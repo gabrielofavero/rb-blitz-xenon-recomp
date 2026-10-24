@@ -785,8 +785,16 @@ function Invoke-StoreLeg {
         Assert-Label $detailsText @('RELEASED', 'DOWNLOADS') 'store: the details page carries the release date and download count'
 
         # Press Download (row 0 is where this build's Download row sits) and follow the transfer.
+        # P9-6a: the press opens a modal popup over the details page, and the panel's own text
+        # carries the state (`Downloading from RhythmVerse...`, then `Downloaded '<Artist - Title>'.`).
+        # The caption strip no longer reports any of it.
         $installsBefore = Get-LogMatches "store_download: job \w+ installed '"
-        Drive @('key:a', 'wait:2')
+        Drive @('key:a', 'wait:1')
+        $popupText = Get-ScreenText 'popup.png'
+        # Whichever state the capture caught: a 5 MB transfer can finish inside the capture's own
+        # delay, and both sentences exist only in this panel.
+        $popupShown = $popupText.Contains('DOWNLOADING') -or $popupText.Contains('DOWNLOADED')
+        Add-Step 'store: the Download press opens the download popup' $popupShown (($popupText -replace '\s+', ' ').Trim())
         $deadline = (Get-Date).AddSeconds($DownloadWaitSec)
         $installed = $null
         while ((Get-Date) -lt $deadline) {
@@ -797,14 +805,21 @@ function Invoke-StoreLeg {
             }
             Start-Sleep -Seconds 2
         }
-        $stripText = Get-ScreenText 'strip.png'
         Assert-Log 'store_download: start accepted for \w+' 'store: the Download press reached the service'
         Add-Step 'store: the transfer installed a package' ($null -ne $installed -and $installed.Success) $(if ($installed -and $installed.Success) { $installed.Value } else { 'no install line' })
         if ($installed -and $installed.Success) {
             $script:installedTitle = $installed.Groups[2].Value
             $script:installedPath = $installed.Groups[3].Value
             $script:installedBytes = [int]$installed.Groups[4].Value
-            Assert-Contains $stripText 'INSTALLED' 'store: the strip reports the install'
+            # The same panel switches to its outcome state; P9-6c turns that state into the toast
+            # whose A runs the main menu's Refresh Songs.
+            $doneText = Wait-ForScreen 'popup-done.png' 'DOWNLOADED' 30 'the popup''s outcome state'
+            Assert-Label $doneText @('DOWNLOADED', 'CLOSE') 'store: the popup reports the install'
+            # B closes the popup (the job is terminal, so no cancel is written) and leaves the
+            # details page focused, which is why the single Back below still reaches the browser.
+            Drive @('key:b', 'wait:2')
+            $closedText = Get-ScreenText 'popup-closed.png'
+            Assert-Lacks $closedText 'DOWNLOADED' 'store: B closes the download popup'
         }
 
         # The install is a file in the resolved root, the staging directory is empty again, the
@@ -885,7 +900,8 @@ function Invoke-InstallLeg {
         return
     }
     # The plan's own rule: the next boot's discovery is what makes the song playable, which is why
-    # the strip says "Restart the game to play it".
+    # the download popup stops at "Downloaded '<Artist - Title>'." and P9-6c's toast (A refreshes
+    # the songs) is the same-session path.
     $proc = Start-Leg 'Install' $profileDir $dlcRoot $InstallBootTimeoutSec
     try {
         if (-not (Enter-MainMenu $InstallBootTimeoutSec)) { return }

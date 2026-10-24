@@ -168,12 +168,14 @@ struct MouseScrollFollow {
   void Reset() { armed = false; }
 };
 
-// The scrollbar strip sits in the gutter right of a vertical list's rows, where the
-// song library draws its rail and thumb. Points there map onto the thumb's own
-// geometry: the thumb is one row pitch tall and travels between the rail's top and
-// bottom as the view's first row walks 0..maxFirst, so a row of mouse movement is a
-// row of thumb movement and the guest list clamps the result to its own last page.
-struct MenuRail { float left = 0, top = 0, right = 0, bottom = 0; bool valid = false; };
+// The scrollbar strip and thumb come from the scene's projected meshes. The thumb
+// travels between the rail's ends as the first visible row walks 0..maxFirst.
+struct MenuRail {
+  float left = 0, top = 0, right = 0, bottom = 0;
+  bool valid = false;
+  float thumb_height = 0;
+  float thumb_top = NAN;
+};
 inline float RailPitch(const std::vector<MenuRow>& rows) {
   std::vector<float> ys;
   for (const auto& row : rows) if (row.bounds) ys.push_back((row.bounds->top + row.bounds->bottom) * .5f);
@@ -191,14 +193,37 @@ inline float RailPerFirst(float rail_height, float thumb_height, int max_first) 
 }
 // The firstShowing whose thumb top sits at `y`.
 inline int RailFirstFromY(float y, float rail_top, float per_first, int max_first) {
-  if (!(per_first > 0) || max_first <= 0) return 0;
-  return std::clamp(int(std::lround((y - rail_top) / per_first)), 0, max_first);
+  if (!std::isfinite(y) || !(per_first > 0) || max_first <= 0) return 0;
+  return int(std::lround(std::clamp((y - rail_top) / per_first, 0.0f, float(max_first))));
 }
 // Whether `y` is on the thumb (with a small grab margin) for a view at `first`.
 inline bool RailYOnThumb(float y, float rail_top, float per_first, float thumb_height, int first) {
   const float top = rail_top + per_first * float(first);
   return y >= top - .004f && y <= top + thumb_height + .004f;
 }
+
+// A thumb grab preserves the point held inside it. A track press centers the thumb
+// at the pointer immediately, and can continue straight into a drag.
+struct MenuRailDrag {
+  bool active = false;
+  uint32_t list = 0;
+  float grab = 0;
+  void Reset() { *this = {}; }
+  int Target(float y, const MenuRail& rail, int max_first) const {
+    return RailFirstFromY(y - grab, rail.top,
+                         RailPerFirst(rail.bottom - rail.top, rail.thumb_height, max_first), max_first);
+  }
+  int Begin(uint32_t owner, float y, const MenuRail& rail, int first, int max_first) {
+    const float per = RailPerFirst(rail.bottom - rail.top, rail.thumb_height, max_first);
+    active = rail.valid && per > 0 && std::isfinite(y);
+    list = active ? owner : 0;
+    const float thumb_top = rail.top + per * float(first);
+    const float drawn_top = std::isfinite(rail.thumb_top) ? rail.thumb_top : thumb_top;
+    const bool on_thumb = y >= drawn_top - .004f && y <= drawn_top + rail.thumb_height + .004f;
+    grab = on_thumb ? y - thumb_top : rail.thumb_height * .5f;
+    return active ? Target(y, rail, max_first) : first;
+  }
+};
 
 // Guest-frame pulses, independent of how many times XInput is polled per frame.
 // Both the press and release must reach a pad poll before advancing: UI frames

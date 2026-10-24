@@ -82,8 +82,9 @@ layout work (RhythmVerse plan P9-4, animation and layout correction).
 An intermittent Search overlap was subsequently reported with Recommendations
 Off. The shared background now also reapplies disabled-caption visibility at
 entry and poll, since the browser's entry skips the front menu's header setup.
-This follow-up passes the eight-state host check; the owner's visual retest is
-pending (RhythmVerse plan P9-4, Search overlap record).
+This follow-up passes the eight-state host check, and the owner's own in-game
+check on 2026-10-24 reads the switches and the header bar as working (RhythmVerse
+plan P9-4, Search overlap record and close-out).
 
 **Earlier combined implementation (2026-10-22, superseded by the split above):** General ▸ Interface
 has four rows: **Main Menu**, **Offline Prompts**, **Help & Options Labels**, then

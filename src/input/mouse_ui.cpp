@@ -261,8 +261,15 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
       : ImGuiDialog(drawer), provider_(std::move(provider)) {}
   ~MouseCursor() override { Detach(); }
  private:
+  void EndDrag(bool cancel = true) {
+    if (!dragging_) return;
+    dragging_ = false;
+    if (cancel) QueueMenuScrollbar(MouseAction::kScrollbarUp, {NAN, NAN});
+    if (window_) window_->ReleaseMouse();
+  }
   void Detach() {
     if (!window_) return;
+    EndDrag();
     window_->RemoveInputListener(this); window_->RemoveListener(this);
     window_ = nullptr; g_mouse_buttons = 0; g_window_focused = false; ClearKeys();
     g_wheel_detents = 0;
@@ -270,7 +277,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
   }
   void OnClosing(rex::ui::UIEvent&) override { Detach(); }
   void OnLostFocus(rex::ui::UISetupEvent&) override {
-    dragging_ = false;
+    EndDrag();
     // A lost window has no held buttons or keys from the host's point of view: the releases that
     // happen outside it never reach this listener, so the latches must not stay pressed.
     g_mouse_buttons = 0;
@@ -292,6 +299,8 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
       MouseMenuFocus(g_window_focused);
     }
     MouseMenuFocus(window_->HasFocus() && !io.WantCaptureMouse);
+    if (!MouseMenuAvailable() || io.WantCaptureMouse ||
+        (dragging_ && (CurrentScreen() != drag_screen_ || CurrentFocus() != drag_focus_))) EndDrag();
     // The focus facts are read on the main thread where SDL allows them, and per frame because
     // this listener attaches after the window exists (so the initial focus has no OnGotFocus).
     g_window_focused = window_->HasFocus();
@@ -315,20 +324,21 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
       else SDL_HideCursor();
     });
   }
-  std::optional<MenuPoint> Point(const rex::ui::MouseEvent& e) const {
+  std::optional<MenuPoint> Point(const rex::ui::MouseEvent& e, bool clip = true) const {
     if (!window_) return {};
     auto p = MenuPointer(float(e.x()), float(e.y()),
         window_->GetActualPhysicalWidth(), window_->GetActualPhysicalHeight(),
         REXCVAR_GET(video_mode_width), REXCVAR_GET(video_mode_height),
         REXCVAR_GET(present_letterbox), REXCVAR_GET(present_allow_overscan_cutoff),
         REXCVAR_GET(present_safe_area_x), REXCVAR_GET(present_safe_area_y));
-    if (!MenuBounds{0, 0, 1, 1}.Contains(p)) return {};
+    if (!std::isfinite(p.x) || !std::isfinite(p.y) ||
+        (clip && !MenuBounds{0, 0, 1, 1}.Contains(p))) return {};
     return p;
   }
   void OnMouseMove(rex::ui::MouseEvent& e) override {
     if (!MouseSupportEnabled()) return;
     const bool moved = e.x() != last_x_ || e.y() != last_y_;
-    if (auto p = Point(e)) {
+    if (auto p = Point(e, !dragging_)) {
       if (dragging_) QueueMenuScrollbar(MouseAction::kScrollbarDrag, *p);
       else if (moved) QueueMenuMouse(MouseAction::kMove, *p);
     } else if (moved && !dragging_) {
@@ -355,7 +365,10 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
         // The gutter belongs to the scrollbar: a press there must not click the row,
         // and a miss just outside the strip must not press A either.
         if (MouseMenuRailHit(*p)) {
+          EndDrag();
           dragging_ = true;
+          drag_screen_ = CurrentScreen(); drag_focus_ = CurrentFocus();
+          window_->CaptureMouse();
           QueueMenuScrollbar(MouseAction::kScrollbarDown, *p);
         } else if (!MouseMenuScrollZone(*p)) QueueMenuMouse(MouseAction::kAccept, *p);
       }
@@ -368,11 +381,12 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     if (REXCVAR_GET(mouse_native_trace))
       REXLOG_INFO("native_mouse: button={} up mask={:02X}", static_cast<int>(e.button()),
                   g_mouse_buttons.load());
-    if (!MouseSupportEnabled()) return;
     if (dragging_ && e.button() == rex::ui::MouseEvent::Button::kLeft) {
-      if (auto p = Point(e)) QueueMenuScrollbar(MouseAction::kScrollbarUp, *p);
-      dragging_ = false;
+      const float miss = std::numeric_limits<float>::quiet_NaN();
+      QueueMenuScrollbar(MouseAction::kScrollbarUp, Point(e, false).value_or(MenuPoint{miss, miss}));
+      EndDrag(false);
     }
+    if (!MouseSupportEnabled()) return;
     e.set_handled(true);
   }
   void OnMouseWheel(rex::ui::MouseEvent& e) override {
@@ -394,6 +408,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
   rex::ui::Window* window_ = nullptr;
   int last_x_ = -1, last_y_ = -1;
   bool dragging_ = false;
+  uint32_t drag_screen_ = 0, drag_focus_ = 0;
 };
 }
 

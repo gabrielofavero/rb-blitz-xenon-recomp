@@ -162,7 +162,7 @@ costs a null check when off, and the paths arrive overlay-relative (`ui/store/..
 
 **The store's own sentences (P7).** What a player reads about the store is not a cvar: every store
 state change is published to [store_catalogue_status.cpp](../../src/store/store_catalogue_status.cpp),
-which the caption overlay draws below the search and download strips. The credit line
+which the caption overlay draws below the search strip. The credit line
 **`Customs from RhythmVerse`** follows the front menu's own serve (the heading itself is
 `RHYTHMVERSE`, because `CUSTOMS FROM RHYTHMVERSE` clips in the retail header - measured 2026-10-21),
 the empty state says where the instrument filter lives, the loading line counts the pages read so
@@ -265,7 +265,26 @@ file's own facts. The block is one `{do ...}` appended to the method, after `ref
 and after `HideStoreInfoPriceChrome`'s, which is why the payload wires it after that transform.
 `rb_blitz_store_payload_tests store-edit <store_info.dtb> info` runs it against the shipped record
 and dumps the whole transformed `refresh_panel`, which is how the edit was checked before any boot;
-the block's on-screen reading (label positions in that box) is the prompt's open measurement.
+the owner read the rendered block in game (2026-10-24), which is what closed the prompt.
+
+**The download popup (P9-6a, 2026-10-24).** P5 drew a transfer's progress and outcome as a host-side
+caption line; the owner's 2026-10-23 pass replaced it with one **modal** panel, in the shape the
+search loading panel already proves. `store::AddDownloadPopup` defines `rbbz_download_panel` in
+`store_info.dtb` - the retail error popup's resource (`../error/error_general.milo`), `error.lbl`
+for the sentence and `continue.lbl` for the prompt - and lists it last on `store_info_screen`, so
+its `all.grp` draws over the details page. `show_popup` sets the loading sentence
+(**Downloading from RhythmVerse...**) and the Cancel prompt and takes the screen's focus; `poll`
+reads the job the press was made on (`{store_info_panel get cur_offer}` -> `(job)`) and asks the
+bridge for `rbbz-store/state/<job>/installed|failed|cancelled`; the first terminal answer switches
+the same panel's labels (`Downloaded '<Artist - Title>'.` + Close, or the generic failure sentence)
+once, guarded by a `terminal` property. **B** writes `rbbz-store/download/cancel/<job>` while the job
+is running and closes, so a cancelled transfer never outlives the press, and leaving the screen with
+the popup up is the same cancel. No string property and no method argument carries the token:
+neither shape is measured on this engine's script objects, while the offer already holds it.
+P9-6b fills the loading line with the progress bucket and names a failure's reason; P9-6c turns the
+installed state into the toast whose A runs the main menu's Refresh Songs. The popup calls no host
+drawing at all - it is the guest's own labels. `rb_blitz_store_payload_tests store-edit
+<store_info.dtb> download` prints the definition and both routed presses against the shipped record.
 
 **The master switch's restart rule (P9-2, measured 2026-10-22).** `scripts/probe_master_restart.ps1`
 flips a filter leaf and the store's master switch through Help & Options and reads what leaving does.
@@ -283,7 +302,8 @@ leg already committed (it does not rewrite the fixture, which is the point of th
 in four boots and is the only script here that asserts instead of describing: `-Legs Enable` (the
 master switch turned on through Help & Options > General > Downloadable Content, then the committed
 `settings.toml` value), `Store` (the row opens the retail store, Recent, the search answer, its
-results page, the details screen's Download, and the install asserted on disk, in the receipt and in
+results page, the details screen's Download - P9-6a's popup and its outcome sentence - and the
+install asserted on disk, in the receipt and in
 the log), `Install` (the next boot's song list carries the downloaded title, read out of the install
 line above) and `Control` (RhythmVerse Off: no store request in the log at all and the main menu's
 refresh row still dispatches its sentinel). It uses its own profile directories and an **empty

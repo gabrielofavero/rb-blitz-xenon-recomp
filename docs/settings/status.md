@@ -55,7 +55,9 @@ Part 1 wherever they disagree.
   disabled-label visibility on entry and poll, covering the browser entry that
   skips the front menu's header setup. The updated eight-state record check passes
   1,982 assertions (`out/_swap/header-search-visibility/records/state-0..7/`).
-  Manual confirmation of this follow-up remains pending; P9-4 is In Progress.
+  **Closed 2026-10-24:** the owner's own in-game check reads the two switches and the
+  header bar as working, the Search overlap included - P9-4 is Done (RhythmVerse
+  plan §9/P9-4 close-out).
 
 - **Historical combined Show Headers (2026-10-22, superseded by the split above):** General ▸ Interface now ends with
   **Music Library & Store**, containing **Show Headers: On | Off**. Default On;

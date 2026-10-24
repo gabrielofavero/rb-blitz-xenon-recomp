@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include <algorithm>
 #include <cstdio>
 #include <fstream>
 
@@ -1568,15 +1569,20 @@ int StoreEdit(const char* path, const char* which) {
   if (mode == "download") {
     // P5's two transforms against the shipped record, and both methods they rewrote, printed in
     // full: the row has to sit in the not-downloaded branch of the Downloaded gate, and its press
-    // has to be a `write_file` on a path built from the offer's own token.
+    // has to be a `write_file` on a path built from the offer's own token - after P9-6a's popup
+    // call, which is why the modal's definition is printed too.
     ok = rb_blitz::store::AddDownloadButton(&roots, &why);
     std::printf("store-edit: download row -> %s (%s)\n", ok ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    why.clear();
+    const bool popup = rb_blitz::store::AddDownloadPopup(&roots, &why);
+    std::printf("store-edit: download popup -> %s (%s)\n", popup ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
     why.clear();
     const bool routed = rb_blitz::store::RouteDownloadButtons(&roots, &why);
     std::printf("store-edit: download press -> %s (%s)\n", routed ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
-    ok = ok && routed;
+    ok = ok && popup && routed;
     const Node* buttons = nullptr;
     const Node* select = nullptr;
     for (const Node& root : roots) {
@@ -1591,6 +1597,16 @@ int StoreEdit(const char* path, const char* which) {
     if (select != nullptr) {
       std::printf("store-edit: SELECT_MSG after:\n");
       PrintNode(*select, 0);
+    }
+    for (const Node& root : roots) {
+      if (root.tag == rb_blitz::ui::dtb::kCommand && root.kids.size() >= 3 &&
+          root.kids[0].text == "new" &&
+          root.kids[1].text == "UIPanel" &&
+          root.kids[2].text == rb_blitz::store::kDownloadPanelName) {
+        std::printf("store-edit: %s definition:\n", rb_blitz::store::kDownloadPanelName);
+        PrintNode(root, 0);
+        break;
+      }
     }
     return ok ? 0 : 1;
   }
@@ -1733,13 +1749,18 @@ int StoreEdit(const char* path, const char* which) {
     const bool option = rb_blitz::store::ClearDetailsFooterOption(&roots, &why);
     std::printf("store-edit: view item caption -> %s (%s)\n", option ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
+    // P9-6a: the popup the Download press opens, on this record's own details screen.
+    why.clear();
+    const bool popup = rb_blitz::store::AddDownloadPopup(&roots, &why);
+    std::printf("store-edit: download popup -> %s (%s)\n", popup ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
     // P9-13: the credit block is written into `refresh_panel`, whose whole method the dump below
     // prints so a boot's record can be compared with this one.
     why.clear();
     const bool credits = rb_blitz::store::ShowOfferCredits(&roots, &why);
     std::printf("store-edit: credit block -> %s (%s)\n", credits ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
-    ok = ok && preview && purchased && option && credits;
+    ok = ok && preview && purchased && option && popup && credits;
   }
   std::printf("store-edit: %s -> %s\n", mode.c_str(), ok ? "edited" : "refused");
   const Node* method = nullptr;
@@ -2066,6 +2087,8 @@ void TestDownloadButtonsRouted() {
     bool writes = false;
     bool literal_path = false;
     bool var_path = false;
+    bool popup = false;
+    bool popup_before_write = false;
   };
   const auto scan_case = [&](const char* symbol, const char* command) {
     CaseShape shape;
@@ -2081,6 +2104,29 @@ void TestDownloadButtonsRouted() {
           shape.var_path = true;
         } else if (node.kids[1].tag == rb_blitz::ui::dtb::kString) {
           shape.literal_path = node.kids[1].text.find(command) != std::string::npos;
+        }
+      }
+      // P9-6a: the press shows the popup, and it does so *before* the request is written - the
+      // `do` that writes the path has the popup call as an earlier statement.
+      if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() >= 3 &&
+          node.kids[0].text == "do") {
+        size_t popup_at = node.kids.size();
+        size_t write_at = node.kids.size();
+        for (size_t i = 1; i < node.kids.size(); ++i) {
+          const Node& kid = node.kids[i];
+          if (kid.tag == rb_blitz::ui::dtb::kCommand && kid.kids.size() >= 2 &&
+              kid.kids[0].text == rb_blitz::store::kDownloadPanelName &&
+              kid.kids[1].text == "show_popup") {
+            shape.popup = true;
+            popup_at = i;
+          }
+          if (kid.tag == rb_blitz::ui::dtb::kCommand && !kid.kids.empty() &&
+              kid.kids[0].text == "write_file") {
+            write_at = i;
+          }
+        }
+        if (popup_at != node.kids.size() && write_at != node.kids.size() && popup_at < write_at) {
+          shape.popup_before_write = true;
         }
       }
       for (const Node& kid : node.kids) self(kid, self);
@@ -2104,6 +2150,8 @@ void TestDownloadButtonsRouted() {
     CHECK_TRUE(again.writes);
     CHECK_FALSE(again.literal_path);  // never a literal: the token is the offer's own key
     CHECK_TRUE(again.var_path);
+    CHECK_TRUE(again.popup);
+    CHECK_TRUE(again.popup_before_write);
   }
   {
     const CaseShape now = scan_case("store_download_now", "start");
@@ -2112,6 +2160,8 @@ void TestDownloadButtonsRouted() {
     CHECK_TRUE(now.writes);
     CHECK_FALSE(now.literal_path);
     CHECK_TRUE(now.var_path);
+    CHECK_TRUE(now.popup);
+    CHECK_TRUE(now.popup_before_write);
   }
   // The path's own spelling, in the `{var $path {sprintf …}}` statement both cases carry.
   bool start_path = false;
@@ -2174,6 +2224,153 @@ void TestDownloadButtonsRouted() {
   why.clear();
   CHECK_FALSE(rb_blitz::store::RouteDownloadButtons(&other, &why));
   CHECK_TRUE(TreeUnchanged(other, untouched));
+}
+
+// P9-6a: the modal the Download press opens on the details screen.
+void TestDownloadPopup() {
+  BeginCase("the Download press opens a modal popup on the details screen");
+
+  const auto record_with_screen = [] {
+    return std::vector<Node>{
+        Node::Command({Symbol("new"), Symbol("StoreInfoPanel"), Symbol("store_info_panel"),
+                       Node::Array({Symbol("focus"), Symbol("buttons.lst")})}),
+        Node::Command({Symbol("new"), Symbol("UIScreen"), Symbol("store_info_screen"),
+                       Node::Array({Symbol("panels"), Symbol("background_panel"),
+                                    Symbol("store_info_panel"), Symbol("error_popup_panel")}),
+                       Node::Array({Symbol("focus"), Symbol("store_info_panel")})}),
+    };
+  };
+
+  std::vector<Node> record = record_with_screen();
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::AddDownloadPopup(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  CHECK_EQ(record.size(), size_t{3});
+
+  // The definition is first (`new UIPanel rbbz_download_panel ...`), before the screen naming it,
+  // and it carries the search modal's own resource.
+  const Node& panel = record[0];
+  CHECK_TRUE(panel.tag == rb_blitz::ui::dtb::kCommand && panel.kids.size() >= 3);
+  if (panel.kids.size() < 3) return;
+  CHECK_STR_EQ(panel.kids[1].text, "UIPanel");
+  CHECK_STR_EQ(panel.kids[2].text, rb_blitz::store::kDownloadPanelName);
+  bool resource = false;
+  for (const Node& kid : panel.kids) {
+    if (kid.tag == rb_blitz::ui::dtb::kArray && kid.kids.size() == 2 &&
+        kid.kids[0].text == "file" && kid.kids[1].tag == rb_blitz::ui::dtb::kString &&
+        kid.kids[1].text == "../error/error_general.milo") {
+      resource = true;
+    }
+  }
+  CHECK_TRUE(resource);
+
+  // Every method the popup's life runs through, and every sentence / bridge path it needs: the
+  // three terminal predicates, the cancel command, both outcome methods and the three tokens.
+  const auto method = [&](std::string_view name) -> const Node* {
+    for (const Node& kid : panel.kids) {
+      if (kid.tag == rb_blitz::ui::dtb::kArray && !kid.kids.empty() && kid.kids[0].text == name) {
+        return &kid;
+      }
+    }
+    return nullptr;
+  };
+  for (const char* name : {"enter", "exit", "show_popup", "hide_popup", "finish_installed",
+                           "finish_failed", "poll", "BUTTON_DOWN_MSG"}) {
+    CHECK_TRUE(method(name) != nullptr);
+  }
+  std::vector<std::string> texts;
+  const auto collect = [&](const Node& node, const auto& self) -> void {
+    if (node.tag == rb_blitz::ui::dtb::kString || node.tag == rb_blitz::ui::dtb::kSymbol) {
+      texts.push_back(node.text);
+    }
+    for (const Node& kid : node.kids) self(kid, self);
+  };
+  collect(panel, collect);
+  const auto has = [&](std::string_view value) {
+    return std::find(texts.begin(), texts.end(), value) != texts.end();
+  };
+  CHECK_TRUE(has("rbbz-store/state/%s/installed"));
+  CHECK_TRUE(has("rbbz-store/state/%s/failed"));
+  CHECK_TRUE(has("rbbz-store/state/%s/cancelled"));
+  CHECK_TRUE(has("rbbz-store/download/cancel/%s"));
+  CHECK_TRUE(has("finish_installed"));
+  CHECK_TRUE(has("finish_failed"));
+  CHECK_TRUE(has(rb_blitz::store::kDownloadLoadingToken));
+  CHECK_TRUE(has(rb_blitz::store::kDownloadCancelToken));
+  CHECK_TRUE(has(rb_blitz::store::kDownloadCloseToken));
+  CHECK_TRUE(has(rb_blitz::store::kDownloadFailedToken));
+  // The installed line is composed from the offer with the writer the credit block already draws
+  // with, and both the job and the song's name are the offer's own keys behind its `has_data` guard
+  // (and behind the object-truthiness test, so a property read that answered nothing is not walked).
+  CHECK_TRUE(has("Downloaded '%s'."));
+  CHECK_TRUE(has("set_display_text_string"));
+  CHECK_TRUE(has("cur_offer"));
+  CHECK_TRUE(has("has_data"));
+  CHECK_TRUE(has("job"));
+  CHECK_TRUE(has("name"));
+  CHECK_TRUE(has("store_info_panel"));
+
+  // The screen lists the popup last, so its `all.grp` draws over the screen's own panels.
+  const Node* screen = nullptr;
+  for (const Node& root : record) {
+    if (root.tag == rb_blitz::ui::dtb::kCommand && root.kids.size() >= 3 &&
+        root.kids[0].text == "new" && root.kids[1].text == "UIScreen" &&
+        root.kids[2].text == "store_info_screen") {
+      screen = &root;
+    }
+  }
+  CHECK_TRUE(screen != nullptr);
+  bool listed = false;
+  if (screen != nullptr) {
+    for (const Node& kid : screen->kids) {
+      if (kid.tag != rb_blitz::ui::dtb::kArray || kid.kids.empty() || kid.kids[0].text != "panels") {
+        continue;
+      }
+      listed = !kid.kids.empty() && kid.kids.back().text == rb_blitz::store::kDownloadPanelName;
+    }
+  }
+  CHECK_TRUE(listed);
+
+  // Idempotent: a second pass finds its own definition and changes nothing.
+  const std::vector<Node> after_first = record;
+  why.clear();
+  CHECK_TRUE(rb_blitz::store::AddDownloadPopup(&record, &why));
+  CHECK_TRUE(TreeUnchanged(record, after_first));
+
+  // The record survives compile -> parse, which is what delivery does.
+  {
+    const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(after_first);
+    std::vector<Node> parsed;
+    rb_blitz::ui::dtb::RootHeader header;
+    why.clear();
+    CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+    bool parsed_panel = false;
+    for (const Node& root : parsed) {
+      if (root.tag == rb_blitz::ui::dtb::kCommand && root.kids.size() >= 3 &&
+          root.kids[1].text == "UIPanel" &&
+          root.kids[2].text == rb_blitz::store::kDownloadPanelName) {
+        parsed_panel = true;
+      }
+    }
+    CHECK_TRUE(parsed_panel);
+  }
+
+  // Refusals: a record with no details screen, and one whose screen lists no panels. Both leave
+  // the tree byte-identical - a popup nobody draws is worse than none.
+  std::vector<Node> other = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                            Symbol("splash_screen")})};
+  const std::vector<Node> other_untouched = other;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::AddDownloadPopup(&other, &why));
+  CHECK_FALSE(why.empty());
+  CHECK_TRUE(TreeUnchanged(other, other_untouched));
+
+  std::vector<Node> no_panels = {Node::Command({Symbol("new"), Symbol("UIScreen"),
+                                                Symbol("store_info_screen")})};
+  const std::vector<Node> no_panels_untouched = no_panels;
+  why.clear();
+  CHECK_FALSE(rb_blitz::store::AddDownloadPopup(&no_panels, &why));
+  CHECK_TRUE(TreeUnchanged(no_panels, no_panels_untouched));
 }
 
 void TestAlbumArtLinked() {
@@ -2963,6 +3160,7 @@ int main(int argc, char** argv) {
   TestDownloadedRowGate();
   TestDownloadButtonAdded();
   TestDownloadButtonsRouted();
+  TestDownloadPopup();
   TestDifficultyLoopUnrolled();
   TestAlbumArtLinked();
   TestStoreStartRoutesToFilter();

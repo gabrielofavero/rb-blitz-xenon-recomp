@@ -176,8 +176,9 @@ the P8 record). What that adds to the rules above:
 - **A newly installed package waits for the next start.** `dlc::RefreshAfterStoreInstall()` re-walks
   the flat roots (an install is not a cache feature, so R7's gate does not apply) and the host hands
   the fresh list to the title on the next menu frame, but the running title's own song discovery
-  begins at boot - which is why the caption strip says *Restart the game to play it* rather than
-  claiming the song is already playable. The acceptance harness measures exactly that pair of boots.
+  begins at boot - which is why the details page's download popup stops at *Downloaded 'Artist -
+  Song'.* instead of claiming the song is already playable. P9-6c's toast is where the in-session
+  Refresh Songs lands; until it does, the acceptance harness measures the pair of boots.
 
 ## 3. Configuration
 

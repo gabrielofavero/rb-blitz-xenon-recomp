@@ -1234,13 +1234,23 @@ Node DownloadRequest(std::string_view command) {
   // the next statement - this binding as a command - died on `read of 0x00000000`.
   Node bind_offer =
       Node::Array({Node::Var("offer"), Node::Property({Node::Symbol("cur_offer")})});
+  // The token is read once, inside the `has_data` guard, and only the path uses the local: the
+  // popup reads the same key from the same offer when its `poll` asks the bridge for the state, so
+  // the modal and the worker cannot disagree about which job they mean (P9-6a).
+  Node bind_job = Node::Array(
+      {Node::Var("job"), Node::Command({Node::Var("offer"), Node::Symbol("get_data"),
+                                        Node::Array({Node::Symbol("job")})})});
   Node read = Node::Command({Node::Symbol("sprintf"),
                              Node::String("rbbz-store/download/" + std::string(command) + "/%s"),
-                             Node::Command({Node::Var("offer"), Node::Symbol("get_data"),
-                                            Node::Array({Node::Symbol("job")})})});
+                             Node::Var("job")});
   Node bind_path = Node::Array({Node::Var("path"), std::move(read)});
+  // P9-6a: the modal is up before the transfer starts. The popup takes the screen's focus and shows
+  // its loading sentence; its own `poll` reads the same offer's `job` key and moves the panel to the
+  // outcome state when the job finishes (store_payload.h), which is what replaces the caption
+  // strip's old progress line.
+  Node open_popup = Node::Command({Node::Symbol(kDownloadPanelName), Node::Symbol("show_popup")});
   Node press = Node::Command(
-      {Node::Symbol("do"), std::move(bind_path),
+      {Node::Symbol("do"), std::move(bind_job), std::move(bind_path), std::move(open_popup),
        Node::Command({Node::Symbol("write_file"), Node::Var("path"), Node::Int(0)})});
   Node no_job = Node::Command(
       {Node::Symbol("notify"), Node::String("This offer carries no download job")});
@@ -1318,6 +1328,206 @@ bool RouteDownloadButtons(std::vector<ui::dtb::Node>* store_info_roots, std::str
   retargeted.kids.erase(retargeted.kids.begin() + 1, retargeted.kids.end());
   retargeted.kids.push_back(DownloadRequest("again"));
   (*cases).push_back(Node::Array({Node::Symbol(kDownloadNowButton), DownloadRequest("start")}));
+  if (why != nullptr) why->clear();
+  return true;
+}
+
+namespace {
+
+// The job the popup is about, as the panel's methods read it: the details panel's own `cur_offer`
+// is the one the press was made on, and `get` is the property read retail's own `go_back` uses
+// (`{store_info_screen get back_screen}`, which runs on every B press of this screen). The token
+// itself is the offer's `job` key, the one `RouteDownloadButtons`' body writes into its request
+// path - no string property and no method argument, because neither shape is measured on this
+// engine's script objects and the offer already carries the value.
+Node BindCurrentOffer() {
+  return Node::Array({Node::Var("offer"),
+                      Node::Command({Node::Symbol("store_info_panel"), Node::Symbol("get"),
+                                     Node::Symbol("cur_offer")})});
+}
+
+// `{if $offer …}` - object truthiness, the test `AddSearchKeyboard` already relies on for the
+// keyboard's User (`{if_else $user …}`, measured in game 2026-10-23). It keeps a property read
+// that answered nothing from being walked as a null.
+Node IfCurrentOffer(Node body) {
+  return Node::Command({Node::Symbol("if"), Node::Var("offer"), std::move(body)});
+}
+
+// `{offer get_data (job)}` - the one-component read retail itself makes for `preview_audio`; the
+// two-component `(rank <part>)` is the one the walk cannot answer (see UnrollOfferDifficulty).
+Node CurrentJobRead() {
+  return Node::Command({Node::Var("offer"), Node::Symbol("get_data"),
+                        Node::Array({Node::Symbol("job")})});
+}
+
+// `{offer get_data (name)}` - the song's title, the same value the browser row and the details
+// band draw, so the outcome sentence names the song and never the opaque job token.
+Node CurrentNameRead() {
+  return Node::Command({Node::Var("offer"), Node::Symbol("get_data"),
+                        Node::Array({Node::Symbol("name")})});
+}
+
+Node HasCurrentJob() {
+  return Node::Command({Node::Var("offer"), Node::Symbol("has_data"), Node::Symbol("job")});
+}
+
+Node HasCurrentName() {
+  return Node::Command({Node::Var("offer"), Node::Symbol("has_data"), Node::Symbol("name")});
+}
+
+// `{file_exists "rbbz-store/state/<job>/<state>"}` with the path built from the offer's token: the
+// grammar `store_download.h`'s `ParseJobQuery` owns, and the same built-argument shape the art poll
+// uses (`{file_exists {sprintf "rbbz-store/art/ready/%s" …}}`).
+Node JobStateQuery(std::string_view state) {
+  return Node::Command(
+      {Node::Symbol("file_exists"),
+       Node::Command({Node::Symbol("sprintf"),
+                      Node::String("rbbz-store/state/%s/" + std::string(state)),
+                      CurrentJobRead()})});
+}
+
+// `{write_file {sprintf "rbbz-store/download/cancel/%s" <job>} 0}` - the bridge's cancel command,
+// written inside a `do` that has bound the offer. A cancel of a job that already finished is a
+// no-op in the service (measured: it looks the token up in the active job and the queue only), so
+// the write is safe on every path that can reach it.
+Node CancelWrite() {
+  return Node::Command(
+      {Node::Symbol("do"), BindCurrentOffer(),
+       IfCurrentOffer(Node::Command(
+           {Node::Symbol("if"), HasCurrentJob(),
+            Node::Command({Node::Symbol("write_file"),
+                           Node::Command({Node::Symbol("sprintf"),
+                                          Node::String("rbbz-store/download/cancel/%s"),
+                                          CurrentJobRead()}),
+                           Node::Int(0)})}))});
+}
+
+}  // namespace
+
+bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string* why) {
+  auto refuse = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  if (store_info_roots == nullptr) {
+    return refuse("no record roots");
+  }
+  Node* screen = nullptr;
+  for (Node& root : *store_info_roots) {
+    if (IsNewObject(root, "UIScreen", "store_info_screen")) {
+      screen = &root;
+      break;
+    }
+  }
+  if (screen == nullptr) {
+    return refuse("the record carries no store_info_screen definition");
+  }
+  Node* panels = nullptr;
+  for (Node& kid : screen->kids) {
+    if (kid.tag == ui::dtb::kArray && !kid.kids.empty() && IsSymbol(kid.kids[0], "panels")) {
+      panels = &kid;
+      break;
+    }
+  }
+  if (panels == nullptr) {
+    return refuse("the details screen carries no panels list");
+  }
+  for (const Node& root : *store_info_roots) {
+    if (IsNewObject(root, "UIPanel", kDownloadPanelName)) {
+      if (why != nullptr) why->clear();  // an idempotent second pass
+      return true;
+    }
+  }
+
+  const auto cmd = [](std::initializer_list<Node> kids) { return Node::Command(kids); };
+  const auto sym = [](const char* value) { return Node::Symbol(value); };
+  const auto member = [](const char* name, std::initializer_list<Node> body) {
+    std::vector<Node> kids{Node::Symbol(name)};
+    kids.insert(kids.end(), body.begin(), body.end());
+    return Node::Array(std::move(kids));
+  };
+  // Two booleans, both measured on the search modal's own panel: `active` says the popup is up,
+  // `terminal` says the job already answered, so the poll writes the outcome once and B stops
+  // cancelling. A string property is avoided on purpose - the shipped records never set one from
+  // DTA, while the offer carrying the token needs no storage at all.
+  const Node active = Node::Property({sym("active")});
+  const Node terminal = Node::Property({sym("terminal")});
+  const Node running = cmd({sym("&&"), active, cmd({sym("!"), terminal})});
+  const Node deactivate = cmd({sym("set"), active, sym("FALSE")});
+  const Node hide = cmd({sym("all.grp"), sym("set_showing"), sym("FALSE")});
+  const Node close = cmd({sym(kDownloadPanelName), sym("hide_popup")});
+  const Node loading = cmd({sym("error.lbl"), sym("set_token_fmt"), sym(kDownloadLoadingToken)});
+  const Node cancel_prompt =
+      cmd({sym("continue.lbl"), sym("set_token_fmt"), sym(kDownloadCancelToken)});
+  const Node close_prompt =
+      cmd({sym("continue.lbl"), sym("set_token_fmt"), sym(kDownloadCloseToken)});
+  // `installed` is the one outcome the player must see (the store cannot say "playable" until
+  // P9-6c proves same-session discovery, and this sentence is the state 6c turns into its toast);
+  // `failed`/`cancelled` get the generic sentence P9-6b replaces with the reason tokens.
+  const Node installed_text =
+      cmd({sym("error.lbl"), sym("set_display_text_string"),
+           cmd({sym("sprintf"), Node::String("Downloaded '%s'."), CurrentNameRead()})});
+  const Node installed_body =
+      cmd({sym("do"), cmd({sym("set"), terminal, sym("TRUE")}), BindCurrentOffer(),
+           close_prompt,
+           IfCurrentOffer(cmd({sym("if"), HasCurrentName(), installed_text}))});
+  const Node finish_installed = member("finish_installed", {installed_body});
+  const Node failed_body = cmd({sym("do"), cmd({sym("set"), terminal, sym("TRUE")}),
+      cmd({sym("error.lbl"), sym("set_token_fmt"), sym(kDownloadFailedToken)}), close_prompt});
+  const Node finish_failed = member("finish_failed", {failed_body});
+  const Node show_body = cmd({sym("do"), cmd({sym("set"), active, sym("TRUE")}),
+      cmd({sym("set"), terminal, sym("FALSE")}), loading, cancel_prompt,
+      cmd({sym("all.grp"), sym("set_showing"), sym("TRUE")}),
+      cmd({cmd({sym("ui"), sym("current_screen")}), sym("set_focus_panel"), Node::Var("this")})});
+  const Node show_popup = member("show_popup", {show_body});
+  const Node focus_back = cmd({cmd({sym("ui"), sym("current_screen")}), sym("set_focus_panel"),
+                               sym("store_info_panel")});
+  const Node hide_body =
+      cmd({sym("do"), deactivate, hide, focus_back,
+           cmd({sym("store_info_panel"), sym("set_focus"), Node::String("buttons.lst")})});
+  const Node hide_popup = member("hide_popup", {hide_body});
+  const Node failed_state =
+      cmd({sym("||"), JobStateQuery("failed"), JobStateQuery("cancelled")});
+  const Node state_switch =
+      cmd({sym("if"), JobStateQuery("installed"),
+           cmd({Node::Var("this"), sym("finish_installed")}),
+           cmd({sym("if"), failed_state, cmd({Node::Var("this"), sym("finish_failed")})})});
+  const Node poll_body =
+      cmd({sym("if"), running,
+           cmd({sym("do"), BindCurrentOffer(),
+                IfCurrentOffer(cmd({sym("if"), HasCurrentJob(), state_switch}))})});
+  const Node poll = member("poll", {poll_body});
+  // B and Back: the transfer never outlives the press. The cancel goes first, then the close (the
+  // search modal's own two statements), and after a terminal state only the close remains. Every
+  // other action is consumed - the shape P9-11 measured, whose `(int 1)` return is the method's
+  // own value, exactly as retail's `BUTTON_DOWN_MSG` methods end with one.
+  const Node cancel_case =
+      cmd({sym("do"), cmd({sym("if"), running, CancelWrite()}), close});
+  const Node buttons = member("BUTTON_DOWN_MSG",
+      {cmd({sym("switch"), Node::Var("action"),
+            Node::Array({sym("kAction_Cancel"), cancel_case})}),
+       Node::Int(1)});
+  // Leaving the screen with the popup up is a cancel as well (`active` and not `terminal`).
+  const Node exit_body = cmd({sym("if"), running, CancelWrite()});
+  const Node exit = member("exit", {exit_body, deactivate, hide});
+
+  const Node panel = cmd({sym("new"), sym("UIPanel"), sym(kDownloadPanelName),
+      Node::Array({sym("file"), Node::String("../error/error_general.milo")}),
+      Node::Array({sym("active"), sym("FALSE")}),
+      Node::Array({sym("terminal"), sym("FALSE")}),
+      member("enter", {deactivate, hide}), exit, show_popup, hide_popup, finish_installed,
+      finish_failed, poll, buttons});
+  // The panel is listed last, the position the search modal measured (its `all.grp` draws over the
+  // screen's own panels; `error_popup_panel` stays in the list so a retail error still has its
+  // surface), and defined first, before the screen that names it.
+  panels->kids.push_back(Node::Symbol(kDownloadPanelName));
+  if (std::none_of(panels->kids.begin(), panels->kids.end(),
+                   [](const Node& node) { return IsSymbol(node, "error_popup_panel"); })) {
+    panels->kids.push_back(Node::Symbol("error_popup_panel"));
+  }
+  store_info_roots->insert(store_info_roots->begin(), panel);
   if (why != nullptr) why->clear();
   return true;
 }

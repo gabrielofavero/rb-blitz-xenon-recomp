@@ -690,7 +690,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                  std::pair{store::kSearchCancelToken, store::kSearchCancelText},
                  std::pair{store::kSearchEmptyToken, store::kSearchEmptyText},
                  std::pair{store::kSearchFailedToken, store::kSearchFailedText},
-                 std::pair{store::kSearchShortToken, store::kSearchShortText}}) {
+                 std::pair{store::kSearchShortToken, store::kSearchShortText},
+                 // P9-6a's modal: the download popup's own sentences. The installed state composes
+                 // its line from the offer, so it needs no entry here.
+                 std::pair{store::kDownloadLoadingToken, store::kDownloadLoadingText},
+                 std::pair{store::kDownloadCancelToken, store::kDownloadCancelText},
+                 std::pair{store::kDownloadCloseToken, store::kDownloadCloseText},
+                 std::pair{store::kDownloadFailedToken, store::kDownloadFailedText}}) {
           why.clear();
           if (!screen::AddLocaleEntry(&roots, key, text, &why) &&
               why != "the locale already has that key") {
@@ -916,6 +922,12 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       // to reach the download worker through the request channel instead of the commerce object.
       if (!store::AddDownloadButton(&info_roots, &why)) {
         note("adding the details page's Download row was refused: " + why);
+      }
+      // P9-6a: the modal the press opens. Defined on the details screen - the record that carries
+      // the press - before the routes below write the press that shows it.
+      why.clear();
+      if (!store::AddDownloadPopup(&info_roots, &why)) {
+        note("adding the details page's download popup was refused: " + why);
       }
       why.clear();
       if (!store::RouteDownloadButtons(&info_roots, &why)) {

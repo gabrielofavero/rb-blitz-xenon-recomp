@@ -31,7 +31,9 @@ REX_EXTERN(__imp__sub_824BFEF0); // UIListMeshElement::Draw
 REX_EXTERN(sub_821E14A8);       // Multiply(Vector3, Transform)
 REX_EXTERN(sub_821FF4A0);       // RndCam::WorldToScreen
 REX_EXTERN(sub_824E3008);       // UIListState::Selected (logical index)
-REX_EXTERN(sub_822DAE10);       // UIListProvider::NumData (vtable slot 10 in Blitz)
+REX_EXTERN(sub_824C0C08);       // UIList::NumData (dispatches to the current provider)
+REX_EXTERN(sub_82402DE8);       // ObjectDir::FindObject
+REX_EXTERN(sub_821F13D0);       // RndTransformable::WorldXfm
 
 namespace rb_blitz::input {
 namespace {
@@ -86,10 +88,8 @@ struct Geometry {
   bool horizontal = false;
   MenuBounds bounds;
   std::vector<MenuRow> rows;
-  // Captured for the scrollbar mapping: the focused row's data index and the row pitch
-  // the wheel's step size follows.
+  // The focused row's logical data index, preserved while the viewport scrolls.
   int selected = -1;
-  float pitch = 0;
 };
 thread_local Geometry geometry;
 thread_local uint32_t frame_number = 0;
@@ -105,6 +105,7 @@ thread_local MouseHighlight mouse_highlight;
 // the rows, so the row that comes to rest under the pointer is caught once the burst has drained
 // and the drawn frame shows the new view.
 thread_local MouseScrollFollow scroll_follow;
+thread_local MenuRailDrag rail_drag;
 
 // The gutter the window thread may arm a drag in: published per draw so input that
 // arrives between frames still sees the last confirmed strip, never a retired list.
@@ -128,36 +129,24 @@ uint32_t Focus(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   sub_824B1980(call.frame, base);
   return call.frame.ctx.r3.u32;
 }
-// The song library's rail, measured 2026-10-16 against the list state (calibration in
-// docs/engine/input-flow.md): the thumb is one row pitch tall (kThumbHeight) and its top
-// walks from kRailTop to kRailBottom - kThumbHeight as firstShowing walks 0..maxFirst.
-constexpr float kRailTop = .2175f, kRailBottom = .8348f, kThumbHeight = .0624f;
-constexpr uint32_t kNumDataFn = 0x822DAE10u;  // UIListProvider::NumData (vtable slot 10)
 struct RailMap {
   bool known = false;
   uint32_t list = 0;
   int max_first = 0;
 };
 thread_local RailMap rail_map;
-float RailPerFirstNow() {
-  return RailPerFirst(kRailBottom - kRailTop, kThumbHeight, rail_map.max_first);
-}
 // Resolve how far the focused list can scroll: provider NumData minus the visible row
-// count. The vtable slot is checked against the recompiled address before calling, and a
-// refused answer leaves the gutter inert rather than guessing.
+// count, using the list's own virtual dispatch. Providers and their contents can change
+// without changing the focused component (search results, sorting, store refreshes).
 bool EnsureRailMap(PPCContext& ctx, uint8_t* base, uint32_t list) {
-  if (rail_map.known && rail_map.list == list) return true;
-  rail_map = {};
-  const auto provider = U32(base, list + 208);
-  const auto vtable = provider ? U32(base, provider) : 0;
-  if (!vtable || U32(base, vtable + 10 * 4) != kNumDataFn) return false;
   GuestCall call(ctx);
-  call.frame.ctx.r3.u32 = provider;
-  sub_822DAE10(call.frame, base);
+  call.frame.ctx.r3.u32 = list;
+  sub_824C0C08(call.frame, base);
   const int rows = call.frame.ctx.r3.s32, display = int(U32(base, list + 180));
-  if (rows <= 0 || display <= 0) return false;
+  if (rows <= 0 || display <= 0) { rail_map = {}; return false; }
+  const bool changed = !rail_map.known || rail_map.list != list || rail_map.max_first != std::max(0, rows - display);
   rail_map = {true, list, std::max(0, rows - display)};
-  if (REXCVAR_GET(mouse_native_trace))
+  if (changed && REXCVAR_GET(mouse_native_trace))
     REXLOG_INFO("native_mouse: scroll rail rows={} numDisplay={} maxFirst={}", rows, display, rail_map.max_first);
   return true;
 }
@@ -177,6 +166,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     MenuRail stale; PublishRail(stale);
     last_selected_row = -1;
     rail_map = {};
+    rail_drag.Reset();
     mouse_highlight.Reset();
     scroll_follow.Reset();
     // A page's rows are gone the moment its screen or focus changes: the overlay must draw
@@ -244,15 +234,6 @@ bool Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   if (REXCVAR_GET(mouse_native_trace)) REXLOG_INFO("native_mouse: selected row={} list={:08X}", row, geometry.list);
   return true;
 }
-// One live gutter drag. `first` is the view target frozen when the press landed; the
-// selection is never moved by the scrollbar, so no row rides along with it.
-struct RailDrag {
-  bool active = false, moved = false;
-  uint32_t list = 0;
-  int first = 0;
-  float y = 0;
-};
-thread_local RailDrag rail_drag;
 // Move only the viewport, keep the guest's selection row, then notify the providers the
 // way the guest's own scroll does. `first` is clamped to the list's own last page; an
 // applied scroll ends the hover it owned and arms the scroll-aware catch under `pointer`
@@ -370,7 +351,8 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   Context(ctx, base, manager);
   std::optional<MenuMouseEvent> event;
   const bool fresh = geometry.list && geometry.list == current_focus && geometry.frame + 1 == frame_number;
-  const bool railed = fresh && !geometry.horizontal && geometry.pitch > 0 && RailSnapshot().valid;
+  const auto rail = RailSnapshot();
+  const bool railed = fresh && !geometry.horizontal && rail.valid;
   // Retail UIListState rejects another directional input while the viewport is
   // animating (firstShowing != targetShowing). Keep that detent queued instead - except
   // on a railed list, where the wheel advances a plain target and needs no hold.
@@ -382,6 +364,7 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     idle = !queue.Pending();
     enabled = queue.enabled();
   }
+  if (!enabled) rail_drag.Reset();
   // The scroll-aware hover's landing (MouseScrollFollow in native_menu.h): the scroll has been
   // applied and drawn (a fresh frame carries the new view), the burst has drained and the
   // viewport is at rest, so the row under the pointer is caught - or the hover stays empty (the
@@ -403,32 +386,23 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   if (event->action == MouseAction::kScrollbarDown || event->action == MouseAction::kScrollbarDrag ||
       event->action == MouseAction::kScrollbarUp) {
     if (event->action == MouseAction::kScrollbarDown) {
-      rail_drag = {};
-      // Anchor on the pending target: the thumb's drawn position follows it, and the
-      // drag then moves the view port row-for-row with the cursor.
+      rail_drag.Reset();
       const int anchor = geometry.selected >= 0 ? geometry.selected : last_selected_row;
-      if (fresh && railed && anchor >= 0 && EnsureRailMap(ctx, base, current_focus))
-        rail_drag = {true, false, current_focus, int(U32(base, current_focus + 228)), event->point.y};
+      if (railed && anchor >= 0 && EnsureRailMap(ctx, base, current_focus)) {
+        const int target = rail_drag.Begin(current_focus, event->point.y, rail,
+                                          int(U32(base, current_focus + 228)), rail_map.max_first);
+        if (rail_drag.active) ScrollListTo(ctx, base, current_focus, target, event->point);
+      }
       if (REXCVAR_GET(mouse_native_trace))
         REXLOG_INFO("native_mouse: gutter press y={:.3f} armed={}", event->point.y, rail_drag.active);
-    } else if (event->action == MouseAction::kScrollbarDrag) {
-      const float per = RailPerFirstNow();
-      if (rail_drag.active && rail_drag.list == current_focus && fresh && railed && per > 0) {
-        const int delta = int(std::lround((event->point.y - rail_drag.y) / per));
-        ScrollListTo(ctx, base, rail_drag.list,
-                     std::clamp(rail_drag.first + delta, 0, rail_map.max_first), event->point);
-        rail_drag.moved = true;
-      }
     } else {
-      // A press that never moved slides the thumb to the cursor unless it already sat on
-      // the thumb (which is a grab), the way a track click lands in a native scrollbar.
-      const bool on_thumb = RailYOnThumb(rail_drag.y, kRailTop, RailPerFirstNow(), kThumbHeight, rail_drag.first);
-      if (rail_drag.active && rail_drag.list == current_focus && fresh && railed &&
-          !rail_drag.moved && !on_thumb)
+      // Apply the release position too: a fast drag may finish between guest frames.
+      if (rail_drag.active && rail_drag.list == current_focus && railed &&
+          std::isfinite(event->point.y) && EnsureRailMap(ctx, base, current_focus)) {
         ScrollListTo(ctx, base, rail_drag.list,
-                     RailFirstFromY(rail_drag.y, kRailTop, RailPerFirstNow(), rail_map.max_first),
-                     event->point);
-      rail_drag = {};
+                     rail_drag.Target(event->point.y, rail, rail_map.max_first), event->point);
+      }
+      if (event->action == MouseAction::kScrollbarUp) rail_drag.Reset();
     }
     return;
   }
@@ -487,6 +461,9 @@ thread_local DrawCapture* drawing = nullptr;
 struct MeshBox { std::array<float, 3> low, high; uint32_t resource = 0; };
 std::mutex mesh_mutex;
 std::unordered_map<uint32_t, MeshBox> mesh_boxes;
+// ObjectDir stores Hmx::Object pointers; OnSync supplies the corresponding RndMesh
+// pointer. Keep that conversion alongside the resource-validated vertex bounds.
+std::unordered_map<uint32_t, uint32_t> mesh_objects;
 void SyncMesh(PPCContext& ctx, uint8_t* base) {
   const auto mesh = ctx.r3.u32, owner = U32(base, mesh + 324);
   std::optional<MeshBox> box;
@@ -512,8 +489,9 @@ void SyncMesh(PPCContext& ctx, uint8_t* base) {
     std::lock_guard lock(mesh_mutex);
     if (box) {
       box->resource = U32(base, mesh + 412);
-      if (mesh_boxes.size() >= 65536) mesh_boxes.clear();
+      if (mesh_boxes.size() >= 65536) { mesh_boxes.clear(); mesh_objects.clear(); }
       mesh_boxes[mesh] = *box;
+      if (const auto object = ObjectBase(base, mesh)) mesh_objects[object] = mesh;
     } else if (auto it = mesh_boxes.find(mesh); it != mesh_boxes.end() &&
                it->second.resource != U32(base, mesh + 412)) mesh_boxes.erase(it);
   }
@@ -529,6 +507,12 @@ std::optional<MenuBounds> ProjectMesh(PPCContext& ctx, uint8_t* base, uint32_t m
     box = it->second;
   }
   GuestCall call(ctx); auto& c = call.frame.ctx;
+  // These sibling meshes may be queried before their own draw updates the world
+  // transform. Resolve parent transforms before projecting their bounds.
+  if (base[mesh + 253]) {
+    c.r3.u32 = mesh + 64;
+    sub_821F13D0(c, base);
+  }
   const auto local = call.scratch, world = local + 16, projected = local + 32;
   MenuBounds b{INFINITY, INFINITY, -INFINITY, -INFINITY};
   for (unsigned corner = 0; corner < 8; ++corner) {
@@ -544,6 +528,46 @@ std::optional<MenuBounds> ProjectMesh(PPCContext& ctx, uint8_t* base, uint32_t m
     b.top = std::min(b.top, y); b.bottom = std::max(b.bottom, y);
   }
   return b;
+}
+
+uint32_t SceneMesh(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* name) {
+  GuestCall call(ctx);
+  std::memcpy(base + call.scratch, name, std::strlen(name) + 1);
+  auto& c = call.frame.ctx;
+  c.r3.u32 = dir; c.r4.u32 = call.scratch; c.r5.u32 = 0; c.r6.u32 = 0;
+  sub_82402DE8(c, base);
+  const auto object = c.r3.u32;
+  std::lock_guard lock(mesh_mutex);
+  const auto it = mesh_objects.find(object);
+  if (it == mesh_objects.end() || ObjectBase(base, it->second) != object ||
+      ObjectName(base, object) != name) return 0;
+  return it->second;
+}
+
+MenuRail MeasureRail(PPCContext& ctx, uint8_t* base, uint32_t list, const Geometry& rows) {
+  if (rows.horizontal || rows.rows.empty()) return {};
+  const auto object = ObjectBase(base, list);
+  const auto dir = object ? U32(base, object + 36) : 0;
+  if (!dir) return {};
+  const auto track_mesh = SceneMesh(ctx, base, dir, "rail.mesh");
+  const auto thumb_mesh = SceneMesh(ctx, base, dir, "scroller.mesh");
+  if (!track_mesh || !thumb_mesh) return {};
+  const auto track = ProjectMesh(ctx, base, track_mesh);
+  const auto thumb = ProjectMesh(ctx, base, thumb_mesh);
+  if (!track || !thumb) return {};
+  // A panel may also contain another focused list (shortcuts, leaderboards). Its
+  // sibling scrollbar belongs only to the row band immediately to its left.
+  // Text can occupy much less than the full row when its highlight is lifted, so
+  // don't impose a maximum gap based on the current labels' right edge.
+  if (track->left < rows.bounds.right - .025f ||
+      track->bottom < rows.bounds.top || track->top > rows.bounds.bottom ||
+      !EnsureRailMap(ctx, base, list) || rail_map.max_first <= 0) return {};
+  const float height = thumb->bottom - thumb->top;
+  if (!(height > 0) || track->bottom - track->top <= height) return {};
+  // Keep a narrow native rail easy to grab, using both rendered meshes' widths.
+  const float center = (thumb->left + thumb->right) * .5f;
+  return {std::min({track->left, thumb->left, center - .006f}), track->top,
+          std::max({track->right, thumb->right, center + .006f}), track->bottom, true, height, thumb->top};
 }
 void CaptureRow(uint8_t* base, MenuBounds bounds) {
   if (!drawing || !drawing->row) return;
@@ -701,18 +725,7 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   geometry = std::move(result);
   geometry.selected = capture.selected;
   if (capture.selected >= 0) last_selected_row = capture.selected;
-  geometry.pitch = RailPitch(geometry.rows);
-  MenuRail rail;
-  float right = -INFINITY;
-  for (const auto& row : geometry.rows)
-    if (row.bounds) right = std::max(right, row.bounds->right);
-  if (!geometry.horizontal && geometry.pitch > 0 && std::isfinite(right)) {
-    // The rail's own extent, not the row band: the thumb travels inside it (measured).
-    rail.left = right + .023f; rail.right = rail.left + .024f;
-    rail.top = kRailTop; rail.bottom = kRailBottom;
-    rail.valid = true;
-  }
-  PublishRail(rail);
+  PublishRail(MeasureRail(ctx, base, list, geometry));
   // P1: the page's visible rows and their text boxes for the settings overlay. Each label is
   // paired with the row's full clickable cell, so the overlay can size a replacement line against
   // the room the row really has. The cell is only as wide as the highlight mesh on frames where

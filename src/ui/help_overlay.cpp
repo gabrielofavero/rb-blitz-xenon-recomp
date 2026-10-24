@@ -46,7 +46,6 @@
 #include "profile/input_rows.h"
 #include "settings/input_bindings.h"
 #include "store/store_catalogue_status.h"
-#include "store/store_download_service.h"
 #include "store/store_search.h"
 #include "ui/help_topics.h"
 #include "ui/settings_screen.h"
@@ -376,24 +375,16 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     const std::string search_status = store_ns::SearchInFlight()
                                           ? std::string{} : store_ns::SearchStatusText();
     const bool searching = !search_status.empty();
-    // P5: a store download's progress and its outcome are the same kind of input feedback - the
-    // details page draws static rows, so the strip is where "42%" and "Installed, restart the
-    // game" appear. It yields to the search field (an input surface takes precedence over a
-    // progress line) and outranks a row caption.
-    const std::string download_status = store_ns::DownloadStatusText();
-    const bool downloading = !download_status.empty();
     // P7: the store's own words - the loading sentence while the first page is in flight, and the
     // empty/offline sentence after it (the credit line that used to open the store was removed on
-    // the owner's request, 2026-10-23). It yields to every input surface (the search field, a
-    // download's progress, the recovery notice, a capture) and outranks a row caption: it is what
+    // the owner's request, 2026-10-23). It yields to every input surface (the search field, the
+    // recovery notice, a capture) and outranks a row caption: it is what
     // explains a page that has nothing on it. The module itself says nothing outside a short window
     // after the store served a record, so the line cannot follow a player out of the store.
     const std::string store_status = store_ns::CatalogueStatusText();
     const bool store_speaking = !store_status.empty();
     if (searching) {
       text = search_status;
-    } else if (downloading) {
-      text = download_status;
     } else if (recovering) {
       text = recovery_status;
     } else if (capturing) {
@@ -406,7 +397,7 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     // The store's own sentences are drawn regardless: an empty or unreachable catalogue is a state
     // a player cannot explain from the screen, the same rule the search field follows.
     if (text.empty() ||
-        (!capturing && !recovering && !searching && !downloading && !store_speaking &&
+        (!capturing && !recovering && !searching && !store_speaking &&
          !REXCVAR_GET(settings_help_overlay))) {
       return;
     }

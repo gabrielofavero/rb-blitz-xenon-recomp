@@ -13,7 +13,6 @@
 #include <map>
 #include <mutex>
 #include <cstdio>
-#include <sstream>
 #include <thread>
 #include <utility>
 
@@ -25,10 +24,6 @@ namespace {
 constexpr std::string_view kStorePrefix = "rbbz-store/";
 constexpr std::string_view kReceiptHeader = "# rbbz-store downloads v1";
 constexpr std::size_t kMaxQueuedJobs = 8;
-
-// How long a finished job keeps the caption strip. Long enough to read the outcome after the
-// player looked away, short enough that it never becomes part of the screen.
-constexpr auto kStatusHold = std::chrono::seconds(30);
 
 struct State {
   std::mutex mutex;
@@ -43,9 +38,6 @@ struct State {
   bool worker_running = false;
   bool stopping = false;
   std::thread worker;
-  // The newest job and when it reached a terminal state: the strip follows it for `kStatusHold`.
-  std::string last_job;
-  std::chrono::steady_clock::time_point last_finished{};
 
   // A joinable std::thread would terminate the process at static destruction. A process that
   // exits mid-transfer waits at most the transport's own receive timeout for the worker; the
@@ -78,12 +70,6 @@ void LogLine(const std::string_view line, const bool warning = false) {
   }
 }
 
-void NoteTerminal(const std::string& token) {
-  const std::lock_guard<std::mutex> lock(S().mutex);
-  S().last_job = token;
-  S().last_finished = std::chrono::steady_clock::now();
-}
-
 void SetFailed(const std::string& token, const DownloadError error, const std::string& detail) {
   {
     const std::lock_guard<std::mutex> lock(S().mutex);
@@ -92,7 +78,6 @@ void SetFailed(const std::string& token, const DownloadError error, const std::s
     status.error = error;
     status.bucket = 0;
   }
-  NoteTerminal(token);
   LogLine("store_download: job " + token + " failed (" + std::string(DownloadErrorToken(error)) +
               "): " + detail,
           true);
@@ -106,7 +91,6 @@ void SetCancelled(const std::string& token, const DownloadError error, const std
     status.error = error;
     status.bucket = 0;
   }
-  NoteTerminal(token);
   LogLine("store_download: job " + token + " cancelled (" +
               std::string(DownloadErrorToken(error)) + "): " + detail,
           false);
@@ -186,12 +170,10 @@ void RunJob(const std::string& token) {
         status.received = outcome.bytes;
         if (status.total == 0) status.total = outcome.bytes;
         S().installed[token] = final_path;
-        S().last_job = token;
-        S().last_finished = std::chrono::steady_clock::now();
       }
-      // The quoted name is the job's own title ("Artist - Title", the same string the strip
-      // draws). It is what makes a boot log say *which* song was installed, and it is what
-      // scripts/acceptance_store.ps1 reads to know the title the next boot's song list must
+      // The quoted name is the job's own title ("Artist - Title", the same string the details
+      // page's popup draws). It is what makes a boot log say *which* song was installed, and it is
+      // what scripts/acceptance_store.ps1 reads to know the title the next boot's song list must
       // carry - the receipt stays a transfer history with no name in it, by design.
       LogLine("store_download: job " + token + " installed '" + offer.title + "' " +
                   final_path.string() + " (" + std::to_string(outcome.bytes) + " bytes, title " +
@@ -425,81 +407,6 @@ std::filesystem::path InstalledPath(const std::string_view token) {
   const std::lock_guard<std::mutex> lock(S().mutex);
   const auto found = S().installed.find(std::string(token));
   return found == S().installed.end() ? std::filesystem::path() : found->second;
-}
-
-namespace {
-
-std::string TitleOfLocked(const std::string& token) {
-  const auto offer = S().offers.find(token);
-  if (offer != S().offers.end() && !offer->second.title.empty()) {
-    return "'" + offer->second.title + "'";
-  }
-  return "the song";
-}
-
-}  // namespace
-
-std::string DownloadStatusText() {
-  const std::lock_guard<std::mutex> lock(S().mutex);
-  const auto active = S().jobs.find(S().active);
-  if (!S().active.empty() && active != S().jobs.end()) {
-    const JobStatus& status = active->second;
-    std::string line = "Downloading " + TitleOfLocked(S().active);
-    if (status.total != 0) {
-      line += ": " + std::to_string(status.received * 100 / status.total) + "%";
-    } else if (status.bucket > 0) {
-      line += ": at least " + std::to_string(status.bucket) + "%";
-    } else {
-      line += "...";
-    }
-    return line;
-  }
-  if (!S().queue.empty()) {
-    return "Waiting to download " + TitleOfLocked(S().queue.front()) + "...";
-  }
-  if (S().last_job.empty()) {
-    return {};
-  }
-  if (std::chrono::steady_clock::now() - S().last_finished > kStatusHold) {
-    return {};
-  }
-  const auto finished = S().jobs.find(S().last_job);
-  if (finished == S().jobs.end()) {
-    return {};
-  }
-  const JobStatus& status = finished->second;
-  const std::string title = TitleOfLocked(S().last_job);
-  switch (status.state) {
-    case JobState::kInstalled:
-      // The honest half of OQ6: the host list is updated, the guest's own discovery is not, so a
-      // restart is the documented way to play it (plan §3.2/P5).
-      return "Installed " + title + ". Restart the game to play it.";
-    case JobState::kFailed:
-      return "Download failed for " + title + ": " +
-             std::string(DownloadErrorText(status.error)) + ".";
-    case JobState::kCancelled:
-      if (status.error == DownloadError::kDisabled) {
-        return "Download cancelled: RhythmVerse was switched off.";
-      }
-      return "Download cancelled for " + title + ".";
-    case JobState::kQueued:
-    case JobState::kDownloading:
-    case JobState::kUnknown:
-      break;
-  }
-  return {};
-}
-
-std::string DownloadStatusJob() {
-  const std::lock_guard<std::mutex> lock(S().mutex);
-  if (!S().active.empty()) {
-    return S().active;
-  }
-  if (!S().queue.empty()) {
-    return S().queue.front();
-  }
-  return std::chrono::steady_clock::now() - S().last_finished > kStatusHold ? std::string()
-                                                                           : S().last_job;
 }
 
 // --- The guest channels ---------------------------------------------------------------------------

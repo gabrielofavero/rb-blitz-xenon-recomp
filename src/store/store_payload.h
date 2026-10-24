@@ -345,8 +345,9 @@ bool AddDownloadButton(std::vector<ui::dtb::Node>* store_info_roots, std::string
 //
 //   {do ($offer {property cur_offer})
 //        {if_else {offer has_data job}
-//           {do ($path {sprintf "rbbz-store/download/<start|again>/%s"
-//                              {offer get_data (job)}}
+//           {do ($job {offer get_data (job)})
+//               ($path {sprintf "rbbz-store/download/<start|again>/%s" $job})
+//               {rbbz_download_panel show_popup $job}
 //                {write_file $path 0}}
 //           {notify "This offer carries no download job"}}}
 //
@@ -355,7 +356,8 @@ bool AddDownloadButton(std::vector<ui::dtb::Node>* store_info_roots, std::string
 // thing and crashed the first boot that pressed the row), the `has_data` guard that keeps a missing
 // key from being walked, `sprintf` with a nested command as its argument, and the request channel's
 // own `write_file`. The path is the grammar `store_download.h` owns (`ParseJobCommand`), and the
-// token is the offer's `job` key.
+// token is the offer's `job` key. P9-6a's modal opens first (`AddDownloadPopup`), so the popup is
+// up before the transfer starts and it is the only place the job's state is drawn.
 //
 // Measured 2026-10-22 on the first boot that pressed the row (`out/_swap/store-probe/
 // 20261022-115913`, log `rb_blitz_212.log`): the case dispatched and reached the host (a literal
@@ -366,6 +368,57 @@ bool AddDownloadButton(std::vector<ui::dtb::Node>* store_info_roots, std::string
 // `SELECT_MSG` switch or no `store_download_again` case. Requires `AddDownloadButton` to have run
 // only for the row itself - the two transforms do not depend on each other's output.
 bool RouteDownloadButtons(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
+// ---------------------------------------------------------------------------------------------
+// P9-6a - the download press opens one modal popup
+// ---------------------------------------------------------------------------------------------
+//
+// P5 shipped the transfer's feedback as a host-side line in the caption strip, drawn while the job
+// ran and for 30 s after it ended. The owner's 2026-10-23 pass replaced that with one **modal**
+// popup, in the shape P9-11's search loading panel already proved: a focus-owning panel over the
+// details screen, the retail error popup's own resource, B cancelling, and the panel itself moving
+// to its outcome state when the job reaches a terminal one - no second popup and no host drawing.
+//
+// `AddDownloadPopup` defines that panel (`(new UIPanel rbbz_download_panel …)`, the same
+// `../error/error_general.milo` the search modal uses) and appends its symbol to
+// `store_info_screen`'s `panels` list, so the record that carries the press is the record that
+// carries the popup. Its methods:
+//
+//   show_popup ($job)  stores the job token, sets the loading sentence and the Cancel prompt,
+//                      shows `all.grp` and takes the screen's focus;
+//   poll               waits here for the job's terminal state
+//                      (`state/<job>/installed|failed|cancelled`, the bridge grammar
+//                      `store_download.h` owns): `installed` switches the labels to
+//                      `Downloaded '<name>'.` and the Close prompt, `failed`/`cancelled` to the
+//                      generic failure sentence; a `terminal` property makes the switch once;
+//   hide_popup         hides, releases `active`, and gives the focus back to
+//                      `store_info_panel`'s `buttons.lst`;
+//   BUTTON_DOWN_MSG    B writes `rbbz-store/download/cancel/<job>` while the job is not terminal
+//                      and closes - so a cancelled transfer never outlives the press - and every
+//                      other action is consumed;
+//   exit               leaving the screen with the popup up is a cancel as well (`active` and not
+//                      `terminal`), which is the search modal's rule.
+//
+// The press itself is `RouteDownloadButtons`' body: it shows the popup with the offer's `job` key
+// **before** it writes the start/again request, so the modal is up when the transfer begins.
+//
+// The outcome states are the panel's, not the strip's: P9-6b fills the loading sentence with the
+// live progress bucket and names a failure's reason, and P9-6c turns the `installed` state into the
+// toast whose A runs the main menu's Refresh Songs - all in this same object, which is why the
+// panel carries the switch now.
+//
+// Idempotent (the panel definition is the marker); refused, before any edit, when the record carries
+// no `store_info_screen` definition or no `panels` list on it.
+inline constexpr char kDownloadPanelName[] = "rbbz_download_panel";
+inline constexpr char kDownloadLoadingToken[] = "rbbz_download_loading";
+inline constexpr char kDownloadLoadingText[] = "Downloading from RhythmVerse...";
+inline constexpr char kDownloadCancelToken[] = "rbbz_download_cancel";
+inline constexpr char kDownloadCancelText[] = "Press <alt1>B</alt1> to Cancel";
+inline constexpr char kDownloadCloseToken[] = "rbbz_download_close";
+inline constexpr char kDownloadCloseText[] = "Press <alt1>B</alt1> to Close";
+inline constexpr char kDownloadFailedToken[] = "rbbz_download_failed";
+inline constexpr char kDownloadFailedText[] = "The download could not finish.";
+bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
 
 // The details page's Preview Audio row is built from `refresh_buttons`' own preview block, and its
 // gate is `{&& is_song {offer has_data preview_audio} {is_allowed_to_preview_offer offer}}`. The

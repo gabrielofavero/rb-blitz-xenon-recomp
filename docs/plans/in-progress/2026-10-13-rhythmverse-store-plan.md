@@ -2432,16 +2432,16 @@ one.
 | P9-1 | Done | Settings | The master switch defaults **On** | the P6 record's "master off" |
 | P9-2 | Done | Settings | A master change stays **hot** only if the menu row **and** the header follow it live; otherwise a restart is asked for | P6 (all six rows `kHot`) |
 | P9-3 | Done | Settings | `Downloadable Content ▸ RhythmVerse` submenu first; the filter is renamed **Search Song Filter** (renamed again to **Filters**, page `RHYTHMVERSE FILTERS`, by P9-11) | P6's flat page |
-| P9-4 | In Progress | Settings | Independent `Show Messages` and `Show Recommendations` under Interface ▸ Music Library & Store | — |
+| P9-4 | Done | Settings | Independent `Show Messages` and `Show Recommendations` under Interface ▸ Music Library & Store | — |
 | P9-5 | Done | Store menu | **Recently Added**, and no count beside the two rows | P3/P7's labels |
-| P9-6 | Todo | Store surface (3 prompts + 1) | **6a** a download press opens one modal *Downloading from RhythmVerse* popup (the search panel's shape; B cancels, auto-closes on a terminal state); **6b** the popup's own text carries the live status (a native bar only if one can be reused, else text); **6c** the same popup becomes the success toast — **A** runs the main menu's Refresh Songs, **B** closes, and the refresh must list the new song without a restart; **6d** the credit line goes (unchanged 2026-10-22 item) | P5's overlay strip, P7's credit line, the 2026-10-22 P9-6 draft |
+| P9-6 | In Progress | Store surface (3 prompts + 1) | **6a** a download press opens one modal *Downloading from RhythmVerse* popup (the search panel's shape; B cancels, auto-closes on a terminal state); **6b** the popup's own text carries the live status (a native bar only if one can be reused, else text); **6c** the same popup becomes the success toast — **A** runs the main menu's Refresh Songs, **B** closes, and the refresh must list the new song without a restart; **6d** the credit line goes (unchanged 2026-10-22 item) | P5's overlay strip, P7's credit line, the 2026-10-22 P9-6 draft |
 | P9-7 | Done | Store footer | **Start = Search Filters**, and Back returns to the store | P1/P3's Start route |
 | P9-8 | Done | Store footer | Hide **Y View Item** where it does nothing | — |
 | P9-9 | Done | Your Songs | The LT/RT tabs navigate from the song list; the RhythmVerse tab follows the master | — |
 | P9-10 | Done | Catalogue | Warm Recently Added at boot; a failed press draws the retail connection-failed popup and retries in the background — nothing is hidden | P7's fetch-on-open |
 | P9-11 | Done | Search | Use the title's own keyboard search; retire the authored key pages | P4 |
 | P9-12 | Done | Main menu + Settings | The store row is renamed **RhythmVerse** (was *RhythmVerse Customs*), the refresh row is renamed **Refresh Songs** (was *Refresh Music Library*), and the refresh entry defaults **On** again | the 2026-10-20 default-off and the P1 label |
-| P9-13 | In Progress | Store details page | The box that carries the **Download / Cancel** buttons carries the **custom's** credit block: who charted it, the custom's release date, its audio type and its download count (not the song's year) | — |
+| P9-13 | Done | Store details page | The box that carries the **Download / Cancel** buttons carries the **custom's** credit block: who charted it, the custom's release date, its audio type and its download count (not the song's year) | — |
 
 Status checked 2026-10-23 against this section's records and the tree: **Done** = the prompt's
 Done-when is met by a record; **In Progress** = part is landed and the closing measurement is owed;
@@ -2471,7 +2471,13 @@ title's keyboard route, the modal search popup, the answer listing, a second sea
 first and the per-search art were confirmed in game, closing the prompt's Done-when;
 labels and the refresh entry's compiled-On default were confirmed on the rebuilt binary; **P9-13's
 model, writers and payload edit landed 2026-10-23** (the record under the prompt below) and the boot
-that OCRs the block is the one measurement it still owes.
+that OCRs the block is the one measurement it still owed.
+
+Status checked 2026-10-24, against this section's records and the tree: **P9-4 and P9-13 are Done**
+(both closed by the owner's own in-game check on 2026-10-24 - see the close-outs under their prompts;
+P9-4's reopened Search-overlap item included), and **P9-6a landed** the same day (`AddDownloadPopup`,
+the press routed through it, the caption strip's download line removed - see the P9-6a record), which
+leaves P9-6 **In Progress** on 6b, 6c and 6d.
 
 ### P9-12 — two row renames, and the refresh entry on by default (2026-10-22)
 
@@ -2713,6 +2719,18 @@ artist, and groups the remaining facts below them at size 14 with a 22-unit pitc
 artist widths are 480 units; metadata is 440, with ellipsis retained. Download / Exit return to
 the scene's original lower-right action area, fixed independently of missing metadata. This
 refinement uses the same confirmed UILabel properties; its visual check remains with the owner.
+
+**P9-13 close-out (2026-10-24; owner's own boots) — P9-13 is Done.** The owner read the refined
+block in game on the rebuilt binary and reports the box correct: the custom's own facts in the
+owner's order (title, artist, audio type, `Charted by`, release date, downloads) with both actions
+in the scene's lower-right area, which is the prompt's Done-when. Read by hand, no capture stored -
+the same standing as P9-5's, P9-7's and P9-9's owner boots. What stays as the standing check:
+`store_client` (the four facts on the captured records and `DatePart`), `store_metadata` (both
+writers emit the four keys on every offer, the audio-type label table and its unknown fallback),
+`store_payload`'s `TestOfferCredits` and the `store-edit <store_info.dtb> info` dump, and
+`scripts/acceptance_store.ps1`'s Store leg (`CHARTED`, `RELEASED`, `DOWNLOADS`). P9-13 leaves one
+downstream task, not its own: P9-6a's popup opens on the same box's Download press, and the row
+pressed there is unchanged by this block.
 
 ### P9-1 — the master switch defaults On
 
@@ -3101,6 +3119,15 @@ byte-identical DTB round trips. Evidence:
 **Manual Search retest remains with the owner; the intermittent visual glitch is
 not claimed reproduced or confirmed fixed from host checks.**
 
+**P9-4 close-out (2026-10-24; owner's own check) — P9-4 is Done.** The owner drove the rebuilt binary
+and reports the two independent switches (**Show Messages** On / **Show Recommendations** Off, both
+restart-scoped), the ordered tab ring with its skipped-tab direction, and the compact header bar as
+working, the intermittent Search overlap included. Read by hand, no capture stored - the same standing
+as P9-5's, P9-7's and P9-9's owner boots. What stays as the standing check: the eight-state
+extracted-record matrix (`menu_payload`'s `check-header-records`, **1,982 assertions**, evidence
+`out/_swap/header-search-visibility/records/state-0..7/`) and the suite pins the two rows, their
+defaults and the legacy fallback.
+
 ### P9-5 — **Recently Added**, and no count beside the two rows
 
 - **Do two things in `src/store/store_metadata.cpp`**:
@@ -3236,6 +3263,72 @@ Measurements the design rides on (each dated at its source):
 - **Done when**: one boot presses Download on a real offer — the popup draws over the details page,
   the transfer runs, and B at any point cancels (no package, no receipt, the popup closes); letting
   it finish reaches 6c without a second popup.
+
+**P9-6a record (2026-10-24) — the modal is in the tree, the caption strip's download line is gone,
+and the boot that presses the row is the one measurement owed.**
+
+- **The panel** (`store::AddDownloadPopup`, `src/store/store_payload.{h,cpp}`). `rbbz_download_panel`
+  is defined in `store_info.dtb` — the record that carries the press — with the search modal's own
+  resource (`../error/error_general.milo`), and its symbol is appended **last** to
+  `store_info_screen`'s `panels` list (the position the search modal was measured at, and the reason
+  its `all.grp` draws over the screen's panels). It carries two booleans and no string property:
+  `active` (the popup is up) and `terminal` (the job already answered), the pair the search panel
+  proved.
+- **The press** stays P5's two cases, one statement longer: `DownloadRequest` now binds the offer's
+  `job` key, builds the request path from that local, calls `{rbbz_download_panel show_popup}`, and
+  only then writes `rbbz-store/download/start|again/<job>` — so the modal is up before the transfer
+  starts, as the prompt asks. The `{offer has_data job}` guard and the compiled record's array
+  binding are untouched.
+- **The states**, all in the one panel object:
+  - `show_popup` sets `active`, clears `terminal`, writes `error.lbl` = **Downloading from
+    RhythmVerse...** and `continue.lbl` = **Press B to Cancel** (two new locale entries, added by
+    `menu_payload.cpp` beside the search modal's), shows `all.grp` and takes the screen's focus;
+  - `poll` waits on `rbbz-store/state/<job>/installed|failed|cancelled` (`store_download.h`'s
+    grammar, built with `sprintf` — the shape the art poll uses) and switches the same labels
+    **once**: `installed` → `Downloaded '<song title>'.` + **Press B to Close**,
+    `failed`/`cancelled` → **The download could not finish.** + the Close prompt;
+  - `hide_popup` releases `active`, hides, and gives the focus back to `store_info_panel`'s
+    `buttons.lst`;
+  - `BUTTON_DOWN_MSG`'s B writes `rbbz-store/download/cancel/<job>` while the job is not terminal and
+    closes — so a cancelled transfer never outlives the press — and every other action is consumed;
+    `exit` cancels the same way when the screen is left with the popup up.
+- **Where the job token comes from, and why not a property.** The popup is a different object from
+  the details panel, so the token is read from the panel's own `cur_offer` when it is needed:
+  `{store_info_panel get cur_offer}` — the cross-object read retail's `go_back` already makes on
+  every B press of this screen (`{store_info_screen get back_screen}`) — behind `{if $offer …}`, the
+  object-truthiness test `AddSearchKeyboard` relies on for the keyboard's User (measured 2026-10-23).
+  A string property was rejected because no shipped record sets one from DTA, and a method argument
+  was rejected for the same class of reason (the token would still have to be stored between calls);
+  the offer already carries it. The song title in the outcome sentence is read the same way and
+  written with `set_display_text_string` — the writer `ShowOfferCredits` already draws with.
+- **The overlay line is gone**: `DownloadStatusText`/`DownloadStatusJob`, the service's last-job
+  bookkeeping (`last_job`/`last_finished`, `kStatusHold`, `NoteTerminal`) and `help_overlay.cpp`'s
+  download branch were removed with it, so no host-side line describes a transfer any more. The
+  store's own catalogue sentences and the search strip are untouched (`store_catalogue_status.h`'s
+  credit line is **6d's**, not this record's).
+- **Scope of this prompt, stated plainly**: the loading line is static (6b adds the progress bucket
+  and the failure reason tokens), and the installed state stops at the sentence — 6c replaces it with
+  the toast whose **A** runs the main menu's Refresh Songs and proves same-session discovery. What
+  6a owns is the panel, its switch between states, the cancel and the close, and it does not draw
+  over the game: every string is one of the panel's own labels.
+- **Verification**, hermetic: `cmake --build --preset win-amd64-debug` links the game and every
+  target; `ctest` in `out/build/win-amd64-debug` is **47/47**; `store_payload` is **552 checks**
+  (`TestDownloadPopup`: the definition, its resource, the eight methods, the three state predicates,
+  the cancel command, the four tokens, the composed sentence, the panels-list position, idempotency,
+  compile→parse and both refusals; `TestDownloadButtonsRouted` now also pins that each press shows
+  the popup **before** it writes the request). Against the shipped record,
+  `rb_blitz_store_payload_tests store-edit assets\game\360\ui\store\gen\store_info.dtb download`
+  answers `download row -> edited`, `download popup -> edited`, `download press -> edited` and dumps
+  the whole panel definition (evidence: `out/_swap/p9-6a-download.txt`).
+- **Owed — the prompt's Done-when is a boot**, and on this machine that is the owner's to take
+  (`AGENTS.md`). Recipe, release build `out/build/win-amd64-release/rb_blitz.exe`: main menu →
+  **RhythmVerse** → **Recently Added** → A on an offer → **Download**; the popup draws over the
+  details page reading *Downloading from RhythmVerse...* / *Press B to Cancel*; pressing **B** at
+  once cancels (log: `store_download: job … cancelled`, no package in the root, no receipt row, the
+  popup closes); pressing it and letting the transfer finish leaves the same panel reading
+  *Downloaded '<song>'.* / *Press B to Close*; **B** closes it and the details page is focused again
+  (its Exit row still returns to the browser). The harness's Store leg now asserts all of that
+  (`popup.png`, `popup-done.png`, `popup-closed.png`) but has not been re-run on this build.
 
 #### P9-6b — the popup's own text carries the live status
 

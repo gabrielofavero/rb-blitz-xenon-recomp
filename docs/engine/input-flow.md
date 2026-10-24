@@ -126,16 +126,19 @@ and the fraction of the list it covers shrinks as the library grows. Successive
 detents advance the *pending target* (list +228) so a burst is not lost to the
 animation.
 
-The rail itself is mapped from the thumb's own geometry (`docs` record below):
-the thumb is one row pitch tall and its top crosses the rail as the first visible
-row walks 0..maxFirst, where `maxFirst` is the list's own last page. It comes from
-the provider's `NumData()` minus the visible row count — Blitz puts `NumData` at
-vtable slot 10 of `UIListProvider` (RB3's layout has one extra virtual before it),
-and the call is only made after the rebuilt slot is checked against the known
-recompiled address (`822DAE10`); a refused answer leaves the gutter inert rather
-than guessing. With that map a track click slides the thumb to the cursor, a press
-on the thumb grabs it (no jump on release) and a drag moves the view row-for-row
-with the cursor, clamped to `[0, maxFirst]`. Applications go through
+The rail uses the focused list's scene geometry: `ObjectDir::FindObject`
+(`82402DE8`) resolves its sibling `rail.mesh` and `scroller.mesh`, and the mesh
+bounds retained by `OnSync` are projected through the current camera. The hit area
+and thumb travel therefore follow each scene's actual placement and size, including
+the song library and RhythmVerse results. Lists without those meshes keep directional
+wheel input. `maxFirst` comes from `UIList::NumData()` (`824C0C08`) minus the
+visible row count. This uses the current provider's virtual dispatch and is refreshed
+as results change, rather than accepting only the library provider's implementation.
+A track press immediately centers the thumb at the cursor; a thumb press preserves
+the grab offset. Both can continue into a drag, clamped to `[0, maxFirst]`.
+The window captures the mouse until release so the pointer can leave the rail or
+game rectangle. The release position is applied too; focus loss, screen changes,
+and overlays cancel the drag and release capture. Applications go through
 UIList::SetSelected plus the same scroll-start and scroll-complete notifications
 hover uses (`824C1938`, `824C1DE8`, `824C1F08`). A press on the rail is a scroll,
 not a click: it never emits A. The strip is published per draw and invalidated on

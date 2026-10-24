@@ -290,6 +290,34 @@ int main() {
   CHECK_FALSE(RailYOnThumb(.2175f + per * 10 + .09f, .2175f, per, .0624f, 10));
   CHECK_TRUE(RailYOnThumb(.5f, .2175f, per, .4f, 0));
 
+  BeginCase("thumb grabs preserve their offset and track presses jump immediately");
+  const MenuRail measured{.6f, .2f, .62f, .8f, true, .1f};
+  MenuRailDrag grab;
+  // At first=20/100 the thumb covers .30..40. Grab near its bottom.
+  CHECK_EQ(grab.Begin(0x1234, .39f, measured, 20, 100), 20);
+  CHECK_TRUE(grab.active && grab.list == 0x1234);
+  CHECK_EQ(grab.Target(.39f, measured, 100), 20);
+  CHECK_EQ(grab.Target(.49f, measured, 100), 40);
+  CHECK_EQ(grab.Target(-.5f, measured, 100), 0);
+  CHECK_EQ(grab.Target(1.5f, measured, 100), 100);
+  CHECK_EQ(grab.Target(.39f, measured, 100), 20); // dragging back from a clamped endpoint
+  // A track press takes effect on Begin, without needing motion or release.
+  CHECK_EQ(grab.Begin(0x1234, .65f, measured, 20, 100), 80);
+  CHECK_EQ(grab.Target(.70f, measured, 100), 90);
+  CHECK_EQ(grab.Begin(0x1234, .2f, measured, 20, 100), 0);
+  CHECK_EQ(grab.Begin(0x1234, .8f, measured, 20, 100), 100);
+  // Different scene position, thumb size, and row count use the same interaction.
+  const MenuRail store_rail{.4f, .1f, .42f, .9f, true, .2f};
+  CHECK_EQ(grab.Begin(7, .8f, store_rail, 0, 300), 300);
+  CHECK_EQ(grab.Begin(7, .5f, store_rail, 0, 300), 150);
+  CHECK_EQ(grab.Target(.2f, store_rail, 300), 0);
+  grab.Reset(); CHECK_FALSE(grab.active); CHECK_EQ(grab.list, 0);
+  CHECK_EQ(grab.Begin(7, .5f, store_rail, 0, 0), 0); CHECK_FALSE(grab.active);
+  CHECK_EQ(grab.Begin(7, NAN, store_rail, 0, 300), 0); CHECK_FALSE(grab.active);
+  CHECK_EQ(grab.Begin(7, .5f, {}, 0, 300), 0); CHECK_FALSE(grab.active);
+  CHECK_EQ(RailFirstFromY(NAN, .2f, .01f, 100), 0);
+  CHECK_EQ(RailFirstFromY(1e30f, .2f, .01f, 100), 100);
+
   BeginCase("final pad packets expose mouse edges beside an idle controller");
   PadPacket packets;
   PadSample pad;
