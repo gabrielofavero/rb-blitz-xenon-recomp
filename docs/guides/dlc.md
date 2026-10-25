@@ -425,7 +425,7 @@ clones that shipped case under `splash_dlc_store` whenever `interface.hide_downl
 the online-store entry out of the menu while it remains one toggle away. With the cache off the retail
 `splash_dlc` row *is* `Download Content`, so the extra switch is not offered.
 
-**The refresh runs on a worker, and since 2026-10-15 the press rides it.** Reading every
+**The refresh runs on a worker; the press returns immediately (2026-10-24).** Reading every
 container is the same per-file cost the cold boot pays, so an in-game refresh of the
 1,402-package library is **30.2-31.0 s** — and it used to run on the thread that asked,
 which is the frame, so the press froze the game for half a minute
@@ -436,36 +436,32 @@ second press while the scan is in flight rides the first instead of queueing a s
 scan — and **published exactly once**, because two guest threads can reach the publish
 point together.
 
-The press itself waits for that worker, **bounded at 15 s**, because the row now also
-re-enters the title's own discovery pass ([main-menu.md](../engine/main-menu.md) §7.1) and
-that pass snapshots the content list **when its aggregate enumerators are created** —
-measured, the creates run before the pass's first message and are made by guest code the
-mod cannot wait on, so nothing downstream can wait for the scan instead. Because that wait blocks
-the guest thread, the press also takes the menu's background music down before it blocks (a stream
-with nothing advancing it repeats its last buffered slice) and starts the rotation's next song on
-the first menu frame after it — measured, music is back 1.9 s after the press, already on the
-discovery screen ([main-menu.md](../engine/main-menu.md) part 2 §4, `out/_swap/menu-run/music3`).
-A refresh always
-reads every container's header again — that is what the row asks for — so the press pays the
-same per-file cost a cold boot pays (§4.2), and the bound is what keeps that from becoming a
-stall: a scan still running at the bound returns the press and the pass runs over the previous
-list, with the fresh one landing for the next enumeration. Measured 2026-10-15
-(`out/_swap/menu-run/refresh12`): a library linked in after the menu had come up refreshed in
-**8.1 s** of scan — `packages=600`, 13.6 ms per file on the default single thread — and the
-press returned after **8.9 s**; the pass then enumerated the fresh list,
-`XamContentAggregateCreateEnumerator: added 600 items`, **600/600** with the
-title's own **Discovering Downloadable Content** screen and bar up, and the menu returned.
-(That run named its fixture folder as both the DLC root and a library, so the old root list
-walked every package twice; `fs::UniqueLibraryRoots` dedupes that now — the timings above are
-what one press really costs.) The scan rewrote the cache, so the next *boot* is a hit; an
-explicit refresh never accepts the cache, so a second press scans again.
+The main-menu row and the RhythmVerse download popup both start the worker and
+enter the normal connect screen without waiting on the game thread. The native
+`StartEnumeratingContent` state (28, panel field `+56`) defers its advance at
+`0x822CA460` while the host scan is running. The panel's state poll at `0x822CB618`
+retries on each frame, publishes the finished list on the guest thread, and then
+runs the original advance, which creates the aggregate enumerators and selects
+`EnumeratingContent` (29). Drawing, input polling and audio continue during the scan.
+No panel pointer or guest stack is retained between frames; leaving the panel
+abandons its continuation. This also covers a pending store-install scan with the
+host cache disabled.
+
+The old 15-second blocking wait and refresh-specific music teardown/resume are
+removed. A slow scan now keeps the loading screen active rather than timing out
+into an enumeration of the previous list. Explicit refresh still reads every
+container header and rewrites the cache; this change removes the frame stall,
+not that I/O.
+Build and host-test validation do not establish runtime UI smoothness; both
+refresh entry points still need an in-game check on a large library.
 
 **Where the refreshed list lands, and why not on the worker.** The result is handed to the
 content manager from a *guest* thread, because ContentManager's
 `extra_content_library_` is a plain `std::vector` with **no lock of its own**: a worker
 writing it while the guest lists or resolves content would be a data race, and
-`Configure()` writes it from a guest thread at boot for exactly that reason. The reliable
-publish point is the main menu's own per-frame music poll
+`Configure()` writes it from a guest thread at boot for exactly that reason. During discovery,
+the native state poll publishes the list before enumeration.
+The menu also publishes through its own per-frame music poll
 ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp), `ShellMusic::Poll` — the hook
 R9 already installs), which runs every frame the menu is up **with R9 on or off**, because
 it is the title's own music. Measured: the publish lands on the first frame after the scan

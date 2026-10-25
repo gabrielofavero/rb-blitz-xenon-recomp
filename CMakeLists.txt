@@ -707,6 +707,19 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_refresh_state_tests PRIVATE src)
     add_test(NAME refresh_state COMMAND rb_blitz_refresh_state_tests)
 
+    if(WIN32)
+        # Exercise the actual connect-panel hooks with fake guest memory and native
+        # continuations, without launching or navigating the game.
+        add_executable(rb_blitz_refresh_discovery_tests
+            tests/refresh_discovery_tests.cpp src/hooks/dlc_refresh.cpp)
+        target_include_directories(rb_blitz_refresh_discovery_tests PRIVATE src)
+        target_link_libraries(rb_blitz_refresh_discovery_tests PRIVATE rex::runtime)
+        add_custom_command(TARGET rb_blitz_refresh_discovery_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_refresh_discovery_tests>)
+        add_test(NAME refresh_discovery COMMAND rb_blitz_refresh_discovery_tests)
+    endif()
+
     # The typed guest<->host settings channel (src/hooks/settings_bridge.h, P1): exact namespace
     # matching, bounded and checksummed frames, structured status and idempotent request ids.
     # SDK-free like the tests above; the guest hook that carries the frames needs the SDK and a

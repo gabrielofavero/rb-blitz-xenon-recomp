@@ -69,6 +69,11 @@ void DrainRefreshForRestart();
 // rewritten either way, which is the half the next boot reads.
 void PublishPendingRefresh();
 
+// Nonblocking discovery barrier. Publish a completed scan on the guest thread and
+// return false while work remains. The connect panel retries on its next poll,
+// before creating any aggregate enumerators (which snapshot the package list).
+bool RefreshReadyForDiscovery();
+
 // Whether an in-game refresh can happen at all: the R7 toggle is on and Configure() has
 // run. A hook checks this before it does any work - including reading the path a call
 // names - so a run with the toggle off pays nothing.

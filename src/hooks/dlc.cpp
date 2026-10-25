@@ -415,10 +415,10 @@ void StartRefreshWorker(const char* why) {
       g_refresh_paths = std::move(scan.paths);
       g_refresh_count = count;
     }
-    g_refresh_state.Finish();
     REXLOG_INFO("dlc: the refresh finished ({} package(s)); the running title's library is "
                 "handed over on the next menu frame",
                 count);
+    g_refresh_state.Finish();
   });
 }
 
@@ -631,6 +631,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 }
 
 void PublishPendingRefresh() {
+  if (!g_refresh_state.Pending()) return;
   std::vector<rex::system::xam::ExtraContentItem> items;
   std::vector<std::filesystem::path> paths;
   std::size_t count = 0;
@@ -675,8 +676,14 @@ void PublishPendingRefresh() {
               JoinLibraryRoots(g_library_roots));
 }
 
-// Defined below, next to its contract: the press's bounded wait for the scan.
-void WaitForRefreshToLand();
+bool RefreshReadyForDiscovery() {
+  // Check running first: Finish() publishes pending before clearing running.
+  // A scan that finishes during this check is picked up on the next frame.
+  if (g_refresh_state.Running()) return false;
+  PublishPendingRefresh();
+  return !g_refresh_state.Running() && !g_refresh_state.Pending() &&
+         !g_refresh_publishing.load();
+}
 
 void RefreshConfigured() {
   {
@@ -686,10 +693,8 @@ void RefreshConfigured() {
       return;
     }
     // R7's scan belongs to the cache feature, so with the cache off a press schedules none. The
-    // wait below still runs: the store's post-install refresh (RefreshAfterStoreInstall) scans
-    // whatever the switch says, and the press may arrive while that scan is running or its list
-    // is waiting to be published - which is the case P9-14's toast refresh cares about. With
-    // nothing pending the wait returns at once.
+    // store's post-install refresh scans regardless of this switch. The connect panel's
+    // per-frame barrier covers that scan too, including a result awaiting publication.
     if (g_cache_enabled) {
       if (g_library_roots.empty()) {
         REXLOG_WARN("dlc: a refresh was asked for but no DLC library is configured, nothing to "
@@ -697,8 +702,8 @@ void RefreshConfigured() {
         return;
       }
       // One at a time. A second ask while the scan is in flight rides the first one rather than
-      // queueing a second scan of the same tree - and it still waits below, because what it
-      // needs is the finished list, not a second worker
+      // queueing a second scan of the same tree. The discovery barrier covers the
+      // worker either way
       // (docs/plans/finished/2026-10-10-song-cache-plan.md §9.5).
       if (!g_refresh_state.Begin()) {
         REXLOG_INFO("dlc: a refresh is already running; this ask rides it");
@@ -710,8 +715,8 @@ void RefreshConfigured() {
       }
     }
   }
-  // The press waits (bounded) for the scan: see WaitForRefreshToLand below.
-  WaitForRefreshToLand();
+  // Return to the frame immediately. ServerConnectPanel defers its enumeration
+  // until RefreshReadyForDiscovery() succeeds; it never enumerates a stale list.
 }
 
 // P5's half of OQ6: a verified store install changed a flat library, so the host scans it and
@@ -744,72 +749,6 @@ void DrainRefreshForRestart() {
   std::lock_guard<std::mutex> worker_lock(g_refresh_worker_mutex);
   g_restarting = true;
   if (g_refresh_worker.thread.joinable()) g_refresh_worker.thread.join();
-}
-
-// A refresh entry's press re-enters the title's own connect/discovery pass (src/ui/menu_options.cpp's
-// TapRefreshCache navigates into it, and P9-14's download toast runs the same sentinel right
-// before its navigation), and that pass must enumerate the list its own re-scan produced - not the
-// one this boot loaded. The pass's aggregate enumerators are built from the content manager's list
-// *at the create call*, and measured 2026-10-15 the creates run before the pass's first message
-// (and are made by guest code the mod cannot wait on: the create is an ordinal-resolved import).
-// So the waiting belongs here, inside the press: the row's action has only scheduled the screen
-// transition at this point - nothing of the pass has run yet - and by the time this returns the
-// list is either the finished one or the scan sat out its bound.
-//
-// PublishPendingRefresh() is called on this (guest) thread, exactly like the file-call hooks do
-// at the menu, because the content manager's list is a plain vector the worker must not write.
-//
-// Bounded on purpose: a refresh always re-reads every container header - that is what the row
-// asks for - so the press pays the per-file cost the cold boot pays. Measured 2026-10-15
-// (out/_swap/menu-run/refresh12): 8.1 s of scan for a 600-file walk, 13.6 ms each on the default
-// single thread, 8.9 s of press wait; docs/guides/dlc.md §4.2 has the per-file table and
-// `dlc_scan_threads` divides it. The bound is where that stops being an acceptable hold: a scan
-// still running after it must not hold the press any longer. The press returns, the pass runs over
-// the previous list, and the fresh one lands mid-pass for the next enumeration (the shell poll and
-// the file hooks publish it). The scan rewrote the cache, so the next *boot* is the cheap one; a
-// second press in the same session scans again, because an explicit refresh never accepts the cache.
-void WaitForRefreshToLand() {
-  // Not gated on the cache switch: with the cache off nothing schedules a scan, but a store
-  // install's own scan (which ignores the switch) can still be running or pending, and a press
-  // that is about to enter the discovery pass must publish it first (P9-14). With nothing pending
-  // the loop below exits on its first test.
-  if (g_runtime == nullptr) {
-    return;
-  }
-  constexpr int kBoundMs = 15000;
-  const auto started = std::chrono::steady_clock::now();
-  bool waited = false;
-  const auto note_waiting = [&] {
-    if (!waited) {
-      waited = true;
-      REXLOG_INFO("dlc: the refresh is still scanning; the press waits for it so the discovery "
-                  "pass enumerates the fresh list");
-    }
-  };
-  for (;;) {
-    if (g_refresh_state.Pending()) {
-      note_waiting();
-      PublishPendingRefresh();
-      continue;
-    }
-    if (!g_refresh_state.Running() && !g_refresh_publishing.load()) {
-      break;
-    }
-    note_waiting();
-    if (std::chrono::steady_clock::now() - started >= std::chrono::milliseconds(kBoundMs)) {
-      REXLOG_WARN("dlc: the library refresh did not finish within {} ms; the press returns and "
-                  "the discovery pass runs over the previous list",
-                  kBoundMs);
-      return;
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  }
-  if (waited) {
-    REXLOG_INFO("dlc: the refresh finished before the press returned ({} ms); the discovery "
-                "pass enumerates the fresh list",
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - started).count());
-  }
 }
 
 bool RefreshArmed() { return g_cache_enabled && g_runtime != nullptr; }
