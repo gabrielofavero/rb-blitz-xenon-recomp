@@ -366,15 +366,46 @@ int main() {
   Close(drawn_x, 312 + delta);
   Close(Float(comparison + 0x38), 300);
   old_dirty_calls = dirty_calls;
+  const auto prepared_calls = original_calls;
   for (unsigned frame = 0; frame < 100; ++frame) {
     Draw(comparison_draw, comparison_group, true);
     Close(drawn_x, 312 + delta);
   }
   CHECK_EQ(dirty_calls, old_dirty_calls);
+  CHECK_EQ(original_calls, prepared_calls); // no forced evaluator/virtual update per child draw
   // Reopening/comparison animation can update its child while the anchor stays clean.
   Float(best_text + 0x38, 17); memory[best_text + 189] = 1;
   Draw(comparison_draw, comparison_group, true);
   Close(drawn_x, 317 + delta);
+
+  BeginCase("prepared anchor reuse still follows dirty animation and changed live state");
+  Float(comparison + 0x38, 310); memory[comparison + 189] = 1;
+  Draw(comparison_draw, comparison_group, true);
+  Close(drawn_x, 327 + delta);
+  // A clean but newly authored local transform must not reuse the old result.
+  Float(comparison + 0x38, 320);
+  Draw(comparison_draw, comparison_group, true);
+  Close(drawn_x, 337 + delta);
+  // Reloaded art at the same addresses must be placed from its live matrices.
+  Float(comparison + 0x78, 320); // an unshifted clean world cache after a load
+  Float(best_text + 0x78, 337);
+  Draw(comparison_draw, comparison_group, true);
+  Close(drawn_x, 337 + delta);
+  const auto animated_calls = original_calls;
+  Draw(comparison_draw, comparison_group, true);
+  CHECK_EQ(original_calls, animated_calls);
+
+  BeginCase("ordinary venue groups do not prepare owning HUD transforms");
+  Reset();
+  const auto owner_anchor = Make(0, shapes[4], 300);
+  const auto owner_dir = owner_anchor - 236;
+  ObjectView(owner_dir, owner_anchor + 0x1B4);
+  const Shape ordinary_group{"venue.grp", 0x82024C4C, -0x108, 0};
+  const auto venue = Make(1, ordinary_group, 0, owner_dir);
+  const auto venue_calls = original_calls;
+  Draw(venue, ordinary_group, true);
+  CHECK_EQ(original_calls, venue_calls);
+  CHECK_EQ(memory[owner_anchor + 189], 1);
 
   BeginCase("comparison draw group can own art without sharing its transform parent");
   Reset();

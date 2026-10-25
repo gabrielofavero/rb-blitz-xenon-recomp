@@ -96,6 +96,7 @@
 #include "store/store_probe.h"
 #include "store/store_search_service.h"
 #include "ui/help_overlay.h"
+#include "ui/keyboard_theme.h"
 #include "util/sha256.h"
 
 // The graphics backend the game renders with, defined in src/main.cpp beside the app it belongs
@@ -461,6 +462,13 @@ class RbBlitzApp : public rex::ReXApp {
   // atlas may still be added to, which is why the load lives here and not in the overlay.
   void OnConfigureFonts(ImFontAtlas* atlas) override {
     rb_blitz::ui::help::ConfigureCaptionFont(atlas);
+    rb_blitz::ui::ConfigureKeyboardFonts(atlas);
+  }
+
+  // The SDK's compact keyboard dialog is a debug-style prompt by default.
+  // Restyle that same modal for both library and RhythmVerse song searches.
+  void OnConfigureStyle(ImGuiStyle&, rex::ui::Style& style) override {
+    rb_blitz::ui::ConfigureKeyboardTheme(style);
   }
 
   // Diagnostics. The probe overlay is an ordinary SDK dialog: its constructor

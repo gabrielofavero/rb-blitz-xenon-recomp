@@ -955,6 +955,79 @@ checks (`out/_scratch/hud-worldxfm/comparison-after.log`). Documentation checks
 have the same 40 errors as HEAD and no added errors
 (`out/_scratch/hud-worldxfm/docs-comparison-meter.json`).
 
+#### 9.2.9 Gameplay regression from repeated pre-draw evaluation (2026-10-25)
+
+The owner reported severe Vulkan gameplay stuttering after the 9.2.8 change,
+with normal menu navigation. The preserved normal run (`rb_blitz_338.log` under
+`out/_swap/vulkan-gameplay-regression/`) prepared all 423 pipelines in 856 ms,
+with no subsequent guest pipeline creations logged during its song. This is
+not evidence of a cold-cache miss burst; that run had no frame trace enabled.
+
+The owner-driven comparison with `hud_reanchor=false` substantially improved
+the same song at the original **2560x1080** resolution: 1,127 GPU frame intervals
+averaged **29.95 ms**, worst **36.64 ms**, with no interval >=50 ms. Guest worst
+was 37.12 ms. Guest compilation/placeholder/wait work was zero; one helper took
+162 us. Evidence: `hud-off-r2.log` and `hud-off-r2-report.json` in that folder.
+The first diagnostic run is **not a matched comparison**: missing-game-root
+launch failures triggered safe graphics, so `hud-off.log` ran at 1280x720.
+The next boot retried the saved 2560x1080 request automatically; preferences
+were not edited or caches deleted.
+
+Static inspection explains the new work: `sub_821F13D0` is an unconditional
+world-matrix evaluator, including the class's virtual world-update call. It
+does not return the cached matrix merely because the dirty byte is clear.
+9.2.8's owner/parent traversal could therefore force the same anchor through
+that path repeatedly as its descendants drew. Avoiding repeated descendant
+invalidation alone did not prevent those evaluations.
+
+`PrepareAnchorDraw` now retains up to sixteen content snapshots per guest
+thread. Reuse requires the live anchor still passing the name/class/HUD guards,
+unchanged local/world/parent/constraint state, the same correction, clean dirty
+flags, and an unchanged parent world cache. No saved pointer is followed to
+identify a future object. A changed or reloaded live object is compared against
+its current bytes and prepared again; the address alone never establishes
+reuse. This supersedes 9.2.8's statement that no instance state is retained.
+The authored matrices and the guest's animation/dirty propagation stay intact.
+
+Release build and both HUD suites pass. New runtime cases assert no further
+guest evaluations over unchanged repeated draws and correct placement after
+dirty animation, clean-but-changed local state, and replaced world caches at
+reused addresses. The first rebuilt run with reanchoring enabled improved but
+remained slower than the owner's disabled comparison: 1,196 GPU intervals
+averaged 36.02 ms, worst 52.93 ms (one >=50 ms interval); guest worst 46.36 ms.
+No guest compile work occurred. The owner confirmed the remaining difference.
+Evidence: `hud-fixed.log` / `hud-fixed-report.json`; the full host suite passed
+74/74.
+
+The second correction removes broad ancestry searches as well. Draw hooks first
+check the live object's class/name. The six named anchors retain parent-first
+preparation. The authored comparison `draw.grp` checks its immediate named owner
+and direct transform parent; unrelated scene groups, including unrelated
+`draw.grp` objects, do not walk their enclosing scene directories. This replaces
+9.2.8's generalized owner traversal with the measured entry routes. New host
+coverage also checks that an unrelated group cannot force preparation merely
+because it has a named owning directory.
+
+**Owner verification, 2026-10-25:** the second correction is smooth with correct
+HUD placement. At the same 2560x1080 settings, the measured segment contains
+1,162 GPU frame intervals averaging **29.40 ms**, worst **36.22 ms**, none >=50 ms;
+guest worst is 43.21 ms. Guest translation/pipeline/placeholder/wait counts are
+zero; one helper creation took 121 us. This matches the disabled comparison's
+29.95 ms mean / 36.64 ms worst within run variation. Evidence:
+`hud-fixed-r2.log` / `hud-fixed-r2-report.json` in the same folder. The owner drove
+all gameplay checks; no cache deletion or permanent disabling of anchoring is
+part of the fix. This closes this reported performance regression on the tested
+Vulkan route, not every hardware/content case or the unrelated song-start stalls.
+
+Final host validation: release build, both HUD suites and full **74/74 CTest**
+pass (`build-final.txt`, `ctest-final.txt` in the evidence folder). The installer
+build/tests pass and the refreshed
+`installer/out/dist/RockBandBlitzSetup-0.1.0.exe` is **24,665,999 bytes**, SHA-256
+`2d565c71fa1d25fa4b1ecfa99d6243ad62d7d97390685a5ed23f32c9a676cb23`.
+Documentation remains at the existing 40-error baseline; the distributable audit
+passes **8/8, zero skips**, recorded in
+`out/distributable-audit-hud-regression/`.
+
 #### 9.3 The policy seam (done, tested)
 
 **Runtime update 2026-10-24:** arithmetic is unchanged; §9.2.7 replaces the runtime seams described in the historical paragraph below.

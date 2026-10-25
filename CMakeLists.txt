@@ -197,6 +197,7 @@ set(RBBLITZ_SOURCES
     # ImGui overlay the captions are drawn on.
     src/ui/help_topics.cpp
     src/ui/help_overlay.cpp
+    src/ui/keyboard_theme.cpp
     src/hooks/help_observer.cpp
     # P0 of the RhythmVerse store plan: the catalogue client and its URL/byte policy (SDK-free) plus
     # the WinHTTP transport seam the store's worker threads will use. Nothing in the game calls the

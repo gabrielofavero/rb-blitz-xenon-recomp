@@ -12,6 +12,16 @@ checkout.
 
 ## Patches
 
+`0036-keyboard-dialog-theme.patch` adds an opt-in theme for the existing XAM
+keyboard modal. The title enables it for My Songs and RhythmVerse searches:
+a centered, resolution-scaled plum panel, pink accents, a full-width input and
+larger Done/Cancel buttons. Regular and semibold system sans fonts are baked
+at 64 px before the atlas is uploaded, with a bundled-font fallback. Enter
+confirms, Escape cancels, and the guest's prompt and completion path are kept.
+Colors and fonts live in `src/ui/keyboard_theme.cpp`; other SDK dialogs retain
+their existing presentation. Upstream candidate: the opt-in styling seam and
+responsive keyboard layout are general; the palette is title-specific.
+
 Shader-cache P0 adds `0020-bounded-shader-compilation-trace.patch` and extends
 0019's swap observations with the shared, opt-in instrument. The runtime owns the
 clock/phases/counters so helper creation in `rexruntime.dll` and guest creation in

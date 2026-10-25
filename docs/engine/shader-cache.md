@@ -2269,6 +2269,13 @@ Final host record, 2026-10-25:
   SHA-256 `d446bb4cc5d3e3804c1f1794d3195a08d715cdf8cfa0cb508440ccf3c484a414`.
   This is the local working-tree artifact, not a published release.
 
+Later the same day, the owner isolated a gameplay regression to HUD reanchoring,
+not shader preparation. Restricting pre-draw work and reusing validated prepared
+transforms restored the tested Vulkan song to the anchoring-off timing range;
+the installer was subsequently refreshed. The setup hash above records the P9
+snapshot before that fix. See [graphics.md](../settings/graphics.md) §9.2.9 for
+the comparison, current artifact and validation record.
+
 | Gate | Evidence/status |
 | --- | --- |
 | Release build, patch applicability, payload audit | P9 host verification record below |

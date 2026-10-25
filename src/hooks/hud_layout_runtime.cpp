@@ -189,13 +189,52 @@ uint32_t TransformForHeader(const uint8_t* base, uint32_t header) {
 
 void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
                        const Anchor& anchor) {
-  // These bits affect logging only; no instance or placement state survives.
+  // A group and each of its descendants may submit the same owning anchor.
+  // WorldXfm is an evaluator, not a clean-cache getter: even with +189 clear it
+  // recomputes the matrix and calls the class's virtual world-update method.
+  // Do that once for unchanged live state, rather than at every child draw.
+  // Never trust an address alone across an unload/reload. Compare the current
+  // transform (including local/world matrices, parent, constraint and dirty byte)
+  // and its parent's world cache against the exact result we prepared.
+  struct Prepared {
+    const uint8_t* base = nullptr;
+    uint32_t transformable = 0;
+    double delta = 0;
+    std::array<uint8_t, 0xC0> state{};
+    std::array<uint8_t, 64> parent_world{};
+  };
+  static thread_local std::array<Prepared, 16> prepared{};
+  static thread_local size_t next_prepared = 0;
+  const double delta = ActiveDelta();
+  const uint32_t parent = U32(base, transformable + kParent);
+  const bool has_parent = HeapRange(parent, 0xC0);
+  Prepared* previous = nullptr;
+  for (auto& entry : prepared) {
+    if (entry.base != base || entry.transformable != transformable) continue;
+    previous = &entry;
+    if (!base[transformable + 189] && (!has_parent || !base[parent + 189]) &&
+        entry.delta == delta &&
+        std::memcmp(entry.state.data(), base + transformable, entry.state.size()) == 0 &&
+        (!has_parent || std::memcmp(entry.parent_world.data(), base + parent + 72,
+                                   entry.parent_world.size()) == 0)) return;
+    break;
+  }
+  // These bits affect logging only.
   static thread_local std::array<bool, kAnchors.size()> reported{};
   bool& seen = reported[size_t(&anchor - kAnchors.data())];
   const uint32_t before = seen ? 0 : U32(base, transformable + kWorldX);
   rex::CallFrame call(ctx);
   call.ctx.r3.u32 = transformable;
   sub_821F13D0(call.ctx, base);
+  if (!previous) previous = &prepared[next_prepared++ % prepared.size()];
+  previous->base = base;
+  previous->transformable = transformable;
+  previous->delta = delta;
+  std::memcpy(previous->state.data(), base + transformable, previous->state.size());
+  const uint32_t resolved_parent = U32(base, transformable + kParent);
+  if (HeapRange(resolved_parent, 0xC0))
+    std::memcpy(previous->parent_world.data(), base + resolved_parent + 72,
+                previous->parent_world.size());
   if (!seen) {
     seen = true;
     const uint32_t after = U32(base, transformable + kWorldX);
@@ -210,7 +249,8 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
 // Clean matrices bypass WorldXfm in the guest's draw paths. Prepare every HUD
 // anchor in the drawn group's transform ancestry, from parent to child. This
 // also covers separately submitted comparison art whose anchor dir never draws.
-// Only the live parent chain is visited: no object search or persistent cache.
+// Only eligible anchors' live parent chains are visited; repeated preparations
+// reuse the content-validated snapshots above.
 void PrepareTransformAncestry(PPCContext& ctx, uint8_t* base, uint32_t current) {
   std::array<uint32_t, kMaxParents> chain{};
   size_t count = 0;
@@ -237,24 +277,35 @@ void PrepareHudDraw(PPCContext& ctx, uint8_t* base) {
   if (ActiveDelta() == 0.0) return;
   const uint32_t header = ObjectBase(base, ctx.r3.u32);
   if (!header) return;
-  std::array<uint32_t, kMaxParents> owners{};
-  size_t count = 0;
-  uint32_t dir = U32(base, header + 36);
-  while (HeapRange(dir, 8) && count < owners.size()) {
-    const uint32_t object = ObjectBase(base, dir);
-    if (!object) break;
-    owners[count++] = TransformForHeader(base, object);
-    const uint32_t parent = U32(base, object + 36);
-    if (parent == dir) break;
-    dir = parent;
-  }
-  while (count != 0) {
-    const uint32_t transformable = owners[--count];
-    if (transformable && AnchorFor(base, transformable)) {
-      PrepareTransformAncestry(ctx, base, transformable);
+  // These hooks also see the entire 3D venue. Only the named HUD entry points
+  // and Ultimate's explicitly submitted comparison draw.grp need preparation.
+  // In particular, don't walk every model group's ObjectDir ancestry looking
+  // for a HUD that isn't there.
+  const uint32_t vtable = U32(base, header);
+  const uint32_t name = U32(base, header + 32);
+  bool named_anchor = false;
+  for (const auto& anchor : kAnchors) {
+    if (vtable == anchor.vtable && NameIs(base, name, anchor.name)) {
+      named_anchor = true;
+      break;
     }
   }
-  PrepareTransformAncestry(ctx, base, TransformForHeader(base, header));
+  if (!named_anchor &&
+      (vtable != 0x82024C4C || !NameIs(base, name, "draw.grp"))) return;
+  const uint32_t transformable = TransformForHeader(base, header);
+  if (named_anchor) {
+    PrepareTransformAncestry(ctx, base, transformable);
+    return;
+  }
+  // The authored comparison route supplies either its named owning directory
+  // or a direct transform parent. Unrelated draw.grp objects must also take a
+  // constant-time rejection path, without a scene-wide ancestry walk.
+  const uint32_t dir = U32(base, header + 36);
+  const uint32_t owner = HeapRange(dir, 8) ? TransformForHeader(base, ObjectBase(base, dir)) : 0;
+  if (owner && AnchorFor(base, owner)) PrepareTransformAncestry(ctx, base, owner);
+  const uint32_t parent = transformable ? U32(base, transformable + kParent) : 0;
+  if (HeapRange(parent, 0xC0) && AnchorFor(base, parent))
+    PrepareTransformAncestry(ctx, base, parent);
 }
 }  // namespace
 

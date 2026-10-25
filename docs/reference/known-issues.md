@@ -37,6 +37,21 @@ its named parent's draw path. Pre-draw preparation now follows the submitted
 art's directory ownership and transform ancestors; host regressions cover
 this route, with the next gameplay comparison pending (§9.2.8). The
 2026-10-17 measurements below describe the earlier implementation.
+**2026-10-25 performance regression:** the owner isolated severe Vulkan song
+stutter to reanchoring: disabling it at the same 2560x1080 settings restored
+healthy frame timing (29.95 ms mean, 36.64 ms worst GPU interval, no >=50 ms
+interval). Pre-draw ancestry handling repeatedly forced the guest's world
+evaluator/virtual update even for clean anchors. Bounded content-validated
+reuse now skips unchanged repeated preparations; animation/reload regressions
+and both HUD suites pass. A second correction restricts preparation to the six
+named anchors and the measured comparison draw-group route, avoiding broad scene
+ancestry walks. The owner confirmed smooth gameplay and correct HUD placement
+on the rebuilt second correction: 29.40 ms mean / 36.22 ms worst GPU interval,
+no >=50 ms interval, matching the anchoring-off comparison. The reported Vulkan
+performance regression is fixed for that route; broader placement/visibility
+checks above retain their own scope.
+See [graphics.md](../settings/graphics.md) §9.2.9 and
+`out/_swap/vulkan-gameplay-regression/`.
 
 **Ultimate settings restart validation pending (2026-10-24):** the host adapter's
 rejection of native DTA pairs is fixed; Gold Star Progress now saves and reloads in
