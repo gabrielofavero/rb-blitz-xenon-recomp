@@ -361,3 +361,17 @@ design choice. Verified in-game on the first boot carrying it: in-song helper tr
 went from **1,473 calls / 209 ms to 1 call / 108 us** (`p8-vulkan-ultimate-fbo-cold-r2`).
 See [the P8 record](../docs/engine/shader-cache.md) (part 8).
 
+`0034-nonblocking-async-pipeline-submission.patch` removes runtime pipeline queue
+draining and worker waits from submission in async mode on both backends. D3D12
+already skips draws with a null PSO. Vulkan keeps its pending-draw fallback,
+defaults whole-frame suppression off, and publishes completed handle/layout pairs
+on the command processor at submission boundaries. Old handles remain alive until
+the relevant GPU submission completes; shutdown joins workers and drains the last
+completions. Primary-buffer submission no longer depends on workers being idle in
+async mode. Explicit synchronous mode and the loading-preparation barriers retain
+their waits. Upstream candidate: the submission wait defeats the existing async
+fallback; changing the default incomplete-frame presentation policy is a deliberate
+product choice. Host tests cover the actual completion queue with delayed and
+concurrent workers. Gameplay verification and synchronous first-use costs remain
+open; see [the P8 record](../docs/engine/shader-cache.md) (part 8).
+

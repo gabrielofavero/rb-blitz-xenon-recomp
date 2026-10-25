@@ -1,0 +1,238 @@
+diff --git a/include/rex/graphics/pipeline_completion_queue.h b/include/rex/graphics/pipeline_completion_queue.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/graphics/pipeline_completion_queue.h
+@@ -0,0 +1,29 @@
++// Worker-to-command-processor handoff. Driver calls run before Push, outside
++// the mutex. Taking a batch never waits for unfinished compilation.
++#pragma once
++
++#include <mutex>
++#include <utility>
++#include <vector>
++
++namespace rex::graphics {
++template <typename T>
++class PipelineCompletionQueue {
++ public:
++  void Push(T completion) {
++    std::lock_guard lock(mutex_);
++    completions_.push_back(std::move(completion));
++  }
++
++  std::vector<T> Take() {
++    std::vector<T> completions;
++    std::lock_guard lock(mutex_);
++    completions.swap(completions_);
++    return completions;
++  }
++
++ private:
++  std::mutex mutex_;
++  std::vector<T> completions_;
++};
++}  // namespace rex::graphics
+diff --git a/include/rex/graphics/vulkan/pipeline_cache.h b/include/rex/graphics/vulkan/pipeline_cache.h
+--- a/include/rex/graphics/vulkan/pipeline_cache.h
++++ b/include/rex/graphics/vulkan/pipeline_cache.h
+@@ -31,6 +31,7 @@
+ #include <rex/graphics/graphics_preparation.h>
+ #include <rex/graphics/native_pipeline_cache.h>
+ #include <rex/graphics/pipeline_preload.h>
++#include <rex/graphics/pipeline_completion_queue.h>
+ #include <rex/hash.h>
+ #include <rex/platform.h>
+ #include <rex/thread.h>
+@@ -405,9 +406,11 @@
+   // layout and render pass object (unless dynamic rendering is used) must be
+   // available.
+   bool EnsurePipelineCreated(const PipelineCreationArguments& creation_arguments,
+-                             VkShaderModule fragment_shader_override = VK_NULL_HANDLE);
++                             VkShaderModule fragment_shader_override = VK_NULL_HANDLE,
++                             bool defer_publication = false);
+   void CreationThread(size_t thread_index);
+   void CreateQueuedPipelinesOnProcessorThread();
++  void PublishCompletedPipelines();
+   void ProcessDeferredPipelineDestructions(bool force_all);
+ 
+   VulkanCommandProcessor& command_processor_;
+@@ -507,6 +510,13 @@
+   bool creation_completion_set_event_ = false;
+   size_t creation_threads_shutdown_from_ = SIZE_MAX;
+   std::vector<std::unique_ptr<rex::thread::Thread>> creation_threads_;
++
++  struct CompletedPipeline {
++    Pipeline* target;
++    VkPipeline pipeline;
++    const PipelineLayoutProvider* layout;
++  };
++  PipelineCompletionQueue<CompletedPipeline> completed_pipelines_;
+ 
+   // Explicit terminal states and the completion barrier of the storage preload.
+   // The tracker itself lives in the command processor's preparation controller,
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -3666,7 +3666,8 @@
+ }
+ 
+ bool D3D12CommandProcessor::CanEndSubmissionImmediately() const {
+-  return !submission_open_ || !pipeline_cache_->IsCreatingPipelines();
++  return !submission_open_ || REXCVAR_GET(async_shader_compilation) ||
++         !pipeline_cache_->IsCreatingPipelines();
+ }
+ 
+ void D3D12CommandProcessor::ClearCommandAllocatorCache() {
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -1215,6 +1215,12 @@
+     pipeline_storage_file_flush_needed_ = false;
+   }
+   if (!creation_threads_.empty()) {
++    if (REXCVAR_GET(async_shader_compilation)) {
++      // Deferred execution already skips draws whose PSO is still null. Keep
++      // compilation on workers: a driver call cannot be bounded once entered.
++      creation_request_cond_.notify_all();
++      return;
++    }
+     {
+       rex::graphics::compile_trace::Scope trace_drain(
+           rex::graphics::compile_trace::Event::kCompileDrain,
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -57,7 +57,7 @@
+                     "Read data written by memory export in shaders on the CPU")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
+-REXCVAR_DEFINE_BOOL(vulkan_async_skip_incomplete_frames, true, "GPU/Vulkan",
++REXCVAR_DEFINE_BOOL(vulkan_async_skip_incomplete_frames, false, "GPU/Vulkan",
+                     "When async shader compilation is enabled, skip presenting frames that "
+                     "used placeholder pipelines to avoid visible flashing")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+@@ -3936,8 +3936,8 @@
+     return draw_fail("configure_pipeline");
+   }
+   bool pipeline_is_placeholder = false;
+-  // Reload the current handle state to observe async hot-swap completions that
+-  // may happen between pipeline configuration and binding.
++  // Runtime completions are published at submission boundaries, so the handle
++  // and its layout stay paired throughout command recording.
+   pipeline_cache_->GetPipelineAndLayoutByHandle(pipeline_handle, pipeline, pipeline_layout_provider,
+                                                 &pipeline_is_placeholder);
+   if (REXCVAR_GET(async_shader_compilation) && pipeline_is_placeholder) {
+@@ -5169,7 +5169,9 @@
+ }
+ 
+ bool VulkanCommandProcessor::CanEndSubmissionImmediately() const {
+-  return !submission_open_ || (!scratch_buffer_used_ && !pipeline_cache_->IsCreatingPipelines());
++  return !submission_open_ ||
++         (!scratch_buffer_used_ && (REXCVAR_GET(async_shader_compilation) ||
++                                   !pipeline_cache_->IsCreatingPipelines()));
+ }
+ 
+ bool VulkanCommandProcessor::BeginSubmission(bool is_guest_command) {
+@@ -5213,9 +5215,8 @@
+   if (!submission_open_) {
+     submission_open_ = true;
+ 
+-    // Start a new deferred command buffer - will submit it to the real one in
+-    // the end of the submission (when async pipeline object creation requests
+-    // are fulfilled).
++    // Start a new deferred command buffer. Async draws whose pipelines are
++    // still pending are skipped; submission does not await their creation.
+     deferred_command_buffer_.Reset();
+     texture_descriptor_cache_.Clear();
+ 
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -1320,8 +1320,10 @@
+       std::lock_guard<std::mutex> lock(creation_request_lock_);
+       startup_loading = startup_loading_;
+     }
+-    if (startup_loading) {
+-      creation_request_cond_.notify_one();
++    if (startup_loading || REXCVAR_GET(async_shader_compilation)) {
++      // Unready draws are skipped. Never enter a driver creation or wait for
++      // a worker on the submission thread in async mode.
++      creation_request_cond_.notify_all();
+     } else {
+       // Help worker threads on the processor thread to reduce warm-up latency.
+       {
+@@ -1353,6 +1355,9 @@
+     }
+   }
+ 
++  // Publish handles and layouts together on their only reader's thread. Old
++  // handles remain alive until the last possibly referencing submission ends.
++  PublishCompletedPipelines();
+   ProcessDeferredPipelineDestructions(false);
+ }
+ 
+@@ -1387,6 +1392,9 @@
+   const ui::vulkan::VulkanDevice::Functions& dfn = vulkan_device->functions();
+   const VkDevice device = vulkan_device->device();
+ 
++  // Workers have joined. Publish their last completions so shutdown owns and
++  // destroys every created handle, including ones never used by a draw.
++  PublishCompletedPipelines();
+   ProcessDeferredPipelineDestructions(true);
+ 
+   // Destroy all pipelines.
+@@ -3576,7 +3584,8 @@
+ }
+ 
+ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments& creation_arguments,
+-                                                VkShaderModule fragment_shader_override) {
++                                                VkShaderModule fragment_shader_override,
++                                                bool defer_publication) {
+   VkPipeline existing_pipeline =
+       creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
+   bool is_placeholder =
+@@ -4075,6 +4084,13 @@
+         uint32_t(use_dynamic_rendering));
+     return false;
+   }
++  if (defer_publication) {
++    // Runtime workers must not read submission counters or replace a handle
++    // while the processor is recording commands with its matching layout.
++    completed_pipelines_.Push(
++        {&creation_arguments.pipeline->second, pipeline, creation_arguments.pipeline_layout});
++    return true;
++  }
+   bool was_placeholder =
+       creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+   VkPipeline old_pipeline =
+@@ -4123,7 +4139,7 @@
+     if (creation_arguments.preload_identity != kNoPreloadIdentity) {
+       command_processor_.preparation().BeginEntry(creation_arguments.preload_identity);
+     }
+-    bool created = EnsurePipelineCreated(creation_arguments);
++    bool created = EnsurePipelineCreated(creation_arguments, VK_NULL_HANDLE, true);
+     if (!created) {
+       // Remember the failure for the preload accounting: a retained placeholder
+       // keeps the recovery path working, but it is not a real pipeline.
+@@ -4198,6 +4214,21 @@
+   }
+ }
+ 
++void VulkanPipelineCache::PublishCompletedPipelines() {
++  for (const auto& completion : completed_pipelines_.Take()) {
++    VkPipeline old_pipeline =
++        completion.target->pipeline.exchange(completion.pipeline, std::memory_order_acq_rel);
++    completion.target->pipeline_layout.store(completion.layout, std::memory_order_release);
++    completion.target->is_placeholder.store(false, std::memory_order_release);
++    completion.target->real_pipeline_failed.store(false, std::memory_order_release);
++    if (old_pipeline != VK_NULL_HANDLE) {
++      std::lock_guard<std::mutex> lock(deferred_destroy_lock_);
++      deferred_destroy_pipelines_.emplace_back(command_processor_.GetCurrentSubmission(),
++                                             old_pipeline);
++    }
++  }
++}
++
+ void VulkanPipelineCache::ProcessDeferredPipelineDestructions(bool force_all) {
+   std::vector<VkPipeline> pipelines_to_destroy;
+   uint64_t completed_submission = command_processor_.GetCompletedSubmission();

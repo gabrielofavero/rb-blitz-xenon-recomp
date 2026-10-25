@@ -87,18 +87,18 @@ that name an action.
 
 ## 4. Deferred, with no design yet
 
-- [ ] **An unprepared pipeline stalls the command processor instead of skipping a frame**
-      (measured 2026-10-25, `-vulkan-ultimate-fbo-cold-r3`): the trace shows
-      `placeholder` (6 ms) followed by `compile_wait` **230 ms** and a 271 ms frame - the
-      runtime already draws a placeholder while the pipeline is built, then blocks until
-      it exists. Catalogue coverage cannot remove this for good: the same song produced
-      twelve new recipes in one run and two more `multimesh` **shader pairings** in the
-      next, because the venue's props pair materials and vertex formats by what is on
-      screen (`multimesh` is 141 of the 209 prepared shader identities). Bounding the
-      wait - keep drawing the placeholder until the pipeline is ready, budget the
-      creation into background frames - turns a 237 ms hitch into a missing effect for a
-      frame or two and is the answer that survives new content. Evidence:
-      [shader-cache.md](../engine/shader-cache.md) part 8.
+- [x] **Runtime async submission drained/waited for unprepared pipelines**
+      (measured 2026-10-25, `-vulkan-ultimate-fbo-cold-r3`: 6 ms placeholder,
+      230 ms `compile_wait`, 271 ms frame). Implemented in SDK patch 0034:
+      both backends keep runtime creation on workers in async mode, Vulkan
+      publishes replacements at submission boundaries, and incomplete frames now
+      present by default rather than holding the entire picture. Loading barriers
+      and explicit synchronous mode remain blocking. **Gameplay verification is
+      pending**; translation, synchronous placeholder creation and other first-use
+      costs remain outside this bound. Missing effects may last several frames,
+      depending on compilation and guest redraws. Development builds now journal
+      uncovered portable recipes for organic catalogue growth. Evidence and
+      limits: [shader-cache.md](../engine/shader-cache.md) part 8.
 - [x] **The Vulkan presenter rebuilt its guest-output paint pipeline on every present**
       (measured 2026-10-25, P8's `-vulkan-ultimate-fbo-cold`;
       **fixed the same day** in `patches/rexglue-sdk/0033-vulkan-presenter-reuse-paint-pipeline.patch`):

@@ -2033,21 +2033,104 @@ and vertex formats according to what is actually on screen in a given run.
 
 Two consequences, stated plainly:
 
-- **Catalogue coverage is asymptotic for this title, not finite.** Adding a song's recipes
-  removes *that run's* compiles — 12 then 2 then, probably, 0 — but a dynamic venue can
-  always produce a pairing the catalogue has not seen. Coverage should be grown per
-  shipped song, and the campaign must not promise "no in-song compile, ever".
+- **The finite catalogue has not reached coverage saturation.** Adding a run's recipes
+  removes those misses, but twelve then two does not establish that the next run adds
+  zero. A dynamic venue can expose further pairings and state combinations. The campaign
+  must not promise "no in-song compile, ever".
 - **The 237 ms is a blocking wait, not just a compile.** The trace shows
-  `placeholder` (6 ms) then `compile_wait` (230 ms): the runtime already draws a
-  placeholder while the pipeline is built elsewhere, and then the command processor waits
-  for it. Bounding that wait (draw the placeholder again until the pipeline is ready)
-  turns a 237 ms hitch into a missing effect for a frame or two, and is the only answer
-  that survives new content. Filed in `reference/backlog.md` §4.
+  `placeholder` (6 ms) then `compile_wait` (230 ms): a placeholder is created and the
+  unavailable draw is skipped, but submission then waits for the real pipeline. Keeping
+  that work on a worker avoids this explicit wait. At 30 FPS, 230 ms spans roughly seven
+  frames; a missing effect is not limited to one or two frames. Vulkan also held whole
+  incomplete frames by default. The implementation below addresses both policies.
 
 Both recipes were added the same way as before — the run's store preserved as
 `out/_swap/p8/manifest-sources/p8-vulkan-run2-fbo.vk.xpso`, catalogue regenerated from the
 whole set: `vulkan/fbo` **423**, every other path unchanged, 209 sources unchanged, and
 all fourteen keys from the two runs are covered.
+
+#### Nonblocking runtime submission and organic development coverage — 2026-10-25
+
+SDK patch `0034-nonblocking-async-pipeline-submission.patch` removes runtime queue
+draining and worker completion waits from both backends' `EndSubmission` when
+`async_shader_compilation=true`. The compile-wait budget for that path is **zero**;
+a timed wait would still permit the processor to enter an uninterruptible driver
+creation while draining the queue. Ordinary primary-buffer submissions also no
+longer depend on creation workers becoming idle. D3D12's existing deferred execution
+skips draws whose PSO is null. Vulkan keeps skipping pending draws, but now defaults
+`vulkan_async_skip_incomplete_frames` to **false**, so other draws can reach the
+screen. An explicit true retains the old whole-frame presentation policy.
+
+Vulkan runtime workers enqueue completed handle/layout pairs. The command processor
+publishes each pair at a submission boundary and retires the old handle only after
+that submission's fence completes. Workers no longer sample mutable submission
+counters to retire placeholders. Shutdown joins workers and drains their last
+completions before destroying handles. Explicit synchronous mode and the separate
+loading-preparation completion barrier keep their waits and failure accounting.
+
+This bounds the explicit runtime pipeline wait, **not every frame cost**. Vulkan
+shader translation, synchronous placeholder creation, depth-only/synchronous
+fallbacks, driver-internal contention, helper creation, uploads and unrelated
+song-start stalls remain possible costs. Missing effects can last for the full
+compile duration, or until the guest redraws their target. Gameplay verification
+for patch 0034 is pending; replaying a fully covered catalogue does not test the
+fallback. Verification needs a genuinely missing recipe and should check zero
+runtime `compile_wait`/processor `compile_drain`, eventual real creation, frame
+continuity, audio/input timing and visual recovery.
+
+The owner also requested passive discovery during ordinary development play. The
+executable starts a background-priority coverage worker only when its directory equals
+the CMake build directory compiled into it. A copied installer executable does not
+start collection. No special P8 launch or `shader_compile_trace` setting is needed.
+The worker checks the four portable recipe stores under the **effective cache root**
+every five seconds, rereads changed stores only, validates headers, storage versions
+and XXH3 recipe hashes, and appends uncovered recipes to:
+
+```text
+out/shader-coverage/discoveries.jsonl
+```
+
+The journal grows with unique discoveries across launches. Each line includes the
+path, storage generation, description hash/raw portable recipe, referenced shader
+identities, missing source locators, catalogue identity, observation time and source
+store. It contains no shader instruction bytes or GPU-native blobs. Existing local
+recipes absent from the current manifest are collected on the first scan too, so
+observation time is **not** evidence of an in-song compile or a particular song.
+Known recipes and repeated draws do not grow the file. Partial records are retried;
+a truncated journal line is preserved and separated from subsequent valid lines.
+The first uncovered recipe creates the file. A final scan runs on orderly teardown;
+any later buffered cache write is recovered on the next development launch.
+Collection requires `store_shaders=true` (the default). Structural/hash validation
+of a discovered recipe does not prove successful driver creation or correct visuals.
+Windows cache reads share delete access, so they cannot block preparation's atomic
+store replacement.
+
+Report discoveries, then produce a new manifest for review:
+
+```powershell
+python scripts/shader_coverage.py
+python scripts/shader_coverage.py --candidate-out out/shader-coverage/candidate.json
+```
+
+The tool rehashes journal records with the SDK helper, preserves all current recipes,
+deduplicates additions and refuses to overwrite an output. New shader identities
+without source locators block candidate publication: resolve those with the existing
+local resolver first. Promoting the candidate to `config/graphics_preparation.json`
+and rebuilding is a separate deliberate step. Collection never rewrites the shipped
+catalogue, local caches or player data. The journal is ignored development evidence,
+not an installer payload input.
+
+Validation: `cmake --build --preset win-amd64-release` succeeds with the current
+executable and GPU DLL staged together. Patch replay verifies all 33 patches with
+zero failures or unexpected SDK edits. Full `ctest` passes **72/72** with `TEMP`
+and `TMP` set to `out/_swap/bounded-pipelines/host-test-temp`: the initial system-temp
+run was 71/72 because the unchanged `path_policy` test rejected a nonexistent nested
+temp path; it passes with the workspace temp directory. New cases cover a delayed
+creation worker, concurrent completion delivery, all four recipe paths, restart
+deduplication, partial/corrupt/stale records, incomplete journal recovery, installer
+directory exclusion, missing source blockers, and a C++ collector-to-Python promotion
+round trip. Documentation audit remains at its existing **40-error** baseline.
+No game/UI navigation was performed; gameplay verification remains owner-driven.
 
 #### Still unproven after the campaign
 

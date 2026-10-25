@@ -1687,12 +1687,17 @@ extension worked - but it created **two more**, `7a090f77ad173f1a` and
 already had, in a combination it had not seen, one of them with a state block identical to
 three existing recipes. The owner's read was right - the song's background is a large
 moving 3D scene, `multimesh` is 141 of the 209 prepared shader identities, and its props
-pair materials with vertex formats according to what is on screen. So **catalogue coverage
-is asymptotic for this title**: it removes a run's compiles (12, then 2, then likely 0 per
-song) but cannot promise zero forever, and P9 must not claim otherwise. The 237 ms the
+pair materials with vertex formats according to what is on screen. So **the finite
+catalogue has not reached saturation**: twelve then two misses do not establish that
+the next run adds zero, and P9 must not promise zero forever. The 237 ms the
 owner felt was a `compile_wait` (230 ms) after a 6 ms placeholder - the runtime builds the
-pipeline in the background and then blocks. Bounding that wait is the durable fix and is
-filed in `reference/backlog.md` §4; the two recipes were merged mechanically
+pipeline in the background and then blocks. SDK patch 0034 now removes that explicit
+submission wait in async mode on both backends, publishes Vulkan completions safely
+at submission boundaries and presents incomplete frames by default. Gameplay evidence
+for that fallback is pending; missing effects may span the full compile duration,
+and synchronous translation/placeholder costs remain. Development builds now journal
+uncovered recipes for organic growth (see `engine/shader-cache.md` part 8).
+The two recipes were merged mechanically
 (`vulkan/fbo` **423**, every other path and the 209 sources unchanged).
 
 ### P9 — Package, document and close the release gates

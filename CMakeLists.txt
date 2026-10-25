@@ -99,6 +99,8 @@ set(RBBLITZ_SOURCES
     src/graphics/preparation_assets.cpp
     src/graphics/preparation_state.cpp
     src/graphics/preparation_loading.cpp
+    src/graphics/shader_coverage.cpp
+    src/graphics/development_coverage.cpp
     src/enhancements.cpp
     src/hooks/content_progress.cpp
     src/hooks/crypto.cpp
@@ -305,6 +307,8 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 configure_file(src/graphics/preparation_catalogue.h.in
     "${CMAKE_CURRENT_BINARY_DIR}/generated/preparation_catalogue.h" @ONLY)
 target_include_directories(rb_blitz PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+set_source_files_properties(src/graphics/development_coverage.cpp PROPERTIES COMPILE_DEFINITIONS
+    "RBBLITZ_DEVELOPMENT_BUILD_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\";RBBLITZ_DEVELOPMENT_COVERAGE_LOG=\"${CMAKE_CURRENT_SOURCE_DIR}/out/shader-coverage/discoveries.jsonl\"")
 target_link_libraries(rb_blitz PRIVATE xxhash)
 if(WIN32)
     target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32)
@@ -512,6 +516,10 @@ if(BUILD_TESTING)
     # logs only, so the matrix's rules are pinned without a run or a GPU.
     add_test(NAME shader_cache_p8_tools
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_cache_p8_tools_tests.py")
+    add_test(NAME shader_coverage_tools
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_coverage_tools_tests.py"
+                --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>
+                --collector $<TARGET_FILE:rb_blitz_shader_coverage_tests>)
     add_executable(rb_blitz_loading_record_inspect tools/loading_record_inspect.cpp
         src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_loading_record_inspect PRIVATE src)
@@ -545,6 +553,17 @@ if(BUILD_TESTING)
         target_link_libraries(rb_blitz_pipeline_preload_tests PRIVATE ws2_32)
     endif()
     add_test(NAME pipeline_preload COMMAND rb_blitz_pipeline_preload_tests)
+
+    add_executable(rb_blitz_pipeline_completion_queue_tests tests/pipeline_completion_queue_tests.cpp)
+    target_include_directories(rb_blitz_pipeline_completion_queue_tests PRIVATE "${REXSDK_DIR}/include")
+    add_test(NAME pipeline_completion_queue COMMAND rb_blitz_pipeline_completion_queue_tests)
+
+    add_executable(rb_blitz_shader_coverage_tests tests/shader_coverage_tests.cpp
+        src/graphics/shader_coverage.cpp)
+    target_include_directories(rb_blitz_shader_coverage_tests PRIVATE src
+        "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+    target_link_libraries(rb_blitz_shader_coverage_tests PRIVATE xxhash)
+    add_test(NAME shader_coverage COMMAND rb_blitz_shader_coverage_tests)
 
     # P4: the cancellable graphics-preparation lifecycle both backends drive
     # from the command processor thread (rexglue-sdk/include/rex/graphics/

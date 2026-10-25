@@ -57,6 +57,7 @@
 #include <rex/graphics/compile_trace.h>
 #include "diag/shader_trace.h"
 #include "graphics/preparation_loading.h"
+#include "graphics/shader_coverage.h"
 #include <rex/filesystem.h>
 #include <rex/logging/macros.h>
 #include <rex/platform/dynlib.h>
@@ -417,6 +418,8 @@ class RbBlitzApp : public rex::ReXApp {
     // player cannot change has to say so rather than save a value that never takes effect.
     rex::cvar::FinalizeInit();
     rb_blitz::graphics::ConfigureLoading(runtime());
+    coverage_recorder_ = rb_blitz::graphics::StartDevelopmentCoverage(
+        rex::filesystem::GetExecutablePath(),runtime()->cache_root());
     rb_blitz::diag::shader_trace::LogConfiguration();
   }
 
@@ -573,6 +576,7 @@ class RbBlitzApp : public rex::ReXApp {
   std::unique_ptr<rex::ui::ImGuiDialog> probe_overlay_;
   std::unique_ptr<rex::ui::ImGuiDialog> mouse_cursor_;
   bool graphics_loading_payload_ready_ = false;
+  std::unique_ptr<rb_blitz::graphics::CoverageRecorder> coverage_recorder_;
   // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings
   // bridge's caption sink, because the sink object lives beside the dialog.
   std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;
