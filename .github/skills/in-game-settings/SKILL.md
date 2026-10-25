@@ -135,6 +135,9 @@ Over-budget labels to fix or verify (they may be drawn without a value): `Disabl
   enforced by `TestHelpTextsCoverEveryRow` (`tests/settings_screen_tests.cpp:2184`). It is shown while the
   row is highlighted (the overlay wraps at 72% of the display), and it is the right home for anything that
   does not fit the row line. A new factory call cannot omit it — the caption is a required argument.
+  Adding a row is inside the standing overlay exception of `.github/copilot-instructions.md` ("UI:
+  guest-rendered"): its label/value and caption are drawn the way the rows beside them already are. Any
+  **new** host-side overlay beyond that surface still needs the owner's authorization.
 - **Labels are unique, and every row symbol has one.** A row symbol with no locale entry draws as the
   bare symbol; `TestLabels` pins both directions.
 - A row's `setting` is the stable `<category>.<id>` id (`docs/settings/contracts.md` §5.1), never a label

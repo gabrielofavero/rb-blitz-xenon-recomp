@@ -42,18 +42,25 @@ python .github/skills/documentation/scripts/check_docs.py
 
 `ctest` runs 37 tests; `game_restart` (#33) can flake in the parallel run and passes when re-run alone.
 
-## UI: guest-rendered, never host-drawn (owner directive, 2026-10-22)
+## UI: guest-rendered, never host-drawn (owner directive, 2026-10-22; overlay authorization 2026-10-24)
 
-- **Never draw a host-side panel, box, button or text over the game's own UI.** It is a cheap
-  shortcut that reads as unprofessional. A feature the player sees belongs in the guest: authored
-  DTA (the settings surface, screens, lists), the title's own widgets, or a texture/record we serve.
-- **The only tolerated exception is a text-only label replacement** (the help caption strip, a
-  label's value drawn where the guest itself drew one), and even that is on notice — ask before
-  adding a new one. `src/ui/help_overlay.cpp`'s `DrawBindingRows` is the case that motivated this
-  rule; its replacement is `docs/plans/todo/2026-10-22-in-game-binding-rows-plan.md`.
+- **Drawing directly on the guest's own UI is always authorized.** Authored DTA (the settings
+  surface, screens, lists), the title's own widgets and labels, or a texture/record we serve — that
+  is the default route, it reads as part of the game, and it needs no permission.
+- **A new overlay needs the owner's explicit authorization first.** "Overlay" means any host-drawn
+  element over the guest's screen: a panel, box, button, or a label/text drawn where the guest did
+  not draw one. Do not ship one because the guest route is inconvenient — ask, say what the guest
+  route would cost, and wait for the answer.
+- **Exception — a feature that already uses an overlay keeps it.** When the work extends a surface
+  that already draws overlays, the matching overlay for the new item is expected and pre-authorized
+  by that feature: e.g. a new Help & Options row gets its label/value and help caption drawn the
+  same way the rows beside it are. This exception ends when the feature's own guest replacement
+  lands.
 - A missing engine capability is not a reason to draw over the game: extend the guest channel
   (DTA records, list data, bridged text) instead. Say "unproven" and plan a spike rather than
   shipping an overlay.
+- `src/ui/help_overlay.cpp`'s `DrawBindingRows` is the case that motivated this rule; its
+  replacement is `docs/plans/todo/2026-10-22-in-game-binding-rows-plan.md`.
 
 ## Rules that bite
 

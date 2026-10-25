@@ -15,3 +15,11 @@
   current build already contains the most recent change. An unbuilt change means
   the user tests stale binaries. Build command:
   `cmake --build --preset win-amd64-release`.
+- Overlays (owner directive, 2026-10-24): drawing directly on the guest's own UI
+  (authored DTA, the title's own widgets/labels, records we serve) is always
+  authorized. A new host-side overlay over the guest's screen — a panel, box,
+  button, or a label/text the guest did not draw — needs the owner's explicit
+  authorization first; ask and wait. Exception: a feature that already uses
+  overlays keeps them, so the overlay a new item expects there (e.g. a new
+  Help & Options setting and its label/caption) needs no new ask. Never use an
+  overlay to dodge an inconvenient guest route.
