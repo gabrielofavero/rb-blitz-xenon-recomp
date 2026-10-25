@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "input/effective_input.h"
 #include "profile/gameplay_remap.h"
 #include "profile/input_rows.h"
 #include "profile/remap.h"
@@ -276,17 +277,12 @@ Node EnterExit() {
 // is how a base install shows five root rows and an Ultimate install six (plan §3).
 
 enum class Kind {
-  kBool,         // boolean: an `_on`/`_off` symbol pair, Confirm flips it
-  kSelect,       // horizontal select: one symbol per choice, Confirm advances, Left/Right pick
-  kSubmenu,      // submenu: one symbol, Confirm enters `screen`
-  kBoolSubmenu,  // boolean with a submenu: `_on`/`_off` symbols, Confirm enters `screen`
-  // P7's read-only state rows. Each draws a `_on`/`_off` pair selected by a query, like a
-  // boolean, but a press never writes the setting:
-  //
-  //   kStateSubmenu  the pair is "Custom"/"Default" and Confirm enters `screen` (a binding row);
-  //   kStateAction   the `_on` spelling writes `path` and commits (a per-row Reset); an `_off`
-  //                  press is inert, which is the disabled row the plan asks for.
-  kStateSubmenu,
+  kBool,            // boolean: an `_on`/`_off` symbol pair, Confirm flips it
+  kSelect,          // horizontal select: one symbol per choice, Confirm advances, Left/Right pick
+  kSubmenu,         // submenu: one symbol, Confirm enters `screen`
+  kBoolSubmenu,     // boolean with a submenu: `_on`/`_off` symbols, Confirm enters `screen`
+  kBindingSubmenu,  // live input text, Confirm opens this binding's Assign/Reset page
+  // Reset's `_on` spelling writes `path` and commits; `_off` is inert.
   kStateAction,
   // D9's plain action (P3/P4): one symbol, a `path` write on press, a commit. No state query, so
   // the row always reads its label - it is how every `Reset All` stopped drawing a `: Nothing`
@@ -296,10 +292,10 @@ enum class Kind {
   // session and enters the dialog. The dialog is left by the capture itself (a valid press, or
   // the countdown's zero), so no row writes the bridge's `capture-cancel` op.
   kCapture,
-  kChoose,       // one-shot choice: set `setting` to the row's own token, commit, leave
-  kAction,       // one-shot action: invoke `setting`
-  kInfo,         // a row that is present but deliberately does nothing (the protected entry)
-  kRoute,        // a retail screen: set its `member` to the current screen, then enter it
+  kChoose,  // one-shot choice: set `setting` to the row's own token, commit, leave
+  kAction,  // one-shot action: invoke `setting`
+  kInfo,    // a row that is present but deliberately does nothing (the protected entry)
+  kRoute,   // a retail screen: set its `member` to the current screen, then enter it
   kRestart,
   kClose,
   kCalibration,
@@ -488,19 +484,17 @@ Row RouteRow(const char* symbol, const char* screen, const char* member, const c
   return row;
 }
 
-// P7: a binding row. Its state reads Custom when the profile has a stored row for it and Default
-// when the compiled default is what plays; Confirm enters the row's own Assign/Reset page.
-// `label` is the control or action's own name ("A", "First Note"); the state suffix keeps the
-// drawn line inside the 28-character budget the in-game-settings skill records.
-Row StateSubmenuRow(const char* symbol, const char* setting, const char* screen, const char* label,
-                    const char* description) {
+// A binding row. LiveBindingRows supplies its effective inputs at page entry; Confirm enters
+// its own Assign/Reset page. The canonical symbol identifies actions and help independently
+// of the runtime display text.
+Row BindingSubmenuRow(const char* symbol, const char* setting, const char* screen,
+                      const char* label, const char* description) {
   Row row;
   row.symbol = symbol;
-  row.kind = Kind::kStateSubmenu;
+  row.kind = Kind::kBindingSubmenu;
   row.setting = setting;
   row.screen = screen;
   row.label = label;
-  row.off_label = std::string(label) + ": Default";
   row.description = description;
   return row;
 }
@@ -659,8 +653,8 @@ Row InterfaceBindingRow(profile::remap::Target target, const char* description) 
   const std::string token = profile::GeneralBindingToken(target);
   const std::string symbol = profile::InputRowSymbol(token);
   const std::string screen = symbol + "_screen";
-  return StateSubmenuRow(symbol.c_str(), token.c_str(), screen.c_str(),
-                         std::string(profile::InterfaceTargetLabel(target)).c_str(), description);
+  return BindingSubmenuRow(symbol.c_str(), token.c_str(), screen.c_str(),
+                           std::string(profile::InterfaceTargetLabel(target)).c_str(), description);
 }
 
 // One visible Interface row's Assign/Reset page. `back` is the page that *lists* the row, so a
@@ -911,10 +905,10 @@ std::vector<PanelSpec> AllPanels() {
         for (const profile::gameplay_remap::Action action : group.actions) {
           const std::string token = profile::GameplayBindingToken(kind, action);
           const std::string symbol = profile::InputRowSymbol(token);
-          action_rows.push_back(StateSubmenuRow(
-              symbol.c_str(), token.c_str(), (symbol + "_screen").c_str(),
-              std::string(profile::gameplay_remap::ActionLabel(action)).c_str(),
-              "Press to assign or reset the inputs for this action."));
+          action_rows.push_back(
+              BindingSubmenuRow(symbol.c_str(), token.c_str(), (symbol + "_screen").c_str(),
+                                std::string(profile::gameplay_remap::ActionLabel(action)).c_str(),
+                                "Press to assign or reset the inputs for this action."));
         }
         out.push_back(PanelSpec{group_symbol + "_panel", group_symbol + "_screen", groups_screen,
                                 MenuPanels(), std::move(action_rows)});
@@ -1599,7 +1593,6 @@ std::vector<std::string> RowSymbols(const Row& row) {
   switch (row.kind) {
     case Kind::kBool:
     case Kind::kBoolSubmenu:
-    case Kind::kStateSubmenu:
     case Kind::kStateAction:
       return {row.symbol + "_on", row.symbol + "_off"};
     case Kind::kSelect: {
@@ -1655,14 +1648,31 @@ Node DropAll(const std::vector<std::string>& symbols) {
 // `populate_menu`: build the row array, drop what does not apply, then fill the list.
 //
 //   `{var rows {array (<every symbol>)} }`   - the literal array holds both spellings of every
-//                                              boolean, adjacent, plus every choice of every select;
+//                                              boolean, adjacent, plus every choice of every
+//                                              select;
 //   `{if {! <gate>} {do {remove_elem ...}}}` - a provider-hidden row (and its whole screen) goes;
 //   `{if_else <query> <drop off> <drop on>}` - a boolean keeps the spelling that matches;
 //   `{if {! <choice query>} <drop choice>}`  - a select drops every choice that is not current,
 //   `{if <choice query> <drop first>}`         and the first choice is the default that stays when
 //                                              the store holds no value yet.
+// These pages have a fixed row order and receive their text at every population. All consumers
+// of their selection use the same index; runtime text is never used as an action identifier.
+bool LiveBindingRows(const PanelSpec& panel) {
+  return std::any_of(panel.rows.begin(), panel.rows.end(), [](const Row& row) {
+    return row.kind == Kind::kBindingSubmenu && profile::ParseInputRowToken(row.setting).valid();
+  });
+}
+
 Node PopulateMenu(const PanelSpec& panel) {
   std::vector<Node> body;
+
+  if (LiveBindingRows(panel)) {
+    body.push_back(
+        Arr({Var("rows"), Cmd({Sym("read_file"), Str("rbbz-settings/text/" + panel.name)})}));
+    for (Node& statement : FillStatements()) body.push_back(std::move(statement));
+    body.insert(body.begin(), Sym("do"));
+    return Arr({Sym("populate_menu"), Cmd(std::move(body))});
+  }
 
   std::vector<Node> literal;
   for (const Row& row : panel.rows) {
@@ -1694,7 +1704,7 @@ Node PopulateMenu(const PanelSpec& panel) {
 
   for (const Row& row : panel.rows) {
     if (row.kind == Kind::kBool || row.kind == Kind::kBoolSubmenu ||
-        row.kind == Kind::kStateSubmenu || row.kind == Kind::kStateAction) {
+        row.kind == Kind::kStateAction) {
       const std::string on = row.symbol + "_on";
       const std::string off = row.symbol + "_off";
       // The pair keeps its usual meaning (`_on` = the row reads On); an inverted row's setting is
@@ -1778,9 +1788,8 @@ Node RowCase(const Row& row, const std::string_view symbol) {
     case Kind::kSubmenu:
     case Kind::kBoolSubmenu:
       return Arr({Sym(symbol), EnterScreen(row.screen)});
-    case Kind::kStateSubmenu:
-      // Both spellings enter: the state says whether the row is customised, and the page behind
-      // it is the one place to change or reset that.
+    case Kind::kBindingSubmenu:
+      // The index identifies this binding independently of its current input text.
       return Arr({Sym(symbol), EnterScreen(row.screen)});
     case Kind::kStateAction: {
       if (symbol != std::string(row.symbol) + "_on") {
@@ -1851,6 +1860,14 @@ Node RowCase(const Row& row, const std::string_view symbol) {
 // Every case the row table needs, in row order.
 std::vector<Node> RowCases(const PanelSpec& panel) {
   std::vector<Node> cases;
+  if (LiveBindingRows(panel)) {
+    for (size_t i = 0; i < panel.rows.size(); ++i) {
+      Node item = RowCase(panel.rows[i], panel.rows[i].symbol);
+      item.kids[0] = Node::Int(static_cast<int>(i));
+      cases.push_back(std::move(item));
+    }
+    return cases;
+  }
   for (const Row& row : panel.rows) {
     for (const std::string& symbol : RowSymbols(row)) {
       cases.push_back(RowCase(row, symbol));
@@ -1861,7 +1878,9 @@ std::vector<Node> RowCases(const PanelSpec& panel) {
 
 // `{switch {options.lst selected_sym} <cases...>}` inside a `select_row` method.
 Node SelectRowCases(const PanelSpec& panel) {
-  std::vector<Node> kids = {Sym("switch"), Cmd({Sym(kList), Sym("selected_sym")})};
+  std::vector<Node> kids = {
+      Sym("switch"),
+      Cmd({Sym(kList), Sym(LiveBindingRows(panel) ? "selected_pos" : "selected_sym")})};
   for (Node& item : RowCases(panel)) {
     kids.push_back(std::move(item));
   }
@@ -1884,7 +1903,14 @@ Node SelectRowCases(const PanelSpec& panel) {
 // A page that suppresses captions (the confirmation/error panels, see `SuppressesHelp`) gets no
 // member at all, so a scroll there cannot put a description over its own message.
 std::vector<Node> ScrollHelpCases(const PanelSpec& panel) {
-  std::vector<Node> kids = {Sym("switch"), Cmd({Sym(kList), Sym("selected_sym")})};
+  std::vector<Node> kids = {
+      Sym("switch"),
+      Cmd({Sym(kList), Sym(LiveBindingRows(panel) ? "selected_pos" : "selected_sym")})};
+  if (LiveBindingRows(panel)) {
+    for (size_t i = 0; i < panel.rows.size(); ++i)
+      kids.push_back(Arr({Node::Int(static_cast<int>(i)), HelpWrite(panel.rows[i].symbol)}));
+    return kids;
+  }
   for (const Row& row : panel.rows) {
     for (const std::string& symbol : RowSymbols(row)) {
       kids.push_back(Arr({Sym(symbol), HelpWrite(row.symbol)}));
@@ -1932,7 +1958,7 @@ std::vector<Node> DirectionCases(const PanelSpec& panel, const bool forward) {
 // So `move_up` / `move_down` walk the list with the one primitive that provably moves the drawn
 // selection: `{<list>.lst set_selected <index>}` - the same call `populate_menu` uses to place the
 // selection, and the reason the first row is drawn highlighted. Each method is a switch on the
-// list's *selected symbol* (so no index state has to be kept anywhere), with one table per provider
+// selected symbol, or selected position for live binding rows, with one table per provider
 // state, because a base install draws five rows where an Ultimate install draws six.
 
 // One cell of the drawn list: a row, every symbol that can occupy it, and its index.
@@ -1964,8 +1990,10 @@ Node SelectIndex(const size_t index) {
     Cmd({Sym(kList), Sym("set_selected"), Var("rbbz_settings_index")})});
 }
 
-Node DirectionTable(const std::vector<Cell>& cells, const bool forward, const bool suppress_help) {
-  std::vector<Node> kids = {Sym("switch"), Cmd({Sym(kList), Sym("selected_sym")})};
+Node DirectionTable(const std::vector<Cell>& cells, const bool forward, const bool suppress_help,
+                    const bool live) {
+  std::vector<Node> kids = {Sym("switch"),
+                            Cmd({Sym(kList), Sym(live ? "selected_pos" : "selected_sym")})};
   for (size_t i = 0; i < cells.size(); ++i) {
     // Clamp at both ends rather than wrap: a wrap needs the user to notice they have left the
     // bottom, and the first row is where `populate_menu` places the selection.
@@ -1980,6 +2008,11 @@ Node DirectionTable(const std::vector<Cell>& cells, const bool forward, const bo
     // A suppressed page (a confirmation: see `SuppressesHelp`) publishes the *hide* instead, so the
     // move announces nothing while still placing the selection.
     const std::string target_symbol = suppress_help ? std::string() : cells[target].row->symbol;
+    if (live) {
+      kids.push_back(Arr({Node::Int(static_cast<int>(i)),
+                          Cmd({Sym("do"), SelectIndex(target), HelpWrite(target_symbol)})}));
+      continue;
+    }
     for (const std::string& symbol : cells[i].symbols) {
       kids.push_back(Arr({Sym(symbol), Cmd({Sym("do"), SelectIndex(target),
                                             HelpWrite(target_symbol)})}));
@@ -2029,10 +2062,11 @@ Node MoveMember(const PanelSpec& panel, const char* name, const bool forward) {
     }
     return false;
   }();
-  Node body = DirectionTable(Cells(panel, false), forward, suppress_help);
+  Node body = DirectionTable(Cells(panel, false), forward, suppress_help, LiveBindingRows(panel));
   if (has_provider_row) {
     body = Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(kProviderQuery)}),
-               DirectionTable(Cells(panel, true), forward, suppress_help), std::move(body)});
+                DirectionTable(Cells(panel, true), forward, suppress_help, LiveBindingRows(panel)),
+                std::move(body)});
   }
   return Arr({Sym(name), Cmd({Sym("if"), Cmd({Sym("!"), Var("rbbz_settings_editing")}), std::move(body)})});
 }
@@ -2252,7 +2286,6 @@ std::vector<std::string> RequestPaths() {
       switch (row.kind) {
         case Kind::kBool:
         case Kind::kBoolSubmenu:
-        case Kind::kStateSubmenu:
         case Kind::kStateAction:
           add(QueryPath(row));
           if (row.inverted) add(Path("snapshot", row.setting, "b:0"));
@@ -2326,8 +2359,7 @@ std::vector<std::string> ScreenBindingRows(const std::string_view screen) {
   }
   // The page tree is fixed for the process and a binding row never depends on the boot's
   // configuration (the one configuration-dependent row, Play Current Song, is not a binding), so
-  // the mapping is built once and the overlay's per-frame ask is a lookup. A page that has no
-  // binding row at all is deliberately absent: an empty answer means "draw nothing there".
+  // the identity mapping is built once. Pages without binding rows have no entry.
   static const std::map<std::string, std::vector<std::string>> kPages = [] {
     std::map<std::string, std::vector<std::string>> pages;
     for (const std::vector<PanelSpec>& context : {AllPanels(), InSongPanels()}) {
@@ -2336,7 +2368,8 @@ std::vector<std::string> ScreenBindingRows(const std::string_view screen) {
         bool any = false;
         for (const Row& row : panel.rows) {
           std::string token;
-          if (row.kind == Kind::kStateSubmenu && profile::ParseInputRowToken(row.setting).valid()) {
+          if (row.kind == Kind::kBindingSubmenu &&
+              profile::ParseInputRowToken(row.setting).valid()) {
             token = row.setting;
             any = true;
           }
@@ -2467,6 +2500,42 @@ std::vector<std::string> PanelRowSymbols(std::string_view panel) {
     return out;
   }
   return out;
+}
+
+std::vector<std::string> PanelBindingText(const std::string_view name,
+                                          const input::EffectiveInput& snapshot) {
+  static const std::map<std::string, std::vector<Row>> pages = [] {
+    std::map<std::string, std::vector<Row>> result;
+    for (const auto& context : {AllPanels(), InSongPanels()})
+      for (const PanelSpec& panel : context)
+        if (LiveBindingRows(panel)) result.emplace(panel.name, panel.rows);
+    return result;
+  }();
+  const auto found = pages.find(std::string(name));
+  if (found == pages.end()) return {};
+  std::vector<std::string> lines;
+  for (const Row& row : found->second) {
+    const auto token = profile::ParseInputRowToken(row.setting);
+    const std::vector<profile::remap::Source>* sources = nullptr;
+    switch (token.kind) {
+      case profile::InputRowKind::kGeneralBinding:
+        sources = snapshot.general.Effective(*profile::remap::ParseTarget(token.name));
+        break;
+      case profile::InputRowKind::kControllerBinding:
+        sources = snapshot.controller.Effective(*profile::gameplay_remap::ParseAction(token.name));
+        break;
+      case profile::InputRowKind::kKeyboardMouseBinding:
+        sources =
+            snapshot.keyboard_mouse.Effective(*profile::gameplay_remap::ParseAction(token.name));
+        break;
+      default:
+        // Keep ordinary rows as locale symbols so installed translations still apply.
+        lines.push_back(row.symbol);
+        continue;
+    }
+    lines.push_back(profile::BindingRowText(token, sources));
+  }
+  return lines;
 }
 
 std::vector<std::string> PauseRootRows(const bool provider_active) {
@@ -3319,11 +3388,9 @@ std::vector<std::pair<std::string, std::string>> Labels() {
         // halves with "Hidden"/"Visible".
         add(row.symbol + "_on", row.on_label.empty() ? row.label + ": On" : row.on_label);
         add(row.symbol + "_off", row.off_label.empty() ? row.label + ": Off" : row.off_label);
-      } else if (row.kind == Kind::kStateSubmenu) {
-        // A binding row's pair: whether the row is the player's or the compiled default.
-        add(row.symbol + "_on", row.label + ": Custom");
-        add(row.symbol + "_off", row.off_label.empty() ? row.label + ": Default"
-                                                        : row.off_label);
+      } else if (row.kind == Kind::kBindingSubmenu) {
+        // Live binding rows are interned page-entry text, with no boot-time locale pair.
+        continue;
       } else if (row.kind == Kind::kStateAction) {
         add(row.symbol + "_on", row.label);
         add(row.symbol + "_off", row.off_label.empty() ? row.label : row.off_label);

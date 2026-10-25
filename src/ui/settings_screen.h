@@ -80,6 +80,10 @@
 
 #include "ui/dtb_author.h"
 
+namespace rb_blitz::input {
+struct EffectiveInput;
+}
+
 namespace rb_blitz::ui::screen {
 
 // Frozen before generating the installed menu. Values come from the boot service and provider.
@@ -475,15 +479,19 @@ std::vector<std::string> HelpSymbols();
 // ------------------------------------------------------------------------------------------------
 //
 // A page lists its rows in `PanelSpec::rows` order and every binding row contributes exactly one
-// symbol to the list (`_on`/`_off` are adjacent and one is dropped), so a drawn row's logical index
-// is its page-row index. This returns the token each index addresses, in draw order, with an empty
-// string for a row that is not a binding (`Reset All`, a submenu, an Assign/Reset page). Empty for
-// any screen this surface does not define.
+// runtime Symbol to the list, so a drawn row's logical index is its page-row index. This returns
+// the token each index addresses, in draw order, with an empty string for a row that is not a
+// binding (`Reset All`, a submenu, an Assign/Reset page). Empty for any screen this surface does
+// not define.
 //
 // Both contexts resolve: the in-song twin's screen name answers the same rows. The mapping is the
-// row's *identity*, not its value - the overlay asks the effective binding for the value every
-// frame, so a capture shows in the row without re-entering the page.
+// row's identity, not its value. PanelBindingText composes the current values on page entry.
 std::vector<std::string> ScreenBindingRows(std::string_view screen);
+
+// Page-entry text, in PanelRowSymbols order. Empty for an unknown/non-binding page. The caller
+// supplies one effective snapshot for the entire page; no separate binding table is maintained.
+std::vector<std::string> PanelBindingText(std::string_view panel,
+                                          const input::EffectiveInput& snapshot);
 
 // Appends `<key>` -> `<text>` to a locale definition, the shape every locale file in this title
 // uses (an array of exactly two elements). Refuses when the key already exists, so a shadow copy

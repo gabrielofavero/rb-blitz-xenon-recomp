@@ -33,3 +33,6 @@ The in-game settings program outgrew the plan format and lives with its subject;
 [`../../settings/status.md`](../../settings/status.md).
 
 See [`../README.md`](../README.md) for the status taxonomy.
+
+Binding rows are now implemented in the guest; gameplay verification is deferred at the owner's request. See
+[`2026-10-22-in-game-binding-rows-plan.md`](2026-10-22-in-game-binding-rows-plan.md).

@@ -37,13 +37,9 @@
 #include <rex/ui/imgui_dialog.h>
 #include <rex/ui/imgui_drawer.h>
 
-#include "hooks/gameplay_input.h"
 #include "hooks/settings_bridge.h"
-#include "input/effective_input.h"
 #include "input/input_capture.h"
-#include "input/native_menu.h"
 #include "input/remap.h"
-#include "profile/input_rows.h"
 #include "settings/input_bindings.h"
 #include "store/store_catalogue_status.h"
 #include "store/store_search.h"
@@ -123,208 +119,6 @@ float CaptionFontSize(const ImVec2 display) {
   return std::clamp(display.y * kCaptionSizeFraction, kCaptionMinSize, kCaptionMaxSize);
 }
 
-// --- P1: the binding rows' own line -------------------------------------------------------------
-//
-// The owner asked for each binding row to draw the inputs it currently holds ("First Note: A"),
-// not a state word: the list's row text is a locale entry baked at boot, so the host draws the
-// line over the guest's own label instead. The geometry comes from the guest's draw
-// (src/input/native_menu.cpp publishes every visible row's text box), the page's row identities
-// come from the generated surface (ui::screen::ScreenBindingRows), and the values come from the
-// published effective snapshot - which is why a capture shows up in the row the moment the store
-// publishes, with no re-entry and no second copy of the binding tables.
-//
-// The guest's label is covered by the overlay's own background: two texts in one box would read
-// as one. A line that does not fit the row's width is drawn as `Multiple` (the owner's
-// allowance); a row where even that does not fit is left alone, so the guest's own label stays
-// legible rather than being covered by nothing.
-
-const std::vector<profile::remap::Source>* SourcesFor(
-    const profile::InputRowToken& row, const input::EffectiveInput& snapshot) {
-  switch (row.kind) {
-    case profile::InputRowKind::kGeneralBinding:
-      if (const auto target = profile::remap::ParseTarget(row.name)) {
-        return snapshot.general.Effective(*target);
-      }
-      return nullptr;
-    case profile::InputRowKind::kControllerBinding:
-      if (const auto action = profile::gameplay_remap::ParseAction(row.name)) {
-        return snapshot.controller.Effective(*action);
-      }
-      return nullptr;
-    case profile::InputRowKind::kKeyboardMouseBinding:
-      if (const auto action = profile::gameplay_remap::ParseAction(row.name)) {
-        return snapshot.keyboard_mouse.Effective(*action);
-      }
-      return nullptr;
-    default:
-      return nullptr;
-  }
-}
-
-// The guest's own line is measured by the draw, not re-derived: the label rectangle the guest's
-// label widget projected is exactly the text it rendered (measured 2026-10-19: "A: Custom" box
-// 162 px against 167 px of glyphs). It is the cover; the row's cell is the width budget.
-void DrawBindingRows(ImGuiIO& io) {
-  // The last set of lines drawn, so the log names each page's rows once (and says when the page
-  // was left). Only the UI thread touches it, like every other value in this draw.
-  static std::string last_lines;
-  const auto finish = [](const char* why) {
-    if (!last_lines.empty()) {
-      REXLOG_INFO("help_overlay: binding rows {}", why);
-      last_lines.clear();
-    }
-  };
-
-  std::string screen;
-  std::vector<input::MenuRowGeometry> rows;
-  if (!input::VisibleMenuRows(&screen, &rows)) {
-    finish("(no menu list)");
-    return;
-  }
-  // P2's measurement, kept as a permanent evidence line: while one of our pages is open, does the
-  // live song controller still carry the selected preset? A value here means the surface can name
-  // the selection immediately, even before the next song; `none` means it can only show the last
-  // preset a song observed (the restructure plan's open question 1).
-  if (screen.starts_with("settings_")) {
-    static std::string last_preset_line;
-    const int live = gameplay_input::LiveControllerPreset();
-    std::string line = screen + " live-preset=";
-    line += live < 0 ? std::string("none (no song controller)")
-                     : profile::gameplay_remap::PresetLabel(live);
-    if (line != last_preset_line) {
-      REXLOG_INFO("help_overlay: settings page {}", line);
-      last_preset_line = line;
-    }
-  }
-  const std::vector<std::string> tokens = ui::screen::ScreenBindingRows(screen);
-  if (tokens.empty()) {
-    finish("(page left)");
-    return;
-  }
-  const std::shared_ptr<const input::EffectiveInput> snapshot = input::CurrentInput();
-  if (!snapshot) {
-    finish("(no input snapshot)");
-    return;
-  }
-
-  const float width = io.DisplaySize.x, height = io.DisplaySize.y;
-  if (!(width > 0.0f) || !(height > 0.0f)) {
-    return;
-  }
-  const int frame_w = static_cast<int>(std::lround(width));
-  const int frame_h = static_cast<int>(std::lround(height));
-  const int aspect_w = REXCVAR_GET(video_mode_width);
-  const int aspect_h = REXCVAR_GET(video_mode_height);
-  const bool letterbox = REXCVAR_GET(present_letterbox);
-  const bool overscan = REXCVAR_GET(present_allow_overscan_cutoff);
-  const int safe_x = REXCVAR_GET(present_safe_area_x);
-  const int safe_y = REXCVAR_GET(present_safe_area_y);
-  const auto to_window = [&](const float x, const float y) {
-    return input::MenuPointToWindow({x, y}, frame_w, frame_h, aspect_w, aspect_h, letterbox,
-                                    overscan, safe_x, safe_y);
-  };
-
-  ImDrawList* draw = ImGui::GetForegroundDrawList();
-  std::string lines;
-  std::string fit;
-  for (const input::MenuRowGeometry& entry : rows) {
-    if (entry.index < 0 || static_cast<std::size_t>(entry.index) >= tokens.size()) {
-      continue;
-    }
-    const std::string& token = tokens[static_cast<std::size_t>(entry.index)];
-    if (token.empty()) {
-      continue;
-    }
-    const profile::InputRowToken row = profile::ParseInputRowToken(token);
-    if (!row.valid()) {
-      continue;
-    }
-    const std::string line = profile::BindingRowText(row, SourcesFor(row, *snapshot));
-    if (line.empty()) {
-      continue;
-    }
-    const input::MenuPoint label_top = to_window(entry.label.left, entry.label.top);
-    const input::MenuPoint label_end = to_window(entry.label.right, entry.label.bottom);
-    const input::MenuPoint cell_top = to_window(entry.cell.left, entry.cell.top);
-    const input::MenuPoint cell_end = to_window(entry.cell.right, entry.cell.bottom);
-    const float label_width = label_end.x - label_top.x;
-    const float label_height = label_end.y - label_top.y;
-    const float row_width = cell_end.x - cell_top.x;
-    if (!std::isfinite(label_width) || !std::isfinite(label_height) ||
-        !std::isfinite(row_width) || label_width < 4.0f || label_height < 6.0f ||
-        row_width < 16.0f) {
-      continue;
-    }
-    // The caption face draws below the size it is asked for (the drawer's legacy path scales the
-    // bake), so the ask is calibrated from the face's own answer: push the label's height, read
-    // what came out, and scale the ask so the final line is about the guest's own height. Measured
-    // 2026-10-19: without this the overlay drew half-height text inside a full-height box.
-    const float probe = std::max(label_height, 11.0f);
-    ImGui::PushFont(g_caption_font, probe);
-    const float rendered = ImGui::GetFontSize();
-    ImGui::PopFont();
-    if (!(rendered > 0.0f)) {
-      continue;
-    }
-    const float size =
-        std::clamp(probe * (label_height * 0.75f) / rendered, 11.0f, kCaptionMaxSize);
-    ImGui::PushFont(g_caption_font, size);
-    const float pad = std::max(3.0f, ImGui::GetFontSize() * 0.22f);
-    const float room = row_width - 6.0f;
-    std::string shown = line;
-    float text_width = ImGui::CalcTextSize(shown.c_str()).x;
-    if (text_width + pad * 2.0f > room) {
-      shown = "Multiple";
-      text_width = ImGui::CalcTextSize(shown.c_str()).x;
-    }
-    if (fit.empty()) {
-      char numbers[192];
-      std::snprintf(numbers, sizeof(numbers),
-                    "display=%.0fx%.0f label=%.1fx%.1f cell=%.1fx%.1f size=%.1f text=%.1f "
-                    "room=%.1f",
-                    static_cast<double>(width), static_cast<double>(height),
-                    static_cast<double>(label_width), static_cast<double>(label_height),
-                    static_cast<double>(row_width), static_cast<double>(cell_end.y - cell_top.y),
-                    static_cast<double>(size), static_cast<double>(text_width),
-                    static_cast<double>(room));
-      fit = numbers;
-    }
-    if (text_width + pad * 2.0f <= room) {
-      // Cover the guest's whole line - its label box plus a margin - and widen it only when the
-      // replacement itself is wider. Both are measured in the same units the draw uses, so the
-      // two texts can never show through each other.
-      const float center_x = (label_top.x + label_end.x) * 0.5f;
-      const float center_y = (label_top.y + label_end.y) * 0.5f;
-      const float cover_width = std::max(label_width, text_width) + pad * 2.0f;
-      const float text_height = ImGui::GetTextLineHeight();
-      draw->AddRectFilled({center_x - cover_width * 0.5f, label_top.y - 1.0f},
-                          {center_x + cover_width * 0.5f, label_end.y + 1.0f},
-                          IM_COL32(5, 9, 18, 255), std::max(2.0f, size * 0.16f));
-      draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
-                    {center_x - text_width * 0.5f, center_y - text_height * 0.5f},
-                    IM_COL32(255, 255, 255, 255), shown.c_str());
-      if (!lines.empty()) {
-        lines += " | ";
-      }
-      lines += token;
-      lines += " = ";
-      lines += shown;
-    }
-    ImGui::PopFont();
-  }
-  if (!lines.empty()) {
-    lines = screen + ": " + lines;
-  }
-  if (lines != last_lines) {
-    if (!fit.empty()) {
-      REXLOG_INFO("help_overlay: row text fit {}", fit);
-    }
-    REXLOG_INFO("help_overlay: binding rows {}",
-                lines.empty() ? std::string("(nothing to draw)") : lines);
-    last_lines = lines;
-  }
-}
-
 class CaptionSink final : public settings::bridge::HelpSink {
  public:
   void Show(const std::string_view symbol) override { PublishSymbol(symbol); }
@@ -345,10 +139,6 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     // whether or not a device is connected - the guest's state filter does not run while nothing
     // enumerates, which is exactly the state a recovery exists for.
     input::TickInputRecovery();
-    // P1: a binding row draws its inputs over the guest's label. Drawn whether or not the caption
-    // switch is on - it is the row's value, not help text - and before the caption, whose own
-    // early-out must not take it with it.
-    DrawBindingRows(io);
     std::string text;
     {
       std::lock_guard lock(g_text_mutex);

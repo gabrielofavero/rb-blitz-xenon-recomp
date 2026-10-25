@@ -1,12 +1,58 @@
 # In-game binding rows — replacing the Interface Mapping overlay
 
-**Status: planning (2026-10-22). Nothing implemented.** This plan replaces the host-drawn binding
+**Status: implemented (2026-10-25); gameplay verification deferred at the owner's request.** This plan replaces the host-drawn binding
 rows (`src/ui/help_overlay.cpp`, `DrawBindingRows` at `:168`) with rows the **guest draws itself**,
 filled from host text at page entry, so a capture is visible in-game and without a restart.
 
 It is also the first consumer of the owner's UI directive (2026-10-22): a host may not draw a
 panel, box or button over the game's UI; the only tolerated exception is a text-only label
 replacement, and this change removes the one that exists.
+
+## Implementation (2026-10-25)
+
+- Main-menu and pause binding lists (Interface Mapping, Navigation, Music Library Options and
+  all six gameplay groups) use the live text channel. Assign/Reset child pages keep their guest
+  actions and state labels; returning to a listing refreshes its text.
+- `read_file` is `sub_8241DD48` (registration at `0x82421A60`). Paths outside our namespace
+  forward unchanged, and the existing enabled/forward-only gates apply.
+- Correction to the proposed ABI: a DataArray is a **16-byte header**, not the node buffer.
+  Allocate it with `sub_82457F50(16, 16)` and call `sub_823FB260(header, count)`; it initializes
+  the node buffer and refcount 1. Intern each line with `sub_8245C878` into a type-5 Symbol node.
+  Transfer that reference in the type-16 result cell; native variable/list ownership releases it.
+  This follows the title's constructor/destructor pair, avoiding a fabricated header or leaked
+  page buffers. Symbols use the same list-provider path as the pre-existing authored pages.
+- `PanelBindingText` is SDK-free and takes one effective snapshot. Non-binding rows remain locale
+  symbols for translation. All text goes directly into Symbol nodes, so quotes/backslashes never
+  pass through a DTA parser; the proposed bounded-alphabet restriction is unnecessary.
+- Selection, movement and scroll-help cases use integer indices on those pages. Host tests pin
+  text counts/order, both contexts, refresh/reset/empty bindings, gameplay tables, and literal
+  quote/backslash preservation. No diagnostic-only page is shipped: acceptance exercises the
+  actual guest pages.
+- `DrawBindingRows`, its opaque covers, its `Multiple` fallback and the cross-thread geometry
+  publisher are removed. The existing caption strip remains.
+- Release build and six related ctest suites pass. Runtime capture/reset, highlighting and long
+  line layout still require gameplay verification with the updated acceptance scripts.
+
+### Runtime attempt and remaining acceptance
+
+The owner deferred further gameplay testing on 2026-10-25. No binding page was reached and no
+`rbbz-settings/text/` request was observed; **guest rendering and interaction are not claimed**.
+D3D12 attempts `guest-rows-20261025-c/d` and Vulkan attempt `guest-rows-20261025-e` remained
+before the menu after content enumeration and shader preparation. The D3D12 thread capture
+(`out/_swap/binding-stacks.log`) placed the main guest thread in `sub_8251E390`, waiting on the
+GPU command ring. A forward-only comparison (`guest-rows-20261025-f`, channel log confirms
+forward-only on) also remained before the menu when it was stopped at the owner's request.
+This does not establish the cause of the startup stall.
+
+Evidence is under `out/interface-mapping/p1-rows/`; all runs used isolated userdata. The game and
+harness have been stopped. Remaining checks: actual guest text/selection/highlighting, capture
+return, Reset All without leaving the listing, long-line clipping and both pause-context routes.
+No diagnostic logging or host binding overlay is left in the implementation.
+
+The documentation checker still reports unrelated missing RhythmVerse-plan references; stale
+binding-plan references were corrected as part of this change.
+
+The original design and proposed spike below are retained as the implementation rationale.
 
 ## 1. The request, as requirements
 

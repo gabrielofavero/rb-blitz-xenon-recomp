@@ -173,6 +173,17 @@ and a whole stub round trip. **1/1 passes; suite 23/23.**
 
 ### 5. Ownership and allocator API — what is known, what is missing
 
+**2026-10-25 implementation update:** the binding-row channel now constructs native arrays via
+`sub_82457F50(16, 16)` and `sub_823FB260(header, count)`. The constructor allocates the nodes
+and initializes refcount 1 at header +10. Interned Symbol nodes (type 5) are filled with
+`sub_8245C878`; the result cell transfers that array reference as type 16. `read_file` is
+`sub_8241DD48`, whose original return path constructs a node and balances the temporary array
+references via `sub_82190510`. This supersedes the implementation deferral below; the old
+assessment is retained as research history. Host composition and authored index dispatch pass
+regression tests. Gameplay ownership/rendering verification is still pending, since the isolated
+runs stalled before requesting any binding text and the owner deferred further driving. See the
+[binding-row plan](../plans/in-progress/2026-10-22-in-game-binding-rows-plan.md).
+
 **Known [cited]:** the result cell is 8 bytes, caller-owned, `{value, type}` with type `0` = int/bool;
 `file_exists`/`write_file` are safe to produce (their results are a boolean and a constant zero). Node
 payloads for string arguments start at `node + 8`, stride 8, via `sub_823F9538`.

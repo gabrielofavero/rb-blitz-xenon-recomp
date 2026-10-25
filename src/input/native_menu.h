@@ -392,22 +392,6 @@ uint32_t CurrentFocus();
 uint32_t FocusedListDrawn();
 bool MenuAvailable();
 
-// One row the focused list last drew: its logical index (the same index the mouse hit test and
-// `UIListState::Selected` use) and the two rectangles the draw measured - `label`, the row's own
-// text, and `cell`, the row's full clickable slot. Normalized through the camera, the coordinate
-// space MenuPointer maps into; MenuPointToWindow turns them into window coordinates.
-struct MenuRowGeometry {
-  int index = -1;
-  MenuBounds label;
-  MenuBounds cell;
-};
-
-// The visible rows of the focused list, in draw order, and the screen that owned it (the guest
-// object's own name, e.g. `settings_general_mapping_screen`). False when no menu list is drawn -
-// a song, a transition, or before the first draw - and then the caller must draw nothing rather
-// than a stale page's rows. The settings overlay (src/ui/help_overlay.cpp) reads this once per
-// UI frame; the snapshot is replaced by the draw and cleared at every screen/focus boundary.
-bool VisibleMenuRows(std::string* screen_name, std::vector<MenuRowGeometry>* rows);
 // A live song: the screen is `game_screen` and the focused panel is not the pause panel
 // (the same split `MenuAvailable` uses to let pause take the pad). False on every menu, on
 // the title, the loading screens and while paused.

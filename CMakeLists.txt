@@ -106,6 +106,8 @@ set(RBBLITZ_SOURCES
     src/hooks/crypto.cpp
     src/hooks/dlc.cpp
     src/hooks/dlc_refresh.cpp
+    src/loading/load_guard.cpp
+    src/loading/load_trace.cpp
     src/hooks/hud_layout.cpp
     src/hooks/hud_layout_runtime.cpp
     src/hooks/local_save.cpp
@@ -560,6 +562,15 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_loading_record_inspect tools/loading_record_inspect.cpp
         src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_loading_record_inspect PRIVATE src)
+
+    add_executable(rb_blitz_load_guard_tests tests/load_guard_tests.cpp src/loading/load_guard.cpp)
+    target_include_directories(rb_blitz_load_guard_tests PRIVATE src tests)
+    add_test(NAME load_guard COMMAND rb_blitz_load_guard_tests)
+
+    add_executable(rb_blitz_load_trace_tests tests/load_trace_tests.cpp src/loading/load_trace.cpp)
+    target_include_directories(rb_blitz_load_trace_tests PRIVATE src tests)
+    target_link_libraries(rb_blitz_load_trace_tests PRIVATE rex::runtime)
+    add_test(NAME load_trace COMMAND rb_blitz_load_trace_tests)
 
     add_executable(rb_blitz_shader_compile_trace_tests tests/shader_compile_trace_tests.cpp)
     target_link_libraries(rb_blitz_shader_compile_trace_tests PRIVATE rex::runtime)

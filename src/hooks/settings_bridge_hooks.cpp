@@ -3,7 +3,7 @@
 //
 // The guest half of the typed settings channel (P1 of docs/settings/plan.md).
 // src/hooks/settings_bridge.h holds the transport decision and the frame rules; this file is the
-// two overridden guest builtins that carry it, plus the boot line that reports them.
+// overridden guest builtins that carry it, plus the boot line that reports them.
 //
 // Why overridden guest functions and not a file hook: the title's own script builtins are ordinary
 // recompiled functions, so a strong `extern "C" REX_FUNC(sub_...)` replaces every call site while
@@ -11,15 +11,16 @@
 // src/hooks/shell_music.cpp. It adds **no** `Nt*` definition, so the read/query hooks owned by
 // src/hooks/menu_filter.cpp and src/hooks/dlc_refresh.cpp keep their single strong definitions.
 //
-// Measured addresses and ABI (docs/settings/architecture.md (part 1, the bridge) §2, from the pinned
-// retail image and the recompiled bodies):
+// Measured addresses and ABI (docs/settings/architecture.md (part 1, the bridge) §2, from the
+// pinned retail image and the recompiled bodies):
 //
 //   0x8241DFB0  file_exists(path)     -> writes {bool, type 0} into the caller's 8-byte result
 //   0x8241DE48  write_file(path, data) -> writes {0, 0}
-//   0x823F9538  node -> string: both take the argument's payload field address (arg i's payload is
-//               at `*(u32*)r4 + 8 + 8*i`) and return a guest string pointer
+//   0x8241DD48  read_file(path)       -> native type-16 binding-row array
+//   0x823F9538  node -> string: takes the argument's payload field address (arg i's payload is
+//               at `*(u32*)r4 + 8 + 8*i`) and returns a guest string pointer
 //
-// The rule for both hooks is the same and is the reason the channel is safe:
+// The rule for all three hooks is the same and is the reason the channel is safe:
 //
 //   * a path in the exact `rbbz-settings/` namespace is **ours** - it is parsed, dispatched and
 //     answered here, and the original is *not* called, because a name in our namespace is a name
@@ -27,17 +28,20 @@
 //   * every other path is forwarded to the original **exactly once**, unchanged.
 //
 // Faithful behaviour is therefore "no content file is named like that": with the channel idle the
-// two hooks only add a prefix comparison to a call the title already makes, and the game is the
+// hooks only add a prefix comparison to a call the title already makes, and the game is the
 // game it was. `settings_bridge_forward_only` is the diagnostic that makes even our own namespace
 // forward, so the no-op forwarded hook can be compared against the answering one in one boot.
 //
 // The cvar registry is read once, in Configure(), on a host thread: a guest thread must not touch
-// it (project rule, docs/plans/finished/2026-10-10-song-cache-plan.md §7). The hooks only read the cached flags.
+// it (project rule, docs/plans/finished/2026-10-10-song-cache-plan.md §7). The hooks only read the
+// cached flags.
 
 #include "hooks/settings_bridge.h"
 #include "graphics/preparation_loading.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
@@ -57,6 +61,7 @@
 #include "hooks/shell_music.h"
 #include "hooks/hot_apply_runtime.h"
 #include "input/input_store.h"
+#include "input/effective_input.h"
 #include "input/native_menu.h"
 #include "input/remap.h"
 #include "input/title_input.h"
@@ -72,19 +77,25 @@
 #include "store/store_download_service.h"
 #include "store/store_search.h"
 #include "store/store_settings.h"
+#include "ui/settings_screen.h"
 
-// The two builtins the channel rides on and the node -> string helper the originals use. The
+// The builtins the channel rides on and the node -> string helper the originals use. The
 // originals are the __imp__ aliases; the strong definitions below replace the call sites.
 REX_EXTERN(__imp__sub_8241DFB0);
 REX_EXTERN(__imp__sub_8241DE48);
 REX_EXTERN(__imp__sub_823F9538);
+REX_EXTERN(__imp__sub_8241DD48);  // read_file(path), registered at 0x82421A60
+REX_EXTERN(__imp__sub_82457F50);  // size-class allocator (size, class)
+REX_EXTERN(__imp__sub_823FB260);  // DataArray(this, node_count), initial refcount 1
+REX_EXTERN(__imp__sub_8245C878);  // Symbol(out_slot, chars)
 
-REXCVAR_DEFINE_BOOL(settings_bridge, true, "Settings",
-                    "In-game settings channel: answer the guest's own file_exists/write_file "
-                    "builtins when (and only when) the path is in the rbbz-settings/ namespace, "
-                    "so the native Advanced Settings screen can read and write host settings. "
-                    "Faithful: no content file is named in that namespace, so every call is "
-                    "forwarded unchanged.")
+REXCVAR_DEFINE_BOOL(
+    settings_bridge, true, "Settings",
+    "In-game settings channel: answer the guest's own file_exists/read_file/write_file "
+    "builtins when (and only when) the path is in the rbbz-settings/ namespace, "
+    "so the native Advanced Settings screen can read and write host settings. "
+    "Faithful: no content file is named in that namespace, so every call is "
+    "forwarded unchanged.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(settings_bridge_forward_only, false, "Settings",
@@ -199,8 +210,9 @@ std::string ArgumentString(uint8_t* base, PPCContext& ctx, const uint32_t arg_ar
   return out;
 }
 
-// The 8-byte result cell both builtins write: `{u32 value, u32 type}` in guest byte order.
-void WriteResultCell(uint8_t* base, const uint32_t cell, const uint32_t value) {
+// The 8-byte result cell the builtins write: `{u32 value, u32 type}` in guest byte order.
+void WriteResultCell(uint8_t* base, const uint32_t cell, const uint32_t value,
+                     const uint32_t type = 0) {
   uint8_t* p = rex::memory::GuestPtr<uint8_t*>(base, cell);
   if (p == nullptr) {
     return;
@@ -209,7 +221,10 @@ void WriteResultCell(uint8_t* base, const uint32_t cell, const uint32_t value) {
   p[1] = uint8_t((value >> 16) & 0xFF);
   p[2] = uint8_t((value >> 8) & 0xFF);
   p[3] = uint8_t(value & 0xFF);
-  p[4] = p[5] = p[6] = p[7] = 0;  // type 0 = int/bool
+  p[4] = uint8_t(type >> 24);
+  p[5] = uint8_t(type >> 16);
+  p[6] = uint8_t(type >> 8);
+  p[7] = uint8_t(type);
 }
 
 void LogRejection(const char* why, const std::string_view path, const std::string& error) {
@@ -633,7 +648,7 @@ void RunHotApplyDiagnostic() {
 
 }  // namespace
 
-// The two entry points the overridden builtins call, and the only names this file exports besides
+// The entry points the overridden builtins call, and the only names this file exports besides
 // Configure(). They are named rather than anonymous because the hooks at the bottom of the file
 // are at global scope (that is where a strong REX_FUNC definition belongs), and they stay out of
 // the header because they take the guest register context while the header is SDK-free on purpose.
@@ -710,6 +725,62 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
   bool ours = false;
   const bool answer = QueryValue(path, &ours);
   WriteResultCell(base, ctx.r3.u32, (ours && answer) ? 1u : 0u);
+  return true;
+}
+
+bool TakeRead(PPCContext& ctx, uint8_t* base) {
+  if (!g_enabled || g_forward_only) return false;
+  const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  if (!IsNamespacedPath(path)) return false;
+  constexpr std::string_view prefix = "rbbz-settings/text/";
+  const auto snapshot = ::rb_blitz::input::CurrentInput();
+  const auto lines = path.starts_with(prefix)
+                         ? ::rb_blitz::ui::screen::PanelBindingText(
+                               std::string_view(path).substr(prefix.size()), *snapshot)
+                         : std::vector<std::string>{};
+  if (lines.empty()) {
+    WriteResultCell(base, ctx.r3.u32, 0);
+    return true;
+  }
+
+  // Use the title's own allocator/constructor pair: DataArray is a 16-byte header with a
+  // separately allocated node buffer and a u16 reference count at +10. A raw node buffer is
+  // not an array. Transfer the constructor's one reference to the returned DataNode; normal
+  // variable/list ownership then releases it, just as the original read_file does.
+  size_t longest = 0;
+  for (const auto& line : lines) longest = std::max(longest, line.size());
+  rex::CallFrame frame(ctx);
+  auto& call = frame.ctx;
+  call.r1.u32 -= static_cast<uint32_t>((longest + 1 + 0x100 + 15) & ~size_t{15});
+  const uint32_t chars = call.r1.u32 + 0x80;
+  call.r3.u32 = 16;
+  call.r4.u32 = 16;
+  __imp__sub_82457F50(call, base);
+  const uint32_t array = call.r3.u32;
+  if (array == 0) {
+    WriteResultCell(base, ctx.r3.u32, 0);
+    return true;
+  }
+  call.r3.u32 = array;
+  call.r4.u32 = static_cast<uint32_t>(lines.size());
+  __imp__sub_823FB260(call, base);
+  const uint32_t nodes = rex::memory::load_and_swap<uint32_t>(base + array);
+  for (size_t i = 0; i < lines.size(); ++i) {
+    std::memcpy(base + chars, lines[i].c_str(), lines[i].size() + 1);
+    const uint32_t node = nodes + static_cast<uint32_t>(i * 8);
+    call.r3.u32 = node;
+    call.r4.u32 = chars;
+    __imp__sub_8245C878(call, base);
+    const uint32_t symbol = rex::memory::load_and_swap<uint32_t>(base + node);
+    WriteResultCell(base, node, symbol, 5);
+  }
+  WriteResultCell(base, ctx.r3.u32, array, 16);
+  std::string logged;
+  for (const auto& line : lines) {
+    if (!logged.empty()) logged += " | ";
+    logged += line;
+  }
+  REXLOG_INFO("settings_bridge: binding text {}: {}", path.substr(prefix.size()), logged);
   return true;
 }
 
@@ -875,4 +946,9 @@ extern "C" REX_FUNC(sub_8241DE48) {
     return;
   }
   __imp__sub_8241DE48(ctx, base);
+}
+
+extern "C" REX_FUNC(sub_8241DD48) {
+  if (rb_blitz::settings::bridge::TakeRead(ctx, base)) return;
+  __imp__sub_8241DD48(ctx, base);
 }

@@ -8,6 +8,10 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **Guest binding rows (2026-10-25):** the host binding overlay is removed. Interface and gameplay
+  lists receive current text on entry and after Reset All; the title draws every row. See the
+  [implementation plan](../plans/in-progress/2026-10-22-in-game-binding-rows-plan.md).
+
 - **HUD placement rewritten (2026-10-24; gameplay validation pending):** the
   post-present repair and transform-message probes are replaced by a WorldXfm
   hook, applying the aspect correction before rendering. Missing/hidden HUD
@@ -523,18 +527,17 @@ menu, so the external app is no longer the only place to change a binding:
   `Controller` = Controller Presets — retail's page, always available — and Custom Mapping;
   `Mouse & Keyboard` lists the same three groups and Reset All directly; the two Custom switches
   are gone since P2).
-* **A binding row draws its inputs in place (P1, 2026-10-19).** The list's own text is a locale
-  entry baked at boot, so the host draws the line over the guest's label: `<row>: <inputs>`
-  (`A: G, H`, `First Note: Q, Right Click`), with `Multiple` when the list does not fit the row's
-  width and the guest's line covered by an opaque box. The row identity comes from the page tree
-  ([`ScreenBindingRows`](../../src/ui/settings_screen.h)), the values from the published input
-  snapshot, and the geometry from the guest's own draw
-  ([`VisibleMenuRows`](../../src/input/native_menu.h)) - so a capture shows in the row the moment
-  the store publishes, with no relaunch and no root re-entry. The display spellings live with the
-  row grammar ([`profile/input_rows.h`](../../src/profile/input_rows.h)): `pad:left_thumb` reads
-  `L3`, `key:Return` reads `Enter`, `key:right` reads `Arrow Right`, `mouse:right` reads
-  `Right Click`. Live: `scripts/acceptance_binding_rows.ps1 -Label p1-h` (24 steps, 0 failures,
-  `out/interface-mapping/p1-rows/p1-h/`).
+* **The guest draws binding rows (2026-10-25).** Interface and gameplay binding lists request
+  `rbbz-settings/text/<panel>` through `read_file` on every population. The host composes
+  `profile::BindingRowText` from one effective snapshot and returns a native reference-counted
+  DataArray of interned Symbols; ordinary rows retain their locale symbols. Selection, movement
+  and scroll captions dispatch by `selected_pos`, from the same authored row order. Capture return
+  and Reset All repopulate immediately without a restart. The host binding-row drawing, opaque
+  covers, `Multiple` fallback, and UI-thread geometry copy are deleted; Settings Labels remains.
+  Both main-menu and pause definitions have host coverage. **Gameplay verification is pending:**
+  isolated D3D12/Vulkan attempts stalled before the menu and never requested binding text. The
+  owner deferred further driving; the game and harness are stopped. Details and evidence are in
+  the [binding-row plan](../plans/in-progress/2026-10-22-in-game-binding-rows-plan.md).
 * **The listening dialog is a screen** (`settings_listen_screen`): a capture waits for neutral,
   then counts **3, 2, 1** and leaves the row untouched if nothing is pressed (P5, 2026-10-20,
   replacing the 700 ms hold-to-cancel and the 20-second timeout). A valid press binds on its own

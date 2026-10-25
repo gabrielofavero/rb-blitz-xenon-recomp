@@ -7,6 +7,7 @@
 #include <rex/cvar.h>
 #include <rex/kernel/xam/module.h>
 #include "hooks/help_observer.h"
+#include "loading/load_trace.h"
 #include "hooks/content_progress.h"
 #include <bit>
 #include <cstring>
@@ -65,26 +66,11 @@ bool window_focused = false;
 bool menu_available = false;
 bool game_screen_active = false;
 uint32_t current_screen = 0, current_focus = 0;
-// The current screen's guest object name, so the rows snapshot can name the page it belongs to.
+// The current screen's guest object name, used by native mouse navigation.
 std::string current_screen_name;
 // The focused list the previous frame's draw identified (see DrawList). Read by the help caption
 // observer; 0 when no list has been drawn as the focused component yet.
 uint32_t focused_list_drawn = 0;
-
-// The visible rows of the focused list, replaced by every draw and cleared at every screen/focus
-// boundary (P1: the settings overlay draws a binding row's line over the guest's own label).
-// Separate from `geometry`, which is the guest thread's per-frame capture: this copy is what the
-// UI thread reads, and it must never outlive the page that produced it.
-std::mutex rows_mutex;
-struct RowsSnapshot {
-  std::string screen_name;
-  std::vector<MenuRowGeometry> rows;
-};
-RowsSnapshot rows_snapshot;
-std::string ScreenNameSnapshot() {
-  std::lock_guard lock(mutex);
-  return current_screen_name;
-}
 
 struct Geometry {
   uint32_t list = 0, frame = 0;
@@ -181,12 +167,6 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     rail_drag.Reset();
     mouse_highlight.Reset();
     scroll_follow.Reset();
-    // A page's rows are gone the moment its screen or focus changes: the overlay must draw
-    // nothing for the new page until its own draw has measured a list.
-    {
-      std::lock_guard rows_lock(rows_mutex);
-      rows_snapshot = {};
-    }
     // P2 (plan D5): a screen or focus change is a boundary the gameplay tables must not carry
     // held state across. The gameplay holds are dropped without an edge on the next poll, so a
     // press or release from the old context can never arrive late in the new one.
@@ -363,13 +343,6 @@ bool MenuAvailable() {
   std::lock_guard lock(mutex);
   return menu_available;
 }
-bool VisibleMenuRows(std::string* screen_name, std::vector<MenuRowGeometry>* rows) {
-  std::lock_guard lock(rows_mutex);
-  if (rows_snapshot.rows.empty()) return false;
-  if (screen_name != nullptr) *screen_name = rows_snapshot.screen_name;
-  if (rows != nullptr) *rows = rows_snapshot.rows;
-  return true;
-}
 bool GameScreenActive() {
   std::lock_guard lock(mutex);
   return game_screen_active;
@@ -496,9 +469,6 @@ struct DrawCapture {
   uint32_t first = 0, end = 0, row = 0;
   int selected = -1;
   std::optional<MenuBounds> highlight;
-  // The rows' own text rectangles, in draw order, as `UIListLabelElement::Draw` measured them
-  // (before the hit cell is merged in): the settings overlay covers exactly this box.
-  std::vector<MenuRowGeometry> labels;
   // The mouse's unhover frame: the shared highlight mesh is skipped while this draw runs.
   bool suppress = false;
 };
@@ -663,20 +633,6 @@ void CaptureLabel(PPCContext& ctx, uint8_t* base) {
     bounds.left = std::min(bounds.left, px); bounds.right = std::max(bounds.right, px);
     bounds.top = std::min(bounds.top, py); bounds.bottom = std::max(bounds.bottom, py);
   }
-  // Keep the label's own box apart from the hit cell `CaptureRow` merges below (P1): the overlay
-  // replaces the guest's text, so it must cover the text and not the whole row.
-  const int index = U32(base, row + 36);
-  auto& labels = drawing->labels;
-  const auto found = std::find_if(labels.begin(), labels.end(),
-                                  [index](const MenuRowGeometry& entry) { return entry.index == index; });
-  if (found == labels.end()) {
-    labels.push_back(MenuRowGeometry{index, bounds, bounds});
-  } else {
-    found->label.left = std::min(found->label.left, bounds.left);
-    found->label.right = std::max(found->label.right, bounds.right);
-    found->label.top = std::min(found->label.top, bounds.top);
-    found->label.bottom = std::max(found->label.bottom, bounds.bottom);
-  }
   CaptureRow(base, bounds);
 }
 
@@ -811,37 +767,7 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   geometry.selected = capture.selected;
   if (capture.selected >= 0) last_selected_row = capture.selected;
   PublishRail(MeasureRail(ctx, base, list, geometry));
-  // P1: the page's visible rows and their text boxes for the settings overlay. Each label is
-  // paired with the row's full clickable cell, so the overlay can size a replacement line against
-  // the room the row really has. The cell is only as wide as the highlight mesh on frames where
-  // that mesh is drawn, so the widest box seen for the page is kept: the row's width does not
-  // change while the page is open, and a frame without the highlight must not shrink it back to
-  // the label's own width.
-  {
-    RowsSnapshot snapshot;
-    snapshot.screen_name = ScreenNameSnapshot();
-    snapshot.rows = std::move(capture.labels);
-    std::lock_guard lock(rows_mutex);
-    const bool same_page = rows_snapshot.screen_name == snapshot.screen_name;
-    for (MenuRowGeometry& entry : snapshot.rows) {
-      // `geometry.rows` is the capture's own result (moved into `geometry` above), not the
-      // moved-from `capture.result.rows`.
-      const auto row = std::find_if(geometry.rows.begin(), geometry.rows.end(),
-                                    [&entry](const MenuRow& candidate) { return candidate.index == entry.index; });
-      if (row != geometry.rows.end() && row->bounds) entry.cell = *row->bounds;
-      if (!same_page) continue;
-      const auto previous =
-          std::find_if(rows_snapshot.rows.begin(), rows_snapshot.rows.end(),
-                       [&entry](const MenuRowGeometry& candidate) { return candidate.index == entry.index; });
-      if (previous != rows_snapshot.rows.end()) {
-        entry.cell.left = std::min(entry.cell.left, previous->cell.left);
-        entry.cell.right = std::max(entry.cell.right, previous->cell.right);
-        entry.cell.top = std::min(entry.cell.top, previous->cell.top);
-        entry.cell.bottom = std::max(entry.cell.bottom, previous->cell.bottom);
-      }
-    }
-    rows_snapshot = std::move(snapshot);
-  }
+
 }
 } // namespace rb_blitz::input
 
@@ -849,6 +775,7 @@ REX_HOOK_RAW(sub_824B2958) {
   const auto manager = ctx.r3.u32;
   rb_blitz::input::PollMouse(ctx, base, manager);
   __imp__sub_824B2958(ctx, base);
+  rb_blitz::loading::ObserveLoadFrame(base, manager);
   rb_blitz::input::Context(ctx, base, manager);
   // The help captions' observer (owner request, 2026-10-13): the frame's input has been
   // dispatched by now, so a selection that moved this frame is already visible and the observer

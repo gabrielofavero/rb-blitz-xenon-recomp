@@ -39,6 +39,7 @@
 // They only ever *read* an input, and they write only the path the caller names.
 
 #include "check.h"
+#include "input/effective_input.h"
 
 #include "hooks/settings_bridge.h"
 #include "profile/gameplay_remap.h"
@@ -308,7 +309,8 @@ void CollectRowTables(const dtb::Node& node, std::vector<const dtb::Node*>* out)
   if (node.tag == dtb::kCommand && node.kids.size() >= 2 && node.kids[0].tag == dtb::kSymbol &&
       node.kids[0].text == "switch" && node.kids[1].tag == dtb::kCommand) {
     const std::vector<std::string> words = Words(node.kids[1]);
-    if (std::find(words.begin(), words.end(), "selected_sym") != words.end()) {
+    if (std::find(words.begin(), words.end(), "selected_sym") != words.end() ||
+        std::find(words.begin(), words.end(), "selected_pos") != words.end()) {
       out->push_back(&node);
     }
   }
@@ -638,6 +640,10 @@ void TestRequestPathsParse() {
   int checked = 0;
   for (const std::string& literal : literals) {
     if (literal.rfind("rbbz-settings/", 0) != 0) {
+      continue;
+    }
+    if (literal.starts_with("rbbz-settings/text/")) {
+      CHECK_FALSE(PanelBindingText(literal.substr(19), rb_blitz::input::EffectiveInput{}).empty());
       continue;
     }
     ++checked;
@@ -2037,6 +2043,13 @@ void TestLabels() {
     CollectSymbols(root, &symbols);
   }
 
+  // Ordinary rows on live pages are locale symbols supplied by the text channel.
+  for (const auto& root : DefinitionRoots()) {
+    if (root.kids.size() < 3 || root.kids[1].text != "UIPanel") continue;
+    for (const auto& line : PanelBindingText(root.kids[2].text, rb_blitz::input::EffectiveInput{}))
+      symbols.push_back(line);
+  }
+
   // The spelling, measured in a capture: our own rows drew "GENERAL" and "GAMEPLAY" beside retail's
   // "Controls" and "Calibration", because a label of ours was typed in the main menu's capitals
   // while the retail rows beside it come from the options *page* locale strings. Every row label of
@@ -2770,8 +2783,10 @@ void TestHelpEventsInTheDefinition() {
         std::vector<std::string> out;
         for (size_t i = 2; i < table.kids.size(); ++i) {
           const dtb::Node& kase = table.kids[i];
-          if (kase.tag == dtb::kArray && !kase.kids.empty() && kase.kids[0].tag == dtb::kSymbol) {
-            out.push_back(kase.kids[0].text);
+          if (kase.tag == dtb::kArray && !kase.kids.empty() &&
+              (kase.kids[0].tag == dtb::kSymbol || kase.kids[0].tag == dtb::kInt)) {
+            out.push_back(kase.kids[0].tag == dtb::kInt ? std::to_string(kase.kids[0].scalar)
+                                                        : kase.kids[0].text);
           }
         }
         return out;
@@ -3294,6 +3309,12 @@ std::vector<std::string> PageRows(const std::string& panel_name) {
           continue;
         }
         const dtb::Node& values = statement->kids[1];
+        if (HasWord(values, "read_file")) {
+          std::string name = panel_name;
+          const auto pause = name.find("_pause_panel");
+          if (pause != std::string::npos) name.replace(pause, 12, "_panel");
+          return PanelRowSymbols(name);
+        }
         if (values.tag != dtb::kCommand || values.kids.size() < 2 ||
             values.kids[1].tag != dtb::kArray) {
           continue;
@@ -3426,7 +3447,7 @@ void TestGameplayMappingTreeAfterP4() {
     CHECK_TRUE(has_label(key, "PAUSE & POWER-UP"));
   }
   // D13: the game's own spelling, on the row and on the bind page's title.
-  CHECK_TRUE(has_label("settings_bind_controller_powerup_on", "Power-up: Custom"));
+  CHECK_FALSE(has_label("settings_bind_controller_powerup_on", "Power-up: Custom"));
   CHECK_TRUE(has_label("settings_title_settings_bind_controller_powerup_panel", "POWER-UP"));
   CHECK_TRUE(has_label("settings_title_settings_bind_keyboard_mouse_powerup_panel", "POWER-UP"));
 
@@ -3517,14 +3538,9 @@ void TestInterfaceMappingTreeAfterP3() {
   CHECK_TRUE(has_label("settings_title_settings_interface_navigation_panel", "NAVIGATION"));
   CHECK_TRUE(
       has_label("settings_title_settings_interface_music_library_panel", "MUSIC LIBRARY OPTIONS"));
-  // D1's names, on the rows and on the child pages' own titles.
-  CHECK_TRUE(has_label("settings_bind_general_a_on", "Confirm: Custom"));
-  CHECK_TRUE(has_label("settings_bind_general_a_off", "Confirm: Default"));
-  CHECK_TRUE(has_label("settings_bind_general_b_on", "Go Back: Custom"));
-  CHECK_TRUE(has_label("settings_bind_general_dpad_up_on", "Up: Custom"));
-  CHECK_TRUE(has_label("settings_bind_general_start_on", "Search: Custom"));
-  CHECK_TRUE(has_label("settings_bind_general_y_on", "Shortcuts: Custom"));
-  CHECK_TRUE(has_label("settings_bind_general_back_on", "Sort: Custom"));
+  // Binding values are supplied at entry; their old Custom/Default locale pairs are retired.
+  CHECK_FALSE(has_label("settings_bind_general_a_on", "Confirm: Custom"));
+  CHECK_FALSE(has_label("settings_bind_general_a_off", "Confirm: Default"));
   CHECK_TRUE(has_label("settings_interface_navigation", "Navigation"));
   CHECK_TRUE(has_label("settings_interface_music_library", "Music Library Options"));
   CHECK_TRUE(has_label("settings_reset_general", "Reset All"));
@@ -3570,6 +3586,99 @@ void TestInterfaceMappingTreeAfterP3() {
              "input.general.a");
   CHECK_TRUE(rb_blitz::profile::GeneralBindingToken(rb_blitz::profile::remap::Target::kDpadUp) ==
              "input.general.dpad_up");
+}
+
+void TestLiveBindingText() {
+  BeginCase(
+      "live binding text: snapshot parity, refresh, reset and index dispatch in both contexts");
+  rb_blitz::input::EffectiveInput snapshot;
+  using namespace rb_blitz::profile;
+  const auto roots = DefinitionRoots();
+  size_t live_pages = 0;
+  for (const auto& root : roots) {
+    if (root.kids.size() < 3 || root.kids[1].text != "UIPanel") continue;
+    const std::string panel = root.kids[2].text;
+    const auto text = PanelBindingText(panel, snapshot);
+    if (text.empty()) continue;
+    ++live_pages;
+    const auto symbols = PageRows(panel);
+    CHECK_EQ(text.size(), symbols.size());
+    // The press table and scroll caption table must address every row exactly once, with
+    // consecutive integer keys, and never identify a row by its changing display text.
+    for (const char* member : {"select_row", "SCROLL_MSG"}) {
+      std::vector<const Node*> members;
+      CollectMembers(root, member, &members);
+      CHECK_EQ(members.size(), 1u);
+      if (members.empty()) continue;
+      CHECK_TRUE(HasWord(*members.front(), "selected_pos"));
+      CHECK_FALSE(HasWord(*members.front(), "selected_sym"));
+      std::vector<const Node*> tables;
+      CollectRowTables(*members.front(), &tables);
+      CHECK_EQ(tables.size(), 1u);
+      if (tables.empty()) continue;
+      CHECK_EQ(tables.front()->kids.size(), text.size() + 2);
+      for (size_t i = 0; i < text.size(); ++i) {
+        const auto& key = tables.front()->kids[i + 2].kids.front();
+        CHECK_EQ(key.tag, dtb::kInt);
+        CHECK_EQ(key.scalar, i);
+        if (std::string_view(member) == "SCROLL_MSG")
+          CHECK_TRUE(
+              HasWord(tables.front()->kids[i + 2], "rbbz-settings/help/" + symbols[i] + "/-"));
+      }
+    }
+    CHECK_TRUE(HasWord(root, "rbbz-settings/text/" + panel));
+    for (const char* member : {"move_up", "move_down"}) {
+      std::vector<const Node*> members;
+      CollectMembers(root, member, &members);
+      CHECK_EQ(members.size(), 1u);
+      if (!members.empty()) {
+        CHECK_TRUE(HasWord(*members.front(), "selected_pos"));
+        CHECK_FALSE(HasWord(*members.front(), "selected_sym"));
+      }
+    }
+    for (size_t i = 0; i < symbols.size(); ++i) {
+      const auto row = ParseInputRowSymbol(symbols[i]);
+      if (!row.valid())
+        CHECK_TRUE(text[i] == symbols[i]);
+      else
+        CHECK_TRUE(text[i].find(BindingRowLabel(row) + ": ") == 0);
+    }
+  }
+  CHECK_EQ(live_pages, 18u);  // 3 interface + 6 gameplay lists, main menu and pause
+  const std::string panel = "settings_interface_mapping_panel";
+  const auto defaults = PanelBindingText(panel, snapshot);
+  snapshot.general.Set(remap::Target::kA, *remap::ParseSourceList("key:g, key:h"));
+  auto changed = PanelBindingText(panel, snapshot);
+  CHECK_TRUE(changed[1] == "Confirm: G, H");
+  CHECK_TRUE(changed[0] == defaults[0] && changed[4] == defaults[4]);
+  snapshot.general.Set(remap::Target::kA, *remap::ParseSourceList("key:g, key:h, key:j"));
+  CHECK_TRUE(PanelBindingText(panel, snapshot)[1] == "Confirm: G, H, J");
+  CHECK_TRUE(PanelBindingText(PausePanel(panel), snapshot) == PanelBindingText(panel, snapshot));
+  snapshot.general.ResetAll();
+  CHECK_TRUE(PanelBindingText(panel, snapshot) == defaults);
+  snapshot.general.Set(remap::Target::kA, {});
+  CHECK_TRUE(PanelBindingText(panel, snapshot)[1] == "Confirm: (no inputs)");
+  // No DTA source is interpolated: quotes and backslashes are data, even for future key names.
+  snapshot.general.Set(remap::Target::kA, {{remap::SourceKind::kKey, "quote\"slash\\"}});
+  const auto token = ParseInputRowToken("input.general.a");
+  CHECK_TRUE(PanelBindingText(panel, snapshot)[1] ==
+             BindingRowText(token, snapshot.general.Effective(remap::Target::kA)));
+  for (auto kind : gameplay_remap::TableKinds()) {
+    auto& table = kind == gameplay_remap::TableKind::kController ? snapshot.controller
+                                                                 : snapshot.keyboard_mouse;
+    const std::string group = kind == gameplay_remap::TableKind::kController
+                                  ? "settings_controller_notes_panel"
+                                  : "settings_keyboard_mouse_notes_panel";
+    table.Set(gameplay_remap::Action::kFirstNote, *remap::ParseSourceList("key:q, mouse:right"));
+    CHECK_TRUE(PanelBindingText(group, snapshot)[0] == "First Note: Q, Right Click");
+    table.ResetAll();
+    CHECK_TRUE(PanelBindingText(group, snapshot)[0] ==
+               BindingRowText(ParseInputRowToken(
+                                  GameplayBindingToken(kind, gameplay_remap::Action::kFirstNote)),
+                              table.Effective(gameplay_remap::Action::kFirstNote)));
+  }
+  CHECK_TRUE(PanelBindingText("settings_controls_panel", snapshot).empty());
+  CHECK_TRUE(PanelBindingText("unknown", snapshot).empty());
 }
 
 void TestScreenBindingRows() {
@@ -4146,6 +4255,7 @@ int main(int argc, char** argv) {
   TestProviderRowRemoval();
   TestRendererRowVisibility();
   TestScreenBindingRows();
+  TestLiveBindingText();
   TestInterfaceMappingTreeAfterP3();
   TestGameplayMappingTreeAfterP4();
   TestLocaleOverrides();

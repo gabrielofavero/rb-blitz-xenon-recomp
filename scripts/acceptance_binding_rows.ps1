@@ -1,28 +1,14 @@
-# P1 acceptance: the runtime binding-row text (docs/plans/in-progress/2026-10-19-interface-gameplay-
-# mapping-restructure-plan.md, P1).
-#
-# One boot proves the three facts P1 has to prove, and keeps the screenshot and the host's own
-# line for each:
-#
-#   * a binding row draws the inputs it holds, not a state word - a seeded two-source [remap] row
-#     reads `A: G, H` and a compiled default reads `Left bumper: LB`;
-#   * a capture writes the row's text: the A row gains `J` after a tap in the listening dialog,
-#     with no relaunch and no re-entry from the root (the page behind the dialog shows it);
-#   * a list too long for the row reads `Multiple` - the Controller table's First Note default is
-#     eight stick/D-pad directions.
-#
-# The row text is asserted on the host's own line (`help_overlay: binding rows <screen>: ...`),
-# so a failure names the text rather than a pixel; the screenshots are the visual record beside it.
-#
-# Usage:  pwsh -File scripts\acceptance_binding_rows.ps1 [-Label p1-rows]
-# Writes out/interface-mapping/p1-rows/<Label>/ (log, argv, profile snapshots, binding-rows.txt)
-# and out/interface-mapping/p1-rows/<Label>-shots/*.png, prints a per-step verdict, and exits
-# non-zero unless every step behaved.
+# Guest-drawn binding-row acceptance (2026-10-25).
+# Uses isolated userdata and captures the guest pages. Bridge log assertions verify delivered
+# text; screenshots verify actual guest rendering, clipping and highlighting. No binding overlay.
+# Exercises capture, immediate Reset All refresh, and the full long Controller binding.
+# Usage: pwsh -File scripts/acceptance_binding_rows.ps1 -Label guest-rows
 param(
     [string]$Label = 'p1-rows',
     [string]$BuildDir = 'out/build/win-amd64-release',
     [int]$BootTimeoutSec = 240,
-    [int]$StepSeconds = 4
+    [int]$StepSeconds = 4,
+    [ValidateSet("", "d3d12", "vulkan")][string]$Backend = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,6 +54,7 @@ $exeArgs = @("--game_data_root=$game", '--mnk_mode=1', '--fullscreen=false',
              "--dlc_library=$empty", "--dlc_root=$empty",
              '--enhancements_dlc_cache=true', '--enhancements_dlc_uncap_enumeration=true',
              "--log_file=$log", '--mouse_native_trace=true')
+if ($Backend) { $exeArgs += "--gpu_backend=$Backend" }
 $exeArgs | Set-Content (Join-Path $outDir 'argv.txt')
 New-Item -ItemType Directory -Force -Path (Join-Path $root $shots) | Out-Null
 
@@ -149,7 +136,7 @@ function Assert-Screen {
 function Assert-RowText {
     param([string]$Screen, [string]$Needle, [string]$Tag)
     $script:steps += 1
-    $line = Select-String -Path $log -Pattern "help_overlay: binding rows $Screen" -ErrorAction SilentlyContinue |
+    $line = Select-String -Path $log -Pattern "settings_bridge: binding text $($Screen -replace '_screen$', '_panel'):" -ErrorAction SilentlyContinue |
         Select-Object -Last 1
     $text = if ($line) { $line.Line } else { '' }
     if ($text -notlike "*$Needle*") {
@@ -194,7 +181,7 @@ try {
 
     # The title takes A; the content pass delays the main menu's first draw, so wait for a row
     # line and press again if the first A was swallowed (the same rule acceptance_controls uses).
-    Drive @('shot:00-title.png')
+    Drive @('refocus', 'shot:00-title.png')
     for ($attempt = 1; $attempt -le 3; $attempt++) {
         Drive @('key:a')
         $saw_rows = $false
@@ -228,8 +215,8 @@ try {
     # The seeded two-source row reads its own list under P3's own name for the target (`Confirm`
     # is the A row), and a default row names every source. The wrapped list draws only the rows
     # around the selection, so the default probe is one of those.
-    Assert-RowText 'settings_interface_mapping_screen' 'input.general.a = Confirm: G, H' '05-interface-rows'
-    Assert-RowText 'settings_interface_mapping_screen' 'input.general.b = Go Back: B, Escape, B' '05-interface-rows'
+    Assert-RowText 'settings_interface_mapping_screen' 'Confirm: G, H' '05-interface-rows'
+    Assert-RowText 'settings_interface_mapping_screen' 'Go Back: B, Escape, B' '05-interface-rows'
     Copy-Item -LiteralPath $log -Destination (Join-Path $outDir 'game-before-capture.log')
 
     # --- a capture changes the row's text ----------------------------------------------------
@@ -243,9 +230,15 @@ try {
     # One Back returns to the page that owns the row: no relaunch, no root re-entry.
     Drive @('key:b', "wait:$StepSeconds", 'shot:10-interface-rows-after.png')
     Assert-Screen 'settings_interface_mapping_screen' '10-interface-rows-after' | Out-Null
-    Assert-RowText 'settings_interface_mapping_screen' 'input.general.a = Confirm: G, H, J' '10-interface-rows-after'
+    Assert-RowText 'settings_interface_mapping_screen' 'Confirm: G, H, J' '10-interface-rows-after'
 
-    # --- a list too long for the row ---------------------------------------------------------
+    # Reset All repopulates this same page: no Back/re-entry is needed for the value to change.
+    ClickRow 4 '10b-reset-all'
+    Assert-Screen 'settings_interface_mapping_screen' '10b-reset-all' | Out-Null
+    Assert-RowText 'settings_interface_mapping_screen' 'Confirm: A, Enter, A' '10b-reset-all'
+    Assert-Profile 'key:j' $false '10b-reset-all' 'profile-10b-reset.toml'
+
+    # --- the complete long binding list ---------------------------------------------------------
     Drive @('key:b', "wait:$StepSeconds", 'shot:11-back-controls.png')
     Assert-Screen 'settings_controls_screen' '11-back-controls' | Out-Null
     ClickRow 2 '12-gameplay-mapping'
@@ -259,7 +252,7 @@ try {
     ClickRow 0 '15-notes'
     Assert-Screen 'settings_controller_notes_screen' '15-notes' | Out-Null
     Drive @("wait:$StepSeconds", 'shot:16-controller-actions.png')
-    Assert-RowText 'settings_controller_notes_screen' 'input.controller.first_note = Multiple' '16-controller-actions'
+    Assert-RowText 'settings_controller_notes_screen' 'First Note: L-Stick Up, L-Stick Down, L-Stick Left, L-Stick Right, D-pad Up, D-pad Down, D-pad Left, D-pad Right' '16-controller-actions'
 } catch {
     $script:failures += $_.Exception.Message
     Write-Host ("  !! run stopped: {0}" -f $_.Exception.Message)
@@ -269,9 +262,9 @@ try {
     Start-Sleep -Milliseconds 500
 }
 
-# The overlay's own record of every page's row text, in draw order, beside the shots.
+# The text delivered to the guest on each population, beside the visual evidence.
 if (Test-Path $log) {
-    Select-String -Path $log -Pattern 'help_overlay: binding rows ' -ErrorAction SilentlyContinue |
+    Select-String -Path $log -Pattern 'settings_bridge: binding text ' -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Line } | Set-Content (Join-Path $outDir 'binding-rows.txt')
     Select-String -Path $log -Pattern 'native_mouse: screen=' -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Line } | Set-Content (Join-Path $outDir 'screens.txt')

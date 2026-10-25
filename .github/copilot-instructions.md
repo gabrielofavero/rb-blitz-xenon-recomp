@@ -59,8 +59,8 @@ python .github/skills/documentation/scripts/check_docs.py
 - A missing engine capability is not a reason to draw over the game: extend the guest channel
   (DTA records, list data, bridged text) instead. Say "unproven" and plan a spike rather than
   shipping an overlay.
-- `src/ui/help_overlay.cpp`'s `DrawBindingRows` is the case that motivated this rule; its
-  replacement is `docs/plans/todo/2026-10-22-in-game-binding-rows-plan.md`.
+- The removed `DrawBindingRows` overlay motivated this rule; its guest-drawn replacement is
+  implemented in `docs/plans/in-progress/2026-10-22-in-game-binding-rows-plan.md`.
 
 ## Rules that bite
 

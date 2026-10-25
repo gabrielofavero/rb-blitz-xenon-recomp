@@ -39,7 +39,8 @@ param(
     [string]$Label = 'p7-controls',
     [string]$BuildDir = 'out/build/win-amd64-release',
     [int]$BootTimeoutSec = 240,
-    [int]$StepSeconds = 4
+    [int]$StepSeconds = 4,
+    [ValidateSet("", "d3d12", "vulkan")][string]$Backend = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,6 +78,7 @@ $exeArgs = @("--game_data_root=$game", '--mnk_mode=1', '--fullscreen=false',
              "--dlc_library=$empty", "--dlc_root=$empty",
              '--enhancements_dlc_cache=true', '--enhancements_dlc_uncap_enumeration=true',
              "--log_file=$log", '--mouse_native_trace=true')
+if ($Backend) { $exeArgs += "--gpu_backend=$Backend" }
 $exeArgs | Set-Content (Join-Path $outDir 'argv.txt')
 New-Item -ItemType Directory -Force -Path (Join-Path $root $shots) | Out-Null
 
@@ -184,14 +186,11 @@ function Assert-Same {
     Write-Host "  ${Tag}: the profile is byte-identical"
 }
 
-# P1: the binding-row line the host overlay drew for a page. The overlay logs the whole set once
-# per change (`help_overlay: binding rows <screen>: <token> = <text> | ...`), so a step can assert
-# on the words the player sees instead of on pixels; the screenshots beside it are the visual
-# record. The line is also the state after an in-page capture, which is what makes "the row updates
-# without re-entering the page" measurable rather than a claim.
+# The bridge logs exactly the row text supplied to the guest at each population.
+# Screenshots remain the evidence for guest rendering and layout.
 function Get-RowText {
     param([string]$Screen)
-    $line = Select-String -Path $log -Pattern "help_overlay: binding rows $Screen" -ErrorAction SilentlyContinue |
+    $line = Select-String -Path $log -Pattern "settings_bridge: binding text $($Screen -replace '_screen$', '_panel'):" -ErrorAction SilentlyContinue |
         Select-Object -Last 1
     if (-not $line) { return '' }
     return $line.Line
@@ -265,8 +264,8 @@ try {
     ClickRow 1 '06-interface-mapping'
     Assert-Screen 'settings_interface_mapping_screen' '06-interface-mapping' | Out-Null
     # P3: the page names the interface's actions, not the pad's plastic (`Confirm` is the A
-    # target's row), and P1's overlay draws the row's own list over the label.
-    Assert-RowText 'settings_interface_mapping_screen' 'input.general.a = Confirm: A, Enter, A' '06-interface-mapping'
+    # target's row), and the guest draws the row's own list.
+    Assert-RowText 'settings_interface_mapping_screen' 'Confirm: A, Enter, A' '06-interface-mapping'
     Drive @('key:b', "wait:$StepSeconds")
     ClickRow 2 '07-gameplay-mapping'
     Assert-Screen 'settings_gameplay_mapping_screen' '07-gameplay-mapping' | Out-Null
@@ -293,7 +292,7 @@ try {
     # `Confirm: G` rather than the default's three sources plus the captured one.
     Drive @('key:b', "wait:$StepSeconds", 'shot:13a-interface-row-after-capture.png')
     Assert-Screen 'settings_interface_mapping_screen' '13a-interface-row-after-capture' | Out-Null
-    Assert-RowText 'settings_interface_mapping_screen' 'input.general.a = Confirm: G' '13a-interface-row-after-capture'
+    Assert-RowText 'settings_interface_mapping_screen' 'Confirm: G' '13a-interface-row-after-capture'
     ClickRow 1 '13b-confirm-row-again'
     Assert-Screen 'settings_bind_general_a_screen' '13b-confirm-row-again' | Out-Null
 
@@ -311,7 +310,7 @@ try {
     Assert-Screen 'settings_interface_mapping_screen' '15a-back-interface' | Out-Null
     ClickRow 0 '15b-navigation'
     Assert-Screen 'settings_interface_navigation_screen' '15b-navigation' | Out-Null
-    Assert-RowText 'settings_interface_navigation_screen' 'input.general.dpad_up = Up: D-pad Up, W, Arrow Up' '15b-navigation'
+    Assert-RowText 'settings_interface_navigation_screen' 'Up: D-pad Up, W, Arrow Up' '15b-navigation'
     ClickRow 0 '15c-up-row'
     Assert-Screen 'settings_bind_general_dpad_up_screen' '15c-up-row' | Out-Null
     ClickRow 0 '15d-assign-up' -Wait 0.4
@@ -323,19 +322,19 @@ try {
     # (the page that lists the Up row), not the Interface Mapping page above it.
     Drive @('key:b', "wait:$StepSeconds", 'shot:15f-navigation-rows.png')
     Assert-Screen 'settings_interface_navigation_screen' '15f-navigation-rows' | Out-Null
-    Assert-RowText 'settings_interface_navigation_screen' 'input.general.dpad_up = Up: J' '15f-navigation-rows'
+    Assert-RowText 'settings_interface_navigation_screen' 'Up: J' '15f-navigation-rows'
     Drive @('key:b', "wait:$StepSeconds", 'shot:15g-back-interface.png')
     Assert-Screen 'settings_interface_mapping_screen' '15g-back-interface' | Out-Null
     ClickRow 3 '15h-music-library'
     Assert-Screen 'settings_interface_music_library_screen' '15h-music-library' | Out-Null
-    Assert-RowText 'settings_interface_music_library_screen' 'input.general.start = Search: Start, Space' '15h-music-library'
+    Assert-RowText 'settings_interface_music_library_screen' 'Search: Start, Space' '15h-music-library'
     Drive @('key:b', "wait:$StepSeconds", 'shot:15i-back-interface.png')
     Assert-Screen 'settings_interface_mapping_screen' '15i-back-interface' | Out-Null
     # D9 + D2: one plain `Reset All` press restores every row - the two captures above and the
     # seven targets this page does not draw - and removes the `[remap]` rows from the profile.
     ClickRow 4 '15j-reset-all'
     Assert-Screen 'settings_interface_mapping_screen' '15j-reset-all' | Out-Null
-    Assert-RowText 'settings_interface_mapping_screen' 'input.general.a = Confirm: A, Enter, A' '15j-reset-all'
+    Assert-RowText 'settings_interface_mapping_screen' 'Confirm: A, Enter, A' '15j-reset-all'
     Assert-Profile 'key:j' $false '15j-reset-all' 'profile-15j-after-reset-all.toml'
 
     # --- the Controller table's own pages ----------------------------------------------------
@@ -359,9 +358,9 @@ try {
     Drive @('shot:24-controller-groups.png')
     ClickRow 0 '25-notes'
     Assert-Screen 'settings_controller_notes_screen' '25-notes' | Out-Null
-    # P1: a list too long for the row reads `Multiple` (the owner's allowance) instead of
-    # overflowing; the Controller default for First Note is eight stick/D-pad directions.
-    Assert-RowText 'settings_controller_notes_screen' 'input.controller.first_note = Multiple' '25-notes'
+    # The guest receives the complete First Note default: eight stick/D-pad directions.
+    # Its actual clipping and fit are verified in the screenshot.
+    Assert-RowText 'settings_controller_notes_screen' 'First Note: L-Stick Up, L-Stick Down, L-Stick Left, L-Stick Right, D-pad Up, D-pad Down, D-pad Left, D-pad Right' '25-notes'
     # --- a key into the Controller table is the wrong kind ------------------------------------
     ClickRow 0 '26-first-note'
     Assert-Screen 'settings_bind_controller_first_note_screen' '26-first-note' | Out-Null
@@ -391,7 +390,7 @@ try {
     Drive @('shot:33-keyboard-mouse-groups.png')
     ClickRow 0 '34-notes-km'
     Assert-Screen 'settings_keyboard_mouse_notes_screen' '34-notes-km' | Out-Null
-    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: Q, Right Click' '34-notes-km'
+    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'First Note: Q, Right Click' '34-notes-km'
     ClickRow 0 '35-first-note-km'
     Assert-Screen 'settings_bind_keyboard_mouse_first_note_screen' '35-first-note-km' | Out-Null
     ClickRow 0 '36-assign-km' -Wait 0.4
@@ -404,7 +403,7 @@ try {
     # D8: the first Assign replaced the default pair, so the group's row now reads the captured key.
     Drive @('key:b', "wait:$StepSeconds", 'shot:39-notes-after-capture.png')
     Assert-Screen 'settings_keyboard_mouse_notes_screen' '39-notes-after-capture' | Out-Null
-    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: G' '39-notes-after-capture'
+    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'First Note: G' '39-notes-after-capture'
 
     # P5/D11: a wheel detent is a press with no release, and it binds on the frame it arrives.
     # The row is already custom, so this is also D8's append case (`G, Scroll Up`).
@@ -417,7 +416,7 @@ try {
     Assert-Profile 'wheel_up' $true '39d-wheel-bound' 'profile-39d-after-wheel.toml'
     Drive @('key:b', "wait:$StepSeconds", 'shot:39e-notes-wheel.png')
     Assert-Screen 'settings_keyboard_mouse_notes_screen' '39e-notes-wheel' | Out-Null
-    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: G, Scroll Up' '39e-notes-wheel'
+    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'First Note: G, Scroll Up' '39e-notes-wheel'
 
     # P4/D9: the table's plain Reset All removes the custom row and the row falls back to its
     # default pair - the check the old disabled-when-uncustomised Reset All row could not make.
@@ -432,7 +431,7 @@ try {
     Assert-Profile 'wheel_up' $false '41-reset-all-km' ''
     ClickRow 0 '42-notes-again'
     Assert-Screen 'settings_keyboard_mouse_notes_screen' '42-notes-again' | Out-Null
-    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'input.keyboard_mouse.first_note = First Note: Q, Right Click' '42-notes-again'
+    Assert-RowText 'settings_keyboard_mouse_notes_screen' 'First Note: Q, Right Click' '42-notes-again'
 
     # Back out to the Controls page and then to the main menu: every level's Back is its own.
     Drive @('key:b', "wait:$StepSeconds", 'shot:43-back-groups.png')
@@ -458,8 +457,8 @@ if (Test-Path $log) {
         ForEach-Object { $_.Line } | Set-Content (Join-Path $outDir 'bridge-lines.txt')
     Select-String -Path $log -Pattern 'native_mouse: screen=' -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Line } | Set-Content (Join-Path $outDir 'screens.txt')
-    # P1: what each binding page drew, in order, as the evidence behind the row screenshots.
-    Select-String -Path $log -Pattern 'help_overlay: binding rows ' -ErrorAction SilentlyContinue |
+    # Text supplied to each guest binding page, alongside its screenshot.
+    Select-String -Path $log -Pattern 'settings_bridge: binding text ' -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Line } | Set-Content (Join-Path $outDir 'binding-rows.txt')
 }
 Copy-Item -LiteralPath $profilePath -Destination (Join-Path $outDir 'profile-final.toml')

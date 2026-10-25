@@ -83,6 +83,7 @@
 #include "hooks/settings_payload.h"
 #include "hooks/shell_music.h"
 #include "hooks/ultimate.h"
+#include "loading/load_trace.h"
 #include "input/mouse_ui.h"
 #include "input/remap.h"
 #include "input/title_input.h"
@@ -424,6 +425,7 @@ class RbBlitzApp : public rex::ReXApp {
     // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the
     // player cannot change has to say so rather than save a value that never takes effect.
     rex::cvar::FinalizeInit();
+    rb_blitz::loading::ConfigureLoadTrace();
     rb_blitz::graphics::ConfigureLoading(runtime());
     coverage_recorder_ = rb_blitz::graphics::StartDevelopmentCoverage(
         rex::filesystem::GetExecutablePath(),runtime()->cache_root());
