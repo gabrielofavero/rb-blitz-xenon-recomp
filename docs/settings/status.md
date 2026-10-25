@@ -8,6 +8,13 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **Ultimate settings format fixed (2026-10-24):** the host rejected the mod's own
+  top-level DTA pairs as trailing content, causing Gold Star Progress to look changed
+  in-session but revert at restart. The adapter now reads native pairs and legacy host
+  wrappers, and always saves native pairs without losing unknown values. Host regression
+  and real-payload reload coverage are in `tests/ultimate_adapter_tests.cpp`; evidence
+  and the pending game restart check are in [architecture.md](architecture.md) part 5 §4.
+
 - **Two rows renamed, the refresh entry back on by default (2026-10-22, owner request):** the main
   menu's store entry reads **RhythmVerse** (was *RhythmVerse Customs*) and the refresh row reads
   **Refresh Songs** (was *Refresh Music Library*); the Downloadable Content page's own switch is

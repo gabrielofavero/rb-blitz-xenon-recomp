@@ -449,7 +449,7 @@ void TestReadiness() {
 
 void TestProviderFile() {
   rb_blitz::test::BeginCase("the provider's file round-trips and keeps what this build omits");
-  // Exactly the shape `mod_settings_rw save_settings` writes: a leading marker, then pairs - two
+  // The legacy host-written shape: a leading marker, then pairs - two
   // of which (`controller_mapping`, `server_url`) this build does not draw, and one of which
   // (`p9dlc`-style) serialized as several items rather than a single value.
   const std::string text =
@@ -482,20 +482,20 @@ void TestProviderFile() {
   // written back exactly - and the multi-item element is still there.
   const std::string rewritten = WriteProviderFile(file, {{"freq_ms", "TRUE"}, {"gems", "ulti"}});
   CHECK_TRUE(rewritten ==
-             "(0 (controller_mapping \"A B X Y\") (freq_ms TRUE) (which_skybox 0) (speedmod "
-             "1.05) (server_url \"listener.hmxservices.com\") (gems ulti) (legacy_multi 1 2 "
-             "3))");
+             "(controller_mapping \"A B X Y\")\n(freq_ms TRUE)\n(which_skybox 0)\n(speedmod "
+             "1.05)\n(server_url \"listener.hmxservices.com\")\n(gems ulti)\n(legacy_multi 1 2 "
+             "3)\n");
   ProviderFile again;
   CHECK_TRUE(ParseProviderFile(rewritten, &again, &error));
   CHECK_TRUE(again.values.at("freq_ms") == "TRUE");
   CHECK_TRUE(again.values.at("gems") == "ulti");
   CHECK_TRUE(again.values.at("server_url") == "\"listener.hmxservices.com\"");
   CHECK_TRUE(again.names == file.names);
-  // A round trip with no updates is the identity.
+  // A legacy file is migrated to the native format even when no values change.
   CHECK_TRUE(WriteProviderFile(file, {}) ==
-             "(0 (controller_mapping \"A B X Y\") (freq_ms FALSE) (which_skybox 0) (speedmod "
-             "1.05) (server_url \"listener.hmxservices.com\") (gems monkey) (legacy_multi 1 2 "
-             "3))");
+             "(controller_mapping \"A B X Y\")\n(freq_ms FALSE)\n(which_skybox 0)\n(speedmod "
+             "1.05)\n(server_url \"listener.hmxservices.com\")\n(gems monkey)\n(legacy_multi 1 2 "
+             "3)\n");
 
   // Garbage is refused rather than half-read.
   ProviderFile junk;
@@ -508,7 +508,7 @@ void TestProviderFile() {
   ProviderFile empty;
   CHECK_TRUE(ParseProviderFile("(0)", &empty, &error));
   CHECK_TRUE(empty.elements.empty());
-  CHECK_TRUE(WriteProviderFile(empty, {}) == "(0)");
+  CHECK_TRUE(WriteProviderFile(empty, {}).empty());
 }
 
 void TestValueTranslation() {
@@ -650,7 +650,7 @@ void TestProviderFileSave() {
   // The first save has no file to replace, so the pairs it owns are appended.
   CHECK_TRUE(SaveProviderFile(path, {{"gems", "monkey"}, {"hide_hud", "TRUE"}}, &error));
   CHECK_TRUE(std::filesystem::exists(path));
-  CHECK_TRUE(ReadText(path) == "(0 (gems monkey) (hide_hud TRUE))");
+  CHECK_TRUE(ReadText(path) == "(gems monkey)\n(hide_hud TRUE)\n");
   // ... and no temporary sibling is left behind.
   CHECK_FALSE(std::filesystem::exists(root / "ulti_settings.dta.tmp"));
 
@@ -664,7 +664,7 @@ void TestProviderFileSave() {
   }
   CHECK_TRUE(SaveProviderFile(path, {{"gems", "ulti"}}, &error));
   CHECK_TRUE(ReadText(path) ==
-             "(0 (controller_mapping \"A B X Y\") (hide_hud TRUE) (gems ulti))");
+             "(controller_mapping \"A B X Y\")\n(hide_hud TRUE)\n(gems ulti)\n");
 
   // A file this build cannot parse is refused rather than rewritten: it is the only copy of the
   // values the provider does not show us.
@@ -678,6 +678,61 @@ void TestProviderFileSave() {
   CHECK_TRUE(ReadText(path) == before);
   CHECK_FALSE(std::filesystem::exists(root / "ulti_settings.dta.tmp"));
 
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+}
+
+void TestNativeProviderFileSave() {
+  rb_blitz::test::BeginCase("native Ultimate pairs save Gold Star Progress and reload it");
+  const auto root = Scratch("native-save");
+  const auto path = root / "ulti_settings.dta";
+  // The on-disk shape from the owner's failing session: write_file emits the array's
+  // children, so there is no outer (0 ...) wrapper. Include values we must preserve.
+  const std::string original =
+      "(freq_ms 0)\n(disable_dof 0)\n(which_skybox 0)\n"
+      "(disable_random_wiggles 0)\n(disable_plots 0)\n(forceplot 0)\n"
+      "(server_url 0)\n(server_ssl 1)\n(p9dlc 0)\n(hide_hud 0)\n"
+      "(goldprogress 1)\n(progressbar 1)\n(show_timer 1)\n(show_pb 1)\n"
+      "(show_steak 1)\n(input_viewer 0)\n(controller_mapping 1)\n"
+      "(camera_angle 0)\n(letterbox 0)\n(gems default)\n(speedmod 1.00)\n"
+      "(future_nested (a b))\n";
+  {
+    std::ofstream out(path, std::ios::binary);
+    out << original;
+  }
+  ProviderFile before;
+  std::string error;
+  const bool parsed = ParseProviderFile(original, &before, &error);
+  CHECK_TRUE(parsed);
+  if (parsed) CHECK_TRUE(ValuesFromProviderFile(before).at(SettingId::kGoldProgress).boolean);
+  const bool saved = SaveProviderFile(path, {{"goldprogress", "FALSE"}}, &error);
+  CHECK_TRUE(saved);
+  CHECK_TRUE(error.empty());
+  if (saved) {
+    ProviderFile reloaded;
+    CHECK_TRUE(ParseProviderFile(ReadText(path), &reloaded, &error));
+    CHECK_FALSE(ValuesFromProviderFile(reloaded).at(SettingId::kGoldProgress).boolean);
+    CHECK_TRUE(reloaded.names == before.names);
+    for (const auto& [name, value] : before.values) {
+      if (name != "goldprogress") CHECK_TRUE(reloaded.values.at(name) == value);
+    }
+    CHECK_TRUE(ReadText(path).find("(future_nested (a b))") != std::string::npos);
+    CHECK_TRUE(ReadText(path).find("(0 ") == std::string::npos);
+    CHECK_TRUE(SaveProviderFile(path, {{"goldprogress", "TRUE"}}, &error));
+    CHECK_TRUE(ParseProviderFile(ReadText(path), &reloaded, &error));
+    CHECK_TRUE(ValuesFromProviderFile(reloaded).at(SettingId::kGoldProgress).boolean);
+  }
+  // A single pair must also be read as a pair rather than as a wrapper/version.
+  ProviderFile single;
+  const bool one = ParseProviderFile("(goldprogress 0)", &single, &error);
+  CHECK_TRUE(one);
+  if (one) {
+    CHECK_TRUE(single.values.count("goldprogress") == 1);
+    if (single.values.count("goldprogress"))
+      CHECK_FALSE(ValuesFromProviderFile(single).at(SettingId::kGoldProgress).boolean);
+  }
+  CHECK_FALSE(ParseProviderFile("(goldprogress 0) (gems", &single, &error));
+  CHECK_FALSE(ParseProviderFile("(goldprogress 0) garbage", &single, &error));
   std::error_code ec;
   std::filesystem::remove_all(root, ec);
 }
@@ -889,8 +944,10 @@ void TestRealPayload(const char* payload_root) {
     value.text = "ulti";
     return value;
   }();
+  edited[SettingId::kGoldProgress] = edited.at(SettingId::kHideHud);
   CHECK_TRUE(EncodeProviderValues(edited, &updates, &error));
-  CHECK_EQ(updates.size(), 2);
+  CHECK_EQ(updates.size(), 3);
+  CHECK_TRUE(updates.at("goldprogress") == "FALSE");
   CHECK_TRUE(updates.at("hide_hud") == "FALSE");
   CHECK_TRUE(updates.at("gems") == "ulti");
   CHECK_TRUE(SaveProviderFile(runtime.settings_path, updates, &error));
@@ -902,6 +959,8 @@ void TestRealPayload(const char* payload_root) {
   const Value* hide_hud = reloaded.ValueFor(SettingId::kHideHud);
   CHECK_TRUE(hide_hud != nullptr);
   CHECK_TRUE(hide_hud != nullptr && !hide_hud->boolean);
+  const Value* gold_progress = reloaded.ValueFor(SettingId::kGoldProgress);
+  CHECK_TRUE(gold_progress != nullptr && !gold_progress->boolean);
   // A pair the file now carries is the row's value even where `ulti_init` had no default - which
   // is the whole point of the file over the defaults.
   const Value* gems_value = reloaded.ValueFor(SettingId::kGems);
@@ -955,6 +1014,7 @@ int main(int argc, char** argv) {
   TestValueTranslation();
   TestRedirectNames();
   TestProviderFileSave();
+  TestNativeProviderFileSave();
   TestConfigureProviderWithoutAPayload();
   TestConfigureProviderWithAForeignPayload();
   TestRealPayload(argc > 1 ? argv[1] : nullptr);

@@ -366,9 +366,10 @@ const std::vector<std::string>& RequiredPanels() {
 // ------------------------------------------------------------------------------------------------
 // The provider's settings file: a small tolerant DTA-text reader
 // ------------------------------------------------------------------------------------------------
-// The file is what the provider's own `write_file` produced from an array, so it is DTA text: one
-// outer `(...)`, a leading marker, then `(name value)` pairs. The reader keeps each element's
-// source text verbatim, which is what makes an unknown pair survive a rewrite byte for byte
+// The provider's `write_file` emits the array's children: top-level `(name value)` pairs,
+// without an outer array or version marker. Older host builds wrote `(0 (name value) ...)`;
+// accept those files as an import, but always write the native format (architecture part 5 §4).
+// The reader keeps each element's source text, so an unknown pair survives a rewrite
 // (a value we do not model may be a nested array, a string, a symbol, or a float we would round).
 
 struct TextNode {
@@ -1248,25 +1249,43 @@ std::filesystem::path ProviderSettingsPath(const std::filesystem::path& user_dat
 }
 
 bool ParseProviderFile(std::string_view text, ProviderFile* out, std::string* error) {
+  if (error != nullptr) error->clear();
   ProviderFile file;
   TextScanner scanner(text);
-  TextNode root;
-  if (!scanner.ParseValue(&root) || !root.array) {
-    file.error = "the file is not a DTA array";
-    if (error != nullptr) *error = file.error;
-    return false;
-  }
+  std::vector<TextNode> elements;
   scanner.SkipSpace();
-  if (!scanner.AtEnd()) {
-    file.error = "there is content after the outer array";
-    if (error != nullptr) *error = file.error;
+  while (!scanner.AtEnd()) {
+    TextNode node;
+    if (!scanner.ParseValue(&node) || !node.array) {
+      if (error != nullptr) *error = "the file is not a sequence of DTA arrays";
+      return false;
+    }
+    elements.push_back(std::move(node));
+    scanner.SkipSpace();
+  }
+  if (elements.empty()) {
+    if (error != nullptr) *error = "the provider settings file is empty";
     return false;
   }
-  if (!root.kids.empty() && !root.kids.front().array) {
-    file.version_marker = root.kids.front().raw;
+  // Only the old host writer's numeric marker denotes a wrapper. A single native pair,
+  // including a pair with an array value, must retain its first element as the name.
+  const auto& first = elements.front().kids;
+  if (!first.empty() && !first.front().array && !first.front().raw.empty() &&
+      std::all_of(first.front().raw.begin(), first.front().raw.end(),
+                  [](char c) { return c >= '0' && c <= '9'; })) {
+    if (elements.size() != 1) {
+      if (error != nullptr) *error = "there is content after the legacy outer array";
+      return false;
+    }
+    file.version_marker = first.front().raw;
+    std::vector<TextNode> legacy(first.begin() + 1, first.end());
+    elements = std::move(legacy);
   }
-  for (size_t i = 1; i < root.kids.size(); ++i) {
-    const TextNode& kid = root.kids[i];
+  for (const TextNode& kid : elements) {
+    if (!kid.array || kid.kids.empty() || kid.kids.front().array) {
+      if (error != nullptr) *error = "a provider settings element has no pair name";
+      return false;
+    }
     std::string element;
     Emit(kid, &element);
     file.elements.push_back(std::move(element));
@@ -1293,10 +1312,8 @@ bool ParseProviderFile(std::string_view text, ProviderFile* out, std::string* er
 std::string WriteProviderFile(const ProviderFile& file,
                               const std::map<std::string, std::string>& updates) {
   std::string out;
-  out.push_back('(');
-  out.append(file.version_marker.empty() ? "0" : file.version_marker);
   for (size_t i = 0; i < file.elements.size(); ++i) {
-    out.push_back(' ');
+    if (!out.empty()) out.push_back('\n');
     const std::string* name =
         i < file.element_names.size() ? &file.element_names[i] : nullptr;
     const auto updated =
@@ -1321,14 +1338,14 @@ std::string WriteProviderFile(const ProviderFile& file,
     if (std::find(file.names.begin(), file.names.end(), name) != file.names.end()) {
       continue;
     }
-    out.push_back(' ');
+    if (!out.empty()) out.push_back('\n');
     out.push_back('(');
     out.append(name);
     out.push_back(' ');
     out.append(value);
     out.push_back(')');
   }
-  out.push_back(')');
+  if (!out.empty()) out.push_back('\n');
   return out;
 }
 
@@ -1721,7 +1738,6 @@ bool SaveProviderFile(const std::filesystem::path& path,
       return false;
     }
     file.parsed = true;
-    file.version_marker = "0";
   }
 
   const std::string text = WriteProviderFile(file, updates);

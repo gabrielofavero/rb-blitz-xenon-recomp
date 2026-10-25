@@ -1152,6 +1152,28 @@ Nothing pre-creates the file, so a player who never opens the provider's setting
 and the adapter's writer preserves every pair the provider persists and this build does not draw
 (`controller_mapping`, `server_url`, `server_ssl`, `p9dlc`), in the file's own order.
 
+**2026-10-24 format correction [measured]:** writable storage was already working; the host
+adapter was rejecting the mod's native file. The owner's session log
+`out/build/win-amd64-release/logs/rb_blitz_330.log:544` reports
+`refusing to rewrite ... ulti_settings.dta: there is content after the outer array`.
+The actual file contains 21 top-level `(name value)` pairs, beginning `(freq_ms 0)`,
+with `(goldprogress 1)`; it has no outer array or version marker. `write_file` writes the
+array's children. The earlier `(0 (...))` fixture below measured only the host's invented
+wrapper, and a successful guest open did not establish that the guest interpreted its values.
+
+`ParseProviderFile` now reads the native sequence, including its first pair and single-pair
+files; it also imports the old host wrapper. `WriteProviderFile` always emits native pairs,
+so both a first save and an update are readable by the provider. Unknown pairs, nested
+values, order and untouched scalar spelling survive; malformed files are still preserved
+and reported. The exact-path writable redirect and atomic replacement are unchanged.
+`TestNativeProviderFileSave` reproduces the 21-pair file in scratch storage, saves/reloads
+Gold Star Progress in both directions and checks preservation; `TestRealPayload` checks
+that a fresh `ConfigureProvider` restores the saved Gold Star Progress value.
+Verification: the release build passed (`build-retry.log`) and all 14 related host tests
+passed (`tests.log`), under `out/_swap/ultimate-settings-format/`. The documentation checker
+reports 40 unrelated stale plan links/references. Game UI/restart validation of this
+correction remains unproven; no game UI was driven for these checks.
+
 ### 5. Evidence
 
 Host: `ctest --test-dir out/build/win-amd64-release` — **31/31**, of which `ultimate_adapter` (hermetic) and

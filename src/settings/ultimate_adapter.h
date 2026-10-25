@@ -280,8 +280,8 @@ inline constexpr char kLegacySettingsRecord[] = "ulti_settings.ini";
 std::filesystem::path ProviderSettingsDirectory(const std::filesystem::path& user_data_root);
 std::filesystem::path ProviderSettingsPath(const std::filesystem::path& user_data_root);
 
-// The provider's file, as its own writer produces it: an outer array whose first element is a
-// version marker and whose remaining elements are `(name value)` pairs.
+// The provider's file is a sequence of top-level `(name value)` pairs. Read the legacy
+// host-written `(0 (name value) ...)` wrapper too; writes always use the native pair sequence.
 //
 // Parsing keeps the file's **own order and its unknown elements**: the provider persists values
 // this build does not draw (`server_url`, `server_ssl`, `p9dlc`, `controller_mapping`), and
@@ -292,7 +292,7 @@ std::filesystem::path ProviderSettingsPath(const std::filesystem::path& user_dat
 // (a nested array comes back with normalized whitespace).
 struct ProviderFile {
   bool parsed = false;
-  std::string version_marker;                 // the leading element's text ("0")
+  std::string version_marker;                 // legacy wrapper marker; empty for native files
   std::vector<std::string> names;             // pair names, in file order
   std::map<std::string, std::string> values;  // name -> the value's own text, verbatim
   std::vector<std::string> elements;          // every element, verbatim, in file order

@@ -9,6 +9,11 @@ is removed from this file, not from the log.
 
 ## Open
 
+**Ultimate settings restart validation pending (2026-10-24):** the host adapter's
+rejection of native DTA pairs is fixed; Gold Star Progress now saves and reloads in
+host tests, including the installed payload. Confirming the setting through a game
+restart remains pending. See [the adapter record](../settings/architecture.md) part 5 §4.
+
 **Background music stutters under load (2026-10-24):** the owner hears breaks during
 song-cache loading, RhythmVerse entry and graphics preparation. The menu now gets
 six seconds of native decoded-stream capacity, audio workers get higher scheduling
