@@ -1669,6 +1669,32 @@ is in part 8 ("Still unproven after the campaign"): Vulkan `VkPipelineCache` reu
 Vulkan `fsi`, D3D12 `rov`, retail, the changed-setting row, the cancel row and the
 separate damage rows.
 
+One more run closed the loop on the Vulkan finding, and it earned its keep twice.
+`-vulkan-ultimate-fbo-cold-r2` is the first boot on the build with patch 0033: in-song
+helper traffic collapsed from **1,473 calls / 209 ms to 1 call / 108 us**, and the owner
+- who did not know the backend - called it the smoothest run so far. The row still
+**failed on coverage**: that song created **12 new `vulkan/fbo` recipes** and translated
+four shaders (worst creation 168 ms, one 180 ms frame). The catalogue was extended the
+documented way (run store preserved in `out/_swap/p8/manifest-sources`, regenerated from
+the whole set): `vulkan/fbo` **409 -> 421**, every other path unchanged, 209 sources
+unchanged, and all twelve trace keys are covered. `-cold-r3` replays the same song to
+confirm, and answers why four shaders that were already prepared were translated anyway.
+
+It answered both, and it changed the plan's promise. `p8-vulkan-ultimate-fbo-cold-r3`
+(same song, 421 prepared in 2,048 ms) created **none** of the twelve recipes again - the
+extension worked - but it created **two more**, `7a090f77ad173f1a` and
+`d43893fecfac3a55`: `multimesh` draws pairing a vertex and a pixel shader the catalogue
+already had, in a combination it had not seen, one of them with a state block identical to
+three existing recipes. The owner's read was right - the song's background is a large
+moving 3D scene, `multimesh` is 141 of the 209 prepared shader identities, and its props
+pair materials with vertex formats according to what is on screen. So **catalogue coverage
+is asymptotic for this title**: it removes a run's compiles (12, then 2, then likely 0 per
+song) but cannot promise zero forever, and P9 must not claim otherwise. The 237 ms the
+owner felt was a `compile_wait` (230 ms) after a 6 ms placeholder - the runtime builds the
+pipeline in the background and then blocks. Bounding that wait is the durable fix and is
+filed in `reference/backlog.md` §4; the two recipes were merged mechanically
+(`vulkan/fbo` **423**, every other path and the 209 sources unchanged).
+
 ### P9 — Package, document and close the release gates
 
 > Implement P9. Package the versioned recipe/coverage manifest and local extraction

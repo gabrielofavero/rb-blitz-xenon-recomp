@@ -87,16 +87,28 @@ that name an action.
 
 ## 4. Deferred, with no design yet
 
-- [ ] **The Vulkan presenter rebuilds its guest-output paint pipeline on every present**
-      (measured 2026-10-25, P8's `-vulkan-ultimate-fbo-cold`):
-      `rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp:2653` calls
-      `vkCreateGraphicsPipelines` each time instead of keeping the handle, so one run
-      logged **2,026 creations of one identity** (~100 us each, up to 2.3 ms, 209 ms of
-      the song's 86.6 s). Nothing is wrong on screen - frames held 29.46 ms mean with a
-      33.63 ms worst - so this is waste, not a race. The fix is to memoize the
-      `VkPipeline` per `(effect, intermediate)` in the presenter and destroy them with
-      the device. Patch-driven, so it lands as a `patches/rexglue-sdk/` entry like every
-      other SDK change. Evidence: [shader-cache.md](../engine/shader-cache.md) part 8.
+- [ ] **An unprepared pipeline stalls the command processor instead of skipping a frame**
+      (measured 2026-10-25, `-vulkan-ultimate-fbo-cold-r3`): the trace shows
+      `placeholder` (6 ms) followed by `compile_wait` **230 ms** and a 271 ms frame - the
+      runtime already draws a placeholder while the pipeline is built, then blocks until
+      it exists. Catalogue coverage cannot remove this for good: the same song produced
+      twelve new recipes in one run and two more `multimesh` **shader pairings** in the
+      next, because the venue's props pair materials and vertex formats by what is on
+      screen (`multimesh` is 141 of the 209 prepared shader identities). Bounding the
+      wait - keep drawing the placeholder until the pipeline is ready, budget the
+      creation into background frames - turns a 237 ms hitch into a missing effect for a
+      frame or two and is the answer that survives new content. Evidence:
+      [shader-cache.md](../engine/shader-cache.md) part 8.
+- [x] **The Vulkan presenter rebuilt its guest-output paint pipeline on every present**
+      (measured 2026-10-25, P8's `-vulkan-ultimate-fbo-cold`;
+      **fixed the same day** in `patches/rexglue-sdk/0033-vulkan-presenter-reuse-paint-pipeline.patch`):
+      `vulkan_presenter.cpp` compared a stored `swapchain_format` it never assigned, so
+      the cached pipeline was destroyed and rebuilt per present - **2,026 creations of
+      one identity** in one run (~100 us each, up to 2.3 ms, 209 ms during an 86.6 s
+      song for the 1,473 in-song calls). Recording the format at creation makes the
+      cache work; frames were healthy either way (29.46 ms mean), so this was waste,
+      not breakage. In-game verification is the `-vulkan-ultimate-fbo-cold-r2` row.
+      Evidence: [shader-cache.md](../engine/shader-cache.md) part 8.
 - [ ] **The compile trace cannot report how many distinct helper identities a phase
       used.** Detail lines are suppressed once the detail limit is spent, and the
       suppressed lines on Vulkan are exactly the ones a reader needs, so the P8

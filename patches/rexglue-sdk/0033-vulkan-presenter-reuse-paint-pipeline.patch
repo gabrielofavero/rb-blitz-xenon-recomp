@@ -1,0 +1,23 @@
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+index 23645eff..ba33f328 100644
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -2624,6 +2626,18 @@ VkPipeline VulkanPresenter::CreateGuestOutputPaintPipeline(GuestOutputPaintEffec
+   dynamic_state.dynamicStateCount = uint32_t(rex::countof(kPipelineDynamicStates));
+   dynamic_state.pDynamicStates = kPipelineDynamicStates;
+ 
++  // Record the swapchain format this pipeline is built for, because the paint path
++  // uses it to tell a reusable cached pipeline from one that must be rebuilt for a
++  // different render pass. Nothing wrote that field before, so the comparison was
++  // true on every paint: the pipeline was awaited, destroyed and recreated on every
++  // present (measured 2026-10-25 - 2,026 creations of a single identity in one run).
++  // Writing it before the create call is safe: a failed creation leaves the handle
++  // null, and the paint path re-tests the handle before trusting the format.
++  if (!intermediate) {
++    paint_context_.guest_output_paint_pipelines[size_t(effect)].swapchain_format =
++        paint_context_.swapchain_render_pass_format;
++  }
++
+   VkGraphicsPipelineCreateInfo pipeline_create_info;
+   pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+   pipeline_create_info.pNext = nullptr;

@@ -1966,22 +1966,99 @@ strict, so the Vulkan `fsi` path and the D3D12 `rov` path are still unmeasured.
 **What this does not prove:** one DLC song, the `fbo` path only, and no second
 Vulkan boot - so `VkPipelineCache` *reuse* on Vulkan is still unmeasured.
 
-#### `p8-vulkan-ultimate-fbo-cold` - the finding, in one line
+#### `p8-vulkan-ultimate-fbo-cold` - the finding, and its fix
 
-`vulkan_presenter.cpp:2653` rebuilds the guest-output paint pipeline per present
-(2,026 creations in one run, one identity, ~100 us each, up to 2.3 ms). Memoizing
-the handle per (effect, intermediate) removes all of them. Filed in the backlog.
+`vulkan_presenter.cpp:2653` rebuilt the guest-output paint pipeline per present
+(2,026 creations in one run, one identity, ~100 us each, up to 2.3 ms). The root
+cause is a field with a reader and no writer: `GuestOutputPaintPipeline`
+::`swapchain_format` is compared against the render pass format to decide whether the
+cached pipeline can be reused, and **nothing assigned it**, so the mismatch was true
+on every paint and each present awaited the previous paint submission, destroyed the
+pipeline and rebuilt it. Fixed in `patches/rexglue-sdk/0033-vulkan-presenter-reuse-paint-pipeline.patch`,
+which records the format at creation (safe before the create call - a failed creation
+leaves the handle null, and the paint path re-tests the handle before trusting the
+format). Built and unit-tested 2026-10-25 (`ctest` 69/69); the in-game verification
+is the `-vulkan-ultimate-fbo-cold-r2` row, which must show in-song helper traffic
+collapse while the cold boot still prepares every pipeline.
+
+#### `p8-vulkan-ultimate-fbo-cold-r2` — 2026-10-25 — FAIL on coverage, and it proves the presenter fix
+
+The first boot on the build carrying patch 0033, Vulkan, one more song played start to
+finish (6,338 frames). **The fix works**: in-song `helper_graphics` went from **1,473
+calls / 209 ms to 1 call / 108 us**. The owner, who did not know which backend the run
+used, reported the smoothest run so far and assumed mid-song it had been D3D12. Frames
+held: GPU mean 29.48 ms, one 180 ms frame, none at or above 250 ms.
+
+The row still fails, on a **catalogue gap**, which is what it exists to find: this song
+created **12 Vulkan pipelines** in-song (`pipeline_cache.cpp:3492`, each preceded by a
+placeholder), plus **4 shader translations**, two compile waits (168 ms and 6.7 ms) and
+a worst single creation of 168 ms. That is a different song from the DLC one the earlier
+Vulkan row played, so it is song coverage, not a regression: the `vulkan/fbo` catalogue
+had never seen these effects.
+
+Recipe identities, straight from the trace, and the extension:
+
+| | Before | After |
+| --- | --- | --- |
+| `vulkan/fbo` recipes | 409 | **421** |
+| `d3d12/rtv` / `d3d12/rov` / `vulkan/fsi` | 421 / 219 / 228 | unchanged |
+| Shader identities in `config/shader_resolution_candidate.json` | 209 | 209 |
+
+The run's own store held all twelve (`shader_pipeline_catalogue.py` verified 421 records,
+0 duplicates), and the twelve in-song `guest_pipeline` keys are exactly the twelve added
+to `config/graphics_preparation.json`. Nothing was lost: the store was preserved as
+`out/_swap/p8/manifest-sources/p8-vulkan-run-fbo.vk.xpso` and the catalogue regenerated
+from the whole `manifest-sources` set, so only `vulkan/fbo` moved. The four translation
+keys (`76def253143358ce`, `37f0746d803d41c2`, `af0ec59bf0d67487`, `5bdab7f7afcdf6db`)
+are **already among the 209 prepared sources**, so why they were translated in-song is an
+open question, not something this record claims to explain - `-cold-r3` answers it by
+replaying the same song.
+
+#### `p8-vulkan-ultimate-fbo-cold-r3` — 2026-10-25 — FAIL, and the reason corrects the plan
+
+The same song as `-cold-r2`, start to finish, on the build whose catalogue already held
+those twelve recipes (`records=421/219/421/228`, 421 prepared in 2,048 ms). The song
+created **two more pipelines** — `7a090f77ad173f1a` and `d43893fecfac3a55` — with one
+translation, one 237 ms creation and a matching 271 ms frame; the owner felt exactly one
+stutter mid-song and called it shader stutter. **None of the twelve recipes came back**,
+so the extension worked; the song simply has more than one set.
+
+The two new recipes are the interesting part. Both are `multimesh` draws that pair a
+vertex shader the catalogue already had with a pixel shader it already had, **in a
+combination it had never seen** — and one of them carries a state block identical to three
+existing recipes, so nothing differed except the pairing. That fits the owner's
+observation that this song's background is a large moving 3D scene: `multimesh` is **141
+of the 209 prepared shader identities**, and the venues' prop draws pair those materials
+and vertex formats according to what is actually on screen in a given run.
+
+Two consequences, stated plainly:
+
+- **Catalogue coverage is asymptotic for this title, not finite.** Adding a song's recipes
+  removes *that run's* compiles — 12 then 2 then, probably, 0 — but a dynamic venue can
+  always produce a pairing the catalogue has not seen. Coverage should be grown per
+  shipped song, and the campaign must not promise "no in-song compile, ever".
+- **The 237 ms is a blocking wait, not just a compile.** The trace shows
+  `placeholder` (6 ms) then `compile_wait` (230 ms): the runtime already draws a
+  placeholder while the pipeline is built elsewhere, and then the command processor waits
+  for it. Bounding that wait (draw the placeholder again until the pipeline is ready)
+  turns a 237 ms hitch into a missing effect for a frame or two, and is the only answer
+  that survives new content. Filed in `reference/backlog.md` §4.
+
+Both recipes were added the same way as before — the run's store preserved as
+`out/_swap/p8/manifest-sources/p8-vulkan-run2-fbo.vk.xpso`, catalogue regenerated from the
+whole set: `vulkan/fbo` **423**, every other path unchanged, 209 sources unchanged, and
+all fourteen keys from the two runs are covered.
 
 #### Still unproven after the campaign
 
 | Area | Why it is unproven |
 | --- | --- |
-| Vulkan `VkPipelineCache` reuse | no second Vulkan boot was run |
+| Vulkan `VkPipelineCache` reuse | no second Vulkan boot on one binary yet |
 | Vulkan `fsi` path, D3D12 `rov` path | rows never ran; both reported, not passed |
 | Retail content | row never ran |
 | Changed-setting discovery row | row never ran |
 | Cancel row, separate damage rows | superseded by `-damaged-all` for this scope |
-| Song-to-song coverage | three songs total (These Days, one bundled, one DLC) |
+| Song-to-song coverage | each song adds its own recipes, and a dynamic venue adds a few more per run: `-cold-r2` added twelve `vulkan/fbo` recipes and `-cold-r3`, replaying the same song, two new `multimesh` shader pairings |
 
 Scope was cut by the owner on 2026-10-25: one song per run, a different song, no
 more loadout cycling, then a single Vulkan row as the last planned run. The

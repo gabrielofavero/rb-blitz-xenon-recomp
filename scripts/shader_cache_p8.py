@@ -144,6 +144,19 @@ ROWS = [
              "guest shader"),
     row("p8-vulkan-ultimate-fbo-warm", 1, "warm", "vulkan", "ultimate", "fbo",
         warm_from="p8-vulkan-ultimate-fbo-cold", route=ROUTE_SHORT, allow_host_helper=True),
+    row("p8-vulkan-ultimate-fbo-cold-r2", 1, "cold", "vulkan", "ultimate", "fbo",
+        route=ROUTE_FINAL,
+        note="the same Vulkan route on the build that carries patch 0033 (the presenter now "
+             "keeps its pipeline): verifies the in-song helper traffic collapses, and that a "
+             "Vulkan cold boot still prepares every pipeline"),
+    row("p8-vulkan-ultimate-fbo-cold-r3", 1, "cold", "vulkan", "ultimate", "fbo",
+        route=ROUTE_FINAL,
+        note="after the catalogue was extended with the twelve recipes -cold-r2 created "
+             "in-song (vulkan/fbo 409 -> 421): the same song must add no pipeline and no "
+             "translation. Its four in-song translations were already in the 209 prepared "
+             "sources, which is the open question this row answers"),
+    row("p8-vulkan-ultimate-fbo-warm-r2", 1, "warm", "vulkan", "ultimate", "fbo",
+        warm_from="p8-vulkan-ultimate-fbo-cold-r2", route=ROUTE_SHORT),
     row("p8-d3d12-ultimate-rtv-corrupt-portable", 2, "corrupt-portable", "d3d12", "ultimate",
         "rtv", warm_from="p8-d3d12-ultimate-rtv-cold-r3", route=ROUTE_SHORT,
         note="superseded by -damaged-all for the reduced scope; kept in the matrix"),

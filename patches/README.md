@@ -342,3 +342,22 @@ async driver pipeline creation off the command-processor submission thread.
 an owned fixed-capacity PCM ring, shortens its mutex scope to copies, and adds
 rate-limited starvation/callback-gap diagnostics. It retains the configured output
 queue depth. See [menu audio stability](../docs/engine/main-menu.md) part 2 §6.
+
+`0033-vulkan-presenter-reuse-paint-pipeline.patch` fixes an upstream Vulkan defect
+found by P8's Vulkan row: `VulkanPresenter::PaintContext::GuestOutputPaintPipeline`
+stores the swapchain format its cached pipeline was built for, and the paint path
+compares that field with the current render pass format to decide whether the
+pipeline can be reused — but **nothing ever wrote it**, so the comparison was true
+on every paint. Each present therefore awaited the previous paint submission,
+destroyed the pipeline and rebuilt it, including the `vkCreateGraphicsPipelines`
+call P0's trace counts as a helper: **2,026 creations of a single identity in one
+run**, 1,473 of them inside an 86.6 s song (209 ms, worst call 818 µs). The patch
+records the format where the pipeline is created, so the cached pipeline is reused
+until the render pass really is rebuilt for another format. Writing it before the
+create call is safe because a failed creation leaves the handle null and the paint
+path re-tests the handle before trusting the format. Upstream candidate: yes — the
+field's only reader is that comparison, so the missing writer is a plain bug, not a
+design choice. Verified in-game on the first boot carrying it: in-song helper traffic
+went from **1,473 calls / 209 ms to 1 call / 108 us** (`p8-vulkan-ultimate-fbo-cold-r2`).
+See [the P8 record](../docs/engine/shader-cache.md) (part 8).
+

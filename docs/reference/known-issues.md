@@ -9,15 +9,19 @@ is removed from this file, not from the log.
 
 ## Open
 
-**Vulkan presenter recreates its pipeline every present (measured 2026-10-25):** the
-Vulkan backend's guest-output paint pipeline is created inside the present path
-(`vulkan_presenter.cpp:2653`) rather than cached, so a normal run performs about two
-thousand `vkCreateGraphicsPipelines` calls of a single identity - 1,473 of them
-during a song, 209 ms in total over 86.6 s, worst call 818 us. The driver's shared
-`VkPipelineCache` keeps it cheap and no frame suffered (GPU mean 29.46 ms, worst
-33.63 ms), but it is pure waste and it is what makes the Vulkan helper counters look
-busy. Filed in [the backlog](backlog.md) §4; the measurement is in
-[shader-cache.md](../engine/shader-cache.md) part 8.
+**Vulkan presenter recreated its pipeline every present (measured 2026-10-25, fixed in
+patch 0033, in-game verification pending):** the Vulkan backend's guest-output paint
+pipeline was created inside the present path
+(`vulkan_presenter.cpp`) rather than cached, because the field the paint path compares
+against the render pass format was read and never written - so a normal run performed
+about two thousand `vkCreateGraphicsPipelines` calls of a single identity, 1,473 of
+them during a song (209 ms in total over 86.6 s, worst call 818 us). The driver's
+shared `VkPipelineCache` kept it cheap and no frame suffered (GPU mean 29.46 ms, worst
+33.63 ms), but it was pure waste and it is what made the Vulkan helper counters look
+busy. `patches/rexglue-sdk/0033-vulkan-presenter-reuse-paint-pipeline.patch` records
+the format where the pipeline is created; a `-vulkan-ultimate-fbo-cold-r2` run has to
+confirm the counters go quiet. Filed as done in [the backlog](backlog.md) §4; the
+measurement is in [shader-cache.md](../engine/shader-cache.md) part 8.
 
 **HUD placement runtime validation pending (2026-10-24):** the owner reported
 16:9 anchors after hiding Song Progress Bar, lag and occasional placement flicker.
