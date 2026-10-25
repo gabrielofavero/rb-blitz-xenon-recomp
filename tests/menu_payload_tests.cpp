@@ -328,6 +328,31 @@ void CheckRoutes(const std::vector<Node>& roots, int current, int mask) {
     const auto* buttons = Method(roots, panel, "BUTTON_DOWN_MSG");
     CHECK_TRUE(buttons != nullptr);
     if (!buttons) continue;
+    const auto* poll = Method(roots, panel, "poll");
+    int mouse_routes = 0;
+    for (int target = 0; target < 4; ++target) {
+      const bool enabled = target != current && (target == 0 || (mask & (1 << (target - 1))));
+      const auto path = std::string("rbbz-mouse/header/") + panel + "/" + std::to_string(target);
+      CHECK_EQ(poll && Has(*poll, path.c_str()), enabled);
+      if (enabled) ++mouse_routes;
+    }
+    if (mouse_routes && poll) {
+      const auto& routes = poll->kids.back();
+      CHECK_EQ(routes.kids.size(), size_t(mouse_routes + 1));
+      for (size_t i = 1; i < routes.kids.size(); ++i) {
+        const auto& route = routes.kids[i];
+        const int target = route.kids[0].kids[1].text.back() - '0';
+        const bool right = (target - current + 4) % 4 <= 2;
+        std::vector<int> destinations;
+        Destinations(route, &destinations, right);
+        CHECK_EQ(destinations.size(), 1u);
+        if (!destinations.empty()) CHECK_EQ(destinations[0], target);
+        CHECK_FALSE(Has(route, "online_gate"));
+        CHECK_TRUE(Has(route, right ? "arrow_rt.flow" : "arrow_lt.flow"));
+        if (current == 3) CHECK_TRUE(Has(route, "stop_preview_audio"));
+        if (std::string(panel) == "store_browser_panel") CHECK_TRUE(Has(route, "turn_off_preview"));
+      }
+    }
     for (bool right : {true, false}) {
       const auto* kase = Case(*buttons, right ? "kAction_PageDown" : "kAction_PageUp");
       CHECK_TRUE(kase != nullptr);

@@ -7,6 +7,7 @@
 #include <thread>
 
 namespace rb_blitz::graphics {
+std::string DevelopmentDirectoryIdentity(const std::filesystem::path& directory);
 bool IsDevelopmentExecutable(const std::filesystem::path& executable,
                              const std::filesystem::path& build_directory);
 

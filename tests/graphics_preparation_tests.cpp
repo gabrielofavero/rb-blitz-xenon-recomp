@@ -3,7 +3,7 @@
 //
 // Host tests for rexglue-sdk/include/rex/graphics/graphics_preparation.h and the
 // cancellation states added to pipeline_preload.h - the lifecycle both graphics
-// backends drive from P4 on (docs/plans/in-progress/2026-10-10-shader-cache-plan.md,
+// backends drive from P4 on (docs/plans/finished/2026-10-10-shader-cache-plan.md,
 // P4).
 //
 // These exercise the real component the command processor and both caches call,

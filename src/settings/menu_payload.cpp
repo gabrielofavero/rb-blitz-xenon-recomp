@@ -119,7 +119,7 @@ bool SetHeaderAnimationBeforeGoto(Node& function, Node direction) {
 
 // Retail interprets an index gap greater than one as a wrap. Skipping a hidden
 // tab breaks that inference, and two-tab rings need opposite swipes for the same
-// endpoints. Only trigger routes override it; keep the retail expression intact
+// endpoints. Trigger and mouse routes override it; keep the retail expression intact
 // for every other caller. See RhythmVerse plan P9-4's animation/layout correction.
 bool ConfigureLibraryHeaderAnimations(std::vector<Node>* roots, std::string* why) {
   if (!roots) { if (why) *why = "no transition definitions"; return false; }
@@ -265,6 +265,37 @@ bool RouteLibraryHeaderNavigation(std::vector<Node>* roots, LibraryHeader curren
   for (const char* panel : panels[static_cast<int>(current)]) {
     Node* buttons = PanelMethod(&staged, panel, "BUTTON_DOWN_MSG");
     const Node* helper = PanelMethod(&staged, panel, "go_to_song_select");
+    // Keep the authored departure work (preview shutdown, highlight saves, etc.)
+    // for direct mouse destinations too, before the trigger cases are rewritten.
+    std::array<Node, 2> click_templates;
+    for (int side = 0; side < 2; ++side) {
+      std::vector<Node*> cases;
+      if (buttons) FindTriggerCases(*buttons, side == 0 ? "kAction_PageDown" : "kAction_PageUp", &cases);
+      if (cases.size() != 1) {
+        if (why) *why = std::string(panel) + " lacks its mouse departure template";
+        return false;
+      }
+      click_templates[side] = *cases[0];
+    }
+    std::vector<Node> click_routes{Node::Symbol("cond")};
+    const std::array<bool, 4> enabled = {true, options.store, options.messages, options.recommendations};
+    for (int target = 0; target < 4; ++target) {
+      if (!enabled[target] || target == static_cast<int>(current)) continue;
+      const int distance = (target - static_cast<int>(current) + 4) % 4;
+      const int direction = distance <= 2 ? 1 : -1;
+      Node route = click_templates[direction > 0 ? 0 : 1];
+      route.kids[0] = Node::Command({Node::Symbol("file_exists"),
+          Node::String(std::string("rbbz-mouse/header/") + panel + "/" + std::to_string(target))});
+      if (current == LibraryHeader::kSongs && route.kids.size() == 2 &&
+          route.kids[1].kids.size() >= 4 && route.kids[1].kids[0].text == "if")
+        route.kids[1].kids[1] = Node::Symbol("TRUE");
+      if (!RewriteHeaderTransition(route, static_cast<LibraryHeader>(target),
+                                   direction, helper)) {
+        if (why) *why = std::string(panel) + " lacks its mouse header transition";
+        return false;
+      }
+      click_routes.push_back(std::move(route));
+    }
     for (int direction : {1, -1}) {
       std::vector<Node*> cases;
       if (buttons) FindTriggerCases(*buttons,
@@ -290,6 +321,20 @@ bool RouteLibraryHeaderNavigation(std::vector<Node>* roots, LibraryHeader curren
       if (!RewriteHeaderTransition(kase, next, direction, helper)) {
         if (why) *why = std::string(panel) + " lacks its header transition";
         return false;
+      }
+    }
+    if (click_routes.size() > 1) {
+      Node command = Node::Command(std::move(click_routes));
+      if (auto* poll = PanelMethod(&staged, panel, "poll")) {
+        poll->kids.push_back(std::move(command));
+      } else {
+        for (auto& root : staged) {
+          if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 &&
+              root.kids[0].text == "new" && root.kids[2].text == panel) {
+            root.kids.push_back(Node::Array({Node::Symbol("poll"), std::move(command)}));
+            break;
+          }
+        }
       }
     }
   }

@@ -13,6 +13,7 @@ whose exit code is the answer - and the one thing it found.
 | Check | What it looks at | What it would catch |
 | --- | --- | --- |
 | `inventory` | `installer\out\payload` against the allow-list in `make_payload.ps1` and against `payload-manifest.toml` | a stray `rb_blitz.toml`, a `.pdb`, a `logs\` directory, a file nobody meant to ship |
+| `preparation` | locator/recipe schema, complete embedded JSON, release SHA-256 and source/per-path counts | stale executable/catalogue pair, accidental shader bytes/native fields, incomplete paths |
 | `retail-data` | every payload file against `config/game_fingerprints.toml`, by size and digest, by extension, by container magic at offset 0, and by carrying the entrypoint's own first or last 4 KiB | the dump, or part of it, being copied in |
 | `mod-data` | the same against `installer/config/ultimate_fingerprints.toml` | the community mod being mirrored into the payload |
 | `credentials` | the payload, the helper, the setup executable and the three config files, for private keys, provider tokens, JWTs, `Authorization:` headers and word-level key names | a token or key committed into a shipped file, or a second copy of the console's XEX key |
@@ -152,3 +153,16 @@ reader does not have to re-derive the reasoning:
 - **The uninstaller and the install manifest.** They write on the user's machine, not into
   the payload, and they record the user's own paths - which is what a report the user
   attaches to a bug is for.
+
+## Shader preparation payload (P9, 2026-10-25)
+
+Build the release before taking a snapshot. CMake stages
+`graphics-preparation.json` alongside the executable; `make_payload.ps1` ships
+it only if its full normalized text is embedded in that executable. The native
+extractor is compiled in; Python and retail shader records are not shipped.
+The payload manifest fingerprints the JSON and records `[graphics_preparation]`
+identity/counts. The runtime reads its embedded copy. Updates retain compatible
+local discoveries and saves; corrupt stores repair at next preparation.
+The audit rejects shader/native store extensions and magic even if renamed.
+See [shader-cache.md](../engine/shader-cache.md) part 9 for the release evidence,
+troubleshooting, cold/warm timings and the unproven installed/UI gates.

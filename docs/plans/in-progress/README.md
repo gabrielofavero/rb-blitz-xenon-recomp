@@ -17,24 +17,11 @@ A Refresh on the download toast, landed 2026-10-24 and still owing its same-sess
 prompts are owed; the records in §5 are what shipped before the pass, and the P8 close-out record still
 says which rows were measured by a probe rather than by the harness.
 
-[`2026-10-10-shader-cache-plan.md`](2026-10-10-shader-cache-plan.md) is the shader-stutter program,
-moved here from `todo/` and renamed on 2026-10-24. **P0 is done**: the post-A gate map, the opt-in
-`shader_compile_trace` instrument and the repeatable measurement workflow, with controlled
-D3D12 empty/warm and Vulkan empty traces collected the same day
-([`../../engine/shader-cache.md`](../../engine/shader-cache.md) part 1, evidence under
-`out/shader-cache-p0/runs/`). **P1** made preload completion explicit on both backends.
-**P2** resolves all 186 candidate shader identities from installed content
-([`../../engine/shader-cache.md`](../../engine/shader-cache.md) part 2). **P3** validates,
-deduplicates and merges the renderer's pipeline recipes with provenance and resolves every
-recipe-referenced identity, and inventories the 26 helper-pipeline sites
-([`../../engine/shader-cache.md`](../../engine/shader-cache.md) part 3). **P4** turned preparation
-into a cancellable generation both backends advance in bounded command-processor slices
-([`../../engine/shader-cache.md`](../../engine/shader-cache.md) part 4), and **P5** persists the
-driver's own results beside the shareable recipes - D3D12 cached PSO blobs and one real Vulkan
-pipeline cache shared by every creation path
-([`../../engine/shader-cache.md`](../../engine/shader-cache.md) part 5). P6–P9 (the post-A phase,
-invalidation, validation and packaging) are prompts; the post-A gate and the cold/warm measurement
-remain open.
+The shader-cache program was delivered 2026-10-25 and moved to
+[`../finished/2026-10-10-shader-cache-plan.md`](../finished/2026-10-10-shader-cache-plan.md).
+P0-P9 implementation and packaging are complete; the unproven installed UI,
+dynamic coverage and hardware gates remain explicit in
+[`../../engine/shader-cache.md`](../../engine/shader-cache.md) parts 8-9 and the backlog.
 
 The most recent plan before it,
 [`2026-10-19-interface-gameplay-mapping-restructure-plan.md`](../finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md) —

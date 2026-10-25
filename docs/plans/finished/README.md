@@ -6,6 +6,7 @@ decisions behind code that is running today, and the per-prompt tables are how a
 
 | Plan | Delivered |
 | --- | --- |
+| [`2026-10-10-shader-cache-plan.md`](2026-10-10-shader-cache-plan.md) | Shader preparation P0-P9, delivered 2026-10-25: local extraction, portable recipes, native caches, the post-A guest gate, repair/reuse, campaign evidence and audited packaging. Dynamic combinations and the pending installed UI/hardware gates are recorded in the plan and engine study parts 8-9. |
 | [`2026-09-27-launcher-plan.md`](2026-09-27-launcher-plan.md) | The launcher: its 27 prompts are built (the launcher is part of the release preset). The residual manual passes — real pads by hand, the three finish-page choices, one driven Ultimate install — are listed in the plan itself and in [`../../settings/status.md`](../../settings/status.md). |
 | [`2026-10-03-customization-plan.md`](2026-10-03-customization-plan.md) | The guest-side enhancement research: it produced [`../../engine/`](../../engine/) and the toggle registry in [`../../engine/toggles.md`](../../engine/toggles.md); the R-items it names are implemented. |
 | [`2026-10-09-save-persistence-findings.md`](2026-10-09-save-persistence-findings.md) | Offline save persistence: root-caused and verified in-game, including the checkpoint re-application after the guest's own `SaveData` teardown. |

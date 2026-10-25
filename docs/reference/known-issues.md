@@ -9,19 +9,18 @@ is removed from this file, not from the log.
 
 ## Open
 
-**Vulkan presenter recreated its pipeline every present (measured 2026-10-25, fixed in
-patch 0033, in-game verification pending):** the Vulkan backend's guest-output paint
-pipeline was created inside the present path
-(`vulkan_presenter.cpp`) rather than cached, because the field the paint path compares
-against the render pass format was read and never written - so a normal run performed
-about two thousand `vkCreateGraphicsPipelines` calls of a single identity, 1,473 of
-them during a song (209 ms in total over 86.6 s, worst call 818 us). The driver's
-shared `VkPipelineCache` kept it cheap and no frame suffered (GPU mean 29.46 ms, worst
-33.63 ms), but it was pure waste and it is what made the Vulkan helper counters look
-busy. `patches/rexglue-sdk/0033-vulkan-presenter-reuse-paint-pipeline.patch` records
-the format where the pipeline is created; a `-vulkan-ultimate-fbo-cold-r2` run has to
-confirm the counters go quiet. Filed as done in [the backlog](backlog.md) §4; the
-measurement is in [shader-cache.md](../engine/shader-cache.md) part 8.
+**Shader preparation coverage and installed acceptance (P9, 2026-10-25):**
+the installer now carries an audited locator/recipe catalogue and native local
+extractor. D3D12 campaign cold/warm/recovery routes passed within their declared
+scope. Later Vulkan runs still found new dynamic material/vertex combinations;
+there is no universal first-song/no-stutter guarantee. SDK patch 0034 removes
+explicit async runtime submission waits, but visual/audio/input recovery from
+a real miss remains unproven. Installed cold/warm runs and the recovery/UI
+matrix are owner-driven and pending; Vulkan native reuse, alternate paths,
+retail and other hardware are unproven. Non-compilation song-start stalls
+remain unresolved. The presenter defect from patch 0033 was verified in-game:
+1,473 helper calls / 209 ms became 1 / 108 us (P8 cold-r2).
+See [shader-cache.md](../engine/shader-cache.md) parts 8-9.
 
 **HUD placement runtime validation pending (2026-10-24):** the owner reported
 16:9 anchors after hiding Song Progress Bar, lag and occasional placement flicker.
@@ -59,7 +58,7 @@ mouse disabled, trial/error paths and first-song compile coverage remain unprove
 Two owner runs exposed a dot-prefixed ARK shader-name lookup failure, now fixed
 in source. Failed preparation now offers in-place A Try Again (preserving DLC) or
 B Ignore (normal compilation/caching without a readiness guarantee). The owner now confirms the normal flow works; the preserved run preloads 432/432
-pipelines and enters the menu. Broader route verification and P7 invalidation remain open. See [the P6 record](../engine/shader-cache.md) (part 6).
+pipelines and enters the menu. P7 invalidation and P8 campaign evidence are delivered; the broader installed route matrix remains open (part 9). See [the P6 record](../engine/shader-cache.md) (part 6).
 
 
 **Intermittent header overlap around RhythmVerse Search (2026-10-23):** the

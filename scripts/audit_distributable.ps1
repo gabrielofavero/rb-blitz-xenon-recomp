@@ -15,11 +15,13 @@
 # The checks, and what each would catch:
 #
 #   1 inventory     the payload is exactly the allow-list make_payload.ps1 defines (the
-#                   executable, the two SDK DLLs, the four CRT DLLs, and the Vulkan
+#                   executable, the locator/recipe JSON, the two SDK DLLs, the four CRT DLLs, and the Vulkan
 #                   loader when the build offers Vulkan) plus
 #                   payload-manifest.toml, and every file matches the manifest's size and
 #                   hash. Catches a stray rb_blitz.toml, a .pdb, a logs\ directory, or a
 #                   file nobody meant to ship.
+#   preparation    the catalogue schema and full embedded text match the executable,
+#                   and its release identity/counts agree with the payload manifest.
 #   2 retail data   no payload file is a game file: not by the fingerprints in
 #                   config/game_fingerprints.toml (size and digest), not by extension,
 #                   not by container magic, and not by carrying the entrypoint's own
@@ -221,8 +223,13 @@ if ($payloadFiles.Count -eq 0) {
     $manifestPath = Join-Path $PayloadDir "payload-manifest.toml"
     if (Test-Path $manifestPath) {
         $manifestText = Get-Content -LiteralPath $manifestPath -Raw
+        $manifestNames = New-Object System.Collections.Generic.HashSet[string]
         foreach ($block in (($manifestText -split '\[\[files\]\]') | Select-Object -Skip 1)) {
             $path = [regex]::Match($block, 'path\s*=\s*"([^"]+)"').Groups[1].Value
+            if ($path -notin $allowed -or $path -eq 'payload-manifest.toml' -or -not $manifestNames.Add($path)) {
+                $problems.Add("invalid or duplicate manifest path: $path")
+                continue
+            }
             $size = [int][regex]::Match($block, 'size\s*=\s*(\d+)').Groups[1].Value
             $sha = [regex]::Match($block, 'sha256\s*=\s*"([0-9a-f]{64})"').Groups[1].Value
             $file = Join-Path $PayloadDir $path
@@ -233,6 +240,11 @@ if ($payloadFiles.Count -eq 0) {
                 $problems.Add("manifest mismatch for $path ($($item.Length) bytes, sha256 $digest)")
             }
             $rows.Add(("{0,-26} {1,12:N0} bytes  sha256 {2}" -f $path, $item.Length, $digest))
+        }
+        foreach ($name in $allowed) {
+            if ($name -ne 'payload-manifest.toml' -and -not $manifestNames.Contains($name)) {
+                $problems.Add("payload file is not verified by the manifest: $name")
+            }
         }
     } else {
         $problems.Add("no payload-manifest.toml beside the payload")
@@ -264,6 +276,7 @@ function Read-Fingerprints([string]$Path) {
 }
 
 $gameContainerExtensions = @(".xex", ".ark", ".hdr", ".mogg", ".wem", ".xma", ".bik", ".stfs", ".pkg", ".dta", ".zbm")
+$gameContainerExtensions += @('.xsh', '.xpso', '.rbnp')
 
 function Test-GameData {
     param([string]$Name, [string]$FingerprintFile, [string]$Label, [switch]$EntrypointNeedles)
@@ -308,7 +321,7 @@ function Test-GameData {
         $stream = [IO.File]::OpenRead($file.FullName)
         try { [void]$stream.Read($head, 0, 4) } finally { $stream.Dispose() }
         $magic = $latin1.GetString($head)
-        if ($magic -eq "XEX2" -or $magic -eq "LIVE" -or $magic -eq "PIRS" -or $magic -eq "CON ") {
+        if ($magic -in @('XEX2', 'LIVE', 'PIRS', 'CON ', 'XESH', 'XEPS', 'RBNP')) {
             $problems.Add("$($file.Name) starts with the container magic '$magic'")
         }
         # One pass over the file's text, then both needles against it.
@@ -331,6 +344,37 @@ function Test-GameData {
 
 Test-GameData "retail-data" (Join-Path $repoRoot "config/game_fingerprints.toml") "game data" -EntrypointNeedles
 Test-GameData "mod-data" (Join-Path $installerDir "config/ultimate_fingerprints.toml") "Rock Band Blitz Ultimate content"
+
+# The runtime extracts instruction bytes from the owner's installed assets. The
+# shipped JSON has locators and portable descriptions only, and must match the
+# complete catalogue embedded in the shipped executable.
+if ($payloadFiles.Count -eq 0) {
+    Add-Check 'preparation' 'skip' 'no payload to check' '' @()
+} else {
+    try {
+        . (Join-Path $installerDir 'tools/preparation_payload.ps1')
+        $preparation = Get-PreparationPayload -Directory $PayloadDir
+        $manifestText = Get-Content -LiteralPath $payloadManifest -Raw
+        $table = [regex]::Match($manifestText, '(?ms)^\[graphics_preparation\]\s*\n(.*?)(?=^\[|\z)').Groups[1].Value
+        if ($table -notmatch '(?m)^schema = 1\s*$' -or
+            $table -notmatch ('(?m)^catalogue_sha256 = "' + $preparation.Sha256 + '"\s*$') -or
+            $table -notmatch ('(?m)^sources = ' + $preparation.Sources + '\s*$')) {
+            throw 'missing or stale graphics_preparation release identity'
+        }
+        foreach ($path in $preparation.Counts.Keys) {
+            if ($table -notmatch ('(?m)^' + $path.Replace('/', '_') + ' = ' + $preparation.Counts[$path] + '\s*$')) {
+                throw "release count mismatch: $path"
+            }
+        }
+        $rows = @("schema=1 sha256=$($preparation.Sha256) sources=$($preparation.Sources)")
+        foreach ($path in $preparation.Counts.Keys) { $rows += "$path=$($preparation.Counts[$path])" }
+        $evidence = Write-Evidence 'preparation' $rows
+        Add-Check 'preparation' 'pass' 'locator/recipe catalogue matches embedded runtime and release identity' $evidence $rows
+    } catch {
+        $evidence = Write-Evidence 'preparation' @($_.Exception.Message)
+        Add-Check 'preparation' 'fail' $_.Exception.Message $evidence @($_.Exception.Message)
+    }
+}
 
 # ----------------------------------------------------------- 4. credentials ---
 

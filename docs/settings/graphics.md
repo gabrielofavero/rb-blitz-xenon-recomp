@@ -2,6 +2,11 @@
 
 This file consolidates three records about the picture. Part 1 (P2) asks **what the title can actually render** — it is resolution-blind, offers two heights (720 and 540), and exact 1920x1080 is reached by pairing its 540 mode with the SDK's 2x draw scale (measured) or by changing one guest constant. Part 2 (P4) asks **what the graphics policy is** — which backends, resolutions, AA and filtering steps may be published, how a request is corrected without lying to the user, and what first run and failed-boot recovery do. Part 3 (ultrawide) asks **what non-16:9 costs** — three facts must change together (the frame, the layout space, the presenter), the HUD is still open, and a planner window bounds which sizes are offered at all. Evidence labels: **measured** = executed and read out of a log/capture; **source** = read from the repository; **static** = read from the recompiled guest, not observed to execute.
 
+For shader preparation, startup reuse, failure recovery and measured limits,
+see [shader-cache.md](../engine/shader-cache.md) part 9. The guest prepares known
+recipes after the title A press. Dynamic combinations can still compile during
+play; the catalogue is not a universal no-stutter guarantee.
+
 ## Sources
 
 | Part | Original document | Package | Status |

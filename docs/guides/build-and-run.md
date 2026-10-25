@@ -959,3 +959,13 @@ Get-Content $out
 Useful context to include with the excerpt: build type (`Release`), the route
 you took (title only, or into a song), and whether music/sound effects were
 audible. The excerpt is normally well under 50 lines.
+
+## Shader catalogue changes and installer snapshots
+
+Changing `config/graphics_preparation.json` regenerates the embedded header and
+build-tree `graphics-preparation.json`. Always run
+`cmake --build --preset win-amd64-release` before `installer/build.ps1`.
+Packaging rejects an executable/catalogue mismatch and refreshes stale payload
+snapshots. Installed extraction runs natively from the owner's assets; the
+development Python tools are not runtime dependencies. Release evidence and
+limits: [shader-cache.md](../engine/shader-cache.md) part 9.

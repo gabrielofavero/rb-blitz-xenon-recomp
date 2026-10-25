@@ -1187,6 +1187,33 @@ static void TestPayloadAndFinalize() {
   CHECK_TRUE(FileExists(zip_app / kPayloadManifestName));
   CHECK_FALSE(DirectoryExists(StagingRoot(zip_app)));
 
+  BeginCase("payload updates preserve local shader discoveries, native caches and saves");
+  // Even a portable installation with user data beside the executable must keep
+  // its private stores. Use both payload routes against populated destinations.
+  const Entry private_entries[] = {
+      {"cache/shaders/shareable/5841122D.xsh", "locally extracted and learned shaders"},
+      {"cache/shaders/shareable/5841122D.rtv.d3d12.xpso", "learned D3D12 recipes"},
+      {"cache/shaders/shareable/5841122D.fbo.vk.xpso", "learned Vulkan recipes"},
+      {"cache/shaders/native/driver.bin", "local driver bytes"},
+      {"cache/shaders/preparation-state.json", "local preparation ledger"},
+      {"saves/profile.dat", "player progress"},
+      {"launcher.toml", "player settings"},
+      {"paths.toml", "player locations"}};
+  for (const auto& destination : {app, zip_app}) {
+    for (const auto& entry : private_entries) {
+      EnsureDirectory((destination / entry.name).parent_path(), nullptr);
+      WriteText(destination / entry.name, entry.text);
+    }
+    WriteText(destination / kRuntimeExeName, "old build");
+    const auto& update = destination == app ? source : zip_source;
+    CHECK_TRUE(InstallPayload(update, destination, embedded, ProgressSink{}, nullptr, &error));
+    CHECK_TRUE(VerifyPayload(destination, embedded, nullptr, &error));
+    CHECK_STR_EQ(ReadFileOrEmpty(destination / kRuntimeExeName), entries[0].text);
+    for (const auto& entry : private_entries) {
+      CHECK_STR_EQ(ReadFileOrEmpty(destination / entry.name), entry.text);
+    }
+  }
+
   BeginCase("the install is finalised into a manifest and a report");
 
   EnsureDirectory(game_root, nullptr);

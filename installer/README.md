@@ -776,3 +776,16 @@ order) so a change that drops one fails the suite:
 | `[payload] commit '<x>' is not a 40-character commit id` while configuring | The pin is a ref — `HEAD` by default — and only `build.ps1` has git at the right moment to resolve it. Configure through the script, or write a commit id (or nothing) in `config\pins.toml`. |
 | `the generated pins.iss says commit '<a>' but this build resolved '<b>'` | A stale cached `-DRBBLITZ_EMBED_EXTRA_ARGS`, which would ship a setup executable claiming to be another build. Delete `installer\out\build` and build again. |
 | The wizard is up but nothing happens, then it fails after ten minutes | The helper died silently. Its own log is next to the install folder (`rbblitz-probe.log` in the temporary directory while the wizard is still open); `install-report.txt` in the finished install has the rest. |
+
+## Shader preparation catalogue
+
+The payload includes `graphics-preparation.json` (schema-1 source locators and
+portable recipes only) and the same catalogue embedded in `rb_blitz.exe`.
+`tools/make_payload.ps1` verifies they match, and records their identity/counts
+in `[graphics_preparation]` of `payload-manifest.toml`. Extraction/vertex
+linking runs natively against the user's own assets after title-screen A;
+Python, retail `.xsh` bytes and developer native caches never ship.
+Updates preserve local caches and player saves/settings. The runtime validates
+and merges/rebuilds layers at next preparation. Run the distribution audit
+after creating the payload. See [the release record](../docs/engine/shader-cache.md)
+part 9 for measurements, troubleshooting and unproven installed UI/hardware gates.

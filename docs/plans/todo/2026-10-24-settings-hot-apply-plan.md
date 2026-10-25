@@ -194,7 +194,7 @@ the last known applied value and restores 16:9 correctly. Invalidate HUD object 
 replacement and compute anchors from original positions so repeated changes do not accumulate shifts.
 Reconcile Auto against the active display without overwriting the saved Auto intent.
 
-Coordinate with the [shader-cache plan](../in-progress/2026-10-10-shader-cache-plan.md): scale/AA/path
+Coordinate with the [shader-cache plan](../finished/2026-10-10-shader-cache-plan.md): scale/AA/path
 changes can change pipeline keys. Cancel/drain old preparation generations, prepare newly required
 variants through the graphics owner, and reject stale completion. Do not invalidate unrelated cache
 data or collide with the graphics-preparation work already in progress.

@@ -4,40 +4,21 @@ Date: 2026-10-10. Architecture review 2026-10-16; plan finalized 2026-10-17.
 Product flow and implementation prompts updated 2026-10-24.
 Scope: first-play freezes that become less frequent with further play and do not
 recur at the same spot after restarting a song.
-Status: P0 implemented 2026-10-24 and its controlled traces collected the same day;
-P1 (backend completion and result reporting) implemented 2026-10-24. P2's bounded
-local resolver/index is implemented and tested 2026-10-24: all 186 current candidate
-shader identities (120 pixel, 66 vertex) resolve locally and match preserved runtime
-bytes exactly. Vertex declaration linking and the executable's bootstrap shader
-sources are resolved. P3 implemented 2026-10-24: a validated, deduplicated catalogue
-of the renderer's normalized D3D12/Vulkan pipeline recipes, a merged replayable store
-per rendering path, and a 35-entry helper-pipeline inventory. Five owner-driven
-coverage sessions the same day (options surface, every power-up, songs, and both
-alternate rendering paths) took the catalogues from 175/144 to 631 D3D12 (`rtv` 412 +
-`rov` 219) and 637 Vulkan (`fbo` 409 + `fsi` 228) recipes, with 208/208 referenced
-shader identities resolving locally and the committed candidate extended from 186 to
-208 — so all four declared rendering paths are covered. Helper creation keys are
-carried by the trace since SDK patch 0026, so the inventory's 31 repeated helper
-recipes are key-identified instead of call-site-only. The graphics-settings matrix is
-the last unmeasured axis; the owner states that ordinary songs and DLC do not vary
-shader usage, so that axis is not a coverage obligation. P4 implemented 2026-10-24: a
-cancellable preparation generation both backends advance in bounded command-processor
-slices, with a dedicated preparation queue and pool per backend so submissions never
-wait for it, plus the `shader_storage_async_preparation` launch switch (default off)
-that starts it beside the guest. P5 implemented 2026-10-24: a header-only native cache
-identity/store, D3D12 cached PSO blobs keyed by the portable description hash, and one
-real Vulkan `VkPipelineCache` shared by every creation path on the device, written at
-preparation end and at shutdown only, with a rejected blob forgotten and retried without
-it. P6 now implements the post-A native loading phase and gate (2026-10-24); its UI
-verification is pending. P7 implemented 2026-10-24: a persistent layer ledger with
-separate validity for the local extraction and each per-path recipe store, a full
-configuration epoch (content/executable/storage versions/settings/content epoch),
-repair-instead-of-fail for stale or damaged stores, a content-change hook that
-retires readiness without touching storage, and distinct shader-data/not-writable
-failure labels. P8's harness, matrix and acceptance rules are delivered 2026-10-25
-(`scripts/shader_cache_p8.py`). Its first run failed on a real catalogue gap and the
-shipped catalogue was extended (rtv 412 -> 421, identities 208 -> 209); the repeat
-run is pending - the owner drives them. P9 remains unstarted.
+Status: delivered 2026-10-25, P0-P9 implemented; moved to `finished/` at the
+owner's request. The final catalogue has **209 shader locators** and **421 rtv,
+219 rov, 423 fbo, 228 fsi** portable recipes. P8 established D3D12 cold/warm reuse
+and combined damage recovery, plus Vulkan cold preparation and the presenter fix.
+Its later Vulkan runs showed that dynamic scene/material combinations still add
+recipes. The zero-compilation promise was therefore narrowed by those findings:
+preparation covers known recipes, with asynchronous runtime discovery for misses.
+P9 packages and audits the embedded catalogue/local extractor and preserves user
+stores on update. Installed game/UI checks are owner-driven and **pending**;
+the remaining release/runtime gates are tracked in
+[shader-cache.md](../../engine/shader-cache.md) parts 8 and 9 and
+[the backlog](../../reference/backlog.md). Moving this delivery to finished does
+not certify those gates, every song, every configuration or other hardware.
+
+Historical P0 summary (2026-10-24):
 On an empty application cache the first song creates 81 guest pipelines and
 translates 61 shaders, with four of its eight active-song long frames (worst
 306.4 ms) overlapping that work; a same-process replay adds 1/1. A full restart on
@@ -56,7 +37,7 @@ validation and the cold-versus-warm measurement remain P8, and P6 UI evidence is
 [shader-cache.md](../../engine/shader-cache.md) (parts 1 and 3) and
 `out/shader-cache-p0/runs/`.
 
-The [2026-10-24 prompt plan](#implementation-prompts-2026-10-24) defines the next work:
+The [2026-10-24 prompt plan](#implementation-prompts-2026-10-24) defined the delivered work:
 a graphics-preparation phase after the title-screen A press, beside the existing
 settings/content loading, with persistent caches for faster subsequent launches.
 It supersedes the older before-guest product flow and the optional priority of native
@@ -1715,3 +1696,36 @@ The two recipes were merged mechanically
 Exit: a distributable install protects its first covered song without the user first
 training the cache, and subsequent launches reuse compatible saved results. Both the
 post-A loading experience and its failure/recovery paths are documented and validated.
+
+Implementation close-out, 2026-10-25:
+
+- The executable embeds the complete schema-1 locator/recipe catalogue and the
+  native local extractor. CMake also stages `graphics-preparation.json` for
+  review. `make_payload.ps1` verifies the full normalized JSON is embedded in
+  the executable, then snapshots both together. `[graphics_preparation]` in the
+  payload manifest records its SHA-256, schema and per-path/source counts.
+  No standalone Python runtime, retail shader records or native driver cache
+  is an installation input.
+- The distribution audit now checks that contract, its release identity and
+  the payload inventory, and rejects shader/native store extensions and magic.
+  Payload provenance includes the catalogue, so an older snapshot is rebuilt.
+  Development discovery retains its directory gate without shipping absolute
+  developer paths (hashed directory identity, relative journal destination).
+- Host checks cover stale/malformed/proprietary-field payload rejection,
+  compatible local-recipe retention across catalogue updates, fresh payload
+  installation and folder/ZIP updates preserving local discoveries and saves.
+  Exact build/audit evidence and results are in part 9 of the engine study.
+- Final host results: release build and **74/74 ctest**, installer build/test and
+  complete setup build, real folder/ZIP fresh/update checks, **34 patch entries**
+  with zero failures/unexpected SDK edits, distribution audit **8/8** with no
+  skips. Documentation remains at its existing 40-error baseline. Built setup:
+  `installer/out/dist/RockBandBlitzSetup-0.1.0.exe`; the engine study records its
+  exact size/hash and the non-frozen local toolchain warning.
+- The owner chose to drive installed cold/warm and recovery UI checks. They
+  have **not run in P9**. Vulkan native reuse, retail, alternate rendering
+  paths, cancellation/focus/trial/error routes, new-recipe visual recovery
+  under patch 0034, and other hardware remain open. P8's latest Vulkan route
+  failed coverage; a universal first-song/no-stutter claim is not released.
+
+The prompt's original zero-compilation exit above is retained as design history;
+the P8 findings and this explicit evidence ledger define the delivered scope.

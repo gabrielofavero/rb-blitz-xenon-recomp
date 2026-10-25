@@ -306,9 +306,22 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/config/graphics_preparation.json")
 configure_file(src/graphics/preparation_catalogue.h.in
     "${CMAKE_CURRENT_BINARY_DIR}/generated/preparation_catalogue.h" @ONLY)
+# P9: the reviewable, byte-free catalogue travels with the executable. Packaging
+# verifies that this build-tree copy is also the catalogue embedded in the PE.
+configure_file(config/graphics_preparation.json
+    "${CMAKE_CURRENT_BINARY_DIR}/graphics-preparation.json" COPYONLY)
 target_include_directories(rb_blitz PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+# The installed PE must not carry developer machine paths. Keep the development
+# directory gate as a digest, and resolve its journal relative to that directory.
+file(REAL_PATH "${CMAKE_CURRENT_BINARY_DIR}" RBBLITZ_DEVELOPMENT_DIRECTORY)
+if(WIN32)
+    string(TOLOWER "${RBBLITZ_DEVELOPMENT_DIRECTORY}" RBBLITZ_DEVELOPMENT_DIRECTORY)
+endif()
+string(SHA256 RBBLITZ_DEVELOPMENT_DIRECTORY_HASH "${RBBLITZ_DEVELOPMENT_DIRECTORY}")
+file(RELATIVE_PATH RBBLITZ_DEVELOPMENT_JOURNAL "${CMAKE_CURRENT_BINARY_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/out/shader-coverage/discoveries.jsonl")
 set_source_files_properties(src/graphics/development_coverage.cpp PROPERTIES COMPILE_DEFINITIONS
-    "RBBLITZ_DEVELOPMENT_BUILD_DIR=\"${CMAKE_CURRENT_BINARY_DIR}\";RBBLITZ_DEVELOPMENT_COVERAGE_LOG=\"${CMAKE_CURRENT_SOURCE_DIR}/out/shader-coverage/discoveries.jsonl\"")
+    "RBBLITZ_DEVELOPMENT_DIRECTORY_HASH=\"${RBBLITZ_DEVELOPMENT_DIRECTORY_HASH}\";RBBLITZ_DEVELOPMENT_JOURNAL=\"${RBBLITZ_DEVELOPMENT_JOURNAL}\"")
 target_link_libraries(rb_blitz PRIVATE xxhash)
 if(WIN32)
     target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32)
@@ -516,6 +529,8 @@ if(BUILD_TESTING)
     # logs only, so the matrix's rules are pinned without a run or a GPU.
     add_test(NAME shader_cache_p8_tools
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_cache_p8_tools_tests.py")
+    add_test(NAME preparation_payload
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/preparation_payload_tests.py")
     add_test(NAME shader_coverage_tools
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_coverage_tools_tests.py"
                 --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>
@@ -559,7 +574,7 @@ if(BUILD_TESTING)
     add_test(NAME pipeline_completion_queue COMMAND rb_blitz_pipeline_completion_queue_tests)
 
     add_executable(rb_blitz_shader_coverage_tests tests/shader_coverage_tests.cpp
-        src/graphics/shader_coverage.cpp)
+        src/graphics/shader_coverage.cpp src/util/sha256.cpp)
     target_include_directories(rb_blitz_shader_coverage_tests PRIVATE src
         "${REXSDK_DIR}/thirdparty/inja/third_party/include")
     target_link_libraries(rb_blitz_shader_coverage_tests PRIVATE xxhash)

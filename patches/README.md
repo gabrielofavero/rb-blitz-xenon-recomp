@@ -27,7 +27,7 @@ The restructuring replaces the D3D12 preload drain/wait sites that 0020 original
 instrumented, so **those two hunks live in 0021 now** — a patch whose post-image
 another patch rewrites can never `--reverse --check` again, which the audit reads as
 drift. 0020 keeps the rest of the instrument. See the P1 record in the
-[shader-cache plan](../docs/plans/in-progress/2026-10-10-shader-cache-plan.md#p1--make-backend-completion-and-failure-reporting-trustworthy).
+[shader-cache plan](../docs/plans/finished/2026-10-10-shader-cache-plan.md#p1--make-backend-completion-and-failure-reporting-trustworthy).
 
 The patch audit now replays the full stack against pristine HEAD files under
 ignored `out/sdk-patch-audit/` and compares final contents (normalizing CRLF).
@@ -121,7 +121,7 @@ contract; `IGraphicsSystem`/`GraphicsSystem` expose begin/cancel/query/wait, and
 `rex_app.cpp` starts the generation after guest resume when
 `shader_storage_async_preparation` is on (default off — the visible loading phase is
 P6's). See the
-[P4 record](../docs/plans/in-progress/2026-10-10-shader-cache-plan.md#p4--add-asynchronous-preparation-without-starving-the-loading-screen)
+[P4 record](../docs/plans/finished/2026-10-10-shader-cache-plan.md#p4--add-asynchronous-preparation-without-starving-the-loading-screen)
 and the [shader-cache record](../docs/engine/shader-cache.md) (part 4).
 
 `rexglue-sdk/0028-native-pipeline-caches.patch` persists the driver's own pipeline
@@ -141,7 +141,7 @@ swap effects, presenter, immediate drawer, `util::CreateComputePipeline`) uses i
 merges the on-disk data of another instance before serializing. Both backends flush only
 at a preparation boundary and at shutdown; `native_pipeline_cache` (default on) disables
 the layer. See the
-[P5 record](../docs/plans/in-progress/2026-10-10-shader-cache-plan.md#p5--persist-native-results-for-faster-subsequent-boots-on-both-backends)
+[P5 record](../docs/plans/finished/2026-10-10-shader-cache-plan.md#p5--persist-native-results-for-faster-subsequent-boots-on-both-backends)
 and the [shader-cache record](../docs/engine/shader-cache.md) (part 5).
 
 ## Apply / verify

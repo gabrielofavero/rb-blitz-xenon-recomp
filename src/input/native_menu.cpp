@@ -35,6 +35,8 @@ REX_EXTERN(sub_824E3008);       // UIListState::Selected (logical index)
 REX_EXTERN(sub_824C0C08);       // UIList::NumData (dispatches to the current provider)
 REX_EXTERN(sub_82402DE8);       // ObjectDir::FindObject
 REX_EXTERN(sub_821F13D0);       // RndTransformable::WorldXfm
+REX_EXTERN(__imp__sub_824BC668); // UILabel::DrawShowing (label +260)
+REX_EXTERN(sub_824BA9F8);       // UILabel::LabelStyle
 
 namespace rb_blitz::input {
 namespace {
@@ -94,6 +96,11 @@ struct Geometry {
 };
 thread_local Geometry geometry;
 thread_local uint32_t frame_number = 0;
+struct HeaderGeometry { uint32_t screen = 0, focus = 0, frame = 0; MenuBounds bounds; };
+thread_local std::array<HeaderGeometry, 4> header_geometry;
+thread_local int clicked_header = -1;
+thread_local uint32_t header_click_frame = 0;
+thread_local std::string current_panel_name;
 // The last row a draw positively identified as selected. The guest sets the selected
 // *slot* to -1 when a scroll left the selection outside the band, so the slot cannot
 // be the anchor; this survives that and is reset on every screen or focus change.
@@ -166,6 +173,8 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   rb_blitz::diag::shader_trace::ObserveScreen(name, panel_name, ObjectName(base, ObjectBase(base, focus)),
                                              U32(base, manager + 16) != 0);
   if (screen != current_screen || focus != current_focus || allowed != menu_available) {
+    header_geometry = {};
+    clicked_header = -1;
     MenuRail stale; PublishRail(stale);
     last_selected_row = -1;
     rail_map = {};
@@ -189,6 +198,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   current_screen = screen; current_focus = focus; menu_available = allowed;
   if (current_screen_name != name) current_screen_name = name;
   game_screen_active = in_song;
+  current_panel_name = panel_name;
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled() &&
                 !rex::kernel::xam::xeXamIsUIActive());
 }
@@ -270,6 +280,22 @@ bool ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first, Menu
 }
 
 bool MouseSupportEnabled() { return REXCVAR_GET(mouse_ui_nav); }
+bool AnswerMenuHeaderQuery(std::string_view path, bool* answer) {
+  constexpr std::string_view prefix = "rbbz-mouse/header/";
+  if (!path.starts_with(prefix)) return false;
+  *answer = false;
+  const auto suffix = path.substr(prefix.size());
+  const auto slash = suffix.rfind('/');
+  if (slash == std::string_view::npos || slash + 2 != suffix.size() ||
+      suffix.back() < '0' || suffix.back() > '3') return true;
+  std::lock_guard lock(mutex);
+  if (queue.enabled() && MouseSupportEnabled() && header_click_frame == frame_number &&
+      suffix.substr(0, slash) == current_panel_name && clicked_header == suffix.back() - '0') {
+    *answer = true;
+    clicked_header = -1;
+  }
+  return true;
+}
 bool MouseMenuAvailable() {
   std::lock_guard lock(mutex);
   return MouseSupportEnabled() && menu_available && window_focused;
@@ -351,6 +377,7 @@ bool GameScreenActive() {
 
 void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   ++frame_number;
+  clicked_header = -1;
   Context(ctx, base, manager);
   std::optional<MenuMouseEvent> event;
   const bool fresh = geometry.list && geometry.list == current_focus && geometry.frame + 1 == frame_number;
@@ -384,6 +411,25 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     }
   }
   if (!event) return;
+  // Header clicks precede the focused list's hit test and never become A.
+  // Only a label actually drawn in the last frame can receive the click.
+  if (event->action == MouseAction::kAccept && LibraryHeaderForScreen(current_screen_name) >= 0) {
+    for (int i = 0; i < int(header_geometry.size()); ++i) {
+      const auto& header = header_geometry[i];
+      if (header.screen != current_screen || header.focus != current_focus ||
+          header.frame + 1 != frame_number || !header.bounds.Contains(event->point)) continue;
+      Select(ctx, base, event->point); // retire the list's mouse hover
+      scroll_follow.Reset();
+      if (i != LibraryHeaderForScreen(current_screen_name)) {
+        clicked_header = i;
+        header_click_frame = frame_number;
+        if (REXCVAR_GET(mouse_native_trace))
+          REXLOG_INFO("native_mouse: header click screen={} panel={} target={}",
+                      current_screen_name, current_panel_name, i);
+      }
+      return;
+    }
+  }
   // Scrollbar traffic drives the list's view directly (no pad pulse, no horizontal
   // remap), so it is handled before the directional path below.
   if (event->action == MouseAction::kScrollbarDown || event->action == MouseAction::kScrollbarDrag ||
@@ -411,13 +457,14 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   }
   // The wheel scrolls a railed list's view instead of stepping its selection (owner
   // rule, 2026-10-16): a scrollbar moves the view; selection is a controller behaviour.
-  // One detent is one list row (firstShowing counts rows), so the sensitivity is the
-  // same per detent on any library - the fraction of the list it covers shrinks with
-  // the library, the way a desktop scrollbar gets more granular with more content.
+  // Large song libraries advance farther per notch, up to one visible page.
   if ((event->action == MouseAction::kUp || event->action == MouseAction::kDown) && railed &&
       EnsureRailMap(ctx, base, current_focus) && rail_map.max_first > 0) {
     const int base_first = int(U32(base, current_focus + 228));
-    ScrollListTo(ctx, base, current_focus, base_first + (event->action == MouseAction::kDown ? 1 : -1),
+    const int display = int(U32(base, current_focus + 180));
+    const int step = current_screen_name == "song_select_screen" ?
+        LibraryWheelRows(rail_map.max_first + display, display) : 1;
+    ScrollListTo(ctx, base, current_focus, base_first + (event->action == MouseAction::kDown ? step : -step),
                  event->point);
     return;
   }
@@ -632,6 +679,41 @@ void CaptureLabel(PPCContext& ctx, uint8_t* base) {
   }
   CaptureRow(base, bounds);
 }
+
+void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  if (!menu_available || LibraryHeaderForScreen(current_screen_name) < 0) return;
+  const int index = LibraryHeaderForLabel(ObjectName(base, ObjectBase(base, label)));
+  const auto camera = U32(base, 0x8284A108);
+  if (index < 0 || !camera) return;
+  const float x = F32(base, label + 144), z = F32(base, label + 148);
+  const float width = F32(base, label + 152), height = F32(base, label + 156);
+  if (!(width > 0) || height == 0) return;
+  GuestCall call(ctx); auto& c = call.frame.ctx;
+  c.r3.u32 = label; c.r4.u32 = 0;
+  sub_824BA9F8(c, base);
+  // DrawShowing skips fully transparent label styles; those are not hit targets.
+  if (!(F32(base, c.r3.u32 + 36) > 0)) return;
+  // Resolve the same virtual RndTransformable base used by UIListLabelElement::Draw.
+  c.r3.u32 = label + 72 + U32(base, U32(base, label + 72) + 16);
+  sub_821F13D0(c, base);
+  const auto transform = c.r3.u32;
+  const auto local = call.scratch, world = local + 16, projected = local + 32;
+  MenuBounds bounds{INFINITY, INFINITY, -INFINITY, -INFINITY};
+  for (unsigned corner = 0; corner < 4; ++corner) {
+    Float(base, local, x + (corner & 1 ? width : 0));
+    Float(base, local + 4, 0);
+    Float(base, local + 8, z + (corner & 2 ? height : 0));
+    c.r3.u32 = local; c.r4.u32 = transform; c.r5.u32 = world;
+    sub_821E14A8(c, base);
+    c.r3.u32 = camera; c.r4.u32 = world; c.r5.u32 = projected;
+    sub_821FF4A0(c, base);
+    const float px = F32(base, projected), py = F32(base, projected + 4);
+    if (!std::isfinite(px) || !std::isfinite(py)) return;
+    bounds.left = std::min(bounds.left, px); bounds.right = std::max(bounds.right, px);
+    bounds.top = std::min(bounds.top, py); bounds.bottom = std::max(bounds.bottom, py);
+  }
+  header_geometry[index] = {current_screen, current_focus, frame_number, bounds};
+}
 // Defined after DrawList; declared here because the draw is what discovers a new list.
 void DrawList(PPCContext& ctx, uint8_t* base) {
   const uint32_t list = ctx.r5.u32 - 176;
@@ -791,6 +873,11 @@ REX_HOOK_RAW(sub_824E07A8) {
 REX_HOOK_RAW(sub_824E9A90) {
   rb_blitz::input::CaptureLabel(ctx, base);
   __imp__sub_824E9A90(ctx, base);
+}
+REX_HOOK_RAW(sub_824BC668) {
+  const auto label = ctx.r3.u32 - 260;
+  __imp__sub_824BC668(ctx, base);
+  rb_blitz::input::CaptureHeader(ctx, base, label);
 }
 REX_HOOK_RAW(sub_824E0900) {
   using namespace rb_blitz::input;

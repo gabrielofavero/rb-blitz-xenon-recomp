@@ -57,6 +57,7 @@
 #include "hooks/shell_music.h"
 #include "hooks/hot_apply_runtime.h"
 #include "input/input_store.h"
+#include "input/native_menu.h"
 #include "input/remap.h"
 #include "input/title_input.h"
 #include "profile/profile_apply.h"
@@ -642,6 +643,11 @@ void RunHotApplyDiagnostic() {
 
 bool TakeExists(PPCContext& ctx, uint8_t* base) {
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  bool header_answer = false;
+  if (::rb_blitz::input::AnswerMenuHeaderQuery(path, &header_answer)) {
+    WriteResultCell(base, ctx.r3.u32, header_answer ? 1u : 0u);
+    return true;
+  }
   uint32_t graphics_answer = 0;
   if (::rb_blitz::graphics::LoadingQuery(path, &graphics_answer)) {
     WriteResultCell(base, ctx.r3.u32, graphics_answer);

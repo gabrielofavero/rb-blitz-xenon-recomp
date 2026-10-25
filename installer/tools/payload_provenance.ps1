@@ -19,7 +19,7 @@
 # the Visual C++ runtime DLLs and the Vulkan loader - comes from directories the build tree
 # does not own, so those are checked for presence rather than by content.
 function Get-PayloadTreeFiles {
-    return @('rb_blitz.exe', 'rexruntime.dll', 'rexgpu-xenos.dll')
+    return @('rb_blitz.exe', 'rexruntime.dll', 'rexgpu-xenos.dll', 'graphics-preparation.json')
 }
 
 # The graphics backends a build tree was configured with, in the order the Renderer row offers

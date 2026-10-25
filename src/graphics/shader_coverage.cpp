@@ -14,6 +14,7 @@
 #include <vector>
 #include <nlohmann/json.hpp>
 #include <xxhash.h>
+#include "util/sha256.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -94,6 +95,17 @@ bool ValidEntry(const Json& j) {
   } catch (const std::exception&) { return false; }
 }
 }  // namespace
+
+std::string DevelopmentDirectoryIdentity(const std::filesystem::path& directory) {
+  std::error_code error;
+  const auto canonical = std::filesystem::canonical(directory,error);
+  if (error) return {};
+  auto text = canonical.generic_string();
+#ifdef _WIN32
+  for (auto& c : text) if (c >= 'A' && c <= 'Z') c += 'a'-'A';
+#endif
+  return util::HashHex(text);
+}
 
 bool IsDevelopmentExecutable(const std::filesystem::path& executable,
                              const std::filesystem::path& build_directory) {

@@ -65,6 +65,7 @@ bool AddRecompilationCredits(std::vector<ui::dtb::Node>* roots, bool ultimate, s
 bool SetRefreshRowAction(std::vector<ui::dtb::Node>* roots, bool refresh_row_active);
 // The shared header ring is Your Songs -> RhythmVerse -> Messages -> Recommended.
 // Your Songs is always enabled; every trigger skips disabled entries.
+// Clicks on the drawn headers use direct destinations and the same departure work.
 enum class LibraryHeader { kSongs = 0, kStore = 1, kMessages = 2, kRecommendations = 3 };
 struct LibraryHeaderOptions {
   bool store = false;

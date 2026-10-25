@@ -3,7 +3,7 @@
 //
 // Host tests for rexglue-sdk/include/rex/graphics/native_pipeline_cache.h - the
 // driver-specific layer both pipeline caches persist beside the shareable
-// recipes (docs/plans/in-progress/2026-10-10-shader-cache-plan.md, P5).
+// recipes (docs/plans/finished/2026-10-10-shader-cache-plan.md, P5).
 //
 // The cases mirror what makes a native cache different from the portable stores,
 // and each one is a rule the backends rely on:

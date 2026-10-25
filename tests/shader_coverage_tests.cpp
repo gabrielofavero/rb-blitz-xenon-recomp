@@ -60,6 +60,12 @@ void TestDevelopmentScope() {
   CHECK_TRUE(IsDevelopmentExecutable(f.root/"build"/"rb_blitz.exe",f.root/"build"));
   CHECK_FALSE(IsDevelopmentExecutable(f.root/"installed"/"rb_blitz.exe",f.root/"build"));
   CHECK_FALSE(IsDevelopmentExecutable(f.root/"missing"/"rb_blitz.exe",f.root/"build"));
+  CHECK_EQ(DevelopmentDirectoryIdentity(f.root/"build").size(),size_t(64));
+  CHECK_TRUE(DevelopmentDirectoryIdentity(f.root/"build") ==
+             DevelopmentDirectoryIdentity(f.root/"build"/"."));
+  CHECK_TRUE(DevelopmentDirectoryIdentity(f.root/"installed") !=
+             DevelopmentDirectoryIdentity(f.root/"build"));
+  CHECK_TRUE(DevelopmentDirectoryIdentity(f.root/"missing").empty());
 }
 void TestFourPathsAndRestartDeduplication() {
   BeginCase("four paths record only catalogue misses and deduplicate across launches");

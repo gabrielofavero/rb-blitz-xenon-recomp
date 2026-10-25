@@ -9,6 +9,13 @@ drag and a track click all move the view and never the selection. Gameplay hides
 the cursor: only the focused `pause_panel` accepts mouse input. Transitions, focus
 loss and gameplay discard pending events, partial wheel detents and button pulses.
 
+The library's visible headers (Your Songs, RhythmVerse, Messages and Recommended)
+also accept left clicks. Their hit boxes come from the guest's own label draw,
+projected through its current world transform and camera. A click goes directly
+to the chosen tab through the authored header transition, preserving departure
+work such as stopping store previews. Hidden headers and the active tab do not
+navigate; a header click never presses A on the selected song.
+
 The old screenshot detector, hover aligner, relative-motion stepper and their
 configuration flags have been removed. `enhancements_native_mouse` was an unused
 placeholder; R6 uses `mouse_ui_nav` as its single switch.
@@ -120,11 +127,21 @@ selection on the row that catch just left. With no row under the pointer the gue
 selection stays where the scroll left it, even out of the band; the guest reports
 that as selected slot -1, which the mapping tolerates because every scroll
 application passes the last row a draw positively identified (`last_selected_row`,
-reset on screen or focus change) rather than the live slot. The wheel moves one list
-row per detent — `firstShowing` counts rows, so a detent is one row on any library
-and the fraction of the list it covers shrinks as the library grows. Successive
+reset on screen or focus change) rather than the live slot. In Your Songs, the wheel
+moves `ceil(NumData / 100)` rows per detent, clamped to one through `numDisplay`:
+a small library retains single-row precision, while a large library advances up
+to one visible page per notch. Other railed lists retain one row per notch. Successive
 detents advance the *pending target* (list +228) so a burst is not lost to the
 animation.
+
+Header labels are captured by `UILabel::DrawShowing` (`824BC668`, label +260),
+using the same text rectangle and virtual transform base as list label capture.
+Only a label drawn in the preceding frame for the same screen and focus can
+receive a click. The active panel's generated `poll` consumes a one-shot
+`rbbz-mouse/header/<panel>/<destination>` query through the existing `file_exists`
+bridge, then runs a copy of its trigger departure work with the clicked destination.
+The request expires in that frame and the bridge checks focus, mouse support and
+queue availability before delivering it. Header navigation uses no host overlay.
 
 The rail uses the focused list's scene geometry: `ObjectDir::FindObject`
 (`82402DE8`) resolves its sibling `rail.mesh` and `scroller.mesh`, and the mesh

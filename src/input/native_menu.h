@@ -98,6 +98,29 @@ enum class MouseAction { kMove, kAccept, kBack, kUp, kDown, kLeft, kRight,
                          kScrollbarDown, kScrollbarDrag, kScrollbarUp };
 struct MenuMouseEvent { MouseAction action; MenuPoint point; };
 
+// Small lists retain precise single-row scrolling. Large song libraries scale to
+// roughly one percent per notch, capped at one visible page.
+inline int LibraryWheelRows(int total, int display) {
+  if (total <= 0 || display <= 0) return 1;
+  return std::clamp(1 + (total - 1) / 100, 1, display);
+}
+
+inline int LibraryHeaderForScreen(std::string_view screen) {
+  if (screen == "song_select_screen") return 0;
+  if (screen == "store_menu_screen" || screen == "store_browser_screen") return 1;
+  if (screen == "inbox_screen") return 2;
+  if (screen == "recommendation_screen") return 3;
+  return -1;
+}
+
+inline int LibraryHeaderForLabel(std::string_view name) {
+  if (name == "main_my_songs.lbl") return 0;
+  if (name == "main_store.lbl") return 1;
+  if (name == "main_inbox.lbl") return 2;
+  if (name == "main_Home.lbl") return 3;
+  return -1;
+}
+
 // Hover ownership and the unhover lift (owner rule, 2026-10-16). Hover selects a row; when the
 // pointer leaves the rows the frame the player sees drops the highlight too - but only the hover
 // the mouse itself owns. The engine's selected row is never written: the lift strips the
@@ -318,6 +341,8 @@ class MenuMouseQueue {
 // Thread-safe bridge. Window events contain no guest pointers; only the UIManager
 // hook reads guest objects or calls guest functions.
 bool MouseSupportEnabled();
+// One-shot header clicks consumed by the active panel's authored poll handler.
+bool AnswerMenuHeaderQuery(std::string_view path, bool* answer);
 bool MouseMenuAvailable();
 void MouseMenuFocus(bool focused);
 // The host's raw device state, as the window thread last saw it - for the guest-side physical

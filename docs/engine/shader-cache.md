@@ -5,7 +5,7 @@ shader identities resolve from installed content, the pipeline recipe catalogue,
 preparation lifecycle, the native driver pipeline caches, and the post-A guest loading gate that
 runs preparation. It merges the six per-delivery records (P0, P2-P6) unchanged: each is a part
 below, and the plan that scopes them is
-[`docs/plans/in-progress/2026-10-10-shader-cache-plan.md`](../plans/in-progress/2026-10-10-shader-cache-plan.md).
+[`docs/plans/finished/2026-10-10-shader-cache-plan.md`](../plans/finished/2026-10-10-shader-cache-plan.md).
 
 Cite as "`docs/engine/shader-cache.md` part N §X". Part numbers are stable; section numbers repeat
 across parts on purpose.
@@ -19,7 +19,7 @@ across parts on purpose.
 
 2026-10-24. Project base `e1c27e3`, SDK `c94f5eb` plus the project patch stack.
 Implements the inspection and diagnostic portion of
-[P0](../plans/in-progress/2026-10-10-shader-cache-plan.md#p0--establish-the-post-a-loading-gate-and-baseline-measurements).
+[P0](../plans/finished/2026-10-10-shader-cache-plan.md#p0--establish-the-post-a-loading-gate-and-baseline-measurements).
 Controlled D3D12 empty/warm and Vulkan empty traces were collected on 2026-10-24
 (see [Measured runs](#measured-runs-2026-10-24)); they measure the in-song compile
 work but do not certify a compilation cause for every long frame, implement a
@@ -1141,7 +1141,7 @@ entry), shutdown releasing a waiter, idle snapshots, and the tracker's cancelled
 
 - Verified in this session: the full release build, the complete ctest roster including the new
   suite, and the SDK patch audit with patch 0027. Numbers are recorded in the P4 record of the
-  [shader-cache plan](../plans/in-progress/2026-10-10-shader-cache-plan.md#p4--add-asynchronous-preparation-without-starving-the-loading-screen).
+  [shader-cache plan](../plans/finished/2026-10-10-shader-cache-plan.md#p4--add-asynchronous-preparation-without-starving-the-loading-screen).
 - **Not measured:** no game/UI run was made for P4. This document makes no claim that in-song
   compile work dropped, that a warm boot is faster, or that every pipeline a song needs is in the
   catalogue — those are P8's route matrix, P5's native caches and P3's coverage respectively.
@@ -1336,7 +1336,7 @@ nothing.
 
 ## Part 6 — Post-A graphics preparation (was `docs/engine/shader-cache-p6.md`, P6)
 
-2026-10-24. Implementation of the [P6 prompt](../plans/in-progress/2026-10-10-shader-cache-plan.md#p6--integrate-the-post-a-preparing-graphics-phase-and-native-loading-bar).
+2026-10-24. Implementation of the [P6 prompt](../plans/finished/2026-10-10-shader-cache-plan.md#p6--integrate-the-post-a-preparing-graphics-phase-and-native-loading-bar).
 Status: implemented and release/headless checked. Cold/warm UI,
 mouse-disabled, focus, trial and error-route evidence remains unproven until an
 authorized operator runs those routes. P8 retains gameplay/timing acceptance.
@@ -1399,7 +1399,7 @@ hashes, offsets, vertex-fetch metadata and declaration recipes; no retail shader
 instructions, developer paths or native GPU blobs. `graphics_preparation_manifest.py`
 rebuilds it from a validated P3 catalogue and the owner's installed assets.
 CMake embeds it in the executable, so runtime does not need Python or an external
-manifest file. The P9 installer audit/release work remains separate.
+manifest file. P9 packages/audits that embedded copy and its reviewable sidecar (part 9).
 
 At the safe post-A boundary a cancellable host worker validates the local .xsh,
 resolves missing shaders from the mounted patch-before-main archive view and the
@@ -1516,7 +1516,7 @@ owner; no additional game/UI run was driven by the agent.
 
 ## Part 7 — Invalidation, new content and interrupted preparation (P7)
 
-2026-10-24. Implementation of the [P7 prompt](../plans/in-progress/2026-10-10-shader-cache-plan.md#p7--handle-invalidation-new-content-and-interrupted-preparation).
+2026-10-24. Implementation of the [P7 prompt](../plans/finished/2026-10-10-shader-cache-plan.md#p7--handle-invalidation-new-content-and-interrupted-preparation).
 Status: implemented and headless checked. No game/UI run was made in this pass, so
 the reason labels, the content-change hook and the repairs are proven by their
 suites and by source inspection, not by an operator route. P8 still owns the
@@ -1683,7 +1683,7 @@ any cache written before this change rebuilds once, by design.
 
 ## Part 8 — The validation matrix (P8)
 
-2026-10-25. Harness and matrix for the [P8 prompt](../plans/in-progress/2026-10-10-shader-cache-plan.md#p8--validate-first-song-coverage-timing-and-visual-correctness).
+2026-10-25. Harness and matrix for the [P8 prompt](../plans/finished/2026-10-10-shader-cache-plan.md#p8--validate-first-song-coverage-timing-and-visual-correctness).
 Status: **the harness, the matrix and the acceptance rules exist; three cold rows
 and one warm row have been run.** Row 1 failed on a real catalogue gap and extended
 it; the repeat is guest-clean and leaves one measured helper first-use, accepted by
@@ -2151,6 +2151,142 @@ matrix row with its verdict, preparation milliseconds and pipeline count,
 post-A-to-menu milliseconds, in-song compile events, GPU frame maximum with its
 buckets, and cache bytes.
 
+
+## Part 9 — Packaging and release close-out (P9)
+
+2026-10-25. Implementation delivered; installed gameplay verification remains
+owner-driven. The [finished plan](../plans/finished/2026-10-10-shader-cache-plan.md)
+retains the full campaign and its failed as well as successful measurements.
+
+### What the installer carries
+
+The schema-1 catalogue is embedded in `rb_blitz.exe`; the C++ local extractor,
+vertex linker and preparation gate are compiled into that executable, and the
+renderer backends/native-cache support travel in the SDK DLLs. Installation
+needs neither Python nor the developer's extraction scripts. A reviewable
+`graphics-preparation.json` travels alongside the executable. The runtime uses
+its embedded copy, so editing the sidecar cannot change preparation.
+
+The final catalogue contains **209 source locators** and **421 D3D12 rtv,
+219 D3D12 rov, 423 Vulkan fbo, 228 Vulkan fsi** recipes. It contains hashes,
+source offsets, declarations and renderer descriptions only. The owner's
+installed executable and shader assets supply all instruction bytes locally.
+Neither retail `.xsh` records nor developer GPU-native blobs are packaged.
+
+`installer/tools/make_payload.ps1` rejects a missing/unsupported catalogue or
+an executable that does not contain its complete normalized UTF-8 text.
+`payload-manifest.toml` fingerprints the sidecar and records a
+`[graphics_preparation]` table (schema, normalized catalogue SHA-256, source
+count and all four recipe counts). Snapshot provenance includes the sidecar.
+The distribution audit repeats the embedded-catalogue/identity check, requires
+all payload files to be fingerprinted, and rejects `.xsh`, `.xpso`, `.rbnp`
+files and `XESH`/`XEPS`/`RBNP` magic even under another filename. Schema field
+checks reject accidental instruction/native-cache fields in the JSON.
+The catalogue tests separately verify source resolution and recipe hashes.
+
+Development collection still runs only from the configured build directory.
+The binary now carries that directory's SHA-256 and a relative journal path,
+so copying it into an installation neither starts collection nor ships the
+developer's absolute paths.
+
+### Startup, reuse and recovery
+
+1. Press A at the title. The title loads settings/saves and enumerates content
+   through its existing connect states. Preparation starts at the content-ready
+   boundary, before any menu continuation can release.
+2. The guest's own loading label/bar shows **Checking graphics cache...** or
+   **Preparing graphics... completed / required**. No host overlay is added.
+3. The runtime validates/merges the catalogue with local stores, extracts missing
+   shader identities from installed assets, and asks the selected backend to
+   translate/create its known pipelines. The gate waits for actual completion.
+4. A compatible later launch reuses extraction and portable stores; it still
+   creates live device objects, optionally using the local native driver cache.
+   A saved ledger is evidence for layers, never a substitute for live readiness.
+5. A catalogue/executable/content/storage-version change rebuilds affected
+   layers; compatible discoveries are merged and retained. Settings/content
+   epochs retire live readiness. Adapter/driver changes invalidate native
+   results. Corrupt/incompatible stores rebuild; rejected native blobs retry
+   without the blob. Updates replace payload files without clearing caches,
+   player saves, settings or location files.
+
+Measured preparation, **not total title-A latency**: D3D12 421 pipelines took
+1,155-1,182 ms on the cold campaign boots; warm compatible layers took 626 ms
+with native off, and the combined-damage/native-on boot took 666 ms. A 15,959 ms
+warm boot followed a PC reboot and cold driver cache; it was not proof that
+native blobs are slower. Vulkan 421 pipelines took 2,048 ms in its latest run.
+These are one machine's P8 measurements, not timings of a newly installed P9
+build. Content enumeration can dominate the post-A screen (54.7 s for the
+measured 1,777-package library). Part 8 preserves the individual run verdicts.
+
+If preparation fails, the guest offers **A Try Again** in place (DLC progress
+retained) or **B Ignore** for that process. Ignore resumes ordinary compilation
+without a readiness guarantee. The reason distinguishes missing/mismatched
+installed shader data, an unwritable cache, and backend preparation failure.
+Check `graphics_loading:` in the log and the effective cache root before
+changing anything. Repair the installed assets for `shader_data`; fix folder
+permissions/free space for `cache_not_writable`. Do not delete saves or clear
+all caches as a first step. A successful live preparation whose ledger cannot
+be saved remains ready for this process and logs the persistence failure.
+
+Known recipes reduce first-use work; dynamic material/vertex combinations
+can still miss. With async compilation enabled, patch 0034 removes explicit
+runtime submission waits and may omit pending draws until creation completes.
+Translation, placeholders, driver work and unrelated song-start stalls remain
+possible. Correct visual recovery from a real miss is still unproven in-game.
+
+### Validation and remaining release gates
+
+P9 host evidence is under `out/_swap/p9-*` and
+`out/distributable-audit-p9/`. No game/UI navigation was performed: the
+owner explicitly chose to test the installed build themselves.
+
+Final host record, 2026-10-25:
+
+- Release build passes (`p9-build-retry.txt`); the parallel pass hit a transient
+  shared-DLL staging collision, so the final pass used `--parallel 1`.
+  The configured non-strict toolchain warns about local clang 19.1.7/CMake 4.4.0
+  versus the frozen clang 23.1.1/CMake 4.4.3; it is not a frozen-toolchain proof.
+- Full release `ctest`: **74/74**, workspace `TEMP`/`TMP`
+  (`p9-tests.txt`). New packaging suite: **6 cases**, including stale executable,
+  malformed recipe, absent path and shader/native-field rejection. The native
+  preparation suite also preserves a discovered recipe across catalogue changes.
+- Installer build/tests and the complete Inno setup build pass
+  (`p9-installer-tests-final.txt`, `p9-setup.txt`). Actual fresh folder and ZIP
+  payload installation plus updates pass the real helper's verification; each
+  retains eight private cache/save/settings files byte-for-byte
+  (`p9-installed/summary.json`). These check file placement, not the wizard or game.
+- SDK patch check: **34 entries** (numbered through 0035), **0 failed**,
+  **0 unexpected** SDK edits (`p9-patches.txt`). Distribution audit: **8/8 pass**,
+  **0 skipped**, including preparation, inventory and machine-path checks
+  (`out/distributable-audit-p9/summary.json`).
+- Documentation checker: the existing **40-error baseline** remains; no newly
+  broken shader-plan references. The move updated source comments, patch docs,
+  the settings plan and indexes; `git diff --check` is clean.
+- Payload: nine fingerprinted files plus its manifest, both backends and Vulkan
+  loader. Normalized embedded catalogue SHA-256:
+  `4aae009f810257bfff3a910a08abe9997a608a3854615e44d764cf866203a920`.
+  Built setup: `installer/out/dist/RockBandBlitzSetup-0.1.0.exe`, **24,661,223 bytes**,
+  SHA-256 `d446bb4cc5d3e3804c1f1794d3195a08d715cdf8cfa0cb508440ccf3c484a414`.
+  This is the local working-tree artifact, not a published release.
+
+| Gate | Evidence/status |
+| --- | --- |
+| Release build, patch applicability, payload audit | P9 host verification record below |
+| Fresh payload placement and folder/ZIP update preservation | Real helper plus installer host regressions; no game/UI claim |
+| Installed cold then warm on D3D12 and Vulkan | **Pending owner test**; P8 build-tree evidence remains in part 8 |
+| Retry/Ignore, cancellation, trial/focus/input variants | Authored routes and host tests; complete installed UI matrix **unproven** |
+| First song without prior cache training | Proven for covered D3D12 campaign routes; latest Vulkan route **failed coverage** |
+| Vulkan native reuse, rov/fsi, retail, other hardware | **Unproven**, carried to the backlog |
+| Patch 0034 with a genuinely missing recipe | Host concurrency tests pass; continuity/audio/input/visual recovery **pending** |
+
+Owner verification of the packaged build: install the rebuilt setup into a
+disposable installation using your own assets and a separate writable data
+root. Keep your normal saves/caches. On D3D12, press A, observe the guest bar,
+play one song, exit normally, then repeat with the same root and confirm
+`extraction=reused` and recipe reuse in the second log. Repeat cold/warm with
+Vulkan. Preserve logs and note visual/audio/input problems. Recovery tests
+should damage only disposable cache fixtures. Report misses as coverage
+discoveries, never label a missing effect as a successful smooth-frame fix.
 
 ## Sources
 

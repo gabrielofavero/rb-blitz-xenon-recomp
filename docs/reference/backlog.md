@@ -87,6 +87,15 @@ that name an action.
 
 ## 4. Deferred, with no design yet
 
+- [ ] **Shader preparation residual release gates (P9 close-out, 2026-10-25):**
+      owner-driven installed cold/warm D3D12 and Vulkan, Vulkan native reuse,
+      rov/fsi and retail, cancellation/focus/trial/error routes, and other hardware.
+      Exercise a genuinely missing recipe on patch 0034 and verify frame continuity,
+      eventual effects, audio and input recovery. Dynamic scene/material pairings
+      still add recipes; continue organic discovery without promising universal
+      first-song coverage. Investigate non-compilation song-start stalls separately.
+      [Shader-cache.md](../engine/shader-cache.md) parts 8-9 retain evidence and limits.
+
 - [x] **Runtime async submission drained/waited for unprepared pipelines**
       (measured 2026-10-25, `-vulkan-ultimate-fbo-cold-r3`: 6 ms placeholder,
       230 ms `compile_wait`, 271 ms frame). Implemented in SDK patch 0034:

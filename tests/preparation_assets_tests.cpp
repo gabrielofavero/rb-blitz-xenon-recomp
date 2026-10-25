@@ -197,6 +197,28 @@ int main(int argc, char** argv) {
         [&](const std::string&) { ++reads; return Bytes{}; },{},[] {return false;},inputs,0);
     CHECK_TRUE(again.recipes_reused[0]);
     CHECK_EQ(uint64_t(reads),0);
+
+    BeginCase("a catalogue update merges with compatible local discoveries");
+    // Simulate a locally learned recipe, then install a catalogue that doesn't
+    // know it. A changed catalogue identity must merge rather than overwrite.
+    const Bytes discovered(64,8);
+    std::string discovered_hex;
+    for (const auto byte : discovered) {
+      discovered_hex.push_back(digits[byte>>4]); discovered_hex.push_back(digits[byte&15]);
+    }
+    auto learned = with_path;
+    learned["paths"]["d3d12/rtv"].push_back({{"raw",discovered_hex},
+        {"hash",Hex(XXH3_64bits(discovered.data(),discovered.size()))}});
+    auto changed = inputs; changed.catalogue = 101;
+    const auto extra = SeedPreparation(learned.dump(),root,
+        [](const std::string&) {return Bytes{1,2,3,4};},{},[] {return false;},changed,0);
+    CHECK_EQ(extra.records[0],uint64_t(2));
+    const auto learned_bytes = Read(store);
+    changed.catalogue = 102;
+    const auto updated = SeedPreparation(with_path.dump(),root,
+        [](const std::string&) {return Bytes{1,2,3,4};},{},[] {return false;},changed,0);
+    CHECK_EQ(updated.records[0],uint64_t(2));
+    CHECK_TRUE(Read(store) == learned_bytes);
     std::filesystem::remove(store);
   }
 

@@ -3,7 +3,7 @@
 //
 // Host tests for rexglue-sdk/include/rex/graphics/pipeline_preload.h - the
 // accounting and the completion barrier both pipeline caches use for a shader
-// storage preload (docs/plans/in-progress/2026-10-10-shader-cache-plan.md, P1).
+// storage preload (docs/plans/finished/2026-10-10-shader-cache-plan.md, P1).
 //
 // These exercise the component the D3D12 and Vulkan caches actually call, with
 // real threads and real waits - not a copy of the logic. The cases mirror the

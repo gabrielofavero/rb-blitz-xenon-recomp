@@ -6,6 +6,28 @@ using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("library wheel scales with content and never exceeds a visible page");
+  CHECK_EQ(LibraryWheelRows(51, 10), 1);
+  CHECK_EQ(LibraryWheelRows(100, 10), 1);
+  CHECK_EQ(LibraryWheelRows(101, 10), 2);
+  CHECK_EQ(LibraryWheelRows(501, 10), 6);
+  CHECK_EQ(LibraryWheelRows(5000, 10), 10);
+  CHECK_EQ(LibraryWheelRows(5000, 4), 4);
+  CHECK_EQ(LibraryWheelRows(0, 0), 1);
+  CHECK_EQ(LibraryWheelRows(-1, 10), 1);
+
+  BeginCase("only library screens and their authored navigation labels are header targets");
+  CHECK_EQ(LibraryHeaderForScreen("song_select_screen"), 0);
+  CHECK_EQ(LibraryHeaderForScreen("store_browser_screen"), 1);
+  CHECK_EQ(LibraryHeaderForScreen("inbox_screen"), 2);
+  CHECK_EQ(LibraryHeaderForScreen("recommendation_screen"), 3);
+  CHECK_EQ(LibraryHeaderForScreen("store_info_screen"), -1);
+  CHECK_EQ(LibraryHeaderForLabel("main_my_songs.lbl"), 0);
+  CHECK_EQ(LibraryHeaderForLabel("main_store.lbl"), 1);
+  CHECK_EQ(LibraryHeaderForLabel("main_inbox.lbl"), 2);
+  CHECK_EQ(LibraryHeaderForLabel("main_Home.lbl"), 3);
+  CHECK_EQ(LibraryHeaderForLabel("main_new_msg.lbl"), -1);
+
   BeginCase("pointer mapping respects letterboxing, stretch and overscan");
   auto p = MenuPointer(1280, 360, 2560, 720, 16, 9, true, false, 90, 90);
   CHECK_TRUE(p.x == .5f && p.y == .5f);

@@ -5,7 +5,10 @@ Snapshots the recompiled build into installer/out/payload, with a manifest.
 .DESCRIPTION
 The installer places exactly the files of the recompiled build that the game
 needs to run: the game's executable, the two runtime DLLs the
-game loads, and the Microsoft Visual C++ runtime DLLs the binaries import.
+game loads, the Microsoft Visual C++ runtime DLLs the binaries import, and the
+reviewable locator/recipe catalogue also embedded in rb_blitz.exe. The native
+extractor uses the owner's installed assets; no Python or shader/native cache
+files are copied from the developer machine.
 Nothing else is quoted from the build tree - in particular rb_blitz.toml is a
 developer profile, not a shipped file, and the *.pdb / *d.dll files there belong
 to a debug build.
@@ -72,6 +75,7 @@ $ErrorActionPreference = 'Stop'
 # Get-PayloadBackends and the manifest readers are shared with build.ps1, which decides
 # whether an existing snapshot may be reused; see that file for why the provenance matters.
 . (Join-Path $PSScriptRoot 'payload_provenance.ps1')
+. (Join-Path $PSScriptRoot 'preparation_payload.ps1')
 
 $installerDir = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $installerDir
@@ -164,8 +168,10 @@ if (-not $CrtDir -or -not (Test-Path -LiteralPath $CrtDir)) {
 # import (checked below); the rest of Machine.VC143.CRT is for other languages
 # and for WinRT/ConcRT, which nothing here uses.
 $payloadBackends = Get-PayloadBackends -BuildDir $SourceDir
+$preparation = Get-PreparationPayload -Directory $SourceDir
 $wanted = [ordered]@{
     'rb_blitz.exe'             = $SourceDir
+    'graphics-preparation.json' = $SourceDir
     'rexruntime.dll'           = $SourceDir
     'rexgpu-xenos.dll'         = $SourceDir
     'msvcp140.dll'             = $CrtDir
@@ -249,6 +255,7 @@ if (-not $SkipDependencyCheck) {
         $systemDir = Join-Path $env:WINDIR 'System32'
         $problems = @()
         foreach ($item in $entries) {
+            if ([IO.Path]::GetExtension($item.Name) -notin @('.exe', '.dll')) { continue }
             foreach ($import in (Get-PeImports -Path $item.Full -Reader $reader)) {
                 if ($import.StartsWith('api-ms-win-') -or $import.StartsWith('ext-ms-')) { continue }
                 if ($present.Contains($import)) { continue }
@@ -279,6 +286,15 @@ $manifest.Add('')
 $manifest.Add('[payload]')
 $manifest.Add("backends = `"$($payloadBackends -join ',')`"")
 $manifest.Add("commit = `"$Commit`"")
+$manifest.Add('')
+$manifest.Add('[graphics_preparation]')
+$manifest.Add('schema = 1')
+$manifest.Add("catalogue_sha256 = `"$($preparation.Sha256)`"")
+$manifest.Add("sources = $($preparation.Sources)")
+foreach ($path in $preparation.Counts.Keys) {
+    $manifest.Add("$($path.Replace('/', '_')) = $($preparation.Counts[$path])")
+}
+$manifest.Add('coverage = "observed recipes; dynamic combinations and other hardware remain unproven"')
 foreach ($item in $entries) {
     $manifest.Add('')
     $manifest.Add('[[files]]')
