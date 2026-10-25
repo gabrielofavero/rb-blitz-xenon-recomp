@@ -8,6 +8,17 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **HUD placement rewritten (2026-10-24; gameplay validation pending):** the
+  post-present repair and transform-message probes are replaced by a WorldXfm
+  hook, applying the aspect correction before rendering. Missing/hidden HUD
+  elements cannot trigger rediscovery; authored local transforms and parent
+  inheritance are preserved. Host regressions exercise all 64 anchor subsets,
+  repeated recomputation and scene reuse. **Owner follow-up:** the left cluster
+  was still at 16:9; draw-time preparation now covers clean cached anchors and
+  invalidates cached children only when a parent matrix changes. The new cached
+  draw regressions pass; the next gameplay check remains with the owner. See
+  [graphics.md](graphics.md) part 3 §9.2.7.
+
 - **Ultimate settings format fixed (2026-10-24):** the host rejected the mod's own
   top-level DTA pairs as trailing content, causing Gold Star Progress to look changed
   in-session but revert at restart. The adapter now reads native pairs and legacy host

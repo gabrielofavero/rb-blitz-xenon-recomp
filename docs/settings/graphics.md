@@ -483,6 +483,8 @@ Remove-Item Env:\REX_RESOLUTION_SCALE
 
 *Custom resolutions (ultrawide and taller-than-16:9) — findings*
 
+**2026-10-24 update:** the HUD runtime now places anchors during WorldXfm; §9.2.7 supersedes the historical present-pass implementation and records the pending gameplay check.
+
 Status: **the render path renders arbitrary aspect ratios correctly.** A 2560x1080 boot on this machine's own 21:9 primary monitor presents a true 2560x1080 image that fills the window — no black bars, no stretch — and the UI is laid out in the frame's own aspect. The in-game/HUD half now has a runtime seam that applies the owner's re-anchor rule (§9.2.3, §9.3) but **no boot capture has been taken with it on yet**; the optional black-bars menu mode, the `Resolution` submenu and its rows, and the per-layer menu-background policy are still open. Those are listed with their next step in §7.
 
 Evidence labels: **measured** = executed in this pass and read out of a log or a capture; **source** = read from the repository; **static** = read from the recompiled guest, not observed to execute.
@@ -810,7 +812,110 @@ The measurement is kept in the build: the present hook carries a `PresentTimer` 
 **The one remaining spike is the scene's first resolve, and it is a dirty call, not the finder.** On the window where a song's HUD appears, `hud-ship3.log` reports `6 write(s), 6 dirty call(s), 6 lookup(s)`, mean 551 us/frame and a worst frame of **295 ms** — that is `0x821F0300` walking the child list of `band_meter_hud` and `remedial_help.grp` and re-deriving every descendant's world transform, plus the first touch of the pages it writes. It happens once per song, while the track is still loading, and no window after it crosses the 200 us threshold (`hud-ship3.log` has exactly one such line). Replacing `Mapped` with `PageCommitted` inside the finder (`ObjectShape`, `FindNamedInDir`, `AsNamedObject`) cut the same window from 327 ms to 295 ms, so the finder's share is small; splitting the six placements one per frame would turn one 295 ms frame into six ~50 ms frames if that ever matters.
 
 
+#### 9.2.7 Visibility-independent placement during WorldXfm (2026-10-24)
+
+**Current implementation; supersedes the present-pass and script/PropAnim seams in
+§9.2.3–§9.2.6.** The 2026-10-17 captures and costs above describe the earlier build.
+The owner reported that hiding Song Progress Bar left other HUD elements at the
+16:9 anchors, with severe lag, occasional position flicker and visible movement
+at startup. The exact last-run timing has not been measured here.
+
+**Source findings:** `src/hooks/hud_layout_runtime.cpp` previously read the message
+symbol through `HostPtr`/guest heap queries on every `RndTransformable::Handle`
+call, including unrelated messages. That cost was outside `PresentTimer`. Missing
+required targets retried `HudDirNow` every 20 presents, which repeatedly queried
+the heap while walking candidates; there was no terminal absent-element state.
+Placement happened after frame submission, and applied another delta whenever
+the cached world x differed from the last write. Authored local x was changed
+only when it happened to match world x. Engine recomputation could therefore
+undo a placement, and the next present repaired it after rendering. These paths
+explain how the implementation can stall and flicker; attribution of every
+symptom in the owner's last run remains unproven.
+
+The replacement hooks `RndTransformable::WorldXfm` (`0x821F13D0`). The generated
+body in `generated/default/rb_blitz_recomp.45.cpp` clears the dirty flag, derives
+a fresh world matrix from local data, recursively resolves dirty parents, and
+returns `transformable + 72`. The wrapper keeps that original call and its
+register results, then adjusts world x at `+0x78` before returning it to a child
+or drawing code. The six measured class/offset/name/side rows in §9.2.5 remain
+the acceptance table. The `+4` virtual-base table identifies the live object's
+`Hmx::Object` header; its directory chain must still reach `track/hud.milo`.
+Only live objects handed to WorldXfm are inspected, with no scene search,
+visibility dependency, retained instance list, heap-query API or page bitmap.
+The speculative file-path strings use a bounded `VirtualQuery` readability
+check directly; there is no guest `QueryRegionInfo` call.
+
+Authored local positions are left intact. Every recomputation gets one correction
+of the fresh world result, so pause/resume, animation, missing optional elements
+and allocator address reuse do not depend on the previous frame's value.
+Children inherit the translated parent normally; a named anchor beneath another
+anchor compensates for that inherited offset instead of shifting twice. No
+additional dirty-tree walk was included in the first WorldXfm-only version;
+the follow-up below corrects that omission for cached child matrices. The old
+per-present, message and animation hooks are removed. `hud_reanchor_scan` remains accepted as an inert compatibility
+flag; it can no longer start a heap sweep. `hud_reanchor_probe` logs at most eight
+placements per measured anchor per thread. 16:9 and disabled placement return
+before inspecting any object metadata.
+
+`tests/hud_layout_runtime_tests.cpp` exercises the production wrapper with isolated
+guest-memory fixtures and a stand-in for the original evaluator: all 64 subsets
+of the six anchors, no progress-bar object, first resolution, 3,000 repeated
+resolutions, changing authored positions, named and unnamed children, menu
+objects, subdirectories, reused scene/object addresses, 4:3/16:9, disabled gates,
+uncommitted path strings and original return-register preservation. This is host
+regression coverage, **not a game capture**. A cold song entry, hidden/visible
+Song Progress Bar, other HUD visibility combinations, pause/resume and a second
+song still need a driven runtime check; current gameplay timing is unproven.
+
+**Validation (2026-10-24):** `cmake --build --preset win-amd64-release`
+succeeded. `ctest --test-dir out/build/win-amd64-release -R '^hud_layout' -V`
+passed: 316 arithmetic checks and 13,723 runtime-wrapper checks. Evidence:
+`out/_scratch/hud-worldxfm/hud-tests.log`. The 3,000-resolution synthetic meter
+loop, including assertions, measured 1.634 us/call; this is not gameplay frame
+time. The documentation checker reports the same 40 errors as HEAD, with no
+new diagnostics (`out/_scratch/hud-worldxfm/docs-comparison.json`); they are
+stale references to moved plans.
+
+**Owner follow-up, 2026-10-24:** the new screenshot still showed the left
+multiplier cluster at its 16:9 anchor; the right readout appeared farther out,
+without a measured right-side comparison. The 13,723 wrapper checks above did
+not cover an already clean parent/child cache drawn without a WorldXfm call.
+The generated draw bodies explicitly bypass WorldXfm when dirty byte `+189`
+is clear, so correcting only fresh resolutions cannot guarantee placement of
+static HUD art. A changed parent world matrix also leaves previously clean
+child caches unchanged unless they are invalidated.
+
+**Source correction:** `src/hooks/hud_layout_runtime.cpp` now prepares each
+live named anchor before the guest traverses its drawing children:
+`RndDir::DrawShowing` (`0x821F65C8`, drawable view; transformable is +80) and
+`RndGroup`'s child draw traversal (`0x82226CD8`, drawable view; transformable
+is +64). These offsets are corroborated by constructors in the generated
+`rb_blitz_recomp.71.cpp` and `.3.cpp`; acceptance still uses the measured
+Hmx::Object class/offset/name table. The draw hooks resolve only the actual
+anchor being drawn, including a clean cache populated before its directory
+path was assigned. They perform no object search and retain no placement state.
+A bounded normal-log line (`hud_reanchor: pre-draw`) reports the first actual
+placement per anchor per thread for the next owner run.
+
+WorldXfm snapshots the old world matrix, calls the original and places the
+anchor. If any of its twelve meaningful matrix floats changed, the guest's
+`0x821F0300` invalidates descendant caches. Padding bytes are ignored. The
+already resolved parent's dirty byte is then cleared so a child cannot
+needlessly resolve it again. An unchanged placement performs no dirty walk;
+a hidden progress-bar child is neither discovered nor required.
+
+**Validation:** release build and both HUD tests pass after the follow-up.
+`tests/hud_layout_runtime_tests.cpp` now includes a fully cached left meter
+and child loaded before HUD-path assignment, first-draw placement, 1,000
+unchanged draws with no repeated dirty walk, clean-child invalidation, the
+lane-switch group route and an already placed right anchor. There are 19,784
+runtime checks plus 316 arithmetic checks. Evidence:
+`out/_scratch/hud-worldxfm/hud-cached-draw-tests.log`. The owner will perform
+the next in-game check; this follow-up has no new gameplay capture yet.
+
 #### 9.3 The policy seam (done, tested)
+
+**Runtime update 2026-10-24:** arithmetic is unchanged; §9.2.7 replaces the runtime seams described in the historical paragraph below.
 
 `src/hooks/hud_layout.h` is the rule as pure arithmetic — `HudShiftUnits`,all six elements).** `src/hooks/hud_layout_runtime.cpp` is the caller of this policy. The script seam overrides `RndTransformable::Handle` (`0x821F44F8`), keeps the original `set_local_pos`, and moves the local x by `ShiftHudX(x, HudShiftUnits(width, height) * hud_reanchor_hud_half_height)` for objects in the HUD dir. The scene pass (§9.2.4–9.2.5) resolves the stock HUD's scene dir, finds the six anchored elements through the scene dir's own object hash, and writes their transform pair plus the transformable's dirty call. Two safeguards: `BootRenderWidth() == 0` — the title's own 16:9 frame, and every unforced boot — returns before any read, and `HudShiftUnits` is exactly 0 there anyway, so a 16:9 boot is the identity twice over. The cvars are `hud_reanchor` (default on; the whole feature), `hud_reanchor_apply` (default on; place the six measured elements — `HudTarget::place` gates each one), `hud_reanchor_hud_half_height` (240, measured), `hud_reanchor_probe` (off; scene inventory, resolutions, shifts and the present hook's cost) and `hud_reanchor_scan` (off; **diagnostic only** now — the heap sweep the lookup replaced, kept to map a scene whose containers have not been read). The stock route produces no `set_local_pos` calls (§9.2.3), which is why the scene pass exists; the Ultimate route reaches the script seam but crashes before the HUD is placed.
 

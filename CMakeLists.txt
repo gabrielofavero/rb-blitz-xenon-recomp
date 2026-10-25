@@ -655,6 +655,18 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_hud_layout_tests PRIVATE src)
     add_test(NAME hud_layout COMMAND rb_blitz_hud_layout_tests)
 
+    if(WIN32)
+        # Exercise the production WorldXfm hook with isolated live-object fixtures.
+        add_executable(rb_blitz_hud_layout_runtime_tests
+            tests/hud_layout_runtime_tests.cpp src/hooks/hud_layout_runtime.cpp)
+        target_include_directories(rb_blitz_hud_layout_runtime_tests PRIVATE src)
+        target_link_libraries(rb_blitz_hud_layout_runtime_tests PRIVATE rex::runtime)
+        add_custom_command(TARGET rb_blitz_hud_layout_runtime_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_hud_layout_runtime_tests>)
+        add_test(NAME hud_layout_runtime COMMAND rb_blitz_hud_layout_runtime_tests)
+    endif()
+
     # The window's own size (src/settings/window_policy.h, P2): how a fixed-size window is fitted
     # into the display's usable area without changing its aspect, and the physical -> logical
     # conversion `window_width`/`window_height` are expressed in. SDK-free arithmetic like the HUD

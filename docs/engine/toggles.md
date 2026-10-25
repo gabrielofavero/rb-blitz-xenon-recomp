@@ -126,15 +126,15 @@ own row, and the two labels it moves between are the module's constants
 
 The in-song HUD re-anchor of [graphics.md](../settings/graphics.md) part 3 §9 lives in
 [src/hooks/hud_layout_runtime.cpp](../../src/hooks/hud_layout_runtime.cpp), not `src/enhancements.cpp`.
-Its four cvars are registered here so they are not invisible:
+Its five cvars (including the retired scan flag) are registered here:
 
 | Cvar | Default | What it does |
 | --- | --- | --- |
-| `hud_reanchor` | on | Maps the in-song HUD on a non-16:9 frame: the scripted `set_local_pos` handler, plus a per-present pass that resolves the live `track/hud.milo` scene dir and finds its elements through the dir's **own object hash** (`ObjectDir` entries at dir+0x08/+0x0C, child dirs at +0x50 — a few hundred word reads, done once per song). A 16:9 boot is the identity and is never touched. A record is accepted only when its dir chain reaches the HUD scene, and the pass only runs on the live `game_screen`. Per-frame cost after placement is 1-4 us (`PageCommitted`, never `Mapped`) — graphics.md §9.2.6. |
-| `hud_reanchor_apply` | on | Places the six elements the scene authors off centre: `band_meter_hud` (−298.537), `letter_collect_hud` (−294.108) and `remedial_help.grp` (−289.338, the lane-switch prompt) travel left; `score.lbl` and `star_board` (+270) and `dynamic_leaderboard` (+300) travel right — 320 px on 2560x1080, verified against a capture (graphics.md §9.2.5). Centred elements and any class not in the measured table are left alone. |
+| `hud_reanchor` | on | Re-anchors the six measured HUD anchors during the guest's WorldXfm evaluation, with pre-draw resolution for clean cached anchors and change-triggered descendant invalidation. Independent of element visibility; no present pass, scene search, guest heap queries or retained object cache. 16:9 returns before inspecting metadata. See graphics.md part 3 §9.2.7; earlier capture timings belong to §9.2.6's superseded implementation. |
+| `hud_reanchor_apply` | on | Places `band_meter_hud`, `letter_collect_hud` and `remedial_help.grp` on the left, `score.lbl`, `star_board` and `dynamic_leaderboard` on the right. Their children inherit the shift; named children compensate for an already shifted ancestor. Authored local transforms stay intact. The six sides/offsets were measured in graphics.md §9.2.5; the WorldXfm implementation's gameplay validation is pending (§9.2.7). |
 | `hud_reanchor_hud_half_height` | 240 | The HUD scene's half-height in its own units, measured 2026-10-17: the left block authors `x = -298.537` and sits 335.9 px left of centre on a 540-line frame, i.e. 1.125 px per unit, so 270 px (half of 540) is 240 units. 2560x1080 shifts by 142.2 units = 160 guest px = 320 px on a 1080p frame. The 180 it carried before was derived from the payload anchors and was wrong. |
-| `hud_reanchor_probe` | off | Diagnostics: logs the HUD scene dir, the container inventory with each element's authored x, every element resolution and applied shift, and the present hook's window cost with a per-element breakdown every 600 frames. This is the evidence behind the element table. |
-| `hud_reanchor_scan` | off | Diagnostics **only** since the object-hash lookup replaced it: sweeps ±2 MiB of guest heap around the live HUD scene and logs every transformable-looking record, to map a scene whose containers have not been read. **Expensive** — an uncached page test is a heap query plus `VirtualQuery`, ~1.2 ms here, so a sweep is seconds of frame time in slices of up to ~200 ms (graphics.md §9.2.6). The placement never uses it. |
+| `hud_reanchor_probe` | off | Logs a bounded sample (eight placements per anchor per thread) of original/placed world x during WorldXfm. No container inventory or present timer remains. |
+| `hud_reanchor_scan` | off | Retired 2026-10-24: accepted for configuration/command-line compatibility, performs no work. The heap sweep and its page cache were removed with the present-pass finder (graphics.md §9.2.7). Historical sweep costs remain in §9.2.6. |
 
 ## Input switches (gameplay mapping)
 
