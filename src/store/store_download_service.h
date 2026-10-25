@@ -48,6 +48,10 @@ struct DownloadConfig {
   std::size_t max_offers = 512;
   // The boot's log sink; the service itself stays free of the SDK so the tests can link it.
   std::function<void(std::string_view line, bool warning)> log;
+  // Resolve exact artist/title matches to enumerated DLC packages, never guest-supplied paths.
+  std::function<std::vector<std::filesystem::path>(std::string_view, std::string_view)> packages;
+  std::function<void(const std::filesystem::path&)> forget_package;
+  std::function<bool()> library_ready;
 };
 
 // Called once at boot (src/hooks/dlc.cpp Configure) on a host thread.
@@ -75,6 +79,7 @@ std::filesystem::path InstalledPath(std::string_view token);
 // forward it; a path inside the namespace is always consumed.
 bool AnswerDownloadQuery(std::string_view path, bool* answer);
 bool HandleDownloadWrite(std::string_view path);
+void ClearStoreRefreshWarning();
 
 // Stops and joins the worker, cancelling queued work. Safe to call more than once.
 void StopDownloads();

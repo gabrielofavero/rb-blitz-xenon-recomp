@@ -80,6 +80,7 @@ enum class JobState : std::uint8_t {
   kInstalled,
   kFailed,
   kCancelled,
+  kDeleted,
 };
 
 std::string_view JobStateToken(JobState state);
@@ -107,7 +108,7 @@ struct JobQuery {
 // refused so `TakeExists` can forward it.
 std::optional<JobQuery> ParseJobQuery(std::string_view rest);
 
-enum class JobCommandKind { kStart, kCancel, kDownloadAgain };
+enum class JobCommandKind { kStart, kCancel, kDownloadAgain, kDelete };
 
 struct JobCommand {
   JobCommandKind kind = JobCommandKind::kStart;
@@ -170,6 +171,8 @@ struct OfferRecord {
   // package's install name - `store_install.cpp`'s sanitizer turns it into the file name, so no
   // byte of it reaches the library unexamined. Host-only: the guest never sees it.
   std::string title;
+  std::string artist;
+  std::string song;
 };
 
 struct TransferOutcome {

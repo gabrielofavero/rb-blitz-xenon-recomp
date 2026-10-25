@@ -502,6 +502,12 @@ target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 
 if(BUILD_TESTING)
     find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
+    # Exercise the keyboard modal's production ownership/navigation rules without
+    # booting the game, opening a window, or synthesizing controller input.
+    add_executable(rb_blitz_keyboard_controller_tests tests/keyboard_controller_tests.cpp)
+    target_include_directories(rb_blitz_keyboard_controller_tests PRIVATE "${REXSDK_DIR}/include")
+    target_link_libraries(rb_blitz_keyboard_controller_tests PRIVATE imgui)
+    add_test(NAME keyboard_controller COMMAND rb_blitz_keyboard_controller_tests)
     add_test(NAME shader_asset_resolver
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_asset_resolver_tests.py"
                 --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>)
@@ -1229,8 +1235,10 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_store_library_tests
         tests/store_library_tests.cpp
         src/store/store_library_index.cpp
+        src/store/rhythmverse_client.cpp
     )
-    target_include_directories(rb_blitz_store_library_tests PRIVATE src)
+    target_include_directories(rb_blitz_store_library_tests PRIVATE src
+        "${REXSDK_DIR}/thirdparty/inja/third_party/include")
     add_test(NAME store_library COMMAND rb_blitz_store_library_tests)
 
     # P5 of the RhythmVerse store plan: the download pipeline. SDK-free and hermetic - the

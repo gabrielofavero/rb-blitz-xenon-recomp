@@ -4147,3 +4147,27 @@ now use `rbbz_release_date` for the credit string, and the credit-panel transfor
 reads that key. Regression checks reject the reserved key in text and compiled
 records. The release build and focused host tests pass; the owner chose to perform
 the in-game validation.
+
+
+**2026-10-25 — Installed custom management.** The details page now queries installed
+ownership when opened and while the index changes, matching normalized artist and
+song title across all scanned DLC packages, including manual installs in the shared writable content root. Matching
+folds Unicode case and tolerates Latin-1 metadata. The metadata reader also descends
+into anonymous outer lists; previously those packs declared no songs. The index
+starts at boot, and a selected offer shows Checking installed songs while it builds.
+Package-list snapshots and invalidation generations prevent a concurrent refresh
+from publishing an obsolete ownership index.
+
+An owned offer shows **Delete**. A guest dialog confirms removal of every matching
+package and warns that other songs in those packages are included. Successful
+removal immediately returns the action to **Download**. Deletion errors retain the
+remaining ownership and show an error; partial removals still require a refresh.
+Leaving the details page after deletion without a replacement download offers
+**Refresh** or **Ignore**, warning that playing without refreshing could crash.
+Refresh starts the host rescan and the existing guest discovery route. Ignore
+finishes the leave and dismisses that warning until another deletion. Receipts
+remain download history and never determine ownership.
+
+Validation: release build, host service regressions with temporary packages, metadata
+and index regressions, and authored dialog compile/parse tests. In-game interaction
+still requires an owner test; no game navigation was performed for this change.

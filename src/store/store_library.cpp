@@ -23,8 +23,10 @@
 #include <rex/logging.h>
 
 #include "fs/dlc_song_metadata.h"
+#include "fs/dlc_layout.h"
 #include "hooks/dlc.h"
 #include "store/store_serve.h"
+#include "store/store_settings.h"
 
 namespace rb_blitz::store {
 namespace {
@@ -42,7 +44,9 @@ bool g_pending = false;
 bool g_quit = false;
 bool g_installed = false;
 bool g_stale = true;  // no build published, or the library changed since the last one
+std::uint64_t g_revision = 0;
 std::string g_reason;  // why the last build ran
+std::filesystem::path g_user_data_root;  // immutable after installation
 
 class Worker {
  public:
@@ -73,7 +77,16 @@ std::shared_ptr<LoadedSongIndex> Build() {
   auto index = std::make_shared<LoadedSongIndex>();
   // A copy: `LibraryPackagePaths()` is the boot's own list and must not be read while the
   // refresh row replaces it.
-  const std::vector<std::filesystem::path> packages = rb_blitz::dlc::LibraryPackagePaths();
+  std::vector<std::filesystem::path> packages = rb_blitz::dlc::LibraryPackagePaths();
+  // XAM also enumerates common marketplace content from the writable content root. Those
+  // manually installed packages never appear in the extra DLC roots' scan.
+  if (!g_user_data_root.empty()) {
+    for (const auto& package : fs::ScanDlcRoot(g_user_data_root / "0000000000000000").packages) {
+      if (package.content_type == "00000002") packages.push_back(package.host_path);
+    }
+  }
+  std::sort(packages.begin(), packages.end());
+  packages.erase(std::unique(packages.begin(), packages.end()), packages.end());
   const Clock::time_point started = Clock::now();
   std::size_t mounted = 0;
   std::size_t failed = 0;
@@ -90,7 +103,7 @@ std::shared_ptr<LoadedSongIndex> Build() {
     }
     ++mounted;
     for (const auto& song : rb_blitz::fs::ReadDeviceSongMetadata(*device)) {
-      index->Add(song.artist, song.title);
+      index->Add(song.artist, song.title, packages[i]);
     }
   }
   const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started);
@@ -106,6 +119,7 @@ std::shared_ptr<LoadedSongIndex> Build() {
 
 void Run() {
   for (;;) {
+    std::uint64_t revision;
     {
       std::unique_lock<std::mutex> lock(g_mutex);
       g_wake.wait(lock, [] { return g_quit || g_pending; });
@@ -114,13 +128,18 @@ void Run() {
       }
       g_pending = false;
       g_building = true;
+      revision = g_revision;
     }
     std::shared_ptr<LoadedSongIndex> index = Build();
     {
       const std::lock_guard<std::mutex> lock(g_mutex);
-      g_index = std::move(index);
-      g_stale = false;
-      ++g_generation;
+      if (revision == g_revision) {
+        g_index = std::move(index);
+        g_stale = false;
+        ++g_generation;
+      } else {
+        g_pending = true;  // invalidation during a scan must not publish its old snapshot
+      }
       g_building = false;
     }
   }
@@ -128,13 +147,14 @@ void Run() {
 
 }  // namespace
 
-void InstallStoreLibrary() {
+void InstallStoreLibrary(const std::filesystem::path& user_data_root) {
   {
     const std::lock_guard<std::mutex> lock(g_mutex);
     if (g_installed) {
       return;
     }
     g_installed = true;
+    g_user_data_root = user_data_root;
   }
   // The serving policy asks this once per offer when a page is written (store_serve.h). Reading the
   // published snapshot is a mutex plus a set lookup - cheap enough for the guest thread, and it
@@ -142,6 +162,7 @@ void InstallStoreLibrary() {
   SetDownloadedPredicate(
       [](const Offer& offer) { return IsDownloadedSong(offer.artist, offer.name); });
   TheWorker();  // start the thread now, so the first request only has to wake it
+  if (Settings()->enabled) RequestLibraryRefresh("boot");
   REXLOG_INFO("store_library: the Downloaded mark is built from the loaded DLC packages' songs.dta");
 }
 
@@ -166,11 +187,13 @@ void InvalidateLibrary() {
   {
     const std::lock_guard<std::mutex> lock(g_mutex);
     g_stale = true;
+    ++g_revision;
     if (g_index) {
       dropped = g_index->size();
       g_index.reset();
     }
   }
+  RequestLibraryRefresh("DLC library changed");
   if (dropped != 0) {
     REXLOG_INFO("store_library: the published index ({} song(s)) was dropped; the store's next "
                 "page rebuilds it",
@@ -200,6 +223,32 @@ bool IsDownloadedSong(std::string_view artist, std::string_view title) {
     index = g_index;
   }
   return index != nullptr && index->Contains(artist, title);
+}
+
+std::vector<std::filesystem::path> InstalledSongPackages(std::string_view artist,
+                                                       std::string_view title) {
+  std::vector<std::filesystem::path> paths;
+  {
+    const std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_index) paths = g_index->Packages(artist, title);
+  }
+  std::erase_if(paths, [](const auto& path) {
+    std::error_code ec;
+    return !std::filesystem::exists(path, ec) || ec;
+  });
+  return paths;
+}
+
+void ForgetInstalledPackage(const std::filesystem::path& package) {
+  const std::lock_guard<std::mutex> lock(g_mutex);
+  // Copy-on-write: readers may still own the previous immutable snapshot.
+  if (g_index) {
+    auto next = std::make_shared<LoadedSongIndex>(*g_index);
+    next->RemovePackage(package);
+    g_index = std::move(next);
+  }
+  ++g_revision;
+  ++g_generation;
 }
 
 }  // namespace rb_blitz::store

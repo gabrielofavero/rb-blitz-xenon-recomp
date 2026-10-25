@@ -390,7 +390,7 @@ class RbBlitzApp : public rex::ReXApp {
     rb_blitz::store::InstallAlbumArt();
     // P3's Downloaded mark (§3.2): the artist/title index of the loaded DLC library. Its builder
     // thread is started here; the serving policy asks only the published snapshot.
-    rb_blitz::store::InstallStoreLibrary();
+    rb_blitz::store::InstallStoreLibrary(runtime()->user_data_root());
     // P9-10 of the RhythmVerse store plan (§9): warm Recently Added once per boot. Until this the
     // first catalogue fetch started when the store *opened* (`store_fetch.cpp`'s front-menu serve),
     // so a Recent press 1-2 s later asked for a page the site had not answered yet and was handed
@@ -466,7 +466,8 @@ class RbBlitzApp : public rex::ReXApp {
   }
 
   // The SDK's compact keyboard dialog is a debug-style prompt by default.
-  // Restyle that same modal for both library and RhythmVerse song searches.
+  // Restyle that same modal for both library and RhythmVerse song searches,
+  // and share its presentation with the existing achievement unlock toast.
   void OnConfigureStyle(ImGuiStyle&, rex::ui::Style& style) override {
     rb_blitz::ui::ConfigureKeyboardTheme(style);
   }

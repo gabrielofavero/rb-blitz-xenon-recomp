@@ -541,7 +541,10 @@ void TestDownloadJob() {
   std::vector<Registration> registered;
   rb_blitz::store::SetOfferRegistrar(
       [&registered](std::string_view file_id, std::string_view url,
-                    std::optional<std::int64_t> api_size, std::string_view title) {
+                    std::optional<std::int64_t> api_size, std::string_view title,
+                    std::string_view artist, std::string_view song) {
+        CHECK_TRUE(artist == "Bush");
+        CHECK_TRUE(song == "The People That We Love");
         registered.push_back(Registration{std::string(file_id), std::string(url),
                                           std::string(title)});
         CHECK_TRUE(api_size.has_value() && *api_size == 4096);

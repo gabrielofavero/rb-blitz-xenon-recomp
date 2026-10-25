@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ui/keyboard_theme.h"
 
+#include "input/native_menu.h"
+#include "input/title_input.h"
+
 #include <imgui.h>
 #include <rex/logging.h>
 #include <rex/ui/style.h>
@@ -14,7 +17,7 @@ namespace {
 ImFont *g_font = nullptr;
 ImFont *g_heading_font = nullptr;
 // The legacy renderer uploads its atlas once. Bake above the largest drawn
-// heading (56 logical pixels) so larger windows never enlarge a tiny debug
+// heading (46 logical pixels) so larger windows never enlarge a tiny debug
 // face.
 constexpr float kBakedSize = 64.0f;
 
@@ -45,8 +48,10 @@ void ConfigureKeyboardFonts(ImFontAtlas *atlas) {
   if (!atlas) {
     return;
   }
-  const char *regular[] = {"segoeui.ttf", "tahoma.ttf", "arial.ttf"};
-  const char *heading[] = {"seguisb.ttf", "tahomabd.ttf", "arialbd.ttf"};
+  // Approximate the retail popup's bold sans heading and condensed prompts
+  // using installed fonts; the game's typefaces are packed guest assets.
+  const char *regular[] = {"arialnb.ttf", "tahomabd.ttf", "arialbd.ttf"};
+  const char *heading[] = {"arialbd.ttf", "tahomabd.ttf", "seguisb.ttf"};
   g_font = LoadFont(atlas, regular, 3);
   g_heading_font = LoadFont(atlas, heading, 3);
   if (!g_font) {
@@ -64,17 +69,57 @@ void ConfigureKeyboardFonts(ImFontAtlas *atlas) {
 void ConfigureKeyboardTheme(rex::ui::Style &style) {
   auto &keyboard = style.keyboard;
   keyboard.enabled = true;
+  keyboard.sample_controller = [] {
+    using Pad = rex::ui::KeyboardControllerSample;
+    using namespace rex::input;
+    X_INPUT_STATE state{};
+    Pad sample;
+    sample.connected = input::SamplePhysicalPad(&state);
+    sample.focused = input::HostInputFocused() && input::HostSdlKeyboardFocused();
+    if (!sample.connected) {
+      return sample;
+    }
+    const uint16_t buttons = state.gamepad.buttons;
+    if (buttons & X_INPUT_GAMEPAD_A) sample.buttons |= Pad::Select;
+    if (buttons & X_INPUT_GAMEPAD_B) sample.buttons |= Pad::Cancel;
+    constexpr int kStickThreshold = 18000;
+    if ((buttons & X_INPUT_GAMEPAD_DPAD_UP) || state.gamepad.thumb_ly > kStickThreshold)
+      sample.buttons |= Pad::Up;
+    if ((buttons & X_INPUT_GAMEPAD_DPAD_DOWN) || state.gamepad.thumb_ly < -kStickThreshold)
+      sample.buttons |= Pad::Down;
+    if ((buttons & X_INPUT_GAMEPAD_DPAD_LEFT) || state.gamepad.thumb_lx < -kStickThreshold)
+      sample.buttons |= Pad::Left;
+    if ((buttons & X_INPUT_GAMEPAD_DPAD_RIGHT) || state.gamepad.thumb_lx > kStickThreshold)
+      sample.buttons |= Pad::Right;
+    return sample;
+  };
   keyboard.font = g_font;
   keyboard.heading_font = g_heading_font;
-  keyboard.background = ImVec4(0.14f, 0.075f, 0.19f, 1.0f);
-  keyboard.border = ImVec4(0.48f, 0.28f, 0.53f, 1.0f);
-  keyboard.text = ImVec4(1.0f, 0.97f, 1.0f, 1.0f);
-  keyboard.muted_text = ImVec4(0.81f, 0.72f, 0.85f, 1.0f);
-  keyboard.input = ImVec4(0.085f, 0.04f, 0.12f, 1.0f);
-  keyboard.accent = ImVec4(0.64f, 0.16f, 0.50f, 1.0f);
-  keyboard.accent_hovered = ImVec4(0.77f, 0.23f, 0.61f, 1.0f);
-  keyboard.accent_active = ImVec4(0.51f, 0.10f, 0.39f, 1.0f);
-  keyboard.secondary = ImVec4(0.27f, 0.16f, 0.33f, 1.0f);
-  keyboard.dim = ImVec4(0.06f, 0.025f, 0.09f, 0.55f);
+  keyboard.background = ImVec4(0.025f, 0.015f, 0.02f, 0.66f);
+  keyboard.border = ImVec4(1.0f, 0.08f, 0.10f, 1.0f);
+  keyboard.border_highlight = ImVec4(1.0f, 0.70f, 0.65f, 0.95f);
+  keyboard.layered_border = true;
+  keyboard.text = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+  keyboard.muted_text = ImVec4(0.94f, 0.92f, 0.91f, 1.0f);
+  keyboard.input = ImVec4(0.0f, 0.0f, 0.0f, 0.48f);
+  keyboard.accent = ImVec4(0.55f, 0.035f, 0.045f, 0.60f);
+  keyboard.accent_hovered = ImVec4(0.85f, 0.06f, 0.08f, 0.78f);
+  keyboard.accent_active = ImVec4(0.40f, 0.02f, 0.03f, 0.85f);
+  keyboard.secondary = ImVec4(0.06f, 0.02f, 0.025f, 0.40f);
+  keyboard.dim = ImVec4(0.0f, 0.0f, 0.0f, 0.12f);
+
+  // Keep the existing unlock toast compact while sharing the keyboard's fonts
+  // and palette, so the two player-facing SDK surfaces stay visually in sync.
+  auto &toast = style.toast;
+  toast.themed = true;
+  toast.font = keyboard.font;
+  toast.heading_font = keyboard.heading_font;
+  toast.background = keyboard.background;
+  toast.background_alpha = keyboard.background.w;
+  toast.border = keyboard.border;
+  toast.border_highlight = keyboard.border_highlight;
+  toast.text = keyboard.text;
+  toast.title = keyboard.text;
+  toast.muted_text = keyboard.muted_text;
 }
 }  // namespace rb_blitz::ui

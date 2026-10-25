@@ -1761,7 +1761,12 @@ int StoreEdit(const char* path, const char* which) {
     const bool credits = rb_blitz::store::ShowOfferCredits(&roots, &why);
     std::printf("store-edit: credit block -> %s (%s)\n", credits ? "edited" : "refused",
                 why.empty() ? "no reason" : why.c_str());
-    ok = ok && preview && purchased && option && popup && credits;
+    const bool add_button = rb_blitz::store::AddDownloadButton(&roots, &why);
+    const bool route_buttons = rb_blitz::store::RouteDownloadButtons(&roots, &why);
+    const bool library = rb_blitz::store::AddLibraryManagement(&roots, &why);
+    std::printf("store-edit: library management -> %s (%s)\n", library ? "edited" : "refused",
+                why.empty() ? "no reason" : why.c_str());
+    ok = ok && preview && purchased && option && popup && credits && add_button && route_buttons && library;
   }
   std::printf("store-edit: %s -> %s\n", mode.c_str(), ok ? "edited" : "refused");
   const Node* method = nullptr;
@@ -2225,6 +2230,62 @@ void TestDownloadButtonsRouted() {
   why.clear();
   CHECK_FALSE(rb_blitz::store::RouteDownloadButtons(&other, &why));
   CHECK_TRUE(TreeUnchanged(other, untouched));
+}
+
+void TestLibraryManagement() {
+  BeginCase("selected offers use live ownership, confirmed deletion and a leave refresh warning");
+  const auto sym = [](const char* name) { return Node::Symbol(name); };
+  const auto cmd = [](std::initializer_list<Node> kids) { return Node::Command(kids); };
+  const auto insert = [&](const char* name) {
+    return cmd({sym("insert_elem"), Node::Var("buttons"), Node::Int(0), sym(name)});
+  };
+  std::vector<Node> record{
+    cmd({sym("new"), sym("StoreInfoPanel"), sym("store_info_panel"),
+      Node::Array({sym("refresh_buttons"), cmd({sym("if_else"),
+        cmd({Node::Var("offer"), sym("get_data"), Node::Array({sym("is_purchased")})}),
+        insert("store_download_again"), insert("store_download_now")})}),
+      Node::Array({sym("SELECT_MSG"), cmd({sym("switch"), Node::Var("action"),
+        Node::Array({sym("store_download_again"), cmd({sym("old_download")})}),
+        Node::Array({sym("store_download_now"), cmd({sym("start_download")})})})}),
+      Node::Array({sym("go_back"), cmd({sym("original_back")})})}),
+    cmd({sym("new"), sym("UIScreen"), sym("store_info_screen"),
+      Node::Array({sym("panels"), sym("store_info_panel")})})};
+  std::string why;
+  CHECK_TRUE(rb_blitz::store::AddDownloadPopup(&record, &why));
+  CHECK_TRUE(rb_blitz::store::AddLibraryManagement(&record, &why));
+  if (!why.empty()) Fail(__FILE__, __LINE__, why);
+  // Inspect the complete compiled record: live queries must replace the captured ownership
+  // bit, and the unsafe legacy re-download action must be unreachable.
+  bool captured_ownership = false, live_ownership = false, checking = false;
+  bool delete_request = false, warning = false, original_back = false;
+  bool refresh_host = false, checking_row = false;
+  const auto scan = [&](const Node& node, const auto& self) -> void {
+    if (node.text == "is_purchased") captured_ownership = true;
+    if (node.text == "rbbz-store/owned/%s") live_ownership = true;
+    if (node.text == "rbbz-store/library/ready") checking = true;
+    if (node.text == "rbbz-store/download/delete/%s") delete_request = true;
+    if (node.text.find("could cause crashes") != std::string::npos) warning = true;
+    if (node.text == "original_back") original_back = true;
+    if (node.text == "rbbz-store/library/refresh") refresh_host = true;
+    if (node.text == "store_checking_library") checking_row = true;
+    CHECK_FALSE(node.text == "store_download_again");
+    for (const auto& child : node.kids) self(child, self);
+  };
+  for (const auto& node : record) scan(node, scan);
+  CHECK_FALSE(captured_ownership);
+  CHECK_TRUE(live_ownership && checking && checking_row);
+  CHECK_TRUE(delete_request && warning && original_back && refresh_host);
+  const auto once = record;
+  CHECK_TRUE(rb_blitz::store::AddLibraryManagement(&record, &why));
+  CHECK_TRUE(TreeUnchanged(record, once));
+  auto bytes = rb_blitz::ui::dtb::Compile(record);
+  std::vector<Node> parsed;
+  rb_blitz::ui::dtb::RootHeader header;
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  CHECK_EQ(parsed.size(), record.size());
+  std::vector<Node> missing;
+  CHECK_FALSE(rb_blitz::store::AddLibraryManagement(&missing, &why));
+  CHECK_TRUE(missing.empty());
 }
 
 // P9-6: the modal the Download press opens on the details screen.
@@ -3319,6 +3380,7 @@ int main(int argc, char** argv) {
   TestDownloadButtonAdded();
   TestDownloadButtonsRouted();
   TestDownloadPopup();
+  TestLibraryManagement();
   TestDownloadRefreshAction();
   TestDifficultyLoopUnrolled();
   TestAlbumArtLinked();

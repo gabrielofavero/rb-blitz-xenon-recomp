@@ -447,6 +447,12 @@ void TestSongMetadata() {
     CHECK_TRUE(wrapped_songs[0].title == "Building a Mystery");
     CHECK_TRUE(wrapped_songs[0].artist == "Sarah McLachlan");
   }
+  // Packs also use an anonymous list around their records. Its first child is an
+  // array, so it has no text of its own; that is not a reason to skip the subtree.
+  const auto anonymous = parse("(" + wrapped + " " + text + ")");
+  CHECK_TRUE(error.empty());
+  CHECK_EQ(anonymous.size(), 3u);
+  CHECK_TRUE(SongKeyForStream(anonymous, "songs/one/audio") == "ActualKey");
   // A wrapper that names no song declares nothing rather than pretending.
   CHECK_TRUE(parse("(songs (not_a_song (label \"x\")))").empty());
 

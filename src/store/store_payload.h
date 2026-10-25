@@ -444,6 +444,10 @@ inline constexpr char kDownloadFailedToken[] = "rbbz_download_failed";
 inline constexpr char kDownloadFailedText[] = "The download could not finish.";
 bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
 
+// Live ownership queries, package deletion and the leave-without-refresh confirmation.
+// Uses the title's own error dialog scene and widgets.
+bool AddLibraryManagement(std::vector<ui::dtb::Node>* store_info_roots, std::string* why);
+
 // The details page's Preview Audio row is built from `refresh_buttons`' own preview block, and its
 // gate is `{&& is_song {offer has_data preview_audio} {is_allowed_to_preview_offer offer}}`. The
 // record must carry `preview_audio` (its previous statement reads it unconditionally, and an absent

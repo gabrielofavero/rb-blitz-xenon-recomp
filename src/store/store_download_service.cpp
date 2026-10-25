@@ -11,6 +11,7 @@
 #include <deque>
 #include <fstream>
 #include <map>
+#include <set>
 #include <mutex>
 #include <cstdio>
 #include <thread>
@@ -33,7 +34,11 @@ struct State {
   std::map<std::string, JobStatus> jobs;
   std::map<std::string, std::filesystem::path> installed;
   std::deque<std::string> queue;
+  std::set<std::string> deletions;
+  std::set<std::pair<std::string, std::string>> removed_songs;
+  bool warning_dismissed = false;
   std::string active;
+  bool active_deleting = false;
   std::atomic<bool> cancel{false};
   bool worker_running = false;
   bool stopping = false;
@@ -170,6 +175,7 @@ void RunJob(const std::string& token) {
         status.received = outcome.bytes;
         if (status.total == 0) status.total = outcome.bytes;
         S().installed[token] = final_path;
+        S().removed_songs.erase({FoldForMatch(offer.artist), FoldForMatch(offer.song)});
       }
       // The quoted name is the job's own title ("Artist - Title", the same string the details
       // page's popup draws). It is what makes a boot log say *which* song was installed, and it is
@@ -236,9 +242,85 @@ void RunJob(const std::string& token) {
   }
 }
 
+void RunDelete(const std::string& token) {
+  DownloadConfig config;
+  OfferRecord offer;
+  {
+    const std::lock_guard<std::mutex> lock(S().mutex);
+    config = S().config;
+    offer = S().offers.at(token);
+  }
+  auto paths = config.packages ? config.packages(offer.artist, offer.song)
+                              : std::vector<std::filesystem::path>{};
+  const auto installed = InstalledPath(token);
+  if (!installed.empty()) paths.push_back(installed);
+  std::sort(paths.begin(), paths.end());
+  paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+  if (paths.empty()) {
+    SetFailed(token, DownloadError::kStorage, "No matching installed package was found");
+    return;
+  }
+  for (const auto& path : paths) {
+    // Only indexed package roots reach here. Never follow a link or recursively remove a
+    // library root: extracted packages must have their own songs metadata below the root.
+    std::error_code ec;
+    const auto resolved = std::filesystem::weakly_canonical(path, ec);
+    if (ec) {
+      SetFailed(token, DownloadError::kStorage, "The package path could not be resolved");
+      return;
+    }
+    const auto status = std::filesystem::symlink_status(path, ec);
+    if (ec || !path.is_absolute() || resolved == resolved.root_path() ||
+        std::filesystem::is_symlink(status)) {
+      SetFailed(token, DownloadError::kStorage, "The package path could not be verified");
+      return;
+    }
+    if (std::filesystem::is_directory(status)) {
+      const auto songs = resolved / "songs";
+      if (!std::filesystem::is_directory(songs, ec) || ec ||
+          std::filesystem::is_symlink(std::filesystem::symlink_status(songs, ec))) {
+        SetFailed(token, DownloadError::kStorage, "The extracted package has no songs directory");
+        return;
+      }
+      std::filesystem::remove_all(resolved, ec);
+      if (ec) {
+        // A recursive removal may have removed some files before encountering a locked one.
+        const std::lock_guard<std::mutex> lock(S().mutex);
+        S().removed_songs.emplace(FoldForMatch(offer.artist), FoldForMatch(offer.song));
+        S().warning_dismissed = false;
+      }
+    } else {
+      std::filesystem::remove(resolved, ec);
+    }
+    if (ec) {
+      SetFailed(token, DownloadError::kStorage, ec.message());
+      return;
+    }
+    if (config.forget_package) config.forget_package(path);
+    {
+      const std::lock_guard<std::mutex> lock(S().mutex);
+      S().removed_songs.emplace(FoldForMatch(offer.artist), FoldForMatch(offer.song));
+      S().warning_dismissed = false;
+      // Alternate charts may have separate tokens pointing at the same package.
+      for (auto it = S().installed.begin(); it != S().installed.end();) {
+        if (it->second == path) {
+          S().jobs.erase(it->first);
+          it = S().installed.erase(it);
+        } else ++it;
+      }
+    }
+    LogLine("store_download: deleted '" + offer.title + "' package " + path.string());
+  }
+  {
+    const std::lock_guard<std::mutex> lock(S().mutex);
+    S().jobs[token] = JobStatus{JobState::kDeleted};
+  }
+}
+
 void WorkerLoop() {
   for (;;) {
     std::string token;
+    bool deleting;
     {
       const std::lock_guard<std::mutex> lock(S().mutex);
       if (S().stopping || S().queue.empty()) {
@@ -248,6 +330,8 @@ void WorkerLoop() {
       token = S().queue.front();
       S().queue.pop_front();
       S().active = token;
+      deleting = S().deletions.erase(token) != 0;
+      S().active_deleting = deleting;
       S().cancel.store(false);
       JobStatus& status = S().jobs[token];
       status.state = JobState::kDownloading;
@@ -256,7 +340,8 @@ void WorkerLoop() {
       status.received = 0;
       status.total = 0;
     }
-    RunJob(token);
+    if (deleting) RunDelete(token);
+    else RunJob(token);
     {
       const std::lock_guard<std::mutex> lock(S().mutex);
       if (S().active == token) {
@@ -415,6 +500,36 @@ bool AnswerDownloadQuery(const std::string_view path, bool* answer) {
   if (answer == nullptr || !path.starts_with(kStorePrefix)) {
     return false;
   }
+  if (path == "rbbz-store/library/refresh-needed") {
+    const std::lock_guard<std::mutex> lock(S().mutex);
+    *answer = !S().removed_songs.empty() && !S().warning_dismissed;
+    return true;
+  }
+  if (path == "rbbz-store/library/ready") {
+    std::function<bool()> ready;
+    { const std::lock_guard<std::mutex> lock(S().mutex); ready = S().config.library_ready; }
+    *answer = !ready || ready();
+    return true;
+  }
+  constexpr std::string_view owned = "rbbz-store/owned/";
+  if (path.starts_with(owned)) {
+    DownloadConfig config;
+    OfferRecord offer;
+    std::filesystem::path installed;
+    {
+      const std::lock_guard<std::mutex> lock(S().mutex);
+      const auto token = std::string(path.substr(owned.size()));
+      const auto found = S().offers.find(token);
+      if (found == S().offers.end()) { *answer = false; return true; }
+      offer = found->second;
+      config = S().config;
+      if (S().installed.contains(token)) installed = S().installed.at(token);
+    }
+    std::error_code ec;
+    *answer = (!installed.empty() && std::filesystem::exists(installed, ec)) ||
+        (config.packages && !config.packages(offer.artist, offer.song).empty());
+    return true;
+  }
   const std::optional<JobQuery> query = ParseJobQuery(path.substr(kStorePrefix.size()));
   if (!query) {
     return false;
@@ -448,6 +563,20 @@ bool HandleDownloadWrite(const std::string_view path) {
   if (!path.starts_with(kStorePrefix)) {
     return false;
   }
+  if (path == "rbbz-store/library/dismiss-warning") {
+    const std::lock_guard<std::mutex> lock(S().mutex);
+    S().warning_dismissed = true;
+    return true;
+  }
+  if (path == "rbbz-store/library/refresh") {
+    std::function<void()> refresh;
+    { const std::lock_guard<std::mutex> lock(S().mutex); refresh = S().config.refresh; }
+    if (refresh) {
+      refresh();  // includes the host scan even when the optional DLC cache is disabled
+      ClearStoreRefreshWarning();
+    }
+    return true;
+  }
   const std::optional<JobCommand> command = ParseJobCommand(path.substr(kStorePrefix.size()));
   if (!command) {
     LogLine("store_download: refusing a malformed write: " + std::string(path.substr(0, 96)),
@@ -455,6 +584,38 @@ bool HandleDownloadWrite(const std::string_view path) {
     return true;
   }
   switch (command->kind) {
+    case JobCommandKind::kDelete: {
+      {
+        const std::lock_guard<std::mutex> lock(S().mutex);
+        if (!S().configured || !Settings()->enabled || !S().offers.contains(command->token)) {
+          S().jobs[command->token] = JobStatus{JobState::kFailed, 0,
+              Settings()->enabled ? DownloadError::kUnknownOffer : DownloadError::kDisabled};
+          return true;
+        }
+        if (S().worker_running || !S().queue.empty()) {
+          if (std::find(S().queue.begin(), S().queue.end(), command->token) != S().queue.end()) {
+            S().deletions.insert(command->token);  // replace a queued transfer with the deletion
+            return true;
+          }
+          if (S().active == command->token && !S().active_deleting &&
+              !S().deletions.contains(command->token)) {
+            // An install has published its result but is still finishing its receipt/rescan.
+            // Keep this delete behind it rather than leaving the popup waiting on Installed.
+            S().deletions.insert(command->token);
+            S().queue.push_back(command->token);
+          }
+          if (S().active != command->token &&
+              std::find(S().queue.begin(), S().queue.end(), command->token) == S().queue.end())
+            S().jobs[command->token] = JobStatus{JobState::kFailed, 0, DownloadError::kBusy};
+          return true;
+        }
+        S().jobs[command->token] = JobStatus{JobState::kQueued};
+        S().deletions.insert(command->token);
+        S().queue.push_back(command->token);
+      }
+      EnsureWorker();
+      break;
+    }
     case JobCommandKind::kStart:
       if (!Enqueue(command->token, false)) {
         LogLine("store_download: start for " + command->token + " was refused", true);
@@ -484,6 +645,7 @@ bool HandleDownloadWrite(const std::string_view path) {
               std::find(S().queue.begin(), S().queue.end(), command->token);
           if (queued != S().queue.end()) {
             S().queue.erase(queued);
+            S().deletions.erase(command->token);
             JobStatus& status = S().jobs[command->token];
             status.state = JobState::kCancelled;
             status.error = DownloadError::kCancelled;
@@ -512,6 +674,7 @@ void StopDownloads() {
     S().stopping = true;
     S().cancel.store(true);
     S().queue.clear();
+    S().deletions.clear();
   }
   if (S().worker.joinable()) {
     S().worker.join();
@@ -547,8 +710,17 @@ void ResetDownloadsForTesting() {
   S().offers.clear();
   S().jobs.clear();
   S().installed.clear();
+  S().deletions.clear();
+  S().removed_songs.clear();
+  S().warning_dismissed = false;
   S().configured = false;
   S().config = DownloadConfig{};
+}
+
+void ClearStoreRefreshWarning() {
+  const std::lock_guard<std::mutex> lock(S().mutex);
+  S().removed_songs.clear();
+  S().warning_dismissed = false;
 }
 
 // --- Receipts -------------------------------------------------------------------------------------

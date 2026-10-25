@@ -876,6 +876,147 @@ void TestStagingExclusion() {
   CHECK_TRUE(before == after);
 }
 
+void TestDeleteAndDownloadFlow() {
+  BeginCase("manual installs match by artist and title, delete, and can be downloaded again");
+  Scratch scratch;
+  PublishEnabled(true);
+  ResetDownloadsForTesting();
+  const fs::path original = scratch.base / "manual-song.con";
+  const fs::path unrelated = scratch.base / "unrelated.con";
+  WriteFile(original, StfsBody());
+  WriteFile(unrelated, "keep me");
+  FakeServer server;
+  DownloadConfig config;
+  config.layout.destination_root = scratch.base / "downloads";
+  config.transfer = server.Fn();
+  config.packages = [&](std::string_view artist, std::string_view song) {
+    if (FoldForMatch(artist) == "artist" && FoldForMatch(song) == "song" && fs::exists(original))
+      return std::vector<fs::path>{original};
+    return std::vector<fs::path>{};
+  };
+  bool forgotten = false;
+  config.forget_package = [&](const fs::path& path) { forgotten = path == original; };
+  config.library_ready = [] { return true; };
+  ConfigureDownloads(config);
+  const OfferRecord offer{"manual-match", "https://rhythmverse.co/download_file/manual",
+                           std::nullopt, "Artist - Song", "ARTIST", "Song"};
+  const auto token = RegisterOffer(offer).value_or("");
+  bool answer = false;
+  CHECK_TRUE(AnswerDownloadQuery("rbbz-store/owned/" + token, &answer));
+  CHECK_TRUE(answer);
+  // A title without the same artist never owns this package.
+  auto other = offer;
+  other.file_id = "other";
+  other.artist = "Someone Else";
+  const auto other_token = RegisterOffer(other).value_or("");
+  AnswerDownloadQuery("rbbz-store/owned/" + other_token, &answer);
+  CHECK_FALSE(answer);
+  HandleDownloadWrite("rbbz-store/download/delete/" + token);
+  WaitForDownloadsIdle();
+  CHECK_TRUE(forgotten);
+  CHECK_FALSE(fs::exists(original));
+  CHECK_STR_EQ(ReadFile(unrelated), "keep me");
+  CHECK_TRUE(QueryJob(token)->state == JobState::kDeleted);
+  AnswerDownloadQuery("rbbz-store/owned/" + token, &answer);
+  CHECK_FALSE(answer);
+  AnswerDownloadQuery("rbbz-store/library/refresh-needed", &answer);
+  CHECK_TRUE(answer);
+  HandleDownloadWrite("rbbz-store/library/dismiss-warning");
+  AnswerDownloadQuery("rbbz-store/library/refresh-needed", &answer);
+  CHECK_FALSE(answer);
+  ScriptedResponse response;
+  response.body = StfsBody();
+  server.Add(offer.url, response);
+  HandleDownloadWrite("rbbz-store/download/start/" + token);
+  WaitForDownloadsIdle();
+  CHECK_TRUE(QueryJob(token)->state == JobState::kInstalled);
+  AnswerDownloadQuery("rbbz-store/owned/" + token, &answer);
+  CHECK_TRUE(answer);
+  // Deleting a file installed in this session resets the installed job too.
+  HandleDownloadWrite("rbbz-store/download/delete/" + token);
+  WaitForDownloadsIdle();
+  CHECK_TRUE(QueryJob(token)->state == JobState::kDeleted);
+  CHECK_TRUE(InstalledPath(token).empty());
+  AnswerDownloadQuery("rbbz-store/library/refresh-needed", &answer);
+  CHECK_TRUE(answer);
+  ClearStoreRefreshWarning();
+  AnswerDownloadQuery("rbbz-store/library/refresh-needed", &answer);
+  CHECK_FALSE(answer);
+  ResetDownloadsForTesting();
+  PublishEnabled(false);
+}
+
+void TestDeleteDuringInstallCompletion() {
+  BeginCase("a delete arriving during install completion waits for the worker and can refresh");
+  Scratch scratch;
+  PublishEnabled(true);
+  ResetDownloadsForTesting();
+  FakeServer server;
+  DownloadConfig config;
+  config.layout.destination_root = scratch.base / "downloads";
+  config.transfer = server.Fn();
+  std::string token;
+  int refreshes = 0;
+  config.refresh = [&] {
+    if (++refreshes == 1) HandleDownloadWrite("rbbz-store/download/delete/" + token);
+  };
+  ConfigureDownloads(config);
+  OfferRecord offer{"completion", "https://rhythmverse.co/download_file/completion", {},
+                     "Artist - Song", "Artist", "Song"};
+  token = RegisterOffer(offer).value_or("");
+  ScriptedResponse response;
+  response.body = StfsBody();
+  server.Add(offer.url, response);
+  HandleDownloadWrite("rbbz-store/download/start/" + token);
+  WaitForDownloadsIdle();
+  CHECK_TRUE(QueryJob(token)->state == JobState::kDeleted);
+  bool answer = false;
+  AnswerDownloadQuery("rbbz-store/library/refresh-needed", &answer);
+  CHECK_TRUE(answer);
+  HandleDownloadWrite("rbbz-store/library/refresh");
+  CHECK_EQ(refreshes, 2);
+  AnswerDownloadQuery("rbbz-store/library/refresh-needed", &answer);
+  CHECK_FALSE(answer);
+  ResetDownloadsForTesting();
+  PublishEnabled(false);
+}
+
+void TestDeleteRefusalsAndPacks() {
+  BeginCase("deletion refuses unknown tokens and invalid roots, and handles whole extracted packs");
+  Scratch scratch;
+  PublishEnabled(true);
+  ResetDownloadsForTesting();
+  const auto pack = scratch.base / "pack";
+  WriteFile(pack / "songs" / "songs.dta", "(songs)");
+  WriteFile(pack / "songs" / "audio", "test audio");
+  DownloadConfig config;
+  config.layout.destination_root = scratch.base / "downloads";
+  config.packages = [&](std::string_view, std::string_view) { return std::vector<fs::path>{pack}; };
+  ConfigureDownloads(config);
+  auto token = RegisterOffer({"pack", "https://rhythmverse.co/download_file/pack", {},
+                             "Artist - Song", "Artist", "Song"}).value_or("");
+  HandleDownloadWrite("rbbz-store/download/delete/" + JobTokenForFileId("unknown"));
+  WaitForDownloadsIdle();
+  CHECK_TRUE(fs::exists(pack));
+  HandleDownloadWrite("rbbz-store/download/delete/" + token);
+  WaitForDownloadsIdle();
+  CHECK_FALSE(fs::exists(pack));
+  CHECK_TRUE(QueryJob(token)->state == JobState::kDeleted);
+  ResetDownloadsForTesting();
+  config.packages = [&](std::string_view, std::string_view) {
+    return std::vector<fs::path>{scratch.base};  // no songs directory: not an extracted package
+  };
+  ConfigureDownloads(config);
+  token = RegisterOffer({"refuse", "https://rhythmverse.co/download_file/refuse", {},
+                         "Artist - Song", "Artist", "Song"}).value_or("");
+  HandleDownloadWrite("rbbz-store/download/delete/" + token);
+  WaitForDownloadsIdle();
+  CHECK_TRUE(fs::exists(scratch.base));
+  CHECK_TRUE(QueryJob(token)->state == JobState::kFailed);
+  ResetDownloadsForTesting();
+  PublishEnabled(false);
+}
+
 }  // namespace
 
 int main() {
@@ -893,5 +1034,8 @@ int main() {
   TestServiceCancelAndOff();
   TestServiceUnknownOffer();
   TestStagingExclusion();
+  TestDeleteAndDownloadFlow();
+  TestDeleteRefusalsAndPacks();
+  TestDeleteDuringInstallCompletion();
   return Finish();
 }

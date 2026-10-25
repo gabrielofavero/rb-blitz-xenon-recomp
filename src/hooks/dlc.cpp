@@ -322,8 +322,10 @@ std::size_t g_content_count = 0;
 // src/hooks/shell_music.cpp.
 std::vector<std::filesystem::path> g_structured_paths;
 std::vector<std::filesystem::path> g_package_paths;
+std::mutex g_package_paths_mutex;
 
 void RebuildPackagePaths(const std::vector<fs::LibraryItem>& library) {
+  const std::lock_guard<std::mutex> lock(g_package_paths_mutex);
   g_package_paths.clear();
   g_package_paths.reserve(g_structured_paths.size() + library.size());
   g_package_paths.insert(g_package_paths.end(), g_structured_paths.begin(),
@@ -523,6 +525,9 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     downloads.transfer = store::WinHttpTransfer();
 #endif
     downloads.refresh = [] { RefreshAfterStoreInstall(); };
+    downloads.packages = store::InstalledSongPackages;
+    downloads.forget_package = store::ForgetInstalledPackage;
+    downloads.library_ready = store::LibraryReady;
     downloads.log = [](std::string_view line, bool warning) {
       if (warning) {
         REXLOG_WARN("{}", line);
@@ -536,21 +541,13 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // the serving path gets the boot's one registrar here - beside the destination, before any page
   // can be served, and never in a test, which installs its own (store_serve.h).
   store::SetOfferRegistrar([](std::string_view file_id, std::string_view url,
-                              std::optional<std::int64_t> api_size, std::string_view title) {
+                              std::optional<std::int64_t> api_size, std::string_view title,
+                              std::string_view artist, std::string_view song) {
     return store::RegisterOffer(store::OfferRecord{std::string(file_id), std::string(url),
-                                                   api_size, std::string(title)})
+                                                   api_size, std::string(title),
+                                                   std::string(artist), std::string(song)})
         .value_or(std::string());
   });
-  // The registration half (P5): a served row's job token is the worker's handle on that offer, so
-  // the serving path gets the boot's one registrar here - beside the destination, before any page
-  // can be served, and never in a test, which installs its own (store_serve.h).
-  store::SetOfferRegistrar([](std::string_view file_id, std::string_view url,
-                              std::optional<std::int64_t> api_size, std::string_view title) {
-    return store::RegisterOffer(store::OfferRecord{std::string(file_id), std::string(url),
-                                                   api_size, std::string(title)})
-        .value_or(std::string());
-  });
-
   const fs::LibraryScanResult library =
       LoadOrScanLibrary(cache_enabled, refresh_requested, library_roots, force_content_type,
                         g_scan_threads, cache_path, "this boot", &g_cache_served);
@@ -670,13 +667,16 @@ void PublishPendingRefresh() {
   // RefreshAfterStoreInstall). Compare as sets, because a rescan may order the
   // same packages differently, and only a real change retires readiness.
   const bool content_changed = [&] {
-    auto before = g_package_paths, after = paths;
+    auto before = LibraryPackagePaths(), after = paths;
     std::sort(before.begin(), before.end());
     std::sort(after.begin(), after.end());
     return before != after;
   }();
   g_content_count = g_structured_paths.size() + count;
-  g_package_paths = std::move(paths);
+  {
+    const std::lock_guard<std::mutex> lock(g_package_paths_mutex);
+    g_package_paths = std::move(paths);
+  }
   // The list just changed, so the store's Downloaded index (§3.2) is stale: drop it rather than
   // letting a page keep marking songs the library no longer (or newly) holds.
   rb_blitz::store::InvalidateLibrary();
@@ -699,6 +699,7 @@ bool RefreshReadyForDiscovery() {
 }
 
 void RefreshConfigured() {
+  store::ClearStoreRefreshWarning();
   {
     std::lock_guard<std::mutex> worker_lock(g_refresh_worker_mutex);
     if (g_restarting) return;
@@ -770,6 +771,9 @@ bool CacheServedThisBoot() { return g_cache_served; }
 
 std::size_t ContentItemCount() { return g_content_count; }
 
-const std::vector<std::filesystem::path>& LibraryPackagePaths() { return g_package_paths; }
+std::vector<std::filesystem::path> LibraryPackagePaths() {
+  const std::lock_guard<std::mutex> lock(g_package_paths_mutex);
+  return g_package_paths;
+}
 
 }  // namespace rb_blitz::dlc

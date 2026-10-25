@@ -99,7 +99,8 @@ std::vector<Offer> OffersForPage();
 // catalogue's byte count (empty when unknown).
 using OfferRegistrar = std::function<std::string(std::string_view file_id, std::string_view url,
                                                 std::optional<std::int64_t> api_size,
-                                                std::string_view title)>;
+                                                std::string_view title, std::string_view artist,
+                                                std::string_view song)>;
 void SetOfferRegistrar(OfferRegistrar registrar);
 
 // Fills `offer->job` from the installed registrar, or leaves it empty when no registrar is

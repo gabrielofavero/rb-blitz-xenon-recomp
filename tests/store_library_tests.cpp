@@ -85,11 +85,29 @@ void TestClear() {
   CHECK_FALSE(index.Contains("Bush", "The People That We Love"));
 }
 
+void TestPackages() {
+  BeginCase("ownership tracks Unicode names and every package of a matching song");
+  LoadedSongIndex index;
+  index.Add("BJ\xC3\x96RK", "J\xC3\x93GA", "first.con");
+  index.Add("bj\xC3\xB6rk", "j\xC3\xB3ga", "second.con");
+  index.Add("Other Artist", "Other Song", "first.con");
+  CHECK_EQ(index.size(), 2u);
+  CHECK_TRUE(index.Contains("bj\xC3\xB6rk", "j\xC3\xB3ga"));
+  CHECK_TRUE(index.Contains("BJ\xD6RK", "J\xD3GA"));  // Latin-1 songs.dta, UTF-8 API
+  CHECK_EQ(index.Packages("bj\xC3\xB6rk", "j\xC3\xB3ga").size(), 2u);
+  index.RemovePackage("first.con");
+  CHECK_FALSE(index.Contains("Other Artist", "Other Song"));
+  CHECK_TRUE(index.Contains("bj\xC3\xB6rk", "j\xC3\xB3ga"));
+  index.RemovePackage("second.con");
+  CHECK_EQ(index.size(), 0u);
+}
+
 }  // namespace
 
 int main() {
   TestNormalization();
   TestIndex();
   TestClear();
+  TestPackages();
   return rb_blitz::test::Finish();
 }

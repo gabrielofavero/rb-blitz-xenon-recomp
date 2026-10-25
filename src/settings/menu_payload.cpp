@@ -834,6 +834,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             why != "the locale already has that key") {
           note("the Download label was refused: " + why);
         }
+        screen::AddLocaleEntry(&roots, "store_delete_song", "Delete", &why);
+        screen::AddLocaleEntry(&roots, "store_checking_library", "Checking installed songs...", &why);
         // P9-7's footer caption: the store's Start button now opens the Search Song Filter page, so
         // its inline help names that page instead of the scene's `inline_help_options`
         // (store_payload.h's `SetStoreFooterStart` writes the token on both store screens).
@@ -1118,6 +1120,10 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       why.clear();
       if (!store::RouteDownloadButtons(&info_roots, &why)) {
         note("routing the details page's Download rows was refused: " + why);
+      }
+      why.clear();
+      if (!store::AddLibraryManagement(&info_roots, &why)) {
+        note("adding the details page's library management was refused: " + why);
       }
       // P9-8: the details page's Y caption goes too - its option case only opens a recommendation,
       // and this build never shows the recommendation band (store_payload.h).

@@ -6,36 +6,39 @@
 // tests/store_library_tests.cpp can link it without the package reader.
 
 #include "store/store_library.h"
+#include "store/rhythmverse_client.h"
 
 namespace rb_blitz::store {
 
 std::string NormalizeSongField(std::string_view text) {
-  std::string out;
-  out.reserve(text.size());
-  bool pending_space = false;
-  for (const char raw : text) {
-    const char c = (raw >= 'A' && raw <= 'Z') ? static_cast<char>(raw - 'A' + 'a') : raw;
-    const bool space = c == ' ' || c == '\t' || c == '\r' || c == '\n';
-    if (space) {
-      pending_space = !out.empty();
-      continue;
-    }
-    if (pending_space) {
-      out.push_back(' ');
-      pending_space = false;
-    }
-    out.push_back(c);
-  }
-  return out;
+  return FoldForMatch(text);
 }
 
-void LoadedSongIndex::Add(std::string_view artist, std::string_view title) {
+void LoadedSongIndex::Add(std::string_view artist, std::string_view title,
+                          const std::filesystem::path& package) {
   std::string normalized_artist = NormalizeSongField(artist);
   std::string normalized_title = NormalizeSongField(title);
   if (normalized_artist.empty() || normalized_title.empty()) {
     return;
   }
-  songs_.emplace(std::move(normalized_artist), std::move(normalized_title));
+  songs_[{std::move(normalized_artist), std::move(normalized_title)}].insert(package);
+}
+
+std::vector<std::filesystem::path> LoadedSongIndex::Packages(std::string_view artist,
+                                                           std::string_view title) const {
+  const auto found = songs_.find({NormalizeSongField(artist), NormalizeSongField(title)});
+  if (found == songs_.end()) return {};
+  std::vector<std::filesystem::path> paths;
+  for (const auto& path : found->second) if (!path.empty()) paths.push_back(path);
+  return paths;
+}
+
+void LoadedSongIndex::RemovePackage(const std::filesystem::path& package) {
+  for (auto it = songs_.begin(); it != songs_.end();) {
+    it->second.erase(package);
+    if (it->second.empty()) it = songs_.erase(it);
+    else ++it;
+  }
 }
 
 bool LoadedSongIndex::Contains(std::string_view artist, std::string_view title) const {

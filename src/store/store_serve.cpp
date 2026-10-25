@@ -154,7 +154,8 @@ void AttachDownloadJob(Offer* offer) {
   // Called outside the source mutex: the registrar is the download service, which has a mutex of
   // its own, and two locks in a guest-thread call is exactly the nesting this file avoids.
   const std::string title = offer->artist.empty() ? offer->name : offer->artist + " - " + offer->name;
-  offer->job = registrar(offer->file_id, offer->download_url, offer->size_bytes, title);
+  offer->job = registrar(offer->file_id, offer->download_url, offer->size_bytes, title,
+                         offer->artist, offer->name);
 }
 
 namespace {

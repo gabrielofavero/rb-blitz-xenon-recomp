@@ -120,7 +120,7 @@ std::vector<SongMetadata> ReadSongMetadata(std::span<const uint8_t> bytes, bool 
   while (!pending.empty()) {
     const Node* node = pending.back();
     pending.pop_back();
-    if (node->tag != ui::dtb::kArray || node->kids.empty() || node->kids[0].text.empty()) continue;
+    if (node->tag != ui::dtb::kArray || node->kids.empty()) continue;
     const Node* song = Field(*node, "song");
     if (song != nullptr) {
       candidates.push_back(node);

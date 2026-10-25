@@ -1556,6 +1556,168 @@ bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string*
   return true;
 }
 
+
+bool AddLibraryManagement(std::vector<ui::dtb::Node>* roots, std::string* why) {
+  const auto refuse = [&](const char* message) {
+    if (why) *why = message;
+    return false;
+  };
+  if (!roots) return refuse("no record roots");
+  constexpr char popup_name[] = "rbbz_library_panel";
+  for (const auto& root : *roots) {
+    if (IsNewObject(root, "UIPanel", popup_name)) {
+      if (why) why->clear();
+      return true;
+    }
+  }
+  Node* info = nullptr;
+  Node* screen = nullptr;
+  Node* download = nullptr;
+  for (auto& root : *roots) {
+    if (IsNewObject(root, "StoreInfoPanel", "store_info_panel")) info = &root;
+    if (IsNewObject(root, "UIScreen", "store_info_screen")) screen = &root;
+    if (IsNewObject(root, "UIPanel", kDownloadPanelName)) download = &root;
+  }
+  if (!info || !screen || !download) return refuse("the details panels are missing");
+  Node* go_back = FindNamedMethod(*info, "store_info_panel", "go_back");
+  Node* refresh = FindNamedMethod(*info, "store_info_panel", "refresh_buttons");
+  Node* select = FindNamedMethod(*info, "store_info_panel", "SELECT_MSG");
+  Node* panels = nullptr;
+  for (auto& node : screen->kids)
+    if (node.tag == ui::dtb::kArray && !node.kids.empty() && IsSymbol(node.kids[0], "panels"))
+      panels = &node;
+  std::vector<Node>* cases = nullptr;
+  if (!go_back || !refresh || !select || !panels || !FindButtonSwitch(select->kids, &cases))
+    return refuse("the details record has no navigation or button methods");
+  const size_t again = FindButtonCase(*cases, kDownloadAgainButton);
+  if (again == cases->size()) return refuse("the details record has no installed-song action");
+
+  const auto sym = [](const char* s) { return Node::Symbol(s); };
+  const auto cmd = [](std::initializer_list<Node> kids) { return Node::Command(kids); };
+  const auto member = [](const char* name, std::initializer_list<Node> body) {
+    std::vector<Node> kids{Node::Symbol(name)};
+    kids.insert(kids.end(), body.begin(), body.end());
+    return Node::Array(std::move(kids));
+  };
+  const auto query = [&](const char* path) { return FileExistsCommand(path); };
+  const auto text = [&](const char* widget, const char* value) {
+    return cmd({sym(widget), sym("set_display_text_string"), Node::String(value)});
+  };
+  const auto call = [&](const char* method) { return cmd({sym(popup_name), sym(method)}); };
+  const auto prop = [&](const char* name) { return Node::Property({sym(name)}); };
+  const Node owned = cmd({sym("file_exists"), cmd({sym("sprintf"),
+      Node::String("rbbz-store/owned/%s"), CurrentJobRead()})});
+  const Node ready = query("rbbz-store/library/ready");
+  const Node refresh_needed = query("rbbz-store/library/refresh-needed");
+  const Node guarded_owned = cmd({sym("&&"), HasCurrentJob(), owned});
+
+  // The catalogue record can outlive an index build, a delete, or an install. Never use its
+  // captured is_purchased bit for the selected offer's action.
+  const auto rewrite = [&](Node& node, const auto& self) -> void {
+    if (IsDataPurchasedRead(node)) { node = guarded_owned; return; }
+    if (node.tag == ui::dtb::kSymbol && node.text == kDownloadAgainButton)
+      node.text = "store_delete_song";
+    for (auto& kid : node.kids) self(kid, self);
+  };
+  rewrite(*refresh, rewrite);
+  // While the first scan is running, do not offer a speculative Download.
+  const auto guard_gate = [&](Node& node, const auto& self) -> bool {
+    if (node.tag == ui::dtb::kCommand && node.kids.size() >= 3 &&
+        IsSymbol(node.kids[0], "if_else") && HasInsertButton(node.kids[2], "store_delete_song")) {
+      Node gate = std::move(node);
+      node = cmd({sym("if_else"), ready, std::move(gate),
+          cmd({sym("insert_elem"), Node::Var("buttons"), Node::Int(0), sym("store_checking_library")})});
+      return true;
+    }
+    for (auto& kid : node.kids) if (self(kid, self)) return true;
+    return false;
+  };
+  guard_gate(*refresh, guard_gate);
+  (*cases)[again] = Node::Array({sym("store_delete_song"), call("show_delete")});
+  // All references above are consumed before appending members (which may move the vector).
+  go_back->kids[0] = sym("rbbz_go_back_unchecked");
+  const Node back = cmd({sym("store_info_panel"), sym("rbbz_go_back_unchecked")});
+  info->kids.push_back(member("go_back", {
+      cmd({sym("if_else"), refresh_needed, call("show_refresh"), back})}));
+  info->kids.push_back(Node::Array({sym("library_ready"), sym("FALSE")}));
+  info->kids.push_back(Node::Array({sym("library_owned"), sym("FALSE")}));
+  const Node recheck = cmd({sym("do"),
+      cmd({sym("set"), prop("library_ready"), ready}),
+      cmd({sym("set"), prop("library_owned"), guarded_owned}),
+      cmd({sym("store_info_panel"), sym("refresh_buttons"), sym("TRUE")})});
+  const Node poll_live = cmd({sym("do"), BindCurrentOffer(), IfCurrentOffer(
+      cmd({sym("if"), cmd({sym("||"),
+          cmd({sym("!="), prop("library_ready"), ready}),
+          cmd({sym("!="), prop("library_owned"), guarded_owned})}), recheck}))});
+  if (Node* poll = FindNamedMethod(*info, "store_info_panel", "poll"))
+    poll->kids.push_back(poll_live);
+  else info->kids.push_back(member("poll", {poll_live}));
+  // Closing the existing download popup also refreshes the action immediately.
+  if (Node* hide = FindNamedMethod(*download, kDownloadPanelName, "hide_popup"))
+    hide->kids.push_back(cmd({sym("store_info_panel"), sym("refresh_buttons"), sym("TRUE")}));
+
+  const Node active = prop("active");
+  const Node mode = prop("mode");
+  const auto is_mode = [&](int n) { return cmd({sym("=="), mode, Node::Int(n)}); };
+  const Node hide = cmd({sym("all.grp"), sym("set_showing"), sym("FALSE")});
+  const Node deactivate = cmd({sym("set"), active, sym("FALSE")});
+  const Node show = cmd({sym("do"), cmd({sym("set"), active, sym("TRUE")}),
+      cmd({sym("all.grp"), sym("set_showing"), sym("TRUE")}),
+      cmd({cmd({sym("ui"), sym("current_screen")}), sym("set_focus_panel"), Node::Var("this")})});
+  const Node close = call("hide_popup");
+  const Node dismiss = WriteCommand("rbbz-store/library/dismiss-warning");
+  const Node show_delete = member("show_delete", {
+      cmd({sym("set"), mode, Node::Int(1)}),
+      text("error.lbl", "Delete the installed package(s) for this song? Other songs in those packages will also be deleted."),
+      text("continue.lbl", "<alt1>A</alt1> Delete   <alt1>B</alt1> Cancel"), show});
+  const Node show_refresh = member("show_refresh", {
+      cmd({sym("set"), mode, Node::Int(4)}),
+      text("error.lbl", "Songs were deleted. Refresh the song cache before playing. Skipping the refresh could cause crashes."),
+      text("continue.lbl", "<alt1>A</alt1> Refresh   <alt1>B</alt1> Ignore"), show});
+  const Node delete_write = cmd({sym("do"), BindCurrentOffer(), IfCurrentOffer(
+      cmd({sym("if"), HasCurrentJob(), cmd({sym("write_file"),
+          cmd({sym("sprintf"), Node::String("rbbz-store/download/delete/%s"), CurrentJobRead()}),
+          Node::Int(0)})}))});
+  const Node confirm_delete = member("confirm_delete", {
+      cmd({sym("set"), mode, Node::Int(2)}),
+      text("error.lbl", "Deleting installed package(s)..."), text("continue.lbl", "Please wait"),
+      delete_write});
+  const Node failed = cmd({sym("do"), cmd({sym("set"), mode, Node::Int(3)}),
+      text("error.lbl", "Could not delete every matching package. A file may be in use or read-only. Any removed songs still require a cache refresh."),
+      text("continue.lbl", "<alt1>B</alt1> Close")});
+  const Node delete_state = cmd({sym("if"), HasCurrentJob(),
+      cmd({sym("if"), JobStateQuery("deleted"), close}),
+      cmd({sym("if"), JobStateQuery("failed"), failed})});
+  const Node poll = member("poll", {
+      cmd({sym("if"), cmd({sym("&&"), active, is_mode(2)}),
+          cmd({sym("do"), BindCurrentOffer(), IfCurrentOffer(delete_state)})})});
+  const Node buttons = member("BUTTON_DOWN_MSG", {
+      cmd({sym("switch"), Node::Var("action"),
+          Node::Array({sym("kAction_Confirm"),
+              cmd({sym("if"), is_mode(4), close}),
+              cmd({sym("if"), is_mode(4), WriteCommand("rbbz-store/library/refresh")}),
+              cmd({sym("if"), is_mode(4), cmd({sym("ui"), sym("goto_screen"),
+                  sym(menu_options::kRefreshRowDiscoverScreen)})}),
+              cmd({sym("if"), is_mode(4), FileExistsCommand(menu_options::kRefreshSentinelPath)}),
+              cmd({sym("if"), is_mode(1), call("confirm_delete")})}),
+          Node::Array({sym("kAction_Cancel"),
+              cmd({sym("if_else"), is_mode(4), cmd({sym("do"), dismiss, close, back}),
+                  cmd({sym("if"), cmd({sym("!="), mode, Node::Int(2)}), close})})})}), Node::Int(1)});
+  const Node panel = cmd({sym("new"), sym("UIPanel"), sym(popup_name),
+      Node::Array({sym("file"), Node::String("../error/error_general.milo")}),
+      Node::Array({sym("active"), sym("FALSE")}), Node::Array({sym("mode"), Node::Int(0)}),
+      member("enter", {deactivate, hide}), member("exit", {deactivate, hide}),
+      member("hide_popup", {deactivate, hide,
+          cmd({cmd({sym("ui"), sym("current_screen")}), sym("set_focus_panel"), sym("store_info_panel")}),
+          cmd({sym("store_info_panel"), sym("refresh_buttons"), sym("TRUE")}),
+          cmd({sym("store_info_panel"), sym("set_focus"), Node::String("buttons.lst")})}),
+      show_delete, show_refresh, confirm_delete, poll, buttons});
+  panels->kids.push_back(sym(popup_name));
+  roots->insert(roots->begin(), panel);
+  if (why) why->clear();
+  return true;
+}
+
 namespace {
 
 // Where a `{<receiver> <method> ...}` command sits inside its parent's child list. The append below

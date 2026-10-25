@@ -1,0 +1,113 @@
+diff --git a/include/rex/ui/style.h b/include/rex/ui/style.h
+index d095829..ebfd689 100644
+--- a/include/rex/ui/style.h
++++ b/include/rex/ui/style.h
+@@ -45,6 +45,14 @@ struct ToastStyle {
+   float rounding = 6.0f;
+   float background_alpha = 0.88f;
+   float icon_size = 44.0f;
++  // Opt-in compact presentation; fonts must already belong to the drawer atlas.
++  bool themed = false;
++  ImFont* font = nullptr;
++  ImFont* heading_font = nullptr;
++  ImVec4 background{0.10f, 0.10f, 0.12f, 1.00f};
++  ImVec4 border{0.40f, 0.40f, 0.45f, 1.00f};
++  ImVec4 border_highlight{1.00f, 0.75f, 0.75f, 1.00f};
++  ImVec4 muted_text{0.75f, 0.75f, 0.80f, 1.00f};
+ };
+ 
+ struct ConsoleStyle {
+diff --git a/src/ui/overlay/achievement_toast.cpp b/src/ui/overlay/achievement_toast.cpp
+index 53b8c0b..453328e 100644
+--- a/src/ui/overlay/achievement_toast.cpp
++++ b/src/ui/overlay/achievement_toast.cpp
+@@ -12,6 +12,7 @@
+ #include <imgui.h>
+ 
+ #include <algorithm>
++#include <string>
+ 
+ #include <rex/ui/immediate_drawer.h>
+ 
+@@ -74,6 +75,81 @@ void AchievementToastDialog::OnDraw(ImGuiIO& io) {
+   // Colors carry the fade envelope; the style holds them at full opacity.
+   auto faded = [alpha](ImVec4 c) { return ImVec4(c.x, c.y, c.z, c.w * alpha); };
+ 
++  if (s.themed) {
++    // Retain the existing 320 x 70 footprint and bottom-right placement. Draw
++    // inside it so decorative rails never enlarge the notification or take input.
++    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, s.rounding);
++    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
++    ImGui::PushStyleColor(ImGuiCol_WindowBg, s.background);
++    if (ImGui::Begin("##ach_toast", nullptr, flags)) {
++      const ImVec2 pos = ImGui::GetWindowPos();
++      const ImVec2 size = ImGui::GetWindowSize();
++      auto* draw = ImGui::GetWindowDrawList();
++      draw->PushClipRect(pos, ImVec2(pos.x + size.x, pos.y + size.y));
++      for (int rail = 0; rail < 3; ++rail) {
++        const float inset = 2.0f + 3.0f * rail;
++        const ImVec2 lo(pos.x + inset, pos.y + inset);
++        const ImVec2 hi(pos.x + size.x - inset, pos.y + size.y - inset);
++        const auto stroke = [&](ImVec4 color, float opacity, float thickness) {
++          color.w *= opacity;
++          draw->AddRect(lo, hi, ImGui::GetColorU32(faded(color)),
++                        std::max(1.0f, s.rounding - rail * 2.0f), 0, thickness);
++        };
++        stroke(s.border, 0.12f, 5.0f);
++        stroke(s.border, 0.22f, 3.0f);
++        stroke(s.border, 0.70f, 1.8f);
++        stroke(s.border_highlight, 1.0f, 0.7f);
++      }
++
++      float text_x = pos.x + 14.0f;
++      if (auto* icon = icon_cache_.GetIcon(toast.event.achievement)) {
++        const float icon_size = std::min(s.icon_size, 44.0f);
++        const float icon_y = pos.y + (size.y - icon_size) * 0.5f;
++        draw->AddImage(reinterpret_cast<ImTextureID>(icon), ImVec2(text_x, icon_y),
++                       ImVec2(text_x + icon_size, icon_y + icon_size),
++                       ImVec2(0, 0), ImVec2(1, 1),
++                       ImGui::GetColorU32(ImVec4(1, 1, 1, alpha)));
++        text_x += icon_size + 10.0f;
++      }
++      const float right = pos.x + size.x - 14.0f;
++      // Reserve gamerscore on the heading row, leaving a full row for the name.
++      // Both fonts reuse the atlas baked before renderer upload.
++      ImGui::PushFont(s.heading_font ? s.heading_font : s.font, 15.0f);
++      const std::string score = std::to_string(toast.event.achievement.gamerscore) + "G";
++      const float score_width = ImGui::CalcTextSize(score.c_str()).x;
++      draw->AddText(ImVec2(right - score_width, pos.y + 16.0f),
++                    ImGui::GetColorU32(faded(s.muted_text)), score.c_str());
++      const ImVec4 heading_clip(text_x, pos.y, right - score_width - 8.0f,
++                                pos.y + size.y);
++      draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
++                    ImVec2(text_x, pos.y + 16.0f), ImGui::GetColorU32(faded(s.title)),
++                    "Achievement Unlocked", nullptr, 0.0f, &heading_clip);
++      ImGui::PopFont();
++
++      ImGui::PushFont(s.font, 18.0f);
++      std::string label = toast.event.achievement.label;
++      if (ImGui::CalcTextSize(label.c_str()).x > right - text_x) {
++        // Trim whole UTF-8 codepoints, keeping long names within the same panel.
++        do {
++          size_t end = label.size() - 1;
++          while (end > 0 && (static_cast<unsigned char>(label[end]) & 0xC0) == 0x80)
++            --end;
++          label.resize(end);
++        } while (!label.empty() &&
++                 ImGui::CalcTextSize((label + "...").c_str()).x > right - text_x);
++        label += "...";
++      }
++      draw->AddText(ImVec2(text_x, pos.y + 35.0f),
++                    ImGui::GetColorU32(faded(s.text)), label.c_str());
++      ImGui::PopFont();
++      draw->PopClipRect();
++    }
++    ImGui::End();
++    ImGui::PopStyleColor();
++    ImGui::PopStyleVar(2);
++    return;
++  }
++
+   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, s.rounding);
+   ImGui::PushStyleColor(ImGuiCol_Text, faded(s.text));
+   if (ImGui::Begin("##ach_toast", nullptr, flags)) {

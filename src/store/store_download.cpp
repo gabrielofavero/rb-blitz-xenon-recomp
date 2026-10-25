@@ -257,13 +257,14 @@ std::string_view JobStateToken(const JobState state) {
     case JobState::kInstalled: return "installed";
     case JobState::kFailed: return "failed";
     case JobState::kCancelled: return "cancelled";
+    case JobState::kDeleted: return "deleted";
   }
   return "unknown";
 }
 
 std::optional<JobState> JobStateFromToken(const std::string_view token) {
   for (const JobState state : {JobState::kQueued, JobState::kDownloading, JobState::kInstalled,
-                               JobState::kFailed, JobState::kCancelled}) {
+                               JobState::kFailed, JobState::kCancelled, JobState::kDeleted}) {
     if (JobStateToken(state) == token) {
       return state;
     }
@@ -384,6 +385,8 @@ std::optional<JobCommand> ParseJobCommand(const std::string_view rest) {
     command.kind = JobCommandKind::kCancel;
   } else if (verb == "again") {
     command.kind = JobCommandKind::kDownloadAgain;
+  } else if (verb == "delete") {
+    command.kind = JobCommandKind::kDelete;
   } else {
     return std::nullopt;
   }

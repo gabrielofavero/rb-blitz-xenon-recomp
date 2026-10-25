@@ -13,10 +13,8 @@
 //     the same read the R9 menu-music pool uses (src/fs/dlc_song_metadata.h). That covers
 //     manually installed content and every song of a merged pack, which no filename or purchase
 //     record can.
-//   * Building it touches every package, so it happens on this module's own thread, started when
-//     the store opens (the front menu is served ~14 s before a page is asked for). A page that is
-//     asked for before the index is ready simply carries no Downloaded mark: unknown is not a
-//     negative claim, and a false "Downloaded" would be the worse error.
+//   * Building it touches every package, so it happens on a worker at boot. The details page
+//     queries the live index and shows Checking installed songs until that first pass finishes.
 //   * The comparison is the owner's deliberately simple one (plan §3.2): normalized artist and
 //     title, both required, exact after normalization - no fuzzy matching, no punctuation or
 //     version stripping. Alternate charts of one song therefore all match together, and a pack
@@ -33,12 +31,14 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <filesystem>
+#include <map>
+#include <vector>
 
 namespace rb_blitz::store {
 
-// Trimmed, interior whitespace collapsed to one space, ASCII-lowercased. Applied to both sides of
-// every comparison, so a trailing space in songs.dta cannot hide a match. Unicode case folding is
-// deliberately out of scope: the API and songs.dta carry the same spelling of the same title.
+// Trimmed, whitespace-collapsed and Unicode-case-folded using FoldForMatch. Applied to both
+// sides, including Latin-1 metadata, so case, encoding and trailing spaces cannot hide a match.
 std::string NormalizeSongField(std::string_view text);
 
 // The (artist, title) pairs a loaded library declares.
@@ -46,25 +46,28 @@ class LoadedSongIndex {
  public:
   // A pair with an empty artist or title is refused: the plan requires both, and an empty field
   // would match every offer that also lacks it.
-  void Add(std::string_view artist, std::string_view title);
+  void Add(std::string_view artist, std::string_view title,
+           const std::filesystem::path& package = {});
   bool Contains(std::string_view artist, std::string_view title) const;
+  std::vector<std::filesystem::path> Packages(std::string_view artist, std::string_view title) const;
+  void RemovePackage(const std::filesystem::path& package);
   std::size_t size() const { return songs_.size(); }
   void Clear() { songs_.clear(); }
 
  private:
-  std::set<std::pair<std::string, std::string>> songs_;
+  std::map<std::pair<std::string, std::string>, std::set<std::filesystem::path>> songs_;
 };
 
 // Installs the Downloaded predicate the serving policy asks (`store_serve.h`) and starts the
 // builder thread. Called once per boot on the host thread, beside the other store installations.
-void InstallStoreLibrary();
+void InstallStoreLibrary(const std::filesystem::path& user_data_root = {});
 
 // Asks for the index to be (re)built. Never blocks: one build at a time, and a build already in
 // flight is not queued twice (single flight, like the catalogue). A no-op before
 // InstallStoreLibrary.
 void RequestLibraryRefresh(std::string_view why);
 
-// Drops the published index so the next request rebuilds it. Called when the library changed
+// Drops the published index and schedules a rebuild. Called when the library changed
 // under us: the refresh row's scan, or a verified store install.
 void InvalidateLibrary();
 
@@ -81,5 +84,8 @@ std::uint64_t LibraryGeneration();
 // True when the loaded library declares this artist + title. False while the index is still being
 // built (unknown, not "not downloaded").
 bool IsDownloadedSong(std::string_view artist, std::string_view title);
+std::vector<std::filesystem::path> InstalledSongPackages(std::string_view artist,
+                                                       std::string_view title);
+void ForgetInstalledPackage(const std::filesystem::path& package);
 
 }  // namespace rb_blitz::store
