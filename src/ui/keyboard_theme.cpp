@@ -3,6 +3,7 @@
 
 #include "input/native_menu.h"
 #include "input/title_input.h"
+#include "platform/virtual_keyboard.h"
 
 #include <imgui.h>
 #include <rex/logging.h>
@@ -66,31 +67,30 @@ void ConfigureKeyboardFonts(ImFontAtlas *atlas) {
   }
 }
 
-void ConfigureKeyboardTheme(rex::ui::Style &style) {
+void ConfigureKeyboardTheme(rex::ui::Style &style, std::function<void*()> native_window) {
   auto &keyboard = style.keyboard;
   keyboard.enabled = true;
+  keyboard.request_keyboard = [native_window] {
+    return platform::RequestVirtualKeyboard(native_window ? native_window() : nullptr);
+  };
+  keyboard.dismiss_keyboard = [native_window] {
+    platform::DismissVirtualKeyboard(native_window ? native_window() : nullptr);
+  };
   keyboard.sample_controller = [] {
     using Pad = rex::ui::KeyboardControllerSample;
     using namespace rex::input;
     X_INPUT_STATE state{};
     Pad sample;
-    sample.connected = input::SamplePhysicalPad(&state);
-    sample.focused = input::HostInputFocused() && input::HostSdlKeyboardFocused();
+    sample.connected = input::SamplePhysicalPad(&state, true);
+    // The window's actual focus is authoritative; text/IME keyboard focus and
+    // ImGui capture must not disable this dialog's own cancel button.
+    sample.focused = input::HostInputFocused();
     if (!sample.connected) {
       return sample;
     }
     const uint16_t buttons = state.gamepad.buttons;
-    if (buttons & X_INPUT_GAMEPAD_A) sample.buttons |= Pad::Select;
+    if (buttons & X_INPUT_GAMEPAD_A) sample.buttons |= Pad::ShowKeyboard;
     if (buttons & X_INPUT_GAMEPAD_B) sample.buttons |= Pad::Cancel;
-    constexpr int kStickThreshold = 18000;
-    if ((buttons & X_INPUT_GAMEPAD_DPAD_UP) || state.gamepad.thumb_ly > kStickThreshold)
-      sample.buttons |= Pad::Up;
-    if ((buttons & X_INPUT_GAMEPAD_DPAD_DOWN) || state.gamepad.thumb_ly < -kStickThreshold)
-      sample.buttons |= Pad::Down;
-    if ((buttons & X_INPUT_GAMEPAD_DPAD_LEFT) || state.gamepad.thumb_lx < -kStickThreshold)
-      sample.buttons |= Pad::Left;
-    if ((buttons & X_INPUT_GAMEPAD_DPAD_RIGHT) || state.gamepad.thumb_lx > kStickThreshold)
-      sample.buttons |= Pad::Right;
     return sample;
   };
   keyboard.font = g_font;

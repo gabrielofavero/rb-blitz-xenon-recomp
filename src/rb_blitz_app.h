@@ -469,7 +469,9 @@ class RbBlitzApp : public rex::ReXApp {
   // Restyle that same modal for both library and RhythmVerse song searches,
   // and share its presentation with the existing achievement unlock toast.
   void OnConfigureStyle(ImGuiStyle&, rex::ui::Style& style) override {
-    rb_blitz::ui::ConfigureKeyboardTheme(style);
+    rb_blitz::ui::ConfigureKeyboardTheme(style, [this] {
+      return window() ? window()->GetNativeWindowHandle() : nullptr;
+    });
   }
 
   // Diagnostics. The probe overlay is an ordinary SDK dialog: its constructor

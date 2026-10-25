@@ -39,6 +39,8 @@ std::unique_ptr<rex::system::IInputSystem> CreateTitleInputSystem(bool tool_mode
 // is attached. Called from the state filter, so it is one extra poll of the drivers per guest
 // poll and no background work; the drivers read their own cached state or the platform's, both of
 // which are cheap.
-bool SamplePhysicalPad(rex::input::X_INPUT_STATE* out_state);
+// for_host_ui bypasses the guest suppression while a host dialog captures input.
+// Gameplay callers leave it false; host dialogs still check actual window focus.
+bool SamplePhysicalPad(rex::input::X_INPUT_STATE* out_state, bool for_host_ui = false);
 
 }  // namespace rb_blitz::input

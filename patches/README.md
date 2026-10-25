@@ -23,17 +23,33 @@ Colors and fonts live in `src/ui/keyboard_theme.cpp`; other SDK dialogs retain
 their existing presentation. Upstream candidate: the opt-in styling seam and
 responsive keyboard layout are general; the palette is title-specific.
 
-`0037-keyboard-controller-navigation.patch` adds controller navigation to that
-same modal. D-pad/left stick moves focus, A returns to the text field, and B
-cancels even while typing. Enter (including keypad Enter) is the only submit
-shortcut; mouse clicks on Done/Cancel also work. A never submits a highlighted
-Done button. There is no typing lock or Start handoff. The footer describes the
-current controls. Physical-only sampling in `src/ui/keyboard_theme.cpp` avoids
-keyboard-to-pad feedback; opening presses, focus loss and disconnection require
-a release before resuming. Host tests exercise controller navigation and real
-ImGui input fields/buttons without opening the game. Actual device acceptance
-remains a manual check. Upstream candidate:
-the opt-in sampler and device-independent controller rules are general.
+`0037-keyboard-controller-navigation.patch` lets B cancel, including while
+typing, and A request the OS keyboard. Directions have no action. Enter
+(including keypad Enter) is the submit shortcut; mouse clicks on Done/Cancel
+also work. There is no typing lock or Start handoff. Each button has its own
+press edge, so held A or stick drift cannot prevent B cancellation.
+The title checks actual window focus instead of the SDL keyboard-focus latch.
+A focuses text, then requests the keyboard on the following frame; it never
+submits. Windows uses the documented InputPane desktop interop/TryShow API in
+`src/platform/virtual_keyboard.cpp`, and requests TryHide at dialog close only
+after a successful show request. This API is best effort: Windows may keep using
+an attached hardware keyboard instead of showing its input pane. Request results
+are logged. External keyboards and normal typing remain available. See
+[InputPane.TryShow](https://learn.microsoft.com/en-us/uwp/api/windows.ui.viewmanagement.inputpane.tryshow).
+Host tests exercise the controller rule and real ImGui fields/buttons without
+opening the game. Upstream candidate: the opt-in sampler and cancel rule.
+
+`0039-host-dialog-controller-state.patch` fixes the input layer beneath that
+dialog. SDL's guest-facing `GetDeviceState` deliberately zeroes buttons while
+ImGui captures the mouse, so reading it from the host modal also hid B. The new
+`InputDriver::GetDeviceStateForUI` defaults to the normal read, with an SDL
+override that copies physical state independently of the guest activity gate.
+Only the host-dialog sampler opts in; guest reads retain their suppression.
+`keyboard_controller_driver` reproduces this using the production SDL driver,
+an SDL virtual pad and an inactive guest-input callback without opening a native
+window: B reaches the modal, while guest reads remain neutral. Actual device
+acceptance remains a manual check. Upstream candidate: host dialogs need input
+while they own capture.
 
 `0038-achievement-toast-theme.patch` adds opt-in styling to the existing unlock
 notification. The title shares the keyboard's translucent dark background,

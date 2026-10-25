@@ -187,6 +187,7 @@ set(RBBLITZ_SOURCES
     # pool, the rename's scope). SDK-free, and read by the menu hooks the mod already owns.
     src/settings/menu_compat.cpp
     src/platform/game_restart.cpp
+    src/platform/virtual_keyboard.cpp
     # The compiled-DTA parser, promoted out of the test-only targets: the provider adapter reads
     # the payload's own definitions with it at boot (it was P1's authoring module, with no
     # production consumer until P6). The cipher it shares with menu_options.cpp is already here.
@@ -325,7 +326,7 @@ set_source_files_properties(src/graphics/development_coverage.cpp PROPERTIES COM
     "RBBLITZ_DEVELOPMENT_DIRECTORY_HASH=\"${RBBLITZ_DEVELOPMENT_DIRECTORY_HASH}\";RBBLITZ_DEVELOPMENT_JOURNAL=\"${RBBLITZ_DEVELOPMENT_JOURNAL}\"")
 target_link_libraries(rb_blitz PRIVATE xxhash)
 if(WIN32)
-    target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32)
+    target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32 runtimeobject)
 endif()
 
 # The store's fault logger (src/store/store_probe.cpp) prints host frames, which are resolved
@@ -508,6 +509,20 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_keyboard_controller_tests PRIVATE "${REXSDK_DIR}/include")
     target_link_libraries(rb_blitz_keyboard_controller_tests PRIVATE imgui)
     add_test(NAME keyboard_controller COMMAND rb_blitz_keyboard_controller_tests)
+    # Compile the production driver into the test so its SDL registry and the
+    # virtual-pad fixture share one module (SDL is static in rexruntime.dll).
+    add_executable(rb_blitz_keyboard_controller_driver_tests
+        tests/keyboard_controller_driver_tests.cpp
+        "${REXSDK_DIR}/src/input/sdl/sdl_input_driver.cpp")
+    target_compile_definitions(rb_blitz_keyboard_controller_driver_tests PRIVATE
+        hid_mappings_file=keyboard_test_hid_mappings_file)
+    target_link_libraries(rb_blitz_keyboard_controller_driver_tests PRIVATE rex::runtime)
+    if(WIN32)
+        add_custom_command(TARGET rb_blitz_keyboard_controller_driver_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_keyboard_controller_driver_tests>)
+    endif()
+    add_test(NAME keyboard_controller_driver COMMAND rb_blitz_keyboard_controller_driver_tests)
     add_test(NAME shader_asset_resolver
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_asset_resolver_tests.py"
                 --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>)

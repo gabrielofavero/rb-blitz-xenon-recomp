@@ -10,11 +10,13 @@ diff --git a/include/rex/ui/style.h b/include/rex/ui/style.h
  
  namespace rex::ui {
  
-@@ -78,6 +80,7 @@
+@@ -78,6 +80,9 @@
  // drawer's atlas and must be registered in OnConfigureFonts before enabling it.
  struct KeyboardInputStyle {
    bool enabled = false;
 +  std::function<KeyboardControllerSample()> sample_controller;
++  std::function<bool()> request_keyboard;
++  std::function<void()> dismiss_keyboard;
    ImFont* font = nullptr;
    ImFont* heading_font = nullptr;
    ImVec4 background{0.10f, 0.10f, 0.12f, 1.00f};
@@ -27,19 +29,16 @@ diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
      const auto& theme = imgui_drawer()->style().keyboard;
 +    const auto pad = theme.sample_controller ? theme.sample_controller()
 +                                              : rex::ui::KeyboardControllerSample{};
-+    const auto action = controller_.Update(pad, io.DeltaTime);
++    const auto action = controller_.Update(pad);
      // DisplaySize is already in DPI-independent units. Scale with the game,
      // including short and ultrawide windows, and keep a margin at either edge.
      const float scale = std::clamp(std::min(io.DisplaySize.y / 720.0f,
-@@ -489,26 +492,58 @@
+@@ -489,26 +492,37 @@
          ImGui::TextWrapped("%s", description_.c_str());
          ImGui::PopStyleColor();
        }
 -      if (first_draw) {
-+      const bool focus_text = first_draw || action.focus_text ||
-+                              (action.focus_changed && controller_.focus() ==
-+                                  rex::ui::KeyboardInputController::Focus::Text);
-+      if (focus_text) {
++      if (first_draw || action.show_keyboard) {
          ImGui::SetKeyboardFocusHere();
        }
        ImGui::SetNextItemWidth(-1.0f);
@@ -47,19 +46,11 @@ diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
 -                                        ImGuiInputTextFlags_EnterReturnsTrue);
 +      const bool entered = ImGui::InputText("##body", text_buffer_.data(), text_buffer_.size(),
 +                                            ImGuiInputTextFlags_EnterReturnsTrue);
-+      const auto highlight = [&](rex::ui::KeyboardInputController::Focus focus) {
-+        if (pad.connected && pad.focused && controller_.focus() == focus) {
-+          const ImVec2 lo = ImGui::GetItemRectMin();
-+          const ImVec2 hi = ImGui::GetItemRectMax();
-+          ImGui::GetWindowDrawList()->AddRect(
-+              ImVec2(lo.x - 2.0f * scale, lo.y - 2.0f * scale),
-+              ImVec2(hi.x + 2.0f * scale, hi.y + 2.0f * scale),
-+              ImGui::GetColorU32(theme.border_highlight), 3.0f * scale, 0, 2.0f * scale);
-+        }
-+      };
-+      highlight(rex::ui::KeyboardInputController::Focus::Text);
-+      // Enter submits from anywhere in the modal. Controller A never submits,
-+      // including when Done is highlighted. B and Escape always cancel.
++      if (pending_keyboard_request_ && theme.request_keyboard && !action.cancel) {
++        keyboard_requested_ |= theme.request_keyboard();
++      }
++      pending_keyboard_request_ = action.show_keyboard;
++      // Enter is the submit shortcut; controller B cancels independently of typing.
 +      bool confirmed = entered || ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
 +                       ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
        const bool escaped = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
@@ -69,39 +60,37 @@ diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
        ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                            (ImGui::GetContentRegionAvail().x - buttons_width) * 0.5f);
 -      confirmed |= ImGui::Button("Done", ImVec2(button_width, 32.0f * scale));
-+      if (action.focus_changed && controller_.focus() ==
-+                                     rex::ui::KeyboardInputController::Focus::Done) {
-+        ImGui::SetKeyboardFocusHere();
-+      }
 +      confirmed |= ImGui::Button("Done", ImVec2(button_width, 32.0f * scale)) && mouse_released;
-+      highlight(rex::ui::KeyboardInputController::Focus::Done);
        ImGui::SameLine();
        ImGui::PushStyleColor(ImGuiCol_Button, theme.secondary);
 -      const bool cancelled = ImGui::Button("Cancel", ImVec2(button_width, 32.0f * scale));
-+      if (action.focus_changed && controller_.focus() ==
-+                                     rex::ui::KeyboardInputController::Focus::Cancel) {
-+        ImGui::SetKeyboardFocusHere();
-+      }
 +      const bool cancelled = (ImGui::Button("Cancel", ImVec2(button_width, 32.0f * scale)) &&
 +                               mouse_released) || action.cancel;
-+      highlight(rex::ui::KeyboardInputController::Focus::Cancel);
        ImGui::PopStyleColor();
        ImGui::PushFont(theme.font, 14.0f * scale);
        ImGui::PushStyleColor(ImGuiCol_Text, theme.muted_text);
 -      center_text("Enter to confirm    /    Esc to cancel");
 -      ImGui::TextUnformatted("Enter to confirm    /    Esc to cancel");
-+      const char* hint = pad.connected ? "Enter: search    A: type    B / Esc: cancel" :
-+                                         "Enter to confirm    /    Esc to cancel";
++      const char* hint = pad.connected ? "Enter: Search    B / Esc: Cancel" :
++                                         "Enter: Search    Esc: Cancel";
 +      center_text(hint);
 +      ImGui::TextUnformatted(hint);
        ImGui::PopStyleColor();
        ImGui::PopFont();
        if (confirmed || cancelled || escaped) {
-@@ -526,6 +561,7 @@
+@@ -526,6 +540,15 @@
      ImGui::PopFont();
    }
  
++  void OnClose() override {
++    const auto& theme = imgui_drawer()->style().keyboard;
++    if (keyboard_requested_ && theme.dismiss_keyboard) theme.dismiss_keyboard();
++    XamDialog::OnClose();
++  }
++
 +  rex::ui::KeyboardInputController controller_;
++  bool pending_keyboard_request_ = false;
++  bool keyboard_requested_ = false;
    bool has_opened_ = false;
    std::string title_;
    std::string description_;
@@ -109,99 +98,47 @@ diff --git a/include/rex/ui/keyboard_input_controller.h b/include/rex/ui/keyboar
 new file mode 100644
 --- /dev/null
 +++ b/include/rex/ui/keyboard_input_controller.h
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,43 @@
 +// Copyright 2026. Released under the BSD license - see LICENSE.
 +#pragma once
 +
-+#include <algorithm>
 +#include <cstdint>
 +
 +namespace rex::ui {
 +
 +// Physical controls only: keyboard-to-pad emulation must never feed this modal.
 +struct KeyboardControllerSample {
-+  enum Button : uint16_t {
-+    Select = 1, Cancel = 2, Up = 4, Down = 8, Left = 16, Right = 32
-+  };
++  enum Button : uint16_t { ShowKeyboard = 1, Cancel = 2 };
 +  bool connected = false;
 +  bool focused = false;
 +  uint16_t buttons = 0;
 +};
 +
 +struct KeyboardControllerAction {
-+  bool focus_text = false;
-+  bool focus_changed = false;
 +  bool cancel = false;
++  bool show_keyboard = false;
 +};
 +
-+// Device/ImGui-independent navigation for the XAM keyboard modal. Controller
-+// input cannot submit: A focuses text, B cancels, directions move focus. Enter
-+// and mouse clicks are handled by the dialog, regardless of text editing state.
++// B cancels; A requests the OS keyboard, never submission. Ignore buttons
++// already held on open/focus regain. Directions and typing do not participate.
 +class KeyboardInputController {
 + public:
-+  enum class Focus { Text, Done, Cancel };
-+
-+  KeyboardControllerAction Update(KeyboardControllerSample sample, float delta_seconds) {
-+    using Button = KeyboardControllerSample;
-+    KeyboardControllerAction action;
-+    const uint16_t pressed = sample.buttons & ~previous_buttons_;
-+    previous_buttons_ = sample.buttons;
++  KeyboardControllerAction Update(KeyboardControllerSample sample) {
 +    if (!sample.connected || !sample.focused) {
-+      armed_ = false;
-+      repeat_button_ = 0;
-+      return action;
++      initialized_ = false;
++      return {};
 +    }
-+    if (!armed_) {
-+      if (sample.buttons == 0) {
-+        armed_ = true;
-+      }
-+      return action;
-+    }
-+    if (pressed & Button::Cancel) {
-+      action.cancel = true;
-+      return action;
-+    }
-+    const uint16_t direction = sample.buttons & (Button::Up | Button::Down |
-+                                                Button::Left | Button::Right);
-+    bool move = direction != 0 && direction != repeat_button_;
-+    if (direction != repeat_button_) {
-+      repeat_button_ = direction;
-+      repeat_delay_ = 0.35f;
-+    } else if (direction != 0) {
-+      repeat_delay_ -= std::clamp(delta_seconds, 0.0f, 0.1f);
-+      if (repeat_delay_ <= 0.0f) {
-+        move = true;
-+        repeat_delay_ = 0.12f;
-+      }
-+    }
-+    if (move) {
-+      const int current = static_cast<int>(focus_);
-+      if (direction == Button::Up) {
-+        focus_ = static_cast<Focus>((current + 2) % 3);
-+      } else if (direction == Button::Down) {
-+        focus_ = static_cast<Focus>((current + 1) % 3);
-+      } else if (direction == Button::Left || direction == Button::Right) {
-+        focus_ = focus_ == Focus::Done ? Focus::Cancel : Focus::Done;
-+      }
-+      action.focus_changed = focus_ != static_cast<Focus>(current);
-+      return action;
-+    }
-+    if (pressed & Button::Select) {
-+      focus_ = Focus::Text;
-+      action.focus_text = true;
-+      action.focus_changed = true;
-+    }
-+    return action;
++    const auto pressed = initialized_ ? sample.buttons & ~previous_buttons_ : 0;
++    const bool cancel = (pressed & KeyboardControllerSample::Cancel) != 0;
++    const bool show = !cancel && (pressed & KeyboardControllerSample::ShowKeyboard) != 0;
++    previous_buttons_ = sample.buttons;
++    initialized_ = true;
++    return {cancel, show};
 +  }
 +
-+  Focus focus() const { return focus_; }
-+
 + private:
-+  Focus focus_ = Focus::Text;
-+  bool armed_ = false;
++  bool initialized_ = false;
 +  uint16_t previous_buttons_ = 0;
-+  uint16_t repeat_button_ = 0;
-+  float repeat_delay_ = 0.0f;
 +};
 +
 +}  // namespace rex::ui

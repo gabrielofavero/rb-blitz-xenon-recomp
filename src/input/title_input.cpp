@@ -106,7 +106,7 @@ std::unique_ptr<rex::system::IInputSystem> CreateTitleInputSystem(bool tool_mode
   return input;
 }
 
-bool SamplePhysicalPad(rex::input::X_INPUT_STATE* out_state) {
+bool SamplePhysicalPad(rex::input::X_INPUT_STATE* out_state, bool for_host_ui) {
   if (out_state) {
     *out_state = {};
   }
@@ -127,7 +127,9 @@ bool SamplePhysicalPad(rex::input::X_INPUT_STATE* out_state) {
         continue;
       }
       rex::input::X_INPUT_STATE state{};
-      if (driver->GetDeviceState(info.id, &state) != X_ERROR_SUCCESS) {
+      const auto result = for_host_ui ? driver->GetDeviceStateForUI(info.id, &state)
+                                      : driver->GetDeviceState(info.id, &state);
+      if (result != X_ERROR_SUCCESS) {
         continue;
       }
       if (!any) {

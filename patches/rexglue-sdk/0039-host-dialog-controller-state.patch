@@ -1,0 +1,52 @@
+diff --git a/include/rex/input/input_driver.h b/include/rex/input/input_driver.h
+--- a/include/rex/input/input_driver.h
++++ b/include/rex/input/input_driver.h
+@@ -38,6 +38,11 @@
+   virtual void EnumerateDevices(std::vector<DeviceInfo>& out) = 0;
+ 
+   virtual X_RESULT GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) = 0;
++  // Physical state for host dialogs that own input capture. Guest-facing reads
++  // may intentionally return neutral while such a dialog is open.
++  virtual X_RESULT GetDeviceStateForUI(DeviceId id, X_INPUT_STATE* out_state) {
++    return GetDeviceState(id, out_state);
++  }
+   virtual X_RESULT GetDeviceCapabilities(DeviceId id, uint32_t flags,
+                                          X_INPUT_CAPABILITIES* out_caps) = 0;
+   virtual X_RESULT SetDeviceVibration(DeviceId id, X_INPUT_VIBRATION* vibration) = 0;
+diff --git a/include/rex/input/sdl/sdl_input_driver.h b/include/rex/input/sdl/sdl_input_driver.h
+--- a/include/rex/input/sdl/sdl_input_driver.h
++++ b/include/rex/input/sdl/sdl_input_driver.h
+@@ -36,6 +36,7 @@
+ 
+   void EnumerateDevices(std::vector<DeviceInfo>& out) override;
+   X_RESULT GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) override;
++  X_RESULT GetDeviceStateForUI(DeviceId id, X_INPUT_STATE* out_state) override;
+   X_RESULT GetDeviceCapabilities(DeviceId id, uint32_t flags,
+                                  X_INPUT_CAPABILITIES* out_caps) override;
+   X_RESULT SetDeviceVibration(DeviceId id, X_INPUT_VIBRATION* vibration) override;
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -221,6 +221,22 @@
+     // pressed buttons aren't lost and will be visible again.
+     std::memset(&out_state->gamepad, 0, sizeof(out_state->gamepad));
+   }
++  return X_ERROR_SUCCESS;
++}
++
++X_RESULT SDLInputDriver::GetDeviceStateForUI(DeviceId id, X_INPUT_STATE* out_state) {
++  if (!sdl_events_initialized_ || !SDL_Gamepad_initialized_) {
++    return X_ERROR_DEVICE_NOT_CONNECTED;
++  }
++  // The host modal is the reason is_active() is false. It still needs the
++  // physical buttons, without re-enabling guest input or changing its counters.
++  QueueControllerUpdate();
++  auto guard = DrainAndLock();
++  auto controller = FindController(id);
++  if (!controller) {
++    return X_ERROR_DEVICE_NOT_CONNECTED;
++  }
++  *out_state = controller->state;
+   return X_ERROR_SUCCESS;
+ }
+ 
