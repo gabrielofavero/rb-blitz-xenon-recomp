@@ -21,18 +21,18 @@ says which rows were measured by a probe rather than by the harness.
 moved here from `todo/` and renamed on 2026-10-24. **P0 is done**: the post-A gate map, the opt-in
 `shader_compile_trace` instrument and the repeatable measurement workflow, with controlled
 D3D12 empty/warm and Vulkan empty traces collected the same day
-([`../../engine/shader-cache-p0.md`](../../engine/shader-cache-p0.md), evidence under
+([`../../engine/shader-cache.md`](../../engine/shader-cache.md) part 1, evidence under
 `out/shader-cache-p0/runs/`). **P1** made preload completion explicit on both backends.
 **P2** resolves all 186 candidate shader identities from installed content
-([`../../engine/shader-cache-p2.md`](../../engine/shader-cache-p2.md)). **P3** validates,
+([`../../engine/shader-cache.md`](../../engine/shader-cache.md) part 2). **P3** validates,
 deduplicates and merges the renderer's pipeline recipes with provenance and resolves every
 recipe-referenced identity, and inventories the 26 helper-pipeline sites
-([`../../engine/shader-cache-p3.md`](../../engine/shader-cache-p3.md)). **P4** turned preparation
+([`../../engine/shader-cache.md`](../../engine/shader-cache.md) part 3). **P4** turned preparation
 into a cancellable generation both backends advance in bounded command-processor slices
-([`../../engine/shader-cache-p4.md`](../../engine/shader-cache-p4.md)), and **P5** persists the
+([`../../engine/shader-cache.md`](../../engine/shader-cache.md) part 4), and **P5** persists the
 driver's own results beside the shareable recipes - D3D12 cached PSO blobs and one real Vulkan
 pipeline cache shared by every creation path
-([`../../engine/shader-cache-p5.md`](../../engine/shader-cache-p5.md)). P6–P9 (the post-A phase,
+([`../../engine/shader-cache.md`](../../engine/shader-cache.md) part 5). P6–P9 (the post-A phase,
 invalidation, validation and packaging) are prompts; the post-A gate and the cold/warm measurement
 remain open.
 

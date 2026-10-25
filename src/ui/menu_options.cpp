@@ -554,7 +554,11 @@ Node AutoAdvance(uint16_t line) {
 
 // The second A: off the offline-mode question and back to the title screen's main
 // menu - the same two calls, in the same order, the file's own handler makes there.
-Node AutoAccept(uint16_t line) {
+Node AutoAccept(uint16_t line, bool graphics_gate = false) {
+  if (graphics_gate) {
+    return CommandNode({TextNode(kSymbol, "if"), StateIs(kPanelOffline, line),
+        CommandNode({TextNode(kVar, kVarThis), TextNode(kSymbol, "rbbz_begin_graphics")}, line)}, line);
+  }
   return CommandNode(
       {TextNode(kSymbol, "if"), StateIs(kPanelOffline, line),
        CommandNode({CommandNode({TextNode(kSymbol, "splash_panel"),
@@ -1094,7 +1098,7 @@ Skipped SkipOfflinePrompts(uint8_t* file, size_t available) {
   // The two transitions carry the handler's own line, so a dumped patched file
   // reads as one more part of the handler they were put in.
   const Node advance = AutoAdvance(body->line);
-  const Node accept = AutoAccept(body->line);
+  const Node accept = AutoAccept(body->line, ContainsText(*panel, "rbbz_begin_graphics"));
   skipped.added = NodeSize(advance) + NodeSize(accept);
 
   // The payment: one root-level `#define NAME (value)` pair per constant.

@@ -1,0 +1,52 @@
+diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
+--- a/include/rex/rex_app.h
++++ b/include/rex/rex_app.h
+@@ -157,6 +157,9 @@
+   /// Called immediately before the main guest thread is created.
+   /// Everything is set up -- last chance to patch guest memory/code.
+   virtual void OnPreLaunchModule() {}
++
++  /// Let the application start bulk shader preparation at its own safe loading boundary.
++  virtual bool DeferShaderStoragePreparation() const { return false; }
+ 
+   /// Called after the main guest thread is created but before it starts
+   /// executing. The thread is suspended -- attach debuggers/monitors here.
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -460,7 +460,8 @@
+     uint32_t title_id =
+         (graphics_system && runtime_->kernel_state()) ? runtime_->kernel_state()->title_id() : 0;
+     const bool has_shader_storage =
+-        graphics_system && !runtime_->cache_root().empty() && title_id != 0;
++        graphics_system && !runtime_->cache_root().empty() && title_id != 0 &&
++        !DeferShaderStoragePreparation();
+     // P4: preparation can run beside the guest instead of before it. The
+     // blocking call below returns only after every stored pipeline exists, which
+     // is why the loading UI cannot animate during it; the asynchronous form
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -303,6 +303,9 @@
+   // The generation (key, entry accounting, cancellation) was started by
+   // CommandProcessor::BeginShaderStoragePreparation on the caller's thread; the
+   // import below is the first slice that must run here.
++  // A previous terminal/cancelled generation may still own open storage.
++  // Its workers have retired; close its writer before reopening the files.
++  ShutdownShaderStorage();
+   preparation_blocking_ = false;
+   if (!OpenShaderStorage(cache_root, title_id)) {
+     command_processor_.preparation().Finish(GraphicsPreparationPhase::kFailed);
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -656,6 +656,9 @@
+ 
+ void VulkanPipelineCache::BeginShaderStoragePreparation(const std::filesystem::path& cache_root,
+                                                         uint32_t title_id) {
++  // A previous terminal/cancelled generation may still own open storage.
++  // Its workers have retired; close its writer before reopening the files.
++  ShutdownShaderStorage();
+   preparation_blocking_ = false;
+   if (!OpenShaderStorage(cache_root, title_id)) {
+     command_processor_.preparation().Finish(GraphicsPreparationPhase::kFailed);

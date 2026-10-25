@@ -114,7 +114,7 @@ driver `out/_swap/p0/run.ps1` carries the later switches that have not been fold
 
 ### The shader-compilation trace (shader-cache P0, 2026-10-24)
 
-`shader_compile_trace` is the instrument behind [shader-cache-p0.md](shader-cache-p0.md)
+`shader_compile_trace` is the instrument behind [shader-cache.md](shader-cache.md) part 1
 and SDK patch 0020. It is a runtime-owned counter set (one monotonic clock shared by
 `rexruntime.dll` and the GPU plugin), not the probe ring: it times shader translation,
 guest PSO creation, Vulkan placeholders, render-target helper graphics/compute creation,
@@ -167,7 +167,7 @@ and keeps the pipelines that were already in flight. The lifecycle lives in
 | `shader_storage_async_preparation` | `false` | Prepares the persistent shader/pipeline storage after the guest starts, in bounded command-processor slices, instead of blocking the launch. P4's measurement and integration switch; the visible loading phase belongs to P6. |
 
 Since shader-cache P5 (2026-10-24) the driver's own results are persisted beside the
-shareable recipes ([shader-cache-p5.md](shader-cache-p5.md)). The lines to read when a
+shareable recipes ([shader-cache.md](shader-cache.md) part 5). The lines to read when a
 boot's driver work did not drop:
 
 ```text

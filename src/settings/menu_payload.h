@@ -30,6 +30,9 @@ bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit);
 // The formerly transient state 28 can now span frames while a refresh scans.
 // Give it the same content-loading label as state 29; retain real connection labels.
 bool SetDiscoveryStartLabel(std::vector<ui::dtb::Node>* roots);
+// Replace every connect-panel menu continuation with the same deferred guest
+// method. Refuses an unknown shape instead of leaving an ungated menu route.
+bool AddGraphicsLoadingGate(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Applied the same way, for the main menu's downloadable-content row: with R7 on the row *is*
 // the library refresh (`TapRefreshCache`), so the label it draws has to say so. Built into the
 // locale record here rather than left to the in-flight menu_filter relabel, which cannot reach a

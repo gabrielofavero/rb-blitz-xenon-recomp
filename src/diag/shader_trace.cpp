@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "diag/shader_trace.h"
+#include "graphics/preparation_loading.h"
 #include <rex/cvar.h>
 #include <rex/graphics/compile_trace.h>
 #include <rex/hook.h>
@@ -114,9 +115,11 @@ void ObserveSongController(bool accepts_input) {
 } // namespace rb_blitz::diag::shader_trace
 
 REX_HOOK_RAW(sub_822CB0D0) {
+  rb_blitz::graphics::BeginLoadingAttempt();
   trace::SetPhase(trace::Phase::kPostALoading, "start_connect_process");
   __imp__sub_822CB0D0(ctx, base);
 }
+
 REX_HOOK_RAW(sub_822CA8E8) {
   if (trace::Enabled()) {
     static unsigned budget = 0; // all calls on the guest/UI owner thread

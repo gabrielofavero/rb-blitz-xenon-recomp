@@ -1055,3 +1055,84 @@ order; workers do not access the VFS, guest memory, RNG, or playback state. The
 also rejects ordinary filenames before querying directory attributes when deciding
 whether a DLC root uses the structured layout (the same log measured that layout
 check at 6.75 seconds for a flat library). End-to-end timings await the owner's test.
+
+### 6. Background music under loading pressure (2026-10-24)
+
+**Status:** implementation and headless checks; listening validation pending with
+an owner-driven run. The owner reports occasional background-music stutters during
+song-cache loading and opening RhythmVerse, becoming more frequent during P6's
+post-A graphics preparation. The exact reported breaks were not time-correlated
+with device underruns, so this does not attribute every break to one cause.
+
+Source inspection found three independent pressure points:
+
+- The native `synth.stream_buf_size` default is **1.2 seconds** of decoded stream
+  capacity (`out/system_default.dta.txt`, retained in the installed record).
+  `StandardStream` constructor `0x823E5BE0` forwards f2 to `0x823E5748`, which stores
+  it at stream +48 and resolves zero through `stream_buf_size`. Channel setup
+  `0x823E52B0` sizes the ring from that value × sample rate × 2 bytes, rounded to
+  native blocks. ShellMusic's factory calls pass zero for this argument.
+- The SDL output queue defaults to **8 × 256 / 48000 = 42.67 ms**, and previously
+  allocated/recycled heap buffers while holding a queue mutex through conversion
+  and `SDL_PutAudioStreamData`. This gives little tolerance for delayed delivery;
+  it does not establish that every music skip is an output underrun.
+- Background preparation could use logical-processor-count minus one translation/
+  creation workers (Vulkan auto creation: three quarters of CPUs), at normal
+  priority. Its command processor also made synchronous driver pipeline calls in
+  each service slice; a bounded count is not a bounded wall-clock time.
+
+The changes preserve the title's music player, volume, loop/rotation and scene
+lifetime while adding headroom at each boundary:
+
+1. **Menu-only decoded reserve:** `menu_audio_policy.h` and the constructor hook in
+   `shell_music.cpp` request at least **6 seconds** while ShellMusic is constructing
+   a stream. The scope is thread-local and also covers the DLC handoff's direct
+   Start call. Both native title tracks and DLC tracks benefit. An explicit larger
+   stream request is retained; gameplay streams keep their original buffer request.
+   This is capacity ahead of the music playhead, not a six-second output delay.
+   Startup may take longer to accumulate data; the actual duration is unmeasured.
+   Its bounded startup grace is now 15 seconds (previously 8); the 3-second
+   deadline for a stream that stops advancing after playback begins is unchanged.
+2. **Audio scheduling:** SDK patch 0031 raises Audio Worker and XMA Decoder to
+   `ThreadPriority::kHighest` (normal process class, not realtime). SDL already gives
+   its playback thread time-critical/MMCSS handling. Background preparation workers
+   run below normal, with at most four active workers and two logical CPUs left
+   outside that budget where hardware permits (one worker on one/two-CPU systems).
+   Async preparation delegates driver creation to these workers instead of making
+   additional driver calls on the submission/command-processor thread. The blocking
+   legacy path and a no-worker fallback can still participate on that thread.
+3. **Bounded PCM handoff:** patch 0032 gives each SDL driver a fixed 64-frame ring,
+   matching the existing maximum queue setting. The queue owns each submitted
+   frame and holds its mutex only for a bounded PCM copy. Mixing and SDL submission
+   happen after unlocking; the queue needs no per-frame heap allocation or recycling.
+   Device callbacks use stack arrays and return one producer credit per consumed
+   frame, including an SDL submission failure. `audio_maxqframes` stays at its
+   existing value, preserving output latency and gameplay calibration.
+
+`Audio starvation` warnings count missing 256-sample output frames after the first
+submission and report the largest device-callback gap. They are rate-limited to
+one per five seconds on the producer, never emitted on the device callback's
+normal path. Shutdown prints cumulative submitted/starved counts. Startup silence
+before any submission is excluded. These diagnose output delivery; a decoder/source
+loop that keeps submitting repeated samples may stutter with no queue underrun.
+No interpolation, repeated-frame concealment or audio/video clock drift is added.
+
+Evidence and checks live under ignored `out/audio-stability/`: the owner's
+`rb_blitz_328.log` copy records a successful **432/432** P6 preparation in **15,240 ms**,
+which confirms the normal menu continuation, not stable audio. The native stream
+ABI/config dump is inspected locally; no game bytes are distributed. The new
+`audio_stability` test verifies queue ownership, capacity, wraparound and clear,
+then runs **20,000 PCM frames** through producer/consumer threads with deliberate
+pauses, checking exact sample order and no torn/replayed frames. It also checks
+menu/gameplay scope and CPU budgeting. Listening under song-cache loading, graphics
+preparation and RhythmVerse remains with the owner; this change has not driven UI.
+
+Validation, 2026-10-24: release rebuild passes for the executable and both graphics
+backends. The four directly affected ctests pass after the final startup-grace
+change (`ctest-targeted-final.log`); the full roster is **65/66**, with only the
+previously failing, unchanged `path_policy` nonexistent-descendant check. SDK exact
+replay reports **31 patches, 0 failed, 85 patched files, 0 unexpected**
+(`sdk-apply.log`). The docs checker reports 40 pre-existing reference errors;
+no audio-follow-up link is among them (`docs-check.json`). All evidence named in
+this paragraph is under `out/audio-stability/`. No listening or game/UI test was
+performed by the agent; the owner retains that role.

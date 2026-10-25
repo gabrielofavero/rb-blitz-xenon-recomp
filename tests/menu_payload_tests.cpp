@@ -727,6 +727,91 @@ void TestDiscoveryWaitingLabel() {
   CHECK_TRUE(dtb::Compile(unknown) == bytes);
 }
 
+// Evaluate the authored recovery branch with a failed host preparation. The
+// important boundary is navigation: retry must never reenter content discovery,
+// while Ignore must execute the saved menu continuation exactly once.
+void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
+  using namespace rb_blitz::ui;
+  using dtb::Node;
+  struct Machine {
+    const std::vector<Node>& roots;
+    bool pending = true, failed = true;
+    int retries = 0, ignores = 0, menus = 0, discoveries = 0;
+    std::string action;
+    std::map<std::string,std::string> hints;
+    std::map<std::string,bool> showing;
+    bool Truth(const Node& n) { auto v = Eval(n); return v.tag == dtb::kInt ? v.scalar != 0 : v.text == "TRUE"; }
+    Node Method(const std::string& name) {
+      const auto* method = header_test::Method(roots,"server_connect_panel",name.c_str());
+      CHECK_TRUE(method != nullptr);
+      Node result = Node::Int(0);
+      if (method) for (size_t i=1;i<method->kids.size();++i) result = Eval(method->kids[i]);
+      return result;
+    }
+    Node Eval(const Node& n) {
+      if (n.tag == dtb::kProperty) return Node::Int(pending);
+      if (n.tag == dtb::kVar && n.text == "action") return Node::Symbol(action);
+      if (n.tag != dtb::kCommand || n.kids.empty()) return n;
+      const auto& op = n.kids[0].text;
+      if (op == "file_exists") {
+        const auto& path = n.kids[1].text;
+        if (path == "rbbz-graphics/failed") return Node::Int(failed);
+        if (path == "rbbz-graphics/retry") { ++retries; failed=false; return Node::Int(1); }
+        if (path == "rbbz-graphics/ignore") { ++ignores; return Node::Int(1); }
+        if (path == "rbbz-graphics/checking") return Node::Int(1);
+        return Node::Int(0);
+      }
+      if (op == "if_else") return Eval(n.kids[Truth(n.kids[1])?2:3]);
+      if (op == "if" || op == "unless") {
+        if (Truth(n.kids[1]) == (op=="if"))
+          for (size_t i=2;i<n.kids.size();++i) Eval(n.kids[i]);
+        return Node::Int(0);
+      }
+      if (op == "&&") return Node::Int(Truth(n.kids[1]) && Truth(n.kids[2]));
+      if (op == "||") return Node::Int(Truth(n.kids[1]) || Truth(n.kids[2]));
+      if (op == "!") return Node::Int(!Truth(n.kids[1]));
+      if (op == "==") { auto a=Eval(n.kids[1]), b=Eval(n.kids[2]); return Node::Int(a.tag==b.tag && a.text==b.text && a.scalar==b.scalar); }
+      if (op == "do") { for (size_t i=1;i<n.kids.size();++i) Eval(n.kids[i]); return Node::Int(0); }
+      if (op == "switch") {
+        const auto value=Eval(n.kids[1]);
+        for (size_t i=2;i<n.kids.size();++i)
+          if (!n.kids[i].kids.empty() && n.kids[i].kids[0].text==value.text)
+            for (size_t j=1;j<n.kids[i].kids.size();++j) Eval(n.kids[i].kids[j]);
+        return Node::Int(0);
+      }
+      if (op == "set" && n.kids[1].tag==dtb::kProperty) { pending=Truth(n.kids[2]); return Node::Int(0); }
+      if (n.kids[0].tag==dtb::kVar && op=="this") {
+        if (n.kids[1].text=="start_connect_process") { ++discoveries; return Node::Int(0); }
+        return Method(n.kids[1].text);
+      }
+      if (op=="ui" && n.kids[1].text=="goto_screen") ++menus;
+      if (op=="content_mgr" || op=="saveload_mgr") ++discoveries;
+      if (n.kids.size()>=4 && n.kids[1].text=="set_action_token") hints[op]=Eval(n.kids[3]).text;
+      if (n.kids.size()>=3 && n.kids[1].text=="set_showing") showing[op]=Truth(n.kids[2]);
+      return Node::Int(0);
+    }
+  };
+  BeginCase("failed preparation exposes native A retry and B ignore; retry preserves DLC loading");
+  Machine retry{roots};
+  retry.Method("rbbz_graphics_poll");
+  CHECK_TRUE(retry.showing["continue.ihp"] && retry.showing["back.ihp"]);
+  CHECK_TRUE(retry.hints["continue.ihp"]=="rbbz_graphics_retry");
+  CHECK_TRUE(retry.hints["back.ihp"]=="rbbz_graphics_ignore");
+  retry.action="kAction_Confirm";
+  retry.Method("BUTTON_DOWN_MSG");
+  CHECK_EQ(retry.retries,1); CHECK_EQ(retry.discoveries,0); CHECK_EQ(retry.menus,0);
+  CHECK_TRUE(retry.pending);
+  retry.Method("BUTTON_DOWN_MSG");
+  CHECK_EQ(retry.retries,1);
+  BeginCase("Ignore executes the menu continuation and retires the guest graphics gate");
+  Machine ignore{roots}; ignore.action="kAction_Cancel";
+  ignore.Method("BUTTON_DOWN_MSG");
+  CHECK_EQ(ignore.ignores,1); CHECK_EQ(ignore.discoveries,0); CHECK_EQ(ignore.menus,1);
+  CHECK_FALSE(ignore.pending);
+  ignore.Method("rbbz_graphics_poll");
+  CHECK_EQ(ignore.menus,1);
+}
+
 int main(int argc, char** argv) {
   if (argc == 3 && std::string(argv[1]) == "check-discovery-record") {
     namespace dtb = rb_blitz::ui::dtb;
@@ -738,11 +823,28 @@ int main(int argc, char** argv) {
     std::string why;
     CHECK_TRUE(dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why));
     CHECK_TRUE(rb_blitz::settings::SetDiscoveryStartLabel(&roots));
+    CHECK_TRUE(rb_blitz::settings::AddGraphicsLoadingGate(&roots,&why));
+    const auto count = [](auto&& self, const dtb::Node& n, const std::string& text) -> int {
+      int total = n.text == text;
+      for (const auto& child : n.kids) total += self(self,child,text);
+      return total;
+    };
+    const auto count_all = [&](const std::string& text) {
+      int total = 0; for (const auto& n : roots) total += count(count,n,text); return total;
+    };
+    // Confirm and Option both call the same gate; main_menu exists only inside
+    // the ready continuation. Applying R3 must preserve that invariant.
+    CHECK_EQ(count_all("main_menu"),1);
+    CHECK_EQ(count_all("rbbz_begin_graphics"),3);
     bytes = dtb::Compile(roots, header);
     // The generated record must remain compatible with the later read-time
     // offline transform, which removes the unused named state-28 constant.
     CHECK_TRUE(rb_blitz::menu_options::SkipOfflinePrompts(bytes.data(), bytes.size()).applied);
     CHECK_TRUE(dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why));
+    CHECK_EQ(count_all("main_menu"),1);
+    CHECK_EQ(count_all("rbbz_begin_graphics"),4);
+    CHECK_EQ(count_all("rbbz-graphics/cancel"),1);
+    TestGraphicsRecovery(roots);
     const auto before = dtb::Compile(roots, header);
     CHECK_TRUE(rb_blitz::settings::SetDiscoveryStartLabel(&roots));
     CHECK_TRUE(dtb::Compile(roots, header) == before);

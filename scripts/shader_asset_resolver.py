@@ -2,7 +2,8 @@
 
 The XOBX loader is sub_823EC540, NOT the base-class sub_8224DC70.
 Vertex declaration linking and bootstrap programs use the supported installed XEX.
-See docs/engine/shader-cache-p2.md for the layout and validated candidate scope.
+See docs/engine/shader-cache.md (part 2, local shader resolution) for the layout
+and validated candidate scope.
 The index is evidence/source locators, not a live graphics-readiness marker.
 """
 import argparse

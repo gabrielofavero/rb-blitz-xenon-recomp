@@ -56,6 +56,7 @@
 #include <rex/cvar.h>
 #include <rex/graphics/compile_trace.h>
 #include "diag/shader_trace.h"
+#include "graphics/preparation_loading.h"
 #include <rex/filesystem.h>
 #include <rex/logging/macros.h>
 #include <rex/platform/dynlib.h>
@@ -394,7 +395,7 @@ class RbBlitzApp : public rex::ReXApp {
     // is served a record. With the master off this is a no-op - the store makes no request at all
     // then (plan §1.6, and the acceptance Control leg pins that silence).
     rb_blitz::store::RequestCatalogueRefresh("the boot asked");
-    rb_blitz::settings::InstallMenuPayload(runtime());
+    graphics_loading_payload_ready_ = rb_blitz::settings::InstallMenuPayload(runtime());
     // The typed settings channel (P1): its two guest hooks are installed at link time, so this
     // only reads their flags once on this host thread and logs what they are set to. A guest
     // thread must not touch the cvar registry, which is why the read happens here.
@@ -415,13 +416,23 @@ class RbBlitzApp : public rex::ReXApp {
     // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the
     // player cannot change has to say so rather than save a value that never takes effect.
     rex::cvar::FinalizeInit();
+    rb_blitz::graphics::ConfigureLoading(runtime());
     rb_blitz::diag::shader_trace::LogConfiguration();
   }
 
   bool OnWindowCloseRequested() override {
+    rb_blitz::graphics::CloseLoading();
     rex::graphics::compile_trace::Snapshot("window_close");
     if (settings_boot_) settings_boot_->Closing();
     return true;
+  }
+
+  // Bulk work belongs to the post-A content boundary, including when an SDK
+  // diagnostic requests asynchronous startup. Pre-A draws bootstrap on demand.
+  bool DeferShaderStoragePreparation() const override { return true; }
+  bool CanLaunchModule() const override { return graphics_loading_payload_ready_; }
+  void OnGuestThreadExit(rex::system::XThread*) override {
+    rb_blitz::graphics::CloseLoading();
   }
 
   // Logging is up from here, which is why the profile application made in OnConfigurePaths is
@@ -561,6 +572,7 @@ class RbBlitzApp : public rex::ReXApp {
   // is destroyed, which happens before ~ReXApp() tears the drawer down.
   std::unique_ptr<rex::ui::ImGuiDialog> probe_overlay_;
   std::unique_ptr<rex::ui::ImGuiDialog> mouse_cursor_;
+  bool graphics_loading_payload_ready_ = false;
   // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings
   // bridge's caption sink, because the sink object lives beside the dialog.
   std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;

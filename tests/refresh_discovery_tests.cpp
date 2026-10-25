@@ -2,6 +2,7 @@
 // Exercise the production native hooks; the scan and retail callees are stand-ins.
 #include "check.h"
 #include "hooks/dlc.h"
+#include "graphics/preparation_loading.h"
 #include <array>
 #include <rex/hook.h>
 #include <rex/system/xmemory.h>
@@ -28,6 +29,15 @@ bool RefreshReadyForDiscovery() {
   return ready;
 }
 }  // namespace rb_blitz::dlc
+
+namespace rb_blitz::graphics {
+void ObserveContentLoading(uint8_t*, uint32_t panel) { CHECK_EQ(panel,kPanel); }
+void PollLoading() {}
+bool GraphicsLoadingPending() { return false; }
+}
+extern "C" REX_FUNC(__imp__sub_824B5F68) {
+  rb_blitz::test::Fail(__FILE__,__LINE__,"graphics base poll without a pending gate");
+}
 
 extern "C" REX_FUNC(__imp__sub_822CA460) {
   ++advances;

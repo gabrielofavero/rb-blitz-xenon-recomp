@@ -1,0 +1,230 @@
+diff --git a/include/rex/audio/sdl/sdl_audio_driver.h b/include/rex/audio/sdl/sdl_audio_driver.h
+--- a/include/rex/audio/sdl/sdl_audio_driver.h
++++ b/include/rex/audio/sdl/sdl_audio_driver.h
+@@ -11,9 +11,8 @@
+ 
+ #pragma once
+ 
+-#include <mutex>
+-#include <queue>
+-#include <stack>
++#include <atomic>
++#include <rex/audio/frame_queue.h>
+ 
+ #include <rex/audio/audio_driver.h>
+ #include <rex/thread.h>
+@@ -46,9 +45,15 @@
+   static const uint32_t channel_samples_ = 256;
+   static const uint32_t frame_samples_ = frame_channels_ * channel_samples_;
+   static const uint32_t frame_size_ = sizeof(float) * frame_samples_;
+-  std::queue<float*> frames_queued_ = {};
+-  std::stack<float*> frames_unused_ = {};
+-  std::mutex frames_mutex_ = {};
++  // Matches AudioSystem::kMaximumQueuedFrames. Storage is owned for the device
++  // lifetime, with only a bounded PCM copy inside the queue lock.
++  AudioFrameQueue<64, frame_samples_> frames_;
++  std::atomic<uint64_t> submitted_frames_{0};
++  std::atomic<uint64_t> starved_frames_{0};
++  std::atomic<uint64_t> last_callback_us_{0};
++  std::atomic<uint64_t> max_callback_gap_us_{0};
++  uint64_t reported_starved_frames_ = 0;  // producer thread only
++  uint64_t next_report_us_ = 0;
+ };
+ 
+ }  // namespace rex::audio::sdl
+diff --git a/src/audio/sdl/sdl_audio_driver.cpp b/src/audio/sdl/sdl_audio_driver.cpp
+--- a/src/audio/sdl/sdl_audio_driver.cpp
++++ b/src/audio/sdl/sdl_audio_driver.cpp
+@@ -12,6 +12,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cstring>
++#include <chrono>
+ 
+ #include <rex/assert.h>
+ #include <rex/audio/conversion.h>
+@@ -31,10 +32,7 @@
+ SDLAudioDriver::SDLAudioDriver(memory::Memory* memory, rex::thread::Semaphore* semaphore)
+     : AudioDriver(memory), semaphore_(semaphore) {}
+ 
+-SDLAudioDriver::~SDLAudioDriver() {
+-  assert_true(frames_queued_.empty());
+-  assert_true(frames_unused_.empty());
+-}
++SDLAudioDriver::~SDLAudioDriver() = default;
+ 
+ bool SDLAudioDriver::Initialize() {
+   // Set audio category for proper OS audio handling
+@@ -110,31 +108,26 @@
+ }
+ 
+ void SDLAudioDriver::SubmitFrame(uint32_t frame_ptr) {
+-  const auto input_frame = memory_->TranslateVirtual<float*>(frame_ptr);
+-  float* output_frame;
+-  {
+-    std::unique_lock<std::mutex> guard(frames_mutex_);
+-    if (frames_unused_.empty()) {
+-      output_frame = new float[frame_samples_];
+-    } else {
+-      output_frame = frames_unused_.top();
+-      frames_unused_.pop();
+-    }
++  const auto* input_frame = memory_->TranslateVirtual<float*>(frame_ptr);
++  size_t depth = 0;
++  if (!frames_.Push(input_frame, &depth)) {
++    REXAPU_WARN("Audio queue overflow; dropping one frame");
++    semaphore_->Release(1, nullptr);
++    return;
+   }
+-
+-  std::memcpy(output_frame, input_frame, frame_samples_ * sizeof(float));
+-
+-  static uint32_t sdl_submit_count = 0;
+-  if (sdl_submit_count < 10) {
+-    REXAPU_DEBUG("SDLAudioDriver::SubmitFrame: frame_ptr={:08X} queued_count={}", frame_ptr,
+-                 frames_queued_.size() + 1);
+-    sdl_submit_count++;
+-  }
+-
+-  {
+-    std::unique_lock<std::mutex> guard(frames_mutex_);
+-    frames_queued_.push(output_frame);
+-    PROFILE_BUFFER_QUEUE_DEPTH(static_cast<int64_t>(frames_queued_.size()));
++  submitted_frames_.fetch_add(1, std::memory_order_relaxed);
++  PROFILE_BUFFER_QUEUE_DEPTH(static_cast<int64_t>(depth));
++  // Report from the producer, never from the device callback. Count starvation
++  // after the first submission only, excluding the device's initial silence.
++  const uint64_t starved = starved_frames_.load(std::memory_order_relaxed);
++  const uint64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
++      std::chrono::steady_clock::now().time_since_epoch()).count();
++  if (starved != reported_starved_frames_ && now >= next_report_us_) {
++    REXAPU_WARN("Audio starvation: {} missing frame(s) ({:.1f} ms), largest device callback gap {:.1f} ms",
++        starved, starved * (1000.0 * channel_samples_ / frame_frequency_),
++        max_callback_gap_us_.load(std::memory_order_relaxed) / 1000.0);
++    reported_starved_frames_ = starved;
++    next_report_us_ = now + 5000000;
+   }
+ }
+ 
+@@ -147,84 +140,59 @@
+     SDL_QuitSubSystem(SDL_INIT_AUDIO);
+     sdl_initialized_ = false;
+   }
+-  std::unique_lock<std::mutex> guard(frames_mutex_);
+-  while (!frames_unused_.empty()) {
+-    delete[] frames_unused_.top();
+-    frames_unused_.pop();
+-  }
+-  while (!frames_queued_.empty()) {
+-    delete[] frames_queued_.front();
+-    frames_queued_.pop();
+-  }
++  frames_.Clear();
++  REXAPU_INFO("Audio queue totals: {} submitted, {} starved frame(s), largest callback gap {:.1f} ms",
++      submitted_frames_.load(), starved_frames_.load(), max_callback_gap_us_.load() / 1000.0);
+ }
+ 
+ void SDLAudioDriver::SDLCallback(void* userdata, SDL_AudioStream* stream, int additional_amount,
+                                  [[maybe_unused]] int total_amount) {
+   SCOPE_profile_cpu_f("apu");
+-  if (!userdata || !stream) {
+-    REXAPU_ERROR("SDLAudioDriver::SDLCallback called with nullptr.");
+-    return;
++  if (!userdata || !stream) return;
++  const auto driver = static_cast<SDLAudioDriver*>(userdata);
++  const uint64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
++      std::chrono::steady_clock::now().time_since_epoch()).count();
++  const uint64_t before = driver->last_callback_us_.exchange(now, std::memory_order_relaxed);
++  if (before) {
++    const uint64_t gap = now - before;
++    uint64_t largest = driver->max_callback_gap_us_.load(std::memory_order_relaxed);
++    while (largest < gap && !driver->max_callback_gap_us_.compare_exchange_weak(
++        largest, gap, std::memory_order_relaxed)) {}
+   }
+-  const auto driver = static_cast<SDLAudioDriver*>(userdata);
+   const int sample_count =
+       static_cast<int>(channel_samples_ * std::max<uint8_t>(driver->sdl_device_channels_, 1));
+   const int len = static_cast<int>(sizeof(float) * sample_count);
+-  float* data = SDL_stack_alloc(float, sample_count);
+-  if (!data) {
+-    REXAPU_ERROR("SDLAudioDriver::SDLCallback failed to allocate {} samples", sample_count);
+-    return;
+-  }
+-  // Snapshot once. A change mid-callback would split the frame across two mixes.
++  std::array<float, frame_samples_> input;
++  std::array<float, frame_samples_> output;
+   const StereoFold fold = GetStereoFold();
+   const SurroundMix mix = GetSurroundMix();
+   const float gain = GetOutputGain();
+   while (additional_amount > 0) {
+-    static uint32_t sdl_callback_count = 0;
+-    std::unique_lock<std::mutex> guard(driver->frames_mutex_);
+-    if (driver->frames_queued_.empty()) {
+-      if (sdl_callback_count < 10) {
+-        REXAPU_DEBUG("SDLCallback: no frames queued (silence)");
+-        sdl_callback_count++;
+-      }
+-      std::memset(data, 0, len);
+-      if (!SDL_PutAudioStreamData(stream, data, len)) {
+-        REXAPU_ERROR("SDL_PutAudioStreamData() failed while filling silence: {}", SDL_GetError());
+-        break;
+-      }
+-      additional_amount -= len;
++    const bool supplied = driver->frames_.Pop(input.data());
++    if (!supplied || REXCVAR_GET(audio_mute)) {
++      std::memset(output.data(), 0, len);
++      if (!supplied && driver->submitted_frames_.load(std::memory_order_relaxed))
++        driver->starved_frames_.fetch_add(1, std::memory_order_relaxed);
++    } else if (driver->sdl_device_channels_ == 2) {
++      conversion::sequential_6_BE_to_interleaved_2_LE(output.data(), input.data(),
++                                                   channel_samples_, fold, gain);
+     } else {
+-      auto buffer = driver->frames_queued_.front();
+-      driver->frames_queued_.pop();
+-      if (REXCVAR_GET(audio_mute)) {
+-        std::memset(data, 0, len);
+-      } else {
+-        switch (driver->sdl_device_channels_) {
+-          case 2:
+-            conversion::sequential_6_BE_to_interleaved_2_LE(data, buffer, channel_samples_, fold,
+-                                                            gain);
+-            break;
+-          case 6:
+-            conversion::sequential_6_BE_to_interleaved_6_LE(data, buffer, channel_samples_, mix,
+-                                                            gain);
+-            break;
+-          default:
+-            assert_unhandled_case(driver->sdl_device_channels_);
+-            break;
+-        }
+-      }
+-      if (!SDL_PutAudioStreamData(stream, data, len)) {
+-        REXAPU_ERROR("SDL_PutAudioStreamData() failed: {}", SDL_GetError());
+-        driver->frames_unused_.push(buffer);
+-        break;
+-      }
+-      driver->frames_unused_.push(buffer);
+-
+-      auto ret = driver->semaphore_->Release(1, nullptr);
+-      assert_true(ret);
+-      additional_amount -= len;
++      assert_true(driver->sdl_device_channels_ == 6);
++      conversion::sequential_6_BE_to_interleaved_6_LE(output.data(), input.data(),
++                                                   channel_samples_, mix, gain);
+     }
++    // Conversion and SDL stream submission run outside the PCM handoff lock.
++    const bool submitted = SDL_PutAudioStreamData(stream, output.data(), len);
++    if (supplied) {
++      const bool released = driver->semaphore_->Release(1, nullptr);
++      assert_true(released);
++    }
++    if (!submitted) {
++      REXAPU_ERROR("SDL_PutAudioStreamData() failed: {}", SDL_GetError());
++      break;
++    }
++    additional_amount -= len;
+   }
+-  SDL_stack_free(data);
+ }
+ 
+ }  // namespace rex::audio::sdl

@@ -541,6 +541,94 @@ bool SetDiscoveryStartLabel(std::vector<Node>* roots) {
   return visit(visit, *method);
 }
 
+bool AddGraphicsLoadingGate(std::vector<Node>* roots, std::string* why) {
+  using namespace ui::dtb;
+  if (!roots) return false;
+  auto staged = *roots;
+  Node* panel = nullptr;
+  for (auto& root : staged)
+    if (root.tag == kCommand && root.kids.size() >= 3 && root.kids[0].text == "new" &&
+        root.kids[1].text == "ServerConnectPanel" && root.kids[2].text == "server_connect_panel") panel = &root;
+  if (!panel || PanelMethod(&staged,"server_connect_panel","rbbz_begin_graphics")) {
+    if (why) *why = "missing connect panel or graphics gate already installed";
+    return false;
+  }
+  const auto sym = [](const char* s) { return Node::Symbol(s); };
+  const auto cmd = [](std::vector<Node> n) { return Node::Command(std::move(n)); };
+  const auto query = [&](const char* name) {
+    return cmd({sym("file_exists"),Node::String(std::string("rbbz-graphics/")+name)});
+  };
+  const auto call = [&](const char* method) { return cmd({Node::Var("this"),sym(method)}); };
+  const auto pending = Node::Property({sym("rbbz_graphics_pending")});
+  const auto set_pending = [&](bool v) { return cmd({sym("set"),pending,sym(v?"TRUE":"FALSE")}); };
+  Node continuation;
+  size_t replaced = 0;
+  const auto rewrite = [&](auto&& self, Node& n) -> void {
+    for (size_t i = 0; i+1 < n.kids.size(); ++i) {
+      const auto& a = n.kids[i]; const auto& b = n.kids[i+1];
+      const bool state = a.tag == kCommand && a.kids.size() == 4 &&
+          a.kids[0].tag == kCommand && a.kids[0].kids.size() == 2 &&
+          a.kids[0].kids[0].text == "splash_panel" && a.kids[0].kids[1].text == "loaded_dir" &&
+          a.kids[1].text == "set" && a.kids[2].text == "state" && a.kids[3].text == "main_menu";
+      const bool jump = b.tag == kCommand && b.kids.size() == 3 && b.kids[0].text == "ui" &&
+          b.kids[1].text == "goto_screen" && b.kids[2].text == "splash_screen";
+      if (!state || !jump) continue;
+      continuation = cmd({sym("do"),set_pending(false),a,b});
+      n.kids[i] = call("rbbz_begin_graphics");
+      n.kids.erase(n.kids.begin()+i+1);
+      ++replaced;
+    }
+    for (auto& child : n.kids) self(self,child);
+  };
+  rewrite(rewrite,*panel);
+  if (replaced != 2) {
+    if (why) *why = "expected exactly Confirm and Option menu continuations";
+    return false;
+  }
+  // A graphics failure is recoverable within this same loaded screen: A retries
+  // only graphics; B explicitly accepts ordinary demand compilation/caching.
+  auto* buttons = PanelMethod(&staged,"server_connect_panel","BUTTON_DOWN_MSG");
+  if (!buttons) { if (why) *why = "missing connect input handler"; return false; }
+  std::vector<Node> original{sym("do")};
+  original.insert(original.end(),buttons->kids.begin()+1,buttons->kids.end());
+  const auto recovery = cmd({sym("switch"),Node::Var("action"),
+      Node::Array({sym("kAction_Confirm"),cmd({sym("if"),query("retry"),call("rbbz_graphics_poll")})}),
+      Node::Array({sym("kAction_Cancel"),cmd({sym("if"),query("ignore"),call("rbbz_finish_graphics")})})});
+  buttons->kids = {sym("BUTTON_DOWN_MSG"),cmd({sym("if_else"),
+      cmd({sym("&&"),pending,query("failed")}),recovery,
+      cmd({sym("if"),cmd({sym("||"),cmd({sym("!"),pending}),
+          cmd({sym("=="),Node::Var("action"),sym("kAction_Cancel")})}),cmd(std::move(original))})})};
+  const auto set_label = [&](const char* token) { return cmd({sym("status.lbl"),sym("set"),sym("text_token"),sym(token)}); };
+  const auto preparing_label = cmd({sym("status.lbl"),sym("set_token_fmt"),sym("rbbz_graphics_preparing"),
+      query("current"),query("total")});
+  const auto showing = [&](const char* object, bool value) { return cmd({sym(object),sym("set_showing"),sym(value?"TRUE":"FALSE")}); };
+  const auto directory_set = [&](const char* property, Node value) {
+    return cmd({cmd({Node::Var("this"),sym("loaded_dir")}),sym("set"),sym(property),std::move(value)});
+  };
+  panel->kids.push_back(Node::Array({sym("rbbz_graphics_pending"),sym("FALSE")}));
+  panel->kids.push_back(Node::Array({sym("rbbz_finish_graphics"),continuation}));
+  panel->kids.push_back(Node::Array({sym("rbbz_begin_graphics"),cmd({sym("unless"),pending,
+      set_pending(true),query("request"),call("rbbz_graphics_poll")})}));
+  panel->kids.push_back(Node::Array({sym("rbbz_graphics_poll"),cmd({sym("if"),pending,
+      cmd({sym("if_else"),query("ready"),call("rbbz_finish_graphics"),
+          cmd({sym("do"),
+              cmd({sym("if_else"),query("failed"),set_label("rbbz_graphics_failed"),
+                  cmd({sym("if_else"),query("checking"),set_label("rbbz_graphics_checking"),preparing_label})}),
+              cmd({sym("continue.ihp"),sym("set_action_token"),sym("kAction_Confirm"),sym("rbbz_graphics_retry")}),
+              cmd({sym("back.ihp"),sym("set_action_token"),sym("kAction_Cancel"),
+                  cmd({sym("if_else"),query("failed"),sym("rbbz_graphics_ignore"),sym("rbbz_graphics_back")})}),
+              cmd({sym("continue.ihp"),sym("set_showing"),query("failed")}),
+              showing("skip.ihp",false),showing("back.ihp",true),
+              showing("enter_name.grp",false),showing("enter_password.grp",false),
+              directory_set("current_content",query("current")),directory_set("total_content",query("total"))})})})}));
+  panel->kids.push_back(Node::Array({sym("poll"),call("rbbz_graphics_poll")}));
+  if (auto* exit = PanelMethod(&staged,"server_connect_panel","exit")) {
+    exit->kids.push_back(query("cancel")); exit->kids.push_back(set_pending(false));
+  } else panel->kids.push_back(Node::Array({sym("exit"),query("cancel"),set_pending(false)}));
+  *roots = std::move(staged);
+  return true;
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
                       bool cached_dlc_list, bool refresh_row_active,
@@ -658,6 +746,19 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       })) return false;
   for (const auto& locale : locales) {
     if (!edit(locale, [&](auto& roots) {
+      for (const auto& [key,text] : std::initializer_list<std::pair<const char*,const char*>>{
+          {"rbbz_graphics_checking","Checking graphics cache..."},
+          {"rbbz_graphics_preparing","Preparing graphics... %i / %i"},
+          {"rbbz_graphics_failed","Graphics preparation failed."},
+          {"rbbz_graphics_retry","Try Again"},
+          {"rbbz_graphics_ignore","Ignore"},
+          {"rbbz_graphics_back","Back"}}) {
+        std::string why;
+        if (!screen::AddLocaleEntry(&roots,key,text,&why) && why != "the locale already has that key") {
+          if (error) *error = why;
+          return false;
+        }
+      }
       SetDiscoveryCacheLabel(&roots, cached_dlc_list);
       SetRefreshRowLabel(&roots, refresh_row_active);
       // Retail's own strings this surface restyles (the AV page's two checkboxes). A locale that
@@ -995,10 +1096,11 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     std::string why;
     if (read(path, &bytes, &why) &&
         ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why) &&
-        SetDiscoveryStartLabel(&roots)) {
+        SetDiscoveryStartLabel(&roots) && AddGraphicsLoadingGate(&roots,&why)) {
       built[path] = ui::dtb::Compile(roots, header);
     } else {
-      note("the content scan's waiting label could not be added: " + why);
+      if (error) *error = "the required graphics loading gate could not be authored: " + why;
+      return false;
     }
   }
   *records = std::move(built);

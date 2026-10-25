@@ -96,6 +96,8 @@ set(RBBLITZ_SOURCES
     src/diag/probe_trace.cpp
     src/diag/gameplay_probe.cpp
     src/diag/shader_trace.cpp
+    src/graphics/preparation_assets.cpp
+    src/graphics/preparation_loading.cpp
     src/enhancements.cpp
     src/hooks/content_progress.cpp
     src/hooks/crypto.cpp
@@ -296,6 +298,13 @@ add_dependencies(rb_blitz rb_blitz_stage_gpu)
 # the transport links WinHTTP (src/store/store_http.cpp is the only file that includes it).
 target_include_directories(rb_blitz PRIVATE
     "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/config/graphics_preparation.json" RBBLITZ_PREPARATION_CATALOGUE)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/config/graphics_preparation.json")
+configure_file(src/graphics/preparation_catalogue.h.in
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/preparation_catalogue.h" @ONLY)
+target_include_directories(rb_blitz PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(rb_blitz PRIVATE xxhash)
 if(WIN32)
     target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32)
 endif()
@@ -542,6 +551,16 @@ if(BUILD_TESTING)
         target_link_libraries(rb_blitz_graphics_preparation_tests PRIVATE ws2_32)
     endif()
     add_test(NAME graphics_preparation COMMAND rb_blitz_graphics_preparation_tests)
+    add_executable(rb_blitz_audio_stability_tests tests/audio_stability_tests.cpp)
+    target_include_directories(rb_blitz_audio_stability_tests PRIVATE src "${REXSDK_DIR}/include")
+    add_test(NAME audio_stability COMMAND rb_blitz_audio_stability_tests)
+    add_executable(rb_blitz_preparation_assets_tests
+        tests/preparation_assets_tests.cpp src/graphics/preparation_assets.cpp
+        src/settings/ultimate_adapter.cpp src/ui/dtb_author.cpp src/ui/menu_options.cpp)
+    target_include_directories(rb_blitz_preparation_assets_tests PRIVATE src
+        "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+    target_link_libraries(rb_blitz_preparation_assets_tests PRIVATE xxhash)
+    add_test(NAME preparation_assets COMMAND rb_blitz_preparation_assets_tests)
 
     # P5: the driver-specific layer both backends persist beside the shareable
     # recipes (rexglue-sdk/include/rex/graphics/native_pipeline_cache.h). Header

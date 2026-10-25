@@ -18,6 +18,7 @@
 #include "hooks/menu_music_pool.h"
 #include "hooks/menu_music_playback.h"
 #include "hooks/menu_music_metadata.h"
+#include "hooks/menu_audio_policy.h"
 
 #include <algorithm>
 #include <chrono>
@@ -69,6 +70,7 @@ REX_EXTERN(__imp__sub_82758B98);  // ShellMusic::Start
 REX_EXTERN(__imp__sub_827583F8);  // ShellMusic::StopStreams
 REX_EXTERN(__imp__sub_82758998);  // ShellMusic::Stop (menu exit)
 REX_EXTERN(__imp__sub_82758490);  // ShellMusic destructor
+REX_EXTERN(__imp__sub_823E5BE0);  // StandardStream constructor, f2 = buffer seconds
 
 namespace {
 
@@ -143,7 +145,7 @@ bool g_watch_title = false;
 // True while the host or ShellMusic::Start is assembling a track. Both call StopStreams as
 // cleanup before the new stream exists (Start does it inside its own body), and that cleanup
 // must not be read as the game tearing the menu music down. Never read outside the guest thread.
-bool g_setting_up_music = false;
+thread_local bool g_setting_up_music = false;
 
 // The ShellMusic the last substitution went to, and the Load arguments the panel passed
 // it - the poll hook replays them when it starts the next track. Zero outside R9.
@@ -816,6 +818,18 @@ extern "C" REX_FUNC(sub_82758B98) {
   g_setting_up_music = true;
   __imp__sub_82758B98(ctx, base);
   g_setting_up_music = was_setting_up;
+}
+
+// StandardStream::Init (0x823E5748) stores f2 at +48 and resolves zero through
+// synth.stream_buf_size. Channel setup (0x823E52B0) sizes its decoded ring from
+// that value times sample rate. Only ShellMusic construction gets extra reserve;
+// active-song streams and the host output queue retain their original timing.
+extern "C" REX_FUNC(sub_823E5BE0) {
+  const auto requested = ctx.f2.f64;
+  ctx.f2.f64 = rb_blitz::shell_music::StreamBufferSeconds(g_setting_up_music,requested);
+  if (ctx.f2.f64 != requested)
+    REXLOG_INFO("shell_music: menu stream reserve {} -> {} seconds",requested,ctx.f2.f64);
+  __imp__sub_823E5BE0(ctx,base);
 }
 
 // StopStreams is how the game lets the menu music go (the faded-out stop finishing, the poll's

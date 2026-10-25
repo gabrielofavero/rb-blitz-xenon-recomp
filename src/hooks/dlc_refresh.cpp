@@ -42,6 +42,7 @@
 #include <rex/types.h>
 
 #include "hooks/dlc.h"
+#include "graphics/preparation_loading.h"
 
 #if defined(_WIN32)
 
@@ -49,6 +50,7 @@
 
 REX_EXTERN(__imp__sub_822CA460);  // ServerConnectPanel's native state advance
 REX_EXTERN(__imp__sub_822CB618);  // ServerConnectPanel's per-frame state poll
+REX_EXTERN(__imp__sub_824B5F68);  // base UIPanel poll dispatches the authored handler
 
 namespace {
 
@@ -190,6 +192,7 @@ extern "C" REX_FUNC(sub_822CA460) {
 }
 
 extern "C" REX_FUNC(sub_822CB618) {
+  const uint32_t panel = ctx.r3.u32;
   // Retail has no poll branch for state 28: advance normally runs synchronously
   // from set_state. Retry it here, only while this very panel is still in 28.
   // Leaving/unloading the screen therefore cancels the continuation naturally.
@@ -203,7 +206,18 @@ extern "C" REX_FUNC(sub_822CB618) {
     __imp__sub_822CA460(ctx, base);
     return;
   }
+  // P6: exactly the content-ready predicate the native state-29 poll uses,
+  // after the required save/global-options sequence. Enumeration totals are
+  // insufficient. Latch before native advance can reenter R3's continuation.
+  rb_blitz::graphics::ObserveContentLoading(base,panel);
   __imp__sub_822CB618(ctx, base);
+  rb_blitz::graphics::PollLoading();
+  if (rb_blitz::graphics::GraphicsLoadingPending()) {
+    PPCContext call = ctx;
+    call.r1.u32 -= 256;
+    call.r3.u32 = panel;
+    __imp__sub_824B5F68(call,base);
+  }
 }
 
 #endif  // _WIN32

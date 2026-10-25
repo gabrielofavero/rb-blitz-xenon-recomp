@@ -1,0 +1,182 @@
+diff --git a/include/rex/audio/frame_queue.h b/include/rex/audio/frame_queue.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/audio/frame_queue.h
+@@ -0,0 +1,35 @@
++// Fixed-capacity PCM handoff. No allocation or device calls while locked.
++#pragma once
++#include <array>
++#include <cstddef>
++#include <cstring>
++#include <mutex>
++
++namespace rex::audio {
++template <size_t Capacity, size_t Samples>
++class AudioFrameQueue {
++ public:
++  bool Push(const float* samples, size_t* depth = nullptr) {
++    std::lock_guard lock(mutex_);
++    if (count_ == Capacity) return false;
++    std::memcpy(frames_[(head_ + count_) % Capacity].data(), samples, Samples * sizeof(float));
++    ++count_;
++    if (depth) *depth = count_;
++    return true;
++  }
++  bool Pop(float* samples) {
++    std::lock_guard lock(mutex_);
++    if (!count_) return false;
++    std::memcpy(samples, frames_[head_].data(), Samples * sizeof(float));
++    head_ = (head_ + 1) % Capacity;
++    --count_;
++    return true;
++  }
++  void Clear() { std::lock_guard lock(mutex_); head_ = count_ = 0; }
++ private:
++  static_assert(Capacity && Samples);
++  std::array<std::array<float, Samples>, Capacity> frames_;
++  size_t head_ = 0, count_ = 0;
++  std::mutex mutex_;
++};
++}
+diff --git a/include/rex/graphics/preparation_budget.h b/include/rex/graphics/preparation_budget.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/graphics/preparation_budget.h
+@@ -0,0 +1,10 @@
++// Background preparation leaves CPU time for audio and the guest/UI.
++#pragma once
++#include <algorithm>
++#include <cstddef>
++namespace rex::graphics {
++inline size_t PreparationWorkerCount(size_t work, size_t processors) {
++  const size_t available = processors > 2 ? processors - 2 : 1;
++  return std::min(work, std::min(size_t(4), available));
++}
++}
+diff --git a/src/audio/audio_system.cpp b/src/audio/audio_system.cpp
+--- a/src/audio/audio_system.cpp
++++ b/src/audio/audio_system.cpp
+@@ -97,6 +97,10 @@
+ }
+ 
+ void AudioSystem::WorkerThreadMain() {
++  // Audio deadlines take precedence over loading/compilation throughput.
++  if (auto* thread = rex::thread::Thread::GetCurrentThread()) {
++    thread->set_priority(rex::thread::ThreadPriority::kHighest);
++  }
+   // Initialize driver and ringbuffer.
+   Initialize();
+ 
+diff --git a/src/audio/xma_decoder.cpp b/src/audio/xma_decoder.cpp
+--- a/src/audio/xma_decoder.cpp
++++ b/src/audio/xma_decoder.cpp
+@@ -138,6 +138,10 @@
+ }
+ 
+ void XmaDecoder::WorkerThreadMain() {
++  // Audio deadlines take precedence over loading/compilation throughput.
++  if (auto* thread = rex::thread::Thread::GetCurrentThread()) {
++    thread->set_priority(rex::thread::ThreadPriority::kHighest);
++  }
+   while (worker_running_) {
+     // Okay, let's loop through XMA contexts to find ones we need to decode!
+     bool did_work = false;
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <rex/graphics/compile_trace.h>
++#include <rex/graphics/preparation_budget.h>
+ #include "thirdparty/dxbc/DXBCChecksum.h"
+ 
+ #include <algorithm>
+@@ -639,10 +640,13 @@
+         std::lock_guard<std::mutex> lock(preparation_translation_lock_);
+         shader_translation_threads_needed = std::min(
+             preparation_translation_busy_ + preparation_shaders_to_translate_.size() + size_t(1),
+-            logical_processor_count - size_t(1));
++            PreparationWorkerCount(preparation_shaders_to_translate_.size() + size_t(1),
++                                   logical_processor_count));
+       }
+       while (preparation_translation_threads_.size() < shader_translation_threads_needed) {
+-        auto thread = rex::thread::Thread::Create({}, shader_translation_thread_function);
++        auto thread = rex::thread::Thread::Create(
++            {.initial_priority = rex::thread::ThreadPriority::kBelowNormal},
++            shader_translation_thread_function);
+         assert_not_null(thread);
+         thread->set_name("Shader Translation");
+         preparation_translation_threads_.push_back(std::move(thread));
+@@ -901,7 +905,9 @@
+       rex::graphics::compile_trace::Scope trace_drain(
+           rex::graphics::compile_trace::Event::kCompileDrain,
+           "src/graphics/d3d12/pipeline_cache.cpp");
+-      CreatePreparationPipelinesOnProcessorThread(kPreparationCreationBatch);
++      if (preparation_blocking_ || preparation_creation_threads_.empty()) {
++        CreatePreparationPipelinesOnProcessorThread(kPreparationCreationBatch);
++      }
+       trace_drain.Success();
+     }
+     const bool all_enqueued =
+@@ -938,7 +944,7 @@
+   // The translation pool was grown while the storage was read; only the creation
+   // pool is created here, sized once to the whole batch.
+   size_t creation_thread_count =
+-      PreloadCreationThreadCount(preparation_descriptions_.size(), logical_processor_count, 0);
++      PreparationWorkerCount(preparation_descriptions_.size(), logical_processor_count);
+   {
+     std::lock_guard<std::mutex> lock(preparation_creation_lock_);
+     while (!preparation_creation_queue_.empty()) {
+@@ -951,7 +957,8 @@
+   preparation_creation_threads_.reserve(creation_thread_count);
+   for (size_t thread_index = 0; thread_index < creation_thread_count; ++thread_index) {
+     std::unique_ptr<rex::thread::Thread> creation_thread = rex::thread::Thread::Create(
+-        {}, [this, thread_index]() { PreparationCreationThread(thread_index); });
++        {.initial_priority = rex::thread::ThreadPriority::kBelowNormal},
++        [this, thread_index]() { PreparationCreationThread(thread_index); });
+     assert_not_null(creation_thread);
+     creation_thread->set_name("D3D12 Prep Pipelines");
+     preparation_creation_threads_.push_back(std::move(creation_thread));
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <rex/graphics/compile_trace.h>
++#include <rex/graphics/preparation_budget.h>
+ #include <algorithm>
+ #include <array>
+ #include <atomic>
+@@ -1043,7 +1044,9 @@
+       rex::graphics::compile_trace::Scope trace_drain(
+           rex::graphics::compile_trace::Event::kCompileDrain,
+           "src/graphics/vulkan/pipeline_cache.cpp");
+-      CreatePreparationPipelinesOnProcessorThread(kPreparationCreationBatch);
++      if (preparation_blocking_ || preparation_creation_threads_.empty()) {
++        CreatePreparationPipelinesOnProcessorThread(kPreparationCreationBatch);
++      }
+       trace_drain.Success();
+     }
+     const bool all_enqueued = preparation_next_creation_ >= preparation_descriptions_.size();
+@@ -1094,7 +1097,8 @@
+                  size_t(logical_processor_count));
+   }
+   creation_thread_count = std::max(creation_thread_count, size_t(1));
+-  creation_thread_count = std::min(creation_thread_count, preparation_descriptions_.size());
++  creation_thread_count = std::min(creation_thread_count,
++      PreparationWorkerCount(preparation_descriptions_.size(), logical_processor_count));
+   {
+     std::lock_guard<std::mutex> lock(preparation_creation_lock_);
+     while (!preparation_creation_queue_.empty()) {
+@@ -1107,7 +1111,8 @@
+   preparation_creation_threads_.reserve(creation_thread_count);
+   for (size_t thread_index = 0; thread_index < creation_thread_count; ++thread_index) {
+     std::unique_ptr<rex::thread::Thread> creation_thread = rex::thread::Thread::Create(
+-        {}, [this, thread_index]() { PreparationCreationThread(thread_index); });
++        {.initial_priority = rex::thread::ThreadPriority::kBelowNormal},
++        [this, thread_index]() { PreparationCreationThread(thread_index); });
+     assert_not_null(creation_thread);
+     creation_thread->set_name("Vulkan Prep Pipelines");
+     preparation_creation_threads_.push_back(std::move(creation_thread));

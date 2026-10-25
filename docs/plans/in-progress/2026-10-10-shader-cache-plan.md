@@ -28,7 +28,8 @@ that starts it beside the guest. P5 implemented 2026-10-24: a header-only native
 identity/store, D3D12 cached PSO blobs keyed by the portable description hash, and one
 real Vulkan `VkPipelineCache` shared by every creation path on the device, written at
 preparation end and at shutdown only, with a rejected blob forgotten and retried without
-it. The visible phase and the post-A gate are P6; invalidation is P7; full route
+it. P6 now implements the post-A native loading phase and gate (2026-10-24); its UI
+verification is pending. Invalidation is P7; full route
 validation and the cold-versus-warm measurement remain P8.
 On an empty application cache the first song creates 81 guest pipelines and
 translates 61 shaders, with four of its eight active-song long frames (worst
@@ -42,10 +43,9 @@ explicit required/succeeded/failed/missing counts on both backends and cannot re
 before its required work finished ([P1 record](#p1--make-backend-completion-and-failure-reporting-trustworthy));
 since P4 the same work can run as a cancellable generation beside the guest
 ([P4 record](#p4--add-asynchronous-preparation-without-starving-the-loading-screen)),
-and the visible loading phase, native caches, invalidation and route validation remain
-P5–P9. The post-A gate remains a P6 blocker. Evidence:
-[shader-cache-p0.md](../../engine/shader-cache-p0.md),
-[shader-cache-p3.md](../../engine/shader-cache-p3.md) and
+and P5/P6 now add native persistence and the post-A guest loading gate.
+Invalidation and full route validation remain P7–P9; P6 UI evidence is pending. Evidence:
+[shader-cache.md](../../engine/shader-cache.md) (parts 1 and 3) and
 `out/shader-cache-p0/runs/`.
 
 The [2026-10-24 prompt plan](#implementation-prompts-2026-10-24) defines the next work:
@@ -738,7 +738,7 @@ P1–P5 can proceed, but P6 must not guess the guest transition.
 Implementation update, 2026-10-24:
 
 - Source map, ownership/lifetime analysis and repeatable workflow:
-  [shader-cache-p0.md](../../engine/shader-cache-p0.md). Read-only archive inspection
+  [shader-cache.md](../../engine/shader-cache.md) (part 1). Read-only archive inspection
   scanned 131 retail and 42 Ultimate DTBs; the inspected Ultimate has no connect-panel
   override. Both use the retail connect machine, with different splash records.
 - The candidate continuation is the script pair `splash directory state=main_menu`
@@ -969,7 +969,7 @@ for a runtime record stem instead of whole blobs; then model the vertex transfor
 This delivers P2's resolver and its **explicit coverage-blocker exit alternative**;
 it does not satisfy complete release coverage or remove in-song compilation.
 Details, commands, hashes, local evidence paths and the remaining linker work:
-[shader-cache-p2.md](../../engine/shader-cache-p2.md).
+[shader-cache.md](../../engine/shader-cache.md) (part 2).
 
 #### P2 completed for the current candidate, 2026-10-24
 
@@ -1002,7 +1002,7 @@ Details, commands, hashes, local evidence paths and the remaining linker work:
 P2's resolution exit criterion is met for this candidate. This does not claim
 complete P3 pipeline/helper coverage, arbitrary DLC/custom vertex layouts or P4
 live GPU preparation. `live_ready` remains false. Evidence, commands and exact
-scope: [shader-cache-p2.md](../../engine/shader-cache-p2.md).
+scope: [shader-cache.md](../../engine/shader-cache.md) (part 2).
 
 ### P3 — Build the complete candidate pipeline catalogue, including helpers
 
@@ -1069,7 +1069,7 @@ Implementation update, 2026-10-24:
 - Validation: release build links `rb_blitz` and the hash helper; full release
   `ctest` is **55/55** (with workspace `TEMP`/`TMP`, the pre-existing `path_policy`
   default-temp issue unchanged). No SDK patch and no game/UI navigation were needed;
-  P4 remains the first consumer. Details: [shader-cache-p3.md](../../engine/shader-cache-p3.md).
+  P4 remains the first consumer. Details: [shader-cache.md](../../engine/shader-cache.md) (part 3).
 
 #### P3 coverage sessions, 2026-10-24
 
@@ -1096,7 +1096,7 @@ Implementation update, 2026-10-24:
   this list (the owner states they do not vary shader usage), and neither are
   `d3d12/rov` / `vulkan/fsi` or helper key identity — both closed later the same day,
   below. The shader test subset passes 6/6 after each candidate extension. Evidence:
-  [shader-cache-p3.md](../../engine/shader-cache-p3.md).
+  [shader-cache.md](../../engine/shader-cache.md) (part 3).
 
 #### P3 alternate rendering paths, 2026-10-24
 
@@ -1244,7 +1244,7 @@ Implementation update, 2026-10-24:
 - Remaining for P4's exit in practice: the responsive-loading-screen evidence (the
   switch booted with the trace on) and P6's decision on where the generation starts.
   The import itself is still one slice; only translation and creation are sliced.
-  Details: [shader-cache-p4.md](../../engine/shader-cache-p4.md).
+  Details: [shader-cache.md](../../engine/shader-cache.md) (part 4).
 
 ### P5 — Persist native results for faster subsequent boots on both backends
 
@@ -1325,7 +1325,7 @@ Implementation update, 2026-10-24:
   created at command-processor initialization run before any storage root exists), while
   Vulkan's device-wide cache covers them; translated shader bytecode is not persisted.
   Invalidation by settings/content/SDK change remains P7. Details:
-  [shader-cache-p5.md](../../engine/shader-cache-p5.md).
+  [shader-cache.md](../../engine/shader-cache.md) (part 5).
 
 ### P6 — Integrate the post-A Preparing graphics phase and native loading bar
 
@@ -1347,6 +1347,53 @@ Implementation update, 2026-10-24:
 Exit: pressing A on a fresh installation visibly prepares graphics and then reaches
 the menu; a subsequent launch reuses saved data and still verifies live readiness.
 Progress remains responsive, and no bypass can start a song while preparation is pending.
+
+Implementation update, 2026-10-24:
+
+- The effective compiled connect record now defers Confirm, Option/skip and R3
+  automatic offline through one graphics continuation. Native state-29 content
+  completion, after required save/global-options resolution, starts local input
+  validation/extraction and the P4 generation. Pre-A bulk loading is removed for
+  this title; actual title/loading draws bootstrap on demand.
+- The title draws Checking graphics cache / Preparing graphics and real completed /
+  required counts in its existing status label and native bar. The graphics phase
+  owns its counts separately from DLC enumeration/mounting. Pending Confirm/Option
+  cannot leave; Back cancels. A successful current live generation releases once;
+  work finishing during normal loading adds no separate visible phase.
+- Embedded portable manifest: 1,268 P3 recipes across all four rendering paths and
+  208 P2 source locators. Missing shaders are extracted/linked/hashed from local
+  mounted assets and the validated executable; existing shader/recipe discoveries
+  are merged rather than replaced. No game shader bytes are distributed.
+- SDK patches 0029/0030 add application-owned deferral, safe reopening after terminal
+  generations, and refusal to launch with a missing required gate payload.
+- Release build and headless extraction/record checks pass; full ctest is 64/65
+  (unchanged path_policy fails), SDK replay 29/29. Cold/warm native UI, mouse disabled, focus,
+  manual/automatic offline, trial/error routes and responsiveness remain unproven.
+  P6's runtime exit is **not yet certified**. See [the P6 record](../../engine/shader-cache.md) (part 6).
+
+Owner refinement after two failed manual tests, 2026-10-24:
+
+- Both failures were before GPU compilation: the runtime ARK lookup requested bare
+  shader names while their root entries carry `./`. The shared root-shader lookup
+  now accepts both spellings; archive-based extraction regression coverage replaces
+  reliance on already-extracted inputs at that boundary.
+- A failure now offers native **A Try Again / B Ignore**. Retry preserves completed
+  settings/DLC loading and restarts only graphics in place. Ignore explicitly enters
+  the menu with normal on-demand compilation/cache recording and no readiness claim;
+  it bypasses the graphics gate for this session. This owner authorization refines
+  the earlier ready-only continuation requirement for this explicit failure choice.
+- The failure evidence and recovery validation are recorded in
+  [the P6 failure record](../../engine/shader-cache.md#owner-failure-report-and-in-place-recovery-2026-10-24).
+  Recovery checks: 9/9 affected ctests, 32 production-record assertions, and all
+  208 shaders / 1,268 recipes byte-identical via real ARK extraction. The owner
+  continues to drive UI tests; no agent-driven UI run is authorized here.
+
+Owner follow-up, 2026-10-24: the revised loading flow works on the owner's normal
+route (`rb_blitz_328.log`: 432/432 prepared, continuation released in 15,240 ms).
+The owner also reports more frequent background-music stutters during preparation.
+The [menu audio follow-up](../../engine/main-menu.md) part 2 §6 adds decoded reserve,
+audio priority and bounded background preparation; audio stability is not yet
+certified by a listening run. Trial/error/focus and P8's wider matrix remain open.
 
 ### P7 — Handle invalidation, new content and interrupted preparation
 

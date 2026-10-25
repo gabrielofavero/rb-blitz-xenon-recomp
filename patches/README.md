@@ -16,7 +16,7 @@ Shader-cache P0 adds `0020-bounded-shader-compilation-trace.patch` and extends
 0019's swap observations with the shared, opt-in instrument. The runtime owns the
 clock/phases/counters so helper creation in `rexruntime.dll` and guest creation in
 `rexgpu-xenos.dll` use the same timeline. It changes no compilation or submission
-policy. See [the P0 evidence map](../docs/engine/shader-cache-p0.md).
+policy. See [the P0 evidence map](../docs/engine/shader-cache.md) (part 1).
 
 Shader-cache P1 adds `0021-preload-completion-accounting.patch`: the shared
 `PipelinePreloadTracker`/`PipelinePreloadResult` in
@@ -100,7 +100,7 @@ key's upper byte and the caller's own packed key sits below it (`TransferShaderK
 shader index, and so on); masked-sample and stencil-bit derivatives use the trace's
 `variant` field, and `compile_trace::Call` gained that argument to carry them. The
 change is instrumentation only — no creation, submission or synchronization decision
-reads a key. See the [P3 record](../docs/engine/shader-cache-p3.md) and
+reads a key. See the [P3 record](../docs/engine/shader-cache.md) (part 3) and
 [`config/pipeline_helper_inventory.json`](../config/pipeline_helper_inventory.json).
 
 `rexglue-sdk/0027-graphics-preparation-lifecycle.patch` makes persistent
@@ -122,7 +122,7 @@ contract; `IGraphicsSystem`/`GraphicsSystem` expose begin/cancel/query/wait, and
 `shader_storage_async_preparation` is on (default off — the visible loading phase is
 P6's). See the
 [P4 record](../docs/plans/in-progress/2026-10-10-shader-cache-plan.md#p4--add-asynchronous-preparation-without-starving-the-loading-screen)
-and [shader-cache-p4.md](../docs/engine/shader-cache-p4.md).
+and the [shader-cache record](../docs/engine/shader-cache.md) (part 4).
 
 `rexglue-sdk/0028-native-pipeline-caches.patch` persists the driver's own pipeline
 results beside the shareable recipes. `include/rex/graphics/native_pipeline_cache.h`
@@ -142,7 +142,7 @@ merges the on-disk data of another instance before serializing. Both backends fl
 at a preparation boundary and at shutdown; `native_pipeline_cache` (default on) disables
 the layer. See the
 [P5 record](../docs/plans/in-progress/2026-10-10-shader-cache-plan.md#p5--persist-native-results-for-faster-subsequent-boots-on-both-backends)
-and [shader-cache-p5.md](../docs/engine/shader-cache-p5.md).
+and the [shader-cache record](../docs/engine/shader-cache.md) (part 5).
 
 ## Apply / verify
 
@@ -327,3 +327,18 @@ setting hides. Re-run the scripts after `git submodule update`, a fresh clone, o
 any checkout that rewrites the SDK tree. Background:
 [../docs/history/bringup-log.md](../docs/history/bringup-log.md) B-001 and
 [../docs/reference/known-issues.md](../docs/reference/known-issues.md).
+
+`rexglue-sdk/0029-application-loading-preparation.patch` adds the application hook
+`DeferShaderStoragePreparation`, retaining the SDK default while allowing this title
+to start bulk work after A at its native content-ready boundary. Both backend begin
+operations close the prior terminal generation's writer before reopening storage.
+`0030-required-loading-payload.patch` adds `CanLaunchModule`: a required authored gate
+that could not be built refuses guest launch. See [the P6 record](../docs/engine/shader-cache.md) (part 6).
+
+`0031-audio-loading-scheduling.patch` raises the Audio Worker/XMA Decoder priority,
+limits lower-priority preparation pools to four workers with CPU headroom, and keeps
+async driver pipeline creation off the command-processor submission thread.
+`0032-bounded-audio-device-handoff.patch` replaces SDL's allocated frame queue with
+an owned fixed-capacity PCM ring, shortens its mutex scope to copies, and adds
+rate-limited starvation/callback-gap diagnostics. It retains the configured output
+queue depth. See [menu audio stability](../docs/engine/main-menu.md) part 2 §6.

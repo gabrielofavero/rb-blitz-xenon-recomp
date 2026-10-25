@@ -312,10 +312,11 @@ void TestPlaybackLifecycle() {
   BeginCase("missing, failed, replaced and stalled streams cannot freeze the rotation");
   playback.Begin(0);
   CHECK_TRUE(playback.Observe(3000, 0, false, false, 0) == Event::kNone);
-  CHECK_TRUE(playback.Observe(8000, 0, false, false, 0) == Event::kFailed);
+  CHECK_TRUE(playback.Observe(8000, 0, false, false, 0) == Event::kNone);
+  CHECK_TRUE(playback.Observe(15000, 0, false, false, 0) == Event::kFailed);
   playback.Begin(0);
-  CHECK_TRUE(playback.Observe(7999, 10, false, false, 0) == Event::kNone);
-  CHECK_TRUE(playback.Observe(8000, 10, false, false, 0) == Event::kFailed);
+  CHECK_TRUE(playback.Observe(14999, 10, false, false, 0) == Event::kNone);
+  CHECK_TRUE(playback.Observe(15000, 10, false, false, 0) == Event::kFailed);
   playback.Begin(0);
   CHECK_TRUE(playback.Observe(3000, 10, false, false, 0) == Event::kNone);
   CHECK_TRUE(playback.Observe(4000, 10, true, false, 100) == Event::kAudible);

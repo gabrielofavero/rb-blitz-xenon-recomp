@@ -1,0 +1,28 @@
+diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
+--- a/include/rex/rex_app.h
++++ b/include/rex/rex_app.h
+@@ -160,6 +160,9 @@
+ 
+   /// Let the application start bulk shader preparation at its own safe loading boundary.
+   virtual bool DeferShaderStoragePreparation() const { return false; }
++
++  /// Refuse guest launch if a required application payload failed validation.
++  virtual bool CanLaunchModule() const { return true; }
+ 
+   /// Called after the main guest thread is created but before it starts
+   /// executing. The thread is suspended -- attach debuggers/monitors here.
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -448,6 +448,11 @@
+     }
+ 
+     OnPreLaunchModule();
++    if (!CanLaunchModule()) {
++      REXLOG_ERROR("Application refused module launch: required payload is unavailable");
++      app_context().QuitFromUIThread();
++      return;
++    }
+ 
+     auto main_thread = runtime_->PrepareModuleLaunch();
+     if (!main_thread) {

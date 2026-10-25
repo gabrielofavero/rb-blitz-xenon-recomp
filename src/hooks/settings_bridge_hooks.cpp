@@ -35,6 +35,7 @@
 // it (project rule, docs/plans/finished/2026-10-10-song-cache-plan.md §7). The hooks only read the cached flags.
 
 #include "hooks/settings_bridge.h"
+#include "graphics/preparation_loading.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -641,6 +642,11 @@ void RunHotApplyDiagnostic() {
 
 bool TakeExists(PPCContext& ctx, uint8_t* base) {
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  uint32_t graphics_answer = 0;
+  if (::rb_blitz::graphics::LoadingQuery(path, &graphics_answer)) {
+    WriteResultCell(base, ctx.r3.u32, graphics_answer);
+    return true;
+  }
   // The "Play Current Song" probes (owner feature, 2026-10-14) ride the same builtin but are not part
   // of the settings channel: they are the main menu's only way to ask the host which pooled DLC song
   // is playing, so they are answered even on a boot that turns the settings channel off or makes it

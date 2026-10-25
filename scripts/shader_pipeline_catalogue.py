@@ -17,7 +17,7 @@ Exit codes: 0 = catalogue published with complete declared coverage; 2 = the
 catalogue was written but coverage has explicit blockers (unresolved shader
 identities, helper recipes whose runtime key is only a call site, an accepted
 corrupt tail, or shader resolution not checked); 1 = invalid input or tool
-failure. See docs/engine/shader-cache-p3.md.
+failure. See docs/engine/shader-cache.md (part 3, pipeline recipe catalogue).
 """
 import argparse
 import json

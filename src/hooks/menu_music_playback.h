@@ -11,7 +11,8 @@ class Playback {
  public:
   enum class Event { kNone, kAudible, kEnded, kFailed };
   static constexpr int64_t kProgressDeadlineMs = 3000;
-  static constexpr int64_t kStartupDeadlineMs = 8000;
+  // Allow cold package opening and the larger menu-only decoded reserve.
+  static constexpr int64_t kStartupDeadlineMs = 15000;
 
   void Begin(int64_t now) {
     active_ = true;

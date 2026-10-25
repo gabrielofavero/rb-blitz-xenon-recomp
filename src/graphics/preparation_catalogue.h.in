@@ -1,0 +1,5 @@
+// Generated from config/graphics_preparation.json. No shader instruction bytes.
+#pragma once
+namespace rb_blitz::graphics {
+inline constexpr char kPreparationCatalogue[] = R"RBBZ(@RBBLITZ_PREPARATION_CATALOGUE@)RBBZ";
+}
