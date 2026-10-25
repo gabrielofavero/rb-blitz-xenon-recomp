@@ -11,7 +11,7 @@
 // title's `file_exists` answers false and the row's DTA does nothing with it.
 //
 // A second entry runs the same call since P9-14: the download toast's **A Refresh**
-// (src/store/store_payload.cpp) writes the identical sentinel right before it navigates
+// (src/store/store_payload.cpp) writes the identical sentinel as it requests navigation
 // into the discovery pass, which is why the log line below names the refresh and no longer
 // one caller.
 //
@@ -24,13 +24,13 @@
 // the whole surface a guest file question can reach the host through.
 //
 // Faithful behaviour is the toggle off: no row is edited (src/ui/menu_options.cpp) and
-// this file's hooks do no work at all, because RefreshArmed() is false - the flag is
-// read before any path is touched. Under the toggle, the sentinel path starts the library
+// the file hooks do no work, because RefreshArmed() is false - the flag is read
+// before any path is touched. The native discovery barrier also covers store installs
+// with caching off. Under the toggle, the sentinel path starts the library
 // scan behind the frame, so the press returns at once instead of freezing for the ~31 s a
 // 1,402-package library takes to read (docs/plans/finished/2026-10-10-song-cache-plan.md §9.5): the cache is
-// rewritten on a worker, and the content manager is handed the fresh list on the next menu
-// frame, on the guest thread, so the next enumeration sees a package that was dropped in
-// mid-session.
+// rewritten on a worker, and a guest thread publishes the fresh list on a later frame.
+// The connect panel yields before enumeration until that publication finishes.
 
 #include <algorithm>
 #include <cstdint>
@@ -183,6 +183,7 @@ extern "C" REX_FUNC(__imp__NtQueryFullAttributesFile) {
 extern "C" REX_FUNC(sub_822CA460) {
   if (Be32(base + ctx.r3.u32 + 56) == 28 &&
       !rb_blitz::dlc::RefreshReadyForDiscovery()) {
+    REXLOG_INFO("dlc: discovery is waiting for the library scan; yielding to the next frame");
     return;
   }
   __imp__sub_822CA460(ctx, base);
@@ -192,10 +193,15 @@ extern "C" REX_FUNC(sub_822CB618) {
   // Retail has no poll branch for state 28: advance normally runs synchronously
   // from set_state. Retry it here, only while this very panel is still in 28.
   // Leaving/unloading the screen therefore cancels the continuation naturally.
-  if (Be32(base + ctx.r3.u32 + 56) == 28) {
-    rex::CallFrame call(ctx);
-    call.ctx.r3 = ctx.r3;
-    sub_822CA460(call, base);
+  if (Be32(base + ctx.r3.u32 + 56) == 28 &&
+      rb_blitz::dlc::RefreshReadyForDiscovery()) {
+    // Resume as this frame's native operation on the live guest context. A
+    // CallFrame copies only r1/r13/FPSCR: its uninitialized nonvolatile registers
+    // and LR must not enter this native continuation or its callbacks. Returning
+    // here also avoids polling the state we just entered in the same frame.
+    REXLOG_INFO("dlc: the fresh library is ready; resuming native discovery");
+    __imp__sub_822CA460(ctx, base);
+    return;
   }
   __imp__sub_822CB618(ctx, base);
 }

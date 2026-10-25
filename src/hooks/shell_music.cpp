@@ -287,8 +287,7 @@ constexpr const char* kTitleTracks[] = {"sfx/shell/samples/shellmusic_1",
 
 // Retire the stream a ShellMusic currently holds, the way the engine's own Start does
 // (0x82758C08): the stream's own destructor with the "remove from the pool" flag, the field
-// cleared, then StopStreams. Shared by the rotation's handover and R7's refresh stand-down, which
-// must leave nothing playing that a blocked frame cannot advance.
+// cleared, then StopStreams. The rotation uses this when handing over to its next track.
 void RetireStreamOnGuest(uint8_t* base, PPCContext& parent, uint32_t music) {
   const uint32_t old_stream = LoadBe32(base, music + kStreamOffset);
   if (old_stream == 0) {

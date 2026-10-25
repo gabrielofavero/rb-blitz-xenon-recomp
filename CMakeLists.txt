@@ -512,6 +512,16 @@ if(BUILD_TESTING)
     add_test(NAME shader_compile_trace_enabled COMMAND rb_blitz_shader_compile_trace_tests enabled)
     add_test(NAME shader_compile_trace_disabled COMMAND rb_blitz_shader_compile_trace_tests disabled)
 
+    # Exercise the SDK's real unlock/save/reload path without launching the game.
+    add_executable(rb_blitz_achievement_persistence_tests tests/achievement_persistence_tests.cpp)
+    target_link_libraries(rb_blitz_achievement_persistence_tests PRIVATE rex::runtime)
+    if(WIN32)
+        add_custom_command(TARGET rb_blitz_achievement_persistence_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_achievement_persistence_tests>)
+    endif()
+    add_test(NAME achievement_persistence COMMAND rb_blitz_achievement_persistence_tests)
+
     # Shader-storage preload accounting and the blocking barrier, the component
     # both backends use (rexglue-sdk/include/rex/graphics/pipeline_preload.h).
     # Header-only, and exercised with real threads rather than a copied model.

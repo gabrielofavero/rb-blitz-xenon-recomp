@@ -64,6 +64,7 @@ The value and the **source** are both stated (`default`, `config`, `environment`
 
 | Toggle (cvar = `enhancements_` + key) | Feature | Faithful (off) behaviour | Implemented by |
 | --- | --- | --- | --- |
+| `hide_achievements` | Hide achievement unlock notifications. Help & Options → General → Achievements & Unlocks → Hide Achievements (`general.hide_achievements`, default Off). Available for all editions; changes use the restart prompt because the SDK creates the notification dialog once per launch. | Display the SDK's achievement unlock toast. Earning and saving achievements works in either state. | [src/rb_blitz_app.h](../../src/rb_blitz_app.h), [src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp) |
 | `expand_resolution` | R1 custom resolutions: expand the guest's own layout (menu background, HUD, 3D, song selection, power-up menu) for a non-16:9 video mode | the guest's 16:9 layout is drawn as authored; the presenter's letterbox/safe-area path handles the window | R2, R3 (research R1) |
 | `ui_scale` | R2 UI accessibility: scale guest text and the main-menu logo through the game's own font/layout metrics | the design's text and logo sizes | U2 |
 | `skip_offline_dialog` | R3 skip the offline prompts: answer both of the title's failed-connect questions - "Cannot connect to Rock Central" and "Proceed in Offline Mode?" - as they arrive, so a start goes straight to the menu in offline mode | both questions are asked and the player answers them | [main-menu-flow.md](main-menu.md) § "the offline prompts" |

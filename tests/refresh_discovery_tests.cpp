@@ -33,8 +33,12 @@ extern "C" REX_FUNC(__imp__sub_822CA460) {
   ++advances;
   CHECK_EQ(ctx.r3.u32, kPanel);
   State(base, 29);
-  // A real native call clobbers volatile registers. The retry must isolate them
-  // so the original poll still receives its panel and other original arguments.
+  // The continuation needs the caller's live native context, including registers
+  // absent from rex::CallFrame. The old deferred side call failed these checks.
+  CHECK_EQ(ctx.r31.u64, 0x81234560);
+  CHECK_EQ(ctx.lr, 0x824B3000);
+  // Native functions may clobber volatile registers; the guest caller reloads
+  // arguments before its next poll.
   ctx.r3.u64 = 0;
   ctx.r4.u64 = 0;
 }
@@ -51,6 +55,8 @@ int main() {
   PPCContext ctx{};
   ctx.r3.u32 = kPanel;
   ctx.r4.u32 = 1234;
+  ctx.r31.u64 = 0x81234560;
+  ctx.lr = 0x824B3000;
   State(memory.data(), 28);
 
   BeginCase("discovery yields every frame while scanning, including a prolonged scan");
@@ -63,14 +69,16 @@ int main() {
   CHECK_EQ(polls, 2000);
   CHECK_EQ(rex::memory::load_and_swap<uint32_t>(memory.data() + kPanel + 56), 28);
 
-  BeginCase("the ready result releases discovery once and preserves poll arguments");
+  BeginCase("the ready result resumes with the live context and polls the new state next frame");
   ready = true;
   sub_822CB618(ctx, memory.data());
   CHECK_EQ(advances, 1);
-  CHECK_EQ(ctx.r3.u32, kPanel);
-  CHECK_EQ(ctx.r4.u32, 1234);
+  CHECK_EQ(polls, 2000);  // no second native state operation in the resume frame
+  ctx.r3.u32 = kPanel;
+  ctx.r4.u32 = 1234;
   sub_822CB618(ctx, memory.data());
   CHECK_EQ(advances, 1);
+  CHECK_EQ(polls, 2001);
 
   BeginCase("leaving the deferred state abandons its continuation");
   ready = false;

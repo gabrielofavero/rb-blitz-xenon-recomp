@@ -690,13 +690,71 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
   return Finish();
 }
 
+void TestDiscoveryWaitingLabel() {
+  using namespace rb_blitz;
+  using ui::dtb::Node;
+  namespace dtb = ui::dtb;
+  BeginCase("pending host scans display content loading and retain real connection labels");
+  const auto make = [](Node key) {
+    return std::vector<Node>{Node::Command({Node::Symbol("new"),
+      Node::Symbol("ServerConnectPanel"), Node::Symbol("server_connect_panel"),
+      Node::Array({Node::Symbol("update_state"), Node::Array({Node::Var("state")}),
+        Node::Command({Node::Symbol("status.lbl"), Node::Symbol("set"), Node::Symbol("text_token"),
+          Node::Command({Node::Symbol("switch"), Node::Var("state"),
+            Node::Array({std::move(key), Node::Symbol(menu_options::kEnumeratingContentKey)}),
+            Node::Symbol("server_connect_connecting")})})})})};
+  };
+  for (Node key : {Node::Int(29), Node::Symbol("kServerConnectPanel_EnumeratingContent")}) {
+    auto roots = make(key);
+    CHECK_TRUE(settings::SetDiscoveryStartLabel(&roots));
+    const Node& choices = roots[0].kids[3].kids[2].kids[3];
+    CHECK_EQ(choices.kids.size(), 5);
+    CHECK_EQ(choices.kids[3].kids[0].tag, dtb::kInt);
+    CHECK_EQ(choices.kids[3].kids[0].scalar, 28);
+    CHECK_TRUE(choices.kids[3].kids[1].text == menu_options::kEnumeratingContentKey);
+    CHECK_TRUE(choices.kids.back().text == "server_connect_connecting");
+    const auto bytes = dtb::Compile(roots);
+    CHECK_TRUE(settings::SetDiscoveryStartLabel(&roots));
+    CHECK_TRUE(dtb::Compile(roots) == bytes);
+    std::vector<Node> parsed;
+    dtb::RootHeader header;
+    std::string why;
+    CHECK_TRUE(dtb::Parse(bytes.data(), bytes.size(), &parsed, &header, &why));
+  }
+  auto unknown = make(Node::Int(99));
+  const auto bytes = dtb::Compile(unknown);
+  CHECK_FALSE(settings::SetDiscoveryStartLabel(&unknown));
+  CHECK_TRUE(dtb::Compile(unknown) == bytes);
+}
+
 int main(int argc, char** argv) {
+  if (argc == 3 && std::string(argv[1]) == "check-discovery-record") {
+    namespace dtb = rb_blitz::ui::dtb;
+    std::ifstream input(argv[2], std::ios::binary);
+    std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input),
+                               std::istreambuf_iterator<char>()};
+    std::vector<dtb::Node> roots;
+    dtb::RootHeader header;
+    std::string why;
+    CHECK_TRUE(dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why));
+    CHECK_TRUE(rb_blitz::settings::SetDiscoveryStartLabel(&roots));
+    bytes = dtb::Compile(roots, header);
+    // The generated record must remain compatible with the later read-time
+    // offline transform, which removes the unused named state-28 constant.
+    CHECK_TRUE(rb_blitz::menu_options::SkipOfflinePrompts(bytes.data(), bytes.size()).applied);
+    CHECK_TRUE(dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why));
+    const auto before = dtb::Compile(roots, header);
+    CHECK_TRUE(rb_blitz::settings::SetDiscoveryStartLabel(&roots));
+    CHECK_TRUE(dtb::Compile(roots, header) == before);
+    return Finish();
+  }
   if (argc == 4 && std::string(argv[1]) == "check-header-records") {
     return CheckInstalledHeaderRecords(argv[2], argv[3]);
   }
   TestHeaderAnimations();
   TestHeaderVisibility();
   TestHeaderNavigation();
+  TestDiscoveryWaitingLabel();
   BeginCase("the generated locale names a cached list only after a real host hit");
   {
     using rb_blitz::ui::dtb::Node;

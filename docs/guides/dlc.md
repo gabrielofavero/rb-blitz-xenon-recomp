@@ -447,6 +447,17 @@ No panel pointer or guest stack is retained between frames; leaving the panel
 abandons its continuation. This also covers a pending store-install scan with the
 host cache disabled.
 
+The deferred advance runs on the poll's live guest context and returns directly;
+the newly entered enumeration state is first polled on the following frame. The
+initial implementation used a temporary `CallFrame` (which initializes only
+`r1`, `r13` and FPSCR) and polled the new state in that same frame. An owner run
+crashed shortly after resumption (`rb_blitz_325.log`, guest read `0x00000005`);
+the log does not identify the exact faulting instruction. The regression test now
+checks live nonvolatile registers/LR and one native state operation per frame.
+The generated connect record also labels waiting state 28 with the same content
+token as state 29, preserving the genuine connection-state labels and the later
+byte-neutral offline-prompt transform.
+
 The old 15-second blocking wait and refresh-specific music teardown/resume are
 removed. A slow scan now keeps the loading screen active rather than timing out
 into an enumeration of the previous list. Explicit refresh still reads every

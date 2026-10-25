@@ -3198,6 +3198,10 @@ void TestAchievementActionWording() {
   };
   CHECK_TRUE(label_for("settings_unlock_online") == "Unlock Online Achievements");
   CHECK_TRUE(label_for("settings_earn_achievements") == "Unlock Online Achievements");
+  CHECK_TRUE(label_for("settings_hide_achievements_on") == "Hide Achievements: On");
+  CHECK_TRUE(label_for("settings_hide_achievements_off") == "Hide Achievements: Off");
+  CHECK_TRUE(HelpTextFor("settings_hide_achievements").find("still earned and saved") !=
+             std::string::npos);
 
   // The row's own caption still says what the grant does, and no surface spells the old wording.
   CHECK_TRUE(!HelpTextFor("settings_unlock_online").empty());

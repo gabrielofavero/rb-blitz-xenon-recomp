@@ -118,6 +118,8 @@ std::string_view CvarForSetting(SettingId id) {
       // (src/ui/help_overlay.cpp), not in the SDK, so the write is the ordinary config-rank one and
       // the same name is what the live applier writes (src/hooks/hot_apply_runtime.cpp).
       return "settings_help_overlay";
+    case SettingId::kHideAchievements:
+      return "enhancements_hide_achievements";
     case SettingId::kVsync:
       return "vsync";
     case SettingId::kRenderer:

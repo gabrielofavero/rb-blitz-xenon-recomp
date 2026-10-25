@@ -522,7 +522,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
           SettingId::kDlcScanThreads, SettingId::kDlcMenuSongs, SettingId::kHideOfflinePrompts,
           SettingId::kHideMainMenu, SettingId::kHiddenMainMenu, SettingId::kVsync,
           SettingId::kFiltering, SettingId::kResolution, SettingId::kAntiAliasing,
-          SettingId::kDisplay, SettingId::kSettingsLabels}) {
+          SettingId::kDisplay, SettingId::kSettingsLabels, SettingId::kHideAchievements}) {
       ApplyRow(id, /*defer_unregistered=*/true);
     }
   }

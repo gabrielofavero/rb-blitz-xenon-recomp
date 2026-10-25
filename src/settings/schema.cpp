@@ -185,6 +185,10 @@ std::vector<SchemaRow> BuildTable() {
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
                      {"general", "rhythmverse_keys"}, "rhythmverse", "Keys",
                      "Only list songs that have a keys chart."));
+  rows.push_back(Row(Make(SettingId::kHideAchievements, Category::kGeneral, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
+                     {"general", "hide_achievements"}, "achievements", "Hide Achievements",
+                     "Hide achievement unlock notifications. Achievements are still earned and saved."));
   rows.push_back(ProviderRow(Make(SettingId::kUnlockAll, Category::kGeneral, Provider::kUltimate,
                                   WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                              "achievements", "Unlock All",
@@ -456,6 +460,7 @@ constexpr StrategyEntry kStrategies[] = {
      "change after a commit"},
     {SettingId::kUnlockAll, ApplicationStrategy::kRestart, ""},
     {SettingId::kUnlockOnlineAchievements, ApplicationStrategy::kRestart, ""},
+    {SettingId::kHideAchievements, ApplicationStrategy::kRestart, ""},
     // Graphics
     {SettingId::kResolution, ApplicationStrategy::kRestart, ""},
     // The first row promoted to `hot`, and its evidence is a measurement rather than a guess about

@@ -63,6 +63,7 @@
 #include <rex/system/flags.h>
 #include <rex/system/gpu_plugin.h>
 #include <rex/ui/presenter.h>
+#include <rex/ui/overlay/achievement_notification.h>
 #include <rex/system/interfaces/graphics.h>
 #include <rex/ui/window.h>
 #include <rex/version.h>
@@ -105,6 +106,16 @@ REXCVAR_DECLARE(std::string, gpu_backend);
 class RbBlitzApp : public rex::ReXApp {
  public:
   using rex::ReXApp::ReXApp;
+
+  // The SDK creates the toast once per launch. Suppressing its UI leaves the
+  // achievement manager's unlock, save, and reload paths running normally.
+  std::unique_ptr<rex::ui::AchievementNotificationDialog>
+  CreateAchievementNotificationDialog() override {
+    if (REXCVAR_GET(enhancements_hide_achievements)) {
+      return nullptr;
+    }
+    return rex::ReXApp::CreateAchievementNotificationDialog();
+  }
 
   static std::unique_ptr<rex::ui::WindowedApp> Create(
       rex::ui::WindowedAppContext& ctx) {

@@ -184,6 +184,41 @@ void TestShowHeadersRoundTrip() {
   CHECK_TRUE(writer.Save().status == CommitStatus::kConflict);
 }
 
+void TestHideAchievementsRoundTrip() {
+  BeginCase("service: achievement notifications default on and hiding them persists without Ultimate");
+  Scratch scratch;
+  const StorePaths paths = Paths(scratch);
+  Service service(paths);
+  service.Boot(nullptr, PathEntry{}, nullptr);
+  service.SetCapabilities(CapabilitySnapshot{});
+  const auto id = SettingId::kHideAchievements;
+  const auto* descriptor = service.DescriptorFor(id);
+  CHECK_TRUE(descriptor != nullptr);
+  if (!descriptor) return;
+  CHECK_TRUE(descriptor->availability == Availability::kVisible);
+  CHECK_TRUE(descriptor->provider == Provider::kNative);
+  CHECK_FALSE(service.EffectiveValue(id).boolean);
+  CHECK_TRUE(CvarForSetting(id) == "enhancements_hide_achievements");
+
+  const auto txn = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(txn, id, BoolV(true), service.capability_revision()).ok);
+  const auto result = service.Commit(txn);
+  CHECK_TRUE(result.status == CommitStatus::kSaved);
+  CHECK_TRUE(result.restart_required);
+  {
+    Service reloaded(paths);
+    reloaded.Boot(nullptr, PathEntry{}, nullptr);
+    CHECK_TRUE(reloaded.EffectiveValue(id).boolean);
+    CHECK_TRUE(reloaded.EffectiveSource(id) == Source::kSettingsFile);
+  }
+  const auto off = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(off, id, BoolV(false), service.capability_revision()).ok);
+  CHECK_TRUE(service.Commit(off).status == CommitStatus::kSaved);
+  Service reloaded(paths);
+  reloaded.Boot(nullptr, PathEntry{}, nullptr);
+  CHECK_FALSE(reloaded.EffectiveValue(id).boolean);
+}
+
 void TestDurableEditReload() {
   Scratch scratch;
   const StorePaths paths = Paths(scratch);
@@ -678,6 +713,7 @@ void TestCvarVocabulary() {
 }  // namespace
 
 int main() {
+  TestHideAchievementsRoundTrip();
   TestShowHeadersRoundTrip();
   TestDurableEditReload();
   TestValidationAndPending();

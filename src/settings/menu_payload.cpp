@@ -508,6 +508,39 @@ bool SetRefreshRowAction(std::vector<ui::dtb::Node>* roots, bool refresh_row_act
   return ui::screen::RerouteRow(roots, menu_options::kDlcRowKey, RefreshRowBody(), &why);
 }
 
+bool SetDiscoveryStartLabel(std::vector<Node>* roots) {
+  Node* method = PanelMethod(roots, "server_connect_panel", "update_state");
+  if (!method) return false;
+  const auto state_case = [](const Node& node, uint32_t number, const char* name) {
+    return node.tag == ui::dtb::kArray && !node.kids.empty() &&
+        ((node.kids[0].tag == ui::dtb::kInt && node.kids[0].scalar == number) ||
+         (node.kids[0].tag == ui::dtb::kSymbol && node.kids[0].text == name));
+  };
+  const auto visit = [&](auto&& self, Node& node) -> bool {
+    if (node.tag == ui::dtb::kCommand && node.kids.size() >= 3 &&
+        node.kids[0].text == "switch" && node.kids[1].tag == ui::dtb::kVar &&
+        node.kids[1].text == "state") {
+      for (const auto& branch : node.kids) {
+        if (state_case(branch, 28, "kServerConnectPanel_StartEnumeratingContent")) return true;
+      }
+      for (const auto& branch : node.kids) {
+        if (state_case(branch, 29, "kServerConnectPanel_EnumeratingContent") &&
+            branch.kids.size() == 2 && branch.kids[1].text == menu_options::kEnumeratingContentKey) {
+          Node waiting = branch;
+          // Numeric on purpose: the byte-neutral offline-prompt edit removes the
+          // unused StartEnumeratingContent definition to pay for its transitions.
+          waiting.kids[0] = Node::Int(28);
+          node.kids.insert(node.kids.end() - 1, std::move(waiting));
+          return true;
+        }
+      }
+    }
+    for (auto& child : node.kids) if (self(self, child)) return true;
+    return false;
+  };
+  return visit(visit, *method);
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
                       bool cached_dlc_list, bool refresh_row_active,
@@ -952,6 +985,22 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             &built["ui/pause/gen/settings_confirmation.milo_xbox"], error)) return false;
   built["ui/pause/gen/settings_confirmation_pause.milo_xbox"] =
       built["ui/pause/gen/settings_confirmation.milo_xbox"];
+  // This record may grow in the generated archive. Retain all original constants
+  // so menu_filter's independent, byte-neutral offline transitions still apply.
+  {
+    constexpr char path[] = "ui/net/gen/server_connect.dtb";
+    std::vector<uint8_t> bytes;
+    std::vector<Node> roots;
+    ui::dtb::RootHeader header;
+    std::string why;
+    if (read(path, &bytes, &why) &&
+        ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why) &&
+        SetDiscoveryStartLabel(&roots)) {
+      built[path] = ui::dtb::Compile(roots, header);
+    } else {
+      note("the content scan's waiting label could not be added: " + why);
+    }
+  }
   *records = std::move(built);
   return true;
 }

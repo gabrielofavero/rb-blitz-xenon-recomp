@@ -31,6 +31,10 @@
 
 #include "ui/menu_options.h"
 
+REXCVAR_DEFINE_BOOL(enhancements_hide_achievements, false, "Enhancements",
+                    "Hide achievement unlock notifications. Achievements are still earned and saved.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 REXCVAR_DEFINE_BOOL(enhancements_expand_resolution, false, "Enhancements",
                     "R1 custom resolutions: expand the guest's own layout (menu background, HUD, "
                     "3D, song selection, power-up menu) for a non-16:9 video mode instead of "
@@ -185,7 +189,9 @@ struct ToggleRow {
 // what the log walks, so a toggle that is not here is a toggle nobody sees. The size is
 // explicit, and it has to match the rows below: a short initializer list is not an error,
 // it leaves the last row - a null name and a null `enabled` - in the table.
-constexpr std::array<ToggleRow, 11> kToggles{{
+constexpr std::array<ToggleRow, 12> kToggles{{
+    {"enhancements_hide_achievements", "hide achievement unlock notifications",
+     [] { return REXCVAR_GET(enhancements_hide_achievements); }},
     {"enhancements_expand_resolution", "R1 custom resolutions",
      [] { return REXCVAR_GET(enhancements_expand_resolution); }},
     {"enhancements_ui_scale", "R2 UI accessibility",

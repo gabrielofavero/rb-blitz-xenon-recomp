@@ -30,6 +30,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "unlock_all";
     case SettingId::kUnlockOnlineAchievements:
       return "unlock_online_achievements";
+    case SettingId::kHideAchievements:
+      return "hide_achievements";
     case SettingId::kResolution:
       return "resolution";
     case SettingId::kVsync:

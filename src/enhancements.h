@@ -16,6 +16,10 @@
 
 #pragma once
 
+#include <rex/cvar.h>
+
+REXCVAR_DECLARE(bool, enhancements_hide_achievements);
+
 namespace rb_blitz::enhancements {
 
 // Logs every toggle with its effective value and the source that set it (a

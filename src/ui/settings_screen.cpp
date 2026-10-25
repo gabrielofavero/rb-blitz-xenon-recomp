@@ -970,7 +970,7 @@ std::vector<PanelSpec> AllPanels() {
                                          "Scanning and caching options for your downloadable-content library."),
                               SubmenuRow("settings_achievements", "settings_achievements_screen",
                                          "Achievements & Unlocks",
-                                         "Unlock the game's content and its online-only achievements.", true),
+                                         "Achievement notifications and content unlocks."),
                               RouteRow("credits", "credits_screen", "back_screen", "",
                                        "View the game's credits."),
                           }});
@@ -1072,10 +1072,13 @@ std::vector<PanelSpec> AllPanels() {
                                       "Only list customs that have a keys chart."),
                           }});
 
-  // 1c. Achievements & Unlocks (provider only).
+  // 1c. Achievements & Unlocks. Notification visibility is native; grants need Ultimate.
   out.push_back(PanelSpec{"settings_achievements_panel", "settings_achievements_screen",
                           "settings_general_screen", MenuPanels(),
                           {
+                              BoolRow("settings_hide_achievements", "general.hide_achievements",
+                                      "Hide Achievements",
+                                      "Hide achievement unlock notifications. Achievements are still earned and saved."),
                               BoolRow("settings_unlock_all", "general.unlock_all", "Unlock All",
                                       "Unlock everything, including songs, plots, and power-ups.",
                                       true),
