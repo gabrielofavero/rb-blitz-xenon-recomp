@@ -390,6 +390,20 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(pc.BACKENDS["d3d12"]["description_size"] + 8, 72)
         self.assertEqual(pc.BACKENDS["vulkan"]["description_size"] + 8, 68)
 
+        # P7: the in-game seed writes the same headers. A translator bump that
+        # updates the SDK but not this constant would now be caught here rather
+        # than at a player's first boot (where the layer is repaired, but the
+        # shipped catalogue would still be described wrongly).
+        seed_source = (ROOT / "src" / "graphics" / "preparation_assets.h").read_text(
+            encoding="utf-8")
+        seed = {name: int(value, 16) for name, value in re.findall(
+            r"(kD3D12RecipeStorageVersion|kVulkanRecipeStorageVersion)\s*=\s*0x([0-9A-Fa-f]+)",
+            seed_source)}
+        self.assertEqual(seed.get("kD3D12RecipeStorageVersion"), d3d12,
+                         "the seed's D3D12 storage version drifted from the SDK headers")
+        self.assertEqual(seed.get("kVulkanRecipeStorageVersion"), vulkan,
+                         "the seed's Vulkan storage version drifted from the SDK headers")
+
     def test_shipped_helper_inventory_matches_the_sdk_sites(self):
         entries = pc.load_helper_inventory(
             ROOT / "config" / "pipeline_helper_inventory.json", "5841122D")

@@ -109,10 +109,97 @@ int main(int argc, char** argv) {
   int reads = 0;
   SeedPreparation(j.dump(),root,[&](const std::string&) { ++reads; return Bytes{}; },{},[] {return false;});
   CHECK_EQ(reads,0); CHECK_TRUE(before == Read(xsh));
-  BeginCase("a corrupt shader cache cannot satisfy readiness");
+  BeginCase("a corrupt shader cache is repaired from installed bytes, never trusted");
   { std::ofstream f(xsh,std::ios::binary|std::ios::trunc); before.back() ^= 1;
     f.write(reinterpret_cast<const char*>(before.data()),before.size()); }
-  CHECK_TRUE(Refuses(j,root));
+  // P7: this used to refuse the launch. A damaged layer is rebuilt from the
+  // installed content instead, and the ledger is the only thing that may report
+  // the result as reusable.
+  CHECK_FALSE(Refuses(j,root));
+  {
+    const auto repaired = Read(xsh);
+    CHECK_EQ(uint64_t(repaired.size()),uint64_t(8+12+code.size()));
+    CHECK_TRUE(repaired.size() > 20 && repaired[0]=='X' && repaired[3]=='H');
+    CHECK_EQ(uint64_t(XXH3_64bits(repaired.data()+20,code.size())),
+             uint64_t(XXH3_64bits(code.data(),code.size())));
+  }
+
+  BeginCase("a stale shader header is replaced instead of failing the launch");
+  {
+    Bytes stale{'X','E','S','H',9,9,9,9};
+    stale.insert(stale.end(),{1,2,3,4});
+    std::ofstream f(xsh,std::ios::binary|std::ios::trunc);
+    f.write(reinterpret_cast<const char*>(stale.data()),stale.size());
+  }
+  CHECK_FALSE(Refuses(j,root));
+  CHECK_EQ(uint64_t(Read(xsh).size()),uint64_t(8+12+code.size()));
+
+  BeginCase("a layer is reused only for the inputs it was built from");
+  {
+    PreparationInputs first;
+    first.catalogue = 1; first.content = 2; first.executable = 3;
+    SeedPreparation(j.dump(),root,[](const std::string&) { return Bytes{1,2,3,4}; },{},
+                    [] {return false;},first,0);
+    int reads = 0;
+    const auto reused = SeedPreparation(j.dump(),root,
+        [&](const std::string&) { ++reads; return Bytes{1,2,3,4}; },{},
+        [] {return false;},first,0);
+    CHECK_TRUE(reused.extraction_reused);
+    CHECK_EQ(uint64_t(reads),0);
+    // A changed content identity must rebuild the shader layer, and the repair
+    // is counted so the log can say which layer was affected.
+    PreparationInputs moved = first; moved.content = 99;
+    reads = 0;
+    const auto rebuilt = SeedPreparation(j.dump(),root,
+        [&](const std::string&) { ++reads; return Bytes{1,2,3,4}; },{},
+        [] {return false;},moved,0);
+    CHECK_FALSE(rebuilt.extraction_reused);
+    // The record itself is hash-verified, so a byte-identical shader needs no
+    // new asset read; what changed is that the layer is no longer reusable for
+    // the old content and is recorded again under the new identity.
+    CHECK_TRUE(rebuilt.repaired_layers > 0);
+    CHECK_EQ(rebuilt.shaders,uint64_t(1));
+  }
+
+  BeginCase("a recipe store of another storage version is replaced with the current one");
+  {
+    const Bytes raw(64,7);
+    const uint64_t hash = XXH3_64bits(raw.data(),raw.size());
+    static const char* digits = "0123456789abcdef";
+    std::string hex;
+    for (const auto byte : raw) { hex.push_back(digits[byte>>4]); hex.push_back(digits[byte&15]); }
+    Json with_path = j;
+    with_path["paths"] = Json{{"d3d12/rtv",
+        Json::array({{{"raw",hex},{"hash",Hex(hash)}}})}};
+    const auto store = root/"shaders/shareable/5841122D.rtv.d3d12.xpso";
+    {
+      // A store written by an older translator: same layout, other version word.
+      Bytes stale{'X','E','P','S',0x44,0x58,0x52,0x54,0x20,0x26,0x02,0x99};
+      std::ofstream f(store,std::ios::binary|std::ios::trunc);
+      f.write(reinterpret_cast<const char*>(stale.data()),stale.size());
+    }
+    PreparationInputs inputs;
+    inputs.catalogue = 5; inputs.content = 6; inputs.executable = 7;
+    inputs.d3d12_version = kD3D12RecipeStorageVersion;
+    inputs.vulkan_version = kVulkanRecipeStorageVersion;
+    const auto report = SeedPreparation(with_path.dump(),root,
+        [](const std::string&) { return Bytes{1,2,3,4}; },{},[] {return false;},inputs,0);
+    CHECK_FALSE(report.recipes_reused[0]);
+    CHECK_TRUE(report.repaired_layers > 0);
+    const auto written = Read(store);
+    CHECK_EQ(uint64_t(written.size()),uint64_t(12+72));
+    CHECK_EQ(uint64_t(written[11]),uint64_t(kD3D12RecipeStorageVersion & 0xFF));
+    CHECK_EQ(uint64_t(written[8]),uint64_t((kD3D12RecipeStorageVersion>>24) & 0xFF));
+    CHECK_EQ(report.records[0],uint64_t(1));
+    // A second pass with the same inputs reuses it and touches no asset.
+    int reads = 0;
+    const auto again = SeedPreparation(with_path.dump(),root,
+        [&](const std::string&) { ++reads; return Bytes{}; },{},[] {return false;},inputs,0);
+    CHECK_TRUE(again.recipes_reused[0]);
+    CHECK_EQ(uint64_t(reads),0);
+    std::filesystem::remove(store);
+  }
+
   std::filesystem::remove(xsh);
   return Finish();
 }

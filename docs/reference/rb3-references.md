@@ -396,3 +396,15 @@ origin. An empty table is the correct state until something is actually ported.
 | §7.3, §8 (methodology, config gaps) | [backlog.md](backlog.md) §1 — the config gaps (hook hygiene closed 2026-10-01 and removed with its section) |
 | §9 (borrowing rules) | [README](../../README.md) (license), [distributable.md](../guides/distributable.md) — what ships and the audit that refuses the rest |
 | §0 (Rock Band Blitz Ultimate row) | [ultimate-compat.md](../guides/ultimate-compat.md) — the Blitz-side sibling of the RB3DX groups catalogued in §5–§6 (a different project from this one) |
+
+## 11. Framerate follow-up (2026-10-25)
+
+The [framerate feasibility study and implementation plan](../plans/todo/2026-10-25-framerate-expansion-plan.md)
+§3 refreshes the timing references with pinned revisions from all three RB3
+projects. It finds elapsed-time task scheduling, audio-led gameplay time,
+time-aware particle integration, a frame-dependent camera-shake path and a
+sample-count-based clock filter. The recomp's `camera_shake.cpp` is evidence of
+a real compatibility issue, not a guarantee that every engine path supports
+unlimited FPS. No universal safe ceiling was found in the inspected sources.
+Blitz's corresponding bodies and title-specific power-ups still need validation.
+This pass borrowed knowledge only; the adapted-code provenance table stays empty.

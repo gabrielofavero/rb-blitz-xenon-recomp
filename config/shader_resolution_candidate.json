@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "title_id": "5841122D",
-  "scope": "Shader identities referenced by the P3 pipeline recipe catalogues: the ten distinct preserved P0 stores (including developer input caches) plus the 2026-10-24 owner-driven D3D12 and Vulkan coverage sessions (d3d12-ultimate-coverage-r1/r2, vulkan-ultimate-coverage-r1). This is a P2 shader-resolution candidate, not a P3 pipeline recipe or gameplay coverage catalogue.",
+  "scope": "Shader identities referenced by the P3 pipeline recipe catalogues: the ten distinct preserved P0 stores (including developer input caches) plus the 2026-10-24 owner-driven D3D12 and Vulkan coverage sessions (d3d12-ultimate-coverage-r1/r2, vulkan-ultimate-coverage-r1). This is a P2 shader-resolution candidate, not a P3 pipeline recipe or gameplay coverage catalogue. P8 row p8-d3d12-ultimate-rtv-cold (2026-10-25) added one pixel identity: the owner played a bundled song across power-up loadouts and the run translated it for a loadout-specific pipeline.",
   "shaders": [
     {
       "stage": "pixel",
@@ -32,6 +32,14 @@
       "hash": "08e876e3bfa4f3ad"
     },
     {
+      "stage": "vertex",
+      "hash": "094e1f9e1a9e33c6"
+    },
+    {
+      "stage": "vertex",
+      "hash": "0c5285bf2ab541c7"
+    },
+    {
       "stage": "pixel",
       "hash": "0e74dcd0e4ddcf6d"
     },
@@ -52,12 +60,20 @@
       "hash": "10f6cb456a407644"
     },
     {
+      "stage": "vertex",
+      "hash": "135210754740531e"
+    },
+    {
       "stage": "pixel",
       "hash": "1490fa4fd9b436dc"
     },
     {
       "stage": "pixel",
       "hash": "14f6d4879b452192"
+    },
+    {
+      "stage": "vertex",
+      "hash": "15aa57ab1a78ee22"
     },
     {
       "stage": "pixel",
@@ -68,12 +84,24 @@
       "hash": "17016aee0c38755e"
     },
     {
+      "stage": "vertex",
+      "hash": "1ccea409ec98e9ef"
+    },
+    {
+      "stage": "vertex",
+      "hash": "1e6883fccde1f688"
+    },
+    {
       "stage": "pixel",
       "hash": "1ed978b1a81cf158"
     },
     {
       "stage": "pixel",
       "hash": "1f28609b5a7da353"
+    },
+    {
+      "stage": "vertex",
+      "hash": "2156c812dd418844"
     },
     {
       "stage": "pixel",
@@ -96,8 +124,16 @@
       "hash": "248adbf373ffaa60"
     },
     {
+      "stage": "vertex",
+      "hash": "24b20d3d1e182fa5"
+    },
+    {
       "stage": "pixel",
       "hash": "2580f1a2632a562f"
+    },
+    {
+      "stage": "vertex",
+      "hash": "267714c3fcf0585f"
     },
     {
       "stage": "pixel",
@@ -124,8 +160,16 @@
       "hash": "320e436c76b905b6"
     },
     {
+      "stage": "vertex",
+      "hash": "330953b79b8f86c8"
+    },
+    {
       "stage": "pixel",
       "hash": "336b0604107c3091"
+    },
+    {
+      "stage": "vertex",
+      "hash": "342e174241e31ad4"
     },
     {
       "stage": "pixel",
@@ -134,6 +178,10 @@
     {
       "stage": "pixel",
       "hash": "35432fc8a261c03e"
+    },
+    {
+      "stage": "vertex",
+      "hash": "36927e86f7ba4436"
     },
     {
       "stage": "pixel",
@@ -148,12 +196,28 @@
       "hash": "38448f554b8cf69d"
     },
     {
+      "stage": "vertex",
+      "hash": "385bb8c5371cd306"
+    },
+    {
+      "stage": "vertex",
+      "hash": "3a680f592872d3e7"
+    },
+    {
       "stage": "pixel",
       "hash": "3a6a5f111b8fc22f"
     },
     {
       "stage": "pixel",
       "hash": "3c149e61666530d5"
+    },
+    {
+      "stage": "vertex",
+      "hash": "3c3eaaeadc1c78a9"
+    },
+    {
+      "stage": "vertex",
+      "hash": "3dca613ce8aab66a"
     },
     {
       "stage": "pixel",
@@ -166,6 +230,10 @@
     {
       "stage": "pixel",
       "hash": "44184295f416de62"
+    },
+    {
+      "stage": "vertex",
+      "hash": "44ad9c6bdae8ba14"
     },
     {
       "stage": "pixel",
@@ -188,12 +256,24 @@
       "hash": "47c9c7f14daa85ea"
     },
     {
+      "stage": "vertex",
+      "hash": "483dc3533945397d"
+    },
+    {
       "stage": "pixel",
       "hash": "4941b711f271ca89"
     },
     {
+      "stage": "vertex",
+      "hash": "49abe9b07550ecba"
+    },
+    {
       "stage": "pixel",
       "hash": "4af5306f2f7e5271"
+    },
+    {
+      "stage": "vertex",
+      "hash": "4b440523979c0658"
     },
     {
       "stage": "pixel",
@@ -204,8 +284,16 @@
       "hash": "4f64e4988031075f"
     },
     {
+      "stage": "vertex",
+      "hash": "511083a9e6427fb1"
+    },
+    {
       "stage": "pixel",
       "hash": "5110fe6aa991466b"
+    },
+    {
+      "stage": "vertex",
+      "hash": "53c521e2125f437b"
     },
     {
       "stage": "pixel",
@@ -236,8 +324,20 @@
       "hash": "5d7681a012b7b233"
     },
     {
+      "stage": "vertex",
+      "hash": "5e20f6e9539d166d"
+    },
+    {
+      "stage": "vertex",
+      "hash": "5e3bd3a639289def"
+    },
+    {
       "stage": "pixel",
       "hash": "5e73a4e725aa0d59"
+    },
+    {
+      "stage": "vertex",
+      "hash": "5ea1ed0c4275b078"
     },
     {
       "stage": "pixel",
@@ -258,6 +358,14 @@
     {
       "stage": "pixel",
       "hash": "62bf2db8830f3b52"
+    },
+    {
+      "stage": "vertex",
+      "hash": "64afafa732eb24fc"
+    },
+    {
+      "stage": "vertex",
+      "hash": "65011b03d1d6318c"
     },
     {
       "stage": "pixel",
@@ -284,6 +392,14 @@
       "hash": "6b4359606e49c8c9"
     },
     {
+      "stage": "vertex",
+      "hash": "6d694fbea5d470b5"
+    },
+    {
+      "stage": "vertex",
+      "hash": "6f065ef9b1275f99"
+    },
+    {
       "stage": "pixel",
       "hash": "6fd62d4873f7a94b"
     },
@@ -304,6 +420,14 @@
       "hash": "7398a334cdcd6607"
     },
     {
+      "stage": "vertex",
+      "hash": "749e64ddef5ab99f"
+    },
+    {
+      "stage": "vertex",
+      "hash": "74bf595c29d1427c"
+    },
+    {
       "stage": "pixel",
       "hash": "7521bff2508fe342"
     },
@@ -316,6 +440,14 @@
       "hash": "76def253143358ce"
     },
     {
+      "stage": "vertex",
+      "hash": "79c15a69a2330a0c"
+    },
+    {
+      "stage": "vertex",
+      "hash": "7afecc632a1b894a"
+    },
+    {
       "stage": "pixel",
       "hash": "7d9ba0eca6b85ede"
     },
@@ -326,6 +458,10 @@
     {
       "stage": "pixel",
       "hash": "7fc03720b01586d0"
+    },
+    {
+      "stage": "vertex",
+      "hash": "8043256bdcb59a6e"
     },
     {
       "stage": "pixel",
@@ -356,6 +492,14 @@
       "hash": "8b93b7a63c4bf2a6"
     },
     {
+      "stage": "vertex",
+      "hash": "8c7549f6cfc56589"
+    },
+    {
+      "stage": "vertex",
+      "hash": "8ed417d9183575e9"
+    },
+    {
       "stage": "pixel",
       "hash": "8ef1d354815ef015"
     },
@@ -366,6 +510,18 @@
     {
       "stage": "pixel",
       "hash": "9034099c395e4915"
+    },
+    {
+      "stage": "vertex",
+      "hash": "92079c85cedcf7d3"
+    },
+    {
+      "stage": "vertex",
+      "hash": "92a5ab64f7d9be78"
+    },
+    {
+      "stage": "vertex",
+      "hash": "92caef11a59f94c0"
     },
     {
       "stage": "pixel",
@@ -380,24 +536,64 @@
       "hash": "96c1f6963f14f8cb"
     },
     {
+      "stage": "vertex",
+      "hash": "97196a24a122e5db"
+    },
+    {
+      "stage": "vertex",
+      "hash": "97a4c887be1869ff"
+    },
+    {
       "stage": "pixel",
       "hash": "999781f7980815f8"
+    },
+    {
+      "stage": "vertex",
+      "hash": "9a3cdaf12de7fcf3"
     },
     {
       "stage": "pixel",
       "hash": "9d43451e328fd486"
     },
     {
+      "stage": "vertex",
+      "hash": "9e7f9712013c8762"
+    },
+    {
+      "stage": "vertex",
+      "hash": "a0098f9299ddddcb"
+    },
+    {
       "stage": "pixel",
       "hash": "a08fe7e00119a47a"
+    },
+    {
+      "stage": "vertex",
+      "hash": "a1eac20433af9d04"
+    },
+    {
+      "stage": "vertex",
+      "hash": "a2ac01521fca6a0e"
     },
     {
       "stage": "pixel",
       "hash": "a4a965c189287b99"
     },
     {
+      "stage": "vertex",
+      "hash": "a4b15d777c4fc768"
+    },
+    {
+      "stage": "vertex",
+      "hash": "aa25fe32b3619f3e"
+    },
+    {
       "stage": "pixel",
       "hash": "ab1bb9c27904dd6b"
+    },
+    {
+      "stage": "vertex",
+      "hash": "ae617c54ec0bfe13"
     },
     {
       "stage": "pixel",
@@ -408,12 +604,28 @@
       "hash": "b47a9b760ffa2bdc"
     },
     {
+      "stage": "vertex",
+      "hash": "b5d59c59ec1d386d"
+    },
+    {
+      "stage": "vertex",
+      "hash": "b6c9863f710683ec"
+    },
+    {
       "stage": "pixel",
       "hash": "b76340b7beda9404"
     },
     {
+      "stage": "vertex",
+      "hash": "bcad88c63fbff78c"
+    },
+    {
       "stage": "pixel",
       "hash": "bde037e93db2736a"
+    },
+    {
+      "stage": "vertex",
+      "hash": "be26413054955768"
     },
     {
       "stage": "pixel",
@@ -424,12 +636,36 @@
       "hash": "be8185a89d865054"
     },
     {
+      "stage": "vertex",
+      "hash": "bef2e0f30538c9fe"
+    },
+    {
+      "stage": "vertex",
+      "hash": "c1c46da0c23fec95"
+    },
+    {
       "stage": "pixel",
       "hash": "c210eaf9d808a926"
     },
     {
+      "stage": "vertex",
+      "hash": "c47e905c2ac5f7b7"
+    },
+    {
+      "stage": "vertex",
+      "hash": "c526432a87eaeef6"
+    },
+    {
       "stage": "pixel",
       "hash": "c5390e49fd84b7ea"
+    },
+    {
+      "stage": "vertex",
+      "hash": "c580ebef7419686e"
+    },
+    {
+      "stage": "vertex",
+      "hash": "c91929bedcbb1b50"
     },
     {
       "stage": "pixel",
@@ -448,8 +684,20 @@
       "hash": "d276502ceb7f7d3e"
     },
     {
+      "stage": "vertex",
+      "hash": "d3ba1bbaa0d5b3e1"
+    },
+    {
       "stage": "pixel",
       "hash": "d6c06456d9567040"
+    },
+    {
+      "stage": "vertex",
+      "hash": "d6cc5aa166b1acdc"
+    },
+    {
+      "stage": "pixel",
+      "hash": "d74837164c7372b0"
     },
     {
       "stage": "pixel",
@@ -458,6 +706,14 @@
     {
       "stage": "pixel",
       "hash": "da03826e9fa34b2b"
+    },
+    {
+      "stage": "vertex",
+      "hash": "dae487d985598531"
+    },
+    {
+      "stage": "vertex",
+      "hash": "dca4a4959db33559"
     },
     {
       "stage": "pixel",
@@ -480,12 +736,24 @@
       "hash": "e3aa93879f293bba"
     },
     {
+      "stage": "vertex",
+      "hash": "e725966b7b5e01ba"
+    },
+    {
+      "stage": "vertex",
+      "hash": "e7e53e3202877c70"
+    },
+    {
       "stage": "pixel",
       "hash": "e85d19d6177eac4a"
     },
     {
       "stage": "pixel",
       "hash": "e995d53b4a3bce81"
+    },
+    {
+      "stage": "vertex",
+      "hash": "ebce2275faf3e4ef"
     },
     {
       "stage": "pixel",
@@ -502,6 +770,10 @@
     {
       "stage": "pixel",
       "hash": "ee9cc7d0bfb1e6d6"
+    },
+    {
+      "stage": "vertex",
+      "hash": "eeca514fa35f0267"
     },
     {
       "stage": "pixel",
@@ -532,6 +804,14 @@
       "hash": "f8ea7d404b65e162"
     },
     {
+      "stage": "vertex",
+      "hash": "f9105dc5556a2c40"
+    },
+    {
+      "stage": "vertex",
+      "hash": "f913cf2a9109b809"
+    },
+    {
       "stage": "pixel",
       "hash": "f920af5cd865655e"
     },
@@ -548,292 +828,16 @@
       "hash": "fc53125b5eb914f8"
     },
     {
-      "stage": "pixel",
-      "hash": "ffed2d080b7080d3"
-    },
-    {
-      "stage": "vertex",
-      "hash": "094e1f9e1a9e33c6"
-    },
-    {
-      "stage": "vertex",
-      "hash": "0c5285bf2ab541c7"
-    },
-    {
-      "stage": "vertex",
-      "hash": "135210754740531e"
-    },
-    {
-      "stage": "vertex",
-      "hash": "15aa57ab1a78ee22"
-    },
-    {
-      "stage": "vertex",
-      "hash": "1ccea409ec98e9ef"
-    },
-    {
-      "stage": "vertex",
-      "hash": "1e6883fccde1f688"
-    },
-    {
-      "stage": "vertex",
-      "hash": "2156c812dd418844"
-    },
-    {
-      "stage": "vertex",
-      "hash": "24b20d3d1e182fa5"
-    },
-    {
-      "stage": "vertex",
-      "hash": "267714c3fcf0585f"
-    },
-    {
-      "stage": "vertex",
-      "hash": "330953b79b8f86c8"
-    },
-    {
-      "stage": "vertex",
-      "hash": "342e174241e31ad4"
-    },
-    {
-      "stage": "vertex",
-      "hash": "36927e86f7ba4436"
-    },
-    {
-      "stage": "vertex",
-      "hash": "385bb8c5371cd306"
-    },
-    {
-      "stage": "vertex",
-      "hash": "3a680f592872d3e7"
-    },
-    {
-      "stage": "vertex",
-      "hash": "3c3eaaeadc1c78a9"
-    },
-    {
-      "stage": "vertex",
-      "hash": "3dca613ce8aab66a"
-    },
-    {
-      "stage": "vertex",
-      "hash": "44ad9c6bdae8ba14"
-    },
-    {
-      "stage": "vertex",
-      "hash": "483dc3533945397d"
-    },
-    {
-      "stage": "vertex",
-      "hash": "49abe9b07550ecba"
-    },
-    {
-      "stage": "vertex",
-      "hash": "4b440523979c0658"
-    },
-    {
-      "stage": "vertex",
-      "hash": "511083a9e6427fb1"
-    },
-    {
-      "stage": "vertex",
-      "hash": "53c521e2125f437b"
-    },
-    {
-      "stage": "vertex",
-      "hash": "5e20f6e9539d166d"
-    },
-    {
-      "stage": "vertex",
-      "hash": "5e3bd3a639289def"
-    },
-    {
-      "stage": "vertex",
-      "hash": "5ea1ed0c4275b078"
-    },
-    {
-      "stage": "vertex",
-      "hash": "64afafa732eb24fc"
-    },
-    {
-      "stage": "vertex",
-      "hash": "65011b03d1d6318c"
-    },
-    {
-      "stage": "vertex",
-      "hash": "6d694fbea5d470b5"
-    },
-    {
-      "stage": "vertex",
-      "hash": "6f065ef9b1275f99"
-    },
-    {
-      "stage": "vertex",
-      "hash": "749e64ddef5ab99f"
-    },
-    {
-      "stage": "vertex",
-      "hash": "74bf595c29d1427c"
-    },
-    {
-      "stage": "vertex",
-      "hash": "79c15a69a2330a0c"
-    },
-    {
-      "stage": "vertex",
-      "hash": "7afecc632a1b894a"
-    },
-    {
-      "stage": "vertex",
-      "hash": "8043256bdcb59a6e"
-    },
-    {
-      "stage": "vertex",
-      "hash": "8c7549f6cfc56589"
-    },
-    {
-      "stage": "vertex",
-      "hash": "8ed417d9183575e9"
-    },
-    {
-      "stage": "vertex",
-      "hash": "92079c85cedcf7d3"
-    },
-    {
-      "stage": "vertex",
-      "hash": "92a5ab64f7d9be78"
-    },
-    {
-      "stage": "vertex",
-      "hash": "92caef11a59f94c0"
-    },
-    {
-      "stage": "vertex",
-      "hash": "97196a24a122e5db"
-    },
-    {
-      "stage": "vertex",
-      "hash": "97a4c887be1869ff"
-    },
-    {
-      "stage": "vertex",
-      "hash": "9a3cdaf12de7fcf3"
-    },
-    {
-      "stage": "vertex",
-      "hash": "9e7f9712013c8762"
-    },
-    {
-      "stage": "vertex",
-      "hash": "a0098f9299ddddcb"
-    },
-    {
-      "stage": "vertex",
-      "hash": "a1eac20433af9d04"
-    },
-    {
-      "stage": "vertex",
-      "hash": "a2ac01521fca6a0e"
-    },
-    {
-      "stage": "vertex",
-      "hash": "a4b15d777c4fc768"
-    },
-    {
-      "stage": "vertex",
-      "hash": "aa25fe32b3619f3e"
-    },
-    {
-      "stage": "vertex",
-      "hash": "ae617c54ec0bfe13"
-    },
-    {
-      "stage": "vertex",
-      "hash": "b5d59c59ec1d386d"
-    },
-    {
-      "stage": "vertex",
-      "hash": "b6c9863f710683ec"
-    },
-    {
-      "stage": "vertex",
-      "hash": "bcad88c63fbff78c"
-    },
-    {
-      "stage": "vertex",
-      "hash": "be26413054955768"
-    },
-    {
-      "stage": "vertex",
-      "hash": "bef2e0f30538c9fe"
-    },
-    {
-      "stage": "vertex",
-      "hash": "c1c46da0c23fec95"
-    },
-    {
-      "stage": "vertex",
-      "hash": "c47e905c2ac5f7b7"
-    },
-    {
-      "stage": "vertex",
-      "hash": "c526432a87eaeef6"
-    },
-    {
-      "stage": "vertex",
-      "hash": "c580ebef7419686e"
-    },
-    {
-      "stage": "vertex",
-      "hash": "c91929bedcbb1b50"
-    },
-    {
-      "stage": "vertex",
-      "hash": "d3ba1bbaa0d5b3e1"
-    },
-    {
-      "stage": "vertex",
-      "hash": "d6cc5aa166b1acdc"
-    },
-    {
-      "stage": "vertex",
-      "hash": "dae487d985598531"
-    },
-    {
-      "stage": "vertex",
-      "hash": "dca4a4959db33559"
-    },
-    {
-      "stage": "vertex",
-      "hash": "e725966b7b5e01ba"
-    },
-    {
-      "stage": "vertex",
-      "hash": "e7e53e3202877c70"
-    },
-    {
-      "stage": "vertex",
-      "hash": "ebce2275faf3e4ef"
-    },
-    {
-      "stage": "vertex",
-      "hash": "eeca514fa35f0267"
-    },
-    {
-      "stage": "vertex",
-      "hash": "f9105dc5556a2c40"
-    },
-    {
-      "stage": "vertex",
-      "hash": "f913cf2a9109b809"
-    },
-    {
       "stage": "vertex",
       "hash": "fccbe050850028a0"
     },
     {
       "stage": "vertex",
       "hash": "fceb2437544e0166"
+    },
+    {
+      "stage": "pixel",
+      "hash": "ffed2d080b7080d3"
     }
   ]
 }

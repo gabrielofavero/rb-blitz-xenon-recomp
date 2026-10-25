@@ -97,6 +97,7 @@ set(RBBLITZ_SOURCES
     src/diag/gameplay_probe.cpp
     src/diag/shader_trace.cpp
     src/graphics/preparation_assets.cpp
+    src/graphics/preparation_state.cpp
     src/graphics/preparation_loading.cpp
     src/enhancements.cpp
     src/hooks/content_progress.cpp
@@ -507,6 +508,10 @@ if(BUILD_TESTING)
     add_test(NAME shader_pipeline_catalogue
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_pipeline_catalogue_tests.py"
                 --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>)
+    # P8's acceptance checker: a row's verdict must follow its evidence. Synthetic
+    # logs only, so the matrix's rules are pinned without a run or a GPU.
+    add_test(NAME shader_cache_p8_tools
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_cache_p8_tools_tests.py")
     add_executable(rb_blitz_loading_record_inspect tools/loading_record_inspect.cpp
         src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_loading_record_inspect PRIVATE src)
@@ -556,11 +561,22 @@ if(BUILD_TESTING)
     add_test(NAME audio_stability COMMAND rb_blitz_audio_stability_tests)
     add_executable(rb_blitz_preparation_assets_tests
         tests/preparation_assets_tests.cpp src/graphics/preparation_assets.cpp
+        src/graphics/preparation_state.cpp
         src/settings/ultimate_adapter.cpp src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_preparation_assets_tests PRIVATE src
         "${REXSDK_DIR}/thirdparty/inja/third_party/include")
     target_link_libraries(rb_blitz_preparation_assets_tests PRIVATE xxhash)
     add_test(NAME preparation_assets COMMAND rb_blitz_preparation_assets_tests)
+
+    # P7: the persistent preparation ledger - which reusable layer is still
+    # valid, and what the last attempt achieved. SDK-free, so the invalidation
+    # rules are pinned with real files and no boot.
+    add_executable(rb_blitz_preparation_state_tests
+        tests/preparation_state_tests.cpp src/graphics/preparation_state.cpp)
+    target_include_directories(rb_blitz_preparation_state_tests PRIVATE src
+        "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+    target_link_libraries(rb_blitz_preparation_state_tests PRIVATE xxhash)
+    add_test(NAME preparation_state COMMAND rb_blitz_preparation_state_tests)
 
     # P5: the driver-specific layer both backends persist beside the shareable
     # recipes (rexglue-sdk/include/rex/graphics/native_pipeline_cache.h). Header

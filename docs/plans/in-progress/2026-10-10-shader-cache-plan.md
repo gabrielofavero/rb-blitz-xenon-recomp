@@ -29,8 +29,15 @@ identity/store, D3D12 cached PSO blobs keyed by the portable description hash, a
 real Vulkan `VkPipelineCache` shared by every creation path on the device, written at
 preparation end and at shutdown only, with a rejected blob forgotten and retried without
 it. P6 now implements the post-A native loading phase and gate (2026-10-24); its UI
-verification is pending. Invalidation is P7; full route
-validation and the cold-versus-warm measurement remain P8.
+verification is pending. P7 implemented 2026-10-24: a persistent layer ledger with
+separate validity for the local extraction and each per-path recipe store, a full
+configuration epoch (content/executable/storage versions/settings/content epoch),
+repair-instead-of-fail for stale or damaged stores, a content-change hook that
+retires readiness without touching storage, and distinct shader-data/not-writable
+failure labels. P8's harness, matrix and acceptance rules are delivered 2026-10-25
+(`scripts/shader_cache_p8.py`). Its first run failed on a real catalogue gap and the
+shipped catalogue was extended (rtv 412 -> 421, identities 208 -> 209); the repeat
+run is pending - the owner drives them. P9 remains unstarted.
 On an empty application cache the first song creates 81 guest pipelines and
 translates 61 shaders, with four of its eight active-song long frames (worst
 306.4 ms) overlapping that work; a same-process replay adds 1/1. A full restart on
@@ -44,7 +51,8 @@ before its required work finished ([P1 record](#p1--make-backend-completion-and-
 since P4 the same work can run as a cancellable generation beside the guest
 ([P4 record](#p4--add-asynchronous-preparation-without-starving-the-loading-screen)),
 and P5/P6 now add native persistence and the post-A guest loading gate.
-Invalidation and full route validation remain P7–P9; P6 UI evidence is pending. Evidence:
+Invalidation is P7 (implemented 2026-10-24); full route
+validation and the cold-versus-warm measurement remain P8, and P6 UI evidence is pending. Evidence:
 [shader-cache.md](../../engine/shader-cache.md) (parts 1 and 3) and
 `out/shader-cache-p0/runs/`.
 
@@ -623,8 +631,10 @@ and S6 packaging; a preload barrier alone cannot prepare previously unknown pipe
 ## Implementation prompts (2026-10-24)
 
 Original planning status: **P0–P9 were unstarted when these prompts were authored**.
-Implementation updates are recorded below each prompt: **P0–P5 are implemented
-(2026-10-24)**, P6–P9 remain unstarted prompts.The planning update inspected project
+Implementation updates are recorded below each prompt: **P0–P7 are implemented
+(2026-10-24), P8's harness/matrix/acceptance are delivered (2026-10-25) with no row
+run yet**, and P9 is unstarted. P6's runtime exit is **not certified** (its
+owner-route run passed, the remaining routes are P8's). The planning update inspected project
 `a8f0bb5`, SDK `c94f5eb` and the current working-tree sources. No game/UI navigation,
 build, cache deletion or new performance measurement was performed. The prompts are
 future implementation tasks, not authorization to execute them as part of this edit.
@@ -1415,6 +1425,55 @@ Exit: stale/corrupt/partial data never bypasses preparation; caches and saves su
 updates and backend switching. A valid native cache does not override a changed recipe
 catalogue or an invalid live generation.
 
+Implementation update, 2026-10-24:
+
+- **The ledger.** New SDK-free `src/graphics/preparation_state.{h,cpp}` owns
+  `shaders/preparation-state.json` (schema 1): one `PreparationLayer` for the local
+  extraction and one per declared rendering path, each recording the inputs it was
+  built from and whether it verified end to end, plus the content epoch and the last
+  attempt's terminal phase/counts. Validity rules are encoded in the type:
+  `ExtractionValid` ignores the translator/schema versions (a translator bump may
+  reuse guest shaders) and `RecipesValid` compares that backend's version; an
+  incomplete layer is never valid. Native driver data has no field here - a driver
+  cache hit can never say "prepared".
+- **Repair instead of a failed launch.** `SeedPreparation` now parses `.xsh`/`.xpso`
+  without throwing, rebuilds only the layers the ledger does not vouch for (or whose
+  file does not parse to its last record, or whose recorded count differs), verifies
+  each rewritten file by reading it back, and marks every layer it is about to touch
+  incomplete *before* touching it. The old behaviour threw "unsupported local shader
+  storage" / "unsupported local recipe storage" and failed the boot gate.
+  Unresolvable installed data still throws, and is now classified as `kShaderData`.
+  The recipe stores' version word comes from `kD3D12RecipeStorageVersion` /
+  `kVulkanRecipeStorageVersion`, which `tests/shader_pipeline_catalogue_tests.py`
+  re-reads against the four SDK headers.
+- **The epoch.** `CurrentConfiguration()` hashes the embedded manifest, the content
+  identity (the ARK indexes actually read, hashed), the validated entrypoint identity,
+  both storage versions, a curated table of pipeline-affecting cvars
+  (`kSettingNames`, 27 entries with the inclusion rule in its comment) and the content
+  epoch. Layers reuse independently of it; the epoch decides whether a *live*
+  generation's readiness is reusable.
+- **New content.** `NoteContentChanged` is called from `dlc::PublishPendingRefresh`
+  (the one point the boot scan, a requested refresh and a store install all pass
+  through) after comparing the published package set, so a reordering rescan changes
+  nothing. It bumps the epoch and retires readiness; it never touches storage, so it
+  is safe during a song. A mid-preparation epoch change now retires that generation
+  and re-prepares under the new key instead of failing the attempt.
+- **Unwritable persistence.** The cache root is probed once at configure time. A
+  failed ledger write after a successful preparation logs "prepared graphics but
+  could not save the reusable result" and keeps live readiness; a failed preparation
+  under an unwritable root reports `kCacheNotWritable`, not a GPU failure. The
+  authored failure row now picks `rbbz_graphics_failed_data` /
+  `rbbz_graphics_failed_cache` / `rbbz_graphics_failed` through
+  `LoadingQuery("failed_data")`/`("failed_cache")`; Retry/Ignore are unchanged.
+- Gates (2026-10-24): release build links `rb_blitz`; full release `ctest` **68/68**
+  with workspace `TEMP`/`TMP` (the pre-existing default-temp `path_policy` failure is
+  unchanged). New `preparation_state` (72 checks) and four added
+  `preparation_assets` cases (33 checks). No SDK patch; `apply_sdk_patches.ps1
+  -Check` is unaffected.
+- Remaining: no game/UI run, so the reason labels, a live store-install epoch bump and
+  a real driver update are unproven; P8 owns that matrix. Details:
+  [shader-cache.md](../../engine/shader-cache.md) (part 7).
+
 ### P8 — Validate first-song coverage, timing and visual correctness
 
 > Execute P8 after building the current implementation. Ask who will drive the UI unless
@@ -1433,6 +1492,182 @@ catalogue or an invalid live generation.
 Exit: zero compilation-related work or visual fallbacks during validated active-song
 routes on each claimed backend/configuration. Report supported scope, untested hardware,
 worst frames and measured warm-boot behavior; do not promise universal absence of stutter.
+
+Implementation update, 2026-10-25 (harness delivered; **no row run yet**):
+
+- New `scripts/shader_cache_p8.py` reuses P0's preparation/collection machinery
+  (`shader_cache_trace.py`) and adds the matrix, deterministic fixtures and
+  acceptance. Commands: `configure`, `plan`, `prepare <row>` / `prepare-next`,
+  `collect <row> --observations`, `accept <row>` (writes `acceptance.json`, exits 1
+  on FAIL), `summarize` (`out/shader-cache-p8/summary.md` + `.json`). The save and
+  profile inputs live in ignored `out/shader-cache-p8/local.json`.
+- The matrix has 16 rows in two tiers. Tier 1 (required): D3D12/Ultimate `rtv` and
+  Vulkan/Ultimate `fbo`, each cold and warm; damaged portable store; lost/truncated
+  ledger; corrupted native driver blob; cancelled preparation; unwritable cache
+  root. Tier 2 (recommended scope): the `rov` and `fsi` alternate paths, retail
+  cold/warm, and a changed pipeline-affecting setting after a warm cache.
+- Acceptance is explicit: during `active_song` the `translation`, `guest_pipeline`,
+  `placeholder`, `helper_graphics`, `helper_compute` and `compile_wait` counters
+  must all be zero **and** nothing may have failed; per kind, a cold row must have
+  rebuilt the extraction layer, a warm row must have reused it and all four recipe
+  layers, a damaged row must report `repaired > 0`, the read-only row must log
+  `cache_not_writable` and must not hold a non-ignored release, and the cancel row
+  must show the cancelled attempt and a later success. The changed-setting row is
+  a coverage discovery, never a gate: the shipped catalogue was captured at the
+  default draw scale.
+- Two evidence gaps were closed in `src/graphics/preparation_loading.cpp`: a failed
+  attempt logs its reason (`shader_data` / `cache_not_writable` / `preparation`),
+  and a cancelled attempt is recorded in the ledger as `kCancelled` with
+  `complete=false` before its generation retires.
+- Instrument limits recorded rather than worked around: only frames >= 50 ms are
+  logged individually, so there is no median/p95/p99 and no 33.3 ms bucket;
+  `active_song` remains an input-enabled controller proxy; skipped draws are not
+  instrumented (the placeholder counter is the proxy); pipeline memory is not
+  instrumented.
+- Tests: new `tests/shader_cache_p8_tools_tests.py` -> ctest `shader_cache_p8_tools`,
+  8 cases over synthetic logs (a clean row passes, an in-song translation fails,
+  cold-versus-warm layer expectations, damage requiring a recorded repair, the
+  read-only row's reason and no-readiness rule, the cancel evidence, the discovery
+  row, and `summarize` never reporting an unrun row as passing). Full release
+  `ctest` is **69/69** with workspace `TEMP`/`TMP`.
+- Next: the owner runs tier 1 (and tier 2 as available). Each row is prepared on
+  demand because warm rows need their cold predecessor's collected cache. Nothing
+  is claimed as valid until its `acceptance.json` says PASS. Details and the empty
+  results table: [shader-cache.md](../../engine/shader-cache.md) (part 8).
+
+First run, 2026-10-25 - **`p8-d3d12-ultimate-rtv-cold` FAILED, and it earned its keep**:
+
+- The gate did its job: 412 pipelines prepared in **2,957 ms** on an empty cache
+  (seed 0.4 s, 208 shaders, four stores rebuilt, 0 repaired), ledger complete, the
+  menu released once. The post-A window was 58.5 s, but 54.7 s of it is the
+  title's own content enumeration (1,777 DLC packages) before the content-ready
+  boundary; graphics is 3.4 s of it. GPU frames never exceeded 50 ms.
+- The route (bundled song, replayed with different power-up **loadouts** until
+  every power-up was used) added **3 translations, 9 guest pipelines and 1 helper
+  graphics pipeline** during `active_song`, clustered at song starts. Their keys
+  match the run's store exactly: the after-cache held **421** `d3d12/rtv` recipes
+  against the shipped **412**, and one pixel identity (`d74837164c7372b0`) was not
+  in the candidate. So the gap is **catalogue coverage of loadout combinations**,
+  not a missed gate or a stale cache - P3's coverage session played some loadouts,
+  not all combinations.
+- Seven guest frames were 125-213 ms. Four overlap compilation (causation
+  unproven); **two record no compilation or wait at all**, so the song-start hitch
+  is only partly explained by shader work and is reported as unresolved.
+- Response: the shipped catalogue was regenerated from the same P3 merged stores
+  plus this run's store (`d3d12/rtv` 412 -> **421**; the other paths unchanged),
+  and `config/shader_resolution_candidate.json` went 208 -> **209**. All 421
+  recipes resolve from installed content (catalogue check exit 0). Release build
+  and full `ctest` are **69/69** after the change.
+- New rows: `p8-d3d12-ultimate-rtv-cold-r2` repeats the same route against the
+  extended catalogue (the acceptance gate), and the warm/damage/config rows now
+  warm from it because a catalogue change invalidates the layers by design.
+- Next: the owner re-runs that route. Until `-cold-r2` reports zero in-song
+  compile events, the shipped first-song guarantee is **not** met for this route.
+
+Second run, 2026-10-25 - **`p8-d3d12-ultimate-rtv-cold-r2` is guest-clean**:
+
+- The gate prepared **421 pipelines in 1,155 ms** from 209 shaders, and six
+  `active_song` segments recorded **zero translations, zero guest pipelines, zero
+  placeholders, zero compile waits**. The catalogue extension closed the gap the
+  first row found.
+- One **helper first-use** remains: a render-target ownership-transfer pipeline
+  (`render_target_cache.cpp:3773`, `kTransfer`, key `0500000000008000`), **once per
+  process**, 0.9 ms, 0.2 s into the first song. It is the F6 class and no
+  catalogue can pre-create it without enumerating every format combination. P8's
+  checker now separates helper creation from guest work and lets a row accept a
+  measured first-use only through its explicit `allow_helper_first_use` policy,
+  which the acceptance record always annotates. **This is an owner release
+  decision** (accept 0.9 ms once per process, or plan an SDK-side pre-creation).
+- Six guest frames of 124-213 ms remain, **one per song start**; five contain no
+  compilation or wait at all and the longest contains only that 0.9 ms helper.
+  GPU frames stayed under 46.7 ms. This is a song-start stall unrelated to shader
+  work and is reported unresolved; diagnosing it needs a resource/asset
+  instrument, not more preparation.
+- Tooling: `scripts/shader_cache_p8.py` now reports guest and helper work as
+  separate checks (tests 9/9, ctest `shader_cache_p8_tools` green).
+
+Warm run, 2026-10-25 - **`p8-d3d12-ultimate-rtv-warm` exposed a P7 defect**:
+
+- In-song work was clean again, but the boot **reused nothing**
+  (`repaired=5`) from a complete ledger. The ledger's `content` identity was
+  XXH3 over the ARK headers as resolved through `game:/`, whose visibility of the
+  Ultimate payload overlay varies per boot: **three boots of one installation
+  produced three different identities**, so no warm boot could ever reuse a
+  layer. This is the first warm boot ever measured (P7 had no UI run).
+- Fix (2026-10-25): the content identity is derived from inputs that are stable by
+  construction - the provider mode the boot already computed, the installed
+  `main_xbox.hdr` / `ultimate/gen/patch_xbox.hdr` sizes from the host game root,
+  and the payload's `ark_version`. Extracted bytes and recipes remain verified by
+  their own hashes, so a different dump still cannot reuse a store it did not
+  produce. One INFO line per boot logs the inputs and the value. The first boot on
+  a pre-fix cache rebuilds once by design.
+- Release build links; full `ctest` **69/69**; the P8 tooling tests are 10/10.
+- Rows added: `-cold-r3` establishes the stable ledger and `-warm-r2` measures
+  reuse from it; the damage, native-invalid and config rows now warm from r3.
+  The pre-fix warm row is kept as the evidence of the defect.
+
+Run of `-cold-r3`, 2026-10-25 - **unplayable, and invalid as evidence**:
+
+- Preparation was healthy (421 pipelines in 1,182 ms, 209 shaders, layers rebuilt)
+  and the song recorded **zero** guest compiles. But every phase was 3-4x slower:
+  menu 57 ms/frame vs 17.6, post-A to menu 177.9 s vs 56.5 s, `active_song` GPU
+  mean 236.7 ms with 84 frames of 250 ms or more.
+- Settings, effective settings, adapter and driver are identical to the smooth
+  `-cold-r2` run; the only binary difference is the prep-time content identity,
+  which has no per-frame path. No driver event or crash was logged. Machine
+  contention/throttling during the run is the leading explanation and was not
+  reproducible from the artifacts.
+- P8's acceptance gained a **playability gate** (GPU mean <= 33.3 ms, no frame
+  >= 250 ms), so an unplayable run can never read as a cache PASS. The row is
+  recorded FAIL on that gate. Its cache is valid and is the warm source for
+  `-warm-r2`. The owner restarted the PC; the next run was normal, confirming the
+  machine. The gate is now rate-based (0.1% of song frames, minimum two) because
+  the normal warm run had a single 334 ms frame.
+
+Warm run `-warm-r2`, 2026-10-25 - **PASS, and a new P5 finding**:
+
+- Reuse works: same content identity, `extraction=reused recipes=reused/...`,
+  guest work zero, GPU mean 28.6 ms, row passes.
+- But preparation took **15,959 ms** against **1,182 ms** on the cold boot that
+  wrote the same 421 pipelines. Layers are not the cost (both prepare 421); the
+  cold boot had no native driver blobs, the warm one had 398 (22 MB). No blob was
+  rejected, so the D3D12 cached-PSO path costs ~38 ms per pipeline against ~2.8 ms
+  cold on driver 32.0.15.6614. This also explains P6's 15,240 ms owner run.
+- Row `-warm-nonative` (`--native_pipeline_cache=false`) isolates it; if confirmed,
+  the title should default that layer off until the driver's cached-PSO path is
+  cheaper than creating from scratch.
+
+Scope cut, 2026-10-25 (owner): the campaign ends with two short rows - one song in
+`-warm-nonative` (a different bundled song, which also tests song independence) and
+a menu-only `-damaged-all` boot that damages the portable store, the ledger and a
+native blob together. Vulkan, the `rov` path, retail, the changed-setting row, the
+cancel row and the separate damage rows are reported as **unproven scope**, not as
+passing. This is a deliberate coverage limit recorded in part 8, not a silent drop.
+
+Both ran the same day and **PASS**; the owner then asked for one Vulkan row
+(`-vulkan-ultimate-fbo-cold`, DLC song) as the last planned run:
+
+- `-warm-nonative`: 421 pipelines in **626 ms**, layers reused, a **different song**
+  added no in-song work, GPU mean 29.9 ms.
+- `-damaged-all`: `repaired=5`, stores rebuilt to 209/421-219-409-228, native layer
+  **397 reused, 1 rejected, 1 written**, preparation 666 ms, menu reached, no error.
+- **Correction:** the 15,959 ms warm boot was **not** the native blob layer - it was
+  the first boot after a reboot (cold driver shader cache). With a warm driver,
+  native-on costs 666 ms and native-off 626 ms. No `native_pipeline_cache` default
+  change was made.
+
+The last planned run also **PASSed**: `-vulkan-ultimate-fbo-cold`, one DLC song,
+409 pipelines prepared in **1,936 ms** with an 11.5 MB `VkPipelineCache` written,
+zero in-song guest work, GPU mean 29.46 ms / worst 33.63 ms. It failed the strict
+helper check only because Vulkan's presenter rebuilds its guest-output paint
+pipeline on every present (`vulkan_presenter.cpp:2653`, one identity, 1,473 calls /
+209 ms over an 86.6 s song). That is a **host defect**, now filed in
+`reference/backlog.md`, and the acceptance gained an auditable `allow_host_helper`
+policy (5 ms per song second, 5 ms per call, no failures, healthy frames) instead
+of a silent exception. **P8 is complete for the accepted scope**; the unproven list
+is in part 8 ("Still unproven after the campaign"): Vulkan `VkPipelineCache` reuse,
+Vulkan `fsi`, D3D12 `rov`, retail, the changed-setting row, the cancel row and the
+separate damage rows.
 
 ### P9 — Package, document and close the release gates
 

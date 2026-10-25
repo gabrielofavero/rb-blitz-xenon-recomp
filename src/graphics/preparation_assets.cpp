@@ -190,87 +190,221 @@ void Save(const std::filesystem::path& path, const Bytes& bytes) {
   Require(fs::WriteAtomic(path, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()), &error),
           "cannot persist local preparation inputs");
 }
+// A store is usable only when it parses to its last record. Anything else is a
+// stale, truncated or damaged layer, which the caller rebuilds rather than
+// refuses to boot on (P7: bad cache state must never block a launch, and must
+// never be reused as if it were complete).
+bool ParseShaders(const Bytes& data, const Bytes& header,
+                  std::map<std::pair<uint64_t,bool>,Bytes>* out) {
+  out->clear();
+  if (data.size() < header.size() || !std::equal(header.begin(),header.end(),data.begin()))
+    return false;
+  for (size_t p = header.size(); p < data.size();) {
+    if (p+12 > data.size()) return false;
+    const auto hash = LE(data,p,8), packed = LE(data,p+8,4);
+    const size_t size = size_t(packed & 0x7fffffff) * 4;
+    if (!size || size > 65536 || p+12+size > data.size()) return false;
+    Bytes code(data.begin()+p+12,data.begin()+p+12+size);
+    if (XXH3_64bits(code.data(),code.size()) != hash) return false;
+    (*out)[{hash,bool(packed>>31)}] = std::move(code);
+    p += 12+size;
+  }
+  return true;
+}
+// The SDK records byte_swap(version) in the file, so it lands big-endian.
+std::array<uint8_t,4> VersionBytes(uint32_t version) {
+  return {uint8_t(version>>24),uint8_t(version>>16),uint8_t(version>>8),uint8_t(version)};
+}
+Bytes RecipeHeader(bool dx, const std::string& kind) {
+  Bytes header{'X','E','P','S'};
+  Put(header,dx?(kind=="rov"?0x4f525844:0x54525844):(kind=="fsi"?1:0),4);
+  const auto version = VersionBytes(dx?kD3D12RecipeStorageVersion:kVulkanRecipeStorageVersion);
+  header.insert(header.end(),version.begin(),version.end());
+  return header;
+}
+bool ParseRecipes(const Bytes& data, const Bytes& header, size_t stride,
+                  std::map<uint64_t,Bytes>* out) {
+  out->clear();
+  if (data.size() < 12 || !std::equal(header.begin(),header.end(),data.begin()) ||
+      (data.size()-12) % stride != 0) return false;
+  for (size_t p = 12; p < data.size(); p += stride) {
+    const auto hash = LE(data,p,8);
+    Bytes raw(data.begin()+p+8,data.begin()+p+stride);
+    if (XXH3_64bits(raw.data(),raw.size()) != hash) return false;
+    (*out)[hash] = std::move(raw);
+  }
+  return true;
+}
+Bytes RecipeStore(const Bytes& header, const std::map<uint64_t,Bytes>& records) {
+  Bytes bytes = header;
+  for (const auto& [hash,raw] : records) { Put(bytes,hash,8); bytes.insert(bytes.end(),raw.begin(),raw.end()); }
+  return bytes;
+}
+// Writes `bytes` to `file` only if they differ, then reads the file back and
+// requires it to parse with the expected record count. A layer is never
+// announced as reusable without this second reading.
+void PublishShaders(const std::filesystem::path& file, const Bytes& bytes, const Bytes& header,
+                    size_t expected) {
+  Save(file,bytes);
+  std::map<std::pair<uint64_t,bool>,Bytes> parsed;
+  Require(ParseShaders(ReadCache(file),header,&parsed) && parsed.size() == expected,
+          "a rebuilt shader layer did not verify");
+}
+void PublishRecipes(const std::filesystem::path& file, const Bytes& bytes, const Bytes& header,
+                    size_t stride, size_t expected) {
+  Save(file,bytes);
+  std::map<uint64_t,Bytes> parsed;
+  Require(ParseRecipes(ReadCache(file),header,stride,&parsed) && parsed.size() == expected,
+          "a rebuilt recipe layer did not verify");
+}
 }
 
-void SeedPreparation(const std::string& text, const std::filesystem::path& cache,
-                     const AssetReader& read, std::span<const uint8_t> image,
-                     const std::function<bool()>& cancelled) {
+SeedReport SeedPreparation(const std::string& text, const std::filesystem::path& cache,
+                           const AssetReader& read, std::span<const uint8_t> image,
+                           const std::function<bool()>& cancelled,
+                           const PreparationInputs& inputs, uint64_t content_epoch,
+                           std::string* persistence_error) {
   const auto manifest = Json::parse(text);
   Require(manifest.at("schema") == 1 && manifest.at("title_id") == "5841122D", "unsupported preparation manifest");
   const auto root = cache / "shaders" / "shareable";
   std::filesystem::create_directories(root);
+  const Bytes shader_header = {'X','E','S','H',0x20,0x20,0x12,0x19};
+  PreparationLedger ledger;
+  std::string ledger_reason;
+  ledger.Load(cache,&ledger_reason);
+  ledger.content_epoch = std::max(ledger.content_epoch,content_epoch);
+  SeedReport report;
+
+  // --- Layer 1: local shader extraction, from installed content.
+  const auto xsh_file = root / "5841122D.xsh";
   std::map<std::pair<uint64_t,bool>,Bytes> shaders;
-  const Bytes old = ReadCache(root / "5841122D.xsh");
-  const Bytes header = {'X','E','S','H',0x20,0x20,0x12,0x19};
-  if (!old.empty()) {
-    Require(old.size() >= 8 && std::equal(header.begin(),header.end(),old.begin()), "unsupported local shader storage");
-    for (size_t p = 8; p < old.size();) {
-      const auto hash = LE(old,p,8), packed = LE(old,p+8,4);
-      const size_t size = (packed & 0x7fffffff) * 4;
-      Require(size && size <= 65536 && size <= old.size()-std::min(old.size(),p+12), "invalid local shader extent");
-      Bytes code(old.begin()+p+12,old.begin()+p+12+size);
-      Require(XXH3_64bits(code.data(),code.size()) == hash, "local shader hash mismatch");
-      shaders[{hash,bool(packed>>31)}] = std::move(code);
-      p += 12+size;
-    }
+  const bool extraction_recorded = ledger.extraction.complete &&
+      ledger.extraction.ExtractionValid(inputs);
+  const Bytes previous_shaders = ReadCache(xsh_file);
+  if (!previous_shaders.empty()) {
+    const bool parsed = ParseShaders(previous_shaders,shader_header,&shaders);
+    const bool counted = parsed && shaders.size() == ledger.extraction.entries;
+    if (extraction_recorded && counted) report.extraction_reused = true;
+    else { if (!parsed) shaders.clear(); ++report.repaired_layers; }
+  } else if (extraction_recorded) {
+    // The ledger said the layer was complete but its file is gone.
+    ++report.repaired_layers;
   }
-  std::map<std::string,Bytes> assets;
-  for (const auto& source : manifest.at("sources")) {
-    if (cancelled()) throw std::runtime_error("preparation cancelled");
-    const uint64_t hash = Hex(source.at("hash"));
-    const bool pixel = source.at("stage") == "pixel";
-    if (shaders.contains({hash,pixel})) continue;
-    const std::string asset = source.at("asset");
-    std::span<const uint8_t> data = image;
-    if (asset != "default.xex") {
-      if (!assets.contains(asset)) assets[asset] = read(asset);
-      data = assets.at(asset);
-      Require(data.size() == manifest.at("assets").at(asset).at("bytes"), "installed shader asset changed");
-    }
-    const size_t p = source.at("offset"), size = source.at("bytes");
-    Require(size && size <= 65536 && p <= data.size() && size <= data.size()-p, "invalid shader locator");
-    Bytes code(data.begin()+p,data.begin()+p+size);
-    if (source.contains("vertex_layout")) code = Link(std::move(code),source,manifest,image);
-    Require(XXH3_64bits(code.data(),code.size()) == hash, "installed shader identity mismatch");
-    shaders[{hash,pixel}] = std::move(code);
-  }
-  Bytes xsh = header;
-  for (const auto& [key, code] : shaders) {
-    Put(xsh,key.first,8); Put(xsh,(key.second?0x80000000u:0u)|uint32_t(code.size()/4),4);
-    xsh.insert(xsh.end(),code.begin(),code.end());
-  }
-  if (cancelled()) throw std::runtime_error("preparation cancelled");
-  Save(root / "5841122D.xsh",xsh);
-  for (const auto& [path, recipes] : manifest.at("paths").items()) {
-    const bool dx = path.starts_with("d3d12/");
-    const std::string kind = path.substr(path.find('/')+1);
-    const size_t stride = dx ? 72 : 68;
-    Bytes xpso{'X','E','P','S'};
-    Put(xpso,dx?(kind=="rov"?0x4f525844:0x54525844):(kind=="fsi"?1:0),4);
-    xpso.insert(xpso.end(),{0x20,0x26,0x02,uint8_t(dx?0x26:0x28)});
-    const auto file = root / ("5841122D."+kind+(dx?".d3d12.xpso":".vk.xpso"));
-    const auto previous = ReadCache(file);
-    std::map<uint64_t,Bytes> records;
-    if (!previous.empty()) {
-      Require(previous.size() >= 12 && std::equal(xpso.begin(),xpso.end(),previous.begin()) && (previous.size()-12)%stride==0,
-              "unsupported local recipe storage");
-      for (size_t p = 12; p < previous.size(); p += stride) {
-        const auto hash = LE(previous,p,8);
-        Bytes raw(previous.begin()+p+8,previous.begin()+p+stride);
-        Require(XXH3_64bits(raw.data(),raw.size())==hash,"local recipe hash mismatch");
-        records[hash] = std::move(raw);
+  if (!report.extraction_reused) {
+    std::map<std::string,Bytes> assets;
+    for (const auto& source : manifest.at("sources")) {
+      if (cancelled()) throw std::runtime_error("preparation cancelled");
+      const uint64_t hash = Hex(source.at("hash"));
+      const bool pixel = source.at("stage") == "pixel";
+      if (shaders.contains({hash,pixel})) continue;
+      const std::string asset = source.at("asset");
+      std::span<const uint8_t> data = image;
+      if (asset != "default.xex") {
+        if (!assets.contains(asset)) assets[asset] = read(asset);
+        data = assets.at(asset);
+        Require(data.size() == manifest.at("assets").at(asset).at("bytes"), "installed shader asset changed");
       }
+      const size_t p = source.at("offset"), size = source.at("bytes");
+      Require(size && size <= 65536 && p <= data.size() && size <= data.size()-p, "invalid shader locator");
+      Bytes code(data.begin()+p,data.begin()+p+size);
+      if (source.contains("vertex_layout")) code = Link(std::move(code),source,manifest,image);
+      Require(XXH3_64bits(code.data(),code.size()) == hash, "installed shader identity mismatch");
+      shaders[{hash,pixel}] = std::move(code);
     }
-    for (const auto& recipe : recipes) {
+  }
+
+  // --- Layer 2: portable recipes, one store per declared rendering path.
+  struct RecipePlan {
+    size_t index = 0;
+    bool dx = false;
+    size_t stride = 0;
+    Bytes header;
+    std::filesystem::path file;
+    std::map<uint64_t,Bytes> records;
+    bool reuse = false;
+  };
+  std::vector<RecipePlan> plans;
+  for (const auto& [path, recipes] : manifest.at("paths").items()) {
+    const size_t index = PreparationPathIndex(path);
+    Require(index < kPreparationPathCount, "undeclared rendering path in the preparation manifest");
+    RecipePlan plan;
+    plan.index = index;
+    plan.dx = path.starts_with("d3d12/");
+    plan.stride = plan.dx ? 72 : 68;
+    const std::string kind = path.substr(path.find('/')+1);
+    plan.header = RecipeHeader(plan.dx,kind);
+    plan.file = root / ("5841122D."+kind+(plan.dx?".d3d12.xpso":".vk.xpso"));
+    const bool recorded = ledger.recipes[index].complete &&
+        ledger.recipes[index].RecipesValid(inputs,plan.dx);
+    const Bytes previous = ReadCache(plan.file);
+    if (!previous.empty()) {
+      const bool parsed = ParseRecipes(previous,plan.header,plan.stride,&plan.records);
+      const bool counted = parsed && plan.records.size() == ledger.recipes[index].entries;
+      if (recorded && counted) plan.reuse = true;
+      else { if (!parsed) plan.records.clear(); ++report.repaired_layers; }
+    } else if (recorded) ++report.repaired_layers;
+    if (!plan.reuse) for (const auto& recipe : recipes) {
       auto raw = Unhex(recipe.at("raw"));
       const auto hash = Hex(recipe.at("hash"));
-      Require(raw.size()==stride-8 && XXH3_64bits(raw.data(),raw.size())==hash,"invalid portable recipe");
-      Require(!records.contains(hash) || records.at(hash)==raw,"recipe hash collision");
-      records[hash] = std::move(raw);
+      Require(raw.size()==plan.stride-8 && XXH3_64bits(raw.data(),raw.size())==hash,"invalid portable recipe");
+      Require(!plan.records.contains(hash) || plan.records.at(hash)==raw,"recipe hash collision");
+      plan.records[hash] = std::move(raw);
     }
-    for (const auto& [hash,raw] : records) { Put(xpso,hash,8); xpso.insert(xpso.end(),raw.begin(),raw.end()); }
-    if (cancelled()) throw std::runtime_error("preparation cancelled");
-    Save(file,xpso);
+    plans.push_back(std::move(plan));
   }
+
+  // Every layer that is about to be rewritten is marked incomplete *before* its
+  // file is touched, so a crash or a cancelled write can never leave a valid
+  // claim behind for a half-written store.
+  const bool rewriting = !report.extraction_reused ||
+      std::any_of(plans.begin(),plans.end(),[](const RecipePlan& p) { return !p.reuse; });
+  if (rewriting) {
+    ledger.extraction.complete = report.extraction_reused;
+    for (const auto& plan : plans) ledger.recipes[plan.index].complete = plan.reuse;
+    std::string ignored;
+    ledger.Save(cache,&ignored);
+  }
+
+  if (!report.extraction_reused) {
+    Bytes xsh = shader_header;
+    for (const auto& [key, code] : shaders) {
+      Put(xsh,key.first,8); Put(xsh,(key.second?0x80000000u:0u)|uint32_t(code.size()/4),4);
+      xsh.insert(xsh.end(),code.begin(),code.end());
+    }
+    if (cancelled()) throw std::runtime_error("preparation cancelled");
+    PublishShaders(xsh_file,xsh,shader_header,shaders.size());
+    ledger.extraction.complete = true;
+    ledger.extraction.catalogue = inputs.catalogue;
+    ledger.extraction.content = inputs.content;
+    ledger.extraction.executable = inputs.executable;
+    ledger.extraction.entries = shaders.size();
+  }
+  report.shaders = shaders.size();
+
+  for (auto& plan : plans) {
+    if (plan.reuse) {
+      report.recipes_reused[plan.index] = true;
+    } else {
+      if (cancelled()) throw std::runtime_error("preparation cancelled");
+      PublishRecipes(plan.file,RecipeStore(plan.header,plan.records),plan.header,plan.stride,
+                     plan.records.size());
+      ledger.recipes[plan.index].complete = true;
+      ledger.recipes[plan.index].catalogue = inputs.catalogue;
+      ledger.recipes[plan.index].content = inputs.content;
+      ledger.recipes[plan.index].executable = inputs.executable;
+      ledger.recipes[plan.index].d3d12_version = inputs.d3d12_version;
+      ledger.recipes[plan.index].vulkan_version = inputs.vulkan_version;
+      ledger.recipes[plan.index].entries = plan.records.size();
+    }
+    report.records[plan.index] = ledger.recipes[plan.index].entries;
+  }
+
+  // The ledger is the reusable result and is announced only after every layer
+  // above verified. A failed write is a persistence fact, not a preparation
+  // failure: the live pipelines exist either way.
+  std::string persistence;
+  report.persisted = ledger.Save(cache,&persistence);
+  if (!report.persisted && persistence_error) *persistence_error = persistence;
+  return report;
 }
 }

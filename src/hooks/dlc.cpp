@@ -86,6 +86,7 @@
 
 #include "fs/dlc_layout.h"
 #include "fs/dlc_library.h"
+#include "graphics/preparation_loading.h"
 #include "fs/dlc_cache.h"
 #include "fs/dlc_cached_library.h"
 #include <chrono>
@@ -664,6 +665,16 @@ void PublishPendingRefresh() {
     return;
   }
   content_manager->set_extra_content_library(std::move(items));
+  // P7: a published list is the one place every content change passes through -
+  // the boot scan, a requested refresh and a store install (whose callback is
+  // RefreshAfterStoreInstall). Compare as sets, because a rescan may order the
+  // same packages differently, and only a real change retires readiness.
+  const bool content_changed = [&] {
+    auto before = g_package_paths, after = paths;
+    std::sort(before.begin(), before.end());
+    std::sort(after.begin(), after.end());
+    return before != after;
+  }();
   g_content_count = g_structured_paths.size() + count;
   g_package_paths = std::move(paths);
   // The list just changed, so the store's Downloaded index (§3.2) is stale: drop it rather than
@@ -672,6 +683,8 @@ void PublishPendingRefresh() {
   // After the list is in place, never before: everything that waits on a refresh waits for
   // this to clear.
   g_refresh_publishing.store(false);
+  if (content_changed)
+    rb_blitz::graphics::NoteContentChanged("the DLC library changed");
   REXLOG_INFO("dlc: refreshed the running title's DLC library: {} package(s) in {}", count,
               JoinLibraryRoots(g_library_roots));
 }

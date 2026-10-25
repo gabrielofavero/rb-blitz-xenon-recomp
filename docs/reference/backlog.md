@@ -87,6 +87,30 @@ that name an action.
 
 ## 4. Deferred, with no design yet
 
+- [ ] **The Vulkan presenter rebuilds its guest-output paint pipeline on every present**
+      (measured 2026-10-25, P8's `-vulkan-ultimate-fbo-cold`):
+      `rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp:2653` calls
+      `vkCreateGraphicsPipelines` each time instead of keeping the handle, so one run
+      logged **2,026 creations of one identity** (~100 us each, up to 2.3 ms, 209 ms of
+      the song's 86.6 s). Nothing is wrong on screen - frames held 29.46 ms mean with a
+      33.63 ms worst - so this is waste, not a race. The fix is to memoize the
+      `VkPipeline` per `(effect, intermediate)` in the presenter and destroy them with
+      the device. Patch-driven, so it lands as a `patches/rexglue-sdk/` entry like every
+      other SDK change. Evidence: [shader-cache.md](../engine/shader-cache.md) part 8.
+- [ ] **The compile trace cannot report how many distinct helper identities a phase
+      used.** Detail lines are suppressed once the detail limit is spent, and the
+      suppressed lines on Vulkan are exactly the ones a reader needs, so the P8
+      acceptance has to reason from **totals** (and says so). A per-(phase, event)
+      distinct-key count in the `shader_trace: summary` line would turn "1,473 helper
+      calls, no new identity" from an inference into a measurement. Small change to
+      `rex::graphics::compile_trace`, one more field in the P8 report parser.
+
+Framerate expansion has a [feasibility study and implementation plan](../plans/todo/2026-10-25-framerate-expansion-plan.md)
+as of 2026-10-25. It is no longer undesigned: implementation remains pending,
+with 120 FPS the first high-rate candidate and no safe upper ceiling established.
+The older "unlocked frame rate" deferral below is superseded by
+that plan; it does not claim that a high-rate mode has shipped.
+
 - [ ] **Pin the sheet format and offset, then a reskin is a two-command job.** The claim
       that this already worked is withdrawn ? the pixel diffs it rested on were the animated
       backgrounds, not the art ([assets.md](../guides/assets.md) "Where the art would have to live,
