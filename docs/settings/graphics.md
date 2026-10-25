@@ -913,6 +913,43 @@ runtime checks plus 316 arithmetic checks. Evidence:
 `out/_scratch/hud-worldxfm/hud-cached-draw-tests.log`. The owner will perform
 the next in-game check; this follow-up has no new gameplay capture yet.
 
+#### 9.2.8 Personal-best comparison submitted independently (2026-10-25)
+
+**Owner report:** the score-comparison progress meter (`Your Best` / `You`) still
+appeared at its 16:9 position. The preceding run's normal log has pre-draw
+placements for the band meter, letter row and star board, but none for
+`dynamic_leaderboard` (`out/build/win-amd64-release/logs/rb_blitz_336.log`).
+
+**Source:** `assets/game/360/ulti/gen/ulti_game_enter.dtb` explicitly adds the
+leaderboard's `draw.grp` directly to the main `hud.grp` in its offline personal-
+best branch. That submits the art without entering the named leaderboard dir's
+own draw. The previous pre-draw gate accepted only the named anchor itself,
+so a clean leaderboard cache could bypass placement. A container's transform
+parent and its owning ObjectDir are independent; its member art can inherit
+the leaderboard position even when `draw.grp` itself has no transform parent.
+
+`PrepareHudDraw` in `src/hooks/hud_layout_runtime.cpp` now visits the drawn
+object's bounded live directory chain and transform-parent chain. Owning HUD
+anchors and transform ancestors resolve from parent to child before the art
+is consumed. Existing class/offset/name/HUD-path guards still determine which
+objects move. No scene search or persistent instance cache was added, and
+unchanged world matrices still avoid descendant invalidation. This also keeps
+nested named anchors from applying the horizontal correction twice.
+
+**Host regression:** the directly drawn comparison fixture reproduced the
+missing correction before the change (`out/_scratch/hud-worldxfm/comparison-before.log`).
+Coverage includes an already cached leaderboard, direct group submission,
+repeated draws, reopening/child animation, independent group ownership and
+nested named anchors. The synthetic fixture uses the production hooks with
+a stand-in guest evaluator; it is not a gameplay capture. The owner's next
+in-song comparison check remains pending.
+
+**Validation (2026-10-25):** `cmake --build --preset win-amd64-release`
+succeeded; both HUD tests pass, with 20,447 runtime checks plus 316 arithmetic
+checks (`out/_scratch/hud-worldxfm/comparison-after.log`). Documentation checks
+have the same 40 errors as HEAD and no added errors
+(`out/_scratch/hud-worldxfm/docs-comparison-meter.json`).
+
 #### 9.3 The policy seam (done, tested)
 
 **Runtime update 2026-10-24:** arithmetic is unchanged; §9.2.7 replaces the runtime seams described in the historical paragraph below.

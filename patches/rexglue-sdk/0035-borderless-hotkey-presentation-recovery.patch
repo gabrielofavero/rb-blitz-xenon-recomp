@@ -1,0 +1,291 @@
+diff --git a/include/rex/ui/window.h b/include/rex/ui/window.h
+--- a/include/rex/ui/window.h
++++ b/include/rex/ui/window.h
+@@ -273,6 +273,9 @@
+   // by the implementation (including from SetFullscreen itself).
+   bool IsFullscreen() const { return fullscreen_; }
+   void SetFullscreen(bool new_fullscreen);
++  // Ordinary undecorated desktop-sized window, mutually exclusive with fullscreen.
++  bool IsBorderless() const { return borderless_; }
++  void SetBorderless(bool new_borderless);
+ 
+   // Desired state stored by the common Window, externally modifiable, read-only
+   // in the implementation.
+@@ -712,6 +715,7 @@
+   uint32_t actual_physical_height_ = 0;
+ 
+   bool fullscreen_ = false;
++  bool borderless_ = false;
+ 
+   std::string title_;
+ 
+diff --git a/include/rex/ui/window_sdl.h b/include/rex/ui/window_sdl.h
+--- a/include/rex/ui/window_sdl.h
++++ b/include/rex/ui/window_sdl.h
+@@ -70,6 +70,8 @@
+   // event handler.
+   void PerformClose();
+   void DestroySDLWindow();
++  void ApplyDisplayModeNow();
++  void LogDisplayMode() const;
+ 
+   void ApplyCursorVisibilityNow();
+   void ApplyTextInputActiveNow();
+@@ -81,6 +83,10 @@
+ 
+   SDL_Window* sdl_window_ = nullptr;
+   SDL_WindowID sdl_window_id_ = 0;
++  // SDL's fullscreen restore geometry doesn't cover ordinary borderless mode.
++  SDL_Rect windowed_bounds_{};
++  bool desktop_mode_applied_ = false;
++  SDL_Scancode display_toggle_key_ = SDL_SCANCODE_UNKNOWN;
+   std::atomic<bool> paint_pending_{false};
+   // Auto-hide cursor bookkeeping (CursorVisibility::kAutoHidden).
+   SDL_TimerID cursor_hide_timer_ = 0;
+diff --git a/include/rex/ui/presenter.h b/include/rex/ui/presenter.h
+--- a/include/rex/ui/presenter.h
++++ b/include/rex/ui/presenter.h
+@@ -333,7 +333,8 @@
+   // May be called from the destructor of the presenter through the window.
+   void SetWindowSurfaceFromUIThread(Window* new_window, Surface* new_surface);
+   void OnSurfaceMonitorUpdateFromUIThread(bool old_monitor_potentially_disconnected);
+-  void OnSurfaceResizeFromUIThread();
++  // force_reconnect also refreshes a same-size connection after focus returns.
++  void OnSurfaceResizeFromUIThread(bool force_reconnect = false);
+ 
+   // For calling from the platform paint event handler. Refreshes the surface
+   // connection if needed, and also paints if possible and if needed (if there
+diff --git a/src/ui/window.cpp b/src/ui/window.cpp
+--- a/src/ui/window.cpp
++++ b/src/ui/window.cpp
+@@ -294,6 +294,9 @@
+     return;
+   }
+   fullscreen_ = new_fullscreen;
++  if (new_fullscreen) {
++    borderless_ = false;
++  }
+   if (!CanApplyState()) {
+     return;
+   }
+@@ -302,6 +305,21 @@
+   if (destruction_receiver.IsWindowDestroyedOrStateInapplicable()) {
+     return;
+   }
++}
++
++void Window::SetBorderless(bool new_borderless) {
++  if (borderless_ == new_borderless) {
++    return;
++  }
++  borderless_ = new_borderless;
++  if (new_borderless) {
++    fullscreen_ = false;
++  }
++  if (!CanApplyState()) {
++    return;
++  }
++  // Both flags are updated before the platform applies the compound mode.
++  ApplyNewFullscreen();
+ }
+ 
+ void Window::SetTitle(const std::string_view new_title) {
+@@ -587,6 +605,11 @@
+     return;
+   }
+   has_focus_ = new_has_focus;
++  if (has_focus_ && presenter_surface_) {
++    // Capture/task switching can change the presentation path without resizing
++    // the HWND. Reconnect even when the surface dimensions stayed the same.
++    presenter_->OnSurfaceResizeFromUIThread(true);
++  }
+   UISetupEvent e(this);
+   if (has_focus_) {
+     SendEventToListeners([&e](auto listener) { listener->OnGotFocus(e); }, destruction_receiver);
+diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
+--- a/src/ui/window_sdl.cpp
++++ b/src/ui/window_sdl.cpp
+@@ -191,22 +191,8 @@
+     }
+   }
+ 
+-  if (IsFullscreen()) {
+-    // Borderless desktop fullscreen (a NULL display mode is SDL3's default).
+-    SDL_SetWindowFullscreen(sdl_window_, true);
+-  } else if (REXCVAR_GET(borderless)) {
+-    // ReXGlue addition (2026-10-13): the Display row's Borderless mode - an undecorated window
+-    // covering the display's own bounds, without entering SDL's fullscreen state (so the window
+-    // stays an ordinary window that alt-tab and other windows treat as one).
+-    SDL_SetWindowBordered(sdl_window_, false);
+-    if (SDL_DisplayID display = SDL_GetDisplayForWindow(sdl_window_)) {
+-      SDL_Rect bounds{};
+-      if (SDL_GetDisplayBounds(display, &bounds)) {
+-        SDL_SetWindowPosition(sdl_window_, bounds.x, bounds.y);
+-        SDL_SetWindowSize(sdl_window_, bounds.w, bounds.h);
+-      }
+-    }
+-  }
++  desktop_mode_applied_ = false;
++  ApplyDisplayModeNow();
+ #if REX_PLATFORM_MAC
+   CFPreferencesSetAppValue(CFSTR("ApplePressAndHoldEnabled"), kCFBooleanFalse,
+                            kCFPreferencesCurrentApplication);
+@@ -338,7 +324,54 @@
+   if (!sdl_window_) {
+     return;
+   }
+-  SDL_SetWindowFullscreen(sdl_window_, IsFullscreen());
++  ApplyDisplayModeNow();
++}
++
++void WindowSDL::ApplyDisplayModeNow() {
++  const bool desktop_mode = IsFullscreen() || IsBorderless();
++  if (!desktop_mode_applied_) {
++    SDL_GetWindowPosition(sdl_window_, &windowed_bounds_.x, &windowed_bounds_.y);
++    SDL_GetWindowSize(sdl_window_, &windowed_bounds_.w, &windowed_bounds_.h);
++  }
++  if (IsFullscreen()) {
++    // Desktop fullscreen, without requesting an exclusive display mode.
++    if (!SDL_SetWindowFullscreen(sdl_window_, true)) {
++      REXLOG_ERROR("SDL_SetWindowFullscreen failed: {}", SDL_GetError());
++    }
++  } else {
++    if ((SDL_GetWindowFlags(sdl_window_) & SDL_WINDOW_FULLSCREEN) &&
++        !SDL_SetWindowFullscreen(sdl_window_, false)) {
++      REXLOG_ERROR("Leaving SDL fullscreen failed: {}", SDL_GetError());
++      return;
++    }
++    if (IsBorderless()) {
++      SDL_Rect bounds{};
++      const SDL_DisplayID display = SDL_GetDisplayForWindow(sdl_window_);
++      if (!display || !SDL_GetDisplayBounds(display, &bounds)) {
++        REXLOG_ERROR("Getting borderless display bounds failed: {}", SDL_GetError());
++        return;
++      }
++      SDL_SetWindowBordered(sdl_window_, false);
++      SDL_SetWindowPosition(sdl_window_, bounds.x, bounds.y);
++      SDL_SetWindowSize(sdl_window_, bounds.w, bounds.h);
++    } else if (desktop_mode_applied_) {
++      SDL_SetWindowBordered(sdl_window_, true);
++      SDL_SetWindowSize(sdl_window_, windowed_bounds_.w, windowed_bounds_.h);
++      SDL_SetWindowPosition(sdl_window_, windowed_bounds_.x, windowed_bounds_.y);
++    }
++  }
++  desktop_mode_applied_ = desktop_mode;
++  LogDisplayMode();
++}
++
++void WindowSDL::LogDisplayMode() const {
++  int width = 0, height = 0;
++  SDL_GetWindowSizeInPixels(sdl_window_, &width, &height);
++  const SDL_WindowFlags flags = SDL_GetWindowFlags(sdl_window_);
++  REXLOG_INFO("Window mode: requested={} SDL fullscreen={} bordered={} pixels={}x{}",
++              IsFullscreen() ? "fullscreen" : IsBorderless() ? "borderless" : "windowed",
++              (flags & SDL_WINDOW_FULLSCREEN) != 0, (flags & SDL_WINDOW_BORDERLESS) == 0,
++              width, height);
+ }
+ 
+ void WindowSDL::ApplyNewTitle() {
+@@ -493,7 +526,8 @@
+       // Track the user-driven size as the desired size for the normal state
+       // only (mirrors the Win32 WM_SIZE handling).
+       SDL_WindowFlags flags = SDL_GetWindowFlags(sdl_window_);
+-      if (!(flags & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MINIMIZED))) {
++      if (!IsBorderless() && !IsFullscreen() &&
++          !(flags & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MINIMIZED))) {
+ #if REX_PLATFORM_MAC
+         // Cocoa reports the client size in logical points. Converting it from
+         // the backing DPI a second time would halve the desired size on Retina
+@@ -517,9 +551,11 @@
+       break;
+     }
+     case SDL_EVENT_WINDOW_FOCUS_GAINED:
++      LogDisplayMode();
+       OnFocusUpdate(true, destruction_receiver);
+       break;
+     case SDL_EVENT_WINDOW_FOCUS_LOST:
++      display_toggle_key_ = SDL_SCANCODE_UNKNOWN;
+       OnFocusUpdate(false, destruction_receiver);
+       break;
+     case SDL_EVENT_WINDOW_EXPOSED:
+@@ -552,6 +588,28 @@
+ }
+ 
+ void WindowSDL::HandleKeyEvent(SDL_Event& event) {
++  // Handle before guest/overlay listeners, and consume repeats and releases so
++  // Enter cannot also activate a menu item or repeatedly toggle the window.
++  if (event.key.scancode == display_toggle_key_) {
++    if (event.type == SDL_EVENT_KEY_UP) {
++      display_toggle_key_ = SDL_SCANCODE_UNKNOWN;
++    }
++    return;
++  }
++  if (event.key.scancode == SDL_SCANCODE_RETURN ||
++      event.key.scancode == SDL_SCANCODE_KP_ENTER) {
++    if (event.type == SDL_EVENT_KEY_DOWN && (event.key.mod & SDL_KMOD_ALT)) {
++      display_toggle_key_ = event.key.scancode;
++      if (!event.key.repeat) {
++        if (IsFullscreen()) {
++          SetFullscreen(false);
++        } else {
++          SetBorderless(!IsBorderless());
++        }
++      }
++      return;
++    }
++  }
+   VirtualKey virtual_key = TranslateSDLScancode(event.key.scancode);
+   if (virtual_key == VirtualKey::kNone) {
+     return;
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -349,6 +349,8 @@
+ 
+   if (REXCVAR_GET(fullscreen)) {
+     window_->SetFullscreen(true);
++  } else {
++    window_->SetBorderless(REXCVAR_GET(borderless));
+   }
+   rex::cvar::RegisterChangeCallback("fullscreen", [this](std::string_view, std::string_view value) {
+     if (window_) {
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -387,7 +387,7 @@
+   UpdateSurfaceMonitorFromUIThread(old_monitor_potentially_disconnected);
+ }
+ 
+-void Presenter::OnSurfaceResizeFromUIThread() {
++void Presenter::OnSurfaceResizeFromUIThread(bool force_reconnect) {
+   // No intrusive lifetime management must be performed from UI drawers - defer
+   // it if needed.
+   assert_false(is_executing_ui_drawers_);
+@@ -404,6 +404,12 @@
+   // if it becomes available during the resize.
+   if (paint_mode_ == PaintMode::kGuestOutputThreadImmediately) {
+     SetPaintModeFromUIThread(PaintMode::kUIThreadOnRequest);
++  }
++
++  if (force_reconnect &&
++      surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedPaintable) {
++    REXLOG_INFO("Presenter: Refreshing presentation after window focus returned");
++    surface_paint_connection_state_ = SurfacePaintConnectionState::kConnectedOutdated;
+   }
+ 
+   bool request_repaint;
+diff --git a/src/ui/d3d12/d3d12_presenter.cpp b/src/ui/d3d12/d3d12_presenter.cpp
+--- a/src/ui/d3d12/d3d12_presenter.cpp
++++ b/src/ui/d3d12/d3d12_presenter.cpp
+@@ -1164,6 +1164,11 @@
+   // Discord server.
+   paint_context_.present_submission_tracker.NextSubmission();
+   switch (present_result) {
++    case DXGI_STATUS_MODE_CHANGED:
++      REXLOG_INFO("D3D12Presenter: Display mode changed; refreshing swap chain");
++      return PaintResult::kNotPresentedConnectionOutdated;
++    case DXGI_STATUS_MODE_CHANGE_IN_PROGRESS:
++      return PaintResult::kNotPresented;
+     case DXGI_ERROR_DEVICE_REMOVED:
+       return PaintResult::kGpuLostExternally;
+     case DXGI_ERROR_DEVICE_RESET:

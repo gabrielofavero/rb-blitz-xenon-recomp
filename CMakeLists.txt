@@ -713,6 +713,10 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_window_policy_tests PRIVATE src)
     add_test(NAME window_policy COMMAND rb_blitz_window_policy_tests)
 
+    add_executable(rb_blitz_display_mode_tests tests/display_mode_tests.cpp)
+    target_link_libraries(rb_blitz_display_mode_tests PRIVATE rex::runtime)
+    add_test(NAME display_mode COMMAND rb_blitz_display_mode_tests)
+
     add_executable(rb_blitz_path_policy_tests
         tests/path_policy_tests.cpp
     )

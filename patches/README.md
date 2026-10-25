@@ -375,3 +375,15 @@ product choice. Host tests cover the actual completion queue with delayed and
 concurrent workers. Gameplay verification and synchronous first-use costs remain
 open; see [the P8 record](../docs/engine/shader-cache.md) (part 8).
 
+`0035-borderless-hotkey-presentation-recovery.patch` adds the missing Alt+Enter
+Windowed/Borderless toggle, preserves windowed placement across desktop modes,
+and prevents borderless resize events from replacing the desired windowed size.
+Focus regain refreshes the existing presentation connection even without a size
+change; D3D12 mode-change status also requests recovery instead of being treated
+as ordinary success. Window mode and focus recovery are logged. Host tests cover
+the production key handler without opening a window. Capture slowdown recovery
+still needs runtime acceptance; see [display modes](../docs/engine/display-modes.md).
+Upstream candidate: the missing shortcut and DXGI status handling are general;
+unconditional focus-return reconnection is a defensive policy needing runtime
+validation.
+

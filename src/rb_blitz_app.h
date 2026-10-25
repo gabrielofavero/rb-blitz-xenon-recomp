@@ -125,6 +125,12 @@ class RbBlitzApp : public rex::ReXApp {
         PPCImageConfig));
   }
 
+  // Keep the SDK's internal name for config/save paths, and give the window
+  // its player-facing name while retaining the SDK build identification.
+  void OnOpened(rex::ui::UISetupEvent& event) override {
+    event.target()->SetTitle("Rock Band Blitz " REXGLUE_BUILD_TITLE);
+  }
+
   // Runtime/backend selection. Called before Runtime::Setup(); the GPU plugin
   // is loaded immediately after this hook returns, so set the plugin name here.
   // The `rexgpu-xenos` DLL is staged next to the executable via

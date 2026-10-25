@@ -171,39 +171,90 @@ double ActiveDelta() {
   return std::isfinite(delta) ? delta : 0.0;
 }
 
-// Draw code can consume clean cached matrices without ever entering WorldXfm.
-// Resolve a live named anchor before its descendants draw, even if it was cached
-// before loading assigned the HUD directory/path. There is no instance cache or
-// missing-object search: this is the actual drawable the guest is about to use.
+// A drawn group can be submitted independently of its owning ObjectDir (the
+// Ultimate personal-best path adds dynamic_leaderboard's draw.grp to hud.grp).
+// Identify the live transformable using the same measured class offsets; the
+// group itself need not have an anchor name.
+uint32_t TransformForHeader(const uint8_t* base, uint32_t header) {
+  if (!header) return 0;
+  const uint32_t vtable = U32(base, header);
+  for (const auto& known : kAnchors) {
+    if (vtable != known.vtable) continue;
+    const uint32_t transformable = uint32_t(int64_t(header) + known.transform_offset);
+    return HeapRange(transformable, 0xC0) && ObjectBase(base, transformable) == header
+               ? transformable : 0;
+  }
+  return 0;
+}
+
+void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
+                       const Anchor& anchor) {
+  // These bits affect logging only; no instance or placement state survives.
+  static thread_local std::array<bool, kAnchors.size()> reported{};
+  bool& seen = reported[size_t(&anchor - kAnchors.data())];
+  const uint32_t before = seen ? 0 : U32(base, transformable + kWorldX);
+  rex::CallFrame call(ctx);
+  call.ctx.r3.u32 = transformable;
+  sub_821F13D0(call.ctx, base);
+  if (!seen) {
+    seen = true;
+    const uint32_t after = U32(base, transformable + kWorldX);
+    float from, to;
+    std::memcpy(&from, &before, sizeof(from));
+    std::memcpy(&to, &after, sizeof(to));
+    REXLOG_INFO("hud_reanchor: pre-draw '{}' world x {:.3f} -> {:.3f} ({:08X})",
+                anchor.name, from, to, transformable);
+  }
+}
+
+// Clean matrices bypass WorldXfm in the guest's draw paths. Prepare every HUD
+// anchor in the drawn group's transform ancestry, from parent to child. This
+// also covers separately submitted comparison art whose anchor dir never draws.
+// Only the live parent chain is visited: no object search or persistent cache.
+void PrepareTransformAncestry(PPCContext& ctx, uint8_t* base, uint32_t current) {
+  std::array<uint32_t, kMaxParents> chain{};
+  size_t count = 0;
+  while (HeapRange(current, 0xC0) && count < chain.size()) {
+    for (size_t i = 0; i < count; ++i) {
+      if (chain[i] == current) return; // malformed cycle, never resolve it recursively
+    }
+    chain[count++] = current;
+    const uint32_t constraint = U32(base, current + kConstraint);
+    if (constraint != 0 && constraint != 1 && constraint != 2 && constraint != 10) break;
+    current = U32(base, current + kParent);
+  }
+  while (count != 0) {
+    const uint32_t transformable = chain[--count];
+    if (const Anchor* anchor = AnchorFor(base, transformable)) {
+      PrepareAnchorDraw(ctx, base, transformable, *anchor);
+    }
+  }
+}
+// A draw group's ownership and transform parent are independent. Its members
+// can belong to the comparison dir and inherit that dir's transform even when
+// draw.grp itself has no transform parent. Prepare named owning dirs as well.
 void PrepareHudDraw(PPCContext& ctx, uint8_t* base) {
   if (ActiveDelta() == 0.0) return;
   const uint32_t header = ObjectBase(base, ctx.r3.u32);
   if (!header) return;
-  const uint32_t vtable = U32(base, header);
-  for (const auto& anchor : kAnchors) {
-    if (vtable != anchor.vtable ||
-        !NameIs(base, U32(base, header + 32), anchor.name)) continue;
-    const uint32_t transformable = uint32_t(int64_t(header) + anchor.transform_offset);
-    if (AnchorFor(base, transformable) != &anchor) return;
-    // One normal-log observation per anchor helps verify the next owner run
-    // without requiring a diagnostic launch flag. These bits affect logging only.
-    static thread_local std::array<bool, kAnchors.size()> reported{};
-    bool& seen = reported[size_t(&anchor - kAnchors.data())];
-    const uint32_t before = seen ? 0 : U32(base, transformable + kWorldX);
-    rex::CallFrame call(ctx);
-    call.ctx.r3.u32 = transformable;
-    sub_821F13D0(call.ctx, base);
-    if (!seen) {
-      seen = true;
-      const uint32_t after = U32(base, transformable + kWorldX);
-      float from, to;
-      std::memcpy(&from, &before, sizeof(from));
-      std::memcpy(&to, &after, sizeof(to));
-      REXLOG_INFO("hud_reanchor: pre-draw '{}' world x {:.3f} -> {:.3f} ({:08X})",
-                  anchor.name, from, to, transformable);
-    }
-    return;
+  std::array<uint32_t, kMaxParents> owners{};
+  size_t count = 0;
+  uint32_t dir = U32(base, header + 36);
+  while (HeapRange(dir, 8) && count < owners.size()) {
+    const uint32_t object = ObjectBase(base, dir);
+    if (!object) break;
+    owners[count++] = TransformForHeader(base, object);
+    const uint32_t parent = U32(base, object + 36);
+    if (parent == dir) break;
+    dir = parent;
   }
+  while (count != 0) {
+    const uint32_t transformable = owners[--count];
+    if (transformable && AnchorFor(base, transformable)) {
+      PrepareTransformAncestry(ctx, base, transformable);
+    }
+  }
+  PrepareTransformAncestry(ctx, base, TransformForHeader(base, header));
 }
 }  // namespace
 

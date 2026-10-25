@@ -12,3 +12,35 @@
 #define IDI_RB_BLITZ 1
 
 IDI_RB_BLITZ ICON DISCARDABLE "assets\\icon\\blitz.ico"
+
+#include <winver.h>
+#include <rex/version.h>
+
+// Windows uses FileDescription for the friendly application name in Task
+// Manager. The version identifies the SDK build, as in the window title.
+1 VERSIONINFO
+ FILEVERSION REXGLUE_VERSION_MAJOR,REXGLUE_VERSION_MINOR,REXGLUE_VERSION_PATCH,REXGLUE_VERSION_TWEAK
+ PRODUCTVERSION REXGLUE_VERSION_MAJOR,REXGLUE_VERSION_MINOR,REXGLUE_VERSION_PATCH,REXGLUE_VERSION_TWEAK
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS 0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "Rock Band Blitz\0"
+            VALUE "FileVersion", REXGLUE_VERSION_STRING "\0"
+            VALUE "InternalName", "rb_blitz\0"
+            VALUE "OriginalFilename", "rb_blitz.exe\0"
+            VALUE "ProductName", "Rock Band Blitz\0"
+            VALUE "ProductVersion", REXGLUE_VERSION_STRING "\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

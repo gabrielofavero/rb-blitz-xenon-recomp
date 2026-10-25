@@ -33,7 +33,11 @@ and invalidates clean children only when the parent matrix changes; new host
 fixtures cover this missed case. The current build still needs an in-song
 hidden/visible comparison, startup,
 pause/resume and a second-song check. See [graphics.md](../settings/graphics.md)
-part 3 §9.2.7. The 2026-10-17 measurements below describe the earlier implementation.
+part 3 §9.2.7. **2026-10-25:** the personal-best comparison meter also bypassed
+its named parent's draw path. Pre-draw preparation now follows the submitted
+art's directory ownership and transform ancestors; host regressions cover
+this route, with the next gameplay comparison pending (§9.2.8). The
+2026-10-17 measurements below describe the earlier implementation.
 
 **Ultimate settings restart validation pending (2026-10-24):** the host adapter's
 rejection of native DTA pairs is fixed; Gold Star Progress now saves and reloads in

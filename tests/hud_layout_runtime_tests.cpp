@@ -346,6 +346,74 @@ int main() {
   Close(Float(placed_stars + 0x78), 270 + delta);
   CHECK_EQ(dirty_calls, old_dirty_calls);
 
+  BeginCase("personal-best comparison draws its group directly, bypassing the cached anchor dir");
+  Reset();
+  Word(kHud + 0x64, Text("loading.milo"));
+  const auto comparison = Make(0, shapes[4], 300);
+  const Shape comparison_group{"draw.grp", 0x82024C4C, -0x108, 0};
+  const auto comparison_draw = Make(1, comparison_group, 0, kHud, comparison);
+  const Shape best_label{"name.lbl", 0x8203A95C, 0x7C, 0};
+  const auto best_text = Make(2, best_label, 12, kHud, comparison_draw);
+  Resolve(best_text);
+  CHECK_EQ(memory[comparison + 189], 0);
+  CHECK_EQ(memory[comparison_draw + 189], 0);
+  CHECK_EQ(memory[best_text + 189], 0);
+  Word(kHud + 0x64, Text("track/hud.milo"));
+  drawn_child = best_text;
+  // ulti_game_enter attaches draw.grp straight to hud.grp: the directory's
+  // own DrawShowing is never entered on this route.
+  Draw(comparison_draw, comparison_group, true);
+  Close(drawn_x, 312 + delta);
+  Close(Float(comparison + 0x38), 300);
+  old_dirty_calls = dirty_calls;
+  for (unsigned frame = 0; frame < 100; ++frame) {
+    Draw(comparison_draw, comparison_group, true);
+    Close(drawn_x, 312 + delta);
+  }
+  CHECK_EQ(dirty_calls, old_dirty_calls);
+  // Reopening/comparison animation can update its child while the anchor stays clean.
+  Float(best_text + 0x38, 17); memory[best_text + 189] = 1;
+  Draw(comparison_draw, comparison_group, true);
+  Close(drawn_x, 317 + delta);
+
+  BeginCase("comparison draw group can own art without sharing its transform parent");
+  Reset();
+  Word(kHud + 0x64, Text("loading.milo"));
+  const auto owned_comparison = Make(0, shapes[4], 300);
+  // DynamicLeaderboard constructor: complete ObjectDir is 236 bytes before its
+  // transformable; the Hmx::Object view is another 436 bytes after that base.
+  const auto comparison_dir = owned_comparison - 236;
+  const auto comparison_header = owned_comparison + 0x1B4;
+  ObjectView(comparison_dir, comparison_header);
+  const auto independent_draw = Make(1, comparison_group, 0, comparison_dir);
+  const auto owned_text = Make(2, best_label, 12, comparison_dir, owned_comparison);
+  Resolve(owned_text);
+  Resolve(independent_draw);
+  Word(kHud + 0x64, Text("track/hud.milo"));
+  drawn_child = owned_text;
+  Draw(independent_draw, comparison_group, true);
+  Close(drawn_x, 312 + delta);
+  Close(Float(independent_draw + 0x78), 0); // container stays authored, art inherits its dir
+  old_dirty_calls = dirty_calls;
+  Draw(independent_draw, comparison_group, true);
+  Close(drawn_x, 312 + delta);
+  CHECK_EQ(dirty_calls, old_dirty_calls);
+
+  BeginCase("direct group draw prepares nested named anchors in parent-first order");
+  Reset();
+  Word(kHud + 0x64, Text("loading.milo"));
+  const auto comparison_parent = Make(0, shapes[4], 300);
+  const auto nested_anchor = Make(1, shapes[0], 15, kHud, comparison_parent);
+  const auto nested_group = Make(2, comparison_group, 2, kHud, nested_anchor);
+  const auto nested_text = Make(3, best_label, 5, kHud, nested_group);
+  Resolve(nested_text);
+  Word(kHud + 0x64, Text("track/hud.milo"));
+  drawn_child = nested_text;
+  Draw(nested_group, comparison_group, true);
+  Close(drawn_x, 322 + delta);
+  Close(Float(comparison_parent + 0x78), 300 + delta);
+  Close(Float(nested_anchor + 0x78), 315 + delta);
+
   BeginCase("retired scan flag performs no search and invalid path pointers are rejected");
   Reset();
   REXCVAR_SET(hud_reanchor_scan, true);

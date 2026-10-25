@@ -17,7 +17,11 @@ Part 1 wherever they disagree.
   was still at 16:9; draw-time preparation now covers clean cached anchors and
   invalidates cached children only when a parent matrix changes. The new cached
   draw regressions pass; the next gameplay check remains with the owner. See
-  [graphics.md](graphics.md) part 3 §9.2.7.
+  [graphics.md](graphics.md) part 3 §9.2.7. **2026-10-25 comparison follow-up:**
+  the personal-best meter's draw group bypassed the named leaderboard dir;
+  pre-draw preparation now follows ownership and transform ancestry. The new
+  direct-submission regression reproduces the omission; gameplay confirmation
+  of the correction is pending (graphics.md part 3 §9.2.8).
 
 - **Ultimate settings format fixed (2026-10-24):** the host rejected the mod's own
   top-level DTA pairs as trailing content, causing Gold Star Progress to look changed
