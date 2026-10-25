@@ -27,9 +27,14 @@ D3D12 empty/warm and Vulkan empty traces collected the same day
 ([`../../engine/shader-cache-p2.md`](../../engine/shader-cache-p2.md)). **P3** validates,
 deduplicates and merges the renderer's pipeline recipes with provenance and resolves every
 recipe-referenced identity, and inventories the 26 helper-pipeline sites
-([`../../engine/shader-cache-p3.md`](../../engine/shader-cache-p3.md)). P4–P9 (asynchronous
-preparation, native caches, the post-A phase, invalidation, validation and packaging) are prompts;
-helper recipe key identity and the post-A gate remain open.
+([`../../engine/shader-cache-p3.md`](../../engine/shader-cache-p3.md)). **P4** turned preparation
+into a cancellable generation both backends advance in bounded command-processor slices
+([`../../engine/shader-cache-p4.md`](../../engine/shader-cache-p4.md)), and **P5** persists the
+driver's own results beside the shareable recipes - D3D12 cached PSO blobs and one real Vulkan
+pipeline cache shared by every creation path
+([`../../engine/shader-cache-p5.md`](../../engine/shader-cache-p5.md)). P6–P9 (the post-A phase,
+invalidation, validation and packaging) are prompts; the post-A gate and the cold/warm measurement
+remain open.
 
 The most recent plan before it,
 [`2026-10-19-interface-gameplay-mapping-restructure-plan.md`](../finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md) —

@@ -24,8 +24,12 @@ shader usage, so that axis is not a coverage obligation. P4 implemented 2026-10-
 cancellable preparation generation both backends advance in bounded command-processor
 slices, with a dedicated preparation queue and pool per backend so submissions never
 wait for it, plus the `shader_storage_async_preparation` launch switch (default off)
-that starts it beside the guest. The visible phase and the post-A gate are P6; native
-caches are P5; full route validation remains P8.
+that starts it beside the guest. P5 implemented 2026-10-24: a header-only native cache
+identity/store, D3D12 cached PSO blobs keyed by the portable description hash, and one
+real Vulkan `VkPipelineCache` shared by every creation path on the device, written at
+preparation end and at shutdown only, with a rejected blob forgotten and retried without
+it. The visible phase and the post-A gate are P6; invalidation is P7; full route
+validation and the cold-versus-warm measurement remain P8.
 On an empty application cache the first song creates 81 guest pipelines and
 translates 61 shaders, with four of its eight active-song long frames (worst
 306.4 ms) overlapping that work; a same-process replay adds 1/1. A full restart on
@@ -619,8 +623,8 @@ and S6 packaging; a preload barrier alone cannot prepare previously unknown pipe
 ## Implementation prompts (2026-10-24)
 
 Original planning status: **P0–P9 were unstarted when these prompts were authored**.
-Implementation updates are recorded below each prompt: **P0–P4 are implemented
-(2026-10-24)**, P5–P9 remain unstarted prompts.The planning update inspected project
+Implementation updates are recorded below each prompt: **P0–P5 are implemented
+(2026-10-24)**, P6–P9 remain unstarted prompts.The planning update inspected project
 `a8f0bb5`, SDK `c94f5eb` and the current working-tree sources. No game/UI navigation,
 build, cache deletion or new performance measurement was performed. The prompts are
 future implementation tasks, not authorization to execute them as part of this edit.
@@ -1261,6 +1265,67 @@ Exit: both backends reuse native data across processes and recover from corrupte
 incompatible data. Report actual preparation time and disk size; do not call cache-file
 existence a performance result. Native reuse is required work for the requested warm-
 boot experience; further bytecode-cache layers remain conditional on measurements.
+
+Implementation update, 2026-10-24:
+
+- New SDK header `include/rex/graphics/native_pipeline_cache.h` (patch
+  `0028-native-pipeline-caches.patch`): `NativeAdapterIdentity` /
+  `NativePipelineCacheIdentity` (backend, title, rendering path, container schema,
+  `PipelineDescription::kVersion`, translator version, adapter vendor/device/subsystem/
+  revision, driver version, Vulkan `pipelineCacheUUID`) and a header-only
+  `NativePipelineCacheStore`. One entry file per key carries a 40-byte header (magic,
+  format, identity hash, key, payload hash, payload size) and an opaque payload; wrong
+  magic/format/identity/key/size/hash is `rejected`, never handed to a driver. Writes
+  are a temp sibling plus one rename, bounded at 64 MiB per entry, 128 MiB / 8192
+  entries pending and 1 GiB / 32768 entries per directory; everything refused is counted.
+- **D3D12**: `PipelineCache` opens `shaders/local/<TITLEID>.<rtv|rov>.d3d12/` in
+  `OpenShaderStorage` and keys blobs by `XXH3_64bits(&PipelineDescription)`.
+  `CreateD3D12Pipeline` passes a stored blob as `state_desc.CachedPSO`; when the driver
+  rejects it the entry is forgotten, the description is created without the blob and the
+  failure is not reported to the caller; a successful creation that did not use a blob
+  stages `ID3D12PipelineState::GetCachedBlob()`. Adapter identity comes from
+  `GetAdapterLuid` → `IDXGIFactory4::EnumAdapterByLuid` → `DXGI_ADAPTER_DESC1` plus the
+  UMD version (`CheckInterfaceSupport`), because the descriptor alone does not change
+  across driver updates.
+- **Vulkan**: one real `VkPipelineCache` in `shaders/local/<TITLEID>.<fbo|fsi>.vk/`,
+  created from the stored bytes after both the container and
+  `VkPipelineCacheHeaderVersionOne` (`headerVersion`, `headerSize`, `vendorID`,
+  `deviceID`, `pipelineCacheUUID`) agree with the device; a driver refusal forgets the
+  entry and starts empty. The handle is published on
+  `VulkanDevice::shared_pipeline_cache()` and **every** creation path passes it - guest
+  graphics, render-target transfer/resolve, swap-effect gamma/FXAA, presenter, immediate
+  drawer and `util::CreateComputePipeline` - so the helper compute recipes the P3
+  inventory names are covered without per-site keys. Four Vulkan 1.0 functions
+  (`vkCreatePipelineCache`, `vkDestroyPipelineCache`, `vkGetPipelineCacheData`,
+  `vkMergePipelineCaches`) joined `functions/device_1_0.inc`.
+- **Serialization point**: staging is memory-only; a flush runs when a preparation
+  generation finishes and when the storage shuts down, so no song frame does cache I/O.
+  Vulkan may not snapshot while a creation is in flight (`IsCreatingPipelines()`), and
+  because new gameplay creation is enqueued only by the command processor thread, that
+  check is a real quiescence window; the shutdown path runs after the creation threads
+  are joined, so it always writes. Concurrent instances are handled by an atomic replace
+  per D3D12 entry and by reading the on-disk Vulkan data back and
+  `vkMergePipelineCaches`-ing it before serializing.
+- New cvar `native_pipeline_cache` (GPU, default **true**, requires restart), declared in
+  `include/rex/graphics/flags.h` and defined beside `store_shaders`; it disables only
+  this layer. Log lines: `Native pipeline cache: adapter …`, `… byte(s) restored`,
+  `D3D12 rejected a stored cached-PSO blob (hr=…)`, `… cached PSO blob(s) written`,
+  `serialization deferred …`.
+- Tests: `tests/native_pipeline_cache_tests.cpp` → ctest `native_pipeline_cache`, 86
+  checks against the real header with a scratch directory (identity coverage, round trip,
+  every refusal class, atomic replace, forget, bounds, disabled store).
+- Gates (2026-10-24): release build links `rexruntime.dll`, `rexgpu-xenos.dll` and
+  `rb_blitz.exe` with both backends; full roster **60/60** in the Vulkan-off test tree;
+  `apply_sdk_patches.ps1 -Check` reports **27 patches, 0 failed, 78 patched files, 0
+  unexpected**. **No game/UI run was made in this pass**, so P5 claims reuse across
+  processes by construction and by the headless tests, not by a measured boot: cold vs
+  warm restart timings, disk size and the actual share of driver work removed are P8's.
+- Scope limits recorded here rather than hidden: D3D12's helper **compute** pipelines are
+  outside this layer (their creation helper does not see the cache's store, and the ones
+  created at command-processor initialization run before any storage root exists), while
+  Vulkan's device-wide cache covers them; translated shader bytecode is not persisted.
+  Invalidation by settings/content/SDK change remains P7. Details:
+  [shader-cache-p5.md](../../engine/shader-cache-p5.md).
 
 ### P6 — Integrate the post-A Preparing graphics phase and native loading bar
 

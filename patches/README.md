@@ -124,6 +124,26 @@ P6's). See the
 [P4 record](../docs/plans/in-progress/2026-10-10-shader-cache-plan.md#p4--add-asynchronous-preparation-without-starving-the-loading-screen)
 and [shader-cache-p4.md](../docs/engine/shader-cache-p4.md).
 
+`rexglue-sdk/0028-native-pipeline-caches.patch` persists the driver's own pipeline
+results beside the shareable recipes. `include/rex/graphics/native_pipeline_cache.h`
+adds `NativeAdapterIdentity`/`NativePipelineCacheIdentity` (backend, title, rendering
+path, container schema, `PipelineDescription::kVersion`, translator version, adapter
+descriptor, driver version and Vulkan `pipelineCacheUUID`) and a header-only
+`NativePipelineCacheStore` whose entry files carry magic, format, identity hash, key,
+payload hash and payload size; anything unexpected is refused instead of being handed to
+a driver, writes are a temp file plus one rename, and both pending and on-disk sizes are
+bounded. D3D12's `PipelineCache` loads a stored `ID3D12PipelineState` cached blob into
+`D3D12_GRAPHICS_PIPELINE_STATE_DESC::CachedPSO`, forgets and retries without it when the
+driver rejects it, and stages `GetCachedBlob()` for later. Vulkan creates one real
+`VkPipelineCache` from validated data, publishes it on
+`VulkanDevice::shared_pipeline_cache()` so every creation path (guest, render-target,
+swap effects, presenter, immediate drawer, `util::CreateComputePipeline`) uses it, and
+merges the on-disk data of another instance before serializing. Both backends flush only
+at a preparation boundary and at shutdown; `native_pipeline_cache` (default on) disables
+the layer. See the
+[P5 record](../docs/plans/in-progress/2026-10-10-shader-cache-plan.md#p5--persist-native-results-for-faster-subsequent-boots-on-both-backends)
+and [shader-cache-p5.md](../docs/engine/shader-cache-p5.md).
+
 ## Apply / verify
 
 ```powershell

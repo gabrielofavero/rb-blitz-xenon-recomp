@@ -91,6 +91,7 @@ See [`engine/README.md`](engine/README.md) for the per-document summary.
 | [`engine/loading-cancel.md`](engine/loading-cancel.md) | Why a song load that never finishes cannot be cancelled yet, and what was measured trying. |
 | [`engine/diagnostics.md`](engine/diagnostics.md) | The two standing instruments: the runtime probe overlay and the UI-state observer. |
 | [`engine/shader-cache-p4.md`](engine/shader-cache-p4.md) | The graphics-preparation lifecycle (P4): the cancellable generation, its phases and counts, the bounded command-processor slices, and the launch switch. |
+| [`engine/shader-cache-p5.md`](engine/shader-cache-p5.md) | Native pipeline caches (P5): the adapter/driver/translator identity and its bounded entry store, D3D12 cached PSO blobs and the Vulkan `VkPipelineCache` shared by every creation path, the rejected-blob recovery, and the serialization rules. |
 | [`engine/messages.md`](engine/messages.md) | The retail Messages screen: its record, the `InboxProvider`/`InboxMessage` objects and addresses, the empty-state tokens, the bottom-bar inline help, and the row-icon set with converted PNGs. |
 
 ### Settings

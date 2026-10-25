@@ -115,6 +115,7 @@ set(RBBLITZ_SOURCES
     # running game (today `graphics.vsync` -> the SDK's own `vsync`, the call R7 already measured).
     src/hooks/hot_apply_runtime.cpp
     src/hooks/shell_music.cpp
+    src/hooks/song_sort.cpp
     src/hooks/menu_music_metadata.cpp
     src/hooks/ultimate.cpp
     src/fs/payload_overlay.cpp
@@ -532,6 +533,19 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME graphics_preparation COMMAND rb_blitz_graphics_preparation_tests)
 
+    # P5: the driver-specific layer both backends persist beside the shareable
+    # recipes (rexglue-sdk/include/rex/graphics/native_pipeline_cache.h). Header
+    # only; the cases use a real scratch directory, so atomic replacement, the
+    # identity check and the bounds are pinned without a GPU or a boot.
+    add_executable(rb_blitz_native_pipeline_cache_tests tests/native_pipeline_cache_tests.cpp)
+    target_include_directories(rb_blitz_native_pipeline_cache_tests PRIVATE
+        "${REXSDK_DIR}/thirdparty/xxHash")
+    target_link_libraries(rb_blitz_native_pipeline_cache_tests PRIVATE rex::core)
+    if(WIN32)
+        target_link_libraries(rb_blitz_native_pipeline_cache_tests PRIVATE ws2_32)
+    endif()
+    add_test(NAME native_pipeline_cache COMMAND rb_blitz_native_pipeline_cache_tests)
+
     if(WIN32 AND REXGLUE_USE_VULKAN)
         add_executable(rb_blitz_vulkan_texture_descriptor_cache_tests
             tests/vulkan_texture_descriptor_cache_tests.cpp)
@@ -579,6 +593,24 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_crypto_keytable_tests PRIVATE src)
     add_test(NAME crypto_keytable COMMAND rb_blitz_crypto_keytable_tests)
+
+    if(WIN32 AND REXGLUE_ENTRYPOINT_GENERATED_SOURCES)
+        # Execute the retail rank calculation and heading lookup, including the
+        # tier-zero ASCII-pointer crash, with the production hook and isolated data.
+        set(RBBLITZ_SONG_SORT_FIXTURE "${CMAKE_CURRENT_BINARY_DIR}/song_sort_guest.inc")
+        add_custom_command(OUTPUT "${RBBLITZ_SONG_SORT_FIXTURE}"
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/song_sort_guest_fixture.py"
+                    --generated "${CMAKE_SOURCE_DIR}/generated/default"
+                    --output "${RBBLITZ_SONG_SORT_FIXTURE}"
+            DEPENDS tests/song_sort_guest_fixture.py ${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
+            VERBATIM)
+        add_executable(rb_blitz_song_sort_tests tests/song_sort_tests.cpp
+            src/hooks/song_sort.cpp "${RBBLITZ_SONG_SORT_FIXTURE}")
+        target_include_directories(rb_blitz_song_sort_tests PRIVATE
+            "${CMAKE_CURRENT_BINARY_DIR}" $<TARGET_PROPERTY:rb_blitz,INCLUDE_DIRECTORIES>)
+        target_compile_definitions(rb_blitz_song_sort_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        add_test(NAME song_sort COMMAND rb_blitz_song_sort_tests)
+    endif()
 
     add_executable(rb_blitz_payload_overlay_tests
         tests/payload_overlay_tests.cpp

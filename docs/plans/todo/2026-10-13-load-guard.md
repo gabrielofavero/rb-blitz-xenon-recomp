@@ -9,6 +9,10 @@ cleanup, main-menu return or popup route has been measured.**
 Read part 1 §1 for the supported/unsupported split and §5 for the evidence gate that must pass before
 any code is written; start part 2 at Prompt 1, which can still disprove the whole approach.
 
+**First reproducer candidate (owner report, 2026-10-24):** *Can't Hold Us* by Macklemore & Ryan Lewis
+is reported to take the game down — see part 1 §2.6. The report is unmeasured; Prompt 1
+characterizes it before it is used as evidence.
+
 ## Sources
 
 | Part | Original document | Status |
@@ -183,6 +187,26 @@ MSVC compiler switches are background on the distinction, not a proposed build c
 load completion, or jump into the menu loop. Fix specific bad-input paths before a fatal fault,
 or return a supported error at an established operation boundary.
 
+#### 2.6 A song reported to crash: *Can't Hold Us* (owner report, 2026-10-24)
+
+The owner reports that **Macklemore & Ryan Lewis - Can't Hold Us** takes the game down, and named it
+as a good song to test a load guard against. This is a **report, not a measurement**: no build hash,
+log, failure phase or fault code is attached yet, and nothing in this tree has reproduced it. It is
+recorded because it is a real song from a player's library rather than a manufactured missing-file
+package, and because Prompt 1 has to answer these questions about it:
+
+| question | why it decides whether the guard applies |
+| --- | --- |
+| Which phase fails - package mount/STFS read, the `loading_screen`, the `load_finished` completion, or the first `game_screen` frame? | Only a load-phase failure is this feature's subject; a fault after gameplay starts is not a song-load stall. |
+| Does the guest UI keep updating while it fails or stalls? | The cooperative deadline can only be acted on from a guest UI update (§4.1); a blocked UI thread needs the restart design, not this guard. |
+| Does B leave the screen, as R11 measured on a stuck load (§2.1)? | The native cancellation route is the gate for any automatic abort. |
+| Is the failure a returned loader error, or a guest access violation? | A fatal guest fault is outside the guard by §1: detecting it does not restore loader state. Fix the fault itself first, under Prompt 4's boundary rule. |
+| Does a known-good song still load and play in the same process afterwards? | §5's repeated-failure test; a guard that leaves the process unusable has not recovered. |
+
+Record the answers here with the build hash and the log path before this song is used as acceptance
+evidence. If it turns out to be a fatal fault rather than an unfinished or failed load, it belongs in
+`docs/reference/known-issues.md` as a correctness defect and **not** in this feature's test matrix.
+
 ### 3. Proposed setting and player behavior
 
 | Item | Proposal |
@@ -351,9 +375,12 @@ not included in the implementation prompts below.
 ### 5. Evidence required before shipping
 
 The first gate is a current-build cancellation experiment with a **real or controlled unfinished
-load**, not the old missing-milo example. A controlled stall must leave native cancellation and
-cleanup executable; simply suppressing `load_finished` can leave a completed loader waiting and
-does not represent all incomplete loads. Record which phase is stalled.
+load**, not the old missing-milo example. Start with the owner-reported *Can't Hold Us* package
+(§2.6) and characterize its failure before using it: only an unfinished load or a returned loader
+error exercises this feature, while a fatal guest fault belongs to §1's unsupported row and needs a
+correctness fix first. A controlled stall must leave native cancellation and cleanup executable;
+simply suppressing `load_finished` can leave a completed loader waiting and does not represent all
+incomplete loads. Record which phase is stalled.
 
 | Test | Expected evidence |
 | --- | --- |
@@ -440,6 +467,13 @@ stall at a documented phase which still permits the real cancellation/cleanup pa
 The old missing-milo example was a failed but completed load. Suppressing a final
 notification alone proves only that artificial state, not unfinished I/O cancellation.
 Do not alter installed DLC or saves to manufacture the reproducer.
+
+Start from the owner-reported "Macklemore & Ryan Lewis - Can't Hold Us" song (part 1
+§2.6). Boot it with a trace, record the guest thread and the phase it fails in, and
+classify the failure as an unfinished load, a returned loader error, or a guest
+access violation. Use it as the cancellation reproducer only if the load can still
+be left through the title's own B path; a fatal fault is a correctness defect for
+known-issues, not evidence for this feature.
 
 Measure manual cancellation, then the same native cancellation requested once at
 a verified guest safe point. Prove resource/callback cleanup. If cancellation lands

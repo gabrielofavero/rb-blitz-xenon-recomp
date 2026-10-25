@@ -166,6 +166,28 @@ and keeps the pipelines that were already in flight. The lifecycle lives in
 | --- | --- | --- |
 | `shader_storage_async_preparation` | `false` | Prepares the persistent shader/pipeline storage after the guest starts, in bounded command-processor slices, instead of blocking the launch. P4's measurement and integration switch; the visible loading phase belongs to P6. |
 
+Since shader-cache P5 (2026-10-24) the driver's own results are persisted beside the
+shareable recipes ([shader-cache-p5.md](shader-cache-p5.md)). The lines to read when a
+boot's driver work did not drop:
+
+```text
+Native pipeline cache: adapter 10DE:13C2 subsystem 1111 revision A1 driver 32.0.15.7602
+Native pipeline cache: adapter 10DE:13C2 driver 0x…, 123456 byte(s) restored
+D3D12 rejected a stored cached-PSO blob (hr=0x…); creating the pipeline without it and replacing the entry
+Native pipeline cache: 132 cached PSO blob(s) written (d3d12 native pipeline cache: 132 reused, …)
+Native pipeline cache: serialization deferred at shader storage shutdown, pipelines are still being created
+```
+
+`reused` counts entries that were read back, `absent` entries that were never written,
+`rejected` files refused by the container check, and `refused` writes the bounds declined.
+One summary per flush, so a silent line means nothing was staged - not that the cache is
+in use. The Vulkan backend means something different by "restored": one serialized
+`VkPipelineCache` for the whole device, whose size is the line's byte count.
+
+| Cvar | Default | What it does |
+| --- | --- | --- |
+| `native_pipeline_cache` | `true` | Persists driver-specific pipeline state (D3D12 cached PSO blobs, a Vulkan pipeline cache) keyed by adapter, driver and translator versions. Off = the shareable recipes are still used, only the driver's own layer is skipped; the A/B switch for P8. |
+
 ### Adding a point
 
 1. Pick a function that is already named, or an address proved by hand ([symbols.md](../reference/symbols.md) is the table).
