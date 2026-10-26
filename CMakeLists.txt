@@ -953,6 +953,11 @@ if(BUILD_TESTING)
     target_link_libraries(rb_blitz_menu_music_guest_tests PRIVATE rex::runtime)
     add_test(NAME menu_music_guest COMMAND rb_blitz_menu_music_guest_tests)
 
+    add_executable(rb_blitz_menu_music_runtime_tests tests/menu_music_runtime_tests.cpp)
+    target_include_directories(rb_blitz_menu_music_runtime_tests PRIVATE src)
+    target_link_libraries(rb_blitz_menu_music_runtime_tests PRIVATE rex::runtime)
+    add_test(NAME menu_music_runtime COMMAND rb_blitz_menu_music_runtime_tests)
+
     # The menu filter's edit (src/ui/menu_options.cpp): the compiled DTA grammar, the
     # byte-neutral rewrite and the title's SHA-1, run against a synthetic fixture built
     # in the test itself - no boot, and no retail content (D14).

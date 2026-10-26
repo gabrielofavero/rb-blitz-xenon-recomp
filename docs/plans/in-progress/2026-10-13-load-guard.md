@@ -1,29 +1,33 @@
 # Song Load Guard
 
-Song Load Guard is one proposed feature recorded in two halves: **part 1** is the feasibility study —
-which stall and failure cases a cooperative 30s/60s timeout can recover from in-process, and which it
-must refuse — and **part 2** is the implementation prompts written against it. Both date from
-2026-10-13 and neither has been carried out: **no runtime feature exists, and no cancellation,
-cleanup, main-menu return or popup route has been measured.**
+Song Load Guard is recorded in three parts: **part 1** is the feasibility study — which stall and
+failure cases a cooperative 30s/60s timeout can recover from in-process, and which it must refuse —
+**part 2** is the implementation prompts written against it, and **part 3** is what the 2026-10-25
+implementation attempt actually built and measured. The controller and its read-only trace hooks
+exist; **automatic recovery, its player setting and its popup are not connected, and no
+cancellation, cleanup, main-menu return or popup route has been measured** (part 3 §4).
 
 Read part 1 §1 for the supported/unsupported split and §5 for the evidence gate that must pass before
-any code is written; start part 2 at Prompt 1, which can still disprove the whole approach.
+any recovery code is written; start part 2 at Prompt 1, which can still disprove the whole approach.
+Part 3 §1 is what exists today, §2 the package inspection and §3 the manual run still owed.
 
 **First reproducer candidate (owner report, 2026-10-24):** *Can't Hold Us* by Macklemore & Ryan Lewis
-is reported to take the game down — see part 1 §2.6. The report is unmeasured; Prompt 1
-characterizes it before it is used as evidence.
+is reported to take the game down — see part 1 §2.6. The report is unmeasured; part 3 §2 inspected
+the package read-only and found no damaged stored data, so the failure itself is still unexplained.
 
 ## Sources
 
 | Part | Original document | Status |
 | --- | --- | --- |
 | 1 | `docs/plans/todo/2026-10-13-load-guard-findings.md` | Research only (2026-10-13) — no runtime feature implemented |
-| 2 | `docs/plans/todo/2026-10-13-load-guard-prompts.md` | Proposed work (2026-10-13) — none of the five prompts has run |
+| 2 | `docs/plans/todo/2026-10-13-load-guard-prompts.md` | Proposed work (2026-10-13) — Prompt 1 partly run, Prompts 2–5 not run |
+| 3 | `docs/plans/in-progress/2026-10-25-load-guard-runtime-findings.md` | Implementation evidence (2026-10-25) — controller and trace hooks landed, automatic recovery deliberately disconnected |
 
-The two records were merged into this document on 2026-10-22; git history before the merge holds the
-originals. Each part keeps its source's own section numbers, demoted one heading level, so a citation
-such as "part 1 §2.4" still lands. Cite the result as
-"`docs/plans/todo/2026-10-13-load-guard.md` part 1 §5".
+Parts 1 and 2 were merged into this document on 2026-10-22, and part 3 on 2026-10-26 (its source
+already lived beside this file, so nothing moved between folders). Git history before each merge
+holds the originals. Each part keeps its source's own section numbers, demoted one heading level, so
+a citation such as "part 1 §2.4" still lands. Cite the result as
+"`docs/plans/in-progress/2026-10-13-load-guard.md` part 1 §5".
 
 ---
 
@@ -206,6 +210,11 @@ package, and because Prompt 1 has to answer these questions about it:
 Record the answers here with the build hash and the log path before this song is used as acceptance
 evidence. If it turns out to be a fatal fault rather than an unfinished or failed load, it belongs in
 `docs/reference/known-issues.md` as a correctness defect and **not** in this feature's test matrix.
+
+**Update (2026-10-26, part 3):** part 3 §2 is the read-only inspection of this package — every stored
+block matched its digest, and the boot log's `cantholdus.pan` STFS warning is explained by that
+entry's zero logical length — and part 3 §3 lists which of the questions above the manual run still
+owes. The owner report above is still unmeasured; nothing here classifies the song as corrupt.
 
 ### 3. Proposed setting and player behavior
 
@@ -435,6 +444,12 @@ behavior contract) before using these prompts. They implement the cooperative ti
 individually validated load-error cases. They do not promise recovery from arbitrary access
 violations, memory corruption, or a deadlocked guest UI.
 
+**Status 2026-10-26:** Prompt 1 has been started and is only partly complete — part 3 records the
+controller, the trace hooks and the package inspection it produced, and the runtime characterization it
+still owes. Prompts 2–5 have not run. Paths inside the quoted prompt texts that named the old `todo/`
+copy of this plan, or a separate runtime-findings file, were re-pointed to this document (part 1 here,
+part 3 for the findings) when the records were merged; the prompt wording is otherwise unchanged.
+
 Run these sequentially in the same checkout, inspecting the evidence at each gate. A failed gate
 means record the remaining blocker and keep the unsupported behavior unavailable; it does not
 mean fabricate completion or ship an inert setting. Runtime experiments need the local game
@@ -444,7 +459,7 @@ dump and disposable test configuration. Preserve existing user changes and data.
 
 ```text
 Investigate the cancellation prerequisite for Load Guard in this repository. Read
-docs/plans/todo/2026-10-13-load-guard.md (part 1) and docs/engine/loading-cancel.md first. This step
+docs/plans/in-progress/2026-10-13-load-guard.md (part 1) and docs/engine/loading-cancel.md first. This step
 may add narrowly scoped, disabled-by-default diagnostics and a disposable harness;
 do not expose the player setting yet.
 
@@ -481,7 +496,7 @@ on song_select_screen, establish the normal transition from there to splash_scre
 after cleanup; do not inject repeated B or bypass the screen manager. Then load and
 play a known-good song in the same process. Exercise cancellation more than once.
 
-Write docs/plans/load-guard-runtime-findings.md with exact hooks/ABIs, logs/capture
+Write the runtime findings into part 3 of this document with exact hooks/ABIs, logs/capture
 locations, cleanup evidence, provider differences, and a go/no-go decision. Separate
 static inference, old measurements, controlled-stall evidence, and real fault evidence.
 If no safe cancellation route exists, explain the specific blocker and stop before
@@ -491,7 +506,7 @@ implementing an automatic abort or advertising the setting.
 ### Prompt 2 — Implement the controller and cooperative timeout
 
 ```text
-Implement the controller for Load Guard using docs/plans/todo/2026-10-13-load-guard.md (part 1) and
+Implement the controller for Load Guard using docs/plans/in-progress/2026-10-13-load-guard.md (part 1) and
 the runtime evidence from Prompt 1. Proceed with guest cancellation only if that
 evidence proves a safe route and subsequent good-song playback.
 
@@ -532,7 +547,7 @@ behavior; distinguish controller tests from in-game validation.
 
 ```text
 Integrate the proven Load Guard controller with settings and native UI. Follow
-docs/plans/todo/2026-10-13-load-guard.md (part 1). Require Prompt 1's cancellation/cleanup proof and
+docs/plans/in-progress/2026-10-13-load-guard.md (part 1). Require Prompt 1's cancellation/cleanup proof and
 Prompt 2's functioning controller; do not add a setting that cannot perform recovery.
 
 Add “Load Guard” under Help & Options -> General -> Downloadable Content, with a
@@ -603,7 +618,7 @@ do not assert that all bad DLC or internal exceptions are handled.
 Add focused tests and one real or safely injected end-to-end reproduction per
 supported error. Show immediate recovery in both enabled modes, no feature-driven
 recovery in Off, and successful subsequent good-song playback. Maintain a supported
-error table in load-guard-runtime-findings.md; update the help caption only to match
+error table in part 3 of this document; update the help caption only to match
 coverage actually established. Keep generic crash/restart containment out of scope.
 ```
 
@@ -611,7 +626,7 @@ coverage actually established. Keep generic crash/restart containment out of sco
 
 ```text
 Validate the implemented Load Guard against section 5 of
-docs/plans/todo/2026-10-13-load-guard.md (part 1). Read the runtime findings first; preserve unrelated
+docs/plans/in-progress/2026-10-13-load-guard.md (part 1). Read the runtime findings first; preserve unrelated
 work. Run the affected tests and the configured project's required checks, then the
 in-game acceptance matrix. Use actual 30s and 60s values for final timing acceptance;
 fake-clock tests and short diagnostic delays alone are insufficient.
@@ -638,3 +653,115 @@ Report unresolved cancellation or cleanup failures as release blockers. Do not m
 the feature done if it merely changes screens while work from the failed load can
 still access old objects, or if it cannot load a good song afterward.
 ```
+
+---
+
+## Part 3 — Implementation evidence (was `docs/plans/in-progress/2026-10-25-load-guard-runtime-findings.md`)
+
+**2026-10-25 — in progress.** Implements the controller and read-only prerequisites of part 1 (§3-§4)
+and Prompt 1 of part 2. Automatic recovery, its setting and its popup are **not connected**: native
+cancellation and cleanup still need measurement. Controller unit tests do not establish that it is
+safe to cancel the guest loader.
+
+### 1. Current implementation
+
+`src/loading/load_guard.{h,cpp}`
+([header](../../../src/loading/load_guard.h), [source](../../../src/loading/load_guard.cpp)) is an
+SDK-free state machine with injected monotonic milliseconds, per-attempt policy and generation,
+Off/30s/60s deadlines, completion-before-commit precedence, latched supported errors, explicit
+cancellation/cleanup/return/popup acknowledgements, a ten-second recovery budget, and explicit
+suspension rebasing. It has no worker, guest pointers, input injection, exception handler or resource
+cleanup of its own. The production guest adapter is deliberately still absent.
+
+[load_trace.cpp](../../../src/loading/load_trace.cpp) supplies pass-through hooks. `song_load_trace=true`
+is a restart-scoped, disabled-by-default diagnostic. Configuration is read on the host before guest
+launch; wrappers never query cvars or call an additional guest function. The existing
+`UIManager::Poll` hook supplies the read-only heartbeat independently of mouse navigation.
+
+| Address | Static ABI / observation | Evidence status |
+| --- | --- | --- |
+| `0x822C3428` | `r3=LoadingScreen`; setup enter/return, before/after the native body | Static: slot +116 of vtable `0x8203DD64`; earliest selected setup candidate, not yet a proven full-load start |
+| `0x822C3878` | `r3=LoadingScreen`; sets native state `+72` to 3 and launches the game load | Static: native body and callers in `0x822C39D0` |
+| `0x822C38F8` | `r3=result cell`, `r4=LoadingScreen`, `r5=caller-prepared message`; completion enter/return | Static: original called exactly once; no fabricated messages |
+| `0x822C3F48` | `r3=LoadingScreen`, original `r4` retained; unload enter/return | Static: slot +124; clears content subscription, vector, native state and invokes base unload; does not by itself prove all cleanup |
+| `0x824B2958` | `r3=UIManager`; observer runs after the original poll | Shared existing strong hook; reads current screen `+44` and transition `+16` |
+
+The trace reports generation, monotonic elapsed time, guest thread, caller, screen and
+native state. Bookkeeping is thread-local: cross-thread lifecycle events, if found, must
+be reconciled explicitly rather than silently assuming UI ownership. After unload, the
+observer stops reading the old screen. These hooks observe; none cancels, suppresses a
+late callback, navigates or catches a fault.
+
+### 2. Can't Hold Us package investigation
+
+**Read-only inspection, 2026-10-25.** Local package:
+`Macklemore & Ryan Lewis - Can't Hold Us (ft Ray Dalton)`, 22,573,056 bytes,
+SHA-256 `e736c981e1ec87577a3d13d37f90efce281c8cb2211327d2c5bd5e630e28d983`.
+Ignored extracted inspection inputs are under `out/load-guard/`.
+
+All blocks consumed by the seven file entries matched their stored STFS SHA-1 digests.
+No required declared data extent ran off its chain. This checks stored-byte consistency,
+not package authenticity, script compatibility or successful game decoding.
+
+| Entry under `songs/` | Declared size | Finding |
+| --- | ---: | --- |
+| `cantholdus/gen/cantholdus.milo_xbox` | 127,701 | Present, stored ChunkStream header |
+| `cantholdus/gen/cantholdus_keep.png_xbox` | 349,588 | Present |
+| `cantholdus/gen/cantholdus_weights.bin` | 15,706 | Present |
+| `cantholdus/cantholdus.mid` | 929,681 | MThd, 12 MTrk extents covering the file, each ending with end-of-track |
+| `cantholdus/cantholdus.mogg` | 20,945,466 | Unencrypted version 10, OggS at declared offset 4,660; Vorbis header declares 10 channels at 44,100 Hz |
+| `cantholdus/cantholdus.pan` | 0 | One allocated block with zero logical bytes |
+| `songs.dta` | 2,967 | Present; custom metadata declares `game_origin rb4_dlc` and a `context` script accessing `$world`/PostProc |
+
+The MIDI contains the drum/bass/guitar/vocals/harmony/BEAT/VENUE/EVENTS tracks and a
+769,290-byte LIPSYNC1 track. Header/extent checks do not validate every event or prove
+that Blitz supports this custom conversion. Metadata pans/vols/cores each have ten values,
+consistent with the audio channel count. The context script is an investigation lead,
+**not an established crash cause**.
+
+Existing boot `out/build/win-amd64-release/logs/rb_blitz_342.log` contains
+`STFS failed to read correct block-chain for entry cantholdus.pan, read 0 blocks, expected 1`.
+The SDK constructs readable blocks from logical file length and then compares their count
+to allocated blocks. Zero length explains this warning without establishing damaged data.
+That boot continues opening other packages afterwards; the warning is not evidence of
+the owner's song-start failure. No package was modified or blacklisted.
+
+### 3. Runtime test handoff
+
+The owner chose to navigate/test manually and requested that Codex boot the game.
+The rebuilt executable was launched with `--song_load_trace=true --log_flush_interval=1`,
+using the normal library and preferences. No synthetic input was sent.
+
+Diagnostic executable SHA-256:
+`4d05daf521bae40a3e3078ec285ec7d69c06e5a7662cdd599f85997f49bc0d33`.
+Active handoff log: `out/build/win-amd64-release/logs/rb_blitz_349.log`.
+Unhandled-fault capture: `out/load-guard/manual-fault.log` and, if a fault occurs,
+`out/load-guard/manual-fault.dmp`. The debugger passes first-chance access violations
+through to the runtime; it supplies diagnostics, never recovery.
+
+Initial sandboxed launches failed before guest launch because normal settings/save paths
+were inaccessible (`HostPathDevice::Initialize` filesystem exception). Launching with normal
+user access passed that point. This host startup failure is unrelated to song loading.
+A temporary debugger attachment was restarted with local symbols to avoid symbol-server
+waits. The diagnostic window was confirmed open. None of this is a cancellation test.
+
+Still required from the manual run: failure phase and fault/result, whether guest UI polls
+continue, one native B cancellation if possible, cleanup/resource/callback evidence and
+subsequent known-good-song playback. Native main-menu transition and popup dispatch remain
+unproven. Retail/Ultimate differences, auto-start, explicit suspension lifecycle and recovery
+races remain unvalidated in the guest.
+
+### 4. Checks and decision
+
+`cmake --build --preset win-amd64-release` passed. The `load_guard` and `load_trace` CTests
+passed. The trace test executes the real wrappers against original-function doubles and
+isolated memory, verifying exactly-once forwarding, unchanged arguments and preserved
+original results with tracing both off and on. The controller uses fake time, covering both
+boundaries, Off, completion at expiry, wait-for-A, stale generations, manual exit, native
+failed completion, error/timeout races, late completion, recovery failure and pause rebasing.
+
+**Decision: no-go for enabling automatic guest cancellation yet.** There is no established
+recoverable-error boundary and no supported-error table entry. In particular, Can't Hold Us
+is not classified as corrupt or guard-recoverable. Finish the manual reproduction and trace
+the native cancellation/ownership protocol before wiring the adapter, player setting and
+native main-menu popup. No universal fault interception is implemented.

@@ -49,4 +49,3 @@ docs/native/NATIVE_HACK_AUDIT_2026-06-08.md
 docs/plans/vr-port-plan.md
 docs/plans/av-settings-plan.md
 docs/plans/button-mapping-plan.md
-docs/plans/load-guard-runtime-findings.md

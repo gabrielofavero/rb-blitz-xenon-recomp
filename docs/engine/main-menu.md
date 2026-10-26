@@ -1184,8 +1184,8 @@ host-prepared package is held by this runtime's demand path pending publication.
 Play Current Song reads its captured stable catalog ID as a native Symbol through
 `read_file("rbbz-play/song")`. Eviction cannot change the name selected by a press.
 The current stream remains in control while successors prepare. At EOF with no ready
-successor, a title track fills the gap; the prepared DLC sequence resumes at its next
-loop boundary. This optional work never gates native content or graphics readiness.
+successor, a title track fills the gap; the prepared DLC sequence resumes as soon as
+a successor is ready. This optional work never gates native content or graphics readiness.
 
 The session exposes shared forward/backward cursor methods, but the future navigator's
 buttons, settings, pause seam and footer are not implemented by this architecture work.
@@ -1205,3 +1205,19 @@ with zero failures or unexpected edits. Documentation checking reports 57 reposi
 reference errors, none in the documents edited for this architecture. Evidence is
 under ignored `out/rolling-music/` (`build-final.log`, `tests-final.log`,
 `tests-full.log`, `sdk-patch-check.log`, `docs-check.json`).
+
+Fallback recovery correction (2026-10-26): the owner's `rb_blitz_351.log` selected
+a random DLC source in 235 ms, but its startup watchdog expired at 09:33:40.544.
+It entered title-track fallback before cache loading began. Three successors were
+ready by 09:33:52.723, yet the title's sample counter kept increasing through
+09:35:40.656, so waiting for a counter rewind left DLC recovery stuck. Temporary
+fallback now yields on the first poll with a ready successor; a failed pre-A startup
+also starts the bounded preparation worker immediately. The deliberate fallback
+after three consecutive failures retains its circuit breaker. Native failure logs
+include stream/state/position for any remaining startup diagnosis. The new
+`menu_music_runtime` host test exercises the production poll, stream retirement,
+Load/Start handoff and audible Play Current Song selection with stand-in native
+callees; no game UI is driven. Evidence is under `out/rolling-music-recovery/`.
+The release rebuild and all nine targeted music/audio/menu tests pass; the runtime
+regression contributes 48 checks, including pre-A preparation and the deliberate
+failure circuit breaker. Actual listening after this correction remains a manual check.

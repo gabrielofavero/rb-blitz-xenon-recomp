@@ -557,6 +557,9 @@ void NoteFailedCandidate(uint8_t* base, PPCContext& parent, uint32_t music) {
   REXLOG_WARN("shell_music: \"{}\" failed to start or stopped advancing ({} ms since start); "
               "it sits out the rest of this rotation (R9)",
               failed, MillisecondsSince(g_track_started_at));
+  // A single startup candidate can fail before the post-A cache-loading event.
+  // Start bounded recovery preparation now instead of waiting for that event.
+  rb_blitz::shell_music::StartQueuedPool();
   if (++g_attempts >= kMaxAttemptsPerSeam && !g_session.Sources().empty()) {
     REXLOG_WARN("shell_music: {} candidate(s) in a row could not be started; the menu goes back "
                 "to the title's own tracks (R9)",
@@ -997,10 +1000,18 @@ extern "C" REX_FUNC(sub_827586D8) {
     const uint32_t state = stream ? LoadBe32(base, stream + 20) : 0;
     const uint32_t position = stream ? LoadBe32(base, stream + kPositionOffset) : 0;
     if (g_watch_title) {
-      // The fallback plays the title's own track with the title's own loop (r7=1). Report it -
-      // a heartbeat, and the loop itself, seen as the position restarting - and never rotate;
-      // leaving the menu stops it through the hooks above. A fallback that ever *ends* is the
-      // failure this watching exists to make visible.
+      // Temporary title audio fills an empty ready queue. Its sample counter can
+      // keep increasing across loops, so recovery must not depend on a rewind.
+      // Only a temporary fallback yields here; three consecutive failures still
+      // leave the deliberate circuit-breaker fallback in control.
+      if (g_waiting_for_pool && HasReadyNext()) {
+        REXLOG_INFO("shell_music: DLC successor ready; leaving temporary title fallback");
+        g_waiting_for_pool = false;
+        g_seam_at = std::chrono::steady_clock::now();
+        StartNextTrack(base, ctx, music);
+        __imp__sub_827586D8(ctx, base);
+        return;
+      }
       if (state == 6 || stream == 0) {
         g_watch_title = false;
         REXLOG_WARN("shell_music: the title fallback track ended; the menu's background music "
@@ -1008,13 +1019,6 @@ extern "C" REX_FUNC(sub_827586D8) {
       } else {
         constexpr uint32_t kLoopSlack = 44100;  // ~1 s of samples: below this, a torn read
         if (position + kLoopSlack < g_pos) {
-          if (g_waiting_for_pool && HasReadyNext()) {
-            g_waiting_for_pool = false;
-            NoteSeam(g_pos);
-            StartNextTrack(base, ctx, music);
-            __imp__sub_827586D8(ctx, base);
-            return;
-          }
           REXLOG_INFO("shell_music: the title fallback track looped after {:.1f} s of samples "
                       "(R9)",
                       static_cast<double>(g_pos) / kSamplesPerSecond);
@@ -1036,6 +1040,8 @@ extern "C" REX_FUNC(sub_827586D8) {
         NoteSeam(g_pos);
         StartNextTrack(base, ctx, music);
       } else if (event == Event::kFailed) {
+        REXLOG_WARN("shell_music: native failure snapshot: stream={:08X} state={} position={}",
+                    stream, state, position);
         NoteFailedCandidate(base, ctx, music);
       } else {
         if (event == Event::kAudible) {

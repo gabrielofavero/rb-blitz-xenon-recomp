@@ -4,6 +4,20 @@ Plans that are actively being worked. A plan moves here from [`../todo/`](../tod
 and leaves for [`../finished/`](../finished/) when it is delivered — one `git mv`, keeping its
 `YYYY-MM-DD-` prefix.
 
+The Song Load Guard work started on 2026-10-25 and lives in
+[`2026-10-13-load-guard.md`](2026-10-13-load-guard.md): part 1 is the feasibility record, part 2 the
+five implementation prompts, and part 3 the evidence from the controller and the trace hooks built so
+far. Automatic recovery, its setting and its popup are **not connected** — part 3 §4 is an explicit
+no-go until native cancellation and cleanup are measured, so the player-visible feature still does not
+exist. The document is a merge of three records, kept as `## Part N` sections so old citations still
+resolve:
+
+| Old document | Now |
+| --- | --- |
+| `2026-10-13-load-guard-findings.md` | [`2026-10-13-load-guard.md`](2026-10-13-load-guard.md) part 1 |
+| `2026-10-13-load-guard-prompts.md` | [`2026-10-13-load-guard.md`](2026-10-13-load-guard.md) part 2 |
+| `2026-10-25-load-guard-runtime-findings.md` | [`2026-10-13-load-guard.md`](2026-10-13-load-guard.md) part 3 |
+
 The plan filed here is [`2026-10-13-rhythmverse-store-plan.md`](2026-10-13-rhythmverse-store-plan.md) —
 the RhythmVerse customs catalogue inside the retail DOWNLOAD CONTENT store (P0 → P6 → P1 → P2 → P3 →
 P4 → P5 → P7 → P8). It **finished on 2026-10-22** — its acceptance harness is green in all four legs
@@ -31,6 +45,15 @@ was delivered on 2026-10-20: P1–P5 all landed, ending with the countdown and t
 
 The in-game settings program outgrew the plan format and lives with its subject; its live tracker is
 [`../../settings/status.md`](../../settings/status.md).
+
+The background-music navigator plan is filed here since 2026-10-26:
+[`2026-10-22-background-music-navigator-plan.md`](2026-10-22-background-music-navigator-plan.md) —
+its session/mount-cache **foundation is implemented** (one boot-mounted package, a rolling playlist
+and a bounded mount cache, replacing the fixed 50-song pool), while the navigator itself — the
+default-on *Menu Music Navigation* switch on General → Interface, the Background Music Play page
+under Controls → Interface Mapping, the LB/RB/Start and media-key latches, the pause seam and the
+footer — remains P1–P3 of its §5. The old pool-order cursor is not to be restored; new navigation
+work builds on `MusicSession`'s shared cursor and history.
 
 See [`../README.md`](../README.md) for the status taxonomy.
 
