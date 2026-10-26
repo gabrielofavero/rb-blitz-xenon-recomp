@@ -12,8 +12,8 @@ struct SongMetadata {
   std::string key;     // the song manager's Symbol, preserving case
   std::string stream;  // (song (name ...)), without .mogg
   // The display identity (RhythmVerse store plan §3.2): `(song (title ...))` and
-  // `(song (artist ...))`. Empty when the record does not carry them; the menu-music pool never
-  // reads them, the store's Downloaded matcher compares exactly these two strings.
+  // `(song (artist ...))`. Empty when the record does not carry them; the menu-music catalog retains
+  // them for its player, and the store's Downloaded matcher compares exactly these two strings.
   std::string title;
   std::string artist;
 };

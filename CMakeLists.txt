@@ -124,6 +124,8 @@ set(RBBLITZ_SOURCES
     src/hooks/shell_music.cpp
     src/hooks/song_sort.cpp
     src/hooks/menu_music_metadata.cpp
+    src/hooks/menu_music_now_playing.cpp
+    src/input/menu_music_nav.cpp
     src/hooks/ultimate.cpp
     src/fs/payload_overlay.cpp
     src/input/remap.cpp
@@ -933,6 +935,14 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_menu_music_pool_tests PRIVATE src)
     add_test(NAME menu_music_pool COMMAND rb_blitz_menu_music_pool_tests)
+
+    add_executable(rb_blitz_menu_music_nav_tests
+        tests/menu_music_nav_tests.cpp
+        src/input/menu_music_nav.cpp
+        src/hooks/menu_music_now_playing.cpp
+    )
+    target_include_directories(rb_blitz_menu_music_nav_tests PRIVATE src)
+    add_test(NAME menu_music_nav COMMAND rb_blitz_menu_music_nav_tests)
 
     add_executable(rb_blitz_menu_music_queue_tests tests/menu_music_queue_tests.cpp)
     target_include_directories(rb_blitz_menu_music_queue_tests PRIVATE src)

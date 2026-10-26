@@ -65,6 +65,7 @@ enum class SettingId : uint16_t {
   kInputViewer = 50,  // provider rows, original spelling
   kSettingsLabels = 51,  // the help caption's own on/off (owner request, 2026-10-14)
   kHideDownloadContent = 52,  // the restored Download Content row (owner request, 2026-10-20)
+  kBackgroundMusicNavigation = 53,  // menu-music navigator; restart-built surface
   // Gameplay (Ultimate provider)
   kPrecisionMode = 60,
   kDisableRandomWiggles = 61,

@@ -30,6 +30,10 @@ struct PoolEntry {
   std::string alias;
   std::string stream;
   std::string song_key{};  // songs.dta/dtb key, which need not equal the filename
+  // Owned display identity stays in MusicSession after a package is retired.
+  std::string title{}, artist{};
+  // Exact package-relative asset path; empty until the local resolver proves it (P3).
+  std::string artwork_locator{};
 };
 
 inline constexpr size_t kNoIndex = static_cast<size_t>(-1);

@@ -184,6 +184,43 @@ void TestShowHeadersRoundTrip() {
   CHECK_TRUE(writer.Save().status == CommitStatus::kConflict);
 }
 
+void TestMusicNavigationRoundTrip() {
+  BeginCase("service: menu-music navigation is a default-on native restart setting and persists off");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  Service service(paths);
+  service.Boot(nullptr, PathEntry{}, nullptr);
+  service.SetCapabilities(CapabilitySnapshot{});
+  const auto id = SettingId::kBackgroundMusicNavigation;
+  const auto* descriptor = service.DescriptorFor(id);
+  CHECK_TRUE(descriptor);
+  if (!descriptor) return;
+  CHECK_EQ(static_cast<unsigned>(id), 53u);
+  CHECK_TRUE(SettingIdToken(id) == "background_music_navigation");
+  CHECK_TRUE(CvarForSetting(id) == "enhancements_background_music_nav");
+  CHECK_TRUE(descriptor->category == Category::kInterface);
+  CHECK_TRUE(descriptor->provider == Provider::kNative);
+  CHECK_TRUE(descriptor->widget == WidgetKind::kBoolean);
+  CHECK_TRUE(descriptor->strategy == ApplicationStrategy::kRestart);
+  CHECK_TRUE(descriptor->compiled_default.boolean);
+  CHECK_TRUE(service.EffectiveValue(id).boolean);
+  const auto txn = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(txn, id, BoolV(false), service.capability_revision()).ok);
+  const auto committed = service.Commit(txn);
+  CHECK_TRUE(committed.status == CommitStatus::kSaved);
+  CHECK_TRUE(committed.restart_required);
+  Service reloaded(paths);
+  reloaded.Boot(nullptr, PathEntry{}, nullptr);
+  CHECK_FALSE(reloaded.EffectiveValue(id).boolean);
+  CHECK_TRUE(reloaded.EffectiveSource(id) == Source::kSettingsFile);
+  const auto enabled = reloaded.BeginEdit(reloaded.revision());
+  CHECK_TRUE(reloaded.Set(enabled, id, BoolV(true), reloaded.capability_revision()).ok);
+  CHECK_TRUE(reloaded.Commit(enabled).status == CommitStatus::kSaved);
+  Service again(paths);
+  again.Boot(nullptr, PathEntry{}, nullptr);
+  CHECK_TRUE(again.EffectiveValue(id).boolean);
+}
+
 void TestHideAchievementsRoundTrip() {
   BeginCase("service: achievement notifications default on and hiding them persists without Ultimate");
   Scratch scratch;
@@ -714,6 +751,7 @@ void TestCvarVocabulary() {
 
 int main() {
   TestHideAchievementsRoundTrip();
+  TestMusicNavigationRoundTrip();
   TestShowHeadersRoundTrip();
   TestDurableEditReload();
   TestValidationAndPending();

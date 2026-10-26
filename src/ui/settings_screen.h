@@ -99,6 +99,8 @@ struct MenuConfiguration {
   // player did not ask for it, and an empty pool means there is no DLC song to start - the two
   // states the settings screen reports as unavailable on its own row.
   bool play_current_song = false;
+  // Effective navigator switch at boot; its command row/page are always authored.
+  bool background_music_navigation = true;
   std::vector<std::string> menu_music_songs;
   // The restored Download Content row (owner request, 2026-10-20). `download_content_row` is true
   // when this boot builds the row (the visibility setting says visible *and* R7 owns

@@ -333,6 +333,11 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
       configuration.disabled["general.dlc_menu_songs"] = "No DLC Dir";
       configuration.disabled["general.play_current_song"] = "Disabled";
     }
+    configuration.background_music_navigation =
+        boot->service()->EffectiveValue(SettingId::kBackgroundMusicNavigation).boolean;
+    REXLOG_INFO("settings_menu: Menu Music Navigation {}; Background Music Play row/page always present "
+                "(P1 surface; playback commands not connected)",
+                configuration.background_music_navigation ? "on" : "off");
     configuration.play_current_song = play_current_row;
     configuration.rhythmverse_row = rhythmverse_setting;
     configuration.show_messages =

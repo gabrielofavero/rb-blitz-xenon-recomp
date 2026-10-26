@@ -66,6 +66,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "show_steak";
     case SettingId::kInputViewer:
       return "input_viewer";
+    case SettingId::kBackgroundMusicNavigation:
+      return "background_music_navigation";
     case SettingId::kSettingsLabels:
       return "settings_labels";
     case SettingId::kHideDownloadContent:

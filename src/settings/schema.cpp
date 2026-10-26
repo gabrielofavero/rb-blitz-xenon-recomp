@@ -293,6 +293,10 @@ std::vector<SchemaRow> BuildTable() {
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "settings_labels"}, "", "Settings Labels",
                      "Show a description of the highlighted row at the bottom of the screen."));
+  rows.push_back(Row(Make(SettingId::kBackgroundMusicNavigation, Category::kInterface,
+                          Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"interface", "background_music_navigation"}, "", "Menu Music Navigation",
+                     "Navigate menu music with the shoulders, media keys, or music player. Requires a restart."));
   // P9-4: the shared background panel is authored once at boot.
   rows.push_back(Row(Make(SettingId::kShowMessages, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
@@ -484,6 +488,7 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kShowMessages, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowRecommendations, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideOfflinePrompts, ApplicationStrategy::kRestart, ""},
+    {SettingId::kBackgroundMusicNavigation, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideMainMenu, ApplicationStrategy::kRestart, ""},
     {SettingId::kHiddenMainMenu, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideHud, ApplicationStrategy::kRestart, ""},

@@ -72,6 +72,13 @@ class PlaySelection {
     current_ = -1;
     pending_ = index;
   }
+  // Manual navigation must not let the automatic handoff's old-song grace win.
+  // An already captured press still names its original song until Complete().
+  void Skipped(int index, int64_t now) {
+    current_ = recent_ = -1;
+    pending_ = index;
+    transition_at_ = now;
+  }
   void Failed(int index) {
     if (current_ == index) current_ = -1;
     if (pending_ == index) pending_ = -1;

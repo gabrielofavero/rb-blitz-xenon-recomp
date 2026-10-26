@@ -89,6 +89,7 @@ Value Enum(std::string token) {
 // joined on 2026-10-22: the owner pass's P9-2 made it `restart` because the surfaces the switch
 // owns are drawn at boot, so re-promoting it needs a measurement of both of them changing live.
 constexpr SettingId kRowsThatMustStayRestart[] = {
+    SettingId::kBackgroundMusicNavigation,
     SettingId::kTarget,     SettingId::kHideHud,     SettingId::kCacheDlcLibrary,
     SettingId::kResolution, SettingId::kRenderer,   SettingId::kAntiAliasing,
     SettingId::kFiltering,  SettingId::kRhythmVerse, SettingId::kShowMessages, SettingId::kShowRecommendations,

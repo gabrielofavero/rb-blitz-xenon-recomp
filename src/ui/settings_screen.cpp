@@ -288,6 +288,8 @@ enum class Kind {
   // the row always reads its label - it is how every `Reset All` stopped drawing a `: Nothing`
   // suffix, and why a table's reset works whether or not the table is custom.
   kPathAction,
+  // Playback commands use file_exists in rbbz-play/, with no settings write/commit.
+  kPlaybackAction,
   // One-shot Controls rows: `path` is a `rbbz-settings/` write. `kCapture` arms the listening
   // session and enters the dialog. The dialog is left by the capture itself (a valid press, or
   // the countdown's zero), so no row writes the bridge's `capture-cancel` op.
@@ -529,6 +531,17 @@ Row PathActionRow(const char* symbol, const char* path, const char* label,
   return row;
 }
 
+Row PlaybackActionRow(const char* symbol, const char* path, const char* label,
+                      const char* description) {
+  Row row;
+  row.symbol = symbol;
+  row.kind = Kind::kPlaybackAction;
+  row.path = path;
+  row.label = label;
+  row.description = description;
+  return row;
+}
+
 // A gated retail route used to live here (`Default Presets` while Controller Custom was off).
 // P2 of the interface/gameplay mapping restructure plan removes the Custom switches, so the row
 // is a plain `RouteRow` now: the preset page is always available.
@@ -578,6 +591,7 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_controls_panel", "CONTROLS"},
       {"settings_input_types_panel", "INPUT TYPES"},
       {"settings_interface_mapping_panel", "INTERFACE MAPPING"},
+      {"settings_interface_music_play_panel", "BACKGROUND MUSIC PLAY"},
       {"settings_interface_navigation_panel", "NAVIGATION"},
       {"settings_interface_music_library_panel", "MUSIC LIBRARY OPTIONS"},
       {"settings_gameplay_mapping_panel", "GAMEPLAY MAPPING"},
@@ -773,10 +787,25 @@ std::vector<PanelSpec> AllPanels() {
                                            "settings_interface_music_library_screen",
                                            "Music Library Options",
                                            "The song list's search, shortcuts, and sort buttons."),
+                                SubmenuRow("settings_interface_music_play",
+                                           "settings_interface_music_play_screen",
+                                           "Background Music Play",
+                                           "Next track, previous track, or pause and resume menu music."),
                                 PathActionRow("settings_reset_general",
                                               Path("bind-reset-all", "input.reset.general", "-").c_str(),
                                               "Reset All",
                                               "Restore all 16 interface controls to their compiled defaults."),
+                            }});
+    out.push_back(PanelSpec{"settings_interface_music_play_panel",
+                            "settings_interface_music_play_screen",
+                            "settings_interface_mapping_screen", MenuPanels(),
+                            {
+                                PlaybackActionRow("settings_music_next", "rbbz-play/next", "Next Track",
+                                                  "Skip to the next track in the menu-music playlist."),
+                                PlaybackActionRow("settings_music_previous", "rbbz-play/previous", "Previous Track",
+                                                  "Restart after five seconds; otherwise play the previous track."),
+                                PlaybackActionRow("settings_music_pause", "rbbz-play/pause", "Play/Pause",
+                                                  "Pause or resume the current menu-music track."),
                             }});
     out.push_back(PanelSpec{"settings_interface_navigation_panel",
                             "settings_interface_navigation_screen",
@@ -1265,6 +1294,9 @@ std::vector<PanelSpec> AllPanels() {
                               BoolRow("settings_labels", "interface.settings_labels",
                                       "Help & Options Labels",
                                       "Show a description of the highlighted row at the bottom of the screen."),
+                              BoolRow("settings_music_navigation", "interface.background_music_navigation",
+                                      "Menu Music Navigation",
+                                      "Navigate menu music with the shoulders, media keys, or music player. Requires a restart."),
                           }});
 
   out.push_back(PanelSpec{"settings_music_library_store_panel", "settings_music_library_store_screen",
@@ -1488,6 +1520,8 @@ std::vector<PanelSpec> AllPanels() {
       return false;
     });
   }
+  // Background Music Play is always discoverable. The navigation switch gates
+  // runtime commands (P2), not the row/page or its in-song twin.
   for (PanelSpec& panel : out) {
     ApplyDefaultTitle(&panel);
     if (!panel.title.empty()) {
@@ -1803,6 +1837,8 @@ Node RowCase(const Row& row, const std::string_view symbol) {
       // the rows that reset restore their own states in place.
       return Arr({Sym(symbol), Write(row.path), Write(Path("commit", "-", "-")),
                   CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
+    case Kind::kPlaybackAction:
+      return Arr({Sym(symbol), Cmd({Sym("file_exists"), Str(row.path)})});
     case Kind::kCapture:
       return Arr({Sym(symbol), Write(row.path), EnterScreen(row.screen)});
     case Kind::kChoose:

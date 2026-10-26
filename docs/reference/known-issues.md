@@ -9,6 +9,13 @@ is removed from this file, not from the log.
 
 ## Open
 
+**Menu-music navigator is staged at P1 (2026-10-26):** the default-on Menu Music Navigation
+switch and Background Music Play command page exist, but Next Track / Previous Track /
+Play/Pause do not change music yet. Pad/media controls and pause execution are P2; the footer,
+clickable player and artwork rendering are P3. Existing background music is unchanged. Manual
+layout/restart acceptance is pending; see the
+[navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §11.
+
 **Shader preparation coverage and installed acceptance (P9, 2026-10-25):**
 the installer now carries an audited locator/recipe catalogue and native local
 extractor. D3D12 campaign cold/warm/recovery routes passed within their declared

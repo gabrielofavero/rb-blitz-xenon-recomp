@@ -303,7 +303,17 @@ std::optional<PreparedPackage> PreparePackage(const std::filesystem::path& packa
       if (alias.size() + stream.size() + 2 > kBufferBytes) continue;
       auto key = rb_blitz::shell_music::SongKeyForStream(metadata, stream);
       if (!metadata.empty() && key.empty()) continue;
-      prepared.songs.push_back({alias, std::move(stream), std::move(key)});
+      PoolEntry entry{alias, stream, std::move(key)};
+      for (const auto& song : metadata) {
+        if (song.key == entry.song_key &&
+            rb_blitz::shell_music::StreamIdentity(song.stream) ==
+                rb_blitz::shell_music::StreamIdentity(stream)) {
+          entry.title = song.title;
+          entry.artist = song.artist;
+          break;
+        }
+      }
+      prepared.songs.push_back(std::move(entry));
     }
     if (prepared.songs.empty()) return std::nullopt;
     return prepared;

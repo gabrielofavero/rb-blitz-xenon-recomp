@@ -1221,3 +1221,38 @@ callees; no game UI is driven. Evidence is under `out/rolling-music-recovery/`.
 The release rebuild and all nine targeted music/audio/menu tests pass; the runtime
 regression contributes 48 checks, including pre-A preparation and the deliberate
 failure circuit breaker. Actual listening after this correction remains a manual check.
+
+
+### 7. Navigator P1: surface and shared bridge (2026-10-26)
+
+The default-on `interface.background_music_navigation` (id 53, carrier
+`enhancements_background_music_nav`) is a restart-scoped boolean on General → Interface,
+directly after Help & Options Labels. Background Music Play is always present as Interface
+Mapping's fifth row, before Reset All, regardless of this switch (owner follow-up, 2026-10-26). That three-row page emits the one-shot
+`file_exists` commands `rbbz-play/next`, `rbbz-play/previous`, `rbbz-play/pause`, without a settings
+write or commit. On and Off retain identical authored trees, including the command page
+and in-song twin. The boot log reports the effective switch and always-present page. The
+switch's restart strategy remains until P2 proves live runtime gating; visibility requires none.
+
+P1 installs no command handler or input interception: the existing `rbbz-play/` namespace rejects
+these unimplemented commands safely. Music playback is unchanged. P2 connects commands to the
+guest poll and proves pause; P3 implements the authorized footer/player, art resolution and mouse
+routing. Runtime behavior and player visuals remain unproven.
+
+The SDK-free `src/input/menu_music_nav.*` latch samples disabled frames as well as enabled ones,
+so held controls do not become synthetic presses when a gate opens. Its shared mailbox lives
+with `NowPlayingBridge` (`src/hooks/menu_music_now_playing.*`): one accepted command remains busy
+through execution until completion/cancellation, and a synchronized owned snapshot carries
+transport/capabilities, stable track identity, art status and the latest command result. Posting
+never calls the guest. Session epochs reject stale playback/art updates and request completions;
+art results must match the current song and artwork key. P2 must still revalidate producer-specific
+screen/capture gates on the guest thread.
+
+`PoolEntry` now owns title/artist plus an optional package-relative artwork locator. Package
+preparation copies parsed display metadata by exact stream/key; the catalog keeps it when a mount
+is retired. The locator stays empty until P3 proves asset resolution. `PlaySelection::Skipped`
+clears automatic handoff grace for future presses while preserving an already captured press.
+No second playlist or mounted-cache cursor is introduced.
+
+Host tests and the build/manual validation record are in the
+[navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §11.

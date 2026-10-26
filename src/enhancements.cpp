@@ -153,6 +153,15 @@ REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, true, "Enhancements",
                     "is written to, so an explicit flag or environment value still outranks it.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+// Navigator P1: the setting and command-page surface only. Runtime input/pause and
+// the clickable player are later prompts; this switch must not imply otherwise.
+REXCVAR_DEFINE_BOOL(enhancements_background_music_nav, true, "Enhancements",
+                    "Enable menu-music navigation; Background Music Play remains visible when off. "
+                    "P1 supplies the settings surface and bookkeeping; playback commands, "
+                    "input capture, footer and music player are not connected yet. "
+                    "Existing menu playback is unchanged in P1.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",
                      "R9's retired pool-size row: music uses a rolling session and a bounded "
                      "mount cache, so this legacy value is ignored (a boot says so).")
@@ -189,7 +198,7 @@ struct ToggleRow {
 // what the log walks, so a toggle that is not here is a toggle nobody sees. The size is
 // explicit, and it has to match the rows below: a short initializer list is not an error,
 // it leaves the last row - a null name and a null `enabled` - in the table.
-constexpr std::array<ToggleRow, 12> kToggles{{
+constexpr std::array<ToggleRow, 13> kToggles{{
     {"enhancements_hide_achievements", "hide achievement unlock notifications",
      [] { return REXCVAR_GET(enhancements_hide_achievements); }},
     {"enhancements_expand_resolution", "R1 custom resolutions",
@@ -212,6 +221,8 @@ constexpr std::array<ToggleRow, 12> kToggles{{
      [] { return REXCVAR_GET(enhancements_force_controller_scheme); }},
     {"enhancements_menu_dlc_songs", "R9 main-menu DLC songs (the in-game DLC Menu Songs row)",
      [] { return REXCVAR_GET(enhancements_menu_dlc_songs); }},
+    {"enhancements_background_music_nav", "menu-music navigator surface (P1; runtime pending)",
+     [] { return REXCVAR_GET(enhancements_background_music_nav); }},
     {"enhancements_rename_mod_settings", "R10 rename the mod's settings row",
      [] { return REXCVAR_GET(enhancements_rename_mod_settings); }},
 }};
@@ -219,7 +230,8 @@ constexpr std::array<ToggleRow, 12> kToggles{{
 }  // namespace
 
 void LogToggles() {
-  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3, R6, R7's cache, R9 and R10 "
+  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3, R6, R7's cache, R9, R10 "
+              "and the menu-music navigator's own cvar "
               "(docs/engine/toggles.md)",
               kToggles.size());
   for (const ToggleRow& row : kToggles) {
