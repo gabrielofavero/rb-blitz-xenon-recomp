@@ -1239,6 +1239,19 @@ The release rebuild and all nine targeted music/audio/menu tests pass; the runti
 regression contributes 48 checks, including pre-A preparation and the deliberate
 failure circuit breaker. Actual listening after this correction remains a manual check.
 
+Loading preservation follow-up (2026-10-26): `rb_blitz_362.log` showed the watchdog rejecting the
+boot song before native Start (stream 0), then replacing an audible state-3 stream during graphics
+preparation. Load now stages the song without arming its watchdog; Start arms it once. Native
+loading polls and the active graphics-loading gate defer watchdog deadlines while preserving the
+playing stream, sample position and selection. Cache-ready successors do not interrupt that song.
+EOF and foreign-stream checks still run, and normal timeout recovery resumes after loading.
+The production-hook and SDK-free regressions cover those boundaries; listening remains manual.
+The same boot spent 531 ms mounting menu music, 45.794 s in native content enumeration and
+5.663 s in graphics preparation. A separate full-library store index ran throughout startup;
+its contribution to the long pre-menu interval needs profiling in a separate session. Detailed
+timestamps and the unconfirmed double-audio report are in the
+[navigator follow-up](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §13.
+
 
 ### 7. Navigator P1: surface and shared bridge (2026-10-26)
 
@@ -1255,6 +1268,8 @@ P1 installs no command handler or input interception: the existing `rbbz-play/` 
 these unimplemented commands safely. Music playback is unchanged. P2 connects commands to the
 guest poll and proves pause; P3 implements the authorized footer/player, art resolution and mouse
 routing. Runtime behavior and player visuals remain unproven.
+The owner's subsequent request for visible effective bindings and an assignment flow is recorded
+in P2's follow-up notes; P1's command-only rows do not implement that flow.
 
 The SDK-free `src/input/menu_music_nav.*` latch samples disabled frames as well as enabled ones,
 so held controls do not become synthetic presses when a gate opens. Its shared mailbox lives

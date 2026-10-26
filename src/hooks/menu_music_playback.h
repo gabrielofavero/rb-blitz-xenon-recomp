@@ -21,6 +21,12 @@ class Playback {
     progress_at_ = started_at_ = now;
   }
   void Stop() { active_ = audible_ = false; }
+  bool active() const { return active_; }
+
+  // Native content/graphics loading can starve decoding and ShellMusic polls.
+  // Keep the same stream/position/identity, but give it a fresh recovery window
+  // after loading. EOF and stream replacement remain authoritative in Observe.
+  void DeferWatchdog(int64_t now) { progress_at_ = started_at_ = now; }
 
   Event Observe(int64_t now, uint32_t stream, bool playing, bool finished, uint32_t position) {
     if (!active_) return Event::kNone;

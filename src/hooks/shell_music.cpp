@@ -57,6 +57,7 @@
 #include "fs/dlc_song_metadata.h"
 #include "settings/menu_compat.h"
 #include "settings/boot.h"
+#include "graphics/preparation_loading.h"
 
 #if defined(_WIN32)
 
@@ -665,7 +666,7 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
   g_track_started_at = std::chrono::steady_clock::now();
   g_seam_at = g_track_started_at;
   g_heartbeat_at = g_track_started_at;
-  g_playback.Begin(NowMs());
+  g_playback.Stop();  // Load only stages a path; Start arms the startup watchdog.
   g_watch = true;
   g_watch_title = false;
   g_attempts = 0;
@@ -809,6 +810,9 @@ void StartQueuedPool() {
 
 void PublishQueuedPool(bool during_loading) {
   std::lock_guard lock(g_mutex);
+  // This also runs before the queue starts and on the final loading query.
+  // Preparing caches is not evidence that the current music source failed.
+  if (during_loading) g_playback.DeferWatchdog(NowMs());
   if (g_closing || !g_queue_started || g_setting_up_music) return;
   const bool active = during_loading || g_watch || g_watch_title;
   g_queue.Pause(!active);
@@ -950,7 +954,16 @@ extern "C" REX_FUNC(sub_82758B98) {
   {
     std::lock_guard lock(g_mutex);
     if (music == g_music) {
-      if (g_watch && g_pending_index >= 0) g_stream_song = size_t(g_pending_index);
+      if (g_watch && g_pending_index >= 0) {
+        g_stream_song = size_t(g_pending_index);
+        // The panel can stage Load long before it calls Start. Charging that
+        // interval to decoding falsely rejects the boot song on a slow boot.
+        // Repeated Start calls on the same playing stream must not reset it.
+        if (!g_playback.active()) {
+          g_playback.Begin(NowMs());
+          g_track_started_at = g_heartbeat_at = std::chrono::steady_clock::now();
+        }
+      }
       else if (g_watch_title) g_stream_song = rb_blitz::shell_music::kNoIndex;
     }
   }
@@ -1044,6 +1057,9 @@ extern "C" REX_FUNC(sub_827586D8) {
     } else {
       // StandardStream's native predicates: IsPlaying == state 3 (0x823E30F0),
       // IsFinished == state 6 (0x823E30D8). Observe EOF before Poll can restart anything.
+      // A renderer preparation call can itself block longer than the watchdog,
+      // after the loading poll's keepalive. Check the live gate here as well.
+      if (rb_blitz::graphics::GraphicsLoadingPending()) g_playback.DeferWatchdog(NowMs());
       const auto event = g_playback.Observe(NowMs(), stream, state == 3, state == 6, position);
       using Event = rb_blitz::shell_music::Playback::Event;
       if (event == Event::kEnded) {

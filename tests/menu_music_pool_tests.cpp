@@ -332,6 +332,28 @@ void TestPlaybackLifecycle() {
   playback.Begin(0);
   playback.Observe(1, 10, true, false, 2000);
   CHECK_TRUE(playback.Observe(2, 10, true, false, 100) == Event::kEnded);
+
+  BeginCase("loading defers stall deadlines without losing progress or masking EOF");
+  playback.Begin(0);
+  CHECK_TRUE(playback.Observe(1, 10, true, false, 100) == Event::kAudible);
+  playback.DeferWatchdog(60000);
+  CHECK_TRUE(playback.Observe(60001, 10, true, false, 100) == Event::kNone);
+  CHECK_EQ(playback.position(), 100u);
+  CHECK_TRUE(playback.Observe(60002, 10, true, false, 200) == Event::kNone);
+  CHECK_TRUE(playback.Observe(63001, 10, true, false, 200) == Event::kNone);
+  CHECK_TRUE(playback.Observe(63002, 10, true, false, 200) == Event::kFailed);
+  playback.Begin(0);
+  playback.DeferWatchdog(60000);
+  CHECK_TRUE(playback.Observe(60001, 10, false, false, 0) == Event::kNone);
+  CHECK_TRUE(playback.Observe(75000, 10, false, false, 0) == Event::kFailed);
+  playback.Begin(0);
+  playback.Observe(1, 10, true, false, 100);
+  playback.DeferWatchdog(60000);
+  CHECK_TRUE(playback.Observe(60001, 10, false, true, 100) == Event::kEnded);
+  playback.Begin(0);
+  playback.Observe(1, 10, true, false, 100);
+  playback.DeferWatchdog(60000);
+  CHECK_TRUE(playback.Observe(60001, 20, true, false, 200) == Event::kFailed);
 }
 
 void TestCanonicalSongHistory() {

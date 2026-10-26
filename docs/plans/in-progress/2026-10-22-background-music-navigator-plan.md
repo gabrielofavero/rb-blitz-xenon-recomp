@@ -361,6 +361,18 @@ state).
 
 ### P2 — The runtime: pause seam, navigation, inputs, Play Current Song
 
+**Owner acceptance follow-up (2026-10-26).** The P1 page draws only action names and its presses
+are inert, as originally scoped. The owner expects visible current bindings (for example
+`Next Track: RB, Media Next`) and an assignment flow on selection. Carry that work into **P2**,
+alongside the runtime input wiring: persist action-specific pad/media-key bindings, display their
+effective values, support assignment/cancellation/reset, and make the input latch consume those
+values. Do not map a feature action to an unrelated physical-control target in `[remap]`.
+This revises R5/D9's command-only page design for the future implementation; P1's existing
+`file_exists` commands remain the execution channel, and P3 must polish bound/unavailable values
+within the guest row budget. Acceptance must include reassignment surviving restart, one command
+per press, cancellation leaving the prior binding intact, and the navigation-off gate. This is
+recorded future work, not a claim that P1 supports assignment or playback commands.
+
 **Goal.** Make Next/Previous/Pause actually change the menu music, driven by LB/RB/Start and the
 media keys, and keep Play Current Song on the audible song.
 
@@ -658,3 +670,51 @@ no introduced findings. Evidence: `out/_swap/music-nav/p1-always-visible/` (`bui
 confirmation remains manual. After turning the switch Off, revisit Controls → Interface Mapping
 without restarting: the fifth-row submenu, its three commands and Back route must remain present;
 an explicit off-flag boot must also retain them.
+
+## 13. Loading/playback acceptance follow-up (2026-10-26)
+
+The owner's last boot, `out/build/win-amd64-release/logs/rb_blitz_362.log`, exposes two false
+watchdog failures in the existing background-music implementation, independent of P1's UI:
+
+- Load staged `EdT_SU_BEP` at 12:26:12.832. At 12:26:40.838 the watchdog rejected it with
+  **stream=0**, before the title called Start. The startup deadline now begins at Start,
+  rather than charging the panel's deferred startup to decoding. Repeated Start calls do not
+  reset an already active watchdog.
+- `traininvain` was audible at 12:26:47.551. During graphics preparation the same stream
+  (`408305A8`, state 3, position 2392064) was rejected at 12:27:39.980 and replaced by
+  `gimmesometruth`, just before the gate released at 12:27:41.179. Native loading polls and the
+  active loading gate now defer startup/stall deadlines while retaining the stream, sample
+  position, selection and session cursor. A renderer call can itself block, so the ShellMusic
+  poll checks the gate after preparation calls as well. EOF/replacement detection remains live;
+  normal 15-second startup and 3-second stall limits resume after loading.
+
+Cache publication only warms successors; it never starts a replacement merely because a package
+is ready. The existing temporary title-fallback recovery still applies to a genuinely failed
+source. The production-hook regression covers deferred native startup, ready successors plus a
+loading stall, and resumption on the original stream without another Load/Start/destructor.
+SDK-free checks cover watchdog recovery, subsequent real failure, EOF and foreign-stream rejection.
+
+**Double audio:** the log proves successive track replacements, not simultaneous audible copies.
+The native handoff destroys and clears the prior stream before starting its successor. P1 adds no
+audio engine or runtime input handler. A listening check is still needed to establish the owner's
+reported effect; neither code inspection nor synthetic native callees prove the actual audio mix.
+
+**Slow boot, separate work:** the menu-music startup mount took **531 ms**, with one package.
+The same log spans 12:24:31.401 to a usable menu at 12:27:41.299 (about **190 s**). About 92 s
+elapsed between the pool becoming ready and the first guest music request (101 s from launch); this interval precedes
+the rolling worker. The native content pass took **45.794 s**, enumerating 1,777 packages twice
+(3,554 successful entries), with zero metadata reads and a 38 ms song-cache read. Graphics preparation
+then took **5.663 s**, including a repaired recipe layer and native pipeline-cache restore.
+The store's separate boot index worker (`src/store/store_library.cpp`, `Build`/`InstallStoreLibrary`)
+was opening the full DLC library throughout startup, independent of the bounded music worker.
+That is a concrete source of competing disk I/O; its exact contribution to the unusually slow
+pre-menu interval is unmeasured. Do not attribute that whole interval to it without profiling.
+Persistent/deferred store indexing and native enumeration/startup profiling belong to the separate
+performance session requested by the owner; no store/content/graphics optimization is included here.
+
+**Host verification:** the release build succeeds with the final changes; all nine targeted
+music/menu ctests pass, including `menu_music_runtime`. Documentation findings are identical
+before/after this follow-up (43 existing errors / 89 warnings), and `git diff --check` passes.
+Evidence: `out/music-followup-build-final.log`, `out/music-followup-tests.log`,
+`out/music-followup-docs-before.json`, `out/music-followup-docs-after.json`. Game/UI testing awaits
+the owner's choice; the listening report remains unconfirmed.

@@ -9,6 +9,7 @@ namespace {
 constexpr uint32_t kMusic = 0x100, kOldStream = 0x200, kNewStream = 0x400;
 constexpr uint32_t kVtable = 0x800, kDestroy = 0x1234, kPath = 0x1000;
 unsigned loads = 0, starts = 0, stops = 0, destroys = 0, polls = 0;
+bool native_loading = false;
 std::string loaded;
 void Store(uint8_t* base, uint32_t address, uint32_t value) {
   rex::memory::store_and_swap<uint32_t>(base + address, value);
@@ -37,6 +38,7 @@ namespace rb_blitz::settings::menu_compat {
 std::string LegacyPoolCountNote(int32_t) { return {}; }
 }
 namespace rb_blitz::content_progress { void Tick() {} }
+namespace rb_blitz::graphics { bool GraphicsLoadingPending() { return native_loading; } }
 namespace rb_blitz::dlc {
 bool RefreshArmed() { return false; }
 void PublishPendingRefresh() {}
@@ -78,8 +80,78 @@ extern "C" REX_FUNC(__imp__sub_82758998) {}
 extern "C" REX_FUNC(__imp__sub_82758490) {}
 extern "C" REX_FUNC(__imp__sub_823E5BE0) {}
 
+void TestLoadingPreservesBootSong() {
+  using namespace rb_blitz::shell_music;
+  rb_blitz::test::BeginCase("a staged boot song waits for native Start, even on a slow boot");
+  std::array<uint8_t, 65536> memory{};
+  auto* base = memory.data();
+  PPCContext ctx{};
+  ctx.r1.u32 = 0xF000;
+  ctx.r3.u32 = kMusic;
+  ctx.r4.u32 = 0x2000;
+  ctx.r31.u64 = 0xABCDEF;
+  std::strcpy(reinterpret_cast<char*>(base + ctx.r4.u32), "sfx/shell/samples/shellmusic_1");
+  rex::filesystem::HostPathDevice ready("\\Device\\ReadyMusic", {}, true);
+  g_enabled = true;
+  g_buffers = {kPath};
+  g_session.Discover(0, {{"menumusic0", "songs/startup/audio", "BootSong"}});
+  CHECK_TRUE(g_cache.Insert(0, &ready));
+  sub_82757F50(ctx, base);
+  CHECK_EQ(loads, 1u);
+  CHECK_FALSE(g_playback.active());
+  g_track_started_at -= std::chrono::seconds(28);
+  sub_827586D8(ctx, base); // no stream yet: the panel has not called Start
+  CHECK_EQ(loads, 1u);
+  CHECK_EQ(starts, 0u);
+  CHECK_FALSE(g_queue_started);
+  CHECK_EQ(g_pending_index, 0);
+  sub_82758B98(ctx, base);
+  CHECK_TRUE(g_playback.active());
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_current_index, 0);
+  CHECK_TRUE(SelectedSongKey() == "BootSong");
+
+  rb_blitz::test::BeginCase("cache publication and a loading stall preserve the audible stream");
+  g_session.Discover(1, {{"menumusic1", "songs/next/audio", "Successor"}});
+  CHECK_TRUE(g_cache.Insert(1, &ready));
+  const auto now = NowMs();
+  g_playback.Begin(now - 10000);
+  CHECK_TRUE(g_playback.Observe(now - 10000, kNewStream, true, false, 100) == Playback::Event::kAudible);
+  PublishQueuedPool(true); // native preparation stalled decoding for >3 s
+  sub_827586D8(ctx, base); // still state 3 at the same position
+  CHECK_EQ(loads, 1u);
+  CHECK_EQ(starts, 1u);
+  CHECK_EQ(destroys, 0u);
+  CHECK_EQ(LoadBe32(base, kMusic + kStreamOffset), kNewStream);
+  CHECK_EQ(g_session.Cursor(), 0u);
+  CHECK_EQ(g_current_index, 0);
+  CHECK_TRUE(SelectedSongKey() == "BootSong");
+  g_playback.Begin(now - 10000);
+  g_playback.Observe(now - 10000, kNewStream, true, false, 100);
+  native_loading = true; // preparation itself blocked after the last keepalive
+  sub_827586D8(ctx, base);
+  native_loading = false;
+  CHECK_EQ(loads, 1u);
+  CHECK_EQ(starts, 1u);
+  CHECK_EQ(g_current_index, 0);
+  Store(base, kNewStream + kPositionOffset, 200);
+  sub_827586D8(ctx, base); // decoding resumes after loading, same stream/song
+  CHECK_EQ(loads, 1u);
+  CHECK_EQ(starts, 1u);
+  CHECK_EQ(g_playback.position(), 200u);
+
+  g_session = MusicSession{};
+  g_cache = MusicMountCache<rex::filesystem::Device>{};
+  g_playback.Stop();
+  g_play_selection.Stop();
+  g_current_index = g_pending_index = -1;
+  g_stream_song = kNoIndex;
+  loads = starts = stops = destroys = polls = 0;
+}
+
 int main() {
   using namespace rb_blitz::shell_music;
+  TestLoadingPreservesBootSong();
   rb_blitz::test::BeginCase("temporary title fallback recovers without a counter rewind");
   std::array<uint8_t, 65536> memory{};
   auto* base = memory.data();
