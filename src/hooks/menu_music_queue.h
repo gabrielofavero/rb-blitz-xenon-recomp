@@ -7,69 +7,98 @@
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <thread>
 #include <utility>
 
 namespace rb_blitz::shell_music {
 
-// Host-only preparation with a bounded handoff. Taking a result never waits for
-// I/O; publishing devices and changing the live pool belong to the caller.
+// Demand-driven host preparation. No library walk runs ahead of the consumer.
+// A request stays deduplicated until its result is consumed, including in-flight
+// I/O. Devices are prepared outside the mutex and published by the guest owner.
 template <typename T>
 class MenuMusicQueue {
  public:
   ~MenuMusicQueue() { Stop(); }
 
-  void Start(size_t begin, size_t end,
-             std::function<std::optional<T>(size_t)> prepare) {
+  void Start(std::function<std::optional<T>(size_t)> prepare) {
     std::lock_guard lock(mutex_);
     if (started_ || stopped_) return;
     started_ = true;
-    worker_ = std::jthread([this, begin, end, prepare = std::move(prepare)] {
-      for (size_t i = begin; i < end; ++i) {
+    worker_ = std::jthread([this, prepare = std::move(prepare)] {
+      for (;;) {
+        size_t key;
         {
           std::unique_lock lock(mutex_);
-          wake_.wait(lock, [this] { return stopped_ || ready_.size() < 2; });
+          wake_.wait(lock, [this] {
+            return stopped_ || (!paused_ && !requests_.empty() && ready_.size() < 2);
+          });
           if (stopped_) break;
+          key = requests_.front();
+          requests_.pop_front();
         }
-        auto result = prepare(i);
-        std::lock_guard lock(mutex_);
-        if (stopped_) break;
-        if (result) ready_.push_back(std::move(*result));
+        auto result = prepare(key);
+        {
+          std::lock_guard lock(mutex_);
+          if (stopped_) break;
+          if (result) ready_.push_back({key, std::move(*result)});
+          else outstanding_.erase(key);
+        }
       }
-      std::lock_guard lock(mutex_);
-      finished_ = true;
+      // Retire unpublished devices on this host worker, not on a closing UI
+      // thread. All callbacks own their host-only snapshots.
+      std::deque<std::pair<size_t, T>> discarded;
+      {
+        std::lock_guard lock(mutex_);
+        discarded.swap(ready_);
+        requests_.clear();
+        outstanding_.clear();
+      }
     });
+  }
+
+  bool Request(size_t key, bool priority = false) {
+    std::lock_guard lock(mutex_);
+    if (!started_ || stopped_ || outstanding_.contains(key) || outstanding_.size() >= 2) return false;
+    outstanding_.insert(key);
+    if (priority) requests_.push_front(key); else requests_.push_back(key);
+    wake_.notify_one();
+    return true;
   }
 
   std::optional<T> Take() {
     std::lock_guard lock(mutex_);
     if (stopped_ || ready_.empty()) return std::nullopt;
-    T result = std::move(ready_.front());
+    auto item = std::move(ready_.front());
     ready_.pop_front();
+    outstanding_.erase(item.first);
     wake_.notify_one();
-    return result;
+    return std::move(item.second);
   }
 
-  // Nonblocking, including while a mount is in progress. The worker owns only
-  // host data, so it can finish that mount without accessing a closing runtime.
+  void Pause(bool paused) {
+    std::lock_guard lock(mutex_);
+    paused_ = paused;
+    wake_.notify_all();
+  }
+  bool Idle() const {
+    std::lock_guard lock(mutex_);
+    return outstanding_.empty();
+  }
+  // Does not join an in-flight mount. The destructor joins before members die.
   void Stop() {
     std::lock_guard lock(mutex_);
     stopped_ = true;
     wake_.notify_all();
   }
 
-  bool Finished() const {
-    std::lock_guard lock(mutex_);
-    return finished_ && ready_.empty();
-  }
-
  private:
   mutable std::mutex mutex_;
   std::condition_variable wake_;
-  std::deque<T> ready_;
-  bool started_ = false, stopped_ = false, finished_ = false;
-  // Destroyed first: joins before the mutex, queue and condition variable die.
+  std::deque<size_t> requests_;
+  std::deque<std::pair<size_t, T>> ready_;
+  std::set<size_t> outstanding_;
+  bool started_ = false, stopped_ = false, paused_ = false;
   std::jthread worker_;
 };
-
 }  // namespace rb_blitz::shell_music

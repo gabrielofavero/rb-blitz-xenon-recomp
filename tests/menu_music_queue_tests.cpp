@@ -1,15 +1,23 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
 #include "hooks/menu_music_queue.h"
-#include "hooks/menu_music_pool.h"
-#include "hooks/menu_music_playback.h"
-
 #include <atomic>
 #include <chrono>
 #include <future>
 
 using namespace rb_blitz::shell_music;
 using namespace std::chrono_literals;
+
+namespace {
+template <typename T> std::optional<T> Await(MenuMusicQueue<T>& queue) {
+  const auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (auto result = queue.Take()) return result;
+    std::this_thread::yield();
+  }
+  return {};
+}
+}
 
 int main() {
   rb_blitz::test::BeginCase("a blocked mount cannot block a poll or a close request");
@@ -18,77 +26,63 @@ int main() {
     const auto gate = release.get_future().share();
     std::atomic<int> calls{0};
     MenuMusicQueue<int> queue;
-    CHECK_FALSE(queue.Take().has_value());
-    queue.Start(1, 50, [&](size_t i) -> std::optional<int> {
+    queue.Start([&](size_t i) -> std::optional<int> {
       ++calls;
       entered.set_value();
       gate.wait();
       return int(i);
     });
+    CHECK_TRUE(queue.Idle());
+    CHECK_TRUE(queue.Request(1));
+    CHECK_FALSE(queue.Request(1));
     CHECK_TRUE(entered.get_future().wait_for(5s) == std::future_status::ready);
     CHECK_FALSE(queue.Take().has_value());
-    queue.Stop();  // must return before release, even with a mount in flight
+    queue.Stop();
     CHECK_FALSE(queue.Take().has_value());
+    CHECK_FALSE(queue.Request(2));
     release.set_value();
     CHECK_EQ(calls.load(), 1u);
   }
 
-  rb_blitz::test::BeginCase("prefetch stays bounded and advances only when a result is consumed");
+  rb_blitz::test::BeginCase("demand requests pause, deduplicate, prioritize and stay bounded");
   {
-    std::promise<void> second, third;
-    auto second_ready = second.get_future();
-    auto third_ready = third.get_future();
     MenuMusicQueue<int> queue;
-    queue.Start(1, 4, [&](size_t i) -> std::optional<int> {
-      if (i == 2) second.set_value();
-      if (i == 3) third.set_value();
-      return int(i);
-    });
-    CHECK_TRUE(second_ready.wait_for(5s) == std::future_status::ready);
-    CHECK_TRUE(third_ready.wait_for(20ms) == std::future_status::timeout);
-    const auto first = queue.Take();
-    CHECK_TRUE(first.has_value());
-    if (first) CHECK_EQ(*first, 1u);
-    CHECK_TRUE(third_ready.wait_for(5s) == std::future_status::ready);
-    // Stop discards queued publication and rejects a second start.
-    queue.Stop();
-    queue.Start(0, 1, [](size_t) -> std::optional<int> { return 99; });
+    queue.Start([](size_t i) -> std::optional<int> { return int(i); });
+    queue.Pause(true);
+    CHECK_TRUE(queue.Request(2));
+    CHECK_FALSE(queue.Request(2));
+    CHECK_TRUE(queue.Request(1, true));
+    CHECK_FALSE(queue.Request(3));
     CHECK_FALSE(queue.Take().has_value());
+    queue.Pause(false);
+    auto first = Await(queue), second = Await(queue);
+    CHECK_TRUE(first.has_value());
+    CHECK_TRUE(second.has_value());
+    if (first) CHECK_EQ(*first, 1u);
+    if (second) CHECK_EQ(*second, 2u);
+    CHECK_TRUE(queue.Idle());
+    CHECK_TRUE(queue.Request(1));  // a retired package can be remounted later
+    const auto remounted = Await(queue);
+    CHECK_TRUE(remounted.has_value());
+    if (remounted) CHECK_EQ(*remounted, 1u);
   }
 
-  rb_blitz::test::BeginCase("failed packages do not end the background walk");
+  rb_blitz::test::BeginCase("failed preparation releases its demand slot without an autonomous walk");
   {
-    std::promise<void> done;
+    std::atomic<unsigned> calls{0};
     MenuMusicQueue<int> queue;
-    queue.Start(1, 4, [&](size_t i) -> std::optional<int> {
-      if (i < 3) return std::nullopt;
-      done.set_value();
-      return int(i);
+    queue.Start([&](size_t i) -> std::optional<int> {
+      ++calls;
+      return i == 1 ? std::nullopt : std::optional<int>(int(i));
     });
-    CHECK_TRUE(done.get_future().wait_for(5s) == std::future_status::ready);
-    std::optional<int> result;
+    CHECK_TRUE(queue.Request(1));
     const auto deadline = std::chrono::steady_clock::now() + 5s;
-    while (!result && std::chrono::steady_clock::now() < deadline) {
-      result = queue.Take();
-      std::this_thread::yield();
-    }
-    CHECK_TRUE(result.has_value());
-    if (result) CHECK_EQ(*result, 3u);
+    while (!queue.Idle() && std::chrono::steady_clock::now() < deadline) std::this_thread::yield();
+    CHECK_TRUE(queue.Idle());
+    CHECK_EQ(calls.load(), 1u);
+    CHECK_TRUE(queue.Request(2));
+    CHECK_TRUE(Await(queue).has_value());
+    CHECK_EQ(calls.load(), 2u);
   }
-
-  rb_blitz::test::BeginCase("growing the pool preserves playback history and a captured press");
-  std::mt19937 rng(42);
-  Rotation rotation(rng);
-  rotation.SetPool({"ActualStartupKey"});
-  CHECK_EQ(rotation.Next(), 0u);
-  PlaySelection selection;
-  selection.Loading(0, 0);
-  selection.Audible(0);
-  CHECK_EQ(selection.Capture(10), 0u);
-  rotation.SetPool({"ActualStartupKey", "QueuedKey", "AnotherQueuedKey"});
-  CHECK_EQ(selection.Query(11), 0u);
-  const auto next = rotation.Next();
-  CHECK_TRUE(next == 1 || next == 2);
-  CHECK_EQ(rotation.Next(), next == 1 ? 2u : 1u);
   return rb_blitz::test::Finish();
 }

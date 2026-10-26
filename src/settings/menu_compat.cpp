@@ -125,14 +125,12 @@ HideDecision DecideHiddenRows(const HideRequest& request) {
   return decision;
 }
 
-size_t PoolCap(size_t usable_songs) { return std::min(kMenuPoolMax, usable_songs); }
-
 std::string LegacyPoolCountNote(int32_t configured) {
   if (configured == kLegacyPoolCountDefault) {
     return {};
   }
   return "the retired menu-pool size (" + std::to_string(configured) +
-         ") is ignored; the pool is fixed at " + std::to_string(kMenuPoolMax) + " songs";
+         ") is ignored; music uses a rolling session with a bounded mount cache";
 }
 
 }  // namespace rb_blitz::settings::menu_compat

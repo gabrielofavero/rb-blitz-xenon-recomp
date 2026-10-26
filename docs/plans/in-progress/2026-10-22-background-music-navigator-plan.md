@@ -1,6 +1,9 @@
 # Background music navigator — implementation plan
 
-**Status:** planning (2026-10-22). Nothing implemented. Owner request of 2026-10-22, normalized in
+**Status:** navigator planning (2026-10-22). The session/mount-cache architecture was
+approved and implemented separately on 2026-10-26; the navigator controls, settings,
+pause seam, media-key mapping and footer remain unimplemented. This session delivers
+only that architecture foundation, not P1–P3 of this navigator feature. Owner request of 2026-10-22, normalized in
 §1; the design is §4, the three execution prompts are §5.
 
 ## 1. Request (normalized)
@@ -63,7 +66,7 @@
 | --- | --- |
 | **D1** | **Setting.** `SettingId::kBackgroundMusicNavigation = 53`, token `interface.background_music_navigation`, `Category::kInterface`, `WidgetKind::kBoolean`, default **true**, `ApplicationStrategy::kRestart` (it decides boot-built rows and the footer, like the other menu-shaping rows). Carrier cvar `enhancements_background_music_nav` (default `true`, `kRequiresRestart`), written at the config rank by `CvarForSetting`, read once by `shell_music::Configure` and per draw by the overlay. |
 | **D2** | **The navigator owns the menu music source, not R9.** With a pool it navigates the pool; with R9 off (or no pool) it navigates the title's three tracks. It therefore learns the panel's Load arguments (`this`, gain, pan) on every Load call when the setting is on, and keeps one guest path buffer allocated even when R9 built no pool. |
-| **D3** | **The queue is the source list in order** (pool order, or `shellmusic_1..3`), with an explicit cursor. Next/Previous move the cursor and wrap. The automatic end-of-track path keeps using `Rotation::Next()`; a manual move calls a new `Rotation::NoteHeard(key)` so auto-advance neither replays the skipped song nor repeats the current one. |
+| **D3** | **One session playlist and cursor serve manual and automatic advancement.** `MusicSession` retains stable catalog song IDs and backward/forward history independently of mounted devices. Next follows an existing forward entry; at the frontier it draws an unseen source. Previous follows the same history under D4. After library discovery and one full pass, begin a fresh randomized pass without an immediate repeat. Keep current + three upcoming + two recent songs warm, with an eight-package residency ceiling and explicit active/selection pins. Retired mounts are remounted asynchronously when revisited; a missing ready successor never blocks the UI. The title's three tracks use the same cursor semantics when R9 is off. This supersedes the former fixed-50 pool cursor and separate automatic `Rotation` order. |
 | **D4** | **The 5-second rule uses the stream's sample counter** (`Stream+0xA0` / 44,100), not wall time. A track that is still loading counts as "< 5 s". "First song" means cursor 0 → restart. Next/Previous always resume playback if paused. |
 | **D5** | **Pause is proven or reported, never faked.** P1 must find a seam that (a) silences the stream, (b) freezes the reported position, (c) resumes at the same position, and (d) is not undone by the guest's own poll. Candidate ladder: the `StandardStream` message/vtable pause-and-resume call; else the stream state word (`Stream+0x14`, value 4 = the usual paused state) under a measured write; else the Play/Pause action is drawn as unavailable (`<label>: Unavailable`) and Start does nothing, with the limitation in `known-issues.md`. During a pause the `Playback` watchdog must be suspended or it marks the track failed after 3 s. |
 | **D6** | **Buttons are consumed on the main menu only** (`splash_screen` *and* its option list drawn), while the setting is on and a menu-music source exists. Bits: LB `0x0100`, RB `0x0200`, Start `0x0010`; media keys ride the existing keyboard gate (`keyboard_support`). One command per physical press (rising edge), keyboard hold does not repeat. |
@@ -79,7 +82,7 @@
 | Module | Role |
 | --- | --- |
 | `src/input/menu_music_nav.{h,cpp}` (new, SDK-free) | `Command {kNext, kPrevious, kPlayPause}`; the rising-edge `Latch` (pad bits + the three key names); `Post`/`Take` (one command in flight); `PreviousAction(position_samples, cursor)` = restart vs step back (pure); `SetAvailable`/`Available`. |
-| `src/hooks/menu_music_pool.h` | `Rotation::NoteHeard(key)`; a pure `QueueCursor::Next/Previous(size, cursor)` helper (wrap, skip nothing — failed songs are still visible to a manual move). |
+| `src/hooks/menu_music_session.h`, `menu_music_cache.h`, `menu_music_queue.h` | Delivered foundation: stable metadata catalog, shared playlist/cursor, outcomes, no-repeat passes, three-ahead/two-behind warming, explicit pins, bounded residency and a demand worker. Navigator commands will use `NextPosition`, `PreviousPosition` and `Select`; a cold target waits asynchronously while the current stream remains in control. |
 | `src/hooks/menu_music_playback.h` | `PlaySelection::Skipped(index, now)` (a manual transition: `current_ = -1`, `pending_ = index`, **clears `recent_`**) and a `Paused` accessor for the poll. |
 | `src/hooks/shell_music.{h,cpp}` | The guest half: learn Load args when navigator-only, allocate a path buffer, `ApplyNavigatorCommand(base, ctx)` at the top of `sub_827586D8`, `NavigatorNext/Previous/TogglePause` helpers, `NavigatorEnabled()`/`NavigatorHasSource()` for the overlay, and the pause seam (P1). |
 | `src/input/remap.cpp` | `user_index == 0`: sample LB/RB/Start + the three `HostKeyDown` names, run the latch when `menu_music_nav::Available()` and `MenuScreenIs("splash_screen")`, post one command, clear the three pad bits from the delivered state. |
@@ -108,10 +111,13 @@ LB/RB/Start (physical pad)      media keys (event latch)      Controls → Backg
 
 ### 4.3 The two sources
 
-- **Pool (R9 on with a pool):** `g_pool` order is the queue. Next/Previous load
-  `g_pool[cursor].alias + ":" + stream` with `loop=false` through `LoadOnGuest`; the cursor is
-  updated under `g_mutex`; `g_current_index` is cleared until the new stream advances (exactly as
-  `NextPathLocked` already does), and `g_play_selection.Skipped(...)` runs immediately.
+- **DLC session (R9 on):** use the shared `MusicSession` playlist, not mounted-cache
+  order. `SongAt(position)` is a stable catalog ID; the catalog supplies the exact
+  metadata key and source alias/path. Request a cold target asynchronously and keep
+  the current stream until it is ready. `LoadOnGuest` performs the handoff on the guest
+  owner thread; pin active/pending/captured selections and defer eviction while native
+  Files remain open. A manual move calls `Skipped` and the future
+  `PlaySelection::Skipped(...)` so the previous audible song cannot win the grace rule.
 - **Title tracks (R9 off / no pool):** the Load hook records the asked path; if it matches
   `sfx/shell/samples/shellmusic_N`, the cursor is N and Next/Previous load the neighbouring entry
   with `loop=true` (the title's own behaviour). No pool index exists, so `Play Current Song` says
@@ -173,9 +179,9 @@ session; do not commit.
    off (erase the row *and* the panel before `AllPanels()` returns); title
    `BACKGROUND MUSIC PLAY` in `ApplyDefaultTitle`.
 5. `src/input/menu_music_nav.{h,cpp}` with the whole pure API of §4.1 (no SDK), added to
-   `RBBLITZ_SOURCES`; `Rotation::NoteHeard` + `QueueCursor` in `menu_music_pool.h`;
+   `RBBLITZ_SOURCES`; reuse `MusicSession` cursor/history in `menu_music_session.h` (do not add a second rotation order);
    `PlaySelection::Skipped` in `menu_music_playback.h`.
-6. Tests: `tests/menu_music_pool_tests.cpp` (cursor order/wrap, `NoteHeard` vs the rotation, the
+6. Tests: `tests/menu_music_pool_tests.cpp` (shared history/cursor, asynchronous cold-target handling, the
    5 s rule, `Skipped` clears the grace, the latch fires once per press), `tests/settings_screen_tests.cpp`
    (the two new pages, the hidden-when-off case, `TestEveryDestinationExists`, the row/page counts
    move), `tests/settings_hot_apply_tests.cpp` if its pinned row count moves, `settings_service`
@@ -312,3 +318,22 @@ Boots use a scratch profile (`--launcher_profile=<scratch>/launcher.toml`,
 `dev.ps1 run-game-quick` for the auto-A route. `capture_window.ps1` + `ocr_image.ps1` (Windows
 PowerShell 5.1) read the frame. **Never edit the SDK by hand** — the media-key map is patch 0020,
 applied by `scripts/apply_sdk_patches.ps1`.
+
+
+## 10. Architecture foundation delivered separately (2026-10-26)
+
+Owner approval: implement the rolling architecture now; leave the background-music
+navigator feature for another session. `MusicSession`, `MusicMountCache` and the demand
+worker replace the runtime's fixed 50-song working set. Boot mounts one usable randomly
+selected package. Cache loading and menu playback prepare only the nearby window; new
+speculative requests stop while gameplay owns audio. Song metadata and playlist history
+outlive residency. SDK patch `0040-device-open-file-accounting.patch` supplies the native
+File lifetime count used after active/selection pins permit a package to retire.
+
+The existing Play Current Song row uses the dynamic Symbol read introduced earlier;
+its stable IDs remain valid after growth, retirement and remounting. No navigator input,
+new setting, media key, pause operation, action row or footer is part of this delivery.
+Future P1–P3 must build on D3 above rather than restoring the old pool-order cursor.
+The old media-key patch number 0020 in the historical prompts is occupied; allocate
+an unused SDK patch number when that feature is implemented. Footer implementation
+must follow the current owner directive in AGENTS.md.

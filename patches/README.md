@@ -437,3 +437,12 @@ Upstream candidate: the missing shortcut and DXGI status handling are general;
 unconditional focus-return reconnection is a defensive policy needing runtime
 validation.
 
+
+`0040-device-open-file-accounting.patch` adds a per-device native File lifetime
+counter. Base File construction retains one count and base destruction releases it,
+after the derived file has closed its resources. The rolling menu-music cache uses
+zero only after stopping new opens and excluding active/pending/captured sources,
+so guest handles still retaining a File prevent device eviction. It does not change
+the VFS's general unregister policy. Host tests open two real HostPath files and
+exercise the production cache's pins, residency bound and deferred retirement.
+Upstream candidate: resource accounting is general; eviction policy stays in the title.

@@ -27,14 +27,14 @@ namespace rb_blitz::shell_music {
 //
 // Call once from RbBlitzApp::OnPostLoadXexImage(), after dlc::Configure(): it reads the
 // library that layer just enumerated and mounts one randomly chosen usable package.
-// The remaining pool is prepared during native cache loading. With the toggle off
+// A small rolling cache is prepared during native cache loading and menu playback. With the toggle off
 // it logs and returns, leaving the title's own music in control.
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
 
 // The native cache-loading attempt starts host-only preparation. Guest polls
 // publish at most one ready device without waiting for I/O. Close never joins.
 void StartQueuedPool();
-void PublishQueuedPool();
+void PublishQueuedPool(bool during_loading = false);
 void CloseQueuedPool();
 
 // Metadata key of the selection captured by rbbz-play/begin, including songs
@@ -58,11 +58,11 @@ bool MenuMusicEnabled();
 // True when this boot really has a pool (the setting on *and* at least one song mounted).
 bool HasPool();
 
-// The pool's songs, in pool order, as the song key the title's own song manager knows them by
-// (from package metadata, or the stream basename when metadata is absent). Empty with no pool.
+// Discovered catalog songs in stable ID order, independent of mount residency.
+// Keys come from metadata, or the stream basename when metadata is absent.
 std::vector<std::string> PoolSongNames();
 
-// The pool index whose stream is audibly advancing, or -1 during loading and with no pool.
+// The stable catalog ID whose stream is audibly advancing, or -1 while loading.
 int CurrentPoolIndex();
 
 // The host's answer for one `rbbz-play/<...>` query path - what the menu's Play Current Song row

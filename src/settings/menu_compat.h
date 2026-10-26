@@ -43,10 +43,8 @@ inline constexpr char kProtectedMenuRow[] = "splash_options";
 // The row that carries the DLC library refresh while R7 is on (`TapRefreshCache`).
 inline constexpr char kRefreshMenuRow[] = "splash_dlc";
 
-// §3.5: the pool is a fixed 50 songs, capped by what the library can actually supply. The old
-// `enhancements_menu_dlc_song_count` row is retired: a legacy value is *ignored* (with a
-// diagnostic) rather than re-enabling configurability.
-inline constexpr size_t kMenuPoolMax = 50;
+// The old menu-song-count setting stays retired. The session now has no fixed
+// song cap; only mounted residency and advance preparation are bounded.
 inline constexpr int32_t kLegacyPoolCountDefault = 3;
 
 // The rows the compiled default hides: the three entries whose screens only ever worked online.
@@ -81,10 +79,6 @@ struct HideDecision {
 // The §3.5 rule, decided. Order is the selection's, de-duplicated; an empty result means the menu
 // is left exactly as the title ships it.
 HideDecision DecideHiddenRows(const HideRequest& request);
-
-// §3.5's pool: `min(50, what the library can supply)`. `usable_songs` is the boot's own ceiling
-// (how many songs/packages it is willing to mount), never the old cvar.
-size_t PoolCap(size_t usable_songs);
 
 // A one-line note when the retired `enhancements_menu_dlc_song_count` is not at its default, so a
 // boot says out loud that the value is ignored rather than silently behaving differently from what

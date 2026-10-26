@@ -937,6 +937,16 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_menu_music_queue_tests tests/menu_music_queue_tests.cpp)
     target_include_directories(rb_blitz_menu_music_queue_tests PRIVATE src)
     add_test(NAME menu_music_queue COMMAND rb_blitz_menu_music_queue_tests)
+    set_tests_properties(menu_music_queue PROPERTIES TIMEOUT 20)
+
+    add_executable(rb_blitz_menu_music_session_tests tests/menu_music_session_tests.cpp)
+    target_include_directories(rb_blitz_menu_music_session_tests PRIVATE src)
+    add_test(NAME menu_music_session COMMAND rb_blitz_menu_music_session_tests)
+
+    add_executable(rb_blitz_menu_music_cache_tests tests/menu_music_cache_tests.cpp)
+    target_include_directories(rb_blitz_menu_music_cache_tests PRIVATE src)
+    target_link_libraries(rb_blitz_menu_music_cache_tests PRIVATE rex::runtime)
+    add_test(NAME menu_music_cache COMMAND rb_blitz_menu_music_cache_tests)
 
     add_executable(rb_blitz_menu_music_guest_tests tests/menu_music_guest_tests.cpp)
     target_include_directories(rb_blitz_menu_music_guest_tests PRIVATE src)

@@ -6,8 +6,8 @@
 // Load alone does not replace a playing Stream: that was the cause of the apparent
 // rotation logging different names while the same audio kept playing.
 //
-// The bounded pool contains up to 50 distinct songs from mounted DLC. Rotation history
-// uses canonical song identities. Play Current Song publishes only a source producing
+// A session playlist keeps stable song identities and history while a small rolling
+// cache mounts nearby packages on demand. Play Current Song publishes only a source producing
 // samples, and menu exit clears it without starting another track.
 //
 // Guest ABI and runtime evidence: docs/engine/main-menu.md, part 2, 2026-10-15 correction.
@@ -19,6 +19,8 @@
 #include "hooks/menu_music_playback.h"
 #include "hooks/menu_music_metadata.h"
 #include "hooks/menu_music_queue.h"
+#include "hooks/menu_music_session.h"
+#include "hooks/menu_music_cache.h"
 #include "hooks/menu_audio_policy.h"
 
 #include <algorithm>
@@ -84,11 +86,6 @@ using rb_blitz::shell_music::PoolEntry;
 constexpr char kShellMusicPrefix[] = "sfx/shell/";
 constexpr size_t kShellMusicPrefixSize = sizeof(kShellMusicPrefix) - 1;
 
-// How many songs the pool holds at most - and, because one package can hold any number of
-// songs, how many containers it is reasonable to hold open at once: each mounted package is
-// one file handle and its own block-hash cache, and the walk mounts no more than this.
-constexpr int kMaxSongs = 64;
-
 // One guest string buffer per substitution, cycled. Several are kept because the
 // engine may still be holding the previous path when the next pool entry arrives: the
 // panel asks for the next track as the current one ends.
@@ -102,7 +99,8 @@ constexpr uint32_t kPositionOffset = 0xA0;
 constexpr double kSamplesPerSecond = 44100.0;  // diagnostic display for these mixdowns
 
 bool g_enabled = false;
-std::vector<PoolEntry> g_pool;
+rb_blitz::shell_music::MusicSession g_session;
+size_t g_stream_song = rb_blitz::shell_music::kNoIndex;
 
 // The setting's own value, as read in Configure(): true when `general.dlc_menu_songs` (the revived
 // "DLC Menu Songs" row) asked for the pool this boot. `g_enabled` is the stricter fact - the
@@ -126,12 +124,6 @@ std::mt19937 MakeRandom() {
   return std::mt19937(seed);
 }
 std::mt19937 g_rng = MakeRandom();
-
-// The play order of the pool, walked to the end and then reshuffled. A rotation rather
-// than a per-load pick: every song gets heard before any repeats, the song after the last
-// one is never the last one again, and a song whose load failed steps aside
-// (src/hooks/menu_music_pool.h).
-rb_blitz::shell_music::Rotation g_rotation{g_rng};
 
 // Playback bounds startup and stalled progress separately. Limit consecutive attempts before
 // handing the menu back to the title's tracks.
@@ -280,10 +272,11 @@ struct PreparedPackage {
 rb_blitz::shell_music::MenuMusicQueue<PreparedPackage> g_queue;
 rex::filesystem::VirtualFileSystem* g_file_system = nullptr;
 std::vector<std::filesystem::path> g_packages;  // shuffled once, before guest launch
-size_t g_next_package = 0, g_mounts = 0;
-size_t g_pool_cap = 0;
-bool g_queue_started = false, g_queue_reported = false, g_closing = false;
-std::chrono::steady_clock::time_point g_queue_started_at;
+size_t g_next_package = 0;
+rb_blitz::shell_music::MusicMountCache<rex::filesystem::Device> g_cache;
+std::optional<PreparedPackage> g_ready_package;
+bool g_queue_started = false, g_closing = false;
+
 
 std::string MountPath(size_t index) {
   return fmt::format("\\Device\\BlitzMenuMusic\\{}\\", index);
@@ -307,6 +300,7 @@ std::optional<PreparedPackage> PreparePackage(const std::filesystem::path& packa
                                          : FindSongMetadata(*prepared.device);
     const std::string alias = fmt::format("menumusic{}", index);
     for (auto& stream : streams) {
+      if (alias.size() + stream.size() + 2 > kBufferBytes) continue;
       auto key = rb_blitz::shell_music::SongKeyForStream(metadata, stream);
       if (!metadata.empty() && key.empty()) continue;
       prepared.songs.push_back({alias, std::move(stream), std::move(key)});
@@ -319,51 +313,108 @@ std::optional<PreparedPackage> PreparePackage(const std::filesystem::path& packa
   }
 }
 
-// Caller holds g_mutex, or runs before guest launch. Keep existing indices
-// stable: playback and an in-progress Play Current Song press may refer to them.
-bool PublishPackage(PreparedPackage prepared) {
-  auto additions = rb_blitz::shell_music::BuildPool(std::move(prepared.songs), g_pool_cap, g_rng);
-  std::erase_if(additions, [](const PoolEntry& candidate) {
-    const auto identity = rb_blitz::shell_music::SongIdentity(
-        rb_blitz::shell_music::PoolSongKey(candidate));
-    return std::any_of(g_pool.begin(), g_pool.end(), [&](const PoolEntry& entry) {
-      return rb_blitz::shell_music::SongIdentity(rb_blitz::shell_music::PoolSongKey(entry)) == identity;
-    });
+// Caller holds g_mutex or runs before guest launch. Published song IDs are
+// catalog IDs, never positions in the mounted cache or the session playlist.
+std::set<size_t> WarmPackagesLocked() {
+  std::vector<size_t> pins{g_stream_song};
+  if (g_pending_index >= 0) pins.push_back(size_t(g_pending_index));
+  if (g_current_index >= 0) pins.push_back(size_t(g_current_index));
+  const int selected = g_play_selection.Query(NowMs());
+  if (selected >= 0) pins.push_back(size_t(selected));
+  return g_session.WarmPackages(pins);
+}
+
+void RetireColdLocked() {
+  const auto retired = g_cache.RetireCold(WarmPackagesLocked(), [](size_t package) {
+    // Neither the active stream, its pending replacement nor a captured press
+    // can refer to this source. Open native Files defer its destruction further.
+    g_file_system->UnregisterSymbolicLink(fmt::format("menumusic{}:", package));
+    return g_file_system->UnregisterDevice(MountPath(package));
   });
-  if (additions.empty() || g_pool.size() >= g_pool_cap || g_mounts >= g_pool_cap) return false;
-  additions.resize(std::min(additions.size(), g_pool_cap - g_pool.size()));
-  const auto mount_path = MountPath(prepared.index);
-  const auto alias = additions.front().alias;
-  if (!g_file_system->RegisterDevice(std::move(prepared.device))) return false;
-  if (!g_file_system->RegisterSymbolicLink(alias + ":", mount_path)) {
-    g_file_system->UnregisterDevice(mount_path);
-    return false;
+  if (retired) REXLOG_INFO("shell_music: retired {} cold package(s); {} resident, {} catalog songs",
+                           retired, g_cache.Size(), g_session.Sources().size());
+}
+
+// Returns false only when all residency slots are pinned; keep the prepared
+// device pending and retry on a later poll without blocking or growing the cache.
+bool PublishPackage(PreparedPackage& prepared) {
+  if (!prepared.device) {
+    g_session.BlockPackage(prepared.index);
+    return true;
   }
-  ++g_mounts;
-  for (auto& song : additions) g_pool.push_back(std::move(song));
-  std::vector<std::string> keys;
-  for (const auto& song : g_pool) keys.push_back(rb_blitz::shell_music::PoolSongKey(song));
-  g_rotation.SetPool(std::move(keys));  // preserves played/failed identities
+  g_session.Discover(prepared.index, std::move(prepared.songs));
+  g_session.PlanAhead(g_rng);
+  if (!WarmPackagesLocked().contains(prepared.index)) return true;
+  if (g_cache.Contains(prepared.index)) return true;
+  RetireColdLocked();
+  if (g_cache.Full()) return false;
+  const auto mount_path = MountPath(prepared.index);
+  auto* device = prepared.device.get();
+  if (!g_file_system->RegisterDevice(std::move(prepared.device))) {
+    g_session.BlockPackage(prepared.index);
+    return true;
+  }
+  if (!g_file_system->RegisterSymbolicLink(fmt::format("menumusic{}:", prepared.index), mount_path)) {
+    g_file_system->UnregisterDevice(mount_path);
+    g_session.BlockPackage(prepared.index);
+    return true;
+  }
+  g_cache.Insert(prepared.index, device);
+  REXLOG_INFO("shell_music: package {} ready; {} resident, {} catalog songs, {} playlist entries",
+              prepared.index, g_cache.Size(), g_session.Sources().size(), g_session.Playlist().size());
   return true;
 }
 
-// The next song to play: the next song of the rotation, which hears every pooled song before it
-// repeats one and never hands back the song that just played. Also records which index that is,
-// because the index is what "Play Current Song" asks for. An empty path means the rotation has
-// nothing distinct left to offer (the caller then decides what the menu hears instead).
-// The caller holds g_mutex.
+size_t ReadyNextPositionLocked() {
+  g_session.PlanAhead(g_rng);
+  const size_t position = g_session.NextPosition();
+  return position != rb_blitz::shell_music::kNoIndex &&
+         g_cache.Contains(g_session.Package(g_session.SongAt(position)))
+      ? position : rb_blitz::shell_music::kNoIndex;
+}
+
+bool HasReadyNext() {
+  std::lock_guard lock(g_mutex);
+  return ReadyNextPositionLocked() != rb_blitz::shell_music::kNoIndex;
+}
+
 std::string NextPathLocked() {
-  const size_t index = g_rotation.Next();
-  if (index == rb_blitz::shell_music::kNoIndex) {
-    g_pending_index = -1;
-    g_current_index = -1;
+  const size_t position = ReadyNextPositionLocked();
+  if (position == rb_blitz::shell_music::kNoIndex) {
+    g_pending_index = g_current_index = -1;
     g_play_selection.Stop();
     return {};
   }
-  g_pending_index = static_cast<int>(index);
-  g_current_index = -1;  // publish only after this stream starts advancing
+  g_session.Select(position);
+  const size_t id = g_session.SongAt(position);
+  g_pending_index = static_cast<int>(id);
+  g_current_index = -1;
   g_play_selection.Loading(g_pending_index, NowMs());
-  return g_pool[index].alias + ":" + g_pool[index].stream;
+  const auto& source = g_session.Sources()[id];
+  return source.alias + ":" + source.stream;
+}
+
+void SchedulePreparationLocked() {
+  if (!g_queue_started || !g_queue.Idle() || g_ready_package) return;
+  if (g_next_package == g_packages.size()) g_session.DiscoveryComplete();
+  g_session.PlanAhead(g_rng);
+  RetireColdLocked();
+  if (g_cache.Full()) return;  // backpressure while retired streams still hold Files
+  // The immediate successor has priority over previous/history cache warming.
+  const auto next = g_session.NextPosition();
+  if (next != rb_blitz::shell_music::kNoIndex) {
+    const auto package = g_session.Package(g_session.SongAt(next));
+    if (!g_cache.Contains(package)) { g_queue.Request(package, true); return; }
+  }
+  for (size_t package : WarmPackagesLocked()) {
+    if (!g_session.PackageBlocked(package) && !g_cache.Contains(package)) {
+      g_queue.Request(package);
+      return;
+    }
+  }
+  if (g_session.NeedsDiscovery() && g_next_package < g_packages.size()) {
+    if (g_queue.Request(g_next_package)) ++g_next_package;
+  }
 }
 
 // The title's own pool entries, as the panel's own loader spells them (`sprintf("sfx/shell/%s")`
@@ -426,6 +477,11 @@ void LoadOnGuest(uint8_t* base, PPCContext& parent, uint32_t music, uint32_t buf
   start.r1.u32 -= 0x100;
   start.r3.u32 = music;
   __imp__sub_82758B98(start, base);
+  {
+    std::lock_guard lock(g_mutex);
+    g_stream_song = !loop && g_pending_index >= 0 ? size_t(g_pending_index)
+                                                 : rb_blitz::shell_music::kNoIndex;
+  }
   g_pos = 0;
   g_track_started_at = std::chrono::steady_clock::now();
   g_heartbeat_at = g_track_started_at;
@@ -443,9 +499,12 @@ void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
   bool new_pass = false;
   {
     std::lock_guard<std::mutex> lock(g_mutex);
+    const auto old_pass = g_session.Cursor() == rb_blitz::shell_music::kNoIndex ? 0
+        : g_session.Playlist()[g_session.Cursor()].pass;
     path = NextPathLocked();
-    new_pass = g_rotation.reshuffled();
-    if (path.empty() && !g_pool.empty()) {
+    new_pass = g_session.Cursor() != rb_blitz::shell_music::kNoIndex &&
+               g_session.Playlist()[g_session.Cursor()].pass != old_pass;
+    if (path.empty() && !g_session.Sources().empty()) {
       std::uniform_int_distribution<size_t> pick(0, 2);
       path = kTitleTracks[pick(g_rng)];
       title_track = true;
@@ -455,13 +514,13 @@ void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
       g_buffer_next = (g_buffer_next + 1) % g_buffers.size();
     }
     g_playing_name = g_pending_index >= 0
-        ? rb_blitz::shell_music::PoolSongKey(g_pool[g_pending_index]) : std::string();
+        ? rb_blitz::shell_music::PoolSongKey(g_session.Sources()[g_pending_index]) : std::string();
   }
   if (path.empty() || buffer == 0 || path.size() + 1 > kBufferBytes) {
     return;
   }
   if (title_track) {
-    g_waiting_for_pool = !g_queue_reported && g_next_package < g_packages.size();
+    g_waiting_for_pool = true;
     g_watch = false;        // the title's own music loops; the rotation has nothing left to do
     g_watch_title = true;   // ...but the poll still reports it, so a stalled fallback is visible
     REXLOG_INFO("shell_music: the DLC pool has nothing new to play; the menu goes back to the "
@@ -475,7 +534,7 @@ void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
                 "{} ms after the seam{}",
                 path, MillisecondsSince(g_seam_at),
                 new_pass ? fmt::format(", opening a new pass over the {} song(s) of the pool",
-                                       g_pool.size())
+                                       g_session.Sources().size())
                          : std::string());
   }
   LoadOnGuest(base, parent, music, buffer, path, /*loop=*/title_track);
@@ -489,7 +548,7 @@ void NoteFailedCandidate(uint8_t* base, PPCContext& parent, uint32_t music) {
     std::lock_guard<std::mutex> lock(g_mutex);
     failed = g_playing_name;
     if (!failed.empty()) {
-      g_rotation.MarkFailed(failed);
+      if (g_pending_index >= 0) g_session.Failed(size_t(g_pending_index));
       g_playing_name.clear();
     }
     g_play_selection.Failed(g_pending_index);
@@ -498,7 +557,7 @@ void NoteFailedCandidate(uint8_t* base, PPCContext& parent, uint32_t music) {
   REXLOG_WARN("shell_music: \"{}\" failed to start or stopped advancing ({} ms since start); "
               "it sits out the rest of this rotation (R9)",
               failed, MillisecondsSince(g_track_started_at));
-  if (++g_attempts >= kMaxAttemptsPerSeam && !g_pool.empty()) {
+  if (++g_attempts >= kMaxAttemptsPerSeam && !g_session.Sources().empty()) {
     REXLOG_WARN("shell_music: {} candidate(s) in a row could not be started; the menu goes back "
                 "to the title's own tracks (R9)",
                 g_attempts);
@@ -534,7 +593,7 @@ void NoteFailedCandidate(uint8_t* base, PPCContext& parent, uint32_t music) {
 // one of the loaded DLC songs instead. Anything else - a path that is not the shell
 // music pool's - is left exactly as it is.
 void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
-  if (!g_enabled || g_pool.empty() || g_buffers.empty()) {
+  if (!g_enabled || g_session.Sources().empty() || g_buffers.empty()) {
     return;
   }
   const uint32_t filename = ctx.r4.u32;
@@ -554,7 +613,20 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
     buffer = g_buffers[g_buffer_next];
     g_buffer_next = (g_buffer_next + 1) % g_buffers.size();
   }
-  if (path.empty() || path.size() + 1 > kBufferBytes) {
+  if (path.empty()) {
+    // Returning from gameplay can require an asynchronous remount. Watch the
+    // title's own source until the requested successor is ready; never wait here.
+    g_music = ctx.r3.u32;
+    g_gain = ctx.f1.f64;
+    g_scale_pan = ctx.r6.u64;
+    g_pos = 0;
+    g_watch = false;
+    g_watch_title = g_waiting_for_pool = true;
+    g_heartbeat_at = g_track_started_at = std::chrono::steady_clock::now();
+    ctx.r7.u64 = 1;
+    return;
+  }
+  if (path.size() + 1 > kBufferBytes) {
     return;
   }
   std::memcpy(rex::memory::GuestPtr<uint8_t*>(base, buffer), path.c_str(), path.size() + 1);
@@ -573,8 +645,8 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
   int index = -1;
   {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_playing_name = rb_blitz::shell_music::PoolSongKey(g_pool[g_pending_index]);
-    pool_size = g_pool.size();
+    g_playing_name = rb_blitz::shell_music::PoolSongKey(g_session.Sources()[g_pending_index]);
+    pool_size = g_session.Sources().size();
     index = g_pending_index;
   }
   g_track_started_at = std::chrono::steady_clock::now();
@@ -595,11 +667,11 @@ namespace rb_blitz::shell_music {
 
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
   (void)game_data_root;
-  // P10: the pool is a fixed 50 songs (§3.5), capped by what this boot can mount. Both lines are
-  // said *before* the early returns, so a boot that never mounts a package still reports the fixed
-  // cap and that a retired `enhancements_menu_dlc_song_count` is ignored instead of obeyed.
-  const size_t cap = rb_blitz::settings::menu_compat::PoolCap(kMaxSongs);
-  REXLOG_INFO("shell_music: the menu's DLC pool holds up to {} song(s) (fixed, plan 3.5)", cap);
+  REXLOG_INFO("shell_music: rolling session: one startup package, {} upcoming and {} recent "
+              "songs warm, at most {} resident packages",
+              rb_blitz::shell_music::MusicSession::kAhead,
+              rb_blitz::shell_music::MusicSession::kBehind,
+              rb_blitz::shell_music::MusicSession::kResidentLimit);
   const std::string legacy_note = rb_blitz::settings::menu_compat::LegacyPoolCountNote(
       REXCVAR_GET(enhancements_menu_dlc_song_count));
   if (!legacy_note.empty()) {
@@ -654,19 +726,18 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 
   const auto pool_start = std::chrono::steady_clock::now();
   g_file_system = file_system;
-  g_pool_cap = cap;
   g_packages = packages;
   // A uniform permutation of the entire library, freshly seeded from OS entropy.
   // Failed/art-only packages are skipped in this same order; no alphabetic prefix,
   // remembered last choice or deterministic per-boot seed biases the first mount.
   std::shuffle(g_packages.begin(), g_packages.end(), g_rng);
-  while (g_next_package < g_packages.size() && g_pool.empty()) {
+  while (g_next_package < g_packages.size() && g_cache.Size() == 0) {
     const size_t index = g_next_package++;
     auto prepared = PreparePackage(g_packages[index], index);
-    if (prepared) PublishPackage(std::move(*prepared));
+    if (prepared) PublishPackage(*prepared);
   }
 
-  if (g_pool.empty()) {
+  if (g_cache.Size() == 0) {
     REXLOG_WARN("shell_music: no DLC song could be mounted; the main menu keeps the title's own "
                 "tracks");
     g_enabled = false;
@@ -685,36 +756,23 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   if (g_buffers.empty()) {
     REXLOG_WARN("shell_music: no guest memory for a stream path; R9 falls back to the title's own "
                 "tracks");
-    g_pool.clear();
     g_enabled = false;
     g_current_index = -1;
     return;
   }
 
-  // Hand the rotation the pool's song keys. Identity is the song, not the index: a pool rebuilt
-  // later (a refresh) keeps the history, so a song that has just been heard is not new again
-  // because the list around it changed shape (src/hooks/menu_music_pool.h).
-  {
-    std::vector<std::string> keys;
-    keys.reserve(g_pool.size());
-    for (const PoolEntry& entry : g_pool) {
-      keys.emplace_back(rb_blitz::shell_music::PoolSongKey(entry));
-    }
-    std::lock_guard<std::mutex> lock(g_mutex);
-    g_rotation.SetPool(std::move(keys));
-    g_watch = false;
-    g_watch_title = false;
-    g_attempts = 0;
-    g_playing_name.clear();
-    g_current_index = -1;
-  }
-
+  if (g_next_package == g_packages.size()) g_session.DiscoveryComplete();
+  g_session.PlanAhead(g_rng);
+  g_watch = g_watch_title = false;
+  g_attempts = 0;
+  g_playing_name.clear();
   REXLOG_INFO("shell_music: startup pool ready in {} ms: {} song(s), {} mounted package(s) "
-              "of {}; remaining pool queued for native cache loading (cap {})",
+              "of {}; rolling preparation begins during native cache loading",
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - pool_start).count(),
-              g_pool.size(), g_mounts, packages.size(), cap);
-  for (const PoolEntry& entry : g_pool) {
+              g_session.Sources().size(), g_cache.Size(), packages.size());
+  for (const auto& planned : g_session.Playlist()) {
+    const auto& entry = g_session.Sources()[planned.song];
     REXLOG_INFO("shell_music: startup {}:{}.mogg", entry.alias, entry.stream);
   }
 }
@@ -723,31 +781,28 @@ bool MenuMusicEnabled() { return g_menu_music_enabled; }
 
 void StartQueuedPool() {
   std::lock_guard lock(g_mutex);
-  if (!g_enabled || g_closing || g_queue_started || g_pool.size() >= g_pool_cap ||
-      g_next_package >= g_packages.size()) return;
+  if (!g_enabled || g_closing || g_queue_started) return;
   g_queue_started = true;
-  g_queue_started_at = std::chrono::steady_clock::now();
-  // The worker owns its snapshot and standalone devices. It never dereferences
-  // the runtime, even if the window closes during a slow mount.
-  g_queue.Start(g_next_package, g_packages.size(),
-      [packages = g_packages](size_t index) { return PreparePackage(packages[index], index); });
-  REXLOG_INFO("shell_music: background pool preparation started during native cache loading "
-              "({}/{} songs ready, one mount worker, at most two pending devices)",
-              g_pool.size(), g_pool_cap);
+  g_queue.Start([packages = g_packages](size_t index) -> std::optional<PreparedPackage> {
+    auto prepared = PreparePackage(packages.at(index), index);
+    if (prepared) return prepared;
+    PreparedPackage failed;
+    failed.index = index;
+    return failed;  // failures still retire the demand request and discovery slot
+  });
+  SchedulePreparationLocked();
+  REXLOG_INFO("shell_music: rolling preparation started; bounded demand worker, no fixed song cap");
 }
 
-void PublishQueuedPool() {
+void PublishQueuedPool(bool during_loading) {
   std::lock_guard lock(g_mutex);
-  if (g_closing || !g_queue_started || g_queue_reported) return;
-  // At most one already-prepared device per poll. Take never waits for mount I/O.
-  if (auto prepared = g_queue.Take()) PublishPackage(std::move(*prepared));
-  if (g_pool.size() >= g_pool_cap || g_mounts >= g_pool_cap || g_queue.Finished()) {
-    g_queue.Stop();
-    g_queue_reported = true;
-    REXLOG_INFO("shell_music: background pool ready after {} ms: {} song(s), {} mounted "
-                "package(s); startup indices and playback preserved",
-                MillisecondsSince(g_queue_started_at), g_pool.size(), g_mounts);
-  }
+  if (g_closing || !g_queue_started || g_setting_up_music) return;
+  const bool active = during_loading || g_watch || g_watch_title;
+  g_queue.Pause(!active);
+  if (!active) return;  // no new speculative I/O while gameplay owns audio
+  if (!g_ready_package) g_ready_package = g_queue.Take();
+  if (g_ready_package && PublishPackage(*g_ready_package)) g_ready_package.reset();
+  SchedulePreparationLocked();
 }
 
 void CloseQueuedPool() {
@@ -759,20 +814,20 @@ void CloseQueuedPool() {
 std::string SelectedSongKey() {
   std::lock_guard lock(g_mutex);
   const int index = g_play_selection.Query(NowMs());
-  return index >= 0 && static_cast<size_t>(index) < g_pool.size()
-      ? PoolSongKey(g_pool[index]) : std::string();
+  return index >= 0 && static_cast<size_t>(index) < g_session.Sources().size()
+      ? PoolSongKey(g_session.Sources()[index]) : std::string();
 }
 
 bool HasPool() {
   std::lock_guard<std::mutex> lock(g_mutex);
-  return g_enabled && !g_pool.empty();
+  return g_enabled && !g_session.Sources().empty();
 }
 
 std::vector<std::string> PoolSongNames() {
   std::lock_guard<std::mutex> lock(g_mutex);
   std::vector<std::string> names;
-  names.reserve(g_pool.size());
-  for (const PoolEntry& entry : g_pool) {
+  names.reserve(g_session.Sources().size());
+  for (const PoolEntry& entry : g_session.Sources()) {
     names.emplace_back(rb_blitz::shell_music::PoolSongKey(entry));
   }
   return names;
@@ -798,8 +853,8 @@ bool AnswerPlayQuery(const std::string_view path, bool* answer) {
   const int current = g_play_selection.Query(NowMs());
   if (path == "rbbz-play/result/resolved" || path == "rbbz-play/result/no-track" ||
       path == "rbbz-play/result/missing-name" || path == "rbbz-play/result/missing-data") {
-    const std::string key = current >= 0 && static_cast<size_t>(current) < g_pool.size()
-        ? PoolSongKey(g_pool[current]) : std::string();
+    const std::string key = current >= 0 && static_cast<size_t>(current) < g_session.Sources().size()
+        ? PoolSongKey(g_session.Sources()[current]) : std::string();
     REXLOG_INFO("shell_music: Play Current Song result: {} (pool {}, key \"{}\")",
                 path.substr(std::string_view("rbbz-play/result/").size()), current, key);
     g_play_selection.Complete();
@@ -812,8 +867,8 @@ bool AnswerPlayQuery(const std::string_view path, bool* answer) {
   // A malformed probe in our namespace is answered false and never forwarded.
   if (hit) {
     REXLOG_INFO("shell_music: Play Current Song: selected pool {} of {} (\"{}\")",
-                index, g_pool.size(),
-                index < static_cast<int>(g_pool.size()) ? PoolSongKey(g_pool[index])
+                index, g_session.Sources().size(),
+                index < static_cast<int>(g_session.Sources().size()) ? PoolSongKey(g_session.Sources()[index])
                                                        : std::string("?"));
   }
   if (answer != nullptr) {
@@ -843,6 +898,7 @@ void ForgetMenuMusic(uint32_t music) {
     name = g_playing_name;
     g_watch = false;
     g_watch_title = false;
+    g_queue.Pause(true);
     g_playback.Stop();
     g_current_index = -1;
     g_pending_index = -1;
@@ -856,21 +912,35 @@ void ForgetMenuMusic(uint32_t music) {
 }
 
 extern "C" REX_FUNC(sub_82758998) {
+  const auto music = ctx.r3.u32;
   ForgetMenuMusic(ctx.r3.u32);
   __imp__sub_82758998(ctx, base);
+  std::lock_guard lock(g_mutex);
+  if (music == g_music) g_stream_song = rb_blitz::shell_music::kNoIndex;
 }
 
 extern "C" REX_FUNC(sub_82758490) {
+  const auto music = ctx.r3.u32;
   ForgetMenuMusic(ctx.r3.u32);
   __imp__sub_82758490(ctx, base);
+  std::lock_guard lock(g_mutex);
+  if (music == g_music) g_stream_song = rb_blitz::shell_music::kNoIndex;
 }
 
 // Start builds the track that was just loaded; its body calls StopStreams as cleanup
 // (0x82758C28) before the new stream exists. While it runs, that call is not a teardown.
 extern "C" REX_FUNC(sub_82758B98) {
+  const auto music = ctx.r3.u32;
   const bool was_setting_up = g_setting_up_music;
   g_setting_up_music = true;
   __imp__sub_82758B98(ctx, base);
+  {
+    std::lock_guard lock(g_mutex);
+    if (music == g_music) {
+      if (g_watch && g_pending_index >= 0) g_stream_song = size_t(g_pending_index);
+      else if (g_watch_title) g_stream_song = rb_blitz::shell_music::kNoIndex;
+    }
+  }
   g_setting_up_music = was_setting_up;
 }
 
@@ -891,8 +961,11 @@ extern "C" REX_FUNC(sub_823E5BE0) {
 // host's own handoffs run with g_setting_up_music set and call __imp__ directly, so only a
 // guest-driven teardown reaches here.
 extern "C" REX_FUNC(sub_827583F8) {
+  const auto music = ctx.r3.u32;
   if (!g_setting_up_music) ForgetMenuMusic(ctx.r3.u32);
   __imp__sub_827583F8(ctx, base);
+  std::lock_guard lock(g_mutex);
+  if (!g_setting_up_music && music == g_music) g_stream_song = rb_blitz::shell_music::kNoIndex;
 }
 
 // Poll observes one-shot completion before the guest's Ready/Play branch. Stop and
@@ -917,7 +990,7 @@ extern "C" REX_FUNC(sub_827586D8) {
   // inside it cannot see. One atomic load when nothing is in flight.
   rb_blitz::content_progress::Tick();
   const uint32_t music = ctx.r3.u32;
-  const bool watched = g_enabled && (g_watch || g_watch_title) && !g_pool.empty() &&
+  const bool watched = g_enabled && (g_watch || g_watch_title) && !g_session.Sources().empty() &&
                        music != 0 && music == g_music;
   if (watched) {
     const uint32_t stream = LoadBe32(base, music + kStreamOffset);
@@ -935,7 +1008,7 @@ extern "C" REX_FUNC(sub_827586D8) {
       } else {
         constexpr uint32_t kLoopSlack = 44100;  // ~1 s of samples: below this, a torn read
         if (position + kLoopSlack < g_pos) {
-          if (g_waiting_for_pool && g_pool.size() > 1) {
+          if (g_waiting_for_pool && HasReadyNext()) {
             g_waiting_for_pool = false;
             NoteSeam(g_pos);
             StartNextTrack(base, ctx, music);
@@ -971,7 +1044,7 @@ extern "C" REX_FUNC(sub_827586D8) {
             std::lock_guard<std::mutex> lock(g_mutex);
             g_current_index = g_pending_index;
             g_play_selection.Audible(g_current_index);
-            g_rotation.MarkStarted(g_playing_name);
+            if (g_current_index >= 0) g_session.Heard(size_t(g_current_index));
           }
           REXLOG_INFO("shell_music: \"{}\" started playback {} ms after the previous track's end "
                       "(stream {:08X}, source \"{}\") (R9)",

@@ -1242,8 +1242,10 @@ point or any child route. Default offline rows must not hide Refresh Song Librar
 when splash_dlc has that job; provide the agreed alternate refresh action when
 explicitly hidden. Reuse the existing asynchronous request/publication path.
 
-Replace the menu-song count input with a fixed 50-song maximum selection, bounded
-by valid library contents. Check package handles, teardown, invalid/short libraries,
+Historical P10 policy: replace the menu-song count input with a fixed 50-song maximum
+selection. Superseded by the owner's 2026-10-26 rolling-session approval: the size input
+stays retired, metadata/history is uncapped by 50, and only nearby mounted residency is
+bounded (three ahead, two recent, eight packages maximum). Check package handles, teardown, invalid/short libraries,
 and refresh while music plays. Retire the normal-user rename toggle without letting
 its old locale transform overwrite the merged root's label. Remove old schema
 behavior for deleted categories (including P5's Advanced Settings row) without

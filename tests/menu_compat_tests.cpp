@@ -209,18 +209,6 @@ void RefreshEntryOffMeansNothingWithoutR7() {
   CHECK_FALSE(decision.refresh_row_left_visible);
 }
 
-void PoolIsFixedAtFifty() {
-  test::BeginCase("pool: 50 songs, bounded by what the library can supply");
-
-  CHECK_EQ(kMenuPoolMax, 50u);
-  CHECK_EQ(PoolCap(200), 50u);
-  CHECK_EQ(PoolCap(64), 50u);  // the old cvar's own maximum no longer means anything
-  CHECK_EQ(PoolCap(50), 50u);
-  CHECK_EQ(PoolCap(7), 7u);
-  CHECK_EQ(PoolCap(1), 1u);
-  CHECK_EQ(PoolCap(0), 0u);
-}
-
 void LegacyPoolCountIsIgnoredOutLoud() {
   test::BeginCase("pool: a legacy pool size is ignored, and said so");
 
@@ -228,7 +216,7 @@ void LegacyPoolCountIsIgnoredOutLoud() {
   CHECK_TRUE(LegacyPoolCountNote(3).empty());
   const std::string note = LegacyPoolCountNote(64);
   CHECK_TRUE(note.find("ignored") != std::string::npos);
-  CHECK_TRUE(note.find("50") != std::string::npos);
+  CHECK_TRUE(note.find("rolling session") != std::string::npos);
   CHECK_TRUE(note.find("64") != std::string::npos);
   CHECK_FALSE(LegacyPoolCountNote(1).empty());
 }
@@ -302,7 +290,6 @@ int main() {
   RefreshEntryOffAlsoHidesItFromACustomSelection();
   RefreshEntryOffIgnoresTheHideMaster();
   RefreshEntryOffMeansNothingWithoutR7();
-  PoolIsFixedAtFifty();
   LegacyPoolCountIsIgnoredOutLoud();
   RenameCannotReachTheMergedRoot();
   HideListSeamTakesTheInventoryAndKeepsTheEmptyCase();

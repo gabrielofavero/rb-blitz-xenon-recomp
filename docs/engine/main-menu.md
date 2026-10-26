@@ -1046,7 +1046,7 @@ original song key, resolves and reaches gameplay in `out/_swap/music-fix/reliabi
 
 ### Startup cost of the DLC music pool (2026-10-24)
 
-Historical implementation; superseded by **Deferred menu-music pool (2026-10-26)** below.
+Historical implementation; superseded by **Rolling menu-music session and mount cache (2026-10-26)** below.
 
 The last reported slow boot (`rb_blitz_299.log`) spent about 44 seconds preparing
 50 menu-music packages serially, before guest execution. Pool preparation now mounts
@@ -1141,35 +1141,67 @@ this paragraph is under `out/audio-stability/`. No listening or game/UI test was
 performed by the agent; the owner retains that role.
 
 
-### Deferred menu-music pool (2026-10-26)
+### Rolling menu-music session and mount cache (2026-10-26)
 
-The owner's latest boot, `out/build/win-amd64-release/logs/rb_blitz_350.log`, spent
-**75,424 ms** preparing 50 menu-music packages before guest launch (08:19:23.407 to
-08:20:38.832). The enumeration cache was a hit: fingerprint 123.531 ms, load 93.392 ms,
-no library scan. Later graphics preparation completed 423/423 pipelines in 7,901 ms.
-The separate store Downloaded index was still mounting packages at shutdown; its
-background I/O can compete with loading, but its duration is not a boot barrier.
+The owner's slow boot, `out/build/win-amd64-release/logs/rb_blitz_350.log`, spent
+**75,424 ms** preparing 50 menu-music packages before guest launch. The enumeration
+cache was a hit (fingerprint 123.531 ms, load 93.392 ms); later graphics preparation
+completed 423/423 pipelines in 7,901 ms. An initial follow-up deferred the 50-song fill;
+the owner's approved architecture now replaces that fixed working set entirely.
 
-Boot now mounts the first usable package from a uniform shuffle of the full library.
-The generator is freshly seeded from 16 `std::random_device` values. Selection is
-uniform **among usable packages**; within a merged pack its distinct songs are shuffled.
-A one-song package supplies one startup song; one merged pack may supply the whole
-50-song pool. Invalid, art-only and metadata-ambiguous packages are skipped in that same
-random order. Independent boots may legitimately choose the same package.
+Boot mounts the first usable package from a uniform full-library shuffle, seeded from
+16 `std::random_device` values. Selection is uniform among usable packages; a merged
+pack's songs are drawn randomly as its catalog becomes available. Strict uniform odds
+across every individual song would require a complete song index. Invalid or ambiguous
+sources are skipped; independent boots may legitimately pick the same package.
 
-`BeginLoadingAttempt` starts one host mount worker during the native post-A cache
-loading. A bounded queue holds at most two prepared devices; the worker owns its
-package-list snapshot and never accesses the runtime, live VFS, RNG or guest memory.
-The native loading and ShellMusic polls publish one already-prepared device per call,
-append distinct songs up to the 50-song cap and retain playback/rotation history.
-The queue is optional work and never gates native loading or graphics readiness.
-If the sole startup song ends before more songs arrive, a title-track fallback gives
-the expanded pool its next loop boundary. Closing stops further work/publication
-without joining an in-flight mount on the UI thread.
+`MusicSession` owns stable catalog IDs, one ordered playlist and its cursor. Metadata
+survives mount eviction. Only three successors are planned ahead; two recent songs are
+kept warm alongside the current source. A merged pack can expose hundreds of catalog
+records while occupying one mount. Lazy discovery continues beyond 50 songs. No fresh
+pass begins until every boot-enumerated package has been considered and the first
+pass's eligible songs have been scheduled. A new randomized pass avoids an immediate
+repeat; a sole usable song falls back to title music instead of repeating forever.
+Failure outcomes are distinct from heard/skipped outcomes, and repeated failures are
+quarantined. A failed remount marks its package unavailable for this session.
 
-Logs distinguish `startup pool ready in ... ms`, `background pool preparation started`
-and `background pool ready after ... ms`. Host tests cover bounded prefetch, a blocked
-mount with nonblocking poll/close, failed packages, rotation/press history during pool
-growth, the Symbol ABI and the authored row's dynamic lookup. Actual boot timing,
-rotation and Play Current Song acceptance remain an owner/manual test; no game UI was
-driven to implement this change. The eager SDK STFS chain walk is unchanged.
+`BeginLoadingAttempt` starts a demand-driven host worker. It owns its package-list
+snapshot and standalone devices; it never touches the live VFS, guest memory or RNG.
+Native loading and ShellMusic polls publish already-prepared results and request more
+work only when the warm window needs it. Gameplay stops new speculative requests; an
+in-flight mount may finish. Queue shutdown never joins that mount on the UI thread.
+
+`MusicMountCache` caps published residency at **eight packages**. The active stream,
+pending source and captured Play Current Song selection pin their packages. After the
+owner stops issuing opens to a cold source, `Device::open_file_count()` must also be
+zero before its alias/device is removed. SDK patch
+`0040-device-open-file-accounting.patch` counts native File construction/destruction,
+including File objects still retained through guest handles or asynchronous work.
+If old files keep every residency slot occupied, preparation applies backpressure;
+it never evicts a live file or expands residency without a bound. At most one additional
+host-prepared package is held by this runtime's demand path pending publication.
+
+Play Current Song reads its captured stable catalog ID as a native Symbol through
+`read_file("rbbz-play/song")`. Eviction cannot change the name selected by a press.
+The current stream remains in control while successors prepare. At EOF with no ready
+successor, a title track fills the gap; the prepared DLC sequence resumes at its next
+loop boundary. This optional work never gates native content or graphics readiness.
+
+The session exposes shared forward/backward cursor methods, but the future navigator's
+buttons, settings, pause seam and footer are not implemented by this architecture work.
+See the updated background-music navigator plan in `docs/plans/in-progress/`.
+
+Host validation covers lazy exhaustion past 50 songs, large merged packs, stable IDs,
+shared backward/forward history, bounded warmth and explicit pins, failure quarantine,
+request deduplication/pause/shutdown, real native File lifetimes and cache retirement,
+and the dynamic Symbol/row contract. Actual boot timing, listening and eviction during
+real playback remain manual acceptance; no game UI was driven for this change.
+
+Validation: `cmake --build --preset win-amd64-release` succeeds; all nine targeted
+music/menu/loading host tests pass after the final changes. The full host roster is
+81/82, with the unchanged SDK-free `path_policy` nonexistent-descendant assertion
+still failing. The SDK exact replay audit accepts 39 patches / 99 patched files,
+with zero failures or unexpected edits. Documentation checking reports 57 repository
+reference errors, none in the documents edited for this architecture. Evidence is
+under ignored `out/rolling-music/` (`build-final.log`, `tests-final.log`,
+`tests-full.log`, `sdk-patch-check.log`, `docs-check.json`).

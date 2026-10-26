@@ -154,8 +154,8 @@ REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, true, "Enhancements",
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",
-                     "R9's retired pool-size row: the menu's pool is a fixed 50 songs, capped by "
-                     "what the boot can mount, so this legacy value is ignored (a boot says so).")
+                     "R9's retired pool-size row: music uses a rolling session and a bounded "
+                     "mount cache, so this legacy value is ignored (a boot says so).")
     .range(1, 64)
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
@@ -231,7 +231,7 @@ void LogToggles() {
   REXLOG_INFO("enhancements: {} = \"{}\" (R5 rows; the three offline-dead entries by default)",
               "enhancements_hidden_menu_options",
               REXCVAR_GET(enhancements_hidden_menu_options));
-  REXLOG_INFO("enhancements: {} = {} (R9 pool size; drawn at random from the loaded DLC library)",
+  REXLOG_INFO("enhancements: {} = {} (retired size; rolling music session ignores this value)",
               "enhancements_menu_dlc_song_count",
               REXCVAR_GET(enhancements_menu_dlc_song_count));
 }

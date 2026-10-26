@@ -1,0 +1,50 @@
+diff --git a/include/rex/filesystem/device.h b/include/rex/filesystem/device.h
+--- a/include/rex/filesystem/device.h
++++ b/include/rex/filesystem/device.h
+@@ -12,4 +12,5 @@
+ #pragma once
+ 
++#include <atomic>
+ #include <memory>
+ #include <string>
+@@ -29,4 +30,7 @@
+ 
+   const std::string& mount_path() const { return mount_path_; }
++  // Live native File objects, including files retained by guest XFile handles.
++  // An owner must stop issuing new opens before using zero to retire a device.
++  size_t open_file_count() const { return open_file_count_.load(std::memory_order_acquire); }
+   virtual bool is_read_only() const { return true; }
+ 
+@@ -48,4 +52,8 @@
+   rex::thread::global_critical_region global_critical_region_;
+   std::string mount_path_;
++
++ private:
++  friend class File;
++  std::atomic<size_t> open_file_count_{0};
+ };
+ 
+diff --git a/include/rex/filesystem/file.h b/include/rex/filesystem/file.h
+--- a/include/rex/filesystem/file.h
++++ b/include/rex/filesystem/file.h
+@@ -16,4 +16,5 @@
+ 
+ #include <rex/system/xtypes.h>
++#include <rex/filesystem/device.h>
+ 
+ namespace rex::filesystem {
+@@ -23,6 +24,12 @@
+ class File {
+  public:
+-  File(uint32_t file_access, Entry* entry) : file_access_(file_access), entry_(entry) {}
+-  virtual ~File() = default;
++  File(uint32_t file_access, Entry* entry) : file_access_(file_access), entry_(entry) {
++    if (entry_) entry_->device()->open_file_count_.fetch_add(1, std::memory_order_relaxed);
++  }
++  virtual ~File() {
++    if (entry_) entry_->device()->open_file_count_.fetch_sub(1, std::memory_order_release);
++  }
++  File(const File&) = delete;
++  File& operator=(const File&) = delete;
+ 
+   virtual void Destroy() = 0;

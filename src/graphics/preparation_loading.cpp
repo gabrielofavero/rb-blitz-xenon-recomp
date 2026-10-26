@@ -356,7 +356,7 @@ void ObserveContentLoading(uint8_t* base, uint32_t panel) {
   if (content && u32(content+44) == 1) ContentLoadingReady();
 }
 void PollLoading() {
-  rb_blitz::shell_music::PublishQueuedPool();
+  rb_blitz::shell_music::PublishQueuedPool(true);
   if (closing.load() || !runtime || !content_ready || failed || ignored) return;
   auto* gpu = runtime->graphics_system();
   if (!gpu) { FailAttempt(GraphicsFailure::kPreparation); return; }
