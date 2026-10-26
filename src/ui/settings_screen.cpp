@@ -288,8 +288,6 @@ enum class Kind {
   // the row always reads its label - it is how every `Reset All` stopped drawing a `: Nothing`
   // suffix, and why a table's reset works whether or not the table is custom.
   kPathAction,
-  // Playback commands use file_exists in rbbz-play/, with no settings write/commit.
-  kPlaybackAction,
   // One-shot Controls rows: `path` is a `rbbz-settings/` write. `kCapture` arms the listening
   // session and enters the dialog. The dialog is left by the capture itself (a valid press, or
   // the countdown's zero), so no row writes the bridge's `capture-cancel` op.
@@ -525,17 +523,6 @@ Row PathActionRow(const char* symbol, const char* path, const char* label,
   Row row;
   row.symbol = symbol;
   row.kind = Kind::kPathAction;
-  row.path = path;
-  row.label = label;
-  row.description = description;
-  return row;
-}
-
-Row PlaybackActionRow(const char* symbol, const char* path, const char* label,
-                      const char* description) {
-  Row row;
-  row.symbol = symbol;
-  row.kind = Kind::kPlaybackAction;
   row.path = path;
   row.label = label;
   row.description = description;
@@ -800,13 +787,30 @@ std::vector<PanelSpec> AllPanels() {
                             "settings_interface_music_play_screen",
                             "settings_interface_mapping_screen", MenuPanels(),
                             {
-                                PlaybackActionRow("settings_music_next", "rbbz-play/next", "Next Track",
-                                                  "Skip to the next track in the menu-music playlist."),
-                                PlaybackActionRow("settings_music_previous", "rbbz-play/previous", "Previous Track",
-                                                  "Restart after five seconds; otherwise play the previous track."),
-                                PlaybackActionRow("settings_music_pause", "rbbz-play/pause", "Play/Pause",
-                                                  "Pause or resume the current menu-music track."),
+                                BindingSubmenuRow("settings_bind_music_next", "input.music.next",
+                                    "settings_bind_music_next_screen", "Next Track",
+                                    "Configure the inputs that skip to the next menu track."),
+                                BindingSubmenuRow("settings_bind_music_previous", "input.music.previous",
+                                    "settings_bind_music_previous_screen", "Previous Track",
+                                    "Restart after five seconds; otherwise return to the previous track."),
+                                BindingSubmenuRow("settings_bind_music_pause", "input.music.pause",
+                                    "settings_bind_music_pause_screen", "Play/Pause",
+                                    "Pause and resume are currently unavailable for menu music."),
                             }});
+    for (const auto action : profile::music::kActions) {
+      const std::string token = "input.music." + std::string(action);
+      const std::string symbol = profile::InputRowSymbol(token);
+      PanelSpec page{symbol + "_panel", symbol + "_screen",
+                     "settings_interface_music_play_screen", MenuPanels(), {
+          CaptureRow((symbol + "_assign").c_str(), Path("capture", token, "-").c_str(),
+                     "settings_listen_screen", "Assign", "Release all inputs, then press a pad control or key. Wait to cancel."),
+          StateActionRow((symbol + "_reset").c_str(), token.c_str(),
+                         Path("bind-reset", token, "-").c_str(), "Reset", "Reset: Default",
+                         "Restore this action's default pad and media key bindings."),
+      }};
+      page.title = profile::music::Label(action);
+      out.push_back(std::move(page));
+    }
     out.push_back(PanelSpec{"settings_interface_navigation_panel",
                             "settings_interface_navigation_screen",
                             "settings_interface_mapping_screen", MenuPanels(),
@@ -1840,8 +1844,6 @@ Node RowCase(const Row& row, const std::string_view symbol) {
       // the rows that reset restore their own states in place.
       return Arr({Sym(symbol), Write(row.path), Write(Path("commit", "-", "-")),
                   CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
-    case Kind::kPlaybackAction:
-      return Arr({Sym(symbol), Cmd({Sym("file_exists"), Str(row.path)})});
     case Kind::kCapture:
       return Arr({Sym(symbol), Write(row.path), EnterScreen(row.screen)});
     case Kind::kChoose:
@@ -2557,6 +2559,9 @@ std::vector<std::string> PanelBindingText(const std::string_view name,
     const auto token = profile::ParseInputRowToken(row.setting);
     const std::vector<profile::remap::Source>* sources = nullptr;
     switch (token.kind) {
+      case profile::InputRowKind::kMusicBinding:
+        sources = snapshot.music.Effective(token.name);
+        break;
       case profile::InputRowKind::kGeneralBinding:
         sources = snapshot.general.Effective(*profile::remap::ParseTarget(token.name));
         break;
@@ -2572,7 +2577,10 @@ std::vector<std::string> PanelBindingText(const std::string_view name,
         lines.push_back(row.symbol);
         continue;
     }
-    lines.push_back(profile::BindingRowText(token, sources));
+    if (token.kind == profile::InputRowKind::kMusicBinding && token.name == "pause")
+      lines.push_back("Play/Pause: Unavailable");
+    else
+      lines.push_back(profile::BindingRowText(token, sources));
   }
   return lines;
 }

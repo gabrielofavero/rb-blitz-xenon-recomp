@@ -1,0 +1,16 @@
+diff --git a/src/ui/sdl_virtual_key.cpp b/src/ui/sdl_virtual_key.cpp
+--- a/src/ui/sdl_virtual_key.cpp
++++ b/src/ui/sdl_virtual_key.cpp
+@@ -34,6 +34,12 @@
+     return VirtualKey(uint32_t(VirtualKey::kNumpad0) + 1 + (scancode - SDL_SCANCODE_KP_1));
+   }
+   switch (scancode) {
++    case SDL_SCANCODE_MEDIA_NEXT_TRACK:
++      return VirtualKey::kMediaNextTrack;
++    case SDL_SCANCODE_MEDIA_PREVIOUS_TRACK:
++      return VirtualKey::kMediaPrevTrack;
++    case SDL_SCANCODE_MEDIA_PLAY_PAUSE:
++      return VirtualKey::kMediaPlayPause;
+     case SDL_SCANCODE_0:
+       return VirtualKey::k0;
+     case SDL_SCANCODE_KP_0:

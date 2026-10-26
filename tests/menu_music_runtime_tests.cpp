@@ -9,19 +9,25 @@ namespace {
 constexpr uint32_t kMusic = 0x100, kOldStream = 0x200, kNewStream = 0x400;
 constexpr uint32_t kVtable = 0x800, kDestroy = 0x1234, kPath = 0x1000;
 unsigned loads = 0, starts = 0, stops = 0, destroys = 0, polls = 0;
+uint32_t native_start_state = 3, native_start_position = 100, native_start_offset_ms = 0;
 bool native_loading = false;
+bool main_menu = true;
+bool capture_active = false;
+bool modal_active = false;
+bool window_focused = true;
 std::string loaded;
 void Store(uint8_t* base, uint32_t address, uint32_t value) {
   rex::memory::store_and_swap<uint32_t>(base + address, value);
 }
 void DestroyStream(PPCContext& ctx, uint8_t*) {
-  CHECK_EQ(ctx.r3.u32, kOldStream);
+  CHECK_TRUE(ctx.r3.u32 == kOldStream || ctx.r3.u32 == kNewStream);
   CHECK_EQ(ctx.r4.u32, 1u);
   CHECK_EQ(ctx.r31.u64, 0xABCDEFu);
   ++destroys;
 }
 }
 
+bool& FLAGS_enhancements_background_music_nav_storage_() { static bool value = true; return value; }
 bool& FLAGS_enhancements_menu_dlc_songs_storage_() { static bool value = true; return value; }
 int32_t& FLAGS_enhancements_menu_dlc_song_count_storage_() { static int32_t value = 3; return value; }
 namespace rex::runtime {
@@ -30,6 +36,12 @@ PPCFunc* ResolveIndirectFunction(uint32_t address) {
   return DestroyStream;
 }
 }
+namespace rb_blitz::input {
+bool MainMenuMusicInputAvailable() { return main_menu; }
+bool HostInputFocused() { return window_focused; }
+namespace capture { bool Armed() { return capture_active; } }
+}
+namespace rex::kernel::xam { bool xeXamIsUIActive() { return modal_active; } }
 namespace rb_blitz::settings::boot {
 SettingsBoot* SettingsBoot::Current() { return nullptr; }
 void SettingsBoot::MenuFrame() {}
@@ -61,11 +73,14 @@ extern "C" REX_FUNC(__imp__sub_82757F50) {
   CHECK_EQ(ctx.r7.u64, loaded.starts_with("sfx/shell/") ? 1u : 0u);
   Store(base, kMusic + 68, ctx.r4.u32);
 }
+extern "C" REX_FUNC(__imp__sub_82757D40) { ctx.r3.u32 = native_start_offset_ms; }
 extern "C" REX_FUNC(__imp__sub_82758B98) {
   ++starts;
+  PPCContext offset(ctx);
+  sub_82757D40(offset, base);
   Store(base, kMusic + kStreamOffset, kNewStream);
-  Store(base, kNewStream + 20, 3);
-  Store(base, kNewStream + kPositionOffset, 100);
+  Store(base, kNewStream + 20, native_start_state);
+  Store(base, kNewStream + kPositionOffset, native_start_position + offset.r3.u32 * 44100 / 1000);
 }
 extern "C" REX_FUNC(__imp__sub_827583F8) {
   ++stops;
@@ -149,8 +164,250 @@ void TestLoadingPreservesBootSong() {
   loads = starts = stops = destroys = polls = 0;
 }
 
+void TestNavigatorRuntime() {
+  using namespace rb_blitz::shell_music;
+  rb_blitz::test::BeginCase("production navigator: commands, audible metadata, history, restart and gates");
+  std::array<uint8_t, 65536> memory{};
+  auto* base = memory.data();
+  PPCContext ctx{};
+  ctx.r1.u32 = 0xF000; ctx.r3.u32 = kMusic; ctx.r31.u64 = 0xABCDEF;
+  rex::filesystem::HostPathDevice ready("\\Device\\ReadyMusic", {}, true);
+  g_navigation_enabled = g_enabled = true;
+  g_closing = false;
+  g_nav_epoch = NowPlaying().Reset();
+  g_buffers = {kPath}; g_music = kMusic;
+  g_session = MusicSession{};
+  g_session.Discover(0, {{"menumusic0", "songs/one/audio", "One", "First", "Artist One"}});
+  g_session.Discover(1, {{"menumusic1", "songs/two/audio", "Two", "Second", "Artist Two"}});
+  g_session.AdoptFirst(0);
+  g_session.PlanAhead(g_rng);
+  g_cache = MusicMountCache<rex::filesystem::Device>{};
+  CHECK_TRUE(g_cache.Insert(0, &ready)); CHECK_TRUE(g_cache.Insert(1, &ready));
+  g_watch = true; g_watch_title = false;
+  g_pending_index = g_current_index = 0; g_stream_song = 0;
+  g_play_selection.Audible(0);
+  g_playback.Begin(NowMs());
+  Store(base, kMusic + kStreamOffset, kOldStream);
+  Store(base, kOldStream, kVtable); Store(base, kVtable, kDestroy);
+  Store(base, kNewStream, kVtable);
+  Store(base, kOldStream + 20, 3); Store(base, kOldStream + kPositionOffset, 100);
+  sub_827586D8(ctx, base);
+  auto snapshot = NowPlaying().ReadSnapshot();
+  CHECK_TRUE(snapshot.available);
+  CHECK_TRUE(snapshot.playback.track.title == "First");
+  CHECK_FALSE(snapshot.playback.capabilities.play_pause);
+  bool answer = false;
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_TRUE(answer);
+  native_start_offset_ms = 30000; // native Start would begin at 30 seconds without the manual override
+  CHECK_EQ(loads, 0u); // file_exists only posts; it never calls native playback
+  CHECK_TRUE(NowPlaying().ReadSnapshot().pending.has_value());
+  sub_827586D8(ctx, base);
+  CHECK_EQ(loads, 1u); CHECK_EQ(g_session.Cursor(), 1u);
+  CHECK_EQ(LoadBe32(base, kNewStream + kPositionOffset), native_start_position);
+  snapshot = NowPlaying().ReadSnapshot();
+  CHECK_TRUE(snapshot.playback.track.key == "Two");
+  CHECK_TRUE(snapshot.result && snapshot.result->status == nav::CompletionStatus::kApplied);
+  CHECK_FALSE(snapshot.pending);
+  CHECK_TRUE(SelectedSongKey() == "Two"); // no old-song grace after manual skip
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/begin", &answer)); CHECK_TRUE(answer);
+  CHECK_TRUE(SelectedSongKey() == "Two");
+  g_play_selection.Complete();
+
+  Store(base, kNewStream + kPositionOffset, 7 * 44100);
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/previous", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_session.Cursor(), 1u); CHECK_TRUE(loaded == "menumusic1:songs/two/audio");
+  CHECK_EQ(LoadBe32(base, kNewStream + kPositionOffset), 100u);
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/previous", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_session.Cursor(), 0u); CHECK_TRUE(SelectedSongKey() == "One");
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_session.Cursor(), 1u); CHECK_TRUE(SelectedSongKey() == "Two");
+
+  g_session.Discover(2, {{"menumusic2", "songs/cold/audio", "Cold"}});
+  g_session.PlanAhead(g_rng);
+  const auto before = loads;
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_EQ(loads, before); CHECK_EQ(g_session.Cursor(), 1u);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().playback.track.key == "Two");
+  CHECK_TRUE(NowPlaying().ReadSnapshot().pending.has_value());
+  CHECK_TRUE(g_cache.Insert(2, &ready));
+  sub_827586D8(ctx, base);
+  CHECK_EQ(loads, before + 1); CHECK_TRUE(SelectedSongKey() == "Cold");
+
+  CHECK_TRUE(nav::Post(nav::Command::kPrevious).status == nav::PostStatus::kAccepted);
+  main_menu = false;
+  sub_827586D8(ctx, base);
+  CHECK_EQ(loads, before + 1);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().result->status == nav::CompletionStatus::kCancelled);
+  main_menu = true;
+  g_session.DiscoveryComplete();
+  g_session.PlanAhead(g_rng);
+  Store(base, kNewStream + 20, 6); // automatic EOF publishes the successor too
+  sub_827586D8(ctx, base);
+  sub_827586D8(ctx, base);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().playback.track.key != "Cold");
+  CHECK_TRUE(NowPlaying().ReadSnapshot().playback.state == TransportState::kPlaying);
+  const auto fallback_cursor = g_session.Cursor();
+  const auto fallback_previous = PoolSongKey(g_session.Sources()[g_session.SongAt(fallback_cursor)]);
+  g_watch = false; g_watch_title = true; g_waiting_for_pool = false; g_title_index = 0;
+  g_nav_age.Reset();
+  Store(base, kNewStream + kPositionOffset, 100);
+  sub_827586D8(ctx, base);
+  g_current_index = g_pending_index = -1; g_play_selection.Stop();
+  Store(base, kNewStream + kPositionOffset, 7 * 44100);
+  sub_827586D8(ctx, base);
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/previous", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_TRUE(loaded == kTitleTracks[0]);
+  CHECK_EQ(g_session.Cursor(), fallback_cursor);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().result->status == nav::CompletionStatus::kApplied);
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/previous", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_session.Cursor(), fallback_cursor);
+  CHECK_TRUE(SelectedSongKey() == fallback_previous);
+  capture_active = true;
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_FALSE(answer);
+  capture_active = false;
+  modal_active = true;
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_FALSE(answer);
+  modal_active = false;
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/pause", &answer)); CHECK_FALSE(answer);
+  g_navigation_enabled = false;
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_FALSE(answer);
+  g_navigation_enabled = true;
+  ForgetMenuMusic(kMusic);
+  CHECK_FALSE(NowPlaying().ReadSnapshot().available);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().playback.track.key.empty());
+
+  rb_blitz::test::BeginCase("navigator with R9 off adopts and navigates the native title source");
+  g_enabled = false;
+  g_session = MusicSession{};
+  g_watch = g_watch_title = false;
+  g_playback.Stop();
+  Store(base, kMusic + kStreamOffset, 0);
+  ctx.r4.u32 = 0x2000;
+  ctx.r7.u64 = 1;
+  std::strcpy(reinterpret_cast<char*>(base + ctx.r4.u32), kTitleTracks[1]);
+  sub_82757F50(ctx, base);
+  CHECK_EQ(g_title_index, 1);
+  CHECK_EQ(g_session.SongAt(g_session.Cursor()), 1u);
+  sub_827586D8(ctx, base); // staged native Load must survive the deferred Start
+  CHECK_TRUE(g_watch_title);
+  sub_82758B98(ctx, base);
+  sub_827586D8(ctx, base);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().playback.track.source == MusicSource::kTitle);
+  CHECK_FALSE(HasPool()); CHECK_TRUE(SelectedSongKey().empty());
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_session.Cursor(), 1u);
+  CHECK_TRUE(loaded.starts_with("sfx/shell/"));
+  CHECK_TRUE(NowPlaying().ReadSnapshot().result->status == nav::CompletionStatus::kApplied);
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/previous", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_TRUE(loaded == kTitleTracks[1]);
+  native_start_state = 6; native_start_position = 0;
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_FALSE(NowPlaying().ReadSnapshot().pending);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().result->status == nav::CompletionStatus::kFailed);
+  CHECK_EQ(g_nav_target, kNoIndex);
+  CHECK_FALSE(g_nav_request);
+  native_start_state = 3; native_start_position = 100; native_start_offset_ms = 0;
+  ForgetMenuMusic(kMusic);
+  g_navigation_enabled = false;
+  g_session = MusicSession{};
+  g_cache = MusicMountCache<rex::filesystem::Device>{};
+  g_stream_song = kNoIndex;
+  loads = starts = stops = destroys = polls = 0;
+}
+
+void TestRapidPreviousDuringRestart() {
+  using namespace rb_blitz::shell_music;
+  rb_blitz::test::BeginCase("rapid Previous survives a slow restart and reaches the boot song");
+  std::array<uint8_t, 65536> memory{};
+  auto* base = memory.data();
+  PPCContext ctx{};
+  ctx.r1.u32 = 0xF000; ctx.r3.u32 = kMusic; ctx.r31.u64 = 0xABCDEF;
+  rex::filesystem::HostPathDevice ready("\\Device\\ReadyMusic", {}, true);
+  g_navigation_enabled = g_enabled = true;
+  g_nav_epoch = NowPlaying().Reset();
+  g_session = MusicSession{};
+  g_session.Discover(0, {{"menumusic0", "songs/boot/audio", "Boot"},
+                         {"menumusic0", "songs/second/audio", "Second"},
+                         {"menumusic0", "songs/third/audio", "Third"}});
+  g_session.AdoptFirst(0); g_session.PlanAhead(g_rng);
+  CHECK_TRUE(g_session.Select(2));
+  const auto before_key = PoolSongKey(g_session.Sources()[g_session.SongAt(2)]);
+  g_cache = MusicMountCache<rex::filesystem::Device>{}; CHECK_TRUE(g_cache.Insert(0, &ready));
+  g_music = kMusic; g_buffers = {kPath};
+  g_watch = true; g_watch_title = false; g_waiting_for_pool = false;
+  g_current_index = g_pending_index = int(g_session.SongAt(2));
+  g_stream_song = g_session.SongAt(2);
+  g_play_selection.Audible(g_current_index);
+  g_nav_age.Reset(); g_playback.Begin(NowMs());
+  Store(base, kMusic + kStreamOffset, kOldStream);
+  Store(base, kOldStream, kVtable); Store(base, kNewStream, kVtable);
+  Store(base, kVtable, kDestroy);
+  Store(base, kOldStream + 20, 3); Store(base, kOldStream + kPositionOffset, 6 * 44100);
+  sub_827586D8(ctx, base);
+  Store(base, kOldStream + kPositionOffset, 13 * 44100);
+  bool answer = false;
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/previous", &answer)); CHECK_TRUE(answer);
+  native_start_state = 1; native_start_position = 0; // decoder opens for several polls
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_session.Cursor(), 2u); // first press restarts after seven seconds
+  CHECK_TRUE(loaded.find(g_session.Sources()[g_session.SongAt(2)].stream) != std::string::npos);
+  CHECK_TRUE(g_nav_started);
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/previous", &answer)); CHECK_TRUE(answer);
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/previous", &answer)); CHECK_TRUE(answer);
+  CHECK_EQ(NowPlaying().ReadSnapshot().queued.size(), 2u);
+  const auto pending_loads = loads;
+  sub_827586D8(ctx, base);
+  CHECK_EQ(loads, pending_loads);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().pending.has_value());
+  CHECK_TRUE(NowPlaying().ReadSnapshot().playback.track.key == before_key);
+  native_start_state = 3; native_start_position = 100;
+  Store(base, kNewStream + 20, 3); Store(base, kNewStream + kPositionOffset, 6 * 44100);
+  sub_827586D8(ctx, base); // restart finally plays; queued press becomes pending
+  CHECK_EQ(g_session.Cursor(), 2u);
+  // Even if execution is delayed beyond five seconds, the queued press was made
+  // while loading and must step back, not be reinterpreted as another restart.
+  Store(base, kNewStream + kPositionOffset, 13 * 44100);
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_session.Cursor(), 1u);
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_session.Cursor(), 0u);
+  CHECK_TRUE(SelectedSongKey() == "Boot");
+  CHECK_FALSE(NowPlaying().ReadSnapshot().pending);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().queued.empty());
+  CHECK_EQ(loads, pending_loads + 2);
+
+  rb_blitz::test::BeginCase("focus loss cancels the active navigation and its queued burst");
+  native_start_state = 1; native_start_position = 0;
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/previous", &answer)); CHECK_TRUE(answer);
+  window_focused = false;
+  sub_827586D8(ctx, base);
+  CHECK_FALSE(NowPlaying().ReadSnapshot().pending);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().queued.empty());
+  CHECK_FALSE(g_nav_request);
+  window_focused = true;
+  native_start_state = 3; native_start_position = 100;
+  ForgetMenuMusic(kMusic);
+  g_navigation_enabled = false;
+  g_session = MusicSession{}; g_cache = MusicMountCache<rex::filesystem::Device>{};
+  g_stream_song = kNoIndex;
+  loads = starts = stops = destroys = polls = 0;
+}
+
 int main() {
   using namespace rb_blitz::shell_music;
+  TestNavigatorRuntime();
+  TestRapidPreviousDuringRestart();
   TestLoadingPreservesBootSong();
   rb_blitz::test::BeginCase("temporary title fallback recovers without a counter rewind");
   std::array<uint8_t, 65536> memory{};

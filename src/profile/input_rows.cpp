@@ -5,6 +5,7 @@
 #include "profile/input_rows.h"
 
 #include <map>
+#include "profile/music_bindings.h"
 
 namespace rb_blitz::profile {
 namespace {
@@ -77,6 +78,8 @@ std::string KeyDisplayName(std::string_view name) {
       {"right", "Arrow Right"}, {"left shift", "L Shift"}, {"right shift", "R Shift"},
       {"left ctrl", "L Ctrl"},  {"right ctrl", "R Ctrl"}, {"left alt", "L Alt"},
       {"right alt", "R Alt"},
+      {"mediatracknext", "Media Next"}, {"mediatrackprevious", "Media Prev"},
+      {"mediaplaypause", "Media Play"},
   };
   const std::string lower = LowerAscii(name);
   if (const auto found = kNames.find(lower); found != kNames.end()) {
@@ -108,6 +111,12 @@ bool IsInputToken(const std::string_view token) {
 
 InputRowToken ParseInputRowToken(const std::string_view token) {
   InputRowToken out;
+  if (token == "input.reset.music") return {InputRowKind::kResetMusic, {}};
+  if (token.starts_with("input.music.")) {
+    const auto name = token.substr(12);
+    if (music::ActionIndex(name)) return {InputRowKind::kMusicBinding, std::string(name)};
+    return {};
+  }
   if (token == "input.keyboard_support") {
     out.kind = InputRowKind::kKeyboardSupport;
     return out;
@@ -214,6 +223,10 @@ std::string InputRowSymbol(const std::string_view token) {
 }
 
 InputRowToken ParseInputRowSymbol(const std::string_view symbol) {
+  for (const auto name : music::kActions) {
+    const std::string token = "input.music." + std::string(name);
+    if (InputRowSymbol(token) == symbol) return ParseInputRowToken(token);
+  }
   for (const remap::Target target : remap::Targets()) {
     if (InputRowSymbol(GeneralBindingToken(target)) == symbol) {
       InputRowToken out;
@@ -264,6 +277,7 @@ std::string InterfaceTargetLabel(const remap::Target target) {
 }
 
 std::string BindingRowLabel(const InputRowToken& token) {  switch (token.kind) {
+    case InputRowKind::kMusicBinding: return music::Label(token.name);
     case InputRowKind::kGeneralBinding: {
       const auto target = remap::ParseTarget(token.name);
       return target.has_value() ? InterfaceTargetLabel(*target) : token.name;

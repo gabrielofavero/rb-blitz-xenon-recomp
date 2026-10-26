@@ -782,6 +782,8 @@ ProfileLoadResult LoadProfile(const fs::path& path) {
   for (const KeyRef& ref : layout.keys) {
     if (ref.section == "settings") {
       profile.settings.push_back(ProfileSetting{ref.key, ref.value, ref.style});
+    } else if (ref.section == "menu_music") {
+      profile.menu_music.push_back(ProfileSetting{ref.key, ref.value, ref.style});
     } else if (ref.section == "remap") {
       profile.remap.push_back(ProfileSetting{ref.key, ref.value, ref.style});
     } else if (ref.section == "gameplay_remap_controller") {
@@ -852,6 +854,9 @@ bool ComposeProfile(const Profile& profile, std::string* text, std::string* erro
   for (const ProfileSetting& setting : profile.settings) {
     Schedule(layout, &pending, "settings", setting.key, setting.value, setting.style);
   }
+  for (const ProfileSetting& binding : profile.menu_music) {
+    Schedule(layout, &pending, "menu_music", binding.key, binding.value, binding.style);
+  }
   for (const ProfileSetting& binding : profile.remap) {
     Schedule(layout, &pending, "remap", binding.key, binding.value, binding.style);
   }
@@ -887,6 +892,8 @@ bool ComposeProfile(const Profile& profile, std::string* text, std::string* erro
     const std::vector<ProfileSetting>* rows = nullptr;
     if (ref.section == "settings") {
       rows = &profile.settings;
+    } else if (ref.section == "menu_music") {
+      rows = &profile.menu_music;
     } else if (ref.section == "remap") {
       rows = &profile.remap;
     } else if (ref.section == "gameplay_remap_controller") {
@@ -971,6 +978,13 @@ std::string RenderProfile(const Profile& profile) {
     text += "[settings]" + newline;
     for (const ProfileSetting& setting : profile.settings) {
       text += setting.key + " = " + RenderValue(setting.value, setting.style) + newline;
+    }
+  }
+  if (!profile.menu_music.empty()) {
+    text += newline;
+    text += "[menu_music]" + newline;
+    for (const ProfileSetting& binding : profile.menu_music) {
+      text += binding.key + " = " + RenderValue(binding.value, binding.style) + newline;
     }
   }
   if (!profile.remap.empty()) {

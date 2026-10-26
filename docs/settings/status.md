@@ -17,15 +17,14 @@ Part 1 wherever they disagree.
   background music and subsequent playback. See
   [the load-guard record](../plans/finished/2026-10-13-load-guard.md) part 5.
 
-- **Menu-music navigator P1 (2026-10-26; manual acceptance pending):** General → Interface gains
-  **Menu Music Navigation**, default On, restart-scoped. Controls → Interface Mapping gains
-  **Background Music Play** before Reset All, with Next Track / Previous Track / Play/Pause
-  command rows. The owner follow-up keeps the submenu/page visible with the switch On or Off,
-  so a restart is never needed to discover them. The
-  SDK-free latch, shared command/snapshot bridge, manual-skip selection and retained display
-  metadata are implemented. Playback execution, pad/media-key interception, footer and player
-  remain P2/P3; the P1 command rows do not change music. See the
-  [navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §11.
+- **Menu-music navigator P1/P2 (2026-10-26; live acceptance pending):** the default-On,
+  restart-scoped switch stays on General → Interface. Background Music Play remains
+  Interface Mapping's fifth row, with effective bindings and Assign / Reset
+  pages in both contexts. `[menu_music]` persists action-specific pad/key sources.
+  Next/Previous execute on the guest poll for DLC or title-only sources, publish snapshots
+  and keep Play Current Song aligned. Pause uses D5's unavailable fallback; Start is not
+  intercepted. Footer/player/artwork remain P3. See the
+  [navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §14.
 
 - **Guest binding rows (2026-10-25):** the host binding overlay is removed. Interface and gameplay
   lists receive current text on entry and after Reset All; the title draws every row. See the

@@ -62,6 +62,7 @@ InputStore::InputStore(std::filesystem::path path, profile::ProfileLoadResult lo
       file_present_(load.status != profile::ProfileStatus::kMissingFile),
       unreadable_(load.error),
       general_(profile::remap::Table::FromRows(load.profile.remap)),
+      music_(load.profile.menu_music),
       controller_(profile::gameplay_remap::Table::FromRows(
           TableKind::kController, load.profile.gameplay_remap_controller)),
       keyboard_mouse_(profile::gameplay_remap::Table::FromRows(
@@ -91,6 +92,8 @@ bool InputStore::IsToken(const std::string_view token) const {
 
 std::optional<InputStore::TableSel> InputStore::SwitchTable(const InputRowKind kind) {
   switch (kind) {
+    case InputRowKind::kMusicBinding:
+    case InputRowKind::kResetMusic: return TableSel::kMusic;
     case InputRowKind::kGeneralBinding:
     case InputRowKind::kResetGeneral:
       return TableSel::kGeneral;
@@ -107,6 +110,7 @@ std::optional<InputStore::TableSel> InputStore::SwitchTable(const InputRowKind k
 
 std::optional<InputStore::TableSel> InputStore::BindingTableOf(const InputRowKind kind) {
   switch (kind) {
+    case InputRowKind::kMusicBinding: return TableSel::kMusic;
     case InputRowKind::kGeneralBinding: return TableSel::kGeneral;
     case InputRowKind::kControllerBinding: return TableSel::kController;
     case InputRowKind::kKeyboardMouseBinding: return TableSel::kKeyboardMouse;
@@ -116,6 +120,7 @@ std::optional<InputStore::TableSel> InputStore::BindingTableOf(const InputRowKin
 
 InputRowKind InputStore::SwitchKindOf(const TableSel table) {
   switch (table) {
+    case TableSel::kMusic: return InputRowKind::kMusicBinding;
     case TableSel::kGeneral: return InputRowKind::kGeneralBinding;
     case TableSel::kController: return InputRowKind::kControllerBinding;
     case TableSel::kKeyboardMouse: return InputRowKind::kKeyboardMouseBinding;
@@ -173,6 +178,7 @@ bool InputStore::SetSwitch(const InputRowKind kind, const bool value, std::strin
 
 const std::vector<Source>* InputStore::EffectiveSources(const InputRowToken& token) const {
   switch (token.kind) {
+    case InputRowKind::kMusicBinding: return music_.Effective(token.name);
     case InputRowKind::kGeneralBinding:
       if (const auto target = profile::remap::ParseTarget(token.name); target.has_value()) {
         return general_.Effective(*target);
@@ -197,6 +203,7 @@ const std::vector<Source>* InputStore::EffectiveSources(const InputRowToken& tok
 
 bool InputStore::IsBound(const InputRowToken& token) const {
   switch (token.kind) {
+    case InputRowKind::kMusicBinding: return music_.IsBound(token.name);
     case InputRowKind::kGeneralBinding:
       if (const auto target = profile::remap::ParseTarget(token.name); target.has_value()) {
         return general_.IsBound(*target);
@@ -221,6 +228,7 @@ bool InputStore::IsBound(const InputRowToken& token) const {
 
 std::size_t InputStore::BoundCount(const TableSel table) const {
   switch (table) {
+    case TableSel::kMusic: return music_.BoundCount();
     case TableSel::kGeneral: return general_.BoundCount();
     case TableSel::kController: return controller_.BoundCount();
     case TableSel::kKeyboardMouse: return keyboard_mouse_.BoundCount();
@@ -230,6 +238,7 @@ std::size_t InputStore::BoundCount(const TableSel table) const {
 
 void InputStore::ResetRow(const InputRowToken& token) {
   switch (token.kind) {
+    case InputRowKind::kMusicBinding: music_.Reset(token.name); break;
     case InputRowKind::kGeneralBinding:
       if (const auto target = profile::remap::ParseTarget(token.name); target.has_value()) {
         general_.Reset(*target);
@@ -254,6 +263,7 @@ void InputStore::ResetRow(const InputRowToken& token) {
 
 void InputStore::SetRow(const InputRowToken& token, std::vector<Source> sources) {
   switch (token.kind) {
+    case InputRowKind::kMusicBinding: music_.Set(token.name, sources); break;
     case InputRowKind::kGeneralBinding:
       if (const auto target = profile::remap::ParseTarget(token.name); target.has_value()) {
         general_.Set(*target, std::move(sources));
@@ -278,6 +288,7 @@ void InputStore::SetRow(const InputRowToken& token, std::vector<Source> sources)
 
 void InputStore::ResetTable(const TableSel table) {
   switch (table) {
+    case TableSel::kMusic: music_.ResetAll(); break;
     case TableSel::kGeneral: general_.ResetAll(); break;
     case TableSel::kController: controller_.ResetAll(); break;
     case TableSel::kKeyboardMouse: keyboard_mouse_.ResetAll(); break;
@@ -286,6 +297,7 @@ void InputStore::ResetTable(const TableSel table) {
 
 bool InputStore::Accepts(const InputRowToken& token, const SourceKind kind) const {
   switch (token.kind) {
+    case InputRowKind::kMusicBinding: return kind == SourceKind::kPad || kind == SourceKind::kKey;
     case InputRowKind::kGeneralBinding:
       return true;
     case InputRowKind::kControllerBinding:
@@ -303,6 +315,7 @@ bool InputStore::Matches(const std::string_view token, const bool value) const {
     case InputRowKind::kKeyboardSupport:
     case InputRowKind::kMouseSupport:
       return CurrentSwitch(row.kind) == value;
+    case InputRowKind::kMusicBinding:
     case InputRowKind::kGeneralBinding:
     case InputRowKind::kControllerBinding:
     case InputRowKind::kKeyboardMouseBinding:
@@ -313,6 +326,7 @@ bool InputStore::Matches(const std::string_view token, const bool value) const {
       return BoundCount(TableSel::kController) != 0;
     case InputRowKind::kResetKeyboardMouse:
       return BoundCount(TableSel::kKeyboardMouse) != 0;
+    case InputRowKind::kResetMusic: return music_.BoundCount() != 0;
     case InputRowKind::kNone:
       return false;
   }
@@ -354,6 +368,7 @@ bool InputStore::StageResetAll(const std::string_view token, std::string* error)
   const InputRowToken row = profile::ParseInputRowToken(token);
   std::optional<TableSel> table;
   switch (row.kind) {
+    case InputRowKind::kResetMusic: table = TableSel::kMusic; break;
     case InputRowKind::kResetGeneral: table = TableSel::kGeneral; break;
     case InputRowKind::kResetController: table = TableSel::kController; break;
     case InputRowKind::kResetKeyboardMouse: table = TableSel::kKeyboardMouse; break;
@@ -385,6 +400,7 @@ bool InputStore::ApplyToProfile(profile::Profile* profile, std::string* error) c
     if (error != nullptr) *error = "no profile document";
     return false;
   }
+  profile::music::Bindings music(profile->menu_music);
   profile::remap::Table general = profile::remap::Table::FromRows(profile->remap);
   profile::gameplay_remap::Table controller = profile::gameplay_remap::Table::FromRows(
       TableKind::kController, profile->gameplay_remap_controller);
@@ -393,6 +409,7 @@ bool InputStore::ApplyToProfile(profile::Profile* profile, std::string* error) c
 
   for (const TableSel table : staged_reset_all_) {
     switch (table) {
+      case TableSel::kMusic: music.ResetAll(); break;
       case TableSel::kGeneral: general.ResetAll(); break;
       case TableSel::kController: controller.ResetAll(); break;
       case TableSel::kKeyboardMouse: keyboard_mouse.ResetAll(); break;
@@ -406,6 +423,9 @@ bool InputStore::ApplyToProfile(profile::Profile* profile, std::string* error) c
     }
     const std::vector<Source> list = sources.value_or(std::vector<Source>{});
     switch (row.kind) {
+      case InputRowKind::kMusicBinding:
+        if (sources) music.Set(row.name, list); else music.Reset(row.name);
+        break;
       case InputRowKind::kGeneralBinding:
         if (const auto target = profile::remap::ParseTarget(row.name); target.has_value()) {
           if (sources.has_value()) {
@@ -453,6 +473,7 @@ bool InputStore::ApplyToProfile(profile::Profile* profile, std::string* error) c
     }
   }
 
+  profile->menu_music = music.ToRows();
   profile->remap = general.ToRows();
   profile->gameplay_remap_controller = controller.ToRows();
   profile->gameplay_remap_keyboard_mouse = keyboard_mouse.ToRows();
@@ -495,6 +516,7 @@ bool InputStore::Commit(std::string* error) {
   }
   usable_ = true;
   file_present_ = true;
+  music_ = profile::music::Bindings(document.menu_music);
   general_ = profile::remap::Table::FromRows(document.remap);
   controller_ = profile::gameplay_remap::Table::FromRows(TableKind::kController,
                                                          document.gameplay_remap_controller);
@@ -548,6 +570,9 @@ bool InputStore::BeginCapture(const std::string_view token, std::string* error) 
   capture::CaptureTarget target;
   target.token = std::string(token);
   switch (row.kind) {
+    case InputRowKind::kMusicBinding:
+      target.allowed = {SourceKind::kPad, SourceKind::kKey};
+      break;
     case InputRowKind::kGeneralBinding:
       target.allowed = {SourceKind::kPad, SourceKind::kKey, SourceKind::kMouse};
       break;
@@ -575,7 +600,8 @@ bool InputStore::CompleteCapture(const std::string_view token, const Source& sou
     }
     return false;
   }
-  if (!Accepts(row, source.kind)) {
+  if (!Accepts(row, source.kind) ||
+      (row.kind == InputRowKind::kMusicBinding && !profile::music::Bindings::Accepts(source))) {
     if (error != nullptr) {
       *error = std::string("this row does not take ") + profile::remap::FormatSource(source);
     }
@@ -662,6 +688,7 @@ std::string InputStore::Summary() const {
   } else {
     out += profile::gameplay_remap::PresetLabel(preset);
   }
+  out += "; [menu_music] " + std::to_string(music_.BoundCount()) + " row(s)";
   out += "; [remap] ";
   out += std::to_string(general_.BoundCount());
   out += " row(s); [gameplay_remap_controller] ";
@@ -678,6 +705,7 @@ std::string InputStore::Summary() const {
 void InputStore::Publish() {
   auto snapshot = std::make_shared<EffectiveInput>();
   snapshot->general = general_;
+  snapshot->music = music_;
   snapshot->controller = controller_;
   // D4: a table without a custom row follows the preset the title's own preset page selected.
   // The observed value is boot-wide (src/input/effective_input.h), so a later publish must stamp

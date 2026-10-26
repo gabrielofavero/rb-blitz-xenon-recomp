@@ -88,6 +88,8 @@ struct Profile {
   // Controller Settings reads it - the game's profile reader wants `[remap]` - and it is the one table
   // whose contents can lock a user out of the window that would fix them, which is what
   // `--safe-mode` exists for.
+  // Independent background-music actions, pad/key sources; additive schema extension.
+  std::vector<ProfileSetting> menu_music;
   std::vector<ProfileSetting> nav;  // file order
   // The `[update]` table (D19): the release version the user answered "no" to, and nothing
   // when they have never been asked. It is remembered per version rather than as "the user

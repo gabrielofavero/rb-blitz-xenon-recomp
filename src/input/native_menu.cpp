@@ -72,6 +72,7 @@ std::string current_screen_name;
 // The focused list the previous frame's draw identified (see DrawList). Read by the help caption
 // observer; 0 when no list has been drawn as the focused component yet.
 uint32_t focused_list_drawn = 0;
+uint32_t music_list_screen = 0, music_list_frame = 0, observed_menu_frame = 0;
 
 struct Geometry {
   uint32_t list = 0, frame = 0;
@@ -178,6 +179,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   }
   std::lock_guard lock(mutex);
   current_screen = screen; current_focus = focus; menu_available = allowed;
+  observed_menu_frame = frame_number;
   if (current_screen_name != name) current_screen_name = name;
   game_screen_active = in_song;
   current_panel_name = panel_name;
@@ -344,6 +346,17 @@ uint32_t FocusedListDrawn() {
 bool MenuAvailable() {
   std::lock_guard lock(mutex);
   return menu_available;
+}
+bool MenuScreenIs(std::string_view name) {
+  std::lock_guard lock(mutex);
+  return current_screen_name == name;
+}
+bool MainMenuMusicInputAvailable() {
+  std::lock_guard lock(mutex);
+  return menu_available && current_screen_name == "splash_screen" &&
+         focused_list_drawn != 0 && focused_list_drawn == current_focus &&
+         music_list_screen == current_screen &&
+         (music_list_frame == observed_menu_frame || music_list_frame + 1 == observed_menu_frame);
 }
 bool GameScreenActive() {
   std::lock_guard lock(mutex);
@@ -682,6 +695,8 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   if (!ctx.r9.u32 && list != 0 && list == current_focus && menu_available) {
     std::lock_guard lock(mutex);
     focused_list_drawn = list;
+    music_list_screen = current_screen;
+    music_list_frame = frame_number;
   }
   // The capture runs whatever the mouse preference says: the mouse hit test needs it, and so does
   // the settings overlay's row text (P1), which must work on a pad-only machine too. Only the

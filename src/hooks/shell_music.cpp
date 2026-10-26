@@ -11,7 +11,7 @@
 // samples, and menu exit clears it without starting another track.
 //
 // Guest ABI and runtime evidence: docs/engine/main-menu.md, part 2, 2026-10-15 correction.
-// With DLC Menu Songs off, the guest loader, loop and navigation remain unchanged.
+// With DLC Menu Songs off, the independent navigator can use the three title tracks.
 
 #include "hooks/shell_music.h"
 
@@ -21,10 +21,15 @@
 #include "hooks/menu_music_queue.h"
 #include "hooks/menu_music_session.h"
 #include "hooks/menu_music_cache.h"
+#include "hooks/menu_music_now_playing.h"
+#include "input/native_menu.h"
+#include "input/input_capture.h"
+#include <rex/kernel/xam/module.h>
 #include "hooks/menu_audio_policy.h"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -65,6 +70,10 @@
 // first is the carrier of the in-game "DLC Menu Songs" row (the boot writes the row into it at the
 // config rank), and the second is the retired pool-size row, read only to say it is ignored.
 REXCVAR_DECLARE(bool, enhancements_menu_dlc_songs);
+REXCVAR_DECLARE(bool, enhancements_background_music_nav);
+REXCVAR_DEFINE_STRING(background_music_nav_probe, "", "Diagnostics",
+    "One main-menu command after background_music_nav_probe_delay seconds: next, previous, play_pause.");
+REXCVAR_DEFINE_INT32(background_music_nav_probe_delay, 5, "Diagnostics", "Seconds before the one-shot music navigator probe.");
 REXCVAR_DECLARE(int32_t, enhancements_menu_dlc_song_count);
 
 REX_EXTERN(__imp__sub_82757F50);
@@ -74,6 +83,7 @@ REX_EXTERN(__imp__sub_827583F8);  // ShellMusic::StopStreams
 REX_EXTERN(__imp__sub_82758998);  // ShellMusic::Stop (menu exit)
 REX_EXTERN(__imp__sub_82758490);  // ShellMusic destructor
 REX_EXTERN(__imp__sub_823E5BE0);  // StandardStream constructor, f2 = buffer seconds
+REX_EXTERN(__imp__sub_82757D40);  // ShellMusic random start-offset selector
 
 namespace {
 
@@ -100,6 +110,17 @@ constexpr uint32_t kPositionOffset = 0xA0;
 constexpr double kSamplesPerSecond = 44100.0;  // diagnostic display for these mixdowns
 
 bool g_enabled = false;
+bool g_navigation_enabled = false;
+namespace nav = rb_blitz::input::menu_music_nav;
+std::optional<nav::Request> g_nav_request;
+size_t g_nav_target = rb_blitz::shell_music::kNoIndex;
+bool g_nav_started = false;
+int g_nav_title_target = -1;
+int g_title_index = -1;
+uint64_t g_nav_epoch = 0;
+std::string g_nav_probe;
+int32_t g_nav_probe_delay = 5;
+std::chrono::steady_clock::time_point g_nav_menu_since{};
 rb_blitz::shell_music::MusicSession g_session;
 size_t g_stream_song = rb_blitz::shell_music::kNoIndex;
 
@@ -130,6 +151,8 @@ std::mt19937 g_rng = MakeRandom();
 // handing the menu back to the title's tracks.
 constexpr int kMaxAttemptsPerSeam = 3;
 rb_blitz::shell_music::Playback g_playback;
+rb_blitz::shell_music::PlaybackAge g_nav_age;
+thread_local bool g_nav_start_at_zero = false;
 
 // True while the track playing on `g_music` is one of R9's own. Once the rotation hands the menu a
 // title track instead - a pool of one song, or every candidate failing - the poll stops watching,
@@ -276,7 +299,8 @@ std::vector<std::filesystem::path> g_packages;  // shuffled once, before guest l
 size_t g_next_package = 0;
 rb_blitz::shell_music::MusicMountCache<rex::filesystem::Device> g_cache;
 std::optional<PreparedPackage> g_ready_package;
-bool g_queue_started = false, g_closing = false;
+bool g_queue_started = false;
+std::atomic<bool> g_closing{false};
 
 
 std::string MountPath(size_t index) {
@@ -328,6 +352,7 @@ std::optional<PreparedPackage> PreparePackage(const std::filesystem::path& packa
 // catalog IDs, never positions in the mounted cache or the session playlist.
 std::set<size_t> WarmPackagesLocked() {
   std::vector<size_t> pins{g_stream_song};
+  if (g_nav_target != rb_blitz::shell_music::kNoIndex) pins.push_back(g_session.SongAt(g_nav_target));
   if (g_pending_index >= 0) pins.push_back(size_t(g_pending_index));
   if (g_current_index >= 0) pins.push_back(size_t(g_current_index));
   const int selected = g_play_selection.Query(NowMs());
@@ -411,6 +436,11 @@ void SchedulePreparationLocked() {
   g_session.PlanAhead(g_rng);
   RetireColdLocked();
   if (g_cache.Full()) return;  // backpressure while retired streams still hold Files
+  if (g_nav_target != rb_blitz::shell_music::kNoIndex) {
+    const auto id = g_session.SongAt(g_nav_target);
+    const auto package = g_session.Package(id);
+    if (g_session.Usable(id) && !g_cache.Contains(package)) { g_queue.Request(package, true); return; }
+  }
   // The immediate successor has priority over previous/history cache warming.
   const auto next = g_session.NextPosition();
   if (next != rb_blitz::shell_music::kNoIndex) {
@@ -493,7 +523,10 @@ void LoadOnGuest(uint8_t* base, PPCContext& parent, uint32_t music, uint32_t buf
     g_stream_song = !loop && g_pending_index >= 0 ? size_t(g_pending_index)
                                                  : rb_blitz::shell_music::kNoIndex;
   }
+  g_title_index = -1;
+  if (loop) for (int i = 0; i < 3; ++i) if (path == kTitleTracks[i]) g_title_index = i;
   g_pos = 0;
+  g_nav_age.Reset();
   g_track_started_at = std::chrono::steady_clock::now();
   g_heartbeat_at = g_track_started_at;
   g_playback.Begin(NowMs());
@@ -603,10 +636,202 @@ void NoteFailedCandidate(uint8_t* base, PPCContext& parent, uint32_t music) {
   StartNextTrack(base, parent, music);
 }
 
+// Pause capability deliberately remains false. StandardStream state 4 alone is
+// not proof of silence, position preservation or compatibility with the native
+// poll. D5 requires those live measurements before a pause seam may ship.
+void PublishNavigator(uint8_t* base, uint32_t music) {
+  using namespace rb_blitz::shell_music;
+  if (!g_navigation_enabled || music != g_music) return;
+  PlaybackUpdate update;
+  const bool source = music && (g_watch || g_watch_title) && !g_closing;
+  const bool available = source &&
+      rb_blitz::input::HostInputFocused() &&
+      !rb_blitz::input::capture::Armed() && !rex::kernel::xam::xeXamIsUIActive() &&
+      !rb_blitz::graphics::GraphicsLoadingPending();
+  if (source) {
+    const auto stream = LoadBe32(base, music + kStreamOffset);
+    const auto state = stream ? LoadBe32(base, stream + 20) : 0;
+    const auto position = stream ? LoadBe32(base, stream + kPositionOffset) : 0;
+    g_nav_age.Observe(stream, state == 3, position);
+    update.state = state == 3 && position > 0 ? TransportState::kPlaying : TransportState::kLoading;
+    update.capabilities = {true, true, false};
+    std::lock_guard lock(g_mutex);
+    if (g_watch && g_pending_index >= 0) {
+      const auto id = size_t(g_pending_index);
+      const auto& song = g_session.Sources()[id];
+      update.track = {MusicSource::kDlc, id, PoolSongKey(song), song.title, song.artist, song.artwork_locator};
+      if (update.track.title.empty()) update.track.title = update.track.key;
+    } else if (g_title_index >= 0) {
+      update.track = {MusicSource::kTitle, size_t(g_title_index), kTitleTracks[g_title_index],
+                     fmt::format("Menu Track {}", g_title_index + 1), "Unknown artist", {}};
+    }
+  }
+  NowPlaying().Publish(g_nav_epoch, std::move(update), available);
+}
+
+void FinishNavigator(nav::CompletionStatus status, const std::string& reason = {}) {
+  if (g_nav_request) {
+    REXLOG_INFO("music_nav: request {} {} ({})", g_nav_request->id,
+                status == nav::CompletionStatus::kApplied ? "applied" : "ended", reason);
+    rb_blitz::shell_music::NowPlaying().Complete(*g_nav_request, status, reason);
+  }
+  g_nav_request.reset();
+  g_nav_target = rb_blitz::shell_music::kNoIndex;
+  g_nav_started = false;
+  g_nav_title_target = -1;
+}
+
+void ApplyNavigatorCommand(uint8_t* base, PPCContext& ctx, uint32_t music) {
+  using namespace rb_blitz::shell_music;
+  if (g_closing) {
+    FinishNavigator(nav::CompletionStatus::kCancelled, "shutdown");
+    return;
+  }
+  if (!g_navigation_enabled || music != g_music || !(g_watch || g_watch_title)) return;
+  const bool blocked = !rb_blitz::input::HostInputFocused() ||
+                       rb_blitz::input::capture::Armed() || rex::kernel::xam::xeXamIsUIActive() ||
+                       rb_blitz::graphics::GraphicsLoadingPending();
+  if (blocked) {
+    FinishNavigator(nav::CompletionStatus::kCancelled, "input/loading owner changed");
+    NowPlaying().SetAvailable(false);
+    return;
+  }
+  if (g_nav_request && g_nav_request->producer != nav::Producer::kControlsPage &&
+      !rb_blitz::input::MainMenuMusicInputAvailable()) {
+    FinishNavigator(nav::CompletionStatus::kCancelled, "main menu left before handoff");
+    return;
+  }
+  if (!g_nav_request) {
+    g_nav_request = nav::Take();
+    if (!g_nav_request) return;
+    if (g_nav_request->producer != nav::Producer::kControlsPage &&
+        !rb_blitz::input::MainMenuMusicInputAvailable()) {
+      FinishNavigator(nav::CompletionStatus::kCancelled, "main menu left before execution");
+      return;
+    }
+    if (g_nav_request->command == nav::Command::kPlayPause) {
+      FinishNavigator(nav::CompletionStatus::kFailed, "native pause seam unavailable");
+      return;
+    }
+    const auto stream = LoadBe32(base, music + kStreamOffset);
+    const auto position = stream ? LoadBe32(base, stream + kPositionOffset) : 0;
+    g_nav_age.Observe(stream, stream && LoadBe32(base, stream + 20) == 3, position);
+    const auto samples = g_nav_request->previous_step_back ? 0 : g_nav_age.samples();
+    std::lock_guard lock(g_mutex);
+    g_session.PlanAhead(g_rng);
+    g_nav_target = g_nav_request->command == nav::Command::kNext ? g_session.NextPosition()
+                                                               : g_session.PreviousPosition(samples);
+    REXLOG_INFO("music_nav: request {} action {} raw_position {} elapsed_samples {} cursor {} target {}",
+                g_nav_request->id, int(g_nav_request->command), position, samples,
+                g_session.Cursor(), g_nav_target);
+    // A temporary native fallback is audible, but is not an entry in the DLC
+    // history. Restart that source after five seconds; before five, return to
+    // the last DLC entry rather than skipping another entry backward.
+    if (g_enabled && g_watch_title && g_nav_request->command == nav::Command::kPrevious) {
+      if (samples >= nav::kRestartSamples || g_session.Cursor() == kNoIndex) {
+        g_nav_title_target = g_title_index;
+        g_nav_target = kNoIndex;
+      } else {
+        g_nav_target = g_session.Cursor();
+      }
+    }
+  }
+  if (g_nav_started) return; // confirmation follows observation of the new stream
+  std::string path;
+  uint32_t buffer = 0;
+  {
+    std::lock_guard lock(g_mutex);
+    if (g_nav_title_target >= 0) {
+      path = kTitleTracks[g_nav_title_target];
+    } else {
+      if (g_nav_target == kNoIndex && g_nav_request->command == nav::Command::kNext) {
+        g_session.PlanAhead(g_rng);
+        g_nav_target = g_session.NextPosition();
+        if (g_nav_target == kNoIndex && !g_session.DiscoveryFinished()) {
+          SchedulePreparationLocked();
+          return;
+        }
+      }
+      if (g_nav_target == kNoIndex) {
+        FinishNavigator(nav::CompletionStatus::kFailed, "no successor ready in the session");
+        return;
+      }
+      const auto id = g_session.SongAt(g_nav_target);
+      if (!g_session.Usable(id)) {
+        FinishNavigator(nav::CompletionStatus::kFailed, "target package unavailable");
+        return;
+      }
+      if (g_enabled && !g_cache.Contains(g_session.Package(id))) {
+        SchedulePreparationLocked();
+        return; // keep audible track, metadata and cursor while a cold target remounts
+      }
+      const auto& song = g_session.Sources()[id];
+      path = g_enabled ? song.alias + ":" + song.stream : song.stream;
+    }
+    if (g_buffers.empty()) {
+      FinishNavigator(nav::CompletionStatus::kFailed, "no guest path buffer");
+      return;
+    }
+    if (path.size() + 1 > kBufferBytes) {
+      FinishNavigator(nav::CompletionStatus::kFailed, "source path too long");
+      return;
+    }
+    buffer = g_buffers[g_buffer_next];
+    g_buffer_next = (g_buffer_next + 1) % g_buffers.size();
+    if (g_nav_title_target < 0) {
+      g_session.Skipped();
+      g_session.Select(g_nav_target);
+    }
+    g_pending_index = g_enabled && g_nav_title_target < 0 ? int(g_session.SongAt(g_nav_target)) : -1;
+    g_current_index = -1;
+    g_play_selection.Skipped(g_pending_index, NowMs());
+    g_playing_name = g_pending_index >= 0 ? PoolSongKey(g_session.Sources()[g_pending_index]) : path;
+  }
+  const bool title_track = !g_enabled || g_nav_title_target >= 0;
+  g_watch = !title_track;
+  g_watch_title = title_track;
+  g_waiting_for_pool = false;
+  g_attempts = 0;
+  g_nav_started = true;
+  REXLOG_INFO("music_nav: request {} loading {} (cursor {})", g_nav_request->id, path, g_nav_target);
+  g_nav_start_at_zero = true;
+  LoadOnGuest(base, ctx, music, buffer, path, title_track);
+  g_nav_start_at_zero = false;
+}
+
 // The path the title is about to stream is one of its own three pool entries; give it
 // one of the loaded DLC songs instead. Anything else - a path that is not the shell
 // music pool's - is left exactly as it is.
 void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
+  const auto requested = ctx.r4.u32 ? rex::memory::GuestPtr<const char*>(base, ctx.r4.u32) : nullptr;
+  if (g_navigation_enabled && requested && std::strncmp(requested, kShellMusicPrefix, kShellMusicPrefixSize) == 0) {
+    FinishNavigator(nav::CompletionStatus::kCancelled, "native source changed");
+    g_nav_epoch = rb_blitz::shell_music::NowPlaying().Reset();
+    g_music = ctx.r3.u32;
+    g_gain = ctx.f1.f64;
+    g_scale_pan = ctx.r6.u64;
+    g_nav_age.Reset();
+    g_title_index = -1;
+    for (int i = 0; i < 3; ++i) if (requested == std::string_view(kTitleTracks[i])) g_title_index = i;
+    if (!g_enabled && g_title_index >= 0 && !g_buffers.empty()) {
+      std::lock_guard lock(g_mutex);
+      {
+        g_session = rb_blitz::shell_music::MusicSession{};
+        std::vector<PoolEntry> songs;
+        for (auto path : kTitleTracks) songs.push_back({"", path, path});
+        g_session.Discover(0, std::move(songs));
+        g_session.AdoptFirst(size_t(g_title_index));
+        g_session.DiscoveryComplete();
+        g_session.PlanAhead(g_rng);
+      }
+      g_watch_title = true;
+      g_watch = g_waiting_for_pool = false;
+      g_current_index = g_pending_index = -1;
+      g_play_selection.Stop();
+      g_playback.Stop();
+      g_pos = 0;
+    }
+  }
   if (!g_enabled || g_session.Sources().empty() || g_buffers.empty()) {
     return;
   }
@@ -700,6 +925,18 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // since 2026-10-13, so reviving the row changes no existing boot.
   //
   // The read happens once, on this host thread; no guest thread ever touches the cvar registry.
+  g_navigation_enabled = REXCVAR_GET(enhancements_background_music_nav);
+  g_nav_epoch = rb_blitz::shell_music::NowPlaying().Reset();
+  g_nav_probe = REXCVAR_GET(background_music_nav_probe);
+  g_nav_probe_delay = REXCVAR_GET(background_music_nav_probe_delay);
+  if ((g_navigation_enabled || REXCVAR_GET(enhancements_menu_dlc_songs)) && runtime && runtime->memory()) {
+    for (size_t i = g_buffers.size(); i < kBufferCount; ++i) {
+      const auto address = runtime->memory()->SystemHeapAlloc(static_cast<uint32_t>(kBufferBytes), 0x20);
+      if (!address) break;
+      g_buffers.push_back(address);
+    }
+  }
+  if (g_buffers.empty()) g_navigation_enabled = false;
   g_menu_music_enabled = REXCVAR_GET(enhancements_menu_dlc_songs);
   // The index only means something for this boot's pool, and this is the one place the pool is
   // built: a fresh boot has no current track until the panel picks one.
@@ -712,9 +949,8 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
               REXCVAR_GET(enhancements_menu_dlc_songs) ? "true" : "false",
               g_menu_music_enabled ? "building the DLC pool" : "the menu keeps the title's tracks");
   if (!g_menu_music_enabled) {
-    // The off state is the whole feature: nothing is mounted, the loader and poll hooks stay inert,
-    // and the boot is the one the title ships. `g_enabled` is already false, so a poll that arrives
-    // anyway watches nothing.
+    // R9 mounts nothing. The independent navigator may still capture and move
+    // the native title sources; with both switches off the hooks remain inert.
     return;
   }
   if (runtime == nullptr) {
@@ -759,14 +995,6 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     return;
   }
 
-  g_buffers.reserve(kBufferCount);
-  for (size_t i = 0; i < kBufferCount; ++i) {
-    const uint32_t address = memory->SystemHeapAlloc(static_cast<uint32_t>(kBufferBytes), 0x20);
-    if (address == 0) {
-      break;
-    }
-    g_buffers.push_back(address);
-  }
   if (g_buffers.empty()) {
     REXLOG_WARN("shell_music: no guest memory for a stream path; R9 falls back to the title's own "
                 "tracks");
@@ -825,6 +1053,7 @@ void PublishQueuedPool(bool during_loading) {
 void CloseQueuedPool() {
   std::lock_guard lock(g_mutex);
   g_closing = true;
+  NowPlaying().Reset();
   g_queue.Stop();
 }
 
@@ -858,6 +1087,15 @@ int CurrentPoolIndex() {
 bool AnswerPlayQuery(const std::string_view path, bool* answer) {
   if (!path.starts_with(rb_blitz::shell_music::kPlayNamespace)) {
     return false;
+  }
+  if (path == "rbbz-play/next" || path == "rbbz-play/previous" || path == "rbbz-play/pause") {
+    const auto command = path == "rbbz-play/next" ? nav::Command::kNext :
+                         path == "rbbz-play/previous" ? nav::Command::kPrevious : nav::Command::kPlayPause;
+    const bool allowed = g_navigation_enabled && !rb_blitz::input::capture::Armed() &&
+                         !rex::kernel::xam::xeXamIsUIActive();
+    const auto result = allowed ? nav::Post(command, nav::Producer::kControlsPage) : nav::PostResult{};
+    if (answer) *answer = result.status == nav::PostStatus::kAccepted;
+    return true;
   }
   std::lock_guard<std::mutex> lock(g_mutex);
   if (path == "rbbz-play/begin") {
@@ -903,6 +1141,14 @@ extern "C" REX_FUNC(sub_82757F50) {
   __imp__sub_82757F50(ctx, base);
 }
 
+// Native Start calls this selector before creating the stream.
+// Manual Next/Previous/restart must begin at zero; native and automatic starts
+// retain their existing random offsets. No authored offset vector is modified.
+extern "C" REX_FUNC(sub_82757D40) {
+  if (g_nav_start_at_zero && ctx.r3.u32 == g_music) ctx.r3.u32 = 0;
+  else __imp__sub_82757D40(ctx, base);
+}
+
 // Stopping a menu stream is navigation, not a song end. In particular, do not start
 // another background song while the loading screen is taking over the audio system.
 void ForgetMenuMusic(uint32_t music) {
@@ -920,6 +1166,8 @@ void ForgetMenuMusic(uint32_t music) {
     g_current_index = -1;
     g_pending_index = -1;
     g_play_selection.Stop();
+    FinishNavigator(nav::CompletionStatus::kCancelled, "menu music stopped");
+    g_nav_epoch = rb_blitz::shell_music::NowPlaying().Reset();
   }
   if (watched) {
     REXLOG_INFO("shell_music: the game took this menu track down; the rotation stops watching "
@@ -964,7 +1212,10 @@ extern "C" REX_FUNC(sub_82758B98) {
           g_track_started_at = g_heartbeat_at = std::chrono::steady_clock::now();
         }
       }
-      else if (g_watch_title) g_stream_song = rb_blitz::shell_music::kNoIndex;
+      else if (g_watch_title) {
+        g_stream_song = rb_blitz::shell_music::kNoIndex;
+        if (!g_playback.active()) g_playback.Begin(NowMs());
+      }
     }
   }
   g_setting_up_music = was_setting_up;
@@ -1016,7 +1267,19 @@ extern "C" REX_FUNC(sub_827586D8) {
   // inside it cannot see. One atomic load when nothing is in flight.
   rb_blitz::content_progress::Tick();
   const uint32_t music = ctx.r3.u32;
-  const bool watched = g_enabled && (g_watch || g_watch_title) && !g_session.Sources().empty() &&
+  PublishNavigator(base, music);
+  if (g_navigation_enabled && !g_nav_probe.empty() && rb_blitz::input::MainMenuMusicInputAvailable()) {
+    if (g_nav_menu_since == std::chrono::steady_clock::time_point{}) g_nav_menu_since = std::chrono::steady_clock::now();
+    if (MillisecondsSince(g_nav_menu_since) >= int64_t(std::max(0, g_nav_probe_delay)) * 1000) {
+      const auto command = g_nav_probe == "next" ? nav::Command::kNext :
+                           g_nav_probe == "previous" ? nav::Command::kPrevious : nav::Command::kPlayPause;
+      const auto result = nav::Post(command);
+      REXLOG_INFO("music_nav: diagnostic {} status {}", g_nav_probe, int(result.status));
+      g_nav_probe.clear();
+    }
+  }
+  ApplyNavigatorCommand(base, ctx, music);
+  const bool watched = (g_enabled || g_navigation_enabled) && (g_watch || g_watch_title) && !g_session.Sources().empty() &&
                        music != 0 && music == g_music;
   if (watched) {
     const uint32_t stream = LoadBe32(base, music + kStreamOffset);
@@ -1027,15 +1290,25 @@ extern "C" REX_FUNC(sub_827586D8) {
       // keep increasing across loops, so recovery must not depend on a rewind.
       // Only a temporary fallback yields here; three consecutive failures still
       // leave the deliberate circuit-breaker fallback in control.
-      if (g_waiting_for_pool && HasReadyNext()) {
+      if (!g_nav_request && g_waiting_for_pool && HasReadyNext()) {
         REXLOG_INFO("shell_music: DLC successor ready; leaving temporary title fallback");
         g_waiting_for_pool = false;
         g_seam_at = std::chrono::steady_clock::now();
         StartNextTrack(base, ctx, music);
         __imp__sub_827586D8(ctx, base);
+        PublishNavigator(base, music);
         return;
       }
-      if (state == 6 || stream == 0) {
+      if (g_nav_started && state == 3 && position > 0) {
+        PublishNavigator(base, music);
+        FinishNavigator(nav::CompletionStatus::kApplied);
+      }
+      if (g_nav_started && MillisecondsSince(g_track_started_at) >=
+          rb_blitz::shell_music::Playback::kStartupDeadlineMs && !(state == 3 && position > 0))
+        FinishNavigator(nav::CompletionStatus::kFailed, "title stream failed to start");
+      if (state == 6 || (stream == 0 && g_playback.active())) {
+        if (g_nav_request)
+          FinishNavigator(nav::CompletionStatus::kFailed, "title stream ended before command completion");
         g_watch_title = false;
         REXLOG_WARN("shell_music: the title fallback track ended; the menu's background music "
                     "stops (R9)");
@@ -1064,10 +1337,13 @@ extern "C" REX_FUNC(sub_827586D8) {
       using Event = rb_blitz::shell_music::Playback::Event;
       if (event == Event::kEnded) {
         NoteSeam(g_pos);
-        StartNextTrack(base, ctx, music);
+        if (g_nav_started)
+          FinishNavigator(nav::CompletionStatus::kFailed, "replacement ended before becoming audible");
+        if (!g_nav_request) StartNextTrack(base, ctx, music);
       } else if (event == Event::kFailed) {
         REXLOG_WARN("shell_music: native failure snapshot: stream={:08X} state={} position={}",
                     stream, state, position);
+        if (g_nav_request) FinishNavigator(nav::CompletionStatus::kFailed, "active or replacement stream failed");
         NoteFailedCandidate(base, ctx, music);
       } else {
         if (event == Event::kAudible) {
@@ -1077,6 +1353,10 @@ extern "C" REX_FUNC(sub_827586D8) {
             g_current_index = g_pending_index;
             g_play_selection.Audible(g_current_index);
             if (g_current_index >= 0) g_session.Heard(size_t(g_current_index));
+          }
+          if (g_nav_started) {
+            PublishNavigator(base, music);
+            FinishNavigator(nav::CompletionStatus::kApplied);
           }
           REXLOG_INFO("shell_music: \"{}\" started playback {} ms after the previous track's end "
                       "(stream {:08X}, source \"{}\") (R9)",
@@ -1094,6 +1374,7 @@ extern "C" REX_FUNC(sub_827586D8) {
     }
   }
   __imp__sub_827586D8(ctx, base);
+  PublishNavigator(base, music);
 }
 
 #endif  // _WIN32

@@ -1,10 +1,9 @@
 # Background music navigator — implementation plan
 
-**Status:** P1 implemented (2026-10-26), manual acceptance pending (§11). The session/mount-cache
-foundation was delivered separately. P1 adds the default-on restart setting, always-visible Controls
-command page and SDK-free navigator/snapshot core. Command execution, pause, pad/media-key
-wiring, footer and clickable music-player overlay remain P2/P3. Owner request of 2026-10-22 is
-normalized in §1; the design is §4, the three execution prompts are §5.
+**Status:** P1/P2 implemented (2026-10-26), live acceptance pending. P2 connects
+Next/Previous, persistent action bindings, pad/media input, title-track navigation and
+playback snapshots. Pause uses D5's unavailable fallback; no native seam has been
+live-verified. Footer/player/artwork remain P3. See §14 for the P2 record.
 
 **Scope revision (2026-10-26, owner).** The two controls the feature cannot ship without are in
 scope, and the plan is corrected to match the tree: the **on/off setting** moves from
@@ -107,7 +106,7 @@ until P2 proves live source setup and input/pause ownership. See §12 for the fo
 | **D1** | **Setting.** `SettingId::kBackgroundMusicNavigation = 53` (the next free Interface id), token `interface.background_music_navigation`, `Category::kInterface`, `WidgetKind::kBoolean`, default **true**, `ApplicationStrategy::kRestart` (retained until P2 proves live source setup and input/pause ownership; **it no longer controls any row/page visibility**). **Row:** `BoolRow("settings_music_navigation", …)` labelled **`Menu Music Navigation`** (21 characters; `Menu Music Navigation: On` is 25, inside the 28-character line budget) on **General → Interface**, the page's fifth row directly after `settings_labels` (4 rows today, budget 6). **Why not the Main Menu page:** that page lists the menu's own hideable entries and its static rows are replaced by the live mirror built from `g_configuration.menu_rows` (`src/ui/settings_screen.cpp`), so a behaviour switch there would be dropped on a normal boot and would break the page's "no master switch" rule. Carrier cvar `enhancements_background_music_nav` (default `true`, `kRequiresRestart`), written at the config rank by `CvarForSetting`, read once by `shell_music::Configure` (P2) and per frame by the latch and the overlay. |
 | **D2** | **The navigator owns the menu music source, not R9.** With a pool it navigates the pool; with R9 off (or no pool) it navigates the title's three tracks. It therefore learns the panel's Load arguments (`this`, gain, pan) on every Load call when the setting is on, and keeps one guest path buffer allocated even when R9 built no pool. |
 | **D3** | **One session playlist and cursor serve manual and automatic advancement.** `MusicSession` retains stable catalog song IDs and backward/forward history independently of mounted devices. Next follows an existing forward entry; at the frontier it draws an unseen source. Previous follows the same history under D4. After library discovery and one full pass, begin a fresh randomized pass without an immediate repeat. Keep current + three upcoming + two recent songs warm, with an eight-package residency ceiling and explicit active/selection pins. Retired mounts are remounted asynchronously when revisited; a missing ready successor never blocks the UI. The title's three tracks use the same cursor semantics when R9 is off. This supersedes the former fixed-50 pool cursor and separate automatic `Rotation` order. |
-| **D4** | **The 5-second rule uses the stream's sample counter** (`Stream+0xA0` / 44,100), not wall time. A track that is still loading counts as "< 5 s". "First song" means cursor 0 → restart. Next/Previous always resume playback if paused. |
+| **D4** | **The 5-second rule uses sample progress since playback begins** (`Stream+0xA0` delta / 44,100), excluding the native random offset and decoded reserve, not wall time. Manual starts use zero offset (owner acceptance fix, §14). A track that is still loading counts as "< 5 s". "First song" means cursor 0 → restart. Next/Previous always resume playback if paused. |
 | **D5** | **Pause is proven or reported, never faked.** **P2** must find a seam that (a) silences the stream, (b) freezes the reported position, (c) resumes at the same position, and (d) is not undone by the guest's own poll. Candidate ladder: the `StandardStream` message/vtable pause-and-resume call; else the stream state word (`Stream+0x14`, value 4 = the usual paused state) under a measured write; else the Play/Pause action is drawn as unavailable (`<label>: Unavailable`) and Start does nothing, with the limitation in `known-issues.md`. During a pause the `Playback` watchdog must be suspended or it marks the track failed after 3 s. |
 | **D6** | **Buttons are consumed on the main menu only** (`splash_screen` *and* its option list drawn), while the setting is on and a menu-music source exists. Bits: LB `0x0100`, RB `0x0200`, Start `0x0010`; media keys ride the existing keyboard gate (`keyboard_support`). One command per physical press (rising edge), keyboard hold does not repeat. |
 | **D7** | **The footer is host-drawn beside retail's, never a payload/locale edit.** `help_overlay.cpp` draws `LB Previous` immediately left of the guest's A prompt and `RB Next` right of B, same baseline and face, only while the setting is on, the main menu is current and a menu-music source exists. The guest's `A Select / B Back` is left untouched (its button glyphs are guest art; strings are ours and are recorded as such). |
@@ -718,3 +717,137 @@ before/after this follow-up (43 existing errors / 89 warnings), and `git diff --
 Evidence: `out/music-followup-build-final.log`, `out/music-followup-tests.log`,
 `out/music-followup-docs-before.json`, `out/music-followup-docs-after.json`. Game/UI testing awaits
 the owner's choice; the listening report remains unconfirmed.
+
+
+## 14. P2 implementation record (2026-10-26)
+
+**Implemented; live audio/UI acceptance pending.** This supersedes P1's command-only
+surface and earlier statements that runtime wiring is future work. The switch remains
+restart-scoped. No game UI has been driven for this implementation.
+
+- Every producer posts to the P1 mailbox; only the ShellMusic poll executes commands.
+  It revalidates modal/capture/loading ownership and producer scope, then reports applied
+  after the replacement stream is observed playing. Cold targets are pinned and remounted
+  asynchronously without moving the cursor or replacing the current audible metadata.
+  Failures, stop and shutdown cancel or fail pending requests explicitly. Automatic
+  advances publish through the same owned snapshot.
+- Next/Previous share `MusicSession` with automatic advancement. Previous restarts at
+  220,500 samples of progress since the first playing observation (five seconds) or the first entry; otherwise it follows history.
+  Forward after Previous follows the existing history. Manual handoff clears old-song
+  grace in Play Current Song without changing an already captured selection.
+- Navigator-only boots allocate guest path buffers before R9's early exits. The native
+  title path is adopted as the first of three title sources, with native looping and
+  neutral display metadata. No title source becomes a DLC Play Current Song selection.
+  The staged watchdog fixes in §13 remain intact.
+- Raw physical pad/key action bindings are sampled before General Mapping. Supported
+  sources are consumed until release; held inputs do not fire on menu/device/configuration
+  boundaries. The splash option list must be drawn, and input yields to modal/capture
+  owners. Keys obey Keyboard Support/focus. Unavailable pause leaves Start untouched.
+- `[menu_music]` in the existing launcher profile owns `next`, `previous`, `pause`,
+  separate from `[remap]`. Defaults: RB/MediaTrackNext, LB/MediaTrackPrevious,
+  Start/MediaPlayPause. Three guest binding rows open Assign / Reset pages
+  in both contexts. Existing release-first capture and its three-second countdown
+  support cancellation without a write. First assignment replaces defaults; later
+  assignments append distinct inputs. Saves rebase on disk and publish a new immutable
+  snapshot. All pages remain visible Off; commands cannot bypass the runtime off gate.
+- SDK patch **0041-media-keys.patch** and the host key latch translate all three media
+  keys. `drive_ui.ps1` adds `media_next`, `media_prev`, `media_play_pause` with extended
+  scan codes. `background_music_nav_probe=next|previous|play_pause` posts once after
+  `background_music_nav_probe_delay` seconds (default 5) on the main-menu option list.
+- **Pause limitation (D5 fallback):** no guessed state-4/vtable write ships. Silence,
+  frozen samples and same-position resume require a live measurement. Capability is
+  false; the guest row/action says **Play/Pause: Unavailable**, the command returns
+  false and Start retains retail behavior. P3 must disable its center control with
+  this explanation unless a native seam is subsequently verified. No fake paused
+  state or mute/restart-as-resume is published.
+
+Evidence: `out/_swap/music-nav/p2-runtime/`. Host tests call production hooks with
+synthetic native callees; they do not measure the actual audio mixer or navigate the UI.
+Windows media-key delivery/arbitration, audible continuity, physical-pad input, page layout
+and assignment/restart routes remain unmeasured. Footer/player/artwork remain P3.
+
+
+**Owner acceptance and corrections (2026-10-26).** The owner reports the buttons work,
+but Previous could not return to the boot song. `rb_blitz_364.log` shows successful Next
+requests through cursors 1/2, then repeated Previous restarts at cursor 2 and busy replies
+to presses during each approximately 2.3-second replacement load. History was not removed.
+Static native inspection shows `ShellMusic::Start` calls the random-offset selector
+`0x82757D40` (the offset vector is at ShellMusic +156/+160), and `StandardStream +0xA0`
+includes the initial offset and decoded-ahead reserve (`0x823E52B0`, `0x823E3D60`). Thus an
+absolute cursor is not a measure of how long this selection has played.
+
+`PlaybackAge` now uses positive sample deltas since the first playing observation, resetting
+on every native/manual handoff even if the allocator reuses the stream address. Manual
+Next/Previous/restart alone override the native offset selector to zero; automatic/native
+starts retain their existing offsets. New diagnostics record raw cursor, elapsed samples,
+source cursor and target. Synthetic regressions include a 30-second native random offset,
+six seconds of initial decoded reserve, consecutive back/forward moves reaching entry zero,
+and same-address restart. The fix still needs an owner listening/retest; no live run of this
+revision is claimed. At this revision, a press while another command was pending was busy rather than queued;
+§15 supersedes that behavior after the owner's next test.
+
+The owner also removed the execution button from Interface Mapping: each music binding now
+opens only **Assign / Reset**. This supersedes the earlier Play Now and P1 one-shot command
+surface descriptions in R5/D9 and §5. The internal command channel remains for shared runtime
+execution, but mapping pages configure inputs and do not execute playback actions.
+
+
+**Host verification.** The release build succeeds. All **13 targeted release tests** pass
+with the owner corrections, including the production-hook runtime fixture, navigator,
+input bindings, settings surface and profile round-trip. An earlier full release run
+passed **85/86**, including the SDK patch-stack audit; its sole failure is the existing
+`path_policy` assertion at `tests/path_policy_tests.cpp:88`. The final targeted run covers
+the subsequent sample-age/random-offset and Assign/Reset corrections; the full roster
+was not repeated after those changes. Documentation remains at **43 existing errors /
+87 warnings**, with no introduced check/file/detail identities. `git diff --check` passes.
+Builds, tests, doc snapshots and the owner log excerpt are in the P2 evidence directory.
+
+The final Vulkan-off debug subset also passes **6/6**: settings_screen, menu_music_pool,
+menu_music_nav, menu_music_session, profile and input_bindings (`tests-debug-final.log`).
+The final release rebuild includes the owner corrections; no game UI was driven by the agent.
+
+
+## 15. Previous during loading: bounded command bursts (2026-10-26)
+
+The owner reports that Previous still restarted the current song, including rapid double/triple
+presses. The next owner log, `out/build/win-amd64-release/logs/rb_blitz_365.log`, separates the
+accepted requests from the lost presses. At 13:40:07.113 the accepted restart had 327,680 elapsed
+samples (about 7.43 seconds); the next press at 13:40:07.891 returned busy before that restart
+finished at 13:40:09.461. At 13:40:17.729 another restart had 376,832 elapsed samples (about
+8.55 seconds), and both follow-ups at 13:40:18.023 / 13:40:18.221 returned busy before completion
+at 13:40:20.080. The earlier sample-baseline correction did not preserve those presses.
+These readings do not establish a single accepted before-five-seconds request in that log;
+the owner's reported behavior remains the acceptance requirement.
+
+Production `nav::Post` now opts into a FIFO of **four waiting requests plus one active request**.
+Each accepted press gets its own id and session epoch. Snapshots expose the waiting requests;
+posting does not claim completion or change the audible identity. Strict bridge callers retain
+the old busy-on-pending API unless they explicitly opt into queuing. A full FIFO returns busy.
+
+A Previous posted during another navigation or a loading transport captures step-back intent.
+When the guest executes it, delayed package/decoder work cannot reinterpret it as another
+five-second restart. An ordinary Previous while playing retains the sample-age rule. Thus a
+double Previous after five seconds means restart then step back; a triple can reach two earlier
+entries, including the boot song. Execution remains on the guest poll, one completed handoff
+at a time. Failed/cancelled commands, session reset, teardown, lost focus, modal/capture/loading
+ownership and producer scope invalidate the pending burst. No UI was driven by the agent.
+
+**Verification:** release build succeeds; all **seven music ctests** pass. The production-hook
+fixture simulates a decoder that stays loading across polls, queues two Previous presses,
+confirms the restart, then delays execution past five seconds and still reaches history entries
+1 and 0. It also checks focus-loss cancellation. SDK-free bridge checks cover FIFO order,
+request ids, capacity, unchanged audible metadata, reset and failure cancellation. Evidence:
+`out/_swap/music-nav/p2-previous-burst/`. Owner listening/retest of this revision is pending.
+
+
+**Owner-driven runtime follow-up:** the owner launched the successfully built executable
+while the final comment-only cleanup was being checked. `rb_blitz_366.log` confirms a
+Previous pressed at 13:49:21.911 during request 3's restart was accepted (status 0).
+After request 3 completed at 13:49:22.815, request 4 selected target **0** from cursor 1
+at 13:49:22.833 (`elapsed_samples 0`), loaded the boot song `suddenlyisee` and applied
+at 13:49:25.199. This is live execution evidence for the formerly dropped follow-up;
+it is not a listening confirmation or a claim that the agent navigated the UI.
+The current executable includes all functional changes. A redundant relink after header
+comment cleanup hit Windows' running-executable lock; no additional behavior change was
+waiting to be built. The debug navigator suite also passes, and documentation retains
+43 existing errors / 87 warnings with no introduced findings. `git diff --check` passes.

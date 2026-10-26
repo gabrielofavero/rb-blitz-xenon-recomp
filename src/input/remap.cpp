@@ -10,6 +10,8 @@
 #include "input/host_pad.h"
 #include "input/input_capture.h"
 #include "input/modal_input.h"
+#include "input/menu_music_bindings.h"
+#include "hooks/menu_music_now_playing.h"
 #include "input/native_menu.h"
 #include "input/pad_packet.h"
 #include "input/source_gates.h"
@@ -523,6 +525,22 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
               PulseHostPad(0x2000);
             }
           }
+          // Music actions own physical sources before General Mapping can turn
+          // those same inputs into a guest control. Sampling runs on every poll.
+          std::vector<Source> music_consumed;
+          if (user_index == 0) {
+            static thread_local menu_music_nav::BindingLatch music_latch;
+            const auto snapshot = shell_music::NowPlaying().ReadSnapshot();
+            const bool active = snapshot.available && MainMenuMusicInputAvailable() &&
+                                physical.window_focused && !capture_armed && !modal_blocked;
+            if (auto press = music_latch.Update(config->music, physical.pad,
+                    [](std::string_view key) { return HostKeyDown(key); }, gates.keyboard,
+                    active, snapshot.playback.capabilities.play_pause, &music_consumed)) {
+              const auto result = menu_music_nav::Post(press->command, press->producer, snapshot.epoch);
+              REXLOG_INFO("music_nav: input command {} status {}", int(press->command), int(result.status));
+            }
+            consumed.insert(consumed.end(), music_consumed.begin(), music_consumed.end());
+          }
           // General Mapping's input pad. It is the merged state - the physical pads plus the
           // SDK's legacy MnK emulation when `mnk_mode` is on, which is how every acceptance
           // harness drives the menus - except while a gameplay table routes input: then the
@@ -537,8 +555,17 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
                                       state.gamepad.thumb_ly,      state.gamepad.thumb_rx,
                                       state.gamepad.thumb_ry};
           const bool direct_routing = gameplay;
-          const remap::PadState pad =
-              (direct_routing || !gates.keyboard) ? physical.pad : merged;
+          const bool music_key_owned = std::any_of(music_consumed.begin(), music_consumed.end(),
+              [](const Source& source) { return source.kind == SourceKind::kKey; });
+          remap::PadState pad =
+              (direct_routing || !gates.keyboard || music_key_owned) ? physical.pad : merged;
+          for (const auto& source : music_consumed) if (source.kind == SourceKind::kPad) {
+            if (auto target = remap::ParseTarget(source.name)) {
+              pad.buttons &= ~remap::TargetBit(*target);
+              if (*target == remap::Target::kLeftTrigger) pad.left_trigger = 0;
+              if (*target == remap::Target::kRightTrigger) pad.right_trigger = 0;
+            }
+          }
           remap::PadState out;
           if (has_table) {
             DownView view;

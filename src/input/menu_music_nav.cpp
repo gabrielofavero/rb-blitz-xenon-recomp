@@ -29,7 +29,7 @@ Previous PreviousAction(uint32_t position_samples, size_t cursor) {
 }
 
 PostResult Post(Command command, Producer producer, uint64_t epoch) {
-  return shell_music::NowPlaying().Post(command, producer, epoch);
+  return shell_music::NowPlaying().Post(command, producer, epoch, true);
 }
 std::optional<Request> Take() { return shell_music::NowPlaying().Take(); }
 void SetAvailable(bool available) { shell_music::NowPlaying().SetAvailable(available); }

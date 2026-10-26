@@ -98,6 +98,9 @@ SDL_Keycode KeycodeForVirtualKey(rex::ui::VirtualKey key) {
     return SDLK_F1 + (vk - uint16_t(rex::ui::VirtualKey::kF1));
   }
   switch (key) {
+    case rex::ui::VirtualKey::kMediaNextTrack: return SDLK_MEDIA_NEXT_TRACK;
+    case rex::ui::VirtualKey::kMediaPrevTrack: return SDLK_MEDIA_PREVIOUS_TRACK;
+    case rex::ui::VirtualKey::kMediaPlayPause: return SDLK_MEDIA_PLAY_PAUSE;
     case rex::ui::VirtualKey::kSpace:
       return SDLK_SPACE;
     case rex::ui::VirtualKey::kReturn:

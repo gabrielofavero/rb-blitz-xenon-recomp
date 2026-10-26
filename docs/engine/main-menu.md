@@ -1255,6 +1255,8 @@ timestamps and the unconfirmed double-audio report are in the
 
 ### 7. Navigator P1: surface and shared bridge (2026-10-26)
 
+**Historical P1 record; superseded for runtime/binding behavior by §8 below.**
+
 The default-on `interface.background_music_navigation` (id 53, carrier
 `enhancements_background_music_nav`) is a restart-scoped boolean on General → Interface,
 directly after Help & Options Labels. Background Music Play is always present as Interface
@@ -1288,3 +1290,38 @@ No second playlist or mounted-cache cursor is introduced.
 
 Host tests and the build/manual validation record are in the
 [navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §11.
+
+
+### 8. Navigator P2: guest execution and action bindings (2026-10-26)
+
+The independent navigator now posts Next/Previous to the guest ShellMusic poll. Manual and
+automatic advancement share `MusicSession`; a cold target is pinned/remounted without
+moving the cursor or replacing audible metadata until handoff. Manual transitions clear
+Play Current Song's old-song grace. Native title-only Load paths seed a three-track history
+using the same cursor rules, native looping and neutral metadata. Filename buffers are
+allocated before R9's early returns, so DLC Menu Songs is not a prerequisite.
+
+The owner publishes coherent track/transport/capability snapshots and request results on
+Load, poll, automatic/manual handoff, stop and shutdown. Applied means the replacement
+stream was observed playing. Controls now draws effective bindings, with Assign / Reset child pages. Its `[menu_music]` profile table is independent of `[remap]`, reuses the
+existing capture/countdown/rebase/save flow and publishes the live input snapshot. On/Off
+retain the same authored tree and restart-scoped feature switch.
+
+**Pause remains unavailable under D5:** no state-4 or guessed vtable call is enabled without
+silence/frozen-position/same-position-resume measurements. The guest says Unavailable,
+the probe returns false and Start retains retail behavior. Host production-hook tests
+cover navigation, cold targets, history/restart, automatic snapshots, title tracks and
+cancellation; actual audio, media-key delivery, guest layout and physical-pad input remain
+unproven. Footer/player/artwork remain P3. See the
+[P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §14 and
+`out/_swap/music-nav/p2-runtime/` for verification.
+
+
+**Rapid Previous follow-up (2026-10-26):** the owner's `rb_blitz_365.log` showed follow-up
+Previous presses rejected as busy during approximately 2.3-second restart loads. Production
+navigation now retains four waiting requests in addition to the active handoff, with ids/epochs
+visible in the snapshot. A Previous made during loading retains step-back intent until execution,
+so a delayed command cannot become another restart. The ordinary playing-state five-second
+rule remains. Failed/cancelled requests and focus/scope/owner/session boundaries clear the burst.
+Seven music host tests pass; the owner retest remains pending. See the
+[navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §15.

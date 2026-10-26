@@ -27,12 +27,16 @@ It never continues a faulted guest. A 60s live run, live row application and
 broader provider/hardware coverage remain unmeasured. See the
 [load-guard evidence](../plans/finished/2026-10-13-load-guard.md) parts 4–5.
 
-**Menu-music navigator is staged at P1 (2026-10-26):** the default-on Menu Music Navigation
-switch and Background Music Play command page exist, but Next Track / Previous Track /
-Play/Pause do not change music yet. Pad/media controls and pause execution are P2; the footer,
-clickable player and artwork rendering are P3. Existing background music is unchanged. Manual
-layout/restart acceptance is pending; see the
-[navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §11.
+**Menu-music navigator P2 limits (2026-10-26):** Next/Previous, persistent pad/key
+bindings and title-only navigation are implemented. **Pause is unavailable:** no native
+seam has passed silence/frozen-position/same-position-resume measurement. The guest says
+Unavailable, its command returns false and Start retains retail behavior. Windows media-key
+arbitration, actual audio continuity, physical-pad input and guest layout/assignment/restart
+routes remain unmeasured. Footer/player/artwork remain P3. See the
+[navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §14.
+Rapid Previous presses during restart were confirmed dropped as busy in the owner's next log.
+The bounded command-burst fix passes host tests, including return to the boot song, but
+still needs the owner's listening retest (navigator plan §15).
 
 **Shader preparation coverage and installed acceptance (P9, 2026-10-25):**
 the installer now carries an audited locator/recipe catalogue and native local

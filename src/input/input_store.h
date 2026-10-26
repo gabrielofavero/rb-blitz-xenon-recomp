@@ -113,7 +113,7 @@ class InputStore final : public settings::InputBindingStore {
   const std::filesystem::path& path() const { return path_; }
 
  private:
-  enum class TableSel : uint8_t { kGeneral, kController, kKeyboardMouse };
+  enum class TableSel : uint8_t { kGeneral, kController, kKeyboardMouse, kMusic };
 
   InputStore(std::filesystem::path path, profile::ProfileLoadResult load,
              InputStoreOptions options);
@@ -143,6 +143,7 @@ class InputStore final : public settings::InputBindingStore {
   std::string unreadable_;
 
   profile::remap::Table general_;
+  profile::music::Bindings music_;
   profile::gameplay_remap::Table controller_;
   profile::gameplay_remap::Table keyboard_mouse_;
 

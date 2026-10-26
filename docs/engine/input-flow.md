@@ -729,3 +729,38 @@ steps the selection through D-pad detents exactly as before.
 `rb_blitz_native_mouse_tests` passes 460 checks (the scroll-aware catch and the
 wheel's pointer, on top of the record above); all 38 CTest targets pass in
 `out/build/win-amd64-debug`.
+
+
+## Menu-music navigator input (P2, 2026-10-26)
+
+Player one's filter samples independent `[menu_music]` bindings from the immutable
+`EffectiveInput` snapshot before General Mapping. Defaults: RB/MediaTrackNext,
+LB/MediaTrackPrevious and Start/MediaPlayPause. Supported sources are consumed until
+release; held inputs cannot become presses on menu entry, device enabling or binding
+publication. Raw physical pad sources cannot be triggered by keyboard pad emulation.
+Keys obey Keyboard Support and window focus. The splash focused option list must be drawn;
+the pre-press title screen is excluded, and modal/capture owners win.
+
+Only supported actions intercept input. Pause is explicitly unavailable, so Start retains
+retail behavior. The internal `rbbz-play/next|previous|pause` command channel retains its
+off gate. Mapping pages configure bindings only, without an execution button. Only the guest music poll executes requests,
+revalidating producer scope before handoff. Assignment uses the existing guest capture
+page, three-second cancellation countdown, profile writer and live snapshot publication.
+
+SDK patch `0041-media-keys.patch` maps the three SDL media scancodes to existing VirtualKeys;
+the host latch translates them to SDL key names for capture and `HostKeyDown`.
+`drive_ui.ps1` adds media key names and E0 scan codes; the diagnostic navigator probe posts
+once after a configurable delay. Host tests drive no game UI. Windows media-key arbitration
+and physical-pad delivery remain unmeasured. No host player is added here; its mouse hit
+regions, event ordering and click-through proof remain P3. See the
+[P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §14.
+
+
+The 2026-10-26 Previous follow-up retains rapid navigation edges while the decoder loads:
+production posting accepts up to four waiting requests behind the active handoff. A Previous
+made during another navigation/loading captures step-back intent at posting, rather than using
+the eventual execution time to choose restart. Completion promotes the next request; failed or
+cancelled execution, focus loss, modal/capture/loading ownership, teardown and session reset
+clear the burst. Full queues still report busy. Host tests reproduce double/triple Previous
+through a delayed restart and back to the boot song; owner listening confirmation is pending.
+See the [follow-up](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §15.

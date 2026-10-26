@@ -16,6 +16,9 @@ struct Request {
   uint64_t epoch = 0;
   Command command = Command::kNext;
   Producer producer = Producer::kPad;
+  // A Previous pressed during another navigation belongs to the new selection's
+  // loading interval, even if execution waits behind slow package/decoder work.
+  bool previous_step_back = false;
 };
 struct PostResult {
   PostStatus status = PostStatus::kUnavailable;

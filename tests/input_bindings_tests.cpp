@@ -477,9 +477,60 @@ void TestRowDisplayText() {
   CHECK_TRUE(confirm_row.name == "a");
 }
 
+void TestMusicBindings() {
+  rb_blitz::test::BeginCase("music actions persist independently, rebase, cancel and reset");
+  const auto path = ScratchDir() / "music.toml";
+  auto load = WriteFixture(path);
+  auto store = rb_blitz::input::InputStore::Load(path, load, {});
+  store->PublishInitial();
+  std::string error;
+  CHECK_TRUE(store->IsToken("input.music.next"));
+  CHECK_FALSE(store->IsToken("input.music.nope"));
+  CHECK_TRUE(store->Describe("input.music.next").find("RB, Media Next") != std::string::npos);
+  CHECK_TRUE(store->BeginCapture("input.music.next", &error));
+  store->CancelCapture();
+  CHECK_FALSE(capture::Armed());
+  CHECK_FALSE(store->dirty());
+  CHECK_TRUE(Slurp(path).find("[menu_music]") == std::string::npos);
+  CHECK_TRUE(store->CompleteCapture("input.music.next", Source("key:N"), &error));
+  CHECK_TRUE(store->CompleteCapture("input.music.next", Source("pad:x"), &error));
+  CHECK_TRUE(store->CompleteCapture("input.music.next", Source("pad:x"), &error));
+  const auto disk = rb_blitz::profile::LoadProfile(path);
+  CHECK_TRUE(disk.usable());
+  CHECK_EQ(disk.profile.menu_music.size(), 1u);
+  CHECK_EQ(disk.profile.remap.size(), load.profile.remap.size());
+  auto reloaded = rb_blitz::input::InputStore::Load(path, disk, {});
+  reloaded->PublishInitial();
+  CHECK_TRUE(reloaded->Describe("settings_bind_music_next").find("N, X") != std::string::npos);
+  CHECK_EQ(rb_blitz::input::CurrentInput()->music.Effective("next")->size(), 2u);
+  CHECK_FALSE(reloaded->CompleteCapture("input.music.previous", Source("mouse:left"), &error));
+  const auto before = Slurp(path);
+  CHECK_TRUE(reloaded->BeginCapture("input.music.next", &error));
+  reloaded->CancelCapture();
+  CHECK_TRUE(Slurp(path) == before);
+  CHECK_TRUE(reloaded->StageReset("input.music.next", &error));
+  CHECK_TRUE(reloaded->Commit(&error));
+  CHECK_TRUE(reloaded->Describe("input.music.next").find("RB, Media Next") != std::string::npos);
+  CHECK_TRUE(rb_blitz::profile::LoadProfile(path).profile.menu_music.empty());
+  auto concurrent = rb_blitz::profile::LoadProfile(path);
+  concurrent.profile.menu_music = {{"previous", "key:P", rb_blitz::profile::ValueStyle::kBasic},
+                                   {"future_action", "future:input", rb_blitz::profile::ValueStyle::kBasic}};
+  CHECK_TRUE(rb_blitz::profile::SaveProfile(path, concurrent.profile, &error));
+  CHECK_TRUE(reloaded->CompleteCapture("input.music.next", Source("key:N"), &error));
+  const auto merged = rb_blitz::profile::LoadProfile(path);
+  CHECK_EQ(merged.profile.menu_music.size(), 3u);
+  CHECK_TRUE(reloaded->Describe("input.music.previous").find("P") != std::string::npos);
+  CHECK_TRUE(Slurp(path).find("future:input") != std::string::npos);
+  std::string roundtrip;
+  CHECK_TRUE(rb_blitz::profile::ComposeProfile(merged.profile, &roundtrip, &error));
+  CHECK_TRUE(roundtrip == Slurp(path));
+
+}
+
 }  // namespace
 
 int main() {
+  TestMusicBindings();
   TestTokenGrammar();
   TestCaptureReleasesFirst();
   TestCaptureWrongKind();

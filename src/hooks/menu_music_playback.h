@@ -5,6 +5,31 @@
 
 namespace rb_blitz::shell_music {
 
+// The decoder cursor includes the native random start offset and decoded-ahead
+// reserve. Navigation uses progress since the first playing observation instead
+// of mistaking that initial cursor for time the listener has heard.
+class PlaybackAge {
+ public:
+  void Reset() { stream_ = last_ = samples_ = 0; }
+  void Observe(uint32_t stream, bool playing, uint32_t position) {
+    if (!stream || !playing || !position) return;
+    if (stream != stream_) {
+      stream_ = stream;
+      last_ = position;
+      samples_ = 0;
+      return;
+    }
+    if (position >= last_) {
+      const uint32_t delta = position - last_;
+      samples_ = UINT32_MAX - samples_ < delta ? UINT32_MAX : samples_ + delta;
+    }
+    last_ = position;
+  }
+  uint32_t samples() const { return samples_; }
+ private:
+  uint32_t stream_ = 0, last_ = 0, samples_ = 0;
+};
+
 // The observation of a one-shot guest stream. A filename choice alone is not playback.
 // EOF is authoritative; rewinds are a defensive escape if a source unexpectedly loops.
 class Playback {

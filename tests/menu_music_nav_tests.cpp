@@ -3,6 +3,7 @@
 #include "hooks/menu_music_now_playing.h"
 #include "hooks/menu_music_playback.h"
 #include "hooks/menu_music_cache.h"
+#include "input/menu_music_bindings.h"
 
 #include <atomic>
 #include <thread>
@@ -237,7 +238,127 @@ void TestSessionAndSelection() {
   CHECK_EQ(selection.Choose(104), -1);
 }
 
+void TestConfiguredInput() {
+  BeginCase("configured actions: physical edges, device/screen gates and binding publication");
+  rb_blitz::profile::music::Bindings bindings;
+  nav::BindingLatch latch;
+  rb_blitz::profile::remap::PadState pad;
+  std::string held;
+  bool enabled = false, keyboard = true;
+  std::vector<rb_blitz::profile::remap::Source> consumed;
+  const auto sample = [&] {
+    consumed.clear();
+    return latch.Update(bindings, pad, [&](std::string_view name) { return held == name; },
+                        keyboard, enabled, false, &consumed);
+  };
+  CHECK_FALSE(sample());
+  pad.buttons = nav::kNextButton;
+  CHECK_FALSE(sample());
+  enabled = true;
+  CHECK_FALSE(sample()); // entering with RB held cannot skip
+  pad.buttons = 0;
+  CHECK_FALSE(sample());
+  pad.buttons = nav::kNextButton;
+  auto press = sample();
+  CHECK_TRUE(press && press->command == nav::Command::kNext);
+  CHECK_EQ(consumed.size(), 1u);
+  CHECK_FALSE(sample());
+  enabled = false;
+  CHECK_FALSE(sample());
+  CHECK_EQ(consumed.size(), 1u); // ownership lasts through release across a screen boundary
+  pad.buttons = 0;
+  CHECK_FALSE(sample());
+  CHECK_TRUE(consumed.empty());
+  enabled = true;
+  pad.buttons = nav::kPlayPauseButton;
+  CHECK_FALSE(sample());
+  CHECK_TRUE(consumed.empty()); // unavailable pause leaves retail Start alone
+  pad.buttons = 0;
+  keyboard = false;
+  held = "MediaTrackNext";
+  CHECK_FALSE(sample());
+  keyboard = true;
+  CHECK_FALSE(sample());
+  held.clear(); sample();
+  held = "MediaTrackNext";
+  press = sample();
+  CHECK_TRUE(press && press->producer == nav::Producer::kMediaKey);
+  CHECK_FALSE(sample());
+  bindings.Set("next", {{rb_blitz::profile::remap::SourceKind::kKey, "N"}});
+  held = "N";
+  CHECK_FALSE(sample()); // publishing a binding while down requires release
+  held.clear(); sample();
+  held = "N";
+  press = sample();
+  CHECK_TRUE(press && press->command == nav::Command::kNext);
+  held = "MediaTrackNext";
+  CHECK_FALSE(sample()); // old default no longer owns the action
+}
+
+void TestPlaybackAge() {
+  BeginCase("Previous uses sample progress, excluding random offset and decoded reserve");
+  PlaybackAge age;
+  const uint32_t initial = 36 * 44100; // 30-second native offset + six seconds primed
+  age.Observe(1, false, initial);
+  CHECK_EQ(age.samples(), 0u);
+  age.Observe(1, true, initial);
+  CHECK_EQ(age.samples(), 0u);
+  age.Observe(1, true, initial + 2 * 44100);
+  CHECK_TRUE(nav::PreviousAction(age.samples(), 2) == nav::Previous::kStepBack);
+  age.Observe(1, true, initial + 5 * 44100);
+  CHECK_TRUE(nav::PreviousAction(age.samples(), 2) == nav::Previous::kRestart);
+  age.Reset(); // allocator may reuse the exact same stream address on restart
+  age.Observe(1, true, 6 * 44100);
+  CHECK_EQ(age.samples(), 0u);
+  age.Observe(1, true, 8 * 44100);
+  CHECK_TRUE(nav::PreviousAction(age.samples(), 1) == nav::Previous::kStepBack);
+  CHECK_TRUE(nav::PreviousAction(age.samples(), 0) == nav::Previous::kRestart);
+}
+
+void TestNavigationBurst() {
+  BeginCase("bounded navigation burst preserves press order and loading-time Previous intent");
+  NowPlayingBridge bridge;
+  const auto epoch = bridge.ReadSnapshot().epoch;
+  CHECK_TRUE(bridge.Publish(epoch, Track(3), true));
+  auto first = bridge.Post(nav::Command::kPrevious, nav::Producer::kPad, epoch, true);
+  auto active = bridge.Take();
+  CHECK_TRUE(active && !active->previous_step_back);
+  std::vector<uint64_t> ids;
+  for (size_t i = 0; i < NowPlayingBridge::kQueuedLimit; ++i) {
+    const auto next = bridge.Post(nav::Command::kPrevious, nav::Producer::kMediaKey, epoch, true);
+    CHECK_TRUE(next.status == nav::PostStatus::kAccepted);
+    ids.push_back(next.id);
+  }
+  CHECK_TRUE(bridge.Post(nav::Command::kNext, nav::Producer::kPad, epoch, true).status == nav::PostStatus::kBusy);
+  CHECK_TRUE(bridge.ReadSnapshot().pending->id == first.id);
+  CHECK_EQ(bridge.ReadSnapshot().playback.track.song, 3u);
+  CHECK_TRUE(bridge.Complete(*active, nav::CompletionStatus::kApplied));
+  for (auto id : ids) {
+    auto next = bridge.Take();
+    CHECK_TRUE(next && next->id == id && next->previous_step_back);
+    CHECK_TRUE(bridge.Complete(*next, nav::CompletionStatus::kApplied));
+  }
+  CHECK_FALSE(bridge.ReadSnapshot().pending);
+  CHECK_TRUE(bridge.ReadSnapshot().queued.empty());
+  CHECK_TRUE(bridge.Post(nav::Command::kNext, nav::Producer::kPad, epoch, true).status == nav::PostStatus::kAccepted);
+  CHECK_TRUE(bridge.Post(nav::Command::kPrevious, nav::Producer::kPad, epoch, true).status == nav::PostStatus::kAccepted);
+  bridge.Reset();
+  CHECK_FALSE(bridge.Take());
+  CHECK_TRUE(bridge.ReadSnapshot().queued.empty());
+  CHECK_TRUE(bridge.ReadSnapshot().result->status == nav::CompletionStatus::kCancelled);
+  CHECK_TRUE(bridge.Publish(bridge.ReadSnapshot().epoch, Track(4), true));
+  bridge.Post(nav::Command::kNext, nav::Producer::kPad, 0, true);
+  auto failing = bridge.Take();
+  bridge.Post(nav::Command::kPrevious, nav::Producer::kPad, 0, true);
+  CHECK_TRUE(bridge.Complete(*failing, nav::CompletionStatus::kFailed));
+  CHECK_TRUE(bridge.ReadSnapshot().queued.empty());
+  CHECK_FALSE(bridge.ReadSnapshot().pending);
+}
+
 int main() {
+  TestNavigationBurst();
+  TestPlaybackAge();
+  TestConfiguredInput();
   TestLatch();
   TestBridge();
   TestCoherentPublication();

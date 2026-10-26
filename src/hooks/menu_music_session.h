@@ -33,6 +33,16 @@ class MusicSession {
     return sources_.size() - before;
   }
 
+  // Adopt the native title track at the first Load; subsequent moves use this
+  // same history/cursor, including forward traversal after Previous.
+  bool AdoptFirst(size_t song) {
+    if (!playlist_.empty() || !Usable(song)) return false;
+    playlist_.push_back({song, pass_});
+    std::erase(remaining_, song);
+    cursor_ = 0;
+    return true;
+  }
+
   void DiscoveryComplete() { discovery_complete_ = true; }
   bool DiscoveryFinished() const { return discovery_complete_; }
   void BlockPackage(size_t package) { blocked_.insert(package); }

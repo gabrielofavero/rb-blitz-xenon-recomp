@@ -51,6 +51,8 @@ enum class InputRowKind : uint8_t {
   kResetGeneral,
   kResetController,
   kResetKeyboardMouse,
+  kMusicBinding,
+  kResetMusic,
 };
 
 struct InputRowToken {

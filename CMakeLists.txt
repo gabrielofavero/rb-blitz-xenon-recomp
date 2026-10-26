@@ -969,6 +969,7 @@ if(BUILD_TESTING)
 
     add_executable(rb_blitz_menu_music_nav_tests
         tests/menu_music_nav_tests.cpp
+        src/profile/remap.cpp
         src/input/menu_music_nav.cpp
         src/hooks/menu_music_now_playing.cpp
     )
@@ -994,7 +995,8 @@ if(BUILD_TESTING)
     target_link_libraries(rb_blitz_menu_music_guest_tests PRIVATE rex::runtime)
     add_test(NAME menu_music_guest COMMAND rb_blitz_menu_music_guest_tests)
 
-    add_executable(rb_blitz_menu_music_runtime_tests tests/menu_music_runtime_tests.cpp)
+    add_executable(rb_blitz_menu_music_runtime_tests tests/menu_music_runtime_tests.cpp
+        src/input/menu_music_nav.cpp src/hooks/menu_music_now_playing.cpp)
     target_include_directories(rb_blitz_menu_music_runtime_tests PRIVATE src)
     target_link_libraries(rb_blitz_menu_music_runtime_tests PRIVATE rex::runtime)
     add_test(NAME menu_music_runtime COMMAND rb_blitz_menu_music_runtime_tests)

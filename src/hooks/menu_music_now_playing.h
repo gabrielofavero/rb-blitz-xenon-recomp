@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -42,18 +43,22 @@ struct NowPlayingSnapshot {
   PlaybackUpdate playback;
   ArtworkState artwork = ArtworkState::kMissing;
   std::optional<nav::Request> pending;
+  std::deque<nav::Request> queued;
   std::optional<CommandResult> result;
 };
 
-// One lock covers playback facts, the command slot and its acknowledgement, so a
-// snapshot cannot mix identities from different tracks/sessions. No callback runs
-// under the lock. P1 supplies the bridge only; P2/P3 install its runtime producers.
+// One lock covers playback facts, the active command and its bounded follow-ups.
+// Acceptance remains separate from completion; no callback runs under the lock.
 class NowPlayingBridge {
  public:
   NowPlayingSnapshot ReadSnapshot() const;
-  bool Publish(uint64_t epoch, PlaybackUpdate update);
+  bool Publish(uint64_t epoch, PlaybackUpdate update, std::optional<bool> available = {});
   bool PublishArtwork(uint64_t epoch, size_t song, const std::string& key, ArtworkState state);
-  nav::PostResult Post(nav::Command command, nav::Producer producer, uint64_t epoch = 0);
+  // Strict callers retain the one-slot busy answer; production navigation opts
+  // into four waiting requests so rapid presses survive decoder/package loads.
+  static constexpr size_t kQueuedLimit = 4;
+  nav::PostResult Post(nav::Command command, nav::Producer producer, uint64_t epoch = 0,
+                      bool queue_if_busy = false);
   std::optional<nav::Request> Take();
   bool Complete(const nav::Request& request, nav::CompletionStatus status,
                 std::string explanation = {});

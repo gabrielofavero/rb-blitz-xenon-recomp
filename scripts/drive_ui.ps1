@@ -108,6 +108,9 @@ $keyMap = @{
 # Y = P, Start = Return, Back = Tab, D-pad = Shift+arrows, sticks = WASD /
 # arrows, shoulders = 1 / 3, triggers = Q,I / E,O.
 $vkMap = @{
+    "media_next" = 0xB0
+    "media_prev" = 0xB1
+    "media_play_pause" = 0xB3
     "a"            = 0x20   # Space
     "b"            = 0x08   # Backspace
     "x"            = 0x4C   # L
@@ -158,6 +161,7 @@ $scMap = @{
     0x1B = 0x01; 0x26 = 0x48; 0x28 = 0x50; 0x25 = 0x4B; 0x27 = 0x4D; 0x57 = 0x11;
     0x53 = 0x1F; 0x41 = 0x1E; 0x44 = 0x20; 0x46 = 0x21; 0x31 = 0x02; 0x33 = 0x04;
     0x51 = 0x10; 0x45 = 0x12; 0x10 = 0x2A; 0x47 = 0x22; 0x48 = 0x23; 0x4E = 0x31; 0x4D = 0x32;
+    0xB0 = 0x19; 0xB1 = 0x10; 0xB3 = 0x22;
     0x4A = 0x24; 0x4B = 0x25; 0x79 = 0x44
 }
 
@@ -192,13 +196,14 @@ function Focus-GameWindow {
 function Send-Key([int]$vk, [double]$seconds) {
     $scan = $scMap[$vk]
     if (-not $scan) { $scan = 0 }
-    [RbDriveWin32]::keybd_event([byte]$vk, [byte]$scan, 0, [IntPtr]::Zero)
+    $extended = if ($vk -in @(0xB0, 0xB1, 0xB3)) { 1 } else { 0 }
+    [RbDriveWin32]::keybd_event([byte]$vk, [byte]$scan, $extended, [IntPtr]::Zero)
     if ($seconds -le 0) {
         Start-Sleep -Milliseconds 90
     } else {
         Start-Sleep -Milliseconds ([int]($seconds * 1000))
     }
-    [RbDriveWin32]::keybd_event([byte]$vk, [byte]$scan, 2, [IntPtr]::Zero)
+    [RbDriveWin32]::keybd_event([byte]$vk, [byte]$scan, ($extended -bor 2), [IntPtr]::Zero)
     Start-Sleep -Milliseconds 150
 }
 

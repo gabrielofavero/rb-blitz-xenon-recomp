@@ -26,6 +26,7 @@
 
 #include "profile/gameplay_remap.h"
 #include "profile/remap.h"
+#include "profile/music_bindings.h"
 
 namespace rb_blitz::input {
 
@@ -35,6 +36,7 @@ namespace rb_blitz::input {
 // readable at all - the fact that decides whether General Mapping's compiled defaults apply.
 struct EffectiveInput {
   profile::remap::Table general;
+  profile::music::Bindings music;
   profile::gameplay_remap::Table controller{
       profile::gameplay_remap::TableKind::kController};
   profile::gameplay_remap::Table keyboard_mouse{

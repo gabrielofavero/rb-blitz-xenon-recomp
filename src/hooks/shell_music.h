@@ -28,7 +28,7 @@ namespace rb_blitz::shell_music {
 // Call once from RbBlitzApp::OnPostLoadXexImage(), after dlc::Configure(): it reads the
 // library that layer just enumerated and mounts one randomly chosen usable package.
 // A small rolling cache is prepared during native cache loading and menu playback. With the toggle off
-// it logs and returns, leaving the title's own music in control.
+// it leaves the title's tracks in control; the independent navigator can still move them.
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
 
 // The native cache-loading attempt starts host-only preparation. Guest polls
@@ -67,6 +67,7 @@ int CurrentPoolIndex();
 
 // The host's answer for one `rbbz-play/<...>` query path - what the menu's Play Current Song row
 // asks through `file_exists`:
+//   `rbbz-play/next|previous|pause` - post a navigator request (false if unavailable/busy).
 //   `rbbz-play/begin` - snapshot a selection (audible, recently heard, or pending at startup).
 //   `rbbz-play/current/<i>` - true for the selected index, stable throughout one press.
 //   `rbbz-play/result/<reason>` - record guest lookup success/failure and end the snapshot.
