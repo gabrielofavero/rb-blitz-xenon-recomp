@@ -270,6 +270,8 @@ std::string QuoteArgument(std::string_view text) {
 }
 
 bool IsRetiredArgument(std::string_view argument) {
+    if (argument.starts_with("--song_load_recovered") || argument.starts_with("--song_load_test_crash"))
+      return true;
   if (IsHandoffSwitch(argument)) {
     return true;  // one-shot: the previous handoff is consumed by this boot
   }

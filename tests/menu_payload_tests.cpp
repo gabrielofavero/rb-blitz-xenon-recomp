@@ -838,6 +838,29 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
 }
 
 int main(int argc, char** argv) {
+  {
+    namespace dtb = rb_blitz::ui::dtb;
+    using dtb::Node;
+    BeginCase("crash recovery preserves splash methods and refuses incompatible records atomically");
+    std::vector<Node> roots{
+        Node::Command({Node::Symbol("new"), Node::Symbol("UIPanel"), Node::Symbol("splash_panel"),
+            Node::Array({Node::Symbol("enter"), Node::Command({Node::Symbol("original_enter")})}),
+            Node::Array({Node::Symbol("poll"), Node::Command({Node::Symbol("provider_poll")})})}),
+        Node::Command({Node::Symbol("new"), Node::Symbol("UIScreen"), Node::Symbol("splash_screen"),
+            Node::Array({Node::Symbol("enter"), Node::Command({Node::Symbol("screen_enter")})})})};
+    std::string why;
+    CHECK_TRUE(rb_blitz::settings::AddCrashRecoveryHooks(&roots, &why));
+    const auto bytes = dtb::Compile(roots);
+    const auto before = bytes;
+    CHECK_FALSE(rb_blitz::settings::AddCrashRecoveryHooks(&roots, &why));
+    CHECK_TRUE(dtb::Compile(roots) == before);
+    CHECK_TRUE(roots[0].kids[3].kids[1].kids[0].text == "original_enter");
+    CHECK_TRUE(roots[0].kids[4].kids[1].kids[0].text == "provider_poll");
+    std::vector<Node> invalid{Node::Command({Node::Symbol("new"), Node::Symbol("UIPanel"), Node::Symbol("splash_panel")})};
+    const auto original = dtb::Compile(invalid);
+    CHECK_FALSE(rb_blitz::settings::AddCrashRecoveryHooks(&invalid, &why));
+    CHECK_TRUE(dtb::Compile(invalid) == original);
+  }
   if (argc == 3 && std::string(argv[1]) == "check-discovery-record") {
     namespace dtb = rb_blitz::ui::dtb;
     std::ifstream input(argv[2], std::ios::binary);

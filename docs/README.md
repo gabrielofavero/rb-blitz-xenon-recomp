@@ -113,6 +113,7 @@ budget, and the row-text budget — are a skill:
 
 | Document | Status |
 | --- | --- |
+| [`plans/todo/2026-10-26-in-game-song-management-plan.md`](plans/todo/2026-10-26-in-game-song-management-plan.md) | Planning only: native My Songs X Manage, shared RhythmVerse entry, per-song hiding and search settings, exact-package deletion, DLC date tracking and failed-load auto-hide. |
 | [`plans/finished/2026-09-27-launcher-plan.md`](plans/finished/2026-09-27-launcher-plan.md) | Controller Settings' own plan; 27 prompts built, with the residual hand-check list. |
 | [`plans/finished/2026-10-03-customization-plan.md`](plans/finished/2026-10-03-customization-plan.md) | The guest-side enhancement research plan that produced `engine/` and the toggle registry. |
 | [`plans/finished/2026-10-09-save-persistence-findings.md`](plans/finished/2026-10-09-save-persistence-findings.md) | Why offline saves did not persist, the fix, and the evidence. |

@@ -38,6 +38,7 @@
 
 #include "hooks/settings_bridge.h"
 #include "graphics/preparation_loading.h"
+#include "loading/crash_recovery.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -659,6 +660,11 @@ void RunHotApplyDiagnostic() {
 
 bool TakeExists(PPCContext& ctx, uint8_t* base) {
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  bool recovery_answer = false;
+  if (::rb_blitz::loading::CrashRecoveryQuery(path, &recovery_answer)) {
+    WriteResultCell(base, ctx.r3.u32, recovery_answer ? 1u : 0u);
+    return true;
+  }
   bool header_answer = false;
   if (::rb_blitz::input::AnswerMenuHeaderQuery(path, &header_answer)) {
     WriteResultCell(base, ctx.r3.u32, header_answer ? 1u : 0u);

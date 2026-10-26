@@ -677,6 +677,52 @@ bool AddGraphicsLoadingGate(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
+bool AddCrashRecoveryHooks(std::vector<Node>* roots, std::string* why) {
+  if (!roots) return false;
+  auto staged = *roots;
+  auto* enter = PanelMethod(&staged, "splash_panel", "enter");
+  auto* screen_enter = PanelMethod(&staged, "splash_screen", "enter");
+  if (!enter || !screen_enter || PanelMethod(&staged, "splash_panel", "rbbz_recovery_boot")) {
+    if (why) *why = "unsupported splash recovery lifecycle";
+    return false;
+  }
+  const auto sym = [](const char* s) { return Node::Symbol(s); };
+  const auto cmd = [](std::vector<Node> kids) { return Node::Command(std::move(kids)); };
+  const auto query = [&](const char* leaf) {
+    return cmd({sym("file_exists"), Node::String(std::string("rbbz-load/recovery/") + leaf)});
+  };
+  const auto set = [&](Node value) {
+    return cmd({Node::Var("this"), sym("set"), sym("rbbz_recovery_boot"), std::move(value)});
+  };
+  enter->kids.push_back(set(query("active")));
+  const auto start_action = cmd({sym("do"),
+      cmd({sym("user_mgr"), sym("set_participating_user"), Node::Var("rbbz_recovery_user")}),
+      query("starting"), cmd({sym("ui"), sym("goto_screen"), sym("server_connect_screen")})});
+  const auto user = Node::Array({Node::Var("rbbz_recovery_user"),
+      cmd({sym("user_mgr"), sym("get_user_from_pad_num"), Node::Int(0)})});
+  const auto start = cmd({sym("if"), query("start"), cmd({sym("do"), user,
+      cmd({sym("if"), Node::Var("rbbz_recovery_user"), start_action})})});
+  const auto panel_state = cmd({cmd({sym("splash_panel"), sym("loaded_dir")}), sym("get"), sym("state")});
+  const auto popup_condition = cmd({sym("&&"), cmd({sym("=="), panel_state, sym("main_menu")}), query("popup")});
+  const auto popup_action = cmd({sym("do"), set(sym("FALSE")),
+      cmd({sym("error_popup_panel"), sym("show_popup"), sym("rbbz_load_crashed"), sym("splash_panel")})});
+  const auto popup = cmd({sym("if"), popup_condition, popup_action});
+  const auto poll = cmd({sym("if"), Node::Property({sym("rbbz_recovery_boot")}),
+                         cmd({sym("do"), start, popup})});
+  if (auto* existing = PanelMethod(&staged, "splash_panel", "poll")) existing->kids.push_back(poll);
+  else for (auto& root : staged) {
+    if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 && root.kids[2].text == "splash_panel")
+      root.kids.push_back(Node::Array({sym("poll"), poll}));
+  }
+  // Add the property after appending to enter: vector growth can invalidate it.
+  for (auto& root : staged) {
+    if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 && root.kids[2].text == "splash_panel")
+      root.kids.push_back(Node::Array({sym("rbbz_recovery_boot"), sym("FALSE")}));
+  }
+  *roots = std::move(staged);
+  return true;
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
                       bool cached_dlc_list, bool refresh_row_active,
@@ -687,6 +733,23 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   auto note = [notes](std::string line) {
     if (notes != nullptr) notes->push_back(std::move(line));
   };
+  // Validate the effective provider's native popup contract before installing
+  // a recovery route that depends on it. Never ship half of that route.
+  {
+    std::vector<uint8_t> popup_bytes;
+    std::vector<Node> popup_roots;
+    ui::dtb::RootHeader popup_header;
+    if (!read("ui/error/gen/error_general.dtb", &popup_bytes, error) ||
+        !ui::dtb::Parse(popup_bytes.data(), popup_bytes.size(), &popup_roots, &popup_header, error)) return false;
+    const auto* popup = PanelMethod(&popup_roots, "error_popup_panel", "show_popup");
+    if (!popup || popup->kids.size() < 3 || popup->kids[1].tag != ui::dtb::kArray ||
+        popup->kids[1].kids.size() != 2 || popup->kids[1].kids[0].tag != ui::dtb::kVar ||
+        popup->kids[1].kids[0].text != "error_token" || popup->kids[1].kids[1].tag != ui::dtb::kVar ||
+        popup->kids[1].kids[1].text != "ret_panel") {
+      if (error) *error = "unsupported native crash-popup arguments";
+      return false;
+    }
+  }
   auto edit = [&](const std::string& path, auto transform) {
     std::vector<uint8_t> bytes;
     std::vector<Node> roots;
@@ -708,6 +771,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         }
         return true;
       }) || !edit("ui/splash/gen/splash.dtb", [&](auto& roots) {
+        if (!AddCrashRecoveryHooks(&roots, error)) return false;
         if (merge_provider) {
           // A compatible provider's own settings entry is *removed*: its pages are all reachable
           // from Help & Options now, so keeping a second button to the same things is one button
@@ -802,7 +866,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           {"rbbz_graphics_failed_cache","The graphics cache folder is not writable."},
           {"rbbz_graphics_retry","Try Again"},
           {"rbbz_graphics_ignore","Ignore"},
-          {"rbbz_graphics_back","Back"}}) {
+          {"rbbz_graphics_back","Back"},
+          {"rbbz_load_crashed","The game crashed while loading a song and was restarted. Returned to the main menu. Try another song."}}) {
         std::string why;
         if (!screen::AddLocaleEntry(&roots,key,text,&why) && why != "the locale already has that key") {
           if (error) *error = why;

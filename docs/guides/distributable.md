@@ -30,10 +30,11 @@ failed, 2 the audit could not measure what it needs (a missing `llvm-readobj`, o
 
 ## What the payload is
 
-The installer places a recompiled build and nothing else: `rb_blitz.exe`, the two SDK DLLs the
+The installer places a recompiled build and nothing else: `rb_blitz.exe`, its headless
+`rb_blitz_load_monitor.exe` crash-restart companion, the two SDK DLLs the
 game loads (`rexruntime.dll`, `rexgpu-xenos.dll`) and the four Visual C++ runtime DLLs the
 executable imports, plus `payload-manifest.toml`, which records their sizes and digests so the
-helper can hash what it placed before it reports success. One executable is the whole payload
+helper can hash what it placed before it reports success. One player-facing executable is the payload
 since the external settings application retired on 2026-10-19 (gameplay-mapping plan §19);
 the list lives in one place,
 `$wanted` in [`installer/tools/make_payload.ps1`](../../installer/tools/make_payload.ps1),

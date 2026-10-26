@@ -27,6 +27,19 @@ in place, never repacked:
 All five are byte-neutral or read-time edits delivered at the read that carries the file, except R9's
 hooks and the Play Current Song row's probe channel, which are host-side.
 
+**Fatal song-load recovery (2026-10-26):** a replacement process carries a
+one-shot recovery reason. Authored `splash_panel` polling chooses pad 0's local
+user and enters `server_connect_screen` automatically once the screen is stable;
+no simulated button press is required. Discovery and the normal background-song
+preparation still run, respecting DLC Menu Songs and its launch overrides.
+Recovery skips offline prompts for this boot and requests the existing native
+error popup once discovery returns to the stable main menu. The owner confirmed
+the shorter boot and successful Can't Hold Us playback; enabled background
+music on this route awaits follow-up acceptance after removing the initial
+recovery-only disable. See the
+[load-guard evidence](../plans/in-progress/2026-10-13-load-guard.md) part 4 and
+[the authored lifecycle](../../src/settings/menu_payload.cpp).
+
 ## Sources
 
 | Part | Original document | Status |

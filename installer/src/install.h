@@ -57,12 +57,11 @@ inline constexpr std::string_view kInstallLogName = "install.log";
 inline constexpr std::string_view kRuntimeExeName = "rb_blitz.exe";
 inline constexpr std::string_view kHelperExeName = "rb_blitz_setup_helper.exe";
 
-// The programs the recompiled payload is expected to carry. One, since Controller Settings
-// retired on 2026-10-19 (gameplay-mapping plan §19): the game owns every setting, so the
-// payload is one executable. Verification itself stays manifest-driven - the game hashes like
+// The game and its external load-crash monitor. The monitor has no player UI.
+// Verification itself stays manifest-driven - each executable hashes like
 // every other [[files]] entry - but recording the names here lets the install manifest and
 // the report say which executables the folder received.
-inline constexpr std::string_view kPayloadExecutables[] = {kRuntimeExeName};
+inline constexpr std::string_view kPayloadExecutables[] = {kRuntimeExeName, "rb_blitz_load_monitor.exe"};
 
 // The roles in config/game_fingerprints.toml that identify a Rock Band Blitz
 // dump. All three are mandatory: the archive trio is what proves the user has

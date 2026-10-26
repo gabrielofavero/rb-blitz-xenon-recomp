@@ -171,6 +171,7 @@ $payloadBackends = Get-PayloadBackends -BuildDir $SourceDir
 $preparation = Get-PreparationPayload -Directory $SourceDir
 $wanted = [ordered]@{
     'rb_blitz.exe'             = $SourceDir
+    'rb_blitz_load_monitor.exe' = $SourceDir
     'graphics-preparation.json' = $SourceDir
     'rexruntime.dll'           = $SourceDir
     'rexgpu-xenos.dll'         = $SourceDir

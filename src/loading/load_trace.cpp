@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Read-only prerequisite diagnostics for Song Load Guard. No abort or popup is
-// enabled until the cancellation/cleanup contract has been measured.
+// Song-load diagnostics and process-monitor lifecycle publication. These hooks
+// never attempt to continue a faulted guest or manufacture native completion.
 #include "loading/load_trace.h"
+#include "loading/crash_recovery.h"
 
 #include <chrono>
 
@@ -52,7 +53,7 @@ void Event(const char* phase, uint8_t* base, uint32_t screen, uint32_t caller) {
 
 void ConfigureLoadTrace() {
   enabled = REXCVAR_GET(song_load_trace);
-  if (enabled) REXLOG_INFO("song_load: read-only tracing enabled; automatic recovery unavailable");
+  if (enabled) REXLOG_INFO("song_load: read-only lifecycle tracing enabled");
 }
 
 void ObserveLoadFrame(uint8_t* base, uint32_t manager) {
@@ -93,6 +94,7 @@ void TraceEnd() { if (enabled) trace.active = false; }
 // wrappers preserve the original arguments/result and forward exactly once.
 REX_HOOK_RAW(sub_822C3428) {
   const auto screen = ctx.r3.u32, caller = uint32_t(ctx.lr);
+  rb_blitz::loading::BeginCrashRecoveryAttempt();
   rb_blitz::loading::TraceBegin(base, screen, caller);
   __imp__sub_822C3428(ctx, base);
   rb_blitz::loading::TraceEvent("setup_return", base, screen, caller);
@@ -109,12 +111,14 @@ REX_HOOK_RAW(sub_822C38F8) {
   const auto screen = ctx.r4.u32, caller = uint32_t(ctx.lr);
   rb_blitz::loading::TraceEvent("completion_enter", base, screen, caller);
   __imp__sub_822C38F8(ctx, base);
+  rb_blitz::loading::EndCrashRecoveryAttempt();
   rb_blitz::loading::TraceEvent("completion_return", base, screen, caller);
 }
 REX_HOOK_RAW(sub_822C3F48) {
   const auto screen = ctx.r3.u32, caller = uint32_t(ctx.lr);
   rb_blitz::loading::TraceEvent("unload_enter", base, screen, caller);
   __imp__sub_822C3F48(ctx, base);
+  rb_blitz::loading::EndCrashRecoveryAttempt();
   rb_blitz::loading::TraceEvent("unload_return", base, screen, caller);
   rb_blitz::loading::TraceEnd();
 }

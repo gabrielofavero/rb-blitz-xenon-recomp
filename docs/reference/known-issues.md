@@ -9,6 +9,20 @@ is removed from this file, not from the log.
 
 ## Open
 
+**Can't Hold Us load crash and recovery acceptance (2026-10-26):** the debugger
+located a signed 16-bit event-count overflow on the custom MIDI's optional
+LIPSYNC1 track. The host now rejects LIPSYNC1–4 through the title's own MIDI
+track-skip path, preserving playable tracks and installed packages. An external
+Windows monitor also restarts fatal process exits during active song loading,
+with an authored native main-menu dialog. On 2026-10-26 the owner confirmed the
+injected failure restarted and Can't Hold Us played successfully afterward;
+the MIDI correction is unconditional and does not require a prior crash.
+Recovery's temporary DLC-menu-music disable was removed after that run: the
+normal background-song setting now remains in effect, with in-game acceptance
+of this follow-up still pending. This does not recover a non-exiting hang or
+continue a faulted guest. See the
+[load-guard evidence](../plans/in-progress/2026-10-13-load-guard.md) part 4.
+
 **Menu-music navigator is staged at P1 (2026-10-26):** the default-on Menu Music Navigation
 switch and Background Music Play command page exist, but Next Track / Previous Track /
 Play/Pause do not change music yet. Pad/media controls and pause execution are P2; the footer,

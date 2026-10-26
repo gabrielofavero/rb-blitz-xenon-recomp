@@ -8,6 +8,7 @@
 #include <rex/kernel/xam/module.h>
 #include "hooks/help_observer.h"
 #include "loading/load_trace.h"
+#include "loading/crash_recovery.h"
 #include "hooks/content_progress.h"
 #include <bit>
 #include <cstring>
@@ -155,6 +156,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   const bool allowed = screen && U32(base, manager + 16) == 0 &&
       (name != "game_screen" || panel_name == "pause_panel");
   const bool in_song = screen != 0 && name == "game_screen" && panel_name != "pause_panel";
+  rb_blitz::loading::ObserveRecoveryScreen(name, allowed);
   rb_blitz::content_progress::ObserveScreen(name, panel_name, allowed);
   rb_blitz::diag::shader_trace::ObserveScreen(name, panel_name, ObjectName(base, ObjectBase(base, focus)),
                                              U32(base, manager + 16) != 0);

@@ -1,19 +1,20 @@
 # Song Load Guard
 
-Song Load Guard is recorded in three parts: **part 1** is the feasibility study — which stall and
+Song Load Guard is recorded in four parts: **part 1** is the feasibility study — which stall and
 failure cases a cooperative 30s/60s timeout can recover from in-process, and which it must refuse —
 **part 2** is the implementation prompts written against it, and **part 3** is what the 2026-10-25
-implementation attempt actually built and measured. The controller and its read-only trace hooks
-exist; **automatic recovery, its player setting and its popup are not connected, and no
-cancellation, cleanup, main-menu return or popup route has been measured** (part 3 §4).
+implementation attempt actually built and measured. **Part 4** records the 2026-10-26 crash
+diagnosis, independent MIDI fix and owner-authorized external crash restart. The fatal-load
+monitor and native popup are implemented and under manual acceptance. **The cooperative
+30s/60s timeout, its player setting and same-process cleanup remain disconnected.**
 
 Read part 1 §1 for the supported/unsupported split and §5 for the evidence gate that must pass before
 any recovery code is written; start part 2 at Prompt 1, which can still disprove the whole approach.
 Part 3 §1 is what exists today, §2 the package inspection and §3 the manual run still owed.
 
 **First reproducer candidate (owner report, 2026-10-24):** *Can't Hold Us* by Macklemore & Ryan Lewis
-is reported to take the game down — see part 1 §2.6. The report is unmeasured; part 3 §2 inspected
-the package read-only and found no damaged stored data, so the failure itself is still unexplained.
+was reproduced under a debugger on 2026-10-26. Its optional LIPSYNC1 MIDI track overflows a
+signed event counter; see part 4 §1. The package's stored data is intact (part 3 §2).
 
 ## Sources
 
@@ -765,3 +766,139 @@ recoverable-error boundary and no supported-error table entry. In particular, Ca
 is not classified as corrupt or guard-recoverable. Finish the manual reproduction and trace
 the native cancellation/ownership protocol before wiring the adapter, player setting and
 native main-menu popup. No universal fault interception is implemented.
+
+
+---
+
+## Part 4 — Measured crash and external restart (2026-10-26)
+
+### 1. Can't Hold Us is fixable without rejecting the package
+
+The owner reproduced the same guest read fault at `0x3FFF1A00` in boots
+`out/build/win-amd64-release/logs/rb_blitz_353.log` and `rb_blitz_354.log`.
+The latter was run under CDB with load tracing. Evidence is retained in
+`out/load-guard/cant-hold-us-20261026-debugger.log`, its `.dmp`, `context.bin`,
+`guest-stack.bin`, `midi-parser.bin`, `dataarray.bin` and `text-events.bin`.
+
+The UI poll continued in native loading state 3 until approximately 25 seconds
+into the attempt. Native completion had not run. The faulting host instruction
+maps through that build's `rb_blitz.map` to guest allocator `0x82457F50`.
+The preceding calls are DataArray insertion (`0x823FA678`), MIDI event insertion
+(`0x8242AE98` / `0x8242B6E0`), bracket-text parsing (`0x82437FE8`) and MIDI text
+handling (`0x82439258`, called by `0x824A8578`).
+
+The live parser's current-track symbol at +432 was **LIPSYNC1**. Its text-event
+array had length **0x8000**, exceeding its signed 16-bit representation. The
+next insertion sign-extends that count and requests **0xFFFC0008** bytes; the
+size-class allocator consequently indexes below its table. The text being
+parsed was `[New_hi 97 hold]`, classified as `unknown_event_type`.
+
+Read-only MIDI parsing counted 38,163 events in LIPSYNC1. All track/event
+extents and variable-length quantities were valid. Blitz's authored MIDI
+parsers have no LIPSYNC track consumer. The zero-byte `.pan` allocation warning,
+base `.milo` lookup and custom metadata context script are not the measured
+fault site. The earlier speculation about the context script in part 3 is
+superseded by this stack and live parser evidence.
+
+[src/hooks/midi_tracks.cpp](../../../src/hooks/midi_tracks.cpp) extends native
+`MidiParser::ShouldReadTrack` (`0x82438880`) to reject exactly LIPSYNC1 through
+LIPSYNC4. It calls the original decision once and overrides an accepted result
+only for those optional conversion tracks. The native caller (`0x824390B0`)
+then invokes its own track rejection / skip protocol (`0x824A8D90` ->
+`0x824A7280`): seek to the declared MTrk end, notify track end and continue.
+Instrument, harmony, BEAT, EVENTS and VENUE tracks retain native processing.
+No installed DLC is rewritten, no playable chart is truncated and no song is
+blacklisted. This correctness fix applies with crash recovery switched off.
+
+### 2. Fatal faults recover through a fresh process
+
+The owner explicitly authorized automatic restart into the main menu for fatal
+faults on 2026-10-26. This extends the original proposal's scope: part 1 §4.4
+correctly described restart as separate work, and that work is now included.
+The original cooperative timeout remains a separate, unvalidated path.
+
+[crash_recovery.cpp](../../../src/loading/crash_recovery.cpp) starts a headless
+`rb_blitz_load_monitor.exe` before guest launch. The monitor inherits only an
+actual synchronization/query handle to its parent, an anonymous shared page and
+a readiness event, using a restricted inherited-handle list. Guest launch waits
+for the monitor to resolve the parent executable and acknowledge readiness.
+It derives the executable identity
+from the parent handle; there is no guest-supplied executable path, guest pointer,
+exception callback or instruction-pointer rewrite. The page records only whether
+a song attempt is active. Setup arms it; native completion, unload and normal
+window close disarm it. Trace logging need not be enabled.
+
+After the parent process has exited, a fatal Windows exception status or CRT
+abort while that page is armed starts one replacement. A normal exit, ordinary
+application error, task termination or exit outside an active load starts none.
+Windows retires the failed process's threads, address space and handles;
+no attempt is made to continue a guest whose state may already be corrupted.
+A non-exiting deadlock, GPU stall or debugger-paused fault is not process exit
+and is not recovered by this monitor. Unsaved state lost by a crash cannot be
+restored by this mechanism.
+
+The fresh boot receives an internal one-shot reason. It preserves the original
+launch arguments, strips consumed restart/injection arguments, skips the offline
+prompts for this boot and preserves the DLC background-song setting and its
+launch overrides. The first acceptance build disabled that music for recovery;
+the owner requested normal background-song preparation on the fast boot, so
+that temporary override was removed. Preferences and DLC files are unchanged.
+Native splash polling selects pad 0's local user and enters normal content
+discovery. After discovery has returned to a stable main menu, the existing
+`error_popup_panel show_popup` displays a project-owned locale message once,
+with `splash_panel` as its return focus. No host overlay is added. Provider enter
+and poll handlers are preserved, and incompatible splash shapes fail authoring.
+
+Runtime controls:
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `song_load_crash_recovery` | true | Enable the Windows external fatal-load monitor; restart-scoped |
+| `song_load_recovered` | false | Internal one-shot boot reason supplied by the monitor |
+| `song_load_test_crash` | false | Development acceptance: one synthetic access-violation exit before the first song setup; removed from recovery arguments |
+| `song_load_trace` | false | Existing read-only lifecycle diagnostics |
+
+The monitor logs its exit classification and replacement PID to
+`<cache_root>/song-load-recovery.log`. Healthy restart also strips the internal
+reason and injection flags. The companion is built with the game and included
+in the installer's payload allow-list and snapshot provenance.
+
+### 3. Validation and remaining acceptance
+
+The MIDI regression executes the generated native acceptance, OnTrackName and
+skip functions against isolated memory. It proves that retail initially accepts
+LIPSYNC1, that the extension rejects only the four exact optional names, and that
+the native path seeks once, notifies once and returns to the next-track state.
+Near matches and playable tracks retain acceptance.
+
+The monitor tests use actual child processes and an inherited event gate. They
+check no replacement before parent death, exactly one replacement for an armed
+abnormal exit, no replacement for normal/disarmed exits, argument quoting with
+spaces/ampersands, and injection/reason filtering. Intermittent combined-test
+failures exposed a startup race: the parent could exit before the monitor had
+queried its executable path. The readiness handshake fixes that race before
+guest launch. The rebuilt combined six-suite CTest run passed, including all
+monitor checks and exclusion of ordinary task termination/error exits. Follow-up
+argument regressions cover background music explicitly On, Off and unspecified.
+
+Native dialog state tests cover menu readiness, discovery start, once-only
+consumption and normal-boot silence. Payload tests preserve provider lifecycle
+statements and reject unknown shapes without partial mutation.
+
+Manual acceptance was booted with `song_load_test_crash=true`: the owner's first
+song selection intentionally tests restart and the dialog; selecting Can't Hold
+Us after dismissal tests the actual MIDI correction without reinjection.
+Logs `rb_blitz_355.log` and `rb_blitz_356.log` plus
+`<cache_root>/song-load-recovery.log` record the synthetic `c0000005` exit,
+one replacement and consumption of the native popup request at the main menu.
+The owner closed that run before testing again. The next manual run,
+`rb_blitz_357.log` / `rb_blitz_358.log`, reproduced the injected failure and
+restart; the owner then confirmed Can't Hold Us played successfully. The log
+records native LIPSYNC1 rejection and completion in 1,192 ms. The owner observed
+the shorter recovery boot and requested enabled background songs still load;
+the follow-up preserves the normal music setting rather than forcing it Off.
+Its in-game acceptance, explicit visual dialog/dismissal confirmation and a
+subsequent good song remain unmeasured. The synthetic flag defaults false; the
+MIDI fix is active on the first normal boot without any crash prerequisite.
+Retail/other configurations remain unmeasured. The 30s/60s cooperative timeout
+is not advertised as implemented.

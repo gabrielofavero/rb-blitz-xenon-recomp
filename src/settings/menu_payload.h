@@ -30,6 +30,8 @@ bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit);
 // The formerly transient state 28 can now span frames while a refresh scans.
 // Give it the same content-loading label as state 29; retain real connection labels.
 bool SetDiscoveryStartLabel(std::vector<ui::dtb::Node>* roots);
+// Existing splash lifecycle and native error_popup_panel, preserving provider handlers.
+bool AddCrashRecoveryHooks(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Replace every connect-panel menu continuation with the same deferred guest
 // method. Refuses an unknown shape instead of leaving an ungated menu route.
 bool AddGraphicsLoadingGate(std::vector<ui::dtb::Node>* roots, std::string* why);

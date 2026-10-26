@@ -84,6 +84,7 @@
 #include "hooks/shell_music.h"
 #include "hooks/ultimate.h"
 #include "loading/load_trace.h"
+#include "loading/crash_recovery.h"
 #include "input/mouse_ui.h"
 #include "input/remap.h"
 #include "input/title_input.h"
@@ -426,6 +427,7 @@ class RbBlitzApp : public rex::ReXApp {
     // player cannot change has to say so rather than save a value that never takes effect.
     rex::cvar::FinalizeInit();
     rb_blitz::loading::ConfigureLoadTrace();
+    rb_blitz::loading::ConfigureCrashRecovery(runtime());
     rb_blitz::graphics::ConfigureLoading(runtime());
     coverage_recorder_ = rb_blitz::graphics::StartDevelopmentCoverage(
         rex::filesystem::GetExecutablePath(),runtime()->cache_root());
@@ -433,6 +435,7 @@ class RbBlitzApp : public rex::ReXApp {
   }
 
   bool OnWindowCloseRequested() override {
+    rb_blitz::loading::EndCrashRecoveryAttempt();
     rb_blitz::shell_music::CloseQueuedPool();
     rb_blitz::graphics::CloseLoading();
     rex::graphics::compile_trace::Snapshot("window_close");

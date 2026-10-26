@@ -108,6 +108,8 @@ set(RBBLITZ_SOURCES
     src/hooks/dlc_refresh.cpp
     src/loading/load_guard.cpp
     src/loading/load_trace.cpp
+    src/loading/crash_recovery.cpp
+    src/platform/song_load_monitor.cpp
     src/hooks/hud_layout.cpp
     src/hooks/hud_layout_runtime.cpp
     src/hooks/local_save.cpp
@@ -123,6 +125,7 @@ set(RBBLITZ_SOURCES
     src/hooks/hot_apply_runtime.cpp
     src/hooks/shell_music.cpp
     src/hooks/song_sort.cpp
+    src/hooks/midi_tracks.cpp
     src/hooks/menu_music_metadata.cpp
     src/hooks/menu_music_now_playing.cpp
     src/input/menu_music_nav.cpp
@@ -301,6 +304,13 @@ add_custom_target(rb_blitz_stage_gpu
     COMMENT "Staging the current GPU plugin beside rb_blitz"
     VERBATIM)
 add_dependencies(rb_blitz rb_blitz_stage_gpu)
+if(WIN32)
+    add_executable(rb_blitz_load_monitor WIN32 tools/song_load_monitor_main.cpp
+        src/platform/song_load_monitor.cpp src/platform/game_restart.cpp)
+    target_include_directories(rb_blitz_load_monitor PRIVATE src)
+    target_link_libraries(rb_blitz_load_monitor PRIVATE shell32)
+    add_dependencies(rb_blitz rb_blitz_load_monitor)
+endif()
 
 # P0 of the RhythmVerse store plan: its JSON dependency is the copy the SDK tree already vendors
 # (inja's single-header nlohmann 3.11.3, MIT) - no new third-party code is added to the project - and
@@ -724,6 +734,27 @@ if(BUILD_TESTING)
             "${CMAKE_CURRENT_BINARY_DIR}" $<TARGET_PROPERTY:rb_blitz,INCLUDE_DIRECTORIES>)
         target_compile_definitions(rb_blitz_song_sort_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
         add_test(NAME song_sort COMMAND rb_blitz_song_sort_tests)
+
+        set(RBBLITZ_MIDI_TRACKS_FIXTURE "${CMAKE_CURRENT_BINARY_DIR}/midi_tracks_guest.inc")
+        add_custom_command(OUTPUT "${RBBLITZ_MIDI_TRACKS_FIXTURE}"
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/midi_tracks_guest_fixture.py"
+                    --generated "${CMAKE_SOURCE_DIR}/generated/default"
+                    --output "${RBBLITZ_MIDI_TRACKS_FIXTURE}"
+            DEPENDS tests/midi_tracks_guest_fixture.py ${REXGLUE_ENTRYPOINT_GENERATED_SOURCES}
+            VERBATIM)
+        add_executable(rb_blitz_midi_tracks_tests tests/midi_tracks_tests.cpp
+            src/hooks/midi_tracks.cpp "${RBBLITZ_MIDI_TRACKS_FIXTURE}")
+        target_include_directories(rb_blitz_midi_tracks_tests PRIVATE
+            "${CMAKE_CURRENT_BINARY_DIR}" $<TARGET_PROPERTY:rb_blitz,INCLUDE_DIRECTORIES>)
+        target_compile_definitions(rb_blitz_midi_tracks_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        target_link_libraries(rb_blitz_midi_tracks_tests PRIVATE rex::runtime)
+        add_test(NAME midi_tracks COMMAND rb_blitz_midi_tracks_tests)
+
+        add_executable(rb_blitz_song_load_monitor_tests tests/song_load_monitor_tests.cpp
+            src/platform/song_load_monitor.cpp src/platform/game_restart.cpp)
+        target_include_directories(rb_blitz_song_load_monitor_tests PRIVATE src tests)
+        add_dependencies(rb_blitz_song_load_monitor_tests rb_blitz_load_monitor)
+        add_test(NAME song_load_monitor COMMAND rb_blitz_song_load_monitor_tests $<TARGET_FILE:rb_blitz_load_monitor>)
     endif()
 
     add_executable(rb_blitz_payload_overlay_tests
@@ -1365,4 +1396,5 @@ endif()
 
 # Controller Settings used to be a second executable in this build tree (launcher plan D1). It
 # retired on 2026-10-19: every player setting it edited is an in-game Help & Options row, so the
-# build produces rb_blitz.exe only (gameplay-mapping plan §19).
+# player-facing executable is rb_blitz.exe; rb_blitz_load_monitor is a headless
+# companion that restarts a process which died during song loading.

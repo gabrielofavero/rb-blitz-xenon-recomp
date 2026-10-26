@@ -13,6 +13,11 @@ REX_EXTERN(sub_822C38F8);
 REX_EXTERN(sub_822C3F48);
 REXCVAR_DECLARE(bool, song_load_trace);
 
+namespace rb_blitz::loading {
+void BeginCrashRecoveryAttempt() {}
+void EndCrashRecoveryAttempt() {}
+}
+
 namespace {
 std::array<unsigned, 4> calls{};
 void Original(PPCContext& ctx, unsigned index) {
