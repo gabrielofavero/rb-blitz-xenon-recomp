@@ -1,11 +1,15 @@
 # Cancelling a song load that never finishes (R11)
 
-> **New study (2026-10-13):** [Song Load Guard](../plans/in-progress/2026-10-13-load-guard.md) examines
+> **New study (2026-10-13):** [Song Load Guard](../plans/finished/2026-10-13-load-guard.md) examines
 > automatic 30s/60s cancellation, return to the **main menu**, and a native error popup using
 > the current settings/UI infrastructure. It distinguishes cooperative timeouts from fatal
 > exception recovery (part 1) and carries the implementation prompts written against that study
 > (part 2). Part 3 (2026-10-25) adds the evidence from the controller and trace hooks built since;
-> automatic recovery is still not connected, and that study recorded a no-go on cancellation.
+> same-process automatic cancellation is still not connected, and that study recorded a no-go
+> on cancellation. Part 4 records the separate external fatal-load restart implemented on
+> 2026-10-26 and the independent Can't Hold Us MIDI fix, both confirmed by the owner.
+> Part 5 supersedes the proposed cooperative timeout with the owner's chosen external
+> restart-to-menu deadline and its Off/30s/60s setting; same-process cancellation remains unshipped.
 > The R11 results and corrected reproducer below remain historical evidence.
 
 *Status: **cancelled, and removed from the tree** (2026-10-07). R11's toggle, its timeout cvar,

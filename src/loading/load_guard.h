@@ -12,6 +12,8 @@ enum class Phase : uint8_t {
 enum class Reason : uint8_t { kNone, kTimeout, kSupportedError };
 enum class Action : uint8_t { kNone, kCancel, kReturnToMenu, kShowPopup, kReportUnavailable };
 
+// Historical cooperative-cancellation protocol retained for research/tests.
+// The shipped timeout uses external restart (song_load_monitor / load_policy).
 // SDK-free protocol, owned by the guest UI thread. Times are monotonic milliseconds.
 // Actions are suggestions until their explicit acknowledgement. In particular a
 // screen change is NOT a cleanup acknowledgement. The adapter must prove native

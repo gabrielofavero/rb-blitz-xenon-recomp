@@ -136,6 +136,34 @@ struct FakeProvider : ProviderSink {
   }
 };
 
+void TestLoadGuardRoundTrip() {
+  BeginCase("load guard: strict native hot enum persists and invalid values cannot commit");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  Service service(paths);
+  service.Boot(nullptr, PathEntry{}, nullptr);
+  service.SetCapabilities(CapabilitySnapshot{});
+  constexpr auto id = SettingId::kLoadGuard;
+  const auto* descriptor = service.DescriptorFor(id);
+  CHECK_TRUE(descriptor != nullptr);
+  if (!descriptor) return;
+  CHECK_TRUE(descriptor->provider == Provider::kNative);
+  CHECK_TRUE(descriptor->strategy == ApplicationStrategy::kHot);
+  CHECK_TRUE(service.EffectiveValue(id).text == "off");
+  CHECK_TRUE(CvarForSetting(id) == "song_load_guard");
+  for (const auto* token : {"30s", "60s", "off"}) {
+    const auto txn = service.BeginEdit(service.revision());
+    CHECK_FALSE(service.Set(txn, id, EnumV("15s"), service.capability_revision()).ok);
+    CHECK_TRUE(service.Set(txn, id, EnumV(token), service.capability_revision()).ok);
+    const auto result = service.Commit(txn);
+    CHECK_TRUE(result.status == CommitStatus::kSaved);
+    CHECK_FALSE(result.restart_required);
+    Service reloaded(paths);
+    reloaded.Boot(nullptr, PathEntry{}, nullptr);
+    CHECK_TRUE(reloaded.EffectiveValue(id).text == token);
+  }
+}
+
 void TestShowHeadersRoundTrip() {
   BeginCase("header defaults: Messages On, Recommendations Off; independent persistence and restart");
   Scratch scratch;
@@ -750,6 +778,7 @@ void TestCvarVocabulary() {
 }  // namespace
 
 int main() {
+  TestLoadGuardRoundTrip();
   TestHideAchievementsRoundTrip();
   TestMusicNavigationRoundTrip();
   TestShowHeadersRoundTrip();

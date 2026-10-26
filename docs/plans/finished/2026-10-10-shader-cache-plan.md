@@ -444,7 +444,7 @@ song, scene, power-ups and content. It must hold **every** route into active gam
 before audio and scoring begin while allowing guest loading, UI events and GPU work to
 continue. A host pipeline count reaching zero cannot replace the title's asset-load
 completion condition. [Loading-cancel findings](../../engine/loading-cancel.md) and
-the [Load Guard study](../in-progress/2026-10-13-load-guard.md) are required context: a safe
+the [Load Guard study](2026-10-13-load-guard.md) are required context: a safe
 loading/return transition cannot be assumed from a visible loading screen alone.
 
 The inspected `loading_screen` has two start routes: `load_finished` either waits for

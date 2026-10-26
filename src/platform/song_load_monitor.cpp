@@ -24,11 +24,17 @@ bool ShouldRestart(uint32_t code, bool loading) {
   return loading && fatal;
 }
 
-std::vector<std::string> RecoveryArguments(const std::vector<std::string>& arguments) {
+bool DeadlineExpired(uint64_t now_ms, uint64_t deadline_ms) {
+  return deadline_ms != 0 && now_ms >= deadline_ms;
+}
+
+std::vector<std::string> RecoveryArguments(const std::vector<std::string>& arguments,
+                                         uint32_t timeout_seconds) {
   std::vector<std::string> out;
   for (const auto& arg : arguments) {
     const auto key = std::string_view(arg).substr(0, arg.find('='));
-    if (key == "--song_load_recovered" || key == "--song_load_test_crash" ||
+    if (key == "--song_load_recovered" || key == "--song_load_timeout" ||
+        key == "--song_load_test_stall" || key == "--no-song_load_test_stall" || key == "--song_load_test_crash" ||
         key == "--no-song_load_test_crash" || key == "--restart-bootstrap" ||
         key == "--restart-handoff" || key == "--enhancements_skip_offline_dialog" ||
         key == "--no-enhancements_skip_offline_dialog") continue;
@@ -38,18 +44,31 @@ std::vector<std::string> RecoveryArguments(const std::vector<std::string>& argum
   // must rebuild a valid guest session before the main menu and its popup.
   // Keep background music arguments intact so recovery honors the user's setting.
   out.push_back("--song_load_recovered=true");
+  if (timeout_seconds == 30 || timeout_seconds == 60)
+    out.push_back("--song_load_timeout=" + std::to_string(timeout_seconds));
   out.push_back("--enhancements_skip_offline_dialog=true");
   return out;
 }
 
 #if defined(_WIN32)
 namespace {
-constexpr uint64_t kMagic = 0x5242425A4C473031ull;
+constexpr uint64_t kMagic = 0x5242425A4C473032ull;
+constexpr DWORD kTimeoutExit = 0xE042424C;
 struct Shared {
   uint64_t magic = kMagic;
   uint32_t parent = 0;
-  volatile LONG loading = 0;
+  LONG recover_crashes = 1;
+  // Low bits: 0 retired, 1 active, 2 timeout claimed. Upper bits: generation.
+  alignas(8) volatile LONG64 attempt = 0;
+  alignas(8) volatile LONG64 deadline = 0;
+  alignas(8) volatile LONG64 timeout_ms = 0;
 };
+uint64_t NowMilliseconds() {
+  ULONGLONG ticks = 0;
+  // Excludes OS sleep/hibernate. Focus changes do not rebase an active load.
+  return QueryUnbiasedInterruptTime(&ticks) ? ticks / 10000 : 0;
+}
+LONG64 Read(volatile LONG64* value) { return InterlockedCompareExchange64(value, 0, 0); }
 std::wstring Wide(const std::string& text) {
   const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), int(text.size()), nullptr, 0);
   std::wstring out(count, L'\0');
@@ -90,6 +109,7 @@ struct Session::Impl {
   HANDLE mapping = nullptr, process = nullptr;
   Shared* shared = nullptr;
   uint32_t pid = 0;
+  uint64_t generation = 0;
   ~Impl() {
     if (shared) UnmapViewOfFile(shared);
     if (mapping) CloseHandle(mapping);
@@ -98,20 +118,34 @@ struct Session::Impl {
 };
 Session::Session() : impl_(std::make_unique<Impl>()) {}
 Session::~Session() = default;
-void Session::SetLoading(bool loading) {
-  if (impl_->shared) InterlockedExchange(&impl_->shared->loading, loading ? 1 : 0);
+void Session::SetLoading(bool loading, uint32_t timeout_ms) {
+  auto* state = impl_->shared;
+  if (!state) return;
+  auto attempt = Read(&state->attempt);
+  // Completion or manual exit wins until the monitor commits its claim.
+  while ((attempt & 3) == 1) {
+    const auto actual = InterlockedCompareExchange64(&state->attempt, attempt & ~3LL, attempt);
+    if (actual == attempt) { attempt &= ~3LL; break; }
+    attempt = actual;
+  }
+  if (!loading || (attempt & 3) == 2) return;
+  const auto now = NowMilliseconds();
+  InterlockedExchange64(&state->deadline, timeout_ms && now ? now + timeout_ms : 0);
+  InterlockedExchange64(&state->timeout_ms, timeout_ms);
+  InterlockedExchange64(&state->attempt, (++impl_->generation << 2) | 1);
 }
 uint32_t Session::monitor_pid() const { return impl_->pid; }
 
 bool Session::Start(const std::filesystem::path& monitor, const std::vector<std::string>& args,
-                     const std::filesystem::path& log, std::string* error) {
+                     const std::filesystem::path& log, std::string* error, bool recover_crashes) {
   if (impl_->mapping) { if (error) *error = "monitor already configured"; return false; }
   auto state = std::make_unique<Impl>();
   SECURITY_ATTRIBUTES attributes{sizeof(attributes), nullptr, TRUE};
   state->mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, &attributes, PAGE_READWRITE, 0, sizeof(Shared), nullptr);
   if (state->mapping)
     state->shared = static_cast<Shared*>(MapViewOfFile(state->mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Shared)));
-  HANDLE parent = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, TRUE, GetCurrentProcessId());
+  HANDLE parent = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
+                              TRUE, GetCurrentProcessId());
   HANDLE ready = CreateEventW(&attributes, TRUE, FALSE, nullptr);
   if (!state->shared || !parent || !ready) {
     if (parent) CloseHandle(parent);
@@ -121,7 +155,10 @@ bool Session::Start(const std::filesystem::path& monitor, const std::vector<std:
   }
   state->shared->magic = kMagic;
   state->shared->parent = GetCurrentProcessId();
-  InterlockedExchange(&state->shared->loading, 0);
+  state->shared->recover_crashes = recover_crashes ? 1 : 0;
+  InterlockedExchange64(&state->shared->attempt, 0);
+  InterlockedExchange64(&state->shared->deadline, 0);
+  InterlockedExchange64(&state->shared->timeout_ms, 0);
   std::vector<std::string> command{
       "--parent=" + std::to_string(reinterpret_cast<uintptr_t>(parent)),
       "--state=" + std::to_string(reinterpret_cast<uintptr_t>(state->mapping)),
@@ -179,20 +216,44 @@ int RunMonitor(const std::vector<std::string>& args) {
   image.resize(length);
   if (!SetEvent(ready)) return 2;
   CloseHandle(ready);
-  if (WaitForSingleObject(parent, INFINITE) != WAIT_OBJECT_0) return 2;
+  std::ofstream log(std::filesystem::path(Wide(args[3].substr(6))), std::ios::app);
+  bool timed_out = false;
+  uint32_t timeout_seconds = 0;
+  DWORD wait = WAIT_FAILED;
+  while ((wait = WaitForSingleObject(parent, 100)) == WAIT_TIMEOUT) {
+    const auto attempt = Read(&state->attempt);
+    if ((attempt & 3) != 1) continue;
+    const auto deadline = Read(&state->deadline);
+    const auto timeout_ms = Read(&state->timeout_ms);
+    const auto now = NowMilliseconds();
+    if (!DeadlineExpired(now, deadline) || Read(&state->attempt) != attempt) continue;
+    if (InterlockedCompareExchange64(&state->attempt, attempt + 1, attempt) != attempt) continue;
+    // Only this real inherited process handle can be terminated. The atomic claim
+    // fences completion, manual exit and same-address re-entry from stale timers.
+    if (TerminateProcess(parent, kTimeoutExit)) {
+      timed_out = true;
+      timeout_seconds = timeout_ms >= 60000 ? 60 : 30;
+      log << "timeout_ms=" << timeout_ms << " elapsed_ms=" << now - deadline + timeout_ms
+          << " generation=" << (attempt >> 2) << '\n';
+    } else log << "timeout_termination_failed=" << GetLastError() << '\n';
+    log.flush();
+    // Never start a replacement until every old thread has actually exited.
+    wait = WaitForSingleObject(parent, INFINITE);
+    break;
+  }
+  if (wait != WAIT_OBJECT_0) return 2;
   DWORD exit_code = 0;
   if (!GetExitCodeProcess(parent, &exit_code)) return 2;
-  const bool loading = InterlockedCompareExchange(&state->loading, 0, 0) == 1;
+  const bool loading = (Read(&state->attempt) & 3) != 0;
+  const bool recover = timed_out || (state->recover_crashes && ShouldRestart(exit_code, loading));
   UnmapViewOfFile(state);
   CloseHandle(mapping);
   CloseHandle(parent);
-  const bool recover = ShouldRestart(exit_code, loading);
-  std::ofstream log(std::filesystem::path(Wide(args[3].substr(6))), std::ios::app);
   log << "parent_exit=" << std::hex << exit_code << " loading=" << loading << " restart=" << recover << '\n';
   log.flush();
   if (!recover) return 0;
   PROCESS_INFORMATION replacement{};
-  const auto recovery = RecoveryArguments({args.begin() + 5, args.end()});
+  const auto recovery = RecoveryArguments({args.begin() + 5, args.end()}, timeout_seconds);
   if (!Spawn(std::filesystem::path(image), recovery, nullptr, 0, &replacement)) {
     log << "restart_failed=" << GetLastError() << '\n';
     return 3;
@@ -207,11 +268,11 @@ struct Session::Impl {};
 Session::Session() : impl_(std::make_unique<Impl>()) {}
 Session::~Session() = default;
 bool Session::Start(const std::filesystem::path&, const std::vector<std::string>&,
-                    const std::filesystem::path&, std::string* error) {
+                    const std::filesystem::path&, std::string* error, bool) {
   if (error) *error = "crash restart is supported on Windows only";
   return false;
 }
-void Session::SetLoading(bool) {}
+void Session::SetLoading(bool, uint32_t) {}
 uint32_t Session::monitor_pid() const { return 0; }
 int RunMonitor(const std::vector<std::string>&) { return 2; }
 #endif

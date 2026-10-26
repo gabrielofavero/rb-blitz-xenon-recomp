@@ -101,6 +101,7 @@ REX_HOOK_RAW(sub_822C3428) {
 }
 REX_HOOK_RAW(sub_822C3878) {
   const auto screen = ctx.r3.u32, caller = uint32_t(ctx.lr);
+  rb_blitz::loading::BeforeSongLoadJob();
   rb_blitz::loading::TraceEvent("job_enter", base, screen, caller);
   __imp__sub_822C3878(ctx, base);
   rb_blitz::loading::TraceEvent("job_return", base, screen, caller);
@@ -116,9 +117,11 @@ REX_HOOK_RAW(sub_822C38F8) {
 }
 REX_HOOK_RAW(sub_822C3F48) {
   const auto screen = ctx.r3.u32, caller = uint32_t(ctx.lr);
+  // Native departure/manual cancellation retires the deadline before cleanup,
+  // which may itself block. Do not let an old load timer outlive that decision.
+  rb_blitz::loading::EndCrashRecoveryAttempt();
   rb_blitz::loading::TraceEvent("unload_enter", base, screen, caller);
   __imp__sub_822C3F48(ctx, base);
-  rb_blitz::loading::EndCrashRecoveryAttempt();
   rb_blitz::loading::TraceEvent("unload_return", base, screen, caller);
   rb_blitz::loading::TraceEnd();
 }

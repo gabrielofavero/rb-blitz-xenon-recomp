@@ -79,7 +79,7 @@ custom songs can be browsed, searched, and downloaded in-game, with instrument f
 in-game settings.
 
 Related reading: [dlc.md](../../guides/dlc.md) (content pipeline),
-[song-cache-plan.md](../finished/2026-10-10-song-cache-plan.md) (R7, refresh),
+[song-cache-plan.md](2026-10-10-song-cache-plan.md) (R7, refresh),
 [settings/menu.md](../../settings/menu.md), [settings/architecture.md](../../settings/architecture.md),
 [known-issues.md](../../reference/known-issues.md) (the store is currently offline-only — this
 plan is the community-mod-style feature that known-issues.md explicitly assigns to "the community

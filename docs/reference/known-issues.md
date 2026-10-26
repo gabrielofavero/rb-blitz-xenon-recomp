@@ -9,7 +9,7 @@ is removed from this file, not from the log.
 
 ## Open
 
-**Can't Hold Us load crash and recovery acceptance (2026-10-26):** the debugger
+**Load Guard coverage limits (2026-10-26):** the debugger
 located a signed 16-bit event-count overflow on the custom MIDI's optional
 LIPSYNC1 track. The host now rejects LIPSYNC1–4 through the title's own MIDI
 track-skip path, preserving playable tracks and installed packages. An external
@@ -18,10 +18,14 @@ with an authored native main-menu dialog. On 2026-10-26 the owner confirmed the
 injected failure restarted and Can't Hold Us played successfully afterward;
 the MIDI correction is unconditional and does not require a prior crash.
 Recovery's temporary DLC-menu-music disable was removed after that run: the
-normal background-song setting now remains in effect, with in-game acceptance
-of this follow-up still pending. This does not recover a non-exiting hang or
-continue a faulted guest. See the
-[load-guard evidence](../plans/in-progress/2026-10-13-load-guard.md) part 4.
+normal background-song setting now remains in effect. The owner then authorized
+external timeout restart too: the native Off/30s/60s setting and monitor deadline
+are implemented and pass host process/settings tests. The owner confirmed the
+30s timeout dialog, restored background music and subsequent playback. A deadline can end
+a blocked guest load; unrelated boot/gameplay/GPU stalls remain outside its scope.
+It never continues a faulted guest. A 60s live run, live row application and
+broader provider/hardware coverage remain unmeasured. See the
+[load-guard evidence](../plans/finished/2026-10-13-load-guard.md) parts 4–5.
 
 **Menu-music navigator is staged at P1 (2026-10-26):** the default-on Menu Music Navigation
 switch and Background Music Play command page exist, but Next Track / Previous Track /

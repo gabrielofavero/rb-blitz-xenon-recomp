@@ -44,6 +44,7 @@ enum class SettingId : uint16_t {
   kPlayCurrentSong = 7,           // the main menu's second entry (owner feature, 2026-10-14)
   kRefreshMusicLibrary = 8,       // the main menu's refresh entry (owner request, 2026-10-15)
   kHideAchievements = 9,
+  kLoadGuard = 10,
   // Graphics
   kResolution = 20,
   kVsync = 21,

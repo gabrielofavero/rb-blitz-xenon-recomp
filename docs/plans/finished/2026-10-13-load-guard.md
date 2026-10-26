@@ -1,16 +1,19 @@
 # Song Load Guard
 
-Song Load Guard is recorded in four parts: **part 1** is the feasibility study — which stall and
+Song Load Guard is recorded in five parts: **part 1** is the feasibility study — which stall and
 failure cases a cooperative 30s/60s timeout can recover from in-process, and which it must refuse —
 **part 2** is the implementation prompts written against it, and **part 3** is what the 2026-10-25
 implementation attempt actually built and measured. **Part 4** records the 2026-10-26 crash
-diagnosis, independent MIDI fix and owner-authorized external crash restart. The fatal-load
-monitor and native popup are implemented and under manual acceptance. **The cooperative
-30s/60s timeout, its player setting and same-process cleanup remain disconnected.**
+diagnosis, independent MIDI fix and owner-authorized external crash restart. **Part 5** records
+the owner's subsequent choice to use external restart for overdue loads too. Off/30s/60s,
+next-load live application, external timeout and the native reason-specific popup are implemented.
+**Finished 2026-10-26:** the owner confirmed timeout restart, the native dialog,
+enabled background music and subsequent playback. **Same-process cancellation was superseded
+by the owner's restart decision, and is not shipped or claimed safe.**
 
-Read part 1 §1 for the supported/unsupported split and §5 for the evidence gate that must pass before
-any recovery code is written; start part 2 at Prompt 1, which can still disprove the whole approach.
-Part 3 §1 is what exists today, §2 the package inspection and §3 the manual run still owed.
+Parts 1–3 preserve the original proposal and its cancellation safety gate as historical evidence.
+Parts 4–5 describe the delivered design and its measured scope. The owner confirmed fatal-load
+restart and successful Can't Hold Us playback; part 5 records the final timeout acceptance.
 
 **First reproducer candidate (owner report, 2026-10-24):** *Can't Hold Us* by Macklemore & Ryan Lewis
 was reproduced under a debugger on 2026-10-26. Its optional LIPSYNC1 MIDI track overflows a
@@ -28,7 +31,7 @@ Parts 1 and 2 were merged into this document on 2026-10-22, and part 3 on 2026-1
 already lived beside this file, so nothing moved between folders). Git history before each merge
 holds the originals. Each part keeps its source's own section numbers, demoted one heading level, so
 a citation such as "part 1 §2.4" still lands. Cite the result as
-"`docs/plans/in-progress/2026-10-13-load-guard.md` part 1 §5".
+"`docs/plans/finished/2026-10-13-load-guard.md` part 1 §5".
 
 ---
 
@@ -460,7 +463,7 @@ dump and disposable test configuration. Preserve existing user changes and data.
 
 ```text
 Investigate the cancellation prerequisite for Load Guard in this repository. Read
-docs/plans/in-progress/2026-10-13-load-guard.md (part 1) and docs/engine/loading-cancel.md first. This step
+docs/plans/finished/2026-10-13-load-guard.md (part 1) and docs/engine/loading-cancel.md first. This step
 may add narrowly scoped, disabled-by-default diagnostics and a disposable harness;
 do not expose the player setting yet.
 
@@ -507,7 +510,7 @@ implementing an automatic abort or advertising the setting.
 ### Prompt 2 — Implement the controller and cooperative timeout
 
 ```text
-Implement the controller for Load Guard using docs/plans/in-progress/2026-10-13-load-guard.md (part 1) and
+Implement the controller for Load Guard using docs/plans/finished/2026-10-13-load-guard.md (part 1) and
 the runtime evidence from Prompt 1. Proceed with guest cancellation only if that
 evidence proves a safe route and subsequent good-song playback.
 
@@ -548,7 +551,7 @@ behavior; distinguish controller tests from in-game validation.
 
 ```text
 Integrate the proven Load Guard controller with settings and native UI. Follow
-docs/plans/in-progress/2026-10-13-load-guard.md (part 1). Require Prompt 1's cancellation/cleanup proof and
+docs/plans/finished/2026-10-13-load-guard.md (part 1). Require Prompt 1's cancellation/cleanup proof and
 Prompt 2's functioning controller; do not add a setting that cannot perform recovery.
 
 Add “Load Guard” under Help & Options -> General -> Downloadable Content, with a
@@ -627,7 +630,7 @@ coverage actually established. Keep generic crash/restart containment out of sco
 
 ```text
 Validate the implemented Load Guard against section 5 of
-docs/plans/in-progress/2026-10-13-load-guard.md (part 1). Read the runtime findings first; preserve unrelated
+docs/plans/finished/2026-10-13-load-guard.md (part 1). Read the runtime findings first; preserve unrelated
 work. Run the affected tests and the configured project's required checks, then the
 in-game acceptance matrix. Use actual 30s and 60s values for final timing acceptance;
 fake-clock tests and short diagnostic delays alone are insufficient.
@@ -902,3 +905,108 @@ subsequent good song remain unmeasured. The synthetic flag defaults false; the
 MIDI fix is active on the first normal boot without any crash prerequisite.
 Retail/other configurations remain unmeasured. The 30s/60s cooperative timeout
 is not advertised as implemented.
+
+---
+
+## Part 5 — External timeout and completion audit (2026-10-26)
+
+### 1. Owner decision and final behavior
+
+When asked to finish the feature, the owner explicitly chose **restart-to-menu
+for timed-out loads**. This supersedes part 1's same-process cancellation route
+and part 2's dependent implementation prompts. It does not assert that native
+cancellation, asynchronous guest unwinding or continued execution after a fault
+has become safe. The old SDK-free cooperative controller is retained as research
+and regression evidence; the shipped timeout runs in the external monitor.
+
+Help & Options → General → Downloadable Content now exposes **Load Guard**:
+**Off / 30s / 60s**, default Off. Stable identity is `general.load_guard`, native
+SettingId 10, persisted as `[general] load_guard = "off"`, `"30s"` or `"60s"`.
+Invalid tokens are refused. A successful commit writes and reads back the hot
+`song_load_guard` cvar; its host callback publishes an atomic policy. Each new
+song setup snapshots that value. Changing it does not alter an existing attempt,
+and failed saves do not publish a new policy. Explicit config/environment/CLI
+overrides use the existing settings precedence and read-only-row reporting.
+
+Off disables the deadline. Fatal-load recovery remains the independent existing
+`song_load_crash_recovery` control, default true; the monitor can enforce a chosen
+deadline even when fatal-load recovery is disabled. It starts before guest launch
+so a live change from Off needs no process restart.
+
+The monitor uses Windows unbiased interrupt time, excluding system sleep and
+hibernation; focus loss does not reset the total duration. Arbitrary debugger or
+Task Manager process suspension is not a supported pause signal: use Off when
+intentionally stopping the guest. The timer covers song setup until confirmed
+native completion. It is disarmed before native unload/manual departure and on
+normal window close. Discovery, boot graphics preparation, menu music, waiting
+for A after completion, results and gameplay have no armed song deadline.
+
+### 2. Process ownership and race contract
+
+The anonymous shared page contains a generation, active/retired/claimed state,
+absolute deadline and snapshotted duration. All mutable fields use Windows
+interlocked operations. The monitor validates a coherent generation/deadline
+snapshot, then atomically claims that active generation at expiry. Completion or
+manual exit before the claim wins; an old timer cannot act on a new generation.
+After the claim, the restart is committed. The monitor terminates only the real
+inherited parent process handle, never a PID or path obtained from guest data.
+It waits for actual process exit before launching exactly one replacement.
+The OS retires the old address space, workers and resources; no guest cleanup
+acknowledgement or completion callback is manufactured.
+
+Only `30` or `60` is carried as the internal `song_load_timeout` reason. Recovery
+arguments strip old reasons and both test injections; they preserve the normal
+music setting. The existing native popup chooses a 30-second, 60-second or crash
+locale token after normal discovery and stable main-menu entry. Messages explain
+the restart and suggest another song/checking files; a timeout does not classify
+the package as corrupt. Healthy settings restart also strips consumed reasons.
+
+`song_load_test_stall` is a default-false development injection: the first song
+job with an enabled deadline blocks before native work, leaving the external deadline to recover even
+with the guest UI thread blocked. It neither changes installed songs nor touches
+save data, and it is removed from replacement arguments. Production launches
+have no injected stall or fault.
+
+### 3. Verification and remaining measured scope
+
+The release preset builds successfully. Twelve affected CTest suites passed:
+load_guard, load_trace, midi_tracks, song_load_monitor, settings_screen,
+menu_payload, settings_store, settings_migration, settings_service,
+settings_hot_apply, game_restart and settings_bridge_service.
+
+Fake-time assertions cover the exact 30s/60s boundaries and disabled deadlines.
+Actual child-process tests cover fatal exit, normal/disarmed exit, timeout of a
+blocked parent, native-completion retirement, same-address/new-generation
+re-entry, crash-recovery Off with/without timeout, no early replacement, reason
+selection and removal of one-shot injections. Settings tests cover strict enum
+validation, hot classification, Off/30s/60s save/reload and both native menu
+contexts. The generated payload still round-trips and retains provider handlers.
+
+The initial final-test boot (`rb_blitz_359.log`) selected a song with the policy
+still Off, so its injected stall had no timer. That diagnostic process was
+stopped deliberately (`ffffffff`, no automatic replacement), and the injection
+was corrected to defer while Off. The rebuilt `rb_blitz_360.log` uses a 30s CLI
+override for the owner's timeout restart/dialog, enabled background music and
+subsequent ordinary playback test. At that handoff the result was pending;
+the close-out below records the owner's confirmation. Live settings-row
+application, a 60s game run and broader retail/hardware coverage are not claimed
+as manual measurements.
+The earlier fatal-injection recovery and Can't Hold Us gameplay were confirmed
+by the owner and logged in part 4.
+
+**Final acceptance and close-out, 2026-10-26:** the owner answered **“All three
+worked”** to timeout restart/dialog, restored background music and subsequent
+ordinary playback. `<cache_root>/song-load-recovery.log` records `timeout_ms=30000
+elapsed_ms=30038 generation=1`, exit `e042424c`, and exactly one replacement.
+`rb_blitz_361.log` records DLC Menu Songs On, playback of the selected DLC menu
+track, the native recovery popup request at stable main menu, and the next song's
+native completion after 1,140 ms. The controlled stall is absent on that boot.
+The original fatal-load case, the independent song fix and the chosen timeout
+restart design are delivered. Same-process cancellation was superseded, rather
+than marked implemented. The explicit coverage limits above remain limits.
+
+The authored retail-record integration also passed 2,612 checks across all eight
+store/header configurations (`out/load-guard/timeout-retail-records/`). The docs
+checker still reports 43 pre-existing errors for the separately moved
+RhythmVerse/binding plans; the completion check output is retained under
+`out/load-guard/`. No generated retail data or test captures are committed.

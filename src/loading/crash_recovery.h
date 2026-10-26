@@ -5,6 +5,7 @@ namespace rex { class Runtime; }
 namespace rb_blitz::loading {
 void ConfigureCrashRecovery(rex::Runtime* runtime);
 void BeginCrashRecoveryAttempt();
+void BeforeSongLoadJob();
 void EndCrashRecoveryAttempt();
 void ObserveRecoveryScreen(std::string_view name, bool stable);
 bool CrashRecoveryQuery(std::string_view path, bool* answer);

@@ -15,6 +15,7 @@ REXCVAR_DECLARE(bool, song_load_trace);
 
 namespace rb_blitz::loading {
 void BeginCrashRecoveryAttempt() {}
+void BeforeSongLoadJob() {}
 void EndCrashRecoveryAttempt() {}
 }
 

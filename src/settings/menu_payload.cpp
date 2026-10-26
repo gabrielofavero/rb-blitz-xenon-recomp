@@ -705,7 +705,10 @@ bool AddCrashRecoveryHooks(std::vector<Node>* roots, std::string* why) {
   const auto panel_state = cmd({cmd({sym("splash_panel"), sym("loaded_dir")}), sym("get"), sym("state")});
   const auto popup_condition = cmd({sym("&&"), cmd({sym("=="), panel_state, sym("main_menu")}), query("popup")});
   const auto popup_action = cmd({sym("do"), set(sym("FALSE")),
-      cmd({sym("error_popup_panel"), sym("show_popup"), sym("rbbz_load_crashed"), sym("splash_panel")})});
+      cmd({sym("error_popup_panel"), sym("show_popup"),
+           cmd({sym("if_else"), query("timeout30"), sym("rbbz_load_timeout_30"),
+                cmd({sym("if_else"), query("timeout60"), sym("rbbz_load_timeout_60"), sym("rbbz_load_crashed")})}),
+           sym("splash_panel")})});
   const auto popup = cmd({sym("if"), popup_condition, popup_action});
   const auto poll = cmd({sym("if"), Node::Property({sym("rbbz_recovery_boot")}),
                          cmd({sym("do"), start, popup})});
@@ -867,7 +870,9 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           {"rbbz_graphics_retry","Try Again"},
           {"rbbz_graphics_ignore","Ignore"},
           {"rbbz_graphics_back","Back"},
-          {"rbbz_load_crashed","The game crashed while loading a song and was restarted. Returned to the main menu. Try another song."}}) {
+          {"rbbz_load_crashed","The game crashed while loading a song and was restarted. Returned to the main menu. Try another song."},
+          {"rbbz_load_timeout_30","The song did not finish loading within 30 seconds. The game was restarted to the main menu. Try another song or check this song's files."},
+          {"rbbz_load_timeout_60","The song did not finish loading within 60 seconds. The game was restarted to the main menu. Try another song or check this song's files."}}) {
         std::string why;
         if (!screen::AddLocaleEntry(&roots,key,text,&why) && why != "the locale already has that key") {
           if (error) *error = why;

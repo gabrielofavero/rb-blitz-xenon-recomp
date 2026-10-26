@@ -3,15 +3,28 @@
 `song_load_crash_recovery` (Runtime, default **true**, restart-scoped) enables
 the Windows external monitor that restarts a fatal process exit during an active
 song load, returning through normal discovery to the native main-menu crash
-dialog. Off installs no monitor; the independent optional-MIDI-track fix remains
+dialog. Off disables fatal-exit recovery; the independent optional-MIDI-track fix remains
 active. `song_load_recovered` is an internal one-shot reason; development-only
 `song_load_test_crash` defaults false and is removed from replacement arguments.
 Recovery automatically starts discovery with the local user and skips offline
 prompts for that boot. It preserves the DLC Menu Songs setting and its launch
 overrides, so enabled background songs still prepare through the normal path.
-See [Load Guard part 4](../plans/in-progress/2026-10-13-load-guard.md),
+See [Load Guard part 4](../plans/finished/2026-10-13-load-guard.md),
 [crash_recovery.cpp](../../src/loading/crash_recovery.cpp) and
 [song_load_monitor.cpp](../../src/platform/song_load_monitor.cpp).
+
+**Load Guard** (General → Downloadable Content) adds the separate
+`general.load_guard` / `song_load_guard` enum: **Off / 30s / 60s**, default Off.
+A successful settings commit applies to the next song attempt without restarting.
+At expiry the external monitor ends the unfinished process, waits for exit and
+fast-boots to the main menu with a timeout-specific native dialog. Completion,
+manual departure and window close retire the deadline; waiting for A after load
+completion does not count. System sleep/hibernate is excluded, focus loss is not.
+Intentional debugger/process suspension needs Off. The helper starts even with
+both recovery controls Off so a later live timeout change works.
+`song_load_timeout` is the consumed internal 30/60-second reason;
+`song_load_test_stall` is a default-false, one-attempt diagnostic removed on
+recovery. See [part 5 of the evidence](../plans/finished/2026-10-13-load-guard.md).
 
 The contract for the customization features in
 [plans/customization-plan.md](../plans/finished/2026-10-03-customization-plan.md) (R1–R9, plus R10 below, which a

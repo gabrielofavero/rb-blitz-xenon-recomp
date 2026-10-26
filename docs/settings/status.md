@@ -8,6 +8,15 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **Load Guard (2026-10-26):** General → Downloadable Content has a native
+  Off/30s/60s selector, default Off (`general.load_guard`, stable id 10).
+  A committed value updates the host atomic policy for the next load. An overdue
+  attempt uses the owner-authorized external restart, with a native timeout dialog;
+  same-process cancellation is not claimed. Strict persistence and both menu
+  contexts pass host tests; the owner confirmed timeout restart/dialog, enabled
+  background music and subsequent playback. See
+  [the load-guard record](../plans/finished/2026-10-13-load-guard.md) part 5.
+
 - **Menu-music navigator P1 (2026-10-26; manual acceptance pending):** General → Interface gains
   **Menu Music Navigation**, default On, restart-scoped. Controls → Interface Mapping gains
   **Background Music Play** before Reset All, with Next Track / Previous Track / Play/Pause

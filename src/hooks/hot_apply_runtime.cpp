@@ -13,6 +13,7 @@
 #include <rex/logging.h>
 
 #include "settings/schema.h"
+#include "loading/load_policy.h"
 #include "store/store_settings.h"
 
 namespace rb_blitz::settings {
@@ -28,6 +29,7 @@ struct HotRow {
 };
 
 constexpr HotRow kHotRows[] = {
+    {SettingId::kLoadGuard, "general.load_guard", "song_load_guard"},
     {SettingId::kVsync, "graphics.vsync", "vsync"},
     // The caption overlay's switch (owner request, 2026-10-14). Its cvar is defined by the game
     // itself (src/ui/help_overlay.cpp) and read on every draw, so the write takes effect on the
@@ -69,7 +71,13 @@ constexpr char kCvarError[] = "the applier has no cvar for this row";
 
 // The value as the cvar's own text form. `vsync` is a bool cvar; a value of the wrong kind is
 // refused rather than spelled, because a guessed spelling is how a write silently does nothing.
-bool CvarText(const Value& value, std::string* out) {
+bool CvarText(SettingId id, const Value& value, std::string* out) {
+  if (id == SettingId::kLoadGuard) {
+    uint32_t seconds = 0;
+    if (value.kind != ValueKind::kEnum || !loading::ParseLoadGuardSeconds(value.text, &seconds)) return false;
+    *out = value.text;
+    return true;
+  }
   if (value.kind != ValueKind::kBool) {
     return false;
   }
@@ -141,7 +149,7 @@ class CvarHotApplier : public HotApplier {
       return false;
     }
     std::string text;
-    if (!CvarText(value, &text)) {
+    if (!CvarText(id, value, &text)) {
       *error = "the row's value is not the kind its cvar takes";
       return false;
     }

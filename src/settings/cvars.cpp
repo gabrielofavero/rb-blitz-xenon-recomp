@@ -107,6 +107,8 @@ std::string_view CvarForSetting(SettingId id) {
       return "enhancements_menu_dlc_songs";
     case SettingId::kDlcScanThreads:
       return "dlc_scan_threads";
+    case SettingId::kLoadGuard:
+      return "song_load_guard";
     case SettingId::kHideOfflinePrompts:
       return "enhancements_skip_offline_dialog";
     case SettingId::kHideMainMenu:

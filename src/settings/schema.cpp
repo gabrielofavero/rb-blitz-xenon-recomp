@@ -146,6 +146,13 @@ std::vector<SchemaRow> BuildTable() {
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"general", "dlc_menu_songs"}, "dlc", "DLC Menu Songs",
                      "Play songs from your DLC library as the main menu's background music."));
+  {
+    Descriptor d = Make(SettingId::kLoadGuard, Category::kGeneral, Provider::kNative,
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("off"));
+    d.choices = Choices({{"off", "Off"}, {"30s", "30s"}, {"60s", "60s"}});
+    rows.push_back(Row(std::move(d), {"general", "load_guard"}, "dlc", "Load Guard",
+                       "Restart to the main menu if a song takes too long to load. Unsaved progress may be lost."));
+  }
   // `general.play_current_song`: the main menu's second entry exists only while this row is on and
   // the menu really has a DLC track playing (owner feature, 2026-10-14). It is consumed at boot, so
   // it is a restart row like the rest of the menu-shaping ones. On by default, like the cache row
@@ -429,6 +436,8 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kCacheDlcLibrary, ApplicationStrategy::kRestart, ""},
     {SettingId::kRefreshMusicLibrary, ApplicationStrategy::kRestart, ""},
     {SettingId::kDlcScanThreads, ApplicationStrategy::kRestart, ""},
+    {SettingId::kLoadGuard, ApplicationStrategy::kHot,
+     "Host atomic policy publication; the next attempt snapshots its deadline. See load_policy.h and song_load_monitor_tests.cpp."},
     // Read while the menu's music pool is built (src/hooks/shell_music.cpp, at
     // OnPostLoadXexImage), so a new process is what a change needs.
     {SettingId::kDlcMenuSongs, ApplicationStrategy::kRestart, ""},

@@ -4,19 +4,18 @@ Plans that are actively being worked. A plan moves here from [`../todo/`](../tod
 and leaves for [`../finished/`](../finished/) when it is delivered — one `git mv`, keeping its
 `YYYY-MM-DD-` prefix.
 
-The Song Load Guard work started on 2026-10-25 and lives in
-[`2026-10-13-load-guard.md`](2026-10-13-load-guard.md): part 1 is the feasibility record, part 2 the
-five implementation prompts, and part 3 the evidence from the controller and the trace hooks built so
-far. Automatic recovery, its setting and its popup are **not connected** — part 3 §4 is an explicit
-no-go until native cancellation and cleanup are measured, so the player-visible feature still does not
-exist. The document is a merge of three records, kept as `## Part N` sections so old citations still
-resolve:
+Song Load Guard **finished on 2026-10-26** and moved to
+[`2026-10-13-load-guard.md`](../finished/2026-10-13-load-guard.md).
+The owner confirmed fatal-load recovery, Can't Hold Us playback, 30s timeout/dialog,
+restored background music and subsequent playback. The final external-restart
+design supersedes same-process cancellation. Its five parts preserve the earlier
+records, so these old citations still resolve:
 
 | Old document | Now |
 | --- | --- |
-| `2026-10-13-load-guard-findings.md` | [`2026-10-13-load-guard.md`](2026-10-13-load-guard.md) part 1 |
-| `2026-10-13-load-guard-prompts.md` | [`2026-10-13-load-guard.md`](2026-10-13-load-guard.md) part 2 |
-| `2026-10-25-load-guard-runtime-findings.md` | [`2026-10-13-load-guard.md`](2026-10-13-load-guard.md) part 3 |
+| `2026-10-13-load-guard-findings.md` | [`2026-10-13-load-guard.md`](../finished/2026-10-13-load-guard.md) part 1 |
+| `2026-10-13-load-guard-prompts.md` | [`2026-10-13-load-guard.md`](../finished/2026-10-13-load-guard.md) part 2 |
+| `2026-10-25-load-guard-runtime-findings.md` | [`2026-10-13-load-guard.md`](../finished/2026-10-13-load-guard.md) part 3 |
 
 The plan filed here is [`2026-10-13-rhythmverse-store-plan.md`](2026-10-13-rhythmverse-store-plan.md) —
 the RhythmVerse customs catalogue inside the retail DOWNLOAD CONTENT store (P0 → P6 → P1 → P2 → P3 →

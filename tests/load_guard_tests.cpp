@@ -1,12 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
 #include "loading/load_guard.h"
+#include "loading/load_policy.h"
 #include <limits>
 
 using namespace rb_blitz::loading;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("committed policy publication is strict and attempts keep their snapshot");
+  CHECK_TRUE(PublishLoadGuardPolicy("30s"));
+  const auto snapshot = CurrentLoadGuardSeconds();
+  CHECK_EQ(snapshot, 30u);
+  CHECK_FALSE(PublishLoadGuardPolicy("15s"));
+  CHECK_EQ(CurrentLoadGuardSeconds(), 30u);
+  CHECK_TRUE(PublishLoadGuardPolicy("60s"));
+  CHECK_EQ(CurrentLoadGuardSeconds(), 60u);
+  CHECK_EQ(snapshot, 30u);
+  CHECK_TRUE(PublishLoadGuardPolicy("off"));
+  CHECK_EQ(CurrentLoadGuardSeconds(), 0u);
   LoadGuard guard;
   BeginCase("Off never cancels, including supported errors");
   auto gen = guard.Begin(Policy::kOff, 100);

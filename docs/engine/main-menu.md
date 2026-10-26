@@ -34,11 +34,15 @@ no simulated button press is required. Discovery and the normal background-song
 preparation still run, respecting DLC Menu Songs and its launch overrides.
 Recovery skips offline prompts for this boot and requests the existing native
 error popup once discovery returns to the stable main menu. The owner confirmed
-the shorter boot and successful Can't Hold Us playback; enabled background
-music on this route awaits follow-up acceptance after removing the initial
-recovery-only disable. See the
-[load-guard evidence](../plans/in-progress/2026-10-13-load-guard.md) part 4 and
+the shorter boot and successful Can't Hold Us playback, then confirmed restored
+background music and subsequent playback on the timed-out-load recovery boot
+after removing the initial recovery-only disable. See the
+[load-guard evidence](../plans/finished/2026-10-13-load-guard.md) part 4 and
 [the authored lifecycle](../../src/settings/menu_payload.cpp).
+The owner subsequently chose the same restart route for overdue song loads:
+Load Guard's Off/30s/60s policy now feeds the external deadline, and a one-shot
+30/60-second reason selects the corresponding native timeout message instead of
+the crash message. The stable-menu and once-only presentation gates are shared.
 
 ## Sources
 

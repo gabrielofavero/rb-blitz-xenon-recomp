@@ -8,7 +8,9 @@
 
 namespace rb_blitz::platform::song_load {
 bool ShouldRestart(uint32_t exit_code, bool loading);
-std::vector<std::string> RecoveryArguments(const std::vector<std::string>& arguments);
+bool DeadlineExpired(uint64_t now_ms, uint64_t deadline_ms);
+std::vector<std::string> RecoveryArguments(const std::vector<std::string>& arguments,
+                                         uint32_t timeout_seconds = 0);
 
 // Owns only host kernel handles. The monitor inherits a real handle to this
 // process and an anonymous shared page; it never opens a PID supplied by guests.
@@ -17,8 +19,10 @@ class Session {
   Session();
   ~Session();
   bool Start(const std::filesystem::path& monitor, const std::vector<std::string>& arguments,
-             const std::filesystem::path& log, std::string* error);
-  void SetLoading(bool loading);
+             const std::filesystem::path& log, std::string* error, bool recover_crashes = true);
+  // Deadline is a per-attempt snapshot. Zero disables timeout; completion/unload
+  // retires it atomically. A monitor claim commits restart before termination.
+  void SetLoading(bool loading, uint32_t timeout_ms = 0);
   uint32_t monitor_pid() const;
  private:
   struct Impl;

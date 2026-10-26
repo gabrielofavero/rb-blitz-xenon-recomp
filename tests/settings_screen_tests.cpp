@@ -3134,6 +3134,19 @@ void TestShowHeadersRow() {
 // `settings_service`); this is the row half, which lives in this table.
 std::vector<std::string> PageRows(const std::string& panel_name);
 
+void TestLoadGuardSurface() {
+  BeginCase("load guard is a native selector in both DLC settings contexts");
+  for (const auto& panel : {std::string("settings_dlc_panel"), PausePanel("settings_dlc_panel")}) {
+    const auto rows = PageRows(panel);
+    CHECK_EQ(std::count(rows.begin(), rows.end(), "settings_load_guard"), 1);
+  }
+  for (const auto* choice : {"Off", "30s", "60s"}) {
+    bool label = false;
+    for (const auto& entry : Labels()) if (entry.second == std::string("Load Guard: ") + choice) label = true;
+    CHECK_TRUE(label);
+  }
+}
+
 void TestMusicNavigationSurface() {
   BeginCase("music navigation: plain playback commands, five/six-row budgets and both back targets");
   ConfigureMenu({});
@@ -3837,7 +3850,7 @@ void TestRhythmVerseRows() {
   // P9-3: the store submenu leads the five-row page in both contexts.
   const std::vector<std::string> expected_dlc = {
       "settings_rhythmverse_menu", "settings_dlc_cache", "settings_dlc_refresh",
-      "settings_dlc_threads", "settings_dlc_menu"};
+      "settings_dlc_threads", "settings_load_guard", "settings_dlc_menu"};
   const std::vector<std::string> expected_store = {
       "settings_rhythmverse", "settings_rhythmverse_filter"};
   CHECK_TRUE(PanelRowSymbols("settings_dlc_panel") == expected_dlc);
@@ -4335,6 +4348,7 @@ int main(int argc, char** argv) {
   TestShowHeadersRow();
   TestSettingsLabelsRow();
   TestMusicNavigationSurface();
+  TestLoadGuardSurface();
   TestAchievementActionWording();
   return Finish();
 }
