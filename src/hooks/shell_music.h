@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "ui/menu_music_artwork.h"
 
 namespace rex {
 class Runtime;
@@ -36,6 +37,10 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 void StartQueuedPool();
 void PublishQueuedPool(bool during_loading = false);
 void CloseQueuedPool();
+
+// Worker-only bounded read. Opening under the session lock leases the existing
+// cache device until copied bytes are owned; art never mounts another package.
+ui::music::ArtRead ReadArtwork(const ui::music::ArtTag& tag, std::vector<uint8_t>* bytes);
 
 // Metadata key of the selection captured by rbbz-play/begin, including songs
 // appended after boot. The read_file hook returns it as a native Symbol.

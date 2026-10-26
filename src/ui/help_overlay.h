@@ -28,6 +28,7 @@
 #include <string_view>
 
 struct ImFontAtlas;  // imgui; only the font hook below needs the type
+struct ImFont;
 
 namespace rex::ui {
 class ImGuiDrawer;
@@ -47,6 +48,7 @@ std::unique_ptr<rex::ui::ImGuiDialog> CreateOverlay(rex::ui::ImGuiDrawer* drawer
 // rather than no caption at all. What it chose, and why, is logged, because "the caption got
 // bigger" is otherwise a claim with no evidence.
 void ConfigureCaptionFont(ImFontAtlas* atlas);
+ImFont* CaptionFont();
 
 // The thread-safe publish the caption sources call. Empty text hides the caption; text equal to
 // the current caption is a no-op, so publishing every frame cannot churn the UI thread.

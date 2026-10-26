@@ -753,8 +753,8 @@ SDK patch `0041-media-keys.patch` maps the three SDL media scancodes to existing
 the host latch translates them to SDL key names for capture and `HostKeyDown`.
 `drive_ui.ps1` adds media key names and E0 scan codes; the diagnostic navigator probe posts
 once after a configurable delay. Host tests drive no game UI. Windows media-key arbitration
-and physical-pad delivery remain unmeasured. No host player is added here; its mouse hit
-regions, event ordering and click-through proof remain P3. See the
+and physical-pad delivery remain unmeasured. P3’s host player mouse routing is described below;
+its live click-through acceptance awaits the owner’s test. See the
 [P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §§14 and 17.
 
 
@@ -766,3 +766,22 @@ cancelled execution, focus loss, modal/capture/loading ownership, teardown and s
 clear the burst. Full queues still report busy. Host tests reproduce double/triple Previous
 through a delayed restart and back to the boot song; owner listening confirmation is pending.
 See the [follow-up](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §15.
+
+
+### P3 player pointer ownership (2026-10-26)
+
+`menu_music_player.cpp` draws and routes in the same 96-DPI logical viewport; physical window
+coordinates are converted before hit testing. The player uses custom draw-list controls without
+pad/keyboard focus or ImGui button activation. `MouseCursor` routes events before writing raw
+button/wheel latches or queuing guest hover/Select/Back. The SDK ImGui listener observes mouse
+events first without handling them; the native listener at priority 1 then consumes player hits
+before the keyboard/mouse emulation at priority 0. This does not depend on the previous frame’s
+`WantCaptureMouse` value. Hovering the panel clears native mouse queue ownership while pad and
+media input remain available. Outside-player events retain the native route.
+
+Only an enabled left press and release on the same control posts a command; hold does not repeat,
+and dragging out cancels activation. Right-click and wheel over the panel are swallowed. A
+session/song/layout change, focus loss, modal/capture owner or hidden player cancels the armed
+control while retaining an already-consumed release. Mouse Support off leaves the player visible
+with disabled pointer controls. The guest poll independently rechecks scope and capabilities.
+Host tests cover these policy boundaries; the owner will validate live event delivery and DPI.

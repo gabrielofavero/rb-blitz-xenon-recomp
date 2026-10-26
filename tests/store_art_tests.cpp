@@ -134,9 +134,15 @@ void TestEnvelopeRefusals() {
   CHECK_TRUE(why.find("format word") != std::string::npos);
 
   std::vector<std::uint8_t> version_one = file;
+  std::copy(file.begin()+5,file.begin()+17,version_one.begin()+1);
+  std::fill(version_one.begin()+13,version_one.begin()+32,0);
   version_one[0] = 1;
-  CHECK_FALSE(ParseTextureEnvelope(version_one.data(), version_one.size(), &envelope, &why));
-  CHECK_TRUE(why.find("version 1") != std::string::npos);
+  CHECK_TRUE(ParseTextureEnvelope(version_one.data(), version_one.size(), &envelope, &why));
+  CHECK_EQ(envelope.version,1u);
+  CHECK_EQ(envelope.width,32u);
+  CHECK_EQ(envelope.height,32u);
+  version_one[0]=3;
+  CHECK_FALSE(ParseTextureEnvelope(version_one.data(),version_one.size(),&envelope,&why));
 
   std::vector<std::uint8_t> zero_width = file;
   zero_width[11] = 0;

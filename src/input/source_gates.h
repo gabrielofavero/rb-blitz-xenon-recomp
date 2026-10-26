@@ -252,11 +252,12 @@ class ActionEdges {
 inline bool HostDeviceConnected(const SourceGates& gates) { return gates.keyboard || gates.mouse; }
 
 // Whether the OS cursor belongs on screen: only while a native menu can use it, or while an
-// ImGui overlay asked for pointer capture. A live song shows no cursor (D3), which is also the
+// host player owns the pointer, or an ImGui dialog asked for capture. A live song shows no cursor (D3), which is also the
 // reason a gameplay mouse press cannot reach the native-menu queue - the queue only accepts
 // input while a menu is available.
-inline bool CursorVisible(bool mouse_support, bool menu_available, bool imgui_wants_capture) {
-  return mouse_support && (menu_available || imgui_wants_capture);
+inline bool CursorVisible(bool mouse_support, bool menu_available, bool imgui_wants_capture,
+                          bool player_pointer = false) {
+  return mouse_support && (menu_available || imgui_wants_capture || player_pointer);
 }
 
 // ---------------------------------------------------------------------------------------------

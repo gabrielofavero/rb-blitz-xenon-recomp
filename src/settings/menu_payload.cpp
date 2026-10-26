@@ -726,6 +726,79 @@ bool AddCrashRecoveryHooks(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
+bool AddNativeMusicFooter(std::vector<Node>* roots, std::string* why) {
+  if (!roots) return false;
+  auto staged = *roots;
+  auto* enter = PanelMethod(&staged, "splash_panel", "enter");
+  if (!enter || PanelMethod(&staged, "splash_panel", "rbbz_music_footer_poll")) {
+    if (why) *why = "unsupported splash footer lifecycle";
+    return false;
+  }
+  const auto sym = [](const char* value) { return Node::Symbol(value); };
+  const auto cmd = [](std::vector<Node> kids) { return Node::Command(std::move(kids)); };
+  const auto set = [&](bool value) {
+    return cmd({Node::Var("this"), sym("set"), sym("rbbz_music_footer"), sym(value ? "TRUE" : "FALSE")});
+  };
+  const auto clear = [&](const char* widget, const char* action) {
+    return cmd({sym(widget), sym("clear_action_token"), sym(action)});
+  };
+  const auto token = [&](const char* widget, const char* action, const char* text) {
+    return cmd({sym(widget), sym("set_action_token"), sym(action), sym(text)});
+  };
+  const auto var = [](const char* name) { return Node::Var(std::string("rbbz_music_") + name); };
+  const auto get = [&](const char* name) { return cmd({sym("continue.ihp"), sym("get"), sym(name)}); };
+  const auto property = [&](const char* name, Node value) {
+    return cmd({sym("continue.ihp"), sym("set"), sym(name), std::move(value)});
+  };
+  const auto gap = cmd({sym("-"), var("bx"), var("ax")});
+  // InlineHelp::DrawShowing (824D85E8) advances by the explicit spacing field,
+  // not by each label's width. Retail's one-action widgets both have spacing 0.
+  // One native four-action widget, anchored one A/B interval left of A, gives
+  // LB/A/B/RB without stacking labels or moving the original A/B anchor slots.
+  // Use the existing local-position messages; retain the original state for exit.
+  const auto enabled = Node::Property({sym("rbbz_music_footer")});
+  const auto disable = cmd({sym("do"), clear("continue.ihp", "kAction_PageUp"),
+      clear("continue.ihp", "kAction_Cancel"), clear("continue.ihp", "kAction_PageDown"),
+      cmd({sym("continue.ihp"), sym("set_local_pos"), var("ax"), var("ay"), var("az")}),
+      property("spacing", var("spacing")), property("horizontal", var("horizontal")),
+      token("back.ihp", "kAction_Cancel", "inline_help_back"), set(false)});
+  const auto enable = cmd({sym("do"),
+      cmd({sym("continue.ihp"), sym("get_local_pos"), var("ax"), var("ay"), var("az")}),
+      cmd({sym("back.ihp"), sym("get_local_pos"), var("bx"), var("by"), var("bz")}),
+      cmd({sym("set"), var("spacing"), get("spacing")}),
+      cmd({sym("set"), var("horizontal"), get("horizontal")}),
+      property("spacing", gap), property("horizontal", sym("TRUE")),
+      cmd({sym("continue.ihp"), sym("set_local_pos"), cmd({sym("-"), var("ax"), gap}), var("ay"), var("az")}),
+      clear("continue.ihp", "kAction_Confirm"),
+      token("continue.ihp", "kAction_PageUp", "rbbz_music_previous"),
+      token("continue.ihp", "kAction_Confirm", "inline_help_continue"),
+      token("continue.ihp", "kAction_Cancel", "inline_help_back"),
+      token("continue.ihp", "kAction_PageDown", "rbbz_music_next"),
+      clear("back.ihp", "kAction_Cancel"), set(true)});
+  const auto update = cmd({sym("if_else"), cmd({sym("file_exists"), Node::String("rbbz-play/footer")}),
+      cmd({sym("unless"), enabled, enable}), cmd({sym("if"), enabled, disable})});
+  const auto poll = cmd({Node::Var("this"), sym("rbbz_music_footer_poll")});
+  enter->kids.push_back(set(false));
+  if (auto* method = PanelMethod(&staged, "splash_panel", "poll")) method->kids.push_back(poll);
+  if (auto* method = PanelMethod(&staged, "splash_panel", "exit"))
+    method->kids.push_back(cmd({sym("if"), enabled, disable}));
+  // Grow the panel only after all pointers into its method vector are retired.
+  for (auto& root : staged) {
+    if (root.tag != ui::dtb::kCommand || root.kids.size() < 3 || root.kids[2].text != "splash_panel")
+      continue;
+    if (!PanelMethod(&staged, "splash_panel", "poll"))
+      root.kids.push_back(Node::Array({sym("poll"), poll}));
+    if (!PanelMethod(&staged, "splash_panel", "exit"))
+      root.kids.push_back(Node::Array({sym("exit"), cmd({sym("if"), enabled, disable})}));
+    root.kids.push_back(Node::Array({sym("rbbz_music_footer"), sym("FALSE")}));
+    root.kids.push_back(Node::Array({sym("rbbz_music_footer_poll"), update}));
+    break;
+  }
+  *roots = std::move(staged);
+  if (why) why->clear();
+  return true;
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
                       bool cached_dlc_list, bool refresh_row_active,
@@ -775,6 +848,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         return true;
       }) || !edit("ui/splash/gen/splash.dtb", [&](auto& roots) {
         if (!AddCrashRecoveryHooks(&roots, error)) return false;
+        if (screen::CurrentMenuConfiguration().background_music_navigation &&
+            !AddNativeMusicFooter(&roots, error)) return false;
         if (merge_provider) {
           // A compatible provider's own settings entry is *removed*: its pages are all reachable
           // from Help & Options now, so keeping a second button to the same things is one button
@@ -880,6 +955,16 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         }
       }
       SetDiscoveryCacheLabel(&roots, cached_dlc_list);
+      if (screen::CurrentMenuConfiguration().background_music_navigation) {
+        for (const auto& [key, text] : {std::pair{"rbbz_music_previous", "PREVIOUS"},
+                                       std::pair{"rbbz_music_next", "NEXT"}}) {
+          std::string why;
+          if (!screen::AddLocaleEntry(&roots, key, text, &why) && why != "the locale already has that key") {
+            if (error) *error = why;
+            return false;
+          }
+        }
+      }
       SetRefreshRowLabel(&roots, refresh_row_active);
       // Retail's own strings this surface restyles (the AV page's two checkboxes). A locale that
       // does not carry them, or carries a translation, is left alone by the same call.

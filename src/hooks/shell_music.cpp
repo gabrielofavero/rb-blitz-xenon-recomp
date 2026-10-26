@@ -315,6 +315,18 @@ std::string MountPath(size_t index) {
   return fmt::format("\\Device\\BlitzMenuMusic\\{}\\", index);
 }
 
+void CollectArtwork(rex::filesystem::Entry* node, const std::string& path, size_t depth,
+                    std::vector<std::string>& out) {
+  if (!node || depth > 6) return;
+  for (const auto& child : node->children()) {
+    const auto next = path + "\\" + child->name();
+    if (child->attributes() & rex::filesystem::kFileAttributeDirectory)
+      CollectArtwork(child.get(), next, depth+1, out);
+    else if (rb_blitz::shell_music::StreamIdentity(next).ends_with(".png_xbox"))
+      out.push_back(next);
+  }
+}
+
 // Runs on either the boot thread or the worker. No VFS registration, guest
 // memory, RNG or live pool access happens here.
 std::optional<PreparedPackage> PreparePackage(const std::filesystem::path& package, size_t index) {
@@ -332,11 +344,14 @@ std::optional<PreparedPackage> PreparePackage(const std::filesystem::path& packa
     const auto metadata = streams.empty() ? std::vector<rb_blitz::shell_music::SongMetadata>{}
                                          : FindSongMetadata(*prepared.device);
     const std::string alias = fmt::format("menumusic{}", index);
+    std::vector<std::string> artwork;
+    if (g_navigation_enabled) CollectArtwork(prepared.device->ResolvePath(""), "", 0, artwork);
     for (auto& stream : streams) {
       if (alias.size() + stream.size() + 2 > kBufferBytes) continue;
       auto key = rb_blitz::shell_music::SongKeyForStream(metadata, stream);
       if (!metadata.empty() && key.empty()) continue;
       PoolEntry entry{alias, stream, std::move(key)};
+      entry.artwork_locator = rb_blitz::ui::music::ResolveArtwork(stream, artwork);
       for (const auto& song : metadata) {
         if (song.key == entry.song_key &&
             rb_blitz::shell_music::StreamIdentity(song.stream) ==
@@ -949,6 +964,38 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
 
 namespace rb_blitz::shell_music {
 
+ui::music::ArtRead ReadArtwork(const ui::music::ArtTag& tag, std::vector<uint8_t>* bytes) {
+  using ui::music::ArtRead;
+  const auto snapshot = NowPlaying().ReadSnapshot();
+  if (!bytes || !snapshot.available || tag.epoch != snapshot.epoch ||
+      tag.song != snapshot.playback.track.song || tag.key != snapshot.playback.track.artwork_key)
+    return ArtRead::kMissing;
+  rex::filesystem::File* file = nullptr;
+  size_t size = 0;
+  {
+    std::lock_guard lock(g_mutex);
+    if (g_closing || !g_navigation_enabled || tag.song >= g_session.Sources().size())
+      return ArtRead::kMissing;
+    const auto& source = g_session.Sources()[tag.song];
+    if (source.artwork_locator != tag.key) return ArtRead::kMissing;
+    auto* device = g_cache.Get(g_session.Package(tag.song));
+    if (!device) return ArtRead::kDeferred;  // playback remounts; art adds no residency
+    auto* entry = device->ResolvePath(source.artwork_locator);
+    if (!entry || !entry->size() || entry->size() > 2*1024*1024) return ArtRead::kMissing;
+    size = size_t(entry->size());
+    if (entry->Open(rex::filesystem::FileAccess::kGenericRead, &file) != 0 || !file)
+      return ArtRead::kMissing;
+  }
+  // File's accounting pins the device across retirement without holding g_mutex
+  // over disk I/O. Destroy the lease before returning bytes to the decoder.
+  const auto destroy = [](rex::filesystem::File* value) { value->Destroy(); };
+  std::unique_ptr<rex::filesystem::File, decltype(destroy)> lease(file, destroy);
+  bytes->resize(size);
+  size_t read = 0;
+  return file->ReadSync(*bytes, 0, &read) == 0 && read == size
+      ? ArtRead::kReady : ArtRead::kMissing;
+}
+
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
   (void)game_data_root;
   REXLOG_INFO("shell_music: rolling session: one startup package, {} upcoming and {} recent "
@@ -1134,6 +1181,15 @@ int CurrentPoolIndex() {
 bool AnswerPlayQuery(const std::string_view path, bool* answer) {
   if (!path.starts_with(rb_blitz::shell_music::kPlayNamespace)) {
     return false;
+  }
+  if (path == "rbbz-play/footer") {
+    const auto snapshot = NowPlaying().ReadSnapshot();
+    if (answer) *answer = g_navigation_enabled && snapshot.available &&
+        snapshot.playback.track.source != MusicSource::kNone &&
+        rb_blitz::input::MainMenuMusicInputAvailable() &&
+        !rb_blitz::input::capture::Armed() && !rex::kernel::xam::xeXamIsUIActive() &&
+        !rb_blitz::graphics::GraphicsLoadingPending();
+    return true;
   }
   if (path == "rbbz-play/next" || path == "rbbz-play/previous" || path == "rbbz-play/pause") {
     const auto command = path == "rbbz-play/next" ? nav::Command::kNext :

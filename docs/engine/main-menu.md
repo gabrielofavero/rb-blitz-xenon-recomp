@@ -1284,7 +1284,7 @@ screen/capture gates on the guest thread.
 
 `PoolEntry` now owns title/artist plus an optional package-relative artwork locator. Package
 preparation copies parsed display metadata by exact stream/key; the catalog keeps it when a mount
-is retired. The locator stays empty until P3 proves asset resolution. `PlaySelection::Skipped`
+is retired. P3 fills the locator from an exact package-relative match (see §9). `PlaySelection::Skipped`
 clears automatic handoff grace for future presses while preserving an already captured press.
 No second playlist or mounted-cache cursor is introduced.
 
@@ -1316,7 +1316,8 @@ trial flag now only requests per-second diagnostics. The guest row shows binding
 Host production-hook tests
 cover navigation, cold targets, history/restart, automatic snapshots, title tracks and
 cancellation; title-only live pause, media-device attribution, guest layout and physical-pad input remain
-unproven. Footer/player/artwork remain P3. See the
+unproven. P3 implements footer/player/artwork (§9 below); live visual and mouse acceptance
+remains pending. See the
 [P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §§14 and 17 and
 `out/_swap/music-nav/p2-runtime/` for verification.
 
@@ -1329,3 +1330,66 @@ so a delayed command cannot become another restart. The ordinary playing-state f
 rule remains. Failed/cancelled requests and focus/scope/owner/session boundaries clear the burst.
 Seven music host tests pass; the owner retest remains pending. See the
 [navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §15.
+
+
+### 9. Navigator P3: footer, player and local covers (2026-10-26)
+
+The default-on switch gates the guest’s own footer and an independent bottom-right host player.
+The owner’s first P3 test confirmed the player mostly works and that the cover is visible live,
+although their capture shows the fallback. They requested the search interface’s Blitz styling,
+a lower position, no hover text, and native footer prompts. Those corrections supersede the
+initial host-drawn shoulder labels and blue player design.
+
+`AddNativeMusicFooter` extends the authored splash panel with a guest poll and a boolean latch.
+`rbbz-play/footer` reports the navigator’s main-menu/list/source and modal/loading availability;
+it never posts a transport command. On availability changes, the panel uses the existing
+`continue.ihp` and `back.ihp` widgets’ native `set_action_token`/`clear_action_token` methods.
+Previous/PageUp is inserted before Confirm on the first widget, and Next/PageDown after Cancel
+on the second, giving **LB Previous / A Select / B Back / RB Next** in guest glyphs and type.
+The new locale tokens are authored alongside the menu records. Unavailable/exit removes only the
+shoulder actions and preserves A/B; the setting-off boot adds no footer hook. Native inspection
+verified `InlineHelp::SetActionToken` (`0x824DABE8`) updates/appends and refreshes, while
+`ClearActionToken` (`0x824D9F20`) erases and refreshes. No host footer is drawn.
+
+`menu_music_player.cpp` uses the existing search keyboard theme directly: bold/condensed fonts,
+dark translucent background, layered red rails/glow, pale text and red hover/pressed controls.
+The panel’s bottom inset is 24 reference pixels at 720p, alongside the footer’s right margin.
+It keeps the square cover, UTF-8-safe ellipsis and transport icons, with no hover tooltips.
+Its independent dialog still draws with Settings Labels off. The lowered theme and native footer
+need the owner’s next live check, including small-window/DPI overlap and glyph spacing.
+
+The UI copies `NowPlayingSnapshot` and posts `kPlayer` commands with the observed session epoch.
+It never reads guest memory or calls native transport. A pending indicator means accepted work;
+the center icon changes only when the playback owner confirms playing/paused state. Results
+remain in the shared snapshot/diagnostics; loading-state pause is disabled. Focus, modal/capture,
+loading and menu/source gates hide the player and its hit regions. Mouse Support gates pointer
+controls; pad/media bindings retain their own gates. Explicit event routing before native mouse
+queueing is documented in [input-flow.md](input-flow.md).
+
+Package preparation matches each complete stream path to the actual entry
+`<stream-directory>/gen/<stream-basename>_keep.png_xbox`; a basename from another song directory
+cannot match. Display strings and exact asset locators remain owned by the stable catalog after
+mount retirement. Read-only probes verified this on a single-song package and the title’s merged
+25-song package: all 26 covers decoded to 256×256 pixels, and every native File lease returned
+from one to zero. Decoded samples were visually inspected outside the game.
+
+`menu_music_artwork.cpp` runs one decode plus one latest waiting job, retains at most eight
+256×256 RGBA covers (2 MiB), limits encoded reads to 2 MiB and input dimensions to 1024×1024.
+The worker opens under the music-cache lock, copies bytes outside it while the File counter pins
+the existing device, and releases the lease before decode. Artwork mounts no package and adds no
+residency beyond the existing eight-device cap; a cold device defers the optional read to the
+playback remount. The shared texture codec now decodes version-1 headers (signature at byte 1,
+without v2’s ID) as well as v2. Invalid/missing covers and title tracks use a neutral disc fallback.
+Epoch/song/art-key checks reject delayed results; hiding/disabling clears jobs, pixels and the
+visible texture. No network/store lookup is involved.
+
+SDK patch `0042-imgui-image-textures.patch` exposes `CreateImageTexture`,
+`ReleaseImageTexture` and a drawer generation. Creation delegates to the same RGBA8
+`ImmediateDrawer::CreateTexture` path used by the font atlas; `RenderDrawLists` uses the resulting
+`ImmediateTexture*` as its texture ID. Upload/release runs from the dialog’s UI draw thread.
+D3D12 and Vulkan already defer destroyed resources to their last-use submission fences. Drawer
+replacement clears owned textures and increments the generation, preventing attachment/release
+of obsolete IDs; the player uploads again from owned pixels. The bridge patch caps eight host
+textures at 512×512, while this player retains one at 256×256. Static backend inspection, builds,
+SDK patch replay and host artwork/click tests cover implementation; real GPU rendering, device
+reset and lifecycle soak still await the owner’s test.

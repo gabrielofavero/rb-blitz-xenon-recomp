@@ -227,18 +227,21 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
 
 }  // namespace
 
+ImFont* CaptionFont() { return g_caption_font; }
+
 void ConfigureCaptionFont(ImFontAtlas* atlas) {
   if (atlas == nullptr) {
     return;
   }
   const std::string directory = SystemFontDirectory();
+  static const ImWchar ranges[] = {0x20,0x024F,0x0370,0x052F,0x2000,0x206F,0};
   for (const char* candidate : kCaptionFontCandidates) {
     if (directory.empty()) {
       break;
     }
     const std::string path = directory + candidate;
     if (ImFont* font = atlas->AddFontFromFileTTF(path.c_str(), kCaptionBakedSize, nullptr,
-                                                atlas->GetGlyphRangesDefault())) {
+                                                ranges)) {
       g_caption_font = font;
       REXLOG_INFO("help_overlay: caption font '{}' baked at {:.0f} px", candidate,
                   static_cast<double>(kCaptionBakedSize));

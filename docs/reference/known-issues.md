@@ -27,14 +27,17 @@ It never continues a faulted guest. A 60s live run, live row application and
 broader provider/hardware coverage remain unmeasured. See the
 [load-guard evidence](../plans/finished/2026-10-13-load-guard.md) parts 4–5.
 
-**Menu-music navigator P2 limits (2026-10-26):** Next/Previous, persistent pad/key
+**Menu-music navigator acceptance limits (2026-10-26):** Next/Previous, persistent pad/key
 bindings and title-only navigation are implemented. **Native pause/resume is enabled:**
 the owner confirmed the trial works, and `rb_blitz_367.log` records a 7.285-second
 frozen-cursor pause and same-stream/same-position resume. No trial flag is required;
 the guest row displays the configured bindings. A separate title-only pause boot,
 Windows media-key arbitration, physical-pad input and guest layout/assignment/restart
-routes remain unmeasured. Footer/player/artwork remain P3. See the
-[navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §17.
+routes remain unmeasured. P3 footer/player/artwork are implemented; rendered-cover, layout/DPI,
+click-through and lifecycle soak acceptance await the owner’s test. Start is consumed on the
+main-menu option list when its configured pause action is available. Shoulder prompts now use the guest’s own InlineHelp widgets; their added-action layout
+awaits the owner’s next check. Another Windows media application may claim media keys. See the
+[navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §§17–18.
 The legacy `--background_music_nav_pause_trial` flag now only enables per-second
 cursor diagnostics. A final in-flight decoder block may settle after native pause;
 it is excluded from Previous's five-second playback-age counter.

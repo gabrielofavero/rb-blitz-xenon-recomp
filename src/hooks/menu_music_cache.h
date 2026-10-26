@@ -9,6 +9,10 @@ template <typename Device>
 class MusicMountCache {
  public:
   bool Contains(size_t package) const { return devices_.contains(package); }
+  Device* Get(size_t package) const {
+    const auto it = devices_.find(package);
+    return it == devices_.end() ? nullptr : it->second;
+  }
   size_t Size() const { return devices_.size(); }
   bool Full() const { return Size() >= MusicSession::kResidentLimit; }
   bool Insert(size_t package, Device* device) {

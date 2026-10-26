@@ -1,0 +1,63 @@
+diff --git a/include/rex/ui/imgui_drawer.h b/include/rex/ui/imgui_drawer.h
+--- a/include/rex/ui/imgui_drawer.h
++++ b/include/rex/ui/imgui_drawer.h
+@@ -44,6 +44,12 @@
+   // Per-overlay styling, patched by the consumer in OnConfigureStyle.
+   Style& style() { return style_; }
+   const Style& style() const { return style_; }
++
++  // UI/draw thread only. IDs remain valid until release or a drawer replacement.
++  // The backend defers GPU destruction to its submission fence.
++  ImTextureID CreateImageTexture(uint32_t width, uint32_t height, const uint8_t* rgba);
++  void ReleaseImageTexture(ImTextureID id, uint64_t generation);
++  uint64_t image_texture_generation() const { return image_texture_generation_; }
+ 
+   void AddDialog(ImGuiDialog* dialog);
+   void RemoveDialog(ImGuiDialog* dialog);
+@@ -113,6 +119,8 @@
+   // Resources specific to an immediate drawer - must be destroyed before
+   // detaching the presenter.
+   std::unique_ptr<ImmediateTexture> font_texture_;
++  std::vector<std::unique_ptr<ImmediateTexture>> image_textures_;
++  uint64_t image_texture_generation_ = 1;
+ 
+   // If there's an active pointer, the ImGui mouse is controlled by this touch.
+   // If it's TouchEvent::kPointerIDNone, the ImGui mouse is controlled by the
+diff --git a/src/ui/imgui_drawer.cpp b/src/ui/imgui_drawer.cpp
+--- a/src/ui/imgui_drawer.cpp
++++ b/src/ui/imgui_drawer.cpp
+@@ -328,6 +328,25 @@
+   }
+ }
+ 
++ImTextureID ImGuiDrawer::CreateImageTexture(uint32_t width, uint32_t height,
++                                           const uint8_t* rgba) {
++  if (!immediate_drawer_ || !rgba || !width || !height || width > 512 || height > 512 ||
++      image_textures_.size() >= 8) return ImTextureID{};
++  auto texture = immediate_drawer_->CreateTexture(width, height,
++      ImmediateTextureFilter::kLinear, false, rgba);
++  if (!texture) return ImTextureID{};
++  auto id = reinterpret_cast<ImTextureID>(texture.get());
++  image_textures_.push_back(std::move(texture));
++  return id;
++}
++
++void ImGuiDrawer::ReleaseImageTexture(ImTextureID id, uint64_t generation) {
++  if (generation != image_texture_generation_) return;
++  std::erase_if(image_textures_, [id](const auto& texture) {
++    return reinterpret_cast<ImTextureID>(texture.get()) == id;
++  });
++}
++
+ void ImGuiDrawer::SetupFontTexture() {
+   if (font_texture_ || !immediate_drawer_) {
+     return;
+@@ -366,6 +385,8 @@
+     GetIO().Fonts->TexID = ImTextureID{};
+     font_texture_.reset();
+   }
++  image_textures_.clear();
++  ++image_texture_generation_;
+   immediate_drawer_ = new_immediate_drawer;
+   // Eagerly upload the font atlas only when a presenter is attached (SDK mode).
+   // In detached mode (presenter_ == nullptr) the app's renderer device may not

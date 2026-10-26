@@ -205,6 +205,8 @@ set(RBBLITZ_SOURCES
     # ImGui overlay the captions are drawn on.
     src/ui/help_topics.cpp
     src/ui/help_overlay.cpp
+    src/ui/menu_music_player.cpp
+    src/ui/menu_music_artwork.cpp
     src/ui/keyboard_theme.cpp
     src/hooks/help_observer.cpp
     # P0 of the RhythmVerse store plan: the catalogue client and its URL/byte policy (SDK-free) plus
@@ -996,10 +998,24 @@ if(BUILD_TESTING)
     add_test(NAME menu_music_guest COMMAND rb_blitz_menu_music_guest_tests)
 
     add_executable(rb_blitz_menu_music_runtime_tests tests/menu_music_runtime_tests.cpp
-        src/input/menu_music_nav.cpp src/hooks/menu_music_now_playing.cpp)
+        src/input/menu_music_nav.cpp src/hooks/menu_music_now_playing.cpp
+        src/ui/menu_music_artwork.cpp src/assets/texture_codec.cpp
+        src/hooks/menu_music_metadata.cpp src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_menu_music_runtime_tests PRIVATE src)
     target_link_libraries(rb_blitz_menu_music_runtime_tests PRIVATE rex::runtime)
     add_test(NAME menu_music_runtime COMMAND rb_blitz_menu_music_runtime_tests)
+
+    add_executable(rb_blitz_menu_music_player_tests tests/menu_music_player_tests.cpp
+        src/ui/menu_music_artwork.cpp src/assets/texture_codec.cpp)
+    target_include_directories(rb_blitz_menu_music_player_tests PRIVATE src)
+    add_test(NAME menu_music_player COMMAND rb_blitz_menu_music_player_tests)
+    set_tests_properties(menu_music_player PROPERTIES TIMEOUT 20)
+
+    add_executable(rb_blitz_menu_music_artwork_probe tools/menu_music_artwork_probe.cpp
+        src/ui/menu_music_artwork.cpp src/assets/texture_codec.cpp
+        src/fs/dlc_song_metadata.cpp src/hooks/menu_music_metadata.cpp src/ui/dtb_author.cpp src/ui/menu_options.cpp)
+    target_include_directories(rb_blitz_menu_music_artwork_probe PRIVATE src)
+    target_link_libraries(rb_blitz_menu_music_artwork_probe PRIVATE rex::runtime)
 
     # The menu filter's edit (src/ui/menu_options.cpp): the compiled DTA grammar, the
     # byte-neutral rewrite and the title's SHA-1, run against a synthetic fixture built

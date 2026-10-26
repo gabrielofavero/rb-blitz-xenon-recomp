@@ -206,19 +206,14 @@ bool ParseTextureEnvelope(const std::uint8_t* data, std::size_t size, TextureEnv
     return false;
   }
   const std::uint8_t version = data[0];
-  if (version == 1) {
-    // Three shipped files are version 1 (`gem_ulti`, `gstar1`, `logo_anim`) and their header lays
-    // its dimensions out differently from the version 2 files this codec writes. The engine reads
-    // them itself; nothing here produces or consumes them, so the honest answer is a refusal rather
-    // than a guess that would misread a texture's size.
-    if (why) *why = "envelope version 1 is not decoded by this build (only version 2 is written)";
-    return false;
-  }
-  if (version != 2) {
+  if (version != 1 && version != 2) {
     if (why) *why = "unknown envelope version " + std::to_string(version);
     return false;
   }
-  const std::uint16_t format_word = ReadLe16(data + 5);
+  // Local DLC covers (single-song and merged Blitz pack) use v1: the
+  // signature starts at 1, without v2's four-byte ID. Both have 32-byte envelopes.
+  const size_t signature = version == 2 ? 5 : 1;
+  const std::uint16_t format_word = ReadLe16(data + signature);
   TextureFormat format;
   switch (format_word) {
     case 0x0804:
@@ -232,14 +227,13 @@ bool ParseTextureEnvelope(const std::uint8_t* data, std::size_t size, TextureEnv
       return false;
   }
   TextureEnvelope parsed;
-  parsed.version = 2;
-  parsed.id = ReadLe32(data + 1);
+  parsed.version = version;
+  parsed.id = version == 2 ? ReadLe32(data + 1) : 0;
   parsed.format = format;
-  // The mip count, the dimensions and the pitch sit at the same offsets in every version 2 file.
-  parsed.mip_levels = std::uint32_t(data[10]) + 1;
-  parsed.width = ReadLe16(data + 11);
-  parsed.height = ReadLe16(data + 13);
-  parsed.pitch_dwords = ReadLe16(data + 15);
+  parsed.mip_levels = std::uint32_t(data[signature + 5]) + 1;
+  parsed.width = ReadLe16(data + signature + 6);
+  parsed.height = ReadLe16(data + signature + 8);
+  parsed.pitch_dwords = ReadLe16(data + signature + 10);
   if (parsed.width == 0 || parsed.height == 0) {
     if (why) *why = "a zero dimension";
     return false;

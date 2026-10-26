@@ -1,11 +1,12 @@
 # Background music navigator — implementation plan
 
-**Status:** P1/P2 implementation complete (2026-10-26), broader live acceptance pending.
-P2 connects Next/Previous, persistent action bindings, pad/media input, title-track
-navigation, native pause/resume and playback snapshots. The owner confirmed the pause
-trial works; `rb_blitz_367.log` proves a frozen cursor across 7.3 seconds and same-stream,
-same-position resume. Pause now works in ordinary boots without a trial flag. Footer,
-player and artwork remain P3. See §§14–17 for implementation and evidence limits.
+**Status:** P1–P3 implementation present (2026-10-26); P3 live acceptance pending.
+P2 connects shared navigation, persistent bindings and owner-accepted native pause/resume.
+P3 adds native guest shoulder prompts, an independent clickable bottom-right player, local package covers,
+bounded asynchronous artwork and explicit pointer ownership. The owner chose to perform
+P3 game/UI testing themselves. The owner confirms the player mostly works and the cover is visible live. The follow-up lowers
+and themes the player, removes hover text and replaces host footer text with native guest prompts.
+That revision’s guest layout, mouse/DPI acceptance and lifecycle soak remain unproven; the plan stays in progress. See §§17–18 for evidence.
 
 **Scope revision (2026-10-26, owner).** The two controls the feature cannot ship without are in
 scope, and the plan is corrected to match the tree: the **on/off setting** moves from
@@ -111,7 +112,7 @@ until P2 proves live source setup and input/pause ownership. See §12 for the fo
 | **D4** | **The 5-second rule uses sample progress since playback begins** (`Stream+0xA0` delta / 44,100), excluding the native random offset and decoded reserve, not wall time. Manual starts use zero offset (owner acceptance fix, §14). A track that is still loading counts as "< 5 s". "First song" means cursor 0 → restart. Next/Previous always resume playback if paused. |
 | **D5** | **Native pause/resume, verified in §17.** StandardStream slot 7 pauses the channels and changes `Stream+0x14` from 3 to **5**; slot 6 resumes them at the same position. The Play hook prevents the guest poll from auto-resuming an owned pause. The owner confirms listening behavior, and `rb_blitz_367.log` proves a 7.285-second stable cursor and same-position resume. The earlier state-4 guess is superseded. Defer the `Playback` watchdog while paused; a manual move starts its successor playing. A final in-flight decoder block may settle during pause and is excluded from playback age. Never fake pause by muting or restarting. |
 | **D6** | **Buttons are consumed on the main menu only** (`splash_screen` *and* its option list drawn), while the setting is on and a menu-music source exists. Bits: LB `0x0100`, RB `0x0200`, Start `0x0010`; media keys ride the existing keyboard gate (`keyboard_support`). One command per physical press (rising edge), keyboard hold does not repeat. |
-| **D7** | **The footer is host-drawn beside retail's, never a payload/locale edit.** `help_overlay.cpp` draws `LB Previous` immediately left of the guest's A prompt and `RB Next` right of B, same baseline and face, only while the setting is on, the main menu is current and a menu-music source exists. The guest's `A Select / B Back` is left untouched (its button glyphs are guest art; strings are ours and are recorded as such). |
+| **D7** | **Native guest footer (owner correction, 2026-10-26; §19).** Supersedes the original host-text design. Extend the splash panel’s existing `continue.ihp` and `back.ihp` action lists through authored DTA and native `set_action_token`/`clear_action_token`: Previous/PageUp before Confirm, Next/PageDown after Cancel. `rbbz-play/footer` gates source/main-menu/modal availability. Native button glyphs, font and layout render all four prompts; off/exit restores A/B. No host footer drawing. |
 | **D8** | **Play Current Song follows the navigated song through the existing probe, with one fix.** The probe answers at press time, so it already names the audible song; the 2 s "recent" grace in `PlaySelection` must be cleared on a *manual* transition or a press right after Next/Previous would name the song that just left. |
 | **D9** | **Commands travel as host state, not guest calls.** The input filter only *posts* a command (`rbbz-play/next|previous|pause` from the Controls page, or a rising edge in the filter). The per-frame poll applies it on the guest thread, the same place R9's handover already runs. |
 | **D10** | Nothing is committed or pushed without the owner's approval. |
@@ -217,11 +218,14 @@ If none holds, D5's fallback applies and the Play/Pause row is drawn unavailable
 
 ### 4.5 The footer
 
-`DrawMainMenuMusicFooter` reads `VisibleMenuRows()` (screen name + drawn list), the setting's cvar,
-and `shell_music::NavigatorHasSource()`; it draws two `ImGui::TextUnformatted` runs on the prompt
-band's baseline. The x positions are calibrated from a boot capture (P3): the guest prompt cluster
-is centred at `0.5 * DisplaySize.x`; `LB Previous` ends one measured gap left of it, `RB Next`
-starts one gap right of it. No cover rectangle: nothing of the guest's is replaced.
+The owner corrected the initial host-text implementation (§19). `AddNativeMusicFooter` authors
+splash-panel poll/exit hooks for the existing `continue.ihp` and `back.ihp` widgets.
+`rbbz-play/footer` reports eligible menu/source availability without posting a command. The
+native action lists become Previous/PageUp, Confirm on the first widget and Cancel,
+Next/PageDown on the second. New `rbbz_music_previous` / `rbbz_music_next` locale tokens carry
+PREVIOUS / NEXT; the original A/B tokens are retained. Only transitions write action lists;
+off/unavailable/exit removes the two added actions. The setting-off boot adds no footer hook.
+The guest’s own glyph/font/layout now owns prompt rendering; no ImGui footer text remains.
 
 ### 4.6 The player and its snapshot
 
@@ -436,10 +440,10 @@ bridge and local artwork path, complete the acceptance sweep and update the docs
 
 **Deliverable**
 
-1. `src/ui/help_overlay.cpp`: `DrawMainMenuMusicFooter(io)` before the caption early-out; draws
-   `LB Previous` / `RB Next` on the guest prompt band's baseline, only with the setting on, the
-   main menu current and a source available; x offsets are the P3 calibration constants (measure
-   the prompt cluster at 16:9 and 21:9 in one boot each).
+1. **Owner-corrected native footer (§19):** `AddNativeMusicFooter` in `src/settings/menu_payload.cpp`
+   extends the existing guest InlineHelp widgets and locale records. `rbbz-play/footer` reports
+   eligibility from the playback owner. Guest glyphs/font/layout draw Previous/A/B/Next;
+   the original `DrawMainMenuMusicFooter` host implementation is removed.
 2. `src/ui/menu_music_player.{h,cpp}` plus lifecycle registration/source-list wiring: the compact
    player in §4.6 with cover/title/artist and clickable Previous/Play-Pause/Next. Consume the P2
    snapshots and post through the shared command queue. Respect switch, main-menu/source,
@@ -953,3 +957,115 @@ and `menu_payload` were rerun and both pass (`tests-final-labels.log`). Document
 validation remains at 44 existing errors / 87 warnings, with no introduced finding
 identities, and `git diff --check` passes. The additional existing link error is
 the concurrently moved button-layout plan, outside this music change.
+
+
+## 18. P3 implementation and owner test handoff (2026-10-26)
+
+**Implemented; live visual/mouse acceptance awaits the owner.** The owner selected
+“I’ll test the build myself” after the release build succeeded. No game/UI was driven by the
+agent for P3. The historical P1/P2 “footer/player/artwork remain P3” statements above are
+superseded by this section; earlier one-shot mapping-page and unavailable-pause descriptions
+remain historical, superseded by §§14 and 17.
+
+- `help_overlay.cpp` draws shoulder footer text before the caption early-out. The separate
+  `menu_music_player.cpp` dialog draws a compact translucent bottom-right panel, square cover,
+  owned title/artist, tooltips, UTF-8-safe ellipsis and three transport controls. It shares the
+  player-facing font and does not depend on Settings Labels. Main-menu/list/source, switch,
+  focus, modal/capture and loading gates are checked at draw and event time. The center icon
+  follows confirmed transport; loading-state pause is disabled. Accepted commands show pending,
+  never an optimistic transport change; failures return through the existing snapshot.
+- Mouse events route at the native listener before raw latches, guest hover/Select/Back/wheel
+  queues and keyboard/mouse emulation. Press/release on the same enabled left control posts once;
+  hold, drag-out, disabled and right controls cannot post. A consumed sequence owns its release
+  across visibility/focus/modal/session boundaries. Layout/DPI changes invalidate stale bounds.
+  Mouse Support off leaves the player visible with disabled pointer controls. No new execution
+  button was added to the owner’s Assign / Reset mapping pages.
+- Exact package-relative covers are resolved from the full stream directory and basename,
+  retaining actual entry spelling in the stable catalog. Preparation skips the artwork walk
+  when navigation is off. The bounded worker reads through existing cache devices with short
+  native File leases; artwork never creates another package mount or evicts active audio.
+  Cold reads defer to playback’s remount. It copies at most 2 MiB encoded bytes, validates input
+  dimensions before decode (1024×1024 maximum), caches eight 256×256 RGBA covers (2 MiB), and
+  queues one latest job behind one running job. Epoch/song/art-key tags reject late completions.
+  Hide/reset/off clears pending work and owned visible pixels/texture. Missing/invalid art and
+  title tracks use the neutral disc cover. There is no network/store dependency.
+- Real local probes found version-1 Xbox covers, exposing a shared-codec limitation before UI
+  testing. `texture_codec.cpp` now reads the v1 signature at byte 1, with dimensions four bytes
+  before v2’s fields; the envelope remains 32 bytes. A single-song package decoded **1/1** cover,
+  and the merged Blitz package decoded **25/25**, all to 256×256. Every read’s File count was
+  **1 → 0**. Decoded +44 and Some Nights covers were visually inspected outside the game.
+  This proves local resolution/read/decode, not GPU rendering.
+- SDK patch **0042-imgui-image-textures.patch** exposes drawer-owned image create/release and
+  generation APIs. It delegates RGBA upload to the same `ImmediateDrawer::CreateTexture` used by
+  the font atlas and rendering to the existing ImGui `ImmediateTexture*` draw-list path. D3D12
+  and Vulkan already defer destruction to last-use submission fences. Calls run on UI draw;
+  replacement clears textures and advances the generation. The API limits eight 512×512 images;
+  the player holds one 256×256 image and reuploads owned pixels after replacement. The numbered
+  patch passes exact pristine-HEAD stack replay; no untracked SDK edit is required.
+
+Evidence is under `out/_swap/music-nav/p3-acceptance/`: release build logs, music/full test logs,
+real-package cover probe logs and decoded samples, SDK replay audit, and before/after docs reports.
+The host player suite covers pointer geometry/DPI, one post per release, disabled controls,
+drag/session/resize/cancel boundaries, exact path resolution, v1/v2 decoding, corrupt/bounded
+inputs, delayed completion rejection, latest-job replacement, disable/reset, retry and LRU eviction.
+The production ShellMusic fixture continues to cover guest command completion and native transport
+with synthetic callees.
+
+**Still required from the owner:** actual player/GPU cover rendering for both package shapes,
+automatic/manual metadata changes, Previous on both sides of five seconds, pause/resume clicks,
+no click-through/double-posts, outside-player routing, focus/modal/mouse-off/nav-off behavior,
+16:9/21:9/small-window/non-default-DPI captures, and repeated-skip/refresh/renderer-teardown soak.
+Footer baseline and prompt-cluster constants remain provisional until those captures calibrate
+them. A title-only live boot and the broader P2 physical-pad/media/assignment/restart matrix also
+remain unmeasured. Do not move this plan to `finished/` or claim P3 live acceptance on host tests.
+
+
+**Final host verification:** `cmake --build --preset win-amd64-release` succeeds with the
+final DPI guard and production artwork-read regression. All **eight music suites** pass;
+the full release roster is **86/87**, with only the previously recorded `path_policy`
+assertion at `tests/path_policy_tests.cpp:88` failing. The obsolete version-1 refusal
+expectation was replaced with actual v1 parse/decode coverage; `store_art` passes. The
+Vulkan-off debug subset (`menu_music_player`, `menu_music_nav`, `store_art`) is **3/3**.
+Documentation reports **43 existing errors / 87 warnings**, with no new check/file/detail
+identities against the 44-error / 87-warning baseline (an unrelated plan edit removed one
+existing finding). Both working-tree and staged `git diff --check` pass. Evidence:
+`build-final.log`, `tests-full-final.log`, `tests-debug-final.log`, `docs-before.json`,
+`docs-after.json`, `art-single.log` and `art-merged.log` in the P3 evidence directory.
+The owner closed the running game for the final relink; the current binary includes all
+functional changes. No commit/push was performed by this agent.
+
+
+## 19. Owner P3 review: search theme and native footer (2026-10-26)
+
+The owner reports **“It mostly works”** and confirms the album cover is present live even
+though their capture shows the neutral fallback. They requested no hover text, a lower player,
+the search interface’s Blitz styling and a **real guest footer modification**, superseding D7’s
+original host labels and §18’s initial blue player/footer implementation.
+
+- The player now reads the existing keyboard/search theme directly: condensed/bold fonts,
+  dark translucent fill, three layered red rails/glow, pale text and red button feedback.
+  The reference bottom inset changes **105 → 24 pixels at 720p**. Drawing and pointer bounds
+  use the same updated layout. All transport and metadata hover tooltips are removed.
+- Host footer drawing is deleted. `AddNativeMusicFooter` extends the authored splash panel’s
+  existing `continue.ihp` / `back.ihp` action lists through the native InlineHelp API. The lists
+  become Previous/PageUp, Confirm and Cancel, Next/PageDown. Original `inline_help_continue`
+  (verified locale text **SELECT**) and `inline_help_back` remain; new locale entries supply
+  PREVIOUS / NEXT. Native glyphs/font/layout draw the prompts. Only availability transitions
+  update them; source/menu/modal loss and exit remove shoulder actions and retain A/B. Off boots
+  add no footer script. The `rbbz-play/footer` read-only query never posts a playback request.
+- Static native inspection verified `SetActionToken` (`0x824DABE8`) searches existing actions,
+  updates or appends, and calls the label refresh; `ClearActionToken` (`0x824D9F20`) removes and
+  refreshes. The real splash scene declares both InlineHelp widgets. Guest lifecycle tests
+  round-trip the authored DTB, execute availability/on/off/repeated-poll/exit paths, check action
+  order, preserve provider handlers and reject incompatible/duplicate authoring atomically.
+  Production runtime tests cover footer query gates without generating transport commands.
+
+**Verification:** the release rebuild succeeds; all **12 targeted release suites** pass.
+A read-only payload build against the extracted game records passes **2,654 checks**, all eight
+store/messages/recommendations combinations, with **zero refused transforms**. The Vulkan-off
+debug player/menu-payload suites also pass. Evidence: `build-owner-followup.log`,
+`tests-owner-followup.log`, `guest-records-owner-followup.log` and
+`tests-debug-owner-followup.log` under `out/_swap/music-nav/p3-acceptance/`. Earlier full-release
+validation remains 86/87 (existing path-policy failure); it predates this follow-up. The agent
+has not navigated the game. Native prompt spacing/glyph layout and the lowered theme now await
+the owner’s next visual test; broader DPI/soak acceptance remains pending.

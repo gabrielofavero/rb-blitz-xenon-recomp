@@ -525,6 +525,10 @@ int main() {
     // Mouse support off hides it even with a menu up.
     CHECK_FALSE(CursorVisible(false, true, false));
     CHECK_FALSE(CursorVisible(false, true, true));
+    // The player suppresses native mouse focus without becoming an ImGui window.
+    CHECK_TRUE(CursorVisible(true, false, false, true));
+    CHECK_FALSE(CursorVisible(false, false, false, true));
+    CHECK_FALSE(CursorVisible(true, false, false, false));
   }
 
   BeginCase("a remapped key changes the delivered pad, and the packet number says so");

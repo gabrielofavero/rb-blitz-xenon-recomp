@@ -1,7 +1,7 @@
 # Button layout hot-swapping — button glyphs and controller art
 
-**Status: planning, 2026-10-19. No code has been changed by this document.** The format measurement
-in §2.3 was made today and its decoded evidence is in
+**Status: planning, created 2026-10-19; scope revised 2026-10-26. No implementation is delivered by
+this revision.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
 
@@ -10,6 +10,15 @@ player choose a controller scheme in Help & Options, hot-swaps it without a rest
 automatically between controller and keyboard/mouse art based on the last real input. It also adds
 an **optional installer flow** that extracts the one platform-specific asset from the user's own
 Rock Band Blitz PS3 package, and a **tracked authoring structure** under `assets/controller/`.
+Both mapping screens display bound inputs as images, and the game's action hints follow the
+effective bindings. Keyboard/mouse icons are built in and always available; only controller art
+is selectable.
+
+The 2026-10-26 revision supersedes the static-keyboard limitation formerly in D12, renames the
+setting to **Controller Layout**, expands the controller catalog to seven families, and adds
+**P8–P10** for input-icon resolution, mapping-row images, and remap-aware guest hints. Existing
+prompt ids are retained; the dependency graph defines execution order. Live behavior remains
+**unproven** until the corresponding implementation and acceptance prompts pass.
 
 ## 1. Request, normalized
 
@@ -18,13 +27,26 @@ Rock Band Blitz PS3 package, and a **tracked authoring structure** under `assets
 | R1 | Replace the **button glyphs** (A/B/X/Y, LB/RB, LT/RT, Start/Back, LS/RS, D-pad, and the other slots the sheet carries) and the **controller-layout art** shown on the retail Control Preset page — everywhere the title draws them, not only on that page. |
 | R2 | The installer offers an **optional Rock Band Blitz PS3 `.pkg`** and extracts exactly the assets this feature needs. If the user supplies it, a **PS3 layout** appears in the in-game list. |
 | R3 | A tracked structure under `assets/controller/` where the owner leaves PNGs (and a small manifest) to build a **custom scheme package**. |
-| R4 | A **keyboard layout** is the default when keyboard/mouse input is active. The game watches real input and **hot-switches** to the controller art on controller movement, and to the keyboard art on keyboard or mouse input. |
-| R5 | On Help & Options the player can select among the **available controller layouts**; choosing one **hot-swaps without restarting the game**. |
-| R6 | The owner will author **Xbox Series**, **PS5**, **Nintendo Switch** and **Keyboard**. PS3 is generated from the user's own package. Custom packages are discoverable. |
-| R7 | With no scheme installed the title draws **retail art**, exactly as today. A player who never opens the page sees no change. |
+| R4 | **Keyboard/mouse icons are built in, always available, and not selectable or replaceable by controller packages.** Real keyboard/mouse input switches ordinary action hints to their effective key/mouse icons; real controller input switches back to the selected controller family. |
+| R5 | Help & Options calls the setting **Controller Layout**. Each accepted click/selection applies immediately and visibly previews the new controller icons, including when selected with keyboard/mouse; no Apply, screen exit, restart, or subsequent controller input is needed. |
+| R6 | Seven controller families: **Xbox 360** (default, base-game art), **PlayStation 3** (local import), **Xbox Series**, **PlayStation Series**, **Nintendo Switch**, **Steam Controller**, and **Steam Deck**. The latter five use owner-authored art; custom controller packages remain discoverable. |
+| R7 | With no custom controller scheme installed, controller art falls back to **Xbox 360** from the base game. Built-in keyboard/mouse icons and binding-aware hints remain available while the feature is enabled. |
 | R8 | No game art is committed, bundled or downloaded. PS3-extracted art lives only in the user's install or user-data folder and is never redistributed. |
 | R9 | R4's existing `enhancements_icon_schemes` toggle and the settings program's contracts are honoured; the feature is documented in `engine/toggles.md` and the settings documents. |
 | R10 | Tests, a live acceptance harness and the documents named in §10 are part of the change. |
+| R11 | **Interface Mapping and Gameplay Mapping** render bound inputs as button/key/mouse images side by side, in saved binding order, instead of textual input names. For example, `Confirm: [A icon] [Enter keycap]` contains two images; the action label remains text. Mapping rows show all bindings; overflowing rows use the guest's layout/scrolling with no silent omission. |
+| R12 | The **effective Interface Mapping dictates every interface footer and action hint**: mapping physical Y to Confirm draws Y in the selected controller family wherever Confirm is offered. For multiple controller or keyboard/mouse bindings, ordinary hints show the **first mapped source in the active device family**. Rebinding, reset, and profile changes refresh visible hints live. Gameplay hints use the effective Gameplay Mapping/preset for their context. |
+
+### 1.1 Scope cross-check, 2026-10-26
+
+| Owner request | Earlier coverage | Revised delivery |
+| --- | --- | --- |
+| Images in both mapping screens | Missing; existing scope replaced sheets only | R11, D13, P8/P9 |
+| Setting called Controller Layout | Used `Button Icons` / `Layout` | R5, D6, P3 |
+| Keyboard/mouse always present with live switching | Switching planned, keyboard depended on an authored package | R4, D4/D8, P4/P8 |
+| Bindings dictate footer and game hints; first source per family | Explicitly excluded by static D12 | R12, rewritten D12, P8/P10 |
+| Immediate preview on selection | Hot apply planned, keyboard-driven preview unspecified | R5, D14, P3/P4 |
+| Seven controller families | Xbox Series, PS5, Switch and an authored Keyboard package | R6, §4.6, P2/P6a/P6b |
 
 ## 2. What exists today
 
@@ -63,6 +85,10 @@ must therefore reach that routed screen, not a new screen of ours.
 - `HotApplier` (`src/settings/hot_apply.h`) is the live-apply seam; a row is `kHot` only with
   `strategy_evidence` naming a measured live effect. `interface.settings_labels` is the precedent.
 
+The following input notes are the **2026-10-19 snapshot**; current mapping surfaces are called
+Interface Mapping and Gameplay Mapping. P8 must inspect their effective binding APIs rather than
+derive a new icon table from the old default-key list.
+
 `[tree]` The input layer already exposes the physical devices without the SDK's synthetic
 keyboard-to-pad emulation:
 
@@ -75,6 +101,11 @@ keyboard-to-pad emulation:
   table is on by default (2026-10-19).
 - There is **no last-device tracker** yet; the source gates decide whether a device may act, not
   which device last acted.
+
+`[tree, inspected 2026-10-26]` `src/profile/input_rows.{h,cpp}` owns `BindingRowLabel` and
+`InterfaceTargetLabel`; `src/ui/settings_screen.cpp` has `LiveBindingRows` and separate Interface
+Mapping / Gameplay Mapping pages. These are inspection starting points for P8/P9, not evidence
+that either image rows or remap-aware guest hints already work.
 
 `[tree]` The SDK's texture path is a common base plus two backends:
 
@@ -137,18 +168,20 @@ button sheet and which is each pad. §3 D1 makes that P1's measurement.
 
 | Id | Decision |
 | --- | --- |
-| **D1** | **Hot swap is a host texture override, not a file swap.** The SDK texture cache gains a generic override provider; the project supplies replacement RGBA for a slot, keyed by a measured fingerprint of the guest texture (dimensions + content hash, with the scene-read order as the fallback). The guest scene, DTB and archive are never edited at runtime. A scene-reload route (VFS overlay + forced resource reload) is the fallback only if P1 proves the override cannot be made safe. |
+| **D1** | **Controller-art hot swap uses a host texture override.** The SDK texture cache gains a generic override provider; the project supplies replacement RGBA for a slot, keyed by a measured fingerprint of the guest texture (dimensions + content hash, with the scene-read order as the fallback). P9/P10 may also change authored guest UI and served labels/records to express input icons and action identity; a texture swap alone cannot describe every binding. A scene-reload route is a fallback only if P1 proves live replacement unsafe, and does not satisfy R5 without a revised design. |
 | **D2** | **A scheme is a folder with one manifest.** `scheme.toml` names the id, display name and kind; `buttons.png` is the 512×512 glyph sheet; `pad.png` is the 1024×1024 controller art (with optional per-slot `pads/pad_0..3.png`); `icons.png` is the optional 1024×512 extra sheet. No DXT5, no scene, no archive surgery for custom schemes. |
-| **D3** | **Discovery is a boot scan, not a hot-add.** The game scans `<install>/assets/controller/schemes/` (shipped) and `<user_data_root>/controller_schemes/` (user packages; a user package with the same id shadows a built-in with a log line). Newly dropped packages are read at the next boot; the page says so in its caption. There is no Rescan row in v1. |
-| **D4** | **The controller scheme is selectable; the keyboard scheme is implicit.** The page lists `Retail` plus every valid controller scheme. The keyboard scheme is the reserved id `keyboard`, used automatically when the last real input was keyboard or mouse. **The boot starts on the keyboard scheme**; the first real pad event switches to the selected controller scheme. The selected controller scheme does not change when the keyboard is used; it is the art the controller gets back on the next pad input. |
+| **D3** | **Discovery is a boot scan, not a hot-add.** The game scans `<install>/assets/controller/schemes/` and `<user_data_root>/controller_schemes/`. For non-reserved custom ids, a user package shadows an install-root package with a log line; reserved families follow §4.1. Newly dropped packages are read at the next boot; the page says so in its caption. There is no Rescan row in v1. |
+| **D4** | **Only the controller layout is selectable.** The page lists `Xbox 360` plus every available valid controller scheme. Keyboard/mouse icons are a built-in provider, never an authored/discoverable layout or a list choice. Boot starts in keyboard/mouse hint mode; the first real pad event selects controller hint mode. Device switching never changes the saved controller selection. The selection page's explicit controller preview is independent of ordinary last-device hints (D14). |
 | **D5** | **PS3 import extracts one asset.** From a `.pkg` (plus the matching `.rap` if needed) or an extracted PS3 game folder, the installer extracts `ui/resource/fonts/gen/buttons.milo_ps3`, decodes its DXT5 sheet, and builds the PS3 scheme. The `ps_*` pad art comes from the user's 360 `controller_config.milo_xbox` via the same decoder. Nothing from the package is copied wholesale; the full ~350 MB ARK is never laid down. |
-| **D6** | **One native setting: `controller.scheme`.** It is a stable token (`retail`, `xbox-series`, `ps5`, `nintendo-switch`, `ps3`, a custom id). It lives in `settings.toml` through the main settings service, not in the controller profile's `input.*` binding store. Its row is `Controls → Button Icons`, a `kSelect` drawn as `Layout: <short name>`, with a help caption for the automatic keyboard switch. |
-| **D7** | **`enhancements_icon_schemes` becomes the master gate and defaults on**, with `Retail` as the compiled default. The row is the visible control; with the gate off the `Button Icons` page is omitted (no dead rows), and the faithful retail art is what a fresh profile gets. This changes the "off by default" line in `src/enhancements.cpp`; the toggle table records it. |
-| **D8** | **Fallback chain, no dead ends.** Selected controller scheme → `Retail` art. Keyboard input → `keyboard` scheme if present → selected controller scheme → `Retail`. A missing/corrupt package is skipped with a log line and never listed. |
+| **D6** | **One native setting: `controller.scheme`, displayed as Controller Layout.** Stable tokens are `retail`, `ps3`, `xbox-series`, `playstation-series`, `nintendo-switch`, `steam-controller`, `steam-deck`, or a custom id. It lives in `settings.toml` through the main settings service, not in the profile's binding store. The route is `Controls → Controller Layout`; the setting label also uses the full name. `retail` is displayed as `Xbox 360`. Label/value layout must accommodate the name instead of shortening it to `Layout`. |
+| **D7** | **`enhancements_icon_schemes` becomes the master gate and defaults on**, with `Xbox 360` (`retail`) as the compiled default. With the gate off the Controller Layout page is omitted and faithful retail art is used. This changes the off-by-default line in `src/enhancements.cpp`; the toggle table records it. R4/R11/R12 describe enabled behavior. |
+| **D8** | **Fallbacks preserve the device family.** Missing/invalid selected controller package → Xbox 360 art, logged and reflected in the setting. Keyboard/mouse → built-in keycap/mouse provider, with a built-in neutral image for an unsupported source or no binding; never controller art because a keyboard package is absent. Invalid controller packages are skipped and never listed. |
 | **D9** | **Art is authored on a fixed grid, in white/alpha.** `buttons.png` must use the 6×6 slot grid; the game's material tints the glyph, so the sheet should be white/grey with straight alpha (colored art is allowed but is multiplied by the tint). `pad.png` is transparent-background RGBA. The loader converts to the guest's format; the art author never handles DXT5. |
-| **D10** | **No retail/game art in the repository or the release.** The four owner-authored schemes are original art and may be committed; the PS3 scheme is generated in the user's install from their own data and is gitignored/audited like `game/` and `assets/game/`. |
+| **D10** | **No retail/game art in the repository or the release.** The five owner-authored controller schemes and built-in keyboard/mouse art must be original or appropriately licensed. Xbox 360 art stays in the user's base game; the PS3 scheme is generated locally and is gitignored/audited like `game/` and `assets/game/`. |
 | **D11** | **The retail pad page's eight pad slots all receive the selected scheme's art.** `xbox_i` and `ps_i` both map to `pad_i` (or `pad.png` for all four), so whichever family/preset index retail draws, it shows the selected scheme. |
-| **D12** | **The keyboard sheet is static.** It represents the compiled default keyboard mapping in `src/profile/remap.cpp`. If the player rebinds General Mapping, the keyboard glyphs do not follow; this is recorded as a known limitation, not silently pretended. A future runtime keycap renderer is out of scope. |
+| **D12** | **Effective bindings are the source of truth for icons.** A shared resolver maps `(action, interface/gameplay context, device family, effective profile/preset)` to ordered physical sources, then their icons. Mapping rows render every source; ordinary action hints render the first source in the active family. Controller glyphs use the selected family; keyboard/mouse glyphs use the built-in provider. No static default-key sheet after rebinding. Profile/preset changes, assigning, removing, reordering and resetting invalidate the relevant views. |
+| **D13** | **Draw icons through the guest's UI.** Mapping rows keep their text action labels and render adjacent input images; guest footers, widgets, labels and served records carry the resolved hints. A shared 6×6 texture cannot express arbitrary simultaneous row contents or context-specific actions on its own. P9/P10 prove guest draw/label routes; no new host overlay is authorized by this plan. |
+| **D14** | **Selection has an immediate controller preview.** Each accepted choice refreshes controller icons and pad art on the next presented frame. A guest-authored preview on the Controller Layout page always shows the selected controller family, even when a mouse click or keyboard key chose it. Ordinary hints still follow real last-device activity. The preview neither fakes controller input nor changes the saved device state, and does not wait for leaving the page. |
 
 ## 4. The asset contract — what to draw
 
@@ -164,13 +197,15 @@ button sheet and which is each pad. §3 D1 makes that P1's measurement.
 | anything else | no | — | — | the loader ignores it; the validator reports it |
 
 Provisional limits (P2 may tighten, never loosen without a measurement): ≤ 8 MB per image, ≤ 32
-files per scheme, no symlinks, id `[a-z0-9][a-z0-9-]{0,31}`, display name ≤ 20 characters (the
-settings row's text budget: `Layout: ` is 8 characters, leaving 20 for the value within the measured
-28-character line).
+files per scheme, no symlinks, id `[a-z0-9][a-z0-9-]{0,31}`, display name ≤ 20 characters.
+The earlier 28-character single-line budget does not fit `Controller Layout: <name>`; P3 must
+measure separate guest label/value placement or wrapping while retaining the full setting name.
+The 20-character value cap remains provisional until that measurement.
 
-Reserved ids: `retail` (the virtual no-override scheme; it has no folder), `keyboard` (the keyboard
-sheet), and the built-in ids `xbox-series`, `ps5`, `nintendo-switch`, `ps3`. A custom package may not
-claim a reserved id.
+Reserved ids: `retail` (base-game Xbox 360; no folder), `keyboard` (internal built-in provider,
+not a package), and `ps3`, `xbox-series`, `playstation-series`, `nintendo-switch`,
+`steam-controller`, `steam-deck`. Only the trusted built-in/import pipeline may supply reserved
+controller packages; user custom packages cannot replace them or the keyboard/mouse provider.
 
 ### 4.2 The slot map
 
@@ -188,35 +223,29 @@ replacement. Until then, the measured grid is:
 | 4 (≈340–424) | 0–5 |
 | 5 (≈425–511) | 0, 1 (columns 2–5 empty) |
 
-The slot IDs are **actions, not letters**, so the keyboard sheet can paint a different key in the
-same cell. P0 assigns them from the glyph table; the expected set is:
+The retail slot IDs identify the guest's logical prompts, **not the physical sources currently
+bound to those prompts**. P0 assigns them from the glyph table; the expected set is:
 
 `confirm_a`, `back_b`, `x`, `y`, `lb`, `rb`, `lt`, `rt`, `start`, `back`, `ls`, `rs`,
 `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right`, plus the remaining occupied cells (the retail
 sheet's extra icons). The template draws each slot's rectangle and label so a paint program can be
 used without guessing.
 
-The replacement is the **glyph sheet**. Locale strings that spell a button name as text (if any are
-found in the title) are not rewritten in v1; the inline `<alt1>…</alt1>` prompts are the subject.
+P8 separates this **logical action-slot map** from a **physical-source icon catalog**. A selected
+controller sheet supplies physical controller icons; the resolver can draw Y for logical Confirm
+without changing what Confirm does. P10 may compose action-slot textures for compatible guest
+paths, but per-widget/context resolution is required wherever one shared sheet is ambiguous.
 
-For the **keyboard** sheet (`schemes/keyboard/buttons.png`), paint the compiled default keys:
+Keyboard/mouse icons are a built-in catalog or keycap renderer, not
+`schemes/keyboard/buttons.png`. It covers every key, mouse button, wheel direction and other
+source the current binding system accepts. Keycap legends such as `Enter` are inside rendered
+images; plain binding-name strings are not the visual replacement. Unknown/unbound sources get
+explicit neutral images and diagnostics, not misleading controller defaults.
 
-| Slot | Key to draw | Slot | Key to draw |
-| --- | --- | --- | --- |
-| `confirm_a` | `Enter` / `A` | `back_b` | `Esc` / `B` |
-| `x` | `X` | `y` | `Y` |
-| `lb` | (pad only) | `rb` | (pad only) |
-| `ls` | (pad only) | `rs` | (pad only) |
-| `start` | `Space` | `back` | `Backspace` |
-| `dpad_up` | `W` / `↑` | `dpad_down` | `S` / `↓` |
-| `dpad_left` | `A` / `←` | `dpad_right` | `D` / `→` |
-| `lt` | (unbound by default) | `rt` | (unbound by default) |
-
-`lt`/`rt` have no compiled keyboard default; paint a neutral trigger icon or a short label, and let
-the player's General Mapping decide. A two-key slot (`confirm_a`, `back_b` and the four D-pad
-slots) draws both spellings separated by `/`; the compact forms above fit the 85 px cell.
-LB/RB/LS/RS are pad-only defaults, so their cells show the pad control rather than a key. D12
-records that a rebind does not update the sheet.
+P10 audits inline `<alt1>…</alt1>` prompts, footers, graphical hints, and locale strings that spell
+an actionable button name. The earlier exclusion of textual button hints is superseded: all
+actionable hints must resolve through the effective context, with any unmeasured route recorded
+as open rather than declared complete. Decorative controller art is not an action hint.
 
 ### 4.3 `scheme.toml`
 
@@ -224,7 +253,7 @@ records that a rebind does not update the sheet.
 schema_version = 1
 id = "xbox-series"
 name = "Xbox Series"      # ≤ 20 characters; this is the row's value
-kind = "controller"       # controller | keyboard
+kind = "controller"       # the only discoverable package kind
 
 [buttons]
 file = "buttons.png"
@@ -238,8 +267,8 @@ file = "pad.png"
 file = "icons.png"        # optional
 ```
 
-A keyboard scheme has `kind = "keyboard"` and usually only `[buttons]`; its pad entry is ignored.
-A controller scheme must have `pad.png` or all four per-slot files.
+A controller scheme must have `pad.png` or all four per-slot files. `kind = "keyboard"` is
+rejected for packages; keyboard/mouse resources are built with the application independently.
 
 ### 4.4 The authoring kit (P6a, not blocked on the owner's art)
 
@@ -248,7 +277,7 @@ A controller scheme must have `pad.png` or all four per-slot files.
   generated by the P0 tool. It contains **no retail art** and may be committed.
 - `assets/controller/template/pad.png` — a blank 1024×1024 guide with the safe area marked.
 - `assets/controller/slots.toml` — the tracked slot registry (id, rectangle, row/column, label).
-- `assets/controller/schemes/<id>/` — the owner's schemes; the four built-ins live here when P6b
+- `assets/controller/schemes/<id>/` — the owner's schemes; the five authored controller families live here when P6b
   runs.
 - `scripts/controller_schemes.ps1 -Validate -Pack` — validates every scheme (size, mode, required
   files, slot coverage, id rules, duplicate ids) and copies the valid ones into the install layout.
@@ -259,13 +288,31 @@ A controller scheme must have `pad.png` or all four per-slot files.
 
 | Root | Contents | Who writes it |
 | --- | --- | --- |
-| `<install>/assets/controller/schemes/<id>/` | the four built-in schemes copied by the installer | the installer/build |
+| `<install>/assets/controller/schemes/<id>/` | five authored controller schemes plus locally imported PS3, when available | the installer/build |
 | `<user_data_root>/controller_schemes/<id>/` | user packages, including a scheme the player drops in | the player |
 
 `<user_data_root>` is the same root the game already uses for saves and `settings.toml`
-(`src/rb_blitz_app.h`). A user package with a duplicate id shadows the built-in one and logs
+(`src/rb_blitz_app.h`). For non-reserved custom ids, a user package shadows an install-root package and logs
 `button_schemes: <id> shadowed by <path>`; a package that fails validation is skipped and logged with
 the reason.
+
+### 4.6 Controller catalog
+
+| Display name | Stable token | Source / availability |
+| --- | --- | --- |
+| Xbox 360 | `retail` | Always available; default, original base-game art, no copied package |
+| PlayStation 3 | `ps3` | Available after local PS3 import (P5); never bundled |
+| Xbox Series | `xbox-series` | Owner-authored controller package |
+| PlayStation Series | `playstation-series` | Owner-authored controller package; replaces the earlier planned `PS5` name/token |
+| Nintendo Switch | `nintendo-switch` | Owner-authored controller package |
+| Steam Controller | `steam-controller` | Owner-authored controller package |
+| Steam Deck | `steam-deck` | Owner-authored controller package |
+
+These seven are the target catalog, not evidence that art exists today. P6b requires the five
+authored controller packages; PS3 remains conditional on import. Keyboard/mouse is never a choice.
+P8 records coverage for each physical source supported by the mapper, including Steam/Deck
+controls: art availability does not imply new input-driver support. A control the input layer
+cannot bind is recorded separately from a missing icon.
 
 ## 5. The flows
 
@@ -325,25 +372,26 @@ The installer's built-ins are present before the first boot.
 
 ### 5.3 In-game selection and hot swap
 
-The Controls page gains one submenu row (`Button Icons`, 4 rows total, inside the six-row budget):
+The Controls page gains one submenu row (`Controller Layout`, 4 rows total, inside the six-row budget):
 
 ```
 Controls
   Input Types
-  General Mapping
+  Interface Mapping
   Gameplay Mapping
-  Button Icons          <- new
+  Controller Layout     <- new
 ```
 
-`Button Icons` has two rows:
+`Controller Layout` has these guest-drawn elements:
 
 | Row | Kind | Setting | Drawn line | Help caption |
 | --- | --- | --- | --- | --- |
-| `Layout` | `kSelect` | `controller.scheme` | `Layout: Xbox Series` | "The controller art used for button hints and the preset page. Changes apply immediately." |
-| `Keyboard` | `kInfo` | — | `Keyboard: Automatic` | "Keyboard and mouse input switch the button hints to the keyboard sheet automatically." |
+| `Controller Layout` | `kSelect` | `controller.scheme` | Full label plus `Xbox Series` in measured separate value space or a wrapped line | "Choose controller icons and preset art. Each selection applies immediately." |
+| `Keyboard & Mouse` | `kInfo` | — | `Keyboard & Mouse: Automatic` | "Built-in key and mouse icons follow your bindings and appear automatically when you use them." |
+| Controller preview | guest image widgets | — | Representative button images and pad art from the selected controller family | Visible immediately, including on keyboard/mouse selection; never an overlay. |
 
-The `Layout` choices are built from the boot's registry and inserted through
-`MenuConfiguration.choices`; `Retail` is always present and is the compiled default. A custom
+The `Controller Layout` choices are built from the boot's registry and inserted through
+`MenuConfiguration.choices`; `Xbox 360` (`retail`) is always present and is the compiled default. A custom
 scheme's `name` is the value, capped at 20 characters.
 
 Hot apply:
@@ -355,10 +403,14 @@ Hot apply:
 - `HotApplier::Apply(kButtonScheme)` publishes the new active controller scheme to the scheme
   runtime and asks the texture override provider to refresh the affected slots. The invalidation is
   queued to the GPU/UI thread, not performed on the guest thread.
+- Each click or accepted selector change commits and refreshes the on-page controller preview
+  on the next presented frame. Rapid selections resolve to the latest committed choice. Keyboard
+  or mouse activity cannot mask that preview by switching ordinary hints to keyboard/mouse.
 - The row commits without a restart prompt; leaving the page and returning shows the new selection.
-- The retail **Default Presets** page redraws with the selected pad art the next time it is opened.
-- If the selected package becomes invalid between boots, the boot falls back to `Retail`, logs
-  `button_schemes: saved scheme <id> is missing, using retail`, and the row shows `Retail`.
+- The retail **Default Presets** page uses the selected pad art whenever visible; the selection
+  page itself already demonstrates both changed icons and pad art without navigation.
+- If the selected package becomes invalid between boots, the boot falls back to `retail`, logs
+  `button_schemes: saved scheme <id> is missing, using retail`, and the row shows `Xbox 360`.
 
 ### 5.4 Input-aware automatic switching
 
@@ -372,11 +424,44 @@ A small **last-device tracker** watches the raw input that the source gates alre
 - A switch is published when the device changes; a short debounce (target 50–150 ms; measured in P4)
   absorbs pad noise. The tracker does not switch on focus loss, and a switch does not change the
   selected controller scheme.
-- The active button page is `keyboard` when the last device is keyboard/mouse, else the selected
-  controller scheme. It starts on `keyboard` and switches on the first real pad event. The active
-  **pad** page is always the selected controller scheme.
+- Ordinary action hints use the built-in keyboard/mouse provider when that is the last active
+  family, otherwise the selected controller family, resolving current bindings in either case.
+  They start in keyboard/mouse mode. The active **pad** art and explicit Controller Layout preview
+  always show the selected controller scheme. There is no timer that forces controller hints
+  over keyboard/mouse after selecting a layout.
 - Every switch logs `button_schemes: active <id> (device controller|keyboard)`, which is the
   acceptance hook.
+
+### 5.5 Mapping rows and action hints
+
+1. On either mapping surface, retain the action label and draw **all effective bound sources** as
+   adjacent images in their stored order, including mixed controller/key sources on interface
+   rows. Gameplay's device-specific pages show that page's sources. The row's device scope, not
+   last input, determines which bindings are listed. Bound key/mouse icons stay built in when
+   the controller layout changes.
+2. In ordinary interface hints, filter the effective Interface Mapping to the active family and
+   draw its first bound source. Example: controller `[Y, A]`, keyboard/mouse `[Enter, Space]` for
+   Confirm draws Y on controller input and Enter on keyboard/mouse input. The mapping row still
+   exposes every binding. Preserve stored order; do not sort by display name or button number.
+3. Treat keyboard and mouse as one hint family: their combined binding order decides which icon
+   is first. If that family has no binding, use an explicit unbound image instead of advertising
+   an input that will not perform the action.
+4. Interface Mapping controls menus, footers and pause interface hints. Gameplay Mapping and the
+   active retail preset control in-song action hints. P8/P10 inspect the existing context rules;
+   a gameplay A icon and an interface Confirm icon must not accidentally share a remapped value.
+5. Assign, remove, reorder, reset, or switch profile/preset → publish a new effective-binding
+   snapshot → refresh visible rows and action hints on the next presented frame. Never feed
+   resolved icon identities back into input dispatch.
+
+### 5.6 Acceptance authorization
+
+These are future implementation/acceptance steps, not authorization to drive the game now.
+Before any manual or automated game/UI navigation, ask whether the owner wants to perform the
+test themselves and wait for the answer, unless they already authorized autonomous UI testing
+for that scope. Build with `cmake --build --preset win-amd64-release` before requesting a test
+unless the current binary is known to contain the latest changes. Code inspection, host-only
+tests, and builds can proceed independently. New host overlays need explicit owner approval;
+guest-authored rows, preview widgets and labels follow the authorized guest route.
 
 ## 6. Architecture
 
@@ -386,11 +471,13 @@ A small **last-device tracker** watches the raw input that the source gates alre
 | --- | --- | --- |
 | Scheme registry / manifest / images | `src/controller_schemes/{registry,manifest,image,slots}.{h,cpp}` | SDK-free parsing, validation, RGBA loading, slot table; testable without a boot. The installer compiles the same manifest/slot code where it overlaps. |
 | Slot map / template tool | `scripts/hmx_milo.py` extension + `scripts/controller_schemes.ps1` | P0/P2 tooling: decode a named sheet, emit rectangles, validate a package, build the template. |
-| Active scheme runtime | `src/hooks/button_schemes.{h,cpp}` | Holds the selected controller scheme and the active input scheme; publishes an atomic snapshot; logs; owns the registry instance. |
+| Active scheme runtime | `src/hooks/button_schemes.{h,cpp}` | Holds selected controller layout, last input family, explicit preview state and binding generation; publishes immutable snapshots; logs; owns the registry instance. |
+| Input-icon resolver | proposed `src/input/input_icons.{h,cpp}` + existing `src/profile/input_rows.{h,cpp}` / effective binding APIs | P8: ordered physical-source icons for interface/gameplay contexts, first source per hint family, preset inheritance, unbound behavior; built-in keyboard/mouse provider independent of controller packages. |
 | Last-device tracker | `src/input/last_device.{h,cpp}` | Raw pad/keyboard/mouse activity, debounce, atomic `LastDevice`; called from the existing poll/event seams. |
 | Texture override provider | `src/assets/texture_override.{h,cpp}` + `patches/00xx-texture-override.patch` | Registers a provider with the SDK cache; maps a guest texture fingerprint to a slot; supplies RGBA; invalidates affected textures on a generation bump. |
 | Settings | `src/settings/model.h`, `schema.cpp`, `boot.cpp`, `hot_apply_runtime.cpp`, `cvars.cpp` | `SettingId::kButtonScheme`, the descriptor, the boot catalog, the `kHot` applier. |
-| Screen | `src/ui/settings_screen.{h,cpp}` | The `Button Icons` page, the `Layout` select, the `Keyboard` info row, help text; `MenuConfiguration.choices` drives the list. |
+| Screen | `src/ui/settings_screen.{h,cpp}` | Controller Layout label/select, automatic keyboard/mouse info and guest controller preview; P9 image binding rows; `MenuConfiguration.choices` drives the list. |
+| Guest action hints | P10-measured guest draw/label hooks and served UI records (paths to be pinned by P10) | Contextual action identity, remap-aware footers/visual hints and refresh on binding/device/layout changes; no host overlay. |
 | Tests | `tests/button_scheme_tests.cpp`, `tests/settings_screen_tests.cpp`, `tests/settings_hot_apply_tests.cpp`, `tests/settings_schema_tests.cpp`, `tests/settings_service_tests.cpp`, `tests/source_gates_tests.cpp` (or a new input tracker test) | The invariants in §8. |
 | Installer | `installer/src/{pkg,ark,milo_tex}.{h,cpp}`, `commands.cpp`, `setup.iss`, `install.cpp`, `config.h` | The optional page, probe/install commands, manifest table, refusal messages. |
 | Assets | `assets/controller/**` | The contract, template, slot registry, owner schemes; built-ins copied by the installer. |
@@ -461,6 +548,8 @@ fallback, not the plan.
 
 - The active scheme is an immutable snapshot published by the settings commit / input tracker and
   read by the GPU thread. No lock is held across a draw.
+- Effective bindings, context and controller layout share a versioned icon snapshot. Mapping rows,
+  ordinary hints and the controller preview must not combine stale bindings with a new layout.
 - The registry and image decoding are host-thread work; the decoded RGBA is uploaded on the GPU
   thread through the provider.
 - The settings commit follows the existing rule: a guest thread never touches the cvar registry;
@@ -469,7 +558,7 @@ fallback, not the plan.
 
 ## 7. Packages and prompts
 
-Dependency graph:
+Dependency graph (P8–P10 are new scope; ids are appended rather than renumbered):
 
 ```mermaid
 graph TD
@@ -477,7 +566,17 @@ graph TD
   P0 --> P2[P2 package + registry]
   P1 --> P3[P3 settings + hot apply]
   P2 --> P3
+  P2 --> P8[P8 resolver + built-in key/mouse icons]
+  P8 --> P3
   P2 --> P4[P4 input-aware switch]
+  P1 --> P4
+  P8 --> P4
+  P3 --> P4
+  P8 --> P9[P9 mapping-row images]
+  P1 --> P9
+  P3 --> P9
+  P9 --> P10[P10 remap-aware guest hints]
+  P4 --> P10
   P0 --> P5[P5 PS3 import]
   P2 --> P5
   P2 --> P6a[P6a authoring kit]
@@ -485,14 +584,20 @@ graph TD
   P4 --> P6b
   P5 --> P6b
   P6a --> P6b
+  P10 --> P6b
   P6b --> P7[P7 docs + close]
 ```
 
-> **The only package blocked on the owner's manual art is P6b.** P0–P5 and P6a run with the retail
-> scenes, the user's PS3 package and generated marker schemes. **Do not start P6b until the four
-> scheme folders contain the real art.** P6a produces the template and the validator; P0 produces
+> **The only package blocked on the owner's manual controller art is P6b.** P0–P5, P6a and P8–P10
+> use retail scenes, generated controller markers, built-in key/mouse icons and synthetic bindings;
+> P5 separately requires the owner's PS3 input files. **Do not start P6b until all five authored
+> controller folders contain real art.** P6a produces the template and validator; P0 produces
 > the slot map the template is drawn from. The PS3 scheme (P5) is generated from the user's own
 > package and is not part of P6b.
+
+Suggested execution: P0 → P1/P2 → P8 → P3 → P4/P9 → P10 → P6b → P7, with P5 and P6a
+following their own dependencies. P7 closes only after the new prompts and real-art acceptance
+pass; no static keyboard-sheet exception survives as an accepted limitation.
 
 ### P0 — Scene texture decode, slot map and template
 
@@ -569,10 +674,14 @@ fall back to editing the guest scene and call it a hot swap.
 - `src/controller_schemes/`: manifest parsing, id/name validation, image loading to RGBA8, the
   slot table, discovery from the two roots, duplicate/shadow rules, fallback ordering, and a
   `Summary()` for the boot log.
+- The seven controller identities from §4.6, with Xbox 360 always present, PS3 gated on local
+  import, and the five authored families listed only when valid. Keyboard/mouse is a separate
+  built-in dependency, never a scheme choice or user-shadowable package.
 - `scripts/controller_schemes.ps1 -Validate -Pack`: validates the owner tree and copies built-ins
   into the install layout; accepts a `-Scheme <dir>` for one package.
 - Tests: valid/invalid manifests, reserved ids, duplicate ids, missing/extra files, wrong
-  dimensions, alpha requirement, slot coverage, fallback ordering, user-shadows-builtin.
+  dimensions, alpha requirement, slot coverage, fallback ordering, custom-id user shadowing,
+  reserved-family protection, and rejection of `kind = "keyboard"`.
 - The generated `test-markers` scheme and a deliberately invalid fixture for the tests.
 
 **Verify.** `ctest -R button_scheme` green; the boot log lists the schemes and the rejected
@@ -589,22 +698,26 @@ the installer compiles its pure parts.
 - `SettingId::kButtonScheme` (`controller.scheme`, value kind enum/string token) with a descriptor,
   the boot's scheme catalog, and `MenuConfiguration.choices["controller.scheme"]` from the same
   catalog.
-- The `Button Icons` submenu on Controls; the `Layout` select (`Retail` + valid controller schemes)
-  and the `Keyboard: Automatic` info row; labels/help within the settings skill's budgets; the
-  in-song twin.
+- The Controller Layout submenu and full setting label (`Xbox 360` + valid controller schemes),
+  built-in automatic keyboard/mouse info, and a guest-authored controller icon/pad preview; the
+  in-song twin. Measure label/value placement without abbreviating the setting name (§4.1).
 - The `kHot` applier that publishes the active controller scheme and invalidates the overrides,
   with `strategy_evidence` filled from P3's own live measurement. Until that measurement exists, the
   row is not allowed to claim `kHot`.
-- Persistence through `settings.toml`; a missing/invalid saved token falls back to `Retail` with a
+- Persistence through `settings.toml`; a missing/invalid saved token falls back to `retail` with a
   log line.
 - Tests: generated menu shape/row order/back targets, label uniqueness, help coverage, descriptor
-  choices, commit and restart classification, the hot applier called once.
+  choices, commit and restart classification, the hot applier called once per accepted choice,
+  preview independent of last-device state, and rapid choices applying the latest selection.
 
-**Verify.** With the `test-markers` scheme, selecting it on the page changes the prompt band and the
-Default Presets pad on the next frame; leaving the page shows no restart prompt; a new boot shows the
-saved selection; selecting `Retail` restores retail art. The boot log names the active scheme.
+**Verify.** With `test-markers`, each selection changes the on-page controller icons and pad preview
+on the next presented frame, including a mouse click or keyboard selection while ordinary hints
+remain in keyboard/mouse mode. Repeat with controller selection and rapid changes. No Apply,
+page exit, or later pad input is needed. Default Presets uses the selected art; leaving shows no
+restart prompt; a new boot restores the saved selection. Choosing Xbox 360 restores base-game
+controller art. The boot log names the active scheme.
 
-**Don't.** Do not add a dead row when no scheme is installed (`Retail` is always valid). Do not
+**Don't.** Do not add a dead row when no scheme is installed (`Xbox 360` is always valid). Do not
 persist a list index or a label; the token is the wire value. Do not mark the row `kHot` before the
 live effect is measured.
 
@@ -616,15 +729,17 @@ art; the switch is immediate, stable and logged.
 **Deliverable.**
 - `src/input/last_device.{h,cpp}`: raw activity detection, thresholds, debounce, focus handling,
   no synthetic pad bits.
-- Integration with `src/hooks/button_schemes.cpp`: the active button page becomes `keyboard` or the
-  selected controller scheme; the active pad page stays the selected controller scheme.
-- The `keyboard` reserved scheme; the fallback chain in D8.
+- Integration with `src/hooks/button_schemes.cpp` and P8's resolver: ordinary hints use built-in
+  keyboard/mouse icons or the selected controller family with effective bindings; pad art and the
+  explicit Controller Layout preview stay on the selected controller family.
+- Built-in key/mouse provider available without any controller package; D8's device-safe fallback.
 - Tests: the boot's initial keyboard state, key event, mouse button, mouse motion threshold, pad
   button/trigger/stick, focus loss, no switch on the SDK's synthesized pad bits, no flapping across
-  alternating inputs, and a switch that does not change the selected controller scheme.
+  alternating inputs, no missing-keyboard-package fallback to controller art, no selectable
+  keyboard layout, and a switch that does not change the selected controller scheme or preview.
 - Boot/acceptance log lines.
 
-**Verify.** In a live boot, press a key → the prompt band changes to the keyboard sheet; move/press
+**Verify.** In a live boot, press a key or use the mouse → ordinary hints use built-in key/mouse icons; move/press
 the pad → it changes back; alternating inputs does not flicker; the controller page still shows the
 selected controller pad; the log names each active scheme. A physical pad arm is recorded manually
 if the harness has no virtual pad.
@@ -663,7 +778,8 @@ Band Blitz PS3 id without an explicit, logged override.
 ### P6a — Authoring kit and built-in scheme pipeline (not blocked)
 
 **Goal.** Everything the owner needs to paint and drop a scheme, plus the installer plumbing for the
-four tracked built-ins.
+five tracked authored controller families. Built-in keyboard/mouse resources belong to P8 and
+do not depend on the owner drawing a Keyboard scheme.
 
 **Deliverable.**
 - The final `assets/controller/README.md`, template, `slots.toml`, validator, and an example scheme
@@ -680,24 +796,31 @@ size; an install copies exactly the scheme files; the audit reports no game data
 **Don't.** Do not start from a decoded retail sheet as committed art. Do not ship a scheme the owner
 has not authored or licensed.
 
-### P6b — The owner's four schemes and visual acceptance (**blocked on the manual art**)
+### P6b — The owner's five controller schemes and visual acceptance (**blocked on the manual art**)
 
-**Start condition.** `assets/controller/schemes/xbox-series/`, `ps5/`, `nintendo-switch/` and
-`keyboard/` exist with the real `scheme.toml`, `buttons.png` and (for the controller schemes)
-`pad.png`; the owner has confirmed the slot map is the one they painted. **This prompt cannot be
-run before those files exist.** P0–P6a do not need them.
+**Start condition.** `assets/controller/schemes/xbox-series/`, `playstation-series/`,
+`nintendo-switch/`, `steam-controller/`, and `steam-deck/` contain real `scheme.toml`, `buttons.png`
+and `pad.png` (or all four pad files); the owner has confirmed the slot map. P3/P4/P9/P10 and the
+P6a pipeline pass. **This prompt cannot run before those files exist.** Earlier prompts use
+generated fixtures; built-in keyboard/mouse resources never require a manual Keyboard package.
 
-**Goal.** Integrate the owner's Xbox Series, PS5, Nintendo Switch and Keyboard art as the shipped
-built-ins and accept them visually and functionally.
+**Goal.** Integrate Xbox Series, PlayStation Series, Nintendo Switch, Steam Controller and Steam
+Deck art, then accept the full controller catalog and built-in keyboard/mouse behavior.
 
-**Deliverable.** The four validated schemes in `assets/controller/schemes/`, copied by the
+**Deliverable.** The five validated controller schemes in `assets/controller/schemes/`, copied by the
 installer; the PS3 scheme from P5 (user data, not committed); a final visual pass on every screen
 that uses prompts (menu, Help & Options, gameplay HUD, pause, results) and on the retail Default
-Presets page; the keyboard sheet's default-key check (D12); the real-art acceptance captures.
+Presets page; both mapping screens' adjacent images; default and rebound controller/key/mouse
+hints with first-source ordering (D12); immediate previews chosen by every input family; the
+real-art acceptance captures. Xbox 360 is read from the base game, never copied into tracked art.
 
 **Verify.** Each scheme draws its own glyphs and pad, the keyboard auto-switch matches the art, the
 selected controller scheme persists, and no screen falls back to retail unintentionally. The
 acceptance captures are under `out/button-schemes/p6b/`.
+Exercise all seven families when the PS3 import is available; if absent, record PS3 acceptance as
+unproven rather than fabricating a package. Changing controller layout leaves key/mouse icons
+unchanged. Rebinding Confirm to Y updates every sampled footer, and multiple bindings show the
+first source in ordinary hints while both mapping pages retain the complete source list.
 
 **Don't.** Do not infer a scheme's art from a screenshot; use the owner's files. Do not edit the
 owner's art in the integration; report a bad slot to the owner. Do not commit the PS3-extracted art.
@@ -707,23 +830,114 @@ owner's art in the integration; report a bad slot to the owner. Do not commit th
 **Goal.** The change is recorded where the project looks for it.
 
 **Deliverable.**
-- `docs/engine/toggles.md`: the R4 row says implemented, names the modules and the `Button Icons`
+- `docs/engine/toggles.md`: the R4 row says implemented, names the modules and the Controller Layout
   page, and states the on-by-default decision (D7).
-- `docs/settings/plan.md` §3: the `Button Icons` page and the `controller.scheme` row; the page's
+- `docs/settings/plan.md` §3: the Controller Layout page and the `controller.scheme` row; the page's
   row count; the hot classification and its evidence.
 - `docs/settings/menu.md`: the Controls page's fourth row and the retail Default Presets route.
 - `docs/settings/status.md`: the live state and any open items.
 - `docs/guides/assets.md`: the 2026-10-19 format section (P0) and the PS3 button-sheet route.
 - `docs/reference/backlog.md`: the old "pin the sheet format" item is resolved by P0; any remaining
   work is named.
-- `docs/reference/known-issues.md`: the keyboard sheet's static default mapping (D12), the PS3
-  trial/full RAP caveat, and any backend left unproven.
+- `docs/reference/known-issues.md`: the PS3 trial/full RAP caveat, unsupported physical controls
+  or unmeasured hint routes, and any backend left unproven. Static default-key icons after a
+  rebind are a failed R12 acceptance item, not an accepted D12 limitation.
 - `docs/guides/distributable.md` and `scripts/audit_distributable.ps1`: no PS3 art and no game art
   in the payload.
 - `patches/README.md`: the texture override patch.
-- `docs/README.md`: the plan row already added when this plan was filed; move the plan to
-  `finished/` only when P6b and P7 pass.
+- `docs/README.md`: maintain the existing plan row; move the plan to `finished/` only when
+  P8/P9/P10, P6b and P7 pass, with P5's import outcome explicitly recorded.
 - Run `python .github/skills/documentation/scripts/check_docs.py` (exit 0) and `git diff --check`.
+
+### P8 — Effective-binding icon resolver and built-in keyboard/mouse provider
+
+**Goal.** One source of truth resolves physical input images for every mapping row and game hint,
+without a selectable keyboard scheme or a dependency on the owner's controller art.
+
+**Deliverable.**
+
+- Inspect the current Interface Mapping, Gameplay Mapping, profile, default/preset inheritance,
+  source-order and source-gate APIs. Record the exact read/invalidation seams and test fixtures;
+  do not copy the historical §2.2 default list into a second binding implementation.
+- A shared, host-testable resolver (proposed `src/input/input_icons.{h,cpp}`) exposing ordered
+  icon descriptors for all sources and the first source per active family. Inputs include action
+  identity, interface/gameplay context, effective profile/preset, controller family and version.
+- Built-in keycap/mouse images or rendering, covering the binding system's accepted key/mouse
+  sources. Resources are original/licensed, ship with the application, cannot be replaced through
+  controller packages, and have neutral unsupported/unbound images with diagnostics.
+- Controller physical-source icon lookup for all §4.6 families. Synthetic markers suffice for
+  unprovided art. Report unsupported Steam/Deck physical controls separately; adding input-driver
+  support is not implied by adding a layout.
+- Invalidation on assign/remove/reorder/reset, profile/preset change, layout change and active
+  input-family change, producing coherent immutable snapshots for P3/P4/P9/P10.
+- Tests with synthetic bindings: Confirm controller `[Y, A]` and key/mouse `[Enter, Space]`;
+  key/mouse mixed order; no binding in one family; explicit empty versus inherited bindings;
+  gameplay/interface context differences; profile/reset changes; keyboard icons invariant under
+  every controller choice; missing controller packages do not remove keyboard/mouse support.
+
+**Verify.** Host tests prove full source order for mapping rows and first-source selection for
+ordinary hints. Rebinding or resetting changes the resolved images without restarting. Generated
+or built-in icons suffice to complete this prompt; future guest rendering remains unproven here.
+
+**Don't.** Do not sort bindings, silently truncate them, mutate input dispatch, invent new profile
+syntax, or substitute static default icons when the effective mapping differs.
+
+### P9 — Input images in Interface Mapping and Gameplay Mapping
+
+**Goal.** Both mapping surfaces show actual bound button/key/mouse images next to their action
+labels, replacing textual binding lists.
+
+**Deliverable.**
+
+- A measured guest row/inline-glyph route using P8's ordered icon descriptors. Keep row identity,
+  focus, Assign/Reset, capture and back targets stable while rendering source images side by side.
+- Support mixed controller/key sources in Interface Mapping and the proper device scope on each
+  Gameplay Mapping page. Show every effective binding in stored order; use measured guest
+  wrapping/scrolling or a row detail route for long lists without hiding available bindings.
+- Coverage for controller buttons, triggers/directions and accepted key/mouse inputs, explicit
+  unbound rows, inherited presets/defaults, and refresh after binding edits or controller selection.
+- Tests of row data, ordering, icon selection, refresh, row identity and overflow behavior, plus
+  live captures of both mapping surfaces in `out/button-schemes/p9/` after authorized UI testing.
+
+**Verify.** `Confirm: [A button image] [Enter keycap image]` contains adjacent images with a textual
+action label. Rebind it to Y and a different key and see the new images immediately. Both gameplay
+device pages do the same for their effective inputs. Changing the controller layout changes only
+controller images. Long binding lists remain inspectable; no image overlaps the next row.
+
+**Don't.** Do not use parenthesized button-name strings as replacement icons, show only the first
+source on mapping rows, or add a host overlay to bypass the guest's row renderer.
+
+### P10 — Remap-aware guest footers and visual action hints
+
+**Goal.** Every actionable game hint depicts the input that actually performs that action in the
+current interface/gameplay context.
+
+**Deliverable.**
+
+- An inventory of menu/Help & Options, pause, results, gameplay, and other actionable footer,
+  widget, inline-glyph and localized-text routes, with action/context identity, draw/label seam,
+  and a coverage/evidence entry for each. Calibration-specific scene art remains outside the
+  v1 texture replacement scope in §2.1; any actionable calibration hints still need an explicit
+  route/outcome in this inventory rather than an assumed exception to R12.
+- Integration of P8's first-source-per-family result into the guest's own hints. Use contextual
+  widget/label or served-record changes where global sheet remapping is ambiguous. A texture-only
+  implementation is insufficient if two visible contexts need different icons for one slot.
+- Next-frame refresh when bindings, profile/preset, active input family, or controller layout
+  changes; no stale icons on already-visible footers. Preserve D14's explicit selection preview.
+- Host/fixture tests for context and invalidation, and authorized live captures/logs in
+  `out/button-schemes/p10/` covering default, rebound, multiple-source, removed, reset and
+  profile-switch cases. Record any route left unproven as outstanding work.
+
+**Verify.** Bind controller Y to interface Confirm: all Confirm footer/visual hints draw Y in
+the selected controller family and input still confirms. Bind `[Y, A]` plus `[Enter, Space]`:
+ordinary hints draw Y or Enter according to real last input; mapping rows retain both alternatives
+per family. Reordering changes the hint; removing/resetting/profile-switching refreshes it.
+Gameplay action hints follow Gameplay Mapping/presets while pause/menu hints follow Interface
+Mapping. Repeat across representative controller layouts and unchanged built-in key/mouse art.
+
+**Don't.** Do not treat a logical guest A prompt as proof that physical A is bound. Do not apply
+interface remaps to gameplay blindly, advertise unbound inputs, or mark R12 complete while a
+known actionable hint still shows stale/default bindings.
 
 ## 8. Validation matrix
 
@@ -736,16 +950,25 @@ owner's art in the integration; report a bad slot to the owner. Do not commit th
 | Select `test-markers` on the page | the row writes `controller.scheme` and applies live | log + capture |
 | Leave the page / return | no restart prompt, selection persists | capture + `settings.toml` |
 | New boot | the saved selection is the active scheme | log |
-| Key/mouse event | the keyboard sheet is active | log + capture |
+| Key/mouse event, no controller packages installed | built-in key/mouse icons are available and follow effective bindings | log + capture |
 | Pad button/stick | the selected controller scheme is active | log + capture |
 | Alternating inputs | no flapping beyond the debounce | log |
-| `Retail` selected | the retail art returns | capture |
+| `Xbox 360` selected (`retail`) | base-game controller art returns; key/mouse icons remain built in | capture |
 | Missing/corrupt package | skipped with a reason; the page is not dead | boot log |
 | PS3 `.pkg` | content id, decryption, one-entry extraction | helper log + `install-manifest.toml` |
 | PS3 folder | the same scheme from `gen/main_ps3.hdr` | helper log |
 | PS3 generated art | matches the reference grid/art | `ps3/buttons.png` vs the PS3 reference |
 | No game art in the repo/release | the audit rule | `audit_distributable.ps1` |
 | Switch cost | the frame does not stutter on a scheme change | measured frame times |
+| Click/select each Controller Layout choice with keyboard, mouse and controller | on-page controller icons/pad change next frame without Apply or later pad input | capture + commit/generation log |
+| Confirm bound to controller `[Y, A]`, key/mouse `[Enter, Space]` | ordinary interface hints draw first source per active family; mapping row draws all sources | resolver test + footer/row captures |
+| Interface Mapping image rows | action text plus ordered adjacent physical input images, including mixed device sources | guest fixture + capture |
+| Both Gameplay Mapping device pages | images reflect effective gameplay bindings/preset without inheriting interface Confirm remaps | resolver/row tests + captures |
+| Assign/remove/reorder/reset/profile or preset change while hints visible | next-frame rows/footers reflect the effective mapping; no stale default icons | tests + generation log/captures |
+| No binding for active family | neutral unbound image; no advertised false binding | resolver test + capture |
+| Long binding list | every binding is inspectable; no clipping into neighboring rows | guest row test + capture |
+| Seven-family catalog / keyboard package rejection | five authored controllers, retail default, conditional PS3, and no selectable/swappable keyboard layout | registry/validator tests + choice list |
+| P10 hint-route inventory | every known actionable footer/visual/text hint follows context and remaps | coverage table + captures; unmeasured routes remain open |
 
 ## 9. Risks and open questions
 
@@ -762,35 +985,45 @@ owner's art in the integration; report a bad slot to the owner. Do not commit th
    tables. A scene or table that differs is a finding, not a silent fallback.
 4. **Auto-switch can feel noisy.** The thresholds and debounce are measured in P4; the plan does not
    invent a final number. A mouse bump must not switch the art.
-5. **Keyboard glyphs are static (D12).** A General Mapping rebind does not change the keyboard
-   sheet. This is a known limitation; an in-game keycap renderer is out of scope.
-6. **Custom scheme names and the row budget.** Names over 20 characters lose the value on the row;
-   the validator enforces the cap. The page's label is `Layout`, not `Controller Layout`, to keep
-   the line inside the measured 28-character budget.
+5. **A sheet swap cannot resolve all contexts.** Mapping rows need multiple source images, and
+   interface/gameplay hints may resolve the same guest slot differently. P8 separates physical
+   sources from logical actions; P9/P10 prove guest row/label routes. Static default-key images
+   after a rebind violate D12 and cannot be accepted as a limitation.
+6. **Full Controller Layout label and row budget.** The old 28-character single-line budget is
+   insufficient for the required name plus a value. P3 measures separate guest label/value
+   placement or wrapping; the provisional 20-character value cap is validated there. Truncating
+   or renaming the setting is not the resolution.
 7. **The retail pad page's four images.** The plan maps all eight slots to the selected scheme; if
    the four images turn out to be four distinct presets that must not be collapsed, the per-slot
    `pad_0..3.png` override exists. P0/P5 confirms which it is.
-8. **Memory and load time.** Four controller schemes × (1 MB sheet + 4 MB pad) is ~20 MB of RGBA
-   if every image is decoded eagerly. P2 may decode lazily; the acceptance measures the boot and
-   switch cost. The slot images are small enough that the simplest implementation is acceptable
-   unless the measurement says otherwise.
+8. **Memory and load time.** Five authored controller schemes plus an imported PS3 scheme ×
+   (1 MiB sheet + 4 MiB pad) is about 30 MiB of decoded RGBA for one pad image per scheme, or
+   about 102 MiB with four distinct 4 MiB pads each, before built-in key/mouse resources and GPU
+   copies. P2 may decode lazily; acceptance measures boot, binding refresh and switch costs.
 9. **Security.** The validator clamps file sizes/dimensions, rejects symlinks and path traversal,
    and never trusts a manifest's file paths outside its folder. A malformed PNG is a rejection, not
    a crash.
+10. **Selection versus last-device input.** A mouse click selecting a controller layout also
+    counts as mouse input. D14's explicit guest controller preview makes the choice visible
+    without falsifying last-device state or suppressing ordinary keyboard/mouse hints.
+11. **Icon coverage versus driver support.** Steam Controller/Deck art does not prove every
+    physical control is exposed to the existing binding system. P8 inventories accepted inputs
+    and missing icons separately; no new driver implementation is silently added to this plan.
 
 ## 10. Documents this change owes
 
 | When | Document | What changes |
 | --- | --- | --- |
-| Plan filed | [`docs/README.md`](../../README.md) | one row in the Plans table |
+| Plan filed / scope revised | [`docs/README.md`](../../README.md) | maintain the existing plan row, current path and binding-aware scope |
 | P0 | [`docs/guides/assets.md`](../../guides/assets.md) | the 23-byte record, DXT5 offset, unswap, the 6×6 grid, the pad decode; the old "No" is marked superseded |
 | P0 | [`docs/reference/backlog.md`](../../reference/backlog.md) | the "pin the sheet format" item is resolved; the successor is this plan |
 | P1 | [`patches/README.md`](../../../patches/README.md) | the texture-override patch and why it is generic |
 | P3 | [`docs/engine/toggles.md`](../../engine/toggles.md) | R4 is implemented; the gate's default and the page |
-| P3 | [`docs/settings/plan.md`](../../settings/plan.md), [`menu.md`](../../settings/menu.md), [`status.md`](../../settings/status.md) | the Button Icons page, the row, the hot evidence, the live state |
-| P4/P5/P6b | [`docs/reference/known-issues.md`](../../reference/known-issues.md) | the static keyboard sheet, the RAP/trial caveat, any unproven backend |
+| P3/P9/P10 | [`docs/settings/plan.md`](../../settings/plan.md), [`menu.md`](../../settings/menu.md), [`status.md`](../../settings/status.md) | Controller Layout, full label/preview, image mapping rows, binding-aware hints, hot evidence, live state |
+| P4/P5/P6b/P8/P10 | [`docs/reference/known-issues.md`](../../reference/known-issues.md) | RAP/trial caveat, unsupported inputs/hint routes, any unproven backend; no accepted static-keyboard exception |
 | P5/P6a | [`docs/guides/distributable.md`](../../guides/distributable.md) | no PS3/game art in the payload; the audit rule |
-| P7 | this plan | status moved to `finished/` when P6b and P7 pass |
+| P8/P9/P10 | [`docs/engine/input-flow.md`](../../engine/input-flow.md) | resolver context, ordering and remap-aware hint seams, once measured |
+| P7 | this plan | status moved to `finished/` after P8/P9/P10, P6b and P7 pass; record P5's outcome |
 
 ## 11. Reproducing the 2026-10-19 measurement
 

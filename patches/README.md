@@ -454,3 +454,13 @@ as the existing VirtualKey values. The title's latch/capture and menu-music navi
 use them through ordinary keyboard/focus gates. No global hotkeys or playback engine
 are added. Upstream candidate: missing media-key translation is general. Windows
 delivery/arbitration still requires live acceptance.
+
+
+`0042-imgui-image-textures.patch` exposes drawer-owned bounded RGBA image textures for host UI.
+`CreateImageTexture` uses the existing D3D12/Vulkan ImmediateDrawer texture API; IDs are consumed
+by the existing ImGui draw-list renderer. `ReleaseImageTexture` requires the drawer generation;
+replacement clears textures and increments that generation. Both backends already defer in-use
+resource destruction behind submission fences. Calls must run on the UI/draw thread. Limits:
+eight images, at most 512×512 each. The menu-music player keeps one 256×256 cover and rebuilds it
+from owned CPU pixels after replacement. Host tests/build and exact patch replay are covered;
+real image rendering and reset/soak acceptance await the owner.

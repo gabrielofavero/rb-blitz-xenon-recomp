@@ -98,6 +98,7 @@
 #include "store/store_probe.h"
 #include "store/store_search_service.h"
 #include "ui/help_overlay.h"
+#include "ui/menu_music_player.h"
 #include "ui/keyboard_theme.h"
 #include "util/sha256.h"
 
@@ -501,6 +502,7 @@ class RbBlitzApp : public rex::ReXApp {
     // bridge's caption sink; whether it draws is the `settings_help_overlay` cvar's decision,
     // re-read every frame, which is what makes the toggle live.
     help_overlay_ = rb_blitz::ui::help::CreateOverlay(drawer);
+    music_player_ = rb_blitz::ui::music::CreatePlayer(drawer);
 
     probe_overlay_ = rb_blitz::diag::CreateOverlayDialog(drawer, [this] {
       rb_blitz::diag::WindowState state;
@@ -604,6 +606,7 @@ class RbBlitzApp : public rex::ReXApp {
   // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings
   // bridge's caption sink, because the sink object lives beside the dialog.
   std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;
+  std::unique_ptr<rex::ui::ImGuiDialog> music_player_;
 
   // What Controller Settings' profile contributed at OnConfigurePaths, reported once logging exists.
   rb_blitz::profile::ProfileApplyReport profile_apply_;

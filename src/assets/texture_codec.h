@@ -11,8 +11,8 @@
 // 32 bytes are an envelope, everything after it is the mip chain, largest first:
 //
 //     [0]        envelope version (2 in all but three of the shipped files; this codec writes and
-//                reads version 2 only - the three version-1 files lay their dimensions out
-//                differently and are loaded by the engine alone)
+//                writes version 2; version-1 decoding uses the same signature at offset 1,
+//                without the ID, as measured on local single-song and merged-pack covers)
 //     [1..4]     per-asset 32-bit id (version 2 only). Not a checksum: files with identical
 //                pixels carry different ids, so it identifies the asset. Kept, never interpreted
 //     [5..6]     format word, little-endian: 0x0804 DXT1, 0x1808 DXT5, 0x2008 two-channel normal

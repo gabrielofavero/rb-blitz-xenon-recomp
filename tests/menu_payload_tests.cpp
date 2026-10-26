@@ -837,7 +837,88 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
   CHECK_EQ(ignore.menus,1);
 }
 
+void TestNativeMusicFooter() {
+  using namespace rb_blitz;
+  using ui::dtb::Node;
+  namespace dtb = ui::dtb;
+  const auto s = [](const char* v) { return Node::Symbol(v); };
+  std::vector<Node> roots{Node::Command({s("new"),s("UIPanel"),s("splash_panel"),
+      Node::Array({s("enter"),Node::Command({s("provider_enter")})}),
+      Node::Array({s("exit"),Node::Command({s("provider_exit")})}),
+      Node::Array({s("poll"),Node::Command({s("provider_poll")})})})};
+  std::string why;
+  BeginCase("native music footer preserves provider lifecycle and compiles into the guest record");
+  CHECK_TRUE(settings::AddNativeMusicFooter(&roots,&why));
+  const auto bytes=dtb::Compile(roots);
+  std::vector<Node> parsed; dtb::RootHeader header;
+  CHECK_TRUE(dtb::Parse(bytes.data(),bytes.size(),&parsed,&header,&why));
+  CHECK_FALSE(settings::AddNativeMusicFooter(&roots,&why));
+  CHECK_TRUE(dtb::Compile(roots)==bytes);
+  auto invalid=std::vector<Node>{};
+  CHECK_FALSE(settings::AddNativeMusicFooter(&invalid,&why));
+  CHECK_TRUE(invalid.empty());
+  struct Guest {
+    const std::vector<Node>& roots;
+    bool available=false, enabled=false;
+    int writes=0, enters=0, exits=0, polls=0;
+    using Actions=std::vector<std::pair<std::string,std::string>>;
+    Actions confirm{{"kAction_Confirm","inline_help_continue"}};
+    Actions back{{"kAction_Cancel","inline_help_back"}};
+    bool Truth(const Node& n) { auto v=Eval(n);return v.tag==dtb::kInt?v.scalar!=0:v.text=="TRUE"; }
+    Node Method(const char* name) {
+      const auto* m=header_test::Method(roots,"splash_panel",name);
+      CHECK_TRUE(m!=nullptr);
+      Node value=Node::Int(0);
+      if (m) for (size_t i=1;i<m->kids.size();++i) value=Eval(m->kids[i]);
+      return value;
+    }
+    Node Eval(const Node& n) {
+      if (n.tag==dtb::kProperty) return Node::Int(enabled);
+      if (n.tag!=dtb::kCommand || n.kids.empty()) return n;
+      const auto& k=n.kids;const auto& op=k[0].text;
+      if (op=="file_exists") { CHECK_TRUE(k[1].text=="rbbz-play/footer");return Node::Int(available); }
+      if (op=="if_else") return Eval(k[Truth(k[1])?2:3]);
+      if (op=="if" || op=="unless") {
+        if (Truth(k[1])==(op=="if")) for(size_t i=2;i<k.size();++i) Eval(k[i]);
+      } else if (op=="do") { for(size_t i=1;i<k.size();++i) Eval(k[i]); }
+      else if (op=="this" && k[1].text=="set") enabled=Truth(k[3]);
+      else if (op=="this") return Method(k[1].text.c_str());
+      else if (op=="provider_enter") ++enters;
+      else if (op=="provider_exit") ++exits;
+      else if (op=="provider_poll") ++polls;
+      else if (op=="continue.ihp" || op=="back.ihp") {
+        auto& actions=op=="continue.ihp"?confirm:back;
+        auto it=std::find_if(actions.begin(),actions.end(),[&](auto& a){return a.first==k[2].text;});
+        ++writes;
+        if (k[1].text=="clear_action_token") { if(it!=actions.end()) actions.erase(it); }
+        else if(it!=actions.end()) it->second=k[3].text;
+        else actions.emplace_back(k[2].text,k[3].text);
+      }
+      return Node::Int(0);
+    }
+  } guest{parsed};
+  guest.Method("enter"); guest.Method("poll");
+  CHECK_EQ(guest.enters,1u); CHECK_EQ(guest.polls,1u); CHECK_EQ(guest.writes,0u);
+  BeginCase("native footer orders Previous/A and B/Next, changes only at gates and restores A/B");
+  guest.available=true; guest.Method("poll");
+  CHECK_TRUE(guest.enabled);
+  CHECK_EQ(guest.confirm.size(),2u);CHECK_EQ(guest.back.size(),2u);
+  CHECK_TRUE(guest.confirm[0].first=="kAction_PageUp" && guest.confirm[0].second=="rbbz_music_previous");
+  CHECK_TRUE(guest.confirm[1].first=="kAction_Confirm" && guest.confirm[1].second=="inline_help_continue");
+  CHECK_TRUE(guest.back[0].first=="kAction_Cancel" && guest.back[0].second=="inline_help_back");
+  CHECK_TRUE(guest.back[1].first=="kAction_PageDown" && guest.back[1].second=="rbbz_music_next");
+  const auto writes=guest.writes;
+  guest.Method("poll"); CHECK_EQ(guest.writes,writes);
+  guest.available=false;guest.Method("poll");
+  CHECK_FALSE(guest.enabled);CHECK_EQ(guest.confirm.size(),1u);CHECK_EQ(guest.back.size(),1u);
+  CHECK_TRUE(guest.confirm[0].first=="kAction_Confirm" && guest.back[0].first=="kAction_Cancel");
+  guest.available=true;guest.Method("poll");guest.Method("exit");
+  CHECK_EQ(guest.exits,1u);CHECK_FALSE(guest.enabled);
+  CHECK_EQ(guest.confirm.size(),1u);CHECK_EQ(guest.back.size(),1u);
+}
+
 int main(int argc, char** argv) {
+  TestNativeMusicFooter();
   {
     namespace dtb = rb_blitz::ui::dtb;
     using dtb::Node;

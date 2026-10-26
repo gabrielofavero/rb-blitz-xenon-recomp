@@ -3,6 +3,7 @@
 // memory. Runtime services and native callees are stand-ins; no game/UI runs.
 // Inclusion makes its private owner state available without a shipping test API.
 #include "check.h"
+#include <fstream>
 #include "../src/hooks/shell_music.cpp"
 
 namespace {
@@ -64,9 +65,6 @@ namespace rb_blitz::fs {
 std::unique_ptr<rex::filesystem::Device> MountPackage(
     const std::string&, const std::filesystem::path&, std::error_code&) { return {}; }
 std::vector<shell_music::SongMetadata> ReadDeviceSongMetadata(rex::filesystem::Device&) { return {}; }
-}
-namespace rb_blitz::shell_music {
-std::string SongKeyForStream(const std::vector<SongMetadata>&, const std::string&) { return {}; }
 }
 
 extern "C" REX_FUNC(__imp__sub_82757F50) {
@@ -523,7 +521,69 @@ void TestNativePauseRuntime() {
   }
 }
 
+void TestArtworkRead() {
+  using namespace rb_blitz;
+  using namespace shell_music;
+  using ui::music::ArtRead;
+  test::BeginCase("production artwork read uses cache leases and revalidates epoch/song/off gates");
+  const auto root = std::filesystem::temp_directory_path() /
+      ("rbbz-player-art-" + std::to_string(NowMs()));
+  std::filesystem::create_directories(root / "songs" / "one" / "gen");
+  const auto path = root / "songs" / "one" / "gen" / "one_keep.png_xbox";
+  { std::ofstream file(path, std::ios::binary); file << "owned bytes"; }
+  rex::filesystem::HostPathDevice device("\\Device\\ArtReadTest", root, true);
+  CHECK_TRUE(device.Initialize());
+  g_closing = false;
+  g_navigation_enabled = true;
+  g_session = MusicSession{};
+  const std::string key = "\\songs\\one\\gen\\one_keep.png_xbox";
+  g_session.Discover(0, {{"menumusic0", "songs/one/one", "One", "Title", "Artist", key}});
+  g_cache = MusicMountCache<rex::filesystem::Device>{};
+  CHECK_TRUE(g_cache.Insert(0, &device));
+  const auto epoch = NowPlaying().Reset();
+  NowPlaying().Publish(epoch, {{MusicSource::kDlc, 0, "One", "Title", "Artist", key},
+                              TransportState::kPlaying, {true,true,true}}, true);
+  std::vector<uint8_t> bytes;
+  const ui::music::ArtTag tag{epoch,0,key};
+  test::BeginCase("native footer query follows source/main-menu/modal/off gates without posting commands");
+  bool footer = false;
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/footer", &footer));
+  CHECK_TRUE(footer);
+  CHECK_FALSE(NowPlaying().ReadSnapshot().pending.has_value());
+  main_menu = false;
+  AnswerPlayQuery("rbbz-play/footer", &footer); CHECK_FALSE(footer);
+  main_menu = true; modal_active = true;
+  AnswerPlayQuery("rbbz-play/footer", &footer); CHECK_FALSE(footer);
+  modal_active = false; capture_active = true;
+  AnswerPlayQuery("rbbz-play/footer", &footer); CHECK_FALSE(footer);
+  capture_active = false; native_loading = true;
+  AnswerPlayQuery("rbbz-play/footer", &footer); CHECK_FALSE(footer);
+  native_loading = false;
+  CHECK_EQ(ReadArtwork(tag,&bytes),ArtRead::kReady);
+  CHECK_TRUE(std::string(bytes.begin(),bytes.end()) == "owned bytes");
+  CHECK_EQ(device.open_file_count(),0u);
+  CHECK_EQ(g_cache.Size(),1u);
+  CHECK_EQ(ReadArtwork({epoch+1,0,key},&bytes),ArtRead::kMissing);
+  CHECK_EQ(ReadArtwork({epoch,1,key},&bytes),ArtRead::kMissing);
+  CHECK_EQ(ReadArtwork({epoch,0,"different"},&bytes),ArtRead::kMissing);
+  g_navigation_enabled = false;
+  AnswerPlayQuery("rbbz-play/footer", &footer); CHECK_FALSE(footer);
+  CHECK_EQ(ReadArtwork(tag,&bytes),ArtRead::kMissing);
+  g_navigation_enabled = true;
+  g_cache = MusicMountCache<rex::filesystem::Device>{};
+  CHECK_EQ(ReadArtwork(tag,&bytes),ArtRead::kDeferred);
+  CHECK_EQ(g_cache.Size(),0u);  // optional art never mounts a ninth device
+  g_closing = true;
+  CHECK_EQ(ReadArtwork(tag,&bytes),ArtRead::kMissing);
+  std::filesystem::remove(path);
+  std::filesystem::remove(path.parent_path());
+  std::filesystem::remove(root / "songs" / "one");
+  std::filesystem::remove(root / "songs");
+  std::filesystem::remove(root);
+}
+
 int main() {
+  TestArtworkRead();
   using namespace rb_blitz::shell_music;
   TestNavigatorRuntime();
   TestRapidPreviousDuringRestart();
