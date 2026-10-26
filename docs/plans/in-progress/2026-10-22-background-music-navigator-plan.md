@@ -1,9 +1,11 @@
 # Background music navigator — implementation plan
 
-**Status:** P1/P2 implemented (2026-10-26), live acceptance pending. P2 connects
-Next/Previous, persistent action bindings, pad/media input, title-track navigation and
-playback snapshots. Pause uses D5's unavailable fallback; no native seam has been
-live-verified. Footer/player/artwork remain P3. See §14 for the P2 record.
+**Status:** P1/P2 implementation complete (2026-10-26), broader live acceptance pending.
+P2 connects Next/Previous, persistent action bindings, pad/media input, title-track
+navigation, native pause/resume and playback snapshots. The owner confirmed the pause
+trial works; `rb_blitz_367.log` proves a frozen cursor across 7.3 seconds and same-stream,
+same-position resume. Pause now works in ordinary boots without a trial flag. Footer,
+player and artwork remain P3. See §§14–17 for implementation and evidence limits.
 
 **Scope revision (2026-10-26, owner).** The two controls the feature cannot ship without are in
 scope, and the plan is corrected to match the tree: the **on/off setting** moves from
@@ -107,7 +109,7 @@ until P2 proves live source setup and input/pause ownership. See §12 for the fo
 | **D2** | **The navigator owns the menu music source, not R9.** With a pool it navigates the pool; with R9 off (or no pool) it navigates the title's three tracks. It therefore learns the panel's Load arguments (`this`, gain, pan) on every Load call when the setting is on, and keeps one guest path buffer allocated even when R9 built no pool. |
 | **D3** | **One session playlist and cursor serve manual and automatic advancement.** `MusicSession` retains stable catalog song IDs and backward/forward history independently of mounted devices. Next follows an existing forward entry; at the frontier it draws an unseen source. Previous follows the same history under D4. After library discovery and one full pass, begin a fresh randomized pass without an immediate repeat. Keep current + three upcoming + two recent songs warm, with an eight-package residency ceiling and explicit active/selection pins. Retired mounts are remounted asynchronously when revisited; a missing ready successor never blocks the UI. The title's three tracks use the same cursor semantics when R9 is off. This supersedes the former fixed-50 pool cursor and separate automatic `Rotation` order. |
 | **D4** | **The 5-second rule uses sample progress since playback begins** (`Stream+0xA0` delta / 44,100), excluding the native random offset and decoded reserve, not wall time. Manual starts use zero offset (owner acceptance fix, §14). A track that is still loading counts as "< 5 s". "First song" means cursor 0 → restart. Next/Previous always resume playback if paused. |
-| **D5** | **Pause is proven or reported, never faked.** **P2** must find a seam that (a) silences the stream, (b) freezes the reported position, (c) resumes at the same position, and (d) is not undone by the guest's own poll. Candidate ladder: the `StandardStream` message/vtable pause-and-resume call; else the stream state word (`Stream+0x14`, value 4 = the usual paused state) under a measured write; else the Play/Pause action is drawn as unavailable (`<label>: Unavailable`) and Start does nothing, with the limitation in `known-issues.md`. During a pause the `Playback` watchdog must be suspended or it marks the track failed after 3 s. |
+| **D5** | **Native pause/resume, verified in §17.** StandardStream slot 7 pauses the channels and changes `Stream+0x14` from 3 to **5**; slot 6 resumes them at the same position. The Play hook prevents the guest poll from auto-resuming an owned pause. The owner confirms listening behavior, and `rb_blitz_367.log` proves a 7.285-second stable cursor and same-position resume. The earlier state-4 guess is superseded. Defer the `Playback` watchdog while paused; a manual move starts its successor playing. A final in-flight decoder block may settle during pause and is excluded from playback age. Never fake pause by muting or restarting. |
 | **D6** | **Buttons are consumed on the main menu only** (`splash_screen` *and* its option list drawn), while the setting is on and a menu-music source exists. Bits: LB `0x0100`, RB `0x0200`, Start `0x0010`; media keys ride the existing keyboard gate (`keyboard_support`). One command per physical press (rising edge), keyboard hold does not repeat. |
 | **D7** | **The footer is host-drawn beside retail's, never a payload/locale edit.** `help_overlay.cpp` draws `LB Previous` immediately left of the guest's A prompt and `RB Next` right of B, same baseline and face, only while the setting is on, the main menu is current and a menu-music source exists. The guest's `A Select / B Back` is left untouched (its button glyphs are guest art; strings are ours and are recorded as such). |
 | **D8** | **Play Current Song follows the navigated song through the existing probe, with one fix.** The probe answers at press time, so it already names the audible song; the 2 s "recent" grace in `PlaySelection` must be cleared on a *manual* transition or a press right after Next/Previous would name the song that just left. |
@@ -192,7 +194,13 @@ R8's wider scope. No guest call, package I/O or GPU upload runs inside an ImGui 
 
 ### 4.4 Pause
 
-The playback pause seam remains unproven. Instruments for P2, in order:
+**Current seam (owner-verified 2026-10-26, §17):** StandardStream slot 7
+(`0x823E3FD8`) pauses the channels and changes state 3 → 5; slot 6 (`0x823E4808`)
+resumes them at the same position. The Play hook prevents ShellMusic's poll from
+automatically resuming an explicitly paused stream. Watchdogs are deferred while
+paused; navigation and teardown clear pause ownership. No mute/restart or seek is used.
+
+The following was the original investigation ladder, retained as history:
 
 1. `scripts/scan_process_strings.ps1` on a live menu boot, around the `ShellMusic`/stream class, to
    find a message-table entry naming a pause/resume; call it on the guest thread as
@@ -523,7 +531,7 @@ owner versus automation, and keep unmeasured behavior explicitly unproven.
 | Id | Question / risk | Resolution |
 | --- | --- | --- |
 | OQ1 | Is there a pause seam at all? | D5's ladder; a failed seam is a documented limitation, not a fake pause. |
-| OQ2 | Does the guest's own poll restart a paused stream or tear it down? | P2 boot: read `Stream+0x14`/`+0xA0` across 5 s while paused. |
+| OQ2 | Does the guest's own poll restart a paused stream or tear it down? | Resolved for the verified stream by the Play ownership guard; `rb_blitz_367.log` retains state 5 and the same sample cursor across 7.285 s (§17). |
 | OQ3 | Does Start do anything retail on the splash screen? | P2 control boot with the setting off: press Start, read the action line. If it starts PLAY, the navigator still consumes it only while it advertises the prompt (D6). |
 | OQ4 | Are media keys delivered to this window at all on Windows? | P2: log the latch; if the OS shell swallows them, Start/LB/RB remain and the limitation is recorded. |
 | OQ5 | Does the pre-press title screen also report `splash_screen`? | Gate on the option list being drawn (`VisibleMenuRows`), not on the name alone; P2's off-arm proves the title ignores the keys. |
@@ -851,3 +859,97 @@ The current executable includes all functional changes. A redundant relink after
 comment cleanup hit Windows' running-executable lock; no additional behavior change was
 waiting to be built. The debug navigator suite also passes, and documentation retains
 43 existing errors / 87 warnings with no introduced findings. `git diff --check` passes.
+
+
+## 16. Native pause/resume trial (2026-10-26)
+
+**Historical trial record; §17 supersedes the default-off/unavailable status below.**
+
+The owner's P2 completion review highlighted that the unavailable fallback is not
+working pause. Navigation/bindings are implemented; normal Play/Pause remains
+unavailable until live transport acceptance succeeds.
+
+Static inspection of the decrypted retail image and StandardStream RTTI vtable
+`0x82077594` found a concrete seam, superseding the earlier state-4 candidate:
+
+- Slot 7 (`+28`, `0x823E3FD8`) calls `0x823E96B0` for every channel and changes
+  stream state **3 → 5**. The channel routine calls its virtual pause method with
+  argument 1; it does not destroy or seek the stream.
+- Slot 6 (`+24`, `0x823E4808`) resumes channels through `0x823E9640`, whose paused
+  channel branch calls that same method with argument 0, and sets stream state **3**.
+- The ShellMusic poll's `!IsPlaying && IsReady` branch at `0x82758834–0x827588A0`
+  would immediately call Play on state 5. An ownership guard in the Play hook now
+  suppresses that call only for the navigator's explicitly paused stream. An explicit
+  resume bypasses the guard; unrelated streams retain native Play behavior.
+
+The default-off diagnostic flag `--background_music_nav_pause_trial` enables the
+candidate through the existing pad/media action bindings and command bridge. The
+normal binding page still says Unavailable: this flag is a measurement tool, not
+a claim that release pause acceptance has passed. No new setting or overlay was
+added. Pause/resume commands run on the guest owner, preserve selection/history,
+publish the observed state, and report a failed native state transition as failed.
+The watchdog is deferred throughout owned state 5 and on resume; a manual skip
+retires pause ownership and starts its successor normally. Stop/teardown also clears
+ownership. Title-fallback recovery cannot replace an intentionally paused source.
+
+Logs tagged `music_nav: pause trial` record the pause/resume stream, state, raw
+sample cursor and paused baseline, plus a hold observation each second. The live
+test must verify silence, at least five seconds of frozen progress despite native
+polls, then continuity from the same position after resume, for DLC and title-only
+sources. No live silence/frozen-progress/resume result is claimed yet. The agent
+asked the owner to choose who performs the game/UI test, as required by AGENTS.md;
+the owner chose to test the pause trial themselves. Live acceptance remains pending.
+
+**Host verification:** `cmake --build --preset win-amd64-release` succeeds, and all
+13 targeted release tests pass. The production-hook fixture covers both source
+types, native poll auto-resume attempts, a watchdog aged by 60 seconds, unchanged
+identity/cursor/sample position, resume, failed pause, Next from pause, teardown
+and unrelated Play calls. Its native audio callees are synthetic; these tests do
+not prove the actual mix is silent or that the real sample cursor freezes.
+After adding explicit native Load/Start ownership resets and the supported-Start
+edge regression, the final release rebuild and both affected tests
+(`menu_music_nav`, `menu_music_runtime`) also pass. Static seam dumps and the final
+test log are under `out/_swap/music-nav/p2-pause-trial/`. `git diff --check` passes.
+
+
+## 17. Owner pause acceptance and normal enablement (2026-10-26)
+
+The owner tested the trial themselves and reported **“it works!”**. Their
+`out/build/win-amd64-release/logs/rb_blitz_367.log` supplies the native evidence:
+
+- At 14:38:20.905, stream `40830638` changed state **3 → 5**, cursor **3555328**.
+  Seven one-second hold observations retained that exact cursor and state 5.
+  At 14:38:28.190 it resumed **5 → 3**, still at **3555328**: a **7.285-second**
+  hold without a reload, restart, watchdog failure or guest-poll auto-resume.
+- Three subsequent pause/resume pairs used the same stream. One pause allowed
+  one in-flight decoder block (4096 samples) to finish before the cursor settled;
+  it remained stable thereafter and resumed at that settled position. This is
+  not a promise that asynchronous decoding stops mid-block.
+
+Native pause/resume is now enabled whenever Menu Music Navigation owns an eligible
+playing/paused source; no trial flag is required. The legacy
+`--background_music_nav_pause_trial` flag remains accepted solely to request
+per-second paused-cursor diagnostics. The default mapping row now shows
+**Play/Pause: Start, Media Play**, including the in-song mapping page. The existing
+off gate and main-menu input scope still apply.
+
+`PlaybackAge::Hold` excludes the final paused decoder block from Previous's
+five-second progress counter. A failed native resume retains pause ownership
+and publishes failure plus the actual paused state, so the guest cannot silently
+auto-resume after a rejected command. Tests cover both behaviors with synthetic
+callees, plus normal pause without the diagnostic flag and the existing title/DLC
+transport, skip, watchdog and teardown cases.
+
+**Verification:** the final release build succeeds, and all **13 targeted release
+tests** pass, including settings rows and production runtime hooks. Evidence:
+`out/_swap/music-nav/p2-pause-trial/tests-accepted-release.log` and
+`owner-367-pause.log`. No game UI was driven by the agent. The log demonstrates
+DLC playback; a separate title-only live boot, physical-pad/media-device attribution,
+and the broader assignment/restart/layout matrix are not established by this report.
+P2 implementation is complete; those acceptance limits remain explicit, and P3's
+footer/player/artwork work remains outstanding.
+The final caption/boot-log cleanup was rebuilt successfully; `settings_screen`
+and `menu_payload` were rerun and both pass (`tests-final-labels.log`). Documentation
+validation remains at 44 existing errors / 87 warnings, with no introduced finding
+identities, and `git diff --check` passes. The additional existing link error is
+the concurrently moved button-layout plan, outside this music change.

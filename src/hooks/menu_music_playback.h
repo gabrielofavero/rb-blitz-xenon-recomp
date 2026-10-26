@@ -11,6 +11,11 @@ namespace rb_blitz::shell_music {
 class PlaybackAge {
  public:
   void Reset() { stream_ = last_ = samples_ = 0; }
+  // One decoder block can finish after native pause. It was not listener
+  // progress; retain the age and rebase the next playing observation.
+  void Hold(uint32_t stream, uint32_t position) {
+    if (stream && stream == stream_) last_ = position;
+  }
   void Observe(uint32_t stream, bool playing, uint32_t position) {
     if (!stream || !playing || !position) return;
     if (stream != stream_) {

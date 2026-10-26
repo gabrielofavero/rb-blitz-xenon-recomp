@@ -3166,7 +3166,7 @@ void TestMusicNavigationSurface() {
   CHECK_EQ(text.size(), 3u);
   CHECK_TRUE(text[0] == "Next Track: RB, Media Next");
   CHECK_TRUE(text[1] == "Previous Track: LB, Media Prev");
-  CHECK_TRUE(text[2] == "Play/Pause: Unavailable");
+  CHECK_TRUE(text[2] == "Play/Pause: Start, Media Play");
   const auto request_paths = RequestPaths();
   for (const auto& path : request_paths) CHECK_FALSE(path.starts_with("rbbz-play/"));
   int labels = 0;

@@ -244,12 +244,12 @@ void TestConfiguredInput() {
   nav::BindingLatch latch;
   rb_blitz::profile::remap::PadState pad;
   std::string held;
-  bool enabled = false, keyboard = true;
+  bool enabled = false, keyboard = true, pause_supported = false;
   std::vector<rb_blitz::profile::remap::Source> consumed;
   const auto sample = [&] {
     consumed.clear();
     return latch.Update(bindings, pad, [&](std::string_view name) { return held == name; },
-                        keyboard, enabled, false, &consumed);
+                        keyboard, enabled, pause_supported, &consumed);
   };
   CHECK_FALSE(sample());
   pad.buttons = nav::kNextButton;
@@ -273,6 +273,15 @@ void TestConfiguredInput() {
   pad.buttons = nav::kPlayPauseButton;
   CHECK_FALSE(sample());
   CHECK_TRUE(consumed.empty()); // unavailable pause leaves retail Start alone
+  pause_supported = true;
+  CHECK_FALSE(sample()); // capability publication cannot turn held Start into a press
+  pad.buttons = 0;
+  CHECK_FALSE(sample());
+  pad.buttons = nav::kPlayPauseButton;
+  press = sample();
+  CHECK_TRUE(press && press->command == nav::Command::kPlayPause);
+  CHECK_EQ(consumed.size(), 1u);
+  CHECK_FALSE(sample()); // supported Start is still one command per press
   pad.buttons = 0;
   keyboard = false;
   held = "MediaTrackNext";
@@ -305,7 +314,10 @@ void TestPlaybackAge() {
   CHECK_EQ(age.samples(), 0u);
   age.Observe(1, true, initial + 2 * 44100);
   CHECK_TRUE(nav::PreviousAction(age.samples(), 2) == nav::Previous::kStepBack);
-  age.Observe(1, true, initial + 5 * 44100);
+  age.Hold(2, UINT32_MAX); // another stream cannot change this age's baseline
+  age.Hold(1, initial + 2 * 44100 + 4096);
+  CHECK_EQ(age.samples(), 2u * 44100);
+  age.Observe(1, true, initial + 5 * 44100 + 4096);
   CHECK_TRUE(nav::PreviousAction(age.samples(), 2) == nav::Previous::kRestart);
   age.Reset(); // allocator may reuse the exact same stream address on restart
   age.Observe(1, true, 6 * 44100);

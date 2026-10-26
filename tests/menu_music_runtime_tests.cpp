@@ -15,6 +15,10 @@ bool main_menu = true;
 bool capture_active = false;
 bool modal_active = false;
 bool window_focused = true;
+bool poll_retries_play = false;
+bool native_pause_works = true;
+bool native_resume_works = true;
+unsigned pause_calls = 0, resume_calls = 0;
 std::string loaded;
 void Store(uint8_t* base, uint32_t address, uint32_t value) {
   rex::memory::store_and_swap<uint32_t>(base + address, value);
@@ -90,6 +94,20 @@ extern "C" REX_FUNC(__imp__sub_827586D8) {
   ++polls;
   CHECK_EQ(ctx.r3.u32, kMusic);
   CHECK_EQ(ctx.r31.u64, 0xABCDEFu);
+  const auto stream = LoadBe32(base, kMusic + kStreamOffset);
+  if (poll_retries_play && stream && LoadBe32(base, stream + 20) == 5) {
+    PPCContext call(ctx);
+    call.r3.u32 = stream;
+    sub_823E4808(call, base); // retail's IsReady/!IsPlaying branch
+  }
+}
+extern "C" REX_FUNC(sub_823E3FD8) {
+  ++pause_calls;
+  if (native_pause_works) Store(base, ctx.r3.u32 + 20, 5);
+}
+extern "C" REX_FUNC(__imp__sub_823E4808) {
+  ++resume_calls;
+  if (native_resume_works) Store(base, ctx.r3.u32 + 20, 3);
 }
 extern "C" REX_FUNC(__imp__sub_82758998) {}
 extern "C" REX_FUNC(__imp__sub_82758490) {}
@@ -195,7 +213,7 @@ void TestNavigatorRuntime() {
   auto snapshot = NowPlaying().ReadSnapshot();
   CHECK_TRUE(snapshot.available);
   CHECK_TRUE(snapshot.playback.track.title == "First");
-  CHECK_FALSE(snapshot.playback.capabilities.play_pause);
+  CHECK_TRUE(snapshot.playback.capabilities.play_pause);
   bool answer = false;
   CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_TRUE(answer);
   native_start_offset_ms = 30000; // native Start would begin at 30 seconds without the manual override
@@ -274,7 +292,9 @@ void TestNavigatorRuntime() {
   modal_active = true;
   CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_FALSE(answer);
   modal_active = false;
-  CHECK_TRUE(AnswerPlayQuery("rbbz-play/pause", &answer)); CHECK_FALSE(answer);
+  CHECK_TRUE(AnswerPlayQuery("rbbz-play/pause", &answer)); CHECK_TRUE(answer);
+  sub_827586D8(ctx, base);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().playback.state == TransportState::kPaused);
   g_navigation_enabled = false;
   CHECK_TRUE(AnswerPlayQuery("rbbz-play/next", &answer)); CHECK_FALSE(answer);
   g_navigation_enabled = true;
@@ -321,7 +341,7 @@ void TestNavigatorRuntime() {
   g_session = MusicSession{};
   g_cache = MusicMountCache<rex::filesystem::Device>{};
   g_stream_song = kNoIndex;
-  loads = starts = stops = destroys = polls = 0;
+  loads = starts = stops = destroys = polls = pause_calls = resume_calls = 0;
 }
 
 void TestRapidPreviousDuringRestart() {
@@ -404,10 +424,110 @@ void TestRapidPreviousDuringRestart() {
   loads = starts = stops = destroys = polls = 0;
 }
 
+void TestNativePauseRuntime() {
+  using namespace rb_blitz::shell_music;
+  rb_blitz::test::BeginCase("native pause: poll ownership, watchdog, same-position resume and skip");
+  for (bool title : {false, true}) {
+    std::array<uint8_t, 65536> memory{};
+    auto* base = memory.data();
+    PPCContext ctx{};
+    ctx.r1.u32 = 0xF000; ctx.r3.u32 = kMusic; ctx.r31.u64 = 0xABCDEF;
+    rex::filesystem::HostPathDevice ready("\\Device\\PauseMusic", {}, true);
+    g_navigation_enabled = true;
+    g_nav_pause_trace = false; // ordinary boots support pause without the trial flag
+    g_enabled = !title; g_closing = false; g_music = kMusic;
+    g_watch = !title; g_watch_title = title; g_title_index = title ? 0 : -1;
+    g_waiting_for_pool = false; g_nav_paused_stream = 0; g_nav_age.Reset();
+    g_nav_epoch = NowPlaying().Reset(); g_buffers = {kPath};
+    g_session = MusicSession{};
+    g_session.Discover(0, {{"menumusic0", title ? kTitleTracks[0] : "songs/one/audio", "One"}});
+    g_session.Discover(1, {{"menumusic1", title ? kTitleTracks[1] : "songs/two/audio", "Two"}});
+    g_session.AdoptFirst(0); g_session.PlanAhead(g_rng);
+    g_cache = MusicMountCache<rex::filesystem::Device>{};
+    CHECK_TRUE(g_cache.Insert(0, &ready)); CHECK_TRUE(g_cache.Insert(1, &ready));
+    g_pending_index = g_current_index = title ? -1 : 0;
+    if (!title) g_play_selection.Audible(0);
+    g_playback.Begin(NowMs());
+    Store(base, kMusic + kStreamOffset, kOldStream);
+    Store(base, kOldStream, kVtable); Store(base, kVtable, kDestroy);
+    Store(base, kNewStream, kVtable);
+    Store(base, kOldStream + 20, 3); Store(base, kOldStream + kPositionOffset, 123456);
+    poll_retries_play = true;
+    sub_827586D8(ctx, base);
+    const auto track = NowPlaying().ReadSnapshot().playback.track.key;
+    CHECK_TRUE(NowPlaying().ReadSnapshot().playback.capabilities.play_pause);
+    CHECK_TRUE(nav::Post(nav::Command::kPlayPause).status == nav::PostStatus::kAccepted);
+    sub_827586D8(ctx, base);
+    CHECK_TRUE(NowPlaying().ReadSnapshot().playback.state == TransportState::kPaused);
+    CHECK_TRUE(NowPlaying().ReadSnapshot().result->status == nav::CompletionStatus::kApplied);
+    CHECK_EQ(pause_calls, 1u); CHECK_EQ(resume_calls, 0u);
+    // A long intentional hold must survive both the host watchdog and native
+    // auto-Play without reloading, advancing history or losing song identity.
+    g_playback.Begin(NowMs() - 60000);
+    g_playback.Observe(NowMs() - 60000, kOldStream, true, false, 123456);
+    sub_827586D8(ctx, base);
+    CHECK_TRUE(g_playback.active()); CHECK_EQ(g_session.Cursor(), 0u);
+    CHECK_EQ(LoadBe32(base, kOldStream + 20), 5u);
+    CHECK_EQ(LoadBe32(base, kOldStream + kPositionOffset), 123456u);
+    CHECK_EQ(loads + starts + stops + destroys + resume_calls, 0u);
+    CHECK_TRUE(NowPlaying().ReadSnapshot().playback.track.key == track);
+    // A final in-flight decoder block may settle during pause (owner log 367).
+    Store(base, kOldStream + kPositionOffset, 123456 + 4096);
+    sub_827586D8(ctx, base);
+    CHECK_EQ(g_nav_age.samples(), 0u);
+    native_resume_works = false;
+    CHECK_TRUE(nav::Post(nav::Command::kPlayPause).status == nav::PostStatus::kAccepted);
+    sub_827586D8(ctx, base);
+    CHECK_TRUE(NowPlaying().ReadSnapshot().result->status == nav::CompletionStatus::kFailed);
+    CHECK_TRUE(NowPlaying().ReadSnapshot().playback.state == TransportState::kPaused);
+    CHECK_EQ(g_nav_paused_stream, kOldStream);
+    native_resume_works = true;
+    CHECK_TRUE(nav::Post(nav::Command::kPlayPause).status == nav::PostStatus::kAccepted);
+    sub_827586D8(ctx, base);
+    CHECK_EQ(resume_calls, 2u); CHECK_EQ(g_nav_paused_stream, 0u);
+    CHECK_TRUE(NowPlaying().ReadSnapshot().playback.state == TransportState::kPlaying);
+    CHECK_EQ(LoadBe32(base, kOldStream + kPositionOffset), 123456u + 4096);
+    CHECK_TRUE(g_playback.active());
+    Store(base, kOldStream + kPositionOffset, 124456 + 4096);
+    sub_827586D8(ctx, base);
+    CHECK_EQ(g_nav_age.samples(), 1000u);
+    // A failed native call never publishes a paused state.
+    native_pause_works = false;
+    CHECK_TRUE(nav::Post(nav::Command::kPlayPause).status == nav::PostStatus::kAccepted);
+    sub_827586D8(ctx, base);
+    CHECK_TRUE(NowPlaying().ReadSnapshot().result->status == nav::CompletionStatus::kFailed);
+    CHECK_TRUE(NowPlaying().ReadSnapshot().playback.state == TransportState::kPlaying);
+    native_pause_works = true;
+    CHECK_TRUE(nav::Post(nav::Command::kPlayPause).status == nav::PostStatus::kAccepted);
+    sub_827586D8(ctx, base);
+    CHECK_TRUE(nav::Post(nav::Command::kNext).status == nav::PostStatus::kAccepted);
+    sub_827586D8(ctx, base);
+    CHECK_EQ(g_nav_paused_stream, 0u);
+    CHECK_EQ(loads, 1u); CHECK_EQ(g_session.Cursor(), 1u);
+    CHECK_TRUE(NowPlaying().ReadSnapshot().playback.state == TransportState::kPlaying);
+    CHECK_EQ(LoadBe32(base, kNewStream + kPositionOffset), native_start_position);
+    CHECK_TRUE(nav::Post(nav::Command::kPlayPause).status == nav::PostStatus::kAccepted);
+    sub_827586D8(ctx, base);
+    ForgetMenuMusic(kMusic);
+    CHECK_EQ(g_nav_paused_stream, 0u);
+    CHECK_FALSE(NowPlaying().ReadSnapshot().available);
+    // The ownership guard must not suppress a foreign stream's native Play.
+    PPCContext foreign(ctx); foreign.r3.u32 = kNewStream;
+    const auto calls = resume_calls;
+    sub_823E4808(foreign, base);
+    CHECK_EQ(resume_calls, calls + 1);
+    poll_retries_play = false; g_navigation_enabled = false;
+    g_session = MusicSession{}; g_cache = MusicMountCache<rex::filesystem::Device>{};
+    g_stream_song = kNoIndex;
+    loads = starts = stops = destroys = polls = pause_calls = resume_calls = 0;
+  }
+}
+
 int main() {
   using namespace rb_blitz::shell_music;
   TestNavigatorRuntime();
   TestRapidPreviousDuringRestart();
+  TestNativePauseRuntime();
   TestLoadingPreservesBootSong();
   rb_blitz::test::BeginCase("temporary title fallback recovers without a counter rewind");
   std::array<uint8_t, 65536> memory{};

@@ -741,8 +741,10 @@ publication. Raw physical pad sources cannot be triggered by keyboard pad emulat
 Keys obey Keyboard Support and window focus. The splash focused option list must be drawn;
 the pre-press title screen is excluded, and modal/capture owners win.
 
-Only supported actions intercept input. Pause is explicitly unavailable, so Start retains
-retail behavior. The internal `rbbz-play/next|previous|pause` command channel retains its
+Only supported actions intercept input. Native pause/resume is owner-verified and
+enabled without a trial flag: Start/MediaPlayPause toggle the owned stream between
+states 3 and 5. The Play hook prevents the guest poll from undoing pause, and the
+watchdog is deferred while paused. The internal `rbbz-play/next|previous|pause` command channel retains its
 off gate. Mapping pages configure bindings only, without an execution button. Only the guest music poll executes requests,
 revalidating producer scope before handoff. Assignment uses the existing guest capture
 page, three-second cancellation countdown, profile writer and live snapshot publication.
@@ -753,7 +755,7 @@ the host latch translates them to SDL key names for capture and `HostKeyDown`.
 once after a configurable delay. Host tests drive no game UI. Windows media-key arbitration
 and physical-pad delivery remain unmeasured. No host player is added here; its mouse hit
 regions, event ordering and click-through proof remain P3. See the
-[P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §14.
+[P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §§14 and 17.
 
 
 The 2026-10-26 Previous follow-up retains rapid navigation edges while the decoder loads:

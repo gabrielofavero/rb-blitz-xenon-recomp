@@ -153,12 +153,12 @@ REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, true, "Enhancements",
                     "is written to, so an explicit flag or environment value still outranks it.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-// Navigator P2: Next/Previous, action bindings and playback snapshots are live.
-// Pause is explicitly unavailable; the footer/clickable player remain P3.
+// Navigator P2: Next/Previous, native pause/resume, bindings and snapshots are live.
+// The footer/clickable player remain P3.
 REXCVAR_DEFINE_BOOL(enhancements_background_music_nav, true, "Enhancements",
                     "Enable menu-music navigation; Background Music Play remains visible when off. "
-                    "Next/Previous use the guest music player and independent pad/key bindings. "
-                    "Pause is unavailable; footer and music player rendering remain pending.")
+                    "Next/Previous and pause/resume use the guest music player and independent "
+                    "pad/key bindings. Footer and music player rendering remain pending.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",
@@ -220,7 +220,7 @@ constexpr std::array<ToggleRow, 13> kToggles{{
      [] { return REXCVAR_GET(enhancements_force_controller_scheme); }},
     {"enhancements_menu_dlc_songs", "R9 main-menu DLC songs (the in-game DLC Menu Songs row)",
      [] { return REXCVAR_GET(enhancements_menu_dlc_songs); }},
-    {"enhancements_background_music_nav", "menu-music navigator (P2; pause unavailable)",
+    {"enhancements_background_music_nav", "menu-music navigator (P2; native pause/resume)",
      [] { return REXCVAR_GET(enhancements_background_music_nav); }},
     {"enhancements_rename_mod_settings", "R10 rename the mod's settings row",
      [] { return REXCVAR_GET(enhancements_rename_mod_settings); }},

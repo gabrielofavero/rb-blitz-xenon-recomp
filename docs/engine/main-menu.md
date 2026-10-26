@@ -1307,13 +1307,17 @@ stream was observed playing. Controls now draws effective bindings, with Assign 
 existing capture/countdown/rebase/save flow and publishes the live input snapshot. On/Off
 retain the same authored tree and restart-scoped feature switch.
 
-**Pause remains unavailable under D5:** no state-4 or guessed vtable call is enabled without
-silence/frozen-position/same-position-resume measurements. The guest says Unavailable,
-the probe returns false and Start retains retail behavior. Host production-hook tests
+**Native pause/resume is enabled after owner acceptance:** StandardStream's native
+pause call (`0x823E3FD8`) uses state 5, and Play (`0x823E4808`) resumes its channels.
+The owner confirms the trial works; `rb_blitz_367.log` records a 7.285-second frozen
+cursor and same-stream/same-position resume. A Play-hook ownership guard stops the
+guest poll from undoing pause, and the watchdog is deferred while paused. The legacy
+trial flag now only requests per-second diagnostics. The guest row shows bindings.
+Host production-hook tests
 cover navigation, cold targets, history/restart, automatic snapshots, title tracks and
-cancellation; actual audio, media-key delivery, guest layout and physical-pad input remain
+cancellation; title-only live pause, media-device attribution, guest layout and physical-pad input remain
 unproven. Footer/player/artwork remain P3. See the
-[P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §14 and
+[P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §§14 and 17 and
 `out/_swap/music-nav/p2-runtime/` for verification.
 
 

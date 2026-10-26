@@ -22,9 +22,10 @@ Part 1 wherever they disagree.
   Interface Mapping's fifth row, with effective bindings and Assign / Reset
   pages in both contexts. `[menu_music]` persists action-specific pad/key sources.
   Next/Previous execute on the guest poll for DLC or title-only sources, publish snapshots
-  and keep Play Current Song aligned. Pause uses D5's unavailable fallback; Start is not
-  intercepted. Footer/player/artwork remain P3. See the
-  [navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §14.
+  and keep Play Current Song aligned. Native pause/resume is enabled without a trial
+  flag after owner listening acceptance and a measured 7.285-second frozen-cursor hold.
+  The Play/Pause row displays its configured bindings. Footer/player/artwork remain P3. See the
+  [navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §17.
 
 - **Guest binding rows (2026-10-25):** the host binding overlay is removed. Interface and gameplay
   lists receive current text on entry and after Reset All; the title draws every row. See the

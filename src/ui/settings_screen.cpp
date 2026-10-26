@@ -795,7 +795,7 @@ std::vector<PanelSpec> AllPanels() {
                                     "Restart after five seconds; otherwise return to the previous track."),
                                 BindingSubmenuRow("settings_bind_music_pause", "input.music.pause",
                                     "settings_bind_music_pause_screen", "Play/Pause",
-                                    "Pause and resume are currently unavailable for menu music."),
+                                    "Configure the inputs that pause and resume menu music."),
                             }});
     for (const auto action : profile::music::kActions) {
       const std::string token = "input.music." + std::string(action);
@@ -2577,10 +2577,7 @@ std::vector<std::string> PanelBindingText(const std::string_view name,
         lines.push_back(row.symbol);
         continue;
     }
-    if (token.kind == profile::InputRowKind::kMusicBinding && token.name == "pause")
-      lines.push_back("Play/Pause: Unavailable");
-    else
-      lines.push_back(profile::BindingRowText(token, sources));
+    lines.push_back(profile::BindingRowText(token, sources));
   }
   return lines;
 }

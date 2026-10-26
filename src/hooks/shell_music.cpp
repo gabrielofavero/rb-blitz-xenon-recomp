@@ -74,6 +74,8 @@ REXCVAR_DECLARE(bool, enhancements_background_music_nav);
 REXCVAR_DEFINE_STRING(background_music_nav_probe, "", "Diagnostics",
     "One main-menu command after background_music_nav_probe_delay seconds: next, previous, play_pause.");
 REXCVAR_DEFINE_INT32(background_music_nav_probe_delay, 5, "Diagnostics", "Seconds before the one-shot music navigator probe.");
+REXCVAR_DEFINE_BOOL(background_music_nav_pause_trial, false, "Diagnostics",
+    "Legacy pause-trial flag: log paused sample progress each second. Native pause no longer requires this flag.");
 REXCVAR_DECLARE(int32_t, enhancements_menu_dlc_song_count);
 
 REX_EXTERN(__imp__sub_82757F50);
@@ -84,6 +86,8 @@ REX_EXTERN(__imp__sub_82758998);  // ShellMusic::Stop (menu exit)
 REX_EXTERN(__imp__sub_82758490);  // ShellMusic destructor
 REX_EXTERN(__imp__sub_823E5BE0);  // StandardStream constructor, f2 = buffer seconds
 REX_EXTERN(__imp__sub_82757D40);  // ShellMusic random start-offset selector
+REX_EXTERN(sub_823E3FD8);         // StandardStream::Stop: pause channels, state 3 -> 5
+REX_EXTERN(__imp__sub_823E4808);  // StandardStream::Play: resume channels, state 5 -> 3
 
 namespace {
 
@@ -111,6 +115,10 @@ constexpr double kSamplesPerSecond = 44100.0;  // diagnostic display for these m
 
 bool g_enabled = false;
 bool g_navigation_enabled = false;
+bool g_nav_pause_trace = false;
+uint32_t g_nav_paused_stream = 0;
+uint32_t g_nav_pause_position = 0;
+std::chrono::steady_clock::time_point g_nav_pause_log_at{};
 namespace nav = rb_blitz::input::menu_music_nav;
 std::optional<nav::Request> g_nav_request;
 size_t g_nav_target = rb_blitz::shell_music::kNoIndex;
@@ -469,6 +477,7 @@ constexpr const char* kTitleTracks[] = {"sfx/shell/samples/shellmusic_1",
 // (0x82758C08): the stream's own destructor with the "remove from the pool" flag, the field
 // cleared, then StopStreams. The rotation uses this when handing over to its next track.
 void RetireStreamOnGuest(uint8_t* base, PPCContext& parent, uint32_t music) {
+  g_nav_paused_stream = 0;
   const uint32_t old_stream = LoadBe32(base, music + kStreamOffset);
   if (old_stream == 0) {
     return;
@@ -636,9 +645,12 @@ void NoteFailedCandidate(uint8_t* base, PPCContext& parent, uint32_t music) {
   StartNextTrack(base, parent, music);
 }
 
-// Pause capability deliberately remains false. StandardStream state 4 alone is
-// not proof of silence, position preservation or compatibility with the native
-// poll. D5 requires those live measurements before a pause seam may ship.
+// Retail StandardStream's slot 7 (0x823E3FD8) pauses every channel through
+// 0x823E96B0 and sets state 5; slot 6 (0x823E4808) resumes through 0x823E9640.
+// ShellMusic's poll would immediately call Play again (0x827588A0), so the Play
+// hook below preserves an explicitly paused stream. State 4 is not this seam.
+// Owner listening confirmation and rb_blitz_367.log prove pause across 7.3 s
+// with a frozen cursor and same-stream/same-position resume (2026-10-26).
 void PublishNavigator(uint8_t* base, uint32_t music) {
   using namespace rb_blitz::shell_music;
   if (!g_navigation_enabled || music != g_music) return;
@@ -652,9 +664,12 @@ void PublishNavigator(uint8_t* base, uint32_t music) {
     const auto stream = LoadBe32(base, music + kStreamOffset);
     const auto state = stream ? LoadBe32(base, stream + 20) : 0;
     const auto position = stream ? LoadBe32(base, stream + kPositionOffset) : 0;
-    g_nav_age.Observe(stream, state == 3, position);
-    update.state = state == 3 && position > 0 ? TransportState::kPlaying : TransportState::kLoading;
-    update.capabilities = {true, true, false};
+    const bool paused = stream && stream == g_nav_paused_stream && state == 5;
+    if (paused) g_nav_age.Hold(stream, position);
+    else g_nav_age.Observe(stream, state == 3, position);
+    update.state = paused ? TransportState::kPaused :
+        state == 3 && position > 0 ? TransportState::kPlaying : TransportState::kLoading;
+    update.capabilities = {true, true, paused || (state == 3 && position > 0)};
     std::lock_guard lock(g_mutex);
     if (g_watch && g_pending_index >= 0) {
       const auto id = size_t(g_pending_index);
@@ -710,7 +725,36 @@ void ApplyNavigatorCommand(uint8_t* base, PPCContext& ctx, uint32_t music) {
       return;
     }
     if (g_nav_request->command == nav::Command::kPlayPause) {
-      FinishNavigator(nav::CompletionStatus::kFailed, "native pause seam unavailable");
+      const auto stream = LoadBe32(base, music + kStreamOffset);
+      const auto state = stream ? LoadBe32(base, stream + 20) : 0;
+      const bool resume = stream && stream == g_nav_paused_stream && state == 5;
+      if (!stream || (!resume && state != 3)) {
+        FinishNavigator(nav::CompletionStatus::kFailed, "native pause unavailable for this stream");
+        return;
+      }
+      PPCContext call(ctx);
+      call.r1.u32 -= 0x100;
+      call.r3.u32 = stream;
+      const auto position = LoadBe32(base, stream + kPositionOffset);
+      if (resume) {
+        g_nav_age.Hold(stream, position);
+        __imp__sub_823E4808(call, base);
+        if (LoadBe32(base, stream + 20) == 3) g_nav_paused_stream = 0;
+      } else {
+        sub_823E3FD8(call, base);
+        if (LoadBe32(base, stream + 20) == 5) g_nav_paused_stream = stream;
+        g_nav_pause_position = LoadBe32(base, stream + kPositionOffset);
+        g_nav_pause_log_at = std::chrono::steady_clock::now();
+      }
+      g_playback.DeferWatchdog(NowMs());
+      const auto after = LoadBe32(base, stream + 20);
+      REXLOG_INFO("music_nav: {} stream {:08X} state {} -> {} samples {} -> {} pause_samples {}",
+                  resume ? "resume" : "pause", stream, state, after, position,
+                  LoadBe32(base, stream + kPositionOffset), g_nav_pause_position);
+      PublishNavigator(base, music);
+      const bool applied = after == (resume ? 3u : 5u);
+      FinishNavigator(applied ? nav::CompletionStatus::kApplied : nav::CompletionStatus::kFailed,
+                      applied ? (resume ? "native resume" : "native pause") : "native pause transition failed");
       return;
     }
     const auto stream = LoadBe32(base, music + kStreamOffset);
@@ -806,6 +850,7 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
   const auto requested = ctx.r4.u32 ? rex::memory::GuestPtr<const char*>(base, ctx.r4.u32) : nullptr;
   if (g_navigation_enabled && requested && std::strncmp(requested, kShellMusicPrefix, kShellMusicPrefixSize) == 0) {
     FinishNavigator(nav::CompletionStatus::kCancelled, "native source changed");
+    g_nav_paused_stream = 0;
     g_nav_epoch = rb_blitz::shell_music::NowPlaying().Reset();
     g_music = ctx.r3.u32;
     g_gain = ctx.f1.f64;
@@ -926,6 +971,8 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   //
   // The read happens once, on this host thread; no guest thread ever touches the cvar registry.
   g_navigation_enabled = REXCVAR_GET(enhancements_background_music_nav);
+  g_nav_pause_trace = REXCVAR_GET(background_music_nav_pause_trial);
+  g_nav_paused_stream = 0;
   g_nav_epoch = rb_blitz::shell_music::NowPlaying().Reset();
   g_nav_probe = REXCVAR_GET(background_music_nav_probe);
   g_nav_probe_delay = REXCVAR_GET(background_music_nav_probe_delay);
@@ -1161,6 +1208,7 @@ void ForgetMenuMusic(uint32_t music) {
     name = g_playing_name;
     g_watch = false;
     g_watch_title = false;
+    g_nav_paused_stream = 0;
     g_queue.Pause(true);
     g_playback.Stop();
     g_current_index = -1;
@@ -1196,6 +1244,7 @@ extern "C" REX_FUNC(sub_82758490) {
 // (0x82758C28) before the new stream exists. While it runs, that call is not a teardown.
 extern "C" REX_FUNC(sub_82758B98) {
   const auto music = ctx.r3.u32;
+  if (music == g_music) g_nav_paused_stream = 0;
   const bool was_setting_up = g_setting_up_music;
   g_setting_up_music = true;
   __imp__sub_82758B98(ctx, base);
@@ -1231,6 +1280,15 @@ extern "C" REX_FUNC(sub_823E5BE0) {
   if (ctx.f2.f64 != requested)
     REXLOG_INFO("shell_music: menu stream reserve {} -> {} seconds",requested,ctx.f2.f64);
   __imp__sub_823E5BE0(ctx,base);
+}
+
+// Retail ShellMusic retries Play whenever IsPlaying is false and IsReady true;
+// paused state 5 satisfies that condition. Only the navigator's explicit pause
+// owns this stream; unrelated/native Play calls continue through unchanged.
+extern "C" REX_FUNC(sub_823E4808) {
+  if (g_nav_paused_stream && ctx.r3.u32 == g_nav_paused_stream &&
+      LoadBe32(base, ctx.r3.u32 + 20) == 5) return;
+  __imp__sub_823E4808(ctx, base);
 }
 
 // StopStreams is how the game lets the menu music go (the faded-out stop finishing, the poll's
@@ -1285,12 +1343,22 @@ extern "C" REX_FUNC(sub_827586D8) {
     const uint32_t stream = LoadBe32(base, music + kStreamOffset);
     const uint32_t state = stream ? LoadBe32(base, stream + 20) : 0;
     const uint32_t position = stream ? LoadBe32(base, stream + kPositionOffset) : 0;
+    const bool paused = stream && stream == g_nav_paused_stream && state == 5;
+    if (g_nav_paused_stream && !paused) g_nav_paused_stream = 0;
+    if (paused) {
+      g_playback.DeferWatchdog(NowMs());
+      if (g_nav_pause_trace && MillisecondsSince(g_nav_pause_log_at) >= 1000) {
+        g_nav_pause_log_at = std::chrono::steady_clock::now();
+        REXLOG_INFO("music_nav: paused stream {:08X} state {} samples {} pause_samples {}",
+                    stream, state, position, g_nav_pause_position);
+      }
+    }
     if (g_watch_title) {
       // Temporary title audio fills an empty ready queue. Its sample counter can
       // keep increasing across loops, so recovery must not depend on a rewind.
       // Only a temporary fallback yields here; three consecutive failures still
       // leave the deliberate circuit-breaker fallback in control.
-      if (!g_nav_request && g_waiting_for_pool && HasReadyNext()) {
+      if (!paused && !g_nav_request && g_waiting_for_pool && HasReadyNext()) {
         REXLOG_INFO("shell_music: DLC successor ready; leaving temporary title fallback");
         g_waiting_for_pool = false;
         g_seam_at = std::chrono::steady_clock::now();

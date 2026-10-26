@@ -28,12 +28,16 @@ broader provider/hardware coverage remain unmeasured. See the
 [load-guard evidence](../plans/finished/2026-10-13-load-guard.md) parts 4–5.
 
 **Menu-music navigator P2 limits (2026-10-26):** Next/Previous, persistent pad/key
-bindings and title-only navigation are implemented. **Pause is unavailable:** no native
-seam has passed silence/frozen-position/same-position-resume measurement. The guest says
-Unavailable, its command returns false and Start retains retail behavior. Windows media-key
-arbitration, actual audio continuity, physical-pad input and guest layout/assignment/restart
+bindings and title-only navigation are implemented. **Native pause/resume is enabled:**
+the owner confirmed the trial works, and `rb_blitz_367.log` records a 7.285-second
+frozen-cursor pause and same-stream/same-position resume. No trial flag is required;
+the guest row displays the configured bindings. A separate title-only pause boot,
+Windows media-key arbitration, physical-pad input and guest layout/assignment/restart
 routes remain unmeasured. Footer/player/artwork remain P3. See the
-[navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §14.
+[navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §17.
+The legacy `--background_music_nav_pause_trial` flag now only enables per-second
+cursor diagnostics. A final in-flight decoder block may settle after native pause;
+it is excluded from Previous's five-second playback-age counter.
 Rapid Previous presses during restart were confirmed dropped as busy in the owner's next log.
 The bounded command-burst fix passes host tests, including return to the boot song, but
 still needs the owner's listening retest (navigator plan §15).
