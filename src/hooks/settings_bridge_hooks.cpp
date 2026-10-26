@@ -59,6 +59,7 @@
 
 #include "hooks/ultimate.h"
 #include "hooks/shell_music.h"
+#include "hooks/menu_music_guest.h"
 #include "hooks/hot_apply_runtime.h"
 #include "input/input_store.h"
 #include "input/effective_input.h"
@@ -729,8 +730,16 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
 }
 
 bool TakeRead(PPCContext& ctx, uint8_t* base) {
-  if (!g_enabled || g_forward_only) return false;
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  // Independent of the settings channel, like the rbbz-play/begin query. Use
+  // the same native Symbol constructor as binding text below, preserving the
+  // exact metadata spelling that SongMgr expects (DataNode type 5).
+  if (path == "rbbz-play/song") {
+    const auto key = ::rb_blitz::shell_music::SelectedSongKey();
+    ::rb_blitz::shell_music::ReturnSongSymbol(ctx, base, key);
+    return true;
+  }
+  if (!g_enabled || g_forward_only) return false;
   if (!IsNamespacedPath(path)) return false;
   constexpr std::string_view prefix = "rbbz-settings/text/";
   const auto snapshot = ::rb_blitz::input::CurrentInput();

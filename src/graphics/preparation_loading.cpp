@@ -9,6 +9,7 @@
 #include "generated/fingerprint_expected.h"
 #include "generated/preparation_catalogue.h"
 #include "hooks/ultimate.h"
+#include "hooks/shell_music.h"
 #include "settings/ultimate_adapter.h"
 #include <algorithm>
 #include <atomic>
@@ -329,6 +330,7 @@ void ConfigureLoading(rex::Runtime* value) {
               settings_fingerprint,std::size(kSettingNames),cache_writable);
 }
 void BeginLoadingAttempt() {
+  rb_blitz::shell_music::StartQueuedPool();
   // Reuse only a live ready generation that was prepared for this exact
   // configuration, never a disk-file existence test.
   if (runtime && generation) progress = runtime->graphics_system()->QueryShaderStoragePreparation();
@@ -354,6 +356,7 @@ void ObserveContentLoading(uint8_t* base, uint32_t panel) {
   if (content && u32(content+44) == 1) ContentLoadingReady();
 }
 void PollLoading() {
+  rb_blitz::shell_music::PublishQueuedPool();
   if (closing.load() || !runtime || !content_ready || failed || ignored) return;
   auto* gpu = runtime->graphics_system();
   if (!gpu) { FailAttempt(GraphicsFailure::kPreparation); return; }

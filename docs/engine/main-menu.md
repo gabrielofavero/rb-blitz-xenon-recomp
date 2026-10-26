@@ -477,31 +477,31 @@ first screen → `game_screen`, with the visible song matching the audible one; 
    (`ui/pause/gen/pause_to_new_game.dtb`), and the branch that follows is the song list's own
    `song_chosen` (`ui/song_select/gen/song_select.dtb`, on `song_select_screen`).
 
-**Which song is playing is the host's fact.** A DTA script cannot be handed a string, and the only
-answer a host can give through the channel this project already owns is a boolean (`file_exists`,
-[src/hooks/settings_bridge_hooks.cpp](../../src/hooks/settings_bridge_hooks.cpp)). So the payload
-**bakes the boot's pool** into the body — one probe per pool entry, `rbbz-play/current/<index>` — and
-the host answers true for exactly one selected index, captured by `rbbz-play/begin`
-([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp), `AnswerPlayQuery`; the path parser is
-[src/hooks/menu_music_pool.h](../../src/hooks/menu_music_pool.h)). The song key baked with each probe
-comes from `songs.dta`/`songs.dtb`: the top-level song Symbol whose `(song (name ...))` matches the
-complete audio path. The stream basename is only a fallback when metadata is absent/unreadable;
-with readable metadata, unmatched or ambiguous streams are excluded. This supersedes the original
-assumption that the filename always names the song. A press costs one file question per pool
-entry, the whole `rbbz-play/` namespace is answered by the host (never forwarded — a forwarded bare
-name is a name the title's own file layer may answer out of data it already has, the lesson §7.1's
-sentinel taught), plus begin/result queries. During a silent handoff the selection keeps the last
-heard song for up to **2 s**; afterward, or at first startup, it uses the pending candidate. Once the
-new stream advances, its song wins immediately. Failed candidates, title fallback and screen exit
-invalidate their selections. A captured press stays on one index throughout its probe sequence.
+**Which song is playing is the host's fact.** The row captures a selection with
+`file_exists("rbbz-play/begin")`, then reads `read_file("rbbz-play/song")`. The latter
+returns a native Symbol DataNode through the title's own intern constructor, preserving
+the metadata key's spelling and SongMgr's type contract. This replaces the boot-baked
+per-index name list on 2026-10-26: songs appended by background preparation work without
+rewriting or reloading the active menu record. The indexed `rbbz-play/current/<index>`
+queries remain available for diagnostics.
+
+The key comes from `songs.dta`/`songs.dtb`: the top-level song Symbol whose
+`(song (name ...))` matches the complete audio path. The stream basename is a fallback
+when metadata is absent/unreadable; readable metadata excludes unmatched or ambiguous
+streams. Begin/read/result queries belong to the menu-music feature and work independently
+of the settings-channel switch. During a silent handoff the selection keeps the last
+heard song for up to **2 s**, then uses the pending candidate. Once the new stream
+advances, its song wins immediately. Failed candidates, title fallback and screen exit
+invalidate their selections. Appending pool entries preserves every existing index and
+the selection captured by a press.
 
 **Why the lookup answered 0, and the fix (measured 2026-10-15).** The 2026-10-14 reading below was
 correct about *what* happened and wrong about the cause: `SongMgr`'s native handler (`0x8244938C`,
 interning its argument through `0x823F94A0`) reads a **Symbol** payload, and the body handed it a
 **String** — the lookup then never matched, for the pool's own key and for an on-disc name alike, and
-`song_mgr data 0` handed the loading screen a null song. The baked song keys are now `Sym("…")` nodes
-([src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp) `PlayCurrentSongBody`;
-`tests/settings_screen_tests.cpp` pins the node kind), the id resolves, and the press continues:
+`song_mgr data 0` handed the loading screen a null song. The fix supplied Symbol nodes instead of Strings. Since 2026-10-26 the live
+read returns that same native Symbol type (`menu_music_guest_tests` pins its result
+cell, metadata spelling and calling context), so the lookup contract remains intact:
 `song_select_panel set_current_song` takes the resolved metadata before the `loading_screen` hand-off,
 so the song list's own current-song state agrees with what plays. A press with **no** selectable track
 (for example, title fallback) or a name the manager does not
@@ -524,7 +524,8 @@ does not claim to have touched ([known-issues.md](../reference/known-issues.md))
 **Evidence [boot]** — the boot lines to look for are
 `settings_menu: "DLC Menu Songs" is on; N menu-music song(s); the Play Current Song entry is built`,
 `shell_music: Play Current Song request: selected=... audible=... pending=... title_fallback=...`,
-`Play Current Song: selected pool i of N ("<key>")`, and `Play Current Song result: resolved`,
+`Play Current Song result: resolved` (or the older indexed diagnostic
+`Play Current Song: selected pool i of N ("<key>")`),
 `no-track`, `missing-name` or `missing-data`. Selection alone does **not** prove guest lookup success.
 On an unavailable press the `settings_play_unavailable` page remains; arms and captures are in
 [play-current-song.md](../plans/finished/2026-10-14-play-current-song.md) §Evidence.
@@ -1045,6 +1046,8 @@ original song key, resolves and reaches gameplay in `out/_swap/music-fix/reliabi
 
 ### Startup cost of the DLC music pool (2026-10-24)
 
+Historical implementation; superseded by **Deferred menu-music pool (2026-10-26)** below.
+
 The last reported slow boot (`rb_blitz_299.log`) spent about 44 seconds preparing
 50 menu-music packages serially, before guest execution. Pool preparation now mounts
 and reads metadata for up to four independent packages concurrently. The host
@@ -1136,3 +1139,37 @@ replay reports **31 patches, 0 failed, 85 patched files, 0 unexpected**
 no audio-follow-up link is among them (`docs-check.json`). All evidence named in
 this paragraph is under `out/audio-stability/`. No listening or game/UI test was
 performed by the agent; the owner retains that role.
+
+
+### Deferred menu-music pool (2026-10-26)
+
+The owner's latest boot, `out/build/win-amd64-release/logs/rb_blitz_350.log`, spent
+**75,424 ms** preparing 50 menu-music packages before guest launch (08:19:23.407 to
+08:20:38.832). The enumeration cache was a hit: fingerprint 123.531 ms, load 93.392 ms,
+no library scan. Later graphics preparation completed 423/423 pipelines in 7,901 ms.
+The separate store Downloaded index was still mounting packages at shutdown; its
+background I/O can compete with loading, but its duration is not a boot barrier.
+
+Boot now mounts the first usable package from a uniform shuffle of the full library.
+The generator is freshly seeded from 16 `std::random_device` values. Selection is
+uniform **among usable packages**; within a merged pack its distinct songs are shuffled.
+A one-song package supplies one startup song; one merged pack may supply the whole
+50-song pool. Invalid, art-only and metadata-ambiguous packages are skipped in that same
+random order. Independent boots may legitimately choose the same package.
+
+`BeginLoadingAttempt` starts one host mount worker during the native post-A cache
+loading. A bounded queue holds at most two prepared devices; the worker owns its
+package-list snapshot and never accesses the runtime, live VFS, RNG or guest memory.
+The native loading and ShellMusic polls publish one already-prepared device per call,
+append distinct songs up to the 50-song cap and retain playback/rotation history.
+The queue is optional work and never gates native loading or graphics readiness.
+If the sole startup song ends before more songs arrive, a title-track fallback gives
+the expanded pool its next loop boundary. Closing stops further work/publication
+without joining an in-flight mount on the UI thread.
+
+Logs distinguish `startup pool ready in ... ms`, `background pool preparation started`
+and `background pool ready after ... ms`. Host tests cover bounded prefetch, a blocked
+mount with nonblocking poll/close, failed packages, rotation/press history during pool
+growth, the Symbol ABI and the authored row's dynamic lookup. Actual boot timing,
+rotation and Play Current Song acceptance remain an owner/manual test; no game UI was
+driven to implement this change. The eager SDK STFS chain walk is unchanged.

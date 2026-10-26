@@ -85,11 +85,10 @@ inline std::vector<PoolEntry> BuildPool(std::vector<PoolEntry> candidates, size_
 // ------------------------------------------------------------------------------------------------
 // The "Play Current Song" probe channel (owner feature, 2026-10-14)
 // ------------------------------------------------------------------------------------------------
-// The main menu's Play Current Song row has to learn *which* pooled song the menu is playing, and
-// the only value a DTA script can read back from the host is a boolean (`file_exists`, the builtin
-// the settings channel already rides on - see src/hooks/settings_bridge_hooks.cpp). So the row asks
-// one question per pool index and the host answers true for exactly one of them. The paths are
-// parsed here, without the SDK, so the protocol is a test rather than a claim.
+// The main menu's Play Current Song row captures a selection through file_exists
+// and reads its metadata key
+// through read_file("rbbz-play/song"), returned as a native Symbol. Indexed boolean
+// probes remain available for diagnostics and older authored records.
 // The namespace the channel lives in, and the probe prefix inside it. The whole namespace is ours:
 // a name in it is a name no content file can have, so the builtin hook answers every one of them -
 // including a malformed probe, which is answered "false" rather than forwarded, because a

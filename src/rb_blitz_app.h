@@ -433,6 +433,7 @@ class RbBlitzApp : public rex::ReXApp {
   }
 
   bool OnWindowCloseRequested() override {
+    rb_blitz::shell_music::CloseQueuedPool();
     rb_blitz::graphics::CloseLoading();
     rex::graphics::compile_trace::Snapshot("window_close");
     if (settings_boot_) settings_boot_->Closing();
@@ -444,6 +445,7 @@ class RbBlitzApp : public rex::ReXApp {
   bool DeferShaderStoragePreparation() const override { return true; }
   bool CanLaunchModule() const override { return graphics_loading_payload_ready_; }
   void OnGuestThreadExit(rex::system::XThread*) override {
+    rb_blitz::shell_music::CloseQueuedPool();
     rb_blitz::graphics::CloseLoading();
   }
 

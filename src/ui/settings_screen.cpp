@@ -2972,18 +2972,15 @@ Node SetVar(const std::string_view name, Node value) {
   return Cmd({Sym("set"), Var(name), std::move(value)});
 }
 
-std::vector<Node> PlayCurrentSongBody(const std::vector<std::string>& songs) {
+std::vector<Node> PlayCurrentSongBody() {
   // SongMgr::Handle at 0x8244938C reads a Symbol payload (0x823F94A0), not a
   // string. A string's DataArray pointer was being looked up as a symbol, returning
   // zero even for songs already in the library. Preserve the package's spelling.
+  // The pool grows after boot. Read the captured selection as a native Symbol
+  // instead of baking a list that would omit every background-prepared song.
   std::vector<Node> statements{
-      Cmd({Sym("file_exists"), Str("rbbz-play/begin")}), SetVar(kPlaySongVar, Sym(""))};
-  for (size_t i = 0; i < songs.size(); ++i) {
-    statements.push_back(Cmd(
-        {Sym("if"),
-         Cmd({Sym("file_exists"), Str(std::string(kPlayProbePrefix) + std::to_string(i))}),
-         SetVar(kPlaySongVar, Sym(songs[i]))}));
-  }
+      Cmd({Sym("file_exists"), Str("rbbz-play/begin")}),
+      SetVar(kPlaySongVar, Cmd({Sym("read_file"), Str("rbbz-play/song")}))};
   const auto unavailable = [](const char* reason) {
     return Cmd({Sym("do"),
         Cmd({Sym("file_exists"), Str(std::string("rbbz-play/result/") + reason)}),
@@ -3033,7 +3030,7 @@ bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason) {
     return false;
   }
   return AddMainMenuSwitchCase(nodes, kPlayCurrentRow,
-                               PlayCurrentSongBody(g_configuration.menu_music_songs), reason);
+                               PlayCurrentSongBody(), reason);
 }
 
 bool AddDownloadContentRow(std::vector<dtb::Node>* nodes, std::string* reason) {

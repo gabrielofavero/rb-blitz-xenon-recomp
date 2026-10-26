@@ -26,16 +26,25 @@ namespace rb_blitz::shell_music {
 // written.
 //
 // Call once from RbBlitzApp::OnPostLoadXexImage(), after dlc::Configure(): it reads the
-// library that layer just enumerated, mounts the chosen packages, and leaves the guest
-// untouched. With the toggle off - its default - it logs and returns, and the hook is
-// inert, so a boot without R9 is the boot this project had before the hook existed.
+// library that layer just enumerated and mounts one randomly chosen usable package.
+// The remaining pool is prepared during native cache loading. With the toggle off
+// it logs and returns, leaving the title's own music in control.
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
+
+// The native cache-loading attempt starts host-only preparation. Guest polls
+// publish at most one ready device without waiting for I/O. Close never joins.
+void StartQueuedPool();
+void PublishQueuedPool();
+void CloseQueuedPool();
+
+// Metadata key of the selection captured by rbbz-play/begin, including songs
+// appended after boot. The read_file hook returns it as a native Symbol.
+std::string SelectedSongKey();
 
 // --- the "Play Current Song" row's view of this layer (owner feature, 2026-10-14) --------------
 // The main menu's second entry starts whichever song the menu is playing, so it needs the facts
-// below at two moments: the payload builder bakes the pool - and the probes that name it - into the
-// menu record at boot, and the probe channel (`AnswerPlayQuery`) answers, once per press, which one
-// is playing.
+// below at two moments: the payload builder checks that the startup pool exists,
+// and the live channel captures a selection and returns its metadata key on press.
 //
 // `MenuMusicEnabled` is the setting's own value (the revived `general.dlc_menu_songs` row, read
 // from the settings store in Configure()), and `HasPool` is whether that setting produced a pool.
@@ -61,6 +70,8 @@ int CurrentPoolIndex();
 //   `rbbz-play/begin` - snapshot a selection (audible, recently heard, or pending at startup).
 //   `rbbz-play/current/<i>` - true for the selected index, stable throughout one press.
 //   `rbbz-play/result/<reason>` - record guest lookup success/failure and end the snapshot.
+// The authored row reads the key through read_file("rbbz-play/song"); indexed
+// probes remain available for diagnostics.
 // Returns false (and leaves `*answer` alone) for a path this layer does not own, so the caller
 // keeps forwarding it to the original.
 bool AnswerPlayQuery(std::string_view path, bool* answer);

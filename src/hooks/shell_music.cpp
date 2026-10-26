@@ -18,18 +18,18 @@
 #include "hooks/menu_music_pool.h"
 #include "hooks/menu_music_playback.h"
 #include "hooks/menu_music_metadata.h"
+#include "hooks/menu_music_queue.h"
 #include "hooks/menu_audio_policy.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <future>
 #include <memory>
 #include <mutex>
-#include <numeric>
 #include <random>
 #include <string>
 #include <system_error>
@@ -118,7 +118,14 @@ int g_pending_index = -1;
 rb_blitz::shell_music::PlaySelection g_play_selection;
 
 std::mutex g_mutex;
-std::mt19937 g_rng{std::random_device{}()};
+std::mt19937 MakeRandom() {
+  std::random_device entropy;
+  std::array<uint32_t, 16> words;
+  for (auto& word : words) word = entropy();
+  std::seed_seq seed(words.begin(), words.end());
+  return std::mt19937(seed);
+}
+std::mt19937 g_rng = MakeRandom();
 
 // The play order of the pool, walked to the end and then reshuffled. A rotation rather
 // than a per-load pick: every song gets heard before any repeats, the song after the last
@@ -141,6 +148,9 @@ int g_attempts = 0;
 // distinct left). The poll reports it - heartbeats, and the loop it takes when the title
 // track wraps - but never rotates: the title's own music is the title's own business.
 bool g_watch_title = false;
+// A sole startup song may end before the background queue begins. A title
+// fallback fills the gap, then gives the grown DLC pool its next loop boundary.
+bool g_waiting_for_pool = false;
 
 // True while the host or ShellMusic::Start is assembling a track. Both call StopStreams as
 // cleanup before the new stream exists (Start does it inside its own body), and that cleanup
@@ -261,6 +271,82 @@ std::vector<rb_blitz::shell_music::SongMetadata> FindSongMetadata(rex::filesyste
 // src/fs/dlc_song_metadata.h.)
 using rb_blitz::fs::MountPackage;
 
+struct PreparedPackage {
+  size_t index = 0;
+  std::unique_ptr<rex::filesystem::Device> device;
+  std::vector<PoolEntry> songs;
+};
+
+rb_blitz::shell_music::MenuMusicQueue<PreparedPackage> g_queue;
+rex::filesystem::VirtualFileSystem* g_file_system = nullptr;
+std::vector<std::filesystem::path> g_packages;  // shuffled once, before guest launch
+size_t g_next_package = 0, g_mounts = 0;
+size_t g_pool_cap = 0;
+bool g_queue_started = false, g_queue_reported = false, g_closing = false;
+std::chrono::steady_clock::time_point g_queue_started_at;
+
+std::string MountPath(size_t index) {
+  return fmt::format("\\Device\\BlitzMenuMusic\\{}\\", index);
+}
+
+// Runs on either the boot thread or the worker. No VFS registration, guest
+// memory, RNG or live pool access happens here.
+std::optional<PreparedPackage> PreparePackage(const std::filesystem::path& package, size_t index) {
+  try {
+    PreparedPackage prepared;
+    prepared.index = index;
+    std::error_code ec;
+    prepared.device = MountPackage(MountPath(index), package, ec);
+    if (!prepared.device) {
+      REXLOG_WARN("shell_music: cannot mount {} as DLC menu music ({})", package.string(),
+                  ec ? ec.message() : "not a mountable package");
+      return std::nullopt;
+    }
+    auto streams = FindSongStreams(*prepared.device);
+    const auto metadata = streams.empty() ? std::vector<rb_blitz::shell_music::SongMetadata>{}
+                                         : FindSongMetadata(*prepared.device);
+    const std::string alias = fmt::format("menumusic{}", index);
+    for (auto& stream : streams) {
+      auto key = rb_blitz::shell_music::SongKeyForStream(metadata, stream);
+      if (!metadata.empty() && key.empty()) continue;
+      prepared.songs.push_back({alias, std::move(stream), std::move(key)});
+    }
+    if (prepared.songs.empty()) return std::nullopt;
+    return prepared;
+  } catch (const std::exception& error) {
+    REXLOG_WARN("shell_music: preparing {} failed: {}", package.string(), error.what());
+    return std::nullopt;
+  }
+}
+
+// Caller holds g_mutex, or runs before guest launch. Keep existing indices
+// stable: playback and an in-progress Play Current Song press may refer to them.
+bool PublishPackage(PreparedPackage prepared) {
+  auto additions = rb_blitz::shell_music::BuildPool(std::move(prepared.songs), g_pool_cap, g_rng);
+  std::erase_if(additions, [](const PoolEntry& candidate) {
+    const auto identity = rb_blitz::shell_music::SongIdentity(
+        rb_blitz::shell_music::PoolSongKey(candidate));
+    return std::any_of(g_pool.begin(), g_pool.end(), [&](const PoolEntry& entry) {
+      return rb_blitz::shell_music::SongIdentity(rb_blitz::shell_music::PoolSongKey(entry)) == identity;
+    });
+  });
+  if (additions.empty() || g_pool.size() >= g_pool_cap || g_mounts >= g_pool_cap) return false;
+  additions.resize(std::min(additions.size(), g_pool_cap - g_pool.size()));
+  const auto mount_path = MountPath(prepared.index);
+  const auto alias = additions.front().alias;
+  if (!g_file_system->RegisterDevice(std::move(prepared.device))) return false;
+  if (!g_file_system->RegisterSymbolicLink(alias + ":", mount_path)) {
+    g_file_system->UnregisterDevice(mount_path);
+    return false;
+  }
+  ++g_mounts;
+  for (auto& song : additions) g_pool.push_back(std::move(song));
+  std::vector<std::string> keys;
+  for (const auto& song : g_pool) keys.push_back(rb_blitz::shell_music::PoolSongKey(song));
+  g_rotation.SetPool(std::move(keys));  // preserves played/failed identities
+  return true;
+}
+
 // The next song to play: the next song of the rotation, which hears every pooled song before it
 // repeats one and never hands back the song that just played. Also records which index that is,
 // because the index is what "Play Current Song" asks for. An empty path means the rotation has
@@ -375,12 +461,14 @@ void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
     return;
   }
   if (title_track) {
+    g_waiting_for_pool = !g_queue_reported && g_next_package < g_packages.size();
     g_watch = false;        // the title's own music loops; the rotation has nothing left to do
     g_watch_title = true;   // ...but the poll still reports it, so a stalled fallback is visible
     REXLOG_INFO("shell_music: the DLC pool has nothing new to play; the menu goes back to the "
                 "title's own tracks (\"{}.mogg\") (R9)",
                 path);
   } else {
+    g_waiting_for_pool = false;
     g_watch = true;
     g_watch_title = false;
     REXLOG_INFO("shell_music: the menu track ended; playing \"{}.mogg\" next (R9), handed over "
@@ -433,6 +521,7 @@ void NoteFailedCandidate(uint8_t* base, PPCContext& parent, uint32_t music) {
       }
       g_watch = false;
       g_watch_title = true;
+      g_waiting_for_pool = false;  // repeated failures, not a queue still filling
       LoadOnGuest(base, parent, music, buffer, path, /*loop=*/true);
     }
     return;
@@ -563,95 +652,19 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     return;
   }
 
-  // P10: the pool is a fixed 50 songs (§3.5), capped by what this boot can actually mount. The
-  // retired `enhancements_menu_dlc_song_count` is read only to say it is ignored - a hand-edited
-  // config must not silently re-enable a size the product no longer offers.
-  const size_t total = packages.size();
-
-  // Draw packages at random from the whole library, and collect every song each one holds.
-  // A package is one open container, so the walk stops as soon as there are enough songs to
-  // fill the pool and never mounts more than `cap` of them: a merged pack fills the pool from
-  // a single handle, while a library of one-song packages is mounted as many times as the
-  // pool is deep. The old index stride picked the same packages in the same order on every
-  // run; a shuffle of the library's indices is a distinct sample by construction.
-  std::vector<size_t> order(total);
-  std::iota(order.begin(), order.end(), size_t{0});
-  std::shuffle(order.begin(), order.end(), g_rng);
-
-  std::vector<PoolEntry> candidates;
-  size_t mounts = 0;
-  // Opening cold containers can be expensive even when the DLC enumeration is
-  // cached. Prepare independent devices concurrently, then publish in draw order
-  // on this thread. No worker touches the VFS, RNG, guest memory or pool state.
-  struct PreparedPackage {
-    std::unique_ptr<rex::filesystem::Device> device;
-    std::vector<std::string> streams;
-    std::vector<rb_blitz::shell_music::SongMetadata> metadata;
-  };
   const auto pool_start = std::chrono::steady_clock::now();
-  constexpr size_t kMountWorkers = 4;
-  for (size_t next = 0; next < order.size() && candidates.size() < cap && mounts < cap;) {
-    const size_t batch_start = next;
-    const size_t count = std::min({kMountWorkers, order.size() - next,
-                                   cap - candidates.size(), cap - mounts});
-    std::vector<std::future<PreparedPackage>> pending;
-    for (size_t j = 0; j < count; ++j, ++next) {
-      const auto package = packages[order[next]];
-      const auto mount_path = fmt::format("\\Device\\BlitzMenuMusic\\{}\\", next);
-      pending.push_back(std::async(std::launch::async, [package, mount_path] {
-        PreparedPackage prepared;
-        std::error_code ec;
-        prepared.device = MountPackage(mount_path, package, ec);
-        if (!prepared.device) {
-          REXLOG_WARN("shell_music: cannot mount {} as DLC menu music ({})", package.string(),
-                      ec ? ec.message() : "not a mountable package");
-          return prepared;
-        }
-        prepared.streams = FindSongStreams(*prepared.device);
-        if (!prepared.streams.empty()) {
-          prepared.metadata = FindSongMetadata(*prepared.device);
-        }
-        return prepared;
-      }));
-    }
-    for (size_t j = 0; j < count; ++j) {
-      auto prepared = pending[j].get();
-      if (!prepared.device || prepared.streams.empty() || candidates.size() >= cap) continue;
-      const auto& package = packages[order[batch_start + j]];
-      const auto mount_path = fmt::format("\\Device\\BlitzMenuMusic\\{}\\", batch_start + j);
-      const std::string alias = fmt::format("menumusic{}", batch_start + j);
-      auto& device = prepared.device;
-      auto& streams = prepared.streams;
-      const auto& metadata = prepared.metadata;
-      if (!file_system->RegisterDevice(std::move(device))) {
-        REXLOG_WARN("shell_music: cannot register the device for {}", package.string());
-        continue;
-      }
-      if (!file_system->RegisterSymbolicLink(alias + ":", mount_path)) {
-        REXLOG_WARN("shell_music: cannot point {}: at {}", alias, mount_path);
-        continue;
-      }
-      ++mounts;
-      for (std::string& stream : streams) {
-        std::string key = rb_blitz::shell_music::SongKeyForStream(metadata, stream);
-        if (!metadata.empty() && key.empty()) {
-          REXLOG_WARN("shell_music: {}:{} has no unambiguous song metadata; excluding it from "
-                      "the menu pool", alias, stream);
-          continue;
-        }
-        if (!key.empty() && key != rb_blitz::shell_music::SongName(stream)) {
-          REXLOG_INFO("shell_music: song metadata maps {}:{} to key \"{}\"", alias, stream, key);
-        }
-        candidates.push_back({alias, std::move(stream), std::move(key)});
-      }
-    }
+  g_file_system = file_system;
+  g_pool_cap = cap;
+  g_packages = packages;
+  // A uniform permutation of the entire library, freshly seeded from OS entropy.
+  // Failed/art-only packages are skipped in this same order; no alphabetic prefix,
+  // remembered last choice or deterministic per-boot seed biases the first mount.
+  std::shuffle(g_packages.begin(), g_packages.end(), g_rng);
+  while (g_next_package < g_packages.size() && g_pool.empty()) {
+    const size_t index = g_next_package++;
+    auto prepared = PreparePackage(g_packages[index], index);
+    if (prepared) PublishPackage(std::move(*prepared));
   }
-
-  // The pool is a random sample of those songs, redrawn every boot, with a song that two
-  // packages both carry kept once. Shuffling the collected songs rather than cutting them in
-  // walk order keeps one large pack from always opening with the same track
-  // (src/hooks/menu_music_pool.h).
-  g_pool = BuildPool(std::move(candidates), cap, g_rng);
 
   if (g_pool.empty()) {
     REXLOG_WARN("shell_music: no DLC song could be mounted; the main menu keeps the title's own "
@@ -696,18 +709,59 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     g_current_index = -1;
   }
 
-  REXLOG_INFO("shell_music: R9 plays the loaded DLC in the main menu: {} song(s) drawn at random "
-              "from {} mounted package(s) of {} (pool cap {})",
-              g_pool.size(), mounts, total, cap);
-  REXLOG_INFO("shell_music: pool prepared in {} ms (up to {} concurrent mounts)",
+  REXLOG_INFO("shell_music: startup pool ready in {} ms: {} song(s), {} mounted package(s) "
+              "of {}; remaining pool queued for native cache loading (cap {})",
               std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now() - pool_start).count(), kMountWorkers);
+                  std::chrono::steady_clock::now() - pool_start).count(),
+              g_pool.size(), g_mounts, packages.size(), cap);
   for (const PoolEntry& entry : g_pool) {
-    REXLOG_INFO("shell_music:   {}:{}.mogg", entry.alias, entry.stream);
+    REXLOG_INFO("shell_music: startup {}:{}.mogg", entry.alias, entry.stream);
   }
 }
 
 bool MenuMusicEnabled() { return g_menu_music_enabled; }
+
+void StartQueuedPool() {
+  std::lock_guard lock(g_mutex);
+  if (!g_enabled || g_closing || g_queue_started || g_pool.size() >= g_pool_cap ||
+      g_next_package >= g_packages.size()) return;
+  g_queue_started = true;
+  g_queue_started_at = std::chrono::steady_clock::now();
+  // The worker owns its snapshot and standalone devices. It never dereferences
+  // the runtime, even if the window closes during a slow mount.
+  g_queue.Start(g_next_package, g_packages.size(),
+      [packages = g_packages](size_t index) { return PreparePackage(packages[index], index); });
+  REXLOG_INFO("shell_music: background pool preparation started during native cache loading "
+              "({}/{} songs ready, one mount worker, at most two pending devices)",
+              g_pool.size(), g_pool_cap);
+}
+
+void PublishQueuedPool() {
+  std::lock_guard lock(g_mutex);
+  if (g_closing || !g_queue_started || g_queue_reported) return;
+  // At most one already-prepared device per poll. Take never waits for mount I/O.
+  if (auto prepared = g_queue.Take()) PublishPackage(std::move(*prepared));
+  if (g_pool.size() >= g_pool_cap || g_mounts >= g_pool_cap || g_queue.Finished()) {
+    g_queue.Stop();
+    g_queue_reported = true;
+    REXLOG_INFO("shell_music: background pool ready after {} ms: {} song(s), {} mounted "
+                "package(s); startup indices and playback preserved",
+                MillisecondsSince(g_queue_started_at), g_pool.size(), g_mounts);
+  }
+}
+
+void CloseQueuedPool() {
+  std::lock_guard lock(g_mutex);
+  g_closing = true;
+  g_queue.Stop();
+}
+
+std::string SelectedSongKey() {
+  std::lock_guard lock(g_mutex);
+  const int index = g_play_selection.Query(NowMs());
+  return index >= 0 && static_cast<size_t>(index) < g_pool.size()
+      ? PoolSongKey(g_pool[index]) : std::string();
+}
 
 bool HasPool() {
   std::lock_guard<std::mutex> lock(g_mutex);
@@ -844,6 +898,7 @@ extern "C" REX_FUNC(sub_827583F8) {
 // Poll observes one-shot completion before the guest's Ready/Play branch. Stop and
 // destruction are handled separately, so a screen transition cannot advance the deck.
 extern "C" REX_FUNC(sub_827586D8) {
+  rb_blitz::shell_music::PublishQueuedPool();
   if (auto* settings = rb_blitz::settings::boot::SettingsBoot::Current()) settings->MenuFrame();
   // R7's refreshed DLC library is handed to the content manager here, and this is the
   // only guest hook that runs every frame while the main menu is up - which is where the
@@ -880,6 +935,13 @@ extern "C" REX_FUNC(sub_827586D8) {
       } else {
         constexpr uint32_t kLoopSlack = 44100;  // ~1 s of samples: below this, a torn read
         if (position + kLoopSlack < g_pos) {
+          if (g_waiting_for_pool && g_pool.size() > 1) {
+            g_waiting_for_pool = false;
+            NoteSeam(g_pos);
+            StartNextTrack(base, ctx, music);
+            __imp__sub_827586D8(ctx, base);
+            return;
+          }
           REXLOG_INFO("shell_music: the title fallback track looped after {:.1f} s of samples "
                       "(R9)",
                       static_cast<double>(g_pos) / kSamplesPerSecond);

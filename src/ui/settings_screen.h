@@ -352,7 +352,7 @@ bool RemoveRow(std::vector<dtb::Node>* nodes, std::string_view row, std::string*
 
 // Adds the "Play Current Song" entry to a splash record: `kPlayCurrentRow` right after
 // `splash_start` in the option array (so it is the menu's second row) plus the case that
-// dispatches it. The body is built from `configuration().menu_music_songs` and the host answers its
+// dispatches it. The body reads the captured song key dynamically; the host answers its
 // probes (see the .cpp for the shipped statements it is assembled from). Refuses, leaving `nodes`
 // untouched, when the record has no option array bearing `splash_start`, when the row is already
 // there (a second pass), or when the pool is empty - the caller decides what an empty pool means.

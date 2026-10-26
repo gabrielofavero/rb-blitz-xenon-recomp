@@ -828,12 +828,10 @@ void TestPlayCurrentSongRow() {
     CHECK_TRUE(array->kids.back().text == "splash_exit");
   }
 
-  // The case that dispatches it: one probe per pool entry (the host answers exactly one true), the
-  // resolution chain `quick_start_song` uses, the mount, and then the song list's own `song_chosen`
-  // - which is where the two targets differ (power-up screen with Ultimate, the loading screen on
-  // the offline base target).
+  // Resolve the captured song dynamically, including songs prepared after this
+  // record was authored. Keep SongMgr's native lookup/mount/chosen flow.
   const std::vector<std::string> body = CaseWords(nodes, kPlayCurrentRow);
-  for (const char* word : {"16candles", "lycanthrope", "file_exists",
+  for (const char* word : {"file_exists", "read_file", "rbbz-play/song",
                            "rbbz-play/begin", "rbbz-play/result/resolved",
                            "rbbz-play/result/no-track", "rbbz-play/result/missing-name",
                            "rbbz-play/result/missing-data",
@@ -841,29 +839,11 @@ void TestPlayCurrentSongRow() {
                            "set_current_song", "song_chosen", "settings_play_unavailable_screen"}) {
     CHECK_TRUE(std::find(body.begin(), body.end(), word) != body.end());
   }
-  // One probe per pool entry, named by its index in the pool order the payload baked.
-  CHECK_TRUE(std::find(body.begin(), body.end(), std::string(kPlayProbePrefix) + "0") !=
-             body.end());
-  CHECK_TRUE(std::find(body.begin(), body.end(), std::string(kPlayProbePrefix) + "1") !=
-             body.end());
-  CHECK_TRUE(std::find(body.begin(), body.end(), std::string(kPlayProbePrefix) + "2") ==
-             body.end());  // one probe per song, not one per pool cap
-  // The success destination remains the title's choice. Unavailable audio gets a visible answer.
-  CHECK_TRUE(std::find(body.begin(), body.end(), "powerup_select_screen") == body.end());
+  for (const char* stale : {"16candles", "lycanthrope", "rbbz-play/current/0",
+                            "powerup_select_screen"}) {
+    CHECK_TRUE(std::find(body.begin(), body.end(), stale) == body.end());
+  }
   CHECK_TRUE(std::find(body.begin(), body.end(), kRootScreen) == body.end());
-
-  // The guest's Symbol accessor copies the payload without string conversion. The old
-  // String node compiled and displayed perfectly, but EVERY lookup returned zero at runtime.
-  size_t song_symbols = 0;
-  auto check_song_types = [&](auto&& self, const dtb::Node& node) -> void {
-    if (node.text == "16candles" || node.text == "lycanthrope") {
-      CHECK_EQ(node.tag, dtb::kSymbol);
-      ++song_symbols;
-    }
-    for (const auto& child : node.kids) self(self, child);
-  };
-  for (const auto& node : Reparse(nodes, &reason)) check_song_types(check_song_types, node);
-  CHECK_EQ(song_symbols, 2u);
 
   // The label exists exactly while the row does (the menu draws the symbol's locale text).
   bool labelled = false;
