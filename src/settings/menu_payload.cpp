@@ -896,7 +896,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           {"rbbz_graphics_failed_cache","The graphics cache folder is not writable."},
           {"rbbz_graphics_retry","Try Again"},
           {"rbbz_graphics_ignore","Ignore"},
-          {"rbbz_graphics_back","Back"},
+          {"rbbz_graphics_back","Skip"},
           {"rbbz_load_crashed","The game crashed while loading a song and was restarted. Returned to the main menu. Try another song."},
           {"rbbz_load_timeout_30","The song did not finish loading within 30 seconds. The game was restarted to the main menu. Try another song or check this song's files."},
           {"rbbz_load_timeout_60","The song did not finish loading within 60 seconds. The game was restarted to the main menu. Try another song or check this song's files."}}) {

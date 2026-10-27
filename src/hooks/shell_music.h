@@ -28,8 +28,9 @@ namespace rb_blitz::shell_music {
 // written.
 //
 // Call once from RbBlitzApp::OnPostLoadXexImage(), after dlc::Configure(): it reads the
-// bundled catalog and the library that layer just enumerated. One shuffled DLC package
-// prepares asynchronously; native Load selects from the songs ready at that point.
+// bundled catalog and the library that layer just enumerated. Cached metadata supplies
+// uniform song selection independently of mount readiness; a cold catalog is built in
+// bounded worker batches only after the main menu is ready. Native music covers the wait.
 // A small rolling cache is prepared during native cache loading and menu playback. With the toggle off
 // it leaves the title's tracks in control; the independent navigator can still move them.
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);

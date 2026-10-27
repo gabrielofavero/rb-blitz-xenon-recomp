@@ -47,12 +47,31 @@ Harmonix/ESRB entries, and sets `wait_for_splash FALSE`. Retail starts with Harm
 uses `TRUE`. Normal preserves those provider records; their presence in the list does
 not mean every entry will be shown before the title advances.
 
-Startup music preparation no longer waits for a DLC package to mount. One shuffled
-package prepares in the background while boot continues; the native music Load chooses
-from bundled songs and any DLC ready then. A slow package falls back to ready bundled
-music (or the title's tracks if no bundled songs are readable). Native Start still owns
-when audio begins. The store's full-library Downloaded index waits until the store opens;
+Startup music preparation never waits for a DLC package to mount. The library player
+uses a complete metadata catalog and uniform draws without replacement, including songs
+in merged packs. Readiness cannot move a bundled song ahead of the selected DLC song.
+The catalog is saved as `menu_music_catalog.cache` under the runtime cache root; unchanged
+containers need only size/mtime checks, and extracted packages use stat-only tree fingerprints.
+Enumeration reordering preserves cached entries; changed/new packages alone need metadata reads.
+Missing/stale entries are rebuilt on the worker after the main menu is ready, in batches of
+at most eight packages, with a pause check between packages when gameplay/loading takes over.
+The original shell soundtrack covers catalog preparation and slow selected streams. Library
+playback starts only after all sources have been accounted for; later boots reuse the catalog.
+An unchanged library needs one small catalog read, stat validation, and a few O(1) song draws;
+only selected/upcoming packages are mounted. No audio is cached or extracted.
+Native Start still owns when audio begins. The store's full-library Downloaded index waits until the store opens;
 its details page can show Checking installed songs until that first scan finishes.
+
+Host checks for the shuffle change (2026-10-26): 2,048 independently seeded sessions with
+2,003 songs (three bundled, 1,000 in merged packs, 1,000 in single-song packages) selected a
+bundled song in the first four slots 4, 2, 4, and 4 times respectively. The first-slot
+expectation is 3.07 occurrences. All 15 targeted tests passed, including blocked selected
+mounts and cold-catalog startup/loading gates and eight-package batches. A validation-only
+benchmark on the 1,777 real container paths, using a 347,553-byte synthetic metadata catalog,
+took 24.9–26.8 ms with grouped directory attributes, versus 734–776 ms with individual stat
+queries. This measures catalog parsing/validation, not a live boot or listening test;
+the raw validation report is `out/music-randomness/catalog-benchmark.txt`.
+
 Fast/restart startup also guards the native splasher's empty list: retail otherwise treats
 the list sentinel as a scene and calls address zero. The guards preserve the worker's
 state/event handshake and only bypass loading, polling and advancing a nonexistent scene.

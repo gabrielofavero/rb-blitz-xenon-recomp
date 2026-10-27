@@ -2,6 +2,8 @@
 #include "check.h"
 #include "hooks/menu_music_session.h"
 #include "hooks/menu_music_playback.h"
+#include <array>
+#include <chrono>
 
 using namespace rb_blitz::shell_music;
 
@@ -15,6 +17,47 @@ void Discover(MusicSession& session, size_t package) {
 }
 
 int main() {
+  rb_blitz::test::BeginCase("full-catalog shuffle has no bundled, discovery-order or merged-pack bias in its first four slots");
+  std::array<size_t, 4> bundled{}, merged_picks{};
+  std::array<std::array<size_t, 8>, 4> bins{};
+  const auto started = std::chrono::steady_clock::now();
+  for (unsigned seed = 0; seed < 2048; ++seed) {
+    std::mt19937 random(seed), untouched(seed);
+    MusicSession full;
+    full.RequireCompleteDiscovery();
+    full.Discover(kNoIndex, {Song(kNoIndex, "Base0"), Song(kNoIndex, "Base1"), Song(kNoIndex, "Base2")});
+    full.PlanAhead(random);
+    CHECK_TRUE(full.Playlist().empty());
+    CHECK_TRUE(random == untouched); // repeated readiness polls cannot consume the random draw
+    for (size_t package = 0; package < 100; ++package) {
+      std::vector<PoolEntry> pack;
+      for (size_t song = 0; song < 10; ++song)
+        pack.push_back(Song(package, "Merged" + std::to_string(package*10+song)));
+      full.Discover(package, std::move(pack));
+      full.PlanAhead(random);
+    }
+    for (size_t package = 100; package < 1100; ++package) Discover(full, package);
+    CHECK_TRUE(full.Playlist().empty());
+    full.DiscoveryComplete();
+    full.PlanAhead(random);
+    CHECK_EQ(full.Playlist().size(), 4u);
+    std::set<size_t> unique;
+    for (size_t slot = 0; slot < 4; ++slot) {
+      const auto id = full.SongAt(slot);
+      CHECK_TRUE(unique.insert(id).second);
+      bundled[slot] += id < 3;
+      merged_picks[slot] += id >= 3 && id < 1003;
+      ++bins[slot][id * 8 / 2003];
+    }
+  }
+  for (size_t slot = 0; slot < 4; ++slot) {
+    CHECK_TRUE(bundled[slot] <= 16); // expected 3.07; prior behavior was hundreds/thousands
+    CHECK_TRUE(merged_picks[slot] > 900 && merged_picks[slot] < 1150);
+    for (size_t bin : bins[slot]) CHECK_TRUE(bin > 175 && bin < 340);
+    std::printf("slot %zu: bundled=%zu/2048 merged=%zu/2048\n", slot, bundled[slot], merged_picks[slot]);
+  }
+  std::printf("2048 boots of a 2003-song catalog: %.1f ms\n",
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-started).count());
   std::mt19937 rng(42);
   rb_blitz::test::BeginCase("a lazy session crosses 50 songs before beginning another pass");
   MusicSession session;

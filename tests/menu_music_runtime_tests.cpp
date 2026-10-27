@@ -710,10 +710,23 @@ void TestAsyncStartup(bool bundled) {
   g_buffers = {kPath};
   g_packages = {"blocked-startup-package"};
   if (bundled) g_session.Discover(kBasePackage, {{"", "songs/base/base", "BundledSong"}});
+  // A cached catalog chooses this DLC song even while its device is blocked.
+  // The ready bundled song must not replace it just because it loads faster.
+  const auto dlc_id = g_session.Sources().size();
+  g_session.Discover(0, {{"menumusic0", "songs/dlc/dlc", "DlcSong"}});
+  g_session.DiscoveryComplete();
+  g_session.RequireCompleteDiscovery();
+  for (unsigned seed = 0;; ++seed) {
+    auto trial = g_session;
+    std::mt19937 rng(seed);
+    trial.PlanAhead(rng);
+    if (trial.SongAt(0) == dlc_id) { g_session = std::move(trial); break; }
+  }
+  g_next_package = g_packages.size();
   StartQueuedPool();
   CHECK_TRUE(started.wait_for(5s) == std::future_status::ready);
   CHECK_EQ(g_next_package, 1u);
-  CHECK_TRUE(g_session.Playlist().empty());
+  CHECK_EQ(g_session.SongAt(0), dlc_id);
   CHECK_TRUE(HasPool());
   std::array<uint8_t, 65536> memory{};
   PPCContext ctx{};
@@ -722,14 +735,84 @@ void TestAsyncStartup(bool bundled) {
   sub_82757F50(ctx, memory.data());
   CHECK_EQ(loads, 1u);
   CHECK_EQ(starts, 0u); // the native splash still owns playback timing
-  CHECK_TRUE(loaded == (bundled ? "songs/base/base" : kTitleTracks[0]));
-  CHECK_TRUE(g_waiting_for_pool == !bundled);
+  CHECK_TRUE(loaded == kTitleTracks[0]);
+  CHECK_TRUE(g_waiting_for_pool);
+  CHECK_EQ(g_session.SongAt(0), dlc_id);
   CHECK_EQ(g_cache.Size(), 0u);
   CloseQueuedPool(); // must return while the worker is still blocked
   release->set_value();
 }
 
+void TestColdCatalog() {
+  using namespace rb_blitz::shell_music;
+  using namespace std::chrono_literals;
+  rb_blitz::test::BeginCase("cold catalog waits for the main menu and loading completion before touching a package");
+  auto entered = std::make_shared<std::promise<void>>();
+  auto release = std::make_shared<std::promise<void>>();
+  auto released = release->get_future().share();
+  auto started = entered->get_future();
+  std::atomic<unsigned> mounts{0};
+  mount_gate = [entered, released, &mounts] {
+    if (++mounts == 1) { entered->set_value(); released.wait(); }
+  };
+  g_enabled = g_menu_music_enabled = true;
+  g_buffers = {kPath};
+  g_catalog_pending = std::make_shared<MusicCatalog>();
+  for (unsigned i = 0; i < 17; ++i) {
+    g_packages.push_back("cold-missing-fixture-" + std::to_string(i));
+    g_catalog_pending->push_back({g_packages.back(), {}, {}});
+  }
+  const auto root = std::filesystem::temp_directory_path() / ("rbbz-cold-catalog-" + std::to_string(NowMs()));
+  g_catalog_path = root / "catalog.cache";
+  g_session.Discover(kBasePackage, {{"", "songs/base/base", "BundledSong"}});
+  g_session.RequireCompleteDiscovery();
+  main_menu = false;
+  StartQueuedPool();
+  PublishQueuedPool(true);
+  CHECK_TRUE(g_queue.Idle());
+  CHECK_TRUE(started.wait_for(0ms) == std::future_status::timeout);
+  g_session.PlanAhead(g_rng);
+  CHECK_TRUE(g_session.Playlist().empty());
+  main_menu = true; native_loading = true;
+  PublishQueuedPool(true);
+  CHECK_TRUE(g_queue.Idle());
+  native_loading = false;
+  PublishQueuedPool(true);
+  CHECK_TRUE(started.wait_for(5s) == std::future_status::ready);
+  CHECK_TRUE(g_session.Playlist().empty());
+  release->set_value();
+  const auto deadline = std::chrono::steady_clock::now() + 5s;
+  std::optional<PreparedPackage> first_batch;
+  while (!first_batch && std::chrono::steady_clock::now() < deadline) {
+    first_batch = g_queue.Take();
+    std::this_thread::yield();
+  }
+  CHECK_TRUE(first_batch.has_value());
+  CHECK_EQ(mounts, 8u);
+  if (first_batch) {
+    CHECK_FALSE(first_batch->catalog_complete);
+    CHECK_TRUE(PublishPackage(*first_batch));
+  }
+  CHECK_TRUE(g_session.Playlist().empty());
+  while (g_catalog_pending && std::chrono::steady_clock::now() < deadline) {
+    PublishQueuedPool(true);
+    std::this_thread::yield();
+  }
+  CHECK_FALSE(bool(g_catalog_pending));
+  CHECK_EQ(mounts, 17u);
+  CHECK_TRUE(g_session.DiscoveryFinished());
+  CHECK_TRUE(NextPathLocked() == "songs/base/base"); // only after the missing package has been accounted for
+  CHECK_EQ(g_cache.Size(), 0u);
+  CloseQueuedPool();
+  std::filesystem::remove(g_catalog_path);
+  std::filesystem::remove(root);
+}
+
 int main(int argc, char** argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--cold-catalog") {
+    TestColdCatalog();
+    return rb_blitz::test::Finish();
+  }
   if (argc == 2 && (std::string_view(argv[1]) == "--startup-blocked" ||
                     std::string_view(argv[1]) == "--startup-no-base")) {
     TestAsyncStartup(std::string_view(argv[1]) == "--startup-blocked");

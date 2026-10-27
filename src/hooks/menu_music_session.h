@@ -44,6 +44,9 @@ class MusicSession {
   }
 
   void DiscoveryComplete() { discovery_complete_ = true; }
+  // A full catalog makes both the opener and every later draw uniform by song,
+  // including merged packs. Readiness and discovery order cannot choose a track.
+  void RequireCompleteDiscovery() { require_complete_discovery_ = true; }
   bool DiscoveryFinished() const { return discovery_complete_; }
   void BlockPackage(size_t package) { blocked_.insert(package); }
   bool PackageBlocked(size_t package) const { return blocked_.contains(package); }
@@ -63,10 +66,10 @@ class MusicSession {
   // Reserve only the current/initial entry plus a few successors. A merged pack
   // can contribute many cheap catalog records without mounting other packages.
   void PlanAhead(std::mt19937& rng) {
+    if (require_complete_discovery_ && !discovery_complete_) return;
     size_t ahead = UpcomingCount();
     const size_t wanted = cursor_ == kNoIndex ? 1 + kAhead : kAhead;
     while (ahead < wanted) {
-      std::erase_if(remaining_, [this](size_t id) { return !Usable(id); });
       if (remaining_.empty()) {
         if (!discovery_complete_) break;  // never repeat ahead of unseen packages
         for (size_t id = 0; id < sources_.size(); ++id)
@@ -74,13 +77,17 @@ class MusicSession {
         if (remaining_.empty()) break;
         ++pass_;
       }
-      std::vector<size_t> choices;
-      for (size_t i = 0; i < remaining_.size(); ++i)
-        if (playlist_.empty() || remaining_[i] != playlist_.back().song) choices.push_back(i);
-      if (choices.empty()) break;  // sole song must not follow itself
-      const size_t pick = choices[std::uniform_int_distribution<size_t>(0, choices.size()-1)(rng)];
-      playlist_.push_back({remaining_[pick], pass_});
-      remaining_.erase(remaining_.begin() + pick);
+      if (remaining_.size() == 1 && !playlist_.empty() && remaining_[0] == playlist_.back().song)
+        break;  // sole song must not follow itself
+      // Incremental Fisher-Yates: an O(1) uniform draw and removal. A rejected
+      // immediate repeat stays in the deck; failed entries are removed lazily.
+      const size_t pick = std::uniform_int_distribution<size_t>(0, remaining_.size()-1)(rng);
+      const auto song = remaining_[pick];
+      if (!playlist_.empty() && song == playlist_.back().song) continue;
+      remaining_[pick] = remaining_.back();
+      remaining_.pop_back();
+      if (!Usable(song)) continue;
+      playlist_.push_back({song, pass_});
       ++ahead;
     }
   }
@@ -153,5 +160,6 @@ class MusicSession {
   std::set<size_t> discovered_, blocked_, heard_;
   size_t cursor_ = kNoIndex, pass_ = 0;
   bool discovery_complete_ = false;
+  bool require_complete_discovery_ = false;
 };
 }  // namespace rb_blitz::shell_music

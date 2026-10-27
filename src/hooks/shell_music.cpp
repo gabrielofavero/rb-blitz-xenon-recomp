@@ -20,6 +20,7 @@
 #include "hooks/menu_music_metadata.h"
 #include "hooks/menu_music_queue.h"
 #include "hooks/menu_music_session.h"
+#include "hooks/menu_music_catalog.h"
 #include "hooks/menu_music_cache.h"
 #include "hooks/menu_music_now_playing.h"
 #include "input/native_menu.h"
@@ -354,16 +355,23 @@ struct PreparedPackage {
   size_t index = 0;
   std::unique_ptr<rex::filesystem::Device> device;
   std::vector<PoolEntry> songs;
+  std::shared_ptr<std::vector<rb_blitz::shell_music::catalog::Package>> catalog;
+  bool catalog_complete = false;
 };
 
 rb_blitz::shell_music::MenuMusicQueue<PreparedPackage> g_queue;
 rex::filesystem::VirtualFileSystem* g_file_system = nullptr;
-std::vector<std::filesystem::path> g_packages;  // shuffled once, before guest launch
+std::vector<std::filesystem::path> g_packages;  // catalog aliases use this boot's stable indices
 size_t g_next_package = 0;
 rb_blitz::shell_music::MusicMountCache<rex::filesystem::Device> g_cache;
 std::optional<PreparedPackage> g_ready_package;
 bool g_queue_started = false;
 std::atomic<bool> g_closing{false};
+using MusicCatalog = std::vector<rb_blitz::shell_music::catalog::Package>;
+std::shared_ptr<MusicCatalog> g_catalog_pending;
+std::filesystem::path g_catalog_path;
+std::atomic<bool> g_catalog_io_allowed{false};
+constexpr size_t kCatalogJob = rb_blitz::shell_music::kNoIndex;
 
 // Bundled songs stay in the game's ARK and use native relative paths. They
 // never occupy or request a slot in the rolling DLC mount cache.
@@ -501,7 +509,6 @@ std::optional<PreparedPackage> PreparePackage(const std::filesystem::path& packa
       }
       prepared.songs.push_back(std::move(entry));
     }
-    if (prepared.songs.empty()) return std::nullopt;
     return prepared;
   } catch (const std::exception& error) {
     REXLOG_WARN("shell_music: preparing {} failed: {}", package.string(), error.what());
@@ -535,6 +542,21 @@ void RetireColdLocked() {
 // Returns false only when all residency slots are pinned; keep the prepared
 // device pending and retry on a later poll without blocking or growing the cache.
 bool PublishPackage(PreparedPackage& prepared) {
+  if (prepared.catalog) {
+    if (!prepared.catalog_complete) return true; // another bounded batch follows on menu polls
+    for (size_t i = 0; i < prepared.catalog->size(); ++i) {
+      auto songs = (*prepared.catalog)[i].songs;
+      for (auto& song : songs) song.alias = fmt::format("menumusic{}", i);
+      g_session.Discover(i, std::move(songs));
+    }
+    g_next_package = g_packages.size();
+    g_session.DiscoveryComplete();
+    g_session.PlanAhead(g_rng);
+    g_catalog_pending.reset();
+    REXLOG_INFO("shell_music: complete catalog ready: {} songs; choosing uniformly by song",
+                g_session.Sources().size());
+    return true;
+  }
   if (!prepared.device) {
     g_session.BlockPackage(prepared.index);
     return true;
@@ -593,6 +615,16 @@ std::string NextPathLocked() {
 
 void SchedulePreparationLocked() {
   if (!g_queue_started || !g_queue.Idle() || g_ready_package) return;
+  if (g_catalog_pending) {
+    // A cold catalog scans metadata only after startup/discovery has finished.
+    // While it runs, native shell music covers the gap; ready bundled songs
+    // never get substituted for a random choice that is still unknown/loading.
+    const bool allowed = rb_blitz::input::MainMenuMusicInputAvailable() &&
+                         !rb_blitz::graphics::GraphicsLoadingPending();
+    g_catalog_io_allowed = allowed;
+    if (allowed) g_queue.Request(kCatalogJob);
+    return;
+  }
   if (g_next_package == g_packages.size()) g_session.DiscoveryComplete();
   g_session.PlanAhead(g_rng);
   RetireColdLocked();
@@ -1002,9 +1034,9 @@ void ApplyNavigatorCommand(uint8_t* base, PPCContext& ctx, uint32_t music) {
 // music pool's - is left exactly as it is.
 void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
   const auto requested = ctx.r4.u32 ? rex::memory::GuestPtr<const char*>(base, ctx.r4.u32) : nullptr;
-  // Take a completed startup mount without waiting for it. A cold/slow DLC
-  // package must never hold the splash screen behind disk I/O. Selection is
-  // delayed until this native Load so ready DLC can join the bundled songs.
+  // Take a completed selected mount without waiting for it. A cold/slow DLC
+  // package must never hold the splash screen behind disk I/O, and a ready
+  // bundled source must never replace the song selected from the full catalog.
   if (requested && std::strncmp(requested, kShellMusicPrefix, kShellMusicPrefixSize) == 0)
     rb_blitz::shell_music::PublishQueuedPool(true);
   if (g_navigation_enabled && requested && std::strncmp(requested, kShellMusicPrefix, kShellMusicPrefixSize) == 0) {
@@ -1226,10 +1258,28 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   g_file_system = file_system;
   DiscoverBaseSongs();
   g_packages = packages;
-  // A uniform permutation of the entire library, freshly seeded from OS entropy.
-  // Failed/art-only packages are skipped in this same order; no alphabetic prefix,
-  // remembered last choice or deterministic per-boot seed biases the first mount.
-  std::shuffle(g_packages.begin(), g_packages.end(), g_rng);
+  // Metadata is cheap to reuse, whereas opening every container competes with
+  // startup reads. A complete catalog also gives merged-pack songs equal odds.
+  g_catalog_path = runtime->cache_root() / "menu_music_catalog.cache";
+  auto catalog = std::make_shared<MusicCatalog>(
+      rb_blitz::shell_music::catalog::Load(g_catalog_path, g_packages));
+  size_t cached = 0;
+  for (size_t i = 0; i < catalog->size(); ++i) {
+    if (!(*catalog)[i].identity) continue;
+    auto songs = (*catalog)[i].songs;
+    for (auto& song : songs) song.alias = fmt::format("menumusic{}", i);
+    g_session.Discover(i, std::move(songs));
+    ++cached;
+  }
+  g_session.RequireCompleteDiscovery();
+  if (cached == g_packages.size()) {
+    g_next_package = g_packages.size();
+    g_session.DiscoveryComplete();
+  } else {
+    g_catalog_pending = std::move(catalog);
+  }
+  REXLOG_INFO("shell_music: catalog reused {}/{} packages; {} need background metadata reads",
+              cached, g_packages.size(), g_packages.size() - cached);
   if (g_session.Sources().empty() && g_packages.empty()) {
     REXLOG_WARN("shell_music: no bundled or DLC song is playable; the main menu keeps the title's own "
                 "tracks");
@@ -1250,8 +1300,8 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   g_watch = g_watch_title = false;
   g_attempts = 0;
   g_playing_name.clear();
-  REXLOG_INFO("shell_music: startup metadata ready in {} ms: {} bundled song(s), {} mounted package(s) "
-              "of {}; first DLC preparation is asynchronous; selection waits for native Load",
+  REXLOG_INFO("shell_music: startup metadata ready in {} ms: {} catalog song(s), {} mounted package(s) "
+              "of {}; metadata order and mount readiness do not affect the random draw",
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - pool_start).count(),
               g_session.Sources().size(), g_cache.Size(), packages.size());
@@ -1264,20 +1314,46 @@ void StartQueuedPool() {
   std::lock_guard lock(g_mutex);
   if (!g_enabled || g_closing || g_queue_started) return;
   g_queue_started = true;
-  g_queue.Start([packages = g_packages](size_t index) -> std::optional<PreparedPackage> {
+  g_queue.Start([packages = g_packages, catalog = g_catalog_pending,
+                 catalog_path = g_catalog_path, catalog_cursor = size_t{0}]
+                (size_t index) mutable -> std::optional<PreparedPackage> {
+    if (index == kCatalogJob && catalog) {
+      const auto started = std::chrono::steady_clock::now();
+      size_t reads = 0;
+      for (; catalog_cursor < catalog->size() && reads < 8; ++catalog_cursor) {
+        if (g_closing) return {};
+        if (!g_catalog_io_allowed) break;
+        auto& record = (*catalog)[catalog_cursor];
+        if (record.identity) continue;
+        const auto before = rb_blitz::shell_music::catalog::Identity(record.path);
+        auto prepared = PreparePackage(record.path, catalog_cursor);
+        ++reads;
+        if (prepared && before && before == rb_blitz::shell_music::catalog::Identity(record.path)) {
+          record.identity = before;
+          record.songs = std::move(prepared->songs);
+        }
+      }
+      if (g_closing) return {};
+      PreparedPackage completed;
+      completed.catalog = catalog;
+      completed.catalog_complete = catalog_cursor == catalog->size();
+      if (completed.catalog_complete) {
+        std::string why;
+        const bool saved = rb_blitz::shell_music::catalog::Save(catalog_path, *catalog, &why);
+        REXLOG_INFO("shell_music: background catalog complete; {} packages; saved={} {}",
+                    catalog->size(), saved, why);
+      }
+      REXLOG_DEBUG("shell_music: catalog batch: {} packages read in {} ms ({}/{})",
+                   reads, MillisecondsSince(started), catalog_cursor, catalog->size());
+      return completed;
+    }
     auto prepared = PreparePackage(packages.at(index), index);
     if (prepared) return prepared;
     PreparedPackage failed;
     failed.index = index;
     return failed;  // failures still retire the demand request and discovery slot
   });
-  // Before the first Load, prepare just one shuffled DLC package and leave the
-  // playlist uncommitted. No second package is requested until the guest polls.
-  if (g_session.Playlist().empty() && g_next_package < g_packages.size()) {
-    if (g_queue.Request(g_next_package)) ++g_next_package;
-  } else {
-    SchedulePreparationLocked();
-  }
+  SchedulePreparationLocked();
   REXLOG_INFO("shell_music: rolling preparation started; bounded demand worker, no fixed song cap");
 }
 
@@ -1286,6 +1362,8 @@ void PublishQueuedPool(bool during_loading) {
   // This also runs before the queue starts and on the final loading query.
   // Preparing caches is not evidence that the current music source failed.
   if (during_loading) g_playback.DeferWatchdog(NowMs());
+  g_catalog_io_allowed = rb_blitz::input::MainMenuMusicInputAvailable() &&
+                         !rb_blitz::graphics::GraphicsLoadingPending();
   if (g_closing || !g_queue_started || g_setting_up_music) return;
   const bool active = during_loading || g_watch || g_watch_title;
   g_queue.Pause(!active);
@@ -1298,6 +1376,7 @@ void PublishQueuedPool(bool during_loading) {
 void CloseQueuedPool() {
   std::lock_guard lock(g_mutex);
   g_closing = true;
+  g_catalog_io_allowed = false;
   NowPlaying().Reset();
   g_queue.Stop();
 }
@@ -1408,6 +1487,7 @@ void ForgetMenuMusic(uint32_t music) {
     g_watch_title = false;
     g_nav_paused_stream = 0;
     g_queue.Pause(true);
+    g_catalog_io_allowed = false;
     g_playback.Stop();
     g_current_index = -1;
     g_pending_index = -1;
