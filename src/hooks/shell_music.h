@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// R9: the main menu's background music, drawn from the loaded DLC instead of the
-// three tracks the title ships. See src/hooks/shell_music.cpp for the flow and
+// R9: the main menu's background music, drawn from bundled songs and loaded DLC
+// instead of the title's three shell tracks. See src/hooks/shell_music.cpp for the flow and
 // docs/engine/main-menu.md (part 2, the background music) for the evidence.
 
 #pragma once
@@ -20,14 +20,15 @@ class Runtime;
 
 namespace rb_blitz::shell_music {
 
-// Hooks the engine's shell-music loader (0x82757F50) so that, with R9 on and a DLC
-// package mounted, every track the menu asks for is one of the loaded DLC songs rather
-// than the title's own three. The packages are mounted read-only from
+// Hooks the engine's shell-music loader (0x82757F50) so that, with R9 on, every track
+// the menu asks for is a bundled or loaded DLC song rather than the title's own
+// three shell tracks. Bundled songs stream natively from the game archive.
+// DLC packages are mounted read-only from
 // rb_blitz::dlc::LibraryPackagePaths(), so nothing is copied and nothing under game/ is
 // written.
 //
 // Call once from RbBlitzApp::OnPostLoadXexImage(), after dlc::Configure(): it reads the
-// library that layer just enumerated and mounts one randomly chosen usable package.
+// bundled catalog and the library that layer just enumerated, preparing one random usable package.
 // A small rolling cache is prepared during native cache loading and menu playback. With the toggle off
 // it leaves the title's tracks in control; the independent navigator can still move them.
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
@@ -53,14 +54,14 @@ std::string SelectedSongKey();
 //
 // `MenuMusicEnabled` is the setting's own value (the revived `general.dlc_menu_songs` row, read
 // from the settings store in Configure()), and `HasPool` is whether that setting produced a pool.
-// They differ exactly when the setting is on and nothing could be mounted (no library, or no
-// package holds a stream) - the state the settings screen reports as unavailable, and the reason
+// They differ when the setting is on but neither bundled songs nor DLC can be read
+// (a missing/damaged archive and no usable packages) - the unavailable state, and the reason
 // the Play Current Song row is absent from a menu whose background music is the title's own.
 
-// Whether the "DLC Menu Songs" setting asked for the DLC pool this boot.
+// Whether Background Music asked for the library pool this boot.
 bool MenuMusicEnabled();
 
-// True when this boot really has a pool (the setting on *and* at least one song mounted).
+// True when this boot has a pool (the setting on and at least one bundled or DLC song).
 bool HasPool();
 
 // Discovered catalog songs in stable ID order, independent of mount residency.

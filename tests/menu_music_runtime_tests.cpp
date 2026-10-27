@@ -588,7 +588,115 @@ void TestMusicFeatureConfiguration() {
   g_buffers.clear();
 }
 
-int main() {
+void TestBundledMusic(const std::filesystem::path& game = {}) {
+  using namespace rb_blitz;
+  using namespace shell_music;
+  test::BeginCase("bundled songs rotate and navigate with no DLC mounts, retaining native song keys");
+  rex::filesystem::VirtualFileSystem vfs;
+  g_session = MusicSession{};
+  g_cache = MusicMountCache<rex::filesystem::Device>{};
+  g_file_system = &vfs;
+  if (!game.empty()) {
+    auto device = std::make_unique<rex::filesystem::HostPathDevice>("\\Device\\BaseGameTest", game, true);
+    CHECK_TRUE(device->Initialize());
+    CHECK_TRUE(vfs.RegisterDevice(std::move(device)));
+    CHECK_TRUE(vfs.RegisterSymbolicLink("game:", "\\Device\\BaseGameTest"));
+    DiscoverBaseSongs();
+    CHECK_EQ(g_session.Sources().size(), 3u);
+    std::set<std::string> keys;
+    for (const auto& song : g_session.Sources()) keys.insert(song.song_key);
+    CHECK_TRUE(keys == std::set<std::string>({"deathontwolegs", "oneweek", "thesedaysfoo"}));
+  } else {
+    g_session.Discover(kBasePackage, {{"", "songs/one/one", "One", "First", "Artist"},
+        {"", "songs/two/two", "Two", "Second", "Artist"},
+        {"", "songs/three/three", "Three", "Third", "Artist"}});
+  }
+  if (g_session.Sources().size() != 3) return;
+  g_session.DiscoveryComplete();
+  g_enabled = g_menu_music_enabled = g_navigation_enabled = true;
+  CHECK_TRUE(HasPool());
+  g_closing = false;
+  g_buffers = {kPath};
+  g_nav_epoch = NowPlaying().Reset();
+  g_watch = g_watch_title = false;
+  g_play_selection.Stop();
+  std::array<uint8_t, 65536> memory{};
+  auto* base = memory.data();
+  PPCContext ctx{};
+  ctx.r1.u32 = 0xF000; ctx.r3.u32 = kMusic; ctx.r4.u32 = 0x2000; ctx.r31.u64 = 0xABCDEF;
+  std::strcpy(reinterpret_cast<char*>(base + ctx.r4.u32), kTitleTracks[0]);
+  Store(base, kNewStream, kVtable); Store(base, kVtable, kDestroy);
+  sub_82757F50(ctx, base);
+  CHECK_TRUE(loaded.starts_with("songs/")); // native ARK path, without a device alias
+  sub_82758B98(ctx, base);
+  std::set<std::string> heard;
+  for (size_t i = 0; i < 3; ++i) {
+    sub_827586D8(ctx, base);
+    const auto snapshot = NowPlaying().ReadSnapshot();
+    CHECK_TRUE(snapshot.available);
+    CHECK_TRUE(snapshot.playback.track.source == MusicSource::kBaseGame);
+    CHECK_FALSE(snapshot.playback.track.title.empty());
+    bool answer = false;
+    CHECK_TRUE(AnswerPlayQuery("rbbz-play/begin", &answer)); CHECK_TRUE(answer);
+    CHECK_TRUE(SelectedSongKey() == snapshot.playback.track.key);
+    heard.insert(SelectedSongKey());
+    g_play_selection.Complete();
+    if (!game.empty()) {
+      const auto& track = snapshot.playback.track;
+      std::vector<uint8_t> bytes;
+      CHECK_FALSE(track.artwork_key.empty());
+      CHECK_EQ(ReadArtwork({snapshot.epoch, track.song, track.artwork_key}, &bytes), ui::music::ArtRead::kReady);
+      CHECK_EQ(bytes.size(), 43680u);
+    }
+    Store(base, kNewStream + 20, 6); // EOF advances instead of looping a bundled song
+    sub_827586D8(ctx, base);
+  }
+  CHECK_EQ(heard.size(), 3u);
+  sub_827586D8(ctx, base);
+  const auto cursor = g_session.Cursor();
+  CHECK_TRUE(nav::Post(nav::Command::kPrevious).status == nav::PostStatus::kAccepted);
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_session.Cursor(), cursor - 1);
+  CHECK_TRUE(loaded.starts_with("songs/"));
+  CHECK_TRUE(nav::Post(nav::Command::kNext).status == nav::PostStatus::kAccepted);
+  sub_827586D8(ctx, base);
+  CHECK_EQ(g_session.Cursor(), cursor);
+  CHECK_EQ(g_cache.Size(), 0u);
+  CHECK_FALSE(g_queue_started);
+  CHECK_TRUE(nav::Post(nav::Command::kPlayPause).status == nav::PostStatus::kAccepted);
+  sub_827586D8(ctx, base);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().playback.state == TransportState::kPaused);
+  CHECK_TRUE(nav::Post(nav::Command::kPlayPause).status == nav::PostStatus::kAccepted);
+  sub_827586D8(ctx, base);
+  CHECK_TRUE(NowPlaying().ReadSnapshot().playback.state == TransportState::kPlaying);
+
+  test::BeginCase("bundled and DLC catalogs deduplicate and share one session");
+  const auto song = g_session.Sources().front();
+  CHECK_EQ(g_session.Discover(0, {{"menumusic0", song.stream, song.song_key},
+                                 {"menumusic0", "songs/dlc/dlc", "DlcSong"}}), 1u);
+  CHECK_EQ(g_session.Sources().size(), 4u);
+  CHECK_TRUE(PackageReady(kBasePackage));
+  CHECK_FALSE(PackageReady(0));
+  rex::filesystem::HostPathDevice ready("\\Device\\ReadyMusic", {}, true);
+  CHECK_TRUE(g_cache.Insert(0, &ready));
+  CHECK_TRUE(PackageReady(0));
+
+  g_session = MusicSession{};
+  g_cache = MusicMountCache<rex::filesystem::Device>{};
+  g_base_archive = {};
+  g_file_system = nullptr;
+  g_playback.Stop(); g_play_selection.Stop();
+  g_current_index = g_pending_index = -1; g_stream_song = kNoIndex;
+  g_watch = g_watch_title = false;
+  loads = starts = stops = destroys = polls = 0;
+}
+
+int main(int argc, char** argv) {
+  if (argc == 2) {
+    TestBundledMusic(argv[1]);
+    return rb_blitz::test::Finish();
+  }
+  TestBundledMusic();
   TestMusicFeatureConfiguration();
   TestArtworkRead();
   using namespace rb_blitz::shell_music;

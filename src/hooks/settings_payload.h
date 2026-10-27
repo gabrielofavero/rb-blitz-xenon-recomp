@@ -2,5 +2,5 @@
 #pragma once
 namespace rex { class Runtime; }
 namespace rb_blitz::settings {
-bool InstallMenuPayload(rex::Runtime* runtime);
+bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot = false);
 }

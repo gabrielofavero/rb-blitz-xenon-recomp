@@ -18,7 +18,7 @@ struct Feature {
 };
 // A visibility preference whose stored value means hidden has an inverted enabled value.
 inline constexpr Feature kFeatures[] = {
-    {"general.dlc_menu_songs", "Background Music: DLC"},
+    {"general.dlc_menu_songs", "Background Music: Library"},
     {"interface.music_player", "Music Player"},
     {"general.play_current_song", "Play Current Song"},
     {"interface.background_music_navigation", "Menu Music Navigation"},

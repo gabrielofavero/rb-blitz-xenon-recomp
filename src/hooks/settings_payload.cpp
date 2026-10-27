@@ -100,7 +100,7 @@ std::string ResolutionChoiceLabel(const DisplayMode& size) {
 }
 }
 
-bool InstallMenuPayload(rex::Runtime* runtime) {
+bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
   const auto started = std::chrono::steady_clock::now();
   auto* vfs = runtime->file_system();
   ArkIndex main, patch;
@@ -323,9 +323,9 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     // Missing dependencies explain why a shortcut is absent this boot. Its visibility preference
     // remains editable, so the player can restore it before enabling the dependency and restarting.
     if (!menu_music_on) {
-      configuration.availability["general.play_current_song"] = "requires Background Music: DLC";
+      configuration.availability["general.play_current_song"] = "requires Background Music: Library";
     } else if (!menu_music_pool) {
-      configuration.availability["general.play_current_song"] = "no playable DLC songs found";
+      configuration.availability["general.play_current_song"] = "no playable library songs found";
     }
     if (!dlc_cache_on)
       configuration.availability["general.refresh_music_library"] = "requires Cache Song Library";
@@ -368,10 +368,15 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
   }
   MenuRecords records;
   std::vector<std::string> build_notes;
+  const bool skip_startup_logos = settings_restart_boot ||
+      rex::cvar::GetFlagByName("startup_mode") == "fast" ||
+      rex::cvar::GetFlagByName("song_load_recovered") == "true";
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), dlc::CacheServedThisBoot(),
-                        dlc_cache_on && refresh_row_on, &build_notes, menu_filter::HiddenRows()))
+                        dlc_cache_on && refresh_row_on, &build_notes, menu_filter::HiddenRows(),
+                        skip_startup_logos))
     return fail();
+  if (skip_startup_logos) REXLOG_INFO("startup: native logo playlist skipped for this boot");
   // What the boot asked for and the authoring side refused. Not fatal - the menu it produced is
   // still a menu - but each line is a difference between the configuration and what the guest
   // sees, so it is said rather than inferred from a later screenshot.

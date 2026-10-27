@@ -661,7 +661,9 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
     bytes->assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
     return true;
   };
-  for (int mask = 0; mask < 8; ++mask) {
+  for (int boot_case = 0; boot_case < 16; ++boot_case) {
+    const int mask = boot_case & 7;
+    const bool fast = boot_case >= 8;
     const auto state = State(mask);
     screen::MenuConfiguration config;
     config.rhythmverse_row = state.store;
@@ -672,11 +674,12 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
     std::string why;
     std::vector<std::string> notes;
     if (!settings::BuildMenuRecords(read, {"ui/locale/eng/gen/locale_keep.dtb"}, &records,
-                                    &why, false, false, false, &notes)) {
+                                    &why, false, false, false, &notes, {}, fast)) {
       std::printf("header records refused: %s\n", why.c_str()); return 1;
     }
     CHECK_TRUE(notes.empty());
-    const auto dir = fs::path(output_root) / ("state-" + std::to_string(mask));
+    CHECK_TRUE(records.contains("ui/startup/gen/startup.dtb") == fast);
+    const auto dir = fs::path(output_root) / (std::string(fast ? "fast-" : "normal-") + std::to_string(mask));
     for (const auto& [name, bytes] : records) {
       if (!name.ends_with(".dtb")) continue;
       std::vector<Node> roots;
@@ -685,6 +688,13 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
         std::printf("header records invalid: %s: %s\n", name.c_str(), why.c_str()); return 1;
       }
       if (name == "ui/background/gen/background.dtb") CheckBar(roots, mask);
+      if (name == "ui/startup/gen/startup.dtb") {
+        for (const auto& root : roots) {
+          if (root.kids.empty()) continue;
+          if (root.kids[0].text == "splash_order") CHECK_EQ(root.kids.size(), 1u);
+          if (root.kids[0].text == "wait_for_splash") CHECK_TRUE(root.kids[1].text == "FALSE");
+        }
+      }
       if (name == "ui/gen/transition_screens.dtb") CheckAnimations(roots, mask);
       if (name == "ui/locale/eng/gen/locale_keep.dtb") {
         // P9-7/P9-10's store entries ride in every locale the payload edits while the store is on:
@@ -838,6 +848,50 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
 }
 
 int main(int argc, char** argv) {
+  {
+    using namespace rb_blitz::ui::dtb;
+    BeginCase("short boots clear regional and provider logos without changing other startup settings");
+    Node region;
+    region.tag = kIfdef;
+    region.text = "REGION_NA";
+    std::vector<Node> roots{
+        Node::Array({Node::Symbol("wait_for_splash"), Node::Symbol("TRUE")}),
+        Node::Array({Node::Symbol("splash_order"),
+            Node::Array({Node::Symbol("ulti/ultimate_mods.milo"), Node::Int(5)}), region,
+            Node::Array({Node::Symbol("ui/startup/hmx_logo_screen.milo"), Node::Int(5)})}),
+        Node::Array({Node::Symbol("provider_setting"), Node::Int(42)})};
+    const auto extra = Compile({roots[2]});
+    std::string why;
+    CHECK_TRUE(rb_blitz::settings::SkipStartupLogos(&roots, &why));
+    CHECK_EQ(roots[1].kids.size(), 1u);
+    CHECK_TRUE(roots[0].kids[1].text == "FALSE");
+    CHECK_TRUE(Compile({roots[2]}) == extra);
+    CHECK_TRUE(rb_blitz::settings::SkipStartupLogos(&roots, &why));
+    roots.erase(roots.begin());
+    const auto before = Compile(roots);
+    CHECK_FALSE(rb_blitz::settings::SkipStartupLogos(&roots, &why));
+    CHECK_TRUE(Compile(roots) == before);
+  }
+  if (argc == 3 && std::string(argv[1]) == "check-startup-record") {
+    using namespace rb_blitz::ui::dtb;
+    std::ifstream input(argv[2], std::ios::binary);
+    std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    std::vector<Node> roots;
+    RootHeader header;
+    std::string why;
+    CHECK_TRUE(Parse(bytes.data(), bytes.size(), &roots, &header, &why));
+    CHECK_TRUE(Compile(roots, header) == bytes);
+    CHECK_TRUE(rb_blitz::settings::SkipStartupLogos(&roots, &why));
+    for (const auto& root : roots) {
+      if (root.kids.empty()) continue;
+      if (root.kids[0].text == "splash_order") CHECK_EQ(root.kids.size(), 1u);
+      if (root.kids[0].text == "wait_for_splash") CHECK_TRUE(root.kids[1].text == "FALSE");
+    }
+    const auto skipped = Compile(roots, header);
+    CHECK_TRUE(Parse(skipped.data(), skipped.size(), &roots, &header, &why));
+    CHECK_TRUE(Compile(roots, header) == skipped);
+    return Finish();
+  }
   {
     namespace dtb = rb_blitz::ui::dtb;
     using dtb::Node;

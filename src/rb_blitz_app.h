@@ -410,7 +410,8 @@ class RbBlitzApp : public rex::ReXApp {
     // is served a record. With the master off this is a no-op - the store makes no request at all
     // then (plan §1.6, and the acceptance Control leg pins that silence).
     rb_blitz::store::RequestCatalogueRefresh("the boot asked");
-    graphics_loading_payload_ready_ = rb_blitz::settings::InstallMenuPayload(runtime());
+    graphics_loading_payload_ready_ =
+        rb_blitz::settings::InstallMenuPayload(runtime(), settings_restart_boot_);
     // The typed settings channel (P1): its two guest hooks are installed at link time, so this
     // only reads their flags once on this host thread and logs what they are set to. A guest
     // thread must not touch the cvar registry, which is why the read happens here.

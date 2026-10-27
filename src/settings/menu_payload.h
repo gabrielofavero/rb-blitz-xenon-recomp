@@ -23,7 +23,10 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       MenuRecords* records, std::string* error, bool merge_provider = false,
                       bool cached_dlc_list = false, bool refresh_row_active = false,
                       std::vector<std::string>* notes = nullptr,
-                      const std::vector<std::string>& hidden_menu_rows = {});
+                      const std::vector<std::string>& hidden_menu_rows = {},
+                      bool skip_startup_logos = false);
+// Empty the native startup playlist and release its wait, before the guest boots.
+bool SkipStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Applied to the complete generated locale record, before it is archived. This
 // path has no split-read length constraint and serves both installed providers.
 bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit);

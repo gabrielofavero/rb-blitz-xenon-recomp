@@ -30,12 +30,13 @@ The root remains How to Play, Calibration, General, Controls, Audio/Video, and G
 | Video | Display; Graphics; Renderer (when more than one backend is available) |
 | Display | Window Mode; Resolution; V-Sync; Overscan |
 
-Shortcut and library-tab preferences use Visible/Hidden. Background Music uses Default/DLC;
+Shortcut and library-tab preferences use Visible/Hidden. Background Music uses Default/Library;
 Store Access uses Enabled/Disabled. Hiding the RhythmVerse shortcut does not disable the store.
 Controls, gameplay, graphics quality, and their deeper pages retain their previous organization.
 
-Startup defaults to Normal: show the splash screen and "Press A to Start". Fast
-selects the local user and continues automatically through discovery to the main
+Startup defaults to Normal: show startup logos, the splash screen, and "Press A to Start". Fast
+skips the native startup playlist (including Harmonix and Ultimate Mods logos),
+selects the local user, and continues automatically through discovery to the main
 menu, skipping offline prompts for that boot. Settings and recovery restarts
 always use the fast path regardless of this preference; only recovery shows an
 error popup. The preference is saved as `[general] startup = "normal" | "fast"`
@@ -66,13 +67,19 @@ clickable with controller/keyboard music navigation off. Both switches are appli
 the music transport is prepared when either feature needs it, while pad/key consumption follows
 the navigation switch alone.
 
-Background Music **Default** means the original implementation; **DLC** enables the enhanced
-library background music. Selecting Default first asks before disabling any enabled linked music
-features. Selecting DLC alone leaves those features disabled.
+Background Music **Default** means the original implementation; **Library** enables the enhanced
+rotation of bundled songs and installed DLC. The base archive supplies “Death on Two Legs,”
+“One Week,” and “These Days”; the two tutorial tracks are excluded. A clean boot with no DLC
+supports the player, music navigation, and Play Current Song through these bundled tracks.
+Audio streams from the native archive without extraction or DLC cache residency; metadata and
+artwork also come from that archive. Installed DLC joins the same session and song-key deduplication.
+The stored `general.dlc_menu_songs` key and its enabled default remain unchanged.
+Selecting Default first asks before disabling any enabled linked music features.
+Selecting Library alone leaves those features disabled.
 
 | Prerequisite | Linked features |
 | --- | --- |
-| Background Music: DLC | Music Player; Play Current Song; Menu Music Navigation |
+| Background Music: Library | Music Player; Play Current Song; Menu Music Navigation |
 | Cache Song Library | Refresh Songs |
 | RhythmVerse Store Access | RhythmVerse main-menu shortcut |
 | All HUD Elements: Visible | Gold Star Progress; Song Progress Bar; Timer; Personal Best; Note Streak; Input Viewer |

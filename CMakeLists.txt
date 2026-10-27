@@ -998,12 +998,17 @@ if(BUILD_TESTING)
     add_test(NAME menu_music_guest COMMAND rb_blitz_menu_music_guest_tests)
 
     add_executable(rb_blitz_menu_music_runtime_tests tests/menu_music_runtime_tests.cpp
+        src/settings/ultimate_adapter.cpp
         src/input/menu_music_nav.cpp src/hooks/menu_music_now_playing.cpp
         src/ui/menu_music_artwork.cpp src/assets/texture_codec.cpp
         src/hooks/menu_music_metadata.cpp src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_menu_music_runtime_tests PRIVATE src)
     target_link_libraries(rb_blitz_menu_music_runtime_tests PRIVATE rex::runtime)
     add_test(NAME menu_music_runtime COMMAND rb_blitz_menu_music_runtime_tests)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game/gen/main_xbox.hdr")
+        add_test(NAME menu_music_runtime_base_game COMMAND rb_blitz_menu_music_runtime_tests
+                 "${CMAKE_CURRENT_SOURCE_DIR}/game")
+    endif()
 
     add_executable(rb_blitz_menu_music_player_tests tests/menu_music_player_tests.cpp
         src/ui/menu_music_artwork.cpp src/assets/texture_codec.cpp)

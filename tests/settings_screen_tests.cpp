@@ -2044,7 +2044,7 @@ void TestLabels() {
     // retail header they replace; the Main Menu mirror and the acronyms are the other exceptions.
     if (label.first.rfind("settings_mm_", 0) == 0 ||
         label.first.rfind("settings_title_", 0) == 0 || label.second == "HUD" ||
-        label.second == "FXAA" || label.second == "DLC") {
+        label.second == "FXAA" || label.second == "Library") {
       continue;
     }
     ++checked;

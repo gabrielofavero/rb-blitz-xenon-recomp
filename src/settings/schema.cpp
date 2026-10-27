@@ -119,7 +119,7 @@ std::vector<SchemaRow> BuildTable() {
                         WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("normal"));
     d.choices = Choices({{"normal", "Normal"}, {"fast", "Fast"}});
     rows.push_back(Row(std::move(d), {"general", "startup"}, "launch", "Startup",
-                       "Normal: Show the splash screen and 'Press A to Start'. Fast: Continue automatically to the main menu."));
+                       "Normal: Show startup logos and 'Press A to Start'. Fast: Skip both and continue automatically to the main menu."));
   }
   rows.push_back(Row(Make(SettingId::kCacheDlcLibrary, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
@@ -152,7 +152,7 @@ std::vector<SchemaRow> BuildTable() {
   rows.push_back(Row(Make(SettingId::kDlcMenuSongs, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"general", "dlc_menu_songs"}, "audio", "Background Music",
-                     "Play songs from your DLC library as the main menu's background music."));
+                     "Play bundled songs and installed DLC as the main menu's background music."));
   {
     Descriptor d = Make(SettingId::kLoadGuard, Category::kGeneral, Provider::kNative,
                         WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("off"));
@@ -310,11 +310,11 @@ std::vector<SchemaRow> BuildTable() {
   rows.push_back(Row(Make(SettingId::kBackgroundMusicNavigation, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "background_music_navigation"}, "", "Menu Music Navigation",
-                     "Navigate DLC menu music with controller buttons or keyboard/media keys. Requires a restart."));
+                     "Navigate library menu music with controller buttons or keyboard/media keys. Requires a restart."));
   rows.push_back(Row(Make(SettingId::kMusicPlayer, Category::kInterface, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "music_player"}, "main_menu_extra", "Music Player",
-                     "Show the music player at the bottom right of the main menu. Requires Background Music: DLC."));
+                     "Show the music player at the bottom right of the main menu. Requires Background Music: Library."));
   // P9-4: the shared background panel is authored once at boot.
   rows.push_back(Row(Make(SettingId::kShowMessages, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),

@@ -1018,7 +1018,7 @@ std::vector<PanelSpec> AllPanels() {
                               SubmenuRow("settings_target", "settings_target_screen", "Game Version",
                                          "Choose which version starts: Rock Band Blitz, Ultimate, or the Demo."),
                               SelectRow("settings_startup", "general.startup", "Startup",
-                                        "Normal: Show the splash screen and 'Press A to Start'. Fast: Continue automatically to the main menu.",
+                                        "Normal: Show startup logos and 'Press A to Start'. Fast: Skip both and continue automatically to the main menu.",
                                         Choices({"normal", "Normal", "fast", "Fast"})),
                           }});
 
@@ -1356,9 +1356,9 @@ std::vector<PanelSpec> AllPanels() {
       ElementVisibilityRow("settings_dlc_refresh", "general.refresh_music_library", "Refresh Songs",
                            "Show the shortcut that re-scans your songs. Requires Cache Song Library. Restart to apply."),
       ElementVisibilityRow("settings_play_current", "general.play_current_song", "Play Current Song",
-                           "Show the shortcut for the background song. Needs Background Music: DLC and a playable song. Restart to apply."),
+                           "Show the shortcut for the background song. Needs Background Music: Library and a playable song. Restart to apply."),
       ElementVisibilityRow("settings_music_player", "interface.music_player", "Music Player",
-                           "Show the bottom-right music player. Requires Background Music: DLC. Restart to apply."),
+                           "Show the bottom-right music player. Requires Background Music: Library. Restart to apply."),
       VisibilityRow("settings_mm_rhythmverse", "interface.hidden_main_menu.rbbz_rhythmverse",
                     "RhythmVerse", "Show the RhythmVerse shortcut. Store Access is controlled in Song Library. Restart to apply."),
   }});
@@ -2333,7 +2333,7 @@ std::string HelpTextFor(const std::string_view symbol) {
   if (symbol == "settings_dlc_menu_songs")
     return "Default restores the original music implementation. DLC enables library music and linked features. Restart to apply.";
   if (symbol == "settings_music_navigation")
-    return "Navigate DLC menu music with controller buttons or keyboard/media keys. Music Player visibility is separate. Restart to apply.";
+    return "Navigate library menu music with controller buttons or keyboard/media keys. Music Player visibility is separate. Restart to apply.";
   if (symbol.empty()) {
     return {};
   }
@@ -3377,7 +3377,7 @@ std::vector<std::pair<std::string, std::string>> Labels() {
   std::vector<std::pair<std::string, std::string>> out;
   out.emplace_back("settings_dlc_menu_songs", "Background Music: %s");
   out.emplace_back("settings_background_original", "Default");
-  out.emplace_back("settings_background_dlc", "DLC");
+  out.emplace_back("settings_background_dlc", "Library");
   out.emplace_back("settings_music_navigation", "Menu Music Navigation: %s");
   out.emplace_back("settings_linked_message", "This change also changes linked settings. Continue?");
   for (const auto& prompt : settings::dependencies::Prompts())

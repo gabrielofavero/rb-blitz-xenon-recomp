@@ -136,11 +136,10 @@ REXCVAR_DEFINE_STRING(enhancements_controller_scheme, "", "Enhancements",
 
 // R9, implemented. The title loops ONE of three of its own streamed tracks per menu visit
 // (the `shellmusic` block of config/synth.dtb, chosen at random and looped forever); with
-// this on, every track the menu plays is one of the loaded DLC songs instead, streamed
-// read-only from the package it came from (src/hooks/shell_music.cpp). The pool is drawn
-// at random from every song the boot's DLC packages carry - every `.mogg` in a package,
-// not just the first, so a merged pack contributes all of its songs - and every boot draws
-// a new one, so without a library there is nothing to draw from and the menu is unchanged.
+// this on, the menu rotates through regular bundled songs and installed DLC instead.
+// Bundled songs stream from the native archive; DLC streams read-only from its packages
+// (src/hooks/shell_music.cpp). Merged packages contribute every declared stream, and
+// the bundled songs keep this feature available without an installed DLC library.
 //
 // REVIVED (owner request, 2026-10-14): the feature has a visible row again - "DLC Menu Songs" on
 // the merged Help & Options surface's Downloadable Content page (`general.dlc_menu_songs`), which
@@ -148,19 +147,19 @@ REXCVAR_DEFINE_STRING(enhancements_controller_scheme, "", "Enhancements",
 // compiled default here must equal the row's (`true`): a row nobody has chosen is *not* written, so
 // on a fresh install what a boot reads is this cvar's own default.
 REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, true, "Enhancements",
-                    "R9 main-menu DLC songs: play the loaded DLC as the main menu's background "
-                    "music. The in-game \"DLC Menu Songs\" row is the control; this is the cvar it "
+                    "R9 main-menu library songs: play bundled songs and installed DLC as background "
+                    "music. The in-game Background Music row is the control; this is the cvar it "
                     "is written to, so an explicit flag or environment value still outranks it.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 // Input navigation and the visible player are independent preferences sharing one transport.
 REXCVAR_DEFINE_BOOL(enhancements_background_music_nav, true, "Enhancements",
                     "Enable pad/key menu-music navigation. Music-player visibility is independent. "
-                    "Requires DLC background music.")
+                    "Requires library background music.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_BOOL(enhancements_music_player, true, "Enhancements",
                     "Show the clickable music player at the bottom right of the main menu. "
-                    "Independent of pad/key navigation. Requires DLC background music.")
+                    "Independent of pad/key navigation. Requires library background music.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",
@@ -220,7 +219,7 @@ constexpr std::array<ToggleRow, 13> kToggles{{
      [] { return REXCVAR_GET(enhancements_refresh_music_library); }},
     {"enhancements_force_controller_scheme", "R8 force controller scheme",
      [] { return REXCVAR_GET(enhancements_force_controller_scheme); }},
-    {"enhancements_menu_dlc_songs", "R9 main-menu DLC songs (the in-game DLC Menu Songs row)",
+    {"enhancements_menu_dlc_songs", "R9 main-menu library songs (the Background Music row)",
      [] { return REXCVAR_GET(enhancements_menu_dlc_songs); }},
     {"enhancements_background_music_nav", "menu-music navigator (P2; native pause/resume)",
      [] { return REXCVAR_GET(enhancements_background_music_nav); }},

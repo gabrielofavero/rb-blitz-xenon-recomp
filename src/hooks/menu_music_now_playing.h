@@ -14,7 +14,7 @@
 namespace rb_blitz::shell_music {
 
 namespace nav = input::menu_music_nav;
-enum class MusicSource { kNone, kDlc, kTitle };
+enum class MusicSource { kNone, kDlc, kTitle, kBaseGame };
 enum class TransportState { kUnavailable, kLoading, kPlaying, kPaused, kStopped };
 enum class ArtworkState { kMissing, kLoading, kReady, kError };
 struct Capabilities {

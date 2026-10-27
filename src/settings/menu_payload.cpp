@@ -726,11 +726,33 @@ bool AddCrashRecoveryHooks(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
+bool SkipStartupLogos(std::vector<Node>* roots, std::string* why) {
+  if (!roots) return false;
+  Node* order = nullptr;
+  Node* wait = nullptr;
+  for (auto& root : *roots) {
+    if (root.tag != ui::dtb::kArray || root.kids.empty() ||
+        root.kids[0].tag != ui::dtb::kSymbol) continue;
+    if (root.kids[0].text == "splash_order") order = &root;
+    else if (root.kids[0].text == "wait_for_splash") wait = &root;
+  }
+  if (!order || !wait || wait->kids.size() != 2) {
+    if (why) *why = "unsupported startup splash playlist";
+    return false;
+  }
+  // Clear the complete list, including regional directives and provider logos.
+  // Keeping the key lets the native splasher finish through its empty-list path.
+  order->kids.resize(1);
+  wait->kids[1] = Node::Symbol("FALSE");
+  return true;
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
                       bool cached_dlc_list, bool refresh_row_active,
                       std::vector<std::string>* notes,
-                      const std::vector<std::string>& hidden_menu_rows) {
+                      const std::vector<std::string>& hidden_menu_rows,
+                      bool skip_startup_logos) {
   namespace screen = ui::screen;
   MenuRecords built;
   auto note = [notes](std::string line) {
@@ -763,6 +785,9 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     built[path] = ui::dtb::Compile(roots, header);
     return true;
   };
+  if (skip_startup_logos && !edit("ui/startup/gen/startup.dtb", [&](auto& roots) {
+        return SkipStartupLogos(&roots, error);
+      })) return false;
   if (!edit(screen::kDefinitionRecord, [&](auto& roots) {
         const auto added = screen::EarlyDefinitionRoots();
         roots.insert(roots.end(), added.begin(), added.end());

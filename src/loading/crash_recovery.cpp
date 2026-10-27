@@ -13,7 +13,7 @@
 #endif
 
 REXCVAR_DEFINE_STRING(startup_mode, "normal", "Runtime",
-    "Startup: normal shows the splash screen and Press A to Start; fast starts the local user automatically.")
+    "Startup: normal shows startup logos and Press A to Start; fast skips both and starts the local user automatically.")
     .allowed({"normal", "fast"})
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
