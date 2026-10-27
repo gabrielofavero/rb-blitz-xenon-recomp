@@ -13,7 +13,7 @@
 //     the same read the R9 menu-music pool uses (src/fs/dlc_song_metadata.h). That covers
 //     manually installed content and every song of a merged pack, which no filename or purchase
 //     record can.
-//   * Building it touches every package, so it happens on a worker at boot. The details page
+//   * Building it touches every package, so it happens on a worker when the store opens. The details page
 //     queries the live index and shows Checking installed songs until that first pass finishes.
 //   * The comparison is the owner's deliberately simple one (plan §3.2): normalized artist and
 //     title, both required, exact after normalization - no fuzzy matching, no punctuation or

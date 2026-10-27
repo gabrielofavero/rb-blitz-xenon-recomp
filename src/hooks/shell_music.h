@@ -28,12 +28,13 @@ namespace rb_blitz::shell_music {
 // written.
 //
 // Call once from RbBlitzApp::OnPostLoadXexImage(), after dlc::Configure(): it reads the
-// bundled catalog and the library that layer just enumerated, preparing one random usable package.
+// bundled catalog and the library that layer just enumerated. One shuffled DLC package
+// prepares asynchronously; native Load selects from the songs ready at that point.
 // A small rolling cache is prepared during native cache loading and menu playback. With the toggle off
 // it leaves the title's tracks in control; the independent navigator can still move them.
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
 
-// The native cache-loading attempt starts host-only preparation. Guest polls
+// Startup starts host-only preparation; native cache loading also ensures it is running. Guest polls
 // publish at most one ready device without waiting for I/O. Close never joins.
 void StartQueuedPool();
 void PublishQueuedPool(bool during_loading = false);
@@ -53,15 +54,17 @@ std::string SelectedSongKey();
 // and the live channel captures a selection and returns its metadata key on press.
 //
 // `MenuMusicEnabled` is the setting's own value (the revived `general.dlc_menu_songs` row, read
-// from the settings store in Configure()), and `HasPool` is whether that setting produced a pool.
-// They differ when the setting is on but neither bundled songs nor DLC can be read
-// (a missing/damaged archive and no usable packages) - the unavailable state, and the reason
+// from the settings store in Configure()), and `HasPool` is whether that setting found
+// bundled songs or DLC candidates for asynchronous preparation.
+// They differ when the setting is on but the archive has no bundled songs and there are
+// no DLC candidates - the unavailable state, and the reason
 // the Play Current Song row is absent from a menu whose background music is the title's own.
 
 // Whether Background Music asked for the library pool this boot.
 bool MenuMusicEnabled();
 
-// True when this boot has a pool (the setting on and at least one bundled or DLC song).
+// True with the setting on and bundled songs or DLC candidates. An asynchronous
+// candidate may still fail; the press-time selection reports availability then.
 bool HasPool();
 
 // Discovered catalog songs in stable ID order, independent of mount residency.

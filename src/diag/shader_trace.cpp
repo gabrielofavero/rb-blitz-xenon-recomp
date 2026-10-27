@@ -53,6 +53,22 @@ void LogConfiguration() {
 }
 void ObserveScreen(std::string_view screen, std::string_view panel,
                    std::string_view focus, bool transitioning) {
+  // Small, always-on startup evidence for intermittent blank/blue boots. This
+  // observes native UI state only; it cannot establish that pixels rendered.
+  // Keep it independent of the expensive shader diagnostic switch.
+  static bool startup_finished = false;
+  static unsigned startup_budget = 16;
+  static std::string startup_context;
+  if (!startup_finished && startup_budget) {
+    const std::string context = std::string(screen) + "/" + std::string(panel) +
+                                (transitioning ? "/transition" : "/stable");
+    if (context != startup_context) {
+      startup_context = context;
+      --startup_budget;
+      REXLOG_INFO("startup: native UI {} focus={}", context, focus);
+    }
+    startup_finished = !transitioning && screen == "splash_screen" && panel == "splash_panel";
+  }
   if (!trace::Enabled())
     return;
   static std::string last_context;

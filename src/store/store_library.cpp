@@ -162,8 +162,9 @@ void InstallStoreLibrary(const std::filesystem::path& user_data_root) {
   SetDownloadedPredicate(
       [](const Offer& offer) { return IsDownloadedSong(offer.artist, offer.name); });
   TheWorker();  // start the thread now, so the first request only has to wake it
-  if (Settings()->enabled) RequestLibraryRefresh("boot");
-  REXLOG_INFO("store_library: the Downloaded mark is built from the loaded DLC packages' songs.dta");
+  // Opening every installed package competes with the guest's startup reads,
+  // even on a worker. The store front-menu request already starts this scan.
+  REXLOG_INFO("store_library: Downloaded index deferred until the store requests it");
 }
 
 void RequestLibraryRefresh(std::string_view why) {

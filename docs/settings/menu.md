@@ -42,6 +42,32 @@ always use the fast path regardless of this preference; only recovery shows an
 error popup. The preference is saved as `[general] startup = "normal" | "fast"`
 and applies on the next launch (`startup_mode` is its cvar).
 
+The installed Ultimate startup record puts **Ultimate Mods first**, then the regional
+Harmonix/ESRB entries, and sets `wait_for_splash FALSE`. Retail starts with Harmonix and
+uses `TRUE`. Normal preserves those provider records; their presence in the list does
+not mean every entry will be shown before the title advances.
+
+Startup music preparation no longer waits for a DLC package to mount. One shuffled
+package prepares in the background while boot continues; the native music Load chooses
+from bundled songs and any DLC ready then. A slow package falls back to ready bundled
+music (or the title's tracks if no bundled songs are readable). Native Start still owns
+when audio begins. The store's full-library Downloaded index waits until the store opens;
+its details page can show Checking installed songs until that first scan finishes.
+Fast/restart startup also guards the native splasher's empty list: retail otherwise treats
+the list sentinel as a scene and calls address zero. The guards preserve the worker's
+state/event handshake and only bypass loading, polling and advancing a nonexistent scene.
+
+Measured 2026-10-26 with copied settings/saves/caches, Ultimate, Vulkan, 2560×1080 rendering
+and a 1280×540 test window: the title was current about 6 s after logging started and
+music samples advanced at about 8 s. Fast completed automatically to the main menu;
+its 1,777-package native content pass still took 47.4 s (3,554 successful items across
+two batches, no metadata reads), including 1.1 s of graphics preparation. This remaining
+frame-paced walk has not been optimized here. Evidence: `out/startup-inspect/live/`,
+especially `normal-final.log`, `fast-fixed.log`, and `fast-fixed-menu.png`. The intermittent
+blue screen was not reproduced. Ordinary logs now record early native UI transitions
+and the interval from music Load to Start. The release build and 15 related host tests pass,
+including blocked startup I/O and the empty/nonempty native splash-list regressions.
+
 Shortcut preferences remain reachable with an empty song library, disabled cache, or disabled
 store. Captions explain unmet dependencies and restart requirements. Unlock Full Game is marked
 Unavailable outside the Demo; Download Content is marked Unavailable in the Demo, following

@@ -741,7 +741,8 @@ bool SkipStartupLogos(std::vector<Node>* roots, std::string* why) {
     return false;
   }
   // Clear the complete list, including regional directives and provider logos.
-  // Keeping the key lets the native splasher finish through its empty-list path.
+  // startup_splasher.cpp guards the native scene operations on this empty list;
+  // retail otherwise dereferences its sentinel as the first scene.
   order->kids.resize(1);
   wait->kids[1] = Node::Symbol("FALSE");
   return true;

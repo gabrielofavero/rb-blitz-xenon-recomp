@@ -4,6 +4,7 @@
 // Inclusion makes its private owner state available without a shipping test API.
 #include "check.h"
 #include <fstream>
+#include <future>
 #include "../src/hooks/shell_music.cpp"
 
 namespace {
@@ -21,6 +22,7 @@ bool native_pause_works = true;
 bool native_resume_works = true;
 unsigned pause_calls = 0, resume_calls = 0;
 std::string loaded;
+std::function<void()> mount_gate;
 void Store(uint8_t* base, uint32_t address, uint32_t value) {
   rex::memory::store_and_swap<uint32_t>(base + address, value);
 }
@@ -64,7 +66,10 @@ std::vector<std::filesystem::path> LibraryPackagePaths() { return {}; }
 }
 namespace rb_blitz::fs {
 std::unique_ptr<rex::filesystem::Device> MountPackage(
-    const std::string&, const std::filesystem::path&, std::error_code&) { return {}; }
+    const std::string&, const std::filesystem::path&, std::error_code&) {
+  if (mount_gate) mount_gate();
+  return {};
+}
 std::vector<shell_music::SongMetadata> ReadDeviceSongMetadata(rex::filesystem::Device&) { return {}; }
 }
 
@@ -691,7 +696,45 @@ void TestBundledMusic(const std::filesystem::path& game = {}) {
   loads = starts = stops = destroys = polls = 0;
 }
 
+void TestAsyncStartup(bool bundled) {
+  using namespace rb_blitz::shell_music;
+  using namespace std::chrono_literals;
+  rb_blitz::test::BeginCase("a blocked startup mount cannot block native music Load or close");
+  auto entered = std::make_shared<std::promise<void>>();
+  auto release = std::make_shared<std::promise<void>>();
+  auto released = release->get_future().share();
+  auto started = entered->get_future();
+  mount_gate = [entered, released] { entered->set_value(); released.wait(); };
+  g_enabled = g_menu_music_enabled = true;
+  g_navigation_enabled = false;
+  g_buffers = {kPath};
+  g_packages = {"blocked-startup-package"};
+  if (bundled) g_session.Discover(kBasePackage, {{"", "songs/base/base", "BundledSong"}});
+  StartQueuedPool();
+  CHECK_TRUE(started.wait_for(5s) == std::future_status::ready);
+  CHECK_EQ(g_next_package, 1u);
+  CHECK_TRUE(g_session.Playlist().empty());
+  CHECK_TRUE(HasPool());
+  std::array<uint8_t, 65536> memory{};
+  PPCContext ctx{};
+  ctx.r1.u32 = 0xF000; ctx.r3.u32 = kMusic; ctx.r4.u32 = 0x2000; ctx.r31.u64 = 0xABCDEF;
+  std::strcpy(reinterpret_cast<char*>(memory.data() + ctx.r4.u32), kTitleTracks[0]);
+  sub_82757F50(ctx, memory.data());
+  CHECK_EQ(loads, 1u);
+  CHECK_EQ(starts, 0u); // the native splash still owns playback timing
+  CHECK_TRUE(loaded == (bundled ? "songs/base/base" : kTitleTracks[0]));
+  CHECK_TRUE(g_waiting_for_pool == !bundled);
+  CHECK_EQ(g_cache.Size(), 0u);
+  CloseQueuedPool(); // must return while the worker is still blocked
+  release->set_value();
+}
+
 int main(int argc, char** argv) {
+  if (argc == 2 && (std::string_view(argv[1]) == "--startup-blocked" ||
+                    std::string_view(argv[1]) == "--startup-no-base")) {
+    TestAsyncStartup(std::string_view(argv[1]) == "--startup-blocked");
+    return rb_blitz::test::Finish();
+  }
   if (argc == 2) {
     TestBundledMusic(argv[1]);
     return rb_blitz::test::Finish();

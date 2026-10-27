@@ -124,6 +124,7 @@ set(RBBLITZ_SOURCES
     # running game (today `graphics.vsync` -> the SDK's own `vsync`, the call R7 already measured).
     src/hooks/hot_apply_runtime.cpp
     src/hooks/shell_music.cpp
+    src/hooks/startup_splasher.cpp
     src/hooks/song_sort.cpp
     src/hooks/midi_tracks.cpp
     src/hooks/menu_music_metadata.cpp
@@ -1005,6 +1006,13 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_menu_music_runtime_tests PRIVATE src)
     target_link_libraries(rb_blitz_menu_music_runtime_tests PRIVATE rex::runtime)
     add_test(NAME menu_music_runtime COMMAND rb_blitz_menu_music_runtime_tests)
+    add_executable(rb_blitz_startup_splasher_tests tests/startup_splasher_tests.cpp)
+    target_include_directories(rb_blitz_startup_splasher_tests PRIVATE src)
+    target_link_libraries(rb_blitz_startup_splasher_tests PRIVATE rex::runtime)
+    add_test(NAME startup_splasher COMMAND rb_blitz_startup_splasher_tests)
+    add_test(NAME menu_music_startup_blocked COMMAND rb_blitz_menu_music_runtime_tests --startup-blocked)
+    add_test(NAME menu_music_startup_no_base COMMAND rb_blitz_menu_music_runtime_tests --startup-no-base)
+    set_tests_properties(menu_music_startup_blocked menu_music_startup_no_base PROPERTIES TIMEOUT 15)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game/gen/main_xbox.hdr")
         add_test(NAME menu_music_runtime_base_game COMMAND rb_blitz_menu_music_runtime_tests
                  "${CMAKE_CURRENT_SOURCE_DIR}/game")

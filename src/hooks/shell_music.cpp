@@ -1002,6 +1002,11 @@ void ApplyNavigatorCommand(uint8_t* base, PPCContext& ctx, uint32_t music) {
 // music pool's - is left exactly as it is.
 void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
   const auto requested = ctx.r4.u32 ? rex::memory::GuestPtr<const char*>(base, ctx.r4.u32) : nullptr;
+  // Take a completed startup mount without waiting for it. A cold/slow DLC
+  // package must never hold the splash screen behind disk I/O. Selection is
+  // delayed until this native Load so ready DLC can join the bundled songs.
+  if (requested && std::strncmp(requested, kShellMusicPrefix, kShellMusicPrefixSize) == 0)
+    rb_blitz::shell_music::PublishQueuedPool(true);
   if (g_navigation_enabled && requested && std::strncmp(requested, kShellMusicPrefix, kShellMusicPrefixSize) == 0) {
     FinishNavigator(nav::CompletionStatus::kCancelled, "native source changed");
     g_nav_paused_stream = 0;
@@ -1031,7 +1036,7 @@ void SubstituteFilename(uint8_t* base, PPCContext& ctx) {
       g_pos = 0;
     }
   }
-  if (!g_enabled || g_session.Sources().empty() || g_buffers.empty()) {
+  if (!g_enabled || g_buffers.empty()) {
     return;
   }
   const uint32_t filename = ctx.r4.u32;
@@ -1146,7 +1151,7 @@ ui::music::ArtRead ReadArtwork(const ui::music::ArtTag& tag, std::vector<uint8_t
 
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
   (void)game_data_root;
-  REXLOG_INFO("shell_music: rolling session: one startup package, {} upcoming and {} recent "
+  REXLOG_INFO("shell_music: rolling session: async startup package, {} upcoming and {} recent "
               "songs warm, at most {} resident packages",
               rb_blitz::shell_music::MusicSession::kAhead,
               rb_blitz::shell_music::MusicSession::kBehind,
@@ -1225,16 +1230,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // Failed/art-only packages are skipped in this same order; no alphabetic prefix,
   // remembered last choice or deterministic per-boot seed biases the first mount.
   std::shuffle(g_packages.begin(), g_packages.end(), g_rng);
-  while (g_next_package < g_packages.size()) {
-    const size_t index = g_next_package++;
-    auto prepared = PreparePackage(g_packages[index], index);
-    if (prepared) {
-      PublishPackage(*prepared);
-      break;  // the initial plan may consist entirely of bundled songs
-    }
-  }
-
-  if (g_session.Sources().empty()) {
+  if (g_session.Sources().empty() && g_packages.empty()) {
     REXLOG_WARN("shell_music: no bundled or DLC song is playable; the main menu keeps the title's own "
                 "tracks");
     g_enabled = false;
@@ -1251,19 +1247,15 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   }
 
   if (g_next_package == g_packages.size()) g_session.DiscoveryComplete();
-  g_session.PlanAhead(g_rng);
   g_watch = g_watch_title = false;
   g_attempts = 0;
   g_playing_name.clear();
-  REXLOG_INFO("shell_music: startup pool ready in {} ms: {} song(s), {} mounted package(s) "
-              "of {}; rolling preparation begins during native cache loading",
+  REXLOG_INFO("shell_music: startup metadata ready in {} ms: {} bundled song(s), {} mounted package(s) "
+              "of {}; first DLC preparation is asynchronous; selection waits for native Load",
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::steady_clock::now() - pool_start).count(),
               g_session.Sources().size(), g_cache.Size(), packages.size());
-  for (const auto& planned : g_session.Playlist()) {
-    const auto& entry = g_session.Sources()[planned.song];
-    REXLOG_INFO("shell_music: startup {}.mogg", SourcePath(entry));
-  }
+  StartQueuedPool();
 }
 
 bool MenuMusicEnabled() { return g_menu_music_enabled; }
@@ -1279,7 +1271,13 @@ void StartQueuedPool() {
     failed.index = index;
     return failed;  // failures still retire the demand request and discovery slot
   });
-  SchedulePreparationLocked();
+  // Before the first Load, prepare just one shuffled DLC package and leave the
+  // playlist uncommitted. No second package is requested until the guest polls.
+  if (g_session.Playlist().empty() && g_next_package < g_packages.size()) {
+    if (g_queue.Request(g_next_package)) ++g_next_package;
+  } else {
+    SchedulePreparationLocked();
+  }
   REXLOG_INFO("shell_music: rolling preparation started; bounded demand worker, no fixed song cap");
 }
 
@@ -1313,7 +1311,7 @@ std::string SelectedSongKey() {
 
 bool HasPool() {
   std::lock_guard<std::mutex> lock(g_mutex);
-  return g_enabled && !g_session.Sources().empty();
+  return g_enabled && (!g_session.Sources().empty() || !g_packages.empty());
 }
 
 std::vector<std::string> PoolSongNames() {
@@ -1457,6 +1455,9 @@ extern "C" REX_FUNC(sub_82758B98) {
         // interval to decoding falsely rejects the boot song on a slow boot.
         // Repeated Start calls on the same playing stream must not reset it.
         if (!g_playback.active()) {
+          REXLOG_INFO("shell_music: native Start {} ms after Load for '{}' (stream {:08X})",
+                      MillisecondsSince(g_track_started_at), g_playing_name,
+                      LoadBe32(base, music + kStreamOffset));
           g_playback.Begin(NowMs());
           g_track_started_at = g_heartbeat_at = std::chrono::steady_clock::now();
         }
