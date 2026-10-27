@@ -161,6 +161,8 @@ Value ServiceSink::CurrentValue(const SettingId id) const {
     return staged->second;
   }
   if (!service_) return Value{};
+  if (const auto baseline = menu_baseline_.find(id); baseline != menu_baseline_.end())
+    return baseline->second;
   // Keep Auto selected in the menu while boot uses its resolved pixel dimensions.
   if (id == SettingId::kResolution && !service_->IsOverridden(id) &&
       IsAutoResolution(service_->RequestedValue(id))) return service_->RequestedValue(id);
@@ -334,9 +336,44 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       // transaction touched; the values are ours to compare. The *token spelling the guest used* is
       // kept too, so the log line and the hot-apply lookup see the screen's own name
       // ("general.dlc_menu_songs") rather than a second spelling of it.
-      staged_base_.insert({id, service_->EffectiveValue(id)});
+      staged_base_.insert({id, CurrentValue(id)});
       staged_token_[id] = member ? "interface.hidden_main_menu" : request.setting;
       staged_[id] = std::move(value);
+      // Refresh Songs has one visible preference. Clear the competing legacy hide-list bit in
+      // the same transaction, preserving every other hidden row (including legacy defaults).
+      if (id == SettingId::kRefreshMusicLibrary && refresh_owns_dlc_row_) {
+        Value hidden = CurrentValue(SettingId::kHiddenMainMenu);
+        hidden.kind = ValueKind::kList;
+        std::erase(hidden.list, "splash_dlc");
+        const auto valid_hidden = service_->Set(txn_, SettingId::kHiddenMainMenu, hidden,
+                                               service_->capability_revision());
+        if (!valid_hidden.ok) {
+          status = Status::kInvalid;
+          response.message = valid_hidden.reason_key;
+          break;
+        }
+        staged_base_.insert({SettingId::kHiddenMainMenu, CurrentValue(SettingId::kHiddenMainMenu)});
+        staged_token_[SettingId::kHiddenMainMenu] = "interface.hidden_main_menu";
+        staged_[SettingId::kHiddenMainMenu] = std::move(hidden);
+      }
+      // A saved explicit list remains authoritative even when it happens to equal the old
+      // compiled defaults. Keep the legacy master in sync rather than exposing another switch.
+      if (id == SettingId::kHiddenMainMenu ||
+          (id == SettingId::kRefreshMusicLibrary && refresh_owns_dlc_row_)) {
+        Value master;
+        master.kind = ValueKind::kBool;
+        master.boolean = true;
+        const auto valid_master = service_->Set(txn_, SettingId::kHideMainMenu, master,
+                                               service_->capability_revision());
+        if (!valid_master.ok) {
+          status = Status::kInvalid;
+          response.message = valid_master.reason_key;
+          break;
+        }
+        staged_base_.insert({SettingId::kHideMainMenu, CurrentValue(SettingId::kHideMainMenu)});
+        staged_token_[SettingId::kHideMainMenu] = "interface.hide_main_menu";
+        staged_[SettingId::kHideMainMenu] = master;
+      }
       response.message = "staged";
       break;
     }
@@ -453,6 +490,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       // The session's own record is cleared only *after* it is read: `staged_base_` is the value
       // each row held before the edit, and it is what tells a real change from a write-back.
       if (service_ != nullptr && (result.status == CommitStatus::kSaved || result.status == CommitStatus::kPartial)) {
+        for (const auto& [id, value] : staged_) menu_baseline_.erase(id);
         for (const auto& entry : service_->last_commit_changes()) {
           const auto base = staged_base_.find(entry.first);
           if (base != staged_base_.end() && ValueEquals(base->second, entry.second)) {
@@ -749,6 +787,21 @@ bool ServiceSink::Get(const std::string_view setting, WireValue* out) const {
 
 void ServiceSink::SeedLocal(std::string token, WireValue value) {
   local_[std::move(token)] = std::move(value);
+}
+
+void ServiceSink::SeedMenuVisibility(std::vector<std::string> hidden, bool refresh_visible,
+                                    bool refresh_owns_dlc_row) {
+  refresh_owns_dlc_row_ = refresh_owns_dlc_row;
+  Value selection;
+  selection.kind = ValueKind::kList;
+  selection.list = std::move(hidden);
+  // Preserve the legacy refresh bit until the refresh preference itself is edited. Editing
+  // another shortcut must not accidentally reveal a refresh entry hidden by an older config.
+  menu_baseline_[SettingId::kHiddenMainMenu] = std::move(selection);
+  Value refresh;
+  refresh.kind = ValueKind::kBool;
+  refresh.boolean = refresh_visible;
+  menu_baseline_[SettingId::kRefreshMusicLibrary] = refresh;
 }
 
 bool ServiceSink::GetLocal(const std::string_view token, WireValue* out) const {

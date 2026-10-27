@@ -44,6 +44,12 @@ Load Guard's Off/30s/60s policy now feeds the external deadline, and a one-shot
 30/60-second reason selects the corresponding native timeout message instead of
 the crash message. The stable-menu and once-only presentation gates are shared.
 
+**Settings restarts (2026-10-26):** the validated restart handoff enables the same
+short boot: select the local user and start discovery automatically, skipping
+the splash confirmation and offline prompts. Only crash/timeout recovery shows
+an error popup. The offline-prompt bypass lasts for this boot and leaves the
+saved setting editable; ordinary launches still use the saved preference.
+
 ## Sources
 
 | Part | Original document | Status |
@@ -1316,7 +1322,7 @@ trial flag now only requests per-second diagnostics. The guest row shows binding
 Host production-hook tests
 cover navigation, cold targets, history/restart, automatic snapshots, title tracks and
 cancellation; title-only live pause, media-device attribution, guest layout and physical-pad input remain
-unproven. P3 implements footer/player/artwork (§9 below); live visual and mouse acceptance
+unproven. P3 implements player/artwork (§9 below); live visual and mouse acceptance
 remains pending. See the
 [P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §§14 and 17 and
 `out/_swap/music-nav/p2-runtime/` for verification.
@@ -1332,31 +1338,23 @@ Seven music host tests pass; the owner retest remains pending. See the
 [navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §15.
 
 
-### 9. Navigator P3: footer, player and local covers (2026-10-26)
+### 9. Navigator P3: player and local covers (2026-10-26)
 
-The default-on switch gates the guest’s own footer and an independent bottom-right host player.
-The owner’s first P3 test confirmed the player mostly works and that the cover is visible live,
-although their capture shows the fallback. They requested the search interface’s Blitz styling,
-a lower position, no hover text, and native footer prompts. Those corrections supersede the
-initial host-drawn shoulder labels and blue player design.
+The default-on switch gates an independent bottom-right host player. The owner confirmed the
+player mostly works and the cover is visible live. Their latest review removes all LB/RB footer
+additions: the retail A/B widgets retain their original actions and layout. No native spacing or
+transform edit, footer locale token, availability query or host footer drawing remains.
 
-`AddNativeMusicFooter` extends the authored splash panel with a guest poll and a boolean latch.
-`rbbz-play/footer` reports the navigator’s main-menu/list/source and modal/loading availability;
-it never posts a transport command. On availability changes, the panel uses the existing
-`continue.ihp` and `back.ihp` widgets’ native `set_action_token`/`clear_action_token` methods.
-Previous/PageUp is inserted before Confirm on the first widget, and Next/PageDown after Cancel
-on the second, giving **LB Previous / A Select / B Back / RB Next** in guest glyphs and type.
-The new locale tokens are authored alongside the menu records. Unavailable/exit removes only the
-shoulder actions and preserves A/B; the setting-off boot adds no footer hook. Native inspection
-verified `InlineHelp::SetActionToken` (`0x824DABE8`) updates/appends and refreshes, while
-`ClearActionToken` (`0x824D9F20`) erases and refreshes. No host footer is drawn.
+The owner also reports RB Next crashes. The current log reaches the successor load before a
+guest read of `0x4`, without a stack. A bounded first-chance trace now captures near-null guest
+faults, host frames and the active ShellMusic stage/context, without handling the exception.
+The crash remains unresolved; see the [navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §21.
 
-`menu_music_player.cpp` uses the existing search keyboard theme directly: bold/condensed fonts,
-dark translucent background, layered red rails/glow, pale text and red hover/pressed controls.
-The panel’s bottom inset is 24 reference pixels at 720p, alongside the footer’s right margin.
-It keeps the square cover, UTF-8-safe ellipsis and transport icons, with no hover tooltips.
-Its independent dialog still draws with Settings Labels off. The lowered theme and native footer
-need the owner’s next live check, including small-window/DPI overlap and glyph spacing.
+The player keeps the search interface’s bold/condensed fonts, but the owner’s second review
+replaces its prominent popup treatment with a black translucent panel, dark-gray transport
+buttons, and no border or glow. The bottom inset stays 24 reference pixels at 720p. It retains
+square artwork, UTF-8-safe ellipsis, transport icons and hover/pressed color feedback, without
+hover text. The independent dialog still draws with Settings Labels off.
 
 The UI copies `NowPlayingSnapshot` and posts `kPlayer` commands with the observed session epoch.
 It never reads guest memory or calls native transport. A pending indicator means accepted work;

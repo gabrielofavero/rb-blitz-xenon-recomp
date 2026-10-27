@@ -505,7 +505,37 @@ void TestRendererSelectionSurvivesCommitAndReload() {
 
 }  // namespace
 
+void TestMenuVisibilityBaselineAndRefresh() {
+  BeginCase("visibility starts from runtime filtering and saves one refresh preference atomically");
+  Harness h;
+  h.sink.SeedMenuVisibility({"splash_leaderboard", "splash_achievements", "splash_dlc"}, false, true);
+  CHECK_TRUE(h.Holds("interface.hidden_main_menu.splash_leaderboard", WireValue::Bool(true)));
+  CHECK_TRUE(h.Holds("general.refresh_music_library", WireValue::Bool(false)));
+  // Editing another entry must preserve the older refresh hide bit.
+  CHECK_TRUE(h.Send("rbbz-settings/set/interface.hidden_main_menu.splash_leaderboard/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.Holds("interface.hidden_main_menu.splash_dlc", WireValue::Bool(true)));
+  CHECK_TRUE(h.Holds("general.refresh_music_library", WireValue::Bool(false)));
+  CHECK_TRUE(h.Send("rbbz-settings/set/general.refresh_music_library/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.Holds("general.refresh_music_library", WireValue::Bool(true)));
+  CHECK_TRUE(h.Holds("interface.hidden_main_menu.splash_dlc", WireValue::Bool(false)));
+  CHECK_TRUE(h.Holds("interface.hidden_main_menu.splash_achievements", WireValue::Bool(true)));
+  Service again(h.paths);
+  again.Boot(nullptr, PathEntry{}, nullptr, true);
+  CHECK_TRUE(again.EffectiveValue(SettingId::kRefreshMusicLibrary).boolean);
+  CHECK_TRUE(again.EffectiveValue(SettingId::kHideMainMenu).boolean);
+  const auto hidden = again.EffectiveValue(SettingId::kHiddenMainMenu).list;
+  CHECK_TRUE(hidden == std::vector<std::string>({"splash_achievements"}));
+  // Hiding the RhythmVerse shortcut leaves store access enabled.
+  CHECK_TRUE(h.Send("rbbz-settings/set/interface.hidden_main_menu.rbbz_rhythmverse/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kRhythmVerse).boolean);
+  CHECK_TRUE(h.Holds("interface.hidden_main_menu.rbbz_rhythmverse", WireValue::Bool(true)));
+}
+
 int main() {
+  TestMenuVisibilityBaselineAndRefresh();
   TestTextFormEditsTheRealStore();
   TestFramedFormCarriesTheRequestId();
   TestNoOpCommitReportsNothing();

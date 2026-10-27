@@ -66,6 +66,8 @@
 
 #if defined(_WIN32)
 
+#include <windows.h>
+
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table. Both are read here: the
 // first is the carrier of the in-game "DLC Menu Songs" row (the boot writes the row into it at the
 // config rank), and the second is the retired pool-size row, read only to say it is ignored.
@@ -90,6 +92,57 @@ REX_EXTERN(sub_823E3FD8);         // StandardStream::Stop: pause channels, state
 REX_EXTERN(__imp__sub_823E4808);  // StandardStream::Play: resume channels, state 5 -> 3
 
 namespace {
+
+// Keep the actual context, including scratch contexts used during a handoff,
+// available to the first-chance logger. This observes faults; it never handles
+// one or attempts to continue a damaged stream.
+struct MusicFaultScope {
+  static inline thread_local MusicFaultScope* current = nullptr;
+  PPCContext& context;
+  uint8_t* base;
+  const char* stage;
+  MusicFaultScope* previous;
+  MusicFaultScope(PPCContext& ctx, uint8_t* memory, const char* name)
+      : context(ctx), base(memory), stage(name), previous(current) { current = this; }
+  ~MusicFaultScope() { current = previous; }
+};
+
+std::atomic<uintptr_t> g_music_fault_base{0};
+
+LONG CALLBACK LogMusicFault(EXCEPTION_POINTERS* info) {
+  const auto* scope = MusicFaultScope::current;
+  if (!info || !info->ExceptionRecord ||
+      info->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION ||
+      info->ExceptionRecord->NumberParameters < 2) return EXCEPTION_CONTINUE_SEARCH;
+  const auto address = uintptr_t(info->ExceptionRecord->ExceptionInformation[1]);
+  const auto base = scope ? reinterpret_cast<uintptr_t>(scope->base)
+                          : g_music_fault_base.load(std::memory_order_relaxed);
+  if (!base || address < base || address - base >= 0x100000) return EXCEPTION_CONTINUE_SEARCH;
+  static std::atomic<unsigned> faults{0};
+  if (faults.fetch_add(1, std::memory_order_relaxed) >= 8) return EXCEPTION_CONTINUE_SEARCH;
+  REXLOG_ERROR("music_nav: fault stage={} guest={:08X} rip={:X} module={:X}",
+               scope ? scope->stage : "outside ShellMusic", uint32_t(address - base),
+               reinterpret_cast<uintptr_t>(info->ExceptionRecord->ExceptionAddress),
+               reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)));
+  if (scope) {
+    const auto& ctx = scope->context;
+    REXLOG_ERROR("music_nav: fault lr={:08X} sp={:08X} r3={:08X} r4={:08X} "
+                 "r11={:08X} r30={:08X} r31={:08X}",
+                 uint32_t(ctx.lr), ctx.r1.u32, ctx.r3.u32, ctx.r4.u32,
+                 ctx.r11.u32, ctx.r30.u32, ctx.r31.u32);
+  }
+  void* frames[24]{};
+  const auto count = RtlCaptureStackBackTrace(1, 24, frames, nullptr);
+  for (USHORT i = 0; i < count; ++i)
+    REXLOG_ERROR("music_nav: fault frame {} {:X}", i, reinterpret_cast<uintptr_t>(frames[i]));
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void CallMusicGuest(void (*function)(PPCContext&, uint8_t*), PPCContext& ctx,
+                    uint8_t* base, const char* stage) {
+  const MusicFaultScope scope(ctx, base, stage);
+  function(ctx, base);
+}
 
 // The pool's bookkeeping lives in a header of its own so it can be tested without the SDK
 // (tests/menu_music_pool_tests.cpp): the sample and the rotation are host logic, not hooks.
@@ -503,13 +556,13 @@ void RetireStreamOnGuest(uint8_t* base, PPCContext& parent, uint32_t music) {
     destroy.r3.u32 = old_stream;
     destroy.r4.u32 = 1;
     const uint32_t destructor = LoadBe32(base, LoadBe32(base, old_stream));
-    rex::runtime::ResolveIndirectFunction(destructor)(destroy, base);
+    CallMusicGuest(rex::runtime::ResolveIndirectFunction(destructor), destroy, base, "retire");
   }
   std::memset(rex::memory::GuestPtr<uint8_t*>(base, music + kStreamOffset), 0, 4);
   PPCContext stop(parent);
   stop.r1.u32 -= 0x100;
   stop.r3.u32 = music;
-  __imp__sub_827583F8(stop, base);
+  CallMusicGuest(__imp__sub_827583F8, stop, base, "stop streams");
 }
 
 // Hand `path` to the same ShellMusic the menu is polling, with the Load arguments the panel chose
@@ -536,12 +589,12 @@ void LoadOnGuest(uint8_t* base, PPCContext& parent, uint32_t music, uint32_t buf
   call.f1.f64 = g_gain;              // volume, the one the panel passed
   call.r6.u64 = g_scale_pan;         // preserve the panel's pan scaling
   call.r7.u64 = loop ? 1 : 0;        // the panel's own loop flag (Load stores it at +48)
-  __imp__sub_82757F50(call, base);
+  CallMusicGuest(__imp__sub_82757F50, call, base, "load");
   *rex::memory::GuestPtr<uint8_t*>(base, music + 48) = loop ? 1 : 0;  // same field, read back
   PPCContext start(parent);
   start.r1.u32 -= 0x100;
   start.r3.u32 = music;
-  __imp__sub_82758B98(start, base);
+  CallMusicGuest(__imp__sub_82758B98, start, base, "start");
   {
     std::lock_guard lock(g_mutex);
     g_stream_song = !loop && g_pending_index >= 0 ? size_t(g_pending_index)
@@ -1018,6 +1071,13 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   //
   // The read happens once, on this host thread; no guest thread ever touches the cvar registry.
   g_navigation_enabled = REXCVAR_GET(enhancements_background_music_nav);
+  g_music_fault_base.store(g_navigation_enabled && runtime && runtime->memory()
+      ? reinterpret_cast<uintptr_t>(runtime->memory()->virtual_membase()) : 0,
+      std::memory_order_relaxed);
+  if (g_music_fault_base.load(std::memory_order_relaxed)) {
+    static const auto handler = AddVectoredExceptionHandler(1, LogMusicFault);
+    REXLOG_INFO("music_nav: native fault trace {}", handler ? "installed" : "unavailable");
+  }
   g_nav_pause_trace = REXCVAR_GET(background_music_nav_pause_trial);
   g_nav_paused_stream = 0;
   g_nav_epoch = rb_blitz::shell_music::NowPlaying().Reset();
@@ -1181,15 +1241,6 @@ int CurrentPoolIndex() {
 bool AnswerPlayQuery(const std::string_view path, bool* answer) {
   if (!path.starts_with(rb_blitz::shell_music::kPlayNamespace)) {
     return false;
-  }
-  if (path == "rbbz-play/footer") {
-    const auto snapshot = NowPlaying().ReadSnapshot();
-    if (answer) *answer = g_navigation_enabled && snapshot.available &&
-        snapshot.playback.track.source != MusicSource::kNone &&
-        rb_blitz::input::MainMenuMusicInputAvailable() &&
-        !rb_blitz::input::capture::Armed() && !rex::kernel::xam::xeXamIsUIActive() &&
-        !rb_blitz::graphics::GraphicsLoadingPending();
-    return true;
   }
   if (path == "rbbz-play/next" || path == "rbbz-play/previous" || path == "rbbz-play/pause") {
     const auto command = path == "rbbz-play/next" ? nav::Command::kNext :
@@ -1362,6 +1413,7 @@ extern "C" REX_FUNC(sub_827583F8) {
 // Poll observes one-shot completion before the guest's Ready/Play branch. Stop and
 // destruction are handled separately, so a screen transition cannot advance the deck.
 extern "C" REX_FUNC(sub_827586D8) {
+  const MusicFaultScope fault_scope(ctx, base, "poll");
   rb_blitz::shell_music::PublishQueuedPool();
   if (auto* settings = rb_blitz::settings::boot::SettingsBoot::Current()) settings->MenuFrame();
   // R7's refreshed DLC library is handed to the content manager here, and this is the

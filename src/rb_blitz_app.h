@@ -308,11 +308,15 @@ class RbBlitzApp : public rex::ReXApp {
   // logging is up and the guest has not started yet.
   void OnPostLoadXexImage() override {
     LogBootIdentity();
+    // The bootstrap has already validated this handoff and waited for the parent.
+    for (const auto& argument : rb_blitz::platform::CommandLineArguments()) {
+      if (rb_blitz::platform::IsHandoffSwitch(argument)) settings_restart_boot_ = true;
+    }
     rb_blitz::enhancements::LogToggles();
     // R5 reads its own cvars here, before the guest starts: the read hook that
     // applies the menu filter runs on guest threads and must not touch the
     // registry, so the toggle and the row list are captured once (P1's D7).
-    rb_blitz::menu_filter::Configure();
+    rb_blitz::menu_filter::Configure(settings_restart_boot_);
     rb_blitz::local_save::Configure(runtime());
     rb_blitz::ultimate::Configure(runtime(), game_data_root());
     // After ultimate::Configure, which decides what the guest-visible game tree
@@ -428,7 +432,7 @@ class RbBlitzApp : public rex::ReXApp {
     // player cannot change has to say so rather than save a value that never takes effect.
     rex::cvar::FinalizeInit();
     rb_blitz::loading::ConfigureLoadTrace();
-    rb_blitz::loading::ConfigureCrashRecovery(runtime());
+    rb_blitz::loading::ConfigureCrashRecovery(runtime(), settings_restart_boot_);
     rb_blitz::graphics::ConfigureLoading(runtime());
     coverage_recorder_ = rb_blitz::graphics::StartDevelopmentCoverage(
         rex::filesystem::GetExecutablePath(),runtime()->cache_root());
@@ -620,6 +624,7 @@ class RbBlitzApp : public rex::ReXApp {
   // The backend this boot really loaded, when it named one (empty when the SDK chose). Reported by
   // the settings store as the active renderer.
   std::string selected_backend_;
+  bool settings_restart_boot_ = false;
   std::unique_ptr<rb_blitz::platform::ChildLauncher> restart_launcher_ =
       rb_blitz::platform::CreateChildLauncher();
   rb_blitz::platform::RestartCoordinator restart_coordinator_{restart_launcher_.get()};

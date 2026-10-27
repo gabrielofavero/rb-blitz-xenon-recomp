@@ -8,6 +8,7 @@
 #include "ui/settings_screen.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <initializer_list>
 #include <iterator>
@@ -594,15 +595,16 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_keyboard_mouse_pause_powerup_panel", "PAUSE & POWER-UP"},
       {"settings_listen_panel", "ASSIGN INPUT"},
       {"settings_general_panel", "GENERAL"},
-      {"settings_target_panel", "TARGET"},
-      {"settings_dlc_panel", "DOWNLOADABLE CONTENT"},
-      {"settings_dlc_menu_panel", "DLC MENU MUSIC"},
+      {"settings_target_panel", "GAME EDITION"},
+      {"settings_dlc_panel", "SONG LIBRARY"},
       {"settings_rhythmverse_panel", "RHYTHMVERSE"},
       {"settings_music_library_store_panel", "MUSIC LIBRARY & STORE"},
       {"settings_rhythmverse_filter_panel", "RHYTHMVERSE FILTERS"},
       {"settings_achievements_panel", "ACHIEVEMENTS & UNLOCKS"},
       {"settings_interface_panel", "INTERFACE"},
       {"settings_main_menu_panel", "MAIN MENU"},
+      {"settings_main_menu_base_panel", "BASE GAME ITEMS"},
+      {"settings_main_menu_extra_panel", "EXTRA ITEMS"},
       {"settings_hud_panel", "HUD"},
       {"settings_hud_elements_panel", "HUD ELEMENTS"},
       {"settings_av_panel", "AUDIO/VIDEO"},
@@ -706,7 +708,7 @@ std::vector<PanelSpec> AllPanels() {
                               RouteRow("calibration", "cal_welcome_screen", "cancel_screen", "",
                                        "Line up the audio and video so notes hit in time with the music."),
                               SubmenuRow("settings_general", "settings_general_screen", "General",
-                                         "Target, interface, downloadable content, achievements, and credits."),
+                                         "Game edition, interface, song library, achievements, recovery, and credits."),
                               SubmenuRow("controls", "settings_controls_screen", "",
                                          "Choose the devices and the controller mappings that play the game."),
                               SubmenuRow("audio_video_options", "settings_av_screen", "",
@@ -984,20 +986,23 @@ std::vector<PanelSpec> AllPanels() {
                                       "after a short countdown."),
                           }});
 
-  // 1. General: the edition, the interface page, downloadable content, achievements, and credits.
+  // General: six entries, with recovery independent of song-library settings.
   out.push_back(PanelSpec{"settings_general_panel", "settings_general_screen", kRootScreen,
                           MenuPanels(),
                           {
-                              SubmenuRow("settings_target", "settings_target_screen", "Target",
+                              SubmenuRow("settings_target", "settings_target_screen", "Game Edition",
                                          "Choose which edition starts: Rock Band Blitz, Ultimate, or the Demo."),
                               SubmenuRow("settings_interface", "settings_interface_screen", "Interface",
                                          "Main-menu visibility and the settings caption."),
                               SubmenuRow("settings_dlc", "settings_dlc_screen",
-                                         "Downloadable Content",
-                                         "Scanning and caching options for your downloadable-content library."),
+                                         "Song Library",
+                                         "Song scanning, caching, and RhythmVerse store settings."),
                               SubmenuRow("settings_achievements", "settings_achievements_screen",
                                          "Achievements & Unlocks",
                                          "Achievement notifications and content unlocks."),
+                              SelectRow("settings_load_guard", "general.load_guard", "Load Guard",
+                                        "Restart to the main menu if a song takes too long to load. Unsaved progress may be lost.",
+                                        Choices({"off", "Off", "30s", "30s", "60s", "60s"})),
                               RouteRow("credits", "credits_screen", "back_screen", "",
                                        "View the game's credits."),
                           }});
@@ -1019,35 +1024,20 @@ std::vector<PanelSpec> AllPanels() {
                                         "Rock Band Blitz Demo", "Start the Rock Band Blitz demo."),
                           }});
 
-  // 1b. Downloadable Content.
-  //
-  // P9-3: the store controls share a submenu, first in this five-row page.
+  // Song Library: store access, package caching, and scan performance.
   out.push_back(PanelSpec{"settings_dlc_panel", "settings_dlc_screen", "settings_general_screen",
                           MenuPanels(),
                           {
                               SubmenuRow("settings_rhythmverse_menu", "settings_rhythmverse_screen",
                                          "RhythmVerse", "Browse store settings and the Filters page."),
                               BoolRow("settings_dlc_cache", "general.cache_dlc_library",
-                                      "Cache DLC Library",
+                                      "Cache Song Library",
                                       "Reuse an unchanged package list on the next launch. Songs still need to load."),
-                              // The refresh entry's own control (owner request, 2026-10-15). It sits
-                              // beside the cache row because that is what it needs: the main menu's
-                              // row only exists while R7 owns it, and this is how a player removes
-                              // that entry without going through Interface -> Hidden Items.
-                              BoolRow("settings_dlc_refresh", "general.refresh_music_library",
-                                      "Refresh Songs",
-                                      "Show the main menu entry that re-scans your DLC folders and re-runs the discovery pass. Needs Cache DLC Library."),
                               SelectRow("settings_dlc_threads", "general.dlc_scan_threads",
-                                        "DLC Scan Threads",
+                                        "Scan Threads",
                                         "How many threads scan your packages. More threads scan faster.",
                                         Choices({"1", "1", "2", "2", "4", "4", "8", "8"}),
                                         false, "i:"),
-                              SelectRow("settings_load_guard", "general.load_guard", "Load Guard",
-                                        "Restart to the main menu if a song takes too long to load. Unsaved progress may be lost.",
-                                        Choices({"off", "Off", "30s", "30s", "60s", "60s"})),
-                              SubmenuRow("settings_dlc_menu", "settings_dlc_menu_screen",
-                                         "DLC Menu Music",
-                                         "The main menu's DLC background music and its Play Current Song entry."),
                           }});
 
   // The filter remains reachable with the master off. Both contexts use this same page. P9-11's
@@ -1057,30 +1047,12 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_rhythmverse_panel", "settings_rhythmverse_screen",
                           "settings_dlc_screen", MenuPanels(),
                           {
-                              BoolRow("settings_rhythmverse", "general.rhythmverse", "RhythmVerse",
+                              BoolRow("settings_rhythmverse", "general.rhythmverse", "Store Access",
                                       "Browse the RhythmVerse customs catalogue in the store and download songs."),
                               SubmenuRow("settings_rhythmverse_filter",
                                          kRhythmVerseFilterScreen,
                                          "Filters",
                                          "Filters: choose which instruments listed customs must have."),
-                          }});
-
-  // 1b-i. DLC Menu Music: R9's own row (owner request, 2026-10-14) and the Play Current Song entry.
-  // The two are one subject, and their order here is the order they had on the Downloadable Content
-  // page before the RhythmVerse pair joined it: menu music first, the entry that starts it second.
-  out.push_back(PanelSpec{"settings_dlc_menu_panel", "settings_dlc_menu_screen", "settings_dlc_screen",
-                          MenuPanels(),
-                          {
-                              // R9's own row - and the row Play Current Song is wired to: with this
-                              // off there is no background DLC song to start, so the row below reads
-                              // unavailable and the main-menu entry is not built at all (see
-                              // src/hooks/settings_payload.cpp).
-                              BoolRow("settings_dlc_menu_songs", "general.dlc_menu_songs",
-                                      "DLC Menu Songs",
-                                      "Play songs from your DLC library as the main menu's background music."),
-                              BoolRow("settings_play_current", "general.play_current_song",
-                                      "Play Current Song",
-                                      "Add a main menu entry that starts the song playing in the background."),
                           }});
 
   // 1b-ii. Filters (plan P6 §1.6): one boolean per instrument, On = that chart is required, Off =
@@ -1106,8 +1078,8 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_achievements_panel", "settings_achievements_screen",
                           "settings_general_screen", MenuPanels(),
                           {
-                              BoolRow("settings_hide_achievements", "general.hide_achievements",
-                                      "Hide Achievements",
+                              VisibilityRow("settings_hide_achievements", "general.hide_achievements",
+                                      "Achievement Alerts",
                                       "Hide achievement unlock notifications. Achievements are still earned and saved."),
                               BoolRow("settings_unlock_all", "general.unlock_all", "Unlock All",
                                       "Unlock everything, including songs, plots, and power-ups.",
@@ -1118,13 +1090,11 @@ std::vector<PanelSpec> AllPanels() {
                                         "Grant the achievements that normally need online play.", true),
                           }});
 
-  // 3. Audio / Video: Audio first, then Video. The Audio page is retail's own page (its rows are
-  // console-backed through ConsoleSaveData, and re-implementing them is neither P5b's job nor
-  // honest - `av_options_screen` is the page that owns them).
+  // Audio retains the native sliders and save handlers; ReorganizeAudioPage adds music controls.
   out.push_back(PanelSpec{"settings_av_panel", "settings_av_screen", kRootScreen, MenuPanels(),
                           {
                               RouteRow("settings_audio", "av_options_screen", "back_screen",
-                                       "Audio", "Volume options plus overscan and bass boost."),
+                                       "Audio", "Volume, bass boost, background music, and music navigation."),
                               SubmenuRow("settings_video", "settings_video_screen", "Video",
                                          "Display, resolution, graphics, and renderer options."),
                           }});
@@ -1149,7 +1119,7 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_display_panel", "settings_display_screen",
                           "settings_video_screen", MenuPanels(),
                           {
-                              SelectRow("settings_display", "graphics.display", "Display",
+                              SelectRow("settings_display", "graphics.display", "Window Mode",
                                         "Run the game windowed, borderless, or full screen.",
                                         Choices({"windowed", "Windowed", "borderless",
                                                  "Borderless", "fullscreen", "Full Screen"})),
@@ -1160,6 +1130,8 @@ std::vector<PanelSpec> AllPanels() {
                                                  "3840x2160"})),
                               BoolRow("settings_vsync", "graphics.vsync", "V-Sync",
                                       "Match the frame rate to your display to remove screen tearing."),
+                              BoolRow("settings_overscan", "guest.overscan", "Overscan",
+                                      "Expand the picture so it fills the screen edge to edge."),
                           }});
 
   // 3a-ii. Graphics: the render-path rows, with Depth of Field moved here from Gameplay and drawn
@@ -1275,9 +1247,7 @@ std::vector<PanelSpec> AllPanels() {
                                         true),
                           }});
 
-  // 5. Interface: the main menu's own visibility page and the caption overlay's switch. The HUD
-  // rows live under Gameplay now; the old 4:3 letterboxing row is gone because it fights the HUD
-  // repositioning that non-16:9 frames rely on.
+  // Interface: shortcut and library-tab visibility, offline prompts, and setting descriptions.
   out.push_back(PanelSpec{"settings_interface_panel", "settings_interface_screen",
                           "settings_general_screen", MenuPanels(),
                           {
@@ -1299,20 +1269,17 @@ std::vector<PanelSpec> AllPanels() {
                               // the surface's second `hot` row - flipping it hides or shows the
                               // caption on the next frame, with no restart prompt.
                               BoolRow("settings_labels", "interface.settings_labels",
-                                      "Help & Options Labels",
+                                      "Setting Descriptions",
                                       "Show a description of the highlighted row at the bottom of the screen."),
-                              BoolRow("settings_music_navigation", "interface.background_music_navigation",
-                                      "Menu Music Navigation",
-                                      "Navigate menu music with the shoulders, media keys, or music player. Requires a restart."),
                           }});
 
   out.push_back(PanelSpec{"settings_music_library_store_panel", "settings_music_library_store_screen",
                           "settings_interface_screen", MenuPanels(),
                           {
-                              BoolRow("settings_show_messages", "interface.show_messages", "Show Messages",
+                              ElementVisibilityRow("settings_show_messages", "interface.show_messages", "Messages",
                                       "Show the MESSAGES tab in the music library and store. Requires a restart."),
-                              BoolRow("settings_show_recommendations", "interface.show_recommendations",
-                                      "Show Recommendations",
+                              ElementVisibilityRow("settings_show_recommendations", "interface.show_recommendations",
+                                      "Recommendations",
                                       "Show the RECOMMENDED tab in the music library and store. Requires a restart."),
                           }});
 
@@ -1350,40 +1317,34 @@ std::vector<PanelSpec> AllPanels() {
                                                    "Show progress toward your personal best score.", true),
                           }});
 
-  // 5b. Main Menu: one visibility row per hideable entry. There is no master switch: each row is
-  // its own Visible/Hidden state. PLAY, HELP & OPTIONS and EXIT GAME are absent because the menu
-  // keeps them visible by design; `mod_settings` is absent because its pages are all inside this
-  // surface now; and Play Current Song follows its Downloadable Content setting instead of a row.
+  // Stable shortcut pages also list entries that are hidden or unavailable this boot.
   out.push_back(PanelSpec{"settings_main_menu_panel", "settings_main_menu_screen",
-                          "settings_interface_screen", MenuPanels(),
-                          {
-                              VisibilityRow("settings_mm_leaderboard",
-                                            "interface.hidden_main_menu.splash_leaderboard",
-                                            "LEADERBOARDS",
-                                            "Show or hide the main menu's LEADERBOARDS entry."),
-                              VisibilityRow("settings_mm_achievements",
-                                            "interface.hidden_main_menu.splash_achievements",
-                                            "ACHIEVEMENTS",
-                                            "Show or hide the main menu's ACHIEVEMENTS entry."),
-                              VisibilityRow("settings_mm_upgrade",
-                                            "interface.hidden_main_menu.splash_upgrade", "UPGRADE",
-                                            "Show or hide the main menu's UPGRADE entry."),
-                              VisibilityRow("settings_mm_dlc",
-                                            "interface.hidden_main_menu.splash_dlc",
-                                            "Download content",
-                                            "Show or hide the main menu's Download content entry."),
-                              // The retail Download Content entry R7's refresh took over, restored
-                              // as a row of its own (owner request, 2026-10-20). Hidden by default;
-                              // the static fallback is shown only when the menu inventory is empty,
-                              // so the live list below normally provides this row instead.
-                              //
-                              // Sentence case is the owner's spelling (2026-10-23), matching the
-                              // live list's locale-derived rows beside it.
-                              VisibilityRow("settings_mm_download_content",
-                                            "interface.hide_download_content",
-                                            "Download content",
-                                            "Show or hide the main menu's Download content entry."),
-                          }});
+                          "settings_interface_screen", MenuPanels(), {
+      SubmenuRow("settings_main_menu_base", "settings_main_menu_base_screen", "Base Game Items",
+                 "Choose which original main-menu entries appear."),
+      SubmenuRow("settings_main_menu_extra", "settings_main_menu_extra_screen", "Extra Items",
+                 "Choose which additional main-menu shortcuts appear."),
+  }});
+  out.push_back(PanelSpec{"settings_main_menu_base_panel", "settings_main_menu_base_screen",
+                          "settings_main_menu_screen", MenuPanels(), {
+      VisibilityRow("settings_mm_leaderboard", "interface.hidden_main_menu.splash_leaderboard",
+                    "Leaderboards", "Show or hide Leaderboards. Restart to apply."),
+      VisibilityRow("settings_mm_achievements", "interface.hidden_main_menu.splash_achievements",
+                    "Achievements", "Show or hide Achievements. Restart to apply."),
+      VisibilityRow("settings_mm_upgrade", "interface.hidden_main_menu.splash_upgrade",
+                    "Unlock Full Game", "Show or hide Unlock Full Game. Only available in the Demo. Restart to apply."),
+      VisibilityRow("settings_mm_download_content", "interface.hide_download_content",
+                    "Download Content", "Show or hide Download Content. Only available in the full game. Restart to apply."),
+  }});
+  out.push_back(PanelSpec{"settings_main_menu_extra_panel", "settings_main_menu_extra_screen",
+                          "settings_main_menu_screen", MenuPanels(), {
+      ElementVisibilityRow("settings_dlc_refresh", "general.refresh_music_library", "Refresh Songs",
+                           "Show the shortcut that re-scans your songs. Requires Cache Song Library. Restart to apply."),
+      ElementVisibilityRow("settings_play_current", "general.play_current_song", "Play Current Song",
+                           "Show the shortcut for the background song. Needs Background Music: DLC and a playable song. Restart to apply."),
+      VisibilityRow("settings_mm_rhythmverse", "interface.hidden_main_menu.rbbz_rhythmverse",
+                    "RhythmVerse", "Show the RhythmVerse shortcut. Store Access is controlled in Song Library. Restart to apply."),
+  }});
 
   // The confirmation scene is copied from the installation under our own name, as with the menu.
   Row restart = InfoRow("settings_restart_now", "Restart now",
@@ -1414,83 +1375,22 @@ std::vector<PanelSpec> AllPanels() {
                          "settings_achievements_message"});
 
   for (auto& panel : out) {
-    if (panel.name == "settings_main_menu_panel") {
-      if (!g_configuration.download_content_row_available) {
-        // The restored row exists only while R7 owns `splash_dlc`; with the cache off that retail
-        // row is the Download Content entry itself and the live list already offers it.
-        std::erase_if(panel.rows, [](const Row& row) {
-          return row.setting == "interface.hide_download_content";
-        });
-      } else {
-        // The static fallback lists the retail row under its shipped name; while R7 owns it the
-        // row is the library refresh, which is the identity the live list gives it too.
-        for (Row& row : panel.rows) {
-          if (row.setting == "interface.hidden_main_menu.splash_dlc") {
-            row.label = "REFRESH SONGS";
-            row.on_label = "REFRESH SONGS: Hidden";
-            row.off_label = "REFRESH SONGS: Visible";
-          }
-        }
-      }
-      if (!g_configuration.refresh_row_on) {
-        // P9-12: the refresh entry's own switch takes `splash_dlc` away from the menu entirely, so
-        // the fallback must not offer a visibility toggle for a row that is not there. The switch
-        // itself is on the Downloadable Content page.
-        std::erase_if(panel.rows, [](const Row& row) {
-          return row.setting == "interface.hidden_main_menu.splash_dlc";
-        });
-      }
-      if (!g_configuration.menu_rows.empty()) {
-        std::vector<Row> live;
-        size_t index = 0;
-        for (const auto& [token, label] : g_configuration.menu_rows) {
-          // The menu keeps these visible, so they are not offered. `mod_settings` is gone from the
-          // menu itself (all of its pages are inside this surface), and the Play Current Song row
-          // follows the Downloadable Content setting rather than a visibility toggle.
-          if (token == std::string(kMainMenuRow) || token == "splash_start" ||
-              token == "splash_exit" || token == kProviderMenuRow || token == kPlayCurrentRow) {
-            continue;
-          }
-          // The refresh entry's own switch (P9-12): with it off the main menu does not carry this
-          // row at all, so the mirror must not offer a toggle that would do nothing. The switch is
-          // on Downloadable Content; the row returns to both the menu and this page with it. The
-          // restored Download Content row below keeps its own switch either way - it is a row of
-          // its own, not part of the refresh entry.
-          const bool refresh_entry_off =
-              token == "splash_dlc" && !g_configuration.refresh_row_on;
-          if (!refresh_entry_off) {
-            const std::string symbol = "settings_mm_live_" + std::to_string(index++);
-            // The live mirror follows the installed menu, so the caption is derived from the row's
-            // own label rather than a token table: a menu this record does not know still gets text.
-            const std::string description =
-                "Show or hide the main menu's " + label + " entry.";
-            live.push_back(VisibilityRow(symbol.c_str(),
-                                         ("interface.hidden_main_menu." + token).c_str(),
-                                         label.c_str(), description.c_str()));
-          }
-          // The restored Download Content row sits where the retail menu drew it: right after the
-          // row R7 took over (`splash_dlc`), whose label above is the refresh name while the cache
-          // owns it. Its own switch is the feature's, so it is not part of the hide list.
-          if (token == "splash_dlc" && g_configuration.download_content_row_available) {
-            live.push_back(VisibilityRow("settings_mm_download_content",
-                                         "interface.hide_download_content",
-                                         "Download content",
-                                         "Show or hide the main menu's Download content entry."));
-          }
-        }
-        // An effective menu with nothing hideable keeps the static fallback rows rather than an
-        // empty, unfocusable page.
-        if (!live.empty()) {
-          panel.rows = std::move(live);
-        }
-      }
-    }
     std::erase_if(panel.rows, [](Row& row) {
-      // The Play Current Song row is hidden, not disabled, on a boot that found no DLC at all
-      // (owner request, 2026-10-20): a row that exists must work, and there is nothing for it to
-      // start. With a library present it stays, drawing the DLC Menu Songs reason when needed.
-      if (row.setting == "general.play_current_song" && !g_configuration.has_dlc_library) {
-        return true;
+      if (const auto available = g_configuration.availability.find(row.setting);
+          available != g_configuration.availability.end()) {
+        row.description = "Currently unavailable: " + available->second + ". Your visibility preference is saved. Restart to apply.";
+      }
+      if (row.setting == "interface.hidden_main_menu.splash_upgrade" && !g_configuration.trial_mode) {
+        row.kind = Kind::kInfo;
+        row.label = "Unlock Full Game: Unavailable";
+      }
+      if (row.setting == "interface.hide_download_content" && g_configuration.trial_mode) {
+        row.kind = Kind::kInfo;
+        row.label = "Download Content: Unavailable";
+      }
+      if (row.setting == "general.rhythmverse") {
+        row.on_label = "Store Access: Enabled";
+        row.off_label = "Store Access: Disabled";
       }
       if (row.setting == "general.unlock_online_achievements") {
         row.kind = Kind::kSubmenu;
@@ -1752,7 +1652,9 @@ Node PopulateMenu(const PanelSpec& panel) {
       // false when it reads On, so the query it is matched against is the `b:0` one.
       const std::string query =
           row.inverted ? Path("snapshot", row.setting, "b:0") : QueryPath(row);
-      body.push_back(Cmd({Sym("if_else"), Cmd({Sym("file_exists"), Str(query)}),
+      body.push_back(Cmd({Sym("if_else"), (row.setting == "guest.overscan"
+                              ? Cmd({Sym("console_data"), Sym("get_overscan_enabled")})
+                              : Cmd({Sym("file_exists"), Str(query)})),
                           Drop(off), Drop(on)}));
     } else if (row.kind == Kind::kSelect) {
       for (size_t i = 1; i < row.choices.size(); ++i) {
@@ -1810,6 +1712,12 @@ bool g_emitting_pause = false;
 Node RowCase(const Row& row, const std::string_view symbol) {
   switch (row.kind) {
     case Kind::kBool: {
+      if (row.setting == "guest.overscan") {
+        return Arr({Sym(symbol),
+                    Cmd({Sym("console_data"), Sym("set_overscan_enabled"),
+                         Cmd({Sym("!"), Cmd({Sym("console_data"), Sym("get_overscan_enabled")})})}),
+                    Cmd({Var("this"), Sym("populate_menu")})});
+      }
       const bool is_on = symbol == std::string(row.symbol) + "_on";
       // A normal row writes the opposite of what it showed; an inverted one (`Depth of Field`)
       // shows `On` while its setting is *false*, so it writes the opposite of that.
@@ -2295,6 +2203,12 @@ std::vector<std::string> RequestPaths() {
   add(kProviderQuery);
   add(Path("commit", "-", "-"));
   add(Path("restart", "-", "-"));
+  for (const char* token : {"general.dlc_menu_songs", "interface.background_music_navigation"}) {
+    for (const char* value : {"b:0", "b:1"}) {
+      add(Path("snapshot", token, value));
+      add(Path("set", token, value));
+    }
+  }
   // The caption events: the hide, plus every row's canonical symbol (see HelpWrite). Both the
   // hide and the per-row writes are what the DTA emits, so the test below covers the whole
   // surface's caption traffic with the same grammar the boot will use.
@@ -2321,7 +2235,8 @@ std::vector<std::string> RequestPaths() {
     for (const Row& row : panel.rows) {
       // A capture or path-action row carries its write in `path`, not in `setting`; the branches
       // below are the rows of this surface with no setting at all.
-      if (row.setting.empty() && row.kind != Kind::kCapture && row.kind != Kind::kPathAction) {
+      if (row.setting == "guest.overscan" ||
+          (row.setting.empty() && row.kind != Kind::kCapture && row.kind != Kind::kPathAction)) {
         continue;
       }
       switch (row.kind) {
@@ -2359,6 +2274,10 @@ std::vector<std::string> RequestPaths() {
 }
 
 std::string HelpTextFor(const std::string_view symbol) {
+  if (symbol == "settings_dlc_menu_songs")
+    return "Choose Original game music or songs from your DLC library. Restart to apply; DLC needs playable songs.";
+  if (symbol == "settings_music_navigation")
+    return "Navigate menu music with shoulders, media keys, or the music player. Restart to apply.";
   if (symbol.empty()) {
     return {};
   }
@@ -3400,6 +3319,10 @@ bool ReplaceLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view ke
 // retail row symbol whose text the installed locale already carries, so nothing is added for it.
 std::vector<std::pair<std::string, std::string>> Labels() {
   std::vector<std::pair<std::string, std::string>> out;
+  out.emplace_back("settings_dlc_menu_songs", "Background Music: %s");
+  out.emplace_back("settings_background_original", "Original");
+  out.emplace_back("settings_background_dlc", "DLC");
+  out.emplace_back("settings_music_navigation", "Menu Music Navigation: %s");
   out.emplace_back("settings_restart_message", "Settings saved. Restart the game to apply these changes.");
   out.emplace_back("settings_save_error_message", "Settings could not be saved. Check that the settings folder is writable, then try again.");
   out.emplace_back("settings_save_error_provider", "Saved, but the Ultimate mod's own settings file could not be written. Close this message and try again.");
@@ -3524,6 +3447,71 @@ std::vector<Node> AudioPageEnterStatements() {
       Node::Command({Node::Symbol("header.lbl"), Node::Symbol("set"),
                      Node::Symbol("text_token"), Node::Symbol("settings_title_audio")}),
   };
+}
+
+bool ReorganizeAudioPage(std::vector<Node>* nodes, std::string* reason) {
+  if (nodes == nullptr) {
+    if (reason) *reason = "no audio record";
+    return false;
+  }
+  auto staged = *nodes;
+  Hit list;
+  FindInRoots(&staged, [](const Node& node) {
+    return node.tag == dtb::kCommand && node.kids.size() >= 3 &&
+           IsSymbol(node.kids[0], "checkbox.lst") && IsSymbol(node.kids[1], "set_data") &&
+           node.kids[2].tag == dtb::kArray;
+  }, &list);
+  Hit selection;
+  FindInRoots(&staged, [](const Node& node) {
+    return IsSwitchCommand(node) && node.kids.size() >= 2 &&
+           node.kids[1].tag == dtb::kCommand && node.kids[1].kids.size() == 2 &&
+           IsSymbol(node.kids[1].kids[0], "checkbox.lst") &&
+           IsSymbol(node.kids[1].kids[1], "selected_sym");
+  }, &selection);
+  if (!list.found || !selection.found) {
+    if (reason) *reason = "unsupported native audio list or selection handler";
+    return false;
+  }
+  Node& rows = list.parent->kids[list.index].kids[2];
+  if (rows.kids.size() != 4 || rows.kids.front().tag != dtb::kArray ||
+      rows.kids.front().kids.empty() || !IsSymbol(rows.kids.front().kids.front(), "av_overscan")) {
+    if (reason) *reason = "unsupported native audio rows";
+    return false;
+  }
+  rows.kids.erase(rows.kids.begin());
+  const auto query = [](const char* token) {
+    return Cmd({Sym("file_exists"), Str(Path("snapshot", token, "b:1"))});
+  };
+  for (const auto& [symbol, token, on, off] : {
+      std::array<const char*, 4>{"settings_dlc_menu_songs", "general.dlc_menu_songs",
+                                 "settings_background_dlc", "settings_background_original"},
+      std::array<const char*, 4>{"settings_music_navigation", "interface.background_music_navigation",
+                                 "enabled_token", "disabled_token"}}) {
+    rows.kids.push_back(Arr({Sym(symbol), Cmd({Sym("if_else"), query(token), Sym(on), Sym(off)})}));
+  }
+  // Mutate the selection switch only after finishing the row list, so vector growth cannot
+  // invalidate a node used above. Native sliders, focus changes and save handlers stay intact.
+  Node& cases = selection.parent->kids[selection.index];
+  std::erase_if(cases.kids, [](const Node& node) {
+    return node.tag == dtb::kArray && !node.kids.empty() && IsSymbol(node.kids[0], "av_overscan");
+  });
+  int selected_index = 3;
+  for (const auto& [symbol, token] : {
+      std::pair{"settings_dlc_menu_songs", "general.dlc_menu_songs"},
+      std::pair{"settings_music_navigation", "interface.background_music_navigation"}}) {
+    const Node failure = Cmd({Sym("if_else"),
+        Cmd({Sym("=="), Cmd({Sym("ui"), Sym("current_screen")}), Sym("av_options_pause_screen")}),
+        EnterScreen(PauseScreen("settings_save_error_screen")), EnterScreen("settings_save_error_screen")});
+    cases.kids.push_back(Arr({Sym(symbol),
+        Cmd({Sym("if_else"), query(token), Write(Path("set", token, "b:0")), Write(Path("set", token, "b:1"))}),
+        Write(Path("commit", "-", "-")),
+        Cmd({Sym("if_else"), query("commit.ok"),
+             Cmd({Sym("do"), Cmd({Var("this"), Sym("enter_audio_video")}),
+                  Cmd({Sym("checkbox.lst"), Sym("set_selected"), Node::Int(selected_index++)})}), failure})}));
+  }
+  *nodes = std::move(staged);
+  if (reason) reason->clear();
+  return true;
 }
 
 // P4's earlier measurement entry (a `{ui goto_screen <search>}` appended to the *retail store

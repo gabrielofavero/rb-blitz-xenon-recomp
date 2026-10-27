@@ -32,9 +32,6 @@ bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit);
 bool SetDiscoveryStartLabel(std::vector<ui::dtb::Node>* roots);
 // Existing splash lifecycle and native error_popup_panel, preserving provider handlers.
 bool AddCrashRecoveryHooks(std::vector<ui::dtb::Node>* roots, std::string* why);
-// Main-menu shoulder prompts are native InlineHelp actions beside A/B. The
-// guest poll follows rbbz-play/footer and restores retail tokens on exit/off.
-bool AddNativeMusicFooter(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Replace every connect-panel menu continuation with the same deferred guest
 // method. Refuses an unknown shape instead of leaving an ungated menu route.
 bool AddGraphicsLoadingGate(std::vector<ui::dtb::Node>* roots, std::string* why);

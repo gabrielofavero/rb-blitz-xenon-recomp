@@ -430,11 +430,11 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 130u);  // sixty-five pages, in each of the two contexts
+  CHECK_EQ(panels.size(), 132u);  // sixty-five pages, in each of the two contexts
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
-  CHECK_EQ(screens.size(), 130u);
+  CHECK_EQ(screens.size(), 132u);
   CHECK_TRUE(screens.front() == kRootScreen);
   // The contexts pair up one for one, in declaration order: the i-th screen's in-song twin is the
   // (i + half)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
@@ -500,8 +500,8 @@ void TestListOwnership() {
     CHECK_TRUE(pause || HasText(root, kSceneName) || HasText(root, "../pause/settings_confirmation.milo"));
     (pause ? in_song : main_menu) += 1;
   }
-  CHECK_EQ(main_menu, 65);
-  CHECK_EQ(in_song, 65);
+  CHECK_EQ(main_menu, 66);
+  CHECK_EQ(in_song, 66);
 
   // The copies have to live **beside** the retail scene, because that scene refers to its neighbours
   // by relative path (`neon_lights.milo`, `../resource/lists/list_options_main.milo`), and those
@@ -562,7 +562,7 @@ void TestScreenBackTargets() {
       CHECK_TRUE(HasText(root, "game_screen"));
     }
   }
-  CHECK_EQ(in_song, 65);  // one per page, the root included
+  CHECK_EQ(in_song, 66);  // one per page, the root included
   CHECK_EQ(root_twins, 1);
 }
 
@@ -749,6 +749,42 @@ void TestPanelEnterAppend() {
   CHECK_EQ(no_enter[0].kids.size(), 4u);
 }
 
+void TestNativeAudioOrganization() {
+  BeginCase("native Audio keeps sliders/save handlers and gains music controls within five rows");
+  const auto overscan = Arr({Sym("av_overscan"), Sym("enabled_token")});
+  const auto slider = Cmd({Sym("track_sound_slider.sld"), Sym("set_showing"), Sym("TRUE")});
+  std::vector<Node> roots = {Cmd({Sym("new"), Sym("UIPanel"), Sym("av_options_panel"),
+      Arr({Sym("enter_audio_video"), Cmd({Sym("checkbox.lst"), Sym("set_data"),
+          Arr({overscan, Sym("av_active_track_volume"), Sym("av_sound_volume"),
+               Arr({Sym("av_bass_boost"), Sym("enabled_token")})}),
+          Node::Int(0), Sym("FALSE"), Sym("TRUE")})}),
+      Arr({Sym("SELECT_MSG"), Cmd({Sym("switch"), Cmd({Sym("checkbox.lst"), Sym("selected_sym")}),
+          Arr({Sym("av_overscan"), Cmd({Sym("console_data"), Sym("set_overscan_enabled"), Sym("TRUE")})}),
+          Arr({Sym("av_active_track_volume"), slider}),
+          Arr({Sym("av_sound_volume"), Cmd({Sym("native_sound_slider")})}),
+          Arr({Sym("av_bass_boost"), Cmd({Sym("native_bass_save")})})})}),
+      Arr({Sym("BUTTON_DOWN_MSG"), Cmd({Sym("native_slider_confirm_cancel_and_save")})})})};
+  std::string why;
+  CHECK_TRUE(ReorganizeAudioPage(&roots, &why));
+  CHECK_TRUE(why.empty());
+  CHECK_FALSE(HasSymbol(roots[0], "av_overscan"));
+  CHECK_TRUE(HasSymbol(roots[0], "native_slider_confirm_cancel_and_save"));
+  CHECK_TRUE(HasSymbol(roots[0], "native_sound_slider"));
+  CHECK_TRUE(HasSymbol(roots[0], "native_bass_save"));
+  CHECK_TRUE(HasSymbol(roots[0], "settings_dlc_menu_songs"));
+  CHECK_TRUE(HasSymbol(roots[0], "settings_music_navigation"));
+  CHECK_TRUE(HasSymbol(roots[0], "settings_save_error_screen"));
+  CHECK_TRUE(HasSymbol(roots[0], "settings_save_error_pause_screen"));
+  std::vector<std::string> strings;
+  CollectText(roots[0], &strings);
+  CHECK_TRUE(std::find(strings.begin(), strings.end(), "rbbz-settings/set/general.dlc_menu_songs/b:0") != strings.end());
+  CHECK_TRUE(std::find(strings.begin(), strings.end(), "rbbz-settings/set/interface.background_music_navigation/b:1") != strings.end());
+  CHECK_EQ(Reparse(roots, &why).size(), 1u);
+  const auto before = dtb::Compile(roots);
+  CHECK_FALSE(ReorganizeAudioPage(&roots, &why));
+  CHECK_TRUE(dtb::Compile(roots) == before);
+}
+
 void TestSplashReroute() {
   BeginCase("the main-menu row is re-pointed at the merged root, keeping its symbol");
 
@@ -866,7 +902,7 @@ void TestPlayCurrentSongRow() {
   // The rows the recent owner requests add to the Downloadable Content page owe the line budget
   // measured for this surface (a drawn line is `<label>: <value>`; over 28 characters the value is
   // not drawn). `settings_dlc_refresh` is the refresh entry's own switch (owner request,
-  // 2026-10-15, renamed `Refresh Songs` 2026-10-22) - "Refresh Songs: On" is 17 characters, and
+  // 2026-10-15, renamed `Refresh Songs` 2026-10-22) - "Refresh Songs: Visible" is 17 characters, and
   // its label alone 13.
   for (const auto& label : Labels()) {
     if (label.first == "settings_dlc_menu_songs_on" ||
@@ -876,7 +912,7 @@ void TestPlayCurrentSongRow() {
       CHECK_TRUE(label.second.size() <= 28u);
     }
     if (label.first == "settings_dlc_refresh_on") {
-      CHECK_TRUE(label.second == "Refresh Songs: On");
+      CHECK_TRUE(label.second == "Refresh Songs: Visible");
     }
   }
   CHECK_TRUE(std::string(kPlayCurrentLabel).size() <= 22u);
@@ -971,83 +1007,41 @@ void TestDownloadContentRow() {
   }
 }
 
+std::vector<std::string> PageRows(const std::string& panel_name);
 void TestDownloadContentVisibilityAndNoDlc() {
-  BeginCase("download-content visibility follows the cache and a boot with no DLC hides Play "
-            "Current Song");
-
-  const auto has_symbol = [](const std::string& name) {
-    for (const dtb::Node& root : DefinitionRoots()) {
-      if (HasSymbol(root, name)) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  // While R7 owns `splash_dlc`, the live Main Menu mirror offers the restored row's own switch.
+  BeginCase("shortcut settings remain reachable when shortcuts are hidden or unavailable");
   MenuConfiguration configuration;
-  configuration.download_content_row = true;
-  configuration.download_content_row_available = true;
-  configuration.menu_rows = {{"splash_start", "PLAY"}, {"splash_dlc", "REFRESH SONGS"},
-                             {"splash_exit", "EXIT GAME"}};
-  ConfigureMenu(configuration);
-  CHECK_TRUE(has_symbol("settings_mm_download_content_on"));
-  // With a library present the Play Current Song row is drawn (it may still be disabled).
-  CHECK_TRUE(has_symbol("settings_play_current_on"));
-
-  // With no DLC the Play Current Song row is hidden rather than disabled.
   configuration.has_dlc_library = false;
-  ConfigureMenu(configuration);
-  CHECK_TRUE(has_symbol("settings_mm_download_content_on"));
-  CHECK_FALSE(has_symbol("settings_play_current_on"));
-  CHECK_FALSE(has_symbol("settings_play_current_off"));
-
-  // With the cache off the retail row is the Download Content entry itself, so the extra switch
-  // is not offered.
-  configuration.download_content_row_available = false;
-  ConfigureMenu(configuration);
-  CHECK_FALSE(has_symbol("settings_mm_download_content_on"));
-
-  // P9-12: the refresh entry's own switch takes `splash_dlc` out of the menu, so the mirror must
-  // not offer a toggle for it - a row that is not in the menu is not a hideable choice (P10's
-  // rule). The menu here carries a second hideable row, so the live list (not the static
-  // fallback) is what is measured.
-  configuration.menu_rows = {{"splash_start", "PLAY"},
-                             {"splash_dlc", "REFRESH SONGS"},
-                             {"splash_upgrade", "UNLOCK FULL GAME"},
-                             {"splash_exit", "EXIT GAME"}};
-  configuration.refresh_row_on = true;
-  ConfigureMenu(configuration);
-  CHECK_EQ(PanelRowSymbols("settings_main_menu_panel").size(), 2u);
   configuration.refresh_row_on = false;
+  configuration.rhythmverse_row = false;
+  configuration.availability["general.play_current_song"] = "no playable DLC songs found";
   ConfigureMenu(configuration);
-  CHECK_EQ(PanelRowSymbols("settings_main_menu_panel").size(), 1u);
-
-  // The restored row's own switch is independent of the refresh entry: with the entry off it is
-  // still offered where the menu draws it, because the row itself is still on the menu.
-  configuration.download_content_row_available = true;
-  ConfigureMenu(configuration);
-  CHECK_EQ(PanelRowSymbols("settings_main_menu_panel").size(), 2u);
-  CHECK_TRUE(has_symbol("settings_mm_download_content_on"));
-
-  // The restored row's spelling is the owner's sentence case (2026-10-23), and its state text is
-  // the visibility pair the rest of the mirror draws.
-  configuration.refresh_row_on = true;
-  configuration.download_content_row_available = true;
-  ConfigureMenu(configuration);
-  bool download_label = false;
-  for (const auto& label : Labels()) {
-    if (label.first == "settings_mm_download_content_on") {
-      download_label = true;
-      CHECK_TRUE(label.second == "Download content: Hidden");
-    }
-    if (label.first == "settings_mm_download_content_off") {
-      CHECK_TRUE(label.second == "Download content: Visible");
-    }
+  CHECK_TRUE(PanelRowSymbols("settings_main_menu_panel") ==
+             std::vector<std::string>({"settings_main_menu_base", "settings_main_menu_extra"}));
+  const std::vector<std::string> extras = {"settings_dlc_refresh", "settings_play_current", "settings_mm_rhythmverse"};
+  CHECK_TRUE(PanelRowSymbols("settings_main_menu_extra_panel") == extras);
+  CHECK_TRUE(PageRows(PausePanel("settings_main_menu_extra_panel")) == extras);
+  CHECK_EQ(PanelRowSymbols("settings_main_menu_base_panel").size(), 4u);
+  CHECK_TRUE(HelpTextFor("settings_play_current").find("no playable DLC songs") != std::string::npos);
+  bool upgrade_unavailable = false;
+  bool refresh_visible = false;
+  for (const auto& [key, label] : Labels()) {
+    if (key == "settings_mm_upgrade") upgrade_unavailable = label == "Unlock Full Game: Unavailable";
+    if (key == "settings_dlc_refresh_on") refresh_visible = label == "Refresh Songs: Visible";
   }
-  CHECK_TRUE(download_label);
-
-  ConfigureMenu(MenuConfiguration{});
+  CHECK_TRUE(upgrade_unavailable);
+  CHECK_TRUE(refresh_visible);
+  configuration.trial_mode = true;
+  ConfigureMenu(configuration);
+  bool download_unavailable = false;
+  bool upgrade_visible = false;
+  for (const auto& [key, label] : Labels()) {
+    if (key == "settings_mm_download_content") download_unavailable = label == "Download Content: Unavailable";
+    if (key == "settings_mm_upgrade_off") upgrade_visible = label == "Unlock Full Game: Visible";
+  }
+  CHECK_TRUE(download_unavailable);
+  CHECK_TRUE(upgrade_visible);
+  ConfigureMenu({});
 }
 
 void TestPauseReroute() {
@@ -1132,7 +1126,7 @@ void TestInSongContext() {
     CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screens[i])) !=
                screens.end());
   }
-  CHECK_EQ(menu_screens.size(), 65u);
+  CHECK_EQ(menu_screens.size(), 66u);
   std::vector<std::string> in_song_panels_names = PanelNames();
   in_song_panels_names.erase(in_song_panels_names.begin(),
                              in_song_panels_names.begin() + static_cast<std::ptrdiff_t>(half));
@@ -1152,7 +1146,7 @@ void TestInSongContext() {
       CHECK_FALSE(HasText(root, screen));
     }
   }
-  CHECK_EQ(in_song_panels, 65);
+  CHECK_EQ(in_song_panels, 66);
 
   // The two contexts' panel sets are retail's own, and the difference between them is
   // load-bearing - measured, not stylistic. Retail's in-song page screens that are entered with a
@@ -1403,7 +1397,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, 130);                   // every panel, in both contexts
+  CHECK_EQ(fills, 132);                   // every panel, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -1599,7 +1593,7 @@ void TestButtonTableIsOneSwitch() {
     }
     CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
   }
-  CHECK_EQ(tables, 130);  // every panel, in both contexts
+  CHECK_EQ(tables, 132);  // every panel, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
@@ -1652,7 +1646,7 @@ void TestButtonTableIsOneSwitch() {
         all.size() - 1u - static_cast<size_t>(in_moves) - static_cast<size_t>(in_scroll);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, 130);  // one row table per panel, in both contexts
+  CHECK_EQ(row_tables, 132);  // one row table per panel, in both contexts
 }
 
 void TestSelectAdvancesAndWraps() {
@@ -1755,9 +1749,9 @@ void TestRestartPromptOnlyOnLeave() {
   // P9-11 retired the ten authored search-key pages (one root, the letters index, five character
   // groups, two number groups and More Keys) in both contexts: the store's Search row opens the
   // title's own keyboard now. 142 - 2 * 10.
-  CHECK_EQ(panels, 130);
+  CHECK_EQ(panels, 132);
   CHECK_EQ(root_cancels, 2);
-  CHECK_EQ(other_cancels, 128);
+  CHECK_EQ(other_cancels, 130);
 }
 
 // A `{<receiver> set <member> <value>}` call, with the value node kept so a test can say what the
@@ -2042,7 +2036,7 @@ void TestLabels() {
     // retail header they replace; the Main Menu mirror and the acronyms are the other exceptions.
     if (label.first.rfind("settings_mm_", 0) == 0 ||
         label.first.rfind("settings_title_", 0) == 0 || label.second == "HUD" ||
-        label.second == "FXAA") {
+        label.second == "FXAA" || label.second == "DLC") {
       continue;
     }
     ++checked;
@@ -2076,7 +2070,8 @@ void TestLabels() {
   // `settings_title_audio`, which is written into retail's `av_options.dtb` (the Audio route) and
   // therefore never appears in our own definition tree.
   for (const auto& label : labels) {
-    if (label.first == "settings_title_audio") {
+    if (label.first == "settings_title_audio" || label.first == "settings_dlc_menu_songs" ||
+        label.first == "settings_music_navigation" || label.first.starts_with("settings_background_")) {
       continue;
     }
     CHECK_TRUE(std::find(symbols.begin(), symbols.end(), label.first) != symbols.end());
@@ -2855,7 +2850,7 @@ void TestHelpEventsInTheDefinition() {
       }
     }
   }
-  CHECK_EQ(panels, 130);        // every page, in both contexts
+  CHECK_EQ(panels, 132);        // every page, in both contexts
   CHECK_EQ(enters, panels);    // every page tells the overlay where the highlight starts
   CHECK_TRUE(moves > 100);     // the unclamped direction cases, across the surface
   CHECK_EQ(scrolls, panels - 6);  // every ordinary page, not the three suppressed twins
@@ -2898,15 +2893,15 @@ void TestHelpTopicsResolve() {
 
   // The retail audio page: its four checkbox rows, in the order the record fills the list, plus
   // the two sliders the volume rows open.
-  const char* av_rows[] = {"av_overscan", "av_active_track_volume", "av_sound_volume",
-                           "av_bass_boost"};
-  for (int i = 0; i < 4; ++i) {
+  const char* av_rows[] = {"av_active_track_volume", "av_sound_volume", "av_bass_boost",
+                           "settings_dlc_menu_songs", "settings_music_navigation"};
+  for (int i = 0; i < 5; ++i) {
     CHECK_TRUE(CaptionFor({"av_options_screen", "checkbox.lst", i, true}) ==
                TextForSymbol(av_rows[i]));
     CHECK_TRUE(CaptionFor({"av_options_pause_screen", "checkbox.lst", i, true}) ==
                TextForSymbol(av_rows[i]));
   }
-  CHECK_TRUE(CaptionFor({"av_options_screen", "checkbox.lst", 4, false}).empty());
+  CHECK_TRUE(CaptionFor({"av_options_screen", "checkbox.lst", 5, false}).empty());
   CHECK_TRUE(CaptionFor({"av_options_screen", "track_sound_slider.sld", -1, false}) ==
              TextForSymbol("av_active_track_volume"));
   CHECK_TRUE(CaptionFor({"av_options_screen", "sound_effects_slider.sld", -1, false}) ==
@@ -3025,7 +3020,7 @@ void TestConfirmationPagesAreCaptionFree() {
     }
   }
 
-  CHECK_EQ(panels, 130);         // the whole surface, in both contexts
+  CHECK_EQ(panels, 132);         // the whole surface, in both contexts
   CHECK_EQ(suppressed_seen, 6);  // three pages, each with an in-song twin
 }
 
@@ -3082,7 +3077,7 @@ void TestShowHeadersRow() {
   BeginCase("independent Messages / Recommendations rows fit and retain both context Back targets");
   CHECK_TRUE(PanelRowSymbols("settings_interface_panel") ==
              std::vector<std::string>({"settings_main_menu", "settings_music_library_store",
-                                       "settings_offline", "settings_labels", "settings_music_navigation"}));
+                                       "settings_offline", "settings_labels"}));
   CHECK_TRUE(PanelRowSymbols("settings_music_library_store_panel") ==
              std::vector<std::string>({"settings_show_messages", "settings_show_recommendations"}));
   int backs = 0;
@@ -3104,8 +3099,8 @@ void TestShowHeadersRow() {
     if (key == "settings_show_messages_on" || key == "settings_show_messages_off" ||
         key == "settings_show_recommendations_on" || key == "settings_show_recommendations_off") {
       const bool messages = key.find("recommendations") == std::string::npos;
-      CHECK_TRUE(label == std::string(messages ? "Show Messages: " : "Show Recommendations: ") +
-                            (key.ends_with("_on") ? "On" : "Off"));
+      CHECK_TRUE(label == std::string(messages ? "Messages: " : "Recommendations: ") +
+                            (key.ends_with("_on") ? "Visible" : "Hidden"));
       CHECK_TRUE(label.size() <= 28u);
       ++states;
     }
@@ -3136,7 +3131,7 @@ std::vector<std::string> PageRows(const std::string& panel_name);
 
 void TestLoadGuardSurface() {
   BeginCase("load guard is a native selector in both DLC settings contexts");
-  for (const auto& panel : {std::string("settings_dlc_panel"), PausePanel("settings_dlc_panel")}) {
+  for (const auto& panel : {std::string("settings_general_panel"), PausePanel("settings_general_panel")}) {
     const auto rows = PageRows(panel);
     CHECK_EQ(std::count(rows.begin(), rows.end(), "settings_load_guard"), 1);
   }
@@ -3150,7 +3145,7 @@ void TestLoadGuardSurface() {
 void TestMusicNavigationSurface() {
   BeginCase("music navigation: live bindings, Assign/Reset pages, on/off budgets and both back targets");
   ConfigureMenu({});
-  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 5u);
+  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 4u);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
   const std::vector<std::string> actions{"settings_bind_music_next", "settings_bind_music_previous", "settings_bind_music_pause"};
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
@@ -3171,15 +3166,15 @@ void TestMusicNavigationSurface() {
   for (const auto& path : request_paths) CHECK_FALSE(path.starts_with("rbbz-play/"));
   int labels = 0;
   for (const auto& [key, label] : Labels()) {
-    if (key == "settings_music_navigation_on" || key == "settings_music_navigation_off") {
-      CHECK_TRUE(label == std::string("Menu Music Navigation: ") + (key.ends_with("_on") ? "On" : "Off"));
+    if (key == "settings_music_navigation") {
+      CHECK_TRUE(label == "Menu Music Navigation: %s");
       CHECK_TRUE(label.size() <= 28u);
       ++labels;
     }
     if (key == "settings_title_settings_interface_music_play_panel")
       CHECK_TRUE(label == "BACKGROUND MUSIC PLAY");
   }
-  CHECK_EQ(labels, 2);
+  CHECK_EQ(labels, 1);
   int screens = 0;
   for (const auto& root : roots) {
     ScreenFacts facts;
@@ -3198,9 +3193,9 @@ void TestMusicNavigationSurface() {
   disabled.background_music_navigation = false;
   ConfigureMenu(disabled);
   // Off must keep the identical tree, including the command page in both contexts.
-  CHECK_EQ(PanelNames().size(), 130u);
+  CHECK_EQ(PanelNames().size(), 132u);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
-  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 5u);
+  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 4u);
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
   CHECK_TRUE(PageRows(PausePanel("settings_interface_music_play_panel")) == actions);
   const auto before = dtb::Compile(roots);
@@ -3237,8 +3232,8 @@ void TestSettingsLabelsRow() {
     }
     return std::string();
   };
-  CHECK_TRUE(label_for("settings_labels_on") == "Help & Options Labels: On");
-  CHECK_TRUE(label_for("settings_labels_off") == "Help & Options Labels: Off");
+  CHECK_TRUE(label_for("settings_labels_on") == "Setting Descriptions: On");
+  CHECK_TRUE(label_for("settings_labels_off") == "Setting Descriptions: Off");
 
   // The caption the row itself shows explains what the switch does; it must exist like every other
   // row's.
@@ -3272,8 +3267,8 @@ void TestAchievementActionWording() {
   };
   CHECK_TRUE(label_for("settings_unlock_online") == "Unlock Online Achievements");
   CHECK_TRUE(label_for("settings_earn_achievements") == "Unlock Online Achievements");
-  CHECK_TRUE(label_for("settings_hide_achievements_on") == "Hide Achievements: On");
-  CHECK_TRUE(label_for("settings_hide_achievements_off") == "Hide Achievements: Off");
+  CHECK_TRUE(label_for("settings_hide_achievements_on") == "Achievement Alerts: Hidden");
+  CHECK_TRUE(label_for("settings_hide_achievements_off") == "Achievement Alerts: Visible");
   CHECK_TRUE(HelpTextFor("settings_hide_achievements").find("still earned and saved") !=
              std::string::npos);
 
@@ -3831,8 +3826,7 @@ void TestRhythmVerseRows() {
 
   // P9-3: the store submenu leads the five-row page in both contexts.
   const std::vector<std::string> expected_dlc = {
-      "settings_rhythmverse_menu", "settings_dlc_cache", "settings_dlc_refresh",
-      "settings_dlc_threads", "settings_load_guard", "settings_dlc_menu"};
+      "settings_rhythmverse_menu", "settings_dlc_cache", "settings_dlc_threads"};
   const std::vector<std::string> expected_store = {
       "settings_rhythmverse", "settings_rhythmverse_filter"};
   CHECK_TRUE(PanelRowSymbols("settings_dlc_panel") == expected_dlc);
@@ -3867,10 +3861,10 @@ void TestRhythmVerseRows() {
   CHECK_TRUE(filter == expected_filter);
 
   // The two menu-music rows moved together, in the order they had on the parent page.
-  const std::vector<std::string> menu = PanelRowSymbols("settings_dlc_menu_panel");
-  CHECK_EQ(menu.size(), 2u);
-  CHECK_TRUE(menu.size() == 2u && menu[0] == "settings_dlc_menu_songs" &&
-             menu[1] == "settings_play_current");
+  const std::vector<std::string> menu = PanelRowSymbols("settings_main_menu_extra_panel");
+  CHECK_EQ(menu.size(), 3u);
+  CHECK_TRUE(menu.size() == 3u && menu[0] == "settings_dlc_refresh" &&
+             menu[1] == "settings_play_current" && menu[2] == "settings_mm_rhythmverse");
 
   // Both new pages have a screen in each context, so a song reaches them too.
   const std::vector<std::string> panels = PanelNames();
@@ -3878,8 +3872,8 @@ void TestRhythmVerseRows() {
              panels.end());
   CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_rhythmverse_filter_pause_panel") !=
              panels.end());
-  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_dlc_menu_panel") != panels.end());
-  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_dlc_menu_pause_panel") !=
+  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_main_menu_extra_panel") != panels.end());
+  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_main_menu_extra_pause_panel") !=
              panels.end());
 
   // Text: the owner's spellings, and every drawn line within the measured 28-character budget.
@@ -3891,11 +3885,11 @@ void TestRhythmVerseRows() {
   for (const auto& label : Labels()) {
     if (label.first == "settings_rhythmverse_on") {
       master_on = true;
-      CHECK_TRUE(label.second == "RhythmVerse: On");
+      CHECK_TRUE(label.second == "Store Access: Enabled");
     }
     if (label.first == "settings_rhythmverse_off") {
       master_off = true;
-      CHECK_TRUE(label.second == "RhythmVerse: Off");
+      CHECK_TRUE(label.second == "Store Access: Disabled");
     }
     if (label.first == "settings_rhythmverse_filter") {
       filter_title = true;
@@ -3905,12 +3899,12 @@ void TestRhythmVerseRows() {
       guitar_on = true;
       CHECK_TRUE(label.second == "Guitar: On");
     }
-    if (label.first == "settings_dlc_menu") {
+    if (label.first == "settings_main_menu_extra") {
       menu_title = true;
-      CHECK_TRUE(label.second == "DLC Menu Music");
+      CHECK_TRUE(label.second == "Extra Items");
     }
     if (label.first.rfind("settings_rhythmverse", 0) == 0 ||
-        label.first.rfind("settings_rv_", 0) == 0 || label.first == "settings_dlc_menu") {
+        label.first.rfind("settings_rv_", 0) == 0 || label.first == "settings_main_menu_extra") {
       CHECK_TRUE(label.second.size() <= 28u);
     }
   }
@@ -4292,6 +4286,7 @@ int main(int argc, char** argv) {
   TestRequestPathsParse();
   TestPanelLoadEdit();
   TestPanelEnterAppend();
+  TestNativeAudioOrganization();
   TestAudioRouteCapturesListPosition();
   TestSplashReroute();
   TestPlayCurrentSongRow();

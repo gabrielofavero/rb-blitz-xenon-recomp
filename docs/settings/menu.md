@@ -9,6 +9,47 @@ preserved; repeated baseline/build/test prose and duplicated evidence lists were
 records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.md](contracts.md) and
 [status.md](status.md).
 
+## Current organization (2026-10-26)
+
+The root remains How to Play, Calibration, General, Controls, Audio/Video, and Gameplay
+(Ultimate). Every category has at most six visible entries, in both menu and in-song contexts.
+
+| Page | Entries |
+| --- | --- |
+| General | Game Edition; Interface; Song Library; Achievements & Unlocks; Load Guard; Credits |
+| Interface | Main Menu; Music Library & Store; Skip Offline Prompts; Setting Descriptions |
+| Main Menu | Base Game Items; Extra Items |
+| Base Game Items | Leaderboards; Achievements; Unlock Full Game; Download Content |
+| Extra Items | Refresh Songs; Play Current Song; RhythmVerse |
+| Music Library & Store | Messages; Recommendations |
+| Song Library | RhythmVerse; Cache Song Library; Scan Threads |
+| RhythmVerse | Store Access; Filters (Guitar, Bass, Drums, Vocals, Keys) |
+| Achievements & Unlocks | Achievement Alerts; Unlock All; Unlock Online Achievements |
+| Audio | Active Track Volume; Sound Volume; Bass Boost; Background Music; Menu Music Navigation |
+| Video | Display; Graphics; Renderer (when more than one backend is available) |
+| Display | Window Mode; Resolution; V-Sync; Overscan |
+
+Shortcut and library-tab preferences use Visible/Hidden. Background Music uses Original/DLC;
+Store Access uses Enabled/Disabled. Hiding the RhythmVerse shortcut does not disable the store.
+Controls, gameplay, graphics quality, and their deeper pages retain their previous organization.
+
+Shortcut preferences remain reachable with an empty song library, disabled cache, or disabled
+store. Captions explain unmet dependencies and restart requirements. Unlock Full Game is marked
+Unavailable outside the Demo; Download Content is marked Unavailable in the Demo, following
+the native `check_trial` rules. These edition-specific rows remain listed.
+
+The visibility editor starts from the runtime filter's hidden rows rather than treating an absent
+saved list as “everything visible.” Editing Refresh Songs saves `general.refresh_music_library`
+and clears the competing legacy `splash_dlc` hide-list entry in one transaction. Editing another
+shortcut preserves the legacy refresh choice. Saved explicit hide lists remain authoritative even
+when their contents equal the old compiled defaults. Download Content keeps one preference with
+the cache enabled or disabled.
+
+Audio retains the native scene, volume sliders, bass-boost handlers, and console save data. Its
+authored record removes Overscan and adds the two settings-bridge music rows. Display reads and
+writes Overscan through the native console-data getter/setter; it introduces no host preference.
+Stored setting IDs and TOML keys remain stable. Earlier sections below record the previous layout.
+
 ## Sources
 
 | Part | Original document | Package | Status |

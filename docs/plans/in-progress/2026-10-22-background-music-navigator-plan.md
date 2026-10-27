@@ -1,12 +1,12 @@
 # Background music navigator — implementation plan
 
-**Status:** P1–P3 implementation present (2026-10-26); P3 live acceptance pending.
-P2 connects shared navigation, persistent bindings and owner-accepted native pause/resume.
-P3 adds native guest shoulder prompts, an independent clickable bottom-right player, local package covers,
-bounded asynchronous artwork and explicit pointer ownership. The owner chose to perform
-P3 game/UI testing themselves. The owner confirms the player mostly works and the cover is visible live. The follow-up lowers
-and themes the player, removes hover text and replaces host footer text with native guest prompts.
-That revision’s guest layout, mouse/DPI acceptance and lifecycle soak remain unproven; the plan stays in progress. See §§17–18 for evidence.
+**Status:** P1–P3 implementation present (2026-10-26); P3 acceptance remains open.
+P2 connects navigation, bindings and owner-accepted native pause/resume. P3 adds an authorized
+bottom-right player, local covers, bounded asynchronous artwork and explicit pointer ownership.
+The owner confirms the player and live cover work and Start pauses. Their latest review removes
+all LB/RB footer additions; the retail A/B prompts remain unchanged. RB Next crashed during a
+song handoff in `rb_blitz_372.log`; its cause is still unresolved. The next build adds a bounded
+first-chance fault trace for diagnosis. Live UI testing remains with the owner. See §21.
 
 **Scope revision (2026-10-26, owner).** The two controls the feature cannot ship without are in
 scope, and the plan is corrected to match the tree: the **on/off setting** moves from
@@ -37,13 +37,13 @@ until P2 proves live source setup and input/pause ownership. See §12 for the fo
 | R1 | An **independent** feature: navigate the music the main menu is playing with controller buttons and keyboard media keys. It must not require *DLC Menu Songs* (R9) or *Play Current Song*, but it must cooperate with both. |
 | R2 | One setting, row label **Menu Music Navigation** (`interface.background_music_navigation`, id 53, default **on**), on **General → Interface** — the page of behaviour switches, directly after *Help & Options Labels*. It is the feature's only switch: off means no pad capture, no media keys, no footer, no player overlay/artwork work; **Background Music Play stays visible** (R5, R7). **Not** on General → Interface → Main Menu: that page lists the menu's own hideable entries, its static rows are replaced by the live mirror built from `g_configuration.menu_rows`, and its documented rule is one visibility row per entry with no master switch. |
 | R3 | Controller: **RB** (pad `0x0200`) / **MediaTrackNext** → next song. **LB** (pad `0x0100`) / **MediaTrackPrevious** → restart the current song when it has played ≥ 5 s, otherwise go to the previous song; on the first song of the queue, restart. **Start** (pad `0x0010`) / **MediaPlayPause** → pause/resume. |
-| R4 | The main-menu footer, today guest-drawn as `A Select / B Back`, must read `LB Previous | A Select | B Back | RB Next`. |
+| R4 | **Withdrawn by owner, 2026-10-26 (§21):** leave the retail `A Select / B Back` footer unchanged; no LB/RB prompts or spacing edits. |
 | R5 | Controls → **Interface Mapping** always carries a **Background Music Play** submenu as the page's fifth row (between *Music Library Options* and *Reset All*, so Reset All stays last; the page goes 5 → 6 rows, which is the visible budget), opening a three-row page: **Next Track / Previous Track / Play/Pause**. The three are one-shot **commands** — a press fires `rbbz-play/next|previous|pause` through the guest's `file_exists` channel — not `[remap]` bindings: that table's targets are physical controls, while these are feature actions, so the player triggers them here but does not assign them. With the setting **off**, both the row and page remain visible; runtime commands are unavailable while navigation is disabled. |
 | R6 | When the setting is on, a navigation must keep **Play Current Song** pointing at the song that is now audible, so pressing it starts exactly what is playing in the background. |
 | R7 | With the setting off, behaviour is exactly today's: no interception, no footer prompts, no player overlay and no player artwork requests. Background Music Play remains visible; its commands cannot bypass the off gate. |
 | R8 | Scope of the pad/media buttons and player overlay: the **main menu only** (the owner's footer), with the option list drawn and a menu-music source available. The player hides during gameplay, loading and other screens; it yields to modal dialogs/input capture. The three Controls-page actions work wherever the menu music is playing (they are the same commands) while the setting is on; with it off the page remains visible, but commands are unavailable. |
 | R9 | Docs are part of the change (toggles, menu study, input-flow, settings plan/status, plan index). |
-| R10 | Keep the LB/RB footer and add a **bottom-right music-player overlay**: square album cover, song title, artist and `<< / Play-Pause / >>` controls. Use a compact translucent panel, readable text and hover/pressed/disabled feedback, scaled and inset from the viewport edges without covering the guest footer or menu rows. |
+| R10 | Add a **bottom-right music-player overlay**: square album cover, song title, artist and `<< / Play-Pause / >>` controls. Use a compact translucent panel, readable text and hover/pressed/disabled feedback, scaled and inset from the viewport edges without covering the guest footer or menu rows. |
 | R11 | All three player actions are **mouse-clickable**, one command per click, using the same Previous 5 s/restart rule, Next and pause/resume semantics as R3. The center icon reflects confirmed playback state (Pause while playing, Play while paused); if P2 cannot prove pause, show it disabled with an unavailable explanation. |
 | R12 | **Two-way communication:** the playback owner publishes coherent track identity/title/artist/artwork reference and actual transport/capability state to the host UI; clicks post commands back for execution on the guest thread. Command acceptance/completion and playback updates flow back so the UI never treats a queued request as a completed skip or pause. |
 | R13 | Load the audible song's album art asynchronously from its local package, with a neutral fallback while loading or when absent/invalid. Track metadata and decoded art must survive package retirement safely; late results from a previous track/session must never replace the current cover. No online lookup or store dependency is required. |
@@ -112,11 +112,11 @@ until P2 proves live source setup and input/pause ownership. See §12 for the fo
 | **D4** | **The 5-second rule uses sample progress since playback begins** (`Stream+0xA0` delta / 44,100), excluding the native random offset and decoded reserve, not wall time. Manual starts use zero offset (owner acceptance fix, §14). A track that is still loading counts as "< 5 s". "First song" means cursor 0 → restart. Next/Previous always resume playback if paused. |
 | **D5** | **Native pause/resume, verified in §17.** StandardStream slot 7 pauses the channels and changes `Stream+0x14` from 3 to **5**; slot 6 resumes them at the same position. The Play hook prevents the guest poll from auto-resuming an owned pause. The owner confirms listening behavior, and `rb_blitz_367.log` proves a 7.285-second stable cursor and same-position resume. The earlier state-4 guess is superseded. Defer the `Playback` watchdog while paused; a manual move starts its successor playing. A final in-flight decoder block may settle during pause and is excluded from playback age. Never fake pause by muting or restarting. |
 | **D6** | **Buttons are consumed on the main menu only** (`splash_screen` *and* its option list drawn), while the setting is on and a menu-music source exists. Bits: LB `0x0100`, RB `0x0200`, Start `0x0010`; media keys ride the existing keyboard gate (`keyboard_support`). One command per physical press (rising edge), keyboard hold does not repeat. |
-| **D7** | **Native guest footer (owner correction, 2026-10-26; §19).** Supersedes the original host-text design. Extend the splash panel’s existing `continue.ihp` and `back.ihp` action lists through authored DTA and native `set_action_token`/`clear_action_token`: Previous/PageUp before Confirm, Next/PageDown after Cancel. `rbbz-play/footer` gates source/main-menu/modal availability. Native button glyphs, font and layout render all four prompts; off/exit restores A/B. No host footer drawing. |
+| **D7** | **Retail footer retained (§21).** Remove native shoulder actions, locale additions, eligibility query and spacing/transform edits. No host footer is drawn. |
 | **D8** | **Play Current Song follows the navigated song through the existing probe, with one fix.** The probe answers at press time, so it already names the audible song; the 2 s "recent" grace in `PlaySelection` must be cleared on a *manual* transition or a press right after Next/Previous would name the song that just left. |
 | **D9** | **Commands travel as host state, not guest calls.** The input filter only *posts* a command (`rbbz-play/next|previous|pause` from the Controls page, or a rising edge in the filter). The per-frame poll applies it on the guest thread, the same place R9's handover already runs. |
 | **D10** | Nothing is committed or pushed without the owner's approval. |
-| **D11** | **The authorized player supplements the footer.** A separate host ImGui player lives at bottom right, gated by the same navigator switch/main-menu/source facts and independent of `settings_help_overlay` or caption text. Keep the footer and guest A/B prompts readable. No extra player switch in this scope. |
+| **D11** | **The authorized player keeps the retail footer clear.** A separate host ImGui player lives at bottom right, gated by the same navigator switch/main-menu/source facts and independent of `settings_help_overlay` or caption text. Keep the footer and guest A/B prompts readable. No extra player switch in this scope. |
 | **D12** | **The guest playback owner is authoritative.** A synchronized, immutable `NowPlayingSnapshot` carries a session epoch, monotonically increasing revision, stable source/song identity, display strings, artwork key/status, actual playback state, supported actions and latest command result. The UI copies it without reading guest memory. Mouse, pad, media keys and Controls actions all use `Post`/`Take`; only the guest poll applies playback operations. No socket, web service or second playback engine is needed for this in-process overlay. |
 | **D13** | **Artwork is local, asynchronous and bounded.** Preserve metadata and an exact package-relative artwork locator by stable song identity. Resolve package assets on a worker, decode Xbox art with the existing codec and upload through the renderer's supported host texture path on its owning thread. Keep copied bytes/pixels/handles independent of guest pointers; hold a cache lease/open File only while reading. Use an explicit bounded art cache and discard stale results. Missing/corrupt art uses a neutral cover and never delays playback. |
 | **D14** | **Clicks belong to one surface.** While the mouse-support gate is on, player controls accept left clicks and consume their press/release sequence before the guest can turn it into Select/Back/hover/wheel actions. Hovering/clicking the player must not move guest focus; outside it normal routing continues. Respect window focus, modal capture, visibility changes and DPI coordinates; reset held input on those boundaries. The overlay takes no keyboard/gamepad focus away from the menu. |
@@ -218,14 +218,9 @@ If none holds, D5's fallback applies and the Play/Pause row is drawn unavailable
 
 ### 4.5 The footer
 
-The owner corrected the initial host-text implementation (§19). `AddNativeMusicFooter` authors
-splash-panel poll/exit hooks for the existing `continue.ihp` and `back.ihp` widgets.
-`rbbz-play/footer` reports eligible menu/source availability without posting a command. The
-native action lists become Previous/PageUp, Confirm on the first widget and Cancel,
-Next/PageDown on the second. New `rbbz_music_previous` / `rbbz_music_next` locale tokens carry
-PREVIOUS / NEXT; the original A/B tokens are retained. Only transitions write action lists;
-off/unavailable/exit removes the two added actions. The setting-off boot adds no footer hook.
-The guest’s own glyph/font/layout now owns prompt rendering; no ImGui footer text remains.
+The latest owner request (§21) removes the shoulder prompts and their spacing. Keep the retail
+A/B footer untouched. No native footer mutation, extra locale entry, availability query or host
+footer drawing remains. LB/RB continue to execute their configured transport actions.
 
 ### 4.6 The player and its snapshot
 
@@ -433,17 +428,15 @@ media keys, and keep Play Current Song on the audible song.
 **Evidence.** `out/_swap/music-nav/p2-media/`, `p2-pad/`, `p2-play-current/`, `p2-off/`,
 `p2-title-tracks/` (logs + captures).
 
-### P3 — The footer, clickable player, artwork, soak and documentation
+### P3 — Clickable player, artwork, soak and documentation
 
-**Goal.** Deliver the footer plus the authorized bottom-right music player, prove its two-way
+**Goal.** Deliver the authorized bottom-right music player, prove its two-way
 bridge and local artwork path, complete the acceptance sweep and update the docs.
 
 **Deliverable**
 
-1. **Owner-corrected native footer (§19):** `AddNativeMusicFooter` in `src/settings/menu_payload.cpp`
-   extends the existing guest InlineHelp widgets and locale records. `rbbz-play/footer` reports
-   eligibility from the playback owner. Guest glyphs/font/layout draw Previous/A/B/Next;
-   the original `DrawMainMenuMusicFooter` host implementation is removed.
+1. **Retail footer (§21):** retain the original A/B widgets. Remove all shoulder prompt and
+   spacing additions, their locale entries and `rbbz-play/footer`; no host footer is drawn.
 2. `src/ui/menu_music_player.{h,cpp}` plus lifecycle registration/source-list wiring: the compact
    player in §4.6 with cover/title/artist and clickable Previous/Play-Pause/Next. Consume the P2
    snapshots and post through the shared command queue. Respect switch, main-menu/source,
@@ -466,14 +459,13 @@ bridge and local artwork path, complete the acceptance sweep and update the docs
    bridge and the art resolver/cache/texture lifecycle), part 1 §7.2 (Play Current Song
    follows a manual skip), `docs/engine/input-flow.md` (the menu-music latch and the media-key
    patch and mouse capture/click routing), `docs/settings/status.md` (one bullet), `docs/reference/known-issues.md` (only what is
-   really limited: Start is consumed on the main menu; the footer's shoulder labels are host text;
+   really limited: Start is consumed on the main menu; RB handoff has an unresolved crash;
    the media keys may be claimed by another Windows media app), this plan's status record.
 7. Index: `docs/README.md` and `docs/plans/in-progress/README.md` already point at `in-progress/`
    (corrected 2026-10-26); when P1–P3 are green, `git mv` the plan to `finished/` and re-point every
    reference with `move_docs.py`.
 
-**Acceptance.** One full boot with a capture read by OCR: the footer reads
-`LB PREVIOUS … A SELECT … B BACK … RB NEXT` (OCR may drop the glyphs; assert on the words), the
+**Acceptance.** One full boot with the retail A/B footer unchanged, the
 `Background Music Play` page (Controls → Interface Mapping) draws its three rows, and the music
 responds. `ctest` green, `check_docs.py` 0 errors.
 The `nav-off` boot shows the retail footer alone, with no player hit regions or artwork jobs.
@@ -512,7 +504,7 @@ owner versus automation, and keep unmeasured behavior explicitly unproven.
 | `p2-play-current` | on | on | Play Current Song starts the navigated song |
 | `p2-off` | off | on | keys inert; footer/player absent; no player art jobs or mouse capture |
 | `p2-title-tracks` | on | off | title tracks navigate and pause |
-| `p3-footer` | on / off | on | host footer / retail footer alone |
+| `p3-footer` | on / off | on | retail A/B footer unchanged; no LB/RB labels or spacing edits |
 | `p3-player` | on | on / off | title/artist/cover fallback, three mouse actions, confirmed state, no click-through, gate/modal/focus checks |
 | `p3-artwork` | on | on | real covers in single/merged packs; missing/corrupt fallback; delayed-result rejection; bounded cache and read leases |
 | `p3-layout` | on | on | 16:9, 21:9, small window and DPI: player/bounds aligned, footer/rows clear, help captions off still works |
@@ -1069,3 +1061,83 @@ debug player/menu-payload suites also pass. Evidence: `build-owner-followup.log`
 validation remains 86/87 (existing path-policy failure); it predates this follow-up. The agent
 has not navigated the game. Native prompt spacing/glyph layout and the lowered theme now await
 the owner’s next visual test; broader DPI/soak acceptance remains pending.
+
+
+## 20. Owner review: quiet player, native spacing and cursor (2026-10-26)
+
+The owner found the popup’s red glow too prominent and requested a black player, dark-gray
+buttons and no border. They also reported native prompts stacking at a retail anchor and the
+mouse cursor disappearing over the player. The last “LB” in the requested LB/A/B/LB sequence
+is treated as RB/Next, consistently with the feature’s existing bindings and the stated RB/LB
+request. No new overlay was added; the footer continues to use guest widgets exclusively.
+
+**Cause and correction:** static native inspection found `InlineHelp::DrawShowing`
+(`0x824D85E8`) advances label i by `i × spacing`, transformed by the widget’s scale. It never
+advances by the preceding label’s width. Both splash InlineHelp instances are horizontal with
+**spacing 0**, because each originally carries one action. Appending tokens alone stacks them.
+The parsed local scene matrices have uniform scale **1.2**, A.x **−47.934883**, B.x **78.832283**,
+and the same `splash` parent. The measured parent interval is **126.767166**; dividing by scale
+produces native spacing **105.639301**. The corrected four anchors are approximately
+**−174.702049, −47.934883, 78.832283, 205.599449**. Runtime authoring derives these values from
+the live widgets rather than hard-coding this sample, retaining A/B’s original positions.
+
+`AddNativeMusicFooter` now assembles all four actions on the first existing native widget,
+clears the second widget’s Cancel token, and restores its token plus the first widget’s original
+position, spacing and orientation when unavailable or exiting. Native `get_local_scale`
+(`0x821F0F78`), `get_local_pos` / `set_local_pos`, and `InlineHelp` spacing-property synchronization
+were checked against the local retail image. The native draw and property source excerpts and
+raw-scene measurements are in `out/_swap/music-nav/p3-footer-layout/`. No host footer text or
+host footer draw function remains.
+
+The player keeps the condensed/bold fonts, black translucent fill and gray controls, with no
+red rails, glow or border. Cursor hiding was a separate source-gate bug: player hover correctly
+clears native mouse focus to prevent click-through, but the old cursor rule interpreted that as
+having no pointer surface. `CursorVisible` now accepts player ownership independently of native
+focus/ImGui capture; Mouse Support off still hides it, and native routing remains suppressed.
+
+Regression tests execute the authored guest footer, verify four distinct native positions with
+a non-unit scale and original zero spacing, preserve A/B anchors and verify teardown restoration.
+Input-gate tests cover player-only cursor visibility and the mouse-off boundary. Read-only payload
+builds exercise the real records. Live game/UI testing stays with the owner; this revision’s
+visual spacing and cursor behavior require their next check.
+
+
+**§20 host verification:** release build succeeds with the final native spacing and cursor
+changes. All **14 targeted release suites** pass; the Vulkan-off debug `menu_payload`,
+`menu_music_player`, `input_gates` subset is **3/3**. The actual extracted-record payload
+build passes **2,661 checks** across all eight feature combinations with **zero refused
+transforms**. Working-tree and staged diff checks pass. Documentation retains the previous
+**43 errors / 87 warnings**, with no new finding identities. Evidence is under
+`out/_swap/music-nav/p3-footer-layout/`: `build-release.log`, `tests-release.log`,
+`tests-debug.log`, `guest-records.log`, `geometry-measured.json` and `docs.json`.
+No live game/UI test was performed by the agent; the new build is ready for the owner’s
+native-footer alignment and pointer-visibility check.
+
+## 21. Owner removes shoulder prompts; RB handoff crash (2026-10-26)
+
+The owner withdrew the LB/RB footer additions because they clutter the menu. This supersedes
+§§19–20's native footer work: `AddNativeMusicFooter`, its build hook, locale tokens, query branch
+and footer-specific tests are removed. The retail A/B layout is no longer changed. Pad LB/RB,
+media keys and player controls retain their transport behavior. The black borderless player,
+dark-gray buttons and cursor correction remain.
+
+The owner confirms Start pauses, but RB Next crashed. `rb_blitz_372.log` records request 7
+loading `menumusic1:\songs\treatyoubetter\treatyoubetter` at 16:01:07.555, the stream reserve
+hook at 16:01:07.627, and a guest read of `0x00000004` at 16:01:07.655. It has no stack trace;
+the only available Windows dumps predate this run. Read-only package inspection finds a v10
+MOGG with an Ogg/Vorbis identification header at the declared offset (3396), ten channels and
+44.1 kHz. That does not establish a decoder fault or prove the asset valid end to end.
+
+A bounded first-chance logger now records near-null guest faults with module/RIP and host
+frames, plus the active PPC context and stage when inside ShellMusic. Scratch contexts are
+tracked through retire, stop, load and start. The logger returns `EXCEPTION_CONTINUE_SEARCH`;
+it neither suppresses a fault nor resumes a damaged stream. It also covers decoder faults
+outside ShellMusic on other guest threads. No game/UI test was driven by the agent. RB remains
+unresolved until a reproduced fault identifies its function and a correction is verified.
+
+Validation: `cmake --build --preset win-amd64-release` succeeded. All 14 targeted release tests
+passed (music, payload, settings, input and store art/payload). The extracted-record integration
+check passed 2612 checks over eight menu configurations with zero refusals. `git diff --check`
+passed. The documentation checker retained its baseline 43 errors/87 warnings with no new
+identities. Evidence: `out/_swap/music-nav/p3-skip-crash/` (`build-release.log`,
+`tests-release.log`, `records.log`, `docs.json` and read-only package-header logs).

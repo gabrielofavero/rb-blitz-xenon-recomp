@@ -2,6 +2,7 @@
 #include "hooks/settings_payload.h"
 
 #include <chrono>
+#include <algorithm>
 #include <set>
 #include <rex/cvar.h>
 #include <rex/runtime.h>
@@ -15,6 +16,7 @@
 #include "hooks/shell_music.h"
 #include "hooks/ultimate.h"
 #include "settings/boot.h"
+#include "settings/bridge_sink.h"
 #include "settings/menu_payload.h"
 #include "settings/store.h"
 #include "settings/schema.h"
@@ -318,20 +320,23 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     configuration.choices["general.target"].emplace_back("demo", "Demo");
     if (provider.Active() && boot->service()->store().document().values.contains(SettingId::kUnlockAll))
       configuration.boot_booleans["unlockall"] = boot->service()->EffectiveValue(SettingId::kUnlockAll).boolean;
-    // The two DLC rows the owner asked for (2026-10-14): R9's own setting is visible again, and the
-    // Play Current Song row is wired to it - and to the pool, because a menu whose background music
-    // is the title's own has no song to start. Both states are said on the row itself (the settings
-    // screen draws a disabled row as `<label>: <reason>`), so nothing here is a silent no-op. With
-    // no DLC at all the Play Current Song row is erased by the settings screen (owner request,
-    // 2026-10-20); the reasons below still describe the DLC Menu Songs row in that boot.
+    // Missing dependencies explain why a shortcut is absent this boot. Its visibility preference
+    // remains editable, so the player can restore it before enabling the dependency and restarting.
     if (!menu_music_on) {
-      configuration.disabled["general.play_current_song"] = "Needs DLC Menu Songs";
+      configuration.availability["general.play_current_song"] = "requires Background Music: DLC";
     } else if (!menu_music_pool) {
-      // The pool is empty because no library directory was configured (or it yielded nothing).
-      // The two truncated texts the player saw were "No DLC songs found", which also overran the
-      // row's 28-character line; these say the same thing and fit.
-      configuration.disabled["general.dlc_menu_songs"] = "No DLC Dir";
-      configuration.disabled["general.play_current_song"] = "Disabled";
+      configuration.availability["general.play_current_song"] = "no playable DLC songs found";
+    }
+    if (!dlc_cache_on)
+      configuration.availability["general.refresh_music_library"] = "requires Cache Song Library";
+    if (!rhythmverse_setting)
+      configuration.availability["interface.hidden_main_menu.rbbz_rhythmverse"] = "Store Access is disabled";
+    configuration.trial_mode = boot->service()->EffectiveValue(SettingId::kTarget).text == "demo";
+    if (boot->sink()) {
+      const auto& hidden = menu_filter::HiddenRows();
+      const bool refresh_visible = refresh_row_on &&
+          (!dlc_cache_on || std::find(hidden.begin(), hidden.end(), "splash_dlc") == hidden.end());
+      boot->sink()->SeedMenuVisibility(hidden, refresh_visible, dlc_cache_on);
     }
     configuration.background_music_navigation =
         boot->service()->EffectiveValue(SettingId::kBackgroundMusicNavigation).boolean;
@@ -353,9 +358,7 @@ bool InstallMenuPayload(rex::Runtime* runtime) {
     configuration.menu_music_songs = menu_music_songs;
     configuration.download_content_row = download_content_row;
     configuration.download_content_row_available = download_content_row_available;
-    // P9-12: the Interface -> Main Menu mirror lists the menu's actual rows, and with the refresh
-    // entry off `splash_dlc` is not one of them - so the mirror must not offer it as a hideable
-    // choice either (the control lives on Downloadable Content).
+    // Shortcut settings have a fixed inventory; these boot values control the actual menu rows.
     configuration.refresh_row_on = refresh_row_on;
     configuration.has_dlc_library = has_dlc_library;
     for (const auto& row : schema::MenuRows()) {

@@ -777,7 +777,10 @@ button/wheel latches or queuing guest hover/Select/Back. The SDK ImGui listener 
 events first without handling them; the native listener at priority 1 then consumes player hits
 before the keyboard/mouse emulation at priority 0. This does not depend on the previous frame’s
 `WantCaptureMouse` value. Hovering the panel clears native mouse queue ownership while pad and
-media input remain available. Outside-player events retain the native route.
+media input remain available. Cursor visibility treats the player’s pointer ownership separately
+from native mouse focus: it remains visible over the player even though the guest queue is
+disabled and no ImGui window requests capture. Mouse Support off still hides it.
+Outside-player events retain the native route.
 
 Only an enabled left press and release on the same control posts a command; hold does not repeat,
 and dragging out cancels activation. Right-click and wheel over the panel are swallowed. A

@@ -111,12 +111,12 @@ std::vector<SchemaRow> BuildTable() {
     d.choices = Choices({{"common", "Rock Band Blitz"},
                          {"ultimate", "Rock Band Blitz Ultimate"},
                          {"demo", "Rock Band Blitz Demo"}});
-    rows.push_back(Row(std::move(d), {"general", "target"}, "", "Target",
+    rows.push_back(Row(std::move(d), {"general", "target"}, "", "Game Edition",
                        "Which game the launch runs."));
   }
   rows.push_back(Row(Make(SettingId::kCacheDlcLibrary, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"general", "cache_dlc_library"}, "dlc", "Cache DLC Library",
+                     {"general", "cache_dlc_library"}, "song_library", "Cache Song Library",
                      "Reuse a cached DLC library scan on the next launch."));
   // The main menu's refresh entry (owner request, 2026-10-15): the row `splash_dlc` carries
   // TapRefreshCache while R7 is on, so it is a feature toggle of its own - a player who does not
@@ -128,13 +128,13 @@ std::vector<SchemaRow> BuildTable() {
   // main-menu entry are both named "Refresh Songs" (renamed with the same owner request).
   rows.push_back(Row(Make(SettingId::kRefreshMusicLibrary, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"general", "refresh_music_library"}, "dlc", "Refresh Songs",
+                     {"general", "refresh_music_library"}, "main_menu_extra", "Refresh Songs",
                      "Show the main menu entry that re-scans your DLC folders."));
   {
     Descriptor d = Make(SettingId::kDlcScanThreads, Category::kGeneral, Provider::kNative,
                         WidgetKind::kHorizontalSelect, ValueKind::kInt, IntValue(1),
                         "processor_count");
-    rows.push_back(Row(std::move(d), {"general", "dlc_scan_threads"}, "dlc", "DLC Scan Threads",
+    rows.push_back(Row(std::move(d), {"general", "dlc_scan_threads"}, "song_library", "Scan Threads",
                        "How many threads scan the DLC library."));
   }
   // `general.dlc_menu_songs` controls R9 - the menu's DLC background music - and is a visible row
@@ -144,25 +144,25 @@ std::vector<SchemaRow> BuildTable() {
   // store before it mounts anything.
   rows.push_back(Row(Make(SettingId::kDlcMenuSongs, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"general", "dlc_menu_songs"}, "dlc", "DLC Menu Songs",
+                     {"general", "dlc_menu_songs"}, "audio", "Background Music",
                      "Play songs from your DLC library as the main menu's background music."));
   {
     Descriptor d = Make(SettingId::kLoadGuard, Category::kGeneral, Provider::kNative,
                         WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("off"));
     d.choices = Choices({{"off", "Off"}, {"30s", "30s"}, {"60s", "60s"}});
-    rows.push_back(Row(std::move(d), {"general", "load_guard"}, "dlc", "Load Guard",
+    rows.push_back(Row(std::move(d), {"general", "load_guard"}, "", "Load Guard",
                        "Restart to the main menu if a song takes too long to load. Unsaved progress may be lost."));
   }
   // `general.play_current_song`: the main menu's second entry exists only while this row is on and
   // the menu really has a DLC track playing (owner feature, 2026-10-14). It is consumed at boot, so
   // it is a restart row like the rest of the menu-shaping ones. On by default, like the cache row
-  // (owner request, 2026-10-20); a boot that found no DLC at all does not draw the row at all
-  // (`src/hooks/settings_payload.cpp`), because there is nothing it could ever start.
+  // (owner request, 2026-10-20). The shortcut preference remains reachable without DLC; its
+  // caption explains the missing dependency while the actual shortcut is absent.
   rows.push_back(Row(Make(SettingId::kPlayCurrentSong, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"general", "play_current_song"}, "dlc", "Play Current Song",
+                     {"general", "play_current_song"}, "main_menu_extra", "Play Current Song",
                      "Add an entry that starts the song the main menu is playing."));
-  // RhythmVerse store (plan P6). The master is a plain boolean in the `dlc` group; the instrument
+  // RhythmVerse store (plan P6). The master is a plain boolean in the `song_library` group; the instrument
   // filter is a submenu of its own (no SettingId), so its five leaves carry their own group. The
   // master defaults **on** (owner pass, plan §9/P9-1, 2026-10-22): the store is a shipped feature,
   // and Off is the switch that silences it - the workers still ask `StoreSettings::enabled` before
@@ -170,7 +170,7 @@ std::vector<SchemaRow> BuildTable() {
   // leg). A master change is restart-scoped (plan §9/P9-2): see its entry in the strategy table.
   rows.push_back(Row(Make(SettingId::kRhythmVerse, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"general", "rhythmverse"}, "dlc", "RhythmVerse",
+                     {"general", "rhythmverse"}, "song_library", "Store Access",
                      "Browse the RhythmVerse customs catalogue in the store and download songs."));
   rows.push_back(Row(Make(SettingId::kRhythmVerseGuitar, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
@@ -194,7 +194,7 @@ std::vector<SchemaRow> BuildTable() {
                      "Only list songs that have a keys chart."));
   rows.push_back(Row(Make(SettingId::kHideAchievements, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
-                     {"general", "hide_achievements"}, "achievements", "Hide Achievements",
+                     {"general", "hide_achievements"}, "achievements", "Achievement Alerts",
                      "Hide achievement unlock notifications. Achievements are still earned and saved."));
   rows.push_back(ProviderRow(Make(SettingId::kUnlockAll, Category::kGeneral, Provider::kUltimate,
                                   WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
@@ -298,7 +298,7 @@ std::vector<SchemaRow> BuildTable() {
   // it `kHot` and the runtime applier writes that cvar.
   rows.push_back(Row(Make(SettingId::kSettingsLabels, Category::kInterface, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"interface", "settings_labels"}, "", "Settings Labels",
+                     {"interface", "settings_labels"}, "", "Setting Descriptions",
                      "Show a description of the highlighted row at the bottom of the screen."));
   rows.push_back(Row(Make(SettingId::kBackgroundMusicNavigation, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
@@ -307,11 +307,11 @@ std::vector<SchemaRow> BuildTable() {
   // P9-4: the shared background panel is authored once at boot.
   rows.push_back(Row(Make(SettingId::kShowMessages, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"interface", "show_messages"}, "music_library_store", "Show Messages",
+                     {"interface", "show_messages"}, "music_library_store", "Messages",
                      "Show the MESSAGES tab in the music library and store. Requires a restart."));
   rows.push_back(Row(Make(SettingId::kShowRecommendations, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
-                     {"interface", "show_recommendations"}, "music_library_store", "Show Recommendations",
+                     {"interface", "show_recommendations"}, "music_library_store", "Recommendations",
                      "Show the RECOMMENDED tab in the music library and store. Requires a restart."));
   // The main menu's Download Content row (owner request, 2026-10-20). R7's refresh took the row
   // over (`splash_dlc`), so the retail entry lost its label and action; the payload now restores

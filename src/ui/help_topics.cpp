@@ -30,7 +30,8 @@ namespace {
 // the arrays the retail records fill their lists with.
 std::vector<std::string_view> RetailRows(const std::string_view screen) {
   if (screen == "av_options_screen" || screen == "av_options_pause_screen") {
-    return {"av_overscan", "av_active_track_volume", "av_sound_volume", "av_bass_boost"};
+    return {"av_active_track_volume", "av_sound_volume", "av_bass_boost",
+            "settings_dlc_menu_songs", "settings_music_navigation"};
   }
   if (screen == "tutorials_screen" || screen == "tutorials_pause_screen") {
     return {"tutorialsong", "tutorialsong3"};
@@ -55,6 +56,8 @@ std::string_view RetailListName(const std::string_view screen) {
 }  // namespace
 
 std::string TextForSymbol(const std::string_view symbol) {
+  if (symbol == "settings_dlc_menu_songs" || symbol == "settings_music_navigation")
+    return screen::HelpTextFor(symbol);
   if (symbol.empty()) {
     return {};
   }

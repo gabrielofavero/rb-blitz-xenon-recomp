@@ -92,6 +92,30 @@ int main(int argc, char** argv) {
   CHECK_EQ(std::count(timeout_args.begin(), timeout_args.end(), "--song_load_timeout=30"), 1);
   CHECK_EQ(std::count(timeout_args.begin(), timeout_args.end(), "--song_load_guard=30s"), 1);
 
+  BeginCase("ordinary boots wait for user input without a recovery popup");
+  loading::CrashDialogState ordinary;
+  bool boot_answer = true;
+  ordinary.menu_ready = true;
+  ordinary.Query("rbbz-load/recovery/active", &boot_answer); CHECK_FALSE(boot_answer);
+  ordinary.Query("rbbz-load/recovery/start", &boot_answer); CHECK_FALSE(boot_answer);
+  ordinary.Query("rbbz-load/recovery/popup", &boot_answer); CHECK_FALSE(boot_answer);
+
+  BeginCase("settings restarts auto-start once through the stable splash without an error popup");
+  loading::CrashDialogState restart;
+  restart.settings_restart = true;
+  restart.Query("rbbz-load/recovery/active", &boot_answer); CHECK_TRUE(boot_answer);
+  restart.Query("rbbz-load/recovery/start", &boot_answer); CHECK_FALSE(boot_answer);
+  restart.menu_ready = true;
+  restart.Query("rbbz-load/recovery/popup", &boot_answer); CHECK_FALSE(boot_answer);
+  restart.Query("rbbz-load/recovery/start", &boot_answer); CHECK_TRUE(boot_answer);
+  restart.Query("rbbz-load/recovery/starting", &boot_answer); CHECK_TRUE(boot_answer);
+  restart.menu_ready = false;
+  restart.Query("rbbz-load/recovery/start", &boot_answer); CHECK_FALSE(boot_answer);
+  restart.menu_ready = true;
+  restart.Query("rbbz-load/recovery/start", &boot_answer); CHECK_FALSE(boot_answer);
+  restart.Query("rbbz-load/recovery/popup", &boot_answer); CHECK_FALSE(boot_answer);
+  restart.Query("rbbz-load/recovery/active", &boot_answer); CHECK_FALSE(boot_answer);
+
   BeginCase("native dialog waits for the stable menu, discovery and one-shot consumption");
   loading::CrashDialogState state;
   bool answer = true;

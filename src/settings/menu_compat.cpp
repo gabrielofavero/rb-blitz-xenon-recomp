@@ -61,7 +61,7 @@ HideDecision DecideHiddenRows(const HideRequest& request) {
 
   const std::vector<std::string>& source =
       request.selection_explicit ? request.selected : request.defaults;
-  if (source.empty()) {
+  if (source.empty() && !refresh_row_off) {
     // On with an empty selection hides nothing. This is the case the old code got wrong: an empty
     // list used to mean "the defaults", which silently re-hid rows the player had cleared.
     decision.note = "the selection is empty; the master is on and nothing is hidden";

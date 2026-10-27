@@ -92,6 +92,10 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   // The local space: a token with no row of ours, or a row the installed provider owns. Called by
   // the boot's seeding path (through the channel, so it is the same code the menu exercises).
   void SeedLocal(std::string token, bridge::WireValue value);
+  // Runtime filtering can differ from an absent/legacy stored selection. Start the visibility
+  // editor from what this boot actually built, then retire each baseline after its first save.
+  void SeedMenuVisibility(std::vector<std::string> hidden, bool refresh_visible,
+                          bool refresh_owns_dlc_row);
   bool GetLocal(std::string_view token, bridge::WireValue* out) const;
 
   // --- what the boot asks after a commit ----------------------------------
@@ -169,6 +173,8 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   std::map<std::string, bridge::WireValue> local_;
   std::map<std::string, bridge::WireValue> staged_local_;
   std::map<SettingId, Value> staged_;
+  std::map<SettingId, Value> menu_baseline_;
+  bool refresh_owns_dlc_row_ = true;
   // What each staged row held before this session touched it: the commit uses it to tell a real
   // change from a value written back unchanged (P9's no-op rule).
   std::map<SettingId, Value> staged_base_;

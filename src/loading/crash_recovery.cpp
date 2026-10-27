@@ -40,8 +40,11 @@ bool inject = false;
 bool inject_stall = false;
 uint32_t attempt_seconds = 0;
 }
-void ConfigureCrashRecovery(rex::Runtime* runtime) {
+void ConfigureCrashRecovery(rex::Runtime* runtime, bool settings_restart_boot) {
   presentation.recovered = REXCVAR_GET(song_load_recovered);
+  presentation.settings_restart = settings_restart_boot;
+  if (settings_restart_boot)
+    REXLOG_INFO("settings_restart: short boot; auto-starting the local user through discovery");
   presentation.timeout_seconds = REXCVAR_GET(song_load_timeout);
   inject = REXCVAR_GET(song_load_test_crash);
   inject_stall = REXCVAR_GET(song_load_test_stall);

@@ -545,20 +545,6 @@ void TestArtworkRead() {
                               TransportState::kPlaying, {true,true,true}}, true);
   std::vector<uint8_t> bytes;
   const ui::music::ArtTag tag{epoch,0,key};
-  test::BeginCase("native footer query follows source/main-menu/modal/off gates without posting commands");
-  bool footer = false;
-  CHECK_TRUE(AnswerPlayQuery("rbbz-play/footer", &footer));
-  CHECK_TRUE(footer);
-  CHECK_FALSE(NowPlaying().ReadSnapshot().pending.has_value());
-  main_menu = false;
-  AnswerPlayQuery("rbbz-play/footer", &footer); CHECK_FALSE(footer);
-  main_menu = true; modal_active = true;
-  AnswerPlayQuery("rbbz-play/footer", &footer); CHECK_FALSE(footer);
-  modal_active = false; capture_active = true;
-  AnswerPlayQuery("rbbz-play/footer", &footer); CHECK_FALSE(footer);
-  capture_active = false; native_loading = true;
-  AnswerPlayQuery("rbbz-play/footer", &footer); CHECK_FALSE(footer);
-  native_loading = false;
   CHECK_EQ(ReadArtwork(tag,&bytes),ArtRead::kReady);
   CHECK_TRUE(std::string(bytes.begin(),bytes.end()) == "owned bytes");
   CHECK_EQ(device.open_file_count(),0u);
@@ -567,7 +553,6 @@ void TestArtworkRead() {
   CHECK_EQ(ReadArtwork({epoch,1,key},&bytes),ArtRead::kMissing);
   CHECK_EQ(ReadArtwork({epoch,0,"different"},&bytes),ArtRead::kMissing);
   g_navigation_enabled = false;
-  AnswerPlayQuery("rbbz-play/footer", &footer); CHECK_FALSE(footer);
   CHECK_EQ(ReadArtwork(tag,&bytes),ArtRead::kMissing);
   g_navigation_enabled = true;
   g_cache = MusicMountCache<rex::filesystem::Device>{};

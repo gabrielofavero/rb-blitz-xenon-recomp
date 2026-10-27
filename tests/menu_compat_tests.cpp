@@ -193,6 +193,20 @@ void RefreshEntryOffIgnoresTheHideMaster() {
   CHECK_TRUE(DecideHiddenRows(on).hidden.empty());
 }
 
+void RefreshEntryOffHidesItWithAnEmptySelection() {
+  test::BeginCase("hide: Refresh Songs stays hidden when every other entry is visible");
+  HideRequest request = Base();
+  request.master = true;
+  request.selection_explicit = true;
+  request.selected.clear();
+  request.refresh_row_owns_refresh = true;
+  request.refresh_row_enabled = false;
+  const auto decision = DecideHiddenRows(request);
+  CHECK_TRUE(Joined(decision.hidden) == "splash_dlc");
+  CHECK_TRUE(decision.refresh_row_disabled);
+  CHECK_FALSE(decision.alternate_refresh_needed);
+}
+
 void RefreshEntryOffMeansNothingWithoutR7() {
   test::BeginCase("hide: the switch is inert while the row is not the refresh row");
 
@@ -289,6 +303,7 @@ int main() {
   RefreshEntryOffHidesTheRow();
   RefreshEntryOffAlsoHidesItFromACustomSelection();
   RefreshEntryOffIgnoresTheHideMaster();
+  RefreshEntryOffHidesItWithAnEmptySelection();
   RefreshEntryOffMeansNothingWithoutR7();
   LegacyPoolCountIsIgnoredOutLoud();
   RenameCannotReachTheMergedRoot();

@@ -90,6 +90,8 @@ namespace rb_blitz::ui::screen {
 struct MenuConfiguration {
   std::map<std::string, std::vector<std::pair<std::string, std::string>>> choices;
   std::map<std::string, std::string> disabled;
+  // Availability changes the caption, never removes the preference needed to restore a shortcut.
+  std::map<std::string, std::string> availability;
   std::vector<std::pair<std::string, std::string>> menu_rows;
   // Native overrides applied after the installed provider's initialization.
   std::map<std::string, bool> boot_booleans;
@@ -105,15 +107,12 @@ struct MenuConfiguration {
   // The restored Download Content row (owner request, 2026-10-20). `download_content_row` is true
   // when this boot builds the row (the visibility setting says visible *and* R7 owns
   // `splash_dlc`, so the retail row's label and action are free); `download_content_row_available`
-  // says whether the visibility switch is offered at all - it is meaningful only while R7 owns
-  // `splash_dlc`, because with the cache off that retail row is the Download Content entry.
+  // says whether R7 owns `splash_dlc`. With the cache off that retail row is Download Content;
+  // the same visibility preference controls either identity without a duplicate settings row.
   bool download_content_row = false;
   bool download_content_row_available = false;
-  // The refresh entry's own switch (`general.refresh_music_library`), frozen at boot with the other
-  // menu-shaping values (P9-12). With it off the main menu does not carry `splash_dlc` at all, so
-  // the Interface -> Main Menu mirror must not offer that row either: a row that is not in the menu
-  // is not a hideable choice (P10's rule in src/ui/menu_options.h). The switch itself lives on the
-  // Downloadable Content page, not on the mirror.
+  bool trial_mode = false;
+  // The refresh shortcut's visibility. Its control stays reachable under Main Menu / Extra Items.
   bool refresh_row_on = true;
   // The RhythmVerse entry (RhythmVerse plan P1): true when the boot builds the row, i.e.
   // when the store's master switch was on. Its case re-checks the live gate, so switching the
@@ -128,8 +127,8 @@ struct MenuConfiguration {
   // shipped. The measurement, not a feature: what the store asks for becomes a file open the
   // probe can name.
   std::string store_local_server_root;
-  // False when the boot found no DLC at all. The Play Current Song row is then not drawn: a row
-  // that exists must work, and with no library there is nothing it could ever start.
+  // False when the boot found no DLC. The actual Play Current Song shortcut then has nothing to
+  // start; its settings row stays reachable with the dependency explained in its caption.
   bool has_dlc_library = true;
 };
 void ConfigureMenu(MenuConfiguration configuration);
@@ -417,6 +416,8 @@ bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view 
 // 0x821F1678, three float arguments); the earlier `local_xfm` spelling did not move the list, and
 // the owner's capture from it showed Overscan off on entry (measured 2026-10-19, out/audio-fix/probe3).
 std::vector<dtb::Node> AudioPageEnterStatements();
+// Keep the native volume sliders/save handlers; move Overscan out and add the two music rows.
+bool ReorganizeAudioPage(std::vector<dtb::Node>* nodes, std::string* reason);
 
 // The statement an earlier P4 measurement appended to the retail store screen's `{enter}`. Retired
 // with the authored key pages (P9-11): the store's own Search row opens the title's keyboard, and

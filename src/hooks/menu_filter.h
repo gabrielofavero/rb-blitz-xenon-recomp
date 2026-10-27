@@ -48,7 +48,8 @@ namespace rb_blitz::menu_filter {
 // thing a user can get wrong, so it is echoed in the boot log. Also the point
 // where the cvars are read: the read hook itself must not touch the registry per
 // read.
-void Configure();
+// Settings restarts skip the offline prompts for this boot without changing the saved toggle.
+void Configure(bool settings_restart_boot = false);
 void RetargetRecord(uint8_t* guest_base, const uint8_t before[20], const uint8_t after[20]);
 
 // The rows the R5 decision hides on this boot, as `Configure()` resolved them. Read after

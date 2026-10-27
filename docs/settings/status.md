@@ -24,13 +24,14 @@ Part 1 wherever they disagree.
   Next/Previous execute on the guest poll for DLC or title-only sources, publish snapshots
   and keep Play Current Song aligned. Native pause/resume is enabled without a trial
   flag after owner listening acceptance and a measured 7.285-second frozen-cursor hold.
-  The Play/Pause row displays its configured bindings. P3 adds native guest shoulder prompts and an
-  independent bottom-right player with mouse transport and local package covers. The owner’s
-  first test confirms the player/cover; their corrections lower it, share the search theme,
-  remove hover text and replace host footer text with guest InlineHelp actions. The artwork
-  worker and click policy pass host tests; rendered covers, footer alignment, DPI and click-through
-  await the owner’s test. See the
-  [navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §§17–18.
+  The Play/Pause row displays its configured bindings. P3 adds an independent bottom-right
+  player with mouse transport and local package covers. The owner confirms the player/cover and
+  Start pause. The borderless black panel has dark-gray buttons and no hover text; hover retains
+  the OS cursor. The latest review removes all LB/RB footer additions and spacing edits, retaining
+  retail A/B. RB Next crashed during a successor load; diagnosis remains open and the new build
+  adds a bounded native fault trace. Artwork/click policy passes host tests; DPI, click-through and
+  lifecycle acceptance remain pending. See the
+  [navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §21.
 
 - **Guest binding rows (2026-10-25):** the host binding overlay is removed. Interface and gameplay
   lists receive current text on entry and after Reset All; the title draws every row. See the

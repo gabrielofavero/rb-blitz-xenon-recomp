@@ -25,6 +25,7 @@
 #include "hooks/dlc.h"
 #include "hooks/content_progress.h"
 #include "settings/menu_compat.h"
+#include "settings/boot.h"
 #include "ui/menu_options.h"
 
 #if defined(_WIN32)
@@ -503,10 +504,10 @@ void RetargetRecord(uint8_t* base, const uint8_t before[20], const uint8_t after
   RetargetChecksumRow(base, before, after);
 }
 
-void Configure() {
+void Configure(bool settings_restart_boot) {
   g_settings.hide_rows = REXCVAR_GET(enhancements_hide_menu_options);
   g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);
-  g_settings.skip_offline_prompts = REXCVAR_GET(enhancements_skip_offline_dialog);
+  g_settings.skip_offline_prompts = settings_restart_boot || REXCVAR_GET(enhancements_skip_offline_dialog);
   g_settings.tap_refresh_row = REXCVAR_GET(enhancements_dlc_cache);
   g_settings.refresh_row_on = REXCVAR_GET(enhancements_refresh_music_library);
 
@@ -518,8 +519,24 @@ void Configure() {
   const std::string configured_rows = REXCVAR_GET(enhancements_hidden_menu_options);
   rb_blitz::settings::menu_compat::HideRequest request;
   request.selection_explicit = configured_rows != menu_options::kDefaultRows;
+  if (const auto* boot = rb_blitz::settings::boot::SettingsBoot::Current(); boot && boot->service()) {
+    request.selection_explicit = request.selection_explicit ||
+        boot->service()->EffectiveSource(rb_blitz::settings::SettingId::kHiddenMainMenu) !=
+            rb_blitz::settings::Source::kCompiledDefault;
+  }
   request.master = g_settings.hide_rows || request.selection_explicit;
   request.selected = menu_options::ParseRowNames(configured_rows);
+  if (!g_settings.tap_refresh_row) {
+    // With the cache off splash_dlc is the original Download Content entry. Its single
+    // visibility preference still applies; Refresh Songs must not take over its identity.
+    if (!request.master) request.selected.clear();
+    std::erase(request.selected, "splash_dlc");
+    if (const auto* boot = rb_blitz::settings::boot::SettingsBoot::Current(); boot && boot->service() &&
+        boot->service()->EffectiveValue(rb_blitz::settings::SettingId::kHideDownloadContent).boolean)
+      request.selected.push_back("splash_dlc");
+    request.master = true;
+    request.selection_explicit = true;
+  }
   request.defaults = menu_options::ParseRowNames(menu_options::kDefaultRows);
   request.refresh_row_owns_refresh = g_settings.tap_refresh_row;
   request.refresh_row_enabled = g_settings.refresh_row_on;

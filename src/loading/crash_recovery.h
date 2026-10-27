@@ -3,7 +3,7 @@
 #include <string_view>
 namespace rex { class Runtime; }
 namespace rb_blitz::loading {
-void ConfigureCrashRecovery(rex::Runtime* runtime);
+void ConfigureCrashRecovery(rex::Runtime* runtime, bool settings_restart_boot = false);
 void BeginCrashRecoveryAttempt();
 void BeforeSongLoadJob();
 void EndCrashRecoveryAttempt();
