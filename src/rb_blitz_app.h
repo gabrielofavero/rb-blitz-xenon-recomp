@@ -429,6 +429,9 @@ class RbBlitzApp : public rex::ReXApp {
   // change to kInitOnly flags, which is correct here - those are device and logging
   // selections that the config, environment and command line have already fixed.
   void OnPreLaunchModule() override {
+    rb_blitz::assets::InstallControllerSchemes(
+        rex::filesystem::GetExecutableFolder() / "assets" / "controller" / "schemes",
+        runtime()->user_data_root() / "controller_schemes");
     rb_blitz::assets::InstallP1TextureOverride();
     // P11a: the last read-back before the guest thread exists. A cvar this boot wrote can have been
     // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the

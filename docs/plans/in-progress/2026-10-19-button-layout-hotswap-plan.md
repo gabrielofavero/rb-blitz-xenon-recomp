@@ -1,7 +1,7 @@
 # Button layout hot-swapping — button glyphs and controller art
 
-**Status: in progress, created 2026-10-19; scope revised 2026-10-26. P0 delivered
-2026-10-26; P1 delivered 2026-10-27; P2 onward remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
+**Status: in progress, created 2026-10-19; scope revised 2026-10-27. P0 delivered
+2026-10-26; P1 and P2 delivered 2026-10-27; P3 onward remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
 
@@ -20,6 +20,12 @@ setting to **Controller Layout**, expands the controller catalog to seven famili
 prompt ids are retained; the dependency graph defines execution order. Live behavior remains
 **unproven** until the corresponding implementation and acceptance prompts pass.
 
+The 2026-10-27 asset revision changes P2 onward: custom schemes provide individually named glyph
+and pad PNGs, while omitted slots keep the corresponding art from the user's base game. Source
+images are resized proportionally into measured destinations. P6a must deliver a standalone
+custom-package guide in `assets/controller/README.md`. P0's local sheet exports and P1's
+whole-texture override remain valid evidence and infrastructure.
+
 ## 1. Request, normalized
 
 | Id | Requirement |
@@ -28,7 +34,7 @@ prompt ids are retained; the dependency graph defines execution order. Live beha
 | R2 | The installer offers an **optional Rock Band Blitz PS3 `.pkg`** and extracts exactly the assets this feature needs. If the user supplies it, a **PS3 layout** appears in the in-game list. |
 | R3 | A tracked structure under `assets/controller/` where the owner leaves PNGs (and a small manifest) to build a **custom scheme package**. |
 | R4 | **Keyboard/mouse icons are built in, always available, and not selectable or replaceable by controller packages.** Real keyboard/mouse input switches ordinary action hints to their effective key/mouse icons; real controller input switches back to the selected controller family. |
-| R5 | Help & Options calls the setting **Controller Layout**. Each accepted click/selection applies immediately and visibly previews the new controller icons, including when selected with keyboard/mouse; no Apply, screen exit, restart, or subsequent controller input is needed. |
+| R5 | Help & Options calls the setting **Controller Layout**. Each accepted click/selection applies immediately and visibly previews supplied controller art, including when selected with keyboard/mouse; no Apply, screen exit, restart, or subsequent controller input is needed. |
 | R6 | Seven controller families: **Xbox 360** (default, base-game art), **PlayStation 3** (local import), **Xbox Series**, **PlayStation Series**, **Nintendo Switch**, **Steam Controller**, and **Steam Deck**. The latter five use owner-authored art; custom controller packages remain discoverable. |
 | R7 | With no custom controller scheme installed, controller art falls back to **Xbox 360** from the base game. Built-in keyboard/mouse icons and binding-aware hints remain available while the feature is enabled. |
 | R8 | No game art is committed, bundled or downloaded. PS3-extracted art lives only in the user's install or user-data folder and is never redistributed. |
@@ -36,6 +42,7 @@ prompt ids are retained; the dependency graph defines execution order. Live beha
 | R10 | Tests, a live acceptance harness and the documents named in §10 are part of the change. |
 | R11 | **Interface Mapping and Gameplay Mapping** render bound inputs as button/key/mouse images side by side, in saved binding order, instead of textual input names. For example, `Confirm: [A icon] [Enter keycap]` contains two images; the action label remains text. Mapping rows show all bindings; overflowing rows use the guest's layout/scrolling with no silent omission. |
 | R12 | The **effective Interface Mapping dictates every interface footer and action hint**: mapping physical Y to Confirm draws Y in the selected controller family wherever Confirm is offered. For multiple controller or keyboard/mouse bindings, ordinary hints show the **first mapped source in the active device family**. Rebinding, reset, and profile changes refresh visible hints live. Gameplay hints use the effective Gameplay Mapping/preset for their context. |
+| R13 | A controller scheme supplies **individual images for only the glyph and pad slots it changes**. Omitted slots retain the corresponding base-game art without requiring the author to distribute it. Source PNG dimensions may differ from the destination: scale to fit without cropping or stretching, center on a transparent slot canvas, and preserve aspect ratio. `assets/controller/README.md` must explain the complete custom-package workflow. |
 
 ### 1.1 Scope cross-check, 2026-10-26
 
@@ -171,49 +178,74 @@ What this settles for the plan:
 1. **The PS3 import has a concrete route.** The only platform-specific art is the button sheet; the
    pad families (`ps_0..3` and `xbox_0..3`) already ship in the 360 scene, so the PS3 layout's pad
    art does not have to come out of the PS3 package at all.
-2. **Custom schemes do not have to re-encode DXT5.** The planned runtime override can take decoded
-   RGBA from PNGs; the guest's own DXT5 payload is never rewritten. Existing conversion code covers
-   DXT decode/encode, but this RGBA-to-guest-texture override remains P1 work.
+2. **Authors do not encode DXT5.** P1 proved that the project can provide canonical BC3 mip data
+   to both graphics backends without rewriting the guest's DXT5 payload. P2 must decode and fit
+   individual PNGs, compose them with original game glyphs, and encode the replacement texture.
 3. **The slot map is a real grid.** The sheet is 6×6 (about 85×84 px per cell); the exact slot
    rectangles come from the scene's `Glyph` table, which P0 reads.
 
-The `[unproven]` part is the **boot-time texture identity**: which loaded guest texture is the
-button sheet and which is each pad. §3 D1 makes that P1's measurement.
+P1 measured the boot-time button and first-pad texture fingerprints. P2 must identify the
+remaining pad slots before claiming independent replacement of all eight.
 
 ## 3. Decisions
 
 | Id | Decision |
 | --- | --- |
-| **D1** | **Controller-art hot swap uses a host texture override.** The SDK texture cache gains a generic override provider; the project supplies replacement RGBA for a slot, keyed by a measured fingerprint of the guest texture (dimensions + content hash, with the scene-read order as the fallback). P9/P10 may also change authored guest UI and served labels/records to express input icons and action identity; a texture swap alone cannot describe every binding. A scene-reload route is a fallback only if P1 proves live replacement unsafe, and does not satisfy R5 without a revised design. |
-| **D2** | **A scheme is a folder with one manifest.** `scheme.toml` names the id, display name and kind; `buttons.png` is the 512×512 glyph sheet; `pad.png` is the 1024×1024 controller art (with optional per-slot `pads/pad_0..3.png`); `icons.png` is the optional 1024×512 extra sheet. No DXT5, no scene, no archive surgery for custom schemes. |
+| **D1** | **Controller-art hot swap uses a host texture override.** The SDK texture cache has a generic override provider; the project supplies complete canonical BC3 mip data for a matched guest texture, keyed by a measured fingerprint (dimensions + content hash, with the scene-read order as the fallback). P9/P10 may also change authored guest UI and served labels/records to express input icons and action identity; a texture swap alone cannot describe every binding. P1 proved live replacement on D3D12 and Vulkan; the earlier scene-reload fallback is no longer needed. |
+| **D2** | **A scheme is a folder with one manifest and individual PNGs.** `scheme.toml` names the id, display name, kind and any button-slot and pad-slot image paths. Every slot entry is optional, but a package must replace at least one button or pad slot; an extra-icon sheet alone is insufficient. Omitted entries retain that same slot's base-game art. `icons.png` remains an optional whole 1024×512 extra sheet. No DXT5, scene, archive surgery or copied retail pixels in custom packages. |
 | **D3** | **Discovery is a boot scan, not a hot-add.** The game scans `<install>/assets/controller/schemes/` and `<user_data_root>/controller_schemes/`. For non-reserved custom ids, a user package shadows an install-root package with a log line; reserved families follow §4.1. Newly dropped packages are read at the next boot; the page says so in its caption. There is no Rescan row in v1. |
 | **D4** | **Only the controller layout is selectable.** The page lists `Xbox 360` plus every available valid controller scheme. Keyboard/mouse icons are a built-in provider, never an authored/discoverable layout or a list choice. Boot starts in keyboard/mouse hint mode; the first real pad event selects controller hint mode. Device switching never changes the saved controller selection. The selection page's explicit controller preview is independent of ordinary last-device hints (D14). |
 | **D5** | **PS3 import extracts one asset.** From a `.pkg` (plus the matching `.rap` if needed) or an extracted PS3 game folder, the installer extracts `ui/resource/fonts/gen/buttons.milo_ps3`, decodes its DXT5 sheet, and builds the PS3 scheme. The `ps_*` pad art comes from the user's 360 `controller_config.milo_xbox` via the same decoder. Nothing from the package is copied wholesale; the full ~350 MB ARK is never laid down. |
 | **D6** | **One native setting: `controller.scheme`, displayed as Controller Layout.** Stable tokens are `retail`, `ps3`, `xbox-series`, `playstation-series`, `nintendo-switch`, `steam-controller`, `steam-deck`, or a custom id. It lives in `settings.toml` through the main settings service, not in the profile's binding store. The route is `Controls → Controller Layout`; the setting label also uses the full name. `retail` is displayed as `Xbox 360`. Label/value layout must accommodate the name instead of shortening it to `Layout`. |
 | **D7** | **`enhancements_icon_schemes` becomes the master gate and defaults on**, with `Xbox 360` (`retail`) as the compiled default. With the gate off the Controller Layout page is omitted and faithful retail art is used. This changes the off-by-default line in `src/enhancements.cpp`; the toggle table records it. R4/R11/R12 describe enabled behavior. |
-| **D8** | **Fallbacks preserve the device family.** Missing/invalid selected controller package → Xbox 360 art, logged and reflected in the setting. Keyboard/mouse → built-in keycap/mouse provider, with a built-in neutral image for an unsupported source or no binding; never controller art because a keyboard package is absent. Invalid controller packages are skipped and never listed. |
-| **D9** | **Art is authored on a fixed grid, in white/alpha.** `buttons.png` must use the 6×6 slot grid; the game's material tints the glyph, so the sheet should be white/grey with straight alpha (colored art is allowed but is multiplied by the tint). `pad.png` is transparent-background RGBA. The loader converts to the guest's format; the art author never handles DXT5. |
+| **D8** | **Fallbacks preserve the device family and each guest slot.** Missing/invalid selected controller package → Xbox 360 art, logged and reflected in the setting. Within a valid partial package, an unlisted button or pad slot keeps the corresponding original game slot/texture; an explicitly listed but invalid file rejects the package rather than silently falling back. Keyboard/mouse → built-in keycap/mouse provider, with a built-in neutral image for an unsupported source or no binding; never controller art because a keyboard package is absent. Invalid controller packages are skipped and never listed. |
+| **D9** | **Authors provide independent, variably sized PNGs.** Button art is white/grey with straight alpha because the game's material tints glyphs (colored art is allowed but multiplied by the tint). For each supplied button or pad image, the loader scales uniformly to fit the measured destination rectangle/canvas, centers it, and leaves unused space transparent; it never stretches or crops. The runtime composes the full 512×512 button texture from the user's original game art plus supplied glyphs, then encodes all required BC3 mips for the existing guest texture override. The art author never handles DXT5 or positions. |
 | **D10** | **No retail/game art in the repository or the release.** The five owner-authored controller schemes and built-in keyboard/mouse art must be original or appropriately licensed. Xbox 360 art stays in the user's base game; the PS3 scheme is generated locally and is gitignored/audited like `game/` and `assets/game/`. |
-| **D11** | **The retail pad page's eight pad slots all receive the selected scheme's art.** `xbox_i` and `ps_i` both map to `pad_i` (or `pad.png` for all four), so whichever family/preset index retail draws, it shows the selected scheme. |
+| **D11** | **The retail pad page has eight independently replaceable textures.** A scheme may name any subset of `xbox_0..3` and `ps_0..3`; each omitted texture remains the corresponding original Xbox/PS game texture. An optional shared pad image can fill all eight, with explicit per-slot images taking precedence. Do not collapse distinct preset images or substitute one family's base-game pad for the other. |
 | **D12** | **Effective bindings are the source of truth for icons.** A shared resolver maps `(action, interface/gameplay context, device family, effective profile/preset)` to ordered physical sources, then their icons. Mapping rows render every source; ordinary action hints render the first source in the active family. Controller glyphs use the selected family; keyboard/mouse glyphs use the built-in provider. No static default-key sheet after rebinding. Profile/preset changes, assigning, removing, reordering and resetting invalidate the relevant views. |
 | **D13** | **Draw icons through the guest's UI.** Mapping rows keep their text action labels and render adjacent input images; guest footers, widgets, labels and served records carry the resolved hints. A shared 6×6 texture cannot express arbitrary simultaneous row contents or context-specific actions on its own. P9/P10 prove guest draw/label routes; no new host overlay is authorized by this plan. |
-| **D14** | **Selection has an immediate controller preview.** Each accepted choice refreshes controller icons and pad art on the next presented frame. A guest-authored preview on the Controller Layout page always shows the selected controller family, even when a mouse click or keyboard key chose it. Ordinary hints still follow real last-device activity. The preview neither fakes controller input nor changes the saved device state, and does not wait for leaving the page. |
+| **D14** | **Selection has an immediate controller preview.** Each accepted choice refreshes the controller preview on the next presented frame. A guest-authored preview on the Controller Layout page shows at least one image actually supplied by a selected package, plus any original-art fallback it uses; `retail` previews original game art. This applies even when a mouse click or keyboard key chose the layout. Ordinary hints still follow real last-device activity. The preview neither fakes controller input nor changes the saved device state, and does not wait for leaving the page. |
 
 ## 4. The asset contract — what to draw
 
 ### 4.1 Files and restrictions
 
-| File | Required | Size | Format | Rules |
+| File | Required | Destination | Source format | Rules |
 | --- | --- | --- | --- | --- |
 | `scheme.toml` | yes | — | TOML | `schema_version = 1`; id, name, kind; file paths relative to the scheme folder |
-| `buttons.png` | yes | **512×512** | PNG, 8-bit RGBA | straight alpha; sRGB; transparent background; white/grey art (tinted by the game); **do not move or resize the 6×6 slots**; no drop shadows that cross a slot boundary |
-| `pad.png` | yes for a controller scheme | **1024×1024** | PNG, 8-bit RGBA | transparent background; the controller centered as in the retail image; used for all four pad slots unless per-slot files exist |
-| `pads/pad_0.png` … `pad_3.png` | no | **1024×1024** each | PNG, 8-bit RGBA | optional per-slot override; if present, all four must be present |
-| `icons.png` | no | **1024×512** | PNG, 8-bit RGBA | optional `blitz_icons` sheet; if absent, the retail sheet is used |
+| `buttons/<slot-id>.png` | any subset | that ID's rectangle in `slots.toml`, inside a 512×512 sheet | PNG, 8-bit RGBA, sRGB, straight alpha; variable dimensions | one image per supplied button slot; white/grey art is tinted by the game; no copied game art |
+| `pads/<slot-id>.png` | any subset | 1024×1024 for each `xbox_0..3` / `ps_0..3` texture | PNG, 8-bit RGBA, sRGB, straight alpha; variable dimensions | optional image for that exact guest pad texture; other pads retain their original art |
+| `pads/shared.png` | no | 1024×1024 for all eight pad textures | PNG, 8-bit RGBA, sRGB, straight alpha; variable dimensions | optional common image; explicit pad-slot images override it |
+| `icons.png` | no | **1024×512** | PNG, 8-bit RGBA, sRGB, straight alpha | optional whole `blitz_icons` sheet; if absent, the retail sheet is used; this sheet has no measured per-glyph contract yet |
 | anything else | no | — | — | the loader ignores it; the validator reports it |
 
-Provisional limits (P2 may tighten, never loosen without a measurement): ≤ 8 MB per image, ≤ 32
-files per scheme, no symlinks, id `[a-z0-9][a-z0-9-]{0,31}`, display name ≤ 20 characters.
+Paths above are examples, not implicit discovery: every supplied image is named by its stable slot
+ID in `scheme.toml`. An omitted manifest key means intentional base-game fallback for that slot.
+At least one button or pad replacement image must be declared; `icons.png` alone is insufficient.
+An absent file named in the manifest, an unknown
+ID, a malformed PNG or a duplicate path rejects the package; there is no silent fallback for a
+broken declaration. Packages do not include a copy of the base game's button sheet or pad art.
+
+For a declared image of source size `W×H` and destination size `w×h`, resize uniformly by
+`min(w/W, h/H)`, round the resulting dimensions to fit within the target (at least one pixel per
+axis), and center it on a transparent `w×h` canvas. Preserve aspect ratio; never crop, stretch or
+repeat. Thus a 128×128 image for a 32×32 target becomes 32×32, and a 64×50 image becomes 32×25
+with transparent space above and below. The actual button target is the measured rectangle in
+`slots.toml` (for example, A is 81×81), not a universal 32×32. The whole source canvas, including
+any transparent margins, participates in scaling; authors should trim unintended margins. A
+declared button image **replaces** its rectangle on a composite made from the user's own game
+texture; its old pixels do not show through transparent parts of the new image. Clear that
+glyph's 85-pixel atlas cell before fitting the image into its measured rectangle: the Xbox 360
+A art has visible pixels at rows 81–82, just beyond its UV rectangle's last row 80. Preserve original
+BC3 blocks where no cleared cell intersects them so omitted art is not degraded by an
+unnecessary recompression. A declared pad image uses the same fit/center rule on a 1024×1024
+transparent canvas; an omitted pad texture is not overridden at all. When buttons are supplied,
+compose and encode the complete button BC3 texture/mips in memory or user-local cache only;
+never ship or commit a
+composite containing game pixels. Verify untouched rectangles and pad textures against the source.
+
+Provisional limits (P2 may tighten with measurement): ≤ 8 MB and ≤ 2048×2048 per source PNG,
+≤ 64 files per scheme, no symlinks, id `[a-z0-9][a-z0-9-]{0,31}`, display name ≤ 20 characters.
 The earlier 28-character single-line budget does not fit `Controller Layout: <name>`; P3 must
 measure separate guest label/value placement or wrapping while retaining the full setting name.
 The 20-character value cap remains provisional until that measurement.
@@ -244,7 +276,8 @@ glyphs in row 0. The corrected pixels identify A/B/X/Y, LT/LB/RT/RB, D-pad direc
 LS/RS and two horizontal arrows. The remaining instrument and stick-direction icons retain
 character-based IDs until their action semantics are measured. This sheet has no standalone
 Start or Back picture; P8/P10 must resolve those actions without assuming one exists. The
-template draws each rectangle and label so a paint program can be used without guessing.
+blank template draws each rectangle and label as a reference; authors save independent PNGs,
+not a painted copy of the template sheet.
 
 P8 separates this **logical action-slot map** from a **physical-source icon catalog**. A selected
 controller sheet supplies physical controller icons; the resolver can draw Y for logical Confirm
@@ -271,40 +304,52 @@ name = "Xbox Series"      # ≤ 20 characters; this is the row's value
 kind = "controller"       # the only discoverable package kind
 
 [buttons]
-file = "buttons.png"
+confirm_a = "buttons/a.png"
+# back_b = "buttons/b.png"
+# Omit every button glyph that should retain its base-game art.
 
-[controller]
-file = "pad.png"
-# Optional: per-slot overrides, all four or none.
-# slots = ["pads/pad_0.png", "pads/pad_1.png", "pads/pad_2.png", "pads/pad_3.png"]
+# [controller]
+# file = "pads/shared.png"  # Optional: fills all eight pad textures.
 
-[icons]
-file = "icons.png"        # optional
+# [controller.slots]
+# xbox_0 = "pads/xbox_0.png"  # Optional: takes precedence over shared.
+# ps_0 = "pads/ps_0.png"   # Each other pad slot is independent.
+
+# [icons]
+# file = "icons.png"       # Optional whole extra-icon sheet.
 ```
 
-A controller scheme must have `pad.png` or all four per-slot files. `kind = "keyboard"` is
-rejected for packages; keyboard/mouse resources are built with the application independently.
+The sample may omit `[controller]`, `[controller.slots]` or `[icons]` entirely. A button-only or
+pad-only controller package is valid. `kind = "keyboard"` is rejected for packages;
+keyboard/mouse resources are built with the application independently. P2 must make this exact
+manifest form, key precedence and absent-versus-invalid behavior executable and tested.
 
 ### 4.4 The authoring kit (P6a, not blocked on the owner's art)
 
-- `assets/controller/README.md` — this contract in task form.
+- `assets/controller/README.md` — a user-facing, step-by-step custom-template/package guide:
+  accepted PNG format and size limits; slot IDs and their measured destination sizes; proportional
+  fit, centering and transparent padding with numerical examples; tint/alpha behavior; manifest
+  syntax and paths; button/pad omission and original-art fallback; validation, installation and
+  next-boot discovery; licensing/no-game-art rule; and a minimal working package.
 - `assets/controller/template/buttons.png` — a blank 6×6 grid with the slot rectangles and labels,
-  generated by the P0 tool. It contains **no retail art** and may be committed.
+  generated by the P0 tool. It is a placement reference, not a required package asset; it contains
+  **no retail art** and may be committed.
 - `assets/controller/template/pad.png` — a blank 1024×1024 guide with the safe area marked.
 - `assets/controller/template-360/` — a gitignored local reference generated from the
-  owner's Xbox 360 scenes by `python scripts/export_template_360.py`, including a
-  package-shaped `scheme.toml` with non-reserved id `xbox-360-reference` (`retail`
-  remains the built-in choice with no package). It is never installed or committed;
+  owner's Xbox 360 scenes by `python scripts/export_template_360.py`; P6a updates its
+  package-shaped `scheme.toml` and individual art exports to the P2 contract. `retail`
+  remains the built-in choice with no package. The reference is never installed or committed;
   the blank `template/` remains the distributable guide.
 - `assets/controller/template-ps3/` — the equivalent gitignored reference generated
-  from the owner's PS3 scenes by `python scripts/export_template_ps3.py`, with PS3
-  buttons, the four `ps_*` pad images and a package-shaped `scheme.toml` using
-  reserved id `ps3`; it is never installed or committed automatically.
+  from the owner's PS3 scenes by `python scripts/export_template_ps3.py`; P6a updates it to
+  individual PS3 controller glyphs, optional pad images and a package-shaped manifest using
+  reserved id `ps3`. It is never installed or committed automatically.
 - `assets/controller/slots.toml` — the tracked slot registry (id, rectangle, row/column, label).
 - `assets/controller/schemes/<id>/` — the owner's schemes; the five authored controller families live here when P6b
   runs.
-- `scripts/controller_schemes.ps1 -Validate -Pack` — validates every scheme (size, mode, required
-  files, slot coverage, id rules, duplicate ids) and copies the valid ones into the install layout.
+- `scripts/controller_schemes.ps1 -Validate -Pack` — validates every scheme (format, bounded source
+  dimensions, known slot IDs, declared paths, fit results, id rules, duplicate ids) and copies the
+  valid ones into the install layout.
 - A generated **`test-markers`** scheme (not shipped) with a unique solid color per slot, used by
   P1–P4 before real art exists.
 
@@ -352,8 +397,9 @@ The wizard gains one optional page after the Xbox 360 game-data page, **Controll
 
 On Next the helper runs `probe-ps3` (read-only) so a wrong source fails on the page, not halfway
 through the install. During the Progress stage `install-ps3-scheme` writes
-`<install>/assets/controller/schemes/ps3/` with `scheme.toml`, `buttons.png` and `pad_0..3.png`,
-and records the source in `install-manifest.toml` (`[controller_scheme]` table: id, source,
+`<install>/assets/controller/schemes/ps3/` with `scheme.toml`, individual controller glyph PNGs
+and the `ps_0..3` pad PNGs, and records the source in `install-manifest.toml`
+(`[controller_scheme]` table: id, source,
 content id, files, bytes, sha256).
 
 The extraction, exactly:
@@ -370,9 +416,11 @@ The extraction, exactly:
    `ui/resource/fonts/gen/buttons.milo_ps3` from `gen/main_ps3_0.ark` by its offset and size. The
    full 350 MB ARK is never written.
 4. **Decode** the milo chunk: find the 23-byte header and eight-byte preamble, take the
-   512×512 DXT5 payload at header + 31, decode PS3 blocks directly to RGBA, write `buttons.png`.
+   512×512 DXT5 payload at header + 31, decode PS3 blocks directly to RGBA, and crop the
+   known controller glyph rectangles from `slots.toml` to individual PNGs. Do not generate a
+   distributable full sheet or replace instrument glyphs just because they occupy the same sheet.
 5. **Extract the pad art from the 360 scene** (`ui/controller_config/gen/controller_config.milo_xbox`,
-   already installed): decode the four `ps_*` 1024×1024 DXT5 images and write `pad_0..3.png`. The
+   already installed): decode the four `ps_*` 1024×1024 DXT5 images and write `pads/ps_0..3.png`. The
    `ps_*` family is already in the 360 dump, which the project already measured
    ([assets.md](../../guides/assets.md)); the PS3 package is not the source of the pad art.
 6. **Validate** the generated scheme with the same validator the custom-package flow uses, then
@@ -384,8 +432,8 @@ extracted-folder route. The PS3 scheme is **never** written into the repository 
 
 ### 5.2 Custom package flow
 
-1. The player drops `<user_data_root>/controller_schemes/<id>/` with `scheme.toml`, `buttons.png`
-   and `pad.png` (or the optional files).
+1. The player follows `assets/controller/README.md` and drops
+   `<user_data_root>/controller_schemes/<id>/` with `scheme.toml` and at least one declared PNG.
 2. The next boot scans both roots, validates each package, logs one line per accepted/rejected
    scheme, and publishes the list to the settings screen.
 3. The page lists the accepted controller schemes. Selecting one writes `controller.scheme` and
@@ -412,7 +460,7 @@ Controls
 | --- | --- | --- | --- | --- |
 | `Controller Layout` | `kSelect` | `controller.scheme` | Full label plus `Xbox Series` in measured separate value space or a wrapped line | "Choose controller icons and preset art. Each selection applies immediately." |
 | `Keyboard & Mouse` | `kInfo` | — | `Keyboard & Mouse: Automatic` | "Built-in key and mouse icons follow your bindings and appear automatically when you use them." |
-| Controller preview | guest image widgets | — | Representative button images and pad art from the selected controller family | Visible immediately, including on keyboard/mouse selection; never an overlay. |
+| Controller preview | guest image widgets | — | At least one supplied button or pad image from the selected scheme, with original art shown for omitted slots | Visible immediately, including on keyboard/mouse selection; never an overlay. |
 
 The `Controller Layout` choices are built from the boot's registry and inserted through
 `MenuConfiguration.choices`; `Xbox 360` (`retail`) is always present and is the compiled default. A custom
@@ -428,11 +476,14 @@ Hot apply:
   runtime and asks the texture override provider to refresh the affected slots. The invalidation is
   queued to the GPU/UI thread, not performed on the guest thread.
 - Each click or accepted selector change commits and refreshes the on-page controller preview
-  on the next presented frame. Rapid selections resolve to the latest committed choice. Keyboard
+  on the next presented frame. Choose the preview's representative image from art the scheme
+  actually supplies, including a pad image for pad-only schemes. Identify original-art fallback
+  in a guest-authored caption where otherwise ambiguous. Rapid selections resolve to the latest committed choice. Keyboard
   or mouse activity cannot mask that preview by switching ordinary hints to keyboard/mouse.
 - The row commits without a restart prompt; leaving the page and returning shows the new selection.
-- The retail **Controller Presets** page uses the selected pad art whenever visible; the selection
-  page itself already demonstrates both changed icons and pad art without navigation.
+- The retail **Controller Presets** page uses each supplied pad image when visible and its own
+  original texture for omitted slots. The selection page demonstrates a supplied image without
+  navigation.
 - If the selected package becomes invalid between boots, the boot falls back to `retail`, logs
   `button_schemes: saved scheme <id> is missing, using retail`, and the row shows `Xbox 360`.
 
@@ -513,23 +564,23 @@ guest-authored rows, preview widgets and labels follow the authorized guest rout
 The patch is deliberately **generic and upstreamable**: "a host provider may replace the data of a
 guest texture at load time". It does not know about Rock Band Blitz.
 
-Sketch (the exact naming is P1's):
+P1's interface, abbreviated:
 
 ```cpp
 namespace rex::graphics {
 
 struct TextureOverrideRequest {
-  // The cache's own key: guest page, width/height, format, tiling, mip count.
-  // The provider may also ask for the loaded base data to fingerprint it.
+  // Width, height, mip count, format, guest base address/size, tiling, endianness.
 };
 
 class TextureOverrideProvider {
  public:
-  // Returns true and fills `rgba8` (top level, width * height * 4) when this texture
-  // has a replacement for the current generation. Called on the GPU thread.
+  // Returns a complete canonical BC3 mip chain for a matched texture.
+  // The guest base bytes are for identification, not a ready RGBA canvas.
   virtual bool GetOverride(const TextureOverrideRequest& request,
-                           const uint8_t* guest_data, size_t guest_data_size,
-                           std::vector<uint8_t>* rgba8) = 0;
+                           const uint8_t* guest_data,
+                           std::vector<std::vector<uint8_t>>* host_levels,
+                           bool* refresh_target) = 0;
 };
 
 // The provider is process-global because the cache is created by the GPU plugin.
@@ -540,12 +591,11 @@ void InvalidateTextureOverrides();
 }  // namespace rex::graphics
 ```
 
-Why this works for both backends: the base `TextureCache` owns the load path; the backend-specific
-`LoadTextureDataFromResidentMemoryImpl` converts guest data to host data. The patch asks the provider
-before conversion and feeds it the provider's RGBA. The backends do not each need a project-specific
-hook.
+Why this works for both backends: the base `TextureCache` owns identification and invalidation;
+each backend uploads the returned canonical BC3 levels into its existing compressed texture.
+The SDK patch remains independent of Rock Band Blitz's slot IDs and manifest format.
 
-Identification in P1, in order of preference:
+Identification strategy for P2 onward, in order of preference:
 
 1. **Content fingerprint**: hash the guest base data (or a stable 4 KB sample) and match a table of
    measured fingerprints for the button sheet and the eight pad images. The table is recorded by
@@ -558,16 +608,10 @@ Identification in P1, in order of preference:
    source path are still in guest memory; this is the most precise but the most invasive, and is
    only chosen if 1 and 2 both fail.
 
-Invalidation: a generation counter on the provider. On a scheme change, bump the generation and
-call `ClearCache()` **or** drop only the textures whose keys are in the override table; P1 measures
-the cost. The button sheet is 512×512 (1 MB RGBA), the pads are 1024×1024 (4 MB each); a full cache
-clear on every keyboard/controller switch would be wrong, so the plan requires the narrow invalidation
-or a per-slot re-upload. The acceptance measures the switch's frame cost.
-
-Fallback if the patch is rejected: a VFS overlay can serve a scheme-specific
-`buttons.milo_xbox`/`controller_config.milo_xbox`, and the host can force the UI resource to reload.
-That is a worse user experience (a scene reload, and the font/glyph cache may persist); it is a
-fallback, not the plan.
+Invalidation uses the provider's generation counter. P1 proved narrow candidate invalidation and
+full-mip reload on D3D12 and Vulkan. P2 must mark each identified button/pad texture as a
+candidate, return no replacement for omitted pads, and rebuild the composed button texture
+when the selected scheme changes. Measure the cost again with real partial packages.
 
 ### 6.3 Threading
 
@@ -656,8 +700,9 @@ exports are also in the gitignored `assets/controller/template-360/`.
   RhythmVerse art worker uses it for image-to-game conversion; the music player uses
   `DecodePlatformTexture` for game-cover-to-overlay conversion. For P5, use `DecodeDxt5`
   directly on the PS3 scene payload, and `SwapSixteenBitWords` plus `DecodeDxt5` on the
-  Xbox pad scene payload, then write the required `buttons.png` / `pad_*.png`
-  from RGBA. `BuildPlatformTexture` writes a standalone `.png_xbox` / `.png_ps3` container, not a
+  Xbox pad scene payload, then write individual controller glyph and pad PNGs from RGBA for the
+  revised P5 contract. `BuildPlatformTexture` writes a standalone `.png_xbox` / `.png_ps3`
+  container, not a
   PNG, and does not parse the 23-byte scene record. `scripts/hmx_tex.py` provides the same block
   decode and PNG output offline; P0 still has to locate the scene payload and `Glyph` table.
 - **Keep the DXT5 runtime question separate (measured 2026-10-21).** The codec's DXT5 output
@@ -823,24 +868,67 @@ fall back to editing the guest scene and call it a hot swap.
 
 ### P2 — Scheme package, registry and validator
 
+**Delivered and owner-accepted on D3D12 (2026-10-27).** `src/controller_schemes/` parses and validates the
+individual-slot manifest, decodes straight-alpha RGBA PNGs with WIC, fits each image into its
+measured rectangle, preserves untouched canonical BC3 blocks, and composes full pad mip chains.
+The boot scans install and user roots, logs its catalog/rejections, and the P1 provider routes the
+identified button and eight pad fingerprints to the selected package. Until P3 supplies the
+setting, normal boots select `retail`; `RB_BLITZ_SCHEME` selects a package for P2 development
+acceptance. `scripts/controller_schemes.ps1` validates and packs packages. The generated
+`out/button-schemes/p2/fixtures/` has all-slot markers, one-glyph, one-pad and invalid packages;
+it is gitignored and contains no game pixels. `ctest -R button_scheme` pins parser, fit,
+original-block preservation, the tiled/endian inverse and all ten scene fingerprints. The
+owner's first one-glyph screenshot exposed retail A pixels below the measured UV rectangle;
+clearing the containing atlas cell fixed that artifact. The owner retest confirmed a clean magenta
+A frame, an unchanged A prompt with the pad-only package, one magenta `xbox_1` controller-preset
+image and original art for the other pad images. Logs
+`out/button-schemes/p2/d3d12-one-glyph-20261027-202258.log` and
+`out/button-schemes/p2/d3d12-one-pad-20261027-202327.log` record the button override at one mip,
+the pad override at seven mips, successful catalog discovery, deliberate rejection of the invalid
+fixture, 3,811 µs button composition and 111 ms boot-time pad preparation. The owner performed
+the UI checks with `scripts/acceptance_button_schemes_p2.ps1`. P2 package behavior on Vulkan
+remains unmeasured; P1 already measured the underlying override seam there.
+
 **Goal.** Make a scheme a folder the game can validate and load, before any UI exists.
 
 **Deliverable.**
 - `src/controller_schemes/`: manifest parsing, id/name validation, image loading to RGBA8, the
   slot table, discovery from the two roots, duplicate/shadow rules, fallback ordering, and a
-  `Summary()` for the boot log.
+  `Summary()` for the boot log. Parse the §4.3 individual-slot manifest. Each absent button or pad
+  key intentionally keeps the corresponding original slot; an explicitly declared broken file
+  rejects the entire scheme. A button-only or pad-only scheme is valid if it has replacement art.
+- Implement the §4.1 fit/center transform for variable-size PNGs using the exact `slots.toml`
+  rectangles. Clear a supplied button rectangle before inserting its resized image so its
+  transparent pixels do not reveal the prior glyph; preserve canonical original BC3 blocks
+  unaffected by any replacement rectangle instead of recompressing the entire sheet. Test that
+  unlisted art still decodes like the user's original sheet. Preserve original game art only in
+  memory or a user-local cache, never in a distributable package. Supply complete BC3 mip chains through
+  P1's provider. For each absent pad slot, let the SDK load that original guest texture unchanged;
+  for a declared pad, use the shared image or its specific image with the documented precedence.
+- Pin the base-game decode/composition route in host tests: the P1 callback's `guest_data` may be
+  tiled and endian-swapped, so raw bytes are not a ready RGBA canvas. Reuse the measured scene
+  decoder or a proven SDK conversion route; do not assume linear BC3 input. Generate the final
+  texture before GPU-thread upload where practical, then invalidate only affected textures.
 - The seven controller identities from §4.6, with Xbox 360 always present, PS3 gated on local
   import, and the five authored families listed only when valid. Keyboard/mouse is a separate
   built-in dependency, never a scheme choice or user-shadowable package.
 - `scripts/controller_schemes.ps1 -Validate -Pack`: validates the owner tree and copies built-ins
   into the install layout; accepts a `-Scheme <dir>` for one package.
-- Tests: valid/invalid manifests, reserved ids, duplicate ids, missing/extra files, wrong
-  dimensions, alpha requirement, slot coverage, fallback ordering, custom-id user shadowing,
-  reserved-family protection, and rejection of `kind = "keyboard"`.
+- Tests: valid/invalid manifests, reserved ids, duplicate ids, missing/extra declared files,
+  unknown slots, zero/oversized dimensions, alpha/format requirement, one-slot packages,
+  intentionally omitted instrument glyphs and pads, original-block/pixel preservation,
+  old-art clearing
+  inside a supplied transparent slot, 128×128→32×32 and 64×50→32×25 proportional fits,
+  centering/transparent padding, shared-versus-specific pad precedence, fallback ordering,
+  custom-id user shadowing, reserved-family protection, and rejection of `kind = "keyboard"`.
 - The generated `test-markers` scheme and a deliberately invalid fixture for the tests.
 
 **Verify.** `ctest -R button_scheme` green; the boot log lists the schemes and the rejected
-packages; a package with a wrong-size PNG is not listed and says why.
+packages. A valid non-native-size PNG is accepted and fitted; an oversized or corrupt PNG is
+rejected with a reason. A one-glyph scheme visibly changes only that glyph while instrument
+glyphs and every omitted pad remain the user's original art; supplying one pad changes only the
+named texture. If a package supplies buttons, its composed button sheet has all required mip
+levels and swaps live via P1; a pad-only package leaves the button texture untouched.
 
 **Don't.** Do not let the registry depend on SDL, the GPU or the guest; it is a host-only module and
 the installer compiles its pure parts.
@@ -868,7 +956,9 @@ the installer compiles its pure parts.
 **Verify.** With `test-markers`, each selection changes the on-page controller icons and pad preview
 on the next presented frame, including a mouse click or keyboard selection while ordinary hints
 remain in keyboard/mouse mode. Repeat with controller selection and rapid changes. No Apply,
-page exit, or later pad input is needed. Controller Presets uses the selected art; leaving shows no
+page exit, or later pad input is needed. A one-glyph scheme previews that glyph and retains its
+original pad; a pad-only scheme previews its supplied pad and retains original button glyphs.
+Controller Presets uses the supplied pad art and original fallback as declared; leaving shows no
 restart prompt; a new boot restores the saved selection. Choosing Xbox 360 restores base-game
 controller art. The boot log names the active scheme.
 
@@ -920,9 +1010,11 @@ only the needed art extracted.
   synthetic fixture, the folder route, a wrong package refused, no full-ARK output.
 - An acceptance run against the user's package and the extracted `assets/game/ps3` reference.
 
-**Verify.** The generated `ps3/buttons.png` matches the PS3 reference sheet (same grid, PlayStation
-symbols); its `Glyph` table matches the 360 sheet's slot rectangles (a mismatch stops the package as
-a finding, because the host override maps by slot); `ps3/pad_0..3.png` match the 360 `ps_*` art; the
+**Verify.** The generated `ps3/buttons/<slot-id>.png` files match the corresponding PS3 reference
+rectangles for the known controller glyphs; omitted instrument glyphs remain from the user's 360
+base game when the package is selected. The PS3 `Glyph` table matches the 360 sheet's slot
+rectangles (a mismatch stops the package as a finding, because the host override maps by slot);
+`ps3/pads/ps_0..3.png` match the 360 `ps_*` art and omitted `xbox_*` pads remain original; the
 install contains no game archive and no key; the PS3 scheme appears in the page and hot-swaps like
 the others. The folder route passes even when the PKG decryption route cannot be exercised.
 
@@ -937,16 +1029,30 @@ five tracked authored controller families. Built-in keyboard/mouse resources bel
 do not depend on the owner drawing a Keyboard scheme.
 
 **Deliverable.**
-- The final `assets/controller/README.md`, template, `slots.toml`, validator, and an example scheme
-  folder (the `test-markers` scheme is a generated example, not a shipped one).
+- The final user-facing `assets/controller/README.md`, template, `slots.toml`, validator, and an
+  example scheme with a simple procedurally drawn original icon (the `test-markers` scheme is a
+  generated test fixture, not a shipped one). Write the README as a complete custom-template/package
+  tutorial, not a link back
+  to this plan. Cover every topic listed in §4.4 and show a minimal valid `scheme.toml` with one
+  button image, then an optional pad-slot example. Explain where the user's files go and how to
+  validate them before a boot. Keep it in sync with the implemented P2 parser and validator.
+- Update the local export/template scripts to offer the new individual-file contract while keeping
+  decoded game art in the gitignored local reference only. Provide blank individual glyph/pad
+  guides or an extraction guide from `slots.toml`; no authored scheme requires a full sheet.
 - The installer `[Files]` entry and build step that copy `assets/controller/schemes/` into
   `<install>/assets/controller/schemes/`; the audit rule that the folder contains only original art.
-- A blank-scheme test: a scheme with the retail slots and a solid pattern in one slot is accepted
-  by the validator and loaded by the registry.
+- A partial-scheme test: one original 128×128 glyph PNG for a measured button slot is accepted,
+  resized and loaded without any pad PNG or copied retail glyphs. A second example replaces one
+  pad while all seven other pad textures retain base-game art.
 
-**Verify.** `controller_schemes.ps1 -Validate` passes on the template/example and rejects a wrong
-size; an install copies exactly the scheme files; the audit reports no game data under
-`assets/controller/`.
+**Exit criteria.** `assets/controller/README.md` exists in the tracked authoring kit and a reader
+can follow it alone to make and validate a one-button custom scheme: it specifies image format,
+source size limits, manifest syntax, stable slot IDs, expected art/tint/alpha, proportion-preserving
+resizing and transparent padding (including the 128×128→32×32 and 64×50→32×25 examples), optional
+pads, per-slot base-game fallback, file placement, next-boot discovery and licensing. Run the
+documented commands on that example and a non-square image; the validator accepts both and
+reports the computed destination dimensions. An install copies exactly the authored scheme files;
+the audit finds no game pixels under tracked `assets/controller/` or in the distributable.
 
 **Don't.** Do not start from a decoded retail sheet as committed art. Do not ship a scheme the owner
 has not authored or licensed.
@@ -954,8 +1060,9 @@ has not authored or licensed.
 ### P6b — The owner's five controller schemes and visual acceptance (**blocked on the manual art**)
 
 **Start condition.** `assets/controller/schemes/xbox-series/`, `playstation-series/`,
-`nintendo-switch/`, `steam-controller/`, and `steam-deck/` contain real `scheme.toml`, `buttons.png`
-and `pad.png` (or all four pad files); the owner has confirmed the slot map. P3/P4/P9/P10 and the
+`nintendo-switch/`, `steam-controller/`, and `steam-deck/` each contain a real `scheme.toml` and at
+least one original, declared glyph or pad image; the owner has confirmed the slot map. Pads and
+instrument glyphs that the owner does not wish to replace may be omitted. P3/P4/P9/P10 and the
 P6a pipeline pass. **This prompt cannot run before those files exist.** Earlier prompts use
 generated fixtures; built-in keyboard/mouse resources never require a manual Keyboard package.
 
@@ -969,8 +1076,11 @@ Presets page; both mapping screens' adjacent images; default and rebound control
 hints with first-source ordering (D12); immediate previews chosen by every input family; the
 real-art acceptance captures. Xbox 360 is read from the base game, never copied into tracked art.
 
-**Verify.** Each scheme draws its own glyphs and pad, the keyboard auto-switch matches the art, the
-selected controller scheme persists, and no screen falls back to retail unintentionally. The
+**Verify.** Each scheme draws every glyph and pad image it actually supplies; all intentionally
+omitted glyphs and pads remain the corresponding original base-game art. Verify at least one
+non-native-size, non-square source preserves its proportions and transparent margins. The
+keyboard auto-switch matches the art, the selected controller scheme persists, and no supplied
+slot falls back to retail unintentionally. The
 acceptance captures are under `out/button-schemes/p6b/`.
 Exercise all seven families when the PS3 import is available; if absent, record PS3 acceptance as
 unproven rather than fabricating a package. Changing controller layout leaves key/mouse icons
@@ -1112,7 +1222,10 @@ known actionable hint still shows stale/default bindings.
 | Missing/corrupt package | skipped with a reason; the page is not dead | boot log |
 | PS3 `.pkg` | content id, decryption, one-entry extraction | helper log + `install-manifest.toml` |
 | PS3 folder | the same scheme from `gen/main_ps3.hdr` | helper log |
-| PS3 generated art | matches the reference grid/art | `ps3/buttons.png` vs the PS3 reference |
+| PS3 generated art | individual controller glyphs and `ps_*` pads match the local reference; omitted instrument/`xbox_*` slots stay original | per-slot PNG comparison + capture |
+| Partial package | one changed glyph does not erase or redistribute omitted instrument glyphs; one changed pad leaves seven original pad textures | composite/texture tests + capture + distributable audit |
+| Variable source dimensions | 128×128→32×32 and 64×50→32×25 fit; real slot dimensions come from `slots.toml` | transform tests + validator report + capture |
+| Custom-package guide | a reader can make, validate and install a one-image scheme using `assets/controller/README.md` alone | documented example run + file audit |
 | No game art in the repo/release | the audit rule | `audit_distributable.ps1` |
 | Switch cost | the frame does not stutter on a scheme change | measured frame times |
 | Click/select each Controller Layout choice with keyboard, mouse and controller | on-page controller icons/pad change next frame without Apply or later pad input | capture + commit/generation log |
@@ -1148,13 +1261,12 @@ known actionable hint still shows stale/default bindings.
    insufficient for the required name plus a value. P3 measures separate guest label/value
    placement or wrapping; the provisional 20-character value cap is validated there. Truncating
    or renaming the setting is not the resolution.
-7. **The retail pad page's four images.** The plan maps all eight slots to the selected scheme; if
-   the four images turn out to be four distinct presets that must not be collapsed, the per-slot
-   `pad_0..3.png` override exists. P0/P5 confirms which it is.
-8. **Memory and load time.** Five authored controller schemes plus an imported PS3 scheme ×
-   (1 MiB sheet + 4 MiB pad) is about 30 MiB of decoded RGBA for one pad image per scheme, or
-   about 102 MiB with four distinct 4 MiB pads each, before built-in key/mouse resources and GPU
-   copies. P2 may decode lazily; acceptance measures boot, binding refresh and switch costs.
+7. **The retail pad page's eight images.** The four Xbox and four PS textures may represent distinct
+   presets. Explicit slot IDs replace them independently; the optional shared pad is a deliberate
+   author choice. Missing slots retain the matching original texture, not a different preset.
+8. **Memory and load time.** Packages can have one image or up to 32 glyph images and eight pad
+   images. Retain the source game sheet once, compose only active schemes and decode lazily where
+   possible. P2 measures boot, binding refresh, switch cost, source-image bounds and GPU copies.
 9. **Security.** The validator clamps file sizes/dimensions, rejects symlinks and path traversal,
    and never trusts a manifest's file paths outside its folder. A malformed PNG is a rejection, not
    a crash.
@@ -1173,6 +1285,7 @@ known actionable hint still shows stale/default bindings.
 | P0 | [`docs/guides/assets.md`](../../guides/assets.md) | the 23-byte record, DXT5 offset, unswap, the 6×6 grid, the pad decode; the old "No" is marked superseded |
 | P0 | [`docs/reference/backlog.md`](../../reference/backlog.md) | the "pin the sheet format" item is resolved; the successor is this plan |
 | P1 | [`patches/README.md`](../../../patches/README.md) | the texture-override patch and why it is generic |
+| P6a exit criterion | `assets/controller/README.md` | a standalone custom-template/package guide, with manifest and individual-slot examples, image formats, proportional resizing, transparent padding, original-art fallback, validation and installation |
 | P3 | [`docs/engine/toggles.md`](../../engine/toggles.md) | R4 is implemented; the gate's default and the page |
 | P3/P9/P10 | [`docs/settings/plan.md`](../../settings/plan.md), [`menu.md`](../../settings/menu.md), [`status.md`](../../settings/status.md) | Controller Layout, full label/preview, image mapping rows, binding-aware hints, hot evidence, live state |
 | P4/P5/P6b/P8/P10 | [`docs/reference/known-issues.md`](../../reference/known-issues.md) | RAP/trial caveat, unsupported inputs/hint routes, any unproven backend; no accepted static-keyboard exception |

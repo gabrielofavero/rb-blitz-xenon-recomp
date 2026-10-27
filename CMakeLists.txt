@@ -253,6 +253,8 @@ set(RBBLITZ_SOURCES
     # sheets decode with it next. SDK-free, so the suites cover it without a boot.
     src/assets/texture_codec.cpp
     src/assets/texture_override.cpp
+    src/controller_schemes/schemes.cpp
+    src/controller_schemes/png_wic.cpp
     # P3's album art, host half: the key/path/URL rules and the texture cache the guest's art
     # request reads. The fetch and the image decode are Windows-only and appended below.
     src/store/album_art.cpp
@@ -1355,6 +1357,29 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_store_art_tests PRIVATE src)
     add_test(NAME store_art COMMAND rb_blitz_store_art_tests)
+
+    add_executable(rb_blitz_button_scheme_tests
+        tests/button_scheme_tests.cpp
+        src/controller_schemes/schemes.cpp
+        src/assets/texture_codec.cpp)
+    if(WIN32)
+        target_sources(rb_blitz_button_scheme_tests PRIVATE src/controller_schemes/png_wic.cpp)
+        target_link_libraries(rb_blitz_button_scheme_tests PRIVATE windowscodecs ole32)
+    endif()
+    target_include_directories(rb_blitz_button_scheme_tests PRIVATE src)
+    add_test(NAME button_scheme COMMAND rb_blitz_button_scheme_tests)
+    add_test(NAME button_scheme_fingerprints
+        COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_controller_texture_fingerprints.py)
+    if(WIN32)
+        add_executable(rb_blitz_controller_schemes
+            tools/controller_schemes_main.cpp
+            src/controller_schemes/schemes.cpp
+            src/controller_schemes/png_wic.cpp
+            src/assets/texture_codec.cpp)
+        target_include_directories(rb_blitz_controller_schemes PRIVATE src)
+        target_link_libraries(rb_blitz_controller_schemes PRIVATE windowscodecs ole32)
+    endif()
 
     # P3's Downloaded matcher (src/store/store_library.h): the field normalization and the
     # (artist, title) index. Hermetic and SDK-free - the package reader is the builder's half and

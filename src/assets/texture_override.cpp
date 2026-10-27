@@ -3,8 +3,10 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -14,6 +16,7 @@
 #include <rex/logging.h>
 
 #include "assets/texture_codec.h"
+#include "controller_schemes/schemes.h"
 
 namespace rb_blitz::assets {
 namespace {
@@ -37,6 +40,100 @@ uint64_t ContentHash(const uint8_t* bytes, std::size_t size) {
   }
   return hash;
 }
+
+// Reproduced from the owner's 360 scene bytes with the SDK's tiled 2D layout,
+// then checked against P1's guest trace. These hashes identify all eight pad
+// slots independently, including the four not visited in the first P1 run.
+constexpr std::pair<uint64_t, const char*> kPadFingerprints[] = {
+    {0x1607043F166B232Dull, "xbox_0"}, {0x06FFB32889EA3A64ull, "xbox_1"},
+    {0x54855E715F650967ull, "xbox_2"}, {0x66AE0BAD190B484Dull, "xbox_3"},
+    {0x4747E8979C00EEFBull, "ps_0"}, {0xC6948849BBEEB180ull, "ps_1"},
+    {0xF2158119E803554Eull, "ps_2"}, {0x86AAF3CCA6CE2365ull, "ps_3"},
+};
+constexpr uint64_t kButtonFingerprint = 0x3F044908A62A89ADull;
+constexpr uint64_t kExtraIconsFingerprint = 0x1163F9F7F2FFF53Dull;
+
+class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
+ public:
+  SchemeOverride(controller_schemes::Registry registry, std::string selected)
+      : registry_(std::move(registry)), selected_(std::move(selected)) {
+    const auto* scheme = registry_.Find(selected_);
+    if (!scheme) return;
+    const auto start = std::chrono::steady_clock::now();
+    for (const auto& [hash, id] : kPadFingerprints) {
+      if (const auto* image = scheme->Pad(id))
+        pads_[hash] = controller_schemes::ComposePad(*image, 7);
+    }
+    if (scheme->has_icons) icons_ = controller_schemes::ComposeIcons(scheme->icons, 11);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start);
+    REXLOG_INFO("controller_schemes: selected '{}' with {} prepared pad texture(s) in {} ms",
+                selected_, pads_.size(), elapsed.count());
+  }
+  bool GetOverride(const rex::graphics::TextureOverrideRequest& request,
+                   const uint8_t* guest_data,
+                   std::vector<std::vector<uint8_t>>* host_levels,
+                   bool* refresh_target) override {
+    const auto* scheme = registry_.Find(selected_);
+    if (!scheme) return false;
+    const uint64_t hash = ContentHash(guest_data, request.guest_base_size);
+    if (request.width == 512 && request.height == 512 && hash == kButtonFingerprint) {
+      *refresh_target = true;
+      if (scheme->buttons.empty()) return false;
+      if (buttons_.empty()) {
+        const auto start = std::chrono::steady_clock::now();
+        std::vector<uint8_t> original;
+        if (!controller_schemes::UntileBc3Base(
+                guest_data, request.guest_base_size, request.width,
+                request.tiled, uint32_t(request.endianness), &original) ||
+            !controller_schemes::ComposeButtons({original}, *scheme, &buttons_)) {
+          REXLOG_WARN("controller_schemes: cannot compose original button sheet");
+          return false;
+        }
+        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start);
+        REXLOG_INFO("controller_schemes: composed button sheet in {} us", elapsed.count());
+      }
+      if (request.mip_count > buttons_.size()) return false;
+      host_levels->assign(buttons_.begin(), buttons_.begin() + request.mip_count);
+      if (logged_.insert(hash).second)
+        REXLOG_INFO("controller_schemes: overrode button sheet ({} mip level(s))",
+                    request.mip_count);
+      return true;
+    }
+    if (request.width == 1024 && request.height == 1024) {
+      for (const auto& [fingerprint, slot] : kPadFingerprints) {
+        if (hash != fingerprint) continue;
+        *refresh_target = true;
+        auto it = pads_.find(hash);
+        if (it == pads_.end() || request.mip_count > it->second.size()) return false;
+        host_levels->assign(it->second.begin(), it->second.begin() + request.mip_count);
+        if (logged_.insert(hash).second)
+          REXLOG_INFO("controller_schemes: overrode {} pad ({} mip level(s))", slot,
+                      request.mip_count);
+        return true;
+      }
+    }
+    if (request.width == 1024 && request.height == 512 &&
+        hash == kExtraIconsFingerprint) {
+      *refresh_target = true;
+      if (request.mip_count > icons_.size()) return false;
+      host_levels->assign(icons_.begin(), icons_.begin() + request.mip_count);
+      if (logged_.insert(hash).second)
+        REXLOG_INFO("controller_schemes: overrode extra icons ({} mip level(s))",
+                    request.mip_count);
+      return true;
+    }
+    return false;
+  }
+ private:
+  controller_schemes::Registry registry_;
+  std::string selected_;
+  std::vector<std::vector<uint8_t>> buttons_;
+  std::vector<std::vector<uint8_t>> icons_;
+  std::map<uint64_t, std::vector<std::vector<uint8_t>>> pads_;
+  std::unordered_set<uint64_t> logged_;
+};
 
 std::vector<uint8_t> MakeMarkerLevel(uint32_t size, bool pad) {
   std::vector<uint8_t> rgba(std::size_t(size) * size * 4);
@@ -145,6 +242,27 @@ void InstallP1TextureOverride() {
   rex::graphics::SetTextureOverrideProvider(&provider);
   REXLOG_INFO("texture_override: P1 trace active (button={}, pad={}, switch={})",
               button.has_value(), pad.has_value(), switch_path ? switch_path : "none");
+}
+
+void InstallControllerSchemes(const std::filesystem::path& install_root,
+                              const std::filesystem::path& user_root) {
+  auto registry = controller_schemes::Discover(install_root, user_root,
+                                                controller_schemes::DecodePngWic);
+  REXLOG_INFO("controller_schemes: {}", registry.Summary());
+  for (const auto& rejected : registry.rejected)
+    REXLOG_WARN("controller_schemes: rejected '{}': {}", rejected.folder.string(), rejected.reason);
+  for (const auto& shadowed : registry.shadowed)
+    REXLOG_INFO("controller_schemes: {}", shadowed);
+  for (const auto& [id, scheme] : registry.schemes)
+    for (const auto& extra : scheme.extra_files)
+      REXLOG_WARN("controller_schemes: '{}' ignores extra file '{}'", id,
+                  extra.generic_string());
+  const char* requested = std::getenv("RB_BLITZ_SCHEME");
+  const std::string selected = requested ? requested : "retail";
+  if (selected != "retail" && !registry.Find(selected))
+    REXLOG_WARN("controller_schemes: '{}' unavailable; using Xbox 360", selected);
+  static SchemeOverride provider(std::move(registry), selected);
+  rex::graphics::SetTextureOverrideProvider(&provider);
 }
 
 }  // namespace rb_blitz::assets
