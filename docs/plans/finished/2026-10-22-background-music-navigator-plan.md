@@ -1,12 +1,12 @@
 # Background music navigator — implementation plan
 
-**Status:** P1–P3 implementation present (2026-10-26); P3 acceptance remains open.
+**Status:** Delivered and accepted by the owner (2026-10-26; §22).
 P2 connects navigation, bindings and owner-accepted native pause/resume. P3 adds an authorized
 bottom-right player, local covers, bounded asynchronous artwork and explicit pointer ownership.
-The owner confirms the player and live cover work and Start pauses. Their latest review removes
-all LB/RB footer additions; the retail A/B prompts remain unchanged. RB Next crashed during a
-song handoff in `rb_blitz_372.log`; its cause is still unresolved. The next build adds a bounded
-first-chance fault trace for diagnosis. Live UI testing remains with the owner. See §21.
+The retail A/B prompts remain unchanged. §21 records the earlier RB Next crash and diagnostic
+build; the owner subsequently confirmed that the full navigator works, including the RB handoff.
+The crash's root cause was not independently established. See §22 for the acceptance scope and
+remaining unmeasured cases.
 
 **Scope revision (2026-10-26, owner).** The two controls the feature cannot ship without are in
 scope, and the plan is corrected to match the tree: the **on/off setting** moves from
@@ -459,7 +459,8 @@ bridge and local artwork path, complete the acceptance sweep and update the docs
    bridge and the art resolver/cache/texture lifecycle), part 1 §7.2 (Play Current Song
    follows a manual skip), `docs/engine/input-flow.md` (the menu-music latch and the media-key
    patch and mouse capture/click routing), `docs/settings/status.md` (one bullet), `docs/reference/known-issues.md` (only what is
-   really limited: Start is consumed on the main menu; RB handoff has an unresolved crash;
+   really limited: Start is consumed on the main menu; record the historical RB handoff crash
+   (§21) and the owner's later full-feature acceptance (§22);
    the media keys may be claimed by another Windows media app), this plan's status record.
 7. Index: `docs/README.md` and `docs/plans/in-progress/README.md` already point at `in-progress/`
    (corrected 2026-10-26); when P1–P3 are green, `git mv` the plan to `finished/` and re-point every
@@ -1009,7 +1010,8 @@ no click-through/double-posts, outside-player routing, focus/modal/mouse-off/nav
 16:9/21:9/small-window/non-default-DPI captures, and repeated-skip/refresh/renderer-teardown soak.
 Footer baseline and prompt-cluster constants remain provisional until those captures calibrate
 them. A title-only live boot and the broader P2 physical-pad/media/assignment/restart matrix also
-remain unmeasured. Do not move this plan to `finished/` or claim P3 live acceptance on host tests.
+remain unmeasured. At this handoff, host tests alone did not justify moving the plan to
+`finished/`; the owner's later full-feature acceptance is recorded in §22.
 
 
 **Final host verification:** `cmake --build --preset win-amd64-release` succeeds with the
@@ -1141,3 +1143,18 @@ check passed 2612 checks over eight menu configurations with zero refusals. `git
 passed. The documentation checker retained its baseline 43 errors/87 warnings with no new
 identities. Evidence: `out/_swap/music-nav/p3-skip-crash/` (`build-release.log`,
 `tests-release.log`, `records.log`, `docs.json` and read-only package-header logs).
+
+## 22. Owner acceptance and delivery (2026-10-26)
+
+After the §21 build and review, the owner confirmed that the **full background music navigator
+works**, including the RB Next handoff that had previously crashed. This is owner-reported live
+acceptance of the feature, its player and controls; no new automated game drive or diagnostic log
+was supplied with the confirmation. The `rb_blitz_372.log` failure remains a historical observation,
+and its exact cause was not independently isolated. The previous statements that the crash is
+currently reproducible and P3 live acceptance is pending are superseded by this section.
+
+P1–P3 implementation and host validation are recorded above. The owner's full-feature confirmation
+closes the plan. Individual matrix arms that were not separately evidenced — physical-pad and
+Windows media-key delivery, title-only pause, every viewport/DPI combination, and prolonged
+renderer/refresh soak — remain unmeasured as such; this acceptance does not create logs or
+measurements for them.

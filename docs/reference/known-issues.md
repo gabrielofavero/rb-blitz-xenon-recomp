@@ -27,21 +27,22 @@ It never continues a faulted guest. A 60s live run, live row application and
 broader provider/hardware coverage remain unmeasured. See the
 [load-guard evidence](../plans/finished/2026-10-13-load-guard.md) parts 4–5.
 
-**Menu-music navigator acceptance limits (2026-10-26):** Next/Previous, persistent pad/key
+**Menu-music navigator remaining measurement limits (2026-10-26):** Next/Previous, persistent pad/key
 bindings and title-only navigation are implemented. **Native pause/resume is enabled:**
 the owner confirmed the trial works, and `rb_blitz_367.log` records a 7.285-second
 frozen-cursor pause and same-stream/same-position resume. No trial flag is required;
 the guest row displays the configured bindings. A separate title-only pause boot,
 Windows media-key arbitration, physical-pad input and guest layout/assignment/restart
-routes remain unmeasured. P3 player/artwork are implemented; DPI, click-through and lifecycle
-soak acceptance remain open. The owner confirmed the live cover and Start pause, then reported
-RB Next crashes. `rb_blitz_372.log` reaches the next source load before a guest read of `0x4`;
-the function is unknown because that run has no stack. A bounded first-chance fault trace is now
-included for diagnosis; the crash is **not fixed**. All LB/RB footer prompts and spacing edits
-were removed at the owner's request, retaining retail A/B. Start is consumed on the main-menu
+routes remain unmeasured. P3 player/artwork are implemented. The owner confirmed the **full navigator
+works** after the earlier RB Next crash, including the RB handoff; individual DPI, click-through and
+lifecycle-soak cases were not separately evidenced. `rb_blitz_372.log` records the historical
+successor-load failure before a guest read of `0x4`; that run has no stack, and the exact cause
+was not independently isolated. The bounded first-chance fault trace remains available.
+All LB/RB footer prompts and spacing edits were removed at the owner's request, retaining retail
+A/B. Start is consumed on the main-menu
 option list when its configured pause action is available. Another Windows media application
 may claim media keys. See the
-[navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §21.
+[navigator plan](../plans/finished/2026-10-22-background-music-navigator-plan.md) §22.
 The legacy `--background_music_nav_pause_trial` flag now only enables per-second
 cursor diagnostics. A final in-flight decoder block may settle after native pause;
 it is excluded from Previous's five-second playback-age counter.

@@ -1210,9 +1210,9 @@ The current stream remains in control while successors prepare. At EOF with no r
 successor, a title track fills the gap; the prepared DLC sequence resumes as soon as
 a successor is ready. This optional work never gates native content or graphics readiness.
 
-The session exposes shared forward/backward cursor methods, but the future navigator's
-buttons, settings, pause seam and footer are not implemented by this architecture work.
-See the updated background-music navigator plan in `docs/plans/in-progress/`.
+The session foundation exposes shared forward/backward cursor methods; the later navigator
+adds buttons, settings, the pause seam and the player. See the
+[finished background-music navigator plan](../plans/finished/2026-10-22-background-music-navigator-plan.md).
 
 Host validation covers lazy exhaustion past 50 songs, large merged packs, stable IDs,
 shared backward/forward history, bounded warmth and explicit pins, failure quarantine,
@@ -1256,7 +1256,7 @@ The same boot spent 531 ms mounting menu music, 45.794 s in native content enume
 5.663 s in graphics preparation. A separate full-library store index ran throughout startup;
 its contribution to the long pre-menu interval needs profiling in a separate session. Detailed
 timestamps and the unconfirmed double-audio report are in the
-[navigator follow-up](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §13.
+[navigator follow-up](../plans/finished/2026-10-22-background-music-navigator-plan.md) §13.
 
 
 ### 7. Navigator P1: surface and shared bridge (2026-10-26)
@@ -1295,7 +1295,7 @@ clears automatic handoff grace for future presses while preserving an already ca
 No second playlist or mounted-cache cursor is introduced.
 
 Host tests and the build/manual validation record are in the
-[navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §11.
+[navigator plan](../plans/finished/2026-10-22-background-music-navigator-plan.md) §11.
 
 
 ### 8. Navigator P2: guest execution and action bindings (2026-10-26)
@@ -1322,9 +1322,9 @@ trial flag now only requests per-second diagnostics. The guest row shows binding
 Host production-hook tests
 cover navigation, cold targets, history/restart, automatic snapshots, title tracks and
 cancellation; title-only live pause, media-device attribution, guest layout and physical-pad input remain
-unproven. P3 implements player/artwork (§9 below); live visual and mouse acceptance
-remains pending. See the
-[P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §§14 and 17 and
+unproven in this earlier P2 record. P3 implements player/artwork (§9 below), and the owner
+later accepted the full navigator. See the
+[P2 record](../plans/finished/2026-10-22-background-music-navigator-plan.md) §§14 and 17 and
 `out/_swap/music-nav/p2-runtime/` for verification.
 
 
@@ -1334,8 +1334,8 @@ navigation now retains four waiting requests in addition to the active handoff, 
 visible in the snapshot. A Previous made during loading retains step-back intent until execution,
 so a delayed command cannot become another restart. The ordinary playing-state five-second
 rule remains. Failed/cancelled requests and focus/scope/owner/session boundaries clear the burst.
-Seven music host tests pass; the owner retest remains pending. See the
-[navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §15.
+Seven music host tests pass; the owner later accepted the full navigator. See the
+[navigator record](../plans/finished/2026-10-22-background-music-navigator-plan.md) §15.
 
 
 ### 9. Navigator P3: player and local covers (2026-10-26)
@@ -1345,10 +1345,12 @@ player mostly works and the cover is visible live. Their latest review removes a
 additions: the retail A/B widgets retain their original actions and layout. No native spacing or
 transform edit, footer locale token, availability query or host footer drawing remains.
 
-The owner also reports RB Next crashes. The current log reaches the successor load before a
-guest read of `0x4`, without a stack. A bounded first-chance trace now captures near-null guest
-faults, host frames and the active ShellMusic stage/context, without handling the exception.
-The crash remains unresolved; see the [navigator plan](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §21.
+An earlier owner run reported an RB Next crash. `rb_blitz_372.log` reaches the successor load
+before a guest read of `0x4`, without a stack. A bounded first-chance trace captures near-null
+guest faults, host frames and the active ShellMusic stage/context, without handling the exception.
+The owner subsequently confirmed that the full navigator works, including RB Next. The exact
+cause of the earlier fault was not independently isolated; see the
+[navigator plan](../plans/finished/2026-10-22-background-music-navigator-plan.md) §22.
 
 The player keeps the search interface’s bold/condensed fonts, but the owner’s second review
 replaces its prominent popup treatment with a black translucent panel, dark-gray transport

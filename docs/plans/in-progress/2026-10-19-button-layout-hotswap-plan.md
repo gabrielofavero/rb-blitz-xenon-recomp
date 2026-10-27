@@ -116,6 +116,19 @@ that either image rows or remap-aware guest hints already work.
   `LoadTextureDataFromResidentMemoryImpl`.
 - There is **no texture-override or replacement hook** today.
 
+`[tree, inspected 2026-10-26]` Image conversion already works in both directions outside that
+cache. `src/assets/texture_codec.{h,cpp}` parses/writes the 32-byte standalone `.png_xbox` /
+`.png_ps3` envelope, swaps 16-bit DXT words, decodes/encodes DXT1 and DXT5, and resizes RGBA.
+`src/store/album_art_service.cpp` uses WIC to decode a downloaded image to RGBA and
+`BuildPlatformTexture` to serve a `.png_xbox` through the game's own album-art request.
+`src/ui/menu_music_artwork.cpp` uses `DecodePlatformTexture` to turn an installed song cover into
+RGBA; `src/ui/menu_music_player.cpp` uploads that RGBA with `ImGuiDrawer::CreateImageTexture` for
+the **existing music-player overlay**. `scripts/hmx_tex.py` also exports/imports standalone
+textures and swaps standalone archive entries. These paths prove conversion and their respective
+serving/drawing routes, not replacement of a scene-embedded button sheet or live invalidation of
+the guest texture cache. The music-player upload is an overlay draw path, so it is not the guest UI
+route required by D13.
+
 `[tree]` The installer is a separate, Windows-only C++ helper (`installer/src/`) driven by Inno
 Setup (`installer/setup.iss`). Its commands are deliberately small (`probe-folder`, `probe-package`,
 `import-game`, …); the helper already links a few SDK-free project modules from the emulator tree so
@@ -156,8 +169,9 @@ What this settles for the plan:
 1. **The PS3 import has a concrete route.** The only platform-specific art is the button sheet; the
    pad families (`ps_0..3` and `xbox_0..3`) already ship in the 360 scene, so the PS3 layout's pad
    art does not have to come out of the PS3 package at all.
-2. **Custom schemes do not have to re-encode DXT5.** The runtime override can take RGBA PNGs from
-   the host; the guest's own DXT5 payload is never rewritten.
+2. **Custom schemes do not have to re-encode DXT5.** The planned runtime override can take decoded
+   RGBA from PNGs; the guest's own DXT5 payload is never rewritten. Existing conversion code covers
+   DXT decode/encode, but this RGBA-to-guest-texture override remains P1 work.
 3. **The slot map is a real grid.** The sheet is 6×6 (about 85×84 px per cell); the exact slot
    rectangles come from the scene's `Glyph` table, which P0 reads.
 
@@ -470,11 +484,12 @@ guest-authored rows, preview widgets and labels follow the authorized guest rout
 | Area | File(s) | Responsibility |
 | --- | --- | --- |
 | Scheme registry / manifest / images | `src/controller_schemes/{registry,manifest,image,slots}.{h,cpp}` | SDK-free parsing, validation, RGBA loading, slot table; testable without a boot. The installer compiles the same manifest/slot code where it overlaps. |
-| Slot map / template tool | `scripts/hmx_milo.py` extension + `scripts/controller_schemes.ps1` | P0/P2 tooling: decode a named sheet, emit rectangles, validate a package, build the template. |
+| Image conversion already available | `src/assets/texture_codec.{h,cpp}`, `scripts/hmx_tex.py`; WIC use in `src/store/album_art_service.cpp` | Reuse DXT decode/word swap and RGBA conversion. The standalone texture envelope and store art serving path are not the scene-record parser or the live override. |
+| Slot map / template tool | `scripts/hmx_milo.py` extension + `scripts/controller_schemes.ps1` | P0/P2 tooling: locate a named scene payload and its `Glyph` table, reuse the existing DXT decoder to export it, emit rectangles, validate a package, build the template. |
 | Active scheme runtime | `src/hooks/button_schemes.{h,cpp}` | Holds selected controller layout, last input family, explicit preview state and binding generation; publishes immutable snapshots; logs; owns the registry instance. |
 | Input-icon resolver | proposed `src/input/input_icons.{h,cpp}` + existing `src/profile/input_rows.{h,cpp}` / effective binding APIs | P8: ordered physical-source icons for interface/gameplay contexts, first source per hint family, preset inheritance, unbound behavior; built-in keyboard/mouse provider independent of controller packages. |
 | Last-device tracker | `src/input/last_device.{h,cpp}` | Raw pad/keyboard/mouse activity, debounce, atomic `LastDevice`; called from the existing poll/event seams. |
-| Texture override provider | `src/assets/texture_override.{h,cpp}` + `patches/00xx-texture-override.patch` | Registers a provider with the SDK cache; maps a guest texture fingerprint to a slot; supplies RGBA; invalidates affected textures on a generation bump. |
+| Texture override provider | `src/assets/texture_override.{h,cpp}` + `patches/00xx-texture-override.patch` | Registers a provider with the SDK cache; maps a guest texture fingerprint to a slot; supplies RGBA; invalidates affected textures on a generation bump. The existing `ImGuiDrawer::CreateImageTexture` path only draws in the music-player overlay. |
 | Settings | `src/settings/model.h`, `schema.cpp`, `boot.cpp`, `hot_apply_runtime.cpp`, `cvars.cpp` | `SettingId::kButtonScheme`, the descriptor, the boot catalog, the `kHot` applier. |
 | Screen | `src/ui/settings_screen.{h,cpp}` | Controller Layout label/select, automatic keyboard/mouse info and guest controller preview; P9 image binding rows; `MenuConfiguration.choices` drives the list. |
 | Guest action hints | P10-measured guest draw/label hooks and served UI records (paths to be pinned by P10) | Contextual action identity, remap-aware footers/visual hints and refresh on binding/device/layout changes; no host overlay. |
@@ -605,8 +620,9 @@ pass; no static keyboard-sheet exception survives as an accepted limitation.
 
 **Deliverable.**
 - Extend `scripts/hmx_milo.py` with a `texture`/`export` command that finds a scene's 23-byte
-  record, identifies the DXT5 payload, `unswap`s it and writes a PNG; the same code handles the
-  512×512 sheet and the 1024×1024 pads.
+  record and identifies its DXT5 payload. Reuse the existing word swap and DXT decoder in
+  `scripts/hmx_tex.py` (or the C++ codec) to write a PNG; the same path handles the 512×512 sheet
+  and the 1024×1024 pads. Do not implement another block codec.
 - Read the `Glyph` table (the object records around the texture) and emit
   `assets/controller/slots.toml` with every slot id and rectangle; generate the blank
   `assets/controller/template/buttons.png` and `pad.png` guides.
@@ -614,21 +630,21 @@ pass; no static keyboard-sheet exception survives as an accepted limitation.
   mark the old "Can a UI texture be swapped today? **No**" claim as superseded, and name this plan
   as the successor. Move the format item in `docs/reference/backlog.md` to resolved/superseded.
 - Copy the evidence into `out/button-schemes/format-2026-10-19/` (already done) and cite it.
-- **Already landed, reuse it instead of starting over (2026-10-21):** `src/assets/texture_codec.h`
-  is the same format in C++ - the 32-byte platform envelope (parser and writer), DXT1/DXT5 decode
-  **and** encode, the 16-bit word swap and a box-filtered resampler, all SDK-free and pinned by
-  `tests/store_art_tests.cpp`. It arrived with the store's album art
-  (`src/store/album_art_service.cpp` decodes a cover with WIC and encodes a `.png_xbox` at runtime),
-  and it is exactly what P5's installer needs for the PS3 sheet (`DecodeDxt5` on the milo payload,
-  `BuildPlatformTexture` for the output) and what a host-side slot tool needs instead of a second
-  codec. The Python command above still matters for the *scene* half (finding the 23-byte record
-  and the `Glyph` table), which no C++ module reads yet.
-- **Encode DXT1 wherever alpha is not needed (measured 2026-10-21).** A DXT5 this codec produces is
-  a valid BC3 - it decodes to its source to within 0.8 levels per channel offline - but the engine
-  draws it as noise, while a DXT1 from the same code goes through the same serving path correctly
-  (`docs/guides/assets.md`, "which formats this build actually draws"). The button and slot sheets
-  are opaque, so `BuildPlatformTexture(..., TextureFormat::kDxt1, ...)` is both correct and half
-  the bytes; decod*ing* the retail PS3 DXT5 sheet stays DXT5, since that is what the file is.
+- **Already landed, reuse it instead of starting over (2026-10-21):**
+  `src/assets/texture_codec.{h,cpp}` has the standalone texture envelope, DXT1/DXT5 decode and
+  encode, 16-bit word swap and RGBA resampling, pinned by `tests/store_art_tests.cpp`. The
+  RhythmVerse art worker uses it for image-to-game conversion; the music player uses
+  `DecodePlatformTexture` for game-cover-to-overlay conversion. For P5, use `SwapSixteenBitWords`
+  and `DecodeDxt5` on the *scene* payload, then write the required `buttons.png` / `pad_*.png`
+  from RGBA. `BuildPlatformTexture` writes a standalone `.png_xbox` / `.png_ps3` container, not a
+  PNG, and does not parse the 23-byte scene record. `scripts/hmx_tex.py` provides the same block
+  decode and PNG output offline; P0 still has to locate the scene payload and `Glyph` table.
+- **Keep the DXT5 runtime question separate (measured 2026-10-21).** The codec's DXT5 output
+  decodes correctly offline, but a newly encoded DXT5 standalone cover drew with wrong colours in
+  the current game path (`docs/guides/assets.md`, "which formats this build actually draws"). That
+  result does not prove the planned RGBA cache override works or fails. Preserve the scheme PNGs'
+  straight alpha; do not force the transparent button/pad art to opaque DXT1. P1 must measure the
+  actual override upload on both backends.
 
 **Verify.** Re-running the command on the 360 and PS3 `buttons.milo_*` reproduces the two decoded
 sheets at the same 6×6 grid (the 360 sheet's 29 occupied cells and the PS3 sheet's own art); the two
@@ -644,6 +660,11 @@ proven for a scene that was not decoded.
 
 **Goal.** Prove a host texture can replace the button sheet and one pad slot in a live boot without
 touching the guest scene, and measure the cost of switching it.
+
+The store's `.png_xbox` serving path and the music player's `CreateImageTexture` upload are working
+examples of conversion and rendering, but neither replaces an already loaded, scene-embedded guest
+texture. P1 starts at the guest texture identity, upload and invalidation seam; it does not rebuild
+the DXT codec or duplicate the overlay renderer.
 
 **Deliverable.**
 - The SDK patch under `patches/` (with `patches/README.md`), applied by

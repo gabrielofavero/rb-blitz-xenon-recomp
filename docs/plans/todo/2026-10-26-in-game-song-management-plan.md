@@ -50,7 +50,7 @@ Inspected 2026-10-26. These are code observations, not runtime verification.
 | [load_trace.cpp](../../../src/loading/load_trace.cpp), [crash_dialog_state.h](../../../src/loading/crash_dialog_state.h) | Load setup/completion/unload observations and a one-shot main-menu popup already exist. Capture identity before calling vulnerable setup; extend this lifecycle without inventing an independent restart system. |
 
 Related work: [load-guard plan](../finished/2026-10-13-load-guard.md),
-[background-music navigator](../in-progress/2026-10-22-background-music-navigator-plan.md),
+[background-music navigator](../finished/2026-10-22-background-music-navigator-plan.md),
 and [library sorting](../../engine/song-library-sorting.md). Recheck these moving
 implementations before changing their shared hooks or state.
 

@@ -28,7 +28,7 @@ Part 1 wherever they disagree.
   background music and subsequent playback. See
   [the load-guard record](../plans/finished/2026-10-13-load-guard.md) part 5.
 
-- **Menu-music navigator P1–P3 implementation (2026-10-26; P3 live acceptance pending):** the default-On,
+- **Menu-music navigator P1–P3 delivered (2026-10-26; owner accepted):** the default-On,
   restart-scoped switch is on Audio/Video → Audio. Background Music Play remains
   Interface Mapping's fifth row, with effective bindings and Assign / Reset
   pages in both contexts. `[menu_music]` persists action-specific pad/key sources.
@@ -39,10 +39,10 @@ Part 1 wherever they disagree.
   player with mouse transport and local package covers. The owner confirms the player/cover and
   Start pause. The borderless black panel has dark-gray buttons and no hover text; hover retains
   the OS cursor. The latest review removes all LB/RB footer additions and spacing edits, retaining
-  retail A/B. RB Next crashed during a successor load; diagnosis remains open and the new build
-  adds a bounded native fault trace. Artwork/click policy passes host tests; DPI, click-through and
-  lifecycle acceptance remain pending. See the
-  [navigator record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §21.
+  retail A/B. The owner subsequently confirmed the full navigator works, including RB Next after
+  the earlier successor-load crash. Its exact cause was not independently isolated; specific DPI,
+  hardware and prolonged-soak arms remain unmeasured. See the
+  [navigator record](../plans/finished/2026-10-22-background-music-navigator-plan.md) §22.
 
 - **Guest binding rows (2026-10-25):** the host binding overlay is removed. Interface and gameplay
   lists receive current text on entry and after Reset All; the title draws every row. See the

@@ -18,10 +18,6 @@ re-points the references in code comments when a plan moves.
 
 ## Other plans
 
-The [background music navigator](in-progress/2026-10-22-background-music-navigator-plan.md)
-has P1/P2 implemented, including owner-verified native pause/resume (§17). Broader
-live acceptance and P3's footer, player and artwork remain outstanding.
-
 Two programs outgrew the plan format and now live with their subject instead:
 
 - **In-game settings** — sixteen per-package records were consolidated into

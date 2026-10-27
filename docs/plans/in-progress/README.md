@@ -45,17 +45,6 @@ was delivered on 2026-10-20: P1–P5 all landed, ending with the countdown and t
 The in-game settings program outgrew the plan format and lives with its subject; its live tracker is
 [`../../settings/status.md`](../../settings/status.md).
 
-The background-music navigator plan is filed here since 2026-10-26:
-[`2026-10-22-background-music-navigator-plan.md`](2026-10-22-background-music-navigator-plan.md) —
-its session/mount-cache **foundation is implemented** (one boot-mounted package, a rolling playlist
-and a bounded mount cache, replacing the fixed 50-song pool), while the navigator itself — the
-default-on *Menu Music Navigation* switch on General → Interface, the Background Music Play page
-under Controls → Interface Mapping, the LB/RB/Start and media-key latches, the pause seam and the
-owner-authorized bottom-right player (clickable transport, title/artist, album
-cover and a two-way playback bridge) — is staged: **P1–P3 implementation is present** (setting/bindings, navigation, owner-accepted pause,
-clickable player and local covers). The owner removed LB/RB prompts; an RB skip crash and live acceptance remain open, so the plan stays here. The old pool-order cursor is not to be restored;
-new navigation work builds on `MusicSession`'s shared cursor and history.
-
 See [`../README.md`](../README.md) for the status taxonomy.
 
 Binding rows are now implemented in the guest; gameplay verification is deferred at the owner's request. See

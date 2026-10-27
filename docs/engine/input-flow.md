@@ -753,9 +753,9 @@ SDK patch `0041-media-keys.patch` maps the three SDL media scancodes to existing
 the host latch translates them to SDL key names for capture and `HostKeyDown`.
 `drive_ui.ps1` adds media key names and E0 scan codes; the diagnostic navigator probe posts
 once after a configurable delay. Host tests drive no game UI. Windows media-key arbitration
-and physical-pad delivery remain unmeasured. P3’s host player mouse routing is described below;
-its live click-through acceptance awaits the owner’s test. See the
-[P2 record](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §§14 and 17.
+and physical-pad delivery remain unmeasured individually. P3’s host player mouse routing is
+described below; the owner later accepted the full navigator. See the
+[P2 record](../plans/finished/2026-10-22-background-music-navigator-plan.md) §§14 and 17.
 
 
 The 2026-10-26 Previous follow-up retains rapid navigation edges while the decoder loads:
@@ -764,8 +764,9 @@ made during another navigation/loading captures step-back intent at posting, rat
 the eventual execution time to choose restart. Completion promotes the next request; failed or
 cancelled execution, focus loss, modal/capture/loading ownership, teardown and session reset
 clear the burst. Full queues still report busy. Host tests reproduce double/triple Previous
-through a delayed restart and back to the boot song; owner listening confirmation is pending.
-See the [follow-up](../plans/in-progress/2026-10-22-background-music-navigator-plan.md) §15.
+through a delayed restart and back to the boot song; the owner later accepted the full navigator,
+without a separate burst log.
+See the [follow-up](../plans/finished/2026-10-22-background-music-navigator-plan.md) §15.
 
 
 ### P3 player pointer ownership (2026-10-26)
