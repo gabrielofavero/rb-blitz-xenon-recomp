@@ -34,6 +34,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "hide_achievements";
     case SettingId::kLoadGuard:
       return "load_guard";
+    case SettingId::kStartup:
+      return "startup";
     case SettingId::kResolution:
       return "resolution";
     case SettingId::kVsync:
@@ -70,6 +72,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "input_viewer";
     case SettingId::kBackgroundMusicNavigation:
       return "background_music_navigation";
+    case SettingId::kMusicPlayer:
+      return "music_player";
     case SettingId::kSettingsLabels:
       return "settings_labels";
     case SettingId::kHideDownloadContent:

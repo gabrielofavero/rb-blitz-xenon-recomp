@@ -16,11 +16,12 @@ The root remains How to Play, Calibration, General, Controls, Audio/Video, and G
 
 | Page | Entries |
 | --- | --- |
-| General | Game Edition; Interface; Song Library; Achievements & Unlocks; Load Guard; Credits |
+| General | Launch; Interface; Song Library; Achievements & Unlocks; Load Guard; Credits |
+| Launch | Game Version (Rock Band Blitz / Ultimate / Demo); Startup (Normal / Fast) |
 | Interface | Main Menu; Music Library & Store; Skip Offline Prompts; Setting Descriptions |
 | Main Menu | Base Game Items; Extra Items |
 | Base Game Items | Leaderboards; Achievements; Unlock Full Game; Download Content |
-| Extra Items | Refresh Songs; Play Current Song; RhythmVerse |
+| Extra Items | Refresh Songs; Play Current Song; Music Player; RhythmVerse |
 | Music Library & Store | Messages; Recommendations |
 | Song Library | RhythmVerse; Cache Song Library; Scan Threads |
 | RhythmVerse | Store Access; Filters (Guitar, Bass, Drums, Vocals, Keys) |
@@ -29,9 +30,16 @@ The root remains How to Play, Calibration, General, Controls, Audio/Video, and G
 | Video | Display; Graphics; Renderer (when more than one backend is available) |
 | Display | Window Mode; Resolution; V-Sync; Overscan |
 
-Shortcut and library-tab preferences use Visible/Hidden. Background Music uses Original/DLC;
+Shortcut and library-tab preferences use Visible/Hidden. Background Music uses Default/DLC;
 Store Access uses Enabled/Disabled. Hiding the RhythmVerse shortcut does not disable the store.
 Controls, gameplay, graphics quality, and their deeper pages retain their previous organization.
+
+Startup defaults to Normal: show the splash screen and "Press A to Start". Fast
+selects the local user and continues automatically through discovery to the main
+menu, skipping offline prompts for that boot. Settings and recovery restarts
+always use the fast path regardless of this preference; only recovery shows an
+error popup. The preference is saved as `[general] startup = "normal" | "fast"`
+and applies on the next launch (`startup_mode` is its cvar).
 
 Shortcut preferences remain reachable with an empty song library, disabled cache, or disabled
 store. Captions explain unmet dependencies and restart requirements. Unlock Full Game is marked
@@ -49,6 +57,50 @@ Audio retains the native scene, volume sliders, bass-boost handlers, and console
 authored record removes Overscan and adds the two settings-bridge music rows. Display reads and
 writes Overscan through the native console-data getter/setter; it introduces no host preference.
 Stored setting IDs and TOML keys remain stable. Earlier sections below record the previous layout.
+
+### Linked settings and Music Player (2026-10-26)
+
+`interface.music_player` (ID 54, default true, restart-scoped) controls the existing bottom-right
+player independently of `interface.background_music_navigation`. The player can remain visible and
+clickable with controller/keyboard music navigation off. Both switches are applied by the boot;
+the music transport is prepared when either feature needs it, while pad/key consumption follows
+the navigation switch alone.
+
+Background Music **Default** means the original implementation; **DLC** enables the enhanced
+library background music. Selecting Default first asks before disabling any enabled linked music
+features. Selecting DLC alone leaves those features disabled.
+
+| Prerequisite | Linked features |
+| --- | --- |
+| Background Music: DLC | Music Player; Play Current Song; Menu Music Navigation |
+| Cache Song Library | Refresh Songs |
+| RhythmVerse Store Access | RhythmVerse main-menu shortcut |
+| All HUD Elements: Visible | Gold Star Progress; Song Progress Bar; Timer; Personal Best; Note Streak; Input Viewer |
+
+`settings/dependencies.h` defines these relationships. A `set/linked.<setting>/<value>` request
+plans the change without staging or saving it. If it changes another setting, the guest opens its
+authored confirmation screen with Cancel selected. Back or Cancel discards the plan. Confirm stages
+the requested change and all linked changes in one transaction; a locked field or stale revision
+rejects the whole edit. Both menu and in-song contexts, including the native Audio page, use this
+route. Enabling a child asks to enable a missing prerequisite; enabling a prerequisite never restores
+children. Individual HUD settings are saved by the same provider transaction as the HUD master.
+
+Settings remain reachable while prerequisites are disabled. Missing installed content (for example,
+no playable DLC songs) is a resource constraint explained by the caption, rather than a preference
+that a confirmation could enable. Instrument filters and input bindings may still be configured in
+advance; they are criteria/mappings rather than dependent feature switches.
+
+### Combined verification (2026-10-26)
+
+`cmake --build --preset win-amd64-release` succeeds with Launch, Startup, the independent
+Music Player preference, and linked confirmations included. All 21 related settings, music,
+restart/recovery, and menu suites pass. The extracted-record matrix passes 2,612 checks across
+eight store/header states with zero refused edits and byte-identical DTB round trips. This includes
+host checks for startup persistence and both launch contexts, confirmation cancellation and stale
+or locked edits, failed-save retry, and independently preparing music transport for the player or
+pad/key navigation. Evidence: `out/tmp/linked-settings-launch-build.log`,
+`out/tmp/linked-settings-launch-tests.log`, and `out/tmp/linked-settings-launch-records.log`.
+No game/UI navigation was performed for this verification.
 
 ## Sources
 

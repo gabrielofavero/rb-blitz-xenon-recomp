@@ -12,6 +12,11 @@
 #include <windows.h>
 #endif
 
+REXCVAR_DEFINE_STRING(startup_mode, "normal", "Runtime",
+    "Startup: normal shows the splash screen and Press A to Start; fast starts the local user automatically.")
+    .allowed({"normal", "fast"})
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 REXCVAR_DEFINE_BOOL(song_load_crash_recovery, true, "Runtime",
     "Restart into the main menu with a native error dialog after a fatal process exit during song loading.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
@@ -43,6 +48,9 @@ uint32_t attempt_seconds = 0;
 void ConfigureCrashRecovery(rex::Runtime* runtime, bool settings_restart_boot) {
   presentation.recovered = REXCVAR_GET(song_load_recovered);
   presentation.settings_restart = settings_restart_boot;
+  presentation.fast_startup = REXCVAR_GET(startup_mode) == "fast";
+  if (presentation.fast_startup)
+    REXLOG_INFO("startup: fast; auto-starting the local user through discovery");
   if (settings_restart_boot)
     REXLOG_INFO("settings_restart: short boot; auto-starting the local user through discovery");
   presentation.timeout_seconds = REXCVAR_GET(song_load_timeout);

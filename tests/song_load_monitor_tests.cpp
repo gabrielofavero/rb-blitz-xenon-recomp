@@ -116,6 +116,22 @@ int main(int argc, char** argv) {
   restart.Query("rbbz-load/recovery/popup", &boot_answer); CHECK_FALSE(boot_answer);
   restart.Query("rbbz-load/recovery/active", &boot_answer); CHECK_FALSE(boot_answer);
 
+  BeginCase("fast startup uses the short boot once, with no crash or timeout popup");
+  loading::CrashDialogState fast;
+  fast.fast_startup = true;
+  fast.Query("rbbz-load/recovery/active", &boot_answer); CHECK_TRUE(boot_answer);
+  fast.Query("rbbz-load/recovery/start", &boot_answer); CHECK_FALSE(boot_answer);
+  fast.menu_ready = true;
+  fast.Query("rbbz-load/recovery/start", &boot_answer); CHECK_TRUE(boot_answer);
+  fast.Query("rbbz-load/recovery/starting", &boot_answer); CHECK_TRUE(boot_answer);
+  fast.Query("rbbz-load/recovery/start", &boot_answer); CHECK_FALSE(boot_answer);
+  fast.Query("rbbz-load/recovery/active", &boot_answer); CHECK_FALSE(boot_answer);
+  fast.Query("rbbz-load/recovery/popup", &boot_answer); CHECK_FALSE(boot_answer);
+  fast.recovered = true;
+  fast.Query("rbbz-load/recovery/active", &boot_answer); CHECK_TRUE(boot_answer);
+  fast.Query("rbbz-load/recovery/popup", &boot_answer); CHECK_TRUE(boot_answer);
+  fast.Query("rbbz-load/recovery/popup", &boot_answer); CHECK_FALSE(boot_answer);
+
   BeginCase("native dialog waits for the stable menu, discovery and one-shot consumption");
   loading::CrashDialogState state;
   bool answer = true;

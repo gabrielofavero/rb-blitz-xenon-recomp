@@ -38,6 +38,7 @@ REXCVAR_DECLARE(bool, enhancements_hide_menu_options);
 REXCVAR_DECLARE(std::string, enhancements_hidden_menu_options);
 REXCVAR_DECLARE(bool, enhancements_rename_mod_settings);
 REXCVAR_DECLARE(bool, enhancements_skip_offline_dialog);
+REXCVAR_DECLARE(std::string, startup_mode);
 REXCVAR_DECLARE(bool, enhancements_dlc_cache);
 REXCVAR_DECLARE(bool, enhancements_refresh_music_library);
 
@@ -507,7 +508,8 @@ void RetargetRecord(uint8_t* base, const uint8_t before[20], const uint8_t after
 void Configure(bool settings_restart_boot) {
   g_settings.hide_rows = REXCVAR_GET(enhancements_hide_menu_options);
   g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);
-  g_settings.skip_offline_prompts = settings_restart_boot || REXCVAR_GET(enhancements_skip_offline_dialog);
+  g_settings.skip_offline_prompts = settings_restart_boot || REXCVAR_GET(startup_mode) == "fast" ||
+                                    REXCVAR_GET(enhancements_skip_offline_dialog);
   g_settings.tap_refresh_row = REXCVAR_GET(enhancements_dlc_cache);
   g_settings.refresh_row_on = REXCVAR_GET(enhancements_refresh_music_library);
 

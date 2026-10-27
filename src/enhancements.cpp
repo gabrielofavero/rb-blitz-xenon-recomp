@@ -153,12 +153,14 @@ REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, true, "Enhancements",
                     "is written to, so an explicit flag or environment value still outranks it.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-// Navigator P2: Next/Previous, native pause/resume, bindings and snapshots are live.
-// The footer/clickable player remain P3.
+// Input navigation and the visible player are independent preferences sharing one transport.
 REXCVAR_DEFINE_BOOL(enhancements_background_music_nav, true, "Enhancements",
-                    "Enable menu-music navigation; Background Music Play remains visible when off. "
-                    "Next/Previous and pause/resume use the guest music player and independent "
-                    "pad/key bindings. Footer and music player rendering remain pending.")
+                    "Enable pad/key menu-music navigation. Music-player visibility is independent. "
+                    "Requires DLC background music.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+REXCVAR_DEFINE_BOOL(enhancements_music_player, true, "Enhancements",
+                    "Show the clickable music player at the bottom right of the main menu. "
+                    "Independent of pad/key navigation. Requires DLC background music.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",

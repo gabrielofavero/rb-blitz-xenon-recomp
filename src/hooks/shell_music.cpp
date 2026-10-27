@@ -73,6 +73,7 @@
 // config rank), and the second is the retired pool-size row, read only to say it is ignored.
 REXCVAR_DECLARE(bool, enhancements_menu_dlc_songs);
 REXCVAR_DECLARE(bool, enhancements_background_music_nav);
+REXCVAR_DECLARE(bool, enhancements_music_player);
 REXCVAR_DEFINE_STRING(background_music_nav_probe, "", "Diagnostics",
     "One main-menu command after background_music_nav_probe_delay seconds: next, previous, play_pause.");
 REXCVAR_DEFINE_INT32(background_music_nav_probe_delay, 5, "Diagnostics", "Seconds before the one-shot music navigator probe.");
@@ -1070,7 +1071,8 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // since 2026-10-13, so reviving the row changes no existing boot.
   //
   // The read happens once, on this host thread; no guest thread ever touches the cvar registry.
-  g_navigation_enabled = REXCVAR_GET(enhancements_background_music_nav);
+  g_navigation_enabled = REXCVAR_GET(enhancements_menu_dlc_songs) &&
+      (REXCVAR_GET(enhancements_background_music_nav) || REXCVAR_GET(enhancements_music_player));
   g_music_fault_base.store(g_navigation_enabled && runtime && runtime->memory()
       ? reinterpret_cast<uintptr_t>(runtime->memory()->virtual_membase()) : 0,
       std::memory_order_relaxed);

@@ -136,6 +136,29 @@ struct FakeProvider : ProviderSink {
   }
 };
 
+void TestStartupRoundTrip() {
+  BeginCase("startup: normal default, strict choices, cvar binding and durable preference");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  Service service(paths);
+  service.Boot(nullptr, PathEntry{}, nullptr);
+  service.SetCapabilities(CapabilitySnapshot{});
+  constexpr auto id = SettingId::kStartup;
+  CHECK_TRUE(service.EffectiveValue(id).text == "normal");
+  CHECK_TRUE(CvarForSetting(id) == "startup_mode");
+  for (const auto* token : {"fast", "normal"}) {
+    const auto txn = service.BeginEdit(service.revision());
+    CHECK_FALSE(service.Set(txn, id, EnumV("quick"), service.capability_revision()).ok);
+    CHECK_TRUE(service.Set(txn, id, EnumV(token), service.capability_revision()).ok);
+    const auto result = service.Commit(txn);
+    CHECK_TRUE(result.status == CommitStatus::kSaved);
+    CHECK_TRUE(result.restart_required);
+    Service reloaded(paths);
+    reloaded.Boot(nullptr, PathEntry{}, nullptr);
+    CHECK_TRUE(reloaded.EffectiveValue(id).text == token);
+  }
+}
+
 void TestLoadGuardRoundTrip() {
   BeginCase("load guard: strict native hot enum persists and invalid values cannot commit");
   Scratch scratch;
@@ -778,6 +801,7 @@ void TestCvarVocabulary() {
 }  // namespace
 
 int main() {
+  TestStartupRoundTrip();
   TestLoadGuardRoundTrip();
   TestHideAchievementsRoundTrip();
   TestMusicNavigationRoundTrip();

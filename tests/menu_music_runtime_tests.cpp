@@ -33,6 +33,7 @@ void DestroyStream(PPCContext& ctx, uint8_t*) {
 }
 
 bool& FLAGS_enhancements_background_music_nav_storage_() { static bool value = true; return value; }
+bool& FLAGS_enhancements_music_player_storage_() { static bool value = true; return value; }
 bool& FLAGS_enhancements_menu_dlc_songs_storage_() { static bool value = true; return value; }
 int32_t& FLAGS_enhancements_menu_dlc_song_count_storage_() { static int32_t value = 3; return value; }
 namespace rex::runtime {
@@ -567,7 +568,28 @@ void TestArtworkRead() {
   std::filesystem::remove(root);
 }
 
+void TestMusicFeatureConfiguration() {
+  rb_blitz::test::BeginCase("player and pad/key navigation independently prepare the transport; Default keeps native music");
+  using namespace rb_blitz::shell_music;
+  for (bool music : {false, true}) for (bool player : {false, true}) for (bool keys : {false, true}) {
+    FLAGS_enhancements_menu_dlc_songs_storage_() = music;
+    FLAGS_enhancements_music_player_storage_() = player;
+    FLAGS_enhancements_background_music_nav_storage_() = keys;
+    // Supplied buffers avoid allocating guest memory; Configure itself still owns the flags.
+    g_buffers = {kPath};
+    Configure(nullptr, {});
+    CHECK_TRUE(g_menu_music_enabled == music);
+    CHECK_TRUE(g_navigation_enabled == (music && (player || keys)));
+  }
+  FLAGS_enhancements_menu_dlc_songs_storage_() = true;
+  FLAGS_enhancements_music_player_storage_() = true;
+  FLAGS_enhancements_background_music_nav_storage_() = true;
+  g_navigation_enabled = false;
+  g_buffers.clear();
+}
+
 int main() {
+  TestMusicFeatureConfiguration();
   TestArtworkRead();
   using namespace rb_blitz::shell_music;
   TestNavigatorRuntime();

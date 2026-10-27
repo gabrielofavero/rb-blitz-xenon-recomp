@@ -109,6 +109,8 @@ std::string_view CvarForSetting(SettingId id) {
       return "dlc_scan_threads";
     case SettingId::kLoadGuard:
       return "song_load_guard";
+    case SettingId::kStartup:
+      return "startup_mode";
     case SettingId::kHideOfflinePrompts:
       return "enhancements_skip_offline_dialog";
     case SettingId::kHideMainMenu:
@@ -117,6 +119,8 @@ std::string_view CvarForSetting(SettingId id) {
       return "enhancements_hidden_menu_options";
     case SettingId::kBackgroundMusicNavigation:
       return "enhancements_background_music_nav";
+    case SettingId::kMusicPlayer:
+      return "enhancements_music_player";
     case SettingId::kSettingsLabels:
       // The caption overlay's own switch. The definition lives in the game's own translation unit
       // (src/ui/help_overlay.cpp), not in the SDK, so the write is the ordinary config-rank one and

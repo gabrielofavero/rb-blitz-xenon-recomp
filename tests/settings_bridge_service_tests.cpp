@@ -534,7 +534,175 @@ void TestMenuVisibilityBaselineAndRefresh() {
   CHECK_TRUE(h.Holds("interface.hidden_main_menu.rbbz_rhythmverse", WireValue::Bool(true)));
 }
 
+void TestLinkedMusicConfirmCancelAndReenable() {
+  BeginCase("linked music edits require consent, save together, and never restore children");
+  Harness h;
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kMusicPlayer).boolean);
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.dlc_menu_songs/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.Holds("general.dlc_menu_songs", WireValue::Bool(true)));
+  CHECK_TRUE(h.Holds("interface.music_player", WireValue::Bool(true)));
+  CHECK_FALSE(fs::exists(h.paths.settings_file));
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kInvalid);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.cancel/-").status == Status::kOk);
+  CHECK_FALSE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kDlcMenuSongs).boolean);
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.dlc_menu_songs/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  for (const auto id : {SettingId::kDlcMenuSongs, SettingId::kMusicPlayer,
+                        SettingId::kPlayCurrentSong, SettingId::kBackgroundMusicNavigation})
+    CHECK_FALSE(h.service.EffectiveValue(id).boolean);
+  Service again(h.paths);
+  again.Boot(nullptr, PathEntry{}, nullptr, true);
+  CHECK_FALSE(again.EffectiveValue(SettingId::kMusicPlayer).boolean);
+  // Enabling the parent is immediate and does not guess the previous child preferences.
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.dlc_menu_songs/b:1").status == Status::kOk);
+  CHECK_FALSE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_FALSE(h.service.EffectiveValue(SettingId::kMusicPlayer).boolean);
+  CHECK_FALSE(h.service.EffectiveValue(SettingId::kPlayCurrentSong).boolean);
+  CHECK_FALSE(h.service.EffectiveValue(SettingId::kBackgroundMusicNavigation).boolean);
+  // Enabling a child offers its parent and enables exactly that child after consent.
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.dlc_menu_songs/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.interface.music_player/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_FALSE(h.service.EffectiveValue(SettingId::kDlcMenuSongs).boolean);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kDlcMenuSongs).boolean);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kMusicPlayer).boolean);
+  CHECK_FALSE(h.service.EffectiveValue(SettingId::kBackgroundMusicNavigation).boolean);
+  CHECK_FALSE(h.service.EffectiveValue(SettingId::kPlayCurrentSong).boolean);
+}
+
+void TestLinkedCacheAndStore() {
+  BeginCase("cache and store shortcuts use the same confirmation rules, including inverted visibility");
+  Harness h;
+  h.sink.SeedMenuVisibility({}, true, true);
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.cache_dlc_library/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_FALSE(h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean);
+  CHECK_FALSE(h.service.EffectiveValue(SettingId::kRefreshMusicLibrary).boolean);
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.refresh_music_library/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kRefreshMusicLibrary).boolean);
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.rhythmverse/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.Holds("interface.hidden_main_menu.rbbz_rhythmverse", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.interface.hidden_main_menu.rbbz_rhythmverse/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kRhythmVerse).boolean);
+  CHECK_TRUE(h.Holds("interface.hidden_main_menu.rbbz_rhythmverse", WireValue::Bool(false)));
+}
+
+void TestLinkedFailuresSaveNothing() {
+  BeginCase("a locked dependent or stale confirmation cannot save a partial linked edit");
+  Harness h;
+  Value forced;
+  forced.kind = ValueKind::kBool;
+  forced.boolean = true;
+  h.service.SetOverrides({{SettingId::kMusicPlayer, forced}}, {{SettingId::kMusicPlayer, Source::kCommandLine}});
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.dlc_menu_songs/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kInvalid);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kInvalid);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kDlcMenuSongs).boolean);
+  CHECK_FALSE(fs::exists(h.paths.settings_file));
+  h.service.SetOverrides({}, {});
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.dlc_menu_songs/b:0").status == Status::kOk);
+  CapabilitySnapshot changed_caps;
+  changed_caps.revision = h.service.capability_revision() + 1;
+  h.service.SetCapabilities(changed_caps);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kStaleRequest);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kInvalid);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kDlcMenuSongs).boolean);
+}
+
+void TestLinkedHud() {
+  BeginCase("HUD parent and individual visibility use confirmations without automatic restoration");
+  Harness h;
+  h.sink.SeedLocal("interface.hide_hud", WireValue::Bool(false));
+  h.sink.SeedLocal("interface.show_timer", WireValue::Bool(true));
+  h.sink.SeedLocal("interface.show_pb", WireValue::Bool(true));
+  int saves = 0;
+  h.sink.SetProviderSaver([&](const std::map<std::string, WireValue>&, std::string*) {
+    ++saves;
+    return true;
+  });
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.interface.hide_hud/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_EQ(saves, 0);
+  CHECK_TRUE(h.Holds("interface.show_timer", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_EQ(saves, 1);
+  CHECK_TRUE(h.Holds("interface.hide_hud", WireValue::Bool(true)));
+  CHECK_TRUE(h.Holds("interface.show_timer", WireValue::Bool(false)));
+  CHECK_TRUE(h.Holds("interface.show_pb", WireValue::Bool(false)));
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.interface.show_timer/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.Holds("interface.hide_hud", WireValue::Bool(false)));
+  CHECK_TRUE(h.Holds("interface.show_timer", WireValue::Bool(true)));
+  CHECK_TRUE(h.Holds("interface.show_pb", WireValue::Bool(false)));
+}
+
+void TestRefreshEnableFromCacheOffBoot() {
+  BeginCase("enabling Refresh Songs from a cache-off boot also enables caching without inheriting the store hide bit");
+  Harness h;
+  CHECK_TRUE(h.Send("rbbz-settings/set/general.cache_dlc_library/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  h.sink.SeedMenuVisibility({"splash_dlc", "splash_achievements"}, false, false);
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.refresh_music_library/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kRefreshMusicLibrary).boolean);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kHiddenMainMenu).list ==
+             std::vector<std::string>({"splash_achievements"}));
+}
+
+void TestLinkedSaveFailureRetry() {
+  BeginCase("a failed linked save can be reviewed and retried without an extra rejected edit");
+  Harness h;
+  CHECK_TRUE(h.Send("rbbz-settings/set/general.load_guard/t:30s").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  const auto before = ReadText(h.paths.settings_file);
+  std::error_code ec;
+  fs::permissions(h.paths.settings_file, fs::perms::owner_read, fs::perm_options::replace, ec);
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.dlc_menu_songs/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kIoError);
+  CHECK_TRUE(ReadText(h.paths.settings_file) == before);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kMusicPlayer).boolean);
+  fs::permissions(h.paths.settings_file, fs::perms::owner_all, fs::perm_options::replace, ec);
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.dlc_menu_songs/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_FALSE(h.service.EffectiveValue(SettingId::kDlcMenuSongs).boolean);
+  CHECK_FALSE(h.service.EffectiveValue(SettingId::kMusicPlayer).boolean);
+}
+
 int main() {
+  TestLinkedMusicConfirmCancelAndReenable();
+  TestLinkedCacheAndStore();
+  TestLinkedFailuresSaveNothing();
+  TestLinkedHud();
+  TestRefreshEnableFromCacheOffBoot();
+  TestLinkedSaveFailureRetry();
   TestMenuVisibilityBaselineAndRefresh();
   TestTextFormEditsTheRealStore();
   TestFramedFormCarriesTheRequestId();

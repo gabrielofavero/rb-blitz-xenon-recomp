@@ -228,6 +228,50 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kSet: {
+      constexpr std::string_view linked_prefix = "linked.";
+      if (request.setting.starts_with(linked_prefix)) {
+        linked_plan_.reset();
+        // After a failed save the old transaction is still staged. A new UI action must plan
+        // from the last saved values, rather than merge an unconfirmed change into that retry.
+        if (!commit_ok_ && (txn_ != 0 || !staged_local_.empty() || input_staged_)) {
+          bridge::Request cancel;
+          cancel.op = bridge::Op::kCancelEdit;
+          Handle(cancel);
+        }
+        const std::string token = request.setting.substr(linked_prefix.size());
+        if (!service_ || !dependencies::Contains(token) ||
+            request.value.kind != bridge::ValueKind::kBool || txn_ != 0 ||
+            !staged_local_.empty() || input_staged_) {
+          status = Status::kInvalid;
+          response.message = "invalid linked setting or another edit is pending";
+          break;
+        }
+        auto plan = dependencies::Prepare(token, request.value.boolean, [this](std::string_view field) {
+          bridge::Request probe;
+          probe.setting = field;
+          probe.value = WireValue::Bool(true);
+          return Matches(probe);
+        });
+        if (plan.confirmation) {
+          linked_revision_ = service_->revision();
+          linked_capability_revision_ = service_->capability_revision();
+          linked_plan_ = std::move(plan);
+          response.message = "linked settings need confirmation; nothing staged";
+        } else {
+          auto actual = request;
+          actual.request_id = 0;
+          actual.setting = token;
+          const auto result = Handle(actual);
+          status = result.status;
+          response.message = result.message;
+        }
+        break;
+      }
+      if (linked_plan_) {
+        status = Status::kInvalid;
+        response.message = "confirm or cancel the linked change first";
+        break;
+      }
       if (request.setting.empty()) {
         status = Status::kInvalid;
         response.message = "a set needs a setting token";
@@ -341,7 +385,9 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       staged_[id] = std::move(value);
       // Refresh Songs has one visible preference. Clear the competing legacy hide-list bit in
       // the same transaction, preserving every other hidden row (including legacy defaults).
-      if (id == SettingId::kRefreshMusicLibrary && refresh_owns_dlc_row_) {
+      const bool refresh_owns_row = refresh_owns_dlc_row_ ||
+          CurrentValue(SettingId::kCacheDlcLibrary).boolean;
+      if (id == SettingId::kRefreshMusicLibrary && refresh_owns_row) {
         Value hidden = CurrentValue(SettingId::kHiddenMainMenu);
         hidden.kind = ValueKind::kList;
         std::erase(hidden.list, "splash_dlc");
@@ -359,7 +405,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       // A saved explicit list remains authoritative even when it happens to equal the old
       // compiled defaults. Keep the legacy master in sync rather than exposing another switch.
       if (id == SettingId::kHiddenMainMenu ||
-          (id == SettingId::kRefreshMusicLibrary && refresh_owns_dlc_row_)) {
+          (id == SettingId::kRefreshMusicLibrary && refresh_owns_row)) {
         Value master;
         master.kind = ValueKind::kBool;
         master.boolean = true;
@@ -398,6 +444,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kCancelEdit: {
+      linked_plan_.reset();
       edit_failed_ = false;
       staged_.clear();
       staged_local_.clear();
@@ -411,6 +458,12 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kCommit: {
+      if (linked_plan_) {
+        status = Status::kInvalid;
+        commit_ok_ = false;
+        response.message = "linked changes have not been confirmed";
+        break;
+      }
       last_commit_changes_.clear();
       // P7: the input store commits its staged rows through the profile's own surgical save and
       // publishes the new binding snapshot. It is committed first so a settings failure cannot
@@ -596,6 +649,39 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kInvoke: {
+      if (request.setting == "linked.cancel") {
+        linked_plan_.reset();
+        response.message = "linked change cancelled; nothing saved";
+        break;
+      }
+      if (request.setting == "linked.confirm") {
+        auto plan = std::move(linked_plan_);
+        linked_plan_.reset();
+        if (!plan || !service_ || service_->revision() != linked_revision_ ||
+            service_->capability_revision() != linked_capability_revision_) {
+          status = Status::kStaleRequest;
+          edit_failed_ = true;
+          response.message = "the linked change is missing or stale; review it again";
+          break;
+        }
+        for (const auto& change : plan->changes) {
+          bridge::Request set;
+          set.op = bridge::Op::kSet;
+          set.setting = change.token;
+          set.value = WireValue::Bool(change.value);
+          const auto result = Handle(set);
+          if (result.status == Status::kOk) continue;
+          bridge::Request cancel;
+          cancel.op = bridge::Op::kCancelEdit;
+          Handle(cancel);
+          status = result.status;
+          edit_failed_ = true;
+          response.message = result.message;
+          break;
+        }
+        if (status == Status::kOk) response.message = "linked changes staged together";
+        break;
+      }
       const SettingId id = schema::IdForToken(request.setting);
       if (service_ == nullptr || id == SettingId::kUnknown) {
         status = Status::kUnsupported;
@@ -723,6 +809,10 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
 }
 
 bool ServiceSink::Matches(const bridge::Request& request) const {
+  if (request.setting == "linked.pending")
+    return WireValuesEqual(WireValue::Bool(linked_plan_.has_value()), request.value);
+  if (request.setting == "linked.prompt")
+    return linked_plan_ && WireValuesEqual(WireValue::Text(linked_plan_->prompt), request.value);
   if (request.setting == "restart.ok") return WireValuesEqual(WireValue::Bool(restart_ok_), request.value);
   if (request.setting == "commit.ok") return WireValuesEqual(WireValue::Bool(commit_ok_), request.value);
   if (request.setting == "commit.failed")
@@ -795,6 +885,7 @@ void ServiceSink::SeedMenuVisibility(std::vector<std::string> hidden, bool refre
   Value selection;
   selection.kind = ValueKind::kList;
   selection.list = std::move(hidden);
+  if (!refresh_owns_dlc_row) std::erase(selection.list, "splash_dlc");
   // Preserve the legacy refresh bit until the refresh preference itself is edited. Editing
   // another shortcut must not accidentally reveal a refresh entry hidden by an older config.
   menu_baseline_[SettingId::kHiddenMainMenu] = std::move(selection);
@@ -823,6 +914,7 @@ bool ServiceSink::GetLocal(const std::string_view token, WireValue* out) const {
 }
 
 void ServiceSink::Reset() {
+  linked_plan_.reset();
   if (service_ && txn_) service_->Cancel(txn_);
   edit_failed_ = false;
   commit_ok_ = true;

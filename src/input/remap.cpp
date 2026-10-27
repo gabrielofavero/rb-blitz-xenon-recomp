@@ -53,6 +53,7 @@ REXCVAR_DEFINE_BOOL(keyboard_support, true, "Input",
                     "sources and the Mouse & Keyboard gameplay table) drive the game. Off blocks "
                     "that device; Controller Settings' own keys are unaffected. Applied live at the "
                     "menu/pause boundary the in-game Controls page saves at.");
+REXCVAR_DECLARE(bool, enhancements_background_music_nav);
 
 // P2's live instrument (plan §6): one line per press/release the physical layer sees for a
 // gameplay table, naming the binding that caused it. Off by default; the acceptance arm runs with
@@ -531,7 +532,8 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           if (user_index == 0) {
             static thread_local menu_music_nav::BindingLatch music_latch;
             const auto snapshot = shell_music::NowPlaying().ReadSnapshot();
-            const bool active = snapshot.available && MainMenuMusicInputAvailable() &&
+            const bool active = REXCVAR_GET(enhancements_background_music_nav) &&
+                                snapshot.available && MainMenuMusicInputAvailable() &&
                                 physical.window_focused && !capture_armed && !modal_blocked;
             if (auto press = music_latch.Update(config->music, physical.pad,
                     [](std::string_view key) { return HostKeyDown(key); }, gates.keyboard,

@@ -430,11 +430,11 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 132u);  // sixty-five pages, in each of the two contexts
+  CHECK_EQ(panels.size(), 136u);  // sixty-eight pages, in each of the two contexts
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
-  CHECK_EQ(screens.size(), 132u);
+  CHECK_EQ(screens.size(), 136u);
   CHECK_TRUE(screens.front() == kRootScreen);
   // The contexts pair up one for one, in declaration order: the i-th screen's in-song twin is the
   // (i + half)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
@@ -500,8 +500,8 @@ void TestListOwnership() {
     CHECK_TRUE(pause || HasText(root, kSceneName) || HasText(root, "../pause/settings_confirmation.milo"));
     (pause ? in_song : main_menu) += 1;
   }
-  CHECK_EQ(main_menu, 66);
-  CHECK_EQ(in_song, 66);
+  CHECK_EQ(main_menu, 68);
+  CHECK_EQ(in_song, 68);
 
   // The copies have to live **beside** the retail scene, because that scene refers to its neighbours
   // by relative path (`neon_lights.milo`, `../resource/lists/list_options_main.milo`), and those
@@ -562,7 +562,7 @@ void TestScreenBackTargets() {
       CHECK_TRUE(HasText(root, "game_screen"));
     }
   }
-  CHECK_EQ(in_song, 66);  // one per page, the root included
+  CHECK_EQ(in_song, 68);  // one per page, the root included
   CHECK_EQ(root_twins, 1);
 }
 
@@ -620,9 +620,14 @@ void TestRequestPathsParse() {
   CHECK_TRUE(has_op(Op::kSnapshot));
   CHECK_TRUE(has_op(Op::kSet));
   CHECK_TRUE(has_op(Op::kCommit));
-  // The confirmed achievement action executes the provider's guest API directly.
-  // It must not route to the host Invoke stub or shadow the Unlock All submenu.
-  CHECK_FALSE(has_op(Op::kInvoke));
+  // Achievements still use the guest API; Invoke confirms or cancels linked edits.
+  CHECK_TRUE(has_op(Op::kInvoke));
+  for (const auto& path : RequestPaths()) {
+    Request request;
+    std::string why;
+    if (ParseTextRequest(path, &request, &why) && request.op == Op::kInvoke)
+      CHECK_TRUE(request.setting == "linked.confirm" || request.setting == "linked.cancel");
+  }
   std::vector<std::string> declared;
   for (const auto& root : DefinitionRoots()) {
     if (root.kids.size() < 3 || root.kids[0].text != "new") continue;
@@ -775,10 +780,12 @@ void TestNativeAudioOrganization() {
   CHECK_TRUE(HasSymbol(roots[0], "settings_music_navigation"));
   CHECK_TRUE(HasSymbol(roots[0], "settings_save_error_screen"));
   CHECK_TRUE(HasSymbol(roots[0], "settings_save_error_pause_screen"));
+  CHECK_TRUE(HasSymbol(roots[0], "settings_linked_screen"));
+  CHECK_TRUE(HasSymbol(roots[0], "settings_linked_pause_screen"));
   std::vector<std::string> strings;
   CollectText(roots[0], &strings);
-  CHECK_TRUE(std::find(strings.begin(), strings.end(), "rbbz-settings/set/general.dlc_menu_songs/b:0") != strings.end());
-  CHECK_TRUE(std::find(strings.begin(), strings.end(), "rbbz-settings/set/interface.background_music_navigation/b:1") != strings.end());
+  CHECK_TRUE(std::find(strings.begin(), strings.end(), "rbbz-settings/set/linked.general.dlc_menu_songs/b:0") != strings.end());
+  CHECK_TRUE(std::find(strings.begin(), strings.end(), "rbbz-settings/set/linked.interface.background_music_navigation/b:1") != strings.end());
   CHECK_EQ(Reparse(roots, &why).size(), 1u);
   const auto before = dtb::Compile(roots);
   CHECK_FALSE(ReorganizeAudioPage(&roots, &why));
@@ -1018,7 +1025,7 @@ void TestDownloadContentVisibilityAndNoDlc() {
   ConfigureMenu(configuration);
   CHECK_TRUE(PanelRowSymbols("settings_main_menu_panel") ==
              std::vector<std::string>({"settings_main_menu_base", "settings_main_menu_extra"}));
-  const std::vector<std::string> extras = {"settings_dlc_refresh", "settings_play_current", "settings_mm_rhythmverse"};
+  const std::vector<std::string> extras = {"settings_dlc_refresh", "settings_play_current", "settings_music_player", "settings_mm_rhythmverse"};
   CHECK_TRUE(PanelRowSymbols("settings_main_menu_extra_panel") == extras);
   CHECK_TRUE(PageRows(PausePanel("settings_main_menu_extra_panel")) == extras);
   CHECK_EQ(PanelRowSymbols("settings_main_menu_base_panel").size(), 4u);
@@ -1126,7 +1133,7 @@ void TestInSongContext() {
     CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screens[i])) !=
                screens.end());
   }
-  CHECK_EQ(menu_screens.size(), 66u);
+  CHECK_EQ(menu_screens.size(), 68u);
   std::vector<std::string> in_song_panels_names = PanelNames();
   in_song_panels_names.erase(in_song_panels_names.begin(),
                              in_song_panels_names.begin() + static_cast<std::ptrdiff_t>(half));
@@ -1146,7 +1153,7 @@ void TestInSongContext() {
       CHECK_FALSE(HasText(root, screen));
     }
   }
-  CHECK_EQ(in_song_panels, 66);
+  CHECK_EQ(in_song_panels, 68);
 
   // The two contexts' panel sets are retail's own, and the difference between them is
   // load-bearing - measured, not stylistic. Retail's in-song page screens that are entered with a
@@ -1397,7 +1404,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, 132);                   // every panel, in both contexts
+  CHECK_EQ(fills, 136);                   // every panel, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -1593,7 +1600,7 @@ void TestButtonTableIsOneSwitch() {
     }
     CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
   }
-  CHECK_EQ(tables, 132);  // every panel, in both contexts
+  CHECK_EQ(tables, 136);  // every panel, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
@@ -1640,13 +1647,14 @@ void TestButtonTableIsOneSwitch() {
         (root.kids.size() >= 3 && root.kids[2].tag == dtb::kSymbol) ? root.kids[2].text : "";
     const bool suppressed = panel_name.rfind("settings_restart", 0) == 0 ||
                             panel_name.rfind("settings_save_error", 0) == 0 ||
-                            panel_name.rfind("settings_achievements_confirm", 0) == 0;
+                            panel_name.rfind("settings_achievements_confirm", 0) == 0 ||
+                            panel_name.rfind("settings_linked", 0) == 0;
     CHECK_EQ(in_scroll, suppressed ? 0 : 1);
     const size_t extra =
         all.size() - 1u - static_cast<size_t>(in_moves) - static_cast<size_t>(in_scroll);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, 132);  // one row table per panel, in both contexts
+  CHECK_EQ(row_tables, 136);  // one row table per panel, in both contexts
 }
 
 void TestSelectAdvancesAndWraps() {
@@ -1749,9 +1757,9 @@ void TestRestartPromptOnlyOnLeave() {
   // P9-11 retired the ten authored search-key pages (one root, the letters index, five character
   // groups, two number groups and More Keys) in both contexts: the store's Search row opens the
   // title's own keyboard now. 142 - 2 * 10.
-  CHECK_EQ(panels, 132);
+  CHECK_EQ(panels, 136);
   CHECK_EQ(root_cancels, 2);
-  CHECK_EQ(other_cancels, 130);
+  CHECK_EQ(other_cancels, panels - root_cancels);
 }
 
 // A `{<receiver> set <member> <value>}` call, with the value node kept so a test can say what the
@@ -2690,7 +2698,8 @@ void TestHelpEventsInTheDefinition() {
         (root.kids.size() >= 3 && root.kids[2].tag == dtb::kSymbol) ? root.kids[2].text : "";
     const bool suppressed = panel_name.rfind("settings_restart", 0) == 0 ||
                             panel_name.rfind("settings_save_error", 0) == 0 ||
-                            panel_name.rfind("settings_achievements_confirm", 0) == 0;
+                            panel_name.rfind("settings_achievements_confirm", 0) == 0 ||
+                            panel_name.rfind("settings_linked", 0) == 0;
 
     // Enter: the first visible row's caption, emitted as an `enter` statement so a commit that
     // re-runs `populate_menu` cannot drag the overlay back to row 0 (the mirror has shown that
@@ -2850,10 +2859,10 @@ void TestHelpEventsInTheDefinition() {
       }
     }
   }
-  CHECK_EQ(panels, 132);        // every page, in both contexts
+  CHECK_EQ(panels, 136);        // every page, in both contexts
   CHECK_EQ(enters, panels);    // every page tells the overlay where the highlight starts
   CHECK_TRUE(moves > 100);     // the unclamped direction cases, across the surface
-  CHECK_EQ(scrolls, panels - 6);  // every ordinary page, not the three suppressed twins
+  CHECK_EQ(scrolls, panels - 8);  // every ordinary page, not the three suppressed twins
   CHECK_TRUE(clears >= panels);
 }
 
@@ -2948,7 +2957,8 @@ void TestConfirmationPagesAreCaptionFree() {
   const char* kSuppressed[] = {"settings_restart_panel",     "settings_restart_pause_panel",
                                "settings_save_error_panel",  "settings_save_error_pause_panel",
                                "settings_achievements_confirm_panel",
-                               "settings_achievements_confirm_pause_panel"};
+                               "settings_achievements_confirm_pause_panel",
+                               "settings_linked_panel", "settings_linked_pause_panel"};
   const auto is_suppressed = [&kSuppressed](const std::string& name) {
     for (const char* candidate : kSuppressed) {
       if (name == candidate) {
@@ -3020,8 +3030,8 @@ void TestConfirmationPagesAreCaptionFree() {
     }
   }
 
-  CHECK_EQ(panels, 132);         // the whole surface, in both contexts
-  CHECK_EQ(suppressed_seen, 6);  // three pages, each with an in-song twin
+  CHECK_EQ(panels, 136);         // the whole surface, in both contexts
+  CHECK_EQ(suppressed_seen, 8);  // three pages, each with an in-song twin
 }
 
 // Gameplay -> HUD (owner request, 2026-10-19): the page is three rows, and its five element
@@ -3129,6 +3139,39 @@ void TestShowHeadersRow() {
 // `settings_service`); this is the row half, which lives in this table.
 std::vector<std::string> PageRows(const std::string& panel_name);
 
+void TestLaunchSurface() {
+  BeginCase("Launch groups Game Version and Startup in both menu contexts");
+  ConfigureMenu({});
+  const auto roots = DefinitionRoots();
+  for (bool pause : {false, true}) {
+    const auto panel = [&](const char* name) { return pause ? PausePanel(name) : std::string(name); };
+    const auto screen = [&](const char* name) { return pause ? PauseScreen(name) : std::string(name); };
+    const auto general = PageRows(panel("settings_general_panel"));
+    CHECK_TRUE(std::find(general.begin(), general.end(), "settings_launch") != general.end());
+    CHECK_TRUE(std::find(general.begin(), general.end(), "settings_target") == general.end());
+    CHECK_TRUE(PageRows(panel("settings_launch_panel")) ==
+               std::vector<std::string>({"settings_target", "settings_startup_normal", "settings_startup_fast"}));
+    for (const auto& root : roots) {
+      ScreenFacts facts;
+      if (!ReadScreenFacts(root, &facts)) continue;
+      if (facts.name == screen("settings_launch_screen"))
+        CHECK_TRUE(facts.back == screen("settings_general_screen"));
+      if (facts.name == screen("settings_target_screen"))
+        CHECK_TRUE(facts.back == screen("settings_launch_screen"));
+    }
+  }
+  const auto labels = Labels();
+  for (const char* choice : {"Normal", "Fast"}) {
+    CHECK_TRUE(std::any_of(labels.begin(), labels.end(), [&](const auto& entry) {
+      return entry.second == std::string("Startup: ") + choice;
+    }));
+  }
+  CHECK_TRUE(std::any_of(labels.begin(), labels.end(), [](const auto& entry) {
+    return entry.second == "Game Version";
+  }));
+  CHECK_TRUE(HelpTextFor("settings_startup").find("Press A to Start") != std::string::npos);
+}
+
 void TestLoadGuardSurface() {
   BeginCase("load guard is a native selector in both DLC settings contexts");
   for (const auto& panel : {std::string("settings_general_panel"), PausePanel("settings_general_panel")}) {
@@ -3193,7 +3236,7 @@ void TestMusicNavigationSurface() {
   disabled.background_music_navigation = false;
   ConfigureMenu(disabled);
   // Off must keep the identical tree, including the command page in both contexts.
-  CHECK_EQ(PanelNames().size(), 132u);
+  CHECK_EQ(PanelNames().size(), 136u);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
   CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 4u);
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
@@ -3862,9 +3905,10 @@ void TestRhythmVerseRows() {
 
   // The two menu-music rows moved together, in the order they had on the parent page.
   const std::vector<std::string> menu = PanelRowSymbols("settings_main_menu_extra_panel");
-  CHECK_EQ(menu.size(), 3u);
-  CHECK_TRUE(menu.size() == 3u && menu[0] == "settings_dlc_refresh" &&
-             menu[1] == "settings_play_current" && menu[2] == "settings_mm_rhythmverse");
+  CHECK_EQ(menu.size(), 4u);
+  CHECK_TRUE(menu.size() == 4u && menu[0] == "settings_dlc_refresh" &&
+             menu[1] == "settings_play_current" && menu[2] == "settings_music_player" &&
+             menu[3] == "settings_mm_rhythmverse");
 
   // Both new pages have a screen in each context, so a song reaches them too.
   const std::vector<std::string> panels = PanelNames();
@@ -4325,6 +4369,7 @@ int main(int argc, char** argv) {
   TestShowHeadersRow();
   TestSettingsLabelsRow();
   TestMusicNavigationSurface();
+  TestLaunchSurface();
   TestLoadGuardSurface();
   TestAchievementActionWording();
   return Finish();

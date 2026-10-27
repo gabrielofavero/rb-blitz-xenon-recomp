@@ -111,8 +111,15 @@ std::vector<SchemaRow> BuildTable() {
     d.choices = Choices({{"common", "Rock Band Blitz"},
                          {"ultimate", "Rock Band Blitz Ultimate"},
                          {"demo", "Rock Band Blitz Demo"}});
-    rows.push_back(Row(std::move(d), {"general", "target"}, "", "Game Edition",
+    rows.push_back(Row(std::move(d), {"general", "target"}, "launch", "Game Version",
                        "Which game the launch runs."));
+  }
+  {
+    Descriptor d = Make(SettingId::kStartup, Category::kGeneral, Provider::kNative,
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("normal"));
+    d.choices = Choices({{"normal", "Normal"}, {"fast", "Fast"}});
+    rows.push_back(Row(std::move(d), {"general", "startup"}, "launch", "Startup",
+                       "Normal: Show the splash screen and 'Press A to Start'. Fast: Continue automatically to the main menu."));
   }
   rows.push_back(Row(Make(SettingId::kCacheDlcLibrary, Category::kGeneral, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
@@ -303,7 +310,11 @@ std::vector<SchemaRow> BuildTable() {
   rows.push_back(Row(Make(SettingId::kBackgroundMusicNavigation, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "background_music_navigation"}, "", "Menu Music Navigation",
-                     "Navigate menu music with the shoulders, media keys, or music player. Requires a restart."));
+                     "Navigate DLC menu music with controller buttons or keyboard/media keys. Requires a restart."));
+  rows.push_back(Row(Make(SettingId::kMusicPlayer, Category::kInterface, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"interface", "music_player"}, "main_menu_extra", "Music Player",
+                     "Show the music player at the bottom right of the main menu. Requires Background Music: DLC."));
   // P9-4: the shared background panel is authored once at boot.
   rows.push_back(Row(Make(SettingId::kShowMessages, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
@@ -433,6 +444,7 @@ struct StrategyEntry {
 constexpr StrategyEntry kStrategies[] = {
     // General
     {SettingId::kTarget, ApplicationStrategy::kRestart, ""},
+    {SettingId::kStartup, ApplicationStrategy::kRestart, ""},
     {SettingId::kCacheDlcLibrary, ApplicationStrategy::kRestart, ""},
     {SettingId::kRefreshMusicLibrary, ApplicationStrategy::kRestart, ""},
     {SettingId::kDlcScanThreads, ApplicationStrategy::kRestart, ""},
@@ -498,6 +510,7 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kShowRecommendations, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideOfflinePrompts, ApplicationStrategy::kRestart, ""},
     {SettingId::kBackgroundMusicNavigation, ApplicationStrategy::kRestart, ""},
+    {SettingId::kMusicPlayer, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideMainMenu, ApplicationStrategy::kRestart, ""},
     {SettingId::kHiddenMainMenu, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideHud, ApplicationStrategy::kRestart, ""},

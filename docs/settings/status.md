@@ -8,7 +8,18 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
-- **Load Guard (2026-10-26):** General → Downloadable Content has a native
+- **Settings organization, Launch, and linked confirmations (2026-10-26):** General → Launch
+  groups Game Version and Startup (Normal/Fast, default Normal). Main Menu has Base Game Items
+  and Extra Items, including the default-visible Music Player with its own preference. Audio owns
+  Background Music (Default/DLC) and Menu Music Navigation; Display owns Overscan. Music-player
+  visibility and pad/key music navigation work independently. Changes affecting linked music,
+  cache/refresh, RhythmVerse shortcut/store, or HUD settings ask for confirmation before saving;
+  Cancel changes nothing, and re-enabling a prerequisite does not restore its children.
+  The combined release build and 21 related suites pass, as do 2,612 extracted-record checks across
+  eight store/header states, with no refused edits. These are offline checks; the new settings
+  and confirmation UI have not been navigated in-game. See [the current organization and rules](menu.md#current-organization-2026-10-26).
+
+- **Load Guard (2026-10-26):** General has a native
   Off/30s/60s selector, default Off (`general.load_guard`, stable id 10).
   A committed value updates the host atomic policy for the next load. An overdue
   attempt uses the owner-authorized external restart, with a native timeout dialog;
@@ -18,10 +29,10 @@ Part 1 wherever they disagree.
   [the load-guard record](../plans/finished/2026-10-13-load-guard.md) part 5.
 
 - **Menu-music navigator P1–P3 implementation (2026-10-26; P3 live acceptance pending):** the default-On,
-  restart-scoped switch stays on General → Interface. Background Music Play remains
+  restart-scoped switch is on Audio/Video → Audio. Background Music Play remains
   Interface Mapping's fifth row, with effective bindings and Assign / Reset
   pages in both contexts. `[menu_music]` persists action-specific pad/key sources.
-  Next/Previous execute on the guest poll for DLC or title-only sources, publish snapshots
+  Next/Previous execute on the guest poll for DLC music and its temporary title-track fallback, publish snapshots
   and keep Play Current Song aligned. Native pause/resume is enabled without a trial
   flag after owner listening acceptance and a measured 7.285-second frozen-cursor hold.
   The Play/Pause row displays its configured bindings. P3 adds an independent bottom-right

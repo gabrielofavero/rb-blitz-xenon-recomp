@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -51,6 +52,7 @@
 #include "hooks/settings_bridge.h"
 #include "settings/input_bindings.h"
 #include "settings/model.h"
+#include "settings/dependencies.h"
 #include "settings/service.h"
 
 namespace rb_blitz::settings {
@@ -175,6 +177,8 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   std::map<SettingId, Value> staged_;
   std::map<SettingId, Value> menu_baseline_;
   bool refresh_owns_dlc_row_ = true;
+  std::optional<dependencies::Plan> linked_plan_;
+  uint64_t linked_revision_ = 0, linked_capability_revision_ = 0;
   // What each staged row held before this session touched it: the commit uses it to tell a real
   // change from a value written back unchanged (P9's no-op rule).
   std::map<SettingId, Value> staged_base_;

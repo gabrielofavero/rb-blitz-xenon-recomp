@@ -48,7 +48,7 @@ namespace rb_blitz::menu_filter {
 // thing a user can get wrong, so it is echoed in the boot log. Also the point
 // where the cvars are read: the read hook itself must not touch the registry per
 // read.
-// Settings restarts skip the offline prompts for this boot without changing the saved toggle.
+// Fast startup and settings restarts skip offline prompts without changing the saved toggle.
 void Configure(bool settings_restart_boot = false);
 void RetargetRecord(uint8_t* guest_base, const uint8_t before[20], const uint8_t after[20]);
 

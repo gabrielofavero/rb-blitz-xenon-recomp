@@ -18,7 +18,7 @@
 #include "ui/help_overlay.h"
 #include "ui/menu_music_artwork.h"
 
-REXCVAR_DECLARE(bool, enhancements_background_music_nav);
+REXCVAR_DECLARE(bool, enhancements_music_player);
 namespace rb_blitz::ui::music {
 namespace {
 namespace nav = input::menu_music_nav;
@@ -32,7 +32,7 @@ ArtTag drawn_tag;
 float logical_w = 0, logical_h = 0;
 bool pointer_over = false, drawn_visible = false;
 bool Eligible(const NowPlayingSnapshot& s) {
-  return REXCVAR_GET(enhancements_background_music_nav) && s.available &&
+  return REXCVAR_GET(enhancements_music_player) && s.available &&
          s.playback.track.source != shell_music::MusicSource::kNone &&
          input::MainMenuMusicInputAvailable() && input::HostInputFocused() &&
          !input::capture::Armed() && !rex::kernel::xam::xeXamIsUIActive() &&

@@ -519,10 +519,12 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     // is reported rather than swallowed.
     for (const SettingId id :
          {SettingId::kRenderer, SettingId::kCacheDlcLibrary, SettingId::kRefreshMusicLibrary,
-          SettingId::kDlcScanThreads, SettingId::kDlcMenuSongs, SettingId::kLoadGuard, SettingId::kHideOfflinePrompts,
+          SettingId::kDlcScanThreads, SettingId::kDlcMenuSongs, SettingId::kLoadGuard, SettingId::kStartup,
+          SettingId::kHideOfflinePrompts,
           SettingId::kHideMainMenu, SettingId::kHiddenMainMenu, SettingId::kVsync,
           SettingId::kFiltering, SettingId::kResolution, SettingId::kAntiAliasing,
-          SettingId::kDisplay, SettingId::kSettingsLabels, SettingId::kHideAchievements}) {
+          SettingId::kDisplay, SettingId::kSettingsLabels, SettingId::kHideAchievements,
+          SettingId::kBackgroundMusicNavigation, SettingId::kMusicPlayer}) {
       ApplyRow(id, /*defer_unregistered=*/true);
     }
   }

@@ -21,6 +21,7 @@
 #include "profile/gameplay_remap.h"
 #include "profile/input_rows.h"
 #include "profile/remap.h"
+#include "settings/dependencies.h"
 #include "store/store_settings.h"
 
 namespace rb_blitz::ui::screen {
@@ -301,6 +302,8 @@ enum class Kind {
   kClose,
   kCalibration,
   kAchievements,
+  kLinkedConfirm,
+  kLinkedCancel,
 };
 
 struct Choice {
@@ -357,6 +360,7 @@ struct PanelSpec {
   // mistaken for the `_pause` twin suffix.
   std::string title;
   std::string title_key;
+  std::string message_query = "commit.failed";
 };
 
 Row BoolRow(const char* symbol, const char* setting, const char* label, const char* description,
@@ -595,7 +599,8 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_keyboard_mouse_pause_powerup_panel", "PAUSE & POWER-UP"},
       {"settings_listen_panel", "ASSIGN INPUT"},
       {"settings_general_panel", "GENERAL"},
-      {"settings_target_panel", "GAME EDITION"},
+      {"settings_launch_panel", "LAUNCH"},
+      {"settings_target_panel", "GAME VERSION"},
       {"settings_dlc_panel", "SONG LIBRARY"},
       {"settings_rhythmverse_panel", "RHYTHMVERSE"},
       {"settings_music_library_store_panel", "MUSIC LIBRARY & STORE"},
@@ -708,7 +713,7 @@ std::vector<PanelSpec> AllPanels() {
                               RouteRow("calibration", "cal_welcome_screen", "cancel_screen", "",
                                        "Line up the audio and video so notes hit in time with the music."),
                               SubmenuRow("settings_general", "settings_general_screen", "General",
-                                         "Game edition, interface, song library, achievements, recovery, and credits."),
+                                         "Launch, interface, song library, achievements, recovery, and credits."),
                               SubmenuRow("controls", "settings_controls_screen", "",
                                          "Choose the devices and the controller mappings that play the game."),
                               SubmenuRow("audio_video_options", "settings_av_screen", "",
@@ -990,8 +995,8 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_general_panel", "settings_general_screen", kRootScreen,
                           MenuPanels(),
                           {
-                              SubmenuRow("settings_target", "settings_target_screen", "Game Edition",
-                                         "Choose which edition starts: Rock Band Blitz, Ultimate, or the Demo."),
+                              SubmenuRow("settings_launch", "settings_launch_screen", "Launch",
+                                         "Choose the game version and startup behavior."),
                               SubmenuRow("settings_interface", "settings_interface_screen", "Interface",
                                          "Main-menu visibility and the settings caption."),
                               SubmenuRow("settings_dlc", "settings_dlc_screen",
@@ -1007,12 +1012,22 @@ std::vector<PanelSpec> AllPanels() {
                                        "View the game's credits."),
                           }});
 
+  out.push_back(PanelSpec{"settings_launch_panel", "settings_launch_screen", "settings_general_screen",
+                          MenuPanels(),
+                          {
+                              SubmenuRow("settings_target", "settings_target_screen", "Game Version",
+                                         "Choose which version starts: Rock Band Blitz, Ultimate, or the Demo."),
+                              SelectRow("settings_startup", "general.startup", "Startup",
+                                        "Normal: Show the splash screen and 'Press A to Start'. Fast: Continue automatically to the main menu.",
+                                        Choices({"normal", "Normal", "fast", "Fast"})),
+                          }});
+
   // 1a. Target: choose one, commit, leave. `ultimate_mode`/`license_mask` are consumed before
   // Ultimate configures, so the row is restart-scoped (plan §5.5) and the restart prompt is P9's.
   // The demo (trial) choice is offered by name; the plan's own note - that the trial boot used to
   // fault before the menu - is what the row's presence now records, because the owner asked for the
   // choice to be pickable rather than omitted.
-  out.push_back(PanelSpec{"settings_target_panel", "settings_target_screen", "settings_general_screen",
+  out.push_back(PanelSpec{"settings_target_panel", "settings_target_screen", "settings_launch_screen",
                           MenuPanels(),
                           {
                               ChooseRow("settings_target_common", "general.target", "common",
@@ -1342,6 +1357,8 @@ std::vector<PanelSpec> AllPanels() {
                            "Show the shortcut that re-scans your songs. Requires Cache Song Library. Restart to apply."),
       ElementVisibilityRow("settings_play_current", "general.play_current_song", "Play Current Song",
                            "Show the shortcut for the background song. Needs Background Music: DLC and a playable song. Restart to apply."),
+      ElementVisibilityRow("settings_music_player", "interface.music_player", "Music Player",
+                           "Show the bottom-right music player. Requires Background Music: DLC. Restart to apply."),
       VisibilityRow("settings_mm_rhythmverse", "interface.hidden_main_menu.rbbz_rhythmverse",
                     "RhythmVerse", "Show the RhythmVerse shortcut. Store Access is controlled in Song Library. Restart to apply."),
   }});
@@ -1373,6 +1390,18 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_achievements_confirm_panel", "settings_achievements_confirm_screen", "settings_achievements_screen",
                          MenuPanels(), {close, achievements}, "../pause/settings_confirmation.milo",
                          "settings_achievements_message"});
+
+  Row linked_cancel = InfoRow("settings_linked_cancel", "Cancel", "Keep the current settings.");
+  linked_cancel.kind = Kind::kLinkedCancel;
+  Row linked_confirm = InfoRow("settings_linked_confirm", "Confirm", "Save this change and its linked settings together.");
+  linked_confirm.kind = Kind::kLinkedConfirm;
+  PanelSpec linked{"settings_linked_panel", "settings_linked_screen", kRootScreen,
+                   MenuPanels(), {linked_cancel, linked_confirm},
+                   "../pause/settings_confirmation.milo", "settings_linked_message"};
+  linked.message_query = "linked.prompt";
+  for (const auto& prompt : settings::dependencies::Prompts())
+    linked.message_by_reason.emplace_back(prompt.key, "settings_linked_" + SymbolToken(prompt.key));
+  out.push_back(std::move(linked));
 
   for (auto& panel : out) {
     std::erase_if(panel.rows, [](Row& row) {
@@ -1697,6 +1726,20 @@ Node CommitResult(const bool pause, Node success) {
               std::move(success), EnterScreen(destination("settings_save_error_screen"))});
 }
 
+// Linked edits are previews until the player confirms. Ordinary settings keep their usual
+// immediate commit. The native Audio page uses this same route as generated settings pages.
+Node ChangeSetting(const std::string_view setting, const std::string_view value,
+                   const bool pause, Node success) {
+  const bool linked = settings::dependencies::Contains(setting);
+  const Node commit = Cmd({Sym("do"), Write(Path("commit", "-", "-")),
+                           CommitResult(pause, std::move(success))});
+  return Cmd({Sym("do"), Write(Path("set", linked ? "linked." + std::string(setting) : std::string(setting), value)),
+      linked ? Cmd({Sym("if_else"),
+                    Cmd({Sym("file_exists"), Str(Path("snapshot", "linked.pending", "b:1"))}),
+                    EnterScreen(pause ? PauseScreen("settings_linked_screen") : "settings_linked_screen"),
+                    commit}) : commit});
+}
+
 // The index of the choice a select row's symbol stands for. A select contributes one symbol per
 // choice (`<row>_<token>`), so the symbol is the whole identity a press carries back to us.
 size_t ChoiceIndexForSymbol(const Row& row, const std::string_view symbol) {
@@ -1722,8 +1765,8 @@ Node RowCase(const Row& row, const std::string_view symbol) {
       // A normal row writes the opposite of what it showed; an inverted one (`Depth of Field`)
       // shows `On` while its setting is *false*, so it writes the opposite of that.
       const bool write_on_value = is_on != row.inverted;
-      return Arr({Sym(symbol), Write(SetPath(row, write_on_value ? "b:0" : "b:1")),
-                  Write(Path("commit", "-", "-")), CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
+      return Arr({Sym(symbol), ChangeSetting(row.setting, write_on_value ? "b:0" : "b:1",
+                  g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
     }
     case Kind::kSelect: {
       // Confirm advances to the **next** choice and wraps at the last one: a horizontal selector
@@ -1782,6 +1825,11 @@ Node RowCase(const Row& row, const std::string_view symbol) {
     }
     case Kind::kClose:
       return Arr({Sym(symbol), Leave()});
+    case Kind::kLinkedCancel:
+      return Arr({Sym(symbol), Write(Path("invoke", "linked.cancel", "-")), Leave()});
+    case Kind::kLinkedConfirm:
+      return Arr({Sym(symbol), Write(Path("invoke", "linked.confirm", "-")),
+                  Write(Path("commit", "-", "-")), CommitResult(g_emitting_pause, Leave())});
     case Kind::kRestart:
       return Arr({Sym(symbol), Write(Path("restart", "-", "-")),
           Cmd({Sym("if"), Cmd({Sym("!"), Cmd({Sym("file_exists"), Str(Path("snapshot", "restart.ok", "b:1"))})}),
@@ -2031,7 +2079,7 @@ Node PanelDefinition(const PanelSpec& panel) {
   // them matches (an older host, or a failure the panel was not told about).
   for (const auto& [reason, token] : panel.message_by_reason) {
     enter.kids.push_back(Cmd(
-        {Sym("if"), Cmd({Sym("file_exists"), Str(Path("snapshot", "commit.failed",
+        {Sym("if"), Cmd({Sym("file_exists"), Str(Path("snapshot", panel.message_query,
                                                        "t:" + reason))}),
          Cmd({Sym("pause.lbl"), Sym("set_token_fmt"), Sym(token)})}));
   }
@@ -2049,6 +2097,8 @@ Node PanelDefinition(const PanelSpec& panel) {
   // The exit member, shared by every panel.
   Node exit_member =
       Arr({Sym("exit"), Cmd({Sym("shell_sfx"), Sym("clear_interceptor")})});
+  if (panel.message_query == "linked.prompt")
+    exit_member.kids.push_back(Write(Path("invoke", "linked.cancel", "-")));
   std::vector<Node> extras;
   extras.push_back(Arr({Sym("kAction_Up"), Cmd({Var("this"), Sym("move_up")})}));
   extras.push_back(Arr({Sym("kAction_Down"), Cmd({Var("this"), Sym("move_down")})}));
@@ -2203,6 +2253,12 @@ std::vector<std::string> RequestPaths() {
   add(kProviderQuery);
   add(Path("commit", "-", "-"));
   add(Path("restart", "-", "-"));
+  add(Path("snapshot", "linked.pending", "b:1"));
+  add(Path("invoke", "linked.confirm", "-"));
+  add(Path("invoke", "linked.cancel", "-"));
+  for (const auto& feature : settings::dependencies::kFeatures)
+    for (const char* value : {"b:0", "b:1"})
+      add(Path("set", "linked." + std::string(feature.token), value));
   for (const char* token : {"general.dlc_menu_songs", "interface.background_music_navigation"}) {
     for (const char* value : {"b:0", "b:1"}) {
       add(Path("snapshot", token, value));
@@ -2228,7 +2284,7 @@ std::vector<std::string> RequestPaths() {
   for (const PanelSpec& panel : AllPanels()) {
     for (const auto& [reason, message] : panel.message_by_reason) {
       (void)message;
-      add(Path("snapshot", "commit.failed", "t:" + reason));
+      add(Path("snapshot", panel.message_query, "t:" + reason));
     }
   }
   for (const PanelSpec& panel : AllPanels()) {
@@ -2275,9 +2331,9 @@ std::vector<std::string> RequestPaths() {
 
 std::string HelpTextFor(const std::string_view symbol) {
   if (symbol == "settings_dlc_menu_songs")
-    return "Choose Original game music or songs from your DLC library. Restart to apply; DLC needs playable songs.";
+    return "Default restores the original music implementation. DLC enables library music and linked features. Restart to apply.";
   if (symbol == "settings_music_navigation")
-    return "Navigate menu music with shoulders, media keys, or the music player. Restart to apply.";
+    return "Navigate DLC menu music with controller buttons or keyboard/media keys. Music Player visibility is separate. Restart to apply.";
   if (symbol.empty()) {
     return {};
   }
@@ -3320,9 +3376,12 @@ bool ReplaceLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view ke
 std::vector<std::pair<std::string, std::string>> Labels() {
   std::vector<std::pair<std::string, std::string>> out;
   out.emplace_back("settings_dlc_menu_songs", "Background Music: %s");
-  out.emplace_back("settings_background_original", "Original");
+  out.emplace_back("settings_background_original", "Default");
   out.emplace_back("settings_background_dlc", "DLC");
   out.emplace_back("settings_music_navigation", "Menu Music Navigation: %s");
+  out.emplace_back("settings_linked_message", "This change also changes linked settings. Continue?");
+  for (const auto& prompt : settings::dependencies::Prompts())
+    out.emplace_back("settings_linked_" + SymbolToken(prompt.key), prompt.text);
   out.emplace_back("settings_restart_message", "Settings saved. Restart the game to apply these changes.");
   out.emplace_back("settings_save_error_message", "Settings could not be saved. Check that the settings folder is writable, then try again.");
   out.emplace_back("settings_save_error_provider", "Saved, but the Ultimate mod's own settings file could not be written. Close this message and try again.");
@@ -3499,15 +3558,15 @@ bool ReorganizeAudioPage(std::vector<Node>* nodes, std::string* reason) {
   for (const auto& [symbol, token] : {
       std::pair{"settings_dlc_menu_songs", "general.dlc_menu_songs"},
       std::pair{"settings_music_navigation", "interface.background_music_navigation"}}) {
-    const Node failure = Cmd({Sym("if_else"),
+    const Node success = Cmd({Sym("do"), Cmd({Var("this"), Sym("enter_audio_video")}),
+                              Cmd({Sym("checkbox.lst"), Sym("set_selected"), Node::Int(selected_index++)})});
+    const auto change = [&](bool pause) {
+      return Cmd({Sym("if_else"), query(token), ChangeSetting(token, "b:0", pause, success),
+                                               ChangeSetting(token, "b:1", pause, success)});
+    };
+    cases.kids.push_back(Arr({Sym(symbol), Cmd({Sym("if_else"),
         Cmd({Sym("=="), Cmd({Sym("ui"), Sym("current_screen")}), Sym("av_options_pause_screen")}),
-        EnterScreen(PauseScreen("settings_save_error_screen")), EnterScreen("settings_save_error_screen")});
-    cases.kids.push_back(Arr({Sym(symbol),
-        Cmd({Sym("if_else"), query(token), Write(Path("set", token, "b:0")), Write(Path("set", token, "b:1"))}),
-        Write(Path("commit", "-", "-")),
-        Cmd({Sym("if_else"), query("commit.ok"),
-             Cmd({Sym("do"), Cmd({Var("this"), Sym("enter_audio_video")}),
-                  Cmd({Sym("checkbox.lst"), Sym("set_selected"), Node::Int(selected_index++)})}), failure})}));
+        change(true), change(false)})}));
   }
   *nodes = std::move(staged);
   if (reason) reason->clear();

@@ -45,6 +45,7 @@ enum class SettingId : uint16_t {
   kRefreshMusicLibrary = 8,       // the main menu's refresh entry (owner request, 2026-10-15)
   kHideAchievements = 9,
   kLoadGuard = 10,
+  kStartup = 11,
   // Graphics
   kResolution = 20,
   kVsync = 21,
@@ -67,6 +68,7 @@ enum class SettingId : uint16_t {
   kSettingsLabels = 51,  // the help caption's own on/off (owner request, 2026-10-14)
   kHideDownloadContent = 52,  // the restored Download Content row (owner request, 2026-10-20)
   kBackgroundMusicNavigation = 53,  // menu-music navigator; restart-built surface
+  kMusicPlayer = 54,  // independent main-menu music-player visibility
   // Gameplay (Ultimate provider)
   kPrecisionMode = 60,
   kDisableRandomWiggles = 61,
