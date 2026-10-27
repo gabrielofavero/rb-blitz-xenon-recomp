@@ -252,6 +252,7 @@ set(RBBLITZ_SOURCES
     # the store's album art encodes with it now, and the button-layout plan's PS3 import and slot
     # sheets decode with it next. SDK-free, so the suites cover it without a boot.
     src/assets/texture_codec.cpp
+    src/assets/texture_override.cpp
     # P3's album art, host half: the key/path/URL rules and the texture cache the guest's art
     # request reads. The fetch and the image decode are Windows-only and appended below.
     src/store/album_art.cpp

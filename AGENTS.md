@@ -1,9 +1,5 @@
 # User preferences
 
-- Send an ntfy notification whenever you finish handling a user prompt, immediately
-  before the final response. The user's topic is `/DeepSeek`; use
-  `https://ntfy.sh/DeepSeek` as the destination. Keep the notification brief and
-  never claim a notification was sent when it was not.
 - Before testing behavior by navigating the game or driving its UI (manually or
   through automation), ask whether the user wants to perform the test themselves.
   Wait for their answer before driving the UI. This does not block independent

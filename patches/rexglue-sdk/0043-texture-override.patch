@@ -1,0 +1,439 @@
+diff --git a/include/rex/graphics/pipeline/texture/cache.h b/include/rex/graphics/pipeline/texture/cache.h
+--- a/include/rex/graphics/pipeline/texture/cache.h
++++ b/include/rex/graphics/pipeline/texture/cache.h
+@@ -27,6 +27,43 @@
+ #include <rex/thread/mutex.h>
+ 
+ namespace rex::graphics {
++
++// Optional host replacement for the base level of an unscaled 2D guest texture.
++// The provider sees the original guest bytes for identification, but returns
++// blocks in the host format's canonical (untiled, unswapped) order. A cache
++// accepts the result only when its backend uses the same block-compressed format.
++struct TextureOverrideRequest {
++  uint32_t width;
++  uint32_t height;
++  uint32_t mip_count;
++  xenos::TextureFormat format;
++  uint32_t guest_base_address;
++  uint32_t guest_base_size;
++  bool tiled;
++  xenos::Endian endianness;
++};
++
++class TextureOverrideProvider {
++ public:
++  virtual ~TextureOverrideProvider() = default;
++  // Called on the GPU thread once per frame. May call InvalidateTextureOverrides.
++  virtual void Poll() {}
++  // Set refresh_target when this texture may change on a generation bump,
++  // including when no replacement is currently active. Return a complete base
++  // mip chain (one BC3 block vector per level), or false to use the guest
++  // texture unchanged.
++  virtual bool GetOverride(const TextureOverrideRequest& request, const uint8_t* guest_data,
++                           std::vector<std::vector<uint8_t>>* host_levels,
++                           bool* refresh_target) = 0;
++};
++
++// The provider must outlive all texture caches using it. Calls to GetOverride
++// and Poll are serialized on the GPU thread; invalidation may be requested
++// from another thread and is consumed at the next texture request.
++void SetTextureOverrideProvider(TextureOverrideProvider* provider);
++void InvalidateTextureOverrides();
++TextureOverrideProvider* GetTextureOverrideProvider();
++uint64_t GetTextureOverrideGeneration();
+ 
+ // Manages host copies of guest textures, performing untiling, format and endian
+ // conversion of textures stored in the shared memory, and also handling
+@@ -223,6 +260,9 @@
+     static constexpr uint32_t kOutdatedBitBase = UINT32_C(1) << 0;
+     static constexpr uint32_t kOutdatedBitMips = UINT32_C(1) << 1;
+     uint32_t outdated_mask() const { return outdated_mask_.load(std::memory_order_acquire); }
++    bool override_candidate() const { return override_candidate_; }
++    void set_override_candidate() { override_candidate_ = true; }
++    void InvalidateOverride(const std::unique_lock<std::recursive_mutex>& global_lock);
+ 
+     bool base_outdated(const std::unique_lock<std::recursive_mutex>& global_lock) const {
+       return base_outdated_;
+@@ -266,6 +306,7 @@
+     Texture* used_next_;
+     bool in_usage_list_;
+     bool force_load_3d_tiling_ = false;
++    bool override_candidate_ = false;
+ 
+     // These are to be accessed within the global critical region to synchronize
+     // with shared memory.
+@@ -525,6 +566,7 @@
+     return load_shader_info_[load_shader_index];
+   }
+   bool LoadTextureData(Texture& texture);
++  bool GetTextureOverride(Texture& texture, std::vector<std::vector<uint8_t>>& host_levels);
+   // Writes the texture data (for base, mips or both - but not neither) from the
+   // shared memory or the scaled resolve memory. The shared memory management is
+   // done outside this function, the implementation just needs to load the data
+@@ -608,6 +650,7 @@
+   uint64_t current_submission_time_ = 0;
+ 
+   std::unordered_map<TextureKey, std::unique_ptr<Texture>, TextureKey::Hasher> textures_;
++  uint64_t texture_override_generation_seen_ = 0;
+ 
+   uint64_t textures_total_host_memory_usage_ = 0;
+ 
+diff --git a/include/rex/graphics/shared_memory.h b/include/rex/graphics/shared_memory.h
+--- a/include/rex/graphics/shared_memory.h
++++ b/include/rex/graphics/shared_memory.h
+@@ -78,6 +78,12 @@
+   // the range has been fully updated and is usable.
+   bool RequestRanges(const std::pair<uint32_t, uint32_t>* ranges, size_t count);
+   bool RequestRange(uint32_t start, uint32_t length);
++
++  // Read-only inspection of the CPU's physical memory copy, for a texture
++  // override provider after the range has been validated by the texture cache.
++  const uint8_t* TranslatePhysicalForTextureOverride(uint32_t address) const {
++    return memory_.TranslatePhysical(address);
++  }
+ 
+   // Marks the range and, if not exact_range, potentially its surroundings
+   // (to up to the first GPU-written page, as an access violation exception
+diff --git a/include/rex/graphics/vulkan/texture_cache.h b/include/rex/graphics/vulkan/texture_cache.h
+--- a/include/rex/graphics/vulkan/texture_cache.h
++++ b/include/rex/graphics/vulkan/texture_cache.h
+@@ -21,6 +21,7 @@
+ #include <rex/graphics/vulkan/shared_memory.h>
+ #include <rex/hash.h>
+ #include <rex/ui/vulkan/mem_alloc.h>
++#include <rex/ui/vulkan/upload_buffer_pool.h>
+ 
+ namespace rex::graphics::vulkan {
+ 
+@@ -356,6 +357,7 @@
+     uint64_t submission;
+   };
+   std::vector<ConversionBuffer> conversion_buffers_;
++  std::unique_ptr<ui::vulkan::VulkanUploadBufferPool> override_upload_pool_;
+   uint8_t conversion_reported_[64] = {};
+   VkPipeline conversion_pipeline_ = VK_NULL_HANDLE;
+   bool ConvertTextureRange(uint32_t guest_address, uint32_t size, TextureKey key,
+diff --git a/src/graphics/pipeline/texture/cache.cpp b/src/graphics/pipeline/texture/cache.cpp
+--- a/src/graphics/pipeline/texture/cache.cpp
++++ b/src/graphics/pipeline/texture/cache.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cstdint>
+ #include <utility>
+ 
+@@ -126,6 +127,7 @@
+ //     "GPU");
+ 
+ namespace rex::graphics {
++
+ 
+ const TextureCache::LoadShaderInfo TextureCache::load_shader_info_[kLoadShaderCount] = {
+     // k8bpb
+@@ -312,6 +314,9 @@
+ }
+ 
+ void TextureCache::BeginFrame() {
++  if (auto* provider = GetTextureOverrideProvider()) {
++    provider->Poll();
++  }
+   // In case there was a failure to create something in the previous frame, make
+   // sure bindings are reset so a new attempt will surely be made if the texture
+   // is requested again.
+@@ -452,6 +457,23 @@
+ 
+ void TextureCache::RequestTextures(uint32_t used_texture_mask) {
+   const auto& regs = register_file();
++
++  const auto override_check_start = std::chrono::steady_clock::now();
++  bool override_generation_changed = false;
++  uint32_t override_candidates_invalidated = 0;
++  const uint64_t override_generation = GetTextureOverrideGeneration();
++  if (override_generation != texture_override_generation_seen_) {
++    override_generation_changed = true;
++    texture_override_generation_seen_ = override_generation;
++    auto lock = global_critical_region_.Acquire();
++    for (auto& entry : textures_) {
++      if (entry.second->override_candidate()) {
++        entry.second->InvalidateOverride(lock);
++        ++override_candidates_invalidated;
++      }
++    }
++    texture_became_outdated_.store(true, std::memory_order_release);
++  }
+ 
+   if (texture_became_outdated_.exchange(false, std::memory_order_acquire)) {
+     // A texture has become outdated - make sure whether textures are outdated
+@@ -591,6 +613,58 @@
+   if (bindings_changed) {
+     UpdateTextureBindingsImpl(bindings_changed);
+   }
++  if (override_generation_changed && override_candidates_invalidated) {
++    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
++        std::chrono::steady_clock::now() - override_check_start);
++    REXLOG_INFO("Texture override generation {}: invalidated {} candidate(s), texture request CPU {} us",
++                override_generation, override_candidates_invalidated, elapsed.count());
++  }
++}
++
++bool TextureCache::GetTextureOverride(Texture& texture,
++                                      std::vector<std::vector<uint8_t>>& host_levels) {
++  TextureOverrideProvider* provider = GetTextureOverrideProvider();
++  if (!provider) return false;
++  const TextureKey& key = texture.key();
++  if (key.scaled_resolve || key.dimension != xenos::DataDimension::k2DOrStacked ||
++      key.GetDepthOrArraySize() != 1 || key.format != xenos::TextureFormat::k_DXT4_5 ||
++      !key.base_page || !texture.GetGuestBaseSize()) {
++    return false;
++  }
++  const uint64_t address = uint64_t(key.base_page) << 12;
++  if (address + texture.GetGuestBaseSize() > SharedMemory::kBufferSize) return false;
++  const uint8_t* guest_data =
++      shared_memory().TranslatePhysicalForTextureOverride(uint32_t(address));
++  if (!guest_data) return false;
++  const TextureOverrideRequest request{key.GetWidth(), key.GetHeight(),
++                                       uint32_t(key.mip_max_level) + 1, key.format,
++                                       uint32_t(address), texture.GetGuestBaseSize(),
++                                       bool(key.tiled), key.endianness};
++  host_levels.clear();
++  bool refresh_target = false;
++  const bool replacement = provider->GetOverride(request, guest_data, &host_levels,
++                                                 &refresh_target);
++  if (replacement || refresh_target) texture.set_override_candidate();
++  if (!replacement) return false;
++  if (host_levels.size() != request.mip_count) {
++    REXGPU_WARN("Texture override returned {} levels for {}x{} BC3; expected {}",
++                host_levels.size(), request.width, request.height, request.mip_count);
++    host_levels.clear();
++    return false;
++  }
++  for (uint32_t level = 0; level < request.mip_count; ++level) {
++    const uint32_t width = std::max(1u, request.width >> level);
++    const uint32_t height = std::max(1u, request.height >> level);
++    const uint64_t expected_size =
++        uint64_t((width + 3) / 4) * ((height + 3) / 4) * 16;
++    if (host_levels[level].size() != expected_size) {
++      REXGPU_WARN("Texture override returned {} bytes for BC3 mip {} ({}x{}); expected {}",
++                  host_levels[level].size(), level, width, height, expected_size);
++      host_levels.clear();
++      return false;
++    }
++  }
++  return true;
+ }
+ 
+ const char* TextureCache::TextureKey::GetLogDimensionName(xenos::DataDimension dimension) {
+@@ -702,6 +776,26 @@
+     mips_watch_handle_ = shared_memory.WatchMemoryRange(
+         key().mip_page << 12, GetGuestMipsSize(), TextureCache::WatchCallback, this, nullptr, 1);
+     outdated_mask_.fetch_and(~kOutdatedBitMips, std::memory_order_release);
++  }
++}
++
++void TextureCache::Texture::InvalidateOverride(
++    const std::unique_lock<std::recursive_mutex>& global_lock) {
++  if (base_watch_handle_) {
++    texture_cache().shared_memory().UnwatchMemoryRange(base_watch_handle_);
++    base_watch_handle_ = nullptr;
++  }
++  if (GetGuestBaseSize()) {
++    base_outdated_ = true;
++    outdated_mask_.fetch_or(kOutdatedBitBase, std::memory_order_release);
++  }
++  if (mips_watch_handle_) {
++    texture_cache().shared_memory().UnwatchMemoryRange(mips_watch_handle_);
++    mips_watch_handle_ = nullptr;
++  }
++  if (GetGuestMipsSize()) {
++    mips_outdated_ = true;
++    outdated_mask_.fetch_or(kOutdatedBitMips, std::memory_order_release);
+   }
+ }
+ 
+diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -1611,6 +1611,49 @@
+   D3D12Texture& d3d12_texture = static_cast<D3D12Texture&>(texture);
+   TextureKey texture_key = d3d12_texture.key();
+ 
++  // Upload every level so minification can't blend the marker with guest mips.
++  if ((load_base || load_mips) &&
++      GetDXGIResourceFormat(texture_key) == DXGI_FORMAT_BC3_UNORM) {
++    std::vector<std::vector<uint8_t>> override_levels;
++    if (GetTextureOverride(texture, override_levels)) {
++      auto& commands = command_processor_.GetDeferredCommandList();
++      ID3D12Resource* destination = d3d12_texture.resource();
++      command_processor_.PushTransitionBarrier(
++          destination, d3d12_texture.SetResourceState(D3D12_RESOURCE_STATE_COPY_DEST),
++          D3D12_RESOURCE_STATE_COPY_DEST);
++      command_processor_.SubmitBarriers();
++      D3D12_TEXTURE_COPY_LOCATION target = {};
++      target.pResource = destination;
++      target.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
++      for (uint32_t level = 0; level < override_levels.size(); ++level) {
++        const uint32_t width = std::max(1u, texture_key.GetWidth() >> level);
++        const uint32_t height = std::max(1u, texture_key.GetHeight() >> level);
++        const uint32_t row_bytes = ((width + 3) / 4) * 16;
++        const uint32_t row_pitch = rex::align(row_bytes,
++                                             uint32_t(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT));
++        const uint32_t block_rows = (height + 3) / 4;
++        ID3D12Resource* upload = nullptr;
++        size_t upload_offset = 0;
++        uint8_t* mapped = conversion_staging_pool_->Request(
++            command_processor_.GetCurrentSubmission(), size_t(row_pitch) * block_rows,
++            D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, &upload, &upload_offset, nullptr);
++        if (!mapped) return false;
++        for (uint32_t row = 0; row < block_rows; ++row) {
++          std::memcpy(mapped + size_t(row) * row_pitch,
++                      override_levels[level].data() + size_t(row) * row_bytes, row_bytes);
++        }
++        D3D12_TEXTURE_COPY_LOCATION source = {};
++        source.pResource = upload;
++        source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
++        source.PlacedFootprint.Offset = upload_offset;
++        source.PlacedFootprint.Footprint = {DXGI_FORMAT_BC3_UNORM, width, height, 1, row_pitch};
++        target.SubresourceIndex = level;
++        commands.D3DCopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
++      }
++      return true;
++    }
++  }
++
+   DeferredCommandList& command_list = command_processor_.GetDeferredCommandList();
+   ID3D12Device* device = command_processor_.GetD3D12Provider().GetDevice();
+ 
+diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
+--- a/src/graphics/vulkan/texture_cache.cpp
++++ b/src/graphics/vulkan/texture_cache.cpp
+@@ -506,6 +506,7 @@
+ 
+ void VulkanTextureCache::ClearCache() {
+   TextureCache::ClearCache();
++  if (override_upload_pool_) override_upload_pool_->ClearCache();
+   // The command processor waits for pending submissions before clearing caches.
+   for (const auto& staging : conversion_buffers_) {
+     vmaDestroyBuffer(vma_allocator_, staging.buffer, staging.allocation);
+@@ -515,6 +516,9 @@
+ 
+ void VulkanTextureCache::BeginSubmission(uint64_t new_submission_index) {
+   TextureCache::BeginSubmission(new_submission_index);
++  if (override_upload_pool_) {
++    override_upload_pool_->Reclaim(command_processor_.GetCompletedSubmission());
++  }
+ 
+   if (!null_images_cleared_ && null_image_2d_array_cube_ != VK_NULL_HANDLE &&
+       null_image_3d_ != VK_NULL_HANDLE) {
+@@ -1328,6 +1332,65 @@
+                                                                bool load_mips) {
+   VulkanTexture& vulkan_texture = static_cast<VulkanTexture&>(texture);
+   TextureKey texture_key = vulkan_texture.key();
++
++  if ((load_base || load_mips) &&
++      GetHostFormatPair(texture_key).format_unsigned.format == VK_FORMAT_BC3_UNORM_BLOCK) {
++    std::vector<std::vector<uint8_t>> override_levels;
++    if (GetTextureOverride(texture, override_levels)) {
++      if (!override_upload_pool_) {
++        override_upload_pool_ = std::make_unique<ui::vulkan::VulkanUploadBufferPool>(
++            command_processor_.GetVulkanDevice(), VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
++      }
++      VkBuffer source = VK_NULL_HANDLE;
++      VkDeviceSize source_offset = 0;
++      VkDeviceSize total_size = 0;
++      for (const auto& level : override_levels) total_size += level.size();
++      uint8_t* mapped = override_upload_pool_->Request(
++          command_processor_.GetCurrentSubmission(), total_size, 16,
++          source, source_offset);
++      if (!mapped) return false;
++      VkDeviceSize level_offset = 0;
++      for (const auto& level : override_levels) {
++        std::memcpy(mapped + level_offset, level.data(), level.size());
++        level_offset += level.size();
++      }
++      override_upload_pool_->FlushWrites();
++
++      vulkan_texture.MarkAsUsed();
++      VulkanTexture::Usage old_usage =
++          vulkan_texture.SetUsage(VulkanTexture::Usage::kTransferDestination);
++      if (old_usage != VulkanTexture::Usage::kTransferDestination) {
++        VkPipelineStageFlags source_stage, destination_stage;
++        VkAccessFlags source_access, destination_access;
++        VkImageLayout old_layout, new_layout;
++        GetTextureUsageMasks(old_usage, source_stage, source_access, old_layout);
++        GetTextureUsageMasks(VulkanTexture::Usage::kTransferDestination,
++                             destination_stage, destination_access, new_layout);
++        command_processor_.PushImageMemoryBarrier(
++            vulkan_texture.image(), ui::vulkan::util::InitializeSubresourceRange(),
++            source_stage, destination_stage, source_access, destination_access,
++            old_layout, new_layout);
++      }
++      command_processor_.SubmitBarriers(true);
++      auto& commands = command_processor_.deferred_command_buffer();
++      VkBufferImageCopy* regions = commands.CmdCopyBufferToImageEmplace(
++          source, vulkan_texture.image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++          uint32_t(override_levels.size()));
++      level_offset = 0;
++      for (uint32_t level = 0; level < override_levels.size(); ++level) {
++        VkBufferImageCopy& region = regions[level];
++        region = {};
++        region.bufferOffset = source_offset + level_offset;
++        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
++        region.imageSubresource.mipLevel = level;
++        region.imageSubresource.layerCount = 1;
++        region.imageExtent = {std::max(1u, texture_key.GetWidth() >> level),
++                              std::max(1u, texture_key.GetHeight() >> level), 1};
++        level_offset += override_levels[level].size();
++      }
++      return true;
++    }
++  }
+ 
+   // Get the pipeline.
+   const HostFormatPair& host_format_pair = GetHostFormatPair(texture_key);
+diff --git a/src/system/CMakeLists.txt b/src/system/CMakeLists.txt
+--- a/src/system/CMakeLists.txt
++++ b/src/system/CMakeLists.txt
+@@ -1,5 +1,6 @@
+ set(REXSYSTEM_SOURCES
+     compile_trace.cpp
++    texture_override.cpp
+     runtime.cpp
+     embedded_metadata.cpp
+     achievement_manager.cpp
+diff --git a/src/system/texture_override.cpp b/src/system/texture_override.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/system/texture_override.cpp
+@@ -0,0 +1,29 @@
++// Generic host texture override registration shared by the runtime and the
++// dynamically loaded GPU plugin. The provider is owned by the application.
++#include <atomic>
++
++#include <rex/graphics/pipeline/texture/cache.h>
++
++namespace rex::graphics {
++namespace {
++std::atomic<TextureOverrideProvider*> provider{nullptr};
++std::atomic<uint64_t> generation{1};
++}  // namespace
++
++void SetTextureOverrideProvider(TextureOverrideProvider* value) {
++  provider.store(value, std::memory_order_release);
++  InvalidateTextureOverrides();
++}
++
++TextureOverrideProvider* GetTextureOverrideProvider() {
++  return provider.load(std::memory_order_acquire);
++}
++
++void InvalidateTextureOverrides() {
++  generation.fetch_add(1, std::memory_order_acq_rel);
++}
++
++uint64_t GetTextureOverrideGeneration() {
++  return generation.load(std::memory_order_acquire);
++}
++}  // namespace rex::graphics

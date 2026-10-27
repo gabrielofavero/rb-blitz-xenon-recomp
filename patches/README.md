@@ -87,6 +87,7 @@ make untracked files are excluded; tracked edits and moved gitlinks remain visib
 
 | Patch | Purpose | Upstream candidate |
 | --- | --- | --- |
+| `rexglue-sdk/0043-texture-override.patch` | Adds a process-wide texture override provider in `rexruntime`, candidate fingerprinting in the shared texture cache, and narrow generation invalidation. D3D12 and Vulkan upload canonical BC3 blocks directly to a matching BC3 host texture; unsupported host formats keep the guest load. The application supplies P1's synthetic markers and the measured fingerprint selection. No guest scene or guest memory is rewritten. | yes |
 | `rexglue-sdk/0041-media-keys.patch` | Deliver SDL Media Next/Previous/Play-Pause through the existing VirtualKey channel. | yes |
 | `rexglue-sdk/0001-xthread-log-once-core-count-warning.patch` | `XThread::SetActiveCpu` re-logged "Too few processor cores" on every thread CPU assignment (~11k lines, ~580 KB per boot). Log it once. | yes |
 | `rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch` | The SDK has no host format and no load shader for the 32-bit guest texture formats (`k_32`, `k_32_32`, `k_32_32_32_32`), which are 0.32 fixed point when `num_format = 0`; `CreateTexture` then returned `nullptr` and the SRV sampled (0,0,0,0), making every alpha-blended 3D element invisible (B-010 in [../docs/history/bringup-log.md](../docs/history/bringup-log.md)). Maps them to the float host formats with the existing word-mover load shaders, carries `num_format` in `TextureKey`, and converts the guest words to IEEE float bits on the CPU into an upload-pool staging buffer bound as the load shader's source. On 2026-09-30 the two limits the first cut left were removed: the conversion now covers `num_format = 1` (integer) as well as `0` (fraction), using the scaling rule of the SDK's own other number-format consumers (the `is_integer` mode of the vertex fetch and the integer surface number formats of the memory export both leave an integer component unscaled) and reporting the first use of each such format at `REXGPU_WARN`; and the staging buffer comes from a texture-cache-owned pool that allocates a page large enough for the request instead of requiring the whole converted texture and its mips to fit `GraphicsUploadBufferPool`'s 2 MiB default page — which is what `Page::size_` (the size each page was actually allocated with) in `GraphicsUploadBufferPool` and the page-size increase in `D3D12UploadBufferPool::Request` are for. **Extended 2026-10-24 to Vulkan:** its format table still rejected `k_32_32_32_32` on every gameplay frame (`rb_blitz_310.log`), matching the owner's missing-highway screenshot. Both backends now share the component conversion in `pipeline/texture/util.h`. Vulkan uses float host images and mapped VMA storage buffers, reuses them only after their submissions complete, flushes noncoherent writes, and converts base/mip ranges separately. Converted formats cannot use the scaled-resolve shortcut. The title enables Vulkan resolve readback by default while honoring explicit readback overrides. Host conversion tests and the release build cover the code; visual gameplay confirmation is pending the owner's test. | yes |
@@ -457,6 +458,19 @@ delivery/arbitration still requires live acceptance.
 
 
 `0042-imgui-image-textures.patch` exposes drawer-owned bounded RGBA image textures for host UI.
+
+`0043-texture-override.patch` is the P1 seam for the
+[controller layout plan](../docs/plans/in-progress/2026-10-19-button-layout-hotswap-plan.md).
+The provider gets a read-only view of the original guest base level to identify a
+texture. It returns the same block-compressed host format in untiled, unswapped
+order. This matches how both backends already keep native BC3 textures and avoids
+changing their resource/view formats. The project can decode an authored PNG to
+RGBA and encode its replacement to BC3 on the host; the guest's DXT5 bytes stay
+untouched. The cache invalidates only previously observed candidates when the
+provider bumps its generation, so ordinary textures stay resident. The P1 probe
+currently covers the base level of 2D DXT5 textures on BC3-capable devices,
+preserving the guest's mip levels; the live
+menu/pad capture and switch-cost measurement remain acceptance gates.
 `CreateImageTexture` uses the existing D3D12/Vulkan ImmediateDrawer texture API; IDs are consumed
 by the existing ImGui draw-list renderer. `ReleaseImageTexture` requires the drawer generation;
 replacement clears textures and increments that generation. Both backends already defer in-use

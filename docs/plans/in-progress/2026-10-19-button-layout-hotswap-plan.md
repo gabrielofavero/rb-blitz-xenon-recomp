@@ -1,7 +1,7 @@
 # Button layout hot-swapping — button glyphs and controller art
 
 **Status: in progress, created 2026-10-19; scope revised 2026-10-26. P0 delivered
-2026-10-26; P1 onward remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
+2026-10-26; P1 delivered 2026-10-27; P2 onward remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
 
@@ -67,9 +67,9 @@ The art the feature must replace is **scene-embedded**, not standalone archive e
 | Pad art | `ui/controller_config/gen/controller_config.milo_xbox` | `img/xbox_0..3.png`, `img/ps_0..3.png` | 1024×1024, 8 bpp each | the four controller-layout images per family; both families ship in both builds |
 | Calibration prompts | `ui/calibration/gen/cal_auto.milo_xbox` | `button_a_calibrate_icon0001/2.bmp`, `button_press_ps30001/2.bmp` | 256×256 | calibration-specific icons; **out of scope in v1** |
 
-The settings screen already routes the **Default Presets** row to retail's `controller_config_screen`
-(`src/ui/settings_screen.cpp`, the `settings_default_presets` RouteGatedRow). Swapping the pad art
-must therefore reach that routed screen, not a new screen of ours.
+The settings screen routes **Help & Options → Controls → Gameplay Mapping → Controller → Controller
+Presets** to retail's `controller_config_screen` (`src/ui/settings_screen.cpp`, the
+`settings_controller_presets` RouteRow). Swapping the pad art must reach that routed screen.
 
 ### 2.2 The settings and input machinery the feature plugs into
 
@@ -431,7 +431,7 @@ Hot apply:
   on the next presented frame. Rapid selections resolve to the latest committed choice. Keyboard
   or mouse activity cannot mask that preview by switching ordinary hints to keyboard/mouse.
 - The row commits without a restart prompt; leaving the page and returning shows the new selection.
-- The retail **Default Presets** page uses the selected pad art whenever visible; the selection
+- The retail **Controller Presets** page uses the selected pad art whenever visible; the selection
   page itself already demonstrates both changed icons and pad art without navigation.
 - If the selected package becomes invalid between boots, the boot falls back to `retail`, logs
   `button_schemes: saved scheme <id> is missing, using retail`, and the row shows `Xbox 360`.
@@ -679,6 +679,119 @@ proven for a scene that was not decoded.
 
 ### P1 — Texture override seam (SDK patch) and marker spike
 
+**Status (2026-10-27): P1 complete on D3D12 and Vulkan.** Owner runs prove
+visible button and pad replacement, full pad mip coverage, and live restoration
+in both directions on each backend. Frame traces place both reloads before the
+first post-switch `XE_SWAP` on each backend and record the observed intervals.
+The noisy trace and manual flag toggle do not isolate GPU upload cost from
+other frame work.
+
+**Implementation checkpoint (2026-10-27):** `0043-texture-override.patch` and the
+internal `RB_BLITZ_P1_*` probe compile with D3D12 and Vulkan. The provider returns
+canonical BC3 blocks encoded from generated RGBA marker art, rather than RGBA
+directly: both current backends retain a BC3 host image for these DXT5 textures,
+so an RGBA upload would require changing their image/view formats. The guest
+bytes and scenes remain untouched. The candidate trace below identifies likely
+button and pad hashes. The marker and switch runs below supply the live
+evidence that was pending at this checkpoint.
+
+**Owner trace (2026-10-27):** `out/button-schemes/p1/d3d12-20261027-183250.log`
+completed with the trace enabled and no overrides selected. Its only 512×512
+BC3 candidate is `3F044908A62A89AD` (#5), the likely button sheet. At the
+Controller Presets visit, 1024×1024 candidate `06FFB32889EA3A64` (#32)
+appeared with two 64×128 arrow textures (#33–34), making it the likely first
+pad slot; three further 1024×1024 candidates (#35–37) appeared seconds later.
+Those fingerprints were hypotheses until the marker run below. The trace
+has no replacement or generation timing evidence because no hashes were supplied.
+
+**Owner marker run (2026-10-27):** `out/button-schemes/p1/d3d12-20261027-184046.log`
+confirms replacements for `3F044908A62A89AD` (512×512 button sheet) and
+`06FFB32889EA3A64` (1024×1024 first pad slot). Owner screenshots show the
+probe's deliberate white three-stripe glyph in menu prompts and a magenta
+rectangle over the controller preset art. The underlying art remains visible
+in that screenshot; the reason has not been isolated. This run proves the
+selected texture draws but does not yet establish a clean standalone pad image. No marker-switch
+event or `Texture override generation` timing line occurred in the log, so
+generation cost and retail restoration still need a live check.
+
+**Full mip correction (2026-10-27, awaiting owner retest):** The next owner
+capture (`out/button-schemes/p1/d3d12-20261027-184953.log`, recovered from the
+build log) used the empty DLC roots: the scan reported zero packages. It again
+showed the magenta rectangle mixed with the retail pad art. The previous P1
+override uploaded BC3 level 0 while leaving guest mips in the host image, so
+minification could blend both. `0043-texture-override.patch` now accepts and
+uploads a complete BC3 mip chain on D3D12 and Vulkan; invalidation also reloads
+both base and mip levels when retail art is restored. The release build and SDK
+patch replay audit pass. A new owner screenshot and switch timing are still
+needed at this checkpoint to verify the visual result and finish P1 acceptance.
+
+**Owner retest (2026-10-27):** A screenshot from the rebuilt D3D12 probe now
+shows a solid magenta 1024×1024 pad region with no retail controller art
+bleeding through. `out/button-schemes/p1/d3d12-20261027-190406.log` confirms
+the button sheet was replaced at one level and the pad at seven levels; the
+empty DLC roots yielded a cache hit with zero packages. This confirms the
+full-mip correction visually. That log had no marker-switch or generation
+timing event; the later run below supplies them.
+
+**Owner live switch (2026-10-27):** `out/button-schemes/p1/d3d12-20261027-191202.log`
+records `marker switch off` at 19:12:49.592 and `marker switch on` at
+19:13:10.849. Each generation invalidated the two matching texture candidates;
+the texture-request CPU portion logged 6 µs and 5 µs respectively. The button
+and pad replacement requests on the return to markers were logged 68 and 70 ms
+after the switch event. The owner confirmed that retail art returned and that
+both markers returned after removing the flag. The boot used the empty DLC roots
+and loaded zero DLC packages. This establishes the live D3D12 override and
+restoration without a guest scene edit. The log does not provide a rendered
+frame-time sample or prove the one-frame presentation bound; Vulkan is compiled
+but has no live result yet.
+
+The acceptance script now has `-MeasureFrames`, which enables the SDK's
+`[VdSwap]` and `[XE_SWAP]` interval trace for an owner-run switch. This is
+diagnostic mode only; normal P1 probe runs keep the quieter log settings.
+
+**Frame trace acceptance (2026-10-27):** The owner repeated the off/on switch
+with `-MeasureFrames`; evidence is
+`out/button-schemes/p1/d3d12-20261027-191829.log`. On switch-off at
+19:19:28.851, the cache invalidated both candidates and loaded the retail
+1024×1024/7-mip pad at 19:19:28.858 and 512×512/1-mip button sheet at
+19:19:28.858, before the next `XE_SWAP` (#2746) at 19:19:28.862. On
+switch-on at 19:19:34.979, both marker replacements loaded at
+19:19:34.986–.989 before the next `XE_SWAP` (#2936) at 19:19:34.994.
+Those two first post-switch `XE_SWAP` intervals were 13,091 µs and 15,398 µs;
+the corresponding guest `VdSwap` intervals were 12,472 µs and 12,677 µs.
+Candidate invalidation logged 5 µs for each change. This trace mode is noisy
+and its intervals are observations, not an isolated GPU cost measurement; the
+switch frames showed no spike relative to nearby frames. Only the two selected
+hashes were replaced, and the owner confirmed the visible state in both
+directions. The D3D12 one-frame request bound is satisfied.
+
+**Vulkan live acceptance (2026-10-27):** The owner reported that the same
+marker and retail toggle looked correct on Vulkan. Evidence is
+`out/button-schemes/p1/vulkan-20261027-192321.log`: the button and pad hashes
+were replaced at one and seven mip levels respectively, then both candidate
+textures were invalidated on switch-off at 19:28:59.891 and switch-on at
+19:29:09.428. The retail pad and button levels loaded by 19:28:59.893, before
+the next `XE_SWAP` (#5502) at 19:28:59.894. Both marker levels loaded by
+19:29:09.433, before the next `XE_SWAP` (#6022) at 19:29:09.448. Candidate
+invalidation cost 5 and 6 µs. The first post-switch intervals were 183,012 µs
+off and 21,083 µs on; nearby 60-frame pre-switch medians were 16,574 and
+16,667 µs. The 183 ms interval includes about 180 ms before the off event, so
+it cannot be attributed to the texture reload. This boot used empty DLC roots
+with zero packages, reached normal execution completion, and logged no GPU
+error. The Vulkan one-frame request bound and visible switching are accepted.
+
+The owner-run probe is `scripts/acceptance_button_schemes_p1.ps1`. Run it first
+without hashes, visit the menu prompt band and Controller Presets through the route above, close the game,
+and inspect the copied `out/button-schemes/p1/d3d12-*.log` candidate lines. Once
+the two slot hashes are identified from that trace, rerun with `-ButtonHash HEX
+-PadHash HEX -Switchable`; creating/removing the printed `markers-off.flag`
+toggles retail/marker art in the running game. Capture both states, note the
+`Texture override generation` CPU timing line and frame timing, then repeat with
+`-Backend vulkan` if that backend can run. The script launches the game but leaves
+all navigation and screenshots to the owner. It pins `--dlc_root` and
+`--dlc_library` to its empty `out/button-schemes/p1/empty-dlc` directory so
+subsequent probes do not scan the owner's DLC library.
+
 **Goal.** Prove a host texture can replace the button sheet and one pad slot in a live boot without
 touching the guest scene, and measure the cost of switching it.
 
@@ -700,7 +813,7 @@ the DXT codec or duplicate the overlay renderer.
   records the switch cost.
 
 **Verify.** A boot on the menu shows the marker glyphs on the prompt band and the marker pad on the
-retail Default Presets page; a second boot without the spike shows retail art. A scheme change
+retail Controller Presets page; a second boot without the spike shows retail art. A scheme change
 replaces both within one frame after the generation bump; the frame cost is measured and recorded.
 The untouched textures are unchanged (hash/screens). At least one backend is measured; the other is
 recorded as unproven if it cannot be run.
@@ -755,7 +868,7 @@ the installer compiles its pure parts.
 **Verify.** With `test-markers`, each selection changes the on-page controller icons and pad preview
 on the next presented frame, including a mouse click or keyboard selection while ordinary hints
 remain in keyboard/mouse mode. Repeat with controller selection and rapid changes. No Apply,
-page exit, or later pad input is needed. Default Presets uses the selected art; leaving shows no
+page exit, or later pad input is needed. Controller Presets uses the selected art; leaving shows no
 restart prompt; a new boot restores the saved selection. Choosing Xbox 360 restores base-game
 controller art. The boot log names the active scheme.
 
@@ -876,7 +989,7 @@ owner's art in the integration; report a bad slot to the owner. Do not commit th
   page, and states the on-by-default decision (D7).
 - `docs/settings/plan.md` §3: the Controller Layout page and the `controller.scheme` row; the page's
   row count; the hot classification and its evidence.
-- `docs/settings/menu.md`: the Controls page's fourth row and the retail Default Presets route.
+- `docs/settings/menu.md`: the Controls page's fourth row and the retail Controller Presets route.
 - `docs/settings/status.md`: the live state and any open items.
 - `docs/guides/assets.md`: the 2026-10-19 format section (P0) and the PS3 button-sheet route.
 - `docs/reference/backlog.md`: the old "pin the sheet format" item is resolved by P0; any remaining
@@ -988,7 +1101,7 @@ known actionable hint still shows stale/default bindings.
 | `hmx_milo.py texture` on 360/PS3 `buttons` | header + 31, DXT5, Xbox word swap and grid are reproducible | decoded PNGs, 30 occupied cells |
 | `controller_config` decode | the eight pad images and the per-slot mapping | `pads-contact.png` |
 | Marker sheet on the menu prompt band | the host override reaches the glyph draw | capture + pixel/OCR |
-| Marker pad on Default Presets | the pad slots are overridden, not only the glyphs | capture |
+| Marker pad on Controller Presets | the pad slots are overridden, not only the glyphs | capture |
 | Select `test-markers` on the page | the row writes `controller.scheme` and applies live | log + capture |
 | Leave the page / return | no restart prompt, selection persists | capture + `settings.toml` |
 | New boot | the saved selection is the active scheme | log |

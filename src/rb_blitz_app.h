@@ -54,6 +54,7 @@
 #include <string>
 
 #include <rex/cvar.h>
+#include "assets/texture_override.h"
 #include <rex/graphics/compile_trace.h>
 #include "diag/shader_trace.h"
 #include "graphics/preparation_loading.h"
@@ -428,6 +429,7 @@ class RbBlitzApp : public rex::ReXApp {
   // change to kInitOnly flags, which is correct here - those are device and logging
   // selections that the config, environment and command line have already fixed.
   void OnPreLaunchModule() override {
+    rb_blitz::assets::InstallP1TextureOverride();
     // P11a: the last read-back before the guest thread exists. A cvar this boot wrote can have been
     // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the
     // player cannot change has to say so rather than save a value that never takes effect.
