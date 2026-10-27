@@ -366,9 +366,71 @@ length-prefixed builder-side source path — `splash.milo_xbox` names
 `img/list_neon_outer.png`, `img/list_panel.png`, `img/start_inner_neon.png` (512×512 and
 512×128 at bpp 8), and no such entry exists in either archive.
 
-### Can a UI texture be swapped today?
+### Button and controller scene textures: measured 2026-10-19, automated in P0
 
-**No ? and the previous revision of this section said yes.** What that claim rested on is
+The earlier format uncertainty below is superseded for the **button**, **extra-icon** and
+**controller-config** scenes. `scripts/hmx_milo.py texture` locates each source path's inline
+23-byte header, validates the dimensions and its following eight zero bytes, and exports
+the first DXT5 mip to PNG through `scripts/hmx_tex.py`'s decoder. The header is a per-file
+four-byte id followed by `08 00 00 00 18`, a mip field, three big-endian 16-bit values
+(width, height and row bytes), and seven zero bytes. **Eight more zero bytes precede the
+BC3 blocks**: the pixel payload starts at `header + 31`, not `header + 23`. Its first mip
+occupies `width × height` bytes. Xbox blocks need a 16-bit word swap; PS3 blocks do not.
+The exporter clears RGB where alpha is zero so transparent PNG previews do not show BC3 filler colors.
+This structure is measured for these scenes and is not a claim about every Milo texture.
+
+| Source | Record / first payload (decompressed stream offsets) | First mip |
+| --- | --- | --- |
+| 360 and PS3 `buttons.milo_*` | `0x5C9` / `0x5E8` | 512×512, 262,144 bytes |
+| 360 `blitz_icons.milo_xbox` | `0x413` / `0x432` | 1024×512, 524,288 bytes |
+| 360 `controller_config.milo_xbox` | ten path-specific headers; `img/ps_0.png` is `0x2B96` / `0x2BB5` | eight 1024×1024 pads plus two 64×128 arrows |
+
+For example, run:
+
+```powershell
+python scripts/hmx_milo.py texture assets/game/360/ui/resource/fonts/gen/buttons.milo_xbox --list
+python scripts/hmx_milo.py texture assets/game/360/ui/resource/fonts/gen/buttons.milo_xbox --asset ../image/icons_buttons_xbox_nomip.bmp --out out/button-schemes/buttons-360.png
+python scripts/hmx_milo.py slots assets/game/360/ui/resource/fonts/gen/buttons.milo_xbox assets/game/ps3/ui/resource/fonts/gen/buttons.milo_ps3
+```
+
+The two platforms' button scenes have **two 34-entry `Glyph` tables each**. Corresponding
+tables match exactly across platforms. Within either scene, the second font variant swaps
+the `(` and `*` assignments between two cells and gives whitespace a zero-width location.
+The 32 drawable rectangles have been recorded in `assets/controller/slots.toml`; the
+transparent, retail-art-free guides are in `assets/controller/template/`. The registry
+keeps each font character for its rectangle. Named controls were checked against the decoded 360 sheet;
+unidentified glyphs keep character-based ids. The decoded 360 sheet has **30** visually
+occupied cells; the two small `g`/`c` entries are empty. The prior evidence is in
+`out/button-schemes/format-2026-10-19/`; repeat exports are in `out/button-schemes/p0/`.
+The older PNGs started at `header + 23`, eight bytes too early, and used the
+then-broken no-op word swap. They are superseded by the P0 exports. These directories
+are ignored and must never be shipped as game art. The successor work
+for live replacement is the [button layout hot-swap plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md), P1 onward.
+
+For a local reference while authoring controller art, run
+`python scripts/export_template_360.py`. It reads the user's Xbox 360 scenes and
+creates the gitignored `assets/controller/template-360/`: `buttons.png`,
+`icons.png`, `pad.png` (a copy of preset 0), and `pads/pad_0.png` through
+`pad_3.png`, plus `scheme.toml` using non-reserved id `xbox-360-reference`.
+The built-in `retail` choice has no package folder. These are decoded retail
+assets for local comparison only; the
+tracked `assets/controller/template/` remains the blank, distributable guide.
+For the local PlayStation 3 counterpart, run `python scripts/export_template_ps3.py`.
+It creates the gitignored `assets/controller/template-ps3/` with a `scheme.toml`
+matching the planned PS3 package layout, using the PS3 button, extra-icon and
+`ps_0..3` pad scenes from the user's dump. `ps3` is a reserved id for the trusted
+local import path; this reference folder is not installed automatically.
+Both local references now show the planned controller package shape. Copy the
+structure, give an original scheme its own id/name and appropriately licensed
+art, and keep the measured button slots in place. P1/P2/P3 and later prompts
+still have to implement texture replacement, package validation and the in-game
+choice; these reference folders are not usable in-game yet.
+
+### Can a UI texture be swapped today? (historical, superseded for format)
+
+**Historical status before the 2026-10-19 measurement.** The prior "no" about
+decoding the scene texture is superseded above. The earlier live-swap claim rested on
+an invalid screenshot comparison and was withdrawn. What it rested on is
 withdrawn above; what is left is a much smaller, but solid, set of pieces.
 
 **Ready.** Reading the archive and writing a whole replacement entry to it, delivered

@@ -1,0 +1,230 @@
+# Generated from matching Xbox 360 and PS3 Buttons Glyph tables.
+# Named controls were checked against the correctly decoded Xbox 360 sheet.
+# Unnamed glyphs retain their character code as a stable identifier.
+schema_version = 1
+sheet_size = [512, 512]
+
+[[slot]]
+id = "confirm_a"
+glyphs = ["A"]
+rect = [2, 0, 81, 81]
+row = 0
+column = 0
+
+[[slot]]
+id = "back_b"
+glyphs = ["B"]
+rect = [87, 0, 80, 80]
+row = 0
+column = 1
+
+[[slot]]
+id = "x"
+glyphs = ["X"]
+rect = [172, 0, 80, 80]
+row = 0
+column = 2
+
+[[slot]]
+id = "y"
+glyphs = ["Y"]
+rect = [257, 0, 80, 80]
+row = 0
+column = 3
+
+[[slot]]
+id = "glyph_0067"
+glyphs = ["g"]
+rect = [340, 0, 21, 21]
+row = 0
+column = 4
+
+[[slot]]
+id = "glyph_0063"
+glyphs = ["c"]
+rect = [425, 0, 21, 21]
+row = 0
+column = 5
+
+[[slot]]
+id = "left_trigger"
+glyphs = ["l"]
+rect = [11, 85, 63, 63]
+row = 1
+column = 0
+
+[[slot]]
+id = "left_bumper"
+glyphs = ["L"]
+rect = [86, 85, 82, 82]
+row = 1
+column = 1
+
+[[slot]]
+id = "right_trigger"
+glyphs = ["r"]
+rect = [180, 85, 64, 64]
+row = 1
+column = 2
+
+[[slot]]
+id = "right_bumper"
+glyphs = ["R"]
+rect = [256, 85, 82, 82]
+row = 1
+column = 3
+
+[[slot]]
+id = "next_arrow"
+glyphs = ["S"]
+rect = [341, 85, 83, 83]
+row = 1
+column = 4
+
+[[slot]]
+id = "previous_arrow"
+glyphs = ["s"]
+rect = [426, 85, 83, 83]
+row = 1
+column = 5
+
+[[slot]]
+id = "dpad"
+glyphs = ["D"]
+rect = [2, 170, 81, 81]
+row = 2
+column = 0
+
+[[slot]]
+id = "glyph_0031"
+glyphs = ["1"]
+rect = [87, 170, 81, 81]
+row = 2
+column = 1
+
+[[slot]]
+id = "glyph_0032"
+glyphs = ["2"]
+rect = [172, 170, 81, 81]
+row = 2
+column = 2
+
+[[slot]]
+id = "glyph_0033"
+glyphs = ["3"]
+rect = [257, 170, 81, 81]
+row = 2
+column = 3
+
+[[slot]]
+id = "glyph_0034"
+glyphs = ["4"]
+rect = [342, 170, 81, 81]
+row = 2
+column = 4
+
+[[slot]]
+id = "glyph_0035"
+glyphs = ["5"]
+rect = [427, 170, 81, 81]
+row = 2
+column = 5
+
+[[slot]]
+id = "dpad_up"
+glyphs = ["w"]
+rect = [2, 255, 81, 81]
+row = 3
+column = 0
+
+[[slot]]
+id = "dpad_right"
+glyphs = ["d"]
+rect = [87, 255, 81, 81]
+row = 3
+column = 1
+
+[[slot]]
+id = "dpad_down"
+glyphs = ["x"]
+rect = [172, 255, 81, 81]
+row = 3
+column = 2
+
+[[slot]]
+id = "dpad_left"
+glyphs = ["a"]
+rect = [257, 255, 81, 81]
+row = 3
+column = 3
+
+[[slot]]
+id = "left_stick"
+glyphs = ["["]
+rect = [342, 255, 81, 81]
+row = 3
+column = 4
+
+[[slot]]
+id = "right_stick"
+glyphs = ["]"]
+rect = [427, 255, 81, 81]
+row = 3
+column = 5
+
+[[slot]]
+id = "glyph_0036"
+glyphs = ["6"]
+rect = [2, 340, 81, 81]
+row = 4
+column = 0
+
+[[slot]]
+id = "glyph_0037"
+glyphs = ["7"]
+rect = [87, 340, 81, 81]
+row = 4
+column = 1
+
+[[slot]]
+id = "glyph_0038"
+glyphs = ["8"]
+rect = [172, 340, 81, 81]
+row = 4
+column = 2
+
+[[slot]]
+id = "glyph_0039"
+glyphs = ["9"]
+rect = [257, 340, 81, 81]
+row = 4
+column = 3
+
+[[slot]]
+id = "glyph_005e"
+glyphs = ["^"]
+rect = [342, 340, 81, 81]
+row = 4
+column = 4
+
+[[slot]]
+id = "glyph_0026"
+glyphs = ["&"]
+rect = [427, 340, 81, 81]
+row = 4
+column = 5
+
+[[slot]]
+id = "glyph_0028"
+glyphs = ["(", "*"]
+rect = [2, 425, 81, 81]
+row = 5
+column = 0
+
+[[slot]]
+id = "glyph_002a"
+glyphs = ["(", "*"]
+rect = [87, 425, 81, 81]
+row = 5
+column = 1
+

@@ -1,7 +1,7 @@
 # Button layout hot-swapping — button glyphs and controller art
 
-**Status: planning, created 2026-10-19; scope revised 2026-10-26. No implementation is delivered by
-this revision.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
+**Status: in progress, created 2026-10-19; scope revised 2026-10-26. P0 delivered
+2026-10-26; P1 onward remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
 
@@ -135,34 +135,36 @@ Setup (`installer/setup.iss`). Its commands are deliberately small (`probe-folde
 the installer and the game cannot drift. It has no PKG parser and no AES, and there is no optional
 PS3 page today.
 
-### 2.3 The scene texture format — measured 2026-10-19
+### 2.3 The scene texture format — measured 2026-10-19, offset corrected 2026-10-26
 
 The prior record in `docs/guides/assets.md` said a UI texture could not yet be swapped because the
 pixel buffer's format and offset inside a `.milo` chunk were unpinned. **That is now measured** for
-the two scenes this feature needs. A `.milo` chunk carries a **23-byte texture record** immediately
-before the DXT5 payload:
+the two scenes this feature needs. A `.milo` chunk carries a **23-byte texture header**
+followed by **eight zero bytes** before the DXT5 payload:
 
 ```
 record (23 bytes):  <4-byte per-file id> 08 00 00 00 18 00 02 00 02 00 02 00 00 00 00 00 00 00 00
-payload:            512 × 512 × 8 bits = 262,144 bytes, DXT5, 16-bit words stored in console order
+zero preamble:      00 00 00 00 00 00 00 00
+payload:            512 × 512 × 8 bits = 262,144 bytes, DXT5; swap 16-bit words for Xbox only
 ```
 
-For `buttons.milo_xbox` the record starts at **stream offset 0x5C9** and the payload at **0x5E0**;
-decoding the payload after `hmx_tex.unswap()` gives a recognizable 6×6 glyph sheet with **29 occupied
-cells**. The PS3 `buttons.milo_ps3` is the same size and record shape (only the 4-byte id differs)
+For `buttons.milo_xbox` the header starts at **stream offset 0x5C9** and the payload at **0x5E8**;
+decoding the payload after `hmx_tex.unswap()` gives a clean 6×6 glyph sheet with **30 occupied
+cells**. The PS3 `buttons.milo_ps3` is the same size and header shape (only the 4-byte id differs)
 and decodes at the same offset to a **different** sheet — the PlayStation symbols — on the same 6×6
-scene grid. Its art has more internal components, so a component count is **not** the layout check;
+scene grid **without** a word swap. Its art has more internal components, so a component count is **not** the layout check;
 P0 compares the two scenes' `Glyph` tables. The controller scene's eight pad images decode the same
-way at **record + 23** as 1024×1024 DXT5 in the texture chunks (chunk 6 carries two of them); the
+way at **header + 31** as 1024×1024 DXT5 in the texture chunks (chunk 6 carries two of them); the
 two scroll arrows are the small chunks.
 
 Evidence (gitignored):
 
-- `out/button-schemes/format-2026-10-19/buttons-360.png`
-- `out/button-schemes/format-2026-10-19/buttons-ps3.png`
-- `out/button-schemes/format-2026-10-19/buttons-grid.png` (6×6 grid overlay)
-- `out/button-schemes/format-2026-10-19/pads-contact.png` (the decoded pad chunks)
-- `out/button-schemes/format-2026-10-19/measurements.txt` (the commands and offsets)
+- `out/button-schemes/format-2026-10-19/buttons-360.png` (superseded misaligned decode)
+- `out/button-schemes/format-2026-10-19/buttons-ps3.png` (superseded misaligned decode)
+- `out/button-schemes/format-2026-10-19/buttons-grid.png` (historical overlay on misaligned decode)
+- `out/button-schemes/format-2026-10-19/pads-contact.png` (superseded misaligned decode)
+- `out/button-schemes/format-2026-10-19/measurements.txt` (historical commands and offsets)
+- `out/button-schemes/p0/` and `assets/controller/template-360/` (correctly aligned local exports)
 
 What this settles for the plan:
 
@@ -223,27 +225,26 @@ controller packages; user custom packages cannot replace them or the keyboard/mo
 
 ### 4.2 The slot map
 
-The retail sheet is a **6×6 grid**. The 360 sheet has 29 occupied cells; the PS3 sheet decodes on
-the same 6×6 scene grid with different art. P0 reads both scenes' `Glyph` tables and publishes the
-exact rectangles; the two tables must agree before the PS3 sheet is used as a slot-for-slot
-replacement. Until then, the measured grid is:
+The retail sheet is a **6×6 grid**. The 360 sheet has 30 occupied cells; the PS3 sheet decodes on
+the same scene grid with different art. P0 compared both font variants across the 360 and PS3
+scenes; corresponding `Glyph` tables match. The measured grid is:
 
 | Row (y) | Occupied columns (x) |
 | --- | --- |
 | 0 (≈0–84) | 0, 1, 2, 3 (four; columns 4–5 empty) |
 | 1 (≈85–169) | 0–5 |
-| 2 (≈170–254) | 0, 1, 2, 3, 5 (column 4 empty) |
+| 2 (≈170–254) | 0–5 |
 | 3 (≈255–339) | 0–5 |
 | 4 (≈340–424) | 0–5 |
 | 5 (≈425–511) | 0, 1 (columns 2–5 empty) |
 
-The retail slot IDs identify the guest's logical prompts, **not the physical sources currently
-bound to those prompts**. P0 assigns them from the glyph table; the expected set is:
-
-`confirm_a`, `back_b`, `x`, `y`, `lb`, `rb`, `lt`, `rt`, `start`, `back`, `ls`, `rs`,
-`dpad_up`, `dpad_down`, `dpad_left`, `dpad_right`, plus the remaining occupied cells (the retail
-sheet's extra icons). The template draws each slot's rectangle and label so a paint program can be
-used without guessing.
+The retail slot IDs identify glyphs, **not the physical sources currently bound to an action**.
+`assets/controller/slots.toml` records all 32 table rectangles, including the two empty small
+glyphs in row 0. The corrected pixels identify A/B/X/Y, LT/LB/RT/RB, D-pad directions,
+LS/RS and two horizontal arrows. The remaining instrument and stick-direction icons retain
+character-based IDs until their action semantics are measured. This sheet has no standalone
+Start or Back picture; P8/P10 must resolve those actions without assuming one exists. The
+template draws each rectangle and label so a paint program can be used without guessing.
 
 P8 separates this **logical action-slot map** from a **physical-source icon catalog**. A selected
 controller sheet supplies physical controller icons; the resolver can draw Y for logical Confirm
@@ -290,6 +291,15 @@ rejected for packages; keyboard/mouse resources are built with the application i
 - `assets/controller/template/buttons.png` — a blank 6×6 grid with the slot rectangles and labels,
   generated by the P0 tool. It contains **no retail art** and may be committed.
 - `assets/controller/template/pad.png` — a blank 1024×1024 guide with the safe area marked.
+- `assets/controller/template-360/` — a gitignored local reference generated from the
+  owner's Xbox 360 scenes by `python scripts/export_template_360.py`, including a
+  package-shaped `scheme.toml` with non-reserved id `xbox-360-reference` (`retail`
+  remains the built-in choice with no package). It is never installed or committed;
+  the blank `template/` remains the distributable guide.
+- `assets/controller/template-ps3/` — the equivalent gitignored reference generated
+  from the owner's PS3 scenes by `python scripts/export_template_ps3.py`, with PS3
+  buttons, the four `ps_*` pad images and a package-shaped `scheme.toml` using
+  reserved id `ps3`; it is never installed or committed automatically.
 - `assets/controller/slots.toml` — the tracked slot registry (id, rectangle, row/column, label).
 - `assets/controller/schemes/<id>/` — the owner's schemes; the five authored controller families live here when P6b
   runs.
@@ -359,8 +369,8 @@ The extraction, exactly:
 3. **Read the PS3 ARK index** (`gen/main_ps3.hdr`) and extract only
    `ui/resource/fonts/gen/buttons.milo_ps3` from `gen/main_ps3_0.ark` by its offset and size. The
    full 350 MB ARK is never written.
-4. **Decode** the milo chunk: find the 23-byte record, take the 512×512 DXT5 payload, `unswap` the
-   16-bit words, decode to RGBA, write `buttons.png`.
+4. **Decode** the milo chunk: find the 23-byte header and eight-byte preamble, take the
+   512×512 DXT5 payload at header + 31, decode PS3 blocks directly to RGBA, write `buttons.png`.
 5. **Extract the pad art from the 360 scene** (`ui/controller_config/gen/controller_config.milo_xbox`,
    already installed): decode the four `ps_*` 1024×1024 DXT5 images and write `pad_0..3.png`. The
    `ps_*` family is already in the 360 dump, which the project already measured
@@ -616,11 +626,21 @@ pass; no static keyboard-sheet exception survives as an accepted limitation.
 
 ### P0 — Scene texture decode, slot map and template
 
+**Delivered 2026-10-26.** `hmx_milo.py texture` exports the measured DXT5 first mip
+for buttons, blitz icons and controller-config textures; `slots` compares both
+34-entry font variants across the 360 and PS3 scenes and writes the 32 drawable
+rectangles plus transparent guides. Both platform pairs match. The two font
+variants swap the `(` and `*` character assignments between two cells, recorded
+as aliases in `slots.toml`. Decodes are in the ignored `out/button-schemes/p0/`.
+The 2026-10-26 visual review caught an eight-byte preamble omitted from the
+2026-10-19 offset. The earlier PNGs are misaligned and superseded; clean 360
+exports are also in the gitignored `assets/controller/template-360/`.
+
 **Goal.** Turn the 2026-10-19 format measurement into a repeatable tool and the authoring contract.
 
 **Deliverable.**
 - Extend `scripts/hmx_milo.py` with a `texture`/`export` command that finds a scene's 23-byte
-  record and identifies its DXT5 payload. Reuse the existing word swap and DXT decoder in
+  header and eight-byte preamble, then identifies its DXT5 payload. Reuse the existing word swap and DXT decoder in
   `scripts/hmx_tex.py` (or the C++ codec) to write a PNG; the same path handles the 512×512 sheet
   and the 1024×1024 pads. Do not implement another block codec.
 - Read the `Glyph` table (the object records around the texture) and emit
@@ -634,8 +654,9 @@ pass; no static keyboard-sheet exception survives as an accepted limitation.
   `src/assets/texture_codec.{h,cpp}` has the standalone texture envelope, DXT1/DXT5 decode and
   encode, 16-bit word swap and RGBA resampling, pinned by `tests/store_art_tests.cpp`. The
   RhythmVerse art worker uses it for image-to-game conversion; the music player uses
-  `DecodePlatformTexture` for game-cover-to-overlay conversion. For P5, use `SwapSixteenBitWords`
-  and `DecodeDxt5` on the *scene* payload, then write the required `buttons.png` / `pad_*.png`
+  `DecodePlatformTexture` for game-cover-to-overlay conversion. For P5, use `DecodeDxt5`
+  directly on the PS3 scene payload, and `SwapSixteenBitWords` plus `DecodeDxt5` on the
+  Xbox pad scene payload, then write the required `buttons.png` / `pad_*.png`
   from RGBA. `BuildPlatformTexture` writes a standalone `.png_xbox` / `.png_ps3` container, not a
   PNG, and does not parse the 23-byte scene record. `scripts/hmx_tex.py` provides the same block
   decode and PNG output offline; P0 still has to locate the scene payload and `Glyph` table.
@@ -647,7 +668,7 @@ pass; no static keyboard-sheet exception survives as an accepted limitation.
   actual override upload on both backends.
 
 **Verify.** Re-running the command on the 360 and PS3 `buttons.milo_*` reproduces the two decoded
-sheets at the same 6×6 grid (the 360 sheet's 29 occupied cells and the PS3 sheet's own art); the two
+sheets at the same 6×6 grid (the 360 sheet's 30 occupied cells and the PS3 sheet's own art); the two
 scenes' `Glyph` tables are compared and either match slot for slot or the mismatch is recorded as a
 finding; the pad command reproduces the eight pad images; every slot rectangle lies inside 512×512
 and does not overlap; the template has no retail art.
@@ -964,7 +985,7 @@ known actionable hint still shows stale/default bindings.
 
 | Check | Proves | Evidence |
 | --- | --- | --- |
-| `hmx_milo.py texture` on 360/PS3 `buttons` | the record, DXT5, unswap and grid are reproducible | decoded PNGs, 29 occupied cells |
+| `hmx_milo.py texture` on 360/PS3 `buttons` | header + 31, DXT5, Xbox word swap and grid are reproducible | decoded PNGs, 30 occupied cells |
 | `controller_config` decode | the eight pad images and the per-slot mapping | `pads-contact.png` |
 | Marker sheet on the menu prompt band | the host override reaches the glyph draw | capture + pixel/OCR |
 | Marker pad on Default Presets | the pad slots are overridden, not only the glyphs | capture |
@@ -1046,16 +1067,17 @@ known actionable hint still shows stale/default bindings.
 | P8/P9/P10 | [`docs/engine/input-flow.md`](../../engine/input-flow.md) | resolver context, ordering and remap-aware hint seams, once measured |
 | P7 | this plan | status moved to `finished/` after P8/P9/P10, P6b and P7 pass; record P5's outcome |
 
-## 11. Reproducing the 2026-10-19 measurement
+## 11. Reproducing the corrected measurement
 
 ```powershell
 python scripts\hmx_milo.py dump assets\game\360\ui\resource\fonts\gen\buttons.milo_xbox `
     --chunk 0 --out out\button-schemes\format-2026-10-19\buttons_chunk0.bin
 
-# Record at 0x5C9 (23 bytes), DXT5 at 0x5E0, 512x512:
-python -c "import sys; sys.path.insert(0,'scripts'); import hmx_tex; from PIL import Image; b=open(r'out/button-schemes/format-2026-10-19/buttons_chunk0.bin','rb').read(); d=b[0x5E0:0x5E0+262144]; rgba=hmx_tex.decode_mip(hmx_tex.unswap(d),0,512,512,16); Image.frombytes('RGBA',(512,512),rgba).save('out/button-schemes/format-2026-10-19/buttons-360.png')"
+# Header at 0x5C9 (23 bytes), eight zero bytes, DXT5 at 0x5E8, 512x512:
+python scripts\hmx_milo.py texture assets\game\360\ui\resource\fonts\gen\buttons.milo_xbox `
+    --asset ../image/icons_buttons_xbox_nomip.bmp --out out\button-schemes\p0\buttons-360.png
 ```
 
-The same block runs on `assets\game\ps3\ui\resource\fonts\gen\buttons.milo_ps3` (the PS3 sheet
-differs, the offset is the same). The pad chunks are dumped the same way and decoded at record+23 as
-1024×1024 DXT5.
+Run `texture` with `assets\game\ps3\ui\resource\fonts\gen\buttons.milo_ps3` for the PS3
+sheet (same offset, no word swap). The pad scene uses the same header + 31 payload offset
+for its 1024×1024 DXT5 images.

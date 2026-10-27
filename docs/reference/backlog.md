@@ -132,21 +132,18 @@ with 120 FPS the first high-rate candidate and no safe upper ceiling established
 The older "unlocked frame rate" deferral below is superseded by
 that plan; it does not claim that a high-rate mode has shipped.
 
-- [ ] **Pin the sheet format and offset, then a reskin is a two-command job.** The claim
-      that this already worked is withdrawn ? the pixel diffs it rested on were the animated
-      backgrounds, not the art ([assets.md](../guides/assets.md) "Where the art would have to live,
-      and a retraction"). What is solid: the payload route delivers a whole replacement
-      scene (`gen/main_xbox_0.ark` in a payload directory is the copy the game uses, run-log
-      confirmed; a payload with only `patch_xbox.*` mounts but prefers no copies); the
-      archive index carries per-entry sizes, so a replacement scene can be any size; the
-      360 and PS3 `buttons.milo_xbox` differ across one span, **stream `0x5C9`?`0x405DF`,
-      262,167 bytes = a 512?512 sheet plus 23**, which is where a reskin has to aim; and the
-      span has **16-byte elements** (pitch-16 neighbour difference is 26 where every other
-      pitch sits at 55+) with a working **mip chain** on `controller_config`'s pad texture
-      (DXT5 1024?1024, level 1 correlates 0.86 with the half-scaled level 0, alternating
-      cleanly on a 16-byte period). DXT5 is the leading hypothesis; it is not confirmed.
-      The next run should write one flat DXT5 colour over the span and check the prompt band
-      with OCR plus a settled-frame A/B, which answers format and location at once.
+- [x] **Pin the button sheet format and offset.** The 2026-10-19 measurement and P0's
+      `hmx_milo.py texture` command decode the 360 and PS3 512×512 button sheets at
+      header `0x5C9`, payload `0x5E8`, with a 23-byte header, eight-byte zero preamble,
+      DXT5 and an Xbox-only 16-bit word swap. The earlier `0x5E0` decode was eight
+      bytes early and produced visibly corrupted PNGs.
+      The same command decodes `blitz_icons` and all eight controller pad images. Both
+      platform scenes' two `Glyph` tables match their counterparts, and
+      `assets/controller/slots.toml` records the 32 drawable rectangles. See
+      [assets.md](../guides/assets.md#button-and-controller-scene-textures-measured-2026-10-19-automated-in-p0).
+      A live, safe texture replacement remains in the
+      [button layout hot-swap plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md)
+      P1; offline decode alone does not establish live swapping.
 - [x] **Measured 2026-10-04 - the noise floor is not one number.** [observing.md](../engine/diagnostics.md)
       carries the per-state table and [known-issues.md](known-issues.md) B-015 the reason for it: at
       `-CompareScale 4` only `help-options` and `exit-confirm` reproduced at 0 %, with `song-list` at

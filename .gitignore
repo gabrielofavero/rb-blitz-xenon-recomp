@@ -8,6 +8,13 @@
 # directory is retail content, so nothing under it is ever committed.
 /assets/game/
 
+# Local Xbox 360 controller-art reference generated from the user's game dump.
+# It contains retail images and must never be committed or shipped.
+/assets/controller/template-360/
+
+# Local PlayStation 3 controller-art reference from the user's PS3 dump.
+/assets/controller/template-ps3/
+
 # Build products and CMake-local state.
 /out/
 /compile_commands.json

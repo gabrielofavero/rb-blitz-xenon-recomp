@@ -23,17 +23,11 @@ What it gives you: the chunk table of any scene, the decompressed stream, and th
 asset names the scene declares, which is what tells you *which* screen owns which
 texture (``splash.milo_xbox`` declares 13 `.tex` assets, `list_panel.tex` among them).
 
-What it does **not** do yet: locate the pixels of those textures. A `RndTex` whose
-stream is cached carries its bitmap inline, but the shape this tool looked for - the
-RB3 `RndBitmap::LoadHeader` (revision byte, bits per pixel, byte order, mip count,
-dimensions, row bytes, reserved bytes, then the mip chain) - matches nothing in the
-10.4 MB ``splash.milo_xbox`` decompresses to, and neither does any descriptor that
-just puts a power-of-two width and height next to matching row bytes. Blitz is a
-later engine than the RB3 decompilation whose format this was modelled on, so its
-inline texture record is still unknown; see docs/guides/assets.md, "Texture swapping", and
-the backlog entry for what a next attempt should start from. The scene's textures
-also carry builder-side source paths (``img/list_neon_outer.png``), so the record may
-be a file reference plus a cached copy rather than an RB3-shaped bitmap.
+For the measured button, extra-icon and controller-config scenes, ``texture`` finds
+the 23-byte DXT5 header and its following eight-byte zero preamble, then exports
+the first mip level. ``slots`` compares the Xbox 360 and PS3 button-font Glyph tables
+and writes the original-art-free authoring guides. Other scenes and formats are
+not assumed to share this layout.
 
 The `.tex` names and the corpus are here to work against:
 
@@ -46,6 +40,8 @@ References: the chunk table and the deflate framing come from the RB3 decompilat
 the dump rather than assumed.
 """
 import argparse
+import json
+import math
 import os
 import re
 import struct
@@ -159,8 +155,8 @@ class Milo:
         pixel follows from ``row_bytes * 8 / width``. The path is what tells a
         reskin which file it is replacing (`img/xbox_0.png`,
         `../image/icons_buttons_xbox_nomip.bmp`), and the dimensions are what the
-        pixel data has to match. Where that data sits is still open - see
-        docs/guides/assets.md, "Where the art actually lives".
+        pixel data has to match. ``scene_textures`` validates the measured inline
+        DXT5 record for the three scene families used by button schemes.
         """
         stream = self.stream()
         records = []
@@ -216,6 +212,31 @@ class Milo:
             lines.append(chunk.describe(self.codec))
         lines.append(f"  {self.trailing} bytes past the last chunk")
         return "\n".join(lines)
+
+    def scene_textures(self):
+        """Locate measured DXT5 headers and payloads by their source paths."""
+        stream = self.stream()
+        found = []
+        for source in self.texture_records():
+            width, height = source["width"], source["height"]
+            if width % 4 or height % 4:
+                continue
+            payload_size = width * height  # DXT5: 16 bytes per 4x4 block.
+            for at in range(source["at"], min(source["at"] + 80, len(stream) - 31)):
+                record = stream[at:at + 23]
+                if (record[4:9] != b"\x08\x00\x00\x00\x18" or
+                        record[10:16] != struct.pack(">HHH", width, height,
+                                                     source["row_bytes"]) or
+                        record[16:23] != bytes(7) or
+                        stream[at + 23:at + 31] != bytes(8)):
+                    continue
+                payload_at = at + 31
+                if payload_at + payload_size > len(stream):
+                    raise MiloError(f"{source['path']}: DXT5 payload is truncated")
+                found.append({**source, "record_at": at, "payload_at": payload_at,
+                              "payload_size": payload_size, "mip_field": record[9]})
+                break
+        return found
 
 
 def load(path):
@@ -291,6 +312,167 @@ def cmd_records(args):
     return 0
 
 
+def _require_pillow():
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as exc:
+        raise MiloError("PNG output requires Pillow (python -m pip install Pillow)") from exc
+    return Image, ImageDraw
+
+
+def cmd_texture(args):
+    """Export the first DXT5 mip of a measured scene texture."""
+    milo = load(args.milo)
+    found = milo.scene_textures()
+    if args.list:
+        for item in found:
+            print(f"{item['path']}: {item['width']}x{item['height']} DXT5 "
+                  f"record=0x{item['record_at']:x} payload=0x{item['payload_at']:x} "
+                  f"mip_field={item['mip_field']}")
+        return 0
+    matches = [item for item in found if item["path"] == args.asset]
+    if len(matches) != 1:
+        raise MiloError(f"expected one measured DXT5 record for {args.asset!r}; "
+                        f"found {len(matches)} (use --list)")
+    item = matches[0]
+    import hmx_tex
+    Image, _ = _require_pillow()
+    start = item["payload_at"]
+    encoded = milo.stream()[start:start + item["payload_size"]]
+    # MiloLib's RndBitmap export swaps Xbox words and leaves PS3 words as-is.
+    # Both scenes use the same BC3 block layout after this platform step.
+    if milo.path.lower().endswith(".milo_xbox"):
+        encoded = hmx_tex.unswap(encoded)
+    elif not milo.path.lower().endswith(".milo_ps3"):
+        raise MiloError("texture export supports .milo_xbox and .milo_ps3 scenes")
+    rgba = bytearray(hmx_tex.decode_mip(encoded, 0,
+                                        item["width"], item["height"], 16))
+    # BC3 leaves arbitrary RGB in fully transparent texels. Clearing those
+    # bytes does not change the visible art and avoids noisy PNG previews.
+    for pixel in range(0, len(rgba), 4):
+        if rgba[pixel + 3] == 0:
+            rgba[pixel:pixel + 3] = b"\x00\x00\x00"
+    Image.frombytes("RGBA", (item["width"], item["height"]), bytes(rgba)).save(args.out)
+    print(f"{item['path']} -> {args.out} ({item['width']}x{item['height']} "
+          f"DXT5, record 0x{item['record_at']:x}, payload 0x{start:x})")
+    return 0
+
+
+def button_glyphs(milo):
+    """Read both measured Buttons RndFont Glyph arrays, without fixed offsets."""
+    stream = milo.stream()
+    marker = b"\x00\x00\x00\x22\x00\x20"  # count 34, first Glyph is space
+    positions = [match.start() for match in re.finditer(re.escape(marker), stream)]
+    candidates = []
+    for at in positions:
+        if struct.pack(">ff", 85.0, 85.0) not in stream[max(0, at - 256):at]:
+            continue  # Both font objects declare an 85 x 85 base glyph.
+        first = at + 4
+        if first + 34 * 18 > len(stream):
+            continue
+        glyphs = [struct.unpack_from(">Hffff", stream, first + i * 18)
+                  for i in range(34)]
+        chars = [glyph[0] for glyph in glyphs]
+        if chars[:2] != [0x20, 0x26] or chars[-1] != 0xa0 or len(set(chars)) != 34:
+            continue
+        if not all(all(math.isfinite(v) and 0 <= v <= 1.1 for v in glyph[1:])
+                   for glyph in glyphs):
+            continue
+        candidates.append(glyphs)
+    if len(candidates) != 2:
+        raise MiloError(f"{milo.path}: expected two 34-entry Buttons Glyph tables; "
+                        f"found {len(candidates)}")
+    return candidates
+
+
+_GLYPH_IDS = {
+    "A": "confirm_a", "B": "back_b", "X": "x", "Y": "y",
+    "L": "left_bumper", "R": "right_bumper",
+    "l": "left_trigger", "r": "right_trigger",
+    "S": "next_arrow", "s": "previous_arrow", "D": "dpad",
+    "w": "dpad_up", "d": "dpad_right", "x": "dpad_down",
+    "a": "dpad_left", "[": "left_stick", "]": "right_stick",
+}
+
+
+def _slots(tables):
+    slots = []
+    for charcode, u, v, scale_x, scale_y in tables[0]:
+        if charcode in (0x20, 0xa0):
+            continue  # Whitespace is in the font table but has no image slot.
+        char = chr(charcode)
+        # The font declares an 85 px base glyph. The Glyph entries give UV
+        # origins in the 512 px sheet and size factors relative to that base.
+        x, y = round(u * 512), round(v * 512)
+        width, height = round(scale_x * 85), round(scale_y * 85)
+        if not (0 <= x < 512 and 0 <= y < 512 and
+                0 < width <= 512 - x and 0 < height <= 512 - y):
+            raise MiloError(f"Glyph U+{charcode:04X} has an invalid rectangle")
+        alternate = [g for g in tables[1] if g[1:] == (u, v, scale_x, scale_y)]
+        if len(alternate) != 1:
+            raise MiloError(f"Glyph U+{charcode:04X}: second font has no matching rectangle")
+        glyph_chars = sorted({char, chr(alternate[0][0])})
+        slots.append({"id": _GLYPH_IDS.get(char, f"glyph_{charcode:04x}"),
+                      "glyphs": glyph_chars, "rect": (x, y, width, height),
+                      "row": y // 85, "column": x // 85})
+    for i, a in enumerate(slots):
+        ax, ay, aw, ah = a["rect"]
+        for b in slots[i + 1:]:
+            bx, by, bw, bh = b["rect"]
+            if ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah:
+                raise MiloError(f"Glyph rectangles overlap: {a['id']} and {b['id']}")
+    return sorted(slots, key=lambda s: (s["row"], s["column"], s["id"]))
+
+
+def cmd_slots(args):
+    xbox, ps3 = load(args.xbox), load(args.ps3)
+    xbox_tables, ps3_tables = button_glyphs(xbox), button_glyphs(ps3)
+    if xbox_tables != ps3_tables:
+        raise MiloError("Xbox 360 and PS3 Buttons Glyph tables differ; no "
+                        "slot-for-slot authoring guide can be generated")
+    slots = _slots(xbox_tables)
+    Image, ImageDraw = _require_pillow()
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.buttons_template)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.pad_template)), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("# Generated from matching Xbox 360 and PS3 Buttons Glyph tables.\n"
+                     "# Named controls were checked against the correctly decoded Xbox 360 sheet.\n"
+                     "# Unnamed glyphs retain their character code as a stable identifier.\n"
+                     "schema_version = 1\nsheet_size = [512, 512]\n\n")
+        for slot in slots:
+            handle.write("[[slot]]\n"
+                         f"id = \"{slot['id']}\"\n"
+                         f"glyphs = {json.dumps(slot['glyphs'])}\n"
+                         f"rect = {list(slot['rect'])}\n"
+                         f"row = {slot['row']}\ncolumn = {slot['column']}\n\n")
+    guide = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(guide)
+    for slot in slots:
+        x, y, width, height = slot["rect"]
+        draw.rectangle((x, y, x + width - 1, y + height - 1),
+                       outline=(125, 190, 255, 220), width=1)
+        caption = "/".join(slot["glyphs"]) if width < 50 else slot["id"]
+        draw.text((x + 2, y + 2), caption, fill=(255, 255, 255, 255),
+                  stroke_width=1, stroke_fill=(0, 0, 0, 255))
+    guide.save(args.buttons_template)
+    pad = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(pad)
+    draw.rectangle((1, 1, 1022, 1022), outline=(90, 150, 220, 180), width=2)
+    draw.rectangle((128, 128, 895, 895), outline=(125, 190, 255, 220), width=2)
+    draw.line((512, 128, 512, 896), fill=(125, 190, 255, 100))
+    draw.line((128, 512, 896, 512), fill=(125, 190, 255, 100))
+    draw.text((144, 144), "Controller art guide - transparent background",
+              fill=(255, 255, 255, 255), stroke_width=1,
+              stroke_fill=(0, 0, 0, 255))
+    pad.save(args.pad_template)
+    print(f"matching Glyph tables: {len(xbox_tables)} variants, "
+          f"{len(xbox_tables[0])} entries each, {len(slots)} "
+          f"drawable slots -> {args.out}")
+    print(f"blank guides -> {args.buttons_template}, {args.pad_template}")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="hmx_milo.py",
@@ -321,8 +503,25 @@ def main(argv=None):
                    help="also report files that are not chunk streams")
     p.set_defaults(func=cmd_records)
 
+    p = sub.add_parser("texture", help="export measured scene DXT5 texture as PNG")
+    p.add_argument("milo")
+    p.add_argument("--list", action="store_true", help="show available texture records")
+    p.add_argument("--asset", help="builder-side source path shown by --list")
+    p.add_argument("--out", help="output PNG path")
+    p.set_defaults(func=cmd_texture)
+
+    p = sub.add_parser("slots", help="compare button Glyph tables and write blank guides")
+    p.add_argument("xbox", help="Xbox 360 buttons.milo_xbox")
+    p.add_argument("ps3", help="PS3 buttons.milo_ps3")
+    p.add_argument("--out", default="assets/controller/slots.toml")
+    p.add_argument("--buttons-template", default="assets/controller/template/buttons.png")
+    p.add_argument("--pad-template", default="assets/controller/template/pad.png")
+    p.set_defaults(func=cmd_slots)
+
     args = parser.parse_args(argv)
     try:
+        if args.command == "texture" and not args.list and not (args.asset and args.out):
+            parser.error("texture needs --asset and --out, or --list")
         return args.func(args)
     except (OSError, MiloError) as exc:
         print(f"error: {exc}", file=sys.stderr)
