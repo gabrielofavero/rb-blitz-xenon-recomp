@@ -2534,14 +2534,12 @@ std::vector<std::string> ScreenNames() {
 
 std::vector<std::string> PanelRowSymbols(std::string_view panel) {
   std::vector<std::string> out;
-  for (const PanelSpec& candidate : AllPanels()) {
-    if (candidate.name != panel) {
-      continue;
+  for (const auto& context : {AllPanels(), InSongPanels()}) {
+    for (const PanelSpec& candidate : context) {
+      if (candidate.name != panel) continue;
+      for (const Row& row : candidate.rows) out.push_back(row.symbol);
+      return out;
     }
-    for (const Row& row : candidate.rows) {
-      out.push_back(row.symbol);
-    }
-    return out;
   }
   return out;
 }

@@ -861,5 +861,8 @@ source cell retains the A/B circles' lower arc. The complete padded band is
 downsampled together so fractional mip coordinates retain the same image placement.
 Host tests cover the full sampling window and gutters of all 30 slots. The
 material isolation and stray-pixel correction have owner visual acceptance.
-A page needing more than 30 images still uses its
-complete textual list; an image overflow route remains P9 work.
+A page needing more than 30 images still uses its complete textual list.
+The owner rejected the separate View Inputs page on 2026-10-28 because it
+repeated images already visible on the mapping row and filled the rest of the
+page with empty entries. The in-song list resolves row symbols from its pause
+panel as well. An in-list overflow solution remains P9 work.

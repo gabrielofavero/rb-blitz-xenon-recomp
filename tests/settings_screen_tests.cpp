@@ -3755,6 +3755,8 @@ void TestScreenBindingRows() {
 
   // The in-song twins answer the same rows: one page tree, two contexts.
   CHECK_TRUE(ScreenBindingRows("settings_interface_mapping_pause_screen") == interface_page);
+  CHECK_TRUE(PanelRowSymbols(PausePanel("settings_interface_mapping_panel")) ==
+             PanelRowSymbols("settings_interface_mapping_panel"));
   CHECK_TRUE(ScreenBindingRows("settings_interface_navigation_pause_screen") == navigation);
   CHECK_TRUE(ScreenBindingRows("settings_interface_music_library_pause_screen") == library);
   CHECK_TRUE(ScreenBindingRows("settings_gameplay_mapping_pause_screen").empty());

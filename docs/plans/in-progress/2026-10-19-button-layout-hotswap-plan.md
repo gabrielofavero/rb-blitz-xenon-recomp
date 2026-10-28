@@ -4,8 +4,9 @@
 2026-10-26; P1, P2 and P3 delivered 2026-10-27; P6a and P8 delivered 2026-10-28.
 P4's tracker, D3D12 family switching and selected-pad-art stability were
 accepted 2026-10-28; visible binding-aware hints remain P10 work.
-P5, P6b, P7 and P9–P10 remain open. P9 has a built host implementation awaiting
-owner-run visual acceptance and a guest image route for lists exceeding 30 icons.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
+P5, P6b, P7 and P9–P10 remain open. P9's ordinary Interface and Gameplay Mapping
+images and binding refresh have owner visual acceptance; in-song rendering and
+lists exceeding 30 icons remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
 
@@ -1285,10 +1286,15 @@ was removed; exactly two distinct font styles remain. On 2026-10-28 the owner
 accepted the final Interface Mapping appearance ("Perfect!", screenshot of
 black Confirm text beside colored controller/key icons on the retail yellow
 highlight). Size, positioning and selected-row text/icon colors are accepted.
-Gameplay Mapping and long-list wrapping still await owner checks. More than 30 images on one page currently
-restore the complete textual list; an image detail/overflow route is still
-required to satisfy R11. Keep P9 open until these checks and the overflow route
-pass. Capture owner-run evidence under `out/button-schemes/p9/`.
+The owner then confirmed that Gameplay Mapping's Notes rows show their images
+and that assigning an input refreshes the visible mapping row. A separate
+**View Inputs** page was tested and rejected on 2026-10-28: for ordinary rows it
+duplicated the mapping images and showed empty rows and inactive page controls.
+It was removed. More than 30 images on one mapping page still restores the
+complete textual list, so an in-list overflow solution remains P9 work. The
+in-song panel symbol lookup is fixed but still needs a live check. Keep P9 open
+until overflow and in-song checks pass. Capture owner-run evidence under
+`out/button-schemes/p9/`.
 
 **Goal.** Both mapping surfaces show actual bound button/key/mouse images next to their action
 labels, replacing textual binding lists.
@@ -1299,7 +1305,7 @@ labels, replacing textual binding lists.
   focus, Assign/Reset, capture and back targets stable while rendering source images side by side.
 - Support mixed controller/key sources in Interface Mapping and the proper device scope on each
   Gameplay Mapping page. Show every effective binding in stored order; use measured guest
-  wrapping/scrolling or a row detail route for long lists without hiding available bindings.
+  wrapping/scrolling within the mapping list for long lists without hiding available bindings.
 - Coverage for controller buttons, triggers/directions and accepted key/mouse inputs, explicit
   unbound rows, inherited presets/defaults, and refresh after binding edits or controller selection.
 - Tests of row data, ordering, icon selection, refresh, row identity and overflow behavior, plus

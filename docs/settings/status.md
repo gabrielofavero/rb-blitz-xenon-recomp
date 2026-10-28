@@ -24,6 +24,12 @@ Part 1 wherever they disagree.
   The first controller button capture asks for confirmation before saving; after confirmation,
   custom controller bindings disable preset input for every unconfigured action. Reset All restores
   both gameplay tables and the selected controller preset.
+- **Mapping images (button-layout P9, 2026-10-28):** the built guest list renders
+  effective inputs as adjacent controller/key/mouse images. The owner accepted
+  Interface Mapping's size, placement and selected colors, and confirmed the
+  Gameplay Mapping Notes images and live refresh after assigning an input. The
+  redundant View Inputs page was removed after the owner's visual check. In-song
+  rendering and lists exceeding 30 images remain open.
 - **Layout selector (button-layout P3, owner correction 2026-10-27):** the native selector sits
   directly on Controls as `Layout: <name>` in both contexts. The boot-discovered choices,
   `settings.toml` token, missing-package fallback, and queued GPU texture refresh are implemented.
