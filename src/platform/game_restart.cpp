@@ -279,10 +279,9 @@ bool IsRetiredArgument(std::string_view argument) {
   if (argument == kBootstrapSwitch) {
     return true;
   }
-  // The DLC cache refresh means "scan the library once, now"; rebuilding it onto a restart would
-  // re-run a scan the player never asked for twice (§8's one-shot policy).
-  return argument.size() > 2 && argument.substr(0, 2) == "--" &&
-         argument.substr(2).find("refresh_dlc_cache") != std::string_view::npos;
+  // Retired host-cache switches are not forwarded into a replacement process.
+  return argument.starts_with("--refresh_dlc_cache") ||
+         argument.starts_with("--enhancements_dlc_cache");
 }
 
 std::vector<std::string> BuildChildArguments(const LaunchContext& context,

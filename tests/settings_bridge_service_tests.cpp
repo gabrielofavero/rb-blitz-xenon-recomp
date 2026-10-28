@@ -113,8 +113,8 @@ void TestTextFormEditsTheRealStore() {
   // Stage *the other* value of the row: its compiled default is `true` (it took the setting over
   // from Controller Settings flag, P11b) and a commit that writes the value a row already holds is
   // `kNoChanges`, so writing `b:1` here would test nothing.
-  const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
-  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/general.cache_dlc_library/b:") +
+  const bool before = h.service.EffectiveValue(SettingId::kHideOfflinePrompts).boolean;
+  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/interface.hide_offline_prompts/b:") +
                     (before ? "0" : "1"))
                  .status == Status::kOk);
   const Response commit = h.Send("rbbz-settings/commit/-/-");
@@ -123,24 +123,24 @@ void TestTextFormEditsTheRealStore() {
   CHECK_TRUE(h.sink.saved_revision() != 0);
 
   // The read half is the membership probe: exactly what a row draws its own state from.
-  CHECK_TRUE(h.Holds("general.cache_dlc_library", WireValue::Bool(!before)));
-  CHECK_TRUE(!h.Holds("general.cache_dlc_library", WireValue::Bool(before)));
+  CHECK_TRUE(h.Holds("interface.hide_offline_prompts", WireValue::Bool(!before)));
+  CHECK_TRUE(!h.Holds("interface.hide_offline_prompts", WireValue::Bool(before)));
 
   // The change is reported once, by its token, for the application-strategy seam.
   CHECK_TRUE(h.sink.last_commit_changes().size() == 1);
-  CHECK_TRUE(h.sink.last_commit_changes().at(0) == "general.cache_dlc_library");
+  CHECK_TRUE(h.sink.last_commit_changes().at(0) == "interface.hide_offline_prompts");
 
   // ...and it is on disk, under the row's storage key with its provenance.
   const std::string text = ReadText(h.paths.settings_file);
-  CHECK_TRUE(text.find("cache_dlc_library") != std::string::npos);
-  CHECK_TRUE(text.find("'general.cache_dlc_library'") != std::string::npos);
+  CHECK_TRUE(text.find("hide_offline_prompts") != std::string::npos);
+  CHECK_TRUE(text.find("'interface.hide_offline_prompts'") != std::string::npos);
 
   // A second service over the same file boots into the same value: the write really landed.
   Service again(h.paths);
   MigrationResult migration;
   again.Boot(nullptr, PathEntry{}, &migration, true);
-  CHECK_TRUE(again.EffectiveValue(SettingId::kCacheDlcLibrary).boolean == !before);
-  CHECK_TRUE(again.EffectiveSource(SettingId::kCacheDlcLibrary) == Source::kSettingsFile);
+  CHECK_TRUE(again.EffectiveValue(SettingId::kHideOfflinePrompts).boolean == !before);
+  CHECK_TRUE(again.EffectiveSource(SettingId::kHideOfflinePrompts) == Source::kSettingsFile);
 }
 
 void TestFramedFormCarriesTheRequestId() {
@@ -267,13 +267,13 @@ void TestCancelAndRestart() {
   // Stage the row's *other* value: `b:1` is its compiled default and a commit of an unchanged row
   // is `kNoChanges` (see `TestTextFormEditsTheRealStore`), so the field has to move for the cancel
   // to have something to restore.
-  const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
-  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/general.cache_dlc_library/b:") +
+  const bool before = h.service.EffectiveValue(SettingId::kHideOfflinePrompts).boolean;
+  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/interface.hide_offline_prompts/b:") +
                     (before ? "0" : "1"))
                  .status == Status::kOk);
-  CHECK_TRUE(h.Holds("general.cache_dlc_library", WireValue::Bool(!before)));
-  CHECK_TRUE(h.Send("rbbz-settings/cancel-field/general.cache_dlc_library/-").status == Status::kOk);
-  CHECK_TRUE(!h.Holds("general.cache_dlc_library", WireValue::Bool(!before)));
+  CHECK_TRUE(h.Holds("interface.hide_offline_prompts", WireValue::Bool(!before)));
+  CHECK_TRUE(h.Send("rbbz-settings/cancel-field/interface.hide_offline_prompts/-").status == Status::kOk);
+  CHECK_TRUE(!h.Holds("interface.hide_offline_prompts", WireValue::Bool(!before)));
   CHECK_TRUE(h.Send("rbbz-settings/cancel/-/-").status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
   CHECK_TRUE(h.sink.last_commit_changes().empty());
@@ -300,8 +300,8 @@ void TestRestartPendingFollowsTheQuery() {
 
   // A restart-scoped commit sets the sticky bit. The row has to actually move for the commit to
   // save anything (see `TestTextFormEditsTheRealStore`), so stage its other value.
-  const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
-  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/general.cache_dlc_library/b:") +
+  const bool before = h.service.EffectiveValue(SettingId::kHideOfflinePrompts).boolean;
+  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/interface.hide_offline_prompts/b:") +
                     (before ? "0" : "1"))
                  .status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
@@ -341,8 +341,8 @@ void TestRestartRefusalsAreVisible() {
     *error = "the child could not be started";
     return false;
   });
-  const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
-  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/general.cache_dlc_library/b:") +
+  const bool before = h.service.EffectiveValue(SettingId::kHideOfflinePrompts).boolean;
+  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/interface.hide_offline_prompts/b:") +
                     (before ? "0" : "1"))
                  .status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
@@ -364,11 +364,11 @@ void TestCommitFailureReasons() {
   BeginCase("a failed save names the reason, and the retry the panel asks for really retries");
   Harness h;
   // A first durable save: the file has to exist before it can be made unwritable.
-  const bool before = h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
+  const bool before = h.service.EffectiveValue(SettingId::kHideOfflinePrompts).boolean;
   const std::string other =
-      std::string("rbbz-settings/set/general.cache_dlc_library/b:") + (before ? "0" : "1");
+      std::string("rbbz-settings/set/interface.hide_offline_prompts/b:") + (before ? "0" : "1");
   const std::string back =
-      std::string("rbbz-settings/set/general.cache_dlc_library/b:") + (before ? "1" : "0");
+      std::string("rbbz-settings/set/interface.hide_offline_prompts/b:") + (before ? "1" : "0");
   CHECK_TRUE(h.Send(other).status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
   // Nothing to explain after a save that worked, so the panel's own default text stands.
@@ -397,7 +397,7 @@ void TestCommitFailureReasons() {
   CHECK_TRUE(h.sink.last_commit_failure() == ServiceSink::CommitFailure::kNone);
   CHECK_TRUE(h.Holds("commit.ok", WireValue::Bool(true)));
   CHECK_FALSE(h.Holds("commit.failed", WireValue::Text("not_writable")));
-  CHECK_TRUE(h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean == before);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kHideOfflinePrompts).boolean == before);
 
   // A failure of the provider's own file is *not* the settings folder's problem. With no
   // service-side provider sink, a provider row is kept here (the local space, `SetProviderSaver`),
@@ -508,7 +508,7 @@ void TestRendererSelectionSurvivesCommitAndReload() {
 void TestMenuVisibilityBaselineAndRefresh() {
   BeginCase("visibility starts from runtime filtering and saves one refresh preference atomically");
   Harness h;
-  h.sink.SeedMenuVisibility({"splash_leaderboard", "splash_achievements", "splash_dlc"}, false, true);
+  h.sink.SeedMenuVisibility({"splash_leaderboard", "splash_achievements", "splash_dlc"}, false);
   CHECK_TRUE(h.Holds("interface.hidden_main_menu.splash_leaderboard", WireValue::Bool(true)));
   CHECK_TRUE(h.Holds("general.refresh_music_library", WireValue::Bool(false)));
   // Editing another entry must preserve the older refresh hide bit.
@@ -577,22 +577,10 @@ void TestLinkedMusicConfirmCancelAndReenable() {
   CHECK_FALSE(h.service.EffectiveValue(SettingId::kPlayCurrentSong).boolean);
 }
 
-void TestLinkedCacheAndStore() {
-  BeginCase("cache and store shortcuts use the same confirmation rules, including inverted visibility");
+void TestLinkedStore() {
+  BeginCase("store shortcuts use confirmation rules, including inverted visibility");
   Harness h;
-  h.sink.SeedMenuVisibility({}, true, true);
-  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.cache_dlc_library/b:0").status == Status::kOk);
-  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
-  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
-  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
-  CHECK_FALSE(h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean);
-  CHECK_FALSE(h.service.EffectiveValue(SettingId::kRefreshMusicLibrary).boolean);
-  CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.refresh_music_library/b:1").status == Status::kOk);
-  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
-  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
-  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
-  CHECK_TRUE(h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean);
-  CHECK_TRUE(h.service.EffectiveValue(SettingId::kRefreshMusicLibrary).boolean);
+  h.sink.SeedMenuVisibility({}, true);
   CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.rhythmverse/b:0").status == Status::kOk);
   CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
   CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
@@ -658,17 +646,14 @@ void TestLinkedHud() {
   CHECK_TRUE(h.Holds("interface.show_pb", WireValue::Bool(false)));
 }
 
-void TestRefreshEnableFromCacheOffBoot() {
-  BeginCase("enabling Refresh Songs from a cache-off boot also enables caching without inheriting the store hide bit");
+void TestRefreshEnableClearsLegacyHide() {
+  BeginCase("enabling Refresh Songs clears a legacy hide bit without changing unrelated rows");
   Harness h;
-  CHECK_TRUE(h.Send("rbbz-settings/set/general.cache_dlc_library/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/set/general.refresh_music_library/b:0").status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
-  h.sink.SeedMenuVisibility({"splash_dlc", "splash_achievements"}, false, false);
+  h.sink.SeedMenuVisibility({"splash_dlc", "splash_achievements"}, false);
   CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.refresh_music_library/b:1").status == Status::kOk);
-  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
-  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
-  CHECK_TRUE(h.service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean);
   CHECK_TRUE(h.service.EffectiveValue(SettingId::kRefreshMusicLibrary).boolean);
   CHECK_TRUE(h.service.EffectiveValue(SettingId::kHiddenMainMenu).list ==
              std::vector<std::string>({"splash_achievements"}));
@@ -698,10 +683,10 @@ void TestLinkedSaveFailureRetry() {
 
 int main() {
   TestLinkedMusicConfirmCancelAndReenable();
-  TestLinkedCacheAndStore();
+  TestLinkedStore();
   TestLinkedFailuresSaveNothing();
   TestLinkedHud();
-  TestRefreshEnableFromCacheOffBoot();
+  TestRefreshEnableClearsLegacyHide();
   TestLinkedSaveFailureRetry();
   TestMenuVisibilityBaselineAndRefresh();
   TestTextFormEditsTheRealStore();

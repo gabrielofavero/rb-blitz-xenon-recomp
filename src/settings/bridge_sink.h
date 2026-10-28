@@ -96,8 +96,7 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   void SeedLocal(std::string token, bridge::WireValue value);
   // Runtime filtering can differ from an absent/legacy stored selection. Start the visibility
   // editor from what this boot actually built, then retire each baseline after its first save.
-  void SeedMenuVisibility(std::vector<std::string> hidden, bool refresh_visible,
-                          bool refresh_owns_dlc_row);
+  void SeedMenuVisibility(std::vector<std::string> hidden, bool refresh_visible);
   bool GetLocal(std::string_view token, bridge::WireValue* out) const;
 
   // --- what the boot asks after a commit ----------------------------------
@@ -176,7 +175,6 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   std::map<std::string, bridge::WireValue> staged_local_;
   std::map<SettingId, Value> staged_;
   std::map<SettingId, Value> menu_baseline_;
-  bool refresh_owns_dlc_row_ = true;
   std::optional<dependencies::Plan> linked_plan_;
   uint64_t linked_revision_ = 0, linked_capability_revision_ = 0;
   // What each staged row held before this session touched it: the commit uses it to tell a real

@@ -25,7 +25,7 @@ The root remains How to Play, Calibration, General, Controls, Audio/Video, and G
 | Base Game Items | Leaderboards; Achievements; Unlock Full Game; Download Content |
 | Extra Items | Refresh Songs; Play Current Song; Music Player; RhythmVerse |
 | Music Library & Store | Messages; Recommendations |
-| Song Library | RhythmVerse; Cache Song Library; Scan Threads |
+| Song Library | RhythmVerse; Scan Threads |
 | RhythmVerse | Store Access; Filters (Guitar, Bass, Drums, Vocals, Keys) |
 | Achievements & Unlocks | Achievement Alerts; Unlock All; Unlock Online Achievements |
 | Audio | Active Track Volume; Sound Volume; Bass Boost; Background Music; Menu Music Navigation |
@@ -127,7 +127,6 @@ Selecting Library alone leaves those features disabled.
 | Prerequisite | Linked features |
 | --- | --- |
 | Background Music: Library | Music Player; Play Current Song; Menu Music Navigation |
-| Cache Song Library | Refresh Songs |
 | RhythmVerse Store Access | RhythmVerse main-menu shortcut |
 | All HUD Elements: Visible | Gold Star Progress; Song Progress Bar; Timer; Personal Best; Note Streak; Input Viewer |
 

@@ -2549,8 +2549,7 @@ void TestDownloadRefreshAction() {
     bool routed = false;
     const auto scan = [&](const Node& node, const auto& self) -> void {
       if (node.tag == rb_blitz::ui::dtb::kString &&
-          (node.text == rb_blitz::menu_options::kRefreshSentinelPath ||
-           node.text == rb_blitz::menu_options::kRefreshRowDiscoverScreen)) {
+          node.text == rb_blitz::menu_options::kRefreshRowDiscoverScreen) {
         routed = true;
       }
       for (const Node& kid : node.kids) self(kid, self);
@@ -2560,10 +2559,10 @@ void TestDownloadRefreshAction() {
   }
 
   if (confirm != nullptr) {
-    // Three siblings, the row's own order - close, navigate, ask - each guarded by `installed`, so
+    // Two siblings, close then navigate, each guarded by `installed`, so
     // a cancelled or failed job has no action behind the caption it does not draw.
-    CHECK_TRUE(confirm->kids.size() == 4);
-    for (size_t i = 1; i < 4 && i < confirm->kids.size(); ++i) {
+    CHECK_TRUE(confirm->kids.size() == 3);
+    for (size_t i = 1; i < 3 && i < confirm->kids.size(); ++i) {
       const Node& step = confirm->kids[i];
       CHECK_TRUE(step.tag == rb_blitz::ui::dtb::kCommand && step.kids.size() == 3 &&
                  step.kids[0].text == "if");
@@ -2581,12 +2580,6 @@ void TestDownloadRefreshAction() {
         CHECK_TRUE(body.tag == rb_blitz::ui::dtb::kCommand && body.kids.size() == 3 &&
                    body.kids[0].text == "ui" && body.kids[1].text == "goto_screen" &&
                    body.kids[2].text == rb_blitz::menu_options::kRefreshRowDiscoverScreen);
-      } else {
-        // 3. the menu row's own sentinel, the call the host answers by re-scanning
-        CHECK_TRUE(body.tag == rb_blitz::ui::dtb::kCommand && body.kids.size() == 2 &&
-                   body.kids[0].text == "file_exists" &&
-                   body.kids[1].tag == rb_blitz::ui::dtb::kString &&
-                   body.kids[1].text == rb_blitz::menu_options::kRefreshSentinelPath);
       }
     }
   }

@@ -572,7 +572,7 @@ bool HandleDownloadWrite(const std::string_view path) {
     std::function<void()> refresh;
     { const std::lock_guard<std::mutex> lock(S().mutex); refresh = S().config.refresh; }
     if (refresh) {
-      refresh();  // includes the host scan even when the optional DLC cache is disabled
+      refresh();  // scan the host library on the refresh worker
       ClearStoreRefreshWarning();
     }
     return true;

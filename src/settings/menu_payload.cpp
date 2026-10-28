@@ -342,13 +342,6 @@ bool RouteLibraryHeaderNavigation(std::vector<Node>* roots, LibraryHeader curren
   return true;
 }
 
-bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit) {
-  if (!cache_hit) return false;
-  std::string why;
-  return ui::screen::ReplaceLocaleEntry(roots, menu_options::kEnumeratingContentKey,
-      menu_options::kDiscoveringContentLabel, menu_options::kLoadingCacheLabel, &why);
-}
-
 bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_active) {
   if (!refresh_row_active) return false;
   std::string why;
@@ -503,15 +496,10 @@ bool AddRecompilationCredits(std::vector<Node>* roots, bool ultimate, std::strin
   return true;
 }
 
-// The refresh row's action as the payload's copy of the splash record carries it. The two
-// statements and their order are menu_options.h's (`kRefreshRowDiscoverScreen`,
-// `kRefreshSentinelPath`), shared with the byte-budgeted in-flight edit so the two can never
-// disagree about what the press does.
+// The payload copy takes the same native discovery route as the in-flight edit.
 std::vector<Node> RefreshRowBody() {
   return {Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
-                         Node::Symbol(menu_options::kRefreshRowDiscoverScreen)}),
-          Node::Command({Node::Symbol("file_exists"),
-                         Node::String(menu_options::kRefreshSentinelPath)})};
+                         Node::Symbol(menu_options::kRefreshRowDiscoverScreen)})};
 }
 
 // The `splash_dlc` case wherever the switch that dispatches it lives, in these roots. The walk
@@ -529,22 +517,24 @@ Node* FindRefreshRowCase(Node* node) {
   return nullptr;
 }
 
-bool ContainsString(const Node& node, const std::string_view text) {
-  if (node.tag == ui::dtb::kString && node.text == text) return true;
+bool ContainsNativeDiscovery(const Node& node) {
+  if (node.tag == ui::dtb::kCommand && node.kids.size() == 3 &&
+      node.kids[0].text == "ui" && node.kids[1].text == "goto_screen" &&
+      node.kids[2].text == menu_options::kRefreshRowDiscoverScreen) return true;
   for (const Node& kid : node.kids) {
-    if (ContainsString(kid, text)) return true;
+    if (ContainsNativeDiscovery(kid)) return true;
   }
   return false;
 }
 
 bool SetRefreshRowAction(std::vector<ui::dtb::Node>* roots, bool refresh_row_active) {
   if (!refresh_row_active || roots == nullptr) return false;
-  // The in-flight twin's guard, for the same reason: a case that already carries the call is left
+  // The in-flight twin's guard, for the same reason: a case already entering discovery is left
   // alone rather than rewritten a second time.
   for (Node& root : *roots) {
     if (Node* row = FindRefreshRowCase(&root)) {
       for (size_t i = 1; i < row->kids.size(); ++i) {
-        if (ContainsString(row->kids[i], menu_options::kRefreshSentinelPath)) return false;
+        if (ContainsNativeDiscovery(row->kids[i])) return false;
       }
       break;
     }
@@ -750,7 +740,7 @@ bool SkipStartupLogos(std::vector<Node>* roots, std::string* why) {
 
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
-                      bool cached_dlc_list, bool refresh_row_active,
+                      bool refresh_row_active,
                       std::vector<std::string>* notes,
                       const std::vector<std::string>& hidden_menu_rows,
                       bool skip_startup_logos) {
@@ -906,7 +896,6 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           return false;
         }
       }
-      SetDiscoveryCacheLabel(&roots, cached_dlc_list);
       SetRefreshRowLabel(&roots, refresh_row_active);
       // Retail's own strings this surface restyles (the AV page's two checkboxes). A locale that
       // does not carry them, or carries a translation, is left alone by the same call.

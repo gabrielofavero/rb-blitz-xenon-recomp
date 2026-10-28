@@ -352,7 +352,7 @@ std::vector<uint8_t> ServerConnectFile(size_t filler_per_constant, bool skipped_
 // A compiled DTA shaped like `ui/splash/gen/splash.dtb` where R7 matters: the
 // command that turns the highlight into a case - a `switch` over the panel's state,
 // whose case list is one array per row, each beginning with the row's own name - and
-// the downloadable-content case, the one TapRefreshCache rewrites. The case's action
+// the downloadable-content case, the one TapNativeDiscovery rewrites. The case's action
 // is an `if_else` of whatever size the case asks for, because that size is the whole
 // budget the replacement gets: the case's bytes go back exactly as they came.
 
@@ -1263,7 +1263,7 @@ int main() {
     const size_t size = file.size();
     std::vector<uint8_t> untouched = file;
 
-    const Tapped tapped = TapRefreshCache(file.data(), file.size());
+    const Tapped tapped = TapNativeDiscovery(file.data(), file.size());
     CHECK_TRUE(tapped.applied);
     CHECK_EQ(tapped.file_size, size);
     // The retail action is longer than the call, so the difference is padding: the
@@ -1280,27 +1280,14 @@ int main() {
     CHECK_TRUE(!root.empty());
     CHECK_EQ(end, size - 4);
 
-    // The row's action is now two sibling statements plus the padding: the trip through
-    // the title's own discovery pass, the sentinel call, and a value the case evaluates
-    // and discards. Siblings, retail's own shape for multi-statement cases - a `{do ...}`
-    // wrapper only ever ran its first child in-game (measured 2026-10-15).
+    // The native route is the sole action; the inert value preserves file length.
     const Node* row = FindCase(root, kDlcFixtureRow);
     CHECK_TRUE(row != nullptr);
     if (row != nullptr) {
-      CHECK_EQ(row->kids.size(), 4);
-      CHECK_TRUE(HasText(*row, "file_exists"));
+      CHECK_EQ(row->kids.size(), 3);
       CHECK_TRUE(tapped.navigates);
-      // The mount prefix is part of the path the host sees, so it is part of what the
-      // module writes; a bare name is answered inside the engine and never reaches a
-      // file call (docs/engine/main-menu.md (part 1, the option list) §7.1).
-      CHECK_TRUE(HasText(*row, "songcache:/rbbz_dlc_refresh"));
-      // The screen the title's own start button enters, so the press shows the discovery
-      // pass rather than refreshing silently behind the menu.
-      CHECK_TRUE(HasText(*row, "server_connect_screen"));
-      // The navigation is the FIRST statement: the sentinel call is answered by no device
-      // the emulator serves, so nothing may depend on it having run.
       CHECK_TRUE(HasText(row->kids[1], "server_connect_screen"));
-      CHECK_TRUE(HasText(row->kids[2], "songcache:/rbbz_dlc_refresh"));
+      CHECK_FALSE(HasText(*row, "file_exists"));
       CHECK_EQ(CountText(*row, std::string(tapped.padding, 'z')), 1);
       CHECK_EQ(CountText(*row, std::string(400, 'x')), 0);
     }
@@ -1314,45 +1301,35 @@ int main() {
   BeginCase("a row that already refreshes, and a file without the row");
   {
     std::vector<uint8_t> file = DlcCaseFile(400);
-    CHECK_TRUE(TapRefreshCache(file.data(), file.size()).applied);
+    CHECK_TRUE(TapNativeDiscovery(file.data(), file.size()).applied);
     const std::vector<uint8_t> before = file;
-    const Tapped again = TapRefreshCache(file.data(), file.size());
+    const Tapped again = TapNativeDiscovery(file.data(), file.size());
     CHECK_FALSE(again.applied);
-    CHECK_TRUE(again.reason.find("already refreshes") != std::string::npos);
+    CHECK_TRUE(again.reason.find("already enters native discovery") != std::string::npos);
     CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
 
     // The retail file has the row; a payload that renamed it does not, and the edit
     // refuses rather than adding one (the option list is the file's own business).
     std::vector<uint8_t> renamed = DlcCaseFile(400, true, "splash_store");
     const std::vector<uint8_t> renamed_before = renamed;
-    const Tapped missing = TapRefreshCache(renamed.data(), renamed.size());
+    const Tapped missing = TapNativeDiscovery(renamed.data(), renamed.size());
     CHECK_FALSE(missing.applied);
     CHECK_TRUE(missing.reason.find("no downloadable-content row") != std::string::npos);
     CHECK_TRUE(std::memcmp(renamed.data(), renamed_before.data(), renamed_before.size()) == 0);
 
     std::vector<uint8_t> absent = DlcCaseFile(400, false);
-    CHECK_FALSE(TapRefreshCache(absent.data(), absent.size()).applied);
+    CHECK_FALSE(TapNativeDiscovery(absent.data(), absent.size()).applied);
   }
 
-  BeginCase("an action that holds the call but not the navigation keeps the refresh alone");
+  BeginCase("a shorter action still enters native discovery when it fits");
   {
-    // Between the two costs: long enough for `file_exists`, too tight for the connect
-    // call. The refresh is never the part that is dropped.
-    std::vector<uint8_t> file = DlcCaseFile(40);
-    const Tapped tapped = TapRefreshCache(file.data(), file.size());
+    std::vector<uint8_t> file = DlcCaseFile(100);
+    const Tapped tapped = TapNativeDiscovery(file.data(), file.size());
     CHECK_TRUE(tapped.applied);
-    CHECK_FALSE(tapped.navigates);
-    size_t end = 0;
-    const std::vector<Node> root = ReadRoot(file, &end);
+    CHECK_TRUE(tapped.navigates);
+    const std::vector<Node> root = ReadRoot(file);
     const Node* row = FindCase(root, kDlcFixtureRow);
     CHECK_TRUE(row != nullptr);
-    if (row != nullptr) {
-      CHECK_EQ(row->kids.size(), 3);
-      CHECK_TRUE(HasText(*row, "file_exists"));
-      CHECK_TRUE(HasText(*row, "songcache:/rbbz_dlc_refresh"));
-      CHECK_FALSE(HasText(*row, "server_connect_screen"));
-      CHECK_EQ(CountText(*row, std::string(tapped.padding, 'z')), 1);
-    }
   }
 
   BeginCase("a row whose action cannot hold the call is refused");
@@ -1361,7 +1338,7 @@ int main() {
     // action shorter than that cannot be balanced, so the file is left alone.
     std::vector<uint8_t> file = DlcCaseFile(0);
     const std::vector<uint8_t> before = file;
-    const Tapped refused = TapRefreshCache(file.data(), file.size());
+    const Tapped refused = TapNativeDiscovery(file.data(), file.size());
     CHECK_FALSE(refused.applied);
     CHECK_TRUE(refused.reason.find("too short") != std::string::npos);
     CHECK_TRUE(std::memcmp(file.data(), before.data(), before.size()) == 0);
@@ -1372,7 +1349,7 @@ int main() {
     const std::vector<uint8_t> before = DlcCaseFile(400);
     std::vector<uint8_t> block(before.size() + 4096, 0xA5);
     std::memcpy(block.data(), before.data(), before.size());
-    const Tapped tapped = TapRefreshCache(block.data(), block.size());
+    const Tapped tapped = TapNativeDiscovery(block.data(), block.size());
     CHECK_TRUE(tapped.applied);
     CHECK_EQ(tapped.file_size, before.size());
     bool tail_intact = true;

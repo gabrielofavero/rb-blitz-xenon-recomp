@@ -21,15 +21,12 @@ using MenuRecords = std::map<std::string, std::vector<uint8_t>>;
 // not draw it).
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider = false,
-                      bool cached_dlc_list = false, bool refresh_row_active = false,
+                      bool refresh_row_active = false,
                       std::vector<std::string>* notes = nullptr,
                       const std::vector<std::string>& hidden_menu_rows = {},
                       bool skip_startup_logos = false);
 // Empty the native startup playlist and release its wait, before the guest boots.
 bool SkipStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
-// Applied to the complete generated locale record, before it is archived. This
-// path has no split-read length constraint and serves both installed providers.
-bool SetDiscoveryCacheLabel(std::vector<ui::dtb::Node>* roots, bool cache_hit);
 // The formerly transient state 28 can now span frames while a refresh scans.
 // Give it the same content-loading label as state 29; retain real connection labels.
 bool SetDiscoveryStartLabel(std::vector<ui::dtb::Node>* roots);
@@ -39,7 +36,7 @@ bool AddCrashRecoveryHooks(std::vector<ui::dtb::Node>* roots, std::string* why);
 // method. Refuses an unknown shape instead of leaving an ungated menu route.
 bool AddGraphicsLoadingGate(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Applied the same way, for the main menu's downloadable-content row: with R7 on the row *is*
-// the library refresh (`TapRefreshCache`), so the label it draws has to say so. Built into the
+// the library refresh (`TapNativeDiscovery`), so the label it draws has to say so. Built into the
 // locale record here rather than left to the in-flight menu_filter relabel, which cannot reach a
 // record spanning more than two archive reads (measured 2026-10-15: with a provider installed the
 // 87 KB English locale sits across three read blocks and the relabel was silently refused).
@@ -60,7 +57,7 @@ bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_acti
 // A file whose first non-empty section is not one of those two headings is left alone (false):
 // a mod release may change what its credits say, and that must not turn into a boot failure.
 bool AddRecompilationCredits(std::vector<ui::dtb::Node>* roots, bool ultimate, std::string* why);// The same row's *action*, built into the payload's own copy of the splash record
-// (`ui/splash/gen/splash.dtb`; the in-flight twin is menu_filter's `TapRefreshCache`). Two sibling
+// (`ui/splash/gen/splash.dtb`; the in-flight twin is menu_filter's `TapNativeDiscovery`). Two sibling
 // statements - the title's connect/discovery screen, then the `file_exists` the host answers by
 // re-scanning - with no byte budget: the payload's record may grow, so both always fit and nothing
 // is padded. The overlay prefers this copy, and the in-flight edit cannot be relied on for it

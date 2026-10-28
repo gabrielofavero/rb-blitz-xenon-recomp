@@ -1,15 +1,20 @@
 # DLC cache comparison, 2026-10-27
 
+**Outcome (2026-10-28):** the persisted flat-library cache was removed. Scan
+threads remain. Refresh Songs now routes through native discovery and rescans
+the host library on a worker before the guest enumerates it. The measurements
+below document why the old cache was retired.
+
 ## Scope and method
 
-The production host loader was measured directly with
-[`tools/dlc_cache_benchmark.cpp`](../../tools/dlc_cache_benchmark.cpp). The library
+The former production host loader was measured directly with the now-retired
+`tools/dlc_cache_benchmark.cpp`. The library
 contained 1,777 packages. Each trial used a new cache-file path and the game's
 configured four scan threads. The benchmark ran three trials, placing the
 cache-off scan first in trials 1 and 3 and last in trial 2. Raw results are in
 [`dlc-cache-comparison-2026-10-27.csv`](dlc-cache-comparison-2026-10-27.csv).
 
-Reproduce with a new, disposable output directory:
+Historical reproduction command (the benchmark tool was retired with the cache):
 
 ```powershell
 clang++ -O2 -std=c++23 -Isrc tools/dlc_cache_benchmark.cpp -o out/dlc-cache-compare/dlc_cache_benchmark.exe

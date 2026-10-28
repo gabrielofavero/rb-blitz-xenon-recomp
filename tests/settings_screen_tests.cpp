@@ -3773,7 +3773,7 @@ void TestRhythmVerseRows() {
 
   // P9-3: the store submenu leads the five-row page in both contexts.
   const std::vector<std::string> expected_dlc = {
-      "settings_rhythmverse_menu", "settings_dlc_cache", "settings_dlc_threads"};
+      "settings_rhythmverse_menu", "settings_dlc_threads"};
   const std::vector<std::string> expected_store = {
       "settings_rhythmverse", "settings_rhythmverse_filter"};
   CHECK_TRUE(PanelRowSymbols("settings_dlc_panel") == expected_dlc);

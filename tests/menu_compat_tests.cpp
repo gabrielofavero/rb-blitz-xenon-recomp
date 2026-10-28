@@ -37,6 +37,7 @@ std::string Joined(const std::vector<std::string>& names) {
 HideRequest Base() {
   HideRequest request;
   request.defaults = DefaultHiddenRows();
+  request.refresh_row_enabled = true;
   return request;
 }
 
@@ -57,13 +58,13 @@ void MasterOffHidesNothing() {
 }
 
 void NoSelectionUsesTheDefaults() {
-  test::BeginCase("hide: an absent selection uses the compiled default trio");
+  test::BeginCase("hide: an absent selection keeps the native refresh row visible");
 
   HideRequest request = Base();
   request.master = true;
   const HideDecision decision = DecideHiddenRows(request);
-  CHECK_TRUE(Joined(decision.hidden) == "splash_leaderboard,splash_achievements,splash_dlc");
-  CHECK_TRUE(decision.note.find("hiding 3 row(s)") != std::string::npos);
+  CHECK_TRUE(Joined(decision.hidden) == "splash_leaderboard,splash_achievements");
+  CHECK_TRUE(decision.note.find("hiding 2 row(s)") != std::string::npos);
 }
 
 void EmptySelectionHidesNothing() {
@@ -113,7 +114,6 @@ void RefreshRowIsKeptForTheDefaults() {
 
   HideRequest request = Base();
   request.master = true;
-  request.refresh_row_owns_refresh = true;
   const HideDecision decision = DecideHiddenRows(request);
   // The trio loses `splash_dlc`: that row is what refreshes the library in this run.
   CHECK_TRUE(Joined(decision.hidden) == "splash_leaderboard,splash_achievements");
@@ -129,7 +129,6 @@ void RefreshRowMayBeHiddenExplicitly() {
   request.master = true;
   request.selection_explicit = true;
   request.selected = {"splash_dlc", "splash_leaderboard"};
-  request.refresh_row_owns_refresh = true;
   const HideDecision decision = DecideHiddenRows(request);
   CHECK_TRUE(Joined(decision.hidden) == "splash_dlc,splash_leaderboard");
   CHECK_FALSE(decision.refresh_row_left_visible);
@@ -145,7 +144,6 @@ void RefreshEntryOffHidesTheRow() {
   // owns it - must not keep it. It is the player's choice, so nothing needs another row.
   HideRequest request = Base();
   request.master = true;
-  request.refresh_row_owns_refresh = true;
   request.refresh_row_enabled = false;
   const HideDecision decision = DecideHiddenRows(request);
   CHECK_TRUE(Joined(decision.hidden) == "splash_leaderboard,splash_achievements,splash_dlc");
@@ -162,7 +160,6 @@ void RefreshEntryOffAlsoHidesItFromACustomSelection() {
   request.master = true;
   request.selection_explicit = true;
   request.selected = {"splash_start"};
-  request.refresh_row_owns_refresh = true;
   request.refresh_row_enabled = false;
   const HideDecision decision = DecideHiddenRows(request);
   CHECK_TRUE(Joined(decision.hidden) == "splash_start,splash_dlc");
@@ -179,7 +176,6 @@ void RefreshEntryOffIgnoresTheHideMaster() {
   request.master = false;
   request.selection_explicit = true;
   request.selected = {"splash_start"};
-  request.refresh_row_owns_refresh = true;
   request.refresh_row_enabled = false;
   const HideDecision decision = DecideHiddenRows(request);
   CHECK_TRUE(Joined(decision.hidden) == "splash_dlc");
@@ -199,28 +195,11 @@ void RefreshEntryOffHidesItWithAnEmptySelection() {
   request.master = true;
   request.selection_explicit = true;
   request.selected.clear();
-  request.refresh_row_owns_refresh = true;
   request.refresh_row_enabled = false;
   const auto decision = DecideHiddenRows(request);
   CHECK_TRUE(Joined(decision.hidden) == "splash_dlc");
   CHECK_TRUE(decision.refresh_row_disabled);
   CHECK_FALSE(decision.alternate_refresh_needed);
-}
-
-void RefreshEntryOffMeansNothingWithoutR7() {
-  test::BeginCase("hide: the switch is inert while the row is not the refresh row");
-
-  // R7 off (`enhancements_dlc_cache` off): `splash_dlc` is the title's own online row again, so the
-  // refresh entry's switch says nothing about it - the compiled trio hides it as before.
-  HideRequest request = Base();
-  request.master = true;
-  request.refresh_row_owns_refresh = false;
-  request.refresh_row_enabled = false;
-  const HideDecision decision = DecideHiddenRows(request);
-  CHECK_TRUE(Joined(decision.hidden) == "splash_leaderboard,splash_achievements,splash_dlc");
-  CHECK_FALSE(decision.refresh_row_disabled);
-  CHECK_FALSE(decision.alternate_refresh_needed);
-  CHECK_FALSE(decision.refresh_row_left_visible);
 }
 
 void LegacyPoolCountIsIgnoredOutLoud() {
@@ -304,7 +283,6 @@ int main() {
   RefreshEntryOffAlsoHidesItFromACustomSelection();
   RefreshEntryOffIgnoresTheHideMaster();
   RefreshEntryOffHidesItWithAnEmptySelection();
-  RefreshEntryOffMeansNothingWithoutR7();
   LegacyPoolCountIsIgnoredOutLoud();
   RenameCannotReachTheMergedRoot();
   HideListSeamTakesTheInventoryAndKeepsTheEmptyCase();

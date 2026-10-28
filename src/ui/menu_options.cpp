@@ -640,12 +640,15 @@ Node* FindSkippedBlock(Node& node) {
 // repurposes that one row rather than adding one, so nothing in the option array moves.
 constexpr char kDlcRowName[] = "splash_dlc";
 
-// The name the row's DTA asks for lives in menu_options.h (`kRefreshSentinelPath`), because the
-// payload's own copy of the row builds the same call (src/settings/menu_payload.cpp).
-
-// What the host looks for inside the path it is handed. Kept apart from the path above so a change
-// of mount cannot break the hook, and vice versa.
-constexpr char kRefreshSentinel[] = "rbbz_dlc_refresh";
+bool ContainsNativeDiscovery(const Node& node) {
+  if (node.tag == kCommand && node.kids.size() == 3 &&
+      IsText(node.kids[0], "ui") && IsText(node.kids[1], "goto_screen") &&
+      IsText(node.kids[2], kRefreshRowDiscoverScreen)) return true;
+  for (const Node& kid : node.kids) {
+    if (ContainsNativeDiscovery(kid)) return true;
+  }
+  return false;
+}
 
 // The switch case for `name`: an array whose *first* element is the row's name. The
 // option array lists the same name too, but never first - `splash_start` opens it - so
@@ -868,7 +871,7 @@ Inventory MenuInventory(const uint8_t* file, size_t available) {
   return inventory;
 }
 
-Tapped TapRefreshCache(uint8_t* file, size_t available) {
+Tapped TapNativeDiscovery(uint8_t* file, size_t available) {
   Tapped tapped;
   Loaded loaded;
   if (!LoadFile(file, available, &loaded, &tapped.reason)) {
@@ -891,8 +894,8 @@ Tapped TapRefreshCache(uint8_t* file, size_t available) {
     return tapped;
   }
   for (size_t i = 1; i < row->kids.size(); ++i) {
-    if (ContainsTextWithin(row->kids[i], kRefreshSentinel)) {
-      tapped.reason = "the row already refreshes the cache";
+    if (ContainsNativeDiscovery(row->kids[i])) {
+      tapped.reason = "the row already enters native discovery";
       return tapped;
     }
   }
@@ -905,45 +908,22 @@ Tapped TapRefreshCache(uint8_t* file, size_t available) {
     original += NodeSize(row->kids[i]);
   }
 
-  // The replacement is two sibling statements, like retail's own multi-statement cases
-  // (`splash_exit`: `{... set display_msg ...}` `{ui goto_screen ...}`, `splash_achievements`):
-  // `{ui goto_screen server_connect_screen}` - the screen the title's own start button enters,
-  // so the press shows the discovery pass rather than refreshing silently behind the menu - and
-  // `{file_exists "songcache:/rbbz_dlc_refresh"}`, the call the host answers by re-scanning.
-  //
-  // The navigation is the FIRST statement on purpose. A `{do ...}` wrapper used to carry both,
-  // and in-game it only ever ran its first child: with the call first the screen was never
-  // entered, with the navigation first the call never fired (measured 2026-10-15). As siblings,
-  // retail's shape, both run; the navigation goes first so that even an abort after the failing
-  // call (the sentinel is answered by no device the emulator serves) cannot take the screen away.
-  //
-  // The trailing padding is a value the case evaluates and discards, which makes the case's bytes
-  // come out exactly as they went in (the ark index fixes this file's length).
-  const Node call =
-      CommandNode({TextNode(kSymbol, "file_exists"), TextNode(kString, kRefreshSentinelPath)}, 0);
+  // Keep the title's own discovery route. The host refresh starts when its
+  // connect panel enters native enumeration, before the guest snapshots the list.
+  // The ark index fixes this record's length, so an inert text value pays back
+  // the bytes that the shipped store action occupied.
   const Node discover = CommandNode({TextNode(kSymbol, "ui"), TextNode(kSymbol, "goto_screen"),
                                      TextNode(kSymbol, kRefreshRowDiscoverScreen)}, 0);
-  constexpr size_t kTextHeader = 8;  // tag + length
-  const size_t fixed_call = NodeSize(call) + kTextHeader;
-  const size_t fixed_discover = fixed_call + NodeSize(discover);
-  if (original < fixed_call) {
-    tapped.reason = "the downloadable-content row's action is too short to hold the refresh";
+  constexpr size_t kTextHeader = 8;
+  const size_t fixed = NodeSize(discover) + kTextHeader;
+  if (original < fixed) {
+    tapped.reason = "the downloadable-content row's action is too short for native discovery";
     return tapped;
   }
-  // A row whose action is tight may hold the call but not the navigation (measured: the
-  // payload's splash record leaves 323 bytes, other records less than the call alone). The
-  // refresh itself is never the part that is dropped - only the trip through the discovery
-  // screen is, and the press still refreshes the library.
-  const bool with_discover = original >= fixed_discover;
-  const size_t fixed = with_discover ? fixed_discover : fixed_call;
   const size_t padding = original - fixed;
-
   std::vector<Node> replacement;
-  replacement.reserve(3);
-  if (with_discover) {
-    replacement.push_back(discover);
-  }
-  replacement.push_back(call);
+  replacement.reserve(2);
+  replacement.push_back(discover);
   replacement.push_back(TextNode(kString, std::string(padding, 'z')));
   size_t rebuilt_action = 0;
   for (const Node& part : replacement) {
@@ -968,7 +948,7 @@ Tapped TapRefreshCache(uint8_t* file, size_t available) {
   Sha1Digest(file, tapped.file_size, tapped.digest_after);
   tapped.applied = true;
   tapped.padding = padding;
-  tapped.navigates = with_discover;
+  tapped.navigates = true;
   return tapped;
 }
 

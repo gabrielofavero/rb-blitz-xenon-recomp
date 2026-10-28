@@ -1,5 +1,8 @@
 # The main menu — option list, labels, offline prompts, refresh row, background music
 
+Current refresh behavior is described under **At a glance**. Dated R7 sections
+below retain the old persisted-cache and sentinel measurements as history.
+
 ## At a glance
 
 The title's main menu is **four pieces of data plus one loader path**, and each is edited (or hooked)
@@ -13,8 +16,8 @@ in place, never repacked:
 - **The two offline prompts** are states of `server_connect_panel` in `ui/net/gen/server_connect.dtb`,
   answered by writing the file's own transitions into its `update_state`, paid for by eight unused
   state constants — R3, on by default.
-- **The refresh row** re-points `splash_dlc`'s action at the title's own `file_exists` on a sentinel
-  device path, which the host hears — R7, off by default.
+- **The refresh row** re-points `splash_dlc` to the title's native discovery screen.
+  Later discovery passes start a host worker rescan before enumerating — R7, on by default.
 - **The background music** is `ShellMusicPanel`, fed by the ark's `config/synth.dtb` `shellmusic`
   block (three of the title's own tracks). DLC songs cannot be a pool entry, so R9 hooks the pool
   loader and the per-frame poll instead — **on by default since 2026-10-14**, when the feature got a
@@ -444,9 +447,9 @@ thread, and a stream left playing through it repeats its last buffered slice. Th
 down before the block and the rotation's next song starts on the first menu frame after it - part 2
 §4 has the mechanism and the measurement, and `out/_swap/menu-run/music3` is the arm.
 
-**The entry's own switch (2026-10-15).** Help & Options → Downloadable Content → *Refresh Songs*
-(`general.refresh_music_library`, carrier `enhancements_refresh_music_library`, **on by default
-since 2026-10-22**; it shipped on 2026-10-15 and was off 2026-10-20 to 2026-10-22) shows that row
+**The entry's own switch (2026-10-15).** Help & Options → Main Menu → Extra Items → *Refresh Songs*
+(`general.refresh_music_library`, carrier `enhancements_refresh_music_library`, **off by default
+since 2026-10-28**) shows that row
 on the menu. On, it is a property of the feature rather than of the hide list: off hides `splash_dlc` with the hide master on **or** off and whatever the
 Interface ▸ Hide Items selection says, it does not raise the hide list's "the refresh lost its row"
 warning (that warning is for a player who hid it *by accident*), and the payload's own locale stops

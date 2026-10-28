@@ -22,7 +22,6 @@
 #include <rex/system/xmemory.h>
 #include <rex/types.h>
 
-#include "hooks/dlc.h"
 #include "hooks/content_progress.h"
 #include "settings/menu_compat.h"
 #include "settings/boot.h"
@@ -54,7 +53,7 @@ struct Settings {
   bool tap_refresh_row = false;
   // The refresh entry's own switch (`general.refresh_music_library`): with it off, the row that
   // performs the refresh is hidden even while R7 owns it.
-  bool refresh_row_on = true;
+  bool refresh_row_on = false;
   bool relabel_refresh_row = false;
 
   bool Any() const {
@@ -274,16 +273,14 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available,
   }
 
   if (g_settings.tap_refresh_row) {
-    // R7: give the downloadable-content row the refresh job. The row's action becomes a
-    // `file_exists` on a name no file has; src/hooks/dlc_refresh.cpp hears the question. This is
+    // R7: give the downloadable-content row the native discovery route. This is
     // the byte-budgeted twin of the payload's own body (src/settings/menu_payload.cpp): it owns
     // the retail record, while the record the overlay prefers carries the body already.
     const rb_blitz::menu_options::Tapped tapped =
-        rb_blitz::menu_options::TapRefreshCache(file, available);
+        rb_blitz::menu_options::TapNativeDiscovery(file, available);
     if (tapped.applied) {
-      REXLOG_INFO("menu_filter: the downloadable-content row now refreshes the DLC cache{} ({} "
-                  "bytes of its action paid for the call)",
-                  tapped.navigates ? " and re-runs the discovery pass" : "", tapped.padding);
+      REXLOG_INFO("menu_filter: the downloadable-content row now enters native song discovery "
+                  "({} padding bytes)", tapped.padding);
       defer(tapped.file_size, tapped.digest_before, tapped.digest_after);
       patched = true;
     } else {
@@ -510,7 +507,6 @@ void Configure(bool settings_restart_boot) {
   request.master = g_settings.hide_rows || request.selection_explicit;
   request.selected = menu_options::ParseRowNames(configured_rows);
   request.defaults = menu_options::ParseRowNames(menu_options::kDefaultRows);
-  request.refresh_row_owns_refresh = g_settings.tap_refresh_row;
   request.refresh_row_enabled = g_settings.refresh_row_on;
   const rb_blitz::settings::menu_compat::HideDecision decision =
       rb_blitz::settings::menu_compat::DecideHiddenRows(request);
@@ -521,7 +517,7 @@ void Configure(bool settings_restart_boot) {
   g_settings.hide_rows = !decision.hidden.empty();
 
   if (g_settings.tap_refresh_row) {
-    // R7 gives the downloadable-content row a new job (TapRefreshCache), so it stays in the list
+    // R7 gives the downloadable-content row a new job (TapNativeDiscovery), so it stays in the list
     // (the decision above says so), and the same toggle repaints the row:
     // the row's shipped label ("Download Content") is an online-store name for something that now
     // refreshes a library.

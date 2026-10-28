@@ -2,8 +2,12 @@
 
 Where downloadable content goes, and what the guest does with it.
 
-**Current cache/status/progress behavior:** see §4.4 (P6, 2026-10-14). Earlier dated
-measurements in §4.1–4.3 describe their original builds and defaults.
+**Current behavior (2026-10-28):** every boot scans the flat DLC library using
+`dlc_scan_threads`. The persisted `dlc_library.cache` and Cache Song Library
+setting were retired after matched boots showed no meaningful menu-load gain.
+Refresh Songs enters the title's native discovery screen; a later native pass
+starts a worker rescan and waits before creating the guest enumerators. Earlier
+dated cache measurements below describe historical builds.
 
 Blitz does not read a DLC directory of its own: it enumerates content through the
 emulated Xbox content APIs and opens what it found, and the SDK's content manager
@@ -195,7 +199,7 @@ the P8 record). What that adds to the rules above:
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
 | `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers: `1` (the default) reads them on the calling thread, `0` uses the machine's core count (capped at 8), and any other value is that many workers (§4.1). Controller Settings' *DLC scan threads* row bounds its slider by the machine's processor count. The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
 | `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | on | Persist the flat library content list and reuse it while roots, type and fingerprint match (§4.4); changing it needs a relaunch. Mount delay and loading-phase pacing are independent. |
-| `--enhancements_refresh_music_library`, or `[enhancements] refresh_music_library` in `rb_blitz.toml` | on (2026-10-22; off 2026-10-20 to 2026-10-22) | The main menu's refresh entry's own switch: the visible row is Help & Options → Downloadable Content → *Refresh Songs* (`general.refresh_music_library`, renamed from *Refresh Music Library* on 2026-10-22). On shows that menu row; off hides it, the boot's scan is unaffected, and the Interface → Main Menu mirror stops offering a visibility row for it too (2026-10-23: the mirror lists the menu's actual rows). Only meaningful with the cache on (§4.1). Changing it needs a relaunch. The retail *Download Content* entry is restored as a separate row, hidden by default (`interface.hide_download_content`; its label is `Download content` since 2026-10-23). |
+| `--enhancements_refresh_music_library`, or `[enhancements] refresh_music_library` in `rb_blitz.toml` | off (2026-10-28) | The main menu's refresh entry's own switch: the visible row is Help & Options → Main Menu → Extra Items → *Refresh Songs* (`general.refresh_music_library`). On shows that menu row; off hides it, the boot's scan is unaffected, and the Interface → Main Menu mirror stops offering a visibility row for it too. Changing it needs a relaunch. The retail *Download Content* entry is restored as a separate row, hidden by default (`interface.hide_download_content`). |
 | `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's *Refresh Songs* row asks for the same thing in a running title, and also re-enters the title's own discovery pass (§4.1) |
 
 The sources are read-only by construction. Enumeration and opening resolve into them,

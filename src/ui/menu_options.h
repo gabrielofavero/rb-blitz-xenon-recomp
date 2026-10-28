@@ -82,7 +82,7 @@ inline constexpr char kUltimateSettingsLabel[] = "Ultimate Settings";
 // src/hooks/menu_filter.cpp for how a file that spans two reads is still patched).
 //
 // The main menu's downloadable-content row is the row R7 gives the refresh job to
-// (`TapRefreshCache`). It ships as "Download Content", which is an online-store label
+// (`TapNativeDiscovery`). It ships as "Download Content", which is an online-store label
 // and says nothing about refreshing a library, so with R7 on it is redrawn as the
 // refresh it now performs (owner decision, 2026-10-13: the row is the *only* refresh
 // entry - the settings page's old duplicate is gone).
@@ -91,28 +91,12 @@ inline constexpr char kDlcRowLabel[] = "Download Content";
 // Renamed `Refresh Songs` by the owner on 2026-10-22 (it was `Refresh Music Library`): the row
 // re-scans the DLC folders, and "songs" is the word the rest of the surface uses for them.
 inline constexpr char kDlcRowRefreshLabel[] = "Refresh Songs";
-
-// The refresh row's action, shared by the two places that build it: the in-flight edit
-// (`TapRefreshCache`, byte-budgeted because the ark index fixes the file's length) and the
-// payload's own copy of the splash record (`SetRefreshRowAction`, where the record may grow).
-//
-// `kRefreshRowDiscoverScreen` is the screen the title's own start button enters, so a press shows
-// the discovery pass rather than refreshing behind the menu. `kRefreshSentinelPath` is a name no
-// file has, so what the player sees does not change - and the *device* is what makes the engine
-// resolve the name at all: a path under `d:` is answered out of the ark the title already has
-// mapped (measured: no host call is made for one), while a device it owns - the title opens
-// `songcache:\songcache` itself at startup - is asked through the guest's file calls, which is
-// where src/hooks/dlc_refresh.cpp hears the name.
 inline constexpr char kRefreshRowDiscoverScreen[] = "server_connect_screen";
-inline constexpr char kRefreshSentinelPath[] = "songcache:/rbbz_dlc_refresh";
 
 // The connect panel's own status line for the content enumeration
 // (`server_connect.dtb` maps `kServerConnectPanel_EnumeratingContent` to this token).
-// With R7 on and the host's enumeration answered from the persisted cache there is no
-// discovery happening, so the screen says what it is doing instead.
 inline constexpr char kEnumeratingContentKey[] = "server_connect_enumerating_content";
 inline constexpr char kDiscoveringContentLabel[] = "Discovering Downloadable Content";
-inline constexpr char kLoadingCacheLabel[] = "Loading Cached Content List";
 
 // What one call did, in the terms a log line and the tests both need.
 struct Outcome {
@@ -240,48 +224,21 @@ struct Skipped {
 // be parked inside a conditional the build skips.
 Skipped SkipOfflinePrompts(uint8_t* file, size_t available);
 
-// What one TapRefreshCache call did, in the same terms.
+// What one TapNativeDiscovery call did, in the same terms.
 struct Tapped {
   bool applied = false;   // the file was rewritten
   size_t file_size = 0;   // the .dtb's own length, 4-byte seed included
   size_t padding = 0;     // bytes given back to the file as a discarded value
-  // The action also enters the discovery screen (`{ui goto_screen server_connect_screen}`).
-  // False when the row's action was too tight to hold the navigation, in which case the
-  // press still refreshes the library - it just does it without the visible pass.
-  bool navigates = false;
+  bool navigates = false;  // true after the native discovery route is installed
   uint8_t digest_before[20] = {};
   uint8_t digest_after[20] = {};
   std::string reason;     // why nothing was written, when applied is false
 };
 
-// R7's in-game trigger, as data. The main menu's downloadable-content row
-// (`splash_dlc`) is dead offline - its own action shows a "store unavailable" notice -
-// so instead of adding a row, this gives that row a job: its action becomes a call to
-// the title's own `file_exists` on a name no file has
-// (`songcache:/rbbz_dlc_refresh`; the device is what makes the engine's own file layer
-// resolve it through the guest's file calls instead of stopping at a name it cannot
-// place). src/hooks/dlc_refresh.cpp watches the kernel file calls the engine then
-// makes, sees the name in the path, and re-runs the DLC scan.
-//
-// The action also enters `server_connect_screen` - the screen the start button enters -
-// so the press shows the title's own discovery pass ("Discovering Downloadable
-// Content", the bar, the mounting) rather than refreshing silently behind the menu
-// (owner decision, 2026-10-15). The replacement is two sibling statements, retail's own
-// shape for multi-statement cases: the navigation first, then the sentinel call. A
-// `{do ...}` wrapper only ever ran its first child in-game, so with one order the screen
-// was never entered and with the other the call never fired (measured 2026-10-15). The
-// host holds the pass's first enumeration message until the re-scan's result is handed
-// to the content manager, so the pass enumerates the fresh list
-// (src/hooks/content_progress.cpp -> dlc::WaitForRefreshBeforeEnumeration).
-// A row whose action cannot hold both statements keeps the call alone.
-//
-// Byte-neutral like the rest of this module: the replacement action is padded back to
-// the bytes the original one used, with a value inside a `do` block that the guest
-// evaluates and discards, so the ark index sees the same length.
-//
-// Refuses the file unless it carries that row, the row's action is long enough to hold
-// the call, and the result is exactly as long as the input.
-Tapped TapRefreshCache(uint8_t* file, size_t available);
+// The row enters the title's native discovery screen. The host rescan starts when
+// the connect panel reaches its native enumeration state, before it snapshots
+// the package list. The replacement is padded to preserve the ark file length.
+Tapped TapNativeDiscovery(uint8_t* file, size_t available);
 
 // SHA-1 of `size` bytes, as the title's own content checksum uses it (the value
 // a patched file's database row has to be given so the title still recognises

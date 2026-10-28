@@ -674,7 +674,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
     std::string why;
     std::vector<std::string> notes;
     if (!settings::BuildMenuRecords(read, {"ui/locale/eng/gen/locale_keep.dtb"}, &records,
-                                    &why, false, false, false, &notes, {}, fast)) {
+                                    &why, false, false, &notes, {}, fast)) {
       std::printf("header records refused: %s\n", why.c_str()); return 1;
     }
     CHECK_TRUE(notes.empty());
@@ -959,19 +959,6 @@ int main(int argc, char** argv) {
   TestHeaderVisibility();
   TestHeaderNavigation();
   TestDiscoveryWaitingLabel();
-  BeginCase("the generated locale names a cached list only after a real host hit");
-  {
-    using rb_blitz::ui::dtb::Node;
-    namespace options = rb_blitz::menu_options;
-    std::vector<Node> locale{Node::Array({Node::Symbol(options::kEnumeratingContentKey),
-                                        Node::String(options::kDiscoveringContentLabel)})};
-    CHECK_FALSE(rb_blitz::settings::SetDiscoveryCacheLabel(&locale, false));
-    CheckStrEq(locale[0].kids[1].text, options::kDiscoveringContentLabel);
-    CHECK_TRUE(rb_blitz::settings::SetDiscoveryCacheLabel(&locale, true));
-    CheckStrEq(locale[0].kids[1].text, options::kLoadingCacheLabel);
-    CHECK_TRUE(rb_blitz::settings::SetDiscoveryCacheLabel(&locale, true));
-    CheckStrEq(locale[0].kids[1].text, options::kLoadingCacheLabel);
-  }
   BeginCase("the generated locale renames the downloadable-content row when R7 owns it");
   {
     using rb_blitz::ui::dtb::Node;
@@ -1018,24 +1005,20 @@ int main(int argc, char** argv) {
     // kids: the row symbol, then exactly two statements - no padding, because this record is the
     // payload's own and may grow, which is the whole reason the action is built here.
     const Node& kase = splash[0].kids[3];
-    CHECK_EQ(kase.kids.size(), 3u);
+    CHECK_EQ(kase.kids.size(), 2u);
     CheckStrEq(kase.kids[0].text, options::kDlcRowKey);
     const Node& discover = kase.kids[1];
     CHECK_EQ(discover.kids.size(), 3u);
     CheckStrEq(discover.kids[0].text, "ui");
     CheckStrEq(discover.kids[1].text, "goto_screen");
     CheckStrEq(discover.kids[2].text, options::kRefreshRowDiscoverScreen);
-    const Node& call = kase.kids[2];
-    CHECK_EQ(call.kids.size(), 2u);
-    CheckStrEq(call.kids[0].text, "file_exists");
-    CheckStrEq(call.kids[1].text, options::kRefreshSentinelPath);
     // The sibling case is untouched: the walk found the dlc case by name.
     CHECK_EQ(splash[0].kids[2].kids.size(), 2u);
 
     // Idempotent the same way the in-flight edit is: a case that already carries the sentinel is
     // left alone, so the payload and the hook can both be armed without rewriting twice.
     CHECK_FALSE(rb_blitz::settings::SetRefreshRowAction(&splash, true));
-    CHECK_EQ(splash[0].kids[3].kids.size(), 3u);
+    CHECK_EQ(splash[0].kids[3].kids.size(), 2u);
 
     // A record that ships no such case is a refusal, not a failure: the in-flight edit still owns
     // the retail copy.

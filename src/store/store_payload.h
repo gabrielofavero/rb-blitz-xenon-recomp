@@ -412,18 +412,14 @@ bool RouteDownloadButtons(std::vector<ui::dtb::Node>* store_info_roots, std::str
 //
 //   (kAction_Confirm
 //     {if [installed] {rbbz_download_panel hide_popup}}
-//     {if [installed] {ui goto_screen server_connect_screen}}
-//     {if [installed] {file_exists "songcache:/rbbz_dlc_refresh"}})
+//     {if [installed] {ui goto_screen server_connect_screen}})
 //
-// The two statements are the menu row's own, in the row's own order - `menu_options::
-// kRefreshRowDiscoverScreen` (the title's discovery pass) and `menu_options::kRefreshSentinelPath`
-// (the sentinel `src/hooks/dlc_refresh.cpp` answers by re-scanning and publishing the fresh list) -
-// and they are **siblings** for the reason the row is: a `do` around them loses everything after
+// The native discovery route is the menu row's own. Close and navigate are
+// siblings: a `do` around them loses everything after
 // the navigation, because the screen change takes the evaluation with it (measured 2026-10-15). The
 // guard is therefore repeated per statement: each one is skipped on its own, so a cancelled or
 // failed job has no action behind the caption it does not draw, and no partial sequence can run.
-// The press runs the scan inside the row's own statement, so the list the discovery pass enumerates
-// is the refreshed one (`dlc::WaitForRefreshToLand` publishes it on this guest thread).
+// The connect panel starts the host rescan and waits before enumerating.
 //
 // `installed` is the second terminal property (TRUE in `finish_installed`, FALSE in `show_popup`
 // and `finish_failed`), so a cancelled or failed job draws no **A**. The prompt line switches with

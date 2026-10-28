@@ -61,11 +61,9 @@ param(
     # Blitz), which is what the acceptance criterion is measured against; a
     # value isolates the run so a probe can hash the save files it leaves.
     [string]$UserDataRoot = "",
-    # Extra runtime arguments, ';'-separated, so a run can ask for the R7 family the same way
+    # Extra runtime arguments, ';'-separated, so a run can select discovery pacing the same way
     # acceptance_dlc.ps1 does, e.g.
-    #   -Extra "--enhancements_dlc_cache=true;--enhancements_dlc_uncap_enumeration=true"
-    # Nothing enables R7 by itself, and every R7 feature is inert without it
-    # (song-cache-plan.md §14.9.1).
+    #   -Extra "--enhancements_dlc_uncap_enumeration=true"
     [string]$Extra = "",
     # Play the song a second time from the results screen, in the same process.
     [switch]$Replay,

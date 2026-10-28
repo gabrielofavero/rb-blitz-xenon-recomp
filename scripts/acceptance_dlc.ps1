@@ -59,12 +59,9 @@ param(
     [int]$CloseWaitSec = 20,
     [switch]$SkipControl,
     # Extra runtime arguments, ';'-separated, given to **both** legs so the only difference
-    # between a leg and its control stays the DLC content. This is how a leg asks for the R7
-    # family, e.g.
-    #   -Extra "--enhancements_dlc_cache=true;--enhancements_dlc_uncap_enumeration=true"
-    # No acceptance script turns R7 on by itself, and with it off every R7 feature - the
-    # cached walk, the bar, the frame pacing - is inert in the leg (song-cache-plan.md
-    # §14.9.1), so a leg that means to exercise one has to say so.
+    # between a leg and its control stays the DLC content. For example:
+    #   -Extra "--enhancements_dlc_uncap_enumeration=true"
+    # Discovery pacing can be selected independently of the library scan.
     [string]$Extra = ""
 )
 

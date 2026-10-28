@@ -180,15 +180,11 @@ void TestMigrateDefault() {
   CHECK_TRUE(result.status == MigrationStatus::kMigrated);
   CHECK_TRUE(result.wrote_settings);
   CHECK_TRUE(result.stats.target_imported);
-  // Keep the old target, 4x filtering, explicitly stored 720p resolution, the profile's *Cache DLC
-  // Library* choice and its *DLC Menu Songs* choice. Those last two are the rows whose compiled
-  // default became `true` when an in-game row took them over from Controller Settings (P11b for the
-  // cache; the 2026-10-14 revival for the menu music), so a profile that stores `false` differs from
-  // the default and is imported like any other choice - which is the point: the player's choice
-  // survives the migration, and a profile that says nothing gets the `true` default.
-  CHECK_EQ(result.stats.imported, 5);
+  // Keep the old target, 4x filtering, explicitly stored 720p resolution and
+  // the DLC Menu Songs choice. The retired host cache preference is dropped.
+  CHECK_EQ(result.stats.imported, 4);
   CHECK_EQ(result.stats.translated, 2);
-  CHECK_EQ(result.stats.dropped, 4);      // rename + pool count + fullscreen + monitor
+  CHECK_EQ(result.stats.dropped, 5);      // retired cache + rename + pool count + fullscreen + monitor
   CHECK_EQ(result.stats.preserved, 1);    // input_backend
   CHECK_TRUE(!result.backup.empty());
   CHECK_STR_EQ(ReadFile(result.backup), ReadFile(paths.legacy_profile));

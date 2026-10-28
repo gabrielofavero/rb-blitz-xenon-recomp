@@ -32,12 +32,9 @@
 // host recognises it and answers, and anything that is not ours is forwarded untouched. This
 // reuses the two builtins whose result shape is already safe to produce - `write_file` (no
 // result to build) and `file_exists` (a boolean) - and never introduces a second `Nt*` hook
-// definition (the read/query hooks are owned by src/hooks/menu_filter.cpp and
-// src/hooks/dlc_refresh.cpp).
-//
-// The namespace is matched **exactly**, not by substring: the DLC refresh sentinel
-// (src/hooks/dlc_refresh.cpp) deliberately searches for a name anywhere in the path, which is
-// fine for a one-way ping and is exactly what must *not* carry settings commands.
+// definition (the read/query hooks are owned by src/hooks/menu_filter.cpp).
+// The namespace is matched exactly so unrelated file names cannot carry
+// settings commands.
 //
 // This module is the host half: it turns a namespaced path into a Request, hands it to a sink,
 // and turns the answer into a Response the guest can read back. The guest hook that calls it

@@ -8,6 +8,14 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **Refresh Songs default (2026-10-28):** the main-menu shortcut defaults Off in both the settings
+  schema and its cvar. Existing saved On choices still take effect.
+
+- **Song Library (2026-10-28):** Cache Song Library was retired after matched
+  boots showed no meaningful menu-load gain. Scan Threads remains. Refresh Songs
+  enters native discovery and starts a host rescan on its worker before guest
+  enumeration; the row no longer depends on the persisted cache.
+
 - **Controller mapping (2026-10-28):** Controls lists Controller Presets, Layout, Interface Mapping,
   and Gameplay Mapping. Input Types was removed; keyboard and mouse input stay enabled even with
   legacy off values. Gameplay Mapping lists each action once and displays only its keyboard/mouse
@@ -96,7 +104,7 @@ Part 1 wherever they disagree.
   and real-payload reload coverage are in `tests/ultimate_adapter_tests.cpp`; evidence
   and the pending game restart check are in [architecture.md](architecture.md) part 5 §4.
 
-- **Two rows renamed, the refresh entry back on by default (2026-10-22, owner request):** the main
+- **Two rows renamed, the refresh entry back on by default (2026-10-22, superseded 2026-10-28):** the main
   menu's store entry reads **RhythmVerse** (was *RhythmVerse Customs*) and the refresh row reads
   **Refresh Songs** (was *Refresh Music Library*); the Downloadable Content page's own switch is
   renamed with it. `general.refresh_music_library` now defaults **On** again (it was On when it

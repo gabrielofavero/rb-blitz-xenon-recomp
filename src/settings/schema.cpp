@@ -122,15 +122,14 @@ std::vector<SchemaRow> BuildTable() {
                        "Normal: Show startup logos and 'Press A to Start'. Fast: Skip both and continue automatically to the main menu."));
   }
   // The main menu's refresh entry (owner request, 2026-10-15): the row `splash_dlc` carries
-  // TapRefreshCache while R7 is on, so it is a feature toggle of its own - a player who does not
-  // want the entry can remove it here instead of digging into Interface -> Hidden Items. It is a
+  // TapNativeDiscovery, so it is a feature toggle of its own - a player who does not
+  // want the entry can remove it in Main Menu / Extra Items. It is a
   // restart row like the other menu-shaping ones: the row list is baked when the menu's records
-  // are read (src/hooks/menu_filter.cpp) and in the payload's own locale. On by default since the
-  // owner request of 2026-10-22 (off 2026-10-20 to 2026-10-22): the refresh entry is part of a
-  // shipped install again, and the row here is how a player removes it. The visible row and the
+  // are read (src/hooks/menu_filter.cpp) and in the payload's own locale. Off by default: the
+  // player can enable the shortcut here. The visible row and the
   // main-menu entry are both named "Refresh Songs" (renamed with the same owner request).
   rows.push_back(Row(Make(SettingId::kRefreshMusicLibrary, Category::kGeneral, Provider::kNative,
-                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
                      {"general", "refresh_music_library"}, "main_menu_extra", "Refresh Songs",
                      "Show the main menu entry that re-scans your DLC folders."));
   {
@@ -328,9 +327,7 @@ std::vector<SchemaRow> BuildTable() {
   // The main menu's Download Content row (owner request, 2026-10-20). R7's refresh took the row
   // over (`splash_dlc`), so the retail entry lost its label and action; the payload now restores
   // it as a row of its own. This switch is its visibility, and `true` means hidden: a fresh
-  // install does not offer a store entry that only ever worked online. The row is only offered
-  // while the cache owns `splash_dlc` (src/hooks/settings_payload.cpp), because with the cache off
-  // that retail row is the Download Content entry itself.
+  // install does not offer a store entry that only ever worked online.
   rows.push_back(Row(Make(SettingId::kHideDownloadContent, Category::kInterface, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "hide_download_content"}, "hide_items", "Download content",

@@ -143,32 +143,21 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
       for (const auto& root : roots) CollectLocale(root, &menu_labels);
   }
   menu_labels["splash_options"] = "HELP & OPTIONS";
-  // With R7 on, the downloadable-content row performs the library refresh and is drawn as such
-  // (`SetRefreshRowLabel` builds the label into the locale records below, for the main menu, and
-  // the hide-list label mirrors what the menu really says). The row's identity is the refresh
-  // whenever the cache owns it, even with the refresh entry switched off: what that switch does
-  // is take the row away, not hand its name back to the store entry.
-  const bool dlc_cache_on =
-      rex::cvar::GetFlagByName("enhancements_dlc_cache") == "true";
   // The refresh entry has a switch of its own (owner request, 2026-10-15): with it off, the row
   // is hidden by menu_filter, so the locale does not repaint it either - the label and the row it
   // belongs to are decided by the same answer.
   const bool refresh_row_on =
       rex::cvar::GetFlagByName("enhancements_refresh_music_library") == "true";
-  if (dlc_cache_on) {
-    menu_labels["splash_dlc"] = menu_options::kDlcRowRefreshLabel;
-  }
+  menu_labels["splash_dlc"] = menu_options::kDlcRowRefreshLabel;
   // The restored Download Content row (owner request, 2026-10-20). Its visibility setting is a
   // normal row (`interface.hide_download_content`, true means hidden), and the row that backs it is
-  // only offered while the cache owns `splash_dlc`: with the cache off that retail row *is* the
-  // Download Content entry, so a second one would be a duplicate.
+  // offered because Refresh Songs now owns the retail `splash_dlc` row.
   bool hide_download_content = true;
   if (auto* boot = boot::SettingsBoot::Current(); boot && boot->service()) {
     hide_download_content =
         boot->service()->EffectiveValue(SettingId::kHideDownloadContent).boolean;
   }
-  const bool download_content_row_available = dlc_cache_on;
-  const bool download_content_row = download_content_row_available && !hide_download_content;
+  const bool download_content_row = !hide_download_content;
 
   // The menu-music state, settled before anything that lists the menu's rows (owner feature,
   // 2026-10-14). `shell_music::Configure` has already run - it is called earlier in
@@ -215,10 +204,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
   REXLOG_INFO("settings_menu: the restored Download Content row is {} (download_content_row={}, "
               "visibility={})",
               download_content_row ? "built after splash_dlc"
-                                   : (download_content_row_available
-                                          ? "not built (its visibility row says hidden)"
-                                          : "not built (the cache is off, so splash_dlc is the "
-                                            "Download Content entry itself)"),
+                                   : "not built (its visibility row says hidden)",
               download_content_row ? "true" : "false",
               hide_download_content ? "hidden" : "visible");
 
@@ -329,16 +315,14 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
     } else if (!menu_music_pool) {
       configuration.availability["general.play_current_song"] = "no playable library songs found";
     }
-    if (!dlc_cache_on)
-      configuration.availability["general.refresh_music_library"] = "requires Cache Song Library";
     if (!rhythmverse_setting)
       configuration.availability["interface.hidden_main_menu.rbbz_rhythmverse"] = "Store Access is disabled";
     configuration.trial_mode = boot->service()->EffectiveValue(SettingId::kTarget).text == "demo";
     if (boot->sink()) {
       const auto& hidden = menu_filter::HiddenRows();
       const bool refresh_visible = refresh_row_on &&
-          (!dlc_cache_on || std::find(hidden.begin(), hidden.end(), "splash_dlc") == hidden.end());
-      boot->sink()->SeedMenuVisibility(hidden, refresh_visible, dlc_cache_on);
+          std::find(hidden.begin(), hidden.end(), "splash_dlc") == hidden.end();
+      boot->sink()->SeedMenuVisibility(hidden, refresh_visible);
     }
     configuration.background_music_navigation =
         boot->service()->EffectiveValue(SettingId::kBackgroundMusicNavigation).boolean;
@@ -359,7 +343,6 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
     }
     configuration.menu_music_songs = menu_music_songs;
     configuration.download_content_row = download_content_row;
-    configuration.download_content_row_available = download_content_row_available;
     // Shortcut settings have a fixed inventory; these boot values control the actual menu rows.
     configuration.refresh_row_on = refresh_row_on;
     configuration.has_dlc_library = has_dlc_library;
@@ -374,8 +357,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
       rex::cvar::GetFlagByName("startup_mode") == "fast" ||
       rex::cvar::GetFlagByName("song_load_recovered") == "true";
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
-                        ultimate::Provider().Active(), dlc::CacheServedThisBoot(),
-                        dlc_cache_on && refresh_row_on, &build_notes, menu_filter::HiddenRows(),
+                        ultimate::Provider().Active(), refresh_row_on, &build_notes, menu_filter::HiddenRows(),
                         skip_startup_logos))
     return fail();
   if (skip_startup_logos) REXLOG_INFO("startup: native logo playlist skipped for this boot");
@@ -399,9 +381,9 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
     if (ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &error)) {
       for (const auto& node : roots) CollectLocale(node, &labels);
       const auto at = labels.find(menu_options::kEnumeratingContentKey);
-      REXLOG_INFO("settings_menu: discovery locale '{}' key='{}' value='{}' host_cache_hit={}",
+      REXLOG_INFO("settings_menu: discovery locale '{}' key='{}' value='{}'",
                   locale, menu_options::kEnumeratingContentKey,
-                  at == labels.end() ? "(missing)" : at->second, dlc::CacheServedThisBoot());
+                  at == labels.end() ? "(missing)" : at->second);
     }
   }
   Bytes part;

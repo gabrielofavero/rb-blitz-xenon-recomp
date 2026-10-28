@@ -312,7 +312,13 @@ MigrationResult Migrate(const Profile& legacy, Store& store, const PathEntry& ex
     }
 
     bool recognised = true;
-    if (key == "enhancements_menu_dlc_songs") {
+    if (key == "dlc_scan_threads") {
+      int64_t value = 0;
+      if (ParseLegacyInt(setting, &value)) {
+        if (value < 1) value = 1;
+        Import(store, SettingId::kDlcScanThreads, IntValue(static_cast<int32_t>(value)), &result);
+      }
+    } else if (key == "enhancements_menu_dlc_songs") {
       // R9's row, revived as a real setting on 2026-10-14 with a compiled default of *on*. The
       // compiled default only decides a boot whose file says nothing; a legacy profile that carries
       // the key keeps its value, so the player's old

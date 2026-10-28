@@ -98,21 +98,19 @@ REXCVAR_DECLARE(bool, mouse_ui_nav);
 // The refresh entry's own row (owner request, 2026-10-15): while R7 owns the main menu's
 // downloadable-content row, that row is also something a player may not want in the menu, and
 // removing it used to mean digging into Interface -> Hidden Items. This cvar is the carrier of
-// the in-game "Refresh Songs" row on the Downloadable Content page; with it off, the menu's row
-// is hidden and the library is only re-scanned when its fingerprint changes at boot.
-// On by default since the owner request of 2026-10-22 (it was off from 2026-10-20): the cache
-// remains on and a fresh install carries the refresh entry in its main menu.
-REXCVAR_DEFINE_BOOL(enhancements_refresh_music_library, true, "Enhancements",
+// the in-game "Refresh Songs" row under Main Menu / Extra Items; with it off, the menu's row
+// is hidden while the boot still scans the library normally.
+// Off by default; players can enable the shortcut in Main Menu / Extra Items.
+REXCVAR_DEFINE_BOOL(enhancements_refresh_music_library, false, "Enhancements",
                     "R7's refresh entry: show the main menu's Refresh Songs row, which re-scans "
-                    "the DLC folders and re-runs the discovery pass. On by default. Off hides "
-                    "the row; the boot's own scan is unaffected (a changed library is always "
-                    "re-read). Needs enhancements_dlc_cache.")
+                    "the DLC folders and re-runs the discovery pass. Off by default. Off hides "
+                    "the row; the boot's own scan is unaffected.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(enhancements_dlc_uncap_enumeration, true, "Enhancements",
                     "Temporarily disable VSync while content loads, restoring the player's "
-                    "value when the usable main menu is current. On by default and independent "
-                    "of the host cache setting. Off keeps the player's pacing throughout.")
+                    "value when the usable main menu is current. On by default. Off keeps "
+                    "the player's pacing throughout.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(enhancements_force_controller_scheme, false, "Enhancements",

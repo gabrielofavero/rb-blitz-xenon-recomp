@@ -32,9 +32,7 @@ namespace rb_blitz::dlc {
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
 
 // R7's in-game refresh, asked for by the main menu's last row. This is what the in-game
-// trigger calls: it runs from a filesystem hook that has no arguments, and it does
-// nothing unless the R7 toggle is on. Cheap to call - the toggle and the pointers are
-// read without touching any registry - so a hook may call it freely.
+// native discovery hook calls. It uses the configuration captured at boot.
 //
 // It *starts* the refresh and returns. The scan reads every package in the library
 // (measured 31 s on a 1,402-package library, docs/plans/finished/2026-10-10-song-cache-plan.md §9.5), so it
@@ -44,12 +42,11 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 // ignored, so a trigger that fires more than once cannot queue a second scan.
 void RefreshConfigured();
 // P5 of the RhythmVerse store plan: the same library scan and publish, asked for by a verified
-// store install. It deliberately ignores the R7 cache gate (an install is not a cache feature)
-// and does not wait: the boot's resolved flat roots are re-walked on a worker and the result is
+// store install. It does not wait: the boot's resolved flat roots are re-walked on a worker and the result is
 // handed over by PublishPendingRefresh() on a guest thread. A structured root is not covered -
 // its package list is captured at boot - so an install into one is discovered by the next boot.
 void RefreshAfterStoreInstall();
-// Serializes the restart barrier with refresh worker creation and waits for cache writes.
+// Serializes the restart barrier with refresh worker creation.
 void DrainRefreshForRestart();
 
 // Hands the content manager a refresh a worker has finished, and does nothing at all when
@@ -61,12 +58,9 @@ void DrainRefreshForRestart();
 //
 // Two callers, both guest threads: the main menu's own per-frame music poll
 // (src/hooks/shell_music.cpp), which is the only hook that runs every frame while the menu
-// - the screen the refresh row lives on - is up; and the file-call hooks
-// (src/hooks/dlc_refresh.cpp). The measured shape (docs/guides/dlc.md §4.2): the scan finishes on
-// the worker and the publish lands on the next frame, ~10 ms later; the file hooks alone
-// were not enough, because the main menu makes no file call at all. A refresh that
-// finishes while the menu is not drawing is published when it next is - the cache file is
-// rewritten either way, which is the half the next boot reads.
+// - the screen the refresh row lives on - is up; and the native discovery barrier
+// (src/hooks/dlc_refresh.cpp). A refresh that finishes while the menu is not
+// drawing is published when the connect panel next reaches the barrier.
 void PublishPendingRefresh();
 
 // Nonblocking discovery barrier. Publish a completed scan on the guest thread and
@@ -74,17 +68,8 @@ void PublishPendingRefresh();
 // before creating any aggregate enumerators (which snapshot the package list).
 bool RefreshReadyForDiscovery();
 
-// Whether an in-game refresh can happen at all: the R7 toggle is on and Configure() has
-// run. A hook checks this before it does any work - including reading the path a call
-// names - so a run with the toggle off pays nothing.
+// Whether Configure() has run, for callers that may arrive early.
 bool RefreshArmed();
-
-// True when this boot's library enumeration came out of the persisted cache rather than
-// a scan, i.e. R7 was on and the fingerprint proved the tree unchanged. The menu filter
-// reads it to pick the label the discovery screen draws: the title's own "Discovering
-// Downloadable Content" when the walk is real, and a "loading cache" label when the host
-// answered from the file it wrote last boot. False before Configure() and with R7 off.
-bool CacheServedThisBoot();
 
 // Registered flat and structured package count, for diagnostics. The progress
 // model reads the actual guest enumerators, which also contain writable/user content.

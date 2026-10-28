@@ -6,8 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -175,4 +173,6 @@ inline bool ComputeTreeFingerprint(const std::vector<std::filesystem::path>& roo
   out->file_count = entries.size();
   return true;
 }
+
+}  // namespace rb_blitz::fs
 

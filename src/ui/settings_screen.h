@@ -105,16 +105,14 @@ struct MenuConfiguration {
   bool background_music_navigation = true;
   std::vector<std::string> menu_music_songs;
   // The restored Download Content row (owner request, 2026-10-20). `download_content_row` is true
-  // when this boot builds the row (the visibility setting says visible *and* R7 owns
-  // `splash_dlc`, so the retail row's label and action are free); `download_content_row_available`
-  // says whether R7 owns `splash_dlc`. With the cache off that retail row is Download Content;
-  // the same visibility preference controls either identity without a duplicate settings row.
+  // when this boot builds the row (the visibility setting says visible).
+  // Refresh Songs owns the retail `splash_dlc` action, so Download Content uses
+  // its restored row.
   bool download_content_row = false;
-  bool download_content_row_available = false;
   bool trial_mode = false;
   bool controller_layout_enabled = false;
   // The refresh shortcut's visibility. Its control stays reachable under Main Menu / Extra Items.
-  bool refresh_row_on = true;
+  bool refresh_row_on = false;
   // The RhythmVerse entry (RhythmVerse plan P1): true when the boot builds the row, i.e.
   // when the store's master switch was on. Its case re-checks the live gate, so switching the
   // store off stops the press without a restart.

@@ -263,7 +263,6 @@ rex::system::xam::ContentManager* ContentManagerOf(rex::Runtime* runtime) {
 // What the boot path resolved, kept so the in-game refresh - which runs from a
 // filesystem hook with no arguments - can rebuild the same sources.
 rex::Runtime* g_runtime = nullptr;
-std::filesystem::path g_game_data_root;
 
 // Everything the refresh needs, resolved once in Configure() and read from there by both
 // paths. The refresh is triggered from a guest thread, and this project's rule is that a
@@ -389,7 +388,6 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     return;
   }
   g_runtime = runtime;
-  g_game_data_root = game_data_root;
 
   std::error_code ec;
   const std::filesystem::path root =
@@ -634,24 +632,18 @@ void RefreshConfigured() {
     if (g_runtime == nullptr) {
       return;
     }
-    {
-      if (g_library_roots.empty()) {
-        REXLOG_WARN("dlc: a refresh was asked for but no DLC library is configured, nothing to "
-                    "scan");
-        return;
-      }
-      // One at a time. A second ask while the scan is in flight rides the first one rather than
-      // queueing a second scan of the same tree. The discovery barrier covers the
-      // worker either way
-      // (docs/plans/finished/2026-10-10-song-cache-plan.md §9.5).
-      if (!g_refresh_state.Begin()) {
-        REXLOG_INFO("dlc: a refresh is already running; this ask rides it");
-      } else {
-        // The previous worker finished before Begin() above succeeded, so this joins an idle
-        // thread rather than waiting for work. The reason names the *entry*, not one caller: the
-        // main menu's row and P9-14's download toast both arrive through the same sentinel.
-        StartRefreshWorker("the song refresh entry");
-      }
+    if (g_library_roots.empty()) {
+      REXLOG_WARN("dlc: a refresh was asked for but no DLC library is configured, nothing to scan");
+      return;
+    }
+    if (g_refresh_state.Pending() || g_refresh_publishing.load()) {
+      REXLOG_INFO("dlc: a completed refresh is awaiting publication; native discovery uses it");
+      return;
+    }
+    if (!g_refresh_state.Begin()) {
+      REXLOG_INFO("dlc: a refresh is already running; this ask rides it");
+    } else {
+      StartRefreshWorker("native song discovery");
     }
   }
   // Return to the frame immediately. ServerConnectPanel defers its enumeration
@@ -659,8 +651,7 @@ void RefreshConfigured() {
 }
 
 // P5's half of OQ6: a verified store install changed a flat library, so the host scans it and
-// hands the result to the content manager exactly as R7's row does - but *without* the R7 cache
-// gate, because the store's install is not a cache feature. The guest's own discovery is still
+// hands the result to the content manager exactly as R7's row does. The guest's own discovery is still
 // not started from here (the store says a restart is required until that path is proven); what
 // this guarantees is that a later menu-boundary publish and the next boot both see the package.
 void RefreshAfterStoreInstall() {

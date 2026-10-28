@@ -429,6 +429,7 @@ void ChildArgumentsAreAnAllowlist() {
   CHECK_TRUE(rebuilt[2] == "--log_file=D:\\My Logs\\boot.log");
   CHECK_TRUE(rebuilt[3] == "--resolution_scale=2");
   CHECK_TRUE(IsRetiredArgument("--refresh_dlc_cache"));
+  CHECK_TRUE(IsRetiredArgument("--enhancements_dlc_cache=true"));
   CHECK_FALSE(IsRetiredArgument("--resolution_scale=2"));
 
 }
@@ -694,11 +695,10 @@ void RealProcessBootstrapWait() {
   CHECK_TRUE(report.error.empty());
   // It waited: the parent's sleep is 1200 ms and the child cannot have finished before it.
   CHECK_EQ(report.elapsed_ms >= 900, true);
-  // The one-shot and transient arguments did not survive the bootstrap; the explicit developer
-  // toggle did (it is a description of this run, not a "this once").
+  // The one-shot and retired cache switches did not survive the bootstrap.
   CHECK_EQ(report.kept_refresh, false);
   CHECK_EQ(report.kept_handoff, false);
-  CHECK_EQ(report.arguments, 2);  // the exe and the surviving developer argument
+  CHECK_EQ(report.arguments, 1);  // only the exe remains
 }
 
 void RealProcessIdentityMismatchStartsImmediately() {

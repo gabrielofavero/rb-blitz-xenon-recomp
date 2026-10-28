@@ -68,7 +68,7 @@ target = 'common'
 $exeArgs = @("--game_data_root=$game", '--fullscreen=false',
              "--user_data_root=$scratch", "--launcher_profile=$profilePath",
              "--dlc_library=$empty", "--dlc_root=$empty",
-             '--enhancements_dlc_cache=true', '--enhancements_dlc_uncap_enumeration=true',
+             '--enhancements_dlc_uncap_enumeration=true',
              "--log_file=$log", '--mouse_native_trace=true', '--input_backend=none',
              '--no-settings_help_overlay')
 $exeArgs | Set-Content (Join-Path $outDir 'argv.txt')

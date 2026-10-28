@@ -1509,9 +1509,8 @@ bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string*
            cmd({sym("do"), BindCurrentOffer(),
                 IfCurrentOffer(cmd({sym("if"), HasCurrentJob(), state_switch}))})});
   const Node poll = member("poll", {poll_body});
-  // P9-14's A: the main menu's own refresh, in that row's own two statements (the discovery page
-  // and the sentinel `src/hooks/dlc_refresh.cpp` answers) and in that row's own order - close,
-  // navigate, ask - as **siblings**, because that is the shape the row measured a screen change to
+  // P9-14's A: the main menu's native discovery route, in that row's order - close,
+  // navigate - as **siblings**, because that is the shape the row measured a screen change to
   // survive: a `do` around them loses everything after the navigation (2026-10-15). Each statement
   // carries the `installed` guard on its own, so a cancelled or failed job has no action behind the
   // caption it does not draw and no partial sequence can run.
@@ -1519,8 +1518,6 @@ bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string*
   const Node refresh_navigate =
       cmd({sym("if"), installed,
            cmd({sym("ui"), sym("goto_screen"), sym(menu_options::kRefreshRowDiscoverScreen)})});
-  const Node refresh_scan =
-      cmd({sym("if"), installed, FileExistsCommand(menu_options::kRefreshSentinelPath)});
   // B and Back: the transfer never outlives the press. The cancel goes first, then the close (the
   // search modal's own two statements), and after a terminal state only the close remains. Every
   // other action is consumed - the shape P9-11 measured, whose `(int 1)` return is the method's
@@ -1530,7 +1527,7 @@ bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string*
   const Node buttons = member("BUTTON_DOWN_MSG",
       {cmd({sym("switch"), Node::Var("action"),
             Node::Array({sym("kAction_Cancel"), cancel_case}),
-            Node::Array({sym("kAction_Confirm"), refresh_close, refresh_navigate, refresh_scan})}),
+            Node::Array({sym("kAction_Confirm"), refresh_close, refresh_navigate})}),
        Node::Int(1)});
   // Leaving the screen with the popup up is a cancel as well (`active` and not `terminal`).
   const Node exit_body = cmd({sym("if"), running, CancelWrite()});
@@ -1672,7 +1669,7 @@ bool AddLibraryManagement(std::vector<ui::dtb::Node>* roots, std::string* why) {
       text("continue.lbl", "<alt1>A</alt1> Delete   <alt1>B</alt1> Cancel"), show});
   const Node show_refresh = member("show_refresh", {
       cmd({sym("set"), mode, Node::Int(4)}),
-      text("error.lbl", "Songs were deleted. Refresh the song cache before playing. Skipping the refresh could cause crashes."),
+      text("error.lbl", "Songs were deleted. Use Refresh Songs before playing. Skipping discovery could cause crashes."),
       text("continue.lbl", "<alt1>A</alt1> Refresh   <alt1>B</alt1> Ignore"), show});
   const Node delete_write = cmd({sym("do"), BindCurrentOffer(), IfCurrentOffer(
       cmd({sym("if"), HasCurrentJob(), cmd({sym("write_file"),
@@ -1683,7 +1680,7 @@ bool AddLibraryManagement(std::vector<ui::dtb::Node>* roots, std::string* why) {
       text("error.lbl", "Deleting installed package(s)..."), text("continue.lbl", "Please wait"),
       delete_write});
   const Node failed = cmd({sym("do"), cmd({sym("set"), mode, Node::Int(3)}),
-      text("error.lbl", "Could not delete every matching package. A file may be in use or read-only. Any removed songs still require a cache refresh."),
+      text("error.lbl", "Could not delete every matching package. A file may be in use or read-only. Refresh Songs to update the library."),
       text("continue.lbl", "<alt1>B</alt1> Close")});
   const Node delete_state = cmd({sym("if"), HasCurrentJob(),
       cmd({sym("if"), JobStateQuery("deleted"), close}),
@@ -1698,7 +1695,6 @@ bool AddLibraryManagement(std::vector<ui::dtb::Node>* roots, std::string* why) {
               cmd({sym("if"), is_mode(4), WriteCommand("rbbz-store/library/refresh")}),
               cmd({sym("if"), is_mode(4), cmd({sym("ui"), sym("goto_screen"),
                   sym(menu_options::kRefreshRowDiscoverScreen)})}),
-              cmd({sym("if"), is_mode(4), FileExistsCommand(menu_options::kRefreshSentinelPath)}),
               cmd({sym("if"), is_mode(1), call("confirm_delete")})}),
           Node::Array({sym("kAction_Cancel"),
               cmd({sym("if_else"), is_mode(4), cmd({sym("do"), dismiss, close, back}),

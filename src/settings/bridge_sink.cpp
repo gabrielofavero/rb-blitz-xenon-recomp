@@ -385,9 +385,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       staged_[id] = std::move(value);
       // Refresh Songs has one visible preference. Clear the competing legacy hide-list bit in
       // the same transaction, preserving every other hidden row (including legacy defaults).
-      const bool refresh_owns_row = refresh_owns_dlc_row_ ||
-          CurrentValue(SettingId::kCacheDlcLibrary).boolean;
-      if (id == SettingId::kRefreshMusicLibrary && refresh_owns_row) {
+      if (id == SettingId::kRefreshMusicLibrary) {
         Value hidden = CurrentValue(SettingId::kHiddenMainMenu);
         hidden.kind = ValueKind::kList;
         std::erase(hidden.list, "splash_dlc");
@@ -404,8 +402,7 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       }
       // A saved explicit list remains authoritative even when it happens to equal the old
       // compiled defaults. Keep the legacy master in sync rather than exposing another switch.
-      if (id == SettingId::kHiddenMainMenu ||
-          (id == SettingId::kRefreshMusicLibrary && refresh_owns_row)) {
+      if (id == SettingId::kHiddenMainMenu || id == SettingId::kRefreshMusicLibrary) {
         Value master;
         master.kind = ValueKind::kBool;
         master.boolean = true;
@@ -902,13 +899,10 @@ void ServiceSink::SeedLocal(std::string token, WireValue value) {
   local_[std::move(token)] = std::move(value);
 }
 
-void ServiceSink::SeedMenuVisibility(std::vector<std::string> hidden, bool refresh_visible,
-                                    bool refresh_owns_dlc_row) {
-  refresh_owns_dlc_row_ = refresh_owns_dlc_row;
+void ServiceSink::SeedMenuVisibility(std::vector<std::string> hidden, bool refresh_visible) {
   Value selection;
   selection.kind = ValueKind::kList;
   selection.list = std::move(hidden);
-  if (!refresh_owns_dlc_row) std::erase(selection.list, "splash_dlc");
   // Preserve the legacy refresh bit until the refresh preference itself is edited. Editing
   // another shortcut must not accidentally reveal a refresh entry hidden by an older config.
   menu_baseline_[SettingId::kHiddenMainMenu] = std::move(selection);

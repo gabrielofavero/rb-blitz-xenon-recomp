@@ -160,6 +160,26 @@ void TestStartupRoundTrip() {
   }
 }
 
+void TestRefreshSongsDefaultAndOverride() {
+  BeginCase("Refresh Songs: fresh profile defaults off and an explicit on choice survives reload");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  Service service(paths);
+  service.Boot(nullptr, PathEntry{}, nullptr);
+  service.SetCapabilities(Capabilities());
+  constexpr auto id = SettingId::kRefreshMusicLibrary;
+  CHECK_FALSE(service.EffectiveValue(id).boolean);
+  CHECK_TRUE(service.EffectiveSource(id) == Source::kCompiledDefault);
+  CHECK_TRUE(CvarForSetting(id) == "enhancements_refresh_music_library");
+
+  const auto txn = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(txn, id, BoolV(true), service.capability_revision()).ok);
+  CHECK_TRUE(service.Commit(txn).status == CommitStatus::kSaved);
+  Service reloaded(paths);
+  reloaded.Boot(nullptr, PathEntry{}, nullptr);
+  CHECK_TRUE(reloaded.EffectiveValue(id).boolean);
+}
+
 void TestControllerSchemeRoundTrip() {
   BeginCase("controller layout: stable id persists and an absent package cannot be selected");
   schema::SetControllerSchemes({{"retail", "Xbox 360"}, {"one-glyph", "One Glyph"}});
@@ -386,8 +406,8 @@ void TestDurableEditReload() {
   // Stage *the other* value of the restart row: its compiled default is `true` (it took the setting
   // over from Controller Settings flag, P11b) and a commit that writes the value a row already holds is
   // `kNoChanges` - so staging `true` here would leave the session with nothing to save.
-  const bool cache_now = service.EffectiveValue(SettingId::kCacheDlcLibrary).boolean;
-  CHECK_TRUE(service.Set(mixed, SettingId::kCacheDlcLibrary, BoolV(!cache_now),
+  const bool prompts_now = service.EffectiveValue(SettingId::kHideOfflinePrompts).boolean;
+  CHECK_TRUE(service.Set(mixed, SettingId::kHideOfflinePrompts, BoolV(!prompts_now),
                          service.capability_revision()).ok);
   const CommitResult mixed_commit = service.Commit(mixed);
   CHECK_TRUE(mixed_commit.status == CommitStatus::kSaved);
@@ -828,6 +848,7 @@ void TestCvarVocabulary() {
 int main() {
   TestControllerSchemeRoundTrip();
   TestStartupRoundTrip();
+  TestRefreshSongsDefaultAndOverride();
   TestLoadGuardRoundTrip();
   TestHideAchievementsRoundTrip();
   TestMusicNavigationRoundTrip();

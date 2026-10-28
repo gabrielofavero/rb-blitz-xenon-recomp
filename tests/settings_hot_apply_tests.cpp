@@ -91,7 +91,7 @@ Value Enum(std::string token) {
 // owns are drawn at boot, so re-promoting it needs a measurement of both of them changing live.
 constexpr SettingId kRowsThatMustStayRestart[] = {
     SettingId::kBackgroundMusicNavigation,
-    SettingId::kTarget,     SettingId::kHideHud,     SettingId::kCacheDlcLibrary,
+    SettingId::kTarget,     SettingId::kHideHud,     SettingId::kHideOfflinePrompts,
     SettingId::kResolution, SettingId::kRenderer,   SettingId::kAntiAliasing,
     SettingId::kFiltering,  SettingId::kRhythmVerse, SettingId::kShowMessages, SettingId::kShowRecommendations,
 };
@@ -267,14 +267,14 @@ void ApplyReportsWhatHappened() {
   HotApplyPlan plan;
   plan.live[SettingId::kVsync] = Bool(false);       // applied
   plan.live[SettingId::kHideHud] = Bool(true);      // the applier refuses the value
-  plan.live[SettingId::kCacheDlcLibrary] = Bool(true); // the write fails
+  plan.live[SettingId::kHideOfflinePrompts] = Bool(true); // the write fails
   plan.live[SettingId::kFiltering] = Bool(true);    // no applier at all
   plan.pending_restart.push_back(SettingId::kTarget);
 
   ScriptedApplier applier;
   applier.Know(SettingId::kVsync);
   applier.Refuse(SettingId::kHideHud, "settings.not_reloadable");
-  applier.Refuse(SettingId::kCacheDlcLibrary, "");  // an empty reason is still a failure
+  applier.Refuse(SettingId::kHideOfflinePrompts, "");  // an empty reason is still a failure
 
   const std::vector<HotApplyOutcome> outcomes = rb_blitz::settings::ApplyHotPlan(plan, &applier);
   CHECK_EQ(outcomes.size(), 4);
@@ -284,7 +284,7 @@ void ApplyReportsWhatHappened() {
   }
   CHECK_EQ(status[SettingId::kVsync] == HotApplyStatus::kApplied, true);
   CHECK_EQ(status[SettingId::kHideHud] == HotApplyStatus::kRefused, true);
-  CHECK_EQ(status[SettingId::kCacheDlcLibrary] == HotApplyStatus::kFailed, true);
+  CHECK_EQ(status[SettingId::kHideOfflinePrompts] == HotApplyStatus::kFailed, true);
   CHECK_EQ(status[SettingId::kFiltering] == HotApplyStatus::kNoApplier, true);
 
   // Only the applied row leaves the restart set. Everything else - including the three hot rows
@@ -302,7 +302,7 @@ void ApplyReportsWhatHappened() {
   };
   CHECK_EQ(contains(SettingId::kVsync), false);
   CHECK_TRUE(contains(SettingId::kHideHud));
-  CHECK_TRUE(contains(SettingId::kCacheDlcLibrary));
+  CHECK_TRUE(contains(SettingId::kHideOfflinePrompts));
   CHECK_TRUE(contains(SettingId::kFiltering));
   CHECK_TRUE(contains(SettingId::kTarget));
 

@@ -40,7 +40,7 @@ namespace rb_blitz::settings::menu_compat {
 // screen by P5b. It is never hidden - see the header comment.
 inline constexpr char kProtectedMenuRow[] = "splash_options";
 
-// The row that carries the DLC library refresh while R7 is on (`TapRefreshCache`).
+// The row that enters native song discovery (`TapNativeDiscovery`).
 inline constexpr char kRefreshMenuRow[] = "splash_dlc";
 
 // The old menu-song-count setting stays retired. The session now has no fixed
@@ -56,14 +56,10 @@ struct HideRequest {
   std::vector<std::string> selected;   // meaningful when selection_explicit
   std::vector<std::string> defaults;   // the compiled default selection
   std::string protected_row = kProtectedMenuRow;
-  // R7: `splash_dlc` performs the library refresh, so hiding it takes the only in-menu refresh
-  // away. The *default* selection therefore leaves it alone; an explicit user choice may hide it,
-  // and the caller is told the refresh lost its row.
-  bool refresh_row_owns_refresh = false;
   // The main menu's refresh entry (owner request, 2026-10-15): `general.refresh_music_library`.
   // With it off the row goes - deliberately, with the master on or off, and without the
   // "needs another row" note an accidental hiding raises.
-  bool refresh_row_enabled = true;
+  bool refresh_row_enabled = false;
 };
 
 struct HideDecision {

@@ -93,7 +93,7 @@ $logDir = $outDir
 $exeArgs = @("--game_data_root=$game", '--mnk_mode=1', '--fullscreen=false',
              "--user_data_root=$scratch", "--launcher_profile=$launcherToml",
              "--dlc_library=$empty", "--dlc_root=$empty",
-             '--enhancements_dlc_cache=true', '--enhancements_dlc_uncap_enumeration=true',
+             '--enhancements_dlc_uncap_enumeration=true',
              "--log_file=$(Join-Path $outDir 'game.log')", '--probe_gameplay=true', '--mouse_native_trace=true',
              "--probe_gameplay_bypass=$($Bypass.IsPresent.ToString().ToLower())",
              "--probe_gameplay_inject=$(($Inject -or $Spam).ToString().ToLower())",

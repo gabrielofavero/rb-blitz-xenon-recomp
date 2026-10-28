@@ -44,7 +44,7 @@ HideDecision DecideHiddenRows(const HideRequest& request) {
   // The entry toggle is not the hide list: it is the refresh feature's own row, so it applies
   // whether or not the hide master is on, and it is the player's own choice rather than a loss to
   // report. Everything below either adds the row to `hidden` or leaves it to the selection.
-  const bool refresh_row_off = request.refresh_row_owns_refresh && !request.refresh_row_enabled;
+  const bool refresh_row_off = !request.refresh_row_enabled;
   if (!request.master) {
     // "Off disables filtering while preserving checked choices": the selection is not consulted at
     // all, and the caller keeps whatever it stored for the next time the master goes on.
@@ -77,7 +77,7 @@ HideDecision DecideHiddenRows(const HideRequest& request) {
       PushUnique(&decision.refused, name);
       continue;
     }
-    if (request.refresh_row_owns_refresh && name == kRefreshMenuRow) {
+    if (name == kRefreshMenuRow) {
       if (refresh_row_off) {
         // Switched off in Help & Options: the row goes, once, and this is not the "refresh lost a
         // row" case - the player asked for exactly this.
