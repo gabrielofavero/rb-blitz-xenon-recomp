@@ -909,7 +909,7 @@ it, so the app's values already survive.
 | --- | --- | --- |
 | Target | `ultimate_mode` + `license_mask`, as a pair | Licence masks are the game's own (`1` purchased, `0` trial); an explicit `--ultimate_mode` outranks the pair and the row is reported overridden (the merged-menu arm passes one) |
 | Renderer | `gpu_backend` | Written before `OnPreSetup` reads it — the reason the renderer row is applied at step 1 |
-| DLC group | `enhancements_dlc_cache`, `dlc_scan_threads`, `enhancements_menu_dlc_songs` | Read by the mod's own `Configure()` calls later in the same hook |
+| DLC group | `dlc_scan_threads`, `enhancements_refresh_music_library`, `enhancements_menu_dlc_songs` | Read by the mod's own `Configure()` calls later in the same hook; the host cache setting was retired in 2026-10-28 |
 | Interface group | `enhancements_skip_offline_dialog`, `enhancements_hide_menu_options`, `enhancements_hidden_menu_options` | The hidden-menu list is written *including the explicitly empty list* — the product spelling §3.5 asks for, which a command line cannot express (§5.4) |
 | V-Sync, Filtering | `vsync`, `anisotropic_override` | Written at step 3, because those cvars belong to `rexgpu-xenos.dll`; the deferred write is reported and verified like any other |
 | Resolution | **not applied** | The exact-render route is P4's Variant B guest-height hook (not compiled in) and the plugin's `resolution_scale` cannot be set from a config-rank write (P2); the value is stored for the boot that has the hook |
@@ -1426,7 +1426,7 @@ claim that a commit reaches the running game.
   symbol for either (the same reason R7 reads `vsync` by name).
 * **On a host thread.** The commit that triggers an apply arrives on the *guest* thread — it is the guest's
   own `write_file` — and a guest thread must not touch the cvar registry
-  ([song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §7). `Apply` runs the write on a short-lived thread and
+  ([song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §7). `Apply` runs the write on a short-lived thread and
   **joins** it: R7 goes async because it is on the frame path, whereas a settings commit already writes a
   file synchronously, and joining is what lets the seam answer honestly.
 * A row it does not know is reported as `kNoApplier` by the seam, never guessed.

@@ -167,8 +167,8 @@ the P8 record). What that adds to the rules above:
   ([`docs/engine/diagnostics.md`](../engine/diagnostics.md), the plan's P5/P8 records) are runs of
   that older rule, not descriptions of the current one.
 - **A transfer is staged outside every enumerator.** `<resolved root>/.rbbz-store-staging/` is
-  skipped by the flat walk, the cache fingerprint and the structured scan, so a half-written
-  `CON ` can neither be enumerated nor invalidate the cache on every chunk. The file is flushed,
+  skipped by the flat walk and the structured scan, so a half-written
+  `CON ` cannot be enumerated. The file is flushed,
   its STFS identity checked, then renamed into place; a cancelled or failed transfer leaves
   nothing behind and no receipt row.
 - **The Downloaded mark reads the packages, not a receipt.** The store mounts every package
@@ -177,14 +177,12 @@ the P8 record). What that adds to the rules above:
   or a song inside a multi-song pack, matches without ever having been downloaded here. A receipt
   (`<user_data_root>/store/downloads.tsv`) is transfer history only, and an index that is still
   building answers "unknown", never "not installed".
-- **The install's own refresh runs at the commit; the toast's A Refresh is what makes the running
-  title list the song.** `dlc::RefreshAfterStoreInstall()` re-walks the flat roots (an install is
-  not a cache feature, so R7's gate does not apply) and the host hands the fresh list to the title
-  on the next menu frame. The running title's own discovery is the title's: the details page's
-  download popup offers **A Refresh** on its installed toast, which runs the main menu row's own two
-  statements - `{ui goto_screen server_connect_screen}` and the `songcache:/rbbz_dlc_refresh`
-  sentinel - so the scan publishes before the discovery pass enumerates and the song is listed
-  without a restart. **B** closes the toast alone, and that route's song is listed on the next start
+- **The install's own refresh runs at commit; the toast's A Refresh enters native discovery.**
+  `dlc::RefreshAfterStoreInstall()` re-walks the flat roots on a worker and hands the fresh list to
+  the title. The details page's installed toast offers **A Refresh**, which enters
+  `server_connect_screen`. The native discovery pass waits for the worker rescan before enumerating
+  packages, so the new song can be listed without a restart. **B** closes the toast alone, and
+  that route's song is listed on the next start
   (the acceptance harness's `Install` leg measures that boot). The popup's sentence never claims
   more than *Downloaded 'Artist - Song'.*; the refresh is what it offers next. *(The shipped payload,
   its tests and the harness's steps landed 2026-10-24; the boot that reads the song on Your Songs
@@ -197,10 +195,8 @@ the P8 record). What that adds to the rules above:
 | `--dlc_root`, or `dlc_root` in `rb_blitz.toml` | `<game_data_root>/dlc` | root of the layout in §2; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library`, or `dlc_library` in `rb_blitz.toml` | *(empty)* | `;`-separated folders of §2.1; a relative value resolves against the game data root; changing it needs a relaunch |
 | `--dlc_library_content_type` | *(empty)* | present **every** library package under this 8-hex-digit content type, instead of §2.1's saved-game → marketplace adaptation; changing it needs a relaunch |
-| `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers: `1` (the default) reads them on the calling thread, `0` uses the machine's core count (capped at 8), and any other value is that many workers (§4.1). Controller Settings' *DLC scan threads* row bounds its slider by the machine's processor count. The scan's *result* is the same at any count; only how long a cold scan takes changes. Changing it needs a relaunch |
-| `--enhancements_dlc_cache`, or `[enhancements] dlc_cache` in `rb_blitz.toml` | on | Persist the flat library content list and reuse it while roots, type and fingerprint match (§4.4); changing it needs a relaunch. Mount delay and loading-phase pacing are independent. |
+| `--dlc_scan_threads` | `1` | threads that read a §2.1 library's package headers on boot and refresh. The settings row offers 1 through the available logical processor count (capped at 32). The scan result is independent of the thread count. Changing it needs a relaunch. |
 | `--enhancements_refresh_music_library`, or `[enhancements] refresh_music_library` in `rb_blitz.toml` | off (2026-10-28) | The main menu's refresh entry's own switch: the visible row is Help & Options → Main Menu → Extra Items → *Refresh Songs* (`general.refresh_music_library`). On shows that menu row; off hides it, the boot's scan is unaffected, and the Interface → Main Menu mirror stops offering a visibility row for it too. Changing it needs a relaunch. The retail *Download Content* entry is restored as a separate row, hidden by default (`interface.hide_download_content`). |
-| `--refresh_dlc_cache` | off | R7: ignore the persisted enumeration this boot, re-scan the libraries and rewrite it. A one-shot read at boot; only meaningful with the toggle on. The main menu's *Refresh Songs* row asks for the same thing in a running title, and also re-enters the title's own discovery pass (§4.1) |
 
 The sources are read-only by construction. Enumeration and opening resolve into them,
 and every write path in the content manager (create, thumbnail, install, delete)
@@ -230,7 +226,25 @@ it is writable, marketplace content in it belongs under `0000000000000000`, and
 `--user_data_root` moves it. The DLC root exists so that game packages share neither
 that directory nor its write access.
 
-## 4.1 The library enumeration cache (R7)
+## 4.1 Current library scan and Refresh Songs
+
+Every boot scans configured flat library roots and reads package headers using
+`dlc_scan_threads`. The host does not persist or consult a flat-library cache.
+Refresh Songs is an optional main-menu shortcut, Off by default. When visible,
+it sends the title to `server_connect_screen`; a later native discovery pass
+starts a host worker scan, waits for the fresh list, and then creates guest
+enumerators. The title's own `songcache` remains separate and authoritative.
+The retail Download Content row remains independently available through its
+main-menu visibility setting. See [main-menu.md](../engine/main-menu.md) §7.1.
+
+## Historical cache and discovery measurements (retired host cache)
+
+The rest of §4.1–§4.4 records the old persisted-cache implementation and dated
+experiments. Cache flags, cache files, and the file-sentinel refresh action
+mentioned below were removed on 2026-10-28. For the retirement measurement, see
+the [2026-10-27 comparison](../performance/dlc-cache-comparison-2026-10-27.md).
+
+### Former library enumeration cache (R7)
 
 A §2.1 library is read by opening every regular file and reading the 868-byte STFS
 identity prefix out of each container
@@ -282,7 +296,7 @@ refusal paths are pinned by
 [tests/dlc_cache_tests.cpp](../../tests/dlc_cache_tests.cpp), SDK-free like the two DLC
 tests beside it.
 
-## 4.2 The rest of the boot a large library costs (R7)
+## 4.2 Historical boot costs for a large library (R7)
 
 The host's walk of the library is the smaller half of what a large library costs, and
 R7 answers for both halves. Measured 2026-10-06 on that library (1,402
@@ -323,7 +337,7 @@ same first boot is ~6.3 minutes and the second is ~1 minute; with the title's ca
 warm, R7's remaining contribution is the 14.5 s of host walk per boot (and every other
 second of a warm boot is the title's own — §4.3).
 
-## 4.3 What a warm boot still pays, and the one lever that shortens it (R7)
+## 4.3 Historical warm-boot measurements (R7)
 
 Measured 2026-10-06 back to back, same library, release build, warm `songcache` — so no
 package is mounted in any run below — each run a launch → start press → main menu
@@ -359,14 +373,14 @@ buffer — the guard a spike added to `WriteItems` — would still hand over one
 the phase came in at **46.7 s and 2,807 calls**, identical to the baseline, with the
 enumerator offering four and reporting the true count. One item per call is therefore part
 of the protocol as this title uses it, and the host has no way to enlarge a buffer the guest
-owns. [song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §13 has the spike and its measurement.
+owns. [song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §13 has the spike and its measurement.
 
 The lever on it is therefore the frame rate — Controller Settings' own **Graphics ▸ Window ▸ V-Sync**
 row (`vsync`, re-read live by the GPU vsync worker): with `--vsync=false` the same 2,809 calls
 arrive every **7.0 ms** and the phase takes **19.7 s**, against 47 s.
 
 **R7 can pull that lever for the player, for exactly as long as the phase lasts** (2026-10-10,
-[song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §14). `enhancements_dlc_uncap_enumeration` (off by
+[song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §14). `enhancements_dlc_uncap_enumeration` (off by
 default) turns `vsync` down when the discovery's first item is counted and puts the player's own value
 back at the first of three signs that the enumeration is over: the last item counted, the engine's own
 completion, or a menu frame with no item counted for two seconds. Measured on the same 1,402-package
@@ -433,7 +447,7 @@ the online-store entry out of the menu while it remains one toggle away. With th
 container is the same per-file cost the cold boot pays, so an in-game refresh of the
 1,402-package library is **30.2-31.0 s** — and it used to run on the thread that asked,
 which is the frame, so the press froze the game for half a minute
-([plans/song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §9.5). It now runs on a worker, and
+([plans/song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §9.5). It now runs on a worker, and
 two rules bound it ([src/fs/refresh_state.h](../../src/fs/refresh_state.h), pinned by
 [tests/refresh_state_tests.cpp](../../tests/refresh_state_tests.cpp)): **one at a time** — a
 second press while the scan is in flight rides the first instead of queueing a second
@@ -507,7 +521,7 @@ archive read — so for a long time the row kept the label the title ships for i
 `DOWNLOAD CONTENT`, an online-store name for something that now refreshes a library.
 
 Making that edit land took two corrections, both measured 2026-10-10
-([plans/song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §11). **(1) The continuation is an
+([plans/song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §11). **(1) The continuation is an
 archive offset, not a guest address.** The rule used to require the second read to land
 immediately after the first *in guest memory*; the title reads its archive into a pool of
 buffers, and the locale's second block arrived in a buffer **192 KiB away** from the end of
@@ -553,7 +567,7 @@ we're not enumerating right now"*. Nothing in the DTA sets those two values, so 
 engine's own code does — through one small object,
 [src/hooks/content_progress.cpp](../../src/hooks/content_progress.cpp) hooks
 `SetTotal`/`Increment`/`Complete`. **Measured 2026-10-10
-([plans/song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §9.4, §12):** this build's engine calls
+([plans/song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §9.4, §12):** this build's engine calls
 `SetTotal` exactly **once, after** the whole enumeration, with a total of **0** — which the
 Flow reads as "not enumerating" and hides the bar for — and `Increment` is **never called at
 all**, so the bar could not be drawn while the discovery ran no matter what total the host
@@ -566,7 +580,7 @@ is touched. The bar then animates: measured, one item per presented frame, 0 →
 46.7 s, and the fill grew 242 → 786 → 1,514 cyan pixels across three captures
 (`out/drive-ui/p2-*.png`).
 
-## 4.4 Current loading pipeline (P6, 2026-10-14)
+## 4.4 Historical loading pipeline (P6, 2026-10-14)
 
 This section supersedes the cache defaults, status/progress and pacing rules in the dated
 2026-10-06/10 measurements above. Those numbers remain historical evidence, not the incremental
@@ -655,7 +669,10 @@ Installed measurements and the controlled trial table are in
 Evidence is under `out/_swap/p6/`. Existing DLC song-start faults remain separately tracked in
 [known-issues.md](../reference/known-issues.md); package counts alone do not prove playable songs.
 
-## 5. Limits
+## 5. Historical acceptance results and limits
+
+The dated R7 cache toggles and refresh-file results below describe retired
+builds. The title's own `songcache` and native discovery remain relevant.
 
 - **Verified in game: the boot R7 is for (2026-10-06).** With `enhancements_dlc_cache`
   on and the same 1,402-package library: a boot with no title `songcache` mounted all
@@ -677,7 +694,7 @@ Evidence is under `out/_swap/p6/`. Existing DLC song-start faults remain separat
   was true)` 7 ms after the first item and `the frame rate is the player's own again (vsync = true)`
   1 ms after the last — 104 ms before the engine's own completion, so no menu frame is presented
   uncapped. The call count is unchanged, i.e. nothing is skipped, which is the whole point: batching the
-  walk instead is closed by measurement ([plans/song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §13), and
+  walk instead is closed by measurement ([plans/song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §13), and
   fast-forwarding it is closed by the absence of any proof that the song list survives
   (§14.5). `scripts\acceptance_dlc.ps1 -DlcLibrary <flat library> -ExpectedSong "LYCANTHROPE"
   -Extra "--enhancements_dlc_cache=true;--enhancements_dlc_uncap_enumeration=true"` then passed with the

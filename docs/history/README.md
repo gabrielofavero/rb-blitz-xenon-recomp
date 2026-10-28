@@ -37,7 +37,7 @@ The log stops describing work in detail where a dedicated document took over:
 
 | Since | Read instead |
 | --- | --- |
-| 2026-10-10 | [`../plans/finished/2026-10-10-song-cache-plan.md`](../plans/finished/2026-10-10-song-cache-plan.md) and [`../guides/dlc.md`](../guides/dlc.md) for the DLC cache and refresh (R7). |
+| 2026-10-10 | [`../plans/cancelled/2026-10-10-song-cache-plan.md`](../plans/cancelled/2026-10-10-song-cache-plan.md) records the former DLC cache and refresh design; [`../guides/dlc.md`](../guides/dlc.md) describes today's scan and native refresh. |
 | 2026-10-10 | [`../plans/finished/2026-10-09-save-persistence-findings.md`](../plans/finished/2026-10-09-save-persistence-findings.md) for the save checkpoint mechanics. |
 | 2026-10-10 | [`../settings/plan.md`](../settings/plan.md) and [`../settings/status.md`](../settings/status.md) for the in-game settings program (P0–P11). |
 | 2026-10-12 | [`../settings/graphics.md`](../settings/graphics.md) for resolution, the capability policy and custom resolutions. |

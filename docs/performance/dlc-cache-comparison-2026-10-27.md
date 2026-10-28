@@ -100,7 +100,7 @@ The cache-hit path itself took 4.8 ms in the matched game run, so optimizing
 that path cannot materially shorten the 24.5 s guest phase. A meaningful
 further speedup would require changing the guest-side enumeration or rendering
 during discovery, which is a separate, more invasive effort. The large
-historical reduction from removing emulated mount latency now applies whether
-the cache is on or off. Removing the cache toggle also currently affects the
-`Refresh Songs` menu behavior, so that behavior would need an independent
-decision if the cache feature were removed.
+historical reduction from removing emulated mount latency applied regardless
+of the host cache. The subsequent implementation retired that cache and kept
+the scan threads. Refresh Songs now uses native discovery with a worker rescan
+before package enumeration.

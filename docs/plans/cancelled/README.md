@@ -5,8 +5,8 @@ because the reason they were dropped is usually the expensive part: it names the
 runtime limit that made the route a dead end, and that is exactly what stops someone walking it
 again. A superseded plan carries a note at the top saying what replaced it.
 
-Nothing is filed here yet. When a plan is cancelled: `git mv` it in from `todo/` or `in-progress/`,
-keep its `YYYY-MM-DD-` prefix, and add one line at the top naming the reason and the document that
-supersedes it, if any.
+| Plan | Why it was retired |
+| --- | --- |
+| [2026-10-10-song-cache-plan.md](2026-10-10-song-cache-plan.md) | The persisted host DLC cache showed no meaningful menu-load gain in matched boots. Scan threads and native Refresh Songs remain; see the [DLC guide](../../guides/dlc.md). |
 
 See [`../README.md`](../README.md) for the status taxonomy.

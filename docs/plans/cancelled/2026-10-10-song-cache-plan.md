@@ -1,5 +1,16 @@
 # Song cache — three issues, split into prompts, with order and parallelization
 
+**Retired 2026-10-28.** This is a historical implementation and test plan, not
+current operating guidance. Matched boots found that the persisted host DLC
+cache saved only about 0.08–0.11 s of warm host work without a meaningful
+menu-load gain, so the cache setting and implementation were removed. The scan
+threads and the native discovery progress remain. Refresh Songs now enters the
+title's native discovery screen; a later discovery pass starts a worker rescan
+before it enumerates packages. See the [DLC guide](../../guides/dlc.md) for
+current behavior and the [comparison](../../performance/dlc-cache-comparison-2026-10-27.md)
+for the retirement measurement. Instructions and commands below describe the
+old build and are retained as evidence only.
+
 Date: 2026-10-10. Author: agent (planning document; see the status table — parts of it have since
 been carried out and are marked as such).
 Scope: the three points raised about the DLC/song-cache feature (R7, `enhancements_dlc_cache`) on

@@ -360,7 +360,13 @@ the token: neither shape is measured on this engine's script objects, while the 
 it. P9-6's loading line is static - the live progress text was withdrawn with the old follow-up
 states.
 
-**P9-14's A Refresh (2026-10-24).** The `installed` state draws the prompt
+**P9-14's A Refresh (2026-10-24).**
+The action details in this dated record are historical: the file sentinel was
+removed on 2026-10-28. The current installed-toast action enters
+`server_connect_screen`; native discovery starts or waits for the host worker
+rescan before guest enumeration. The prompt remains.
+
+**Original P9-14 implementation.** The `installed` state draws the prompt
 **`<alt1>A</alt1> Refresh   <alt1>B</alt1> Close`** (locale entry `rbbz_download_refresh`), and
 `kAction_Confirm` runs the main menu row's own refresh in the row's own order:
 `{rbbz_download_panel hide_popup}`, `{ui goto_screen server_connect_screen}`, `{file_exists

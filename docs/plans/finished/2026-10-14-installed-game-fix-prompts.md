@@ -871,7 +871,7 @@ Preliminary findings:
   and pacing restoration could contribute to the plateau. The screenshot does not distinguish them.
 - `[tree]` `dlc.cpp:474–482` now disables emulated content-mount latency on every boot. Older
   cache measurements attributed this saving to caching. Treat the
-  [finished cache plan](2026-10-10-song-cache-plan.md) as dated evidence, not proof
+  [finished cache plan](../cancelled/2026-10-10-song-cache-plan.md) as dated evidence, not proof
   of the current incremental benefit of Cache On.
 - `[tree]` [acceptance_dlc.ps1](../../../scripts/acceptance_dlc.ps1) deliberately creates fresh
   user roots for its correctness legs. Repeating those legs alone cannot measure a warm cache.

@@ -17,7 +17,8 @@ in place, never repacked:
   answered by writing the file's own transitions into its `update_state`, paid for by eight unused
   state constants — R3, on by default.
 - **The refresh row** re-points `splash_dlc` to the title's native discovery screen.
-  Later discovery passes start a host worker rescan before enumerating — R7, on by default.
+  The shortcut defaults Off. When enabled, later discovery passes start a host
+  worker rescan before enumerating.
 - **The background music** is `ShellMusicPanel`, fed by the ark's `config/synth.dtb` `shellmusic`
   block (three of the title's own tracks). DLC songs cannot be a pool entry, so R9 hooks the pool
   loader and the per-frame poll instead — **on by default since 2026-10-14**, when the feature got a
@@ -336,6 +337,19 @@ is not exactly as long as the input; or the root array outgrew the header's coun
 
 ### 7.1 The refresh row (R7)
 
+**Current behavior (2026-10-28).** When the optional Refresh Songs shortcut is
+enabled, its `splash_dlc` action enters `server_connect_screen`, the same native
+discovery route the title uses at startup. A later native enumeration pass starts
+a host worker rescan and waits for its result before making guest enumerators.
+The shortcut defaults Off; the retail Download Content row is a separate
+visibility choice. Scan threads remain configurable. The persisted host cache
+and the `songcache:/rbbz_dlc_refresh` file-sentinel action were removed.
+
+#### Historical R7 implementation and measurements
+
+The following cache, sentinel and cache-dependent label details describe
+builds before 2026-10-28. They are retained to explain the earlier design.
+
 R7's refresh is asked for from the menu, and the row that asks is the same `splash_dlc` case R5
 *removes* by default. `TapRefreshCache` rewrites that case's action into two sibling statements and a
 padding value:
@@ -411,7 +425,7 @@ drew `Download Content` while the same build without the provider drew the refre
 in-flight relabel remains as the no-payload fallback; its constraints (a file spanning two reads,
 written back into the second block only, paid out of the **last** `#ifdef HX_PS3`) are §10's
 split-read story ([dlc.md](../guides/dlc.md) §4.2,
-[2026-10-10-song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §11).
+[2026-10-10-song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §11).
 
 **The progress bar.** The same panel carries one (`progress_bar.grp`, `content_percent.lbl` in
 `ui/net/gen/server_connect.milo_xbox`, both platforms), driven by a Flow that reads `current_content`
@@ -422,7 +436,7 @@ for the whole 46.7 s. With `enhancements_dlc_cache` on the host counts the items
 app messages the enumeration is made of, hooked through
 `XMsgStartIORequestEx`/`XMsgInProcessCall`/`XMsgSystemProcessCall`) and pushes them with the engine's
 own push, so the bar animates 0 → 100%. See [dlc.md](../guides/dlc.md) §4.2,
-[2026-10-10-song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §12 — and
+[2026-10-10-song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §12 — and
 **2026-10-15**: the host drive is restored on top of P6's model — the title's own bar fills
 0 → 100 % during the enumeration and the engine refills it for its mounting phase; no overlay is
 drawn ([native-discovery-bar.md](../plans/finished/2026-10-15-native-discovery-bar.md)).
@@ -435,7 +449,7 @@ the last item, 104 ms before the engine's own completion, so no menu frame is pr
 finishing the walk in **15.96 s**. Writes happen on a host thread (a guest thread must not touch the
 cvar registry), and the option is off by default: the *V-Sync* row belongs to the player
 ([dlc.md](../guides/dlc.md) §4.3,
-[2026-10-10-song-cache-plan.md](../plans/finished/2026-10-10-song-cache-plan.md) §14).
+[2026-10-10-song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §14).
 
 **What is refused.** A file with no `splash_dlc` case, a case whose action is shorter than the call
 (a row that can hold the call but not the navigation keeps the call and refreshes without the

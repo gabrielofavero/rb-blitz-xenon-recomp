@@ -198,10 +198,11 @@ No game/UI navigation was performed for this verification.
 > change is presentation only; the page's row order is `Main Menu`, `Music Library & Store`,
 > `Skip Offline Prompts`, `Help & Options Labels`.
 
-**Downloadable Content (2026-10-22, P9-3):** General ▸ Downloadable Content has five
-rows in order: **RhythmVerse**, **Cache DLC Library**, **Refresh Songs**, **DLC Scan
-Threads**, **DLC Menu Music**. (The third row was **Refresh Music Library** until the owner renamed
-it on 2026-10-22, the same request that made it default On.) RhythmVerse opens a page containing the
+**Downloadable Content (current, 2026-10-28):** General ▸ Downloadable Content has four
+rows in order: **RhythmVerse**, **Refresh Songs**, **DLC Scan Threads**, **DLC Menu Music**.
+The retired Cache DLC Library row is gone; the scan threads remain. Refresh Songs defaults Off,
+and when enabled its main-menu shortcut enters the title's native discovery screen.
+RhythmVerse opens a page containing the
 **RhythmVerse: On | Off** master and **Filters**. The filter title is
 **RHYTHMVERSE FILTERS** (renamed 2026-10-23, plan P9-11) and its five instrument switches remain
 available while the master is Off. Back from the filter returns to RhythmVerse; Back from RhythmVerse

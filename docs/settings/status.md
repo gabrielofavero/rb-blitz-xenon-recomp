@@ -316,7 +316,7 @@ Part 1 wherever they disagree.
   (2560x1080 render, 2354x993 client). Since **2026-10-19** a mouse hover publishes the same caption
   from the engine's `SCROLL_MSG` (see "Mouse hover publishes the row caption" below), so pointing at a
   row updates the description without a click.
-- **DLC cache, status text and loading progress (P6 of the installed-game review, 2026-10-14)**: the
+- **Historical DLC cache, status text and loading progress (P6 of the installed-game review, 2026-10-14; host cache retired 2026-10-28)**: the
   host cache now names its hit/miss reason and per-phase timings, validates its body with a checksum,
   replaces itself atomically and refuses to persist a partial scan; a **real** hit is what makes the
   English `server_connect_enumerating_content` record read **Loading Cached Content List** (cold, Off
