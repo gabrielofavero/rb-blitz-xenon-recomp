@@ -3,7 +3,7 @@
 Run from anywhere: python scripts/export_template_360.py
 """
 
-from export_controller_reference import ROOT, buttons, manifest, texture
+from export_controller_reference import ROOT, buttons, contact_sheets, manifest, texture
 
 
 SOURCE = ROOT / "assets/game/360/ui"
@@ -26,6 +26,7 @@ def main() -> None:
             slot = f"{family}_{index}"
             texture(pad_scene, f"img/{slot}.png", DEST / "pads" / f"{slot}.png")
             pads.append(f'{slot} = "pads/{slot}.png"')
+    contact_sheets(DEST.parent, DEST)
     manifest(DEST, "xbox-360-reference", "Xbox 360 Reference", entries, pads)
     print(f"Private Xbox 360 reference ready: {DEST}")
 

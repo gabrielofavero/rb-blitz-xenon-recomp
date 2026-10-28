@@ -115,22 +115,22 @@ void BlitFit(const Image& source, std::vector<uint8_t>* canvas, uint32_t canvas_
 
 const std::vector<Slot>& ButtonSlots() {
   static const std::vector<Slot> slots = {
-      {"confirm_a", {2, 0, 81, 81}}, {"back_b", {87, 0, 80, 80}},
-      {"x", {172, 0, 80, 80}}, {"y", {257, 0, 80, 80}},
+      {"a_button", {2, 0, 81, 81}}, {"b_button", {87, 0, 80, 80}},
+      {"x_button", {172, 0, 80, 80}}, {"y_button", {257, 0, 80, 80}},
       {"glyph_0067", {340, 0, 21, 21}}, {"glyph_0063", {425, 0, 21, 21}},
-      {"left_trigger", {11, 85, 63, 63}}, {"left_bumper", {86, 85, 82, 82}},
-      {"right_trigger", {180, 85, 64, 64}}, {"right_bumper", {256, 85, 82, 82}},
+      {"left_trigger", {11, 85, 63, 83}}, {"left_bumper", {86, 85, 82, 82}},
+      {"right_trigger", {180, 85, 64, 83}}, {"right_bumper", {256, 85, 82, 82}},
       {"next_arrow", {341, 85, 83, 83}}, {"previous_arrow", {426, 85, 83, 83}},
-      {"dpad", {2, 170, 81, 81}}, {"glyph_0031", {87, 170, 81, 81}},
-      {"glyph_0032", {172, 170, 81, 81}}, {"glyph_0033", {257, 170, 81, 81}},
-      {"glyph_0034", {342, 170, 81, 81}}, {"glyph_0035", {427, 170, 81, 81}},
+      {"dpad", {2, 170, 81, 81}}, {"instrument_drums", {87, 170, 81, 81}},
+      {"instrument_bass", {172, 170, 81, 81}}, {"instrument_guitar", {257, 170, 81, 81}},
+      {"instrument_vocals", {342, 170, 81, 81}}, {"instrument_keys", {427, 170, 81, 81}},
       {"dpad_up", {2, 255, 81, 81}}, {"dpad_right", {87, 255, 81, 81}},
       {"dpad_down", {172, 255, 81, 81}}, {"dpad_left", {257, 255, 81, 81}},
       {"left_stick", {342, 255, 81, 81}}, {"right_stick", {427, 255, 81, 81}},
-      {"glyph_0036", {2, 340, 81, 81}}, {"glyph_0037", {87, 340, 81, 81}},
-      {"glyph_0038", {172, 340, 81, 81}}, {"glyph_0039", {257, 340, 81, 81}},
-      {"glyph_005e", {342, 340, 81, 81}}, {"glyph_0026", {427, 340, 81, 81}},
-      {"glyph_0028", {2, 425, 81, 81}}, {"glyph_002a", {87, 425, 81, 81}},
+      {"left_stick_up", {2, 340, 81, 81}}, {"left_stick_right", {87, 340, 81, 81}},
+      {"left_stick_down", {172, 340, 81, 81}}, {"left_stick_left", {257, 340, 81, 81}},
+      {"right_stick_up", {342, 340, 81, 81}}, {"right_stick_right", {427, 340, 81, 81}},
+      {"right_stick_left", {2, 425, 81, 81}}, {"right_stick_down", {87, 425, 81, 81}},
   };
   return slots;
 }
@@ -320,11 +320,10 @@ bool ComposeButtons(const std::vector<std::vector<uint8_t>>& original, const Sch
       const Slot* slot = FindButton(id);
       if (!slot) return false;
       const Rect& r = slot->rect;
-      // The font's UV rectangle is the image destination, but the retail BC3
-      // pixels can extend a couple of pixels beyond it. A's circle reaches
-      // rows 81-82 while its measured UV rectangle ends at row 80. Clear the
-      // entire atlas cell so those old pixels cannot remain under a partial
-      // replacement, then fit the new image into the exact measured rectangle.
+      // The slot rectangle is the image destination. Retail BC3 pixels can
+      // extend beyond the font's UV bounds (the triggers do so substantially),
+      // and some art also extends beyond the slot rectangle. Clear the entire
+      // atlas cell before fitting the new image so old pixels cannot remain.
       const uint32_t cell_x = (r.x / 85) * 85;
       const uint32_t cell_y = (r.y / 85) * 85;
       const uint32_t cell_right = std::min(512u, cell_x + 85);

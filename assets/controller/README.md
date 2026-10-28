@@ -23,7 +23,7 @@ This guide, the blank templates, and the original examples are included under
    kind = "controller"
 
    [buttons]
-   confirm_a = "buttons/a.png"
+   a_button = "buttons/a.png"
    ```
 
 3. Find the save-data folder chosen during installation. Its path is recorded as
@@ -83,8 +83,8 @@ replacement. A path is used only when its slot ID appears in `scheme.toml`:
 
 ```toml
 [buttons]
-confirm_a = "buttons/a.png"
-back_b = "buttons/b.png"
+a_button = "buttons/a.png"
+b_button = "buttons/b.png"
 
 [controller.slots]
 xbox_0 = "pads/xbox_0.png"
@@ -112,6 +112,27 @@ and cannot be the package's only image. The extra sheet has no individual-slot
 contract yet. Keyboard and mouse images are built into the application and
 cannot be packaged or selected as a controller layout.
 
+## Keyboard and mouse art
+
+There is currently **no keyboard/mouse layout package format**. A `scheme.toml`
+with `kind = "controller"` changes controller art only; `kind = "keyboard"` is
+not accepted, and the reserved `keyboard` ID is not a user layout. The built-in
+input icon resolver creates key and mouse button images from the player's
+effective bindings. Changing a controller layout never changes those images.
+Use **Help & Options → Controls → Interface Mapping** for menu bindings and
+**Gameplay Mapping** for song bindings. Rebinding changes which keycaps the
+resolver returns, but it does not change their visual style. The resolver is
+implemented; its remaining guest hint and mapping-screen integration is tracked
+in the [hot-swap plan](../../docs/plans/in-progress/2026-10-19-button-layout-hotswap-plan.md).
+
+If you are making keyboard/mouse **art** for this source project, the current
+authoring point is [the built-in renderer](../../src/input/input_icons.cpp):
+`DrawKeycap` draws the keycap and `kFont` defines its letters. You would edit
+that code and rebuild the application. There is no folder of keyboard PNG slots
+to fill, no keyboard pad diagram slot, and no runtime selection of keyboard
+themes. An installable keyboard/mouse art layout would require a new package
+schema and image provider; the controller slot IDs below do not define one.
+
 ## Canvas and slot sizes
 
 The [blank button grid](template/buttons.png) is a placement reference with no
@@ -119,26 +140,49 @@ game art. Save **separate** images for the slots you want to change; do not put
 the full grid PNG into your package. The exact rectangles, including position,
 are in [slots.toml](slots.toml). These are the measured destination sizes:
 
+| Artwork | Slot IDs |
+| --- | --- |
+| Face buttons | `a_button`, `b_button`, `x_button`, `y_button` |
+| Shoulders and triggers | `left_bumper`, `right_bumper`, `left_trigger`, `right_trigger` |
+| Horizontal arrows | `next_arrow` (points right), `previous_arrow` (points left) |
+| D-pad | `dpad`, `dpad_up`, `dpad_right`, `dpad_down`, `dpad_left` |
+| Neutral sticks | `left_stick`, `right_stick` |
+| Stick directions | `left_stick_up`, `left_stick_right`, `left_stick_down`, `left_stick_left`, and the four matching `right_stick_*` IDs |
+| Instruments | `instrument_drums`, `instrument_bass`, `instrument_guitar`, `instrument_vocals`, `instrument_keys` |
+| Transparent cells | `glyph_0067` (`g`) and `glyph_0063` (`c`) |
+
+The IDs name artwork, not the action currently bound to a physical button.
+For example, mapping Y to Confirm still uses `y_button` art. A package manifest
+must use these IDs; older `confirm_a`, `back_b`, `x`, `y`, and numbered `glyph_`
+IDs are no longer accepted. Image filenames themselves are arbitrary.
+
+These sizes are **destinations in the 512×512 atlas**. Private original reference
+PNGs are cropped to the visible pixels in each 85-pixel grid cell, so their
+dimensions may be smaller. In particular, the bumper and arrow references no
+longer include the atlas's empty alignment margins. The loader fits and centers
+each declared PNG in its destination rectangle as described below.
+
 | Slot IDs | Destination size |
 | --- | --- |
-| `confirm_a` | 81×81 |
-| `back_b`, `x`, `y` | 80×80 |
+| `a_button` | 81×81 |
+| `b_button`, `x_button`, `y_button` | 80×80 |
 | `glyph_0067`, `glyph_0063` | 21×21 |
-| `left_trigger` | 63×63 |
-| `right_trigger` | 64×64 |
+| `left_trigger` | 63×83 |
+| `right_trigger` | 64×83 |
 | `left_bumper`, `right_bumper` | 82×82 |
 | `next_arrow`, `previous_arrow` | 83×83 |
-| `dpad`, `glyph_0031`–`glyph_0035`, `dpad_up`, `dpad_right`, `dpad_down`, `dpad_left`, `left_stick`, `right_stick`, `glyph_0036`–`glyph_0039`, `glyph_005e`, `glyph_0026`, `glyph_0028`, `glyph_002a` | 81×81 |
+| `dpad`, `instrument_*`, `dpad_up`, `dpad_right`, `dpad_down`, `dpad_left`, `left_stick`, `right_stick`, `left_stick_*`, `right_stick_*` | 81×81 |
 
-Names beginning `glyph_` are stable character-based IDs where the action is
-not yet identified. The font sheet has no standalone Start or Back picture.
+The two remaining `glyph_` IDs are stable character-based IDs with no visible
+art in the Xbox 360 sheet. The font sheet has no standalone Start or Back
+picture.
 
 The loader scales the **whole source canvas**, including transparent margins,
 uniformly by `min(destination width/source width, destination height/source
 height)`, rounds each resulting dimension to fit, and centers it on a
 transparent destination canvas. It does not crop or stretch. For a 32×32
 destination, 128×128 becomes 32×32; 64×50 becomes 32×25 with transparent space
-above and below. `confirm_a` is actually 81×81, so a 128×128 square fits to
+above and below. `a_button` is actually 81×81, so a 128×128 square fits to
 81×81. Trim accidental transparent margins from the source if the visible art
 looks too small. Pads use the same rule against 1024×1024.
 
@@ -159,9 +203,14 @@ not used by the game.
 
 If you own local game extracts, `python scripts/export_template_360.py` and
 `python scripts/export_template_ps3.py` export separate glyph and pad PNGs into
-gitignored `assets/controller/template-360/` and `template-ps3/` folders. They
-are private references, not authoring assets or distributable packages. The
-blank guides and `slots.toml` are enough to create original art without them.
+gitignored `assets/controller/template-360/` and `template-ps3/` folders. The
+Xbox 360 command also creates `template-360/button-slots-contact.png` (all 32
+tightly cropped button slots, with IDs and character codes) and
+`template-360/pad-slots-contact.png` (all eight pad slots). Individual original
+crops are under `template-360/xbox-360-reference/buttons/` and `pads/` if you
+need a closer look. These are private references, not authoring assets or
+distributable packages. The blank guides and `slots.toml` are enough to create
+original art without them.
 
 Any owner-authored layout with a non-reserved ID placed in
 `assets/controller/schemes/<id>/` is

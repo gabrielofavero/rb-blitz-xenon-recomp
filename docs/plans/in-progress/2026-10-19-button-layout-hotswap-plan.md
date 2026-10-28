@@ -191,8 +191,9 @@ What this settles for the plan:
 2. **Authors do not encode DXT5.** P1 proved that the project can provide canonical BC3 mip data
    to both graphics backends without rewriting the guest's DXT5 payload. P2 must decode and fit
    individual PNGs, compose them with original game glyphs, and encode the replacement texture.
-3. **The slot map is a real grid.** The sheet is 6×6 (about 85×84 px per cell); the exact slot
-   rectangles come from the scene's `Glyph` table, which P0 reads.
+3. **The slot map is a real grid.** The sheet is 6×6 (about 85×84 px per cell). P0 reads
+   rectangles from the scene's `Glyph` table; the trigger export rectangles extend to row 167
+   because their visible Xbox 360 art continues below the table's height.
 
 P1 measured the boot-time button and first-pad texture fingerprints. P2 must identify the
 remaining pad slots before claiming independent replacement of all eight.
@@ -280,10 +281,11 @@ scenes; corresponding `Glyph` tables match. The measured grid is:
 | 5 (≈425–511) | 0, 1 (columns 2–5 empty) |
 
 The retail slot IDs identify glyphs, **not the physical sources currently bound to an action**.
-`assets/controller/slots.toml` records all 32 table rectangles, including the two empty small
-glyphs in row 0. The corrected pixels identify A/B/X/Y, LT/LB/RT/RB, D-pad directions,
-LS/RS and two horizontal arrows. The remaining instrument and stick-direction icons retain
-character-based IDs until their action semantics are measured. This sheet has no standalone
+`assets/controller/slots.toml` records all 32 slot rectangles, including the two empty small
+glyphs in row 0. The trigger rectangles use 83-pixel heights to include their full visible
+Xbox 360 art; the font table reports only 63 and 64 pixels. The corrected pixels identify
+A/B/X/Y, LT/LB/RT/RB, D-pad directions, five instruments, LS/RS and both sticks' directions.
+The two transparent `g` and `c` cells retain character-based IDs. This sheet has no standalone
 Start or Back picture; P8/P10 must resolve those actions without assuming one exists. The
 blank template draws each rectangle and label as a reference; authors save independent PNGs,
 not a painted copy of the template sheet.
@@ -313,8 +315,8 @@ name = "Xbox Series"      # ≤ 20 characters; this is the row's value
 kind = "controller"       # the only discoverable package kind
 
 [buttons]
-confirm_a = "buttons/a.png"
-# back_b = "buttons/b.png"
+a_button = "buttons/a.png"
+# b_button = "buttons/b.png"
 # Omit every button glyph that should retain its base-game art.
 
 # [controller]
@@ -427,8 +429,9 @@ The extraction, exactly:
    `ui/resource/fonts/gen/buttons.milo_ps3` from `gen/main_ps3_0.ark` by its offset and size. The
    full 350 MB ARK is never written.
 4. **Decode** the milo chunk: find the 23-byte header and eight-byte preamble, take the
-   512×512 DXT5 payload at header + 31, decode PS3 blocks directly to RGBA, and crop the
-   known controller glyph rectangles from `slots.toml` to individual PNGs. Do not generate a
+   512×512 DXT5 payload at header + 31, decode PS3 blocks directly to RGBA, and crop each
+   known controller glyph to its visible bounds within the corresponding `slots.toml` grid cell.
+   Do not generate a
    distributable full sheet or replace instrument glyphs just because they occupy the same sheet.
 5. **Extract the pad art from the 360 scene** (`ui/controller_config/gen/controller_config.milo_xbox`,
    already installed): decode the four `ps_*` 1024×1024 DXT5 images and write `pads/ps_0..3.png`. The
@@ -1071,7 +1074,7 @@ only the needed art extracted.
 - An acceptance run against the user's package and the extracted `assets/game/ps3` reference.
 
 **Verify.** The generated `ps3/buttons/<slot-id>.png` files match the corresponding PS3 reference
-rectangles for the known controller glyphs; omitted instrument glyphs remain from the user's 360
+cell art for the known controller glyphs; omitted instrument glyphs remain from the user's 360
 base game when the package is selected. The PS3 `Glyph` table matches the 360 sheet's slot
 rectangles (a mismatch stops the package as a finding, because the host override maps by slot);
 `ps3/pads/ps_0..3.png` match the 360 `ps_*` art and omitted `xbox_*` pads remain original; the

@@ -77,9 +77,11 @@ bool Renderable(std::string_view text) {
 }
 
 std::string Slot(std::string_view name) {
-  if (name == "a") return "confirm_a";
-  if (name == "b") return "back_b";
-  if (name == "x" || name == "y" || name.starts_with("dpad_")) return std::string(name);
+  if (name == "a") return "a_button";
+  if (name == "b") return "b_button";
+  if (name == "x") return "x_button";
+  if (name == "y") return "y_button";
+  if (name.starts_with("dpad_")) return std::string(name);
   if (name == "left_shoulder") return "left_bumper";
   if (name == "right_shoulder") return "right_bumper";
   if (name == "left_trigger" || name == "right_trigger") return std::string(name);

@@ -48,7 +48,7 @@ int main() {
   std::error_code ec;
   fs::remove_all(root, ec);
   const auto install = root / "install", user = root / "user";
-  auto one = Package(install, "one", "[buttons]\nconfirm_a = \"buttons/a.png\"\n");
+  auto one = Package(install, "one", "[buttons]\na_button = \"buttons/a.png\"\n");
   Write(one / "buttons/a.png", "PNG");
   Scheme scheme;
   std::string why;
@@ -58,7 +58,7 @@ int main() {
   Write(one / "extra.txt", "ignored");
   Check(LoadScheme(one, false, FakePng, &scheme, &why) && scheme.extra_files.size() == 1,
         "extra file was not reported");
-  Check(!LoadScheme(Package(install, "keyboard", "[buttons]\nconfirm_a = \"a.png\"\n"),
+  Check(!LoadScheme(Package(install, "keyboard", "[buttons]\na_button = \"a.png\"\n"),
                     false, FakePng, &scheme, &why), "keyboard package accepted");
   auto pad = Package(install, "pads", "[controller]\nfile = \"pads/shared.png\"\n"
       "[controller.slots]\nps_1 = \"pads/specific.png\"\n");
@@ -75,31 +75,31 @@ int main() {
         icon_levels.back().size() == 16, "extra icons BC3 mip chain wrong");
   auto invalid = Package(install, "invalid", "[buttons]\nno_such_slot = \"a.png\"\n");
   Check(!LoadScheme(invalid, false, FakePng, &scheme, &why), "unknown slot accepted");
-  invalid = Package(install, "invalid", "[buttons]\nconfirm_a = \"missing.png\"\n");
+  invalid = Package(install, "invalid", "[buttons]\na_button = \"missing.png\"\n");
   Check(!LoadScheme(invalid, false, FakePng, &scheme, &why), "missing image accepted");
   Write(invalid / "bad.png", "PNG");
-  invalid = Package(install, "invalid", "[buttons]\nconfirm_a = \"bad.png\"\n"
-      "back_b = \"bad.png\"\n");
+  invalid = Package(install, "invalid", "[buttons]\na_button = \"bad.png\"\n"
+      "b_button = \"bad.png\"\n");
   Check(!LoadScheme(invalid, false, FakePng, &scheme, &why), "duplicate image path accepted");
   Write(invalid / "oversize.png", "PNG");
-  invalid = Package(install, "invalid", "[buttons]\nconfirm_a = \"oversize.png\"\n");
+  invalid = Package(install, "invalid", "[buttons]\na_button = \"oversize.png\"\n");
   Check(!LoadScheme(invalid, false, FakePng, &scheme, &why), "oversized pixels accepted");
   Write(invalid / "corrupt.png", "PNG");
-  invalid = Package(install, "invalid", "[buttons]\nconfirm_a = \"corrupt.png\"\n");
+  invalid = Package(install, "invalid", "[buttons]\na_button = \"corrupt.png\"\n");
   Check(!LoadScheme(invalid, false, FakePng, &scheme, &why), "corrupt image accepted");
-  invalid = Package(install, "invalid", "kind = \"keyboard\"\n[buttons]\nconfirm_a = \"bad.png\"\n");
+  invalid = Package(install, "invalid", "kind = \"keyboard\"\n[buttons]\na_button = \"bad.png\"\n");
   Check(!LoadScheme(invalid, false, FakePng, &scheme, &why), "keyboard kind accepted");
-  invalid = Package(install, "invalid", "[buttons]\nconfirm_a = \"../outside.png\"\n");
+  invalid = Package(install, "invalid", "[buttons]\na_button = \"../outside.png\"\n");
   Check(!LoadScheme(invalid, false, FakePng, &scheme, &why), "traversal accepted");
   Write(invalid / "zero.png", "PNG");
-  invalid = Package(install, "invalid", "[buttons]\nconfirm_a = \"zero.png\"\n");
+  invalid = Package(install, "invalid", "[buttons]\na_button = \"zero.png\"\n");
   Check(!LoadScheme(invalid, false, FakePng, &scheme, &why), "zero-size image accepted");
   Write(invalid / "scheme.toml", "schema_version = \"1\"\nid = \"invalid\"\n"
-      "name = \"Test\"\nkind = \"controller\"\n[buttons]\nconfirm_a = \"zero.png\"\n");
+      "name = \"Test\"\nkind = \"controller\"\n[buttons]\na_button = \"zero.png\"\n");
   Check(!LoadScheme(invalid, false, FakePng, &scheme, &why), "quoted schema version accepted");
-  auto authored = Package(install, "xbox-series", "[buttons]\nconfirm_a = \"a.png\"\n");
+  auto authored = Package(install, "xbox-series", "[buttons]\na_button = \"a.png\"\n");
   Write(authored / "a.png", "PNG");
-  auto customized = Package(user, "xbox-series", "[buttons]\nconfirm_a = \"a.png\"\n");
+  auto customized = Package(user, "xbox-series", "[buttons]\na_button = \"a.png\"\n");
   Write(customized / "a.png", "PNG");
   Check(LoadScheme(customized, false, FakePng, &scheme, &why),
         "custom package with authored family id rejected");
@@ -107,7 +107,7 @@ int main() {
   Check(discovered.Find("xbox-series") &&
         discovered.Find("xbox-series")->folder == customized &&
         discovered.shadowed.size() == 1, "user package did not shadow authored package");
-  auto reserved = Package(user, "ps3", "[buttons]\nconfirm_a = \"a.png\"\n");
+  auto reserved = Package(user, "ps3", "[buttons]\na_button = \"a.png\"\n");
   Write(reserved / "a.png", "PNG");
   Check(!LoadScheme(reserved, false, FakePng, &scheme, &why), "reserved PS3 import id accepted");
 #ifdef _WIN32
@@ -141,7 +141,7 @@ int main() {
   }
   std::vector<uint8_t> blocks;
   rb_blitz::assets::EncodeDxt5(original_rgba.data(), 512, 512, &blocks);
-  Scheme one_slot; one_slot.buttons["confirm_a"] = {128, 128, std::vector<uint8_t>(128 * 128 * 4)};
+  Scheme one_slot; one_slot.buttons["a_button"] = {128, 128, std::vector<uint8_t>(128 * 128 * 4)};
   std::vector<std::vector<uint8_t>> composed;
   Check(ComposeButtons({blocks}, one_slot, &composed), "button composition failed");
   const size_t far_block = (size_t(100) * 128 + 100) * 16;
@@ -205,7 +205,7 @@ int main() {
   rb_blitz::assets::EncodeDxt5(edge_rgba.data(), 512, 512, &edge_blocks);
   rb_blitz::input::icons::Icon retail_a;
   retail_a.art = rb_blitz::input::icons::Art::kSchemeSlot;
-  retail_a.slot = "confirm_a";
+  retail_a.slot = "a_button";
   Check(rb_blitz::assets::input_font_atlas::Compose(
       font_chain, edge_blocks, nullptr, {retail_a}, &font_levels),
       "retail mapping glyph composition failed");
@@ -250,7 +250,7 @@ int main() {
   Check(UntileBc3Base(tiled.data(), tiled.size(), 512, true, 1, &canonical) &&
         canonical == blocks, "tiled endian-swapped BC3 did not round-trip");
 
-  auto shadow = Package(user, "one", "[buttons]\nconfirm_a = \"a.png\"\n");
+  auto shadow = Package(user, "one", "[buttons]\na_button = \"a.png\"\n");
   Write(shadow / "a.png", "PNG");
   auto registry = Discover(install, user, FakePng);
   Check(registry.Find("one") && registry.Find("one")->folder == shadow &&

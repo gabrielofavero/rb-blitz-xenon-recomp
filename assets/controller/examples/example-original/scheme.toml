@@ -4,4 +4,4 @@ name = "Example Original"
 kind = "controller"
 
 [buttons]
-confirm_a = "buttons/a.png"
+a_button = "buttons/a.png"

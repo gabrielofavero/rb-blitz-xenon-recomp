@@ -11,7 +11,7 @@ PS3_SOURCE = ROOT / "assets/game/ps3/ui"
 XBOX_SOURCE = ROOT / "assets/game/360/ui"
 DEST = ROOT / "assets/controller/template-ps3/ps3"
 CONTROLLER_GLYPHS = {
-    "confirm_a", "back_b", "x", "y", "left_trigger", "left_bumper",
+    "a_button", "b_button", "x_button", "y_button", "left_trigger", "left_bumper",
     "right_trigger", "right_bumper", "dpad", "dpad_up", "dpad_right",
     "dpad_down", "dpad_left", "left_stick", "right_stick",
 }

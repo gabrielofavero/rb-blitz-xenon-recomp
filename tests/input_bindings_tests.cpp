@@ -85,17 +85,17 @@ void TestEffectiveIcons() {
   const auto pad = icons::Capture("retail", icons::Family::kController);
   const auto all = icons::Ordered(pad, row);
   input->general.Set(remap::Target::kA, {Source("pad:b")});
-  CHECK_TRUE(icons::First(pad, row).slot == "y");
+  CHECK_TRUE(icons::First(pad, row).slot == "y_button");
   CHECK_EQ(all.size(), 4u);
-  CHECK_TRUE(all[0].slot == "y");
+  CHECK_TRUE(all[0].slot == "y_button");
   CHECK_TRUE(all[1].art == icons::Art::kBuiltIn);
   CHECK_TRUE(all[1].legend == "Enter");
   CHECK_TRUE(!all[1].rgba.empty());
-  CHECK_TRUE(icons::First(pad, row).slot == "y");
+  CHECK_TRUE(icons::First(pad, row).slot == "y_button");
   rb_blitz::controller_schemes::Registry packages;
   rb_blitz::controller_schemes::Scheme ps3;
   ps3.id = "ps3";
-  ps3.buttons["y"] = {1, 1, {9, 8, 7, 255}};
+  ps3.buttons["y_button"] = {1, 1, {9, 8, 7, 255}};
   packages.schemes.emplace("ps3", std::move(ps3));
   const auto imported = icons::Capture("ps3", icons::Family::kController, &packages);
   CHECK_TRUE(icons::First(imported, row).art == icons::Art::kPackageImage);
@@ -132,7 +132,7 @@ void TestEffectiveIcons() {
   rb_blitz::input::PublishInput(gameplay);
   const auto game_pad = icons::Capture("retail", icons::Family::kController);
   const auto game_keys = icons::Capture("retail", icons::Family::kKeyboardMouse);
-  CHECK_TRUE(icons::First(game_pad, rb_blitz::profile::gameplay_remap::Action::kFirstNote).slot == "x");
+  CHECK_TRUE(icons::First(game_pad, rb_blitz::profile::gameplay_remap::Action::kFirstNote).slot == "x_button");
   CHECK_TRUE(icons::First(game_keys, rb_blitz::profile::gameplay_remap::Action::kFirstNote).legend == "Q");
   CHECK_TRUE(icons::Ordered(game_keys, rb_blitz::profile::gameplay_remap::Action::kFirstNote).size() == 2);
   auto pad_only = rb_blitz::input::CopyCurrentInput();
@@ -170,7 +170,7 @@ void TestEffectiveIcons() {
   edited->general.Reset(remap::Target::kA);
   rb_blitz::input::PublishInput(edited);
   CHECK_TRUE(icons::First(icons::Capture("retail", icons::Family::kController), row).slot ==
-             "confirm_a");
+             "a_button");
   const auto trigger = rb_blitz::profile::ParseInputRowToken("input.general.left_trigger");
   CHECK_TRUE(icons::First(pad, trigger).slot == "left_trigger");
 }
@@ -712,9 +712,9 @@ void TestImageRows() {
   CHECK_EQ(page.lines.size(), 2u);
   CHECK_TRUE(page.lines[1] == fallback[1]);
   CHECK_EQ(page.icons.size(), 3u);
-  CHECK_TRUE(page.icons[0].slot == "y");
+  CHECK_TRUE(page.icons[0].slot == "y_button");
   CHECK_TRUE(page.icons[1].legend == "Enter");
-  CHECK_TRUE(page.icons[2].slot == "confirm_a");
+  CHECK_TRUE(page.icons[2].slot == "a_button");
   CHECK_TRUE(page.lines[0].find("\xC2\x80 \xC2\x81 \xC2\x82") != std::string::npos);
   CHECK_TRUE(page.lines[0] ==
       "Confirm: <alt1>\xC2\x80 \xC2\x81 \xC2\x82</alt1>");
@@ -724,7 +724,7 @@ void TestImageRows() {
   view.input = rebound;
   const auto updated = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
   CHECK_EQ(updated.icons.size(), 2u);
-  CHECK_TRUE(updated.icons[0].slot == "back_b");
+  CHECK_TRUE(updated.icons[0].slot == "b_button");
   CHECK_TRUE(updated.icons[1].legend == "Space");
   rebound->general.Set(remap::Target::kA, {});
   const auto empty = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);

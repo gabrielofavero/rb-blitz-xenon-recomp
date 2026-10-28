@@ -1,32 +1,33 @@
 # Generated from matching Xbox 360 and PS3 Buttons Glyph tables.
 # Named controls were checked against the correctly decoded Xbox 360 sheet.
+# Trigger heights include visible atlas art below the font table's 63/64 px bounds.
 # Unnamed glyphs retain their character code as a stable identifier.
 schema_version = 1
 sheet_size = [512, 512]
 
 [[slot]]
-id = "confirm_a"
+id = "a_button"
 glyphs = ["A"]
 rect = [2, 0, 81, 81]
 row = 0
 column = 0
 
 [[slot]]
-id = "back_b"
+id = "b_button"
 glyphs = ["B"]
 rect = [87, 0, 80, 80]
 row = 0
 column = 1
 
 [[slot]]
-id = "x"
+id = "x_button"
 glyphs = ["X"]
 rect = [172, 0, 80, 80]
 row = 0
 column = 2
 
 [[slot]]
-id = "y"
+id = "y_button"
 glyphs = ["Y"]
 rect = [257, 0, 80, 80]
 row = 0
@@ -49,7 +50,7 @@ column = 5
 [[slot]]
 id = "left_trigger"
 glyphs = ["l"]
-rect = [11, 85, 63, 63]
+rect = [11, 85, 63, 83]
 row = 1
 column = 0
 
@@ -63,7 +64,7 @@ column = 1
 [[slot]]
 id = "right_trigger"
 glyphs = ["r"]
-rect = [180, 85, 64, 64]
+rect = [180, 85, 64, 83]
 row = 1
 column = 2
 
@@ -96,35 +97,35 @@ row = 2
 column = 0
 
 [[slot]]
-id = "glyph_0031"
+id = "instrument_drums"
 glyphs = ["1"]
 rect = [87, 170, 81, 81]
 row = 2
 column = 1
 
 [[slot]]
-id = "glyph_0032"
+id = "instrument_bass"
 glyphs = ["2"]
 rect = [172, 170, 81, 81]
 row = 2
 column = 2
 
 [[slot]]
-id = "glyph_0033"
+id = "instrument_guitar"
 glyphs = ["3"]
 rect = [257, 170, 81, 81]
 row = 2
 column = 3
 
 [[slot]]
-id = "glyph_0034"
+id = "instrument_vocals"
 glyphs = ["4"]
 rect = [342, 170, 81, 81]
 row = 2
 column = 4
 
 [[slot]]
-id = "glyph_0035"
+id = "instrument_keys"
 glyphs = ["5"]
 rect = [427, 170, 81, 81]
 row = 2
@@ -173,56 +174,56 @@ row = 3
 column = 5
 
 [[slot]]
-id = "glyph_0036"
+id = "left_stick_up"
 glyphs = ["6"]
 rect = [2, 340, 81, 81]
 row = 4
 column = 0
 
 [[slot]]
-id = "glyph_0037"
+id = "left_stick_right"
 glyphs = ["7"]
 rect = [87, 340, 81, 81]
 row = 4
 column = 1
 
 [[slot]]
-id = "glyph_0038"
+id = "left_stick_down"
 glyphs = ["8"]
 rect = [172, 340, 81, 81]
 row = 4
 column = 2
 
 [[slot]]
-id = "glyph_0039"
+id = "left_stick_left"
 glyphs = ["9"]
 rect = [257, 340, 81, 81]
 row = 4
 column = 3
 
 [[slot]]
-id = "glyph_005e"
+id = "right_stick_up"
 glyphs = ["^"]
 rect = [342, 340, 81, 81]
 row = 4
 column = 4
 
 [[slot]]
-id = "glyph_0026"
+id = "right_stick_right"
 glyphs = ["&"]
 rect = [427, 340, 81, 81]
 row = 4
 column = 5
 
 [[slot]]
-id = "glyph_0028"
+id = "right_stick_left"
 glyphs = ["(", "*"]
 rect = [2, 425, 81, 81]
 row = 5
 column = 0
 
 [[slot]]
-id = "glyph_002a"
+id = "right_stick_down"
 glyphs = ["(", "*"]
 rect = [87, 425, 81, 81]
 row = 5

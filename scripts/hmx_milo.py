@@ -386,13 +386,23 @@ def button_glyphs(milo):
 
 
 _GLYPH_IDS = {
-    "A": "confirm_a", "B": "back_b", "X": "x", "Y": "y",
+    "A": "a_button", "B": "b_button", "X": "x_button", "Y": "y_button",
     "L": "left_bumper", "R": "right_bumper",
     "l": "left_trigger", "r": "right_trigger",
     "S": "next_arrow", "s": "previous_arrow", "D": "dpad",
     "w": "dpad_up", "d": "dpad_right", "x": "dpad_down",
     "a": "dpad_left", "[": "left_stick", "]": "right_stick",
+    "1": "instrument_drums", "2": "instrument_bass",
+    "3": "instrument_guitar", "4": "instrument_vocals", "5": "instrument_keys",
+    "6": "left_stick_up", "7": "left_stick_right",
+    "8": "left_stick_down", "9": "left_stick_left",
+    "^": "right_stick_up", "&": "right_stick_right",
+    "(": "right_stick_left", "*": "right_stick_down",
 }
+
+# The font table's trigger height is shorter than the visible Xbox 360 art.
+# Preserve the complete image when exporting slots and composing replacements.
+_ART_HEIGHT_OVERRIDES = {"left_trigger": 83, "right_trigger": 83}
 
 
 def _slots(tables):
@@ -412,7 +422,9 @@ def _slots(tables):
         if len(alternate) != 1:
             raise MiloError(f"Glyph U+{charcode:04X}: second font has no matching rectangle")
         glyph_chars = sorted({char, chr(alternate[0][0])})
-        slots.append({"id": _GLYPH_IDS.get(char, f"glyph_{charcode:04x}"),
+        slot_id = _GLYPH_IDS.get(char, f"glyph_{charcode:04x}")
+        height = _ART_HEIGHT_OVERRIDES.get(slot_id, height)
+        slots.append({"id": slot_id,
                       "glyphs": glyph_chars, "rect": (x, y, width, height),
                       "row": y // 85, "column": x // 85})
     for i, a in enumerate(slots):
@@ -438,6 +450,7 @@ def cmd_slots(args):
     with open(args.out, "w", encoding="utf-8", newline="\n") as handle:
         handle.write("# Generated from matching Xbox 360 and PS3 Buttons Glyph tables.\n"
                      "# Named controls were checked against the correctly decoded Xbox 360 sheet.\n"
+                     "# Trigger heights include visible atlas art below the font table's 63/64 px bounds.\n"
                      "# Unnamed glyphs retain their character code as a stable identifier.\n"
                      "schema_version = 1\nsheet_size = [512, 512]\n\n")
         for slot in slots:

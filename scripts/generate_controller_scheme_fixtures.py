@@ -52,7 +52,7 @@ def main():
     glyph_image.save(one_glyph / 'a.png')
     (one_glyph / 'scheme.toml').write_text(
         'schema_version = 1\nid = "one-glyph"\nname = "One Glyph"\n'
-        'kind = "controller"\n[buttons]\nconfirm_a = "a.png"\n')
+        'kind = "controller"\n[buttons]\na_button = "a.png"\n')
     one_pad = args.output / 'one-pad'
     one_pad.mkdir(parents=True, exist_ok=True)
     Image.new('RGBA', (128, 96), (255, 0, 220, 255)).save(one_pad / 'pad.png')
@@ -63,7 +63,7 @@ def main():
     broken.mkdir(parents=True, exist_ok=True)
     (broken / 'scheme.toml').write_text(
         'schema_version = 1\nid = "invalid-missing"\nname = "Invalid"\n'
-        'kind = "controller"\n[buttons]\nconfirm_a = "missing.png"\n')
+        'kind = "controller"\n[buttons]\na_button = "missing.png"\n')
     print(f'Generated {package}, {one_glyph}, {one_pad}, and {broken}')
 
 

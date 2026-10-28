@@ -26,7 +26,7 @@ def main() -> None:
     draw.rectangle((47, 73, 81, 81), fill=(235, 243, 255, 255))
     save("example-original",
          'schema_version = 1\nid = "example-original"\nname = "Example Original"\n'
-         'kind = "controller"\n\n[buttons]\nconfirm_a = "buttons/a.png"\n',
+         'kind = "controller"\n\n[buttons]\na_button = "buttons/a.png"\n',
          glyph, "buttons/a.png")
 
     pad = Image.new("RGBA", (256, 192), (0, 0, 0, 0))
