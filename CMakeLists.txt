@@ -151,6 +151,7 @@ set(RBBLITZ_SOURCES
     # generated menu, the sandbox and the tests share.
     src/input/effective_input.cpp
     src/input/input_icons.cpp
+    src/input/last_device.cpp
     src/input/host_pad.cpp
     src/input/input_capture.cpp
     src/input/input_store.cpp
@@ -1103,6 +1104,13 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_input_gates_tests PRIVATE src)
     add_test(NAME input_gates COMMAND rb_blitz_input_gates_tests)
 
+    add_executable(rb_blitz_last_device_tests
+        tests/last_device_tests.cpp
+        src/input/last_device.cpp
+    )
+    target_include_directories(rb_blitz_last_device_tests PRIVATE src)
+    add_test(NAME last_device COMMAND rb_blitz_last_device_tests)
+
     # P7 of the gameplay-mapping plan: the in-game Controls rows. The `input.*` grammar, the
     # listening session's release-first and wrong-kind rules, and the store's one-writer save
     # against a temporary profile. SDK-free and SDL-free, like the store itself.
@@ -1112,6 +1120,7 @@ if(BUILD_TESTING)
         src/input/input_store.cpp
         src/input/effective_input.cpp
         src/input/input_icons.cpp
+        src/input/last_device.cpp
         src/profile/input_rows.cpp
         src/profile/profile.cpp
         src/profile/profile_path.cpp

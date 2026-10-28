@@ -9,6 +9,7 @@
 #include "input/effective_input.h"
 #include "input/host_pad.h"
 #include "input/input_capture.h"
+#include "input/last_device.h"
 #include "input/modal_input.h"
 #include "input/menu_music_bindings.h"
 #include "hooks/menu_music_now_playing.h"
@@ -102,6 +103,9 @@ PhysicalInput SamplePhysicalInput() {
   input.pad = rb_blitz::profile::remap::PadState{pad.buttons, pad.left_trigger, pad.right_trigger,
                                                  pad.thumb_lx, pad.thumb_ly, pad.thumb_rx,
                                                  pad.thumb_ry};
+  if (auto changed = last_device::Pad(input.pad_connected, input.pad)) {
+    REXLOG_INFO("button_schemes: active {} (device controller)", changed->scheme);
+  }
   if (input.window_focused) {
     // The raw button mask (a gameplay `mouse:` source is sampled here, never from the native
     // menu's queue - D3), and the keyboard from the window's own key-event latch

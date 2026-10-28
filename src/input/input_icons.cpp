@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "input/input_icons.h"
+#include "input/last_device.h"
 
 #include <algorithm>
 #include <array>
@@ -128,7 +129,15 @@ Icon FirstOf(const View& view, const std::vector<Icon>& all) {
 View Capture(std::string controller_scheme, Family family,
              const controller_schemes::Registry* registry) {
   auto snapshot = CurrentInput();
-  return {snapshot, std::move(controller_scheme), family, snapshot->revision, registry};
+  return {snapshot, std::move(controller_scheme), family, snapshot->revision, 0, registry};
+}
+
+View CaptureActive(const controller_schemes::Registry* registry) {
+  const auto state = last_device::Current();
+  View view = Capture(state.scheme, state.family == last_device::Family::kController
+                                       ? Family::kController : Family::kKeyboardMouse, registry);
+  view.device_revision = state.revision;
+  return view;
 }
 
 Icon Resolve(const Source& source, std::string_view controller_scheme,

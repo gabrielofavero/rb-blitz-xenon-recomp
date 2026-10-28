@@ -2,7 +2,9 @@
 
 **Status: in progress, created 2026-10-19; scope revised 2026-10-27. P0 delivered
 2026-10-26; P1, P2 and P3 delivered 2026-10-27; P6a and P8 delivered 2026-10-28.
-P4, P5, P6b, P7 and P9–P10 remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
+P4's tracker, D3D12 family switching and selected-pad-art stability were
+accepted 2026-10-28; visible binding-aware hints remain P10 work.
+P5, P6b, P7 and P9–P10 remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
 
@@ -975,6 +977,54 @@ persist a list index or a label; the token is the wire value. Do not mark the ro
 live effect is measured.
 
 ### P4 — Input-aware automatic switching
+
+**Host checkpoint (2026-10-28):** `src/input/last_device.{h,cpp}` starts in
+keyboard/mouse mode, tracks the selected controller scheme independently, and
+publishes a versioned state. The raw window key-down, mouse button/wheel and
+cumulative mouse-motion events feed it; the guest poll feeds only
+`SamplePhysicalPad`, which excludes synthetic devices. Pad buttons, triggers
+above 30 and stick axes beyond `kStickThreshold` count on a fresh edge. A 12 px
+cumulative mouse threshold and 100 ms family-switch debounce suppress motion
+noise and rapid alternating events. Focus loss clears pointer and pad-edge
+state without changing the active family. `icons::CaptureActive` consumes the
+same family/layout snapshot for P9/P10 guest hint rendering; changing family
+does not change the texture provider's selected controller pad art. Boot,
+selection and family switches emit `button_schemes: active … (device …)` lines.
+The release build and `last_device`, `input_bindings`, and `button_scheme`
+host tests pass. `scripts/acceptance_button_schemes_p4.ps1` builds and
+captures the owner-run UI test. P9/P10 have not connected this state to
+guest hint drawing yet.
+
+**Owner-run D3D12 evidence (2026-10-28):**
+`out/button-schemes/p4/d3d12-20261028-152254.log` starts with
+`active retail (device keyboard)` at 15:22:56.493, then records eight
+alternating family changes from 15:24:02.927 through 15:24:23.510. The
+shortest interval between changes is 1.036 s, so this run exercises both
+directions but does not measure the 100 ms debounce boundary. A subsequent
+host-only correction retains an opposite-family event received inside that
+window and publishes it at the deadline unless new activity from the current
+family cancels it. `last_device` tests cover that case; the owner log predates
+this correction. The boot used
+SDL's physical pad driver; `SamplePhysicalPad` excludes synthetic devices.
+No non-retail layout was selected, and the log has no visual capture. Pad-art
+independence and visible keyboard/controller hints remain unproven. The
+underlying guest hint route is P10 work, so a family log alone cannot close
+the visual part of P4.
+
+**Owner-run non-retail acceptance (2026-10-28):**
+`out/button-schemes/p4/d3d12-20261028-153751.log` records an in-game
+`controller.scheme` commit to `one-pad` at 15:38:37.575, a GPU-side selection
+at 15:38:37.746, and the `xbox_1` pad override at 15:38:57.087. Between
+15:39:10.921 and 15:39:42.068 it records three controller-to-keyboard
+round trips, all with `active one-pad`; there is no layout change in that
+interval. The owner reports that One Pad stayed selected and the same magenta
+pad art remained after starting with a controller and after using the keyboard.
+The supplied Controller Presets screenshot shows the magenta fixture. This
+accepts P4's selected-pad-art stability and device-family tracking on D3D12.
+The screenshot still shows retail A/B footer glyphs: guest hint drawing has
+not consumed `icons::CaptureActive` yet and remains P10, not an accepted
+keyboard-hint result. The 100 ms debounce boundary is host-tested but not
+timed in the live run; Vulkan has no P4-specific live run.
 
 **Goal.** Controller movement selects the controller art; keyboard/mouse input selects the keyboard
 art; the switch is immediate, stable and logged.

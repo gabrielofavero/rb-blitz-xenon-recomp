@@ -789,3 +789,26 @@ session/song/layout change, focus loss, modal/capture owner or hidden player can
 control while retaining an already-consumed release. Mouse Support off leaves the player visible
 with disabled pointer controls. The guest poll independently rechecks scope and capabilities.
 Host tests cover these policy boundaries; the owner will validate live event delivery and DPI.
+
+### Controller icon input family (2026-10-28 host checkpoint)
+
+`last_device::Tracker` starts in keyboard/mouse mode. `MouseCursor` supplies
+real key-down, mouse button, wheel and cumulative motion events from the window
+listener; `SamplePhysicalInput` supplies `SamplePhysicalPad` before the SDK
+merges synthetic keyboard-to-pad state. Only a new pad activity edge changes to
+controller mode. The tracker ignores motion below 12 cumulative pixels and
+defers an opposite-family event inside 100 ms until that window expires; a
+new active-family event cancels the pending change. Focus loss preserves
+the family and clears transient pointer/edge state. The chosen controller
+scheme is stored independently; selecting it does not claim a controller was
+last used. `icons::CaptureActive` captures the effective binding revision and
+the tracker family/layout revision for guest hint consumers. Mapping rows use
+their page's source scope instead of the last-device family. P9/P10 still need
+to consume this view in the guest's own UI. The owner-run D3D12 log
+`out/button-schemes/p4/d3d12-20261028-152254.log` records eight alternating
+family changes. A second D3D12 run
+(`out/button-schemes/p4/d3d12-20261028-153751.log`) selects One Pad and
+records three controller-to-keyboard round trips while the selected scheme
+stays One Pad; the owner confirmed its magenta pad art remained visible.
+Footer hints still use the guest's retail A/B glyphs until P10 consumes the
+resolver view.

@@ -18,6 +18,7 @@
 
 #include "assets/texture_codec.h"
 #include "controller_schemes/schemes.h"
+#include "input/last_device.h"
 #include "settings/schema.h"
 
 namespace rb_blitz::assets {
@@ -304,10 +305,19 @@ void InstallControllerSchemes(const std::filesystem::path& install_root,
   static SchemeOverride provider(std::move(registry));
   g_scheme_provider = &provider;
   rex::graphics::SetTextureOverrideProvider(&provider);
+  REXLOG_INFO("button_schemes: active retail (device keyboard)");
 }
 
 bool SelectControllerScheme(const std::string& id) {
-  return g_scheme_provider && g_scheme_provider->Select(id);
+  if (!g_scheme_provider || !g_scheme_provider->Select(id)) return false;
+  const auto before = input::last_device::Current();
+  input::last_device::SelectScheme(id);
+  if (before.scheme != id) {
+    REXLOG_INFO("button_schemes: active {} (device {})", id,
+                before.family == input::last_device::Family::kController
+                    ? "controller" : "keyboard");
+  }
+  return true;
 }
 
 }  // namespace rb_blitz::assets

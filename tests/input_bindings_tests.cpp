@@ -18,6 +18,7 @@
 #include "input/input_capture.h"
 #include "input/input_store.h"
 #include "input/input_icons.h"
+#include "input/last_device.h"
 #include "profile/input_rows.h"
 #include "profile/profile.h"
 #include "profile/remap.h"
@@ -79,6 +80,7 @@ void TestEffectiveIcons() {
                       Source("key:space")});
   rb_blitz::input::PublishInput(input);
   const auto row = rb_blitz::profile::ParseInputRowToken("input.general.a");
+  CHECK_TRUE(icons::CaptureActive().active_family == icons::Family::kKeyboardMouse);
   const auto pad = icons::Capture("retail", icons::Family::kController);
   const auto all = icons::Ordered(pad, row);
   input->general.Set(remap::Target::kA, {Source("pad:b")});
@@ -97,6 +99,16 @@ void TestEffectiveIcons() {
   const auto imported = icons::Capture("ps3", icons::Family::kController, &packages);
   CHECK_TRUE(icons::First(imported, row).art == icons::Art::kPackageImage);
   CHECK_TRUE(icons::First(imported, row).rgba == std::vector<uint8_t>({9, 8, 7, 255}));
+  rb_blitz::input::last_device::SelectScheme("ps3");
+  rb_blitz::input::last_device::Focus(true);
+  rb_blitz::profile::remap::PadState real_pad{};
+  real_pad.buttons = 0x8000;
+  CHECK_TRUE(rb_blitz::input::last_device::Pad(true, real_pad).has_value());
+  const auto active = icons::CaptureActive(&packages);
+  CHECK_TRUE(active.active_family == icons::Family::kController);
+  CHECK_TRUE(active.controller_scheme == "ps3");
+  CHECK_TRUE(active.device_revision > 0);
+  CHECK_TRUE(icons::First(active, row).art == icons::Art::kPackageImage);
   CHECK_TRUE(icons::First(icons::Capture("steam-deck", icons::Family::kController, &packages), row)
                  .diagnostic.find("unavailable") != std::string::npos);
   const auto keyboard = icons::Capture("ps3", icons::Family::kKeyboardMouse);

@@ -9,6 +9,17 @@ is removed from this file, not from the log.
 
 ## Open
 
+**Controller icon family switching (2026-10-28):** the raw-input tracker,
+selected-layout separation and resolver snapshot pass host tests and the
+release build. Owner-run D3D12 logs record alternating keyboard/controller
+changes; a second run selects One Pad and confirms its magenta controller
+image remains visible across three controller-to-keyboard round trips. The
+100 ms debounce boundary is host-tested but unmeasured live; Vulkan has no
+P4-specific run. The visible footer still shows retail A/B glyphs because
+guest remap-aware hint drawing remains P10 work. The mapping rows remain P9.
+See the
+[button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P4.
+
 **Load Guard coverage limits (2026-10-26):** the debugger
 located a signed 16-bit event-count overflow on the custom MIDI's optional
 LIPSYNC1 track. The host now rejects LIPSYNC1–4 through the title's own MIDI

@@ -36,12 +36,15 @@ struct View {
   std::string controller_scheme;
   Family active_family = Family::kKeyboardMouse;
   uint64_t revision = 0;
+  uint64_t device_revision = 0;
   // Boot owns the registry for the view's lifetime. Null means use the retail sheet.
   const controller_schemes::Registry* registry = nullptr;
 };
 
 View Capture(std::string controller_scheme, Family active_family,
              const controller_schemes::Registry* registry = nullptr);
+// Uses the atomic last-device/layout snapshot for ordinary action hints.
+View CaptureActive(const controller_schemes::Registry* registry = nullptr);
 Icon Resolve(const profile::remap::Source& source, std::string_view controller_scheme,
              const controller_schemes::Registry* registry = nullptr);
 std::vector<Icon> Ordered(const View& view, const profile::InputRowToken& row);

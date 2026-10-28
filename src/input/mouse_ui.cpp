@@ -2,6 +2,7 @@
 #include "input/mouse_ui.h"
 #include "input/native_menu.h"
 #include "input/remap.h"
+#include "input/last_device.h"
 #include "input/source_gates.h"
 #include "input/title_input.h"
 #include "ui/menu_music_player.h"
@@ -20,6 +21,7 @@
 #include <rex/cvar.h>
 #include <rex/input/input_driver.h>
 #include <rex/input/input_system.h>
+#include <rex/logging.h>
 #include <rex/ui/flags.h>
 #include <rex/ui/virtual_key.h>
 #include <rex/ui/window.h>
@@ -175,6 +177,8 @@ void LatchKey(rex::ui::VirtualKey key, bool down) {
     const bool was = g_keys_down[scancode].exchange(down, std::memory_order_relaxed);
     if (down && !was) {
       g_any_key_down.fetch_add(1, std::memory_order_relaxed);
+      if (auto changed = last_device::KeyDown())
+        REXLOG_INFO("button_schemes: active {} (device keyboard)", changed->scheme);
       if (const char* name = SDL_GetScancodeName(scancode); name != nullptr && name[0] != 0) {
         PushKeyEvent(name);
       }
@@ -276,6 +280,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     ui::music::CancelPlayerPointer();
     window_->RemoveInputListener(this); window_->RemoveListener(this);
     window_ = nullptr; g_mouse_buttons = 0; g_window_focused = false; ClearKeys();
+    last_device::Focus(false);
     g_wheel_detents = 0;
     MouseMenuFocus(false);
   }
@@ -287,11 +292,14 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     // happen outside it never reach this listener, so the latches must not stay pressed.
     g_mouse_buttons = 0;
     g_window_focused = false;
+    last_device::Focus(false);
     ClearKeys();
     g_wheel_detents = 0;
     MouseMenuFocus(false);
   }
-  void OnGotFocus(rex::ui::UISetupEvent&) override { g_window_focused = true; MouseMenuFocus(true); }
+  void OnGotFocus(rex::ui::UISetupEvent&) override {
+    g_window_focused = true; last_device::Focus(true); MouseMenuFocus(true);
+  }
   void OnKeyDown(rex::ui::KeyEvent& e) override { LatchKey(e.virtual_key(), true); }
   void OnKeyUp(rex::ui::KeyEvent& e) override { LatchKey(e.virtual_key(), false); }
   void OnDraw(ImGuiIO& io) override {
@@ -301,6 +309,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
       // Above the keyboard's mouse bindings (0), below the SDK dialogs.
       window_->AddInputListener(this, 1); window_->AddListener(this);
       g_window_focused = window_->HasFocus();
+      last_device::Focus(g_window_focused);
       MouseMenuFocus(g_window_focused);
     }
     MouseMenuFocus(window_->HasFocus() && !io.WantCaptureMouse && !ui::music::PlayerPointerOver());
@@ -308,7 +317,13 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
         (dragging_ && (CurrentScreen() != drag_screen_ || CurrentFocus() != drag_focus_))) EndDrag();
     // The focus facts are read on the main thread where SDL allows them, and per frame because
     // this listener attaches after the window exists (so the initial focus has no OnGotFocus).
-    g_window_focused = window_->HasFocus();
+    const bool focused = window_->HasFocus();
+    if (focused != g_window_focused.load()) last_device::Focus(focused);
+    g_window_focused = focused;
+    if (auto changed = last_device::Tick())
+      REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
+                  changed->family == last_device::Family::kController
+                      ? "controller" : "keyboard");
     g_sdl_keyboard_focused = SDL_GetKeyboardFocus() != nullptr;
     // The raw mask is the event latch, not `SDL_GetMouseState`: P2's live arm measured SDL's
     // device state blind in this process (both the key and the mouse arrays read zero while the
@@ -342,6 +357,8 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     return p;
   }
   void OnMouseMove(rex::ui::MouseEvent& e) override {
+    if (auto changed = last_device::MouseMove(e.x(), e.y()))
+      REXLOG_INFO("button_schemes: active {} (device keyboard)", changed->scheme);
     if (PlayerEvent(ui::music::PointerEvent::kMove, e)) return;
     if (!MouseSupportEnabled()) return;
     const bool moved = e.x() != last_x_ || e.y() != last_y_;
@@ -359,6 +376,8 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     e.set_handled(true);
   }
   void OnMouseDown(rex::ui::MouseEvent& e) override {
+    if (auto changed = last_device::MouseButton())
+      REXLOG_INFO("button_schemes: active {} (device keyboard)", changed->scheme);
     if (PlayerEvent(ui::music::PointerEvent::kDown, e)) return;
     // The raw mask is device state, so it is recorded whatever the gates say: the sampler applies
     // the gates, and a mouse button recorded while Mouse Support is off must not look "never
@@ -399,6 +418,8 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     e.set_handled(true);
   }
   void OnMouseWheel(rex::ui::MouseEvent& e) override {
+    if (auto changed = last_device::MouseWheel())
+      REXLOG_INFO("button_schemes: active {} (device keyboard)", changed->scheme);
     if (PlayerEvent(ui::music::PointerEvent::kWheel, e)) return;
     // Device state first, gate second: the sampler applies the gates, and a capture binds a
     // detent while Mouse Support is off.
