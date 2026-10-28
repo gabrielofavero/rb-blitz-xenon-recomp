@@ -295,12 +295,12 @@ packages), release build, nothing cached:
 The 100 ms is `KernelState::CompleteOverlappedDeferredEx`'s emulated storage latency
 (`constexpr kDeferredOverlappedDelayMillis` before patch
 [0011](../../patches/README.md)), and `XamContentCreate` — the call a content mount goes
-through — defers *the whole mount* through it. So with `enhancements_dlc_cache` on the
-host sets `--deferred_overlapped_delay_ms=0` for the run
-([src/hooks/dlc.cpp](../../src/hooks/dlc.cpp)): 662 s becomes 379 s. Nothing else changes
-— the completion still runs on the dispatch thread, still sets the overlapped, still
-queues the completion routine — and with the toggle off the value is the SDK's own 100,
-so the faithful boot is byte-for-byte the boot this project had before R7.
+through — defers *the whole mount* through it. At the time of this measurement,
+turning on R7 also set `deferred_overlapped_delay_ms=0`: 662 s became 379 s.
+The completion still ran on the dispatch thread, set the overlapped and queued
+the completion routine. The current build sets this delay to zero on **every**
+boot, including Cache Off; the historical 280 s saving is not attributable to
+the cache toggle today.
 
 ### The title caches this itself, and R7 is what lets it finish
 
@@ -573,7 +573,9 @@ but keeps accurate progress and the separately selected pacing policy.
 The **host cache** stores the flat library's content list. It still fingerprints every file and
 does not cache structured-root traversal, guest enumeration, STFS mounts or song metadata. The
 production loader is [dlc_cached_library.h](../../src/fs/dlc_cached_library.h), shared by boot,
-refresh and [the benchmark](../../tools/dlc_cache_benchmark.cpp). Logs name effective roots,
+refresh and [the benchmark](../../tools/dlc_cache_benchmark.cpp). The
+[2026-10-27 comparison](../performance/dlc-cache-comparison-2026-10-27.md) separates
+warm scans, a first-access scan, cache creation and cache hits. Logs name effective roots,
 content type, hit/miss reason, counts, fingerprint/load/scan/verification/write times and write
 outcome. Existing enhancement/settings boot logs identify the setting's source; changing the
 in-game Cache DLC Library row still requires restart.

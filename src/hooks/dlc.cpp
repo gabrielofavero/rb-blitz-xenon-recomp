@@ -253,6 +253,8 @@ fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool for
                                         const uint32_t scan_threads,
                                         const std::filesystem::path& cache_path,
                                         const char* when, bool* cache_hit = nullptr) {
+  REXLOG_INFO("dlc_cache: begin when={} enabled={} refresh={} roots='{}'", when,
+              cache_enabled, force_refresh, JoinLibraryRoots(roots));
   const auto result = fs::LoadOrScanDlcLibrary(cache_enabled, force_refresh, roots,
                                               force_content_type, scan_threads, cache_path);
   if (cache_hit) *cache_hit = result.hit;
@@ -260,10 +262,11 @@ fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool for
               "content_type={:08X} path='{}' packages={} files={}", when, cache_enabled,
               force_refresh, result.hit ? "hit" : "scan", result.reason, JoinLibraryRoots(roots),
               force_content_type, cache_path.string(), result.library.items.size(), result.library.files_seen);
-  REXLOG_INFO("dlc_cache: fingerprint_ms={:.3f} load_ms={:.3f} scan_ms={:.3f} "
+  REXLOG_INFO("dlc_cache: end when={} total_ms={:.3f} fingerprint_ms={:.3f} "
+              "load_ms={:.3f} scan_ms={:.3f} "
               "verify_ms={:.3f} write_ms={:.3f} written={} write_reason='{}'",
-              result.fingerprint_ms, result.load_ms, result.scan_ms, result.verify_ms,
-              result.write_ms, result.written, result.write_reason);
+              when, result.total_ms, result.fingerprint_ms, result.load_ms, result.scan_ms,
+              result.verify_ms, result.write_ms, result.written, result.write_reason);
   for (const auto& rejected : result.library.rejected)
     REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
   return result.library;

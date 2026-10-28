@@ -10,6 +10,7 @@ struct CachedLibraryResult {
   bool hit = false, written = false;
   std::string reason, write_reason;
   double fingerprint_ms = 0, load_ms = 0, scan_ms = 0, verify_ms = 0, write_ms = 0;
+  double total_ms = 0;
 };
 
 // Shared by boot, refresh and the host benchmark. A failed or changing scan must
@@ -18,6 +19,11 @@ inline CachedLibraryResult LoadOrScanDlcLibrary(bool enabled, bool refresh,
     const std::vector<std::filesystem::path>& roots, uint32_t content_type,
     uint32_t threads, const std::filesystem::path& path) {
   CachedLibraryResult result;
+  const auto total_start = std::chrono::steady_clock::now();
+  const auto finish = [&] {
+    result.total_ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - total_start).count();
+  };
   const auto timed = [](double& ms, auto&& operation) {
     const auto start = std::chrono::steady_clock::now();
     const bool ok = operation();
@@ -41,6 +47,7 @@ inline CachedLibraryResult LoadOrScanDlcLibrary(bool enabled, bool refresh,
       if (result.hit) {
         result.reason = "unchanged library";
         result.library = ToLibraryScanResult(cache);
+        finish();
         return result;
       }
     } else if (fingerprint_ok) result.reason = "explicit refresh";
@@ -66,6 +73,7 @@ inline CachedLibraryResult LoadOrScanDlcLibrary(bool enabled, bool refresh,
       } else if (stable) result.write_reason = "library changed during scan";
     }
   } else result.write_reason = enabled ? "no complete fingerprint" : "disabled";
+  finish();
   return result;
 }
 }  // namespace rb_blitz::fs

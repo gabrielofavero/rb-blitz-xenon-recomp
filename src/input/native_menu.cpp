@@ -261,6 +261,7 @@ bool ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first, Menu
     REXLOG_INFO("native_mouse: scrollbar first={} target={} row={} dir={}", current, first, row, direction);
   return true;
 }
+std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoint point);
 }
 
 bool MouseSupportEnabled() { return REXCVAR_GET(mouse_ui_nav); }
@@ -416,6 +417,15 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
                       current_screen_name, current_panel_name, i);
       }
       return;
+    }
+  }
+  if (event->action == MouseAction::kAccept) {
+    if (const auto arrow = PresetArrowAt(ctx, base, event->point)) {
+      // The art belongs to the guest's preset page. A controller D-pad pulse
+      // reaches its own left/right handler, including its normal wrap behavior.
+      Select(ctx, base, event->point); // retire any mouse-owned list hover
+      scroll_follow.Reset();
+      event->action = *arrow;
     }
   }
   // Scrollbar traffic drives the list's view directly (no pad pulse, no horizontal
@@ -577,6 +587,24 @@ uint32_t SceneMesh(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* nam
   if (it == mesh_objects.end() || ObjectBase(base, it->second) != object ||
       ObjectName(base, object) != name) return 0;
   return it->second;
+}
+
+namespace {
+std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoint point) {
+  if (current_screen_name != "controller_config_screen" &&
+      current_screen_name != "controller_config_pause_screen") return {};
+  // UIPanel +0x34 owns the loaded PanelDir, whose authored arrow meshes are
+  // named in controller_config.milo_xbox. Resolve only on a click so placement
+  // and aspect changes use the scene's current transforms at minimal cost.
+  const uint32_t panel = U32(base, current_screen + 52);
+  const uint32_t dir = panel ? U32(base, panel + 52) : 0;
+  if (!dir) return {};
+  const uint32_t left = SceneMesh(ctx, base, dir, "arrow_lt.mesh");
+  const uint32_t right = SceneMesh(ctx, base, dir, "arrow_rt.mesh");
+  return HitPresetArrow(point,
+                        left ? ProjectMesh(ctx, base, left) : std::nullopt,
+                        right ? ProjectMesh(ctx, base, right) : std::nullopt);
+}
 }
 
 MenuRail MeasureRail(PPCContext& ctx, uint8_t* base, uint32_t list, const Geometry& rows) {

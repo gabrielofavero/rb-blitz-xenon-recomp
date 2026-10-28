@@ -28,6 +28,23 @@ int main() {
   CHECK_EQ(LibraryHeaderForLabel("main_Home.lbl"), 3);
   CHECK_EQ(LibraryHeaderForLabel("main_new_msg.lbl"), -1);
 
+  BeginCase("preset arrows dispatch their matching D-pad directions only on their art");
+  const MenuBounds left_arrow{.22f, .25f, .24f, .31f};
+  const MenuBounds right_arrow{.74f, .25f, .76f, .31f};
+  CHECK_TRUE(HitPresetArrow({.23f, .28f}, left_arrow, right_arrow) == MouseAction::kLeft);
+  CHECK_TRUE(HitPresetArrow({.75f, .28f}, left_arrow, right_arrow) == MouseAction::kRight);
+  CHECK_FALSE(HitPresetArrow({.5f, .28f}, left_arrow, right_arrow));
+  CHECK_FALSE(HitPresetArrow({.23f, .35f}, left_arrow, right_arrow));
+  CHECK_FALSE(HitPresetArrow({NAN, .28f}, left_arrow, right_arrow));
+  CHECK_FALSE(HitPresetArrow({.23f, .28f}, std::nullopt, std::nullopt));
+  MenuMouseQueue preset_clicks;
+  preset_clicks.Context(1, 2, true);
+  preset_clicks.Pulse(*HitPresetArrow({.23f, .28f}, left_arrow, right_arrow));
+  CHECK_EQ(preset_clicks.SamplePad(), 4);
+  preset_clicks.Reset();
+  preset_clicks.Pulse(*HitPresetArrow({.75f, .28f}, left_arrow, right_arrow));
+  CHECK_EQ(preset_clicks.SamplePad(), 8);
+
   BeginCase("pointer mapping respects letterboxing, stretch and overscan");
   auto p = MenuPointer(1280, 360, 2560, 720, 16, 9, true, false, 90, 90);
   CHECK_TRUE(p.x == .5f && p.y == .5f);

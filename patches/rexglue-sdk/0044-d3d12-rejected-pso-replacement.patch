@@ -1,0 +1,20 @@
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -3505,7 +3505,7 @@
+   // damaged one is refused before it reaches the driver.
+   const uint64_t native_cache_key = XXH3_64bits(&description, sizeof(description));
+   std::vector<uint8_t> native_cached_blob;
+-  const bool native_blob_loaded =
++  bool native_blob_loaded =
+       native_cache_.enabled() && native_cache_.Load(native_cache_key, native_cached_blob);
+   if (native_blob_loaded) {
+     state_desc.CachedPSO.pCachedBlob = native_cached_blob.data();
+@@ -3528,6 +3528,7 @@
+         "it and replacing the entry",
+         uint32_t(create_result));
+     native_cache_.Forget(native_cache_key);
+     state_desc.CachedPSO.pCachedBlob = nullptr;
++    native_blob_loaded = false;
+     state_desc.CachedPSO.CachedBlobSizeInBytes = 0;
+     create_result = rex::graphics::compile_trace::Call(

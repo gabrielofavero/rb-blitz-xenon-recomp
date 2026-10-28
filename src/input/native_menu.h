@@ -98,6 +98,21 @@ enum class MouseAction { kMove, kAccept, kBack, kUp, kDown, kLeft, kRight,
                          kScrollbarDown, kScrollbarDrag, kScrollbarUp };
 struct MenuMouseEvent { MouseAction action; MenuPoint point; };
 
+// The preset page's arrows are meshes, not focused list rows. Their projected
+// rectangles are supplied by the guest scene; a small margin makes the thin
+// arrow art practical to click without turning the space between them into a target.
+inline std::optional<MouseAction> HitPresetArrow(MenuPoint point,
+                                                const std::optional<MenuBounds>& left,
+                                                const std::optional<MenuBounds>& right) {
+  const auto hit = [point](const std::optional<MenuBounds>& bounds) {
+    return bounds && MenuBounds{bounds->left - .012f, bounds->top - .012f,
+                                bounds->right + .012f, bounds->bottom + .012f}.Contains(point);
+  };
+  if (hit(left)) return MouseAction::kLeft;
+  if (hit(right)) return MouseAction::kRight;
+  return {};
+}
+
 // Small lists retain precise single-row scrolling. Large song libraries scale to
 // roughly one percent per notch, capped at one visible page.
 inline int LibraryWheelRows(int total, int display) {
