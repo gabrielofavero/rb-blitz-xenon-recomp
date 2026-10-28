@@ -150,6 +150,7 @@ set(RBBLITZ_SOURCES
     # the store that owns the controller profile's binding rows, and the token grammar the
     # generated menu, the sandbox and the tests share.
     src/input/effective_input.cpp
+    src/input/input_icons.cpp
     src/input/host_pad.cpp
     src/input/input_capture.cpp
     src/input/input_store.cpp
@@ -1110,6 +1111,7 @@ if(BUILD_TESTING)
         src/input/input_capture.cpp
         src/input/input_store.cpp
         src/input/effective_input.cpp
+        src/input/input_icons.cpp
         src/profile/input_rows.cpp
         src/profile/profile.cpp
         src/profile/profile_path.cpp

@@ -17,6 +17,7 @@
 #include "check.h"
 #include "input/input_capture.h"
 #include "input/input_store.h"
+#include "input/input_icons.h"
 #include "profile/input_rows.h"
 #include "profile/profile.h"
 #include "profile/remap.h"
@@ -66,6 +67,124 @@ void TestTokenGrammar() {
   CHECK_TRUE(rb_blitz::profile::BindingRowLabel(back) == "Left bumper");
   CHECK_TRUE(rb_blitz::profile::ParseInputRowSymbol("settings_vsync").kind ==
              InputRowKind::kNone);
+}
+
+void TestEffectiveIcons() {
+  rb_blitz::test::BeginCase("input icons: effective order, family and revision");
+  namespace icons = rb_blitz::input::icons;
+  namespace remap = rb_blitz::profile::remap;
+  auto input = std::make_shared<rb_blitz::input::EffectiveInput>();
+  input->general.Set(remap::Target::kA,
+                     {Source("pad:y"), Source("key:Return"), Source("pad:a"),
+                      Source("key:space")});
+  rb_blitz::input::PublishInput(input);
+  const auto row = rb_blitz::profile::ParseInputRowToken("input.general.a");
+  const auto pad = icons::Capture("retail", icons::Family::kController);
+  const auto all = icons::Ordered(pad, row);
+  input->general.Set(remap::Target::kA, {Source("pad:b")});
+  CHECK_TRUE(icons::First(pad, row).slot == "y");
+  CHECK_EQ(all.size(), 4u);
+  CHECK_TRUE(all[0].slot == "y");
+  CHECK_TRUE(all[1].art == icons::Art::kBuiltIn);
+  CHECK_TRUE(all[1].legend == "Enter");
+  CHECK_TRUE(!all[1].rgba.empty());
+  CHECK_TRUE(icons::First(pad, row).slot == "y");
+  rb_blitz::controller_schemes::Registry packages;
+  rb_blitz::controller_schemes::Scheme ps3;
+  ps3.id = "ps3";
+  ps3.buttons["y"] = {1, 1, {9, 8, 7, 255}};
+  packages.schemes.emplace("ps3", std::move(ps3));
+  const auto imported = icons::Capture("ps3", icons::Family::kController, &packages);
+  CHECK_TRUE(icons::First(imported, row).art == icons::Art::kPackageImage);
+  CHECK_TRUE(icons::First(imported, row).rgba == std::vector<uint8_t>({9, 8, 7, 255}));
+  CHECK_TRUE(icons::First(icons::Capture("steam-deck", icons::Family::kController, &packages), row)
+                 .diagnostic.find("unavailable") != std::string::npos);
+  const auto keyboard = icons::Capture("ps3", icons::Family::kKeyboardMouse);
+  CHECK_TRUE(icons::First(keyboard, row).legend == "Enter");
+  CHECK_TRUE(icons::Ordered(keyboard, row)[1].rgba == all[1].rgba);
+  for (const char* scheme : {"retail", "ps3", "xbox-series", "playstation-series",
+                             "nintendo-switch", "steam-controller", "steam-deck", "custom"}) {
+    const auto choice = icons::Capture(scheme, icons::Family::kKeyboardMouse);
+    CHECK_TRUE(icons::First(choice, row).rgba == icons::First(keyboard, row).rgba);
+  }
+  CHECK_TRUE(icons::Resolve(Source("key:semicolon"), "retail").art == icons::Art::kBuiltIn);
+  const auto unknown_key = icons::Resolve(Source("key:~"), "retail");
+  CHECK_TRUE(unknown_key.art == icons::Art::kUnsupported);
+  CHECK_TRUE(!unknown_key.diagnostic.empty());
+  auto gameplay = rb_blitz::input::CopyCurrentInput();
+  gameplay->controller.Set(rb_blitz::profile::gameplay_remap::Action::kFirstNote,
+                           {Source("pad:x"), Source("pad:y")});
+  gameplay->keyboard_mouse.Set(rb_blitz::profile::gameplay_remap::Action::kFirstNote,
+                                {Source("key:q"), Source("mouse:left")});
+  rb_blitz::input::PublishInput(gameplay);
+  const auto game_pad = icons::Capture("retail", icons::Family::kController);
+  const auto game_keys = icons::Capture("retail", icons::Family::kKeyboardMouse);
+  CHECK_TRUE(icons::First(game_pad, rb_blitz::profile::gameplay_remap::Action::kFirstNote).slot == "x");
+  CHECK_TRUE(icons::First(game_keys, rb_blitz::profile::gameplay_remap::Action::kFirstNote).legend == "Q");
+  CHECK_TRUE(icons::Ordered(game_keys, rb_blitz::profile::gameplay_remap::Action::kFirstNote).size() == 2);
+  auto pad_only = rb_blitz::input::CopyCurrentInput();
+  pad_only->general.Set(remap::Target::kA, {Source("pad:y")});
+  rb_blitz::input::PublishInput(pad_only);
+  CHECK_TRUE(icons::First(icons::Capture("retail", icons::Family::kKeyboardMouse), row).art ==
+             icons::Art::kUnbound);
+
+  auto preset = rb_blitz::input::CopyCurrentInput();
+  preset->controller.Reset(rb_blitz::profile::gameplay_remap::Action::kFirstNote);
+  preset->controller.SetControllerPreset(0);
+  rb_blitz::input::PublishInput(preset);
+  const auto before_preset = icons::First(icons::Capture("retail", icons::Family::kController),
+                                          rb_blitz::profile::gameplay_remap::Action::kFirstNote);
+  preset = rb_blitz::input::CopyCurrentInput();
+  preset->controller.SetControllerPreset(1);
+  rb_blitz::input::PublishInput(preset);
+  const auto after_preset = icons::First(icons::Capture("retail", icons::Family::kController),
+                                         rb_blitz::profile::gameplay_remap::Action::kFirstNote);
+  CHECK_TRUE(before_preset.slot != after_preset.slot);
+
+  auto edited = rb_blitz::input::CopyCurrentInput();
+  edited->general.Set(remap::Target::kA, {Source("mouse:right"), Source("key:space")});
+  rb_blitz::input::PublishInput(edited);
+  const auto after = icons::Capture("retail", icons::Family::kKeyboardMouse);
+  CHECK_TRUE(after.revision > keyboard.revision);
+  CHECK_TRUE(icons::First(after, row).legend == "Right Click");
+  CHECK_TRUE(icons::First(keyboard, row).legend == "Enter");
+  edited = rb_blitz::input::CopyCurrentInput();
+  edited->general.Set(remap::Target::kA, {});
+  rb_blitz::input::PublishInput(edited);
+  CHECK_TRUE(icons::First(icons::Capture("retail", icons::Family::kController), row).art ==
+             icons::Art::kUnbound);
+  edited = rb_blitz::input::CopyCurrentInput();
+  edited->general.Reset(remap::Target::kA);
+  rb_blitz::input::PublishInput(edited);
+  CHECK_TRUE(icons::First(icons::Capture("retail", icons::Family::kController), row).slot ==
+             "confirm_a");
+  const auto trigger = rb_blitz::profile::ParseInputRowToken("input.general.left_trigger");
+  CHECK_TRUE(icons::First(pad, trigger).slot == "left_trigger");
+}
+
+void TestIconSourceCatalog() {
+  rb_blitz::test::BeginCase("input icons: every accepted physical source has a distinct image route");
+  namespace icons = rb_blitz::input::icons;
+  namespace remap = rb_blitz::profile::remap;
+  for (const auto target : remap::Targets()) {
+    const auto icon = icons::Resolve({remap::SourceKind::kPad,
+                                      std::string(remap::TargetName(target))}, "retail");
+    CHECK_TRUE(icon.art == icons::Art::kSchemeSlot || icon.art == icons::Art::kBuiltIn);
+    CHECK_TRUE(!icon.slot.empty() || !icon.rgba.empty());
+  }
+  for (const auto direction : remap::PadDirections()) {
+    const auto icon = icons::Resolve({remap::SourceKind::kPad,
+                                      std::string(remap::PadDirectionName(direction))}, "retail");
+    CHECK_TRUE(icon.art == icons::Art::kBuiltIn);
+    CHECK_TRUE(!icon.rgba.empty());
+  }
+  for (const char* name : {"left", "right", "middle", "x1", "x2", "wheel_up", "wheel_down"}) {
+    const auto icon = icons::Resolve({remap::SourceKind::kMouse, name}, "retail");
+    CHECK_TRUE(icon.art == icons::Art::kBuiltIn);
+    CHECK_TRUE(!icon.rgba.empty());
+  }
+  CHECK_TRUE(icons::Resolve({remap::SourceKind::kPad, "steam_back_grip"}, "steam-deck").art ==
+             icons::Art::kUnsupported);
 }
 
 void TestCaptureReleasesFirst() {
@@ -566,6 +685,8 @@ void TestMusicBindings() {
 }  // namespace
 
 int main() {
+  TestEffectiveIcons();
+  TestIconSourceCatalog();
   TestMusicBindings();
   TestTokenGrammar();
   TestCaptureReleasesFirst();

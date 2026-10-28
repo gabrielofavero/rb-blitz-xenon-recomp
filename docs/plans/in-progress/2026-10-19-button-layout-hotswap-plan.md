@@ -1,7 +1,8 @@
 # Button layout hot-swapping — button glyphs and controller art
 
 **Status: in progress, created 2026-10-19; scope revised 2026-10-27. P0 delivered
-2026-10-26; P1, P2 and P3 delivered 2026-10-27; P4 onward remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
+2026-10-26; P1, P2 and P3 delivered 2026-10-27; P8 delivered 2026-10-28.
+P4–P7 and P9–P10 remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
 
@@ -1120,6 +1121,35 @@ owner's art in the integration; report a bad slot to the owner. Do not commit th
 - Run `python .github/skills/documentation/scripts/check_docs.py` (exit 0) and `git diff --check`.
 
 ### P8 — Effective-binding icon resolver and built-in keyboard/mouse provider
+
+**Status (2026-10-28): P8 host resolver delivered.** `src/input/input_icons.{h,cpp}` reads the
+published effective-input snapshot, preserves binding order, selects the first source in the
+active family, maps physical pad sources to controller slots or a built-in keycap, and renders
+host key/mouse keycaps as original RGBA images. A selected package's declared button image is
+returned when available; an omitted slot remains a retail-sheet reference. Snapshot revisions
+change after input publication. Host tests cover reorder, family/layout choice, explicit empty,
+reset, preset change, source catalog, and package fallback. The resolver is not yet consumed by
+guest mapping rows or hints; P9/P10 own those rendering paths and their live acceptance.
+
+The input parser accepts **16 pad targets plus eight stick directions**; the icon catalog
+maps 14 pad targets to the measured sheet slots and renders Start, Back, and all eight stick
+directions with original built-in keycaps. It covers all seven accepted mouse sources (five
+buttons and two wheel directions). Key names are accepted as SDL-style strings by the profile
+parser; the renderer draws printable alphanumeric legends and marks a legend it cannot render
+with a neutral `?` image and a diagnostic. Steam Controller and Steam Deck back grips, touchpads
+and other device-specific controls have no bindable source in the current driver, so package art
+does not imply input support for them. Every controller family uses the same physical source
+vocabulary and slot IDs; only its selected artwork changes.
+
+Read/invalidation seams: `InputStore::Publish` publishes after a durable binding commit and
+`ObserveControllerPreset` republishes after the retail preset changes. `icons::Capture` holds
+one `CurrentInput()` pointer and its revision. `icons::Ordered` reads `general.Effective`,
+`controller.Effective`, `keyboard_mouse.Effective`, or `music.Effective` directly, so a row's
+saved source order and explicit empty value survive without copied defaults. A caller captures
+again after a commit, reset, preset/profile publication, layout change or last-device change;
+there is no separate icon cache to invalidate. `icons::First` filters the ordered list by the
+active family and returns a neutral unbound image if that family has no source. Guest display
+consumption remains P9/P10's responsibility.
 
 **Goal.** One source of truth resolves physical input images for every mapping row and game hint,
 without a selectable keyboard scheme or a dependency on the owner's controller art.

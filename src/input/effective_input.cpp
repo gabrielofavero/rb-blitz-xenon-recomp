@@ -35,7 +35,9 @@ void PublishInput(std::shared_ptr<EffectiveInput> input) {
     return;
   }
   std::lock_guard lock(Mutex());
-  Slot() = std::move(input);
+  auto published = std::make_shared<EffectiveInput>(*input);
+  published->revision = Slot()->revision + 1;
+  Slot() = std::move(published);
 }
 
 std::shared_ptr<EffectiveInput> CopyCurrentInput() {

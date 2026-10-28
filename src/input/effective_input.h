@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <memory>
 
 #include "profile/gameplay_remap.h"
@@ -35,6 +36,9 @@ namespace rb_blitz::input {
 // on a host thread), so this snapshot is about the three binding tables and whether a profile was
 // readable at all - the fact that decides whether General Mapping's compiled defaults apply.
 struct EffectiveInput {
+  // Changes on every publication, including a retail preset change. Consumers can hold a
+  // coherent snapshot while a binding edit publishes the next one.
+  uint64_t revision = 0;
   profile::remap::Table general;
   profile::music::Bindings music;
   profile::gameplay_remap::Table controller{
