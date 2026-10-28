@@ -338,6 +338,36 @@ class RbBlitzApp : public rex::ReXApp {
     // *before* bridge::Configure, whose seeding goes through the channel's store - so the channel
     // must already be pointed at the service.
     settings_boot_->AfterLoadXexImage(selected_backend_);
+    // The menu authoring below snapshots descriptor choices. Discover packages first, so its
+    // controller selector and the texture provider use the same boot catalog.
+    if (rex::cvar::GetFlagByName("enhancements_icon_schemes") == "true") {
+      rb_blitz::assets::InstallControllerSchemes(
+          rex::filesystem::GetExecutableFolder() / "assets" / "controller" / "schemes",
+          runtime()->user_data_root() / "controller_schemes");
+      std::string selected = "retail";
+      if (settings_boot_ && settings_boot_->service()) {
+        auto* service = settings_boot_->service();
+        service->RefreshControllerSchemes();
+        const std::string requested =
+            service->RequestedValue(rb_blitz::settings::SettingId::kButtonScheme).text;
+        if (rb_blitz::assets::SelectControllerScheme(requested)) {
+          selected = requested;
+        } else {
+          REXLOG_WARN("button_schemes: saved scheme {} is missing, using retail", requested);
+          rb_blitz::settings::Value fallback;
+          fallback.kind = rb_blitz::settings::ValueKind::kEnum;
+          fallback.text = "retail";
+          service->store().MarkChanged(rb_blitz::settings::SettingId::kButtonScheme,
+                                       fallback, rb_blitz::settings::Origin::kAutomatic);
+          service->store().Save();
+        }
+      }
+      rb_blitz::assets::SelectControllerScheme(selected);
+      if (const char* probe = std::getenv("RB_BLITZ_SCHEME")) {
+        if (!rb_blitz::assets::SelectControllerScheme(probe))
+          REXLOG_WARN("button_schemes: probe scheme '{}' is unavailable", probe);
+      }
+    }
     // Publish overrides before authoring disabled menu rows, once all config sources exist.
     settings_boot_->FinishInit();
     settings_boot_->SetPresentedProbe([this] {
@@ -429,9 +459,6 @@ class RbBlitzApp : public rex::ReXApp {
   // change to kInitOnly flags, which is correct here - those are device and logging
   // selections that the config, environment and command line have already fixed.
   void OnPreLaunchModule() override {
-    rb_blitz::assets::InstallControllerSchemes(
-        rex::filesystem::GetExecutableFolder() / "assets" / "controller" / "schemes",
-        runtime()->user_data_root() / "controller_schemes");
     rb_blitz::assets::InstallP1TextureOverride();
     // P11a: the last read-back before the guest thread exists. A cvar this boot wrote can have been
     // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the

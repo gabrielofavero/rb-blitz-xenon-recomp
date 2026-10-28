@@ -64,6 +64,9 @@ std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps);
 // "menu_rows" row's choices; pass an empty vector to leave them empty.
 void SetMenuRows(std::vector<Choice> rows);
 std::vector<Choice> MenuRows();
+// Boot-discovered controller packages. Retail remains available with no package folders.
+void SetControllerSchemes(std::vector<Choice> schemes);
+std::vector<Choice> ControllerSchemes();
 
 // Parses a stable token into a Value of the descriptor's kind. A kResolution token is
 // "WIDTHxHEIGHT"; an enum/string token is the token itself; a kInt token is decimal. False

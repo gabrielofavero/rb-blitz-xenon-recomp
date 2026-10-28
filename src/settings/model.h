@@ -26,7 +26,7 @@ namespace rb_blitz::settings {
 
 // --- identifiers -----------------------------------------------------------
 
-enum class Category : uint8_t { kGeneral = 0, kGraphics = 1, kInterface = 2, kGameplay = 3 };
+enum class Category : uint8_t { kGeneral = 0, kGraphics = 1, kInterface = 2, kGameplay = 3, kController = 4 };
 
 // Stable on disk and on the bridge. Values are frozen; ids are never renumbered or reused.
 // P3 addition to §5.1: no enum value is invented beyond the frozen list. Submenu container
@@ -93,6 +93,7 @@ enum class SettingId : uint16_t {
   kShowMessagesRecommendations = 86,  // retired combined preference; never reused
   kShowMessages = 87,
   kShowRecommendations = 88,
+  kButtonScheme = 89,  // selected controller art; stable scheme id
 };
 
 enum class ValueKind : uint8_t { kNone = 0, kBool, kInt, kEnum, kString, kList, kResolution };

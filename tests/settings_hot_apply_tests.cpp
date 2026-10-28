@@ -13,6 +13,7 @@
 // P9 handoff), and a test that pretended otherwise would be the "success message without a call"
 // the plan forbids.
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <string>
@@ -106,8 +107,33 @@ constexpr SettingId kRowsThatMustBeHot[] = {
     SettingId::kLoadGuard,
     SettingId::kVsync,             SettingId::kSettingsLabels,  SettingId::kRhythmVerseGuitar,
     SettingId::kRhythmVerseBass,   SettingId::kRhythmVerseDrums, SettingId::kRhythmVerseVocals,
-    SettingId::kRhythmVerseKeys,
+    SettingId::kRhythmVerseKeys,   SettingId::kButtonScheme,
 };
+
+void ControllerCatalogUsesStableTokens() {
+  test::BeginCase("Controller Layout descriptor uses the boot catalog and stable saved tokens");
+  namespace schema = rb_blitz::settings::schema;
+  schema::SetControllerSchemes({{"retail", "Xbox 360"},
+                                {"one-glyph", "One Glyph"},
+                                {"one-pad", "Pad Only"}});
+  CHECK_TRUE(schema::IdForToken("controller.scheme") == SettingId::kButtonScheme);
+  const auto rows = schema::BuildDescriptors(CapabilitySnapshot{});
+  const auto found = std::find_if(rows.begin(), rows.end(), [](const Descriptor& row) {
+    return row.id == SettingId::kButtonScheme;
+  });
+  CHECK_TRUE(found != rows.end());
+  if (found != rows.end()) {
+    CHECK_EQ(found->choices.size(), 3u);
+    CHECK_TRUE(found->choices[0].token == "retail");
+    CHECK_TRUE(found->choices[1].token == "one-glyph");
+    CHECK_TRUE(found->choices[2].token == "one-pad");
+    Value selected;
+    CHECK_TRUE(schema::ParseTokenToValue(*found, "one-pad", &selected));
+    CHECK_TRUE(selected.text == "one-pad");
+    CHECK_FALSE(schema::ParseTokenToValue(*found, "missing", &selected));
+  }
+  schema::SetControllerSchemes({{"retail", "Xbox 360"}});
+}
 
 void StrategyTableIsComplete() {
   test::BeginCase("strategy: every row carries a §5.5 classification");
@@ -139,7 +165,7 @@ void StrategyTableIsComplete() {
   // Exactly eight rows are hot today, and each is hot because something measured the effect, not
   // because its cvar was tagged reloadable (see src/settings/schema.cpp). A future session that
   // promotes another row must also record its evidence, and this expectation moves with it.
-  CHECK_EQ(hot, 8);
+  CHECK_EQ(hot, 9);
   for (const SettingId id : kRowsThatMustBeHot) {
     const rb_blitz::settings::schema::SchemaRow* row = rb_blitz::settings::schema::FindRow(id);
     CHECK_TRUE(row != nullptr);
@@ -415,6 +441,7 @@ void StrategyTokensAreFrozen() {
 }  // namespace
 
 int main() {
+  ControllerCatalogUsesStableTokens();
   StrategyTableIsComplete();
   SchemaAndAdapterAgree();
   PlanSplitsByStrategy();

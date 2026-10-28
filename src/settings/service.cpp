@@ -239,6 +239,8 @@ void Service::SetMenuRows(std::vector<Choice> rows) {
   RefreshDescriptors();
 }
 
+void Service::RefreshControllerSchemes() { RefreshDescriptors(); }
+
 const Descriptor* Service::DescriptorFor(SettingId id) const {
   for (const Descriptor& descriptor : descriptors_) {
     if (descriptor.id == id) {

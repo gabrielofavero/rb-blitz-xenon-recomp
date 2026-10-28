@@ -18,6 +18,7 @@ The root remains How to Play, Calibration, General, Controls, Audio/Video, and G
 | --- | --- |
 | General | Launch; Interface; Song Library; Achievements & Unlocks; Load Guard; Credits |
 | Launch | Game Version (Rock Band Blitz / Ultimate / Demo); Startup (Normal / Fast) |
+| Controls | Input Types; Interface Mapping; Gameplay Mapping; `Layout: <name>` (when icon schemes are on). The Layout row cycles through discovered controller schemes directly; there is no layout submenu. |
 | Interface | Main Menu; Music Library & Store; Skip Offline Prompts; Setting Descriptions |
 | Main Menu | Base Game Items; Extra Items |
 | Base Game Items | Leaderboards; Achievements; Unlock Full Game; Download Content |

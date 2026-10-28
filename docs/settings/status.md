@@ -8,6 +8,24 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **Layout selector (button-layout P3, owner correction 2026-10-27):** the native selector sits
+  directly on Controls as `Layout: <name>` in both contexts. The boot-discovered choices,
+  `settings.toml` token, missing-package fallback, and queued GPU texture refresh are implemented.
+  The first live boot exposed a timing bug: the menu was authored before package discovery, leaving
+  only Xbox 360 selectable. Discovery now runs before menu authoring. A second owner test confirmed
+  the choices cycle but the A/B footer art stayed retail. The GPU log showed selection changes with
+  no button-sheet composition: a retail boot had never marked the original sheet as a cache refresh
+  candidate. The provider now tracks matching original button, pad, and icon textures even while
+  Xbox 360 is selected. The owner retest shows One Glyph replacing A with the magenta fixture while
+  B stays retail, One Pad leaving both footer glyphs retail, Test Markers replacing both, and Xbox
+  360 restoring both. In `out/build/win-amd64-release/logs/rb_blitz_397.log`, the first One Glyph
+  selection invalidated one texture candidate and composed/overrode the button sheet; the commits
+  report no pending restart. The owner then confirmed One Pad turns Freakish's pad magenta while
+  Default stays original (`rb_blitz_398.log`: `xbox_1` override, seven mips), and One Glyph survives
+  relaunch (`rb_blitz_399.log`: selected and composed at boot, with a magenta start prompt).
+  Five focused host tests pass. The separate layout page, keyboard/mouse info and next-start info
+  rows were removed at the owner's request. P3 is delivered and owner-accepted on Vulkan.
+
 - **Settings organization, Launch, and linked confirmations (2026-10-26):** General → Launch
   groups Game Version and Startup (Normal/Fast, default Normal). Main Menu has Base Game Items
   and Extra Items, including the default-visible Music Player with its own preference. Audio owns

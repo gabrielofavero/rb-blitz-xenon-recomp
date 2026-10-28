@@ -2,15 +2,17 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
 
 namespace rb_blitz::assets {
 
 // Internal P1 marker and fingerprint probe. No guest pixels or scene files are
 // read here. Disabled unless RB_BLITZ_P1_TRACE or a marker hash is set.
 void InstallP1TextureOverride();
-// P2: scan controller packages at boot. Selection is retail until P3 wires the setting;
-// RB_BLITZ_SCHEME is a developer-only package probe.
+// Scan at boot, publish the validated catalog, and install the texture provider.
 void InstallControllerSchemes(const std::filesystem::path& install_root,
                               const std::filesystem::path& user_root);
+// Queue a selected, validated token for the GPU thread. Returns false for an unavailable token.
+bool SelectControllerScheme(const std::string& id);
 
 }  // namespace rb_blitz::assets

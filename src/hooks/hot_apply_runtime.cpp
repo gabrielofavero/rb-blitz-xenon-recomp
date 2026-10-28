@@ -13,6 +13,7 @@
 #include <rex/logging.h>
 
 #include "settings/schema.h"
+#include "assets/texture_override.h"
 #include "loading/load_policy.h"
 #include "store/store_settings.h"
 
@@ -114,6 +115,7 @@ bool WriteCvar(const std::string& name, const std::string& text, std::string* er
 class CvarHotApplier : public HotApplier {
  public:
   bool Knows(SettingId id) const override {
+    if (id == SettingId::kButtonScheme) return true;
     if (FindStoreRow(id) != nullptr) {
       return true;
     }
@@ -126,6 +128,15 @@ class CvarHotApplier : public HotApplier {
   }
 
   bool Apply(SettingId id, const Value& value, std::string* error) override {
+    if (id == SettingId::kButtonScheme) {
+      if (value.kind != ValueKind::kEnum ||
+          !assets::SelectControllerScheme(value.text)) {
+        *error = "controller layout is not in this boot's catalog";
+        return false;
+      }
+      REXLOG_INFO("button_schemes: queued selected layout '{}' for the next GPU frame", value.text);
+      return true;
+    }
     if (const StoreRow* store_row = FindStoreRow(id)) {
       // Host-side only: the snapshot is immutable and swapped under a mutex, so this is safe on the
       // thread the commit arrives on and needs no worker thread of its own.
@@ -184,6 +195,7 @@ SettingId IdForToken(std::string_view token) {
 }
 
 std::string_view HotRowToken(SettingId id) {
+  if (id == SettingId::kButtonScheme) return "controller.scheme";
   for (const StoreRow& row : kStoreRows) {
     if (row.id == id) {
       return row.token;
@@ -198,7 +210,7 @@ std::string_view HotRowToken(SettingId id) {
 }
 
 std::string HotApplierSummary() {
-  std::string out;
+  std::string out = "controller.scheme -> GPU texture override";
   for (const HotRow& row : kHotRows) {
     if (!out.empty()) {
       out += ", ";

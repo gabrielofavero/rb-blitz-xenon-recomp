@@ -240,6 +240,8 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
   }
   if (auto* boot = boot::SettingsBoot::Current(); boot && boot->service()) {
     ui::screen::MenuConfiguration configuration;
+    configuration.controller_layout_enabled =
+        rex::cvar::GetFlagByName("enhancements_icon_schemes") == "true";
     const auto& provider = ultimate::Provider();
     for (const auto& descriptor : boot->service()->descriptors()) {
       const std::string token = std::string(CategoryToken(descriptor.category)) + "." +

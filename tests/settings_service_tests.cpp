@@ -13,6 +13,7 @@
 
 #include "settings/cvars.h"
 #include "settings/service.h"
+#include "settings/schema.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -157,6 +158,30 @@ void TestStartupRoundTrip() {
     reloaded.Boot(nullptr, PathEntry{}, nullptr);
     CHECK_TRUE(reloaded.EffectiveValue(id).text == token);
   }
+}
+
+void TestControllerSchemeRoundTrip() {
+  BeginCase("controller layout: stable id persists and an absent package cannot be selected");
+  schema::SetControllerSchemes({{"retail", "Xbox 360"}, {"one-glyph", "One Glyph"}});
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  Service service(paths);
+  service.Boot(nullptr, PathEntry{}, nullptr);
+  service.SetCapabilities(CapabilitySnapshot{});
+  constexpr auto id = SettingId::kButtonScheme;
+  CHECK_TRUE(service.EffectiveValue(id).text == "retail");
+  const auto txn = service.BeginEdit(service.revision());
+  CHECK_FALSE(service.Set(txn, id, EnumV("missing"), service.capability_revision()).ok);
+  CHECK_TRUE(service.Set(txn, id, EnumV("one-glyph"), service.capability_revision()).ok);
+  const auto result = service.Commit(txn);
+  CHECK_TRUE(result.status == CommitStatus::kSaved);
+  CHECK_FALSE(result.restart_required);
+  Service reloaded(paths);
+  reloaded.Boot(nullptr, PathEntry{}, nullptr);
+  reloaded.SetCapabilities(CapabilitySnapshot{});
+  CHECK_TRUE(reloaded.EffectiveValue(id).text == "one-glyph");
+  CHECK_TRUE(reloaded.store().document().values.at(id).text == "one-glyph");
+  schema::SetControllerSchemes({{"retail", "Xbox 360"}});
 }
 
 void TestLoadGuardRoundTrip() {
@@ -801,6 +826,7 @@ void TestCvarVocabulary() {
 }  // namespace
 
 int main() {
+  TestControllerSchemeRoundTrip();
   TestStartupRoundTrip();
   TestLoadGuardRoundTrip();
   TestHideAchievementsRoundTrip();

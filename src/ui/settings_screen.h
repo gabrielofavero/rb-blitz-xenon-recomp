@@ -112,6 +112,7 @@ struct MenuConfiguration {
   bool download_content_row = false;
   bool download_content_row_available = false;
   bool trial_mode = false;
+  bool controller_layout_enabled = false;
   // The refresh shortcut's visibility. Its control stays reachable under Main Menu / Extra Items.
   bool refresh_row_on = true;
   // The RhythmVerse entry (RhythmVerse plan P1): true when the boot builds the row, i.e.

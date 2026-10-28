@@ -4297,6 +4297,38 @@ void TestMainMenuOrder() {
   CHECK_EQ(none.size(), 1u);
 }
 
+void TestControllerLayoutCatalogPage() {
+  BeginCase("Controls has one Layout selector with boot choices in both contexts");
+  MenuConfiguration configuration;
+  configuration.controller_layout_enabled = true;
+  configuration.choices["controller.scheme"] = {
+      {"retail", "Xbox 360"}, {"test-markers", "Test Markers"},
+      {"one-pad", "Pad Only"}};
+  ConfigureMenu(configuration);
+
+  const auto panels = PanelNames();
+  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_controller_layout_panel") == panels.end());
+  const std::vector<std::string> expected = {
+      "settings_controls_input_types", "settings_controls_interface",
+      "settings_controls_gameplay", "settings_controls_layout"};
+  CHECK_TRUE(PanelRowSymbols("settings_controls_panel") == expected);
+  CHECK_TRUE(PageRows("settings_controls_pause_panel") ==
+             PageRows("settings_controls_panel"));
+
+  bool value = false;
+  for (const auto& [key, label] : Labels()) {
+    if (key == "settings_controls_layout_test-markers") value = label == "Layout: Test Markers";
+    CHECK_TRUE(key != "settings_layout_keyboard" && key != "settings_layout_scan");
+  }
+  CHECK_TRUE(value);
+  const auto requests = RequestPaths();
+  CHECK_TRUE(std::find(requests.begin(), requests.end(),
+                       "rbbz-settings/set/controller.scheme/t:test-markers") != requests.end());
+
+  ConfigureMenu(MenuConfiguration{});
+  CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 3u);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -4372,5 +4404,6 @@ int main(int argc, char** argv) {
   TestLaunchSurface();
   TestLoadGuardSurface();
   TestAchievementActionWording();
+  TestControllerLayoutCatalogPage();
   return Finish();
 }

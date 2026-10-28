@@ -745,6 +745,12 @@ std::vector<PanelSpec> AllPanels() {
                                          "settings_gameplay_mapping_screen", "Gameplay Mapping",
                                          "The inputs that play notes, change lanes, use power-ups, and pause."),
                           }});
+  if (g_configuration.controller_layout_enabled) {
+    out.back().rows.push_back(SelectRow(
+        "settings_controls_layout", "controller.scheme", "Layout",
+        "Choose controller button and preset art. The choice applies immediately.",
+        Choices({"retail", "Xbox 360"})));
+  }
 
   // 6a. Input Types. Controller is fixed on with the explanation the plan asks for; Keyboard and
   // Mouse are the two device gates (`keyboard_support` and `mouse_ui_nav`).

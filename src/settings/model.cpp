@@ -14,6 +14,8 @@ namespace rb_blitz::settings {
 
 std::string_view SettingIdToken(SettingId id) {
   switch (id) {
+    case SettingId::kButtonScheme:
+      return "scheme";
     case SettingId::kTarget:
       return "target";
     case SettingId::kCacheDlcLibrary:
@@ -188,6 +190,8 @@ std::string_view CategoryToken(Category category) {
       return "interface";
     case Category::kGameplay:
       return "gameplay";
+    case Category::kController:
+      return "controller";
   }
   return "general";
 }

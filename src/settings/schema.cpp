@@ -307,6 +307,11 @@ std::vector<SchemaRow> BuildTable() {
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "settings_labels"}, "", "Setting Descriptions",
                      "Show a description of the highlighted row at the bottom of the screen."));
+  rows.push_back(Row(Make(SettingId::kButtonScheme, Category::kController, Provider::kNative,
+                          WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("retail"),
+                          "controller_schemes"),
+                     {"controller", "scheme"}, "", "Controller Layout",
+                     "Choose controller icons and preset art. Each selection applies immediately."));
   rows.push_back(Row(Make(SettingId::kBackgroundMusicNavigation, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "background_music_navigation"}, "", "Menu Music Navigation",
@@ -529,6 +534,10 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kSettingsLabels, ApplicationStrategy::kHot,
      "the overlay re-reads `settings_help_overlay` every draw, so flipping the row in Help & Options "
      "hid the caption on the next frame (docs/settings/status.md, Settings Labels)"},
+    {SettingId::kButtonScheme, ApplicationStrategy::kHot,
+     "P3 owner screenshots show One Glyph changing A, Test Markers changing A/B, and Xbox 360 "
+     "restoring retail art in the Controls footer. The live log records GPU texture invalidation "
+     "and button-sheet replacement (docs/settings/status.md, Layout selector)."},
     // Gameplay (Ultimate provider)
     {SettingId::kPrecisionMode, ApplicationStrategy::kRestart, ""},
     {SettingId::kDisableRandomWiggles, ApplicationStrategy::kRestart, ""},
@@ -560,6 +569,11 @@ void ApplyStrategies(std::vector<SchemaRow>& rows) {
 std::vector<Choice>& MutableMenuRows() {
   static std::vector<Choice> rows;
   return rows;
+}
+
+std::vector<Choice>& MutableControllerSchemes() {
+  static std::vector<Choice> schemes{{"retail", "Xbox 360"}};
+  return schemes;
 }
 
 void FillChoiceSource(Descriptor& descriptor, const CapabilitySnapshot& caps) {
@@ -599,6 +613,8 @@ void FillChoiceSource(Descriptor& descriptor, const CapabilitySnapshot& caps) {
     }
   } else if (source == "menu_rows") {
     descriptor.choices = MutableMenuRows();
+  } else if (source == "controller_schemes") {
+    descriptor.choices = MutableControllerSchemes();
   }
 }
 
@@ -671,6 +687,12 @@ ApplicationStrategy StrategyOf(SettingId id) {
 void SetMenuRows(std::vector<Choice> rows) { MutableMenuRows() = std::move(rows); }
 
 std::vector<Choice> MenuRows() { return MutableMenuRows(); }
+
+void SetControllerSchemes(std::vector<Choice> schemes) {
+  MutableControllerSchemes() = std::move(schemes);
+}
+
+std::vector<Choice> ControllerSchemes() { return MutableControllerSchemes(); }
 
 bool ParseTokenToValue(const Descriptor& descriptor, std::string_view token, Value* out) {
   switch (descriptor.value_kind) {

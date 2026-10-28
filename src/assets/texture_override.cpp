@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -17,6 +18,7 @@
 
 #include "assets/texture_codec.h"
 #include "controller_schemes/schemes.h"
+#include "settings/schema.h"
 
 namespace rb_blitz::assets {
 namespace {
@@ -55,30 +57,70 @@ constexpr uint64_t kExtraIconsFingerprint = 0x1163F9F7F2FFF53Dull;
 
 class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
  public:
-  SchemeOverride(controller_schemes::Registry registry, std::string selected)
-      : registry_(std::move(registry)), selected_(std::move(selected)) {
-    const auto* scheme = registry_.Find(selected_);
-    if (!scheme) return;
-    const auto start = std::chrono::steady_clock::now();
-    for (const auto& [hash, id] : kPadFingerprints) {
-      if (const auto* image = scheme->Pad(id))
-        pads_[hash] = controller_schemes::ComposePad(*image, 7);
+  explicit SchemeOverride(controller_schemes::Registry registry)
+      : registry_(std::move(registry)) {}
+  bool Select(const std::string& id) {
+    if (id != "retail" && !registry_.Find(id)) return false;
+    std::lock_guard lock(pending_mutex_);
+    pending_ = id;
+    return true;
+  }
+  void Poll() override {
+    std::string next;
+    {
+      std::lock_guard lock(pending_mutex_);
+      next = std::move(pending_);
+      pending_.clear();
     }
-    if (scheme->has_icons) icons_ = controller_schemes::ComposeIcons(scheme->icons, 11);
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start);
-    REXLOG_INFO("controller_schemes: selected '{}' with {} prepared pad texture(s) in {} ms",
-                selected_, pads_.size(), elapsed.count());
+    if (next.empty() || next == selected_) return;
+    selected_ = std::move(next);
+    buttons_.clear();
+    icons_.clear();
+    pads_.clear();
+    logged_.clear();
+    const auto* scheme = registry_.Find(selected_);
+    if (scheme) {
+      const auto start = std::chrono::steady_clock::now();
+      for (const auto& [hash, id] : kPadFingerprints) {
+        if (const auto* image = scheme->Pad(id))
+          pads_[hash] = controller_schemes::ComposePad(*image, 7);
+      }
+      if (scheme->has_icons) icons_ = controller_schemes::ComposeIcons(scheme->icons, 11);
+      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - start);
+      REXLOG_INFO("controller_schemes: selected '{}' with {} prepared pad texture(s) in {} ms",
+                  selected_, pads_.size(), elapsed.count());
+    }
+    rex::graphics::InvalidateTextureOverrides();
   }
   bool GetOverride(const rex::graphics::TextureOverrideRequest& request,
                    const uint8_t* guest_data,
                    std::vector<std::vector<uint8_t>>* host_levels,
                    bool* refresh_target) override {
-    const auto* scheme = registry_.Find(selected_);
-    if (!scheme) return false;
     const uint64_t hash = ContentHash(guest_data, request.guest_base_size);
-    if (request.width == 512 && request.height == 512 && hash == kButtonFingerprint) {
-      *refresh_target = true;
+    const bool button = request.width == 512 && request.height == 512 &&
+                        hash == kButtonFingerprint;
+    const bool icons = request.width == 1024 && request.height == 512 &&
+                       hash == kExtraIconsFingerprint;
+    const char* pad_slot = nullptr;
+    if (request.width == 1024 && request.height == 1024) {
+      for (const auto& [fingerprint, slot] : kPadFingerprints) {
+        if (hash == fingerprint) {
+          pad_slot = slot;
+          break;
+        }
+      }
+    }
+    // The base-game texture must be a refresh candidate before any custom scheme is selected.
+    // Otherwise a retail boot uploads it once and a later generation bump has nothing to evict.
+    if (button || icons || pad_slot) *refresh_target = true;
+    const auto* scheme = registry_.Find(selected_);
+    if (!scheme) {
+      if (button && logged_.insert(hash).second)
+        REXLOG_INFO("controller_schemes: tracking original button sheet for live selection");
+      return false;
+    }
+    if (button) {
       if (scheme->buttons.empty()) return false;
       if (buttons_.empty()) {
         const auto start = std::chrono::steady_clock::now();
@@ -101,22 +143,16 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
                     request.mip_count);
       return true;
     }
-    if (request.width == 1024 && request.height == 1024) {
-      for (const auto& [fingerprint, slot] : kPadFingerprints) {
-        if (hash != fingerprint) continue;
-        *refresh_target = true;
-        auto it = pads_.find(hash);
-        if (it == pads_.end() || request.mip_count > it->second.size()) return false;
-        host_levels->assign(it->second.begin(), it->second.begin() + request.mip_count);
-        if (logged_.insert(hash).second)
-          REXLOG_INFO("controller_schemes: overrode {} pad ({} mip level(s))", slot,
-                      request.mip_count);
-        return true;
-      }
+    if (pad_slot) {
+      auto it = pads_.find(hash);
+      if (it == pads_.end() || request.mip_count > it->second.size()) return false;
+      host_levels->assign(it->second.begin(), it->second.begin() + request.mip_count);
+      if (logged_.insert(hash).second)
+        REXLOG_INFO("controller_schemes: overrode {} pad ({} mip level(s))", pad_slot,
+                    request.mip_count);
+      return true;
     }
-    if (request.width == 1024 && request.height == 512 &&
-        hash == kExtraIconsFingerprint) {
-      *refresh_target = true;
+    if (icons) {
       if (request.mip_count > icons_.size()) return false;
       host_levels->assign(icons_.begin(), icons_.begin() + request.mip_count);
       if (logged_.insert(hash).second)
@@ -133,7 +169,11 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::vector<std::vector<uint8_t>> icons_;
   std::map<uint64_t, std::vector<std::vector<uint8_t>>> pads_;
   std::unordered_set<uint64_t> logged_;
+  std::mutex pending_mutex_;
+  std::string pending_;
 };
+
+SchemeOverride* g_scheme_provider = nullptr;
 
 std::vector<uint8_t> MakeMarkerLevel(uint32_t size, bool pad) {
   std::vector<uint8_t> rgba(std::size_t(size) * size * 4);
@@ -257,12 +297,17 @@ void InstallControllerSchemes(const std::filesystem::path& install_root,
     for (const auto& extra : scheme.extra_files)
       REXLOG_WARN("controller_schemes: '{}' ignores extra file '{}'", id,
                   extra.generic_string());
-  const char* requested = std::getenv("RB_BLITZ_SCHEME");
-  const std::string selected = requested ? requested : "retail";
-  if (selected != "retail" && !registry.Find(selected))
-    REXLOG_WARN("controller_schemes: '{}' unavailable; using Xbox 360", selected);
-  static SchemeOverride provider(std::move(registry), selected);
+  std::vector<settings::Choice> choices{{"retail", "Xbox 360"}};
+  for (const auto& [id, scheme] : registry.schemes)
+    choices.push_back({id, scheme.name});
+  settings::schema::SetControllerSchemes(std::move(choices));
+  static SchemeOverride provider(std::move(registry));
+  g_scheme_provider = &provider;
   rex::graphics::SetTextureOverrideProvider(&provider);
+}
+
+bool SelectControllerScheme(const std::string& id) {
+  return g_scheme_provider && g_scheme_provider->Select(id);
 }
 
 }  // namespace rb_blitz::assets

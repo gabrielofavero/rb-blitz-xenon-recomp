@@ -62,9 +62,9 @@ REXCVAR_DEFINE_BOOL(enhancements_skip_offline_dialog, true, "Enhancements",
                     "is the same pair of transitions.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_icon_schemes, false, "Enhancements",
-                    "R4 different icons: let the button glyphs and controller-layout art be "
-                    "replaced per scheme. Faithful: the art the title ships. Not implemented.")
+REXCVAR_DEFINE_BOOL(enhancements_icon_schemes, true, "Enhancements",
+                    "R4 Controller Layout: choose installed controller glyph and preset art "
+                    "in Help & Options. Faithful: the art the title ships.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 REXCVAR_DEFINE_BOOL(enhancements_hide_menu_options, false, "Enhancements",

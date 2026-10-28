@@ -97,6 +97,7 @@ class Service {
   void SetOverrides(std::map<SettingId, Value> values, std::map<SettingId, Source> sources);
   void SetBootValues(std::map<SettingId, Value> values, std::string reason);
   void SetMenuRows(std::vector<Choice> rows);  // P10's Hide Main Menu seam
+  void RefreshControllerSchemes();  // boot scan changed schema's native catalog
 
   Store& store() { return store_; }
   const Store& store() const { return store_; }
