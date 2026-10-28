@@ -120,6 +120,8 @@ set(RBBLITZ_SOURCES
     src/hooks/settings_payload.cpp
     src/settings/menu_payload.cpp
     src/ui/settings_screen.cpp
+    src/ui/input_font_scene.cpp
+    src/ui/input_icon_rows.cpp
     # P9's runtime half of the live apply: the one place that knows how a `hot` row reaches the
     # running game (today `graphics.vsync` -> the SDK's own `vsync`, the call R7 already measured).
     src/hooks/hot_apply_runtime.cpp
@@ -254,6 +256,7 @@ set(RBBLITZ_SOURCES
     # the store's album art encodes with it now, and the button-layout plan's PS3 import and slot
     # sheets decode with it next. SDK-free, so the suites cover it without a boot.
     src/assets/texture_codec.cpp
+    src/assets/input_font_atlas.cpp
     src/assets/texture_override.cpp
     src/controller_schemes/schemes.cpp
     src/controller_schemes/png_wic.cpp
@@ -911,6 +914,7 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_settings_screen_tests
         tests/settings_screen_tests.cpp
         src/ui/settings_screen.cpp
+        src/ui/input_font_scene.cpp
         src/ui/dtb_author.cpp
         src/ui/menu_options.cpp
         src/hooks/settings_bridge.cpp
@@ -941,6 +945,7 @@ if(BUILD_TESTING)
         src/settings/menu_payload.cpp
         src/settings/ultimate_adapter.cpp
         src/ui/settings_screen.cpp
+        src/ui/input_font_scene.cpp
         src/ui/dtb_author.cpp
         src/ui/menu_options.cpp
         src/profile/input_rows.cpp
@@ -1120,6 +1125,7 @@ if(BUILD_TESTING)
         src/input/input_store.cpp
         src/input/effective_input.cpp
         src/input/input_icons.cpp
+        src/ui/input_icon_rows.cpp
         src/input/last_device.cpp
         src/profile/input_rows.cpp
         src/profile/profile.cpp
@@ -1363,7 +1369,8 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_button_scheme_tests
         tests/button_scheme_tests.cpp
         src/controller_schemes/schemes.cpp
-        src/assets/texture_codec.cpp)
+        src/assets/texture_codec.cpp
+        src/assets/input_font_atlas.cpp)
     if(WIN32)
         target_sources(rb_blitz_button_scheme_tests PRIVATE src/controller_schemes/png_wic.cpp)
         target_link_libraries(rb_blitz_button_scheme_tests PRIVATE windowscodecs ole32)

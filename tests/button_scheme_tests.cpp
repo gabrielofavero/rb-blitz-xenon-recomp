@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "controller_schemes/schemes.h"
 #include "assets/texture_codec.h"
+#include "assets/input_font_atlas.h"
+#include "ui/input_font_scene.h"
 
 #include <cassert>
 #include <filesystem>
@@ -153,6 +155,82 @@ int main() {
         "retail art just outside the UV rectangle was not cleared");
   Check(decoded[(size_t(200) * 512 + 200) * 4 + 3] == 255,
         "omitted glyph changed");
+
+  // The guest mapping font gets per-row images while all original font blocks stay byte exact.
+  std::vector<uint8_t> font_chain;
+  for (uint32_t mip = 0; mip < rb_blitz::ui::input_font::kMipCount; ++mip) {
+    const uint32_t dim = 1024 >> mip;
+    std::vector<uint8_t> blank(size_t(dim) * dim * 4, 0);
+    std::vector<uint8_t> level;
+    rb_blitz::assets::EncodeDxt5(blank.data(), dim, dim, &level);
+    font_chain.insert(font_chain.end(), level.begin(), level.end());
+  }
+  rb_blitz::input::icons::Icon key_icon;
+  key_icon.art = rb_blitz::input::icons::Art::kBuiltIn;
+  key_icon.width = key_icon.height = 16;
+  key_icon.rgba.resize(16 * 16 * 4, 255);
+  std::vector<std::vector<uint8_t>> font_levels;
+  Check(rb_blitz::assets::input_font_atlas::Compose(
+      font_chain, blocks, nullptr, {key_icon}, &font_levels),
+      "mapping font composition failed");
+  Check(font_levels.size() == 7 && font_levels[0].size() == 1024 * 1024 &&
+        font_levels[6].size() == 16 * 16, "mapping font mip chain wrong");
+  size_t font_offset = 0;
+  for (uint32_t mip = 0; mip < 7; ++mip) {
+    const uint32_t dim = 1024 >> mip;
+    const size_t untouched = size_t(768 >> mip) * dim;
+    Check(std::equal(font_chain.begin() + font_offset,
+                     font_chain.begin() + font_offset + untouched,
+                     font_levels[mip].begin()), "original font blocks changed");
+    font_offset += size_t(dim) * dim;
+  }
+  std::vector<uint8_t> decoded_font(1024 * 1024 * 4);
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
+  Check(decoded_font[(size_t(768 + 8) * 1024 + 32) * 4 + 3] > 200,
+        "mapping icon was not drawn in the spare atlas cell");
+  Check(decoded_font[(size_t(500) * 1024 + 32) * 4 + 3] == 0,
+        "original font area was modified");
+
+  // The measured font UV rectangle for A ends at y=80, while the installed
+  // circle still has antialiased pixels at y=82. Atlas composition needs the
+  // full 85-square retail cell so that lower arc is never amputated.
+  std::vector<uint8_t> edge_rgba(512 * 512 * 4, 0);
+  for (uint32_t y = 80; y <= 82; ++y)
+    for (uint32_t x = 36; x <= 44; ++x) {
+      const size_t p = (size_t(y) * 512 + x) * 4;
+      edge_rgba[p] = 60; edge_rgba[p + 1] = 190;
+      edge_rgba[p + 2] = 70; edge_rgba[p + 3] = 255;
+    }
+  std::vector<uint8_t> edge_blocks;
+  rb_blitz::assets::EncodeDxt5(edge_rgba.data(), 512, 512, &edge_blocks);
+  rb_blitz::input::icons::Icon retail_a;
+  retail_a.art = rb_blitz::input::icons::Art::kSchemeSlot;
+  retail_a.slot = "confirm_a";
+  Check(rb_blitz::assets::input_font_atlas::Compose(
+      font_chain, edge_blocks, nullptr, {retail_a}, &font_levels),
+      "retail mapping glyph composition failed");
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
+  Check(decoded_font[(size_t(768 + 8 + 61) * 1024 + 30) * 4 + 3] > 100,
+        "retail A lower arc was cropped from the mapping glyph");
+
+  // RndFont always samples 79.5 pixels vertically. Adjacent glyph rows must
+  // leave that complete window clear above/below the centered 64-pixel image.
+  std::vector<rb_blitz::input::icons::Icon> full_page(30, key_icon);
+  Check(rb_blitz::assets::input_font_atlas::Compose(
+      font_chain, blocks, nullptr, full_page, &font_levels), "full mapping atlas failed");
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
+  for (uint32_t i = 0; i < 30; ++i) {
+    const uint32_t x = (i % 15) * 68 + 2 + 32;
+    const uint32_t y = 768 + (i / 15) * 128;
+    auto alpha = [&](uint32_t dy) { return decoded_font[(size_t(y + dy) * 1024 + x) * 4 + 3]; };
+    Check(alpha(0) == 0 && alpha(7) == 0 && alpha(72) == 0 && alpha(79) == 0,
+          "neighbor icon leaks into the font's fixed-height sampling window");
+    Check(alpha(8) > 200 && alpha(71) > 200, "icon is not centered in its font cell");
+    const uint32_t left = (i % 15) * 68;
+    Check(decoded_font[(size_t(y + 40) * 1024 + left) * 4 + 3] == 0 &&
+          decoded_font[(size_t(y + 40) * 1024 + left + 67) * 4 + 3] == 0,
+          "adjacent icons have no transparent sampling gutter");
+  }
 
   // The P1 callback presents tiled, 8-in-16-endian guest bytes. The inverse
   // must recover the exact canonical BC3 blocks the composer just used.

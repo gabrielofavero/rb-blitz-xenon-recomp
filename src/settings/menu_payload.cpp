@@ -7,6 +7,7 @@
 #include "store/store_metadata.h"
 #include "store/store_payload.h"
 #include "ui/settings_screen.h"
+#include "ui/input_font_scene.h"
 #include "ui/menu_options.h"
 
 namespace rb_blitz::settings {
@@ -1224,6 +1225,28 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   }
   if (!read(screen::kSceneSourceRecord, &built[screen::kSceneRecord], error)) return false;
   built[screen::kPauseSceneRecord] = built[screen::kSceneRecord];
+  {
+    std::vector<uint8_t> original;
+    std::vector<uint8_t> prepared;
+    std::vector<uint8_t> bc3;
+    std::string why;
+    if (read(ui::input_font::kSceneRecord, &original, &why)) {
+      if (ui::input_font::PrepareScene(original, &prepared, &bc3, &why)) {
+        std::vector<uint8_t> list_source, list;
+        if (!read(ui::input_font::kListRecord, &list_source, &why) ||
+            !ui::input_font::PrepareList(list_source, &list, &why)) {
+          if (error) *error = "input image label preparation was refused: " + why;
+          return false;
+        }
+        built[ui::input_font::kIconSceneRecord] = std::move(prepared);
+        built[ui::input_font::kListRecord] = std::move(list);
+      } else {
+        note("input image font preparation was refused: " + why);
+      }
+    } else {
+      note("input image font is unavailable: " + why);
+    }
+  }
   if (!read("ui/pause/gen/confirmation_message.milo_xbox",
             &built["ui/pause/gen/settings_confirmation.milo_xbox"], error)) return false;
   built["ui/pause/gen/settings_confirmation_pause.milo_xbox"] =

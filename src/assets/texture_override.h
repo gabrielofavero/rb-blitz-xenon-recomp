@@ -3,6 +3,9 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
+
+#include "input/input_icons.h"
 
 namespace rb_blitz::assets {
 
@@ -14,5 +17,9 @@ void InstallControllerSchemes(const std::filesystem::path& install_root,
                               const std::filesystem::path& user_root);
 // Queue a selected, validated token for the GPU thread. Returns false for an unavailable token.
 bool SelectControllerScheme(const std::string& id);
+// Publish the image glyphs used by the currently entered mapping page. The guest list text
+// receives matching character codes; the GPU thread consumes this immutable batch in Poll().
+void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons);
+bool InputIconsAvailable();
 
 }  // namespace rb_blitz::assets

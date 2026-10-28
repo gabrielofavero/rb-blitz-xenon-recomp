@@ -50,6 +50,7 @@
 #include "ui/dtb_author.h"
 #include "ui/help_topics.h"
 #include "ui/settings_screen.h"
+#include "ui/input_font_scene.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -515,8 +516,10 @@ void TestListOwnership() {
     }
     CHECK_TRUE(HasText(root, kListName));
     CHECK_FALSE(HasText(root, "options_menu.milo"));
-    const bool pause = HasText(root, kPauseSceneName) || HasText(root, "../pause/settings_confirmation_pause.milo");
-    CHECK_TRUE(pause || HasText(root, kSceneName) || HasText(root, "../pause/settings_confirmation.milo"));
+    const bool pause = HasText(root, kPauseSceneName) ||
+                       HasText(root, "../pause/settings_confirmation_pause.milo");
+    CHECK_TRUE(pause || HasText(root, kSceneName) ||
+               HasText(root, "../pause/settings_confirmation.milo"));
     (pause ? in_song : main_menu) += 1;
   }
   CHECK_EQ(main_menu, 56);

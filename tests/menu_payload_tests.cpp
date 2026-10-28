@@ -18,6 +18,7 @@
 #include "settings/menu_payload.h"
 #include "settings/ultimate_adapter.h"
 #include "ui/menu_options.h"
+#include "ui/input_font_scene.h"
 #include "ui/settings_screen.h"
 
 #include <filesystem>
@@ -681,6 +682,13 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
     CHECK_TRUE(records.contains("ui/startup/gen/startup.dtb") == fast);
     const auto dir = fs::path(output_root) / (std::string(fast ? "fast-" : "normal-") + std::to_string(mask));
     for (const auto& [name, bytes] : records) {
+      if (boot_case == 0 && (name == rb_blitz::ui::input_font::kIconSceneRecord ||
+                            name == rb_blitz::ui::input_font::kListRecord)) {
+        fs::create_directories((dir / name).parent_path());
+        std::ofstream file(dir / name, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        CHECK_TRUE(bool(file));
+      }
       if (!name.ends_with(".dtb")) continue;
       std::vector<Node> roots;
       dtb::RootHeader header;
@@ -848,6 +856,61 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
 }
 
 int main(int argc, char** argv) {
+  {
+    BeginCase("input label styles carry both PreLoad records and PostLoad variation strings");
+    constexpr size_t header = 0x810;
+    std::vector<uint8_t> source(header + 91806, 0);
+    auto little = [&](size_t at, uint32_t value) {
+      for (unsigned i = 0; i < 4; ++i) source[at + i] = uint8_t(value >> (i * 8));
+    };
+    auto big = [&](size_t at, uint32_t value) {
+      for (unsigned i = 0; i < 4; ++i) source[header + at + i] = uint8_t(value >> (24 - i * 8));
+    };
+    auto reference = [&](size_t at, const std::string& text) {
+      big(at, uint32_t(text.size()));
+      for (size_t i = 0; i < text.size(); ++i) source[header + at + 4 + i] = text[i];
+    };
+    little(0, 0xCABEDEAF); little(4, header); little(8, 1);
+    little(12, 91806); little(16, 0x01000000 | 91806);
+    big(0x1625F, 1);
+    reference(0x16263, "../fonts/pentatonic.milo");
+    reference(0x1627F, "active_normal.color");
+    source[header + 0x16252] = 1;
+    big(0x162A6, 0x3F800000);
+    big(0x162AE, 0xADDEADDE);
+    std::vector<uint8_t> output;
+    std::string why;
+    const bool prepared = rb_blitz::ui::input_font::PrepareList(source, &output, &why);
+    CHECK_TRUE(prepared);
+    if (prepared) {
+      auto read = [&](size_t at) {
+        const uint8_t* p = output.data() + header + at;
+        return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
+      };
+      const uint32_t styles = read(0x1625F);
+      CHECK_EQ(styles, 2u);
+      size_t cursor = 0x16263;
+      std::vector<std::string> fonts;
+      // Mirror the two native loading phases, rather than just round-tripping
+      // the generated container: PostLoad must stop at this object's marker.
+      for (uint32_t i = 0; i < styles; ++i) {
+        for (int ref = 0; ref < 2; ++ref) {
+          const uint32_t length = read(cursor);
+          if (ref == 0) fonts.emplace_back(
+              reinterpret_cast<const char*>(output.data() + header + cursor + 4), length);
+          cursor += 4 + length;
+        }
+        cursor += 5 * 4;
+      }
+      CHECK_TRUE(fonts == std::vector<std::string>({
+          "../fonts/pentatonic.milo", "../fonts/input_icons.milo"}));
+      for (uint32_t i = 0; i < styles; ++i) {
+        CHECK_EQ(read(cursor), 0u);
+        cursor += 4;
+      }
+      CHECK_EQ(read(cursor), 0xADDEADDEu);
+    }
+  }
   {
     using namespace rb_blitz::ui::dtb;
     BeginCase("short boots clear regional and provider logos without changing other startup settings");

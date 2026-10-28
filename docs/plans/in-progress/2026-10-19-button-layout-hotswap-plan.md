@@ -4,7 +4,8 @@
 2026-10-26; P1, P2 and P3 delivered 2026-10-27; P6a and P8 delivered 2026-10-28.
 P4's tracker, D3D12 family switching and selected-pad-art stability were
 accepted 2026-10-28; visible binding-aware hints remain P10 work.
-P5, P6b, P7 and P9–P10 remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
+P5, P6b, P7 and P9–P10 remain open. P9 has a built host implementation awaiting
+owner-run visual acceptance and a guest image route for lists exceeding 30 icons.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
 
@@ -1248,6 +1249,46 @@ or built-in icons suffice to complete this prompt; future guest rendering remain
 syntax, or substitute static default icons when the effective mapping differs.
 
 ### P9 — Input images in Interface Mapping and Gameplay Mapping
+
+**2026-10-28 host checkpoint.** The installed Pentatonic scene has four 256-entry
+glyph tables and 30 unused C1 entries backed by blank atlas space. The generated
+menu archive patches those entries only, and the texture override fills their
+BC3 atlas cells with P8's ordered controller/key/mouse images. The mapping list
+retains its native row symbols, indices and routes; `read_file` returns an action
+label followed by one glyph per effective source. The chosen controller package
+supplies replaced button slots, with the installed sheet supplying omitted slots.
+The release build and `settings_screen`, `menu_payload`, `input_bindings` and
+`button_scheme` host tests pass. The owner's in-game screenshots show inline
+controller and key images on Interface Mapping, and adding a binding refreshes
+the row. They also show controller circles cut at the bottom, small and offset
+icons, and selected-row images collapsing into black fills. An attempted inset
+and alpha adjustment made the visual result worse and was removed. A later
+1.0 glyph width sampled adjacent icons; a cloned list palette also changed other
+settings and was rejected. Both were removed. The current follow-up uses the
+measured 84.25 by 79.5 font cell: glyph width/advance `64 / 84.25`, 128-pixel row
+spacing, and an eight-pixel image inset to align with capitals. The owner
+confirmed perfect size and almost correct placement, with a stray line to B's
+left and black hover icons. Color markup alone cannot overcome the label's
+material tint. The current follow-up uses `<alt1>` with a separate font material
+and the existing white UIColor, and adds a two-pixel horizontal gutter while
+retaining image size and vertical alignment. All palette bytes and the primary
+label style remain retail. The first alternate-style build crashed during
+startup because the two added styles lacked their post-load material-variation
+strings. CDB identified `UILabel::PostLoad` reading the next object as string
+data. Both missing strings are now emitted, the regression test consumes both
+loading phases, and a debugger run reached the usable main menu and closed
+cleanly. The full 85-pixel button source cell preserves the
+lower arc. The owner has confirmed perfect size/position and correct hovered
+icon colors. The hovered action text was white because an extra compatibility
+style reused the primary font and overwrote its material tint. That duplicate
+was removed; exactly two distinct font styles remain. On 2026-10-28 the owner
+accepted the final Interface Mapping appearance ("Perfect!", screenshot of
+black Confirm text beside colored controller/key icons on the retail yellow
+highlight). Size, positioning and selected-row text/icon colors are accepted.
+Gameplay Mapping and long-list wrapping still await owner checks. More than 30 images on one page currently
+restore the complete textual list; an image detail/overflow route is still
+required to satisfy R11. Keep P9 open until these checks and the overflow route
+pass. Capture owner-run evidence under `out/button-schemes/p9/`.
 
 **Goal.** Both mapping surfaces show actual bound button/key/mouse images next to their action
 labels, replacing textual binding lists.

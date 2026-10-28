@@ -22,6 +22,7 @@
 #include "profile/input_rows.h"
 #include "profile/profile.h"
 #include "profile/remap.h"
+#include "ui/input_icon_rows.h"
 
 namespace {
 
@@ -694,9 +695,55 @@ void TestMusicBindings() {
 
 }
 
+void TestImageRows() {
+  rb_blitz::test::BeginCase("input images: native row order, refresh and overflow");
+  namespace icons = rb_blitz::input::icons;
+  namespace remap = rb_blitz::profile::remap;
+  auto snapshot = std::make_shared<rb_blitz::input::EffectiveInput>();
+  snapshot->general.Set(remap::Target::kA,
+                        {Source("pad:y"), Source("key:Return"), Source("pad:a")});
+  auto view = icons::Capture("retail", icons::Family::kController);
+  view.input = snapshot;
+  const std::vector<std::string> symbols{
+      "settings_bind_general_a", "settings_vsync"};
+  const std::vector<std::string> fallback{"Confirm: Y, Enter, A", "settings_vsync"};
+  const auto page = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
+  CHECK_FALSE(page.overflow);
+  CHECK_EQ(page.lines.size(), 2u);
+  CHECK_TRUE(page.lines[1] == fallback[1]);
+  CHECK_EQ(page.icons.size(), 3u);
+  CHECK_TRUE(page.icons[0].slot == "y");
+  CHECK_TRUE(page.icons[1].legend == "Enter");
+  CHECK_TRUE(page.icons[2].slot == "confirm_a");
+  CHECK_TRUE(page.lines[0].find("\xC2\x80 \xC2\x81 \xC2\x82") != std::string::npos);
+  CHECK_TRUE(page.lines[0] ==
+      "Confirm: <alt1>\xC2\x80 \xC2\x81 \xC2\x82</alt1>");
+
+  auto rebound = std::make_shared<rb_blitz::input::EffectiveInput>();
+  rebound->general.Set(remap::Target::kA, {Source("pad:b"), Source("key:space")});
+  view.input = rebound;
+  const auto updated = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
+  CHECK_EQ(updated.icons.size(), 2u);
+  CHECK_TRUE(updated.icons[0].slot == "back_b");
+  CHECK_TRUE(updated.icons[1].legend == "Space");
+  rebound->general.Set(remap::Target::kA, {});
+  const auto empty = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
+  CHECK_EQ(empty.icons.size(), 1u);
+  CHECK_TRUE(empty.icons[0].art == icons::Art::kUnbound);
+
+  const std::vector<std::string> many_symbols(31, symbols[0]);
+  const std::vector<std::string> many_fallback(31, fallback[0]);
+  const auto overflow = rb_blitz::ui::input_icon_rows::Build(
+      many_symbols, many_fallback, view);
+  CHECK_TRUE(overflow.overflow);
+  CHECK_TRUE(overflow.icons.empty());
+  CHECK_TRUE(overflow.lines == many_fallback);
+}
+
 }  // namespace
 
 int main() {
+  TestImageRows();
   TestEffectiveIcons();
   TestIconSourceCatalog();
   TestMusicBindings();

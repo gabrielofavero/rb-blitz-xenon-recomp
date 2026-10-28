@@ -59,10 +59,12 @@
 #include <rex/types.h>
 
 #include "hooks/ultimate.h"
+#include "assets/texture_override.h"
 #include "hooks/shell_music.h"
 #include "hooks/menu_music_guest.h"
 #include "hooks/hot_apply_runtime.h"
 #include "input/input_store.h"
+#include "input/input_icons.h"
 #include "input/effective_input.h"
 #include "input/native_menu.h"
 #include "input/remap.h"
@@ -80,6 +82,7 @@
 #include "store/store_search.h"
 #include "store/store_settings.h"
 #include "ui/settings_screen.h"
+#include "ui/input_icon_rows.h"
 
 // The builtins the channel rides on and the node -> string helper the originals use. The
 // originals are the __imp__ aliases; the strong definitions below replace the call sites.
@@ -749,10 +752,26 @@ bool TakeRead(PPCContext& ctx, uint8_t* base) {
   if (!IsNamespacedPath(path)) return false;
   constexpr std::string_view prefix = "rbbz-settings/text/";
   const auto snapshot = ::rb_blitz::input::CurrentInput();
-  const auto lines = path.starts_with(prefix)
-                         ? ::rb_blitz::ui::screen::PanelBindingText(
-                               std::string_view(path).substr(prefix.size()), *snapshot)
-                         : std::vector<std::string>{};
+  std::vector<std::string> lines;
+  if (path.starts_with(prefix)) {
+    const std::string_view panel = std::string_view(path).substr(prefix.size());
+    lines = ::rb_blitz::ui::screen::PanelBindingText(panel, *snapshot);
+    if (!lines.empty() && ::rb_blitz::assets::InputIconsAvailable()) {
+      auto view = ::rb_blitz::input::icons::CaptureActive();
+      view.input = snapshot;
+      view.revision = snapshot->revision;
+      auto page = ::rb_blitz::ui::input_icon_rows::Build(
+          ::rb_blitz::ui::screen::PanelRowSymbols(panel), lines, view);
+      if (page.overflow) {
+        REXLOG_WARN("input_icons: '{}' needs more than 30 image slots; full text retained", panel);
+      } else if (!page.icons.empty()) {
+        const std::string signature = std::string(panel) + ":" +
+            std::to_string(view.revision) + ":" + view.controller_scheme;
+        ::rb_blitz::assets::PublishInputIcons(signature, std::move(page.icons));
+        lines = std::move(page.lines);
+      }
+    }
+  }
   if (lines.empty()) {
     WriteResultCell(base, ctx.r3.u32, 0);
     return true;

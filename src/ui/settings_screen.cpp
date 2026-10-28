@@ -23,6 +23,7 @@
 #include "profile/remap.h"
 #include "settings/dependencies.h"
 #include "store/store_settings.h"
+#include "ui/input_font_scene.h"
 
 namespace rb_blitz::ui::screen {
 namespace {
@@ -1487,7 +1488,9 @@ std::vector<PanelSpec> InSongPanels() {
     } else if (panel.back.rfind("settings_", 0) == 0) {
       panel.back = PauseScreen(panel.back);
     }
-    panel.scene = panel.message.empty() ? kPauseSceneName : "../pause/settings_confirmation_pause.milo";
+    panel.scene = panel.message.empty()
+        ? kPauseSceneName
+        : "../pause/settings_confirmation_pause.milo";
     panel.panels = PausePanels();
     for (Row& row : panel.rows) {
       if (row.screen == "cal_welcome_screen") row.kind = Kind::kCalibration;

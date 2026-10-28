@@ -17,9 +17,11 @@
 #include <rex/logging.h>
 
 #include "assets/texture_codec.h"
+#include "assets/input_font_atlas.h"
 #include "controller_schemes/schemes.h"
 #include "input/last_device.h"
 #include "settings/schema.h"
+#include "ui/input_font_scene.h"
 
 namespace rb_blitz::assets {
 namespace {
@@ -66,33 +68,57 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     pending_ = id;
     return true;
   }
+  void PublishIcons(std::string signature, std::vector<input::icons::Icon> icons) {
+    std::lock_guard lock(pending_mutex_);
+    if (signature == last_icon_signature_) return;
+    last_icon_signature_ = signature;
+    pending_icons_ = std::move(icons);
+    has_pending_icons_ = true;
+  }
   void Poll() override {
     std::string next;
+    std::vector<input::icons::Icon> icons;
+    bool icons_changed = false;
     {
       std::lock_guard lock(pending_mutex_);
       next = std::move(pending_);
       pending_.clear();
-    }
-    if (next.empty() || next == selected_) return;
-    selected_ = std::move(next);
-    buttons_.clear();
-    icons_.clear();
-    pads_.clear();
-    logged_.clear();
-    const auto* scheme = registry_.Find(selected_);
-    if (scheme) {
-      const auto start = std::chrono::steady_clock::now();
-      for (const auto& [hash, id] : kPadFingerprints) {
-        if (const auto* image = scheme->Pad(id))
-          pads_[hash] = controller_schemes::ComposePad(*image, 7);
+      if (has_pending_icons_) {
+        icons = std::move(pending_icons_);
+        has_pending_icons_ = false;
+        icons_changed = true;
       }
-      if (scheme->has_icons) icons_ = controller_schemes::ComposeIcons(scheme->icons, 11);
-      const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - start);
-      REXLOG_INFO("controller_schemes: selected '{}' with {} prepared pad texture(s) in {} ms",
-                  selected_, pads_.size(), elapsed.count());
     }
-    rex::graphics::InvalidateTextureOverrides();
+    const bool scheme_changed = !next.empty() && next != selected_;
+    if (scheme_changed) {
+      selected_ = std::move(next);
+      buttons_.clear();
+      icons_.clear();
+      pads_.clear();
+      font_levels_.clear();
+      logged_.clear();
+      const auto* scheme = registry_.Find(selected_);
+      if (scheme) {
+        const auto start = std::chrono::steady_clock::now();
+        for (const auto& [hash, id] : kPadFingerprints) {
+          if (const auto* image = scheme->Pad(id))
+            pads_[hash] = controller_schemes::ComposePad(*image, 7);
+        }
+        if (scheme->has_icons) icons_ = controller_schemes::ComposeIcons(scheme->icons, 11);
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start);
+        REXLOG_INFO("controller_schemes: selected '{}' with {} prepared pad texture(s) in {} ms",
+                    selected_, pads_.size(), elapsed.count());
+      }
+    }
+    if (icons_changed) {
+      font_icons_ = std::move(icons);
+      font_levels_.clear();
+    }
+    if (scheme_changed || icons_changed || refresh_font_after_buttons_) {
+      refresh_font_after_buttons_ = false;
+      rex::graphics::InvalidateTextureOverrides();
+    }
   }
   bool GetOverride(const rex::graphics::TextureOverrideRequest& request,
                    const uint8_t* guest_data,
@@ -112,9 +138,46 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         }
       }
     }
+    bool font = false;
+    auto font_original = ui::input_font::OriginalBc3();
+    if (!pad_slot && request.width == ui::input_font::kAtlasSize &&
+        request.height == ui::input_font::kAtlasSize && font_original &&
+        font_original->size() >= request.guest_base_size) {
+      if (font_hash_found_ && hash == font_hash_) {
+        font = true;
+      } else if (!font_hash_found_ && request.guest_base_size ==
+                 ui::input_font::kAtlasSize * ui::input_font::kAtlasSize) {
+        std::vector<uint8_t> canonical;
+        if (controller_schemes::UntileBc3Base(guest_data, request.guest_base_size,
+                request.width, request.tiled, uint32_t(request.endianness), &canonical) &&
+            std::equal(canonical.begin(), canonical.end(), font_original->begin())) {
+          font_hash_ = hash;
+          font_hash_found_ = true;
+          font = true;
+          REXLOG_INFO("input_icons: matched Pentatonic font texture {:016X}", hash);
+        }
+      }
+    }
     // The base-game texture must be a refresh candidate before any custom scheme is selected.
     // Otherwise a retail boot uploads it once and a later generation bump has nothing to evict.
-    if (button || icons || pad_slot) *refresh_target = true;
+    if (button || icons || pad_slot || font) *refresh_target = true;
+    if (button && original_buttons_.empty() &&
+        controller_schemes::UntileBc3Base(guest_data, request.guest_base_size,
+            request.width, request.tiled, uint32_t(request.endianness), &original_buttons_)) {
+      refresh_font_after_buttons_ = true;
+    }
+    if (font) {
+      if (font_icons_.empty() || original_buttons_.empty()) return false;
+      if (font_levels_.empty() &&
+          !input_font_atlas::Compose(*font_original, original_buttons_,
+                                     registry_.Find(selected_), font_icons_, &font_levels_)) {
+        REXLOG_WARN("input_icons: could not compose mapping font images");
+        return false;
+      }
+      if (request.mip_count > font_levels_.size()) return false;
+      host_levels->assign(font_levels_.begin(), font_levels_.begin() + request.mip_count);
+      return true;
+    }
     const auto* scheme = registry_.Find(selected_);
     if (!scheme) {
       if (button && logged_.insert(hash).second)
@@ -168,6 +231,15 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::string selected_;
   std::vector<std::vector<uint8_t>> buttons_;
   std::vector<std::vector<uint8_t>> icons_;
+  std::vector<std::vector<uint8_t>> font_levels_;
+  std::vector<input::icons::Icon> font_icons_;
+  std::vector<input::icons::Icon> pending_icons_;
+  std::vector<uint8_t> original_buttons_;
+  std::string last_icon_signature_;
+  uint64_t font_hash_ = 0;
+  bool font_hash_found_ = false;
+  bool has_pending_icons_ = false;
+  bool refresh_font_after_buttons_ = false;
   std::map<uint64_t, std::vector<std::vector<uint8_t>>> pads_;
   std::unordered_set<uint64_t> logged_;
   std::mutex pending_mutex_;
@@ -318,6 +390,13 @@ bool SelectControllerScheme(const std::string& id) {
                     ? "controller" : "keyboard");
   }
   return true;
+}
+
+void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons) {
+  if (g_scheme_provider) g_scheme_provider->PublishIcons(std::move(signature), std::move(icons));
+}
+bool InputIconsAvailable() {
+  return g_scheme_provider != nullptr && ui::input_font::OriginalBc3() != nullptr;
 }
 
 }  // namespace rb_blitz::assets

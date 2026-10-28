@@ -6,11 +6,21 @@
 #include "check.h"
 #include "ui/menu_music_artwork.h"
 #include "ui/menu_music_player_policy.h"
+#include "ui/menu_music_text.h"
 using namespace rb_blitz;
 using namespace ui::music;
 using test::BeginCase;
 
 namespace {
+void TextTests() {
+  BeginCase("music player converts Latin-1 DTA titles and preserves UTF-8 titles");
+  CHECK_TRUE(DisplayTextUtf8("California \xDC" "ber Alles") ==
+             "California \xC3\x9C" "ber Alles");
+  CHECK_TRUE(DisplayTextUtf8("California \xC3\x9C" "ber Alles") ==
+             "California \xC3\x9C" "ber Alles");
+  CHECK_TRUE(DisplayTextUtf8("Bj\xF6rk and Caf\xC3\xA9") ==
+             "Bj\xC3\xB6rk and Caf\xC3\xA9");
+}
 MenuPoint Center(MenuBounds b) {
   return {(b.left + b.right) / 2, (b.top + b.bottom) / 2};
 }
@@ -186,6 +196,7 @@ void ArtworkTests() {
 }
 }  // namespace
 int main() {
+  TextTests();
   PointerTests();
   ArtworkTests();
   return test::Finish();

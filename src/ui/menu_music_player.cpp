@@ -17,6 +17,7 @@
 #include "input/title_input.h"
 #include "ui/help_overlay.h"
 #include "ui/menu_music_artwork.h"
+#include "ui/menu_music_text.h"
 
 REXCVAR_DECLARE(bool, enhancements_music_player);
 namespace rb_blitz::ui::music {
@@ -49,7 +50,7 @@ ImVec2 BR(MenuBounds b) { return {b.right, b.bottom}; }
 void Label(ImDrawList* draw, ImFont* font, float size, ImVec2 at, float width,
            ImU32 color, const std::string& text) {
   // UTF-8 boundary truncation; never split a multibyte character.
-  std::string fit = text;
+  std::string fit = DisplayTextUtf8(text);
   if (font->CalcTextSizeA(size, FLT_MAX, 0, fit.c_str()).x > width) {
     do {
       size_t end = fit.size() - 1;

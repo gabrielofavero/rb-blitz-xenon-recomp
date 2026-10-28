@@ -812,3 +812,54 @@ records three controller-to-keyboard round trips while the selected scheme
 stays One Pad; the owner confirmed its magenta pad art remained visible.
 Footer hints still use the guest's retail A/B glyphs until P10 consumes the
 resolver view.
+
+### Mapping row images (2026-10-28 host checkpoint)
+
+`input_icon_rows::Build` uses the P8 view to emit every effective source in
+saved order for Interface Mapping and the two device-specific Gameplay Mapping
+lists. It keeps each action's native list position and selection route, and
+replaces only the displayed binding text with a label and inline glyph codes.
+`menu_payload` copies the installed Pentatonic scene as `input_icons.milo` into the generated archive
+with 30 previously empty glyph records pointed at unused atlas cells. The
+texture override populates those cells from built-in key/mouse images, selected
+controller package slots, and omitted slots cropped from the installed button
+sheet. Host tests cover ordering, rebinding, unbound rows, overflow fallback,
+texture composition and untouched BC3 blocks. The owner screenshots confirm Interface Mapping
+draws the images and adding a binding refreshes them. They revealed bottom
+clipping on controller circles, small and offset icons, and unreadable black fills
+when selected. The alpha adjustment and list palette workaround were rejected
+and removed. The owner confirmed the resulting icon size and nearly correct
+placement, but hover still blackened icons: `UILabel::DrawShowing` at `824BC668`
+applies the selected color as a material multiplier, after vertex color markup.
+The current route wraps only icons in `<alt1>` and adds a separate font resource
+with its own material and the existing white `active_focused.color`. Primary
+style, label geometry and every palette record remain byte-identical. The
+owner confirmed the icon size, placement and hovered icon colors. A spare
+compatibility style that reused the primary font caused white hovered action
+text: the shared font's material was updated twice. That duplicate style is now
+removed, leaving exactly two styles with distinct fonts/materials. The text
+therefore retains the ordinary state tint and only the icon font stays white;
+the owner accepted the selected action text on 2026-10-28 ("Perfect!", with
+a screenshot showing black Confirm text, colored controller/key icons and the
+original yellow highlight).
+The added styles also carry one empty material-variation string each for
+`UILabel::PostLoad` (`824BC3E0`). Omitting those post-load records caused the
+2026-10-28 startup crash: the loader treated the next object's marker as a
+string length and overran its buffer. The corrected serialization has a test
+that consumes both loading phases and verifies the following object marker.
+A CDB startup run reached the usable main menu and closed cleanly. The owner
+subsequently accepted the mapping row's hover appearance.
+
+Pentatonic's cell is 84.25 by 79.5 pixels. Its glyph fields are UV origin, width
+factor and advance; the last field is **not height**. The renderer samples the
+full 79.5-pixel height, so 64-pixel atlas rows were invalid. The new band has 15
+columns with a 68-pixel stride and two 128-pixel rows. Each 64-pixel icon starts
+two pixels inside its horizontal cell and eight pixels below the
+cell top, aligning its center with the capital letters (retail A's visible pixels
+span y=15..62). Width and advance are `64 / 84.25`. The complete 85-pixel button
+source cell retains the A/B circles' lower arc. The complete padded band is
+downsampled together so fractional mip coordinates retain the same image placement.
+Host tests cover the full sampling window and gutters of all 30 slots. The
+material isolation and stray-pixel correction have owner visual acceptance.
+A page needing more than 30 images still uses its
+complete textual list; an image overflow route remains P9 work.
