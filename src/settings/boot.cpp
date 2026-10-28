@@ -518,7 +518,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     // made in AfterLoadXexImage - where the fact that they could not be written at the config rank
     // is reported rather than swallowed.
     for (const SettingId id :
-         {SettingId::kRenderer, SettingId::kCacheDlcLibrary, SettingId::kRefreshMusicLibrary,
+         {SettingId::kRenderer, SettingId::kRefreshMusicLibrary,
           SettingId::kDlcScanThreads, SettingId::kDlcMenuSongs, SettingId::kLoadGuard, SettingId::kStartup,
           SettingId::kHideOfflinePrompts,
           SettingId::kHideMainMenu, SettingId::kHiddenMainMenu, SettingId::kVsync,

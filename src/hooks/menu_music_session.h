@@ -47,6 +47,36 @@ class MusicSession {
   // A full catalog makes both the opener and every later draw uniform by song,
   // including merged packs. Readiness and discovery order cannot choose a track.
   void RequireCompleteDiscovery() { require_complete_discovery_ = true; }
+  // A cold catalog can open with a randomly probed package. Reserve only its
+  // first song; the full catalog will plan the following songs once ready.
+  bool PlanOpeningFromPackage(size_t package, std::mt19937& rng) {
+    if (!playlist_.empty()) return false;
+    std::vector<size_t> candidates;
+    for (size_t id = 0; id < sources_.size(); ++id)
+      if (packages_[id] == package && Usable(id)) candidates.push_back(id);
+    if (candidates.empty()) return false;
+    const auto song = candidates[std::uniform_int_distribution<size_t>(0, candidates.size()-1)(rng)];
+    playlist_.push_back({song, pass_});
+    std::erase(remaining_, song);
+    return true;
+  }
+  // During a cold catalog build, reserve one new song from the next randomly
+  // probed package. This keeps Next usable before the complete index is ready.
+  bool PlanSuccessorFromPackage(size_t package, std::mt19937& rng) {
+    if (playlist_.empty()) return false;
+    std::vector<size_t> candidates;
+    for (size_t id = 0; id < sources_.size(); ++id) {
+      if (packages_[id] != package || !Usable(id)) continue;
+      if (std::any_of(playlist_.begin(), playlist_.end(),
+                      [id](const Entry& entry) { return entry.song == id; })) continue;
+      candidates.push_back(id);
+    }
+    if (candidates.empty()) return false;
+    const auto song = candidates[std::uniform_int_distribution<size_t>(0, candidates.size()-1)(rng)];
+    playlist_.push_back({song, pass_});
+    std::erase(remaining_, song);
+    return true;
+  }
   bool DiscoveryFinished() const { return discovery_complete_; }
   void BlockPackage(size_t package) { blocked_.insert(package); }
   bool PackageBlocked(size_t package) const { return blocked_.contains(package); }

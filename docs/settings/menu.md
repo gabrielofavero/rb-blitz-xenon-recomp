@@ -9,7 +9,7 @@ preserved; repeated baseline/build/test prose and duplicated evidence lists were
 records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.md](contracts.md) and
 [status.md](status.md).
 
-## Current organization (2026-10-26)
+## Current organization (2026-10-28)
 
 The root remains How to Play, Calibration, General, Controls, Audio/Video, and Gameplay
 (Ultimate). Every category has at most six visible entries, in both menu and in-song contexts.
@@ -18,7 +18,8 @@ The root remains How to Play, Calibration, General, Controls, Audio/Video, and G
 | --- | --- |
 | General | Launch; Interface; Song Library; Achievements & Unlocks; Load Guard; Credits |
 | Launch | Game Version (Rock Band Blitz / Ultimate / Demo); Startup (Normal / Fast) |
-| Controls | Input Types; Interface Mapping; Gameplay Mapping; `Layout: <name>` (when icon schemes are on). The Layout row cycles through discovered controller schemes directly; there is no layout submenu. |
+| Controls | Controller Presets; `Layout: <name>`; Interface Mapping; Gameplay Mapping. Keyboard and mouse are always enabled. |
+| Gameplay Mapping | Notes; Move Lane; Pause & Power-up; Reset All. Each action row keeps its name beside the keyboard and mouse bindings, with Add Key, Replace, and Reset on its page. Mapping pages hide the bottom settings caption. A first controller button asks for confirmation, then custom controller bindings replace the preset for all actions. |
 | Interface | Main Menu; Music Library & Store; Skip Offline Prompts; Setting Descriptions |
 | Main Menu | Base Game Items; Extra Items |
 | Base Game Items | Leaderboards; Achievements; Unlock Full Game; Download Content |

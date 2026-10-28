@@ -68,6 +68,25 @@ using namespace rb_blitz::test;
 
 using dtb::Node;
 
+bool SuppressesSettingsCaption(const std::string_view name) {
+  return name.starts_with("settings_restart") ||
+         name.starts_with("settings_save_error") ||
+         name.starts_with("settings_achievements_confirm") ||
+         name.starts_with("settings_linked") ||
+         name.starts_with("settings_controller_capture_warning") ||
+         name.starts_with("settings_controls_") ||
+         name.starts_with("settings_interface_mapping_") ||
+         name.starts_with("settings_interface_navigation_") ||
+         name.starts_with("settings_interface_music_library_") ||
+         name.starts_with("settings_interface_music_play_") ||
+         name.starts_with("settings_gameplay_mapping_") ||
+         name.starts_with("settings_keyboard_mouse_") ||
+         name.starts_with("settings_bind_general_") ||
+         name.starts_with("settings_bind_music_") ||
+         name.starts_with("settings_bind_keyboard_mouse_") ||
+         name.starts_with("settings_listen_");
+}
+
 Node Sym(const char* name) { return dtb::Node::Symbol(name); }
 Node Var(const char* name) { return dtb::Node::Var(name); }
 Node Str(const char* text) { return dtb::Node::String(text); }
@@ -430,11 +449,11 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 136u);  // sixty-eight pages, in each of the two contexts
+  CHECK_EQ(panels.size(), 112u);  // fifty-six pages in each context
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
-  CHECK_EQ(screens.size(), 136u);
+  CHECK_EQ(screens.size(), 112u);
   CHECK_TRUE(screens.front() == kRootScreen);
   // The contexts pair up one for one, in declaration order: the i-th screen's in-song twin is the
   // (i + half)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
@@ -500,8 +519,8 @@ void TestListOwnership() {
     CHECK_TRUE(pause || HasText(root, kSceneName) || HasText(root, "../pause/settings_confirmation.milo"));
     (pause ? in_song : main_menu) += 1;
   }
-  CHECK_EQ(main_menu, 68);
-  CHECK_EQ(in_song, 68);
+  CHECK_EQ(main_menu, 56);
+  CHECK_EQ(in_song, 56);
 
   // The copies have to live **beside** the retail scene, because that scene refers to its neighbours
   // by relative path (`neon_lights.milo`, `../resource/lists/list_options_main.milo`), and those
@@ -562,7 +581,7 @@ void TestScreenBackTargets() {
       CHECK_TRUE(HasText(root, "game_screen"));
     }
   }
-  CHECK_EQ(in_song, 68);  // one per page, the root included
+  CHECK_EQ(in_song, 56);  // one per page, the root included
   CHECK_EQ(root_twins, 1);
 }
 
@@ -626,7 +645,9 @@ void TestRequestPathsParse() {
     Request request;
     std::string why;
     if (ParseTextRequest(path, &request, &why) && request.op == Op::kInvoke)
-      CHECK_TRUE(request.setting == "linked.confirm" || request.setting == "linked.cancel");
+      CHECK_TRUE(request.setting == "linked.confirm" || request.setting == "linked.cancel" ||
+                 request.setting == "controller.capture_confirm" ||
+                 request.setting == "controller.capture_cancel");
   }
   std::vector<std::string> declared;
   for (const auto& root : DefinitionRoots()) {
@@ -1133,7 +1154,7 @@ void TestInSongContext() {
     CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screens[i])) !=
                screens.end());
   }
-  CHECK_EQ(menu_screens.size(), 68u);
+  CHECK_EQ(menu_screens.size(), 56u);
   std::vector<std::string> in_song_panels_names = PanelNames();
   in_song_panels_names.erase(in_song_panels_names.begin(),
                              in_song_panels_names.begin() + static_cast<std::ptrdiff_t>(half));
@@ -1153,7 +1174,7 @@ void TestInSongContext() {
       CHECK_FALSE(HasText(root, screen));
     }
   }
-  CHECK_EQ(in_song_panels, 68);
+  CHECK_EQ(in_song_panels, 56);
 
   // The two contexts' panel sets are retail's own, and the difference between them is
   // load-bearing - measured, not stylistic. Retail's in-song page screens that are entered with a
@@ -1404,7 +1425,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, 136);                   // every panel, in both contexts
+  CHECK_EQ(fills, 112);                   // every panel, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -1600,7 +1621,7 @@ void TestButtonTableIsOneSwitch() {
     }
     CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
   }
-  CHECK_EQ(tables, 136);  // every panel, in both contexts
+  CHECK_EQ(tables, 112);  // every panel, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
@@ -1645,16 +1666,13 @@ void TestButtonTableIsOneSwitch() {
     }
     const std::string panel_name =
         (root.kids.size() >= 3 && root.kids[2].tag == dtb::kSymbol) ? root.kids[2].text : "";
-    const bool suppressed = panel_name.rfind("settings_restart", 0) == 0 ||
-                            panel_name.rfind("settings_save_error", 0) == 0 ||
-                            panel_name.rfind("settings_achievements_confirm", 0) == 0 ||
-                            panel_name.rfind("settings_linked", 0) == 0;
+    const bool suppressed = SuppressesSettingsCaption(panel_name);
     CHECK_EQ(in_scroll, suppressed ? 0 : 1);
     const size_t extra =
         all.size() - 1u - static_cast<size_t>(in_moves) - static_cast<size_t>(in_scroll);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, 136);  // one row table per panel, in both contexts
+  CHECK_EQ(row_tables, 112);  // one row table per panel, in both contexts
 }
 
 void TestSelectAdvancesAndWraps() {
@@ -1757,7 +1775,7 @@ void TestRestartPromptOnlyOnLeave() {
   // P9-11 retired the ten authored search-key pages (one root, the letters index, five character
   // groups, two number groups and More Keys) in both contexts: the store's Search row opens the
   // title's own keyboard now. 142 - 2 * 10.
-  CHECK_EQ(panels, 136);
+  CHECK_EQ(panels, 112);
   CHECK_EQ(root_cancels, 2);
   CHECK_EQ(other_cancels, panels - root_cancels);
 }
@@ -2681,6 +2699,7 @@ void TestHelpEventsInTheDefinition() {
   int enters = 0;
   int moves = 0;
   int scrolls = 0;
+  int expected_scrolls = 0;
   int clears = 0;
   for (const dtb::Node& root : roots) {
     std::vector<const dtb::Node*> rows;
@@ -2696,10 +2715,8 @@ void TestHelpEventsInTheDefinition() {
     // here so the assertions below can tell the two kinds of page apart.
     const std::string panel_name =
         (root.kids.size() >= 3 && root.kids[2].tag == dtb::kSymbol) ? root.kids[2].text : "";
-    const bool suppressed = panel_name.rfind("settings_restart", 0) == 0 ||
-                            panel_name.rfind("settings_save_error", 0) == 0 ||
-                            panel_name.rfind("settings_achievements_confirm", 0) == 0 ||
-                            panel_name.rfind("settings_linked", 0) == 0;
+    const bool suppressed = SuppressesSettingsCaption(panel_name);
+    if (!suppressed) ++expected_scrolls;
 
     // Enter: the first visible row's caption, emitted as an `enter` statement so a commit that
     // re-runs `populate_menu` cannot drag the overlay back to row 0 (the mirror has shown that
@@ -2859,10 +2876,10 @@ void TestHelpEventsInTheDefinition() {
       }
     }
   }
-  CHECK_EQ(panels, 136);        // every page, in both contexts
+  CHECK_EQ(panels, 112);        // every page, in both contexts
   CHECK_EQ(enters, panels);    // every page tells the overlay where the highlight starts
   CHECK_TRUE(moves > 100);     // the unclamped direction cases, across the surface
-  CHECK_EQ(scrolls, panels - 8);  // every ordinary page, not the three suppressed twins
+  CHECK_EQ(scrolls, expected_scrolls);
   CHECK_TRUE(clears >= panels);
 }
 
@@ -2954,20 +2971,6 @@ void TestHelpTopicsResolve() {
 void TestConfirmationPagesAreCaptionFree() {
   BeginCase("the restart/save-error/confirmation pages draw no caption in either context");
 
-  const char* kSuppressed[] = {"settings_restart_panel",     "settings_restart_pause_panel",
-                               "settings_save_error_panel",  "settings_save_error_pause_panel",
-                               "settings_achievements_confirm_panel",
-                               "settings_achievements_confirm_pause_panel",
-                               "settings_linked_panel", "settings_linked_pause_panel"};
-  const auto is_suppressed = [&kSuppressed](const std::string& name) {
-    for (const char* candidate : kSuppressed) {
-      if (name == candidate) {
-        return true;
-      }
-    }
-    return false;
-  };
-
   int suppressed_seen = 0;
   int panels = 0;
   for (const dtb::Node& root : DefinitionRoots()) {
@@ -2976,7 +2979,7 @@ void TestConfirmationPagesAreCaptionFree() {
       continue;
     }
     const std::string name = root.kids[2].text;
-    const bool suppressed = is_suppressed(name);
+    const bool suppressed = SuppressesSettingsCaption(name);
 
     // Every caption event on a suppressed page must be the *hide*: an `enter` that publishes the
     // first row, or a move that names a row, would put a description over the message.
@@ -3030,8 +3033,10 @@ void TestConfirmationPagesAreCaptionFree() {
     }
   }
 
-  CHECK_EQ(panels, 136);         // the whole surface, in both contexts
-  CHECK_EQ(suppressed_seen, 8);  // three pages, each with an in-song twin
+  CHECK_EQ(panels, 112);         // the whole surface, in both contexts
+  const auto names = PanelNames();
+  CHECK_EQ(suppressed_seen, static_cast<int>(std::count_if(
+      names.begin(), names.end(), SuppressesSettingsCaption)));
 }
 
 // Gameplay -> HUD (owner request, 2026-10-19): the page is three rows, and its five element
@@ -3186,7 +3191,7 @@ void TestLoadGuardSurface() {
 }
 
 void TestMusicNavigationSurface() {
-  BeginCase("music navigation: live bindings, Assign/Reset pages, on/off budgets and both back targets");
+  BeginCase("music navigation: live bindings, Add/Replace/Reset pages and both back targets");
   ConfigureMenu({});
   CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 4u);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
@@ -3196,7 +3201,8 @@ void TestMusicNavigationSurface() {
   const auto roots = DefinitionRoots();
   for (const auto& action : actions) {
     const auto rows = PanelRowSymbols(action + "_panel");
-    CHECK_TRUE(rows == std::vector<std::string>({action + "_assign", action + "_reset"}));
+    CHECK_TRUE(rows == std::vector<std::string>({action + "_add", action + "_replace",
+                                                action + "_reset"}));
     CHECK_TRUE(PageRows(PausePanel(action + "_panel")) == rows);
   }
   rb_blitz::input::EffectiveInput input;
@@ -3236,7 +3242,7 @@ void TestMusicNavigationSurface() {
   disabled.background_music_navigation = false;
   ConfigureMenu(disabled);
   // Off must keep the identical tree, including the command page in both contexts.
-  CHECK_EQ(PanelNames().size(), 136u);
+  CHECK_EQ(PanelNames().size(), 112u);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
   CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 4u);
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
@@ -3440,147 +3446,58 @@ std::vector<std::string> PageRows(const std::string& panel_name) {
 }
 
 void TestGameplayMappingTreeAfterP4() {
-  BeginCase("Gameplay Mapping: Controller Presets, three groups, and a plain Reset All");
-
-  // The two input types, in the plan's tree order.
-  const std::vector<std::string> top = PageRows("settings_gameplay_mapping_panel");
-  CHECK_EQ(top.size(), 2u);
-  if (top.size() == 2u) {
-    CHECK_TRUE(top[0] == "settings_gameplay_controller");
-    CHECK_TRUE(top[1] == "settings_gameplay_keyboard_mouse");
-  }
-
-  // D5: the Controller page keeps the game's own preset page beside the custom groups.
-  const std::vector<std::string> controller_page = PageRows("settings_gameplay_controller_panel");
-  CHECK_EQ(controller_page.size(), 2u);
-  if (controller_page.size() == 2u) {
-    CHECK_TRUE(controller_page[0] == "settings_controller_presets");
-    CHECK_TRUE(controller_page[1] == "settings_controller_mapping");
-  }
-
-  // D7/D9: each table's groups page is three submenus and one plain action. The action is a single
-  // symbol with no `_on`/`_off` pair, so it can never draw a `: Nothing` suffix.
-  const std::vector<std::string> groups_controller = PageRows("settings_controller_actions_panel");
-  CHECK_EQ(groups_controller.size(), 4u);
-  if (groups_controller.size() == 4u) {
-    CHECK_TRUE(groups_controller[0] == "settings_controller_notes");
-    CHECK_TRUE(groups_controller[1] == "settings_controller_move_lane");
-    CHECK_TRUE(groups_controller[2] == "settings_controller_pause_powerup");
-    CHECK_TRUE(groups_controller[3] == "settings_reset_controller");
-  }
-  const std::vector<std::string> groups_keyboard_mouse =
-      PageRows("settings_gameplay_keyboard_mouse_panel");
-  CHECK_EQ(groups_keyboard_mouse.size(), 4u);
-  if (groups_keyboard_mouse.size() == 4u) {
-    CHECK_TRUE(groups_keyboard_mouse[0] == "settings_keyboard_mouse_notes");
-    CHECK_TRUE(groups_keyboard_mouse[1] == "settings_keyboard_mouse_move_lane");
-    CHECK_TRUE(groups_keyboard_mouse[2] == "settings_keyboard_mouse_pause_powerup");
-    CHECK_TRUE(groups_keyboard_mouse[3] == "settings_reset_keyboard_mouse");
-  }
-
-  // Each group lists its two actions, in the order the group's own name reads.
+  BeginCase("Gameplay Mapping: one action list, keyboard text, and controller confirmation");
+  MenuConfiguration configuration;
+  configuration.controller_layout_enabled = true;
+  ConfigureMenu(configuration);
+  const auto controls = PanelRowSymbols("settings_controls_panel");
+  CHECK_TRUE(std::find(controls.begin(), controls.end(), "settings_controller_presets") != controls.end());
+  CHECK_TRUE(std::find(controls.begin(), controls.end(), "settings_controls_layout") != controls.end());
+  CHECK_TRUE(controls[0] == "settings_controller_presets");
+  CHECK_TRUE(controls[1] == "settings_controls_layout");
+  CHECK_TRUE(PageRows("settings_gameplay_mapping_panel") ==
+      std::vector<std::string>({"settings_keyboard_mouse_notes",
+                                "settings_keyboard_mouse_move_lane",
+                                "settings_keyboard_mouse_pause_powerup",
+                                "settings_reset_gameplay"}));
+  using Action = rb_blitz::profile::gameplay_remap::Action;
   const std::vector<std::pair<std::string, std::vector<std::string>>> groups{
-      {"settings_controller_notes_panel",
-       {"settings_bind_controller_first_note", "settings_bind_controller_second_note"}},
-      {"settings_controller_move_lane_panel",
-       {"settings_bind_controller_move_lane_right", "settings_bind_controller_move_lane_left"}},
-      {"settings_controller_pause_powerup_panel",
-       {"settings_bind_controller_pause", "settings_bind_controller_powerup"}},
       {"settings_keyboard_mouse_notes_panel",
        {"settings_bind_keyboard_mouse_first_note", "settings_bind_keyboard_mouse_second_note"}},
       {"settings_keyboard_mouse_move_lane_panel",
-       {"settings_bind_keyboard_mouse_move_lane_right",
-        "settings_bind_keyboard_mouse_move_lane_left"}},
+       {"settings_bind_keyboard_mouse_move_lane_right", "settings_bind_keyboard_mouse_move_lane_left"}},
       {"settings_keyboard_mouse_pause_powerup_panel",
        {"settings_bind_keyboard_mouse_pause", "settings_bind_keyboard_mouse_powerup"}},
   };
-  for (const auto& [panel, expected] : groups) {
-    const std::vector<std::string> rows = PageRows(panel);
-    CHECK_TRUE(rows == expected);
+  for (const auto& [panel, actions] : groups) {
+    CHECK_TRUE(PageRows(panel) == actions);
+    CHECK_TRUE(PageRows(PausePanel(panel)) == actions);
+    for (const auto& action : actions) {
+      CHECK_TRUE(PageRows(action + "_panel") ==
+          std::vector<std::string>({action + "_add", action + "_replace", action + "_reset"}));
+      CHECK_TRUE(PageRows(PausePanel(action + "_panel")) ==
+                 PageRows(action + "_panel"));
+    }
   }
-
-  // Every gameplay page is inside the six-visible-row budget; the old 7-row action table (six
-  // actions plus Reset All) is gone.
-  for (const char* panel : {"settings_gameplay_mapping_panel",
-                            "settings_gameplay_controller_panel",
-                            "settings_controller_actions_panel",
-                            "settings_gameplay_keyboard_mouse_panel",
-                            "settings_controller_notes_panel",
-                            "settings_controller_move_lane_panel",
-                            "settings_controller_pause_powerup_panel",
-                            "settings_keyboard_mouse_notes_panel",
-                            "settings_keyboard_mouse_move_lane_panel",
-                            "settings_keyboard_mouse_pause_powerup_panel"}) {
-    CHECK_TRUE(PageRows(panel).size() <= 6u);
-  }
-
-  // The titles and label spellings D5/D6/D13 ask for.
-  const std::vector<std::pair<std::string, std::string>> labels = Labels();
-  const auto has_label = [&labels](const std::string& key, const std::string& text) {
-    return std::find(labels.begin(), labels.end(), std::make_pair(key, text)) != labels.end();
+  const auto warning = PageRows("settings_controller_capture_warning_panel");
+  CHECK_TRUE(warning == std::vector<std::string>({"settings_controller_capture_cancel",
+                                                   "settings_controller_capture_confirm"}));
+  CHECK_TRUE(PageRows("settings_controller_capture_warning_pause_panel") == warning);
+  const auto paths = RequestPaths();
+  const auto has_path = [&paths](const std::string& path) {
+    return std::find(paths.begin(), paths.end(), path) != paths.end();
   };
-  CHECK_TRUE(has_label("settings_gameplay_controller", "Controller"));
-  CHECK_TRUE(has_label("settings_gameplay_keyboard_mouse", "Mouse & Keyboard"));
-  CHECK_TRUE(has_label("settings_controller_presets", "Controller Presets"));
-  CHECK_TRUE(has_label("settings_controller_mapping", "Custom Mapping"));
-  CHECK_TRUE(has_label("settings_controller_notes", "Notes"));
-  CHECK_TRUE(has_label("settings_controller_move_lane", "Move Lane"));
-  CHECK_TRUE(has_label("settings_controller_pause_powerup", "Pause & Power-up"));
-  CHECK_TRUE(has_label("settings_reset_controller", "Reset All"));
-  CHECK_TRUE(has_label("settings_reset_keyboard_mouse", "Reset All"));
-  CHECK_TRUE(
-      has_label("settings_title_settings_gameplay_keyboard_mouse_panel", "MOUSE & KEYBOARD"));
-  CHECK_TRUE(has_label("settings_title_settings_controller_actions_panel", "CUSTOM MAPPING"));
-  for (const char* key : {"settings_title_settings_controller_notes_panel",
-                          "settings_title_settings_keyboard_mouse_notes_panel"}) {
-    CHECK_TRUE(has_label(key, "NOTES"));
-  }
-  for (const char* key : {"settings_title_settings_controller_move_lane_panel",
-                          "settings_title_settings_keyboard_mouse_move_lane_panel"}) {
-    CHECK_TRUE(has_label(key, "MOVE LANE"));
-  }
-  for (const char* key : {"settings_title_settings_controller_pause_powerup_panel",
-                          "settings_title_settings_keyboard_mouse_pause_powerup_panel"}) {
-    CHECK_TRUE(has_label(key, "PAUSE & POWER-UP"));
-  }
-  // D13: the game's own spelling, on the row and on the bind page's title.
-  CHECK_FALSE(has_label("settings_bind_controller_powerup_on", "Power-up: Custom"));
-  CHECK_TRUE(has_label("settings_title_settings_bind_controller_powerup_panel", "POWER-UP"));
-  CHECK_TRUE(has_label("settings_title_settings_bind_keyboard_mouse_powerup_panel", "POWER-UP"));
-
-  // D6 renames the input type wherever the model spells it; the profile's section never moves.
-  using rb_blitz::profile::gameplay_remap::TableKind;
-  CHECK_TRUE(std::string(rb_blitz::profile::gameplay_remap::TableKindLabel(
-                 TableKind::kKeyboardMouse)) == "Mouse & Keyboard");
-  CHECK_TRUE(std::string(rb_blitz::profile::gameplay_remap::TableKindSection(
-                 TableKind::kKeyboardMouse)) == "gameplay_remap_keyboard_mouse");
-
-  // The retired rows and the retired level are gone, and no switch token is written anywhere.
-  const std::vector<std::string> symbols = HelpSymbols();
-  for (const char* retired : {"settings_default_presets", "settings_keyboard_mouse_mapping",
-                              "settings_custom_controller", "settings_custom_keyboard_mouse"}) {
-    CHECK_TRUE(std::find(symbols.begin(), symbols.end(), retired) == symbols.end());
-  }
-  const std::vector<std::string> paths = RequestPaths();
-  for (const std::string& path : paths) {
-    CHECK_TRUE(path.find("input.custom_controller") == std::string::npos);
-    CHECK_TRUE(path.find("input.custom_keyboard_mouse") == std::string::npos);
-  }
-  // The table resets survive: they are how a custom table goes back to the preset or the defaults.
-  CHECK_TRUE(std::find(paths.begin(), paths.end(),
-                       "rbbz-settings/bind-reset-all/input.reset.controller/-") != paths.end());
-  CHECK_TRUE(std::find(paths.begin(), paths.end(),
-                       "rbbz-settings/bind-reset-all/input.reset.keyboard_mouse/-") !=
-             paths.end());
-
-  // The in-song twin is the same tree, so a paused song edits the same rows.
-  CHECK_TRUE(PageRows("settings_controller_actions_pause_panel") == groups_controller);
-  CHECK_TRUE(PageRows("settings_gameplay_keyboard_mouse_pause_panel") == groups_keyboard_mouse);
-  for (const auto& [panel, expected] : groups) {
-    CHECK_TRUE(PageRows(PausePanel(panel)) == expected);
-  }
+  CHECK_TRUE(has_path("rbbz-settings/capture/input.keyboard_mouse.first_note/-"));
+  CHECK_TRUE(has_path("rbbz-settings/capture/input.keyboard_mouse.first_note/b:1"));
+  CHECK_TRUE(has_path("rbbz-settings/bind-reset-all/input.reset.keyboard_mouse/-"));
+  CHECK_TRUE(has_path("rbbz-settings/bind-reset-all/input.reset.controller/-"));
+  CHECK_TRUE(has_path("rbbz-settings/invoke/controller.capture_confirm/-"));
+  CHECK_TRUE(has_path("rbbz-settings/invoke/controller.capture_cancel/-"));
+  CHECK_TRUE(has_path("rbbz-settings/snapshot/controller.capture_pending/b:1"));
+  CHECK_TRUE(PageRows("settings_gameplay_controller_panel").empty());
+  CHECK_TRUE(PageRows("settings_gameplay_keyboard_mouse_panel").empty());
+  ConfigureMenu(MenuConfiguration{});
 }
-
 // P3 (interface/gameplay mapping restructure plan): General Mapping is rebuilt as Interface
 // Mapping - nine rows in three groups (D1), the seven remaining targets hidden but still reset by
 // Reset All (D2), Reset All drawn as a plain action (D9), and every `[remap]` token unchanged so an
@@ -3617,10 +3534,14 @@ void TestInterfaceMappingTreeAfterP3() {
     CHECK_TRUE(library[1] == "settings_bind_general_y");       // Shortcuts
     CHECK_TRUE(library[2] == "settings_bind_general_back");    // Sort
   }
+  const std::string confirm = "settings_bind_general_a";
+  CHECK_TRUE(PageRows(confirm + "_panel") ==
+      std::vector<std::string>({confirm + "_add", confirm + "_replace", confirm + "_reset"}));
+  CHECK_TRUE(PageRows(PausePanel(confirm + "_panel")) == PageRows(confirm + "_panel"));
 
   // Every page of the Controls tree is inside the six-visible-row budget: the old 16-row list and
   // its 16 children are gone.
-  for (const char* panel : {"settings_controls_panel", "settings_input_types_panel",
+  for (const char* panel : {"settings_controls_panel",
                             "settings_interface_mapping_panel",
                             "settings_interface_navigation_panel",
                             "settings_interface_music_library_panel"}) {
@@ -3701,9 +3622,8 @@ void TestLiveBindingText() {
     ++live_pages;
     const auto symbols = PageRows(panel);
     CHECK_EQ(text.size(), symbols.size());
-    // The press table and scroll caption table must address every row exactly once, with
-    // consecutive integer keys, and never identify a row by its changing display text.
-    for (const char* member : {"select_row", "SCROLL_MSG"}) {
+    // The press table identifies rows by index; scrolling never publishes a caption here.
+    for (const char* member : {"select_row"}) {
       std::vector<const Node*> members;
       CollectMembers(root, member, &members);
       CHECK_EQ(members.size(), 1u);
@@ -3719,11 +3639,11 @@ void TestLiveBindingText() {
         const auto& key = tables.front()->kids[i + 2].kids.front();
         CHECK_EQ(key.tag, dtb::kInt);
         CHECK_EQ(key.scalar, i);
-        if (std::string_view(member) == "SCROLL_MSG")
-          CHECK_TRUE(
-              HasWord(tables.front()->kids[i + 2], "rbbz-settings/help/" + symbols[i] + "/-"));
       }
     }
+    std::vector<const Node*> scroll_members;
+    CollectMembers(root, "SCROLL_MSG", &scroll_members);
+    CHECK_TRUE(scroll_members.empty());
     CHECK_TRUE(HasWord(root, "rbbz-settings/text/" + panel));
     for (const char* member : {"move_up", "move_down"}) {
       std::vector<const Node*> members;
@@ -3742,7 +3662,7 @@ void TestLiveBindingText() {
         CHECK_TRUE(text[i].find(BindingRowLabel(row) + ": ") == 0);
     }
   }
-  CHECK_EQ(live_pages, 20u);  // 3 interface + 6 gameplay lists, main menu and pause
+  CHECK_EQ(live_pages, 14u);  // 4 interface + 3 gameplay lists, main menu and pause
   const std::string panel = "settings_interface_mapping_panel";
   const auto defaults = PanelBindingText(panel, snapshot);
   snapshot.general.Set(remap::Target::kA, *remap::ParseSourceList("key:g, key:h"));
@@ -3761,12 +3681,9 @@ void TestLiveBindingText() {
   const auto token = ParseInputRowToken("input.general.a");
   CHECK_TRUE(PanelBindingText(panel, snapshot)[1] ==
              BindingRowText(token, snapshot.general.Effective(remap::Target::kA)));
-  for (auto kind : gameplay_remap::TableKinds()) {
-    auto& table = kind == gameplay_remap::TableKind::kController ? snapshot.controller
-                                                                 : snapshot.keyboard_mouse;
-    const std::string group = kind == gameplay_remap::TableKind::kController
-                                  ? "settings_controller_notes_panel"
-                                  : "settings_keyboard_mouse_notes_panel";
+  for (auto kind : {gameplay_remap::TableKind::kKeyboardMouse}) {
+    auto& table = snapshot.keyboard_mouse;
+    const std::string group = "settings_keyboard_mouse_notes_panel";
     table.Set(gameplay_remap::Action::kFirstNote, *remap::ParseSourceList("key:q, mouse:right"));
     CHECK_TRUE(PanelBindingText(group, snapshot)[0] == "First Note: Q, Right Click");
     table.ResetAll();
@@ -3811,24 +3728,13 @@ void TestScreenBindingRows() {
     CHECK_TRUE(library[2] == "input.general.back");
   }
 
-  // P4: the groups page of each table (the Controller's Custom Mapping page, and the Mouse &
-  // Keyboard page Gameplay Mapping enters directly) owns no binding row; each group names its two
-  // actions, and each action's Assign/Reset page answers nothing.
+  // Gameplay Mapping lists each action once and draws keyboard/mouse bindings only.
   using rb_blitz::profile::gameplay_remap::Action;
   using rb_blitz::profile::gameplay_remap::TableKind;
   const auto gameplay_token = [](TableKind kind, Action action) {
     return rb_blitz::profile::GameplayBindingToken(kind, action);
   };
   const std::vector<std::pair<std::string, std::vector<std::string>>> groups{
-      {"settings_controller_notes_screen",
-       {gameplay_token(TableKind::kController, Action::kFirstNote),
-        gameplay_token(TableKind::kController, Action::kSecondNote)}},
-      {"settings_controller_move_lane_screen",
-       {gameplay_token(TableKind::kController, Action::kMoveLaneRight),
-        gameplay_token(TableKind::kController, Action::kMoveLaneLeft)}},
-      {"settings_controller_pause_powerup_screen",
-       {gameplay_token(TableKind::kController, Action::kPause),
-        gameplay_token(TableKind::kController, Action::kPowerup)}},
       {"settings_keyboard_mouse_notes_screen",
        {gameplay_token(TableKind::kKeyboardMouse, Action::kFirstNote),
         gameplay_token(TableKind::kKeyboardMouse, Action::kSecondNote)}},
@@ -3839,8 +3745,7 @@ void TestScreenBindingRows() {
        {gameplay_token(TableKind::kKeyboardMouse, Action::kPause),
         gameplay_token(TableKind::kKeyboardMouse, Action::kPowerup)}},
   };
-  CHECK_TRUE(ScreenBindingRows("settings_controller_actions_screen").empty());
-  CHECK_TRUE(ScreenBindingRows("settings_gameplay_keyboard_mouse_screen").empty());
+  CHECK_TRUE(ScreenBindingRows("settings_gameplay_mapping_screen").empty());
   for (const auto& [screen, expected] : groups) {
     CHECK_TRUE(ScreenBindingRows(screen) == expected);
   }
@@ -3849,8 +3754,7 @@ void TestScreenBindingRows() {
   CHECK_TRUE(ScreenBindingRows("settings_interface_mapping_pause_screen") == interface_page);
   CHECK_TRUE(ScreenBindingRows("settings_interface_navigation_pause_screen") == navigation);
   CHECK_TRUE(ScreenBindingRows("settings_interface_music_library_pause_screen") == library);
-  CHECK_TRUE(ScreenBindingRows("settings_controller_actions_pause_screen").empty());
-  CHECK_TRUE(ScreenBindingRows("settings_gameplay_keyboard_mouse_pause_screen").empty());
+  CHECK_TRUE(ScreenBindingRows("settings_gameplay_mapping_pause_screen").empty());
   for (const auto& [screen, expected] : groups) {
     CHECK_TRUE(ScreenBindingRows(PauseScreen(screen)) == expected);
   }
@@ -4309,8 +4213,8 @@ void TestControllerLayoutCatalogPage() {
   const auto panels = PanelNames();
   CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_controller_layout_panel") == panels.end());
   const std::vector<std::string> expected = {
-      "settings_controls_input_types", "settings_controls_interface",
-      "settings_controls_gameplay", "settings_controls_layout"};
+      "settings_controller_presets", "settings_controls_layout",
+      "settings_controls_interface", "settings_controls_gameplay"};
   CHECK_TRUE(PanelRowSymbols("settings_controls_panel") == expected);
   CHECK_TRUE(PageRows("settings_controls_pause_panel") ==
              PageRows("settings_controls_panel"));
@@ -4326,7 +4230,8 @@ void TestControllerLayoutCatalogPage() {
                        "rbbz-settings/set/controller.scheme/t:test-markers") != requests.end());
 
   ConfigureMenu(MenuConfiguration{});
-  CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 3u);
+  CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 4u);
+  CHECK_TRUE(PanelRowSymbols("settings_input_types_panel").empty());
 }
 
 }  // namespace

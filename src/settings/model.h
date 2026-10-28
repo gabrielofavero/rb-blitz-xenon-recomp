@@ -36,7 +36,7 @@ enum class SettingId : uint16_t {
   kUnknown = 0,
   // General
   kTarget = 1,
-  kCacheDlcLibrary = 2,
+  // 2 was Cache Song Library; retired, never reused.
   kDlcScanThreads = 3,
   kDlcMenuSongs = 4,
   kUnlockAll = 5,

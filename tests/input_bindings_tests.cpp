@@ -351,7 +351,7 @@ void TestLegacyCustomKeysAreInert() {
 }
 
 void TestFirstAssignReplacesAndAppends() {
-  rb_blitz::test::BeginCase("store: first Assign replaces a default, the next one appends, Reset restores");
+  rb_blitz::test::BeginCase("store: Add Key appends defaults, Replace restarts a row, Reset restores");
   const auto dir = ScratchDir();
   const auto path = dir / "launcher.toml";
   rb_blitz::input::InputStoreOptions options;
@@ -361,18 +361,22 @@ void TestFirstAssignReplacesAndAppends() {
   CHECK_FALSE(store->Matches("input.keyboard_mouse.second_note", true));
   CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("W, Left Click") !=
              std::string::npos);
-  CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("Click to Replace") !=
+  CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("Add Key or Replace") !=
              std::string::npos);
 
-  // First Assign: the default list is replaced, not extended (D8).
+  // Add Key preserves the default stack.
+  CHECK_TRUE(store->BeginCapture("input.keyboard_mouse.second_note", &error));
   CHECK_TRUE(store->CompleteCapture("input.keyboard_mouse.second_note", Source("key:Z"), &error));
   const std::string once = Slurp(path);
-  CHECK_TRUE(once.find("second_note = \"key:Z\"") != std::string::npos);
+  CHECK_TRUE(once.find("second_note = \"key:W, mouse:left, key:Z\"") != std::string::npos);
   CHECK_TRUE(once.find("wheel") == std::string::npos);
   CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("Custom binding") !=
              std::string::npos);
 
-  // Second Assign on the now-custom row appends, and a duplicate is still one press.
+  // Replace starts the list over, and Add Key appends to it.
+  CHECK_TRUE(store->BeginCaptureReplace("input.keyboard_mouse.second_note", &error));
+  CHECK_TRUE(store->CompleteCapture("input.keyboard_mouse.second_note", Source("key:Z"), &error));
+  CHECK_TRUE(store->BeginCapture("input.keyboard_mouse.second_note", &error));
   CHECK_TRUE(store->CompleteCapture("input.keyboard_mouse.second_note", Source("key:X"), &error));
   CHECK_TRUE(store->CompleteCapture("input.keyboard_mouse.second_note", Source("key:X"), &error));
   const std::string twice = Slurp(path);
@@ -386,11 +390,41 @@ void TestFirstAssignReplacesAndAppends() {
              std::string::npos);
 
   // A wheel detent binds like any other mouse source, and it persists in the grammar.
+  CHECK_TRUE(store->BeginCaptureReplace("input.keyboard_mouse.move_lane_right", &error));
   CHECK_TRUE(store->CompleteCapture("input.keyboard_mouse.move_lane_right",
                                     Source("mouse:wheel_up"), &error));
   CHECK_TRUE(Slurp(path).find("move_lane_right = \"mouse:wheel_up\"") != std::string::npos);
   CHECK_TRUE(store->Describe("input.keyboard_mouse.move_lane_right").find("Scroll Up") !=
              std::string::npos);
+}
+
+void TestFirstControllerBindNeedsConfirmation() {
+  rb_blitz::test::BeginCase("store: first pad bind waits for consent and disables preset fallbacks");
+  const auto path = ScratchDir() / "launcher.toml";
+  rb_blitz::profile::Profile profile;
+  std::string error;
+  CHECK_TRUE(rb_blitz::profile::SaveProfile(path, profile, &error));
+  auto store = rb_blitz::input::InputStore::Load(
+      path, rb_blitz::profile::LoadProfile(path), {});
+  const auto token = "input.keyboard_mouse.first_note";
+  CHECK_TRUE(store->BeginCapture(token, &error));
+  CHECK_TRUE(store->CompleteCapture(token, Source("pad:b"), &error));
+  CHECK_TRUE(store->HasPendingControllerCapture());
+  CHECK_FALSE(store->controller_custom());
+  CHECK_TRUE(store->ResolvePendingControllerCapture(false, &error));
+  CHECK_FALSE(store->HasPendingControllerCapture());
+  CHECK_FALSE(store->controller_custom());
+  CHECK_TRUE(store->BeginCapture(token, &error));
+  CHECK_TRUE(store->CompleteCapture(token, Source("pad:b"), &error));
+  CHECK_TRUE(store->ResolvePendingControllerCapture(true, &error));
+  CHECK_TRUE(store->controller_custom());
+  CHECK_FALSE(store->HasPendingControllerCapture());
+  CHECK_TRUE(Slurp(path).find("first_note = \"pad:b\"") != std::string::npos);
+  const auto snapshot = rb_blitz::input::CurrentInput();
+  using Action = rb_blitz::profile::gameplay_remap::Action;
+  CHECK_TRUE(snapshot->controller.Effective(Action::kSecondNote)->empty());
+  CHECK_FALSE(snapshot->keyboard_mouse.IsBound(Action::kFirstNote));
+  capture::Cancel();
 }
 
 void TestStoreCaptureAssignment() {
@@ -492,7 +526,9 @@ void TestMusicBindings() {
   CHECK_FALSE(capture::Armed());
   CHECK_FALSE(store->dirty());
   CHECK_TRUE(Slurp(path).find("[menu_music]") == std::string::npos);
+  CHECK_TRUE(store->BeginCaptureReplace("input.music.next", &error));
   CHECK_TRUE(store->CompleteCapture("input.music.next", Source("key:N"), &error));
+  CHECK_TRUE(store->BeginCapture("input.music.next", &error));
   CHECK_TRUE(store->CompleteCapture("input.music.next", Source("pad:x"), &error));
   CHECK_TRUE(store->CompleteCapture("input.music.next", Source("pad:x"), &error));
   const auto disk = rb_blitz::profile::LoadProfile(path);
@@ -543,6 +579,7 @@ int main() {
   TestLegacyCustomKeysAreInert();
   TestStoreCaptureAssignment();
   TestFirstAssignReplacesAndAppends();
+  TestFirstControllerBindNeedsConfirmation();
   TestRowDisplayText();
   std::printf("%s: %d check(s), %d failure(s)\n",
               rb_blitz::test::g_failures == 0 ? "PASS" : "FAIL", rb_blitz::test::g_checks,

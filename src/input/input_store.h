@@ -94,7 +94,10 @@ class InputStore final : public settings::InputBindingStore {
   bool StageResetAll(std::string_view token, std::string* error) override;
   bool Commit(std::string* error) override;
   bool BeginCapture(std::string_view token, std::string* error) override;
+  bool BeginCaptureReplace(std::string_view token, std::string* error) override;
   void CancelCapture() override;
+  bool HasPendingControllerCapture() const override;
+  bool ResolvePendingControllerCapture(bool accept, std::string* error) override;
   bool CompleteCapture(std::string_view token, const profile::remap::Source& source,
                        std::string* error) override;
   std::string Describe(std::string_view token) const override;
@@ -158,6 +161,15 @@ class InputStore final : public settings::InputBindingStore {
   // The gate values last applied to the process, so a commit only writes what moved.
   bool running_keyboard_ = true;
   bool running_mouse_ = true;
+  bool capture_replace_ = false;
+  struct PendingControllerCapture {
+    std::string token;
+    profile::remap::Source source;
+    bool replace = false;
+  };
+  std::optional<PendingControllerCapture> pending_controller_capture_;
+  bool SaveCapturedSource(std::string_view token, const profile::remap::Source& source,
+                          bool replace, std::string* error);
 };
 
 }  // namespace rb_blitz::input

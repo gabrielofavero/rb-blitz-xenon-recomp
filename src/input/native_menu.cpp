@@ -264,7 +264,7 @@ bool ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first, Menu
 std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoint point);
 }
 
-bool MouseSupportEnabled() { return REXCVAR_GET(mouse_ui_nav); }
+bool MouseSupportEnabled() { return true; }
 bool AnswerMenuHeaderQuery(std::string_view path, bool* answer) {
   constexpr std::string_view prefix = "rbbz-mouse/header/";
   if (!path.starts_with(prefix)) return false;

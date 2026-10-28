@@ -317,14 +317,11 @@ std::string BindingRowText(const InputRowToken& token,
   if (label.empty()) {
     return {};
   }
-  std::string text = label;
-  text += ": ";
+  std::string text = label + ": ";
   if (sources == nullptr || sources->empty()) {
-    text += "(no inputs)";
-  } else {
-    text += BindingListText(*sources);
+    return text + "(no inputs)";
   }
-  return text;
+  return text + BindingListText(*sources);
 }
 
 }  // namespace rb_blitz::profile

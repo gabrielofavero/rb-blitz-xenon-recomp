@@ -18,7 +18,7 @@
 
 #include "check.h"
 
-#include "fs/dlc_cache.h"
+#include "fs/tree_fingerprint.h"
 #include "fs/dlc_library.h"
 #include "fs/dlc_layout.h"
 #include "store/store_download.h"
@@ -866,13 +866,13 @@ void TestStagingExclusion() {
   CHECK_EQ(structured.rejected.size(), 0);
   CHECK_FALSE(rbfs::HasStructuredLayout(structured_root));
 
-  rbfs::DlcTreeFingerprint before;
+  rbfs::TreeFingerprint before;
   std::string reason;
-  CHECK_TRUE(rbfs::ComputeLibraryFingerprint({root}, &before, &reason));
+  CHECK_TRUE(rbfs::ComputeTreeFingerprint({root}, &before, &reason));
   WriteFile(root / rbfs::kStoreStagingDirName / "another.part",
             std::string(1024 * 64, 'x'));
-  rbfs::DlcTreeFingerprint after;
-  CHECK_TRUE(rbfs::ComputeLibraryFingerprint({root}, &after, &reason));
+  rbfs::TreeFingerprint after;
+  CHECK_TRUE(rbfs::ComputeTreeFingerprint({root}, &after, &reason));
   CHECK_TRUE(before == after);
 }
 

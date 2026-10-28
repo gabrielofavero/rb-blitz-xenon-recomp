@@ -365,6 +365,8 @@ const std::vector<remap::Source>* Table::Effective(const Action action) const {
   // The Controller table follows the retail preset the player selected (D4); the Mouse & Keyboard
   // table has no preset and answers its compiled default.
   if (kind_ == TableKind::kController) {
+    static const std::vector<remap::Source> kUnbound;
+    if (Custom()) return &kUnbound;
     return PresetSources(preset_, action);
   }
   return DefaultSources(kind_, action);

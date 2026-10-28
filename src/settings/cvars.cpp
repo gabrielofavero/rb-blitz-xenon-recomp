@@ -92,8 +92,6 @@ std::vector<CvarAssignment> DisplayToCvars(std::string_view token) {
 
 std::string_view CvarForSetting(SettingId id) {
   switch (id) {
-    case SettingId::kCacheDlcLibrary:
-      return "enhancements_dlc_cache";
     case SettingId::kRefreshMusicLibrary:
       // The main menu's own row for the refresh (owner request, 2026-10-15). Its consumer is
       // src/hooks/menu_filter.cpp, which builds the hide decision at boot and also feeds

@@ -49,10 +49,7 @@
 // switches that used to live here are retired (P2 of the interface/gameplay mapping restructure
 // plan, D3) - custom is inferred from each table, never from a profile switch.
 REXCVAR_DEFINE_BOOL(keyboard_support, true, "Input",
-                    "Keyboard support: while on, the title's keyboard rows (General Mapping's key "
-                    "sources and the Mouse & Keyboard gameplay table) drive the game. Off blocks "
-                    "that device; Controller Settings' own keys are unaffected. Applied live at the "
-                    "menu/pause boundary the in-game Controls page saves at.");
+                    "Legacy profile switch; keyboard input is always enabled.");
 REXCVAR_DECLARE(bool, enhancements_background_music_nav);
 
 // P2's live instrument (plan §6): one line per press/release the physical layer sees for a
@@ -328,7 +325,7 @@ constexpr char kRecoveryKeyLabel[] = "F10";
 
 }  // namespace
 
-bool KeyboardSupportEnabled() { return REXCVAR_GET(keyboard_support); }
+bool KeyboardSupportEnabled() { return true; }
 
 void InvalidateGameplayInput() {
   g_gameplay_boundary.fetch_add(1, std::memory_order_relaxed);
@@ -404,8 +401,8 @@ std::string RecoveryNotice() {
 
 GameplaySwitches ReadGameplaySwitches() {
   GameplaySwitches switches;
-  switches.keyboard_support = REXCVAR_GET(keyboard_support);
-  switches.mouse_support = MouseSupportEnabled();
+  switches.keyboard_support = true;
+  switches.mouse_support = true;
   return switches;
 }
 
@@ -656,12 +653,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     // P1's evidence line (plan §6 P1): the effective device gates and their sources. The binding
     // tables and the controller preset are logged by the Controls store when it is created (P7),
     // because the store is the one owner of the tables and this point runs before it.
-    const GameplaySwitches switches = ReadGameplaySwitches();
-    REXLOG_INFO("gameplay mapping: keyboard_support={} ({}) mouse_ui_nav={} ({})",
-                switches.keyboard_support ? "on" : "off",
-                CvarSourceName(rex::cvar::GetFlagSource("keyboard_support")),
-                switches.mouse_support ? "on" : "off",
-                CvarSourceName(rex::cvar::GetFlagSource("mouse_ui_nav")));
+    REXLOG_INFO("gameplay mapping: keyboard and mouse input always enabled");
     REXLOG_INFO(
         "gameplay mapping: routing is always on (restructure plan D3) - the Mouse & Keyboard "
         "table drives gameplay and the Controller table acts once it has a custom row; with no "
@@ -675,10 +667,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
         "input sources: pad=physical-drivers-only keyboard=SDL-state mouse=SDL-state "
         "(gameplay only) focus=required; MnK legacy={}; source trace={} ({})",
         rex::cvar::GetFlagByName("mnk_mode") == "true"
-            ? (switches.keyboard_support ? "on (merged into the guest pad, never a `pad:` gameplay "
-                                           "source)"
-                                         : "installed but standing down: keyboard_support is off, "
-                                           "so none of its state is delivered")
+            ? "on (merged into the guest pad, never a `pad:` gameplay source)"
             : "off",
         REXCVAR_GET(input_source_trace) ? "on" : "off",
         CvarSourceName(rex::cvar::GetFlagSource("input_source_trace")));

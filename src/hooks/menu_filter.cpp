@@ -39,7 +39,6 @@ REXCVAR_DECLARE(std::string, enhancements_hidden_menu_options);
 REXCVAR_DECLARE(bool, enhancements_rename_mod_settings);
 REXCVAR_DECLARE(bool, enhancements_skip_offline_dialog);
 REXCVAR_DECLARE(std::string, startup_mode);
-REXCVAR_DECLARE(bool, enhancements_dlc_cache);
 REXCVAR_DECLARE(bool, enhancements_refresh_music_library);
 
 namespace {
@@ -57,11 +56,10 @@ struct Settings {
   // performs the refresh is hidden even while R7 owns it.
   bool refresh_row_on = true;
   bool relabel_refresh_row = false;
-  bool relabel_cache_load = false;
 
   bool Any() const {
     return hide_rows || rename_settings_row || skip_offline_prompts || tap_refresh_row ||
-           relabel_refresh_row || relabel_cache_load;
+           relabel_refresh_row;
   }
 };
 
@@ -312,23 +310,6 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available,
     }
   }
 
-  if (g_settings.relabel_cache_load && rb_blitz::dlc::CacheServedThisBoot()) {
-    // This boot's enumeration came out of the host cache, so the connect panel is not
-    // discovering anything: its status line says what it is really doing.
-    const rb_blitz::menu_options::Renamed renamed = rb_blitz::menu_options::RenameLabel(
-        file, available, rb_blitz::menu_options::kEnumeratingContentKey,
-        rb_blitz::menu_options::kDiscoveringContentLabel, rb_blitz::menu_options::kLoadingCacheLabel);
-    if (renamed.applied) {
-      REXLOG_INFO("menu_filter: relabelled \"{}\" to \"{}\" ({} bytes taken from an unused macro "
-                  "name); the enumeration is coming from the cache (R7)",
-                  renamed.from, renamed.to, renamed.borrowed);
-      defer(renamed.file_size, renamed.digest_before, renamed.digest_after);
-      patched = true;
-    } else {
-      LogRejectionOnce("relabel the cache load", renamed.reason);
-    }
-  }
-
   return patched;
 }
 
@@ -510,7 +491,7 @@ void Configure(bool settings_restart_boot) {
   g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);
   g_settings.skip_offline_prompts = settings_restart_boot || REXCVAR_GET(startup_mode) == "fast" ||
                                     REXCVAR_GET(enhancements_skip_offline_dialog);
-  g_settings.tap_refresh_row = REXCVAR_GET(enhancements_dlc_cache);
+  g_settings.tap_refresh_row = true;
   g_settings.refresh_row_on = REXCVAR_GET(enhancements_refresh_music_library);
 
   // P10: the hide decision is the §3.5 rule, not a branch. The in-game page now edits each
@@ -528,17 +509,6 @@ void Configure(bool settings_restart_boot) {
   }
   request.master = g_settings.hide_rows || request.selection_explicit;
   request.selected = menu_options::ParseRowNames(configured_rows);
-  if (!g_settings.tap_refresh_row) {
-    // With the cache off splash_dlc is the original Download Content entry. Its single
-    // visibility preference still applies; Refresh Songs must not take over its identity.
-    if (!request.master) request.selected.clear();
-    std::erase(request.selected, "splash_dlc");
-    if (const auto* boot = rb_blitz::settings::boot::SettingsBoot::Current(); boot && boot->service() &&
-        boot->service()->EffectiveValue(rb_blitz::settings::SettingId::kHideDownloadContent).boolean)
-      request.selected.push_back("splash_dlc");
-    request.master = true;
-    request.selection_explicit = true;
-  }
   request.defaults = menu_options::ParseRowNames(menu_options::kDefaultRows);
   request.refresh_row_owns_refresh = g_settings.tap_refresh_row;
   request.refresh_row_enabled = g_settings.refresh_row_on;
@@ -552,19 +522,17 @@ void Configure(bool settings_restart_boot) {
 
   if (g_settings.tap_refresh_row) {
     // R7 gives the downloadable-content row a new job (TapRefreshCache), so it stays in the list
-    // (the decision above says so), and the same toggle repaints the row and the discovery screen:
+    // (the decision above says so), and the same toggle repaints the row:
     // the row's shipped label ("Download Content") is an online-store name for something that now
-    // refreshes a library, and the discovery screen's is a lie whenever the host cache answered.
-    g_settings.relabel_cache_load = true;
+    // refreshes a library.
     if (g_settings.refresh_row_on) {
       g_settings.relabel_refresh_row = true;
-      REXLOG_INFO("menu_filter: the downloadable-content row refreshes the DLC cache and is drawn "
+      REXLOG_INFO("menu_filter: the downloadable-content row refreshes the DLC library and is drawn "
                   "as \"{}\" (R7)",
                   menu_options::kDlcRowRefreshLabel);
     } else {
       // The entry is off (Help & Options -> Downloadable Content), so the row was hidden by the
-      // decision above and there is nothing to repaint. The discovery screen's caption still
-      // belongs to the cache, which is untouched by that switch.
+      // decision above and there is nothing to repaint.
       REXLOG_INFO("menu_filter: R7 is on but the Refresh Songs entry is off; the "
                   "downloadable-content row is hidden from the menu");
     }

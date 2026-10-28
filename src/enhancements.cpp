@@ -95,14 +95,6 @@ REXCVAR_DEFINE_BOOL(enhancements_rename_mod_settings, true, "Enhancements",
 // R6 uses the existing Controller Settings Input setting as its sole switch.
 REXCVAR_DECLARE(bool, mouse_ui_nav);
 
-REXCVAR_DEFINE_BOOL(enhancements_dlc_cache, true, "Enhancements",
-                    "Persist the flat DLC package list and reuse it when the roots, content "
-                    "type and file fingerprint match. A hit skips header scanning; guest "
-                    "enumeration, mounting and song loading still run. On by default. "
-                    "--refresh_dlc_cache forces a scan. Off disables the host cache and "
-                    "its refresh row; loading progress and pacing are independent.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-
 // The refresh entry's own row (owner request, 2026-10-15): while R7 owns the main menu's
 // downloadable-content row, that row is also something a player may not want in the menu, and
 // removing it used to mean digging into Interface -> Hidden Items. This cvar is the carrier of
@@ -213,8 +205,6 @@ constexpr std::array<ToggleRow, 13> kToggles{{
      [] { return REXCVAR_GET(enhancements_hide_menu_options); }},
     {"mouse_ui_nav", "R6 native mouse",
      [] { return REXCVAR_GET(mouse_ui_nav); }},
-    {"enhancements_dlc_cache", "R7 DLC cache",
-     [] { return REXCVAR_GET(enhancements_dlc_cache); }},
     {"enhancements_refresh_music_library", "R7 refresh songs row (the in-game row)",
      [] { return REXCVAR_GET(enhancements_refresh_music_library); }},
     {"enhancements_force_controller_scheme", "R8 force controller scheme",

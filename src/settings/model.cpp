@@ -18,8 +18,6 @@ std::string_view SettingIdToken(SettingId id) {
       return "scheme";
     case SettingId::kTarget:
       return "target";
-    case SettingId::kCacheDlcLibrary:
-      return "cache_dlc_library";
     case SettingId::kDlcScanThreads:
       return "dlc_scan_threads";
     case SettingId::kDlcMenuSongs:

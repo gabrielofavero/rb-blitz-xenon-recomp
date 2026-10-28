@@ -8,6 +8,14 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **Controller mapping (2026-10-28):** Controls lists Controller Presets, Layout, Interface Mapping,
+  and Gameplay Mapping. Input Types was removed; keyboard and mouse input stay enabled even with
+  legacy off values. Gameplay Mapping lists each action once and displays only its keyboard/mouse
+  bindings beside each action name. Mapping pages hide the bottom settings caption. Add Key
+  appends, Replace starts the binding list over, and Reset restores defaults.
+  The first controller button capture asks for confirmation before saving; after confirmation,
+  custom controller bindings disable preset input for every unconfigured action. Reset All restores
+  both gameplay tables and the selected controller preset.
 - **Layout selector (button-layout P3, owner correction 2026-10-27):** the native selector sits
   directly on Controls as `Layout: <name>` in both contexts. The boot-discovered choices,
   `settings.toml` token, missing-package fallback, and queued GPU texture refresh are implemented.

@@ -25,8 +25,7 @@
 #include <rex/ui/window.h>
 
 REXCVAR_DEFINE_BOOL(mouse_ui_nav, true, "Input",
-    "Native menu mouse: point to select, left/right click A/B, wheel up/down. "
-    "Gameplay pointer capture follows the plan's D3 rule, not this switch alone.");
+    "Legacy profile switch; mouse input is always enabled.");
 
 // Defined in src/input/native_menu.cpp; read here for the button-event trace only.
 REXCVAR_DECLARE(bool, mouse_native_trace);

@@ -37,8 +37,6 @@ using rex::X_STATUS;
 std::mutex g_drivers_mutex;
 std::vector<rex::input::InputDriver*> g_physical_drivers;
 
-bool KeyboardSupportOn() { return rex::cvar::GetFlagByName("keyboard_support") != "false"; }
-
 }  // namespace
 
 std::unique_ptr<rex::system::IInputSystem> CreateTitleInputSystem(bool tool_mode) {
@@ -73,24 +71,15 @@ std::unique_ptr<rex::system::IInputSystem> CreateTitleInputSystem(bool tool_mode
       }
     }
 
-    // The legacy keyboard/mouse-to-pad emulation. It is a keyboard path, so it follows the
-    // keyboard gate: absent means no synthesized pad bit can exist at all. With the gate on it is
-    // installed exactly as the SDK's default system installs it (mnk_mode itself still decides
-    // whether it enumerates), because every acceptance harness drives the menus through it. Its
+    // The legacy keyboard/mouse-to-pad emulation is installed as the SDK's default system does.
+    // mnk_mode still decides whether it enumerates. Its
     // state is merged into what the guest sees but is never a `pad:` gameplay source - the
     // gameplay tables and P3's dispatcher read SamplePhysicalPad instead.
-    if (KeyboardSupportOn()) {
-      auto mnk_driver = std::make_unique<rex::input::mnk::MnkInputDriver>(nullptr, 0);
-      if (mnk_driver->Setup() == X_STATUS_SUCCESS) {
-        input->AddDriver(std::move(mnk_driver));
-        REXLOG_INFO(
-            "title_input: legacy MnK emulation follows keyboard_support=on (mnk_mode enables it; "
-            "its synthesized pad state is not a `pad:` gameplay source)");
-      }
-    } else {
-      REXLOG_WARN(
-          "title_input: legacy MnK emulation is not installed - keyboard_support is off, so no "
-          "mnk_mode/keybind_* setting can synthesize pad input");
+    auto mnk_driver = std::make_unique<rex::input::mnk::MnkInputDriver>(nullptr, 0);
+    if (mnk_driver->Setup() == X_STATUS_SUCCESS) {
+      input->AddDriver(std::move(mnk_driver));
+      REXLOG_INFO("title_input: legacy MnK emulation installed (mnk_mode enables it; "
+                  "its synthesized pad state is not a `pad:` gameplay source)");
     }
   }
 

@@ -560,6 +560,7 @@ bool InputStore::Commit(std::string* error) {
 }
 
 bool InputStore::BeginCapture(const std::string_view token, std::string* error) {
+  capture_replace_ = false;
   const InputRowToken row = profile::ParseInputRowToken(token);
   if (BindingTableOf(row.kind) == std::nullopt) {
     if (error != nullptr) {
@@ -580,7 +581,7 @@ bool InputStore::BeginCapture(const std::string_view token, std::string* error) 
       target.allowed = {SourceKind::kPad};
       break;
     case InputRowKind::kKeyboardMouseBinding:
-      target.allowed = {SourceKind::kKey, SourceKind::kMouse};
+      target.allowed = {SourceKind::kPad, SourceKind::kKey, SourceKind::kMouse};
       break;
     default:
       break;
@@ -589,7 +590,24 @@ bool InputStore::BeginCapture(const std::string_view token, std::string* error) 
   return true;
 }
 
+bool InputStore::BeginCaptureReplace(const std::string_view token, std::string* error) {
+  if (!BeginCapture(token, error)) return false;
+  capture_replace_ = true;
+  return true;
+}
+
 void InputStore::CancelCapture() { capture::Cancel(); }
+
+bool InputStore::HasPendingControllerCapture() const {
+  return pending_controller_capture_.has_value();
+}
+
+bool InputStore::ResolvePendingControllerCapture(const bool accept, std::string* error) {
+  if (!pending_controller_capture_) return !accept;
+  const auto pending = std::move(*pending_controller_capture_);
+  pending_controller_capture_.reset();
+  return !accept || SaveCapturedSource(pending.token, pending.source, pending.replace, error);
+}
 
 bool InputStore::CompleteCapture(const std::string_view token, const Source& source,
                                  std::string* error) {
@@ -600,17 +618,29 @@ bool InputStore::CompleteCapture(const std::string_view token, const Source& sou
     }
     return false;
   }
-  if (!Accepts(row, source.kind) ||
+  if ((!(row.kind == InputRowKind::kKeyboardMouseBinding && source.kind == SourceKind::kPad) &&
+       !Accepts(row, source.kind)) ||
       (row.kind == InputRowKind::kMusicBinding && !profile::music::Bindings::Accepts(source))) {
     if (error != nullptr) {
       *error = std::string("this row does not take ") + profile::remap::FormatSource(source);
     }
     return false;
   }
-  // D8: the first Assign on a row that still holds its default REPLACES the default list; later
-  // Assigns append. Starting from the effective list would turn the default's five or eight
-  // sources into a custom row nobody asked for. `previous` is the stored list only, so a failed
-  // save restores exactly what the profile held.
+  if (row.kind == InputRowKind::kKeyboardMouseBinding && source.kind == SourceKind::kPad) {
+    const auto action = profile::gameplay_remap::ParseAction(row.name);
+    const std::string controller_token = profile::GameplayBindingToken(TableKind::kController, *action);
+    if (!controller_.Custom()) {
+      pending_controller_capture_ = PendingControllerCapture{controller_token, source, capture_replace_};
+      return true;
+    }
+    return SaveCapturedSource(controller_token, source, capture_replace_, error);
+  }
+  return SaveCapturedSource(token, source, capture_replace_, error);
+}
+
+bool InputStore::SaveCapturedSource(const std::string_view token, const Source& source,
+                                    const bool replace, std::string* error) {
+  const InputRowToken row = profile::ParseInputRowToken(token);
   const bool was_custom = IsBound(row);
   std::optional<std::vector<Source>> previous;
   if (was_custom) {
@@ -618,7 +648,9 @@ bool InputStore::CompleteCapture(const std::string_view token, const Source& sou
       previous = *stored;
     }
   }
-  std::vector<Source> next = previous.value_or(std::vector<Source>{});
+  std::vector<Source> next = replace || (row.kind == InputRowKind::kControllerBinding &&
+                                         !controller_.Custom())
+      ? std::vector<Source>{} : previous.value_or(*EffectiveSources(row));
   if (std::none_of(next.begin(), next.end(),
                    [&source](const Source& candidate) { return SameSource(candidate, source); })) {
     next.push_back(source);
@@ -662,15 +694,15 @@ std::string InputStore::Describe(const std::string_view token) const {
     text += profile::BindingListText(*sources);
   }
   text += ". ";
-  // D8's caption: what a press on Assign does to this row, and where a default comes from.
+  // The action page offers Add Key, Replace, and Reset.
   if (IsBound(row)) {
-    text += "Custom binding. Click to add an input.";
+    text += "Custom binding. Choose Add Key or Replace.";
   } else if (row.kind == InputRowKind::kControllerBinding) {
     text += "Default binding from " +
             profile::gameplay_remap::PresetLabel(ObservedControllerPreset()) +
-            ". Click to Replace.";
+            ". Choose Add Key or Replace.";
   } else {
-    text += "Default binding. Click to Replace.";
+    text += "Default binding. Choose Add Key or Replace.";
   }
   return text;
 }

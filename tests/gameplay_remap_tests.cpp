@@ -672,11 +672,11 @@ void TestControllerPresets() {
   for (const Action action : Actions()) {
     CHECK_TRUE(table.Effective(action) == PresetSources(2, action));
   }
-  // One custom row changes only that action: the rest still follow the preset (D4).
+  // One custom row disables the preset; other controller actions await manual binding.
   table.Set(Action::kFirstNote, {remap::Source{remap::SourceKind::kPad, "b"}});
   CHECK_TRUE(table.Custom());
   CHECK_TRUE(table.Effective(Action::kFirstNote) == table.Bindings(Action::kFirstNote));
-  CHECK_TRUE(table.Effective(Action::kSecondNote) == PresetSources(2, Action::kSecondNote));
+  CHECK_TRUE(table.Effective(Action::kSecondNote)->empty());
   // Reset returns the action to the preset, and Reset All returns the table to it entirely.
   table.Reset(Action::kFirstNote);
   CHECK_FALSE(table.Custom());

@@ -111,7 +111,13 @@ class FakeStore final : public rb_blitz::settings::InputBindingStore {
     ++other_calls;
     return false;
   }
+  bool BeginCaptureReplace(std::string_view, std::string*) override {
+    ++other_calls;
+    return false;
+  }
   void CancelCapture() override { ++other_calls; }
+  bool HasPendingControllerCapture() const override { return false; }
+  bool ResolvePendingControllerCapture(bool, std::string*) override { return false; }
   bool CompleteCapture(std::string_view, const remap::Source&, std::string*) override {
     ++other_calls;
     return false;

@@ -58,6 +58,35 @@ int main() {
   }
   std::printf("2048 boots of a 2003-song catalog: %.1f ms\n",
       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-started).count());
+  rb_blitz::test::BeginCase("cold opener draws within a random DLC package before full catalog discovery");
+  std::array<size_t, 3> opening_bins{};
+  for (unsigned seed = 0; seed < 3000; ++seed) {
+    MusicSession cold;
+    cold.Discover(kNoIndex, {Song(kNoIndex, "Bundled")});
+    cold.RequireCompleteDiscovery();
+    cold.Discover(7, {Song(7, "DlcA"), Song(7, "DlcB"), Song(7, "DlcC")});
+    std::mt19937 opening_rng(seed);
+    cold.PlanAhead(opening_rng);
+    CHECK_TRUE(cold.Playlist().empty());
+    CHECK_TRUE(cold.PlanOpeningFromPackage(7, opening_rng));
+    CHECK_EQ(cold.Playlist().size(), 1u);
+    const auto first = cold.SongAt(0);
+    CHECK_TRUE(first >= 1 && first <= 3);
+    ++opening_bins[first - 1];
+    cold.PlanAhead(opening_rng);
+    CHECK_EQ(cold.Playlist().size(), 1u);
+    cold.Discover(8, {Song(8, "NextA"), Song(8, "NextB")});
+    CHECK_TRUE(cold.PlanSuccessorFromPackage(8, opening_rng));
+    CHECK_EQ(cold.Playlist().size(), 2u);
+    CHECK_TRUE(cold.Select(0));
+    CHECK_EQ(cold.NextPosition(), 1u);
+    CHECK_TRUE(cold.SongAt(1) >= 4 && cold.SongAt(1) <= 5);
+    cold.DiscoveryComplete();
+    cold.PlanAhead(opening_rng);
+    CHECK_TRUE(cold.Playlist().size() >= 4u);
+    CHECK_EQ(cold.SongAt(0), first);
+  }
+  for (const auto count : opening_bins) CHECK_TRUE(count > 900 && count < 1100);
   std::mt19937 rng(42);
   rb_blitz::test::BeginCase("a lazy session crosses 50 songs before beginning another pass");
   MusicSession session;

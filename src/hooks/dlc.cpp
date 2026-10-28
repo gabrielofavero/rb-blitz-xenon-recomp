@@ -87,8 +87,6 @@
 #include "fs/dlc_layout.h"
 #include "fs/dlc_library.h"
 #include "graphics/preparation_loading.h"
-#include "fs/dlc_cache.h"
-#include "fs/dlc_cached_library.h"
 #include <chrono>
 #include "fs/refresh_state.h"
 #include "store/store_download_service.h"
@@ -99,7 +97,6 @@
 #endif
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
-REXCVAR_DECLARE(bool, enhancements_dlc_cache);
 
 namespace rb_blitz::dlc {
 namespace {
@@ -147,17 +144,6 @@ REXCVAR_DEFINE_UINT32(dlc_scan_threads, 1, "Runtime",
                       "default) reads them on the calling thread; 0 uses the machine's "
                       "core count, capped at 8; any other value is that many workers. "
                       "The scan's result is identical at any thread count.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-
-// R7's one-shot. With enhancements_dlc_cache on, a normal boot reads the persisted
-// enumeration when it can be proved current; this flag says "do not trust it": the
-// library is scanned again and the cache rewritten, which is the refresh. It is read
-// once at boot and changes nothing on its own, so it is restart-scoped like the rest.
-REXCVAR_DEFINE_BOOL(refresh_dlc_cache, false, "Runtime",
-                    "R7: ignore the persisted DLC enumeration this boot, re-scan the "
-                    "configured libraries and rewrite the cache. Only meaningful with "
-                    "enhancements_dlc_cache on. Faithful: a boot reads a current cache "
-                    "when there is one.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 std::string JoinTitles(const std::vector<fs::DlcPackage>& packages) {
@@ -234,42 +220,20 @@ std::vector<std::filesystem::path> DiscoverLibraryRoots(const std::filesystem::p
   return fs::UniqueLibraryRoots(roots);
 }
 
-// Reads the library enumeration from the cache when the toggle is on, the tree is
-// unchanged and no refresh was asked for; otherwise scans and, when the toggle is on,
-// rewrites the cache. Anything that makes the proof fail is a miss: the scan always
-// runs, so a cache can never hide a package. Shared by the boot path and the in-game
-// refresh so the two can never disagree about what the cache means.
-//
-// `cache_hit`, when given, is set only on the branch that answers out of the persisted
-// file - the boot path reports it so the menu can say the enumeration was loaded rather
-// than discovered (rb_blitz::dlc::CacheServedThisBoot()).
-//
-// `scan_threads` comes from the caller rather than being read here, so the boot path and
-// the in-game refresh cannot disagree about the thread count the way they cannot disagree
-// about the cache - and so neither reads the registry off the worker thread (docs/guides/dlc.md).
-fs::LibraryScanResult LoadOrScanLibrary(const bool cache_enabled, const bool force_refresh,
-                                        const std::vector<std::filesystem::path>& roots,
-                                        const uint32_t force_content_type,
-                                        const uint32_t scan_threads,
-                                        const std::filesystem::path& cache_path,
-                                        const char* when, bool* cache_hit = nullptr) {
-  REXLOG_INFO("dlc_cache: begin when={} enabled={} refresh={} roots='{}'", when,
-              cache_enabled, force_refresh, JoinLibraryRoots(roots));
-  const auto result = fs::LoadOrScanDlcLibrary(cache_enabled, force_refresh, roots,
-                                              force_content_type, scan_threads, cache_path);
-  if (cache_hit) *cache_hit = result.hit;
-  REXLOG_INFO("dlc_cache: when={} enabled={} refresh={} result={} reason='{}' roots='{}' "
-              "content_type={:08X} path='{}' packages={} files={}", when, cache_enabled,
-              force_refresh, result.hit ? "hit" : "scan", result.reason, JoinLibraryRoots(roots),
-              force_content_type, cache_path.string(), result.library.items.size(), result.library.files_seen);
-  REXLOG_INFO("dlc_cache: end when={} total_ms={:.3f} fingerprint_ms={:.3f} "
-              "load_ms={:.3f} scan_ms={:.3f} "
-              "verify_ms={:.3f} write_ms={:.3f} written={} write_reason='{}'",
-              when, result.total_ms, result.fingerprint_ms, result.load_ms, result.scan_ms,
-              result.verify_ms, result.write_ms, result.written, result.write_reason);
-  for (const auto& rejected : result.library.rejected)
+// The same threaded scan serves boot and refresh. Capture the thread count at boot so
+// the worker never reads the cvar registry.
+fs::LibraryScanResult ScanLibrary(const std::vector<std::filesystem::path>& roots,
+                                  uint32_t force_content_type, uint32_t scan_threads,
+                                  const char* when) {
+  const auto start = std::chrono::steady_clock::now();
+  fs::LibraryScanResult result = fs::ScanDlcLibraries(roots, force_content_type, scan_threads);
+  REXLOG_INFO("dlc: {} scanned roots='{}' content_type={:08X} packages={} files={} scan_ms={:.3f}",
+              when, JoinLibraryRoots(roots), force_content_type, result.items.size(),
+              result.files_seen,
+              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+  for (const auto& rejected : result.rejected)
     REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
-  return result.library;
+  return result;
 }
 
 // One content type for the whole library when one was named; otherwise
@@ -297,10 +261,9 @@ rex::system::xam::ContentManager* ContentManagerOf(rex::Runtime* runtime) {
 }
 
 // What the boot path resolved, kept so the in-game refresh - which runs from a
-// filesystem hook with no arguments - can rebuild the same sources and cache.
+// filesystem hook with no arguments - can rebuild the same sources.
 rex::Runtime* g_runtime = nullptr;
 std::filesystem::path g_game_data_root;
-bool g_cache_enabled = false;
 
 // Everything the refresh needs, resolved once in Configure() and read from there by both
 // paths. The refresh is triggered from a guest thread, and this project's rule is that a
@@ -310,12 +273,6 @@ bool g_cache_enabled = false;
 std::vector<std::filesystem::path> g_library_roots;
 uint32_t g_force_content_type = 0;
 uint32_t g_scan_threads = 1;
-std::filesystem::path g_cache_path;
-
-// R7's two answers about this boot, for the callers that draw the result: whether
-// the enumeration came out of the persisted cache, and how many packages the flat
-// library holds. Written in Configure(), read from guest threads afterwards.
-bool g_cache_served = false;
 std::size_t g_content_count = 0;
 
 // The packages a later layer (R9) may draw a song from: the structured root's packages
@@ -373,7 +330,7 @@ std::mutex g_refresh_worker_mutex;
 bool g_restarting = false;
 
 // The scan half of a refresh: reads the configuration Configure() captured, scans the
-// libraries and rewrites the cache. Pure host work - no guest state, no content manager,
+// libraries. Pure host work - no guest state, no content manager,
 // no cvar registry - which is what makes it safe on a worker thread.
 struct RefreshScan {
   std::vector<rex::system::xam::ExtraContentItem> items;
@@ -381,11 +338,8 @@ struct RefreshScan {
 };
 
 RefreshScan ScanLibraryForRefresh() {
-  // The explicit refresh never accepts the cache: the tree is read again and the cache
-  // rewritten, which is what the in-game row asks for.
   const fs::LibraryScanResult library =
-      LoadOrScanLibrary(/*cache_enabled=*/true, /*force_refresh=*/true, g_library_roots,
-                        g_force_content_type, g_scan_threads, g_cache_path, "the refresh");
+      ScanLibrary(g_library_roots, g_force_content_type, g_scan_threads, "the refresh");
 
   RefreshScan scan;
   scan.items.reserve(library.items.size());
@@ -472,14 +426,6 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 
   const uint32_t force_content_type = ForceContentTypeFromCvar();
 
-  // R7. With enhancements_dlc_cache on, the result of the library scan is persisted
-  // beside the user's saves and read back when it can be proved to describe the same
-  // tree, so a boot does not open every container and read its header again. Anything
-  // that makes the proof fail - no file, a damaged one, a changed tree, a different
-  // library list - falls through to the scan below, because a cache must never be able
-  // to hide a package. --refresh_dlc_cache forces that scan-and-write path.
-  const bool cache_enabled = REXCVAR_GET(enhancements_dlc_cache);
-  g_cache_enabled = cache_enabled;
   // The emulated mount latency is **off on every boot** (owner directive, 2026-10-13: "it should be
   // as fast as we can"). It costs 100 ms per deferred overlapped completion and a large library
   // completes thousands of them: measured on a 1,402-package library, 2,803 completions, which is
@@ -491,28 +437,12 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   REXCVAR_SET(deferred_overlapped_delay_ms, 0);
   REXLOG_INFO("dlc: the emulated mount latency is off this boot (deferred_overlapped_delay_ms = 0; "
               "the faithful 100 ms is one line in rb_blitz.toml away)");
-  if (cache_enabled) {
-    // R7 answers for the whole wait a large library costs, not just for the host's walk
-    // of it: the cache makes that walk instant, and `deferred_overlapped_delay_ms` is
-    // already 0 above for every boot, so what is left is the title's own one-item-per-frame
-    // pacing of the enumeration.
-    REXLOG_INFO("dlc: R7 on - the library scan is cached, so this boot reads no container header "
-                "it can avoid");
-  }
-  const bool refresh_requested = REXCVAR_GET(refresh_dlc_cache);
-  if (refresh_requested && !cache_enabled) {
-    REXLOG_WARN("dlc: --refresh_dlc_cache has no effect while enhancements_dlc_cache is off");
-  }
-
-  const std::filesystem::path cache_path = fs::DlcCachePath(runtime->cache_root());
-
   // Captured for the in-game refresh, which runs from a guest thread and must not read
   // the registry (see the comment on g_library_roots). The refresh therefore resolves the
   // same roots, content type and thread count this boot did, and cannot disagree with it.
   g_library_roots = library_roots;
   g_force_content_type = force_content_type;
   g_scan_threads = REXCVAR_GET(dlc_scan_threads);
-  g_cache_path = cache_path;
 
   // P5 of the RhythmVerse store plan: the store's download destination is this boot's resolved
   // DLC root, and its layout is the one the boot measured - a structured root gets
@@ -552,8 +482,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
         .value_or(std::string());
   });
   const fs::LibraryScanResult library =
-      LoadOrScanLibrary(cache_enabled, refresh_requested, library_roots, force_content_type,
-                        g_scan_threads, cache_path, "this boot", &g_cache_served);
+      ScanLibrary(library_roots, force_content_type, g_scan_threads, "this boot");
   g_content_count = scan.packages.size() + library.items.size();
   g_structured_paths.clear();
   g_structured_paths.reserve(scan.packages.size());
@@ -561,10 +490,6 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     g_structured_paths.push_back(package.host_path);
   }
   RebuildPackagePaths(library.items);
-  if (g_cache_served) {
-    REXLOG_INFO("dlc: the DLC enumeration was loaded from the cache this boot (R7); the "
-                "status reports the cached content list");
-  }
 
   if (!library.items.empty()) {
     if (force_content_type != 0) {
@@ -709,10 +634,7 @@ void RefreshConfigured() {
     if (g_runtime == nullptr) {
       return;
     }
-    // R7's scan belongs to the cache feature, so with the cache off a press schedules none. The
-    // store's post-install refresh scans regardless of this switch. The connect panel's
-    // per-frame barrier covers that scan too, including a result awaiting publication.
-    if (g_cache_enabled) {
+    {
       if (g_library_roots.empty()) {
         REXLOG_WARN("dlc: a refresh was asked for but no DLC library is configured, nothing to "
                     "scan");
@@ -768,9 +690,7 @@ void DrainRefreshForRestart() {
   if (g_refresh_worker.thread.joinable()) g_refresh_worker.thread.join();
 }
 
-bool RefreshArmed() { return g_cache_enabled && g_runtime != nullptr; }
-
-bool CacheServedThisBoot() { return g_cache_served; }
+bool RefreshArmed() { return g_runtime != nullptr; }
 
 std::size_t ContentItemCount() { return g_content_count; }
 

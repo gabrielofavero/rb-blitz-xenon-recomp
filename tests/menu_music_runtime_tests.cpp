@@ -308,6 +308,7 @@ void TestNavigatorRuntime() {
 
   rb_blitz::test::BeginCase("navigator with R9 off adopts and navigates the native title source");
   g_enabled = false;
+  g_menu_music_enabled = false;
   g_session = MusicSession{};
   g_watch = g_watch_title = false;
   g_playback.Stop();
@@ -696,10 +697,89 @@ void TestBundledMusic(const std::filesystem::path& game = {}) {
   loads = starts = stops = destroys = polls = 0;
 }
 
+void TestColdOpeningPublication() {
+  using namespace rb_blitz::shell_music;
+  rb_blitz::test::BeginCase("a cold package publishes one random DLC opener before the full catalog");
+  const auto root = std::filesystem::temp_directory_path() /
+      ("rbbz-opening-" + std::to_string(NowMs()));
+  std::filesystem::create_directory(root);
+  rex::filesystem::VirtualFileSystem vfs;
+  g_file_system = &vfs;
+  g_session = MusicSession{};
+  g_cache = MusicMountCache<rex::filesystem::Device>{};
+  g_session.Discover(kBasePackage, {{"", "songs/base/base", "BundledSong"}});
+  g_session.RequireCompleteDiscovery();
+  g_packages = {root, root};
+  g_catalog_pending = std::make_shared<MusicCatalog>();
+  g_catalog_pending->push_back({root, {}, {}});
+  g_catalog_pending->push_back({root, {}, {}});
+  g_opening_selected = false;
+  g_probing_package = 0;
+  g_enabled = g_menu_music_enabled = true;
+  g_buffers = {kPath};
+  PreparedPackage prepared;
+  prepared.index = 0;
+  prepared.device = std::make_unique<rex::filesystem::HostPathDevice>(MountPath(0), root, true);
+  CHECK_TRUE(prepared.device->Initialize());
+  prepared.songs = {{"menumusic0", "songs/a/a", "SongA"},
+                    {"menumusic0", "songs/b/b", "SongB"}};
+  CHECK_TRUE(PublishPackage(prepared));
+  CHECK_TRUE(g_opening_selected);
+  CHECK_EQ(g_session.Playlist().size(), 1u);
+  CHECK_TRUE(g_session.SongAt(0) >= 1);
+  CHECK_TRUE(g_cache.Contains(0));
+  CHECK_TRUE(!g_catalog_pending->at(0).songs.empty());
+  g_probing_package = 1;
+  PreparedPackage successor;
+  successor.index = 1;
+  successor.device = std::make_unique<rex::filesystem::HostPathDevice>(MountPath(1), root, true);
+  CHECK_TRUE(successor.device->Initialize());
+  successor.songs = {{"menumusic1", "songs/next/next", "NextSong"}};
+  CHECK_TRUE(PublishPackage(successor));
+  CHECK_EQ(g_session.Playlist().size(), 2u);
+  CHECK_TRUE(g_cache.Contains(1));
+  CHECK_TRUE(NextPathLocked().starts_with("menumusic0:"));
+  rb_blitz::test::BeginCase("Next works before a cold catalog finishes");
+  std::array<uint8_t, 65536> memory{};
+  auto* base = memory.data();
+  PPCContext ctx{};
+  ctx.r1.u32 = 0xF000; ctx.r3.u32 = kMusic; ctx.r31.u64 = 0xABCDEF;
+  g_music = kMusic;
+  g_navigation_enabled = g_watch = true;
+  g_watch_title = g_waiting_for_pool = false;
+  g_nav_target = kNoIndex;
+  g_nav_title_target = -1;
+  g_nav_started = false;
+  g_nav_request = nav::Request{1, 0, nav::Command::kNext, nav::Producer::kControlsPage};
+  Store(base, kMusic + kStreamOffset, kOldStream);
+  Store(base, kOldStream, kVtable);
+  Store(base, kVtable, kDestroy);
+  Store(base, kOldStream + 20, 3);
+  Store(base, kOldStream + kPositionOffset, 100);
+  ApplyNavigatorCommand(base, ctx, kMusic);
+  CHECK_EQ(g_session.Cursor(), 1u);
+  CHECK_TRUE(loaded.starts_with("menumusic1:"));
+  CHECK_TRUE(g_nav_started);
+  g_nav_request.reset();
+  g_nav_started = false;
+  g_nav_target = kNoIndex;
+  g_watch = false;
+  g_catalog_pending.reset();
+  g_cache = MusicMountCache<rex::filesystem::Device>{};
+  CHECK_TRUE(vfs.UnregisterDevice(MountPath(0)));
+  CHECK_TRUE(vfs.UnregisterDevice(MountPath(1)));
+  g_session = MusicSession{};
+  g_play_selection.Stop();
+  g_current_index = g_pending_index = -1;
+  g_file_system = nullptr;
+  loads = starts = stops = destroys = polls = 0;
+  std::filesystem::remove(root);
+}
+
 void TestAsyncStartup(bool bundled) {
   using namespace rb_blitz::shell_music;
   using namespace std::chrono_literals;
-  rb_blitz::test::BeginCase("a blocked startup mount cannot block native music Load or close");
+  rb_blitz::test::BeginCase("a blocked startup mount stays silent without blocking Load or close");
   auto entered = std::make_shared<std::promise<void>>();
   auto release = std::make_shared<std::promise<void>>();
   auto released = release->get_future().share();
@@ -733,10 +813,11 @@ void TestAsyncStartup(bool bundled) {
   ctx.r1.u32 = 0xF000; ctx.r3.u32 = kMusic; ctx.r4.u32 = 0x2000; ctx.r31.u64 = 0xABCDEF;
   std::strcpy(reinterpret_cast<char*>(memory.data() + ctx.r4.u32), kTitleTracks[0]);
   sub_82757F50(ctx, memory.data());
-  CHECK_EQ(loads, 1u);
-  CHECK_EQ(starts, 0u); // the native splash still owns playback timing
-  CHECK_TRUE(loaded == kTitleTracks[0]);
+  CHECK_EQ(loads, 0u);
+  sub_82758B98(ctx, memory.data());
+  CHECK_EQ(starts, 0u);
   CHECK_TRUE(g_waiting_for_pool);
+  CHECK_FALSE(g_watch_title);
   CHECK_EQ(g_session.SongAt(0), dlc_id);
   CHECK_EQ(g_cache.Size(), 0u);
   CloseQueuedPool(); // must return while the worker is still blocked
@@ -746,7 +827,7 @@ void TestAsyncStartup(bool bundled) {
 void TestColdCatalog() {
   using namespace rb_blitz::shell_music;
   using namespace std::chrono_literals;
-  rb_blitz::test::BeginCase("cold catalog waits for the main menu and loading completion before touching a package");
+  rb_blitz::test::BeginCase("cold catalog starts off thread before the menu and waits for a complete draw");
   auto entered = std::make_shared<std::promise<void>>();
   auto release = std::make_shared<std::promise<void>>();
   auto released = release->get_future().share();
@@ -762,44 +843,30 @@ void TestColdCatalog() {
     g_packages.push_back("cold-missing-fixture-" + std::to_string(i));
     g_catalog_pending->push_back({g_packages.back(), {}, {}});
   }
+  g_opening_packages.resize(g_packages.size());
+  std::iota(g_opening_packages.begin(), g_opening_packages.end(), size_t{0});
+  std::shuffle(g_opening_packages.begin(), g_opening_packages.end(), g_rng);
+  g_opening_cursor = 0;
+  g_opening_selected = false;
   const auto root = std::filesystem::temp_directory_path() / ("rbbz-cold-catalog-" + std::to_string(NowMs()));
   g_catalog_path = root / "catalog.cache";
   g_session.Discover(kBasePackage, {{"", "songs/base/base", "BundledSong"}});
   g_session.RequireCompleteDiscovery();
   main_menu = false;
   StartQueuedPool();
-  PublishQueuedPool(true);
-  CHECK_TRUE(g_queue.Idle());
-  CHECK_TRUE(started.wait_for(0ms) == std::future_status::timeout);
-  g_session.PlanAhead(g_rng);
-  CHECK_TRUE(g_session.Playlist().empty());
-  main_menu = true; native_loading = true;
-  PublishQueuedPool(true);
-  CHECK_TRUE(g_queue.Idle());
-  native_loading = false;
-  PublishQueuedPool(true);
   CHECK_TRUE(started.wait_for(5s) == std::future_status::ready);
+  CHECK_FALSE(g_queue.Idle());
+  g_session.PlanAhead(g_rng);
   CHECK_TRUE(g_session.Playlist().empty());
   release->set_value();
   const auto deadline = std::chrono::steady_clock::now() + 5s;
-  std::optional<PreparedPackage> first_batch;
-  while (!first_batch && std::chrono::steady_clock::now() < deadline) {
-    first_batch = g_queue.Take();
-    std::this_thread::yield();
-  }
-  CHECK_TRUE(first_batch.has_value());
-  CHECK_EQ(mounts, 8u);
-  if (first_batch) {
-    CHECK_FALSE(first_batch->catalog_complete);
-    CHECK_TRUE(PublishPackage(*first_batch));
-  }
-  CHECK_TRUE(g_session.Playlist().empty());
   while (g_catalog_pending && std::chrono::steady_clock::now() < deadline) {
     PublishQueuedPool(true);
     std::this_thread::yield();
   }
   CHECK_FALSE(bool(g_catalog_pending));
-  CHECK_EQ(mounts, 17u);
+  CHECK_EQ(g_opening_cursor, 17u);
+  CHECK_EQ(mounts, 34u); // random package probes, then the complete catalog
   CHECK_TRUE(g_session.DiscoveryFinished());
   CHECK_TRUE(NextPathLocked() == "songs/base/base"); // only after the missing package has been accounted for
   CHECK_EQ(g_cache.Size(), 0u);
@@ -830,7 +897,8 @@ int main(int argc, char** argv) {
   TestRapidPreviousDuringRestart();
   TestNativePauseRuntime();
   TestLoadingPreservesBootSong();
-  rb_blitz::test::BeginCase("temporary title fallback recovers without a counter rewind");
+  TestColdOpeningPublication();
+  rb_blitz::test::BeginCase("a pending library song stays silent until its source is ready");
   std::array<uint8_t, 65536> memory{};
   auto* base = memory.data();
   PPCContext ctx{};
@@ -838,36 +906,33 @@ int main(int argc, char** argv) {
   ctx.r3.u32 = kMusic;
   ctx.r31.u64 = 0xABCDEF;
   g_music = kMusic;
-  g_enabled = g_watch_title = g_waiting_for_pool = true;
-  g_watch = false;
+  g_enabled = g_menu_music_enabled = g_waiting_for_pool = true;
+  g_watch = g_watch_title = false;
   g_buffers = {kPath};
   g_heartbeat_at = std::chrono::steady_clock::now();
-  g_pos = 2700000;
-  Store(base, kMusic + kStreamOffset, kOldStream);
+  Store(base, kMusic + kStreamOffset, 0);
   Store(base, kOldStream, kVtable);
   Store(base, kVtable, kDestroy);
-  Store(base, kOldStream + 20, 3);
-  Store(base, kOldStream + kPositionOffset, 2717696);
+  Store(base, kNewStream, kVtable);
   g_session.Discover(0, {{"menumusic0", "songs/failed/audio", "FailedStartup"}});
   g_session.PlanAhead(g_rng);
   g_session.Select(0);
   g_session.Failed(0);
   sub_827586D8(ctx, base);
-  CHECK_EQ(loads, 0u); // no successor yet: keep the title source
-  CHECK_EQ(polls, 1u);
+  CHECK_EQ(loads, 0u);
+  CHECK_EQ(polls, 0u);
+  CHECK_FALSE(g_watch_title);
 
-  // Match the owner's log: successor ready, same monotonically increasing title
-  // position. These device objects need no initialization or file I/O here.
+  // This device object needs no initialization or file I/O here.
   rex::filesystem::HostPathDevice ready("\\Device\\ReadyMusic", {}, true);
   g_session.Discover(1, {{"menumusic1", "songs/next/audio", "QueuedSong"}});
   CHECK_TRUE(g_cache.Insert(1, &ready));
-  Store(base, kOldStream + kPositionOffset, 2720000);
   sub_827586D8(ctx, base);
   CHECK_EQ(loads, 1u);
   CHECK_EQ(starts, 1u);
-  CHECK_EQ(stops, 1u);
-  CHECK_EQ(destroys, 1u);
-  CHECK_EQ(polls, 2u);
+  CHECK_EQ(stops, 0u);
+  CHECK_EQ(destroys, 0u);
+  CHECK_EQ(polls, 1u);
   CHECK_TRUE(loaded == "menumusic1:songs/next/audio");
   CHECK_TRUE(g_watch);
   CHECK_FALSE(g_watch_title);
@@ -880,15 +945,12 @@ int main(int argc, char** argv) {
   CHECK_EQ(g_current_index, 1u);
   CHECK_TRUE(SelectedSongKey() == "QueuedSong");
 
-  rb_blitz::test::BeginCase("a deliberate failure fallback keeps its circuit breaker");
-  g_watch = false;
-  g_watch_title = true;
-  g_waiting_for_pool = false;
-  g_session.Discover(2, {{"menumusic2", "songs/another/audio", "AnotherSong"}});
-  CHECK_TRUE(g_cache.Insert(2, &ready));
+  rb_blitz::test::BeginCase("an exhausted library waits silently after EOF");
+  Store(base, kNewStream + 20, 6);
   sub_827586D8(ctx, base);
   CHECK_EQ(loads, 1u);
-  CHECK_EQ(polls, 4u);
+  CHECK_TRUE(g_waiting_for_pool);
+  CHECK_FALSE(g_watch_title);
 
   rb_blitz::test::BeginCase("a failed pre-A startup song starts recovery preparation immediately");
   g_session = MusicSession{};
@@ -910,10 +972,9 @@ int main(int argc, char** argv) {
   Store(base, kMusic + kStreamOffset, 0);
   sub_827586D8(ctx, base);
   CHECK_TRUE(g_queue_started);
-  CHECK_TRUE(g_watch_title);
+  CHECK_FALSE(g_watch_title);
   CHECK_TRUE(g_waiting_for_pool);
-  CHECK_EQ(loads, 2u);
-  CHECK_TRUE(loaded.starts_with("sfx/shell/"));
+  CHECK_EQ(loads, 1u);
   CloseQueuedPool();
   return rb_blitz::test::Finish();
 }

@@ -121,10 +121,6 @@ std::vector<SchemaRow> BuildTable() {
     rows.push_back(Row(std::move(d), {"general", "startup"}, "launch", "Startup",
                        "Normal: Show startup logos and 'Press A to Start'. Fast: Skip both and continue automatically to the main menu."));
   }
-  rows.push_back(Row(Make(SettingId::kCacheDlcLibrary, Category::kGeneral, Provider::kNative,
-                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"general", "cache_dlc_library"}, "song_library", "Cache Song Library",
-                     "Reuse a cached DLC library scan on the next launch."));
   // The main menu's refresh entry (owner request, 2026-10-15): the row `splash_dlc` carries
   // TapRefreshCache while R7 is on, so it is a feature toggle of its own - a player who does not
   // want the entry can remove it here instead of digging into Interface -> Hidden Items. It is a
@@ -450,7 +446,6 @@ constexpr StrategyEntry kStrategies[] = {
     // General
     {SettingId::kTarget, ApplicationStrategy::kRestart, ""},
     {SettingId::kStartup, ApplicationStrategy::kRestart, ""},
-    {SettingId::kCacheDlcLibrary, ApplicationStrategy::kRestart, ""},
     {SettingId::kRefreshMusicLibrary, ApplicationStrategy::kRestart, ""},
     {SettingId::kDlcScanThreads, ApplicationStrategy::kRestart, ""},
     {SettingId::kLoadGuard, ApplicationStrategy::kHot,

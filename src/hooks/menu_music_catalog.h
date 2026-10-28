@@ -2,7 +2,8 @@
 #pragma once
 
 #include "hooks/menu_music_pool.h"
-#include "fs/dlc_cache.h"
+#include "fs/tree_fingerprint.h"
+#include "fs/atomic_file.h"
 #include <iomanip>
 #include <optional>
 #include <sstream>
@@ -13,30 +14,30 @@ namespace rb_blitz::shell_music::catalog {
 // extracted packages use a stat-only tree fingerprint (including their streams).
 struct Package {
   std::filesystem::path path;
-  std::optional<fs::DlcTreeFingerprint> identity;
+  std::optional<fs::TreeFingerprint> identity;
   std::vector<PoolEntry> songs;
 };
 
-inline std::optional<fs::DlcTreeFingerprint> Identity(const std::filesystem::path& path) {
+inline std::optional<fs::TreeFingerprint> Identity(const std::filesystem::path& path) {
   std::error_code ec;
   if (std::filesystem::is_directory(path, ec)) {
-    fs::DlcTreeFingerprint result;
+    fs::TreeFingerprint result;
     std::string why;
-    if (fs::ComputeLibraryFingerprint({path}, &result, &why)) return result;
+    if (fs::ComputeTreeFingerprint({path}, &result, &why)) return result;
     return {};
   }
   const auto size = std::filesystem::file_size(path, ec);
   if (ec) return {};
   const auto time = std::filesystem::last_write_time(path, ec);
   if (ec) return {};
-  return fs::DlcTreeFingerprint{uint64_t(time.time_since_epoch().count()), 1, size};
+  return fs::TreeFingerprint{uint64_t(time.time_since_epoch().count()), 1, size};
 }
 
 // Windows directory entries already carry size and write time. Grouping siblings
 // avoids thousands of individual attribute queries/opens on a large library.
-inline std::vector<std::optional<fs::DlcTreeFingerprint>> Identities(
+inline std::vector<std::optional<fs::TreeFingerprint>> Identities(
     const std::vector<std::filesystem::path>& paths) {
-  std::vector<std::optional<fs::DlcTreeFingerprint>> result(paths.size());
+  std::vector<std::optional<fs::TreeFingerprint>> result(paths.size());
   std::map<std::filesystem::path, std::map<std::filesystem::path, size_t>> directories;
   for (size_t i = 0; i < paths.size(); ++i)
     directories[paths[i].parent_path()][paths[i].filename()] = i;
@@ -53,7 +54,7 @@ inline std::vector<std::optional<fs::DlcTreeFingerprint>> Identities(
           if (!ec) {
             const auto time = entry.last_write_time(ec);
             if (!ec) result[found->second] =
-                fs::DlcTreeFingerprint{uint64_t(time.time_since_epoch().count()), 1, size};
+                fs::TreeFingerprint{uint64_t(time.time_since_epoch().count()), 1, size};
           }
         }
       }
@@ -67,7 +68,7 @@ inline std::string Encode(const std::vector<Package>& packages) {
   std::ostringstream out;
   out << "RBBMUSIC1\n" << packages.size() << '\n';
   for (const auto& package : packages) {
-    const auto identity = package.identity.value_or(fs::DlcTreeFingerprint{});
+    const auto identity = package.identity.value_or(fs::TreeFingerprint{});
     const auto utf8 = package.path.generic_u8string();
     const std::string path(reinterpret_cast<const char*>(utf8.data()), utf8.size());
     out << std::quoted(path) << ' ' << bool(package.identity) << ' '
@@ -92,7 +93,7 @@ inline bool DecodeUnchecked(const std::string& bytes, std::vector<Package>* pack
     Package package;
     std::string path;
     bool valid = false;
-    fs::DlcTreeFingerprint identity;
+    fs::TreeFingerprint identity;
     size_t songs = 0;
     if (!(in >> std::quoted(path) >> valid >> identity.hash >> identity.file_count >>
           identity.total_size >> songs) || path.empty() || path.size() > 4096 ||
@@ -145,7 +146,7 @@ inline std::vector<Package> Load(const std::filesystem::path& file,
   for (auto& package : saved) by_path.emplace(package.path, std::move(package));
   std::vector<Package> result;
   // No cached records means there is nothing to validate on the boot thread.
-  const auto identities = saved.empty() ? std::vector<std::optional<fs::DlcTreeFingerprint>>(paths.size())
+  const auto identities = saved.empty() ? std::vector<std::optional<fs::TreeFingerprint>>(paths.size())
                                         : Identities(paths);
   for (size_t i = 0; i < paths.size(); ++i) {
     const auto& path = paths[i];

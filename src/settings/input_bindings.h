@@ -60,7 +60,10 @@ class InputBindingStore {
   // Arms the listening session for a binding token (the row's table decides the accepted source
   // kinds). The dialog itself is the generated menu's screen; this only starts the host half.
   virtual bool BeginCapture(std::string_view token, std::string* error) = 0;
+  virtual bool BeginCaptureReplace(std::string_view token, std::string* error) = 0;
   virtual void CancelCapture() = 0;
+  virtual bool HasPendingControllerCapture() const = 0;
+  virtual bool ResolvePendingControllerCapture(bool accept, std::string* error) = 0;
 
   // The successful capture: adds the source to the effective list (deduplicated), saves, applies
   // and publishes. False plus `error` when the save failed; the old mapping stays in force.

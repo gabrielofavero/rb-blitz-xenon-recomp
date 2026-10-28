@@ -649,6 +649,23 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kInvoke: {
+      if (request.setting == "controller.capture_cancel" ||
+          request.setting == "controller.capture_confirm") {
+        std::string why;
+        const bool accept = request.setting == "controller.capture_confirm";
+        const bool resolved = input_store_ && input_store_->ResolvePendingControllerCapture(accept, &why);
+        if (accept) {
+          commit_ok_ = resolved;
+          last_commit_failure_ = resolved ? CommitFailure::kNone : CommitFailure::kNotWritable;
+        }
+        if (!resolved) {
+          status = Status::kIoError;
+          response.message = why.empty() ? "controller binding confirmation failed" : why;
+        } else {
+          response.message = accept ? "controller binding saved" : "controller binding cancelled";
+        }
+        break;
+      }
       if (request.setting == "linked.cancel") {
         linked_plan_.reset();
         response.message = "linked change cancelled; nothing saved";
@@ -704,7 +721,9 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         break;
       }
       std::string why;
-      if (!input_store_->BeginCapture(request.setting, &why)) {
+      const bool replace = request.value.kind == bridge::ValueKind::kBool && request.value.boolean;
+      if (!(replace ? input_store_->BeginCaptureReplace(request.setting, &why)
+                    : input_store_->BeginCapture(request.setting, &why))) {
         status = Status::kInvalid;
         response.message = why.empty() ? "capture refused" : why;
         break;
@@ -809,6 +828,10 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
 }
 
 bool ServiceSink::Matches(const bridge::Request& request) const {
+  if (request.setting == "controller.capture_pending")
+    return WireValuesEqual(WireValue::Bool(input_store_ &&
+                                            input_store_->HasPendingControllerCapture()),
+                               request.value);
   if (request.setting == "linked.pending")
     return WireValuesEqual(WireValue::Bool(linked_plan_.has_value()), request.value);
   if (request.setting == "linked.prompt")

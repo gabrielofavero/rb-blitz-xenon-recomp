@@ -28,7 +28,6 @@
 #if defined(_WIN32)
 #include <windows.h>
 REXCVAR_DECLARE(bool, enhancements_dlc_uncap_enumeration);
-REXCVAR_DECLARE(bool, enhancements_dlc_cache);
 REX_EXTERN(__imp__sub_82759190);  // the engine's own push into the panel
 REX_EXTERN(__imp__sub_82759308);
 REX_EXTERN(__imp__sub_827593A8);
@@ -100,7 +99,6 @@ void Forward(const char* symbol, PPCContext& ctx, uint8_t* base) {
   else { ctx.r3.u32 = 0x80004005; REXLOG_ERROR("content_pipeline: missing import {}", symbol); }
 }
 bool g_uncap_enabled = false;
-bool g_cache_enabled = false;
 
 // kIdle -> kFreeing -> kFreed -> kRestoring -> kIdle, claimed by the guest thread and completed
 // by the host thread that does the write. One transition at a time is the whole synchronisation,
@@ -197,8 +195,8 @@ void BeginAttempt() { // g_mutex held
   g_metadata_us = g_cache_read_us = g_cache_write_us = 0;
   g_pushed_percent = -1;
   REXLOG_INFO("content_pipeline: attempt {} started", g_model.Get().attempt);
-  REXLOG_INFO("dlc_load: begin attempt={} cache={} pacing={}", g_model.Get().attempt,
-              g_cache_enabled, g_uncap_enabled);
+  REXLOG_INFO("dlc_load: begin attempt={} pacing={}", g_model.Get().attempt,
+              g_uncap_enabled);
   if (g_uncap_enabled) RequestFrameRateFree("content discovery started");
 }
 
@@ -262,12 +260,10 @@ void WatchXmsg(PPCContext& ctx, uint8_t* base, const char* symbol, bool overlapp
 
 namespace rb_blitz::content_progress {
 void Configure() {
-  // Cache Off changes the host cache only. The bar and the separately selected pacing
-  // policy remain truthful for structured/user roots and uncached scans.
+  // The bar and pacing policy remain truthful for every content root.
   g_uncap_enabled = REXCVAR_GET(enhancements_dlc_uncap_enumeration);
-  g_cache_enabled = REXCVAR_GET(enhancements_dlc_cache);
   REXLOG_INFO("content_pipeline: the title's own discovery bar follows the actual aggregate "
-              "batches; pacing={} (independent of host cache)",
+              "batches; pacing={}",
               g_uncap_enabled);
 }
 void Tick() {} // kept for the shell poll; completion is UIManager's verified panel
@@ -287,9 +283,9 @@ void ObserveScreen(std::string_view screen, std::string_view panel, bool availab
                 g_last_enum_us ? (NowMicros() - g_last_enum_us) / 1000.0 : 0.0,
                 p.batch, p.successful, p.failures, g_metadata_reads, g_metadata_us / 1000.0,
                 g_cache_reads, g_cache_read_us / 1000.0, g_cache_writes, g_cache_write_us / 1000.0);
-    REXLOG_INFO("dlc_load: end attempt={} cache={} total_ms={:.3f} "
+    REXLOG_INFO("dlc_load: end attempt={} total_ms={:.3f} "
                 "after_last_enumeration_ms={:.3f} successful={} failures={}",
-                p.attempt, g_cache_enabled, (NowMicros() - g_start_us) / 1000.0,
+                p.attempt, (NowMicros() - g_start_us) / 1000.0,
                 g_last_enum_us ? (NowMicros() - g_last_enum_us) / 1000.0 : 0.0,
                 p.successful, p.failures);
     RequestFrameRateRestore("the usable main menu is current with no transition pending");

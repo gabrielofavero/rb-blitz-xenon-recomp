@@ -22,7 +22,6 @@ inline constexpr Feature kFeatures[] = {
     {"interface.music_player", "Music Player"},
     {"general.play_current_song", "Play Current Song"},
     {"interface.background_music_navigation", "Menu Music Navigation"},
-    {"general.cache_dlc_library", "Cache Song Library"},
     {"general.refresh_music_library", "Refresh Songs"},
     {"general.rhythmverse", "Store Access"},
     {"interface.hidden_main_menu.rbbz_rhythmverse", "RhythmVerse shortcut", false},
@@ -36,8 +35,8 @@ inline constexpr Feature kFeatures[] = {
 };
 struct Link { size_t child, parent; };
 inline constexpr Link kLinks[] = {
-    {1, 0}, {2, 0}, {3, 0}, {5, 4}, {7, 6},
-    {9, 8}, {10, 8}, {11, 8}, {12, 8}, {13, 8}, {14, 8},
+    {1, 0}, {2, 0}, {3, 0}, {6, 5},
+    {8, 7}, {9, 7}, {10, 7}, {11, 7}, {12, 7}, {13, 7},
 };
 inline size_t Index(std::string_view token) {
   for (size_t i = 0; i < std::size(kFeatures); ++i)
@@ -110,7 +109,7 @@ inline std::vector<Prompt> Prompts() {
           " will also turn off " + children + ". Continue? Enable them separately later.";
       if (i == 0)
         text = "Use Default background music? This also disables Music Player, Play Current Song and Menu Music Navigation. Enable them separately later.";
-      if (i == 8)
+      if (i == 7)
         text = "Hide all HUD elements and disable their individual settings? They will stay disabled when you show the HUD again.";
       out.push_back({PromptKey(i, false), std::move(text)});
     }

@@ -1166,6 +1166,22 @@ performed by the agent; the owner retains that role.
 
 ### Rolling menu-music session and mount cache (2026-10-26)
 
+**Cold opening correction (2026-10-28).** With a valid complete catalog, the
+first song is still drawn uniformly from every catalog song. Without that cache,
+boot shuffles the DLC package list using the session RNG, opens packages in that
+random order until one has playable songs, and draws uniformly within that
+package. It then prepares three successors from further randomly ordered DLC
+packages so Next works while the full catalog is still being built. A Next
+request can put another package probe ahead of the catalog's next batch. The
+opening needs one successful package mount before music can start. It is
+uniform by package, not by individual song: a merged pack's songs each have
+lower first-song odds than a singleton package's song. Exact song-wide odds
+would require song counts from every package or a valid cached index. The full
+catalog continues building after the opener and is saved for later boots.
+While the chosen package is loading, or the library has no ready successor,
+Library mode stays silent. It never plays the title's shell tracks as a fallback;
+Play Current Song has no selection until a library stream advances.
+
 The owner's slow boot, `out/build/win-amd64-release/logs/rb_blitz_350.log`, spent
 **75,424 ms** preparing 50 menu-music packages before guest launch. The enumeration
 cache was a hit (fingerprint 123.531 ms, load 93.392 ms); later graphics preparation
@@ -1184,7 +1200,7 @@ kept warm alongside the current source. A merged pack can expose hundreds of cat
 records while occupying one mount. Lazy discovery continues beyond 50 songs. No fresh
 pass begins until every boot-enumerated package has been considered and the first
 pass's eligible songs have been scheduled. A new randomized pass avoids an immediate
-repeat; a sole usable song falls back to title music instead of repeating forever.
+repeat; a sole usable song ends into silence instead of repeating forever.
 Failure outcomes are distinct from heard/skipped outcomes, and repeated failures are
 quarantined. A failed remount marks its package unavailable for this session.
 
