@@ -598,12 +598,21 @@ std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoi
   // and aspect changes use the scene's current transforms at minimal cost.
   const uint32_t panel = U32(base, current_screen + 52);
   const uint32_t dir = panel ? U32(base, panel + 52) : 0;
-  if (!dir) return {};
-  const uint32_t left = SceneMesh(ctx, base, dir, "arrow_lt.mesh");
-  const uint32_t right = SceneMesh(ctx, base, dir, "arrow_rt.mesh");
-  return HitPresetArrow(point,
-                        left ? ProjectMesh(ctx, base, left) : std::nullopt,
-                        right ? ProjectMesh(ctx, base, right) : std::nullopt);
+  const uint32_t left = dir ? SceneMesh(ctx, base, dir, "arrow_lt.mesh") : 0;
+  const uint32_t right = dir ? SceneMesh(ctx, base, dir, "arrow_rt.mesh") : 0;
+  auto left_bounds = left ? ProjectMesh(ctx, base, left) : std::nullopt;
+  auto right_bounds = right ? ProjectMesh(ctx, base, right) : std::nullopt;
+  auto hit = HitPresetArrow(point, left_bounds, right_bounds);
+  // The static meshes do not always yield a usable projected box. The authored
+  // panel keeps both arrows at these guest coordinates; MenuPointer already
+  // accounts for the window's size and presentation rectangle. These narrow
+  // targets keep a click on the visible art from falling through to Confirm.
+  if (!hit) hit = HitPresetArrow(point, MenuBounds{.365f, .31f, .378f, .35f},
+                                 MenuBounds{.622f, .31f, .635f, .35f});
+  REXLOG_INFO("native_mouse: preset click point={},{} panel={:08X} dir={:08X} meshes={:08X}/{:08X} projected={}/{} action={}",
+              point.x, point.y, panel, dir, left, right, left_bounds.has_value(),
+              right_bounds.has_value(), hit ? (*hit == MouseAction::kLeft ? "left" : "right") : "confirm");
+  return hit;
 }
 }
 

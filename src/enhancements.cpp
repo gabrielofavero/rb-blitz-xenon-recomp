@@ -185,10 +185,9 @@ struct ToggleRow {
 };
 
 // One row per feature in docs/plans/finished/2026-10-03-customization-plan.md R1-R10. This table is
-// what the log walks, so a toggle that is not here is a toggle nobody sees. The size is
-// explicit, and it has to match the rows below: a short initializer list is not an error,
-// it leaves the last row - a null name and a null `enabled` - in the table.
-constexpr std::array<ToggleRow, 13> kToggles{{
+// what the log walks, so a toggle that is not here is a toggle nobody sees. Derive its size
+// from the rows: a larger explicit size silently adds a null entry and crashes at boot.
+constexpr auto kToggles = std::to_array<ToggleRow>({
     {"enhancements_hide_achievements", "hide achievement unlock notifications",
      [] { return REXCVAR_GET(enhancements_hide_achievements); }},
     {"enhancements_expand_resolution", "R1 custom resolutions",
@@ -213,12 +212,12 @@ constexpr std::array<ToggleRow, 13> kToggles{{
      [] { return REXCVAR_GET(enhancements_background_music_nav); }},
     {"enhancements_rename_mod_settings", "R10 rename the mod's settings row",
      [] { return REXCVAR_GET(enhancements_rename_mod_settings); }},
-}};
+});
 
 }  // namespace
 
 void LogToggles() {
-  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3, R6, R7's cache, R9, R10 "
+  REXLOG_INFO("enhancements: {} toggle(s), off by default except R3, R6, R9, R10 "
               "and the menu-music navigator's own cvar "
               "(docs/engine/toggles.md)",
               kToggles.size());
