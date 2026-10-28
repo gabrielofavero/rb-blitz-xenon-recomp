@@ -1,59 +1,39 @@
-"""Generate a local, gitignored controller-art reference from the PS3 dump.
+"""Export private PS3 controller references; never commit or package this output.
 
 Run from anywhere: python scripts/export_template_ps3.py
-Retail PNGs stay in assets/controller/template-ps3/. Its manifest matches the
-planned PS3 scheme format, but this local reference is never packaged.
+The Xbox 360 base game already contains the four PS pad diagrams.
 """
 
-from pathlib import Path
-import shutil
-import subprocess
-import sys
+from export_controller_reference import ROOT, buttons, manifest, texture
 
 
-ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "assets" / "game" / "ps3" / "ui"
-DEST = ROOT / "assets" / "controller" / "template-ps3"
-TOOL = ROOT / "scripts" / "hmx_milo.py"
-
-SCHEME_TOML = """schema_version = 1
-id = "ps3"
-name = "PlayStation 3"
-kind = "controller"
-
-[buttons]
-file = "buttons.png"
-
-[controller]
-file = "pad.png"
-slots = ["pads/pad_0.png", "pads/pad_1.png", "pads/pad_2.png", "pads/pad_3.png"]
-
-[icons]
-file = "icons.png"
-"""
+PS3_SOURCE = ROOT / "assets/game/ps3/ui"
+XBOX_SOURCE = ROOT / "assets/game/360/ui"
+DEST = ROOT / "assets/controller/template-ps3/ps3"
+CONTROLLER_GLYPHS = {
+    "confirm_a", "back_b", "x", "y", "left_trigger", "left_bumper",
+    "right_trigger", "right_bumper", "dpad", "dpad_up", "dpad_right",
+    "dpad_down", "dpad_left", "left_stick", "right_stick",
+}
 
 
-def export(scene, asset, target):
-    target.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run([sys.executable, str(TOOL), "texture", str(scene),
-                    "--asset", asset, "--out", str(target)], check=True)
-
-
-def main():
-    fonts = SOURCE / "resource" / "fonts" / "gen"
-    pad_scene = SOURCE / "controller_config" / "gen" / "controller_config.milo_ps3"
-    required = [fonts / "buttons.milo_ps3", fonts / "blitz_icons.milo_ps3", pad_scene]
-    missing = [str(path) for path in required if not path.is_file()]
+def main() -> None:
+    button_scene = PS3_SOURCE / "resource/fonts/gen/buttons.milo_ps3"
+    pad_scene = XBOX_SOURCE / "controller_config/gen/controller_config.milo_xbox"
+    missing = [str(path) for path in (button_scene, pad_scene) if not path.is_file()]
     if missing:
-        raise SystemExit("PlayStation 3 scene missing: " + ", ".join(missing))
+        raise SystemExit("Local game scene missing: " + ", ".join(missing))
 
-    export(required[0], "../image/icons_buttons_xbox_nomip.bmp", DEST / "buttons.png")
-    export(required[1], "../image/blitz_icons_xbox_nomip.bmp", DEST / "icons.png")
+    sheet = DEST.parent / "buttons-sheet.png"
+    texture(button_scene, "../image/icons_buttons_xbox_nomip.bmp", sheet)
+    entries = buttons(sheet, DEST, CONTROLLER_GLYPHS)
+    pads = []
     for index in range(4):
-        export(pad_scene, f"img/ps_{index}.png", DEST / "pads" / f"pad_{index}.png")
-    shutil.copyfile(DEST / "pads" / "pad_0.png", DEST / "pad.png")
-    (DEST / "scheme.toml").write_text(SCHEME_TOML, encoding="utf-8", newline="\n")
-    print(f"PlayStation 3 reference ready: {DEST}")
+        slot = f"ps_{index}"
+        texture(pad_scene, f"img/{slot}.png", DEST / "pads" / f"{slot}.png")
+        pads.append(f'{slot} = "pads/{slot}.png"')
+    manifest(DEST, "ps3", "PlayStation 3", entries, pads)
+    print(f"Private PS3 reference ready: {DEST}")
 
 
 if __name__ == "__main__":

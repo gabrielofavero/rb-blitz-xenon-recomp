@@ -95,9 +95,19 @@ int main() {
   Write(invalid / "scheme.toml", "schema_version = \"1\"\nid = \"invalid\"\n"
       "name = \"Test\"\nkind = \"controller\"\n[buttons]\nconfirm_a = \"zero.png\"\n");
   Check(!LoadScheme(invalid, false, FakePng, &scheme, &why), "quoted schema version accepted");
-  auto reserved = Package(user, "xbox-series", "[buttons]\nconfirm_a = \"a.png\"\n");
+  auto authored = Package(install, "xbox-series", "[buttons]\nconfirm_a = \"a.png\"\n");
+  Write(authored / "a.png", "PNG");
+  auto customized = Package(user, "xbox-series", "[buttons]\nconfirm_a = \"a.png\"\n");
+  Write(customized / "a.png", "PNG");
+  Check(LoadScheme(customized, false, FakePng, &scheme, &why),
+        "custom package with authored family id rejected");
+  auto discovered = Discover(install, user, FakePng);
+  Check(discovered.Find("xbox-series") &&
+        discovered.Find("xbox-series")->folder == customized &&
+        discovered.shadowed.size() == 1, "user package did not shadow authored package");
+  auto reserved = Package(user, "ps3", "[buttons]\nconfirm_a = \"a.png\"\n");
   Write(reserved / "a.png", "PNG");
-  Check(!LoadScheme(reserved, false, FakePng, &scheme, &why), "reserved user family accepted");
+  Check(!LoadScheme(reserved, false, FakePng, &scheme, &why), "reserved PS3 import id accepted");
 #ifdef _WIN32
   const fs::path rgba_file = root / "rgba.png", rgb_file = root / "rgb.png";
   WriteHex(rgba_file, "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
@@ -166,7 +176,7 @@ int main() {
   Write(shadow / "a.png", "PNG");
   auto registry = Discover(install, user, FakePng);
   Check(registry.Find("one") && registry.Find("one")->folder == shadow &&
-        registry.shadowed.size() == 1, "user shadow failed");
+        registry.shadowed.size() == 2, "user shadow failed");
   fs::remove_all(root, ec);
   std::cout << "button_scheme tests passed\n";
 }

@@ -24,11 +24,24 @@ if (-not $Destination) {
     $Destination = Join-Path $repo 'out/build/win-amd64-release/assets/controller/schemes'
 }
 foreach ($folder in $folders) {
-    & $tool --validate $folder
+    $report = @(& $tool --validate $folder)
     if ($LASTEXITCODE -ne 0) { throw "Invalid controller scheme: $folder" }
+    $report | ForEach-Object { Write-Host $_ }
     if ($Pack) {
+        if (@($report | Where-Object { $_ -match '^\s+ignored extra file:' }).Count) {
+            throw "Remove undeclared files before packing: $folder"
+        }
         New-Item -ItemType Directory -Path $Destination -Force | Out-Null
         $target = Join-Path $Destination (Split-Path -Leaf $folder)
+        $destinationFull = [IO.Path]::GetFullPath($Destination).TrimEnd('\', '/')
+        $targetFull = [IO.Path]::GetFullPath($target)
+        if (-not $targetFull.StartsWith($destinationFull + [IO.Path]::DirectorySeparatorChar,
+                                         [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Pack target escapes destination: $targetFull"
+        }
+        if (Test-Path -LiteralPath $targetFull) {
+            Remove-Item -LiteralPath $targetFull -Recurse -Force
+        }
         New-Item -ItemType Directory -Path $target -Force | Out-Null
         Get-ChildItem -LiteralPath $folder -Force |
             Copy-Item -Destination $target -Recurse -Force

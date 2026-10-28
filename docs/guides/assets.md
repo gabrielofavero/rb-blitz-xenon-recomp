@@ -409,22 +409,18 @@ for live replacement is the [button layout hot-swap plan](../plans/in-progress/2
 
 For a local reference while authoring controller art, run
 `python scripts/export_template_360.py`. It reads the user's Xbox 360 scenes and
-creates the gitignored `assets/controller/template-360/`: `buttons.png`,
-`icons.png`, `pad.png` (a copy of preset 0), and `pads/pad_0.png` through
-`pad_3.png`, plus `scheme.toml` using non-reserved id `xbox-360-reference`.
+creates a package-shaped, gitignored
+`assets/controller/template-360/xbox-360-reference/` with individual glyph and
+eight pad PNGs. Its `scheme.toml` uses the non-reserved id `xbox-360-reference`.
 The built-in `retail` choice has no package folder. These are decoded retail
 assets for local comparison only; the
 tracked `assets/controller/template/` remains the blank, distributable guide.
 For the local PlayStation 3 counterpart, run `python scripts/export_template_ps3.py`.
-It creates the gitignored `assets/controller/template-ps3/` with a `scheme.toml`
-matching the planned PS3 package layout, using the PS3 button, extra-icon and
-`ps_0..3` pad scenes from the user's dump. `ps3` is a reserved id for the trusted
-local import path; this reference folder is not installed automatically.
-Both local references now show the planned controller package shape. Copy the
-structure, give an original scheme its own id/name and appropriately licensed
-art, and keep the measured button slots in place. P1/P2/P3 and later prompts
-still have to implement texture replacement, package validation and the in-game
-choice; these reference folders are not usable in-game yet.
+It creates `assets/controller/template-ps3/ps3/` with individual controller
+glyphs from the user's PS3 buttons scene and `ps_0..3` pad diagrams from the
+user's Xbox 360 scene. `ps3` is a reserved id for the trusted local import path;
+this reference folder is not installed automatically. For original custom art,
+follow the standalone [controller authoring guide](../../assets/controller/README.md).
 
 ### Can a UI texture be swapped today? (historical, superseded for format)
 

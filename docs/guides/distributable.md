@@ -30,7 +30,7 @@ failed, 2 the audit could not measure what it needs (a missing `llvm-readobj`, o
 
 ## What the payload is
 
-The installer places a recompiled build and nothing else: `rb_blitz.exe`, its headless
+The executable payload contains the recompiled build's runtime files: `rb_blitz.exe`, its headless
 `rb_blitz_load_monitor.exe` crash-restart companion, the two SDK DLLs the
 game loads (`rexruntime.dll`, `rexgpu-xenos.dll`) and the four Visual C++ runtime DLLs the
 executable imports, plus `payload-manifest.toml`, which records their sizes and digests so the
@@ -46,6 +46,22 @@ The game data is always the user's own, supplied as an STFS package or an extrac
 folder, and Rock Band Blitz Ultimate is downloaded from its own GitHub release while the
 installer runs - never mirrored, re-hosted or bundled. `installer/README.md` and
 [ultimate-compat.md](ultimate-compat.md) are the policy; this file is the check.
+
+Owner-authored controller layouts are staged separately from the executable
+payload. `installer/tools/stage_controller_schemes.ps1` discovers every direct
+folder under `assets/controller/schemes/`, applies the ordinary package validator
+(which rejects reserved IDs), and writes explicit
+Inno `[Files]` entries for its declared manifest and PNGs. The two example
+packages live under `assets/controller/examples/`; gitignored local game-art
+references are also outside the install source. The build rejects undeclared
+files in an authored package. Originality and redistribution rights for new
+artwork still require owner review before release.
+
+The installer also includes the original controller authoring kit beside the
+game: `assets/controller/README.md`, `slots.toml`, blank templates, and the two
+example packages. These files are Inno-managed install assets, separate from
+the executable payload manifest. Player custom packages go under the selected
+`user_data_root/controller_schemes/` and are not part of a release or update.
 
 ## The one finding: `__FILE__`
 

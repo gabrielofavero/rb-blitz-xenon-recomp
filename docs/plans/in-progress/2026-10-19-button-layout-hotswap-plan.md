@@ -1,8 +1,8 @@
 # Button layout hot-swapping — button glyphs and controller art
 
 **Status: in progress, created 2026-10-19; scope revised 2026-10-27. P0 delivered
-2026-10-26; P1, P2 and P3 delivered 2026-10-27; P8 delivered 2026-10-28.
-P4–P7 and P9–P10 remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
+2026-10-26; P1, P2 and P3 delivered 2026-10-27; P6a and P8 delivered 2026-10-28.
+P4, P5, P6b, P7 and P9–P10 remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
 
@@ -199,10 +199,10 @@ remaining pad slots before claiming independent replacement of all eight.
 | --- | --- |
 | **D1** | **Controller-art hot swap uses a host texture override.** The SDK texture cache has a generic override provider; the project supplies complete canonical BC3 mip data for a matched guest texture, keyed by a measured fingerprint (dimensions + content hash, with the scene-read order as the fallback). P9/P10 may also change authored guest UI and served labels/records to express input icons and action identity; a texture swap alone cannot describe every binding. P1 proved live replacement on D3D12 and Vulkan; the earlier scene-reload fallback is no longer needed. |
 | **D2** | **A scheme is a folder with one manifest and individual PNGs.** `scheme.toml` names the id, display name, kind and any button-slot and pad-slot image paths. Every slot entry is optional, but a package must replace at least one button or pad slot; an extra-icon sheet alone is insufficient. Omitted entries retain that same slot's base-game art. `icons.png` remains an optional whole 1024×512 extra sheet. No DXT5, scene, archive surgery or copied retail pixels in custom packages. |
-| **D3** | **Discovery is a boot scan, not a hot-add.** The game scans `<install>/assets/controller/schemes/` and `<user_data_root>/controller_schemes/` before authoring the menu. For non-reserved custom ids, a user package shadows an install-root package with a log line; reserved families follow §4.1. Newly dropped packages are read at the next boot. There is no Rescan row in v1. |
+| **D3** | **Discovery is a boot scan, not a hot-add.** The game scans `<install>/assets/controller/schemes/` and `<user_data_root>/controller_schemes/` before authoring the menu. Any valid non-system user id shadows the same id in the install root with a log line; only `retail`, `keyboard`, and the PS3 import id are reserved. Newly dropped packages are read at the next boot. There is no Rescan row in v1. |
 | **D4** | **Only the controller layout is selectable.** The page lists `Xbox 360` plus every available valid controller scheme. Keyboard/mouse icons are a built-in provider, never an authored/discoverable layout or a list choice. Boot starts in keyboard/mouse hint mode; the first real pad event selects controller hint mode. Device switching never changes the saved controller selection. The selection page's explicit controller preview is independent of ordinary last-device hints (D14). |
 | **D5** | **PS3 import extracts one asset.** From a `.pkg` (plus the matching `.rap` if needed) or an extracted PS3 game folder, the installer extracts `ui/resource/fonts/gen/buttons.milo_ps3`, decodes its DXT5 sheet, and builds the PS3 scheme. The `ps_*` pad art comes from the user's 360 `controller_config.milo_xbox` via the same decoder. Nothing from the package is copied wholesale; the full ~350 MB ARK is never laid down. |
-| **D6** | **One native setting: `controller.scheme`, displayed as `Layout: <name>` directly on Controls.** Stable tokens are `retail`, `ps3`, `xbox-series`, `playstation-series`, `nintendo-switch`, `steam-controller`, `steam-deck`, or a custom id. It lives in `settings.toml` through the main settings service, not in the profile's binding store. `retail` is displayed as `Xbox 360`. |
+| **D6** | **One native setting: `controller.scheme`, displayed as `Layout: <name>` directly on Controls.** The stable token is `retail` or the id of any valid discovered controller package, including the optional `ps3` import. It lives in `settings.toml` through the main settings service, not in the profile's binding store. `retail` is displayed as `Xbox 360`. |
 | **D7** | **`enhancements_icon_schemes` becomes the master gate and defaults on**, with `Xbox 360` (`retail`) as the compiled default. With the gate off the Layout row is omitted and faithful retail art is used. This changes the off-by-default line in `src/enhancements.cpp`; the toggle table records it. R4/R11/R12 describe enabled behavior. |
 | **D8** | **Fallbacks preserve the device family and each guest slot.** Missing/invalid selected controller package → Xbox 360 art, logged and reflected in the setting. Within a valid partial package, an unlisted button or pad slot keeps the corresponding original game slot/texture; an explicitly listed but invalid file rejects the package rather than silently falling back. Keyboard/mouse → built-in keycap/mouse provider, with a built-in neutral image for an unsupported source or no binding; never controller art because a keyboard package is absent. Invalid controller packages are skipped and never listed. |
 | **D9** | **Authors provide independent, variably sized PNGs.** Button art is white/grey with straight alpha because the game's material tints glyphs (colored art is allowed but multiplied by the tint). For each supplied button or pad image, the loader scales uniformly to fit the measured destination rectangle/canvas, centers it, and leaves unused space transparent; it never stretches or crops. The runtime composes the full 512×512 button texture from the user's original game art plus supplied glyphs, then encodes all required BC3 mips for the existing guest texture override. The art author never handles DXT5 or positions. |
@@ -256,9 +256,9 @@ The 28-character single-line budget fits `Layout: <name>` with the 20-character 
 The owner chose that shorter direct row instead of a separate page.
 
 Reserved ids: `retail` (base-game Xbox 360; no folder), `keyboard` (internal built-in provider,
-not a package), and `ps3`, `xbox-series`, `playstation-series`, `nintendo-switch`,
-`steam-controller`, `steam-deck`. Only the trusted built-in/import pipeline may supply reserved
-controller packages; user custom packages cannot replace them or the keyboard/mouse provider.
+not a package), and `ps3` (the installer's local import). Every other valid package id is
+discoverable without a code list. A user package may shadow an installed authored layout of the
+same id; it cannot replace the base-game choice, keyboard/mouse provider, or PS3 import.
 
 ### 4.2 The slot map
 
@@ -350,8 +350,10 @@ manifest form, key precedence and absent-versus-invalid behavior executable and 
   individual PS3 controller glyphs, optional pad images and a package-shaped manifest using
   reserved id `ps3`. It is never installed or committed automatically.
 - `assets/controller/slots.toml` — the tracked slot registry (id, rectangle, row/column, label).
-- `assets/controller/schemes/<id>/` — the owner's schemes; the five authored controller families live here when P6b
-  runs.
+- `assets/controller/schemes/<id>/` — installable authored schemes, discovered by folder rather
+  than an ID list; the five named families live here when P6b runs.
+- `assets/controller/examples/` — original example packages for the guide, outside the installer
+  source tree.
 - `scripts/controller_schemes.ps1 -Validate -Pack` — validates every scheme (format, bounded source
   dimensions, known slot IDs, declared paths, fit results, id rules, duplicate ids) and copies the
   valid ones into the install layout.
@@ -362,7 +364,7 @@ manifest form, key precedence and absent-versus-invalid behavior executable and 
 
 | Root | Contents | Who writes it |
 | --- | --- | --- |
-| `<install>/assets/controller/schemes/<id>/` | five authored controller schemes plus locally imported PS3, when available | the installer/build |
+| `<install>/assets/controller/schemes/<id>/` | every validated authored scheme plus locally imported PS3, when available | the installer/build |
 | `<user_data_root>/controller_schemes/<id>/` | user packages, including a scheme the player drops in | the player |
 
 `<user_data_root>` is the same root the game already uses for saves and `settings.toml`
@@ -1030,8 +1032,21 @@ Band Blitz PS3 id without an explicit, logged override.
 
 ### P6a — Authoring kit and built-in scheme pipeline (not blocked)
 
-**Goal.** Everything the owner needs to paint and drop a scheme, plus the installer plumbing for the
-five tracked authored controller families. Built-in keyboard/mouse resources belong to P8 and
+**Status (2026-10-28): delivered without owner art.** The standalone guide, blank guides,
+slot registry, original one-button and one-pad examples, individual-file private exporters,
+fit-reporting validator, and installer staging pipeline are in the tree. Both examples validate;
+the Xbox 360 private reference exports to a valid package-shaped local folder. A two-file
+synthetic authored fixture was staged and compiled by Inno Setup, while a copied retail glyph
+was rejected by the stage audit. The 2026-10-28 follow-up removed the five-name packaging list:
+the installer now stages every validated direct folder under `assets/controller/schemes/`, while
+the examples live separately under `assets/controller/examples/`. User layouts with non-system
+ids may shadow installed authored layouts. The setup and updater include the guide, blank
+templates, slot map, and original examples beside the game; players copy their packages into
+the selected save-data root's `controller_schemes/` folder, which the game validates at boot.
+The five named families remain P6b's art input.
+
+**Goal.** Everything the owner needs to paint and drop a scheme, plus installer plumbing that
+discovers any validated authored package. Built-in keyboard/mouse resources belong to P8 and
 do not depend on the owner drawing a Keyboard scheme.
 
 **Deliverable.**

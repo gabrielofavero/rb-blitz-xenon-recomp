@@ -473,6 +473,19 @@ if (-not $SkipArt -and (Test-Path -LiteralPath $makeArt)) {
 # --------------------------------------------------------------------------
 # 4. the updater, and the setup executable that carries it
 # --------------------------------------------------------------------------
+Write-Step 'Staging owner-authored controller layouts'
+$schemeSource = Join-Path $repoRoot 'assets/controller/schemes'
+$haveSchemes = (Test-Path -LiteralPath $schemeSource -PathType Container) -and
+    (@(Get-ChildItem -LiteralPath $schemeSource -Directory).Count -gt 0)
+if ($haveSchemes) {
+    Invoke-Native -Exe 'cmake' -Arguments @('--build', '--preset', 'win-amd64-release',
+        '--target', 'rb_blitz_controller_schemes') -What 'controller scheme validator' -WorkingDirectory $repoRoot
+}
+$stageSchemes = Join-Path $installerDir 'tools/stage_controller_schemes.ps1'
+Invoke-Native -Exe 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '-NoProfile',
+    '-File', $stageSchemes, '-Output', (Join-Path $generatedDir 'controller_schemes.iss')) `
+    -What 'stage_controller_schemes.ps1'
+
 Write-Step 'Compiling the updater'
 
 $iscc = Find-Iscc

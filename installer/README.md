@@ -764,6 +764,17 @@ order) so a change that drops one fails the suite:
    on it, `paths.toml` lands in it with both Document folders, and the game writes
    its saves there rather than under Program Files.
 
+## Custom controller layouts
+
+The setup includes `assets\controller\README.md`, blank button and pad guides,
+the slot map, and two original example packages beside the installed game.
+The runtime scans `<user_data_root>\controller_schemes\<id>\` at boot for
+player packages. `<user_data_root>` is the save-data folder in the installed
+`paths.toml`, not the folder containing `rb_blitz.exe`. A user can copy a valid
+package there, restart the game, and select it in **Help & Options → Controls →
+Layout**. Packages in this folder survive a game update that keeps the same
+save-data path. The installed guide contains the package format and steps.
+
 ## Troubleshooting
 
 | Symptom | Cause |

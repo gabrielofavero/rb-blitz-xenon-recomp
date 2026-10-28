@@ -41,9 +41,7 @@ bool ParseString(const std::string& raw, std::string* value) {
   return true;
 }
 bool Reserved(const std::string& id) {
-  static const std::set<std::string> ids = {"retail", "keyboard", "ps3", "xbox-series",
-      "playstation-series", "nintendo-switch", "steam-controller", "steam-deck"};
-  return ids.contains(id);
+  return id == "retail" || id == "keyboard" || id == "ps3";
 }
 bool ValidName(const std::string& name) {
   size_t count = 0;
@@ -282,7 +280,7 @@ Registry Discover(const fs::path& install_root, const fs::path& user_root, Decod
       }
       auto it = registry.schemes.find(scheme.id);
       if (it != registry.schemes.end()) {
-        if (Reserved(scheme.id)) { registry.rejected.push_back({folder, "reserved family duplicate"}); continue; }
+        if (Reserved(scheme.id)) { registry.rejected.push_back({folder, "reserved id duplicate"}); continue; }
         registry.shadowed.push_back(scheme.id + ": user package shadows install package");
       }
       registry.schemes[scheme.id] = std::move(scheme);

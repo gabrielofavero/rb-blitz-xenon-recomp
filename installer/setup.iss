@@ -253,6 +253,15 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 ; choices and the free space), so it is extracted to the temporary directory as
 ; well. Temporary files must sit at the very top when solid compression is on.
 Source: "{#GeneratedDirPath}{#HelperExeName}"; DestDir: "{tmp}"; Flags: dontcopy noencryption
+; This authoring kit is available beside an installed build. Example art is
+; original and lives outside the runtime's scanned schemes directory.
+Source: "{#ProjectDirPath}assets\controller\README.md"; DestDir: "{app}\assets\controller"; Flags: ignoreversion
+Source: "{#ProjectDirPath}assets\controller\slots.toml"; DestDir: "{app}\assets\controller"; Flags: ignoreversion
+Source: "{#ProjectDirPath}assets\controller\template\*.png"; DestDir: "{app}\assets\controller\template"; Flags: ignoreversion
+Source: "{#ProjectDirPath}assets\controller\examples\*"; DestDir: "{app}\assets\controller\examples"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Generated from every validated authored scheme folder. An empty include is
+; expected when no authored layouts are supplied with this build.
+#include GeneratedDirPath + "controller_schemes.iss"
 #ifndef UpdaterMode
 ; The helper lands in the install folder with the rest of the wizard's own files.
 Source: "{#GeneratedDirPath}{#HelperExeName}"; DestDir: "{app}"; Flags: ignoreversion
