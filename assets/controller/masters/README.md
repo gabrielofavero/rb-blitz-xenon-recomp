@@ -1,4 +1,4 @@
-# Controller vector masters
+# Controller and keyboard vector masters
 
 `Vector Source.svg` is the source sheet. Run
 `python scripts/export_controller_vector_masters.py` from the repository root to
@@ -8,11 +8,18 @@ embedded font definitions. Filenames identify controls where the artwork makes
 that clear; numbered `trackpad_variant_*` files keep additional Steam Controller
 drawings without guessing their final slot meaning.
 
-The seven preset folders contain vector source art only. The runtime controller
+To regenerate just the dark keyboard assets, run
+`python scripts/export_controller_vector_masters.py --preset keyboard-dark`.
+
+The eight preset folders contain vector source art only. `keyboard-dark` contains
+all 85 objects from the source's dark keyboard layer, including mouse drawings,
+special keys, digits, and letters. The light keyboard layer is not exported.
+The runtime controller
 scheme format in [`../README.md`](../README.md) accepts PNGs and a `scheme.toml`;
 rasterizing and packaging these masters is a later conversion step. Nintendo
 Switch has Joy-Con diagrams rather than a full controller diagram in the source.
 `meta-quest` includes both Oculus Touch and Oculus Remote source objects.
+Keyboard and mouse art currently has no runtime scheme package format.
 
 ## Credits and licence
 

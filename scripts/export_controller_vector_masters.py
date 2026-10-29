@@ -1,6 +1,7 @@
-"""Split Vector Source.svg into self-contained controller master SVGs.
+"""Split Vector Source.svg into individual controller and keyboard master SVGs.
 
-These editable vector masters are source art. Runtime schemes still require PNGs.
+These editable vector masters are source art. Runtime controller schemes still
+require PNGs; keyboard art has no runtime scheme format yet.
 
 Vector Source.svg is from https://github.com/haaldor/Xelu_prompts_SVG, the SVG
 edit of Xelu's Free Prompts Pack; both are CC0 1.0. Credits, the Steam Deck
@@ -9,6 +10,7 @@ COCOGOOSE font caveat, and the checked dates are in masters/README.md.
 
 from copy import deepcopy
 from pathlib import Path
+import argparse
 import re
 
 from lxml import etree
@@ -100,6 +102,23 @@ EXPORTS = {
             "dpad_right", "dpad",
         ],
     },
+    "keyboard-dark": {
+        "Keyboard_Dark": [
+            "mouse_side_button_lower", "mouse_side_button_upper",
+            "mouse_wheel_vertical", "mouse_wheel_down", "mouse_wheel_up",
+            "mouse_wheel", "mouse_right_button", "mouse_left_button", "mouse",
+            "numpad_plus", "numpad_enter", "enter_return_arrow", "enter_wide",
+            "space", "shift_wide", "backspace", "backspace_arrow",
+            "caps_lock", "tab", "alt", "ctrl", "shift", "windows",
+            "num_lock", "escape", "asterisk", "less_than", "greater_than",
+            "right_bracket", "left_bracket", "double_quote", "semicolon",
+            "question_mark", "backslash", "plus", "minus", "print_screen",
+            "page_up", "page_down", "home", "end", "delete", "insert",
+            "tilde", "command", "arrow_left", "arrow_down", "arrow_right",
+            "arrow_up", *[f"digit_{n}" for n in range(9, -1, -1)],
+            *[f"key_{letter.lower()}" for letter in "MNBVCXZLKJHGFDSAPOIUYTREWQ"],
+        ],
+    },
 }
 
 # Most source icons occupy the same 100 by 100 drawing cell. The three full
@@ -164,7 +183,7 @@ def write_svg(folder: Path, name: str, child: etree._Element,
         etree.tostring(root, encoding="UTF-8", xml_declaration=True))
 
 
-def export() -> int:
+def export(presets: list[str] | None = None) -> int:
     document = etree.parse(str(SOURCE))
     source_ids = {node.get("id"): node for node in document.getroot().iter() if node.get("id")}
     fonts = list(document.getroot().find(f"{{{SVG}}}defs").iter(f"{{{SVG}}}font"))
@@ -174,7 +193,8 @@ def export() -> int:
         if layer.get(f"{{{INKSCAPE}}}label")
     }
     count = 0
-    for preset, groups in EXPORTS.items():
+    for preset in presets or EXPORTS:
+        groups = EXPORTS[preset]
         folder = MASTERS / preset
         folder.mkdir(parents=True, exist_ok=True)
         for label, names in groups.items():
@@ -207,4 +227,8 @@ def export() -> int:
 
 
 if __name__ == "__main__":
-    print(f"Exported {export()} SVG masters from {SOURCE}")
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--preset", action="append", choices=EXPORTS,
+                        help="Export only this preset; may be repeated")
+    args = parser.parse_args()
+    print(f"Exported {export(args.preset)} SVG masters from {SOURCE}")
