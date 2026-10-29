@@ -1,7 +1,0 @@
-schema_version = 1
-id = "example-pad"
-name = "Example Pad"
-kind = "controller"
-
-[controller.slots]
-xbox_0 = "pads/xbox_0.png"

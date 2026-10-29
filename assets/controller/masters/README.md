@@ -21,6 +21,13 @@ Switch has Joy-Con diagrams rather than a full controller diagram in the source.
 `meta-quest` includes both Oculus Touch and Oculus Remote source objects.
 Keyboard and mouse art currently has no runtime scheme package format.
 
+The six audited controller folders keep direct slot art as `<id>.svg` and
+candidate copies as `<id>_adapt.svg`. The latter still need any art edits listed
+in each folder's `AUDIT.md`; source drawings not used as direct slot files are
+in `unused/`. For these
+layouts, `next_arrow` represents Start and `previous_arrow` represents Select.
+The exporter recognizes this structure when regenerating those six folders.
+
 ## Credits and licence
 
 The art is not ours. `Vector Source.svg` is the

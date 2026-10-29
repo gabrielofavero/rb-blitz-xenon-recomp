@@ -1,7 +1,0 @@
-schema_version = 1
-id = "example-original"
-name = "Example Original"
-kind = "controller"
-
-[buttons]
-a_button = "buttons/a.png"

@@ -12,6 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 import argparse
 import re
+import shutil
 
 from lxml import etree
 
@@ -153,7 +154,8 @@ def add_source_definitions(root: etree._Element, source_ids: dict[str, etree._El
             definitions.append(deepcopy(font))
     pending = local_references(root) - known
     while pending:
-        reference = pending.pop()
+        reference = min(pending)
+        pending.remove(reference)
         if reference in known:
             continue
         source = source_ids.get(reference)
@@ -183,6 +185,32 @@ def write_svg(folder: Path, name: str, child: etree._Element,
         etree.tostring(root, encoding="UTF-8", xml_declaration=True))
 
 
+def organized_layout(folder: Path) -> tuple[dict[str, str], dict[str, str]] | None:
+    """Read the slot names and adaptation sources from an organized audit."""
+    audit = folder / "AUDIT.md"
+    if not (folder / "unused").is_dir() or not audit.is_file():
+        return None
+    direct = {}
+    adaptations = {}
+    rows = re.findall(r"^\| `([^`]+)` \| (Direct|Adapt|Missing) \| (.*) \|$",
+                      audit.read_text(encoding="utf-8"), re.M)
+    for slot, status, field in rows:
+        if status == "Direct":
+            renamed = re.search(r"renamed from `([^`]+)\.svg`", field)
+            source = renamed.group(1) if renamed else slot
+            if source in direct:
+                raise ValueError(f"{audit}: duplicate direct source {source}")
+            direct[source] = slot
+        elif status == "Adapt":
+            copied = re.search(r"copy of \[[^]]+\]\(([^)]+)\.svg\)", field)
+            if not copied:
+                raise ValueError(f"{audit}: no source for {slot}_adapt")
+            adaptations[slot] = Path(copied.group(1)).stem
+    if not rows or not direct:
+        raise ValueError(f"{audit}: no organized slot rows")
+    return direct, adaptations
+
+
 def export(presets: list[str] | None = None) -> int:
     document = etree.parse(str(SOURCE))
     source_ids = {node.get("id"): node for node in document.getroot().iter() if node.get("id")}
@@ -197,6 +225,13 @@ def export(presets: list[str] | None = None) -> int:
         groups = EXPORTS[preset]
         folder = MASTERS / preset
         folder.mkdir(parents=True, exist_ok=True)
+        organized = organized_layout(folder)
+        direct, adaptations = organized if organized else ({}, {})
+
+        def emit(name: str, child: etree._Element, box: tuple[int, int, int, int]) -> None:
+            destination = folder if not organized or name in direct else folder / "unused"
+            write_svg(destination, direct.get(name, name), child, box, source_ids, fonts)
+
         for label, names in groups.items():
             objects = list(layers[label])
             if len(objects) != len(names):
@@ -217,12 +252,14 @@ def export(presets: list[str] | None = None) -> int:
                     for path in list(child.iter(f"{{{SVG}}}path")):
                         if path.get("id") == "path162-1":
                             path.getparent().remove(path)
-                    write_svg(folder, "mute_icon", mute, (30, 50, 40, 43), source_ids, fonts)
+                    emit("mute_icon", mute, (30, 50, 40, 43))
                     count += 1
-                write_svg(folder, name, child,
-                          SPECIAL_VIEWBOX.get(source_id, (0, 0, 100, 100)),
-                          source_ids, fonts)
+                emit(name, child, SPECIAL_VIEWBOX.get(source_id, (0, 0, 100, 100)))
                 count += 1
+        for slot, source in adaptations.items():
+            source_file = ((folder / f"{direct[source]}.svg") if source in direct else
+                           (folder / "unused" / f"{source}.svg"))
+            shutil.copyfile(source_file, folder / f"{slot}_adapt.svg")
     return count
 
 
