@@ -208,9 +208,17 @@ Xbox 360 command also creates `template-360/button-slots-contact.png` (all 32
 tightly cropped button slots, with IDs and character codes) and
 `template-360/pad-slots-contact.png` (all eight pad slots). Individual original
 crops are under `template-360/xbox-360-reference/buttons/` and `pads/` if you
-need a closer look. These are private references, not authoring assets or
-distributable packages. The blank guides and `slots.toml` are enough to create
-original art without them.
+need a closer look. The PS3 command creates
+`template-ps3/button-slots-contact.png` for all 32 corresponding PS3 cells;
+the source checkout's `ps3-source-bounds.toml` records their visible areas.
+All 32 PS3 cells are also exported individually under
+`template-ps3/source-reference/`: `buttons/` contains tight artwork crops,
+while `cells/` preserves each complete 85×85 grid cell for positioning checks.
+These files are separate from the Xbox 360 reference exports. The current PS3
+reference package declares 15 controller glyphs and four PS
+pad diagrams; the optional installer import is still in progress. These are
+private references, not authoring assets or distributable packages. The blank
+guides and `slots.toml` are enough to create original art without them.
 
 Any owner-authored layout with a non-reserved ID placed in
 `assets/controller/schemes/<id>/` is

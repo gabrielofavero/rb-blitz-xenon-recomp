@@ -1,0 +1,210 @@
+"""Split Vector Source.svg into self-contained controller master SVGs.
+
+These editable vector masters are source art. Runtime schemes still require PNGs.
+
+Vector Source.svg is from https://github.com/haaldor/Xelu_prompts_SVG, the SVG
+edit of Xelu's Free Prompts Pack; both are CC0 1.0. Credits, the Steam Deck
+COCOGOOSE font caveat, and the checked dates are in masters/README.md.
+"""
+
+from copy import deepcopy
+from pathlib import Path
+import re
+
+from lxml import etree
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MASTERS = ROOT / "assets" / "controller" / "masters"
+SOURCE = MASTERS / "Vector Source.svg"
+SVG = "http://www.w3.org/2000/svg"
+INKSCAPE = "http://www.inkscape.org/namespaces/inkscape"
+
+# Names follow the visible controls. Numbered variants retain source objects
+# whose exact runtime meaning is not yet established.
+EXPORTS = {
+    "xbox-series": {
+        "Xbox_Series": [
+            "right_bumper", "left_bumper", "right_trigger", "left_trigger",
+            "dpad_down", "dpad_left", "dpad_up", "dpad_right", "dpad",
+            "share_button", "menu_button", "view_button", "right_stick",
+            "left_stick", "right_stick_click", "left_stick_click",
+            "x_button", "y_button", "b_button", "a_button", "pad",
+        ],
+    },
+    "playstation-4": {
+        "Playstation_4": [
+            "dpad_left", "dpad_down", "dpad_right", "dpad_up", "dpad",
+            "touchpad", "share_button", "options_button", "left_bumper",
+            "right_bumper", "left_trigger", "right_trigger",
+            "left_trigger_side", "right_trigger_side", "right_stick",
+            "left_stick", "cross_button", "square_button", "triangle_button",
+            "circle_button", "pad",
+        ],
+    },
+    "playstation-5": {
+        "Playstation_5": [
+            "touchpad", "dpad_down", "dpad_left", "dpad_up", "dpad_right",
+            "dpad", "create_button", "options_button",
+            "create_button_indicator", "options_button_indicator",
+            "right_stick", "left_stick", "right_stick_click", "left_stick_click",
+            "mute_button", "left_trigger", "right_trigger", "right_bumper",
+            "left_bumper", "cross_button", "square_button", "triangle_button",
+            "circle_button", "pad",
+        ],
+    },
+    "nintendo-switch": {
+        "Nintendo_Switch": [
+            "joycon_right_side", "joycon_left_side", "joycon_pair",
+            "joycon_pair_rotated", "zl_button", "zr_button", "r_button",
+            "l_button", "dpad_left", "dpad_down", "dpad_right", "dpad_up",
+            "dpad", "dpad_plain", "minus_button", "capture_button",
+            "home_button", "right_stick", "left_stick", "arrow_down",
+            "arrow_left", "arrow_up", "arrow_right", "x_button", "y_button",
+            "b_button", "a_button",
+        ],
+    },
+    "meta-quest": {
+        "Oculus_Touch": [
+            "touch_right_controller", "touch_left_controller", "right_grip_plain",
+            "right_grip", "left_grip", "right_trigger_plain", "left_trigger",
+            "right_trigger", "right_stick", "left_stick", "x_button",
+            "y_button", "b_button", "a_button",
+        ],
+        "Oculus_Remote": [
+            "remote", "remote_select_bar", "remote_back_button",
+            "remote_plus_button", "remote_minus_button", "remote_rotate_clockwise",
+            "remote_rotate_counterclockwise", "remote_ring_left",
+            "remote_ring_down", "remote_ring_right", "remote_ring_up",
+            "remote_select_button", "remote_ring_button", "remote_center_button",
+        ],
+    },
+    "steam-controller": {
+        "Steam_Controller": [
+            "gesture_rotate", "gesture_horizontal", "gesture_tilt", "gesture_motion",
+            "left_trigger", "right_trigger", "left_bumper", "right_bumper",
+            "right_grip", "left_grip", "trackpad_ring", "steam_button",
+            "previous_arrow", "next_arrow", "x_button", "y_button",
+            "b_button", "a_button", *[f"trackpad_variant_{n:02d}" for n in range(1, 13)],
+        ],
+    },
+    "steam-deck": {
+        "Steam_Deck": [
+            "steam_deck_logo", "l5_button", "r5_button", "l4_button",
+            "r4_button", "l2_button", "r2_button", "l1_button", "r1_button",
+            "power_button", "minus_button", "plus_button", "view_button",
+            "menu_button", "quick_access_button", "steam_button",
+            "right_trackpad", "left_trackpad", "right_stick", "left_stick",
+            "right_stick_click", "left_stick_click", "x_button", "y_button",
+            "b_button", "a_button", "dpad_down", "dpad_left", "dpad_up",
+            "dpad_right", "dpad",
+        ],
+    },
+}
+
+# Most source icons occupy the same 100 by 100 drawing cell. The three full
+# controller diagrams and the tall Steam gesture need their own canvas.
+SPECIAL_VIEWBOX = {
+    "Xbox_Series-69": (-290, -201, 681, 449),
+    "Playstation_4-97": (-273, -121, 649, 392),
+    "Playstation_5-59": (-286, -141, 679, 401),
+    "Playstation_5-99": (0, 16, 100, 40),
+    "Steam_Controller-6": (0, 0, 100, 215),
+}
+
+
+def local_references(element: etree._Element) -> set[str]:
+    """Find SVG paint, clip, and linked-definition references in a subtree."""
+    references = set()
+    for node in element.iter():
+        for key, value in node.attrib.items():
+            references.update(re.findall(r"url\(#([^)]*)\)", value))
+            if key.endswith("}href") and value.startswith("#"):
+                references.add(value[1:])
+    return references
+
+
+def add_source_definitions(root: etree._Element, source_ids: dict[str, etree._Element],
+                           fonts: list[etree._Element]) -> None:
+    """Copy referenced paint definitions and embedded fonts used by text."""
+    known = {node.get("id") for node in root.iter() if node.get("id")}
+    definitions = etree.Element(f"{{{SVG}}}defs")
+    if any(node.tag == f"{{{SVG}}}text" for node in root.iter()):
+        for font in fonts:
+            definitions.append(deepcopy(font))
+    pending = local_references(root) - known
+    while pending:
+        reference = pending.pop()
+        if reference in known:
+            continue
+        source = source_ids.get(reference)
+        if source is None or not any(parent.tag == f"{{{SVG}}}defs" for parent in source.iterancestors()):
+            raise ValueError(f"Missing source definition: {reference}")
+        copied = deepcopy(source)
+        definitions.append(copied)
+        known.update(node.get("id") for node in copied.iter() if node.get("id"))
+        pending.update(local_references(copied) - known)
+    if len(definitions):
+        root.insert(0, definitions)
+
+
+def write_svg(folder: Path, name: str, child: etree._Element,
+              box: tuple[int, int, int, int], source_ids: dict[str, etree._Element],
+              fonts: list[etree._Element]) -> None:
+    x, y, width, height = box
+    root = etree.Element(f"{{{SVG}}}svg", nsmap={None: SVG, "inkscape": INKSCAPE})
+    root.set("version", "1.1")
+    root.set("width", str(width))
+    root.set("height", str(height))
+    root.set("viewBox", f"{x} {y} {width} {height}")
+    child.set(f"{{{INKSCAPE}}}label", name)
+    root.append(child)
+    add_source_definitions(root, source_ids, fonts)
+    (folder / f"{name}.svg").write_bytes(
+        etree.tostring(root, encoding="UTF-8", xml_declaration=True))
+
+
+def export() -> int:
+    document = etree.parse(str(SOURCE))
+    source_ids = {node.get("id"): node for node in document.getroot().iter() if node.get("id")}
+    fonts = list(document.getroot().find(f"{{{SVG}}}defs").iter(f"{{{SVG}}}font"))
+    layers = {
+        layer.get(f"{{{INKSCAPE}}}label"): layer
+        for layer in document.getroot().iter(f"{{{SVG}}}g")
+        if layer.get(f"{{{INKSCAPE}}}label")
+    }
+    count = 0
+    for preset, groups in EXPORTS.items():
+        folder = MASTERS / preset
+        folder.mkdir(parents=True, exist_ok=True)
+        for label, names in groups.items():
+            objects = list(layers[label])
+            if len(objects) != len(names):
+                raise ValueError(f"{label}: expected {len(names)} objects, found {len(objects)}")
+            for source_object, name in zip(objects, names, strict=True):
+                child = deepcopy(source_object)
+                source_id = child.get("id")
+                # Translation and scale place the object on the source sheet.
+                # Its own drawing coordinates make an independent master.
+                child.attrib.pop("transform", None)
+                if source_id == "Playstation_5-99":
+                    # The source object combines a mute button drawing and
+                    # its crossed-microphone symbol in one group.
+                    mute = deepcopy(child)
+                    for path in list(mute.iter(f"{{{SVG}}}path")):
+                        if path.get("id") != "path162-1":
+                            path.getparent().remove(path)
+                    for path in list(child.iter(f"{{{SVG}}}path")):
+                        if path.get("id") == "path162-1":
+                            path.getparent().remove(path)
+                    write_svg(folder, "mute_icon", mute, (30, 50, 40, 43), source_ids, fonts)
+                    count += 1
+                write_svg(folder, name, child,
+                          SPECIAL_VIEWBOX.get(source_id, (0, 0, 100, 100)),
+                          source_ids, fonts)
+                count += 1
+    return count
+
+
+if __name__ == "__main__":
+    print(f"Exported {export()} SVG masters from {SOURCE}")

@@ -354,7 +354,12 @@ manifest form, key precedence and absent-versus-invalid behavior executable and 
 - `assets/controller/template-ps3/` — the equivalent gitignored reference generated
   from the owner's PS3 scenes by `python scripts/export_template_ps3.py`; P6a updates it to
   individual PS3 controller glyphs, optional pad images and a package-shaped manifest using
-  reserved id `ps3`. It is never installed or committed automatically.
+  reserved id `ps3`. Its `source-reference/buttons/` holds tight crops of all 32 slots,
+  and `source-reference/cells/` holds the complete grid cells for alignment review.
+  It is never installed or committed automatically.
+- `assets/controller/ps3-source-bounds.toml` — reviewed visible bounds for all 32 cells in the
+  locally decoded PS3 sheet. The PS3 exporter checks these source areas and writes a private
+  labeled contact sheet; the runtime destinations still come from `slots.toml`.
 - `assets/controller/slots.toml` — the tracked slot registry (id, rectangle, row/column, label).
 - `assets/controller/schemes/<id>/` — installable authored schemes, discovered by folder rather
   than an ID list; the five named families live here when P6b runs.
@@ -1057,6 +1062,13 @@ Do not switch on focus loss or on a single mouse-motion pixel. Do not call the t
 the guest thread.
 
 ### P5 — Optional PS3 import in the installer
+
+**Status (2026-10-28): source-area mapping delivered; installer import remains open.**
+The private PS3 contact sheet, individual source crops, complete grid cells and
+`ps3-source-bounds.toml` cover all 32 slots, including the two transparent cells.
+The current reference scheme declares 15
+controller glyphs and four `ps_*` pad diagrams. This mapping does not install a
+PS3 scheme or make it selectable.
 
 **Goal.** A player who owns the PS3 package gets a PS3 layout in the list, generated locally, with
 only the needed art extracted.

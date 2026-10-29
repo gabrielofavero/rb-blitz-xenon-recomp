@@ -4,12 +4,15 @@ Run from anywhere: python scripts/export_template_ps3.py
 The Xbox 360 base game already contains the four PS pad diagrams.
 """
 
-from export_controller_reference import ROOT, buttons, manifest, texture
+from export_controller_reference import (ROOT, buttons, cells, check_source_bounds,
+                                         contact_sheets, manifest, texture)
 
 
 PS3_SOURCE = ROOT / "assets/game/ps3/ui"
 XBOX_SOURCE = ROOT / "assets/game/360/ui"
 DEST = ROOT / "assets/controller/template-ps3/ps3"
+SOURCE_REFERENCE = DEST.parent / "source-reference"
+BOUNDS = ROOT / "assets/controller/ps3-source-bounds.toml"
 CONTROLLER_GLYPHS = {
     "a_button", "b_button", "x_button", "y_button", "left_trigger", "left_bumper",
     "right_trigger", "right_bumper", "dpad", "dpad_up", "dpad_right",
@@ -26,7 +29,11 @@ def main() -> None:
 
     sheet = DEST.parent / "buttons-sheet.png"
     texture(button_scene, "../image/icons_buttons_xbox_nomip.bmp", sheet)
+    check_source_bounds(sheet, BOUNDS)
+    buttons(sheet, SOURCE_REFERENCE)
+    cells(sheet, SOURCE_REFERENCE / "cells")
     entries = buttons(sheet, DEST, CONTROLLER_GLYPHS)
+    contact_sheets(DEST.parent, DEST, sheet, include_pads=False)
     pads = []
     for index in range(4):
         slot = f"ps_{index}"

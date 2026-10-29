@@ -1,0 +1,133 @@
+# Visible pixel bounds measured from the locally decoded PS3 Buttons texture.
+# Source rectangles only; runtime destinations and stable IDs are in slots.toml.
+# An empty rect marks a transparent cell. No game pixels are stored here.
+schema_version = 1
+sheet_size = [512, 512]
+
+[[slot]]
+id = "a_button"
+rect = [0, 2, 85, 83]
+
+[[slot]]
+id = "b_button"
+rect = [85, 0, 85, 85]
+
+[[slot]]
+id = "x_button"
+rect = [170, 0, 85, 85]
+
+[[slot]]
+id = "y_button"
+rect = [255, 2, 84, 82]
+
+[[slot]]
+id = "glyph_0067"
+rect = []
+
+[[slot]]
+id = "glyph_0063"
+rect = []
+
+[[slot]]
+id = "left_trigger"
+rect = [2, 96, 83, 65]
+
+[[slot]]
+id = "left_bumper"
+rect = [87, 96, 83, 65]
+
+[[slot]]
+id = "right_trigger"
+rect = [170, 95, 85, 65]
+
+[[slot]]
+id = "right_bumper"
+rect = [255, 96, 85, 65]
+
+[[slot]]
+id = "next_arrow"
+rect = [343, 102, 81, 53]
+
+[[slot]]
+id = "previous_arrow"
+rect = [428, 110, 81, 37]
+
+[[slot]]
+id = "dpad"
+rect = [2, 172, 83, 83]
+
+[[slot]]
+id = "instrument_drums"
+rect = [87, 173, 83, 81]
+
+[[slot]]
+id = "instrument_bass"
+rect = [170, 173, 85, 81]
+
+[[slot]]
+id = "instrument_guitar"
+rect = [255, 173, 85, 81]
+
+[[slot]]
+id = "instrument_vocals"
+rect = [340, 173, 85, 81]
+
+[[slot]]
+id = "instrument_keys"
+rect = [427, 172, 83, 82]
+
+[[slot]]
+id = "dpad_up"
+rect = [2, 255, 83, 85]
+
+[[slot]]
+id = "dpad_right"
+rect = [87, 256, 83, 84]
+
+[[slot]]
+id = "dpad_down"
+rect = [172, 257, 83, 83]
+
+[[slot]]
+id = "dpad_left"
+rect = [256, 257, 84, 83]
+
+[[slot]]
+id = "left_stick"
+rect = [340, 257, 85, 83]
+
+[[slot]]
+id = "right_stick"
+rect = [427, 256, 83, 84]
+
+[[slot]]
+id = "left_stick_up"
+rect = [2, 342, 83, 83]
+
+[[slot]]
+id = "left_stick_right"
+rect = [87, 340, 83, 85]
+
+[[slot]]
+id = "left_stick_down"
+rect = [172, 340, 83, 85]
+
+[[slot]]
+id = "left_stick_left"
+rect = [255, 342, 85, 83]
+
+[[slot]]
+id = "right_stick_up"
+rect = [342, 342, 83, 83]
+
+[[slot]]
+id = "right_stick_right"
+rect = [427, 340, 83, 85]
+
+[[slot]]
+id = "right_stick_left"
+rect = [0, 427, 85, 83]
+
+[[slot]]
+id = "right_stick_down"
+rect = [87, 425, 83, 85]
