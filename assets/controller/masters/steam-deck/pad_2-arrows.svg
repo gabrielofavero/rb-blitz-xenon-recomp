@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Steam Deck pad 2 callout routes</title>
+  <desc>Text rails follow PS3 pad 2. Trigger arrows end on the top rim; bumper arrows end on the outer shoulder edges, the two visible landmarks of the shared front silhouette.</desc>
+  <defs><clipPath id="body-viewport"><rect x="132" y="320" width="760" height="307"/></clipPath></defs>
+  <image id="pad-reference" href="pad.png" x="85" y="278.45" width="854.13" height="391.54"
+         preserveAspectRatio="none" opacity="0.65" clip-path="url(#body-viewport)"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
+    <polyline id="left_trigger" points="249,250 233,325"/>
+    <polyline id="right_trigger" points="775,250 791,325"/>
+    <polyline id="left_bumper" points="145,497 162,338"/>
+    <polyline id="right_bumper" points="879,497 862,338"/>
+    <polyline id="x_button" points="830,643 832,515 821,390"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="14">
+    <line id="top-left" x1="24" y1="250" x2="249" y2="250"/>
+    <line id="top-right" x1="775" y1="250" x2="998" y2="250"/>
+    <line id="middle-left" x1="24" y1="497" x2="145" y2="497"/>
+    <line id="middle-right" x1="879" y1="497" x2="998" y2="497"/>
+    <line id="lower-right" x1="830" y1="643" x2="998" y2="643"/>
+  </g>
+</svg>

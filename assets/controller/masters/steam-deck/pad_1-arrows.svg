@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Steam Deck pad 1 callout routes</title>
+  <desc>Text rails follow PS3 pad 1. One arrow per top edge represents the shoulder and trigger together because the front view does not separate them.</desc>
+  <defs><clipPath id="body-viewport"><rect x="132" y="320" width="760" height="307"/></clipPath></defs>
+  <image id="pad-reference" href="pad.png" x="85" y="278.45" width="854.13" height="391.54"
+         preserveAspectRatio="none" opacity="0.65" clip-path="url(#body-viewport)"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
+    <polyline id="left_shoulder_pair" points="249,250 205,326"/>
+    <polyline id="right_shoulder_pair" points="775,250 819,326"/>
+    <polyline id="dpad" points="95,750 182,394"/>
+    <polyline id="left_stick" points="302,750 305,530 263,419"/>
+    <polyline id="right_stick" points="700,750 705,520 754,419"/>
+    <polyline id="x_button" points="819,643 819,515 821,390"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="14">
+    <line id="top-left" x1="23" y1="250" x2="249" y2="250"/>
+    <line id="top-right" x1="775" y1="250" x2="999" y2="250"/>
+    <line id="bottom" x1="88" y1="750" x2="999" y2="750"/>
+    <line id="middle-right" x1="819" y1="643" x2="999" y2="643"/>
+  </g>
+</svg>

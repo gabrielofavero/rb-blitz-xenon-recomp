@@ -12,7 +12,7 @@ from xml.etree import ElementTree
 
 import cv2
 import numpy as np
-from PIL import Image, ImageChops, ImageDraw, ImageOps
+from PIL import Image, ImageChops, ImageDraw
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,8 +29,9 @@ EXPECTED_RAILS = (5, 4, 5, 5)
 # visible silhouette at about x=150..875, y=290..755.
 BODY = (100, 245, 924, 798)
 
-def read_layout(pad_index: int, layout_id: str = "xbox-series") -> tuple[dict[str, tuple[tuple[int, int], ...]],
-                                                                            tuple[tuple[int, int, int], ...], int]:
+def read_layout(pad_index: int, layout_id: str = "xbox-series",
+                expected_routes: int | None = None) -> tuple[dict[str, tuple[tuple[int, int], ...]],
+                                                             tuple[tuple[int, int, int], ...], int]:
     """Read the editable SVG polylines and fixed text rails."""
     layout_svg = ROOT / f"assets/controller/masters/{layout_id}/pad_{pad_index}-arrows.svg"
     root = ElementTree.parse(layout_svg).getroot()
@@ -51,8 +52,9 @@ def read_layout(pad_index: int, layout_id: str = "xbox-series") -> tuple[dict[st
         if not name or name in routes or len(points) < 2:
             raise ValueError(f"Invalid arrow route {name!r}")
         routes[name] = points
-    if len(routes) != EXPECTED_ROUTES[pad_index]:
-        raise ValueError(f"Expected {EXPECTED_ROUTES[pad_index]} arrows in {layout_svg.name}, found {len(routes)}")
+    expected = EXPECTED_ROUTES[pad_index] if expected_routes is None else expected_routes
+    if len(routes) != expected:
+        raise ValueError(f"Expected {expected} arrows in {layout_svg.name}, found {len(routes)}")
     rails = []
     for line in rail_group.findall(f"{SVG}line"):
         x1, y1, x2, y2 = (int(line.get(key)) for key in
@@ -74,8 +76,14 @@ def route_distance(first: tuple[tuple[int, int], tuple[int, int]],
     def cross(p: tuple[int, int], q: tuple[int, int], r: tuple[int, int]) -> int:
         return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
 
-    if cross(a, b, c) * cross(a, b, d) <= 0 and \
-            cross(c, d, a) * cross(c, d, b) <= 0:
+    ab_c, ab_d = cross(a, b, c), cross(a, b, d)
+    cd_a, cd_b = cross(c, d, a), cross(c, d, b)
+    collinear = ab_c == ab_d == cd_a == cd_b == 0
+    overlaps = (max(min(a[0], b[0]), min(c[0], d[0])) <=
+                min(max(a[0], b[0]), max(c[0], d[0])) and
+                max(min(a[1], b[1]), min(c[1], d[1])) <=
+                min(max(a[1], b[1]), max(c[1], d[1])))
+    if (not collinear or overlaps) and ab_c * ab_d <= 0 and cd_a * cd_b <= 0:
         return 0.0
 
     def point_to_segment(p: tuple[int, int], start: tuple[int, int],
@@ -90,12 +98,15 @@ def route_distance(first: tuple[tuple[int, int], tuple[int, int]],
                point_to_segment(c, a, b), point_to_segment(d, a, b))
 
 
-def validate_routes(routes: dict[str, tuple[tuple[int, int], ...]]) -> None:
+def validate_routes(routes: dict[str, tuple[tuple[int, int], ...]],
+                    allowed_joins: frozenset[frozenset[str]] = frozenset()) -> None:
     # A shaft is about 20 px wide. Require visible space between each pair;
     # the shared horizontal rails are intentionally excluded from this check.
     route_items = list(routes.items())
     for index, (name, points) in enumerate(route_items):
         for other_name, other_points in route_items[index + 1:]:
+            if frozenset((name, other_name)) in allowed_joins:
+                continue
             gap = min(route_distance(first, second)
                       for first in zip(points, points[1:])
                       for second in zip(other_points, other_points[1:]))
@@ -115,27 +126,12 @@ def validate_complete(name: str, image: Image.Image,
                 raise ValueError(f"{name} has a gap near ({x}, {y})")
 
 
-def remove_white_background(source: Image.Image) -> Image.Image:
-    """Separate the dark pad from its white matte, retaining its soft shadow."""
-    rgb = source.convert("RGB")
-    red, green, blue = rgb.split()
-    minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
-    # Select the connected dark controller body, then fill its enclosed lighter
-    # controls. This avoids an opaque white fringe from the source's soft shadow.
-    selected = minimum.point(lambda value: 255 if value < 100 else 0)
-    seed = (rgb.width // 2, rgb.height // 3)
-    if selected.getpixel(seed) != 255:
-        raise ValueError("Expected dark controller body at pad.png center")
-    ImageDraw.floodfill(selected, seed, 128)
-    selected = selected.point(lambda value: 255 if value == 128 else 0)
-    ImageDraw.floodfill(selected, (0, 0), 64)
-    silhouette = selected.point(lambda value: 0 if value == 64 else 255)
-    # Exterior gray pixels are the source's shadow on white. Unmatte them to
-    # transparent black; leave all colored buttons and body grays intact.
-    shadow = ImageOps.invert(minimum)
-    alpha = Image.composite(Image.new("L", rgb.size, 255), shadow, silhouette)
-    colors = Image.composite(rgb, Image.new("RGB", rgb.size), silhouette)
-    return Image.merge("RGBA", (*colors.split(), alpha))
+def load_transparent_body(source: Image.Image) -> Image.Image:
+    """Use the source artwork's alpha, including its antialiased edges."""
+    body = source.convert("RGBA")
+    if body.getchannel("A").getextrema()[0] == 255:
+        raise ValueError("Expected pad.png with a transparent background")
+    return body
 
 
 def read_head_library() -> tuple[Image.Image, tuple[tuple[int, int, int], ...]]:
@@ -287,7 +283,7 @@ def generate_pad(pad_index: int) -> None:
     routes, rails, width = read_layout(pad_index)
     validate_routes(routes)
     with Image.open(SOURCE) as source:
-        body = remove_white_background(source)
+        body = load_transparent_body(source)
     art = Image.new("RGBA", (SIZE, SIZE))
     fitted = body.resize((BODY[2] - BODY[0], BODY[3] - BODY[1]),
                          Image.Resampling.LANCZOS)

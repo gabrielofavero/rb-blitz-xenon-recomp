@@ -2,9 +2,9 @@
 
 Each controller has a `<layout-id>/` folder here, matching its layout folder
 under `assets/controller/`. Its `pad.svg` is editable source art and `pad.png`
-is the raster body used while composing annotated pad diagrams. These files are
-authoring sources; runtime schemes use only the PNGs declared in their layout
-folders.
+is the transparent raster body used while composing annotated pad diagrams.
+These files are authoring sources; runtime schemes use only the PNGs declared
+in their layout folders.
 
 The existing vector export helper is `scripts/export_controller_vector_masters.py`.
 It identifies its upstream source as the CC0 Xelu prompts SVG adaptation by
@@ -48,13 +48,25 @@ and their arrow tips follow the PS5 controls. Run
 `python scripts/generate_playstation_5_pads.py` to regenerate the four PNGs in
 `assets/controller/playstation-5/pads/`. The PS5 generator shares the arrow
 head, cyan profile, and route renderer with the Xbox Series generator. It
-extracts the controller silhouette from the white-backed PS5 master so its
-shadow does not appear in the finished diagrams. The PS5 body keeps its source
-aspect ratio; only the arrow tips move to its controls.
+uses the transparent source PNG's alpha. The PS5 body keeps its source aspect
+ratio; only the arrow tips move to its controls.
 
 The PlayStation 4 folder follows the same route and text-rail convention. Its
 `pad_0-arrows.svg` through `pad_3-arrows.svg` point to PS4 controls while keeping
 the PS3 text rails. Run `python scripts/generate_playstation_4_pads.py` to
 regenerate `assets/controller/playstation-4/pads/pad_0.png` through `pad_3.png`.
-The generator removes the white-backed source shadow, preserves the PS4 body's
+The generator uses the transparent source PNG's alpha, preserves the PS4 body's
 aspect ratio, and uses the shared PS3 arrow renderer.
+
+The Steam Deck folder has four `pad_N-arrows.svg` route masters and the same
+PS3 text-rail outer endpoints. Run `python scripts/generate_steam_deck_pads.py` to
+rebuild `assets/controller/steam-deck/pads/pad_0.png` through `pad_3.png`.
+The front-view master does not distinguish each trigger from its bumper, so
+pads 0, 1, and 3 use one arrow per shoulder side. Pad 2 needs separate callouts:
+the trigger arrows meet the top rim and the bumper arrows meet the outer
+shoulder edges. Those positions identify regions of the shared silhouette,
+not separately visible controls. Pads 0 and 3 share one shaft outside the left
+edge for the D-pad and left stick. Pad 0 also shares a straight right shaft for
+the lower X button and right stick. The generator crops the transparent export
+margin to preserve the body framing and arrow alignment; the SVG previews use
+that same framing.

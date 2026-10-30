@@ -46,8 +46,14 @@ PlayStation 4 declares the same four `ps_0` through `ps_3` slots. Run
 `python scripts/generate_playstation_4_pads.py` to rebuild them from its
 [`pad.png`](../../assets/controller/masters/playstation-4/pad.png) and
 [`pad_N-arrows.svg`](../../assets/controller/masters/playstation-4/pad_0-arrows.svg)
-masters, using the corresponding PS3 text rails. The other authored folders
-still declare no pad PNGs.
+masters, using the corresponding PS3 text rails.
+Steam Deck declares four generated diagrams for `xbox_0` through `xbox_3`.
+Run `python scripts/generate_steam_deck_pads.py` to rebuild them from its
+[`pad.png`](../../assets/controller/masters/steam-deck/pad.png) and
+[`pad_N-arrows.svg`](../../assets/controller/masters/steam-deck/pad_0-arrows.svg)
+masters. Its front view shows one shoulder silhouette per side; pad 2 uses
+the top rim for trigger callouts and outer shoulder edges for bumper callouts.
+The other authored folders still declare no pad PNGs.
 The files in `masters/` are authoring sources; manifests reference finished
 images in their layout folders.
 

@@ -194,3 +194,9 @@ source = "sdl:button:right_paddle2"
 id = "right_track_click"
 file = "buttons/C12 - Right Track.png"
 source = "sdl:button:misc2"
+
+[controller.slots]
+xbox_0 = "pads/pad_0.png"
+xbox_1 = "pads/pad_1.png"
+xbox_2 = "pads/pad_2.png"
+xbox_3 = "pads/pad_3.png"

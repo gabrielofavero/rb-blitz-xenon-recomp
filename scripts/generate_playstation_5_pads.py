@@ -5,42 +5,17 @@ Edit masters/playstation-5/pad_N-arrows.svg to adjust the callouts.
 """
 
 from PIL import Image
-import cv2
-import numpy as np
 
 from generate_controller_pad_0 import (
-    ROOT, SIZE, read_layout, render_callouts,
+    ROOT, SIZE, load_transparent_body, read_layout, render_callouts,
     validate_complete, validate_routes,
 )
 
 
 SOURCE = ROOT / "assets/controller/masters/playstation-5/pad.png"
-# Preserve the master's 1322:828 aspect ratio. Its visible silhouette lands at
+# Preserve the master's 1322:829 aspect ratio. Its visible silhouette lands at
 # approximately x=144..879, y=293..723; the PS3 text rails stay in place.
 BODY = (95, 248, 928, 770)
-
-
-def remove_white_background(source: Image.Image) -> Image.Image:
-    """Keep the controller silhouette and thumbsticks, excluding its broad shadow."""
-    rgb = np.asarray(source.convert("RGB"), dtype=np.uint8)
-    candidate = (rgb.min(axis=2) < 145).astype(np.uint8)
-    contours, _ = cv2.findContours(candidate, cv2.RETR_EXTERNAL,
-                                   cv2.CHAIN_APPROX_SIMPLE)
-    silhouette = np.zeros(candidate.shape, dtype=np.uint8)
-    for contour in contours:
-        if cv2.contourArea(contour) > 1000:
-            cv2.drawContours(silhouette, [contour], -1, 255, cv2.FILLED)
-    if not silhouette.any():
-        raise ValueError("PS5 pad silhouette could not be found")
-    silhouette = cv2.erode(silhouette, np.ones((3, 3), dtype=np.uint8),
-                           iterations=2)
-    inner = cv2.erode(silhouette, np.ones((3, 3), dtype=np.uint8),
-                       iterations=2)
-    edge = (silhouette != 0) & (inner == 0)
-    rgb = rgb.copy()
-    rgb[edge] = np.minimum(rgb[edge], 100)
-    rgba = np.dstack((rgb, silhouette))
-    return Image.fromarray(rgba, "RGBA")
 
 
 def generate_pad(pad_index: int) -> None:
@@ -49,7 +24,7 @@ def generate_pad(pad_index: int) -> None:
     routes, rails, width = read_layout(pad_index, "playstation-5")
     validate_routes(routes)
     with Image.open(SOURCE) as source:
-        body = remove_white_background(source)
+        body = load_transparent_body(source)
     art = Image.new("RGBA", (SIZE, SIZE))
     fitted = body.resize((BODY[2] - BODY[0], BODY[3] - BODY[1]),
                          Image.Resampling.LANCZOS)
