@@ -339,7 +339,7 @@ second of a warm boot is the title's own — §4.3).
 
 Measured 2026-10-06 back to back, same library, release build, warm `songcache` — so no
 package is mounted in any run below — each run a launch → start press → main menu
-walk driven through [scripts/drive_ui.ps1](../../scripts/drive_ui.ps1), the probe that also
+walk driven through [scripts/diagnostics/drive_ui.ps1](../../scripts/diagnostics/drive_ui.ps1), the probe that also
 produced §4.2's numbers (it polls the screen every 3 s, so each figure carries ±3 s):
 
 | Boot | launch → title screen | title screen → main menu | launch → main menu |
@@ -392,7 +392,7 @@ something R7 does by itself.
 
 Three measured facts, in the order they should weigh.
 
-- **Gameplay timing is not frame-paced.** [scripts/acceptance_song.ps1](../../scripts/acceptance_song.ps1)
+- **Gameplay timing is not frame-paced.** [scripts/acceptance/acceptance_song.ps1](../../scripts/acceptance/acceptance_song.ps1)
   with `REX_VSYNC=false` played the same song for **226 s** against 225 s with V-Sync on,
   with `Boot`, `SongList`, `Playing`, `Results` and `SongSeen` all true, no `[FATAL]` and a
   clean shutdown — so the title's song clock is its audio clock and a 2.4× faster frame
@@ -679,7 +679,7 @@ builds. The title's own `songcache` and native discovery remain relevant.
   wrote its own 1.1 MB `songcache`, and the next boot mounted **no** package and reached
   the menu in **57.5 s**, of which R7's host cache saves the 14.5 s the walk would have
   cost. A full acceptance run in that cold state
-  (`scripts/acceptance_song.ps1 -DlcLibrary` on `155`) reported `Boot`, `SongList`,
+  (`scripts/acceptance/acceptance_song.ps1 -DlcLibrary` on `155`) reported `Boot`, `SongList`,
   `Playing`, `Results` and `SongSeen` all true with a 225-second playback and no
   `[FATAL]`, and the refresh row's press re-scanned the library and rewrote the cache
   (§4.2). With the toggle off, the delay is the SDK's own default and the enumeration is
@@ -694,7 +694,7 @@ builds. The title's own `songcache` and native discovery remain relevant.
   uncapped. The call count is unchanged, i.e. nothing is skipped, which is the whole point: batching the
   walk instead is closed by measurement ([plans/song-cache-plan.md](../plans/cancelled/2026-10-10-song-cache-plan.md) §13), and
   fast-forwarding it is closed by the absence of any proof that the song list survives
-  (§14.5). `scripts\acceptance_dlc.ps1 -DlcLibrary <flat library> -ExpectedSong "LYCANTHROPE"
+  (§14.5). `scripts\acceptance\acceptance_dlc.ps1 -DlcLibrary <flat library> -ExpectedSong "LYCANTHROPE"
   -Extra "--enhancements_dlc_cache=true;--enhancements_dlc_uncap_enumeration=true"` then passed with the
   pacing armed and restored inside the leg, the library's song on the guest's own list, and that song
   absent from its control leg — the leg needs `-BootTimeoutSec 900 -ScreenTimeoutSec 900`, because a
@@ -712,10 +712,10 @@ builds. The title's own `songcache` and native discovery remain relevant.
   opened every one (2806 `Loading STFS header file` mounts) with no `[FATAL]`. Read as
   their own saved-game type instead, the same folder is enumerated and mounted the same
   way and reaches **no** song list, which is what the adaptation is for. A flat
-  library's songs list and *play*: `scripts/acceptance_song.ps1 -DlcLibrary … -Song 2
+  library's songs list and *play*: `scripts/acceptance/acceptance_song.ps1 -DlcLibrary … -Song 2
   -SongName "155"` reports `SongList`, `Playing`, `Results` and `SongSeen` all true
   with a 225-second playback envelope (a custom `CON` out of the folder, played to its
-  results screen), and the screen-driven `scripts/acceptance_dlc.ps1 -DlcLibrary …`
+  results screen), and the screen-driven `scripts/acceptance/acceptance_dlc.ps1 -DlcLibrary …`
   passes with the library's song on the list. Evidence: `out/m8-play5/` (playback),
   `out/m8-harness/` (the acceptance pass) and `out/m8-full/` (the whole folder's logs).
   A folder this large is near the acceptance harness's limit — at 3840x2160 the OCR of
@@ -729,7 +729,7 @@ builds. The title's own `songcache` and native discovery remain relevant.
   ([patches/rexglue-sdk/0006-content-container-packages-and-extra-content-root.patch](../../patches/rexglue-sdk/0006-content-container-packages-and-extra-content-root.patch),
   which applies to the pinned checkout). The guest's own song list is the only thing
   that proves the enumeration and the mount, and
-  [scripts/acceptance_dlc.ps1](../../scripts/acceptance_dlc.ps1) now drives it:
+  [scripts/acceptance/acceptance_dlc.ps1](../../scripts/acceptance/acceptance_dlc.ps1) now drives it:
   `XamContentAggregateCreateEnumerator: added N items` must be non-zero and a song
   only the DLC package carries must be on the song list, read with Windows OCR,
   with a control leg at a `--dlc_root` that does not exist where the song must be

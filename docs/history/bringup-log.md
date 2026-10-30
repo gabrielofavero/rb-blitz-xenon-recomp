@@ -147,7 +147,7 @@ Command: `rexglued.exe codegen rb_blitz_manifest.toml`
   `symlink()` fails with `unable to create symlink cabextract/mspack/lzxd.c:
   Function not implemented`, the checkout exits 255, and the file is left
   **missing** — worse than a flattened stub. Verified 2026-09-19 and reverted.
-- Standing fix: `scripts/repair_flat_symlinks.ps1` re-expands any flattened entry
+- Standing fix: `scripts/setup/repair_flat_symlinks.ps1` re-expands any flattened entry
   from its link target (idempotent, SHA-256 check inside) and marks the 16 paths
   `--skip-worktree` so the unrepresentable type change stops showing up as dirt.
   Re-run after any clone, `submodule update`, or checkout that rewrites the SDK
@@ -259,7 +259,7 @@ Status: **complete** (2026-09-10).
   **exceeds** the Xenia baseline (canary `80679bc`, whose own notes were
   superseded and removed with the baseline document),
   which only reached the looping animated logo.
-- Acceptance (`scripts/acceptance_launches.ps1`, Release build):
+- Acceptance (`scripts/acceptance/acceptance_launches.ps1`, Release build):
   **10 / 10** consecutive launches stayed alive at the title screen with no
   `[FATAL]`, and **10 / 10 closed cleanly** (graceful window close, no forced
   kill). All ten screenshots visually confirmed the "PRESS A TO START" title
@@ -407,7 +407,7 @@ Stop-Process -Name rb_blitz -Force
 ```powershell
 cmake --preset win-amd64-release          # once
 cmake --build out/build/win-amd64-release # regenerate + build
-.\scripts\acceptance_launches.ps1 -Runs 10 -BootWaitSec 26
+.\scripts\acceptance\acceptance_launches.ps1 -Runs 10 -BootWaitSec 26
 ```
 
 **Design decision (taken 2026-09-20):** all `bctr`-missed functions are now
@@ -575,7 +575,7 @@ three rows marked open above were closed on 2026-09-20 — see "Close-out: menus
 - Symptom: injected keystrokes were ignored until the window had seen a real
   focus change; keys sent to a merely-foregrounded window never reached the
   guest.
-- Fix: `scripts/drive_ui.ps1` gained a `refocus` action (minimize → restore →
+- Fix: `scripts/diagnostics/drive_ui.ps1` gained a `refocus` action (minimize → restore →
   `SetForegroundWindow`), and every `key:`/`hold:`/`text:` action re-asserts
   foreground first. A failed focus is now a hard error instead of a silent
   no-op (the earlier version dropped keys into the terminal without saying so).
@@ -592,7 +592,7 @@ three rows marked open above were closed on 2026-09-20 — see "Close-out: menus
 - **B (Back) dismisses the dialog** and returns to the title, so the title is
   not wedged — but the offline entry point is somewhere else on this screen.
 - The guest image contains the string **"Proceed in Offline Mode?"** (found by
-  scanning the live process with `scripts/scan_process_strings.ps1`). Locating
+  scanning the live process with `scripts/diagnostics/scan_process_strings.ps1`). Locating
   its guest address tells us which branch reaches the menu without Xbox LIVE;
   capturing that address is the next step.
 
@@ -621,10 +621,10 @@ three rows marked open above were closed on 2026-09-20 — see "Close-out: menus
 
 ### New tooling (both untracked helpers, now committed)
 
-- `scripts/drive_ui.ps1` — action-grammar UI driver (`wait:`, `shot:`, `key:`,
+- `scripts/diagnostics/drive_ui.ps1` — action-grammar UI driver (`wait:`, `shot:`, `key:`,
   `hold:`, `text:`, `refocus`) that focus-correctly injects keys and captures
   window screenshots into `out/drive-ui/`.
-- `scripts/scan_process_strings.ps1` — searches the **live process** for a
+- `scripts/diagnostics/scan_process_strings.ps1` — searches the **live process** for a
   string and reports the guest address, exploiting the fact that the arena is
   mapped contiguously (guest `0x82000000` → process `0x0000000182000000`). The
   XEX is encrypted/compressed on disk, so runtime scanning is the only way to
@@ -639,12 +639,12 @@ game-port code change:
 - `src/system/xthread.cpp` — **ours and intentional** (B-007). The one-line
   log-once fix now lives in
   `patches/rexglue-sdk/0001-xthread-log-once-core-count-warning.patch` and is
-  re-applied after any checkout by `scripts/apply_sdk_patches.ps1`, so wiping or
+  re-applied after any checkout by `scripts/setup/apply_sdk_patches.ps1`, so wiping or
   re-cloning the SDK no longer loses it. While applied, the submodule reports
   ` M src/system/xthread.cpp`: expected, not drift.
 - `thirdparty/libmspack` (15 paths) and `thirdparty/o1heap` (1 path) — flattened
   tracked symlinks, not edits. Handled by
-  `scripts/repair_flat_symlinks.ps1`; see the B-001 follow-up for why
+  `scripts/setup/repair_flat_symlinks.ps1`; see the B-001 follow-up for why
   `core.symlinks true` cannot be used on this machine.
 - `thirdparty/fmt/support/.gradle/` — untracked Gradle caches (15 files, 79.2 KB)
   from fmt's own tooling; deleted. `thirdparty/fmt` is clean again.
@@ -683,7 +683,7 @@ rexglue-sdk`) still produced `MM rexglue-sdk`; the index was then restored to th
 recorded `c94f5eb…` and the tree re-verified clean.
 
 Because accidental work-tree edits inside the SDK are now invisible to the parent,
-`scripts/apply_sdk_patches.ps1` audits them on every run: a modified file counts as
+`scripts/setup/apply_sdk_patches.ps1` audits them on every run: a modified file counts as
 accounted for only if its diff matches a patch in the set (the `index` line is
 ignored, since its abbreviation length follows `core.abbrev`). Verified on this
 checkout:
@@ -724,7 +724,7 @@ Two experiments established causality and the data layout:
 - Remapping only these textures to a float host format made *broken, flickering*
   3D appear — the format is causally involved in the missing 3D;
 - a live dump of the guest bytes (external `ReadProcessMemory` of the shared
-  memory mirror; `scripts/dump_guest_memory.ps1`) shows `0x80000000` and
+  memory mirror; `scripts/diagnostics/dump_guest_memory.ps1`) shows `0x80000000` and
   `0xC0000000`, i.e. exactly `0.5` and `0.75` read as 0.32 unsigned. The data is
   normalized fixed point, and reinterpreting those bits as float is precisely why
   the first experiment flickered.
@@ -784,7 +784,7 @@ What the title does now, from the surviving run log and the writable root:
   code is involved.
 - **Input.** `XInput Controller #1` (VendorID `0x0B05`, ProductID `0x1B4C`) is
   enumerated, but every navigation verified so far was **keyboard-injected**
-  through the SDK's MnK emulation and `scripts/drive_ui.ps1`. No pad-driven run
+  through the SDK's MnK emulation and `scripts/diagnostics/drive_ui.ps1`. No pad-driven run
   exists. (Closed 2026-09-20: a hand-run pad pass covers all four control groups —
   see the close-out-completed section.)
 
@@ -811,7 +811,7 @@ missing writable root are all untested.
 All three rows still open above are closed, and the plan's exit criterion for the
 phase is met. Evidence per item, with the command that reproduces it.
 
-**1. ARK/HDR offsets and sizes (runtime audit).** `scripts/audit_ark_reads.ps1`
+**1. ARK/HDR offsets and sizes (runtime audit).** `scripts/diagnostics/audit_ark_reads.ps1`
 drives a run with `--log_noisy=true --log_level=trace`, rebuilds the guest's file
 handles from every `NtCreateFile`/`NtClose`, attributes each `NtReadFile` to its
 file through that timeline, and asserts that the read stayed inside the file and
@@ -855,7 +855,7 @@ between runs. All of it is SDK content-path code, no project code — which is w
 this plan item needed proof rather than implementation.
 
 **4. Save creation, restart persistence, missing/corrupt data.**
-`scripts/acceptance_persistence.ps1` runs five cases, each a fresh process with an
+`scripts/acceptance/acceptance_persistence.ps1` runs five cases, each a fresh process with an
 isolated `--user_data_root` under `out\m4-persistence\userdata`, and asserts on
 that run's own trace log plus the files it leaves behind. 5/5 pass
 (`out/m4-persistence/summary.json`):
@@ -982,7 +982,7 @@ Still open, and none of it is tracked by a script:
 
 | Exit-criterion part | State |
 | --- | --- |
-| Three clean-process runs in a row | no script and no captured run; the boot-phase analogue is `scripts/acceptance_launches.ps1` |
+| Three clean-process runs in a row | no script and no captured run; the boot-phase analogue is `scripts/acceptance/acceptance_launches.ps1` |
 | A named song | never recorded |
 | Launch → results → song select → play again | untested; results and the return path have not been exercised deliberately |
 | Audio/gameplay drift across a full song | never measured |
@@ -1134,10 +1134,10 @@ ctest --test-dir out\build\win-amd64-release --output-on-failure
 
 **Still open.** This is one test target over one header. The acceptance half of the
 issue is unaffected: the menus and songs phases still have no scripted run, because
-`scripts/acceptance_launches.ps1` stops at boot and nothing drives menus → song →
+`scripts/acceptance/acceptance_launches.ps1` stops at boot and nothing drives menus → song →
 results. The narrower wording is now in [known-issues.md](../reference/known-issues.md).
-(Correction, 2026-09-20: both have one now — `scripts/acceptance_song.ps1` drives
-menus → song → results and `scripts/acceptance_persistence.ps1` covers storage; the
+(Correction, 2026-09-20: both have one now — `scripts/acceptance/acceptance_song.ps1` drives
+menus → song → results and `scripts/acceptance/acceptance_persistence.ps1` covers storage; the
 host suite is four targets rather than one.)
 
 ## The fingerprint file gains consumers: gate, boot line, header, tests (2026-09-19)
@@ -1235,7 +1235,7 @@ this: the two files are now proven to be the recorded revision, not proven to be
 read at the right offsets. `toolchain.md` (a release-readiness task) is still missing
 too — the build works because the absolute compiler/cmake/ninja paths live in the
 build tree's `CMakeCache.txt` and nowhere else.
-(Closed 2026-09-20: the offset audit is `scripts/audit_ark_reads.ps1` — see the
+(Closed 2026-09-20: the offset audit is `scripts/diagnostics/audit_ark_reads.ps1` — see the
 close-out-completed section above.)
 
 ## B-012: Rock Band Blitz Ultimate install — a payload union device (2026-09-20)
@@ -1255,11 +1255,11 @@ second build and no pristine dump put at risk.
   [`src/hooks/ultimate.cpp`](../../src/hooks/ultimate.cpp), the
   [`OnPostLoadXexImage`](../../src/rb_blitz_app.h) call site,
   [`tests/payload_overlay_tests.cpp`](../../tests/payload_overlay_tests.cpp) and
-  [`scripts/decrypt_xex.py`](../../scripts/decrypt_xex.py).
+  [`scripts/xex/decrypt_xex.py`](../../scripts/xex/decrypt_xex.py).
 - Policy, the full evidence tables, hazards and acceptance criteria:
   [`ultimate-compat.md`](../guides/ultimate-compat.md).
 
-**The mod is 12 bytes.** `scripts/decrypt_xex.py` mirrors the SDK's
+**The mod is 12 bytes.** `scripts/xex/decrypt_xex.py` mirrors the SDK's
 `XexModule::ReadImage` (retail key, CBC IV = 0 chained across BASIC blocks), so
 `--diff` can compare the payload's executable with retail at guest addresses. Both
 images decrypt to 10,747,904 bytes; the payload's is not even encrypted
@@ -1383,13 +1383,13 @@ that folder exists, which is what the zip's `_keepme` file creates), so only the
 The songs phase's exit criterion — one named bundled song through the full
 launch-to-results path three times in a row from a clean process — is now a
 scripted, repeatable result rather than an observation.
-[`scripts/acceptance_song.ps1`](../../scripts/acceptance_song.ps1) is the boot-phase
+[`scripts/acceptance/acceptance_song.ps1`](../../scripts/acceptance/acceptance_song.ps1) is the boot-phase
 launch-driver's counterpart one screen further in: it starts the title itself,
 drives the offline route with injected keyboard input, and asserts every
 transition on evidence instead of on a fixed sleep.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance_song.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance/acceptance_song.ps1
 # -Runs 3 -Song 3 -SongName "THESE DAYS" -UltimateMode 0 [-Replay]
 # evidence lands in out/m5-acceptance/ (screenshots, per-run logs, summary.json)
 ```
@@ -1407,9 +1407,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance_song.ps1
 | replay leg (`-Replay`) | back to `YOUR SONGS`, reselect, second matched pair, second results screen |
 | clean exit | no `[FATAL]` in the run's log, and a `Title terminated` close |
 
-Screenshots come from [`scripts/capture_window.ps1`](../../scripts/capture_window.ps1)
-and text from [`scripts/ocr_image.ps1`](../../scripts/ocr_image.ps1), the same
-primitives [`scripts/drive_ui.ps1`](../../scripts/drive_ui.ps1) uses.
+Screenshots come from [`scripts/diagnostics/capture_window.ps1`](../../scripts/diagnostics/capture_window.ps1)
+and text from [`scripts/diagnostics/ocr_image.ps1`](../../scripts/diagnostics/ocr_image.ps1), the same
+primitives [`scripts/diagnostics/drive_ui.ps1`](../../scripts/diagnostics/drive_ui.ps1) uses.
 
 ### Result (2026-09-20)
 
@@ -1524,7 +1524,7 @@ frame count against a song's length: **50.005 MHz** in the vsync-on run and
 
 ### The harness
 
-[`scripts/measure_pacing_input.ps1`](../../scripts/measure_pacing_input.ps1) reuses
+[`scripts/diagnostics/measure_pacing_input.ps1`](../../scripts/diagnostics/measure_pacing_input.ps1) reuses
 `acceptance_song.ps1`'s OCR-gated route to reach gameplay, then, while the song
 plays, injects pad-A presses at three hold lengths (8 / 30 / 90 ms) every 12 s and
 records the wall-clock instant of every key-down and key-up. Each press samples the
@@ -1534,7 +1534,7 @@ copies the run's whole rotated log set next to the injection record, so
 `out/m5-pacing/<tag>/` holds `run.json`, `injections.json` and ~74 MB of
 `logs/*.log` — the evidence, not a summary of it.
 
-[`scripts/audit_pacing_input.ps1`](../../scripts/audit_pacing_input.ps1) reduces those
+[`scripts/diagnostics/audit_pacing_input.ps1`](../../scripts/diagnostics/audit_pacing_input.ps1) reduces those
 logs to 17 named checks. `-SelfTest` synthesizes a healthy and a deliberately
 broken measurement and asserts that the verdicts differ, which is the check that
 the checks bite:
@@ -1811,7 +1811,7 @@ now honour the flag. Nothing else in the merge path changed.
 | The six undefined symbols | 0 references, 0 definitions — the thunks call their defined targets (`sub_821D52D8` → `sub_821D5060`, `sub_821D54C0` → `sub_82376F70`) |
 | `cmake --build out\build\win-amd64-release` | exit 0; links `rb_blitz.exe` (38,611,456 bytes) |
 | `ctest` (the 4 host test targets) | 4/4 passed in 0.49 s |
-| `scripts/apply_sdk_patches.ps1 -Check` | 14 patched, 0 UNEXPECTED, 0 untracked, exit 0 |
+| `scripts/setup/apply_sdk_patches.ps1 -Check` | 14 patched, 0 UNEXPECTED, 0 untracked, exit 0 |
 
 ### What this does not cover
 
@@ -1907,7 +1907,7 @@ desktop, so a real cursor and `SetForegroundWindow` were both unavailable.
 Everything below comes from a temporary harness that `PostMessage`s mouse messages
 into the game window and reads the result back with
 `PrintWindow(PW_RENDERFULLCONTENT)` plus
-[scripts/ocr_image.ps1](../../scripts/ocr_image.ps1). Two properties of the SDK
+[scripts/diagnostics/ocr_image.ps1](../../scripts/diagnostics/ocr_image.ps1). Two properties of the SDK
 window fell out of it that anyone repeating this needs:
 
 - **A posted `WM_MOUSEMOVE`'s coordinates are not the delta.** The window computes
@@ -2500,7 +2500,7 @@ they are meant to disagree:
   revision the running executable was actually booted against and returns, because
   pointing a built binary at another `game/` tree is a supported way to run.
 
-Status: complete — [scripts/acceptance_wrong_data.ps1](../../scripts/acceptance_wrong_data.ps1),
+Status: complete — [scripts/acceptance/acceptance_wrong_data.ps1](../../scripts/acceptance/acceptance_wrong_data.ps1),
 three cases, **3/3** in this repository's tree and in the clean clone, exit 0 both times.
 
 The bring-up entry for the fingerprints ended with "**Deliberately not demonstrated**", on
@@ -2579,7 +2579,7 @@ with no `[FATAL]`, no dialog, and no identity line. Two consequences worth keepi
 
 ```powershell
 cd <checkout>
-.\scripts\acceptance_wrong_data.ps1
+.\scripts\acceptance\acceptance_wrong_data.ps1
 ```
 
 The script edits `<GameRoot>\default.xex` in place — that is the mechanism, since the check
@@ -2622,7 +2622,7 @@ thing that leaves this machine. The claim to establish is a negative: no retail 
 symbol taken from a proprietary database, no credential and no machine-specific path
 reaches the installer payload or a packaged build. A negative claim is only worth the check
 behind it, so the deliverable is a check that can fail -
-[scripts/audit_distributable.ps1](../../scripts/audit_distributable.ps1) - and it did fail,
+[scripts/setup/audit_distributable.ps1](../../scripts/setup/audit_distributable.ps1) - and it did fail,
 on the third of those four questions.
 
 Status: complete. Seven checks, 7/7 pass on the payload this tree builds, exit 0, with the
@@ -2706,7 +2706,7 @@ visible.
 Two more things are recorded as deliberate, not defects: the build stamp's timestamp
 (`…@20260928_1827`, which is what a bug report needs) and the console's own XEX key inside
 `rexruntime.dll` - the emulated console has to read the user's dump, the constant is public in
-every Xenia-derived runtime, and the project keeps exactly one copy: `scripts/decrypt_xex.py`
+every Xenia-derived runtime, and the project keeps exactly one copy: `scripts/xex/decrypt_xex.py`
 reads it out of the SDK source rather than carrying a second one. All seven payload PEs
 report `PointerToSymbolTable: 0x0` and no `.debug` section, so no name travels as a symbol at
 all.
@@ -2970,7 +2970,7 @@ tail-branch entries and nothing else.
 ### What the last address was, and what the record got wrong
 
 B-011 recorded `0x827EC038` as a leaf "whose address is taken in data". It is taken
-by nothing. Measured against the decrypted image (`scripts/decrypt_xex.py`, byte for
+by nothing. Measured against the decrypted image (`scripts/xex/decrypt_xex.py`, byte for
 byte what the runtime maps, checked against the live bytes B-011 quoted): no 32-bit
 word anywhere in the file equals `0x827EC038` in either byte order, at any offset -
 a whole-image search is **0 hits** - and a linear decode of `.text` finds no direct
@@ -3027,7 +3027,7 @@ boundary the splitter already found.
 | `acceptance_launches.ps1 -Runs 2 -BootWaitSec 40` | **2 / 2** reached-title-and-closed-clean, no `[FATAL]` |
 | the call that used to trap | a temporary `REXLOG_INFO` in the generated body of `sub_827EC038` logged **206 calls** in one 40 s boot (thread t27832), 0 `[FATAL]`; the probe was then removed and the tree rebuilt (the regenerated output was byte-identical - `0 written, 215 unchanged`) |
 | `config/functions.toml` emptied to a comment | codegen registers 23 of the historical 24 addresses by itself; the Validate phase reports `UnresolvedCall (1): 0x8243C688 from 0x8242A8DC: b 0x8243C688 from 0x8242A8DC - target not in any function`, which is why that entry stays |
-| `scripts/apply_sdk_patches.ps1 -Check` | 9 patches, all applied; 21 patched files, 0 UNEXPECTED, 0 untracked, exit 0 |
+| `scripts/setup/apply_sdk_patches.ps1 -Check` | 9 patches, all applied; 21 patched files, 0 UNEXPECTED, 0 untracked, exit 0 |
 | codegen after the change | `Codegen summary: 0 written, 0 unchanged, 0 deleted, 1 module(s) up to date` in 0.1 s - patch 0005 now bumps `kCodegenBehaviourVersion` 2 -> 3, so every existing tree regenerates exactly once, by design |
 
 ### What this does not cover
@@ -3130,14 +3130,14 @@ learned to serve the request:
 | --- | --- |
 | `cmake --build --preset win-amd64-release` | exit 0; the SDK tree relinks `rexruntime.dll` and `rexgpu-xenos.dll`, then `rb_blitz.exe` |
 | `ctest` (7 host targets) | **7/7** passed (1.9 s) |
-| `scripts/acceptance_song.ps1 -Runs 1` (final binaries, log 13,748 KB) | pass - boot -> song list -> **315 s** of playback (19:09:49 -> 19:15:04) -> results naming `THESE DAYS`, 0 `[FATAL]` |
+| `scripts/acceptance/acceptance_song.ps1 -Runs 1` (final binaries, log 13,748 KB) | pass - boot -> song list -> **315 s** of playback (19:09:49 -> 19:15:04) -> results naming `THESE DAYS`, 0 `[FATAL]` |
 | the B-010 symptom | **0** `Unsupported texture formats used in the frame` lines (18,310 frames carried them before the 2026-09-19 fix) and **0** `Failed to convert a guest texture` lines |
 | the new integer path not taken | **0** `Sampling guest texture format` lines: every fetch constant this title samples is a fraction (`num_format = 0`, as B-010's decoded one was), so the derived rule is not exercised by any run here |
 | the staging path, measured with a temporary probe (removed afterwards, tree rebuilt) | **8** requests of **524,288** bytes, packed four to a 2 MiB page - offsets 0 / 524,288 / 1,048,576 / 1,572,864 within each of the two page buffers the run used - and the pool's own allocation logged as `2097152` bytes |
 | the staged data, same probe | **8** conversions of **131,072** components each; read back through the destination mapping, every component is inside the range its number format allows - min `0.10800648` / max `0.75000000` for one texture and min `0.47703350` / max `0.80284172` for the other, **0 NaN, 0 out of range** |
 | the growth path, measured with a forced configuration (the staging pool constructed with a 64 KiB page and primed with a 4,096-byte request; both removed afterwards, tree rebuilt) | `upload page allocating: 65536 bytes` for the priming page, then `upload page size grown to 524288 bytes for a 524288 byte request` + `upload page allocating: 524288 bytes`; all 8 conversion requests landed at **offset 0 of a fresh buffer**, not at the priming page's offset 4,096 - which is where a fit check against the grown `page_size_` instead of the page's own size would have put a 524,288-byte write inside a 65,536-byte buffer |
 | the growth run's data and route | the same read-back values line for line, and the same pass (315 s, `THESE DAYS`) |
-| `scripts/apply_sdk_patches.ps1 -Check` | 8 patches, all applied; **24** patched files, 0 UNEXPECTED, 0 untracked, exit 0 |
+| `scripts/setup/apply_sdk_patches.ps1 -Check` | 8 patches, all applied; **24** patched files, 0 UNEXPECTED, 0 untracked, exit 0 |
 | the plugin-only build | measured: a build that only recompiles `rexgpu-xenos.dll` leaves the copy beside `rb_blitz.exe` stale, because that copy is a `POST_BUILD` of the executable's link - recorded in [build-and-run.md](../guides/build-and-run.md) §3, and the forced-growth run copied the DLL by hand |
 
 Two conditions of these measurements. The machine was **not idle**: another session on
@@ -3181,7 +3181,7 @@ not transfer, so the pair had to be found in Blitz's.
 Cheap in hindsight, and it is one instruction that makes it cheap: **`mfcr`.** A
 `setjmp` on this ABI has to save the condition register, and nothing else compiled
 into this image does: the whole `.text` (0x82190000-0x827F6ED4, decrypted with
-`scripts/decrypt_xex.py` and disassembled with the SDK's bundled
+`scripts/xex/decrypt_xex.py` and disassembled with the SDK's bundled
 `rexglue-sdk/tools/binutils/powerpc-none-elf-objdump`, which reads a `-b binary`
 input as little-endian, so the image was word-swapped first — scratch, not kept)
 holds exactly one `mfcr`, at `0x82772958` — and it sits in a function that saves
@@ -3226,7 +3226,7 @@ fired **2,164** times in a 40 s boot. With the channel proved:
 
 - a 40 s boot to the title screen: **0** of 21 sites;
 - the full offline route (boot -> menu -> song list -> a 315 s song -> the results
-  screen, `scripts/acceptance_song.ps1 -Runs 1`): **0** of 21 sites.
+  screen, `scripts/acceptance/acceptance_song.ps1 -Runs 1`): **0** of 21 sites.
 
 So the engine's `setjmp`/`longjmp` are error-path only on the routes this project
 can drive, and the backlog's "it may already explain odd error-path deaths" is
@@ -3244,8 +3244,8 @@ observed run has entered one.
 | `cmake --build --preset win-amd64-release` | exit 0; 12 generated partitions recompiled, `rb_blitz.exe` linked |
 | `ctest` (7 host targets) | **7/7** passed (1.9 s) |
 | a 40 s boot of the instrumented build | title screen reached, `game data identity` clean, 0 `[FATAL]`, window closed cleanly ("Title terminated"); control probe 2,164 hits, the 21 bridge probes 0 |
-| `scripts/acceptance_song.ps1 -Runs 1` on the instrumented build (log 13,520 KB) | pass - boot -> song list -> **315 s** of playback (22:09:16 -> 22:14:31) -> results naming `THESE DAYS`, 0 `[FATAL]`, clean exit |
-| `scripts/acceptance_song.ps1 -Runs 1` on the final binaries (log 13,638 KB) | pass - the same route, 315 s of playback (22:21:25 -> 22:26:40), 0 `[FATAL]`, clean exit |
+| `scripts/acceptance/acceptance_song.ps1 -Runs 1` on the instrumented build (log 13,520 KB) | pass - boot -> song list -> **315 s** of playback (22:09:16 -> 22:14:31) -> results naming `THESE DAYS`, 0 `[FATAL]`, clean exit |
+| `scripts/acceptance/acceptance_song.ps1 -Runs 1` on the final binaries (log 13,638 KB) | pass - the same route, 315 s of playback (22:21:25 -> 22:26:40), 0 `[FATAL]`, clean exit |
 | the two probes (removed afterwards) | control 2,164 hits; 0 setjmp and 0 longjmp across both routes above |
 | the tree after removal | `generated/default/codegen.build.stamp` and the SDK's input stamp deleted, codegen re-run: **14 written, 201 unchanged** (the 13 probed partitions + the control one), 0 probe lines left, 21 bridge sites intact - the emitted tree is codegen's own output again, not a hand-reverted copy |
 
@@ -3448,7 +3448,7 @@ source changed: one switch on the song route, one new script.
 
 ### The pause is a screen, because the log has nothing to say
 
-`scripts/acceptance_song.ps1 -Pause` takes a pause 45 s into the song and releases it, Start
+`scripts/acceptance/acceptance_song.ps1 -Pause` takes a pause 45 s into the song and releases it, Start
 both ways (the pause menu opens on Resume Game). The log was measured before the run was
 written: with `--log_noisy=true --log_level=trace` on, a paused run's log carries exactly
 the `XMPSetPlaybackController` pair that brackets the whole song — `(0,1)` at the start,
@@ -3461,7 +3461,7 @@ reported envelope, because the guest's clock stops and the wall clock does not.
 
 ### The menu tree, walked and verified
 
-`scripts/acceptance_screens.ps1` boots once and takes every screen the song route never
+`scripts/acceptance/acceptance_screens.ps1` boots once and takes every screen the song route never
 reaches, one row at a time, with the screen each row produced read back as the assertion:
 the career leaderboard (which names Rock Central as the reason it is empty), the
 achievements row — **inert offline**: A on it leaves the menu up, and that is the
@@ -3487,10 +3487,10 @@ the EXIT GAME dialog, cancelled with B and then asked for again and confirmed, s
 
 ### Verification (2026-10-01, Release `out/build/win-amd64-release`)
 
-- `.\scripts\acceptance_screens.ps1`: **PASS** — all 16 checks true on one boot, 8.1 MB log,
+- `.\scripts\acceptance\acceptance_screens.ps1`: **PASS** — all 16 checks true on one boot, 8.1 MB log,
   no `[FATAL]`, exit 0. Evidence in `out/m6-screens/`: 45 files, the screen it asserted for
   every row plus the clamped/row/back shots around each one, `run.log` and `summary.json`.
-- `.\scripts\acceptance_song.ps1 -Runs 1 -Pause`: **PASS**, `1 / 1` — *These Days*, envelope
+- `.\scripts\acceptance\acceptance_song.ps1 -Runs 1 -Pause`: **PASS**, `1 / 1` — *These Days*, envelope
   09:17:38 → 09:22:57 (319 s of wall clock, 7 s of it paused), results screen naming
   "THESE DAYS", clean window close, no `[FATAL]`. It also shows the preview filter earning
   its keep: pair 1 lasted 5 s and was rejected as the list's preview before the song's pair
@@ -3505,7 +3505,7 @@ the EXIT GAME dialog, cancelled with B and then asked for again and confirmed, s
 The input layer itself. The routes inject keys, so a real pad and the mouse stay hand
 checks; injected keys also need the game window to hold the foreground, which is what the
 "machine left alone" caveat on
-[scripts/measure_pacing_input.ps1](../../scripts/measure_pacing_input.ps1) is about.
+[scripts/diagnostics/measure_pacing_input.ps1](../../scripts/diagnostics/measure_pacing_input.ps1) is about.
 
 ## Mouse navigation, fourth pass: a marker at least as tall as its row (2026-10-01)
 
@@ -3518,7 +3518,7 @@ part that is physics where it was.
 ### The shapes the screens actually use, measured from captures already on disk
 
 No boot was needed and none was run: the m6 screens acceptance walk
-([scripts/acceptance_screens.ps1](../../scripts/acceptance_screens.ps1)) keeps a
+([scripts/acceptance/acceptance_screens.ps1](../../scripts/acceptance/acceptance_screens.ps1)) keeps a
 `-clamped` (first row) and a `-row` (one tap down) shot of every screen it asserts, and the
 song acceptance keeps `run01-paused.png`. Differencing those pairs — through the presenter's
 own letterbox, so the numbers are guest pixels — gives the marker's shape directly:
@@ -3726,10 +3726,10 @@ now `file_info.path / file_info.name`, carried in patch 0006
 
 ### The alpha acceptance
 
-`scripts/acceptance_dlc.ps1` (a package-carrying song must be on the song list, with a
-no-DLC control leg where it must be absent) and `scripts/acceptance_save.ps1` (change the
+`scripts/acceptance/acceptance_dlc.ps1` (a package-carrying song must be on the song list, with a
+no-DLC control leg where it must be absent) and `scripts/acceptance/acceptance_save.ps1` (change the
 manual-calibration offset, quit, restart, require it read back, then revert) now drive both
-features, and `scripts/acceptance_alpha.ps1` runs both against the dev tree and the installer
+features, and `scripts/acceptance/acceptance_alpha.ps1` runs both against the dev tree and the installer
 payload. Save/load: A on the calibration page's CONTINUE rewrites `globaloptions` (hash
 changes; `[NtCreateFile] disp=0x5` + a 1024-byte `[NtWriteFile]`), the value reads back after
 a restart with the file byte-identical, and the revert reads back 0. The Audio/Video toggles
@@ -3822,14 +3822,14 @@ present path, and a trace file rewritten twice a second for scripted runs.
 
 ## The observation harness, and the noise floor it walked into (2026-10-04)
 
-`scripts/observe_ui.ps1` drives the game to a named screen, captures it, reads it and says what
-changed - the instrument the customization plan's S2-S7 and E1 measure with. `scripts/ui_states.ps1`
+`scripts/diagnostics/observe_ui.ps1` drives the game to a named screen, captures it, reads it and says what
+changed - the instrument the customization plan's S2-S7 and E1 measure with. `scripts/diagnostics/ui_states.ps1`
 is the one table of state names, routes and needles; `docs/engine/diagnostics.md (part 2, the observer)` is the operator's
 view.
 
 - **It joins, it does not re-implement.** `drive_ui.ps1` sends the keys, `capture_window.ps1` refuses
   to save the wrong window, `ocr_image.ps1` reads the text, `frame_diff.ps1` measures the difference,
-  and the state table is transcribed from the routes `scripts/acceptance_screens.ps1` already walks -
+  and the state table is transcribed from the routes `scripts/acceptance/acceptance_screens.ps1` already walks -
   a list clamps at both ends and resets to its first row on entry, both measured, which is what makes
   "clamp, tap down N, accept" a safe route.
 - **A diff is only read against a same-build baseline, and never without one.** `-Compare` with no
@@ -3858,7 +3858,7 @@ view.
 ## The observation baseline, and the floor it does not have (2026-10-04)
 
 E1 of the customization plan is the reference set the later visual work is measured against, and
-`scripts/observe_baseline.ps1` is the driver that produces it: two passes per state (capture, then
+`scripts/diagnostics/observe_baseline.ps1` is the driver that produces it: two passes per state (capture, then
 compare), the second pass's `diff.percent` **being** that state's same-build floor. It writes
 `out/observations/baseline/<build>/` (`<build>` = the executable's SHA-256, first 12 digits) with one
 PNG + JSON per state and a `summary.json`. `-Resume` reuses a capture instead of booting again,
@@ -4008,10 +4008,10 @@ All four changes are in [patch 0012](../../patches/rexglue-sdk/0012-stale-native
   dump signature above. **After:** 13 of 13 V-Sync-off boots (three loops, 4 + 6 + 3) log **zero**
   anomaly lines and zero `[FATAL]`, and reach the main menu in 49.3-76.6 s - which is also the
   confirmation that the lever is worth documenting: the same warm boot with V-Sync on measures 78.8 s.
-- `scripts/acceptance_song.ps1 -DlcLibrary "D:\Songs"` plays the same song the V-Sync-on
+- `scripts/acceptance/acceptance_song.ps1 -DlcLibrary "D:\Songs"` plays the same song the V-Sync-on
   baseline plays (225 s) with `Boot`/`SongList`/`Playing`/`Results`/`SongSeen` true, no `[FATAL]` and a
   clean shutdown - measured with `REX_VSYNC=false` (before and after the fix) and with V-Sync on;
-  `scripts/acceptance_save.ps1` passes its three legs (change, reload, revert), which is the path that
+  `scripts/acceptance/acceptance_save.ps1` passes its three legs (change, reload, revert), which is the path that
   tears objects down and restores them; `ctest` is 14/14.
 - **One standing limit.** The lookup can still be handed an object of the *right type* that is the
   wrong object, if the slot was taken by another event between the structure's last use and the next.

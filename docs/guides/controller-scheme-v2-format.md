@@ -28,7 +28,7 @@ Controller v2 manifests may also use the v1 optional `[controller]`,
 `[controller.slots]`, and `[icons]` PNG fields for pad diagrams and the whole
 extra-icon sheet. Their fit, precedence, and omitted-slot fallback rules stay
 the same. Xbox Series declares `pads/pad_0.png` through `pads/pad_3.png` for
-`xbox_0` through `xbox_3`. Run `python scripts/generate_xbox_series_pads.py`
+`xbox_0` through `xbox_3`. Run `python scripts/controllers/generate_xbox_series_pads.py`
 to regenerate them from the authoring
 [`pad.png`](../../assets/controller/masters/xbox-series/pad.png),
 [`ps3-arrow.svg`](../../assets/controller/masters/ps3-arrow.svg), and the four
@@ -38,17 +38,17 @@ keeps its original Xbox 360 texture's outer text anchors fixed; the generator
 joins the arrow shapes before applying the PS3 color profile and checks branch
 clearance and continuous arrow pixels. PlayStation 5 declares its four generated
 `pads/pad_N.png` files for `ps_0` through `ps_3`. Run
-`python scripts/generate_playstation_5_pads.py` to rebuild them from its
+`python scripts/controllers/generate_playstation_5_pads.py` to rebuild them from its
 [`pad.png`](../../assets/controller/masters/playstation-5/pad.png) and
 [`pad_N-arrows.svg`](../../assets/controller/masters/playstation-5/pad_0-arrows.svg)
 masters. Its fixed text rails follow the corresponding PS3 reference pads.
 PlayStation 4 declares the same four `ps_0` through `ps_3` slots. Run
-`python scripts/generate_playstation_4_pads.py` to rebuild them from its
+`python scripts/controllers/generate_playstation_4_pads.py` to rebuild them from its
 [`pad.png`](../../assets/controller/masters/playstation-4/pad.png) and
 [`pad_N-arrows.svg`](../../assets/controller/masters/playstation-4/pad_0-arrows.svg)
 masters, using the corresponding PS3 text rails.
 Steam Deck declares four generated diagrams for `xbox_0` through `xbox_3`.
-Run `python scripts/generate_steam_deck_pads.py` to rebuild them from its
+Run `python scripts/controllers/generate_steam_deck_pads.py` to rebuild them from its
 [`pad.png`](../../assets/controller/masters/steam-deck/pad.png) and
 [`pad_N-arrows.svg`](../../assets/controller/masters/steam-deck/pad_0-arrows.svg)
 masters. Its front view shows one shoulder silhouette per side; pad 2 uses

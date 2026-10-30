@@ -2,7 +2,7 @@
 /game/*
 !/game/README.md
 
-# Extracted game assets (scripts/extract_assets.ps1). Retail content: never commit.
+# Extracted game assets (scripts/assets/extract_assets.ps1). Retail content: never commit.
 # One tree per platform, both written by the same script: the 360 dump under
 # assets/game/360, the PlayStation 3 dump under assets/game/ps3. The whole
 # directory is retail content, so nothing under it is ever committed.
@@ -56,7 +56,7 @@
 /serve.ps1
 
 # Disposable scratch for the harnesses and asset probes (`out/_swap/*/run.ps1` builds an
-# empty DLC root here; scripts/hmx_milo.py dumps decompressed milo chunks here). A dumped
+# empty DLC root here; scripts/assets/hmx_milo.py dumps decompressed milo chunks here). A dumped
 # chunk is retail content byte for byte, so nothing in this directory is ever committed.
 /_scratch/
 

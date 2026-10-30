@@ -164,7 +164,7 @@ cache. `src/assets/texture_codec.{h,cpp}` parses/writes the 32-byte standalone `
 `BuildPlatformTexture` to serve a `.png_xbox` through the game's own album-art request.
 `src/ui/menu_music_artwork.cpp` uses `DecodePlatformTexture` to turn an installed song cover into
 RGBA; `src/ui/menu_music_player.cpp` uploads that RGBA with `ImGuiDrawer::CreateImageTexture` for
-the **existing music-player overlay**. `scripts/hmx_tex.py` also exports/imports standalone
+the **existing music-player overlay**. `scripts/assets/hmx_tex.py` also exports/imports standalone
 textures and swaps standalone archive entries. These paths prove conversion and their respective
 serving/drawing routes, not replacement of a scene-embedded button sheet or live invalidation of
 the guest texture cache. The music-player upload is an overlay draw path, so it is not the guest UI
@@ -412,12 +412,12 @@ authored folders simply declare none of them.
   **no retail art** and may be committed.
 - `assets/controller/template/pad.png` — a blank 1024×1024 guide with the safe area marked.
 - `assets/controller/template-360/` — a gitignored local reference generated from the
-  owner's Xbox 360 scenes by `python scripts/export_template_360.py`; P6a updates its
+  owner's Xbox 360 scenes by `python scripts/controllers/export_template_360.py`; P6a updates its
   package-shaped `scheme.toml` and individual art exports to the P2 contract. `retail`
   remains the built-in choice with no package. The reference is never installed or committed;
   the blank `template/` remains the distributable guide.
 - `assets/controller/template-ps3/` — the equivalent gitignored reference generated
-  from the owner's PS3 scenes by `python scripts/export_template_ps3.py`; P6a updates it to
+  from the owner's PS3 scenes by `python scripts/controllers/export_template_ps3.py`; P6a updates it to
   individual PS3 controller glyphs, optional pad images and a package-shaped manifest using
   reserved id `ps3`. Its `source-reference/buttons/` holds tight crops of all 32 slots,
   and `source-reference/cells/` holds the complete grid cells for alignment review.
@@ -434,7 +434,7 @@ authored folders simply declare none of them.
   user-compatible authored packages and the PS3 import.
 - `assets/controller/examples/` — original example packages for the guide, outside the installer
   source tree.
-- `scripts/controller_schemes.ps1 -Validate -Pack` — validates every scheme (format, bounded source
+- `scripts/controllers/controller_schemes.ps1 -Validate -Pack` — validates every scheme (format, bounded source
   dimensions, known slot IDs, declared paths, fit results, id rules, duplicate ids) and copies the
   valid ones into the install layout.
 - A generated **`test-markers`** scheme (not shipped) with a unique solid color per slot, used by
@@ -627,8 +627,8 @@ guest-authored rows, preview widgets and labels follow the authorized guest rout
 | Area | File(s) | Responsibility |
 | --- | --- | --- |
 | Scheme registry / manifest / images | `src/controller_schemes/{registry,manifest,image,slots}.{h,cpp}` | SDK-free parsing, validation, RGBA loading, slot table; testable without a boot. The installer compiles the same manifest/slot code where it overlaps. |
-| Image conversion already available | `src/assets/texture_codec.{h,cpp}`, `scripts/hmx_tex.py`; WIC use in `src/store/album_art_service.cpp` | Reuse DXT decode/word swap and RGBA conversion. The standalone texture envelope and store art serving path are not the scene-record parser or the live override. |
-| Slot map / template tool | `scripts/hmx_milo.py` extension + `scripts/controller_schemes.ps1` | P0/P2 tooling: locate a named scene payload and its `Glyph` table, reuse the existing DXT decoder to export it, emit rectangles, validate a package, build the template. |
+| Image conversion already available | `src/assets/texture_codec.{h,cpp}`, `scripts/assets/hmx_tex.py`; WIC use in `src/store/album_art_service.cpp` | Reuse DXT decode/word swap and RGBA conversion. The standalone texture envelope and store art serving path are not the scene-record parser or the live override. |
+| Slot map / template tool | `scripts/assets/hmx_milo.py` extension + `scripts/controllers/controller_schemes.ps1` | P0/P2 tooling: locate a named scene payload and its `Glyph` table, reuse the existing DXT decoder to export it, emit rectangles, validate a package, build the template. |
 | Active scheme runtime | `src/hooks/button_schemes.{h,cpp}` | Holds selected controller layout, last input family, explicit preview state and binding generation; publishes immutable snapshots; logs; owns the registry instance. |
 | Input-icon resolver | proposed `src/input/input_icons.{h,cpp}` + existing `src/profile/input_rows.{h,cpp}` / effective binding APIs | P8: ordered physical-source icons for interface/gameplay contexts, first source per hint family, preset inheritance, unbound behavior; built-in keyboard/mouse provider independent of controller packages. |
 | Last-device tracker | `src/input/last_device.{h,cpp}` | Raw pad/keyboard/mouse activity, debounce, atomic `LastDevice`; called from the existing poll/event seams. |
@@ -768,9 +768,9 @@ exports are also in the gitignored `assets/controller/template-360/`.
 **Goal.** Turn the 2026-10-19 format measurement into a repeatable tool and the authoring contract.
 
 **Deliverable.**
-- Extend `scripts/hmx_milo.py` with a `texture`/`export` command that finds a scene's 23-byte
+- Extend `scripts/assets/hmx_milo.py` with a `texture`/`export` command that finds a scene's 23-byte
   header and eight-byte preamble, then identifies its DXT5 payload. Reuse the existing word swap and DXT decoder in
-  `scripts/hmx_tex.py` (or the C++ codec) to write a PNG; the same path handles the 512×512 sheet
+  `scripts/assets/hmx_tex.py` (or the C++ codec) to write a PNG; the same path handles the 512×512 sheet
   and the 1024×1024 pads. Do not implement another block codec.
 - Read the `Glyph` table (the object records around the texture) and emit
   `assets/controller/slots.toml` with every slot id and rectangle; generate the blank
@@ -788,7 +788,7 @@ exports are also in the gitignored `assets/controller/template-360/`.
   Xbox pad scene payload, then write individual controller glyph and pad PNGs from RGBA for the
   revised P5 contract. `BuildPlatformTexture` writes a standalone `.png_xbox` / `.png_ps3`
   container, not a
-  PNG, and does not parse the 23-byte scene record. `scripts/hmx_tex.py` provides the same block
+  PNG, and does not parse the 23-byte scene record. `scripts/assets/hmx_tex.py` provides the same block
   decode and PNG output offline; P0 still has to locate the scene payload and `Glyph` table.
 - **Keep the DXT5 runtime question separate (measured 2026-10-21).** The codec's DXT5 output
   decodes correctly offline, but a newly encoded DXT5 standalone cover drew with wrong colours in
@@ -910,7 +910,7 @@ it cannot be attributed to the texture reload. This boot used empty DLC roots
 with zero packages, reached normal execution completion, and logged no GPU
 error. The Vulkan one-frame request bound and visible switching are accepted.
 
-The owner-run probe is `scripts/acceptance_button_schemes_p1.ps1`. Run it first
+The owner-run probe is `scripts/acceptance/acceptance_button_schemes_p1.ps1`. Run it first
 without hashes, visit the menu prompt band and Controller Presets through the route above, close the game,
 and inspect the copied `out/button-schemes/p1/d3d12-*.log` candidate lines. Once
 the two slot hashes are identified from that trace, rerun with `-ButtonHash HEX
@@ -932,7 +932,7 @@ the DXT codec or duplicate the overlay renderer.
 
 **Deliverable.**
 - The SDK patch under `patches/` (with `patches/README.md`), applied by
-  `scripts/apply_sdk_patches.ps1`; a generic `TextureOverrideProvider` as in §6.2; both D3D12 and
+  `scripts/setup/apply_sdk_patches.ps1`; a generic `TextureOverrideProvider` as in §6.2; both D3D12 and
   Vulkan backends compile.
 - `src/assets/texture_override.{h,cpp}`: the project provider, fingerprint table and generation
   invalidation.
@@ -959,7 +959,7 @@ measured rectangle, preserves untouched canonical BC3 blocks, and composes full 
 The boot scans install and user roots, logs its catalog/rejections, and the P1 provider routes the
 identified button and eight pad fingerprints to the selected package. Until P3 supplies the
 setting, normal boots select `retail`; `RB_BLITZ_SCHEME` selects a package for P2 development
-acceptance. `scripts/controller_schemes.ps1` validates and packs packages. The generated
+acceptance. `scripts/controllers/controller_schemes.ps1` validates and packs packages. The generated
 `out/button-schemes/p2/fixtures/` has all-slot markers, one-glyph, one-pad and invalid packages;
 it is gitignored and contains no game pixels. `ctest -R button_scheme` pins parser, fit,
 original-block preservation, the tiled/endian inverse and all ten scene fingerprints. The
@@ -971,7 +971,7 @@ image and original art for the other pad images. Logs
 `out/button-schemes/p2/d3d12-one-pad-20261027-202327.log` record the button override at one mip,
 the pad override at seven mips, successful catalog discovery, deliberate rejection of the invalid
 fixture, 3,811 µs button composition and 111 ms boot-time pad preparation. The owner performed
-the UI checks with `scripts/acceptance_button_schemes_p2.ps1`. P2 package behavior on Vulkan
+the UI checks with `scripts/acceptance/acceptance_button_schemes_p2.ps1`. P2 package behavior on Vulkan
 remains unmeasured; P1 already measured the underlying override seam there.
 
 **Goal.** Make a scheme a folder the game can validate and load, before any UI exists.
@@ -998,7 +998,7 @@ remains unmeasured; P1 already measured the underlying override seam there.
   The originally planned seven identities were superseded by §4.6's eight authored folders;
   P11 makes them valid without adding an id allowlist. Keyboard/mouse remains a separate
   internal dependency, never a scheme choice or user-shadowable package.
-- `scripts/controller_schemes.ps1 -Validate -Pack`: validates the owner tree and copies built-ins
+- `scripts/controllers/controller_schemes.ps1 -Validate -Pack`: validates the owner tree and copies built-ins
   into the install layout; accepts a `-Scheme <dir>` for one package.
 - Tests: valid/invalid manifests, reserved ids, duplicate ids, missing/extra declared files,
   unknown slots, zero/oversized dimensions, alpha/format requirement, one-slot packages,
@@ -1080,7 +1080,7 @@ same family/layout snapshot for P9/P10 guest hint rendering; changing family
 does not change the texture provider's selected controller pad art. Boot,
 selection and family switches emit `button_schemes: active … (device …)` lines.
 The release build and `last_device`, `input_bindings`, and `button_scheme`
-host tests pass. `scripts/acceptance_button_schemes_p4.ps1` builds and
+host tests pass. `scripts/acceptance/acceptance_button_schemes_p4.ps1` builds and
 captures the owner-run UI test. P9/P10 have not connected this state to
 guest hint drawing yet.
 
@@ -1286,7 +1286,7 @@ ship temporary pad SVGs, or commit PS3-extracted art.
   or unmeasured hint routes, connection paths that hide extra SDL buttons, and any backend left
   unproven. Static default-key icons after a
   rebind are a failed R12 acceptance item, not an accepted D12 limitation.
-- `docs/guides/distributable.md` and `scripts/audit_distributable.ps1`: no PS3 art and no game art
+- `docs/guides/distributable.md` and `scripts/setup/audit_distributable.ps1`: no PS3 art and no game art
   in the payload.
 - `patches/README.md`: the texture override patch.
 - `docs/README.md`: maintain the existing plan row; move the plan to `finished/` only when
@@ -1636,11 +1636,11 @@ packages, make keyboard art a controller choice, or create a host overlay to dis
 ## 11. Reproducing the corrected measurement
 
 ```powershell
-python scripts\hmx_milo.py dump assets\game\360\ui\resource\fonts\gen\buttons.milo_xbox `
+python scripts\assets\hmx_milo.py dump assets\game\360\ui\resource\fonts\gen\buttons.milo_xbox `
     --chunk 0 --out out\button-schemes\format-2026-10-19\buttons_chunk0.bin
 
 # Header at 0x5C9 (23 bytes), eight zero bytes, DXT5 at 0x5E8, 512x512:
-python scripts\hmx_milo.py texture assets\game\360\ui\resource\fonts\gen\buttons.milo_xbox `
+python scripts\assets\hmx_milo.py texture assets\game\360\ui\resource\fonts\gen\buttons.milo_xbox `
     --asset ../image/icons_buttons_xbox_nomip.bmp --out out\button-schemes\p0\buttons-360.png
 ```
 

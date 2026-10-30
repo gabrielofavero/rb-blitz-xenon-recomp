@@ -38,7 +38,7 @@
 // ## Which format the engine actually draws - measured 2026-10-21
 //
 // **DXT1.** A DXT5 this module encodes is a correct BC3 - unswapped and decoded it matches its source
-// to 0.8 levels per channel, and `scripts/hmx_tex.py export` renders it exactly - but the store's
+// to 0.8 levels per channel, and `scripts/assets/hmx_tex.py export` renders it exactly - but the store's
 // texture path draws it as noise with the right shapes and wrong colours, while a shipped DXT1
 // served through the same seam draws correctly and the same cover as DXT1 draws correctly too
 // (`docs/reference/known-issues.md` carries the evidence paths; `docs/guides/assets.md`,

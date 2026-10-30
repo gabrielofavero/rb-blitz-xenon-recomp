@@ -108,7 +108,7 @@ group instead of the withdrawn Experimental tab — and all of them are built, *
 | The mouse-navigation feature, currently unconditional | `InstallMouseUiNavigation` in `OnPreSetup` ([src/rb_blitz_app.h:36](../../../src/rb_blitz_app.h)), device in [src/input/mouse_ui.h](../../../src/input/mouse_ui.h), arithmetic in [src/input/ui_nav.h](../../../src/input/ui_nav.h) | the Controller tab's mouse-support toggle is a *gate*, not a new feature |
 | A vendored UI stack already configured for this build | `imgui` OBJECT target ([rexglue-sdk/thirdparty/CMakeLists.txt:231-242](../../../rexglue-sdk/thirdparty/CMakeLists.txt)), SDL3 static with `SDL_SHARED=OFF`/`SDL_STATIC=ON` (`:247-250`), PNG decode via stb_image ([rexglue-sdk/src/ui/image_decode.cpp:17](../../../rexglue-sdk/src/ui/image_decode.cpp)) | the launcher needs no new third-party dependency (D1, D6) |
 | An art pipeline with a stated licensing posture | [installer/tools/make_art.ps1](../../../installer/tools/make_art.ps1) (DPI ladder, centre-crop, "not ours, not committed"), `.gitignore` `/assets/installer/wizard-*.bmp`, committed `assets/icon/` (`blitz.png` + `blitz.ico`, plus the launcher's `blitz-mono.ico`) | R2's cover is generated, not committed (D11) |
-| A capture/verify toolkit | `scripts/capture_window.ps1`, `scripts/frame_diff.ps1`, `scripts/drive_ui.ps1`, `scripts/acceptance_*.ps1`, and the launcher's own `scripts/capture_controller_settings.ps1` / `scripts/acceptance_controller_settings.ps1` | the launcher is verified the same way the game is (E2/E3, now built) |
+| A capture/verify toolkit | `scripts/diagnostics/capture_window.ps1`, `scripts/diagnostics/frame_diff.ps1`, `scripts/diagnostics/drive_ui.ps1`, `scripts/acceptance_*.ps1`, and the launcher's own `scripts/capture_controller_settings.ps1` / `scripts/acceptance_controller_settings.ps1` | the launcher is verified the same way the game is (E2/E3, now built) |
 | A dependency-free test harness | `tests/check.h`, targets in [CMakeLists.txt:128-172](../../../CMakeLists.txt) | controller-settings/profile/settings tests look exactly like the existing six |
 
 ### 2.2 Does not exist
@@ -165,7 +165,7 @@ shipped alone). Not in scope now.
 | `%APPDATA%\rb_blitz\launcher.toml` (default) | window geometry, selected launch target, last-used folders, every setting the launcher manages (cvar key + value), host-only preferences |
 | `%APPDATA%\rb_blitz\controllers\<device-key>.toml` | one file per physical device (Phase C-B; §D13) |
 | `<exe dir>\launcher.toml` | same file, used instead when `<exe dir>\rb_blitz_controller_settings.portable` exists (portable install) |
-| `--launcher_profile=<path>` / `RBBLITZ_CONTROLLER_SETTINGS_PROFILE` | override, for tests and for isolating acceptance runs (`scripts/acceptance_persistence.ps1` uses the same idea with `--user_data_root`) |
+| `--launcher_profile=<path>` / `RBBLITZ_CONTROLLER_SETTINGS_PROFILE` | override, for tests and for isolating acceptance runs (`scripts/acceptance/acceptance_persistence.ps1` uses the same idea with `--user_data_root`) |
 
 - **Not** the install folder by default: the uninstaller deletes the install folder
   (`.staging`…`install-report.txt`, [installer/setup.iss:153-166](../../../installer/setup.iss)), and a
@@ -1103,7 +1103,7 @@ Each block now says what is already in the tree, so a session does not rebuild i
 > **Deliverable.** `controller-settings/tools/make_launcher_art.ps1` (or a documented reuse of `make_art.ps1`
 > with `-SourceImage`), the embedding tool, the drawing code, and the README section.
 > **Verify.** Build with art present and with `-SkipArt`/no art: both must look deliberate. Screenshot
-> both (`scripts/capture_window.ps1`).
+> both (`scripts/diagnostics/capture_window.ps1`).
 > **Don't.** Do not commit any artwork; do not make the build fail when the download fails — that is
 > `make_art.ps1`'s existing rule and it stays.
 
@@ -1296,7 +1296,7 @@ Anything not in this table is not verified, and should be said out loud rather t
 ## 10. Reusing the game's own UI art — inventory, routes, blocker
 
 The research behind D15. Everything here was read off the dump, not guessed; the tooling it names
-is [scripts/hmx_milo.py](../../../scripts/hmx_milo.py) and the measurements are in
+is [scripts/assets/hmx_milo.py](../../../scripts/assets/hmx_milo.py) and the measurements are in
 [assets.md](../../guides/assets.md).
 
 ### 10.1 What is reusable, and where it lives
@@ -1344,8 +1344,8 @@ the same reason D6 has `--no-gamepad`: the fallback is the recovery path, not de
 ### 10.3 Route 2 in practice — capture, which works today
 
 The game's own screens are already scriptable from this repository:
-[scripts/drive_ui.ps1](../../../scripts/drive_ui.ps1) sends keys,
-[scripts/capture_window.ps1](../../../scripts/capture_window.ps1) shoots the window. Measured on a real
+[scripts/diagnostics/drive_ui.ps1](../../../scripts/diagnostics/drive_ui.ps1) sends keys,
+[scripts/diagnostics/capture_window.ps1](../../../scripts/diagnostics/capture_window.ps1) shoots the window. Measured on a real
 run: the splash, title, main-menu and options screens capture cleanly at 1360×768, and the footer
 prompt glyphs are ≈40 px — usable for a prompt icon, marginal as an upscaled background. This route
 needs no new file-format work at all: it is `make_art.ps1`'s posture with a `-SourceImage` that
@@ -1452,7 +1452,7 @@ For the running artifacts (answer with a boot, not an opinion):
    with the mask on the command line and `content licence: license_mask = 0 (configured)` in the log,
    with no `[FATAL]`, and closes cleanly (`scripts/acceptance_controller_settings.ps1`). Whether the *guest* then
    offers a playable trial rather than a refusal is still open — E3 stops at the boot, and the route
-   that would answer it is `scripts/acceptance_song.ps1 -UltimateMode 0` plus `--license_mask=0`.
+   that would answer it is `scripts/acceptance/acceptance_song.ps1 -UltimateMode 0` plus `--license_mask=0`.
 4. Is the F4 overlay's `SaveConfig` the only writer of `rb_blitz.toml` in practice, or does a normal
    boot write it too? (It should not: `SaveConfig` runs from the overlay only.)
 5. ~~Does a second `SDL_GameController` in a different process see the pad while the game has it open?~~
@@ -1530,7 +1530,7 @@ For the running artifacts (answer with a boot, not an opinion):
 - [docs/guides/dlc.md](../../guides/dlc.md) — DLC layout and the save containers under `Documents\Rock Band Blitz`.
 - [docs/reference/known-issues.md](../../reference/known-issues.md), [docs/reference/backlog.md](../../reference/backlog.md) — the standing limits and
   the deferred features this plan must not quietly un-defer.
-- **The art research (§10):** [scripts/hmx_milo.py](../../../scripts/hmx_milo.py) — the scene reader whose
+- **The art research (§10):** [scripts/assets/hmx_milo.py](../../../scripts/assets/hmx_milo.py) — the scene reader whose
   `records` command produces the texture inventory; [docs/guides/assets.md](../../guides/assets.md) — the container and
-  texture formats, the delivery experiments and the rejected hypotheses; [scripts/drive_ui.ps1](../../../scripts/drive_ui.ps1)
-  and `scripts/capture_window.ps1` — the capture route the acceptance scripts already use.
+  texture formats, the delivery experiments and the rejected hypotheses; [scripts/diagnostics/drive_ui.ps1](../../../scripts/diagnostics/drive_ui.ps1)
+  and `scripts/diagnostics/capture_window.ps1` — the capture route the acceptance scripts already use.

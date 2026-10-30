@@ -199,10 +199,10 @@ These are P0 investigations, not requests for product decisions:
 
 ## 6. Evidence reproduction and limits
 
-List local inputs with `python scripts/hmx_ark.py list --hdr
+List local inputs with `python scripts/assets/hmx_ark.py list --hdr
 game/gen/main_xbox.hdr -v` and the corresponding
 `game/ultimate/gen/patch_xbox.hdr` command. The existing
-`scripts/hmx_ark.py extract --hdr <header> --out <scratch-directory>` command
+`scripts/assets/hmx_ark.py extract --hdr <header> --out <scratch-directory>` command
 extracts records without modifying the installed archives. Parse the relevant
 DTBs using the project's `ui::dtb` reader or the local inspection helper
 `out/_swap/dtb_tree.py`; retain fresh tree dumps and input hashes with P0 evidence.

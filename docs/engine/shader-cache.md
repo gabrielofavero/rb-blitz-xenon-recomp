@@ -316,9 +316,9 @@ The `BUILD_TESTING` switch also builds the SDK-free record inspector and actual
 runtime counter tests. For read-only archive evidence:
 
 ```powershell
-python scripts/shader_cache_trace.py inspect retail-original --hdr game/gen/main_xbox.hdr
-python scripts/shader_cache_trace.py inspect ultimate-original --hdr game/ultimate/gen/patch_xbox.hdr
-python scripts/shader_cache_trace.py inspect retail-offline --hdr game/gen/main_xbox.hdr --offline
+python scripts/shaders/shader_cache_trace.py inspect retail-original --hdr game/gen/main_xbox.hdr
+python scripts/shaders/shader_cache_trace.py inspect ultimate-original --hdr game/ultimate/gen/patch_xbox.hdr
+python scripts/shaders/shader_cache_trace.py inspect retail-offline --hdr game/gen/main_xbox.hdr --offline
 ```
 
 Use new snapshot names on a repeat; existing evidence is never replaced. The
@@ -333,7 +333,7 @@ ones). Preparation copies inputs and writes an inert `launch.ps1`; it never star
 the game or presses A:
 
 ```powershell
-python scripts/shader_cache_trace.py prepare d3d12-ultimate-empty --backend d3d12 --variant ultimate --user-data '<user_data_root>' --profile '<profile_dir>/launcher.toml' --route 'Chosen song and loadout; first play, immediate replay, then normal exit'
+python scripts/shaders/shader_cache_trace.py prepare d3d12-ultimate-empty --backend d3d12 --variant ultimate --user-data '<user_data_root>' --profile '<profile_dir>/launcher.toml' --route 'Chosen song and loadout; first play, immediate replay, then normal exit'
 ```
 
 The two paths are the ones the boot log resolves (`user_data_root` and
@@ -352,8 +352,8 @@ DLC roots, R3 enabled/disabled and trial/full licence must be recorded via
 Once the authorized operator has exited normally:
 
 ```powershell
-python scripts/shader_cache_trace.py collect d3d12-ultimate-empty --observations 'Record first play versus replay; timestamps and visible event; notes/effects/audio/input; normal exit'
-python scripts/shader_cache_trace.py prepare d3d12-ultimate-warm --backend d3d12 --variant ultimate --user-data '<user_data_root>' --profile '<profile_dir>/launcher.toml' --warm-from d3d12-ultimate-empty --route 'Same song, loadout and actions after full process restart'
+python scripts/shaders/shader_cache_trace.py collect d3d12-ultimate-empty --observations 'Record first play versus replay; timestamps and visible event; notes/effects/audio/input; normal exit'
+python scripts/shaders/shader_cache_trace.py prepare d3d12-ultimate-warm --backend d3d12 --variant ultimate --user-data '<user_data_root>' --profile '<profile_dir>/launcher.toml' --warm-from d3d12-ultimate-empty --route 'Same song, loadout and actions after full process restart'
 ```
 
 Collect the warm run the same way. An empty **application** cache leaves OS and
@@ -412,11 +412,11 @@ Implementation files:
   counters, translation/creation/wait scopes and helper instrumentation.
   Patch `0019` also carries the bounded swap observations alongside its original
   trace-level swap/input diagnostics. No SDK gitlink was changed.
-- `scripts/apply_sdk_patches.ps1`: exact replay/content audit rather than concatenated
+- `scripts/setup/apply_sdk_patches.ps1`: exact replay/content audit rather than concatenated
   hunk comparison, which could not validate disjoint patches arriving out of source
   order; new patched files are checked too. Pristine replay lives under ignored
   `out/sdk-patch-audit/`, without changing the installed SDK or nested dependencies.
-- `scripts/shader_cache_trace.py`, `tools/loading_record_inspect.cpp`,
+- `scripts/shaders/shader_cache_trace.py`, `tools/loading_record_inspect.cpp`,
   `tests/shader_compile_trace_tests.cpp`, `tests/shader_cache_trace_tools_tests.py`,
   this evidence map and the parent plan status.
 
@@ -432,10 +432,10 @@ every recipe-referenced identity (part 3); P4 must
 integrate preparation. This alone does not establish live GPU readiness or
 remove in-song compilation.
 
-Implementation: [shader_asset_resolver.py](../../scripts/shader_asset_resolver.py),
+Implementation: [shader_asset_resolver.py](../../scripts/shaders/shader_asset_resolver.py),
 [SDK hash helper](../../tools/shader_microcode_hash.cpp),
-[vertex linker](../../scripts/shader_vertex_link.py),
-[bounded XEX source reader](../../scripts/shader_xex_source.py),
+[vertex linker](../../scripts/shaders/shader_vertex_link.py),
+[bounded XEX source reader](../../scripts/shaders/shader_xex_source.py),
 [layout recipes](../../config/shader_vertex_layouts.json),
 [hash-only candidate](../../config/shader_resolution_candidate.json),
 [hermetic tests](../../tests/shader_asset_resolver_tests.py).
@@ -448,8 +448,8 @@ Build first:
 
 ```powershell
 cmake --build --preset win-amd64-release
-python scripts/shader_asset_resolver.py --game-root game --output out/shader-cache-p2/resolved-retail-index.json
-python scripts/shader_asset_resolver.py --game-root game --effective-overlay-root game/ultimate --output out/shader-cache-p2/resolved-ultimate-index.json
+python scripts/shaders/shader_asset_resolver.py --game-root game --output out/shader-cache-p2/resolved-retail-index.json
+python scripts/shaders/shader_asset_resolver.py --game-root game --effective-overlay-root game/ultimate --output out/shader-cache-p2/resolved-ultimate-index.json
 ctest --test-dir out/build/win-amd64-release -R '^shader_asset_resolver' --output-on-failure
 ```
 
@@ -694,7 +694,7 @@ recipes), which took the combined catalogue to **1,268 recipes across all four d
 paths, 208/208 shader identities resolved** and the committed hash-only candidate from
 186 to 208.
 
-Implementation: [shader_pipeline_catalogue.py](../../scripts/shader_pipeline_catalogue.py),
+Implementation: [shader_pipeline_catalogue.py](../../scripts/shaders/shader_pipeline_catalogue.py),
 [helper inventory](../../config/pipeline_helper_inventory.json),
 [hermetic tests](../../tests/shader_pipeline_catalogue_tests.py). The catalogue itself
 needs no SDK change — it reads the files both caches already write; SDK patch 0026 only
@@ -754,14 +754,14 @@ byte count is recorded, and coverage is incomplete.
 
 ```powershell
 # One store, catalogue only (shader resolution not checked -> exit 2).
-python scripts/shader_pipeline_catalogue.py --store <store.xpso> --catalogue-out out/catalogue.json
+python scripts/shaders/shader_pipeline_catalogue.py --store <store.xpso> --catalogue-out out/catalogue.json
 
 # Merge every preserved store for a backend and verify its identities locally.
-python scripts/shader_pipeline_catalogue.py --store <a.xpso> --store <b.xpso> `
+python scripts/shaders/shader_pipeline_catalogue.py --store <a.xpso> --store <b.xpso> `
   --game-root game --catalogue-out out/d3d12-catalogue.json --merged-store out/merged-rtv.d3d12.xpso
 
 # Cheap re-check against a P2 resolver index, without reading installed content.
-python scripts/shader_pipeline_catalogue.py --store <store.xpso> `
+python scripts/shaders/shader_pipeline_catalogue.py --store <store.xpso> `
   --resolver-index <p2-index.json> --catalogue-out out/catalogue.json
 ```
 
@@ -858,7 +858,7 @@ hash-only, no shader bytes).
 ### Coverage sessions (2026-10-24)
 
 Five sessions with the owner driving the game, all on the same workstation, each
-prepared by `scripts/shader_cache_trace.py prepare` with its own cache, saves and
+prepared by `scripts/shaders/shader_cache_trace.py prepare` with its own cache, saves and
 profile copies and `--shader_compile_trace=true`:
 
 | Run | Start | Records after | Boot preload | Route and outcome |
@@ -1026,10 +1026,10 @@ store, so nothing was lost and no path other than `d3d12/rtv` changed:
 Command, with the release hash helper:
 
 ```powershell
-python scripts/shader_pipeline_catalogue.py --store out/_swap/p8/manifest-sources `
+python scripts/shaders/shader_pipeline_catalogue.py --store out/_swap/p8/manifest-sources `
     --catalogue-out out/_swap/p8/combined-catalogue.json --game-root game `
     --candidate config/shader_resolution_candidate.json
-python scripts/graphics_preparation_manifest.py `
+python scripts/shaders/graphics_preparation_manifest.py `
     --catalogue out/_swap/p8/combined-catalogue.json --game-root game `
     --helper out/build/win-amd64-release/rb_blitz_shader_microcode_hash.exe `
     --output config/graphics_preparation.json
@@ -1739,13 +1739,13 @@ the pre-flight probe and the backend's storage open fail for that reason alone.
 ### Commands
 
 ```powershell
-python scripts/shader_cache_p8.py configure --user-data "<user data>" --profile "<launcher.toml>"
-python scripts/shader_cache_p8.py plan
-python scripts/shader_cache_p8.py prepare-next        # or prepare <row>
+python scripts/shaders/shader_cache_p8.py configure --user-data "<user data>" --profile "<launcher.toml>"
+python scripts/shaders/shader_cache_p8.py plan
+python scripts/shaders/shader_cache_p8.py prepare-next        # or prepare <row>
 # run out/shader-cache-p8/runs/<row>/launch.ps1, play the route, close normally
-python scripts/shader_cache_p8.py collect <row> --observations "..."
-python scripts/shader_cache_p8.py accept <row>        # acceptance.json, exit 1 on FAIL
-python scripts/shader_cache_p8.py summarize           # out/shader-cache-p8/summary.md
+python scripts/shaders/shader_cache_p8.py collect <row> --observations "..."
+python scripts/shaders/shader_cache_p8.py accept <row>        # acceptance.json, exit 1 on FAIL
+python scripts/shaders/shader_cache_p8.py summarize           # out/shader-cache-p8/summary.md
 ```
 
 `configure` writes `out/shader-cache-p8/local.json`, which is ignored: the save and
@@ -2108,8 +2108,8 @@ store replacement.
 Report discoveries, then produce a new manifest for review:
 
 ```powershell
-python scripts/shader_coverage.py
-python scripts/shader_coverage.py --candidate-out out/shader-coverage/candidate.json
+python scripts/shaders/shader_coverage.py
+python scripts/shaders/shader_coverage.py --candidate-out out/shader-coverage/candidate.json
 ```
 
 The tool rehashes journal records with the SDK helper, preserves all current recipes,

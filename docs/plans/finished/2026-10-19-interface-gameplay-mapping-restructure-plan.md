@@ -164,14 +164,14 @@ exists, the custom list when one does. The base label stays the action's own nam
   unknown), `p1-d` (guest width estimated through the caption face: 80 px against 167 px),
   `p1-g` (alpha 236 let the guest text ghost through the cover).
 
-**Acceptance.** `scripts/acceptance_binding_rows.ps1` (new, tracked) — 24 steps, 0 failures,
-evidence above. The P1 steps were added to `scripts/acceptance_controls.ps1` too, whose route was
+**Acceptance.** `scripts/acceptance/acceptance_binding_rows.ps1` (new, tracked) — 24 steps, 0 failures,
+evidence above. The P1 steps were added to `scripts/acceptance/acceptance_controls.ps1` too, whose route was
 re-pointed at the current root order (Controls is root row 3); that harness now runs 62 steps, 0
 failures (`out/gameplay-mapping/in-game/p1-rows-2026-10-19b/`). Host suites: 37/37 `ctest`
 (`input_bindings`, `settings_screen` and `native_mouse` extended).
 
 **Re-verified 2026-10-20.** The record above was re-run on `4b5d059` (the Audio-page refactor
-that followed P1) with no code change: `scripts/acceptance_binding_rows.ps1 -Label
+that followed P1) with no code change: `scripts/acceptance/acceptance_binding_rows.ps1 -Label
 p1-rows-2026-10-20` = 24 steps, 0 failures, evidence in
 `out/interface-mapping/p1-rows/p1-rows-2026-10-20/` and its `-shots/` directory — `A: G, H`
 and `Left bumper: LB` on the General Mapping page, a tap of J in the listening dialog grew the
@@ -329,8 +329,8 @@ Controls
   the paused route uses the same page tree.
 
 **Tests / acceptance:** `tests/settings_screen_tests.cpp` (row order, titles, symbols, labels,
-6-row budget, back targets), `scripts/acceptance_controls.ps1` and
-`scripts/acceptance_controls_in_song.ps1` (new route names and labels; no Custom switch).
+6-row budget, back targets), `scripts/acceptance/acceptance_controls.ps1` and
+`scripts/acceptance/acceptance_controls_in_song.ps1` (new route names and labels; no Custom switch).
 
 #### P3 — landed (2026-10-20)
 
@@ -442,7 +442,7 @@ Gameplay Mapping
   Controller table away from the preset; Mouse & Keyboard is always active.
 
 **Tests / acceptance:** `tests/settings_screen_tests.cpp` (tree, titles, no custom tokens, row
-labels, 6-row budget), `scripts/acceptance_controls.ps1` (both branches, presets row always opens,
+labels, 6-row budget), `scripts/acceptance/acceptance_controls.ps1` (both branches, presets row always opens,
 submenus, reset), `docs/settings/plan.md` §3.
 
 #### P4 — landed (2026-10-20)
@@ -477,7 +477,7 @@ submenus, reset), `docs/settings/plan.md` §3.
 **Measured (2026-10-20).**
 
 - `rb_blitz_settings_screen_tests` = **95,705 checks, 0 failures**; full `ctest` = **37/37**.
-- `scripts/acceptance_controls.ps1 -Label p4-controls-b` = **93 steps, 0 failures**
+- `scripts/acceptance/acceptance_controls.ps1 -Label p4-controls-b` = **93 steps, 0 failures**
   (`out/gameplay-mapping/in-game/p4-controls-b/`, shots in `p4-controls-b-shots/`): the
   Controller page draws `Controller Presets` / `Custom Mapping`, the preset page opens on the
   first press, `Custom Mapping` draws four rows, Notes draws `Multiple` for the default First
@@ -485,8 +485,8 @@ submenus, reset), `docs/settings/plan.md` §3.
   four rows without a Custom Mapping level, its Notes row reads `First Note: Q, Right Click`, a
   `G` capture persists and reads back as `First Note: G`, and `Reset All` (row 3) removes the
   captured value and the row falls back to the default pair.
-- `scripts/acceptance_controls_in_song.ps1 -Label p4-in-song` = **23 steps, 0 failures**;
-  `scripts/acceptance_binding_rows.ps1 -Label p4-rows` = **26 steps, 0 failures**
+- `scripts/acceptance/acceptance_controls_in_song.ps1 -Label p4-in-song` = **23 steps, 0 failures**;
+  `scripts/acceptance/acceptance_binding_rows.ps1 -Label p4-rows` = **26 steps, 0 failures**
   (`out/interface-mapping/p1-rows/p4-rows/`).
 - The first Controls arm (`p4-controls`) failed one assertion only: a profile keeps a section
   header it already knew, so `[gameplay_remap_keyboard_mouse]` survives its own Reset All as an
@@ -556,14 +556,14 @@ so the Controller table's custom-row path is proven by unit tests rather than by
 
 - `rb_blitz_input_bindings_tests` = **163 checks, 0 failures**; `rb_blitz_settings_screen_tests` =
   **95,705**; full `ctest` = **37/37**.
-- `scripts/acceptance_controls.ps1 -Label p5-controls-b` = **103 steps, 0 failures**
+- `scripts/acceptance/acceptance_controls.ps1 -Label p5-controls-b` = **103 steps, 0 failures**
   (`out/gameplay-mapping/in-game/p5-controls-b/`): the dialog read `Closing in 2` on entry and
   `That is a keyboard key; this row takes a pad control. Closing in 1.` on the wrong-kind press,
   then left by itself with the profile byte-identical; `key:g` bound First Note on the press,
   `wheel:1` appended `Scroll Up`, and Reset All removed both.
-- `scripts/acceptance_controls_in_song.ps1 -Label p5-in-song` = **23 steps, 0 failures** (the
+- `scripts/acceptance/acceptance_controls_in_song.ps1 -Label p5-in-song` = **23 steps, 0 failures** (the
   dialog waits out the countdown, the pause and resume are clean);
-  `scripts/acceptance_binding_rows.ps1 -Label p5-rows` = **26 steps, 0 failures**.
+  `scripts/acceptance/acceptance_binding_rows.ps1 -Label p5-rows` = **26 steps, 0 failures**.
 - The first arm (`p5-controls`) failed at the first Assign for the expected reason: a `ClickRow`
   settle of 4 s outlived the 3 s dialog, so the assert read the bind page. Every Assign step now
   passes `-Wait 0.4`; that run is kept as the record of the wrong assumption.

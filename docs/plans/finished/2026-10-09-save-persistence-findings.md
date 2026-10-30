@@ -138,7 +138,7 @@ song metadata cache. This change stores progress produced from now on.
 
 * The SDK's content/write layer works: calibration `CONTINUE` rewrites `globaloptions`
   (`[NtCreateFile] disp=0x5` + a 1024-byte `[NtWriteFile]`) and it round-trips across a restart.
-  `scripts/acceptance_save.ps1` is that measurement.
+  `scripts/acceptance/acceptance_save.ps1` is that measurement.
 * The title's save files **do** get written in the normal (full DLC library) configuration:
   `songcache` = 1,009,556 bytes written 2026-10-09 **17:49:31**, `globaloptions` = 1,024 bytes
   written **17:55:57** in the real root. I decoded the cache: version 11, count **1402**,
@@ -165,7 +165,7 @@ song metadata cache. This change stores progress produced from now on.
 * Build: `cmake --preset win-amd64-release` then `cmake --build --preset win-amd64-release`
   → `out\build\win-amd64-release\{rb_blitz.exe, rexruntime.dll, rexgpu-xenos.dll, rb_blitz_controller_settings.exe}`.
 * Tests: `ctest --test-dir out\build\win-amd64-release --output-on-failure` (19 tests, ~2.5 s).
-* SDK submodule state: `scripts\apply_sdk_patches.ps1` → `35 patched, 0 UNEXPECTED, 0 untracked`,
+* SDK submodule state: `scripts\setup\apply_sdk_patches.ps1` → `35 patched, 0 UNEXPECTED, 0 untracked`,
   exit 0. **The SDK work tree is clean** — every diagnostic I added was reverted
   (`src/kernel/xam/xam_content.cpp`, `src/system/xnotifylistener.cpp`, `src/system/kernel_state.cpp`).
 * Launcher profile `%APPDATA%\rb_blitz\launcher.toml`:
@@ -210,7 +210,7 @@ len = 1009556
 ```
 
 i.e. `[u32 len][ASCII "Artist - Title"][u32 1][u32 varies]` records, artist-sorted. Nothing in
-this repo writes that file (`scripts\acceptance_song.ps1` and `acceptance_persistence.ps1` do not
+this repo writes that file (`scripts\acceptance\acceptance_song.ps1` and `acceptance_persistence.ps1` do not
 copy or seed it), so the title wrote it.
 
 ### 3.3 `globaloptions` is a real state carrier
@@ -277,7 +277,7 @@ observation, present in every run, not investigated further.
    dir), not the repo. **Always pass an absolute `--user_data_root`.**
 3. **"Debug logging is harmless."** With `--log_level=debug` every file read is logged; the scan
    of 1402 packages never finishes inside a run, so the title never completes discovery
-   (`scripts\acceptance_song.ps1` with the full library sat on
+   (`scripts\acceptance\acceptance_song.ps1` with the full library sat on
    `BLITZ DISCOVERING DOWNLOADABLE CONTENT` for 18 minutes and timed out on every screen).
    Use `--log_level=info` for any run that has to reach the song list.
 
@@ -288,7 +288,7 @@ observation, present in every run, not investigated further.
 1. **`songs_download\` (most promising).** The title enumerates content items (`cnt%08x:`) and
    opens `\songs_download\` on each to read DLC song data. 2804/2804 attempts failed with
    `0xC000000F` in my run. Either (a) the flag I used (`--dlc_root`) is not the flag that
-   registers a *library* (`--dlc_library`, see `scripts\acceptance_song.ps1 -DlcLibrary` /
+   registers a *library* (`--dlc_library`, see `scripts\acceptance\acceptance_song.ps1 -DlcLibrary` /
    `-DlcLibraryContentType`), or (b) the overlay does not expose `songs_download\` inside a
    package. Look at `src/fs/dlc_library.h`, `src/fs/dlc_cache.h`, `src/fs/payload_overlay.cpp`,
    `src/fs/overlay_merge.h`, `src/hooks/dlc.cpp`, `src/hooks/dlc_refresh.cpp` and the
@@ -311,7 +311,7 @@ observation, present in every run, not investigated further.
 | surface | writes today? | fix site |
 |---|---|---|
 | `songcache` (song list) | yes, once the library is really registered | none — fix the library registration instead |
-| `globaloptions` (calibration, some settings) | yes (`scripts\acceptance_save.ps1`) | none |
+| `globaloptions` (calibration, some settings) | yes (`scripts\acceptance\acceptance_save.ps1`) | none |
 | DLC song data (`songs_download\`) | **no — 2804/2804 fail** | `src/fs/*` overlay / `src/hooks/dlc.cpp` |
 | stars / profile-backed settings | not observed anywhere | engine-side gate (find it) or a host hook in `src/hooks/` |
 
@@ -352,15 +352,15 @@ Decrypted 10,747,904-byte guest image for further string/vtable work:
   2. The `cache mounts` and `song/DLC packages opened` counters grep for SDK diagnostics
      (`content#create`, `content#enum`) that I **reverted**, so they print `0` always. Use the
      `[debug] [fs] … Registered symbolic link: <name>: => \Device\Content\N\` lines instead.
-* `scripts\drive_ui.ps1` actions used: `wait:N`, `key:<name>` (`a`, `b`, `lstick_up`,
+* `scripts\diagnostics\drive_ui.ps1` actions used: `wait:N`, `key:<name>` (`a`, `b`, `lstick_up`,
   `lstick_down`, `lstick_right`, `dpad_right`), `shot:<file>.png`. Measured route to the title's own
   exit: 8 x `key:lstick_up`, then 5 x `key:lstick_down`, then `key:a` (EXIT GAME), then `key:a`
   (confirm).
-* Existing harnesses worth reusing: `scripts\acceptance_save.ps1` (calibration commit → the
-  `disp=0x5` + 1024-byte write), `scripts\acceptance_persistence.ps1` (5 storage cases against an
-  isolated `--user_data_root`, incl. corrupt payload/header), `scripts\acceptance_song.ps1`
+* Existing harnesses worth reusing: `scripts\acceptance\acceptance_save.ps1` (calibration commit → the
+  `disp=0x5` + 1024-byte write), `scripts\acceptance\acceptance_persistence.ps1` (5 storage cases against an
+  isolated `--user_data_root`, incl. corrupt payload/header), `scripts\acceptance\acceptance_song.ps1`
   (drives a full song to the results screen; OCR-driven, fails loudly),
-  `scripts\ocr_image.ps1`, `scripts\capture_window.ps1`.
+  `scripts\diagnostics\ocr_image.ps1`, `scripts\diagnostics\capture_window.ps1`.
 * Isolated roots left behind: `out\_swap\ctl-root` (nodlc), `out\_swap\fresh-dlc` (3 packages),
   `out\_swap\full2` (full library via junction, info logging), `out\_swap\full-lib`
   (acceptance_song, full library, debug logging), `out\_swap\dlcn` (3 packages),
@@ -371,13 +371,13 @@ Decrypted 10,747,904-byte guest image for further string/vtable work:
 
 ### Uncommitted / temporary state of the tree
 
-* `scripts\acceptance_song.ps1` — **modified (kept, not committed)**: added
+* `scripts\acceptance\acceptance_song.ps1` — **modified (kept, not committed)**: added
   `[string]$UserDataRoot = ""` and `if ($UserDataRoot) { $launchArgs += "--user_data_root=""$UserDataRoot""" }`.
   Rationale: without it the harness writes into the user's **real** save root (that is how the
   real root accumulated its 1 MB cache). Revert or keep as you prefer.
 * `out\_swap\**` — untracked/gitignored (probe, snapshots, byte copies, screenshots, decoders).
 * Everything under `rexglue-sdk/` — reverted to clean; verify with
-  `powershell -File scripts\apply_sdk_patches.ps1`.
+  `powershell -File scripts\setup\apply_sdk_patches.ps1`.
 
 ---
 
@@ -386,7 +386,7 @@ Decrypted 10,747,904-byte guest image for further string/vtable work:
 ```powershell
 # 1. Register the library properly (the flag my runs were missing) and see if the cache is written.
 #    -DlcLibrary is a *flat library*; -DlcRoot alone was not enough in my runs.
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\acceptance_song.ps1 `
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\acceptance\acceptance_song.ps1 `
   -Runs 1 -Song 3 -SongName "THESE DAYS" `
   -DlcRoot "F:\Games\Rock Band DLCs\360 (CON)\Singles" `
   -DlcLibrary "F:\Games\Rock Band DLCs\360 (CON)\Singles" `

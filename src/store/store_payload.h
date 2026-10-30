@@ -527,7 +527,7 @@ bool SetStoreHeading(std::vector<ui::dtb::Node>* locale_roots, std::string_view 
 //
 // The commands are the retail idiom (`{<ihp> set_action_token <action> <token>}` /
 // `{<ihp> clear_action_token <action>}`, as `song_select.dtb` and `store_info.dtb` spell them), and
-// the object names are the scenes' own - measured 2026-10-23 with `python scripts/hmx_milo.py list`:
+// the object names are the scenes' own - measured 2026-10-23 with `python scripts/assets/hmx_milo.py list`:
 // `store_menu.milo` declares `InlineHelp.ihp`, `store_browser.milo` declares `store.ihp`, and
 // `store_info.milo` declares `store_info.ihp` and `view_offer.ihp`.
 

@@ -126,7 +126,7 @@ which is where the bitmaps live. `[measured 2026-10-23]`
 
 Each icon is one chunk of `rec_icon.milo_xbox`: a header, the source path, then a **512×512 DXT1**
 mip chain (mips 512..16 = 174,720 bytes; header `bpp = 8`, `mips−1 = 5`, width/height/pitch
-512/512/256, big-endian). `scripts/ark_inline_icons.py` dumps them; `scripts/hmx_tex.py export`
+512/512/256, big-endian). `scripts/assets/ark_inline_icons.py` dumps them; `scripts/assets/hmx_tex.py export`
 writes the PNGs to `out/_swap/messages-icons/`. The extraction is **proven exact**: the inline bytes
 of `icon_more_stars` equal the shipped `ui/recommendations/img/gen/icon_more_stars_keep.png_xbox`
 byte for byte (174,752 B including the 32-byte envelope). `[measured 2026-10-23]`
@@ -194,15 +194,15 @@ python out\_swap\dtb_tree.py out\_swap\inbox_retail.dtb > out\_swap\inbox_retail
 
 # the scene
 python -c "import sys; sys.path.insert(0,'scripts'); import hmx_ark; h=hmx_ark.load_header('game/gen/main_xbox.hdr'); parts=h.ark_parts('game/gen/main_xbox.hdr'); f=open(parts[0],'rb'); e=[x for x in h.files if x.path=='ui/inbox/gen/inbox.milo_xbox'][0]; i,off=h.select_ark(e.offset); f.seek(off); open('out/_swap/inbox_retail.milo_xbox','wb').write(f.read(e.size))"
-python scripts\hmx_milo.py list out\_swap\inbox_retail.milo_xbox
-python scripts\hmx_milo.py records out\_swap\inbox_retail.milo_xbox
+python scripts\assets\hmx_milo.py list out\_swap\inbox_retail.milo_xbox
+python scripts\assets\hmx_milo.py records out\_swap\inbox_retail.milo_xbox
 
 # the row icon set: the list template, then the inline bitmaps and their PNGs
 python -c "import sys; sys.path.insert(0,'scripts'); import hmx_ark; h=hmx_ark.load_header('game/gen/main_xbox.hdr'); parts=h.ark_parts('game/gen/main_xbox.hdr'); f=open(parts[0],'rb'); e=[x for x in h.files if x.path=='ui/resource/lists/gen/list_inbox.milo_xbox'][0]; i,off=h.select_ark(e.offset); f.seek(off); open('out/_swap/list_inbox.milo_xbox','wb').write(f.read(e.size))"
-python scripts\hmx_milo.py list out\_swap\list_inbox.milo_xbox
-python scripts\ark_inline_icons.py --hdr game/gen/main_xbox.hdr --out out/_swap/messages-icons
+python scripts\assets\hmx_milo.py list out\_swap\list_inbox.milo_xbox
+python scripts\assets\ark_inline_icons.py --hdr game/gen/main_xbox.hdr --out out/_swap/messages-icons
 Get-ChildItem out\_swap\messages-icons\*.png_xbox |
-    ForEach-Object { python scripts\hmx_tex.py export $_.FullName --out $_.FullName.Replace('.png_xbox', '.png') }
+    ForEach-Object { python scripts\assets\hmx_tex.py export $_.FullName --out $_.FullName.Replace('.png_xbox', '.png') }
 
 # proof: icon_more_stars' inline bytes == the shipped file's bytes
 python -c "import sys; sys.path.insert(0,'scripts'); import hmx_ark; h=hmx_ark.load_header('game/gen/main_xbox.hdr'); parts=h.ark_parts('game/gen/main_xbox.hdr'); f=open(parts[0],'rb'); e=[x for x in h.files if x.path=='ui/recommendations/img/gen/icon_more_stars_keep.png_xbox'][0]; i,off=h.select_ark(e.offset); f.seek(off); s=f.read(e.size); i2=open('out/_swap/messages-icons/icon_more_stars.png_xbox','rb').read(); print('identical:', s==i2)"

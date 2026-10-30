@@ -313,7 +313,7 @@ window and never reads it.
 | A size that fits is untouched (`manual-720`) | `settings_boot: window 1280x720 (aspect 1.7778) fits the usable desktop 2560x1032 with 16+39 px of decorations`, no `window_width`/`window_height` write, client measured at exactly **1280x720** |
 | The picture, measured (§8.2's disc ruler) | `fresh` 42x38 (1.105, no bars); the control `control-pre` **22x28 (0.786)** — the same 21:9 render with the policy standing aside, squashed by ~25 % |
 | A named cvar is respected | `control-pre`: `'video_mode_width' is explicitly configured ('1280'); the window policy left it alone` and `a 2560x1080 render wants a 2354x993 client here, but this boot's window size is explicitly configured` |
-| SDK audit | `scripts/apply_sdk_patches.ps1 -Check` → 17 patches, 40 files patched, **0 UNEXPECTED**, exit 0 (the stray `thirdparty/fmt/support/.gradle` cache that made it exit 1 was removed) |
+| SDK audit | `scripts/setup/apply_sdk_patches.ps1 -Check` → 17 patches, 40 files patched, **0 UNEXPECTED**, exit 0 (the stray `thirdparty/fmt/support/.gradle` cache that made it exit 1 was removed) |
 | Host tests | 38/38 (`out/build/rename-tests`, the Vulkan-off tree that can still build them); `window_policy` = 68 checks |
 
 **Honest limits.** No boot at 125/150/300 %, none on a non-primary target monitor, and none that
@@ -873,7 +873,7 @@ Preliminary findings:
   cache measurements attributed this saving to caching. Treat the
   [finished cache plan](../cancelled/2026-10-10-song-cache-plan.md) as dated evidence, not proof
   of the current incremental benefit of Cache On.
-- `[tree]` [acceptance_dlc.ps1](../../../scripts/acceptance_dlc.ps1) deliberately creates fresh
+- `[tree]` [acceptance_dlc.ps1](../../../scripts/acceptance/acceptance_dlc.ps1) deliberately creates fresh
   user roots for its correctness legs. Repeating those legs alone cannot measure a warm cache.
 
 ```text

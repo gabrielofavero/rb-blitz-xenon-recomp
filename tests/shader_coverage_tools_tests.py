@@ -7,7 +7,8 @@ import subprocess
 import tempfile
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/shaders"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/assets"))
 import shader_coverage as coverage
 import shader_pipeline_catalogue as pc
 import shader_pipeline_catalogue_tests as fixtures

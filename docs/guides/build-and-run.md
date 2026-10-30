@@ -18,8 +18,8 @@ rewrites `rexglue-sdk/` — not on every build:
 ```powershell
 # Where the execution policy is Restricted, -ExecutionPolicy Bypass is required; a
 # bare `.\scripts\...ps1` fails with UnauthorizedAccess.
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\repair_flat_symlinks.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\apply_sdk_patches.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\repair_flat_symlinks.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_patches.ps1
 ```
 
 1. **`repair_flat_symlinks.ps1`** expands the SDK files that are symbolic links
@@ -445,7 +445,7 @@ subject is [toolchain.md](toolchain.md).
 build input like any other source: replacing the `.ico` and rebuilding is the
 whole edit, since nothing else references the file. Controller Settings ships the
 black-and-white alt icon instead — `assets/icon/blitz-mono.ico`, made from the colour
-art by [scripts/make_mono_icon.py](../../scripts/make_mono_icon.py) — so a game window and
+art by [scripts/assets/make_mono_icon.py](../../scripts/assets/make_mono_icon.py) — so a game window and
 Controller Settings window are told apart in the taskbar. One resource covers every
 surface of each exe, because SDL registers its window class with the first
 `RT_GROUP_ICON` in it: Explorer, title bar, taskbar and Alt-Tab all follow from it.
@@ -548,12 +548,12 @@ a built executable at an Ultimate content root is a supported run, not a build e
 The fatal half of that check is the gate in §3, not the boot.
 
 What that warning can and cannot see is measured by
-`scripts\acceptance_wrong_data.ps1`, which boots the recorded image, the Ultimate
+`scripts\acceptance\acceptance_wrong_data.ps1`, which boots the recorded image, the Ultimate
 payload's own image (a valid XEX with a different digest) and three corrupt copies,
 and reports the §3 gate's verdict on the same file as the contrast:
 
 ```powershell
-.\scripts\acceptance_wrong_data.ps1
+.\scripts\acceptance\acceptance_wrong_data.ps1
 ```
 
 Three things it pins down. A valid image with a different digest boots on to the title
@@ -585,12 +585,12 @@ For a repeatable run, the acceptance harness clears `logs\` and drives the windo
 itself (`-BootWaitSec` is how long it waits before closing):
 
 ```powershell
-.\scripts\acceptance_launches.ps1 -Runs 2 -BootWaitSec 40
+.\scripts\acceptance\acceptance_launches.ps1 -Runs 2 -BootWaitSec 40
 ```
 
 It reports `alive` / `fatal` / `log KB` / `clean` per run and is the canonical
-launch check. Related helpers: `scripts\capture_window.ps1 -OutFile <png>`
-and `scripts\drive_ui.ps1`.
+launch check. Related helpers: `scripts\diagnostics\capture_window.ps1 -OutFile <png>`
+and `scripts\diagnostics\drive_ui.ps1`.
 
 The harnesses that press keys (`acceptance_song.ps1`, `acceptance_screens.ps1`,
 `acceptance_persistence.ps1`, `measure_pacing_input.ps1`, `audit_ark_reads.ps1
@@ -611,8 +611,8 @@ screen names the expected song. Vanilla content by default
 (`--ultimate_mode=0`), so an installed Ultimate payload cannot change the result:
 
 ```powershell
-.\scripts\acceptance_song.ps1 -Runs 3              # row 3 = "These Days"
-.\scripts\acceptance_song.ps1 -Runs 1 -Replay      # ... then play it again
+.\scripts\acceptance\acceptance_song.ps1 -Runs 3              # row 3 = "These Days"
+.\scripts\acceptance\acceptance_song.ps1 -Runs 1 -Replay      # ... then play it again
 ```
 
 Two behaviours the script has to work around, both found by making the run
@@ -636,7 +636,7 @@ name itself on the results screen afterwards. The paused span stays inside the
 reported envelope (the guest's clock stops, the wall clock does not):
 
 ```powershell
-.\scripts\acceptance_song.ps1 -Runs 1 -Pause      # pause 45 s in, then resume
+.\scripts\acceptance\acceptance_song.ps1 -Runs 1 -Pause      # pause 45 s in, then resume
 ```
 
 The menu routes the song never takes have their own run. `acceptance_screens.ps1`
@@ -653,7 +653,7 @@ complete`, where closing the window prints `Title terminated; hard-exiting
 process.`
 
 ```powershell
-.\scripts\acceptance_screens.ps1
+.\scripts\acceptance\acceptance_screens.ps1
 ```
 
 Every row of that walk is clamped up to the first row of its list and counted
@@ -672,8 +672,8 @@ log as well as the files it leaves behind — creation, restart byte-identity, a
 missing root, a corrupt payload, a corrupt header:
 
 ```powershell
-.\scripts\acceptance_persistence.ps1                 # all five cases
-.\scripts\acceptance_persistence.ps1 -Only restart   # a single case
+.\scripts\acceptance\acceptance_persistence.ps1                 # all five cases
+.\scripts\acceptance\acceptance_persistence.ps1 -Only restart   # a single case
 ```
 
 It needs the trace patch in [`patches/README.md`](../../patches/README.md) (`0003`) to
@@ -702,12 +702,12 @@ installer ships (snapshotted by `installer/tools/make_payload.ps1`, run from a b
 install folder with no `rb_blitz.toml`):
 
 ```powershell
-.\scripts\acceptance_alpha.ps1                 # both suites, both build kinds
-.\scripts\acceptance_alpha.ps1 -SkipInstalled  # the dev tree only
-.\scripts\acceptance_save.ps1                  # save/load round trip on its own
-.\scripts\acceptance_save.ps1 -Steps 3         # -15 ms instead of -10 ms
-.\scripts\acceptance_dlc.ps1                   # DLC visibility on its own
-.\scripts\acceptance_dlc.ps1 -SkipControl -DlcLibrary "D:\Songs" -ExpectedSong "LYCANTHROPE"
+.\scripts\acceptance\acceptance_alpha.ps1                 # both suites, both build kinds
+.\scripts\acceptance\acceptance_alpha.ps1 -SkipInstalled  # the dev tree only
+.\scripts\acceptance\acceptance_save.ps1                  # save/load round trip on its own
+.\scripts\acceptance\acceptance_save.ps1 -Steps 3         # -15 ms instead of -10 ms
+.\scripts\acceptance\acceptance_dlc.ps1                   # DLC visibility on its own
+.\scripts\acceptance\acceptance_dlc.ps1 -SkipControl -DlcLibrary "D:\Songs" -ExpectedSong "LYCANTHROPE"
 ```
 
 * `acceptance_save.ps1` changes the **manual calibration** offset through the guest's
@@ -861,9 +861,9 @@ ctest --test-dir out\build\win-amd64-debug -R "profile|profile_remap" --output-o
 The application's own capture and installed-acceptance scripts
 (`capture_controller_settings.ps1`, `acceptance_controller_settings.ps1`) were removed with it.
 The in-game Controls surface is driven by
-[scripts/acceptance_controls.ps1](../../scripts/acceptance_controls.ps1),
-[scripts/acceptance_controls_in_song.ps1](../../scripts/acceptance_controls_in_song.ps1) and the
-recovery arm [scripts/acceptance_recovery.ps1](../../scripts/acceptance_recovery.ps1).
+[scripts/acceptance/acceptance_controls.ps1](../../scripts/acceptance/acceptance_controls.ps1),
+[scripts/acceptance/acceptance_controls_in_song.ps1](../../scripts/acceptance/acceptance_controls_in_song.ps1) and the
+recovery arm [scripts/acceptance/acceptance_recovery.ps1](../../scripts/acceptance/acceptance_recovery.ps1).
 
 ## 5. What a good run looks like (B-009, music)
 

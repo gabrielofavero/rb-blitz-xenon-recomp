@@ -586,7 +586,7 @@ Default Presets is disabled while Controller Custom is On — no build hides the
 | Package | Work and likely owners | Completion evidence |
 | --- | --- | --- |
 | P7. Move settings and mappings into the game — **landed 2026-10-18 (§16)** | Implement §14's nested Controls menu in both main-menu and paused Help & Options, including Input Types, General Mapping, both Gameplay Mapping branches, native Default Presets, per-row Assign/Reset, table resets, help, and the pause-frame listening dialog. Reuse shared profile/source/capture logic and extend the settings service/bridge for binding edits and safe runtime application. | Generated menu and service tests plus live base/Ultimate main-menu and pause routes; capture, reset, disabled states, safe apply, persistence, native-preset preservation. The external executable remains available until P8b. |
-| P8a. Recovery and parity (§17) — **landed 2026-10-18 (§18)** | Finish the in-game recovery path for a saved profile with no usable route (the `RecoveryNeeded`/`RecoveryHold` seam started in `src/input/source_gates.h`), wire it into the filter and the caption, test it, and drive it live. Close P7's remaining live arm (the in-song Controls entry), verify the §17.1 parity inventory row by row against the build, and classify every host-only app row. No build, packaging, or installer change. Owners: `src/input/`, `src/ui/help_overlay.cpp`, `scripts/acceptance_controls.ps1` (or a second tracked harness), the docs §18 names. | The recovery arm passes live (a profile with both host gates off and no pad reopens the keyboard on one held key, changes one stored switch, and says so); the in-song route reaches Input Types and a bind page and returns to the song; §17.1 has no row without a destination or a written classification; all suites green; `check_docs.py` clean. |
+| P8a. Recovery and parity (§17) — **landed 2026-10-18 (§18)** | Finish the in-game recovery path for a saved profile with no usable route (the `RecoveryNeeded`/`RecoveryHold` seam started in `src/input/source_gates.h`), wire it into the filter and the caption, test it, and drive it live. Close P7's remaining live arm (the in-song Controls entry), verify the §17.1 parity inventory row by row against the build, and classify every host-only app row. No build, packaging, or installer change. Owners: `src/input/`, `src/ui/help_overlay.cpp`, `scripts/acceptance/acceptance_controls.ps1` (or a second tracked harness), the docs §18 names. | The recovery arm passes live (a profile with both host gates off and no pad reopens the keyboard on one held key, changes one stored switch, and says so); the in-song route reaches Input Types and a bind page and returns to the song; §17.1 has no row without a destination or a written classification; all suites green; `check_docs.py` clean. |
 | P8b. Retire Controller Settings and finish acceptance (§17) — **landed 2026-10-19 (§19)** | After P8a parity, remove the external executable target and obsolete app-only UI, launch entry points, packaging requirements and shortcuts; move any still-shared code/schema/tests to their owning game modules first (`tests/controller_settings_profile_tests.cpp` and `controller_settings_remap_tests.cpp` keep their checks under game-owned names). Preserve existing profiles and configuration precedence. Update installer upgrade/repair behavior, scripts, and live documentation; run §14's migration and release matrix. | A clean build/install/upgrade/repair launches the game directly with all settings available in game, retains existing user configuration, and neither requires nor ships `rb_blitz_controller_settings.exe`. No supported setting workflow starts a second settings process. Evidence lives under `out/gameplay-mapping/in-game/` and `out/p8b-install/`; old utility acceptance is replaced by equivalent in-game checks. |
 
 Order: **P4 -> P7 -> P8a -> P8b**. P5 and P6 are cancelled, not prerequisites. P7 **landed**
@@ -673,7 +673,7 @@ retires it. The menu-visibility row is superseded (see its note).
 | Save and launch | Explicit false values and custom rows in both tables survive restart; direct launch and utility launch agree; existing General Mapping and native save data remain intact. |
 | Timing | Compare the native preset and each direct table using the same song/calibration and reproducible input sequence; log sampling/dispatch timing and note outcomes. No added frame wait, lost short taps, extra repeats, or altered calibration. |
 
-Use [drive_ui.ps1](../../../scripts/drive_ui.ps1),
+Use [drive_ui.ps1](../../../scripts/diagnostics/drive_ui.ps1),
 [capture_controller_settings.ps1](../../../scripts/capture_controller_settings.ps1), and
 [acceptance_controller_settings.ps1](../../../scripts/acceptance_controller_settings.ps1) where
 they fit. Extend tooling for the new mapping/focus rows and action traces rather than relying
@@ -917,7 +917,7 @@ before it can claim live acceptance.
 ### 10.6 Second evidence pass (2026-10-18) — the arms that closed §10.5, and a picture freeze
 
 All releases at build time 10:15–10:36 on 2026-10-18, base song unless the arm says otherwise. The
-harness is `scripts/probe_gameplay.ps1` (the deliverable) with the scratch arm driver
+harness is `scripts/diagnostics/probe_gameplay.ps1` (the deliverable) with the scratch arm driver
 `out/_swap/p0/run.ps1` for the later switches; evidence under `out/_swap/p0/<label>/` (combined log)
 and `<label>-shots/`.
 
@@ -962,7 +962,7 @@ Measured recovery, same boot shape that froze before (`hunt104006-1`, 2026-10-18
 boots on the fixed build (that one plus `hunt*`/`observe*`/`ultimate3`) presented normally.
 `docs/reference/known-issues.md` carries the row.
 
-**Harness changes this pass needed** (`scripts/probe_gameplay.ps1`): the window is no longer started
+**Harness changes this pass needed** (`scripts/diagnostics/probe_gameplay.ps1`): the window is no longer started
 `-WindowStyle Hidden` (a hidden window cannot be captured or driven); the guest's own title is waited
 for by OCR before any key is sent, because input during the boot or the content discovery is what the
 packet desync was first seen with; and every menu tap carries its own `wait:1`, since the guest drops
@@ -1190,7 +1190,7 @@ off, so the native preset remains the shipping behaviour for a player who never 
 
 ### 13.3 Live arms (release build, 2026-10-18)
 
-The harness is `scripts/probe_gameplay.ps1`; the new `-LongTrack` switch drove the long holds
+The harness is `scripts/diagnostics/probe_gameplay.ps1`; the new `-LongTrack` switch drove the long holds
 below. Every arm used `--mnk_mode=1`, `--input_source_trace=true` and the default tables (Keyboard
 + Mouse on, Controller off) unless it says otherwise. Evidence under
 `out/gameplay-mapping/p0/<label>/` with shots in `<label>-shots/`.
@@ -1661,7 +1661,7 @@ one tracked driven boot plus the host suites; §16.5 says plainly what was not m
 
 ### 16.4 Live acceptance — one driven boot
 
-`pwsh -NoProfile -File scripts\acceptance_controls.ps1 -Label p7-live4` (release build,
+`pwsh -NoProfile -File scripts\acceptance\acceptance_controls.ps1 -Label p7-live4` (release build,
 `--mnk_mode=1`, scratch profile, empty DLC library, 2026-10-18): **56 steps, 0 failures**. Evidence:
 `out/gameplay-mapping/in-game/p7-live4/` (log, argv, the profile before/after each arm) and
 `p7-live4-shots/` (every step has a hover shot and its result shot). The harness clicks rows by the
@@ -1846,7 +1846,7 @@ payload entry, or any installer file in this pass.
 4. Tests. Extend tests/input_gates_tests.cpp with the needed matrix, the timing/release rule,
    exactly-once, the pad case, and the locked/refused case. Run the full suite.
 5. Drive it live. Add the recovery arm to a tracked harness (extend
-   scripts/acceptance_controls.ps1 with -Recovery, or a sibling script): a scratch profile with
+   scripts/acceptance/acceptance_controls.ps1 with -Recovery, or a sibling script): a scratch profile with
    both gates off and no pad, F10 held, then a menu key; keep the log, the profile before/after
    and a shot under out/gameplay-mapping/in-game/<label>/.
 6. Close P7's in-song arm. Drive a song, pause, Help & Options -> Controls -> Input Types and one
@@ -1932,7 +1932,7 @@ changed in this pass: the external executable still shipped until P8b did the re
 | --- | --- | --- |
 | The recovery rules | [src/input/source_gates.h](../../../src/input/source_gates.h)/[.cpp](../../../src/input/source_gates.cpp): `RecoveryNeeded` (both host gates closed **and** no pad - a pad is a route even though it is not a gate), `RecoveryHold` (rising-edge start, `kRecoveryHold` = 2000 ms, exactly one fire per complete hold, any release or un-needed poll restarts, a key already down when the watch starts cannot fire), and `RecoverKeyboard` (one `StageBool("input.keyboard_support", true)` + one `Commit`, returning `kRearmed`/`kNoStore`/`kRefused`/`kSaveFailed`) | `input_gates` suite, six new cases: the needed matrix, the hold's timing and once-only rule, release/un-needed restart, already-held keys (both the boot case and the gate-reopened-while-held case), the store outcomes, and that `f10` is readable and no shipped table binds it |
 | The observation and its notice | [src/input/remap.cpp](../../../src/input/remap.cpp), `TickInputRecovery`/`RecoveryNotice`, one mutex-guarded watch; called from the state filter **and** from the settings overlay's per-frame `OnDraw` ([src/ui/help_overlay.cpp](../../../src/ui/help_overlay.cpp)), which draws the sentence even with Settings Labels off | §18.2 (why the filter alone cannot work), §18.3 (the live arm) |
-| Harnesses | New [scripts/acceptance_recovery.ps1](../../../scripts/acceptance_recovery.ps1) and [scripts/acceptance_controls_in_song.ps1](../../../scripts/acceptance_controls_in_song.ps1); [scripts/drive_ui.ps1](../../../scripts/drive_ui.ps1) gained `key_f10` | §18.3 and §18.4 (both PASS with their step counts) |
+| Harnesses | New [scripts/acceptance/acceptance_recovery.ps1](../../../scripts/acceptance/acceptance_recovery.ps1) and [scripts/acceptance/acceptance_controls_in_song.ps1](../../../scripts/acceptance/acceptance_controls_in_song.ps1); [scripts/diagnostics/drive_ui.ps1](../../../scripts/diagnostics/drive_ui.ps1) gained `key_f10` | §18.3 and §18.4 (both PASS with their step counts) |
 | Parity verification | Every §17.1 destination checked against the build's own generated definitions with `rb_blitz_settings_screen_tests.exe dump-def <name>` (23 screens and 21 named rows, 0 missing) | §18.5 |
 
 ### 18.2 The filter alone cannot observe recovery, and the code says why
@@ -1949,7 +1949,7 @@ read from the overlay, so the sentence and the observation cannot disagree.
 
 ### 18.3 The recovery arm, driven live (2026-10-18)
 
-`pwsh -NoProfile -File scripts\acceptance_recovery.ps1 -Label p8a-recovery2` — **11 steps, 0
+`pwsh -NoProfile -File scripts\acceptance\acceptance_recovery.ps1 -Label p8a-recovery2` — **11 steps, 0
 failures** on the release build, base game, `--input_backend=none` (no pad driver at all) and
 `--no-settings_help_overlay` (Settings Labels off, which is the rule being proved). Evidence:
 `out/gameplay-mapping/in-game/p8a-recovery2/` (log, argv, profile before/after, OCR text,
@@ -1977,7 +1977,7 @@ file format.
 
 ### 18.4 The in-song Controls arm, driven live (2026-10-18)
 
-`pwsh -NoProfile -File scripts\acceptance_controls_in_song.ps1 -Label p8a-in-song3` — **23 steps, 0
+`pwsh -NoProfile -File scripts\acceptance\acceptance_controls_in_song.ps1 -Label p8a-in-song3` — **23 steps, 0
 failures**, base game, `--mnk_mode=1`, an empty DLC library, release build. Evidence:
 `out/gameplay-mapping/in-game/p8a-in-song3/` (log, argv, `screens.txt`, `capture-lines.txt`) and
 `p8a-in-song3-shots/`; the same arm re-ran on the final binary as `p8a-in-song4` (23 steps, 0
@@ -2094,7 +2094,7 @@ the snapshot.
 `installer/out/dist/RockBandBlitzSetup-0.1.0.exe`, **24,134,728 bytes** (23.0 MiB), sha256
 `139eb6977ea7ec74ccc7ed40a1a8a2fdccce43a269549f21a589645dadefcbad`, commit
 `d120dbfd00b06500ee08239b9afef7c149b1e5bc` — rebuilt once more after the last `setup.iss`
-edit, so the published artifact matches the sources in the tree. `scripts/audit_distributable.ps1` is **7/7 pass**:
+edit, so the published artifact matches the sources in the tree. `scripts/setup/audit_distributable.ps1` is **7/7 pass**:
 inventory "9 files, allow-list exactly, manifest agrees", no retail or mod data, no credential,
 no symbol table, no build-machine path in 17 shipped files, 356 tracked files checked. Its
 allow-list parser now admits `vulkan-1.dll` exactly when the snapshot's manifest records a

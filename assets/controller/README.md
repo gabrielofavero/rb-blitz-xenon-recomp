@@ -60,7 +60,7 @@ you can also run the host validator before copying a package:
 
 ```powershell
 cmake --build --preset win-amd64-release --target rb_blitz_controller_schemes
-.\scripts\controller_schemes.ps1 -Validate -Scheme .\my-layout
+.\scripts\controllers\controller_schemes.ps1 -Validate -Scheme .\my-layout
 ```
 
 Pass an existing folder path to `-Scheme`. The validator reports source and
@@ -70,7 +70,7 @@ The tracked [one-button example](examples/example-original/scheme.toml) includes
 an original, procedurally drawn `buttons/a.png`. You can validate it with:
 
 ```powershell
-.\scripts\controller_schemes.ps1 -Validate -Scheme .\assets\controller\examples\example-original
+.\scripts\controllers\controller_schemes.ps1 -Validate -Scheme .\assets\controller\examples\example-original
 ```
 
 These examples are included under `assets/controller/examples/` in an installed
@@ -82,7 +82,7 @@ The separate [one-pad example](examples/example-pad/scheme.toml) replaces only
 Its source is a non-square 256×192 PNG. Check its fit result with:
 
 ```powershell
-.\scripts\controller_schemes.ps1 -Validate -Scheme .\assets\controller\examples\example-pad
+.\scripts\controllers\controller_schemes.ps1 -Validate -Scheme .\assets\controller\examples\example-pad
 ```
 
 ## Add or omit images
@@ -211,8 +211,8 @@ not used by the game.
 
 ## Local references and packaging
 
-If you own local game extracts, `python scripts/export_template_360.py` and
-`python scripts/export_template_ps3.py` export separate glyph and pad PNGs into
+If you own local game extracts, `python scripts/controllers/export_template_360.py` and
+`python scripts/controllers/export_template_ps3.py` export separate glyph and pad PNGs into
 gitignored `assets/controller/template-360/` and `template-ps3/` folders. The
 Xbox 360 command also creates `template-360/button-slots-contact.png` (all 32
 tightly cropped button slots, with IDs and character codes) and
@@ -237,7 +237,7 @@ code. The example packages live under `assets/controller/examples/` so they
 are not installed. Check and copy all authored layouts to the build tree with:
 
 ```powershell
-.\scripts\controller_schemes.ps1 -Validate -Pack
+.\scripts\controllers\controller_schemes.ps1 -Validate -Pack
 ```
 
 Only original art or art you have permission to redistribute belongs in this

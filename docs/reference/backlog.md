@@ -174,7 +174,7 @@ ever enumerated are **built and acceptance-measured**: the retail DOWNLOAD CONTE
 from the RhythmVerse customs catalogue, on by default behind General ▸ Downloadable Content ▸
 RhythmVerse and silent when that switch is off ([finished
 plan](../plans/finished/2026-10-13-rhythmverse-store-plan.md), whose §5/P8
-record holds the acceptance matrix and `scripts/acceptance_store.ps1`; the closed-out run is
+record holds the acceptance matrix and `scripts/acceptance/acceptance_store.ps1`; the closed-out run is
 `out/store-acceptance/p8-final/`, 69 steps and 0 failures — the switch, Recent, Search, a download,
 the install, the song on the title's own next-boot list, and the control boot's silence). What the
 plan deliberately leaves out stays out of scope: online services, purchases and entitlement, audio

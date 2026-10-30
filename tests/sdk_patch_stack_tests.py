@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts/apply_sdk_patches.ps1"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/setup/apply_sdk_patches.ps1"
 
 
 class PatchStackTests(unittest.TestCase):

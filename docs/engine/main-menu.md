@@ -148,7 +148,7 @@ node  = [u32 tag] + payload
 The body is xored with `dtbcrypt`'s keystream: `key = CryptRound(seed)`, one byte per node byte, where
 `CryptRound` is the Park–Miller generator with Schrage's division as the title spells it (`0x1F31D` /
 `0x41A7` / `0xB14`, `+0x7FFFFFFF` when the result is not positive) **[tree]**
-[scripts/hmx_ark.py](../../scripts/hmx_ark.py), [assets.md](../guides/assets.md) § "Compiled DTA". The
+[scripts/assets/hmx_ark.py](../../scripts/assets/hmx_ark.py), [assets.md](../guides/assets.md) § "Compiled DTA". The
 keystream is its own inverse, so one routine reads and writes the file.
 
 **The grammar is pinned by a round trip.** `HideRows` re-serializes every node it parsed and refuses
@@ -671,7 +671,7 @@ retail one (**7,148 bytes**, `8a743f06…` → `fb7e1f3a…`) at byte 19,299. Va
 (`--ultimate_mode=0`) **[cited]**: the retail file patched, and `content checksum row at guest
 0x82804364 now holds the patched digest`; no dirty-disc screen.
 
-**R5 as OCR.** `scripts/observe_ui.ps1 -State main-menu -Ocr` with the toggle **on**, both
+**R5 as OCR.** `scripts/diagnostics/observe_ui.ps1 -State main-menu -Ocr` with the toggle **on**, both
 targets **[cited]**: `BLITZ ALTIMAT PLAY HELP & OPTIONS MOD SETTINGS EXIT GAME` (Ultimate) and
 `BLITZ PLAY HELP & OPTIONS EXIT GAME` (vanilla) — `LEADERBOARDS` and `ACHIEVEMENTS` are gone from
 both, `DOWNLOAD CONTENT` from the vanilla one, and the harness's own stock needle (`DOWNLOAD
@@ -708,9 +708,9 @@ behind it are untouched. `rb_blitz.exe` with the default cvars (R3 on, R5 and R1
 vanilla **[cited]**: `menu_filter: the offline prompts are skipped (518 bytes of unused state
 constants paid for 518 bytes of transitions): a start goes straight to the menu in offline mode` and
 `content checksum row at guest 0X82804154 now holds the patched digest`; one A reaches the menu.
-`scripts/observe_ui.ps1 -State main-menu -Ocr` with R3 on (its default) **[cited]**: passed — the
+`scripts/diagnostics/observe_ui.ps1 -State main-menu -Ocr` with R3 on (its default) **[cited]**: passed — the
 state's own needle (`DOWNLOAD CONTENT`) is on the screen after the route's **single** accept — the
-boot-flow change the toggle makes. `scripts/observe_ui.ps1 -State "offline prompt" -Ocr
+boot-flow change the toggle makes. `scripts/diagnostics/observe_ui.ps1 -State "offline prompt" -Ocr
 -SkipOfflinePrompts 0` (the control) **[cited]**: passed — OCR `BLITZ ANNOT CONNECT TO ROCK CENTRAL.
 TO CONNECT, SIGN IN TO AN XBOX LIVE-ENABLED PROFILE, …`, and the log carries `menu_filter: R3 off;
 the failed-login and offline-mode prompts are shown`. The same pair driven by hand on the real
@@ -766,7 +766,7 @@ and the split-read rule refused the file silently.
 | the toggles | [src/enhancements.cpp](../../src/enhancements.cpp) (`enhancements_hide_menu_options`, `enhancements_hidden_menu_options`, `enhancements_rename_mod_settings`, `enhancements_skip_offline_dialog`) |
 | the settings rows | [src/ui/settings_screen.cpp](../../src/ui/settings_screen.cpp) (Interface → Hide Items → Main Menu, and R3's own row under Interface) |
 | the tests | [tests/menu_options_tests.cpp](../../tests/menu_options_tests.cpp), [tests/settings_screen_tests.cpp](../../tests/settings_screen_tests.cpp) |
-| the harness | [scripts/ui_states.ps1](../../scripts/ui_states.ps1) (the `RBBLITZ_SKIP_OFFLINE_PROMPTS` knob and the `offline-prompt` state), [scripts/observe_ui.ps1](../../scripts/observe_ui.ps1) (`-SkipOfflinePrompts`) |
+| the harness | [scripts/diagnostics/ui_states.ps1](../../scripts/diagnostics/ui_states.ps1) (the `RBBLITZ_SKIP_OFFLINE_PROMPTS` knob and the `offline-prompt` state), [scripts/diagnostics/observe_ui.ps1](../../scripts/diagnostics/observe_ui.ps1) (`-SkipOfflinePrompts`) |
 
 ### 10. Open
 

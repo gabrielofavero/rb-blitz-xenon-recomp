@@ -48,7 +48,7 @@ REXCVAR_DEFINE_STRING(store_art_dump_dir, "", "Diagnostics",
                       "The art worker's scratch directory. Every encoded cover is written there as "
                       "`<key>.png_xbox`, and a file already present for a key is **served instead** "
                       "of being fetched - so the exact bytes the panel receives can be decoded "
-                      "offline (`python scripts/hmx_tex.py export <key>.png_xbox --out cover.png`), "
+                      "offline (`python scripts/assets/hmx_tex.py export <key>.png_xbox --out cover.png`), "
                       "and a shipped `.png_xbox` copied in is a measurement of the serving path "
                       "against a texture retail accepts. Empty does neither")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);

@@ -279,7 +279,7 @@ where every controller source is inert and the keyboard still works.
 
 ### Live acceptance, 2026-10-18 — the sampler
 
-Release build, `--input_source_trace` on, `scripts/probe_gameplay.ps1` driving a song through the
+Release build, `--input_source_trace` on, `scripts/diagnostics/probe_gameplay.ps1` driving a song through the
 song list. Evidence under `out/gameplay-mapping/p0/`.
 
 - **The keyboard source had to be changed, and the change is measured.**
@@ -401,7 +401,7 @@ native producer is `gameplay input: suppressed native press|release action=… �
 
 ### Live acceptance, 2026-10-18 — direct play
 
-Release build, `scripts/probe_gameplay.ps1`, default tables (Keyboard + Mouse on, Controller off),
+Release build, `scripts/diagnostics/probe_gameplay.ps1`, default tables (Keyboard + Mouse on, Controller off),
 `--mnk_mode=1`, evidence under `out/gameplay-mapping/p0/`.
 
 - **Keyboard play works through the shipped table.** `p3-km-song` logged a press and a release for
@@ -500,7 +500,7 @@ and no pad therefore never runs the filter. `TickInputRecovery` is called from t
 from the settings overlay's per-frame `OnDraw`, which always runs; both share one edge-guarded
 watch, so the second caller cannot double-fire.
 
-**Live acceptance, 2026-10-18** (`scripts/acceptance_recovery.ps1 -Label p8a-recovery2`): 11
+**Live acceptance, 2026-10-18** (`scripts/acceptance/acceptance_recovery.ps1 -Label p8a-recovery2`): 11
 steps, 0 failures, `--input_backend=none`, Settings Labels off. The boot logs the need
 (`input recovery: no usable input … hold F10 for 2000 ms`), the caption OCRs with the sentence on
 screen, one 2.6 s hold logs `F10 held for 2000 ms … keyboard_support is on again`, the profile
@@ -520,7 +520,7 @@ scroll, retargeted by any later pointer event, taken once, discarded on a
 boundary), the lift holding while a scroll reports no selected row, the rail thumb
 math (travel per step, first-from-y with both clamps, the on-thumb grab test),
 press/release delivery gating behind a delayed input thread, per-player final
-packet identity and boundary resets. `scripts/drive_ui.ps1` supports normalized `mouse:x:y`, `click:left/right`,
+packet identity and boundary resets. `scripts/diagnostics/drive_ui.ps1` supports normalized `mouse:x:y`, `click:left/right`,
 `drag:x1:y1:x2:y2`, `wheel:detents` and `cursor:visible/hidden` actions for live
 acceptance checks.
 
@@ -529,7 +529,7 @@ acceptance checks.
 
 Windows Release build, windowed 1280x720, Ultimate enabled, isolated
 `out/mouse-native/user2` profile and the local `game/dlc` library. Verified with
-real pointer moves, button clicks and wheel events through `scripts/drive_ui.ps1`:
+real pointer moves, button clicks and wheel events through `scripts/diagnostics/drive_ui.ps1`:
 
 - Hover selects all four powerup categories. Clicking opens the native submenu;
   hovering updates its description and clicking equips the choice. Note and
@@ -577,7 +577,7 @@ library, a physical controller connected and an isolated profile
 intermittent loss; the previous session's same-environment probe had one click
 swallowed (`out/mouse-click-fix/baseline-powerups.png` still on the main menu)
 and the next one acted (`baseline-click2.png`, powerup screen). Driven end to end
-through `scripts/drive_ui.ps1`, one left-click (or right-click/wheel) per step,
+through `scripts/diagnostics/drive_ui.ps1`, one left-click (or right-click/wheel) per step,
 this build:
 
 - A single click on the title's START started the game, and a single click on

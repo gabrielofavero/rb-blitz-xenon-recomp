@@ -176,7 +176,7 @@ A float `draw_resolution_scale` would be exactly the substitute the plan forbids
 **Done**
 
 - Isolated investigation branch `p2-exact-1080p` (from `1e40765`).
-- Instrumentation landed as a reviewable SDK patch: `patches/rexglue-sdk/0015-render-resolution-instrumentation.patch` (3 files, ~80 added lines, debug level, one line per *changed* dimension tuple, silent at the default log level). It adds no cvar, changes no behaviour, and `scripts/apply_sdk_patches.ps1 -Check` accepts it (exit 0, all edited SDK files reported `patched`).
+- Instrumentation landed as a reviewable SDK patch: `patches/rexglue-sdk/0015-render-resolution-instrumentation.patch` (3 files, ~80 added lines, debug level, one line per *changed* dimension tuple, silent at the default log level). It adds no cvar, changes no behaviour, and `scripts/setup/apply_sdk_patches.ps1 -Check` accepts it (exit 0, all edited SDK files reported `patched`).
 - Spike instruments in `src/diag/probe_points.cpp`, both gated by `Diagnostics` cvars that default off: `probe_screen_1080p` (presses the title's half-resolution flag at entry to `sub_823F3698` and reports what it chose) and `probe_dump_guest_swap` (dumps the guest present object once). With both off they are a pass-through call to the original plus one `REXCVAR_GET`.
 - **Six boots measured**, including the exact 1920x1080 result in §1; evidence in `out/_swap/p2/*.log`.
 - `ctest` 26/26 pass with the instrumented SDK (the tree also carries P1/P3's uncommitted work).
@@ -216,7 +216,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File out\_swap\p2\run-probe.ps1 -
 Remove-Item Env:\REX_RESOLUTION_SCALE
 ```
 
-`out/_swap/p2/run-probe.ps1` boots the dev build against a **disposable** config/save root (`out/_swap/p2/_scratch`, reused so the per-title shader cache stays warm — a cold one costs ~90 s before the guest's first present), drives it with `scripts/drive_ui.ps1`, kills it, and prints every `swapdims`/`rtdims` line. It never reads or writes the user's live profile, DLC library, save or song cache. The first present of a cold boot appears ~90 s in; the guest's window is up long before that. A boot also reports the unscaled-resolve case the SDK already knows about, which is useful as a self-check:
+`out/_swap/p2/run-probe.ps1` boots the dev build against a **disposable** config/save root (`out/_swap/p2/_scratch`, reused so the per-title shader cache stays warm — a cold one costs ~90 s before the guest's first present), drives it with `scripts/diagnostics/drive_ui.ps1`, kills it, and prints every `swapdims`/`rtdims` line. It never reads or writes the user's live profile, DLC library, save or song cache. The first present of a cold boot appears ~90 s in; the guest's window is up long before that. A boot also reports the unscaled-resolve case the SDK already knows about, which is useful as a self-check:
 
 ```text
 [warning] [gpu] D3D12 draw resolution scaling is enabled, but the swap source is unscaled (1280x720).
@@ -261,7 +261,7 @@ P4's four asks — publish truthful capabilities, implement the graphics reconci
 | Shared file touched | root `CMakeLists.txt` — one `add_executable`/`add_test` block inside `BUILD_TESTING` only |
 | SDK patch | `patches/rexglue-sdk/0015-render-resolution-instrumentation.patch` **extended** (P2's swap/RT totals + P4's per-draw viewport/scissor); it is the only patch that touches those three files |
 | Tests | **28/28 pass** (`ctest --test-dir out/build/win-amd64-release --output-on-failure`, 11.3 s) |
-| SDK audit | `scripts/apply_sdk_patches.ps1 -Check` → exit 0, `38 patched, 0 UNEXPECTED, 0 untracked` |
+| SDK audit | `scripts/setup/apply_sdk_patches.ps1 -Check` → exit 0, `38 patched, 0 UNEXPECTED, 0 untracked` |
 | This machine | 4 logical processors; primary display **2560x1080**; **D3D12 built, Vulkan not built** (`REXGLUE_USE_D3D12=ON`, `REXGLUE_USE_VULKAN=OFF` in the build cache) — **amended 2026-10-13:** the Windows presets now configure `REXGLUE_USE_VULKAN=ON`, so this is the state the measurements below were taken in, not the tree today |
 
 ```powershell
@@ -269,7 +269,7 @@ P4's four asks — publish truthful capabilities, implement the graphics reconci
 cmake --preset win-amd64-release
 cmake --build --preset win-amd64-release
 ctest --test-dir out/build/win-amd64-release --output-on-failure     # 28/28
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\apply_sdk_patches.ps1 -Check
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup\apply_sdk_patches.ps1 -Check
 ```
 
 The two new modules are SDK-free and compile standalone (`clang++ -std=c++23 -Isrc`, same source set as `rb_blitz_settings_service_tests` plus the two new files).

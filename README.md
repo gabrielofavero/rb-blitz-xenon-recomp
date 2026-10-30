@@ -55,8 +55,8 @@ You can build for yourself to test how things are going (Windows + PowerShell, f
 
 ```powershell
 # once per checkout
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\repair_flat_symlinks.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\apply_sdk_patches.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\repair_flat_symlinks.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_patches.ps1
 
 # the first build compiles the SDK and stops once after codegen; run it again to link
 cmake --preset win-amd64-release

@@ -428,7 +428,7 @@ under `--pause`), and the in-song HELP & OPTIONS keeps working exactly as retail
 
 Boots: `rb_blitz.exe --game_data_root=<install> --ultimate_mode=2
 --ultimate_payload_root=out/_swap/p5b/payload ...`, disposable `--user_data_root` and `--launcher_profile`,
-driven with `scripts/drive_ui.ps1` through `out/_swap/p5b/run.ps1 -Route <r>`. Payload: 5 records, ark
+driven with `scripts/diagnostics/drive_ui.ps1` through `out/_swap/p5b/run.ps1 -Route <r>`. Payload: 5 records, ark
 238,542 bytes (`ui/options_menu/gen/options_menu.dtb` 132,333 bytes / +29 roots, `ui/gen/ui.dtb` with 14
 `{<panel> load}`, `ui/options_menu/gen/settings_menu.milo_xbox` 11,966 bytes, `ui/splash/gen/splash.dtb`
 7,150 bytes, `ui/locale/eng/gen/locale_keep.dtb` 84,172 bytes / +117 labels).

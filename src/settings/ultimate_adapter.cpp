@@ -48,7 +48,7 @@ constexpr std::array<RecordSpec, kRecordCount> kRecords{{
 // ------------------------------------------------------------------------------------------------
 // The header is XORed with a Park-Miller (16807) keystream seeded from its own first word, and an
 // unencrypted header starts with its version (<= 10) and is read as-is. This is the same public
-// format `scripts/hmx_ark.py` implements; this reader is an independent one, cut down to the
+// format `scripts/assets/hmx_ark.py` implements; this reader is an independent one, cut down to the
 // index. Only the fields the index needs are decoded, and every count is checked against the
 // bytes actually left, so a truncated or hostile header is an error rather than a crash.
 

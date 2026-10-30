@@ -27,7 +27,7 @@ endif()
 # SDK: a directory property is inherited by subdirectories added after it, so the
 # SDK's own libraries get the mapping too. MSVC is not covered (it needs /pathmap
 # and /d1trimfile, and nothing builds the game with it here);
-# scripts/audit_distributable.ps1 is what refuses a payload that leaks anyway.
+# scripts/setup/audit_distributable.ps1 is what refuses a payload that leaks anyway.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options("-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.")
     add_compile_options("-ffile-prefix-map=${CMAKE_BINARY_DIR}=.")
@@ -1379,7 +1379,7 @@ if(BUILD_TESTING)
     add_test(NAME button_scheme COMMAND rb_blitz_button_scheme_tests)
     add_test(NAME button_scheme_fingerprints
         COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_controller_texture_fingerprints.py)
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/controllers/verify_controller_texture_fingerprints.py)
     if(WIN32)
         add_executable(rb_blitz_controller_schemes
             tools/controller_schemes_main.cpp

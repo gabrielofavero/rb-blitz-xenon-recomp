@@ -52,8 +52,8 @@ this document.
 
 ### 1.1 Build and test commands (re-checked, measured)
 
-Toolchain bootstrap is one-time per checkout (`scripts/repair_flat_symlinks.ps1`, then
-`scripts/apply_sdk_patches.ps1` — 18 patches; it exits 1 on any **unexpected** edit inside
+Toolchain bootstrap is one-time per checkout (`scripts/setup/repair_flat_symlinks.ps1`, then
+`scripts/setup/apply_sdk_patches.ps1` — 18 patches; it exits 1 on any **unexpected** edit inside
 `rexglue-sdk/`, including untracked directories).
 
 ```powershell

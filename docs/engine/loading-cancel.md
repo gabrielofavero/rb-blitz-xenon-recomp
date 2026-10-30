@@ -48,8 +48,8 @@ Two things about that shape matter here:
 
 All of it in this tree, on one song at a time (a DLC package whose `songs/<song>/<song>.milo`
 is missing was the reproducer, chosen because the log names the missing file), with the game
-driven by `scripts/observe_ui.ps1 -State in-song -Windowed -KeepRunning` and the frames
-compared with `scripts/frame_diff.ps1` and read with `scripts/ocr_image.ps1`. §2.1 corrects
+driven by `scripts/diagnostics/observe_ui.ps1 -State in-song -Windowed -KeepRunning` and the frames
+compared with `scripts/diagnostics/frame_diff.ps1` and read with `scripts/diagnostics/ocr_image.ps1`. §2.1 corrects
 what the first pass concluded from this reproducer.
 
 | question | answer |

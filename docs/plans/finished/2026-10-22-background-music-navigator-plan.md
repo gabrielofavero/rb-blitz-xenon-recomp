@@ -135,7 +135,7 @@ until P2 proves live source setup and input/pause ownership. See §12 for the fo
 | `src/hooks/menu_music_playback.h` | `PlaySelection::Skipped(index, now)` (a manual transition: `current_ = -1`, `pending_ = index`, **clears `recent_`**) and a `Paused` accessor for the poll. |
 | `src/hooks/shell_music.{h,cpp}` | The guest half: learn Load args when navigator-only, allocate a path buffer, `ApplyNavigatorCommand(base, ctx)` at the top of `sub_827586D8`, `NavigatorNext/Previous/TogglePause` helpers, `NavigatorEnabled()`/`NavigatorHasSource()` for the overlay, authoritative snapshot/result publication after automatic/manual transitions and pause/resume, and the pause seam (P2). |
 | `src/input/remap.cpp` | `user_index == 0`: sample LB/RB/Start + the three `HostKeyDown` names, run the latch when `menu_music_nav::Available()` and `MenuScreenIs("splash_screen")`, post one command, clear the three pad bits from the delivered state. |
-| `src/input/mouse_ui.cpp` (+ a SDK patch) | `KeycodeForVirtualKey` cases for `kMediaNextTrack/kMediaPrevTrack/kMediaPlayPause`, which needs `TranslateSDLScancode` cases in `rexglue-sdk/src/ui/sdl_virtual_key.cpp` — delivered as **`patches/rexglue-sdk/0041-media-keys.patch`** (0020 is `bounded-shader-compilation-trace`, 0040 is the highest in the tree), applied by `scripts/apply_sdk_patches.ps1` (never a hand edit). |
+| `src/input/mouse_ui.cpp` (+ a SDK patch) | `KeycodeForVirtualKey` cases for `kMediaNextTrack/kMediaPrevTrack/kMediaPlayPause`, which needs `TranslateSDLScancode` cases in `rexglue-sdk/src/ui/sdl_virtual_key.cpp` — delivered as **`patches/rexglue-sdk/0041-media-keys.patch`** (0020 is `bounded-shader-compilation-trace`, 0040 is the highest in the tree), applied by `scripts/setup/apply_sdk_patches.ps1` (never a hand edit). |
 | `src/hooks/shell_music.cpp` `AnswerPlayQuery` | Adds `rbbz-play/next`, `rbbz-play/previous`, `rbbz-play/pause` → `Post(...)`, answer `true`. |
 | `src/ui/settings_screen.{h,cpp}` | `Kind::kPlaybackAction` (one symbol, always its label, press body `{file_exists "<path>"}`, no commit — `kPathAction` writes and commits and `kAction` goes through `invoke`, while this namespace must answer with the settings channel off or forward-only, `settings_bridge_hooks.cpp` `TakeExists`); the `BACKGROUND MUSIC PLAY` page; the `Background Music Play` submenu as Interface Mapping's fifth row (before `Reset All`); the `Menu Music Navigation` boolean on General → Interface; `MenuConfiguration::background_music_navigation`. |
 | `src/ui/help_overlay.cpp` | `DrawMainMenuMusicFooter(io)` before the caption's early-out; keep the separate player independent of captions and the help-label toggle. |
@@ -203,7 +203,7 @@ paused; navigation and teardown clear pause ownership. No mute/restart or seek i
 
 The following was the original investigation ladder, retained as history:
 
-1. `scripts/scan_process_strings.ps1` on a live menu boot, around the `ShellMusic`/stream class, to
+1. `scripts/diagnostics/scan_process_strings.ps1` on a live menu boot, around the `ShellMusic`/stream class, to
    find a message-table entry naming a pause/resume; call it on the guest thread as
    `LoadOnGuest` does.
 2. The `StandardStream` vtable (RTTI → slots via a scratch `rtti_vtables.py`, the tool cited in
@@ -356,7 +356,7 @@ session; do not commit.
 **Acceptance.** `ctest` green in the Vulkan-off debug tree; `check_docs.py` 0 errors. A boot with
 the setting on shows `Menu Music Navigation: On` as the fifth row of General → Interface and the
 `Background Music Play` submenu as Interface Mapping's fifth row, its page drawing **Next Track**,
-**Previous Track** and **Play/Pause** (screenshot via `scripts/capture_window.ps1`); the same boot
+**Previous Track** and **Play/Pause** (screenshot via `scripts/diagnostics/capture_window.ps1`); the same boot
 with `--no-enhancements_background_music_nav` retains the same submenu and command page;
 the switch reflects the off/externally configured state. Page visibility never requires a restart
 (owner follow-up, 2026-10-26).
@@ -400,7 +400,7 @@ media keys, and keep Play Current Song on the audible song.
    `TranslateSDLScancode` cases for
    `MEDIA_NEXT_TRACK/PREVIOUS_TRACK/PLAY_PAUSE` → `kMediaNextTrack/kMediaPrevTrack/kMediaPlayPause`,
    plus the three cases in `mouse_ui.cpp`'s `KeycodeForVirtualKey`; `patches/README.md` row.
-6. `scripts/drive_ui.ps1`: `media_next`/`media_prev`/`media_play_pause` (VK `0xB0/0xB1/0xB3`,
+6. `scripts/diagnostics/drive_ui.ps1`: `media_next`/`media_prev`/`media_play_pause` (VK `0xB0/0xB1/0xB3`,
    extended-key scancodes `E0 19/E0 10/E0 22`).
 7. A diagnostic cvar for the pad arm (the harness cannot press a pad): `background_music_nav_probe`
    = `next|previous|play_pause`, queued once N seconds after the menu is up, so the guest-side
@@ -554,7 +554,7 @@ Boots use a scratch profile (`--launcher_profile=<scratch>/launcher.toml`,
 `--user_data_root=<scratch>`, `--dlc_root=<absolute>`), a log level of `info`, and
 `dev.ps1 run-game-quick` for the auto-A route. `capture_window.ps1` + `ocr_image.ps1` (Windows
 PowerShell 5.1) read the frame. **Never edit the SDK by hand** — the media-key map is patch 0041,
-applied by `scripts/apply_sdk_patches.ps1`.
+applied by `scripts/setup/apply_sdk_patches.ps1`.
 
 
 ## 10. Architecture foundation delivered separately (2026-10-26)

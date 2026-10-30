@@ -379,7 +379,7 @@ devices, seen in boot logs) is Xbox-LIVE content plumbing we are **not** revivin
 - Settings model/store/rows (`src/settings/*`, `src/ui/settings_screen.*`) — instrument toggles.
 - DLC walk + cache (R7), `dlc_layout`, refresh (`src/hooks/dlc.cpp`, `dlc_refresh.cpp`,
   `menu_options` refresh row).
-- Acceptance harness (`scripts/acceptance_*.ps1`, `scripts/drive_ui.ps1`, `capture_window.ps1`,
+- Acceptance harness (`scripts/acceptance_*.ps1`, `scripts/diagnostics/drive_ui.ps1`, `capture_window.ps1`,
   OCR helpers).
 
 ### 2.11 Additional code references checked in this review
@@ -772,12 +772,12 @@ Landed, and tested without a boot (`store_payload`, **32 checks**; full `ctest` 
   `store_local_server_root`; the trace is a single function-pointer observer installed on
   `fs::PayloadOverlayDevice`, the one device every `game:`/`d:` path resolves through, so an open
   costs one null check when off.
-- `scripts/probe_store.ps1`: one boot, title → main menu → N rows → the store → (optionally) its
+- `scripts/diagnostics/probe_store.ps1`: one boot, title → main menu → N rows → the store → (optionally) its
   first menu row, with a screenshot and OCR of the menu, the *selected* row, the store and the
   return, a store-probe census, and the log copied beside it (`out/_swap/store-probe/<stamp>/`).
 - `tests/store_payload_tests.cpp` also carries `dump-menu <dtb>` and `dump-strings <dtb>`, which is
   how a boot's generated record was checked against the guest's: the harness extracted
-  `cache/settings-menu/<pid>/gen/patch_xbox.hdr` with `scripts/hmx_ark.py` and dumped it.
+  `cache/settings-menu/<pid>/gen/patch_xbox.hdr` with `scripts/assets/hmx_ark.py` and dumped it.
 
 **Measured, boot 1–2 (`out/_swap/store-probe/20261020-132416`, `…-133319`):**
 
@@ -830,7 +830,7 @@ neither proven nor disproven by that pass:
 
 **Second pass, same day — the request is issued and the native fetch is inert. P2's decision.**
 
-Two boots under `scripts/probe_store.ps1`, both with `--store_trace=1 --store_local_server_root=ui/store/remote_metadata/`: `out/_swap/store-probe/20261020-142448` (the
+Two boots under `scripts/diagnostics/probe_store.ps1`, both with `--store_trace=1 --store_local_server_root=ui/store/remote_metadata/`: `out/_swap/store-probe/20261020-142448` (the
 control leg, on the profile as it stands — master off) and `…-142749` (the measured leg, with
 `general.rhythmverse = true` written into `settings.toml` for that boot and restored afterwards, and
 with `--log_level=trace --log_noisy=1`; the script grew `-Noisy` for it).
@@ -959,7 +959,7 @@ store-probe: request 'dlc_store/europe/dlc_top_xbox_eng.dta' (input '/dlc_top_xb
 
 The measured substitutions are **region `europe`, platform `xbox`, locale `eng`** (not the earlier
 `xbox`/`en` guess). The file cache `sub_8235A240` is reached and opens no store path in that boot,
-so **record delivery is P3's remaining step**. Two practical notes: `scripts/probe_store.ps1` must
+so **record delivery is P3's remaining step**. Two practical notes: `scripts/diagnostics/probe_store.ps1` must
 have its `-StoreRow` re-read with `-MenuOnly` after a main-menu change (the row moved from 4 to 3
 when Play Current Song was hidden), and a probe report can name another boot's log when two sessions
 run at once — match the log by its launch time, not by "newest".
@@ -1013,7 +1013,7 @@ the decrypted image (`out/_swap/blitz_image.bin`, RTTI resolved with the new
 - **Landed and tested**: `src/store/store_serve.{h,cpp}` (which path is ours, the host-directory
   override with a no-escape rule, the built-in record), the text writers in
   `src/store/store_metadata.{h,cpp}` (`BuildFrontMenuText`/`BuildMenuText`), the guest half in
-  `src/store/store_fetch.{h,cpp}` (insert only by default), `scripts/probe_store.ps1 -Extra`, the
+  `src/store/store_fetch.{h,cpp}` (insert only by default), `scripts/diagnostics/probe_store.ps1 -Extra`, the
   cvars `store_serve_dir` and `store_fetch_deliver` (both documented in
   `docs/engine/diagnostics.md`), and ctest **`store_serve` = 50 checks** (full suite **43/43**; the
   count is 61 after the landing record below).
@@ -1085,7 +1085,7 @@ while `store_trace` is on). `store_payload` is **84 checks**; full `ctest` **40/
 **P3 catalogue record (2026-10-21) - the page is filled from the live RhythmVerse catalogue, and the
 retail offers parser reads it; the browser built from those offers still faults.** Boots
 `rb_blitz_097...110.log` (release tree, `out/build/win-amd64-release/logs/`), driven by
-`scripts/probe_store.ps1 -StoreRow 3 -PageRow 0` with `--store_fetch_deliver=1 --store_trace=true`.
+`scripts/diagnostics/probe_store.ps1 -StoreRow 3 -PageRow 0` with `--store_fetch_deliver=1 --store_trace=true`.
 
 - **The delivery seam, corrected.** A menu page does **not** need a hand-built parser call: the file
   cache's own `file_req_complete` reaches the panel's dispatcher `sub_827501F0`, whose branch at
@@ -1132,7 +1132,7 @@ retail offers parser reads it; the browser built from those offers still faults.
   old position and hit EXIT GAME instead.)
 - Landed and tested: `store_catalogue`, the corrected writers, `RememberMessageArray` (the message
   array a page's parser call can reuse), the offers-page delivery, the parser's entry/exit/panel
-  diagnostics, `scripts/probe_store.ps1 -PageRow/-PageKey`, the catalogue cvars
+  diagnostics, `scripts/diagnostics/probe_store.ps1 -PageRow/-PageKey`, the catalogue cvars
   (`store_catalogue_off`, `store_catalogue_ttl_seconds`) and the updated `store_serve` cases
   (**61 checks**; full `ctest` **43/43** in `out/build/win-amd64-debug`).
 
@@ -1182,7 +1182,7 @@ heading are edited into the payload, and the Downloaded matcher is built.** Read
 decrypted image (`out/_swap/blitz_image.bin`), the extracted records
 (`assets/game/360/ui/store/gen/{store,store_info}.dtb`, dumped with
 `rb_blitz_settings_screen_tests.exe dump-record`) and the list resources
-(`ui/resource/lists/gen/list_store_*.milo_xbox`, dumped with `scripts/hmx_milo.py`).
+(`ui/resource/lists/gen/list_store_*.milo_xbox`, dumped with `scripts/assets/hmx_milo.py`).
 
 - **Why every browser row drew blank: `type` was a string.** The row text is the provider's
   `Text(data, label, out)` (`StoreOfferProvider` vtable slot 2 + the `UIListProvider` secondary
@@ -1248,7 +1248,7 @@ decrypted image (`out/_swap/blitz_image.bin`), the extracted records
 - **Still open for P3's exit**: (a) the row labels (above); (b) A -> `store_info_screen` (above);
   (c) album art: `preview_art` stays empty because the retail art loader wants a platform texture
   (`png_xbox`/`dxt`), and producing one needs a runtime PNG decode + DXT encode + Xbox swizzle
-  (`scripts/hmx_tex.py import` documents the format; no C++ encoder exists yet), so the browser
+  (`scripts/assets/hmx_tex.py import` documents the format; no C++ encoder exists yet), so the browser
   keeps retail's placeholder art; (d) the Downloaded index has not been measured on a real library
   (its cost is one mount + one `songs.dta` read per package, on its own thread).
 
@@ -1395,14 +1395,14 @@ Sarah McLachlan's *Surfacing* cover over `BUILDING A MYSTERY / SARAH MCLACHLAN /
 - **Covers ship as DXT1, not DXT5.** The first cut encoded DXT5 (format `0x1808`, 8 bpp, 87328
   bytes) and the panel drew blocky noise with the right shapes and wrong colours. The file was not the
   problem: dumped through the new `store_art_dump_dir`, unswapped and decoded as BC3 it matches the
-  downloaded cover to a mean absolute error of **0.8** per channel, and `scripts/hmx_tex.py export`
+  downloaded cover to a mean absolute error of **0.8** per channel, and `scripts/assets/hmx_tex.py export`
   renders the exact artwork; a 1-mip variant and a mip-reversed variant drew just as wrong. A
   **shipped** retail texture served through the same seam draws correctly in the same test
   (`default_album_art_keep.png_xbox`, 512x512 DXT1 → the silver ROCK BAND BLITZ cover,
   `out/_swap/store-probe/20261021-203850`). So the worker encodes DXT1 (43680 bytes at 256x256 with
   mips to 16) - half the bytes for the same picture, and the format retail's own album art uses.
   The DXT5 loss is recorded as an open known issue with its evidence, not guessed at.
-- **`scripts/hmx_tex.py` had a real bug, found by the same measurement**: `unswap` was
+- **`scripts/assets/hmx_tex.py` had a real bug, found by the same measurement**: `unswap` was
   `out[0::2], out[1::2] = data[0::2], data[1::2]`, a **copy onto itself** that swaps nothing, so
   every export showed correct shapes with wrong colours (a 16-bit word swap only moves the DXT
   endpoints; the index bits stay put). Fixed, and `export` of `default_album_art_keep.png_xbox` now
@@ -1527,7 +1527,7 @@ and **deliverable 5**, the price/icon hide path. The writer skeleton
   known archives are filtered by `IsEligibleOffer`), then
   serve them through the chosen seam. Album art: first use `album_art_path`-style references to files we serve; if the
   engine demands platform textures, add host-side PNG→texture conversion (tooling exists:
-  `scripts/hmx_tex.py`, `tools/milotex`).
+  `scripts/assets/hmx_tex.py`, `tools/milotex`).
 - Field mapping (first cut): `file_title`→`name`, `file_artist`→`artist`,
   `file_album`→`album`, `file_genre`→`genre`, `file_year`→`year_released`,
   `rank_*`→the `rank <part>` values the tier display reads when populated (spike scale/token,
@@ -1624,7 +1624,7 @@ the house row style.
   retail store screen's `{enter}`, which needed `AppendPanelEnterStatements` to accept a `UIScreen`
   definition as well as a `UIPanel` one (the first boot refused by name: `no {new UIPanel <name> ...} definition for that panel`). That edit was then **retired** — it only fired once the store
   screen was already open, which is the one place P3 will change — and the `UIScreen` widening kept.
-- `scripts/probe_search.ps1` — one boot that types a query on the keys and OCRs the strip.
+- `scripts/diagnostics/probe_search.ps1` — one boot that types a query on the keys and OCRs the strip.
 - `src/store/rhythmverse_client.cpp` — one widening the live API forced (§"Measured" below): a
   query with **no matches** answers HTTP 200 with `{"records":{"total_filtered":0,"returned":0}, "songs":false}` — a JSON **boolean** where every matched answer carries an array. `ParseListing`
   now reads a falsey `songs` with a zero record count as *zero songs*, not a parse failure, so the
@@ -1632,7 +1632,7 @@ the house row style.
   as a network failure") holds. Any other non-array shape — and a falsey `songs` with a non-zero
   count — is still refused, and `tests/store_search_tests.cpp` pins both sides.
 
-*Measured in boots (`out/_swap/search-probe/…`, `scripts/probe_search.ps1`).* Everything below is an
+*Measured in boots (`out/_swap/search-probe/…`, `scripts/diagnostics/probe_search.ps1`).* Everything below is an
 OCR of a capture or a log line, not an expectation:
 
 - **The keys render and the field is readable.** `out/_swap/search-probe/20261020-174624`: the
@@ -1749,7 +1749,7 @@ now feeds"); P3 has since landed, and this closes it.
   Press Back, then Search, to list them.` - and a refused submit (the API's 3-character rule) keeps
   the player on the page with the reason.
 - **Measured on the shipped defaults** (`--store_search_seed=bush`, no diagnostic switch;
-  `scripts/probe_search.ps1 -SearchMenuRow 1 -StoreRow 3 -Seed bush`):
+  `scripts/diagnostics/probe_search.ps1 -SearchMenuRow 1 -StoreRow 3 -Seed bush`):
   - `out/_swap/search-probe/20261022-105010`: the store menu OCRs as `RHYTHMVERSE … RECENT SEARCH`;
     the Search row opens the keys (strip `SEARCH: BUSH`); Done submits and the strip reads
     `15 MATCHES FOR "BUSH". PRESS BACK, THEN SEARCH, TO LIST THEM.` while the log records
@@ -2115,7 +2115,7 @@ are pinned by `store_catalogue_status`'s suite instead.
 
 ### P8 — acceptance + docs
 
-- `scripts/acceptance_store.ps1`: enable under General → Downloadable Content → return to main
+- `scripts/acceptance/acceptance_store.ps1`: enable under General → Downloadable Content → return to main
   menu → RhythmVerse Customs → assert Recent list OCR ("Recent",
   first entries) → open Search → assert results → select an entry → download → wait for file →
   refresh/restart as indicated → assert the song appears in the song list; plus a control leg
@@ -2134,7 +2134,7 @@ are pinned by `store_catalogue_status`'s suite instead.
 
 **P8 record (2026-10-22) - the acceptance harness, the matrix, and the phase's docs.**
 
-`scripts/acceptance_store.ps1` is the tracked harness the bullet above asks for. It drives the
+`scripts/acceptance/acceptance_store.ps1` is the tracked harness the bullet above asks for. It drives the
 feature in the order a player takes it, split into four legs so each can be run and read on its own
 (`-Legs`, with `-Reuse` to run the rest later on the fixtures the first one wrote):
 
@@ -2255,7 +2255,7 @@ minutes on the title's "Loading Cached Content List" after the library changed, 
 budget is 720 s (a timeout there is the environment, not the store - the log's `dlc:` lines say which).
 
 **P8 close-out record (2026-10-22) — all four legs green on one build, and the two defects the walk
-found.** `scripts/acceptance_store.ps1`, release binary, its own profile directories and an empty
+found.** `scripts/acceptance/acceptance_store.ps1`, release binary, its own profile directories and an empty
 scratch DLC root, on `out/store-acceptance/p8-final/`: **69 steps, 0 failures**, legs
 `Enable, Store, Install, Control`.
 
@@ -2498,27 +2498,27 @@ owes - see its record under the prompt.
 - **Do not** rename the setting id or the cvar: `general.refresh_music_library` and
   `enhancements_refresh_music_library` are what a profile and a command line already carry, so a
   rename would silently drop a saved Off.
-- **Move with it**: the store acceptance harness's OCR assertions (`scripts/acceptance_store.ps1`
+- **Move with it**: the store acceptance harness's OCR assertions (`scripts/acceptance/acceptance_store.ps1`
   read `CUST` and `MUSIC LIBR` on the main menu, and `REFRESH MUSIC` on the DLC page) and the
-  observation harness's `main-menu` needle (`scripts/ui_states.ps1`), which now reads
+  observation harness's `main-menu` needle (`scripts/diagnostics/ui_states.ps1`), which now reads
   `REFRESH SONGS` on a default boot.
 - **Done when**: the suites are green, the DLC page draws `Refresh Songs: On` on a profile that never
   named the key, and a boot's main menu reads `RHYTHMVERSE` / `REFRESH SONGS`. The label halves are
-  the harness's Enable/Store legs (`scripts/acceptance_store.ps1`), **not yet measured** on a build
+  the harness's Enable/Store legs (`scripts/acceptance/acceptance_store.ps1`), **not yet measured** on a build
   that carries the rename. *(Superseded by the 2026-10-23 record below: the harness now reads the
   renamed rows and proves the default from the profile's silence; only the boot OCR is open.)*
 
 **P9-12 record (2026-10-23).** The labels and the default were already in the tree; this pass
 finished the halves the prompt still owed and closed the owner-visible gap that came with them.
 
-- **The harness proves the default instead of naming it.** `scripts/acceptance_store.ps1`'s
+- **The harness proves the default instead of naming it.** `scripts/acceptance/acceptance_store.ps1`'s
   `Write-StoreSettings` no longer writes `refresh_music_library = true`, so both fixture profiles
   start from the compiled default (On) exactly as the store switch does (P9-1). The Enable leg now
   asserts `HYTH` (the fragment every measured OCR reading of the shortened `RhythmVerse` label
   keeps) and `REFRESH` on the main menu, `SONGS` on the Downloadable Content page, and that the
   boot did **not** commit `refresh_music_library` into the profile - the same read-not-write check
   the store master already had. The old `CUST` needle is gone (the label has not contained it since
-  the 2026-10-22 rename). `Store` and `Control` keep their own `REFRESH` checks; `scripts/ui_states.ps1`
+  the 2026-10-22 rename). `Store` and `Control` keep their own `REFRESH` checks; `scripts/diagnostics/ui_states.ps1`
   no longer claims the refresh-entry-off boot reads `DOWNLOAD CONTENT` (that boot has no such row).
 - **The Interface → Main Menu mirror now agrees with the menu** (owner report, 2026-10-23: the page
   said `Refresh Songs: Visible` while the button was absent). With `general.refresh_music_library`
@@ -2594,7 +2594,7 @@ noted):
 - **Where the lines go (one boot measures the scene).** The box's milo has no spare label
   (`store_info.milo_xbox`: `song.lbl`, `drm.lbl`, `cost.lbl`/`cost_ps3.lbl`,
   `rating.lbl`/`rating_description.lbl`, `recommended*.lbl`, `wait.lbl` — `python
-  scripts/hmx_milo.py list assets/game/360/ui/store/gen/store_info.milo_xbox`), and two rows are
+  scripts/assets/hmx_milo.py list assets/game/360/ui/store/gen/store_info.milo_xbox`), and two rows are
   already ours: `song.lbl` (the name) and `drm.lbl` (the description `refresh_panel` writes,
   `store_info.tree.txt:418-419`). The labels that
   exist but are hidden today — `rating.lbl`/`rating_description.lbl` (inside `rating.grp`, hidden by
@@ -2625,7 +2625,7 @@ noted):
   writers carry the four keys on every offer; the label table's four codes and its unknown-code
   fallback), `tests/store_payload_tests.cpp` (the writes and the empty-field fallbacks, including
   the empty audio type drawing nothing), the `store-edit <store_info.dtb> info` diagnostic dump,
-  and `scripts/acceptance_store.ps1`'s details-page step, which today asserts `DOWNLOAD` / `EXIT`
+  and `scripts/acceptance/acceptance_store.ps1`'s details-page step, which today asserts `DOWNLOAD` / `EXIT`
   only (`out/store-acceptance/p8-final/`).
 - **Done when**: a boot opens a served offer's details page and its box OCRs the block on the
   captured fixture — `Forever Young`, `Youth Group`, the audio type's label (`Single Track` for
@@ -2684,7 +2684,7 @@ the prompt's own Done-when is a boot, and on this machine that is the owner's to
   unknown fallback), `store_payload` **460** (`TestOfferCredits`: the block's statements, the
   binding, idempotency, the compile/parse round trip and both refusals), full `ctest` **47/47** in
   `out/build/win-amd64-debug`; the release preset builds and links `rb_blitz.exe`.
-- **The harness**: `scripts/acceptance_store.ps1`'s Store leg now asserts `CHARTED` and
+- **The harness**: `scripts/acceptance/acceptance_store.ps1`'s Store leg now asserts `CHARTED` and
   `RELEASED`/`DOWNLOADS` on the details capture (the artist and figures vary with the live
   catalogue, so the steps assert the block's own words). Not re-run on this build.
 - **Owed (the prompt's Done-when)**: the boot that opens a served offer's details page and OCRs the
@@ -2736,7 +2736,7 @@ the same standing as P9-5's, P9-7's and P9-9's owner boots. What stays as the st
 `store_client` (the four facts on the captured records and `DatePart`), `store_metadata` (both
 writers emit the four keys on every offer, the audio-type label table and its unknown fallback),
 `store_payload`'s `TestOfferCredits` and the `store-edit <store_info.dtb> info` dump, and
-`scripts/acceptance_store.ps1`'s Store leg (`CHARTED`, `RELEASED`, `DOWNLOADS`). P9-13 leaves one
+`scripts/acceptance/acceptance_store.ps1`'s Store leg (`CHARTED`, `RELEASED`, `DOWNLOADS`). P9-13 leaves one
 downstream task, not its own: P9-6's popup opens on the same box's Download press, and the row
 pressed there is unchanged by this block.
 
@@ -2776,7 +2776,7 @@ pressed there is unchanged by this block.
   and braces).
 - **Move with it**: `finish_installed` and the popup's `BUTTON_DOWN_MSG` (`src/store/store_payload.cpp`),
   the A/B locale pair, `store_payload_tests` (A exists only in the installed state, its case runs
-  the navigate + sentinel pair, B still closes, idempotency), `scripts/acceptance_store.ps1` (the
+  the navigate + sentinel pair, B still closes, idempotency), `scripts/acceptance/acceptance_store.ps1` (the
   Store leg becomes a **same-boot** assertion - download, A, the song list carries the title - with
   the Install leg kept as the next-boot check), `docs/guides/dlc.md` §2.2 (its "waits for the next
   start" bullet becomes conditional on **B**), `docs/reference/known-issues.md` (OQ6's restart
@@ -2833,7 +2833,7 @@ boot that reads the song on Your Songs after A is the measurement the prompt sti
   `TestDownloadPopup` now also pins the refresh token in the tree. Full `ctest` in
   `out/build/win-amd64-debug` is **47/47** (`texture_conversion`, a test another workstream added to
   the tree, is unbuilt in that directory and excluded - its "Not Run" predates this change).
-- **Harness.** `scripts/acceptance_store.ps1`'s Store leg now reads the installed toast's prompt
+- **Harness.** `scripts/acceptance/acceptance_store.ps1`'s Store leg now reads the installed toast's prompt
   (`DOWNLOADED`, `REFRESH`, `CLOSE`), presses **A**, and asserts the three host oracles the press
   produces - the sentinel's line, a further `content_pipeline: attempt N started` (the title
   re-enters its discovery pass), and `splash_screen` coming back on its own - then Play → Your Songs
@@ -2864,7 +2864,7 @@ boot that reads the song on Your Songs after A is the measurement the prompt sti
   (`src/settings/schema.cpp:159-163`, `BoolValue(false)` plus the comment above it), the store's
   compiled snapshot (`src/store/store_settings.h:29-33`, `enabled = false`), and the prose that
   promises "off by default" (`docs/settings/status.md`, `docs/guides/dlc.md`, the index rows).
-- **Move with it**: the acceptance harness. `scripts/acceptance_store.ps1` currently starts the
+- **Move with it**: the acceptance harness. `scripts/acceptance/acceptance_store.ps1` currently starts the
   Enable leg from a fresh profile with the switch **off** (`:6-7`, `-RhythmVerseRow 3` at `:66`,
   the `rhythmverse = false` write at `:152`, the "reads Off before the press" step at `:557`). With
   On as the default the Enable leg proves the default instead of flipping it, and the **Control leg
@@ -2896,7 +2896,7 @@ proves it instead of flipping it:
 - **Docs**: `settings/status.md`, `settings/plan.md`, `reference/backlog.md` and
   `engine/diagnostics.md` now say On; diagnostics marks its 2026-10-22 measured Enable run as
   predating the flip.
-- **Measured** (release binary). `scripts/acceptance_store.ps1 -Legs Enable -Label p9-1-enable`
+- **Measured** (release binary). `scripts/acceptance/acceptance_store.ps1 -Legs Enable -Label p9-1-enable`
   (`out/store-acceptance/p9-1-enable/`) passes **8 of 8**: the page drew
   `RHYTHMVERSE: ON` on a profile whose settings file never named the key, the file still had no
   `rhythmverse` line afterwards (only `target = 'ultimate'`, written by migration), and the main menu
@@ -2979,7 +2979,7 @@ answer.
   which `SettingsBoot::RestartPending()` answers by comparing every row's effective value with the
   boot's (`PendingRestartRows`), so a master change opens the authored `settings_restart_screen` and
   *Close* finishes the leave.
-- **Measured** (`scripts/probe_master_restart.ps1`, release binary, scratch profile, two boots; the
+- **Measured** (`scripts/diagnostics/probe_master_restart.ps1`, release binary, scratch profile, two boots; the
   session leg is `out/_swap/master-restart/20261022-214004/session.log`, every step green, and the
   next boot is `out/_swap/master-restart/20261022-214555/next-boot.log`, which that leg's own run
   reports as **9 steps, 0 failures**):
@@ -3031,7 +3031,7 @@ answer.
   (in-game-settings skill §2), and the filters stay reachable while the master is off (P6's rule).
 - **Move with it**: `settings_screen`'s page-order and page-count pins (P6 moved them to 59 per
   context, 118 both; they move again — the tests hold the exact numbers), the title/locale/help
-  tables, `scripts/acceptance_store.ps1:66` (`-RhythmVerseRow 3`) and its Enable-leg OCR steps
+  tables, `scripts/acceptance/acceptance_store.ps1:66` (`-RhythmVerseRow 3`) and its Enable-leg OCR steps
   (`:556-574`: the master is now reached through the submenu), `docs/settings/menu.md` (the
   Downloadable Content page) and `docs/settings/status.md`.
 - **Done when**: Help & Options ▸ General ▸ Downloadable Content reads those five rows in that order,
@@ -3270,7 +3270,7 @@ defaults and the legacy fallback.
      element is load-bearing, find the field the retail menu draws the number from (the list
      resource or the panel's own count) before inventing state.
 - **Move with it**: `store_metadata`'s tests, the front-menu OCR in
-  `scripts/acceptance_store.ps1:600-601` and the `Assert-Label` calls, and P7's strip copy. The log
+  `scripts/acceptance/acceptance_store.ps1:600-601` and the `Assert-Label` calls, and P7's strip copy. The log
   token (`offer(s) for the Recent list`) is a log string and may stay.
 - **Done when**: the front menu OCRs `RHYTHMVERSE / RECENTLY ADDED / SEARCH` with no digit beside
   either row, both rows still request their measured paths, and the browser opens on their offers.
@@ -3280,7 +3280,7 @@ defaults and the legacy fallback.
 - **Where the number came from, measured statically out of the image** (`out/_swap/blitz_image.bin`,
   base `0x82000000`, read with `out/_swap/fn_strings.py` and `find_string_refs.py`). The front menu's
   list is `store_menu.milo`'s `filter.lst`, whose resource
-  (`ui/resource/lists/gen/list_store_menu.milo_xbox`, dumped with `scripts/hmx_milo.py`) carries
+  (`ui/resource/lists/gen/list_store_menu.milo_xbox`, dumped with `scripts/assets/hmx_milo.py`) carries
   exactly two labels — `count.lbl` and `filter.lbl` — and the native provider that fills them is
   `sub_8275CD58(data, index, label, out)`:
   - `label == "filter"` (literal `0x82044668`) copies the row's **second** element, the text the
@@ -3313,7 +3313,7 @@ defaults and the legacy fallback.
   text with both labels and the marker, plus `TestFrontMenuRowForms` covering all four tails and that
   the marker is never quoted); full `ctest` **47/47** in `out/build/win-amd64-debug` and the debug
   game target links.
-- **Harness**: `scripts/acceptance_store.ps1`'s Store leg waits for `RECENTLY`, asserts the two
+- **Harness**: `scripts/acceptance/acceptance_store.ps1`'s Store leg waits for `RECENTLY`, asserts the two
   labels, and now also asserts the **absence** of the digit the old row drew (`RECENTLYADDED1`,
   `SEARCH1` through `Assert-Lacks`'s whitespace fold).
 - **Measured (owner, 2026-10-23) — the boot this prompt's Done-when asks for, and it closes the
@@ -3355,7 +3355,7 @@ Measurements the design rides on (each dated at its source):
   UI is `server_connect.milo`'s `progress_bar.grp` (`content_percent.lbl`, the boot's enumeration
   bar); the main menu's own loading state is the text caption `Loading Cached Content List` (P5's
   boots), not a bar. The engine's UI class table has no progress-bar class and the tree has no milo
-  writer (`scripts/hmx_milo.py` reads scenes; nothing writes one) — which is why the delivered popup
+  writer (`scripts/assets/hmx_milo.py` reads scenes; nothing writes one) — which is why the delivered popup
   is text-only, and why the withdrawn 6b would have been a spike with a textual fallback.
 - **The refresh the main menu runs** is `menu_options::TapRefreshCache`
   (`src/ui/menu_options.cpp:867`, logged as `dlc: refresh asked for from the main menu`), whose own
@@ -3388,7 +3388,7 @@ Measurements the design rides on (each dated at its source):
   any of it.
 - **Move with it**: the panel definition and its placement on `store_info_screen` (idempotent,
   refusing by name), the two button cases' route into it, the cancel write, `store_payload_tests`
-  (the popup opens on the press, the cancel write, the terminal switch), `scripts/acceptance_store.ps1`
+  (the popup opens on the press, the cancel write, the terminal switch), `scripts/acceptance/acceptance_store.ps1`
   (the Store leg's download step OCRs the popup instead of the strip), `docs/engine/diagnostics.md`,
   `docs/guides/dlc.md` §2.2 and `known-issues.md` where the restart wording moves.
 - **Done when**: one boot presses Download on a real offer — the popup draws over the details page,
@@ -3515,7 +3515,7 @@ closing step.**
   Option caption is the record's own `shortcut_header` or nothing). The objects are named
   `InlineHelp.ihp` (`store_menu.milo`), `store.ihp` (`store_browser.milo`) and `store_info.ihp` /
   `view_offer.ihp` (`store_info.milo`) — measured 2026-10-23 with
-  `python scripts/hmx_milo.py list`. `store::SetStoreFooterStart` therefore writes
+  `python scripts/assets/hmx_milo.py list`. `store::SetStoreFooterStart` therefore writes
   `{InlineHelp.ihp set_action_token kAction_Start inline_help_search_filters}` and the same command
   on `store.ihp` for the browser — the retail idiom `song_select.dtb` already spells
   (`{InlineHelp.ihp set_action_token kAction_Start search}`). The token is a bare symbol and the
@@ -3551,7 +3551,7 @@ closing step.**
   dumps both `BUTTON_DOWN_MSG` methods, `store_menu_panel.enter` and the browser's `refresh_list`:
   measured against the shipped record, all three transforms answer **edited**, and the dump shows
   exactly the statements above.
-- **Harness**: `scripts/acceptance_store.ps1`'s Store leg now asserts the footer reads
+- **Harness**: `scripts/acceptance/acceptance_store.ps1`'s Store leg now asserts the footer reads
   `SEARCH FILTERS`, presses **Start**, waits for `settings_rhythmverse_filter_screen`, checks the
   five instrument rows, presses Back and asserts `store_menu_screen` — and asserts the same
   caption and the absence of `VIEW ITEM` on the browser and the details page (P9-8).
@@ -3569,7 +3569,7 @@ closing step.**
   first placement missed.
 - **Not measured at this record's time**: the boot itself. The Done-when's OCR ("the footer reads
   `(Start) SEARCH FILTERS`, Start opens that page, Back returns to the store") is
-  `scripts/acceptance_store.ps1 -Legs Store`'s new steps, which had not been run on a binary
+  `scripts/acceptance/acceptance_store.ps1 -Legs Store`'s new steps, which had not been run on a binary
   carrying this change. *(Superseded by the close-out below: the owner's boot is the measurement,
   and the harness's steps stay as the standing check.)*
 - **Close-out (owner's boot, 2026-10-23) — P9-7 is met.** After the panel-enter correction the
@@ -3630,7 +3630,7 @@ closing step.**
   right objects, the front menu's clear first in the method, the browser's clear after the gate,
   idempotency and the refusals; the bootstrap `store-edit <store.dtb> start` and
   `store-edit <store_info.dtb> info` diagnostics answer **edited** against both shipped records.
-- **Not measured at this record's time**: the boot capture. `scripts/acceptance_store.ps1`'s Store
+- **Not measured at this record's time**: the boot capture. `scripts/acceptance/acceptance_store.ps1`'s Store
   leg asserts `VIEW ITEM` is absent from the front menu, the browser and the details page; it had
   not been run on a binary carrying this change. *(Superseded by the close-out below.)*
 - **Close-out (owner's boot, 2026-10-23) — P9-8 is met.** The same retest the P9-7 close-out
@@ -3749,7 +3749,7 @@ and P9-7's owner boots. **P9-9 → Done.**
   nothing is drawn: the strip only speaks inside `kCatalogueSurfaceWindow`, which starts when the
   store is served a record, never at boot. Master off stays silent (`RequestCatalogueRefresh`'s own
   gate), which is the Control leg's assertion.
-- **Measured** (`scripts/probe_store.ps1 -StoreRow 4 -PageRow 0 -OutDir out/_swap/p910-recent2`,
+- **Measured** (`scripts/diagnostics/probe_store.ps1 -StoreRow 4 -PageRow 0 -OutDir out/_swap/p910-recent2`,
   release tree, the owner's profile): `store_catalogue: fetching up to 4 page(s) (the boot asked)`
   at 19:52:06.6, all four pages by 19:52:15.9 (`99 offer(s) for the Recent list`) while the title
   was still on `server_connect_screen`; the store opened at 19:53:34.7 and Recent was served
@@ -3775,7 +3775,7 @@ switch) ended in `read of guest 0x00000004` the moment **Recent** was pressed on
 visit: the first visit (20:06:21) drew the catalogue, downloaded and installed a song, and the
 re-entry (20:09:01) faulted before the serve hook logged anything.
 
-- **Reproduced, and the art path is the trigger.** `scripts/probe_store.ps1` grew
+- **Reproduced, and the art path is the trigger.** `scripts/diagnostics/probe_store.ps1` grew
   `-Reenter`/`-ReenterWaitSec` (leave the store, wait, walk back in, press the page row again). With
   covers served, the second press faults at the same address (`out/_swap/repro3` →
   `rb_blitz_241.log`); with `--store_art_off=1` the same two visits list the offers and no fault
@@ -3887,9 +3887,9 @@ which the hosts file cannot give; so the boot got an instrument of its own.
   `127.0.0.1`, `::1`, `[::1]`, `localhost`). The package transfer
   (`store_transfer_winhttp.cpp`) stays strict and says why in a comment. `store_http.cpp`'s
   `WINHTTP_FLAG_SECURE` is now set from the scheme instead of always.
-- **The stub and the probe**: `scripts/store_stub_api.py` answers every request `503` while a flag
+- **The stub and the probe**: `scripts/diagnostics/store_stub_api.py` answers every request `503` while a flag
   file exists and a captured real list page once it is gone (no `Retry-After`, so the wait in play
-  is the catalogue's own); `scripts/probe_store_failure.ps1` starts it, boots
+  is the catalogue's own); `scripts/diagnostics/probe_store_failure.ps1` starts it, boots
   `--store_api_base=http://127.0.0.1:<port>`, and drives the three presses, lifting the flag before
   the third. The payload is one real body captured with the client's own form body.
 - **Measured (`out/_swap/p910-fail/run2/20261023-150750`, release build, the owner's profile)**:
@@ -3937,7 +3937,7 @@ which the hosts file cannot give; so the boot got an instrument of its own.
   without the facility matters, keep the authored keys behind the same row and state the fallback on
   the row's help line.
 - **Move with it**: `store_search`'s key-token grammar keeps only what the typed field needs;
-  `settings_screen`'s key-page pins drop; the seed diagnostic (`scripts/probe_search.ps1`,
+  `settings_screen`'s key-page pins drop; the seed diagnostic (`scripts/diagnostics/probe_search.ps1`,
   `store_search_diagnostic`) moves to the new entry.
 - **Done when**: store → Search draws the title's own popup, a typed query answers in the strip and
   fills the browser, Cancel returns to the front menu, and the authored key pages are gone or
@@ -3947,13 +3947,13 @@ which the hosts file cannot give; so the boot got an instrument of its own.
 title's own keyboard; the in-game typing is the one half this environment cannot measure.**
 
 - **The contradiction, resolved — the dump was from the Ultimate build.** `out/_swap/song_select.tree.txt`
-  is the record in `assets/game/360/…`, which `scripts/extract_assets.ps1` writes as *base plus the
+  is the record in `assets/game/360/…`, which `scripts/assets/extract_assets.ps1` writes as *base plus the
   Ultimate overlay*; P4's scan read `game/gen/main_xbox_0.ark` alone. Re-running
   `out/_swap/scan_dtb_tokens.py keyboard show_keyboard` (with UTF-8 output — the 2026-10-20 run died
   on the French locale's first hit, which is why its report named only the first records it printed)
   gives **131 records, 20 with a hit**, and the only `show_keyboard` in the **retail** ark is
   `ui/rbworld_link/gen/rbworld_link.dtb`. The Ultimate patch's own entry list
-  (`python scripts/hmx_ark.py list --hdr game/ultimate/gen/patch_xbox.hdr -v`) carries
+  (`python scripts/assets/hmx_ark.py list --hdr game/ultimate/gen/patch_xbox.hdr -v`) carries
   `ui/song_select/gen/song_select.dtb` at 32,554 bytes against retail's 19,934 — the overlays are
   exactly the difference. So P4's measurement was right about the *base* target and P9-11's starting
   point is right about the *installed* one.

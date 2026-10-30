@@ -201,13 +201,13 @@ Part 1 wherever they disagree.
   `schema::FindRow(kRhythmVerse)`; `rb_blitz_store_client_tests` pins the row → snapshot mapping
   (the snapshot's own default is On, a commit bumps the generation, an equal commit does not). The
   workers read only that snapshot, so Off makes no request by construction — and since 2026-10-22
-  that is **measured**: the acceptance harness's control leg (`scripts/acceptance_store.ps1`,
+  that is **measured**: the acceptance harness's control leg (`scripts/acceptance/acceptance_store.ps1`,
   RhythmVerse plan §5/P8) writes the switch off and finds no
   `store_catalogue`/`store_fetch`/`store_library`/`store_download`/`store_search` request line in the
   log, while the main menu's own refresh row still dispatches. The harness's Enable leg is what
   proves the default: its profile never names the setting, the page draws `RhythmVerse: On`, the
   boot adds no key to the profile, and the same boot's main menu already carries the store row.
-  **The restart rule is measured too (P9-2, 2026-10-22)**: `scripts/probe_master_restart.ps1` flips
+  **The restart rule is measured too (P9-2, 2026-10-22)**: `scripts/diagnostics/probe_master_restart.ps1` flips
   a filter leaf and then the master through the page — the leaf is applied live
   (`hot_apply: general.rhythmverse_guitar = false`) and leaving asks for nothing, the master is never
   applied live and leaving draws `settings_restart_screen` once (`Restart now` / `Close`), *Close*
@@ -552,7 +552,7 @@ Items 4 and 10 are only honest if the in-game rows own their settings, so on the
   `acceptance_controller_settings.ps1` asserted its exact command line, and each leg deleted its
   fixture's `<profile stem>.game-settings.toml` first (the Ultimate leg's licence line read
   `(configured)`). Both scripts went with the application on 2026-10-19; the in-game surface is
-  driven by `scripts/acceptance_controls.ps1`.
+  driven by `scripts/acceptance/acceptance_controls.ps1`.
 
 #### Gameplay Mapping tables on the Controller tab (P4, 2026-10-18)
 
@@ -644,10 +644,10 @@ menu, so the external app is no longer the only place to change a binding:
   stick clicks) keep their compiled defaults and are still reset by `Reset All`, which now draws
   as a plain action with no `: Nothing` state. The row labels, the overlay's replacement line and
   the help caption read one spelling ([`InterfaceTargetLabel`](../../src/profile/input_rows.h)).
-  Live: `scripts/acceptance_controls.ps1 -Label p3-final-controls` (78 steps, 0 failures,
-  `out/gameplay-mapping/in-game/p3-final-controls/`), `scripts/acceptance_controls_in_song.ps1
+  Live: `scripts/acceptance/acceptance_controls.ps1 -Label p3-final-controls` (78 steps, 0 failures,
+  `out/gameplay-mapping/in-game/p3-final-controls/`), `scripts/acceptance/acceptance_controls_in_song.ps1
   -Label p3-final-in-song` (23 steps, 0 failures, `.../p3-final-in-song/`) and
-  `scripts/acceptance_binding_rows.ps1 -Label p3-final-rows` (24 steps, 0 failures,
+  `scripts/acceptance/acceptance_binding_rows.ps1 -Label p3-final-rows` (24 steps, 0 failures,
   `out/interface-mapping/p1-rows/p3-final-rows/`).
 * **A consumed source stays consumed until it is released (P3, 2026-10-20).** P2's per-poll set
   emptied the moment the context became a menu, so a key that opened the menu while still down
@@ -666,7 +666,7 @@ menu, so the external app is no longer the only place to change a binding:
   child - which now returns to the group that lists it, not to the top of the table. The
   `gameplay_remap_*` tokens did not move, `TableKindLabel` reads `Mouse & Keyboard`, and the
   retired `settings_keyboard_mouse_actions_*` pages are gone. Live:
-  `scripts/acceptance_controls.ps1 -Label p4-controls-b` (93 steps, 0 failures,
+  `scripts/acceptance/acceptance_controls.ps1 -Label p4-controls-b` (93 steps, 0 failures,
   `out/gameplay-mapping/in-game/p4-controls-b/`), `acceptance_controls_in_song.ps1 -Label
   p4-in-song` (23 steps, 0 failures) and `acceptance_binding_rows.ps1 -Label p4-rows` (26 steps,
   0 failures, `out/interface-mapping/p1-rows/p4-rows/`). The Controls arm proves both branches,
@@ -680,7 +680,7 @@ menu, so the external app is no longer the only place to change a binding:
   `Closing in 3` and counts down once per second. A valid press binds on its own frame (no release
   wait), a wrong-kind press prints its sentence while the count keeps running, and zero closes the
   page with the row untouched. The hold oracle (`Observation::still_held`) and its two helpers were
-  deleted with the gesture. Live: `scripts/acceptance_controls.ps1 -Label p5-controls-b` (103
+  deleted with the gesture. Live: `scripts/acceptance/acceptance_controls.ps1 -Label p5-controls-b` (103
   steps, 0 failures, `out/gameplay-mapping/in-game/p5-controls-b/`),
   `acceptance_controls_in_song.ps1 -Label p5-in-song` (23 steps) and
   `acceptance_binding_rows.ps1 -Label p5-rows` (26 steps). The Controls arm proves the countdown
@@ -702,7 +702,7 @@ menu, so the external app is no longer the only place to change a binding:
   and [tests/profile_remap_tests.cpp](../../tests/profile_remap_tests.cpp) pins every row -
   including that the A key sets both A and D-pad left, a consequence of the requested WASD
   layout. A profile that already holds a `[remap]` row still wins over these defaults. Live
-  check: `scripts/acceptance_recovery.ps1 -Label default-keys-2026-10-19` (11 steps, 0 failures,
+  check: `scripts/acceptance/acceptance_recovery.ps1 -Label default-keys-2026-10-19` (11 steps, 0 failures,
   `out/gameplay-mapping/in-game/default-keys-2026-10-19/`) reopens a closed keyboard gate with
   F10 and drives the title with `key_enter`, which reaches A through General Mapping; the other
   rows are pinned by the unit test. One harness caveat: with the legacy `mnk_mode` emulation on
@@ -738,8 +738,8 @@ developer cvar only, and `monitor` is obsolete window geometry (the game fits it
 the system DPI and the primary display). The seven-row profile allowlist is in
 `src/settings/cvars.h`.
 
-Evidence: `scripts/acceptance_recovery.ps1` (11 steps, 0 failures; `p8a-recovery2` and the
-final-binary re-run `p8a-recovery3`) and `scripts/acceptance_controls_in_song.ps1` (23 steps, 0
+Evidence: `scripts/acceptance/acceptance_recovery.ps1` (11 steps, 0 failures; `p8a-recovery2` and the
+final-binary re-run `p8a-recovery3`) and `scripts/acceptance/acceptance_controls_in_song.ps1` (23 steps, 0
 failures; `p8a-in-song3` and `p8a-in-song4`), all under `out/gameplay-mapping/in-game/`;
 `input_gates` 276 checks; 41/41 ctest. **Still open:** a physical
 pad (capture, hold-to-cancel, stick directions, and the recovery's pad-connected arm), an in-song
@@ -779,7 +779,7 @@ a fresh payload snapshot is **8 files / 59.0 MiB** with no settings executable a
 0 with no settings binary, a reinstall over a folder that held one removed it, and the installed
 game booted to `settings_boot: presented menu frame` with the input store live
 (`out/p8b-install/`); `/RUNATEND=controller` is refused (exit 7, nothing installed);
-`scripts/audit_distributable.ps1` is **7/7 pass**. The plan's §19 has the full table and,
+`scripts/setup/audit_distributable.ps1` is **7/7 pass**. The plan's §19 has the full table and,
 plainly, the two legs not run on this machine (a photographed finish page and a hand-created
 pre-2026-10-14 shortcut pair).
 
@@ -994,7 +994,7 @@ Evidence: `out/live-scrollmsg/scrollmsg-hover-calibration.png`,
     twin of the in-game Controls menu (`src/settings/menu_payload.cpp`), which hosts no
     `pause_panel`/`game_panel` and therefore never hits the construct-order fault. A paused song was
     driven to Input Types, a bind page, hold-to-cancel, back to the pause panel and resume
-    (`scripts/acceptance_controls_in_song.ps1`, 23 steps, `out/gameplay-mapping/in-game/p8a-in-song3/`).
+    (`scripts/acceptance/acceptance_controls_in_song.ps1`, 23 steps, `out/gameplay-mapping/in-game/p8a-in-song3/`).
     The original order below is kept as the research record; (a) and (b) were not needed.
     *`menu.md` §3.2, §3.3; gameplay-mapping plan §18.4*.
 14. **The in-song child pages are unverified — CLOSED for Controls (P8a).** Controls → Input Types
@@ -1272,7 +1272,7 @@ archive forever and never reaches `VdSetInterruptCallback`. Two separate things 
 Every archive this title reads declares exactly one part (measured 2026-10-12): `main_xbox.hdr` is
 `ARK v6, 1 part(s), 1613 entries` (`main_xbox_0.ark`, 361,769,177 bytes) and the provider's
 `patch_xbox.hdr` is `ARK v6, 1 part(s), 62 entries` (`patch_xbox_0.ark`, 14,171,207 bytes) —
-`python scripts/hmx_ark.py list --hdr <file>` prints both. The runtime's reader
+`python scripts/assets/hmx_ark.py list --hdr <file>` prints both. The runtime's reader
 (`settings/ultimate_adapter.cpp`) and the offline tool both implement the multi-part *layout*
 correctly, and every count echoed in our header was well-formed, so the defect was never a malformed
 header: the title's patch loader does not follow a second part, and a boot that offers it one cannot
@@ -1321,7 +1321,7 @@ Ordered by what blocks a release:
    horizontal-selector editing and the editing indicator, boolean save, live VSync, the restart
    prompt's close/accept/failure paths, target changes, direct-boot readback, provider saves,
    Unlock All timing, and in-song navigation through every child screen and back. `menu-check.ps1` is
-   the template, `scripts/drive_ui.ps1` + `capture_window.ps1` the tools.
+   the template, `scripts/diagnostics/drive_ui.ps1` + `capture_window.ps1` the tools.
 2. **In-song entry** — the pause context is the one P5b measured as not re-pointable; the pause record
    is still left pristine.
 3. **Restart input guarding** — the prompt defaults to Close, not the planned A=restart / B=close with

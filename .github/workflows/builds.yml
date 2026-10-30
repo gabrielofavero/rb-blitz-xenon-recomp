@@ -59,8 +59,8 @@ jobs:
 
       - name: The SDK submodule's links and patches
         run: |
-          pwsh -File scripts\repair_flat_symlinks.ps1
-          pwsh -File scripts\apply_sdk_patches.ps1
+          pwsh -File scripts\setup\repair_flat_symlinks.ps1
+          pwsh -File scripts\setup\apply_sdk_patches.ps1
 
       - name: Build the game
         run: |

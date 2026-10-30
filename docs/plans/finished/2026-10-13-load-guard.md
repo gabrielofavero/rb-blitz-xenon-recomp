@@ -415,7 +415,7 @@ incomplete loads. Record which phase is stalled.
 Use a fake clock for unit tests; no 30/60-second sleeps in tests. Runtime acceptance needs actual
 30s/60s settings as well as a short development-only timeout for iteration. Developer injection
 must be off by default, scoped to one attempt, and must not mutate installed DLC or save data.
-Use the existing `scripts/observe_ui.ps1`, `drive_ui.ps1`, `frame_diff.ps1`, and `ocr_image.ps1`
+Use the existing `scripts/diagnostics/observe_ui.ps1`, `drive_ui.ps1`, `frame_diff.ps1`, and `ocr_image.ps1`
 where applicable; screenshots alone do not prove cleanup or thread safety.
 
 Until cancellation, cleanup, main-menu navigation, and a subsequent good song are demonstrated,

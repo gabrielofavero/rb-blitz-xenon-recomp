@@ -142,7 +142,7 @@ Bumping a version is a decision, not a discovery, so it goes through the accepta
    `rb_blitz_toolchain --check --project-dir .` prints the new values;
 2. update [config/toolchain.toml](../../config/toolchain.toml) and the table above;
 3. run the acceptance route
-   (`.\scripts\acceptance_song.ps1 -Runs 3`) and record it in
+   (`.\scripts\acceptance\acceptance_song.ps1 -Runs 3`) and record it in
    [history/bringup-log.md](../history/bringup-log.md);
 4. commit the record change together with that evidence — the frozen set is only
    meaningful if the run that justifies it is named.

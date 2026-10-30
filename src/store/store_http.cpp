@@ -199,7 +199,7 @@ HttpResponse Perform(std::string_view url, std::string_view body, bool post,
 
   // §3.1: the store fetches over HTTPS. The one exception is a **loopback** origin, which exists for
   // the measurements that need a server they can make fail and then answer inside one boot
-  // (`store_api_base` + `scripts/store_stub_api.py`, RhythmVerse plan P9-10). Loopback cannot leave
+  // (`store_api_base` + `scripts/diagnostics/store_stub_api.py`, RhythmVerse plan P9-10). Loopback cannot leave
   // the machine, no shipped URL is plain http (the builders compose `https://rhythmverse.co` and
   // the download/art policy refuses anything else), and `SetApiBaseOverride` refuses a plain-http
   // base that is not loopback - so this can only be reached by that one diagnostic flag.

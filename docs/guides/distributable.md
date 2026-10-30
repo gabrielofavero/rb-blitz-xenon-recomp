@@ -3,11 +3,11 @@
 The release-readiness item asks for a negative claim: no retail data, no symbol taken
 from a proprietary database, no credential and no machine-specific path in the installer
 payload or in a packaged build. A negative claim is worth exactly as much as the check
-behind it, so this file describes that check - [`scripts/audit_distributable.ps1`](../../scripts/audit_distributable.ps1),
+behind it, so this file describes that check - [`scripts/setup/audit_distributable.ps1`](../../scripts/setup/audit_distributable.ps1),
 whose exit code is the answer - and the one thing it found.
 
 ```
-.\scripts\audit_distributable.ps1
+.\scripts\setup\audit_distributable.ps1
 ```
 
 | Check | What it looks at | What it would catch |
@@ -113,7 +113,7 @@ copy:
 # a copy of the payload, then: append "D:\\dev\\rb-blitz-xenon-recomp\\src\\leaked.cpp"
 # to rexgpu-xenos.dll and the first 4096 bytes of game\default.xex to rexruntime.dll, and
 # update their size/sha256 in payload-manifest.toml.
-.\scripts\audit_distributable.ps1 -PayloadDir out\distributable-audit\negative-control\payload -SkipSetup
+.\scripts\setup\audit_distributable.ps1 -PayloadDir out\distributable-audit\negative-control\payload -SkipSetup
 ```
 
 Measured 2026-09-28: `retail-data` fails on the dump's bytes and `machine-paths` fails on
@@ -133,7 +133,7 @@ reader does not have to re-derive the reasoning:
   dump, so the emulated console's key is in the SDK's source
   (`rexglue-sdk/src/system/xex_module.cpp`, `xe_xex2_retail_key`) and therefore in the DLL
   built from it. It is a public constant of every Xenia-derived runtime, it is not this
-  project's secret, and there is exactly one copy: `scripts/decrypt_xex.py` reads it from
+  project's secret, and there is exactly one copy: `scripts/xex/decrypt_xex.py` reads it from
   the SDK rather than carrying a second one ([rb3-references.md](../reference/rb3-references.md) §9).
   What the audit checks is that **we** add no literal of our own.
 - **The project's own names.** `sub_821D0A18`-style labels, hook names and guest addresses

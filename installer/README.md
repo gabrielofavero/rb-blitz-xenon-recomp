@@ -39,7 +39,7 @@ powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1
 The version comes from one value — `[installer] version` in `installer\config\pins.toml`
 — and the file name, the wizard's title (`Setup - Rock Band Blitz <version>`) and every
 install manifest follow it; bump it there and run the command again.
-`scripts/acceptance_product_titles.ps1` asserts the built product's caption when the
+`scripts/acceptance/acceptance_product_titles.ps1` asserts the built product's caption when the
 machine lets it open the window unattended.
 
 ## What the installer does and does not contain
@@ -278,7 +278,7 @@ cmake --preset win-amd64-release; cmake --build --preset win-amd64-release
 powershell -File installer\build.ps1
 
 # 3. what ships, and what must never be in it (exit 0 = nothing was)
-powershell -File scripts\audit_distributable.ps1
+powershell -File scripts\setup\audit_distributable.ps1
 
 # 4. publish installer\out\dist\RockBandBlitzSetup-<version>.exe as the release's
 #    only asset, and write the sha256 build.ps1 printed into the release notes

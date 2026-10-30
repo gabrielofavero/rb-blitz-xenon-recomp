@@ -540,7 +540,7 @@ Retail correlations that fit (all of `ui/gen/init.dtb`):
 #### 8.1 The experiment that proved it
 
 A v6 patch archive was built by hand from the retail ark (`out/_swap/p1b/make_payload.py`, reusing
-`scripts/hmx_ark.py`'s writer) and mounted as the payload (`--ultimate_mode=2 --ultimate_payload_root=<arm>`).
+`scripts/assets/hmx_ark.py`'s writer) and mounted as the payload (`--ultimate_mode=2 --ultimate_payload_root=<arm>`).
 Each arm differs in one record; all five boots used the same disposable user root, `--log_level=debug` and
 the project's UI driver.
 
@@ -571,7 +571,7 @@ record**, e.g. `ui/rbbz/gen/advanced_settings.dtb`, and let that include name it
 
 - The row-widget binding of §4 is still untried — now the *only* unmeasured piece of the screen.
 - Where the patch archive comes from in the product is an implementation choice: generate one at boot from
-  the game's own records (the mirror of `scripts/hmx_ark.py` plus the DTB cipher `src/ui/menu_options.*`
+  the game's own records (the mirror of `scripts/assets/hmx_ark.py` plus the DTB cipher `src/ui/menu_options.*`
   implements) or ship a tiny one. **No retail bytes are shipped in either case** — record contents are read
   from the installed ark, only the edits are ours.
 - The `kPatchDiskError`/`kPatchContentDevice` edits and `--ultimate_mode` are how a *payload* is mounted
@@ -1297,7 +1297,7 @@ provider's objects live. The row must not be presented as working until then.
 
 | Item | Why open | Who owns it |
 | --- | --- | --- |
-| **The combined payload's shadowed records.** P5b's generator edits the *base* `ui/gen/ui.dtb` and `ui/splash/gen/splash.dtb`; the payload also carries its own copies of both, which the player's build has mounted, so a patch record built from the base ark would wipe the mod's edits to those two records. | The generator must read the record from the **mounted** payload when it has one, then apply our edits on top — plan §11's "generate the patch record that carries project definitions by extending an installed retail record". Measured: both records are in the payload's 62 (verified with `scripts/hmx_ark.py list --hdr game/ultimate/gen/patch_xbox.hdr -v`). | P11 |
+| **The combined payload's shadowed records.** P5b's generator edits the *base* `ui/gen/ui.dtb` and `ui/splash/gen/splash.dtb`; the payload also carries its own copies of both, which the player's build has mounted, so a patch record built from the base ark would wipe the mod's edits to those two records. | The generator must read the record from the **mounted** payload when it has one, then apply our edits on top — plan §11's "generate the patch record that carries project definitions by extending an installed retail record". Measured: both records are in the payload's 62 (verified with `scripts/assets/hmx_ark.py list --hdr game/ultimate/gen/patch_xbox.hdr -v`). | P11 |
 | **`forceplot` and `which_skybox`: fixed 2026-10-15, and this entry is the corrected one.** It used to say the screen's placeholder tokens (`plot_a`, `plot_b` / `none`, `custom`) were not the payload's. They were replaced by the payload's inventory at boot (`src/hooks/settings_payload.cpp`) - that half was already wired - and the *value* side was wrong in a way the token half hid: the two rows are the payload's boolean-with-submenu pair, so the provider's file holds the chosen **position**, and a codec that spelled them as booleans refused the very token the menu had just written. On an installed copy that refusal was written into the commit journal, which recovery could then never finish, so **every** later edit answered `io error` and the menu blamed the settings folder (measured 2026-10-14, `out/_swap/settings-save/` + the plan's P7). Fixed by `RowBinding::position_value` (part 5 §3), by parking an uncompletable journal instead of refusing every save (part 3 §4), and by a reason token so the save-error page says which failure it was. | The tokens were never the whole contract. | done |
 | **A merged install** (the mod's documented install method: files copied over the game root) has no payload directory to inspect and no overlay to redirect through, so the adapter reports it absent. | The separate-payload arrangement is the one this project mounts (`game/ultimate` + `--ultimate_payload_root`); a merged install would need the records read out of the game's own ark and a different redirect route. | P6 follow-up / P11 |
 | **`unlockall`'s write path.** Its *default* is read from the payload (`ulti_init` sets it true) and the adapter exposes it, but its *value* belongs under native `[ultimate_overrides]` (plan §6.2) — i.e. in P3's store, which the bridge does not own yet. | The bridge writes only the provider's file. `EncodeProviderValues` skips the row by design and the file's `vars` list does not carry it, so nothing is silently lost — it is simply not persisted yet. | P3/P11 wiring |

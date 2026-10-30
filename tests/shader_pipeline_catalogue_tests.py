@@ -8,7 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/shaders"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/assets"))
 import shader_pipeline_catalogue as pc
 from shader_asset_resolver import sdk_hashes
 

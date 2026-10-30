@@ -225,7 +225,7 @@ no machine paths in tracked files; build green and `ctest` green
 > Build release, then launch with R7 **on** and a real library, driving the UI to the main menu and
 > pressing the refresh row once:
 > `.\rb_blitz.exe --game_data_root=..\..\..\game --ultimate_mode=1 --enhancements_dlc_cache=true --dlc_library="D:\Songs" --launcher_profile="$env:APPDATA\rb_blitz\launcher.toml"`
-> (record the exact library size; use `-DlcLibrary` with `scripts\drive_ui.ps1` / `scripts\acceptance_dlc.ps1` for the staged press).
+> (record the exact library size; use `-DlcLibrary` with `scripts\diagnostics\drive_ui.ps1` / `scripts\acceptance\acceptance_dlc.ps1` for the staged press).
 >
 > From `out\build\win-amd64-release\logs\rb_blitz_NNN.log`, extract and report:
 > 1. **Issue 1:** count of `XamAppEnumerateContentAggregate(` lines and the wall-clock span between
@@ -264,7 +264,7 @@ no machine paths in tracked files; build green and `ctest` green
 > inspect the Flow in `ui/net/gen/server_connect.milo_xbox` (`progress_bar.grp`,
 > `content_percent.lbl`, `enumerating_content.grp`) — the evidence for that Flow's conditions is in
 > `src/hooks/content_progress.cpp`'s header comment; re-derive it from the shipped milo rather than
-> trusting the comment. Use `scripts\hmx_milo.py` / `scripts\hmx_ark.py` as needed.
+> trusting the comment. Use `scripts\assets\hmx_milo.py` / `scripts\assets\hmx_ark.py` as needed.
 >
 > Deliverable: a written verdict with the log lines and, if (b), the exact property/condition that
 > hides the bar. No code change in this prompt.
@@ -383,7 +383,7 @@ no machine paths in tracked files; build green and `ctest` green
 > rather than the host-returned size; guard the `memcpy` in `WriteItems` against the reported buffer
 > size.
 >
-> Verification: `scripts\acceptance_dlc.ps1` / `scripts\acceptance_song.ps1` green, log shows the
+> Verification: `scripts\acceptance\acceptance_dlc.ps1` / `scripts\acceptance\acceptance_song.ps1` green, log shows the
 > reduced call count, and the discovery phase duration measured against P0. Docs: `docs/guides/dlc.md`
 > §4.3, `docs/engine/toggles.md` R7 row, `patches/README.md` if a new SDK patch is added.
 
@@ -412,8 +412,8 @@ no machine paths in tracked files; build green and `ctest` green
 ### P8 — Consolidate *(after P1–P7)* — **[DONE, §15]**
 
 > Re-run `ctest --test-dir out\build\win-amd64-release --output-on-failure`; run the acceptance
-> scripts (offline acceptance `scripts\acceptance_launches.ps1`, `scripts\acceptance_dlc.ps1
-> -DlcLibrary …`, `scripts\acceptance_song.ps1`); capture the discovery screen, the main menu, and
+> scripts (offline acceptance `scripts\acceptance\acceptance_launches.ps1`, `scripts\acceptance\acceptance_dlc.ps1
+> -DlcLibrary …`, `scripts\acceptance\acceptance_song.ps1`); capture the discovery screen, the main menu, and
 > the refresh row. Then sweep the docs so they agree with the code:
 > `docs/guides/dlc.md` (§4.2, §4.3, §5 limits), `docs/engine/main-menu.md (part 1, the option list)` (§7.1, §9 evidence table),
 > `docs/engine/toggles.md` (R7 row — in particular the "honest boundary" paragraph, which P6/P7
@@ -977,7 +977,7 @@ patch set, and `xam_content_aggregate.cpp` is patch 0006's file, so a checkout t
 * `cmake --build --preset win-amd64-release` green; `ctest --test-dir out\build\win-amd64-release`
   **21/21**; no `[error]` line in the verification boot.
 * `git -C rexglue-sdk status --porcelain` lists only the 35 files patches 0001–0014 name.
-* `scripts\apply_sdk_patches.ps1` exits **0**. It had been exiting 1 with
+* `scripts\setup\apply_sdk_patches.ps1` exits **0**. It had been exiting 1 with
   `UNEXPECTED : thirdparty/fmt`, which is neither a patch candidate nor this work's: an untracked
   `support/.gradle/` cache (13 files, 18 KB, created 13:35) inside the fmt submodule. Removed, so the
   audit means something again.
@@ -1120,7 +1120,7 @@ the case it was written for.
 win-amd64-release` green; no SDK patch, no cvar outside `[enhancements]`, and `patches/README.md`
 unchanged. The acceptance legs were then run with the option's own setting in the environment
 (`REX_ENHANCEMENTS_DLC_UNCAP_ENUMERATION=true`), since the option has no launcher row (§14.3):
-`scripts\acceptance_dlc.ps1` (§14.8, §14.9) and `scripts\acceptance_song.ps1 -Runs 1` (§14.10). Both
+`scripts\acceptance\acceptance_dlc.ps1` (§14.8, §14.9) and `scripts\acceptance\acceptance_song.ps1 -Runs 1` (§14.10). Both
 turned out to run the **default** configuration — no acceptance script enables R7, so the pacing was
 inert in them, which is why §14.9.1 and §14.9.2 read the legs' configurations out of their logs rather
 than describing them from the command line.
@@ -1145,7 +1145,7 @@ option has no launcher row, §14.3), the leg was re-run; its verdict is in §14.
 
 ### 14.9.1 The leg as the harness runs it — R7 **off**, so the uncap is inert
 
-`scripts\acceptance_dlc.ps1` **PASS, exit 0** (with the R3 flag pinned, §14.8):
+`scripts\acceptance\acceptance_dlc.ps1` **PASS, exit 0** (with the R3 flag pinned, §14.8):
 
 | leg | song list | the DLC song | packages | aggregate items | fatal |
 | --- | --- | --- | --- | --- | --- |
@@ -1177,7 +1177,7 @@ acceptance leg:
 | the pacing shortens the phase without changing the walk | §14.2: **2,807** calls either way, 46.7 s → 15.96 s on the same 1,402-package library, with R7 on |
 | the player's own frame rate comes back before the menu | §14.2: written back 1 ms after the last item, 104 ms before the engine's own completion |
 | the guest's song list still carries the DLC song on a boot that enumerated | §14.9.1's `dlc` leg: song list up, `KIDS IN THE STREET` found, and **absent** in its control leg |
-| an uncapped boot does not break playing a song | already measured before this plan, and a *stronger* deviation than this option: [dlc.md](../../guides/dlc.md) §4.3 records `scripts/acceptance_song.ps1` green with V-Sync off for the whole run (226 s against 225 s, `Boot`/`SongList`/`Playing`/`Results`/`SongSeen` all true, clean shutdown) |
+| an uncapped boot does not break playing a song | already measured before this plan, and a *stronger* deviation than this option: [dlc.md](../../guides/dlc.md) §4.3 records `scripts/acceptance/acceptance_song.ps1` green with V-Sync off for the whole run (226 s against 225 s, `Boot`/`SongList`/`Playing`/`Results`/`SongSeen` all true, clean shutdown) |
 | the new code is inert when its toggle is off | §14.9.1: zero `content_progress:` pacing lines, and the leg's own R7 line says `off (default)` |
 
 What is **not** evidenced by a single leg is the whole combination at once: R7 on *and* the pacing on
@@ -1187,11 +1187,11 @@ alternative is a hand-built leg, not a claim. **P8 closed it**: `-Extra` (§15.1
 that matches a cold discovery (§15.3.1) produced exactly that leg — `dlc: PASS`, with the pacing armed
 and restored inside it.
 
-`scripts\acceptance_song.ps1 -Runs 1` was then run with the pacing on — §14.10.
+`scripts\acceptance\acceptance_song.ps1 -Runs 1` was then run with the pacing on — §14.10.
 
 ## 14.10 The song leg: red, and not because of P7
 
-`scripts\acceptance_song.ps1 -Runs 1` **FAILED (exit 1, `launch-to-results: 0 / 1`)** — and every part of
+`scripts\acceptance\acceptance_song.ps1 -Runs 1` **FAILED (exit 1, `launch-to-results: 0 / 1`)** — and every part of
 that failure is independent of this prompt:
 
 | reading | value | what it says |
@@ -1260,7 +1260,7 @@ timeouts are the knob for that (`-BootTimeoutSec`, `-ScreenTimeoutSec`), not the
 | --- | --- |
 | `cmake --build --preset win-amd64-release` | green |
 | `ctest --test-dir out\build\win-amd64-release --output-on-failure` | **22/22** — 21 when the prompts above ran, and the 22nd (`menu_music_pool`, R9's menu-music pool) arrived while this plan was being worked on; it passes with the rest |
-| `scripts\apply_sdk_patches.ps1` | **exit 0** — patches 0001–0014 applied, nothing unexpected inside the submodule |
+| `scripts\setup\apply_sdk_patches.ps1` | **exit 0** — patches 0001–0014 applied, nothing unexpected inside the submodule |
 | relative links across the five docs this plan touched | **0 broken** |
 | machine paths (`D:\Gabriel`, `C:\Users`, usernames) in the files this plan touched | **none** |
 | the edited acceptance scripts | parse with **0 errors** (`System.Management.Automation.Language.Parser`) |

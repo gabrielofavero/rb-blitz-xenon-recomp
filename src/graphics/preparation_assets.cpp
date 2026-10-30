@@ -48,7 +48,7 @@ uint32_t RI(uint32_t d, uint32_t v, int r, unsigned s, unsigned e) {
 }
 using Words = std::array<uint32_t, 3>;
 using Element = std::array<uint32_t, 7>;
-// Same declaration linker as scripts/shader_vertex_link.py / sub_82521908.
+// Same declaration linker as scripts/shaders/shader_vertex_link.py / sub_82521908.
 Words LinkFetch(Words w, const Element* e, const std::array<uint32_t, 16>& strides,
                 const std::array<uint32_t, 8>& masks) {
   auto [a, b, c] = w;

@@ -2273,7 +2273,7 @@ bool ClearDetailsFooterOption(std::vector<ui::dtb::Node>* store_info_roots, std:
   if (enter == nullptr) {
     return refuse("the record carries no store_info_panel enter method");
   }
-  // Both inline-help objects the details scene declares (`python scripts/hmx_milo.py list
+  // Both inline-help objects the details scene declares (`python scripts/assets/hmx_milo.py list
   // assets/game/360/ui/store/gen/store_info.milo_xbox`): the page draws `store_info.ihp`, and
   // `view_offer.ihp` sits in the recommendation area, so both are cleared rather than guessing
   // which one the caption comes from.

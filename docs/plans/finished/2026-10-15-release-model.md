@@ -58,7 +58,7 @@ a release.
 | The payload snapshot rebuilds cleanly | `make_payload.ps1 -Clean -Commit <HEAD>` → exit 0, `payload snapshot: 9 files, 62.5 MiB`; `out/_swap/installer/make-payload-clean.log` (Windows PowerShell 5.1's `Remove-Item -Recurse` had aborted one rebuild with a spurious "Could not find file"; the script deletes with `[System.IO.Directory]::Delete` now) | 2026-10-15 |
 | The helper suite passes | `ctest --preset installer-release` → 1/1 test; `installer/tests/installer_tests.cpp` | 2026-10-15 |
 | The built installer installs | silent install → exit 0; `install-manifest.toml` records `payload_commit = "4e065474…"`, 9 payload files / 65,519,000 bytes, `fingerprints_matched = true`; `out/_swap/installer/silent-install-manifest.toml` | 2026-10-15 |
-| The setup executable names itself with the pinned version | `scripts/acceptance_product_titles.ps1` derives `Setup - Rock Band Blitz <version>` from the file name and reads it from the window when it can open one; the wizard's own question on this machine reads "Rock Band Blitz 0.1.0 is already installed…" (`out/_swap/titles/pinned-window2.png`) | 2026-10-15 |
+| The setup executable names itself with the pinned version | `scripts/acceptance/acceptance_product_titles.ps1` derives `Setup - Rock Band Blitz <version>` from the file name and reads it from the window when it can open one; the wizard's own question on this machine reads "Rock Band Blitz 0.1.0 is already installed…" (`out/_swap/titles/pinned-window2.png`) | 2026-10-15 |
 | Controller Settings has no update check and still passes everything | `ctest --test-dir out\build\rename-tests` → 38/38 (was 39: the update suite is the one that went) | 2026-10-15 |
 
 ## 4. Limits and what is next (honest, dated)
@@ -83,6 +83,6 @@ a release.
 | the build | `installer/build.ps1` (one product, run from the checkout), `installer/config/pins.toml` (`[installer] version`; `[payload] commit = "HEAD"`), `installer/tools/make_payload.ps1` (the payload snapshot) |
 | the wizard | `installer/setup.iss` (`AppVerName`), `installer/tools/embed_config.cpp` (pins -> `pins.iss` and `embedded_config.h`) |
 | the pipeline | `.github/workflows/builds.yml` (tag -> release, one file) |
-| the harness | `scripts/acceptance_product_titles.ps1` |
+| the harness | `scripts/acceptance/acceptance_product_titles.ps1` |
 | the tests | `installer/tests/installer_tests.cpp` |
 | the docs | `installer/README.md`, `docs/README.md`, `docs/reference/known-issues.md`, and the Controller Settings removal's own doc trail |

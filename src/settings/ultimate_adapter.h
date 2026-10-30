@@ -85,7 +85,7 @@ std::string_view RecordName(Record record);
 // 2. The ark index
 // ------------------------------------------------------------------------------------------------
 // An independent reader for the payload's own container format (Harmonix ARK v6, the same one
-// `scripts/hmx_ark.py` reads: a Park-Miller LCG stream cipher over the header, then a versioned
+// `scripts/assets/hmx_ark.py` reads: a Park-Miller LCG stream cipher over the header, then a versioned
 // index). Only what this module needs is implemented - the index, never the entry bodies beyond
 // the one slice a record occupies - and nothing here is a port of the Python tool.
 

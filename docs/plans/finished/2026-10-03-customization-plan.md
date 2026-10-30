@@ -76,8 +76,8 @@ already owns. A prompt below never ships a user-visible enhancement; it makes on
 | A symbol/analysis inventory | [symbols.md](../../reference/symbols.md) — image identity, sections, imports, function counts, the three forced entries | the address book every flow map extends |
 | A working texture path | `hmx_tex.py` (DXT1/DXT5, mip-aware) and `hmx_ark.py` (index + extract) **[tree]** [assets.md](../../guides/assets.md) | R4's icons can move through the byte-length-locked ark swap or the payload overlay *today* |
 | A working overlay route with no repack | `gen/patch_xbox.*` in a payload directory, merged by `src/fs/payload_overlay.*` **[tree]** [assets.md](../../guides/assets.md) | preferred asset route for R1/R4/R9 until the scene rewrite lands |
-| A MILO scene reader/rewriter, partially | `scripts/hmx_milo.py`, `tools/milotex`, and the §10.4 state of the research **[tree]** [launcher-plan.md](2026-09-27-launcher-plan.md) §10.4 | the one open detail (where a texture buffer starts in a chunk) blocks reading art *and* scene edits generally |
-| Scripted UI observation | `scripts/drive_ui.ps1`, `scripts/capture_window.ps1`, `scripts/ocr_image.ps1`, `scripts/frame_diff.ps1`, `scripts/dump_guest_memory.ps1`, `scripts/sample_thread.ps1`, `scripts/scan_process_strings.ps1` **[tree]** [launcher-plan.md](2026-09-27-launcher-plan.md) §10.3 | the raw pieces of §5's harness exist; nothing joins them or pins a baseline |
+| A MILO scene reader/rewriter, partially | `scripts/assets/hmx_milo.py`, `tools/milotex`, and the §10.4 state of the research **[tree]** [launcher-plan.md](2026-09-27-launcher-plan.md) §10.4 | the one open detail (where a texture buffer starts in a chunk) blocks reading art *and* scene edits generally |
+| Scripted UI observation | `scripts/diagnostics/drive_ui.ps1`, `scripts/diagnostics/capture_window.ps1`, `scripts/diagnostics/ocr_image.ps1`, `scripts/diagnostics/frame_diff.ps1`, `scripts/diagnostics/dump_guest_memory.ps1`, `scripts/diagnostics/sample_thread.ps1`, `scripts/diagnostics/scan_process_strings.ps1` **[tree]** [launcher-plan.md](2026-09-27-launcher-plan.md) §10.3 | the raw pieces of §5's harness exist; nothing joins them or pins a baseline |
 | A mouse-driven menu layer | `src/input/mouse_ui.{h,cpp}`, `src/input/ui_nav.h`, `src/input/nav_detect.h`, `tests/ui_nav_tests.cpp` **[tree]** | R6 starts from a measured, working synthetic pad, plus the aligner that already measures row pitch per screen |
 | Host-side DLC layout work | `src/fs/dlc_layout.h`, `tests/dlc_layout_tests.cpp`, the enumeration facts in [dlc.md](../../guides/dlc.md) §1–§2 | R7's cache wraps a path that is already understood and tested |
 | A settings surface to hang toggles on | [launcher-plan.md](2026-09-27-launcher-plan.md) D2/D12, `rb_blitz.toml` and the flat cvar table | this plan only has to define the guest-side toggle names |
@@ -322,7 +322,7 @@ Contract 2 — **the research artifact** (P4): the `docs/engine/<area>.md` shape
 question, a table of addresses with evidence tags, the flow, and an "open" section. Every flow-map
 prompt writes into it.
 
-Contract 3 — **the harness interface** (P3): `scripts/observe_ui.ps1 -State <name> [-Compare <base>]`
+Contract 3 — **the harness interface** (P3): `scripts/diagnostics/observe_ui.ps1 -State <name> [-Compare <base>]`
 returns a JSON report (`state`, `capture`, `ocr`, `diff vs baseline`, `pass`). Prompts call it; they
 do not re-invent capture logic.
 
@@ -446,8 +446,8 @@ Lanes: **P** platform/prep, **S** symbols & flow, **R** resolution & layout, **U
 
 #### P3 — Scripted observation harness
 
-> **Landed 2026-10-04.** [scripts/observe_ui.ps1](../../../scripts/observe_ui.ps1) (the harness),
-> [scripts/ui_states.ps1](../../../scripts/ui_states.ps1) (the one state table: route, needle, settle,
+> **Landed 2026-10-04.** [scripts/diagnostics/observe_ui.ps1](../../../scripts/diagnostics/observe_ui.ps1) (the harness),
+> [scripts/diagnostics/ui_states.ps1](../../../scripts/diagnostics/ui_states.ps1) (the one state table: route, needle, settle,
 > per-state `MaxDiff` and optional `Crop`) and [docs/engine/diagnostics.md (part 2, the observer)](../../engine/diagnostics.md).
 > It joins `drive_ui.ps1`, `capture_window.ps1`, `ocr_image.ps1` and `frame_diff.ps1` as child scripts
 > rather than re-implementing any of them, reports one JSON object, and exits non-zero when the state
@@ -463,7 +463,7 @@ Lanes: **P** platform/prep, **S** symbols & flow, **R** resolution & layout, **U
 > the spread the 2.5 % ceilings were drawn from and withdrew them**: the same state came back at
 > 18.28 %, 10.74 % and 1.894 %, so both aurora screens carry `Settled = $false` and no run gates on
 > their diff.
-> **Goal.** Join the existing scripts into one harness: `scripts/observe_ui.ps1 -State <name>
+> **Goal.** Join the existing scripts into one harness: `scripts/diagnostics/observe_ui.ps1 -State <name>
 > [-Compare <baseline>] [-Ocr]`, driving `drive_ui.ps1` to a named state, capturing with
 > `capture_window.ps1`, reading static text with `ocr_image.ps1`, diffing with `frame_diff.ps1`, and
 > returning one JSON report. Name the states once, in the script (splash, title, main menu, song
@@ -501,7 +501,7 @@ table, which `[functions]` cannot name.
 
 #### E1 — Baseline capture set and noise floor
 
-> **Landed 2026-10-04, with the noise floor as the correction.** [scripts/observe_baseline.ps1](../../../scripts/observe_baseline.ps1)
+> **Landed 2026-10-04, with the noise floor as the correction.** [scripts/diagnostics/observe_baseline.ps1](../../../scripts/diagnostics/observe_baseline.ps1)
 > produced the set — `out/observations/baseline/caa1e18c3c6c/` (`<build>` = the executable's SHA-256,
 > first 12 digits), one PNG + JSON per state plus a `summary.json`, with `-Resume` so an interrupted
 > fourteen-boot run does not start over — and the floors are recorded in
@@ -624,7 +624,7 @@ table, which `[functions]` cannot name.
 > chunk. This unblocks reading *and writing* scene art (R2, R4, U2) instead of only swapping whole
 > ark entries.
 > **Deliverable.** `docs/engine/asset-model.md` with the record layout and a worked derivation for
-> `buttons.milo_xbox`; `scripts/hmx_milo.py` gains `extract`/`import` for one texture, proven by
+> `buttons.milo_xbox`; `scripts/assets/hmx_milo.py` gains `extract`/`import` for one texture, proven by
 > replacing the glyph sheet with a solid colour and seeing the prompt band change.
 > **Verify.** The glyph table's rectangles all fit the sheet and the derived offset matches the known
 > last-262,144-bytes result for `buttons.milo_xbox`; a swap visibly changes the prompts (same-build
@@ -658,7 +658,7 @@ table, which `[functions]` cannot name.
 > `check_trial` statement, the array verbatim from both shipped files, the loader's conditional
 > behaviour, the edit shape and the runs that prove it. The "probe that dumps every option id + label"
 > this goal asked for is the boot log's own record instead: the read hook names the file it patched
-> (size + digest) and the rows it removed, and `scripts/observe_ui.ps1 -State main-menu -Ocr` reads the
+> (size + digest) and the rows it removed, and `scripts/diagnostics/observe_ui.ps1 -State main-menu -Ocr` reads the
 > resulting labels back. R5 ([src/ui/menu_options.cpp](../../../src/ui/menu_options.cpp),
 > [src/hooks/menu_filter.cpp](../../../src/hooks/menu_filter.cpp)) is the filter, and it is off by
 > default. **R10 landed with it:** the same module and the same hook also rename the mod's own
@@ -902,7 +902,7 @@ table, which `[functions]` cannot name.
 > in the log and no dirty-disc screen. The edit is proven offline against the retail file too:
 > 11,646 bytes in and out, `removed = added = 518`, root arity `84 → 68`, and the patched file parses
 > exactly to its end. The harness carries the pair as
-> [scripts/ui_states.ps1](../../../scripts/ui_states.ps1)'s `offline-prompt` state and its
+> [scripts/diagnostics/ui_states.ps1](../../../scripts/diagnostics/ui_states.ps1)'s `offline-prompt` state and its
 > `RBBLITZ_SKIP_OFFLINE_PROMPTS` knob.
 >
 > **Don't.** Still holds: the edit performs the two transitions the buttons would, in the order they
@@ -912,7 +912,7 @@ table, which `[functions]` cannot name.
 #### E2 — Acceptance extensions for enhancements
 
 > **Goal.** Extend the existing acceptance scripts
-> (`scripts/acceptance_launches.ps1`, `acceptance_screens.ps1`, `acceptance_song.ps1`,
+> (`scripts/acceptance/acceptance_launches.ps1`, `acceptance_screens.ps1`, `acceptance_song.ps1`,
 > `acceptance_persistence.ps1`, `acceptance_ultimate.ps1`) with the enhancement assertions this plan
 > produced: offline skip on/off, non-16:9 state captures, a swapped icon under OCR control, and a DLC
 > cache hit/miss. Keep each new assertion opt-in so the release acceptance stays green with every
@@ -1021,7 +1021,7 @@ it is cheaper to learn that now than after R1's and R4's asset work.
 | R4 a swapped icon is drawn by the guest and nothing else moved | hash of untouched entries + baseline diff + OCR control | A1, A2 |
 | R5 hiding is a model change, not a paint change | option-list probe matches the capture before, and navigation still reaches every remaining row | U1, D12 |
 | R6 input waves each have one measurable acceptance | per-wave capture/log evidence named in the wave list | I2 |
-| R7 the cache is correct and never hides a package | `ctest -R dlc_cache` plus a cold/warm boot timing, plus the menu row's press in a running title (log, cache file mtime, no fault); `scripts/acceptance_song.ps1 -DlcLibrary` and `scripts/acceptance_save.ps1` both pass with the toggle on | D1, D2 |
+| R7 the cache is correct and never hides a package | `ctest -R dlc_cache` plus a cold/warm boot timing, plus the menu row's press in a running title (log, cache file mtime, no fault); `scripts/acceptance/acceptance_song.ps1 -DlcLibrary` and `scripts/acceptance/acceptance_save.ps1` both pass with the toggle on | D1, D2 |
 | R8 forcing is opt-in, backed up, and idempotent | `ctest -R controller_scheme` plus two boots (forced, already-correct) | D3 |
 | R9 main-menu songs follow the content | probe list before/after DLC load + capture | C1 |
 | The maps are trustworthy | every address resolves to a name; a fresh session can answer "who builds the song list" from docs only | S2–S8, E3 |
@@ -1092,8 +1092,8 @@ Anything not in this table is not verified, and should be said out loud rather t
   `src/fs/payload_overlay.h`, `src/fs/dlc_layout.h`.
 - `rexglue-sdk/src/ui/window.cpp:50-62` (guest video mode / `resolution`),
   `rexglue-sdk/src/ui/presenter.cpp:32-41` (letterbox / safe area).
-- Harness: `scripts/drive_ui.ps1`, `scripts/capture_window.ps1`, `scripts/ocr_image.ps1`,
-  `scripts/frame_diff.ps1`, `scripts/dump_guest_memory.ps1`, `scripts/sample_thread.ps1`,
-  `scripts/scan_process_strings.ps1`, `scripts/hmx_ark.py`, `scripts/hmx_tex.py`,
-  `scripts/hmx_milo.py`, `tools/milotex`.
+- Harness: `scripts/diagnostics/drive_ui.ps1`, `scripts/diagnostics/capture_window.ps1`, `scripts/diagnostics/ocr_image.ps1`,
+  `scripts/diagnostics/frame_diff.ps1`, `scripts/diagnostics/dump_guest_memory.ps1`, `scripts/diagnostics/sample_thread.ps1`,
+  `scripts/diagnostics/scan_process_strings.ps1`, `scripts/assets/hmx_ark.py`, `scripts/assets/hmx_tex.py`,
+  `scripts/assets/hmx_milo.py`, `tools/milotex`.
 - Acceptance: `scripts/acceptance_*.ps1`; tests: `tests/check.h` and the `tests/*_tests.cpp` set.

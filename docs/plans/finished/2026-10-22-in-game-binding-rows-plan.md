@@ -136,7 +136,7 @@ the row's index) are cheap to test **with DTA only**, before any bridge work.
 | --- | --- | --- | --- |
 | B1 | Prove a list draws host-shaped text rows and that `selected_pos` identifies the press | A diagnostic page in the generated surface (behind a diagnostic cvar) whose fill is `{array ("Confirm: A, Enter" "Go Back: B, Escape")}` and whose `select_row` switches on `{<list>.lst selected_pos}` | One boot: OCR reads both lines, a press dispatches by index, zero fault lines |
 | B2 | Deliver host text to the guest | `read_file` overridden with the same strong-`REX_FUNC` + forward pattern as `file_exists`; the op `rbbz-settings/text/<panel>` answers a DataArray of `sub_8245C878`-interned strings built in an `Allocate`d guest buffer; an SDK-free text composer (page → row lines) with unit tests | ctest for the composer; one boot where a literal-free page draws the composed lines |
-| B3 | Author the live pages | Interface Mapping tree (top page, Navigation, Music Library Options, each row's Assign/Reset page) fills from the op and dispatches by index; the index table is pinned against `PanelRowSymbols` | Live acceptance (`scripts/acceptance_controls.ps1`, `scripts/acceptance_binding_rows.ps1`): values follow a capture and a Reset All without re-entering the surface |
+| B3 | Author the live pages | Interface Mapping tree (top page, Navigation, Music Library Options, each row's Assign/Reset page) fills from the op and dispatches by index; the index table is pinned against `PanelRowSymbols` | Live acceptance (`scripts/acceptance/acceptance_controls.ps1`, `scripts/acceptance/acceptance_binding_rows.ps1`): values follow a capture and a Reset All without re-entering the surface |
 | B4 | Retire the overlay | Delete `DrawBindingRows` and its per-frame geometry use; keep the caption strip; update `docs/settings/plan.md` §3 (the Interface Mapping row's "draws the inputs it currently holds"), `docs/reference/known-issues.md` if the limitation is recorded, `docs/settings/status.md`, and this plan's status | `python .github/skills/documentation/scripts/check_docs.py`; a capture of the page with no host pixels |
 
 ## 5. Open questions
@@ -157,6 +157,6 @@ the row's index) are cheap to test **with DTA only**, before any bridge work.
   (2026-10-22).
 - The surface as text: `out\build\win-amd64-release\rb_blitz_settings_screen_tests.exe dump-def
   settings_interface_mapping` (and `dump-def settings_interface_navigation`).
-- The current overlay's behaviour: `scripts\acceptance_binding_rows.ps1` (24 steps) — the run whose
+- The current overlay's behaviour: `scripts\acceptance\acceptance_binding_rows.ps1` (24 steps) — the run whose
   captures show the host rectangles.
 - Docs check: `python .github/skills/documentation/scripts/check_docs.py`.

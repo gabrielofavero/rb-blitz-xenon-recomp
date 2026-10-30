@@ -519,7 +519,7 @@ void TestStoreEntryBypassSurvivesCompileAndParse() {
 
 // `dump-menu <file.dtb>`: prints the row symbols of the main menu's option array and the case
 // names of its dispatch switch. This is the *measurement* half of the row edits: a boot's payload
-// can be extracted from its generated ark (scripts/hmx_ark.py extract) and checked here, which is
+// can be extracted from its generated ark (scripts/assets/hmx_ark.py extract) and checked here, which is
 // what tells "the row was authored" apart from "the row is in the record the guest loads".
 int DumpMenu(const char* path) {
   std::ifstream stream(path, std::ios::binary);

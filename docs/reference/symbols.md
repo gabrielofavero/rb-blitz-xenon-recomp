@@ -1,7 +1,7 @@
 # Rock Band Blitz — Symbol & Analysis Inventory
 
 Generated from the first codegen trace (`out/codegen-trace.log`) and the
-plaintext XEX2 header (`scripts/parse_xex2_header.py`). Codegen completed with
+plaintext XEX2 header (`scripts/xex/parse_xex2_header.py`). Codegen completed with
 **0 analysis errors** on 2026-09-09.
 
 ## Image identity
@@ -289,7 +289,7 @@ Measured on 2026-09-30, with a `REXLOG_INFO` in front of each of the 21 bridge s
 `sub_82768C88`, the MOGG header parser, to prove the channel logs: it fired 2,164
 times in a 40 s boot): **no run reaches either bridge.** A 40 s boot to the title
 screen and the whole offline route — boot → menu → song list → a 315 s song → the
-results screen (`scripts/acceptance_song.ps1 -Runs 1`, pass) — execute 0 of the 21
+results screen (`scripts/acceptance/acceptance_song.ps1 -Runs 1`, pass) — execute 0 of the 21
 sites; the same route on the clean tree passes as well. So
 the engine's `setjmp`/`longjmp` are error-path only: the bridge is correct by
 construction, and it is not what a happy-path crash would be, which disposes of the

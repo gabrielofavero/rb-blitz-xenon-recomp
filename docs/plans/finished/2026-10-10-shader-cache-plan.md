@@ -751,7 +751,7 @@ Implementation update, 2026-10-24:
   and the P1 completion defect remained unfixed at that point (**superseded** by the
   P1 record below, which replaces the D3D12 preload barrier and moves the two
   instrumentation sites it owned into patch 0021).
-- Added `scripts/shader_cache_trace.py`, the production-parser-based
+- Added `scripts/shaders/shader_cache_trace.py`, the production-parser-based
   `rb_blitz_loading_record_inspect` host tool, actual runtime-counter tests and report
   attribution tests. Preparation creates isolated cache/save/settings copies and an
   inert launcher; collection preserves comparisons and reports unresolved gaps.
@@ -920,7 +920,7 @@ for a runtime record stem instead of whole blobs; then model the vertex transfor
 
 #### P2 first resolver and coverage blocker, 2026-10-24 (superseded below)
 
-- Added `scripts/shader_asset_resolver.py`, the built
+- Added `scripts/shaders/shader_asset_resolver.py`, the built
   `rb_blitz_shader_microcode_hash` helper and ctest `shader_asset_resolver`.
   The resolver reads effective installed retail/Ultimate ARKs using actual overlay
   and patch/main precedence, fingerprints content, indexes stage/hash/permutation
@@ -964,7 +964,7 @@ Details, commands, hashes, local evidence paths and the remaining linker work:
 
 #### P2 completed for the current candidate, 2026-10-24
 
-- Reproduced `sub_82521908` in bounded `scripts/shader_vertex_link.py`: source fetch
+- Reproduced `sub_82521908` in bounded `scripts/shaders/shader_vertex_link.py`: source fetch
   table parsing, declaration matching, component swizzles, stream/offset/format
   fields, sorting, prefetch counts and mini-fetch coalescing. Four static vertex
   declarations come from the supported installed executable. The fifth is FVF 450,
@@ -1014,7 +1014,7 @@ proof that arbitrary DLC/custom content can never add a pipeline.
 
 Implementation update, 2026-10-24:
 
-- New `scripts/shader_pipeline_catalogue.py` reads the renderer's own
+- New `scripts/shaders/shader_pipeline_catalogue.py` reads the renderer's own
   `*.d3d12.xpso` / `*.vk.xpso` stores, validates the 12-byte header and every record's
   `XXH3_64bits(description)` with the SDK hash helper, decodes both packed
   `PipelineDescription` layouts (64-byte D3D12 / 60-byte Vulkan), deduplicates by
@@ -1476,7 +1476,7 @@ worst frames and measured warm-boot behavior; do not promise universal absence o
 
 Implementation update, 2026-10-25 (harness delivered; **no row run yet**):
 
-- New `scripts/shader_cache_p8.py` reuses P0's preparation/collection machinery
+- New `scripts/shaders/shader_cache_p8.py` reuses P0's preparation/collection machinery
   (`shader_cache_trace.py`) and adds the matrix, deterministic fixtures and
   acceptance. Commands: `configure`, `plan`, `prepare <row>` / `prepare-next`,
   `collect <row> --observations`, `accept <row>` (writes `acceptance.json`, exits 1
@@ -1564,7 +1564,7 @@ Second run, 2026-10-25 - **`p8-d3d12-ultimate-rtv-cold-r2` is guest-clean**:
   GPU frames stayed under 46.7 ms. This is a song-start stall unrelated to shader
   work and is reported unresolved; diagnosing it needs a resource/asset
   instrument, not more preparation.
-- Tooling: `scripts/shader_cache_p8.py` now reports guest and helper work as
+- Tooling: `scripts/shaders/shader_cache_p8.py` now reports guest and helper work as
   separate checks (tests 9/9, ctest `shader_cache_p8_tools` green).
 
 Warm run, 2026-10-25 - **`p8-d3d12-ultimate-rtv-warm` exposed a P7 defect**:

@@ -7,7 +7,7 @@
 //
 // The property that matters, and the reason this file exists: **the extended archive keeps the
 // shape the title can read.** Every archive Rock Band Blitz ships or reads declares exactly one
-// part (measured 2026-10-12 with `scripts/hmx_ark.py list`: `main_xbox.hdr` -> one part,
+// part (measured 2026-10-12 with `scripts/assets/hmx_ark.py list`: `main_xbox.hdr` -> one part,
 // `patch_xbox.hdr` -> one part). Extending the mounted patch by *adding* a second part - which is
 // what this code used to do - produced an Ultimate boot that re-read the generated part forever and
 // never presented (docs/settings/status.md (part 2, the black startup)). So: one part in, one part
@@ -108,7 +108,7 @@ ArkIndex MountedIndex(size_t part_size) {
 }
 
 // The v6 rule the reader implements: an entry's offset is absolute across the ark's parts, so it
-// selects a part by accumulating the sizes. `scripts/hmx_ark.py check_layout` is the same check.
+// selects a part by accumulating the sizes. `scripts/assets/hmx_ark.py check_layout` is the same check.
 bool FitsAnArkPart(const ArkIndex& index, const ArkEntry& entry, std::string* why) {
   uint64_t remaining = entry.offset;
   for (size_t i = 0; i < index.parts.size(); ++i) {

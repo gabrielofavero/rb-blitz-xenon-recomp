@@ -1283,7 +1283,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
 // **One part, always - this is the whole point of `mounted_part`.** Every archive this title
 // ships or reads declares exactly one part (`game/gen/main_xbox.hdr`: `gen/main_xbox_0.ark`;
 // `game/ultimate/gen/patch_xbox.hdr`: `gen/patch_xbox_0.ark`, measured 2026-10-12 with
-// `scripts/hmx_ark.py list`). Growing the ark by *adding* a second part - which is what this
+// `scripts/assets/hmx_ark.py list`). Growing the ark by *adding* a second part - which is what this
 // function used to do - produced the title's only two-part ark, and an Ultimate boot that read the
 // generated part forever and never presented (docs/settings/status.md (part 2, the black startup)).
 // So when the mounted index has a single part, its bytes are carried into the new part unchanged

@@ -25,7 +25,7 @@ namespace {
 // --- the file's own obfuscation -------------------------------------------
 
 // Park-Miller with Schrage's division, spelled the way the title spells it
-// (scripts/hmx_ark.py, docs/guides/assets.md "dtb").
+// (scripts/assets/hmx_ark.py, docs/guides/assets.md "dtb").
 constexpr int32_t kLcgMod = 0x7FFFFFFF;
 constexpr int32_t kLcgDiv = 0x1F31D;  // 2147483647 / 16807
 constexpr int32_t kLcgMul = 0x41A7;   // 16807

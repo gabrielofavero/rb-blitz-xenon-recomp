@@ -68,7 +68,7 @@ python .github/skills/documentation/scripts/check_docs.py
   scripted text edit must not translate newlines — read and write with `newline=""` (or bytes) — or
   whole files flip to LF and pollute the diff. The scripts in the documentation skill already do this.
 - **The SDK is patch-driven.** Changes to `rexglue-sdk/` land as a patch under `patches/`, applied by
-  `scripts/apply_sdk_patches.ps1` (see `patches/README.md`). Never hand-edit the submodule and never
+  `scripts/setup/apply_sdk_patches.ps1` (see `patches/README.md`). Never hand-edit the submodule and never
   `git checkout` inside it — a patch owns those files.
 - **Gates.** The toolchain record (`config/toolchain.toml`) and the game-data fingerprint
   (`game/default.xex`) are deliberate gates; see `docs/guides/toolchain.md` and
