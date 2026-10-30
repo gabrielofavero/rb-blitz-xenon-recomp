@@ -1,9 +1,10 @@
-# Proposed authored layout manifest (version 2)
+# Controller scheme v2 format (proposed)
 
 Each non-template art folder has a `scheme.toml`. This is an authoring contract
 for the later runtime implementation. The current version 1 loader rejects these
-manifests; the art folders are not installed as schemes today. `pads/pad.svg` is
-temporary reference art and is deliberately not listed in any manifest.
+manifests; the art folders are not installed as schemes today. Each layout's
+editable `pad.svg` and source `pad.png` live under
+`assets/controller/masters/<layout-id>/` and are not listed in any manifest.
 
 ```toml
 schema_version = 2
@@ -26,8 +27,19 @@ source = "sdl:button:misc1"    # SDL's distinct Share button source
 Controller v2 manifests may also use the v1 optional `[controller]`,
 `[controller.slots]`, and `[icons]` PNG fields for pad diagrams and the whole
 extra-icon sheet. Their fit, precedence, and omitted-slot fallback rules stay
-the same. The current authored folders declare no pad PNGs; `pads/pad.svg` is
-temporary and cannot be used in these fields.
+the same. Xbox Series declares `pads/pad_0.png` through `pads/pad_3.png` for
+`xbox_0` through `xbox_3`. Run `python scripts/generate_xbox_series_pads.py`
+to regenerate them from the authoring
+[`pad.png`](../../assets/controller/masters/xbox-series/pad.png),
+[`ps3-arrow.svg`](../../assets/controller/masters/ps3-arrow.svg), and the four
+[`pad_N-arrows.svg`](../../assets/controller/masters/xbox-series/pad_0-arrows.svg)
+route masters. The generator requires Pillow, NumPy, and OpenCV. Each route SVG
+keeps its original Xbox 360 texture's outer text anchors fixed; the generator
+joins the arrow shapes before applying the PS3 color profile and checks branch
+clearance and continuous arrow pixels. The other authored folders still declare
+no pad PNGs.
+The files in `masters/` are authoring sources; manifests reference finished
+images in their layout folders.
 
 `[[input]]` binds an image to a physical source. A source may have more than
 one image entry (different shapes or legends); the entry without `variant` or

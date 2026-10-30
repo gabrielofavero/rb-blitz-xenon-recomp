@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-64 -24 72 48">
+  <title>PS3 style controller callout arrow</title>
+  <desc>The cyan polygon is the reusable head silhouette. Its tip is at 0,0 and its shaft enters from the left.</desc>
+  <metadata id="raster-depth-profile">#9cdfef #9cdfef #9cdfef #44c3e3 #18b6de #02b0d8 #00aed6</metadata>
+  <defs>
+    <linearGradient id="cyan-profile" x1="0" y1="-7" x2="0" y2="7" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9cdfef"/>
+      <stop offset="0.14" stop-color="#9cdfef"/>
+      <stop offset="0.29" stop-color="#44c3e3"/>
+      <stop offset="0.43" stop-color="#18b6de"/>
+      <stop offset="0.5" stop-color="#00aed6"/>
+      <stop offset="0.71" stop-color="#18b6de"/>
+      <stop offset="0.86" stop-color="#9cdfef"/>
+      <stop offset="1" stop-color="#9cdfef"/>
+    </linearGradient>
+    <polygon id="cyan-head" points="-34,-6.5 -21,-6.5 -21,-13 -18,-13 0,0 -18,13 -21,13 -21,6.5 -34,6.5"/>
+  </defs>
+  <path d="M -64,0 H -28" fill="none" stroke="#000" stroke-width="19"/>
+  <use href="#cyan-head" fill="#00aed6" stroke="#000" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M -64,0 H -28" fill="none" stroke="url(#cyan-profile)" stroke-width="13"/>
+  <use href="#cyan-head" fill="#00aed6"/>
+</svg>

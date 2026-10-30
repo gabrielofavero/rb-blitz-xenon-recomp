@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Xbox Series pad 0 callout routes</title>
+  <desc>Rail heights, outer ends, and junctions are measured from template-360/pads/pad_0.png. Arrow tips follow Xbox Series control edges.</desc>
+  <image id="pad-reference" href="pad.png" x="100" y="245" width="824" height="553"
+         preserveAspectRatio="none" opacity="0.65"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
+    <polyline id="left_trigger" points="246,265 309,303"/>
+    <polyline id="left_bumper" points="169,265 303,343"/>
+    <polyline id="right_trigger" points="776,265 719,303"/>
+    <polyline id="right_bumper" points="853,265 746,344"/>
+    <polyline id="left_stick" points="86,760 294,528"/>
+    <polyline id="dpad" points="289,760 399,637"/>
+    <polyline id="right_stick" points="698,758 631,637"/>
+    <polyline id="a_button" points="913,758 720,556"/>
+    <polyline id="x_button" points="867,660 708,486 678,486"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="14">
+    <line id="top-left" x1="16" y1="265" x2="246" y2="265"/>
+    <line id="top-right" x1="776" y1="265" x2="1009" y2="265"/>
+    <line id="bottom-left" x1="16" y1="760" x2="289" y2="760"/>
+    <line id="bottom-right" x1="698" y1="758" x2="1009" y2="758"/>
+    <line id="middle-right" x1="867" y1="660" x2="1009" y2="660"/>
+  </g>
+</svg>

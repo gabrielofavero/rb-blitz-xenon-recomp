@@ -2,9 +2,12 @@
 
 > **Authored layouts in this checkout:** The non-template folders directly under
 > `assets/controller/` now contain proposed `schema_version = 2` manifests. See
-> [the v2 layout contract](layout-v2.md). The current game and validator only
+> [the v2 controller scheme format](../../docs/guides/controller-scheme-v2-format.md). The current game and validator only
 > implement the version 1 format described below; these authored layouts will
 > become selectable after the planned loader and input-source code changes.
+
+Editable controller art and source pad PNGs live in [masters](masters/README.md);
+layout folders contain the PNGs used by the game.
 
 A layout is a folder containing `scheme.toml` and at least one original button or
 controller image. The game reads layouts at startup. You can change between installed

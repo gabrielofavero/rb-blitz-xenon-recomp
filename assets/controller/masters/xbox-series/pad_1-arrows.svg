@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Xbox Series pad 1 callout routes</title>
+  <desc>Text rail placement follows template-360/pads/pad_1.png. Arrow tips follow Xbox Series control edges.</desc>
+  <image id="pad-reference" href="pad.png" x="100" y="245" width="824" height="553"
+         preserveAspectRatio="none" opacity="0.65"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
+    <polyline id="left_trigger" points="248,264 309,303"/>
+    <polyline id="left_bumper" points="171,264 303,343"/>
+    <polyline id="right_trigger" points="778,264 719,303"/>
+    <polyline id="right_bumper" points="855,264 746,344"/>
+    <polyline id="left_stick" points="95,757 294,528"/>
+    <polyline id="dpad" points="302,757 399,637"/>
+    <polyline id="right_stick" points="700,757 631,637"/>
+    <polyline id="x_button" points="867,659 709,488 678,488"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="14">
+    <line id="top-left" x1="18" y1="264" x2="248" y2="264"/>
+    <line id="top-right" x1="778" y1="264" x2="1011" y2="264"/>
+    <line id="bottom" x1="88" y1="757" x2="1011" y2="757"/>
+    <line id="middle-right" x1="867" y1="659" x2="1011" y2="659"/>
+  </g>
+</svg>

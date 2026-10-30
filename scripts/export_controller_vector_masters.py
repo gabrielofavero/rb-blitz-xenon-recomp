@@ -4,8 +4,8 @@ These editable vector masters are source art. Runtime controller schemes still
 require PNGs; keyboard art has no runtime scheme format yet.
 
 Vector Source.svg is from https://github.com/haaldor/Xelu_prompts_SVG, the SVG
-edit of Xelu's Free Prompts Pack; both are CC0 1.0. Credits, the Steam Deck
-COCOGOOSE font caveat, and the checked dates are in masters/README.md.
+edit of Xelu's Free Prompts Pack; both are CC0 1.0. Credits and the Steam Deck
+COCOGOOSE font caveat are noted in masters/README.md.
 """
 
 from copy import deepcopy
