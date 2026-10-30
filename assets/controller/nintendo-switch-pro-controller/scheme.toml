@@ -1,0 +1,160 @@
+# Proposed v2 layout; current runtime accepts v1 only.
+schema_version = 2
+id = "nintendo-switch-pro-controller"
+name = "Switch Pro"
+kind = "controller"
+
+[[input]]
+id = "a_button"
+file = "buttons/1 - A.png"
+source = "pad:a"
+slot = "a_button"
+
+[[input]]
+id = "b_button"
+file = "buttons/2 - B.png"
+source = "pad:b"
+slot = "b_button"
+
+[[input]]
+id = "x_button"
+file = "buttons/3 - X.png"
+source = "pad:x"
+slot = "x_button"
+
+[[input]]
+id = "y_button"
+file = "buttons/4 - Y.png"
+source = "pad:y"
+slot = "y_button"
+
+[[input]]
+id = "left_trigger"
+file = "buttons/5 - LT.png"
+source = "pad:left_trigger"
+slot = "left_trigger"
+
+[[input]]
+id = "right_trigger"
+file = "buttons/6 - RT.png"
+source = "pad:right_trigger"
+slot = "right_trigger"
+
+[[input]]
+id = "left_bumper"
+file = "buttons/7 - LB.png"
+source = "pad:left_shoulder"
+slot = "left_bumper"
+
+[[input]]
+id = "right_bumper"
+file = "buttons/8 - RB.png"
+source = "pad:right_shoulder"
+slot = "right_bumper"
+
+[[input]]
+id = "left_stick"
+file = "buttons/9 - LS.png"
+components = ["pad:lstick_up", "pad:lstick_down", "pad:lstick_left", "pad:lstick_right", "pad:left_thumb"]
+slot = "left_stick"
+
+[[input]]
+id = "left_stick_up"
+file = "buttons/10 - LS Up.png"
+source = "pad:lstick_up"
+slot = "left_stick_up"
+
+[[input]]
+id = "left_stick_down"
+file = "buttons/11 - LS Down.png"
+source = "pad:lstick_down"
+slot = "left_stick_down"
+
+[[input]]
+id = "left_stick_left"
+file = "buttons/12 - LS Left.png"
+source = "pad:lstick_left"
+slot = "left_stick_left"
+
+[[input]]
+id = "left_stick_right"
+file = "buttons/13 - LS Right.png"
+source = "pad:lstick_right"
+slot = "left_stick_right"
+
+[[input]]
+id = "right_stick"
+file = "buttons/14 - RS.png"
+components = ["pad:rstick_up", "pad:rstick_down", "pad:rstick_left", "pad:rstick_right", "pad:right_thumb"]
+slot = "right_stick"
+
+[[input]]
+id = "right_stick_up"
+file = "buttons/15 - RS Up.png"
+source = "pad:rstick_up"
+slot = "right_stick_up"
+
+[[input]]
+id = "right_stick_down"
+file = "buttons/16 - RS Down.png"
+source = "pad:rstick_down"
+slot = "right_stick_down"
+
+[[input]]
+id = "right_stick_left"
+file = "buttons/17 - RS Left.png"
+source = "pad:rstick_left"
+slot = "right_stick_left"
+
+[[input]]
+id = "right_stick_right"
+file = "buttons/18 - RS Right.png"
+source = "pad:rstick_right"
+slot = "right_stick_right"
+
+[[input]]
+id = "dpad"
+file = "buttons/19 - Dpad.png"
+components = ["pad:dpad_up", "pad:dpad_down", "pad:dpad_left", "pad:dpad_right"]
+slot = "dpad"
+
+[[input]]
+id = "dpad_up"
+file = "buttons/20 - Dpad Up.png"
+source = "pad:dpad_up"
+slot = "dpad_up"
+
+[[input]]
+id = "dpad_down"
+file = "buttons/21 - Dpad Down.png"
+source = "pad:dpad_down"
+slot = "dpad_down"
+
+[[input]]
+id = "dpad_left"
+file = "buttons/22 - Dpad Left.png"
+source = "pad:dpad_left"
+slot = "dpad_left"
+
+[[input]]
+id = "dpad_right"
+file = "buttons/23 - Dpad Right.png"
+source = "pad:dpad_right"
+slot = "dpad_right"
+
+[[input]]
+id = "start_button"
+file = "buttons/24 - Start.png"
+source = "pad:start"
+slot = "start_button"
+
+[[input]]
+id = "back_button"
+file = "buttons/25 - Back.png"
+source = "pad:back"
+slot = "back_button"
+
+[[input]]
+id = "capture"
+file = "buttons/C2 - Share.png"
+source = "sdl:button:misc1"

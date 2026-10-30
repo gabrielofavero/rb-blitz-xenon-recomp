@@ -159,6 +159,13 @@ that plan; it does not claim that a high-rate mode has shipped.
       gain by sourcing that art from the PS3 dump ? the button sheet is the only
       platform-different art found so far.
 
+- [ ] **Investigate UI text and star-edge pixel imperfections.** The owner reported small breaks
+      near centered menu elements on D3D12 and Vulkan. The 2026-10-29 D3D12 guest capture
+      reproduced the `Audio/Video` close-up, but a fixed screen-center seam and an upstream
+      cause remain unproven. Follow the
+      [investigation plan](../plans/todo/2026-10-29-ui-pixel-imperfections-investigation-plan.md)
+      P0–P3; fix only after the affected stage is isolated.
+
 Pixel-perfect graphics and UI upgrades, unlocked frame rate, latency tuning,
 custom-song/export compatibility, other controller backends, Linux/macOS/ARM hosts,
 packaging and auto-update, symbol-name campaigns, and mod APIs. DLC packages do load
