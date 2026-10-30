@@ -33,7 +33,7 @@
 // forward, so the no-op forwarded hook can be compared against the answering one in one boot.
 //
 // The cvar registry is read once, in Configure(), on a host thread: a guest thread must not touch
-// it (project rule, docs/plans/finished/2026-10-10-song-cache-plan.md §7). The hooks only read the
+// it (project rule, docs/plans/cancelled/2026-10-10-song-cache-plan.md §7). The hooks only read the
 // cached flags.
 
 #include "hooks/settings_bridge.h"

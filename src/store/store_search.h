@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P4 of the RhythmVerse store plan (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// P4 of the RhythmVerse store plan (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
 // §1.5, §5/P4): the search's *data* half - the typed query, its transport across the guest
 // bridge, the request it becomes, and the answer it accepts.
 //

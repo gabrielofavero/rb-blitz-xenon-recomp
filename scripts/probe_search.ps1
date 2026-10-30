@@ -1,4 +1,4 @@
-# P4 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md: the search measurement.
+# P4 of docs/plans/finished/2026-10-13-rhythmverse-store-plan.md: the search measurement.
 #
 # One boot that drives the store's own Search row and captures what the caption says. Since P9-11
 # the typing happens on the **title's own keyboard**, not on authored key pages, so a scripted boot

@@ -251,4 +251,5 @@ The button and controller layouts shipped under this directory adapt art by:
   (Nintendo Switch 1/2), Valve Software (Steam Deck)
 
 The game's own Credits screen repeats these under "Thanks To".
-[Attributions.txt](Attributions.txt) is the source record.
+[Attributions.txt](Attributions.txt) is the credit record; source URLs and
+redistribution terms are not yet verified there.

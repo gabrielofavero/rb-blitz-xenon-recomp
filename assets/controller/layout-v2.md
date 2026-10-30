@@ -23,10 +23,17 @@ file = "buttons/C1 - Share.png"
 source = "sdl:button:misc1"    # SDL's distinct Share button source
 ```
 
+Controller v2 manifests may also use the v1 optional `[controller]`,
+`[controller.slots]`, and `[icons]` PNG fields for pad diagrams and the whole
+extra-icon sheet. Their fit, precedence, and omitted-slot fallback rules stay
+the same. The current authored folders declare no pad PNGs; `pads/pad.svg` is
+temporary and cannot be used in these fields.
+
 `[[input]]` binds an image to a physical source. A source may have more than
 one image entry (different shapes or legends); the entry without `variant` or
-`modifiers`, when present, is the default. `variant` distinguishes alternate art without pretending it is a new
-physical input. `modifiers = ["shift"]` means that the glyph represents a
+`modifiers`, when present, is the default. `variant` distinguishes alternate
+art without pretending it is a new physical input. `modifiers = ["shift"]`
+means that the glyph represents a
 shifted key legend; the source remains the key's physical scancode. A future
 resolver can select a variant or modifier-specific legend explicitly. All
 keyboard and mouse entries are custom: no controller-to-keyboard translation or
@@ -80,12 +87,15 @@ spaces, such as `key:Left Shift` and `key:KP Enter`; the current parser rejects
 these even though the key sampler can resolve them. Shifted
 punctuation entries use the underlying scancode plus `modifiers`. Decorative
 whole-mouse art and OS-reserved keys/buttons are omitted. Guide, Home, Steam,
-and Power are not exposed for gameplay remapping. Their PNGs can remain in the art folder for future
-work, but a v2 packer should copy **declared files only** and should raise its
-version 1 limit of 64 files for the 95-image keyboard set.
+and Power are not exposed for gameplay remapping. Their PNGs can remain in the
+art folder for future work, but a v2 packer should copy **declared files only**
+and should raise its version 1 limit of 64 files for the keyboard folder's 92
+declared images (95 PNGs on disk).
 
 The later loader should validate unique IDs, known source grammar, safe relative
 PNG paths, each file's existence and format, and the explicit schema version.
 It should reject ambiguous duplicate defaults for one source unless a `variant`
 or `modifiers` value distinguishes them. Version 1 packages remain a separate
-accepted format for users who only replace legacy atlas slots.
+accepted format for users who only replace legacy atlas slots. Controller v2
+packages may be installed by users; the `keyboard-mouse` id and kind are reserved
+for the application's internal art and never enter the controller selector.

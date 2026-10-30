@@ -1,4 +1,4 @@
-# P9-10's failure measurement (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md §9): a
+# P9-10's failure measurement (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md §9): a
 # boot whose catalogue cannot be reached, then can, without touching the machine's network.
 #
 # The game is pointed at `scripts/store_stub_api.py` with `--store_api_base` (the diagnostics cvar):

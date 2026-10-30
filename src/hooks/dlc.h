@@ -35,7 +35,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 // native discovery hook calls. It uses the configuration captured at boot.
 //
 // It *starts* the refresh and returns. The scan reads every package in the library
-// (measured 31 s on a 1,402-package library, docs/plans/finished/2026-10-10-song-cache-plan.md §9.5), so it
+// (measured 31 s on a 1,402-package library, docs/plans/cancelled/2026-10-10-song-cache-plan.md §9.5), so it
 // runs on a worker thread and the frame that asked for it keeps drawing; the result is
 // handed to the content manager by PublishPendingRefresh() on a later guest thread.
 // Only one refresh runs at a time: a second ask while the scan is in flight is logged and

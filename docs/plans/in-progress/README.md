@@ -17,7 +17,8 @@ records, so these old citations still resolve:
 | `2026-10-13-load-guard-prompts.md` | [`2026-10-13-load-guard.md`](../finished/2026-10-13-load-guard.md) part 2 |
 | `2026-10-25-load-guard-runtime-findings.md` | [`2026-10-13-load-guard.md`](../finished/2026-10-13-load-guard.md) part 3 |
 
-The plan filed here is [`2026-10-13-rhythmverse-store-plan.md`](2026-10-13-rhythmverse-store-plan.md) —
+The RhythmVerse plan is now filed under [`finished/`](../finished/) as
+[`2026-10-13-rhythmverse-store-plan.md`](../finished/2026-10-13-rhythmverse-store-plan.md) —
 the RhythmVerse customs catalogue inside the retail DOWNLOAD CONTENT store (P0 → P6 → P1 → P2 → P3 →
 P4 → P5 → P7 → P8). It **finished on 2026-10-22** — its acceptance harness is green in all four legs
 on one build (`out/store-acceptance/p8-final/`, 69 steps, 0 failures) — and was **reopened the same
@@ -47,5 +48,6 @@ The in-game settings program outgrew the plan format and lives with its subject;
 
 See [`../README.md`](../README.md) for the status taxonomy.
 
-Binding rows are now implemented in the guest; gameplay verification is deferred at the owner's request. See
-[`2026-10-22-in-game-binding-rows-plan.md`](2026-10-22-in-game-binding-rows-plan.md).
+Binding rows are now implemented in the guest, and the plan moved to `finished/`;
+gameplay verification is deferred at the owner's request. See
+[`2026-10-22-in-game-binding-rows-plan.md`](../finished/2026-10-22-in-game-binding-rows-plan.md).

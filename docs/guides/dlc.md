@@ -146,7 +146,7 @@ many threads read it (§4.1).
 
 The RhythmVerse store's **Download** row is not a second content system: it installs into the
 destination this boot already resolved, so a song it writes is a package like any other and is
-discovered on the next start (`docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md` §5/P5 and
+discovered on the next start (`docs/plans/finished/2026-10-13-rhythmverse-store-plan.md` §5/P5 and
 the P8 record). What that adds to the rules above:
 
 - **The layout is preserved, per root.** A structured root gets the package under
@@ -290,11 +290,9 @@ is scanned again. Since P6, only a complete, stable, rejection-free scan is pers
 The cached items are what the host hands the content manager
 (`set_extra_content_library()`); the guest's own enumeration, mounting and `songcache:`
 are untouched, which is D8's rule for R7 — the cache is a host-side fast path over the
-same answer, never a second authority (docs/engine/toggles.md). The format is in
-[src/fs/dlc_cache.h](../../src/fs/dlc_cache.h) and its round trip, fingerprint movement and
-refusal paths are pinned by
-[tests/dlc_cache_tests.cpp](../../tests/dlc_cache_tests.cpp), SDK-free like the two DLC
-tests beside it.
+same answer, never a second authority (docs/engine/toggles.md). The former format was in
+`src/fs/dlc_cache.h`; its round trip, fingerprint movement and refusal paths were pinned by
+`tests/dlc_cache_tests.cpp`. Both files were removed with the persisted cache on 2026-10-28.
 
 ## 4.2 Historical boot costs for a large library (R7)
 
@@ -590,8 +588,8 @@ but keeps accurate progress and the separately selected pacing policy.
 
 The **host cache** stores the flat library's content list. It still fingerprints every file and
 does not cache structured-root traversal, guest enumeration, STFS mounts or song metadata. The
-production loader is [dlc_cached_library.h](../../src/fs/dlc_cached_library.h), shared by boot,
-refresh and [the benchmark](../../tools/dlc_cache_benchmark.cpp). The
+former production loader was `src/fs/dlc_cached_library.h`, shared by boot,
+refresh and the retired `tools/dlc_cache_benchmark.cpp`. The
 [2026-10-27 comparison](../performance/dlc-cache-comparison-2026-10-27.md) separates
 warm scans, a first-access scan, cache creation and cache hits. Logs name effective roots,
 content type, hit/miss reason, counts, fingerprint/load/scan/verification/write times and write

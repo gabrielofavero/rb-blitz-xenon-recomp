@@ -1,4 +1,4 @@
-# P9-2 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md: the master switch's
+# P9-2 of docs/plans/finished/2026-10-13-rhythmverse-store-plan.md: the master switch's
 # restart rule, measured in two boots.
 #
 # The owner pass (2026-10-22) made `general.rhythmverse` **restart**-scoped, because the switch owns

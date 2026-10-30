@@ -1,6 +1,6 @@
 # A stand-in for the RhythmVerse API, for measurements that need the site to fail and then answer.
 #
-# P9-10 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md owes a boot where the
+# P9-10 of docs/plans/finished/2026-10-13-rhythmverse-store-plan.md owes a boot where the
 # catalogue cannot be reached: the press of the main menu's RhythmVerse row must draw the retail
 # connection popup and ask for a fresh walk, a second press must do it again, and a later press -
 # once the site answers, in the same boot - must open the store. Blocking the real host from the

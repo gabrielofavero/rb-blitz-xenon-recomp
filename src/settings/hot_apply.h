@@ -48,7 +48,7 @@ const char* HotApplyStatusToken(HotApplyStatus status);
 
 // The host half of a live apply. One instance per boot; every call runs on the caller's thread,
 // and the caller is responsible for the project rule that a *guest* thread never touches the cvar
-// registry (docs/plans/finished/2026-10-10-song-cache-plan.md §7) - which is why the runtime implementation of this
+// registry (docs/plans/cancelled/2026-10-10-song-cache-plan.md §7) - which is why the runtime implementation of this
 // interface hands the write to a short-lived host thread instead of doing it inline.
 class HotApplier {
  public:

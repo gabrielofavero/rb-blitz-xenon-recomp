@@ -182,7 +182,7 @@ references via `sub_82190510`. This supersedes the implementation deferral below
 assessment is retained as research history. Host composition and authored index dispatch pass
 regression tests. Gameplay ownership/rendering verification is still pending, since the isolated
 runs stalled before requesting any binding text and the owner deferred further driving. See the
-[binding-row plan](../plans/in-progress/2026-10-22-in-game-binding-rows-plan.md).
+[binding-row plan](../plans/finished/2026-10-22-in-game-binding-rows-plan.md).
 
 **Known [cited]:** the result cell is 8 bytes, caller-owned, `{value, type}` with type `0` = int/bool;
 `file_exists`/`write_file` are safe to produce (their results are a boolean and a constant zero). Node

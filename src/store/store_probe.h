@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P2 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md: the store's data-layer
+// P2 of docs/plans/finished/2026-10-13-rhythmverse-store-plan.md: the store's data-layer
 // probe. Two things, both switched by a cvar because they are measurements rather than features:
 //
 //   * `store_trace` logs every *game-root* path the guest resolves or opens that names the

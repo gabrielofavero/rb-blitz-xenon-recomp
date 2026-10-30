@@ -1,4 +1,4 @@
-# P2 of docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md: the data-layer probe.
+# P2 of docs/plans/finished/2026-10-13-rhythmverse-store-plan.md: the data-layer probe.
 #
 # One boot, driven to the RhythmVerse entry and into the retail store, with two
 # instruments on:

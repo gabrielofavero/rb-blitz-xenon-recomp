@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P3's catalogue for the store's front menu (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// P3's catalogue for the store's front menu (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
 // §5/P3): the offers the "Recently Added" row is answered with.
 //
 // The retail browser has no paging of its own - its PageUp/PageDown are screen transitions, not a

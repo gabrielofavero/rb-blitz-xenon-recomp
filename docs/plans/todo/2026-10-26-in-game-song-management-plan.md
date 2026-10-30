@@ -34,7 +34,8 @@ classification follows the actual content source, not a title-name heuristic.
 
 ## 2. Findings from the current tree
 
-Inspected 2026-10-26. These are code observations, not runtime verification.
+Inspected 2026-10-26; cache-retirement references updated 2026-10-29. These are code
+observations, not runtime verification.
 
 | Evidence | Finding and implication |
 | --- | --- |
@@ -42,7 +43,7 @@ Inspected 2026-10-26. These are code observations, not runtime verification.
 | [store_library.h](../../../src/store/store_library.h), `LoadedSongIndex` | Store ownership matches normalized artist + title and can return several package paths. This is useful for ownership display, but insufficient authority for deleting one selected song's source. |
 | [store_download_service.cpp](../../../src/store/store_download_service.cpp), `RunDelete` | Deletion currently gathers all matching paths plus a receipt path, removes containers or extracted directories, forgets indexed packages and tracks refresh needs. Refactor the useful worker/lifecycle pieces behind an exact package request; do not pass a synthetic store offer to delete arbitrary library songs. |
 | [dlc_song_metadata.h](../../../src/fs/dlc_song_metadata.h), [menu_music_metadata.h](../../../src/hooks/menu_music_metadata.h) | Shared package reading exposes song key, stream, title and artist. It does not currently provide package display name, installation date or play count. Extend shared metadata carefully; avoid a second full package scan on the UI thread. |
-| [dlc_cached_library.h](../../../src/fs/dlc_cached_library.h), [dlc_cache.h](../../../src/fs/dlc_cache.h) | Package enumeration has cache-hit and scan paths. Fingerprint modification times establish cache freshness, not installation time. Observation/date reconciliation must run on both paths and survive cache deletion. |
+| [dlc_library.h](../../../src/fs/dlc_library.h), [dlc_layout.h](../../../src/fs/dlc_layout.h) | Package enumeration uses the current library scan. Package modification times do not establish installation time. Observation/date reconciliation must survive rescans. The persisted cache and its hit path were retired on 2026-10-28; see the [comparison](../../performance/dlc-cache-comparison-2026-10-27.md). |
 | [settings_screen.cpp](../../../src/ui/settings_screen.cpp) | **General → Interface → Music Library & Store** currently has two header switches. Adding the search preference, auto-hide preference and Unhide All action makes five rows, within the six-row page budget; Downloadable Content is narrower than this feature. |
 | [menu_payload.cpp](../../../src/settings/menu_payload.cpp) | Served guest records already include song-library header transforms, locale generation, store management wiring and the native recovery-popup route. Integrate with this composition rather than replacing whole retail/Ultimate records. |
 | [local_save.h](../../../src/fs/local_save.h), `ValidPayload` | The documented native save layout contains scores and stars, with no play counter in that layout. A high score is not a count; another authoritative runtime/profile source remains unproven. |

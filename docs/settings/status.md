@@ -86,7 +86,7 @@ Part 1 wherever they disagree.
 
 - **Guest binding rows (2026-10-25):** the host binding overlay is removed. Interface and gameplay
   lists receive current text on entry and after Reset All; the title draws every row. See the
-  [implementation plan](../plans/in-progress/2026-10-22-in-game-binding-rows-plan.md).
+  [implementation plan](../plans/finished/2026-10-22-in-game-binding-rows-plan.md).
 
 - **HUD placement rewritten (2026-10-24; gameplay validation pending):** the
   post-present repair and transform-message probes are replaced by a WorldXfm
@@ -613,7 +613,7 @@ menu, so the external app is no longer the only place to change a binding:
   Both main-menu and pause definitions have host coverage. **Gameplay verification is pending:**
   isolated D3D12/Vulkan attempts stalled before the menu and never requested binding text. The
   owner deferred further driving; the game and harness are stopped. Details and evidence are in
-  the [binding-row plan](../plans/in-progress/2026-10-22-in-game-binding-rows-plan.md).
+  the [binding-row plan](../plans/finished/2026-10-22-in-game-binding-rows-plan.md).
 * **The listening dialog is a screen** (`settings_listen_screen`): a capture waits for neutral,
   then counts **3, 2, 1** and leaves the row untouched if nothing is pressed (P5, 2026-10-20,
   replacing the 700 ms hold-to-cancel and the 20-second timeout). A valid press binds on its own

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P0's host transport for the RhythmVerse store (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// P0's host transport for the RhythmVerse store (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
 // §2.11, §3.1 step 3, R7): a small WinHTTP wrapper for the game executable.
 //
 // Two properties are the reason this is its own file rather than a copy of the installer's downloader:

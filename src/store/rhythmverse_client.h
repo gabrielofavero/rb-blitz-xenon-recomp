@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// P0 of the RhythmVerse store plan (docs/plans/in-progress/2026-10-13-rhythmverse-store-plan.md
+// P0 of the RhythmVerse store plan (docs/plans/finished/2026-10-13-rhythmverse-store-plan.md
 // §3, §3.1, §3.2): the catalogue client and the contracts built around it.
 //
 // Why this is an SDK-free module of its own: every rule the plan states in words - which offers are

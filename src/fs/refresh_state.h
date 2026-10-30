@@ -8,7 +8,7 @@
 // Why those two rules are the whole point. The row that asks for a refresh is a guest
 // file call, and the scan it starts reads every package in the library - measured 31 s
 // on a 1,402-package library, which is 31 s of frozen frame if it runs on the thread that
-// asked (docs/plans/finished/2026-10-10-song-cache-plan.md §9.5). So the scan runs on a worker and the frame
+// asked (docs/plans/cancelled/2026-10-10-song-cache-plan.md §9.5). So the scan runs on a worker and the frame
 // keeps drawing. That splits the work across two threads and makes both rules load-bearing:
 //
 //   * "one at a time" - the trigger is the title's own `file_exists`, and nothing

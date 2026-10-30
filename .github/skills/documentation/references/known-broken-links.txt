@@ -20,6 +20,11 @@
 #
 # Delete a line when its reference is fixed.
 
+# (4) The persisted DLC cache was retired on 2026-10-28. Finished plans retain
+# links to its former header as historical evidence of the implementation reviewed
+# at the time. Current docs use the retirement record instead.
+src/fs/dlc_cache.h
+
 src/input/ui_nav.h
 src/input/nav_detect.h
 tests/ui_nav_tests.cpp

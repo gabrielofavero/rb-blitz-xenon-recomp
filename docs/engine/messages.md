@@ -183,7 +183,7 @@ The image contains the retail web-service vocabulary around the inbox endpoint `
 So retail already parses a JSON inbox (`messages[]` with `subject`/`message`/`inbox_type`/`payload`).
 Whether that parse is reachable offline is **unproven**: the job class `GetInboxJob` sits on the same
 netcache/web-service stack the store measured as never issuing I/O on an offline boot
-([`rhythmverse-store-plan`](../plans/in-progress/2026-10-13-rhythmverse-store-plan.md) §5/P2).
+([`rhythmverse-store-plan`](../plans/finished/2026-10-13-rhythmverse-store-plan.md) §5/P2).
 
 ## 7. Reproducing the measurements
 

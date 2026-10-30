@@ -15,7 +15,7 @@
 //
 // Two constraints from the project, both structural rather than stylistic:
 //
-//   * **a guest thread must not touch the cvar registry** (docs/plans/finished/2026-10-10-song-cache-plan.md §7). The
+//   * **a guest thread must not touch the cvar registry** (docs/plans/cancelled/2026-10-10-song-cache-plan.md §7). The
 //     commit that triggers an apply arrives on the guest thread (it is the guest's own
 //     `write_file`), so the write itself happens on a short-lived host thread and this function
 //     waits for it: the caller must be able to say "applied" only when the write really happened.

@@ -1,10 +1,10 @@
 # Button layout hot-swapping — button glyphs and controller art
 
-**Status: in progress, created 2026-10-19; scope revised 2026-10-27. P0 delivered
+**Status: in progress, created 2026-10-19; scope revised 2026-10-29. P0 delivered
 2026-10-26; P1, P2 and P3 delivered 2026-10-27; P6a and P8 delivered 2026-10-28.
 P4's tracker, D3D12 family switching and selected-pad-art stability were
 accepted 2026-10-28; visible binding-aware hints remain P10 work.
-P5, P6b, P7 and P9–P10 remain open. P9's ordinary Interface and Gameplay Mapping
+P5, P6b, P7, P9–P11 remain open. P9's ordinary Interface and Gameplay Mapping
 images and binding refresh have owner visual acceptance; in-song rendering and
 lists exceeding 30 icons remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
@@ -36,6 +36,25 @@ images are resized proportionally into measured destinations. P6a must deliver a
 custom-package guide in `assets/controller/README.md`. P0's local sheet exports and P1's
 whole-texture override remain valid evidence and infrastructure.
 
+**2026-10-29 authored-art revision.** Eight controller art folders and one
+`keyboard-mouse/` folder now sit directly under `assets/controller/`, each with a proposed
+`schema_version = 2` manifest. Their PNGs are present; their `pads/pad.svg` files are temporary
+and are not package inputs. The v1 loader, validator, packer, source parser, input sampler and
+icon resolver do **not** consume these manifests yet. P11 implements that bridge while keeping
+v1 user packages and the P5 PS3 import working. The keyboard folder supplies *internal* custom
+key/mouse art, never a selectable or user-installed controller scheme. P6b no longer waits for
+five missing art folders or pad PNGs; it integrates the eight actual controller folders after
+P11, then checks the final UI and art. Historical P0–P8 evidence remains evidence for v1 only.
+
+| Remaining prompt | Current state | Next exit condition |
+| --- | --- | --- |
+| P5 | PS3 source bounds/reference delivered; installer import open | Local v1 `ps3` import works or its unavailable route is reported accurately |
+| P11 | Nine v2 manifests and PNGs present; runtime rejects v2 | V1/v2 coexist, internal keyboard art loads, distinct available SDL sources capture |
+| P9 | Ordinary mapping rows visually accepted; overflow and in-song open | Long lists and in-song render correctly with v2 source images |
+| P10 | Guest hint inventory and remap-aware routes open | Actionable hints follow effective bindings and active family with v2 art |
+| P6b | Eight controller art folders present; no pad PNGs declared | Install/cycle all eight, verify art and fallback, record live acceptance |
+| P7 | Documentation and closeout open | Audit, document P5 outcome, then move this plan to `finished/` |
+
 ## 1. Request, normalized
 
 | Id | Requirement |
@@ -43,9 +62,9 @@ whole-texture override remain valid evidence and infrastructure.
 | R1 | Replace the **button glyphs** (A/B/X/Y, LB/RB, LT/RT, Start/Back, LS/RS, D-pad, and the other slots the sheet carries) and the **controller-layout art** shown on the retail Control Preset page — everywhere the title draws them, not only on that page. |
 | R2 | The installer offers an **optional Rock Band Blitz PS3 `.pkg`** and extracts exactly the assets this feature needs. If the user supplies it, a **PS3 layout** appears in the in-game list. |
 | R3 | A tracked structure under `assets/controller/` where the owner leaves PNGs (and a small manifest) to build a **custom scheme package**. |
-| R4 | **Keyboard/mouse icons are built in, always available, and not selectable or replaceable by controller packages.** Real keyboard/mouse input switches ordinary action hints to their effective key/mouse icons; real controller input switches back to the selected controller family. |
+| R4 | **Keyboard/mouse icons are internal, always available, and not selectable or replaceable by controller packages.** Their authored source is `assets/controller/keyboard-mouse/scheme.toml`, with no controller-to-keyboard translation. Real keyboard/mouse input switches ordinary action hints to effective key/mouse icons; real controller input switches back to the selected controller family. |
 | R5 | Help & Options → Controls has one **Layout: <name>** selector. Each accepted selection applies immediately to the game's controller art; no Apply, screen exit, restart, or subsequent controller input is needed. |
-| R6 | Seven controller families: **Xbox 360** (default, base-game art), **PlayStation 3** (local import), **Xbox Series**, **PlayStation Series**, **Nintendo Switch**, **Steam Controller**, and **Steam Deck**. The latter five use owner-authored art; custom controller packages remain discoverable. |
+| R6 | The controller choices are **Xbox 360** (default), optional imported **PlayStation 3**, and the eight authored folders: **Xbox Series**, **PlayStation 4/5**, **Switch Joy-Con/Pro**, **Switch 2 Joy-Con/Pro**, and **Steam Deck**. There is no authored Steam Controller folder. Custom controller packages remain discoverable. |
 | R7 | With no custom controller scheme installed, controller art falls back to **Xbox 360** from the base game. Built-in keyboard/mouse icons and binding-aware hints remain available while the feature is enabled. |
 | R8 | No game art is committed, bundled or downloaded. PS3-extracted art lives only in the user's install or user-data folder and is never redistributed. |
 | R9 | R4's existing `enhancements_icon_schemes` toggle and the settings program's contracts are honoured; the feature is documented in `engine/toggles.md` and the settings documents. |
@@ -53,6 +72,7 @@ whole-texture override remain valid evidence and infrastructure.
 | R11 | **Interface Mapping and Gameplay Mapping** render bound inputs as button/key/mouse images side by side, in saved binding order, instead of textual input names. For example, `Confirm: [A icon] [Enter keycap]` contains two images; the action label remains text. Mapping rows show all bindings; overflowing rows use the guest's layout/scrolling with no silent omission. |
 | R12 | The **effective Interface Mapping dictates every interface footer and action hint**: mapping physical Y to Confirm draws Y in the selected controller family wherever Confirm is offered. For multiple controller or keyboard/mouse bindings, ordinary hints show the **first mapped source in the active device family**. Rebinding, reset, and profile changes refresh visible hints live. Gameplay hints use the effective Gameplay Mapping/preset for their context. |
 | R13 | A controller scheme supplies **individual images for only the glyph and pad slots it changes**. Omitted slots retain the corresponding base-game art without requiring the author to distribute it. Source PNG dimensions may differ from the destination: scale to fit without cropping or stretching, center on a transparent slot canvas, and preserve aspect ratio. `assets/controller/README.md` must explain the complete custom-package workflow. |
+| R14 | Authored v2 entries associate image, physical source (`pad:`, `sdl:button:`, `key:`, `mouse:`), optional legacy atlas slot, and image variant. Gameplay Mapping may offer an extra control only when the live device exposes that distinct SDL source; Guide/Home/Steam/Power are excluded. The internal keyboard art has no Xbox equivalent. V1 user packages and the PS3 import remain valid. |
 
 ### 1.1 Scope cross-check, 2026-10-26
 
@@ -64,6 +84,9 @@ whole-texture override remain valid evidence and infrastructure.
 | Bindings dictate footer and game hints; first source per family | Explicitly excluded by static D12 | R12, rewritten D12, P8/P10 |
 | Immediate selection effect | Hot apply planned | R5, D14, P3/P4 |
 | Seven controller families | Xbox Series, PS5, Switch and an authored Keyboard package | R6, §4.6, P2/P6a/P6b |
+
+The last row records the 2026-10-26 request history. The 2026-10-29 catalog in §4.6 supersedes
+its seven-family count and the authored Keyboard-package assumption.
 
 ## 2. What exists today
 
@@ -203,27 +226,31 @@ remaining pad slots before claiming independent replacement of all eight.
 | Id | Decision |
 | --- | --- |
 | **D1** | **Controller-art hot swap uses a host texture override.** The SDK texture cache has a generic override provider; the project supplies complete canonical BC3 mip data for a matched guest texture, keyed by a measured fingerprint (dimensions + content hash, with the scene-read order as the fallback). P9/P10 may also change authored guest UI and served labels/records to express input icons and action identity; a texture swap alone cannot describe every binding. P1 proved live replacement on D3D12 and Vulkan; the earlier scene-reload fallback is no longer needed. |
-| **D2** | **A scheme is a folder with one manifest and individual PNGs.** `scheme.toml` names the id, display name, kind and any button-slot and pad-slot image paths. Every slot entry is optional, but a package must replace at least one button or pad slot; an extra-icon sheet alone is insufficient. Omitted entries retain that same slot's base-game art. `icons.png` remains an optional whole 1024×512 extra sheet. No DXT5, scene, archive surgery or copied retail pixels in custom packages. |
-| **D3** | **Discovery is a boot scan, not a hot-add.** The game scans `<install>/assets/controller/schemes/` and `<user_data_root>/controller_schemes/` before authoring the menu. Any valid non-system user id shadows the same id in the install root with a log line; only `retail`, `keyboard`, and the PS3 import id are reserved. Newly dropped packages are read at the next boot. There is no Rescan row in v1. |
-| **D4** | **Only the controller layout is selectable.** The page lists `Xbox 360` plus every available valid controller scheme. Keyboard/mouse icons are a built-in provider, never an authored/discoverable layout or a list choice. Boot starts in keyboard/mouse hint mode; the first real pad event selects controller hint mode. Device switching never changes the saved controller selection. The selection page's explicit controller preview is independent of ordinary last-device hints (D14). |
+| **D2** | **A scheme is a folder with one manifest and individual PNGs.** The delivered v1 format names legacy button/pad slots and remains supported for user packages and P5. V2 `[[input]]` entries additionally name physical sources and image variants; the keyboard kind is an internal authored resource only. An omitted controller atlas slot retains the same base-game art. The v1 optional whole `icons.png` sheet remains supported. No DXT5, scene, archive surgery or copied retail pixels in tracked art. P11 implements v2; its proposed contract is [`assets/controller/layout-v2.md`](../../../assets/controller/layout-v2.md). |
+| **D3** | **Discovery is a boot scan, not a hot-add.** The game scans `<install>/assets/controller/schemes/` and `<user_data_root>/controller_schemes/` before authoring the menu. Any valid non-system user id shadows the same id in the install root with a log line; `retail`, `keyboard`, `keyboard-mouse` (internal v2 art), and the PS3 import id are reserved. Newly dropped packages are read at the next boot. There is no Rescan row. |
+| **D4** | **Only the controller layout is selectable.** The page lists `Xbox 360` plus every available valid controller scheme. Keyboard/mouse icons come from internal authored art with a built-in fallback and are never a discoverable user layout or a list choice. Boot starts in keyboard/mouse hint mode; the first real pad event selects controller hint mode. Device switching never changes the saved controller selection. The direct Layout row applies independently of ordinary last-device hints (D14). |
 | **D5** | **PS3 import extracts one asset.** From a `.pkg` (plus the matching `.rap` if needed) or an extracted PS3 game folder, the installer extracts `ui/resource/fonts/gen/buttons.milo_ps3`, decodes its DXT5 sheet, and builds the PS3 scheme. The `ps_*` pad art comes from the user's 360 `controller_config.milo_xbox` via the same decoder. Nothing from the package is copied wholesale; the full ~350 MB ARK is never laid down. |
 | **D6** | **One native setting: `controller.scheme`, displayed as `Layout: <name>` directly on Controls.** The stable token is `retail` or the id of any valid discovered controller package, including the optional `ps3` import. It lives in `settings.toml` through the main settings service, not in the profile's binding store. `retail` is displayed as `Xbox 360`. |
 | **D7** | **`enhancements_icon_schemes` becomes the master gate and defaults on**, with `Xbox 360` (`retail`) as the compiled default. With the gate off the Layout row is omitted and faithful retail art is used. This changes the off-by-default line in `src/enhancements.cpp`; the toggle table records it. R4/R11/R12 describe enabled behavior. |
-| **D8** | **Fallbacks preserve the device family and each guest slot.** Missing/invalid selected controller package → Xbox 360 art, logged and reflected in the setting. Within a valid partial package, an unlisted button or pad slot keeps the corresponding original game slot/texture; an explicitly listed but invalid file rejects the package rather than silently falling back. Keyboard/mouse → built-in keycap/mouse provider, with a built-in neutral image for an unsupported source or no binding; never controller art because a keyboard package is absent. Invalid controller packages are skipped and never listed. |
+| **D8** | **Fallbacks preserve the device family and each guest slot.** Missing/invalid selected controller package → Xbox 360 art, logged and reflected in the setting. Within a valid partial package, an unlisted button or pad slot keeps the corresponding original game slot/texture; an explicitly listed but invalid file rejects the package rather than silently falling back. Keyboard/mouse → internal authored images where declared, then the built-in keycap/mouse provider, with a neutral image for an unsupported source or no binding; never controller art. Invalid controller packages are skipped and never listed. |
 | **D9** | **Authors provide independent, variably sized PNGs.** Button art is white/grey with straight alpha because the game's material tints glyphs (colored art is allowed but multiplied by the tint). For each supplied button or pad image, the loader scales uniformly to fit the measured destination rectangle/canvas, centers it, and leaves unused space transparent; it never stretches or crops. The runtime composes the full 512×512 button texture from the user's original game art plus supplied glyphs, then encodes all required BC3 mips for the existing guest texture override. The art author never handles DXT5 or positions. |
-| **D10** | **No retail/game art in the repository or the release.** The five owner-authored controller schemes and built-in keyboard/mouse art must be original or appropriately licensed. Xbox 360 art stays in the user's base game; the PS3 scheme is generated locally and is gitignored/audited like `game/` and `assets/game/`. |
+| **D10** | **No retail/game art in the repository or the release.** The eight authored controller layouts and internal keyboard/mouse art must be original or appropriately licensed. Xbox 360 art stays in the user's base game; the PS3 scheme is generated locally and is gitignored/audited like `game/` and `assets/game/`. |
 | **D11** | **The retail pad page has eight independently replaceable textures.** A scheme may name any subset of `xbox_0..3` and `ps_0..3`; each omitted texture remains the corresponding original Xbox/PS game texture. An optional shared pad image can fill all eight, with explicit per-slot images taking precedence. Do not collapse distinct preset images or substitute one family's base-game pad for the other. |
 | **D12** | **Effective bindings are the source of truth for icons.** A shared resolver maps `(action, interface/gameplay context, device family, effective profile/preset)` to ordered physical sources, then their icons. Mapping rows render every source; ordinary action hints render the first source in the active family. Controller glyphs use the selected family; keyboard/mouse glyphs use the built-in provider. No static default-key sheet after rebinding. Profile/preset changes, assigning, removing, reordering and resetting invalidate the relevant views. |
 | **D13** | **Draw icons through the guest's UI.** Mapping rows keep their text action labels and render adjacent input images; guest footers, widgets, labels and served records carry the resolved hints. A shared 6×6 texture cannot express arbitrary simultaneous row contents or context-specific actions on its own. P9/P10 prove guest draw/label routes; no new host overlay is authorized by this plan. |
 | **D14** | **Selection applies immediately.** Each accepted choice changes the Controls row value and refreshes controller art on the next presented frame, including when selected with keyboard or mouse. Ordinary hints still follow real last-device activity. The selection neither fakes controller input nor changes the saved device state. The owner removed the dedicated preview page. |
+| **D15** | **Physical-source identity is independent of atlas slot and printed label.** The v2 source names in authored manifests are expected SDL-normalized inputs. `pad:a` means the south/Xbox A position even when Nintendo art says B. An extra `sdl:button:*` is offered for capture/remapping only when the connected device reports it; the current SDK XInput projection folds or drops several extras, so P11 must sample them before that projection. P11 preserves v1 grammar, checks actual device mappings, and never invents a button for a decorative PNG. |
 
 ## 4. The asset contract — what to draw
 
-### 4.1 Files and restrictions
+### 4.1 Files and restrictions (delivered v1 packages)
+
+This table describes the existing v1 runtime format and the optional P5 import.
+The authored v2 folders use §4.3 and [`layout-v2.md`](../../../assets/controller/layout-v2.md).
 
 | File | Required | Destination | Source format | Rules |
 | --- | --- | --- | --- | --- |
-| `scheme.toml` | yes | — | TOML | `schema_version = 1`; id, name, kind; file paths relative to the scheme folder |
+| `scheme.toml` | yes | — | TOML | v1 `schema_version = 1`; id, name, kind; file paths relative to the scheme folder |
 | `buttons/<slot-id>.png` | any subset | that ID's rectangle in `slots.toml`, inside a 512×512 sheet | PNG, 8-bit RGBA, sRGB, straight alpha; variable dimensions | one image per supplied button slot; white/grey art is tinted by the game; no copied game art |
 | `pads/<slot-id>.png` | any subset | 1024×1024 for each `xbox_0..3` / `ps_0..3` texture | PNG, 8-bit RGBA, sRGB, straight alpha; variable dimensions | optional image for that exact guest pad texture; other pads retain their original art |
 | `pads/shared.png` | no | 1024×1024 for all eight pad textures | PNG, 8-bit RGBA, sRGB, straight alpha; variable dimensions | optional common image; explicit pad-slot images override it |
@@ -255,13 +282,16 @@ compose and encode the complete button BC3 texture/mips in memory or user-local 
 never ship or commit a
 composite containing game pixels. Verify untouched rectangles and pad textures against the source.
 
-Provisional limits (P2 may tighten with measurement): ≤ 8 MB and ≤ 2048×2048 per source PNG,
+The delivered v1 limits are ≤ 8 MB and ≤ 2048×2048 per source PNG,
 ≤ 64 files per scheme, no symlinks, id `[a-z0-9][a-z0-9-]{0,31}`, display name ≤ 20 characters.
+P11 must set a separate v2 limit high enough for the keyboard folder's 92 declared PNGs, count
+only declared images when packing, and enforce equivalent path/size safety. The unreferenced
+temporary SVGs are never runtime pad assets.
 The 28-character single-line budget fits `Layout: <name>` with the 20-character value cap.
 The owner chose that shorter direct row instead of a separate page.
 
-Reserved ids: `retail` (base-game Xbox 360; no folder), `keyboard` (internal built-in provider,
-not a package), and `ps3` (the installer's local import). Every other valid package id is
+Reserved ids: `retail` (base-game Xbox 360; no folder), `keyboard` (legacy internal provider),
+`keyboard-mouse` (internal authored v2 provider), and `ps3` (the installer's local import). Every other valid package id is
 discoverable without a code list. A user package may shadow an installed authored layout of the
 same id; it cannot replace the base-game choice, keyboard/mouse provider, or PS3 import.
 
@@ -295,8 +325,9 @@ controller sheet supplies physical controller icons; the resolver can draw Y for
 without changing what Confirm does. P10 may compose action-slot textures for compatible guest
 paths, but per-widget/context resolution is required wherever one shared sheet is ambiguous.
 
-Keyboard/mouse icons are a built-in catalog or keycap renderer, not
-`schemes/keyboard/buttons.png`. It covers every key, mouse button, wheel direction and other
+Keyboard/mouse icons are an internal catalog sourced from
+`assets/controller/keyboard-mouse/` with a built-in fallback, not a selectable
+`schemes/keyboard/buttons.png` package. It covers every key, mouse button, wheel direction and other
 source the current binding system accepts. Keycap legends such as `Enter` are inside rendered
 images; plain binding-name strings are not the visual replacement. Unknown/unbound sources get
 explicit neutral images and diagnostics, not misleading controller defaults.
@@ -306,7 +337,9 @@ an actionable button name. The earlier exclusion of textual button hints is supe
 actionable hints must resolve through the effective context, with any unmeasured route recorded
 as open rather than declared complete. Decorative controller art is not an action hint.
 
-### 4.3 `scheme.toml`
+### 4.3 `scheme.toml`: v1 compatibility and proposed v2
+
+This is the delivered **v1** format for user packages and the P5 PS3 import:
 
 ```toml
 schema_version = 1
@@ -331,9 +364,40 @@ a_button = "buttons/a.png"
 ```
 
 The sample may omit `[controller]`, `[controller.slots]` or `[icons]` entirely. A button-only or
-pad-only controller package is valid. `kind = "keyboard"` is rejected for packages;
-keyboard/mouse resources are built with the application independently. P2 must make this exact
-manifest form, key precedence and absent-versus-invalid behavior executable and tested.
+pad-only controller package is valid. `kind = "keyboard"` is rejected for v1 packages. P2 made
+this manifest form, key precedence and absent-versus-invalid behavior executable and tested.
+
+The owner-authored folders use **v2**, whose full proposed contract and source evidence are in
+[`assets/controller/layout-v2.md`](../../../assets/controller/layout-v2.md):
+
+```toml
+schema_version = 2
+id = "xbox-series"
+name = "Xbox Series"
+kind = "controller"             # keyboard-mouse only for internal art
+
+[[input]]
+id = "a_button"
+file = "buttons/1 - A.png"
+source = "pad:a"
+slot = "a_button"               # optional legacy atlas destination
+
+[[input]]
+id = "share"
+file = "buttons/C1 - Share.png"
+source = "sdl:button:misc1"     # requires distinct SDL capture in P11
+```
+
+Entries may use `components` for a neutral D-pad/stick image instead of a single `source`;
+`variant` and `modifiers` distinguish alternate images for the same source. Every declared
+image must exist; a missing or malformed image rejects that v2 layout. For keyboard/mouse,
+every key/mouse entry is custom and has no controller atlas slot or controller-to-keyboard
+translation. V2's `kind = "keyboard-mouse"` is accepted only from the trusted internal art
+folder, never the user scheme roots or Controller Layout selector. The current v1 loader rejects
+these files; P11 makes both versions executable without changing v1 semantics. V2 controller
+manifests may also use v1's optional `[controller]` / `[controller.slots]` PNG pad fields and
+`[icons]` whole-sheet field. Their precedence and omission rules stay unchanged; the current
+authored folders simply declare none of them.
 
 ### 4.4 The authoring kit (P6a, not blocked on the owner's art)
 
@@ -361,8 +425,12 @@ manifest form, key precedence and absent-versus-invalid behavior executable and 
   locally decoded PS3 sheet. The PS3 exporter checks these source areas and writes a private
   labeled contact sheet; the runtime destinations still come from `slots.toml`.
 - `assets/controller/slots.toml` — the tracked slot registry (id, rectangle, row/column, label).
-- `assets/controller/schemes/<id>/` — installable authored schemes, discovered by folder rather
-  than an ID list; the five named families live here when P6b runs.
+- `assets/controller/<id>/` — the eight authored controller art folders and the internal
+  `keyboard-mouse/` folder, each with a v2 manifest. P11 stages validated controller layouts
+  into the existing install-root `schemes/<id>/` catalog without moving the owner's source art.
+  The keyboard folder is packaged only as internal icon resources.
+- `assets/controller/schemes/<id>/` — the existing v1 install-root staging path remains valid for
+  user-compatible authored packages and the PS3 import.
 - `assets/controller/examples/` — original example packages for the guide, outside the installer
   source tree.
 - `scripts/controller_schemes.ps1 -Validate -Pack` — validates every scheme (format, bounded source
@@ -383,20 +451,26 @@ manifest form, key precedence and absent-versus-invalid behavior executable and 
 `button_schemes: <id> shadowed by <path>`; a package that fails validation is skipped and logged with
 the reason.
 
-### 4.6 Controller catalog
+### 4.6 Controller catalog (2026-10-29 revision)
 
 | Display name | Stable token | Source / availability |
 | --- | --- | --- |
 | Xbox 360 | `retail` | Always available; default, original base-game art, no copied package |
 | PlayStation 3 | `ps3` | Available after local PS3 import (P5); never bundled |
 | Xbox Series | `xbox-series` | Owner-authored controller package |
-| PlayStation Series | `playstation-series` | Owner-authored controller package; replaces the earlier planned `PS5` name/token |
-| Nintendo Switch | `nintendo-switch` | Owner-authored controller package |
-| Steam Controller | `steam-controller` | Owner-authored controller package |
+| PlayStation 4 | `playstation-4` | Authored v2 folder; buttons present, pad PNG absent |
+| PlayStation 5 | `playstation-5` | Authored v2 folder; buttons present, pad PNG absent |
+| Switch Joy-Con | `nintendo-switch-joycon` | Authored v2 folder; buttons present, pad PNG absent |
+| Switch Pro | `nintendo-switch-pro-controller` | Authored v2 folder; buttons present, pad PNG absent |
+| Switch 2 Joy-Con | `nintendo-switch-2-joycon` | Authored v2 folder; buttons present, pad PNG absent |
+| Switch 2 Pro | `nintendo-switch-2-pro-controller` | Authored v2 folder; buttons present, pad PNG absent |
 | Steam Deck | `steam-deck` | Owner-authored controller package |
 
-These seven are the target catalog, not evidence that art exists today. P6b requires the five
-authored controller packages; PS3 remains conditional on import. Keyboard/mouse is never a choice.
+The eight authored controller folders plus retail produce nine choices, or ten when P5 imports
+PS3. The manifests and button art exist, but no v2 choice is runtime-valid until P11. The former
+`playstation-series`, `nintendo-switch`, and `steam-controller` tokens are not aliases or target
+packages; do not create empty entries for them. `keyboard-mouse` is an internal provider and never
+a choice. PS3 remains conditional on import.
 P8 records coverage for each physical source supported by the mapper, including Steam/Deck
 controls: art availability does not imply new input-driver support. A control the input layer
 cannot bind is recorded separately from a missing icon.
@@ -634,7 +708,7 @@ when the selected scheme changes. Measure the cost again with real partial packa
 
 ## 7. Packages and prompts
 
-Dependency graph (P8–P10 are new scope; ids are appended rather than renumbered):
+Dependency graph (P11 is the 2026-10-29 v2 bridge; completed prompts keep their ids):
 
 ```mermaid
 graph TD
@@ -648,7 +722,9 @@ graph TD
   P1 --> P4
   P8 --> P4
   P3 --> P4
-  P8 --> P9[P9 mapping-row images]
+  P8 --> P11[P11 v2 manifests + physical sources]
+  P6a --> P11
+  P11 --> P9[P9 mapping-row images]
   P1 --> P9
   P3 --> P9
   P9 --> P10[P10 remap-aware guest hints]
@@ -658,22 +734,23 @@ graph TD
   P2 --> P6a[P6a authoring kit]
   P3 --> P6b[P6b owner schemes]
   P4 --> P6b
-  P5 --> P6b
   P6a --> P6b
+  P11 --> P6b
   P10 --> P6b
+  P5 --> P7[P7 docs + close]
   P6b --> P7[P7 docs + close]
 ```
 
-> **The only package blocked on the owner's manual controller art is P6b.** P0–P5, P6a and P8–P10
-> use retail scenes, generated controller markers, built-in key/mouse icons and synthetic bindings;
-> P5 separately requires the owner's PS3 input files. **Do not start P6b until all five authored
-> controller folders contain real art.** P6a produces the template and validator; P0 produces
-> the slot map the template is drawn from. The PS3 scheme (P5) is generated from the user's own
-> package and is not part of P6b.
+> **The authored button PNGs are present; their v2 runtime support is the blocker.** P11 consumes
+> the eight controller manifests and the internal keyboard manifest, preserves v1 packages, and
+> exposes only physically reported extra SDL controls. P6b starts after P11/P9/P10 and accepts
+> button-only layouts with the eight original pad slots still in place. P5's locally generated
+> PS3 scheme remains a parallel v1 installer task and is not a prerequisite for testing the eight
+> authored layouts; its outcome must be recorded before closing P7.
 
-Suggested execution: P0 → P1/P2 → P8 → P3 → P4/P9 → P10 → P6b → P7, with P5 and P6a
-following their own dependencies. P7 closes only after the new prompts and real-art acceptance
-pass; no static keyboard-sheet exception survives as an accepted limitation.
+Remaining execution: P11 → finish P9 → P10 → P6b → P7, with P5 in parallel. P7 closes only
+after v2 loading, distinct-source capture, guest hints, real-art acceptance and the PS3 import
+outcome are recorded. A new host overlay remains outside this plan's authorization.
 
 ### P0 — Scene texture decode, slot map and template
 
@@ -916,9 +993,10 @@ remains unmeasured; P1 already measured the underlying override seam there.
   tiled and endian-swapped, so raw bytes are not a ready RGBA canvas. Reuse the measured scene
   decoder or a proven SDK conversion route; do not assume linear BC3 input. Generate the final
   texture before GPU-thread upload where practical, then invalidate only affected textures.
-- The seven controller identities from §4.6, with Xbox 360 always present, PS3 gated on local
-  import, and the five authored families listed only when valid. Keyboard/mouse is a separate
-  built-in dependency, never a scheme choice or user-shadowable package.
+- A dynamic controller catalog, with Xbox 360 always present and PS3 gated on local import.
+  The originally planned seven identities were superseded by §4.6's eight authored folders;
+  P11 makes them valid without adding an id allowlist. Keyboard/mouse remains a separate
+  internal dependency, never a scheme choice or user-shadowable package.
 - `scripts/controller_schemes.ps1 -Validate -Pack`: validates the owner tree and copies built-ins
   into the install layout; accepts a `-Scheme <dir>` for one package.
 - Tests: valid/invalid manifests, reserved ids, duplicate ids, missing/extra declared files,
@@ -1069,6 +1147,8 @@ The private PS3 contact sheet, individual source crops, complete grid cells and
 The current reference scheme declares 15
 controller glyphs and four `ps_*` pad diagrams. This mapping does not install a
 PS3 scheme or make it selectable.
+P5 may continue to emit a v1 `ps3` scheme: P11 must preserve that validated format and its
+reserved trusted-install behavior. P5 does not need to fabricate v2 physical-source entries.
 
 **Goal.** A player who owns the PS3 package gets a PS3 layout in the list, generated locally, with
 only the needed art extracted.
@@ -1110,7 +1190,8 @@ the examples live separately under `assets/controller/examples/`. User layouts w
 ids may shadow installed authored layouts. The setup and updater include the guide, blank
 templates, slot map, and original examples beside the game; players copy their packages into
 the selected save-data root's `controller_schemes/` folder, which the game validates at boot.
-The five named families remain P6b's art input.
+The former five-family list was superseded by the eight direct authored controller folders in
+§4.6. P6b uses those folders; P11 adapts this pipeline to their v2 manifests.
 
 **Goal.** Everything the owner needs to paint and drop a scheme, plus installer plumbing that
 discovers any validated authored package. Built-in keyboard/mouse resources belong to P8 and
@@ -1145,38 +1226,46 @@ the audit finds no game pixels under tracked `assets/controller/` or in the dist
 **Don't.** Do not start from a decoded retail sheet as committed art. Do not ship a scheme the owner
 has not authored or licensed.
 
-### P6b — The owner's five controller schemes and visual acceptance (**blocked on the manual art**)
+### P6b — The owner's eight controller layouts and visual acceptance
 
-**Start condition.** `assets/controller/schemes/xbox-series/`, `playstation-series/`,
-`nintendo-switch/`, `steam-controller/`, and `steam-deck/` each contain a real `scheme.toml` and at
-least one original, declared glyph or pad image; the owner has confirmed the slot map. Pads and
-instrument glyphs that the owner does not wish to replace may be omitted. P3/P4/P9/P10 and the
-P6a pipeline pass. **This prompt cannot run before those files exist.** Earlier prompts use
-generated fixtures; built-in keyboard/mouse resources never require a manual Keyboard package.
+**Status (2026-10-29): source art and proposed v2 manifests present; runtime integration open.**
+The eight direct controller folders in §4.6 have button PNGs and no declared pad PNGs. The
+`keyboard-mouse/` folder has 92 declared key/mouse PNGs and is an internal resource. P11 must
+validate and stage them before this prompt's in-game acceptance. The temporary pad SVGs are not
+installable diagrams. P5's optional PS3 import may proceed separately.
 
-**Goal.** Integrate Xbox Series, PlayStation Series, Nintendo Switch, Steam Controller and Steam
-Deck art, then accept the full controller catalog and built-in keyboard/mouse behavior.
+**Start condition.** P11's v2 loader/packer, source capture and internal keyboard provider pass;
+P9's overflow and in-song checks and P10's guest hint routes pass. The owner's current eight
+controller folders are the source files; do not wait for the removed `playstation-series`,
+`nintendo-switch`, or `steam-controller` folders or for finished pad art.
 
-**Deliverable.** The five validated controller schemes in `assets/controller/schemes/`, copied by the
-installer; the PS3 scheme from P5 (user data, not committed); a final visual pass on every screen
-that uses prompts (menu, Help & Options, gameplay HUD, pause, results) and on the retail Default
-Presets page; both mapping screens' adjacent images; default and rebound controller/key/mouse
-hints with first-source ordering (D12); immediate previews chosen by every input family; the
-real-art acceptance captures. Xbox 360 is read from the base game, never copied into tracked art.
+**Goal.** Integrate and visually accept the exact eight authored controller choices, the retail
+default, the conditional PS3 choice, and the always-available internal keyboard/mouse art.
 
-**Verify.** Each scheme draws every glyph and pad image it actually supplies; all intentionally
-omitted glyphs and pads remain the corresponding original base-game art. Verify at least one
-non-native-size, non-square source preserves its proportions and transparent margins. The
-keyboard auto-switch matches the art, the selected controller scheme persists, and no supplied
-slot falls back to retail unintentionally. The
-acceptance captures are under `out/button-schemes/p6b/`.
-Exercise all seven families when the PS3 import is available; if absent, record PS3 acceptance as
-unproven rather than fabricating a package. Changing controller layout leaves key/mouse icons
-unchanged. Rebinding Confirm to Y updates every sampled footer, and multiple bindings show the
-first source in ordinary hints while both mapping pages retain the complete source list.
+**Deliverable.** Validated, declared PNGs from the eight direct source folders staged under
+`<install>/assets/controller/schemes/<id>/`; the internal keyboard/mouse images staged separately
+from the selectable catalog; a catalog without phantom family aliases; a final pass on menu,
+Help & Options, Gameplay Mapping, Interface Mapping, gameplay HUD, pause, results and the retail
+Controller Presets page. Record default/rebound hints, first-source ordering, immediate selection
+effect, and any input source absent from a real device. Xbox 360 and imported PS3 art are never
+copied into tracked authored folders.
 
-**Don't.** Do not infer a scheme's art from a screenshot; use the owner's files. Do not edit the
-owner's art in the integration; report a bad slot to the owner. Do not commit the PS3-extracted art.
+**Verify.** All eight installed controller ids load and can be selected; keyboard/mouse never
+appears as a controller choice. Each supplied button image resolves from its v2 `source`, and
+`slot` is used only for the corresponding legacy atlas replacement. PlayStation Share/Create
+resolves as `pad:back`, its touchpad click remains distinct, Nintendo face buttons resolve by
+position, and Steam Deck QAM, paddles and trackpad clicks are offered only where the connected
+device exposes those SDL buttons. PS5 `misc1` uses microphone art. Guide/Home/Steam/Power and
+unreferenced Deck `+`/`−` images are not offered as gameplay sources. No pad SVG is packed; all
+eight omitted pad slots retain their original images. Check non-native-size PNG fit, binding
+refresh, family switching and keyboard icons remaining unchanged across controller choices.
+Store acceptance evidence under `out/button-schemes/p6b/`. If PS3 is unavailable, record its
+acceptance as unproven rather than fabricating art. Ask whether the owner wants to perform each
+live UI test before driving the game; a build must contain the latest change first.
+
+**Don't.** Do not infer a physical input solely from a filename or screenshot, alias an
+unavailable extra SDL button to an Xbox target, edit owner art to make a manifest validate,
+ship temporary pad SVGs, or commit PS3-extracted art.
 
 ### P7 — Documents, audit and close
 
@@ -1193,14 +1282,21 @@ owner's art in the integration; report a bad slot to the owner. Do not commit th
 - `docs/reference/backlog.md`: the old "pin the sheet format" item is resolved by P0; any remaining
   work is named.
 - `docs/reference/known-issues.md`: the PS3 trial/full RAP caveat, unsupported physical controls
-  or unmeasured hint routes, and any backend left unproven. Static default-key icons after a
+  or unmeasured hint routes, connection paths that hide extra SDL buttons, and any backend left
+  unproven. Static default-key icons after a
   rebind are a failed R12 acceptance item, not an accepted D12 limitation.
 - `docs/guides/distributable.md` and `scripts/audit_distributable.ps1`: no PS3 art and no game art
   in the payload.
 - `patches/README.md`: the texture override patch.
 - `docs/README.md`: maintain the existing plan row; move the plan to `finished/` only when
-  P8/P9/P10, P6b and P7 pass, with P5's import outcome explicitly recorded.
-- Run `python .github/skills/documentation/scripts/check_docs.py` (exit 0) and `git diff --check`.
+  P9/P10/P11, P6b and P7 pass, with P5's import outcome explicitly recorded.
+- `assets/controller/README.md` and `layout-v2.md`: distinguish installed v1 user-package
+  instructions from implemented v2 authored layouts, internal keyboard resources, live source
+  availability, and the declared-image-only packer. Remove the current "proposed" warning only
+  after P11 actually works.
+- Run `python .github/skills/documentation/scripts/check_docs.py` and `git diff --check`.
+  Resolve every new finding in files touched by this plan. Record unrelated pre-existing checker
+  failures separately rather than silently treating them as this feature's acceptance result.
 
 ### P8 — Effective-binding icon resolver and built-in keyboard/mouse provider
 
@@ -1212,6 +1308,8 @@ returned when available; an omitted slot remains a retail-sheet reference. Snaps
 change after input publication. Host tests cover reorder, family/layout choice, explicit empty,
 reset, preset change, source catalog, and package fallback. The resolver is not yet consumed by
 guest mapping rows or hints; P9/P10 own those rendering paths and their live acceptance.
+This is the delivered v1/compiled-provider state. P11 extends it to v2 `[[input]]` images and
+distinct SDL sources; this historical P8 status does not assert v2 support.
 
 The input parser accepts **16 pad targets plus eight stick directions**; the icon catalog
 maps 14 pad targets to the measured sheet slots and renders Start, Back, and all eight stick
@@ -1311,6 +1409,12 @@ in-song panel symbol lookup is fixed but still needs a live check. Keep P9 open
 until overflow and in-song checks pass. Capture owner-run evidence under
 `out/button-schemes/p9/`.
 
+**2026-10-29 remaining scope.** Preserve the visually accepted ordinary row styling and refresh.
+After P11, use v2 source-keyed images (including internal keyboard/mouse art) in those rows; a
+pressed extra SDL button must produce its own image only if the connected device exposes that
+source. Existing v1 packages and unsupported-source neutral icons remain valid. The unresolved
+long-list and in-song checks stay open; neither is satisfied by installing more art.
+
 **Goal.** Both mapping surfaces show actual bound button/key/mouse images next to their action
 labels, replacing textual binding lists.
 
@@ -1323,6 +1427,9 @@ labels, replacing textual binding lists.
   wrapping/scrolling within the mapping list for long lists without hiding available bindings.
 - Coverage for controller buttons, triggers/directions and accepted key/mouse inputs, explicit
   unbound rows, inherited presets/defaults, and refresh after binding edits or controller selection.
+- V2 coverage for keyboard/mouse PNGs and independently captured `sdl:button:*` controls;
+  render the bound source's image, never the art for the XInput bit to which the current SDK
+  previously folded it. A device that does not expose a control must not present it as assignable.
 - Tests of row data, ordering, icon selection, refresh, row identity and overflow behavior, plus
   live captures of both mapping surfaces in `out/button-schemes/p9/` after authorized UI testing.
 
@@ -1351,6 +1458,9 @@ current interface/gameplay context.
   implementation is insufficient if two visible contexts need different icons for one slot.
 - Next-frame refresh when bindings, profile/preset, active input family, or controller layout
   changes; no stale icons on already-visible footers. Preserve D14's explicit selection preview.
+- Consume P11's v2 source-keyed controller/keyboard images. Prove that a custom SDL source bound
+  to an action draws its own art and obeys first-source order, while unavailable and OS-reserved
+  controls are not advertised. Keep the existing retail and v1 package paths working.
 - Host/fixture tests for context and invalidation, and authorized live captures/logs in
   `out/button-schemes/p10/` covering default, rebound, multiple-source, removed, reset and
   profile-switch cases. Record any route left unproven as outstanding work.
@@ -1365,6 +1475,64 @@ Mapping. Repeat across representative controller layouts and unchanged built-in 
 **Don't.** Do not treat a logical guest A prompt as proof that physical A is bound. Do not apply
 interface remaps to gameplay blindly, advertise unbound inputs, or mark R12 complete while a
 known actionable hint still shows stale/default bindings.
+
+### P11 — V2 authored manifests and distinct physical-source support
+
+**Status (2026-10-29): proposed manifests and art exist; implementation and live source checks
+are open.** Read [`assets/controller/layout-v2.md`](../../../assets/controller/layout-v2.md) and
+all nine non-template `scheme.toml` files before coding. The current runtime accepts v1 only,
+limits packages to 64 files, draws built-in keycaps, and samples an XInput-shaped pad state that
+cannot distinguish the extra SDL buttons. This prompt is a prerequisite for final P9/P10/P6b
+acceptance, not a claim that those earlier prompts were undone.
+
+**Goal.** Make the eight authored controller layouts selectable and the authored keyboard/mouse
+images usable as an internal source-keyed icon catalog, while making extra controller buttons
+independently capturable and bindable where the active device exposes them.
+
+**Deliverable.**
+
+- Implement schema dispatch: retain the delivered v1 parser, partial-slot fallback and P5 `ps3`
+  import. Validate v2 `[[input]]` ids, declared PNG paths and RGBA bounds, source/`components`
+  exclusivity, unique atlas slots, variant/modifier disambiguation, reserved ids and kind.
+  Reuse v1 `[controller]`, `[controller.slots]` and `[icons]` fields for optional future v2 pad/extra
+  art. Set a v2 limit of at least 128 files (the keyboard has 92 declared PNGs plus its manifest);
+  pack declared files only. Accept valid user-authored v2 controller packages and shadow rules,
+  while rejecting user `keyboard-mouse` packages.
+- Stage all eight controller folders directly from `assets/controller/<id>/` into the existing
+  install-root `schemes/<id>/` catalog. Package `keyboard-mouse/` as an internal icon resource,
+  never as a selectable or user-shadowable layout. Exclude `pads/pad.svg` and every undeclared
+  PNG. No finished pad PNG is required: omitted pad textures retain the matching retail image.
+- Resolve images by source, then optional variant/modifier, separately from the legacy atlas
+  `slot`. Preserve the v1 fallback and neutral unsupported image. Keyboard/mouse art has no
+  controller source or slot; the prior code-rendered keycap remains a fallback for keys/mouse
+  sources without declared art, including wheel directions and unknown layouts.
+- Extend parsing, persistence, capture UI, source gates, effective tables and icon rendering for
+  the distinct `sdl:button:misc1`, `misc2`, `touchpad`, and four paddle names in v2. Accept SDL
+  scancode names containing spaces for declared `key:` art without breaking existing saved
+  bindings. Sample extra buttons before the SDK's XInput folding, tied to the correct connected
+  controller; query its SDL mapping/availability. Do not surface unavailable sources as choices.
+- Keep source identity and art separate: Nintendo face buttons use positions, PlayStation
+  Share/Create is `pad:back`, PS5 microphone is `misc1`, and Steam Deck QAM/paddles/trackpad
+  clicks use the SDL mapping recorded in `layout-v2.md`. Guide/Home/Steam/Power do not become
+  gameplay sources. If a driver/Steam Input path exposes only an XInput projection, report the
+  extra source unavailable and retain ordinary controls.
+- Add host/fixture tests for v1/v2 coexistence, all nine manifest parses, source-to-art lookup,
+  missing-file rejection, undeclared-file exclusion, ≥92-image keyboard packaging, omitted pads, source capture and
+  release, device disconnect/reconnect, same button names on different devices, and the SDK
+  folding boundary. Build before any owner UI acceptance.
+
+**Verify.** The v1 one-button example and locally generated PS3 scheme still load. All eight v2
+controller ids appear only after validation, and `keyboard-mouse` never appears in the selector.
+An exposed extra SDL button can be assigned in Gameplay Mapping and remains distinct from its
+old XInput alias; its own image appears in P9 rows and P10 hints. An unavailable extra button
+cannot be assigned. The 92 declared keyboard PNGs can be staged and resolved, with wheel/keycap
+fallbacks where no art exists. Omitted pad slots stay unchanged; SVGs and undeclared PNGs are
+absent from runtime packages. Record per-device mapping and availability evidence. Ask whether
+the owner wants to perform the live UI tests before driving the game, then wait for the answer.
+
+**Don't.** Do not infer a raw joystick index from a filename, treat SDL enum presence as proof a
+connected device exposes it, collapse `misc1`/paddles into ordinary guest bits, regress v1
+packages, make keyboard art a controller choice, or create a host overlay to display the icons.
 
 ## 8. Validation matrix
 
@@ -1397,7 +1565,11 @@ known actionable hint still shows stale/default bindings.
 | Assign/remove/reorder/reset/profile or preset change while hints visible | next-frame rows/footers reflect the effective mapping; no stale default icons | tests + generation log/captures |
 | No binding for active family | neutral unbound image; no advertised false binding | resolver test + capture |
 | Long binding list | every binding is inspectable; no clipping into neighboring rows | guest row test + capture |
-| Seven-family catalog / keyboard package rejection | five authored controllers, retail default, conditional PS3, and no selectable/swappable keyboard layout | registry/validator tests + choice list |
+| V2 controller catalog / internal keyboard exclusion | eight authored controllers, retail default, conditional PS3, and no selectable keyboard layout | registry/validator tests + choice list |
+| V1/v2 coexistence | existing one-button user package and locally generated PS3 import still load beside v2 authored layouts | parser/registry fixtures + install audit |
+| V2 source and art identity | positional Nintendo faces, PS Share/PS5 microphone, Deck QAM/paddles/trackpad clicks resolve to their own declared images | manifest tests + connected-device capture/row/hint evidence |
+| Extra input availability | no phantom Gameplay Mapping source when SDL/Steam Input does not expose that button; no alias to an ordinary Xbox bit | device mapping/availability log + capture test |
+| Internal keyboard image set | 92 declared PNGs stage and resolve; undeclared images and pad SVGs do not; wheel and uncovered keys retain fallback art | packer manifest audit + resolver tests |
 | P10 hint-route inventory | every known actionable footer/visual/text hint follows context and remaps | coverage table + captures; unmeasured routes remain open |
 
 ## 9. Risks and open questions
@@ -1426,18 +1598,21 @@ known actionable hint still shows stale/default bindings.
 7. **The retail pad page's eight images.** The four Xbox and four PS textures may represent distinct
    presets. Explicit slot IDs replace them independently; the optional shared pad is a deliberate
    author choice. Missing slots retain the matching original texture, not a different preset.
-8. **Memory and load time.** Packages can have one image or up to 32 glyph images and eight pad
-   images. Retain the source game sheet once, compose only active schemes and decode lazily where
-   possible. P2 measures boot, binding refresh, switch cost, source-image bounds and GPU copies.
+8. **Memory and load time.** V1 packages can have one image or up to 32 glyph images and eight pad
+   images; the v2 internal keyboard folder declares 92 PNGs. Retain the source game sheet once,
+   compose only active schemes and decode lazily where possible. P11 measures boot, binding
+   refresh, switch cost, source-image bounds and GPU copies with the larger art set.
 9. **Security.** The validator clamps file sizes/dimensions, rejects symlinks and path traversal,
    and never trusts a manifest's file paths outside its folder. A malformed PNG is a rejection, not
    a crash.
 10. **Selection versus last-device input.** A mouse click selecting a controller layout also
     counts as mouse input. D14's explicit guest controller preview makes the choice visible
     without falsifying last-device state or suppressing ordinary keyboard/mouse hints.
-11. **Icon coverage versus driver support.** Steam Controller/Deck art does not prove every
-    physical control is exposed to the existing binding system. P8 inventories accepted inputs
-    and missing icons separately; no new driver implementation is silently added to this plan.
+11. **Icon coverage versus driver support.** SDL's button names describe a normalized mapping,
+    not proof that a particular connected device, Windows driver or Steam Input path exposes an
+    extra control. The SDK currently folds `misc1` and paddles into XInput bits and ignores
+    `misc2`. P11 explicitly implements distinct capture and availability checks; P6b records
+    hardware evidence separately from art coverage. OS-reserved controls remain unassignable.
 
 ## 10. Documents this change owes
 
@@ -1451,9 +1626,10 @@ known actionable hint still shows stale/default bindings.
 | P3 | [`docs/engine/toggles.md`](../../engine/toggles.md) | R4 is implemented; the gate's default and the page |
 | P3/P9/P10 | [`docs/settings/plan.md`](../../settings/plan.md), [`menu.md`](../../settings/menu.md), [`status.md`](../../settings/status.md) | Controller Layout, full label/preview, image mapping rows, binding-aware hints, hot evidence, live state |
 | P4/P5/P6b/P8/P10 | [`docs/reference/known-issues.md`](../../reference/known-issues.md) | RAP/trial caveat, unsupported inputs/hint routes, any unproven backend; no accepted static-keyboard exception |
-| P5/P6a | [`docs/guides/distributable.md`](../../guides/distributable.md) | no PS3/game art in the payload; the audit rule |
+| P5/P6a/P11 | [`docs/guides/distributable.md`](../../guides/distributable.md) | no PS3/game art in the payload; stage only declared v2 files and exclude temporary pad SVGs |
+| P11 | [`assets/controller/layout-v2.md`](../../../assets/controller/layout-v2.md), [`README.md`](../../../assets/controller/README.md) | make the proposed v2 source, variant, keyboard and packaging rules executable; retain v1 user-package instructions |
 | P8/P9/P10 | [`docs/engine/input-flow.md`](../../engine/input-flow.md) | resolver context, ordering and remap-aware hint seams, once measured |
-| P7 | this plan | status moved to `finished/` after P8/P9/P10, P6b and P7 pass; record P5's outcome |
+| P7 | this plan | status moved to `finished/` after P9/P10/P11, P6b and P7 pass; record P5's outcome |
 
 ## 11. Reproducing the corrected measurement
 

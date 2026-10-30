@@ -60,7 +60,7 @@ python .github/skills/documentation/scripts/check_docs.py
   (DTA records, list data, bridged text) instead. Say "unproven" and plan a spike rather than
   shipping an overlay.
 - The removed `DrawBindingRows` overlay motivated this rule; its guest-drawn replacement is
-  implemented in `docs/plans/in-progress/2026-10-22-in-game-binding-rows-plan.md`.
+  implemented in `docs/plans/finished/2026-10-22-in-game-binding-rows-plan.md`.
 
 ## Rules that bite
 
