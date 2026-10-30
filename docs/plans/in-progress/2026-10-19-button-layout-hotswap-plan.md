@@ -53,7 +53,7 @@ P11, then checks the final UI and art. Historical P0–P8 evidence remains evide
 | P11 | Nine v2 manifests and PNGs present; runtime rejects v2 | V1/v2 coexist, internal keyboard art loads, distinct available SDL sources capture |
 | P9 | Ordinary mapping rows visually accepted; overflow and in-song open | Long lists and in-song render correctly with v2 source images |
 | P10 | Guest hint inventory and remap-aware routes open | Actionable hints follow effective bindings and active family with v2 art |
-| P6b | Eight controller art folders present; no pad PNGs declared | Install/cycle all eight, verify art and fallback, record live acceptance |
+| P6b | Eight controller art folders present; six declare pad PNGs | Install/cycle all eight, verify art and fallback, record live acceptance |
 | P7 | Documentation and closeout open | Audit, document P5 outcome, then move this plan to `finished/` |
 
 ## 1. Request, normalized
@@ -452,19 +452,19 @@ authored folders simply declare none of them.
 `button_schemes: <id> shadowed by <path>`; a package that fails validation is skipped and logged with
 the reason.
 
-### 4.6 Controller catalog (2026-10-29 revision)
+### 4.6 Controller catalog (2026-10-30 revision)
 
 | Display name | Stable token | Source / availability |
 | --- | --- | --- |
 | Xbox 360 | `retail` | Always available; default, original base-game art, no copied package |
 | PlayStation 3 | `ps3` | Available after local PS3 import (P5); never bundled |
 | Xbox Series | `xbox-series` | Owner-authored controller package |
-| PlayStation 4 | `playstation-4` | Authored v2 folder; buttons present, pad PNG absent |
-| PlayStation 5 | `playstation-5` | Authored v2 folder; buttons present, pad PNG absent |
-| Switch Joy-Con | `nintendo-switch-joycon` | Authored v2 folder; buttons present, pad PNG absent |
-| Switch Pro | `nintendo-switch-pro-controller` | Authored v2 folder; buttons present, pad PNG absent |
-| Switch 2 Joy-Con | `nintendo-switch-2-joycon` | Authored v2 folder; buttons present, pad PNG absent |
-| Switch 2 Pro | `nintendo-switch-2-pro-controller` | Authored v2 folder; buttons present, pad PNG absent |
+| PlayStation 4 | `playstation-4` | Authored v2 folder; buttons and four pad PNGs present |
+| PlayStation 5 | `playstation-5` | Authored v2 folder; buttons and four pad PNGs present |
+| Switch Joy-Con | `nintendo-switch-joycon` | Authored v2 folder; buttons and four pad PNGs present |
+| Switch Pro | `nintendo-switch-pro-controller` | Authored v2 folder; buttons and four pad PNGs present |
+| Switch 2 Joy-Con | `nintendo-switch-2-joycon` | Authored v2 folder; buttons and four pad PNGs present |
+| Switch 2 Pro | `nintendo-switch-2-pro-controller` | Authored v2 folder; buttons and four pad PNGs present |
 | Steam Deck | `steam-deck` | Owner-authored controller package |
 
 The eight authored controller folders plus retail produce nine choices, or ten when P5 imports
@@ -1229,11 +1229,11 @@ has not authored or licensed.
 
 ### P6b — The owner's eight controller layouts and visual acceptance
 
-**Status (2026-10-29): source art and proposed v2 manifests present; runtime integration open.**
-The eight direct controller folders in §4.6 have button PNGs and no declared pad PNGs. The
+**Status (2026-10-30): source art and proposed v2 manifests present; runtime integration open.**
+The eight direct controller folders in §4.6 have button PNGs; six declare four pad PNGs each. The
 `keyboard-mouse/` folder has 92 declared key/mouse PNGs and is an internal resource. P11 must
-validate and stage them before this prompt's in-game acceptance. The temporary pad SVGs are not
-installable diagrams. P5's optional PS3 import may proceed separately.
+validate and stage them before this prompt's in-game acceptance. The editable pad SVGs are
+authoring sources, not installable diagrams. P5's optional PS3 import may proceed separately.
 
 **Start condition.** P11's v2 loader/packer, source capture and internal keyboard provider pass;
 P9's overflow and in-song checks and P10's guest hint routes pass. The owner's current eight
@@ -1257,8 +1257,8 @@ appears as a controller choice. Each supplied button image resolves from its v2 
 resolves as `pad:back`, its touchpad click remains distinct, Nintendo face buttons resolve by
 position, and Steam Deck QAM, paddles and trackpad clicks are offered only where the connected
 device exposes those SDL buttons. PS5 `misc1` uses microphone art. Guide/Home/Steam/Power and
-unreferenced Deck `+`/`−` images are not offered as gameplay sources. No pad SVG is packed; all
-eight omitted pad slots retain their original images. Check non-native-size PNG fit, binding
+unreferenced Deck `+`/`−` images are not offered as gameplay sources. No pad SVG is packed;
+omitted pad slots retain their original images. Check non-native-size PNG fit, binding
 refresh, family switching and keyboard icons remaining unchanged across controller choices.
 Store acceptance evidence under `out/button-schemes/p6b/`. If PS3 is unavailable, record its
 acceptance as unproven rather than fabricating art. Ask whether the owner wants to perform each

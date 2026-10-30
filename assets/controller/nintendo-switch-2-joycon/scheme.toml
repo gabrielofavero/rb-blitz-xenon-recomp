@@ -4,6 +4,9 @@ id = "nintendo-switch-2-joycon"
 name = "Switch 2 Joy-Con"
 kind = "controller"
 
+# Face file names use Xbox positions: A/B/X/Y contain Nintendo B/A/Y/X.
+# The exported right shoulder files are reversed: RT draws R, RB draws ZR.
+
 [[input]]
 id = "a_button"
 file = "buttons/1 - A.png"
@@ -36,7 +39,7 @@ slot = "left_trigger"
 
 [[input]]
 id = "right_trigger"
-file = "buttons/6 - RT.png"
+file = "buttons/8 - RB.png"
 source = "pad:right_trigger"
 slot = "right_trigger"
 
@@ -48,7 +51,7 @@ slot = "left_bumper"
 
 [[input]]
 id = "right_bumper"
-file = "buttons/8 - RB.png"
+file = "buttons/6 - RT.png"
 source = "pad:right_shoulder"
 slot = "right_bumper"
 
@@ -158,3 +161,9 @@ slot = "back_button"
 id = "capture"
 file = "buttons/C2 - Share.png"
 source = "sdl:button:misc1"
+
+[controller.slots]
+xbox_0 = "pads/pad_0.png"
+xbox_1 = "pads/pad_1.png"
+xbox_2 = "pads/pad_2.png"
+xbox_3 = "pads/pad_3.png"

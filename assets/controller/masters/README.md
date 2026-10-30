@@ -70,3 +70,46 @@ edge for the D-pad and left stick. Pad 0 also shares a straight right shaft for
 the lower X button and right stick. The generator crops the transparent export
 margin to preserve the body framing and arrow alignment; the SVG previews use
 that same framing.
+
+The Switch Pro and Switch 2 Pro folders each have four editable
+`pad_N-arrows.svg` masters. Run
+`python scripts/controllers/generate_switch_pro_pads.py` to rebuild their
+`pads/pad_0.png` through `pad_3.png` textures. The source bodies keep their
+aspect ratios, while the text rails retain the Xbox 360 label endpoints.
+Pads 0, 1, and 3 use one top arrow for each visible shoulder pair. Pad 2
+distinguishes triggers with downward arrows from the top rails and bumpers
+with upward arrows from the side rails. Pad 3 shortens the inner end of its
+upper-right rail to leave room for the Switch A button callout.
+The top shoulder rails also stop before the controller to leave enough shaft
+for complete arrowheads. Pad 2's upward tips meet the visible outer shoulder
+edges. The generator checks both tip regions and minimum top-arrow length.
+Their route IDs follow Xbox pad positions: `x_button` points to the printed
+Switch Y, `a_button` to B, and `b_button` to A. The generator validates these
+face-button tips so the pad art stays consistent with the scheme's `pad:`
+sources and Xbox atlas slots.
+The Y callouts enter the button from its right edge on pads 0–2 and from its
+top edge on pad 3. Pads 0 and 3 start their right text rails exactly at the Y
+branch, avoiding a short rail stub at the elbow.
+
+The Switch Joy-Con and Switch 2 Joy-Con folders likewise have four editable
+`pad_N-arrows.svg` masters. Run
+`python scripts/controllers/generate_switch_joycon_pads.py` to rebuild their
+`pads/pad_0.png` through `pad_3.png` textures. Each transparent paired body
+keeps its aspect ratio and the callouts share the Xbox 360 text-rail endpoints.
+The face routes use Xbox positions: `x_button` reaches the printed Y,
+`a_button` reaches B, and `b_button` reaches A. Pads 0, 1, and 3 use one
+top arrow per shoulder pair. These arrows descend onto the gray top shoulder
+rim. Pad 2 uses the descending arrows for triggers and upward arrows along the
+outside edges for bumpers; those tips also meet the gray rim. The generator
+checks face-button destinations, top-arrow shaft lengths, continuous text rails,
+the gray shoulder tip regions, and the Y rail elbow on pads 0 and 3.
+Pads 0 and 3 also join the D-pad and left-stick arrows along one shaft just
+outside the left Joy-Con, following the Steam Deck route style.
+Pad 0 joins the right-stick and printed B callouts on a shaft outside the
+right Joy-Con, entering both controls from the right. Its Y callout follows a
+separate outer shaft, passes above the face buttons, and approaches Y
+diagonally from the upper right.
+Pad 1 routes the left-stick arrow along the outside of the left Joy-Con and
+enters the stick from the side. Pad 2 brings Y around the lower left of the
+right Joy-Con and enters it horizontally. Pad 3 brings Y down from above and
+gives the printed A and B separate routes from the right.

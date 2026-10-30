@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Switch Joy-Con pad 0 callout routes</title>
+  <desc>Xbox-position text rails and button callouts on the paired Joy-Con silhouette.</desc>
+  <image id="pad-reference" href="pad.png" x="100" y="200" width="824" height="654" preserveAspectRatio="none" opacity="0.65"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
+    <polyline id="left_shoulder_pair" points="160,265 200,284"/>
+    <polyline id="right_shoulder_pair" points="864,265 824,284"/>
+    <polyline id="left_stick" points="130,760 130,440 210,413"/>
+    <polyline id="dpad" points="130,760 130,580 224,580"/>
+    <polyline id="right_stick" points="890,758 890,545 818,545"/>
+    <polyline id="a_button" points="890,758 890,488 830,488 793,454"/>
+    <polyline id="x_button" points="930,660 930,361 850,361 758,405"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="14">
+    <line id="top-left" x1="16" y1="265" x2="160" y2="265"/>
+    <line id="top-right" x1="864" y1="265" x2="1009" y2="265"/>
+    <line id="bottom-left" x1="16" y1="760" x2="130" y2="760"/>
+    <line id="bottom-right" x1="890" y1="758" x2="1009" y2="758"/>
+    <line id="middle-right" x1="930" y1="660" x2="1009" y2="660"/>
+  </g>
+</svg>

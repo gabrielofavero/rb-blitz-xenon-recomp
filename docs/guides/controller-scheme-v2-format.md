@@ -53,7 +53,13 @@ Run `python scripts/controllers/generate_steam_deck_pads.py` to rebuild them fro
 [`pad_N-arrows.svg`](../../assets/controller/masters/steam-deck/pad_0-arrows.svg)
 masters. Its front view shows one shoulder silhouette per side; pad 2 uses
 the top rim for trigger callouts and outer shoulder edges for bumper callouts.
-The other authored folders still declare no pad PNGs.
+Switch Pro and Switch 2 Pro each declare four generated diagrams for
+`xbox_0` through `xbox_3`. Run
+`python scripts/controllers/generate_switch_pro_pads.py` to rebuild them from
+their body PNGs and editable SVG routes. Switch Joy-Con and Switch 2 Joy-Con
+also declare four generated diagrams for those slots. Run
+`python scripts/controllers/generate_switch_joycon_pads.py` to rebuild them
+from their body PNGs and editable SVG routes.
 The files in `masters/` are authoring sources; manifests reference finished
 images in their layout folders.
 

@@ -15,3 +15,7 @@ documentation and build configuration use these directories:
 
 For example, regenerate the Steam Deck pad diagrams with
 `python scripts/controllers/generate_steam_deck_pads.py`.
+Regenerate both Switch Pro generations with
+`python scripts/controllers/generate_switch_pro_pads.py`.
+Regenerate both Switch Joy-Con generations with
+`python scripts/controllers/generate_switch_joycon_pads.py`.

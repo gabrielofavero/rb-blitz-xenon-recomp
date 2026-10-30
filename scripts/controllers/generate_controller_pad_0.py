@@ -224,7 +224,8 @@ def smooth_elbows(shape: Image.Image,
 
 
 def render_callouts(routes: dict[str, tuple[tuple[int, int], ...]],
-                    rails: tuple[tuple[int, int, int], ...], width: int) -> Image.Image:
+                    rails: tuple[tuple[int, int, int], ...], width: int,
+                    expected_groups: int | None = None) -> Image.Image:
     """Join all cyan shapes before adding one outline and the PS3 color profile."""
     high_size = SIZE * SCALE
     shape = Image.new("L", (high_size, high_size))
@@ -262,8 +263,9 @@ def render_callouts(routes: dict[str, tuple[tuple[int, int], ...]],
     outline = np.asarray(Image.fromarray(high_outline).resize(
         (SIZE, SIZE), Image.Resampling.LANCZOS))
     components, _ = cv2.connectedComponents((fill >= 128).astype(np.uint8))
-    if components - 1 != len(rails):
-        raise ValueError(f"Expected {len(rails)} complete arrow groups, found {components - 1}")
+    expected = len(rails) if expected_groups is None else expected_groups
+    if components - 1 != expected:
+        raise ValueError(f"Expected {expected} complete arrow groups, found {components - 1}")
 
     # The original PS3 cyan is pale at the rim and deepens toward the center.
     distance = cv2.distanceTransform((fill >= 128).astype(np.uint8),

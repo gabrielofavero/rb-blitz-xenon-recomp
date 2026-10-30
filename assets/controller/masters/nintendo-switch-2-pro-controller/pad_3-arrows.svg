@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Switch 2 Pro pad 3 callout routes</title>
+  <desc>Text rails follow the Xbox 360 pad labels. Shoulder callouts use the visible top and side edges of the Switch Pro silhouette.</desc>
+  <image id="pad-reference" href="pad.png" x="100" y="207" width="824" height="609" preserveAspectRatio="none" opacity="0.65"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="13" stroke-linejoin="round">
+    <polyline id="left_shoulder_pair" points="170,264 260,300"/>
+    <polyline id="left_stick" points="86,759 315,458"/>
+    <polyline id="dpad" points="288,759 402,551"/>
+    <polyline id="x_button" points="900,441 850,315 660,315 648,390"/>
+    <polyline id="b_button" points="878,613 870,500 780,411"/>
+    <polyline id="a_button" points="912,758 800,650 740,560 697,488"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="13">
+    <line id="top-left" x1="16" y1="264" x2="170" y2="264"/>
+    <line id="bottom-left" x1="16" y1="759" x2="288" y2="759"/>
+    <line id="top-right" x1="900" y1="441" x2="1006" y2="441"/>
+    <line id="middle-right" x1="878" y1="613" x2="1009" y2="613"/>
+    <line id="bottom-right" x1="912" y1="758" x2="1008" y2="758"/>
+  </g>
+</svg>
