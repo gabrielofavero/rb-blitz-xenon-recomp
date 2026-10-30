@@ -158,3 +158,9 @@ id = "share"
 file = "buttons/C1 - Share.png"
 source = "pad:back"
 slot = "back_button"
+
+[controller.slots]
+ps_0 = "pads/pad_0.png"
+ps_1 = "pads/pad_1.png"
+ps_2 = "pads/pad_2.png"
+ps_3 = "pads/pad_3.png"

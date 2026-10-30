@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>PlayStation 5 pad 2 callout routes</title>
+  <desc>Text rails match template-ps3/pads/pad_2.png; tips follow the PlayStation 5 controls.</desc>
+  <image id="pad-reference" href="pad.png" x="95" y="248" width="833" height="522"
+         preserveAspectRatio="none" opacity="0.65"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
+    <polyline id="left_trigger" points="249,250 309,301"/>
+    <polyline id="right_trigger" points="775,250 715,301"/>
+    <polyline id="left_bumper" points="171,497 285,344"/>
+    <polyline id="right_bumper" points="851,497 739,344"/>
+    <polyline id="x_button" points="830,643 765,507 715,507"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="14">
+    <line id="top-left" x1="24" y1="250" x2="249" y2="250"/>
+    <line id="top-right" x1="775" y1="250" x2="998" y2="250"/>
+    <line id="middle-left" x1="24" y1="497" x2="171" y2="497"/>
+    <line id="middle-right" x1="851" y1="497" x2="998" y2="497"/>
+    <line id="lower-right" x1="830" y1="643" x2="998" y2="643"/>
+  </g>
+</svg>

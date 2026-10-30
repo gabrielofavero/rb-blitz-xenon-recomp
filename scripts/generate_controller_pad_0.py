@@ -29,10 +29,10 @@ EXPECTED_RAILS = (5, 4, 5, 5)
 # visible silhouette at about x=150..875, y=290..755.
 BODY = (100, 245, 924, 798)
 
-def read_layout(pad_index: int) -> tuple[dict[str, tuple[tuple[int, int], ...]],
-                                          tuple[tuple[int, int, int], ...], int]:
+def read_layout(pad_index: int, layout_id: str = "xbox-series") -> tuple[dict[str, tuple[tuple[int, int], ...]],
+                                                                            tuple[tuple[int, int, int], ...], int]:
     """Read the editable SVG polylines and fixed text rails."""
-    layout_svg = ROOT / f"assets/controller/masters/xbox-series/pad_{pad_index}-arrows.svg"
+    layout_svg = ROOT / f"assets/controller/masters/{layout_id}/pad_{pad_index}-arrows.svg"
     root = ElementTree.parse(layout_svg).getroot()
     if root.get("viewBox") != "0 0 1024 1024":
         raise ValueError(f"{layout_svg.name} must use the 1024-pixel pad canvas")

@@ -163,3 +163,9 @@ slot = "back_button"
 id = "microphone"
 file = "buttons/C2 - Microphone.png"
 source = "sdl:button:misc1"
+
+[controller.slots]
+ps_0 = "pads/pad_0.png"
+ps_1 = "pads/pad_1.png"
+ps_2 = "pads/pad_2.png"
+ps_3 = "pads/pad_3.png"

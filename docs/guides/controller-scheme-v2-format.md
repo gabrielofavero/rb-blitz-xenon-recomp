@@ -36,8 +36,18 @@ to regenerate them from the authoring
 route masters. The generator requires Pillow, NumPy, and OpenCV. Each route SVG
 keeps its original Xbox 360 texture's outer text anchors fixed; the generator
 joins the arrow shapes before applying the PS3 color profile and checks branch
-clearance and continuous arrow pixels. The other authored folders still declare
-no pad PNGs.
+clearance and continuous arrow pixels. PlayStation 5 declares its four generated
+`pads/pad_N.png` files for `ps_0` through `ps_3`. Run
+`python scripts/generate_playstation_5_pads.py` to rebuild them from its
+[`pad.png`](../../assets/controller/masters/playstation-5/pad.png) and
+[`pad_N-arrows.svg`](../../assets/controller/masters/playstation-5/pad_0-arrows.svg)
+masters. Its fixed text rails follow the corresponding PS3 reference pads.
+PlayStation 4 declares the same four `ps_0` through `ps_3` slots. Run
+`python scripts/generate_playstation_4_pads.py` to rebuild them from its
+[`pad.png`](../../assets/controller/masters/playstation-4/pad.png) and
+[`pad_N-arrows.svg`](../../assets/controller/masters/playstation-4/pad_0-arrows.svg)
+masters, using the corresponding PS3 text rails. The other authored folders
+still declare no pad PNGs.
 The files in `masters/` are authoring sources; manifests reference finished
 images in their layout folders.
 

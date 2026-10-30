@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>PlayStation 4 pad 1 callout routes</title>
+  <desc>Text rails match template-ps3/pads/pad_1.png; tips follow the PlayStation 4 controls.</desc>
+  <image id="pad-reference" href="pad.png" x="95" y="248" width="833" height="534"
+         preserveAspectRatio="none" opacity="0.65"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
+    <polyline id="left_trigger" points="249,250 306,301"/>
+    <polyline id="left_bumper" points="189,250 284,345"/>
+    <polyline id="right_trigger" points="775,250 718,301"/>
+    <polyline id="right_bumper" points="835,250 740,345"/>
+    <polyline id="dpad" points="95,750 282,518"/>
+    <polyline id="left_stick" points="302,750 404,619"/>
+    <polyline id="right_stick" points="700,750 626,619"/>
+    <polyline id="x_button" points="819,643 763,483 717,483"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="14">
+    <line id="top-left" x1="23" y1="250" x2="249" y2="250"/>
+    <line id="top-right" x1="775" y1="250" x2="999" y2="250"/>
+    <line id="bottom" x1="88" y1="750" x2="999" y2="750"/>
+    <line id="middle-right" x1="819" y1="643" x2="999" y2="643"/>
+  </g>
+</svg>

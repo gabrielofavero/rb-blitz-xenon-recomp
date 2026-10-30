@@ -41,3 +41,20 @@ one exterior rim and the PS3 cyan profile before writing the Xbox Series
 `scripts/generate_controller_pad_0.py` entry point still rebuilds only pad 0.
 This keeps intersections free of internal borders and
 preserves smooth edges at the game's output resolution.
+
+The PlayStation 5 folder likewise has `pad_0-arrows.svg` through
+`pad_3-arrows.svg`. Their text rails follow the corresponding PS3 pad textures,
+and their arrow tips follow the PS5 controls. Run
+`python scripts/generate_playstation_5_pads.py` to regenerate the four PNGs in
+`assets/controller/playstation-5/pads/`. The PS5 generator shares the arrow
+head, cyan profile, and route renderer with the Xbox Series generator. It
+extracts the controller silhouette from the white-backed PS5 master so its
+shadow does not appear in the finished diagrams. The PS5 body keeps its source
+aspect ratio; only the arrow tips move to its controls.
+
+The PlayStation 4 folder follows the same route and text-rail convention. Its
+`pad_0-arrows.svg` through `pad_3-arrows.svg` point to PS4 controls while keeping
+the PS3 text rails. Run `python scripts/generate_playstation_4_pads.py` to
+regenerate `assets/controller/playstation-4/pads/pad_0.png` through `pad_3.png`.
+The generator removes the white-backed source shadow, preserves the PS4 body's
+aspect ratio, and uses the shared PS3 arrow renderer.
