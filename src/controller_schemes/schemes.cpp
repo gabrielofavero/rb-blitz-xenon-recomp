@@ -120,7 +120,7 @@ const std::vector<Slot>& ButtonSlots() {
       {"glyph_0067", {340, 0, 21, 21}}, {"glyph_0063", {425, 0, 21, 21}},
       {"left_trigger", {11, 85, 63, 83}}, {"left_bumper", {86, 85, 82, 82}},
       {"right_trigger", {180, 85, 64, 83}}, {"right_bumper", {256, 85, 82, 82}},
-      {"next_arrow", {341, 85, 83, 83}}, {"previous_arrow", {426, 85, 83, 83}},
+      {"start_button", {341, 85, 83, 83}}, {"back_button", {426, 85, 83, 83}},
       {"dpad", {2, 170, 81, 81}}, {"instrument_drums", {87, 170, 81, 81}},
       {"instrument_bass", {172, 170, 81, 81}}, {"instrument_guitar", {257, 170, 81, 81}},
       {"instrument_vocals", {342, 170, 81, 81}}, {"instrument_keys", {427, 170, 81, 81}},

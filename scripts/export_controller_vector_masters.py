@@ -87,7 +87,7 @@ EXPORTS = {
             "gesture_rotate", "gesture_horizontal", "gesture_tilt", "gesture_motion",
             "left_trigger", "right_trigger", "left_bumper", "right_bumper",
             "right_grip", "left_grip", "trackpad_ring", "steam_button",
-            "previous_arrow", "next_arrow", "x_button", "y_button",
+            "back_button", "start_button", "x_button", "y_button",
             "b_button", "a_button", *[f"trackpad_variant_{n:02d}" for n in range(1, 13)],
         ],
     },
@@ -205,7 +205,7 @@ def organized_layout(folder: Path) -> tuple[dict[str, str], dict[str, str]] | No
             copied = re.search(r"copy of \[[^]]+\]\(([^)]+)\.svg\)", field)
             if not copied:
                 raise ValueError(f"{audit}: no source for {slot}_adapt")
-            adaptations[slot] = Path(copied.group(1)).stem
+            adaptations[slot] = Path(copied.group(1) + ".svg")
     if not rows or not direct:
         raise ValueError(f"{audit}: no organized slot rows")
     return direct, adaptations
@@ -257,8 +257,12 @@ def export(presets: list[str] | None = None) -> int:
                 emit(name, child, SPECIAL_VIEWBOX.get(source_id, (0, 0, 100, 100)))
                 count += 1
         for slot, source in adaptations.items():
-            source_file = ((folder / f"{direct[source]}.svg") if source in direct else
-                           (folder / "unused" / f"{source}.svg"))
+            # Audit links may point at another preset for a generic control.
+            source_file = ((folder / f"{direct[source.stem]}.svg")
+                           if source.stem in direct and source.parent == Path(".")
+                           else folder / source)
+            if not source_file.resolve().is_relative_to(MASTERS.resolve()):
+                raise ValueError(f"Adaptation source outside masters: {source_file}")
             shutil.copyfile(source_file, folder / f"{slot}_adapt.svg")
     return count
 

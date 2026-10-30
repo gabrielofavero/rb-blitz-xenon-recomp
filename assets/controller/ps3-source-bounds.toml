@@ -45,11 +45,11 @@ id = "right_bumper"
 rect = [255, 96, 85, 65]
 
 [[slot]]
-id = "next_arrow"
+id = "start_button"
 rect = [343, 102, 81, 53]
 
 [[slot]]
-id = "previous_arrow"
+id = "back_button"
 rect = [428, 110, 81, 37]
 
 [[slot]]

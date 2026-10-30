@@ -371,11 +371,13 @@ constexpr std::string_view kUltimateDeveloperRole = "Ultimate 2.0 Developer";
 constexpr std::string_view kRecompilationName = "Gabriel Fávero";
 constexpr std::string_view kUltimateName = "Synchrony";
 
-// Everything the build stands on, under its own heading (owner request, 2026-10-21): the
-// recompiler it runs on and the research behind it, the Rock Band 3 recompilation whose hooks
-// are ported here, and the catalogue and asset tools that carry the content it shows. One table,
-// read by both credit files, so the two cannot drift. Both columns stay well inside what the
-// retail screen already draws - its own longest role is 53 characters, its longest name 36.
+// Everything the build stands on, under its own heading (owner request, 2026-10-21; the adapted
+// layout art added 2026-10-29): the recompiler it runs on and the research behind it, the Rock
+// Band 3 recompilation whose hooks are ported here, the catalogue and asset tools that carry the
+// content it shows, and the artists whose button and controller layouts the schemes adapt
+// (assets/controller/Attributions.txt). One table, read by both credit files, so the two cannot
+// drift. Both columns stay well inside what the retail screen already draws - its own longest
+// role is 53 characters, its longest name 36.
 struct CreditRow {
   std::string_view role;
   std::string_view name;
@@ -387,6 +389,10 @@ constexpr CreditRow kThanksRows[] = {
     {"Engine References (RB3)", "band3_recomp by ihatecompvir"},
     {"Customs Store", "RhythmVerse"},
     {"Asset Tooling", "MiloLib"},
+    {"Button Layouts (Adapted)", "Nicolae (XELU) Berbece, Paul Paun"},
+    {"Controller Layouts (Adapted)", "Nicolae (XELU) Berbece, Paul Paun"},
+    {"Controller Layouts (Adapted)", "zacksly (Nintendo Switch 1/2)"},
+    {"Controller Layouts (Adapted)", "Valve Software (Steam Deck)"},
 };
 
 bool IsArrayWithSymbol(const Node& node, std::string_view symbol) {

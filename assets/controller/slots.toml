@@ -76,14 +76,14 @@ row = 1
 column = 3
 
 [[slot]]
-id = "next_arrow"
+id = "start_button"
 glyphs = ["S"]
 rect = [341, 85, 83, 83]
 row = 1
 column = 4
 
 [[slot]]
-id = "previous_arrow"
+id = "back_button"
 glyphs = ["s"]
 rect = [426, 85, 83, 83]
 row = 1

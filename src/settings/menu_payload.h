@@ -48,8 +48,10 @@ bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_acti
 //
 // Default (retail file): a "Recompilation Project" heading and a "Developer" / "Gabriel Fávero"
 // row are inserted before the first official section, then a "Thanks To" section naming what the
-// build stands on (ReXGlue, XenonRecomp, Xenia, band3_recomp, RhythmVerse, MiloLib - one table
-// in the implementation, so the two credit files cannot drift), separated from it by blank rows.
+// build stands on (ReXGlue, XenonRecomp, Xenia, band3_recomp, RhythmVerse, MiloLib) and, since
+// 2026-10-29, the adapted button and controller layout artists
+// (assets/controller/Attributions.txt) - one table in the implementation, so the two credit files
+// cannot drift - separated from it by blank rows.
 // Ultimate (the payload's file): the Ultimate heading is renamed to "Recompilation Project &
 // Ultimate 2.0 Mod" and its one row becomes two - "Recompilation Developer" / "Gabriel Fávero"
 // and "Ultimate 2.0 Developer" / "Synchrony" - followed by the same "Thanks To" section.

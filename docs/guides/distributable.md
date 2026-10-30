@@ -58,10 +58,11 @@ files in an authored package. Originality and redistribution rights for new
 artwork still require owner review before release.
 
 The installer also includes the original controller authoring kit beside the
-game: `assets/controller/README.md`, `slots.toml`, blank templates, and the two
-example packages. These files are Inno-managed install assets, separate from
-the executable payload manifest. Player custom packages go under the selected
-`user_data_root/controller_schemes/` and are not part of a release or update.
+game: `assets/controller/README.md`, `Attributions.txt`, `slots.toml`, blank
+templates, and the two example packages. These files are Inno-managed install
+assets, separate from the executable payload manifest. Player custom packages
+go under the selected `user_data_root/controller_schemes/` and are not part of a
+release or update.
 
 ## The one finding: `__FILE__`
 

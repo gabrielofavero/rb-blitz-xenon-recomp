@@ -144,7 +144,7 @@ are in [slots.toml](slots.toml). These are the measured destination sizes:
 | --- | --- |
 | Face buttons | `a_button`, `b_button`, `x_button`, `y_button` |
 | Shoulders and triggers | `left_bumper`, `right_bumper`, `left_trigger`, `right_trigger` |
-| Horizontal arrows | `next_arrow` (points right), `previous_arrow` (points left) |
+| Start / Back | `start_button` (right arrow), `back_button` (left arrow) |
 | D-pad | `dpad`, `dpad_up`, `dpad_right`, `dpad_down`, `dpad_left` |
 | Neutral sticks | `left_stick`, `right_stick` |
 | Stick directions | `left_stick_up`, `left_stick_right`, `left_stick_down`, `left_stick_left`, and the four matching `right_stick_*` IDs |
@@ -158,9 +158,9 @@ IDs are no longer accepted. Image filenames themselves are arbitrary.
 
 These sizes are **destinations in the 512×512 atlas**. Private original reference
 PNGs are cropped to the visible pixels in each 85-pixel grid cell, so their
-dimensions may be smaller. In particular, the bumper and arrow references no
-longer include the atlas's empty alignment margins. The loader fits and centers
-each declared PNG in its destination rectangle as described below.
+dimensions may be smaller. In particular, the bumper and Start/Back references
+no longer include the atlas's empty alignment margins. The loader fits and
+centers each declared PNG in its destination rectangle as described below.
 
 | Slot IDs | Destination size |
 | --- | --- |
@@ -170,12 +170,13 @@ each declared PNG in its destination rectangle as described below.
 | `left_trigger` | 63×83 |
 | `right_trigger` | 64×83 |
 | `left_bumper`, `right_bumper` | 82×82 |
-| `next_arrow`, `previous_arrow` | 83×83 |
+| `start_button`, `back_button` | 83×83 |
 | `dpad`, `instrument_*`, `dpad_up`, `dpad_right`, `dpad_down`, `dpad_left`, `left_stick`, `right_stick`, `left_stick_*`, `right_stick_*` | 81×81 |
 
 The two remaining `glyph_` IDs are stable character-based IDs with no visible
-art in the Xbox 360 sheet. The font sheet has no standalone Start or Back
-picture.
+art in the Xbox 360 sheet. `start_button` and `back_button` are the title's
+horizontal arrow glyphs; the sheet has no picture of a Start or Back button
+itself.
 
 The loader scales the **whole source canvas**, including transparent margins,
 uniformly by `min(destination width/source width, destination height/source
@@ -234,3 +235,14 @@ Only original art or art you have permission to redistribute belongs in this
 tracked directory or a release. Do not commit decoded game images, filled
 templates copied from them, or composites containing game pixels. The base
 game supplies omitted slots at runtime; a layout package never needs them.
+
+## Attributions
+
+The button and controller layouts shipped under this directory adapt art by:
+
+- **Button layouts:** Nicolae (XELU) Berbece, Paul Paun
+- **Controller layouts:** Nicolae (XELU) Berbece, Paul Paun, zacksly
+  (Nintendo Switch 1/2), Valve Software (Steam Deck)
+
+The game's own Credits screen repeats these under "Thanks To".
+[Attributions.txt](Attributions.txt) is the source record.

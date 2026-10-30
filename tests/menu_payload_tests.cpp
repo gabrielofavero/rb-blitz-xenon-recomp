@@ -50,12 +50,17 @@ void CheckStrEq(const std::string& actual, const std::string& expected) {
   Fail(__FILE__, __LINE__, "expected \"" + expected + "\", got \"" + actual + "\"");
 }
 
-// The third-party thanks both credit files carry (owner request, 2026-10-21), as the credits
-// screen renders them: the role column's text, then the name column's.
+// The third-party thanks both credit files carry (owner request, 2026-10-21; the adapted layout
+// art added 2026-10-29), as the credits screen renders them: the role column's text, then the
+// name column's.
 const std::vector<std::string> kThanksRows = {
     "Recompiler|ReXGlue Team",   "Static Recompiler|XenonRecomp",
     "Emulation Research|Xenia Project", "Engine References (RB3)|band3_recomp by ihatecompvir",
     "Customs Store|RhythmVerse", "Asset Tooling|MiloLib",
+    "Button Layouts (Adapted)|Nicolae (XELU) Berbece, Paul Paun",
+    "Controller Layouts (Adapted)|Nicolae (XELU) Berbece, Paul Paun",
+    "Controller Layouts (Adapted)|zacksly (Nintendo Switch 1/2)",
+    "Controller Layouts (Adapted)|Valve Software (Steam Deck)",
 };
 
 // The rows under one `heading` of a credits document, up to the next blank root - the shape
@@ -1104,9 +1109,9 @@ int main(int argc, char** argv) {
 
     std::string why;
     CHECK_TRUE(rb_blitz::settings::AddRecompilationCredits(&roots, false, &why));
-    // Three spacers, the project's heading + row, a blank, the thanks heading + its six rows, a
+    // Three spacers, the project's heading + row, a blank, the thanks heading + its ten rows, a
     // blank, then the official section untouched.
-    CHECK_EQ(roots.size(), 16u);
+    CHECK_EQ(roots.size(), 20u);
     CheckStrEq(roots[3].kids[0].text, "heading");
     CheckStrEq(roots[3].kids[1].text, "Recompilation Project");
     CheckStrEq(roots[4].kids[0].text, "title_name");
@@ -1115,9 +1120,9 @@ int main(int argc, char** argv) {
     CHECK_EQ(roots[5].kids.size(), 0u);
     CheckStrEq(roots[6].kids[1].text, "Thanks To");
     CheckThanksRows(roots);
-    CHECK_EQ(roots[13].kids.size(), 0u);
-    CheckStrEq(roots[14].kids[1].text, "Core Development Team");
-    CheckStrEq(roots[15].kids[2].text, "Matthew Nordhaus");
+    CHECK_EQ(roots[17].kids.size(), 0u);
+    CheckStrEq(roots[18].kids[1].text, "Core Development Team");
+    CheckStrEq(roots[19].kids[2].text, "Matthew Nordhaus");
 
     // The edited roots compile to a DTA the project's own parser reads back.
     const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(roots);
@@ -1151,8 +1156,8 @@ int main(int argc, char** argv) {
     std::vector<Node> roots = fixture();
     std::string why;
     CHECK_TRUE(rb_blitz::settings::AddRecompilationCredits(&roots, true, &why));
-    // The one row became two plus the thanks block, so the file grew by nine roots.
-    CHECK_EQ(roots.size(), 16u);
+    // The one row became two plus the thanks block, so the file grew by thirteen roots.
+    CHECK_EQ(roots.size(), 20u);
     CheckStrEq(roots[2].kids[1].text, "Recompilation Project & Ultimate 2.0 Mod");
     CheckStrEq(roots[3].kids[1].text, "Recompilation Developer");
     CheckStrEq(roots[3].kids[2].text, "Gabriel Fávero");
@@ -1163,9 +1168,9 @@ int main(int argc, char** argv) {
     CheckThanksRows(roots);
     // The payload's own blank run is not lengthened by the insertion, and the official section
     // after it keeps its place.
-    CHECK_EQ(roots[13].kids.size(), 0u);
-    CHECK_EQ(roots[14].kids.size(), 0u);
-    CheckStrEq(roots[15].kids[1].text, "Core Development Team");
+    CHECK_EQ(roots[17].kids.size(), 0u);
+    CHECK_EQ(roots[18].kids.size(), 0u);
+    CheckStrEq(roots[19].kids[1].text, "Core Development Team");
 
     // A newer payload whose one row does not match is left untouched, including its heading.
     std::vector<Node> moved = fixture();

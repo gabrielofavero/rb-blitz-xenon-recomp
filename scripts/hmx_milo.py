@@ -389,7 +389,7 @@ _GLYPH_IDS = {
     "A": "a_button", "B": "b_button", "X": "x_button", "Y": "y_button",
     "L": "left_bumper", "R": "right_bumper",
     "l": "left_trigger", "r": "right_trigger",
-    "S": "next_arrow", "s": "previous_arrow", "D": "dpad",
+    "S": "start_button", "s": "back_button", "D": "dpad",
     "w": "dpad_up", "d": "dpad_right", "x": "dpad_down",
     "a": "dpad_left", "[": "left_stick", "]": "right_stick",
     "1": "instrument_drums", "2": "instrument_bass",

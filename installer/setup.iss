@@ -256,6 +256,7 @@ Source: "{#GeneratedDirPath}{#HelperExeName}"; DestDir: "{tmp}"; Flags: dontcopy
 ; This authoring kit is available beside an installed build. Example art is
 ; original and lives outside the runtime's scanned schemes directory.
 Source: "{#ProjectDirPath}assets\controller\README.md"; DestDir: "{app}\assets\controller"; Flags: ignoreversion
+Source: "{#ProjectDirPath}assets\controller\Attributions.txt"; DestDir: "{app}\assets\controller"; Flags: ignoreversion
 Source: "{#ProjectDirPath}assets\controller\slots.toml"; DestDir: "{app}\assets\controller"; Flags: ignoreversion
 Source: "{#ProjectDirPath}assets\controller\template\*.png"; DestDir: "{app}\assets\controller\template"; Flags: ignoreversion
 Source: "{#ProjectDirPath}assets\controller\examples\*"; DestDir: "{app}\assets\controller\examples"; Flags: ignoreversion recursesubdirs createallsubdirs
