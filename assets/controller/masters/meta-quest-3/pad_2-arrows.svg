@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>meta-quest-3 pad 2 callout routes</title>
+  <desc>Separate trigger and grip rails; X climbs diagonally from its lower rail.</desc>
+  <image id="pad-reference" href="pad.png" x="76" y="186" width="867" height="635" opacity="0.65"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
+    <polyline id="left_trigger" points="249,265 440,265 440,430"/>
+    <polyline id="right_trigger" points="775,265 580,265 580,430"/>
+    <polyline id="left_grip" points="175,507 235,525"/>
+    <polyline id="right_grip" points="859,507 790,525"/>
+    <polyline id="x_button" points="900,660 340,660 298,399"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="14">
+    <line id="top-left" x1="16" y1="265" x2="249" y2="265"/>
+    <line id="top-right" x1="775" y1="265" x2="1009" y2="265"/>
+    <line id="middle-left" x1="4" y1="507" x2="175" y2="507"/>
+    <line id="middle-right" x1="859" y1="507" x2="1005" y2="507"/>
+    <line id="lower-right" x1="900" y1="660" x2="1009" y2="660"/>
+  </g>
+</svg>

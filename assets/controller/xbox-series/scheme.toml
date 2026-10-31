@@ -6,157 +6,157 @@ kind = "controller"
 
 [[input]]
 id = "a_button"
-file = "buttons/1 - A.png"
+file = "buttons/a_button.png"
 source = "pad:a"
 slot = "a_button"
 
 [[input]]
 id = "b_button"
-file = "buttons/2 - B.png"
+file = "buttons/b_button.png"
 source = "pad:b"
 slot = "b_button"
 
 [[input]]
 id = "x_button"
-file = "buttons/3 - X.png"
+file = "buttons/x_button.png"
 source = "pad:x"
 slot = "x_button"
 
 [[input]]
 id = "y_button"
-file = "buttons/4 - Y.png"
+file = "buttons/y_button.png"
 source = "pad:y"
 slot = "y_button"
 
 [[input]]
 id = "left_trigger"
-file = "buttons/5 - LT.png"
+file = "buttons/left_trigger.png"
 source = "pad:left_trigger"
 slot = "left_trigger"
 
 [[input]]
 id = "right_trigger"
-file = "buttons/6 - RT.png"
+file = "buttons/right_trigger.png"
 source = "pad:right_trigger"
 slot = "right_trigger"
 
 [[input]]
 id = "left_bumper"
-file = "buttons/7 - LB.png"
+file = "buttons/left_bumper.png"
 source = "pad:left_shoulder"
 slot = "left_bumper"
 
 [[input]]
 id = "right_bumper"
-file = "buttons/8 - RB.png"
+file = "buttons/right_bumper.png"
 source = "pad:right_shoulder"
 slot = "right_bumper"
 
 [[input]]
 id = "left_stick"
-file = "buttons/9 - LS.png"
+file = "buttons/left_stick.png"
 components = ["pad:lstick_up", "pad:lstick_down", "pad:lstick_left", "pad:lstick_right", "pad:left_thumb"]
 slot = "left_stick"
 
 [[input]]
 id = "left_stick_up"
-file = "buttons/10 - LS Up.png"
+file = "buttons/left_stick_up.png"
 source = "pad:lstick_up"
 slot = "left_stick_up"
 
 [[input]]
 id = "left_stick_down"
-file = "buttons/11 - LS Down.png"
+file = "buttons/left_stick_down.png"
 source = "pad:lstick_down"
 slot = "left_stick_down"
 
 [[input]]
 id = "left_stick_left"
-file = "buttons/12 - LS Left.png"
+file = "buttons/left_stick_left.png"
 source = "pad:lstick_left"
 slot = "left_stick_left"
 
 [[input]]
 id = "left_stick_right"
-file = "buttons/13 - LS Right.png"
+file = "buttons/left_stick_right.png"
 source = "pad:lstick_right"
 slot = "left_stick_right"
 
 [[input]]
 id = "right_stick"
-file = "buttons/14 - RS.png"
+file = "buttons/right_stick.png"
 components = ["pad:rstick_up", "pad:rstick_down", "pad:rstick_left", "pad:rstick_right", "pad:right_thumb"]
 slot = "right_stick"
 
 [[input]]
 id = "right_stick_up"
-file = "buttons/15 - RS Up.png"
+file = "buttons/right_stick_up.png"
 source = "pad:rstick_up"
 slot = "right_stick_up"
 
 [[input]]
 id = "right_stick_down"
-file = "buttons/16 - RS Down.png"
+file = "buttons/right_stick_down.png"
 source = "pad:rstick_down"
 slot = "right_stick_down"
 
 [[input]]
 id = "right_stick_left"
-file = "buttons/17 - RS Left.png"
+file = "buttons/right_stick_left.png"
 source = "pad:rstick_left"
 slot = "right_stick_left"
 
 [[input]]
 id = "right_stick_right"
-file = "buttons/18 - RS Right.png"
+file = "buttons/right_stick_right.png"
 source = "pad:rstick_right"
 slot = "right_stick_right"
 
 [[input]]
 id = "dpad"
-file = "buttons/19 - Dpad.png"
+file = "buttons/dpad.png"
 components = ["pad:dpad_up", "pad:dpad_down", "pad:dpad_left", "pad:dpad_right"]
 slot = "dpad"
 
 [[input]]
 id = "dpad_up"
-file = "buttons/20 - Dpad Up.png"
+file = "buttons/dpad_up.png"
 source = "pad:dpad_up"
 slot = "dpad_up"
 
 [[input]]
 id = "dpad_down"
-file = "buttons/21 - Dpad Down.png"
+file = "buttons/dpad_down.png"
 source = "pad:dpad_down"
 slot = "dpad_down"
 
 [[input]]
 id = "dpad_left"
-file = "buttons/22 - Dpad Left.png"
+file = "buttons/dpad_left.png"
 source = "pad:dpad_left"
 slot = "dpad_left"
 
 [[input]]
 id = "dpad_right"
-file = "buttons/23 - Dpad Right.png"
+file = "buttons/dpad_right.png"
 source = "pad:dpad_right"
 slot = "dpad_right"
 
 [[input]]
 id = "start_button"
-file = "buttons/24 - Start.png"
+file = "buttons/start_button.png"
 source = "pad:start"
 slot = "start_button"
 
 [[input]]
 id = "back_button"
-file = "buttons/25 - Back.png"
+file = "buttons/back_button.png"
 source = "pad:back"
 slot = "back_button"
 
 [[input]]
 id = "share"
-file = "buttons/C1 - Share.png"
+file = "buttons/share.png"
 source = "sdl:button:misc1"
 
 [controller.slots]

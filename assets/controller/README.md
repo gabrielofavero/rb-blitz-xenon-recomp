@@ -133,13 +133,16 @@ resolver returns, but it does not change their visual style. The resolver is
 implemented; its remaining guest hint and mapping-screen integration is tracked
 in the [hot-swap plan](../../docs/plans/in-progress/2026-10-19-button-layout-hotswap-plan.md).
 
-If you are making keyboard/mouse **art** for this source project, the current
-authoring point is [the built-in renderer](../../src/input/input_icons.cpp):
-`DrawKeycap` draws the keycap and `kFont` defines its letters. You would edit
-that code and rebuild the application. There is no folder of keyboard PNG slots
-to fill, no keyboard pad diagram slot, and no runtime selection of keyboard
-themes. An installable keyboard/mouse art layout would require a new package
-schema and image provider; the controller slot IDs below do not define one.
+If you are making keyboard/mouse **art** for this source project, edit the
+declared PNGs and `scheme.toml` in [keyboard-mouse](keyboard-mouse/). The input
+icon resolver uses these images for matching keys and mouse buttons, with
+[the built-in renderer](../../src/input/input_icons.cpp) as a fallback.
+The wheel-up and wheel-down PNGs preserve the middle-mouse art and add direction
+arrows. Regenerate them with
+`scripts/controllers/generate_mouse_wheel_art.ps1` after editing `mouse_middle.png`.
+There is no keyboard pad diagram slot or runtime selection of keyboard themes.
+An installable keyboard/mouse art layout would require a user package format;
+the controller slot IDs below do not define one.
 
 ## Canvas and slot sizes
 
@@ -194,6 +197,11 @@ destination, 128×128 becomes 32×32; 64×50 becomes 32×25 with transparent spa
 above and below. `a_button` is actually 81×81, so a 128×128 square fits to
 81×81. Trim accidental transparent margins from the source if the visible art
 looks too small. Pads use the same rule against 1024×1024.
+
+The shipped controller and keyboard/mouse PNGs are cropped to their visible alpha bounds,
+matching the framing of the Xbox 360 reference exports. Run
+`python scripts/controllers/trim_button_art.py` after adding or replacing input
+art; it also gives declared files stable names and updates their manifest paths.
 
 Use 1–2048 pixels on each source axis and at most 8 MB per PNG. A v1 layout may
 contain at most 64 files, including its manifest; v2 accepts 128 declared images.
@@ -278,11 +286,12 @@ game supplies omitted slots at runtime; a layout package never needs them.
 
 ## Attributions
 
-The button and controller layouts shipped under this directory adapt art by:
+The button and controller layouts shipped under this directory use adapted artwork from:
 
 - **Button layouts:** Nicolae (XELU) Berbece, Paul Paun
 - **Controller layouts:** Nicolae (XELU) Berbece, Paul Paun, zacksly
-  (Nintendo Switch 1/2), Valve Software (Steam Deck)
+  (Nintendo Switch 1/2); Steam Deck and Quest 1/2 layouts adapted from
+  official device artwork
 
 The game's own Credits screen repeats these under "Thanks To".
 [Attributions.txt](Attributions.txt) is the credit record; source URLs and

@@ -212,11 +212,11 @@ void TestVocabulary() {
   CHECK_TRUE(HasSource(controller(Action::kPowerup), remap::SourceKind::kPad, "x"));
   CHECK_TRUE(HasSource(controller(Action::kPause), remap::SourceKind::kPad, "start"));
 
-  BeginCase("P2: the Mouse & Keyboard defaults are the restructure plan's D12 list");
+  BeginCase("P2: the Mouse & Keyboard defaults include the owner's lane-wheel reversal");
 
   // Q + right click, W + left click, the arrow keys with a wheel detent each, Space + middle
-  // click, Escape. These replace the shipped keyboard preset; a click or detent is a binding by
-  // default now.
+  // click, Escape. The lane-wheel directions are the owner's 2026-10-31 update to D12.
+  // These replace the shipped keyboard preset; a click or detent is a binding by default.
   const auto keyboard = [](Action action) {
     return DefaultSources(TableKind::kKeyboardMouse, action);
   };

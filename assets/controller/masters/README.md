@@ -113,3 +113,23 @@ Pad 1 routes the left-stick arrow along the outside of the left Joy-Con and
 enters the stick from the side. Pad 2 brings Y around the lower left of the
 right Joy-Con and enters it horizontally. Pad 3 brings Y down from above and
 gives the printed A and B separate routes from the right.
+
+The Meta Quest 2 and 3 folders have four editable `pad_N-arrows.svg` route
+masters each. Run `python scripts/controllers/generate_meta_quest_pads.py` to
+rebuild their `pads/pad_0.png` through `pad_3.png` textures. The generator crops
+transparent margins from each supplied master PNG, preserves its aspect ratio,
+and uses the shared PS3 cyan arrow renderer. Quest Touch controllers have no
+D-pad: pads 1 and 3 omit those pointers, leaving one left-stick callout.
+Pad 1 keeps the Xbox template's continuous lower rail. Its left-stick shaft
+joins at the rail's left end, so the rail extends only to the right.
+The right-side X callout travels across to the left controller, where the
+Quest X button actually sits. On pads 0 and 1, both top rails join one center
+stem that branches to separate trigger and grip arrows. Pad 3 branches its
+left top callout to both controls; pad 2 has separate trigger and grip rails.
+Grip arrowheads stop at or beside the grip edges, and no text rail has a short
+stub past its arrow stem. Quest 3 pads 0 and 1 descend from the shared center
+stem and run horizontally into the grip arrows; pad 3 uses a shallow branch.
+All four Quest 3 X callouts approach the button diagonally
+from their lower horizontal run. On pads 0 and 1, the A and right-stick
+callouts render over X so black rims distinguish their crossings. On pad 0,
+the A arrow branches from the right-stick shaft.

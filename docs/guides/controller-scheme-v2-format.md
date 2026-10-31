@@ -1,8 +1,8 @@
 # Controller scheme v2 format
 
 Each non-template art folder has a `scheme.toml`. The runtime and validator accept
-these manifests alongside version 1 user packages. The build stages the eight
-controller folders and the internal keyboard art. Each layout's
+these manifests alongside version 1 user packages. The build stages the
+authored controller folders and the internal keyboard art. Each layout's
 editable `pad.svg` and source `pad.png` live under
 `assets/controller/masters/<layout-id>/` and are not listed in any manifest.
 
@@ -60,6 +60,10 @@ their body PNGs and editable SVG routes. Switch Joy-Con and Switch 2 Joy-Con
 also declare four generated diagrams for those slots. Run
 `python scripts/controllers/generate_switch_joycon_pads.py` to rebuild them
 from their body PNGs and editable SVG routes.
+Meta Quest 2 and 3 declare four generated diagrams each for `xbox_0` through
+`xbox_3`. Run `python scripts/controllers/generate_meta_quest_pads.py` to rebuild
+them from their master PNGs and editable SVG routes. Their callouts use the
+Xbox text rails while pointing to the Quest Touch controls.
 The files in `masters/` are authoring sources; manifests reference finished
 images in their layout folders.
 

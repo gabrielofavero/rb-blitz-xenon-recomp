@@ -15,21 +15,36 @@ from generate_controller_pad_0 import (
 
 
 BODY_BOXES = {
-    "meta-quest-2": (100, 285, 924, 745),
-    "meta-quest-3": (100, 250, 924, 735),
+    "meta-quest-2": (100, 277, 924, 765),
+    "meta-quest-3": (100, 240, 924, 757),
 }
 ROUTE_COUNTS = (7, 6, 5, 6)
-LEFT_SHAFT_JOIN = frozenset(("dpad", "left_stick"))
+# The fixed Xbox rails put X on the right, but Quest X is on the left.
+# Its route joins the right-side callouts on pads 0 and 1.
+LEFT_SHAFT_JOIN = frozenset(("left_stick_alt", "left_stick"))
+RIGHT_RAIL_JOINS = (
+    frozenset(("right_stick", "x_button")),
+    frozenset(("a_button", "x_button")),
+)
+ARROW_GROUPS = (4, 3, 5, 5)
 CONTROL_CENTERS = {
     "meta-quest-2": {
-        "left_stick": (319, 468), "right_stick": (704, 468),
-        "x_button": (327, 504), "a_button": (695, 504),
-        "b_button": (660, 500),
+        "left_shoulder_pair": (410, 575), "right_shoulder_pair": (614, 575),
+        "left_trigger": (410, 575), "right_trigger": (614, 575),
+        "left_grip": (280, 590), "right_grip": (744, 590),
+        "left_stick": (319, 474), "left_stick_alt": (319, 474),
+        "right_stick": (704, 474),
+        "x_button": (327, 511), "a_button": (695, 511),
+        "b_button": (660, 507),
     },
     "meta-quest-3": {
-        "left_stick": (308, 330), "right_stick": (713, 330),
-        "x_button": (296, 383), "a_button": (727, 383),
-        "b_button": (670, 357),
+        "left_shoulder_pair": (440, 430), "right_shoulder_pair": (580, 430),
+        "left_trigger": (440, 430), "right_trigger": (580, 430),
+        "left_grip": (265, 525), "right_grip": (760, 525),
+        "left_stick": (308, 325), "left_stick_alt": (308, 325),
+        "right_stick": (713, 325),
+        "x_button": (296, 382), "a_button": (727, 382),
+        "b_button": (670, 354),
     },
 }
 
@@ -39,9 +54,12 @@ def generate_pad(layout_id: str, pad_index: int) -> None:
         raise ValueError(f"Unknown Meta Quest layout/pad: {layout_id}/{pad_index}")
     routes, rails, width = read_layout(
         pad_index, layout_id, expected_routes=ROUTE_COUNTS[pad_index])
-    allowed_joins = (frozenset((LEFT_SHAFT_JOIN,)) if pad_index in (0, 1, 3)
-                     else frozenset())
-    validate_routes(routes, allowed_joins)
+    allowed_joins = set((LEFT_SHAFT_JOIN,)) if pad_index in (0, 1, 3) else set()
+    if pad_index in (0, 1):
+        allowed_joins.add(RIGHT_RAIL_JOINS[0])
+    if pad_index == 0:
+        allowed_joins.add(RIGHT_RAIL_JOINS[1])
+    validate_routes(routes, frozenset(allowed_joins))
 
     for name, center in CONTROL_CENTERS[layout_id].items():
         if name in routes and dist(routes[name][-1], center) > 25:
@@ -59,7 +77,8 @@ def generate_pad(layout_id: str, pad_index: int) -> None:
     art.alpha_composite(body.resize(
         (right - left, bottom - top), Image.Resampling.LANCZOS), (left, top))
 
-    callouts = render_callouts(routes, rails, width)
+    callouts = render_callouts(routes, rails, width,
+                               expected_groups=ARROW_GROUPS[pad_index])
     for name, points in routes.items():
         validate_complete(name, callouts, points)
     alpha = callouts.getchannel("A")

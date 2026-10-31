@@ -1,7 +1,7 @@
 Controller and button layout artwork attributions
 
 Button layouts: Nicolae (XELU) Berbece; Paul Paun.
-Controller layouts: Nicolae (XELU) Berbece; Paul Paun; zacksly (Nintendo Switch 1/2); Valve Software (Steam Deck).
+Controller layouts: Nicolae (XELU) Berbece; Paul Paun; zacksly (Nintendo Switch 1/2); Steam Deck and Quest 1/2 (adapted from official device artwork).
 
-These are the artist names used by the in-game Credits screen and assets/controller/README.md.
+These are the artist and artwork attributions used by the in-game Credits screen and assets/controller/README.md.
 The original source URLs and redistribution terms have not been verified in this record.

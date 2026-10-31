@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>meta-quest-2 pad 0 callout routes</title>
+  <desc>Xbox-position text rails. The top callouts share one center stem, and X passes beneath A and the right stick.</desc>
+  <image id="pad-reference" href="pad.png" x="11" y="192" width="1004" height="661" opacity="0.65"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
+    <polyline id="left_trigger" points="249,265 512,265 512,625 455,625 410,575"/>
+    <polyline id="left_grip" points="249,265 512,265 512,625 370,625 337,605"/>
+    <polyline id="right_trigger" points="775,265 512,265 512,625 570,625 614,575"/>
+    <polyline id="right_grip" points="775,265 512,265 512,625 654,625 687,605"/>
+    <polyline id="left_stick" points="105,760 105,470 295,470"/>
+    <polyline id="right_stick" points="810,758 810,470 726,470"/>
+    <polyline id="a_button" points="810,758 810,595 695,512"/>
+    <polyline id="x_button" points="900,660 235,660 235,535 307,511"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="14">
+    <line id="top-left" x1="16" y1="265" x2="249" y2="265"/>
+    <line id="top-right" x1="775" y1="265" x2="1009" y2="265"/>
+    <line id="bottom-left" x1="16" y1="760" x2="105" y2="760"/>
+    <line id="bottom-right" x1="810" y1="758" x2="1009" y2="758"/>
+    <line id="middle-right" x1="900" y1="660" x2="1009" y2="660"/>
+  </g>
+</svg>

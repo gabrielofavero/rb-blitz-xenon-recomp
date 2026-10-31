@@ -6,473 +6,483 @@ kind = "keyboard-mouse"
 
 [[input]]
 id = "0"
-file = "0_Key_Dark.png"
+file = "0.png"
 source = "key:0"
 
 [[input]]
 id = "10"
-file = "10_Key_Dark.png"
+file = "10.png"
 source = "key:F10"
 variant = "numbered-filename"
 
 [[input]]
 id = "11"
-file = "11_Key_Dark.png"
+file = "11.png"
 source = "key:F11"
 variant = "numbered-filename"
 
 [[input]]
 id = "12"
-file = "12_Key_Dark.png"
+file = "12.png"
 source = "key:F12"
 variant = "numbered-filename"
 
 [[input]]
 id = "1"
-file = "1_Key_Dark.png"
+file = "1.png"
 source = "key:1"
 
 [[input]]
 id = "2"
-file = "2_Key_Dark.png"
+file = "2.png"
 source = "key:2"
 
 [[input]]
 id = "3"
-file = "3_Key_Dark.png"
+file = "3.png"
 source = "key:3"
 
 [[input]]
 id = "4"
-file = "4_Key_Dark.png"
+file = "4.png"
 source = "key:4"
 
 [[input]]
 id = "5"
-file = "5_Key_Dark.png"
+file = "5.png"
 source = "key:5"
 
 [[input]]
 id = "6"
-file = "6_Key_Dark.png"
+file = "6.png"
 source = "key:6"
 
 [[input]]
 id = "7"
-file = "7_Key_Dark.png"
+file = "7.png"
 source = "key:7"
 
 [[input]]
 id = "8"
-file = "8_Key_Dark.png"
+file = "8.png"
 source = "key:8"
 
 [[input]]
 id = "9"
-file = "9_Key_Dark.png"
+file = "9.png"
 source = "key:9"
 
 [[input]]
 id = "a"
-file = "A_Key_Dark.png"
+file = "a.png"
 source = "key:A"
 
 [[input]]
 id = "alt"
-file = "Alt_Key_Dark.png"
+file = "alt.png"
 source = "key:Left Alt"
 
 [[input]]
 id = "arrow_down"
-file = "Arrow_Down_Key_Dark.png"
+file = "arrow_down.png"
 source = "key:Down"
 
 [[input]]
 id = "arrow_left"
-file = "Arrow_Left_Key_Dark.png"
+file = "arrow_left.png"
 source = "key:Left"
 
 [[input]]
 id = "arrow_right"
-file = "Arrow_Right_Key_Dark.png"
+file = "arrow_right.png"
 source = "key:Right"
 
 [[input]]
 id = "arrow_up"
-file = "Arrow_Up_Key_Dark.png"
+file = "arrow_up.png"
 source = "key:Up"
 
 [[input]]
 id = "asterisk"
-file = "Asterisk_Key_Dark.png"
+file = "asterisk.png"
 source = "key:8"
 modifiers = ["shift"]
 
 [[input]]
 id = "b"
-file = "B_Key_Dark.png"
+file = "b.png"
 source = "key:B"
 
 [[input]]
 id = "backspace_alt"
-file = "Backspace_Alt_Key_Dark.png"
+file = "backspace_alt.png"
 source = "key:Backspace"
 variant = "wide"
 
 [[input]]
 id = "backspace"
-file = "Backspace_Key_Dark.png"
+file = "backspace.png"
 source = "key:Backspace"
 
 [[input]]
 id = "bracket_left"
-file = "Bracket_Left_Key_Dark.png"
+file = "bracket_left.png"
 source = "key:Left Bracket"
 
 [[input]]
 id = "bracket_right"
-file = "Bracket_Right_Key_Dark.png"
+file = "bracket_right.png"
 source = "key:Right Bracket"
 
 [[input]]
 id = "c"
-file = "C_Key_Dark.png"
+file = "c.png"
 source = "key:C"
 
 [[input]]
 id = "caps_lock"
-file = "Caps_Lock_Key_Dark.png"
+file = "caps_lock.png"
 source = "key:CapsLock"
 
 [[input]]
 id = "ctrl"
-file = "Ctrl_Key_Dark.png"
+file = "ctrl.png"
 source = "key:Left Ctrl"
 
 [[input]]
 id = "d"
-file = "D_Key_Dark.png"
+file = "d.png"
 source = "key:D"
 
 [[input]]
 id = "del"
-file = "Del_Key_Dark.png"
+file = "del.png"
 source = "key:Delete"
 
 [[input]]
 id = "e"
-file = "E_Key_Dark.png"
+file = "e.png"
 source = "key:E"
 
 [[input]]
 id = "end"
-file = "End_Key_Dark.png"
+file = "end.png"
 source = "key:End"
 
 [[input]]
 id = "enter_alt"
-file = "Enter_Alt_Key_Dark.png"
+file = "enter_alt.png"
 source = "key:Return"
 variant = "iso"
 
 [[input]]
 id = "enter"
-file = "Enter_Key_Dark.png"
+file = "enter.png"
 source = "key:Return"
 
 [[input]]
 id = "enter_tall"
-file = "Enter_Tall_Key_Dark.png"
+file = "enter_tall.png"
 source = "key:KP Enter"
 
 [[input]]
 id = "esc"
-file = "Esc_Key_Dark.png"
+file = "esc.png"
 source = "key:Escape"
 
 [[input]]
 id = "f10"
-file = "F10_Key_Dark.png"
+file = "f10.png"
 source = "key:F10"
 
 [[input]]
 id = "f11"
-file = "F11_Key_Dark.png"
+file = "f11.png"
 source = "key:F11"
 
 [[input]]
 id = "f12"
-file = "F12_Key_Dark.png"
+file = "f12.png"
 source = "key:F12"
 
 [[input]]
 id = "f1"
-file = "F1_Key_Dark.png"
+file = "f1.png"
 source = "key:F1"
 
 [[input]]
 id = "f2"
-file = "F2_Key_Dark.png"
+file = "f2.png"
 source = "key:F2"
 
 [[input]]
 id = "f3"
-file = "F3_Key_Dark.png"
+file = "f3.png"
 source = "key:F3"
 
 [[input]]
 id = "f4"
-file = "F4_Key_Dark.png"
+file = "f4.png"
 source = "key:F4"
 
 [[input]]
 id = "f5"
-file = "F5_Key_Dark.png"
+file = "f5.png"
 source = "key:F5"
 
 [[input]]
 id = "f6"
-file = "F6_Key_Dark.png"
+file = "f6.png"
 source = "key:F6"
 
 [[input]]
 id = "f7"
-file = "F7_Key_Dark.png"
+file = "f7.png"
 source = "key:F7"
 
 [[input]]
 id = "f8"
-file = "F8_Key_Dark.png"
+file = "f8.png"
 source = "key:F8"
 
 [[input]]
 id = "f9"
-file = "F9_Key_Dark.png"
+file = "f9.png"
 source = "key:F9"
 
 [[input]]
 id = "f"
-file = "F_Key_Dark.png"
+file = "f.png"
 source = "key:F"
 
 [[input]]
 id = "g"
-file = "G_Key_Dark.png"
+file = "g.png"
 source = "key:G"
 
 [[input]]
 id = "h"
-file = "H_Key_Dark.png"
+file = "h.png"
 source = "key:H"
 
 [[input]]
 id = "home"
-file = "Home_Key_Dark.png"
+file = "home.png"
 source = "key:Home"
 
 [[input]]
 id = "i"
-file = "I_Key_Dark.png"
+file = "i.png"
 source = "key:I"
 
 [[input]]
 id = "insert"
-file = "Insert_Key_Dark.png"
+file = "insert.png"
 source = "key:Insert"
 
 [[input]]
 id = "j"
-file = "J_Key_Dark.png"
+file = "j.png"
 source = "key:J"
 
 [[input]]
 id = "k"
-file = "K_Key_Dark.png"
+file = "k.png"
 source = "key:K"
 
 [[input]]
 id = "l"
-file = "L_Key_Dark.png"
+file = "l.png"
 source = "key:L"
 
 [[input]]
 id = "m"
-file = "M_Key_Dark.png"
+file = "m.png"
 source = "key:M"
 
 [[input]]
 id = "mark_left"
-file = "Mark_Left_Key_Dark.png"
+file = "mark_left.png"
 source = "key:Comma"
 modifiers = ["shift"]
 
 [[input]]
 id = "mark_right"
-file = "Mark_Right_Key_Dark.png"
+file = "mark_right.png"
 source = "key:Period"
 modifiers = ["shift"]
 
 [[input]]
 id = "minus"
-file = "Minus_Key_Dark.png"
+file = "minus.png"
 source = "key:Minus"
 
 [[input]]
 id = "mouse_left"
-file = "Mouse_Left_Key_Dark.png"
+file = "mouse_left.png"
 source = "mouse:left"
 
 [[input]]
 id = "mouse_middle"
-file = "Mouse_Middle_Key_Dark.png"
+file = "mouse_middle.png"
 source = "mouse:middle"
 
 [[input]]
+id = "mouse_wheel_up"
+file = "mouse_wheel_up.png"
+source = "mouse:wheel_up"
+
+[[input]]
+id = "mouse_wheel_down"
+file = "mouse_wheel_down.png"
+source = "mouse:wheel_down"
+
+[[input]]
 id = "mouse_right"
-file = "Mouse_Right_Key_Dark.png"
+file = "mouse_right.png"
 source = "mouse:right"
 
 [[input]]
 id = "n"
-file = "N_Key_Dark.png"
+file = "n.png"
 source = "key:N"
 
 [[input]]
 id = "num_lock"
-file = "Num_Lock_Key_Dark.png"
+file = "num_lock.png"
 source = "key:NumLockClear"
 
 [[input]]
 id = "o"
-file = "O_Key_Dark.png"
+file = "o.png"
 source = "key:O"
 
 [[input]]
 id = "p"
-file = "P_Key_Dark.png"
+file = "p.png"
 source = "key:P"
 
 [[input]]
 id = "page_down"
-file = "Page_Down_Key_Dark.png"
+file = "page_down.png"
 source = "key:PageDown"
 
 [[input]]
 id = "page_up"
-file = "Page_Up_Key_Dark.png"
+file = "page_up.png"
 source = "key:PageUp"
 
 [[input]]
 id = "plus"
-file = "Plus_Key_Dark.png"
+file = "plus.png"
 source = "key:Equals"
 modifiers = ["shift"]
 
 [[input]]
 id = "plus_tall"
-file = "Plus_Tall_Key_Dark.png"
+file = "plus_tall.png"
 source = "key:KP Plus"
 
 [[input]]
 id = "print_screen"
-file = "Print_Screen_Key_Dark.png"
+file = "print_screen.png"
 source = "key:PrintScreen"
 
 [[input]]
 id = "q"
-file = "Q_Key_Dark.png"
+file = "q.png"
 source = "key:Q"
 
 [[input]]
 id = "question"
-file = "Question_Key_Dark.png"
+file = "question.png"
 source = "key:Slash"
 modifiers = ["shift"]
 
 [[input]]
 id = "quote"
-file = "Quote_Key_Dark.png"
+file = "quote.png"
 source = "key:Apostrophe"
 modifiers = ["shift"]
 
 [[input]]
 id = "r"
-file = "R_Key_Dark.png"
+file = "r.png"
 source = "key:R"
 
 [[input]]
 id = "s"
-file = "S_Key_Dark.png"
+file = "s.png"
 source = "key:S"
 
 [[input]]
 id = "semicolon"
-file = "Semicolon_Key_Dark.png"
+file = "semicolon.png"
 source = "key:Semicolon"
 
 [[input]]
 id = "shift_alt"
-file = "Shift_Alt_Key_Dark.png"
+file = "shift_alt.png"
 source = "key:Left Shift"
 variant = "wide"
 
 [[input]]
 id = "shift"
-file = "Shift_Key_Dark.png"
+file = "shift.png"
 source = "key:Left Shift"
 
 [[input]]
 id = "slash"
-file = "Slash_Key_Dark.png"
+file = "slash.png"
 source = "key:Backslash"
 
 [[input]]
 id = "space"
-file = "Space_Key_Dark.png"
+file = "space.png"
 source = "key:Space"
 
 [[input]]
 id = "t"
-file = "T_Key_Dark.png"
+file = "t.png"
 source = "key:T"
 
 [[input]]
 id = "tab"
-file = "Tab_Key_Dark.png"
+file = "tab.png"
 source = "key:Tab"
 
 [[input]]
 id = "tilda"
-file = "Tilda_Key_Dark.png"
+file = "tilda.png"
 source = "key:Grave"
 modifiers = ["shift"]
 
 [[input]]
 id = "u"
-file = "U_Key_Dark.png"
+file = "u.png"
 source = "key:U"
 
 [[input]]
 id = "v"
-file = "V_Key_Dark.png"
+file = "v.png"
 source = "key:V"
 
 [[input]]
 id = "w"
-file = "W_Key_Dark.png"
+file = "w.png"
 source = "key:W"
 
 [[input]]
 id = "x"
-file = "X_Key_Dark.png"
+file = "x.png"
 source = "key:X"
 
 [[input]]
 id = "y"
-file = "Y_Key_Dark.png"
+file = "y.png"
 source = "key:Y"
 
 [[input]]
 id = "z"
-file = "Z_Key_Dark.png"
+file = "z.png"
 source = "key:Z"

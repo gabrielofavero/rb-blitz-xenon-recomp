@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>meta-quest-3 pad 1 callout routes</title>
+  <desc>Shared center stem branches to the triggers and descends to horizontal grip arrows; X climbs diagonally from its lower rail.</desc>
+  <image id="pad-reference" href="pad.png" x="76" y="186" width="867" height="635" opacity="0.65"/>
+  <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
+    <polyline id="left_trigger" points="249,264 512,264 512,450 470,450 440,430"/>
+    <polyline id="left_grip" points="249,264 512,264 512,456 440,518 365,518"/>
+    <polyline id="right_trigger" points="775,264 512,264 512,450 550,450 580,430"/>
+    <polyline id="right_grip" points="775,264 512,264 512,456 584,518 659,518"/>
+    <polyline id="left_stick" points="88,757 88,325 285,325"/>
+    <polyline id="right_stick" points="810,757 810,325 735,325"/>
+    <polyline id="x_button" points="900,659 340,659 298,399"/>
+  </g>
+  <g id="text-rails" fill="none" stroke="#00aed6" stroke-width="14">
+    <line id="top-left" x1="18" y1="264" x2="249" y2="264"/>
+    <line id="top-right" x1="775" y1="264" x2="1011" y2="264"/>
+    <line id="bottom" x1="88" y1="757" x2="1011" y2="757"/>
+    <line id="middle-right" x1="900" y1="659" x2="1011" y2="659"/>
+  </g>
+</svg>
