@@ -611,6 +611,7 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_rhythmverse_filter_panel", "RHYTHMVERSE FILTERS"},
       {"settings_achievements_panel", "ACHIEVEMENTS & UNLOCKS"},
       {"settings_interface_panel", "INTERFACE"},
+      {"settings_prompts_labels_panel", "PROMPTS & LABELS"},
       {"settings_main_menu_panel", "MAIN MENU"},
       {"settings_main_menu_base_panel", "BASE GAME ITEMS"},
       {"settings_main_menu_extra_panel", "EXTRA ITEMS"},
@@ -743,6 +744,9 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_controls_panel", "settings_controls_screen", kRootScreen,
                           MenuPanels(),
                           {
+                              SelectRow("settings_controls_layout", "controller.scheme", "Layout",
+                                        "Choose controller button and preset art. The choice applies immediately.",
+                                        Choices({"retail", "Xbox 360"})),
                               RouteRow("settings_controller_presets", "controller_config_screen",
                                        "back_screen", "Controller Presets",
                                        "Choose a preset. It applies when no custom controller bindings exist."),
@@ -753,10 +757,6 @@ std::vector<PanelSpec> AllPanels() {
                                          "settings_gameplay_mapping_screen", "Gameplay Mapping",
                                          "The inputs that play notes, change lanes, use power-ups, and pause."),
                           }});
-  out.back().rows.insert(out.back().rows.begin() + 1, SelectRow(
-      "settings_controls_layout", "controller.scheme", "Layout",
-      "Choose controller button and preset art. The choice applies immediately.",
-      Choices({"retail", "Xbox 360"})));
 
   // 6b. Interface Mapping (P3). The page owns the *interface*: the four directions, confirm, back,
   // and the song list's three buttons - nine rows in three groups, each with its own Assign/Reset
@@ -1244,7 +1244,7 @@ std::vector<PanelSpec> AllPanels() {
                                         true),
                           }});
 
-  // Interface: shortcut and library-tab visibility, offline prompts, and setting descriptions.
+  // Interface: shortcut and library-tab visibility, with a separate page for prompts and labels.
   out.push_back(PanelSpec{"settings_interface_panel", "settings_interface_screen",
                           "settings_general_screen", MenuPanels(),
                           {
@@ -1254,6 +1254,14 @@ std::vector<PanelSpec> AllPanels() {
                               SubmenuRow("settings_music_library_store", "settings_music_library_store_screen",
                                          "Music Library & Store",
                                          "Choose which headers appear in Your Songs and the store."),
+                              SubmenuRow("settings_prompts_labels", "settings_prompts_labels_screen",
+                                         "Prompts & Labels",
+                                         "Choose offline prompt and setting description behavior."),
+                          }});
+
+  out.push_back(PanelSpec{"settings_prompts_labels_panel", "settings_prompts_labels_screen",
+                          "settings_interface_screen", MenuPanels(),
+                          {
                               // Owner request, 2026-10-23: the row says what the switch *does*
                               // rather than naming the prompts it removes. `hide_offline_prompts`
                               // true *is* the skip, so the ordinary `On`/`Off` spelling is the
@@ -1351,8 +1359,11 @@ std::vector<PanelSpec> AllPanels() {
   restart.kind = Kind::kRestart;
   Row close = InfoRow("settings_close", "Close", "Close this message.");
   close.kind = Kind::kClose;
+  Row ignore = InfoRow("settings_ignore_restart", "Ignore and Continue",
+                       "Continue without restarting. Saved changes that require a restart will apply later.");
+  ignore.kind = Kind::kClose;
   out.push_back(PanelSpec{"settings_restart_panel", "settings_restart_screen", kRootScreen,
-                         MenuPanels(), {close, restart}, "../pause/settings_confirmation.milo",
+                         MenuPanels(), {ignore, restart}, "../pause/settings_confirmation.milo",
                          "settings_restart_message"});
   out.push_back(PanelSpec{"settings_save_error_panel", "settings_save_error_screen", kRootScreen,
                          MenuPanels(), {close}, "../pause/settings_confirmation.milo",

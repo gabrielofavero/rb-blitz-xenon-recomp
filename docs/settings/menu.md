@@ -19,9 +19,10 @@ and in-song contexts.
 | --- | --- |
 | General | Launch; Interface; Song Library; Achievements & Unlocks; Credits |
 | Launch | Game Version (Rock Band Blitz / Ultimate / Demo); Startup (Normal / Fast); Load Guard (Off / 30s / 60s) |
-| Controls | Controller Presets; `Layout: <name>`; Interface Mapping; Gameplay Mapping. Keyboard and mouse are always enabled. |
+| Controls | `Layout: <name>`; Controller Presets; Interface Mapping; Gameplay Mapping. Keyboard and mouse are always enabled. |
 | Gameplay Mapping | Notes; Move Lane; Pause & Power-up; Reset All. Each action row keeps its name beside the keyboard and mouse bindings, with Add Key, Replace, and Reset on its page. Mapping pages hide the bottom settings caption. A first controller button asks for confirmation, then custom controller bindings replace the preset for all actions. |
-| Interface | Main Menu; Music Library & Store; Skip Offline Prompts; Setting Descriptions |
+| Interface | Main Menu; Music Library & Store; Prompts & Labels |
+| Prompts & Labels | Skip Offline Prompts; Setting Descriptions |
 | Main Menu | Base Game Items; Extra Items |
 | Base Game Items | Leaderboards; Achievements; Unlock Full Game; Download Content |
 | Extra Items | Refresh Songs; Play Current Song; Music Player; RhythmVerse |

@@ -7,9 +7,12 @@ accepted 2026-10-28; visible binding-aware hints remain P10 work.
 P5, P6b, P7, P9 and P10 remain open. P11's v2 loader, staging, internal keyboard
 art and distinct SDL source path landed 2026-10-30; physical-device/UI acceptance
 remains open. P9's ordinary Interface and Gameplay Mapping
-images and binding refresh have owner visual acceptance. The private icon atlas now holds
+images and binding refresh have owner visual acceptance. The icon font supports
 180 distinct images and reuses tiles for repeated sources. An eight-input Confirm row has owner
-visual acceptance; explicit in-song rendering and the on-screen fit of larger rows remain open.**
+visual acceptance; the latest font-atlas repair has owner visual acceptance.
+The owner has also accepted Interface Mapping and Gameplay Notes images in a paused song.
+Inspectable image overflow beyond the accepted eight-input row remains open; rows exceeding
+180 distinct sources currently fall back to text.**
 The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
@@ -55,7 +58,7 @@ P11, then checks the final UI and art. Historical P0–P8 evidence remains evide
 | --- | --- | --- |
 | P5 | PS3 source bounds/reference delivered; installer import open | Local v1 `ps3` import works or its unavailable route is reported accurately |
 | P11 | V1/v2 coexist; nine manifests validate and stage; virtual SDL extras pass, boot lists eight controllers | Physical-device mapping/capture and on-screen image acceptance |
-| P9 | Ordinary rows and an eight-input Confirm row accepted; 180 distinct atlas tiles host-tested; in-song and large-row visual checks open | In-song and large rows render correctly with v2 source images |
+| P9 | Ordinary rows, an eight-input Confirm row, the repaired atlas, and paused-song Interface Mapping/Gameplay Notes have owner visual acceptance; 180 distinct tiles host-tested | Inspectable image overflow beyond the accepted eight-input row, including rows exceeding atlas capacity |
 | P10 | Guest hint inventory and remap-aware routes open | Actionable hints follow effective bindings and active family with v2 art |
 | P6b | Eight controller art folders present; six declare pad PNGs | Install/cycle all eight, verify art and fallback, record live acceptance |
 | P7 | Documentation and closeout open | Audit, document P5 outcome, then move this plan to `finished/` |
@@ -1504,6 +1507,18 @@ installed assets pass; the latter produces a private icon scene with a separate 
 path and texture object name, with no refused records across 16 menu configurations. The
 owner's next visual check is still required to accept the image rendering and paused-song page.
 
+**2026-10-31 private-atlas regression repair.** The next owner screenshot showed fragments of
+letters in Confirm and Go Back, which means the copied font's icon UVs were sampling the retail
+atlas. The source still had the retail texture bytes and resource names. The copied font now
+renames all 65 `Pentatonic` and two lowercase scene references without changing serialized
+lengths. One bit in the spare atlas band gives its BC3 upload a private fingerprint; the texture
+override matches only that private upload and composes the icons over the original BC3 source.
+An extracted retail font record passes a host check for the separate names and one-byte texture
+marker. The release build and button-scheme, input-binding, settings-screen and menu-payload
+host suites pass. The owner chose to perform the
+mapping and paused-song visual checks personally; until those checks show source images, P9 is
+still open.
+
 **2026-10-31 startup stall after name rewrite.** The owner reported a freeze on "Loading Rock
 Band Blitz audio/video settings...". `rb_blitz_447.log` shows the generated font scene was mounted,
 four 1024-square texture candidates failed the private-font match, and the native graphics-loading
@@ -1557,6 +1572,33 @@ Right's default wheel input to be scroll down and Move Left's to be scroll up; t
 defaults and host assertions now follow that order. The owner's Move Lane screenshot from the
 new build shows the directional mouse art rendered cleanly beside both arrows; wheel art is
 accepted.
+
+**2026-10-31 blank-icon regression repair.** The next owner screenshot showed `Confirm:` and
+`Go Back:` with no images. `rb_blitz_456.log` records the retail Pentatonic upload at hash
+`012769001E910536`, differing from the private marker by one byte, and no private upload. The
+guest was reusing the retail texture object, so renaming the copied scene and matching only a
+private BC3 chain left the icon band empty. The copied scene again retains retail resource names
+and texture bytes; the override matches the retail upload and composes the 180-image band there.
+This returns to the route that matched in `rb_blitz_451.log` and `rb_blitz_452.log`, after which
+owner screenshots showed ordinary mapping images. The release build, focused suites, extracted
+font check and installed-record generation for 16 configurations pass. An isolated D3D12 boot
+in `out/button-schemes/p9/live-2026-10-31/` reached the menu and logged the same retail font
+match. The tool session had no foreground desktop (`GetForegroundWindow` returned zero), so the
+game window could not be foregrounded for input or a reliable screenshot. Live verification of
+this repair and the paused-song page remain open.
+
+**2026-10-31 owner recheck.** The owner supplied a new Interface Mapping screenshot showing
+`Confirm:` and `Go Back:` followed by colored controller images and keyboard keycaps. This
+accepts the retail-band atlas repair. P9 remains open for the explicit in-song mapping check
+and an inspectable image route beyond the accepted eight-input row. A row exceeding the
+180-tile atlas still falls back to text.
+
+**2026-10-31 paused-song owner check.** The owner supplied screenshots from a paused song:
+Gameplay Mapping's Notes page shows key and mouse images for First Note and Second Note, and
+Interface Mapping shows controller and keyboard images for Confirm and Go Back. This accepts
+the in-song row rendering path. The only remaining P9 row-layout gap is inspectable image
+overflow beyond the accepted eight-input row; a row above 180 distinct images currently uses
+its complete textual fallback.
 
 **Goal.** Both mapping surfaces show actual bound button/key/mouse images next to their action
 labels, replacing textual binding lists.

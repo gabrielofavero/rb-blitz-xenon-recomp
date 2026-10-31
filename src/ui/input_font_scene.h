@@ -8,9 +8,9 @@
 
 namespace rb_blitz::ui::input_font {
 
-// Derive an icon-only copy of the installed Pentatonic font scene. Both fonts share the
-// retail texture; icon pixels occupy only its unused bottom band, preserving text glyphs.
-// Atlas pixels are supplied at runtime; no game art is stored in the project.
+// Derive an icon-only copy of the installed Pentatonic font scene. The guest
+// shares its texture with the retail font; runtime pixels fill its unused band.
+// No game art is stored in the project.
 bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                   std::vector<uint8_t>* original_bc3, std::string* error);
 bool PrepareList(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,

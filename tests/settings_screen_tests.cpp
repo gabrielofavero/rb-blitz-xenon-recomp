@@ -450,11 +450,11 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 112u);  // fifty-six pages in each context
+  CHECK_EQ(panels.size(), 114u);  // fifty-seven pages in each context
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
-  CHECK_EQ(screens.size(), 112u);
+  CHECK_EQ(screens.size(), 114u);
   CHECK_TRUE(screens.front() == kRootScreen);
   // The contexts pair up one for one, in declaration order: the i-th screen's in-song twin is the
   // (i + half)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
@@ -519,8 +519,8 @@ void TestListOwnership() {
                HasText(root, "../pause/settings_confirmation.milo"));
     (pause ? in_song : main_menu) += 1;
   }
-  CHECK_EQ(main_menu, 56);
-  CHECK_EQ(in_song, 56);
+  CHECK_EQ(main_menu, 57);
+  CHECK_EQ(in_song, 57);
 
   // The copies have to live **beside** the retail scene, because that scene refers to its neighbours
   // by relative path (`neon_lights.milo`, `../resource/lists/list_options_main.milo`), and those
@@ -581,7 +581,7 @@ void TestScreenBackTargets() {
       CHECK_TRUE(HasText(root, "game_screen"));
     }
   }
-  CHECK_EQ(in_song, 56);  // one per page, the root included
+  CHECK_EQ(in_song, 57);  // one per page, the root included
   CHECK_EQ(root_twins, 1);
 }
 
@@ -1154,7 +1154,7 @@ void TestInSongContext() {
     CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screens[i])) !=
                screens.end());
   }
-  CHECK_EQ(menu_screens.size(), 56u);
+  CHECK_EQ(menu_screens.size(), 57u);
   std::vector<std::string> in_song_panels_names = PanelNames();
   in_song_panels_names.erase(in_song_panels_names.begin(),
                              in_song_panels_names.begin() + static_cast<std::ptrdiff_t>(half));
@@ -1174,7 +1174,7 @@ void TestInSongContext() {
       CHECK_FALSE(HasText(root, screen));
     }
   }
-  CHECK_EQ(in_song_panels, 56);
+  CHECK_EQ(in_song_panels, 57);
 
   // The two contexts' panel sets are retail's own, and the difference between them is
   // load-bearing - measured, not stylistic. Retail's in-song page screens that are entered with a
@@ -1425,7 +1425,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, 112);                   // every panel, in both contexts
+  CHECK_EQ(fills, 114);                   // every panel, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -1621,7 +1621,7 @@ void TestButtonTableIsOneSwitch() {
     }
     CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
   }
-  CHECK_EQ(tables, 112);  // every panel, in both contexts
+  CHECK_EQ(tables, 114);  // every panel, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
@@ -1672,7 +1672,7 @@ void TestButtonTableIsOneSwitch() {
         all.size() - 1u - static_cast<size_t>(in_moves) - static_cast<size_t>(in_scroll);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, 112);  // one row table per panel, in both contexts
+  CHECK_EQ(row_tables, 114);  // one row table per panel, in both contexts
 }
 
 void TestSelectAdvancesAndWraps() {
@@ -1775,7 +1775,7 @@ void TestRestartPromptOnlyOnLeave() {
   // P9-11 retired the ten authored search-key pages (one root, the letters index, five character
   // groups, two number groups and More Keys) in both contexts: the store's Search row opens the
   // title's own keyboard now. 142 - 2 * 10.
-  CHECK_EQ(panels, 112);
+  CHECK_EQ(panels, 114);
   CHECK_EQ(root_cancels, 2);
   CHECK_EQ(other_cancels, panels - root_cancels);
 }
@@ -1800,6 +1800,14 @@ void CollectSetCalls(const dtb::Node& node, std::vector<SetCall>* out) {
 
 void TestRestartPromptLeavesTheSurface() {
   BeginCase("dismissing the restart confirmation completes the leave it interrupted");
+
+  CHECK_TRUE(PanelRowSymbols("settings_restart_panel") ==
+             std::vector<std::string>({"settings_ignore_restart", "settings_restart_now"}));
+  CHECK_TRUE(PanelRowSymbols(PausePanel("settings_restart_panel")) ==
+             PanelRowSymbols("settings_restart_panel"));
+  for (const auto& [key, label] : Labels()) {
+    if (key == "settings_ignore_restart") CHECK_TRUE(label == "Ignore and Continue");
+  }
 
   // The reproduced defect (2026-10-14, `out/_swap/p3/repro3-close/`): the confirmation was entered
   // with the generic `EnterScreen`, whose `{<screen> set back_screen {ui current_screen}}` pointed
@@ -2876,7 +2884,7 @@ void TestHelpEventsInTheDefinition() {
       }
     }
   }
-  CHECK_EQ(panels, 112);        // every page, in both contexts
+  CHECK_EQ(panels, 114);        // every page, in both contexts
   CHECK_EQ(enters, panels);    // every page tells the overlay where the highlight starts
   CHECK_TRUE(moves > 100);     // the unclamped direction cases, across the surface
   CHECK_EQ(scrolls, expected_scrolls);
@@ -3033,7 +3041,7 @@ void TestConfirmationPagesAreCaptionFree() {
     }
   }
 
-  CHECK_EQ(panels, 112);         // the whole surface, in both contexts
+  CHECK_EQ(panels, 114);         // the whole surface, in both contexts
   const auto names = PanelNames();
   CHECK_EQ(suppressed_seen, static_cast<int>(std::count_if(
       names.begin(), names.end(), SuppressesSettingsCaption)));
@@ -3092,7 +3100,24 @@ void TestShowHeadersRow() {
   BeginCase("independent Messages / Recommendations rows fit and retain both context Back targets");
   CHECK_TRUE(PanelRowSymbols("settings_interface_panel") ==
              std::vector<std::string>({"settings_main_menu", "settings_music_library_store",
-                                       "settings_offline", "settings_labels"}));
+                                       "settings_prompts_labels"}));
+  CHECK_TRUE(PanelRowSymbols("settings_prompts_labels_panel") ==
+             std::vector<std::string>({"settings_offline", "settings_labels"}));
+  CHECK_TRUE(PageRows(PausePanel("settings_prompts_labels_panel")) ==
+             PageRows("settings_prompts_labels_panel"));
+  for (bool pause : {false, true}) {
+    const std::string screen = pause ? PauseScreen("settings_prompts_labels_screen")
+                                     : "settings_prompts_labels_screen";
+    bool found = false;
+    for (const auto& root : DefinitionRoots()) {
+      ScreenFacts facts;
+      if (!ReadScreenFacts(root, &facts) || facts.name != screen) continue;
+      CHECK_TRUE(facts.back == (pause ? PauseScreen("settings_interface_screen")
+                                     : "settings_interface_screen"));
+      found = true;
+    }
+    CHECK_TRUE(found);
+  }
   CHECK_TRUE(PanelRowSymbols("settings_music_library_store_panel") ==
              std::vector<std::string>({"settings_show_messages", "settings_show_recommendations"}));
   int backs = 0;
@@ -3198,7 +3223,7 @@ void TestLoadGuardSurface() {
 void TestMusicNavigationSurface() {
   BeginCase("music navigation: live bindings, Add/Replace/Reset pages and both back targets");
   ConfigureMenu({});
-  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 4u);
+  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 3u);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
   const std::vector<std::string> actions{"settings_bind_music_next", "settings_bind_music_previous", "settings_bind_music_pause"};
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
@@ -3247,9 +3272,9 @@ void TestMusicNavigationSurface() {
   disabled.background_music_navigation = false;
   ConfigureMenu(disabled);
   // Off must keep the identical tree, including the command page in both contexts.
-  CHECK_EQ(PanelNames().size(), 112u);
+  CHECK_EQ(PanelNames().size(), 114u);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
-  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 4u);
+  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 3u);
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
   CHECK_TRUE(PageRows(PausePanel("settings_interface_music_play_panel")) == actions);
   const auto before = dtb::Compile(roots);
@@ -3261,7 +3286,7 @@ void TestMusicNavigationSurface() {
 }
 
 void TestSettingsLabelsRow() {
-  BeginCase("Interface carries the Help & Options Labels row, with On/Off labels");
+  BeginCase("Prompts & Labels carries the Setting Descriptions row, with On/Off labels");
 
   const std::vector<dtb::Node> roots = DefinitionRoots();
   const auto has = [&roots](const char* symbol) {
@@ -3458,8 +3483,8 @@ void TestGameplayMappingTreeAfterP4() {
   const auto controls = PanelRowSymbols("settings_controls_panel");
   CHECK_TRUE(std::find(controls.begin(), controls.end(), "settings_controller_presets") != controls.end());
   CHECK_TRUE(std::find(controls.begin(), controls.end(), "settings_controls_layout") != controls.end());
-  CHECK_TRUE(controls[0] == "settings_controller_presets");
-  CHECK_TRUE(controls[1] == "settings_controls_layout");
+  CHECK_TRUE(controls[0] == "settings_controls_layout");
+  CHECK_TRUE(controls[1] == "settings_controller_presets");
   CHECK_TRUE(PageRows("settings_gameplay_mapping_panel") ==
       std::vector<std::string>({"settings_keyboard_mouse_notes",
                                 "settings_keyboard_mouse_move_lane",
@@ -4220,7 +4245,7 @@ void TestControllerLayoutCatalogPage() {
   const auto panels = PanelNames();
   CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_controller_layout_panel") == panels.end());
   const std::vector<std::string> expected = {
-      "settings_controller_presets", "settings_controls_layout",
+      "settings_controls_layout", "settings_controller_presets",
       "settings_controls_interface", "settings_controls_gameplay"};
   CHECK_TRUE(PanelRowSymbols("settings_controls_panel") == expected);
   CHECK_TRUE(PageRows("settings_controls_pause_panel") ==

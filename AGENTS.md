@@ -11,6 +11,11 @@
   current build already contains the most recent change. An unbuilt change means
   the user tests stale binaries. Build command:
   `cmake --build --preset win-amd64-release`.
+- On Windows, run payload test executables through
+  `out/build/win-amd64-release/rb_blitz_windows_test_runner.exe <test.exe> [args...]`
+  so crashes go to the agent's console or CTest log without desktop dialogs.
+  The CTest registrations for `menu_payload`, `store_payload`, and `payload_overlay`
+  already use this launcher.
 - Overlays (owner directive, 2026-10-24): drawing directly on the guest's own UI
   (authored DTA, the title's own widgets/labels, records we serve) is always
   authorized. A new host-side overlay over the guest's screen — a panel, box,

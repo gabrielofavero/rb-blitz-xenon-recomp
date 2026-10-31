@@ -150,8 +150,8 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
     (*original_bc3)[i] = bytes[kTexturePayload + i + 1];
     (*original_bc3)[i + 1] = bytes[kTexturePayload + i];
   }
-  // The retail texture remains byte-identical in this scene. The override matches that
-  // proven upload and replaces only blocks in the empty bottom band.
+  // The guest reuses the retail texture object for this copied font. Retain its
+  // identity and let the override replace the unused bottom band on that upload.
   // A single stored chunk is valid Milo and avoids a second compressor.
   if (!PackStored(bytes, scene, error)) return false;
   g_original_bc3.store(std::make_shared<const std::vector<uint8_t>>(*original_bc3));

@@ -528,6 +528,18 @@ target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 
 if(BUILD_TESTING)
     find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
+    if(WIN32)
+        # Set the inherited Windows error mode before a payload test starts, so even
+        # faults during startup end in CTest's log instead of opening a desktop dialog.
+        add_executable(rb_blitz_windows_test_runner tests/windows_test_runner.cpp)
+    endif()
+    function(add_payload_test name target)
+        if(WIN32)
+            add_test(NAME ${name} COMMAND rb_blitz_windows_test_runner $<TARGET_FILE:${target}>)
+        else()
+            add_test(NAME ${name} COMMAND ${target})
+        endif()
+    endfunction()
     # Exercise the keyboard modal's production ownership/navigation rules without
     # booting the game, opening a window, or synthesizing controller input.
     add_executable(rb_blitz_keyboard_controller_tests tests/keyboard_controller_tests.cpp)
@@ -772,7 +784,7 @@ if(BUILD_TESTING)
         tests/payload_overlay_tests.cpp
     )
     target_include_directories(rb_blitz_payload_overlay_tests PRIVATE src)
-    add_test(NAME payload_overlay COMMAND rb_blitz_payload_overlay_tests)
+    add_payload_test(payload_overlay rb_blitz_payload_overlay_tests)
 
     # The HUD re-anchor rule (src/hooks/hud_layout.h). Header-only: the policy is arithmetic
     # and has no boot frame, no guest and no SDK in it, which is the point of the seam.
@@ -957,7 +969,7 @@ if(BUILD_TESTING)
         src/store/store_payload.cpp
     )
     target_include_directories(rb_blitz_menu_payload_tests PRIVATE src)
-    add_test(NAME menu_payload COMMAND rb_blitz_menu_payload_tests)
+    add_payload_test(menu_payload rb_blitz_menu_payload_tests)
 
     # R9's pool and deck (src/hooks/menu_music_pool.h): that a merged pack's songs are all
     # pooled and sampled at random, and that no song is ever dealt twice in a row. The hook
@@ -1323,7 +1335,7 @@ if(BUILD_TESTING)
         src/ui/menu_options.cpp
     )
     target_include_directories(rb_blitz_store_payload_tests PRIVATE src)
-    add_test(NAME store_payload COMMAND rb_blitz_store_payload_tests)
+    add_payload_test(store_payload rb_blitz_store_payload_tests)
 
     # P2's exit needs the writer skeleton (src/store/store_metadata.h): the request names and the
     # front-menu record. The schema is still a guess, so the suite pins the names, the refusals and

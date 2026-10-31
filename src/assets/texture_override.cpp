@@ -168,7 +168,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
           font_hash_ = hash;
           font_hash_found_ = true;
           font = true;
-          REXLOG_INFO("input_icons: matched Pentatonic icon atlas texture {:016X}", hash);
+          REXLOG_INFO("input_icons: matched retail font atlas texture {:016X}", hash);
         }
       }
     }

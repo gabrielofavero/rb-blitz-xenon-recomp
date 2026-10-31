@@ -658,6 +658,26 @@ void TestHeaderNavigation() {
   CHECK_TRUE(dtb::Compile(invalid) == before);
 }
 
+void CheckIconScene(const std::vector<uint8_t>& icon_scene) {
+  CHECK_TRUE(icon_scene.size() > 0x810 + 0x867 + 31);
+  if (icon_scene.size() <= 0x810 + 0x867 + 31) return;
+  const std::string resources(reinterpret_cast<const char*>(icon_scene.data() + 0x810), 0x867);
+  CHECK_TRUE(resources.find("Pentatonic_Regular_") != std::string::npos);
+  CHECK_TRUE(resources.find("../image/pentatonic_regular_") != std::string::npos);
+  CHECK_TRUE(resources.find("Iconatonic_Regular_") == std::string::npos);
+  const auto retail = rb_blitz::ui::input_font::OriginalBc3();
+  CHECK_TRUE(retail != nullptr);
+  if (!retail) return;
+  constexpr size_t payload = 0x810 + 0x867 + 31;
+  CHECK_TRUE(icon_scene.size() >= payload + retail->size());
+  if (icon_scene.size() < payload + retail->size()) return;
+  bool texture_identical = true;
+  for (size_t i = 0; i < retail->size(); i += 2)
+    texture_identical &= icon_scene[payload + i] == (*retail)[i + 1] &&
+                         icon_scene[payload + i + 1] == (*retail)[i];
+  CHECK_TRUE(texture_identical);
+}
+
 // Optional integration check against extracted records; never boots or drives the game.
 int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root) {
   namespace fs = std::filesystem;
@@ -686,6 +706,9 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
       std::printf("header records refused: %s\n", why.c_str()); return 1;
     }
     CHECK_TRUE(notes.empty());
+    if (boot_case == 0) {
+      CheckIconScene(records.at(rb_blitz::ui::input_font::kIconSceneRecord));
+    }
     CHECK_TRUE(records.contains("ui/startup/gen/startup.dtb") == fast);
     const auto dir = fs::path(output_root) / (std::string(fast ? "fast-" : "normal-") + std::to_string(mask));
     for (const auto& [name, bytes] : records) {
@@ -864,6 +887,19 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
 
 int main(int argc, char** argv) {
   rb_blitz::test::SuppressWindowsTestCrashDialogs();
+  if (argc == 3 && std::string(argv[1]) == "check-icon-font") {
+    std::ifstream input(argv[2], std::ios::binary);
+    CHECK_TRUE(bool(input));
+    if (!input) return Finish();
+    std::vector<uint8_t> original{std::istreambuf_iterator<char>(input),
+                                  std::istreambuf_iterator<char>()};
+    std::vector<uint8_t> scene, bc3;
+    std::string why;
+    CHECK_TRUE(rb_blitz::ui::input_font::PrepareScene(original, &scene, &bc3, &why));
+    if (!why.empty()) std::printf("icon font refused: %s\n", why.c_str());
+    if (!scene.empty()) CheckIconScene(scene);
+    return Finish();
+  }
   {
     BeginCase("input label styles carry both PreLoad records and PostLoad variation strings");
     constexpr size_t header = 0x810;
@@ -1115,17 +1151,21 @@ int main(int argc, char** argv) {
     // Three spacers, the project's heading + row, a blank, the thanks heading + its eleven rows, a
     // blank, then the official section untouched.
     CHECK_EQ(roots.size(), 21u);
-    CheckStrEq(roots[3].kids[0].text, "heading");
-    CheckStrEq(roots[3].kids[1].text, "Recompilation Project");
-    CheckStrEq(roots[4].kids[0].text, "title_name");
-    CheckStrEq(roots[4].kids[1].text, "Developer");
-    CheckStrEq(roots[4].kids[2].text, "Gabriel Fávero");
-    CHECK_EQ(roots[5].kids.size(), 0u);
-    CheckStrEq(roots[6].kids[1].text, "Thanks To");
+    if (roots.size() == 21u) {
+      CheckStrEq(roots[3].kids[0].text, "heading");
+      CheckStrEq(roots[3].kids[1].text, "Recompilation Project");
+      CheckStrEq(roots[4].kids[0].text, "title_name");
+      CheckStrEq(roots[4].kids[1].text, "Developer");
+      CheckStrEq(roots[4].kids[2].text, "Gabriel Fávero");
+      CHECK_EQ(roots[5].kids.size(), 0u);
+      CheckStrEq(roots[6].kids[1].text, "Thanks To");
+    }
     CheckThanksRows(roots);
-    CHECK_EQ(roots[18].kids.size(), 0u);
-    CheckStrEq(roots[19].kids[1].text, "Core Development Team");
-    CheckStrEq(roots[20].kids[2].text, "Matthew Nordhaus");
+    if (roots.size() == 21u) {
+      CHECK_EQ(roots[18].kids.size(), 0u);
+      CheckStrEq(roots[19].kids[1].text, "Core Development Team");
+      CheckStrEq(roots[20].kids[2].text, "Matthew Nordhaus");
+    }
 
     // The edited roots compile to a DTA the project's own parser reads back.
     const std::vector<uint8_t> bytes = rb_blitz::ui::dtb::Compile(roots);
@@ -1161,19 +1201,23 @@ int main(int argc, char** argv) {
     CHECK_TRUE(rb_blitz::settings::AddRecompilationCredits(&roots, true, &why));
     // The one row became two plus the thanks block, so the file grew by fourteen roots.
     CHECK_EQ(roots.size(), 21u);
-    CheckStrEq(roots[2].kids[1].text, "Recompilation Project & Ultimate 2.0 Mod");
-    CheckStrEq(roots[3].kids[1].text, "Recompilation Developer");
-    CheckStrEq(roots[3].kids[2].text, "Gabriel Fávero");
-    CheckStrEq(roots[4].kids[1].text, "Ultimate 2.0 Developer");
-    CheckStrEq(roots[4].kids[2].text, "Synchrony");
-    CHECK_EQ(roots[5].kids.size(), 0u);
-    CheckStrEq(roots[6].kids[1].text, "Thanks To");
+    if (roots.size() == 21u) {
+      CheckStrEq(roots[2].kids[1].text, "Recompilation Project & Ultimate 2.0 Mod");
+      CheckStrEq(roots[3].kids[1].text, "Recompilation Developer");
+      CheckStrEq(roots[3].kids[2].text, "Gabriel Fávero");
+      CheckStrEq(roots[4].kids[1].text, "Ultimate 2.0 Developer");
+      CheckStrEq(roots[4].kids[2].text, "Synchrony");
+      CHECK_EQ(roots[5].kids.size(), 0u);
+      CheckStrEq(roots[6].kids[1].text, "Thanks To");
+    }
     CheckThanksRows(roots);
     // The payload's own blank run is not lengthened by the insertion, and the official section
     // after it keeps its place.
-    CHECK_EQ(roots[18].kids.size(), 0u);
-    CHECK_EQ(roots[19].kids.size(), 0u);
-    CheckStrEq(roots[20].kids[1].text, "Core Development Team");
+    if (roots.size() == 21u) {
+      CHECK_EQ(roots[18].kids.size(), 0u);
+      CHECK_EQ(roots[19].kids.size(), 0u);
+      CheckStrEq(roots[20].kids[1].text, "Core Development Team");
+    }
 
     // A newer payload whose one row does not match is left untouched, including its heading.
     std::vector<Node> moved = fixture();
