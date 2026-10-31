@@ -249,6 +249,17 @@ void TestIconSourceCatalog() {
   CHECK_TRUE(authored_up.art == icons::Art::kBuiltIn);
   CHECK_TRUE(authored_up.rgba != authored_down.rgba);
   CHECK_TRUE(authored_up.rgba != wheel_up.rgba);
+  registry.keyboard_mouse.inputs.push_back({"wheel_up", "mouse:wheel_up", "", "",
+      "mouse_wheel_up.png", {}, {}, {68, 92, std::vector<uint8_t>(68 * 92 * 4, 91)}});
+  registry.keyboard_mouse.inputs.push_back({"wheel_down", "mouse:wheel_down", "", "",
+      "mouse_wheel_down.png", {}, {}, {68, 92, std::vector<uint8_t>(68 * 92 * 4, 92)}});
+  const auto packaged_up = icons::Resolve({remap::SourceKind::kMouse, "wheel_up"},
+                                           "retail", &registry);
+  const auto packaged_down = icons::Resolve({remap::SourceKind::kMouse, "wheel_down"},
+                                             "retail", &registry);
+  CHECK_TRUE(packaged_up.art == icons::Art::kPackageImage);
+  CHECK_TRUE(packaged_down.art == icons::Art::kPackageImage);
+  CHECK_TRUE(packaged_up.rgba != packaged_down.rgba);
   CHECK_TRUE(icons::Resolve({remap::SourceKind::kSdl, "button:misc1"}, "steam-deck",
                           &registry).art == icons::Art::kPackageImage);
   CHECK_TRUE(icons::Resolve({remap::SourceKind::kKey, "Return"}, "steam-deck",
@@ -753,6 +764,15 @@ void TestMusicBindings() {
 }
 
 void TestImageRows() {
+  std::vector<bool> used_codes(256);
+  for (uint32_t i = 0; i < rb_blitz::ui::input_font::kIconCount; ++i) {
+    const auto code = rb_blitz::ui::input_font::GlyphCode(i);
+    CHECK_TRUE(code != 0 && code < used_codes.size());
+    if (code < used_codes.size()) {
+      CHECK_FALSE(used_codes[code]);
+      used_codes[code] = true;
+    }
+  }
   rb_blitz::test::BeginCase("input images: native row order, refresh and overflow");
   namespace icons = rb_blitz::input::icons;
   namespace remap = rb_blitz::profile::remap;
@@ -860,6 +880,14 @@ void TestImageRows() {
   CHECK_TRUE(repeated.lines.back() == "Confirm: <alt1>\xC2\x80</alt1>");
 
   std::vector<remap::Source> distinct;
+  for (uint32_t i = 0; i < 46; ++i)
+    distinct.push_back({remap::SourceKind::kKey, "Key" + std::to_string(i)});
+  rebound->general.Set(remap::Target::kA, distinct);
+  const auto above_old_limit = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
+  CHECK_FALSE(above_old_limit.overflow);
+  CHECK_EQ(above_old_limit.icons.size(), 46u);
+  CHECK_TRUE(above_old_limit.lines[0].find("\xC2\xB9") != std::string::npos);
+  distinct.clear();
   for (uint32_t i = 0; i < rb_blitz::ui::input_font::kIconCount; ++i)
     distinct.push_back({remap::SourceKind::kKey, "Key" + std::to_string(i)});
   rebound->general.Set(remap::Target::kA, distinct);
@@ -867,7 +895,7 @@ void TestImageRows() {
   CHECK_FALSE(expanded.overflow);
   CHECK_EQ(expanded.icons.size(), rb_blitz::ui::input_font::kIconCount);
   CHECK_TRUE(expanded.lines[0].find("\xC2\xB8") != std::string::npos);
-  distinct.push_back({remap::SourceKind::kKey, "Key45"});
+  distinct.push_back({remap::SourceKind::kKey, "Key180"});
   rebound->general.Set(remap::Target::kA, distinct);
   const auto overflow = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
   CHECK_TRUE(overflow.overflow);
@@ -879,7 +907,7 @@ void TestImageRows() {
   const std::vector<std::string> mixed_symbols{
       "settings_bind_general_b", "settings_bind_general_a"};
   const std::vector<std::string> mixed_fallback{
-      "Go Back: B", "Confirm: all 46 bindings"};
+      "Go Back: B", "Confirm: all 181 bindings"};
   const auto partial = rb_blitz::ui::input_icon_rows::Build(
       mixed_symbols, mixed_fallback, view);
   CHECK_TRUE(partial.overflow);

@@ -30,7 +30,8 @@ EXPECTED_RAILS = (5, 4, 5, 5)
 BODY = (100, 245, 924, 798)
 
 def read_layout(pad_index: int, layout_id: str = "xbox-series",
-                expected_routes: int | None = None) -> tuple[dict[str, tuple[tuple[int, int], ...]],
+                expected_routes: int | None = None,
+                expected_rails: int | None = None) -> tuple[dict[str, tuple[tuple[int, int], ...]],
                                                              tuple[tuple[int, int, int], ...], int]:
     """Read the editable SVG polylines and fixed text rails."""
     layout_svg = ROOT / f"assets/controller/masters/{layout_id}/pad_{pad_index}-arrows.svg"
@@ -62,8 +63,9 @@ def read_layout(pad_index: int, layout_id: str = "xbox-series",
         if y1 != y2 or x1 >= x2:
             raise ValueError(f"Text rail {line.get('id')} must be horizontal")
         rails.append((x1, x2, y1))
-    if len(rails) != EXPECTED_RAILS[pad_index]:
-        raise ValueError(f"Expected {EXPECTED_RAILS[pad_index]} text rails in {layout_svg.name}, found {len(rails)}")
+    expected = EXPECTED_RAILS[pad_index] if expected_rails is None else expected_rails
+    if len(rails) != expected:
+        raise ValueError(f"Expected {expected} text rails in {layout_svg.name}, found {len(rails)}")
     return routes, tuple(rails), width
 
 

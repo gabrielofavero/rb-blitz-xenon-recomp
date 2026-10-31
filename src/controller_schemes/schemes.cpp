@@ -82,7 +82,8 @@ bool ValidSource(const std::string& source, bool keyboard) {
     return false;
   }
   if (source.starts_with("mouse:")) {
-    static const std::set<std::string> mice = {"left", "right", "middle", "x1", "x2"};
+    static const std::set<std::string> mice = {
+        "left", "right", "middle", "x1", "x2", "wheel_up", "wheel_down"};
     return mice.contains(source.substr(6));
   }
   if (!source.starts_with("key:")) return false;

@@ -12,6 +12,10 @@ bool IsBinding(profile::InputRowKind kind) {
          kind == K::kKeyboardMouseBinding || kind == K::kMusicBinding;
 }
 void AppendGlyph(std::string* text, uint32_t code) {
+  if (code < 0x80) {
+    text->push_back(static_cast<char>(code));
+    return;
+  }
   text->push_back(static_cast<char>(0xC0 | (code >> 6)));
   text->push_back(static_cast<char>(0x80 | (code & 0x3F)));
 }

@@ -67,9 +67,9 @@ bool Compose(const std::vector<uint8_t>& original_font,
     fitted.push_back(controller_schemes::Fit(image, font::kIconSize, font::kIconSize));
   }
 
-  // Downsample the padded band as one image. Fractional mip coordinates must
-  // follow the authored UVs, rather than rounding each icon's origin separately.
-  constexpr uint32_t band_height = font::kAtlasSize - font::kIconTop;
+  // Downsample the private icon atlas as one image. Fractional mip coordinates
+  // must follow the authored UVs, rather than rounding each icon's origin.
+  constexpr uint32_t band_height = font::kAtlasSize;
   std::vector<uint8_t> band(size_t(font::kAtlasSize) * band_height * 4);
   for (size_t i = 0; i < fitted.size(); ++i) {
     const uint32_t x = uint32_t(i % font::kIconColumns) * font::kIconColumnStride +
@@ -83,32 +83,15 @@ bool Compose(const std::vector<uint8_t>& original_font,
   }
 
   levels->clear();
-  size_t offset = 0;
   for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
     const uint32_t dim = font::kAtlasSize >> mip;
-    const size_t bytes = size_t(dim) * dim;
-    std::vector<uint8_t> rgba(size_t(dim) * dim * 4);
-    assets::DecodeDxt5(original_font.data() + offset, dim, dim, rgba.data());
-    std::vector<uint8_t> resized(size_t(dim) * (band_height >> mip) * 4);
+    std::vector<uint8_t> resized(size_t(dim) * dim * 4);
     if (mip == 0) resized = band;
     else assets::ResizeRgba(band.data(), font::kAtlasSize, band_height,
-                            resized.data(), dim, band_height >> mip);
-    std::copy(resized.begin(), resized.end(),
-              rgba.begin() + size_t(font::kIconTop >> mip) * dim * 4);
-    std::vector<uint8_t> encoded;
-    assets::EncodeDxt5(rgba.data(), dim, dim, &encoded);
-    std::vector<uint8_t> level(original_font.begin() + offset,
-                               original_font.begin() + offset + bytes);
-    const uint32_t pitch = dim / 4;
-    const uint32_t top = (font::kIconTop >> mip) / 4;
-    const uint32_t bottom = dim / 4;
-    const uint32_t right = dim / 4;
-    for (uint32_t by = top; by < bottom; ++by)
-      for (uint32_t bx = 0; bx < right; ++bx)
-        std::copy_n(encoded.data() + (size_t(by) * pitch + bx) * 16, 16,
-                    level.data() + (size_t(by) * pitch + bx) * 16);
+                            resized.data(), dim, dim);
+    std::vector<uint8_t> level;
+    assets::EncodeDxt5(resized.data(), dim, dim, &level);
     levels->push_back(std::move(level));
-    offset += bytes;
   }
   return true;
 }

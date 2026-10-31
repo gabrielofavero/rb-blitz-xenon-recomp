@@ -7,9 +7,9 @@ accepted 2026-10-28; visible binding-aware hints remain P10 work.
 P5, P6b, P7, P9 and P10 remain open. P11's v2 loader, staging, internal keyboard
 art and distinct SDL source path landed 2026-10-30; physical-device/UI acceptance
 remains open. P9's ordinary Interface and Gameplay Mapping
-images and binding refresh have owner visual acceptance. The atlas now holds 45 distinct
-images and reuses tiles for repeated sources. An eight-input Confirm row has owner visual
-acceptance; explicit in-song rendering and bindings beyond atlas capacity remain open.**
+images and binding refresh have owner visual acceptance. The private icon atlas now holds
+180 distinct images and reuses tiles for repeated sources. An eight-input Confirm row has owner
+visual acceptance; explicit in-song rendering and the on-screen fit of larger rows remain open.**
 The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
@@ -55,7 +55,7 @@ P11, then checks the final UI and art. Historical P0–P8 evidence remains evide
 | --- | --- | --- |
 | P5 | PS3 source bounds/reference delivered; installer import open | Local v1 `ps3` import works or its unavailable route is reported accurately |
 | P11 | V1/v2 coexist; nine manifests validate and stage; virtual SDL extras pass, boot lists eight controllers | Physical-device mapping/capture and on-screen image acceptance |
-| P9 | Ordinary rows and an eight-input Confirm row accepted; source-keyed atlas path and 45 distinct tiles host-tested; in-song and above-capacity lists open | In-song and above-capacity lists render correctly with v2 source images |
+| P9 | Ordinary rows and an eight-input Confirm row accepted; 180 distinct atlas tiles host-tested; in-song and large-row visual checks open | In-song and large rows render correctly with v2 source images |
 | P10 | Guest hint inventory and remap-aware routes open | Actionable hints follow effective bindings and active family with v2 art |
 | P6b | Eight controller art folders present; six declare pad PNGs | Install/cycle all eight, verify art and fallback, record live acceptance |
 | P7 | Documentation and closeout open | Audit, document P5 outcome, then move this plan to `finished/` |
@@ -289,7 +289,7 @@ composite containing game pixels. Verify untouched rectangles and pad textures a
 
 The delivered v1 limits are ≤ 8 MB and ≤ 2048×2048 per source PNG,
 ≤ 64 files per scheme, no symlinks, id `[a-z0-9][a-z0-9-]{0,31}`, display name ≤ 20 characters.
-P11 must set a separate v2 limit high enough for the keyboard folder's 92 declared PNGs, count
+P11 must set a separate v2 limit high enough for the keyboard folder's 94 declared PNGs, count
 only declared images when packing, and enforce equivalent path/size safety. The unreferenced
 temporary SVGs are never runtime pad assets.
 The 28-character single-line budget fits `Layout: <name>` with the 20-character value cap.
@@ -1464,14 +1464,48 @@ images, and tiles reserved solely by the overflowing row are reused. Host covera
 overflow before and after an ordinary row. A single row above capacity still lacks an all-image
 guest rendering route, and the paused-song visual check remains open.
 
+**2026-10-31 atlas expansion.** The dedicated icon font is now a private texture as well as a
+private glyph table: one BC3 marker bit gives it a different fingerprint from the retail text
+font before either texture reaches the override provider. Its 1024-square atlas can therefore
+hold 180 images in twelve 80-pixel rows, with 64-pixel source art and the accepted glyph size.
+The first 45 glyph codes stay stable; the remaining codes use printable Latin-1 and ASCII
+records only in the private font. A 46-source row and the 180-source boundary now emit images
+in host tests; 181 distinct sources still retain complete text for that row. The release build,
+installed-scene record generation, and focused host tests pass. The generated scene's BC3 chain
+differs from the installed Pentatonic source at exactly the intended marker byte. On-screen fit
+and inspection of a very large row still require live evidence; the owner chose to perform the
+paused-song visual check personally, so no game UI was driven in this pass.
+
+**2026-10-31 owner startup freeze during the paused-song check.** The owner reported a stall on
+"Loading Rock Band Blitz Library File...". `rb_blitz_443.log` records 141 indirect GPU packet
+overflows beginning at 07:28:21, with no native graphics-loading release or icon-font match;
+the font atlas had not been matched when the stall began. SDK patch 0046 now propagates an
+indirect failure to the primary ring's bounded recovery, resumes at the failed packet on a
+retry, and skips the complete indirect call on resynchronisation. The release build and SDK
+patch replay pass; whether this recovers the owner's startup is pending their next run. The
+paused-song visual check remains open.
+
+**2026-10-31 Confirm/Go Back screenshot after recovery.** The owner reached the guest mapping
+screen, so startup recovery passed this run. Confirm and Go Back showed fragments of letters
+instead of their source images. `rb_blitz_444.log` contains the emitted `<alt1>` icon codes but no
+private icon texture match. The guest therefore used the new glyph coordinates against the
+retail atlas. The copied font scene still used the retail in-scene resource names and bitmap
+source path; those now receive equal-length private names, and the texture provider logs the
+first 32 distinct 1024-square candidates with their first differing byte. The release build
+and focused settings/menu host suites pass. The owner's next visual check must establish
+whether the private texture is now loaded; P9 remains open until the images appear correctly.
+
 **2026-10-31 mapping follow-up.** Owner screenshots of Interface Mapping, Gameplay Notes and
 Move Lane show the ordinary images in the guest rows. Move Lane exposed a remaining art gap:
 the internal keyboard/mouse manifest has no `mouse:wheel_up` or `mouse:wheel_down` PNG, so
 the resolver drew tiny text keycaps. Wheel images now reuse the authored middle-mouse silhouette
-with opposite directional arrows, with a built-in mouse drawing when the authored image is
-unavailable. The owner also requested Move Right's default wheel input to be scroll down and
-Move Left's to be scroll up; the compiled defaults and host assertions now follow that order.
-The wheel visuals still need owner acceptance in a new build.
+with opposite directional arrows. The owner accepted that look, so the same pixels are now
+packaged as declared `mouse_wheel_up.png` and `mouse_wheel_down.png` assets; the built-in mouse
+drawing remains a fallback when those images are unavailable. The owner also requested Move
+Right's default wheel input to be scroll down and Move Left's to be scroll up; the compiled
+defaults and host assertions now follow that order. The owner's Move Lane screenshot from the
+new build shows the directional mouse art rendered cleanly beside both arrows; wheel art is
+accepted.
 
 **Goal.** Both mapping surfaces show actual bound button/key/mouse images next to their action
 labels, replacing textual binding lists.
@@ -1567,7 +1601,7 @@ independently capturable and bindable where the active device exposes them.
   import. Validate v2 `[[input]]` ids, declared PNG paths and RGBA bounds, source/`components`
   exclusivity, unique atlas slots, variant/modifier disambiguation, reserved ids and kind.
   Reuse v1 `[controller]`, `[controller.slots]` and `[icons]` fields for optional future v2 pad/extra
-  art. Set a v2 limit of at least 128 files (the keyboard has 92 declared PNGs plus its manifest);
+  art. Set a v2 limit of at least 128 files (the keyboard has 94 declared PNGs plus its manifest);
   pack declared files only. Accept valid user-authored v2 controller packages and shadow rules,
   while rejecting user `keyboard-mouse` packages.
 - Stage all eight controller folders directly from `assets/controller/<id>/` into the existing
@@ -1598,7 +1632,7 @@ independently capturable and bindable where the active device exposes them.
 controller ids appear only after validation, and `keyboard-mouse` never appears in the selector.
 An exposed extra SDL button can be assigned in Gameplay Mapping and remains distinct from its
 old XInput alias; its own image appears in P9 rows and P10 hints. An unavailable extra button
-cannot be assigned. The 92 declared keyboard PNGs can be staged and resolved, with wheel/keycap
+cannot be assigned. The 94 declared keyboard PNGs can be staged and resolved, with keycap
 fallbacks where no art exists. Omitted pad slots stay unchanged; SVGs and undeclared PNGs are
 absent from runtime packages. Record per-device mapping and availability evidence. Ask whether
 the owner wants to perform the live UI tests before driving the game, then wait for the answer.
@@ -1642,7 +1676,7 @@ packages, make keyboard art a controller choice, or create a host overlay to dis
 | V1/v2 coexistence | existing one-button user package and locally generated PS3 import still load beside v2 authored layouts | parser/registry fixtures + install audit |
 | V2 source and art identity | positional Nintendo faces, PS Share/PS5 microphone, Deck QAM/paddles/trackpad clicks resolve to their own declared images | manifest tests + connected-device capture/row/hint evidence |
 | Extra input availability | no phantom Gameplay Mapping source when SDL/Steam Input does not expose that button; no alias to an ordinary Xbox bit | device mapping/availability log + capture test |
-| Internal keyboard image set | 92 declared PNGs stage and resolve; undeclared images and pad SVGs do not; wheel and uncovered keys retain fallback art | packer manifest audit + resolver tests |
+| Internal keyboard image set | 94 declared PNGs stage and resolve; undeclared images and pad SVGs do not; uncovered keys retain fallback art | packer manifest audit + resolver tests |
 | P10 hint-route inventory | every known actionable footer/visual/text hint follows context and remaps | coverage table + captures; unmeasured routes remain open |
 
 ## 9. Risks and open questions

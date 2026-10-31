@@ -867,3 +867,19 @@ The owner rejected the separate View Inputs page on 2026-10-28 because it
 repeated images already visible on the mapping row and filled the rest of the
 page with empty entries. The in-song list resolves row symbols from its pause
 panel as well. An in-list overflow solution remains P9 work.
+
+### Mapping font capacity (2026-10-31)
+
+The icon font is a private copy of Pentatonic. Its BC3 payload now carries one
+marker bit in the old spare band, making its texture fingerprint distinct from
+the retail text font before the host override runs. The override can fill the
+entire private 1024-square atlas without changing ordinary text. The same
+64-pixel images, 68-pixel column stride, 80-pixel row stride, glyph dimensions
+and `<alt1>` tint are retained. Twelve rows hold 180 source images. The first
+45 glyph codes remain stable; later icons use more glyph records in the private
+font. Repeated sources still share one tile. At 181 distinct sources, the
+affected row retains its complete textual list and other rows keep images.
+Host tests cover ordered 46- and 180-source rows, the 46th atlas tile and the
+remaining overflow boundary. Installed-scene generation confirms only the
+marker byte changes in the source BC3 chain. The paused-song and very-large-row
+on-screen appearance still need owner visual checks.

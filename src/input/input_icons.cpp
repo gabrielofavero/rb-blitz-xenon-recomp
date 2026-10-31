@@ -283,8 +283,8 @@ Icon Resolve(const Source& source, std::string_view controller_scheme,
         package_image(registry->keyboard_mouse.InputFor("mouse:" + source.name))) return icon;
     const int wheel = profile::remap::MouseWheelDirection(source.name);
     if (wheel != 0) {
-      // The authored keyboard/mouse set has no wheel-direction PNGs. Reuse its
-      // mouse silhouette and draw a distinct arrow for each physical detent.
+      // Older or incomplete keyboard/mouse resources can omit wheel art. Reuse
+      // the middle-mouse silhouette and draw a distinct arrow in that case.
       if (registry && registry->has_keyboard_mouse &&
           package_image(registry->keyboard_mouse.InputFor("mouse:middle")) &&
           icon.width >= 40 && icon.height >= 60) {

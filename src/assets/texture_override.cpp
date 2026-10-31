@@ -149,13 +149,26 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       } else if (!font_hash_found_ && request.guest_base_size ==
                  ui::input_font::kAtlasSize * ui::input_font::kAtlasSize) {
         std::vector<uint8_t> canonical;
-        if (controller_schemes::UntileBc3Base(guest_data, request.guest_base_size,
-                request.width, request.tiled, uint32_t(request.endianness), &canonical) &&
-            std::equal(canonical.begin(), canonical.end(), font_original->begin())) {
+        const bool decoded = controller_schemes::UntileBc3Base(
+            guest_data, request.guest_base_size, request.width, request.tiled,
+            uint32_t(request.endianness), &canonical);
+        const bool matches = decoded && canonical.size() <= font_original->size() &&
+                             std::equal(canonical.begin(), canonical.end(), font_original->begin());
+        if (font_probe_logged_.size() < 32 && font_probe_logged_.insert(hash).second) {
+          const size_t first_diff = decoded
+              ? size_t(std::mismatch(canonical.begin(), canonical.end(),
+                                     font_original->begin()).first - canonical.begin())
+              : 0;
+          REXLOG_INFO("input_icons: font candidate {:016X} guest=0x{:08X} tiled={} "
+                      "endian={} decoded={} first_diff={} match={}",
+                      hash, request.guest_base_address, request.tiled,
+                      uint32_t(request.endianness), decoded, first_diff, matches);
+        }
+        if (matches) {
           font_hash_ = hash;
           font_hash_found_ = true;
           font = true;
-          REXLOG_INFO("input_icons: matched Pentatonic font texture {:016X}", hash);
+          REXLOG_INFO("input_icons: matched private icon font texture {:016X}", hash);
         }
       }
     }
@@ -239,6 +252,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::string last_icon_signature_;
   uint64_t font_hash_ = 0;
   bool font_hash_found_ = false;
+  std::unordered_set<uint64_t> font_probe_logged_;
   bool has_pending_icons_ = false;
   bool refresh_font_after_buttons_ = false;
   std::map<uint64_t, std::vector<std::vector<uint8_t>>> pads_;

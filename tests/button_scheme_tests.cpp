@@ -78,9 +78,10 @@ int main() {
         "internal keyboard became selectable");
   Check(LoadInternalKeyboard(art / "keyboard-mouse", FakePng, &scheme, &why),
         "internal keyboard rejected");
-  Check(scheme.inputs.size() == 92 && scheme.declared_files.size() == 92 &&
+  Check(scheme.inputs.size() == 94 && scheme.declared_files.size() == 94 &&
         scheme.InputFor("key:Return") && scheme.InputFor("key:KP Enter") &&
-        scheme.InputFor("mouse:left") && scheme.extra_files.size() == 3 &&
+        scheme.InputFor("mouse:left") && scheme.InputFor("mouse:wheel_up") &&
+        scheme.InputFor("mouse:wheel_down") && scheme.extra_files.size() == 3 &&
         scheme.InputFor("key:8", {}, "shift") &&
         scheme.InputFor("key:8", {}, "shift")->id == "asterisk",
         "internal keyboard manifest or declared-file audit wrong");
@@ -200,7 +201,7 @@ int main() {
   Check(decoded[(size_t(200) * 512 + 200) * 4 + 3] == 255,
         "omitted glyph changed");
 
-  // The guest mapping font gets per-row images while all original font blocks stay byte exact.
+  // The private guest mapping font gets per-row images across its complete atlas.
   std::vector<uint8_t> font_chain;
   for (uint32_t mip = 0; mip < rb_blitz::ui::input_font::kMipCount; ++mip) {
     const uint32_t dim = 1024 >> mip;
@@ -219,21 +220,12 @@ int main() {
       "mapping font composition failed");
   Check(font_levels.size() == 7 && font_levels[0].size() == 1024 * 1024 &&
         font_levels[6].size() == 16 * 16, "mapping font mip chain wrong");
-  size_t font_offset = 0;
-  for (uint32_t mip = 0; mip < 7; ++mip) {
-    const uint32_t dim = 1024 >> mip;
-    const size_t untouched = size_t(rb_blitz::ui::input_font::kIconTop >> mip) * dim;
-    Check(std::equal(font_chain.begin() + font_offset,
-                     font_chain.begin() + font_offset + untouched,
-                     font_levels[mip].begin()), "original font blocks changed");
-    font_offset += size_t(dim) * dim;
-  }
   std::vector<uint8_t> decoded_font(1024 * 1024 * 4);
   rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
   Check(decoded_font[(size_t(rb_blitz::ui::input_font::kIconTop + 8) * 1024 + 32) * 4 + 3] > 200,
-        "mapping icon was not drawn in the spare atlas cell");
+        "mapping icon was not drawn in the icon atlas cell");
   Check(decoded_font[(size_t(500) * 1024 + 32) * 4 + 3] == 0,
-        "original font area was modified");
+        "unused icon atlas area is not transparent");
 
   rb_blitz::input::icons::Icon source_image;
   source_image.art = rb_blitz::input::icons::Art::kPackageImage;
@@ -295,6 +287,17 @@ int main() {
           decoded_font[(size_t(y + 40) * 1024 + left + 67) * 4 + 3] == 0,
           "adjacent icons have no transparent sampling gutter");
   }
+  std::vector<rb_blitz::input::icons::Icon> above_old_limit(46, key_icon);
+  above_old_limit.back() = source_image;
+  Check(rb_blitz::assets::input_font_atlas::Compose(
+      font_chain, blocks, nullptr, above_old_limit, &font_levels),
+      "the 46th image did not fit the private mapping atlas");
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
+  const size_t forty_sixth =
+      (size_t(rb_blitz::ui::input_font::kIconRowStride * 3 + 40) * 1024 + 34) * 4;
+  Check(decoded_font[forty_sixth] > 200 && decoded_font[forty_sixth + 1] < 50 &&
+        decoded_font[forty_sixth + 2] < 50,
+        "the 46th source image was replaced by an earlier tile");
 
   // The P1 callback presents tiled, 8-in-16-endian guest bytes. The inverse
   // must recover the exact canonical BC3 blocks the composer just used.

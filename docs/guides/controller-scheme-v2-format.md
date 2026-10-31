@@ -126,7 +126,7 @@ whole-mouse art and OS-reserved keys/buttons are omitted. Guide, Home, Steam,
 and Power are not exposed for gameplay remapping. Their PNGs can remain in the
 art folder for future work. The packer copies **declared files only**. Version 1
 keeps its 64-file limit; version 2 accepts up to 128 declared images, including
-the keyboard folder's 92 images (95 PNGs on disk).
+the keyboard folder's 94 images (97 PNGs on disk).
 
 The loader validates unique IDs, known source grammar, safe relative
 PNG paths, each file's existence and format, and the explicit schema version.
