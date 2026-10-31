@@ -17,6 +17,7 @@
 //   * the rewritten record survives compile -> parse, which is what delivery does.
 
 #include "check.h"
+#include "windows_test_crash.h"
 
 #include "store/store_metadata.h"
 #include "store/store_payload.h"
@@ -3340,6 +3341,7 @@ void TestOfferCredits() {
 }
 
 int main(int argc, char** argv) {
+  rb_blitz::test::SuppressWindowsTestCrashDialogs();
   if (argc >= 3 && std::strcmp(argv[1], "dump-menu") == 0) {
     return DumpMenu(argv[2]);
   }

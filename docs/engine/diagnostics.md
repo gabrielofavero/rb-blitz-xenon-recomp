@@ -617,7 +617,7 @@ Only two of the fourteen reproduce exactly and three more sit under the 1 % defa
 
 ### The two rules, and why
 
-Both come from things this project has already been wrong about ([backlog.md](../reference/backlog.md), "Measure the noise floor before believing any screenshot diff").
+Both come from things this project has already been wrong about ([known-issues.md](../reference/known-issues.md) B-015).
 
 **A pixel diff is only evidence against a same-build baseline.** Two runs of the *same* build differ by **3.5–5.9 %** just after a screen is entered and **~0.14 %** settled, so a 3 % diff is a normal unsettled screen, not a changed one — which is how a round of "proven" texture swaps turned out to be nothing. So the harness needs `-BaselineDir` to compare against, reports `same_build` from the baseline's metadata, and compares the **settled** frame (hence `settle_seconds`), not the one the last key produced.
 

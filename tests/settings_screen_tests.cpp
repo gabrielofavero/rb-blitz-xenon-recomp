@@ -465,10 +465,7 @@ void TestMergedRootShape() {
     CHECK_TRUE(PausePanel(panels[i]) == panels[i + panels.size() / 2]);
   }
 
-  // The root's rows, in the plan's §3 order. Retail's help list is How to Play, Controls,
-  // Calibration, Audio/Video, Credits; the merge keeps Controls / Calibration / Audio-Video at
-  // indices 1 / 2 / 3 so the route-driven acceptance scripts (`New-UiHelpRoute 1|2|3`) still land
-  // on the same screens, and General / Gameplay take the two slots the retail rows vacate.
+  // The root's rows follow the current Help & Options order in both menu contexts.
   const std::vector<std::string> words = Words(DefinitionRoots().front());
   auto at = [&words](const std::string& prefix) {
     for (size_t i = 0; i < words.size(); ++i) {
@@ -478,8 +475,8 @@ void TestMergedRootShape() {
     }
     return words.size();
   };
-  const char* order[] = {"tutorial", "calibration", "settings_general", "controls",
-                         "audio_video_options", "settings_gameplay"};
+  const char* order[] = {"controls", "calibration", "settings_general", "audio_video_options",
+                         "settings_gameplay", "tutorial"};
   for (size_t i = 0; i + 1 < 6; ++i) {
     CHECK_TRUE(at(order[i]) < words.size());
     CHECK_TRUE(at(order[i]) < at(order[i + 1]));
@@ -1129,15 +1126,15 @@ void TestInSongContext() {
   const std::vector<std::string> five = PauseRootRows(false);
   CHECK_EQ(six.size(), 6u);
   CHECK_EQ(five.size(), 5u);
-  CHECK_TRUE(six[0] == "pause_tutorial");
+  CHECK_TRUE(six[0] == "pause_controls");
   CHECK_TRUE(six[1] == "calibration");
   CHECK_TRUE(six[2] == "settings_general");
-  CHECK_TRUE(six[3] == "pause_controls");
-  CHECK_TRUE(six[4] == "audio_video_options");
-  CHECK_TRUE(six[5] == "settings_gameplay");
+  CHECK_TRUE(six[3] == "audio_video_options");
+  CHECK_TRUE(six[4] == "settings_gameplay");
+  CHECK_TRUE(six[5] == "pause_tutorial");
   // A base install must not be offered a dead row: only the provider row moves.
   CHECK_TRUE(std::find(five.begin(), five.end(), "settings_gameplay") == five.end());
-  CHECK_TRUE(five[4] == "audio_video_options");
+  CHECK_TRUE(five[4] == "pause_tutorial");
 
   // A row of ours in song jumps to its twin and points that twin's Back at whoever sent us.
   const dtb::Node body = Cmd({InSongRowBody("settings_general_screen")});
@@ -3148,7 +3145,7 @@ void TestShowHeadersRow() {
 std::vector<std::string> PageRows(const std::string& panel_name);
 
 void TestLaunchSurface() {
-  BeginCase("Launch groups Game Version and Startup in both menu contexts");
+  BeginCase("Launch groups Game Version, Startup, and Load Guard in both menu contexts");
   ConfigureMenu({});
   const auto roots = DefinitionRoots();
   for (bool pause : {false, true}) {
@@ -3157,8 +3154,11 @@ void TestLaunchSurface() {
     const auto general = PageRows(panel("settings_general_panel"));
     CHECK_TRUE(std::find(general.begin(), general.end(), "settings_launch") != general.end());
     CHECK_TRUE(std::find(general.begin(), general.end(), "settings_target") == general.end());
+    CHECK_TRUE(std::find(general.begin(), general.end(), "settings_load_guard") == general.end());
     CHECK_TRUE(PageRows(panel("settings_launch_panel")) ==
-               std::vector<std::string>({"settings_target", "settings_startup_normal", "settings_startup_fast"}));
+               std::vector<std::string>({"settings_target", "settings_startup_normal", "settings_startup_fast",
+                                         "settings_load_guard", "settings_load_guard_30s",
+                                         "settings_load_guard_60s"}));
     for (const auto& root : roots) {
       ScreenFacts facts;
       if (!ReadScreenFacts(root, &facts)) continue;
@@ -3181,10 +3181,12 @@ void TestLaunchSurface() {
 }
 
 void TestLoadGuardSurface() {
-  BeginCase("load guard is a native selector in both DLC settings contexts");
-  for (const auto& panel : {std::string("settings_general_panel"), PausePanel("settings_general_panel")}) {
+  BeginCase("load guard is a native selector in both Launch settings contexts");
+  for (const auto& panel : {std::string("settings_launch_panel"), PausePanel("settings_launch_panel")}) {
     const auto rows = PageRows(panel);
-    CHECK_EQ(std::count(rows.begin(), rows.end(), "settings_load_guard"), 1);
+    CHECK_EQ(std::count_if(rows.begin(), rows.end(), [](const auto& row) {
+      return row == "settings_load_guard" || row.starts_with("settings_load_guard_");
+    }), 3);
   }
   for (const auto* choice : {"Off", "30s", "60s"}) {
     bool label = false;

@@ -30,7 +30,7 @@ Do not put: chronology ("we then tried…") — that is `history/`; plans or ope
 Expect: a registry shape — a table or list you **append a row to**, ids that never change, and a
 definition per row. `known-issues.md` splits `Open` from `Accepted (by design, not bugs)`;
 `toggles.md` has one row per toggle with its faithful (off) behaviour and the module that implements
-it; `backlog.md` says what is not started and the ground rules; `rb3-references.md` carries a
+it; dated plans in `docs/plans/todo/` say what is not started, `docs/README.md` carries the project change rules, and `rb3-references.md` carries a
 "borrowing rules" section (what may be adapted, with provenance).
 
 Do not put: a fix's narrative (link the owning document), or a row you cannot keep true.

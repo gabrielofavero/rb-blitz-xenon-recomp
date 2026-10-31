@@ -84,9 +84,7 @@ Related reading: [dlc.md](../../guides/dlc.md) (content pipeline),
 [known-issues.md](../../reference/known-issues.md) (the store is currently offline-only — this
 plan is the community-mod-style feature that known-issues.md explicitly assigns to "the community
 mod's job"; we are not restoring Xbox LIVE/Rock Central, we are replacing the store's *catalogue
-source* locally), [backlog.md](../../reference/backlog.md) ("what is still undefined is everything around [DLC
-packages], from a store UI to custom-song content that no content API ever enumerated" — this is
-that item).
+source* locally). At planning time, the former backlog still called the store UI and custom-song catalogue undefined; this plan delivered that scope.
 
 Evidence files (all under `out/`, gitignored, described in §8): `store.tree.txt`,
 `store_info.tree.txt`, `config_store.tree.txt`, `splash.tree.txt`, `ui.tree.txt`,
@@ -2893,7 +2891,7 @@ proves it instead of flipping it:
   profile (so the value really was the compiled default), and that the same boot's main menu already
   carries the store row. The row press was removed - this prompt makes Control the only leg that
   writes the value off - and `-RhythmVerseRow` went with it.
-- **Docs**: `settings/status.md`, `settings/plan.md`, `reference/backlog.md` and
+- **Docs**: `settings/status.md`, `settings/plan.md`, `reference/known-issues.md` and
   `engine/diagnostics.md` now say On; diagnostics marks its 2026-10-22 measured Enable run as
   predating the flip.
 - **Measured** (release binary). `scripts/acceptance/acceptance_store.ps1 -Legs Enable -Label p9-1-enable`

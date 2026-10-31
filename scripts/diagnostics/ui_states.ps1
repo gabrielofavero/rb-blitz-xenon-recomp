@@ -14,7 +14,7 @@
 #     frame is only comparable once the screen has stopped animating, and the
 #     noise floor between two runs of the same build falls from 3.5-5.9 % just
 #     after a screen is entered to ~0.14 % once it has settled
-#     (docs/reference/backlog.md, "Measure the noise floor").
+#     (docs/engine/diagnostics.md, "Measure the noise floor").
 #
 # A state with an empty needle is a state whose text has not been pinned down
 # yet; the harness still captures it (and says the expectation is unknown) rather

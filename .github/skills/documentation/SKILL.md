@@ -80,7 +80,7 @@ When a code change lands, ask which of these it obliges:
 | --- | --- |
 | adds, removes or renames an enhancement toggle or cvar | [`docs/engine/toggles.md`](../../../docs/engine/toggles.md) (one row: toggle, feature, faithful behaviour, implementing module) |
 | fixes, introduces or narrows a limitation | [`docs/reference/known-issues.md`](../../../docs/reference/known-issues.md) (`Open` or `Accepted (by design)`) |
-| changes what is not started yet | [`docs/reference/backlog.md`](../../../docs/reference/backlog.md) |
+| changes what is not started yet | The owning plan in [`docs/plans/todo/`](../../../docs/plans/todo/README.md) |
 | advances a plan or package | its status folder, and the live tracker (`docs/settings/status.md` for the settings program) |
 | adds a document, or changes the layout | [`docs/README.md`](../../../docs/README.md) index (a new row, one line, in the right table) |
 | changes the UI, a menu file or a hook point | the owning `docs/engine/*.md` study, not only the code comment |

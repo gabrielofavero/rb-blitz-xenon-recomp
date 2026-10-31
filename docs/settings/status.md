@@ -57,9 +57,9 @@ Part 1 wherever they disagree.
   Cancel changes nothing, and re-enabling a prerequisite does not restore its children.
   The combined release build and 21 related suites pass, as do 2,612 extracted-record checks across
   eight store/header states, with no refused edits. These are offline checks; the new settings
-  and confirmation UI have not been navigated in-game. See [the current organization and rules](menu.md#current-organization-2026-10-26).
+  and confirmation UI have not been navigated in-game. See [the current organization and rules](menu.md#current-organization-2026-10-31).
 
-- **Load Guard (2026-10-26):** General has a native
+- **Load Guard (2026-10-26):** General → Launch has a native
   Off/30s/60s selector, default Off (`general.load_guard`, stable id 10).
   A committed value updates the host atomic policy for the next load. An overdue
   attempt uses the owner-authorized external restart, with a native timeout dialog;
@@ -248,8 +248,8 @@ Part 1 wherever they disagree.
   one-press flow (`out/_swap/search-probe/20261023-175633`: `waited 2730 ms`, `15 offer(s)`,
   `store_browser_screen`), and the plan's P9-11 record. The owner's own boot (2026-10-23) typed on
   the console keyboard and confirmed the route end to end.
-- **The Help & Options tree was reorganised and retitled (2026-10-19).** The root is
-  `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; Interface moved under General
+- **The Help & Options tree was reorganised and retitled (2026-10-19; reordered 2026-10-31).** The root is
+  `Controls, Calibration, General, Audio/Video, Gameplay, How to Play`; Interface moved under General
   (`Main Menu`, `Music Library & Store`, `Skip Offline Prompts`, `Help & Options Labels`;
   Music Library & Store moved directly after Main Menu on 2026-10-23, and the offline row was
   renamed from `Offline Prompts: Hidden|Visible` to `Skip Offline Prompts: On|Off` the same day -

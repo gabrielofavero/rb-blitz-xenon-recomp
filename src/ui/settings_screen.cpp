@@ -712,22 +712,22 @@ std::vector<PanelSpec> AllPanels() {
   // main menu uses for its entries. The Main Menu mirror panel is the deliberate exception: it lists
   // the menu's own rows, so it mirrors the menu's own spelling ("PLAY", "EXIT GAME").
 
-  // 0. The merged root: six rows (five on a base install), in the owner's order. How to Play and
-  // Calibration are retail's own pages; General, Controls, Audio/Video and Gameplay are ours.
+  // 0. The merged root: six rows (five on a base install), in the owner's order. Calibration and
+  // How to Play are retail's own pages; Controls, General, Audio/Video and Gameplay are ours.
   out.push_back(PanelSpec{kRootPanel, kRootScreen, "splash_screen", MenuPanels(),
                           {
-                              RouteRow("tutorial", "tutorials_screen", "back_screen", "",
-                                       "Watch the game's how-to-play tutorials."),
+                              SubmenuRow("controls", "settings_controls_screen", "",
+                                         "Choose the devices and the controller mappings that play the game."),
                               RouteRow("calibration", "cal_welcome_screen", "cancel_screen", "",
                                        "Line up the audio and video so notes hit in time with the music."),
                               SubmenuRow("settings_general", "settings_general_screen", "General",
                                          "Launch, interface, song library, achievements, recovery, and credits."),
-                              SubmenuRow("controls", "settings_controls_screen", "",
-                                         "Choose the devices and the controller mappings that play the game."),
                               SubmenuRow("audio_video_options", "settings_av_screen", "",
                                          "Audio, video, and graphics settings."),
                               SubmenuRow("settings_gameplay", "settings_gameplay_screen", "Gameplay",
                                          "Camera, HUD, tracks, and scenery options from the Ultimate mod.", true),
+                              RouteRow("tutorial", "tutorials_screen", "back_screen", "",
+                                       "Watch the game's how-to-play tutorials."),
                           }});
 
   // ----------------------------------------------------------------------------------------------
@@ -976,12 +976,12 @@ std::vector<PanelSpec> AllPanels() {
                                       "after a short countdown."),
                           }});
 
-  // General: six entries, with recovery independent of song-library settings.
+  // General: launch and recovery settings are grouped together.
   out.push_back(PanelSpec{"settings_general_panel", "settings_general_screen", kRootScreen,
                           MenuPanels(),
                           {
                               SubmenuRow("settings_launch", "settings_launch_screen", "Launch",
-                                         "Choose the game version and startup behavior."),
+                                         "Choose the game version, startup behavior, and load guard."),
                               SubmenuRow("settings_interface", "settings_interface_screen", "Interface",
                                          "Main-menu visibility and the settings caption."),
                               SubmenuRow("settings_dlc", "settings_dlc_screen",
@@ -990,9 +990,6 @@ std::vector<PanelSpec> AllPanels() {
                               SubmenuRow("settings_achievements", "settings_achievements_screen",
                                          "Achievements & Unlocks",
                                          "Achievement notifications and content unlocks."),
-                              SelectRow("settings_load_guard", "general.load_guard", "Load Guard",
-                                        "Restart to the main menu if a song takes too long to load. Unsaved progress may be lost.",
-                                        Choices({"off", "Off", "30s", "30s", "60s", "60s"})),
                               RouteRow("credits", "credits_screen", "back_screen", "",
                                        "View the game's credits."),
                           }});
@@ -1005,6 +1002,9 @@ std::vector<PanelSpec> AllPanels() {
                               SelectRow("settings_startup", "general.startup", "Startup",
                                         "Normal: Show startup logos and 'Press A to Start'. Fast: Skip both and continue automatically to the main menu.",
                                         Choices({"normal", "Normal", "fast", "Fast"})),
+                              SelectRow("settings_load_guard", "general.load_guard", "Load Guard",
+                                        "Restart to the main menu if a song takes too long to load. Unsaved progress may be lost.",
+                                        Choices({"off", "Off", "30s", "30s", "60s", "60s"})),
                           }});
 
   // 1a. Target: choose one, commit, leave. `ultimate_mode`/`license_mask` are consumed before
@@ -2590,11 +2590,12 @@ std::vector<std::string> PauseRootRows(const bool provider_active) {
   // what keeps those rows working without new bodies. `settings_gameplay` is dropped on a boot
   // whose provider gate answers false - the same rule the root panel applies to itself, applied
   // here to the list retail's pause panel fills.
-  std::vector<std::string> rows{"pause_tutorial", "calibration", "settings_general",
-                                "pause_controls", "audio_video_options"};
+  std::vector<std::string> rows{"pause_controls", "calibration", "settings_general",
+                                "audio_video_options"};
   if (provider_active) {
     rows.push_back("settings_gameplay");
   }
+  rows.push_back("pause_tutorial");
   return rows;
 }
 

@@ -9,15 +9,16 @@ preserved; repeated baseline/build/test prose and duplicated evidence lists were
 records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.md](contracts.md) and
 [status.md](status.md).
 
-## Current organization (2026-10-28)
+## Current organization (2026-10-31)
 
-The root remains How to Play, Calibration, General, Controls, Audio/Video, and Gameplay
-(Ultimate). Every category has at most six visible entries, in both menu and in-song contexts.
+The root shows Controls, Calibration, General, Audio/Video, Gameplay, and How to Play.
+Gameplay appears only with Ultimate. Every category has at most six visible entries, in both menu
+and in-song contexts.
 
 | Page | Entries |
 | --- | --- |
-| General | Launch; Interface; Song Library; Achievements & Unlocks; Load Guard; Credits |
-| Launch | Game Version (Rock Band Blitz / Ultimate / Demo); Startup (Normal / Fast) |
+| General | Launch; Interface; Song Library; Achievements & Unlocks; Credits |
+| Launch | Game Version (Rock Band Blitz / Ultimate / Demo); Startup (Normal / Fast); Load Guard (Off / 30s / 60s) |
 | Controls | Controller Presets; `Layout: <name>`; Interface Mapping; Gameplay Mapping. Keyboard and mouse are always enabled. |
 | Gameplay Mapping | Notes; Move Lane; Pause & Power-up; Reset All. Each action row keeps its name beside the keyboard and mouse bindings, with Add Key, Replace, and Reset on its page. Mapping pages hide the bottom settings caption. A first controller button asks for confirmation, then custom controller bindings replace the preset for all actions. |
 | Interface | Main Menu; Music Library & Store; Skip Offline Prompts; Setting Descriptions |
@@ -178,7 +179,7 @@ No game/UI navigation was performed for this verification.
 > Gameplay Mapping → Controller → Controller Presets (renamed from `Default Presets` by P4,
 > 2026-10-20); the pause record's `pause_controls` case is re-pointed at the pause twin of that menu.
 >
-> **Current-state correction (2026-10-19, the owner's surface overhaul):** the root is now
+> **2026-10-19 state (root order superseded):** the root was
 > `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; **Interface is no longer a root
 > row** and lives under General with `Main Menu`, `Offline Prompts` and `Help & Options Labels`. HUD
 > moved under Gameplay. `4:3 Letterboxing` is removed (it fights the non-16:9 HUD repositioning), and

@@ -23,7 +23,7 @@
 #   * **A pixel diff is only evidence against a same-build baseline.** Without
 #     -BaselineDir there is nothing to compare, and -Compare with no baseline
 #     file for the state reports `no-baseline` and does NOT fail the run - a
-#     measurement with nothing to measure against is not a pass (docs/reference/backlog.md,
+#     measurement with nothing to measure against is not a pass (docs/engine/diagnostics.md,
 #     "Measure the noise floor before believing any screenshot diff").
 #   * **The comparison is against the state's settled frame.** The route's own
 #     waits are not enough: a screen is only comparable once it has stopped

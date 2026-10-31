@@ -3,7 +3,7 @@
 //
 // Unit tests for the B-009 MOGG key path (src/hooks/crypto_keytable.h). No SDK,
 // no game image, no boot: the logic under test is pure host code, so this runs in
-// milliseconds. It is the oldest of the project's host test targets (docs/reference/backlog.md
+// milliseconds. It is the oldest of the project's host test targets (docs/reference/known-issues.md
 // §1); what the two import hooks decide - where a key comes from, and which key an
 // AES-CBC call runs under - is covered here too, so only the kernel calls themselves
 // still need a boot.

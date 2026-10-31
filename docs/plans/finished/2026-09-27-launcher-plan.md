@@ -1,7 +1,7 @@
 # Launcher — work plan, by prompts
 
 **Status: scoping/planning.** No code in this document. Nothing here is a commitment, and nothing here
-gates the release-readiness tasks in [backlog.md](../../reference/backlog.md).
+gates the release-readiness tasks now grouped in the [engine close-out plan](../todo/2026-10-31-engine-compatibility-closeout-plan.md).
 
 > **Current milestone: M1 — "the launcher with the graphical settings" (§1.1), decided 2026-10-03.**
 > The plan below still describes the whole launcher. M1 is the cut that is in scope *right now*:
@@ -458,7 +458,7 @@ filtering, render scale, letterbox, safe area/overscan, overscan cutoff, ditheri
   behind `REXGLUE_ENABLE_FIDELITYFX=OFF` in this cache) are **hidden**, not shown greyed: the build
   flag is not something a user can act on from the launcher.
 - Free bonus once the SDK gains it: master volume (`audio_volume` → `SetOutputGain`), which does not exist today.
-- Frame-rate unlocking is a project non-goal (the Deferred section of [docs/reference/backlog.md](../../reference/backlog.md)).
+- Frame-rate expansion was deferred at the time; it now has a [feasibility plan](../todo/2026-10-25-framerate-expansion-plan.md).
   Do not put a frame-rate row in.
 
 M1 ships this tab in full (§1.1); a row for a feature that does not exist yet (master volume) stays out
@@ -1528,8 +1528,7 @@ For the running artifacts (answer with a boot, not an opinion):
   `rexglue-sdk/include/rex/rex_app.h:98-115` (the hooks),
   `rexglue-sdk/thirdparty/CMakeLists.txt:231-255` (imgui + SDL3 configuration).
 - [docs/guides/dlc.md](../../guides/dlc.md) — DLC layout and the save containers under `Documents\Rock Band Blitz`.
-- [docs/reference/known-issues.md](../../reference/known-issues.md), [docs/reference/backlog.md](../../reference/backlog.md) — the standing limits and
-  the deferred features this plan must not quietly un-defer.
+- [docs/reference/known-issues.md](../../reference/known-issues.md) — the standing limits; deferred features now have dated plans.
 - **The art research (§10):** [scripts/assets/hmx_milo.py](../../../scripts/assets/hmx_milo.py) — the scene reader whose
   `records` command produces the texture inventory; [docs/guides/assets.md](../../guides/assets.md) — the container and
   texture formats, the delivery experiments and the rejected hypotheses; [scripts/diagnostics/drive_ui.ps1](../../../scripts/diagnostics/drive_ui.ps1)

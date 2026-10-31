@@ -67,9 +67,10 @@ bool Compose(const std::vector<uint8_t>& original_font,
     fitted.push_back(controller_schemes::Fit(image, font::kIconSize, font::kIconSize));
   }
 
-  // Downsample the private icon atlas as one image. Fractional mip coordinates
-  // must follow the authored UVs, rather than rounding each icon's origin.
-  constexpr uint32_t band_height = font::kAtlasSize;
+  // Draw into the retail font's unused bottom band. Keep the original BC3 blocks
+  // above it verbatim so ordinary Pentatonic text still samples its original art.
+  // Downsample the band as one image so mip coordinates follow the authored UVs.
+  constexpr uint32_t band_height = font::kAtlasSize - font::kIconTop;
   std::vector<uint8_t> band(size_t(font::kAtlasSize) * band_height * 4);
   for (size_t i = 0; i < fitted.size(); ++i) {
     const uint32_t x = uint32_t(i % font::kIconColumns) * font::kIconColumnStride +
@@ -83,14 +84,22 @@ bool Compose(const std::vector<uint8_t>& original_font,
   }
 
   levels->clear();
+  size_t source_offset = 0;
   for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
     const uint32_t dim = font::kAtlasSize >> mip;
-    std::vector<uint8_t> resized(size_t(dim) * dim * 4);
+    const uint32_t mip_band_height = band_height >> mip;
+    std::vector<uint8_t> resized(size_t(dim) * mip_band_height * 4);
     if (mip == 0) resized = band;
     else assets::ResizeRgba(band.data(), font::kAtlasSize, band_height,
-                            resized.data(), dim, dim);
-    std::vector<uint8_t> level;
-    assets::EncodeDxt5(resized.data(), dim, dim, &level);
+                            resized.data(), dim, mip_band_height);
+    std::vector<uint8_t> band_blocks;
+    assets::EncodeDxt5(resized.data(), dim, mip_band_height, &band_blocks);
+    if (band_blocks.size() != size_t(dim) * mip_band_height) return false;
+    std::vector<uint8_t> level(original_font.begin() + source_offset,
+                               original_font.begin() + source_offset + size_t(dim) * dim);
+    source_offset += level.size();
+    std::copy(band_blocks.begin(), band_blocks.end(),
+              level.begin() + size_t(dim) * (font::kIconTop >> mip));
     levels->push_back(std::move(level));
   }
   return true;

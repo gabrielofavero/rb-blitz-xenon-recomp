@@ -8,7 +8,7 @@ Rock Band Blitz and Rock Band 3 are the same engine. That means a lot of the
 work already done for RB3 transfers to us **as knowledge**, even though the
 addresses never do. This document is the durable output of a survey of the two
 external projects; the leads that name an action are tracked in
-[backlog.md](backlog.md).
+[engine compatibility plan](../plans/todo/2026-10-31-engine-compatibility-closeout-plan.md).
 
 It is deliberately a catalogue of *techniques and known-answer checks*, not a
 plan: nothing here is a commitment.
@@ -389,11 +389,11 @@ origin. An empty table is the correct state until something is actually ported.
 
 | Section | Goes to |
 | --- | --- |
-| §1–§3 (hook mechanism, names, midasm) | [backlog.md](backlog.md) §1, "Engine knowledge still to port" |
-| §4 (port catalogue) | [backlog.md](backlog.md) §1 |
-| §5–§6 (RB3DX cross-reference) | [backlog.md](backlog.md) §1 (groups 2–4 and 6–9) |
-| §7.1 (audio verification) | [backlog.md](backlog.md) §1 — the audio-verify regression check |
-| §7.3, §8 (methodology, config gaps) | [backlog.md](backlog.md) §1 — the config gaps (hook hygiene closed 2026-10-01 and removed with its section) |
+| §1–§3 (hook mechanism, names, midasm) | [engine compatibility plan](../plans/todo/2026-10-31-engine-compatibility-closeout-plan.md) E5 |
+| §4 (port catalogue) | [engine compatibility plan](../plans/todo/2026-10-31-engine-compatibility-closeout-plan.md) E5 |
+| §5–§6 (RB3DX cross-reference) | [engine compatibility plan](../plans/todo/2026-10-31-engine-compatibility-closeout-plan.md) E5 (groups 2–10) |
+| §7.1 (audio verification) | [engine compatibility plan](../plans/todo/2026-10-31-engine-compatibility-closeout-plan.md) E5 — the audio regression check |
+| §7.3, §8 (methodology, config gaps) | [engine compatibility plan](../plans/todo/2026-10-31-engine-compatibility-closeout-plan.md) E5 — the config gaps (hook hygiene closed 2026-10-01 and removed with its section) |
 | §9 (borrowing rules) | [README](../../README.md) (license), [distributable.md](../guides/distributable.md) — what ships and the audit that refuses the rest |
 | §0 (Rock Band Blitz Ultimate row) | [ultimate-compat.md](../guides/ultimate-compat.md) — the Blitz-side sibling of the RB3DX groups catalogued in §5–§6 (a different project from this one) |
 

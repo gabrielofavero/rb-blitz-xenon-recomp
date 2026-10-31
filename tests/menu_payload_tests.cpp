@@ -14,6 +14,7 @@
 // out, every record inside the part it belongs to, and the mounted bytes carried verbatim.
 
 #include "check.h"
+#include "windows_test_crash.h"
 
 #include "settings/menu_payload.h"
 #include "settings/ultimate_adapter.h"
@@ -862,6 +863,7 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
 }
 
 int main(int argc, char** argv) {
+  rb_blitz::test::SuppressWindowsTestCrashDialogs();
   {
     BeginCase("input label styles carry both PreLoad records and PostLoad variation strings");
     constexpr size_t header = 0x810;

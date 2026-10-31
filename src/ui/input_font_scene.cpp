@@ -99,24 +99,6 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
   std::vector<uint8_t> bytes;
   if (!DecodeStream(source, &bytes, error)) return false;
 
-  // The guest caches resources by their in-scene names. Give this copy its own
-  // names and bitmap source path as well as its own BC3 marker; otherwise its
-  // altered glyph coordinates can still draw against the retail texture.
-  auto rename = [&](std::string_view from, std::string_view to, size_t expected) {
-    if (from.size() != to.size()) return false;
-    size_t found = 0;
-    auto cursor = bytes.begin();
-    while ((cursor = std::search(cursor, bytes.end(), from.begin(), from.end())) != bytes.end()) {
-      std::copy(to.begin(), to.end(), cursor);
-      cursor += from.size();
-      ++found;
-    }
-    return found == expected;
-  };
-  if (!rename("Pentatonic", "InputIcons", 32) ||
-      !rename("pentatonic_regular_", "inputicons_regular_", 1))
-    return Fail(error, "Pentatonic resource names changed");
-
   // Four fixed-width Font Glyph arrays share one 1024-square atlas. Locate them by their
   // contiguous ASCII records rather than a compressed-file offset. This is a private
   // icon-only scene, so occupied text glyphs may be reassigned here.
@@ -133,10 +115,12 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
   if (tables.size() != 4) return Fail(error, "Pentatonic Glyph arrays changed");
   for (const size_t table : tables) {
     if (Be32(bytes.data() + table - 12) !=
-            std::bit_cast<uint32_t>(kFontCellWidth / kAtlasSize) ||
+            std::bit_cast<uint32_t>(kOriginalFontCellWidth / kAtlasSize) ||
         Be32(bytes.data() + table - 8) !=
-            std::bit_cast<uint32_t>(kFontCellHeight / kAtlasSize))
+            std::bit_cast<uint32_t>(kOriginalFontCellHeight / kAtlasSize))
       return Fail(error, "Pentatonic cell dimensions changed");
+    PutFloat(bytes.data() + table - 12, kFontCellWidth / kAtlasSize);
+    PutFloat(bytes.data() + table - 8, kFontCellHeight / kAtlasSize);
     for (uint32_t index = 0; index < kIconCount; ++index) {
       const uint32_t code = GlyphCode(index);
       uint8_t* glyph = bytes.data() + table + code * 18;
@@ -166,16 +150,9 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
     (*original_bc3)[i] = bytes[kTexturePayload + i + 1];
     (*original_bc3)[i + 1] = bytes[kTexturePayload + i];
   }
-  // Give this copy a distinct texture identity before the guest uploads it. The
-  // provider can then replace its entire atlas without also matching the retail
-  // Pentatonic texture used for ordinary text. A single valid BC3 bit in the old
-  // spare band is enough; the dynamic override replaces that block as well.
-  constexpr size_t marker = size_t(768 / 4) * (kAtlasSize / 4) * 16;
-  (*original_bc3)[marker] ^= 1;
-  bytes[kTexturePayload + marker + 1] ^= 1;
-
-  // A single stored chunk is valid Milo and avoids a second compressor. It contains only the
-  // player's source bytes plus the private glyph/texture edits above, and lives in the generated ark.
+  // The retail texture remains byte-identical in this scene. The override matches that
+  // proven upload and replaces only blocks in the empty bottom band.
+  // A single stored chunk is valid Milo and avoids a second compressor.
   if (!PackStored(bytes, scene, error)) return false;
   g_original_bc3.store(std::make_shared<const std::vector<uint8_t>>(*original_bc3));
   if (error) error->clear();

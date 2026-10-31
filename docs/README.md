@@ -9,7 +9,7 @@ documents under [`settings/`](settings).
 | Folder | What lives there |
 | --- | --- |
 | [`guides/`](guides) | Task guides: build, run, ship, extract assets, content and DLC, the toolchain record, the Ultimate mod's compatibility policy. |
-| [`reference/`](reference) | Standing records: open issues and accepted limitations, the backlog, the guest image's symbols, and the RB3/RB3DX mining notes. |
+| [`reference/`](reference) | Standing records: open issues and accepted limitations, the guest image's symbols, and the RB3/RB3DX mining notes. |
 | [`engine/`](engine) | How the recompiled guest actually behaves — per-subsystem studies plus the standing diagnostics harness. Start at [`engine/README.md`](engine/README.md). |
 | [`settings/`](settings) | The in-game settings / Help & Options program: plan, frozen contracts, architecture, surfaces, graphics, and the live status. Start at [`settings/status.md`](settings/status.md). |
 | [`plans/`](plans) | Dated work plans, filed by status (`todo/`, `in-progress/`, `finished/`, `cancelled/`). See [`plans/README.md`](plans/README.md). |
@@ -41,6 +41,23 @@ documents under [`settings/`](settings).
   (`out/_swap/...`), and anything unproven says so.
 - **No machine paths in tracked files.** Use `<checkout>`, `<home>`, or a neutral example such as
   `D:\Songs`. Build output (`out/`, `installer/out/`) and dumped game data (`game/`) are local.
+
+### Project change rules
+
+Keep four layers separate: read-only, fingerprinted local `game/` input; the pinned SDK;
+regenerated code; and project code containing Blitz-specific manifests, hooks, patches
+and diagnostics. Change the SDK only for a generic Xbox 360 behavior defect, as a
+patch in [`patches/`](../patches/README.md). Prefer a corrected boundary or hint,
+then an existing SDK implementation, a whole-function hook, a named data/code
+patch, a mid-ASM hook, and finally an SDK patch. Record the guest address,
+observed failure, intended behavior and evidence for each hook or patch.
+
+Record chronology in [`history/bringup-log.md`](history/bringup-log.md), standing
+limits in [`reference/known-issues.md`](reference/known-issues.md), proved symbols
+in [`reference/symbols.md`](reference/symbols.md), and cross-project findings in
+[`reference/rb3-references.md`](reference/rb3-references.md). Correct the record
+that made a claim when a measurement disproves it. Online services remain a
+permanent non-goal; installed Ultimate payload compatibility is required.
 
 ## Changing these docs
 
@@ -75,7 +92,6 @@ endings and orphaned documents. Auditing without editing is the read-only `docs-
 | Document | What it is |
 | --- | --- |
 | [`reference/known-issues.md`](reference/known-issues.md) | Open issues and limitations accepted by design. |
-| [`reference/backlog.md`](reference/backlog.md) | What is not started yet, and the ground rules for the project. |
 | [`reference/symbols.md`](reference/symbols.md) | The guest image inventory: identity, sections, imports, named symbols, jump tables, exception handling. |
 | [`reference/rb3-references.md`](reference/rb3-references.md) | Mining the RB3/RB3DX projects: how hooking works in this SDK, the `[[midasm_hook]]` route, the port catalogue, and the borrowing rules. |
 
@@ -114,6 +130,9 @@ budget, and the row-text budget — are a skill:
 | Document | Status |
 | --- | --- |
 | [`plans/todo/2026-10-26-in-game-song-management-plan.md`](plans/todo/2026-10-26-in-game-song-management-plan.md) | Planning only: native My Songs X Manage, shared RhythmVerse entry, per-song hiding and search settings, exact-package deletion, DLC date tracking and default-On Auto-hide Failed Songs; Off preserves current load-guard recovery. |
+| [`plans/todo/2026-10-31-engine-compatibility-closeout-plan.md`](plans/todo/2026-10-31-engine-compatibility-closeout-plan.md) | Planning only: scripted Ultimate acceptance, shader release evidence, compile-trace counts and selective engine knowledge porting. |
+| [`plans/todo/2026-10-31-content-and-music-closeout-plan.md`](plans/todo/2026-10-31-content-and-music-closeout-plan.md) | Planning only: DLC list, same-session store refresh, Search header and menu-music routes. |
+| [`plans/todo/2026-10-31-runtime-ui-acceptance-plan.md`](plans/todo/2026-10-31-runtime-ui-acceptance-plan.md) | Planning only: HUD, settings restart/recovery, Load Guard and live input acceptance. |
 | [`plans/todo/2026-10-26-native-song-folders-plan.md`](plans/todo/2026-10-26-native-song-folders-plan.md) | Planning only: prove direct runtime use of Clone Hero/Phase Shift folders as read-only DLC without CON packaging, then implement the guest-compatible chart/audio view, mixed-library integration and performance checks. |
 | [`plans/todo/2026-10-29-ui-pixel-imperfections-investigation-plan.md`](plans/todo/2026-10-29-ui-pixel-imperfections-investigation-plan.md) | Planning only: locate the cause of reported menu text and star-edge pixel imperfections with original-resolution, cross-stage and cross-renderer comparisons before any fix. |
 | [`plans/finished/2026-09-27-launcher-plan.md`](plans/finished/2026-09-27-launcher-plan.md) | Controller Settings' own plan; 27 prompts built, with the residual hand-check list. |

@@ -1030,7 +1030,7 @@ port supports.)
 executable is not swappable, why the payload cannot be merged per file, the union
 rules, install/uninstall, hazards and the acceptance criteria. Propagated to
 [`README.md`](../../README.md) (goal, baseline, and what "working" means),
-[`backlog.md`](../reference/backlog.md) (the deferred backlog), [`known-issues.md`](../reference/known-issues.md),
+the deferred backlog (now grouped in dated plans), [`known-issues.md`](../reference/known-issues.md),
 [`build-and-run.md`](../guides/build-and-run.md), and [`rb3-references.md`](../reference/rb3-references.md)
 §0 and §10.
 
@@ -3596,7 +3596,7 @@ one band:
 
 ## Close-out: the fixes implied by the open known-issues (2026-10-01)
 
-The backlog's known-issues section — removed from [backlog.md](../reference/backlog.md) when it
+The backlog's known-issues section — removed from the former backlog when it
 completed — is closed here; its four items are done and their chronology is above and
 below in this file.
 
@@ -3834,7 +3834,7 @@ view.
   "clamp, tap down N, accept" a safe route.
 - **A diff is only read against a same-build baseline, and never without one.** `-Compare` with no
   baseline reports `no-baseline` and does not fail the run: there is nothing to measure against, and
-  saying so is the point (docs/reference/backlog.md, "Measure the noise floor").
+  saying so is the point ([diagnostics.md](../engine/diagnostics.md), "Measured noise floor").
 - **The first real pair corrected the plan's own verification.** The plan asked for a diff "below the
   settled noise floor". Two same-build runs of the title screen differ by **0.046 %** in one pair and
   **1.978 %** in another: the aurora behind the title animates, so what varies is the distance between

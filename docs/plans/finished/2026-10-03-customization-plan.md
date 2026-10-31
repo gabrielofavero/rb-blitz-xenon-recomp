@@ -3,7 +3,7 @@
 **Status: scoping/planning.** No feature code in this document. Every unit of work below is
 **research or preparation** — naming, flow maps, probes, harnesses, contracts, scaffolding — that
 unblocks a later feature commit. Nothing here is a commitment, and nothing here gates the
-release-readiness tasks in [backlog.md](../../reference/backlog.md).
+release-readiness tasks in [known-issues.md](../../reference/known-issues.md).
 
 This document is written as a **prompt plan**, the same shape as
 [plans/launcher-plan.md](2026-09-27-launcher-plan.md): every unit of work is a self-contained prompt you can hand
@@ -13,7 +13,7 @@ to a fresh agent session, plus the order it must run in and what can run beside 
 and the host-side settings surface; this plan owns the *guest-side engine research* the enhancements
 need, and it feeds the launcher a list of honest toggles when the features exist. Where the two touch
 (toggles, the Graphics tab, art reuse) this document defers to the launcher plan's decisions and says
-so. It absorbs [backlog.md](../../reference/backlog.md) §1's naming campaign, which was always the prerequisite
+so. It absorbs [engine close-out plan](../todo/2026-10-31-engine-compatibility-closeout-plan.md) E5's naming campaign, which was always the prerequisite
 for this scope.
 
 **Evidence convention** (all three tags are used below):
@@ -41,7 +41,7 @@ for this scope.
 **One sentence that ties them together:** all nine are *guest* behaviour changes, and this project's
 rule for reaching guest behaviour is "correct boundaries or hints → an existing SDK implementation →
 a whole-function hook with the guest address recorded → a named data/code patch → a mid-ASM hook →
-an SDK patch file" **[tree]** [backlog.md](../../reference/backlog.md) §6. So the preparation this plan plans is
+an SDK patch file" **[tree]** [project change rules](../../README.md#project-change-rules). So the preparation this plan plans is
 the first two rungs: **know the flow and name it**, then pick the cheapest rung that reaches it.
 
 **R10 (added 2026-10-06, after the plan's own R1–R9).** A follow-up request asked that the Ultimate
@@ -100,7 +100,7 @@ already owns. A prompt below never ships a user-visible enhancement; it makes on
   rather than hides is the presenter's paint rect, which no public SDK accessor exposes.
 - **No baseline set, and a measured noise floor bigger than most effects.** Two runs of the same
   build differ by **3.5–5.9 %** of the frame just after a screen is entered and ~0.14 % once settled
-  **[tree]** [backlog.md](../../reference/backlog.md) §4, so any pixel-diff-based verification is meaningless until a
+  **[tree]** [diagnostics](../../engine/diagnostics.md), so any pixel-diff-based verification is meaningless until a
   same-build baseline is in the loop. **The harness landed (P3, 2026-10-04)** and measures the floor
   per state — it already found that the animated title background has no settled frame at all (two
   same-build pairs: 0.046 % and 1.978 %). What E1 still owes is the baseline *set*.
@@ -123,7 +123,7 @@ with the command named.
 1. **Naming + disassembly reading.** Hook the function, log its arguments and its call sites, then
    name it. Names are only assigned from *runtime or disassembly evidence*, never from a guess, and
    land in `config/functions.toml` **in the same commit** as the [symbols.md](../../reference/symbols.md) table
-   row **[tree]** [backlog.md](../../reference/backlog.md) §1.
+   row **[tree]** [engine close-out plan](../todo/2026-10-31-engine-compatibility-closeout-plan.md) E5.
 2. **A probe build.** A `--probe=<area>` run (or a cvar) that logs a flow — the addresses a path
    visits, in order, with the values that decided each branch. This is the primary deliverable of
    S2–S7, and it is what makes a later hook cheap.
@@ -164,14 +164,14 @@ the image, and enduring facts live beside [symbols.md](../../reference/symbols.m
 **Proposal:** names use the `Subsystem_Method` shape already used by the borrowed RB3 catalogue
 (`BandSongMgr::IsDemo`, `RndMat::Load` **[tree]** [rb3-references.md](../../reference/rb3-references.md) §4.1).
 Only functions with recorded evidence are named. Each batch updates both files in one commit, per
-[backlog.md](../../reference/backlog.md) §1.
+[engine close-out plan](../todo/2026-10-31-engine-compatibility-closeout-plan.md) E5.
 
 **Why:** a wrong name is worse than `sub_XXXXXXXX`, because it makes a false claim readable.
 
 ### D3 — Probe first, hook second, patch third
 
 **Proposal:** every feature prompt's preparation ends at the **cheapest working rung** from
-[backlog.md](../../reference/backlog.md) §6. Concretely: a `[[midasm_hook]]` when the need is a forced branch or
+[project change rules](../../README.md#project-change-rules). Concretely: a `[[midasm_hook]]` when the need is a forced branch or
 return value (R3, R5); a `REX_HOOK` when state must cross calls; an SDK patch only when the behaviour
 is generically wrong for Xbox 360 software. A research prompt that cannot reach a rung by probing
 says so and stops rather than inventing a body.
@@ -258,7 +258,7 @@ already reports it.
 
 **Proposal:** if U1/C1 find the main-menu options and the main-menu songs are built from a DTA or a
 scene's data, the enhancement is a data overlay (D6 route 1), not a hook. A hook is the fallback, and
-it records its guest address per [backlog.md](../../reference/backlog.md) §6.
+it records its guest address per [project change rules](../../README.md#project-change-rules).
 
 **Answered 2026-10-06 (U1).** The options *are* data — a compiled DTA (`splash.dtb`) inside the ark —
 and the edit is data too: the same bytes a patched payload entry would carry. What R5 does *not* use
@@ -302,7 +302,7 @@ machine.
 
 **Proposal:** E1 produces the baseline set and the measured noise floor; from then on a prompt that
 claims a visual change names its baseline. This is the rule the withdrawn reskin claim earned
-**[tree]** [backlog.md](../../reference/backlog.md) §4.
+**[tree]** [diagnostics](../../engine/diagnostics.md).
 
 ### D16 — Documentation is part of the change
 
@@ -482,7 +482,7 @@ Lanes: **P** platform/prep, **S** symbols & flow, **R** resolution & layout, **U
 proved MOGG functions; the rule and the table are in
 [symbols.md](../../reference/symbols.md) "Named symbols", chronology in
 [history/bringup-log.md](../../history/bringup-log.md), and the remaining anonymous set stays open
-in [backlog.md](../../reference/backlog.md) §1. The tranche is nine names, not "the eleven MOGG rows": the
+in [engine close-out plan](../todo/2026-10-31-engine-compatibility-closeout-plan.md) E5. The tranche is nine names, not "the eleven MOGG rows": the
 MOGG table's other two rows are import thunks codegen already names, and one is a `.data`
 table, which `[functions]` cannot name.
 
@@ -928,7 +928,7 @@ table, which `[functions]` cannot name.
 > **Goal.** Close the campaign: [symbols.md](../../reference/symbols.md) complete and consistent with
 > `config/functions.toml`; `docs/engine/` indexed and each map's "open" section honest; every new
 > standing limit in [known-issues.md](../../reference/known-issues.md); the chronology in
-> [history/bringup-log.md](../../history/bringup-log.md); [backlog.md](../../reference/backlog.md) §1 updated (naming
+> [history/bringup-log.md](../../history/bringup-log.md); [engine close-out plan](../todo/2026-10-31-engine-compatibility-closeout-plan.md) E5 updated (naming
 > progress, the RB3DX groups 2–10 check if any were answered); [rb3-references.md](../../reference/rb3-references.md)
 > §4/§6 provenance rows for anything adapted.
 > **Deliverable.** The doc updates and a short "what is now known / what is still open" summary at the
@@ -1079,8 +1079,9 @@ Anything not in this table is not verified, and should be said out loud rather t
 
 - [plans/launcher-plan.md](2026-09-27-launcher-plan.md) — the sibling plan; owns the launcher, the settings
   surface, D15's art posture (§10), and the harness precedent (§10.3).
-- [backlog.md](../../reference/backlog.md) §1 (naming), §4 (the noise floor and the withdrawn reskin claim), §6
-  (the rung order and the layering rules).
+- [engine close-out plan](../todo/2026-10-31-engine-compatibility-closeout-plan.md) E5 (naming),
+  [diagnostics](../../engine/diagnostics.md) (the noise floor), and
+  [project change rules](../../README.md#project-change-rules) (the rung order and layering).
 - [rb3-references.md](../../reference/rb3-references.md) §1–§3 (hooking, `name =`, `[[midasm_hook]]` and the
   offline-dialog candidate), §4/§6 (the band3/RB3DX catalogue and the Blitz map), §7.2–§7.3 (the DTA
   overlay technique and the pure-decision-split method).

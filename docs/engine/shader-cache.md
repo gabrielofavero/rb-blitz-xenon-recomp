@@ -1956,7 +1956,7 @@ this separable rather than a judgement call - every helper identity in the run (
 was first seen before the menu, and the per-call cost matches the presenter, not a
 compile.
 
-That is a host defect and is filed as one (`reference/backlog.md`), not hidden in
+That is a host defect and is filed as one (`../plans/todo/2026-10-31-engine-compatibility-closeout-plan.md`), not hidden in
 the verdict, and the acceptance grew a third policy to say so exactly: a row may
 set `allow_host_helper`, and then in-song helper time must stay under **5 ms per
 song second** and **5 ms per call**, with no failures and healthy frames - all

@@ -13,7 +13,7 @@ See [Load Guard part 4](../plans/finished/2026-10-13-load-guard.md),
 [crash_recovery.cpp](../../src/loading/crash_recovery.cpp) and
 [song_load_monitor.cpp](../../src/platform/song_load_monitor.cpp).
 
-**Load Guard** (General → Downloadable Content) adds the separate
+**Load Guard** (General → Launch) adds the separate
 `general.load_guard` / `song_load_guard` enum: **Off / 30s / 60s**, default Off.
 A successful settings commit applies to the next song attempt without restarting.
 At expiry the external monitor ends the unfinished process, waits for exit and
@@ -271,7 +271,7 @@ and generated retail records. The visual change awaits the owner's retest.
    `kToggles` — a toggle missing from that table is a toggle nobody sees.
 2. Add the row to the table above, naming the prompt that implements it.
 3. State in the implementing prompt's change what the faithful path is and why the feature deviates
-   from it ([backlog.md](../reference/backlog.md) §6's rule, applied to a flag).
+   from it ([project change rules](../README.md#project-change-rules)'s rule, applied to a flag).
 
 
 P2 diagnostics: `background_music_nav_probe` (empty by default; `next`, `previous`,

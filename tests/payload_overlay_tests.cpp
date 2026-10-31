@@ -11,6 +11,7 @@
 // de-duplicated, and how the hidden payload default.xex prunes a subtree.
 
 #include "check.h"
+#include "windows_test_crash.h"
 
 #include "fs/overlay_merge.h"
 
@@ -317,6 +318,7 @@ void ASettingsRecordIsNotMergedWithTheGameRoot() {
 }  // namespace
 
 int main() {
+  rb_blitz::test::SuppressWindowsTestCrashDialogs();
   FoldNameFoldsAsciiAndLeavesOtherBytes();
   FoldGuestPathDropsCaseAndSeparatorSpelling();
   JoinGuestsBuildsOverlayPaths();

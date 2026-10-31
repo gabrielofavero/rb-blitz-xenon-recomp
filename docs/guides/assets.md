@@ -557,7 +557,7 @@ asset**, from an independent build, at the same offset. Measured on `buttons`:
 So the next attempt has an oracle the last one did not: find a decoding that reads *both*
 copies, or use the 70%-identical majority to separate "this is the image" from "this is a
 re-encode". That belongs with the rest of the open problem in
-[backlog.md](../reference/backlog.md).
+[button layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md).
 
 ## The texture record, pinned
 

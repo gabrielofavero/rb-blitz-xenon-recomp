@@ -144,22 +144,22 @@ Generated partition numbers may change. Recover the owning file through `generat
 
 **Status of the two entries after P5b, and after P7.** The main-menu entry reaches the merged root and is verified in a boot. The **in-song entry is still retail's own page**: retail's in-song Help & Options is not a screen jump but a focus switch to a second list inside the pause panel, and re-pointing that row at our screen faults the guest (`read of guest 0x00000024`, four arms — [in-game-settings-merged-menu.md](menu.md) §3). The shipped payload therefore leaves that focus switch pristine; the merge of that inline list (its five symbols and its dispatch) is the next experiment, and the plan's §3 tree describes the in-song page as it will be once that lands. **Since P7 (2026-10-18)** the one retail-row edit the payload makes is the existing `pause_controls` *jump* case, re-pointed at the pause twin of the Controls menu; the focus switch itself is untouched ([menu.md](menu.md) §3.3).
 
-**Root rows, in order (2026-10-19).** Six with Ultimate installed; `Gameplay` is omitted when it has no available rows, so a base-only install shows five. The 2026-10-19 overhaul moved how-to-play and calibration back to the root and folded the former `Interface` root page into `General`.
+**Root rows, in order (reordered 2026-10-31).** Six with Ultimate installed; `Gameplay` is omitted when it has no available rows, so a base-only install shows five. The 2026-10-19 overhaul moved how-to-play and calibration back to the root and folded the former `Interface` root page into `General`.
 
 | # | Root row | Interaction | Contents |
 | --- | --- | --- | --- |
-| 0 | How to Play | Retail screen | Retail's tutorials page, unchanged |
+| 0 | Controls | Submenu (P7, 2026-10-18) | In-game Controls menu: Input Types, Interface Mapping, Gameplay Mapping, and a direct `Layout: <name>` selector (§3.2). Retail's controller preset page remains beneath Gameplay Mapping → Controller → Controller Presets. The Layout row is gated by `enhancements_icon_schemes`. |
 | 1 | Calibration | Retail wizard | Unchanged retail calibration |
 | 2 | General | Submenu | Target, Interface, Downloadable Content, Achievements & Unlocks, Credits |
-| 3 | Controls | Submenu (P7, 2026-10-18) | In-game Controls menu: Input Types, Interface Mapping, Gameplay Mapping, and a direct `Layout: <name>` selector (§3.2). Retail's controller preset page remains beneath Gameplay Mapping → Controller → Controller Presets. The Layout row is gated by `enhancements_icon_schemes`. |
-| 4 | Audio / Video | Submenu | Audio group first, then Video group |
-| 5 | Gameplay | Submenu (Ultimate rows only) | Camera Angle, Game Speed, HUD, Tracks & Gems, Plots & Skyboxes |
+| 3 | Audio / Video | Submenu | Audio group first, then Video group |
+| 4 | Gameplay | Submenu (Ultimate rows only) | Camera Angle, Game Speed, HUD, Tracks & Gems, Plots & Skyboxes |
+| 5 | How to Play | Retail screen | Retail's tutorials page, unchanged |
 
-**Superseded 2026-10-19:** the earlier root was `General, Controls, Calibration, Audio/Video, Gameplay, Interface`, with How to Play and Credits inside General and Interface holding the letterbox/HUD/hide rows. The current order is the owner's tree: `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`.
+**Superseded 2026-10-19:** the earlier root was `General, Controls, Calibration, Audio/Video, Gameplay, Interface`, with How to Play and Credits inside General and Interface holding the letterbox/HUD/hide rows. The 2026-10-19 order was `How to Play, Calibration, General, Controls, Audio/Video, Gameplay`; the current order is shown above.
 
 Two properties of the ordering are deliberate:
 
-- **The retail pages remain retail's own.** How to Play and Calibration are retail screens at the root; the merged root no longer has to keep retail's old indices. The route-driven acceptance scripts that counted rows must be updated to the new order (How to Play = 0, Calibration = 1, General = 2, Controls = 3, Audio/Video = 4, Gameplay = 5).
+- **The retail pages remain retail's own.** How to Play and Calibration are retail screens at the root; the merged root no longer has to keep retail's old indices. Route-driven acceptance scripts that count rows use the new order (Controls = 0, Calibration = 1, General = 2, Audio/Video = 3, Gameplay = 4 on Ultimate, How to Play = 5 on Ultimate or 4 on base).
 - **Visibility is not a fixed row count.** Base = 5 rows, Ultimate = 6. Never ship a dead Ultimate row on a base install, and never leave an empty group behind as an unfocusable row.
 
 **Page titles (2026-10-19).** The scene's `header.lbl` is a `UILabel`, not a texture: it carries a locale token and every page of ours sets `text_token` on entry. The root reads `HELP & OPTIONS`; each submenu reads its own name (`GENERAL`, `TARGET`, `AUDIO/VIDEO`, `VIDEO`, `HUD`, `HUD ELEMENTS`, …). Retail's How to Play, Calibration and Credits pages keep their own titles. The retail Audio page is retitled `AUDIO` by the `Audio` route and its list is moved onto the merged list's position with `get_local_pos`/`set_local_pos` (the `local_xfm` spelling did not move it), so its four console-backed rows line up with the rest of the surface; boot-verified 2026-10-19 in `out/audio-fix/probe3/`.

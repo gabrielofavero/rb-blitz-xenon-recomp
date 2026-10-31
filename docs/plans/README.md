@@ -30,3 +30,7 @@ Two programs outgrew the plan format and now live with their subject instead:
 
 The engine-level studies that plans here refer to (menu layout, toggles, input, diagnostics) live in
 [`../engine/`](../engine), not in this folder.
+
+The former backlog was triaged on 2026-10-31. Its remaining work is grouped in
+the three close-out plans under [`todo/`](todo); existing feature plans keep their
+own scope, and project change rules live in [`../README.md`](../README.md).

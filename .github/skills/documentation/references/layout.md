@@ -26,7 +26,7 @@ docs/
 | Folder | Belongs | Does not belong |
 | --- | --- | --- |
 | `guides/` | procedures with exact commands; format notes; gates and their failure modes; policy records (`ultimate-compat.md`, `distributable.md`) | subsystem measurements (→ `engine/`), plans (→ `plans/`) |
-| `reference/` | open issues and accepted limitations (`known-issues.md`), the unstarted list (`backlog.md`), the guest image inventory (`symbols.md`), other projects' techniques worth porting (`rb3-references.md`) | how-to steps, current status of a program |
+| `reference/` | open issues and accepted limitations (`known-issues.md`), the guest image inventory (`symbols.md`), other projects' techniques worth porting (`rb3-references.md`) | how-to steps, current status of a program |
 | `engine/` | a study of one subsystem: the panel/file/loader, the addresses, the hook point, what was measured, where it lives, what is open | anything about the host UI or packaging |
 | `settings/` | the settings program only — see the role table below | a new subsystem study (→ `engine/`) |
 | `plans/<status>/` | plans, package implementation records, hand-offs; each dated | living reference material (→ `guides/`/`reference/`) |

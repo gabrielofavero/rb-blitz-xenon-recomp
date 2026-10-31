@@ -15,7 +15,7 @@ section, so paths and section numbers are an interface.
   superseded statements and name the successor.
 - A change that alters behaviour, a toggle, a limitation, or a plan's state owes a documentation
   update — the skill's §4 table says which document owns what (`engine/toggles.md`, `reference/known-issues.md`,
-  `reference/backlog.md`, the plan's status folder, `settings/status.md`, the index).
+  the owning dated plan, its status folder, `settings/status.md`, the index).
 - Plans: `docs/plans/<todo|in-progress|finished|cancelled>/YYYY-MM-DD-<name>.md`.
 - No machine-specific values in tracked files: no `C:\Users\<name>\...`, no absolute checkout paths.
   Use `<checkout>`, `<home>`, or a neutral example such as `D:\Songs`.

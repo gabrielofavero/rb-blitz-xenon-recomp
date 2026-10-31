@@ -782,7 +782,7 @@ exports are also in the gitignored `assets/controller/template-360/`.
   `assets/controller/template/buttons.png` and `pad.png` guides.
 - Add the measured format record to `docs/guides/assets.md` (a new section, dated 2026-10-19),
   mark the old "Can a UI texture be swapped today? **No**" claim as superseded, and name this plan
-  as the successor. Move the format item in `docs/reference/backlog.md` to resolved/superseded.
+  as the successor. The former backlog's format item was resolved by P0 and retired.
 - Copy the evidence into `out/button-schemes/format-2026-10-19/` (already done) and cite it.
 - **Already landed, reuse it instead of starting over (2026-10-21):**
   `src/assets/texture_codec.{h,cpp}` has the standalone texture envelope, DXT1/DXT5 decode and
@@ -1285,7 +1285,7 @@ ship temporary pad SVGs, or commit PS3-extracted art.
 - `docs/settings/menu.md`: the Controls page's fourth row and the retail Controller Presets route.
 - `docs/settings/status.md`: the live state and any open items.
 - `docs/guides/assets.md`: the 2026-10-19 format section (P0) and the PS3 button-sheet route.
-- `docs/reference/backlog.md`: the old "pin the sheet format" item is resolved by P0; any remaining
+- `docs/guides/assets.md`: the old "pin the sheet format" item is resolved by P0; any remaining
   work is named.
 - `docs/reference/known-issues.md`: the PS3 trial/full RAP caveat, unsupported physical controls
   or unmeasured hint routes, connection paths that hide extra SDL buttons, and any backend left
@@ -1494,6 +1494,57 @@ source path; those now receive equal-length private names, and the texture provi
 first 32 distinct 1024-square candidates with their first differing byte. The release build
 and focused settings/menu host suites pass. The owner's next visual check must establish
 whether the private texture is now loaded; P9 remains open until the images appear correctly.
+
+**2026-10-31 text-fallback regression follow-up.** The owner's next Confirm/Go Back screenshot
+showed binding names instead of images. `rb_blitz_445.log` identifies the immediate cause:
+`PrepareScene` refused the copied font because its resource-name guard expected 32 references
+from the first decompressed chunk, while the installed three-chunk scene has 65. The guard now
+checks all 65. The release build and `menu_payload_tests check-header-records` against the
+installed assets pass; the latter produces a private icon scene with a separate bitmap source
+path and texture object name, with no refused records across 16 menu configurations. The
+owner's next visual check is still required to accept the image rendering and paused-song page.
+
+**2026-10-31 startup stall after name rewrite.** The owner reported a freeze on "Loading Rock
+Band Blitz audio/video settings...". `rb_blitz_447.log` shows the generated font scene was mounted,
+four 1024-square texture candidates failed the private-font match, and the native graphics-loading
+gate started, but the guest never reached the content-ready boundary; there was no GPU packet
+overflow. The prior build without the resource-name rewrite reached the menu. The rewrite was
+speculative and is removed from the current release build; the candidate diagnostics remain so
+the next boot and mapping visit can identify what texture the guest actually requests. The
+installed-record generation check passes with 16 menu configurations. Neither boot recovery nor
+the icon images are accepted yet for this build.
+
+**2026-10-31 private texture identity follow-up.** The owner reached Interface Mapping after
+the name-rewrite rollback; Confirm and Go Back again showed fragments rather than images.
+`rb_blitz_448.log` records the retail Pentatonic candidate at hash `012769001E910536`:
+its first difference from the private BC3 chain is byte 786432, exactly the marker byte.
+No candidate matched the private texture. The copied font had retained the retail Tex name
+in its string table and four material references. `PrepareScene` now changes just those five
+equal-length `.tex` references to `InputIcons_Regular_(8_89)4x.tex`; every font and material
+name and the bitmap source path stay intact. Installed-record generation across 16 menu
+configurations passes, and the generated scene differs from the rollback scene by precisely
+the 50 name bytes. The release build passes; live boot and icon rendering are pending the
+owner's next check.
+
+**2026-10-31 material identity follow-up.** The owner's next screenshot still showed letter
+fragments. `rb_blitz_449.log` repeated the exact retail-font candidate and marker-byte
+mismatch, with no private texture upload. The private font's four material objects still had
+retail names, so `PrepareScene` now renames those `.mat` declarations and links as well as the
+five `.tex` references. It leaves every `.font` name and the bitmap source path unchanged.
+The generated scene remains the same size; relative to the prior build, exactly the expected
+110 material-name bytes differ. The release build and installed-record generation across 16
+menu configurations pass. Live boot and image acceptance remained pending at that point.
+
+**2026-10-31 retail-band atlas follow-up.** The next owner screenshot still showed fragments.
+`rb_blitz_450.log` again records the retail Pentatonic candidate with `first_diff=786432`
+against the marked private chain and no private upload. The copied font scene now retains the
+retail texture bytes and resource names. The override matches that known upload and replaces
+only BC3 blocks in the unused 768–1023 bottom band, preserving the original text blocks at
+all seven mips. A 28-column, seven-row grid of 36-pixel font cells holds 180 distinct 32-pixel
+images with transparent gutters. The copied font's cell dimensions and glyph UVs use this grid.
+Host tests verify all 180 cells, the 46th source image, and byte-for-byte preservation of the
+text blocks. The release build passes. Live image rendering and the paused-song mapping check
+remain pending owner verification.
 
 **2026-10-31 mapping follow-up.** Owner screenshots of Interface Mapping, Gameplay Notes and
 Move Lane show the ordinary images in the guest rows. Move Lane exposed a remaining art gap:
@@ -1727,7 +1778,7 @@ packages, make keyboard art a controller choice, or create a host overlay to dis
 | --- | --- | --- |
 | Plan filed / scope revised | [`docs/README.md`](../../README.md) | maintain the existing plan row, current path and binding-aware scope |
 | P0 | [`docs/guides/assets.md`](../../guides/assets.md) | the 23-byte record, DXT5 offset, unswap, the 6×6 grid, the pad decode; the old "No" is marked superseded |
-| P0 | [`docs/reference/backlog.md`](../../reference/backlog.md) | the "pin the sheet format" item is resolved; the successor is this plan |
+| P0 | [`docs/guides/assets.md`](../../guides/assets.md) | the sheet format is measured; this plan is the live replacement successor |
 | P1 | [`patches/README.md`](../../../patches/README.md) | the texture-override patch and why it is generic |
 | P6a exit criterion | `assets/controller/README.md` | a standalone custom-template/package guide, with manifest and individual-slot examples, image formats, proportional resizing, transparent padding, original-art fallback, validation and installation |
 | P3 | [`docs/engine/toggles.md`](../../engine/toggles.md) | R4 is implemented; the gate's default and the page |

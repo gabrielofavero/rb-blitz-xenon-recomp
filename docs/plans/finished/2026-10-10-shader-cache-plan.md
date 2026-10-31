@@ -15,7 +15,7 @@ P9 packages and audits the embedded catalogue/local extractor and preserves user
 stores on update. Installed game/UI checks are owner-driven and **pending**;
 the remaining release/runtime gates are tracked in
 [shader-cache.md](../../engine/shader-cache.md) parts 8 and 9 and
-[the backlog](../../reference/backlog.md). Moving this delivery to finished does
+[the engine close-out plan](../todo/2026-10-31-engine-compatibility-closeout-plan.md). Moving this delivery to finished does
 not certify those gates, every song, every configuration or other hardware.
 
 Historical P0 summary (2026-10-24):
@@ -1643,7 +1643,7 @@ zero in-song guest work, GPU mean 29.46 ms / worst 33.63 ms. It failed the stric
 helper check only because Vulkan's presenter rebuilds its guest-output paint
 pipeline on every present (`vulkan_presenter.cpp:2653`, one identity, 1,473 calls /
 209 ms over an 86.6 s song). That is a **host defect**, now filed in
-`reference/backlog.md`, and the acceptance gained an auditable `allow_host_helper`
+`reference/known-issues.md`, and the acceptance gained an auditable `allow_host_helper`
 policy (5 ms per song second, 5 ms per call, no failures, healthy frames) instead
 of a silent exception. **P8 is complete for the accepted scope**; the unproven list
 is in part 8 ("Still unproven after the campaign"): Vulkan `VkPipelineCache` reuse,

@@ -66,7 +66,7 @@ never laid out at is the highest risk in this plan.
 | **D2** | Add the title's own 4:3 sizes as catalogue bases: **720×540** and **960×720** beside the two 16:9 bases. Their scale products make 4:3 sizes offerable on any display, exactly as 16:9 is today. |
 | **D3** | Remove the primary-aspect family filter from `SupportedResolutions`. The offer becomes every **enumerated** mode the planner accepts and that fits the primary, plus the producible catalogue. Rationale: since the P2 window work the video mode equals the render size and the window is fitted to the same aspect, a 4:3 or 3:2 mode no longer produces bars — it produces a true frame of that shape. The filter is obsolete; keeping it would hide 4:3 modes a 16:9 display advertises. |
 | **D4** | Add a diagnostic size override, parsed exactly like `DiagnosticGuestBases()`: `RBBLITZ_PROBE_RESOLUTIONS=WxH[,WxH...]` (optional `--probe_resolutions=` if the boot's flag path is trivial). It appends the named sizes to the capability snapshot **after** the display trim, deduplicated and ordered. It cannot make the planner accept a size it refuses; it only bypasses "the monitor did not advertise this". It logs a warning naming every size, is unset in production, and is never written to the profile. |
-| **D5** | The 4:3 modes above 720 and 3840×1600 need guest heights 768/800/864/960/1050. P2 probes them in descending order and sets `max_guest_height` to the highest that passes the title-screen art check. A mode whose height fails stays refused and is recorded in `known-issues.md`/`backlog.md`; it is not guessed into the offer. |
+| **D5** | The 4:3 modes above 720 and 3840×1600 need guest heights 768/800/864/960/1050. P2 probes them in descending order and sets `max_guest_height` to the highest that passes the title-screen art check. A mode whose height fails stays refused and is recorded in [known-issues.md](../../reference/known-issues.md); it is not guessed into the offer. |
 | **D6** | `ResolutionChoiceLabel` becomes the token alone (delete the suffix branch and its comment). Extract it to a small pure helper so the rule is unit-tested; if extraction is deferred, the boot log's `Resolution offers …` line is the evidence. |
 | **D7** | Scales 5–7 stay unoffered. They produce no target size within the ceiling, and every extra scale is an unmeasured render path. |
 | **D8** | No SDK patch and no fractional scale. Scale 4 already fits `kMaxDrawResolutionScaleAlongAxis` (1..7) and the 3-bit resolve packing (`graphics.md` part 1 §6). |
@@ -191,7 +191,7 @@ are unchanged.
 | P1 lands | [`docs/settings/status.md`](../../settings/status.md) | the live record's current resolution state |
 | P0 lands | [`docs/engine/diagnostics.md`](../../engine/diagnostics.md) | the `RBBLITZ_PROBE_RESOLUTIONS` instrument and its limits |
 | P2 lands | [`docs/reference/known-issues.md`](../../reference/known-issues.md) | any height/mode the probe refuses, with the measurement |
-| If deferred | [`docs/reference/backlog.md`](../../reference/backlog.md) | modes left unsupported and why |
+| If deferred | [`docs/reference/known-issues.md`](../../reference/known-issues.md) | modes left unsupported and why |
 | P1 lands | [`docs/settings/plan.md`](../../settings/plan.md) §7 | the requirement record now includes 4:3 and the wider set |
 
 No toggle is introduced, so [`docs/engine/toggles.md`](../../engine/toggles.md) is unchanged. The

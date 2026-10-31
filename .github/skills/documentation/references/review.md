@@ -50,7 +50,7 @@ Use this for any documentation change (the **docs-auditor** agent runs it and re
 
 **Consequences**
 - [ ] The documents that own the touched subject were updated (see the table in the skill's §4:
-      `toggles.md`, `known-issues.md`, `backlog.md`, the plan's status, the live tracker, `docs/README.md`).
+      `toggles.md`, `known-issues.md`, the owning dated plan, its status, the live tracker, `docs/README.md`).
 - [ ] A plan whose work finished moved to `finished/`, and its plan README row says what it delivered.
 
 ## How the auditor reports

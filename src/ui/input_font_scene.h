@@ -8,8 +8,8 @@
 
 namespace rb_blitz::ui::input_font {
 
-// Derive a private icon-only copy of the installed Pentatonic font scene. Its texture has a
-// distinct fingerprint so replacing the complete icon atlas cannot change the retail text font.
+// Derive an icon-only copy of the installed Pentatonic font scene. Both fonts share the
+// retail texture; icon pixels occupy only its unused bottom band, preserving text glyphs.
 // Atlas pixels are supplied at runtime; no game art is stored in the project.
 bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                   std::vector<uint8_t>* original_bc3, std::string* error);
@@ -23,17 +23,19 @@ inline constexpr char kListRecord[] = "ui/resource/lists/gen/list_options_main.m
 inline constexpr uint32_t kAtlasSize = 1024;
 inline constexpr uint32_t kIconFirst = 0x80;
 inline constexpr uint32_t kIconCount = 180;
-inline constexpr uint32_t kIconSize = 64;
-inline constexpr uint32_t kIconColumns = 15;
-inline constexpr uint32_t kIconColumnStride = 68;
+inline constexpr uint32_t kIconSize = 32;
+inline constexpr uint32_t kIconColumns = 28;
+inline constexpr uint32_t kIconColumnStride = 36;
 inline constexpr uint32_t kIconInsetX = 2;
-inline constexpr uint32_t kIconRowStride = 80;
-inline constexpr uint32_t kIconInsetY = 8;
-// RndFont samples a fixed cell height; the final glyph float is advance, not height.
-inline constexpr float kFontCellWidth = 84.25f;
-inline constexpr float kFontCellHeight = 79.5f;
-// The private icon atlas begins at its first row at every authored mip.
-inline constexpr uint32_t kIconTop = 0;
+inline constexpr uint32_t kIconRowStride = 36;
+inline constexpr uint32_t kIconInsetY = 2;
+// The icon-only font uses smaller source cells so 180 tiles fit the spare band.
+// RndFont samples the cell height; the final glyph float is advance, not height.
+inline constexpr float kOriginalFontCellWidth = 84.25f;
+inline constexpr float kOriginalFontCellHeight = 79.5f;
+inline constexpr float kFontCellWidth = 36.0f;
+inline constexpr float kFontCellHeight = 36.0f;
+inline constexpr uint32_t kIconTop = 768;
 inline constexpr uint32_t kMipCount = 7;
 inline constexpr uint32_t GlyphCode(uint32_t index) {
   // Keep the accepted first 45 codes stable. The private icon font may also use
