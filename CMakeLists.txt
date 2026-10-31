@@ -1125,6 +1125,8 @@ if(BUILD_TESTING)
         src/input/input_store.cpp
         src/input/effective_input.cpp
         src/input/input_icons.cpp
+        src/controller_schemes/schemes.cpp
+        src/assets/texture_codec.cpp
         src/ui/input_icon_rows.cpp
         src/input/last_device.cpp
         src/profile/input_rows.cpp
@@ -1376,6 +1378,8 @@ if(BUILD_TESTING)
         target_link_libraries(rb_blitz_button_scheme_tests PRIVATE windowscodecs ole32)
     endif()
     target_include_directories(rb_blitz_button_scheme_tests PRIVATE src)
+    target_compile_definitions(rb_blitz_button_scheme_tests PRIVATE
+        RBBLITZ_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME button_scheme COMMAND rb_blitz_button_scheme_tests)
     add_test(NAME button_scheme_fingerprints
         COMMAND ${Python3_EXECUTABLE}
@@ -1388,6 +1392,14 @@ if(BUILD_TESTING)
             src/assets/texture_codec.cpp)
         target_include_directories(rb_blitz_controller_schemes PRIVATE src)
         target_link_libraries(rb_blitz_controller_schemes PRIVATE windowscodecs ole32)
+        add_custom_target(rb_blitz_controller_art
+            COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/controllers/controller_schemes.ps1
+                -Validate -Pack -Destination
+                $<TARGET_FILE_DIR:rb_blitz>/assets/controller/schemes
+            DEPENDS rb_blitz_controller_schemes
+            VERBATIM)
+        add_dependencies(rb_blitz rb_blitz_controller_art)
     endif()
 
     # P3's Downloaded matcher (src/store/store_library.h): the field normalization and the

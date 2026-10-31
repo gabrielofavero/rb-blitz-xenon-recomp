@@ -23,6 +23,7 @@
 #include "profile/profile.h"
 #include "profile/remap.h"
 #include "ui/input_icon_rows.h"
+#include "ui/input_font_scene.h"
 
 namespace {
 
@@ -40,6 +41,32 @@ capture::Observation Frame() {
   capture::Observation frame;
   frame.focused = true;
   return frame;
+}
+
+void TestExtraButtonCapture() {
+  rb_blitz::test::BeginCase("extra SDL button capture and release");
+  namespace remap = rb_blitz::profile::remap;
+  capture::Arm({"input.controller.first_note", {remap::SourceKind::kPad,
+                                                remap::SourceKind::kSdl}});
+  auto frame = Frame();
+  frame.extra_available = 1;
+  frame.extra_held = 1;
+  CHECK_FALSE(capture::Observe(frame).captured.has_value());  // opening press
+  frame.extra_held = 0;
+  CHECK_FALSE(capture::Observe(frame).captured.has_value());  // neutral
+  frame.extra_held = 1;
+  const auto tick = capture::Observe(frame);
+  CHECK_TRUE(tick.captured.has_value());
+  CHECK_TRUE(remap::FormatSource(tick.captured->source) == "sdl:button:misc1");
+  CHECK_FALSE(capture::Armed());
+  capture::Arm({"input.controller.first_note", {remap::SourceKind::kSdl}});
+  frame.extra_available = 0;
+  CHECK_FALSE(capture::Observe(frame).captured.has_value());
+  frame.extra_held = 0;
+  CHECK_FALSE(capture::Observe(frame).captured.has_value());
+  frame.extra_held = 1;
+  CHECK_FALSE(capture::Observe(frame).captured.has_value()); // unavailable source
+  capture::Cancel();
 }
 
 void TestTokenGrammar() {
@@ -198,6 +225,22 @@ void TestIconSourceCatalog() {
   }
   CHECK_TRUE(icons::Resolve({remap::SourceKind::kPad, "steam_back_grip"}, "steam-deck").art ==
              icons::Art::kUnsupported);
+  rb_blitz::controller_schemes::Registry registry;
+  auto& deck = registry.schemes["steam-deck"];
+  deck.schema_version = 2;
+  rb_blitz::controller_schemes::InputImage qam;
+  qam.source = "sdl:button:misc1";
+  qam.image = {8, 8, std::vector<uint8_t>(8 * 8 * 4, 255)};
+  deck.inputs.push_back(qam);
+  registry.has_keyboard_mouse = true;
+  registry.keyboard_mouse.inputs.push_back({"enter", "key:Return", "", "",
+      "Enter_Key_Dark.png", {}, {}, {9, 9, std::vector<uint8_t>(9 * 9 * 4, 255)}});
+  CHECK_TRUE(icons::Resolve({remap::SourceKind::kSdl, "button:misc1"}, "steam-deck",
+                          &registry).art == icons::Art::kPackageImage);
+  CHECK_TRUE(icons::Resolve({remap::SourceKind::kKey, "Return"}, "steam-deck",
+                          &registry).width == 9);
+  CHECK_TRUE(icons::Resolve({remap::SourceKind::kKey, "Return"}, "retail",
+                          &registry).width == 9);
 }
 
 void TestCaptureReleasesFirst() {
@@ -719,6 +762,68 @@ void TestImageRows() {
   CHECK_TRUE(page.lines[0] ==
       "Confirm: <alt1>\xC2\x80 \xC2\x81 \xC2\x82</alt1>");
 
+  // A v2 row must keep physical-source identity through resolution and glyph assignment.
+  // In particular, the two SDL extras have no legacy XInput sheet slot to fall back to.
+  rb_blitz::controller_schemes::Registry packages;
+  rb_blitz::controller_schemes::Scheme deck;
+  deck.id = "deck";
+  deck.schema_version = 2;
+  auto add_image = [](rb_blitz::controller_schemes::Scheme* scheme,
+                      const char* source, const uint8_t red) {
+    rb_blitz::controller_schemes::InputImage entry;
+    entry.source = source;
+    entry.id = source;
+    entry.image = {1, 1, {red, 0, 0, 255}};
+    scheme->inputs.push_back(std::move(entry));
+  };
+  add_image(&deck, "sdl:button:misc1", 17);
+  add_image(&deck, "sdl:button:left_paddle1", 34);
+  packages.schemes.emplace(deck.id, std::move(deck));
+  rb_blitz::controller_schemes::Scheme xbox;
+  xbox.id = "xbox-series";
+  xbox.schema_version = 2;
+  add_image(&xbox, "pad:start", 85);
+  add_image(&xbox, "pad:back", 102);
+  packages.schemes.emplace(xbox.id, std::move(xbox));
+  packages.has_keyboard_mouse = true;
+  packages.keyboard_mouse.schema_version = 2;
+  add_image(&packages.keyboard_mouse, "key:Return", 51);
+  add_image(&packages.keyboard_mouse, "mouse:left", 68);
+  snapshot->general.Set(remap::Target::kA,
+      {Source("sdl:button:misc1"), Source("key:Return"),
+       Source("sdl:button:left_paddle1"), Source("mouse:left")});
+  auto v2 = icons::Capture("deck", icons::Family::kController, &packages);
+  v2.input = snapshot;
+  const auto mixed = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, v2);
+  CHECK_FALSE(mixed.overflow);
+  CHECK_EQ(mixed.icons.size(), 4u);
+  if (mixed.icons.size() == 4) {
+    constexpr uint8_t expected_red[] = {17, 51, 34, 68};
+    for (size_t i = 0; i < 4; ++i) {
+      CHECK_TRUE(mixed.icons[i].art == icons::Art::kPackageImage);
+      CHECK_TRUE(mixed.icons[i].slot.empty());
+      CHECK_TRUE(mixed.icons[i].rgba ==
+          std::vector<uint8_t>({expected_red[i], 0, 0, 255}));
+    }
+  }
+  CHECK_TRUE(mixed.lines[0] ==
+      "Confirm: <alt1>\xC2\x80 \xC2\x81 \xC2\x82 \xC2\x83</alt1>");
+
+  const auto retail_start = icons::Resolve(Source("pad:start"), "retail", &packages);
+  const auto retail_back = icons::Resolve(Source("pad:back"), "retail", &packages);
+  CHECK_TRUE(retail_start.art == icons::Art::kPackageImage);
+  CHECK_TRUE(retail_back.art == icons::Art::kPackageImage);
+  CHECK_TRUE(retail_start.rgba == std::vector<uint8_t>({85, 0, 0, 255}));
+  CHECK_TRUE(retail_back.rgba == std::vector<uint8_t>({102, 0, 0, 255}));
+  const auto media_next = icons::Resolve(Source("key:MediaTrackNext"), "retail", &packages);
+  const auto media_previous = icons::Resolve(Source("key:MediaTrackPrevious"), "retail", &packages);
+  const auto media_pause = icons::Resolve(Source("key:MediaPlayPause"), "retail", &packages);
+  CHECK_TRUE(media_next.art == icons::Art::kBuiltIn && media_next.width == 48);
+  CHECK_TRUE(media_previous.art == icons::Art::kBuiltIn && media_previous.width == 48);
+  CHECK_TRUE(media_pause.art == icons::Art::kBuiltIn && media_pause.width == 48);
+  CHECK_TRUE(media_next.rgba != media_previous.rgba);
+  CHECK_TRUE(media_next.rgba != media_pause.rgba);
+
   auto rebound = std::make_shared<rb_blitz::input::EffectiveInput>();
   rebound->general.Set(remap::Target::kA, {Source("pad:b"), Source("key:space")});
   view.input = rebound;
@@ -731,13 +836,29 @@ void TestImageRows() {
   CHECK_EQ(empty.icons.size(), 1u);
   CHECK_TRUE(empty.icons[0].art == icons::Art::kUnbound);
 
-  const std::vector<std::string> many_symbols(31, symbols[0]);
-  const std::vector<std::string> many_fallback(31, fallback[0]);
-  const auto overflow = rb_blitz::ui::input_icon_rows::Build(
+  rebound->general.Set(remap::Target::kA, {Source("pad:a")});
+  const std::vector<std::string> many_symbols(55, symbols[0]);
+  const std::vector<std::string> many_fallback(55, fallback[0]);
+  const auto repeated = rb_blitz::ui::input_icon_rows::Build(
       many_symbols, many_fallback, view);
+  CHECK_FALSE(repeated.overflow);
+  CHECK_EQ(repeated.icons.size(), 1u);
+  CHECK_TRUE(repeated.lines.back() == "Confirm: <alt1>\xC2\x80</alt1>");
+
+  std::vector<remap::Source> distinct;
+  for (uint32_t i = 0; i < rb_blitz::ui::input_font::kIconCount; ++i)
+    distinct.push_back({remap::SourceKind::kKey, "Key" + std::to_string(i)});
+  rebound->general.Set(remap::Target::kA, distinct);
+  const auto expanded = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
+  CHECK_FALSE(expanded.overflow);
+  CHECK_EQ(expanded.icons.size(), rb_blitz::ui::input_font::kIconCount);
+  CHECK_TRUE(expanded.lines[0].find("\xC2\xB8") != std::string::npos);
+  distinct.push_back({remap::SourceKind::kKey, "Key45"});
+  rebound->general.Set(remap::Target::kA, distinct);
+  const auto overflow = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
   CHECK_TRUE(overflow.overflow);
   CHECK_TRUE(overflow.icons.empty());
-  CHECK_TRUE(overflow.lines == many_fallback);
+  CHECK_TRUE(overflow.lines == fallback);
 }
 
 }  // namespace
@@ -749,6 +870,7 @@ int main() {
   TestMusicBindings();
   TestTokenGrammar();
   TestCaptureReleasesFirst();
+  TestExtraButtonCapture();
   TestCaptureWrongKind();
   TestCaptureCancelAndTimeout();
   TestCaptureCountdown();

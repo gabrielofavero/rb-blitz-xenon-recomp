@@ -48,14 +48,15 @@ installer runs - never mirrored, re-hosted or bundled. `installer/README.md` and
 [ultimate-compat.md](ultimate-compat.md) are the policy; this file is the check.
 
 Owner-authored controller layouts are staged separately from the executable
-payload. `installer/tools/stage_controller_schemes.ps1` discovers every direct
-folder under `assets/controller/schemes/`, applies the ordinary package validator
-(which rejects reserved IDs), and writes explicit
-Inno `[Files]` entries for its declared manifest and PNGs. The two example
-packages live under `assets/controller/examples/`; gitignored local game-art
-references are also outside the install source. The build rejects undeclared
-files in an authored package. Originality and redistribution rights for new
-artwork still require owner review before release.
+payload. `installer/tools/stage_controller_schemes.ps1` discovers the eight
+direct v2 folders under `assets/controller/`, validates them, and writes explicit
+Inno `[Files]` entries for their manifests and declared PNGs. The 92 declared
+keyboard/mouse PNGs are staged separately as an internal resource, outside the
+selectable controller catalog. Undeclared PNGs, editable SVG masters and the
+gitignored game-art references are excluded. Version 1 user packages remain
+accepted at runtime; the optional PS3 import still writes a local v1 package.
+Originality and redistribution rights for new artwork still require owner review
+before release.
 
 The installer also includes the original controller authoring kit beside the
 game: `assets/controller/README.md`, `Attributions.txt`, `slots.toml`, blank

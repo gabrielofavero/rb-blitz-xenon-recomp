@@ -12,11 +12,14 @@ if (-not (Test-Path -LiteralPath $tool)) {
     throw "Build rb_blitz_controller_schemes first: $tool"
 }
 if (-not $Validate -and -not $Pack) { $Validate = $true }
-$source = Join-Path $repo 'assets/controller/schemes'
+$source = Join-Path $repo 'assets/controller'
 if ($Scheme) {
     $folders = @((Resolve-Path -LiteralPath $Scheme).Path)
 } elseif (Test-Path -LiteralPath $source) {
-    $folders = @(Get-ChildItem -LiteralPath $source -Directory | ForEach-Object FullName)
+    $folders = @(Get-ChildItem -LiteralPath $source -Directory |
+        Where-Object { $_.Name -notlike 'template-*' -and
+            (Test-Path -LiteralPath (Join-Path $_.FullName 'scheme.toml')) } |
+        ForEach-Object FullName)
 } else {
     $folders = @()
 }
@@ -24,16 +27,17 @@ if (-not $Destination) {
     $Destination = Join-Path $repo 'out/build/win-amd64-release/assets/controller/schemes'
 }
 foreach ($folder in $folders) {
-    $report = @(& $tool --validate $folder)
+    $internal = (Split-Path -Leaf $folder) -eq 'keyboard-mouse'
+    $mode = if ($internal) { '--validate-internal-keyboard' } else { '--validate' }
+    $listMode = if ($internal) { '--list-internal-keyboard' } else { '--list-declared' }
+    $report = @(& $tool $mode $folder)
     if ($LASTEXITCODE -ne 0) { throw "Invalid controller scheme: $folder" }
-    $report | ForEach-Object { Write-Host $_ }
+    if (-not $Pack) { $report | ForEach-Object { Write-Host $_ } }
     if ($Pack) {
-        if (@($report | Where-Object { $_ -match '^\s+ignored extra file:' }).Count) {
-            throw "Remove undeclared files before packing: $folder"
-        }
-        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-        $target = Join-Path $Destination (Split-Path -Leaf $folder)
-        $destinationFull = [IO.Path]::GetFullPath($Destination).TrimEnd('\', '/')
+        $targetRoot = if ($internal) { Split-Path -Parent $Destination } else { $Destination }
+        New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
+        $target = Join-Path $targetRoot (Split-Path -Leaf $folder)
+        $destinationFull = [IO.Path]::GetFullPath($targetRoot).TrimEnd('\', '/')
         $targetFull = [IO.Path]::GetFullPath($target)
         if (-not $targetFull.StartsWith($destinationFull + [IO.Path]::DirectorySeparatorChar,
                                          [StringComparison]::OrdinalIgnoreCase)) {
@@ -43,8 +47,14 @@ foreach ($folder in $folders) {
             Remove-Item -LiteralPath $targetFull -Recurse -Force
         }
         New-Item -ItemType Directory -Path $target -Force | Out-Null
-        Get-ChildItem -LiteralPath $folder -Force |
-            Copy-Item -Destination $target -Recurse -Force
+        $files = @(& $tool $listMode $folder)
+        if ($LASTEXITCODE -ne 0) { throw "Cannot list declared files: $folder" }
+        foreach ($relative in $files) {
+            $from = Join-Path $folder $relative
+            $to = Join-Path $target $relative
+            New-Item -ItemType Directory -Path (Split-Path -Parent $to) -Force | Out-Null
+            Copy-Item -LiteralPath $from -Destination $to -Force
+        }
         Write-Host "Packed $folder -> $target"
     }
 }

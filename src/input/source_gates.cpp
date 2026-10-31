@@ -24,6 +24,8 @@ SourceDevice DeviceOf(SourceKind kind) {
   switch (kind) {
     case SourceKind::kPad:
       return SourceDevice::kPad;
+    case SourceKind::kSdl:
+      return SourceDevice::kPad;
     case SourceKind::kKey:
       return SourceDevice::kKeyboard;
     case SourceKind::kMouse:
@@ -40,6 +42,16 @@ uint32_t MouseMaskFor(std::string_view name) {
   if (name == "x2") return mouse_button::kX2;
   return 0;
 }
+uint8_t ExtraButtonMask(std::string_view name) {
+  if (name == "button:misc1") return 1u << 0;
+  if (name == "button:misc2") return 1u << 1;
+  if (name == "button:touchpad") return 1u << 2;
+  if (name == "button:left_paddle1") return 1u << 3;
+  if (name == "button:left_paddle2") return 1u << 4;
+  if (name == "button:right_paddle1") return 1u << 5;
+  if (name == "button:right_paddle2") return 1u << 6;
+  return 0;
+}
 
 bool SourceHeld(const PhysicalInput& input, const SourceGates& gates, const Source& source) {
   // An unfocused window plays nothing: the OS gives the keyboard to somebody else and a pad source
@@ -52,6 +64,11 @@ bool SourceHeld(const PhysicalInput& input, const SourceGates& gates, const Sour
       // The physical pad's own state, never the merged one. A `pad:` name is either one of the 16
       // controls or a stick direction; the vocabularies are disjoint, so order cannot matter.
       return profile::remap::PadSourceHeld(input.pad, source.name);
+    case SourceKind::kSdl: {
+      const uint8_t mask = ExtraButtonMask(source.name);
+      return input.pad_connected && mask && (input.extra_available & mask) &&
+             (input.extra_held & mask);
+    }
     case SourceKind::kKey:
       return gates.keyboard && input.KeyDown(source.name);
     case SourceKind::kMouse: {
@@ -102,7 +119,7 @@ bool TableActive(GameplayRouting routing, profile::gameplay_remap::TableKind kin
 }
 
 bool GeneralSourceAllowed(const SourceGates& gates, const bool gameplay, const SourceKind kind) {
-  if (kind == SourceKind::kPad) {
+  if (kind == SourceKind::kPad || kind == SourceKind::kSdl) {
     return false;
   }
   if (kind == SourceKind::kKey && !gates.keyboard) {
@@ -149,6 +166,7 @@ void CollectGameplayConsumed(const PhysicalInput& input, const SourceGates& gate
       for (const Action action : profile::gameplay_remap::Actions()) {
         const Source* held = HeldSource(input, gates, table, action);
         if (held != nullptr && held->kind != SourceKind::kPad &&
+            held->kind != SourceKind::kSdl &&
             std::find(carry->begin(), carry->end(), *held) == carry->end()) {
           carry->push_back(*held);
         }
@@ -191,7 +209,7 @@ uint16_t ControllerOwnedButtons(const Table& table) {
       continue;
     }
     for (const Source& source : *sources) {
-      if (source.kind != SourceKind::kPad) {
+      if (source.kind != SourceKind::kPad && source.kind != SourceKind::kSdl) {
         continue;
       }
       // A stick direction is not a control (src/profile/remap.h): it has no bit, and the

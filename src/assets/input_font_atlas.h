@@ -8,7 +8,7 @@
 
 namespace rb_blitz::assets::input_font_atlas {
 
-// Replace only the 30 spare glyph tiles in the player's original font mip chain. Controller
+// Replace only the spare glyph tiles in the player's original font mip chain. Controller
 // images come from the selected package or the player's original button sheet; host keycaps
 // come from P8. Untouched font BC3 blocks are copied byte for byte.
 bool Compose(const std::vector<uint8_t>& original_font,

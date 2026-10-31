@@ -224,7 +224,13 @@ void TestVocabulary() {
   CHECK_FALSE(ParseSource("wheel:up").has_value());  // a device this build has no reader for
   CHECK_FALSE(ParseSource("mouse:back").has_value());
   CHECK_FALSE(ParseSource("key:").has_value());
-  CHECK_FALSE(ParseSource("key:space bar").has_value());
+  CHECK_STR_EQ(FormatSource(*ParseSource("key:Left Shift")), "key:Left Shift");
+  CHECK_STR_EQ(FormatSource(*ParseSource("key:KP Enter")), "key:KP Enter");
+  CHECK_FALSE(ParseSource("key:Left:Shift").has_value());
+  CHECK_STR_EQ(FormatSource(*ParseSource("sdl:button:misc1")), "sdl:button:misc1");
+  CHECK_STR_EQ(FormatSource(*ParseSource("sdl:button:right_paddle2")),
+               "sdl:button:right_paddle2");
+  CHECK_FALSE(ParseSource("sdl:button:guide").has_value());
 
   // A key name is SDL's and this module deliberately does not link SDL, so any single word is
   // accepted here and resolved by the game. That is why a key a newer build wrote does not make

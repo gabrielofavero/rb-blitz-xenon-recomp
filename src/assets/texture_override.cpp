@@ -62,6 +62,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
  public:
   explicit SchemeOverride(controller_schemes::Registry registry)
       : registry_(std::move(registry)) {}
+  const controller_schemes::Registry* Registry() const { return &registry_; }
   bool Select(const std::string& id) {
     if (id != "retail" && !registry_.Find(id)) return false;
     std::lock_guard lock(pending_mutex_);
@@ -397,6 +398,9 @@ void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> ic
 }
 bool InputIconsAvailable() {
   return g_scheme_provider != nullptr && ui::input_font::OriginalBc3() != nullptr;
+}
+const controller_schemes::Registry* ControllerSchemeRegistry() {
+  return g_scheme_provider ? g_scheme_provider->Registry() : nullptr;
 }
 
 }  // namespace rb_blitz::assets

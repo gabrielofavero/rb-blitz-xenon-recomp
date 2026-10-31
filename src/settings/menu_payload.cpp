@@ -391,8 +391,9 @@ constexpr CreditRow kThanksRows[] = {
     {"Asset Tooling", "MiloLib"},
     {"Button Layouts (Adapted)", "Nicolae (XELU) Berbece, Paul Paun"},
     {"Controller Layouts (Adapted)", "Nicolae (XELU) Berbece, Paul Paun"},
-    {"Controller Layouts (Adapted)", "zacksly (Nintendo Switch 1/2)"},
-    {"Controller Layouts (Adapted)", "Valve Software (Steam Deck)"},
+    {"Nintendo Switch 1/2 Layouts (Adapted)", "zacksly"},
+    {"Steam Deck Layouts (Adapted)", "Valve Software"},
+    {"Meta Quest 1/2 Layouts (Adapted)", "Meta Platforms"},
 };
 
 bool IsArrayWithSymbol(const Node& node, std::string_view symbol) {

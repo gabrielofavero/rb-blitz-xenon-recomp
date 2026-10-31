@@ -58,6 +58,50 @@ int main() {
   Write(one / "extra.txt", "ignored");
   Check(LoadScheme(one, false, FakePng, &scheme, &why) && scheme.extra_files.size() == 1,
         "extra file was not reported");
+  const fs::path art = fs::path(RBBLITZ_SOURCE_DIR) / "assets/controller";
+  const char* authored_ids[] = {"xbox-series", "playstation-4", "playstation-5",
+      "nintendo-switch-joycon", "nintendo-switch-pro-controller",
+      "nintendo-switch-2-joycon", "nintendo-switch-2-pro-controller", "steam-deck"};
+  for (const char* id : authored_ids) {
+    Check(LoadScheme(art / id, false, FakePng, &scheme, &why),
+          "authored v2 controller rejected");
+    Check(scheme.schema_version == 2 && scheme.id == id && scheme.inputs.size() >= 26 &&
+          scheme.InputFor("pad:a") &&
+          (scheme.Pad("xbox_0") != nullptr) ==
+              (std::string(id) != "playstation-4" && std::string(id) != "playstation-5"),
+          "authored v2 lookup wrong");
+    if (std::string(id) == "steam-deck")
+      Check(scheme.InputFor("sdl:button:misc1") &&
+            scheme.InputFor("sdl:button:left_paddle1"), "Deck extra source art missing");
+  }
+  Check(!LoadScheme(art / "keyboard-mouse", true, FakePng, &scheme, &why),
+        "internal keyboard became selectable");
+  Check(LoadInternalKeyboard(art / "keyboard-mouse", FakePng, &scheme, &why),
+        "internal keyboard rejected");
+  Check(scheme.inputs.size() == 92 && scheme.declared_files.size() == 92 &&
+        scheme.InputFor("key:Return") && scheme.InputFor("key:KP Enter") &&
+        scheme.InputFor("mouse:left") && scheme.extra_files.size() == 3 &&
+        scheme.InputFor("key:8", {}, "shift") &&
+        scheme.InputFor("key:8", {}, "shift")->id == "asterisk",
+        "internal keyboard manifest or declared-file audit wrong");
+  const auto v2 = root / "v2";
+  fs::create_directories(v2);
+  Write(v2 / "scheme.toml", "schema_version = 2\nid = \"v2\"\nname = \"V2\"\n"
+      "kind = \"controller\"\n[[input]]\nid = \"a\"\nfile = \"a.png\"\n"
+      "source = \"pad:a\"\nslot = \"a_button\"\n"
+      "[[input]]\nid = \"a-alt\"\nfile = \"alt.png\"\n"
+      "source = \"pad:a\"\nvariant = \"alternate\"\n");
+  Write(v2 / "a.png", "PNG");
+  Write(v2 / "alt.png", "PNG");
+  Check(LoadScheme(v2, false, FakePng, &scheme, &why) &&
+        scheme.declared_files.size() == 2 && scheme.InputFor("pad:a") &&
+        scheme.InputFor("pad:a", "alternate") &&
+        scheme.InputFor("pad:a")->id == "a" &&
+        scheme.InputFor("pad:a", "alternate")->id == "a-alt",
+        "v2 source variant/modifier lookup wrong");
+  Write(v2 / "a.png", "");
+  fs::remove(v2 / "a.png");
+  Check(!LoadScheme(v2, false, FakePng, &scheme, &why), "v2 missing file accepted");
   Check(!LoadScheme(Package(install, "keyboard", "[buttons]\na_button = \"a.png\"\n"),
                     false, FakePng, &scheme, &why), "keyboard package accepted");
   auto pad = Package(install, "pads", "[controller]\nfile = \"pads/shared.png\"\n"
@@ -178,7 +222,7 @@ int main() {
   size_t font_offset = 0;
   for (uint32_t mip = 0; mip < 7; ++mip) {
     const uint32_t dim = 1024 >> mip;
-    const size_t untouched = size_t(768 >> mip) * dim;
+    const size_t untouched = size_t(rb_blitz::ui::input_font::kIconTop >> mip) * dim;
     Check(std::equal(font_chain.begin() + font_offset,
                      font_chain.begin() + font_offset + untouched,
                      font_levels[mip].begin()), "original font blocks changed");
@@ -186,10 +230,29 @@ int main() {
   }
   std::vector<uint8_t> decoded_font(1024 * 1024 * 4);
   rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
-  Check(decoded_font[(size_t(768 + 8) * 1024 + 32) * 4 + 3] > 200,
+  Check(decoded_font[(size_t(rb_blitz::ui::input_font::kIconTop + 8) * 1024 + 32) * 4 + 3] > 200,
         "mapping icon was not drawn in the spare atlas cell");
   Check(decoded_font[(size_t(500) * 1024 + 32) * 4 + 3] == 0,
         "original font area was modified");
+
+  rb_blitz::input::icons::Icon source_image;
+  source_image.art = rb_blitz::input::icons::Art::kPackageImage;
+  source_image.width = source_image.height = 16;
+  source_image.rgba.resize(16 * 16 * 4, 255);
+  for (size_t i = 0; i < source_image.rgba.size(); i += 4) {
+    source_image.rgba[i] = 255;
+    source_image.rgba[i + 1] = 0;
+    source_image.rgba[i + 2] = 0;
+  }
+  Check(rb_blitz::assets::input_font_atlas::Compose(
+      font_chain, blocks, nullptr, {source_image}, &font_levels),
+      "source-keyed image without an atlas slot was rejected");
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
+  const size_t source_pixel =
+      (size_t(rb_blitz::ui::input_font::kIconTop + 40) * 1024 + 34) * 4;
+  Check(decoded_font[source_pixel] > 200 && decoded_font[source_pixel + 1] < 50 &&
+        decoded_font[source_pixel + 2] < 50,
+        "source-keyed image lost its own color in the mapping font");
 
   // The measured font UV rectangle for A ends at y=80, while the installed
   // circle still has antialiased pixels at y=82. Atlas composition needs the
@@ -210,18 +273,19 @@ int main() {
       font_chain, edge_blocks, nullptr, {retail_a}, &font_levels),
       "retail mapping glyph composition failed");
   rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
-  Check(decoded_font[(size_t(768 + 8 + 61) * 1024 + 30) * 4 + 3] > 100,
+  Check(decoded_font[(size_t(rb_blitz::ui::input_font::kIconTop + 8 + 61) * 1024 + 30) * 4 + 3] > 100,
         "retail A lower arc was cropped from the mapping glyph");
 
   // RndFont always samples 79.5 pixels vertically. Adjacent glyph rows must
   // leave that complete window clear above/below the centered 64-pixel image.
-  std::vector<rb_blitz::input::icons::Icon> full_page(30, key_icon);
+  std::vector<rb_blitz::input::icons::Icon> full_page(
+      rb_blitz::ui::input_font::kIconCount, key_icon);
   Check(rb_blitz::assets::input_font_atlas::Compose(
       font_chain, blocks, nullptr, full_page, &font_levels), "full mapping atlas failed");
   rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
-  for (uint32_t i = 0; i < 30; ++i) {
+  for (uint32_t i = 0; i < rb_blitz::ui::input_font::kIconCount; ++i) {
     const uint32_t x = (i % 15) * 68 + 2 + 32;
-    const uint32_t y = 768 + (i / 15) * 128;
+    const uint32_t y = rb_blitz::ui::input_font::kIconTop + (i / 15) * 80;
     auto alpha = [&](uint32_t dy) { return decoded_font[(size_t(y + dy) * 1024 + x) * 4 + 3]; };
     Check(alpha(0) == 0 && alpha(7) == 0 && alpha(72) == 0 && alpha(79) == 0,
           "neighbor icon leaks into the font's fixed-height sampling window");

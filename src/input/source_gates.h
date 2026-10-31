@@ -75,6 +75,9 @@ struct PhysicalInput {
   bool window_focused = false;
   bool pad_connected = false;
   profile::remap::PadState pad;
+  // Distinct SDL controls, in the order named by ExtraButtonMask below.
+  uint8_t extra_available = 0;
+  uint8_t extra_held = 0;
   // `SDL_GetMouseState()`'s mask bits (mouse_button above). Zero while unfocused.
   uint32_t mouse_buttons = 0;
   // The wheel detents seen since the previous poll: positive away from the player (`wheel_up`),
@@ -86,6 +89,7 @@ struct PhysicalInput {
   std::function<bool(std::string_view)> key_down;
   bool KeyDown(std::string_view name) const { return key_down && key_down(name); }
 };
+uint8_t ExtraButtonMask(std::string_view name);
 
 // Whether `source` is physically held, with the source gates applied. A `pad:` source answers
 // from `input.pad` alone (so no synthesized bit can impersonate it); a key from `key_down` while

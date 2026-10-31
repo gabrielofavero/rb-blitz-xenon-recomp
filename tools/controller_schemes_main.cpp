@@ -6,22 +6,39 @@
 
 int main(int argc, char** argv) {
   if (argc != 3 || (std::string(argv[1]) != "--validate" &&
-                    std::string(argv[1]) != "--validate-install")) {
+                    std::string(argv[1]) != "--validate-install" &&
+                    std::string(argv[1]) != "--validate-internal-keyboard" &&
+                    std::string(argv[1]) != "--list-declared" &&
+                    std::string(argv[1]) != "--list-internal-keyboard")) {
     std::cerr << "usage: rb_blitz_controller_schemes "
-                 "--validate|--validate-install <folder>\n";
+                 "--validate|--validate-install|--validate-internal-keyboard|"
+                 "--list-declared|--list-internal-keyboard <folder>\n";
     return 2;
   }
   rb_blitz::controller_schemes::Scheme scheme;
   std::string reason;
   const auto folder = std::filesystem::path(argv[2]);
   const bool trusted = std::string(argv[1]) == "--validate-install";
-  if (!rb_blitz::controller_schemes::LoadScheme(
-          folder, trusted, rb_blitz::controller_schemes::DecodePngWic, &scheme, &reason)) {
+  const bool internal = std::string(argv[1]) == "--validate-internal-keyboard" ||
+                        std::string(argv[1]) == "--list-internal-keyboard";
+  const bool valid = internal ? rb_blitz::controller_schemes::LoadInternalKeyboard(
+      folder, rb_blitz::controller_schemes::DecodePngWic, &scheme, &reason) :
+      rb_blitz::controller_schemes::LoadScheme(
+          folder, trusted, rb_blitz::controller_schemes::DecodePngWic, &scheme, &reason);
+  if (!valid) {
     std::cerr << folder << ": " << reason << '\n';
     return 1;
   }
+  if (std::string(argv[1]) == "--list-declared" ||
+      std::string(argv[1]) == "--list-internal-keyboard") {
+    std::cout << "scheme.toml\n";
+    for (const auto& path : scheme.declared_files)
+      std::cout << path.generic_string() << '\n';
+    return 0;
+  }
   std::cout << folder << ": valid " << scheme.id << " (" << scheme.buttons.size()
-            << " button, " << scheme.pads.size() << " pad slots"
+            << " button, " << scheme.pads.size() << " pad slots, "
+            << scheme.inputs.size() << " source images"
             << (scheme.has_shared_pad ? ", shared pad" : "") << ")\n";
   auto report = [](const std::string& slot, const rb_blitz::controller_schemes::Image& image,
                    uint32_t width, uint32_t height) {

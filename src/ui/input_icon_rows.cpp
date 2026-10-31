@@ -28,19 +28,28 @@ Page Build(const std::vector<std::string>& symbols,
     if (!IsBinding(token.kind)) continue;
     auto ordered = input::icons::Ordered(view, token);
     if (ordered.empty()) ordered.push_back(input::icons::First(view, token));
-    if (page.icons.size() + ordered.size() > input_font::kIconCount) {
-      page.lines = fallback;
-      page.icons.clear();
-      page.overflow = true;
-      return page;
-    }
     // The dedicated alt1 font has its own white material tint. A vertex color
     // tag cannot override the primary font's black hover material multiplier.
     std::string line = profile::BindingRowLabel(token) + ": <alt1>";
     for (const auto& icon : ordered) {
       if (line.back() != '>') line += ' ';
-      AppendGlyph(&line, input_font::GlyphCode(static_cast<uint32_t>(page.icons.size())));
-      page.icons.push_back(icon);
+      size_t index = 0;
+      for (; index < page.icons.size(); ++index) {
+        const auto& existing = page.icons[index];
+        if (existing.source.kind == icon.source.kind &&
+            existing.source.name == icon.source.name && existing.art == icon.art &&
+            existing.slot == icon.slot && existing.scheme == icon.scheme) break;
+      }
+      if (index == page.icons.size()) {
+        if (index == input_font::kIconCount) {
+          page.lines = fallback;
+          page.icons.clear();
+          page.overflow = true;
+          return page;
+        }
+        page.icons.push_back(icon);
+      }
+      AppendGlyph(&line, input_font::GlyphCode(static_cast<uint32_t>(index)));
     }
     line += "</alt1>";
     page.lines[row] = std::move(line);

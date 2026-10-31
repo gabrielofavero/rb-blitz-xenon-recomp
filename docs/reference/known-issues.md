@@ -20,6 +20,28 @@ guest remap-aware hint drawing remains P10 work. The mapping rows remain P9.
 See the
 [button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P4.
 
+**V2 controller art and extra SDL inputs (2026-10-30):** the loader accepts the
+eight authored controller layouts and the 92-image internal keyboard catalog;
+declared-file staging and a D3D12 scratch boot pass. A virtual SDL pad proves
+`misc1` and a paddle are distinct from the old XInput aliases, and host tests
+cover capture/release and unavailable buttons. Physical-device mappings and v2 source images
+in the live mapping rows remain unmeasured. The owner has confirmed ordinary controller,
+keyboard and mouse images on Interface Mapping and Gameplay Notes, but the tool session cannot
+foreground the game for capture. See the
+[button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P11.
+
+**Mapping image list limits (2026-10-30):** the copied guest font supports 45 distinct
+source images per mapping page, and repeated sources share a tile. At 46 distinct sources,
+the page retains the complete textual binding list. The source-keyed v2 image path and atlas
+capacity pass host tests. An owner screenshot confirms that an eight-input Confirm row fits
+without clipping; the in-song page and image display beyond 45 sources have no explicit live
+acceptance. Owner screenshots exposed generic Start/Back keycaps
+on Music Library Options; the release build now uses the bundled Xbox Series images for those
+missing retail cells and distinct symbols for default media keys; the owner confirmed those
+replacement visuals passed on 2026-10-31.
+The tool session can boot the game but cannot foreground its window for a capture. See the
+[button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P9.
+
 **Load Guard coverage limits (2026-10-26):** the debugger
 located a signed 16-bit event-count overflow on the custom MIDI's optional
 LIPSYNC1 track. The host now rejects LIPSYNC1–4 through the title's own MIDI

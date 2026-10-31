@@ -95,10 +95,12 @@ std::unique_ptr<rex::system::IInputSystem> CreateTitleInputSystem(bool tool_mode
   return input;
 }
 
-bool SamplePhysicalPad(rex::input::X_INPUT_STATE* out_state, bool for_host_ui) {
+bool SamplePhysicalPad(rex::input::X_INPUT_STATE* out_state, bool for_host_ui,
+                       ExtraButtons* extras) {
   if (out_state) {
     *out_state = {};
   }
+  if (extras) *extras = {};
   std::vector<rex::input::InputDriver*> drivers;
   {
     std::lock_guard lock(g_drivers_mutex);
@@ -120,6 +122,15 @@ bool SamplePhysicalPad(rex::input::X_INPUT_STATE* out_state, bool for_host_ui) {
                                       : driver->GetDeviceState(info.id, &state);
       if (result != X_ERROR_SUCCESS) {
         continue;
+      }
+      if (extras) {
+        if (auto* sdl = dynamic_cast<rex::input::sdl::SDLInputDriver*>(driver)) {
+          uint8_t available = 0, held = 0;
+          if (sdl->GetExtraButtonState(info.id, &available, &held)) {
+            extras->available |= available;
+            extras->held |= held;
+          }
+        }
       }
       if (!any) {
         merged = state;

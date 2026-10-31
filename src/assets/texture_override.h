@@ -21,5 +21,6 @@ bool SelectControllerScheme(const std::string& id);
 // receives matching character codes; the GPU thread consumes this immutable batch in Poll().
 void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons);
 bool InputIconsAvailable();
+const controller_schemes::Registry* ControllerSchemeRegistry();
 
 }  // namespace rb_blitz::assets

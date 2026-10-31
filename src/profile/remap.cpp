@@ -106,6 +106,7 @@ std::optional<SourceKind> KindForPrefix(std::string_view prefix) {
   if (prefix == "mouse") {
     return SourceKind::kMouse;
   }
+  if (prefix == "sdl") return SourceKind::kSdl;
   return std::nullopt;
 }
 
@@ -117,6 +118,8 @@ std::string_view PrefixForKind(SourceKind kind) {
       return "key";
     case SourceKind::kMouse:
       return "mouse";
+    case SourceKind::kSdl:
+      return "sdl";
   }
   return "pad";
 }
@@ -125,16 +128,22 @@ bool IsKnownMouseName(std::string_view name) {
   return name == "left" || name == "right" || name == "middle" || name == "x1" ||
          name == "x2" || IsMouseWheelSource(name);
 }
+bool IsKnownExtraName(std::string_view name) {
+  return name == "button:misc1" || name == "button:misc2" ||
+      name == "button:touchpad" || name == "button:left_paddle1" ||
+      name == "button:left_paddle2" || name == "button:right_paddle1" ||
+      name == "button:right_paddle2";
+}
 
 // A key name is SDL's, which this module deliberately does not link: Controller Settings gets one from
 // SDL when it captures a key and the game resolves it back, so all this has to check is that it
 // could be a name at all. A name nothing resolves to simply never fires.
 bool IsPlausibleSourceName(std::string_view name) {
-  if (name.empty() || name.size() > 32) {
+  if (name.empty() || name.size() > 32 || name.front() == ' ' || name.back() == ' ') {
     return false;
   }
   return std::none_of(name.begin(), name.end(), [](char c) {
-    return c == ',' || c == ' ' || c == '\t' || c == ':';
+    return c == ',' || c == '\t' || c == ':' || static_cast<unsigned char>(c) < 0x20;
   });
 }
 
@@ -180,6 +189,9 @@ std::optional<Source> ParseOneSource(std::string_view text) {
       if (!IsPlausibleSourceName(name)) {
         return std::nullopt;
       }
+      break;
+    case SourceKind::kSdl:
+      if (!IsKnownExtraName(name)) return std::nullopt;
       break;
   }
   return Source{*kind, name};
@@ -510,6 +522,7 @@ void Apply(const Table& table, const PadState& state, DownFn down, void* context
         }
         case SourceKind::kKey:
         case SourceKind::kMouse:
+        case SourceKind::kSdl:
           this_one = down != nullptr && down(context, source);
           break;
       }

@@ -30,6 +30,11 @@
 
 namespace rb_blitz::input {
 
+struct ExtraButtons {
+  uint8_t available = 0;
+  uint8_t held = 0;
+};
+
 // The SDK's default drivers with the two changes above. Tool mode installs the NOP driver only,
 // exactly like the SDK's own default.
 std::unique_ptr<rex::system::IInputSystem> CreateTitleInputSystem(bool tool_mode);
@@ -41,6 +46,7 @@ std::unique_ptr<rex::system::IInputSystem> CreateTitleInputSystem(bool tool_mode
 // which are cheap.
 // for_host_ui bypasses the guest suppression while a host dialog captures input.
 // Gameplay callers leave it false; host dialogs still check actual window focus.
-bool SamplePhysicalPad(rex::input::X_INPUT_STATE* out_state, bool for_host_ui = false);
+bool SamplePhysicalPad(rex::input::X_INPUT_STATE* out_state, bool for_host_ui = false,
+                       ExtraButtons* extras = nullptr);
 
 }  // namespace rb_blitz::input

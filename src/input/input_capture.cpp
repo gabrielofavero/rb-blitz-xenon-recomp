@@ -31,6 +31,7 @@ struct Session {
   std::chrono::steady_clock::time_point counting_since{};
   bool have_previous = false;
   PadState previous_pad;
+  uint8_t previous_extra = 0;
   uint32_t previous_mouse = 0;
 };
 
@@ -73,7 +74,8 @@ bool PadAnyHeld(const PadState& pad) {
 // then the keys. A direction and the stick's own synthesized button are different sources on the
 // wire (the button does not exist on a physical pad's report here), so no dedupe is needed
 // between them; a trigger is skipped in the button pass because it has no bit.
-std::vector<Source> Presses(const Observation& now, const PadState& before, const uint32_t mouse_before,
+std::vector<Source> Presses(const Observation& now, const PadState& before,
+                            const uint8_t extra_before, const uint32_t mouse_before,
                             const std::vector<std::string>& keys) {
   std::vector<Source> out;
   for (const profile::remap::Target target : profile::remap::Targets()) {
@@ -93,6 +95,14 @@ std::vector<Source> Presses(const Observation& now, const PadState& before, cons
         !profile::remap::DirectionPressed(before, direction)) {
       out.push_back({SourceKind::kPad, std::string(profile::remap::PadDirectionName(direction))});
     }
+  }
+  static constexpr const char* extra_names[] = {
+      "button:misc1", "button:misc2", "button:touchpad", "button:left_paddle1",
+      "button:left_paddle2", "button:right_paddle1", "button:right_paddle2"};
+  for (uint8_t i = 0; i < 7; ++i) {
+    const uint8_t bit = uint8_t(1u << i);
+    if ((now.extra_available & bit) && (now.extra_held & bit) && !(extra_before & bit))
+      out.push_back({SourceKind::kSdl, extra_names[i]});
   }
   struct MouseName {
     uint32_t mask;
@@ -133,6 +143,7 @@ bool Allowed(const std::vector<SourceKind>& allowed, const SourceKind kind) {
 const char* KindName(const SourceKind kind) {
   switch (kind) {
     case SourceKind::kPad: return "a pad control";
+    case SourceKind::kSdl: return "an extra controller button";
     case SourceKind::kKey: return "a keyboard key";
     case SourceKind::kMouse: return "a mouse button";
   }
@@ -160,6 +171,7 @@ void Arm(const CaptureTarget& target) {
   session.counting_since = std::chrono::steady_clock::now();
   session.have_previous = false;
   session.previous_pad = {};
+  session.previous_extra = 0;
   session.previous_mouse = 0;
 }
 
@@ -194,15 +206,18 @@ Tick Observe(const Observation& observation) {
 
   const PadState before = session.have_previous ? session.previous_pad : PadState{};
   const uint32_t mouse_before = session.have_previous ? session.previous_mouse : 0;
-  const std::vector<Source> presses = Presses(observation, before, mouse_before,
+  const uint8_t extra_before = session.have_previous ? session.previous_extra : 0;
+  const std::vector<Source> presses = Presses(observation, before, extra_before, mouse_before,
                                               session.have_previous ? observation.new_keys
                                                                     : std::vector<std::string>{});
   session.previous_pad = observation.pad;
+  session.previous_extra = observation.extra_held & observation.extra_available;
   session.previous_mouse = observation.mouse_buttons;
   session.have_previous = true;
 
   const bool any_held = observation.any_key_down || observation.mouse_buttons != 0 ||
-                        PadAnyHeld(observation.pad);
+                        PadAnyHeld(observation.pad) ||
+                        (observation.extra_held & observation.extra_available) != 0;
   if (session.waiting_neutral) {
     if (any_held) {
       return tick;
@@ -273,7 +288,7 @@ void PostStatusMessage(std::string message) {
 std::string AllowedKindText(const std::vector<SourceKind>& allowed) {
   bool pad = false, key = false, mouse = false;
   for (const SourceKind kind : allowed) {
-    pad = pad || kind == SourceKind::kPad;
+    pad = pad || kind == SourceKind::kPad || kind == SourceKind::kSdl;
     key = key || kind == SourceKind::kKey;
     mouse = mouse || kind == SourceKind::kMouse;
   }

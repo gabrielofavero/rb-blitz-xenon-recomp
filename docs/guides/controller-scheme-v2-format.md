@@ -1,8 +1,8 @@
-# Controller scheme v2 format (proposed)
+# Controller scheme v2 format
 
-Each non-template art folder has a `scheme.toml`. This is an authoring contract
-for the later runtime implementation. The current version 1 loader rejects these
-manifests; the art folders are not installed as schemes today. Each layout's
+Each non-template art folder has a `scheme.toml`. The runtime and validator accept
+these manifests alongside version 1 user packages. The build stages the eight
+controller folders and the internal keyboard art. Each layout's
 editable `pad.svg` and source `pad.png` live under
 `assets/controller/masters/<layout-id>/` and are not listed in any manifest.
 
@@ -14,13 +14,13 @@ kind = "controller"            # or "keyboard-mouse"
 
 [[input]]
 id = "a_button"               # stable art ID; unique within this layout
-file = "buttons/1 - A.png"    # relative RGBA PNG
+file = "buttons/a_button.png" # relative RGBA PNG
 source = "pad:a"               # normalized Xbox-position source for Gameplay Mapping
 slot = "a_button"             # optional legacy atlas destination
 
 [[input]]
 id = "share"
-file = "buttons/C1 - Share.png"
+file = "buttons/share.png"
 source = "sdl:button:misc1"    # SDL's distinct Share button source
 ```
 
@@ -68,8 +68,9 @@ one image entry (different shapes or legends); the entry without `variant` or
 `modifiers`, when present, is the default. `variant` distinguishes alternate
 art without pretending it is a new physical input. `modifiers = ["shift"]`
 means that the glyph represents a
-shifted key legend; the source remains the key's physical scancode. A future
-resolver can select a variant or modifier-specific legend explicitly. All
+shifted key legend; the source remains the key's physical scancode. The current
+  resolver chooses the unmodified, variant-free entry by default; callers can
+  request a variant or the `shift` modifier explicitly. All
 keyboard and mouse entries are custom: no controller-to-keyboard translation or
 Xbox atlas slot is implied.
 
@@ -86,16 +87,14 @@ its name does not determine the physical source.
 The new `sdl:button:*` values name normalized SDL gamepad buttons that the XInput
 guest packet cannot represent independently: `misc1`, `misc2`, `touchpad`, and the four
 `left_paddle1`, `left_paddle2`, `right_paddle1`, `right_paddle2` buttons. The
-future sampler must capture them before the SDK folds some into ordinary XInput
-bits, and the binding parser, capture UI, persistence, and icon resolver must
-accept them. The existing [SDK SDL driver](../../rexglue-sdk/src/input/sdl/sdl_input_driver.cpp)
-folds `misc1` into Guide and paddles into face buttons, and ignores `misc2`;
-it therefore does not yet deliver the distinct sources these manifests name.
+sampler captures them before any XInput projection. The
+[SDK SDL driver](../../rexglue-sdk/src/input/sdl/sdl_input_driver.cpp)
+keeps them separate from guest XInput bits, while the binding parser, capture UI,
+persistence, and icon resolver accept the distinct source names.
 SDL's [button enum](https://wiki.libsdl.org/SDL3/SDL_GamepadButton) establishes
 the common meanings, while the [device mapping database](https://github.com/libsdl-org/SDL/blob/main/src/joystick/SDL_gamepad_db.h)
-shows that availability varies by device, OS, and driver. The runtime should
-check the connected device's mapping and button availability, then use input
-capture to confirm the actual source. A manifest is an expected SDL mapping,
+shows that availability varies by device, OS, and driver. The runtime checks
+the connected device's mapping and button availability before capture. A manifest is an expected SDL mapping,
 not a promise that every connection path exposes that button.
 
 For PlayStation, the Share/Create button is the Xbox Back equivalent in the
@@ -117,18 +116,17 @@ the Deck has Menu and View buttons, already represented by `pad:start` and
 
 Keyboard `key:` names follow SDL scancode names, and `mouse:` names use the
 current mouse source grammar. The v2 binding parser must accept SDL names with
-spaces, such as `key:Left Shift` and `key:KP Enter`; the current parser rejects
-these even though the key sampler can resolve them. Shifted
+spaces, such as `key:Left Shift` and `key:KP Enter`. Shifted
 punctuation entries use the underlying scancode plus `modifiers`. Decorative
 whole-mouse art and OS-reserved keys/buttons are omitted. Guide, Home, Steam,
 and Power are not exposed for gameplay remapping. Their PNGs can remain in the
-art folder for future work, but a v2 packer should copy **declared files only**
-and should raise its version 1 limit of 64 files for the keyboard folder's 92
-declared images (95 PNGs on disk).
+art folder for future work. The packer copies **declared files only**. Version 1
+keeps its 64-file limit; version 2 accepts up to 128 declared images, including
+the keyboard folder's 92 images (95 PNGs on disk).
 
-The later loader should validate unique IDs, known source grammar, safe relative
+The loader validates unique IDs, known source grammar, safe relative
 PNG paths, each file's existence and format, and the explicit schema version.
-It should reject ambiguous duplicate defaults for one source unless a `variant`
+It rejects ambiguous duplicate defaults for one source unless a `variant`
 or `modifiers` value distinguishes them. Version 1 packages remain a separate
 accepted format for users who only replace legacy atlas slots. Controller v2
 packages may be installed by users; the `keyboard-mouse` id and kind are reserved

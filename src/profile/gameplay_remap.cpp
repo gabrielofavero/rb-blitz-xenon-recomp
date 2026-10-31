@@ -180,6 +180,9 @@ std::string WrongKindReason(TableKind kind, const remap::Source& source) {
     case remap::SourceKind::kPad:
       found = "a pad control";
       break;
+    case remap::SourceKind::kSdl:
+      found = "an extra controller button";
+      break;
     case remap::SourceKind::kKey:
       found = "a key";
       break;
@@ -259,7 +262,8 @@ std::optional<TableKind> ParseTableKindSection(std::string_view section) {
 
 bool AcceptsSourceKind(TableKind kind, remap::SourceKind source_kind) {
   if (kind == TableKind::kController) {
-    return source_kind == remap::SourceKind::kPad;
+    return source_kind == remap::SourceKind::kPad ||
+           source_kind == remap::SourceKind::kSdl;
   }
   return source_kind == remap::SourceKind::kKey || source_kind == remap::SourceKind::kMouse;
 }

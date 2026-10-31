@@ -100,7 +100,7 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
   if (!DecodeStream(source, &bytes, error)) return false;
 
   // Four fixed-width Font Glyph arrays share one 1024-square atlas. Locate them by their
-  // contiguous ASCII records rather than a compressed-file offset, then guard all 30 spare
+  // contiguous ASCII records rather than a compressed-file offset, then guard all 45 spare
   // records before writing. This also refuses a changed retail font instead of guessing.
   std::vector<size_t> tables;
   for (size_t at = 32 * 18 + 4; at + (256 - 32) * 18 <= bytes.size(); ++at) {
@@ -152,7 +152,7 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
   }
 
   // A single stored chunk is valid Milo and avoids a second compressor. It contains only the
-  // player's source bytes plus the 30 empty glyph entries above, and lives in the generated ark.
+  // player's source bytes plus the 45 empty glyph entries above, and lives in the generated ark.
   if (!PackStored(bytes, scene, error)) return false;
   g_original_bc3.store(std::make_shared<const std::vector<uint8_t>>(*original_bc3));
   if (error) error->clear();

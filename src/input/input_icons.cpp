@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdlib>
 #include <utility>
 
 namespace rb_blitz::input::icons {
@@ -44,17 +45,46 @@ void Pixel(Icon* icon, int x, int y, uint8_t r, uint8_t g, uint8_t b) {
 }
 
 void DrawKeycap(Icon* icon) {
+  const bool media_next = icon->source.kind == SourceKind::kKey &&
+      icon->source.name == "MediaTrackNext";
+  const bool media_previous = icon->source.kind == SourceKind::kKey &&
+      icon->source.name == "MediaTrackPrevious";
+  const bool media_play_pause = icon->source.kind == SourceKind::kKey &&
+      icon->source.name == "MediaPlayPause";
+  const bool media = media_next || media_previous || media_play_pause;
   std::string legend = icon->legend;
   std::transform(legend.begin(), legend.end(), legend.begin(), [](unsigned char c) {
     return static_cast<char>(std::toupper(c));
   });
-  icon->width = static_cast<uint32_t>(std::max<size_t>(48, legend.size() * 6 + 14));
+  icon->width = media ? 48 :
+      static_cast<uint32_t>(std::max<size_t>(48, legend.size() * 6 + 14));
   icon->height = 25;
   icon->rgba.assign(static_cast<size_t>(icon->width) * icon->height * 4, 0);
   for (int y = 0; y < 25; ++y) for (int x = 0; x < static_cast<int>(icon->width); ++x) {
     if ((x < 3 || x >= static_cast<int>(icon->width) - 3) && (y < 3 || y >= 22)) continue;
     const bool edge = x < 2 || x >= static_cast<int>(icon->width) - 2 || y < 2 || y >= 23;
     Pixel(icon, x, y, edge ? 225 : 40, edge ? 230 : 45, edge ? 239 : 56);
+  }
+  if (media) {
+    auto triangle = [&](int left, bool right) {
+      for (int y = 0; y < 11; ++y)
+        for (int x = 0; x <= 5 - std::abs(y - 5); ++x)
+          Pixel(icon, right ? left + x : left - x, 7 + y, 244, 246, 250);
+    };
+    if (media_next || media_previous) {
+      const bool right = media_next;
+      triangle(right ? 15 : 32, right);
+      triangle(right ? 23 : 24, right);
+      for (int y = 7; y <= 17; ++y)
+        for (int x = 0; x < 2; ++x)
+          Pixel(icon, (right ? 32 : 14) + x, y, 244, 246, 250);
+    } else {
+      triangle(15, true);
+      for (int y = 7; y <= 17; ++y)
+        for (int x : {29, 30, 34, 35})
+          Pixel(icon, x, y, 244, 246, 250);
+    }
+    return;
   }
   const int left = (static_cast<int>(icon->width) - static_cast<int>(legend.size()) * 6 + 1) / 2;
   for (size_t i = 0; i < legend.size(); ++i) {
@@ -121,6 +151,7 @@ Icon FirstOf(const View& view, const std::vector<Icon>& all) {
   const SourceKind wanted = view.active_family == Family::kController ? SourceKind::kPad : SourceKind::kKey;
   for (const Icon& icon : all) {
     if (icon.source.kind == wanted ||
+        (view.active_family == Family::kController && icon.source.kind == SourceKind::kSdl) ||
         (view.active_family == Family::kKeyboardMouse && icon.source.kind == SourceKind::kMouse))
       return icon;
   }
@@ -147,6 +178,15 @@ Icon Resolve(const Source& source, std::string_view controller_scheme,
   Icon icon;
   icon.source = source;
   icon.legend = profile::SourceDisplayName(source);
+  auto package_image = [&](const controller_schemes::InputImage* entry) {
+    if (!entry) return false;
+    icon.art = Art::kPackageImage;
+    icon.slot = entry->slot;
+    icon.width = entry->image.width;
+    icon.height = entry->image.height;
+    icon.rgba = entry->image.rgba;
+    return true;
+  };
   if (source.kind == SourceKind::kPad) {
     icon.scheme = controller_scheme.empty() ? "retail" : std::string(controller_scheme);
     if (!profile::remap::ParseTarget(source.name) &&
@@ -157,10 +197,22 @@ Icon Resolve(const Source& source, std::string_view controller_scheme,
       DrawKeycap(&icon);
       return icon;
     }
+    if (registry && icon.scheme != "retail") {
+      if (const auto* scheme = registry->Find(icon.scheme);
+          scheme && scheme->schema_version == 2 &&
+          package_image(scheme->InputFor("pad:" + source.name))) return icon;
+    }
     icon.slot = Slot(source.name);
-    // The sheet has no Start/Back or stick-direction glyphs. Render a distinct built-in
-    // pictogram until those physical sources get an authored slot in a future asset format.
+    // The retail sheet has no Start/Back cells. The bundled Xbox layout supplies
+    // source-specific images for those two controls while retail keeps its own art
+    // for every slot it does have.
     icon.art = icon.slot.empty() ? Art::kBuiltIn : Art::kSchemeSlot;
+    if (icon.art == Art::kBuiltIn && registry && icon.scheme == "retail" &&
+        (source.name == "start" || source.name == "back")) {
+      if (const auto* xbox = registry->Find("xbox-series");
+          xbox && xbox->schema_version == 2 &&
+          package_image(xbox->InputFor("pad:" + source.name))) return icon;
+    }
     if (icon.art == Art::kBuiltIn) DrawKeycap(&icon);
     if (icon.art == Art::kSchemeSlot && registry && icon.scheme != "retail") {
       const auto scheme = registry->schemes.find(icon.scheme);
@@ -174,7 +226,24 @@ Icon Resolve(const Source& source, std::string_view controller_scheme,
         icon.rgba = image->second.rgba;
       }
     }
+  } else if (source.kind == SourceKind::kSdl) {
+    icon.scheme = controller_scheme.empty() ? "retail" : std::string(controller_scheme);
+    if (!profile::remap::ParseSource("sdl:" + source.name)) {
+      icon.art = Art::kUnsupported;
+      icon.legend = "?";
+      icon.diagnostic = "unsupported SDL controller source: " + source.name;
+    } else if (registry && icon.scheme != "retail" &&
+               package_image(registry->Find(icon.scheme) ?
+                   registry->Find(icon.scheme)->InputFor("sdl:" + source.name) : nullptr)) {
+      return icon;
+    } else {
+      icon.art = Art::kUnsupported;
+      icon.diagnostic = "no image for distinct SDL controller source";
+    }
+    DrawKeycap(&icon);
   } else if (source.kind == SourceKind::kMouse) {
+    if (registry && registry->has_keyboard_mouse &&
+        package_image(registry->keyboard_mouse.InputFor("mouse:" + source.name))) return icon;
     if (!profile::remap::ParseSource("mouse:" + source.name)) {
       icon.art = Art::kUnsupported;
       icon.legend = "?";
@@ -188,6 +257,8 @@ Icon Resolve(const Source& source, std::string_view controller_scheme,
     }
     DrawKeycap(&icon);
   } else {
+    if (registry && registry->has_keyboard_mouse &&
+        package_image(registry->keyboard_mouse.InputFor("key:" + source.name))) return icon;
     if (!profile::remap::ParseSource("key:" + source.name)) {
       icon.art = Art::kUnsupported;
       icon.legend = "?";

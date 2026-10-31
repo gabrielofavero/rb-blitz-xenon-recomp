@@ -299,9 +299,9 @@ bool InputStore::Accepts(const InputRowToken& token, const SourceKind kind) cons
   switch (token.kind) {
     case InputRowKind::kMusicBinding: return kind == SourceKind::kPad || kind == SourceKind::kKey;
     case InputRowKind::kGeneralBinding:
-      return true;
+      return kind != SourceKind::kSdl;
     case InputRowKind::kControllerBinding:
-      return kind == SourceKind::kPad;
+      return kind == SourceKind::kPad || kind == SourceKind::kSdl;
     case InputRowKind::kKeyboardMouseBinding:
       return kind == SourceKind::kKey || kind == SourceKind::kMouse;
     default:
@@ -578,7 +578,7 @@ bool InputStore::BeginCapture(const std::string_view token, std::string* error) 
       target.allowed = {SourceKind::kPad, SourceKind::kKey, SourceKind::kMouse};
       break;
     case InputRowKind::kControllerBinding:
-      target.allowed = {SourceKind::kPad};
+      target.allowed = {SourceKind::kPad, SourceKind::kSdl};
       break;
     case InputRowKind::kKeyboardMouseBinding:
       target.allowed = {SourceKind::kPad, SourceKind::kKey, SourceKind::kMouse};

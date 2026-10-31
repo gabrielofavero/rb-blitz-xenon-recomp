@@ -4,9 +4,13 @@
 2026-10-26; P1, P2 and P3 delivered 2026-10-27; P6a and P8 delivered 2026-10-28.
 P4's tracker, D3D12 family switching and selected-pad-art stability were
 accepted 2026-10-28; visible binding-aware hints remain P10 work.
-P5, P6b, P7, P9–P11 remain open. P9's ordinary Interface and Gameplay Mapping
-images and binding refresh have owner visual acceptance; in-song rendering and
-lists exceeding 30 icons remain open.** The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
+P5, P6b, P7, P9 and P10 remain open. P11's v2 loader, staging, internal keyboard
+art and distinct SDL source path landed 2026-10-30; physical-device/UI acceptance
+remains open. P9's ordinary Interface and Gameplay Mapping
+images and binding refresh have owner visual acceptance. The atlas now holds 45 distinct
+images and reuses tiles for repeated sources. An eight-input Confirm row has owner visual
+acceptance; explicit in-song rendering and bindings beyond atlas capacity remain open.**
+The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
 
@@ -39,9 +43,9 @@ whole-texture override remain valid evidence and infrastructure.
 **2026-10-29 authored-art revision.** Eight controller art folders and one
 `keyboard-mouse/` folder now sit directly under `assets/controller/`, each with a proposed
 `schema_version = 2` manifest. Their PNGs are present; their editable pad SVGs live in
-`assets/controller/masters/` as authoring sources, not package inputs. The v1
-loader, validator, packer, source parser, input sampler and
-icon resolver do **not** consume these manifests yet. P11 implements that bridge while keeping
+`assets/controller/masters/` as authoring sources, not package inputs. P11 now makes the
+loader, validator, packer, source parser, input sampler and icon resolver consume these
+manifests while keeping
 v1 user packages and the P5 PS3 import working. The keyboard folder supplies *internal* custom
 key/mouse art, never a selectable or user-installed controller scheme. P6b no longer waits for
 five missing art folders or pad PNGs; it integrates the eight actual controller folders after
@@ -50,8 +54,8 @@ P11, then checks the final UI and art. Historical P0–P8 evidence remains evide
 | Remaining prompt | Current state | Next exit condition |
 | --- | --- | --- |
 | P5 | PS3 source bounds/reference delivered; installer import open | Local v1 `ps3` import works or its unavailable route is reported accurately |
-| P11 | Nine v2 manifests and PNGs present; runtime rejects v2 | V1/v2 coexist, internal keyboard art loads, distinct available SDL sources capture |
-| P9 | Ordinary mapping rows visually accepted; overflow and in-song open | Long lists and in-song render correctly with v2 source images |
+| P11 | V1/v2 coexist; nine manifests validate and stage; virtual SDL extras pass, boot lists eight controllers | Physical-device mapping/capture and on-screen image acceptance |
+| P9 | Ordinary rows and an eight-input Confirm row accepted; source-keyed atlas path and 45 distinct tiles host-tested; in-song and above-capacity lists open | In-song and above-capacity lists render correctly with v2 source images |
 | P10 | Guest hint inventory and remap-aware routes open | Actionable hints follow effective bindings and active family with v2 art |
 | P6b | Eight controller art folders present; six declare pad PNGs | Install/cycle all eight, verify art and fallback, record live acceptance |
 | P7 | Documentation and closeout open | Audit, document P5 outcome, then move this plan to `finished/` |
@@ -742,9 +746,10 @@ graph TD
   P6b --> P7[P7 docs + close]
 ```
 
-> **The authored button PNGs are present; their v2 runtime support is the blocker.** P11 consumes
+> **The authored button PNGs load through v2.** P11 consumes
 > the eight controller manifests and the internal keyboard manifest, preserves v1 packages, and
-> exposes only physically reported extra SDL controls. P6b starts after P11/P9/P10 and accepts
+> exposes only physically reported extra SDL controls. Its remaining gate is physical-device
+> and on-screen acceptance. P6b starts after P11/P9/P10 and accepts
 > button-only layouts with the eight original pad slots still in place. P5's locally generated
 > PS3 scheme remains a parallel v1 installer task and is not a prerequisite for testing the eight
 > authored layouts; its outcome must be recorded before closing P7.
@@ -1416,6 +1421,43 @@ pressed extra SDL button must produce its own image only if the connected device
 source. Existing v1 packages and unsupported-source neutral icons remain valid. The unresolved
 long-list and in-song checks stay open; neither is satisfied by installing more art.
 
+**2026-10-30 P9 follow-up.** The final atlas composer now uses a v2 image's own RGBA pixels even
+when it has no legacy slot, covering internal keyboard art and distinct SDL source images.
+The dedicated icon-font copy uses 45 verified empty glyph records in three rows of the existing
+spare atlas band; icon size, tint style and the original font's BC3 blocks are unchanged. Repeated
+physical sources on one page share a tile. The release build and `button_scheme`,
+`input_bindings`, `menu_payload`, and `settings_screen` tests pass, including the 45-tile boundary,
+source-keyed composition, and fallback to complete text at 46 distinct tiles. A D3D12 scratch
+boot under `out/button-schemes/p9/scratch/` matched the Pentatonic font and reached a menu frame.
+The tool session could not foreground the game window for capture or navigation. In-song images,
+horizontal fit of long rows and image display above 45 distinct sources are still unproven; P9
+remains open.
+
+**2026-10-31 host follow-up.** A mixed v2 row test now resolves two distinct SDL extra buttons,
+an internal keyboard key and a mouse button through the same source-keyed icon path and verifies
+their saved order, separate RGBA images and guest glyph sequence. The release build and all four
+focused tests pass. The guest `UILabel` exposes wrap and height properties, but this mapping
+screen's `UIList` still assigns fixed row positions and dispatches actions by those positions;
+changing the label's fit mode alone does not establish a readable continuation for an unbounded
+binding list. Keep the accepted ordinary row styling until a guest list layout with navigable
+continuations is measured. The owner cannot run the requested live check now, and this tool
+session has no capturable game window, so the in-song and long-list visual acceptance is pending.
+
+**2026-10-31 owner screenshots.** Confirm, Go Back and the Gameplay Notes rows display their
+ordered images, including bound keyboard and mouse inputs. Music Library Options still showed
+generic `START` and `BACK` keycaps for Search and Sort because retail's button sheet has no
+cells for those sources. Its default media keys also resolve to text keycaps in the host code.
+The icon resolver now takes the bundled Xbox Series v2 Start/Back images for those two missing
+retail cells and draws compact, distinct next/previous/play-pause symbols on the default media
+keycaps. Source-selection and image tests, the release build, and the four focused host suites
+pass. After restarting the new build, the owner confirmed the replacement visuals passed on
+2026-10-31. Long-list fit and explicit in-song acceptance remain open.
+
+**2026-10-31 long-row visual check.** The owner added more bindings to Confirm and supplied a
+screenshot with eight source images (A, Enter, A, X, Y, RB, RT, LT) visible in saved order, all
+within the guest list row. That tested long row does not clip. The separate 46-distinct-source
+atlas fallback and explicit paused-song check remain open.
+
 **Goal.** Both mapping surfaces show actual bound button/key/mouse images next to their action
 labels, replacing textual binding lists.
 
@@ -1479,12 +1521,26 @@ known actionable hint still shows stale/default bindings.
 
 ### P11 — V2 authored manifests and distinct physical-source support
 
-**Status (2026-10-29): proposed manifests and art exist; implementation and live source checks
-are open.** Read [`docs/guides/controller-scheme-v2-format.md`](../../guides/controller-scheme-v2-format.md) and
-all nine non-template `scheme.toml` files before coding. The current runtime accepts v1 only,
-limits packages to 64 files, draws built-in keycaps, and samples an XInput-shaped pad state that
-cannot distinguish the extra SDL buttons. This prompt is a prerequisite for final P9/P10/P6b
-acceptance, not a claim that those earlier prompts were undone.
+**Status (2026-10-30): loader, packer, source sampling and host tests landed; physical-device
+capture and on-screen acceptance remain open.** The pre-implementation read was
+[`docs/guides/controller-scheme-v2-format.md`](../../guides/controller-scheme-v2-format.md)
+and all nine non-template `scheme.toml` files. The prior runtime accepted v1 only,
+limited packages to 64 files, drew built-in keycaps, and sampled an XInput-shaped pad state
+that could not distinguish extra SDL buttons. This prompt remains a prerequisite for final
+P9/P10/P6b acceptance.
+
+**Implementation evidence (2026-10-30).** `rb_blitz_controller_schemes` validated all nine
+authored manifests. The release build staged eight controller ids under `schemes/` and 92 declared
+keyboard PNGs under `keyboard-mouse/`; the installer include generator emitted 93 keyboard
+files including its manifest and 31–38 files per controller. Undeclared PNGs and pad SVG
+masters were excluded. Host tests passed for v1 and v2 coexistence, source-keyed art,
+multi-word SDL key names, capture/release, availability gating, and the virtual SDL
+`misc1`/paddle folding boundary. The D3D12 scratch boot in
+`out/button-schemes/p11/boot.log` listed all eight choices, selected `steam-deck`,
+prepared its four pad textures in 499 ms, and replaced its button sheet. The scratch
+boot used the retail target because the host sandbox cannot write the user's Ultimate
+profile/cache. The window could not be brought to the foreground from the tool session,
+so on-screen navigation and physical-device checks remain unproven.
 
 **Goal.** Make the eight authored controller layouts selectable and the authored keyboard/mouse
 images usable as an internal source-keyed icon catalog, while making extra controller buttons

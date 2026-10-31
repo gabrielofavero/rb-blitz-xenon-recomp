@@ -98,7 +98,10 @@ PhysicalInput SamplePhysicalInput() {
   // availability), so a menu overlay must not stop the keyboard from playing.
   input.window_focused = HostInputFocused();
   rex::input::X_INPUT_STATE physical_pad{};
-  input.pad_connected = SamplePhysicalPad(&physical_pad);
+  ExtraButtons extras;
+  input.pad_connected = SamplePhysicalPad(&physical_pad, false, &extras);
+  input.extra_available = extras.available;
+  input.extra_held = extras.held;
   const auto& pad = physical_pad.gamepad;
   input.pad = rb_blitz::profile::remap::PadState{pad.buttons, pad.left_trigger, pad.right_trigger,
                                                  pad.thumb_lx, pad.thumb_ly, pad.thumb_rx,
@@ -508,6 +511,8 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
             observation.mouse_buttons = physical.mouse_buttons;
             observation.wheel_detents = physical.wheel_detents;
             observation.pad = physical.pad;
+            observation.extra_available = physical.extra_available;
+            observation.extra_held = physical.extra_held;
             const capture::Tick tick = capture::Observe(observation);
             if (tick.captured.has_value()) {
               settings::InputBindingStore* store = settings::InputBindings();

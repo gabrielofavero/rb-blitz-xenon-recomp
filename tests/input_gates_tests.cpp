@@ -849,5 +849,23 @@ int main() {
     CHECK_TRUE(gate.Block(false, false));
     CHECK_FALSE(gate.Block(false, false));
   }
+  BeginCase("distinct SDL buttons require device availability and never alias pad bits");
+  {
+    const remap::Source extra{remap::SourceKind::kSdl, "button:misc1"};
+    PhysicalInput frame;
+    frame.window_focused = true;
+    frame.pad_connected = true;
+    frame.pad.buttons = remap::TargetBit(remap::Target::kY);
+    frame.extra_held = ExtraButtonMask(extra.name);
+    CHECK_FALSE(SourceHeld(frame, {}, extra));
+    frame.extra_available = frame.extra_held;
+    CHECK_TRUE(SourceHeld(frame, {}, extra));
+    CHECK_FALSE(SourceHeld(frame, {}, {remap::SourceKind::kSdl, "button:misc2"}));
+    frame.extra_held = 0;
+    CHECK_FALSE(SourceHeld(frame, {}, extra));
+    frame.extra_held = frame.extra_available;
+    frame.pad_connected = false;
+    CHECK_FALSE(SourceHeld(frame, {}, extra));
+  }
   return Finish();
 }

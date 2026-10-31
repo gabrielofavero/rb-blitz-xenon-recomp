@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rb_blitz::controller_schemes {
@@ -19,15 +20,28 @@ struct Slot { const char* id; Rect rect; };
 const std::vector<Slot>& ButtonSlots();
 const std::vector<std::string>& PadSlots();
 
+struct InputImage {
+  std::string id, source, slot, variant, file;
+  std::vector<std::string> components, modifiers;
+  Image image;
+};
+
 struct Scheme {
   std::string id, name;
+  int schema_version = 1;
+  std::string kind = "controller";
   std::filesystem::path folder;
   std::map<std::string, Image> buttons;
   std::map<std::string, Image> pads;
   Image shared_pad, icons;
   bool has_shared_pad = false, has_icons = false;
   std::vector<std::filesystem::path> extra_files;
+  std::vector<std::filesystem::path> declared_files;
+  std::vector<InputImage> inputs;
   const Image* Pad(const std::string& slot) const;
+  const InputImage* InputFor(std::string_view source,
+                             std::string_view variant = {},
+                             std::string_view modifier = {}) const;
 };
 struct Rejection { std::filesystem::path folder; std::string reason; };
 
@@ -35,8 +49,12 @@ struct Rejection { std::filesystem::path folder; std::string reason; };
 using DecodePng = bool (*)(const std::filesystem::path&, Image*, std::string*);
 bool LoadScheme(const std::filesystem::path& folder, bool trusted_reserved,
                 DecodePng decoder, Scheme* result, std::string* why);
+bool LoadInternalKeyboard(const std::filesystem::path& folder, DecodePng decoder,
+                          Scheme* result, std::string* why);
 struct Registry {
   std::map<std::string, Scheme> schemes;
+  Scheme keyboard_mouse;
+  bool has_keyboard_mouse = false;
   std::vector<Rejection> rejected;
   std::vector<std::string> shadowed;
   const Scheme* Find(const std::string& id) const;

@@ -296,6 +296,9 @@ std::string SourceDisplayName(const remap::Source& source) {
     case remap::SourceKind::kPad: return PadDisplayName(source.name);
     case remap::SourceKind::kKey: return KeyDisplayName(source.name);
     case remap::SourceKind::kMouse: return MouseDisplayName(source.name);
+    case remap::SourceKind::kSdl:
+      return std::string(source.name.starts_with("button:") ?
+          source.name.substr(7) : source.name);
   }
   return std::string(source.name);
 }

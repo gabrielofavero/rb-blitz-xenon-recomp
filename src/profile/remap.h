@@ -217,7 +217,7 @@ bool IsMouseWheelSource(std::string_view name);
 int MouseWheelDirection(std::string_view name);
 
 // One physical input a binding can come from.
-enum class SourceKind { kPad, kKey, kMouse };
+enum class SourceKind { kPad, kKey, kMouse, kSdl };
 
 struct Source {
   SourceKind kind = SourceKind::kPad;

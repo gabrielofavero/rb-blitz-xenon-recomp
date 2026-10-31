@@ -40,8 +40,57 @@ bool ParseString(const std::string& raw, std::string* value) {
   }
   return true;
 }
+bool ParseStrings(const std::string& raw, std::vector<std::string>* values) {
+  if (raw.size() < 2 || raw.front() != '[' || raw.back() != ']') return false;
+  values->clear();
+  const std::string body = Trim(raw.substr(1, raw.size() - 2));
+  if (body.empty()) return true;
+  size_t start = 0;
+  while (start < body.size()) {
+    bool quoted = false, escape = false;
+    size_t end = start;
+    for (; end < body.size(); ++end) {
+      if (body[end] == '"' && !escape) quoted = !quoted;
+      if (body[end] == ',' && !quoted) break;
+      if (body[end] == '\\' && !escape) escape = true; else escape = false;
+    }
+    std::string value;
+    if (quoted || !ParseString(Trim(body.substr(start, end - start)), &value)) return false;
+    values->push_back(std::move(value));
+    if (end == body.size()) break;
+    start = end + 1;
+    if (start == body.size()) return false;
+  }
+  return true;
+}
 bool Reserved(const std::string& id) {
-  return id == "retail" || id == "keyboard" || id == "ps3";
+  return id == "retail" || id == "keyboard" || id == "keyboard-mouse" || id == "ps3";
+}
+bool ValidSource(const std::string& source, bool keyboard) {
+  static const std::set<std::string> extra = {
+      "misc1", "misc2", "touchpad", "left_paddle1", "left_paddle2",
+      "right_paddle1", "right_paddle2"};
+  static const std::set<std::string> pads = {
+      "a", "b", "x", "y", "left_shoulder", "right_shoulder", "left_trigger",
+      "right_trigger", "back", "start", "left_thumb", "right_thumb",
+      "dpad_up", "dpad_down", "dpad_left", "dpad_right", "lstick_up",
+      "lstick_down", "lstick_left", "lstick_right", "rstick_up", "rstick_down",
+      "rstick_left", "rstick_right"};
+  if (!keyboard) {
+    if (source.starts_with("pad:")) return pads.contains(source.substr(4));
+    if (source.starts_with("sdl:button:")) return extra.contains(source.substr(11));
+    return false;
+  }
+  if (source.starts_with("mouse:")) {
+    static const std::set<std::string> mice = {"left", "right", "middle", "x1", "x2"};
+    return mice.contains(source.substr(6));
+  }
+  if (!source.starts_with("key:")) return false;
+  const std::string name = source.substr(4);
+  return !name.empty() && name.size() <= 32 && name.front() != ' ' &&
+      name.back() != ' ' && std::all_of(name.begin(), name.end(), [](unsigned char c) {
+        return c >= 0x20 && c != ',' && c != ':';
+      });
 }
 bool ValidName(const std::string& name) {
   size_t count = 0;
@@ -144,9 +193,27 @@ const Image* Scheme::Pad(const std::string& slot) const {
   if (it != pads.end()) return &it->second;
   return has_shared_pad ? &shared_pad : nullptr;
 }
+const InputImage* Scheme::InputFor(std::string_view source, std::string_view variant,
+                                   std::string_view modifier) const {
+  const InputImage* variant_fallback = nullptr;
+  const InputImage* default_fallback = nullptr;
+  for (const auto& entry : inputs) {
+    if (entry.source != source) continue;
+    const std::string_view entry_modifier = entry.modifiers.empty() ?
+        std::string_view{} : std::string_view(entry.modifiers.front());
+    if (entry_modifier != modifier) {
+      if (entry_modifier.empty() && entry.variant.empty()) default_fallback = &entry;
+      continue;
+    }
+    if (entry.variant == variant) return &entry;
+    if (entry.variant.empty()) variant_fallback = &entry;
+  }
+  return variant_fallback ? variant_fallback : default_fallback;
+}
 
-bool LoadScheme(const fs::path& folder, bool trusted_reserved, DecodePng decoder,
-                Scheme* result, std::string* why) {
+static bool LoadSchemeImpl(const fs::path& folder, bool trusted_reserved,
+                           bool internal_keyboard, DecodePng decoder,
+                           Scheme* result, std::string* why) {
   std::error_code ec;
   if (fs::is_symlink(folder, ec) || !fs::is_directory(folder, ec)) {
     *why = "package folder is missing or a symlink"; return false;
@@ -159,7 +226,9 @@ bool LoadScheme(const fs::path& folder, bool trusted_reserved, DecodePng decoder
   std::ifstream file(manifest, std::ios::binary);
   if (!file) { *why = "cannot read scheme.toml"; return false; }
   std::map<std::string, std::string> values;
+  std::vector<std::map<std::string, std::string>> input_values;
   std::string section, line;
+  int schema_version = 0;
   unsigned line_no = 0;
   while (std::getline(file, line)) {
     ++line_no;
@@ -172,10 +241,19 @@ bool LoadScheme(const fs::path& folder, bool trusted_reserved, DecodePng decoder
     }
     line = Trim(line);
     if (line.empty()) continue;
+    if (line == "[[input]]") {
+      if (schema_version != 2 || input_values.size() >= 128) {
+        *why = "input table requires schema_version 2 and at most 128 entries"; return false;
+      }
+      input_values.emplace_back();
+      section = "input";
+      continue;
+    }
     if (line.front() == '[' && line.back() == ']') {
       section = line.substr(1, line.size() - 2);
-      if (section != "buttons" && section != "controller" &&
-          section != "controller.slots" && section != "icons") {
+      if ((section == "buttons" && schema_version != 1) ||
+          (section != "buttons" && section != "controller" &&
+          section != "controller.slots" && section != "icons")) {
         *why = "unknown section at line " + std::to_string(line_no); return false;
       }
       continue;
@@ -187,26 +265,51 @@ bool LoadScheme(const fs::path& folder, bool trusted_reserved, DecodePng decoder
     if (key.empty()) { *why = "empty key"; return false; }
     std::string value;
     if (section.empty() && key == "schema_version") {
-      if (raw != "1") { *why = "schema_version must be integer 1"; return false; }
-      value = "1";
+      if (raw != "1" && raw != "2") {
+        *why = "schema_version must be integer 1 or 2"; return false;
+      }
+      schema_version = raw == "1" ? 1 : 2;
+      value = raw;
+    } else if (section == "input" && (key == "components" || key == "modifiers")) {
+      std::vector<std::string> array;
+      if (!ParseStrings(raw, &array)) {
+        *why = "invalid string array at line " + std::to_string(line_no); return false;
+      }
+      // Retain the raw TOML for the entry parser below.
+      value = raw;
     } else if (!ParseString(raw, &value)) {
       *why = "invalid value at line " + std::to_string(line_no); return false;
     }
-    const std::string full = section.empty() ? key : section + "." + key;
-    if (!values.emplace(full, value).second) { *why = "duplicate key: " + full; return false; }
+    if (section == "input") {
+      if (input_values.empty() || !input_values.back().emplace(key, value).second) {
+        *why = "duplicate input key: " + key; return false;
+      }
+    } else {
+      const std::string full = section.empty() ? key : section + "." + key;
+      if (!values.emplace(full, value).second) { *why = "duplicate key: " + full; return false; }
+    }
   }
   auto required = [&](const char* key) -> std::string {
     auto it = values.find(key); return it == values.end() ? "" : it->second;
   };
-  if (required("schema_version") != "1") { *why = "schema_version must be 1"; return false; }
+  if (schema_version == 0) { *why = "missing schema_version"; return false; }
   Scheme scheme;
+  scheme.schema_version = schema_version;
   scheme.id = required("id"); scheme.name = required("name"); scheme.folder = folder;
   if (!std::regex_match(scheme.id, std::regex("[a-z0-9][a-z0-9-]{0,31}")) ||
       scheme.id != folder.filename().string()) { *why = "invalid id or folder name"; return false; }
   if (scheme.id == "retail" || scheme.id == "keyboard" ||
-      (Reserved(scheme.id) && !trusted_reserved)) { *why = "reserved id"; return false; }
+      (Reserved(scheme.id) && !trusted_reserved && !internal_keyboard) ||
+      (scheme.id == "keyboard-mouse" && !internal_keyboard) ||
+      (internal_keyboard && scheme.id != "keyboard-mouse")) {
+    *why = "reserved id"; return false;
+  }
   if (!ValidName(scheme.name)) { *why = "name must be 1-20 UTF-8 characters"; return false; }
-  if (required("kind") != "controller") { *why = "kind must be controller"; return false; }
+  scheme.kind = required("kind");
+  if (scheme.kind != (internal_keyboard ? "keyboard-mouse" : "controller") ||
+      (internal_keyboard && schema_version != 2)) {
+    *why = "invalid scheme kind"; return false;
+  }
   std::set<std::string> paths;
   unsigned image_count = 0;
   for (const auto& [key, value] : values) {
@@ -222,15 +325,75 @@ bool LoadScheme(const fs::path& folder, bool trusted_reserved, DecodePng decoder
     if (!paths.insert(relative.generic_string()).second) {
       *why = "duplicate image path: " + value; return false;
     }
-    if (++image_count > 64) { *why = "more than 64 images"; return false; }
+    if (++image_count > (schema_version == 2 ? 128u : 64u)) {
+      *why = "too many images"; return false;
+    }
     if (!LoadImage(folder, value, decoder, image, why)) return false;
+    scheme.declared_files.push_back(relative);
     if ((key == "controller.file" || key.starts_with("controller.slots.")) &&
         (image->width > 2048 || image->height > 2048)) { *why = "invalid pad"; return false; }
     if (key == "icons.file" && (image->width != 1024 || image->height != 512)) {
       *why = "icons.png must be 1024x512"; return false;
     }
   }
-  if (scheme.buttons.empty() && scheme.pads.empty() && !scheme.has_shared_pad) {
+  std::set<std::string> ids, slots, source_variants;
+  for (const auto& fields : input_values) {
+    auto get = [&](const char* key) -> std::string {
+      const auto it = fields.find(key); return it == fields.end() ? "" : it->second;
+    };
+    for (const auto& [key, unused] : fields) {
+      if (key != "id" && key != "file" && key != "source" && key != "components" &&
+          key != "slot" && key != "variant" && key != "modifiers") {
+        *why = "unknown input key: " + key; return false;
+      }
+    }
+    InputImage entry;
+    entry.id = get("id"); entry.file = get("file"); entry.source = get("source");
+    entry.slot = get("slot"); entry.variant = get("variant");
+    if (!std::regex_match(entry.id, std::regex("[a-z0-9][a-z0-9_-]{0,63}")) ||
+        !ids.insert(entry.id).second) { *why = "invalid or duplicate input id"; return false; }
+    if (entry.file.empty() || !paths.insert(fs::path(entry.file).generic_string()).second) {
+      *why = "missing or duplicate input image path"; return false;
+    }
+    if (fields.contains("components") &&
+        !ParseStrings(get("components"), &entry.components)) {
+      *why = "invalid components"; return false;
+    }
+    if (fields.contains("modifiers") &&
+        !ParseStrings(get("modifiers"), &entry.modifiers)) {
+      *why = "invalid modifiers"; return false;
+    }
+    if (entry.source.empty() == entry.components.empty() ||
+        (!entry.source.empty() && !ValidSource(entry.source, internal_keyboard)) ||
+        (internal_keyboard && (!entry.slot.empty() || !entry.components.empty())) ||
+        (!entry.components.empty() && std::any_of(entry.components.begin(), entry.components.end(),
+            [](const auto& s) { return !ValidSource(s, false) || !s.starts_with("pad:"); }))) {
+      *why = "invalid input source or components"; return false;
+    }
+    if (!entry.slot.empty() && (!FindButton(entry.slot) || !slots.insert(entry.slot).second)) {
+      *why = "invalid or duplicate atlas slot"; return false;
+    }
+    if (!entry.variant.empty() && !std::regex_match(entry.variant,
+        std::regex("[a-z0-9][a-z0-9-]{0,31}"))) {
+      *why = "invalid image variant"; return false;
+    }
+    if (entry.modifiers.size() > 1 ||
+        (!entry.modifiers.empty() && (entry.modifiers[0] != "shift" ||
+                                     !entry.source.starts_with("key:")))) {
+      *why = "invalid modifiers"; return false;
+    }
+    if (!entry.source.empty() && !source_variants.insert(entry.source + "|" +
+        entry.variant + "|" + (entry.modifiers.empty() ? "" : entry.modifiers[0])).second) {
+      *why = "ambiguous image for source"; return false;
+    }
+    if (++image_count > 128) { *why = "more than 128 images"; return false; }
+    if (!LoadImage(folder, entry.file, decoder, &entry.image, why)) return false;
+    scheme.declared_files.push_back(fs::path(entry.file));
+    if (!entry.slot.empty()) scheme.buttons.emplace(entry.slot, entry.image);
+    scheme.inputs.push_back(std::move(entry));
+  }
+  if (scheme.buttons.empty() && scheme.pads.empty() && !scheme.has_shared_pad &&
+      scheme.inputs.empty()) {
     *why = "package has no button or pad replacement"; return false;
   }
   unsigned files = 0;
@@ -238,7 +401,9 @@ bool LoadScheme(const fs::path& folder, bool trusted_reserved, DecodePng decoder
        !ec && it != end; it.increment(ec)) {
     if (it->is_symlink(ec)) { *why = "package contains a symlink"; return false; }
     if (!it->is_regular_file(ec)) continue;
-    if (++files > 64) { *why = "package contains more than 64 files"; return false; }
+    if (++files > (schema_version == 2 ? 512u : 64u)) {
+      *why = "package contains too many files"; return false;
+    }
     const auto relative = fs::relative(it->path(), folder, ec);
     if (relative != fs::path("scheme.toml") &&
         !paths.contains(relative.generic_string())) scheme.extra_files.push_back(relative);
@@ -248,6 +413,15 @@ bool LoadScheme(const fs::path& folder, bool trusted_reserved, DecodePng decoder
   return true;
 }
 
+bool LoadScheme(const fs::path& folder, bool trusted_reserved, DecodePng decoder,
+                Scheme* result, std::string* why) {
+  return LoadSchemeImpl(folder, trusted_reserved, false, decoder, result, why);
+}
+bool LoadInternalKeyboard(const fs::path& folder, DecodePng decoder,
+                          Scheme* result, std::string* why) {
+  return LoadSchemeImpl(folder, true, true, decoder, result, why);
+}
+
 const Scheme* Registry::Find(const std::string& id) const {
   auto it = schemes.find(id); return it == schemes.end() ? nullptr : &it->second;
 }
@@ -255,11 +429,19 @@ std::string Registry::Summary() const {
   std::ostringstream out;
   out << "Xbox 360 (retail)";
   for (const auto& [id, scheme] : schemes) out << ", " << scheme.name << " (" << id << ")";
+  out << "; internal_keyboard=" << (has_keyboard_mouse ? keyboard_mouse.inputs.size() : 0);
   out << "; rejected=" << rejected.size() << "; shadowed=" << shadowed.size();
   return out.str();
 }
 Registry Discover(const fs::path& install_root, const fs::path& user_root, DecodePng decoder) {
   Registry registry;
+  const fs::path keyboard_folder = install_root.parent_path() / "keyboard-mouse";
+  if (fs::exists(keyboard_folder)) {
+    std::string why;
+    if (LoadInternalKeyboard(keyboard_folder, decoder, &registry.keyboard_mouse, &why))
+      registry.has_keyboard_mouse = true;
+    else registry.rejected.push_back({keyboard_folder, why});
+  }
   auto scan = [&](const fs::path& root, bool user) {
     std::error_code ec;
     if (!fs::is_directory(root, ec)) return;

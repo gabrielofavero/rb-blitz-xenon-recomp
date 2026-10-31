@@ -30,7 +30,9 @@ Image CropRetail(const std::vector<uint8_t>& rgba, const std::string& slot) {
 Image ImageFor(const input::icons::Icon& icon,
                const std::vector<uint8_t>& retail_rgba,
                const controller_schemes::Scheme* scheme) {
-  if (icon.art == Art::kSchemeSlot || icon.art == Art::kPackageImage) {
+  if (icon.art == Art::kPackageImage)
+    return {icon.width, icon.height, icon.rgba};
+  if (icon.art == Art::kSchemeSlot) {
     if (scheme) {
       const auto found = scheme->buttons.find(icon.slot);
       if (found != scheme->buttons.end()) return found->second;
@@ -99,8 +101,7 @@ bool Compose(const std::vector<uint8_t>& original_font,
                                original_font.begin() + offset + bytes);
     const uint32_t pitch = dim / 4;
     const uint32_t top = (font::kIconTop >> mip) / 4;
-    const uint32_t bottom = std::min(dim / 4,
-        (((font::kIconTop + 2 * font::kIconRowStride) >> mip) + 3) / 4);
+    const uint32_t bottom = dim / 4;
     const uint32_t right = dim / 4;
     for (uint32_t by = top; by < bottom; ++by)
       for (uint32_t bx = 0; bx < right; ++bx)

@@ -62,6 +62,8 @@ struct Observation {
   // the session captures it on the frame it arrives, without waiting for a release.
   int32_t wheel_detents = 0;
   profile::remap::PadState pad;
+  uint8_t extra_available = 0;
+  uint8_t extra_held = 0;
 };
 
 struct Result {

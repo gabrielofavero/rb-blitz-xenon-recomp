@@ -69,6 +69,22 @@ int main() {
     captured = false;
     CHECK_EQ(driver.GetDeviceState(device, &state), 0);
     CHECK_TRUE((state.gamepad.buttons & X_INPUT_GAMEPAD_B) != 0);
+    CHECK_TRUE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_MISC1, true));
+    CHECK_TRUE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, true));
+    SDL_UpdateJoysticks();
+    SDL_PumpEvents();
+    CHECK_EQ(driver.GetDeviceState(device, &state), 0);
+    CHECK_FALSE((state.gamepad.buttons & X_INPUT_GAMEPAD_GUIDE) != 0);
+    CHECK_FALSE((state.gamepad.buttons & X_INPUT_GAMEPAD_Y) != 0);
+    uint8_t available = 0, held = 0;
+    CHECK_TRUE(driver.GetExtraButtonState(device, &available, &held));
+    CHECK_TRUE((available & (1u << 0)) && (available & (1u << 3)));
+    CHECK_TRUE((held & (1u << 0)) && (held & (1u << 3)));
+    CHECK_TRUE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_MISC1, false));
+    SDL_UpdateJoysticks();
+    SDL_PumpEvents();
+    CHECK_TRUE(driver.GetExtraButtonState(device, &available, &held));
+    CHECK_FALSE((held & (1u << 0)) != 0);
   }
   if (joystick) SDL_CloseJoystick(joystick);
   if (instance) SDL_DetachVirtualJoystick(instance);

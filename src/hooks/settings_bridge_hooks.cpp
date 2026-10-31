@@ -83,6 +83,7 @@
 #include "store/store_settings.h"
 #include "ui/settings_screen.h"
 #include "ui/input_icon_rows.h"
+#include "ui/input_font_scene.h"
 
 // The builtins the channel rides on and the node -> string helper the originals use. The
 // originals are the __imp__ aliases; the strong definitions below replace the call sites.
@@ -757,13 +758,15 @@ bool TakeRead(PPCContext& ctx, uint8_t* base) {
     const std::string_view panel = std::string_view(path).substr(prefix.size());
     lines = ::rb_blitz::ui::screen::PanelBindingText(panel, *snapshot);
     if (!lines.empty() && ::rb_blitz::assets::InputIconsAvailable()) {
-      auto view = ::rb_blitz::input::icons::CaptureActive();
+      auto view = ::rb_blitz::input::icons::CaptureActive(
+          ::rb_blitz::assets::ControllerSchemeRegistry());
       view.input = snapshot;
       view.revision = snapshot->revision;
       auto page = ::rb_blitz::ui::input_icon_rows::Build(
           ::rb_blitz::ui::screen::PanelRowSymbols(panel), lines, view);
       if (page.overflow) {
-        REXLOG_WARN("input_icons: '{}' needs more than 30 image slots; full text retained", panel);
+        REXLOG_WARN("input_icons: '{}' needs more than {} distinct image slots; full text retained",
+                    panel, ::rb_blitz::ui::input_font::kIconCount);
       } else if (!page.icons.empty()) {
         const std::string signature = std::string(panel) + ":" +
             std::to_string(view.revision) + ":" + view.controller_scheme;

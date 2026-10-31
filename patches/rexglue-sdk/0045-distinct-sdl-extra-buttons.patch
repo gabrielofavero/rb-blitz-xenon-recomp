@@ -1,0 +1,95 @@
+diff --git a/include/rex/input/sdl/sdl_input_driver.h b/include/rex/input/sdl/sdl_input_driver.h
+--- a/include/rex/input/sdl/sdl_input_driver.h
++++ b/include/rex/input/sdl/sdl_input_driver.h
+@@ -37,6 +37,9 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener
+   void EnumerateDevices(std::vector<DeviceInfo>& out) override;
+   X_RESULT GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) override;
+   X_RESULT GetDeviceStateForUI(DeviceId id, X_INPUT_STATE* out_state) override;
++  // Distinct SDL controls outside XInput. Bit order: misc1, misc2, touchpad,
++  // left paddle 1/2, right paddle 1/2. Availability comes from this device's mapping.
++  bool GetExtraButtonState(DeviceId id, uint8_t* available, uint8_t* held);
+   X_RESULT GetDeviceCapabilities(DeviceId id, uint32_t flags,
+                                  X_INPUT_CAPABILITIES* out_caps) override;
+   X_RESULT SetDeviceVibration(DeviceId id, X_INPUT_VIBRATION* vibration) override;
+@@ -68,6 +71,7 @@ class SDLInputDriver final : public InputDriver, public rex::ui::WindowListener
+     bool state_changed;
+     bool is_active;
+     DeviceId id;
++    uint8_t extra_buttons = 0;
+     // Per pad rather than per guest user, so it survives reassignment.
+     KeystrokeState keystroke;
+   };
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -241,5 +241,22 @@ X_RESULT SDLInputDriver::GetDeviceStateForUI(DeviceId id, X_INPUT_STATE* out_state) {
+   return X_ERROR_SUCCESS;
+ }
+
++bool SDLInputDriver::GetExtraButtonState(DeviceId id, uint8_t* available, uint8_t* held) {
++  if (!available || !held || !sdl_events_initialized_ || !SDL_Gamepad_initialized_) return false;
++  QueueControllerUpdate();
++  auto guard = DrainAndLock();
++  auto* controller = FindController(id);
++  if (!controller) return false;
++  static constexpr std::array<SDL_GamepadButton, 7> buttons = {
++      SDL_GAMEPAD_BUTTON_MISC1, SDL_GAMEPAD_BUTTON_MISC2, SDL_GAMEPAD_BUTTON_TOUCHPAD,
++      SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, SDL_GAMEPAD_BUTTON_LEFT_PADDLE2,
++      SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2};
++  *available = 0;
++  for (uint8_t i = 0; i < buttons.size(); ++i)
++    if (SDL_GamepadHasButton(controller->sdl, buttons[i])) *available |= uint8_t(1u << i);
++  *held = controller->extra_buttons & *available;
++  return true;
++}
++
+ X_RESULT SDLInputDriver::SetDeviceVibration(DeviceId id, X_INPUT_VIBRATION* vibration) {
+   assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
+@@ -578,16 +596,15 @@ void SDLInputDriver::OnControllerDeviceButtonChangedLocked(const SDL_Event& event) {
+           X_INPUT_GAMEPAD_DPAD_DOWN,
+           X_INPUT_GAMEPAD_DPAD_LEFT,
+           X_INPUT_GAMEPAD_DPAD_RIGHT,
+-          // There are additional buttons only available on some controllers.
+-          // For now just assign sensible defaults
+-          // Misc:
+-          X_INPUT_GAMEPAD_GUIDE,
++          // Extras are exposed separately below, never folded into XInput bits.
++          // Misc 1:
++          0,
+           // Xbox Elite paddles:
+-          X_INPUT_GAMEPAD_Y,
+-          X_INPUT_GAMEPAD_B,
+-          X_INPUT_GAMEPAD_X,
+-          X_INPUT_GAMEPAD_A,
++          0,
++          0,
++          0,
++          0,
+           // PS touchpad button
+-          X_INPUT_GAMEPAD_GUIDE,
++          0,
+       };
+   static_assert(SDL_GAMEPAD_BUTTON_SOUTH == 0);
+@@ -600,4 +616,22 @@ void SDLInputDriver::OnControllerDeviceButtonChangedLocked(const SDL_Event& event) {
+   }
+   auto& controller = controllers_.at(*idx);
+
++  uint8_t extra_bit = 0;
++  switch (event.gbutton.button) {
++    case SDL_GAMEPAD_BUTTON_MISC1: extra_bit = 1u << 0; break;
++    case SDL_GAMEPAD_BUTTON_MISC2: extra_bit = 1u << 1; break;
++    case SDL_GAMEPAD_BUTTON_TOUCHPAD: extra_bit = 1u << 2; break;
++    case SDL_GAMEPAD_BUTTON_LEFT_PADDLE1: extra_bit = 1u << 3; break;
++    case SDL_GAMEPAD_BUTTON_LEFT_PADDLE2: extra_bit = 1u << 4; break;
++    case SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1: extra_bit = 1u << 5; break;
++    case SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2: extra_bit = 1u << 6; break;
++    default: break;
++  }
++  if (extra_bit) {
++    if (event.gbutton.down) controller.extra_buttons |= extra_bit;
++    else controller.extra_buttons &= ~extra_bit;
++    controller.state_changed = true;
++    return;
++  }
++
+   uint16_t xbuttons = controller.state.gamepad.buttons;
