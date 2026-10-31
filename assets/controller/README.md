@@ -1,10 +1,9 @@
 # Create a controller layout
 
 > **Authored layouts in this checkout:** The non-template folders directly under
-> `assets/controller/` now contain proposed `schema_version = 2` manifests. See
-> [the v2 controller scheme format](../../docs/guides/controller-scheme-v2-format.md). The current game and validator only
-> implement the version 1 format described below; these authored layouts will
-> become selectable after the planned loader and input-source code changes.
+> `assets/controller/` use `schema_version = 2` manifests. The game and validator
+> accept them alongside the version 1 format described below. See
+> [the v2 controller scheme format](../../docs/guides/controller-scheme-v2-format.md).
 
 Editable controller art and source pad PNGs live in [masters](masters/README.md);
 layout folders contain the PNGs used by the game.
@@ -196,18 +195,47 @@ above and below. `a_button` is actually 81×81, so a 128×128 square fits to
 81×81. Trim accidental transparent margins from the source if the visible art
 looks too small. Pads use the same rule against 1024×1024.
 
-Use 1–2048 pixels on each source axis and at most 8 MB per PNG. A layout may
-contain at most 64 files, including its manifest. Paths must be relative `.png`
+Use 1–2048 pixels on each source axis and at most 8 MB per PNG. A v1 layout may
+contain at most 64 files, including its manifest; v2 accepts 128 declared images.
+Paths must be relative `.png`
 paths inside the layout folder, with no `..`, absolute path, symlink, duplicate
 path, missing file, or unknown slot ID. The manifest must be under 64 KiB.
-`schema_version` is the integer `1`, `kind` is `"controller"`, the ID matches
+`schema_version` is the integer `1` or `2`, `kind` is `"controller"` for a user
+package, and the ID matches
 its folder and follows `[a-z0-9][a-z0-9-]{0,31}`, and the displayed name is
-1–20 UTF-8 characters. Only `retail` (base-game art), `keyboard` (built-in
-input images), and `ps3` (installer import) are reserved. Any other valid ID
+1–20 UTF-8 characters. `retail` (base-game art), `keyboard` and
+`keyboard-mouse` (internal input images), and `ps3` (installer import) are reserved. Any other valid ID
 can be used for a user layout, including an ID used by an installed authored
 layout. In that case, the user's package takes precedence at the next boot.
-Keep only declared files in the folder. The validator reports extras; they are
-not used by the game.
+The validator reports undeclared files; the build packer excludes them. The
+game ignores extras in user folders.
+
+## Version 2 source images
+
+Version 2 connects each image to a physical input. A minimal controller package is:
+
+```toml
+schema_version = 2
+id = "my-layout"
+name = "My Layout"
+kind = "controller"
+
+[[input]]
+id = "south"
+file = "buttons/a.png"
+source = "pad:a"
+slot = "a_button"
+```
+
+`source` selects art for binding rows; optional `slot` replaces the corresponding
+retail glyph wherever that atlas slot is drawn. The two identities can differ:
+Nintendo's bottom face button is still `pad:a`, regardless of its printed letter.
+An omitted `slot` keeps the base-game atlas image. Omitted controller pad diagrams
+also keep their retail images. Extra SDL sources use `sdl:button:misc1`,
+`misc2`, `touchpad`, or one of the four paddle names; they are bindable only when
+the connected SDL controller reports that button. `key:` and `mouse:` art is
+internal to the game and cannot be installed as a controller package. The
+[format guide](../../docs/guides/controller-scheme-v2-format.md) lists the complete grammar.
 
 ## Local references and packaging
 
@@ -230,11 +258,14 @@ pad diagrams; the optional installer import is still in progress. These are
 private references, not authoring assets or distributable packages. The blank
 guides and `slots.toml` are enough to create original art without them.
 
-Any owner-authored layout with a non-reserved ID placed in
-`assets/controller/schemes/<id>/` is
+Any owner-authored layout with a non-reserved ID placed directly in
+`assets/controller/<id>/` is
 validated and included by the installer build, without registering its ID in
-code. The example packages live under `assets/controller/examples/` so they
-are not installed. Check and copy all authored layouts to the build tree with:
+code. Only declared files are staged under the installed
+`assets/controller/schemes/<id>/`; the internal keyboard art goes to
+`assets/controller/keyboard-mouse/`. The example packages live under
+`assets/controller/examples/` and are not installed as schemes. Check and copy
+all authored layouts to the build tree with:
 
 ```powershell
 .\scripts\controllers\controller_schemes.ps1 -Validate -Pack
