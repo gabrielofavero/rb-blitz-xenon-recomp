@@ -226,10 +226,10 @@ void TestVocabulary() {
   CHECK_TRUE(HasSource(keyboard(Action::kSecondNote), remap::SourceKind::kKey, "W"));
   CHECK_TRUE(HasSource(keyboard(Action::kSecondNote), remap::SourceKind::kMouse, "left"));
   CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneRight), remap::SourceKind::kKey, "Right"));
-  CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneRight), remap::SourceKind::kMouse, "wheel_up"));
+  CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneRight), remap::SourceKind::kMouse, "wheel_down"));
   CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneLeft), remap::SourceKind::kKey, "Left"));
   CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneLeft), remap::SourceKind::kMouse,
-                       "wheel_down"));
+                       "wheel_up"));
   CHECK_TRUE(HasSource(keyboard(Action::kPowerup), remap::SourceKind::kKey, "Space"));
   CHECK_TRUE(HasSource(keyboard(Action::kPowerup), remap::SourceKind::kMouse, "middle"));
   CHECK_TRUE(HasSource(keyboard(Action::kPause), remap::SourceKind::kKey, "Escape"));

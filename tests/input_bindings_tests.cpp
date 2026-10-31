@@ -223,6 +223,11 @@ void TestIconSourceCatalog() {
     CHECK_TRUE(icon.art == icons::Art::kBuiltIn);
     CHECK_TRUE(!icon.rgba.empty());
   }
+  const auto wheel_up = icons::Resolve({remap::SourceKind::kMouse, "wheel_up"}, "retail");
+  const auto wheel_down = icons::Resolve({remap::SourceKind::kMouse, "wheel_down"}, "retail");
+  CHECK_EQ(wheel_up.width, 68u);
+  CHECK_EQ(wheel_up.height, 92u);
+  CHECK_TRUE(wheel_up.rgba != wheel_down.rgba);
   CHECK_TRUE(icons::Resolve({remap::SourceKind::kPad, "steam_back_grip"}, "steam-deck").art ==
              icons::Art::kUnsupported);
   rb_blitz::controller_schemes::Registry registry;
@@ -235,6 +240,15 @@ void TestIconSourceCatalog() {
   registry.has_keyboard_mouse = true;
   registry.keyboard_mouse.inputs.push_back({"enter", "key:Return", "", "",
       "Enter_Key_Dark.png", {}, {}, {9, 9, std::vector<uint8_t>(9 * 9 * 4, 255)}});
+  registry.keyboard_mouse.inputs.push_back({"middle", "mouse:middle", "", "",
+      "mouse_middle.png", {}, {}, {68, 92, std::vector<uint8_t>(68 * 92 * 4, 48)}});
+  const auto authored_up = icons::Resolve({remap::SourceKind::kMouse, "wheel_up"},
+                                           "retail", &registry);
+  const auto authored_down = icons::Resolve({remap::SourceKind::kMouse, "wheel_down"},
+                                             "retail", &registry);
+  CHECK_TRUE(authored_up.art == icons::Art::kBuiltIn);
+  CHECK_TRUE(authored_up.rgba != authored_down.rgba);
+  CHECK_TRUE(authored_up.rgba != wheel_up.rgba);
   CHECK_TRUE(icons::Resolve({remap::SourceKind::kSdl, "button:misc1"}, "steam-deck",
                           &registry).art == icons::Art::kPackageImage);
   CHECK_TRUE(icons::Resolve({remap::SourceKind::kKey, "Return"}, "steam-deck",
@@ -859,6 +873,28 @@ void TestImageRows() {
   CHECK_TRUE(overflow.overflow);
   CHECK_TRUE(overflow.icons.empty());
   CHECK_TRUE(overflow.lines == fallback);
+
+  // Exhausting the font on one row must not erase unrelated image rows.
+  rebound->general.Set(remap::Target::kB, {Source("pad:b")});
+  const std::vector<std::string> mixed_symbols{
+      "settings_bind_general_b", "settings_bind_general_a"};
+  const std::vector<std::string> mixed_fallback{
+      "Go Back: B", "Confirm: all 46 bindings"};
+  const auto partial = rb_blitz::ui::input_icon_rows::Build(
+      mixed_symbols, mixed_fallback, view);
+  CHECK_TRUE(partial.overflow);
+  CHECK_EQ(partial.icons.size(), 1u);
+  CHECK_TRUE(partial.icons[0].slot == "b_button");
+  CHECK_TRUE(partial.lines[0] == "Go Back: <alt1>\xC2\x80</alt1>");
+  CHECK_TRUE(partial.lines[1] == mixed_fallback[1]);
+
+  const auto recovered = rb_blitz::ui::input_icon_rows::Build(
+      {mixed_symbols[1], mixed_symbols[0]},
+      {mixed_fallback[1], mixed_fallback[0]}, view);
+  CHECK_TRUE(recovered.overflow);
+  CHECK_EQ(recovered.icons.size(), 1u);
+  CHECK_TRUE(recovered.lines[0] == mixed_fallback[1]);
+  CHECK_TRUE(recovered.lines[1] == "Go Back: <alt1>\xC2\x80</alt1>");
 }
 
 }  // namespace

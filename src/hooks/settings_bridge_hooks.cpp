@@ -765,9 +765,10 @@ bool TakeRead(PPCContext& ctx, uint8_t* base) {
       auto page = ::rb_blitz::ui::input_icon_rows::Build(
           ::rb_blitz::ui::screen::PanelRowSymbols(panel), lines, view);
       if (page.overflow) {
-        REXLOG_WARN("input_icons: '{}' needs more than {} distinct image slots; full text retained",
+        REXLOG_WARN("input_icons: '{}' needs more than {} distinct image slots; affected rows retain full text",
                     panel, ::rb_blitz::ui::input_font::kIconCount);
-      } else if (!page.icons.empty()) {
+      }
+      if (!page.icons.empty()) {
         const std::string signature = std::string(panel) + ":" +
             std::to_string(view.revision) + ":" + view.controller_scheme;
         ::rb_blitz::assets::PublishInputIcons(signature, std::move(page.icons));

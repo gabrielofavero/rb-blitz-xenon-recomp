@@ -16,7 +16,8 @@ struct Page {
 // `symbols` and `fallback` are the same native list order. A row keeps its original position and
 // selection index; only its displayed text changes. The caller publishes `icons` atomically with
 // these rows. Repeated physical sources reuse one glyph tile. If the dedicated icon font's
-// spare glyph slots are exhausted, the complete textual rows remain visible.
+// spare glyph slots are exhausted, that row retains its complete textual list;
+// other rows continue to use images where capacity permits.
 Page Build(const std::vector<std::string>& symbols,
            const std::vector<std::string>& fallback,
            const input::icons::View& view);

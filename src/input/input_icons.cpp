@@ -44,6 +44,43 @@ void Pixel(Icon* icon, int x, int y, uint8_t r, uint8_t g, uint8_t b) {
   icon->rgba[p] = r; icon->rgba[p + 1] = g; icon->rgba[p + 2] = b; icon->rgba[p + 3] = 255;
 }
 
+void DrawWheelArrow(Icon* icon, bool up) {
+  const int cx = static_cast<int>(icon->width / 2);
+  const int top = static_cast<int>(icon->height * 43 / 100);
+  const int size = std::max(6, static_cast<int>(std::min(icon->width, icon->height) / 7));
+  auto arrow = [&](int dx, int y) {
+    const int half = up ? (y < size ? y : 2) : (y < size ? 2 : 2 * size - y);
+    return std::abs(dx) <= half;
+  };
+  // The mouse body is dark; the one-pixel shadow keeps the arrow legible over
+  // a future, lighter middle-button illustration as well.
+  for (int y = 0; y <= 2 * size; ++y)
+    for (int dx = -size; dx <= size; ++dx)
+      if (arrow(dx, y)) Pixel(icon, cx + dx + 1, top + y + 1, 20, 22, 25);
+  for (int y = 0; y <= 2 * size; ++y)
+    for (int dx = -size; dx <= size; ++dx)
+      if (arrow(dx, y)) Pixel(icon, cx + dx, top + y, 238, 241, 245);
+}
+
+void DrawWheelFallback(Icon* icon, bool up) {
+  icon->width = 68;
+  icon->height = 92;
+  icon->rgba.assign(size_t(icon->width) * icon->height * 4, 0);
+  for (int y = 7; y <= 85; ++y) {
+    const int half = y < 16 ? 16 + y - 7 :
+                     y > 70 ? std::max(3, 25 - (y - 70) * (y - 70) / 11) : 25;
+    for (int dx = -half; dx <= half; ++dx) {
+      const bool rim = std::abs(dx) >= half - 3 || y < 10 || y > 82;
+      const uint8_t shade = rim ? 18 : (y < 37 ? 58 : 43);
+      Pixel(icon, 34 + dx, y, shade, shade + 1, shade + 3);
+    }
+  }
+  for (int y = 12; y <= 34; ++y)
+    for (int x = 30; x <= 37; ++x)
+      Pixel(icon, x, y, 212, 216, 220);
+  DrawWheelArrow(icon, up);
+}
+
 void DrawKeycap(Icon* icon) {
   const bool media_next = icon->source.kind == SourceKind::kKey &&
       icon->source.name == "MediaTrackNext";
@@ -244,6 +281,21 @@ Icon Resolve(const Source& source, std::string_view controller_scheme,
   } else if (source.kind == SourceKind::kMouse) {
     if (registry && registry->has_keyboard_mouse &&
         package_image(registry->keyboard_mouse.InputFor("mouse:" + source.name))) return icon;
+    const int wheel = profile::remap::MouseWheelDirection(source.name);
+    if (wheel != 0) {
+      // The authored keyboard/mouse set has no wheel-direction PNGs. Reuse its
+      // mouse silhouette and draw a distinct arrow for each physical detent.
+      if (registry && registry->has_keyboard_mouse &&
+          package_image(registry->keyboard_mouse.InputFor("mouse:middle")) &&
+          icon.width >= 40 && icon.height >= 60) {
+        icon.art = Art::kBuiltIn;
+        DrawWheelArrow(&icon, wheel > 0);
+      } else {
+        icon.art = Art::kBuiltIn;
+        DrawWheelFallback(&icon, wheel > 0);
+      }
+      return icon;
+    }
     if (!profile::remap::ParseSource("mouse:" + source.name)) {
       icon.art = Art::kUnsupported;
       icon.legend = "?";

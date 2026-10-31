@@ -31,6 +31,8 @@ Page Build(const std::vector<std::string>& symbols,
     // The dedicated alt1 font has its own white material tint. A vertex color
     // tag cannot override the primary font's black hover material multiplier.
     std::string line = profile::BindingRowLabel(token) + ": <alt1>";
+    const size_t first_row_icon = page.icons.size();
+    bool row_overflow = false;
     for (const auto& icon : ordered) {
       if (line.back() != '>') line += ' ';
       size_t index = 0;
@@ -42,15 +44,18 @@ Page Build(const std::vector<std::string>& symbols,
       }
       if (index == page.icons.size()) {
         if (index == input_font::kIconCount) {
-          page.lines = fallback;
-          page.icons.clear();
+          // Keep other rows' images. This row still uses its complete text
+          // representation, and tiles reserved only by this row can be reused.
+          page.icons.resize(first_row_icon);
           page.overflow = true;
-          return page;
+          row_overflow = true;
+          break;
         }
         page.icons.push_back(icon);
       }
       AppendGlyph(&line, input_font::GlyphCode(static_cast<uint32_t>(index)));
     }
+    if (row_overflow) continue;
     line += "</alt1>";
     page.lines[row] = std::move(line);
   }

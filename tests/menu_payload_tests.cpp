@@ -60,8 +60,8 @@ const std::vector<std::string> kThanksRows = {
     "Button Layouts (Adapted)|Nicolae (XELU) Berbece, Paul Paun",
     "Controller Layouts (Adapted)|Nicolae (XELU) Berbece, Paul Paun",
     "Nintendo Switch 1/2 Layouts (Adapted)|zacksly",
-    "Steam Deck Layouts (Adapted)|Valve Software",
-    "Meta Quest 1/2 Layouts (Adapted)|Meta Platforms",
+    "Steam Deck Layouts (Adapted)|Official device artwork",
+    "Quest 1/2 Layouts (Adapted)|Official device artwork",
 };
 
 // The rows under one `heading` of a credits document, up to the next blank root - the shape

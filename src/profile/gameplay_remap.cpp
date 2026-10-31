@@ -148,9 +148,9 @@ std::vector<remap::Source> KeyboardMouseDefault(Action action) {
     case Action::kSecondNote:
       return {Key("W"), Mouse("left")};
     case Action::kMoveLaneRight:
-      return {Key("Right"), Mouse("wheel_up")};
+      return {Key("Right"), Mouse("wheel_down")};
     case Action::kMoveLaneLeft:
-      return {Key("Left"), Mouse("wheel_down")};
+      return {Key("Left"), Mouse("wheel_up")};
     case Action::kPowerup:
       return {Key("Space"), Mouse("middle")};
     case Action::kPause:

@@ -1458,6 +1458,21 @@ screenshot with eight source images (A, Enter, A, X, Y, RB, RT, LT) visible in s
 within the guest list row. That tested long row does not clip. The separate 46-distinct-source
 atlas fallback and explicit paused-song check remain open.
 
+**2026-10-31 overflow isolation.** If one row needs more than the 45 distinct font tiles,
+only that row now retains its complete textual binding list. Other rows keep their source
+images, and tiles reserved solely by the overflowing row are reused. Host coverage exercises
+overflow before and after an ordinary row. A single row above capacity still lacks an all-image
+guest rendering route, and the paused-song visual check remains open.
+
+**2026-10-31 mapping follow-up.** Owner screenshots of Interface Mapping, Gameplay Notes and
+Move Lane show the ordinary images in the guest rows. Move Lane exposed a remaining art gap:
+the internal keyboard/mouse manifest has no `mouse:wheel_up` or `mouse:wheel_down` PNG, so
+the resolver drew tiny text keycaps. Wheel images now reuse the authored middle-mouse silhouette
+with opposite directional arrows, with a built-in mouse drawing when the authored image is
+unavailable. The owner also requested Move Right's default wheel input to be scroll down and
+Move Left's to be scroll up; the compiled defaults and host assertions now follow that order.
+The wheel visuals still need owner acceptance in a new build.
+
 **Goal.** Both mapping surfaces show actual bound button/key/mouse images next to their action
 labels, replacing textual binding lists.
 

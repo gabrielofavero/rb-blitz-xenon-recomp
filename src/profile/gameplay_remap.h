@@ -35,7 +35,8 @@
 //
 // The defaults are frozen from P0's evidence (plan §10.4 O3): the controller table's compiled
 // default reproduces retail preset 0, which the live arms measured, and the keyboard table
-// reproduces the Mouse & Keyboard defaults the restructure plan's D12 lists. They are *not* read
+// starts from the Mouse & Keyboard defaults in the restructure plan, with the owner's later
+// reversal of the two lane wheel directions. They are *not* read
 // back from the saved native preset at run time: a table with no custom row follows the preset
 // the title's own Controller Presets page selected (P2 of
 // docs/plans/finished/2026-10-19-interface-gameplay-mapping-restructure-plan.md), and the

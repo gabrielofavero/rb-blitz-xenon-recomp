@@ -334,9 +334,10 @@ Consequences worth knowing:
   in-song arm measured the pause panel appearing 22 ms after the Escape press, with the release
   after it, and the earlier per-poll set let exactly that window through. A menu key no table
   ever took is never added, so the title's A press is untouched.
-- The Mouse & Keyboard defaults are the restructure plan's D12 list: First Note `Q` + right
-  click, Second Note `W` + left click, Move Right `Arrow Right` + scroll up, Move Left
-  `Arrow Left` + scroll down, Power-up `Space` + middle click, Pause `Escape`. A wheel detent
+- The Mouse & Keyboard defaults use First Note `Q` + right click, Second Note `W` + left
+  click, Move Right `Arrow Right` + scroll down, Move Left `Arrow Left` + scroll up,
+  Power-up `Space` + middle click, Pause `Escape`. The wheel directions were reversed at
+  the owner's request on 2026-10-31. A wheel detent
   (`mouse:wheel_up`/`mouse:wheel_down`) is an event, not a level: `HostTakeMouseWheel` consumes
   the detents once per poll, the source reads as down for that poll, and the action hold turns it
   into one press and one release.
