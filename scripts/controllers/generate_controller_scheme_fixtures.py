@@ -53,18 +53,12 @@ def main():
     (one_glyph / 'scheme.toml').write_text(
         'schema_version = 1\nid = "one-glyph"\nname = "One Glyph"\n'
         'kind = "controller"\n[buttons]\na_button = "a.png"\n')
-    one_pad = args.output / 'one-pad'
-    one_pad.mkdir(parents=True, exist_ok=True)
-    Image.new('RGBA', (128, 96), (255, 0, 220, 255)).save(one_pad / 'pad.png')
-    (one_pad / 'scheme.toml').write_text(
-        'schema_version = 1\nid = "one-pad"\nname = "One Pad"\n'
-        'kind = "controller"\n[controller.slots]\nxbox_1 = "pad.png"\n')
     broken = args.output / 'invalid-missing'
     broken.mkdir(parents=True, exist_ok=True)
     (broken / 'scheme.toml').write_text(
         'schema_version = 1\nid = "invalid-missing"\nname = "Invalid"\n'
         'kind = "controller"\n[buttons]\na_button = "missing.png"\n')
-    print(f'Generated {package}, {one_glyph}, {one_pad}, and {broken}')
+    print(f'Generated {package}, {one_glyph}, and {broken}')
 
 
 if __name__ == '__main__':

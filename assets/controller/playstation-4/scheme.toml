@@ -160,6 +160,10 @@ source = "pad:back"
 slot = "back_button"
 
 [controller.slots]
+xbox_0 = "pads/pad_0.png"
+xbox_1 = "pads/pad_1.png"
+xbox_2 = "pads/pad_2.png"
+xbox_3 = "pads/pad_3.png"
 ps_0 = "pads/pad_0.png"
 ps_1 = "pads/pad_1.png"
 ps_2 = "pads/pad_2.png"

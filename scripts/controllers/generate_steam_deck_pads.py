@@ -13,10 +13,10 @@ from generate_controller_pad_0 import (
 
 
 SOURCE = ROOT / "assets/controller/masters/steam-deck/pad.png"
-# Crop the transparent export margin to the prior 1132:458 framing so the
-# existing arrow tips still land on their controls.
-SOURCE_CROP = (70, 62, 1202, 520)
-BODY = (132, 320, 892, 627)
+# Fit the visible body from the current master without changing its proportions.
+# The three-pixel vertical inset keeps the existing callout tips on the controls.
+SOURCE_CROP = (73, 67, 1201, 514)
+BODY = (132, 323, 892, 624)
 ROUTE_COUNTS = (7, 6, 5, 6)
 LEFT_SHAFT_JOIN = frozenset(("dpad", "left_stick"))
 PAD_0_JOINS = frozenset((

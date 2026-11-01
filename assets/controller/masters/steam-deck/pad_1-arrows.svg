@@ -2,8 +2,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <title>Steam Deck pad 1 callout routes</title>
   <desc>Text rails follow PS3 pad 1. One arrow per top edge represents the shoulder and trigger together because the front view does not separate them.</desc>
-  <defs><clipPath id="body-viewport"><rect x="132" y="320" width="760" height="307"/></clipPath></defs>
-  <image id="pad-reference" href="pad.png" x="85" y="278.45" width="854.13" height="391.54"
+  <defs><clipPath id="body-viewport"><rect x="132" y="323" width="760" height="301"/></clipPath></defs>
+  <image id="pad-reference" href="pad.png" x="82.81" y="277.85" width="857.02" height="393.40"
          preserveAspectRatio="none" opacity="0.65" clip-path="url(#body-viewport)"/>
   <g id="routes" fill="none" stroke="#00aed6" stroke-width="14" stroke-linejoin="round">
     <polyline id="left_shoulder_pair" points="249,250 205,326"/>

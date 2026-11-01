@@ -42,7 +42,10 @@ clearance and continuous arrow pixels. PlayStation 5 declares its four generated
 [`pad.png`](../../assets/controller/masters/playstation-5/pad.png) and
 [`pad_N-arrows.svg`](../../assets/controller/masters/playstation-5/pad_0-arrows.svg)
 masters. Its fixed text rails follow the corresponding PS3 reference pads.
-PlayStation 4 declares the same four `ps_0` through `ps_3` slots. Run
+PlayStation 4 declares the same four `ps_0` through `ps_3` slots. Both PlayStation
+layouts also point `xbox_0` through `xbox_3` at those same four PNGs because the
+game's mapping page uses the Xbox texture family. Pad slots may share a PNG path.
+Run
 `python scripts/controllers/generate_playstation_4_pads.py` to rebuild them from its
 [`pad.png`](../../assets/controller/masters/playstation-4/pad.png) and
 [`pad_N-arrows.svg`](../../assets/controller/masters/playstation-4/pad_0-arrows.svg)

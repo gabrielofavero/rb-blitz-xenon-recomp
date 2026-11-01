@@ -312,6 +312,7 @@ static bool LoadSchemeImpl(const fs::path& folder, bool trusted_reserved,
     *why = "invalid scheme kind"; return false;
   }
   std::set<std::string> paths;
+  std::set<std::string> pad_paths;
   unsigned image_count = 0;
   for (const auto& [key, value] : values) {
     if (key == "schema_version" || key == "id" || key == "name" || key == "kind") continue;
@@ -323,14 +324,18 @@ static bool LoadSchemeImpl(const fs::path& folder, bool trusted_reserved,
     else if (key == "icons.file") { image = &scheme.icons; scheme.has_icons = true; }
     else { *why = "unknown key: " + key; return false; }
     const fs::path relative = fs::path(std::u8string(value.begin(), value.end()));
-    if (!paths.insert(relative.generic_string()).second) {
+    const bool new_path = paths.insert(relative.generic_string()).second;
+    const bool pad_alias = key.starts_with("controller.slots.") &&
+                           pad_paths.contains(relative.generic_string());
+    if (!new_path && !pad_alias) {
       *why = "duplicate image path: " + value; return false;
     }
+    if (key.starts_with("controller.slots.")) pad_paths.insert(relative.generic_string());
     if (++image_count > (schema_version == 2 ? 128u : 64u)) {
       *why = "too many images"; return false;
     }
     if (!LoadImage(folder, value, decoder, image, why)) return false;
-    scheme.declared_files.push_back(relative);
+    if (new_path) scheme.declared_files.push_back(relative);
     if ((key == "controller.file" || key.starts_with("controller.slots.")) &&
         (image->width > 2048 || image->height > 2048)) { *why = "invalid pad"; return false; }
     if (key == "icons.file" && (image->width != 1024 || image->height != 512)) {

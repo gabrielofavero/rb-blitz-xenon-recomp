@@ -66,10 +66,18 @@ int main() {
     Check(LoadScheme(art / id, false, FakePng, &scheme, &why),
           "authored v2 controller rejected");
     Check(scheme.schema_version == 2 && scheme.id == id && scheme.inputs.size() >= 26 &&
-          scheme.InputFor("pad:a") &&
-          (scheme.Pad("xbox_0") != nullptr) ==
-              (std::string(id) != "playstation-4" && std::string(id) != "playstation-5"),
+          scheme.InputFor("pad:a") && scheme.Pad("xbox_0") != nullptr,
           "authored v2 lookup wrong");
+    if (std::string(id) == "playstation-4" || std::string(id) == "playstation-5") {
+      Check(scheme.pads.size() == 8 && scheme.declared_files.size() == scheme.inputs.size() + 4,
+            "PlayStation pad aliases duplicated files");
+      for (int pad_index = 0; pad_index < 4; ++pad_index) {
+        const auto suffix = std::to_string(pad_index);
+        Check(scheme.Pad("xbox_" + suffix) && scheme.Pad("ps_" + suffix) &&
+              scheme.Pad("xbox_" + suffix)->rgba == scheme.Pad("ps_" + suffix)->rgba,
+              "PlayStation pad aliases differ");
+      }
+    }
     if (std::string(id) == "steam-deck")
       Check(scheme.InputFor("sdl:button:misc1") &&
             scheme.InputFor("sdl:button:left_paddle1"), "Deck extra source art missing");

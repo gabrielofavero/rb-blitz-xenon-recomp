@@ -3,11 +3,10 @@
   Builds and launches P2's locally generated controller fixture for the owner's UI check.
 .EXAMPLE
   .\scripts\acceptance\acceptance_button_schemes_p2.ps1 -Scheme one-glyph
-  .\scripts\acceptance\acceptance_button_schemes_p2.ps1 -Scheme one-pad -Backend vulkan
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('retail', 'one-glyph', 'one-pad', 'test-markers')]
+    [ValidateSet('retail', 'one-glyph', 'test-markers')]
     [string]$Scheme = 'one-glyph',
     [ValidateSet('d3d12', 'vulkan')][string]$Backend = 'd3d12'
 )
