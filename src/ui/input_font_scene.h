@@ -13,16 +13,32 @@ namespace rb_blitz::ui::input_font {
 // No game art is stored in the project.
 bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                   std::vector<uint8_t>* original_bc3, std::string* error);
+// A second private font aliases early, proven glyph codes to the reserved
+// footer image tiles without changing P9 mapping-row glyphs.
+bool PrepareHintScene(const std::vector<uint8_t>& icon_scene, std::vector<uint8_t>* scene,
+                      std::string* error);
 bool PrepareList(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                  std::string* error);
+bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                       std::string* error);
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3();
 
 inline constexpr char kSceneRecord[] = "ui/resource/fonts/gen/pentatonic.milo_xbox";
 inline constexpr char kIconSceneRecord[] = "ui/resource/fonts/gen/input_icons.milo_xbox";
+inline constexpr char kHintSceneRecord[] = "ui/resource/fonts/gen/inline_help_icons.milo_xbox";
 inline constexpr char kListRecord[] = "ui/resource/lists/gen/list_options_main.milo_xbox";
+inline constexpr char kInlineHelpRecord[] = "ui/resource/inline_help/gen/default.milo_xbox";
 inline constexpr uint32_t kAtlasSize = 1024;
 inline constexpr uint32_t kIconFirst = 0x80;
 inline constexpr uint32_t kIconCount = 180;
+inline constexpr uint32_t kHintCount = 15;
+// Image slots 101..115 belong to InlineHelp. Its own font scene aliases early
+// private glyph codes to these tiles, leaving P9's row glyphs unchanged.
+inline constexpr uint32_t kHintFirst = 101;
+inline constexpr uint32_t kRowIconCount = kIconCount - kHintCount;
+inline constexpr uint32_t RowGlyphIndex(uint32_t index) {
+  return index < kHintFirst ? index : index + kHintCount;
+}
 inline constexpr uint32_t kIconSize = 32;
 inline constexpr uint32_t kIconColumns = 28;
 inline constexpr uint32_t kIconColumnStride = 36;

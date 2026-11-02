@@ -21,6 +21,12 @@ struct SongMetadata {
 // Bounded, read-only metadata parsing. Invalid input returns no partial records.
 std::vector<SongMetadata> ReadSongMetadata(std::span<const uint8_t> bytes, bool compiled,
                                          std::string* error);
+
+// DLC song metadata is data, not a script. Reject executable DTA forms before the
+// recompiled guest sees a package. This is a compatibility policy for external
+// content; trusted game resources are not inspected here.
+bool IsStaticSongMetadata(std::span<const uint8_t> bytes, bool compiled,
+                          std::string* error);
 std::string StreamIdentity(std::string path);
 // Match the complete package-relative stream path, never just a possibly ambiguous basename.
 std::string SongKeyForStream(const std::vector<SongMetadata>& songs, const std::string& stream);

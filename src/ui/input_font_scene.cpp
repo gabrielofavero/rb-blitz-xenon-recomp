@@ -195,6 +195,57 @@ bool PrepareList(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene
   bytes.insert(bytes.begin() + end + added.size() + 4, 4, 0);
   return PackStored(bytes, scene, error);
 }
+bool PrepareHintScene(const std::vector<uint8_t>& icon_scene, std::vector<uint8_t>* scene,
+                      std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(icon_scene, &bytes, error)) return false;
+  std::vector<size_t> tables;
+  for (size_t at = 32 * 18 + 4; at + (256 - 32) * 18 <= bytes.size(); ++at) {
+    if (bytes[at] != 0 || bytes[at + 1] != 0x20 ||
+        Be32(bytes.data() + at - 32 * 18 - 4) != 256) continue;
+    bool ascii = true;
+    for (uint32_t c = 0; c < 8; ++c)
+      if (bytes[at + c * 18] != 0 || bytes[at + c * 18 + 1] != 0x20 + c)
+        ascii = false;
+    if (ascii) tables.push_back(at - 32 * 18);
+  }
+  if (tables.size() != 4) return Fail(error, "prepared icon font Glyph arrays changed");
+  for (const size_t table : tables) {
+    if (Be32(bytes.data() + table - 12) !=
+            std::bit_cast<uint32_t>(kFontCellWidth / kAtlasSize) ||
+        Be32(bytes.data() + table - 8) !=
+            std::bit_cast<uint32_t>(kFontCellHeight / kAtlasSize))
+      return Fail(error, "prepared icon font cell dimensions changed");
+    for (uint32_t action = 0; action < kHintCount; ++action) {
+      const uint32_t code = GlyphCode(action);
+      uint8_t* glyph = bytes.data() + table + code * 18;
+      if (glyph[0] != 0 || glyph[1] != code)
+        return Fail(error, "prepared icon font early glyph changed");
+      const uint32_t index = kHintFirst + action;
+      const uint32_t x = (index % kIconColumns) * kIconColumnStride + kIconInsetX;
+      const uint32_t y = kIconTop + (index / kIconColumns) * kIconRowStride;
+      PutFloat(glyph + 2, float(x) / kAtlasSize);
+      PutFloat(glyph + 6, float(y) / kAtlasSize);
+    }
+  }
+  return PackStored(bytes, scene, error);
+}
+bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                       std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  constexpr size_t at = 0x3AD;
+  constexpr std::string_view old_font = "../fonts/buttons.milo";
+  constexpr std::string_view new_font = "../fonts/inline_help_icons.milo";
+  if (bytes.size() != 1002 || Be32(bytes.data() + at) != old_font.size() ||
+      std::memcmp(bytes.data() + at + 4, old_font.data(), old_font.size()) != 0 ||
+      Be32(bytes.data() + 0x3E6) != 0xADDEADDE)
+    return Fail(error, "inline help font record changed");
+  PutBe32(bytes.data() + at, static_cast<uint32_t>(new_font.size()));
+  bytes.erase(bytes.begin() + at + 4, bytes.begin() + at + 4 + old_font.size());
+  bytes.insert(bytes.begin() + at + 4, new_font.begin(), new_font.end());
+  return PackStored(bytes, scene, error);
+}
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3() {
   return g_original_bc3.load();
 }

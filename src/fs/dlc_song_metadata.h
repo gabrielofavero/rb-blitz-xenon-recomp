@@ -37,4 +37,8 @@ std::unique_ptr<rex::filesystem::Device> MountPackage(const std::string& mount_p
 // `\songs\gen\songs.dtb`, first that parses). Empty when the package carries none.
 std::vector<shell_music::SongMetadata> ReadDeviceSongMetadata(rex::filesystem::Device& device);
 
+// Check every songs.dta/songs.dtb entry in a mounted package before the SDK
+// exposes that device to guest code. Missing song metadata is fine.
+bool IsSafeSongContent(rex::filesystem::Device& device, std::string* reason);
+
 }  // namespace rb_blitz::fs

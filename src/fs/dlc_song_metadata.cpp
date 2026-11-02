@@ -69,6 +69,50 @@ constexpr std::string_view kMetadataPaths[][2] = {
 
 }  // namespace
 
+bool IsSafeSongContent(rex::filesystem::Device& device, std::string* reason) {
+  if (reason) reason->clear();
+  auto* root = device.ResolvePath("");
+  if (!root) {
+    if (reason) *reason = "package root cannot be read";
+    return false;
+  }
+  // Walk the complete entry tree, including duplicate/case-variant names. The
+  // guest may resolve a different duplicate than a first-match lookup would.
+  std::vector<rex::filesystem::Entry*> pending{root};
+  size_t visited = 0;
+  while (!pending.empty()) {
+    auto* entry = pending.back();
+    pending.pop_back();
+    if (++visited > 100000) {
+      if (reason) *reason = "too many package entries";
+      return false;
+    }
+    for (const auto& child : entry->children()) pending.push_back(child.get());
+    std::string name = entry->name();
+    for (char& c : name) if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
+    if (name != "songs.dta" && name != "songs.dtb") continue;
+    if (entry->attributes() & rex::filesystem::kFileAttributeDirectory) continue;
+    const auto reject = [&](std::string_view detail) {
+      if (reason) *reason = entry->path() + ": " + std::string(detail);
+      return false;
+    };
+    if (entry->size() == 0 || entry->size() > 2 * 1024 * 1024)
+      return reject("empty or oversized metadata");
+    rex::filesystem::File* file = nullptr;
+    if (entry->Open(rex::filesystem::FileAccess::kGenericRead, &file) != 0 || !file)
+      return reject("cannot open metadata");
+    std::vector<uint8_t> bytes(static_cast<size_t>(entry->size()));
+    size_t read = 0;
+    const auto status = file->ReadSync(bytes, 0, &read);
+    file->Destroy();
+    if (status != 0 || read != bytes.size()) return reject("cannot read metadata completely");
+    std::string error;
+    if (!shell_music::IsStaticSongMetadata(bytes, name == "songs.dtb", &error))
+      return reject(error);
+  }
+  return true;
+}
+
 std::vector<shell_music::SongMetadata> ReadDeviceSongMetadata(rex::filesystem::Device& device) {
   auto* root = device.ResolvePath("");
   std::string skipped;

@@ -117,6 +117,7 @@ set(RBBLITZ_SOURCES
     src/hooks/menu_filter.cpp
     src/hooks/settings_bridge.cpp
     src/hooks/settings_bridge_hooks.cpp
+    src/hooks/action_hint_probe.cpp
     src/hooks/render_settings.cpp
     src/hooks/settings_payload.cpp
     src/settings/menu_payload.cpp
@@ -1009,6 +1010,13 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_menu_music_cache_tests PRIVATE src)
     target_link_libraries(rb_blitz_menu_music_cache_tests PRIVATE rex::runtime)
     add_test(NAME menu_music_cache COMMAND rb_blitz_menu_music_cache_tests)
+
+    add_executable(rb_blitz_song_content_safety_tests tests/song_content_safety_tests.cpp
+        src/fs/dlc_song_metadata.cpp src/hooks/menu_music_metadata.cpp
+        src/ui/dtb_author.cpp src/ui/menu_options.cpp)
+    target_include_directories(rb_blitz_song_content_safety_tests PRIVATE src)
+    target_link_libraries(rb_blitz_song_content_safety_tests PRIVATE rex::runtime)
+    add_test(NAME song_content_safety COMMAND rb_blitz_song_content_safety_tests)
 
     add_executable(rb_blitz_menu_music_guest_tests tests/menu_music_guest_tests.cpp)
     target_include_directories(rb_blitz_menu_music_guest_tests PRIVATE src)

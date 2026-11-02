@@ -549,7 +549,38 @@ void TestSongMetadata() {
   CHECK_TRUE(PoolSongKey({"legacy", "songs/legacy/name"}) == "name");
 }
 
+void TestStaticSongMetadataGate() {
+  using namespace rb_blitz::shell_music;
+  namespace dtb = rb_blitz::ui::dtb;
+  const auto check_text = [](std::string_view text, bool expected) {
+    const auto* p = reinterpret_cast<const uint8_t*>(text.data());
+    std::string error;
+    CHECK_TRUE(IsStaticSongMetadata(std::span(p, text.size()), false, &error) == expected);
+  };
+  BeginCase("external song metadata permits data and inert quoted/comment text");
+  check_text("(song (name \"{not code} $name #autorun\") (artist 'AC/DC'))", true);
+  check_text("; {ignored}\n/* $ignored */ (song (name \"safe\"))", true);
+  BeginCase("external song metadata rejects executable or malformed text");
+  check_text("(song (name {run exploit}))", false);
+  check_text("#autorun {run exploit}", false);
+  check_text("(song (name $computed))", false);
+  check_text("(song [name malicious])", false);
+  check_text("(song (name \"unfinished))", false);
+  constexpr char with_nul[] = "(song (name \"safe\"))\0";
+  check_text(std::string_view(with_nul, sizeof(with_nul) - 1), false);
+  BeginCase("compiled metadata permits static nodes and rejects executable tags");
+  auto compiled = dtb::Compile({dtb::Node::Array({dtb::Node::Symbol("song"),
+                                                 dtb::Node::String("static")})});
+  std::string error;
+  CHECK_TRUE(IsStaticSongMetadata(compiled, true, &error));
+  compiled = dtb::Compile({dtb::Node::Command({dtb::Node::Symbol("run")})});
+  CHECK_FALSE(IsStaticSongMetadata(compiled, true, &error));
+  compiled = dtb::Compile({dtb::Node::Array({dtb::Node::Var("payload")})});
+  CHECK_FALSE(IsStaticSongMetadata(compiled, true, &error));
+}
+
 int main() {
+  TestStaticSongMetadataGate();
   TestSongMetadata();
   TestPlaySelection();
   TestFailureRecovery();

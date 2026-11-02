@@ -97,9 +97,17 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     pending_icons_ = std::move(icons);
     has_pending_icons_ = true;
   }
+  void PublishHints(std::string signature, std::vector<input::icons::Icon> icons) {
+    std::lock_guard lock(pending_mutex_);
+    if (signature == last_hint_signature_) return;
+    last_hint_signature_ = std::move(signature);
+    pending_hints_ = std::move(icons);
+    has_pending_hints_ = true;
+  }
   void Poll() override {
     std::string next;
     std::vector<input::icons::Icon> icons;
+    std::vector<input::icons::Icon> hints;
     bool icons_changed = false;
     {
       std::lock_guard lock(pending_mutex_);
@@ -108,6 +116,11 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       if (has_pending_icons_) {
         icons = std::move(pending_icons_);
         has_pending_icons_ = false;
+        icons_changed = true;
+      }
+      if (has_pending_hints_) {
+        hints = std::move(pending_hints_);
+        has_pending_hints_ = false;
         icons_changed = true;
       }
     }
@@ -134,7 +147,19 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       }
     }
     if (icons_changed) {
-      font_icons_ = std::move(icons);
+      if (!icons.empty()) row_icons_ = std::move(icons);
+      if (!hints.empty()) hint_icons_ = std::move(hints);
+      if (!hint_icons_.empty() || row_icons_.size() > ui::input_font::kHintFirst) {
+        input::icons::Icon blank;
+        blank.art = input::icons::Art::kBuiltIn;
+        blank.width = blank.height = 1;
+        blank.rgba = {0, 0, 0, 0};
+        font_icons_.assign(ui::input_font::kIconCount, blank);
+        for (size_t i = 0; i < row_icons_.size(); ++i)
+          font_icons_[ui::input_font::RowGlyphIndex(static_cast<uint32_t>(i))] = row_icons_[i];
+        for (size_t i = 0; i < hint_icons_.size() && i < ui::input_font::kHintCount; ++i)
+          font_icons_[ui::input_font::kHintFirst + i] = hint_icons_[i];
+      } else font_icons_ = row_icons_;
       font_levels_.clear();
     }
     if (scheme_changed || icons_changed || refresh_font_after_buttons_) {
@@ -202,12 +227,20 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       refresh_font_after_buttons_ = true;
     }
     if (font) {
-      if (font_icons_.empty() || original_buttons_.empty()) return false;
-      if (font_levels_.empty() &&
-          !input_font_atlas::Compose(*font_original, original_buttons_,
-                                     registry_.Find(selected_), font_icons_, &font_levels_)) {
-        REXLOG_WARN("input_icons: could not compose mapping font images");
+      if (font_icons_.empty() || original_buttons_.empty()) {
+        REXLOG_WARN("input_icons: font override waiting for icons={} button_sheet={}",
+                    font_icons_.size(), !original_buttons_.empty());
         return false;
+      }
+      if (font_levels_.empty()) {
+        if (!input_font_atlas::Compose(*font_original, original_buttons_,
+                                      registry_.Find(selected_), font_icons_, &font_levels_)) {
+          REXLOG_WARN("input_icons: could not compose mapping font images");
+          return false;
+        }
+        REXLOG_INFO("input_icons: composed {} image slots, hint tiles {}/{}",
+                    font_icons_.size(), ui::input_font::kHintFirst + 1,
+                    ui::input_font::kHintFirst + 2);
       }
       if (request.mip_count > font_levels_.size()) return false;
       host_levels->assign(font_levels_.begin(), font_levels_.begin() + request.mip_count);
@@ -268,13 +301,18 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::vector<std::vector<uint8_t>> icons_;
   std::vector<std::vector<uint8_t>> font_levels_;
   std::vector<input::icons::Icon> font_icons_;
+  std::vector<input::icons::Icon> row_icons_;
+  std::vector<input::icons::Icon> hint_icons_;
   std::vector<input::icons::Icon> pending_icons_;
+  std::vector<input::icons::Icon> pending_hints_;
   std::vector<uint8_t> original_buttons_;
   std::string last_icon_signature_;
+  std::string last_hint_signature_;
   uint64_t font_hash_ = 0;
   bool font_hash_found_ = false;
   std::unordered_set<uint64_t> font_probe_logged_;
   bool has_pending_icons_ = false;
+  bool has_pending_hints_ = false;
   bool refresh_font_after_buttons_ = false;
   std::map<uint64_t, std::vector<std::vector<uint8_t>>> pads_;
   std::unordered_set<uint64_t> logged_;
@@ -436,6 +474,9 @@ bool SelectControllerScheme(const std::string& id) {
 
 void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons) {
   if (g_scheme_provider) g_scheme_provider->PublishIcons(std::move(signature), std::move(icons));
+}
+void PublishHintIcons(std::string signature, std::vector<input::icons::Icon> icons) {
+  if (g_scheme_provider) g_scheme_provider->PublishHints(std::move(signature), std::move(icons));
 }
 bool InputIconsAvailable() {
   return g_scheme_provider != nullptr && ui::input_font::OriginalBc3() != nullptr;

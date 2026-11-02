@@ -87,6 +87,7 @@ make untracked files are excluded; tracked edits and moved gitlinks remain visib
 
 | Patch | Purpose | Upstream candidate |
 | --- | --- | --- |
+| `rexglue-sdk/0047-content-device-validation.patch` | Lets the title inspect a mounted content device before registering it for guest access. Rock Band Blitz uses this to refuse executable song DTA from primary, structured, and flat-library content; see [DaTArrest security](../docs/reference/datarrest-security.md). | maybe |
 | `rexglue-sdk/0045-distinct-sdl-extra-buttons.patch` | Keeps SDL misc, touchpad and paddle buttons separate from XInput aliases, and exposes the connected pad's available and held extra controls for gameplay capture. | maybe |
 | `rexglue-sdk/0046-indirect-ringbuffer-recovery.patch` | Propagates a failed indirect GPU packet to its primary-ring caller, retries from the failed primary packet, and skips the full indirect call when bounded recovery is exhausted. This preserves the chance to reach later frame packets after the library-loading overflow seen in `rb_blitz_443.log`. Live recovery remains to be checked. | maybe |
 | `rexglue-sdk/0043-texture-override.patch` | Adds a process-wide texture override provider in `rexruntime`, candidate fingerprinting in the shared texture cache, and narrow generation invalidation. D3D12 and Vulkan upload canonical BC3 blocks directly to a matching BC3 host texture; unsupported host formats keep the guest load. The application supplies P1's synthetic markers and the measured fingerprint selection. No guest scene or guest memory is rewritten. | yes |

@@ -60,7 +60,7 @@ Page Build(const std::vector<std::string>& symbols,
             existing.slot == icon.slot && existing.scheme == icon.scheme) break;
       }
       if (index == page.icons.size()) {
-        if (index == input_font::kIconCount) {
+        if (index == input_font::kRowIconCount) {
           // Keep other rows' images. This row still uses its complete text
           // representation, and tiles reserved only by this row can be reused.
           page.icons.resize(first_row_icon);
@@ -70,7 +70,8 @@ Page Build(const std::vector<std::string>& symbols,
         }
         page.icons.push_back(icon);
       }
-      AppendGlyph(&line, input_font::GlyphCode(static_cast<uint32_t>(index)));
+      AppendGlyph(&line, input_font::GlyphCode(
+          input_font::RowGlyphIndex(static_cast<uint32_t>(index))));
     }
     if (row_overflow) continue;
     line += "</alt1>";

@@ -4,16 +4,17 @@
 2026-10-26; P1, P2 and P3 delivered 2026-10-27; P6a and P8 delivered 2026-10-28.
 P4's tracker, D3D12 family switching and selected-pad-art stability were
 accepted 2026-10-28; visible binding-aware hints remain P10 work.
-P5, P6b, P7, P9 and P10 remain open. P9's in-list paging is implemented on
-2026-11-01 and awaits a live fit/navigation check. P11's v2 loader, staging, internal keyboard
+P9 is accepted after the owner's 2026-11-02 visual checks of long-row fit and paging.
+P5, P6b, P7 and P10 remain open. P11's v2 loader, staging, internal keyboard
 art and distinct SDL source path landed 2026-10-30; physical-device/UI acceptance
 remains open. P9's ordinary Interface and Gameplay Mapping
 images and binding refresh have owner visual acceptance. The icon font supports
 180 distinct images and reuses tiles for repeated sources. An eight-input Confirm row has owner
 visual acceptance; the latest font-atlas repair has owner visual acceptance.
 The owner has also accepted Interface Mapping and Gameplay Notes images in a paused song.
-Inspectable image overflow beyond the accepted eight-input row awaits live acceptance; long rows
-now page through six images at a time with Left/Right, including rows above 180 sources.**
+Long rows page through six images at a time with Left/Right, including rows above 180 sources.
+The P10 guest-hint route inventory has begun in
+[`docs/engine/button-hint-inventory.md`](../../engine/button-hint-inventory.md).**
 The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
@@ -59,8 +60,8 @@ P11, then checks the final UI and art. Historical P0–P8 evidence remains evide
 | --- | --- | --- |
 | P5 | PS3 source bounds/reference delivered; installer import open | Local v1 `ps3` import works or its unavailable route is reported accurately |
 | P11 | V1/v2 coexist; nine manifests validate and stage; virtual SDL extras pass, boot lists eight controllers | Physical-device mapping/capture and on-screen image acceptance |
-| P9 | Ordinary rows, an eight-input Confirm row, the repaired atlas, and paused-song Interface Mapping/Gameplay Notes have owner visual acceptance; in-list six-image paging is implemented and host-tested | Live fit and Left/Right navigation of a row beyond eight bindings, including a later page |
-| P10 | Guest hint inventory and remap-aware routes open | Actionable hints follow effective bindings and active family with v2 art |
+| P9 | Owner reports the remaining long-row fit and paging visual checks look good (2026-11-02); host tests and prior mapping/in-song acceptance recorded below | Accepted; retain coverage while P10 changes the icon pipeline |
+| P10 | The owner confirmed default main-menu footer icons and Y after rebinding Confirm, then reported the remaining main-menu live checks working (2026-11-02); other hint routes remain open | Actionable hints follow effective bindings and active family with v2 art |
 | P6b | Eight controller art folders present; six declare pad PNGs | Install/cycle all eight, verify art and fallback, record live acceptance |
 | P7 | Documentation and closeout open | Audit, document P5 outcome, then move this plan to `finished/` |
 
@@ -758,7 +759,8 @@ graph TD
 > PS3 scheme remains a parallel v1 installer task and is not a prerequisite for testing the eight
 > authored layouts; its outcome must be recorded before closing P7.
 
-Remaining execution: P11 → finish P9 → P10 → P6b → P7, with P5 in parallel. P7 closes only
+Remaining execution: P10 → P6b → P7, with P5 in parallel and P11 physical-device
+acceptance still open. P7 closes only
 after v2 loading, distinct-source capture, guest hints, real-art acceptance and the PS3 import
 outcome are recorded. A new host overlay remains outside this plan's authorization.
 
@@ -1612,6 +1614,11 @@ generated menu's paging request paths are checked against row indices. The relea
 focused suites are the host gates; visible fit, button routing and no overlap in a live guest
 row remain unproven until an authorized UI check.
 
+**2026-11-02 owner visual acceptance.** The owner performed the pending P9 visual checks and
+reported that the result looks good. This closes the long-row fit and paging acceptance gate;
+the prior ordinary, eight-input, atlas and paused-song checks remain recorded above. No
+new game UI test was driven for this update.
+
 **Goal.** Both mapping surfaces show actual bound button/key/mouse images next to their action
 labels, replacing textual binding lists.
 
@@ -1639,6 +1646,20 @@ controller images. Long binding lists remain inspectable; no image overlaps the 
 source on mapping rows, or add a host overlay to bypass the guest's row renderer.
 
 ### P10 — Remap-aware guest footers and visual action hints
+
+**2026-11-02 inventory checkpoint.** The first measured route table is in
+[`docs/engine/button-hint-inventory.md`](../../engine/button-hint-inventory.md). It
+separates `InlineHelp.ihp` action-token footers from locale-backed inline glyph
+prompts and records the action identity and current evidence for each known route.
+The owner's trace identified action IDs 1 and 2 on live `InlineHelp` labels.
+An action-aware footer hook and private-font scene patch built and passed host
+tests. After two blank-icon builds, the owner confirmed visible main-menu footer
+icons and Y after rebinding interface Confirm in the repaired build;
+`rb_blitz_477.log` records early Confirm/Cancel glyphs and the composed 180-slot
+atlas. The owner subsequently reported that the same-screen refresh and
+active-family checks work as well; the trace records both family and binding
+revision changes. The remaining text and
+scene routes in the inventory still need their own action/context seams.
 
 **Goal.** Every actionable game hint depicts the input that actually performs that action in the
 current interface/gameplay context.

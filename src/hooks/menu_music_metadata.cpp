@@ -94,7 +94,86 @@ const Node* Field(const Node& record, std::string_view key) {
   }
   return nullptr;
 }
+
+bool StaticText(std::string_view text) {
+  // Treat comments and quoted values as inert. Every unquoted scripting token
+  // is refused, including directives/variables that can cause evaluation
+  // without a command block. The structural parser below checks the rest.
+  for (size_t i = 0; i < text.size();) {
+    const char c = text[i];
+    if (c == ';') {
+      while (i < text.size() && text[i] != '\n') ++i;
+      continue;
+    }
+    if (text.substr(i, 2) == "/*") {
+      const auto end = text.find("*/", i + 2);
+      if (end == std::string_view::npos) return false;
+      i = end + 2;
+      continue;
+    }
+    if (c == '"' || c == '\'') {
+      const char quote = c;
+      bool closed = false;
+      ++i;
+      while (i < text.size()) {
+        if (text[i] == '\\' && i + 1 < text.size() &&
+            (text[i + 1] == quote || text[i + 1] == '\\')) { i += 2; continue; }
+        if (text[i++] == quote) { closed = true; break; }
+      }
+      if (!closed) return false;
+      continue;
+    }
+    if (c == '{' || c == '}' || c == '[' || c == ']' ||
+        c == '$' || c == '#' || c == '@' || c == '\0' ||
+        (static_cast<unsigned char>(c) < 0x20 && c != '\t' && c != '\r' && c != '\n'))
+      return false;
+    ++i;
+  }
+  return true;
+}
+
+bool StaticNodes(const std::vector<Node>& nodes) {
+  for (const auto& node : nodes) {
+    switch (node.tag) {
+      case ui::dtb::kInt:
+      case ui::dtb::kFloat:
+      case ui::dtb::kSymbol:
+      case ui::dtb::kString:
+        break;
+      case ui::dtb::kArray:
+        if (!StaticNodes(node.kids)) return false;
+        break;
+      default:
+        return false;
+    }
+  }
+  return true;
+}
 }  // namespace
+
+bool IsStaticSongMetadata(std::span<const uint8_t> bytes, bool compiled, std::string* error) {
+  if (error) error->clear();
+  if (bytes.empty() || bytes.size() > 2 * 1024 * 1024) {
+    if (error) *error = "empty or oversized song metadata";
+    return false;
+  }
+  std::vector<Node> nodes;
+  if (compiled) {
+    ui::dtb::RootHeader header;
+    if (!ui::dtb::Parse(bytes.data(), bytes.size(), &nodes, &header, error)) return false;
+  } else {
+    const auto text = std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    if (!StaticText(text) || !TextReader(text).Read(&nodes)) {
+      if (error) *error = "executable or malformed text DTA";
+      return false;
+    }
+  }
+  if (!StaticNodes(nodes)) {
+    if (error) *error = "executable nodes in song metadata";
+    return false;
+  }
+  return true;
+}
 
 std::vector<SongMetadata> ReadSongMetadata(std::span<const uint8_t> bytes, bool compiled,
                                          std::string* error) {

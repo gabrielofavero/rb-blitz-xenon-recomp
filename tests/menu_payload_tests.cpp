@@ -679,7 +679,8 @@ void CheckIconScene(const std::vector<uint8_t>& icon_scene) {
 }
 
 // Optional integration check against extracted records; never boots or drives the game.
-int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root) {
+int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
+                                bool single = false) {
   namespace fs = std::filesystem;
   namespace screen = rb_blitz::ui::screen;
   using namespace header_test;
@@ -689,7 +690,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
     bytes->assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
     return true;
   };
-  for (int boot_case = 0; boot_case < 16; ++boot_case) {
+  for (int boot_case = 0; boot_case < (single ? 1 : 16); ++boot_case) {
     const int mask = boot_case & 7;
     const bool fast = boot_case >= 8;
     const auto state = State(mask);
@@ -708,6 +709,26 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root)
     CHECK_TRUE(notes.empty());
     if (boot_case == 0) {
       CheckIconScene(records.at(rb_blitz::ui::input_font::kIconSceneRecord));
+      const auto& hint_font = records.at(rb_blitz::ui::input_font::kHintSceneRecord);
+      CheckIconScene(hint_font);
+      CHECK_TRUE(hint_font != records.at(rb_blitz::ui::input_font::kIconSceneRecord));
+      const auto& help = records.at(rb_blitz::ui::input_font::kInlineHelpRecord);
+      constexpr std::string_view hint_path = "../fonts/inline_help_icons.milo";
+      CHECK_TRUE(std::search(help.begin(), help.end(),
+          hint_path.begin(), hint_path.end())
+          != help.end());
+      std::vector<rb_blitz::ui::dtb::Node> locale_roots;
+      rb_blitz::ui::dtb::RootHeader locale_header;
+      CHECK_TRUE(rb_blitz::ui::dtb::Parse(
+          records.at("ui/locale/eng/gen/locale_keep.dtb").data(),
+          records.at("ui/locale/eng/gen/locale_keep.dtb").size(),
+          &locale_roots, &locale_header, &why));
+      bool numbered_alt = false;
+      for (const auto& root : locale_roots)
+        if (root.tag == rb_blitz::ui::dtb::kArray && root.kids.size() >= 2 &&
+            root.kids[0].text == "inline_help_fmt" &&
+            root.kids[1].text == "<alt1>%s</alt1> %s") numbered_alt = true;
+      CHECK_TRUE(numbered_alt);
     }
     CHECK_TRUE(records.contains("ui/startup/gen/startup.dtb") == fast);
     const auto dir = fs::path(output_root) / (std::string(fast ? "fast-" : "normal-") + std::to_string(mask));
@@ -887,6 +908,48 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
 
 int main(int argc, char** argv) {
   rb_blitz::test::SuppressWindowsTestCrashDialogs();
+  if (argc == 3 && std::string(argv[1]) == "check-inline-help") {
+    std::ifstream input(argv[2], std::ios::binary);
+    CHECK_TRUE(bool(input));
+    if (!input) return Finish();
+    std::vector<uint8_t> original{std::istreambuf_iterator<char>(input),
+                                  std::istreambuf_iterator<char>()};
+    std::vector<uint8_t> scene;
+    std::string why;
+    const bool prepared = rb_blitz::ui::input_font::PrepareInlineHelp(original, &scene, &why);
+    CHECK_TRUE(prepared);
+    if (!prepared) std::printf("inline help font refused: %s\n", why.c_str());
+    return Finish();
+  }
+  {
+    BeginCase("inline help uses the private input font without changing its other records");
+    constexpr size_t header = 0x810, size = 1002, at = 0x3AD;
+    std::vector<uint8_t> source(header + size, 0);
+    auto little = [&](size_t pos, uint32_t value) {
+      for (unsigned i = 0; i < 4; ++i) source[pos + i] = uint8_t(value >> (i * 8));
+    };
+    auto big = [&](size_t pos, uint32_t value) {
+      for (unsigned i = 0; i < 4; ++i) source[header + pos + i] = uint8_t(value >> (24 - i * 8));
+    };
+    constexpr std::string_view old_font = "../fonts/buttons.milo";
+    constexpr std::string_view new_font = "../fonts/inline_help_icons.milo";
+    little(0, 0xCABEDEAF); little(4, header); little(8, 1);
+    little(12, size); little(16, 0x01000000 | size);
+    big(at, static_cast<uint32_t>(old_font.size()));
+    std::copy(old_font.begin(), old_font.end(), source.begin() + header + at + 4);
+    big(0x3E6, 0xADDEADDE);
+    std::vector<uint8_t> output;
+    std::string why;
+    CHECK_TRUE(rb_blitz::ui::input_font::PrepareInlineHelp(source, &output, &why));
+    if (!output.empty()) {
+      CHECK_EQ(output.size(), source.size() + new_font.size() - old_font.size());
+      CHECK_TRUE(std::equal(new_font.begin(), new_font.end(), output.begin() + header + at + 4));
+      CHECK_TRUE(std::equal(source.begin() + header + 0x3E6, source.end(),
+                            output.begin() + header + 0x3E6 + new_font.size() - old_font.size()));
+    }
+    source[header + at + 4] = 'x';
+    CHECK_FALSE(rb_blitz::ui::input_font::PrepareInlineHelp(source, &output, &why));
+  }
   if (argc == 3 && std::string(argv[1]) == "check-icon-font") {
     std::ifstream input(argv[2], std::ios::binary);
     CHECK_TRUE(bool(input));
@@ -1061,6 +1124,9 @@ int main(int argc, char** argv) {
   }
   if (argc == 4 && std::string(argv[1]) == "check-header-records") {
     return CheckInstalledHeaderRecords(argv[2], argv[3]);
+  }
+  if (argc == 4 && std::string(argv[1]) == "check-p10-records") {
+    return CheckInstalledHeaderRecords(argv[2], argv[3], true);
   }
   TestHeaderAnimations();
   TestHeaderVisibility();

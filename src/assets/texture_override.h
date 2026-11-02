@@ -20,6 +20,7 @@ bool SelectControllerScheme(const std::string& id);
 // Publish the image glyphs used by the currently entered mapping page. The guest list text
 // receives matching character codes; the GPU thread consumes this immutable batch in Poll().
 void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons);
+void PublishHintIcons(std::string signature, std::vector<input::icons::Icon> icons);
 bool InputIconsAvailable();
 const controller_schemes::Registry* ControllerSchemeRegistry();
 

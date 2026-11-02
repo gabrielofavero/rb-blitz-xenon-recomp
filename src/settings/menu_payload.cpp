@@ -886,6 +886,16 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       })) return false;
   for (const auto& locale : locales) {
     if (!edit(locale, [&](auto& roots) {
+      // InlineHelp's action character uses the same private image font as P9
+      // mapping rows. The retail <alt> tag selects the old button style; the
+      // private font is reached through the numbered alternate style.
+      std::string help_why;
+      if (!screen::ReplaceLocaleEntry(&roots, "inline_help_fmt", "<alt>%s</alt> %s",
+                                      "<alt1>%s</alt1> %s", &help_why) ||
+          !help_why.empty()) {
+        if (error) *error = "inline help locale format changed: " + help_why;
+        return false;
+      }
       for (const auto& [key,text] : std::initializer_list<std::pair<const char*,const char*>>{
           {"rbbz_graphics_checking","Checking graphics cache..."},
           {"rbbz_graphics_preparing","Preparing graphics... %i / %i"},
@@ -1245,8 +1255,20 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           if (error) *error = "input image label preparation was refused: " + why;
           return false;
         }
+        std::vector<uint8_t> help_source, help, hint_font;
+        if (!ui::input_font::PrepareHintScene(prepared, &hint_font, &why)) {
+          if (error) *error = "inline help icon font preparation was refused: " + why;
+          return false;
+        }
+        if (!read(ui::input_font::kInlineHelpRecord, &help_source, &why) ||
+            !ui::input_font::PrepareInlineHelp(help_source, &help, &why)) {
+          if (error) *error = "inline help image font preparation was refused: " + why;
+          return false;
+        }
         built[ui::input_font::kIconSceneRecord] = std::move(prepared);
+        built[ui::input_font::kHintSceneRecord] = std::move(hint_font);
         built[ui::input_font::kListRecord] = std::move(list);
+        built[ui::input_font::kInlineHelpRecord] = std::move(help);
       } else {
         note("input image font preparation was refused: " + why);
       }

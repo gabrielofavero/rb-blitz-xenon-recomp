@@ -1,0 +1,88 @@
+diff --git a/include/rex/system/xam/content_manager.h b/include/rex/system/xam/content_manager.h
+index 6f8dc44..5ecd691 100644
+--- a/include/rex/system/xam/content_manager.h
++++ b/include/rex/system/xam/content_manager.h
+@@ -26,6 +26,9 @@
+ #include <rex/thread/mutex.h>
+ 
+ namespace rex {
++namespace filesystem {
++class Device;
++}
+ namespace system {
+ class KernelState;
+ }  // namespace system
+@@ -35,6 +38,10 @@ namespace rex {
+ namespace system {
+ namespace xam {
+ 
++// The host title may reject a mounted content device before any guest path is
++// registered. A null validator preserves the SDK's default behavior.
++using ContentDeviceValidator = bool (*)(rex::filesystem::Device&);
++
+ // If set in XCONTENT_AGGREGATE_DATA, will be substituted with the running
+ // titles ID
+ // TODO: check if actual x360 kernel/xam has a value similar to this
+@@ -121,7 +128,8 @@ static_assert_size(XCONTENT_AGGREGATE_DATA, 0x148);
+ class ContentPackage {
+  public:
+   ContentPackage(KernelState* kernel_state, const std::string_view root_name,
+-                 const XCONTENT_AGGREGATE_DATA& data, const std::filesystem::path& package_path);
++                 const XCONTENT_AGGREGATE_DATA& data, const std::filesystem::path& package_path,
++                 ContentDeviceValidator validator = nullptr);
+   ~ContentPackage();
+ 
+   void LoadPackageLicenseMask(const std::filesystem::path header_path);
+@@ -205,6 +213,9 @@ class ContentManager {
+   void set_extra_content_root(const std::filesystem::path& path) { extra_content_root_ = path; }
+   const std::filesystem::path& extra_content_root() const { return extra_content_root_; }
+ 
++  // Runs for primary, structured, and flat-library content before guest access.
++  void set_content_device_validator(ContentDeviceValidator validator) { validator_ = validator; }
++
+   // A flat DLC library, laid out however the dumped containers happen to lie: each
+   // item carries the title id and content type read from its own header. Items are
+   // listed and opened like extra-root content, and no write path (create, thumbnail,
+@@ -265,6 +276,7 @@ class ContentManager {
+   std::filesystem::path root_path_;
+   std::filesystem::path extra_content_root_;
+   std::vector<ExtraContentItem> extra_content_library_;
++  ContentDeviceValidator validator_ = nullptr;
+ 
+   // TODO(benvanik): remove use of global lock, it's bad here!
+   rex::thread::global_critical_region global_critical_region_;
+diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
+index 9c2c6a2..4ce2052 100644
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -62,7 +62,8 @@ uint32_t ComputeLicenseMask(const rex::filesystem::StfsHeader& header) {
+ 
+ ContentPackage::ContentPackage(KernelState* kernel_state, const std::string_view root_name,
+                                const XCONTENT_AGGREGATE_DATA& data,
+-                               const std::filesystem::path& package_path)
++                               const std::filesystem::path& package_path,
++                               ContentDeviceValidator validator)
+     : kernel_state_(kernel_state), root_name_(root_name), package_path_(package_path), license_(0) {
+   device_path_ = fmt::format("\\Device\\Content\\{0}\\", ++content_device_id_);
+   content_data_ = data;
+@@ -87,6 +88,10 @@ ContentPackage::ContentPackage(KernelState* kernel_state, const std::string_view
+     return;
+   }
+ 
++  if (validator && !validator(*device)) {
++    return;
++  }
++
+   auto fs = kernel_state_->file_system();
+   fs->RegisterDevice(std::move(device));
+   fs->RegisterSymbolicLink(root_name_ + ":", device_path_);
+@@ -343,7 +348,8 @@ std::unique_ptr<ContentPackage> ContentManager::ResolvePackage(
+   if (!std::filesystem::exists(package_path)) {
+     return nullptr;
+   }
+-  auto package = std::make_unique<ContentPackage>(kernel_state_, root_name, data, package_path);
++  auto package = std::make_unique<ContentPackage>(kernel_state_, root_name, data, package_path,
++                                                  validator_);
+   if (!package->IsValidPackage()) {
+     // Present but unmountable: a damaged container, or a path that is neither a
+     // directory nor an STFS package.

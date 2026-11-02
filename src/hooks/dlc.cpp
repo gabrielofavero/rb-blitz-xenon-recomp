@@ -86,6 +86,7 @@
 
 #include "fs/dlc_layout.h"
 #include "fs/dlc_library.h"
+#include "fs/dlc_song_metadata.h"
 #include "graphics/preparation_loading.h"
 #include <chrono>
 #include "fs/refresh_state.h"
@@ -100,6 +101,13 @@
 
 namespace rb_blitz::dlc {
 namespace {
+
+bool ValidateContentDevice(rex::filesystem::Device& device) {
+  std::string reason;
+  if (fs::IsSafeSongContent(device, &reason)) return true;
+  REXLOG_WARN("dlc: Nope. Not here; refusing song content with {}", reason);
+  return false;
+}
 
 REXCVAR_DEFINE_STRING(dlc_root, "", "Runtime",
                       "DLC directory, laid out as <title_id>/<content_type>/<package> "
@@ -388,6 +396,8 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     return;
   }
   g_runtime = runtime;
+  rex::system::xam::ContentManager* content_manager = ContentManagerOf(runtime);
+  if (content_manager) content_manager->set_content_device_validator(&ValidateContentDevice);
 
   std::error_code ec;
   const std::filesystem::path root =
@@ -499,8 +509,6 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
                   library.adapted_saved_games, Hex8(fs::kMarketplaceContentType));
     }
   }
-
-  rex::system::xam::ContentManager* content_manager = ContentManagerOf(runtime);
 
   const std::size_t structured_count = structured ? scan.packages.size() : 0;
   const std::size_t library_count = library.items.size();
