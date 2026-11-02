@@ -4,15 +4,16 @@
 2026-10-26; P1, P2 and P3 delivered 2026-10-27; P6a and P8 delivered 2026-10-28.
 P4's tracker, D3D12 family switching and selected-pad-art stability were
 accepted 2026-10-28; visible binding-aware hints remain P10 work.
-P5, P6b, P7, P9 and P10 remain open. P11's v2 loader, staging, internal keyboard
+P5, P6b, P7, P9 and P10 remain open. P9's in-list paging is implemented on
+2026-11-01 and awaits a live fit/navigation check. P11's v2 loader, staging, internal keyboard
 art and distinct SDL source path landed 2026-10-30; physical-device/UI acceptance
 remains open. P9's ordinary Interface and Gameplay Mapping
 images and binding refresh have owner visual acceptance. The icon font supports
 180 distinct images and reuses tiles for repeated sources. An eight-input Confirm row has owner
 visual acceptance; the latest font-atlas repair has owner visual acceptance.
 The owner has also accepted Interface Mapping and Gameplay Notes images in a paused song.
-Inspectable image overflow beyond the accepted eight-input row remains open; rows exceeding
-180 distinct sources currently fall back to text.**
+Inspectable image overflow beyond the accepted eight-input row awaits live acceptance; long rows
+now page through six images at a time with Left/Right, including rows above 180 sources.**
 The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
@@ -58,7 +59,7 @@ P11, then checks the final UI and art. Historical P0–P8 evidence remains evide
 | --- | --- | --- |
 | P5 | PS3 source bounds/reference delivered; installer import open | Local v1 `ps3` import works or its unavailable route is reported accurately |
 | P11 | V1/v2 coexist; nine manifests validate and stage; virtual SDL extras pass, boot lists eight controllers | Physical-device mapping/capture and on-screen image acceptance |
-| P9 | Ordinary rows, an eight-input Confirm row, the repaired atlas, and paused-song Interface Mapping/Gameplay Notes have owner visual acceptance; 180 distinct tiles host-tested | Inspectable image overflow beyond the accepted eight-input row, including rows exceeding atlas capacity |
+| P9 | Ordinary rows, an eight-input Confirm row, the repaired atlas, and paused-song Interface Mapping/Gameplay Notes have owner visual acceptance; in-list six-image paging is implemented and host-tested | Live fit and Left/Right navigation of a row beyond eight bindings, including a later page |
 | P10 | Guest hint inventory and remap-aware routes open | Actionable hints follow effective bindings and active family with v2 art |
 | P6b | Eight controller art folders present; six declare pad PNGs | Install/cycle all eight, verify art and fallback, record live acceptance |
 | P7 | Documentation and closeout open | Audit, document P5 outcome, then move this plan to `finished/` |
@@ -1599,6 +1600,17 @@ Interface Mapping shows controller and keyboard images for Confirm and Go Back. 
 the in-song row rendering path. The only remaining P9 row-layout gap is inspectable image
 overflow beyond the accepted eight-input row; a row above 180 distinct images currently uses
 its complete textual fallback.
+
+**2026-11-01 host implementation, live acceptance pending.** Rows with more than eight
+bindings now show six source images at a time and a `(current/total)` page count. Guest
+Left/Right actions on the selected native list row change its display window, then repopulate
+the list at the same selected position. The host stores those windows as transient display
+state; an input revision/layout change and a page change republish the relevant atlas tiles.
+The row builder clamps stale windows after a binding list shrinks. Synthetic tests cover a
+46-source row, the 181st source on page 31, row order and unchanged ordinary rows. The
+generated menu's paging request paths are checked against row indices. The release build and
+focused suites are the host gates; visible fit, button routing and no overlap in a live guest
+row remain unproven until an authorized UI check.
 
 **Goal.** Both mapping surfaces show actual bound button/key/mouse images next to their action
 labels, replacing textual binding lists.

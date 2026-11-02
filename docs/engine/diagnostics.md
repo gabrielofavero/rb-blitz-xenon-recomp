@@ -4,6 +4,7 @@ Two runtime instruments. **The probe** reports *in what order the guest reached 
 
 ## At a glance
 
+- **Slow boot log.** The normal `logs/rb_blitz_*.log` now records `boot_timing` host setup stages, `controller_schemes` discovery and per-package durations, and any PNG decode taking at least 500 ms. From guest launch until the usable menu, `boot_heartbeat` records the last observed phase every 15 s and the process CPU time consumed since the previous heartbeat. A long wall interval with little CPU suggests a wait or scheduling delay; high CPU points toward active work. The heartbeat stays quiet while the title waits for the player's Start press.
 - **Probe.** A bounded ring of `probe_trace_capacity` events (256 default), newest-window only, written by one-line points inside hooks.
 - **Probe — run.** `--probe_trace=1 --probe_trace_path=<file>`; a new point is one `REX_HOOK_RAW` containing `RBBLITZ_PROBE(0xADDR, "subsystem.thing")`.
 - **Probe — output.** The trace file (rewritten wholesale ~twice a second, oldest first) and the live ImGui overlay (`probe_overlay`).

@@ -41,12 +41,14 @@
 #include "loading/crash_recovery.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -136,6 +138,40 @@ namespace {
 // Set once in Configure() on a host thread; the hooks only read them.
 bool g_enabled = true;
 bool g_forward_only = false;
+
+// The guest mapping list keeps its row identities while left/right pages through long image rows.
+// These offsets are display state only: binding changes do not write the settings profile.
+std::mutex g_icon_page_mutex;
+std::map<std::string, std::vector<size_t>> g_icon_page_offsets;
+
+bool AdvanceIconPage(std::string_view path) {
+  constexpr std::string_view prefix = "rbbz-settings/icon-page/";
+  if (!path.starts_with(prefix)) return false;
+  path.remove_prefix(prefix.size());
+  const size_t panel_end = path.find('/');
+  if (panel_end == std::string_view::npos || panel_end == 0) return true;
+  const std::string panel(path.substr(0, panel_end));
+  path.remove_prefix(panel_end + 1);
+  const size_t row_end = path.find('/');
+  if (row_end == std::string_view::npos) return true;
+  size_t row = 0;
+  const auto index = path.substr(0, row_end);
+  const auto parsed = std::from_chars(index.data(), index.data() + index.size(), row);
+  if (parsed.ec != std::errc{} || parsed.ptr != index.data() + index.size() || row >= 128)
+    return true;
+  path.remove_prefix(row_end + 1);
+  if (path != "next" && path != "prev") return true;
+  std::lock_guard lock(g_icon_page_mutex);
+  auto& offsets = g_icon_page_offsets[panel];
+  if (offsets.size() <= row) offsets.resize(row + 1);
+  constexpr size_t step = ::rb_blitz::ui::input_icon_rows::kVisibleLongRowIcons;
+  if (path == "next") {
+    offsets[row] = std::min(offsets[row] + step, size_t{1000000});
+  } else {
+    offsets[row] = offsets[row] >= step ? offsets[row] - step : 0;
+  }
+  return true;
+}
 
 // P11a: the channel's store is a seam. P1's in-memory sink is the default and is what a build with
 // no settings service keeps using; the boot installs the service-backed one (settings/bridge_sink.h)
@@ -762,15 +798,27 @@ bool TakeRead(PPCContext& ctx, uint8_t* base) {
           ::rb_blitz::assets::ControllerSchemeRegistry());
       view.input = snapshot;
       view.revision = snapshot->revision;
+      std::vector<size_t> windows;
+      {
+        std::lock_guard lock(g_icon_page_mutex);
+        const auto it = g_icon_page_offsets.find(std::string(panel));
+        if (it != g_icon_page_offsets.end()) windows = it->second;
+      }
       auto page = ::rb_blitz::ui::input_icon_rows::Build(
-          ::rb_blitz::ui::screen::PanelRowSymbols(panel), lines, view);
+          ::rb_blitz::ui::screen::PanelRowSymbols(panel), lines, view, windows);
+      {
+        std::lock_guard lock(g_icon_page_mutex);
+        g_icon_page_offsets[std::string(panel)] = page.window_starts;
+      }
       if (page.overflow) {
         REXLOG_WARN("input_icons: '{}' needs more than {} distinct image slots; affected rows retain full text",
                     panel, ::rb_blitz::ui::input_font::kIconCount);
       }
       if (!page.icons.empty()) {
-        const std::string signature = std::string(panel) + ":" +
+        std::string signature = std::string(panel) + ":" +
             std::to_string(view.revision) + ":" + view.controller_scheme;
+        for (const size_t start : page.window_starts)
+          signature += ":" + std::to_string(start);
         ::rb_blitz::assets::PublishInputIcons(signature, std::move(page.icons));
         lines = std::move(page.lines);
       }
@@ -865,6 +913,10 @@ bool TakeWrite(PPCContext& ctx, uint8_t* base) {
   }
   if (!IsNamespacedPath(path)) {
     return false;
+  }
+  if (AdvanceIconPage(path)) {
+    WriteResultCell(base, ctx.r3.u32, 0);
+    return true;
   }
   HandleRequest(path);
   WriteResultCell(base, ctx.r3.u32, 0);

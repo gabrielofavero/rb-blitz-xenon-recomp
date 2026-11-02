@@ -53,6 +53,7 @@
 #include "ui/input_font_scene.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -670,6 +671,23 @@ void TestRequestPathsParse() {
     }
     if (literal.starts_with("rbbz-settings/text/")) {
       CHECK_FALSE(PanelBindingText(literal.substr(19), rb_blitz::input::EffectiveInput{}).empty());
+      continue;
+    }
+    if (literal.starts_with("rbbz-settings/icon-page/")) {
+      constexpr std::string_view prefix = "rbbz-settings/icon-page/";
+      const std::string_view suffix(literal.data() + prefix.size(), literal.size() - prefix.size());
+      const size_t panel_end = suffix.find('/');
+      const size_t row_end = suffix.find('/', panel_end + 1);
+      CHECK_TRUE(panel_end != std::string_view::npos && row_end != std::string_view::npos);
+      if (panel_end == std::string_view::npos || row_end == std::string_view::npos) continue;
+      const auto panel = suffix.substr(0, panel_end);
+      const auto index = suffix.substr(panel_end + 1, row_end - panel_end - 1);
+      size_t row = 0;
+      const auto parsed = std::from_chars(index.data(), index.data() + index.size(), row);
+      CHECK_TRUE(parsed.ec == std::errc{} && parsed.ptr == index.data() + index.size());
+      CHECK_TRUE(row < PanelRowSymbols(panel).size());
+      CHECK_TRUE(suffix.substr(row_end + 1) == "next" ||
+                 suffix.substr(row_end + 1) == "prev");
       continue;
     }
     ++checked;

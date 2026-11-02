@@ -12,6 +12,7 @@
 // call (`SetTotal`): the engine then resets the same bar for its mounting phase and refills it
 // with its own `Increment` calls (measured, out/_swap/dlc-native-bar/bar-2, 2026-10-15).
 #include "hooks/content_progress.h"
+#include "diag/boot_heartbeat.h"
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -187,6 +188,7 @@ void RequestFrameRateRestore(const char* why) {
 
 
 void BeginAttempt() { // g_mutex held
+  rb_blitz::diag::boot_heartbeat::Phase("content_discovery");
   g_model.Begin();
   g_start_us = NowMicros();
   g_last_enum_us = 0;
@@ -289,6 +291,7 @@ void ObserveScreen(std::string_view screen, std::string_view panel, bool availab
                 g_last_enum_us ? (NowMicros() - g_last_enum_us) / 1000.0 : 0.0,
                 p.successful, p.failures);
     RequestFrameRateRestore("the usable main menu is current with no transition pending");
+    rb_blitz::diag::boot_heartbeat::Finish("usable menu");
   }
 }
 IoObservation BeginIo(uint32_t handle, bool write) {

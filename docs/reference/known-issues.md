@@ -41,18 +41,13 @@ keyboard and mouse images on Interface Mapping and Gameplay Notes, but the tool 
 foreground the game for capture. See the
 [button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P11.
 
-**Mapping images (2026-10-31):** host tests cover 180 distinct source images per mapping
-page; repeated sources share a tile, and a row beyond capacity retains its complete text.
-Owner screenshots show that an eight-input Confirm row fits, but repeated runs still showed
-letter fragments in place of images. Renaming the copied font scene's texture and material
-resources did not make the guest upload a private texture; `rb_blitz_450.log` again shows only
-the retail Pentatonic texture. The current implementation shares that proven texture and puts
-180 smaller icon tiles into its unused bottom band. Its BC3 blocks above the band remain
-byte-identical at every mip level, preserving ordinary text art. The copied font's cell
-dimensions and glyph UVs address the new tiles. Host checks and a release build pass; live
-icon rendering, the paused-song page, and images beyond 45 sources await owner verification.
-The owner confirmed Music Library Options' replacement Start/Back images and distinct media
-symbols passed on 2026-10-31. See the
+**Mapping images (updated 2026-11-01):** owner screenshots accepted ordinary Interface and
+Gameplay Mapping images, the eight-input Confirm row, the repaired retail-band atlas, and
+both mapping surfaces in a paused song on 2026-10-31. The font has 180 image tiles; repeated
+sources share one. A row with more than eight bindings now pages six images at a time inside
+the guest list via Left/Right, with a page count. Host tests reach the 181st distinct source,
+but the live fit and navigation of an overflow row are unproven. Music Library Options'
+Start/Back images and distinct media symbols were accepted on 2026-10-31. See the
 [button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P9.
 
 **Load Guard coverage limits (2026-10-26):** the debugger

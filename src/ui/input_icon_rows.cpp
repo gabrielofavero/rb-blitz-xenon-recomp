@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ui/input_icon_rows.h"
 
+#include <algorithm>
+
 #include "profile/input_rows.h"
 #include "ui/input_font_scene.h"
 
@@ -23,21 +25,32 @@ void AppendGlyph(std::string* text, uint32_t code) {
 
 Page Build(const std::vector<std::string>& symbols,
            const std::vector<std::string>& fallback,
-           const input::icons::View& view) {
+           const input::icons::View& view,
+           const std::vector<size_t>& windows) {
   Page page;
   if (symbols.size() != fallback.size()) return page;
   page.lines = fallback;
+  page.window_starts.resize(symbols.size());
   for (size_t row = 0; row < symbols.size(); ++row) {
     const auto token = profile::ParseInputRowSymbol(symbols[row]);
     if (!IsBinding(token.kind)) continue;
     auto ordered = input::icons::Ordered(view, token);
     if (ordered.empty()) ordered.push_back(input::icons::First(view, token));
+    const bool long_row = ordered.size() > 8;
+    const size_t start = long_row
+        ? std::min(row < windows.size() ? windows[row] : size_t{0},
+                   ((ordered.size() - 1) / kVisibleLongRowIcons) * kVisibleLongRowIcons)
+        : 0;
+    const size_t end = long_row
+        ? std::min(start + kVisibleLongRowIcons, ordered.size()) : ordered.size();
+    page.window_starts[row] = start;
     // The dedicated alt1 font has its own white material tint. A vertex color
     // tag cannot override the primary font's black hover material multiplier.
     std::string line = profile::BindingRowLabel(token) + ": <alt1>";
     const size_t first_row_icon = page.icons.size();
     bool row_overflow = false;
-    for (const auto& icon : ordered) {
+    for (size_t source = start; source < end; ++source) {
+      const auto& icon = ordered[source];
       if (line.back() != '>') line += ' ';
       size_t index = 0;
       for (; index < page.icons.size(); ++index) {
@@ -61,6 +74,11 @@ Page Build(const std::vector<std::string>& symbols,
     }
     if (row_overflow) continue;
     line += "</alt1>";
+    if (long_row) {
+      line += " (" + std::to_string(start / kVisibleLongRowIcons + 1) + "/" +
+          std::to_string((ordered.size() + kVisibleLongRowIcons - 1) /
+                         kVisibleLongRowIcons) + ")";
+    }
     page.lines[row] = std::move(line);
   }
   return page;

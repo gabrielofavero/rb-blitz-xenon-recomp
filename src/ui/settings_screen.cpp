@@ -2132,7 +2132,20 @@ Node PanelDefinition(const PanelSpec& panel) {
   extras.push_back(Arr({Sym("kAction_Up"), Cmd({Var("this"), Sym("move_up")})}));
   extras.push_back(Arr({Sym("kAction_Down"), Cmd({Var("this"), Sym("move_down")})}));
   std::vector<Node> left = DirectionCases(panel, false);
-  if (!left.empty()) {
+  if (LiveBindingRows(panel)) {
+    for (const auto& [action, step] : {std::pair{"kAction_Left", "prev"},
+                                      std::pair{"kAction_Right", "next"}}) {
+      std::vector<Node> cases = {Sym("switch"), Cmd({Sym(kList), Sym("selected_pos")})};
+      for (size_t i = 0; i < panel.rows.size(); ++i) {
+        cases.push_back(Arr({Node::Int(static_cast<int>(i)),
+                             Cmd({Sym("do"),
+                                  Write("rbbz-settings/icon-page/" + panel.name + "/" +
+                                        std::to_string(i) + "/" + step),
+                                  Cmd({Var("this"), Sym("populate_menu")})})}));
+      }
+      extras.push_back(Arr({Sym(action), Cmd(std::move(cases))}));
+    }
+  } else if (!left.empty()) {
     std::vector<Node> kids = {Sym("switch"), Cmd({Sym(kList), Sym("selected_sym")})};
     for (Node& item : left) {
       kids.push_back(std::move(item));

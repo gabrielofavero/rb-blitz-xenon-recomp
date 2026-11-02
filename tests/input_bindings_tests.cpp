@@ -885,22 +885,47 @@ void TestImageRows() {
   rebound->general.Set(remap::Target::kA, distinct);
   const auto above_old_limit = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
   CHECK_FALSE(above_old_limit.overflow);
-  CHECK_EQ(above_old_limit.icons.size(), 46u);
-  CHECK_TRUE(above_old_limit.lines[0].find("\xC2\xB9") != std::string::npos);
+  CHECK_EQ(above_old_limit.icons.size(), 6u);
+  CHECK_TRUE(above_old_limit.lines[0].find(" (1/8)") != std::string::npos);
+  const auto next_window = rb_blitz::ui::input_icon_rows::Build(
+      symbols, fallback, view, {6});
+  CHECK_EQ(next_window.icons.size(), 6u);
+  CHECK_TRUE(next_window.icons[0].source.name == "Key6");
+  CHECK_TRUE(next_window.lines[0].find(" (2/8)") != std::string::npos);
   distinct.clear();
   for (uint32_t i = 0; i < rb_blitz::ui::input_font::kIconCount; ++i)
     distinct.push_back({remap::SourceKind::kKey, "Key" + std::to_string(i)});
   rebound->general.Set(remap::Target::kA, distinct);
   const auto expanded = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
   CHECK_FALSE(expanded.overflow);
-  CHECK_EQ(expanded.icons.size(), rb_blitz::ui::input_font::kIconCount);
-  CHECK_TRUE(expanded.lines[0].find("\xC2\xB8") != std::string::npos);
+  CHECK_EQ(expanded.icons.size(), 6u);
+  CHECK_TRUE(expanded.lines[0].find(" (1/30)") != std::string::npos);
   distinct.push_back({remap::SourceKind::kKey, "Key180"});
   rebound->general.Set(remap::Target::kA, distinct);
-  const auto overflow = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view);
-  CHECK_TRUE(overflow.overflow);
-  CHECK_TRUE(overflow.icons.empty());
-  CHECK_TRUE(overflow.lines == fallback);
+  const auto last_window = rb_blitz::ui::input_icon_rows::Build(
+      symbols, fallback, view, {180});
+  CHECK_FALSE(last_window.overflow);
+  CHECK_EQ(last_window.icons.size(), 1u);
+  CHECK_TRUE(last_window.icons[0].source.name == "Key180");
+  CHECK_TRUE(last_window.lines[0].find(" (31/31)") != std::string::npos);
+  distinct.resize(9);
+  rebound->general.Set(remap::Target::kA, distinct);
+  const auto clamped_window = rb_blitz::ui::input_icon_rows::Build(
+      symbols, fallback, view, {180});
+  CHECK_EQ(clamped_window.window_starts[0], 6u);
+  CHECK_EQ(clamped_window.icons.size(), 3u);
+  CHECK_TRUE(clamped_window.icons[0].source.name == "Key6");
+  CHECK_TRUE(clamped_window.lines[0].find(" (2/2)") != std::string::npos);
+  distinct.resize(8);
+  rebound->general.Set(remap::Target::kA, distinct);
+  const auto eight = rb_blitz::ui::input_icon_rows::Build(symbols, fallback, view, {6});
+  CHECK_EQ(eight.window_starts[0], 0u);
+  CHECK_EQ(eight.icons.size(), 8u);
+  CHECK_TRUE(eight.lines[0].find(" (1/") == std::string::npos);
+  distinct.push_back({remap::SourceKind::kKey, "Key8"});
+  for (uint32_t i = 9; i <= 180; ++i)
+    distinct.push_back({remap::SourceKind::kKey, "Key" + std::to_string(i)});
+  rebound->general.Set(remap::Target::kA, distinct);
 
   // Exhausting the font on one row must not erase unrelated image rows.
   rebound->general.Set(remap::Target::kB, {Source("pad:b")});
@@ -910,19 +935,19 @@ void TestImageRows() {
       "Go Back: B", "Confirm: all 181 bindings"};
   const auto partial = rb_blitz::ui::input_icon_rows::Build(
       mixed_symbols, mixed_fallback, view);
-  CHECK_TRUE(partial.overflow);
-  CHECK_EQ(partial.icons.size(), 1u);
+  CHECK_FALSE(partial.overflow);
+  CHECK_EQ(partial.icons.size(), 7u);
   CHECK_TRUE(partial.icons[0].slot == "b_button");
   CHECK_TRUE(partial.lines[0] == "Go Back: <alt1>\xC2\x80</alt1>");
-  CHECK_TRUE(partial.lines[1] == mixed_fallback[1]);
+  CHECK_TRUE(partial.lines[1].find(" (1/31)") != std::string::npos);
 
   const auto recovered = rb_blitz::ui::input_icon_rows::Build(
       {mixed_symbols[1], mixed_symbols[0]},
       {mixed_fallback[1], mixed_fallback[0]}, view);
-  CHECK_TRUE(recovered.overflow);
-  CHECK_EQ(recovered.icons.size(), 1u);
-  CHECK_TRUE(recovered.lines[0] == mixed_fallback[1]);
-  CHECK_TRUE(recovered.lines[1] == "Go Back: <alt1>\xC2\x80</alt1>");
+  CHECK_FALSE(recovered.overflow);
+  CHECK_EQ(recovered.icons.size(), 7u);
+  CHECK_TRUE(recovered.lines[0].find(" (1/31)") != std::string::npos);
+  CHECK_TRUE(recovered.lines[1] == "Go Back: <alt1>\xC2\x86</alt1>");
 }
 
 }  // namespace

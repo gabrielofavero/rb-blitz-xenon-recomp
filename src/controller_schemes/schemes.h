@@ -47,6 +47,10 @@ struct Rejection { std::filesystem::path folder; std::string reason; };
 
 // The image decoder is supplied by the host; parsing/composition remain SDK-free.
 using DecodePng = bool (*)(const std::filesystem::path&, Image*, std::string*);
+// Optional read-only progress observer for boot diagnostics. Called before and after
+// each package, so a stalled decode still leaves the package name in the log.
+using DiscoveryObserver = void (*)(const std::filesystem::path&, bool begin,
+                                   bool accepted, uint64_t elapsed_ms);
 bool LoadScheme(const std::filesystem::path& folder, bool trusted_reserved,
                 DecodePng decoder, Scheme* result, std::string* why);
 bool LoadInternalKeyboard(const std::filesystem::path& folder, DecodePng decoder,
@@ -61,7 +65,8 @@ struct Registry {
   std::string Summary() const;
 };
 Registry Discover(const std::filesystem::path& install_root,
-                  const std::filesystem::path& user_root, DecodePng decoder);
+                  const std::filesystem::path& user_root, DecodePng decoder,
+                  DiscoveryObserver observer = nullptr);
 bool DecodePngWic(const std::filesystem::path& path, Image* image, std::string* why);
 
 // The whole source canvas is resized proportionally and centered on transparent pixels.

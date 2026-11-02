@@ -883,3 +883,16 @@ Host tests cover ordered 46- and 180-source rows, the 46th atlas tile and the
 remaining overflow boundary. Installed-scene generation confirms only the
 marker byte changes in the source BC3 chain. The paused-song and very-large-row
 on-screen appearance still need owner visual checks.
+
+### In-list image paging (2026-11-01 host implementation)
+
+The owner accepted an eight-image Confirm row and the paused-song Interface and
+Gameplay Mapping rows on 2026-10-31. Rows with more than eight bindings now show
+six images plus a `(current/total)` page count. The guest's own Left/Right actions
+request the preceding or next six bindings for the selected list position, then
+repopulate that list without adding rows or changing its action indices. The host
+stores only the display offset; it clamps that offset when bindings are removed.
+The icon publication signature includes the offsets so a page turn invalidates
+the composed atlas. Host tests reach binding 181 through its last window. Live
+guest fit and navigation of an overflow row are not yet measured; see the
+[button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P9.

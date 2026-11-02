@@ -96,6 +96,7 @@ set(RBBLITZ_SOURCES
     src/diag/probe_trace.cpp
     src/diag/gameplay_probe.cpp
     src/diag/shader_trace.cpp
+    src/diag/boot_heartbeat.cpp
     src/graphics/preparation_assets.cpp
     src/graphics/preparation_state.cpp
     src/graphics/preparation_loading.cpp

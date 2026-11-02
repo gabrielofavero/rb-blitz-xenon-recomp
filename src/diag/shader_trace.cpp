@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "diag/shader_trace.h"
+#include "diag/boot_heartbeat.h"
 #include "graphics/preparation_loading.h"
 #include <rex/cvar.h>
 #include <rex/graphics/compile_trace.h>
@@ -66,6 +67,12 @@ void ObserveScreen(std::string_view screen, std::string_view panel,
       startup_context = context;
       --startup_budget;
       REXLOG_INFO("startup: native UI {} focus={}", context, focus);
+      // The stable pre-A title can wait for the player indefinitely. Keep the
+      // watchdog alive for the later content load without filling the log here.
+      boot_heartbeat::Phase(!transitioning && screen == "splash_screen" &&
+                                    panel == "splash_panel"
+                                ? "waiting_for_start"
+                                : context);
     }
     startup_finished = !transitioning && screen == "splash_screen" && panel == "splash_panel";
   }

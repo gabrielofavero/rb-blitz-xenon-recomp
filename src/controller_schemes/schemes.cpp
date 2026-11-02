@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <fstream>
 #include <regex>
 #include <set>
@@ -439,12 +440,24 @@ std::string Registry::Summary() const {
   out << "; rejected=" << rejected.size() << "; shadowed=" << shadowed.size();
   return out.str();
 }
-Registry Discover(const fs::path& install_root, const fs::path& user_root, DecodePng decoder) {
+Registry Discover(const fs::path& install_root, const fs::path& user_root, DecodePng decoder,
+                  DiscoveryObserver observer) {
   Registry registry;
+  auto load = [&](const fs::path& folder, bool internal, bool trusted,
+                  Scheme* scheme, std::string* why) {
+    if (observer) observer(folder, true, false, 0);
+    const auto started = std::chrono::steady_clock::now();
+    const bool accepted = internal ? LoadInternalKeyboard(folder, decoder, scheme, why)
+                                   : LoadScheme(folder, trusted, decoder, scheme, why);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started).count();
+    if (observer) observer(folder, false, accepted, static_cast<uint64_t>(elapsed));
+    return accepted;
+  };
   const fs::path keyboard_folder = install_root.parent_path() / "keyboard-mouse";
   if (fs::exists(keyboard_folder)) {
     std::string why;
-    if (LoadInternalKeyboard(keyboard_folder, decoder, &registry.keyboard_mouse, &why))
+    if (load(keyboard_folder, true, true, &registry.keyboard_mouse, &why))
       registry.has_keyboard_mouse = true;
     else registry.rejected.push_back({keyboard_folder, why});
   }
@@ -463,7 +476,7 @@ Registry Discover(const fs::path& install_root, const fs::path& user_root, Decod
       // the optional PS3 import. User packages cannot shadow any reserved id.
       const std::string id = folder.filename().string();
       const bool trusted = !user;
-      if (!LoadScheme(folder, trusted, decoder, &scheme, &why)) {
+      if (!load(folder, false, trusted, &scheme, &why)) {
         registry.rejected.push_back({folder, why}); continue;
       }
       auto it = registry.schemes.find(scheme.id);

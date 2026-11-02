@@ -47,6 +47,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -57,6 +58,7 @@
 #include "assets/texture_override.h"
 #include <rex/graphics/compile_trace.h>
 #include "diag/shader_trace.h"
+#include "diag/boot_heartbeat.h"
 #include "graphics/preparation_loading.h"
 #include "graphics/shader_coverage.h"
 #include <rex/filesystem.h>
@@ -308,6 +310,16 @@ class RbBlitzApp : public rex::ReXApp {
   // paths are final, which is the first point where game_data_root() is known,
   // logging is up and the guest has not started yet.
   void OnPostLoadXexImage() override {
+    const auto boot_started = std::chrono::steady_clock::now();
+    auto stage_started = boot_started;
+    auto log_stage = [&](const char* stage) {
+      const auto now = std::chrono::steady_clock::now();
+      REXLOG_INFO("boot_timing: post_xex stage={} stage_ms={} total_ms={}", stage,
+                  std::chrono::duration_cast<std::chrono::milliseconds>(now - stage_started).count(),
+                  std::chrono::duration_cast<std::chrono::milliseconds>(now - boot_started).count());
+      stage_started = now;
+    };
+    REXLOG_INFO("boot_timing: post_xex begin");
     LogBootIdentity();
     // The bootstrap has already validated this handoff and waited for the parent.
     for (const auto& argument : rb_blitz::platform::CommandLineArguments()) {
@@ -320,11 +332,13 @@ class RbBlitzApp : public rex::ReXApp {
     rb_blitz::menu_filter::Configure(settings_restart_boot_);
     rb_blitz::local_save::Configure(runtime());
     rb_blitz::ultimate::Configure(runtime(), game_data_root());
+    log_stage("identity_and_ultimate");
     // After ultimate::Configure, which decides what the guest-visible game tree
     // looks like: DLC is resolved by the SDK content manager from a host path, so
     // the two do not interact, but the DLC log line reads better next to the boot
     // identity and the payload line than before them.
     rb_blitz::dlc::Configure(runtime(), game_data_root());
+    log_stage("dlc_configure");
     // Capture pacing before guest threads start. Progress uses actual enumerators
     // and UI completion, independently of whether the host cache was enabled/hit.
     rb_blitz::content_progress::Configure();
@@ -333,14 +347,17 @@ class RbBlitzApp : public rex::ReXApp {
     // shell-music loader is redirected to them (src/hooks/shell_music.cpp). With the
     // toggle off - or no library - nothing is mounted and the hook is inert.
     rb_blitz::shell_music::Configure(runtime(), game_data_root());
+    log_stage("shell_music_configure");
     // P11a: the settings store's second half, and it has to run in this order: after
     // ultimate::Configure (the provider's values are what the store reports for its rows) and
     // *before* bridge::Configure, whose seeding goes through the channel's store - so the channel
     // must already be pointed at the service.
     settings_boot_->AfterLoadXexImage(selected_backend_);
+    log_stage("settings_after_xex");
     // The menu authoring below snapshots descriptor choices. Discover packages first, so its
     // controller selector and the texture provider use the same boot catalog.
     if (rex::cvar::GetFlagByName("enhancements_icon_schemes") == "true") {
+      REXLOG_INFO("boot_timing: controller_schemes begin");
       rb_blitz::assets::InstallControllerSchemes(
           rex::filesystem::GetExecutableFolder() / "assets" / "controller" / "schemes",
           runtime()->user_data_root() / "controller_schemes");
@@ -368,8 +385,10 @@ class RbBlitzApp : public rex::ReXApp {
           REXLOG_WARN("button_schemes: probe scheme '{}' is unavailable", probe);
       }
     }
+    log_stage("controller_schemes_and_selection");
     // Publish overrides before authoring disabled menu rows, once all config sources exist.
     settings_boot_->FinishInit();
+    log_stage("settings_finish_init");
     settings_boot_->SetPresentedProbe([this] {
       auto* graphics = runtime()->graphics_system();
       auto* presenter = graphics ? graphics->presenter() : nullptr;
@@ -447,6 +466,7 @@ class RbBlitzApp : public rex::ReXApp {
     // only reads their flags once on this host thread and logs what they are set to. A guest
     // thread must not touch the cvar registry, which is why the read happens here.
     rb_blitz::settings::bridge::Configure();
+    log_stage("menu_services_and_payload");
   }
 
   // Config-file hygiene. A key in rb_blitz.toml (or on the command line) that matches no
@@ -459,6 +479,8 @@ class RbBlitzApp : public rex::ReXApp {
   // change to kInitOnly flags, which is correct here - those are device and logging
   // selections that the config, environment and command line have already fixed.
   void OnPreLaunchModule() override {
+    const auto started = std::chrono::steady_clock::now();
+    REXLOG_INFO("boot_timing: pre_launch begin");
     rb_blitz::assets::InstallP1TextureOverride();
     // P11a: the last read-back before the guest thread exists. A cvar this boot wrote can have been
     // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the
@@ -470,9 +492,14 @@ class RbBlitzApp : public rex::ReXApp {
     coverage_recorder_ = rb_blitz::graphics::StartDevelopmentCoverage(
         rex::filesystem::GetExecutablePath(),runtime()->cache_root());
     rb_blitz::diag::shader_trace::LogConfiguration();
+    REXLOG_INFO("boot_timing: guest_launch_ready elapsed_ms={}",
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - started).count());
+    rb_blitz::diag::boot_heartbeat::Start();
   }
 
   bool OnWindowCloseRequested() override {
+    rb_blitz::diag::boot_heartbeat::Finish("window close");
     rb_blitz::loading::EndCrashRecoveryAttempt();
     rb_blitz::shell_music::CloseQueuedPool();
     rb_blitz::graphics::CloseLoading();
@@ -486,6 +513,7 @@ class RbBlitzApp : public rex::ReXApp {
   bool DeferShaderStoragePreparation() const override { return true; }
   bool CanLaunchModule() const override { return graphics_loading_payload_ready_; }
   void OnGuestThreadExit(rex::system::XThread*) override {
+    rb_blitz::diag::boot_heartbeat::Finish("guest thread exit");
     rb_blitz::shell_music::CloseQueuedPool();
     rb_blitz::graphics::CloseLoading();
   }

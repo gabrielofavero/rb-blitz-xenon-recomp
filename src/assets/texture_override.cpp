@@ -26,6 +26,27 @@
 namespace rb_blitz::assets {
 namespace {
 
+bool DecodeSchemePngTimed(const std::filesystem::path& path,
+                          controller_schemes::Image* image, std::string* why) {
+  const auto started = std::chrono::steady_clock::now();
+  const bool decoded = controller_schemes::DecodePngWic(path, image, why);
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - started).count();
+  if (elapsed >= 500)
+    REXLOG_WARN("controller_schemes: slow image '{}' decode_ms={} success={}",
+                path.string(), elapsed, decoded);
+  return decoded;
+}
+
+void LogSchemeDiscovery(const std::filesystem::path& folder, bool begin,
+                        bool accepted, uint64_t elapsed_ms) {
+  if (begin)
+    REXLOG_INFO("controller_schemes: loading package '{}'", folder.string());
+  else
+    REXLOG_INFO("controller_schemes: package '{}' accepted={} elapsed_ms={}",
+                folder.string(), accepted, elapsed_ms);
+}
+
 std::optional<uint64_t> HashFromEnv(const char* name) {
   const char* value = std::getenv(name);
   if (!value || !*value) return std::nullopt;
@@ -374,8 +395,14 @@ void InstallP1TextureOverride() {
 
 void InstallControllerSchemes(const std::filesystem::path& install_root,
                               const std::filesystem::path& user_root) {
+  const auto started = std::chrono::steady_clock::now();
+  REXLOG_INFO("controller_schemes: discovery begin install='{}' user='{}'",
+              install_root.string(), user_root.string());
   auto registry = controller_schemes::Discover(install_root, user_root,
-                                                controller_schemes::DecodePngWic);
+                                                DecodeSchemePngTimed, LogSchemeDiscovery);
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - started).count();
+  REXLOG_INFO("controller_schemes: discovery end elapsed_ms={}", elapsed);
   REXLOG_INFO("controller_schemes: {}", registry.Summary());
   for (const auto& rejected : registry.rejected)
     REXLOG_WARN("controller_schemes: rejected '{}': {}", rejected.folder.string(), rejected.reason);
