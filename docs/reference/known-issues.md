@@ -53,6 +53,29 @@ Start/Back resolver now selects the installed 360 sheet's own arrow glyphs; the
 owner accepted the corrected Search hint on 2026-11-02. See the
 [button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P9.
 
+**Input font atlas resolution and guest heap (2026-11-02):** the owner kept the
+original 1024-square atlas scope: 32-pixel images in 36-pixel cells, with the
+15 footer tiles in the same grid. The temporary 2048-square host composition and
+the 64/96-pixel tiles were removed. The remaining crash is a guest heap
+capacity/fragmentation failure, not the atlas: `rb_blitz_495.log` shows the
+1,048,580-byte `rays.tex` allocation with 11.7 MB free across 1,540 blocks but a
+largest block of 678 KB, and the allocator's failure path then reads guest
+address 0x4 (`sub_8246FA20 + 0x5FC`, called from `RndBitmap` / `RndTex::Load`).
+Two host-side remedies are in this build: the dedicated `Iconatonic` texture
+identity was removed (both copied font scenes share the retail Pentatonic texture
+and the override replaces only its unused bottom band), and the generated
+`config/gen/mem.dtb` raises the Xbox main heap from 137,000,000 to 160,000,000
+bytes - the size the PS3 branch of the same file uses - so the title creates a
+larger heap at boot. `check-p10-records` parses the generated record back and
+asserts 160,000,000. The first guest allocation now logs the heap's free total,
+so one live boot says whether the raised definition was served. Soft keycap
+rendering remains open and was deferred to a later session; the shared-retail
+visual result and live crash behavior are unproven. Release build and the focused
+host suites pass. The appearance investigation is
+[the icon rendering quality plan](../plans/todo/2026-11-02-icon-rendering-quality-investigation-plan.md).
+See the
+[button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P10.
+
 **Load Guard coverage limits (2026-10-26):** the debugger
 located a signed 16-bit event-count overflow on the custom MIDI's optional
 LIPSYNC1 track. The host now rejects LIPSYNC1–4 through the title's own MIDI

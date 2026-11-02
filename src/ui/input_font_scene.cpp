@@ -20,7 +20,6 @@
 namespace rb_blitz::ui::input_font {
 namespace {
 std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_original_bc3;
-std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_private_bc3;
 uint32_t Le32(const uint8_t* p) {
   return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
 }
@@ -37,20 +36,6 @@ void PutFloat(uint8_t* p, float value) { PutBe32(p, std::bit_cast<uint32_t>(valu
 bool Fail(std::string* error, const char* message) {
   if (error) *error = message;
   return false;
-}
-bool ReplaceMeasured(std::vector<uint8_t>* bytes, std::string_view original,
-                     std::string_view replacement, size_t expected_count) {
-  if (original.size() != replacement.size()) return false;
-  size_t count = 0;
-  for (auto at = std::search(bytes->begin(), bytes->end(),
-                             original.begin(), original.end());
-       at != bytes->end();
-       at = std::search(at + original.size(), bytes->end(),
-                        original.begin(), original.end())) {
-    std::copy(replacement.begin(), replacement.end(), at);
-    ++count;
-  }
-  return count == expected_count;
 }
 bool DecodeStream(const std::vector<uint8_t>& source, std::vector<uint8_t>* bytes,
                   std::string* error) {
@@ -142,8 +127,7 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
       if (glyph[0] != 0 || glyph[1] != code)
         return Fail(error, "Pentatonic glyph code changed");
       PutFloat(glyph + 2, float(IconX(index)) / kAtlasSize);
-      PutFloat(glyph + 6, float(IconY(index) -
-                                (IsHintTile(index) ? kHintInset : kIconInsetY)) / kAtlasSize);
+      PutFloat(glyph + 6, float(IconY(index) - kIconInsetY) / kAtlasSize);
       PutFloat(glyph + 10, IconSize(index) / kFontCellWidth);
       PutFloat(glyph + 14, IconSize(index) / kFontCellWidth);
     }
@@ -151,65 +135,28 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
 
   constexpr size_t kTextureHeader = 0x867;
   constexpr size_t kTexturePayload = kTextureHeader + 31;
-  size_t retail_chain_bytes = 0, private_chain_bytes = 0;
+  size_t retail_chain_bytes = 0;
   for (uint32_t mip = 0; mip < kMipCount; ++mip)
     retail_chain_bytes += (kRetailAtlasSize >> mip) * (kRetailAtlasSize >> mip);
-  for (uint32_t mip = 0; mip < kMipCount; ++mip)
-    private_chain_bytes += (kGuestAtlasSize >> mip) * (kGuestAtlasSize >> mip);
   const std::array<uint8_t, 8> expected{8, 0, 0, 0, 0x18, 6, 4, 0};
   if (bytes.size() < kTexturePayload + retail_chain_bytes ||
       std::memcmp(bytes.data() + kTextureHeader + 4, expected.data(), expected.size()) != 0)
     return Fail(error, "Pentatonic BC3 texture record changed");
+  // Keep the retail texture bytes and resource names. Both copied scenes share
+  // the already loaded Pentatonic texture, and the override replaces only the
+  // unused bottom band; no additional guest bitmap is allocated for the icons.
   original_bc3->resize(retail_chain_bytes);
   for (size_t i = 0; i < retail_chain_bytes; i += 2) {
     (*original_bc3)[i] = bytes[kTexturePayload + i + 1];
     (*original_bc3)[i + 1] = bytes[kTexturePayload + i];
   }
-  // RndDir shares resources by their serialized names. The copied font must
-  // own its Tex and Mat objects, and the texture's source path must differ too;
-  // otherwise the guest keeps sampling the already loaded retail 1024 atlas.
-  // Font object names stay unchanged because the title's font links use them.
-  constexpr struct { std::string_view original, replacement; size_t count; } names[] = {
-      {"Pentatonic_Regular_(8_89)4x.tex", "Iconatonic_Regular_(8_89)4x.tex", 5},
-      {"Pentatonic_Regular_(8_89)4x.mat", "Iconatonic_Regular_(8_89)4x.mat", 2},
-      {"Pentatonic_Regular_(5_00)4x_fadeout.mat",
-       "Iconatonic_Regular_(5_00)4x_fadeout.mat", 3},
-      {"Pentatonic_Regular_(5_00)4x_ploff.mat",
-       "Iconatonic_Regular_(5_00)4x_ploff.mat", 3},
-      {"Pentatonic_Regular_(5_00)4x_znormal.mat",
-       "Iconatonic_Regular_(5_00)4x_znormal.mat", 3},
-      {"../image/pentatonic_regular_(8_89)4x.bmp",
-       "../image/iconatonic_regular_(8_89)4x.bmp", 1},
-  };
-  for (const auto& name : names)
-    if (!ReplaceMeasured(&bytes, name.original, name.replacement, name.count))
-      return Fail(error, "Pentatonic texture identity references changed");
-  // The copied scene needs its own texture identity. Keep the retail-sized
-  // guest bitmap: the host's 2048 image is downsampled into the same 1024
-  // fallback layout, so the glyph UVs above do not change. This avoids two
-  // 2048-square guest allocations that remained resident through song loads.
-  std::vector<uint8_t> private_bc3(private_chain_bytes);
-  constexpr std::array<uint8_t, 16> marker{
-      0x52, 0x42, 0x42, 0x5A, 0x49, 0x43, 0x4F, 0x4E,
-      0x46, 0x4F, 0x4E, 0x54, 0x32, 0x4B, 0x00, 0x01};
-  std::copy(marker.begin(), marker.end(), private_bc3.begin());
   // The measured texture record has width, height and row pitch at +10.
   if (Be32(bytes.data() + kTextureHeader + 10) != 0x04000400 ||
       bytes[kTextureHeader + 14] != 4 || bytes[kTextureHeader + 15] != 0)
     return Fail(error, "Pentatonic texture dimensions changed");
-  static_assert(kGuestAtlasSize == kRetailAtlasSize);
-  std::vector<uint8_t> swapped(private_chain_bytes);
-  for (size_t i = 0; i < private_chain_bytes; i += 2) {
-    swapped[i] = private_bc3[i + 1];
-    swapped[i + 1] = private_bc3[i];
-  }
-  bytes.erase(bytes.begin() + kTexturePayload,
-              bytes.begin() + kTexturePayload + retail_chain_bytes);
-  bytes.insert(bytes.begin() + kTexturePayload, swapped.begin(), swapped.end());
   // A single stored chunk is valid Milo and avoids a second compressor.
   if (!PackStored(bytes, scene, error)) return false;
   g_original_bc3.store(std::make_shared<const std::vector<uint8_t>>(*original_bc3));
-  g_private_bc3.store(std::make_shared<const std::vector<uint8_t>>(std::move(private_bc3)));
   if (error) error->clear();
   return true;
 }
@@ -271,8 +218,6 @@ bool PrepareHintScene(const std::vector<uint8_t>& icon_scene, std::vector<uint8_
         Be32(bytes.data() + table - 8) !=
             std::bit_cast<uint32_t>(kFontCellHeight / kAtlasSize))
       return Fail(error, "prepared icon font cell dimensions changed");
-    PutFloat(bytes.data() + table - 12, kHintFontCellWidth / kAtlasSize);
-    PutFloat(bytes.data() + table - 8, kHintFontCellHeight / kAtlasSize);
     for (uint32_t action = 0; action < kHintCount; ++action) {
       const uint32_t code = GlyphCode(action);
       uint8_t* glyph = bytes.data() + table + code * 18;
@@ -280,9 +225,9 @@ bool PrepareHintScene(const std::vector<uint8_t>& icon_scene, std::vector<uint8_
         return Fail(error, "prepared icon font early glyph changed");
       const uint32_t index = kHintFirst + action;
       PutFloat(glyph + 2, float(IconX(index)) / kAtlasSize);
-      PutFloat(glyph + 6, float(IconY(index) - kHintInset) / kAtlasSize);
-      PutFloat(glyph + 10, kHintIconSize / kHintFontCellWidth);
-      PutFloat(glyph + 14, kHintIconSize / kHintFontCellWidth);
+      PutFloat(glyph + 6, float(IconY(index) - kIconInsetY) / kAtlasSize);
+      PutFloat(glyph + 10, IconSize(index) / kFontCellWidth);
+      PutFloat(glyph + 14, IconSize(index) / kFontCellWidth);
     }
   }
   // Both scenes use the same icon pixels. Keep the Tex, Mat and source names so
@@ -339,8 +284,5 @@ bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* sc
 }
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3() {
   return g_original_bc3.load();
-}
-std::shared_ptr<const std::vector<uint8_t>> PrivateBc3() {
-  return g_private_bc3.load();
 }
 }  // namespace rb_blitz::ui::input_font

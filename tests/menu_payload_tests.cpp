@@ -663,30 +663,25 @@ void CheckIconScene(const std::vector<uint8_t>& icon_scene) {
   CHECK_TRUE(icon_scene.size() > 0x810 + 0x867 + 31);
   if (icon_scene.size() <= 0x810 + 0x867 + 31) return;
   const std::string resources(reinterpret_cast<const char*>(icon_scene.data() + 0x810), 0x867);
-  CHECK_TRUE(resources.find("Iconatonic_Regular_") != std::string::npos);
-  CHECK_TRUE(resources.find("../image/iconatonic_regular_") != std::string::npos);
-  CHECK_TRUE(resources.find("Pentatonic_Regular_(8_89)4x.tex") == std::string::npos);
+  CHECK_TRUE(resources.find("Pentatonic_Regular_(8_89)4x.tex") != std::string::npos);
+  CHECK_TRUE(resources.find("../image/pentatonic_regular_(8_89)4x.bmp") != std::string::npos);
+  CHECK_TRUE(resources.find("Iconatonic_Regular_") == std::string::npos);
   const auto retail = rb_blitz::ui::input_font::OriginalBc3();
-  const auto private_texture = rb_blitz::ui::input_font::PrivateBc3();
   CHECK_TRUE(retail != nullptr);
-  CHECK_TRUE(private_texture != nullptr);
-  if (!retail || !private_texture) return;
+  if (!retail) return;
   constexpr size_t payload = 0x810 + 0x867 + 31;
   constexpr size_t dimensions = 0x810 + 0x867 + 10;
   for (size_t field = 0; field < 3; ++field) {
     CHECK_EQ(icon_scene[dimensions + field * 2], uint8_t{4});
     CHECK_EQ(icon_scene[dimensions + field * 2 + 1], uint8_t{0});
   }
-  CHECK_TRUE(icon_scene.size() >= payload + private_texture->size());
-  if (icon_scene.size() < payload + private_texture->size()) return;
+  CHECK_TRUE(icon_scene.size() >= payload + retail->size());
+  if (icon_scene.size() < payload + retail->size()) return;
   bool texture_identical = true;
-  for (size_t i = 0; i < private_texture->size(); i += 2)
-    texture_identical &= icon_scene[payload + i] == (*private_texture)[i + 1] &&
-                         icon_scene[payload + i + 1] == (*private_texture)[i];
+  for (size_t i = 0; i < retail->size(); i += 2)
+    texture_identical &= icon_scene[payload + i] == (*retail)[i + 1] &&
+                         icon_scene[payload + i + 1] == (*retail)[i];
   CHECK_TRUE(texture_identical);
-  CHECK_EQ(private_texture->size(), retail->size());
-  CHECK_TRUE(!std::equal(retail->begin(), retail->begin() + 16,
-                         private_texture->begin()));
 }
 
 void CheckPrivateFontGeometry(const std::vector<uint8_t>& scene, bool hint) {
@@ -695,12 +690,11 @@ void CheckPrivateFontGeometry(const std::vector<uint8_t>& scene, bool hint) {
     return uint32_t(scene[at]) << 24 | uint32_t(scene[at + 1]) << 16 |
            uint32_t(scene[at + 2]) << 8 | scene[at + 3];
   };
-  const float cell = hint ? font::kHintFontCellWidth : font::kFontCellWidth;
+  const float cell = font::kFontCellWidth;
   const uint32_t index = hint ? font::kHintFirst : 0;
   const float glyph_width = float(font::IconSize(index)) / cell;
   const float glyph_x = float(font::IconX(index)) / font::kAtlasSize;
-  const float glyph_y = float(font::IconY(index) -
-      (hint ? font::kHintInset : font::kIconInsetY)) / font::kAtlasSize;
+  const float glyph_y = float(font::IconY(index) - font::kIconInsetY) / font::kAtlasSize;
   size_t tables = 0;
   for (size_t at = 0x810 + 580; at + (256 - 32) * 18 <= scene.size(); ++at) {
     if (scene[at] != 0 || scene[at + 1] != 0x20 || be32(at - 580) != 256) continue;
@@ -755,8 +749,42 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
                                     &why, false, false, &notes, {}, fast)) {
       std::printf("header records refused: %s\n", why.c_str()); return 1;
     }
+    for (const auto& note : notes) std::printf("record note: %s\n", note.c_str());
     CHECK_TRUE(notes.empty());
     if (boot_case == 0) {
+      // The crash remedy: the Xbox guest heap is sized from this record at boot, and the
+      // retail 137,000,000-byte definition cannot satisfy a fragmented 1 MiB texture
+      // request. The generated record must carry the raised value or the transform is a
+      // no-op that only looks applied.
+      {
+        namespace dtb = rb_blitz::ui::dtb;
+        const auto mem = records.find("config/gen/mem.dtb");
+        CHECK_TRUE(mem != records.end());
+        if (mem != records.end()) {
+          std::vector<dtb::Node> mem_roots;
+          dtb::RootHeader mem_header;
+          std::string mem_why;
+          CHECK_TRUE(dtb::Parse(mem->second.data(), mem->second.size(), &mem_roots,
+                                &mem_header, &mem_why));
+          uint32_t xbox_main = 0;
+          for (const auto& root : mem_roots) {
+            if (root.tag != dtb::kArray || root.kids.size() < 3 ||
+                root.kids[0].text != "heaps") continue;
+            for (size_t i = 1; i + 1 < root.kids.size(); ++i) {
+              if (root.kids[i].tag != dtb::kIfdef || root.kids[i].text != "HX_XBOX") continue;
+              for (size_t j = i + 1; j < root.kids.size() && root.kids[j].tag == dtb::kArray; ++j) {
+                const auto& heap = root.kids[j];
+                if (heap.kids.size() < 2 || heap.kids[0].text != "main") continue;
+                const auto& size = heap.kids[1];
+                if (size.tag == dtb::kArray && size.kids.size() >= 2 &&
+                    size.kids[0].text == "size" && size.kids[1].tag == dtb::kInt)
+                  xbox_main = size.kids[1].scalar;
+              }
+            }
+          }
+          CHECK_EQ(xbox_main, uint32_t{160000000});
+        }
+      }
       const auto& row_font = records.at(rb_blitz::ui::input_font::kIconSceneRecord);
       CheckIconScene(row_font);
       CheckPrivateFontGeometry(row_font, false);
@@ -772,10 +800,11 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
                  bytes.end();
         };
         const auto& row_font = records.at(rb_blitz::ui::input_font::kIconSceneRecord);
-        CHECK_TRUE(has_resource(row_font, "Iconatonic_Regular_(8_89)4x.tex"));
-        CHECK_TRUE(has_resource(hint_font, "Iconatonic_Regular_(8_89)4x.tex"));
-        CHECK_FALSE(has_resource(hint_font, "Hintatonic_Regular_(8_89)4x.tex"));
-        CHECK_TRUE(has_resource(hint_font, "../image/iconatonic_regular_(8_89)4x.bmp"));
+        CHECK_TRUE(has_resource(row_font, "Pentatonic_Regular_(8_89)4x.tex"));
+        CHECK_TRUE(has_resource(hint_font, "Pentatonic_Regular_(8_89)4x.tex"));
+        CHECK_FALSE(has_resource(hint_font, "Iconatonic_Regular_"));
+        CHECK_FALSE(has_resource(hint_font, "Hintatonic_Regular_"));
+        CHECK_TRUE(has_resource(hint_font, "../image/pentatonic_regular_(8_89)4x.bmp"));
         constexpr std::string_view loading_font =
             "../resource/fonts/inline_help_icons.milo";
         size_t loading_font_count = 0;

@@ -126,7 +126,7 @@ bool Compose(const std::vector<uint8_t>& original_font,
       original_buttons.size() != 512u * 512u) return false;
   size_t total = 0;
   for (uint32_t mip = 0; mip < font::kMipCount; ++mip)
-    total += size_t(font::kGuestAtlasSize >> mip) * (font::kGuestAtlasSize >> mip);
+    total += size_t(font::kRetailAtlasSize >> mip) * (font::kRetailAtlasSize >> mip);
   if (original_font.size() != total) return false;
 
   std::vector<uint8_t> retail_rgba(512u * 512u * 4);
@@ -155,7 +155,7 @@ bool Compose(const std::vector<uint8_t>& original_font,
   }
 
   levels->clear();
-  for (uint32_t mip = 0; mip <= font::kMipCount; ++mip) {
+  for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
     const uint32_t dim = font::kAtlasSize >> mip;
     std::vector<uint8_t> resized(size_t(dim) * dim * 4);
     if (mip == 0) resized = atlas;
@@ -173,12 +173,12 @@ bool ComposeRetail(const std::vector<uint8_t>& original_font,
                    const std::vector<std::vector<uint8_t>>& private_levels,
                    std::vector<std::vector<uint8_t>>* levels) {
   namespace font = ui::input_font;
-  if (!levels || private_levels.size() <= font::kMipCount) return false;
+  if (!levels || private_levels.size() < font::kMipCount) return false;
   size_t expected_bytes = 0;
   for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
     const size_t dim = font::kRetailAtlasSize >> mip;
     expected_bytes += dim * dim;
-    if (private_levels[mip + 1].size() != dim * dim) return false;
+    if (private_levels[mip].size() != dim * dim) return false;
   }
   if (original_font.size() != expected_bytes) return false;
   levels->clear();
@@ -186,11 +186,11 @@ bool ComposeRetail(const std::vector<uint8_t>& original_font,
   for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
     const size_t dim = font::kRetailAtlasSize >> mip;
     const size_t level_bytes = dim * dim;
-    const size_t icon_start = dim * ((font::kIconTop / 2) >> mip);
+    const size_t icon_start = dim * (font::kIconTop >> mip);
     std::vector<uint8_t> level(original_font.begin() + offset,
                                original_font.begin() + offset + level_bytes);
-    std::copy(private_levels[mip + 1].begin() + icon_start,
-              private_levels[mip + 1].end(), level.begin() + icon_start);
+    std::copy(private_levels[mip].begin() + icon_start,
+              private_levels[mip].end(), level.begin() + icon_start);
     levels->push_back(std::move(level));
     offset += level_bytes;
   }

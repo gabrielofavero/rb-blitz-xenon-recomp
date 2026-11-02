@@ -106,6 +106,38 @@ Node* FindNode(Node& node, uint32_t tag, std::string_view first, std::string_vie
   for (auto& child : node.kids) if (auto* found = FindNode(child, tag, first, second)) return found;
   return nullptr;
 }
+// The installed memory definition sizes the guest heap per platform. Xbox uses
+// 137,000,000 bytes while PS3 uses 160,000,000; the generated records and the
+// copied font scenes add resident allocations, so the Xbox heap gets the PS3
+// definition's headroom. A larger heap changes no address the title reads.
+constexpr uint32_t kXboxMainHeapBytes = 160000000;
+bool RaiseXboxMainHeap(std::vector<Node>* roots, uint32_t bytes, std::string* error) {
+  if (!roots) return false;
+  for (auto& root : *roots) {
+    if (root.tag != ui::dtb::kArray || root.kids.size() < 3 ||
+        root.kids[0].tag != ui::dtb::kSymbol || root.kids[0].text != "heaps") continue;
+    for (size_t i = 1; i + 1 < root.kids.size(); ++i) {
+      // The platform names are #ifdef macros, not symbols; the heap definitions that
+      // follow one are bare arrays ((main (size ...)) parses as an array of a name
+      // symbol and a size array, not as an array named "main").
+      if (root.kids[i].tag != ui::dtb::kIfdef || root.kids[i].text != "HX_XBOX") continue;
+      for (size_t j = i + 1; j < root.kids.size() && root.kids[j].tag == ui::dtb::kArray; ++j) {
+        auto& heap = root.kids[j];
+        if (heap.kids.size() < 2 || heap.kids[0].tag != ui::dtb::kSymbol ||
+            heap.kids[0].text != "main") continue;
+        auto& size = heap.kids[1];
+        if (size.tag != ui::dtb::kArray || size.kids.size() < 2 ||
+            size.kids[0].tag != ui::dtb::kSymbol || size.kids[0].text != "size" ||
+            size.kids[1].tag != ui::dtb::kInt) break;
+        if (size.kids[1].scalar < bytes) size.kids[1] = Node::Int(bytes);
+        return true;
+      }
+      break;
+    }
+  }
+  if (error) *error = "the Xbox main heap definition changed";
+  return false;
+}
 // The cached transition object must receive the override before goto_screen starts it.
 // Ordinary transitions explicitly reset it, including when they reuse a tab transition.
 bool SetHeaderAnimationBeforeGoto(Node& function, Node direction) {
@@ -1266,6 +1298,22 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   }
   if (!read(screen::kSceneSourceRecord, &built[screen::kSceneRecord], error)) return false;
   built[screen::kPauseSceneRecord] = built[screen::kSceneRecord];
+  {
+    // Size the guest heap before the title creates it. This is the direct
+    // remedy for a large texture request that fails against a fragmented
+    // free list after repeated screen loads.
+    std::vector<uint8_t> mem_bytes;
+    std::vector<Node> mem_roots;
+    ui::dtb::RootHeader mem_header;
+    std::string why;
+    if (read("config/gen/mem.dtb", &mem_bytes, &why) &&
+        ui::dtb::Parse(mem_bytes.data(), mem_bytes.size(), &mem_roots, &mem_header, &why) &&
+        RaiseXboxMainHeap(&mem_roots, kXboxMainHeapBytes, &why)) {
+      built["config/gen/mem.dtb"] = ui::dtb::Compile(mem_roots, mem_header);
+    } else {
+      note("the guest heap size was left unchanged: " + why);
+    }
+  }
   {
     std::vector<uint8_t> original;
     std::vector<uint8_t> prepared;

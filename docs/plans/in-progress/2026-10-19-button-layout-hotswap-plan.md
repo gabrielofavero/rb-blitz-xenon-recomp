@@ -1699,6 +1699,53 @@ release build and `settings_screen`/`menu_payload` host tests pass. The owner
 chose to repeat the game transition manually; live crash and hint appearance
 verification remain pending.
 
+**2026-11-02 pixel-scope revert.** `rb_blitz_494.log` ended in a guest access
+violation (`read of guest 0x00000004`, `fault stage=outside ShellMusic`) after a
+song exit. The crash cause is not proven. The owner assessed that the larger
+atlas values were not the cause of the soft keycaps and asked for the original
+pixel scope so stability work can continue separately. The 2048-square host
+composition and the 64-pixel mapping / 96-pixel footer tiles are superseded.
+`Compose` now emits the original 1024-square atlas directly: a 28-column,
+seven-row grid of 36-pixel cells holding 32-pixel images from `kIconTop` 768,
+with the 15 hint tiles sharing physical slots 101..115. `ComposeRetail` copies
+each icon band from the matching 1024 mip level. The dedicated private texture
+identity, separate glyph tables, loading prompt and six-locale routes are
+unchanged. The release build and `button_scheme`, `button_scheme_fingerprints`,
+`menu_payload`, `input_bindings` and `settings_screen` host suites pass;
+`check-p10-records` passes 397 checks. Soft-image degradation remains open for a
+later session; live crash verification remains owner-run.
+
+**2026-11-02 heap-crash root cause.** `rb_blitz_495.log` shows the loading
+screen's 1,048,580-byte `rays.tex` allocation failing with 11,688,352 bytes free
+in 1,540 blocks but a largest block of 678,076, and the allocator's failure path
+then reads guest address 0x4. The fault RIP resolves to the guest heap allocator
+`sub_8246FA20 + 0x5FC`, called from `RndBitmap` (`sub_821FC8A8`) and
+`RndTex::Load` (`sub_8220CCA8`). The earlier reading that put the fault in the
+deleting-destructor adjustor `sub_824929C0` was wrong and is superseded by the
+allocator frame. The same signature predates the dedicated texture
+(`rb_blitz_467.log`) and occurred on 2026-10-26 (`rb_blitz_372.log`), so the
+fragmentation is cumulative and not caused by the icon font. Two changes follow
+from it:
+
+- The private texture identity is superseded because it added a 1024-square
+  `Iconatonic` bitmap and mip chain to each of the two copied scenes (~1.3 MiB
+  each) that the override never matched. Both copied scenes keep the retail
+  Pentatonic texture bytes and names again, share the already loaded retail
+  upload, and the override replaces only its unused bottom band; no extra guest
+  bitmap exists for the icons (about 2.6 MiB saved).
+- The generated `config/gen/mem.dtb` (`RaiseXboxMainHeap`) raises the Xbox main
+  heap from 137,000,000 to 160,000,000 bytes, the size the file's PS3 branch
+  already uses, so the title creates the larger heap at boot. The transform
+  matches the record's real shape (`#ifdef HX_XBOX` followed by a `main` heap
+  array), and `check-p10-records` parses the generated record back and asserts
+  the value.
+- The first guest allocation now logs the heap's free total, so the live run
+  says whether the raised definition was served.
+
+Release build and the focused host suites pass; `check-p10-records` passes 395
+checks. The shared-retail visual result and the live crash behavior remain
+owner-run.
+
 **Goal.** Every actionable game hint depicts the input that actually performs that action in the
 current interface/gameplay context.
 

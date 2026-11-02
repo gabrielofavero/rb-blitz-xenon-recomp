@@ -166,3 +166,58 @@ bitmap payload from the two scenes. The bitmap trace also records guest buffer
 addresses and free-list totals on `rays.tex` loads to distinguish cumulative
 leaks from fragmentation in the next live run. The loading scene uses the
 footer's font directly instead of mounting a third scene.
+
+**2026-11-02 pixel-scope revert.** `rb_blitz_494.log` ended in a guest access
+violation (`read of guest 0x00000004`, `fault stage=outside ShellMusic`) after a
+song exit on a build whose guest bitmap was already 1024. The crash cause is not
+proven. The owner assessed that the larger atlas values were not the cause of
+the soft keycaps and asked to return to the original pixel scope, deferring the
+image-quality work to a later session. The 2048-square host composition and the
+64-pixel mapping / 96-pixel footer tiles, as well as the earlier 48/50-pixel
+footer tiles, are superseded by the original
+1024-square geometry: 28 columns by seven rows of 36-pixel cells holding
+32-pixel images from `kIconTop` 768, with the 15 reserved footer tiles in
+physical slots 101..115. The host composes 1024 directly, the private guest
+bitmap stays 1024, and `ComposeRetail` copies the icon band from the matching
+mip level. Texture identity, separate glyph tables, the loading prompt and the
+six-locale routes are unchanged. Release build and the focused `button_scheme`,
+`button_scheme_fingerprints`, `menu_payload`, `input_bindings` and
+`settings_screen` host suites pass; `check-p10-records` passes 397 checks. The
+soft-image issue and live crash verification remain open.
+
+**2026-11-02 heap-crash root cause.** `rb_blitz_495.log` names the failing step
+rather than the atlas layout: the loading screen's 1,048,580-byte `rays.tex`
+request finds 11,688,352 bytes free across 1,540 blocks but a largest block of
+only 678,076, and the allocator's failure path then reads guest address 0x4.
+Resolving the fault RIP against `rb_blitz.map` puts it at `sub_8246FA20 + 0x5FC`
+(the guest heap allocator), called from `RndBitmap` (`sub_821FC8A8`) and
+`RndTex::Load` (`sub_8220CCA8`). An earlier reading placed the fault in the
+deleting-destructor adjustor `sub_824929C0`; that identification was wrong and is
+superseded by the allocator frame. The same signature predates the dedicated
+texture (`rb_blitz_467.log`) and occurred on 2026-10-26 (`rb_blitz_372.log`), so
+the fragmentation is cumulative and not caused by the icon font. Two changes
+remove the avoidable pressure and give the heap headroom:
+
+- The mod's private texture identity is gone: the icon and hint scenes keep the
+  retail Pentatonic texture bytes and names, so both share the retail upload and
+  the override replaces only its unused bottom band. No extra guest bitmap
+  exists for the icons (about 2.6 MiB saved).
+- The generated `config/gen/mem.dtb` raises the Xbox main heap from its retail
+  137,000,000 bytes to 160,000,000, the size the PS3 branch of the same file
+  uses, so the title creates a larger heap at boot. `RaiseXboxMainHeap` rewrites
+  only the `HX_XBOX` / `main` / `size` node; `check-p10-records` parses the
+  generated record back and asserts 160,000,000.
+- `input_font_alloc_trace.cpp` logs the heap's free total on the first guest
+  allocation, which is the live evidence for which definition was served.
+
+Release build and the same focused suites pass; `check-p10-records` passes 395
+checks. The shared-retail visual result and the live crash behavior are the
+owner's next check.
+
+**2026-11-02 icon appearance evidence.** The soft-keycap question is tracked in
+[the icon rendering quality plan](../plans/todo/2026-11-02-icon-rendering-quality-investigation-plan.md).
+Measured: the bounding-box BC3 encoder costs 1.9-3.1 dB against a least-squares
+refined fit on representative keycaps; the straight-alpha mip filter darkens icon
+edges by 24-33 levels of 255; and the guest renders a 540p-class frame that the
+host presents at 2x, which caps the sharpness any atlas can add. The plan orders
+the encoder, mip-filter, private-1024-atlas and 1080p-guest options by risk.

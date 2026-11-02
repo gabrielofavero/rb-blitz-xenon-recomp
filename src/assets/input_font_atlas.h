@@ -8,8 +8,8 @@
 
 namespace rb_blitz::assets::input_font_atlas {
 
-// Compose icons in the dedicated 2048-square font texture. The extra eighth
-// level supplies the 1024-square retail fallback without another resample.
+// Compose icons in the dedicated 1024-square font texture using the original
+// 32-pixel retail-band layout.
 bool Compose(const std::vector<uint8_t>& original_font,
              const std::vector<uint8_t>& original_buttons,
              const controller_schemes::Scheme* scheme,

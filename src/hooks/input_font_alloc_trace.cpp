@@ -73,6 +73,23 @@ REX_HOOK_RAW(sub_8246F658) {
 }
 
 REX_HOOK_RAW(sub_8246FA20) {
+  // Once per boot, print the heap's total free bytes on its first allocation: that is the
+  // heap size the title set up from config/gen/mem.dtb, and the one number that says whether
+  // the raised definition was actually served (retail 137,000,000 vs generated 160,000,000).
+  static bool first_logged = false;
+  if (!first_logged) {
+    first_logged = true;
+    uint64_t total = 0;
+    uint32_t blocks = 0;
+    uint32_t node = rex::memory::load_and_swap<uint32_t>(base + ctx.r3.u32);
+    while (node >= 0x40000000 && node < 0x7F000000 && blocks < 100000) {
+      total += rex::memory::load_and_swap<uint32_t>(base + node) * 4;
+      ++blocks;
+      node = rex::memory::load_and_swap<uint32_t>(base + node + 8);
+    }
+    REXLOG_INFO("bitmap_alloc: guest heap first allocation request={} free={} blocks={}",
+                ctx.r4.u32 * 4, total, blocks);
+  }
   if (g_loading_tex == "rays.tex") {
     uint64_t total = 0;
     uint32_t largest = 0;

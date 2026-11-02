@@ -187,7 +187,6 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         }
       }
     }
-    const auto private_original = ui::input_font::PrivateBc3();
     const auto retail_original = ui::input_font::OriginalBc3();
     auto matches_font = [&](uint32_t size,
                             const std::shared_ptr<const std::vector<uint8_t>>& expected,
@@ -219,11 +218,8 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         }
         return matches;
     };
-    const bool private_font = matches_font(ui::input_font::kGuestAtlasSize,
-        private_original, &private_font_hashes_, "private");
-    const bool retail_font = matches_font(ui::input_font::kRetailAtlasSize,
-        retail_original, &retail_font_hashes_, "retail");
-    const bool font = private_font || retail_font;
+    const bool font = matches_font(ui::input_font::kRetailAtlasSize,
+        retail_original, &font_hashes_, "retail");
     // The base-game texture must be a refresh candidate before any custom scheme is selected.
     // Otherwise a retail boot uploads it once and a later generation bump has nothing to evict.
     if (button || icons || pad_slot || font) *refresh_target = true;
@@ -239,7 +235,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         return false;
       }
       if (font_levels_.empty()) {
-        if (!private_original || !input_font_atlas::Compose(*private_original, original_buttons_,
+        if (!retail_original || !input_font_atlas::Compose(*retail_original, original_buttons_,
                                       registry_.Find(selected_), font_icons_, &font_levels_)) {
           REXLOG_WARN("input_icons: could not compose mapping font images");
           return false;
@@ -322,8 +318,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::vector<uint8_t> original_buttons_;
   std::string last_icon_signature_;
   std::string last_hint_signature_;
-  std::unordered_set<uint64_t> private_font_hashes_;
-  std::unordered_set<uint64_t> retail_font_hashes_;
+  std::unordered_set<uint64_t> font_hashes_;
   std::unordered_set<uint64_t> font_probe_logged_;
   bool has_pending_icons_ = false;
   bool has_pending_hints_ = false;
@@ -493,7 +488,7 @@ void PublishHintIcons(std::string signature, std::vector<input::icons::Icon> ico
   if (g_scheme_provider) g_scheme_provider->PublishHints(std::move(signature), std::move(icons));
 }
 bool InputIconsAvailable() {
-  return g_scheme_provider != nullptr && ui::input_font::PrivateBc3() != nullptr;
+  return g_scheme_provider != nullptr && ui::input_font::OriginalBc3() != nullptr;
 }
 const controller_schemes::Registry* ControllerSchemeRegistry() {
   return g_scheme_provider ? g_scheme_provider->Registry() : nullptr;
