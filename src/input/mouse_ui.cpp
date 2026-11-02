@@ -358,7 +358,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
   }
   void OnMouseMove(rex::ui::MouseEvent& e) override {
     if (auto changed = last_device::MouseMove(e.x(), e.y()))
-      REXLOG_INFO("button_schemes: active {} (device keyboard)", changed->scheme);
+      REXLOG_INFO("button_schemes: active {} (device mouse)", changed->scheme);
     if (PlayerEvent(ui::music::PointerEvent::kMove, e)) return;
     if (!MouseSupportEnabled()) return;
     const bool moved = e.x() != last_x_ || e.y() != last_y_;
@@ -377,7 +377,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
   }
   void OnMouseDown(rex::ui::MouseEvent& e) override {
     if (auto changed = last_device::MouseButton())
-      REXLOG_INFO("button_schemes: active {} (device keyboard)", changed->scheme);
+      REXLOG_INFO("button_schemes: active {} (device mouse)", changed->scheme);
     if (PlayerEvent(ui::music::PointerEvent::kDown, e)) return;
     // The raw mask is device state, so it is recorded whatever the gates say: the sampler applies
     // the gates, and a mouse button recorded while Mouse Support is off must not look "never
@@ -419,7 +419,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
   }
   void OnMouseWheel(rex::ui::MouseEvent& e) override {
     if (auto changed = last_device::MouseWheel())
-      REXLOG_INFO("button_schemes: active {} (device keyboard)", changed->scheme);
+      REXLOG_INFO("button_schemes: active {} (device mouse)", changed->scheme);
     if (PlayerEvent(ui::music::PointerEvent::kWheel, e)) return;
     // Device state first, gate second: the sampler applies the gates, and a capture binds a
     // detent while Mouse Support is off.

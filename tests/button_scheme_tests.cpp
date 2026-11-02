@@ -209,10 +209,10 @@ int main() {
   Check(decoded[(size_t(200) * 512 + 200) * 4 + 3] == 255,
         "omitted glyph changed");
 
-  // The guest mapping font gets per-row images in the retail atlas's spare band.
+  // The private font gets a dedicated atlas large enough for near-native icons.
   std::vector<uint8_t> font_chain;
   for (uint32_t mip = 0; mip < rb_blitz::ui::input_font::kMipCount; ++mip) {
-    const uint32_t dim = 1024 >> mip;
+    const uint32_t dim = rb_blitz::ui::input_font::kAtlasSize >> mip;
     std::vector<uint8_t> blank(size_t(dim) * dim * 4, 0);
     std::vector<uint8_t> level;
     rb_blitz::assets::EncodeDxt5(blank.data(), dim, dim, &level);
@@ -226,13 +226,18 @@ int main() {
   Check(rb_blitz::assets::input_font_atlas::Compose(
       font_chain, blocks, nullptr, {key_icon}, &font_levels),
       "mapping font composition failed");
-  Check(font_levels.size() == 7 && font_levels[0].size() == 1024 * 1024 &&
-        font_levels[6].size() == 16 * 16, "mapping font mip chain wrong");
-  std::vector<uint8_t> decoded_font(1024 * 1024 * 4);
-  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
-  Check(decoded_font[(size_t(rb_blitz::ui::input_font::kIconTop + 18) * 1024 + 18) * 4 + 3] > 200,
+  Check(font_levels.size() == 8 && font_levels[0].size() == 2048 * 2048 &&
+        font_levels[7].size() == 16 * 16, "mapping font mip chain wrong");
+  std::vector<uint8_t> decoded_font(2048 * 2048 * 4);
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 2048, 2048, decoded_font.data());
+  namespace font = rb_blitz::ui::input_font;
+  auto atlas_pixel = [](uint32_t index, uint32_t dx, uint32_t dy) {
+    return (size_t(font::IconY(index) + dy) * font::kAtlasSize +
+            font::IconX(index) + dx) * 4;
+  };
+  Check(decoded_font[atlas_pixel(0, 16, 16) + 3] > 200,
         "mapping icon was not drawn in the icon atlas cell");
-  Check(decoded_font[(size_t(500) * 1024 + 32) * 4 + 3] == 0,
+  Check(decoded_font[(size_t(1200) * font::kAtlasSize + 32) * 4 + 3] == 0,
         "unused icon atlas area is not transparent");
 
   rb_blitz::input::icons::Icon source_image;
@@ -247,12 +252,51 @@ int main() {
   Check(rb_blitz::assets::input_font_atlas::Compose(
       font_chain, blocks, nullptr, {source_image}, &font_levels),
       "source-keyed image without an atlas slot was rejected");
-  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
-  const size_t source_pixel =
-      (size_t(rb_blitz::ui::input_font::kIconTop + 18) * 1024 + 18) * 4;
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 2048, 2048, decoded_font.data());
+  const size_t source_pixel = atlas_pixel(0, 16, 16);
   Check(decoded_font[source_pixel] > 200 && decoded_font[source_pixel + 1] < 50 &&
         decoded_font[source_pixel + 2] < 50,
         "source-keyed image lost its own color in the mapping font");
+
+  auto enter_image = source_image;
+  enter_image.source.kind = rb_blitz::profile::remap::SourceKind::kKey;
+  enter_image.source.name = "Return";
+  enter_image.legend = "Enter";
+  std::vector<rb_blitz::input::icons::Icon> enter_page(102, key_icon);
+  enter_page[0] = enter_page[101] = enter_image;
+  Check(rb_blitz::assets::input_font_atlas::Compose(
+      font_chain, blocks, nullptr, enter_page, &font_levels),
+      "keyboard package image composition failed");
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 2048, 2048, decoded_font.data());
+  for (uint32_t index : {0u, 101u}) {
+    const size_t pixel = atlas_pixel(index, font::IconSize(index) / 2,
+                                     font::IconSize(index) / 2);
+    Check(decoded_font[pixel] > 200 && decoded_font[pixel + 1] < 50 &&
+          decoded_font[pixel + 2] < 50,
+          "keyboard package image was replaced in the mapping or footer font");
+  }
+
+  // Transparent black source pixels must not darken a reduced white keycap edge.
+  rb_blitz::input::icons::Icon antialias_icon = source_image;
+  antialias_icon.width = antialias_icon.height = 192;
+  antialias_icon.rgba.assign(192 * 192 * 4, 0);
+  for (uint32_t y = 0; y < 192; ++y)
+    for (uint32_t x = 0; x < 95; ++x) {
+      auto* pixel = antialias_icon.rgba.data() + (size_t(y) * 192 + x) * 4;
+      pixel[0] = pixel[1] = pixel[2] = pixel[3] = 255;
+    }
+  Check(rb_blitz::assets::input_font_atlas::Compose(
+      font_chain, blocks, nullptr, {antialias_icon}, &font_levels),
+      "antialiased keycap composition failed");
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 2048, 2048, decoded_font.data());
+  bool clean_edge = false;
+  for (uint32_t x = 27; x < 37; ++x) {
+    const size_t edge = atlas_pixel(0, x, 32);
+    clean_edge |= decoded_font[edge + 3] > 20 &&
+                  decoded_font[edge + 3] < 235 && decoded_font[edge] > 170;
+  }
+  Check(clean_edge,
+        "transparent source RGB darkened a reduced keycap edge");
 
   // The measured font UV rectangle for A ends at y=80, while the installed
   // circle still has antialiased pixels at y=82. Atlas composition needs the
@@ -272,37 +316,66 @@ int main() {
   Check(rb_blitz::assets::input_font_atlas::Compose(
       font_chain, edge_blocks, nullptr, {retail_a}, &font_levels),
       "retail mapping glyph composition failed");
-  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
-  Check(decoded_font[(size_t(rb_blitz::ui::input_font::kIconTop + 2 + 30) * 1024 + 16) * 4 + 3] > 100,
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 2048, 2048, decoded_font.data());
+  Check(decoded_font[atlas_pixel(0, 32, 61) + 3] > 100,
         "retail A lower arc was cropped from the mapping glyph");
 
-  // RndFont samples the copied scene's 36-pixel cell. Every one of 180 tiles
-  // must have a transparent gutter inside that window.
+  // RndFont samples each copied scene's complete cell. All 180 tiles must
+  // retain transparent gutters at the larger resolution.
   std::vector<rb_blitz::input::icons::Icon> full_page(
       rb_blitz::ui::input_font::kIconCount, key_icon);
   Check(rb_blitz::assets::input_font_atlas::Compose(
       font_chain, blocks, nullptr, full_page, &font_levels), "full mapping atlas failed");
-  size_t original_mip_offset = 0;
-  for (uint32_t mip = 0; mip < rb_blitz::ui::input_font::kMipCount; ++mip) {
-    const size_t dim = 1024u >> mip;
-    const size_t preserved_bytes = dim * (rb_blitz::ui::input_font::kIconTop >> mip);
-    Check(std::equal(font_chain.begin() + original_mip_offset,
-                     font_chain.begin() + original_mip_offset + preserved_bytes,
-                     font_levels[mip].begin()),
-          "mapping atlas changed original text blocks");
-    original_mip_offset += dim * dim;
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 2048, 2048, decoded_font.data());
+  std::vector<uint8_t> retail_chain;
+  for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
+    const uint32_t dim = font::kRetailAtlasSize >> mip;
+    std::vector<uint8_t> blank(size_t(dim) * dim * 4);
+    std::vector<uint8_t> level;
+    rb_blitz::assets::EncodeDxt5(blank.data(), dim, dim, &level);
+    level[0] ^= 0x5A;  // A retail text block that the fallback must preserve.
+    retail_chain.insert(retail_chain.end(), level.begin(), level.end());
   }
-  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
+  std::vector<std::vector<uint8_t>> retail_levels;
+  Check(rb_blitz::assets::input_font_atlas::ComposeRetail(
+      retail_chain, font_levels, &retail_levels), "retail font fallback failed");
+  Check(retail_levels.size() == font::kMipCount, "retail font mip count wrong");
+  size_t retail_offset = 0;
+  for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
+    const size_t dim = font::kRetailAtlasSize >> mip;
+    const size_t preserved = dim * ((font::kIconTop / 2) >> mip);
+    Check(std::equal(retail_chain.begin() + retail_offset,
+                     retail_chain.begin() + retail_offset + preserved,
+                     retail_levels[mip].begin()),
+          "retail fallback changed original text blocks");
+    retail_offset += dim * dim;
+  }
+  std::vector<uint8_t> retail_decoded(1024 * 1024 * 4);
+  rb_blitz::assets::DecodeDxt5(retail_levels[0].data(), 1024, 1024,
+                               retail_decoded.data());
+  for (uint32_t index : {0u, font::kHintFirst}) {
+    const uint32_t x = (font::IconX(index) + font::IconSize(index) / 2) / 2;
+    const uint32_t y = (font::IconY(index) + font::IconSize(index) / 2) / 2;
+    Check(retail_decoded[(size_t(y) * 1024 + x) * 4 + 3] > 200,
+          "retail fallback did not align with private font UVs");
+  }
   for (uint32_t i = 0; i < rb_blitz::ui::input_font::kIconCount; ++i) {
-    const uint32_t x = (i % 28) * 36 + 2 + 16;
-    const uint32_t y = rb_blitz::ui::input_font::kIconTop + (i / 28) * 36;
-    auto alpha = [&](uint32_t dy) { return decoded_font[(size_t(y + dy) * 1024 + x) * 4 + 3]; };
-    Check(alpha(0) == 0 && alpha(1) == 0 && alpha(34) == 0 && alpha(35) == 0,
+    const bool hint = font::IsHintTile(i);
+    const uint32_t size = font::IconSize(i);
+    const uint32_t inset = hint ? font::kHintInset : font::kIconInsetY;
+    const uint32_t cell = hint ? font::kHintCellSize : font::kIconRowStride;
+    const uint32_t x = font::IconX(i) + size / 2;
+    const uint32_t cell_y = font::IconY(i) - inset;
+    auto alpha = [&](uint32_t dy) {
+      return decoded_font[(size_t(cell_y + dy) * font::kAtlasSize + x) * 4 + 3];
+    };
+    Check(alpha(0) == 0 && alpha(cell - 1) == 0,
           "neighbor icon leaks into the font's fixed-height sampling window");
-    Check(alpha(2) > 200 && alpha(33) > 200, "icon is not centered in its font cell");
-    const uint32_t left = (i % 28) * 36;
-    Check(decoded_font[(size_t(y + 18) * 1024 + left) * 4 + 3] == 0 &&
-          decoded_font[(size_t(y + 18) * 1024 + left + 35) * 4 + 3] == 0,
+    Check(alpha(inset) > 200 && alpha(inset + size - 1) > 200,
+          "icon is not centered in its font cell");
+    const uint32_t left = font::IconX(i) - (hint ? font::kHintInset : font::kIconInsetX);
+    Check(decoded_font[(size_t(cell_y + cell / 2) * font::kAtlasSize + left) * 4 + 3] == 0 &&
+          decoded_font[(size_t(cell_y + cell / 2) * font::kAtlasSize + left + cell - 1) * 4 + 3] == 0,
           "adjacent icons have no transparent sampling gutter");
   }
   std::vector<rb_blitz::input::icons::Icon> above_old_limit(46, key_icon);
@@ -310,11 +383,8 @@ int main() {
   Check(rb_blitz::assets::input_font_atlas::Compose(
       font_chain, blocks, nullptr, above_old_limit, &font_levels),
       "the 46th image did not fit the mapping atlas");
-  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
-  const size_t forty_sixth =
-      (size_t(rb_blitz::ui::input_font::kIconTop +
-              (45 / rb_blitz::ui::input_font::kIconColumns) * rb_blitz::ui::input_font::kIconRowStride + 18) * 1024 +
-       (45 % rb_blitz::ui::input_font::kIconColumns) * rb_blitz::ui::input_font::kIconColumnStride + 18) * 4;
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 2048, 2048, decoded_font.data());
+  const size_t forty_sixth = atlas_pixel(45, 16, 16);
   Check(decoded_font[forty_sixth] > 200 && decoded_font[forty_sixth + 1] < 50 &&
         decoded_font[forty_sixth + 2] < 50,
         "the 46th source image was replaced by an earlier tile");

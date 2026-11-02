@@ -2,6 +2,8 @@
 #include "assets/input_font_atlas.h"
 
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 
 #include "assets/texture_codec.h"
 #include "ui/input_font_scene.h"
@@ -10,6 +12,77 @@ namespace rb_blitz::assets::input_font_atlas {
 namespace {
 using controller_schemes::Image;
 using input::icons::Art;
+
+double Lanczos(double distance) {
+  distance = std::abs(distance);
+  if (distance >= 3.0) return 0.0;
+  if (distance < 1e-8) return 1.0;
+  const double angle = std::numbers::pi * distance;
+  return 3.0 * std::sin(angle) * std::sin(angle / 3.0) / (angle * angle);
+}
+
+// The font packs detailed source PNGs into small glyphs. A box filter loses
+// their thin borders and legends; a premultiplied Lanczos reduction retains
+// detail without dark RGB from transparent source pixels bleeding into edges.
+void ResizeIcon(const Image& source, Image* resized) {
+  const double sx = double(source.width) / resized->width;
+  const double sy = double(source.height) / resized->height;
+  const double rx = 3.0 * std::max(1.0, sx);
+  const double ry = 3.0 * std::max(1.0, sy);
+  std::vector<double> horizontal(size_t(resized->width) * source.height * 4);
+  for (uint32_t y = 0; y < source.height; ++y) {
+    for (uint32_t x = 0; x < resized->width; ++x) {
+      const double center = (x + 0.5) * sx - 0.5;
+      double sum[4] = {}, weight_sum = 0;
+      const int first = std::max(0, int(std::ceil(center - rx)));
+      const int last = std::min(int(source.width) - 1, int(std::floor(center + rx)));
+      for (int ix = first; ix <= last; ++ix) {
+        const double weight = Lanczos((ix - center) / std::max(1.0, sx));
+        const auto* pixel = source.rgba.data() + (size_t(y) * source.width + ix) * 4;
+        const double alpha = pixel[3] / 255.0;
+        for (int c = 0; c < 3; ++c) sum[c] += weight * pixel[c] * alpha;
+        sum[3] += weight * alpha;
+        weight_sum += weight;
+      }
+      auto* output = horizontal.data() + (size_t(y) * resized->width + x) * 4;
+      for (int c = 0; c < 4; ++c) output[c] = sum[c] / weight_sum;
+    }
+  }
+  for (uint32_t y = 0; y < resized->height; ++y) {
+    const double center = (y + 0.5) * sy - 0.5;
+    const int first = std::max(0, int(std::ceil(center - ry)));
+    const int last = std::min(int(source.height) - 1, int(std::floor(center + ry)));
+    for (uint32_t x = 0; x < resized->width; ++x) {
+      double sum[4] = {}, weight_sum = 0;
+      for (int iy = first; iy <= last; ++iy) {
+        const double weight = Lanczos((iy - center) / std::max(1.0, sy));
+        const auto* pixel = horizontal.data() + (size_t(iy) * resized->width + x) * 4;
+        for (int c = 0; c < 4; ++c) sum[c] += weight * pixel[c];
+        weight_sum += weight;
+      }
+      auto* output = resized->rgba.data() + (size_t(y) * resized->width + x) * 4;
+      const double alpha = std::clamp(sum[3] / weight_sum, 0.0, 1.0);
+      output[3] = uint8_t(std::lround(alpha * 255.0));
+      for (int c = 0; c < 3; ++c)
+        output[c] = alpha > 1e-6 ? uint8_t(std::lround(std::clamp(
+            sum[c] / weight_sum / alpha, 0.0, 255.0))) : 0;
+    }
+  }
+}
+
+Image FitIcon(const Image& source, uint32_t size) {
+  const double scale = std::min(double(size) / source.width, double(size) / source.height);
+  const uint32_t width = std::clamp(uint32_t(source.width * scale + 0.5), 1u, size);
+  const uint32_t height = std::clamp(uint32_t(source.height * scale + 0.5), 1u, size);
+  Image resized{width, height, std::vector<uint8_t>(size_t(width) * height * 4)};
+  ResizeIcon(source, &resized);
+  Image out{size, size, std::vector<uint8_t>(size_t(size) * size * 4)};
+  const uint32_t left = (size - width) / 2, top = (size - height) / 2;
+  for (uint32_t row = 0; row < height; ++row)
+    std::copy_n(resized.rgba.data() + size_t(row) * width * 4, size_t(width) * 4,
+                out.rgba.data() + (size_t(top + row) * size + left) * 4);
+  return out;
+}
 
 Image CropRetail(const std::vector<uint8_t>& rgba, const std::string& slot) {
   for (const auto& entry : controller_schemes::ButtonSlots()) {
@@ -60,47 +133,66 @@ bool Compose(const std::vector<uint8_t>& original_font,
   assets::DecodeDxt5(original_buttons.data(), 512, 512, retail_rgba.data());
   std::vector<Image> fitted;
   fitted.reserve(icons.size());
-  for (const auto& icon : icons) {
+  for (size_t index = 0; index < icons.size(); ++index) {
+    const auto& icon = icons[index];
     Image image = ImageFor(icon, retail_rgba, scheme);
     if (!image.width || !image.height || image.rgba.size() != size_t(image.width) * image.height * 4)
       return false;
-    fitted.push_back(controller_schemes::Fit(image, font::kIconSize, font::kIconSize));
+    fitted.push_back(FitIcon(image, font::IconSize(static_cast<uint32_t>(index))));
   }
 
-  // Draw into the retail font's unused bottom band. Keep the original BC3 blocks
-  // above it verbatim so ordinary Pentatonic text still samples its original art.
-  // Downsample the band as one image so mip coordinates follow the authored UVs.
-  constexpr uint32_t band_height = font::kAtlasSize - font::kIconTop;
-  std::vector<uint8_t> band(size_t(font::kAtlasSize) * band_height * 4);
+  // The private font has its own texture, so all of its pixels are available
+  // for icons. Downsample the atlas as one image to keep mip UVs aligned.
+  std::vector<uint8_t> atlas(size_t(font::kAtlasSize) * font::kAtlasSize * 4);
   for (size_t i = 0; i < fitted.size(); ++i) {
-    const uint32_t x = uint32_t(i % font::kIconColumns) * font::kIconColumnStride +
-                       font::kIconInsetX;
-    const uint32_t y = uint32_t(i / font::kIconColumns) * font::kIconRowStride +
-                       font::kIconInsetY;
-    for (uint32_t row = 0; row < font::kIconSize; ++row)
-      std::copy_n(fitted[i].rgba.data() + size_t(row) * font::kIconSize * 4,
-                  size_t(font::kIconSize) * 4,
-                  band.data() + (size_t(y + row) * font::kAtlasSize + x) * 4);
+    const uint32_t x = font::IconX(static_cast<uint32_t>(i));
+    const uint32_t y = font::IconY(static_cast<uint32_t>(i));
+    const uint32_t size = font::IconSize(static_cast<uint32_t>(i));
+    for (uint32_t row = 0; row < size; ++row)
+      std::copy_n(fitted[i].rgba.data() + size_t(row) * size * 4,
+                  size_t(size) * 4,
+                  atlas.data() + (size_t(y + row) * font::kAtlasSize + x) * 4);
   }
 
   levels->clear();
-  size_t source_offset = 0;
-  for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
+  for (uint32_t mip = 0; mip <= font::kMipCount; ++mip) {
     const uint32_t dim = font::kAtlasSize >> mip;
-    const uint32_t mip_band_height = band_height >> mip;
-    std::vector<uint8_t> resized(size_t(dim) * mip_band_height * 4);
-    if (mip == 0) resized = band;
-    else assets::ResizeRgba(band.data(), font::kAtlasSize, band_height,
-                            resized.data(), dim, mip_band_height);
-    std::vector<uint8_t> band_blocks;
-    assets::EncodeDxt5(resized.data(), dim, mip_band_height, &band_blocks);
-    if (band_blocks.size() != size_t(dim) * mip_band_height) return false;
-    std::vector<uint8_t> level(original_font.begin() + source_offset,
-                               original_font.begin() + source_offset + size_t(dim) * dim);
-    source_offset += level.size();
-    std::copy(band_blocks.begin(), band_blocks.end(),
-              level.begin() + size_t(dim) * (font::kIconTop >> mip));
+    std::vector<uint8_t> resized(size_t(dim) * dim * 4);
+    if (mip == 0) resized = atlas;
+    else assets::ResizeRgba(atlas.data(), font::kAtlasSize, font::kAtlasSize,
+                            resized.data(), dim, dim);
+    std::vector<uint8_t> level;
+    assets::EncodeDxt5(resized.data(), dim, dim, &level);
+    if (level.size() != size_t(dim) * dim) return false;
     levels->push_back(std::move(level));
+  }
+  return true;
+}
+
+bool ComposeRetail(const std::vector<uint8_t>& original_font,
+                   const std::vector<std::vector<uint8_t>>& private_levels,
+                   std::vector<std::vector<uint8_t>>* levels) {
+  namespace font = ui::input_font;
+  if (!levels || private_levels.size() <= font::kMipCount) return false;
+  size_t expected_bytes = 0;
+  for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
+    const size_t dim = font::kRetailAtlasSize >> mip;
+    expected_bytes += dim * dim;
+    if (private_levels[mip + 1].size() != dim * dim) return false;
+  }
+  if (original_font.size() != expected_bytes) return false;
+  levels->clear();
+  size_t offset = 0;
+  for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
+    const size_t dim = font::kRetailAtlasSize >> mip;
+    const size_t level_bytes = dim * dim;
+    const size_t icon_start = dim * ((font::kIconTop / 2) >> mip);
+    std::vector<uint8_t> level(original_font.begin() + offset,
+                               original_font.begin() + offset + level_bytes);
+    std::copy(private_levels[mip + 1].begin() + icon_start,
+              private_levels[mip + 1].end(), level.begin() + icon_start);
+    levels->push_back(std::move(level));
+    offset += level_bytes;
   }
   return true;
 }

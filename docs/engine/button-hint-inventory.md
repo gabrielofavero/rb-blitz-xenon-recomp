@@ -102,3 +102,30 @@ active-family and binding-revision changes. This is main-menu evidence only. Loa
 calibration and other inline/localized-text routes in the table remain
 unimplemented and unproven. Do not treat the shared footer route as coverage
 for those surfaces.
+
+On 2026-11-02, a screenshot showed the footer keycaps still soft after changing
+the resampler. The shared 1024-pixel font atlas had reduced every icon to a
+32-pixel tile. The footer's 15 reserved tiles now use 48-pixel images in 50-pixel
+font cells; the 165 mapping-row tiles use 32-pixel images in 34-pixel cells below
+them. The footer scene has its own 50-pixel cell dimensions and UVs, while the
+mapping font keeps its separate 34-pixel dimensions. The generated-record check
+verifies both scenes' glyph geometry, and the atlas test checks every tile's
+gutter and preserves the retail texture blocks. A release build and host tests
+pass. The owner's next screenshot showed soft `Enter` and `Esc` keycaps in both
+the mapping rows and footer. A later attempt to replace these with generated
+keycaps changed the appearance without authorization and was reverted. The
+original package images remain in use; the rendering blur still needs a fix.
+
+The first 2048-square attempt kept the retail texture names and bitmap source
+path. The owner's next screenshot showed `8` and `9` in the footer and font
+fragments in mapping rows. `rb_blitz_484.log` had no private-font texture match:
+the guest continued sampling the retail Pentatonic texture at the new UVs.
+The copied scene now gives its Tex, Mat and bitmap source records separate
+equal-length names, while retaining the font links. Its 2048 texture has
+64-pixel mapping icons and 96-pixel footer icons. The coordinates are exactly
+twice the proven 1024 atlas layout; if the guest still aliases the copied
+texture, the runtime also composes the original 32/48-pixel icons into the
+retail font's unused band at the same normalized UVs. Tests verify the new
+scene's dimensions, both font geometries, and that the retail fallback keeps
+the original text blocks. An owner screenshot is still needed to establish
+whether the separate private texture is uploaded and how sharp it appears.

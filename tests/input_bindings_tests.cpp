@@ -108,7 +108,7 @@ void TestEffectiveIcons() {
                       Source("key:space")});
   rb_blitz::input::PublishInput(input);
   const auto row = rb_blitz::profile::ParseInputRowToken("input.general.a");
-  CHECK_TRUE(icons::CaptureActive().active_family == icons::Family::kKeyboardMouse);
+  CHECK_TRUE(icons::CaptureActive().active_family == icons::Family::kController);
   const auto pad = icons::Capture("retail", icons::Family::kController);
   const auto all = icons::Ordered(pad, row);
   input->general.Set(remap::Target::kA, {Source("pad:b")});
@@ -131,7 +131,7 @@ void TestEffectiveIcons() {
   rb_blitz::input::last_device::Focus(true);
   rb_blitz::profile::remap::PadState real_pad{};
   real_pad.buttons = 0x8000;
-  CHECK_TRUE(rb_blitz::input::last_device::Pad(true, real_pad).has_value());
+  CHECK_TRUE(!rb_blitz::input::last_device::Pad(true, real_pad).has_value());
   const auto active = icons::CaptureActive(&packages);
   CHECK_TRUE(active.active_family == icons::Family::kController);
   CHECK_TRUE(active.controller_scheme == "ps3");

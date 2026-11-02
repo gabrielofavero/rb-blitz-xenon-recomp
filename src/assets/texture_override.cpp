@@ -131,6 +131,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       icons_.clear();
       pads_.clear();
       font_levels_.clear();
+      retail_font_levels_.clear();
       logged_.clear();
       const auto* scheme = registry_.Find(selected_);
       if (scheme) {
@@ -161,6 +162,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
           font_icons_[ui::input_font::kHintFirst + i] = hint_icons_[i];
       } else font_icons_ = row_icons_;
       font_levels_.clear();
+      retail_font_levels_.clear();
     }
     if (scheme_changed || icons_changed || refresh_font_after_buttons_) {
       refresh_font_after_buttons_ = false;
@@ -185,39 +187,43 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         }
       }
     }
-    bool font = false;
-    auto font_original = ui::input_font::OriginalBc3();
-    if (!pad_slot && request.width == ui::input_font::kAtlasSize &&
-        request.height == ui::input_font::kAtlasSize && font_original &&
-        font_original->size() >= request.guest_base_size) {
-      if (font_hash_found_ && hash == font_hash_) {
-        font = true;
-      } else if (!font_hash_found_ && request.guest_base_size ==
-                 ui::input_font::kAtlasSize * ui::input_font::kAtlasSize) {
+    const auto private_original = ui::input_font::PrivateBc3();
+    const auto retail_original = ui::input_font::OriginalBc3();
+    auto matches_font = [&](uint32_t size,
+                            const std::shared_ptr<const std::vector<uint8_t>>& expected,
+                            std::unordered_set<uint64_t>* hashes,
+                            const char* name) {
+      if (pad_slot || request.width != size || request.height != size || !expected ||
+          request.guest_base_size != size * size) return false;
+      if (hashes->contains(hash)) return true;
         std::vector<uint8_t> canonical;
         const bool decoded = controller_schemes::UntileBc3Base(
             guest_data, request.guest_base_size, request.width, request.tiled,
             uint32_t(request.endianness), &canonical);
-        const bool matches = decoded && canonical.size() <= font_original->size() &&
-                             std::equal(canonical.begin(), canonical.end(), font_original->begin());
-        if (font_probe_logged_.size() < 32 && font_probe_logged_.insert(hash).second) {
-          const size_t first_diff = decoded
+        const bool matches = decoded && canonical.size() <= expected->size() &&
+                             std::equal(canonical.begin(), canonical.end(), expected->begin());
+        const uint64_t trace_key = hash ^ (uint64_t(size) << 32);
+        if (font_probe_logged_.size() < 32 && font_probe_logged_.insert(trace_key).second) {
+          const size_t first_diff = decoded && canonical.size() <= expected->size()
               ? size_t(std::mismatch(canonical.begin(), canonical.end(),
-                                     font_original->begin()).first - canonical.begin())
+                                     expected->begin()).first - canonical.begin())
               : 0;
-          REXLOG_INFO("input_icons: font candidate {:016X} guest=0x{:08X} tiled={} "
-                      "endian={} decoded={} first_diff={} match={}",
+          REXLOG_INFO("input_icons: {} font candidate {:016X} guest=0x{:08X} tiled={} "
+                      "endian={} decoded={} first_diff={} match={}", name,
                       hash, request.guest_base_address, request.tiled,
                       uint32_t(request.endianness), decoded, first_diff, matches);
         }
         if (matches) {
-          font_hash_ = hash;
-          font_hash_found_ = true;
-          font = true;
-          REXLOG_INFO("input_icons: matched retail font atlas texture {:016X}", hash);
+          hashes->insert(hash);
+          REXLOG_INFO("input_icons: matched {} font atlas texture {:016X}", name, hash);
         }
-      }
-    }
+        return matches;
+    };
+    const bool private_font = matches_font(ui::input_font::kAtlasSize,
+        private_original, &private_font_hashes_, "private");
+    const bool retail_font = matches_font(ui::input_font::kRetailAtlasSize,
+        retail_original, &retail_font_hashes_, "retail");
+    const bool font = private_font || retail_font;
     // The base-game texture must be a refresh candidate before any custom scheme is selected.
     // Otherwise a retail boot uploads it once and a later generation bump has nothing to evict.
     if (button || icons || pad_slot || font) *refresh_target = true;
@@ -233,7 +239,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         return false;
       }
       if (font_levels_.empty()) {
-        if (!input_font_atlas::Compose(*font_original, original_buttons_,
+        if (!private_original || !input_font_atlas::Compose(*private_original, original_buttons_,
                                       registry_.Find(selected_), font_icons_, &font_levels_)) {
           REXLOG_WARN("input_icons: could not compose mapping font images");
           return false;
@@ -242,8 +248,15 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
                     font_icons_.size(), ui::input_font::kHintFirst + 1,
                     ui::input_font::kHintFirst + 2);
       }
-      if (request.mip_count > font_levels_.size()) return false;
-      host_levels->assign(font_levels_.begin(), font_levels_.begin() + request.mip_count);
+      if (retail_font && retail_font_levels_.empty() &&
+          (!retail_original || !input_font_atlas::ComposeRetail(
+              *retail_original, font_levels_, &retail_font_levels_))) {
+        REXLOG_WARN("input_icons: could not compose retail font fallback");
+        return false;
+      }
+      const auto& chosen = retail_font ? retail_font_levels_ : font_levels_;
+      if (request.mip_count > chosen.size()) return false;
+      host_levels->assign(chosen.begin(), chosen.begin() + request.mip_count);
       return true;
     }
     const auto* scheme = registry_.Find(selected_);
@@ -300,6 +313,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::vector<std::vector<uint8_t>> buttons_;
   std::vector<std::vector<uint8_t>> icons_;
   std::vector<std::vector<uint8_t>> font_levels_;
+  std::vector<std::vector<uint8_t>> retail_font_levels_;
   std::vector<input::icons::Icon> font_icons_;
   std::vector<input::icons::Icon> row_icons_;
   std::vector<input::icons::Icon> hint_icons_;
@@ -308,8 +322,8 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::vector<uint8_t> original_buttons_;
   std::string last_icon_signature_;
   std::string last_hint_signature_;
-  uint64_t font_hash_ = 0;
-  bool font_hash_found_ = false;
+  std::unordered_set<uint64_t> private_font_hashes_;
+  std::unordered_set<uint64_t> retail_font_hashes_;
   std::unordered_set<uint64_t> font_probe_logged_;
   bool has_pending_icons_ = false;
   bool has_pending_hints_ = false;
@@ -457,7 +471,7 @@ void InstallControllerSchemes(const std::filesystem::path& install_root,
   static SchemeOverride provider(std::move(registry));
   g_scheme_provider = &provider;
   rex::graphics::SetTextureOverrideProvider(&provider);
-  REXLOG_INFO("button_schemes: active retail (device keyboard)");
+  REXLOG_INFO("button_schemes: active retail (device controller)");
 }
 
 bool SelectControllerScheme(const std::string& id) {
@@ -479,7 +493,7 @@ void PublishHintIcons(std::string signature, std::vector<input::icons::Icon> ico
   if (g_scheme_provider) g_scheme_provider->PublishHints(std::move(signature), std::move(icons));
 }
 bool InputIconsAvailable() {
-  return g_scheme_provider != nullptr && ui::input_font::OriginalBc3() != nullptr;
+  return g_scheme_provider != nullptr && ui::input_font::PrivateBc3() != nullptr;
 }
 const controller_schemes::Registry* ControllerSchemeRegistry() {
   return g_scheme_provider ? g_scheme_provider->Registry() : nullptr;

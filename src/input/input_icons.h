@@ -34,7 +34,7 @@ struct Icon {
 struct View {
   std::shared_ptr<const EffectiveInput> input;
   std::string controller_scheme;
-  Family active_family = Family::kKeyboardMouse;
+  Family active_family = Family::kController;
   uint64_t revision = 0;
   uint64_t device_revision = 0;
   // Boot owns the registry for the view's lifetime. Null means use the retail sheet.

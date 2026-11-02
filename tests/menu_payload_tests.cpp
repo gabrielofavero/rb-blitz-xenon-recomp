@@ -26,6 +26,7 @@
 #include <fstream>
 #include <iterator>
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -662,20 +663,62 @@ void CheckIconScene(const std::vector<uint8_t>& icon_scene) {
   CHECK_TRUE(icon_scene.size() > 0x810 + 0x867 + 31);
   if (icon_scene.size() <= 0x810 + 0x867 + 31) return;
   const std::string resources(reinterpret_cast<const char*>(icon_scene.data() + 0x810), 0x867);
-  CHECK_TRUE(resources.find("Pentatonic_Regular_") != std::string::npos);
-  CHECK_TRUE(resources.find("../image/pentatonic_regular_") != std::string::npos);
-  CHECK_TRUE(resources.find("Iconatonic_Regular_") == std::string::npos);
+  CHECK_TRUE(resources.find("Iconatonic_Regular_") != std::string::npos);
+  CHECK_TRUE(resources.find("../image/iconatonic_regular_") != std::string::npos);
+  CHECK_TRUE(resources.find("Pentatonic_Regular_(8_89)4x.tex") == std::string::npos);
   const auto retail = rb_blitz::ui::input_font::OriginalBc3();
+  const auto private_texture = rb_blitz::ui::input_font::PrivateBc3();
   CHECK_TRUE(retail != nullptr);
-  if (!retail) return;
+  CHECK_TRUE(private_texture != nullptr);
+  if (!retail || !private_texture) return;
   constexpr size_t payload = 0x810 + 0x867 + 31;
-  CHECK_TRUE(icon_scene.size() >= payload + retail->size());
-  if (icon_scene.size() < payload + retail->size()) return;
+  constexpr size_t dimensions = 0x810 + 0x867 + 10;
+  for (size_t field = 0; field < 3; ++field) {
+    CHECK_EQ(icon_scene[dimensions + field * 2], uint8_t{8});
+    CHECK_EQ(icon_scene[dimensions + field * 2 + 1], uint8_t{0});
+  }
+  CHECK_TRUE(icon_scene.size() >= payload + private_texture->size());
+  if (icon_scene.size() < payload + private_texture->size()) return;
   bool texture_identical = true;
-  for (size_t i = 0; i < retail->size(); i += 2)
-    texture_identical &= icon_scene[payload + i] == (*retail)[i + 1] &&
-                         icon_scene[payload + i + 1] == (*retail)[i];
+  for (size_t i = 0; i < private_texture->size(); i += 2)
+    texture_identical &= icon_scene[payload + i] == (*private_texture)[i + 1] &&
+                         icon_scene[payload + i + 1] == (*private_texture)[i];
   CHECK_TRUE(texture_identical);
+  CHECK_TRUE(private_texture->size() > retail->size());
+  CHECK_TRUE(!std::equal(retail->begin(), retail->begin() + 16,
+                         private_texture->begin()));
+}
+
+void CheckPrivateFontGeometry(const std::vector<uint8_t>& scene, bool hint) {
+  namespace font = rb_blitz::ui::input_font;
+  auto be32 = [&](size_t at) {
+    return uint32_t(scene[at]) << 24 | uint32_t(scene[at + 1]) << 16 |
+           uint32_t(scene[at + 2]) << 8 | scene[at + 3];
+  };
+  const float cell = hint ? font::kHintFontCellWidth : font::kFontCellWidth;
+  const uint32_t index = hint ? font::kHintFirst : 0;
+  const float glyph_width = float(font::IconSize(index)) / cell;
+  const float glyph_x = float(font::IconX(index)) / font::kAtlasSize;
+  const float glyph_y = float(font::IconY(index) -
+      (hint ? font::kHintInset : font::kIconInsetY)) / font::kAtlasSize;
+  size_t tables = 0;
+  for (size_t at = 0x810 + 580; at + (256 - 32) * 18 <= scene.size(); ++at) {
+    if (scene[at] != 0 || scene[at + 1] != 0x20 || be32(at - 580) != 256) continue;
+    bool ascii = true;
+    for (uint32_t c = 0; c < 8; ++c)
+      ascii &= scene[at + c * 18] == 0 && scene[at + c * 18 + 1] == 0x20 + c;
+    if (!ascii) continue;
+    ++tables;
+    const size_t table = at - 576;
+    CHECK_EQ(be32(table - 12), std::bit_cast<uint32_t>(cell / font::kAtlasSize));
+    CHECK_EQ(be32(table - 8), std::bit_cast<uint32_t>(cell / font::kAtlasSize));
+    const size_t glyph = table + font::GlyphCode(0) * 18;
+    CHECK_EQ(be32(glyph + 2), std::bit_cast<uint32_t>(glyph_x));
+    CHECK_EQ(be32(glyph + 6), std::bit_cast<uint32_t>(glyph_y));
+    CHECK_EQ(be32(glyph + 10), std::bit_cast<uint32_t>(glyph_width));
+    CHECK_EQ(be32(glyph + 14), std::bit_cast<uint32_t>(glyph_width));
+  }
+  CHECK_EQ(tables, size_t{4});
 }
 
 // Optional integration check against extracted records; never boots or drives the game.
@@ -708,9 +751,12 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
     }
     CHECK_TRUE(notes.empty());
     if (boot_case == 0) {
-      CheckIconScene(records.at(rb_blitz::ui::input_font::kIconSceneRecord));
+      const auto& row_font = records.at(rb_blitz::ui::input_font::kIconSceneRecord);
+      CheckIconScene(row_font);
+      CheckPrivateFontGeometry(row_font, false);
       const auto& hint_font = records.at(rb_blitz::ui::input_font::kHintSceneRecord);
       CheckIconScene(hint_font);
+      CheckPrivateFontGeometry(hint_font, true);
       CHECK_TRUE(hint_font != records.at(rb_blitz::ui::input_font::kIconSceneRecord));
       const auto& help = records.at(rb_blitz::ui::input_font::kInlineHelpRecord);
       constexpr std::string_view hint_path = "../fonts/inline_help_icons.milo";

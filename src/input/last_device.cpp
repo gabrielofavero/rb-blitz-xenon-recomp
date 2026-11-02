@@ -85,10 +85,17 @@ bool Tracker::Tick(uint64_t now_ms) {
 }
 
 bool Tracker::KeyDown(uint64_t now_ms) { return focused_ && Switch(Family::kKeyboardMouse, now_ms); }
-bool Tracker::MouseButton(uint64_t now_ms) { return focused_ && Switch(Family::kKeyboardMouse, now_ms); }
-bool Tracker::MouseWheel(uint64_t now_ms) { return focused_ && Switch(Family::kKeyboardMouse, now_ms); }
+bool Tracker::MouseButton(uint64_t now_ms) {
+  return kMouseButtonAndWheelSelectKeyboardLayout && focused_ &&
+         Switch(Family::kKeyboardMouse, now_ms);
+}
+bool Tracker::MouseWheel(uint64_t now_ms) {
+  return kMouseButtonAndWheelSelectKeyboardLayout && focused_ &&
+         Switch(Family::kKeyboardMouse, now_ms);
+}
 
 bool Tracker::MouseMove(int x, int y, uint64_t now_ms) {
+  if (!kMouseMotionSelectsKeyboardLayout) return false;
   if (!focused_) return false;
   if (!have_pointer_) {
     pointer_x_ = x; pointer_y_ = y; have_pointer_ = true;
