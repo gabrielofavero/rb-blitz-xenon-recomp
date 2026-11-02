@@ -47,7 +47,10 @@ both mapping surfaces in a paused song on 2026-10-31. The font has 180 image til
 sources share one. A row with more than eight bindings now pages six images at a time inside
 the guest list via Left/Right, with a page count. Host tests reach the 181st distinct source,
 but the live fit and navigation of an overflow row are unproven. Music Library Options'
-Start/Back images and distinct media symbols were accepted on 2026-10-31. See the
+Start/Back images and distinct media symbols were accepted on 2026-10-31. A later
+retail Xbox 360 Search screenshot exposed an Xbox Series Start image; the retail
+Start/Back resolver now selects the installed 360 sheet's own arrow glyphs; the
+owner accepted the corrected Search hint on 2026-11-02. See the
 [button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P9.
 
 **Load Guard coverage limits (2026-10-26):** the debugger

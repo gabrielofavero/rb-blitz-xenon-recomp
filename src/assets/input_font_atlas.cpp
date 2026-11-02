@@ -126,7 +126,7 @@ bool Compose(const std::vector<uint8_t>& original_font,
       original_buttons.size() != 512u * 512u) return false;
   size_t total = 0;
   for (uint32_t mip = 0; mip < font::kMipCount; ++mip)
-    total += size_t(font::kAtlasSize >> mip) * (font::kAtlasSize >> mip);
+    total += size_t(font::kGuestAtlasSize >> mip) * (font::kGuestAtlasSize >> mip);
   if (original_font.size() != total) return false;
 
   std::vector<uint8_t> retail_rgba(512u * 512u * 4);

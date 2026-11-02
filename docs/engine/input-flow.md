@@ -237,10 +237,11 @@ two guest polls still produces its edges. SDL's state array remains a fallback f
 held when the listener attached.
 
 - A `pad:` gameplay source answers from the physical pad's state and nothing else. The SDK's
-  legacy keyboard/mouse emulation (`mnk_mode`) synthesizes pad bits, and they are merged into the
-  state the guest sees - General Mapping still reads that merged state, because it is the
-  emulation's only consumer and the acceptance harnesses drive the menus through it - but a
-  `pad:` gameplay binding cannot become active because a key raised the same bit.
+  legacy keyboard/mouse emulation (`mnk_mode`) synthesizes pad bits. With a present profile,
+  General Mapping now reads the physical pad and the raw key events: merging the SDK's default
+  `Space` → A with Interface Mapping's `Space` → Start made one press confirm and search. A
+  profile-free boot retains the merged SDK state, because it has no General Mapping defaults to
+  apply. A `pad:` gameplay binding cannot become active because a key raised the same bit.
 - A `key:`/`mouse:` gameplay source answers from raw device state, never from the remapped or the
   synthesized pad. A gameplay mouse press therefore never enters the native-menu queue: the queue
   only accepts events while a native menu is available, and a song is not one.
@@ -378,12 +379,13 @@ it routes, because the preset it would feed is bypassed; with the shipped defaul
 D-pad directions, A, X, both shoulders and Start (`0x531F`).
 
 **While either gameplay switch routes, the guest sees the physical pad only.** The SDK's legacy
-MnK emulation is merged into the state the guest reads; General Mapping still uses that merged
-state (it is how the acceptance harnesses drive the menus), but a direct table must not be fed by
-it (R4). The filter therefore hands the rewrite the physical `PadState` - buttons, triggers **and
-the four stick axes**. The axes matter: P3's first live arm found that a held `D` still produced a
-native `lane0` press because the title derives its own stick-direction buttons from the axes, and
-the filter had only been rewriting the buttons. Evidence and the fix are in the plan §13.3.
+MnK emulation is merged before the filter, but a direct table must not be fed by it (R4). With a
+present profile, General Mapping also starts from the physical pad and maps raw keys itself; a
+profile-free boot keeps the SDK's merged state for legacy menu input. The filter hands the rewrite
+the physical `PadState` - buttons, triggers **and the four stick axes**. The axes matter: P3's first
+live arm found that a held `D` still produced a native `lane0` press because the title derives its
+own stick-direction buttons from the axes, and the filter had only been rewriting the buttons.
+Evidence and the fix are in the plan §13.3.
 
 **Edges, not levels, between the poll and the guest.** The poll publishes one union held state per
 action; `ActionEdges` remembers at most one press and one release per action and the seam drains

@@ -19,7 +19,7 @@ evidence that ordinary hints are correct.
 | Recommendations and Challenge footers | Their installed DTBs assign Confirm to `inline_help_continue`, `store_offer` or `challenge_play_song`, and Option to `rec_option_prev_audio`; the Challenge panel uses `challenge_help.ihp`. | Same action-token seam, with distinct `InlineHelp` object names and state-dependent captions. |
 | Leaderboards, store and upsell footers | Installed DTBs assign actions to `InlineHelp_leaderboards.ihp`, `cancel.ihp`, `store.ihp` and `InlineHelp.ihp`. The leaderboard ShellOption caption can be a variable token. | Keep the action identity from the call, including variable captions. Check visibility and disabled states. |
 | Pause and results footers | The pause DTB handles `kAction_Cancel`, `kAction_ViewModify` and `kAction_Start`. Results DTBs include `set_action_token` calls through an expression that finds `InlineHelp.ihp` in `results_shared_panel`; a simple named-object search misses these. | Trace the scene/shared-panel draw route and exact visible actions. |
-| Loading screen, begin song (Confirm or Start) | `loading.lbl` uses locale key `loading_press_button`, whose English text is `PRESS <alt1>A</alt1>TO BEGIN`. The loading screen accepts Confirm or Start after load completion; the label is filled on enter. | The displayed A is not sufficient to identify which of the two accepted actions should be advertised. Choose and document the hint's action, then update its guest label when binding or family changes. |
+| Loading screen, begin song (Confirm or Start) | `loading.lbl` uses locale key `loading_press_button`, whose English text is `PRESS <alt1>A</alt1>TO BEGIN`. The loading screen accepts Confirm or Start after load completion; the label is filled on enter. | Advertises Interface Confirm, the action represented by the retail A; Start remains an accepted alternative. The prompt's alternate font and six locale strings now use Confirm's private glyph tile. The loading UI handler publishes binding and family changes. Generated-record checks pass; the owner reported the visual result good on 2026-11-02. |
 | Tutorial and loading tips for note play, power-up deploy, continue | English locale contains `loading_tip_*` strings, including `Play left note: {string:lane0_swing_token}`, `Play right note: {string:lane1_swing_token}`, power-up text with `<alt>X</alt>`, and `Press <alt1>A</alt1> to Continue`. | Inspect each draw context and assign its Gameplay or Interface action. A locale-wide X/A substitution would be ambiguous. |
 | Calibration instructions | `cal_audio_desc_pad` and `cal_video_desc_pad` say to press `<alt1>A</alt1>`; the calibration scene has its own button images. | Actionable calibration hints need an explicit measured route and outcome even though calibration-specific scene art is outside the button-sheet replacement scope. |
 | Standalone Start prompt | English locale key `press_start_to_continue` spells `Press START to continue`. | Inspect caller and action before replacement; this is text, not an `InlineHelp` token. |
@@ -127,5 +127,42 @@ twice the proven 1024 atlas layout; if the guest still aliases the copied
 texture, the runtime also composes the original 32/48-pixel icons into the
 retail font's unused band at the same normalized UVs. Tests verify the new
 scene's dimensions, both font geometries, and that the retail fallback keeps
-the original text blocks. An owner screenshot is still needed to establish
-whether the separate private texture is uploaded and how sharp it appears.
+the original text blocks. On 2026-11-02 the owner confirmed the latest footer
+and mapping-row appearance looks good. The private-texture upload path is still
+inferred from host checks; the visual result is accepted.
+
+The next P10 route is `loading.lbl`. The installed loading scene carries five
+`buttons.milo` font references: three earlier labels, the begin prompt, and
+the rotating tip. Its `loading_press_button` token precedes only the prompt's
+reference. The generated scene changes that one reference to
+`inline_help_icons.milo`, the same private action-hint font the footer uses,
+and each installed locale replaces
+the retail A inside `<alt1>` with the private Confirm glyph. The guest still
+owns the prompt's text, placement, visibility and Confirm-or-Start handler.
+When Controller Layout is disabled, the generated records keep the retail A
+and the original loading scene.
+The loading-screen UI message hook publishes Confirm's first effective source
+when bindings, family or layout change. The release build and generated-record
+check pass across all six installed locales. On 2026-11-02 the owner reported
+the loading prompt looks good, and identified a separate Space/Search conflict:
+the SDK's legacy MnK default also bound Space to A. With a present profile,
+the input filter now feeds General Mapping the physical pad and raw key events,
+so Space follows Interface Mapping's Start/Search binding alone. The owner
+confirmed the Search behavior on 2026-11-02. The same screenshot exposed a
+retail-layout Search hint using the Xbox Series Start image. Retail Start/Back
+now resolve to the installed Xbox 360 sheet's arrow glyphs; the owner accepted
+that image on 2026-11-02. Release builds and the focused input and icon tests pass.
+
+`rb_blitz_488.log`, `rb_blitz_490.log`, and `rb_blitz_492.log` ended at the
+same guest allocator null read shortly after a song exit, with Xbox Series
+active. The `492` bitmap trace places the failing 1 MiB request in the retail
+`rays.tex` texture, after repeated screen loads. Both private font scenes had
+loaded 2048-square guest bitmaps even though this run rendered icons through
+the retail 1024-square fallback. The scenes now retain 1024-square guest
+bitmaps with distinct resource names; their UVs still select the same fallback
+pixels. The host's 2048-square composition is downsampled to 1024 for both
+private textures and the retail font. This removes 8.4 MiB of resident guest
+bitmap payload from the two scenes. The bitmap trace also records guest buffer
+addresses and free-list totals on `rays.tex` loads to distinguish cumulative
+leaks from fragmentation in the next live run. The loading scene uses the
+footer's font directly instead of mounting a third scene.

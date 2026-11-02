@@ -549,15 +549,12 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
             }
             consumed.insert(consumed.end(), music_consumed.begin(), music_consumed.end());
           }
-          // General Mapping's input pad. It is the merged state - the physical pads plus the
-          // SDK's legacy MnK emulation when `mnk_mode` is on, which is how every acceptance
-          // harness drives the menus - except while a gameplay table routes input: then the
-          // guest sees the *physical* pad only, because the MnK emulation is a second keyboard
-          // path into the native preset and General Mapping's key/mouse sources stop at the menu
-          // while a direct table is on (R4). A `pad:` gameplay source reads the physical pad in
-          // either case (src/input/source_gates.h). With Keyboard Support off the MnK emulation
-          // stands down in every context (P7's live gate), so the physical pad is what the guest
-          // may see - a synthesized bit is a keyboard path whether a menu or a song is current.
+          // A present profile makes General Mapping the sole keyboard-to-menu
+          // route. The SDK's legacy MnK default also turns Space into A, while
+          // this title binds Space to Start/Search; merging both makes one press
+          // confirm and search. Without a profile, preserve the SDK's legacy
+          // menu path. Gameplay, a closed keyboard gate, or a music-owned key
+          // also uses the physical pad only (src/input/source_gates.h).
           const remap::PadState merged{state.gamepad.buttons,     state.gamepad.left_trigger,
                                       state.gamepad.right_trigger, state.gamepad.thumb_lx,
                                       state.gamepad.thumb_ly,      state.gamepad.thumb_rx,
@@ -565,8 +562,8 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           const bool direct_routing = gameplay;
           const bool music_key_owned = std::any_of(music_consumed.begin(), music_consumed.end(),
               [](const Source& source) { return source.kind == SourceKind::kKey; });
-          remap::PadState pad =
-              (direct_routing || !gates.keyboard || music_key_owned) ? physical.pad : merged;
+          remap::PadState pad = GeneralPadInput(
+              has_table, direct_routing, gates.keyboard, music_key_owned, physical.pad, merged);
           for (const auto& source : music_consumed) if (source.kind == SourceKind::kPad) {
             if (auto target = remap::ParseTarget(source.name)) {
               pad.buttons &= ~remap::TargetBit(*target);
@@ -598,8 +595,8 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // well as buttons, and the title derives its own stick-direction buttons (kPad 16-23)
           // from the axes, so a held `D` produced a native lane0 press in a song while every
           // button bit was already being cleared. `Apply` copies the axes it was handed, so
-          // writing them back is the identity when the merged state was used and the physical
-          // axes when a gameplay table routes.
+          // writing them back is the identity when a profile-free boot uses the merged state,
+          // and otherwise gives the guest the physical axes.
           state.gamepad.thumb_lx = out.left_x;
           state.gamepad.thumb_ly = out.left_y;
           state.gamepad.thumb_rx = out.right_x;

@@ -219,7 +219,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         }
         return matches;
     };
-    const bool private_font = matches_font(ui::input_font::kAtlasSize,
+    const bool private_font = matches_font(ui::input_font::kGuestAtlasSize,
         private_original, &private_font_hashes_, "private");
     const bool retail_font = matches_font(ui::input_font::kRetailAtlasSize,
         retail_original, &retail_font_hashes_, "retail");
@@ -248,13 +248,13 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
                     font_icons_.size(), ui::input_font::kHintFirst + 1,
                     ui::input_font::kHintFirst + 2);
       }
-      if (retail_font && retail_font_levels_.empty() &&
+      if (retail_font_levels_.empty() &&
           (!retail_original || !input_font_atlas::ComposeRetail(
               *retail_original, font_levels_, &retail_font_levels_))) {
         REXLOG_WARN("input_icons: could not compose retail font fallback");
         return false;
       }
-      const auto& chosen = retail_font ? retail_font_levels_ : font_levels_;
+      const auto& chosen = retail_font_levels_;
       if (request.mip_count > chosen.size()) return false;
       host_levels->assign(chosen.begin(), chosen.begin() + request.mip_count);
       return true;

@@ -34,6 +34,14 @@ SourceDevice DeviceOf(SourceKind kind) {
   return SourceDevice::kPad;
 }
 
+profile::remap::PadState GeneralPadInput(bool profile_present, bool gameplay,
+                                        bool keyboard_enabled, bool music_key_owned,
+                                        const profile::remap::PadState& physical,
+                                        const profile::remap::PadState& merged) {
+  return (profile_present || gameplay || !keyboard_enabled || music_key_owned)
+             ? physical : merged;
+}
+
 uint32_t MouseMaskFor(std::string_view name) {
   if (name == "left") return mouse_button::kLeft;
   if (name == "middle") return mouse_button::kMiddle;

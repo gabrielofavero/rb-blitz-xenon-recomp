@@ -209,10 +209,11 @@ int main() {
   Check(decoded[(size_t(200) * 512 + 200) * 4 + 3] == 255,
         "omitted glyph changed");
 
-  // The private font gets a dedicated atlas large enough for near-native icons.
+  // The guest scene keeps a retail-sized marker atlas; the host composes at
+  // 2048 and downsamples the icon band for both private and retail textures.
   std::vector<uint8_t> font_chain;
   for (uint32_t mip = 0; mip < rb_blitz::ui::input_font::kMipCount; ++mip) {
-    const uint32_t dim = rb_blitz::ui::input_font::kAtlasSize >> mip;
+    const uint32_t dim = rb_blitz::ui::input_font::kGuestAtlasSize >> mip;
     std::vector<uint8_t> blank(size_t(dim) * dim * 4, 0);
     std::vector<uint8_t> level;
     rb_blitz::assets::EncodeDxt5(blank.data(), dim, dim, &level);

@@ -131,6 +131,16 @@ bool TableActive(GameplayRouting routing, profile::gameplay_remap::TableKind kin
 bool GeneralSourceAllowed(const SourceGates& gates, bool gameplay,
                           profile::remap::SourceKind kind);
 
+// A present profile owns menu key bindings through General Mapping. The SDK's
+// legacy MnK pad contains a second, conflicting default (Space -> A), so only
+// the physical pad feeds that rewrite. Without a profile, retain the SDK's
+// legacy menu behavior. Gameplay, a closed keyboard gate, and a music-owned
+// key also require physical input regardless of profile presence.
+profile::remap::PadState GeneralPadInput(bool profile_present, bool gameplay,
+                                        bool keyboard_enabled, bool music_key_owned,
+                                        const profile::remap::PadState& physical,
+                                        const profile::remap::PadState& merged);
+
 // Every key or mouse source an ACTIVE gameplay table is holding this poll, plus the ones it took
 // before the context changed and that are still down. General Mapping must not act on one of
 // them: the press belongs to the table. Measured 2026-10-20 (P2): Escape pauses from the Mouse &

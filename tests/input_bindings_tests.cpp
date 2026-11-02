@@ -845,10 +845,15 @@ void TestImageRows() {
 
   const auto retail_start = icons::Resolve(Source("pad:start"), "retail", &packages);
   const auto retail_back = icons::Resolve(Source("pad:back"), "retail", &packages);
-  CHECK_TRUE(retail_start.art == icons::Art::kPackageImage);
-  CHECK_TRUE(retail_back.art == icons::Art::kPackageImage);
-  CHECK_TRUE(retail_start.rgba == std::vector<uint8_t>({85, 0, 0, 255}));
-  CHECK_TRUE(retail_back.rgba == std::vector<uint8_t>({102, 0, 0, 255}));
+  CHECK_TRUE(retail_start.art == icons::Art::kSchemeSlot);
+  CHECK_TRUE(retail_back.art == icons::Art::kSchemeSlot);
+  CHECK_TRUE(retail_start.slot == "start_button");
+  CHECK_TRUE(retail_back.slot == "back_button");
+  CHECK_TRUE(retail_start.rgba.empty());
+  CHECK_TRUE(retail_back.rgba.empty());
+  const auto series_start = icons::Resolve(Source("pad:start"), "xbox-series", &packages);
+  CHECK_TRUE(series_start.art == icons::Art::kPackageImage);
+  CHECK_TRUE(series_start.rgba == std::vector<uint8_t>({85, 0, 0, 255}));
   const auto media_next = icons::Resolve(Source("key:MediaTrackNext"), "retail", &packages);
   const auto media_previous = icons::Resolve(Source("key:MediaTrackPrevious"), "retail", &packages);
   const auto media_pause = icons::Resolve(Source("key:MediaPlayPause"), "retail", &packages);

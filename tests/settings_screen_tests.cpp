@@ -70,6 +70,9 @@ using namespace rb_blitz::test;
 
 using dtb::Node;
 
+constexpr size_t kExpectedPagesPerContext = 62;
+constexpr size_t kExpectedPages = 2 * kExpectedPagesPerContext;
+
 bool SuppressesSettingsCaption(const std::string_view name) {
   return name.starts_with("settings_restart") ||
          name.starts_with("settings_save_error") ||
@@ -451,11 +454,11 @@ void TestMergedRootShape() {
   BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
 
   const std::vector<std::string> panels = PanelNames();
-  CHECK_EQ(panels.size(), 114u);  // fifty-seven pages in each context
+  CHECK_EQ(panels.size(), kExpectedPages);
   CHECK_TRUE(panels.front() == kRootPanel);
 
   const std::vector<std::string> screens = ScreenNames();
-  CHECK_EQ(screens.size(), 114u);
+  CHECK_EQ(screens.size(), kExpectedPages);
   CHECK_TRUE(screens.front() == kRootScreen);
   // The contexts pair up one for one, in declaration order: the i-th screen's in-song twin is the
   // (i + half)-th. That is what makes `InSongDestination` total - every page a row can name has a twin
@@ -520,8 +523,8 @@ void TestListOwnership() {
                HasText(root, "../pause/settings_confirmation.milo"));
     (pause ? in_song : main_menu) += 1;
   }
-  CHECK_EQ(main_menu, 57);
-  CHECK_EQ(in_song, 57);
+  CHECK_EQ(main_menu, kExpectedPagesPerContext);
+  CHECK_EQ(in_song, kExpectedPagesPerContext);
 
   // The copies have to live **beside** the retail scene, because that scene refers to its neighbours
   // by relative path (`neon_lights.milo`, `../resource/lists/list_options_main.milo`), and those
@@ -582,7 +585,7 @@ void TestScreenBackTargets() {
       CHECK_TRUE(HasText(root, "game_screen"));
     }
   }
-  CHECK_EQ(in_song, 57);  // one per page, the root included
+  CHECK_EQ(in_song, kExpectedPagesPerContext);  // one per page, the root included
   CHECK_EQ(root_twins, 1);
 }
 
@@ -1172,7 +1175,7 @@ void TestInSongContext() {
     CHECK_TRUE(std::find(screens.begin(), screens.end(), PauseScreen(screens[i])) !=
                screens.end());
   }
-  CHECK_EQ(menu_screens.size(), 57u);
+  CHECK_EQ(menu_screens.size(), kExpectedPagesPerContext);
   std::vector<std::string> in_song_panels_names = PanelNames();
   in_song_panels_names.erase(in_song_panels_names.begin(),
                              in_song_panels_names.begin() + static_cast<std::ptrdiff_t>(half));
@@ -1192,7 +1195,7 @@ void TestInSongContext() {
       CHECK_FALSE(HasText(root, screen));
     }
   }
-  CHECK_EQ(in_song_panels, 57);
+  CHECK_EQ(in_song_panels, kExpectedPagesPerContext);
 
   // The two contexts' panel sets are retail's own, and the difference between them is
   // load-bearing - measured, not stylistic. Retail's in-song page screens that are entered with a
@@ -1443,7 +1446,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, 114);                   // every panel, in both contexts
+  CHECK_EQ(fills, kExpectedPages);                   // every panel, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -1639,7 +1642,7 @@ void TestButtonTableIsOneSwitch() {
     }
     CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
   }
-  CHECK_EQ(tables, 114);  // every panel, in both contexts
+  CHECK_EQ(tables, kExpectedPages);  // every panel, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
@@ -1690,7 +1693,7 @@ void TestButtonTableIsOneSwitch() {
         all.size() - 1u - static_cast<size_t>(in_moves) - static_cast<size_t>(in_scroll);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, 114);  // one row table per panel, in both contexts
+  CHECK_EQ(row_tables, kExpectedPages);  // one row table per panel, in both contexts
 }
 
 void TestSelectAdvancesAndWraps() {
@@ -1793,7 +1796,7 @@ void TestRestartPromptOnlyOnLeave() {
   // P9-11 retired the ten authored search-key pages (one root, the letters index, five character
   // groups, two number groups and More Keys) in both contexts: the store's Search row opens the
   // title's own keyboard now. 142 - 2 * 10.
-  CHECK_EQ(panels, 114);
+  CHECK_EQ(panels, kExpectedPages);
   CHECK_EQ(root_cancels, 2);
   CHECK_EQ(other_cancels, panels - root_cancels);
 }
@@ -2902,7 +2905,7 @@ void TestHelpEventsInTheDefinition() {
       }
     }
   }
-  CHECK_EQ(panels, 114);        // every page, in both contexts
+  CHECK_EQ(panels, kExpectedPages);        // every page, in both contexts
   CHECK_EQ(enters, panels);    // every page tells the overlay where the highlight starts
   CHECK_TRUE(moves > 100);     // the unclamped direction cases, across the surface
   CHECK_EQ(scrolls, expected_scrolls);
@@ -3059,7 +3062,7 @@ void TestConfirmationPagesAreCaptionFree() {
     }
   }
 
-  CHECK_EQ(panels, 114);         // the whole surface, in both contexts
+  CHECK_EQ(panels, kExpectedPages);         // the whole surface, in both contexts
   const auto names = PanelNames();
   CHECK_EQ(suppressed_seen, static_cast<int>(std::count_if(
       names.begin(), names.end(), SuppressesSettingsCaption)));
@@ -3290,7 +3293,7 @@ void TestMusicNavigationSurface() {
   disabled.background_music_navigation = false;
   ConfigureMenu(disabled);
   // Off must keep the identical tree, including the command page in both contexts.
-  CHECK_EQ(PanelNames().size(), 114u);
+  CHECK_EQ(PanelNames().size(), kExpectedPages);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
   CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 3u);
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
@@ -3475,7 +3478,7 @@ std::vector<std::string> PageRows(const std::string& panel_name) {
             continue;
           }
           std::string name = symbol.text;
-          for (const char* suffix : {"_on", "_off"}) {
+          for (const char* suffix : {"_on", "_off", "_selected"}) {
             const std::string tail(suffix);
             if (name.size() > tail.size() &&
                 name.compare(name.size() - tail.size(), tail.size(), tail) == 0) {
@@ -4252,35 +4255,70 @@ void TestMainMenuOrder() {
 }
 
 void TestControllerLayoutCatalogPage() {
-  BeginCase("Controls has one Layout selector with boot choices in both contexts");
+  BeginCase("Layout groups the boot catalog and applies only a confirmed choice");
   MenuConfiguration configuration;
   configuration.controller_layout_enabled = true;
   configuration.choices["controller.scheme"] = {
-      {"retail", "Xbox 360"}, {"test-markers", "Test Markers"},
-      {"one-pad", "Pad Only"}};
+      {"retail", "Xbox 360"}, {"xbox-series", "Xbox Series"},
+      {"ps3", "PlayStation 3"}, {"playstation-5", "PlayStation 5"},
+      {"nintendo-switch-pro-controller", "Switch Pro"},
+      {"steam-deck", "Steam Deck"}, {"test-markers", "Test Markers"}};
   ConfigureMenu(configuration);
 
   const auto panels = PanelNames();
-  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_controller_layout_panel") == panels.end());
+  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_controller_layout_panel") != panels.end());
   const std::vector<std::string> expected = {
       "settings_controls_layout", "settings_controller_presets",
       "settings_controls_interface", "settings_controls_gameplay"};
   CHECK_TRUE(PanelRowSymbols("settings_controls_panel") == expected);
   CHECK_TRUE(PageRows("settings_controls_pause_panel") ==
              PageRows("settings_controls_panel"));
-
-  bool value = false;
-  for (const auto& [key, label] : Labels()) {
-    if (key == "settings_controls_layout_test-markers") value = label == "Layout: Test Markers";
-    CHECK_TRUE(key != "settings_layout_keyboard" && key != "settings_layout_scan");
+  const std::vector<std::string> groups = {
+      "settings_layout_xbox", "settings_layout_playstation",
+      "settings_layout_nintendo", "settings_layout_others"};
+  CHECK_TRUE(PageRows("settings_controller_layout_panel") == groups);
+  CHECK_TRUE(PageRows("settings_controller_layout_pause_panel") == groups);
+  const std::vector<std::pair<std::string, std::vector<std::string>>> catalog{
+      {"settings_layout_xbox_panel", {"settings_layout_choice_retail",
+                                      "settings_layout_choice_xbox-series"}},
+      {"settings_layout_playstation_panel", {"settings_layout_choice_ps3",
+                                             "settings_layout_choice_playstation-5"}},
+      {"settings_layout_nintendo_panel", {"settings_layout_choice_nintendo-switch-pro-controller"}},
+      {"settings_layout_others_panel", {"settings_layout_choice_steam-deck",
+                                        "settings_layout_choice_test-markers"}},
+  };
+  for (const auto& [panel, rows] : catalog) {
+    CHECK_TRUE(PanelRowSymbols(panel) == rows);
+    CHECK_TRUE(PanelRowSymbols(PausePanel(panel)) == rows);
   }
-  CHECK_TRUE(value);
+
+  bool active_label = false;
+  for (const auto& [key, label] : Labels()) {
+    if (key == "settings_layout_choice_retail_selected") active_label = label == "* Xbox 360";
+  }
+  CHECK_TRUE(active_label);
   const auto requests = RequestPaths();
   CHECK_TRUE(std::find(requests.begin(), requests.end(),
                        "rbbz-settings/set/controller.scheme/t:test-markers") != requests.end());
+  CHECK_TRUE(std::find(requests.begin(), requests.end(),
+                       "rbbz-settings/snapshot/controller.scheme/t:retail") != requests.end());
+  const auto authored = DefinitionRoots();
+  const auto browse = CaseWords(authored, "settings_layout_xbox");
+  CHECK_TRUE(std::find(browse.begin(), browse.end(), "rbbz-settings/set/controller.scheme/t:retail") ==
+             browse.end());
+  const auto select = CaseWords(authored, "settings_layout_choice_xbox-series");
+  CHECK_TRUE(std::find(select.begin(), select.end(),
+                       "rbbz-settings/set/controller.scheme/t:xbox-series") != select.end());
+  const auto current = CaseWords(authored, "settings_layout_choice_retail_selected");
+  CHECK_TRUE(std::find(current.begin(), current.end(),
+                       "rbbz-settings/set/controller.scheme/t:retail") == current.end());
 
   ConfigureMenu(MenuConfiguration{});
   CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 4u);
+  CHECK_TRUE(PanelRowSymbols("settings_layout_xbox_panel") ==
+             std::vector<std::string>({"settings_layout_choice_retail"}));
+  CHECK_TRUE(PanelRowSymbols("settings_layout_others_panel") ==
+             std::vector<std::string>({"settings_layout_empty_others"}));
   CHECK_TRUE(PanelRowSymbols("settings_input_types_panel").empty());
 }
 

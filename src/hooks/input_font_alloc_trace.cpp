@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Diagnose large guest bitmap allocations while Milo textures load.
+#include <cstdint>
+#include <string>
+#include <utility>
+
+#include <rex/hook.h>
+#include <rex/logging.h>
+#include <rex/system/xmemory.h>
+
+REX_EXTERN(__imp__sub_8220CCA8);  // RndTex::Load
+REX_EXTERN(__imp__sub_821FC8A8);  // RndBitmap pixel allocation
+REX_EXTERN(__imp__sub_8246F658);  // guest heap free-list statistics
+REX_EXTERN(__imp__sub_8246FA20);  // guest heap allocation
+
+namespace {
+thread_local std::string g_loading_tex;
+
+std::string TexName(uint8_t* base, uint32_t object) {
+  if (object < 0x40000000 || object >= 0x7F000000) return {};
+  const auto name = rex::memory::load_and_swap<uint32_t>(base + object + 32);
+  if (!name) return {};
+  const char* chars = rex::memory::GuestPtr<const char*>(base, name);
+  if (!chars) return {};
+  std::string result;
+  for (size_t i = 0; i < 96; ++i) {
+    const auto ch = static_cast<unsigned char>(chars[i]);
+    if (!ch) break;
+    if (ch < 0x20 || ch > 0x7E) return {};
+    result.push_back(static_cast<char>(ch));
+  }
+  return result;
+}
+}  // namespace
+
+REX_HOOK_RAW(sub_8220CCA8) {
+  auto previous = std::move(g_loading_tex);
+  g_loading_tex = TexName(base, ctx.r3.u32);
+  __imp__sub_8220CCA8(ctx, base);
+  g_loading_tex = std::move(previous);
+}
+
+REX_HOOK_RAW(sub_821FC8A8) {
+  const uint32_t bitmap = ctx.r3.u32;
+  if (bitmap >= 0x40000000 && bitmap < 0x7F000000) {
+    const uint32_t width = rex::memory::load_and_swap<uint16_t>(base + bitmap + 6);
+    const uint32_t height = rex::memory::load_and_swap<uint16_t>(base + bitmap + 8);
+    const uint32_t bits = base[bitmap + 10];
+    const uint64_t pixels = uint64_t(width) * height;
+    if (pixels >= 65536)
+      REXLOG_INFO("bitmap_alloc: tex='{}' bitmap={:08X} {}x{} bits={} pixels={}",
+                  g_loading_tex, bitmap, width, height, bits, pixels);
+  }
+  __imp__sub_821FC8A8(ctx, base);
+  if (bitmap >= 0x40000000 && bitmap < 0x7F000000 &&
+      uint64_t(rex::memory::load_and_swap<uint16_t>(base + bitmap + 6)) *
+          rex::memory::load_and_swap<uint16_t>(base + bitmap + 8) >= 65536) {
+    REXLOG_INFO("bitmap_alloc: tex='{}' bitmap={:08X} data={:08X}",
+                g_loading_tex, bitmap,
+                rex::memory::load_and_swap<uint32_t>(base + bitmap + 24));
+  }
+}
+
+REX_HOOK_RAW(sub_8246F658) {
+  const uint32_t total_out = ctx.r6.u32;
+  const uint32_t largest_out = ctx.r7.u32;
+  __imp__sub_8246F658(ctx, base);
+  if (!g_loading_tex.empty())
+    REXLOG_WARN("bitmap_alloc: heap retry tex='{}' total_free={} largest_free={}",
+                g_loading_tex,
+                rex::memory::load_and_swap<uint32_t>(base + total_out),
+                rex::memory::load_and_swap<uint32_t>(base + largest_out));
+}
+
+REX_HOOK_RAW(sub_8246FA20) {
+  if (g_loading_tex == "rays.tex") {
+    uint64_t total = 0;
+    uint32_t largest = 0;
+    uint32_t blocks = 0;
+    uint32_t node = rex::memory::load_and_swap<uint32_t>(base + ctx.r3.u32);
+    while (node >= 0x40000000 && node < 0x7F000000 && blocks < 100000) {
+      const uint32_t bytes = rex::memory::load_and_swap<uint32_t>(base + node) * 4;
+      total += bytes;
+      if (bytes > largest) largest = bytes;
+      ++blocks;
+      node = rex::memory::load_and_swap<uint32_t>(base + node + 8);
+    }
+    REXLOG_INFO("bitmap_alloc: heap before tex='{}' request={} free={} largest={} blocks={} tail={:08X}",
+                g_loading_tex, ctx.r4.u32 * 4, total, largest, blocks, node);
+  }
+  __imp__sub_8246FA20(ctx, base);
+}

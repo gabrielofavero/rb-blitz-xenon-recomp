@@ -32,8 +32,10 @@ Part 1 wherever they disagree.
   later accepted an eight-input Confirm row and both mapping surfaces in a paused
   song. Rows above eight bindings now page six images at a time through the native
   list; live fit and Left/Right navigation remain unproven.
-- **Layout selector (button-layout P3, owner correction 2026-10-27):** the native selector sits
-  directly on Controls as `Layout: <name>` in both contexts. The boot-discovered choices,
+- **Layout menu (button-layout P3, owner correction 2026-11-02):** Controls now opens a Layout
+  submenu with Xbox, PlayStation, Nintendo Switch and Others in both contexts. The saved layout
+  has a `*` marker. Only Confirm on a different named layout applies it; browsing does not.
+  The boot-discovered choices,
   `settings.toml` token, missing-package fallback, and queued GPU texture refresh are implemented.
   The first live boot exposed a timing bug: the menu was authored before package discovery, leaving
   only Xbox 360 selectable. Discovery now runs before menu authoring. A second owner test confirmed

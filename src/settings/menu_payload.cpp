@@ -896,6 +896,30 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         if (error) *error = "inline help locale format changed: " + help_why;
         return false;
       }
+      // The loading screen accepts Confirm or Start. Advertise Confirm, the
+      // action represented by its retail A prompt. The early private glyph
+      // aliases Confirm's image slot; texture publication refreshes it live.
+      if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
+        bool loading_prompt = false;
+        for (auto& root : roots) {
+          if (root.tag != ui::dtb::kArray || root.kids.size() < 2 ||
+              root.kids[0].text != "loading_press_button" ||
+              root.kids[1].tag != ui::dtb::kString) continue;
+          constexpr std::string_view old_glyph = "<alt1>A</alt1>";
+          const size_t at = root.kids[1].text.find(old_glyph);
+          if (at == std::string::npos ||
+              root.kids[1].text.find(old_glyph, at + old_glyph.size()) != std::string::npos) {
+            if (error) *error = "loading prompt Confirm glyph changed";
+            return false;
+          }
+          root.kids[1].text.replace(at, old_glyph.size(), "<alt1>\xC2\x81</alt1>");
+          loading_prompt = true;
+        }
+        if (!loading_prompt) {
+          if (error) *error = "loading prompt locale key is missing";
+          return false;
+        }
+      }
       for (const auto& [key,text] : std::initializer_list<std::pair<const char*,const char*>>{
           {"rbbz_graphics_checking","Checking graphics cache..."},
           {"rbbz_graphics_preparing","Preparing graphics... %i / %i"},
@@ -1269,6 +1293,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         built[ui::input_font::kHintSceneRecord] = std::move(hint_font);
         built[ui::input_font::kListRecord] = std::move(list);
         built[ui::input_font::kInlineHelpRecord] = std::move(help);
+        if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
+          std::vector<uint8_t> loading_source, loading;
+          if (!read(ui::input_font::kLoadingRecord, &loading_source, &why) ||
+              !ui::input_font::PrepareLoading(loading_source, &loading, &why)) {
+            if (error) *error = "loading prompt icon font preparation was refused: " + why;
+            return false;
+          }
+          built[ui::input_font::kLoadingRecord] = std::move(loading);
+        }
       } else {
         note("input image font preparation was refused: " + why);
       }

@@ -152,6 +152,31 @@ int main() {
   CHECK_EQ(mouse_button::kLeft, 1);
   CHECK_EQ(mouse_button::kRight, 4);
 
+  BeginCase("a profiled Space press searches without the legacy MnK Confirm");
+  {
+    FakeDevices devices;
+    devices.KeyDown("Space");
+    auto physical = devices.Snapshot();
+    remap::PadState legacy;
+    legacy.buttons = remap::TargetBit(remap::Target::kA);  // SDK default keybind_a
+    const auto input = GeneralPadInput(true, false, true, false, physical.pad, legacy);
+    remap::PadState out;
+    auto source_down = [](void* context, const remap::Source& source) {
+      return SourceHeld(*static_cast<PhysicalInput*>(context), kOpen, source);
+    };
+    remap::Apply(remap::Table{}, input, source_down, &physical, &out);
+    CHECK_TRUE((out.buttons & remap::TargetBit(remap::Target::kStart)) != 0);
+    CHECK_FALSE((out.buttons & remap::TargetBit(remap::Target::kA)) != 0);
+    // A real controller A remains available alongside the keyboard Search.
+    physical.pad.buttons = remap::TargetBit(remap::Target::kA);
+    const auto with_pad = GeneralPadInput(true, false, true, false, physical.pad, legacy);
+    remap::Apply(remap::Table{}, with_pad, source_down, &physical, &out);
+    CHECK_TRUE((out.buttons & remap::TargetBit(remap::Target::kA)) != 0);
+    // A profile-free boot retains its existing SDK menu state.
+    CHECK_TRUE((GeneralPadInput(false, false, true, false, {}, legacy).buttons &
+                remap::TargetBit(remap::Target::kA)) != 0);
+  }
+
   BeginCase("the keyboard gate blocks keys and leaves the pad alone");
   {
     FakeDevices devices;

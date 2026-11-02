@@ -9,7 +9,8 @@
 namespace rb_blitz::ui::input_font {
 
 // Derive an icon-only copy of the installed Pentatonic font scene with a
-// dedicated 2048-square texture. No game art is stored in the project.
+// dedicated 1024-square guest texture. The host composes a 2048-square image
+// and downsamples its icon band to match the retail fallback UVs.
 bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                   std::vector<uint8_t>* original_bc3, std::string* error);
 // A second private font aliases early, proven glyph codes to the reserved
@@ -20,6 +21,9 @@ bool PrepareList(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene
                  std::string* error);
 bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                        std::string* error);
+// Point only the loading screen's begin prompt at the action-hint font.
+bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                    std::string* error);
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3();
 std::shared_ptr<const std::vector<uint8_t>> PrivateBc3();
 
@@ -28,8 +32,10 @@ inline constexpr char kIconSceneRecord[] = "ui/resource/fonts/gen/input_icons.mi
 inline constexpr char kHintSceneRecord[] = "ui/resource/fonts/gen/inline_help_icons.milo_xbox";
 inline constexpr char kListRecord[] = "ui/resource/lists/gen/list_options_main.milo_xbox";
 inline constexpr char kInlineHelpRecord[] = "ui/resource/inline_help/gen/default.milo_xbox";
+inline constexpr char kLoadingRecord[] = "ui/loading/gen/loading.milo_xbox";
 inline constexpr uint32_t kRetailAtlasSize = 1024;
 inline constexpr uint32_t kAtlasSize = 2048;
+inline constexpr uint32_t kGuestAtlasSize = 1024;
 inline constexpr uint32_t kIconFirst = 0x80;
 inline constexpr uint32_t kIconCount = 180;
 inline constexpr uint32_t kHintCount = 15;

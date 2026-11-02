@@ -33,10 +33,6 @@ uint32_t Be32(const uint8_t* p) {
 void PutBe32(uint8_t* p, uint32_t value) {
   for (unsigned i = 0; i != 4; ++i) p[i] = uint8_t(value >> (24 - 8 * i));
 }
-void PutBe16(uint8_t* p, uint16_t value) {
-  p[0] = uint8_t(value >> 8);
-  p[1] = uint8_t(value);
-}
 void PutFloat(uint8_t* p, float value) { PutBe32(p, std::bit_cast<uint32_t>(value)); }
 bool Fail(std::string* error, const char* message) {
   if (error) *error = message;
@@ -159,7 +155,7 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
   for (uint32_t mip = 0; mip < kMipCount; ++mip)
     retail_chain_bytes += (kRetailAtlasSize >> mip) * (kRetailAtlasSize >> mip);
   for (uint32_t mip = 0; mip < kMipCount; ++mip)
-    private_chain_bytes += (kAtlasSize >> mip) * (kAtlasSize >> mip);
+    private_chain_bytes += (kGuestAtlasSize >> mip) * (kGuestAtlasSize >> mip);
   const std::array<uint8_t, 8> expected{8, 0, 0, 0, 0x18, 6, 4, 0};
   if (bytes.size() < kTexturePayload + retail_chain_bytes ||
       std::memcmp(bytes.data() + kTextureHeader + 4, expected.data(), expected.size()) != 0)
@@ -188,9 +184,10 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
   for (const auto& name : names)
     if (!ReplaceMeasured(&bytes, name.original, name.replacement, name.count))
       return Fail(error, "Pentatonic texture identity references changed");
-  // The copied scene needs its own texture identity. Give its otherwise empty
-  // BC3 image a marker so the guest cache cannot alias the retail font; the
-  // runtime override replaces every pixel before the private font is drawn.
+  // The copied scene needs its own texture identity. Keep the retail-sized
+  // guest bitmap: the host's 2048 image is downsampled into the same 1024
+  // fallback layout, so the glyph UVs above do not change. This avoids two
+  // 2048-square guest allocations that remained resident through song loads.
   std::vector<uint8_t> private_bc3(private_chain_bytes);
   constexpr std::array<uint8_t, 16> marker{
       0x52, 0x42, 0x42, 0x5A, 0x49, 0x43, 0x4F, 0x4E,
@@ -200,8 +197,7 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
   if (Be32(bytes.data() + kTextureHeader + 10) != 0x04000400 ||
       bytes[kTextureHeader + 14] != 4 || bytes[kTextureHeader + 15] != 0)
     return Fail(error, "Pentatonic texture dimensions changed");
-  for (size_t field = 0; field < 3; ++field)
-    PutBe16(bytes.data() + kTextureHeader + 10 + field * 2, uint16_t(kAtlasSize));
+  static_assert(kGuestAtlasSize == kRetailAtlasSize);
   std::vector<uint8_t> swapped(private_chain_bytes);
   for (size_t i = 0; i < private_chain_bytes; i += 2) {
     swapped[i] = private_bc3[i + 1];
@@ -289,6 +285,10 @@ bool PrepareHintScene(const std::vector<uint8_t>& icon_scene, std::vector<uint8_
       PutFloat(glyph + 14, kHintIconSize / kHintFontCellWidth);
     }
   }
+  // Both scenes use the same icon pixels. Keep the Tex, Mat and source names so
+  // RndDir shares the guest bitmap; only the glyph tables differ. Giving this
+  // scene a separate texture loaded another full mip chain before the menu/song
+  // transitions that exhausted contiguous guest heap space.
   return PackStored(bytes, scene, error);
 }
 bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
@@ -305,6 +305,36 @@ bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>*
   PutBe32(bytes.data() + at, static_cast<uint32_t>(new_font.size()));
   bytes.erase(bytes.begin() + at + 4, bytes.begin() + at + 4 + old_font.size());
   bytes.insert(bytes.begin() + at + 4, new_font.begin(), new_font.end());
+  return PackStored(bytes, scene, error);
+}
+bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                    std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  constexpr std::string_view token = "loading_press_button";
+  constexpr std::string_view old_font = "../resource/fonts/buttons.milo";
+  constexpr std::string_view new_font = "../resource/fonts/inline_help_icons.milo";
+  // The installed loading scene contains other button styles, including the
+  // rotating tip. Only the prompt's font follows this token within 256 bytes.
+  size_t matches = 0;
+  for (auto at = std::search(bytes.begin(), bytes.end(), token.begin(), token.end());
+       at != bytes.end();
+       at = std::search(at + token.size(), bytes.end(), token.begin(), token.end())) {
+    auto font = std::search(at + token.size(),
+        bytes.begin() + std::min(bytes.size(), size_t(at - bytes.begin()) + 256),
+        old_font.begin(), old_font.end());
+    if (font == bytes.begin() + std::min(bytes.size(), size_t(at - bytes.begin()) + 256))
+      continue;
+    const size_t offset = size_t(font - bytes.begin());
+    if (offset < 4 || Be32(bytes.data() + offset - 4) != old_font.size())
+      return Fail(error, "loading prompt font string length changed");
+    PutBe32(bytes.data() + offset - 4, static_cast<uint32_t>(new_font.size()));
+    bytes.erase(bytes.begin() + offset, bytes.begin() + offset + old_font.size());
+    bytes.insert(bytes.begin() + offset, new_font.begin(), new_font.end());
+    ++matches;
+    break;
+  }
+  if (matches != 1) return Fail(error, "loading prompt button font changed");
   return PackStored(bytes, scene, error);
 }
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3() {

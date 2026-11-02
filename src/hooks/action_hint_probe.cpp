@@ -21,6 +21,7 @@
 REX_EXTERN(__imp__sub_824D85E8);  // InlineHelp::DrawShowing
 REX_EXTERN(__imp__sub_824D9330);  // InlineHelp::UpdateLabels
 REX_EXTERN(__imp__sub_824D8FF0);  // format and assign one UILabel
+REX_EXTERN(__imp__sub_822C45A8);  // loading screen UI message handler
 
 namespace {
 namespace font = rb_blitz::ui::input_font;
@@ -178,4 +179,15 @@ REX_HOOK_RAW(sub_824D85E8) {
     }
   }
   __imp__sub_824D85E8(ctx, base);
+}
+
+REX_HOOK_RAW(sub_822C45A8) {
+  // The loading prompt is populated on entry and may be the only action hint
+  // on screen. Keep its Confirm tile current without rewriting the guest label.
+  if (rb_blitz::assets::InputIconsAvailable()) {
+    const auto view = rb_blitz::input::icons::CaptureActive(
+        rb_blitz::assets::ControllerSchemeRegistry());
+    Publish(view, Signature(view));
+  }
+  __imp__sub_822C45A8(ctx, base);
 }

@@ -118,6 +118,7 @@ set(RBBLITZ_SOURCES
     src/hooks/settings_bridge.cpp
     src/hooks/settings_bridge_hooks.cpp
     src/hooks/action_hint_probe.cpp
+    src/hooks/input_font_alloc_trace.cpp
     src/hooks/render_settings.cpp
     src/hooks/settings_payload.cpp
     src/settings/menu_payload.cpp

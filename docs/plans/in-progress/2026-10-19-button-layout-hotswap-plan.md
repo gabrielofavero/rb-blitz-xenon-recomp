@@ -34,10 +34,12 @@ setting to **Controller Layout**, expands the controller catalog to seven famili
 prompt ids are retained; the dependency graph defines execution order. Live behavior remains
 **unproven** until the corresponding implementation and acceptance prompts pass.
 
-The owner's later 2026-10-27 UI correction supersedes the selection-page design in D3/D6/D14,
-§5.3 and P3: Controls has one direct `Layout: <name>` selector. There is no layout submenu,
-keyboard/mouse information row, discovery information row, or dedicated preview. Package discovery
-still occurs at boot and selecting a layout still applies immediately.
+The owner's 2026-11-02 UI correction supersedes the direct selector delivered on 2026-10-27:
+Controls → Layout opens Xbox, PlayStation, Nintendo Switch and Others pages. Each page lists
+the valid boot-discovered layouts in that group; an unknown user package goes under Others.
+Browsing the pages does not load a layout. Confirming a named layout saves and applies it
+immediately, while `*` marks the current choice. The 2026-10-27 direct-selector measurements
+below remain historical evidence for hot swapping, not the current menu shape.
 
 The 2026-10-27 asset revision changes P2 onward: custom schemes provide individually named glyph
 and pad PNGs, while omitted slots keep the corresponding art from the user's base game. Source
@@ -56,13 +58,17 @@ key/mouse art, never a selectable or user-installed controller scheme. P6b no lo
 five missing art folders or pad PNGs; it integrates the eight actual controller folders after
 P11, then checks the final UI and art. Historical P0–P8 evidence remains evidence for v1 only.
 
+**2026-11-02 catalog update.** `meta-quest-2` and `meta-quest-3` were added after
+the eight-folder revision. The current authored catalog has ten controller
+layouts; eight declare four pad PNGs. P6b's remaining acceptance covers all ten.
+
 | Remaining prompt | Current state | Next exit condition |
 | --- | --- | --- |
 | P5 | PS3 source bounds/reference delivered; installer import open | Local v1 `ps3` import works or its unavailable route is reported accurately |
-| P11 | V1/v2 coexist; nine manifests validate and stage; virtual SDL extras pass, boot lists eight controllers | Physical-device mapping/capture and on-screen image acceptance |
+| P11 | V1/v2 coexist; eleven manifests validate and stage; virtual SDL extras pass, prior boot listed eight controllers | Physical-device mapping/capture and on-screen image acceptance, including the two new Meta Quest layouts |
 | P9 | Owner reports the remaining long-row fit and paging visual checks look good (2026-11-02); host tests and prior mapping/in-song acceptance recorded below | Accepted; retain coverage while P10 changes the icon pipeline |
 | P10 | The owner confirmed default main-menu footer icons and Y after rebinding Confirm, then reported the remaining main-menu live checks working (2026-11-02); other hint routes remain open | Actionable hints follow effective bindings and active family with v2 art |
-| P6b | Eight controller art folders present; six declare pad PNGs | Install/cycle all eight, verify art and fallback, record live acceptance |
+| P6b | Ten controller art folders present; eight declare pad PNGs | Install/cycle all ten, verify art and fallback, record live acceptance |
 | P7 | Documentation and closeout open | Audit, document P5 outcome, then move this plan to `finished/` |
 
 ## 1. Request, normalized
@@ -73,8 +79,8 @@ P11, then checks the final UI and art. Historical P0–P8 evidence remains evide
 | R2 | The installer offers an **optional Rock Band Blitz PS3 `.pkg`** and extracts exactly the assets this feature needs. If the user supplies it, a **PS3 layout** appears in the in-game list. |
 | R3 | A tracked structure under `assets/controller/` where the owner leaves PNGs (and a small manifest) to build a **custom scheme package**. |
 | R4 | **Keyboard/mouse icons are internal, always available, and not selectable or replaceable by controller packages.** Their authored source is `assets/controller/keyboard-mouse/scheme.toml`, with no controller-to-keyboard translation. Real keyboard/mouse input switches ordinary action hints to effective key/mouse icons; real controller input switches back to the selected controller family. |
-| R5 | Help & Options → Controls has one **Layout: <name>** selector. Each accepted selection applies immediately to the game's controller art; no Apply, screen exit, restart, or subsequent controller input is needed. |
-| R6 | The controller choices are **Xbox 360** (default), optional imported **PlayStation 3**, and the eight authored folders: **Xbox Series**, **PlayStation 4/5**, **Switch Joy-Con/Pro**, **Switch 2 Joy-Con/Pro**, and **Steam Deck**. There is no authored Steam Controller folder. Custom controller packages remain discoverable. |
+| R5 | Help & Options → Controls → Layout opens **Xbox, PlayStation, Nintendo Switch, Others**. Browsing never loads a package; confirming one named layout saves it and applies its controller art immediately, without a restart or subsequent controller input. |
+| R6 | The controller choices are **Xbox 360** (default), optional imported **PlayStation 3**, and ten authored folders: **Xbox Series**, **PlayStation 4/5**, **Switch Joy-Con/Pro**, **Switch 2 Joy-Con/Pro**, **Steam Deck**, and **Meta Quest 2/3**. There is no authored Steam Controller folder. Custom controller packages remain discoverable. |
 | R7 | With no custom controller scheme installed, controller art falls back to **Xbox 360** from the base game. Built-in keyboard/mouse icons and binding-aware hints remain available while the feature is enabled. |
 | R8 | No game art is committed, bundled or downloaded. PS3-extracted art lives only in the user's install or user-data folder and is never redistributed. |
 | R9 | R4's existing `enhancements_icon_schemes` toggle and the settings program's contracts are honoured; the feature is documented in `engine/toggles.md` and the settings documents. |
@@ -89,7 +95,7 @@ P11, then checks the final UI and art. Historical P0–P8 evidence remains evide
 | Owner request | Earlier coverage | Revised delivery |
 | --- | --- | --- |
 | Images in both mapping screens | Missing; existing scope replaced sheets only | R11, D13, P8/P9 |
-| Direct `Layout: <name>` row on Controls (owner correction 2026-10-27) | Earlier revision required a Controller Layout submenu | R5, D6, P3 |
+| Four-group Layout submenu (owner correction 2026-11-02) | The 2026-10-27 direct selector applied a layout on each carousel step | R5, D6, P3 |
 | Keyboard/mouse always present with live switching | Switching planned, keyboard depended on an authored package | R4, D4/D8, P4/P8 |
 | Bindings dictate footer and game hints; first source per family | Explicitly excluded by static D12 | R12, rewritten D12, P8/P10 |
 | Immediate selection effect | Hot apply planned | R5, D14, P3/P4 |
@@ -238,17 +244,17 @@ remaining pad slots before claiming independent replacement of all eight.
 | **D1** | **Controller-art hot swap uses a host texture override.** The SDK texture cache has a generic override provider; the project supplies complete canonical BC3 mip data for a matched guest texture, keyed by a measured fingerprint (dimensions + content hash, with the scene-read order as the fallback). P9/P10 may also change authored guest UI and served labels/records to express input icons and action identity; a texture swap alone cannot describe every binding. P1 proved live replacement on D3D12 and Vulkan; the earlier scene-reload fallback is no longer needed. |
 | **D2** | **A scheme is a folder with one manifest and individual PNGs.** The delivered v1 format names legacy button/pad slots and remains supported for user packages and P5. V2 `[[input]]` entries additionally name physical sources and image variants; the keyboard kind is an internal authored resource only. An omitted controller atlas slot retains the same base-game art. The v1 optional whole `icons.png` sheet remains supported. No DXT5, scene, archive surgery or copied retail pixels in tracked art. P11 implements v2; its proposed contract is [`docs/guides/controller-scheme-v2-format.md`](../../guides/controller-scheme-v2-format.md). |
 | **D3** | **Discovery is a boot scan, not a hot-add.** The game scans `<install>/assets/controller/schemes/` and `<user_data_root>/controller_schemes/` before authoring the menu. Any valid non-system user id shadows the same id in the install root with a log line; `retail`, `keyboard`, `keyboard-mouse` (internal v2 art), and the PS3 import id are reserved. Newly dropped packages are read at the next boot. There is no Rescan row. |
-| **D4** | **Only the controller layout is selectable.** The page lists `Xbox 360` plus every available valid controller scheme. Keyboard/mouse icons come from internal authored art with a built-in fallback and are never a discoverable user layout or a list choice. Boot starts in keyboard/mouse hint mode; the first real pad event selects controller hint mode. Device switching never changes the saved controller selection. The direct Layout row applies independently of ordinary last-device hints (D14). |
+| **D4** | **Only the controller layout is selectable.** The Layout submenu groups `Xbox 360` and every valid controller scheme under Xbox, PlayStation, Nintendo Switch or Others. Keyboard/mouse icons come from internal authored art with a built-in fallback and are never a discoverable user layout or a list choice. Boot starts in keyboard/mouse hint mode; the first real pad event selects controller hint mode. Device switching never changes the saved controller selection. |
 | **D5** | **PS3 import extracts one asset.** From a `.pkg` (plus the matching `.rap` if needed) or an extracted PS3 game folder, the installer extracts `ui/resource/fonts/gen/buttons.milo_ps3`, decodes its DXT5 sheet, and builds the PS3 scheme. The `ps_*` pad art comes from the user's 360 `controller_config.milo_xbox` via the same decoder. Nothing from the package is copied wholesale; the full ~350 MB ARK is never laid down. |
-| **D6** | **One native setting: `controller.scheme`, displayed as `Layout: <name>` directly on Controls.** The stable token is `retail` or the id of any valid discovered controller package, including the optional `ps3` import. It lives in `settings.toml` through the main settings service, not in the profile's binding store. `retail` is displayed as `Xbox 360`. |
+| **D6** | **One native setting: `controller.scheme`, selected from the four-group Layout submenu.** The stable token is `retail` or the id of any valid discovered controller package, including the optional `ps3` import. It lives in `settings.toml` through the main settings service, not in the profile's binding store. `retail` is displayed as `Xbox 360`. |
 | **D7** | **`enhancements_icon_schemes` becomes the master gate and defaults on**, with `Xbox 360` (`retail`) as the compiled default. With the gate off the Layout row is omitted and faithful retail art is used. This changes the off-by-default line in `src/enhancements.cpp`; the toggle table records it. R4/R11/R12 describe enabled behavior. |
 | **D8** | **Fallbacks preserve the device family and each guest slot.** Missing/invalid selected controller package → Xbox 360 art, logged and reflected in the setting. Within a valid partial package, an unlisted button or pad slot keeps the corresponding original game slot/texture; an explicitly listed but invalid file rejects the package rather than silently falling back. Keyboard/mouse → internal authored images where declared, then the built-in keycap/mouse provider, with a neutral image for an unsupported source or no binding; never controller art. Invalid controller packages are skipped and never listed. |
 | **D9** | **Authors provide independent, variably sized PNGs.** Button art is white/grey with straight alpha because the game's material tints glyphs (colored art is allowed but multiplied by the tint). For each supplied button or pad image, the loader scales uniformly to fit the measured destination rectangle/canvas, centers it, and leaves unused space transparent; it never stretches or crops. The runtime composes the full 512×512 button texture from the user's original game art plus supplied glyphs, then encodes all required BC3 mips for the existing guest texture override. The art author never handles DXT5 or positions. |
-| **D10** | **No retail/game art in the repository or the release.** The eight authored controller layouts and internal keyboard/mouse art must be original or appropriately licensed. Xbox 360 art stays in the user's base game; the PS3 scheme is generated locally and is gitignored/audited like `game/` and `assets/game/`. |
+| **D10** | **No retail/game art in the repository or the release.** The ten authored controller layouts and internal keyboard/mouse art must be original or appropriately licensed. Xbox 360 art stays in the user's base game; the PS3 scheme is generated locally and is gitignored/audited like `game/` and `assets/game/`. |
 | **D11** | **The retail pad page has eight independently replaceable textures.** A scheme may name any subset of `xbox_0..3` and `ps_0..3`; each omitted texture remains the corresponding original Xbox/PS game texture. An optional shared pad image can fill all eight, with explicit per-slot images taking precedence. Do not collapse distinct preset images or substitute one family's base-game pad for the other. |
 | **D12** | **Effective bindings are the source of truth for icons.** A shared resolver maps `(action, interface/gameplay context, device family, effective profile/preset)` to ordered physical sources, then their icons. Mapping rows render every source; ordinary action hints render the first source in the active family. Controller glyphs use the selected family; keyboard/mouse glyphs use the built-in provider. No static default-key sheet after rebinding. Profile/preset changes, assigning, removing, reordering and resetting invalidate the relevant views. |
 | **D13** | **Draw icons through the guest's UI.** Mapping rows keep their text action labels and render adjacent input images; guest footers, widgets, labels and served records carry the resolved hints. A shared 6×6 texture cannot express arbitrary simultaneous row contents or context-specific actions on its own. P9/P10 prove guest draw/label routes; no new host overlay is authorized by this plan. |
-| **D14** | **Selection applies immediately.** Each accepted choice changes the Controls row value and refreshes controller art on the next presented frame, including when selected with keyboard or mouse. Ordinary hints still follow real last-device activity. The selection neither fakes controller input nor changes the saved device state. The owner removed the dedicated preview page. |
+| **D14** | **Confirmation applies immediately.** Moving through Layout's categories and choices changes no setting; Confirm on a named choice commits `controller.scheme` and refreshes controller art on the next presented frame, including when selected with keyboard or mouse. Ordinary hints still follow real last-device activity. The selection neither fakes controller input nor changes the saved device state. |
 | **D15** | **Physical-source identity is independent of atlas slot and printed label.** The v2 source names in authored manifests are expected SDL-normalized inputs. `pad:a` means the south/Xbox A position even when Nintendo art says B. An extra `sdl:button:*` is offered for capture/remapping only when the connected device reports it; the current SDK XInput projection folds or drops several extras, so P11 must sample them before that projection. P11 preserves v1 grammar, checks actual device mappings, and never invents a button for a decorative PNG. |
 
 ## 4. The asset contract — what to draw
@@ -297,8 +303,8 @@ The delivered v1 limits are ≤ 8 MB and ≤ 2048×2048 per source PNG,
 P11 must set a separate v2 limit high enough for the keyboard folder's 94 declared PNGs, count
 only declared images when packing, and enforce equivalent path/size safety. The unreferenced
 temporary SVGs are never runtime pad assets.
-The 28-character single-line budget fits `Layout: <name>` with the 20-character value cap.
-The owner chose that shorter direct row instead of a separate page.
+The previous `Layout: <name>` row fit the 28-character single-line budget. The current
+submenu shows one package name per row and marks the saved choice with `*`.
 
 Reserved ids: `retail` (base-game Xbox 360; no folder), `keyboard` (legacy internal provider),
 `keyboard-mouse` (internal authored v2 provider), and `ps3` (the installer's local import). Every other valid package id is
@@ -435,7 +441,7 @@ authored folders simply declare none of them.
   locally decoded PS3 sheet. The PS3 exporter checks these source areas and writes a private
   labeled contact sheet; the runtime destinations still come from `slots.toml`.
 - `assets/controller/slots.toml` — the tracked slot registry (id, rectangle, row/column, label).
-- `assets/controller/<id>/` — the eight authored controller art folders and the internal
+- `assets/controller/<id>/` — the ten authored controller art folders and the internal
   `keyboard-mouse/` folder, each with a v2 manifest. P11 stages validated controller layouts
   into the existing install-root `schemes/<id>/` catalog without moving the owner's source art.
   The keyboard folder is packaged only as internal icon resources.
@@ -461,7 +467,7 @@ authored folders simply declare none of them.
 `button_schemes: <id> shadowed by <path>`; a package that fails validation is skipped and logged with
 the reason.
 
-### 4.6 Controller catalog (2026-10-30 revision)
+### 4.6 Controller catalog (updated 2026-11-02)
 
 | Display name | Stable token | Source / availability |
 | --- | --- | --- |
@@ -475,9 +481,11 @@ the reason.
 | Switch 2 Joy-Con | `nintendo-switch-2-joycon` | Authored v2 folder; buttons and four pad PNGs present |
 | Switch 2 Pro | `nintendo-switch-2-pro-controller` | Authored v2 folder; buttons and four pad PNGs present |
 | Steam Deck | `steam-deck` | Owner-authored controller package |
+| Meta Quest 2 | `meta-quest-2` | Authored v2 folder; buttons and four Xbox pad PNGs present |
+| Meta Quest 3 | `meta-quest-3` | Authored v2 folder; buttons and four Xbox pad PNGs present |
 
-The eight authored controller folders plus retail produce nine choices, or ten when P5 imports
-PS3. The manifests and button art exist, but no v2 choice is runtime-valid until P11. The former
+The ten authored controller folders plus retail produce eleven choices, or twelve when P5 imports
+PS3. P11's loader and packer now validate and stage these v2 folders; live acceptance remains open. The former
 `playstation-series`, `nintendo-switch`, and `steam-controller` tokens are not aliases or target
 packages; do not create empty entries for them. `keyboard-mouse` is an internal provider and never
 a choice. PS3 remains conditional on import.
@@ -1238,23 +1246,23 @@ the audit finds no game pixels under tracked `assets/controller/` or in the dist
 **Don't.** Do not start from a decoded retail sheet as committed art. Do not ship a scheme the owner
 has not authored or licensed.
 
-### P6b — The owner's eight controller layouts and visual acceptance
+### P6b — The owner's ten controller layouts and visual acceptance
 
 **Status (2026-10-30): source art and proposed v2 manifests present; runtime integration open.**
-The eight direct controller folders in §4.6 have button PNGs; six declare four pad PNGs each. The
+The ten direct controller folders in §4.6 have button PNGs; eight declare four pad PNGs each. The
 `keyboard-mouse/` folder has 92 declared key/mouse PNGs and is an internal resource. P11 must
 validate and stage them before this prompt's in-game acceptance. The editable pad SVGs are
 authoring sources, not installable diagrams. P5's optional PS3 import may proceed separately.
 
 **Start condition.** P11's v2 loader/packer, source capture and internal keyboard provider pass;
-P9's overflow and in-song checks and P10's guest hint routes pass. The owner's current eight
+P9's overflow and in-song checks and P10's guest hint routes pass. The owner's current ten
 controller folders are the source files; do not wait for the removed `playstation-series`,
 `nintendo-switch`, or `steam-controller` folders or for finished pad art.
 
-**Goal.** Integrate and visually accept the exact eight authored controller choices, the retail
+**Goal.** Integrate and visually accept the exact ten authored controller choices, the retail
 default, the conditional PS3 choice, and the always-available internal keyboard/mouse art.
 
-**Deliverable.** Validated, declared PNGs from the eight direct source folders staged under
+**Deliverable.** Validated, declared PNGs from the ten direct source folders staged under
 `<install>/assets/controller/schemes/<id>/`; the internal keyboard/mouse images staged separately
 from the selectable catalog; a catalog without phantom family aliases; a final pass on menu,
 Help & Options, Gameplay Mapping, Interface Mapping, gameplay HUD, pause, results and the retail
@@ -1262,7 +1270,7 @@ Controller Presets page. Record default/rebound hints, first-source ordering, im
 effect, and any input source absent from a real device. Xbox 360 and imported PS3 art are never
 copied into tracked authored folders.
 
-**Verify.** All eight installed controller ids load and can be selected; keyboard/mouse never
+**Verify.** All ten installed controller ids load and can be selected; keyboard/mouse never
 appears as a controller choice. Each supplied button image resolves from its v2 `source`, and
 `slot` is used only for the corresponding legacy atlas replacement. PlayStation Share/Create
 resolves as `pad:back`, its touchpad click remains distinct, Nintendo face buttons resolve by
@@ -1658,8 +1666,38 @@ icons and Y after rebinding interface Confirm in the repaired build;
 `rb_blitz_477.log` records early Confirm/Cancel glyphs and the composed 180-slot
 atlas. The owner subsequently reported that the same-screen refresh and
 active-family checks work as well; the trace records both family and binding
-revision changes. The remaining text and
-scene routes in the inventory still need their own action/context seams.
+revision changes. The owner accepted the repaired footer and mapping-row image
+appearance on 2026-11-02. The loading-screen Confirm hint now has a generated
+guest-font and locale route with six-locale host checks; the owner reported its
+visual result good on 2026-11-02. The same check exposed a Space/Search conflict
+from the SDK's legacy MnK default, now corrected when a profile is present. The
+owner confirmed Space opens Search without Confirm on 2026-11-02. The owner's
+Search screenshot also showed the Xbox Series Start image under the retail Xbox 360
+layout. Retail Start/Back now use the installed 360 sheet's arrow glyphs instead;
+source-selection tests and the release build pass; the owner accepted the 360
+glyph on screen. Other text and scene routes in the inventory still need their
+own action/context seams.
+
+**2026-11-02 Layout menu correction.** The owner accepted the retail Xbox 360
+Start glyph, then requested a grouped Layout submenu because the direct carousel
+loaded another layout on each step. Controls now opens Xbox, PlayStation, Nintendo
+Switch and Others; the boot-discovered catalog fills their pages, and a `*` marks
+the saved layout. Entering a group and moving through choices only navigate the
+guest list. Confirming a different named layout commits the existing
+`controller.scheme` setting, applies it immediately and returns to its group.
+The release build, generated-menu tests and menu-payload tests pass. A live check
+of the new menu flow is pending.
+
+**2026-11-02 heap crash follow-up.** `rb_blitz_493.log` faults in the guest heap
+allocator while loading `rays.tex` after menu/song transitions: the 1,048,580-byte
+request sees 11,754,848 bytes free in 1,593 blocks, but the largest block is
+544,528 bytes. The new hint font had loaded its own 1024-square texture and mip
+chain (`Hintatonic`) in addition to the identical icon font texture (`Iconatonic`).
+The hint scene now keeps the icon scene's texture and material identities so the
+guest can share those resources while its glyph table remains separate. The
+release build and `settings_screen`/`menu_payload` host tests pass. The owner
+chose to repeat the game transition manually; live crash and hint appearance
+verification remain pending.
 
 **Goal.** Every actionable game hint depicts the input that actually performs that action in the
 current interface/gameplay context.

@@ -340,6 +340,9 @@ struct Row {
   // provider's `disable_dof == false`. The symbol pair keeps its usual meaning (`_on` = the label
   // reads On), so the query and the write flip - see PopulateMenu and RowCase.
   bool inverted = false;
+  // Layout leaves show a marker for the saved choice without applying a new
+  // package while the player browses the list.
+  bool mark_selected = false;
   std::vector<Choice> choices;
 };
 
@@ -460,6 +463,16 @@ Row ChooseRow(const char* symbol, const char* setting, const char* token, const 
   return row;
 }
 
+std::string SymbolToken(std::string_view token);
+
+Row LayoutChoiceRow(const std::string& token, const std::string& label) {
+  Row row = ChooseRow(("settings_layout_choice_" + SymbolToken(token)).c_str(),
+                      "controller.scheme", token.c_str(), label.c_str(),
+                      "Apply this layout and save the choice. * marks the current layout.");
+  row.mark_selected = true;
+  return row;
+}
+
 Row ActionRow(const char* symbol, const char* setting, const char* label, const char* description,
               bool provider_only = false) {
   Row row;
@@ -566,9 +579,6 @@ std::vector<Choice> Choices(std::initializer_list<const char*> tokensAndLabels) 
   return out;
 }
 
-// Defined with the generator below; declared here because the title keys are built before it.
-std::string SymbolToken(std::string_view token);
-
 std::string UpperAscii(std::string text) {
   for (char& c : text) {
     if (c >= 'a' && c <= 'z') {
@@ -585,6 +595,11 @@ void ApplyDefaultTitle(PanelSpec* panel) {
   static const std::map<std::string, std::string> kTitles{
       {"settings_panel", "HELP & OPTIONS"},
       {"settings_controls_panel", "CONTROLS"},
+      {"settings_controller_layout_panel", "CONTROLLER LAYOUT"},
+      {"settings_layout_xbox_panel", "XBOX"},
+      {"settings_layout_playstation_panel", "PLAYSTATION"},
+      {"settings_layout_nintendo_panel", "NINTENDO SWITCH"},
+      {"settings_layout_others_panel", "OTHERS"},
       {"settings_input_types_panel", "INPUT TYPES"},
       {"settings_interface_mapping_panel", "INTERFACE MAPPING"},
       {"settings_interface_music_play_panel", "BACKGROUND MUSIC PLAY"},
@@ -657,6 +672,13 @@ std::vector<std::string> PausePanels() {
   // `game_fade_out_panel` as the cure for that fault; the later arms show it is not the variable:
   // the fault appears with it and without it.)
   return {"game_panel", "pause_panel", "game_fade_out_panel", "background_night_panel"};
+}
+
+size_t LayoutGroupFor(std::string_view token) {
+  if (token == "retail" || token.starts_with("xbox")) return 0;
+  if (token == "ps3" || token.starts_with("playstation")) return 1;
+  if (token.starts_with("nintendo-switch")) return 2;
+  return 3;  // Steam Deck, Quest, and user packages without a platform prefix.
 }
 
 // P3's Interface Mapping rows. `profile::InterfaceTargetLabel` is the one spelling the list row,
@@ -744,9 +766,8 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_controls_panel", "settings_controls_screen", kRootScreen,
                           MenuPanels(),
                           {
-                              SelectRow("settings_controls_layout", "controller.scheme", "Layout",
-                                        "Choose controller button and preset art. The choice applies immediately.",
-                                        Choices({"retail", "Xbox 360"})),
+                              SubmenuRow("settings_controls_layout", "settings_controller_layout_screen",
+                                         "Layout", "Choose a controller layout by platform."),
                               RouteRow("settings_controller_presets", "controller_config_screen",
                                        "back_screen", "Controller Presets",
                                        "Choose a preset. It applies when no custom controller bindings exist."),
@@ -757,6 +778,37 @@ std::vector<PanelSpec> AllPanels() {
                                          "settings_gameplay_mapping_screen", "Gameplay Mapping",
                                          "The inputs that play notes, change lanes, use power-ups, and pause."),
                           }});
+
+  // The boot catalog contains the built-in Xbox 360 layout and every valid package.
+  // Group only known platform prefixes; arbitrary user packages stay discoverable
+  // under Others. Opening a page or moving its selection never applies a package.
+  constexpr std::array<std::pair<const char*, const char*>, 4> layout_groups{{
+      {"xbox", "Xbox"}, {"playstation", "PlayStation"},
+      {"nintendo", "Nintendo Switch"}, {"others", "Others"}}};
+  std::array<std::vector<Row>, layout_groups.size()> layout_rows;
+  const auto catalog = g_configuration.choices.find("controller.scheme");
+  if (catalog == g_configuration.choices.end() || catalog->second.empty()) {
+    layout_rows[0].push_back(LayoutChoiceRow("retail", "Xbox 360"));
+  } else {
+    for (const auto& [token, label] : catalog->second)
+      layout_rows[LayoutGroupFor(token)].push_back(LayoutChoiceRow(token, label));
+  }
+  std::vector<Row> group_rows;
+  for (size_t i = 0; i < layout_groups.size(); ++i) {
+    const std::string screen = std::string("settings_layout_") + layout_groups[i].first + "_screen";
+    group_rows.push_back(SubmenuRow((std::string("settings_layout_") + layout_groups[i].first).c_str(),
+                                    screen.c_str(), layout_groups[i].second,
+                                    "Browse layouts in this group. Confirm a layout to apply it."));
+    if (layout_rows[i].empty())
+      layout_rows[i].push_back(InfoRow((std::string("settings_layout_empty_") +
+                                      layout_groups[i].first).c_str(),
+                                     "No layouts installed", "No layouts in this group."));
+    out.push_back(PanelSpec{std::string("settings_layout_") + layout_groups[i].first + "_panel",
+                            screen, "settings_controller_layout_screen", MenuPanels(),
+                            std::move(layout_rows[i])});
+  }
+  out.push_back(PanelSpec{"settings_controller_layout_panel", "settings_controller_layout_screen",
+                          "settings_controls_screen", MenuPanels(), std::move(group_rows)});
 
   // 6b. Interface Mapping (P3). The page owns the *interface*: the four directions, confirm, back,
   // and the song list's three buttons - nine rows in three groups, each with its own Assign/Reset
@@ -1555,6 +1607,7 @@ std::string SymbolToken(const std::string_view token) {
 // A boolean contributes its pair *adjacent*, so that dropping one leaves the other in the row's
 // position.
 std::vector<std::string> RowSymbols(const Row& row) {
+  if (row.mark_selected) return {row.symbol + "_selected", row.symbol};
   switch (row.kind) {
     case Kind::kBool:
     case Kind::kBoolSubmenu:
@@ -1690,6 +1743,10 @@ Node PopulateMenu(const PanelSpec& panel) {
         body.push_back(Cmd({Sym("if"), Cmd({Sym("file_exists"), Str(ChoiceQuery(row, row.choices[i]))}),
                             Drop(row.symbol + "_" + SymbolToken(row.choices[0].token))}));
       }
+    } else if (row.mark_selected) {
+      body.push_back(Cmd({Sym("if_else"),
+                          Cmd({Sym("file_exists"), Str(ChoiceQuery(row, row.choices.front()))}),
+                          Drop(row.symbol), Drop(row.symbol + "_selected")}));
     }
   }
 
@@ -1798,6 +1855,8 @@ Node RowCase(const Row& row, const std::string_view symbol) {
     case Kind::kCapture:
       return Arr({Sym(symbol), Write(row.path), EnterScreen(row.screen)});
     case Kind::kChoose:
+      if (row.mark_selected && symbol == row.symbol + "_selected")
+        return Arr({Sym(symbol), Leave()});
       return Arr({Sym(symbol), Write(ChoiceSet(row, row.choices.front())),
                   Write(Path("commit", "-", "-")), CommitResult(g_emitting_pause, Leave())});
     case Kind::kAction:
@@ -2362,6 +2421,7 @@ std::vector<std::string> RequestPaths() {
           }
           break;
         case Kind::kChoose:
+          if (row.mark_selected) add(ChoiceQuery(row, row.choices.front()));
           add(ChoiceSet(row, row.choices.front()));
           break;
         case Kind::kAction:
@@ -3474,6 +3534,9 @@ std::vector<std::pair<std::string, std::string>> Labels() {
         for (const Choice& choice : row.choices) {
           add(row.symbol + "_" + SymbolToken(choice.token), row.label + ": " + choice.label);
         }
+      } else if (row.mark_selected) {
+        add(row.symbol + "_selected", "* " + row.label);
+        add(row.symbol, row.label);
       } else {
         add(row.symbol, row.label);
       }

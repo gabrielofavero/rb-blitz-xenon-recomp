@@ -154,6 +154,8 @@ std::string Slot(std::string_view name) {
   if (name == "left_trigger" || name == "right_trigger") return std::string(name);
   if (name == "left_thumb") return "left_stick";
   if (name == "right_thumb") return "right_stick";
+  if (name == "start") return "start_button";
+  if (name == "back") return "back_button";
   return {};
 }
 
@@ -240,16 +242,10 @@ Icon Resolve(const Source& source, std::string_view controller_scheme,
           package_image(scheme->InputFor("pad:" + source.name))) return icon;
     }
     icon.slot = Slot(source.name);
-    // The retail sheet has no Start/Back cells. The bundled Xbox layout supplies
-    // source-specific images for those two controls while retail keeps its own art
-    // for every slot it does have.
+    // Start/Back have their own arrow glyphs in the retail Xbox 360 sheet.
+    // Use those cells for the retail layout; other packages can supply their
+    // source-specific images or slot art above.
     icon.art = icon.slot.empty() ? Art::kBuiltIn : Art::kSchemeSlot;
-    if (icon.art == Art::kBuiltIn && registry && icon.scheme == "retail" &&
-        (source.name == "start" || source.name == "back")) {
-      if (const auto* xbox = registry->Find("xbox-series");
-          xbox && xbox->schema_version == 2 &&
-          package_image(xbox->InputFor("pad:" + source.name))) return icon;
-    }
     if (icon.art == Art::kBuiltIn) DrawKeycap(&icon);
     if (icon.art == Art::kSchemeSlot && registry && icon.scheme != "retail") {
       const auto scheme = registry->schemes.find(icon.scheme);

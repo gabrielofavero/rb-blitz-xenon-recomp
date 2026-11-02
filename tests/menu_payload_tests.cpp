@@ -674,7 +674,7 @@ void CheckIconScene(const std::vector<uint8_t>& icon_scene) {
   constexpr size_t payload = 0x810 + 0x867 + 31;
   constexpr size_t dimensions = 0x810 + 0x867 + 10;
   for (size_t field = 0; field < 3; ++field) {
-    CHECK_EQ(icon_scene[dimensions + field * 2], uint8_t{8});
+    CHECK_EQ(icon_scene[dimensions + field * 2], uint8_t{4});
     CHECK_EQ(icon_scene[dimensions + field * 2 + 1], uint8_t{0});
   }
   CHECK_TRUE(icon_scene.size() >= payload + private_texture->size());
@@ -684,7 +684,7 @@ void CheckIconScene(const std::vector<uint8_t>& icon_scene) {
     texture_identical &= icon_scene[payload + i] == (*private_texture)[i + 1] &&
                          icon_scene[payload + i + 1] == (*private_texture)[i];
   CHECK_TRUE(texture_identical);
-  CHECK_TRUE(private_texture->size() > retail->size());
+  CHECK_EQ(private_texture->size(), retail->size());
   CHECK_TRUE(!std::equal(retail->begin(), retail->begin() + 16,
                          private_texture->begin()));
 }
@@ -741,11 +741,17 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
     config.rhythmverse_row = state.store;
     config.show_messages = state.messages;
     config.show_recommendations = state.recommendations;
+    config.controller_layout_enabled = single;
     screen::ConfigureMenu(config);
     settings::MenuRecords records;
     std::string why;
     std::vector<std::string> notes;
-    if (!settings::BuildMenuRecords(read, {"ui/locale/eng/gen/locale_keep.dtb"}, &records,
+    const std::vector<std::string> locales = single ? std::vector<std::string>{
+        "ui/locale/deu/gen/locale_keep.dtb", "ui/locale/eng/gen/locale_keep.dtb",
+        "ui/locale/esl/gen/locale_keep.dtb", "ui/locale/fre/gen/locale_keep.dtb",
+        "ui/locale/ita/gen/locale_keep.dtb", "ui/locale/ptb/gen/locale_keep.dtb"} :
+        std::vector<std::string>{"ui/locale/eng/gen/locale_keep.dtb"};
+    if (!settings::BuildMenuRecords(read, locales, &records,
                                     &why, false, false, &notes, {}, fast)) {
       std::printf("header records refused: %s\n", why.c_str()); return 1;
     }
@@ -758,6 +764,42 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
       CheckIconScene(hint_font);
       CheckPrivateFontGeometry(hint_font, true);
       CHECK_TRUE(hint_font != records.at(rb_blitz::ui::input_font::kIconSceneRecord));
+      if (single) {
+        const auto& loading = records.at(rb_blitz::ui::input_font::kLoadingRecord);
+        auto has_resource = [](const std::vector<uint8_t>& bytes,
+                               std::string_view name) {
+          return std::search(bytes.begin(), bytes.end(), name.begin(), name.end()) !=
+                 bytes.end();
+        };
+        const auto& row_font = records.at(rb_blitz::ui::input_font::kIconSceneRecord);
+        CHECK_TRUE(has_resource(row_font, "Iconatonic_Regular_(8_89)4x.tex"));
+        CHECK_TRUE(has_resource(hint_font, "Iconatonic_Regular_(8_89)4x.tex"));
+        CHECK_FALSE(has_resource(hint_font, "Hintatonic_Regular_(8_89)4x.tex"));
+        CHECK_TRUE(has_resource(hint_font, "../image/iconatonic_regular_(8_89)4x.bmp"));
+        constexpr std::string_view loading_font =
+            "../resource/fonts/inline_help_icons.milo";
+        size_t loading_font_count = 0;
+        for (auto at = std::search(loading.begin(), loading.end(),
+                                  loading_font.begin(), loading_font.end());
+             at != loading.end();
+             at = std::search(at + loading_font.size(), loading.end(),
+                              loading_font.begin(), loading_font.end()))
+          ++loading_font_count;
+        CHECK_EQ(loading_font_count, size_t{1});
+        constexpr std::string_view retail_button_font = "../resource/fonts/buttons.milo";
+        size_t retail_button_font_count = 0;
+        for (auto at = std::search(loading.begin(), loading.end(),
+                                  retail_button_font.begin(), retail_button_font.end());
+             at != loading.end();
+             at = std::search(at + retail_button_font.size(), loading.end(),
+                              retail_button_font.begin(), retail_button_font.end()))
+          ++retail_button_font_count;
+        CHECK_EQ(retail_button_font_count, size_t{4});
+        CHECK_FALSE(records.contains("ui/resource/fonts/gen/hintbtn.milo_xbox"));
+      } else {
+        CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kLoadingRecord));
+        CHECK_FALSE(records.contains("ui/resource/fonts/gen/hintbtn.milo_xbox"));
+      }
       const auto& help = records.at(rb_blitz::ui::input_font::kInlineHelpRecord);
       constexpr std::string_view hint_path = "../fonts/inline_help_icons.milo";
       CHECK_TRUE(std::search(help.begin(), help.end(),
@@ -770,11 +812,30 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
           records.at("ui/locale/eng/gen/locale_keep.dtb").size(),
           &locale_roots, &locale_header, &why));
       bool numbered_alt = false;
+      bool loading_confirm = false;
       for (const auto& root : locale_roots)
-        if (root.tag == rb_blitz::ui::dtb::kArray && root.kids.size() >= 2 &&
-            root.kids[0].text == "inline_help_fmt" &&
-            root.kids[1].text == "<alt1>%s</alt1> %s") numbered_alt = true;
+        if (root.tag == rb_blitz::ui::dtb::kArray && root.kids.size() >= 2) {
+          if (root.kids[0].text == "inline_help_fmt" &&
+              root.kids[1].text == "<alt1>%s</alt1> %s") numbered_alt = true;
+          if (root.kids[0].text == "loading_press_button" &&
+              root.kids[1].text.find("<alt1>\xC2\x81</alt1>") != std::string::npos)
+            loading_confirm = true;
+        }
       CHECK_TRUE(numbered_alt);
+      CHECK_EQ(loading_confirm, single);
+      for (const auto& locale : locales) {
+        std::vector<rb_blitz::ui::dtb::Node> localized;
+        rb_blitz::ui::dtb::RootHeader localized_header;
+        CHECK_TRUE(rb_blitz::ui::dtb::Parse(records.at(locale).data(),
+            records.at(locale).size(), &localized, &localized_header, &why));
+        size_t prompts = 0;
+        for (const auto& root : localized)
+          if (root.tag == rb_blitz::ui::dtb::kArray && root.kids.size() >= 2 &&
+              root.kids[0].text == "loading_press_button" &&
+              root.kids[1].text.find("<alt1>\xC2\x81</alt1>") != std::string::npos)
+            ++prompts;
+        CHECK_EQ(prompts, single ? size_t{1} : size_t{0});
+      }
     }
     CHECK_TRUE(records.contains("ui/startup/gen/startup.dtb") == fast);
     const auto dir = fs::path(output_root) / (std::string(fast ? "fast-" : "normal-") + std::to_string(mask));
