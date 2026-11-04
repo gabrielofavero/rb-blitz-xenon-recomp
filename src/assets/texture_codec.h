@@ -115,22 +115,33 @@ void DecodeDxt1(const std::uint8_t* blocks, std::uint32_t width, std::uint32_t h
 void DecodeDxt5(const std::uint8_t* blocks, std::uint32_t width, std::uint32_t height,
                 std::uint8_t* rgba);
 
-// Encoding is the bounding-box fit: the block's per-channel minimum and maximum become the two
-// endpoints and each pixel takes the nearest of the interpolated colours (and, for DXT5, the
-// nearest of the eight alpha steps). It is not a rate-distortion optimiser, and it does not need to
-// be: the art it encodes is a 256-pixel cover drawn at a fraction of that size, and the same codec
-// is what the texture tooling uses to build sheets where the source is already flat colour.
+// Encoding is the best of three fits, each judged by the squared error of the block it decodes to:
+// the bounding box (per-channel min/max endpoints), the block's principal colour axis (endpoints
+// at the cloud's extremes along its dominant direction) and a least-squares refinement of both
+// (`stb_dxt.h`'s refine mode: assignments held fixed, endpoints solved, re-quantised to 5:6:5,
+// repeated). Because the bounding-box candidate is always evaluated, the fit is never worse than
+// the bounding box it replaced; on the button keycaps it measured +1.9 to +3.1 dB
+// (`docs/engine/button-hint-inventory.md`, the 2026-11-02 icon appearance evidence).
 // `width` and `height` must be multiples of 4; `blocks` receives the exact block bytes.
 void EncodeDxt1(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
                 std::vector<std::uint8_t>* blocks);
 void EncodeDxt5(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
                 std::vector<std::uint8_t>* blocks);
 
+// Copies the nearest visible colour outwards into fully transparent pixels, `passes` rings deep.
+// Alpha is never modified - only RGB under transparent texels, which no draw shows but a block
+// encoder reads, so transparent padding stops dragging a block's endpoints towards black.
+void BleedTransparentColours(std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
+                             std::uint32_t passes);
+
 // --- Whole files -----------------------------------------------------------------------------
 
 // A box-filtered resample to `dst_width` x `dst_height` RGBA8, used to bring an arbitrary album
-// art size onto a power-of-two texture. Downscaling averages the source rectangle each destination
-// pixel covers (fractional edges included); upscaling is a bilinear sample at the same centres.
+// art size onto a power-of-two texture and to build the mip levels of an atlas. Downscaling
+// averages the source rectangle each destination pixel covers (fractional edges included);
+// upscaling is a bilinear sample at the same centres. Colour is averaged **premultiplied** and
+// unpremultiplied afterwards, so a texel that straddles an edge keeps the visible colour instead
+// of averaging it with transparent black (measured at 24-33 levels of 255 before the fix).
 void ResizeRgba(const std::uint8_t* src, std::uint32_t src_width, std::uint32_t src_height,
                 std::uint8_t* dst, std::uint32_t dst_width, std::uint32_t dst_height);
 

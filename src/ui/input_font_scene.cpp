@@ -20,6 +20,7 @@
 namespace rb_blitz::ui::input_font {
 namespace {
 std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_original_bc3;
+std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_private_bc3;
 uint32_t Le32(const uint8_t* p) {
   return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
 }
@@ -36,6 +37,27 @@ void PutFloat(uint8_t* p, float value) { PutBe32(p, std::bit_cast<uint32_t>(valu
 bool Fail(std::string* error, const char* message) {
   if (error) *error = message;
   return false;
+}
+bool ReplaceMeasured(std::vector<uint8_t>* bytes, std::string_view original,
+                     std::string_view replacement, size_t expected_count) {
+  if (original.size() != replacement.size()) return false;
+  size_t count = 0;
+  for (auto at = std::search(bytes->begin(), bytes->end(), original.begin(), original.end());
+       at != bytes->end();
+       at = std::search(at + original.size(), bytes->end(), original.begin(), original.end())) {
+    std::copy(replacement.begin(), replacement.end(), at);
+    ++count;
+  }
+  return count == expected_count;
+}
+uint32_t Crc32(const uint8_t* bytes, size_t size) {
+  uint32_t crc = 0xFFFFFFFFu;
+  for (size_t i = 0; i < size; ++i) {
+    crc ^= bytes[i];
+    for (unsigned bit = 0; bit < 8; ++bit)
+      crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320u : 0u);
+  }
+  return ~crc;
 }
 bool DecodeStream(const std::vector<uint8_t>& source, std::vector<uint8_t>* bytes,
                   std::string* error) {
@@ -119,17 +141,17 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
         Be32(bytes.data() + table - 8) !=
             std::bit_cast<uint32_t>(kOriginalFontCellHeight / kRetailAtlasSize))
       return Fail(error, "Pentatonic cell dimensions changed");
-    PutFloat(bytes.data() + table - 12, kFontCellWidth / kAtlasSize);
-    PutFloat(bytes.data() + table - 8, kFontCellHeight / kAtlasSize);
+    PutFloat(bytes.data() + table - 12, kPrivateFontCellWidth / kAtlasSize);
+    PutFloat(bytes.data() + table - 8, kPrivateFontCellHeight / kAtlasSize);
     for (uint32_t index = 0; index < kIconCount; ++index) {
       const uint32_t code = GlyphCode(index);
       uint8_t* glyph = bytes.data() + table + code * 18;
       if (glyph[0] != 0 || glyph[1] != code)
         return Fail(error, "Pentatonic glyph code changed");
-      PutFloat(glyph + 2, float(IconX(index)) / kAtlasSize);
-      PutFloat(glyph + 6, float(IconY(index) - kIconInsetY) / kAtlasSize);
-      PutFloat(glyph + 10, IconSize(index) / kFontCellWidth);
-      PutFloat(glyph + 14, IconSize(index) / kFontCellWidth);
+      PutFloat(glyph + 2, float(PrivateIconX(index)) / kAtlasSize);
+      PutFloat(glyph + 6, float(PrivateIconY(index) - kPrivateInset) / kAtlasSize);
+      PutFloat(glyph + 10, float(kPrivateIconSize) / kPrivateFontCellWidth);
+      PutFloat(glyph + 14, float(kPrivateIconSize) / kPrivateFontCellWidth);
     }
   }
 
@@ -140,11 +162,9 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
     retail_chain_bytes += (kRetailAtlasSize >> mip) * (kRetailAtlasSize >> mip);
   const std::array<uint8_t, 8> expected{8, 0, 0, 0, 0x18, 6, 4, 0};
   if (bytes.size() < kTexturePayload + retail_chain_bytes ||
+      Be32(bytes.data() + kTextureHeader) != 0x6F93E325 ||
       std::memcmp(bytes.data() + kTextureHeader + 4, expected.data(), expected.size()) != 0)
     return Fail(error, "Pentatonic BC3 texture record changed");
-  // Keep the retail texture bytes and resource names. Both copied scenes share
-  // the already loaded Pentatonic texture, and the override replaces only the
-  // unused bottom band; no additional guest bitmap is allocated for the icons.
   original_bc3->resize(retail_chain_bytes);
   for (size_t i = 0; i < retail_chain_bytes; i += 2) {
     (*original_bc3)[i] = bytes[kTexturePayload + i + 1];
@@ -154,9 +174,40 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
   if (Be32(bytes.data() + kTextureHeader + 10) != 0x04000400 ||
       bytes[kTextureHeader + 14] != 4 || bytes[kTextureHeader + 15] != 0)
     return Fail(error, "Pentatonic texture dimensions changed");
+  // Keep the font object names, which the game's links use. Give its texture,
+  // materials, source path, and bitmap cache key a separate identity.
+  constexpr struct { std::string_view original, replacement; size_t count; } names[] = {
+      {"Pentatonic_Regular_(8_89)4x.tex", "Iconatonic_Regular_(8_89)4x.tex", 5},
+      {"Pentatonic_Regular_(8_89)4x.mat", "Iconatonic_Regular_(8_89)4x.mat", 2},
+      {"Pentatonic_Regular_(5_00)4x_fadeout.mat",
+       "Iconatonic_Regular_(5_00)4x_fadeout.mat", 3},
+      {"Pentatonic_Regular_(5_00)4x_ploff.mat",
+       "Iconatonic_Regular_(5_00)4x_ploff.mat", 3},
+      {"Pentatonic_Regular_(5_00)4x_znormal.mat",
+       "Iconatonic_Regular_(5_00)4x_znormal.mat", 3},
+      {"../image/pentatonic_regular_(8_89)4x.bmp",
+       "../image/iconatonic_regular_(8_89)4x.bmp", 1},
+  };
+  for (const auto& name : names)
+    if (!ReplaceMeasured(&bytes, name.original, name.replacement, name.count))
+      return Fail(error, "Pentatonic texture identity references changed");
+  std::vector<uint8_t> private_bc3(retail_chain_bytes);
+  constexpr std::array<uint8_t, 16> marker{
+      0x52, 0x42, 0x42, 0x5A, 0x49, 0x43, 0x4F, 0x4E,
+      0x46, 0x4F, 0x4E, 0x54, 0x31, 0x4B, 0x00, 0x01};
+  std::copy(marker.begin(), marker.end(), private_bc3.begin());
+  const uint32_t bitmap_key = Crc32(private_bc3.data(), kAtlasSize * kAtlasSize);
+  if (!bitmap_key || bitmap_key == 0x6F93E325)
+    return Fail(error, "private bitmap cache key collided with retail");
+  PutBe32(bytes.data() + kTextureHeader, bitmap_key);
+  for (size_t i = 0; i < retail_chain_bytes; i += 2) {
+    bytes[kTexturePayload + i] = private_bc3[i + 1];
+    bytes[kTexturePayload + i + 1] = private_bc3[i];
+  }
   // A single stored chunk is valid Milo and avoids a second compressor.
   if (!PackStored(bytes, scene, error)) return false;
   g_original_bc3.store(std::make_shared<const std::vector<uint8_t>>(*original_bc3));
+  g_private_bc3.store(std::make_shared<const std::vector<uint8_t>>(std::move(private_bc3)));
   if (error) error->clear();
   return true;
 }
@@ -214,9 +265,9 @@ bool PrepareHintScene(const std::vector<uint8_t>& icon_scene, std::vector<uint8_
   if (tables.size() != 4) return Fail(error, "prepared icon font Glyph arrays changed");
   for (const size_t table : tables) {
     if (Be32(bytes.data() + table - 12) !=
-            std::bit_cast<uint32_t>(kFontCellWidth / kAtlasSize) ||
+            std::bit_cast<uint32_t>(kPrivateFontCellWidth / kAtlasSize) ||
         Be32(bytes.data() + table - 8) !=
-            std::bit_cast<uint32_t>(kFontCellHeight / kAtlasSize))
+            std::bit_cast<uint32_t>(kPrivateFontCellHeight / kAtlasSize))
       return Fail(error, "prepared icon font cell dimensions changed");
     for (uint32_t action = 0; action < kHintCount; ++action) {
       const uint32_t code = GlyphCode(action);
@@ -224,16 +275,13 @@ bool PrepareHintScene(const std::vector<uint8_t>& icon_scene, std::vector<uint8_
       if (glyph[0] != 0 || glyph[1] != code)
         return Fail(error, "prepared icon font early glyph changed");
       const uint32_t index = kHintFirst + action;
-      PutFloat(glyph + 2, float(IconX(index)) / kAtlasSize);
-      PutFloat(glyph + 6, float(IconY(index) - kIconInsetY) / kAtlasSize);
-      PutFloat(glyph + 10, IconSize(index) / kFontCellWidth);
-      PutFloat(glyph + 14, IconSize(index) / kFontCellWidth);
+      PutFloat(glyph + 2, float(PrivateIconX(index)) / kAtlasSize);
+      PutFloat(glyph + 6, float(PrivateIconY(index) - kPrivateInset) / kAtlasSize);
+      PutFloat(glyph + 10, float(kPrivateIconSize) / kPrivateFontCellWidth);
+      PutFloat(glyph + 14, float(kPrivateIconSize) / kPrivateFontCellWidth);
     }
   }
-  // Both scenes use the same icon pixels. Keep the Tex, Mat and source names so
-  // RndDir shares the guest bitmap; only the glyph tables differ. Giving this
-  // scene a separate texture loaded another full mip chain before the menu/song
-  // transitions that exhausted contiguous guest heap space.
+  // Both scenes use the same texture identity and pixels; their glyph tables differ.
   return PackStored(bytes, scene, error);
 }
 bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
@@ -284,5 +332,8 @@ bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* sc
 }
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3() {
   return g_original_bc3.load();
+}
+std::shared_ptr<const std::vector<uint8_t>> PrivateBc3() {
+  return g_private_bc3.load();
 }
 }  // namespace rb_blitz::ui::input_font

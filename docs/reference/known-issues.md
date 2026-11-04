@@ -69,10 +69,13 @@ bytes - the size the PS3 branch of the same file uses - so the title creates a
 larger heap at boot. `check-p10-records` parses the generated record back and
 asserts 160,000,000. The first guest allocation now logs the heap's free total,
 so one live boot says whether the raised definition was served. Soft keycap
-rendering remains open and was deferred to a later session; the shared-retail
-visual result and live crash behavior are unproven. Release build and the focused
-host suites pass. The appearance investigation is
-[the icon rendering quality plan](../plans/todo/2026-11-02-icon-rendering-quality-investigation-plan.md).
+rendering remains open: the appearance plan's first step landed on 2026-11-02
+(refined BC3 colour fit, premultiplied mip filter, alpha bleed into transparent
+padding - none of which touches the atlas geometry or the heap), but the visual
+result is unproven until the owner's capture. The shared-retail visual result and
+live crash behavior are unproven. Release build and the focused host suites pass.
+The appearance investigation is
+[the icon rendering quality plan](../plans/in-progress/2026-11-02-icon-rendering-quality-investigation-plan.md).
 See the
 [button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P10.
 

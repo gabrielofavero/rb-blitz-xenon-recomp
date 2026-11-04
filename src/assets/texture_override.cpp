@@ -132,6 +132,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       pads_.clear();
       font_levels_.clear();
       retail_font_levels_.clear();
+      private_font_levels_.clear();
       logged_.clear();
       const auto* scheme = registry_.Find(selected_);
       if (scheme) {
@@ -163,6 +164,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       } else font_icons_ = row_icons_;
       font_levels_.clear();
       retail_font_levels_.clear();
+      private_font_levels_.clear();
     }
     if (scheme_changed || icons_changed || refresh_font_after_buttons_) {
       refresh_font_after_buttons_ = false;
@@ -188,6 +190,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       }
     }
     const auto retail_original = ui::input_font::OriginalBc3();
+    const auto private_original = ui::input_font::PrivateBc3();
     auto matches_font = [&](uint32_t size,
                             const std::shared_ptr<const std::vector<uint8_t>>& expected,
                             std::unordered_set<uint64_t>* hashes,
@@ -220,13 +223,34 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     };
     const bool font = matches_font(ui::input_font::kRetailAtlasSize,
         retail_original, &font_hashes_, "retail");
+    const bool private_font = matches_font(ui::input_font::kAtlasSize,
+        private_original, &private_font_hashes_, "private");
     // The base-game texture must be a refresh candidate before any custom scheme is selected.
     // Otherwise a retail boot uploads it once and a later generation bump has nothing to evict.
-    if (button || icons || pad_slot || font) *refresh_target = true;
+    if (button || icons || pad_slot || font || private_font) *refresh_target = true;
     if (button && original_buttons_.empty() &&
         controller_schemes::UntileBc3Base(guest_data, request.guest_base_size,
             request.width, request.tiled, uint32_t(request.endianness), &original_buttons_)) {
       refresh_font_after_buttons_ = true;
+    }
+    if (private_font) {
+      if (font_icons_.empty() || original_buttons_.empty()) {
+        REXLOG_WARN("input_icons: private font override waiting for icons={} button_sheet={}",
+                    font_icons_.size(), !original_buttons_.empty());
+        return false;
+      }
+      if (private_font_levels_.empty()) {
+        if (!input_font_atlas::ComposePrivate(original_buttons_, registry_.Find(selected_),
+                                              font_icons_, &private_font_levels_)) {
+          REXLOG_WARN("input_icons: could not compose private mapping font images");
+          return false;
+        }
+        REXLOG_INFO("input_icons: composed private font with {} image slots", font_icons_.size());
+      }
+      if (request.mip_count > private_font_levels_.size()) return false;
+      host_levels->assign(private_font_levels_.begin(),
+                          private_font_levels_.begin() + request.mip_count);
+      return true;
     }
     if (font) {
       if (font_icons_.empty() || original_buttons_.empty()) {
@@ -310,6 +334,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::vector<std::vector<uint8_t>> icons_;
   std::vector<std::vector<uint8_t>> font_levels_;
   std::vector<std::vector<uint8_t>> retail_font_levels_;
+  std::vector<std::vector<uint8_t>> private_font_levels_;
   std::vector<input::icons::Icon> font_icons_;
   std::vector<input::icons::Icon> row_icons_;
   std::vector<input::icons::Icon> hint_icons_;
@@ -319,6 +344,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::string last_icon_signature_;
   std::string last_hint_signature_;
   std::unordered_set<uint64_t> font_hashes_;
+  std::unordered_set<uint64_t> private_font_hashes_;
   std::unordered_set<uint64_t> font_probe_logged_;
   bool has_pending_icons_ = false;
   bool has_pending_hints_ = false;
@@ -488,7 +514,7 @@ void PublishHintIcons(std::string signature, std::vector<input::icons::Icon> ico
   if (g_scheme_provider) g_scheme_provider->PublishHints(std::move(signature), std::move(icons));
 }
 bool InputIconsAvailable() {
-  return g_scheme_provider != nullptr && ui::input_font::OriginalBc3() != nullptr;
+  return g_scheme_provider != nullptr && ui::input_font::PrivateBc3() != nullptr;
 }
 const controller_schemes::Registry* ControllerSchemeRegistry() {
   return g_scheme_provider ? g_scheme_provider->Registry() : nullptr;

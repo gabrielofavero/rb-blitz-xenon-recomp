@@ -663,24 +663,31 @@ void CheckIconScene(const std::vector<uint8_t>& icon_scene) {
   CHECK_TRUE(icon_scene.size() > 0x810 + 0x867 + 31);
   if (icon_scene.size() <= 0x810 + 0x867 + 31) return;
   const std::string resources(reinterpret_cast<const char*>(icon_scene.data() + 0x810), 0x867);
-  CHECK_TRUE(resources.find("Pentatonic_Regular_(8_89)4x.tex") != std::string::npos);
-  CHECK_TRUE(resources.find("../image/pentatonic_regular_(8_89)4x.bmp") != std::string::npos);
-  CHECK_TRUE(resources.find("Iconatonic_Regular_") == std::string::npos);
+  CHECK_TRUE(resources.find("Iconatonic_Regular_(8_89)4x.tex") != std::string::npos);
+  CHECK_TRUE(resources.find("../image/iconatonic_regular_(8_89)4x.bmp") != std::string::npos);
   const auto retail = rb_blitz::ui::input_font::OriginalBc3();
   CHECK_TRUE(retail != nullptr);
-  if (!retail) return;
+  const auto private_bc3 = rb_blitz::ui::input_font::PrivateBc3();
+  CHECK_TRUE(private_bc3 != nullptr);
+  if (!retail || !private_bc3) return;
   constexpr size_t payload = 0x810 + 0x867 + 31;
   constexpr size_t dimensions = 0x810 + 0x867 + 10;
   for (size_t field = 0; field < 3; ++field) {
     CHECK_EQ(icon_scene[dimensions + field * 2], uint8_t{4});
     CHECK_EQ(icon_scene[dimensions + field * 2 + 1], uint8_t{0});
   }
-  CHECK_TRUE(icon_scene.size() >= payload + retail->size());
-  if (icon_scene.size() < payload + retail->size()) return;
+  CHECK_TRUE(icon_scene.size() >= payload + private_bc3->size());
+  CHECK_TRUE(*private_bc3 != *retail);
+  if (icon_scene.size() < payload + private_bc3->size()) return;
+  constexpr size_t key = 0x810 + 0x867;
+  const uint32_t bitmap_key = uint32_t(icon_scene[key]) << 24 |
+      uint32_t(icon_scene[key + 1]) << 16 | uint32_t(icon_scene[key + 2]) << 8 |
+      icon_scene[key + 3];
+  CHECK_TRUE(bitmap_key != 0x6F93E325);
   bool texture_identical = true;
-  for (size_t i = 0; i < retail->size(); i += 2)
-    texture_identical &= icon_scene[payload + i] == (*retail)[i + 1] &&
-                         icon_scene[payload + i + 1] == (*retail)[i];
+  for (size_t i = 0; i < private_bc3->size(); i += 2)
+    texture_identical &= icon_scene[payload + i] == (*private_bc3)[i + 1] &&
+                         icon_scene[payload + i + 1] == (*private_bc3)[i];
   CHECK_TRUE(texture_identical);
 }
 
@@ -690,11 +697,11 @@ void CheckPrivateFontGeometry(const std::vector<uint8_t>& scene, bool hint) {
     return uint32_t(scene[at]) << 24 | uint32_t(scene[at + 1]) << 16 |
            uint32_t(scene[at + 2]) << 8 | scene[at + 3];
   };
-  const float cell = font::kFontCellWidth;
+  const float cell = font::kPrivateFontCellWidth;
   const uint32_t index = hint ? font::kHintFirst : 0;
-  const float glyph_width = float(font::IconSize(index)) / cell;
-  const float glyph_x = float(font::IconX(index)) / font::kAtlasSize;
-  const float glyph_y = float(font::IconY(index) - font::kIconInsetY) / font::kAtlasSize;
+  const float glyph_width = float(font::kPrivateIconSize) / cell;
+  const float glyph_x = float(font::PrivateIconX(index)) / font::kAtlasSize;
+  const float glyph_y = float(font::PrivateIconY(index) - font::kPrivateInset) / font::kAtlasSize;
   size_t tables = 0;
   for (size_t at = 0x810 + 580; at + (256 - 32) * 18 <= scene.size(); ++at) {
     if (scene[at] != 0 || scene[at + 1] != 0x20 || be32(at - 580) != 256) continue;
@@ -792,6 +799,9 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
       CheckIconScene(hint_font);
       CheckPrivateFontGeometry(hint_font, true);
       CHECK_TRUE(hint_font != records.at(rb_blitz::ui::input_font::kIconSceneRecord));
+      CHECK_TRUE(std::equal(row_font.begin() + 0x810 + 0x867,
+                            row_font.begin() + 0x810 + 0x867 + 4,
+                            hint_font.begin() + 0x810 + 0x867));
       if (single) {
         const auto& loading = records.at(rb_blitz::ui::input_font::kLoadingRecord);
         auto has_resource = [](const std::vector<uint8_t>& bytes,
@@ -800,11 +810,10 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
                  bytes.end();
         };
         const auto& row_font = records.at(rb_blitz::ui::input_font::kIconSceneRecord);
-        CHECK_TRUE(has_resource(row_font, "Pentatonic_Regular_(8_89)4x.tex"));
-        CHECK_TRUE(has_resource(hint_font, "Pentatonic_Regular_(8_89)4x.tex"));
-        CHECK_FALSE(has_resource(hint_font, "Iconatonic_Regular_"));
+        CHECK_TRUE(has_resource(row_font, "Iconatonic_Regular_(8_89)4x.tex"));
+        CHECK_TRUE(has_resource(hint_font, "Iconatonic_Regular_(8_89)4x.tex"));
         CHECK_FALSE(has_resource(hint_font, "Hintatonic_Regular_"));
-        CHECK_TRUE(has_resource(hint_font, "../image/pentatonic_regular_(8_89)4x.bmp"));
+        CHECK_TRUE(has_resource(hint_font, "../image/iconatonic_regular_(8_89)4x.bmp"));
         constexpr std::string_view loading_font =
             "../resource/fonts/inline_help_icons.milo";
         size_t loading_font_count = 0;

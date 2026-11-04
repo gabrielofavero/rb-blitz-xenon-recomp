@@ -145,7 +145,10 @@ length agrees to the byte (`default_album_art_keep` = 32 + 512²…16² DXT1 = 1
 its dimensions out differently and only the engine reads those three files.
 
 `src/assets/texture_codec.h` is the same format in C++ (SDK-free, no third-party code): the envelope
-parser/writer, DXT1/DXT5 decode **and** encode, the 16-bit word swap, and a box-filtered resampler.
+parser/writer, DXT1/DXT5 decode **and** encode, the 16-bit word swap, a box-filtered resampler that
+averages premultiplied alpha, and the alpha bleed that keeps transparent padding from darkening a
+block's colour endpoints (both added 2026-11-02 for the icon atlas; see
+[button-hint-inventory.md](../engine/button-hint-inventory.md)).
 The store's album art uses it at runtime (`src/store/album_art_service.cpp` decodes the API's cover
 with Windows Imaging Component and encodes a `.png_xbox`); the button-layout plan reuses it for the
 PS3 button sheet and the slot sheets. `tests/store_art_tests.cpp` pins the envelope fields against

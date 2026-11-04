@@ -16,6 +16,12 @@ bool Compose(const std::vector<uint8_t>& original_font,
              const std::vector<input::icons::Icon>& icons,
              std::vector<std::vector<uint8_t>>* levels);
 
+// Fill the private 1024-square font with 64-pixel icons on a 68-pixel grid.
+bool ComposePrivate(const std::vector<uint8_t>& original_buttons,
+                    const controller_schemes::Scheme* scheme,
+                    const std::vector<input::icons::Icon>& icons,
+                    std::vector<std::vector<uint8_t>>* levels);
+
 // Copy only the icon band into the original retail font mip chain. All retail
 // text blocks remain byte-for-byte intact if the guest shares that texture.
 bool ComposeRetail(const std::vector<uint8_t>& original_font,

@@ -215,9 +215,23 @@ checks. The shared-retail visual result and the live crash behavior are the
 owner's next check.
 
 **2026-11-02 icon appearance evidence.** The soft-keycap question is tracked in
-[the icon rendering quality plan](../plans/todo/2026-11-02-icon-rendering-quality-investigation-plan.md).
+[the icon rendering quality plan](../plans/in-progress/2026-11-02-icon-rendering-quality-investigation-plan.md).
 Measured: the bounding-box BC3 encoder costs 1.9-3.1 dB against a least-squares
 refined fit on representative keycaps; the straight-alpha mip filter darkens icon
 edges by 24-33 levels of 255; and the guest renders a 540p-class frame that the
 host presents at 2x, which caps the sharpness any atlas can add. The plan orders
 the encoder, mip-filter, private-1024-atlas and 1080p-guest options by risk.
+
+**2026-11-02 encoder and mip fix (appearance).** The plan's first step landed. `EncodeDxt1` and
+`EncodeDxt5` now write the best of the bounding-box, principal-axis and least-squares-refined
+colour fits (`FitColoursBest`, `src/assets/texture_codec.cpp`), judged by the exact integer error
+of the palette they decode to, so the fit cannot be worse than the bounding box it replaced.
+`ResizeRgba` filters premultiplied colour and unpremultiplies afterwards, and
+`BleedTransparentColours` fills fully transparent texels with the nearest visible colour before
+every level is encoded - in the icon atlas and in `BuildPlatformTexture`. Alpha is never modified,
+so the atlas geometry, the transparent gutters and the guest heap are untouched: no guest bitmap
+changed size or mip count. Host evidence: `store_art` carries the refined-fit, premultiplied-mip
+and alpha-bleed fixtures, and `button_scheme`, `button_scheme_fingerprints`, `menu_payload`,
+`settings_screen` and the rest of the suite pass on the release build. The on-screen result - the
+footer Enter/Esc and one mapping row at 2560x1080 - is still the owner's capture, so the visual
+gain is **unproven in the guest**.

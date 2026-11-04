@@ -141,8 +141,8 @@ bool Compose(const std::vector<uint8_t>& original_font,
     fitted.push_back(FitIcon(image, font::IconSize(static_cast<uint32_t>(index))));
   }
 
-  // The private font has its own texture, so all of its pixels are available
-  // for icons. Downsample the atlas as one image to keep mip UVs aligned.
+  // Only the unused bottom band is copied over the retail font texture.
+  // Downsample the atlas as one image to keep mip UVs aligned.
   std::vector<uint8_t> atlas(size_t(font::kAtlasSize) * font::kAtlasSize * 4);
   for (size_t i = 0; i < fitted.size(); ++i) {
     const uint32_t x = font::IconX(static_cast<uint32_t>(i));
@@ -161,6 +161,48 @@ bool Compose(const std::vector<uint8_t>& original_font,
     if (mip == 0) resized = atlas;
     else assets::ResizeRgba(atlas.data(), font::kAtlasSize, font::kAtlasSize,
                             resized.data(), dim, dim);
+    // Every cell has transparent padding around the icon; bleeding the icon's colour into it keeps
+    // the BC3 endpoints of the blocks that straddle the edge from being dragged towards black.
+    assets::BleedTransparentColours(resized.data(), dim, dim, 4);
+    std::vector<uint8_t> level;
+    assets::EncodeDxt5(resized.data(), dim, dim, &level);
+    if (level.size() != size_t(dim) * dim) return false;
+    levels->push_back(std::move(level));
+  }
+  return true;
+}
+
+bool ComposePrivate(const std::vector<uint8_t>& original_buttons,
+                    const controller_schemes::Scheme* scheme,
+                    const std::vector<input::icons::Icon>& icons,
+                    std::vector<std::vector<uint8_t>>* levels) {
+  namespace font = ui::input_font;
+  if (!levels || icons.empty() || icons.size() > font::kIconCount ||
+      original_buttons.size() != 512u * 512u) return false;
+  std::vector<uint8_t> retail_rgba(512u * 512u * 4);
+  assets::DecodeDxt5(original_buttons.data(), 512, 512, retail_rgba.data());
+  std::vector<uint8_t> atlas(size_t(font::kAtlasSize) * font::kAtlasSize * 4);
+  for (size_t index = 0; index < icons.size(); ++index) {
+    const auto& icon = icons[index];
+    Image source = ImageFor(icon, retail_rgba, scheme);
+    if (!source.width || !source.height ||
+        source.rgba.size() != size_t(source.width) * source.height * 4) return false;
+    Image fitted = FitIcon(source, font::kPrivateIconSize);
+    const uint32_t x = font::PrivateIconX(static_cast<uint32_t>(index));
+    const uint32_t y = font::PrivateIconY(static_cast<uint32_t>(index));
+    for (uint32_t row = 0; row < font::kPrivateIconSize; ++row)
+      std::copy_n(fitted.rgba.data() + size_t(row) * font::kPrivateIconSize * 4,
+                  size_t(font::kPrivateIconSize) * 4,
+                  atlas.data() + (size_t(y + row) * font::kAtlasSize + x) * 4);
+  }
+  levels->clear();
+  for (uint32_t mip = 0; mip < font::kMipCount; ++mip) {
+    const uint32_t dim = font::kAtlasSize >> mip;
+    std::vector<uint8_t> resized(size_t(dim) * dim * 4);
+    if (mip == 0) resized = atlas;
+    else assets::ResizeRgba(atlas.data(), font::kAtlasSize, font::kAtlasSize,
+                            resized.data(), dim, dim);
+    assets::BleedTransparentColours(resized.data(), dim, dim, 4);
     std::vector<uint8_t> level;
     assets::EncodeDxt5(resized.data(), dim, dim, &level);
     if (level.size() != size_t(dim) * dim) return false;

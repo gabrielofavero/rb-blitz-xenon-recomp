@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace rb_blitz::assets {
 namespace {
@@ -169,6 +170,169 @@ void FitColours(const std::uint8_t pixels[16][4], bool four_colour, std::uint16_
   }
   *c0 = hi;
   *c1 = lo;
+}
+
+// Keeps a pair of endpoints legal for the block that will carry them: distinct, and c0 > c1 for a
+// DXT1 block (its four-colour mode is the one this encoder writes). DXT5 interpolates four colours
+// whatever the order, so there only distinctness matters.
+void ConstrainEndpoints(bool four_colour, std::uint16_t* c0, std::uint16_t* c1) {
+  if (*c0 == *c1) {
+    if (*c0 < 0xFFFF) {
+      ++*c0;
+    } else {
+      --*c1;
+    }
+  }
+  if (!four_colour && *c0 < *c1) {
+    std::swap(*c0, *c1);
+  }
+}
+
+std::uint8_t ByteFromDouble(double value) {
+  return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 255.0)));
+}
+
+// Squared RGB error of the block against the palette a pair of endpoints produces - the same
+// integer interpolation DecodeDxt5 and DecodeDxt1 apply, so the number is what the guest sees.
+long long PaletteError(const std::uint8_t pixels[16][4], std::uint16_t c0, std::uint16_t c1) {
+  Rgb8 palette[4];
+  ColourPalette(c0, c1, /*four_colour=*/true, palette);
+  long long total = 0;
+  for (int i = 0; i < 16; ++i) {
+    const int index = NearestColour(palette, pixels[i][0], pixels[i][1], pixels[i][2]);
+    const int dr = int(palette[index].r) - int(pixels[i][0]);
+    const int dg = int(palette[index].g) - int(pixels[i][1]);
+    const int db = int(palette[index].b) - int(pixels[i][2]);
+    total += dr * dr + dg * dg + db * db;
+  }
+  return total;
+}
+
+// The block's colour cloud has one dominant direction. Endpoints at its extremes along that
+// direction track a narrow diagonal band the per-channel bounding box overshoots at the corners.
+void FitColoursPrincipalAxis(const std::uint8_t pixels[16][4], bool four_colour,
+                             std::uint16_t* c0, std::uint16_t* c1) {
+  double mean[3] = {0.0, 0.0, 0.0};
+  for (int i = 0; i < 16; ++i) {
+    for (int c = 0; c < 3; ++c) mean[c] += double(pixels[i][c]) / 16.0;
+  }
+  double covariance[3][3] = {};
+  for (int i = 0; i < 16; ++i) {
+    const double d[3] = {double(pixels[i][0]) - mean[0], double(pixels[i][1]) - mean[1],
+                         double(pixels[i][2]) - mean[2]};
+    for (int r = 0; r < 3; ++r) {
+      for (int k = 0; k < 3; ++k) covariance[r][k] += d[r] * d[k];
+    }
+  }
+  // Power iteration for the dominant eigenvector; the start direction is a flat grey.
+  double axis[3] = {1.0, 1.0, 1.0};
+  for (int iteration = 0; iteration < 8; ++iteration) {
+    double next[3];
+    for (int r = 0; r < 3; ++r) {
+      next[r] = covariance[r][0] * axis[0] + covariance[r][1] * axis[1] + covariance[r][2] * axis[2];
+    }
+    const double length = std::sqrt(next[0] * next[0] + next[1] * next[1] + next[2] * next[2]);
+    if (length < 1e-9) break;
+    for (int r = 0; r < 3; ++r) axis[r] = next[r] / length;
+  }
+  double low = 1e30;
+  double high = -1e30;
+  for (int i = 0; i < 16; ++i) {
+    const double t = (double(pixels[i][0]) - mean[0]) * axis[0] +
+                     (double(pixels[i][1]) - mean[1]) * axis[1] +
+                     (double(pixels[i][2]) - mean[2]) * axis[2];
+    low = std::min(low, t);
+    high = std::max(high, t);
+  }
+  *c0 = Pack565(ByteFromDouble(mean[0] + axis[0] * low),
+                ByteFromDouble(mean[1] + axis[1] * low),
+                ByteFromDouble(mean[2] + axis[2] * low));
+  *c1 = Pack565(ByteFromDouble(mean[0] + axis[0] * high),
+                ByteFromDouble(mean[1] + axis[1] * high),
+                ByteFromDouble(mean[2] + axis[2] * high));
+  ConstrainEndpoints(four_colour, c0, c1);
+}
+
+// The least-squares step of stb_dxt.h's refine mode. Holding each pixel's palette assignment
+// fixed, the endpoints that minimise squared error are a 2x2 normal-equation solve per channel
+// (entry 2 is two thirds of c0 plus one third of c1, entry 3 the reverse); the solved endpoints
+// are re-quantised to 5:6:5 and the assignments recomputed, a few times. `c0`/`c1` end at the best
+// pair seen, and the returned error is that pair's.
+long long RefineColours(const std::uint8_t pixels[16][4], bool four_colour, std::uint16_t* c0,
+                        std::uint16_t* c1) {
+  long long error = PaletteError(pixels, *c0, *c1);
+  for (int iteration = 0; iteration < 8; ++iteration) {
+    Rgb8 palette[4];
+    ColourPalette(*c0, *c1, /*four_colour=*/true, palette);
+    double weight_a = 0.0, weight_b = 0.0, weight_ab = 0.0;
+    double sums[3][2] = {};
+    for (int i = 0; i < 16; ++i) {
+      const int index = NearestColour(palette, pixels[i][0], pixels[i][1], pixels[i][2]);
+      const double a = index == 0 ? 1.0 : (index == 2 ? 2.0 / 3.0 : (index == 3 ? 1.0 / 3.0 : 0.0));
+      const double b = index == 1 ? 1.0 : (index == 2 ? 1.0 / 3.0 : (index == 3 ? 2.0 / 3.0 : 0.0));
+      weight_a += a * a;
+      weight_b += b * b;
+      weight_ab += a * b;
+      for (int c = 0; c < 3; ++c) {
+        sums[c][0] += a * double(pixels[i][c]);
+        sums[c][1] += b * double(pixels[i][c]);
+      }
+    }
+    const double determinant = weight_a * weight_b - weight_ab * weight_ab;
+    if (std::abs(determinant) < 1e-6) break;  // every pixel took one palette entry
+    double endpoint[2][3];
+    for (int c = 0; c < 3; ++c) {
+      endpoint[0][c] = (sums[c][0] * weight_b - sums[c][1] * weight_ab) / determinant;
+      endpoint[1][c] = (sums[c][1] * weight_a - sums[c][0] * weight_ab) / determinant;
+    }
+    std::uint16_t next0 = Pack565(ByteFromDouble(endpoint[0][0]), ByteFromDouble(endpoint[0][1]),
+                                  ByteFromDouble(endpoint[0][2]));
+    std::uint16_t next1 = Pack565(ByteFromDouble(endpoint[1][0]), ByteFromDouble(endpoint[1][1]),
+                                  ByteFromDouble(endpoint[1][2]));
+    ConstrainEndpoints(four_colour, &next0, &next1);
+    const long long next_error = PaletteError(pixels, next0, next1);
+    if (next_error >= error) break;  // converged; keep the pair we already hold
+    *c0 = next0;
+    *c1 = next1;
+    error = next_error;
+  }
+  return error;
+}
+
+// Every fit is measured against the same integer error and the best pair wins, so the encoder can
+// never be worse than the bounding box it replaced.
+void FitColoursBest(const std::uint8_t pixels[16][4], bool four_colour, std::uint16_t* c0,
+                    std::uint16_t* c1) {
+  std::uint16_t best0 = 0;
+  std::uint16_t best1 = 0;
+  long long best_error = std::numeric_limits<long long>::max();
+  const auto consider = [&](std::uint16_t candidate0, std::uint16_t candidate1) {
+    const long long error = PaletteError(pixels, candidate0, candidate1);
+    if (error < best_error) {
+      best_error = error;
+      best0 = candidate0;
+      best1 = candidate1;
+    }
+  };
+  std::uint16_t candidate0 = 0;
+  std::uint16_t candidate1 = 0;
+  FitColours(pixels, four_colour, &candidate0, &candidate1);
+  consider(candidate0, candidate1);
+  // Most of an icon atlas is flat (empty gutter, keycap face); an exact bounding box needs no
+  // refinement, and skipping it keeps composing a 1024-square chain well inside a boot frame.
+  if (best_error == 0) {
+    *c0 = best0;
+    *c1 = best1;
+    return;
+  }
+  RefineColours(pixels, four_colour, &candidate0, &candidate1);
+  consider(candidate0, candidate1);
+  FitColoursPrincipalAxis(pixels, four_colour, &candidate0, &candidate1);
+  consider(candidate0, candidate1);
+  RefineColours(pixels, four_colour, &candidate0, &candidate1);
+  consider(candidate0, candidate1);
+  *c0 = best0;
+  *c1 = best1;
 }
 
 }  // namespace
@@ -348,7 +512,7 @@ void EncodeDxt1(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t hei
       std::uint8_t pixels[16][4];
       GatherBlock(rgba, width, height, int(bx), int(by), pixels);
       std::uint16_t c0 = 0, c1 = 0;
-      FitColours(pixels, false, &c0, &c1);
+      FitColoursBest(pixels, /*four_colour=*/false, &c0, &c1);
       Rgb8 palette[4];
       ColourPalette(c0, c1, true, palette);
       std::uint32_t bits = 0;
@@ -392,7 +556,7 @@ void EncodeDxt5(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t hei
         alpha_bits |= std::uint64_t(index) << (3 * i);
       }
       std::uint16_t c0 = 0, c1 = 0;
-      FitColours(pixels, true, &c0, &c1);
+      FitColoursBest(pixels, /*four_colour=*/true, &c0, &c1);
       Rgb8 palette[4];
       ColourPalette(c0, c1, true, palette);
       std::uint32_t bits = 0;
@@ -413,13 +577,64 @@ void EncodeDxt5(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t hei
   }
 }
 
+void BleedTransparentColours(std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
+                             std::uint32_t passes) {
+  if (rgba == nullptr || width == 0 || height == 0 || passes == 0) return;
+  const std::size_t count = std::size_t(width) * height;
+  // `known` grows one ring per pass: a pixel either held colour to begin with (alpha != 0) or
+  // received it from a neighbour, and only those can supply colour further out. Alpha is never
+  // touched, so the bleed is invisible except to a block encoder weighing the transparent RGB.
+  std::vector<std::uint8_t> known(count, 0);
+  for (std::size_t i = 0; i < count; ++i) known[i] = rgba[i * 4 + 3] != 0;
+  std::vector<std::uint8_t> colours(count * 3);
+  std::vector<std::uint8_t> filled(count);
+  for (std::uint32_t pass = 0; pass < passes; ++pass) {
+    std::fill(filled.begin(), filled.end(), 0);
+    bool any = false;
+    for (std::uint32_t y = 0; y < height; ++y) {
+      for (std::uint32_t x = 0; x < width; ++x) {
+        const std::size_t index = std::size_t(y) * width + x;
+        if (known[index]) continue;
+        unsigned sum[3] = {0, 0, 0};
+        unsigned weight = 0;
+        for (int dy = -1; dy <= 1; ++dy) {
+          const int ny = int(y) + dy;
+          if (ny < 0 || ny >= int(height)) continue;
+          for (int dx = -1; dx <= 1; ++dx) {
+            const int nx = int(x) + dx;
+            if (nx < 0 || nx >= int(width)) continue;
+            const std::size_t neighbour = std::size_t(ny) * width + nx;
+            if (!known[neighbour]) continue;
+            for (int c = 0; c < 3; ++c) sum[c] += rgba[neighbour * 4 + c];
+            ++weight;
+          }
+        }
+        if (weight == 0) continue;
+        for (int c = 0; c < 3; ++c) {
+          colours[index * 3 + c] = static_cast<std::uint8_t>((sum[c] + weight / 2) / weight);
+        }
+        filled[index] = 1;
+        any = true;
+      }
+    }
+    if (!any) break;
+    for (std::size_t i = 0; i < count; ++i) {
+      if (!filled[i]) continue;
+      for (int c = 0; c < 3; ++c) rgba[i * 4 + c] = colours[i * 3 + c];
+      known[i] = 1;
+    }
+  }
+}
+
 void ResizeRgba(const std::uint8_t* src, std::uint32_t src_width, std::uint32_t src_height,
                 std::uint8_t* dst, std::uint32_t dst_width, std::uint32_t dst_height) {
   if (src == nullptr || dst == nullptr || src_width == 0 || src_height == 0 || dst_width == 0 ||
       dst_height == 0) {
     return;
   }
-  // Horizontal pass: dst_width x src_height, in float.
+  // Both passes average premultiplied colour: a destination texel that straddles an icon's edge
+  // then averages the icon's colour with nothing, instead of with transparent black, and the
+  // unpremultiply at the end restores the straight-alpha values the caller stores.
   std::vector<float> middle(std::size_t(dst_width) * src_height * 4, 0.0f);
   for (std::uint32_t y = 0; y < src_height; ++y) {
     const std::uint8_t* row = src + std::size_t(y) * src_width * 4;
@@ -435,9 +650,11 @@ void ResizeRgba(const std::uint8_t* src, std::uint32_t src_width, std::uint32_t 
         const double overlap = std::min(end, double(i) + 1.0) - std::max(begin, double(i));
         if (overlap <= 0.0) continue;
         const std::uint8_t* p = row + std::size_t(i) * 4;
-        for (int c = 0; c < 4; ++c) {
-          accumulators[c] += float(p[c]) * float(overlap);
+        const float alpha = float(p[3]) / 255.0f;
+        for (int c = 0; c < 3; ++c) {
+          accumulators[c] += float(p[c]) * alpha * float(overlap);
         }
+        accumulators[3] += alpha * float(overlap);
         weight_sum += overlap;
       }
       float* out = middle.data() + (std::size_t(y) * dst_width + x) * 4;
@@ -465,9 +682,12 @@ void ResizeRgba(const std::uint8_t* src, std::uint32_t src_width, std::uint32_t 
         }
         weight_sum += overlap;
       }
+      const float alpha = weight_sum > 0.0 ? accumulators[3] / float(weight_sum) : 0.0f;
       std::uint8_t* out = dst + (std::size_t(y) * dst_width + x) * 4;
-      for (int c = 0; c < 4; ++c) {
-        const float value = weight_sum > 0.0 ? accumulators[c] / float(weight_sum) : 0.0f;
+      out[3] = static_cast<std::uint8_t>(std::lround(std::clamp(alpha, 0.0f, 1.0f) * 255.0f));
+      for (int c = 0; c < 3; ++c) {
+        const float value =
+            alpha > 1e-6f ? accumulators[c] / float(weight_sum) / alpha : 0.0f;
         out[c] = static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0f, 255.0f)));
       }
     }
@@ -491,6 +711,10 @@ std::string BuildPlatformTexture(const std::uint8_t* rgba, std::uint32_t width,
   std::uint32_t level_height = height;
   std::vector<std::uint8_t> current(rgba, rgba + std::size_t(width) * height * 4);
   for (;;) {
+    // The colour under a fully transparent texel is never drawn, but a block encoder still reads
+    // it: bleeding the nearest visible colour a few pixels out keeps transparent padding from
+    // pulling a block's endpoints towards black. Alpha is unchanged.
+    BleedTransparentColours(current.data(), level_width, level_height, 4);
     std::vector<std::uint8_t> blocks;
     if (format == TextureFormat::kDxt1) {
       EncodeDxt1(current.data(), level_width, level_height, &blocks);

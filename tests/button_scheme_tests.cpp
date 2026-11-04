@@ -209,8 +209,7 @@ int main() {
   Check(decoded[(size_t(200) * 512 + 200) * 4 + 3] == 255,
         "omitted glyph changed");
 
-  // The guest scene keeps a retail-sized marker atlas; the host composes the
-  // same 1024-square band for both the private and retail textures.
+  // The retail texture keeps the 32-pixel band as a compatibility fallback.
   std::vector<uint8_t> font_chain;
   for (uint32_t mip = 0; mip < rb_blitz::ui::input_font::kMipCount; ++mip) {
     const uint32_t dim = rb_blitz::ui::input_font::kRetailAtlasSize >> mip;
@@ -242,6 +241,23 @@ int main() {
         "mapping icon was not drawn in the icon atlas cell");
   Check(decoded_font[(size_t(500) * font::kAtlasSize + 32) * 4 + 3] == 0,
         "unused icon atlas area is not transparent");
+
+  // The private texture uses all 1024 pixels and must keep its first and last
+  // slots inside separate 68-pixel cells, including transparent padding.
+  std::vector<rb_blitz::input::icons::Icon> private_page(font::kIconCount, key_icon);
+  Check(rb_blitz::assets::input_font_atlas::ComposePrivate(
+      blocks, nullptr, private_page, &font_levels), "private font composition failed");
+  Check(font_levels.size() == font::kMipCount &&
+        font_levels[0].size() == size_t(font::kAtlasSize) * font::kAtlasSize,
+        "private font mip chain wrong");
+  rb_blitz::assets::DecodeDxt5(font_levels[0].data(), 1024, 1024, decoded_font.data());
+  for (uint32_t index : {0u, font::kIconCount - 1}) {
+    const uint32_t x = font::PrivateIconX(index), y = font::PrivateIconY(index);
+    Check(decoded_font[(size_t(y + 32) * 1024 + x + 32) * 4 + 3] > 200,
+          "private icon missing from its cell");
+    Check(decoded_font[(size_t(y + 32) * 1024 + x - 1) * 4 + 3] == 0,
+          "private icon crossed cell padding");
+  }
 
   rb_blitz::input::icons::Icon source_image;
   source_image.art = rb_blitz::input::icons::Art::kPackageImage;

@@ -222,6 +222,69 @@ void TestCodecRoundTrip() {
   CHECK_TRUE(error1 / (pixels * 3.0) < 10.0);
 }
 
+// A block whose two colours sit off the grey diagonal: blue and yellow. The per-channel bounding
+// box is the black corner against the white one, whose palette is four greys (roughly 100 levels
+// of mean error here); the principal-axis and refined fits put the endpoints on the colours
+// themselves. `docs/engine/button-hint-inventory.md` records the measured keycap gain (+1.9 to
+// +3.1 dB), this fixture pins that the better fit is the one the encoder actually writes.
+void TestRefinedColourFit() {
+  BeginCase("the block encoder places endpoints on an off-axis colour pair");
+  const std::uint32_t width = 4;
+  const std::uint32_t height = 4;
+  std::vector<std::uint8_t> source(std::size_t(width) * height * 4);
+  for (int i = 0; i < 16; ++i) {
+    std::uint8_t* p = source.data() + std::size_t(i) * 4;
+    const bool blue = (i % 2) == 0;
+    p[0] = blue ? 0 : 255;
+    p[1] = blue ? 0 : 255;
+    p[2] = blue ? 255 : 0;
+    p[3] = 255;
+  }
+  const auto mean_error = [&source](const std::vector<std::uint8_t>& rgba) {
+    double total = 0.0;
+    for (std::size_t i = 0; i < source.size(); i += 4) {
+      for (int c = 0; c < 3; ++c) total += std::abs(int(source[i + c]) - int(rgba[i + c]));
+    }
+    return total / (16.0 * 3.0);
+  };
+
+  std::vector<std::uint8_t> decoded(source.size());
+  std::vector<std::uint8_t> dxt5;
+  rb_blitz::assets::EncodeDxt5(source.data(), width, height, &dxt5);
+  rb_blitz::assets::DecodeDxt5(dxt5.data(), width, height, decoded.data());
+  CHECK_TRUE(mean_error(decoded) < 8.0);
+
+  std::vector<std::uint8_t> dxt1;
+  rb_blitz::assets::EncodeDxt1(source.data(), width, height, &dxt1);
+  rb_blitz::assets::DecodeDxt1(dxt1.data(), width, height, decoded.data());
+  CHECK_TRUE(mean_error(decoded) < 8.0);
+}
+
+// A component that is not visible still reaches a block encoder: a transparent texel's RGB is
+// averaged into the block's endpoints, so the composer bleeds the nearest visible colour outwards.
+void TestBleedColours() {
+  BeginCase("the alpha bleed fills transparent texels with visible colour and leaves alpha alone");
+  const std::uint32_t width = 8;
+  const std::uint32_t height = 8;
+  std::vector<std::uint8_t> image(std::size_t(width) * height * 4, 0);
+  for (std::uint32_t y = 0; y < 2; ++y) {
+    for (std::uint32_t x = 0; x < 2; ++x) {
+      std::uint8_t* p = image.data() + (std::size_t(y) * width + x) * 4;
+      p[0] = 220;
+      p[1] = 30;
+      p[2] = 40;
+      p[3] = 255;
+    }
+  }
+  rb_blitz::assets::BleedTransparentColours(image.data(), width, height, 2);
+  const std::size_t near = (std::size_t(1) * width + 3) * 4;
+  CHECK_EQ(image[near + 3], 0);       // transparent texels stay transparent
+  CHECK_TRUE(image[near + 0] > 180);  // ... and now carry the keycap's red
+  CHECK_TRUE(image[near + 2] < 90);
+  CHECK_EQ(image[(std::size_t(0) * width + 0) * 4 + 0], 220);  // visible texels unchanged
+  CHECK_EQ(image[(std::size_t(7) * width + 7) * 4 + 0], 0);    // two rings do not reach here
+}
+
 void TestBuildPlatformTexture() {
   BeginCase("BuildPlatformTexture writes the measured envelope and the swapped Xbox payload");
   const std::uint32_t width = 64;
@@ -317,6 +380,27 @@ void TestResize() {
   // The left half averages to black, the right half to white.
   CHECK_EQ(halves[0], 0);
   CHECK_EQ(halves[4], 255);
+
+  // A white edge on transparent black keeps its colour through the reduction: the destination
+  // texel that straddles the edge is half covered, so its alpha is about half and its colour is
+  // the white of the visible side. Averaging straight alpha would darken it to about 128 and leave
+  // a halo around every icon the mip chain samples (measured 24-33 levels of 255;
+  // `docs/engine/button-hint-inventory.md`).
+  std::vector<std::uint8_t> edge(8 * 8 * 4, 0);
+  for (std::uint32_t y = 0; y < 8; ++y) {
+    for (std::uint32_t x = 0; x < 3; ++x) {
+      std::uint8_t* p = edge.data() + (std::size_t(y) * 8 + x) * 4;
+      p[0] = p[1] = p[2] = p[3] = 255;
+    }
+  }
+  std::vector<std::uint8_t> reduced(4 * 4 * 4);
+  rb_blitz::assets::ResizeRgba(edge.data(), 8, 8, reduced.data(), 4, 4);
+  const std::uint8_t* straddle = reduced.data() + (std::size_t(2) * 4 + 1) * 4;
+  CHECK_TRUE(straddle[3] > 100 && straddle[3] < 160);  // half covered
+  CHECK_TRUE(straddle[0] > 250 && straddle[1] > 250 && straddle[2] > 250);
+  CHECK_EQ(reduced[(std::size_t(0) * 4 + 0) * 4 + 3], 255);  // fully covered stays opaque
+  CHECK_EQ(reduced[(std::size_t(2) * 4 + 3) * 4 + 3], 0);    // empty stays empty
+  CHECK_EQ(reduced[(std::size_t(2) * 4 + 3) * 4 + 0], 0);
 }
 
 void TestArtKeys() {
@@ -417,6 +501,8 @@ int main() {
   TestShippedEnvelopes();
   TestEnvelopeRefusals();
   TestCodecRoundTrip();
+  TestRefinedColourFit();
+  TestBleedColours();
   TestBuildPlatformTexture();
   TestResize();
   TestArtKeys();

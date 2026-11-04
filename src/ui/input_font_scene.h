@@ -9,7 +9,7 @@
 namespace rb_blitz::ui::input_font {
 
 // Derive an icon-only copy of the installed Pentatonic font scene with its own
-// 1024-square texture. No game art is stored in the project.
+// 1024-square texture identity. No game art is stored in the project.
 bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                   std::vector<uint8_t>* original_bc3, std::string* error);
 // A second private font aliases early, proven glyph codes to the reserved
@@ -24,6 +24,7 @@ bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>*
 bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                     std::string* error);
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3();
+std::shared_ptr<const std::vector<uint8_t>> PrivateBc3();
 
 inline constexpr char kSceneRecord[] = "ui/resource/fonts/gen/pentatonic.milo_xbox";
 inline constexpr char kIconSceneRecord[] = "ui/resource/fonts/gen/input_icons.milo_xbox";
@@ -57,6 +58,21 @@ inline constexpr float kFontCellWidth = 36.0f;
 inline constexpr float kFontCellHeight = 36.0f;
 inline constexpr uint32_t kIconTop = 768;
 inline constexpr uint32_t kMipCount = 7;
+inline constexpr uint32_t kPrivateIconSize = 64;
+inline constexpr uint32_t kPrivateCellSize = 68;
+inline constexpr uint32_t kPrivateColumns = 15;
+inline constexpr uint32_t kPrivateInset = 2;
+inline constexpr float kPrivateFontCellWidth = 68.0f;
+inline constexpr float kPrivateFontCellHeight = 68.0f;
+inline constexpr uint32_t PrivateIconX(uint32_t index) {
+  return (index % kPrivateColumns) * kPrivateCellSize + kPrivateInset;
+}
+inline constexpr uint32_t PrivateIconY(uint32_t index) {
+  return (index / kPrivateColumns) * kPrivateCellSize + kPrivateInset;
+}
+static_assert(kPrivateColumns * kPrivateCellSize <= kAtlasSize);
+static_assert(((kIconCount + kPrivateColumns - 1) / kPrivateColumns) * kPrivateCellSize <=
+              kAtlasSize);
 inline constexpr uint32_t IconSize(uint32_t) { return kIconSize; }
 inline constexpr uint32_t IconX(uint32_t index) {
   return (index % kIconColumns) * kIconColumnStride + kIconInsetX;
