@@ -1082,6 +1082,7 @@ int main(int argc, char** argv) {
     little(12, size); little(16, 0x01000000 | size);
     big(at, static_cast<uint32_t>(old_font.size()));
     std::copy(old_font.begin(), old_font.end(), source.begin() + header + at + 4);
+    big(0x3CA, 0x4198B240);
     big(0x3E6, 0xADDEADDE);
     std::vector<uint8_t> output;
     std::string why;
@@ -1089,6 +1090,11 @@ int main(int argc, char** argv) {
     if (!output.empty()) {
       CHECK_EQ(output.size(), source.size() + new_font.size() - old_font.size());
       CHECK_TRUE(std::equal(new_font.begin(), new_font.end(), output.begin() + header + at + 4));
+      CHECK_EQ(uint32_t(output[header + 0x3CA + new_font.size() - old_font.size()]) << 24 |
+               uint32_t(output[header + 0x3CB + new_font.size() - old_font.size()]) << 16 |
+               uint32_t(output[header + 0x3CC + new_font.size() - old_font.size()]) << 8 |
+               output[header + 0x3CD + new_font.size() - old_font.size()],
+               std::bit_cast<uint32_t>(20.0f));
       CHECK_TRUE(std::equal(source.begin() + header + 0x3E6, source.end(),
                             output.begin() + header + 0x3E6 + new_font.size() - old_font.size()));
     }
@@ -1128,6 +1134,7 @@ int main(int argc, char** argv) {
     reference(0x16263, "../fonts/pentatonic.milo");
     reference(0x1627F, "active_normal.color");
     source[header + 0x16252] = 1;
+    big(0x16296, 0x41A23D60);
     big(0x162A6, 0x3F800000);
     big(0x162AE, 0xADDEADDE);
     std::vector<uint8_t> output;
@@ -1141,6 +1148,7 @@ int main(int argc, char** argv) {
       };
       const uint32_t styles = read(0x1625F);
       CHECK_EQ(styles, 2u);
+      CHECK_EQ(read(0x16296), 0x41A23D60u);
       size_t cursor = 0x16263;
       std::vector<std::string> fonts;
       // Mirror the two native loading phases, rather than just round-tripping
@@ -1152,6 +1160,7 @@ int main(int argc, char** argv) {
               reinterpret_cast<const char*>(output.data() + header + cursor + 4), length);
           cursor += 4 + length;
         }
+        CHECK_EQ(read(cursor), i == 0 ? 0x41A23D60u : std::bit_cast<uint32_t>(22.3f));
         cursor += 5 * 4;
       }
       CHECK_TRUE(fonts == std::vector<std::string>({

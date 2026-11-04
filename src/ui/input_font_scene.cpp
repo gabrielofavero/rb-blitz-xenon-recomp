@@ -223,7 +223,8 @@ bool PrepareList(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene
       Be32(bytes.data() + first) != font.size() ||
       std::memcmp(bytes.data() + first + 4, font.data(), font.size()) != 0 ||
       bytes[0x16252] != 1 || Be32(bytes.data() + end) != 0 ||
-      Be32(bytes.data() + end + 4) != 0xADDEADDE)
+      Be32(bytes.data() + end + 4) != 0xADDEADDE ||
+      Be32(bytes.data() + 0x16296) != 0x41A23D60)
     return Fail(error, "mapping label style record changed");
   std::vector<uint8_t> added;
   auto string = [&](std::string_view value) {
@@ -235,7 +236,11 @@ bool PrepareList(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene
   auto style = [&](std::string_view resource, std::string_view color) {
     string(resource);
     string(color);
+    const size_t metrics = added.size();
     added.insert(added.end(), bytes.begin() + 0x16296, bytes.begin() + end);
+    // The icon style is independent of the label text. Give the existing
+    // keycap artwork a few more screen pixels without changing its silhouette.
+    PutFloat(added.data() + metrics, 22.3f);
   };
   // Each style must have a distinct font/material. A duplicate primary-font
   // style overwrites the primary material's hover tint in DrawShowing.
@@ -293,8 +298,11 @@ bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>*
   constexpr std::string_view new_font = "../fonts/inline_help_icons.milo";
   if (bytes.size() != 1002 || Be32(bytes.data() + at) != old_font.size() ||
       std::memcmp(bytes.data() + at + 4, old_font.data(), old_font.size()) != 0 ||
-      Be32(bytes.data() + 0x3E6) != 0xADDEADDE)
+      Be32(bytes.data() + 0x3E6) != 0xADDEADDE ||
+      Be32(bytes.data() + 0x3CA) != 0x4198B240)
     return Fail(error, "inline help font record changed");
+  // The footer has less room beside its caption than a mapping row.
+  PutFloat(bytes.data() + 0x3CA, 20.0f);
   PutBe32(bytes.data() + at, static_cast<uint32_t>(new_font.size()));
   bytes.erase(bytes.begin() + at + 4, bytes.begin() + at + 4 + old_font.size());
   bytes.insert(bytes.begin() + at + 4, new_font.begin(), new_font.end());

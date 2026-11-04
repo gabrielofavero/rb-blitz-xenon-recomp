@@ -215,12 +215,12 @@ checks. The shared-retail visual result and the live crash behavior are the
 owner's next check.
 
 **2026-11-02 icon appearance evidence.** The soft-keycap question is tracked in
-[the icon rendering quality plan](../plans/in-progress/2026-11-02-icon-rendering-quality-investigation-plan.md).
+[the icon rendering quality investigation](../plans/finished/2026-11-02-icon-rendering-quality-investigation-plan.md).
 Measured: the bounding-box BC3 encoder costs 1.9-3.1 dB against a least-squares
 refined fit on representative keycaps; the straight-alpha mip filter darkens icon
 edges by 24-33 levels of 255; and the guest renders a 540p-class frame that the
-host presents at 2x, which caps the sharpness any atlas can add. The plan orders
-the encoder, mip-filter, private-1024-atlas and 1080p-guest options by risk.
+host presents at 2x, which caps the sharpness any atlas can add. The investigation
+compares the encoder, mip filter, private 1024 atlas and 1080p guest options.
 
 **2026-11-02 encoder and mip fix (appearance).** The plan's first step landed. `EncodeDxt1` and
 `EncodeDxt5` now write the best of the bounding-box, principal-axis and least-squares-refined
