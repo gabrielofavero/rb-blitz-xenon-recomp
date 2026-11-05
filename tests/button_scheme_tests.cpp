@@ -59,18 +59,34 @@ int main() {
   Check(LoadScheme(one, false, FakePng, &scheme, &why) && scheme.extra_files.size() == 1,
         "extra file was not reported");
   const fs::path art = fs::path(RBBLITZ_SOURCE_DIR) / "assets/controller";
-  const char* authored_ids[] = {"xbox-series", "playstation-4", "playstation-5",
-      "nintendo-switch-joycon", "nintendo-switch-pro-controller",
-      "nintendo-switch-2-joycon", "nintendo-switch-2-pro-controller", "steam-deck"};
-  for (const char* id : authored_ids) {
+  struct Authored { const char* id; size_t inputs; size_t pads; };
+  const Authored authored_packages[] = {
+      {"xbox-series", 26, 4}, {"playstation-4", 26, 8},
+      {"playstation-5", 27, 8}, {"nintendo-switch-joycon", 26, 4},
+      {"nintendo-switch-pro-controller", 26, 4},
+      {"nintendo-switch-2-joycon", 26, 4},
+      {"nintendo-switch-2-pro-controller", 26, 4},
+      {"steam-deck", 33, 4}, {"meta-quest-2", 19, 4},
+      {"meta-quest-3", 19, 4}};
+  for (const auto& [id, inputs, pads] : authored_packages) {
     Check(LoadScheme(art / id, false, FakePng, &scheme, &why),
           "authored v2 controller rejected");
-    Check(scheme.schema_version == 2 && scheme.id == id && scheme.inputs.size() >= 26 &&
+    Check(scheme.schema_version == 2 && scheme.id == id &&
+          scheme.inputs.size() == inputs && scheme.pads.size() == pads &&
           scheme.InputFor("pad:a") && scheme.Pad("xbox_0") != nullptr,
           "authored v2 lookup wrong");
     if (std::string(id) == "playstation-4" || std::string(id) == "playstation-5") {
       Check(scheme.pads.size() == 8 && scheme.declared_files.size() == scheme.inputs.size() + 4,
             "PlayStation pad aliases duplicated files");
+      Check(scheme.InputFor("pad:back") && scheme.InputFor("pad:back")->id == "share" &&
+            scheme.InputFor("pad:back")->slot == "back_button" &&
+            scheme.InputFor("sdl:button:touchpad") &&
+            scheme.InputFor("sdl:button:touchpad")->id == "back_button",
+            "PlayStation Share/Create and touchpad sources conflated");
+      if (std::string(id) == "playstation-5")
+        Check(scheme.InputFor("sdl:button:misc1") &&
+              scheme.InputFor("sdl:button:misc1")->id == "microphone",
+              "PS5 microphone source art missing");
       for (int pad_index = 0; pad_index < 4; ++pad_index) {
         const auto suffix = std::to_string(pad_index);
         Check(scheme.Pad("xbox_" + suffix) && scheme.Pad("ps_" + suffix) &&
@@ -78,9 +94,31 @@ int main() {
               "PlayStation pad aliases differ");
       }
     }
-    if (std::string(id) == "steam-deck")
+    if (std::string(id).starts_with("nintendo-switch")) {
+      for (const char* face : {"a", "b", "x", "y"}) {
+        const auto* image = scheme.InputFor(std::string("pad:") + face);
+        Check(image && image->id == std::string(face) + "_button" &&
+              image->slot == image->id, "Nintendo face source lost its positional slot");
+      }
       Check(scheme.InputFor("sdl:button:misc1") &&
-            scheme.InputFor("sdl:button:left_paddle1"), "Deck extra source art missing");
+            scheme.InputFor("sdl:button:misc1")->id == "capture",
+            "Nintendo capture source art missing");
+    }
+    if (std::string(id) == "steam-deck") {
+      for (const char* source : {"misc1", "misc2", "touchpad", "left_paddle1",
+                                 "left_paddle2", "right_paddle1", "right_paddle2"})
+        Check(scheme.InputFor(std::string("sdl:button:") + source),
+              "Deck extra source art missing");
+      Check(scheme.InputFor("pad:back") && scheme.InputFor("pad:back")->id == "inventory" &&
+            scheme.InputFor("pad:back", "abstract") &&
+            scheme.InputFor("pad:back", "abstract")->id == "back_button",
+            "Deck Back source variant wrong");
+    }
+    if (std::string(id).starts_with("meta-quest"))
+      Check(!scheme.InputFor("pad:back") && !scheme.InputFor("pad:dpad_up") &&
+            scheme.InputFor("pad:left_shoulder") &&
+            scheme.InputFor("pad:left_shoulder")->id == "left_grip",
+            "Quest source inventory wrong");
   }
   Check(!LoadScheme(art / "keyboard-mouse", true, FakePng, &scheme, &why),
         "internal keyboard became selectable");
@@ -108,6 +146,15 @@ int main() {
         scheme.InputFor("pad:a")->id == "a" &&
         scheme.InputFor("pad:a", "alternate")->id == "a-alt",
         "v2 source variant/modifier lookup wrong");
+  for (const char* reserved_source : {"pad:guide", "sdl:button:guide",
+                                       "sdl:button:home", "sdl:button:steam",
+                                       "sdl:button:power"}) {
+    Write(v2 / "scheme.toml", "schema_version = 2\nid = \"v2\"\nname = \"V2\"\n"
+        "kind = \"controller\"\n[[input]]\nid = \"reserved\"\nfile = \"a.png\"\n"
+        "source = \"" + std::string(reserved_source) + "\"\n");
+    Check(!LoadScheme(v2, false, FakePng, &scheme, &why),
+          "reserved controller source accepted");
+  }
   Write(v2 / "a.png", "");
   fs::remove(v2 / "a.png");
   Check(!LoadScheme(v2, false, FakePng, &scheme, &why), "v2 missing file accepted");

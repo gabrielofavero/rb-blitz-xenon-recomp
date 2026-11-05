@@ -13,6 +13,7 @@
 #include <rex/logging.h>
 #include <rex/system/xmemory.h>
 
+#include "hooks/action_hint_probe.h"
 #include "assets/texture_override.h"
 #include "input/input_icons.h"
 #include "profile/input_rows.h"
@@ -75,6 +76,20 @@ void Publish(const rb_blitz::input::icons::View& view, const std::string& signat
   for (const char* target : kTargets)
     icons.push_back(rb_blitz::input::icons::First(view,
         {rb_blitz::profile::InputRowKind::kGeneralBinding, target}));
+  // Localized gameplay labels share the hint font, but each action has its own
+  // tile. The corresponding InlineHelp character slots are empty in retail.
+  icons[font::kGameplayPowerupHint] = rb_blitz::input::icons::First(
+      view, rb_blitz::profile::gameplay_remap::Action::kPowerup);
+  icons[font::kGameplayFirstNoteHint] = rb_blitz::input::icons::First(
+      view, rb_blitz::profile::gameplay_remap::Action::kFirstNote);
+  icons[font::kGameplaySecondNoteHint] = rb_blitz::input::icons::First(
+      view, rb_blitz::profile::gameplay_remap::Action::kSecondNote);
+  icons[font::kGameplayMoveRightHint] = rb_blitz::input::icons::First(
+      view, rb_blitz::profile::gameplay_remap::Action::kMoveLaneRight);
+  icons[font::kGameplayMoveLeftHint] = rb_blitz::input::icons::First(
+      view, rb_blitz::profile::gameplay_remap::Action::kMoveLaneLeft);
+  icons[font::kGameplayPauseHint] = rb_blitz::input::icons::First(
+      view, rb_blitz::profile::gameplay_remap::Action::kPause);
   rb_blitz::assets::PublishHintIcons(signature, std::move(icons));
   published = signature;
   if (TraceEnabled()) REXLOG_INFO("p10_trace: hints published {}", signature);
@@ -88,6 +103,15 @@ void TraceInlineHelp(const uint8_t* base, uint32_t draw) {
                 i, entries[i].label, entries[i].action);
 }
 }  // namespace
+
+namespace rb_blitz::hooks {
+void PublishActionHints() {
+  if (!rb_blitz::assets::InputIconsAvailable()) return;
+  const auto view = rb_blitz::input::icons::CaptureActive(
+      rb_blitz::assets::ControllerSchemeRegistry());
+  Publish(view, Signature(view));
+}
+}  // namespace rb_blitz::hooks
 
 REX_HOOK_RAW(sub_824D9330) {
   if (!rb_blitz::assets::InputIconsAvailable()) {

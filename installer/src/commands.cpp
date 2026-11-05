@@ -33,6 +33,8 @@
 #include "install.h"
 #include "profile/profile_path.h"
 #include "paths.h"
+#include "ps3_scheme.h"
+#include "ps3_package.h"
 #include "stfs.h"
 #include "util.h"
 #include "util/game_fingerprint.h"
@@ -780,6 +782,55 @@ int CommandImportGame(const std::vector<std::string>& args) {
   return Succeed(&context, S("imported the game data into ", Display(game_root)));
 }
 
+int CommandProbePs3(const std::vector<std::string>& args) {
+  CommandContext context;
+  if (!Begin(args, Keys({"folder", "package"}), &context)) return kUsage;
+  if (context.Get("folder").empty() == context.Get("package").empty())
+    return Fail(&context, "probe-ps3 needs exactly one of --folder or --package");
+  if (!context.Get("package").empty()) {
+    std::vector<std::uint8_t> scene_bytes;
+    std::string content_id, error;
+    if (!ReadPs3PackageScene(PathFromUtf8(context.Get("package")), &scene_bytes,
+                             &content_id, &error)) return Fail(&context, error);
+    context.summary.Text("source", "package");
+    context.summary.Text("content_id", content_id);
+    return Succeed(&context, "Rock Band Blitz PS3 package contains a readable Buttons scene");
+  }
+  fs::path scene;
+  std::string error;
+  if (!ProbePs3Folder(PathFromUtf8(context.Get("folder")), &scene, &error))
+    return Fail(&context, error);
+  context.summary.Text("source", "folder");
+  context.summary.Text("scene", Display(scene));
+  return Succeed(&context, "PS3 Buttons scene found and parsed");
+}
+
+int CommandInstallPs3Scheme(const std::vector<std::string>& args) {
+  CommandContext context;
+  if (!Begin(args, Keys({"folder", "package", "dest"}), &context)) return kUsage;
+  if (context.Get("folder").empty() == context.Get("package").empty() ||
+      context.Get("dest").empty())
+    return Fail(&context, "install-ps3-scheme needs --dest and exactly one source");
+  std::string error;
+  const bool package = !context.Get("package").empty();
+  std::string content_id;
+  std::vector<std::uint8_t> scene_bytes;
+  if (package && !ReadPs3PackageScene(PathFromUtf8(context.Get("package")),
+                                      &scene_bytes, &content_id, &error))
+    return Fail(&context, error);
+  const bool installed = package
+      ? InstallPs3SceneScheme(scene_bytes, PathFromUtf8(context.Get("dest")), &error)
+      : InstallPs3FolderScheme(PathFromUtf8(context.Get("folder")),
+                               PathFromUtf8(context.Get("dest")), &error);
+  if (!installed) return Fail(&context, error);
+  context.summary.Text("source", package ? "package" : "folder");
+  if (package) context.summary.Text("content_id", content_id);
+  context.summary.Text("scheme", "ps3");
+  context.summary.Number("buttons", 15);
+  context.summary.Number("pads", 4);
+  return Succeed(&context, "installed local PlayStation 3 controller scheme");
+}
+
 int CommandInstallUltimate(const std::vector<std::string>& args) {
   CommandContext context;
   if (!Begin(args,
@@ -981,7 +1032,7 @@ int CommandFinalize(const std::vector<std::string>& args) {
   if (!Begin(args,
              Keys({"dest", "game-source", "payload-source", "payload-version", "ultimate",
                    "ultimate-source", "ultimate-version", "installer-version",
-                   "payload-commit", "dlc-dir", "save-dir"}),
+                   "payload-commit", "dlc-dir", "save-dir", "ps3-source"}),
              &context)) {
     return kUsage;
   }
@@ -1055,6 +1106,11 @@ int CommandFinalize(const std::vector<std::string>& args) {
     }
   }
 
+  install.ps3_scheme_installed = DirectoryExists(
+      install.install_dir / "assets/controller/schemes/ps3");
+  if (install.ps3_scheme_installed)
+    install.ps3_scheme_source = context.Get("ps3-source", "existing local import");
+
   if (!FinalizeInstall(install, &error)) {
     return Fail(&context, error);
   }
@@ -1062,6 +1118,7 @@ int CommandFinalize(const std::vector<std::string>& args) {
   context.summary.Text("report", Display(install.install_dir / PathOf(kInstallReportName)));
   context.summary.Text("game_dir", Display(install.game_dir));
   context.summary.Flag("ultimate_installed", install.ultimate_installed);
+  context.summary.Flag("ps3_installed", install.ps3_scheme_installed);
   return Succeed(&context, "wrote the install manifest and report");
 }
 
@@ -1145,6 +1202,11 @@ constexpr CommandSpec kCommands[] = {
     {"import-game", CommandImportGame,
      "--dest <dir> (--package <file>|--folder <dir>) [--details <file>] [--progress <file>]",
      "kind location description files required present bytes complete missing imported game_dir"},
+    {"probe-ps3", CommandProbePs3,
+     "--folder <extracted PS3 dir>|--package <PS3 pkg>", "source scene content_id"},
+    {"install-ps3-scheme", CommandInstallPs3Scheme,
+     "--dest <install dir> (--folder <extracted PS3 dir>|--package <PS3 pkg>)",
+     "source scheme content_id buttons pads"},
     {"install-ultimate", CommandInstallUltimate,
      "--dest <dir> (--from-pinned|--from-zip <p>|--from-dir <d>|--from-url <u>) [--sha256 <h>] "
      "[--size <n>] [--version <v>] [--progress <file>]",
@@ -1165,8 +1227,8 @@ constexpr CommandSpec kCommands[] = {
     {"finalize", CommandFinalize,
      "--dest <dir> [--game-source <text>] [--payload-source <text>] [--payload-version <v>] "
      "[--payload-commit <id>] [--ultimate 0|1] [--ultimate-source <text>] [--ultimate-version <v>] "
-     "[--installer-version <v>] [--dlc-dir <dir>] [--save-dir <dir>]",
-     "manifest report game_dir ultimate_installed"},
+     "[--installer-version <v>] [--dlc-dir <dir>] [--save-dir <dir>] [--ps3-source <text>]",
+     "manifest report game_dir ultimate_installed ps3_installed"},
     {"uninstall-cleanup", CommandUninstallCleanup, "--dest <dir> [--keep-game-data]",
      "game_data_kept removed removed_items"},
     {"version", CommandVersion, "", "helper installer payload payload_commit "

@@ -1303,6 +1303,12 @@ bool FinalizeInstall(const InstallSummary& summary, std::string* error) {
   manifest.push_back(S("ultimate_installed = ", summary.ultimate_installed ? "true" : "false"));
   manifest.push_back(std::string{});
   AddManifestComponent(&manifest, "ultimate", summary.ultimate);
+  manifest.push_back("[controller_scheme]");
+  manifest.push_back(S("ps3_installed = ", summary.ps3_scheme_installed ? "true" : "false"));
+  manifest.push_back(S("source = ", TomlString(summary.ps3_scheme_source)));
+  manifest.push_back(S("directory = ", TomlString(Display(
+      summary.install_dir / "assets/controller/schemes/ps3"))));
+  manifest.push_back(std::string{});
 
   // The two locations the install folder page asked for (parent plan §9.2). The
   // installer owns the *answers*; the file the game reads is paths.toml, written
@@ -1384,6 +1390,12 @@ bool FinalizeInstall(const InstallSummary& summary, std::string* error) {
     report.push_back("Not installed.");
     report.push_back(std::string{});
   }
+  report.push_back("PlayStation 3 controller icons");
+  report.push_back("------------------------------");
+  report.push_back(summary.ps3_scheme_installed
+                       ? S("Installed from ", summary.ps3_scheme_source)
+                       : "Not installed.");
+  report.push_back(std::string{});
   report.push_back("Log");
   report.push_back("---");
   report.push_back(LogForReport(summary.install_dir));
@@ -1450,6 +1462,13 @@ bool UninstallCleanup(const std::filesystem::path& app_dir, bool keep_game_data,
   }
 
   RemovePayloadFiles(app_dir, removed);
+
+  // The locally generated PS3 package is not an Inno [Files] entry.
+  const fs::path ps3_scheme = app_dir / "assets/controller/schemes/ps3";
+  if (DirectoryExists(ps3_scheme)) {
+    if (!RemoveTree(ps3_scheme, error)) return false;
+    if (removed != nullptr) removed->push_back(S("PS3 controller scheme (", Display(ps3_scheme), ")"));
+  }
 
   // Files the installer wrote that Inno Setup does not know about. Removing
   // something that is already gone is not an error.

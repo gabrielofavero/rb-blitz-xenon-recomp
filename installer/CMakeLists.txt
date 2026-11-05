@@ -82,6 +82,8 @@ set(RBBLITZ_HELPER_SOURCES
     src/install.cpp
     src/main.cpp
     src/paths.cpp
+    src/ps3_package.cpp
+    src/ps3_scheme.cpp
     src/stfs.cpp
     src/util.cpp
     src/zip.cpp)
@@ -120,11 +122,14 @@ target_compile_features(rb_blitz_setup_helper PRIVATE cxx_std_20)
 # Compiled from the emulator tree rather than copied, so the installer cannot
 # drift from what the runtime expects.
 target_sources(rb_blitz_setup_helper PRIVATE
+    "${RBBLITZ_ROOT}/src/assets/texture_codec.cpp"
+    "${RBBLITZ_ROOT}/src/controller_schemes/schemes.cpp"
+    "${RBBLITZ_ROOT}/src/controller_schemes/png_wic.cpp"
     "${RBBLITZ_ROOT}/src/util/sha256.cpp"
     "${RBBLITZ_ROOT}/src/util/game_fingerprint.cpp"
     ${RBBLITZ_SHARED_SETTINGS_SOURCES})
 
-target_link_libraries(rb_blitz_setup_helper PRIVATE winhttp)
+target_link_libraries(rb_blitz_setup_helper PRIVATE winhttp windowscodecs ole32 bcrypt)
 
 # The helper runs from the wizard's temporary directory on a machine that may
 # not have the VC++ redistributable installed, and it is what downloads the
@@ -168,6 +173,8 @@ if(BUILD_TESTING)
         src/inflate.cpp
         src/install.cpp
         src/paths.cpp
+        src/ps3_package.cpp
+        src/ps3_scheme.cpp
         src/stfs.cpp
         src/util.cpp
         src/zip.cpp)
@@ -182,10 +189,13 @@ if(BUILD_TESTING)
         RBBLITZ_INSTALLER_CONFIG_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config"
         RBBLITZ_ROOT_DIR="${RBBLITZ_ROOT}")
     target_sources(rb_blitz_installer_tests PRIVATE
+        "${RBBLITZ_ROOT}/src/assets/texture_codec.cpp"
+        "${RBBLITZ_ROOT}/src/controller_schemes/schemes.cpp"
+        "${RBBLITZ_ROOT}/src/controller_schemes/png_wic.cpp"
         "${RBBLITZ_ROOT}/src/util/sha256.cpp"
         "${RBBLITZ_ROOT}/src/util/game_fingerprint.cpp"
         ${RBBLITZ_SHARED_SETTINGS_SOURCES})
-    target_link_libraries(rb_blitz_installer_tests PRIVATE winhttp)
+    target_link_libraries(rb_blitz_installer_tests PRIVATE winhttp windowscodecs ole32 bcrypt)
 
     if(MSVC)
         target_compile_options(rb_blitz_installer_tests PRIVATE /W4 /utf-8 /EHsc)

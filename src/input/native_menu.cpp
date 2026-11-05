@@ -7,6 +7,7 @@
 #include <rex/cvar.h>
 #include <rex/kernel/xam/module.h>
 #include "hooks/help_observer.h"
+#include "hooks/action_hint_probe.h"
 #include "loading/load_trace.h"
 #include "loading/crash_recovery.h"
 #include "hooks/content_progress.h"
@@ -152,6 +153,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   const uint32_t panel = screen ? U32(base, screen + 52) : 0;
   const std::string name = ObjectName(base, screen);
   const std::string panel_name = ObjectName(base, ObjectBase(base, panel));
+  rb_blitz::hooks::PublishActionHints();
   // game_screen owns pause_panel too; its focused panel distinguishes a live song
   // from pause and its nested menus. A transition is never an input destination.
   const bool allowed = screen && U32(base, manager + 16) == 0 &&

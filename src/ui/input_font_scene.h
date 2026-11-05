@@ -8,8 +8,9 @@
 
 namespace rb_blitz::ui::input_font {
 
-// Derive an icon-only copy of the installed Pentatonic font scene with its own
-// 1024-square texture identity. No game art is stored in the project.
+// Derive an icon-only copy of the installed Pentatonic font scene. Its glyph
+// table is private; the texture still shares the retail 1024-square identity.
+// No game art is stored in the project.
 bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                   std::vector<uint8_t>* original_bc3, std::string* error);
 // A second private font aliases early, proven glyph codes to the reserved
@@ -20,9 +21,23 @@ bool PrepareList(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene
                  std::string* error);
 bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                        std::string* error);
-// Point only the loading screen's begin prompt at the action-hint font.
+// Point the loading begin prompt, rotating tip and Power-up descriptions at
+// the action-hint font, leaving unrelated label styles on their retail fonts.
 bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                     std::string* error);
+// Point the splash start label at the action-hint font.
+bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                   std::string* error);
+bool PrepareCalibration(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                        std::string* error);
+bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                     std::string* error);
+bool PreparePowerupSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                          std::string* error);
+bool PrepareErrorReturn(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                        std::string* error);
+bool PrepareAccountLink(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                        std::string* error);
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3();
 std::shared_ptr<const std::vector<uint8_t>> PrivateBc3();
 
@@ -32,15 +47,30 @@ inline constexpr char kHintSceneRecord[] = "ui/resource/fonts/gen/inline_help_ic
 inline constexpr char kListRecord[] = "ui/resource/lists/gen/list_options_main.milo_xbox";
 inline constexpr char kInlineHelpRecord[] = "ui/resource/inline_help/gen/default.milo_xbox";
 inline constexpr char kLoadingRecord[] = "ui/loading/gen/loading.milo_xbox";
+inline constexpr char kSplashRecord[] = "ui/splash/gen/splash.milo_xbox";
+inline constexpr char kCalibrationRecord[] = "ui/calibration/gen/cal_auto.milo_xbox";
+inline constexpr char kHudRecord[] = "track/gen/hud.milo_xbox";
+inline constexpr char kPowerupSelectRecord[] = "ui/powerup_select/gen/powerup_select.milo_xbox";
+inline constexpr char kErrorReturnRecord[] = "ui/error/gen/error_general.milo_xbox";
+inline constexpr char kAccountLinkRecord[] = "ui/rbworld_link/gen/rbworld_link.milo_xbox";
 inline constexpr uint32_t kRetailAtlasSize = 1024;
 inline constexpr uint32_t kAtlasSize = 1024;
 static_assert(kAtlasSize == kRetailAtlasSize);
 inline constexpr uint32_t kIconFirst = 0x80;
 inline constexpr uint32_t kIconCount = 180;
 inline constexpr uint32_t kHintCount = 15;
-// Image slots 101..115 belong to InlineHelp. Its own font scene aliases early
+// Image slots 101..115 belong to action hints. The hint font aliases early
 // private glyph codes to these tiles, leaving P9's row glyphs unchanged.
 inline constexpr uint32_t kHintFirst = 101;
+inline constexpr uint32_t kInterfaceStartHint = 4;
+// The loading screen's rotating power-up tip is a gameplay action, unlike its
+// begin-song prompt and the footer actions. It uses an unused hint tile.
+inline constexpr uint32_t kGameplayPowerupHint = 6;
+inline constexpr uint32_t kGameplayFirstNoteHint = 7;
+inline constexpr uint32_t kGameplaySecondNoteHint = 8;
+inline constexpr uint32_t kGameplayMoveRightHint = 9;
+inline constexpr uint32_t kGameplayMoveLeftHint = 10;
+inline constexpr uint32_t kGameplayPauseHint = 12;
 inline constexpr uint32_t kRowIconCount = kIconCount - kHintCount;
 inline constexpr uint32_t RowGlyphIndex(uint32_t index) {
   return index < kHintFirst ? index : index + kHintCount;
@@ -107,5 +137,7 @@ inline constexpr uint32_t GlyphCode(uint32_t index) {
   }
   return 0;
 }
+static_assert(GlyphCode(kGameplayPowerupHint) == 0x86);
+static_assert(GlyphCode(kInterfaceStartHint) == 0x84);
 
 }  // namespace rb_blitz::ui::input_font

@@ -901,3 +901,23 @@ owner performed the pending long-row fit and navigation visual checks on
 2026-11-02 and reported that the result looks good. P9 is accepted; the
 guest-hint route inventory for P10 is in
 [button-hint-inventory.md](button-hint-inventory.md).
+
+### Guest action-hint contexts (P10 checkpoint, 2026-11-04)
+
+`InlineHelp::UpdateLabels` formats a guest footer from its action ID and
+caption. The hook in `action_hint_probe.cpp` publishes the first effective
+Interface Mapping source in the last real input family into an action-specific
+font tile. `InlineHelp::DrawShowing` refreshes visible labels when the binding,
+family or controller-layout revision changes. The loading screen's begin prompt
+uses the same Interface Confirm tile; its message handler keeps that image
+published while loading.
+
+The rotating `loading_tip_03` prompt promises the Gameplay Mapping Power-up
+action. It uses a separate tile, resolved from the effective gameplay table and
+current preset. The splash start label promises Interface Start; `native_menu`
+publishes its tile while the splash panel is active, including before the first
+press. Both labels use the guest's font and locale records. The generated scene
+and locale routes pass host checks, but their on-screen appearance and refresh
+still need owner validation. Other actionable locale strings and tutorial or
+calibration scene images remain open in the
+[hint inventory](button-hint-inventory.md).

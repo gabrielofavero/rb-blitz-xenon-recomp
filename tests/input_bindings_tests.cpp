@@ -181,6 +181,22 @@ void TestEffectiveIcons() {
                                          rb_blitz::profile::gameplay_remap::Action::kFirstNote);
   CHECK_TRUE(before_preset.slot != after_preset.slot);
 
+  // The loading tip's Power-up image follows Gameplay Mapping, not the
+  // interface X target that happens to share its retail glyph.
+  auto powerup = rb_blitz::input::CopyCurrentInput();
+  powerup->general.Set(remap::Target::kX, {Source("pad:b")});
+  powerup->controller.Set(rb_blitz::profile::gameplay_remap::Action::kPowerup,
+                          {Source("pad:y"), Source("pad:x")});
+  powerup->keyboard_mouse.Set(rb_blitz::profile::gameplay_remap::Action::kPowerup,
+                               {Source("key:q"), Source("key:x")});
+  rb_blitz::input::PublishInput(powerup);
+  const auto powerup_pad = icons::Capture("retail", icons::Family::kController);
+  const auto powerup_keys = icons::Capture("retail", icons::Family::kKeyboardMouse);
+  CHECK_TRUE(icons::First(powerup_pad, rb_blitz::profile::gameplay_remap::Action::kPowerup).slot == "y_button");
+  CHECK_TRUE(icons::First(powerup_keys, rb_blitz::profile::gameplay_remap::Action::kPowerup).legend == "Q");
+  CHECK_TRUE(icons::First(powerup_pad, rb_blitz::profile::ParseInputRowToken("input.general.x")).slot ==
+             "b_button");
+
   auto edited = rb_blitz::input::CopyCurrentInput();
   edited->general.Set(remap::Target::kA, {Source("mouse:right"), Source("key:space")});
   rb_blitz::input::PublishInput(edited);

@@ -7,6 +7,7 @@
 #include <bit>
 #include <cstring>
 #include <cstdlib>
+#include <initializer_list>
 #include <string_view>
 
 // stb's project dependency supplies the raw DEFLATE decoder used by Milo chunks.
@@ -49,6 +50,33 @@ bool ReplaceMeasured(std::vector<uint8_t>* bytes, std::string_view original,
     ++count;
   }
   return count == expected_count;
+}
+bool ReplaceAnchoredFonts(std::vector<uint8_t>* bytes, std::string_view old_font,
+                          std::string_view new_font,
+                          std::initializer_list<std::string_view> anchors,
+                          size_t expected, std::string* error) {
+  std::vector<size_t> offsets;
+  for (auto at = std::search(bytes->begin(), bytes->end(), old_font.begin(), old_font.end());
+       at != bytes->end();
+       at = std::search(at + old_font.size(), bytes->end(), old_font.begin(), old_font.end())) {
+    const auto offset = size_t(at - bytes->begin());
+    const auto from = offset > 256 ? offset - 256 : 0;
+    const auto anchored = std::any_of(anchors.begin(), anchors.end(), [&](std::string_view anchor) {
+      return std::search(bytes->begin() + from, at, anchor.begin(), anchor.end()) != at;
+    });
+    if (!anchored) continue;
+    if (offset < 4 || Be32(bytes->data() + offset - 4) != old_font.size())
+      return Fail(error, "action hint font string length changed");
+    offsets.push_back(offset);
+  }
+  if (offsets.size() != expected) return Fail(error, "action hint label font anchors changed");
+  for (auto it = offsets.rbegin(); it != offsets.rend(); ++it) {
+    const auto offset = *it;
+    PutBe32(bytes->data() + offset - 4, static_cast<uint32_t>(new_font.size()));
+    bytes->erase(bytes->begin() + offset, bytes->begin() + offset + old_font.size());
+    bytes->insert(bytes->begin() + offset, new_font.begin(), new_font.end());
+  }
+  return true;
 }
 uint32_t Crc32(const uint8_t* bytes, size_t size) {
   uint32_t crc = 0xFFFFFFFFu;
@@ -315,27 +343,102 @@ bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* sc
   constexpr std::string_view token = "loading_press_button";
   constexpr std::string_view old_font = "../resource/fonts/buttons.milo";
   constexpr std::string_view new_font = "../resource/fonts/inline_help_icons.milo";
-  // The installed loading scene contains other button styles, including the
-  // rotating tip. Only the prompt's font follows this token within 256 bytes.
-  size_t matches = 0;
-  for (auto at = std::search(bytes.begin(), bytes.end(), token.begin(), token.end());
-       at != bytes.end();
-       at = std::search(at + token.size(), bytes.end(), token.begin(), token.end())) {
-    auto font = std::search(at + token.size(),
-        bytes.begin() + std::min(bytes.size(), size_t(at - bytes.begin()) + 256),
-        old_font.begin(), old_font.end());
-    if (font == bytes.begin() + std::min(bytes.size(), size_t(at - bytes.begin()) + 256))
-      continue;
-    const size_t offset = size_t(font - bytes.begin());
+  // The prompt and rotating tip are separate UILabels. Match each font from
+  // its measured text token, so the other three button styles stay retail.
+  for (std::string_view anchor : {token, std::string_view("loading_tip_01")}) {
+    size_t matches = 0, offset = 0;
+    for (auto at = std::search(bytes.begin(), bytes.end(), anchor.begin(), anchor.end());
+         at != bytes.end();
+         at = std::search(at + anchor.size(), bytes.end(), anchor.begin(), anchor.end())) {
+      const auto limit = bytes.begin() +
+          std::min(bytes.size(), size_t(at - bytes.begin()) + 256);
+      const auto font = std::search(at + anchor.size(), limit,
+                                    old_font.begin(), old_font.end());
+      if (font == limit) continue;
+      offset = size_t(font - bytes.begin());
+      ++matches;
+    }
+    if (matches != 1) return Fail(error, "loading label button font changed");
     if (offset < 4 || Be32(bytes.data() + offset - 4) != old_font.size())
-      return Fail(error, "loading prompt font string length changed");
+      return Fail(error, "loading label font string length changed");
     PutBe32(bytes.data() + offset - 4, static_cast<uint32_t>(new_font.size()));
     bytes.erase(bytes.begin() + offset, bytes.begin() + offset + old_font.size());
     bytes.insert(bytes.begin() + offset, new_font.begin(), new_font.end());
-    ++matches;
-    break;
   }
-  if (matches != 1) return Fail(error, "loading prompt button font changed");
+  if (!ReplaceAnchoredFonts(&bytes, old_font, new_font, {"autoplay_desc"}, 3, error))
+    return false;
+  return PackStored(bytes, scene, error);
+}
+bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                   std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  constexpr std::string_view token = "splash_press_start";
+  constexpr std::string_view old_font = "../resource/fonts/buttons.milo";
+  constexpr std::string_view new_font = "../resource/fonts/inline_help_icons.milo";
+  size_t matches = 0, offset = 0;
+  for (auto at = std::search(bytes.begin(), bytes.end(), token.begin(), token.end());
+       at != bytes.end();
+       at = std::search(at + token.size(), bytes.end(), token.begin(), token.end())) {
+    const auto limit = bytes.begin() +
+        std::min(bytes.size(), size_t(at - bytes.begin()) + 256);
+    const auto font = std::search(at + token.size(), limit,
+                                  old_font.begin(), old_font.end());
+    if (font == limit) continue;
+    offset = size_t(font - bytes.begin());
+    ++matches;
+  }
+  if (matches != 1) return Fail(error, "splash start button font changed");
+  if (offset < 4 || Be32(bytes.data() + offset - 4) != old_font.size())
+    return Fail(error, "splash start font string length changed");
+  PutBe32(bytes.data() + offset - 4, static_cast<uint32_t>(new_font.size()));
+  bytes.erase(bytes.begin() + offset, bytes.begin() + offset + old_font.size());
+  bytes.insert(bytes.begin() + offset, new_font.begin(), new_font.end());
+  return PackStored(bytes, scene, error);
+}
+bool PrepareCalibration(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                        std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (!ReplaceAnchoredFonts(&bytes, "../resource/fonts/buttons.milo",
+                            "../resource/fonts/inline_help_icons.milo",
+                            {"cal_audio_desc_pad", "cal_video_desc_pad"}, 2, error)) return false;
+  return PackStored(bytes, scene, error);
+}
+bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                     std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (!ReplaceAnchoredFonts(&bytes, "../ui/resource/fonts/buttons.milo",
+                            "../ui/resource/fonts/inline_help_icons.milo",
+                            {"remedial_help.grp", "tutorial_pane.grp"}, 4, error)) return false;
+  return PackStored(bytes, scene, error);
+}
+bool PreparePowerupSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                          std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (!ReplaceAnchoredFonts(&bytes, "../resource/fonts/buttons.milo",
+                            "../resource/fonts/inline_help_icons.milo",
+                            {"active_description"}, 1, error)) return false;
+  return PackStored(bytes, scene, error);
+}
+bool PrepareErrorReturn(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                        std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (!ReplaceAnchoredFonts(&bytes, "../resource/fonts/buttons.milo",
+                            "../resource/fonts/inline_help_icons.milo",
+                            {"error_return_button"}, 1, error)) return false;
+  return PackStored(bytes, scene, error);
+}
+bool PrepareAccountLink(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                        std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (!ReplaceAnchoredFonts(&bytes, "../resource/fonts/buttons.milo",
+                            "../resource/fonts/inline_help_icons.milo",
+                            {"link_facebook_email_sent"}, 1, error)) return false;
   return PackStored(bytes, scene, error);
 }
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3() {

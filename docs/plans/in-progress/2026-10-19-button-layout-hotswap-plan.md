@@ -5,7 +5,9 @@
 P4's tracker, D3D12 family switching and selected-pad-art stability were
 accepted 2026-10-28; visible binding-aware hints remain P10 work.
 P9 is accepted after the owner's 2026-11-02 visual checks of long-row fit and paging.
-P5, P6b, P7 and P10 remain open. P11's v2 loader, staging, internal keyboard
+P6b, P7 and P10 remain open. P5's extracted-folder import is implemented; the
+owner's finalized retail `.pkg` needs a separate package decryption key and is
+refused with a specific explanation. P11's v2 loader, staging, internal keyboard
 art and distinct SDL source path landed 2026-10-30; physical-device/UI acceptance
 remains open. P9's ordinary Interface and Gameplay Mapping
 images and binding refresh have owner visual acceptance. The icon font supports
@@ -64,11 +66,11 @@ layouts; eight declare four pad PNGs. P6b's remaining acceptance covers all ten.
 
 | Remaining prompt | Current state | Next exit condition |
 | --- | --- | --- |
-| P5 | PS3 source bounds/reference delivered; installer import open | Local v1 `ps3` import works or its unavailable route is reported accurately |
+| P5 | Extracted-folder import and package probe delivered; retail `.pkg` reports its key requirement | Owner game UI check remains; retail `.pkg` support requires a separately authorized key approach |
 | P11 | V1/v2 coexist; eleven manifests validate and stage; virtual SDL extras pass, prior boot listed eight controllers | Physical-device mapping/capture and on-screen image acceptance, including the two new Meta Quest layouts |
 | P9 | Owner reports the remaining long-row fit and paging visual checks look good (2026-11-02); host tests and prior mapping/in-song acceptance recorded below | Accepted; retain coverage while P10 changes the icon pipeline |
-| P10 | The owner confirmed default main-menu footer icons and Y after rebinding Confirm, then reported the remaining main-menu live checks working (2026-11-02); other hint routes remain open | Actionable hints follow effective bindings and active family with v2 art |
-| P6b | Ten controller art folders present; eight declare pad PNGs | Install/cycle all ten, verify art and fallback, record live acceptance |
+| P10 | Known guest-owned hint routes now have action-aware implementation and six-locale host checks (2026-11-04); main-menu footer and loading Confirm have owner acceptance | Owner-run visual/input checks for tutorial, calibration, localized prompts and panel-specific footers |
+| P6b | Ten authored packages and internal keyboard validate and stage; host source-map checks pass (2026-11-04) | Cycle all ten in game, verify art and fallback, record owner visual acceptance |
 | P7 | Documentation and closeout open | Audit, document P5 outcome, then move this plan to `finished/` |
 
 ## 1. Request, normalized
@@ -1161,29 +1163,44 @@ the guest thread.
 
 ### P5 — Optional PS3 import in the installer
 
-**Status (2026-10-28): source-area mapping delivered; installer import remains open.**
+**Status (2026-11-04): extracted-folder installer import delivered and verified; the owner's finalized retail `.pkg` route is unavailable under the no-bundled-key constraint.**
 The private PS3 contact sheet, individual source crops, complete grid cells and
 `ps3-source-bounds.toml` cover all 32 slots, including the two transparent cells.
 The current reference scheme declares 15
-controller glyphs and four `ps_*` pad diagrams. This mapping does not install a
-PS3 scheme or make it selectable.
+controller glyphs and four `ps_*` pad diagrams. The installer now generates a
+local v1 `ps3` scheme from an extracted game folder. Its runtime menu appearance
+has not yet been checked in the game UI.
 P5 may continue to emit a v1 `ps3` scheme: P11 must preserve that validated format and its
 reserved trusted-install behavior. P5 does not need to fabricate v2 physical-source entries.
 
-**Goal.** A player who owns the PS3 package gets a PS3 layout in the list, generated locally, with
-only the needed art extracted.
+**Goal.** A player with extracted PS3 game files gets a PS3 layout in the list,
+generated locally from only the needed art. A supported non-finalized `.pkg` may
+supply the same scene directly; finalized retail `.pkg` files need an unavailable key.
 
 **Deliverable.**
-- The **Controller Icons (optional)** wizard page with Skip / `.pkg` (+ optional `.rap`) / extracted
+- The **Controller Icons (optional)** wizard page with Skip / `.pkg` / extracted
   PS3 folder, and a read-only probe on Next.
-- Helper commands `probe-ps3` and `install-ps3-scheme`; PKG header/probe, AES-CBC via Windows CNG,
+- Helper commands `probe-ps3` and `install-ps3-scheme`; PKG header/probe, selective
+  non-finalized package reading via its QA digest stream, explicit refusal of finalized
+  retail packages (whose data requires a separate AES-CTR package key),
   the PS3 ARK index reader, the single `buttons.milo_ps3` extraction, the DXT5 decoder, the 360
   `ps_*` pad extraction, and the scheme writer. The validator from P2 is reused.
 - Installer manifest `[controller_scheme]` table; report lines; refusal messages for a wrong
-  content id, a missing licence, a decryption failure and a decode failure.
-- Tests: PKG header/content id parser, AES test vector, ARK entry extraction, DXT5 decode of a tiny
-  synthetic fixture, the folder route, a wrong package refused, no full-ARK output.
+  content id, unsupported retail encryption, package index failure and decode failure.
+- Tests: PKG header/content id rejection, retail encryption diagnostic, folder probe,
+  and no full-ARK output. The non-finalized package/ARK reader still lacks a real
+  package acceptance fixture; an AES test vector is inapplicable without a key.
 - An acceptance run against the user's package and the extracted `assets/game/ps3` reference.
+
+**Measured outcome, 2026-11-04.** The owner's 364,734,448-byte TRIAL `.pkg` has a
+`0xC0` header and finalized retail revision `0x8000`; the read-only probe reports
+that a package decryption key is required. The local `rock-band-tools` script uses
+the QA-digest stream for non-finalized packages and cannot decrypt this retail file.
+The extracted-folder probe and sandbox import succeeded. The import wrote only a
+v1 manifest, 15 button PNGs, and four PS3 pad PNGs; all 19 images matched the
+private reference exports pixel for pixel. No whole ARK or Sony key was written.
+The Inno setup and updater compile, and the installer tests pass. The owner will
+check the game UI later.
 
 **Verify.** The generated `ps3/buttons/<slot-id>.png` files match the corresponding PS3 reference
 cell art for the known controller glyphs; omitted instrument glyphs remain from the user's 360
@@ -1248,11 +1265,23 @@ has not authored or licensed.
 
 ### P6b — The owner's ten controller layouts and visual acceptance
 
-**Status (2026-10-30): source art and proposed v2 manifests present; runtime integration open.**
+**Status (2026-11-04): ten packages validate and stage; live visual acceptance open.**
 The ten direct controller folders in §4.6 have button PNGs; eight declare four pad PNGs each. The
-`keyboard-mouse/` folder has 92 declared key/mouse PNGs and is an internal resource. P11 must
-validate and stage them before this prompt's in-game acceptance. The editable pad SVGs are
+`keyboard-mouse/` folder has 94 declared key/mouse PNGs and is an internal resource. P11's
+loader and packer validate and stage them. The editable pad SVGs are
 authoring sources, not installable diagrams. P5's optional PS3 import may proceed separately.
+
+**2026-11-04 host checkpoint.** At the owner's request, P6b host work proceeded while the
+remaining P10 live checks are deferred to the owner's later test. The release build passed and
+staged the exact ten authored IDs plus `keyboard-mouse/` separately. The audit in
+`out/button-schemes/p6b/host-audit.txt` compared every staged file with the loader's declared
+list and source hash, decoded each staged package's PNGs, and found no packed SVG or phantom
+family aliases. `button_scheme` passes with all ten package input counts and pad counts checked,
+including PlayStation Share/Create and touchpad separation, PS5 microphone, Nintendo positional
+face slots, Deck extras, Quest grip mapping, and reserved-source rejection. Quest 2/3 declare
+19 inputs each and no Back or D-pad sources; those unavailable inputs and physical-device
+exposure remain for live assessment. No PS3 package is installed in this build. The owner chose
+to test the UI later, so selectable-menu, hint, pad-art, and device checks remain unproven.
 
 **Start condition.** P11's v2 loader/packer, source capture and internal keyboard provider pass;
 P9's overflow and in-song checks and P10's guest hint routes pass. The owner's current ten
@@ -1746,6 +1775,48 @@ Release build and the focused host suites pass; `check-p10-records` passes 395
 checks. The shared-retail visual result and the live crash behavior remain
 owner-run.
 
+**2026-11-04 loading-tip route.** The rotating loading tip and begin-song
+prompt are separate guest labels. The installed `tip.lbl` scene record starts
+with `loading_tip_01` and owns one of the five `buttons.milo` font references.
+The generated scene now points that one reference at the existing private hint
+font, leaving the other three retail button styles intact. All six generated
+locales replace only `loading_tip_03`'s `<alt>X</alt>` with private glyph 0x86.
+That tile publishes the first effective Gameplay Mapping Power-up source for
+the active device family, separately from the Interface Confirm tile used by
+the begin prompt. The host record check passes 410 assertions. On-screen
+appearance and refresh of this rotating tip remain unproven; tutorial goals,
+calibration and other localized action hints remain P10 work.
+
+**2026-11-04 splash Start route.** The installed splash start state accepts
+`kAction_Start`, although `splash_press_start` draws the retail A. The generated
+splash label now uses the private hint font and all six locales replace this
+label's A with the Interface Start glyph. The native menu poll publishes the
+effective Start image while the splash panel is active, including before the
+first button press. The release build and generated-record check pass; the
+latter now covers 419 assertions. The first-screen visual result remains
+owner-run, and the remaining localized hints remain open.
+
+**2026-11-04 remaining localized routes.** A read-only scene scan found the
+tutorial goal/remedial labels in `track/gen/hud.milo_xbox`, calibration labels
+in `cal_auto.milo_xbox`, Power-up descriptions in Loading and Power-up Select,
+error Continue in `error_general.milo_xbox`, and the account-link email entry
+in `rbworld_link.milo_xbox`. Generated scene records point those measured
+labels at the private hint font. The six locale records replace their literal
+button markup with private action glyphs: Interface Confirm for calibration,
+error and account linking; Gameplay Power-up for descriptions/remedial help.
+All four native `beatmatch_controller.dtb` `button_names` tables now resolve
+tutorial lane/track/power-up tokens to action-specific private glyphs, leaving
+unrelated `controls_*` strings unchanged. The HUD's standalone `Press START to
+continue` uses Gameplay Pause's image because the in-song input path produces
+the native Start bit for that action; this action classification is inferred
+from the HUD route and needs owner-run validation. `UIManager::Poll` checks the
+effective input snapshot every UI frame and republishes hint art when bindings,
+family or layout change. The release build, `menu_payload` test suite and the
+installed-record check pass; the latter covers 558 assertions across all six
+locales. The owner will test the new routes in the game later. Panel-specific
+footer visibility/captions and new routes' on-screen appearance remain open
+for that test; the shared InlineHelp hook covers their known action IDs.
+
 **Goal.** Every actionable game hint depicts the input that actually performs that action in the
 current interface/gameplay context.
 
@@ -1896,10 +1967,12 @@ packages, make keyboard art a controller choice, or create a host overlay to dis
    cache's invalidation rules. P1 must stop and write findings if it cannot be made safe; the plan
    does not accept a fake hot swap. The fallback is a scene reload, which is a worse experience and
    must be recorded as such.
-2. **PKG decryption is unproven.** The supplied file is a **TRIAL** content id; the folder has a
-   **FULL** `.rap`. The trial package may need a different licence, or the folder route may be the
-   only working one. P5 must report exactly which route worked. The extracted
-   `assets/game/ps3` tree is a reference, not a substitute for the installer flow.
+2. **Retail PKG import is unavailable under the key constraint.** The supplied
+   **TRIAL** package is finalized retail and needs a fixed package decryption key
+   for its encrypted data section. Its licence is separate from this package-layer
+   issue; the folder's **FULL** `.rap` does not solve it. The installer reports the
+   key requirement and accepts an extracted game folder. The extracted
+   `assets/game/ps3` tree was used to exercise the real installer flow.
 3. **The 23-byte record and the slot rectangles may not be identical in every scene.** P0 tests
    `buttons`, `blitz_icons` and `controller_config`; it also compares the 360 and PS3 `Glyph`
    tables. A scene or table that differs is a finding, not a silent fallback.

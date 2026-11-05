@@ -13,6 +13,45 @@
 namespace rb_blitz::settings {
 namespace {
 using ui::dtb::Node;
+bool PatchTutorialButtonNames(std::vector<Node>* roots, std::string* error) {
+  constexpr std::array<std::pair<std::string_view, std::string_view>, 5> names{{
+      {"lane0_swing_token", "rbbz_hint_first_note"},
+      {"lane1_swing_token", "rbbz_hint_second_note"},
+      {"track_up_token", "rbbz_hint_move_right"},
+      {"track_down_token", "rbbz_hint_move_left"},
+      {"powerup_token", "rbbz_hint_powerup"}}};
+  unsigned tables = 0;
+  auto walk = [&](auto&& self, Node& node) -> bool {
+    if (node.tag == ui::dtb::kArray && node.kids.size() == 2 &&
+        node.kids[0].text == "button_names") {
+      auto& rows = node.kids[1];
+      if (rows.tag != ui::dtb::kArray || rows.kids.size() != names.size()) return false;
+      for (auto& row : rows.kids) {
+        if (row.tag != ui::dtb::kArray || row.kids.size() != 2 ||
+            row.kids[1].tag != ui::dtb::kSymbol ||
+            !row.kids[1].text.starts_with("controls_")) return false;
+        const auto match = std::find_if(names.begin(), names.end(), [&](const auto& pair) {
+          return row.kids[0].text == pair.first;
+        });
+        if (match == names.end()) return false;
+        row.kids[1].text = match->second;
+      }
+      ++tables;
+      return true;
+    }
+    for (auto& child : node.kids) if (!self(self, child)) return false;
+    return true;
+  };
+  for (auto& root : *roots) if (!walk(walk, root)) {
+    if (error) *error = "tutorial button-names table changed";
+    return false;
+  }
+  if (tables != 4) {
+    if (error) *error = "tutorial button-names preset count changed";
+    return false;
+  }
+  return true;
+}
 void U32(std::vector<uint8_t>& out, uint32_t n) {
   for (int i = 0; i < 4; ++i) out.push_back(static_cast<uint8_t>(n >> (8 * i)));
 }
@@ -816,6 +855,10 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     built[path] = ui::dtb::Compile(roots, header);
     return true;
   };
+  if (screen::CurrentMenuConfiguration().controller_layout_enabled &&
+      !edit("config/gen/beatmatch_controller.dtb", [&](auto& roots) {
+        return PatchTutorialButtonNames(&roots, error);
+      })) return false;
   if (skip_startup_logos && !edit("ui/startup/gen/startup.dtb", [&](auto& roots) {
         return SkipStartupLogos(&roots, error);
       })) return false;
@@ -933,23 +976,101 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       // aliases Confirm's image slot; texture publication refreshes it live.
       if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
         bool loading_prompt = false;
+        bool loading_powerup_tip = false;
+        bool splash_start = false;
         for (auto& root : roots) {
           if (root.tag != ui::dtb::kArray || root.kids.size() < 2 ||
-              root.kids[0].text != "loading_press_button" ||
               root.kids[1].tag != ui::dtb::kString) continue;
-          constexpr std::string_view old_glyph = "<alt1>A</alt1>";
-          const size_t at = root.kids[1].text.find(old_glyph);
+          const bool prompt = root.kids[0].text == "loading_press_button";
+          const bool tip = root.kids[0].text == "loading_tip_03";
+          const bool splash = root.kids[0].text == "splash_press_start";
+          if (!prompt && !tip && !splash) continue;
+          const std::string_view old_glyph = prompt ? "<alt1>A</alt1>" : "<alt>X</alt>";
+          const std::string_view matched_glyph = splash ? "<alt1>A</alt1>" : old_glyph;
+          const size_t at = root.kids[1].text.find(matched_glyph);
           if (at == std::string::npos ||
-              root.kids[1].text.find(old_glyph, at + old_glyph.size()) != std::string::npos) {
-            if (error) *error = "loading prompt Confirm glyph changed";
+              root.kids[1].text.find(matched_glyph, at + matched_glyph.size()) != std::string::npos) {
+            if (error) *error = prompt ? "loading prompt Confirm glyph changed" :
+                                tip ? "loading tip Power-up glyph changed" :
+                                      "splash Start glyph changed";
             return false;
           }
-          root.kids[1].text.replace(at, old_glyph.size(), "<alt1>\xC2\x81</alt1>");
-          loading_prompt = true;
+          root.kids[1].text.replace(at, matched_glyph.size(),
+                                    prompt ? "<alt1>\xC2\x81</alt1>" :
+                                    tip ? "<alt1>\xC2\x86</alt1>" :
+                                          "<alt1>\xC2\x84</alt1>");
+          if (prompt) loading_prompt = true;
+          else if (tip) loading_powerup_tip = true;
+          else splash_start = true;
         }
-        if (!loading_prompt) {
-          if (error) *error = "loading prompt locale key is missing";
+        if (!loading_prompt || !loading_powerup_tip || !splash_start) {
+          if (error) *error = !loading_prompt ? "loading prompt locale key is missing" :
+                              !loading_powerup_tip ? "loading power-up tip locale key is missing" :
+                                                     "splash Start locale key is missing";
           return false;
+        }
+        struct HintText { const char* key; const char* before; const char* after; };
+        constexpr std::array<HintText, 12> hint_text{{
+            {"cal_audio_desc_pad", "<alt1>A</alt1>", "<alt1>\xC2\x81</alt1>"},
+            {"cal_video_desc_pad", "<alt1>A</alt1>", "<alt1>\xC2\x81</alt1>"},
+            {"error_return_button", "<alt1>A</alt1>", "<alt1>\xC2\x81</alt1>"},
+            {"remedial_help_powerup", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
+            {"active_description", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
+            {"autoplay_desc", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
+            {"grenade_desc", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
+            {"jackpot_desc", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
+            {"overdrive_desc", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
+            {"plasma_desc", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
+            {"ripple_desc", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
+            {"press_start_to_continue", "START", "<alt1>\xC2\x8C</alt1>"}}};
+        for (const auto& route : hint_text) {
+          size_t found = 0;
+          for (auto& root : roots) {
+            if (root.tag != ui::dtb::kArray || root.kids.size() < 2 ||
+                root.kids[0].text != route.key || root.kids[1].tag != ui::dtb::kString)
+              continue;
+            auto& value = root.kids[1].text;
+            const std::string_view before = route.before;
+            const auto at = value.find(before);
+            if (at == std::string::npos ||
+                value.find(before, at + before.size()) != std::string::npos) break;
+            value.replace(at, before.size(), route.after);
+            ++found;
+          }
+          if (found != 1) {
+            if (error) *error = std::string("action hint locale entry changed: ") + route.key;
+            return false;
+          }
+        }
+        size_t account_link_variants = 0;
+        for (auto& root : roots) {
+          if (root.tag != ui::dtb::kArray || root.kids.size() < 2 ||
+              root.kids[0].text != "link_facebook_email_entry" ||
+              root.kids[1].tag != ui::dtb::kString) continue;
+          auto& value = root.kids[1].text;
+          constexpr std::string_view old_glyph = "<alt>A</alt>";
+          const auto at = value.find(old_glyph);
+          if (at == std::string::npos ||
+              value.find(old_glyph, at + old_glyph.size()) != std::string::npos) break;
+          value.replace(at, old_glyph.size(), "<alt1>\xC2\x81</alt1>");
+          ++account_link_variants;
+        }
+        if (account_link_variants != 3) {
+          if (error) *error = "account-link Confirm locale variants changed";
+          return false;
+        }
+        for (const auto& [key, value] :
+             std::array<std::pair<const char*, const char*>, 5>{{
+                 {"rbbz_hint_first_note", "<alt1>\xC2\x87</alt1>"},
+                 {"rbbz_hint_second_note", "<alt1>\xC2\x88</alt1>"},
+                 {"rbbz_hint_move_right", "<alt1>\xC2\x89</alt1>"},
+                 {"rbbz_hint_move_left", "<alt1>\xC2\x8A</alt1>"},
+                 {"rbbz_hint_powerup", "<alt1>\xC2\x86</alt1>"}}}) {
+          std::string why;
+          if (!screen::AddLocaleEntry(&roots, key, value, &why)) {
+            if (error) *error = "tutorial hint locale entry refused: " + why;
+            return false;
+          }
         }
       }
       for (const auto& [key,text] : std::initializer_list<std::pair<const char*,const char*>>{
@@ -1349,6 +1470,33 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             return false;
           }
           built[ui::input_font::kLoadingRecord] = std::move(loading);
+          std::vector<uint8_t> splash_source, splash;
+          if (!read(ui::input_font::kSplashRecord, &splash_source, &why) ||
+              !ui::input_font::PrepareSplash(splash_source, &splash, &why)) {
+            if (error) *error = "splash Start icon font preparation was refused: " + why;
+            return false;
+          }
+          built[ui::input_font::kSplashRecord] = std::move(splash);
+          auto prepare_hint_scene = [&](const char* path, auto prepare) {
+            std::vector<uint8_t> source, generated;
+            if (!read(path, &source, &why) || !prepare(source, &generated, &why)) {
+              if (error) *error = std::string("action hint scene preparation was refused: ") +
+                                  path + ": " + why;
+              return false;
+            }
+            built[path] = std::move(generated);
+            return true;
+          };
+          if (!prepare_hint_scene(ui::input_font::kCalibrationRecord,
+                                  ui::input_font::PrepareCalibration) ||
+              !prepare_hint_scene(ui::input_font::kHudRecord,
+                                  ui::input_font::PrepareHudHints) ||
+              !prepare_hint_scene(ui::input_font::kPowerupSelectRecord,
+                                  ui::input_font::PreparePowerupSelect) ||
+              !prepare_hint_scene(ui::input_font::kErrorReturnRecord,
+                                  ui::input_font::PrepareErrorReturn) ||
+              !prepare_hint_scene(ui::input_font::kAccountLinkRecord,
+                                  ui::input_font::PrepareAccountLink)) return false;
         }
       } else {
         note("input image font preparation was refused: " + why);

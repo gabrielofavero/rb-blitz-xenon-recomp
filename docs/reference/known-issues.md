@@ -26,8 +26,9 @@ release build. Owner-run D3D12 logs record alternating keyboard/controller
 changes; a second run selects One Pad and confirms its magenta controller
 image remains visible across three controller-to-keyboard round trips. The
 100 ms debounce boundary is host-tested but unmeasured live; Vulkan has no
-P4-specific run. The visible footer still shows retail A/B glyphs because
-guest remap-aware hint drawing remains P10 work. The mapping rows remain P9.
+P4-specific run. The shared footer now resolves effective Interface Mapping,
+with main-menu default/rebound/family refresh accepted by the owner on 2026-11-02;
+the other guest action-hint routes now have host coverage and await live checks.
 See the
 [button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P4.
 
@@ -41,17 +42,27 @@ keyboard and mouse images on Interface Mapping and Gameplay Notes, but the tool 
 foreground the game for capture. See the
 [button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P11.
 
-**Mapping images (updated 2026-11-01):** owner screenshots accepted ordinary Interface and
+**Mapping images (updated 2026-11-02):** owner screenshots accepted ordinary Interface and
 Gameplay Mapping images, the eight-input Confirm row, the repaired retail-band atlas, and
 both mapping surfaces in a paused song on 2026-10-31. The font has 180 image tiles; repeated
 sources share one. A row with more than eight bindings now pages six images at a time inside
 the guest list via Left/Right, with a page count. Host tests reach the 181st distinct source,
-but the live fit and navigation of an overflow row are unproven. Music Library Options'
+and the owner accepted the live fit and paging on 2026-11-02. Music Library Options'
 Start/Back images and distinct media symbols were accepted on 2026-10-31. A later
 retail Xbox 360 Search screenshot exposed an Xbox Series Start image; the retail
 Start/Back resolver now selects the installed 360 sheet's own arrow glyphs; the
 owner accepted the corrected Search hint on 2026-11-02. See the
 [button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P9.
+
+**Action-hint route coverage (2026-11-04):** the owner accepted the shared
+main-menu footer, the loading begin-song Confirm prompt and the retail 360
+Start/Back images. The release build now has generated guest routes for the
+rotating loading Power-up tip, splash Start, tutorial actions, calibration
+Confirm, in-song Continue/Pause, Power-up descriptions, error Continue and
+account-link Confirm. Host checks pass across all six locales and the four
+tutorial preset tables. These routes and panel-specific footers still need
+owner-run visual and input validation. The
+[route inventory](../engine/button-hint-inventory.md) tracks each surface.
 
 **Input font atlas resolution and guest heap (2026-11-02):** the owner kept the
 original 1024-square atlas scope: 32-pixel images in 36-pixel cells, with the

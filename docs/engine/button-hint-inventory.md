@@ -1,8 +1,9 @@
 # Guest action-hint routes (Controller Layout P10)
 
-Status: main-menu footer icons, Y rebound and live refresh reported working, 2026-11-02; other P10 routes open.
-The owner accepted P9's mapping-row paging visual check. Other P10 routes
-remain open.
+Status: known guest-owned actionable hint routes have code and generated-record
+coverage as of 2026-11-04. Main-menu footer, loading Confirm, and prior image
+checks have owner acceptance; tutorial, calibration, account-link, other panels,
+and new localized prompts still need owner-run visual checks.
 
 This inventory distinguishes the *action* a hint promises from the button character
 currently drawn. The effective Interface Mapping owns menu, pause and dialog
@@ -20,10 +21,12 @@ evidence that ordinary hints are correct.
 | Leaderboards, store and upsell footers | Installed DTBs assign actions to `InlineHelp_leaderboards.ihp`, `cancel.ihp`, `store.ihp` and `InlineHelp.ihp`. The leaderboard ShellOption caption can be a variable token. | Keep the action identity from the call, including variable captions. Check visibility and disabled states. |
 | Pause and results footers | The pause DTB handles `kAction_Cancel`, `kAction_ViewModify` and `kAction_Start`. Results DTBs include `set_action_token` calls through an expression that finds `InlineHelp.ihp` in `results_shared_panel`; a simple named-object search misses these. | Trace the scene/shared-panel draw route and exact visible actions. |
 | Loading screen, begin song (Confirm or Start) | `loading.lbl` uses locale key `loading_press_button`, whose English text is `PRESS <alt1>A</alt1>TO BEGIN`. The loading screen accepts Confirm or Start after load completion; the label is filled on enter. | Advertises Interface Confirm, the action represented by the retail A; Start remains an accepted alternative. The prompt's alternate font and six locale strings now use Confirm's private glyph tile. The loading UI handler publishes binding and family changes. Generated-record checks pass; the owner reported the visual result good on 2026-11-02. |
-| Tutorial and loading tips for note play, power-up deploy, continue | English locale contains `loading_tip_*` strings, including `Play left note: {string:lane0_swing_token}`, `Play right note: {string:lane1_swing_token}`, power-up text with `<alt>X</alt>`, and `Press <alt1>A</alt1> to Continue`. | Inspect each draw context and assign its Gameplay or Interface action. A locale-wide X/A substitution would be ambiguous. |
-| Calibration instructions | `cal_audio_desc_pad` and `cal_video_desc_pad` say to press `<alt1>A</alt1>`; the calibration scene has its own button images. | Actionable calibration hints need an explicit measured route and outcome even though calibration-specific scene art is outside the button-sheet replacement scope. |
-| Standalone Start prompt | English locale key `press_start_to_continue` spells `Press START to continue`. | Inspect caller and action before replacement; this is text, not an `InlineHelp` token. |
-| Other inline glyph strings | The English locale has 68 lines with `<alt...>` markup or `Press` text, including account-link and power-up instructions. | Enumerate callers and locale variants. Static text matching alone does not prove a line is actionable in the current context. |
+| Splash start screen | `splash_panel.BUTTON_DOWN_MSG` in installed `ui/splash/gen/splash.dtb` accepts `kAction_Start` in its `start` state. The scene's start label uses `splash_press_start` (`PRESS <alt1>A</alt1> TO START`) and has its own `buttons.milo` font reference. | The generated label scene uses `inline_help_icons.milo`, and all six locales replace its retail A with private Start glyph 0x84. The native menu poll publishes the first effective Interface Start source while the splash panel is active, before any button press. Host record checks pass; on-screen appearance and refresh need owner acceptance. |
+| Loading tip 03, deploy power-up | `loading.dtb` sends a chosen `loading_tip_*` token to `tip.lbl` through `set_dynamic_controller_token`. The installed `tip.lbl` scene record starts with `loading_tip_01` and references `buttons.milo`; locale key `loading_tip_03` spells `<alt>X</alt>`. | The generated tip font now references `inline_help_icons.milo`; the six locale records replace only this tip's X with private glyph 0x86. The loading UI hook publishes `First(view, Gameplay::Powerup)` into its own atlas tile. Host record checks cover the route; on-screen appearance and refresh still need owner acceptance. |
+| Tutorial note/track/power-up instructions | The tutorial locale uses `{string:lane0_swing_token}`, `{string:track_up_token}` and `{string:powerup_token}` in its goal text. `config/gen/beatmatch_controller.dtb` maps five action tokens to `controls_*` keys in each of four presets. `track/gen/hud.milo_xbox` owns `tutorial_instructions.lbl` and `remedial_help.lbl`. | The generated preset tables now resolve the five tokens to private locale glyphs for Gameplay First/Second Note, Move Left/Right and Power-up. The HUD's four measured button-font references use the hint font; `remedial_help_powerup` also uses the Power-up glyph. The `controls_*` keys stay unchanged. Six-locale and four-preset record checks pass; live appearance and refresh need owner acceptance. |
+| Calibration instructions | `cal_audio_desc_pad` and `cal_video_desc_pad` say to press `<alt1>A</alt1>`. Installed `calibration.dtb` routes `cal_auto_panel.BUTTON_DOWN_MSG` in its init state through `kAction_Confirm`; calibration then owns its own processing state. `cal_auto.milo` also has independent button images. | Both localized instructions and their two label font references now use Interface Confirm's private glyph. The calibration-specific scene images remain outside the sheet replacement scope. Six-locale and scene checks pass; live appearance needs owner acceptance. |
+| In-song Continue prompt | `press_start_to_continue` is the default token for a tutorial label in `track/gen/hud.milo_xbox`, absent from direct UI DTB calls. The gameplay input path sends Gameplay Pause as the native Start bit in a song. | All six locale variants replace the literal START with the private Gameplay Pause glyph, and the HUD label uses the hint font. Mapping it to Gameplay Pause is an inference from the HUD location and Start-bit path; the accepted action and visual result need an owner-run check. |
+| Other inline glyph strings | The English locale has action text in `active_description`, `autoplay_desc`, `grenade_desc`, `jackpot_desc`, `overdrive_desc`, `plasma_desc`, `ripple_desc`, `error_return_button`, and account-link keys. `loading_tip_58` mentions old Typewriter controls as historical advice. | Power-up descriptions in Loading and Power-up Select now use Gameplay Power-up's glyph and patched label fonts. `error_return_button` and all three account-link email-entry variants use Interface Confirm's glyph and the corresponding scene font. Six-locale record checks pass; live appearance needs owner acceptance. `loading_tip_58` remains historical advice. |
 
 ## Evidence and next measurements
 
@@ -34,6 +37,17 @@ Song Leaderboards, Song Select, Store and Upsell. Results Hub also calls
 `set_action_token` through a `results_shared_panel` object lookup. This scan
 does not cover native C++ calls or scene object properties, so absence of a
 call in a DTB is not evidence that its footer is absent.
+
+On 2026-11-04, a read-only scan of all 671 installed Milo scenes found the
+remaining locale-key callers in the track HUD, calibration, error, loading,
+power-up selection and account-link scenes. The generated record check now
+passes 558 assertions across six locales, four native tutorial preset tables
+and the measured scene font references. `UIManager::Poll` checks one effective
+input snapshot each UI frame and publishes the hint tiles when its signature
+changes; the signature includes binding, device and layout revisions.
+The shared `InlineHelp` hook applies to every guest footer instance that uses
+one of the nonempty action characters in `ui_objects.dtb`; panel-specific
+visibility and captions still require owner-run observation.
 
 - `out/_swap/inbox_retail.tree.txt`: `update_inline_help` and its
   `InlineHelp.ihp` action-token calls. The decoded tree is local, ignored
@@ -98,10 +112,9 @@ glyphs 0x81/0x82 and composed 180 atlas slots, including footer tiles 102/103.
 The owner confirmed that default main-menu footer icons now appear and Confirm
 shows Y after rebinding. In a follow-up to the same-screen refresh and active-family
 checks, the owner reported that these work as well; the trace records repeated
-active-family and binding-revision changes. This is main-menu evidence only. Loading, tips,
-calibration and other inline/localized-text routes in the table remain
-unimplemented and unproven. Do not treat the shared footer route as coverage
-for those surfaces.
+active-family and binding-revision changes. This is main-menu evidence only.
+The later localized routes in the table have host checks, with their live
+appearance still awaiting owner acceptance.
 
 On 2026-11-02, a screenshot showed the footer keycaps still soft after changing
 the resampler. The shared 1024-pixel font atlas had reduced every icon to a
