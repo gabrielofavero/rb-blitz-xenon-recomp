@@ -14,7 +14,7 @@
 ; builds the result is (README.md, section "Updating"):
 ;
 ;   the setup executable, as before - it embeds (or downloads) the payload and
-;   asks all four questions, and it puts RockBandBlitzUpdater.exe under the
+;   asks for the game data, mod, and install locations, and it puts RockBandBlitzUpdater.exe under the
 ;   user's local application data;
 ;
 ;   the updater - the same wizard with the payload taken from the release
@@ -362,9 +362,7 @@ const
   PayloadEnd = 200;
   GameStart = 200;
   GameEnd = 700;
-  Ps3Start = 700;
-  Ps3End = 750;
-  UltimateStart = 750;
+  UltimateStart = 700;
   UltimateEnd = 880;
   FinalizeStart = 880;
   FinalizeEnd = 950;
@@ -448,9 +446,6 @@ const
   UltimateZip = 1;
   UltimateFolder = 2;
   UltimateNothing = 3;
-  Ps3Skip = 0;
-  Ps3Package = 1;
-  Ps3Folder = 2;
 
   { The wizard's own registration key: the AppId from [Setup], which Inno Setup
     registers an installation under. Read back at start-up to find a game that is
@@ -470,7 +465,6 @@ const
 var
   MethodPage: TInputOptionWizardPage;
   UltimatePage: TInputOptionWizardPage;
-  Ps3Page: TInputOptionWizardPage;
   StagePage: TOutputProgressWizardPage;
 
   { The file and folder pickers sit on the option page that asks the question they
@@ -486,9 +480,6 @@ var
   { The mod page's second occupant of the picker's band: what to do instead when the
     answer is "do not install it". It and the picker are never visible together. }
   UltimateNoteLabel: TNewStaticText;
-  Ps3PromptLabel: TNewStaticText;
-  Ps3PathEdit: TNewEdit;
-  Ps3BrowseButton: TNewButton;
 
   { The two extra locations on the install folder page. They belong there rather than
     on a page of their own because they are part of the same answer - where this
@@ -543,8 +534,6 @@ var
   gUltimateFolder: String;
   gUltimateSourceDescription: String;
   gUltimateVersion: String;
-  gPs3Installed: Boolean;
-  gPs3Source: String;
 
   gInstalled: Boolean;
   gFinishReached: Boolean;
@@ -654,16 +643,6 @@ end;
 function ParamUltimateFolder: String;
 begin
   Result := RemoveQuotes(Trim(ExpandConstant('{param:ULTIMATEFOLDER|}')));
-end;
-
-function ParamPs3Folder: String;
-begin
-  Result := RemoveQuotes(Trim(ExpandConstant('{param:PS3FOLDER|}')));
-end;
-
-function ParamPs3Package: String;
-begin
-  Result := RemoveQuotes(Trim(ExpandConstant('{param:PS3PACKAGE|}')));
 end;
 
 // The two external folders (§9.1). `...Given` is what tells a silent install that
@@ -1348,17 +1327,6 @@ begin
       'the release''s Xbox folder into game\ultimate in the install folder.';
 end;
 
-procedure UpdatePs3Picker;
-begin
-  Ps3PromptLabel.Visible := Ps3Page.SelectedValueIndex <> Ps3Skip;
-  Ps3PathEdit.Visible := Ps3PromptLabel.Visible;
-  Ps3BrowseButton.Visible := Ps3PromptLabel.Visible;
-  if Ps3Page.SelectedValueIndex = Ps3Folder then
-    Ps3PromptLabel.Caption := 'Extracted PS3 game folder:'
-  else
-    Ps3PromptLabel.Caption := 'Rock Band Blitz PS3 package:';
-end;
-
 procedure MethodChoiceChanged(Sender: TObject);
 begin
   RefreshMethodPage;
@@ -1368,11 +1336,6 @@ end;
 procedure UltimateChoiceChanged(Sender: TObject);
 begin
   UpdateUltimatePicker;
-end;
-
-procedure Ps3ChoiceChanged(Sender: TObject);
-begin
-  UpdatePs3Picker;
 end;
 
 procedure MethodBrowseClick(Sender: TObject);
@@ -1402,21 +1365,6 @@ begin
   else if GetOpenFileName('Choose the Rock Band Blitz Ultimate zip file.', path, '',
                           'Zip archives|*.zip|All files|*.*', '.zip') then
     UltimatePathEdit.Text := path;
-end;
-
-procedure Ps3BrowseClick(Sender: TObject);
-var
-  path: String;
-begin
-  path := Trim(Ps3PathEdit.Text);
-  if Ps3Page.SelectedValueIndex = Ps3Folder then
-  begin
-    if BrowseForFolder('Choose the extracted PS3 game folder.', path, False) then
-      Ps3PathEdit.Text := path;
-  end
-  else if GetOpenFileName('Choose the Rock Band Blitz PS3 package.', path, '',
-                          'PS3 packages|*.pkg|All files|*.*', '.pkg') then
-    Ps3PathEdit.Text := path;
 end;
 
 // --- the install folder page's own header ---------------------------------
@@ -1836,28 +1784,6 @@ begin
     Result := Trim(MethodPathEdit.Text);
 end;
 
-function ChosenPs3Folder: String;
-begin
-  Result := '';
-  if gUpdater then
-    Exit;
-  if WizardSilent then
-    Result := ParamPs3Folder
-  else if Ps3Page.SelectedValueIndex = Ps3Folder then
-    Result := Trim(Ps3PathEdit.Text);
-end;
-
-function ChosenPs3Package: String;
-begin
-  Result := '';
-  if gUpdater then
-    Exit;
-  if WizardSilent then
-    Result := ParamPs3Package
-  else if Ps3Page.SelectedValueIndex = Ps3Package then
-    Result := Trim(Ps3PathEdit.Text);
-end;
-
 function ChosenGamePackage: String;
 begin
   if WizardSilent then
@@ -1873,8 +1799,6 @@ var
 begin
   Result := '';
   gUltimateMode := 'none';
-  gPs3Installed := False;
-  gPs3Source := '';
   gUltimateActive := False;
   gUltimateArchive := '';
   gUltimateFolder := '';
@@ -2233,16 +2157,6 @@ begin
     UltimatePage.SelectedValueIndex := UltimateNothing;
   end;
 
-  Ps3Page := CreateInputOptionPage(UltimatePage.ID,
-    'Controller Icons (optional)',
-    'Add PlayStation 3 controller icons from your own PS3 game files.',
-    'The installer extracts only the button glyphs and uses the Xbox 360 pad art already being installed.',
-    True, False);
-  Ps3Page.Add('Skip PlayStation 3 controller icons');
-  Ps3Page.Add('Import from a Rock Band Blitz PS3 package (.pkg)');
-  Ps3Page.Add('Import from an extracted PS3 game folder');
-  Ps3Page.SelectedValueIndex := Ps3Skip;
-
   // The picker each option page owns: a prompt, an edit and a Browse button, placed
   // under the radios by PlacePicker. The edit is what ChosenGameFolder,
   // ChosenGamePackage and ResolveUltimateChoice read, so the wizard and a silent
@@ -2269,17 +2183,9 @@ begin
   PlacePicker(UltimatePage, UltimatePromptLabel, UltimatePathEdit, UltimateBrowseButton,
               UltimateNoteLabel);
 
-  Ps3PromptLabel := TNewStaticText.Create(WizardForm);
-  Ps3PathEdit := TNewEdit.Create(WizardForm);
-  Ps3PathEdit.OnChange := @Ps3ChoiceChanged;
-  Ps3BrowseButton := TNewButton.Create(WizardForm);
-  Ps3BrowseButton.Caption := 'Browse...';
-  Ps3BrowseButton.OnClick := @Ps3BrowseClick;
-  PlacePicker(Ps3Page, Ps3PromptLabel, Ps3PathEdit, Ps3BrowseButton, nil);
 
   MethodPage.CheckListBox.OnClick := @MethodChoiceChanged;
   UltimatePage.CheckListBox.OnClick := @UltimateChoiceChanged;
-  Ps3Page.CheckListBox.OnClick := @Ps3ChoiceChanged;
 
   // The install folder page asks for three locations, so it grows two rows: the DLC
   // library and the save folder. They are created here rather than on a page of their
@@ -2317,7 +2223,6 @@ begin
   RefreshMethodPage;
   UpdateMethodPicker;
   UpdateUltimatePicker;
-  UpdatePs3Picker;
   LayoutSelectDirHeader;
   LayoutLocationFields;
   // The page the folder starts on, and whatever paths.toml or the user's input
@@ -2360,7 +2265,7 @@ begin
   // The game-data page is the exception: this release may need the user's files
   // again, and then they are the whole reason the update cannot simply run.
   if (PageID = wpWelcome) or (PageID = wpSelectDir) or (PageID = wpSelectTasks) or
-     (PageID = wpReady) or (PageID = UltimatePage.ID) or (PageID = Ps3Page.ID) then
+     (PageID = wpReady) or (PageID = UltimatePage.ID) then
   begin
     Result := True;
     Exit;
@@ -2373,8 +2278,7 @@ begin
 #endif
   if WizardSilent then
   begin
-    Result := (PageID = MethodPage.ID) or (PageID = UltimatePage.ID) or
-              (PageID = Ps3Page.ID);
+    Result := (PageID = MethodPage.ID) or (PageID = UltimatePage.ID);
     Exit;
   end;
 end;
@@ -2505,24 +2409,6 @@ begin
     Exit;
   end;
 
-  if (CurPageID = Ps3Page.ID) and (Ps3Page.SelectedValueIndex <> Ps3Skip) then
-  begin
-    if Ps3Page.SelectedValueIndex = Ps3Package then
-      args := 'probe-ps3 --package ' + QuoteArg(ChosenPs3Package)
-    else
-      args := 'probe-ps3 --folder ' + QuoteArg(ChosenPs3Folder);
-    if not RunQuietProbe(args) then
-    begin
-      SuppressibleMsgBox('That PS3 source cannot supply controller icons:' +
-                         kCrLf + kCrLf + HelperError(gProbeSummaryFile),
-                         mbError, MB_OK, IDOK);
-      Result := False;
-      Exit;
-    end;
-    Ps3PromptLabel.Caption := 'Ready: PS3 Buttons scene found.';
-    Ps3PromptLabel.Update;
-    Exit;
-  end;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -2608,33 +2494,6 @@ begin
     Result := problem;
     Exit;
   end;
-
-  if (not gUpdater) and (not WizardSilent) and
-     (Ps3Page.SelectedValueIndex <> Ps3Skip) and
-     (Trim(Ps3PathEdit.Text) = '') then
-  begin
-    Result := 'Choose the PS3 package or extracted game folder, or skip controller icons.';
-    Exit;
-  end;
-  if (ChosenPs3Folder <> '') and (ChosenPs3Package <> '') then
-  begin
-    Result := 'Choose only one PS3 icon source.';
-    Exit;
-  end;
-  if ChosenPs3Folder <> '' then
-    if not RunQuietProbe('probe-ps3 --folder ' + QuoteArg(ChosenPs3Folder)) then
-    begin
-      Result := 'The extracted PS3 folder cannot supply controller icons: ' +
-                HelperError(gProbeSummaryFile);
-      Exit;
-    end;
-  if ChosenPs3Package <> '' then
-    if not RunQuietProbe('probe-ps3 --package ' + QuoteArg(ChosenPs3Package)) then
-    begin
-      Result := 'The PS3 package cannot supply controller icons: ' +
-                HelperError(gProbeSummaryFile);
-      Exit;
-    end;
 
   problem := RunAtEndProblem;
   if problem <> '' then
@@ -2767,32 +2626,7 @@ begin
     end;
   end;
 
-  // 3. the optional PS3 controller scheme, after Xbox game data supplies its pad art.
-  if (ChosenPs3Folder <> '') or (ChosenPs3Package <> '') then
-  begin
-    args := 'install-ps3-scheme --dest ' + QuoteArg(gAppDir);
-    if ChosenPs3Package <> '' then
-      args := args + ' --package ' + QuoteArg(ChosenPs3Package)
-    else
-      args := args + ' --folder ' + QuoteArg(ChosenPs3Folder);
-    if RunStage('Adding PlayStation 3 controller icons',
-                'Extracting the button glyphs and matching the Xbox 360 pad diagrams...',
-                args, Ps3Start, Ps3End) then
-    begin
-      gPs3Installed := True;
-      if ChosenPs3Package <> '' then
-        gPs3Source := 'package ' + ChosenPs3Package
-      else
-        gPs3Source := 'extracted folder ' + ChosenPs3Folder;
-    end
-    else
-      SuppressibleMsgBox('PlayStation 3 controller icons could not be installed:' +
-                         kCrLf + kCrLf + gFailureText + kCrLf + kCrLf +
-                         'The game itself was installed without this optional layout.',
-                         mbError, MB_OK, IDOK);
-  end;
-
-  // 4. the mod, if it was asked for. The game is playable without it, so a
+  // 3. the mod, if it was asked for. The game is playable without it, so a
   //    failure here is loud but not fatal.
   if gUltimateActive then
   begin
@@ -2841,9 +2675,6 @@ begin
   end
   else
     args := args + ' --ultimate 0';
-
-  if gPs3Installed then
-    args := args + ' --ps3-source ' + QuoteArg(gPs3Source);
 
   // The two folder answers are recorded in the manifest and the report as the user
   // gave them. The file the game reads is written by the stage after this one, once

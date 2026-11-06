@@ -46,6 +46,10 @@ was delivered on 2026-10-20: P1–P5 all landed, ending with the countdown and t
 The in-game settings program outgrew the plan format and lives with its subject; its live tracker is
 [`../../settings/status.md`](../../settings/status.md).
 
+The Button Layout plan closed at the owner's request on 2026-11-06 and moved to
+[`../finished/2026-10-19-button-layout-hotswap-plan.md`](../finished/2026-10-19-button-layout-hotswap-plan.md).
+Its remaining UI checks are independent follow-up, with unverified routes recorded there.
+
 See [`../README.md`](../README.md) for the status taxonomy.
 
 Binding rows are now implemented in the guest, and the plan moved to `finished/`;

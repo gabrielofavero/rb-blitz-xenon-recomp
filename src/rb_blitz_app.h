@@ -92,6 +92,7 @@
 #include "input/remap.h"
 #include "input/title_input.h"
 #include "profile/profile_apply.h"
+#include "platform/crash_diagnostics.h"
 #include "settings/boot.h"
 #include "platform/game_restart.h"
 #include "store/store_fetch.h"
@@ -486,6 +487,11 @@ class RbBlitzApp : public rex::ReXApp {
     // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the
     // player cannot change has to say so rather than save a value that never takes effect.
     rex::cvar::FinalizeInit();
+    if (rb_blitz::platform::InstallCrashDiagnostics(runtime()->cache_root()))
+      REXLOG_INFO("crash_diagnostics: pid={} fatal native exceptions write records to {}",
+                  GetCurrentProcessId(), (runtime()->cache_root() / "crash-dumps").string());
+    else
+      REXLOG_WARN("crash_diagnostics: could not install native crash capture");
     rb_blitz::loading::ConfigureLoadTrace();
     rb_blitz::loading::ConfigureCrashRecovery(runtime(), settings_restart_boot_);
     rb_blitz::graphics::ConfigureLoading(runtime());

@@ -35,6 +35,7 @@ struct Scheme {
   std::map<std::string, Image> pads;
   Image shared_pad, icons;
   bool has_shared_pad = false, has_icons = false;
+  bool use_retail_ps_pads = false;
   std::vector<std::filesystem::path> extra_files;
   std::vector<std::filesystem::path> declared_files;
   std::vector<InputImage> inputs;

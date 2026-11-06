@@ -13,7 +13,7 @@ observations are retained as evidence but do not establish these live cases.
 | U2 | Installed Ultimate payload | Gold Star Progress restart verdict |
 | U3 | Graphics recovery fixture | Guest-drawn recovery note and retry verdict |
 | U4 | Load Guard failure/timeout fixtures | 60s and live-row verdicts |
-| U5 | Active button-layout plan P4/P9/P10/P11 | Acceptance evidence in that plan |
+| U5 | Closed button-layout plan P4/P9/P10/P11 | Remaining UI acceptance is owner-run; evidence gaps are recorded in that plan |
 | U6a | Physical controller | Controls capture/cancel and preset verdict |
 | U6b | Installed Ultimate payload | Ultimate Controls and remaining route verdict |
 
@@ -82,18 +82,18 @@ unmeasured.
 **Exit:** each exercised case returns to the native main menu with the right
 reason and preserves the next playable song; failures get a narrow trace.
 
-### Prompt U5 — Close button-layout acceptance in its owner plan
+### Prompt U5 — Independent button-layout acceptance follow-up
 
-**Owner:** [button-layout plan](../in-progress/2026-10-19-button-layout-hotswap-plan.md)
-P4/P9/P10/P11. This prompt is a handoff, not a second implementation scope.
+**Owner:** The [closed button-layout plan](../finished/2026-10-19-button-layout-hotswap-plan.md)
+P4/P9/P10/P11 records implementation and existing evidence. On 2026-11-06 the owner chose to
+perform any remaining UI checks independently; this prompt adds no agent-run acceptance gate.
 
-**Do:** finish its live debounce and Vulkan family switching, physical
-device/v2 images, in-song and >45-source behavior, and guest remap-aware
-hints. Put screenshots, input identities and backend verdicts in that plan's
-acceptance matrix.
+**Do:** If the owner supplies new results, record measured routes, input identities and backend
+verdicts in [the hint inventory](../../engine/button-hint-inventory.md) and update
+[known issues](../../reference/known-issues.md). Real extra-button capture remains untestable
+with the available Xbox controller.
 
-**Exit:** the owner plan identifies every measured route and keeps its
-45-source textual fallback explicit; unavailable devices stay unmeasured.
+**Exit:** independent results are reconciled when supplied; untested routes remain unverified.
 
 ### Prompt U6a — Verify physical-controller Controls routes
 

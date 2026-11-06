@@ -120,29 +120,29 @@ void TestEffectiveIcons() {
   CHECK_TRUE(!all[1].rgba.empty());
   CHECK_TRUE(icons::First(pad, row).slot == "y_button");
   rb_blitz::controller_schemes::Registry packages;
-  rb_blitz::controller_schemes::Scheme ps3;
-  ps3.id = "ps3";
-  ps3.buttons["y_button"] = {1, 1, {9, 8, 7, 255}};
-  packages.schemes.emplace("ps3", std::move(ps3));
-  const auto imported = icons::Capture("ps3", icons::Family::kController, &packages);
-  CHECK_TRUE(icons::First(imported, row).art == icons::Art::kPackageImage);
-  CHECK_TRUE(icons::First(imported, row).rgba == std::vector<uint8_t>({9, 8, 7, 255}));
-  rb_blitz::input::last_device::SelectScheme("ps3");
+  rb_blitz::controller_schemes::Scheme playstation3;
+  playstation3.id = "playstation-3";
+  playstation3.buttons["y_button"] = {1, 1, {9, 8, 7, 255}};
+  packages.schemes.emplace("playstation-3", std::move(playstation3));
+  const auto authored = icons::Capture("playstation-3", icons::Family::kController, &packages);
+  CHECK_TRUE(icons::First(authored, row).art == icons::Art::kPackageImage);
+  CHECK_TRUE(icons::First(authored, row).rgba == std::vector<uint8_t>({9, 8, 7, 255}));
+  rb_blitz::input::last_device::SelectScheme("playstation-3");
   rb_blitz::input::last_device::Focus(true);
   rb_blitz::profile::remap::PadState real_pad{};
   real_pad.buttons = 0x8000;
   CHECK_TRUE(!rb_blitz::input::last_device::Pad(true, real_pad).has_value());
   const auto active = icons::CaptureActive(&packages);
   CHECK_TRUE(active.active_family == icons::Family::kController);
-  CHECK_TRUE(active.controller_scheme == "ps3");
+  CHECK_TRUE(active.controller_scheme == "playstation-3");
   CHECK_TRUE(active.device_revision > 0);
   CHECK_TRUE(icons::First(active, row).art == icons::Art::kPackageImage);
   CHECK_TRUE(icons::First(icons::Capture("steam-deck", icons::Family::kController, &packages), row)
                  .diagnostic.find("unavailable") != std::string::npos);
-  const auto keyboard = icons::Capture("ps3", icons::Family::kKeyboardMouse);
+  const auto keyboard = icons::Capture("playstation-3", icons::Family::kKeyboardMouse);
   CHECK_TRUE(icons::First(keyboard, row).legend == "Enter");
   CHECK_TRUE(icons::Ordered(keyboard, row)[1].rgba == all[1].rgba);
-  for (const char* scheme : {"retail", "ps3", "xbox-series", "playstation-series",
+  for (const char* scheme : {"retail", "playstation-3", "xbox-series", "playstation-series",
                              "nintendo-switch", "steam-controller", "steam-deck", "custom"}) {
     const auto choice = icons::Capture(scheme, icons::Family::kKeyboardMouse);
     CHECK_TRUE(icons::First(choice, row).rgba == icons::First(keyboard, row).rgba);

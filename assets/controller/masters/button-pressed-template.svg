@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Pressed controller button template</title>
+  <desc>Weathered circular bezel and white press accent. The button and its shadow are added by the renderer.</desc>
+  <defs>
+    <radialGradient id="metal" cx="50%" cy="73%" r="78%" fx="53%" fy="81%">
+      <stop offset="0" stop-color="#d6d2d0"/>
+      <stop offset=".3" stop-color="#aaa6a5"/>
+      <stop offset=".65" stop-color="#777474"/>
+      <stop offset=".88" stop-color="#393738"/>
+      <stop offset="1" stop-color="#181719"/>
+    </radialGradient>
+    <linearGradient id="wear" x1="0" y1="0" x2=".18" y2="1">
+      <stop offset="0" stop-color="#100f11" stop-opacity=".48"/>
+      <stop offset=".44" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#f5f1ed" stop-opacity=".17"/>
+    </linearGradient>
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency=".68" numOctaves="3" seed="19" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".25"/></feComponentTransfer>
+    </filter>
+    <clipPath id="bezel-clip"><circle cx="128" cy="128" r="109"/></clipPath>
+  </defs>
+
+  <g id="bezel">
+    <circle cx="128" cy="128" r="118" fill="#fff"/>
+    <circle cx="128" cy="128" r="109" fill="url(#metal)"/>
+    <g clip-path="url(#bezel-clip)">
+      <circle cx="128" cy="128" r="109" fill="url(#wear)"/>
+      <rect x="19" y="19" width="218" height="218" filter="url(#grain)"/>
+    </g>
+  </g>
+
+  <g id="white-impact-accent" fill="#fff">
+    <path d="M 50 147 C 44 137 44 125 35 119 C 48 115 54 104 52 92 C 63 95 70 89 68 76 C 81 79 93 74 92 54 C 111 62 127 56 135 35 C 138 51 149 57 158 49 C 163 60 169 59 179 54 C 178 68 184 74 194 75 C 191 83 198 89 208 91 C 197 87 188 83 187 78 C 177 77 173 69 172 63 C 163 68 156 64 153 58 C 145 62 137 57 132 49 C 123 62 110 68 98 64 C 95 79 86 85 74 83 C 74 94 65 101 58 99 C 59 110 53 119 44 123 C 50 130 49 140 50 147 Z"/>
+  </g>
+
+</svg>

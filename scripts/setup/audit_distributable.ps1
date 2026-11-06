@@ -550,7 +550,12 @@ if ($payloadFiles.Count -eq 0 -and $scanTargets.Count -eq 0) {
 
     $pathTargets = New-Object System.Collections.Generic.List[object]
     foreach ($file in $payloadFiles) { $pathTargets.Add($file) }
-    foreach ($file in $helperFiles) { $pathTargets.Add($file) }
+    foreach ($file in $helperFiles) {
+        # This Inno build input necessarily uses absolute Source paths to locate
+        # the owner's authored PNGs. Only DestDir reaches the installed product;
+        # the compiled setup executable is scanned below for leaked paths.
+        if ($file.Name -ne 'controller_schemes.iss') { $pathTargets.Add($file) }
+    }
     foreach ($file in $setupExes) { $pathTargets.Add($file) }
     foreach ($path in $configFiles) {
         if (Test-Path $path) { $pathTargets.Add((Get-Item -LiteralPath $path)) }

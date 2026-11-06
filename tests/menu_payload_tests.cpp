@@ -795,6 +795,13 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
       }
       const auto& row_font = records.at(rb_blitz::ui::input_font::kIconSceneRecord);
       CheckIconScene(row_font);
+      const auto original_buttons = rb_blitz::ui::input_font::OriginalButtonsBc3();
+      CHECK_TRUE(original_buttons != nullptr);
+      if (original_buttons) {
+        CHECK_EQ(original_buttons->size(), size_t{512 * 512});
+        CHECK_TRUE(std::any_of(original_buttons->begin(), original_buttons->end(),
+                               [](uint8_t byte) { return byte != 0; }));
+      }
       CheckPrivateFontGeometry(row_font, false);
       const auto& hint_font = records.at(rb_blitz::ui::input_font::kHintSceneRecord);
       CheckIconScene(hint_font);
@@ -971,11 +978,11 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
                    {"overdrive_desc", "<alt1>\xC2\x86</alt1>"},
                    {"plasma_desc", "<alt1>\xC2\x86</alt1>"},
                    {"ripple_desc", "<alt1>\xC2\x86</alt1>"},
-                   {"press_start_to_continue", "<alt1>\xC2\x8C</alt1>"},
+                   {"press_start_to_continue", "<alt1>\xC2\x8D</alt1>"},
                    {"rbbz_hint_first_note", "<alt1>\xC2\x87</alt1>"},
                    {"rbbz_hint_second_note", "<alt1>\xC2\x88</alt1>"},
                    {"rbbz_hint_move_right", "<alt1>\xC2\x89</alt1>"},
-                   {"rbbz_hint_move_left", "<alt1>\xC2\x8A</alt1>"},
+                   {"rbbz_hint_move_left", "<alt1>\xC2\x8B</alt1>"},
                    {"rbbz_hint_powerup", "<alt1>\xC2\x86</alt1>"}}}) {
             size_t found = 0;
             for (const auto& root : localized)
@@ -1224,6 +1231,27 @@ int main(int argc, char** argv) {
     CHECK_TRUE(rb_blitz::ui::input_font::PrepareScene(original, &scene, &bc3, &why));
     if (!why.empty()) std::printf("icon font refused: %s\n", why.c_str());
     if (!scene.empty()) CheckIconScene(scene);
+    return Finish();
+  }
+  if (argc == 3 && std::string(argv[1]) == "check-retail-ps-pads") {
+    std::ifstream input(argv[2], std::ios::binary);
+    CHECK_TRUE(bool(input));
+    if (!input) return Finish();
+    std::vector<uint8_t> scene{std::istreambuf_iterator<char>(input),
+                               std::istreambuf_iterator<char>()};
+    std::string why;
+    CHECK_TRUE(rb_blitz::ui::input_font::PrepareRetailPsPads(scene, &why));
+    if (!why.empty()) std::printf("retail PS pads refused: %s\n", why.c_str());
+    const auto pads = rb_blitz::ui::input_font::OriginalPsPadsBc3();
+    CHECK_TRUE(pads != nullptr);
+    if (pads) {
+      for (const auto& pad : *pads) {
+        CHECK_EQ(pad.size(), size_t{7});
+        for (size_t mip = 0; mip < pad.size(); ++mip)
+          CHECK_EQ(pad[mip].size(), size_t{1024u >> mip} * (1024u >> mip));
+      }
+      CHECK_TRUE((*pads)[0][0] != (*pads)[1][0]);
+    }
     return Finish();
   }
   {

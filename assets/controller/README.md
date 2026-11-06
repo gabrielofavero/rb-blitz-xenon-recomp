@@ -131,7 +131,7 @@ Use **Help & Options → Controls → Interface Mapping** for menu bindings and
 **Gameplay Mapping** for song bindings. Rebinding changes which keycaps the
 resolver returns, but it does not change their visual style. The resolver is
 implemented; its remaining guest hint and mapping-screen integration is tracked
-in the [hot-swap plan](../../docs/plans/in-progress/2026-10-19-button-layout-hotswap-plan.md).
+in the [hot-swap plan](../../docs/plans/finished/2026-10-19-button-layout-hotswap-plan.md).
 
 If you are making keyboard/mouse **art** for this source project, edit the
 declared PNGs and `scheme.toml` in [keyboard-mouse](keyboard-mouse/). The input
@@ -212,7 +212,7 @@ path, missing file, or unknown slot ID. The manifest must be under 64 KiB.
 package, and the ID matches
 its folder and follows `[a-z0-9][a-z0-9-]{0,31}`, and the displayed name is
 1–20 UTF-8 characters. `retail` (base-game art), `keyboard` and
-`keyboard-mouse` (internal input images), and `ps3` (installer import) are reserved. Any other valid ID
+`keyboard-mouse` (internal input images) are reserved. Any other valid ID
 can be used for a user layout, including an ID used by an installed authored
 layout. In that case, the user's package takes precedence at the next boot.
 The validator reports undeclared files; the build packer excludes them. The
@@ -260,9 +260,7 @@ the source checkout's `ps3-source-bounds.toml` records their visible areas.
 All 32 PS3 cells are also exported individually under
 `template-ps3/source-reference/`: `buttons/` contains tight artwork crops,
 while `cells/` preserves each complete 85×85 grid cell for positioning checks.
-These files are separate from the Xbox 360 reference exports. The current PS3
-reference package declares 15 controller glyphs and four PS
-pad diagrams; the optional installer import is still in progress. These are
+These files are separate from the Xbox 360 reference exports. They are
 private references, not authoring assets or distributable packages. The blank
 guides and `slots.toml` are enough to create original art without them.
 

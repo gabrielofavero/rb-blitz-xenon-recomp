@@ -215,8 +215,6 @@ struct InstallSummary {
   ComponentResult payload;
   bool ultimate_installed = false;
   ComponentResult ultimate;
-  bool ps3_scheme_installed = false;
-  std::string ps3_scheme_source;
   std::string installer_version;
   // Commit of the recompiled build (the [payload] commit pin); empty when the
   // build did not record one.

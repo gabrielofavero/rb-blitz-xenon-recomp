@@ -148,6 +148,19 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
                     selected_, pads_.size(), elapsed.count());
       }
     }
+    bool retail_ps_pads_ready = false;
+    if (const auto* scheme = registry_.Find(selected_);
+        scheme && scheme->use_retail_ps_pads && pads_.empty()) {
+      // The Xbox preset page requests xbox_0..3. This layout reuses the PS
+      // textures in the installed 360 scene without exporting pad PNGs.
+      if (const auto original = ui::input_font::OriginalPsPadsBc3()) {
+        for (size_t index = 0; index < original->size(); ++index)
+          pads_[kPadFingerprints[index].first] = (*original)[index];
+        retail_ps_pads_ready = true;
+        REXLOG_INFO("controller_schemes: selected '{}' maps xbox_0..3 to retail ps_0..3",
+                    selected_);
+      }
+    }
     if (icons_changed) {
       if (!icons.empty()) row_icons_ = std::move(icons);
       if (!hints.empty()) hint_icons_ = std::move(hints);
@@ -166,7 +179,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       retail_font_levels_.clear();
       private_font_levels_.clear();
     }
-    if (scheme_changed || icons_changed || refresh_font_after_buttons_) {
+    if (scheme_changed || icons_changed || retail_ps_pads_ready || refresh_font_after_buttons_) {
       refresh_font_after_buttons_ = false;
       rex::graphics::InvalidateTextureOverrides();
     }
@@ -191,6 +204,10 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     }
     const auto retail_original = ui::input_font::OriginalBc3();
     const auto private_original = ui::input_font::PrivateBc3();
+    if (original_buttons_.empty()) {
+      if (const auto source_buttons = ui::input_font::OriginalButtonsBc3())
+        original_buttons_ = *source_buttons;
+    }
     auto matches_font = [&](uint32_t size,
                             const std::shared_ptr<const std::vector<uint8_t>>& expected,
                             std::unordered_set<uint64_t>* hashes,

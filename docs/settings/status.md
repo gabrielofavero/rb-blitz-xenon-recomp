@@ -24,14 +24,22 @@ Part 1 wherever they disagree.
   The first controller button capture asks for confirmation before saving; after confirmation,
   custom controller bindings disable preset input for every unconfigured action. Reset All restores
   both gameplay tables and the selected controller preset.
-- **Mapping images (button-layout P9, updated 2026-11-01):** the built guest list renders
+- **Mapping images (button-layout P9, updated 2026-11-05):** the built guest list renders
   effective inputs as adjacent controller/key/mouse images. The owner accepted
   Interface Mapping's size, placement and selected colors, and confirmed the
   Gameplay Mapping Notes images and live refresh after assigning an input. The
   redundant View Inputs page was removed after the owner's visual check. The owner
   later accepted an eight-input Confirm row and both mapping surfaces in a paused
-  song. Rows above eight bindings now page six images at a time through the native
-  list; live fit and Left/Right navigation remain unproven.
+  song. Rows above eight bindings page six images at a time through the native
+  list; the owner accepted live fit and Left/Right navigation on 2026-11-02.
+- **Button Layout hints (P10, 2026-11-05):** an isolated D3D12 game run captured
+  default and rebound menu, Song Select, loading, tutorial, calibration, pause,
+  results and store prompts. The [route inventory](../engine/button-hint-inventory.md)
+  names online, randomized and later calibration routes that still lack live
+  images. The [button-layout plan](../plans/finished/2026-10-19-button-layout-hotswap-plan.md)
+  was closed at the owner's request on 2026-11-06; the owner will test the
+  remaining UI routes independently. Physical extra-button acceptance is not
+  testable with the available Xbox controller.
 - **Layout menu (button-layout P3, owner correction 2026-11-02):** Controls now opens a Layout
   submenu with Xbox, PlayStation, Nintendo Switch and Others in both contexts. The saved layout
   has a `*` marker. Only Confirm on a different named layout applies it; browsing does not.

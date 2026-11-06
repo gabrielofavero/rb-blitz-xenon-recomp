@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -13,6 +14,16 @@ namespace rb_blitz::ui::input_font {
 // No game art is stored in the project.
 bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                   std::vector<uint8_t>* original_bc3, std::string* error);
+// Read the retail button sheet from the installed game scene before any font
+// draw. Some screens use only the private font and never upload buttons.tex.
+bool PrepareOriginalButtons(const std::vector<uint8_t>& source, std::string* error);
+// Cache the four original PS pad mip chains from the installed Xbox 360 scene.
+// Used only in memory when a layout selects retail_pad_family = "ps".
+using RetailPsPads = std::array<std::vector<std::vector<uint8_t>>, 4>;
+bool PrepareRetailPsPads(const std::vector<uint8_t>& source, std::string* error);
+std::shared_ptr<const RetailPsPads> OriginalPsPadsBc3();
+inline constexpr char kControllerSceneRecord[] =
+    "ui/controller_config/gen/controller_config.milo_xbox";
 // A second private font aliases early, proven glyph codes to the reserved
 // footer image tiles without changing P9 mapping-row glyphs.
 bool PrepareHintScene(const std::vector<uint8_t>& icon_scene, std::vector<uint8_t>* scene,
@@ -40,8 +51,10 @@ bool PrepareAccountLink(const std::vector<uint8_t>& source, std::vector<uint8_t>
                         std::string* error);
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3();
 std::shared_ptr<const std::vector<uint8_t>> PrivateBc3();
+std::shared_ptr<const std::vector<uint8_t>> OriginalButtonsBc3();
 
 inline constexpr char kSceneRecord[] = "ui/resource/fonts/gen/pentatonic.milo_xbox";
+inline constexpr char kButtonSceneRecord[] = "ui/resource/fonts/gen/buttons.milo_xbox";
 inline constexpr char kIconSceneRecord[] = "ui/resource/fonts/gen/input_icons.milo_xbox";
 inline constexpr char kHintSceneRecord[] = "ui/resource/fonts/gen/inline_help_icons.milo_xbox";
 inline constexpr char kListRecord[] = "ui/resource/lists/gen/list_options_main.milo_xbox";
@@ -139,5 +152,7 @@ inline constexpr uint32_t GlyphCode(uint32_t index) {
 }
 static_assert(GlyphCode(kGameplayPowerupHint) == 0x86);
 static_assert(GlyphCode(kInterfaceStartHint) == 0x84);
+static_assert(GlyphCode(kGameplayMoveLeftHint) == 0x8B);
+static_assert(GlyphCode(kGameplayPauseHint) == 0x8D);
 
 }  // namespace rb_blitz::ui::input_font

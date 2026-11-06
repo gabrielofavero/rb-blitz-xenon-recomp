@@ -1,15 +1,19 @@
 # Button layout hot-swapping — button glyphs and controller art
 
-**Status: in progress, created 2026-10-19; scope revised 2026-10-29. P0 delivered
+**Current implementation:** The optional installer PS3 import described below was retired
+after the authored `assets/controller/playstation-3/` layout was added. The
+installer now stages that layout with the other authored controller schemes.
+
+**Status: closed 2026-11-06 at the owner's direction, created 2026-10-19; scope revised 2026-10-29. P0 delivered
 2026-10-26; P1, P2 and P3 delivered 2026-10-27; P6a and P8 delivered 2026-10-28.
 P4's tracker, D3D12 family switching and selected-pad-art stability were
 accepted 2026-10-28; visible binding-aware hints remain P10 work.
 P9 is accepted after the owner's 2026-11-02 visual checks of long-row fit and paging.
-P6b, P7 and P10 remain open. P5's extracted-folder import is implemented; the
+P6b and P10 retain the independent test limits listed below; P7 documentation is complete. P5's extracted-folder import is implemented; the
 owner's finalized retail `.pkg` needs a separate package decryption key and is
 refused with a specific explanation. P11's v2 loader, staging, internal keyboard
-art and distinct SDL source path landed 2026-10-30; physical-device/UI acceptance
-remains open. P9's ordinary Interface and Gameplay Mapping
+art and distinct SDL source path landed 2026-10-30; physical extra-button acceptance
+is not testable with the owner's available controller. P9's ordinary Interface and Gameplay Mapping
 images and binding refresh have owner visual acceptance. The icon font supports
 180 distinct images and reuses tiles for repeated sources. An eight-input Confirm row has owner
 visual acceptance; the latest font-atlas repair has owner visual acceptance.
@@ -17,6 +21,16 @@ The owner has also accepted Interface Mapping and Gameplay Notes images in a pau
 Long rows page through six images at a time with Left/Right, including rows above 180 sources.
 The P10 guest-hint route inventory has begun in
 [`docs/engine/button-hint-inventory.md`](../../engine/button-hint-inventory.md).**
+
+**Closure decision (2026-11-06).** The owner will perform any further UI tests independently
+and asked to close this plan now. Closing records the delivered implementation and P7 audit;
+it does not turn unobserved behavior into accepted behavior. The remaining evidence gaps are
+listed in [button-hint-inventory.md](../../engine/button-hint-inventory.md) and
+[known-issues.md](../../reference/known-issues.md): randomized, service-dependent and later
+calibration hints; remaining binding/profile transitions; real controller-source in-song art;
+and distinct extra-button capture/images, which cannot be tested with the available Xbox
+controller. The optional retail PS3 `.pkg` still requires a decryption key; extracted-folder
+import works. A full installer audit still needs a built setup executable.
 The format measurement in §2.3 was made on 2026-10-19 and its decoded evidence is in
 `out/button-schemes/format-2026-10-19/`; everything else marked `[tree]` is read from the current
 tree, and everything marked **unproven** is not yet measured in a boot.
@@ -64,14 +78,109 @@ P11, then checks the final UI and art. Historical P0–P8 evidence remains evide
 the eight-folder revision. The current authored catalog has ten controller
 layouts; eight declare four pad PNGs. P6b's remaining acceptance covers all ten.
 
-| Remaining prompt | Current state | Next exit condition |
+| Prompt | 2026-11-05 state before owner closure | Independent evidence gap or disposition |
 | --- | --- | --- |
-| P5 | Extracted-folder import and package probe delivered; retail `.pkg` reports its key requirement | Owner game UI check remains; retail `.pkg` support requires a separately authorized key approach |
-| P11 | V1/v2 coexist; eleven manifests validate and stage; virtual SDL extras pass, prior boot listed eight controllers | Physical-device mapping/capture and on-screen image acceptance, including the two new Meta Quest layouts |
+| P5 | Extracted-folder import and package probe delivered; imported PS3 appears and applies in the game UI | Retail `.pkg` support requires a separately authorized key approach; PS3-specific pad slots cannot be viewed in the Xbox preset route |
+| P11 | Implemented; v1/v2 coexist, eleven manifests validate and stage, virtual SDL extras pass, and Quest 2/3 pad diagrams render | Physical extra-button capture, binding and image acceptance are **not testable** with the available Xbox controller; retain as unverified hardware coverage, not a P10 blocker |
 | P9 | Owner reports the remaining long-row fit and paging visual checks look good (2026-11-02); host tests and prior mapping/in-song acceptance recorded below | Accepted; retain coverage while P10 changes the icon pipeline |
-| P10 | Known guest-owned hint routes now have action-aware implementation and six-locale host checks (2026-11-04); main-menu footer and loading Confirm have owner acceptance | Owner-run visual/input checks for tutorial, calibration, localized prompts and panel-specific footers |
-| P6b | Ten authored packages and internal keyboard validate and stage; host source-map checks pass (2026-11-04) | Cycle all ten in game, verify art and fallback, record owner visual acceptance |
-| P7 | Documentation and closeout open | Audit, document P5 outcome, then move this plan to `finished/` |
+| P10 | Default/rebound menu, splash, Song Select, loading, tutorial, audio calibration, pause, results and store routes captured; add/replace/reset and first-source order demonstrated | Prove still-unseen randomized, service-dependent and account/error hints; test removal/reorder/profile changes where supported |
+| P6b | All ten authored layouts selected and saved in game; all ten Controller Presets diagrams rendered; keyboard art appears in song and follows a Gameplay Mapping rebound | Check controller-source art in a song with real controller input; record physical extras as not testable |
+| P7 | Documentation audit updated for current catalog and P10 evidence; docs checker, diff check and refreshed-payload distributable audit pass | Closed 2026-11-06 at the owner's direction; full setup-executable audit remains a release check |
+
+**2026-11-04 autonomous acceptance checkpoint.** The owner authorized driving the UI for this
+scope. The release build and focused host suites passed. The first live run exposed blank splash
+and main-menu icons because the button BC3 sheet was only captured after a GPU upload of
+`buttons.tex`; boot routes can draw the private font before that upload. The runtime now reads the
+installed button scene during menu payload generation, and the rebuilt splash/menu show icons.
+All ten authored controller layouts were selected through the grouped menu and persisted in an
+isolated profile. The imported local PS3 scheme appeared, selected and displayed the Xbox page's
+retail fallback pad art; the generated `ps_*` images cannot be assessed on that Xbox page.
+All ten authored diagrams rendered on the Controller Presets page. Interface Confirm changed to H immediately after
+rebinding and returned to Enter immediately after reset. Audio calibration showed Enter. The
+basic tutorial exposed a blank Move Left hint: its locale pointed to glyph `0x8A` while the font
+assigns `0x8B`. The HUD Pause locale had the analogous mismatch. Both were corrected; the
+rebuilt tutorial shows Q, W, Left and Right, and in-song goal/Continue prompts show Q, W and Esc.
+Song Select displayed Enter, Esc, Space and Y footer tiles; clicking a song in the fresh
+profile entered the game's first-run tutorial, so pause/results remain unmeasured in this pass.
+Captures and logs are under `out/button-schemes/autonomous-*-20261104/`. The connected-device
+list includes virtual gamepad buses and a generic HID game controller, but no supported physical
+extra-button device was exercised. P10, P11 and P6b therefore remain open before P7.
+
+**2026-11-04 normal-song follow-up.** A separate disposable profile copied prior local progress
+and reached a normal One Week song. Captures under
+`out/button-schemes/autonomous-song-20261104/shots/` show the loading Enter prompt, the
+in-song HUD, Pause with Enter Select / Esc Back, the score page with Enter Continue, and the
+offline Rock Central notice with Enter Continue / Esc Back. The song completed and returned to
+Song Select without a crash. The calibration wizard again showed Enter in its audio instruction;
+an unattended measurement failed before its video stage. Song Select's Rhythmverse and Messages
+tabs did not open by mouse or right-trigger input in this offline profile, so their footers remain
+unmeasured. The connected HID game controller reports `VID_1234/PID_BEAD`, alongside vJoy and
+virtual gamepad buses; this is no evidence of a physical extra-button device. P10 still needs
+the other localized/panel routes and rebound checks; P11 and P6b still need physical source and
+source-specific in-song acceptance. P7 is therefore not ready to close.
+The same disposable run rebound Interface Confirm to H and its Help & Options footer changed
+immediately to H. Subsequent UI automation could not foreground the game window, so no rebound
+calibration screenshot was obtained. The game process was stopped; the isolated profile was not
+used as evidence for that open route. A fresh launch of the same disposable profile also could
+not bring the game window to the foreground, so live UI work stopped there.
+
+**2026-11-05 connected Xbox checkpoint.** The owner connected the only available controller,
+a USB Xbox controller (`VID_045E/PID_0B12` in Windows). A standalone SDL 3 probe of the same
+connection reports one `Xbox One Controller` (`VID_045E/PID_02FF` through SDL's Windows mapping),
+11 raw buttons, six axes and one hat. Its normalized mapping assigns all 11 buttons to ordinary
+Xbox controls; `misc1`, `misc2`, `touchpad` and all four paddles each report unavailable.
+The mapping and per-button availability are recorded in
+`out/button-schemes/p11/physical-device-20261105.txt`. The release game's SDL backend detected
+the controller. In an isolated profile, Xbox Series applied and persisted, and Interface
+Mapping rendered its authored A/B images beside the keyboard alternatives. Gameplay Mapping's
+Notes page showed the expected Q/W and mouse images. Captures and the game log are in
+`out/button-schemes/physical-20261105/`. The four focused input/scheme CTest cases passed.
+This verifies the XInput-projected, **no-extra-button** path. The owner confirmed no second
+controller is available, so distinct physical extra-button capture, binding, and P9/P10 image
+acceptance cannot be completed on this hardware. A real controller press has not yet been
+observed in the live game; static art with a connected pad is not evidence of last-input-family
+switching. P11 and P6b remain open for those device-dependent checks.
+
+**2026-11-05 owner scope decision.** P11's remaining physical extra-button acceptance is
+**not testable on the available hardware**: the sole Xbox controller exposes no `misc1`,
+`misc2`, `touchpad` or paddle source. Keep the implemented path and virtual-device tests,
+but record real extra-button capture, binding and P9/P10 image behavior as unverified.
+Proceed with P10 and the available-input portions of P6b; do not require a controller
+the owner does not have to close those portions. Reopen this hardware check if an
+extra-button controller becomes available.
+
+**2026-11-05 autonomous P10 continuation.** The owner authorized the agent to drive
+every missing test and capture images. The release build, five focused CTest
+suites, and 561 generated-record checks passed. The D3D12 run in an isolated
+profile captured default and rebound main/Help, Song Select, loading, audio
+calibration, pause, results and store prompts. Replacing Interface Confirm with
+H refreshed the visible footer and audio calibration instruction immediately.
+Adding H after Enter kept Enter as the first-source prompt and displayed both
+keys on the mapping row; Reset restored Enter. Replacing Gameplay First Note
+with J changed the tutorial entry and in-song goal to J while the Interface
+Confirm instruction stayed Enter. One Week completed through score and offline
+notice without a crash. [The screenshot index](../../../out/button-schemes/p10-live-20261105/README.md)
+links each positive result and each unavailable route. The offline profile
+did not open Messages/Inbox or online leaderboard content; automatic video
+calibration still requires a successful audio measurement. Randomized Power-up
+tip, Power-up Select/remedial text, account-link/error routes, and a few
+binding/profile transitions still lack live images. P10 and dependent P6b/P7
+acceptance remain open; generated-record assertions are not substituted for
+unseen UI images.
+
+**2026-11-05 P7 audit checkpoint.** The P5 extracted-folder import and retail
+package key limit are recorded above and in the known issues. The toggle,
+settings status, distributable, route inventory, docs index and known-issues
+pages now reflect the ten-layout/94-keyboard-image catalog and live evidence.
+`check_docs.py` reports zero errors and 154 existing warnings; `git diff
+--check` passes. A fresh payload snapshot from the release build passed all
+eight `audit_distributable.ps1 -SkipSetup` checks, including no game/PS3 art
+and no machine paths in shipped files. The generated Inno source list uses
+absolute `Source` paths during compilation; the audit now checks the compiled
+setup executable for path leaks rather than treating those build-only paths as
+shipped data. No setup executable was built for this checkpoint, so a full
+installer audit remains a release task. The owner closed the plan on 2026-11-06
+with the outstanding P10/P6b live acceptance retained as independent checks.
 
 ## 1. Request, normalized
 
@@ -769,10 +878,10 @@ graph TD
 > PS3 scheme remains a parallel v1 installer task and is not a prerequisite for testing the eight
 > authored layouts; its outcome must be recorded before closing P7.
 
-Remaining execution: P10 → P6b → P7, with P5 in parallel and P11 physical-device
-acceptance still open. P7 closes only
-after v2 loading, distinct-source capture, guest hints, real-art acceptance and the PS3 import
-outcome are recorded. A new host overlay remains outside this plan's authorization.
+The historical execution order was P10 → P6b → P7, with P5 in parallel and P11 physical
+extra-button acceptance not testable on available hardware. The 2026-11-06 closure decision
+above supersedes that acceptance gate; the unobserved routes remain independent checks.
+A new host overlay remains outside this plan's authorization.
 
 ### P0 — Scene texture decode, slot map and template
 
@@ -1163,13 +1272,13 @@ the guest thread.
 
 ### P5 — Optional PS3 import in the installer
 
-**Status (2026-11-04): extracted-folder installer import delivered and verified; the owner's finalized retail `.pkg` route is unavailable under the no-bundled-key constraint.**
+**Status (2026-11-04): extracted-folder installer import and game UI selection verified; the owner's finalized retail `.pkg` route is unavailable under the no-bundled-key constraint.**
 The private PS3 contact sheet, individual source crops, complete grid cells and
 `ps3-source-bounds.toml` cover all 32 slots, including the two transparent cells.
 The current reference scheme declares 15
 controller glyphs and four `ps_*` pad diagrams. The installer now generates a
 local v1 `ps3` scheme from an extracted game folder. Its runtime menu appearance
-has not yet been checked in the game UI.
+and selection were checked in an isolated game session.
 P5 may continue to emit a v1 `ps3` scheme: P11 must preserve that validated format and its
 reserved trusted-install behavior. P5 does not need to fabricate v2 physical-source entries.
 
@@ -1199,8 +1308,10 @@ the QA-digest stream for non-finalized packages and cannot decrypt this retail f
 The extracted-folder probe and sandbox import succeeded. The import wrote only a
 v1 manifest, 15 button PNGs, and four PS3 pad PNGs; all 19 images matched the
 private reference exports pixel for pixel. No whole ARK or Sony key was written.
-The Inno setup and updater compile, and the installer tests pass. The owner will
-check the game UI later.
+The Inno setup and updater compile, and the installer tests pass. The autonomous
+game run found PlayStation 3 in the PlayStation group and applied it live. The
+Xbox Controller Presets page showed retail fallback for its `xbox_*` pad slots;
+it does not display the imported `ps_*` slots.
 
 **Verify.** The generated `ps3/buttons/<slot-id>.png` files match the corresponding PS3 reference
 cell art for the known controller glyphs; omitted instrument glyphs remain from the user's 360
@@ -1265,7 +1376,7 @@ has not authored or licensed.
 
 ### P6b — The owner's ten controller layouts and visual acceptance
 
-**Status (2026-11-04): ten packages validate and stage; live visual acceptance open.**
+**Status (2026-11-04): ten packages validate and stage; all ten select and show their Controller Presets diagrams, with in-song and physical-source checks open.**
 The ten direct controller folders in §4.6 have button PNGs; eight declare four pad PNGs each. The
 `keyboard-mouse/` folder has 94 declared key/mouse PNGs and is an internal resource. P11's
 loader and packer validate and stage them. The editable pad SVGs are
@@ -1318,6 +1429,9 @@ ship temporary pad SVGs, or commit PS3-extracted art.
 
 ### P7 — Documents, audit and close
 
+**Closed 2026-11-06.** The documentation and payload audit described above are recorded;
+the owner will test the outstanding live cases independently.
+
 **Goal.** The change is recorded where the project looks for it.
 
 **Deliverable.**
@@ -1338,7 +1452,8 @@ ship temporary pad SVGs, or commit PS3-extracted art.
   in the payload.
 - `patches/README.md`: the texture override patch.
 - `docs/README.md`: maintain the existing plan row; move the plan to `finished/` only when
-  P9/P10/P11, P6b and P7 pass, with P5's import outcome explicitly recorded.
+  P9/P10, the testable portions of P6b, and P7 pass, with P11's physical extra-button
+  acceptance marked not testable and P5's import outcome explicitly recorded.
 - `assets/controller/README.md` and `controller-scheme-v2-format.md`: distinguish installed v1 user-package
   instructions from implemented v2 authored layouts, internal keyboard resources, live source
   availability, and the declared-image-only packer. Remove the current "proposed" warning only
@@ -1832,9 +1947,10 @@ current interface/gameplay context.
   implementation is insufficient if two visible contexts need different icons for one slot.
 - Next-frame refresh when bindings, profile/preset, active input family, or controller layout
   changes; no stale icons on already-visible footers. Preserve D14's explicit selection preview.
-- Consume P11's v2 source-keyed controller/keyboard images. Prove that a custom SDL source bound
-  to an action draws its own art and obeys first-source order, while unavailable and OS-reserved
-  controls are not advertised. Keep the existing retail and v1 package paths working.
+- Consume P11's v2 source-keyed controller/keyboard images. Verify first-source order with
+  available inputs, and record physical extra-button art as not testable on the owner's
+  controller. Unavailable and OS-reserved controls must not be advertised. Keep the existing
+  retail and v1 package paths working.
 - Host/fixture tests for context and invalidation, and authorized live captures/logs in
   `out/button-schemes/p10/` covering default, rebound, multiple-source, removed, reset and
   profile-switch cases. Record any route left unproven as outstanding work.
@@ -1852,13 +1968,14 @@ known actionable hint still shows stale/default bindings.
 
 ### P11 — V2 authored manifests and distinct physical-source support
 
-**Status (2026-10-30): loader, packer, source sampling and host tests landed; physical-device
-capture and on-screen acceptance remain open.** The pre-implementation read was
+**Status (2026-11-05): loader, packer, source sampling and host tests landed;
+physical extra-button capture, binding and on-screen image acceptance are not testable
+with the owner's only controller.** The pre-implementation read was
 [`docs/guides/controller-scheme-v2-format.md`](../../guides/controller-scheme-v2-format.md)
 and all nine non-template `scheme.toml` files. The prior runtime accepted v1 only,
 limited packages to 64 files, drew built-in keycaps, and sampled an XInput-shaped pad state
-that could not distinguish extra SDL buttons. This prompt remains a prerequisite for final
-P9/P10/P6b acceptance.
+that could not distinguish extra SDL buttons. Its implemented path supports P9/P10/P6b;
+physical extra-button acceptance is deferred until suitable hardware exists.
 
 **Implementation evidence (2026-10-30).** `rb_blitz_controller_schemes` validated all nine
 authored manifests. The release build staged eight controller ids under `schemes/` and 92 declared
@@ -2020,7 +2137,7 @@ packages, make keyboard art a controller choice, or create a host overlay to dis
 | P5/P6a/P11 | [`docs/guides/distributable.md`](../../guides/distributable.md) | no PS3/game art in the payload; stage only declared v2 files and exclude temporary pad SVGs |
 | P11 | [`docs/guides/controller-scheme-v2-format.md`](../../guides/controller-scheme-v2-format.md), [`README.md`](../../../assets/controller/README.md) | make the proposed v2 source, variant, keyboard and packaging rules executable; retain v1 user-package instructions |
 | P8/P9/P10 | [`docs/engine/input-flow.md`](../../engine/input-flow.md) | resolver context, ordering and remap-aware hint seams, once measured |
-| P7 | this plan | status moved to `finished/` after P9/P10/P11, P6b and P7 pass; record P5's outcome |
+| P7 | this plan | moved to `finished/` on 2026-11-06 at the owner's direction; P11's hardware limit, P5's outcome and the independent live checks remain explicit |
 
 ## 11. Reproducing the corrected measurement
 

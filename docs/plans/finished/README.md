@@ -6,6 +6,7 @@ decisions behind code that is running today, and the per-prompt tables are how a
 
 | Plan | Delivered |
 | --- | --- |
+| [`2026-10-19-button-layout-hotswap-plan.md`](2026-10-19-button-layout-hotswap-plan.md) | Controller Layout with ten authored layouts, source-keyed icons and binding-aware guest hints. Closed 2026-11-06 at the owner's request; the remaining live routes and unavailable extra-button hardware test are recorded as unverified for independent testing. |
 | [`2026-10-13-rhythmverse-store-plan.md`](2026-10-13-rhythmverse-store-plan.md) | The RhythmVerse store's P0–P8 acceptance passed on 2026-10-22 (69 steps, 0 failures). The plan records the later P9 owner adjustments and their remaining verification. |
 | [`2026-10-22-in-game-binding-rows-plan.md`](2026-10-22-in-game-binding-rows-plan.md) | Guest-drawn binding rows replaced the Interface Mapping overlay on 2026-10-25; gameplay verification remains deferred at the owner's request. |
 | [`2026-10-22-background-music-navigator-plan.md`](2026-10-22-background-music-navigator-plan.md) | Background music navigator P1–P3: shared rolling playlist, bindings and native pause, the unchanged retail A/B footer, a clickable player with local covers, and Play Current Song alignment. The owner accepted the full feature on 2026-10-26 after an earlier RB Next crash; §22 records the acceptance and unmeasured cases. |

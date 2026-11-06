@@ -110,6 +110,7 @@ set(RBBLITZ_SOURCES
     src/loading/load_guard.cpp
     src/loading/load_trace.cpp
     src/loading/crash_recovery.cpp
+    src/platform/crash_diagnostics.cpp
     src/platform/song_load_monitor.cpp
     src/hooks/hud_layout.cpp
     src/hooks/hud_layout_runtime.cpp
@@ -256,8 +257,8 @@ set(RBBLITZ_SOURCES
     src/store/store_library.cpp
     src/fs/dlc_song_metadata.cpp
     # The engine's platform texture container and its DXT blocks (src/assets/texture_codec.h):
-    # the store's album art encodes with it now, and the button-layout plan's PS3 import and slot
-    # sheets decode with it next. SDK-free, so the suites cover it without a boot.
+    # the store's album art encodes with it, and controller slot tooling decodes with it.
+    # SDK-free, so the suites cover it without a boot.
     src/assets/texture_codec.cpp
     src/assets/input_font_atlas.cpp
     src/assets/texture_override.cpp
@@ -354,7 +355,7 @@ set_source_files_properties(src/graphics/development_coverage.cpp PROPERTIES COM
     "RBBLITZ_DEVELOPMENT_DIRECTORY_HASH=\"${RBBLITZ_DEVELOPMENT_DIRECTORY_HASH}\";RBBLITZ_DEVELOPMENT_JOURNAL=\"${RBBLITZ_DEVELOPMENT_JOURNAL}\"")
 target_link_libraries(rb_blitz PRIVATE xxhash)
 if(WIN32)
-    target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32 runtimeobject)
+    target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32 runtimeobject dbghelp)
 endif()
 
 # The store's fault logger (src/store/store_probe.cpp) prints host frames, which are resolved
@@ -781,6 +782,15 @@ if(BUILD_TESTING)
         target_include_directories(rb_blitz_song_load_monitor_tests PRIVATE src tests)
         add_dependencies(rb_blitz_song_load_monitor_tests rb_blitz_load_monitor)
         add_test(NAME song_load_monitor COMMAND rb_blitz_song_load_monitor_tests $<TARGET_FILE:rb_blitz_load_monitor>)
+    endif()
+
+    if(WIN32)
+        add_executable(rb_blitz_crash_diagnostics_tests tests/crash_diagnostics_tests.cpp
+            src/platform/crash_diagnostics.cpp)
+        target_include_directories(rb_blitz_crash_diagnostics_tests PRIVATE src)
+        target_link_libraries(rb_blitz_crash_diagnostics_tests PRIVATE dbghelp)
+        add_test(NAME crash_diagnostics COMMAND rb_blitz_windows_test_runner
+            $<TARGET_FILE:rb_blitz_crash_diagnostics_tests>)
     endif()
 
     add_executable(rb_blitz_payload_overlay_tests

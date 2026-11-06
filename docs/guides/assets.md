@@ -408,7 +408,7 @@ occupied cells; the two small `g`/`c` entries are empty. The prior evidence is i
 The older PNGs started at `header + 23`, eight bytes too early, and used the
 then-broken no-op word swap. They are superseded by the P0 exports. These directories
 are ignored and must never be shipped as game art. The successor work
-for live replacement is the [button layout hot-swap plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md), P1 onward.
+for live replacement is the [button layout hot-swap plan](../plans/finished/2026-10-19-button-layout-hotswap-plan.md), P1 onward.
 
 For a local reference while authoring controller art, run
 `python scripts/controllers/export_template_360.py`. It reads the user's Xbox 360 scenes and
@@ -421,8 +421,8 @@ tracked `assets/controller/template/` remains the blank, distributable guide.
 For the local PlayStation 3 counterpart, run `python scripts/controllers/export_template_ps3.py`.
 It creates `assets/controller/template-ps3/ps3/` with individual controller
 glyphs from the user's PS3 buttons scene and `ps_0..3` pad diagrams from the
-user's Xbox 360 scene. `ps3` is a reserved id for the trusted local import path;
-this reference folder is not installed automatically. For original custom art,
+user's Xbox 360 scene. This reference folder is not installed automatically.
+The authored `playstation-3` layout is staged by the installer. For original custom art,
 follow the standalone [controller authoring guide](../../assets/controller/README.md).
 
 ### Can a UI texture be swapped today? (historical, superseded for format)
@@ -560,7 +560,7 @@ asset**, from an independent build, at the same offset. Measured on `buttons`:
 So the next attempt has an oracle the last one did not: find a decoding that reads *both*
 copies, or use the 70%-identical majority to separate "this is the image" from "this is a
 re-encode". That belongs with the rest of the open problem in
-[button layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md).
+[button layout plan](../plans/finished/2026-10-19-button-layout-hotswap-plan.md).
 
 ## The texture record, pinned
 

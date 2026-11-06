@@ -576,6 +576,15 @@ Each launch writes a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:
 Get-ChildItem logs\*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1 Name,Length,LastWriteTime
 ```
 
+On Windows, the boot log also reports its process ID and crash-dump directory.
+An unhandled native exception writes a matching `.txt` record (exception code,
+address, thread, dump status) and `.dmp` file there. The adjacent
+`song-load-recovery.log` records the process ID, UTC exit time, uptime, exit
+code, and song-load attempt number even if the exception handler cannot run.
+Match these IDs to the boot log when investigating an abrupt exit. Windows
+fail-fast termination can bypass in-process handlers, so the monitor record may
+be the only artifact for that case.
+
 A source path that shows up in a log is relative to the checkout
 (`./src/hooks/dlc.cpp`), not absolute: the build maps its own two trees with
 `-ffile-prefix-map`, which is the same thing that keeps the path of the machine

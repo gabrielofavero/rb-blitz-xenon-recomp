@@ -463,7 +463,7 @@ delivery/arbitration still requires live acceptance.
 `0042-imgui-image-textures.patch` exposes drawer-owned bounded RGBA image textures for host UI.
 
 `0043-texture-override.patch` is the P1 seam for the
-[controller layout plan](../docs/plans/in-progress/2026-10-19-button-layout-hotswap-plan.md).
+[controller layout plan](../docs/plans/finished/2026-10-19-button-layout-hotswap-plan.md).
 The provider gets a read-only view of the original guest base level to identify a
 texture. It returns the same block-compressed host format in untiled, unswapped
 order. This matches how both backends already keep native BC3 textures and avoids

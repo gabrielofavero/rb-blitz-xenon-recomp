@@ -1022,7 +1022,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             {"overdrive_desc", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
             {"plasma_desc", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
             {"ripple_desc", "<alt>X</alt>", "<alt1>\xC2\x86</alt1>"},
-            {"press_start_to_continue", "START", "<alt1>\xC2\x8C</alt1>"}}};
+            {"press_start_to_continue", "START", "<alt1>\xC2\x8D</alt1>"}}};
         for (const auto& route : hint_text) {
           size_t found = 0;
           for (auto& root : roots) {
@@ -1064,7 +1064,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                  {"rbbz_hint_first_note", "<alt1>\xC2\x87</alt1>"},
                  {"rbbz_hint_second_note", "<alt1>\xC2\x88</alt1>"},
                  {"rbbz_hint_move_right", "<alt1>\xC2\x89</alt1>"},
-                 {"rbbz_hint_move_left", "<alt1>\xC2\x8A</alt1>"},
+                 {"rbbz_hint_move_left", "<alt1>\xC2\x8B</alt1>"},
                  {"rbbz_hint_powerup", "<alt1>\xC2\x86</alt1>"}}}) {
           std::string why;
           if (!screen::AddLocaleEntry(&roots, key, value, &why)) {
@@ -1442,6 +1442,18 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     std::string why;
     if (read(ui::input_font::kSceneRecord, &original, &why)) {
       if (ui::input_font::PrepareScene(original, &prepared, &bc3, &why)) {
+        std::vector<uint8_t> button_source;
+        if (!read(ui::input_font::kButtonSceneRecord, &button_source, &why) ||
+            !ui::input_font::PrepareOriginalButtons(button_source, &why)) {
+          if (error) *error = "retail button sheet preparation was refused: " + why;
+          return false;
+        }
+        if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
+          std::vector<uint8_t> controller_source;
+          if (!read(ui::input_font::kControllerSceneRecord, &controller_source, &why) ||
+              !ui::input_font::PrepareRetailPsPads(controller_source, &why))
+            note("retail PS pad cache unavailable: " + why);
+        }
         std::vector<uint8_t> list_source, list;
         if (!read(ui::input_font::kListRecord, &list_source, &why) ||
             !ui::input_font::PrepareList(list_source, &list, &why)) {

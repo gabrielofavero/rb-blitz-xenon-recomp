@@ -22,6 +22,8 @@ namespace rb_blitz::ui::input_font {
 namespace {
 std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_original_bc3;
 std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_private_bc3;
+std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_original_buttons_bc3;
+std::atomic<std::shared_ptr<const RetailPsPads>> g_original_ps_pads_bc3;
 uint32_t Le32(const uint8_t* p) {
   return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
 }
@@ -88,7 +90,7 @@ uint32_t Crc32(const uint8_t* bytes, size_t size) {
   return ~crc;
 }
 bool DecodeStream(const std::vector<uint8_t>& source, std::vector<uint8_t>* bytes,
-                  std::string* error) {
+                  std::string* error, uint32_t max_chunk = 2 * 1024 * 1024) {
   constexpr uint32_t kHeader = 0x810;
   constexpr uint32_t kStored = 0xCABEDEAF;
   constexpr uint32_t kDeflate = 0xCDBEDEAF;
@@ -111,7 +113,7 @@ bool DecodeStream(const std::vector<uint8_t>& source, std::vector<uint8_t>* byte
     } else {
       if (size < 5) return Fail(error, "short compressed Milo chunk");
       const uint32_t expanded = Le32(source.data() + pos);
-      if (expanded == 0 || expanded > 2 * 1024 * 1024)
+      if (expanded == 0 || expanded > max_chunk)
         return Fail(error, "implausible Milo chunk size");
       const size_t old = bytes->size();
       bytes->resize(old + expanded);
@@ -142,6 +144,78 @@ bool PackStored(const std::vector<uint8_t>& bytes, std::vector<uint8_t>* scene,
   return true;
 }
 }  // namespace
+
+bool PrepareOriginalButtons(const std::vector<uint8_t>& source, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  // Measured buttons.milo_xbox record: 23-byte header, eight zero bytes, then
+  // the first 512-square BC3 mip. Xbox stores each 16-bit word byte-swapped.
+  constexpr size_t kHeader = 0x5C9, kPayload = kHeader + 31;
+  constexpr size_t kBaseBytes = 512u * 512u;
+  constexpr std::array<uint8_t, 12> kHeaderShape{
+      8, 0, 0, 0, 0x18, 0, 2, 0, 2, 0, 2, 0};
+  if (bytes.size() < kPayload + kBaseBytes ||
+      std::memcmp(bytes.data() + kHeader + 4, kHeaderShape.data(),
+                  kHeaderShape.size()) != 0 ||
+      std::any_of(bytes.begin() + kHeader + 23, bytes.begin() + kPayload,
+                  [](uint8_t byte) { return byte != 0; }))
+    return Fail(error, "retail button BC3 texture record changed");
+  std::vector<uint8_t> original(kBaseBytes);
+  for (size_t i = 0; i < kBaseBytes; i += 2) {
+    original[i] = bytes[kPayload + i + 1];
+    original[i + 1] = bytes[kPayload + i];
+  }
+  g_original_buttons_bc3.store(
+      std::make_shared<const std::vector<uint8_t>>(std::move(original)));
+  if (error) error->clear();
+  return true;
+}
+
+bool PrepareRetailPsPads(const std::vector<uint8_t>& source, std::string* error) {
+  std::vector<uint8_t> bytes;
+  // This scene has 2.8 MiB expanded chunks, larger than the font scenes.
+  if (!DecodeStream(source, &bytes, error, 3 * 1024 * 1024)) return false;
+  constexpr std::array<uint8_t, 12> kHeaderShape{
+      8, 0, 0, 0, 0x18, 6, 4, 0, 4, 0, 4, 0};
+  constexpr std::array<uint32_t, 4> kChainCrc{
+      0x1107691A, 0xF06BDFD3, 0xEEB00FDC, 0x53DB3410};
+  constexpr size_t kMipCount = 7;
+  constexpr size_t kChainBytes = 1398016;
+  RetailPsPads pads;
+  for (size_t index = 0; index < pads.size(); ++index) {
+    const std::string path = "img/ps_" + std::to_string(index) + ".png";
+    const auto at = std::search(bytes.begin(), bytes.end(), path.begin(), path.end());
+    if (at == bytes.end() || at == bytes.begin() ||
+        *(at - 1) != path.size())
+      return Fail(error, "retail PS pad path changed");
+    const size_t path_end = size_t(at - bytes.begin()) + path.size();
+    const size_t header = path_end + 11;
+    const size_t payload = header + 31;
+    if (payload + kChainBytes > bytes.size() ||
+        std::memcmp(bytes.data() + header + 4, kHeaderShape.data(),
+                    kHeaderShape.size()) != 0 ||
+        std::any_of(bytes.begin() + header + 23, bytes.begin() + payload,
+                    [](uint8_t byte) { return byte != 0; }) ||
+        Crc32(bytes.data() + payload, kChainBytes) != kChainCrc[index])
+      return Fail(error, "retail PS pad BC3 texture record changed");
+    size_t offset = payload;
+    for (size_t mip = 0; mip < kMipCount; ++mip) {
+      const size_t dim = 1024u >> mip;
+      const size_t size = dim * dim;
+      auto& level = pads[index].emplace_back(size);
+      // Xbox scene BC3 words are byte-swapped; the host override expects
+      // canonical BC3 blocks, just like PrepareOriginalButtons above.
+      for (size_t i = 0; i < size; i += 2) {
+        level[i] = bytes[offset + i + 1];
+        level[i + 1] = bytes[offset + i];
+      }
+      offset += size;
+    }
+  }
+  g_original_ps_pads_bc3.store(std::make_shared<const RetailPsPads>(std::move(pads)));
+  if (error) error->clear();
+  return true;
+}
 
 bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                   std::vector<uint8_t>* original_bc3, std::string* error) {
@@ -446,5 +520,11 @@ std::shared_ptr<const std::vector<uint8_t>> OriginalBc3() {
 }
 std::shared_ptr<const std::vector<uint8_t>> PrivateBc3() {
   return g_private_bc3.load();
+}
+std::shared_ptr<const std::vector<uint8_t>> OriginalButtonsBc3() {
+  return g_original_buttons_bc3.load();
+}
+std::shared_ptr<const RetailPsPads> OriginalPsPadsBc3() {
+  return g_original_ps_pads_bc3.load();
 }
 }  // namespace rb_blitz::ui::input_font

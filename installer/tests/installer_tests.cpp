@@ -29,8 +29,6 @@
 #include "inflate.h"
 #include "install.h"
 #include "paths.h"
-#include "ps3_package.h"
-#include "ps3_scheme.h"
 #include "settings/paths.h"
 #include "stfs.h"
 #include "util.h"
@@ -2118,6 +2116,9 @@ static void TestWizardScript() {
   CHECK_CONTAINS(script, "SavePromptLabel.Caption := 'Saved games:';");
   CHECK_CONTAINS(script, "DlcDirLeaf = 'Downloaded Content'");
   CHECK_CONTAINS(script, "SaveDirLeaf = 'Saved Games'");
+  CHECK_FALSE(script.find("Ps3Page") != std::string::npos);
+  CHECK_FALSE(script.find("probe-ps3") != std::string::npos);
+  CHECK_FALSE(script.find("install-ps3-scheme") != std::string::npos);
   // The progress page's second line is the helper's own detail, or the sentence the
   // stage was introduced with - never the first line's text twice.
   CHECK_CONTAINS(script, "second := gStageSubtitle;");
@@ -2194,71 +2195,6 @@ static void TestPayloadScripts() {
   CHECK_CONTAINS(build, "the payload snapshot does not match the build tree it was taken from");
 }
 
-static void TestPs3FolderProbe() {
-  BeginCase("PS3 folder probe checks the Buttons Milo stream without game art");
-  const fs::path folder = g_root / "ps3-probe";
-  const fs::path scene = folder / "ui/resource/fonts/gen/buttons.milo_ps3";
-  std::vector<std::uint8_t> stream;
-  for (int table = 0; table < 2; ++table) {
-    stream.insert(stream.end(), {0x42, 0xaa, 0, 0});  // 85.0f base glyph
-    stream.resize(stream.size() + 24);
-    stream.insert(stream.end(), {0, 0, 0, 0x22});  // 34 entries
-    for (int glyph = 0; glyph < 34; ++glyph) {
-      const std::uint16_t code = glyph == 0 ? 0x20 : glyph == 1 ? 0x26 :
-                                 glyph == 33 ? 0xa0 : std::uint16_t(0x30 + glyph);
-      stream.push_back(std::uint8_t(code >> 8));
-      stream.push_back(std::uint8_t(code));
-      stream.resize(stream.size() + 16);
-    }
-  }
-  std::vector<std::uint8_t> milo(0x810, 0);
-  auto put32 = [&](std::size_t at, std::uint32_t value) {
-    for (int i = 0; i < 4; ++i) milo[at + i] = std::uint8_t(value >> (i * 8));
-  };
-  put32(0, 0xCABEDEAF); put32(4, 0x810); put32(8, 1);
-  put32(0x10, 0x01000000 | std::uint32_t(stream.size()));
-  milo.insert(milo.end(), stream.begin(), stream.end());
-  WriteBytes(scene, milo);
-  fs::path found;
-  std::string error;
-  CHECK_TRUE(ProbePs3Folder(folder, &found, &error));
-  CHECK_TRUE(found == scene);
-  milo[0x810 + 4 + 24 + 4 + 1] = 0;
-  WriteBytes(scene, milo);
-  CHECK_FALSE(ProbePs3Folder(folder, &found, &error));
-}
-
-static void TestPs3PackageHeader() {
-  BeginCase("PS3 package probe distinguishes retail encryption from a wrong game");
-  const fs::path package = g_root / "ps3-package.pkg";
-  std::vector<std::uint8_t> bytes(0xe0);
-  auto be32 = [&](std::size_t at, std::uint32_t value) {
-    for (int i = 0; i < 4; ++i) bytes[at + i] = std::uint8_t(value >> (24 - i * 8));
-  };
-  be32(0, 0x7f504b47);
-  be32(0x10, 0xc0);
-  be32(0x14, 1);
-  bytes[0x27] = 0xc0;
-  bytes[0x2f] = 0x20;
-  const char* content_id = "UP8802-NPUB30749_00-RBBLITZ0000TRIAL";
-  std::copy_n(content_id, std::strlen(content_id), bytes.begin() + 0x30);
-  bytes[4] = 0x80;  // Finalized retail revision.
-  WriteBytes(package, bytes);
-  std::vector<std::uint8_t> scene;
-  std::string found_id, error;
-  CHECK_FALSE(ReadPs3PackageScene(package, &scene, &found_id, &error));
-  CHECK_CONTAINS(error, "finalized retail");
-  CHECK_FALSE(fs::exists(g_root / "main_ps3_0.ark"));
-
-  BeginCase("a different PS3 title is refused before reading package contents");
-  bytes[4] = 0;
-  bytes[0x30 + 7] = 'X';
-  WriteBytes(package, bytes);
-  error.clear();
-  CHECK_FALSE(ReadPs3PackageScene(package, &scene, &found_id, &error));
-  CHECK_CONTAINS(error, "content ID mismatch");
-}
-
 int main() {
   g_root = fs::temp_directory_path() / "rbblitz-installer-tests";
   std::string error;
@@ -2283,8 +2219,6 @@ int main() {
   TestLocations();
   TestWizardScript();
   TestPayloadScripts();
-  TestPs3FolderProbe();
-  TestPs3PackageHeader();
   TestCommandLine();
 
   const int result = rb_blitz::test::Finish();

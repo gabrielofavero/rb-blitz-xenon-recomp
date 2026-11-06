@@ -37,14 +37,14 @@ route masters. The generator requires Pillow, NumPy, and OpenCV. Each route SVG
 keeps its original Xbox 360 texture's outer text anchors fixed; the generator
 joins the arrow shapes before applying the PS3 color profile and checks branch
 clearance and continuous arrow pixels. PlayStation 5 declares its four generated
-`pads/pad_N.png` files for `ps_0` through `ps_3`. Run
+`pads/pad_N.png` files for `xbox_0` through `xbox_3`. Run
 `python scripts/controllers/generate_playstation_5_pads.py` to rebuild them from its
 [`pad.png`](../../assets/controller/masters/playstation-5/pad.png) and
 [`pad_N-arrows.svg`](../../assets/controller/masters/playstation-5/pad_0-arrows.svg)
 masters. Its fixed text rails follow the corresponding PS3 reference pads.
-PlayStation 4 declares the same four `ps_0` through `ps_3` slots. Both PlayStation
-layouts also point `xbox_0` through `xbox_3` at those same four PNGs because the
-game's mapping page uses the Xbox texture family. Pad slots may share a PNG path.
+PlayStation 4 declares the same four `xbox_0` through `xbox_3` slots. The game's
+mapping page uses the Xbox texture family. Both layouts leave `ps_0..3` undeclared,
+so those slots keep their original game textures.
 Run
 `python scripts/controllers/generate_playstation_4_pads.py` to rebuild them from its
 [`pad.png`](../../assets/controller/masters/playstation-4/pad.png) and
@@ -69,6 +69,13 @@ them from their master PNGs and editable SVG routes. Their callouts use the
 Xbox text rails while pointing to the Quest Touch controls.
 The files in `masters/` are authoring sources; manifests reference finished
 images in their layout folders.
+
+The authored PlayStation 3 layout declares only button PNGs and sets
+`[controller] retail_pad_family = "ps"`. The Xbox 360 game scene already includes
+`img/ps_0.png` through `img/ps_3.png`; the game reads these textures in memory
+and presents them when the Xbox preset route requests `xbox_0..3`. No extracted
+pad PNGs are packaged. The original `ps_*` slots keep their PS textures. This
+setting cannot be combined with `[controller.slots]` or `[controller] file`.
 
 `[[input]]` binds an image to a physical source. A source may have more than
 one image entry (different shapes or legends); the entry without `variant` or

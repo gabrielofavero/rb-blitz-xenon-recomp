@@ -2,6 +2,7 @@
 #include "platform/song_load_monitor.h"
 #include "platform/game_restart.h"
 #include <charconv>
+#include <cstdio>
 #include <fstream>
 #include <string_view>
 
@@ -67,6 +68,15 @@ uint64_t NowMilliseconds() {
   ULONGLONG ticks = 0;
   // Excludes OS sleep/hibernate. Focus changes do not rebase an active load.
   return QueryUnbiasedInterruptTime(&ticks) ? ticks / 10000 : 0;
+}
+std::string UtcNow() {
+  SYSTEMTIME now{};
+  GetSystemTime(&now);
+  char text[32];
+  std::snprintf(text, sizeof(text), "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ",
+                now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
+                now.wSecond, now.wMilliseconds);
+  return text;
 }
 LONG64 Read(volatile LONG64* value) { return InterlockedCompareExchange64(value, 0, 0); }
 std::wstring Wide(const std::string& text) {
@@ -217,6 +227,9 @@ int RunMonitor(const std::vector<std::string>& args) {
   if (!SetEvent(ready)) return 2;
   CloseHandle(ready);
   std::ofstream log(std::filesystem::path(Wide(args[3].substr(6))), std::ios::app);
+  const auto started_ms = GetTickCount64();
+  log << "monitor_start utc=" << UtcNow() << " pid=" << state->parent << '\n';
+  log.flush();
   bool timed_out = false;
   uint32_t timeout_seconds = 0;
   DWORD wait = WAIT_FAILED;
@@ -244,12 +257,18 @@ int RunMonitor(const std::vector<std::string>& args) {
   if (wait != WAIT_OBJECT_0) return 2;
   DWORD exit_code = 0;
   if (!GetExitCodeProcess(parent, &exit_code)) return 2;
-  const bool loading = (Read(&state->attempt) & 3) != 0;
+  const auto attempt = Read(&state->attempt);
+  const bool loading = (attempt & 3) != 0;
+  const auto parent_pid = state->parent;
   const bool recover = timed_out || (state->recover_crashes && ShouldRestart(exit_code, loading));
   UnmapViewOfFile(state);
   CloseHandle(mapping);
   CloseHandle(parent);
-  log << "parent_exit=" << std::hex << exit_code << " loading=" << loading << " restart=" << recover << '\n';
+  log << "parent_exit=" << std::hex << exit_code << std::dec
+      << " loading=" << loading << " restart=" << recover
+      << " utc=" << UtcNow() << " pid=" << parent_pid
+      << " uptime_ms=" << GetTickCount64() - started_ms
+      << " attempt=" << (attempt >> 2) << '\n';
   log.flush();
   if (!recover) return 0;
   PROCESS_INFORMATION replacement{};

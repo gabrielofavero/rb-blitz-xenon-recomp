@@ -3,7 +3,7 @@
 //
 // The engine's platform texture container (`<name>.png_xbox` / `.png_ps3`) and the DXT blocks
 // inside it. This is the decoder/encoder the store's album art needs (RhythmVerse store plan
-// §5/P3) and the one the button-layout plan reuses for its PS3 import and its slot sheets.
+// §5/P3) and the button-layout tooling uses for its slot sheets.
 //
 // ## The envelope - measured 2026-10-21
 //
@@ -50,7 +50,7 @@
 //
 // It is pure bytes: no rex headers, no guest memory, no Windows. `tests/store_art_tests.cpp` pins
 // the envelope, the block codec and the resampler without a boot, and the installer (a separate
-// target) can compile the same translation unit for its PS3 import.
+// target) can compile the same translation unit when needed.
 
 #pragma once
 
@@ -70,7 +70,7 @@ enum class TextureFormat : std::uint16_t {
 };
 
 // One parsed envelope. The caller's own struct rather than a reference to a file, so the same
-// reader serves the codec's tests and the PS3-import tooling.
+// reader serves the codec's tests and platform texture tooling.
 struct TextureEnvelope {
   std::uint8_t version = 2;
   std::uint32_t id = 0;  // version 2 only, opaque

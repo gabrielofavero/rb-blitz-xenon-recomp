@@ -188,6 +188,14 @@ int main(int argc, char** argv) {
     SetEvent(gate);
     CHECK_EQ(WaitForSingleObject(parent.hProcess, 5000), WAIT_OBJECT_0);
     CHECK_EQ(WaitForSingleObject(monitor, 5000), WAIT_OBJECT_0);
+    std::ifstream monitor_log(report.string() + ".log");
+    const std::string monitor_text{std::istreambuf_iterator<char>(monitor_log),
+                                   std::istreambuf_iterator<char>()};
+    CHECK_TRUE(monitor_text.find("monitor_start utc=") != std::string::npos);
+    CHECK_TRUE(monitor_text.find("parent_exit=") != std::string::npos);
+    CHECK_TRUE(monitor_text.find(" pid=" + std::to_string(parent.dwProcessId)) != std::string::npos);
+    CHECK_TRUE(monitor_text.find(" uptime_ms=") != std::string::npos);
+    CHECK_TRUE(monitor_text.find(" attempt=") != std::string::npos);
     if (timeout || (recover_crashes && ShouldRestart(code, loading))) {
       CHECK_TRUE(WaitFile(report.string() + ".recovered"));
       std::ifstream result(report.string() + ".recovered");

@@ -65,7 +65,7 @@ bool ParseStrings(const std::string& raw, std::vector<std::string>* values) {
   return true;
 }
 bool Reserved(const std::string& id) {
-  return id == "retail" || id == "keyboard" || id == "keyboard-mouse" || id == "ps3";
+  return id == "retail" || id == "keyboard" || id == "keyboard-mouse";
 }
 bool ValidSource(const std::string& source, bool keyboard) {
   static const std::set<std::string> extra = {
@@ -317,6 +317,14 @@ static bool LoadSchemeImpl(const fs::path& folder, bool trusted_reserved,
   unsigned image_count = 0;
   for (const auto& [key, value] : values) {
     if (key == "schema_version" || key == "id" || key == "name" || key == "kind") continue;
+    if (key == "controller.retail_pad_family") {
+      if (value != "ps" || !scheme.pads.empty() || scheme.has_shared_pad) {
+        *why = "retail_pad_family must be ps and cannot be combined with pad images";
+        return false;
+      }
+      scheme.use_retail_ps_pads = true;
+      continue;
+    }
     Image* image = nullptr;
     if (key.starts_with("buttons.") && FindButton(key.substr(8))) image = &scheme.buttons[key.substr(8)];
     else if (key.starts_with("controller.slots.") && IsPad(key.substr(17)))
@@ -342,6 +350,10 @@ static bool LoadSchemeImpl(const fs::path& folder, bool trusted_reserved,
     if (key == "icons.file" && (image->width != 1024 || image->height != 512)) {
       *why = "icons.png must be 1024x512"; return false;
     }
+  }
+  if (scheme.use_retail_ps_pads && (!scheme.pads.empty() || scheme.has_shared_pad)) {
+    *why = "retail_pad_family cannot be combined with pad images";
+    return false;
   }
   std::set<std::string> ids, slots, source_variants;
   for (const auto& fields : input_values) {
@@ -472,8 +484,7 @@ Registry Discover(const fs::path& install_root, const fs::path& user_root, Decod
       if (!fs::is_directory(folder, ec) && !fs::is_symlink(folder, ec)) continue;
       Scheme scheme;
       std::string why;
-      // The installer owns reserved packages in the install root, including
-      // the optional PS3 import. User packages cannot shadow any reserved id.
+      // Internal layouts in the install root cannot be shadowed by user packages.
       const std::string id = folder.filename().string();
       const bool trusted = !user;
       if (!load(folder, false, trusted, &scheme, &why)) {

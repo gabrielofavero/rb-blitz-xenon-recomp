@@ -48,13 +48,13 @@ installer runs - never mirrored, re-hosted or bundled. `installer/README.md` and
 [ultimate-compat.md](ultimate-compat.md) are the policy; this file is the check.
 
 Owner-authored controller layouts are staged separately from the executable
-payload. `installer/tools/stage_controller_schemes.ps1` discovers the eight
+payload. `installer/tools/stage_controller_schemes.ps1` discovers the authored
 direct v2 folders under `assets/controller/`, validates them, and writes explicit
-Inno `[Files]` entries for their manifests and declared PNGs. The 92 declared
+Inno `[Files]` entries for their manifests and declared PNGs. The 94 declared
 keyboard/mouse PNGs are staged separately as an internal resource, outside the
 selectable controller catalog. Undeclared PNGs, editable SVG masters and the
 gitignored game-art references are excluded. Version 1 user packages remain
-accepted at runtime; the optional PS3 import still writes a local v1 package.
+accepted at runtime. The authored PlayStation 3 layout is staged with the other layouts.
 Originality and redistribution rights for new artwork still require owner review
 before release.
 

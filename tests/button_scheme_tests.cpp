@@ -61,8 +61,9 @@ int main() {
   const fs::path art = fs::path(RBBLITZ_SOURCE_DIR) / "assets/controller";
   struct Authored { const char* id; size_t inputs; size_t pads; };
   const Authored authored_packages[] = {
-      {"xbox-series", 26, 4}, {"playstation-4", 26, 8},
-      {"playstation-5", 27, 8}, {"nintendo-switch-joycon", 26, 4},
+      {"xbox-series", 26, 4}, {"playstation-3", 25, 0},
+      {"playstation-4", 26, 4},
+      {"playstation-5", 27, 4}, {"nintendo-switch-joycon", 26, 4},
       {"nintendo-switch-pro-controller", 26, 4},
       {"nintendo-switch-2-joycon", 26, 4},
       {"nintendo-switch-2-pro-controller", 26, 4},
@@ -73,11 +74,17 @@ int main() {
           "authored v2 controller rejected");
     Check(scheme.schema_version == 2 && scheme.id == id &&
           scheme.inputs.size() == inputs && scheme.pads.size() == pads &&
-          scheme.InputFor("pad:a") && scheme.Pad("xbox_0") != nullptr,
+          scheme.InputFor("pad:a") &&
+          (scheme.Pad("xbox_0") != nullptr || scheme.use_retail_ps_pads),
           "authored v2 lookup wrong");
+    if (std::string(id) == "playstation-3")
+      Check(scheme.use_retail_ps_pads && scheme.pads.empty() &&
+            scheme.InputFor("pad:back") &&
+            scheme.InputFor("pad:back")->slot == "back_button",
+            "PlayStation 3 retail PS pad source missing");
     if (std::string(id) == "playstation-4" || std::string(id) == "playstation-5") {
-      Check(scheme.pads.size() == 8 && scheme.declared_files.size() == scheme.inputs.size() + 4,
-            "PlayStation pad aliases duplicated files");
+      Check(scheme.pads.size() == 4 && scheme.declared_files.size() == scheme.inputs.size() + 4,
+            "PlayStation pad declaration count wrong");
       Check(scheme.InputFor("pad:back") && scheme.InputFor("pad:back")->id == "share" &&
             scheme.InputFor("pad:back")->slot == "back_button" &&
             scheme.InputFor("sdl:button:touchpad") &&
@@ -89,9 +96,8 @@ int main() {
               "PS5 microphone source art missing");
       for (int pad_index = 0; pad_index < 4; ++pad_index) {
         const auto suffix = std::to_string(pad_index);
-        Check(scheme.Pad("xbox_" + suffix) && scheme.Pad("ps_" + suffix) &&
-              scheme.Pad("xbox_" + suffix)->rgba == scheme.Pad("ps_" + suffix)->rgba,
-              "PlayStation pad aliases differ");
+        Check(scheme.Pad("xbox_" + suffix) && !scheme.Pad("ps_" + suffix),
+              "PlayStation pad should replace Xbox preset slots only");
       }
     }
     if (std::string(id).starts_with("nintendo-switch")) {
@@ -207,9 +213,9 @@ int main() {
   Check(discovered.Find("xbox-series") &&
         discovered.Find("xbox-series")->folder == customized &&
         discovered.shadowed.size() == 1, "user package did not shadow authored package");
-  auto reserved = Package(user, "ps3", "[buttons]\na_button = \"a.png\"\n");
+  auto reserved = Package(user, "retail", "[buttons]\na_button = \"a.png\"\n");
   Write(reserved / "a.png", "PNG");
-  Check(!LoadScheme(reserved, false, FakePng, &scheme, &why), "reserved PS3 import id accepted");
+  Check(!LoadScheme(reserved, false, FakePng, &scheme, &why), "reserved retail id accepted");
 #ifdef _WIN32
   const fs::path rgba_file = root / "rgba.png", rgb_file = root / "rgb.png";
   WriteHex(rgba_file, "89504e470d0a1a0a0000000d4948445200000001000000010806000000"

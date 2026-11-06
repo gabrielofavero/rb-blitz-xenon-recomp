@@ -148,7 +148,7 @@ artifact digests. Publishing remains a separate release action.
 
 The framerate and UI pixel investigations already have [framerate](2026-10-25-framerate-expansion-plan.md)
 and [pixel](2026-10-29-ui-pixel-imperfections-investigation-plan.md) plans. The
-button layout work stays in its [active plan](../in-progress/2026-10-19-button-layout-hotswap-plan.md).
+button layout work is recorded in its [closed plan](../finished/2026-10-19-button-layout-hotswap-plan.md).
 Online services remain a permanent non-goal. Keep game data read-only, SDK changes
 as generic patch files, generated code regenerated, and Blitz-specific behavior in
 project code; [patches/README.md](../../../patches/README.md) and

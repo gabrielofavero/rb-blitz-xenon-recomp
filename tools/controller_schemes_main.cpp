@@ -39,7 +39,9 @@ int main(int argc, char** argv) {
   std::cout << folder << ": valid " << scheme.id << " (" << scheme.buttons.size()
             << " button, " << scheme.pads.size() << " pad slots, "
             << scheme.inputs.size() << " source images"
-            << (scheme.has_shared_pad ? ", shared pad" : "") << ")\n";
+            << (scheme.has_shared_pad ? ", shared pad" : "")
+            << (scheme.use_retail_ps_pads ? ", retail PS pads for Xbox slots" : "")
+            << ")\n";
   auto report = [](const std::string& slot, const rb_blitz::controller_schemes::Image& image,
                    uint32_t width, uint32_t height) {
     const double scale = std::min(double(width) / image.width, double(height) / image.height);

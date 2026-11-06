@@ -6,10 +6,44 @@ is the transparent raster body used while composing annotated pad diagrams.
 These files are authoring sources; runtime schemes use only the PNGs declared
 in their layout folders.
 
+The pressed and released `button-*-template.svg` masters contain only the
+weathered bezel; the pressed master also contains its white impact accent.
+The prototype renderer tilts the Xbox Series art to the right, derives a close
+black shadow from its alpha, and enlarges face-button symbols so they cross the
+lighter center of the button. To render one button in both states:
+
+```powershell
+python scripts/controllers/render_button_template.py --state pressed
+python scripts/controllers/render_button_template.py --state released
+```
+
+The preview PNGs go under `out/controller-button-prototype/`. The script also
+accepts `--button PATH` and `--output PATH`. For all Xbox Series buttons,
+including D-pad and stick directions, run
+`python scripts/controllers/render_xbox_series_calibration.py`. It reads the
+Xbox Series scheme and writes pressed and released PNGs to
+`assets/controller/xbox-series/calibration/`. The original button PNGs and
+scheme remain available for comparison. Both renderers use Pillow and
+Playwright Chromium, as noted in the script docstring.
+
+For a keyboard and mouse shape check, run
+`python scripts/controllers/render_keyboard_calibration_samples.py`. It renders
+five varied inputs in `assets/controller/keyboard-mouse/calibration/` and writes
+a labeled contact sheet to `out/controller-button-prototype/`.
+
 The existing vector export helper is `scripts/controllers/export_controller_vector_masters.py`.
 It identifies its upstream source as the CC0 Xelu prompts SVG adaptation by
 haaldor and notes the Steam Deck COCOGOOSE font caveat. The pad SVGs were moved
 here unchanged from their layout folders.
+
+The PlayStation 3 button master is
+`playstation-3/ps3-layout-recriated.svg`. Run
+`python scripts/controllers/export_playstation_3_buttons.py` to export its 25
+individual glyphs to `assets/controller/playstation-3/buttons/`. The matching
+`scheme.toml` assigns them to controller inputs and sets
+`[controller].retail_pad_family = "ps"`. At runtime, that maps the Xbox preset
+pad slots to the original `ps_0..3` textures in the Xbox 360
+`controller_config.milo_xbox` scene. No pad PNGs are included in this layout.
 
 [`ps3-arrow.svg`](ps3-arrow.svg) is the reusable arrowhead and color reference.
 The head's tip is `(0, 0)` and its shaft enters from the left. Its dimensions,

@@ -11,12 +11,13 @@ is removed from this file, not from the log.
 section are grouped in the [engine compatibility](../plans/todo/2026-10-31-engine-compatibility-closeout-plan.md),
 [content and music](../plans/todo/2026-10-31-content-and-music-closeout-plan.md),
 and [runtime UI](../plans/todo/2026-10-31-runtime-ui-acceptance-plan.md)
-plans. The existing [button-layout](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md),
+plans. The existing [button-layout](../plans/finished/2026-10-19-button-layout-hotswap-plan.md),
 [framerate](../plans/todo/2026-10-25-framerate-expansion-plan.md) and
 [pixel investigation](../plans/todo/2026-10-29-ui-pixel-imperfections-investigation-plan.md)
 plans retain their subjects. Rows below that say **fixed**, **closed** or
 **superseded** are historical measurements, not open tasks; retained limits are
-identified in their text. No current-build game route was driven for this audit.
+identified in their text. The Button Layout route audit was updated with a
+2026-11-05 isolated D3D12 game run.
 
 ## Open
 
@@ -30,17 +31,19 @@ P4-specific run. The shared footer now resolves effective Interface Mapping,
 with main-menu default/rebound/family refresh accepted by the owner on 2026-11-02;
 the other guest action-hint routes now have host coverage and await live checks.
 See the
-[button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P4.
+[button-layout plan](../plans/finished/2026-10-19-button-layout-hotswap-plan.md) P4.
 
-**V2 controller art and extra SDL inputs (2026-10-30):** the loader accepts the
-eight authored controller layouts and the 92-image internal keyboard catalog;
-declared-file staging and a D3D12 scratch boot pass. A virtual SDL pad proves
+**V2 controller art and extra SDL inputs (updated 2026-11-05):** the loader accepts
+ten authored controller layouts and the 94-image internal keyboard catalog;
+declared-file staging and D3D12 game runs pass. A virtual SDL pad proves
 `misc1` and a paddle are distinct from the old XInput aliases, and host tests
-cover capture/release and unavailable buttons. Physical-device mappings and v2 source images
-in the live mapping rows remain unmeasured. The owner has confirmed ordinary controller,
-keyboard and mouse images on Interface Mapping and Gameplay Notes, but the tool session cannot
-foreground the game for capture. See the
-[button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P11.
+cover capture/release and unavailable buttons. The sole available Xbox controller
+reports no `misc1`, `misc2`, touchpad or paddle source, so physical extra-button
+acceptance is not testable on this hardware. All ten authored layouts have live
+Controller Presets captures; the isolated 2026-11-05 run captured keyboard
+Gameplay Mapping and a rebound tutorial note image. Real controller-source
+in-song art remains unverified. See the
+[button-layout plan](../plans/finished/2026-10-19-button-layout-hotswap-plan.md) P11.
 
 **Mapping images (updated 2026-11-02):** owner screenshots accepted ordinary Interface and
 Gameplay Mapping images, the eight-input Confirm row, the repaired retail-band atlas, and
@@ -52,16 +55,20 @@ Start/Back images and distinct media symbols were accepted on 2026-10-31. A late
 retail Xbox 360 Search screenshot exposed an Xbox Series Start image; the retail
 Start/Back resolver now selects the installed 360 sheet's own arrow glyphs; the
 owner accepted the corrected Search hint on 2026-11-02. See the
-[button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P9.
+[button-layout plan](../plans/finished/2026-10-19-button-layout-hotswap-plan.md) P9.
 
-**Action-hint route coverage (2026-11-04):** the owner accepted the shared
+**Action-hint route coverage (updated 2026-11-05):** the owner accepted the shared
 main-menu footer, the loading begin-song Confirm prompt and the retail 360
 Start/Back images. The release build now has generated guest routes for the
 rotating loading Power-up tip, splash Start, tutorial actions, calibration
 Confirm, in-song Continue/Pause, Power-up descriptions, error Continue and
 account-link Confirm. Host checks pass across all six locales and the four
-tutorial preset tables. These routes and panel-specific footers still need
-owner-run visual and input validation. The
+tutorial preset tables. An isolated D3D12 run captured default and rebound
+splash, menu, Song Select, loading, tutorial, audio calibration, pause,
+results and store hints. Messages/Inbox and online leaderboard content were
+inaccessible offline. The automatic video calibration stage, randomized
+Power-up tip, Power-up Select/remedial hints and account/error prompts still
+need live images; host records alone do not prove them. The
 [route inventory](../engine/button-hint-inventory.md) tracks each surface.
 
 **Input font atlas resolution and guest heap (2026-11-02):** the owner kept the
@@ -87,7 +94,7 @@ remain. The owner chose to keep the current keycap style. The measured result an
 rejected alternatives are in
 [the finished icon rendering quality investigation](../plans/finished/2026-11-02-icon-rendering-quality-investigation-plan.md).
 See the
-[button-layout plan](../plans/in-progress/2026-10-19-button-layout-hotswap-plan.md) P10.
+[button-layout plan](../plans/finished/2026-10-19-button-layout-hotswap-plan.md) P10.
 
 **Load Guard coverage limits (2026-10-26):** the debugger
 located a signed 16-bit event-count overflow on the custom MIDI's optional
