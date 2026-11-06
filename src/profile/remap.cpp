@@ -368,8 +368,10 @@ const std::vector<Source>* DefaultSources(Target target) {
     pad_only(Target::kRightThumb);
     set(Target::kBack, {"Backspace"});
     set(Target::kStart, {"Space"});
-    // The triggers are deliberately absent: a keyboard cannot stand in for a trigger's travel,
-    // and the pad's analog bytes are left exactly as the pad reported them.
+    // The guest treats a fully pressed trigger as PageUp/PageDown in the library
+    // header. Keep each physical trigger and give keyboard navigation its own key.
+    set(Target::kLeftTrigger, {"PageUp"});
+    set(Target::kRightTrigger, {"PageDown"});
     return all;
   }();
   const auto& slot = kDefaults[static_cast<std::size_t>(target)];
@@ -533,10 +535,16 @@ void Apply(const Table& table, const PadState& state, DownFn down, void* context
     }
 
     if (TargetIsTrigger(target)) {
-      // A trigger target is driven to the end of its range, not to "on": the guest reads the
-      // byte, and there is nothing in between that a button press could mean.
+      // Preserve the analog travel when the binding includes the matching
+      // physical trigger. A key or another digital source supplies a full press.
       uint8_t& trigger = target == Target::kLeftTrigger ? out->left_trigger : out->right_trigger;
-      trigger = pressed ? 0xFF : 0x00;
+      const bool own_trigger = std::any_of(sources->begin(), sources->end(),
+          [target](const Source& source) {
+            return source.kind == SourceKind::kPad && source.name == TargetName(target);
+          });
+      trigger = own_trigger ? (target == Target::kLeftTrigger ? state.left_trigger
+                                                               : state.right_trigger) : 0;
+      if (pressed && !TriggerPressed(trigger)) trigger = 0xFF;
     } else if (pressed) {
       out->buttons |= TargetBit(target);
     } else {

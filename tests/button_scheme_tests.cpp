@@ -132,9 +132,12 @@ int main() {
         "internal keyboard became selectable");
   Check(LoadInternalKeyboard(art / "keyboard-mouse", FakePng, &scheme, &why),
         "internal keyboard rejected");
-  Check(scheme.inputs.size() == 94 && scheme.calibration_pairs.size() == 94 &&
-        scheme.declared_files.size() == 94 * 3 &&
+  Check(scheme.inputs.size() == 97 && scheme.calibration_pairs.size() == 97 &&
+        scheme.declared_files.size() == 97 * 3 &&
         scheme.InputFor("key:Return") && scheme.InputFor("key:KP Enter") &&
+        scheme.InputFor("key:MediaTrackNext") &&
+        scheme.InputFor("key:MediaTrackPrevious") &&
+        scheme.InputFor("key:MediaPlayPause") &&
         scheme.InputFor("mouse:left") && scheme.InputFor("mouse:wheel_up") &&
         scheme.InputFor("mouse:wheel_down") && scheme.extra_files.size() == 3 &&
         scheme.InputFor("key:8", {}, "shift") &&

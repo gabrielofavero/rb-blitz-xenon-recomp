@@ -9,12 +9,12 @@
 
 namespace rb_blitz::input::last_device {
 
-// Mouse activity that selects keyboard/mouse hint art. Change these independently
+// Mouse activity that selects mouse hint art. Change these independently
 // without affecting mouse navigation or the bindings themselves.
 inline constexpr bool kMouseButtonAndWheelSelectKeyboardLayout = true;
 inline constexpr bool kMouseMotionSelectsKeyboardLayout = false;
 
-enum class Family { kKeyboardMouse, kController };
+enum class Family { kController, kKeyboard, kMouse };
 
 struct State {
   Family family = Family::kController;

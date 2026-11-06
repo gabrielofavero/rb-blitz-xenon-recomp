@@ -13,6 +13,9 @@ bool IsBinding(profile::InputRowKind kind) {
   return kind == K::kGeneralBinding || kind == K::kControllerBinding ||
          kind == K::kKeyboardMouseBinding || kind == K::kMusicBinding;
 }
+bool SameSource(const input::icons::Icon& a, const input::icons::Icon& b) {
+  return a.source.kind == b.source.kind && a.source.name == b.source.name;
+}
 void AppendGlyph(std::string* text, uint32_t code) {
   if (code < 0x80) {
     text->push_back(static_cast<char>(code));
@@ -23,10 +26,38 @@ void AppendGlyph(std::string* text, uint32_t code) {
 }
 }  // namespace
 
+size_t Catalog::Find(const input::icons::Icon& icon) const {
+  for (size_t i = 0; i < icons.size(); ++i)
+    if (SameSource(icons[i], icon)) return i;
+  return icons.size();
+}
+
+Catalog BuildCatalog(const std::vector<std::vector<std::string>>& panel_symbols,
+                     const input::icons::View& view, const Catalog* previous) {
+  Catalog catalog;
+  if (previous) catalog.icons = previous->icons;
+  for (const auto& symbols : panel_symbols) {
+    for (const auto& symbol : symbols) {
+      const auto token = profile::ParseInputRowSymbol(symbol);
+      if (!IsBinding(token.kind)) continue;
+      auto ordered = input::icons::Ordered(view, token);
+      if (ordered.empty()) ordered.push_back(input::icons::First(view, token));
+      for (auto& icon : ordered) {
+        const size_t index = catalog.Find(icon);
+        if (index < catalog.icons.size()) catalog.icons[index] = std::move(icon);
+        else if (catalog.icons.size() < input_font::kRowIconCount)
+          catalog.icons.push_back(std::move(icon));
+      }
+    }
+  }
+  return catalog;
+}
+
 Page Build(const std::vector<std::string>& symbols,
            const std::vector<std::string>& fallback,
            const input::icons::View& view,
-           const std::vector<size_t>& windows) {
+           const std::vector<size_t>& windows,
+           const Catalog* catalog) {
   Page page;
   if (symbols.size() != fallback.size()) return page;
   page.lines = fallback;
@@ -52,18 +83,20 @@ Page Build(const std::vector<std::string>& symbols,
     for (size_t source = start; source < end; ++source) {
       const auto& icon = ordered[source];
       if (line.back() != '>') line += ' ';
-      size_t index = 0;
-      for (; index < page.icons.size(); ++index) {
-        const auto& existing = page.icons[index];
-        if (existing.source.kind == icon.source.kind &&
-            existing.source.name == icon.source.name && existing.art == icon.art &&
-            existing.slot == icon.slot && existing.scheme == icon.scheme) break;
+      size_t index = catalog ? catalog->Find(icon) : 0;
+      if (!catalog) {
+        for (; index < page.icons.size(); ++index) {
+          const auto& existing = page.icons[index];
+          if (existing.source.kind == icon.source.kind &&
+              existing.source.name == icon.source.name && existing.art == icon.art &&
+              existing.slot == icon.slot && existing.scheme == icon.scheme) break;
+        }
       }
-      if (index == page.icons.size()) {
-        if (index == input_font::kRowIconCount) {
-          // Keep other rows' images. This row still uses its complete text
-          // representation, and tiles reserved only by this row can be reused.
-          page.icons.resize(first_row_icon);
+      if (catalog ? index == catalog->icons.size() : index == page.icons.size()) {
+        if (catalog || index == input_font::kRowIconCount) {
+          // Keep other rows' images. This row uses its complete text
+          // representation when the catalog has no slot for its source.
+          if (!catalog) page.icons.resize(first_row_icon);
           page.overflow = true;
           row_overflow = true;
           break;

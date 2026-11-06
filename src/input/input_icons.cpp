@@ -181,19 +181,40 @@ const std::vector<Source>* Sources(const EffectiveInput& input,
 Icon Unbound() {
   Icon icon;
   icon.art = Art::kUnbound;
-  icon.legend = "NONE";
-  DrawKeycap(&icon);
+  icon.legend = "None";
+  icon.width = icon.height = 32;
+  icon.rgba.assign(32 * 32 * 4, 0);
+  // Raster counterpart of assets/controller/masters/none.svg.
+  for (int y = 4; y <= 27; ++y) for (int x = 4; x <= 27; ++x) {
+    const bool frame = x <= 6 || x >= 25 || y <= 6 || y >= 25;
+    Pixel(&icon, x, y, frame ? 228 : 42, frame ? 232 : 46, frame ? 238 : 54);
+  }
+  for (int y = 7; y <= 24; ++y) for (int x = 7; x <= 24; ++x)
+    if (std::abs(x + y - 31) <= 2) Pixel(&icon, x, y, 238, 241, 245);
   return icon;
 }
 
-Icon FirstOf(const View& view, const std::vector<Icon>& all) {
-  const SourceKind wanted = view.active_family == Family::kController ? SourceKind::kPad : SourceKind::kKey;
-  for (const Icon& icon : all) {
-    if (icon.source.kind == wanted ||
-        (view.active_family == Family::kController && icon.source.kind == SourceKind::kSdl) ||
-        (view.active_family == Family::kKeyboardMouse && icon.source.kind == SourceKind::kMouse))
-      return icon;
+int SourceFamily(SourceKind kind) {
+  switch (kind) {
+    case SourceKind::kPad:
+    case SourceKind::kSdl: return 0;
+    case SourceKind::kKey: return 1;
+    case SourceKind::kMouse: return 2;
   }
+  return -1;
+}
+
+Icon FirstOf(const View& view, const std::vector<Icon>& all) {
+  std::array<int, 3> priority{};
+  switch (view.active_family) {
+    case Family::kController: priority = {0, 1, 2}; break;
+    case Family::kKeyboard: priority = {1, 2, 0}; break;
+    case Family::kMouse: priority = {2, 1, 0}; break;
+  }
+  for (int family : priority)
+    for (const Icon& icon : all)
+      if (SourceFamily(icon.source.kind) == family && icon.art != Art::kUnsupported)
+        return icon;
   return Unbound();
 }
 }  // namespace
@@ -206,8 +227,9 @@ View Capture(std::string controller_scheme, Family family,
 
 View CaptureActive(const controller_schemes::Registry* registry) {
   const auto state = last_device::Current();
-  View view = Capture(state.scheme, state.family == last_device::Family::kController
-                                       ? Family::kController : Family::kKeyboardMouse, registry);
+  const Family family = state.family == last_device::Family::kController ? Family::kController :
+                        state.family == last_device::Family::kMouse ? Family::kMouse : Family::kKeyboard;
+  View view = Capture(state.scheme, family, registry);
   view.device_revision = state.revision;
   return view;
 }
@@ -361,7 +383,29 @@ Icon First(const View& view, const profile::InputRowToken& row) {
   return FirstOf(view, Ordered(view, row));
 }
 
+Icon Hint(const View& view, const profile::InputRowToken& row) {
+  auto all = Ordered(view, row);
+  // Native menu pointer input accepts a left click as Confirm and a right click
+  // as Back independently of General Mapping. Advertise those real routes in
+  // action hints without changing the user's binding rows or input behavior.
+  if (row.kind == profile::InputRowKind::kGeneralBinding &&
+      (row.name == "a" || row.name == "b"))
+    all.push_back(Resolve({SourceKind::kMouse, row.name == "a" ? "left" : "right"},
+                          view.controller_scheme, view.registry));
+  return FirstOf(view, all);
+}
+
 Icon First(const View& view, profile::gameplay_remap::Action action) {
-  return FirstOf(view, Ordered(view, action));
+  std::vector<Icon> all;
+  if (view.input) {
+    const auto append = [&](const std::vector<Source>* sources) {
+      if (!sources) return;
+      for (const Source& source : *sources)
+        all.push_back(Resolve(source, view.controller_scheme, view.registry));
+    };
+    append(view.input->controller.Effective(action));
+    append(view.input->keyboard_mouse.Effective(action));
+  }
+  return FirstOf(view, all);
 }
 }  // namespace rb_blitz::input::icons

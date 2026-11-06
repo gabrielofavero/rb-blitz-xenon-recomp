@@ -103,8 +103,8 @@ std::string BindingRowLabel(const InputRowToken& token);
 // The name the Interface Mapping page gives a `[remap]` target (P3 of the interface/gameplay
 // mapping restructure plan). The page speaks about what the interface does, not about the pad's
 // plastic: `A` is `Confirm`, `B` is `Go Back`, Start is `Search`, Y is `Shortcuts`, Back is
-// `Sort`, and the four D-pad controls are `Up`/`Down`/`Left`/`Right`. The seven targets the page
-// does not show (D2: X, the shoulders, the triggers, the two stick clicks) keep `TargetLabel`.
+// `Sort`, the triggers are `Previous Header`/`Next Header`, and the four D-pad controls are
+// `Up`/`Down`/`Left`/`Right`. X, the shoulders and the stick clicks keep `TargetLabel`.
 //
 // The binding token is unchanged either way (`input.general.a`), so a profile written before the
 // page was rebuilt binds the same control. `BindingRowLabel` answers from here, which is what

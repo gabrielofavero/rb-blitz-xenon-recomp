@@ -98,6 +98,41 @@ void TestTokenGrammar() {
              InputRowKind::kNone);
 }
 
+void TestLibraryHeaderDefaults() {
+  rb_blitz::test::BeginCase("library headers: Page Up and Page Down drive trigger actions");
+  namespace remap = rb_blitz::profile::remap;
+  const auto* previous = remap::DefaultSources(remap::Target::kLeftTrigger);
+  const auto* next = remap::DefaultSources(remap::Target::kRightTrigger);
+  CHECK_TRUE(previous && previous->size() == 2 &&
+             (*previous)[0] == Source("pad:left_trigger") &&
+             (*previous)[1] == Source("key:PageUp"));
+  CHECK_TRUE(next && next->size() == 2 &&
+             (*next)[0] == Source("pad:right_trigger") &&
+             (*next)[1] == Source("key:PageDown"));
+  const auto keyboard = rb_blitz::input::icons::Capture(
+      "retail", rb_blitz::input::icons::Family::kKeyboard);
+  const auto controller = rb_blitz::input::icons::Capture(
+      "retail", rb_blitz::input::icons::Family::kController);
+  for (const auto [name, key] :
+       {std::pair{"left_trigger", "Page Up"},
+        std::pair{"right_trigger", "Page Down"}}) {
+    const rb_blitz::profile::InputRowToken row{
+        rb_blitz::profile::InputRowKind::kGeneralBinding, name};
+    CHECK_TRUE(rb_blitz::input::icons::First(keyboard, row).legend == key);
+    CHECK_TRUE(rb_blitz::input::icons::First(controller, row).source.kind ==
+               remap::SourceKind::kPad);
+  }
+  remap::PadState out;
+  remap::Apply(remap::Table{}, {},
+      [](void*, const remap::Source& source) { return source == Source("key:PageUp"); },
+      nullptr, &out);
+  CHECK_TRUE(out.left_trigger == 0xFF && out.right_trigger == 0);
+  remap::PadState pad;
+  pad.right_trigger = 0xFF;
+  remap::Apply(remap::Table{}, pad, nullptr, nullptr, &out);
+  CHECK_TRUE(out.left_trigger == 0 && out.right_trigger == 0xFF);
+}
+
 void TestEffectiveIcons() {
   rb_blitz::test::BeginCase("input icons: effective order, family and revision");
   namespace icons = rb_blitz::input::icons;
@@ -139,12 +174,12 @@ void TestEffectiveIcons() {
   CHECK_TRUE(icons::First(active, row).art == icons::Art::kPackageImage);
   CHECK_TRUE(icons::First(icons::Capture("steam-deck", icons::Family::kController, &packages), row)
                  .diagnostic.find("unavailable") != std::string::npos);
-  const auto keyboard = icons::Capture("playstation-3", icons::Family::kKeyboardMouse);
+  const auto keyboard = icons::Capture("playstation-3", icons::Family::kKeyboard);
   CHECK_TRUE(icons::First(keyboard, row).legend == "Enter");
   CHECK_TRUE(icons::Ordered(keyboard, row)[1].rgba == all[1].rgba);
   for (const char* scheme : {"retail", "playstation-3", "xbox-series", "playstation-series",
                              "nintendo-switch", "steam-controller", "steam-deck", "custom"}) {
-    const auto choice = icons::Capture(scheme, icons::Family::kKeyboardMouse);
+    const auto choice = icons::Capture(scheme, icons::Family::kKeyboard);
     CHECK_TRUE(icons::First(choice, row).rgba == icons::First(keyboard, row).rgba);
   }
   CHECK_TRUE(icons::Resolve(Source("key:semicolon"), "retail").art == icons::Art::kBuiltIn);
@@ -158,15 +193,15 @@ void TestEffectiveIcons() {
                                 {Source("key:q"), Source("mouse:left")});
   rb_blitz::input::PublishInput(gameplay);
   const auto game_pad = icons::Capture("retail", icons::Family::kController);
-  const auto game_keys = icons::Capture("retail", icons::Family::kKeyboardMouse);
+  const auto game_keys = icons::Capture("retail", icons::Family::kKeyboard);
   CHECK_TRUE(icons::First(game_pad, rb_blitz::profile::gameplay_remap::Action::kFirstNote).slot == "x_button");
   CHECK_TRUE(icons::First(game_keys, rb_blitz::profile::gameplay_remap::Action::kFirstNote).legend == "Q");
   CHECK_TRUE(icons::Ordered(game_keys, rb_blitz::profile::gameplay_remap::Action::kFirstNote).size() == 2);
   auto pad_only = rb_blitz::input::CopyCurrentInput();
   pad_only->general.Set(remap::Target::kA, {Source("pad:y")});
   rb_blitz::input::PublishInput(pad_only);
-  CHECK_TRUE(icons::First(icons::Capture("retail", icons::Family::kKeyboardMouse), row).art ==
-             icons::Art::kUnbound);
+  CHECK_TRUE(icons::First(icons::Capture("retail", icons::Family::kKeyboard), row).slot ==
+             "y_button");
 
   auto preset = rb_blitz::input::CopyCurrentInput();
   preset->controller.Reset(rb_blitz::profile::gameplay_remap::Action::kFirstNote);
@@ -191,7 +226,7 @@ void TestEffectiveIcons() {
                                {Source("key:q"), Source("key:x")});
   rb_blitz::input::PublishInput(powerup);
   const auto powerup_pad = icons::Capture("retail", icons::Family::kController);
-  const auto powerup_keys = icons::Capture("retail", icons::Family::kKeyboardMouse);
+  const auto powerup_keys = icons::Capture("retail", icons::Family::kKeyboard);
   CHECK_TRUE(icons::First(powerup_pad, rb_blitz::profile::gameplay_remap::Action::kPowerup).slot == "y_button");
   CHECK_TRUE(icons::First(powerup_keys, rb_blitz::profile::gameplay_remap::Action::kPowerup).legend == "Q");
   CHECK_TRUE(icons::First(powerup_pad, rb_blitz::profile::ParseInputRowToken("input.general.x")).slot ==
@@ -200,9 +235,9 @@ void TestEffectiveIcons() {
   auto edited = rb_blitz::input::CopyCurrentInput();
   edited->general.Set(remap::Target::kA, {Source("mouse:right"), Source("key:space")});
   rb_blitz::input::PublishInput(edited);
-  const auto after = icons::Capture("retail", icons::Family::kKeyboardMouse);
+  const auto after = icons::Capture("retail", icons::Family::kKeyboard);
   CHECK_TRUE(after.revision > keyboard.revision);
-  CHECK_TRUE(icons::First(after, row).legend == "Right Click");
+  CHECK_TRUE(icons::First(after, row).legend == "Space");
   CHECK_TRUE(icons::First(keyboard, row).legend == "Enter");
   edited = rb_blitz::input::CopyCurrentInput();
   edited->general.Set(remap::Target::kA, {});
@@ -216,6 +251,60 @@ void TestEffectiveIcons() {
              "a_button");
   const auto trigger = rb_blitz::profile::ParseInputRowToken("input.general.left_trigger");
   CHECK_TRUE(icons::First(pad, trigger).slot == "left_trigger");
+}
+
+void TestHintFallbacks() {
+  rb_blitz::test::BeginCase("input hints: mouse, keyboard, controller fallback and none art");
+  namespace icons = rb_blitz::input::icons;
+  namespace remap = rb_blitz::profile::remap;
+  namespace gameplay = rb_blitz::profile::gameplay_remap;
+  auto input = std::make_shared<rb_blitz::input::EffectiveInput>();
+  input->general.Set(remap::Target::kX,
+                     {Source("pad:x"), Source("key:X"), Source("mouse:x1")});
+  input->general.Set(remap::Target::kY, {Source("pad:y"), Source("key:Y")});
+  input->general.Set(remap::Target::kStart, {Source("pad:start")});
+  input->general.Set(remap::Target::kBack, {Source("mouse:wheel_up")});
+  input->general.Set(remap::Target::kRightShoulder, {});
+  input->controller.Set(gameplay::Action::kPowerup, {Source("pad:y")});
+  input->keyboard_mouse.Set(gameplay::Action::kPowerup,
+                            {Source("key:Space"), Source("mouse:middle")});
+  input->controller.Set(gameplay::Action::kFirstNote, {});
+  input->keyboard_mouse.Set(gameplay::Action::kFirstNote, {Source("mouse:right")});
+  input->controller.Set(gameplay::Action::kSecondNote, {Source("pad:b")});
+  input->keyboard_mouse.Set(gameplay::Action::kSecondNote, {});
+  rb_blitz::input::PublishInput(input);
+  const auto controller = icons::Capture("retail", icons::Family::kController);
+  const auto keyboard = icons::Capture("retail", icons::Family::kKeyboard);
+  const auto mouse = icons::Capture("retail", icons::Family::kMouse);
+  const auto x = rb_blitz::profile::ParseInputRowToken("input.general.x");
+  const auto y = rb_blitz::profile::ParseInputRowToken("input.general.y");
+  const auto start = rb_blitz::profile::ParseInputRowToken("input.general.start");
+  const auto back = rb_blitz::profile::ParseInputRowToken("input.general.back");
+  const auto shoulder = rb_blitz::profile::ParseInputRowToken("input.general.right_shoulder");
+  CHECK_TRUE(icons::First(controller, x).source.name == "x");
+  CHECK_TRUE(icons::First(keyboard, x).source.kind == remap::SourceKind::kKey);
+  CHECK_TRUE(icons::First(mouse, x).source.kind == remap::SourceKind::kMouse);
+  CHECK_TRUE(icons::First(mouse, y).source.kind == remap::SourceKind::kKey);
+  CHECK_TRUE(icons::First(keyboard, start).source.kind == remap::SourceKind::kPad);
+  CHECK_TRUE(icons::First(controller, back).source.kind == remap::SourceKind::kMouse);
+  CHECK_TRUE(icons::First(mouse, shoulder).art == icons::Art::kUnbound);
+  CHECK_EQ(icons::First(mouse, shoulder).width, 32u);
+  CHECK_TRUE(icons::First(mouse, shoulder).rgba[3] == 0);
+  CHECK_TRUE(icons::First(mouse, shoulder).rgba[(4 * 32 + 4) * 4 + 3] == 255);
+  CHECK_TRUE(icons::First(mouse, gameplay::Action::kPowerup).source.name == "middle");
+  CHECK_TRUE(icons::First(keyboard, gameplay::Action::kPowerup).source.name == "Space");
+  CHECK_TRUE(icons::First(controller, gameplay::Action::kPowerup).source.name == "y");
+  CHECK_TRUE(icons::First(controller, gameplay::Action::kFirstNote).source.name == "right");
+  CHECK_TRUE(icons::First(mouse, gameplay::Action::kSecondNote).source.name == "b");
+  CHECK_TRUE(icons::Hint(mouse, {rb_blitz::profile::InputRowKind::kGeneralBinding, "a"})
+                 .source.name == "left");
+  CHECK_TRUE(icons::Hint(mouse, {rb_blitz::profile::InputRowKind::kGeneralBinding, "b"})
+                 .source.name == "right");
+  input = rb_blitz::input::CopyCurrentInput();
+  input->general.Set(remap::Target::kY, {Source("key:~"), Source("pad:y")});
+  rb_blitz::input::PublishInput(input);
+  CHECK_TRUE(icons::First(icons::Capture("retail", icons::Family::kKeyboard), y).source.kind ==
+             remap::SourceKind::kPad);
 }
 
 void TestIconSourceCatalog() {
@@ -812,6 +901,27 @@ void TestImageRows() {
   CHECK_TRUE(page.lines[0] ==
       "Confirm: <alt1>\xC2\x80 \xC2\x81 \xC2\x82</alt1>");
 
+  rb_blitz::test::BeginCase("input images: binding pages share stable glyph slots");
+  snapshot->music.Set("next", {Source("key:MediaTrackNext")});
+  const std::vector<std::vector<std::string>> panels{
+      {"settings_bind_general_a"}, {"settings_bind_music_next"}};
+  const auto catalog = rb_blitz::ui::input_icon_rows::BuildCatalog(panels, view);
+  CHECK_EQ(catalog.icons.size(), 4u);
+  const auto music_page = rb_blitz::ui::input_icon_rows::Build(
+      panels[1], {"Next Track: Media Next"}, view, {}, &catalog);
+  CHECK_TRUE(music_page.lines[0] == "Next Track: <alt1>\xC2\x83</alt1>");
+  snapshot->general.Set(remap::Target::kA,
+      {Source("key:Return"), Source("pad:y"), Source("pad:a")});
+  snapshot->music.Set("next", {Source("key:MediaTrackPrevious")});
+  const auto changed = rb_blitz::ui::input_icon_rows::BuildCatalog(panels, view, &catalog);
+  CHECK_EQ(changed.icons.size(), 5u);
+  CHECK_TRUE(changed.icons[0].source.name == "y");
+  CHECK_TRUE(changed.icons[1].source.name == "Return");
+  CHECK_TRUE(changed.icons[4].source.name == "MediaTrackPrevious");
+  const auto changed_page = rb_blitz::ui::input_icon_rows::Build(
+      panels[1], {"Next Track: Media Previous"}, view, {}, &changed);
+  CHECK_TRUE(changed_page.lines[0] == "Next Track: <alt1>\xC2\x84</alt1>");
+
   // A v2 row must keep physical-source identity through resolution and glyph assignment.
   // In particular, the two SDL extras have no legacy XInput sheet slot to fall back to.
   rb_blitz::controller_schemes::Registry packages;
@@ -839,6 +949,9 @@ void TestImageRows() {
   packages.keyboard_mouse.schema_version = 2;
   add_image(&packages.keyboard_mouse, "key:Return", 51);
   add_image(&packages.keyboard_mouse, "mouse:left", 68);
+  add_image(&packages.keyboard_mouse, "key:MediaTrackNext", 71);
+  add_image(&packages.keyboard_mouse, "key:MediaTrackPrevious", 72);
+  add_image(&packages.keyboard_mouse, "key:MediaPlayPause", 73);
   snapshot->general.Set(remap::Target::kA,
       {Source("sdl:button:misc1"), Source("key:Return"),
        Source("sdl:button:left_paddle1"), Source("mouse:left")});
@@ -873,11 +986,13 @@ void TestImageRows() {
   const auto media_next = icons::Resolve(Source("key:MediaTrackNext"), "retail", &packages);
   const auto media_previous = icons::Resolve(Source("key:MediaTrackPrevious"), "retail", &packages);
   const auto media_pause = icons::Resolve(Source("key:MediaPlayPause"), "retail", &packages);
-  CHECK_TRUE(media_next.art == icons::Art::kBuiltIn && media_next.width == 48);
-  CHECK_TRUE(media_previous.art == icons::Art::kBuiltIn && media_previous.width == 48);
-  CHECK_TRUE(media_pause.art == icons::Art::kBuiltIn && media_pause.width == 48);
+  CHECK_TRUE(media_next.art == icons::Art::kPackageImage && media_next.rgba[0] == 71);
+  CHECK_TRUE(media_previous.art == icons::Art::kPackageImage && media_previous.rgba[0] == 72);
+  CHECK_TRUE(media_pause.art == icons::Art::kPackageImage && media_pause.rgba[0] == 73);
   CHECK_TRUE(media_next.rgba != media_previous.rgba);
   CHECK_TRUE(media_next.rgba != media_pause.rgba);
+  CHECK_TRUE(icons::Resolve(Source("key:MediaTrackNext"), "retail").art ==
+             icons::Art::kBuiltIn);
 
   auto rebound = std::make_shared<rb_blitz::input::EffectiveInput>();
   rebound->general.Set(remap::Target::kA, {Source("pad:b"), Source("key:space")});
@@ -976,8 +1091,10 @@ void TestImageRows() {
 int main() {
   TestImageRows();
   TestEffectiveIcons();
+  TestHintFallbacks();
   TestIconSourceCatalog();
   TestMusicBindings();
+  TestLibraryHeaderDefaults();
   TestTokenGrammar();
   TestCaptureReleasesFirst();
   TestExtraButtonCapture();

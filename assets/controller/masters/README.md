@@ -6,6 +6,9 @@ is the transparent raster body used while composing annotated pad diagrams.
 These files are authoring sources; runtime schemes use only the PNGs declared
 in their layout folders.
 
+`none.svg` is the editable square-and-slash master for an action with no usable
+input image. `src/input/input_icons.cpp` draws its matching 32-pixel runtime tile.
+
 The pressed and released `button-*-template.svg` masters contain only the
 weathered bezel; the pressed master also contains its white impact accent.
 The renderer places that accent above the button artwork in pressed outputs.

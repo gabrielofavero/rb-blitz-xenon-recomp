@@ -18,6 +18,8 @@
 #include "input/input_icons.h"
 #include "profile/input_rows.h"
 #include "ui/input_font_scene.h"
+#include "ui/input_icon_rows.h"
+#include "ui/settings_screen.h"
 
 REX_EXTERN(__imp__sub_824D85E8);  // InlineHelp::DrawShowing
 REX_EXTERN(__imp__sub_824D9330);  // InlineHelp::UpdateLabels
@@ -69,30 +71,54 @@ std::string Signature(const rb_blitz::input::icons::View& view) {
 void Publish(const rb_blitz::input::icons::View& view, const std::string& signature) {
   static std::mutex mutex;
   static std::string published;
+  static std::string published_content;
   std::lock_guard lock(mutex);
   if (signature == published) return;
-  std::vector<rb_blitz::input::icons::Icon> icons;
-  icons.reserve(kTargets.size());
-  for (const char* target : kTargets)
-    icons.push_back(rb_blitz::input::icons::First(view,
-        {rb_blitz::profile::InputRowKind::kGeneralBinding, target}));
-  // Localized gameplay labels share the hint font, but each action has its own
-  // tile. The corresponding InlineHelp character slots are empty in retail.
-  icons[font::kGameplayPowerupHint] = rb_blitz::input::icons::First(
-      view, rb_blitz::profile::gameplay_remap::Action::kPowerup);
-  icons[font::kGameplayFirstNoteHint] = rb_blitz::input::icons::First(
-      view, rb_blitz::profile::gameplay_remap::Action::kFirstNote);
-  icons[font::kGameplaySecondNoteHint] = rb_blitz::input::icons::First(
-      view, rb_blitz::profile::gameplay_remap::Action::kSecondNote);
-  icons[font::kGameplayMoveRightHint] = rb_blitz::input::icons::First(
-      view, rb_blitz::profile::gameplay_remap::Action::kMoveLaneRight);
-  icons[font::kGameplayMoveLeftHint] = rb_blitz::input::icons::First(
-      view, rb_blitz::profile::gameplay_remap::Action::kMoveLaneLeft);
-  icons[font::kGameplayPauseHint] = rb_blitz::input::icons::First(
-      view, rb_blitz::profile::gameplay_remap::Action::kPause);
-  rb_blitz::assets::PublishHintIcons(signature, std::move(icons));
-  rb_blitz::assets::PublishCalibrationIcon(signature, rb_blitz::input::icons::First(view,
-      {rb_blitz::profile::InputRowKind::kGeneralBinding, "a"}));
+  rb_blitz::hooks::EnsureInputCatalog(view);
+  const std::string content = std::to_string(view.revision) + ":" + view.controller_scheme;
+  if (content == published_content) {
+    rb_blitz::assets::PublishHintIcons(content, {}, {}, view.active_family);
+    published = signature;
+    return;
+  }
+  std::array<std::vector<rb_blitz::input::icons::Icon>, 3> variants;
+  std::array<rb_blitz::input::icons::Icon, 3> calibration;
+  constexpr std::array families{rb_blitz::input::icons::Family::kController,
+                                rb_blitz::input::icons::Family::kKeyboard,
+                                rb_blitz::input::icons::Family::kMouse};
+  for (size_t family = 0; family < families.size(); ++family) {
+    auto family_view = view;
+    family_view.active_family = families[family];
+    auto& icons = variants[family];
+    icons.reserve(kTargets.size());
+    for (const char* target : kTargets)
+      icons.push_back(rb_blitz::input::icons::Hint(family_view,
+          {rb_blitz::profile::InputRowKind::kGeneralBinding, target}));
+    // The header's LT/RT labels use the retail buttons font. Supply their
+    // effective actions to the texture provider for its keyboard/mouse sheets.
+    icons[rb_blitz::assets::kHeaderPreviousIcon] = rb_blitz::input::icons::First(family_view,
+        {rb_blitz::profile::InputRowKind::kGeneralBinding, "left_trigger"});
+    icons[rb_blitz::assets::kHeaderNextIcon] = rb_blitz::input::icons::First(family_view,
+        {rb_blitz::profile::InputRowKind::kGeneralBinding, "right_trigger"});
+    // Localized gameplay labels share the hint font, but each action has its own tile.
+    icons[font::kGameplayPowerupHint] = rb_blitz::input::icons::First(
+        family_view, rb_blitz::profile::gameplay_remap::Action::kPowerup);
+    icons[font::kGameplayFirstNoteHint] = rb_blitz::input::icons::First(
+        family_view, rb_blitz::profile::gameplay_remap::Action::kFirstNote);
+    icons[font::kGameplaySecondNoteHint] = rb_blitz::input::icons::First(
+        family_view, rb_blitz::profile::gameplay_remap::Action::kSecondNote);
+    icons[font::kGameplayMoveRightHint] = rb_blitz::input::icons::First(
+        family_view, rb_blitz::profile::gameplay_remap::Action::kMoveLaneRight);
+    icons[font::kGameplayMoveLeftHint] = rb_blitz::input::icons::First(
+        family_view, rb_blitz::profile::gameplay_remap::Action::kMoveLaneLeft);
+    icons[font::kGameplayPauseHint] = rb_blitz::input::icons::First(
+        family_view, rb_blitz::profile::gameplay_remap::Action::kPause);
+    calibration[family] = rb_blitz::input::icons::Hint(family_view,
+        {rb_blitz::profile::InputRowKind::kGeneralBinding, "a"});
+  }
+  rb_blitz::assets::PublishHintIcons(content, std::move(variants),
+                                     std::move(calibration), view.active_family);
+  published_content = content;
   published = signature;
   if (TraceEnabled()) REXLOG_INFO("p10_trace: hints published {}", signature);
 }
@@ -107,6 +133,29 @@ void TraceInlineHelp(const uint8_t* base, uint32_t draw) {
 }  // namespace
 
 namespace rb_blitz::hooks {
+std::shared_ptr<const ui::input_icon_rows::Catalog> EnsureInputCatalog(
+    const input::icons::View& view) {
+  static std::mutex mutex;
+  static std::string prepared_signature;
+  static std::shared_ptr<const ui::input_icon_rows::Catalog> current;
+  static const std::vector<std::vector<std::string>> panel_symbols = [] {
+    std::vector<std::vector<std::string>> symbols;
+    for (const auto& panel : ui::screen::BindingPanelNames())
+      symbols.push_back(ui::screen::PanelRowSymbols(panel));
+    return symbols;
+  }();
+  const std::string signature = std::to_string(view.revision) + ":" + view.controller_scheme;
+  std::lock_guard lock(mutex);
+  if (current && signature == prepared_signature) return current;
+  auto catalog = std::make_shared<ui::input_icon_rows::Catalog>(
+      ui::input_icon_rows::BuildCatalog(panel_symbols, view, current.get()));
+  assets::PublishInputIcons("catalog:" + signature, catalog->icons);
+  prepared_signature = signature;
+  current = catalog;
+  REXLOG_INFO("input_icons: prepared stable catalog with {} source slots", catalog->icons.size());
+  return current;
+}
+
 void PublishActionHints() {
   if (!rb_blitz::assets::InputIconsAvailable()) return;
   const auto view = rb_blitz::input::icons::CaptureActive(

@@ -262,6 +262,8 @@ std::vector<std::string> ScreenNames();
 // panel has that name. Pure, so tests can pin a page's order and its six-row budget without
 // parsing the generated DTA.
 std::vector<std::string> PanelRowSymbols(std::string_view panel);
+// Names of panels whose binding rows use the private input icon font.
+std::vector<std::string> BindingPanelNames();
 
 // ------------------------------------------------------------------------------------------------
 // The in-song context (P5b-r2)

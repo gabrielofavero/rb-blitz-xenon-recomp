@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="76" height="72" viewBox="0 0 76 72">
+  <!-- Editable source for the three keyboard media key placeholders. -->
+  <rect x="1" y="1" width="74" height="70" rx="8" fill="#202124"/>
+  <rect x="5" y="5" width="66" height="62" rx="6" fill="#38393b" stroke="#111214" stroke-width="2"/>
+  <rect x="10" y="9" width="56" height="52" rx="4" fill="#5b5b5d" stroke="#78797b" stroke-width="3"/>
+  <rect x="14" y="13" width="48" height="44" rx="2" fill="none" stroke="#aaa9aa" stroke-width="3"/>
+  <g id="media-next" fill="#ededed">
+    <path d="M25 27v18l10-9zm11 0v18l10-9z"/>
+    <rect x="48" y="27" width="3" height="18"/>
+  </g>
+  <g id="media-previous" fill="#ededed">
+    <path d="M51 27v18l-10-9zm-11 0v18l-10-9z"/>
+    <rect x="25" y="27" width="3" height="18"/>
+  </g>
+  <g id="media-play-pause" fill="#ededed">
+    <path d="M26 27v18l12-9z"/>
+    <rect x="41" y="27" width="4" height="18"/>
+    <rect x="49" y="27" width="4" height="18"/>
+  </g>
+</svg>

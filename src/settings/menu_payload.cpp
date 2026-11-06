@@ -1009,6 +1009,25 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                                                      "splash Start locale key is missing";
           return false;
         }
+        bool song_sort = false;
+        for (auto& root : roots) {
+          if (root.tag != ui::dtb::kArray || root.kids.size() < 2 ||
+              root.kids[0].text != "song_sort_str" ||
+              root.kids[1].tag != ui::dtb::kString) continue;
+          constexpr std::string_view before = "<alt1>s</alt1>";
+          const size_t at = root.kids[1].text.find(before);
+          if (song_sort || at == std::string::npos ||
+              root.kids[1].text.find(before, at + before.size()) != std::string::npos) {
+            if (error) *error = "song sort label glyph changed";
+            return false;
+          }
+          root.kids[1].text.replace(at, before.size(), "<alt1>\xC2\x85</alt1>");
+          song_sort = true;
+        }
+        if (!song_sort) {
+          if (error) *error = "song sort locale key is missing";
+          return false;
+        }
         struct HintText { const char* key; const char* before; const char* after; };
         constexpr std::array<HintText, 12> hint_text{{
             {"cal_audio_desc_pad", "<alt1>A</alt1>", "<alt1>\xC2\x81</alt1>"},
@@ -1489,6 +1508,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             return false;
           }
           built[ui::input_font::kSplashRecord] = std::move(splash);
+          std::vector<uint8_t> song_select_source, song_select;
+          if (!read(ui::input_font::kSongSelectRecord, &song_select_source, &why) ||
+              !ui::input_font::PrepareSongSelect(song_select_source, &song_select, &why)) {
+            if (error) *error = "song sort icon font preparation was refused: " + why;
+            return false;
+          }
+          built[ui::input_font::kSongSelectRecord] = std::move(song_select);
           auto prepare_hint_scene = [&](const char* path, auto prepare) {
             std::vector<uint8_t> source, generated;
             if (!read(path, &source, &why) || !prepare(source, &generated, &why)) {

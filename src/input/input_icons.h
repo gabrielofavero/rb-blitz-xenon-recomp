@@ -12,7 +12,7 @@
 
 namespace rb_blitz::input::icons {
 
-enum class Family { kController, kKeyboardMouse };
+enum class Family { kController, kKeyboard, kMouse };
 enum class Art { kSchemeSlot, kPackageImage, kBuiltIn, kUnbound, kUnsupported };
 
 // A physical source, its image, and the controller-sheet slot (if one exists).
@@ -51,5 +51,7 @@ std::vector<Icon> Ordered(const View& view, const profile::InputRowToken& row);
 std::vector<Icon> Ordered(const View& view, profile::gameplay_remap::Action action);
 Icon First(const View& view, const profile::InputRowToken& row);
 Icon First(const View& view, profile::gameplay_remap::Action action);
+// Action hints also include pointer actions handled by the native guest menu route.
+Icon Hint(const View& view, const profile::InputRowToken& row);
 
 }  // namespace rb_blitz::input::icons

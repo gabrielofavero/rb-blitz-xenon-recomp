@@ -9,8 +9,8 @@ names each observed result and each route the offline run could not prove.
 
 This inventory distinguishes the *action* a hint promises from the button character
 currently drawn. The effective Interface Mapping owns menu, pause and dialog
-actions; Gameplay Mapping owns song actions. `input::icons::First` already selects
-the first effective source in the active device family. The shared `InlineHelp`
+actions; Gameplay Mapping owns song actions. `input::icons::First` selects the
+first usable source by the active device's fallback order. The shared `InlineHelp`
 footer now consumes it. The mapping rows use `input_icon_rows::Build` and are P9, not
 evidence that ordinary hints are correct.
 
@@ -88,13 +88,22 @@ with the label, the action character and the caption. The locale format is
 
 `src/hooks/action_hint_probe.cpp` now maps the measured action IDs through
 the `ui_objects.dtb` action-character table, resolves each target with
-`input::icons::First`, and refreshes already-visible footer labels when the
+`input::icons::Hint`, and refreshes already-visible footer labels when the
 effective-input or last-device/layout revision changes. The generated payload
 points the inline-help scene's button style at `inline_help_icons.milo`; the
 texture provider reserves 15 private image slots for those actions while P9
 rows retain their accepted glyph codes. Unknown actions keep
 their original guest formatting. The bounded `p10_trace` output remains
 available for the owner-run visual check.
+
+As of 2026-11-06, action hints distinguish mouse clicks from keyboard presses.
+For each action they prefer controller/key/mouse, key/mouse/controller, or
+mouse/key/controller art according to the last physical input, skipping sources
+whose art is unsupported. Gameplay hints can fall back across both mapping
+tables. Native menu left and right clicks are represented as Confirm and Back
+hint choices without adding those clicks to General Mapping rows. A square
+with a slash is drawn when no source can supply an image. The release build and
+host input tests pass; live appearance has not been checked for this change.
 
 The owner checked the first build in both retail and Xbox Series layouts,
 including a Y rebound: captions remained but icons were blank. A second build

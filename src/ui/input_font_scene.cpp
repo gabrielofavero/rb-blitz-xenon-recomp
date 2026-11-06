@@ -471,6 +471,27 @@ bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* sce
   bytes.insert(bytes.begin() + offset, new_font.begin(), new_font.end());
   return PackStored(bytes, scene, error);
 }
+bool PrepareSongSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                       std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  constexpr std::string_view old_font = "../resource/fonts/buttons.milo";
+  constexpr std::string_view new_font = "../resource/fonts/inline_help_icons.milo";
+  constexpr std::string_view label = "sorting.lbl";
+  const auto font = std::search(bytes.begin(), bytes.end(), old_font.begin(), old_font.end());
+  if (font == bytes.end() ||
+      std::search(font + old_font.size(), bytes.end(), old_font.begin(), old_font.end()) !=
+          bytes.end() ||
+      std::search(bytes.begin(), font, label.begin(), label.end()) == font)
+    return Fail(error, "song sort label font changed");
+  const size_t at = size_t(font - bytes.begin());
+  if (at < 4 || Be32(bytes.data() + at - 4) != old_font.size())
+    return Fail(error, "song sort font string length changed");
+  PutBe32(bytes.data() + at - 4, static_cast<uint32_t>(new_font.size()));
+  bytes.erase(bytes.begin() + at, bytes.begin() + at + old_font.size());
+  bytes.insert(bytes.begin() + at, new_font.begin(), new_font.end());
+  return PackStored(bytes, scene, error);
+}
 bool PrepareCalibration(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                         std::string* error) {
   std::vector<uint8_t> bytes;

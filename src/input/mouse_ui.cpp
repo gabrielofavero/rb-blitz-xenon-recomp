@@ -322,8 +322,8 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     g_window_focused = focused;
     if (auto changed = last_device::Tick())
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
-                  changed->family == last_device::Family::kController
-                      ? "controller" : "keyboard");
+                  changed->family == last_device::Family::kController ? "controller" :
+                  changed->family == last_device::Family::kMouse ? "mouse" : "keyboard");
     g_sdl_keyboard_focused = SDL_GetKeyboardFocus() != nullptr;
     // The raw mask is the event latch, not `SDL_GetMouseState`: P2's live arm measured SDL's
     // device state blind in this process (both the key and the mouse arrays read zero while the

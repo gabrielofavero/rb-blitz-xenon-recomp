@@ -633,10 +633,11 @@ void TestDefaultsGiveTheKeyboardAPad() {
     }
   }
 
-  // The analog triggers have no default and keep the pad's own reporting, so their travel is not
-  // turned into a full-scale press.
-  CHECK_TRUE(DefaultSources(Target::kLeftTrigger) == nullptr);
-  CHECK_TRUE(DefaultSources(Target::kRightTrigger) == nullptr);
+  // The triggers keep their analog pad sources and add Page Up/Down for headers.
+  CHECK_TRUE(DefaultSources(Target::kLeftTrigger) &&
+             DefaultSources(Target::kLeftTrigger)->size() == 2);
+  CHECK_TRUE(DefaultSources(Target::kRightTrigger) &&
+             DefaultSources(Target::kRightTrigger)->size() == 2);
 
   // An empty table means the defaults; an explicit row still wins over one.
   const Table empty;

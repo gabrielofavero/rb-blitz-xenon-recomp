@@ -811,10 +811,10 @@ std::vector<PanelSpec> AllPanels() {
                           "settings_controls_screen", MenuPanels(), std::move(group_rows)});
 
   // 6b. Interface Mapping (P3). The page owns the *interface*: the four directions, confirm, back,
-  // and the song list's three buttons - nine rows in three groups, each with its own Assign/Reset
+  // and the song library's five actions - eleven rows in three groups, each with its own Assign/Reset
   // page. The token behind a row is still the `[remap]` target it always was (`input.general.a`),
   // so a profile written before the rebuild binds the same control; only the name the page gives
-  // it changed (D1). The seven remaining targets (X, the shoulders, the triggers, the two stick
+  // it changed (D1). The five remaining targets (X, the shoulders and the two stick
   // clicks) keep their compiled defaults and are deliberately not shown (D2); Reset All still
   // resets all sixteen.
   {
@@ -831,7 +831,7 @@ std::vector<PanelSpec> AllPanels() {
                                 SubmenuRow("settings_interface_music_library",
                                            "settings_interface_music_library_screen",
                                            "Music Library Options",
-                                           "The song list's search, shortcuts, and sort buttons."),
+                                           "Search, shortcuts, sort, and header navigation in the song library."),
                                 SubmenuRow("settings_interface_music_play",
                                            "settings_interface_music_play_screen",
                                            "Background Music Play",
@@ -894,6 +894,10 @@ std::vector<PanelSpec> AllPanels() {
                                                     "Open the song list's shortcuts."),
                                 InterfaceBindingRow(profile::remap::Target::kBack,
                                                     "Change how the song list is sorted."),
+                                InterfaceBindingRow(profile::remap::Target::kLeftTrigger,
+                                                    "Move to the previous library header."),
+                                InterfaceBindingRow(profile::remap::Target::kRightTrigger,
+                                                    "Move to the next library header."),
                             }});
     // One Assign/Reset page per visible row, in the page's own reading order. The back target is
     // the page that lists the row, so a child of Navigation returns to Navigation.
@@ -909,7 +913,9 @@ std::vector<PanelSpec> AllPanels() {
     }
     for (const profile::remap::Target target : {profile::remap::Target::kStart,
                                                 profile::remap::Target::kY,
-                                                profile::remap::Target::kBack}) {
+                                                profile::remap::Target::kBack,
+                                                profile::remap::Target::kLeftTrigger,
+                                                profile::remap::Target::kRightTrigger}) {
       out.push_back(InterfaceActionPage(target, "settings_interface_music_library_screen"));
     }
   }
@@ -2626,6 +2632,14 @@ std::vector<std::string> PanelRowSymbols(std::string_view panel) {
     }
   }
   return out;
+}
+
+std::vector<std::string> BindingPanelNames() {
+  std::vector<std::string> names;
+  for (const auto& context : {AllPanels(), InSongPanels()})
+    for (const PanelSpec& panel : context)
+      if (LiveBindingRows(panel)) names.push_back(panel.name);
+  return names;
 }
 
 std::vector<std::string> PanelBindingText(const std::string_view name,

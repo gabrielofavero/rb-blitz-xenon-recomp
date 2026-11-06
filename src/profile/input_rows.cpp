@@ -251,7 +251,7 @@ InputRowToken ParseInputRowSymbol(const std::string_view symbol) {
 }
 
 std::string InterfaceTargetLabel(const remap::Target target) {
-  // D1's vocabulary. The three music-library names say what the song list does with the button
+  // D1's vocabulary. The music-library names say what the song list does with the button
   // rather than naming the pad's button, and the two face buttons read as the menu actions they
   // perform - `Confirm`/`Go Back` is also what keeps a player from confusing B with Back/Select.
   switch (target) {
@@ -260,6 +260,8 @@ std::string InterfaceTargetLabel(const remap::Target target) {
     case remap::Target::kY: return "Shortcuts";
     case remap::Target::kBack: return "Sort";
     case remap::Target::kStart: return "Search";
+    case remap::Target::kLeftTrigger: return "Previous Header";
+    case remap::Target::kRightTrigger: return "Next Header";
     case remap::Target::kDpadUp: return "Up";
     case remap::Target::kDpadDown: return "Down";
     case remap::Target::kDpadLeft: return "Left";
@@ -267,8 +269,6 @@ std::string InterfaceTargetLabel(const remap::Target target) {
     case remap::Target::kX:
     case remap::Target::kLeftShoulder:
     case remap::Target::kRightShoulder:
-    case remap::Target::kLeftTrigger:
-    case remap::Target::kRightTrigger:
     case remap::Target::kLeftThumb:
     case remap::Target::kRightThumb:
       break;

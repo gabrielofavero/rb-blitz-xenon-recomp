@@ -4,12 +4,14 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -80,10 +82,78 @@ constexpr std::pair<uint64_t, const char*> kPadFingerprints[] = {
 constexpr uint64_t kButtonFingerprint = 0x3F044908A62A89ADull;
 constexpr uint64_t kExtraIconsFingerprint = 0x1163F9F7F2FFF53Dull;
 
+using Levels = std::vector<std::vector<uint8_t>>;
+using CalibrationLevels = std::array<Levels, 2>;
+
+CalibrationLevels ComposeCalibrationIcon(const controller_schemes::Registry& registry,
+                                         const input::icons::Icon& icon) {
+  CalibrationLevels levels;
+  const auto originals = ui::input_font::OriginalCalibrationButtons();
+  const auto& source = icon.source;
+  if (icon.scheme == "playstation-3" && source.kind == profile::remap::SourceKind::kPad &&
+      source.name == "a" && originals) {
+    levels[0] = (*originals)[2];
+    levels[1] = (*originals)[3];
+  } else if (icon.art == input::icons::Art::kUnbound) {
+    controller_schemes::Image blank{256, 256, std::vector<uint8_t>(256u * 256u * 4u)};
+    levels[0] = controller_schemes::ComposeCalibration(blank);
+    levels[1] = levels[0];
+  } else {
+    const controller_schemes::Scheme* scheme = nullptr;
+    if (source.kind == profile::remap::SourceKind::kKey ||
+        source.kind == profile::remap::SourceKind::kMouse) {
+      if (registry.has_keyboard_mouse) scheme = &registry.keyboard_mouse;
+    } else scheme = registry.Find(icon.scheme);
+    if (scheme) {
+      const char* prefix = source.kind == profile::remap::SourceKind::kPad ? "pad:" :
+                           source.kind == profile::remap::SourceKind::kSdl ? "sdl:" :
+                           source.kind == profile::remap::SourceKind::kMouse ? "mouse:" : "key:";
+      if (const auto* entry = scheme->InputFor(std::string(prefix) + source.name);
+          entry && scheme->calibration_pairs.contains(entry->id)) {
+        controller_schemes::Image released, pressed;
+        std::string why;
+        if (controller_schemes::LoadCalibrationImage(*scheme, *entry, false,
+                DecodeSchemePngTimed, &released, &why) &&
+            controller_schemes::LoadCalibrationImage(*scheme, *entry, true,
+                DecodeSchemePngTimed, &pressed, &why)) {
+          levels[0] = controller_schemes::ComposeCalibration(released);
+          levels[1] = controller_schemes::ComposeCalibration(pressed);
+        } else REXLOG_WARN("calibration: cannot load {} art: {}", entry->id, why);
+      }
+    }
+  }
+  return levels;
+}
+
+struct FontVariant {
+  Levels retail;
+  Levels private_font;
+  CalibrationLevels calibration;
+};
+struct FontJob {
+  uint64_t revision = 0;
+  std::string scheme;
+  std::vector<input::icons::Icon> rows;
+  std::array<std::vector<input::icons::Icon>, 3> hints;
+  std::array<input::icons::Icon, 3> calibration;
+  std::shared_ptr<const std::vector<uint8_t>> original_font;
+  std::shared_ptr<const std::vector<uint8_t>> original_buttons;
+};
+struct FontResult {
+  uint64_t revision = 0;
+  std::array<FontVariant, 3> variants;
+};
+
 class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
  public:
   explicit SchemeOverride(controller_schemes::Registry registry)
-      : registry_(std::move(registry)) {}
+      : registry_(std::move(registry)) {
+    worker_ = std::jthread([this](std::stop_token stop) { PrepareFonts(stop); });
+  }
+  ~SchemeOverride() override {
+    worker_.request_stop();
+    worker_cv_.notify_all();
+  }
   const controller_schemes::Registry* Registry() const { return &registry_; }
   bool Select(const std::string& id) {
     if (id != "retail" && !registry_.Find(id)) return false;
@@ -98,27 +168,73 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     pending_icons_ = std::move(icons);
     has_pending_icons_ = true;
   }
-  void PublishHints(std::string signature, std::vector<input::icons::Icon> icons) {
+  void PublishHints(std::string signature,
+                    std::array<std::vector<input::icons::Icon>, 3> variants,
+                    std::array<input::icons::Icon, 3> calibration,
+                    input::icons::Family active_family) {
     std::lock_guard lock(pending_mutex_);
-    if (signature == last_hint_signature_) return;
+    if (signature == last_hint_signature_ && active_family == last_active_family_) return;
+    const bool content_changed = signature != last_hint_signature_;
     last_hint_signature_ = std::move(signature);
-    pending_hints_ = std::move(icons);
+    last_active_family_ = active_family;
+    if (content_changed) {
+      pending_hints_ = std::move(variants);
+      pending_calibration_ = std::move(calibration);
+    }
+    pending_hint_content_changed_ |= content_changed;
+    pending_active_family_ = active_family;
     has_pending_hints_ = true;
   }
-  void PublishCalibration(std::string signature, input::icons::Icon icon) {
-    std::lock_guard lock(pending_mutex_);
-    if (signature == last_calibration_signature_) return;
-    last_calibration_signature_ = std::move(signature);
-    pending_calibration_ = std::move(icon);
-    has_pending_calibration_ = true;
+  void PrepareFonts(std::stop_token stop) {
+    while (!stop.stop_requested()) {
+      FontJob job;
+      {
+        std::unique_lock lock(worker_mutex_);
+        worker_cv_.wait(lock, [&] { return stop.stop_requested() || pending_job_.has_value(); });
+        if (stop.stop_requested()) return;
+        job = std::move(*pending_job_);
+        pending_job_.reset();
+      }
+      FontResult result;
+      result.revision = job.revision;
+      const auto* scheme = registry_.Find(job.scheme);
+      for (size_t family = 0; family < result.variants.size(); ++family) {
+        input::icons::Icon blank;
+        blank.art = input::icons::Art::kBuiltIn;
+        blank.width = blank.height = 1;
+        blank.rgba = {0, 0, 0, 0};
+        std::vector<input::icons::Icon> icons(ui::input_font::kIconCount, blank);
+        for (size_t i = 0; i < job.rows.size(); ++i)
+          icons[ui::input_font::RowGlyphIndex(static_cast<uint32_t>(i))] = job.rows[i];
+        for (size_t i = 0; i < job.hints[family].size() && i < ui::input_font::kHintCount; ++i)
+          icons[ui::input_font::kHintFirst + i] = job.hints[family][i];
+        auto& variant = result.variants[family];
+        Levels composed;
+        if (!input_font_atlas::Compose(*job.original_font, *job.original_buttons,
+                                       scheme, icons, &composed) ||
+            !input_font_atlas::ComposeRetail(*job.original_font, composed, &variant.retail) ||
+            !input_font_atlas::ComposePrivate(*job.original_buttons, scheme, icons,
+                                               &variant.private_font)) {
+          REXLOG_WARN("input_icons: background font preparation failed for family {}", family);
+        }
+        variant.calibration = ComposeCalibrationIcon(registry_, job.calibration[family]);
+      }
+      REXLOG_INFO("input_icons: prepared controller, keyboard and mouse font variants revision={}",
+                  result.revision);
+      {
+        std::lock_guard lock(worker_mutex_);
+        completed_job_ = std::move(result);
+      }
+    }
   }
   void Poll() override {
     std::string next;
     std::vector<input::icons::Icon> icons;
-    std::vector<input::icons::Icon> hints;
-    input::icons::Icon calibration;
-    bool icons_changed = false;
-    bool calibration_changed = false;
+    std::array<std::vector<input::icons::Icon>, 3> hints;
+    std::array<input::icons::Icon, 3> calibration;
+    bool rows_changed = false;
+    bool hints_changed = false;
+    bool family_changed = false;
     {
       std::lock_guard lock(pending_mutex_);
       next = std::move(pending_);
@@ -126,28 +242,27 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       if (has_pending_icons_) {
         icons = std::move(pending_icons_);
         has_pending_icons_ = false;
-        icons_changed = true;
+        rows_changed = true;
       }
       if (has_pending_hints_) {
-        hints = std::move(pending_hints_);
+        if (pending_hint_content_changed_) {
+          hints = std::move(pending_hints_);
+          calibration = std::move(pending_calibration_);
+          hints_changed = true;
+          pending_hint_content_changed_ = false;
+        }
+        family_changed = active_family_ != pending_active_family_;
+        active_family_ = pending_active_family_;
         has_pending_hints_ = false;
-        icons_changed = true;
-      }
-      if (has_pending_calibration_) {
-        calibration = std::move(pending_calibration_);
-        has_pending_calibration_ = false;
-        calibration_changed = true;
       }
     }
     const bool scheme_changed = !next.empty() && next != selected_;
     if (scheme_changed) {
       selected_ = std::move(next);
       buttons_.clear();
+      for (auto& levels : header_buttons_) levels.clear();
       icons_.clear();
       pads_.clear();
-      font_levels_.clear();
-      retail_font_levels_.clear();
-      private_font_levels_.clear();
       logged_.clear();
       const auto* scheme = registry_.Find(selected_);
       if (scheme) {
@@ -176,65 +291,45 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
                     selected_);
       }
     }
-    if (icons_changed) {
+    if (rows_changed || hints_changed) {
       if (!icons.empty()) row_icons_ = std::move(icons);
-      if (!hints.empty()) hint_icons_ = std::move(hints);
-      if (!hint_icons_.empty() || row_icons_.size() > ui::input_font::kHintFirst) {
-        input::icons::Icon blank;
-        blank.art = input::icons::Art::kBuiltIn;
-        blank.width = blank.height = 1;
-        blank.rgba = {0, 0, 0, 0};
-        font_icons_.assign(ui::input_font::kIconCount, blank);
-        for (size_t i = 0; i < row_icons_.size(); ++i)
-          font_icons_[ui::input_font::RowGlyphIndex(static_cast<uint32_t>(i))] = row_icons_[i];
-        for (size_t i = 0; i < hint_icons_.size() && i < ui::input_font::kHintCount; ++i)
-          font_icons_[ui::input_font::kHintFirst + i] = hint_icons_[i];
-      } else font_icons_ = row_icons_;
-      font_levels_.clear();
-      retail_font_levels_.clear();
-      private_font_levels_.clear();
-    }
-    if (calibration_changed) {
-      calibration_levels_ = {};
-      const auto originals = ui::input_font::OriginalCalibrationButtons();
-      const auto& source = calibration.source;
-      const bool ps3_cross = calibration.scheme == "playstation-3" &&
-          source.kind == profile::remap::SourceKind::kPad && source.name == "a";
-      if (ps3_cross && originals) {
-        calibration_levels_[0] = (*originals)[2];
-        calibration_levels_[1] = (*originals)[3];
-      } else if (calibration.art == input::icons::Art::kUnbound) {
-        controller_schemes::Image blank{256, 256, std::vector<uint8_t>(256u * 256u * 4u)};
-        calibration_levels_[0] = controller_schemes::ComposeCalibration(blank);
-        calibration_levels_[1] = calibration_levels_[0];
-      } else {
-        const controller_schemes::Scheme* scheme = nullptr;
-        if (source.kind == profile::remap::SourceKind::kKey ||
-            source.kind == profile::remap::SourceKind::kMouse) {
-          if (registry_.has_keyboard_mouse) scheme = &registry_.keyboard_mouse;
-        } else scheme = registry_.Find(calibration.scheme);
-        if (scheme) {
-          const char* prefix = source.kind == profile::remap::SourceKind::kPad ? "pad:" :
-                               source.kind == profile::remap::SourceKind::kSdl ? "sdl:" :
-                               source.kind == profile::remap::SourceKind::kMouse ? "mouse:" : "key:";
-          if (const auto* entry = scheme->InputFor(std::string(prefix) + source.name);
-              entry && scheme->calibration_pairs.contains(entry->id)) {
-            controller_schemes::Image released, pressed;
-            std::string why;
-            if (controller_schemes::LoadCalibrationImage(*scheme, *entry, false,
-                    DecodeSchemePngTimed, &released, &why) &&
-                controller_schemes::LoadCalibrationImage(*scheme, *entry, true,
-                    DecodeSchemePngTimed, &pressed, &why)) {
-              calibration_levels_[0] = controller_schemes::ComposeCalibration(released);
-              calibration_levels_[1] = controller_schemes::ComposeCalibration(pressed);
-            } else REXLOG_WARN("calibration: cannot load {} art: {}", entry->id, why);
-          }
-        }
+      if (hints_changed) {
+        hint_variants_ = std::move(hints);
+        calibration_icons_ = std::move(calibration);
+        for (auto& levels : header_buttons_) levels.clear();
       }
-      REXLOG_INFO("calibration: selected {} {} with pressed/released art={}",
-                  calibration.scheme, source.name, !calibration_levels_[0].empty());
     }
-    if (scheme_changed || icons_changed || calibration_changed || retail_ps_pads_ready ||
+    if (scheme_changed || rows_changed || hints_changed) ++font_revision_;
+    if (font_revision_ != queued_font_revision_ && !hint_variants_[0].empty()) {
+      const auto original_font = ui::input_font::OriginalBc3();
+      const auto original_buttons = ui::input_font::OriginalButtonsBc3();
+      if (original_font && original_buttons) {
+        FontJob job;
+        job.revision = font_revision_;
+        job.scheme = selected_;
+        job.rows = row_icons_;
+        job.hints = hint_variants_;
+        job.calibration = calibration_icons_;
+        job.original_font = original_font;
+        job.original_buttons = original_buttons;
+        {
+          std::lock_guard lock(worker_mutex_);
+          pending_job_ = std::move(job);
+        }
+        queued_font_revision_ = font_revision_;
+        worker_cv_.notify_one();
+      }
+    }
+    bool fonts_ready = false;
+    {
+      std::lock_guard lock(worker_mutex_);
+      if (completed_job_ && completed_job_->revision == font_revision_) {
+        font_variants_ = std::move(completed_job_->variants);
+        completed_job_.reset();
+        fonts_ready = true;
+      } else if (completed_job_) completed_job_.reset();
+    }
+    if (scheme_changed || family_changed || hints_changed || fonts_ready || retail_ps_pads_ready ||
         refresh_font_after_buttons_) {
       refresh_font_after_buttons_ = false;
       rex::graphics::InvalidateTextureOverrides();
@@ -319,8 +414,9 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     // Otherwise a retail boot uploads it once and a later generation bump has nothing to evict.
     if (button || icons || pad_slot || font || private_font || calibration_slot >= 0)
       *refresh_target = true;
-    if (calibration_slot >= 0 && !calibration_levels_[calibration_slot % 2].empty()) {
-      const auto& levels = calibration_levels_[calibration_slot % 2];
+    const auto& variant = font_variants_[static_cast<size_t>(active_family_)];
+    if (calibration_slot >= 0 && !variant.calibration[calibration_slot % 2].empty()) {
+      const auto& levels = variant.calibration[calibration_slot % 2];
       if (request.mip_count > levels.size()) return false;
       host_levels->assign(levels.begin(), levels.begin() + request.mip_count);
       return true;
@@ -331,80 +427,74 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       refresh_font_after_buttons_ = true;
     }
     if (private_font) {
-      if (font_icons_.empty() || original_buttons_.empty()) {
-        REXLOG_WARN("input_icons: private font override waiting for icons={} button_sheet={}",
-                    font_icons_.size(), !original_buttons_.empty());
-        return false;
-      }
-      if (private_font_levels_.empty()) {
-        if (!input_font_atlas::ComposePrivate(original_buttons_, registry_.Find(selected_),
-                                              font_icons_, &private_font_levels_)) {
-          REXLOG_WARN("input_icons: could not compose private mapping font images");
-          return false;
-        }
-        REXLOG_INFO("input_icons: composed private font with {} image slots", font_icons_.size());
-      }
-      if (request.mip_count > private_font_levels_.size()) return false;
-      host_levels->assign(private_font_levels_.begin(),
-                          private_font_levels_.begin() + request.mip_count);
+      if (request.mip_count > variant.private_font.size()) return false;
+      host_levels->assign(variant.private_font.begin(),
+                          variant.private_font.begin() + request.mip_count);
       return true;
     }
     if (font) {
-      if (font_icons_.empty() || original_buttons_.empty()) {
-        REXLOG_WARN("input_icons: font override waiting for icons={} button_sheet={}",
-                    font_icons_.size(), !original_buttons_.empty());
-        return false;
-      }
-      if (font_levels_.empty()) {
-        if (!retail_original || !input_font_atlas::Compose(*retail_original, original_buttons_,
-                                      registry_.Find(selected_), font_icons_, &font_levels_)) {
-          REXLOG_WARN("input_icons: could not compose mapping font images");
-          return false;
-        }
-        REXLOG_INFO("input_icons: composed {} image slots, hint tiles {}/{}",
-                    font_icons_.size(), ui::input_font::kHintFirst + 1,
-                    ui::input_font::kHintFirst + 2);
-      }
-      if (retail_font_levels_.empty() &&
-          (!retail_original || !input_font_atlas::ComposeRetail(
-              *retail_original, font_levels_, &retail_font_levels_))) {
-        REXLOG_WARN("input_icons: could not compose retail font fallback");
-        return false;
-      }
-      const auto& chosen = retail_font_levels_;
+      const auto& chosen = variant.retail;
       if (request.mip_count > chosen.size()) return false;
       host_levels->assign(chosen.begin(), chosen.begin() + request.mip_count);
       return true;
     }
     const auto* scheme = registry_.Find(selected_);
-    if (!scheme) {
-      if (button && logged_.insert(hash).second)
-        REXLOG_INFO("controller_schemes: tracking original button sheet for live selection");
-      return false;
-    }
     if (button) {
-      if (scheme->buttons.empty()) return false;
       if (buttons_.empty()) {
         const auto start = std::chrono::steady_clock::now();
         std::vector<uint8_t> original;
         if (!controller_schemes::UntileBc3Base(
                 guest_data, request.guest_base_size, request.width,
-                request.tiled, uint32_t(request.endianness), &original) ||
-            !controller_schemes::ComposeButtons({original}, *scheme, &buttons_)) {
+                request.tiled, uint32_t(request.endianness), &original)) {
           REXLOG_WARN("controller_schemes: cannot compose original button sheet");
           return false;
         }
+        if (scheme && !scheme->buttons.empty()) {
+          if (!controller_schemes::ComposeButtons({original}, *scheme, &buttons_)) {
+            REXLOG_WARN("controller_schemes: cannot compose selected button sheet");
+            return false;
+          }
+        } else buttons_ = {std::move(original)};
         const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - start);
         REXLOG_INFO("controller_schemes: composed button sheet in {} us", elapsed.count());
       }
       if (request.mip_count > buttons_.size()) return false;
-      host_levels->assign(buttons_.begin(), buttons_.begin() + request.mip_count);
+      if (active_family_ == input::icons::Family::kController &&
+          (!scheme || scheme->buttons.empty())) return false;
+      const Levels* chosen = &buttons_;
+      if (active_family_ != input::icons::Family::kController) {
+        const size_t family = static_cast<size_t>(active_family_);
+        auto& header = header_buttons_[family];
+        if (header.empty()) {
+          controller_schemes::Scheme replacement;
+          const auto& hints = hint_variants_[family];
+          for (const auto [index, slot] :
+               {std::pair<size_t, const char*>{kHeaderPreviousIcon, "left_trigger"},
+                {kHeaderNextIcon, "right_trigger"}}) {
+            if (index >= hints.size()) continue;
+            const auto& icon = hints[index];
+            if (icon.source.kind != profile::remap::SourceKind::kKey &&
+                icon.source.kind != profile::remap::SourceKind::kMouse &&
+                icon.art != input::icons::Art::kUnbound) continue;
+            if (!icon.width || !icon.height ||
+                icon.rgba.size() != size_t(icon.width) * icon.height * 4) continue;
+            replacement.buttons.emplace(slot, controller_schemes::Image{
+                icon.width, icon.height, icon.rgba});
+          }
+          if (!replacement.buttons.empty() &&
+              !controller_schemes::ComposeButtons(buttons_, replacement, &header))
+            REXLOG_WARN("controller_schemes: cannot compose header key hints");
+        }
+        if (!header.empty()) chosen = &header;
+      }
+      host_levels->assign(chosen->begin(), chosen->begin() + request.mip_count);
       if (logged_.insert(hash).second)
         REXLOG_INFO("controller_schemes: overrode button sheet ({} mip level(s))",
                     request.mip_count);
       return true;
     }
+    if (!scheme) return false;
     if (pad_slot) {
       auto it = pads_.find(hash);
       if (it == pads_.end() || request.mip_count > it->second.size()) return false;
@@ -428,33 +518,40 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   controller_schemes::Registry registry_;
   std::string selected_;
   std::vector<std::vector<uint8_t>> buttons_;
+  std::array<Levels, 3> header_buttons_;
   std::vector<std::vector<uint8_t>> icons_;
-  std::vector<std::vector<uint8_t>> font_levels_;
-  std::vector<std::vector<uint8_t>> retail_font_levels_;
-  std::vector<std::vector<uint8_t>> private_font_levels_;
-  std::vector<input::icons::Icon> font_icons_;
   std::vector<input::icons::Icon> row_icons_;
-  std::vector<input::icons::Icon> hint_icons_;
+  std::array<std::vector<input::icons::Icon>, 3> hint_variants_;
+  std::array<input::icons::Icon, 3> calibration_icons_;
+  std::array<FontVariant, 3> font_variants_;
   std::vector<input::icons::Icon> pending_icons_;
-  std::vector<input::icons::Icon> pending_hints_;
-  input::icons::Icon pending_calibration_;
-  std::array<std::vector<std::vector<uint8_t>>, 2> calibration_levels_;
+  std::array<std::vector<input::icons::Icon>, 3> pending_hints_;
+  std::array<input::icons::Icon, 3> pending_calibration_;
   std::unordered_map<uint64_t, int> calibration_hashes_;
   std::vector<uint8_t> original_buttons_;
   std::string last_icon_signature_;
   std::string last_hint_signature_;
-  std::string last_calibration_signature_;
+  input::icons::Family last_active_family_ = input::icons::Family::kController;
+  input::icons::Family pending_active_family_ = input::icons::Family::kController;
+  input::icons::Family active_family_ = input::icons::Family::kController;
   std::unordered_set<uint64_t> font_hashes_;
   std::unordered_set<uint64_t> private_font_hashes_;
   std::unordered_set<uint64_t> font_probe_logged_;
   bool has_pending_icons_ = false;
   bool has_pending_hints_ = false;
-  bool has_pending_calibration_ = false;
+  bool pending_hint_content_changed_ = false;
   bool refresh_font_after_buttons_ = false;
+  uint64_t font_revision_ = 0;
+  uint64_t queued_font_revision_ = 0;
   std::map<uint64_t, std::vector<std::vector<uint8_t>>> pads_;
   std::unordered_set<uint64_t> logged_;
   std::mutex pending_mutex_;
   std::string pending_;
+  std::mutex worker_mutex_;
+  std::condition_variable worker_cv_;
+  std::optional<FontJob> pending_job_;
+  std::optional<FontResult> completed_job_;
+  std::jthread worker_;
 };
 
 SchemeOverride* g_scheme_provider = nullptr;
@@ -603,8 +700,8 @@ bool SelectControllerScheme(const std::string& id) {
   input::last_device::SelectScheme(id);
   if (before.scheme != id) {
     REXLOG_INFO("button_schemes: active {} (device {})", id,
-                before.family == input::last_device::Family::kController
-                    ? "controller" : "keyboard");
+                before.family == input::last_device::Family::kController ? "controller" :
+                before.family == input::last_device::Family::kMouse ? "mouse" : "keyboard");
   }
   return true;
 }
@@ -612,11 +709,12 @@ bool SelectControllerScheme(const std::string& id) {
 void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons) {
   if (g_scheme_provider) g_scheme_provider->PublishIcons(std::move(signature), std::move(icons));
 }
-void PublishHintIcons(std::string signature, std::vector<input::icons::Icon> icons) {
-  if (g_scheme_provider) g_scheme_provider->PublishHints(std::move(signature), std::move(icons));
-}
-void PublishCalibrationIcon(std::string signature, input::icons::Icon icon) {
-  if (g_scheme_provider) g_scheme_provider->PublishCalibration(std::move(signature), std::move(icon));
+void PublishHintIcons(std::string signature,
+                      std::array<std::vector<input::icons::Icon>, 3> variants,
+                      std::array<input::icons::Icon, 3> calibration,
+                      input::icons::Family active_family) {
+  if (g_scheme_provider) g_scheme_provider->PublishHints(std::move(signature),
+      std::move(variants), std::move(calibration), active_family);
 }
 bool InputIconsAvailable() {
   return g_scheme_provider != nullptr && ui::input_font::PrivateBc3() != nullptr;

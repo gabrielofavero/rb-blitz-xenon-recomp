@@ -313,6 +313,21 @@ source = "key:Period"
 modifiers = ["shift"]
 
 [[input]]
+id = "media_next"
+file = "media_next.png"
+source = "key:MediaTrackNext"
+
+[[input]]
+id = "media_previous"
+file = "media_previous.png"
+source = "key:MediaTrackPrevious"
+
+[[input]]
+id = "media_play_pause"
+file = "media_play_pause.png"
+source = "key:MediaPlayPause"
+
+[[input]]
 id = "minus"
 file = "minus.png"
 source = "key:Minus"

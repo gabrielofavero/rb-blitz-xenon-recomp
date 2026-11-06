@@ -140,6 +140,10 @@ icon resolver uses these images for matching keys and mouse buttons, with
 The wheel-up and wheel-down PNGs preserve the middle-mouse art and add direction
 arrows. Regenerate them with
 `scripts/controllers/generate_mouse_wheel_art.ps1` after editing `mouse_middle.png`.
+The three background music media keys have packaged placeholder PNGs. Edit
+`masters/keyboard-media.svg` and run
+`python scripts/controllers/render_keyboard_media.py` to regenerate them and
+their pressed/released calibration images.
 There is no keyboard pad diagram slot or runtime selection of keyboard themes.
 An installable keyboard/mouse art layout would require a user package format;
 the controller slot IDs below do not define one.

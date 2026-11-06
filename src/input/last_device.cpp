@@ -84,14 +84,14 @@ bool Tracker::Tick(uint64_t now_ms) {
   return Switch(*pending_family_, now_ms);
 }
 
-bool Tracker::KeyDown(uint64_t now_ms) { return focused_ && Switch(Family::kKeyboardMouse, now_ms); }
+bool Tracker::KeyDown(uint64_t now_ms) { return focused_ && Switch(Family::kKeyboard, now_ms); }
 bool Tracker::MouseButton(uint64_t now_ms) {
   return kMouseButtonAndWheelSelectKeyboardLayout && focused_ &&
-         Switch(Family::kKeyboardMouse, now_ms);
+         Switch(Family::kMouse, now_ms);
 }
 bool Tracker::MouseWheel(uint64_t now_ms) {
   return kMouseButtonAndWheelSelectKeyboardLayout && focused_ &&
-         Switch(Family::kKeyboardMouse, now_ms);
+         Switch(Family::kMouse, now_ms);
 }
 
 bool Tracker::MouseMove(int x, int y, uint64_t now_ms) {
@@ -106,7 +106,7 @@ bool Tracker::MouseMove(int x, int y, uint64_t now_ms) {
   pointer_x_ = x; pointer_y_ = y;
   if (motion_ < kMouseMotionPixels) return false;
   motion_ = 0;
-  return Switch(Family::kKeyboardMouse, now_ms);
+  return Switch(Family::kMouse, now_ms);
 }
 
 bool Tracker::Pad(bool connected, const profile::remap::PadState& pad, uint64_t now_ms) {

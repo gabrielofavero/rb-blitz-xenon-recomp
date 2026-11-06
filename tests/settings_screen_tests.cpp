@@ -70,7 +70,7 @@ using namespace rb_blitz::test;
 
 using dtb::Node;
 
-constexpr size_t kExpectedPagesPerContext = 62;
+constexpr size_t kExpectedPagesPerContext = 64;
 constexpr size_t kExpectedPages = 2 * kExpectedPagesPerContext;
 
 bool SuppressesSettingsCaption(const std::string_view name) {
@@ -3579,11 +3579,13 @@ void TestInterfaceMappingTreeAfterP3() {
   }
 
   const std::vector<std::string> library = PageRows("settings_interface_music_library_panel");
-  CHECK_EQ(library.size(), 3u);
-  if (library.size() == 3u) {
+  CHECK_EQ(library.size(), 5u);
+  if (library.size() == 5u) {
     CHECK_TRUE(library[0] == "settings_bind_general_start");   // Search
     CHECK_TRUE(library[1] == "settings_bind_general_y");       // Shortcuts
     CHECK_TRUE(library[2] == "settings_bind_general_back");    // Sort
+    CHECK_TRUE(library[3] == "settings_bind_general_left_trigger");
+    CHECK_TRUE(library[4] == "settings_bind_general_right_trigger");
   }
   const std::string confirm = "settings_bind_general_a";
   CHECK_TRUE(PageRows(confirm + "_panel") ==
@@ -3617,12 +3619,11 @@ void TestInterfaceMappingTreeAfterP3() {
   CHECK_TRUE(has_label("settings_title_settings_bind_general_a_panel", "CONFIRM"));
   CHECK_TRUE(has_label("settings_title_settings_bind_general_dpad_up_panel", "UP"));
 
-  // D2: the seven hidden targets have no capture, reset or row path at all, while the nine visible
-  // ones each have their own Assign and Reset page.
+  // The five hidden targets have no capture, reset or row path; the eleven visible
+  // targets each have their own Assign and Reset page.
   const std::vector<std::string> paths = RequestPaths();
   for (const char* hidden : {"input.general.x", "input.general.left_shoulder",
-                             "input.general.right_shoulder", "input.general.left_trigger",
-                             "input.general.right_trigger", "input.general.left_thumb",
+                             "input.general.right_shoulder", "input.general.left_thumb",
                              "input.general.right_thumb"}) {
     const std::string token(hidden);
     for (const std::string& path : paths) {
@@ -3631,6 +3632,7 @@ void TestInterfaceMappingTreeAfterP3() {
   }
   for (const char* visible : {"input.general.a", "input.general.b", "input.general.y",
                               "input.general.back", "input.general.start",
+                              "input.general.left_trigger", "input.general.right_trigger",
                               "input.general.dpad_up", "input.general.dpad_down",
                               "input.general.dpad_left", "input.general.dpad_right"}) {
     const std::string token(visible);
@@ -3772,11 +3774,13 @@ void TestScreenBindingRows() {
     CHECK_TRUE(navigation[3] == "input.general.dpad_right");
   }
   const auto library = ScreenBindingRows("settings_interface_music_library_screen");
-  CHECK_EQ(library.size(), 3u);
-  if (library.size() == 3u) {
+  CHECK_EQ(library.size(), 5u);
+  if (library.size() == 5u) {
     CHECK_TRUE(library[0] == "input.general.start");
     CHECK_TRUE(library[1] == "input.general.y");
     CHECK_TRUE(library[2] == "input.general.back");
+    CHECK_TRUE(library[3] == "input.general.left_trigger");
+    CHECK_TRUE(library[4] == "input.general.right_trigger");
   }
 
   // Gameplay Mapping lists each action once and draws keyboard/mouse bindings only.

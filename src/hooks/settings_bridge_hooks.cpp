@@ -62,6 +62,7 @@
 
 #include "hooks/ultimate.h"
 #include "assets/texture_override.h"
+#include "hooks/action_hint_probe.h"
 #include "hooks/shell_music.h"
 #include "hooks/menu_music_guest.h"
 #include "hooks/hot_apply_runtime.h"
@@ -804,24 +805,19 @@ bool TakeRead(PPCContext& ctx, uint8_t* base) {
         const auto it = g_icon_page_offsets.find(std::string(panel));
         if (it != g_icon_page_offsets.end()) windows = it->second;
       }
+      const auto catalog = ::rb_blitz::hooks::EnsureInputCatalog(view);
       auto page = ::rb_blitz::ui::input_icon_rows::Build(
-          ::rb_blitz::ui::screen::PanelRowSymbols(panel), lines, view, windows);
+          ::rb_blitz::ui::screen::PanelRowSymbols(panel), lines, view, windows,
+          catalog.get());
       {
         std::lock_guard lock(g_icon_page_mutex);
         g_icon_page_offsets[std::string(panel)] = page.window_starts;
       }
       if (page.overflow) {
         REXLOG_WARN("input_icons: '{}' needs more than {} distinct image slots; affected rows retain full text",
-                    panel, ::rb_blitz::ui::input_font::kIconCount);
+                    panel, ::rb_blitz::ui::input_font::kRowIconCount);
       }
-      if (!page.icons.empty()) {
-        std::string signature = std::string(panel) + ":" +
-            std::to_string(view.revision) + ":" + view.controller_scheme;
-        for (const size_t start : page.window_starts)
-          signature += ":" + std::to_string(start);
-        ::rb_blitz::assets::PublishInputIcons(signature, std::move(page.icons));
-        lines = std::move(page.lines);
-      }
+      lines = std::move(page.lines);
     }
   }
   if (lines.empty()) {

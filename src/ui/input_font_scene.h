@@ -39,6 +39,9 @@ bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* sc
 // Point the splash start label at the action-hint font.
 bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                    std::string* error);
+// Give the song-list sort label the live Interface Sort icon font.
+bool PrepareSongSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                       std::string* error);
 bool PrepareCalibration(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                         std::string* error);
 // The four calibration button textures, in Xbox released/pressed, PS3
@@ -65,6 +68,7 @@ inline constexpr char kListRecord[] = "ui/resource/lists/gen/list_options_main.m
 inline constexpr char kInlineHelpRecord[] = "ui/resource/inline_help/gen/default.milo_xbox";
 inline constexpr char kLoadingRecord[] = "ui/loading/gen/loading.milo_xbox";
 inline constexpr char kSplashRecord[] = "ui/splash/gen/splash.milo_xbox";
+inline constexpr char kSongSelectRecord[] = "ui/song_select/gen/song_select.milo_xbox";
 inline constexpr char kCalibrationRecord[] = "ui/calibration/gen/cal_auto.milo_xbox";
 inline constexpr char kHudRecord[] = "track/gen/hud.milo_xbox";
 inline constexpr char kPowerupSelectRecord[] = "ui/powerup_select/gen/powerup_select.milo_xbox";

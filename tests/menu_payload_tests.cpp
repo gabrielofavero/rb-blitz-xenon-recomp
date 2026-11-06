@@ -864,6 +864,9 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
           ++splash_hint_fonts;
         CHECK_EQ(splash_hint_fonts, size_t{1});
         CHECK_FALSE(has_resource(splash, "../resource/fonts/buttons.milo"));
+        const auto& song_select = records.at(rb_blitz::ui::input_font::kSongSelectRecord);
+        CHECK_TRUE(has_resource(song_select, loading_font));
+        CHECK_FALSE(has_resource(song_select, "../resource/fonts/buttons.milo"));
         auto count_resource = [](const std::vector<uint8_t>& bytes,
                                  std::string_view name) {
           size_t count = 0;
@@ -908,6 +911,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
       } else {
         CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kLoadingRecord));
         CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kSplashRecord));
+        CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kSongSelectRecord));
         CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kCalibrationRecord));
         CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kHudRecord));
         CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kAccountLinkRecord));
@@ -928,6 +932,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
       bool loading_confirm = false;
       bool loading_powerup = false;
       bool splash_start = false;
+      bool song_sort = false;
       for (const auto& root : locale_roots)
         if (root.tag == rb_blitz::ui::dtb::kArray && root.kids.size() >= 2) {
           if (root.kids[0].text == "inline_help_fmt" &&
@@ -941,17 +946,21 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
           if (root.kids[0].text == "splash_press_start" &&
               root.kids[1].text.find("<alt1>\xC2\x84</alt1>") != std::string::npos)
             splash_start = true;
+          if (root.kids[0].text == "song_sort_str" &&
+              root.kids[1].text.find("<alt1>\xC2\x85</alt1>") != std::string::npos)
+            song_sort = true;
         }
       CHECK_TRUE(numbered_alt);
       CHECK_EQ(loading_confirm, single);
       CHECK_EQ(loading_powerup, single);
       CHECK_EQ(splash_start, single);
+      CHECK_EQ(song_sort, single);
       for (const auto& locale : locales) {
         std::vector<rb_blitz::ui::dtb::Node> localized;
         rb_blitz::ui::dtb::RootHeader localized_header;
         CHECK_TRUE(rb_blitz::ui::dtb::Parse(records.at(locale).data(),
             records.at(locale).size(), &localized, &localized_header, &why));
-        size_t prompts = 0, powerup_tips = 0, splash_starts = 0;
+        size_t prompts = 0, powerup_tips = 0, splash_starts = 0, sort_labels = 0;
         for (const auto& root : localized)
           if (root.tag == rb_blitz::ui::dtb::kArray && root.kids.size() >= 2 &&
               root.kids[0].text == "loading_press_button" &&
@@ -967,9 +976,15 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
               root.kids[0].text == "splash_press_start" &&
               root.kids[1].text.find("<alt1>\xC2\x84</alt1>") != std::string::npos)
             ++splash_starts;
+        for (const auto& root : localized)
+          if (root.tag == rb_blitz::ui::dtb::kArray && root.kids.size() >= 2 &&
+              root.kids[0].text == "song_sort_str" &&
+              root.kids[1].text.find("<alt1>\xC2\x85</alt1>") != std::string::npos)
+            ++sort_labels;
         CHECK_EQ(prompts, single ? size_t{1} : size_t{0});
         CHECK_EQ(powerup_tips, single ? size_t{1} : size_t{0});
         CHECK_EQ(splash_starts, single ? size_t{1} : size_t{0});
+        CHECK_EQ(sort_labels, single ? size_t{1} : size_t{0});
         if (single) {
           size_t account_links = 0;
           for (const auto& root : localized)
