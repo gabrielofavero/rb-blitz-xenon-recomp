@@ -3,9 +3,9 @@
     python scripts/controllers/render_button_template.py --state pressed
     python scripts/controllers/render_button_template.py --state released
 
-For Xbox Series A/B/X/Y, the script keeps each source glyph and draws a
-simple oval face in the colors of the reference artwork. Other buttons use
-their source image. Every shadow follows its button's outline. Outputs default to
+Every button uses its source PNG intact, including A/B/X/Y. The script tilts
+and scales that image, then adds a black shadow from its alpha silhouette.
+Outputs default to
 out/controller-button-prototype/ and do not modify the source art.
 
 Requires Pillow and Playwright Chromium:
@@ -45,17 +45,9 @@ class Placement:
 
 PLACEMENTS = {
     "pressed": Placement(132, 130, 150, 118, 3),
-    "released": Placement(128, 114, 138, 100, 12),
+    "released": Placement(128, 114, 150, 118, 12),
 }
-BODY_ANGLE = -15
-GLYPH_ANGLE = 15
-WHOLE_BUTTON_ANGLE = 15
-FACE_STYLES = {
-    "a_button": (("#319e3a", "#177e22", "#075617"), (248, 248, 244), (95, 75)),
-    "b_button": (("#d9433a", "#b92224", "#73161a"), (248, 248, 244), (78, 75)),
-    "x_button": (("#424244", "#29292b", "#171719"), (89, 139, 192), (116, 82)),
-    "y_button": (("#424244", "#29292b", "#171719"), (225, 174, 59), (94, 75)),
-}
+BUTTON_ANGLE = 15
 
 
 def png_bytes(image: Image.Image) -> bytes:
@@ -70,29 +62,7 @@ def prepare_button(artwork: Path) -> tuple[bytes, bytes]:
         original = source.convert("RGBA")
     shadow = Image.new("RGBA", original.size, (0, 0, 0, 0))
     shadow.putalpha(original.getchannel("A"))
-    return png_bytes(original), png_bytes(shadow)
-
-
-def prepare_face_glyph(artwork: Path, color: tuple[int, int, int],
-                       width: int, height: int) -> bytes:
-    """Extract the source letter and rasterize a sharp mask at output resolution."""
-    with Image.open(artwork) as source:
-        original = source.convert("RGBA")
-    mask = Image.new("L", original.size)
-    for y in range(original.height):
-        for x in range(original.width):
-            red, green, blue, source_alpha = original.getpixel((x, y))
-            saturation = max(red, green, blue) - min(red, green, blue)
-            if saturation > 8:
-                mask.putpixel((x, y), round(source_alpha * min(1, (saturation - 8) / 65)))
-    bounds = mask.getbbox()
-    if bounds is None:
-        raise ValueError(f"{artwork}: no colored face-button glyph")
-    mask = mask.crop(bounds).resize((width * 4, height * 4), Image.Resampling.LANCZOS)
-    mask = mask.point(lambda alpha: 255 if alpha >= 96 else 0)
-    glyph = Image.new("RGBA", mask.size, (*color, 0))
-    glyph.putalpha(mask)
-    return png_bytes(glyph)
+    return artwork.read_bytes(), png_bytes(shadow)
 
 
 def add_image(parent: ET.Element, name: str, data: bytes, center_x: int,
@@ -110,64 +80,11 @@ def add_image(parent: ET.Element, name: str, data: bytes, center_x: int,
     })
 
 
-def add_series_face(root: ET.Element, artwork: Path, placement: Placement) -> None:
-    colors, glyph_color, glyph_size = FACE_STYLES[artwork.stem]
-    defs = root.find(f"{{{SVG_NS}}}defs")
-    if defs is None:
-        defs = ET.SubElement(root, f"{{{SVG_NS}}}defs")
-    gradient = ET.SubElement(defs, f"{{{SVG_NS}}}radialGradient", {
-        "id": "series-face-fill", "cx": "38%", "cy": "30%", "r": "80%",
-    })
-    for offset, color in zip(("0", ".58", "1"), colors):
-        ET.SubElement(gradient, f"{{{SVG_NS}}}stop", {
-            "offset": offset, "stop-color": color,
-        })
-
-    center_x, center_y = placement.center_x, placement.center_y
-    radius_x, radius_y = placement.body_width / 2, placement.body_height / 2
-    shadow = ET.SubElement(root, f"{{{SVG_NS}}}g", {
-        "id": "scripted-shadow", "transform": f"translate(0 {placement.shadow_offset})",
-    })
-    ET.SubElement(shadow, f"{{{SVG_NS}}}ellipse", {
-        "cx": str(center_x), "cy": str(center_y),
-        "rx": str(radius_x), "ry": str(radius_y),
-        "fill": "#050505", "transform": f"rotate({BODY_ANGLE} {center_x} {center_y})",
-    })
-    face = ET.SubElement(root, f"{{{SVG_NS}}}g", {
-        "id": "button-body", "transform": f"rotate({BODY_ANGLE} {center_x} {center_y})",
-    })
-    ET.SubElement(face, f"{{{SVG_NS}}}ellipse", {
-        "cx": str(center_x), "cy": str(center_y),
-        "rx": str(radius_x), "ry": str(radius_y), "fill": "#09090a",
-    })
-    ET.SubElement(face, f"{{{SVG_NS}}}ellipse", {
-        "cx": str(center_x), "cy": str(center_y),
-        "rx": str(radius_x - 4), "ry": str(radius_y - 4),
-        "fill": "url(#series-face-fill)",
-    })
-    ET.SubElement(face, f"{{{SVG_NS}}}ellipse", {
-        "cx": str(center_x), "cy": str(center_y),
-        "rx": str(radius_x - 5), "ry": str(radius_y - 5),
-        "fill": "none", "stroke": "#fff", "stroke-width": "1",
-        "stroke-opacity": ".12",
-    })
-
-    glyph_width = round(glyph_size[0] * placement.body_width / 150)
-    glyph_height = round(glyph_size[1] * placement.body_height / 118)
-    glyph = prepare_face_glyph(artwork, glyph_color, glyph_width, glyph_height)
-    add_image(root, "button-symbol", glyph, center_x, center_y - 4,
-              glyph_width, glyph_height, GLYPH_ANGLE)
-
-
 def compose_svg(master: Path, artwork: Path, state: str) -> bytes:
     placement = PLACEMENTS[state]
     root = ET.parse(master).getroot()
     if root.find(".//*[@id='button-face']") is not None:
         raise ValueError(f"{master}: template still contains a button face")
-    if artwork.parent.parent.name == "xbox-series" and artwork.stem in FACE_STYLES:
-        add_series_face(root, artwork, placement)
-        return ET.tostring(root, encoding="utf-8", xml_declaration=True)
-
     neutral, shadow = prepare_button(artwork)
     with Image.open(artwork) as source:
         scale = min(placement.body_width / source.width,
@@ -180,10 +97,14 @@ def compose_svg(master: Path, artwork: Path, state: str) -> bytes:
     })
     add_image(shadow_group, "shadow-shape", shadow,
               placement.center_x, placement.center_y,
-              body_width, body_height, WHOLE_BUTTON_ANGLE)
+              body_width, body_height, BUTTON_ANGLE)
     add_image(root, "button-body", neutral,
               placement.center_x, placement.center_y,
-              body_width, body_height, WHOLE_BUTTON_ANGLE)
+              body_width, body_height, BUTTON_ANGLE)
+    accent = root.find(f"{{{SVG_NS}}}g[@id='white-impact-accent']")
+    if accent is not None:
+        root.remove(accent)
+        root.append(accent)
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 

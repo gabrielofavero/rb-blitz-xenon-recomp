@@ -8,9 +8,11 @@ in their layout folders.
 
 The pressed and released `button-*-template.svg` masters contain only the
 weathered bezel; the pressed master also contains its white impact accent.
-The prototype renderer tilts the Xbox Series art to the right, derives a close
-black shadow from its alpha, and enlarges face-button symbols so they cross the
-lighter center of the button. To render one button in both states:
+The renderer places that accent above the button artwork in pressed outputs.
+The prototype renderer embeds each source PNG intact, tilts it to the right,
+and derives a close black shadow from its outline. A/B/X/Y use the same path
+as Start and the other controls. Pressed and released states use the same
+button dimensions. To render one button in both states:
 
 ```powershell
 python scripts/controllers/render_button_template.py --state pressed
@@ -24,12 +26,18 @@ including D-pad and stick directions, run
 Xbox Series scheme and writes pressed and released PNGs to
 `assets/controller/xbox-series/calibration/`. The original button PNGs and
 scheme remain available for comparison. Both renderers use Pillow and
-Playwright Chromium, as noted in the script docstring.
+Playwright Chromium, as noted in the script docstring. The Xbox Series batch
+also writes a face-button contact sheet under `out/controller-button-prototype/`.
 
 For a keyboard and mouse shape check, run
 `python scripts/controllers/render_keyboard_calibration_samples.py`. It renders
 five varied inputs in `assets/controller/keyboard-mouse/calibration/` and writes
 a labeled contact sheet to `out/controller-button-prototype/`.
+
+To rebuild pressed and released assets for every populated scheme, run
+`python scripts/controllers/render_all_controller_calibration.py`. Pass
+`--exclude xbox-series` to keep the existing Xbox Series exports while
+generating the other layouts. The source PNGs remain intact.
 
 The existing vector export helper is `scripts/controllers/export_controller_vector_masters.py`.
 It identifies its upstream source as the CC0 Xelu prompts SVG adaptation by
