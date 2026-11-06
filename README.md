@@ -2,15 +2,17 @@
 
 Welcome! :)
 
-This is in soft-launch stage, meaning I'm making releases public here, but not sharing them on any public page until version 1.0.0. For now, if you found this page by accident, feel free to test the releases! Just keep in mind the pre-release builds are Windows only (Release build will include Linux and macOS).
+This is a Rock Band Blitz static recompilation project, based on the Xbox 360 version of the game and using [rexglue](rexglue-sdk) as the recompiler. The goal here is to make a stable, easy-to-install and customizable multi-platform version of this game.
 
-This is a Rock Band Blitz static recompilation project, based on the Xbox 360 version of the game and using [rexglue](rexglue-sdk) as the recompiler. The goal here is to make a stable, easy-to-install and customizable multi-platform version of this game. The initial goal is Windows, but Linux, macOS and mobile are planned.
+We are in soft-launch stage, meaning I'm making releases public here, but not sharing them on any public page until version 1.0.0. For now, if you found this page by accident, feel free to test the releases! Just keep in mind the pre-release builds are Windows only (Release build will include Linux and macOS).
 
 Currently, the game boots, renders 2D and 3D elements correctly and is able to finish songs. Ultimate is compatible as well and a few enhancements are in place.
 
-My goal in order to deliver v1.0.0 is to improve stability and performance (shaders can cause hiccups) and add some cool enhancements. After release, my goal will be minor improvements and work on expanding platforms (mobile first, VR possibly, other consoles not in plans for now).
+In order to deliver v1.0.0, I want to to improve stability and performance, plus add all the non-mobile planned enhancements. After release, the focus will shift from new features to minor stability improvements and work on expanding platforms (mobile first, VR possibly, other consoles not in plans for now).
 
 ## Enhancements
+
+All you will see in the list below, all features are attempts of making the recompilation feel PC native and add quality of life improvements to the experience. It is not in the scope restore what online mode once was (leaderboards, progression system with blitz credits, compete with friends), but rather give an "All-in-One Offline Experience".
 
 | Feature                                                        | Type     | Status      | Notes                                                                                                                                                                                                                                                                                                        |
 | -------------------------------------------------------------- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -51,7 +53,9 @@ As I mentioned before, pre-releases are Windows only.
 
 ## How to Build
 
-You can build for yourself to test how things are going (Windows + PowerShell, from the repo root). You need LLVM/Clang, CMake 3.25+, Ninja, the Visual Studio Build Tools *with* the Windows SDK on `PATH`, and the dump at `game/default.xex`.
+You can build for yourself to test how things are going (Windows + PowerShell, from the repo root). Use the "develop" brach for the latest features.
+
+You need LLVM/Clang, CMake 3.25+, Ninja, the Visual Studio Build Tools *with* the Windows SDK on `PATH`, and the dump at `game/default.xex`.
 
 ```powershell
 # once per checkout
@@ -73,6 +77,6 @@ Being transparent, this is a heavily AI assisted project. I don't consider to be
 
 My job is to decide the scope of the features, plan for the architecture, take the implementation decisions, review the code and do manual testing. AI's job is to do the investigations on the compiled/hard to read code, present me options, do automated testing and coding. I'm a software developer, but C++ is not my speciality so I'm usually more focused on reviewing rather than coding (though I do some manual adjustments here and there).
 
-About art, the icon was AI Upscaled from the 64x64 Xbox 360 Icon. The cover on the installer is the official background, but Photoshop expanded (not AI per se) to be higher. All button layouts were adapted from human work, with attributions attatched on [`docs\`](docs) + in game credits. My adaptations were mostly on the pads. I've done some color adjustments with AI assist on the svgs to match the official assets and I've created a script for helping me on creating the blue arrows.
+About art, the icon was AI Upscaled from the 64x64 Xbox 360 Icon. The cover on the installer is the official cover art, but Photoshop expanded (not AI per se) to be taller. All button layouts were adapted from human work, with attributions attatched on [`docs\`](docs) + in game credits.
 
 And yes, I know that 100% human projects are way more welcome by the community. It's just that I'm a solo dev working on this. And this is like my pet project, not something that I want to consume all of my free time into (even though, to be honest, I am at the moment --'). What I can promise is that I'm doing my best to deliver quality and not another AI-slop port, that's why I plan to take things slow and only release v1.0.0 and Linux/macOS once I'm 100% confident.
