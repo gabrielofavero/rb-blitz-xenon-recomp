@@ -154,11 +154,11 @@ function Find-InFile {
 
 $payloadFiles = @()
 if (Test-Path $PayloadDir) {
-    $payloadFiles = @(Get-ChildItem -LiteralPath $PayloadDir -File | Sort-Object Name)
+    $payloadFiles = @(Get-ChildItem -LiteralPath $PayloadDir -Recurse -File | Sort-Object FullName)
 }
 $payloadDirs = @()
 if (Test-Path $PayloadDir) {
-    $payloadDirs = @(Get-ChildItem -LiteralPath $PayloadDir -Directory)
+    $payloadDirs = @(Get-ChildItem -LiteralPath $PayloadDir -Recurse -Directory)
 }
 $setupExes = @()
 if (-not $SkipSetup -and (Test-Path $SetupDir)) {
@@ -209,14 +209,22 @@ if ($payloadFiles.Count -eq 0) {
 } else {
     $rows = New-Object System.Collections.Generic.List[string]
     $problems = New-Object System.Collections.Generic.List[string]
-    $actual = @($payloadFiles | ForEach-Object { $_.Name })
+    $payloadRoot = (Resolve-Path -LiteralPath $PayloadDir).Path.TrimEnd('\', '/')
+    $actual = @($payloadFiles | ForEach-Object {
+        $_.FullName.Substring($payloadRoot.Length + 1).Replace('\', '/')
+    })
     foreach ($name in $actual) {
         if ($allowed -notcontains $name) { $problems.Add("not in the allow-list: $name") }
     }
     foreach ($name in $allowed) {
         if ($actual -notcontains $name) { $problems.Add("listed but missing: $name") }
     }
-    foreach ($dir in $payloadDirs) { $problems.Add("directory in the payload: $($dir.Name)") }
+    foreach ($dir in $payloadDirs) {
+        $relativeDir = $dir.FullName.Substring($payloadRoot.Length + 1).Replace('\', '/')
+        if ($relativeDir -notin @('assets', 'assets/messages')) {
+            $problems.Add("unexpected directory in the payload: $relativeDir")
+        }
+    }
 
     # The manifest is what the helper checks the installed tree against, so it has to
     # describe the payload it travels with.
@@ -244,6 +252,18 @@ if ($payloadFiles.Count -eq 0) {
         foreach ($name in $allowed) {
             if ($name -ne 'payload-manifest.toml' -and -not $manifestNames.Contains($name)) {
                 $problems.Add("payload file is not verified by the manifest: $name")
+            }
+        }
+        $feedPath = Join-Path $PayloadDir 'assets/messages/feed.json'
+        if (Test-Path -LiteralPath $feedPath -PathType Leaf) {
+            if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+                $problems.Add('Node.js is required to validate the bundled feed')
+            } else {
+                $validator = Join-Path $repoRoot 'scripts/messages/check_feed.mjs'
+                $feedCheck = @(& node $validator --feed $feedPath 2>&1)
+                if ($LASTEXITCODE -ne 0) {
+                    $problems.Add("bundled feed is invalid: $($feedCheck -join ' | ')")
+                }
             }
         }
     } else {

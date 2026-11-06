@@ -1,0 +1,66 @@
+# Publish only the validated feed after the one-file setup release exists.
+# The release is created by builds.yml with GITHUB_TOKEN; that event cannot
+# trigger a release:published workflow, so use workflow_run instead.
+name: messages-feed
+
+on:
+  workflow_run:
+    workflows: [builds]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: messages-feed-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out the release build's commit or the requested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up the feed validator
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate against the latest published setup release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$GH_REPO/releases/latest" > "$RUNNER_TEMP/latest-release.json"
+          node scripts/messages/check_feed.mjs --release-json "$RUNNER_TEMP/latest-release.json"
+
+      - name: Stage only feed.json
+        run: |
+          mkdir -p "$RUNNER_TEMP/messages-pages"
+          cp assets/messages/feed.json "$RUNNER_TEMP/messages-pages/feed.json"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload the feed
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/messages-pages
+
+      - name: Publish the feed
+        id: deployment
+        uses: actions/deploy-pages@v4

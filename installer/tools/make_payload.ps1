@@ -79,6 +79,7 @@ $ErrorActionPreference = 'Stop'
 
 $installerDir = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $installerDir
+$feedValidator = Join-Path $repoRoot 'scripts/messages/check_feed.mjs'
 
 if (-not $SourceDir) { $SourceDir = Join-Path $repoRoot 'out\build\win-amd64-release' }
 if (-not $PayloadDir) { $PayloadDir = Join-Path $installerDir 'out\payload' }
@@ -159,6 +160,18 @@ if (-not (Test-Path -LiteralPath $SourceDir)) {
 if (-not $Version) { $Version = Get-PinsVersion (Join-Path $installerDir 'config\pins.toml') }
 if (-not $Version) { $Version = 'unknown' }
 
+# The feed is authored source, not a build-tree byproduct. Refuse an invalid or
+# stale one before taking a snapshot, including when a caller supplies -Version.
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    throw 'Node.js is required to validate assets/messages/feed.json before packaging.'
+}
+& node $feedValidator
+if ($LASTEXITCODE -ne 0) { throw 'assets/messages/feed.json failed validation.' }
+$pinsVersion = Get-PinsVersion (Join-Path $installerDir 'config\pins.toml')
+if ($Version -ne $pinsVersion) {
+    throw "payload version $Version does not match the feed's pinned version $pinsVersion."
+}
+
 if (-not $CrtDir) { $CrtDir = Get-DefaultCrtDir }
 if (-not $CrtDir -or -not (Test-Path -LiteralPath $CrtDir)) {
     throw "app-local C++ runtime directory not found. Install the Visual C++ runtime files (Visual Studio Build Tools, 'VC++ 2022 redistributable') or pass -CrtDir."
@@ -179,6 +192,7 @@ $wanted = [ordered]@{
     'msvcp140_atomic_wait.dll' = $CrtDir
     'vcruntime140.dll'         = $CrtDir
     'vcruntime140_1.dll'       = $CrtDir
+    'assets/messages/feed.json' = $repoRoot
 }
 
 # Where the loader that was actually shipped came from, kept in a variable of its own: naming
@@ -225,6 +239,8 @@ $entries = @()
 foreach ($entry in $wanted.GetEnumerator()) {
     $source = Join-Path $entry.Value $entry.Key
     $destination = Join-Path $PayloadDir $entry.Key
+    $destinationParent = Split-Path -Parent $destination
+    New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
     Copy-Item -LiteralPath $source -Destination $destination -Force
     $item = Get-Item -LiteralPath $destination
     $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()

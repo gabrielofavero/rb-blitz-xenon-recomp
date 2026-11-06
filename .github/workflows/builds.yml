@@ -45,6 +45,11 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Set up the feed validator
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: The game data has to be here
         run: |
           # The build reads the user's own copy of the game (or a backed-up one) and

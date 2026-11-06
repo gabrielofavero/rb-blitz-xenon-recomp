@@ -458,6 +458,7 @@ offers the user-supplied zip and folder.
 | `rexruntime.dll`, `rexgpu-xenos.dll` | Runtime DLLs the executable loads. |
 | `msvcp140.dll`, `msvcp140_atomic_wait.dll`, `vcruntime140.dll`, `vcruntime140_1.dll` | The Visual C++ runtime the binaries import. |
 | `vulkan-1.dll` | The Khronos Vulkan loader — only when the build offers Vulkan (see below). It is *opened at run time*, never imported, so nothing else would reveal its absence. |
+| `assets/messages/feed.json` | The validated, nonempty message feed available on a first offline launch. The same repository file is published to GitHub Pages after its setup release exists. |
 
 Nothing else is quoted from the build tree — in particular `rb_blitz.toml` is a
 developer profile rather than a shipped file, and the `*d.dll` / `*.pdb` files
@@ -466,6 +467,9 @@ imports from the binaries it copies, so a build that starts needing another DLL
 fails while the snapshot is made instead of on the user's machine. The snapshot is
 written as `payload-manifest.toml`, in the same fingerprint format the helper reads
 back, and the helper hashes every file it placed before it reports success.
+The feed is checked against the pinned setup version before packaging, included
+in the manifest, and compared with the repository source before reusing a
+snapshot. The release workflows select Node.js 22 for this validation.
 
 The script also prints the payload's **renderer backends** (`payload renderer backends: d3d12,
 vulkan`), read from the build tree's `CMakeCache.txt`, and warns when Vulkan is missing: the SDK's

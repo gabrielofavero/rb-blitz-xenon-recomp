@@ -22,6 +22,12 @@ function Get-PayloadTreeFiles {
     return @('rb_blitz.exe', 'rb_blitz_load_monitor.exe', 'rexruntime.dll', 'rexgpu-xenos.dll', 'graphics-preparation.json')
 }
 
+# Authored repository files are not in SourceDir but still determine the bytes
+# of the installer snapshot. A message-only edit must invalidate an old payload.
+function Get-PayloadRepoFiles {
+    return @('assets/messages/feed.json')
+}
+
 # The graphics backends a build tree was configured with, in the order the Renderer row offers
 # them. Read from CMakeCache.txt because that is the configuration the GPU plugin itself was
 # built from; what the packaging half can know about a tree is what it was configured with.
@@ -98,7 +104,8 @@ function Test-PayloadSnapshotCurrent {
         [Parameter(Mandatory = $true)][string] $PayloadDir,
         [Parameter(Mandatory = $true)][string] $SourceDir,
         [Parameter(Mandatory = $true)][string[]] $ExpectedBackends,
-        [string] $ExpectedCommit = ''
+        [string] $ExpectedCommit = '',
+        [string] $RepoRoot = ''
     )
 
     $reasons = @()
@@ -169,6 +176,25 @@ function Test-PayloadSnapshotCurrent {
             if ($entry.Path -eq $name) { $listed = $true }
         }
         if (-not $listed) { $reasons += "the snapshot does not list $name" }
+    }
+
+    if (-not $RepoRoot) { $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
+    foreach ($name in (Get-PayloadRepoFiles)) {
+        $source = Join-Path $RepoRoot $name
+        $entry = @($manifest.Entries | Where-Object { $_.Path -eq $name })
+        if ($entry.Count -ne 1) {
+            $reasons += "the snapshot does not list $name exactly once"
+            continue
+        }
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            $reasons += "the repository has no $name"
+            continue
+        }
+        $item = Get-Item -LiteralPath $source
+        if ([int64]$item.Length -ne $entry[0].Size -or
+            (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $entry[0].Sha256) {
+            $reasons += "$name has changed since the payload snapshot was made"
+        }
     }
 
     return $reasons

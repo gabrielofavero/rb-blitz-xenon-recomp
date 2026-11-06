@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "latest_version": "0.1.0",
+  "generated_at": "2026-11-06T18:00:00Z",
+  "messages": [
+    {
+      "id": "2026-11-06-welcome",
+      "title": "Welcome to Messages",
+      "body": "Project messages are available here, including when you are offline.",
+      "published": "2026-11-06",
+      "icon": "icon_more_stars"
+    }
+  ]
+}

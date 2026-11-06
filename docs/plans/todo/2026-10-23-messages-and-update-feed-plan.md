@@ -1,7 +1,8 @@
 # Messages feed and in-game update flow — plan (2026-10-23)
 
-**Status: planning. Nothing implemented. Revised 2026-11-06 for GitHub Pages, a shipped offline
-feed, and a release-page update action.** This document is the plan for a
+**Status: M0 implemented locally 2026-11-06; M1–M8 pending. No feed deployed or release published.**
+Revised 2026-11-06 for GitHub Pages, a shipped offline feed, and a release-page update action.
+This document is the plan for a
 built-in (not toggleable) message feed served as static JSON by GitHub Pages, plus the
 "a newer version exists" flow that replaces the Messages screen's *Help & Options* prompt with
 *Update Game*.
@@ -591,22 +592,223 @@ this plan neither launches the updater nor changes the one-file release model.
 
 ---
 
-## 11. Phases and prompts
+## 11. Copy-ready implementation prompts
 
-Each prompt is self-contained: goal, deliverable, evidence. The order lets the static feed and host
-half land before the guest spikes decide their seams.
+Run one prompt at a time in dependency order. Each prompt names its own scope and exit evidence;
+do not treat a static reverse-engineering finding as a successful boot. The existing working tree
+may contain unrelated changes: inspect it first and preserve them. Build the latest changes before
+asking the owner to test. Before navigating the game or driving its UI, ask whether the owner wants
+to perform that test and wait for the answer, unless the owner has authorized autonomous UI testing.
+Host tests, document checks and builds can proceed without that answer. On Windows, run payload
+test executables through `rb_blitz_windows_test_runner.exe` as directed by `AGENTS.md`.
 
-| Id | Prompt | Depends on |
+| Prompt | Depends on | Handoff |
 | --- | --- | --- |
-| M0 | Static feed: `assets/messages/feed.json`, the validation script, and a Pages workflow that stages only the JSON and gates publication on a real release. Package the same file as the offline default. | — |
-| M1 | Host half: `messages_api` + `messages_cache` + `messages_service` + boot wiring + version macro; a boot with the feed served locally logs the fetched count and version, and a cold offline boot logs the bundled source. | M0 |
-| M2 | Guest spike + implementation for the **text** (M2-A first; fallbacks B/C). Acceptance: the list and the detail pane draw our messages; the empty array draws the retail empty state. | M1 |
-| M3 | Guest spike + implementation for the **icon** (§9: built-in id selection first, then a custom file). Acceptance: two messages draw two different built-in icons, or a custom icon draws, or the documented fallback. | M2 |
-| M4 | Update plumbing: version compare into `MenuConfiguration`, the two inbox record edits, the authored confirmation screen, the locale entries. Acceptance: a feed with a higher version shows `UPDATE GAME` and the screen; a current feed shows no START prompt. | M2 (M3 not required) |
-| M5 | The press: the bridge write, a testable fixed-URL browser opener, success → close, failure → guest error while the game remains open. Acceptance: a stand-in records the Releases URL and the game closes only after a successful open. | M4 |
-| M6 | Custom icons end-to-end: the `assets/messages/` scan, the DXT1 encode/cache pipeline, the serve seam, the fallback to `icon_misc`, the payload/audit/install changes that ship the folder. | M3, M1 |
-| M7 | Acceptance harness `scripts/acceptance/acceptance_messages.ps1`: a local server, boots for feed / cache-only / bundled-only / no-valid-feed / update / current, icon legs, OCR assertions, and a stand-in browser opener. | M2, M4, M5 |
-| M8 | Docs + review: the engine study, diagnostics, known-issues, the index rows, `check_docs.py` clean. | M7 |
+| M0 — Static feed and release gate (done locally) | — | Valid bundled JSON, packaging rule and Pages workflow; nothing deployed yet |
+| M1 — Host fetch and fallback | M0 | Version, cache and boot service with source-order tests |
+| M2 — Guest message text | M1 | Measured list/detail draw with safe empty-state handling |
+| M3 — Built-in row icons | M2 | Per-row built-in icons or measured fallback |
+| M4 — Update prompt | M2 | Guest-authored prompt, confirmation and no-update state |
+| M5 — Open Releases | M4 | Fixed-URL browser handoff and close/error handling |
+| M6 — Custom local icons | M3 | Shipped local icon decode/cache/draw or documented limitation |
+| M7 — Acceptance | M3, M5, M6 | Host checks and owner-approved live matrix |
+| M8 — Documentation and release review | M7 | Evidence, docs and release checklist reconciled |
+
+### Prompt M0 — Static feed and release gate
+
+```text
+Read docs/plans/todo/2026-10-23-messages-and-update-feed-plan.md §§1, 3–6,
+10.5 and 12. Implement only M0. Inspect the working tree and preserve unrelated
+changes. Add a valid, nonempty assets/messages/feed.json for the planned 0.1.0
+release, using the §4 schema and at least one useful offline message. Add the
+local feed/icon validator and make packaging copy that same file into the setup
+payload; update the payload audit so absence or invalid JSON fails packaging.
+
+Add a GitHub Pages workflow that stages only feed.json. Trigger it after a
+successful builds workflow with workflow_run and permit workflow_dispatch for
+message-only edits. Before deployment, verify the latest published release has
+the expected setup asset and its version equals latest_version. Do not depend
+on a release: published event from builds.yml's GITHUB_TOKEN. Do not deploy or
+publish a release as part of this prompt.
+
+Exit: show validator success and failure cases, packaged-file presence, and
+workflow gate checks for missing release, missing asset and version mismatch.
+Report the exact commands and any unverified GitHub Pages setting.
+```
+
+**M0 handoff (2026-11-06):** `assets/messages/feed.json` contains one offline message for version
+`0.1.0`. The Node validator and six fixture tests pass, including missing feed, unsafe ID/icon,
+missing release, missing setup asset and release-version mismatch. A scratch
+`make_payload.ps1` run packaged the feed as `assets/messages/feed.json` in the manifest;
+the installer's `verify-payload` helper accepted all 11 manifest entries, including the nested feed;
+`audit_distributable.ps1` passed all eight checks against that snapshot. The provenance check
+returned zero reasons for the current feed and one reason after the source bytes changed.
+The existing installer CTest suite passed when its `TEMP`/`TMP` were set to a scratch directory
+inside the workspace; its default OS temp location produced unrelated path/archive failures in
+this sandbox.
+GitHub Pages source configuration, the real `workflow_run`/Pages deployment and the published
+URL remain unverified until a release is cut. No game UI test was needed for M0.
+
+### Prompt M1 — Host fetch, cache and bundled fallback
+
+```text
+Read the plan §§3–4, 6–7 and 12 and use M0's feed contract. Implement only M1:
+compile RBBLITZ_GAME_VERSION from installer/config/pins.toml; add the SDK-free
+feed parser/version comparison, atomic cache and boot service under src/messages/.
+Load a valid cache or bundled assets/messages/feed.json synchronously, then
+attempt the final GitHub Pages JSON URL once on a host worker. A validated
+network answer replaces the snapshot and cache; a failure retains the active
+source. Never let network I/O run on the guest thread. Keep messages_api_url as
+a host-only diagnostic override, with loopback HTTP allowed for local tests.
+
+Cover malformed/unknown-schema documents, message bounds, numeric version
+ordering, invalid cache, first-run offline fallback and failed-write retention
+with focused host tests. Prove boot wiring and source-specific logs. If current-
+session publication cannot reach an already-loaded Messages screen, record the
+actual boundary for M2 rather than calling the feed live in that session.
+
+Exit: a build and focused host tests pass; report source precedence, boot logs,
+and the exact runtime publication boundary still to be measured.
+```
+
+### Prompt M2 — Draw message text in the retail inbox
+
+```text
+Read the plan §§2.1–2.2, 7–8 and 12, and M1's runtime handoff. Implement only
+M2. Start with the InboxProvider::build_list post-hook (M2-A); measure the
+message type, ownership and string behavior before relying on them. Build
+retail InboxMessage objects and provider entries so the game's own list and
+detail pane show the feed's date/title and body. Preserve navigation, empty-
+array behavior and the retail no-valid-feed fallback. Use M2-B or M2-C only
+after recording why M2-A failed, with a measured test for the substitute.
+
+Add meaningful host checks for entry layout and lifetime. Build before any
+guest check. Ask the owner before navigating the game/UI unless autonomous UI
+testing is already authorized. Capture a two-message list, detail switch,
+empty-array case and zero-fault log; separate static findings from live proof.
+
+Exit: text draws correctly in the guest or the failed seam and next experiment
+are documented with enough evidence for another prompt to resume.
+```
+
+### Prompt M3 — Select built-in row icons
+
+```text
+Read the plan §§2.3, 5, 9.1–9.2 and 12, and M2's proven guest seam. Implement
+only M3. Determine how the retail row selects its icon, then map validated
+built-in icon names from the feed to that binding. Try two distinct built-in
+ids on separate messages and the icon_misc fallback. If the row supports only
+one icon for the whole feed, record that measured limit and use §9's fallback;
+do not claim per-message icons without a two-row visual check.
+
+Keep all image names local; no hosted image bytes or host-drawn overlay. Add
+focused mapping/validation checks. Build before any game/UI check and ask the
+owner who should drive it unless autonomous testing is already authorized.
+
+Exit: visual evidence for distinct row icons, or a precise binding limitation
+and the documented fallback, with build/test results and zero-fault logs.
+```
+
+### Prompt M4 — Guest update prompt and confirmation
+
+```text
+Read the plan §§3 D4–D9, 10.1–10.3 and 12, and M2's inbox payload seam.
+Implement only M4. Compare the compiled game version against the active feed;
+show (START) UPDATE GAME only for a newer valid version. Replace the inbox's
+Help & Options START action with an authored guest confirmation screen offering
+Open releases and Later. With equal, older or malformed latest_version, remove
+the START prompt and make that press do nothing. Use retail DTA/widgets and
+locale entries; do not create a host overlay or launch a browser yet.
+
+Test the authored record in host tests for the newer/current branches and
+preserve existing menu payload behavior. Build before any game/UI check and
+ask the owner who should drive it unless autonomous testing is authorized.
+
+Exit: guest evidence for the newer-version prompt/confirmation and current-
+version absence, or a recorded guest-route blocker with its exact fault.
+```
+
+### Prompt M5 — Open GitHub Releases and close the game
+
+```text
+Read the plan §§3 D8–D9, 10.3–10.5 and 12, and M4's confirmed guest action.
+Implement only M5. Connect Open releases through the existing write_file bridge
+to a host handler. The handler opens only the compiled-in
+https://github.com/gabrielofavero/rb-blitz-xenon-recomp/releases URL in the
+default browser, then requests game close after a successful open. A browser-
+open failure keeps the game running and shows guest-authored error text. Guard
+against repeated successful presses opening extra tabs. Do not launch
+RockBandBlitzUpdater.exe or add update.toml/payload release assets.
+
+Use a testable opener seam and a diagnostic stand-in for acceptance. Cover URL
+fixity, success, failure and repeat presses with focused host tests. Build
+before game/UI checks; ask the owner who should drive them unless autonomous
+testing is authorized.
+
+Exit: a stand-in receives the fixed URL before close, a failing opener leaves
+the game usable, and the exact build/test/live evidence is reported.
+```
+
+### Prompt M6 — Custom local message icons
+
+```text
+Read the plan §§5, 9.3–9.4 and 12, and M3's measured icon binding. Implement
+only M6. Validate custom names as local assets/messages/ PNG/JPEG files with
+the declared size/path limits; encode to the measured 512x512 DXT1 shape with
+mips, cache by content hash under user_data_root, and serve through the proven
+guest texture seam. Keep fallback to icon_misc when a file is missing or cannot
+be decoded. Update packaging and its audit so required local icons travel with
+the same setup as feed.json; never fetch image bytes from the feed host.
+
+Add focused validation/codec/cache tests and build. Ask the owner before any
+game/UI icon check unless autonomous testing is authorized. If the guest seam
+cannot show custom files safely, use §9.4's built-in fallback and document the
+limitation; do not treat an encoded cache file alone as a visible icon.
+
+Exit: a custom icon visibly draws with zero faults, or the measured limitation
+and release-safe fallback are recorded with test results.
+```
+
+### Prompt M7 — Run the complete feed and update matrix
+
+```text
+Read the plan §12 and the M0–M6 handoffs. Implement only M7: build
+scripts/acceptance/acceptance_messages.ps1 around a local feed.json server,
+scratch user_data_root and a stand-in browser opener. Cover online fetch,
+cache-only boot, fresh offline bundled boot, no-valid-feed retail fallback,
+two-icon behavior (or M3/M6's documented fallback), newer-version prompt,
+Later, browser-open success/failure, and current-version no-START behavior.
+Check the final GitHub Pages URL for a direct 200 and validated JSON when it
+is available; do not publish it here.
+
+Build the latest code with cmake --build --preset win-amd64-release before live
+checks. Ask the owner whether they want to drive the game/UI themselves and
+wait for the answer, unless they already authorized autonomous UI testing.
+Host tests and fixture preparation can proceed while waiting. Keep screenshots,
+logs and command lines, and distinguish fixture success from the live Pages
+check or any unperformed owner-run route.
+
+Exit: every §12 leg has a pass/fail/unmeasured verdict and reproducible evidence.
+```
+
+### Prompt M8 — Reconcile docs and release readiness
+
+```text
+Read the plan §§6, 10.5, 12–14 and M7's evidence. Implement only M8. Update
+docs/engine/messages.md, docs/engine/diagnostics.md, docs/engine/toggles.md,
+docs/guides/distributable.md, installer/README.md, the plan indexes and known
+issues to match measured behavior. Explain the bundled/cache/online source
+order, GitHub Pages publication gate, guest icon limits and the first release's
+Open releases action. Keep the dormant auto updater explicitly future work.
+
+Run the documentation checker and targeted build/test gates needed to verify
+the final changes. Check that the setup payload contains feed.json, that the
+feed's version matches the setup, and that the published feed does not announce
+an unavailable release. Do not publish a release or deploy Pages in this prompt.
+
+Exit: docs match actual behavior and M7 evidence; list any remaining release
+blocker or unmeasured UI route without presenting it as complete.
+```
 
 ---
 

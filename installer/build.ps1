@@ -288,6 +288,15 @@ function Resolve-PayloadCommit {
 # --------------------------------------------------------------------------
 Write-Step 'Payload'
 
+# Validate the one authored feed even when an existing payload snapshot can be
+# reused. A changed feed invalidates that snapshot in payload_provenance.ps1.
+$feedValidator = Join-Path $repoRoot 'scripts/messages/check_feed.mjs'
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    throw 'Node.js is required to validate assets/messages/feed.json before packaging.'
+}
+& node $feedValidator
+if ($LASTEXITCODE -ne 0) { throw 'assets/messages/feed.json failed validation.' }
+
 $embedPayload = -not $PayloadUrl
 $embedArgs = @()
 
@@ -401,6 +410,12 @@ if ($PayloadUrl) {
     } else {
         Write-Warning "no CMakeCache.txt in $SourceDir, so the payload's renderer backends were not read"
     }
+
+    # -SkipPayload can deliberately keep an older snapshot, but it must never
+    # embed a missing or malformed offline feed.
+    $bundledFeed = Join-Path $PayloadDir 'assets/messages/feed.json'
+    & node $feedValidator --feed $bundledFeed
+    if ($LASTEXITCODE -ne 0) { throw "the payload's assets/messages/feed.json failed validation." }
 
     if ($payloadVersionForPins) { $embedArgs += @('--payload-version', $payloadVersionForPins) }
 }
