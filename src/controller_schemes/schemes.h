@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,6 +40,7 @@ struct Scheme {
   std::vector<std::filesystem::path> extra_files;
   std::vector<std::filesystem::path> declared_files;
   std::vector<InputImage> inputs;
+  std::set<std::string> calibration_pairs;
   const Image* Pad(const std::string& slot) const;
   const InputImage* InputFor(std::string_view source,
                              std::string_view variant = {},
@@ -69,6 +71,9 @@ Registry Discover(const std::filesystem::path& install_root,
                   const std::filesystem::path& user_root, DecodePng decoder,
                   DiscoveryObserver observer = nullptr);
 bool DecodePngWic(const std::filesystem::path& path, Image* image, std::string* why);
+// Optional 256-square pressed/released art is loaded only for the active Confirm source.
+bool LoadCalibrationImage(const Scheme& scheme, const InputImage& input, bool pressed,
+                          DecodePng decoder, Image* image, std::string* why);
 
 // The whole source canvas is resized proportionally and centered on transparent pixels.
 Image Fit(const Image& source, uint32_t width, uint32_t height);
@@ -77,6 +82,7 @@ bool ComposeButtons(const std::vector<std::vector<uint8_t>>& original,
                     const Scheme& scheme, std::vector<std::vector<uint8_t>>* levels);
 std::vector<std::vector<uint8_t>> ComposePad(const Image& image, uint32_t mip_count);
 std::vector<std::vector<uint8_t>> ComposeIcons(const Image& image, uint32_t mip_count);
+std::vector<std::vector<uint8_t>> ComposeCalibration(const Image& image);
 bool UntileBc3Base(const uint8_t* guest, size_t guest_size, uint32_t width,
                    bool tiled, uint32_t endianness, std::vector<uint8_t>* canonical);
 

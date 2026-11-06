@@ -46,6 +46,12 @@ Two things about that shape matter here:
 
 ## 2. What was measured
 
+Correction (2026-11-06): `sub_8229D7A0` is the guest string-buffer setter,
+with a string object in `r3`. The UILabel text setter is `sub_824BC7D0`
+(`r3` = label, `r4` = UTF-8 string, `r5` = refresh flag); it calls the string
+setter on `label + 72`. Earlier references below calling `sub_8229D7A0`
+`UILabel::SetText` describe observations of the internal string write.
+
 All of it in this tree, on one song at a time (a DLC package whose `songs/<song>/<song>.milo`
 is missing was the reproducer, chosen because the log names the missing file), with the game
 driven by `scripts/diagnostics/observe_ui.ps1 -State in-song -Windowed -KeepRunning` and the frames

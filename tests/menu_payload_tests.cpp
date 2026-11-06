@@ -802,6 +802,19 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
         CHECK_TRUE(std::any_of(original_buttons->begin(), original_buttons->end(),
                                [](uint8_t byte) { return byte != 0; }));
       }
+      if (single) {
+        const auto calibration = rb_blitz::ui::input_font::OriginalCalibrationButtons();
+        CHECK_TRUE(calibration != nullptr);
+        if (calibration) {
+          for (const auto& frames : *calibration) {
+            CHECK_EQ(frames.size(), size_t{5});
+            for (size_t mip = 0; mip < frames.size(); ++mip)
+              CHECK_EQ(frames[mip].size(), size_t{(256u >> mip) * (256u >> mip)});
+          }
+          CHECK_TRUE((*calibration)[0][0] != (*calibration)[1][0]);
+          CHECK_TRUE((*calibration)[2][0] != (*calibration)[3][0]);
+        }
+      }
       CheckPrivateFontGeometry(row_font, false);
       const auto& hint_font = records.at(rb_blitz::ui::input_font::kHintSceneRecord);
       CheckIconScene(hint_font);
@@ -861,7 +874,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
           return count;
         };
         CHECK_EQ(count_resource(records.at(rb_blitz::ui::input_font::kCalibrationRecord),
-                                loading_font), size_t{2});
+                                loading_font), size_t{4});
         CHECK_EQ(count_resource(records.at(rb_blitz::ui::input_font::kHudRecord),
                                 "../ui/resource/fonts/inline_help_icons.milo"), size_t{4});
         CHECK_EQ(count_resource(records.at(rb_blitz::ui::input_font::kPowerupSelectRecord),

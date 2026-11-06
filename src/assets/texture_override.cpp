@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -104,11 +105,20 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     pending_hints_ = std::move(icons);
     has_pending_hints_ = true;
   }
+  void PublishCalibration(std::string signature, input::icons::Icon icon) {
+    std::lock_guard lock(pending_mutex_);
+    if (signature == last_calibration_signature_) return;
+    last_calibration_signature_ = std::move(signature);
+    pending_calibration_ = std::move(icon);
+    has_pending_calibration_ = true;
+  }
   void Poll() override {
     std::string next;
     std::vector<input::icons::Icon> icons;
     std::vector<input::icons::Icon> hints;
+    input::icons::Icon calibration;
     bool icons_changed = false;
+    bool calibration_changed = false;
     {
       std::lock_guard lock(pending_mutex_);
       next = std::move(pending_);
@@ -122,6 +132,11 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         hints = std::move(pending_hints_);
         has_pending_hints_ = false;
         icons_changed = true;
+      }
+      if (has_pending_calibration_) {
+        calibration = std::move(pending_calibration_);
+        has_pending_calibration_ = false;
+        calibration_changed = true;
       }
     }
     const bool scheme_changed = !next.empty() && next != selected_;
@@ -179,7 +194,48 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       retail_font_levels_.clear();
       private_font_levels_.clear();
     }
-    if (scheme_changed || icons_changed || retail_ps_pads_ready || refresh_font_after_buttons_) {
+    if (calibration_changed) {
+      calibration_levels_ = {};
+      const auto originals = ui::input_font::OriginalCalibrationButtons();
+      const auto& source = calibration.source;
+      const bool ps3_cross = calibration.scheme == "playstation-3" &&
+          source.kind == profile::remap::SourceKind::kPad && source.name == "a";
+      if (ps3_cross && originals) {
+        calibration_levels_[0] = (*originals)[2];
+        calibration_levels_[1] = (*originals)[3];
+      } else if (calibration.art == input::icons::Art::kUnbound) {
+        controller_schemes::Image blank{256, 256, std::vector<uint8_t>(256u * 256u * 4u)};
+        calibration_levels_[0] = controller_schemes::ComposeCalibration(blank);
+        calibration_levels_[1] = calibration_levels_[0];
+      } else {
+        const controller_schemes::Scheme* scheme = nullptr;
+        if (source.kind == profile::remap::SourceKind::kKey ||
+            source.kind == profile::remap::SourceKind::kMouse) {
+          if (registry_.has_keyboard_mouse) scheme = &registry_.keyboard_mouse;
+        } else scheme = registry_.Find(calibration.scheme);
+        if (scheme) {
+          const char* prefix = source.kind == profile::remap::SourceKind::kPad ? "pad:" :
+                               source.kind == profile::remap::SourceKind::kSdl ? "sdl:" :
+                               source.kind == profile::remap::SourceKind::kMouse ? "mouse:" : "key:";
+          if (const auto* entry = scheme->InputFor(std::string(prefix) + source.name);
+              entry && scheme->calibration_pairs.contains(entry->id)) {
+            controller_schemes::Image released, pressed;
+            std::string why;
+            if (controller_schemes::LoadCalibrationImage(*scheme, *entry, false,
+                    DecodeSchemePngTimed, &released, &why) &&
+                controller_schemes::LoadCalibrationImage(*scheme, *entry, true,
+                    DecodeSchemePngTimed, &pressed, &why)) {
+              calibration_levels_[0] = controller_schemes::ComposeCalibration(released);
+              calibration_levels_[1] = controller_schemes::ComposeCalibration(pressed);
+            } else REXLOG_WARN("calibration: cannot load {} art: {}", entry->id, why);
+          }
+        }
+      }
+      REXLOG_INFO("calibration: selected {} {} with pressed/released art={}",
+                  calibration.scheme, source.name, !calibration_levels_[0].empty());
+    }
+    if (scheme_changed || icons_changed || calibration_changed || retail_ps_pads_ready ||
+        refresh_font_after_buttons_) {
       refresh_font_after_buttons_ = false;
       rex::graphics::InvalidateTextureOverrides();
     }
@@ -189,6 +245,23 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
                    std::vector<std::vector<uint8_t>>* host_levels,
                    bool* refresh_target) override {
     const uint64_t hash = ContentHash(guest_data, request.guest_base_size);
+    int calibration_slot = -1;
+    if (request.width == 256 && request.height == 256 &&
+        request.guest_base_size == 256u * 256u) {
+      if (const auto original = ui::input_font::OriginalCalibrationButtons()) {
+        const auto known = calibration_hashes_.find(hash);
+        if (known != calibration_hashes_.end()) calibration_slot = known->second;
+        else {
+          std::vector<uint8_t> canonical;
+          if (controller_schemes::UntileBc3Base(guest_data, request.guest_base_size,
+                  256, request.tiled, uint32_t(request.endianness), &canonical)) {
+            for (size_t i = 0; i < original->size(); ++i)
+              if (canonical == (*original)[i][0]) { calibration_slot = int(i); break; }
+          }
+          calibration_hashes_[hash] = calibration_slot;
+        }
+      }
+    }
     const bool button = request.width == 512 && request.height == 512 &&
                         hash == kButtonFingerprint;
     const bool icons = request.width == 1024 && request.height == 512 &&
@@ -244,7 +317,14 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         private_original, &private_font_hashes_, "private");
     // The base-game texture must be a refresh candidate before any custom scheme is selected.
     // Otherwise a retail boot uploads it once and a later generation bump has nothing to evict.
-    if (button || icons || pad_slot || font || private_font) *refresh_target = true;
+    if (button || icons || pad_slot || font || private_font || calibration_slot >= 0)
+      *refresh_target = true;
+    if (calibration_slot >= 0 && !calibration_levels_[calibration_slot % 2].empty()) {
+      const auto& levels = calibration_levels_[calibration_slot % 2];
+      if (request.mip_count > levels.size()) return false;
+      host_levels->assign(levels.begin(), levels.begin() + request.mip_count);
+      return true;
+    }
     if (button && original_buttons_.empty() &&
         controller_schemes::UntileBc3Base(guest_data, request.guest_base_size,
             request.width, request.tiled, uint32_t(request.endianness), &original_buttons_)) {
@@ -357,14 +437,19 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::vector<input::icons::Icon> hint_icons_;
   std::vector<input::icons::Icon> pending_icons_;
   std::vector<input::icons::Icon> pending_hints_;
+  input::icons::Icon pending_calibration_;
+  std::array<std::vector<std::vector<uint8_t>>, 2> calibration_levels_;
+  std::unordered_map<uint64_t, int> calibration_hashes_;
   std::vector<uint8_t> original_buttons_;
   std::string last_icon_signature_;
   std::string last_hint_signature_;
+  std::string last_calibration_signature_;
   std::unordered_set<uint64_t> font_hashes_;
   std::unordered_set<uint64_t> private_font_hashes_;
   std::unordered_set<uint64_t> font_probe_logged_;
   bool has_pending_icons_ = false;
   bool has_pending_hints_ = false;
+  bool has_pending_calibration_ = false;
   bool refresh_font_after_buttons_ = false;
   std::map<uint64_t, std::vector<std::vector<uint8_t>>> pads_;
   std::unordered_set<uint64_t> logged_;
@@ -529,6 +614,9 @@ void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> ic
 }
 void PublishHintIcons(std::string signature, std::vector<input::icons::Icon> icons) {
   if (g_scheme_provider) g_scheme_provider->PublishHints(std::move(signature), std::move(icons));
+}
+void PublishCalibrationIcon(std::string signature, input::icons::Icon icon) {
+  if (g_scheme_provider) g_scheme_provider->PublishCalibration(std::move(signature), std::move(icon));
 }
 bool InputIconsAvailable() {
   return g_scheme_provider != nullptr && ui::input_font::PrivateBc3() != nullptr;

@@ -41,6 +41,10 @@ bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* sce
                    std::string* error);
 bool PrepareCalibration(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                         std::string* error);
+// The four calibration button textures, in Xbox released/pressed, PS3
+// released/pressed order. Read from the installed scene; never packaged.
+using CalibrationButtons = std::array<std::vector<std::vector<uint8_t>>, 4>;
+std::shared_ptr<const CalibrationButtons> OriginalCalibrationButtons();
 bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                      std::string* error);
 bool PreparePowerupSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,

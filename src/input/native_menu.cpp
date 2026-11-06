@@ -8,6 +8,7 @@
 #include <rex/kernel/xam/module.h>
 #include "hooks/help_observer.h"
 #include "hooks/action_hint_probe.h"
+#include "ui/input_font_scene.h"
 #include "loading/load_trace.h"
 #include "loading/crash_recovery.h"
 #include "hooks/content_progress.h"
@@ -17,6 +18,7 @@
 #include <string>
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 
 REXCVAR_DECLARE(bool, mouse_ui_nav);
 REXCVAR_DEFINE_BOOL(mouse_native_trace, false, "Diagnostics", "Trace native menu geometry and selection");
@@ -40,6 +42,7 @@ REX_EXTERN(sub_82402DE8);       // ObjectDir::FindObject
 REX_EXTERN(sub_821F13D0);       // RndTransformable::WorldXfm
 REX_EXTERN(__imp__sub_824BC668); // UILabel::DrawShowing (label +260)
 REX_EXTERN(sub_824BA9F8);       // UILabel::LabelStyle
+REX_EXTERN(sub_824BC7D0);       // UILabel::SetText
 
 namespace rb_blitz::input {
 namespace {
@@ -68,6 +71,7 @@ bool window_focused = false;
 bool menu_available = false;
 bool game_screen_active = false;
 uint32_t current_screen = 0, current_focus = 0;
+uint64_t screen_generation = 0;
 // The current screen's guest object name, used by native mouse navigation.
 std::string current_screen_name;
 // The focused list the previous frame's draw identified (see DrawList). Read by the help caption
@@ -164,6 +168,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   rb_blitz::diag::shader_trace::ObserveScreen(name, panel_name, ObjectName(base, ObjectBase(base, focus)),
                                              U32(base, manager + 16) != 0);
   if (screen != current_screen || focus != current_focus || allowed != menu_available) {
+    if (screen != current_screen) ++screen_generation;
     header_geometry = {};
     clicked_header = -1;
     MenuRail stale; PublishRail(stale);
@@ -724,6 +729,30 @@ void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
   }
   header_geometry[index] = {current_screen, current_focus, frame_number, bounds};
 }
+void UpdateCalibrationSideLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  // These two UILabels flank the metronome. Their scene font is redirected to
+  // inline_help_icons.milo; its U+0081 glyph is the live Interface Confirm tile.
+  if (current_screen_name.rfind("cal_", 0) != 0) return;
+  const auto name = ObjectName(base, ObjectBase(base, label));
+  if (name != "green02.lbl" && name != "green1.lbl") return;
+  thread_local uint64_t previous_generation = 0;
+  thread_local std::unordered_set<uint32_t> updated;
+  if (previous_generation != screen_generation) {
+    updated.clear();
+    previous_generation = screen_generation;
+  }
+  if (!updated.insert(label).second) return;
+  GuestCall call(ctx);
+  const auto chars = call.scratch;
+  constexpr uint32_t code = rb_blitz::ui::input_font::GlyphCode(1);
+  base[chars] = uint8_t(0xC0 | (code >> 6));
+  base[chars + 1] = uint8_t(0x80 | (code & 0x3F));
+  base[chars + 2] = 0;
+  call.frame.ctx.r3.u32 = label;
+  call.frame.ctx.r4.u32 = chars;
+  call.frame.ctx.r5.u32 = 0;
+  sub_824BC7D0(call.frame, base);
+}
 // Defined after DrawList; declared here because the draw is what discovers a new list.
 void DrawList(PPCContext& ctx, uint8_t* base) {
   const uint32_t list = ctx.r5.u32 - 176;
@@ -859,6 +888,7 @@ REX_HOOK_RAW(sub_824E9A90) {
 }
 REX_HOOK_RAW(sub_824BC668) {
   const auto label = ctx.r3.u32 - 260;
+  rb_blitz::input::UpdateCalibrationSideLabel(ctx, base, label);
   __imp__sub_824BC668(ctx, base);
   rb_blitz::input::CaptureHeader(ctx, base, label);
 }

@@ -411,6 +411,20 @@ static bool LoadSchemeImpl(const fs::path& folder, bool trusted_reserved,
     if (!entry.slot.empty()) scheme.buttons.emplace(entry.slot, entry.image);
     scheme.inputs.push_back(std::move(entry));
   }
+  for (const auto& entry : scheme.inputs) {
+    const std::string stem = "calibration/" + entry.id;
+    const std::string released = stem + "-released.png";
+    const std::string pressed = stem + "-pressed.png";
+    if (!fs::exists(folder / released, ec) || !fs::exists(folder / pressed, ec)) continue;
+    fs::path checked;
+    if (!SafeImagePath(folder, released, &checked, why) ||
+        !SafeImagePath(folder, pressed, &checked, why)) return false;
+    scheme.calibration_pairs.insert(entry.id);
+    paths.insert(released);
+    paths.insert(pressed);
+    scheme.declared_files.emplace_back(released);
+    scheme.declared_files.emplace_back(pressed);
+  }
   if (scheme.buttons.empty() && scheme.pads.empty() && !scheme.has_shared_pad &&
       scheme.inputs.empty()) {
     *why = "package has no button or pad replacement"; return false;
@@ -439,6 +453,21 @@ bool LoadScheme(const fs::path& folder, bool trusted_reserved, DecodePng decoder
 bool LoadInternalKeyboard(const fs::path& folder, DecodePng decoder,
                           Scheme* result, std::string* why) {
   return LoadSchemeImpl(folder, true, true, decoder, result, why);
+}
+bool LoadCalibrationImage(const Scheme& scheme, const InputImage& input, bool pressed,
+                          DecodePng decoder, Image* image, std::string* why) {
+  if (!scheme.calibration_pairs.contains(input.id)) {
+    *why = "calibration image pair missing";
+    return false;
+  }
+  const std::string path = "calibration/" + input.id +
+      (pressed ? "-pressed.png" : "-released.png");
+  if (!LoadImage(scheme.folder, path, decoder, image, why)) return false;
+  if (image->width != 256 || image->height != 256) {
+    *why = "calibration image must be 256x256";
+    return false;
+  }
+  return true;
 }
 
 const Scheme* Registry::Find(const std::string& id) const {
@@ -595,6 +624,21 @@ std::vector<std::vector<uint8_t>> ComposePad(const Image& image, uint32_t mip_co
                       padded.data() + (y * 4 + x) * 4);
       assets::EncodeDxt5(padded.data(), 4, 4, &blocks);
     }
+    levels.push_back(std::move(blocks));
+  }
+  return levels;
+}
+std::vector<std::vector<uint8_t>> ComposeCalibration(const Image& image) {
+  std::vector<std::vector<uint8_t>> levels;
+  if (!ValidImage(image)) return levels;
+  const Image base = Fit(image, 256, 256);
+  for (uint32_t mip = 0; mip < 5; ++mip) {
+    const uint32_t dim = 256u >> mip;
+    std::vector<uint8_t> rgba(size_t(dim) * dim * 4);
+    if (mip == 0) rgba = base.rgba;
+    else assets::ResizeRgba(base.rgba.data(), 256, 256, rgba.data(), dim, dim);
+    std::vector<uint8_t> blocks;
+    assets::EncodeDxt5(rgba.data(), dim, dim, &blocks);
     levels.push_back(std::move(blocks));
   }
   return levels;

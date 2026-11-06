@@ -21,6 +21,7 @@ bool SelectControllerScheme(const std::string& id);
 // receives matching character codes; the GPU thread consumes this immutable batch in Poll().
 void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons);
 void PublishHintIcons(std::string signature, std::vector<input::icons::Icon> icons);
+void PublishCalibrationIcon(std::string signature, input::icons::Icon icon);
 bool InputIconsAvailable();
 const controller_schemes::Registry* ControllerSchemeRegistry();
 

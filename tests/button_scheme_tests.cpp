@@ -74,6 +74,7 @@ int main() {
           "authored v2 controller rejected");
     Check(scheme.schema_version == 2 && scheme.id == id &&
           scheme.inputs.size() == inputs && scheme.pads.size() == pads &&
+          scheme.calibration_pairs.size() == inputs &&
           scheme.InputFor("pad:a") &&
           (scheme.Pad("xbox_0") != nullptr || scheme.use_retail_ps_pads),
           "authored v2 lookup wrong");
@@ -83,7 +84,8 @@ int main() {
             scheme.InputFor("pad:back")->slot == "back_button",
             "PlayStation 3 retail PS pad source missing");
     if (std::string(id) == "playstation-4" || std::string(id) == "playstation-5") {
-      Check(scheme.pads.size() == 4 && scheme.declared_files.size() == scheme.inputs.size() + 4,
+      Check(scheme.pads.size() == 4 &&
+            scheme.declared_files.size() == scheme.inputs.size() * 3 + 4,
             "PlayStation pad declaration count wrong");
       Check(scheme.InputFor("pad:back") && scheme.InputFor("pad:back")->id == "share" &&
             scheme.InputFor("pad:back")->slot == "back_button" &&
@@ -130,13 +132,30 @@ int main() {
         "internal keyboard became selectable");
   Check(LoadInternalKeyboard(art / "keyboard-mouse", FakePng, &scheme, &why),
         "internal keyboard rejected");
-  Check(scheme.inputs.size() == 94 && scheme.declared_files.size() == 94 &&
+  Check(scheme.inputs.size() == 94 && scheme.calibration_pairs.size() == 94 &&
+        scheme.declared_files.size() == 94 * 3 &&
         scheme.InputFor("key:Return") && scheme.InputFor("key:KP Enter") &&
         scheme.InputFor("mouse:left") && scheme.InputFor("mouse:wheel_up") &&
         scheme.InputFor("mouse:wheel_down") && scheme.extra_files.size() == 3 &&
         scheme.InputFor("key:8", {}, "shift") &&
         scheme.InputFor("key:8", {}, "shift")->id == "asterisk",
         "internal keyboard manifest or declared-file audit wrong");
+#ifdef _WIN32
+  {
+    const auto* enter = scheme.InputFor("key:Return");
+    Check(enter && scheme.calibration_pairs.contains(enter->id),
+          "keyboard Confirm calibration pair missing");
+    Image released, pressed;
+    Check(LoadCalibrationImage(scheme, *enter, false, DecodePngWic, &released, &why) &&
+          LoadCalibrationImage(scheme, *enter, true, DecodePngWic, &pressed, &why),
+          "keyboard calibration PNG pair could not be decoded");
+    const auto first = ComposeCalibration(released);
+    const auto second = ComposeCalibration(pressed);
+    Check(first.size() == 5 && second.size() == 5 &&
+          first[0].size() == 256 * 256 && first[0] != second[0],
+          "pressed and released calibration mip chains were not distinct");
+  }
+#endif
   const auto v2 = root / "v2";
   fs::create_directories(v2);
   Write(v2 / "scheme.toml", "schema_version = 2\nid = \"v2\"\nname = \"V2\"\n"

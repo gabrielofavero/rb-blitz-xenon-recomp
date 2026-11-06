@@ -91,6 +91,8 @@ void Publish(const rb_blitz::input::icons::View& view, const std::string& signat
   icons[font::kGameplayPauseHint] = rb_blitz::input::icons::First(
       view, rb_blitz::profile::gameplay_remap::Action::kPause);
   rb_blitz::assets::PublishHintIcons(signature, std::move(icons));
+  rb_blitz::assets::PublishCalibrationIcon(signature, rb_blitz::input::icons::First(view,
+      {rb_blitz::profile::InputRowKind::kGeneralBinding, "a"}));
   published = signature;
   if (TraceEnabled()) REXLOG_INFO("p10_trace: hints published {}", signature);
 }

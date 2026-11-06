@@ -70,6 +70,15 @@ Xbox text rails while pointing to the Quest Touch controls.
 The files in `masters/` are authoring sources; manifests reference finished
 images in their layout folders.
 
+Calibration uses an optional pair beside each `[[input]]`: `calibration/<id>-released.png`
+and `calibration/<id>-pressed.png`, each 256×256 RGBA. Both files are staged with
+the scheme and loaded when that input becomes the first Interface Confirm source
+in the active device family. Switching the binding, device family, or controller
+layout refreshes the guest's own calibration button textures. A missing pair
+keeps the installed game's image. The PlayStation 3 layout reuses the installed
+game's original PS3 Cross frames when `pad:a` is Confirm; a different PS3
+Confirm binding uses its matching scheme pair.
+
 The authored PlayStation 3 layout declares only button PNGs and sets
 `[controller] retail_pad_family = "ps"`. The Xbox 360 game scene already includes
 `img/ps_0.png` through `img/ps_3.png`; the game reads these textures in memory

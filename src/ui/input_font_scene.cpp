@@ -24,6 +24,7 @@ std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_original_bc3;
 std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_private_bc3;
 std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_original_buttons_bc3;
 std::atomic<std::shared_ptr<const RetailPsPads>> g_original_ps_pads_bc3;
+std::atomic<std::shared_ptr<const CalibrationButtons>> g_calibration_buttons;
 uint32_t Le32(const uint8_t* p) {
   return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
 }
@@ -474,10 +475,60 @@ bool PrepareCalibration(const std::vector<uint8_t>& source, std::vector<uint8_t>
                         std::string* error) {
   std::vector<uint8_t> bytes;
   if (!DecodeStream(source, &bytes, error)) return false;
+  constexpr std::array<std::string_view, 4> paths{
+      "../image/button_a_calibrate_icon0001.bmp",
+      "../image/button_a_calibrate_icon0002.bmp",
+      "../image/button_press_ps30001.bmp",
+      "../image/button_press_ps30002.bmp"};
+  constexpr std::array<uint8_t, 12> header_shape{
+      8, 0, 0, 0, 0x18, 4, 1, 0, 1, 0, 1, 0};
+  CalibrationButtons originals;
+  for (size_t index = 0; index < paths.size(); ++index) {
+    const auto path = paths[index];
+    const auto at = std::search(bytes.begin(), bytes.end(), path.begin(), path.end());
+    if (at == bytes.end() || at == bytes.begin() || *(at - 1) != path.size())
+      return Fail(error, "calibration button path changed");
+    const size_t path_end = size_t(at - bytes.begin()) + path.size();
+    size_t header = bytes.size();
+    for (size_t offset = path_end; offset + 31 <= bytes.size() &&
+                                   offset < path_end + 80; ++offset) {
+      if (std::memcmp(bytes.data() + offset + 4, header_shape.data(),
+                      header_shape.size()) == 0 &&
+          std::all_of(bytes.begin() + offset + 23, bytes.begin() + offset + 31,
+                      [](uint8_t byte) { return byte == 0; })) {
+        header = offset;
+        break;
+      }
+    }
+    if (header == bytes.size()) return Fail(error, "calibration button header changed");
+    size_t payload = header + 31;
+    for (size_t mip = 0; mip < 5; ++mip) {
+      const size_t dimension = 256u >> mip;
+      const size_t size = dimension * dimension;
+      if (payload + size > bytes.size())
+        return Fail(error, "calibration button texture truncated");
+      auto& level = originals[index].emplace_back(size);
+      for (size_t byte = 0; byte < size; byte += 2) {
+        level[byte] = bytes[payload + byte + 1];
+        level[byte + 1] = bytes[payload + byte];
+      }
+      payload += size;
+    }
+  }
   if (!ReplaceAnchoredFonts(&bytes, "../resource/fonts/buttons.milo",
                             "../resource/fonts/inline_help_icons.milo",
                             {"cal_audio_desc_pad", "cal_video_desc_pad"}, 2, error)) return false;
+  // The two green labels flanking the metronome are separate from the large
+  // pressed/released button meshes. Give them the live Interface Confirm font.
+  if (!ReplaceAnchoredFonts(&bytes, "../resource/fonts/buttons.milo",
+                            "../resource/fonts/inline_help_icons.milo",
+                            {"cal_metronome.grp"}, 2, error)) return false;
+  g_calibration_buttons.store(
+      std::make_shared<const CalibrationButtons>(std::move(originals)));
   return PackStored(bytes, scene, error);
+}
+std::shared_ptr<const CalibrationButtons> OriginalCalibrationButtons() {
+  return g_calibration_buttons.load();
 }
 bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                      std::string* error) {
