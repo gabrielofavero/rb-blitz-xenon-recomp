@@ -94,6 +94,7 @@ enum class SettingId : uint16_t {
   kShowMessages = 87,
   kShowRecommendations = 88,
   kButtonScheme = 89,  // selected controller art; stable scheme id
+  kShowCurrency = 90,  // coin and Blitz Cred displays in menus and results
 };
 
 enum class ValueKind : uint8_t { kNone = 0, kBool, kInt, kEnum, kString, kList, kResolution };

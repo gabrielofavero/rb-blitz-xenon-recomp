@@ -324,6 +324,10 @@ std::vector<SchemaRow> BuildTable() {
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
                      {"interface", "show_recommendations"}, "music_library_store", "Recommendations",
                      "Show the RECOMMENDED tab in the music library and store. Requires a restart."));
+  rows.push_back(Row(Make(SettingId::kShowCurrency, Category::kInterface,
+                          Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
+                     {"interface", "show_currency"}, "music_library_store", "Coins & Blitz Cred",
+                     "Show coin and Blitz Cred balances on power-up selection and song results. Requires a restart."));
   // The main menu's Download Content row (owner request, 2026-10-20). R7's refresh took the row
   // over (`splash_dlc`), so the retail entry lost its label and action; the payload now restores
   // it as a row of its own. This switch is its visibility, and `true` means hidden: a fresh
@@ -505,6 +509,7 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kHideDownloadContent, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowMessages, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowRecommendations, ApplicationStrategy::kRestart, ""},
+    {SettingId::kShowCurrency, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideOfflinePrompts, ApplicationStrategy::kRestart, ""},
     {SettingId::kBackgroundMusicNavigation, ApplicationStrategy::kRestart, ""},
     {SettingId::kMusicPlayer, ApplicationStrategy::kRestart, ""},

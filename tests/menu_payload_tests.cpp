@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <tuple>
 
 #include <bit>
 #include <cstddef>
@@ -635,6 +636,37 @@ void TestHeaderVisibility() {
   CHECK_FALSE(settings::ConfigureLibraryHeaderBar(&invalid, State(0), &why));
   CHECK_TRUE(dtb::Compile(invalid) == before);
 }
+void TestCurrencyVisibility() {
+  using namespace header_test;
+  BeginCase("currency chrome is hidden after retail setup without changing purchase or reward data");
+  auto powerups = std::vector<Node>{C({S("new"), S("PowerupSelectPanel"), S("powerup_select_panel"),
+      A({S("enter"), C({S("your_monies_text.lbl"), S("set_token_fmt"), S("current_monies")}),
+                      C({S("your_cred.lbl"), S("set_token_fmt"), S("current_cred")}),
+                      C({S("your_cred.lbl"), S("set"), S("showing"), S("TRUE")})})})};
+  auto results = std::vector<Node>{C({S("new"), S("UIPanel"), S("song_results_panel"),
+      A({S("enter"), C({S("retail_enter")})}), A({S("poll"), C({S("retail_poll")})})})};
+  std::string why;
+  CHECK_TRUE(settings::HidePowerupCurrency(&powerups, &why));
+  CHECK_TRUE(settings::HideResultsCurrency(&results, &why));
+  const auto* enter = Method(powerups, "powerup_select_panel", "enter");
+  CHECK_TRUE(enter && enter->kids.size() == 6 && enter->kids[3].kids[0].text == "your_cred.lbl" &&
+             enter->kids[4].kids[0].text == "your_monies_text.lbl" &&
+             enter->kids[5].kids[0].text == "your_cred.lbl" &&
+             enter->kids[4].kids[2].text == "FALSE" && enter->kids[5].kids[2].text == "FALSE");
+  for (const char* method : {"enter", "poll"}) {
+    const auto* body = Method(results, "song_results_panel", method);
+    CHECK_TRUE(body && body->kids.size() == 4 && body->kids[1].kids[0].text ==
+               std::string(method == std::string("enter") ? "retail_enter" : "retail_poll") &&
+               body->kids[2].kids[0].text == "Coins.grp" &&
+               body->kids[3].kids[0].text == "cred.grp" &&
+               body->kids[2].kids[2].text == "FALSE" && body->kids[3].kids[2].text == "FALSE");
+  }
+  auto invalid = powerups;
+  invalid[0].kids[3].kids.erase(invalid[0].kids[3].kids.begin() + 1);
+  const auto before = dtb::Compile(invalid);
+  CHECK_FALSE(settings::HidePowerupCurrency(&invalid, &why));
+  CHECK_TRUE(dtb::Compile(invalid) == before);
+}
 void TestHeaderNavigation() {
   using namespace header_test;
   BeginCase("all eight header rings: both triggers skip disabled destinations on all five panels");
@@ -743,6 +775,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
     config.rhythmverse_row = state.store;
     config.show_messages = state.messages;
     config.show_recommendations = state.recommendations;
+    config.show_currency = (boot_case & 1) != 0;
     config.controller_layout_enabled = single;
     screen::ConfigureMenu(config);
     settings::MenuRecords records;
@@ -759,6 +792,28 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
     }
     for (const auto& note : notes) std::printf("record note: %s\n", note.c_str());
     CHECK_TRUE(notes.empty());
+    for (const auto& [path, panel, names] :
+         std::array<std::tuple<const char*, const char*, std::array<const char*, 2>>, 2>{{
+             {"ui/powerup_select/gen/powerup_select.dtb", "powerup_select_panel",
+              {"your_monies_text.lbl", "your_cred.lbl"}},
+             {"ui/results_hub/gen/song_results.dtb", "song_results_panel",
+              {"Coins.grp", "cred.grp"}}}}) {
+      const auto found = records.find(path);
+      CHECK_TRUE((found != records.end()) == !config.show_currency);
+      if (found == records.end()) continue;
+      std::vector<dtb::Node> roots;
+      dtb::RootHeader header;
+      CHECK_TRUE(dtb::Parse(found->second.data(), found->second.size(), &roots, &header, &why));
+      const auto* enter = Method(roots, panel, "enter");
+      CHECK_TRUE(enter && enter->kids.size() >= 3);
+      if (!enter || enter->kids.size() < 3) continue;
+      for (size_t i = 0; i < 2; ++i) {
+        const auto& hide = enter->kids[enter->kids.size() - 2 + i];
+        CHECK_TRUE(hide.tag == dtb::kCommand && hide.kids.size() == 3 &&
+                   hide.kids[0].text == names[i] && hide.kids[1].text == "set_showing" &&
+                   hide.kids[2].text == "FALSE");
+      }
+    }
     if (boot_case == 0) {
       // The crash remedy: the Xbox guest heap is sized from this record at boot, and the
       // retail 137,000,000-byte definition cannot satisfy a fragmented 1 MiB texture
@@ -1452,6 +1507,7 @@ int main(int argc, char** argv) {
   }
   TestHeaderAnimations();
   TestHeaderVisibility();
+  TestCurrencyVisibility();
   TestHeaderNavigation();
   TestDiscoveryWaitingLabel();
   BeginCase("the generated locale renames the downloadable-content row when R7 owns it");

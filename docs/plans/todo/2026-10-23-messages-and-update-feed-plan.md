@@ -1,7 +1,8 @@
 # Messages feed and in-game update flow — plan (2026-10-23)
 
-**Status: planning. Nothing implemented, no code touched.** This document is the plan for a
-built-in (not toggleable) message feed served by a Cloudflare Worker, plus the
+**Status: planning. Nothing implemented. Revised 2026-11-06 for GitHub Pages, a shipped offline
+feed, and a release-page update action.** This document is the plan for a
+built-in (not toggleable) message feed served as static JSON by GitHub Pages, plus the
 "a newer version exists" flow that replaces the Messages screen's *Help & Options* prompt with
 *Update Game*.
 
@@ -17,20 +18,22 @@ are gitignored; §15 has the commands to regenerate them.
 
 | Id | Requirement |
 | --- | --- |
-| R1 | A Cloudflare Worker exposes one API route returning an object with the latest version and an array of messages. |
+| R1 | GitHub Pages serves one static `feed.json` returning an object with the latest version and an array of messages. |
 | R2 | Each message carries a title, a body, a date and an **icon name** (no hosted image). |
 | R3 | The game uses that array to drive its own Messages screen. |
-| R4 | The feed is fetched **on boot**. A successful answer is written as JSON to a path the game owns. A failed request keeps the last JSON. With no JSON at all, the screen keeps its current (retail) behaviour. |
+| R4 | The feed is fetched **on boot**. A successful answer is written as JSON to a path the game owns. A failed request uses the last valid cached JSON; on a first offline boot, the game uses the `feed.json` shipped with the build. Only when network, cache, and bundled feed are all unusable does the screen keep its current (retail) behaviour. |
+| R4a | Every setup payload ships a valid, nonempty `assets/messages/feed.json` with at least one useful offline message; its `latest_version` equals that payload's `[installer] version` (`0.1.0` for the planned first release). |
 | R5 | Built-in feature: no toggle. The existing *Show Messages* row keeps deciding whether the tab exists; that row is already implemented and is not part of this work. |
-| R6 | The game compares its own version with the feed's latest version. When they differ, the Messages screen's bottom bar offers `(START) Update Game` **in place of** `(START) Help & Options`. |
-| R7 | Pressing it prompts the player to leave the game and opens the updater executable. |
+| R6 | The game compares its own version with the feed's latest version. Only when the feed names a newer version does the Messages screen's bottom bar offer `(START) Update Game` **in place of** `(START) Help & Options`. |
+| R7 | Pressing it prompts the player to leave the game, opens this project's GitHub Releases page in the default browser, then closes the game. This release does not launch the updater executable. |
 | R8 | When the version is current, that bottom-bar field is hidden (no `(START) …` prompt on that screen). |
-| R9 | Scope of this plan: the JSON shape, the icon requirements, the worker in a new `workers/messages/` folder, the game integration, drawing text and icon from the feed, and the update flow. |
+| R9 | Scope of this plan: the JSON shape, the icon requirements, `assets/messages/feed.json` shipped with the payload and published through GitHub Pages, the game integration, drawing text and icon from the feed, and the release-page update flow. |
 
 Non-goals: a general news/notification system outside the Messages tab; push updates while the game
 runs; any host-drawn UI over the game (see the repository's UI directive — every visible element is
 guest-rendered DTA); **hosted or base64 images in the feed** (the icon is a name resolved against
-the game's own icon set or the local `assets/messages/` folder, §5).
+the game's own icon set or the local `assets/messages/` folder, §5); automated installation through
+the dormant updater (a later release can revisit it).
 
 ---
 
@@ -156,8 +159,8 @@ non-icon textures — `slot.png` and `slot_bar.png` (512×128, embedded), and th
   game again.
 - **Nothing publishes `update.toml` today**, and `[payload] version/url/sha256/size` are empty, so
   the updater would 404 and refuse. `installer/build.ps1` already generates
-  `installer/out/generated/update.toml` and accepts `-PayloadUrl`/`-PayloadSha256` for exactly this
-  case — it is a release-step decision, not new code (D9, Q1).
+  `installer/out/generated/update.toml` and accepts `-PayloadUrl`/`-PayloadSha256` for a future
+  multi-asset release. This release keeps the one-file setup model and opens GitHub Releases (D9).
 
 ### 2.6 The bottom bar's target screen
 
@@ -192,20 +195,21 @@ Every decision is citable as `D<n>` from code comments.
 | Id | Decision | Why |
 | --- | --- | --- |
 | D1 | One GET at boot, before the guest exists, on a host worker thread. The fetch runs even when *Show Messages* is off. | The same answer carries the version (R6), and a guest thread must never do network I/O (project rule). |
-| D2 | One endpoint, one document: `GET /v1/messages` returns `{schema_version, latest_version, generated_at, messages[]}`. | R1's "one object"; one cache file; one parse. |
-| D3 | `schema_version` is an integer, `1` in this plan. A reader that does not know it **refuses** the document and keeps the cache. Unknown extra keys are ignored. | Same rule as `update.toml` (`installer/src/config.h`), so a future revision cannot half-apply. |
+| D2 | One static document: `GET https://gabrielofavero.github.io/rb-blitz-xenon-recomp/feed.json` returns `{schema_version, latest_version, generated_at, messages[]}`. `assets/messages/feed.json` is the repository source and the copy shipped with the game; the Pages workflow publishes that file at the site root. | R1's "one object"; no server code or second feed format. |
+| D3 | `schema_version` is an integer, `1` in this plan. A reader that does not know it **refuses** that source and tries the next valid source (cache, then bundled feed). Unknown extra keys are ignored. | Same rule as `update.toml` (`installer/src/config.h`), so a future revision cannot half-apply. |
 | D4 | The game's version is read at configure time from `installer/config/pins.toml` `[installer] version` and compiled in as `RBBLITZ_GAME_VERSION`. Comparison is numeric, component by component. | One source of truth; the installer already calls it "the version of the installer and of the build inside it". Lexical compare would rank `0.10.0` below `0.9.0`. |
 | D5 | An update is offered only when `latest_version > RBBLITZ_GAME_VERSION`. Equal → current; a *newer local* build (dev) → no prompt, logged. | Otherwise every dev build would nag. |
 | D6 | On the Messages screen only: with an update available, the inline-help `kAction_Start` token becomes `inline_help_update_game` ("UPDATE GAME") and the START case opens our confirmation screen. With no update, the `kAction_Start` prompt is **removed** and the press does nothing. | R6/R8 literally; Help & Options stays reachable from the main menu row and the pause menu. |
 | D7 | The update prompt is an authored guest screen appended to the payload record (retail list resource, our rows and locale entries). No host-drawn pixels. | Repository UI directive (`.github/copilot-instructions.md`). |
-| D8 | "Update now" writes a `rbbz-messages/update/run` path. The host then spawns `%LOCALAPPDATA%\rb_blitz\update\RockBandBlitzUpdater.exe` and requests the UI close. | Spawning must happen before the close: `ReXApp::OnClosing` calls `_Exit(0)` (`src/platform/game_restart.h:11-18`). |
-| D9 | The in-game update installs **only** if the release publishes `update.toml` (and the payload archive it names). Otherwise the row opens the release page instead. **Owner call — Q1.** | The updater fetches a manifest that no release publishes today. |
+| D8 | "Open releases" writes a `rbbz-messages/update/open-releases` path. The host opens the fixed project Releases URL with the Windows default browser and, only after that succeeds, requests the UI close. | The browser handoff must happen before the close: `ReXApp::OnClosing` calls `_Exit(0)` (`src/platform/game_restart.h:11-18`). The URL is compiled in, never taken from feed JSON. |
+| D9 | This release keeps the one-file setup release model. `Update Game` opens `https://github.com/gabrielofavero/rb-blitz-xenon-recomp/releases`; the player downloads and runs the newest setup. Automated installation via the dormant updater is future work with its own release assets and end-to-end proof. | No release currently publishes the `update.toml` and payload archive that the updater requires. |
 | D10 | The date is drawn inside the row text (`YYYY-MM-DD  Title`); the detail pane shows the body unchanged. | The scene has no date label and a milo edit is out of scope (M3 keeps scene edits to texture/binding only). |
-| D11 | No cache and no network → the host performs **no injection at all**. The retail empty state ("No messages" / "Sorry, you don't have any messages at this time.") draws untouched. | R4's last sentence, with the least risk. |
-| D12 | Cache: `<user_data_root>/messages/feed.json`, written atomically only after a fully validated answer; the previous file is replaced on success only. | Same folder family as `<user_data_root>/store/downloads.tsv`; `fs::WriteAtomic` is the house rule. |
+| D11 | Source order at boot: valid cache, otherwise valid `<exe dir>/assets/messages/feed.json`; an asynchronous successful fetch replaces the active snapshot and cache. If the fetch fails, keep the active snapshot. Only when cache and bundled feed both fail validation does the host leave the retail inbox untouched. | A first offline launch can show shipped messages; a later offline launch keeps the last good online feed. |
+| D12 | Cache: `<user_data_root>/messages/feed.json`, written atomically only after a fully validated network answer; the shipped file is read-only and never overwritten. | Same folder family as `<user_data_root>/store/downloads.tsv`; `fs::WriteAtomic` is the house rule. |
 | D13 | The message list is delivered by **post-hooking `InboxProvider::build_list` (`sub_822D5928`)** and replacing its 16-byte entries with ours, built through the retail `InboxMessage` constructor. | Smallest faithful change: retail keeps the list, the detail fill, navigation, the header ring and the empty state. Alternatives in §8. |
 | D14 | Icons are **names**, never image bytes: a built-in id from the game's own set (§9.1) or a custom file in `assets/messages/`, resolved locally, falling back to `icon_misc`. | R2; the game already ships a named 512×512 DXT1 icon set, and a hosted image would need a download + encode for no benefit. |
-| D15 | The API base is a compile-time constant; a `messages_api_url` **host-only diagnostic cvar** overrides it for acceptance runs. The cvar does not appear in any settings surface. | R5 (no toggle) plus the project's harness needs (every host worker has a test seam). |
+| D15 | The final GitHub Pages JSON URL is a compile-time constant; a `messages_api_url` **host-only diagnostic cvar** overrides it for acceptance runs. The cvar does not appear in any settings surface. | R5 (no toggle) plus the project's harness needs (every host worker has a test seam). |
+| D16 | The Pages workflow runs after a successful `builds` workflow (`workflow_run`) or by manual `workflow_dispatch`. It publishes only after a release is available and its setup asset exists, and checks that the feed version matches that release; message-only edits may republish with the same latest released version. | The feed must not offer a version that players cannot download. `release: published` alone would not fire reliably when `builds.yml` creates the release using `GITHUB_TOKEN`. |
 
 ---
 
@@ -216,19 +220,21 @@ Every decision is citable as `D<n>` from code comments.
 ```json
 {
   "schema_version": 1,
-  "latest_version": "0.2.0",
-  "generated_at": "2026-10-23T18:00:00Z",
+  "latest_version": "0.1.0",
+  "generated_at": "2026-11-06T18:00:00Z",
   "messages": [
     {
-      "id": "2026-10-23-live-services",
-      "title": "Live services have moved",
-      "body": "Rock Central is offline, so these messages come from the project now.\nMore soon.",
-      "published": "2026-10-23",
+      "id": "2026-11-06-welcome",
+      "title": "Welcome to Messages",
+      "body": "Project messages are available here, including when you are offline.",
+      "published": "2026-11-06",
       "icon": "icon_more_stars"
     }
   ]
 }
 ```
+
+This is example content for the first shipped file, not a claim that it is implemented or published.
 
 ### 4.2 Field rules
 
@@ -244,8 +250,9 @@ Every decision is citable as `D<n>` from code comments.
 | `messages[].published` | string | `YYYY-MM-DD`, a real date. | Message dropped. |
 | `messages[].icon` | string, optional | Either a **built-in id** (the scene texture name, `^(icons?)_[a-z0-9_]+$` — §9.1's table) or a **custom file name** from `assets/messages/` (`^[a-z0-9][a-z0-9_-]{0,63}\.(png|jpg|jpeg)$`, case-insensitive, ≤ 1 MiB). | The message is drawn with the default icon (`icon_misc`), one log line. |
 
-Bounds are enforced on both sides: the worker's validation script refuses a bad document before it is
-published; the game clamps and drops per the table above (never trusting the server).
+Bounds are enforced on both sides: the publishing workflow's validation script refuses a bad
+document before it is published or shipped; the game clamps and drops per the table above (never
+trusting the server or the local file).
 
 ### 4.3 Version comparison
 
@@ -258,9 +265,11 @@ Split on `.` into three numeric components (parse misses → malformed), compare
 - `GET`, one attempt per boot, `store::HttpOptions` timeouts (10 s resolve/connect, 15 s send, 30 s
   receive), `max_body_bytes` = 256 KiB.
 - Redirects are **not** followed (the store's transport policy). A 3xx is a failure.
-- 200 + parseable document = success. Anything else = failure, cache kept, one log line.
-- Headers: `content-type: application/json; charset=utf-8`, `cache-control: public, max-age=300`,
-  `etag: "<sha256>"`. Conditional GETs are a later nicety, not part of v1.
+- Use the final `https://gabrielofavero.github.io/rb-blitz-xenon-recomp/feed.json` URL directly;
+  Pages redirects are not followed by the existing transport. Verify a 200 response during release.
+- 200 + parseable document = success. Anything else = failure; keep the cache or bundled snapshot.
+  Do not depend on a specific cache-control or ETag header from GitHub Pages. Conditional GETs are
+  a later nicety, not part of v1.
 
 ---
 
@@ -288,57 +297,55 @@ a path separator or `..` (the same rule as the store's path policy).
 | Tint | The icons are masks | The list tints them; custom art should be black/white like the built-ins. |
 | Folder | `assets/messages/` in the checkout, shipped beside the executable | `installer/tools/make_payload.ps1` copies it; `scripts/setup/audit_distributable.ps1` admits it. |
 
-The worker validates the field: a built-in id must be in §9.1's table, a custom name must name a file
+The feed validator checks the field: a built-in id must be in §9.1's table, a custom name must name a file
 that exists in `assets/messages/` at check time (so a typo fails before publication). No image bytes
-ever travel through the API, so there is no download, no URL policy and no per-image cache in the
-worker.
+ever travel through the feed, so there is no image download or per-image network cache.
 
 ---
 
-## 6. The worker: `workers/messages/`
+## 6. Static feed: bundled file and GitHub Pages
 
 ### 6.1 Layout
 
 ```
-workers/messages/
-  README.md              the contract, the icon rules, local dev, deploy
-  package.json           wrangler + node:test scripts, no runtime dependencies
-  wrangler.toml          name, main, [assets] directory = "./public", compatibility_date
-  src/index.ts           fetch handler: the two routes + JSON errors
-  public/messages.json   the document (the only file a maintainer edits for a new message)
-  scripts/check.mjs      validates the document and its icons (runs in `npm test` and before deploy)
-  test/index.test.ts     route tests against the handler (node:test, no network)
-  .gitignore             node_modules/, .wrangler/
+assets/messages/feed.json             the canonical document, also copied into the game payload
+scripts/messages/check_feed.mjs      validates the feed, pins and local icon names
+.github/workflows/messages-feed.yml  stages only feed.json and deploys it to GitHub Pages
 ```
 
-### 6.2 Routes
+### 6.2 Published URL
 
-| Route | Answer |
-| --- | --- |
-| `GET /v1/messages` | `public/messages.json` with `content-type`, `cache-control: public, max-age=300`, `etag` = SHA-256 of the body; `304` on a matching `If-None-Match`. |
-| `GET /healthz` | `{"status":"ok","schema_version":1,"icons":["icon_misc", …]}` — the built-in ids, so a maintainer can check a name without reading the game. |
-| anything else | `404` with `{"error":"not_found"}`. |
+`GET https://gabrielofavero.github.io/rb-blitz-xenon-recomp/feed.json` returns the bytes of
+`assets/messages/feed.json`. The Pages deployment stages only this JSON file at the site root;
+it does not publish the entire repository or the local custom icon files. There is no route
+handler, health route, Worker, KV, or R2. The game verifies the response body itself (§4).
 
-### 6.3 Validation (`scripts/check.mjs`)
+### 6.3 Validation (`scripts/messages/check_feed.mjs`)
 
 - The document parses and satisfies §4.2 (types, bounds, unique ids, newest-first by `published`).
 - Every `icon` is either one of the built-in ids (the list is a constant in the script, kept in sync
   with the engine study's table) or a file that exists in `assets/messages/`, with an allowed
   extension and ≤ 1 MiB.
-- `latest_version` equals `installer/config/pins.toml`'s `[installer] version` (read from the same
-  checkout), so the feed and the installer cannot drift.
-- Exit non-zero with one line per problem; wire it into `npm test` and into the deploy notes.
+- For a release build, `latest_version` equals `installer/config/pins.toml`'s `[installer] version`.
+  For a message-only Pages deploy, it equals the latest **published** release version; checking the
+  checkout's pins alone is insufficient if those pins have already been bumped for an unreleased build.
+- Exit non-zero with one line per problem; run it during packaging and before Pages deployment.
 
-### 6.4 Local development and deploy
+### 6.4 Local development and publication
 
-- `npx wrangler dev` → `http://127.0.0.1:8787`; the acceptance harness points `messages_api_url`
-  there.
-- `npx wrangler deploy` **only with the owner's explicit approval** (repository rule). No secrets
-  are needed: the worker is read-only and serves repository content.
-- Optional custom domain/route is a deployment choice; the game's compiled base URL is updated in the
-  same change that first deploys.
-- Upgrade path (not v1): move the document to Workers KV/R2 if editing without a deploy becomes
-  necessary. The API shape does not change.
+- A local HTTP server serves a fixture `feed.json`; the acceptance harness points
+  `messages_api_url` to that exact file URL. No Cloudflare tooling is needed.
+- Configure this repository's GitHub Pages source as GitHub Actions. Trigger the feed workflow on a
+  successful completion of `builds` (`workflow_run`), checking out that run's tag/commit, or manually
+  (`workflow_dispatch`) for message-only changes. Stage only `feed.json`, validate it, check the
+  latest published release's setup asset, then deploy. Do not rely on `release: published`: the
+  existing `builds.yml` creates releases with `GITHUB_TOKEN`, and events it creates do not start a
+  second workflow ([GitHub Actions token rule](https://docs.github.com/en/actions/concepts/security/github_token)).
+  A message-only run may change text but cannot advertise an unpublished version. Verify the final
+  Pages URL returns 200 before promoting it as the compiled default. The shipped copy gives the
+  first release an offline fallback even before Pages is live.
+- A future hosting move only changes the compiled URL; the document shape and local fallback stay
+  the same.
 
 ---
 
@@ -349,31 +356,32 @@ guest half):
 
 | File | Role |
 | --- | --- |
-| `messages_api.{h,cpp}` | SDK-free: the URL policy (HTTPS, allowlisted host, `/v1/…`), the JSON parse into `MessageFeed { schema_version, latest_version, generated_at, messages[] }`, per-field validation (§4.2), `CompareVersions`, and the banner text rules. Tests walk the matrix. |
+| `messages_api.{h,cpp}` | SDK-free: the URL policy (HTTPS, allowlisted `gabrielofavero.github.io` host and exact project `feed.json` path; a loopback HTTP exception for `messages_api_url` acceptance runs), the JSON parse into `MessageFeed { schema_version, latest_version, generated_at, messages[] }`, per-field validation (§4.2), `CompareVersions`, and the banner text rules. Tests walk the matrix. |
 | `messages_cache.{h,cpp}` | SDK-free: `Load(path, MessageFeed*, error)`, `Save(path, body, error)` — writes the **raw validated body** through `fs::WriteAtomic`, after creating the folder. |
-| `messages_service.{h,cpp}` | Windows: one worker thread per boot (mirrors `album_art_service.cpp`). `Install(runtime, api_base)`: load the cache synchronously → publish a snapshot; start the fetch; on success validate, publish, write the cache. Exposes `Snapshot()`, `UpdateOffer()`, `StateToken()` for logs/tests. |
+| `messages_service.{h,cpp}` | Windows: one worker thread per boot (mirrors `album_art_service.cpp`). `Install(runtime, feed_url)`: load valid cache or bundled `assets/messages/feed.json` synchronously → publish a snapshot; start the fetch; on success validate, publish, write the cache. Exposes `Snapshot()`, `UpdateOffer()`, `StateToken()` for logs/tests. |
 | `messages_icons.{h,cpp}` | Windows: resolve a message's `icon` (built-in id or `assets/messages/` file), encode a custom file to DXT1 512×512 with mips (WIC + `texture_codec`), cache it at `<user_data_root>/messages/icons/`, and publish the bytes for the guest seam (§9). |
 | `messages_guest.{h,cpp}` | Guest half: installs the `build_list` post-hook and the `rbbz-messages/` bridge answers. |
-| `messages_update.{h,cpp}` | Update path: locate the updater, spawn it through `ChildLauncher`, request the close; the state the payload builder reads. |
+| `messages_update.{h,cpp}` | Update path: open the fixed GitHub Releases URL in the default browser, then request the close; expose success/failure to the guest. |
 
 Boot wiring: `rb_blitz_app.h::OnPostLoadXexImage`, beside `InstallAlbumArt()`/`InstallStoreCatalogue()`
-— `rb_blitz::messages::Install(runtime(), kMessagesApiBase)` then `InstallMessagesGuest()`.
+— `rb_blitz::messages::Install(runtime(), kMessagesFeedUrl)` then `InstallMessagesGuest()`.
 The payload builder reads a frozen snapshot, exactly like `MenuConfiguration` does for the store rows.
 
 Cache and logging:
 
 ```
-<user_data_root>/messages/feed.json               the last good document (raw body)
+<exe dir>/assets/messages/feed.json               shipped fallback (read-only)
+<user_data_root>/messages/feed.json               the last good online document (raw body)
 <user_data_root>/messages/icons/<sha1>.png_xbox    encoded custom icons (DXT1 512×512 + mips)
 ```
 
-Log lines (prefixed `messages:`): `cached feed <n> message(s), latest <v>` / `fetched <n> message(s),
-latest <v>` / `fetch failed (<reason>); keeping <m> cached` / `no feed; the retail inbox is
-untouched` / `update <status>: current <v> vs latest <w>` / `icon <id>: built-in <name>` /
+Log lines (prefixed `messages:`): `cached feed <n> message(s), latest <v>` / `bundled feed <n>
+message(s), latest <v>` / `fetched <n> message(s), latest <v>` / `fetch failed (<reason>); keeping
+<source> feed` / `no valid feed; the retail inbox is untouched` / `update <status>: current <v> vs latest <w>` / `icon <id>: built-in <name>` /
 `icon <name>: encoded <bytes> B` / `icon <name>: missing; using icon_misc`.
 
 Diagnostic cvars (host-only allowlist, documented in `docs/engine/diagnostics.md`):
-`messages_api_url` (override the base URL) and `messages_assets_dir` (point the icon folder at the
+`messages_api_url` (override the exact feed URL) and `messages_assets_dir` (point the icon folder at the
 checkout for dev/acceptance). Nothing player-facing; no feature toggle.
 
 ---
@@ -501,7 +509,7 @@ the limit is recorded.
 ### 9.4 M3-C — the built-in default only (documented fallback)
 
 No custom files: the feed's `icon` selects a built-in id (or `icon_misc`), with the per-row limit from
-§9.2 if it applies. `assets/messages/` is still validated by the worker (so a feed carrying a custom
+§9.2 if it applies. `assets/messages/` is still validated by the feed checker (so a feed carrying a custom
 name fails before publication), and the limitation is written in
 `docs/reference/known-issues.md`. This is the release-safe path if the two spikes run out of time.
 
@@ -536,8 +544,8 @@ Only when a feed was loaded **and** an update is available:
    `{set {var first_screen} {var first_screen}}` — M4 verifies on screen.)
 3. Append our `UIScreen messages_update_screen` (panels: `background_panel`, `shell_music_panel`,
    `inbox_panel` as the focus target's back target, our panel on `settings_menu.milo`'s list resource
-   as `settings_restart_screen` does), with the rows `Update now` / `Later` and the captions
-   `UPDATE GAME`, `Leaves the game and opens the updater.`, `B` back to `inbox_screen`.
+   as `settings_restart_screen` does), with the rows `Open releases` / `Later` and the captions
+   `UPDATE GAME`, `Closes the game and opens the releases page.`, `B` back to `inbox_screen`.
 
 When no update is available: the `kAction_Start` **prompt is removed** (delete the
 `set_action_token kAction_Start …` statement) and the press case is rewritten to the empty branch.
@@ -545,64 +553,59 @@ This is R8: no `(START) …` field on that screen.
 
 ### 10.3 The confirmation screen
 
-Text (guest-drawn, authored): title `UPDATE GAME`, body `Version <latest> is available. The game
-will close and the updater will start.` Rows: `Update now`, `Later`. `Later` returns to
-`inbox_screen`. `Update now` writes `rbbz-messages/update/run/0` through the settings bridge's
-`write_file`, which the host answers by spawning the updater (D8).
+Text (guest-drawn, authored): title `UPDATE GAME`, body `Version <latest> is available. Open the
+releases page to download the new setup? The game will close.` Rows: `Open releases`, `Later`.
+`Later` returns to `inbox_screen`. `Open releases` writes
+`rbbz-messages/update/open-releases/0` through the settings bridge's `write_file`, which the host
+answers by opening the fixed Releases URL (D8).
 
-Failure answers (all guest text): `The updater is not installed.` when the exe is missing;
-`The updater could not start.` when `CreateProcess` fails; both leave the player on the screen.
+Failure answer (guest text): `The releases page could not be opened.` The game stays open so the
+player can retry or leave the screen. The URL is never read from feed JSON.
 
 ### 10.4 The host side
 
 `src/messages/messages_update.{h,cpp}`:
 
-- Path resolution: `%LOCALAPPDATA%\rb_blitz\update\RockBandBlitzUpdater.exe`
-  (`SHGetKnownFolderPath(FOLDERID_LocalAppData)` or `LOCALAPPDATA`), with a comment naming
-  `installer/config/pins.toml` `[update] dir_name` and `installer/setup.iss`'s placement. A
-  diagnostic override (`messages_updater`) exists for acceptance runs.
-- Spawn with `platform::CreateChildLauncher()` (no shell, quoted argv), then
-  `app_context().CallInUIThreadDeferred([this]{ window()->RequestClose(); })` — the same shape as the
-  settings restart handler (`rb_blitz_app.h:320-346`).
-- **Race to measure (M5):** the updater starts while the game is still exiting. If the file
-  replacement fails, add a relay: the game spawns `rb_blitz_setup_helper.exe` with a new
-  `wait-and-run --pid <game pid> --exe <updater>` command (helper already ships in the install
-  folder); it waits for the process to exit and then starts the updater. Measure the direct spawn
-  first; only add the helper command if the direct one races.
-- If the updater is absent (portable install, an older setup, or an elevated install whose
-  `{localappdata}` is the admin's — a known installer quirk), log it and answer the guest with the
-  "not installed" path. D9's fallback (open the release page) is the owner's call.
+- Compile in `https://github.com/gabrielofavero/rb-blitz-xenon-recomp/releases` as the only URL.
+  The feed can announce a version but cannot choose a site or executable.
+- On the guest action, call `ShellExecuteW` with `open` on that HTTPS URL through a small testable
+  browser-opener seam. A result of `<= 32` is failure: log it, answer the guest with the error text,
+  and keep the game running. Prevent repeat presses from opening several tabs.
+- After a successful open, call
+  `app_context().CallInUIThreadDeferred([this]{ window()->RequestClose(); })`. Do the browser
+  handoff first because `ReXApp::OnClosing` calls `_Exit(0)`.
+- A host-only diagnostic opener override may launch a stand-in that records the URL for acceptance
+  runs. It must not alter the release build's fixed destination.
 
-### 10.5 Release pipeline (D9)
+### 10.5 Release pipeline (D9/D16)
 
-For `Update Game` to install anything, a release must publish:
+The existing release workflow publishes one `RockBandBlitzSetup-<version>.exe`. The player
+downloads that setup from GitHub Releases after the game opens the page. Publish the setup first;
+then deploy `feed.json` to Pages with `latest_version` matching the published release and its
+setup asset. The Pages workflow must refuse an absent release, absent setup asset, or version
+mismatch. The bundled file belongs in the same setup payload, so first-run offline use is possible.
 
-1. `update.toml` (generated by `installer/tools/embed_config.cpp`, `installer/build.ps1` writes it to
-   `installer/out/generated/update.toml`), at the asset name the updater's compiled
-   `manifest_url` asks for (`releases/latest/download/update.toml`);
-2. the payload archive the manifest names (`payload_url`, `payload_sha256`, `payload_size`,
-   `payload_version`, `payload_commit` — `build.ps1 -PayloadUrl/-PayloadSha256` fills them without
-   editing pins).
-
-Until then the flow can only *tell* the player an update exists. Q1 records the decision.
+The dormant updater would need an additional `update.toml`, a downloadable payload archive,
+version/compatibility handling, and an end-to-end update test. Those are a later release task;
+this plan neither launches the updater nor changes the one-file release model.
 
 ---
 
 ## 11. Phases and prompts
 
-Each prompt is self-contained: goal, deliverable, evidence. The order lets the worker and the host
+Each prompt is self-contained: goal, deliverable, evidence. The order lets the static feed and host
 half land before the guest spikes decide their seams.
 
 | Id | Prompt | Depends on |
 | --- | --- | --- |
-| M0 | Worker: the document, the routes, the validation script, the tests, the README. | — |
-| M1 | Host half: `messages_api` + `messages_cache` + `messages_service` + boot wiring + version macro; a boot with the feed served locally logs the fetched count and version. | M0 |
+| M0 | Static feed: `assets/messages/feed.json`, the validation script, and a Pages workflow that stages only the JSON and gates publication on a real release. Package the same file as the offline default. | — |
+| M1 | Host half: `messages_api` + `messages_cache` + `messages_service` + boot wiring + version macro; a boot with the feed served locally logs the fetched count and version, and a cold offline boot logs the bundled source. | M0 |
 | M2 | Guest spike + implementation for the **text** (M2-A first; fallbacks B/C). Acceptance: the list and the detail pane draw our messages; the empty array draws the retail empty state. | M1 |
 | M3 | Guest spike + implementation for the **icon** (§9: built-in id selection first, then a custom file). Acceptance: two messages draw two different built-in icons, or a custom icon draws, or the documented fallback. | M2 |
 | M4 | Update plumbing: version compare into `MenuConfiguration`, the two inbox record edits, the authored confirmation screen, the locale entries. Acceptance: a feed with a higher version shows `UPDATE GAME` and the screen; a current feed shows no START prompt. | M2 (M3 not required) |
-| M5 | The press: the bridge write, `messages_update` spawn + close, the updater-missing path, the race measurement (and the helper relay only if needed). Acceptance: a stand-in updater records its start after the game exits. | M4 |
+| M5 | The press: the bridge write, a testable fixed-URL browser opener, success → close, failure → guest error while the game remains open. Acceptance: a stand-in records the Releases URL and the game closes only after a successful open. | M4 |
 | M6 | Custom icons end-to-end: the `assets/messages/` scan, the DXT1 encode/cache pipeline, the serve seam, the fallback to `icon_misc`, the payload/audit/install changes that ship the folder. | M3, M1 |
-| M7 | Acceptance harness `scripts/acceptance/acceptance_messages.ps1`: a local server, the five boots (feed / cache-only / no-feed / update / current), the icon legs, OCR assertions, the stand-in updater. | M2, M4, M5 |
+| M7 | Acceptance harness `scripts/acceptance/acceptance_messages.ps1`: a local server, boots for feed / cache-only / bundled-only / no-valid-feed / update / current, icon legs, OCR assertions, and a stand-in browser opener. | M2, M4, M5 |
 | M8 | Docs + review: the engine study, diagnostics, known-issues, the index rows, `check_docs.py` clean. | M7 |
 
 ---
@@ -614,29 +617,34 @@ half land before the guest spikes decide their seams.
 | Suite | Pins |
 | --- | --- |
 | `messages_api` | The parse matrix (missing keys, wrong types, oversize title/body, bad date, duplicate/unsafe id, unknown `schema_version`, 33 messages), the version compare (`0.10.0 > 0.9.0`, malformed, local-newer), the **icon** field (built-in id, custom file name, path separators/`..` refused, unknown id → default), ordering preservation, the "drop one message, keep the rest" rule. |
-| `messages_cache` | Atomic write, corrupt/partial file refused, folder creation, a failed save leaves the previous file intact. |
+| `messages_cache` | Atomic write, corrupt/partial cache refused, folder creation, a failed save leaves the previous file intact; source precedence is fetched answer > valid cache > valid bundled `feed.json` > untouched retail inbox. Invalid or missing bundled JSON does not overwrite the cache. |
 | `messages_icons` | The `assets/messages/` scan (allowed extensions, 1 MiB bound, case-insensitive names), the encode shape (512×512 DXT1, 6 mips, 174,752 B) and the cache key. |
 | `messages_payload` | The inbox record with and without an update: `inline_help_update_game` present/absent, the START case rewritten, the appended screen and locale entries, and the record still parses. |
 | `messages_guest` | Whatever is pure in the guest half (entry layout arithmetic, the string buffer bookkeeping); the hook itself is boot-proven. |
+| `messages_update` | The browser opener receives only the fixed Releases URL; success requests one close, failure leaves the game open and exposes the guest error; repeated presses do not open multiple tabs. |
+| `feed_publish` | Valid feed and local icons; a missing release, missing setup asset, or mismatched `latest_version` refuses Pages publication. The shipped file is present in the payload audit. |
 
 ### Live (`scripts/acceptance/acceptance_messages.ps1`)
 
-A local HTTP server serves a fixture document (or the worker's `public/` via `npx wrangler dev`);
-the boot passes `--messages_api_url=http://127.0.0.1:<port>/` and a scratch `--user_data_root`:
+A local HTTP server serves a fixture `feed.json`; the boot passes
+`--messages_api_url=http://127.0.0.1:<port>/feed.json` and a scratch `--user_data_root`:
 
 1. **Feed leg** — boot, PLAY → LT/RT to MESSAGES, OCR the first row's `YYYY-MM-DD  Title`, arrow down,
    OCR the second body; assert `messages: fetched` and zero faults.
 2. **Icon leg** — a feed with two different built-in ids: OCR-free screenshot check that the two rows
    carry two different icons (the capture is compared against §9.1's converted PNGs, or read by eye).
 3. **Cache leg** — stop the server, boot again with the same user root; the same rows draw and the
-   log says `keeping N cached`.
-4. **Cold leg** — a fresh user root, no server; the retail `No messages` / `Sorry, you don't have any
-   messages at this time.` draw, and the START prompt is absent.
-5. **Update leg** — a feed whose `latest_version` is the game version + 1: OCR `UPDATE GAME` in the
+   log says it kept the cached feed.
+4. **Bundled leg** — a fresh user root, no server; the messages from shipped `assets/messages/feed.json`
+   draw, and the log names the bundled source. This is the first-launch offline case.
+5. **No-valid-feed leg** — an isolated build with a missing/invalid bundled file, a fresh user root,
+   and no server; the retail `No messages` / `Sorry, you don't have any messages at this time.` draw,
+   and the START prompt is absent.
+6. **Update leg** — a feed whose `latest_version` is the game version + 1: OCR `UPDATE GAME` in the
    bottom bar, press START, OCR the confirmation, press `Later` (back to the inbox). Then press
-   `Update now` with `--messages_updater=<stand-in>` (a script that writes a receipt file): assert the
-   game exits and the receipt appears.
-6. **Current leg** — `latest_version == RBBLITZ_GAME_VERSION`: no START prompt on the screen.
+   `Open releases` with a stand-in browser opener: assert its receipt contains the fixed Releases
+   URL and the game exits. A failing opener leaves the game on the confirmation screen.
+7. **Current leg** — `latest_version == RBBLITZ_GAME_VERSION`: no START prompt on the screen.
 
 The script drives the UI; per the owner's standing directive, ask before running it (or run it only
 when the owner says "work autonomously").
@@ -648,13 +656,13 @@ when the owner says "work autonomously").
 | Document | Change |
 | --- | --- |
 | `docs/engine/messages.md` | The inbox study measured today: its Open list is what M2/M3 close. Extend it with the feed's seams, the draws and their evidence as they land. |
-| `docs/engine/diagnostics.md` | `messages_api_url`, `messages_assets_dir`, `messages_updater`, the `messages:` log lines, the acceptance harness. |
+| `docs/engine/diagnostics.md` | `messages_api_url`, `messages_assets_dir`, the diagnostic browser opener, the `messages:` log lines, the acceptance harness. |
 | `docs/engine/toggles.md` | No new toggle (the feature is built-in); the *Show Messages* row already exists. Add one sentence to the row naming the feed. |
-| `docs/reference/known-issues.md` | Whatever the spikes leave open (e.g. M3-C's text-only state, the elevated-install updater path). |
+| `docs/reference/known-issues.md` | Whatever the spikes leave open (e.g. M3-C's text-only state); record that automated installation remains dormant. |
 | `docs/README.md` + `docs/plans/todo/README.md` | The plan row (this file), and the engine/diagnostics rows if a new document appears. |
-| `workers/messages/README.md` | The contract, the icon rules, `check.mjs`, local dev, the deploy command and the owner-approval rule. |
-| `docs/guides/distributable.md` | `assets/messages/` becomes part of the payload (the audit admits it, `make_payload.ps1` copies it). |
-| `installer/README.md` | Only if D9 changes the release model (publishing `update.toml` + the payload archive). |
+| `assets/messages/README.md` | The JSON contract, the icon rules, the GitHub Pages URL, local validation and publication order. |
+| `docs/guides/distributable.md` | `assets/messages/feed.json` and optional local icons become part of the payload (the audit admits them, `make_payload.ps1` copies them). |
+| `installer/README.md` | Explain that this release's in-game Update Game action opens GitHub Releases; the dormant updater and one-file release model remain as documented. |
 | `docs/guides/build-and-run.md` | Only if the version read introduces a configure gate worth naming. |
 
 Code comments cite this plan as `docs/plans/todo/2026-10-23-messages-and-update-feed-plan.md` §n and
@@ -666,13 +674,13 @@ must be re-pointed by `move_docs.py --map` when the plan moves to `in-progress/`
 
 | Id | Question | Recommended |
 | --- | --- | --- |
-| Q1 | Does a release publish `update.toml` + a payload archive so the dormant updater can install? Or should `Update Game` open the release page instead? | Publish both; the flow the request describes needs them. |
+| Q1 | **Resolved 2026-11-06:** What should this release's `Update Game` action do? | Open GitHub Releases in the default browser, then close the game. Defer the auto updater to a future version. |
 | Q2 | Should the date be part of the row text (D10) or should the detail pane carry a `DATE` line above the body? | Row text; no scene edit. |
 | Q3 | With no update, is removing the START prompt (and the press doing nothing) acceptable, or should START keep opening Help & Options invisibly? | Remove both; Help & Options stays on the main menu and the pause menu. |
-| Q4 | Is a `wrangler` deploy of a public read-only worker acceptable, or should the document live in KV/R2 behind a token? | Static assets + Worker; no secrets. |
+| Q4 | **Resolved 2026-11-06:** Where does the feed live? | GitHub Pages serves static `feed.json`; the same file ships with the game for offline first launch. |
 | Q5 | Should the feed be reachable when *Show Messages* is off? | Yes — the version check must run regardless; the tab stays hidden. |
 | Q6 | Default icon when the field is missing or unresolvable: `icon_misc` (the neutral one), or should the row draw **no** icon? | `icon_misc`, pending the screen check. |
-| Q7 | Does `assets/messages/` ship with the installer, or should players drop files there themselves? | Ship it (empty but present), so the folder is discoverable; the payload audit admits it. |
+| Q7 | **Resolved 2026-11-06:** Does `assets/messages/` ship with the installer? | Yes: it contains the nonempty `feed.json`; optional custom icons may also ship there. The payload audit admits both. |
 
 ---
 

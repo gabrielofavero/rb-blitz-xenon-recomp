@@ -335,6 +335,8 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
         boot->service()->EffectiveValue(SettingId::kShowMessages).boolean;
     configuration.show_recommendations =
         boot->service()->EffectiveValue(SettingId::kShowRecommendations).boolean;
+    configuration.show_currency =
+        boot->service()->EffectiveValue(SettingId::kShowCurrency).boolean;
     // P2's data-layer spike (RhythmVerse plan §5/P2): empty is the ordinary boot.
     configuration.store_local_server_root = std::string(store::LocalServerRoot());
     if (!configuration.store_local_server_root.empty()) {

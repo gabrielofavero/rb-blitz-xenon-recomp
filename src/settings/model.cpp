@@ -82,6 +82,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "show_messages";
     case SettingId::kShowRecommendations:
       return "show_recommendations";
+    case SettingId::kShowCurrency:
+      return "show_currency";
     case SettingId::kShowMessagesRecommendations:
       return "show_messages_recommendations";
     case SettingId::kRhythmVerse:

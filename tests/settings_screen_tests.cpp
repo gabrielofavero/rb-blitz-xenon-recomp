@@ -3140,7 +3140,8 @@ void TestShowHeadersRow() {
     CHECK_TRUE(found);
   }
   CHECK_TRUE(PanelRowSymbols("settings_music_library_store_panel") ==
-             std::vector<std::string>({"settings_show_messages", "settings_show_recommendations"}));
+             std::vector<std::string>({"settings_show_messages", "settings_show_recommendations",
+                                       "settings_show_currency"}));
   int backs = 0;
   for (const auto& root : DefinitionRoots()) {
     ScreenFacts facts;
@@ -3170,6 +3171,10 @@ void TestShowHeadersRow() {
   CHECK_EQ(states, 4);
   CHECK_TRUE(std::string(HelpTextFor("settings_show_messages")).find("MESSAGES") != std::string::npos);
   CHECK_TRUE(std::string(HelpTextFor("settings_show_recommendations")).find("RECOMMENDED") != std::string::npos);
+  CHECK_TRUE(std::string(HelpTextFor("settings_show_currency")).find("currency") != std::string::npos);
+  const auto* currency = rb_blitz::settings::schema::FindRow(rb_blitz::settings::SettingId::kShowCurrency);
+  CHECK_TRUE(currency && !currency->descriptor.compiled_default.boolean &&
+             currency->storage.section == "interface" && currency->storage.key == "show_currency");
   for (auto id : {rb_blitz::settings::SettingId::kShowMessages,
                   rb_blitz::settings::SettingId::kShowRecommendations}) {
     const auto* row = rb_blitz::settings::schema::FindRow(id);

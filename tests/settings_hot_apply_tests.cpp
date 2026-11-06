@@ -94,6 +94,7 @@ constexpr SettingId kRowsThatMustStayRestart[] = {
     SettingId::kTarget,     SettingId::kHideHud,     SettingId::kHideOfflinePrompts,
     SettingId::kResolution, SettingId::kRenderer,   SettingId::kAntiAliasing,
     SettingId::kFiltering,  SettingId::kRhythmVerse, SettingId::kShowMessages, SettingId::kShowRecommendations,
+    SettingId::kShowCurrency,
 };
 
 // The hot set, by name, so a promotion is a deliberate edit to this list and not a side effect.

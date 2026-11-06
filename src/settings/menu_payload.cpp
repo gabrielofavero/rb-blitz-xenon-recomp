@@ -817,6 +817,40 @@ bool SkipStartupLogos(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
+bool HidePowerupCurrency(std::vector<Node>* roots, std::string* why) {
+  Node* enter = PanelMethod(roots, "powerup_select_panel", "enter");
+  if (!enter) { if (why) *why = "power-up selection has no enter method"; return false; }
+  constexpr std::array<const char*, 2> labels = {"your_monies_text.lbl", "your_cred.lbl"};
+  for (const char* label : labels) {
+    const bool present = std::any_of(enter->kids.begin(), enter->kids.end(), [label](const Node& child) {
+      return child.tag == ui::dtb::kCommand && child.kids.size() >= 2 &&
+             child.kids[0].tag == ui::dtb::kSymbol && child.kids[0].text == label &&
+             child.kids[1].text == "set_token_fmt";
+    });
+    if (!present) { if (why) *why = std::string("power-up selection lacks ") + label; return false; }
+  }
+  for (const char* label : labels) {
+    enter->kids.push_back(Node::Command({Node::Symbol(label), Node::Symbol("set_showing"),
+                                         Node::Symbol("FALSE")}));
+  }
+  return true;
+}
+
+bool HideResultsCurrency(std::vector<Node>* roots, std::string* why) {
+  Node* enter = PanelMethod(roots, "song_results_panel", "enter");
+  Node* poll = PanelMethod(roots, "song_results_panel", "poll");
+  if (!enter || !poll) { if (why) *why = "song results lacks enter or poll"; return false; }
+  // The scene owns these two groups. Its poll animates earnings, so enforce the
+  // visibility after both lifecycle methods have done their normal work.
+  for (Node* method : {enter, poll}) {
+    for (const char* group : {"Coins.grp", "cred.grp"}) {
+      method->kids.push_back(Node::Command({Node::Symbol(group), Node::Symbol("set_showing"),
+                                            Node::Symbol("FALSE")}));
+    }
+  }
+  return true;
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
                       bool refresh_row_active,
@@ -862,6 +896,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   if (skip_startup_logos && !edit("ui/startup/gen/startup.dtb", [&](auto& roots) {
         return SkipStartupLogos(&roots, error);
       })) return false;
+  if (!screen::CurrentMenuConfiguration().show_currency) {
+    if (!edit("ui/powerup_select/gen/powerup_select.dtb", [&](auto& roots) {
+          return HidePowerupCurrency(&roots, error);
+        }) || !edit("ui/results_hub/gen/song_results.dtb", [&](auto& roots) {
+          return HideResultsCurrency(&roots, error);
+        })) return false;
+  }
   if (!edit(screen::kDefinitionRecord, [&](auto& roots) {
         const auto added = screen::EarlyDefinitionRoots();
         roots.insert(roots.end(), added.begin(), added.end());

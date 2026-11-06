@@ -1344,6 +1344,9 @@ std::vector<PanelSpec> AllPanels() {
                               ElementVisibilityRow("settings_show_recommendations", "interface.show_recommendations",
                                       "Recommendations",
                                       "Show the RECOMMENDED tab in the music library and store. Requires a restart."),
+                              ElementVisibilityRow("settings_show_currency", "interface.show_currency",
+                                      "Coins & Blitz Cred",
+                                      "Show currency balances on power-up selection and song results. Requires a restart."),
                           }});
 
   // 5a. HUD: the element visibility page, then the two provider switches that read On/Off. The

@@ -120,6 +120,7 @@ struct MenuConfiguration {
   // P9-4: shared MESSAGES / RECOMMENDED header labels; frozen for this boot.
   bool show_messages = true;
   bool show_recommendations = false;
+  bool show_currency = false;
   // The P2 data-layer spike (RhythmVerse plan §5/P2): when non-empty, the boot rewrites
   // `config/gen/store.dtb` so the retail store's netcache fetches from a local (host-file) server
   // rooted here (src/store/store_payload.h). Empty - every ordinary boot - leaves the record as
