@@ -21,6 +21,11 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
+**Inbox icon assets:** `icons_unplayed_songs` has no row material in
+`list_inbox.milo_xbox`, and `icon_challenge` has a row material but no verified
+bitmap in the main ark. Both feed IDs draw `icon_misc` until their assets are
+available and verified. Custom image files are a later messages milestone.
+
 **Controller icon family switching (2026-10-28):** the raw-input tracker,
 selected-layout separation and resolver snapshot pass host tests and the
 release build. Owner-run D3D12 logs record alternating keyboard/controller

@@ -10,6 +10,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "messages/messages_icons.h"
+
 namespace rb_blitz::messages {
 namespace {
 using Json = nlohmann::json;
@@ -71,11 +73,10 @@ bool Id(std::string_view text) {
 }
 
 bool Icon(std::string_view text) {
-  static const std::regex built_in(R"(^icons?_[a-z0-9_]+$)");
   static const std::regex custom(R"(^[a-z0-9][a-z0-9_-]{0,63}\.(png|jpg|jpeg)$)",
                                  std::regex::icase);
   const std::string value(text);
-  return std::regex_match(value, built_in) || std::regex_match(value, custom);
+  return IsBuiltInIcon(text) || std::regex_match(value, custom);
 }
 }  // namespace
 

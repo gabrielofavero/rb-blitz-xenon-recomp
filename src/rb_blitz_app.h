@@ -89,6 +89,7 @@
 #include "loading/load_trace.h"
 #include "loading/crash_recovery.h"
 #include "messages/messages_service.h"
+#include "messages/messages_guest.h"
 #include "input/mouse_ui.h"
 #include "input/remap.h"
 #include "input/title_input.h"
@@ -450,6 +451,7 @@ class RbBlitzApp : public rex::ReXApp {
     // M1: resolve cache/bundled feed before guest launch; only the host worker fetches Pages.
     rb_blitz::messages::Install(runtime()->user_data_root(),
                                 rex::filesystem::GetExecutableFolder());
+    rb_blitz::messages::InstallMessagesGuest();
     // P3's Downloaded mark (§3.2): the artist/title index of the loaded DLC library. Its builder
     // thread is started here; the serving policy asks only the published snapshot.
     rb_blitz::store::InstallStoreLibrary(runtime()->user_data_root());

@@ -271,6 +271,7 @@ set(RBBLITZ_SOURCES
     src/messages/messages_api.cpp
     src/messages/messages_cache.cpp
     src/messages/messages_service.cpp
+    src/messages/messages_guest.cpp
 )
 
 if(WIN32)
@@ -562,6 +563,9 @@ add_executable(rb_blitz_shader_microcode_hash tools/shader_microcode_hash.cpp)
 target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 
 if(BUILD_TESTING)
+    add_executable(rb_blitz_messages_guest_tests tests/messages_guest_tests.cpp)
+    target_include_directories(rb_blitz_messages_guest_tests PRIVATE src)
+    add_test(NAME messages_guest COMMAND rb_blitz_messages_guest_tests)
     add_executable(rb_blitz_messages_feed_tests
         tests/messages_feed_tests.cpp
         src/messages/messages_api.cpp

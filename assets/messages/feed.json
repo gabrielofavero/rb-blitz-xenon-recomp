@@ -5,8 +5,8 @@
   "messages": [
     {
       "id": "2026-11-06-welcome",
-      "title": "Welcome to Messages",
-      "body": "Project messages are available here, including when you are offline.",
+      "title": "Welcome to Rock Band Blitz 0.1.0 :)",
+      "body": "This is the very first version of this recompilation project. Play as much as you can, enjoy and please let me know on the GitHub issue section any bugs. We are on pre-release, so many of those pesty bugs are around... Help me kill them all!",
       "published": "2026-11-06",
       "icon": "icon_more_stars"
     }

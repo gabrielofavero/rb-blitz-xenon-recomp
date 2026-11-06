@@ -42,6 +42,10 @@ void Parser() {
   CHECK_TRUE(ParseFeed(R"({"schema_version":1,"latest_version":"bad","messages":[{"id":"bad","title":"x","body":"y","published":"2026-02-30"},{"id":"ok","title":"x","body":"y","published":"2024-02-29","icon":"../bad.png"}]})", &feed, &error));
   CHECK_EQ(feed.messages.size(), 1);
   CHECK_TRUE(feed.messages[0].icon == "icon_misc");
+  CHECK_TRUE(ParseFeed(R"({"schema_version":1,"messages":[{"id":"ok","title":"x","body":"y","published":"2024-02-29","icon":"icon_more_stars"},{"id":"typo","title":"x","body":"y","published":"2024-02-28","icon":"icon_more_star"}]})", &feed, &error));
+  CHECK_EQ(feed.messages.size(), 2);
+  CHECK_TRUE(feed.messages[0].icon == "icon_more_stars");
+  CHECK_TRUE(feed.messages[1].icon == "icon_misc");
   CHECK_TRUE(feed.latest_version.empty());
   CHECK_EQ(static_cast<int>(CompareVersions("0.9.0", "0.10.0")),
            static_cast<int>(VersionStatus::kUpdateAvailable));

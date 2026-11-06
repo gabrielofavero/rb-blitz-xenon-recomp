@@ -1,6 +1,6 @@
 # Messages feed and in-game update flow — plan (2026-10-23)
 
-**Status: M0 committed and pushed; M1 implemented locally 2026-11-06; M2–M8 pending. Pages deployment and release publication have not been verified in this session.**
+**Status: M0 committed and pushed; M1 committed locally; M2 built and visually verified (2026-11-06); M3–M8 pending. Pages deployment and release publication have not been verified in this session.**
 Revised 2026-11-06 for GitHub Pages, a shipped offline feed, and a release-page update action.
 This document is the plan for a
 built-in (not toggleable) message feed served as static JSON by GitHub Pages, plus the
@@ -103,9 +103,9 @@ The vector holds pointers to those 16-byte structs, and `build_list`'s own clear
 structs (it does not free the messages). The entry's `+0` symbol is interned from the pointer at
 `0x8280A594`, the same symbol in all three branches.
 
-`InboxMessage`'s constructor is `sub_82747578(this, String r4, int r5, String r6, bool r7, int r8,
-int r9)` and stores `r4` at `+44` (subject String), `r5` at `+60`, `r8`/`r9` at `+52`/`+56`, `r6` at
-`+64` (body String), `r7` at `+138`, plus four empty vectors at `+72…+100`, `+112` = 0, and two
+`InboxMessage`'s constructor is `sub_82747578(this, const char* r4, int r5, String* r6, bool r7, int r8,
+int r9)` and stores `r4` at `+44` (displayed body), `r5` at `+60`, `r8`/`r9` at `+52`/`+56`, `r6` at
+`+64` (displayed subject), `r7` at `+138`, plus four empty vectors at `+72…+100`, `+112` = 0, and two
 6-byte buffers at `+139`/`+145`. The trial-upsell entry passes type `10`, `true`, `-1`, `-1`; the
 empty-state entry passes `1`, `false`, `-1`, `-1`.
 
@@ -401,8 +401,9 @@ Measured shape (§2.2) makes this concrete:
 4. For each feed message (up to 32), allocate a 16-byte entry and one `InboxMessage` per message for
    the whole boot:
    - `InboxMessage`: allocate 188 bytes from the guest allocator (`sub_823E0C00`, already wrapped by
-     `store_fetch.cpp:120`), intern the subject/body strings (`sub_8245C878` is the intern used by
-     the store paths) and call `sub_82747578(obj, &subject_string, 1, &body_string, false, -1, -1)`.
+     `store_fetch.cpp:120`), keep a unique C string for the body and construct a `String`
+     object for the subject with `sub_82459130`, then call
+     `sub_82747578(obj, body_chars, 1, &subject_string, false, -1, -1)`.
      Type `1` + `false` is the **empty-state recipe** retail itself uses for a plain text message
      (§2.2 step 4), so no `is_*` getter has to be guessed; the spike only confirms that the drawn row
      is our text.
@@ -444,11 +445,12 @@ both fail, and only with a go/no-go measurement first.
 
 ## 9. The icon in the guest
 
-The row already has an icon slot: `list_inbox.milo_xbox`'s `UIListMesh icon` over `icon.mesh`, with
-twelve `icon_*.mat` materials and a 512×512 DXT1 texture per icon (§2.3). The feed's `icon` picks one
-of them, or a custom file encoded to the same shape. The **open question is how the row is told
-which one** — `build_list` puts a constant symbol in every 16-byte entry, so the choice is either by
-the message type (`+60`) or inside `UIListMesh`. M3 is that measurement plus the two bindings below.
+The row has an icon slot: `list_inbox.milo_xbox`'s `UIListMesh icon` over `icon.mesh`, with
+named `icon_*.mat` materials (§2.3). Retail's `InboxProvider` callback at `0x822D52D8` takes the
+row index and returns a material selected from the entry's type at `+8`; the five retail type
+properties resolve to `icon_misc.mat`, `icon_store_rec.mat`, `icon_increase_rank.mat`,
+`icon_challenge.mat`, and `icon_store_plays.mat`. M3 resolves the scene's other named materials
+and substitutes the material per row in that callback. Live two-row visual proof is pending.
 
 ### 9.1 The built-in icon set (§2.3's scenes; converted 2026-10-23)
 
@@ -606,8 +608,8 @@ test executables through `rb_blitz_windows_test_runner.exe` as directed by `AGEN
 | --- | --- | --- |
 | M0 — Static feed and release gate (done locally) | — | Valid bundled JSON, packaging rule and Pages workflow; nothing deployed yet |
 | M1 — Host fetch and fallback (done locally) | M0 | Version, cache and boot service with source-order tests |
-| M2 — Guest message text | M1 | Measured list/detail draw with safe empty-state handling |
-| M3 — Built-in row icons | M2 | Per-row built-in icons or measured fallback |
+| M2 — Guest message text (done locally) | M1 | Retail list/detail, empty state and navigation visually proved; no fatal faults |
+| M3 — Built-in row icons (done locally) | M2 | Two distinct row icons visually proved; `icon_misc` fallback mapped |
 | M4 — Update prompt | M2 | Guest-authored prompt, confirmation and no-update state |
 | M5 — Open Releases | M4 | Fixed-URL browser handoff and close/error handling |
 | M6 — Custom local icons | M3 | Shipped local icon decode/cache/draw or documented limitation |
@@ -712,6 +714,37 @@ Exit: text draws correctly in the guest or the failed seam and next experiment
 are documented with enough evidence for another prompt to resume.
 ```
 
+**M2 handoff (2026-11-06, visually verified):** `src/messages/messages_guest.cpp`
+post-hooks `InboxProvider::build_list` (`sub_822D5928`). It first lets retail build its list,
+then replaces the provider's 16-byte entry vector from the current valid host snapshot. No valid
+feed leaves the retail result untouched. A valid empty array creates the same plain-text
+`No messages`/`Sorry, you don't have any messages at this time.` row. Each nonempty row uses
+`YYYY-MM-DD  Title`, with the feed body as the message detail. The hook caches `InboxMessage`
+objects and their source buffers for the boot; it frees and recreates only the vector entries on
+each build. A changed feed row gets a distinct object. `messages_guest_model.h` defines the entry
+byte layout and lifetime key; `tests/messages_guest_tests.cpp` checks both.
+
+The generated retail constructor shows a correction to §8's proposed call signature: its `r4`
+argument is a **C string pointer** and its `r6` argument is a **String object pointer**. The live
+empty-feed screen on 2026-11-06 showed that `r4` draws the detail body while `r6` draws the list
+row and detail heading. The first M2 build passed them in reverse; the hook now passes body
+characters in `r4` and a constructed subject String in `r6`. `sub_8245C878` interns the
+provider-entry symbol, not either text field. The hook copies that symbol from retail's first
+entry. The full `win-amd64-release` build and focused `messages_guest` and `messages_feed` CTests
+passed after this visual correction.
+
+The canonical first message has the owner's exact welcome title and body; two-message and
+empty-array local fixtures are in `tests/fixtures/messages/`. With fresh user roots and local
+fixture servers, the rebuilt game fetched two messages in `rb_blitz_533.log` and zero messages
+in `rb_blitz_532.log`. Screenshots under `out/m2-ui/` show the first dated welcome row and its
+full body (`two-fixed-inbox.png`), the second row and its different body
+(`two-fixed-second2.png`), and the correct `No messages` heading with apology body
+(`empty-fixed-inbox3.png`). Up/down selection, Page Up/Down to another tab and back, and Escape
+to the main menu worked. Both logs show `messages: guest list built` and no `[FATAL]` or
+native fault. `scripts/diagnostics/drive_ui.ps1` now sends the extended Page Up/Down and arrow
+keys needed to drive these routes. An already-open screen may need reentry to run `build_list`
+after a late fetch; this is not yet measured.
+
 ### Prompt M3 — Select built-in row icons
 
 ```text
@@ -729,6 +762,14 @@ owner who should drive it unless autonomous testing is already authorized.
 Exit: visual evidence for distinct row icons, or a precise binding limitation
 and the documented fallback, with build/test results and zero-fault logs.
 ```
+
+M3 evidence (2026-11-06): `out/m3-ui/messages-distinct.png` shows
+`icon_more_stars` on the welcome row and `icon_misc` on the second row. The
+scratch run's `rb_blitz_546.log` reports two guest messages and `11/11` resolved
+row materials, with no fatal fault. The release build, `messages_guest` and
+`messages_feed` tests, and bundled feed validator pass. The two built-in IDs
+without usable row art (`icon_challenge`, `icons_unplayed_songs`) resolve to
+`icon_misc`; the focused host mapping test covers that fallback.
 
 ### Prompt M4 — Guest update prompt and confirmation
 

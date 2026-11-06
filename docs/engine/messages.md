@@ -152,12 +152,21 @@ black-and-white **masks**; the list tints them. For context, the row's non-icon 
 `slot.png`/`slot_bar.png` (512×128, embedded in `list_inbox`) and `frame.tex`/`neon.tex`
 (1024×1024, embedded in `inbox.milo`) — the row chrome and the pane's frame/glow.
 
-### 5.2 How the row picks an icon — unproven
+### 5.2 How the row picks an icon
 
-`build_list` puts the same symbol in `+0` of every 16-byte entry (interned from `0x8280A594`), so the
-selection is not that field. It is either the message type (`+60`, the value the `is_*` getters read)
-or something inside `UIListMesh` (its `default_mat`). No boot has shown two different icons on two
-inbox rows yet.
+`InboxProvider`'s material callback at `0x822D52D8` receives the row index and the `icon` mesh symbol.
+It reads the 16-byte provider entry's type at `+8` and returns one of five cached `RndMat` pointers.
+The `UIListDir` properties loaded by `0x822D4E70` map those retail categories to materials:
+`announcement` → `icon_misc.mat`, `upsell` → `icon_store_rec.mat`, `bonus` →
+`icon_increase_rank.mat`, `challenge` → `icon_challenge.mat`, and `purchased_songs` →
+`icon_store_plays.mat`. The provider callback therefore supports a different material per row;
+the entry's shared symbol at `+0` does not select it. The recompilation resolves the scene's
+other named row materials during provider initialization and substitutes each feed message's
+material in that callback. The 2026-11-06 D3D12 capture at
+`out/m3-ui/messages-distinct.png` verifies `icon_more_stars` on the welcome row
+and `icon_misc` on the second row. That run resolved all 11 available row
+materials (`rb_blitz_546.log`) and had no fatal fault. The two IDs lacking
+usable row art fall back to `icon_misc`.
 
 ### 5.3 A custom icon would still need a texture seam
 
