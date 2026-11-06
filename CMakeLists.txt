@@ -267,6 +267,10 @@ set(RBBLITZ_SOURCES
     # P3's album art, host half: the key/path/URL rules and the texture cache the guest's art
     # request reads. The fetch and the image decode are Windows-only and appended below.
     src/store/album_art.cpp
+    # M1: the static messages feed model, local fallback and one-shot host coordinator.
+    src/messages/messages_api.cpp
+    src/messages/messages_cache.cpp
+    src/messages/messages_service.cpp
 )
 
 if(WIN32)
@@ -276,6 +280,7 @@ if(WIN32)
     list(APPEND RBBLITZ_SOURCES src/store/store_http.cpp src/store/store_transfer_winhttp.cpp
          src/store/store_search_service.cpp src/store/store_catalogue.cpp
          src/store/album_art_service.cpp)
+    list(APPEND RBBLITZ_SOURCES src/messages/messages_runtime.cpp)
 endif()
 
 if(WIN32)
@@ -332,6 +337,32 @@ endif()
 # the transport links WinHTTP (src/store/store_http.cpp is the only file that includes it).
 target_include_directories(rb_blitz PRIVATE
     "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+set(RBBLITZ_PINS "${CMAKE_CURRENT_SOURCE_DIR}/installer/config/pins.toml")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RBBLITZ_PINS}")
+file(STRINGS "${RBBLITZ_PINS}" RBBLITZ_PIN_LINES)
+set(RBBLITZ_IN_INSTALLER OFF)
+set(RBBLITZ_GAME_VERSION "")
+foreach(RBBLITZ_PIN_LINE IN LISTS RBBLITZ_PIN_LINES)
+    string(STRIP "${RBBLITZ_PIN_LINE}" RBBLITZ_PIN_LINE)
+    if(RBBLITZ_PIN_LINE STREQUAL "[installer]")
+        set(RBBLITZ_IN_INSTALLER ON)
+    elseif(RBBLITZ_PIN_LINE MATCHES "^\\[")
+        set(RBBLITZ_IN_INSTALLER OFF)
+    elseif(RBBLITZ_IN_INSTALLER AND RBBLITZ_PIN_LINE MATCHES
+           "^version[ \t]*=[ \t]*\"([0-9]+\\.[0-9]+\\.[0-9]+)\"$")
+        set(RBBLITZ_GAME_VERSION "${CMAKE_MATCH_1}")
+    endif()
+endforeach()
+if(NOT RBBLITZ_GAME_VERSION)
+    message(FATAL_ERROR "installer/config/pins.toml [installer] version is missing or invalid")
+endif()
+target_compile_definitions(rb_blitz PRIVATE "RBBLITZ_GAME_VERSION=\"${RBBLITZ_GAME_VERSION}\"")
+message(STATUS "rb_blitz: game version ${RBBLITZ_GAME_VERSION}")
+# A checkout boot runs rb_blitz.exe from the build tree; make its offline fallback available there
+# too. The installer stages the canonical source file separately in make_payload.ps1.
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/assets/messages")
+configure_file(assets/messages/feed.json
+    "${CMAKE_CURRENT_BINARY_DIR}/assets/messages/feed.json" COPYONLY)
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/config/graphics_preparation.json" RBBLITZ_PREPARATION_CATALOGUE)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/config/graphics_preparation.json")
@@ -531,6 +562,14 @@ add_executable(rb_blitz_shader_microcode_hash tools/shader_microcode_hash.cpp)
 target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 
 if(BUILD_TESTING)
+    add_executable(rb_blitz_messages_feed_tests
+        tests/messages_feed_tests.cpp
+        src/messages/messages_api.cpp
+        src/messages/messages_cache.cpp
+        src/messages/messages_service.cpp)
+    target_include_directories(rb_blitz_messages_feed_tests PRIVATE src
+        "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+    add_test(NAME messages_feed COMMAND rb_blitz_messages_feed_tests "${CMAKE_CURRENT_BINARY_DIR}")
     find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
     if(WIN32)
         # Set the inherited Windows error mode before a payload test starts, so even

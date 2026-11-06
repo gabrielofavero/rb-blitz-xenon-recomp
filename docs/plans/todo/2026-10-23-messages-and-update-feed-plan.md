@@ -1,6 +1,6 @@
 # Messages feed and in-game update flow — plan (2026-10-23)
 
-**Status: M0 implemented locally 2026-11-06; M1–M8 pending. No feed deployed or release published.**
+**Status: M0 committed and pushed; M1 implemented locally 2026-11-06; M2–M8 pending. Pages deployment and release publication have not been verified in this session.**
 Revised 2026-11-06 for GitHub Pages, a shipped offline feed, and a release-page update action.
 This document is the plan for a
 built-in (not toggleable) message feed served as static JSON by GitHub Pages, plus the
@@ -605,7 +605,7 @@ test executables through `rb_blitz_windows_test_runner.exe` as directed by `AGEN
 | Prompt | Depends on | Handoff |
 | --- | --- | --- |
 | M0 — Static feed and release gate (done locally) | — | Valid bundled JSON, packaging rule and Pages workflow; nothing deployed yet |
-| M1 — Host fetch and fallback | M0 | Version, cache and boot service with source-order tests |
+| M1 — Host fetch and fallback (done locally) | M0 | Version, cache and boot service with source-order tests |
 | M2 — Guest message text | M1 | Measured list/detail draw with safe empty-state handling |
 | M3 — Built-in row icons | M2 | Per-row built-in icons or measured fallback |
 | M4 — Update prompt | M2 | Guest-authored prompt, confirmation and no-update state |
@@ -670,6 +670,27 @@ actual boundary for M2 rather than calling the feed live in that session.
 Exit: a build and focused host tests pass; report source precedence, boot logs,
 and the exact runtime publication boundary still to be measured.
 ```
+
+**M1 handoff (2026-11-06):** `CMakeLists.txt` reads the `[installer] version` from
+`installer/config/pins.toml` at configure time and compiles it as `RBBLITZ_GAME_VERSION`.
+`src/messages/messages_api.{h,cpp}` parses and validates the bounded schema and compares
+versions numerically. `messages_cache.{h,cpp}` loads either local source and writes a validated
+raw response through `fs::WriteAtomic`. `messages_service.{h,cpp}` selects a valid cache first,
+then the bundled copy, and publishes the chosen immutable host snapshot before starting one
+worker fetch. A successful HTTP 200 with a usable schema replaces the snapshot and attempts the
+cache write; an HTTP, transport or schema failure retains the active source. A failed cache write
+leaves the fetched in-memory snapshot active and does not replace the old disk entry.
+`messages_runtime.cpp` binds the worker to the existing WinHTTP GET, the fixed Pages URL and the
+host-only `messages_api_url` loopback override. `rb_blitz_app.h::OnPostLoadXexImage` calls it before
+guest launch. CMake also copies the canonical bundled feed beside the build-tree executable for
+local offline boots. Log lines are prefixed `messages:` and name source, count, latest version, update
+status and failure reason. `tests/messages_feed_tests.cpp` checks the parser, numeric ordering,
+URL policy, source precedence, first-run offline fallback, failed fetch, successful fetch,
+cache replacement and failed-write retention. The focused `messages_feed` CTest passes; the
+release build compiles the game and host suite. M1 exposes `Snapshot()`, `UpdateOffer()` and
+`StateToken()` to M2. The current-session boundary is that this host snapshot can update while
+the process is running, but no retail inbox hook or `on_messages_updated` notification reads it
+yet; M2 must measure whether a screen already loaded before the fetch can refresh in place.
 
 ### Prompt M2 — Draw message text in the retail inbox
 

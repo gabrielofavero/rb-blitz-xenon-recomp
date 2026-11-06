@@ -88,6 +88,7 @@
 #include "hooks/ultimate.h"
 #include "loading/load_trace.h"
 #include "loading/crash_recovery.h"
+#include "messages/messages_service.h"
 #include "input/mouse_ui.h"
 #include "input/remap.h"
 #include "input/title_input.h"
@@ -446,6 +447,9 @@ class RbBlitzApp : public rex::ReXApp {
     // before the catalogue so a page that lands during the same boot already has its prefetch seam
     // installed (src/store/album_art_service.h).
     rb_blitz::store::InstallAlbumArt();
+    // M1: resolve cache/bundled feed before guest launch; only the host worker fetches Pages.
+    rb_blitz::messages::Install(runtime()->user_data_root(),
+                                rex::filesystem::GetExecutableFolder());
     // P3's Downloaded mark (§3.2): the artist/title index of the loaded DLC library. Its builder
     // thread is started here; the serving policy asks only the published snapshot.
     rb_blitz::store::InstallStoreLibrary(runtime()->user_data_root());
