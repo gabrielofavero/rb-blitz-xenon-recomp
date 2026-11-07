@@ -9,7 +9,7 @@ Part 1 wherever they disagree.
 ## At a glance
 
 - **Settings hot apply (2026-11-07):** the [active plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md)
-  has a nine-row immediate baseline and a 48-row static consumer audit. Saved, running and pending
+  began with a nine-row immediate baseline and has a 48-row static consumer audit. Saved, running and pending
   application are tracked separately; a commit rechecks capabilities before writing, partial provider
   saves expose only durable rows, and RhythmVerse filters publish one validated snapshot per group.
   The authored Window Mode Keep/Revert page waits for a successful post-switch presentation before
@@ -19,9 +19,14 @@ Part 1 wherever they disagree.
   The same disposable profile also exercised all six changes, Revert and timeout on Vulkan.
   Later runs without a CLI display override saved Full Screen, relaunched into that SDL mode, and
   returned through Help & Options to a fitted Windowed client on D3D12 and Vulkan. Vulkan Full Screen
-  desktop captures were black, so its relaunch visual and repeated placement/input checks remain
-  unverified. Resolution remains restart-scoped because the guest frame
-  and backend caches lack a proven live reconstruction boundary. Menu row/header refresh is enabled
+  desktop captures were black. On 2026-11-07, Desktop Duplication verified its visible relaunch
+  picture; repeated cycles, windowed placement and focus/input after minimize/restore and Alt+Tab
+  passed on both backends (`out/_swap/hot-settings/c1-2026-11-07/`). SDK patch 0054 fixed lost
+  Vulkan menu input after minimize/restore. Other DPI/monitor configurations remain unverified.
+  Resolution remains restart-scoped: rebuilding the backend caches at a swap would
+  discard live EDRAM owners and scaled resolves, and no guest menu reset or state migration is
+  proven. Live Resolution is parked as a separate renderer project; the hot-apply plan now focuses
+  on bounded menu and next-song candidates. Menu row/header refresh is enabled
   on every boot with guest completion acknowledgments. After moving the splash refresh past the
   retail `check_trial`, a disposable D3D12 run hid and restored LEADERBOARDS on the first returned
   splash frame; saved revisions and guest acknowledgments matched both directions. Other rows and
@@ -29,8 +34,9 @@ Part 1 wherever they disagree.
   Ultimate assignments and seven next-song HUD/visual refreshes; per-row receipts now prevent a
   skipped assignment from being acknowledged. A disposable same-process run hid Timer on the next
   song and restored it on a third song, with matching guest acknowledgments. Other provider rows,
-  later provider saves and restart persistence remain unverified. Display, Ultimate
-  and loaded-menu strategy metadata stay restart-scoped until the advertised boundaries pass acceptance.
+  later provider saves and restart persistence remain unverified. Window Mode is now the tenth
+  immediate strategy through the authored preview/Keep route; Ultimate and loaded-menu metadata
+  stay restart-scoped until their advertised boundaries pass acceptance.
 
   The 2026-11-07 host follow-up adds a guarded Personal Best assignment before
   the song-selection panel reads it, with a per-row guest receipt and an

@@ -116,7 +116,7 @@ constexpr SettingId kRowsThatMustStayRestart[] = {
 // owns what the boot drew - the main-menu row and the store's heading - which a live value would
 // leave lying until the next start.
 constexpr SettingId kRowsThatMustBeHot[] = {
-    SettingId::kLoadGuard,
+    SettingId::kLoadGuard,         SettingId::kDisplay,
     SettingId::kVsync,             SettingId::kSettingsLabels,  SettingId::kRhythmVerseGuitar,
     SettingId::kRhythmVerseBass,   SettingId::kRhythmVerseDrums, SettingId::kRhythmVerseVocals,
     SettingId::kRhythmVerseKeys,   SettingId::kButtonScheme,
@@ -174,10 +174,10 @@ void StrategyTableIsComplete() {
              descriptor.strategy == ApplicationStrategy::kRestart);
   }
 
-  // Exactly eight rows are hot today, and each is hot because something measured the effect, not
+  // Exactly ten rows are hot today, and each is hot because something measured the effect, not
   // because its cvar was tagged reloadable (see src/settings/schema.cpp). A future session that
   // promotes another row must also record its evidence, and this expectation moves with it.
-  CHECK_EQ(hot, 9);
+  CHECK_EQ(hot, 10);
   for (const SettingId id : kRowsThatMustBeHot) {
     const rb_blitz::settings::schema::SchemaRow* row = rb_blitz::settings::schema::FindRow(id);
     CHECK_TRUE(row != nullptr);
@@ -582,6 +582,12 @@ void PlanByStrategyMatchesTheDescriptorPlan() {
   CHECK_EQ(rb_blitz::settings::schema::StrategyOf(SettingId::kVsync) ==
                ApplicationStrategy::kHot,
            true);
+  CHECK_EQ(rb_blitz::settings::schema::StrategyOf(SettingId::kDisplay) ==
+                ApplicationStrategy::kHot,
+            true);
+  CHECK_EQ(rb_blitz::settings::schema::StrategyOf(SettingId::kResolution) ==
+                ApplicationStrategy::kRestart,
+            true);
   CHECK_EQ(rb_blitz::settings::schema::StrategyOf(SettingId::kTarget) ==
                ApplicationStrategy::kRestart,
            true);

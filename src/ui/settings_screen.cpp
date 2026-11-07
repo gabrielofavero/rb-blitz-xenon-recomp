@@ -3718,7 +3718,7 @@ std::vector<std::pair<std::string, std::string>> Labels() {
     out.emplace_back("settings_linked_" + SymbolToken(prompt.key), prompt.text);
   out.emplace_back("settings_restart_message", "Settings saved. Restart the game to apply these changes.");
   out.emplace_back("settings_restore_defaults_message",
-                   "Restore all default settings, including controls? Your current choices will be replaced. Restart to apply.");
+                   "Restore default settings and controls? Your choices will be replaced after a restart.");
   out.emplace_back("settings_display_confirm_message", "Keep this window mode? It will revert in 15 seconds.");
   out.emplace_back("settings_display_preview_error", "The window mode could not be previewed. Try again.");
   out.emplace_back("settings_display_keep_error", "The window mode was not saved. Check the display and try again, or Revert.");

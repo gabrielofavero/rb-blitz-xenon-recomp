@@ -499,9 +499,12 @@ constexpr StrategyEntry kStrategies[] = {
      "flipping the `vsync` cvar with the guest running moved the discovery rate from 16.66 ms per "
      "item to 5.68 ms (46.7 s -> 15.96 s, docs/guides/dlc.md), i.e. a live effect measured in a boot"},
     {SettingId::kRenderer, ApplicationStrategy::kRestart, ""},
-    // The window mode is read once, when the window is created: a new process, like the rest of the
-    // render path it belongs to.
-    {SettingId::kDisplay, ApplicationStrategy::kRestart, ""},
+    // The authored Window Mode row previews through SetDisplayMode on the UI thread. Keep only
+    // follows a successful post-switch presentation, then acknowledges the saved running value.
+    // All six directed transitions and rollback were observed on both backends (hot-apply P2).
+    {SettingId::kDisplay, ApplicationStrategy::kHot,
+     "all six Windowed/Borderless/Full Screen transitions and rollback were observed on D3D12 "
+     "and Vulkan; Keep requires a post-switch UI presentation"},
     {SettingId::kAntiAliasing, ApplicationStrategy::kRestart, ""},
     {SettingId::kFiltering, ApplicationStrategy::kRestart, ""},
     // Interface

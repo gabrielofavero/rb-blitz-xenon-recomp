@@ -215,6 +215,8 @@ set(RBBLITZ_SOURCES
     # ImGui overlay the captions are drawn on.
     src/ui/help_topics.cpp
     src/ui/help_overlay.cpp
+    src/ui/boot_loading_art.cpp
+    src/ui/boot_loading_icon.cpp
     src/ui/menu_music_player.cpp
     src/ui/menu_music_artwork.cpp
     src/ui/keyboard_theme.cpp
@@ -1233,6 +1235,10 @@ if(BUILD_TESTING)
         src/profile/gameplay_remap.cpp
         src/profile/remap.cpp
     )
+    if(WIN32)
+        target_sources(rb_blitz_input_bindings_tests PRIVATE src/controller_schemes/png_wic.cpp)
+        target_link_libraries(rb_blitz_input_bindings_tests PRIVATE windowscodecs ole32)
+    endif()
     target_include_directories(rb_blitz_input_bindings_tests PRIVATE src)
     add_test(NAME input_bindings COMMAND rb_blitz_input_bindings_tests)
 
@@ -1477,6 +1483,21 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_store_art_tests PRIVATE src)
     add_test(NAME store_art COMMAND rb_blitz_store_art_tests)
+
+    # The preboot indicator decodes the installed title's autosave spinner
+    # plate without opening a window. The installed-data leg skips when the
+    # game files are absent from a source checkout.
+    add_executable(rb_blitz_boot_loading_art_tests
+        tests/boot_loading_art_tests.cpp
+        src/ui/boot_loading_art.cpp
+        src/assets/texture_codec.cpp
+        src/settings/ultimate_adapter.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp)
+    target_include_directories(rb_blitz_boot_loading_art_tests PRIVATE src)
+    target_compile_definitions(rb_blitz_boot_loading_art_tests PRIVATE
+        RBBLITZ_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME boot_loading_art COMMAND rb_blitz_boot_loading_art_tests)
 
     add_executable(rb_blitz_button_scheme_tests
         tests/button_scheme_tests.cpp

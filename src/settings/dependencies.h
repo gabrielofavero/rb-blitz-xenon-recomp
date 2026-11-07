@@ -110,7 +110,7 @@ inline std::vector<Prompt> Prompts() {
       if (i == 0)
         text = "Use Default background music? This also disables Music Player, Play Current Song and Menu Music Navigation. Enable them separately later.";
       if (i == 7)
-        text = "Hide all HUD elements and disable their individual settings? They will stay disabled when you show the HUD again.";
+        text = "Hide all HUD elements? Individual settings stay off when you show the HUD again.";
       out.push_back({PromptKey(i, false), std::move(text)});
     }
   }

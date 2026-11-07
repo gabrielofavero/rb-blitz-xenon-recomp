@@ -1368,7 +1368,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
         }
       }
     }
-    CHECK_TRUE(records.contains("ui/startup/gen/startup.dtb") == fast);
+    CHECK_TRUE(records.contains("ui/startup/gen/startup.dtb"));
     const auto dir = fs::path(output_root) / (std::string(fast ? "fast-" : "normal-") + std::to_string(mask));
     for (const auto& [name, bytes] : records) {
       if (boot_case == 0 && (name == rb_blitz::ui::input_font::kIconSceneRecord ||
@@ -1388,8 +1388,8 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
       if (name == "ui/startup/gen/startup.dtb") {
         for (const auto& root : roots) {
           if (root.kids.empty()) continue;
-          if (root.kids[0].text == "splash_order") CHECK_EQ(root.kids.size(), 1u);
-          if (root.kids[0].text == "wait_for_splash") CHECK_TRUE(root.kids[1].text == "FALSE");
+          if (root.kids[0].text == "splash_order") CHECK_TRUE(fast ? root.kids.size() == 1u : root.kids.size() > 1u);
+          if (root.kids[0].text == "wait_for_splash") CHECK_TRUE(root.kids[1].text == (fast ? "FALSE" : "TRUE"));
         }
       }
       if (name == "ui/gen/transition_screens.dtb") CheckAnimations(roots, mask);
@@ -1788,6 +1788,53 @@ int main(int argc, char** argv) {
   }
   {
     using namespace rb_blitz::ui::dtb;
+    BeginCase("normal boot waits for the provider's authored splash playlist");
+    std::vector<Node> roots{
+        Node::Array({Node::Symbol("wait_for_splash"), Node::Symbol("FALSE")}),
+        Node::Array({Node::Symbol("splash_order"),
+            Node::Array({Node::Symbol("ulti/ultimate_mods.milo"), Node::Int(5)}),
+            Node::Array({Node::Symbol("ui/startup/hmx_logo_screen.milo"), Node::Int(5)})})};
+    const auto playlist = Compile({roots[1]});
+    std::string why;
+    CHECK_TRUE(rb_blitz::settings::WaitForStartupLogos(&roots, &why));
+    CHECK_TRUE(roots[0].kids[1].text == "TRUE");
+    CHECK_TRUE(Compile({roots[1]}) == playlist);
+    CHECK_TRUE(rb_blitz::settings::WaitForStartupLogos(&roots, &why));
+    roots[1].kids.resize(1);
+    CHECK_FALSE(rb_blitz::settings::WaitForStartupLogos(&roots, &why));
+  }
+  {
+    using namespace rb_blitz::ui::dtb;
+    BeginCase("Ultimate startup presents Harmonix before its logo in both regions");
+    Node other_region;
+    other_region.tag = 0x08; // #else
+    const Node hmx = Node::Array({Node::Symbol("ui/startup/hmx_logo_screen.milo"), Node::Int(5)});
+    const Node ultimate = Node::Array({Node::Symbol("ulti/ultimate_mods.milo"), Node::Int(5)});
+    const Node esrb = Node::Array({Node::Symbol("ui/startup/esrb.milo"), Node::Int(5)});
+    std::vector<Node> roots{
+        Node::Array({Node::Symbol("wait_for_splash"), Node::Symbol("FALSE")}),
+        Node::Array({Node::Symbol("splash_order"), ultimate, Node::Ifdef("REGION_NA"),
+                     hmx, esrb, other_region, hmx, Node::Endif()})};
+    std::string why;
+    if (!rb_blitz::settings::OrderUltimateStartupLogos(&roots, &why)) {
+      std::printf("synthetic Ultimate startup reorder refused: %s\n", why.c_str());
+      return 1;
+    }
+    CHECK_TRUE(rb_blitz::settings::WaitForStartupLogos(&roots, &why));
+    const auto& order = roots[1].kids;
+    CHECK_EQ(order.size(), size_t{6});
+    CHECK_TRUE(SerializeNodes({order[1]}) == SerializeNodes({hmx}));
+    CHECK_TRUE(SerializeNodes({order[2]}) == SerializeNodes({ultimate}));
+    CHECK_EQ(order[3].tag, kIfdef);
+    CHECK_TRUE(SerializeNodes({order[4]}) == SerializeNodes({esrb}));
+    CHECK_EQ(order[5].tag, kEndif);
+    CHECK_TRUE(roots[0].kids[1].text == "TRUE");
+    const auto after = Compile(roots);
+    CHECK_FALSE(rb_blitz::settings::OrderUltimateStartupLogos(&roots, &why));
+    CHECK_TRUE(Compile(roots) == after);
+  }
+  {
+    using namespace rb_blitz::ui::dtb;
     BeginCase("short boots clear regional and provider logos without changing other startup settings");
     Node region;
     region.tag = kIfdef;
@@ -1809,6 +1856,31 @@ int main(int argc, char** argv) {
     const auto before = Compile(roots);
     CHECK_FALSE(rb_blitz::settings::SkipStartupLogos(&roots, &why));
     CHECK_TRUE(Compile(roots) == before);
+  }
+  if (argc == 3 && std::string(argv[1]) == "check-ultimate-startup-order") {
+    std::ifstream input(argv[2], std::ios::binary);
+    std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    std::vector<rb_blitz::ui::dtb::Node> roots;
+    rb_blitz::ui::dtb::RootHeader header;
+    std::string why;
+    if (!rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why)) {
+      std::printf("parse failed: %s\n", why.c_str()); return 1;
+    }
+    if (!rb_blitz::settings::OrderUltimateStartupLogos(&roots, &why)) {
+      std::printf("installed Ultimate startup reorder refused: %s\n", why.c_str());
+      return 1;
+    }
+    CHECK_TRUE(rb_blitz::settings::WaitForStartupLogos(&roots, &why));
+    for (const auto& root : roots) {
+      if (root.kids.empty() || root.kids[0].text != "splash_order") continue;
+      CHECK_EQ(root.kids.size(), size_t{6});
+      CHECK_TRUE(root.kids[1].kids[0].text == "ui/startup/hmx_logo_screen.milo");
+      CHECK_TRUE(root.kids[2].kids[0].text == "ulti/ultimate_mods.milo");
+      CHECK_TRUE(root.kids[4].kids[0].text == "ui/startup/esrb.milo");
+    }
+    const auto reordered = rb_blitz::ui::dtb::Compile(roots, header);
+    CHECK_TRUE(rb_blitz::ui::dtb::Parse(reordered.data(), reordered.size(), &roots, &header, &why));
+    return Finish();
   }
   if (argc == 3 && std::string(argv[1]) == "check-startup-record") {
     using namespace rb_blitz::ui::dtb;

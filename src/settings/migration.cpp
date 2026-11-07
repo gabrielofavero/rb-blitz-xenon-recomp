@@ -164,6 +164,11 @@ Value ListValue(std::vector<std::string> list) {
 // Import a value only when the row is not already in settings.toml and the value is not
 // already the compiled default. Returns true when the value was imported.
 bool Import(Store& store, SettingId id, Value value, MigrationResult* result) {
+  // Once migration has completed, an absent key can be an intentional default (including
+  // Restore default settings). Do not refill it from the old launcher profile on every boot.
+  if (store.document().migration_imported) {
+    return false;
+  }
   if (store.document().values.count(id) != 0) {
     return false;
   }

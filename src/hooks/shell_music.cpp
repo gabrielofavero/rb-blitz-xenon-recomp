@@ -36,6 +36,9 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <future>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <numeric>
@@ -351,6 +354,7 @@ struct PreparedPackage {
   std::vector<PoolEntry> songs;
   std::shared_ptr<std::vector<rb_blitz::shell_music::catalog::Package>> catalog;
   bool catalog_complete = false;
+  bool catalog_preload = false;
 };
 
 rb_blitz::shell_music::MenuMusicQueue<PreparedPackage> g_queue;
@@ -365,7 +369,100 @@ using MusicCatalog = std::vector<rb_blitz::shell_music::catalog::Package>;
 std::shared_ptr<MusicCatalog> g_catalog_pending;
 std::filesystem::path g_catalog_path;
 std::atomic<bool> g_catalog_io_allowed{false};
+struct CatalogFileStamp {
+  std::uintmax_t size;
+  std::filesystem::file_time_type modified;
+  bool operator==(const CatalogFileStamp&) const = default;
+};
+std::optional<CatalogFileStamp> StampCatalog(const std::filesystem::path& path) {
+  std::error_code ec;
+  const auto size = std::filesystem::file_size(path, ec);
+  if (ec || size > 32 * 1024 * 1024) return {};
+  const auto modified = std::filesystem::last_write_time(path, ec);
+  if (ec) return {};
+  return CatalogFileStamp{size, modified};
+}
+struct PrevalidatedCatalog {
+  std::optional<CatalogFileStamp> stamp;
+  MusicCatalog packages;
+};
+struct BootCatalogJob {
+  std::filesystem::path path;
+  std::shared_future<PrevalidatedCatalog> result;
+};
+std::optional<BootCatalogJob> g_boot_catalog_job;
+bool g_catalog_preload_pending = false;
+
+// Uses only host paths and immutable cache bytes. The saved paths let the
+// existing loader validate every cached entry without waiting for DLC's live
+// candidate list or touching the runtime, cvars, VFS, or guest memory.
+PrevalidatedCatalog PrevalidateCatalog(const std::filesystem::path& path) {
+  const auto before = StampCatalog(path);
+  if (!before) return {};
+  std::ifstream in(path, std::ios::binary);
+  const std::string bytes((std::istreambuf_iterator<char>(in)), {});
+  MusicCatalog saved;
+  if (!rb_blitz::shell_music::catalog::Decode(bytes, &saved)) return {before, {}};
+  std::vector<std::filesystem::path> paths;
+  paths.reserve(saved.size());
+  for (const auto& package : saved) paths.push_back(package.path);
+  auto validated = rb_blitz::shell_music::catalog::Load(path, paths);
+  const auto after = StampCatalog(path);
+  return {before == after ? after : std::nullopt, std::move(validated)};
+}
+
+std::optional<MusicCatalog> CatalogFromPreload(
+    const std::filesystem::path& path, const std::vector<std::filesystem::path>& paths,
+    const std::shared_future<PrevalidatedCatalog>& preload) {
+  try {
+    const auto& prevalidated = preload.get();
+    if (!prevalidated.stamp || prevalidated.stamp != StampCatalog(path)) return {};
+    std::map<std::filesystem::path, const rb_blitz::shell_music::catalog::Package*> by_path;
+    for (const auto& package : prevalidated.packages)
+      by_path.emplace(package.path, &package);
+    std::set<std::filesystem::path> used;
+    MusicCatalog result;
+    result.reserve(paths.size());
+    for (const auto& candidate : paths) {
+      rb_blitz::shell_music::catalog::Package package{candidate, {}, {}};
+      const auto found = by_path.find(candidate);
+      if (found != by_path.end() && found->second->identity && used.insert(candidate).second)
+        package = *found->second;
+      result.push_back(std::move(package));
+    }
+    return result;
+  } catch (const std::exception& error) {
+    REXLOG_WARN("shell_music: early catalog validation failed: {}", error.what());
+    return {};
+  }
+}
+
+// The boot thread never waits for a disk-backed validation. A saved catalog
+// whose worker is still busy is published from the existing music queue after
+// guest launch, before any playlist draw. An absent cache has no stats to do.
+std::optional<MusicCatalog> TryLoadBootCatalog(
+    const std::filesystem::path& path, const std::vector<std::filesystem::path>& paths) {
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(path, ec) || ec)
+    return rb_blitz::shell_music::catalog::Load(path, paths);
+  if (g_boot_catalog_job && g_boot_catalog_job->path == path &&
+      g_boot_catalog_job->result.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+    auto ready = CatalogFromPreload(path, paths, g_boot_catalog_job->result);
+    g_boot_catalog_job.reset();
+    return ready;
+  }
+  return {};
+}
+
+MusicCatalog LoadBootCatalogOnWorker(
+    const std::filesystem::path& path, const std::vector<std::filesystem::path>& paths,
+    const std::shared_future<PrevalidatedCatalog>& preload) {
+  if (preload.valid())
+    if (auto ready = CatalogFromPreload(path, paths, preload)) return std::move(*ready);
+  return rb_blitz::shell_music::catalog::Load(path, paths);
+}
 constexpr size_t kCatalogJob = rb_blitz::shell_music::kNoIndex;
+constexpr size_t kPreloadJob = rb_blitz::shell_music::kNoIndex - 1;
 std::vector<size_t> g_opening_packages;
 size_t g_opening_cursor = 0;
 bool g_opening_selected = false;
@@ -540,6 +637,30 @@ void RetireColdLocked() {
 // Returns false only when all residency slots are pinned; keep the prepared
 // device pending and retry on a later poll without blocking or growing the cache.
 bool PublishPackage(PreparedPackage& prepared) {
+  if (prepared.catalog_preload) {
+    // The boot thread left placeholder paths rather than waiting for catalog
+    // validation. Merge its completed result on this guest-owned poll, before
+    // the queue can schedule any cold probes against the shared catalog.
+    *g_catalog_pending = std::move(*prepared.catalog);
+    size_t cached = 0;
+    for (size_t i = 0; i < g_catalog_pending->size(); ++i) {
+      if (!(*g_catalog_pending)[i].identity) continue;
+      auto songs = (*g_catalog_pending)[i].songs;
+      for (auto& song : songs) song.alias = fmt::format("menumusic{}", i);
+      g_session.Discover(i, std::move(songs));
+      ++cached;
+    }
+    g_catalog_preload_pending = false;
+    if (cached == g_packages.size()) {
+      g_next_package = g_packages.size();
+      g_session.DiscoveryComplete();
+      g_session.PlanAhead(g_rng);
+      g_catalog_pending.reset();
+    }
+    REXLOG_INFO("shell_music: early catalog published {}/{} validated packages; {} song(s)",
+                cached, g_packages.size(), g_session.Sources().size());
+    return true;
+  }
   if (prepared.catalog) {
     if (!prepared.catalog_complete) return true; // another bounded batch follows on menu polls
     for (size_t i = 0; i < prepared.catalog->size(); ++i) {
@@ -636,6 +757,10 @@ std::string NextPathLocked() {
 
 void SchedulePreparationLocked() {
   if (!g_queue_started || g_ready_package) return;
+  if (g_catalog_preload_pending) {
+    if (g_queue.Idle()) g_queue.Request(kPreloadJob, true);
+    return;
+  }
   if (g_catalog_pending) {
     // Keep a small navigable window from randomly ordered DLC packages before
     // the full metadata scan finishes. A priority probe can queue behind the
@@ -1158,6 +1283,16 @@ bool SubstituteFilename(uint8_t* base, PPCContext& ctx) {
 
 namespace rb_blitz::shell_music {
 
+void PrepareBootCatalog(const std::filesystem::path& cache_path) {
+  if (!REXCVAR_GET(enhancements_menu_dlc_songs) || g_boot_catalog_job) return;
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(cache_path, ec) || ec) return;
+  g_boot_catalog_job.emplace(BootCatalogJob{
+      cache_path,
+      std::async(std::launch::async, [cache_path] { return PrevalidateCatalog(cache_path); }).share()});
+  REXLOG_INFO("shell_music: validating saved song catalog during graphics setup");
+}
+
 ui::music::ArtRead ReadArtwork(const ui::music::ArtTag& tag, std::vector<uint8_t>* bytes) {
   using ui::music::ArtRead;
   const auto snapshot = NowPlaying().ReadSnapshot();
@@ -1278,7 +1413,12 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     return;
   }
 
-  const std::vector<std::filesystem::path>& packages = rb_blitz::dlc::LibraryPackagePaths();
+  // The DLC identity scan can still be reading cold headers here. Its early directory
+  // walk supplies stable path candidates immediately, while the content manager waits
+  // until discovery to publish the validated library. Keep these music indices fixed
+  // for the session: the catalog and mounted aliases both use them. A nonpackage
+  // candidate simply fails PreparePackage on the background worker.
+  const std::vector<std::filesystem::path> packages = rb_blitz::dlc::BootCandidatePackagePaths();
   const auto pool_start = std::chrono::steady_clock::now();
   g_file_system = file_system;
   DiscoverBaseSongs();
@@ -1286,8 +1426,18 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // Metadata is cheap to reuse, whereas opening every container competes with
   // startup reads. A complete catalog also gives merged-pack songs equal odds.
   g_catalog_path = runtime->cache_root() / "menu_music_catalog.cache";
-  auto catalog = std::make_shared<MusicCatalog>(
-      rb_blitz::shell_music::catalog::Load(g_catalog_path, g_packages));
+  auto saved_catalog = TryLoadBootCatalog(g_catalog_path, g_packages);
+  // No current packages means no saved DLC records can affect this boot's pool.
+  g_catalog_preload_pending = !saved_catalog && !g_packages.empty();
+  auto catalog = std::make_shared<MusicCatalog>();
+  if (saved_catalog) {
+    *catalog = std::move(*saved_catalog);
+  } else {
+    catalog->reserve(g_packages.size());
+    for (const auto& package : g_packages) catalog->push_back({package, {}, {}});
+    REXLOG_INFO("shell_music: saved catalog validation is still pending; "
+                "the music worker will publish it without holding guest launch");
+  }
   size_t cached = 0;
   for (size_t i = 0; i < catalog->size(); ++i) {
     if (!(*catalog)[i].identity) continue;
@@ -1339,9 +1489,18 @@ void StartQueuedPool() {
   std::lock_guard lock(g_mutex);
   if (!g_enabled || g_closing || g_queue_started) return;
   g_queue_started = true;
+  const auto preload = g_boot_catalog_job && g_boot_catalog_job->path == g_catalog_path
+      ? g_boot_catalog_job->result : std::shared_future<PrevalidatedCatalog>{};
   g_queue.Start([packages = g_packages, catalog = g_catalog_pending,
-                 catalog_path = g_catalog_path, catalog_cursor = size_t{0}]
+                 catalog_path = g_catalog_path, catalog_cursor = size_t{0}, preload]
                 (size_t index) mutable -> std::optional<PreparedPackage> {
+    if (index == kPreloadJob) {
+      PreparedPackage completed;
+      completed.catalog = std::make_shared<MusicCatalog>(
+          LoadBootCatalogOnWorker(catalog_path, packages, preload));
+      completed.catalog_preload = true;
+      return completed;
+    }
     if (index == kCatalogJob && catalog) {
       const auto started = std::chrono::steady_clock::now();
       size_t reads = 0;

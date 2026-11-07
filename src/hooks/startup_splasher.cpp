@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <rex/hook.h>
 #include <rex/system/xmemory.h>
+#include <atomic>
+
+#include "hooks/startup_splasher.h"
 
 REX_EXTERN(__imp__sub_82192008); // load current splash
 REX_EXTERN(__imp__sub_82192A08); // poll/advance current splash
 REX_EXTERN(__imp__sub_82192350); // retire current splash and advance
 
 namespace {
+std::atomic<bool> native_logo_load_started{false};
 bool EmptySplashList(const PPCContext& ctx, const uint8_t* base) {
   // Splasher owns an intrusive list at +184. Retail unconditionally treats
   // its head as a scene in Load (scene+428 -> virtual Enter). An empty authored
@@ -18,11 +22,20 @@ bool EmptySplashList(const PPCContext& ctx, const uint8_t* base) {
 }
 }
 
+namespace rb_blitz::hooks::startup_splasher {
+bool NativeLogoLoadStarted() {
+  return native_logo_load_started.load(std::memory_order_acquire);
+}
+}  // namespace rb_blitz::hooks::startup_splasher
+
 // Leave the worker's 5/6/7/8 state/event handshake intact. Only scene work is
 // empty; returning from the worker itself would leave the main thread waiting.
 extern "C" REX_FUNC(sub_82192008) {
   if (EmptySplashList(ctx, base)) ctx.r3.u64 = 0;
-  else __imp__sub_82192008(ctx, base);
+  else {
+    __imp__sub_82192008(ctx, base);
+    native_logo_load_started.store(true, std::memory_order_release);
+  }
 }
 extern "C" REX_FUNC(sub_82192A08) {
   if (EmptySplashList(ctx, base)) ctx.r3.u64 = 0;

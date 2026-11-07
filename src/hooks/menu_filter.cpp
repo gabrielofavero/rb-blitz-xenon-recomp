@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -101,6 +102,56 @@ struct Pending {
   std::vector<uint8_t> head;   // the candidate's bytes, `file_offset` to `length`
 };
 thread_local Pending g_pending;
+
+// Keep boot I/O timing bounded. The guest can read many archive blocks before
+// its first frame, and this hook also runs later during gameplay. A short
+// per-thread window separates time inside the runtime read from time spent
+// scanning the completed buffer for DTB edits without logging every read.
+using ReadClock = std::chrono::steady_clock;
+ReadClock::time_point g_boot_read_timing_start;
+std::atomic<unsigned> g_boot_read_timing_reports{0};
+struct ReadTimingWindow {
+  ReadClock::time_point last_report;
+  uint64_t plain_calls = 0;
+  uint64_t scatter_calls = 0;
+  uint64_t completed_bytes = 0;
+  uint64_t original_us = 0;
+  uint64_t max_original_us = 0;
+  uint64_t scan_us = 0;
+  uint64_t max_scan_us = 0;
+};
+thread_local ReadTimingWindow g_read_timing;
+
+void ObserveBootRead(bool scatter, uint32_t completed_bytes,
+                     ReadClock::time_point started, ReadClock::time_point read_done,
+                     ReadClock::time_point scan_started, ReadClock::time_point scan_done) {
+  if (!g_configured || started - g_boot_read_timing_start > std::chrono::seconds(90)) return;
+  ReadTimingWindow& window = g_read_timing;
+  if (window.last_report == ReadClock::time_point{}) window.last_report = started;
+  const auto original_us = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(read_done - started).count());
+  const auto scan_us = static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(scan_done - scan_started).count());
+  ++(scatter ? window.scatter_calls : window.plain_calls);
+  window.completed_bytes += completed_bytes;
+  window.original_us += original_us;
+  window.max_original_us = std::max(window.max_original_us, original_us);
+  window.scan_us += scan_us;
+  window.max_scan_us = std::max(window.max_scan_us, scan_us);
+  if (scan_done - window.last_report < std::chrono::seconds(10)) return;
+  if (g_boot_read_timing_reports.fetch_add(1, std::memory_order_relaxed) < 16) {
+    REXLOG_INFO("boot_io: interval_ms={} thread={} plain_reads={} scatter_reads={} "
+                "completed_bytes={} runtime_read_ms={:.1f} max_runtime_read_ms={:.1f} "
+                "post_read_scan_ms={:.1f} max_post_read_scan_ms={:.1f}",
+                std::chrono::duration_cast<std::chrono::milliseconds>(scan_done - window.last_report).count(),
+                GetCurrentThreadId(), window.plain_calls, window.scatter_calls,
+                window.completed_bytes, window.original_us / 1000.0,
+                window.max_original_us / 1000.0, window.scan_us / 1000.0,
+                window.max_scan_us / 1000.0);
+  }
+  window = ReadTimingWindow{};
+  window.last_report = scan_done;
+}
 
 // The title's content database lives in the loaded image as {const char* name;
 // u8 sha1[20]} rows, and a patched file's digest has to be corrected there. The
@@ -502,6 +553,7 @@ void RetargetRecord(uint8_t* base, const uint8_t before[20], const uint8_t after
 }
 
 void Configure(bool settings_restart_boot) {
+  g_boot_read_timing_start = ReadClock::now();
   g_settings.hide_rows = REXCVAR_GET(enhancements_hide_menu_options);
   g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);
   g_settings.skip_offline_prompts = settings_restart_boot || REXCVAR_GET(startup_mode) == "fast" ||
@@ -645,33 +697,41 @@ bool AnswerRuntimeMenuQuery(std::string_view path, bool* answer) {
 extern "C" REX_FUNC(__imp__NtReadFile) {
   const auto io = rb_blitz::content_progress::BeginIo(ctx.r3.u32, false);
   ReadArgs args = Capture(ctx);
+  const auto started = ReadClock::now();
   if (auto original = ResolveOriginal(/*scatter=*/false)) {
     original(ctx, base);
   }
+  const auto read_done = ReadClock::now();
   // NtReadFile performs the read synchronously, then may return STATUS_PENDING
   // for APC delivery. The IOSB carries the completed status and actual byte count.
   const uint32_t result = args.status_ptr && !(ctx.r3.u32 & 0x80000000u)
       ? rex::memory::load_and_swap<uint32_t>(base + args.status_ptr) : ctx.r3.u32;
   rb_blitz::content_progress::EndIo(io, result);
+  const auto scan_started = ReadClock::now();
   if (result == 0) {
     if (args.status_ptr) args.length = std::min(args.length,
         rex::memory::load_and_swap<uint32_t>(base + args.status_ptr + 4));
     HandleRead("plain", ctx, base, args);
   }
+  ObserveBootRead(false, result == 0 ? args.length : 0, started, read_done, scan_started,
+                  ReadClock::now());
 }
 
 extern "C" REX_FUNC(__imp__NtReadFileScatter) {
   const auto io = rb_blitz::content_progress::BeginIo(ctx.r3.u32, false);
   ReadArgs args = Capture(ctx);
+  const auto started = ReadClock::now();
   if (auto original = ResolveOriginal(/*scatter=*/true)) {
     original(ctx, base);
   }
+  const auto read_done = ReadClock::now();
   const uint32_t result = args.status_ptr && !(ctx.r3.u32 & 0x80000000u)
       ? rex::memory::load_and_swap<uint32_t>(base + args.status_ptr) : ctx.r3.u32;
   rb_blitz::content_progress::EndIo(io, result);
   // r8 is a segment table for Scatter, not a contiguous file buffer. Scanning
   // it as args.length bytes can inspect unrelated guest memory. No locale edit.
-
+  ObserveBootRead(true, result == 0 ? args.length : 0, started, read_done,
+                  read_done, read_done);
 }
 
 #endif  // _WIN32

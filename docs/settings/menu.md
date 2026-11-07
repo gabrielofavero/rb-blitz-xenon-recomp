@@ -29,15 +29,17 @@ and in-song contexts.
 | Music Library & Store | Messages; Recommendations |
 | Song Library | RhythmVerse; Scan Threads |
 | RhythmVerse | Store Access; Filters (Guitar, Bass, Drums, Vocals, Keys) |
-
-Restore default settings opens the game's confirmation page. Confirming saves native preferences,
-control bindings, and the installed compatible Ultimate provider's preferences back to their
-defaults. The restored values are restart scoped; leaving Help & Options offers the restart prompt.
-Explicit command-line and environment overrides remain in control of the running process.
 | Achievements & Unlocks | Achievement Alerts; Unlock All; Unlock Online Achievements |
 | Audio | Active Track Volume; Sound Volume; Bass Boost; Background Music; Menu Music Navigation |
 | Video | Display; Graphics; Renderer (when more than one backend is available) |
 | Display | Window Mode; Resolution; V-Sync; Overscan |
+
+On 2026-11-07 [measured], Restore default settings opened a legible confirmation page in a
+disposable Ultimate profile. Cancel left the settings files unchanged. Confirm saved native and
+compatible Ultimate provider defaults, then offered Restart now when leaving Help & Options. The
+restarted game opened the standard Rock Band Blitz menu, kept the provider defaults and did not
+reimport the old Ultimate target from the legacy launcher profile. Explicit command-line and
+environment overrides still outrank stored settings.
 
 As of 2026-11-06 [measured], selecting a different Window Mode opens the guest's own confirmation
 screen with Keep and Revert. Keep saves after a successful frame presentation; Revert restores the
@@ -45,9 +47,14 @@ previous mode without saving. A disposable D3D12 run in `out/_swap/hot-settings/
 observed all six directed Windowed/Borderless/Full Screen changes and explicit Revert. After a
 rebuild, the 15-second timeout restored the native mode and exited the confirmation page.
 The same six changes, Revert and timeout were observed on Vulkan in the disposable profile.
-Saved Full Screen relaunch and input through Help & Options were observed on both backends;
-Vulkan Full Screen desktop captures were black. Repeated placement/input, Vulkan relaunch visuals
-and owner acceptance remain open. Resolution remains a restart
+Saved Full Screen relaunch and input through Help & Options were observed on both backends.
+On 2026-11-07, two repeated mode cycles, windowed placement, focus/input after minimize/restore
+and Alt+Tab, and the Vulkan Full Screen relaunch picture passed on the interactive desktop
+(`out/_swap/hot-settings/c1-2026-11-07/`). Desktop Duplication captured Vulkan frames where
+ordinary captures were black or stale. Other DPI/monitor configurations remain unverified.
+Window Mode is classified immediate through its
+  preview/Keep route; direct set requests are refused because they bypass confirmation.
+  Resolution remains a restart
 setting while live guest-frame reconstruction is unproven (see the hot-apply plan P3).
 
 On 2026-11-07 [measured], the disposable D3D12 profile in
@@ -72,14 +79,15 @@ Startup defaults to Normal: show startup logos, the splash screen, and "Press A 
 skips the native startup playlist (including Harmonix and Ultimate Mods logos),
 selects the local user, and continues automatically through discovery to the main
 menu, skipping offline prompts for that boot. Settings and recovery restarts
-always use the fast path regardless of this preference; only recovery shows an
-error popup. The preference is saved as `[general] startup = "normal" | "fast"`
+still auto-start the local user, but only Fast clears the startup logo playlist;
+only recovery shows an error popup. The preference is saved as `[general] startup = "normal" | "fast"`
 and applies on the next launch (`startup_mode` is its cvar).
 
 The installed Ultimate startup record puts **Ultimate Mods first**, then the regional
 Harmonix/ESRB entries, and sets `wait_for_splash FALSE`. Retail starts with Harmonix and
-uses `TRUE`. Normal preserves those provider records; their presence in the list does
-not mean every entry will be shown before the title advances.
+uses `TRUE`. Normal Ultimate startup presents Harmonix, Ultimate Mods, then the North
+American ESRB notice when applicable, and waits for the playlist to finish before the
+title advances.
 
 Startup music preparation never waits for a DLC package to mount. The library player
 uses a complete metadata catalog and uniform draws without replacement, including songs
@@ -106,7 +114,7 @@ took 24.9–26.8 ms with grouped directory attributes, versus 734–776 ms with 
 queries. This measures catalog parsing/validation, not a live boot or listening test;
 the raw validation report is `out/music-randomness/catalog-benchmark.txt`.
 
-Fast/restart startup also guards the native splasher's empty list: retail otherwise treats
+Fast startup also guards the native splasher's empty list: retail otherwise treats
 the list sentinel as a scene and calls address zero. The guards preserve the worker's
 state/event handshake and only bypass loading, polling and advancing a nonexistent scene.
 

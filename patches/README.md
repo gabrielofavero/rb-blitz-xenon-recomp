@@ -12,6 +12,26 @@ checkout.
 
 ## Patches
 
+`0054-sync-pixel-size-after-restore.patch` reconciles the presenter's pixel
+size on SDL resize, focus, expose, and restore events. Windows can report a
+zero-height SDL size during minimization without a matching pixel-size event
+after restore; the native HWND client size is used when SDL's cached size is
+zero. Focus gain and restore also reconnect the presentation surface even when
+the cached size or focus latch did not change. C1's Vulkan UI check reproduced
+lost input after minimize/restore on the prior stack and recovered it with this
+patch; Desktop Duplication was needed to see Vulkan's real Full Screen image.
+
+`0053-startup-paint-and-guest-output-signal.patch` gives synchronous startup a
+bounded SDL paint pump. It services only the presenter's queued paint event, so
+boot work can keep the window responsive without running deferred UI callbacks
+before the app is initialized. The presenter also exposes a monotonic count
+after each active guest image is refreshed and published, so a temporary boot
+icon can wait for a new guest frame after an observed loading state.
+`ReXApp::WantsStartupPaint` lets a title
+opt in to one paint immediately after its startup drawer is installed, before
+runtime construction. The application must keep calling the pump at bounded
+work checkpoints because an SDL timer cannot paint while the UI thread is blocked.
+
 `0052-boot-stage-timings.patch` logs the duration of guest function registration
 and SDL gamepad initialization at info level. These are the two unmeasured stages
 between function-table creation and the first controller log in a slow boot.
@@ -92,6 +112,8 @@ make untracked files are excluded; tracked edits and moved gitlinks remain visib
 
 | Patch | Purpose | Upstream candidate |
 | --- | --- | --- |
+| `rexglue-sdk/0054-sync-pixel-size-after-restore.patch` | Reconciles the actual pixel size and reconnects presentation after minimize/restore. | yes |
+| `rexglue-sdk/0053-startup-paint-and-guest-output-signal.patch` | Lets a title opt in to an immediate startup paint, service later paints without running startup-sensitive callbacks, and identify the first active guest output. | maybe |
 | `rexglue-sdk/0051-ui-present-display-confirmation.patch` | Counts successful UI-thread paints separately so an older guest-output present cannot confirm a new display mode. | maybe |
 | `rexglue-sdk/0050-verify-startup-display-mode.patch` | Refuses startup when SDL cannot apply the saved native display mode. | yes |
 | `rexglue-sdk/0049-successful-present-sequence.patch` | Counts successful presenter submissions for runtime display diagnostics. | maybe |

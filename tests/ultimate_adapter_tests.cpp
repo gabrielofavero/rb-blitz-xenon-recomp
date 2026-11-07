@@ -1133,6 +1133,24 @@ void TestRealPayload(const char* payload_root) {
 
   RecordBytes records;
   CHECK_TRUE(ReadProviderRecords(payload_root, &records, &error));
+  // The archive can be present but too short for an indexed record. The reader must reject it
+  // before seeking, even though it now reads only the five record slices.
+  const std::filesystem::path truncated_root = Scratch("truncated-archive");
+  std::error_code copy_error;
+  std::filesystem::create_directories(truncated_root / "gen", copy_error);
+  CHECK_FALSE(copy_error);
+  std::filesystem::copy_file(std::filesystem::path(payload_root) / "gen/patch_xbox.hdr",
+                             truncated_root / "gen/patch_xbox.hdr",
+                             std::filesystem::copy_options::overwrite_existing, copy_error);
+  CHECK_FALSE(copy_error);
+  {
+    std::ofstream short_archive(truncated_root / "gen/patch_xbox_0.ark", std::ios::binary);
+    short_archive.put('x');
+  }
+  RecordBytes truncated_records;
+  CHECK_FALSE(ReadProviderRecords(truncated_root, &truncated_records, &error));
+  CHECK_TRUE(error.find("lies past the archive") != std::string::npos);
+  std::filesystem::remove_all(truncated_root, copy_error);
   const ShapeReport report = CheckShape(records);
   for (const std::string& problem : report.problems) {
     note("         problem: %s\n", problem.c_str());

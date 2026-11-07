@@ -1,0 +1,93 @@
+--- a/src/ui/window.cpp
++++ b/src/ui/window.cpp
+@@ -603,6 +603,12 @@
+ 
+ void Window::OnFocusUpdate(bool new_has_focus, WindowDestructionReceiver& destruction_receiver) {
+   if (has_focus_ == new_has_focus) {
++    // A focus event can be the first usable signal after a minimize/restore
++    // even if the focus latch never observed a loss. The swapchain may still
++    // be outdated, so reconnect on the repeated gain as well.
++    if (new_has_focus && presenter_surface_) {
++      presenter_->OnSurfaceResizeFromUIThread(true);
++    }
+     return;
+   }
+   has_focus_ = new_has_focus;
+@@ -651,6 +657,9 @@
+ }
+ 
+ void Window::OnRestored(WindowDestructionReceiver& destruction_receiver) {
++  if (presenter_surface_) {
++    presenter_->OnSurfaceResizeFromUIThread(true);
++  }
+   if (!CanSendEventsToListeners()) {
+     return;
+   }
+--- a/src/ui/window_sdl.cpp
++++ b/src/ui/window_sdl.cpp
+@@ -600,12 +600,41 @@
+ 
+ void WindowSDL::HandleWindowEvent(SDL_Event& event) {
+   WindowDestructionReceiver destruction_receiver(this);
++  // A restore can deliver focus before SDL has published the restored pixel
++  // size. Some platforms also omit PIXEL_SIZE_CHANGED after the minimized
++  // zero-height size. Reconcile on the other size/visibility events so the
++  // presenter does not keep its zero-sized surface after restore.
++  auto sync_actual_size = [&]() {
++    int width = 0, height = 0;
++    SDL_GetWindowSizeInPixels(sdl_window_, &width, &height);
++#if REX_PLATFORM_WIN32
++    // SDL can retain the minimized 144x0 size after Win32 has restored the
++    // client area. Prefer the HWND's current pixel size in that case.
++    if (width <= 0 || height <= 0) {
++      if (auto hwnd = static_cast<HWND>(GetNativeWindowHandle())) {
++        RECT client_rect = {};
++        if (GetClientRect(hwnd, &client_rect)) {
++          width = client_rect.right - client_rect.left;
++          height = client_rect.bottom - client_rect.top;
++          if (width > 0 && height > 0) {
++            REXLOG_INFO("Window: recovered {}x{} client pixels from HWND after SDL reported a minimized size",
++                        width, height);
++          }
++        }
++      }
++    }
++#endif
++    if (width > 0 && height > 0) {
++      OnActualSizeUpdate(uint32_t(width), uint32_t(height), destruction_receiver);
++    }
++  };
+   switch (event.type) {
+     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+       OnActualSizeUpdate(uint32_t(event.window.data1), uint32_t(event.window.data2),
+                          destruction_receiver);
+       break;
+     case SDL_EVENT_WINDOW_RESIZED: {
++      sync_actual_size();
+       // Track the user-driven size as the desired size for the normal state
+       // only (mirrors the Win32 WM_SIZE handling).
+       SDL_WindowFlags flags = SDL_GetWindowFlags(sdl_window_);
+@@ -634,6 +663,7 @@
+       break;
+     }
+     case SDL_EVENT_WINDOW_FOCUS_GAINED:
++      sync_actual_size();
+       LogDisplayMode();
+       OnFocusUpdate(true, destruction_receiver);
+       break;
+@@ -643,6 +673,7 @@
+       OnFocusUpdate(false, destruction_receiver);
+       break;
+     case SDL_EVENT_WINDOW_EXPOSED:
++      sync_actual_size();
+       // The platform cannot retain the previous image; force the paint.
+       OnPaint(true);
+       break;
+@@ -650,6 +681,7 @@
+       OnMinimized(destruction_receiver);
+       break;
+     case SDL_EVENT_WINDOW_RESTORED:
++      sync_actual_size();
+       OnRestored(destruction_receiver);
+       break;
+     case SDL_EVENT_WINDOW_CLOSE_REQUESTED:

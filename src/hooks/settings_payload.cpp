@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <algorithm>
+#include <fstream>
 #include <set>
 #include <rex/cvar.h>
 #include <rex/runtime.h>
@@ -31,6 +32,10 @@ namespace rb_blitz::settings {
 namespace {
 using ultimate_adapter::ArkIndex;
 using Bytes = std::vector<uint8_t>;
+
+void PumpStartupWindow(const std::function<void()>& pump) {
+  if (pump) pump();
+}
 
 bool Read(rex::filesystem::VirtualFileSystem* vfs, const std::string& path,
           uint64_t offset, size_t length, Bytes* bytes, std::string* error) {
@@ -68,9 +73,38 @@ bool ReadRecord(rex::filesystem::VirtualFileSystem* vfs, const ArkIndex& index,
   return false;
 }
 
-bool WriteBytes(const std::filesystem::path& path, const Bytes& bytes, std::string* error) {
-  return WriteFileAtomic(path, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()),
-                         error);
+bool WriteEphemeralBytes(const std::filesystem::path& path, const Bytes& bytes,
+                         const std::function<void()>& pump, std::string* error) {
+  // The archive is mounted only after this stream closes and lives in a PID-specific
+  // cache directory. A durable, atomic replace would wait for a 50+ MB disk flush
+  // before launch, although no process can use a partial archive from this boot.
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  if (ec) {
+    if (error) *error = "cannot create generated UI archive directory: " + ec.message();
+    return false;
+  }
+  std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+  if (stream) {
+    constexpr size_t kWriteChunk = 256 * 1024;
+    auto next_pump = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+    for (size_t offset = 0; offset < bytes.size(); offset += kWriteChunk) {
+      const size_t count = std::min(kWriteChunk, bytes.size() - offset);
+      stream.write(reinterpret_cast<const char*>(bytes.data() + offset),
+                   static_cast<std::streamsize>(count));
+      if (!stream) break;
+      const auto now = std::chrono::steady_clock::now();
+      if (now >= next_pump) {
+        PumpStartupWindow(pump);
+        next_pump = now + std::chrono::milliseconds(50);
+      }
+    }
+    stream.close();
+  }
+  if (stream) return true;
+  std::filesystem::remove(path, ec);
+  if (error) *error = "cannot write generated UI archive " + path.string();
+  return false;
 }
 
 void CollectLocale(const ui::dtb::Node& node, std::map<std::string, std::string>* labels) {
@@ -102,7 +136,8 @@ std::string ResolutionChoiceLabel(const DisplayMode& size) {
 }
 }
 
-bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
+bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
+                        const std::function<void()>& pump_startup_window) {
   ultimate_runtime::SetSongEntryRouteReady(false);
   ultimate_runtime::SetSelectionRouteReady(false);
   const auto started = std::chrono::steady_clock::now();
@@ -374,13 +409,13 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
   MenuRecords records;
   MenuRefreshRoutes refresh_routes;
   std::vector<std::string> build_notes;
-  const bool skip_startup_logos = settings_restart_boot ||
-      rex::cvar::GetFlagByName("startup_mode") == "fast" ||
-      rex::cvar::GetFlagByName("song_load_recovered") == "true";
+  const bool skip_startup_logos =
+      rex::cvar::GetFlagByName("startup_mode") == "fast";
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), refresh_row_on, &build_notes, menu_filter::HiddenRows(),
                         skip_startup_logos, &refresh_routes))
     return fail();
+  PumpStartupWindow(pump_startup_window);
   bool song_entry_patched = false;
   bool song_selection_patched = false;
   if (ultimate::Provider().Active()) {
@@ -433,6 +468,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
                   at == labels.end() ? "(missing)" : at->second);
     }
   }
+  const auto records_ready = std::chrono::steady_clock::now();
   Bytes part;
   std::string part_path;
   // The mounted part's own bytes, so the extended archive can stay a *one-part* archive: the title
@@ -446,13 +482,18 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
     }
   }
   const Bytes header = ExtendMenuArchive(patch, records, mounted_part, &part_path, &part);
+  const auto archive_ready = std::chrono::steady_clock::now();
+  PumpStartupWindow(pump_startup_window);
   // Only generated records live in the cache root, and when a payload is installed the part also
   // carries a byte-for-byte copy of the mounted part those records were appended to. Installed game
   // and provider files on disk stay read-only either way: nothing here is ever written back.
   const auto root = runtime->cache_root() / "settings-menu" /
                     std::to_string(platform::ThisProcessId());
-  if (!WriteBytes(root / part_path, part, &error) ||
-      !WriteBytes(root / "gen/patch_xbox.hdr", header, &error)) return fail();
+  if (!WriteEphemeralBytes(root / part_path, part, pump_startup_window, &error) ||
+      !WriteEphemeralBytes(root / "gen/patch_xbox.hdr", header, pump_startup_window,
+                           &error)) return fail();
+  const auto archive_written = std::chrono::steady_clock::now();
+  PumpStartupWindow(pump_startup_window);
   constexpr std::string_view mount = "\\Device\\BlitzSettingsMenu";
   auto* base = vfs->ResolvePath("game:\\");
   auto overlay = std::make_unique<fs::PayloadOverlayDevice>(mount, root, base);
@@ -482,10 +523,14 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
     menu_options::Sha1Digest(replacement.data(), replacement.size(), after);
     menu_filter::RetargetRecord(runtime->memory()->virtual_membase(), before, after);
   }
-  REXLOG_INFO("settings_menu: mounted {} generated records over {} provider records in {} ms",
+  REXLOG_INFO("settings_menu: mounted {} generated records over {} provider records in {} ms "
+              "(build={} ms, assemble={} ms, write={} ms)",
               records.size(), patch.entries.size(),
               std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::steady_clock::now() - started).count());
+                  std::chrono::steady_clock::now() - started).count(),
+              std::chrono::duration_cast<std::chrono::milliseconds>(records_ready - started).count(),
+              std::chrono::duration_cast<std::chrono::milliseconds>(archive_ready - records_ready).count(),
+              std::chrono::duration_cast<std::chrono::milliseconds>(archive_written - archive_ready).count());
   return true;
 }
 }

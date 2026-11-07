@@ -10,7 +10,8 @@ play; the catalogue is not a universal no-stutter guarantee.
 The [active hot-apply plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md)
 records a negative live Resolution gate (2026-11-06): the guest frame is allocated
 at construction, and both backends capture scale in caches that lack an owned
-in-loop reconstruction path. Window Mode previews change presentation only;
+in-loop reconstruction path. Window Mode previews change presentation only and are now
+classified immediate after measured transitions on both backends;
 Resolution, filtering and native MSAA remain restart-scoped pending their own
 resource-lifetime proofs.
 

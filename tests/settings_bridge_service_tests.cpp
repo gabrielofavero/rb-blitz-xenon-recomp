@@ -831,6 +831,9 @@ void TestDisplayPreviewPersistsOnlyOnKeep() {
   h.sink.SetDisplayPreviewHooks(std::move(hooks));
   const std::string old = h.service.EffectiveValue(SettingId::kDisplay).text;
   const std::string requested = old == "windowed" ? "borderless" : "windowed";
+  CHECK_TRUE(h.Send("rbbz-settings/set/graphics.display/t:" + requested).status ==
+             Status::kInvalid);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kDisplay).text == old);
   CHECK_TRUE(h.Send("rbbz-settings/invoke/display.preview." + requested + "/-").status ==
              Status::kOk);
   CHECK_TRUE(h.Holds("display.preview_active", WireValue::Bool(true)));
@@ -842,6 +845,7 @@ void TestDisplayPreviewPersistsOnlyOnKeep() {
   CHECK_TRUE(h.Send("rbbz-settings/invoke/display.keep/-").status == Status::kOk);
   CHECK_TRUE(!active && h.Holds("display.keep_ok", WireValue::Bool(true)));
   CHECK_TRUE(h.service.EffectiveValue(SettingId::kDisplay).text == requested);
+  CHECK_TRUE(h.Holds("commit.restart_required", WireValue::Bool(false)));
   CHECK_TRUE(acknowledgments == 1);
   CHECK_TRUE(ReadText(h.paths.settings_file).find("display") != std::string::npos);
 

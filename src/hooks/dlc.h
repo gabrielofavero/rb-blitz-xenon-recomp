@@ -15,12 +15,22 @@ class Runtime;
 }  // namespace rex
 
 namespace rb_blitz::dlc {
-// Begin the host-only flat-library scan while graphics presentation is being set up.
-// Configure() consumes this result before the guest starts.
-void PrepareBootLibraryScan(const std::filesystem::path& game_data_root);
+// Start a cached flat-library scan while graphics presentation is set up. A
+// first-time scan starts after the guest reaches its native discovery screen.
+// Configure() uses the result when ready and otherwise arms that screen's
+// nonblocking scan barrier.
+void PrepareBootLibraryScan(const std::filesystem::path& game_data_root,
+                            const std::filesystem::path& identity_cache_path);
 
-// Registers the DLC sources as extra read-only content, so packages dropped there
-// enumerate and open exactly like content installed under Documents\Rock Band Blitz:
+// Paths found before the first guest frame, including candidates whose headers
+// are still being scanned. Shell music captures this list once for its catalog;
+// the content manager receives only validated packages before discovery starts.
+std::vector<std::filesystem::path> BootCandidatePackagePaths();
+
+// Captures the DLC sources as extra read-only content. A cached result is
+// registered here; a cold result is registered at the native discovery barrier
+// before the title snapshots content. Packages then enumerate and open exactly
+// like content installed under Documents\Rock Band Blitz:
 //
 //   * --dlc_root (default <game_data_root>/dlc), laid out as
 //     <title_id>/<content_type>/<package>, mounted in place; and

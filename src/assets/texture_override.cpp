@@ -691,12 +691,18 @@ void InstallP1TextureOverride() {
 }
 
 void InstallControllerSchemes(const std::filesystem::path& install_root,
-                              const std::filesystem::path& user_root) {
+                              const std::filesystem::path& user_root,
+                              const std::function<void()>& pump_startup_window) {
   const auto started = std::chrono::steady_clock::now();
   REXLOG_INFO("controller_schemes: discovery begin install='{}' user='{}'",
               install_root.string(), user_root.string());
+  auto observer = [&](const std::filesystem::path& folder, bool begin,
+                      bool accepted, uint64_t elapsed_ms) {
+    LogSchemeDiscovery(folder, begin, accepted, elapsed_ms);
+    if (pump_startup_window) pump_startup_window();
+  };
   auto registry = controller_schemes::Discover(install_root, user_root,
-                                                DecodeSchemePngTimed, LogSchemeDiscovery);
+                                                DecodeSchemePngTimed, observer);
   const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - started).count();
   REXLOG_INFO("controller_schemes: discovery end elapsed_ms={}", elapsed);

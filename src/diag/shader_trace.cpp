@@ -7,6 +7,7 @@
 #include <rex/hook.h>
 #include <rex/logging.h>
 #include <rex/system/xmemory.h>
+#include <atomic>
 #include <string>
 
 REX_EXTERN(__imp__sub_822CB0D0); // ServerConnectPanel::start_connect_process
@@ -18,7 +19,15 @@ namespace rb_blitz::diag::shader_trace {
 namespace {
 bool menu_seen = false; // guest/UI thread only
 bool in_game_screen = false;
+std::atomic<bool> native_startup_panel_ready{false};
+std::atomic<bool> native_splash_ready{false};
 } // namespace
+bool NativeStartupPanelReady() {
+  return native_startup_panel_ready.load(std::memory_order_acquire);
+}
+bool NativeSplashReady() {
+  return native_splash_ready.load(std::memory_order_acquire);
+}
 void LogConfiguration() {
   if (!trace::Enabled())
     return;
@@ -54,6 +63,10 @@ void LogConfiguration() {
 }
 void ObserveScreen(std::string_view screen, std::string_view panel,
                    std::string_view focus, bool transitioning) {
+  if (!transitioning && !screen.empty() && !panel.empty())
+    native_startup_panel_ready.store(true, std::memory_order_release);
+  if (!transitioning && screen == "splash_screen" && panel == "splash_panel")
+    native_splash_ready.store(true, std::memory_order_release);
   // Small, always-on startup evidence for intermittent blank/blue boots. This
   // observes native UI state only; it cannot establish that pixels rendered.
   // Keep it independent of the expensive shader diagnostic switch.

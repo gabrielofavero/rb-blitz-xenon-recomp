@@ -63,7 +63,7 @@ bool JournalRead(const toml::Document& document, std::string_view section,
     const auto item = document.Get(section, key);
     Value value;
     value.kind = descriptor->value_kind;
-    if (value.kind == ValueKind::kList && item.scalar && item.value == "absent") {
+    if (item.scalar && item.value == "absent") {
       (*values)[descriptor->id] = Value{};
       continue;
     }
@@ -473,8 +473,15 @@ ValidationResult Service::StageDefaults(uint64_t txn) {
   std::map<SettingId, Value> defaults;
   for (const Descriptor& descriptor : descriptors_) {
     if (descriptor.widget == WidgetKind::kAction || external_.contains(descriptor.id)) continue;
-    if (IsProviderFileRow(descriptor.id) &&
-        (!provider_ || provider_->Readiness() != ProviderReadiness::kCompatible)) continue;
+    if (!IsProviderFileRow(descriptor.id)) {
+      // An omitted native key means "use the default". Clearing the saved value also works
+      // when a compiled graphics default is unavailable on this device; the normal boot
+      // reconciler then selects its supported effective value.
+      if (store_.document().values.contains(descriptor.id))
+        defaults.emplace(descriptor.id, Value{});
+      continue;
+    }
+    if (!provider_ || provider_->Readiness() != ProviderReadiness::kCompatible) continue;
     const auto provider_default = provider_defaults_.find(descriptor.id);
     const Value& value = provider_default == provider_defaults_.end()
                              ? descriptor.compiled_default : provider_default->second;
@@ -536,16 +543,20 @@ CommitResult Service::Commit(uint64_t txn) {
     const Descriptor* descriptor = DescriptorFor(id);
     const bool provider_restore = pending_defaults_ && IsProviderFileRow(id) && provider_ &&
                                   provider_->Readiness() == ProviderReadiness::kCompatible;
+    const bool native_restore = pending_defaults_ && !IsProviderFileRow(id) &&
+                                value.kind == ValueKind::kNone;
     if (descriptor == nullptr ||
         ((descriptor->availability == Availability::kHidden ||
-          descriptor->availability == Availability::kVisibleDisabled) && !provider_restore) ||
+          descriptor->availability == Availability::kVisibleDisabled) &&
+         !provider_restore && !native_restore) ||
         external_.count(id) != 0) {
       result.status = CommitStatus::kInvalid;
       result.errors.push_back("settings.row_unavailable");
       return result;
     }
-    const ValidationResult validation = value.kind == ValueKind::kNone &&
-                                        descriptor->compiled_default.kind == ValueKind::kNone
+    const ValidationResult validation = native_restore ||
+                                        (value.kind == ValueKind::kNone &&
+                                         descriptor->compiled_default.kind == ValueKind::kNone)
         ? ValidationResult{true, ""}
         : reconciler->Validate(id, *descriptor, value, capabilities_);
     if (!validation.ok) {
@@ -754,7 +765,8 @@ bool Service::RecoverCommit(std::string* error) {
     if (IsProviderFileRow(id)) { *error = "Invalid native journal row"; return false; }
     const auto current = disk.document.values.find(id);
     const auto previous = base.find(id);
-    committed &= current != disk.document.values.end() && ValueEquals(current->second, value);
+    committed &= value.kind == ValueKind::kNone ? current == disk.document.values.end()
+        : current != disk.document.values.end() && ValueEquals(current->second, value);
     unchanged &= previous == base.end() ? current == disk.document.values.end()
         : current != disk.document.values.end() && ValueEquals(current->second, previous->second);
   }

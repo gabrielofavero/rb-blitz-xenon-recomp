@@ -143,6 +143,7 @@ bool LoadImage(const fs::path& folder, const std::string& name, DecodePng decode
   if (!SafeImagePath(folder, name, &path, why)) return false;
   if (!decoder(path, image, why)) return false;
   if (!ValidImage(*image)) { *why = "invalid RGBA8 dimensions: " + name; return false; }
+  image->source_file = name;
   return true;
 }
 const Slot* FindButton(const std::string& id) {
@@ -470,6 +471,224 @@ bool LoadCalibrationImage(const Scheme& scheme, const InputImage& input, bool pr
   return true;
 }
 
+namespace {
+// The cache is a build artifact, stored beside each installed scheme. Keeping
+// the PNG payloads compressed gives WIC the same bytes as the source loader,
+// while replacing hundreds of cold file opens with one sequential read.
+constexpr char kSchemeCacheMagic[8] = {'R', 'B', 'S', 'C', 'H', '0', '1', '\0'};
+constexpr uintmax_t kMaxSchemeCacheBytes = 128ull * 1024 * 1024;
+
+void WriteU32(std::ostream& out, uint32_t value) {
+  const char bytes[4] = {char(value), char(value >> 8), char(value >> 16), char(value >> 24)};
+  out.write(bytes, 4);
+}
+bool ReadU32(std::istream& in, uint32_t* value) {
+  unsigned char bytes[4]{};
+  if (!in.read(reinterpret_cast<char*>(bytes), 4)) return false;
+  *value = uint32_t(bytes[0]) | (uint32_t(bytes[1]) << 8) |
+           (uint32_t(bytes[2]) << 16) | (uint32_t(bytes[3]) << 24);
+  return true;
+}
+void WriteString(std::ostream& out, std::string_view value) {
+  WriteU32(out, static_cast<uint32_t>(value.size()));
+  out.write(value.data(), static_cast<std::streamsize>(value.size()));
+}
+bool ReadString(std::istream& in, std::string* value) {
+  uint32_t size = 0;
+  if (!ReadU32(in, &size) || size > 65536) return false;
+  value->resize(size);
+  return bool(in.read(value->data(), size));
+}
+void WriteStrings(std::ostream& out, const std::vector<std::string>& values) {
+  WriteU32(out, static_cast<uint32_t>(values.size()));
+  for (const auto& value : values) WriteString(out, value);
+}
+bool ReadStrings(std::istream& in, std::vector<std::string>* values, uint32_t max_count) {
+  uint32_t count = 0;
+  if (!ReadU32(in, &count) || count > max_count) return false;
+  values->resize(count);
+  for (auto& value : *values)
+    if (!ReadString(in, &value)) return false;
+  return true;
+}
+void WritePaths(std::ostream& out, const std::vector<fs::path>& paths) {
+  WriteU32(out, static_cast<uint32_t>(paths.size()));
+  for (const auto& path : paths) WriteString(out, path.generic_string());
+}
+bool ReadPaths(std::istream& in, std::vector<fs::path>* paths) {
+  uint32_t count = 0;
+  if (!ReadU32(in, &count) || count > 512) return false;
+  paths->clear();
+  paths->reserve(count);
+  for (uint32_t i = 0; i < count; ++i) {
+    std::string value;
+    if (!ReadString(in, &value)) return false;
+    paths->emplace_back(std::u8string(value.begin(), value.end()));
+  }
+  return true;
+}
+bool WriteImage(std::ostream& out, const Scheme& scheme, const Image& image,
+                std::string* why) {
+  if (image.source_file.empty()) { *why = "cache image has no source path"; return false; }
+  WriteString(out, image.source_file);
+  const fs::path path = scheme.folder /
+      fs::path(std::u8string(image.source_file.begin(), image.source_file.end()));
+  std::ifstream png(path, std::ios::binary | std::ios::ate);
+  if (!png) { *why = "cannot read cache image: " + image.source_file; return false; }
+  const auto size = png.tellg();
+  if (size < 26 || size > static_cast<std::streamoff>(kMaxPngBytes)) {
+    *why = "cache image size outside 26 bytes..8 MB: " + image.source_file;
+    return false;
+  }
+  std::vector<char> bytes(static_cast<size_t>(size));
+  png.seekg(0);
+  if (!png.read(bytes.data(), size)) {
+    *why = "cannot read cache image: " + image.source_file;
+    return false;
+  }
+  WriteU32(out, static_cast<uint32_t>(bytes.size()));
+  out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  return bool(out);
+}
+bool ReadImage(std::istream& in, Image* image, std::string* why) {
+  std::string path;
+  uint32_t size = 0;
+  if (!ReadString(in, &path) || path.empty() || !ReadU32(in, &size) ||
+      size < 26 || size > kMaxPngBytes) {
+    *why = "invalid cache image header";
+    return false;
+  }
+  std::vector<uint8_t> bytes(size);
+  if (!in.read(reinterpret_cast<char*>(bytes.data()), size)) {
+    *why = "truncated cached image";
+    return false;
+  }
+#ifdef _WIN32
+  if (!DecodePngWicBytes(bytes.data(), bytes.size(), image, why) || !ValidImage(*image)) {
+    if (why->empty()) *why = "invalid cached image";
+    return false;
+  }
+#else
+  *why = "packed scheme images require the Windows decoder";
+  return false;
+#endif
+  image->source_file = std::move(path);
+  return true;
+}
+}  // namespace
+
+bool WriteSchemeCache(const Scheme& scheme, const fs::path& cache_path,
+                      std::string* why) {
+  std::ofstream out(cache_path, std::ios::binary | std::ios::trunc);
+  if (!out) { *why = "cannot create scheme cache"; return false; }
+  out.write(kSchemeCacheMagic, sizeof(kSchemeCacheMagic));
+  WriteString(out, scheme.id);
+  WriteString(out, scheme.name);
+  WriteString(out, scheme.kind);
+  WriteU32(out, static_cast<uint32_t>(scheme.schema_version));
+  WriteU32(out, (scheme.has_shared_pad ? 1u : 0u) |
+                    (scheme.has_icons ? 2u : 0u) |
+                    (scheme.use_retail_ps_pads ? 4u : 0u));
+  WriteU32(out, static_cast<uint32_t>(scheme.buttons.size()));
+  for (const auto& [slot, image] : scheme.buttons)
+    if (WriteString(out, slot); !WriteImage(out, scheme, image, why)) return false;
+  WriteU32(out, static_cast<uint32_t>(scheme.pads.size()));
+  for (const auto& [slot, image] : scheme.pads)
+    if (WriteString(out, slot); !WriteImage(out, scheme, image, why)) return false;
+  if (scheme.has_shared_pad && !WriteImage(out, scheme, scheme.shared_pad, why)) return false;
+  if (scheme.has_icons && !WriteImage(out, scheme, scheme.icons, why)) return false;
+  WriteU32(out, static_cast<uint32_t>(scheme.inputs.size()));
+  for (const auto& input : scheme.inputs) {
+    WriteString(out, input.id);
+    WriteString(out, input.source);
+    WriteString(out, input.slot);
+    WriteString(out, input.variant);
+    WriteString(out, input.file);
+    WriteStrings(out, input.components);
+    WriteStrings(out, input.modifiers);
+    if (!WriteImage(out, scheme, input.image, why)) return false;
+  }
+  WritePaths(out, scheme.extra_files);
+  WritePaths(out, scheme.declared_files);
+  WriteU32(out, static_cast<uint32_t>(scheme.calibration_pairs.size()));
+  for (const auto& id : scheme.calibration_pairs) WriteString(out, id);
+  out.flush();
+  if (!out) { *why = "cannot finish scheme cache"; return false; }
+  return true;
+}
+
+bool LoadSchemeCache(const fs::path& folder, Scheme* result, std::string* why) {
+  const fs::path cache_path = folder / "scheme.cache";
+  std::error_code ec;
+  if (!fs::is_regular_file(cache_path, ec) ||
+      fs::file_size(cache_path, ec) > kMaxSchemeCacheBytes || ec) {
+    *why = "scheme cache absent or oversized";
+    return false;
+  }
+  std::ifstream in(cache_path, std::ios::binary);
+  char magic[sizeof(kSchemeCacheMagic)]{};
+  if (!in.read(magic, sizeof(magic)) ||
+      !std::equal(std::begin(magic), std::end(magic), std::begin(kSchemeCacheMagic))) {
+    *why = "scheme cache version mismatch";
+    return false;
+  }
+  Scheme scheme;
+  scheme.folder = folder;
+  uint32_t version = 0, flags = 0, count = 0;
+  if (!ReadString(in, &scheme.id) || !ReadString(in, &scheme.name) ||
+      !ReadString(in, &scheme.kind) || !ReadU32(in, &version) ||
+      !ReadU32(in, &flags) || (version != 1 && version != 2) || flags > 7 ||
+      scheme.id != folder.filename().string() ||
+      scheme.kind != (scheme.id == "keyboard-mouse" ? "keyboard-mouse" : "controller")) {
+    *why = "invalid scheme cache identity";
+    return false;
+  }
+  scheme.schema_version = static_cast<int>(version);
+  scheme.has_shared_pad = (flags & 1) != 0;
+  scheme.has_icons = (flags & 2) != 0;
+  scheme.use_retail_ps_pads = (flags & 4) != 0;
+  if (!ReadU32(in, &count) || count > 128) goto invalid;
+  for (uint32_t i = 0; i < count; ++i) {
+    std::string slot;
+    Image image;
+    if (!ReadString(in, &slot) || !ReadImage(in, &image, why) ||
+        !scheme.buttons.emplace(std::move(slot), std::move(image)).second) goto invalid;
+  }
+  if (!ReadU32(in, &count) || count > 8) goto invalid;
+  for (uint32_t i = 0; i < count; ++i) {
+    std::string slot;
+    Image image;
+    if (!ReadString(in, &slot) || !ReadImage(in, &image, why) ||
+        !scheme.pads.emplace(std::move(slot), std::move(image)).second) goto invalid;
+  }
+  if (scheme.has_shared_pad && !ReadImage(in, &scheme.shared_pad, why)) goto invalid;
+  if (scheme.has_icons && !ReadImage(in, &scheme.icons, why)) goto invalid;
+  if (!ReadU32(in, &count) || count > 128) goto invalid;
+  scheme.inputs.reserve(count);
+  for (uint32_t i = 0; i < count; ++i) {
+    InputImage entry;
+    if (!ReadString(in, &entry.id) || !ReadString(in, &entry.source) ||
+        !ReadString(in, &entry.slot) || !ReadString(in, &entry.variant) ||
+        !ReadString(in, &entry.file) || !ReadStrings(in, &entry.components, 8) ||
+        !ReadStrings(in, &entry.modifiers, 1) || !ReadImage(in, &entry.image, why)) goto invalid;
+    scheme.inputs.push_back(std::move(entry));
+  }
+  if (!ReadPaths(in, &scheme.extra_files) || !ReadPaths(in, &scheme.declared_files) ||
+      !ReadU32(in, &count) || count > 128) goto invalid;
+  for (uint32_t i = 0; i < count; ++i) {
+    std::string id;
+    if (!ReadString(in, &id) || !scheme.calibration_pairs.insert(std::move(id)).second)
+      goto invalid;
+  }
+  if (in.peek() != std::char_traits<char>::eof()) goto invalid;
+  scheme.from_cache = true;
+  *result = std::move(scheme);
+  return true;
+invalid:
+  if (why->empty()) *why = "truncated or invalid scheme cache";
+  return false;
+}
+
 const Scheme* Registry::Find(const std::string& id) const {
   auto it = schemes.find(id); return it == schemes.end() ? nullptr : &it->second;
 }
@@ -477,8 +696,11 @@ std::string Registry::Summary() const {
   std::ostringstream out;
   out << "Xbox 360 (retail)";
   for (const auto& [id, scheme] : schemes) out << ", " << scheme.name << " (" << id << ")";
+  size_t cached = has_keyboard_mouse && keyboard_mouse.from_cache ? 1 : 0;
+  for (const auto& [id, scheme] : schemes) cached += scheme.from_cache ? 1 : 0;
   out << "; internal_keyboard=" << (has_keyboard_mouse ? keyboard_mouse.inputs.size() : 0);
-  out << "; rejected=" << rejected.size() << "; shadowed=" << shadowed.size();
+  out << "; cached=" << cached << "; rejected=" << rejected.size()
+      << "; shadowed=" << shadowed.size();
   return out.str();
 }
 Registry Discover(const fs::path& install_root, const fs::path& user_root, DecodePng decoder,
@@ -488,8 +710,11 @@ Registry Discover(const fs::path& install_root, const fs::path& user_root, Decod
                   Scheme* scheme, std::string* why) {
     if (observer) observer(folder, true, false, 0);
     const auto started = std::chrono::steady_clock::now();
-    const bool accepted = internal ? LoadInternalKeyboard(folder, decoder, scheme, why)
-                                   : LoadScheme(folder, trusted, decoder, scheme, why);
+    // Only the build-installed assets carry a cache. A user's package is always
+    // parsed and validated from its source so edits take effect on the next boot.
+    const bool cached = trusted && LoadSchemeCache(folder, scheme, why);
+    const bool accepted = cached || (internal ? LoadInternalKeyboard(folder, decoder, scheme, why)
+                                              : LoadScheme(folder, trusted, decoder, scheme, why));
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started).count();
     if (observer) observer(folder, false, accepted, static_cast<uint64_t>(elapsed));

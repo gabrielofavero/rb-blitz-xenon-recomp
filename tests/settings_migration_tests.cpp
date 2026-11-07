@@ -206,6 +206,16 @@ void TestMigrateDefault() {
   CHECK_TRUE(again.status == MigrationStatus::kAlreadyCurrent);
   CHECK_FALSE(again.wrote_settings);
   CHECK_FALSE(again.wrote_paths);
+
+  BeginCase("migrate: a cleared setting remains at its default after restart");
+  second.MarkChanged(SettingId::kTarget, Value{}, Origin::kDefault);
+  CHECK_TRUE(second.Save().status == CommitStatus::kSaved);
+  Store restored(paths);
+  restored.Load();
+  const MigrationResult after_restore = Migrate(legacy, restored, PathEntry{});
+  CHECK_TRUE(after_restore.status == MigrationStatus::kAlreadyCurrent);
+  CHECK_FALSE(after_restore.wrote_settings);
+  CHECK_FALSE(restored.document().values.contains(SettingId::kTarget));
 }
 
 void TestMigrateTranslations() {

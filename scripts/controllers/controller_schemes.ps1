@@ -29,10 +29,6 @@ if (-not $Destination) {
 foreach ($folder in $folders) {
     $internal = (Split-Path -Leaf $folder) -eq 'keyboard-mouse'
     $mode = if ($internal) { '--validate-internal-keyboard' } else { '--validate' }
-    $listMode = if ($internal) { '--list-internal-keyboard' } else { '--list-declared' }
-    $report = @(& $tool $mode $folder)
-    if ($LASTEXITCODE -ne 0) { throw "Invalid controller scheme: $folder" }
-    if (-not $Pack) { $report | ForEach-Object { Write-Host $_ } }
     if ($Pack) {
         $targetRoot = if ($internal) { Split-Path -Parent $Destination } else { $Destination }
         New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null
@@ -47,8 +43,8 @@ foreach ($folder in $folders) {
             Remove-Item -LiteralPath $targetFull -Recurse -Force
         }
         New-Item -ItemType Directory -Path $target -Force | Out-Null
-        $files = @(& $tool $listMode $folder)
-        if ($LASTEXITCODE -ne 0) { throw "Cannot list declared files: $folder" }
+        $files = @(& $tool --write-cache $folder (Join-Path $target 'scheme.cache'))
+        if ($LASTEXITCODE -ne 0) { throw "Cannot cache validated controller scheme: $folder" }
         foreach ($relative in $files) {
             $from = Join-Path $folder $relative
             $to = Join-Path $target $relative
@@ -56,6 +52,10 @@ foreach ($folder in $folders) {
             Copy-Item -LiteralPath $from -Destination $to -Force
         }
         Write-Host "Packed $folder -> $target"
+    } elseif ($Validate) {
+        $report = @(& $tool $mode $folder)
+        if ($LASTEXITCODE -ne 0) { throw "Invalid controller scheme: $folder" }
+        $report | ForEach-Object { Write-Host $_ }
     }
 }
 if ($folders.Count -eq 0) { Write-Host 'No owner controller schemes found.' }

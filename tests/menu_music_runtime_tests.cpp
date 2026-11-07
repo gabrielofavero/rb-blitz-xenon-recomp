@@ -62,6 +62,7 @@ namespace rb_blitz::dlc {
 bool RefreshArmed() { return false; }
 void PublishPendingRefresh() {}
 std::vector<std::filesystem::path> LibraryPackagePaths() { return {}; }
+std::vector<std::filesystem::path> BootCandidatePackagePaths() { return {}; }
 }
 namespace rb_blitz::fs {
 std::unique_ptr<rex::filesystem::Device> MountPackage(
@@ -593,6 +594,74 @@ void TestMusicFeatureConfiguration() {
   g_buffers.clear();
 }
 
+void TestEarlyCatalogValidation() {
+  using namespace rb_blitz::shell_music;
+  rb_blitz::test::BeginCase("early catalog validation preserves warm songs and invalidates changed packages");
+  const auto root = std::filesystem::temp_directory_path() /
+      ("rbbz-preload-catalog-" + std::to_string(NowMs()));
+  std::filesystem::create_directory(root);
+  const auto first = root / "first.con", second = root / "second.con", added = root / "added.con";
+  { std::ofstream(first) << "first"; std::ofstream(second) << "second"; }
+  const auto cache = root / "catalog.cache";
+  MusicCatalog saved{
+      {first, catalog::Identity(first), {{"", "songs/first/first", "First"}}},
+      {second, catalog::Identity(second), {{"", "songs/second/second", "Second"}}}};
+  std::string why;
+  CHECK_TRUE(catalog::Save(cache, saved, &why));
+  FLAGS_enhancements_menu_dlc_songs_storage_() = true;
+  PrepareBootCatalog(cache);
+  CHECK_TRUE(g_boot_catalog_job.has_value());
+  g_boot_catalog_job->result.wait();
+  auto ready = TryLoadBootCatalog(cache, {second, first, added});
+  CHECK_TRUE(ready.has_value());
+  auto loaded = std::move(*ready);
+  CHECK_FALSE(g_boot_catalog_job.has_value());
+  CHECK_EQ(loaded.size(), 3u);
+  CHECK_TRUE(loaded[0].identity == saved[1].identity);
+  CHECK_TRUE(loaded[0].songs[0].song_key == "Second");
+  CHECK_TRUE(loaded[1].identity == saved[0].identity);
+  CHECK_TRUE(loaded[1].songs[0].song_key == "First");
+  CHECK_FALSE(loaded[2].identity.has_value());
+
+  { std::ofstream(first, std::ios::app) << " changed"; }
+  PrepareBootCatalog(cache);
+  CHECK_TRUE(g_boot_catalog_job.has_value());
+  g_boot_catalog_job->result.wait();
+  ready = TryLoadBootCatalog(cache, {first, second});
+  CHECK_TRUE(ready.has_value());
+  loaded = std::move(*ready);
+  CHECK_FALSE(loaded[0].identity.has_value());
+  CHECK_TRUE(loaded[0].songs.empty());
+  CHECK_TRUE(loaded[1].identity.has_value());
+
+  // Another process can replace the cache during renderer setup. In that case
+  // Configure must read the new cache rather than publishing the old snapshot.
+  PrepareBootCatalog(cache);
+  CHECK_TRUE(g_boot_catalog_job.has_value());
+  g_boot_catalog_job->result.wait();
+  const auto old_preload = g_boot_catalog_job->result;
+  saved[0].identity = catalog::Identity(first);
+  saved[0].songs[0].song_key = "FirstAfterReplacement";
+  CHECK_TRUE(catalog::Save(cache, saved, &why));
+  ready = TryLoadBootCatalog(cache, {first, second});
+  CHECK_FALSE(ready.has_value()); // the boot thread delegates changed cache I/O
+  loaded = LoadBootCatalogOnWorker(cache, {first, second}, old_preload);
+  CHECK_TRUE(loaded[0].identity.has_value());
+  CHECK_TRUE(loaded[0].songs[0].song_key == "FirstAfterReplacement");
+  std::promise<PrevalidatedCatalog> blocked;
+  g_boot_catalog_job.emplace(BootCatalogJob{cache, blocked.get_future().share()});
+  const auto started = std::chrono::steady_clock::now();
+  ready = TryLoadBootCatalog(cache, {first, second});
+  CHECK_FALSE(ready.has_value());
+  CHECK_TRUE(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(100));
+  blocked.set_value(PrevalidateCatalog(cache));
+  g_boot_catalog_job.reset();
+  std::filesystem::remove(first);
+  std::filesystem::remove(second);
+  std::filesystem::remove(cache);
+  std::filesystem::remove(root);
+}
+
 void TestBundledMusic(const std::filesystem::path& game = {}) {
   using namespace rb_blitz;
   using namespace shell_music;
@@ -890,6 +959,7 @@ int main(int argc, char** argv) {
   }
   TestBundledMusic();
   TestMusicFeatureConfiguration();
+  TestEarlyCatalogValidation();
   TestArtworkRead();
   using namespace rb_blitz::shell_music;
   TestNavigatorRuntime();

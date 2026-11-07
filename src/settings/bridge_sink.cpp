@@ -346,6 +346,11 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         response.message = "that row is an action; invoke it instead of setting it";
         break;
       }
+      if (id == SettingId::kDisplay) {
+        status = Status::kInvalid;
+        response.message = "window mode changes require display preview and Keep";
+        break;
+      }
       Value value;
       if (member && (request.value.kind != bridge::ValueKind::kBool ||
                      request.setting.size() == member_prefix.size())) {

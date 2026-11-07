@@ -20,15 +20,21 @@ class Runtime;
 
 namespace rb_blitz::shell_music {
 
+// Validate a saved DLC song catalog on a host worker while the renderer is
+// setting up. Configure consumes the result after DLC supplies this boot's
+// candidate paths, so a warm library retains its complete, uniform song draw
+// without doing thousands of file stats on the pre-launch UI thread.
+void PrepareBootCatalog(const std::filesystem::path& cache_path);
+
 // Hooks the engine's shell-music loader (0x82757F50) so that, with R9 on, every track
 // the menu asks for is a bundled or loaded DLC song rather than the title's own
 // three shell tracks. Bundled songs stream natively from the game archive.
-// DLC packages are mounted read-only from
-// rb_blitz::dlc::LibraryPackagePaths(), so nothing is copied and nothing under game/ is
-// written.
+// DLC packages are mounted read-only from the boot's stable path candidates, so
+// nothing is copied and nothing under game/ is written. Cold boot validation may
+// complete later; a candidate that is not a package fails background preparation.
 //
 // Call once from RbBlitzApp::OnPostLoadXexImage(), after dlc::Configure(): it reads the
-// bundled catalog and the library that layer just enumerated. Cached metadata supplies
+// bundled catalog and the DLC layer's early path candidates. Cached metadata supplies
 // uniform song selection independently of mount readiness; a cold catalog is built in
 // bounded worker batches only after the main menu is ready. Native music covers the wait.
 // A small rolling cache is prepared during native cache loading and menu playback. With the toggle off

@@ -1355,7 +1355,8 @@ the [active hot-apply plan](../plans/in-progress/2026-10-24-settings-hot-apply-p
 next-song and process-restart boundaries. The bridge applies only durably saved rows, including
 the native portion of a partial provider save; guest row/selection receipts and controller GPU
 tickets acknowledge deferred consumers. Display preview uses a recovery marker and authored
-Keep/Revert page. These routes remain strategy-gated until the plan's runtime acceptance passes.
+Keep/Revert page. Window Mode is now immediate through that measured route; the remaining
+Ultimate and loaded-menu routes remain strategy-gated until their runtime acceptance passes.
 
 §5.5 replaced "v1 is restart-only" with a per-row decision: a row is `hot` when its value can be applied to
 the **running** process **with a measured live effect**, `restart` otherwise. §8 then defines what happens

@@ -33,6 +33,10 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       MenuRefreshRoutes* refresh_routes = nullptr);
 // Empty the native startup playlist and release its wait, before the guest boots.
 bool SkipStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
+// Keep the provider's authored playlist, but wait for it on a normal boot.
+bool WaitForStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
+// Reorder the installed Ultimate playlist to Harmonix, Ultimate Mods, then regional notices.
+bool OrderUltimateStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Remove the retail balance chrome from the two screens that draw it.
 bool HidePowerupCurrency(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool HideResultsCurrency(std::vector<ui::dtb::Node>* roots, std::string* why);

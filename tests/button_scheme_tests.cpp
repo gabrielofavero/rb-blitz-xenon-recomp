@@ -88,6 +88,30 @@ int main() {
   Write(one / "extra.txt", "ignored");
   Check(LoadScheme(one, false, FakePng, &scheme, &why) && scheme.extra_files.size() == 1,
         "extra file was not reported");
+#ifdef _WIN32
+  // A packed install scheme must preserve the decoded pixels and metadata,
+  // and a damaged cache must fall back to the authored source package.
+  const auto cached_folder = Package(install, "cached", "[buttons]\na_button = \"a.png\"\n");
+  fs::copy_file(fs::path(RBBLITZ_SOURCE_DIR) /
+                    "assets/controller/meta-quest-2/buttons/a_button.png",
+                cached_folder / "a.png", fs::copy_options::overwrite_existing);
+  Scheme uncached;
+  Check(LoadScheme(cached_folder, false, DecodePngWic, &uncached, &why),
+        "real PNG package rejected before caching");
+  const auto cache_path = cached_folder / "scheme.cache";
+  Check(WriteSchemeCache(uncached, cache_path, &why), "scheme cache write failed");
+  Scheme reloaded;
+  Check(LoadSchemeCache(cached_folder, &reloaded, &why) && reloaded.from_cache &&
+        reloaded.id == uncached.id &&
+        reloaded.buttons.at("a_button").rgba == uncached.buttons.at("a_button").rgba,
+        "scheme cache changed the decoded art");
+  Check(Discover(install, user, FakePng).Find("cached")->from_cache,
+        "install discovery ignored a valid packed scheme");
+  fs::resize_file(cache_path, 12);
+  auto corrupt_fallback = Discover(install, user, FakePng);
+  Check(corrupt_fallback.Find("cached") && !corrupt_fallback.Find("cached")->from_cache,
+        "damaged scheme cache did not fall back to source validation");
+#endif
   const fs::path art = fs::path(RBBLITZ_SOURCE_DIR) / "assets/controller";
   struct Authored { const char* id; size_t inputs; size_t pads; };
   const Authored authored_packages[] = {

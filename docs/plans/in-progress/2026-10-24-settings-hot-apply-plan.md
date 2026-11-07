@@ -2,7 +2,7 @@
 
 Date: 2026-10-24. Status: **in progress**. The 2026-11-06–07 work below adds acknowledged
 application state, observed D3D12 and Vulkan display transitions, and guarded Ultimate and menu routes.
-No additional strategy was promoted.
+Window Mode is now the tenth immediate strategy; Resolution remains restart-scoped.
 
 ## 0. Progress record (2026-11-06–07)
 
@@ -10,15 +10,19 @@ No additional strategy was promoted.
 | --- | --- | --- |
 | P0 | Static inventory and measurement hooks delivered | `out/_swap/hot-settings/p0/inventory.json` covers all 48 player preferences, with 48/48 static consumer sites, 17/17 installed provider row macros, and baseline 9 immediate/0 menu-return/0 next-song/39 restart. The provider audit parsed 42 installed DTBs and separates read candidates from writes without publishing extracted data. Bounded request/defer/consumer/ack logs carry revision, generation, value, boundary and reason. Static sites do not prove a live consumer. |
 | P1 | Core contract implemented; asynchronous edge gated | `ApplicationLedger` separates saved, running and pending values, reconciles late completions, and exposes records in snapshots. Stale no-state failures cannot erase a newer failed row, and success without a matching actual value fails. Commits revalidate pending values against the current capability revision and descriptor before disk I/O. Partial provider saves expose only durable rows; RhythmVerse filters publish one immutable group. Menu-return and next-song rows wait for authored guest completion sentinels; Controller Layout waits for a GPU-provider ticket. Controller pixels after invalidation and shutdown during queued work remain unmeasured. |
-| P2 | Six transitions observed on both backends; remaining acceptance open | The authored Window Mode row previews through SDK `SetDisplayMode`, a recovery marker, and a 15-second Keep/Revert page. Disposable runs under `out/_swap/hot-settings/runtime-acceptance/` observed all six directed Windowed/Borderless/Full Screen changes with Keep on D3D12 and Vulkan, plus explicit Revert and timeout rollback to the Display page on each. Both backends restored a saved Full Screen mode on relaunch without a CLI display override; input worked and a kept return to Windowed restored the fitted client. Vulkan Full Screen desktop captures were black, so its relaunch visual remains unverified. Repeated placement/input remains open; schema remains restart-scoped. |
-| P3 | Negative feasibility gate for this implementation | `sub_823F3698` allocates the guest frame; `SetBootRenderFrame` is consumed during construction. Both SDK backends capture draw scale when creating render-target/texture caches in `InitializeContext`; their `ShutdownContext` paths drain GPU work and destroy the caches as part of whole-processor teardown. The common worker has no in-loop reconstruction operation; presenter resize and video-mode updates affect output only. The guest aspect patch is one-shot. No ownership-safe live teardown of the screen object at `0x8298ACA8` or replacement boundary was established, so none of the scale/base/aspect transitions pass P3's safety preflight. Keep Resolution restart-scoped and revisit only when the guest-screen owner and an SDK processor reconfiguration boundary are proven. |
-| P4 | No supported transition after P3 gate | A transactional render operation would need to reconstruct both the guest frame and backend caches coherently. Starting one from the current menu would expose stale resources or risk guest execution; no live render reconfiguration is advertised. |
-| P5 | Guarded next-song and Personal Best selection routes delivered; one live Timer cycle passed | All 17 provider-file bindings retain restart strategy. The bridge serves only durably committed values for active compatible Ultimate. With `--settings_ultimate_refresh_trial=true`, seven player-facing HUD/visual rows are assigned at the start of the installed `ulti_game_enter` record, before its original construction commands. A separate guarded Personal Best assignment runs at song-selection entry before both identified consumers. Each guarded assignment reports a row receipt. A disposable run hid Timer on the next song and restored it on a third song, both with matching guest acknowledgments. Personal Best's visible effect, other provider consumers, in-game later provider saves, restart survival and Game Speed synchronization are unverified. |
+| P2 | Window Mode accepted on the tested desktop; strategy promoted | The authored Window Mode row previews through SDK `SetDisplayMode`, a recovery marker, and a 15-second Keep/Revert page. Disposable runs under `out/_swap/hot-settings/runtime-acceptance/` observed all six directed changes, Revert, timeout and saved Full Screen relaunch on both backends. C1 repeated both cycles, verified windowed placement and focus/input, and captured a visible Vulkan Full Screen relaunch under `out/_swap/hot-settings/c1-2026-11-07/`. SDK patch 0054 fixed Vulkan input after minimize/restore. Other DPI/monitor configurations remain unverified; Window Mode is the tenth immediate strategy. |
+| P3 | Negative feasibility gate for this implementation | `sub_823F3698` allocates the guest frame; `SetBootRenderFrame` is consumed during construction. Both SDK backends capture draw scale when creating render-target/texture/pipeline caches. Replacing those caches at a swap boundary would discard live EDRAM ownership and scaled resolves that ordinary cache clearing deliberately retains. No general migration or menu reset operation exists. The guest aspect patch is one-shot, and no ownership-safe live teardown of the screen object at `0x8298ACA8` was established. None of the scale/base/aspect transitions pass P3's safety preflight. Keep Resolution restart-scoped until retained GPU state can be migrated or proven obsolete, and a guest-screen reconstruction seam exists for base/aspect changes. |
+| P4 | No supported transition after P3 gate | A transactional scale operation needs a GPU-worker boundary, migration or proven invalidation of EDRAM and scaled resolves on both backends, shader/pipeline regeneration, failure rollback, and matching presentation/window updates. Base/aspect changes additionally need guest-frame reconstruction. No safe live render reconfiguration is implemented. |
+| P5 | Guarded next-song and Personal Best selection routes delivered; Timer cycle and All HUD hide observed | All 17 provider-file bindings retain restart strategy. The bridge serves only durably committed values for active compatible Ultimate. With `--settings_ultimate_refresh_trial=true`, seven player-facing HUD/visual rows are assigned at the start of the installed `ulti_game_enter` record, before its original construction commands. A separate guarded Personal Best assignment runs at song-selection entry before both identified consumers. Each guarded assignment reports a row receipt. A disposable run hid Timer on the next song and restored it on a third song. Another run hid All HUD Elements from in-song Help & Options; the next song visibly lost the score, timer and left HUD meter with matching guest acknowledgments. Personal Best's visible effect, individual provider consumers, later provider saves, restart survival and Game Speed synchronization remain unverified. |
 | P6 | Loaded menu/header route enabled; one live row cycle passed | Every boot publishes durable visibility changes and installs loaded splash and header refresh records. Header refresh covers all eight Messages/Recommendations/RhythmVerse masks, positions, badges, LT/RT Flow and offline style. On 2026-11-07 a disposable D3D12 run hid and restored LEADERBOARDS on the first returned splash frame, with saved revisions and guest acknowledgments matching both changes. The refresh now runs after `splash_screen` calls the retail `check_trial`, which previously overwrote it. Other rows, repeated cycles, selected-row recovery, input paths and header visuals remain unverified; schema stays restart-scoped. RhythmVerse master stays boot-seeded. |
 | P7 | Static candidate audit complete; no promotions | DLC Menu Songs constructs its pool and stream mounts at Configure; Scan Threads is captured by the DLC worker; Unlock All is boot-seeded; Hide Achievements is captured by dialog construction. Filtering samplers and native MSAA use backend caches, while FXAA has a live SDK method but no verified settings applier. Exact read sites are recorded below; all remain restart-scoped pending an owned live boundary. |
 
-The D3D12 and Vulkan display runs above used a disposable profile. Repeated placement/input
-and the remaining menu/provider UI acceptance remain unverified.
+**Current strategy count:** 10 immediate, 0 menu-return, 0 next-song, 38 restart. P0's
+9/0/0/39 baseline and later dated records below describe the state before Window Mode promotion.
+
+The D3D12 and Vulkan display runs above used disposable profiles. C1 placement/input passed
+on the tested desktop; other DPI/monitor configurations and menu/provider UI acceptance remain
+unverified.
 
 ## 1. Outcome and priorities
 
@@ -112,7 +116,7 @@ actual consumer for every row before promotion.
 | Priority | Settings | Target completion | Work required / fallback |
 | --- | --- | --- | --- |
 | Highest | Display | Now, brief presentation transition allowed | Implement all six directed transitions between Windowed, Borderless and Full Screen; restore window placement, decoration and client size. |
-| Highest | Resolution | Now where supported; otherwise an explicit menu return boundary | Transactionally update guest frame, GPU resources, video mode, window policy, UI aspect and HUD. Prove scale-only changes before changes of guest base/aspect. Retain restart for unsupported transitions. |
+| Parked | Resolution | Process restart | Live changes require migration or proven invalidation of retained GPU render data; base/aspect changes also need a reentrant guest frame. Revisit as a separate renderer project, not a blocker for other settings. |
 | High | Hide HUD, Gold Progress, Progress Bar, Show Timer, Show PB, Show Steak, Input Viewer | Now | Set live provider values and invoke existing refresh/show/hide logic. If HUD elements are not loaded, stage the value for construction. |
 | High | Camera Angle, Track Wiggles, Depth of Field | Now where consumers support it | Trace polling versus copied state; refresh active camera/track/post-effect state and restore defaults when disabling overrides. |
 | High | Precision Mode | Now if timing state supports it; next song otherwise | Inspect timing/scoring consumers and caches; do not assume writing `freq_ms` updates the active judge. |
@@ -200,6 +204,10 @@ resizing the presentation window does not satisfy the Resolution requirement.
 
 ### P4 — Transactional render reconfiguration
 
+**Parked after P3 (2026-11-07).** This is the implementation specification for a separate
+renderer project if retained GPU state can be migrated or proven obsolete. It is not a closing
+gate for this hot-apply plan; Resolution keeps its restart boundary.
+
 Implement a reconfiguration transaction using the existing `PlanGuestScreen`, capability checks
 and window-fit policy. Validate/preflight first, retain the old working configuration, then
 quiesce rendering at an agreed boundary. Recreate/rebind only the owned scale/frame-dependent
@@ -285,11 +293,13 @@ currently require rows such as the RhythmVerse master to stay restart-scoped. Up
 contracts, architecture, graphics, menu, status and affected plan records. Leave a named reason and
 revisit condition for each remaining restart setting.
 
-**P7 static restart gates (2026-11-06).** The table below is generated by
+**P7 static restart gates (2026-11-06 snapshot).** The table below was generated by
 `python scripts/settings/export_hot_apply_inventory.py --p7-markdown` from the schema and the
-gate map in that exporter. It names all 39 currently restart-scoped player preferences. These are
-source-level reasons and required revisit evidence; none proves a live transition. The full
-per-row consumer references and boundaries are in `out/_swap/hot-settings/p0/inventory.json`.
+gate map in that exporter. It names the 39 restart-scoped player preferences at that date;
+Display was promoted on 2026-11-07 and the current count is 38. The table preserves its
+historical gate. These are source-level reasons and required revisit evidence; none alone
+proves a live transition. The full per-row consumer references and boundaries are in
+`out/_swap/hot-settings/p0/inventory.json`.
 
 | Setting | Reason restart remains required | Revisit when |
 | --- | --- | --- |
@@ -335,10 +345,10 @@ per-row consumer references and boundaries are in `out/_swap/hot-settings/p0/inv
 
 ## 6. Delivery order
 
-Recommended: **P0 -> P1 -> P2 -> P3 -> P4 -> P5 -> P6 -> P7**. Run the resolution gate immediately
-after display delivery because it is the highest-risk requested feature. If P3 exposes a substantial
-renderer-lifecycle blocker, deliver P5/P6 while that blocker is addressed. Their implementation does
-not depend on render reconstruction.
+Current close-out order: **finish P2 acceptance -> finish P6 menu/header acceptance -> finish P5
+Ultimate boundary acceptance -> P7 bounded candidates -> close-out prompts in §8**. P0/P1 are
+implemented; P3 recorded the negative live-Resolution gate, and P4 is parked as a separate
+renderer project. P5/P6 do not depend on render reconstruction.
 
 Each package should be a reviewable change with its own acceptance record. This plan authorizes
 neither a runtime strategy promotion without measurement nor navigating the game for testing.
@@ -365,7 +375,7 @@ builds and tests do not depend on this choice. This planning task performs no ga
 | Runtime check | Required observations |
 | --- | --- |
 | Display | All six directed mode transitions; repeat cycles; placement/DPI; minimize/restore; focus/input; explicit and timed rollback; monitor-loss failure if reproducible. |
-| Resolution | Scale-only/base/aspect transitions in both directions across supported 16:9, ultrawide and 4:3 modes; Auto; all three display modes; actual render dimensions; round artwork; HUD anchoring; failure/rollback. Use the current supported catalogue. |
+| Resolution (parked) | No live-resolution acceptance is due in this plan. Keep restart application and the existing boot-resolution checks. The scale/base/aspect matrix belongs to a future renderer project after P3's state-preservation gate is solved. |
 | Backend | D3D12 and Vulkan separately, including supported alternate rendering paths. Unmeasured combinations remain gated rather than inheriting another path's result. |
 | Ultimate | Change each candidate in the same process; verify at the advertised boundary; reverse it; resume pause; load another song; test absent/inactive/shape-mismatched provider. For speed, verify audio/chart alignment at every offered value. |
 | Menu | Hide/show each eligible entry twice; hide the selected entry; protect Help & Options; verify keyboard/controller/mouse; all eight header states; Search entry; correct directions/Back/labels/badge. |
@@ -376,8 +386,8 @@ Store logs and captures under `out/_swap/hot-settings/<package>/<case>/`, with b
 commit/generation, requested and acknowledged values, application boundary and verdict. Report
 separate totals for immediate, menu-return, next-song and restart settings. The 2026-11-06 baseline is nine
 immediate rows; the final target count is established by measured conversions, not by relabeling
-saved-only settings. Display, real resolution changes, Ultimate behavior and menu refresh each need
-their own acceptance verdict and any remaining limitation.
+saved-only settings. Display, Ultimate behavior and menu refresh each need their own acceptance
+verdict and any remaining limitation. Resolution's verdict is restart-scoped after P3's negative gate.
 
 ### Validation note — 2026-11-06
 
@@ -608,3 +618,243 @@ their own acceptance verdict and any remaining limitation.
 - The owner chose no game testing in this pass. Keep this plan in `in-progress`: Personal Best and
   the remaining Ultimate/menu routes lack visible same-process acceptance, display needs its
   remaining placement and Vulkan visual checks, and Resolution lacks a safe reconstruction path.
+
+### Requested UI validation attempt — 2026-11-07
+
+- The owner authorized autonomous game/UI testing, including General's Restore default settings.
+  `cmake --build --preset win-amd64-release` passed before the attempt. A disposable Ultimate
+  profile and launch arguments are under `out/_swap/hot-settings/ui-validation-2026-11-07/`.
+  The first launch inherited the machine's large DLC library; the second used an empty DLC
+  directory. Its log reached `presented menu frame` and reported the Ultimate song-entry and
+  loaded menu refresh routes installed.
+- UI navigation could not start: the execution session returned a null foreground window handle,
+  and `scripts/diagnostics/capture_window.ps1` rejected both capture attempts because it could
+  not bring the game window to the foreground. No keys were sent, no screenshot was accepted,
+  and no setting was changed through the UI. Both disposable game processes were stopped.
+- Focused CTest `sdk_patch_stack`, `display_mode`, `settings_screen`, `menu_payload`,
+  `settings_service`, `ultimate_adapter`, `settings_hot_apply`, and
+  `settings_bridge_service` passed 8/8. The bridge/service tests cover staged defaults, durable
+  commit, restart requirement, reload, conflict retry, and installed-provider defaults. Source
+  inspection confirms the authored General row opens a Cancel/Restore defaults confirmation
+  and that Confirm invokes `settings.restore_defaults` then commits. These are host checks, not
+  a game/UI acceptance result. Restore defaults and the remaining hot-setting UI checks remain
+  unverified until an interactive foreground desktop is available.
+
+### Interactive Ultimate and General validation — 2026-11-07
+
+- An interactive Windows desktop became available. The game was driven through
+  `scripts/diagnostics/drive_ui.ps1` with a disposable Ultimate profile and an empty DLC directory
+  under `out/_swap/hot-settings/ui-validation-2026-11-07/`. The guarded Ultimate trial flag was
+  enabled. Screenshots are in that directory's `shots/` folder; `game-interactive.log`,
+  `game-restore-retest.log` and `game-final-restore.log` carry the corresponding guest receipts.
+- From main-menu Help & Options, Personal Best was set Hidden. The next song-selection entry
+  acknowledged `show_pb=false`. No prior score existed in this profile, so its visible effect
+  could not be distinguished. From in-song Help & Options, Song Progress Bar was set Hidden;
+  the next song-entry acknowledged `progressbar=false`. Its visual effect was not isolated from
+  the other in-song meters. Input Viewer was set On at the main menu and acknowledged on the
+  next song, then Off via the All HUD action and acknowledged on a later song. These receipts
+  establish the guarded boundaries, not individual visual acceptance.
+- From in-song Help & Options, All HUD Elements was set Hidden. On the next song the score,
+  timer and left HUD meter were absent in `shots/hud-hidden-active.png`, versus their presence
+  in `shots/input-viewer-active.png`. The log acknowledged `hide_hud=true`, `show_timer=false`
+  and the other song-entry values. The All HUD confirmation text was clipped; it was shortened
+  in `src/settings/dependencies.h` and rebuilt, but the revised text has not had a visual retest.
+- General Restore default settings first exposed an unavailable compiled anti-aliasing choice
+  during staging (`settings.graphics.aa_unavailable_choice`). Native defaults now clear saved
+  keys, allowing boot reconciliation to choose a supported effective value. The confirmation
+  text was shortened to fit. Cancel preserved file hashes; Confirm committed native and
+  compatible Ultimate provider defaults, with a restart prompt on leaving Help & Options.
+  A restart initially reimported the old Ultimate target from `launcher.toml` into an absent
+  settings key. Migration now stops importing settings rows after its `imported=true` marker.
+  On the final rebuilt UI run, Confirm committed and Restart now opened the standard Blitz
+  menu; `settings.toml` kept no target override, `ulti_settings.dta` contained the default
+  provider values, and the log reported `migration already current` with zero imported rows.
+- The final release build passed. Focused CTest `settings_migration`, `settings_service`,
+  `settings_bridge_service`, `settings_screen` and `menu_payload` passed 5/5. P5 remains guarded
+  and restart scoped: individual visual reversals, Personal Best with a recorded score, later
+  provider saves, provider mismatch/inactive paths and Game Speed alignment remain open.
+
+### Display delivery and Resolution ownership follow-up — 2026-11-07
+
+- P2's previously measured six directed transitions, Revert and timeout on both backends support
+  promoting Window Mode to `kHot` in `src/settings/schema.cpp`. Its authored route still requires
+  a preview and post-switch UI presentation before Keep saves and acknowledges the running value.
+  `src/settings/bridge_sink.cpp` refuses generic direct set requests for Display, so those requests
+  cannot bypass the confirmation. The strategy is now 10 immediate/0 menu-return/0 next-song/38
+  restart player preferences. Repeated placement/input and Vulkan Full Screen relaunch visuals
+  remain unverified; this pass did not navigate the game UI.
+- P3/P4 [static] reinspection found `sub_823F3FF8` in
+  `generated/default/rb_blitz_recomp.80.cpp` to be a guarded, one-time initializer that calls
+  `sub_823F3698` and then initializes further global state. `sub_823F4440` in the generated
+  `.7.cpp` is the static screen object's full destructor, reached through `sub_827F4A60` at
+  shutdown; it frees several arrays and invokes the base destructor. Calling that pair at menu
+  return would tear down more than the frame, with no established owner for current references.
+- P3/P4 [tree] both SDK backends capture `resolution_scale` during `SetupContext` and construct
+  scale-dependent texture/render-target caches. `ClearCaches` leaves those objects intact. The
+  common command processor calls `SetupContext` once before its worker loop and
+  `ShutdownContext` once after it. A scale-only change with the same guest base would require a
+  new worker-owned transaction: stop packet production at a completed frame, drain the ring and
+  submissions, check GPU completion, cancel shader preparation, rebuild both backend contexts,
+  restore the previous scale on failure, then publish video mode/window policy and verify a new
+  guest output. Changes of guest base or aspect additionally require a narrow, reentrant guest
+  frame teardown/reconstruction method and reversible layout/HUD recomputation. Neither ownership
+  seam is implemented or proven; Resolution remains restart-scoped. The next implementation work
+  is to establish these seams and run the plan's scale/base/aspect probes in that order.
+- `cmake --build --preset win-amd64-release` passed after the strategy change. Focused CTest
+  `display_mode`, `settings_screen`, `settings_service`, `settings_hot_apply` and
+  `settings_bridge_service` passed 5/5 after updating the exact hot-set expectation and checking
+  that direct Display set is refused and Keep needs no restart. `check_docs.py` found 0 errors;
+  `git diff --check` passed. These host checks do not replace the open game/UI acceptance.
+
+### Live Resolution state-preservation follow-up — 2026-11-07
+
+- P3/P4 [tree] A same-guest-base scale switch still needs three GPU caches rebuilt together:
+  render targets, textures, and pipelines. Both backend render-target initializers allocate fresh
+  scale-sized EDRAM buffers (`d3d12/render_target_cache.cpp:206-227`,
+  `vulkan/render_target_cache.cpp:477-498`). The common render-target `ClearCache` deliberately
+  retains host targets that own EDRAM tiles (`pipeline/render_target/cache.cpp:363-394`). Replacing
+  the cache would discard live ownership and contents, even after a completed swap.
+- P3/P4 [tree] The common texture cache tracks valid scaled-resolve pages and a shared-memory
+  watch (`pipeline/texture/cache.cpp:209-236,326-365`); `ClearCache` destroys ordinary textures
+  but retains that state. Both backend texture caches own separate scaled-resolve GPU storage.
+  Their replacement would lose resolved data still addressable from guest memory. The existing
+  D3D12 readback path serves guest-requested ranges, not a full-state migration. Shader
+  translation also embeds scale, so retaining the pipeline cache would give incorrect shaders.
+- P3/P4 [tree] The SDK worker sets up its backend once and shuts it down after the packet loop
+  (`graphics/command_processor.cpp:249-312`). Its `CallInThread` work runs before queued packets,
+  so it cannot by itself guarantee a completed-frame transaction. Backend `ClearCaches` runs at
+  a submission boundary but preserves EDRAM owners and scaled resolves; no project menu caller
+  establishes a state-free reset. The guest's `sub_823F3FF8` is a one-time initializer, while
+  `sub_823F4440` is a full destructor rather than a frame-only teardown. The menu return has no
+  proven way to invalidate all old render data.
+- The implementation path is to add explicit GPU-owner state migration (EDRAM tiles, retained
+  host targets, scaled-resolve storage and validity) or prove a guest transition makes every
+  retained range obsolete; then introduce an ordered GPU-worker reconfigure with reversible
+  cache/shader setup and only publish the new resolution after a successful frame. Base/aspect
+  changes additionally need a reentrant guest-frame lifecycle. None of those prerequisites is
+  present, so no live Resolution code was applied in this follow-up. This was static inspection;
+  no game UI was driven.
+
+### Scope decision and realistic candidates — 2026-11-07
+
+- Resolution is parked as a live setting. The same-process plan proceeds without P4; a normal
+  restart remains the application boundary. Renderer and launch target also remain process
+  boundaries, and Startup has no meaningful mid-session effect.
+- The existing immediate set is Window Mode, V-Sync, Load Guard, Setting Descriptions, Controller
+  Layout, and the five RhythmVerse instrument filters (10 rows). The strongest remaining
+  same-process candidates are the already installed menu-return refresh for Refresh Songs, Play
+  Current Song, Download Content, Main Menu visibility and Messages/Recommendations, plus the
+  guarded Ultimate HUD values at next song or selection. They need their open visual, reversal,
+  persistence and provider checks before promotion; they are not immediate today.
+- Bounded new work may justify Hide Achievements at the next dialog, Offline Mode Prompts at the
+  next prompt, Currency and music controls at the next menu/header entry, Scan Threads before an
+  idle scan, and Ultimate camera/track/plot/skybox/gem choices at next song construction. Treat
+  FXAA separately from native MSAA; a post-process switch has a live SDK method, while native
+  sample-count changes own render resources. Filtering may be possible with backend sampler
+  invalidation, but needs a per-mode, two-backend proof before promotion.
+- Keep mid-song Game Speed, native MSAA, Renderer and Resolution out of this plan's hot work.
+  RhythmVerse master, DLC Background Music and Unlock All cross several live owners and have a
+  high coordination cost; retain restart unless a concrete player need justifies separate work.
+  Depth of Field has no identified non-row provider consumer. The online achievement grant is
+  an action, and the legacy letterbox row is absent from the authored surface.
+
+## 8. Closing prompts (scope set 2026-11-07)
+
+Run C1–C5 in order. For every row, retain its restart strategy until an owned consumer has
+acknowledged the requested value and the visible effect has been checked at its advertised
+boundary. Build current code before asking the owner to test. Ask whether the owner wants to
+perform game/UI checks before driving them; without that answer, use code inspection and host
+tests only. Record measured and unverified results separately.
+
+### C1 — Finish Window Mode acceptance
+
+Use the existing authored preview/Keep/Revert route. Check repeated Windowed, Borderless and Full
+Screen cycles, placement, DPI, focus/input, minimize/restore and rollback on both backends. Resolve
+or explicitly record the outstanding Vulkan Full Screen relaunch visual uncertainty. Preserve the
+already measured ten immediate strategies; do not reopen Resolution as part of this prompt.
+
+**Exit:** a dated matrix names each tested backend/transition and its result. Any unavailable UI
+check is marked unverified rather than inferred from a host test.
+
+**C1 evidence matrix, 2026-11-07 (interactive desktop pass complete):**
+
+| Check | D3D12 | Vulkan |
+| --- | --- | --- |
+| Six directed mode changes with Keep | Passed: Windowed → Borderless → Full Screen → Windowed twice in one process; six previews/Keep | Passed: same two cycles and six previews/Keep |
+| Explicit Revert and 15-second timeout | Passed in disposable run | Passed: explicit Revert; Full Screen preview at 18:03:23 rolled back at 18:03:38 |
+| Saved Full Screen on relaunch; input; kept return to Windowed | Passed in disposable run | Passed: saved `display='fullscreen'`, relaunched without a display override, navigated by keyboard, then kept Windowed at 18:08:09 |
+| Restored windowed size and placement | Passed: 2354×993 client after both returns, with framed placement | Passed: 2354×993 client after both returns, with framed placement |
+| Input after minimize/restore | Passed on patched build; title menu accepted input | Passed on patched build; title and Display menus accepted input after restore |
+| Input after Alt+Tab away and back | Passed: Windows foreground left and returned to the game; title selection moved on next input | Passed: same focus and input check |
+| Full Screen picture visible after relaunch | Passed in disposable run | Passed: Desktop Duplication capture shows the title picture and next selection change |
+| DPI change or movement to another monitor | Unverified; one monitor/DPI configuration exercised | Unverified; one monitor/DPI configuration exercised |
+
+Evidence lives under `out/_swap/hot-settings/c1-2026-11-07/{d3d12,vulkan}/`:
+`game-interactive.log` records the repeated cycles; Vulkan `game-final-ui.log` records rollback;
+`game-fullscreen-relaunch.log` records saved-mode startup; `shots/56-fullscreen-dda.png` and
+`57-fullscreen-dda-input.png` show its visible Full Screen frame and responsive menu. Vulkan
+`shots/62-windowed-after-refocus-dda.png`, `63-windowed-after-input-dda.png`, and
+`71-final-patched-refocus-dda.png` show post-restore input; `72-vulkan-alttab-dda.png` and
+the D3D12 `shots/73-d3d12-refocus-dda.png` and `74-d3d12-alttab-dda.png` show focus checks.
+Ordinary GDI and Windows Graphics Capture returned black or stale frames
+for Vulkan, so these visual judgments use Desktop Duplication (`ffmpeg ddagrab`).
+
+The Vulkan baseline reproduced lost menu input after minimize/restore; SDK patch
+`patches/rexglue-sdk/0054-sync-pixel-size-after-restore.patch` reconnects presentation on
+restore/focus and synchronizes the actual pixel size. The current Release build passed, and
+focused CTest `sdk_patch_stack`, `window_policy`, `display_mode`, `settings_screen`, and
+`settings_bridge_service` passed 5/5. C1 is complete for the tested single-monitor/DPI setup;
+different DPI and monitor configurations remain unverified.
+
+### C2 — Finish the loaded menu and header route
+
+Exercise Refresh Songs, Play Current Song, Download Content, Main Menu visibility and hidden-row
+selection through menu return in both directions. Include selected-row removal, focus recovery,
+Help & Options reachability, keyboard/controller/mouse input and repeated cycles. Check Messages
+and Recommendations across all eight header combinations, Search entry, badge, positions,
+direction and Back. Include Currency, Background Music Navigation and Music Player only if their
+loaded owners and reversal can be bounded within this route.
+
+**Exit:** promote each row to menu-return only after its first visible frame and reversal pass;
+leave other rows restart-scoped with a named failed or unverified gate. Record guest receipts,
+screen evidence and the resulting strategy counts.
+
+### C3 — Finish Ultimate values at their real boundary
+
+For the installed compatible provider, validate the seven guarded HUD/visual rows at next song
+and Personal Best at next song selection with a recorded score. Check each change and reversal,
+both settings entry contexts, a later provider save, restart persistence and inactive or mismatched
+providers. Then attempt Precision Mode, Track Wiggles, Camera Angle, Plots, Force Plot, Skybox and
+Gems only at the song-construction boundary where their consumers read them; check every offered
+choice and Default/Off restoration. Avoid live asset reloads during an active song.
+
+**Exit:** promote individually to next-song or next-selection only with a matching guest receipt
+and observed behavior. Keep Game Speed restart-scoped unless a separate full audio/chart timing
+proof exists. Keep Depth of Field restart-scoped until its effect consumer is identified.
+
+### C4 — Make bounded P7 decisions, then stop
+
+Try Hide Achievements at the next dialog, Offline Mode Prompts at the next prompt, and Scan Threads
+before an idle scan. Consider FXAA as a separate post-process submode and Filtering through owned
+sampler invalidation; a combined AA row may need value-specific strategy before any promotion.
+Require both-backend checks for graphics submodes. Record a concrete consumer and rollback for
+each attempt; if that cannot be done with a narrow owner, leave the row restart-scoped and record
+the reason. Do not start renderer/Resolution migration, native MSAA reconstruction, mid-song Game
+Speed synchronization, or in-process launch-target switching here. Defer the RhythmVerse master,
+DLC Background Music and Unlock All until a separate player need warrants their coordination cost.
+
+**Exit:** every remaining restart row has an explicit reason and revisit condition; no candidate
+is advertised as live merely because its saved value changed.
+
+### C5 — Reconcile and close the plan
+
+Recount immediate, menu-return, next-song/selection and restart rows from the schema and provider
+metadata. Reconcile the ledger, UI captions, bridge and documentation with the measured boundary
+of each promoted row. Run the current Release build, focused tests, relevant full host checks,
+`check_docs.py` and `git diff --check`; record exact results and limits. Keep Resolution, Renderer,
+launch target and Startup as process/boot settings. Treat the online achievement grant as an
+action and the removed letterbox row as compatibility only.
+
+**Exit:** move this plan to `finished/` only when C1–C4 have their required implementation and
+automated gates completed, with owner UI observations or explicit unverified limits recorded.
+Otherwise leave it in `in-progress/` with the remaining owner and next action named.

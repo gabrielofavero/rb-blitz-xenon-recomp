@@ -53,6 +53,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include <rex/cvar.h>
 #include "assets/texture_override.h"
@@ -71,6 +72,7 @@
 #include <rex/ui/overlay/achievement_notification.h>
 #include <rex/system/interfaces/graphics.h>
 #include <rex/ui/window.h>
+#include <rex/ui/windowed_app_context_sdl.h>
 #include <rex/version.h>
 
 #include "generated/fingerprint_expected.h"
@@ -106,6 +108,9 @@
 #include "store/store_probe.h"
 #include "store/store_search_service.h"
 #include "ui/help_overlay.h"
+#include "ui/boot_loading_art.h"
+#include "ui/boot_loading_icon.h"
+#include "hooks/startup_splasher.h"
 #include "ui/menu_music_player.h"
 #include "ui/keyboard_theme.h"
 #include "util/sha256.h"
@@ -148,9 +153,25 @@ class RbBlitzApp : public rex::ReXApp {
   // The `rexgpu-xenos` DLL is staged next to the executable via
   // rexglue_setup_target(rb_blitz GPU_PLUGINS xenos) in CMakeLists.txt.
   void OnPreSetup(rex::RuntimeConfig& config) override {
+    // Read the title's own autosave icon before opening the game window, so
+    // even a cold archive read cannot leave an unpainted window on screen.
+    std::string boot_art_error;
+    const auto art_started = std::chrono::steady_clock::now();
+    boot_icon_art_loaded_ = rb_blitz::ui::boot_loading_art::LoadBootLoadingFrames(
+        game_data_root(), &boot_loading_frames_, &boot_art_error);
+    if (boot_icon_art_loaded_) {
+      REXLOG_INFO("boot_loading: autosave icon ready elapsed_ms={}",
+                  std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - art_started).count());
+    } else {
+      REXLOG_WARN("boot_loading: autosave icon unavailable: {}", boot_art_error);
+    }
     // The settings/config paths are final here. Header I/O can run while the
     // renderer initializes, before the content manager needs the exact list.
-    rb_blitz::dlc::PrepareBootLibraryScan(game_data_root());
+    rb_blitz::dlc::PrepareBootLibraryScan(
+        game_data_root(), cache_root() / "dlc-library-identities.cache");
+    rb_blitz::shell_music::PrepareBootCatalog(
+        cache_root() / "menu_music_catalog.cache");
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = "xenos";
     }
@@ -318,6 +339,9 @@ class RbBlitzApp : public rex::ReXApp {
   // paths are final, which is the first point where game_data_root() is known,
   // logging is up and the guest has not started yet.
   void OnPostLoadXexImage() override {
+    // The autosave icon was installed for the first window paint. Keep it the
+    // only active custom dialog while the boot services are still being built.
+    PumpStartupWindow();
     const auto boot_started = std::chrono::steady_clock::now();
     auto stage_started = boot_started;
     auto log_stage = [&](const char* stage) {
@@ -326,6 +350,7 @@ class RbBlitzApp : public rex::ReXApp {
                   std::chrono::duration_cast<std::chrono::milliseconds>(now - stage_started).count(),
                   std::chrono::duration_cast<std::chrono::milliseconds>(now - boot_started).count());
       stage_started = now;
+      PumpStartupWindow();
     };
     REXLOG_INFO("boot_timing: post_xex begin");
     LogBootIdentity();
@@ -350,8 +375,8 @@ class RbBlitzApp : public rex::ReXApp {
     // Capture pacing before guest threads start. Progress uses actual enumerators
     // and UI completion, independently of whether the host cache was enabled/hit.
     rb_blitz::content_progress::Configure();
-    // After dlc::Configure, whose enumeration is the pool R9 draws from: with the
-    // toggle on, a few loaded DLC songs are mounted read-only and the main menu's
+    // After dlc::Configure, whose early path snapshot is the pool R9 draws from:
+    // with the toggle on, a few loaded DLC songs are mounted read-only and the main menu's
     // shell-music loader is redirected to them (src/hooks/shell_music.cpp). With the
     // toggle off - or no library - nothing is mounted and the hook is inert.
     rb_blitz::shell_music::Configure(runtime(), game_data_root());
@@ -368,7 +393,8 @@ class RbBlitzApp : public rex::ReXApp {
       REXLOG_INFO("boot_timing: controller_schemes begin");
       rb_blitz::assets::InstallControllerSchemes(
           rex::filesystem::GetExecutableFolder() / "assets" / "controller" / "schemes",
-          runtime()->user_data_root() / "controller_schemes");
+          runtime()->user_data_root() / "controller_schemes",
+          [this] { PumpStartupWindow(); });
       std::string selected = "retail";
       if (settings_boot_ && settings_boot_->service()) {
         auto* service = settings_boot_->service();
@@ -550,12 +576,14 @@ class RbBlitzApp : public rex::ReXApp {
     // then (plan §1.6, and the acceptance Control leg pins that silence).
     rb_blitz::store::RequestCatalogueRefresh("the boot asked");
     graphics_loading_payload_ready_ =
-        rb_blitz::settings::InstallMenuPayload(runtime(), settings_restart_boot_);
+        rb_blitz::settings::InstallMenuPayload(
+            runtime(), settings_restart_boot_, [this] { PumpStartupWindow(); });
     // The typed settings channel (P1): its two guest hooks are installed at link time, so this
     // only reads their flags once on this host thread and logs what they are set to. A guest
     // thread must not touch the cvar registry, which is why the read happens here.
     rb_blitz::settings::bridge::Configure();
     log_stage("menu_services_and_payload");
+    CreateRegularDialogs(imgui_drawer());
   }
 
   // Config-file hygiene. A key in rb_blitz.toml (or on the command line) that matches no
@@ -656,6 +684,31 @@ class RbBlitzApp : public rex::ReXApp {
   // handed over as a callback rather than a pointer - the same lazily-called shape
   // as the menu cursor's window lookup.
   void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
+    boot_loading_icon_ = std::make_unique<rb_blitz::ui::BootLoadingIcon>(
+        drawer, [this] {
+          auto* graphics = runtime() ? runtime()->graphics_system() : nullptr;
+          auto* presenter = graphics ? graphics->presenter() : nullptr;
+          return presenter ? presenter->guest_output_refresh_sequence() : 0;
+        }, [] { return rb_blitz::diag::shader_trace::NativeStartupPanelReady(); },
+        [] { return rb_blitz::diag::shader_trace::NativeSplashReady(); },
+        [] { return rb_blitz::hooks::startup_splasher::NativeLogoLoadStarted(); });
+    if (boot_icon_art_loaded_)
+      boot_loading_icon_->SetFrames(std::move(boot_loading_frames_));
+  }
+
+  bool WantsStartupPaint() const override { return boot_icon_art_loaded_; }
+
+  void OnShutdown() override {
+    // The SDK destroys its ImGui drawer immediately after this hook. Dialogs
+    // unregister from that drawer in their destructors, so release them now.
+    probe_overlay_.reset();
+    music_player_.reset();
+    help_overlay_.reset();
+    mouse_cursor_.reset();
+    boot_loading_icon_.reset();
+  }
+
+  void CreateRegularDialogs(rex::ui::ImGuiDrawer* drawer) {
     mouse_cursor_ = rb_blitz::input::CreateMouseMenuCursor(drawer, [this] { return window(); });
 
     // The help captions (owner request, 2026-10-13): a subtitle at the bottom of the screen that
@@ -690,6 +743,13 @@ class RbBlitzApp : public rex::ReXApp {
   }
 
  private:
+  void PumpStartupWindow() {
+    if (window()) window()->RequestPaint();
+    // The normal SDL loop starts only after the synchronous boot hooks return.
+    // Repaint the guest's startup window at bounded work checkpoints meanwhile.
+    static_cast<rex::ui::SDLWindowedAppContext&>(app_context()).PumpStartupPaint();
+  }
+
   // Content licence state, the emulated console's answer to "does this profile
   // own this title?". XamContentGetLicenseMask hands the guest the
   // `license_mask` kernel cvar verbatim, and this is the XBLA build of Rock Band
@@ -764,6 +824,9 @@ class RbBlitzApp : public rex::ReXApp {
   // Owned for the app's lifetime; it unregisters itself from the drawer when this
   // is destroyed, which happens before ~ReXApp() tears the drawer down.
   std::unique_ptr<rex::ui::ImGuiDialog> probe_overlay_;
+  std::unique_ptr<rb_blitz::ui::BootLoadingIcon> boot_loading_icon_;
+  rb_blitz::ui::boot_loading_art::BootLoadingFrames boot_loading_frames_;
+  bool boot_icon_art_loaded_ = false;
   std::unique_ptr<rex::ui::ImGuiDialog> mouse_cursor_;
   bool graphics_loading_payload_ready_ = false;
   std::unique_ptr<rb_blitz::graphics::CoverageRecorder> coverage_recorder_;

@@ -8,19 +8,18 @@
 
 #include <array>
 #include <fstream>
+#include <vector>
 
 namespace rb_blitz::controller_schemes {
-bool DecodePngWic(const std::filesystem::path& path, Image* image, std::string* why) {
+bool DecodePngWicBytes(const uint8_t* bytes, size_t size, Image* image, std::string* why) {
   // WIC may expose an RGBA PNG as BGRA. Check IHDR first so RGB or indexed
   // files converted by WIC cannot silently pass the authoring contract.
-  std::array<uint8_t, 26> ihdr{};
-  std::ifstream input(path, std::ios::binary);
-  if (!input.read(reinterpret_cast<char*>(ihdr.data()), ihdr.size()) ||
-      !std::equal(ihdr.begin(), ihdr.begin() + 8,
+  if (!bytes || size < 26 || size > 8 * 1024 * 1024 ||
+      !std::equal(bytes, bytes + 8,
                   std::array<uint8_t, 8>{137, 80, 78, 71, 13, 10, 26, 10}.begin()) ||
-      ihdr[8] != 0 || ihdr[9] != 0 || ihdr[10] != 0 || ihdr[11] != 13 ||
-      ihdr[12] != 'I' || ihdr[13] != 'H' || ihdr[14] != 'D' || ihdr[15] != 'R' ||
-      ihdr[24] != 8 || ihdr[25] != 6) {
+      bytes[8] != 0 || bytes[9] != 0 || bytes[10] != 0 || bytes[11] != 13 ||
+      bytes[12] != 'I' || bytes[13] != 'H' || bytes[14] != 'D' || bytes[15] != 'R' ||
+      bytes[24] != 8 || bytes[25] != 6) {
     *why = "PNG must have an 8-bit RGBA IHDR";
     return false;
   }
@@ -28,6 +27,7 @@ bool DecodePngWic(const std::filesystem::path& path, Image* image, std::string* 
   HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   struct CoCleanup { bool active; ~CoCleanup() { if (active) CoUninitialize(); } } cleanup{SUCCEEDED(initialized)};
   ComPtr<IWICImagingFactory> factory;
+  ComPtr<IWICStream> stream;
   ComPtr<IWICBitmapDecoder> decoder;
   ComPtr<IWICBitmapFrameDecode> frame;
   ComPtr<IWICFormatConverter> converter;
@@ -37,8 +37,10 @@ bool DecodePngWic(const std::filesystem::path& path, Image* image, std::string* 
   };
   if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                               IID_PPV_ARGS(&factory))) ||
-      FAILED(factory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
-                                                WICDecodeMetadataCacheOnLoad, &decoder)) ||
+      FAILED(factory->CreateStream(&stream)) ||
+      FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(bytes), static_cast<DWORD>(size))) ||
+      FAILED(factory->CreateDecoderFromStream(stream.Get(), nullptr,
+                                              WICDecodeMetadataCacheOnLoad, &decoder)) ||
       FAILED(decoder->GetFrame(0, &frame))) return fail("cannot decode PNG");
   GUID container{};
   if (FAILED(decoder->GetContainerFormat(&container)) || container != GUID_ContainerFormatPng)
@@ -61,10 +63,33 @@ bool DecodePngWic(const std::filesystem::path& path, Image* image, std::string* 
                                    image->rgba.data()))) return fail("cannot read PNG pixels");
   return true;
 }
+
+bool DecodePngWic(const std::filesystem::path& path, Image* image, std::string* why) {
+  // A cold NTFS/antivirus path can make opening each source file expensive.
+  // Reading it once also lets the packed-cache path use the identical decoder.
+  std::ifstream input(path, std::ios::binary | std::ios::ate);
+  if (!input) { *why = "cannot read PNG"; return false; }
+  const auto length = input.tellg();
+  if (length < 26 || length > 8 * 1024 * 1024) {
+    *why = "PNG size outside 26 bytes..8 MB";
+    return false;
+  }
+  std::vector<uint8_t> bytes(static_cast<size_t>(length));
+  input.seekg(0);
+  if (!input.read(reinterpret_cast<char*>(bytes.data()), length)) {
+    *why = "cannot read PNG";
+    return false;
+  }
+  return DecodePngWicBytes(bytes.data(), bytes.size(), image, why);
+}
 }  // namespace rb_blitz::controller_schemes
 #else
 namespace rb_blitz::controller_schemes {
 bool DecodePngWic(const std::filesystem::path&, Image*, std::string* why) {
+  *why = "WIC PNG decoder requires Windows";
+  return false;
+}
+bool DecodePngWicBytes(const uint8_t*, size_t, Image*, std::string* why) {
   *why = "WIC PNG decoder requires Windows";
   return false;
 }

@@ -758,8 +758,16 @@ bool ReadProviderRecords(const std::filesystem::path& payload_root, RecordBytes*
   if (!ReadArkIndex(header.data(), header.size(), &index, error)) {
     return false;
   }
-  std::vector<uint8_t> archive;
-  if (!ReadFileBytes(payload_root / "gen/patch_xbox_0.ark", &archive, error)) {
+  const std::filesystem::path archive_path = payload_root / "gen/patch_xbox_0.ark";
+  std::error_code size_error;
+  const uint64_t archive_size = std::filesystem::file_size(archive_path, size_error);
+  if (size_error) {
+    if (error != nullptr) *error = archive_path.string() + ": " + size_error.message();
+    return false;
+  }
+  std::ifstream archive(archive_path, std::ios::binary);
+  if (!archive) {
+    if (error != nullptr) *error = archive_path.string() + ": could not be read";
     return false;
   }
   auto take = [&](Record record, std::vector<uint8_t>* destination) {
@@ -775,12 +783,20 @@ bool ReadProviderRecords(const std::filesystem::path& payload_root, RecordBytes*
       }
       return false;
     }
-    if (entry->offset + entry->size > archive.size()) {
+    if (entry->offset > archive_size || entry->size > archive_size - entry->offset) {
       if (error != nullptr) *error = std::string(RecordName(record)) + " lies past the archive";
       return false;
     }
-    const auto begin = archive.begin() + std::ptrdiff_t(entry->offset);
-    destination->assign(begin, begin + std::ptrdiff_t(entry->size));
+    // These five DTBs are small slices of the payload ark. Reading the whole archive on the
+    // UI thread made a cold boot wait for unrelated art and audio bytes before any frame drew.
+    destination->resize(entry->size);
+    archive.seekg(static_cast<std::streamoff>(entry->offset));
+    if (!archive.read(reinterpret_cast<char*>(destination->data()),
+                      static_cast<std::streamsize>(destination->size()))) {
+      if (error != nullptr) *error = std::string(RecordName(record)) + " could not be read";
+      destination->clear();
+      return false;
+    }
     return true;
   };
   return take(Record::kModSettings, &out->mod_settings) &&

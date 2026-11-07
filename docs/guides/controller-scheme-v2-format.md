@@ -147,6 +147,13 @@ art folder for future work. The packer copies **declared files only**. Version 1
 keeps its 64-file limit; version 2 accepts up to 128 declared images, including
 the keyboard folder's 94 images (97 PNGs on disk).
 
+The build packer also writes `scheme.cache` beside each bundled package. It
+contains the validated manifest data and original compressed PNG bytes, so a
+cold game boot reads one file per package instead of opening every image. If a
+cache is missing or damaged, the loader validates the source files. User-installed
+packages always use the source-file path, so changes to them apply on the next
+boot.
+
 The loader validates unique IDs, known source grammar, safe relative
 PNG paths, each file's existence and format, and the explicit schema version.
 It rejects ambiguous duplicate defaults for one source unless a `variant`

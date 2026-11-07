@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Diagnose large guest bitmap allocations while Milo textures load.
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <rex/hook.h>
@@ -15,6 +18,17 @@ REX_EXTERN(__imp__sub_8246FA20);  // guest heap allocation
 
 namespace {
 thread_local std::string g_loading_tex;
+
+bool TraceBitmaps() {
+  // This hook observes every large guest texture. Writing two INFO lines per
+  // allocation holds the synchronous file/debug sinks on the guest loading
+  // thread, so keep the detailed trace for explicit diagnostics only.
+  static const bool enabled = [] {
+    const char* value = std::getenv("RB_BLITZ_BITMAP_ALLOC_TRACE");
+    return value && *value && std::string_view(value) != "0";
+  }();
+  return enabled;
+}
 
 std::string TexName(uint8_t* base, uint32_t object) {
   if (object < 0x40000000 || object >= 0x7F000000) return {};
@@ -34,13 +48,53 @@ std::string TexName(uint8_t* base, uint32_t object) {
 }  // namespace
 
 REX_HOOK_RAW(sub_8220CCA8) {
-  auto previous = std::move(g_loading_tex);
-  g_loading_tex = TexName(base, ctx.r3.u32);
-  __imp__sub_8220CCA8(ctx, base);
-  g_loading_tex = std::move(previous);
+  const uint32_t tex = ctx.r3.u32;
+  const auto started = std::chrono::steady_clock::now();
+  if (!TraceBitmaps()) {
+    __imp__sub_8220CCA8(ctx, base);
+  } else {
+    auto previous = std::move(g_loading_tex);
+    g_loading_tex = TexName(base, tex);
+    __imp__sub_8220CCA8(ctx, base);
+    g_loading_tex = std::move(previous);
+  }
+
+  // A few compact buckets distinguish slow Milo texture loading from an
+  // unrelated guest stall without emitting two lines for every bitmap.
+  const auto finished = std::chrono::steady_clock::now();
+  const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+      finished - started).count();
+  struct LoadingTimes {
+    std::chrono::steady_clock::time_point window_started;
+    uint64_t total_us = 0;
+    uint64_t max_us = 0;
+    uint32_t count = 0;
+  };
+  thread_local LoadingTimes times;
+  thread_local uint32_t slow_logged = 0;
+  if (!times.count) times.window_started = started;
+  times.total_us += static_cast<uint64_t>(elapsed_us);
+  if (static_cast<uint64_t>(elapsed_us) > times.max_us)
+    times.max_us = static_cast<uint64_t>(elapsed_us);
+  ++times.count;
+  if (elapsed_us >= 500000 && slow_logged < 16) {
+    ++slow_logged;
+    REXLOG_WARN("bitmap_alloc: slow RndTex::Load tex='{}' elapsed_ms={:.1f}",
+                TexName(base, tex), elapsed_us / 1000.0);
+  }
+  if (finished - times.window_started >= std::chrono::seconds(10)) {
+    REXLOG_INFO("bitmap_alloc: RndTex::Load over {:.1f} s: {} call(s), {:.1f} ms total, {:.1f} ms max",
+                std::chrono::duration<double>(finished - times.window_started).count(),
+                times.count, times.total_us / 1000.0, times.max_us / 1000.0);
+    times = {};
+  }
 }
 
 REX_HOOK_RAW(sub_821FC8A8) {
+  if (!TraceBitmaps()) {
+    __imp__sub_821FC8A8(ctx, base);
+    return;
+  }
   const uint32_t bitmap = ctx.r3.u32;
   if (bitmap >= 0x40000000 && bitmap < 0x7F000000) {
     const uint32_t width = rex::memory::load_and_swap<uint16_t>(base + bitmap + 6);

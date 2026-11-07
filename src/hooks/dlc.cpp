@@ -232,11 +232,13 @@ std::vector<std::filesystem::path> DiscoverLibraryRoots(const std::filesystem::p
 
 struct BootScanResult {
   fs::LibraryScanResult library;
+  fs::LibraryScanCacheStats cache;
   double scan_ms = 0;
 };
 
 struct BootScanJob {
   std::vector<std::filesystem::path> roots;
+  std::filesystem::path cache_path;
   uint32_t content_type = 0;
   uint32_t threads = 0;
   std::future<BootScanResult> result;
@@ -245,6 +247,69 @@ struct BootScanJob {
 // Only the app setup thread owns this slot. The worker owns its paths and
 // promise, so an aborted setup can leave it to finish without runtime access.
 std::optional<BootScanJob> g_boot_scan;
+std::mutex g_initial_scan_mutex;
+bool g_initial_scan_pending = false;
+unsigned g_initial_scan_failures = 0;
+
+std::future<BootScanResult> StartBootScan(const std::vector<std::filesystem::path>& roots,
+                                          const std::filesystem::path& cache_path,
+                                          uint32_t content_type, uint32_t threads,
+                                          bool use_cache = true) {
+  std::promise<BootScanResult> promise;
+  auto result = promise.get_future();
+  std::thread([roots, cache_path, content_type, threads, use_cache,
+               promise = std::move(promise)]() mutable {
+    try {
+      const auto started = std::chrono::steady_clock::now();
+      fs::LibraryScanCacheStats cache;
+      auto library = use_cache
+          ? fs::ScanDlcLibrariesCached(roots, cache_path, content_type, threads, &cache)
+          : fs::ScanDlcLibraries(roots, content_type, threads);
+      const double scan_ms = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - started).count();
+      promise.set_value({std::move(library), cache, scan_ms});
+    } catch (...) {
+      promise.set_exception(std::current_exception());
+    }
+  }).detach();
+  return result;
+}
+
+// A first-time library has no identity cache. Collect regular-file candidates
+// without opening their headers so menu music can restore its path-keyed catalog
+// before launch. False positives are not registered as DLC; the full scan below
+// validates every item before the title creates an aggregate enumerator.
+std::vector<std::filesystem::path> WalkLibraryCandidates(
+    const std::vector<std::filesystem::path>& roots) {
+  std::vector<std::filesystem::path> paths;
+  std::vector<std::filesystem::path> pending(roots.rbegin(), roots.rend());
+  while (!pending.empty()) {
+    const auto directory = pending.back();
+    pending.pop_back();
+    std::error_code ec;
+    std::filesystem::directory_iterator entries(directory,
+        std::filesystem::directory_options::none, ec);
+    if (ec) continue;
+    const std::filesystem::directory_iterator end;
+    while (entries != end) {
+      const auto entry = *entries;
+      entries.increment(ec);
+      if (ec) break;
+      const auto status = entry.status(ec);
+      if (ec) { ec.clear(); continue; }
+      if (std::filesystem::is_directory(status)) {
+        if (!fs::IsStoreStagingEntryName(fs::Utf8FileName(entry.path())) &&
+            !entry.is_symlink(ec)) {
+          pending.push_back(entry.path());
+        }
+        ec.clear();
+      } else if (std::filesystem::is_regular_file(status)) {
+        paths.push_back(entry.path());
+      }
+    }
+  }
+  return paths;
+}
 
 // The same threaded scan serves boot and refresh. Capture the thread count at boot so
 // the worker never reads the cvar registry.
@@ -307,6 +372,7 @@ std::size_t g_content_count = 0;
 // src/hooks/shell_music.cpp.
 std::vector<std::filesystem::path> g_structured_paths;
 std::vector<std::filesystem::path> g_package_paths;
+std::vector<std::filesystem::path> g_boot_candidate_paths;
 std::mutex g_package_paths_mutex;
 
 void RebuildPackagePaths(const std::vector<fs::LibraryItem>& library) {
@@ -409,7 +475,8 @@ void StartRefreshWorker(const char* why) {
 
 }  // namespace
 
-void PrepareBootLibraryScan(const std::filesystem::path& game_data_root) {
+void PrepareBootLibraryScan(const std::filesystem::path& game_data_root,
+                            const std::filesystem::path& identity_cache_path) {
   std::error_code ec;
   const auto root = std::filesystem::absolute(
       fs::ResolveDlcRoot(REXCVAR_GET(dlc_root), game_data_root), ec);
@@ -420,26 +487,21 @@ void PrepareBootLibraryScan(const std::filesystem::path& game_data_root) {
 
   BootScanJob job;
   job.roots = roots;
+  job.cache_path = identity_cache_path;
   job.content_type = ForceContentTypeFromCvar();
   job.threads = REXCVAR_GET(dlc_scan_threads);
-  std::promise<BootScanResult> promise;
-  job.result = promise.get_future();
-  const auto content_type = job.content_type;
-  const auto threads = job.threads;
-  std::thread([roots = std::move(roots), content_type, threads,
-               promise = std::move(promise)]() mutable {
-    try {
-      const auto started = std::chrono::steady_clock::now();
-      auto library = fs::ScanDlcLibraries(roots, content_type, threads);
-      const double scan_ms = std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - started).count();
-      promise.set_value({std::move(library), scan_ms});
-    } catch (...) {
-      promise.set_exception(std::current_exception());
-    }
-  }).detach();
+  // A first scan opens every package. Start it when the title reaches its own
+  // content-discovery screen, so cold I/O cannot hold up the first guest frame.
+  // A known cache is cheap to validate and can overlap graphics setup here.
+  if (std::filesystem::is_regular_file(identity_cache_path, ec) && !ec) {
+    job.result = StartBootScan(job.roots, identity_cache_path,
+                               job.content_type, job.threads);
+    REXLOG_INFO("dlc: started cached boot library scan during graphics setup");
+  } else {
+    REXLOG_INFO("dlc: identity cache absent; first header scan will start on the "
+                "title's content-discovery screen");
+  }
   g_boot_scan.emplace(std::move(job));
-  REXLOG_INFO("dlc: started the boot library scan during graphics setup");
 }
 
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
@@ -541,37 +603,83 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
         .value_or(std::string());
   });
   fs::LibraryScanResult library;
+  bool scan_deferred = false;
+  bool early_scan_failed = false;
+  const auto identity_cache_path = runtime->cache_root() / "dlc-library-identities.cache";
   if (g_boot_scan && g_boot_scan->roots == library_roots &&
+      g_boot_scan->cache_path == identity_cache_path &&
       g_boot_scan->content_type == force_content_type &&
       g_boot_scan->threads == g_scan_threads) {
-    const auto wait_started = std::chrono::steady_clock::now();
-    try {
-      auto completed = g_boot_scan->result.get();
-      library = std::move(completed.library);
-      REXLOG_INFO("dlc: boot scan overlapped graphics setup; scan_ms={:.3f} waited_ms={:.3f}",
-                  completed.scan_ms,
-                  std::chrono::duration<double, std::milli>(
-                      std::chrono::steady_clock::now() - wait_started).count());
-    } catch (const std::exception& error) {
-      REXLOG_WARN("dlc: early scan failed ({}); scanning now", error.what());
-      library = ScanLibrary(library_roots, force_content_type, g_scan_threads, "this boot");
+    if (!g_boot_scan->result.valid() ||
+        g_boot_scan->result.wait_for(std::chrono::milliseconds(0)) !=
+            std::future_status::ready) {
+      scan_deferred = true;
+    } else {
+      try {
+        auto completed = g_boot_scan->result.get();
+        library = std::move(completed.library);
+        REXLOG_INFO("dlc: cached boot scan completed before launch; scan_ms={:.3f} "
+                    "cache_loaded={} reused={} read={} saved={}",
+                    completed.scan_ms, completed.cache.loaded, completed.cache.reused,
+                    completed.cache.read, completed.cache.saved);
+      } catch (const std::exception& error) {
+        REXLOG_WARN("dlc: early scan failed ({}); retrying during native discovery", error.what());
+        scan_deferred = true;
+        early_scan_failed = true;
+      }
     }
   } else {
-    library = ScanLibrary(library_roots, force_content_type, g_scan_threads, "this boot");
+    // A setup-time configuration mismatch is exceptional. Read the resolved
+    // roots directly rather than publish a result from the wrong library.
+    const auto started = std::chrono::steady_clock::now();
+    fs::LibraryScanCacheStats cache;
+    library = fs::ScanDlcLibrariesCached(library_roots, identity_cache_path,
+                                         force_content_type, g_scan_threads, &cache);
+    REXLOG_INFO("dlc: this boot scan_ms={:.3f} cache_loaded={} reused={} read={} saved={}",
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - started).count(),
+                cache.loaded, cache.reused, cache.read, cache.saved);
   }
-  g_boot_scan.reset();
+  if (!scan_deferred) g_boot_scan.reset();
+
+  g_structured_paths.clear();
+  g_structured_paths.reserve(scan.packages.size());
+  for (const auto& package : scan.packages)
+    g_structured_paths.push_back(package.host_path);
+
+  if (scan_deferred) {
+    const auto candidates = WalkLibraryCandidates(library_roots);
+    {
+      const std::lock_guard<std::mutex> lock(g_package_paths_mutex);
+      g_package_paths = g_structured_paths;
+      g_package_paths.insert(g_package_paths.end(), candidates.begin(), candidates.end());
+      g_boot_candidate_paths = g_package_paths;
+    }
+    g_content_count = g_structured_paths.size() + candidates.size();
+    {
+      const std::lock_guard<std::mutex> lock(g_initial_scan_mutex);
+      g_initial_scan_pending = true;
+      g_initial_scan_failures = early_scan_failed ? 1 : 0;
+    }
+    if (content_manager && structured && !scan.packages.empty())
+      content_manager->set_extra_content_root(root);
+    REXLOG_INFO("dlc: first scan deferred to the title's native discovery screen; "
+                "{} flat candidate(s) found, window remains available during header I/O",
+                candidates.size());
+    return;
+  }
+
   REXLOG_INFO("dlc: this boot scanned roots='{}' content_type={:08X} packages={} files={}",
               JoinLibraryRoots(library_roots), force_content_type, library.items.size(),
               library.files_seen);
   for (const auto& rejected : library.rejected)
     REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
   g_content_count = scan.packages.size() + library.items.size();
-  g_structured_paths.clear();
-  g_structured_paths.reserve(scan.packages.size());
-  for (const auto& package : scan.packages) {
-    g_structured_paths.push_back(package.host_path);
-  }
   RebuildPackagePaths(library.items);
+  {
+    const std::lock_guard<std::mutex> lock(g_package_paths_mutex);
+    g_boot_candidate_paths = g_package_paths;
+  }
 
   if (!library.items.empty()) {
     if (force_content_type != 0) {
@@ -636,6 +744,71 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   }
 }
 
+bool PublishInitialScanIfReady() {
+  const std::lock_guard<std::mutex> lock(g_initial_scan_mutex);
+  if (!g_initial_scan_pending) return true;
+  if (!g_boot_scan) {
+    REXLOG_ERROR("dlc: initial scan job was lost; continuing native discovery without flat DLC");
+    g_initial_scan_pending = false;
+    return true;
+  }
+  if (!g_boot_scan->result.valid()) {
+    const bool use_cache = g_initial_scan_failures == 0;
+    g_boot_scan->result = StartBootScan(g_boot_scan->roots, g_boot_scan->cache_path,
+                                       g_boot_scan->content_type, g_boot_scan->threads,
+                                       use_cache);
+    REXLOG_INFO("dlc: initial header scan started behind the native discovery screen "
+                "(cache={})", use_cache ? "enabled" : "disabled after error");
+    return false;
+  }
+  if (g_boot_scan->result.wait_for(std::chrono::milliseconds(0)) !=
+      std::future_status::ready) return false;
+
+  BootScanResult completed;
+  try {
+    completed = g_boot_scan->result.get();
+  } catch (const std::exception& error) {
+    if (++g_initial_scan_failures <= 1) {
+      REXLOG_WARN("dlc: initial scan failed ({}); retrying without cache", error.what());
+      g_boot_scan->result = StartBootScan(g_boot_scan->roots, g_boot_scan->cache_path,
+                                         g_boot_scan->content_type, g_boot_scan->threads,
+                                         false);
+      return false;
+    }
+    REXLOG_ERROR("dlc: initial scan failed twice ({}); continuing without flat DLC", error.what());
+    g_boot_scan.reset();
+    g_initial_scan_pending = false;
+    return true;
+  }
+
+  auto* content_manager = ContentManagerOf(g_runtime);
+  if (content_manager) {
+    std::vector<rex::system::xam::ExtraContentItem> items;
+    items.reserve(completed.library.items.size());
+    for (const auto& item : completed.library.items) {
+      items.push_back({item.host_path, item.file_name, item.title_id,
+                       rex::system::XContentType(item.content_type)});
+    }
+    content_manager->set_extra_content_library(std::move(items));
+  } else {
+    REXLOG_WARN("dlc: initial scan found {} package(s), but no content manager is available",
+                completed.library.items.size());
+  }
+  RebuildPackagePaths(completed.library.items);
+  g_content_count = g_structured_paths.size() + completed.library.items.size();
+  rb_blitz::store::InvalidateLibrary();
+  REXLOG_INFO("dlc: initial scan published at native discovery; scan_ms={:.3f} "
+              "packages={} files={} cache_loaded={} reused={} read={} saved={}",
+              completed.scan_ms, completed.library.items.size(), completed.library.files_seen,
+              completed.cache.loaded, completed.cache.reused, completed.cache.read,
+              completed.cache.saved);
+  for (const auto& rejected : completed.library.rejected)
+    REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
+  g_boot_scan.reset();
+  g_initial_scan_pending = false;
+  return true;
+}
+
 void PublishPendingRefresh() {
   if (!g_refresh_state.Pending()) return;
   std::vector<rex::system::xam::ExtraContentItem> items;
@@ -698,6 +871,7 @@ void PublishPendingRefresh() {
 }
 
 bool RefreshReadyForDiscovery() {
+  if (!PublishInitialScanIfReady()) return false;
   // Check running first: Finish() publishes pending before clearing running.
   // A scan that finishes during this check is picked up on the next frame.
   if (g_refresh_state.Running()) return false;
@@ -708,6 +882,13 @@ bool RefreshReadyForDiscovery() {
 
 void RefreshConfigured() {
   store::ClearStoreRefreshWarning();
+  {
+    const std::lock_guard<std::mutex> initial_lock(g_initial_scan_mutex);
+    if (g_initial_scan_pending) {
+      REXLOG_INFO("dlc: native discovery is already awaiting the initial library scan");
+      return;
+    }
+  }
   {
     std::lock_guard<std::mutex> worker_lock(g_refresh_worker_mutex);
     if (g_restarting) return;
@@ -770,6 +951,11 @@ std::size_t ContentItemCount() { return g_content_count; }
 std::vector<std::filesystem::path> LibraryPackagePaths() {
   const std::lock_guard<std::mutex> lock(g_package_paths_mutex);
   return g_package_paths;
+}
+
+std::vector<std::filesystem::path> BootCandidatePackagePaths() {
+  const std::lock_guard<std::mutex> lock(g_package_paths_mutex);
+  return g_boot_candidate_paths;
 }
 
 }  // namespace rb_blitz::dlc

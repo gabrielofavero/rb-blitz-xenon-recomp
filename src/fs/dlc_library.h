@@ -19,13 +19,15 @@
 // tests/dlc_library_tests.cpp has to cover it without booting the game. The header
 // reads are the whole cost of a cold scan (~17 ms per package on this machine's
 // library, against ~2 ms for the walk itself), so a scan reads them on a small pool;
-// the walk and the merge stay on the calling thread, in walk order, so the answer does
-// not depend on how many threads read it. See docs/guides/dlc.md §2.1 and §4.1.
+// boot can also reuse identities from a persistent cache after validating each file's
+// size and mtime. The walk and merge stay in walk order, so the answer does not depend
+// on how many threads read it. See docs/guides/dlc.md §2.1 and §4.1.
 
 #pragma once
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -38,6 +40,13 @@
 #include <system_error>
 #include <thread>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #include "fs/dlc_layout.h"
 
@@ -246,6 +255,15 @@ struct LibraryScanResult {
   std::size_t adapted_saved_games = 0;  // saved-game packages presented as marketplace
 };
 
+// Counts the work a persistent identity scan did. A hit avoids opening the package;
+// the directory entry still has to be visited so added and removed files are noticed.
+struct LibraryScanCacheStats {
+  std::size_t reused = 0;
+  std::size_t read = 0;
+  bool loaded = false;
+  bool saved = false;
+};
+
 // Splits a ';'-separated cvar value into trimmed, non-empty entries. Paths may
 // contain spaces, so only ';' separates them.
 inline std::vector<std::string> SplitPathList(const std::string_view value) {
@@ -341,6 +359,9 @@ namespace detail {
 struct LibraryJob {
   std::filesystem::path path;
   std::uintmax_t size = kSizeUnknown;
+  std::string cache_key;
+  int64_t mtime = 0;
+  bool cacheable = false;
 };
 
 // What the walk saw, in the order it saw it: either a directory that could not be
@@ -358,7 +379,160 @@ struct LibraryJobOutcome {
   PackageIdentityResult result = PackageIdentityResult::kNotPackage;
   PackageIdentity identity;
   std::string reason;
+  bool reused = false;
 };
+
+struct IdentityCacheRecord {
+  uint64_t size = 0;
+  int64_t mtime = 0;
+  PackageIdentityResult result = PackageIdentityResult::kNotPackage;
+  PackageIdentity identity;
+};
+
+using IdentityCache = std::map<std::string, IdentityCacheRecord>;
+inline constexpr std::string_view kIdentityCacheMagic = "RBDLIC01";
+inline constexpr std::size_t kMaxIdentityCacheBytes = 64 * 1024 * 1024;
+inline constexpr uint32_t kMaxIdentityCacheEntries = 1000000;
+inline constexpr uint32_t kMaxIdentityCacheKeyBytes = 32768;
+
+inline std::string CacheKey(const std::filesystem::path& path) {
+  const std::u8string utf8 = path.generic_u8string();
+  return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+}
+
+inline void AppendU32(std::string* bytes, uint32_t value) {
+  for (unsigned i = 0; i < 4; ++i) bytes->push_back(static_cast<char>(value >> (i * 8)));
+}
+
+inline void AppendU64(std::string* bytes, uint64_t value) {
+  for (unsigned i = 0; i < 8; ++i) bytes->push_back(static_cast<char>(value >> (i * 8)));
+}
+
+inline bool TakeU32(const std::string_view bytes, std::size_t* offset, uint32_t* value) {
+  if (*offset > bytes.size() || bytes.size() - *offset < 4) return false;
+  *value = 0;
+  for (unsigned i = 0; i < 4; ++i)
+    *value |= uint32_t(static_cast<uint8_t>(bytes[(*offset)++])) << (i * 8);
+  return true;
+}
+
+inline bool TakeU64(const std::string_view bytes, std::size_t* offset, uint64_t* value) {
+  if (*offset > bytes.size() || bytes.size() - *offset < 8) return false;
+  *value = 0;
+  for (unsigned i = 0; i < 8; ++i)
+    *value |= uint64_t(static_cast<uint8_t>(bytes[(*offset)++])) << (i * 8);
+  return true;
+}
+
+inline uint64_t CacheChecksum(const std::string_view bytes) {
+  uint64_t hash = 0xCBF29CE484222325ull;
+  for (const char c : bytes) {
+    hash ^= static_cast<uint8_t>(c);
+    hash *= 0x100000001B3ull;
+  }
+  return hash;
+}
+
+// Corruption, truncation, or an unknown version makes the cache a miss. The walker
+// only looks up files it just saw, so cache contents cannot add an arbitrary package.
+inline bool LoadIdentityCache(const std::filesystem::path& path, IdentityCache* out) {
+  std::ifstream file(path, std::ios::binary | std::ios::ate);
+  if (!file) return false;
+  const std::streampos end = file.tellg();
+  if (end < 0 || static_cast<uint64_t>(end) > kMaxIdentityCacheBytes ||
+      static_cast<uint64_t>(end) < kIdentityCacheMagic.size() + 4 + 8)
+    return false;
+  std::string bytes(static_cast<std::size_t>(end), '\0');
+  file.seekg(0);
+  if (!file.read(bytes.data(), static_cast<std::streamsize>(bytes.size()))) return false;
+  const std::string_view body(bytes.data(), bytes.size() - 8);
+  std::size_t checksum_offset = body.size();
+  uint64_t stored_checksum = 0;
+  if (!TakeU64(bytes, &checksum_offset, &stored_checksum) ||
+      stored_checksum != CacheChecksum(body) ||
+      body.substr(0, kIdentityCacheMagic.size()) != kIdentityCacheMagic)
+    return false;
+
+  std::size_t offset = kIdentityCacheMagic.size();
+  uint32_t count = 0;
+  if (!TakeU32(body, &offset, &count) || count > kMaxIdentityCacheEntries) return false;
+  IdentityCache loaded;
+  for (uint32_t i = 0; i < count; ++i) {
+    uint32_t key_length = 0;
+    uint64_t size = 0, mtime = 0;
+    uint32_t result = 0, title_id = 0, content_type = 0;
+    if (!TakeU32(body, &offset, &key_length) || key_length == 0 ||
+        key_length > kMaxIdentityCacheKeyBytes || offset > body.size() ||
+        body.size() - offset < key_length)
+      return false;
+    std::string key(body.substr(offset, key_length));
+    offset += key_length;
+    if (!TakeU64(body, &offset, &size) || !TakeU64(body, &offset, &mtime) ||
+        !TakeU32(body, &offset, &result) || !TakeU32(body, &offset, &title_id) ||
+        !TakeU32(body, &offset, &content_type) ||
+        (result != static_cast<uint32_t>(PackageIdentityResult::kNotPackage) &&
+         result != static_cast<uint32_t>(PackageIdentityResult::kRead)) ||
+        (result == static_cast<uint32_t>(PackageIdentityResult::kRead) && title_id == 0))
+      return false;
+    IdentityCacheRecord record{size, static_cast<int64_t>(mtime),
+                               static_cast<PackageIdentityResult>(result),
+                               {title_id, content_type}};
+    if (!loaded.emplace(std::move(key), record).second) return false;
+  }
+  if (offset != body.size()) return false;
+  *out = std::move(loaded);
+  return true;
+}
+
+inline bool SaveIdentityCache(const std::filesystem::path& path, const IdentityCache& entries) {
+  if (entries.size() > kMaxIdentityCacheEntries) return false;
+  std::string bytes(kIdentityCacheMagic);
+  AppendU32(&bytes, static_cast<uint32_t>(entries.size()));
+  for (const auto& [key, entry] : entries) {
+    if (key.empty() || key.size() > kMaxIdentityCacheKeyBytes) return false;
+    AppendU32(&bytes, static_cast<uint32_t>(key.size()));
+    bytes.append(key);
+    AppendU64(&bytes, entry.size);
+    AppendU64(&bytes, static_cast<uint64_t>(entry.mtime));
+    AppendU32(&bytes, static_cast<uint32_t>(entry.result));
+    AppendU32(&bytes, entry.identity.title_id);
+    AppendU32(&bytes, entry.identity.content_type);
+    if (bytes.size() > kMaxIdentityCacheBytes - 8) return false;
+  }
+  AppendU64(&bytes, CacheChecksum(bytes));
+
+  std::error_code ec;
+  if (!path.parent_path().empty()) {
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) return false;
+  }
+  static std::atomic<uint64_t> serial{0};
+  std::filesystem::path temporary = path;
+  temporary += ".tmp-" + std::to_string(
+      std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
+      std::to_string(serial.fetch_add(1, std::memory_order_relaxed));
+  {
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+    if (!file || !file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()))) {
+      std::filesystem::remove(temporary, ec);
+      return false;
+    }
+    file.close();
+    if (!file) {
+      std::filesystem::remove(temporary, ec);
+      return false;
+    }
+  }
+#if defined(_WIN32)
+  const bool published = MoveFileExW(temporary.c_str(), path.c_str(),
+                                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+  std::filesystem::rename(temporary, path, ec);
+  const bool published = !ec;
+#endif
+  if (!published) std::filesystem::remove(temporary, ec);
+  return published;
+}
 
 }  // namespace detail
 
@@ -374,9 +548,15 @@ struct LibraryJobOutcome {
 // before the pool existed), and any other value is that many workers. The reads are
 // independent and are merged in walk order afterwards, so the thread count cannot
 // change the answer - the same library answers identically at 1 and at 8.
-inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::path>& roots,
-                                          const uint32_t force_content_type = 0,
-                                          const uint32_t scan_threads = 0) {
+inline LibraryScanResult ScanDlcLibrariesImpl(const std::vector<std::filesystem::path>& roots,
+                                              const uint32_t force_content_type,
+                                              const uint32_t scan_threads,
+                                              const std::filesystem::path& cache_path,
+                                              LibraryScanCacheStats* cache_stats) {
+  LibraryScanCacheStats stats;
+  detail::IdentityCache cached;
+  if (!cache_path.empty()) stats.loaded = detail::LoadIdentityCache(cache_path, &cached);
+
   // The walk first, on this thread: it is directory reads and the sizes the directory
   // entries already carry (measured 2 ms for 1,402 packages), and it is what fixes the
   // order everything below is merged in.
@@ -429,6 +609,19 @@ inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::pat
       detail::LibraryJob job;
       job.path = entry.path();
       job.size = size_ec ? kSizeUnknown : size;
+      if (!cache_path.empty() && !size_ec) {
+        std::error_code time_ec;
+        const auto time = entry.last_write_time(time_ec);
+        if (!time_ec) {
+          job.cacheable = true;
+          job.mtime = static_cast<int64_t>(time.time_since_epoch().count());
+          job.cache_key = detail::CacheKey(job.path);
+          if (job.cache_key.size() > detail::kMaxIdentityCacheKeyBytes) {
+            job.cacheable = false;
+            job.cache_key.clear();
+          }
+        }
+      }
 
       detail::LibraryWalkEvent event;
       event.is_file = true;
@@ -441,8 +634,20 @@ inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::pat
   // Then the headers, on a pool when there is one. Every job writes only its own
   // outcome, so the workers share nothing but the queue.
   std::vector<detail::LibraryJobOutcome> outcomes(jobs.size());
+  const detail::IdentityCache& reusable = cached;
   const auto read_one = [&](const std::size_t index) {
     detail::LibraryJobOutcome& outcome = outcomes[index];
+    const detail::LibraryJob& job = jobs[index];
+    if (job.cacheable && stats.loaded) {
+      const auto cached_item = reusable.find(job.cache_key);
+      if (cached_item != reusable.end() && cached_item->second.size == job.size &&
+          cached_item->second.mtime == job.mtime) {
+        outcome.result = cached_item->second.result;
+        outcome.identity = cached_item->second.identity;
+        outcome.reused = true;
+        return;
+      }
+    }
     outcome.result = ReadPackageIdentity(jobs[index].path, jobs[index].size, &outcome.identity,
                                          &outcome.reason);
   };
@@ -451,6 +656,7 @@ inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::pat
   if (jobs.size() < kMinParallelScanFiles) {
     threads = 1;
   }
+
   if (threads <= 1) {
     for (std::size_t i = 0; i < jobs.size(); ++i) {
       read_one(i);
@@ -473,6 +679,26 @@ inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::pat
     for (auto& thread : pool) {
       thread.join();
     }
+  }
+
+  if (!cache_path.empty()) {
+    detail::IdentityCache current;
+    for (std::size_t i = 0; i < jobs.size(); ++i) {
+      if (outcomes[i].reused) ++stats.reused;
+      else ++stats.read;
+      // A transient open/read error must be retried on the next boot. Successful
+      // nonpackages are reusable too, so a folder of stray files stays cheap.
+      if (!jobs[i].cacheable || outcomes[i].result == PackageIdentityResult::kUnreadable)
+        continue;
+      current.emplace(jobs[i].cache_key,
+                      detail::IdentityCacheRecord{static_cast<uint64_t>(jobs[i].size),
+                                                  jobs[i].mtime, outcomes[i].result,
+                                                  outcomes[i].identity});
+    }
+    // A clean hit needs no write. Added, removed, or changed files publish one
+    // complete snapshot after all header readers have joined.
+    if (!stats.loaded || stats.read != 0 || current.size() != cached.size())
+      stats.saved = detail::SaveIdentityCache(cache_path, current);
   }
 
   // And the merge, back on this thread and in walk order: the counters, the rejected
@@ -512,7 +738,26 @@ inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::pat
         {jobs[event.job].path, std::move(name), identity.title_id, content_type});
   }
 
+  if (cache_stats) *cache_stats = stats;
   return result;
+}
+
+// The original no-cache path remains for callers that need a fresh read, including
+// the in-game Refresh Songs route.
+inline LibraryScanResult ScanDlcLibraries(const std::vector<std::filesystem::path>& roots,
+                                          const uint32_t force_content_type = 0,
+                                          const uint32_t scan_threads = 0) {
+  return ScanDlcLibrariesImpl(roots, force_content_type, scan_threads, {}, nullptr);
+}
+
+// A boot scan reuses raw header identities for files whose path, size and mtime have
+// not changed. A corrupt or absent cache reads every header and rewrites the snapshot.
+inline LibraryScanResult ScanDlcLibrariesCached(const std::vector<std::filesystem::path>& roots,
+                                                const std::filesystem::path& cache_path,
+                                                const uint32_t force_content_type = 0,
+                                                const uint32_t scan_threads = 0,
+                                                LibraryScanCacheStats* stats = nullptr) {
+  return ScanDlcLibrariesImpl(roots, force_content_type, scan_threads, cache_path, stats);
 }
 
 }  // namespace rb_blitz::fs

@@ -1207,6 +1207,72 @@ bool SkipStartupLogos(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
+bool WaitForStartupLogos(std::vector<Node>* roots, std::string* why) {
+  if (!roots) return false;
+  Node* order = nullptr;
+  Node* wait = nullptr;
+  for (auto& root : *roots) {
+    if (root.tag != ui::dtb::kArray || root.kids.empty() ||
+        root.kids[0].tag != ui::dtb::kSymbol) continue;
+    if (root.kids[0].text == "splash_order") {
+      if (order) { if (why) *why = "duplicate startup splash playlist"; return false; }
+      order = &root;
+    } else if (root.kids[0].text == "wait_for_splash") {
+      if (wait) { if (why) *why = "duplicate startup splash wait"; return false; }
+      wait = &root;
+    }
+  }
+  if (!order || order->kids.size() < 2 || !wait || wait->kids.size() != 2 ||
+      wait->kids[1].tag != ui::dtb::kSymbol ||
+      (wait->kids[1].text != "TRUE" && wait->kids[1].text != "FALSE")) {
+    if (why) *why = "unsupported startup splash playlist";
+    return false;
+  }
+  wait->kids[1] = Node::Symbol("TRUE");
+  return true;
+}
+
+bool OrderUltimateStartupLogos(std::vector<Node>* roots, std::string* why) {
+  if (!roots) return false;
+  Node* order = nullptr;
+  for (auto& root : *roots) {
+    if (root.tag != ui::dtb::kArray || root.kids.empty() ||
+        root.kids[0].tag != ui::dtb::kSymbol ||
+        root.kids[0].text != "splash_order") continue;
+    if (order) { if (why) *why = "duplicate startup splash playlist"; return false; }
+    order = &root;
+  }
+  auto scene = [](const Node& node, std::string_view path) {
+    return node.tag == ui::dtb::kArray && node.kids.size() == 2 &&
+           node.kids[0].tag == ui::dtb::kSymbol && node.kids[0].text == path &&
+           node.kids[1].tag == ui::dtb::kInt;
+  };
+  if (!order || order->kids.size() != 8 ||
+      !scene(order->kids[1], "ulti/ultimate_mods.milo") ||
+      order->kids[2].tag != ui::dtb::kIfdef || order->kids[2].text != "REGION_NA" ||
+      !scene(order->kids[3], "ui/startup/hmx_logo_screen.milo") ||
+      !scene(order->kids[4], "ui/startup/esrb.milo") ||
+      order->kids[5].tag != 0x08 || // #else
+      !scene(order->kids[6], "ui/startup/hmx_logo_screen.milo") ||
+      order->kids[7].tag != ui::dtb::kEndif ||
+      order->kids[3].kids[1].scalar != order->kids[6].kids[1].scalar) {
+    if (why) *why = "unsupported Ultimate startup splash order";
+    return false;
+  }
+  // Both regional branches contain the same Harmonix entry. Put one copy before
+  // the provider logo, and keep the ESRB entry conditional on North America.
+  std::vector<Node> reordered;
+  reordered.reserve(6);
+  reordered.push_back(order->kids[0]);
+  reordered.push_back(order->kids[3]);
+  reordered.push_back(order->kids[1]);
+  reordered.push_back(order->kids[2]);
+  reordered.push_back(order->kids[4]);
+  reordered.push_back(order->kids[7]);
+  order->kids = std::move(reordered);
+  return true;
+}
+
 bool HidePowerupCurrency(std::vector<Node>* roots, std::string* why) {
   Node* enter = PanelMethod(roots, "powerup_select_panel", "enter");
   if (!enter) { if (why) *why = "power-up selection has no enter method"; return false; }
@@ -1286,8 +1352,10 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       !edit("config/gen/beatmatch_controller.dtb", [&](auto& roots) {
         return PatchTutorialButtonNames(&roots, error);
       })) return false;
-  if (skip_startup_logos && !edit("ui/startup/gen/startup.dtb", [&](auto& roots) {
-        return SkipStartupLogos(&roots, error);
+  if (!edit("ui/startup/gen/startup.dtb", [&](auto& roots) {
+        if (skip_startup_logos) return SkipStartupLogos(&roots, error);
+        return (!merge_provider || OrderUltimateStartupLogos(&roots, error)) &&
+               WaitForStartupLogos(&roots, error);
       })) return false;
   if (!screen::CurrentMenuConfiguration().show_currency) {
     if (!edit("ui/powerup_select/gen/powerup_select.dtb", [&](auto& roots) {

@@ -81,5 +81,9 @@ Revert. The 15-second timeout restored the saved mode and, after a rebuild, the 
 exited through its `display.preview_active` poll. The same six transitions, Revert and timeout
 were observed on Vulkan in the disposable profile. Later launches without a CLI display override
 restored saved Full Screen on both backends, and input reached Help & Options before a kept return
-to Windowed. [unverified] Repeated placement/input and the Vulkan Full Screen relaunch visual
-still need acceptance; its desktop captures were black. The schema remains restart-scoped.
+to Windowed. [measured] On 2026-11-07, the repeated cycles, placement, focus/input after
+minimize/restore and Alt+Tab, and a visible Vulkan Full Screen relaunch passed on the interactive
+desktop (`out/_swap/hot-settings/c1-2026-11-07/`). Desktop Duplication captured the Vulkan
+picture where ordinary captures were black or stale. SDK patch 0054 restored Vulkan menu input
+after minimize/restore. [unverified] Other DPI or monitor configurations. The schema now marks Window Mode
+immediate through this authored preview/Keep route; direct setting writes cannot bypass it.

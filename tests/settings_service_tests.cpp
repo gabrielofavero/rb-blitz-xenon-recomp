@@ -118,6 +118,16 @@ class ClampingReconciler : public Reconciler {
   }
 };
 
+class NoNativeAaReconciler : public Reconciler {
+ public:
+  ValidationResult Validate(SettingId id, const Descriptor& descriptor, const Value& value,
+                            const CapabilitySnapshot& caps) const override {
+    if (id == SettingId::kAntiAliasing && value.text == "native")
+      return {false, "settings.graphics.aa_unavailable_choice"};
+    return Reconciler::Validate(id, descriptor, value, caps);
+  }
+};
+
 struct FakeProvider : ProviderSink {
   ProviderReadiness readiness = ProviderReadiness::kCompatible;
   bool durable = true;
@@ -993,6 +1003,40 @@ void TestProviderRestoreUsesInstalledDefaults() {
   CHECK_FALSE(service.CommittedProviderValue(SettingId::kHideHud)->boolean);
 }
 
+void TestRestoreClearsUnsupportedNativeDefaultWithProvider() {
+  BeginCase("restore clears native keys even when a compiled default is unavailable");
+  Scratch scratch;
+  const StorePaths paths = Paths(scratch);
+  Service service(paths);
+  service.Boot(nullptr, {}, nullptr);
+  NoNativeAaReconciler reconciler;
+  service.SetReconciler(&reconciler);
+  service.SetCapabilities(Capabilities());
+  const uint64_t edit = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(edit, SettingId::kAntiAliasing, EnumV("none"),
+                         service.capability_revision()).ok);
+  CHECK_TRUE(service.Commit(edit).status == CommitStatus::kSaved);
+  CHECK_TRUE(service.store().document().values.contains(SettingId::kAntiAliasing));
+
+  FakeProvider provider;
+  provider.values[SettingId::kHideHud] = BoolV(true);
+  service.SetProviderSink(&provider);
+  service.SetProviderDefaults({{SettingId::kHideHud, BoolV(false)}});
+  const uint64_t restore = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageDefaults(restore).ok);
+  const CommitResult saved = service.Commit(restore);
+  CHECK_TRUE(saved.status == CommitStatus::kSaved);
+  CHECK_TRUE(saved.restart_required);
+  CHECK_EQ(provider.saves, 1);
+  CHECK_FALSE(service.store().document().values.contains(SettingId::kAntiAliasing));
+  CHECK_FALSE(service.CommittedProviderValue(SettingId::kHideHud)->boolean);
+
+  Service reloaded(paths);
+  reloaded.Boot(nullptr, {}, nullptr);
+  CHECK_FALSE(reloaded.store().document().values.contains(SettingId::kAntiAliasing));
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kAntiAliasing).text == "native");
+}
+
 }  // namespace
 
 int main() {
@@ -1016,5 +1060,6 @@ int main() {
   TestApplicationSnapshot();
   TestIndependentBootRecoveryReasons();
   TestProviderRestoreUsesInstalledDefaults();
+  TestRestoreClearsUnsupportedNativeDefaultWithProvider();
   return Finish();
 }

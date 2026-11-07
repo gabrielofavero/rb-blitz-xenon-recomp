@@ -31,6 +31,7 @@ int main() {
     CHECK_TRUE(memory == before); // state/event handshake belongs to native worker
   }
   CHECK_EQ(calls, 0u);
+  CHECK_FALSE(rb_blitz::hooks::startup_splasher::NativeLogoLoadStarted());
   BeginCase("nonempty splash lists keep their native scene work");
   rex::memory::store_and_swap<uint32_t>(base + head, 1024);
   rex::memory::store_and_swap<uint32_t>(base + head + 4, 1024);
@@ -41,5 +42,6 @@ int main() {
     CHECK_EQ(ctx.r3.u64, expected++);
   }
   CHECK_EQ(calls, 3u);
+  CHECK_TRUE(rb_blitz::hooks::startup_splasher::NativeLogoLoadStarted());
   return Finish();
 }

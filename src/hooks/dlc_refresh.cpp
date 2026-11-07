@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// The guest's native content discovery route. A subsequent visit scans the flat
-// host library on a worker, then resumes the title before its enumerators snapshot it.
+// The guest's native content discovery route. An uncached first boot scans the
+// flat library here; later visits refresh it before enumerators snapshot it.
 #include <atomic>
 #include <cstdint>
 
@@ -34,8 +34,8 @@ extern "C" REX_FUNC(sub_822CA460) {
   const bool enumerating = Be32(base + ctx.r3.u32 + 56) == 28;
   if (!enumerating) g_state28_started.store(false);
   if (enumerating && !g_state28_started.exchange(true) && g_seen_discovery.exchange(true)) {
-    // The initial boot already scanned in Configure(). Each later native pass
-    // refreshes the host list before the title creates its aggregate enumerators.
+    // The first pass may still be waiting for its initial header scan. A later
+    // native pass refreshes the host list before creating aggregate enumerators.
     rb_blitz::dlc::RefreshConfigured();
   }
   if (enumerating && !rb_blitz::dlc::RefreshReadyForDiscovery()) {

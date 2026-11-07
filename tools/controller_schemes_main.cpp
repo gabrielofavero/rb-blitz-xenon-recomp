@@ -2,25 +2,40 @@
 #include "controller_schemes/schemes.h"
 
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 
 int main(int argc, char** argv) {
-  if (argc != 3 || (std::string(argv[1]) != "--validate" &&
+  if (argc == 3 && std::string(argv[1]) == "--benchmark-discover") {
+    const auto started = std::chrono::steady_clock::now();
+    auto registry = rb_blitz::controller_schemes::Discover(
+        argv[2], {}, rb_blitz::controller_schemes::DecodePngWic);
+    const auto elapsed = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - started).count();
+    std::cout << registry.Summary() << "; elapsed_ms=" << elapsed << '\n';
+    return 0;
+  }
+  const bool write_cache = argc == 4 && std::string(argv[1]) == "--write-cache";
+  if ((!write_cache && argc != 3) || (!write_cache &&
+      std::string(argv[1]) != "--validate" &&
                     std::string(argv[1]) != "--validate-install" &&
                     std::string(argv[1]) != "--validate-internal-keyboard" &&
                     std::string(argv[1]) != "--list-declared" &&
                     std::string(argv[1]) != "--list-internal-keyboard")) {
     std::cerr << "usage: rb_blitz_controller_schemes "
                  "--validate|--validate-install|--validate-internal-keyboard|"
-                 "--list-declared|--list-internal-keyboard <folder>\n";
+                 "--list-declared|--list-internal-keyboard <folder>\n"
+                 "       rb_blitz_controller_schemes --write-cache <folder> <cache-file>\n"
+                 "       rb_blitz_controller_schemes --benchmark-discover <install-root>\n";
     return 2;
   }
   rb_blitz::controller_schemes::Scheme scheme;
   std::string reason;
   const auto folder = std::filesystem::path(argv[2]);
-  const bool trusted = std::string(argv[1]) == "--validate-install";
+  const bool trusted = std::string(argv[1]) == "--validate-install" || write_cache;
   const bool internal = std::string(argv[1]) == "--validate-internal-keyboard" ||
-                        std::string(argv[1]) == "--list-internal-keyboard";
+                        std::string(argv[1]) == "--list-internal-keyboard" ||
+                        (write_cache && folder.filename() == "keyboard-mouse");
   const bool valid = internal ? rb_blitz::controller_schemes::LoadInternalKeyboard(
       folder, rb_blitz::controller_schemes::DecodePngWic, &scheme, &reason) :
       rb_blitz::controller_schemes::LoadScheme(
@@ -28,6 +43,18 @@ int main(int argc, char** argv) {
   if (!valid) {
     std::cerr << folder << ": " << reason << '\n';
     return 1;
+  }
+  if (write_cache) {
+    if (!rb_blitz::controller_schemes::WriteSchemeCache(scheme, argv[3], &reason)) {
+      std::cerr << folder << ": " << reason << '\n';
+      return 1;
+    }
+    // The packer copies precisely these validated source files beside the
+    // cache. One parse/decode pass now serves validation, listing and caching.
+    std::cout << "scheme.toml\n";
+    for (const auto& path : scheme.declared_files)
+      std::cout << path.generic_string() << '\n';
+    return 0;
   }
   if (std::string(argv[1]) == "--list-declared" ||
       std::string(argv[1]) == "--list-internal-keyboard") {

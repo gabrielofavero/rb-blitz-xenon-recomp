@@ -15,6 +15,7 @@
 
 #include "fs/dlc_library.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -398,6 +399,109 @@ int main() {
     const LibraryScanResult automatic = ScanDlcLibraries({s.base});
     CHECK_TRUE(items_of(automatic) == items_of(one));
     CHECK_TRUE(rejected_of(automatic) == rejected_of(one));
+  }
+
+  BeginCase("a second boot reuses unchanged headers, but changed files are read again");
+  {
+    Scratch s;
+    const fs::path library = s.base / "library";
+    const fs::path cache = s.base / "identities.cache";
+    const fs::path one = library / "song-one";
+    const fs::path two = library / "song-two";
+    WritePackage(one, "CON ", kRb3TitleId, kSavedGame);
+    WritePackage(two, "LIVE", kRb2TitleId, kMarketplace);
+    WriteFile(library / "notes.txt", "not a package");
+
+    LibraryScanCacheStats cold_stats;
+    const LibraryScanResult cold = ScanDlcLibrariesCached({library}, cache, 0, 4, &cold_stats);
+    CHECK_FALSE(cold_stats.loaded);
+    CHECK_TRUE(cold_stats.saved);
+    CHECK_EQ(cold_stats.read, 3);
+    CHECK_EQ(cold.items.size(), 2);
+
+    LibraryScanCacheStats warm_stats;
+    const LibraryScanResult warm = ScanDlcLibrariesCached({library}, cache, 0, 4, &warm_stats);
+    CHECK_TRUE(warm_stats.loaded);
+    CHECK_EQ(warm_stats.reused, 3);
+    CHECK_EQ(warm_stats.read, 0);
+    CHECK_EQ(warm.items.size(), cold.items.size());
+    CHECK_EQ(warm.other_files, cold.other_files);
+    CHECK_TRUE(FindItem(warm, kRb3TitleId, kMarketplace, "song-one") != nullptr);
+    CHECK_TRUE(FindItem(warm, kRb2TitleId, kMarketplace, "song-two") != nullptr);
+
+    // Same length, new title, later mtime: the directory still sees one file but
+    // its cached identity must no longer determine which title gets the song.
+    const auto old_time = fs::last_write_time(one);
+    WritePackage(one, "CON ", kRb1TitleId, kSavedGame);
+    fs::last_write_time(one, old_time + std::chrono::seconds(2));
+    LibraryScanCacheStats changed_stats;
+    const LibraryScanResult changed =
+        ScanDlcLibrariesCached({library}, cache, 0, 4, &changed_stats);
+    CHECK_TRUE(changed_stats.loaded);
+    CHECK_EQ(changed_stats.reused, 2);
+    CHECK_EQ(changed_stats.read, 1);
+    CHECK_TRUE(FindItem(changed, kRb1TitleId, kMarketplace, "song-one") != nullptr);
+    CHECK_TRUE(FindItem(changed, kRb3TitleId, kMarketplace, "song-one") == nullptr);
+
+    // The cache stores the raw content type, so a changed presentation override
+    // applies on a hit without reading or rewriting the package.
+    LibraryScanCacheStats forced_stats;
+    const LibraryScanResult forced =
+        ScanDlcLibrariesCached({library}, cache, 0x00009000u, 4, &forced_stats);
+    CHECK_EQ(forced_stats.reused, 3);
+    CHECK_EQ(forced_stats.read, 0);
+    CHECK_TRUE(FindItem(forced, kRb1TitleId, 0x00009000u, "song-one") != nullptr);
+
+    fs::remove(two);
+    WritePackage(library / "song-three", "CON ", kBlitzTitleId, kSavedGame);
+    LibraryScanCacheStats changed_tree_stats;
+    const LibraryScanResult changed_tree =
+        ScanDlcLibrariesCached({library}, cache, 0, 4, &changed_tree_stats);
+    CHECK_EQ(changed_tree_stats.reused, 2);
+    CHECK_EQ(changed_tree_stats.read, 1);
+    CHECK_EQ(changed_tree.items.size(), 2);
+    CHECK_TRUE(FindItem(changed_tree, kRb2TitleId, kMarketplace, "song-two") == nullptr);
+    CHECK_TRUE(FindItem(changed_tree, kBlitzTitleId, kMarketplace, "song-three") != nullptr);
+  }
+
+  BeginCase("a corrupt cache falls back to the package headers");
+  {
+    Scratch s;
+    const fs::path library = s.base / "library";
+    const fs::path cache = s.base / "identities.cache";
+    WritePackage(library / "song", "CON ", kRb3TitleId, kSavedGame);
+    LibraryScanCacheStats first;
+    ScanDlcLibrariesCached({library}, cache, 0, 1, &first);
+    CHECK_TRUE(first.saved);
+    WriteFile(cache, "broken cache data");
+
+    LibraryScanCacheStats recovered;
+    const LibraryScanResult result =
+        ScanDlcLibrariesCached({library}, cache, 0, 1, &recovered);
+    CHECK_FALSE(recovered.loaded);
+    CHECK_EQ(recovered.read, 1);
+    CHECK_TRUE(recovered.saved);
+    CHECK_TRUE(FindItem(result, kRb3TitleId, kMarketplace, "song") != nullptr);
+  }
+
+  BeginCase("parallel header readers and cache hits keep the same library");
+  {
+    Scratch s;
+    const fs::path library = s.base / "library";
+    const fs::path cache = s.base / "identities.cache";
+    for (std::size_t i = 0; i < kMinParallelScanFiles + 4; ++i)
+      WritePackage(library / ("song-" + std::to_string(i)), "CON ", kRb3TitleId,
+                   kSavedGame);
+    LibraryScanCacheStats cold_stats;
+    const LibraryScanResult cold = ScanDlcLibrariesCached({library}, cache, 0, 4, &cold_stats);
+    CHECK_EQ(cold_stats.read, kMinParallelScanFiles + 4);
+    LibraryScanCacheStats warm_stats;
+    const LibraryScanResult warm = ScanDlcLibrariesCached({library}, cache, 0, 4, &warm_stats);
+    CHECK_EQ(warm_stats.reused, kMinParallelScanFiles + 4);
+    CHECK_EQ(warm_stats.read, 0);
+    CHECK_EQ(warm.items.size(), cold.items.size());
+    for (const LibraryItem& item : cold.items)
+      CHECK_TRUE(FindItem(warm, item.title_id, item.content_type, item.file_name) != nullptr);
   }
 
   return Finish();

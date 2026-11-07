@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -58,7 +59,8 @@ inline constexpr std::size_t kHeaderNextIcon = 13;
 void InstallP1TextureOverride();
 // Scan at boot, publish the validated catalog, and install the texture provider.
 void InstallControllerSchemes(const std::filesystem::path& install_root,
-                              const std::filesystem::path& user_root);
+                              const std::filesystem::path& user_root,
+                              const std::function<void()>& pump_startup_window = {});
 // Queue a selected, validated token for the GPU thread. Returns false for an unavailable token.
 bool SelectControllerScheme(const std::string& id, uint64_t* ticket = nullptr);
 std::optional<ControllerSchemeProgress> LatestAppliedControllerScheme();
