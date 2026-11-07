@@ -129,10 +129,17 @@ about 28 seconds of low-CPU guest startup with only three file reads totaling
 22 ms. The current trace does not distinguish a guest wait from a slow file
 open, so no wait semantics were changed.
 
-The boot window now paints a circular lime autosave motif reconstructed from
-the title's spinner strip in the installed `spinner_autosave.milo_xbox` before
-opening the window. Its eight-wedge wrap, material scroll, and slower transform
-rotation follow the scene's authored animation keys. The
+The boot window now paints the autosave motif from the title's installed
+`spinner_autosave.milo_xbox` before opening the window. It rasterizes the
+scene's 21-vertex wedge mesh eight times, samples both the plate and bloom
+textures through the material's quarter-width U scale, and applies the
+authored material scroll, color keys, and transform rotation. The icon now
+occupies about 5% of the window height near (79.5%, 7.3%), matching its
+placement on the title's menu. A user recording showed the first implementation
+going black after about 2.6 seconds: it tried to upload 60 separate textures, but
+the SDK permits only eight. The frames now occupy four 512x512 atlases, so
+every animation frame remains available. The optional caption was removed
+after the recording showed its host font did not match the warning screen. The
 startup paint is an SDK opt-in; while synchronous setup runs, its paint pump
 services one queued paint at a time and leaves input and deferred callbacks
 queued until the normal event loop starts. Controller scheme discovery calls
@@ -150,3 +157,16 @@ The installed-art extractor, provider adapter, menu payload, controller scheme,
 and DLC headless checks pass. The owner will verify the early paint and window
 responsiveness in a live boot; these checks do not substitute for that visual
 test.
+
+## Early boot animation pause
+
+The owner's `Recording 2026-11-07 192503.mp4` confirms the small autosave icon
+is visible and correctly positioned, but its motion stops for roughly 0.6 s
+near the start. In `rb_blitz_588.log`, menu payload installation takes 1,218 ms.
+The record build uses 364 ms, archive assembly 46 ms, and archive write 152 ms;
+roughly 656 ms remains for mounting and checksum retargeting. The latter
+scans the guest image once per modified record and had no repaint checkpoints.
+Menu record reads/edits and checksum retargeting now request a bounded startup
+paint about every 33 ms while they run. A single record operation can still
+take longer than that interval. The owner needs to verify the change in a
+subsequent live boot.

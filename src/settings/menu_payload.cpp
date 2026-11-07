@@ -1313,7 +1313,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       std::vector<std::string>* notes,
                       const std::vector<std::string>& hidden_menu_rows,
                       bool skip_startup_logos,
-                      MenuRefreshRoutes* refresh_routes) {
+                      MenuRefreshRoutes* refresh_routes,
+                      const std::function<void()>& pump_startup_window) {
   namespace screen = ui::screen;
   MenuRecords built;
   MenuRefreshRoutes installed_routes;
@@ -1346,6 +1347,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         !ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, error) ||
         !transform(roots)) return false;
     built[path] = ui::dtb::Compile(roots, header);
+    if (pump_startup_window) pump_startup_window();
     return true;
   };
   if (screen::CurrentMenuConfiguration().controller_layout_enabled &&

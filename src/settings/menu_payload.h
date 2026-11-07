@@ -30,7 +30,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       std::vector<std::string>* notes = nullptr,
                       const std::vector<std::string>& hidden_menu_rows = {},
                       bool skip_startup_logos = false,
-                      MenuRefreshRoutes* refresh_routes = nullptr);
+                      MenuRefreshRoutes* refresh_routes = nullptr,
+                      const std::function<void()>& pump_startup_window = {});
 // Empty the native startup playlist and release its wait, before the guest boots.
 bool SkipStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Keep the provider's authored playlist, but wait for it on a normal boot.

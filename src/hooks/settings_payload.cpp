@@ -141,6 +141,16 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
   ultimate_runtime::SetSongEntryRouteReady(false);
   ultimate_runtime::SetSelectionRouteReady(false);
   const auto started = std::chrono::steady_clock::now();
+  // The boot icon shares this UI thread. Repaint between record reads and
+  // checksum updates so a large generated menu cannot freeze its animation.
+  auto last_paint = started;
+  auto maybe_pump = [&] {
+    if (!pump_startup_window) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_paint < std::chrono::milliseconds(33)) return;
+    PumpStartupWindow(pump_startup_window);
+    last_paint = std::chrono::steady_clock::now();
+  };
   auto* vfs = runtime->file_system();
   ArkIndex main, patch;
   Bytes bytes;
@@ -158,9 +168,10 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
   MenuRecords originals;
   RecordReader read = [&](const std::string& path, Bytes* out, std::string* why) {
     auto found = originals.find(path);
-    if (found != originals.end()) { *out = found->second; return true; }
+    if (found != originals.end()) { *out = found->second; maybe_pump(); return true; }
     if (!ReadRecord(vfs, patch.Find(path) ? patch : main, path, out, why)) return false;
     originals[path] = *out;
+    maybe_pump();
     return true;
   };
   std::set<std::string> locale_set;
@@ -413,7 +424,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
       rex::cvar::GetFlagByName("startup_mode") == "fast";
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), refresh_row_on, &build_notes, menu_filter::HiddenRows(),
-                        skip_startup_logos, &refresh_routes))
+                        skip_startup_logos, &refresh_routes, maybe_pump))
     return fail();
   PumpStartupWindow(pump_startup_window);
   bool song_entry_patched = false;
@@ -521,7 +532,9 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
     uint8_t before[20], after[20];
     menu_options::Sha1Digest(original->second.data(), original->second.size(), before);
     menu_options::Sha1Digest(replacement.data(), replacement.size(), after);
-    menu_filter::RetargetRecord(runtime->memory()->virtual_membase(), before, after);
+    menu_filter::RetargetRecord(runtime->memory()->virtual_membase(), before, after,
+                                maybe_pump);
+    maybe_pump();
   }
   REXLOG_INFO("settings_menu: mounted {} generated records over {} provider records in {} ms "
               "(build={} ms, assemble={} ms, write={} ms)",

@@ -38,14 +38,15 @@ int main() {
     const auto& image = frames[0];
     if (image.size() == kBytes) {
       size_t visible = 0;
-      size_t lime = 0;
+      size_t textured = 0;
       for (size_t pixel = 0; pixel < kFrameSize * kFrameSize; ++pixel) {
         const auto* rgba = image.data() + pixel * 4;
         visible += rgba[3] != 0;
-        lime += rgba[3] > 128 && rgba[1] > rgba[0] && rgba[0] > rgba[2];
+        textured += rgba[3] > 128;
       }
-      CHECK_TRUE(visible > 5000 && visible < 10000);
-      CHECK_TRUE(lime > 4000);
+      CHECK_TRUE(visible > kFrameSize * kFrameSize * 19 / 100 &&
+                 visible < kFrameSize * kFrameSize * 61 / 100);
+      CHECK_TRUE(textured > kFrameSize * kFrameSize * 15 / 100);
       CHECK_EQ(image[3], 0);  // transparent corner around the circular motif
       CHECK_EQ(image[(kFrameSize * kFrameSize - 1) * 4 + 3], 0);
       CHECK_EQ(image[((kFrameSize / 2) * kFrameSize + kFrameSize / 2) * 4 + 3], 0);

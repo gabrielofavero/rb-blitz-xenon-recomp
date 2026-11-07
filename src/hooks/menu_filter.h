@@ -38,6 +38,7 @@
 
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -51,7 +52,8 @@ namespace rb_blitz::menu_filter {
 // read.
 // Fast startup and settings restarts skip offline prompts without changing the saved toggle.
 void Configure(bool settings_restart_boot = false);
-void RetargetRecord(uint8_t* guest_base, const uint8_t before[20], const uint8_t after[20]);
+void RetargetRecord(uint8_t* guest_base, const uint8_t before[20], const uint8_t after[20],
+                    const std::function<void()>& pump_startup_window = {});
 
 // The rows the R5 decision hides on this boot, as `Configure()` resolved them. Read after
 // `Configure()` (the boot calls it before the payload is built) and only on the host thread: the

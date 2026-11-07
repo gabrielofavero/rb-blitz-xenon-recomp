@@ -203,7 +203,8 @@ std::string Joined(const std::vector<std::string>& names) {
 // were rewritten. Zero means the file is not in the database at all, which is
 // the payload's case: the mod's files are read through the update/content
 // device the database does not describe.
-uint32_t RetargetChecksumRow(uint8_t* base, const uint8_t before[20], const uint8_t after[20]) {
+uint32_t RetargetChecksumRow(uint8_t* base, const uint8_t before[20], const uint8_t after[20],
+                             const std::function<void()>& pump_startup_window = {}) {
   if (std::memcmp(before, after, 20) == 0) {
     return 0;
   }
@@ -221,6 +222,10 @@ uint32_t RetargetChecksumRow(uint8_t* base, const uint8_t before[20], const uint
     }
     if (ReadableHost(at)) {
       for (uint8_t* p = at; p + 20 <= region_end; ++p) {
+        // Before the guest starts, checksum scans share the UI thread with the
+        // boot animation. Give it a repaint checkpoint within a large region.
+        if (pump_startup_window &&
+            ((p - first) & (256 * 1024 - 1)) == 0) pump_startup_window();
         if (std::memcmp(p, before, 20) != 0) {
           continue;
         }
@@ -548,8 +553,9 @@ ReadFunc ResolveOriginal(bool scatter) {
 
 namespace rb_blitz::menu_filter {
 
-void RetargetRecord(uint8_t* base, const uint8_t before[20], const uint8_t after[20]) {
-  RetargetChecksumRow(base, before, after);
+void RetargetRecord(uint8_t* base, const uint8_t before[20], const uint8_t after[20],
+                    const std::function<void()>& pump_startup_window) {
+  RetargetChecksumRow(base, before, after, pump_startup_window);
 }
 
 void Configure(bool settings_restart_boot) {

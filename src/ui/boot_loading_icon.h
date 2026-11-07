@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <functional>
 #include <vector>
@@ -26,6 +27,17 @@ class BootLoadingIcon final : public rex::ui::ImGuiDialog {
   void SetFrames(boot_loading_art::BootLoadingFrames frames);
 
  private:
+  static constexpr size_t kAtlasColumns = 4;
+  static constexpr size_t kAtlasRows = 4;
+  static constexpr size_t kFramesPerAtlas = kAtlasColumns * kAtlasRows;
+  static constexpr size_t kAtlasCount =
+      (boot_loading_art::kAnimationFrameCount + kFramesPerAtlas - 1) /
+      kFramesPerAtlas;
+  static constexpr uint32_t kAtlasSize =
+      boot_loading_art::kFrameSize * kAtlasColumns;
+  static_assert(kAtlasSize <= 512 && kAtlasCount <= 8,
+                "boot spinner atlases must fit the SDK image texture limits");
+
   void OnDraw(ImGuiIO& io) override;
   void ReleaseTextures();
 
@@ -33,8 +45,8 @@ class BootLoadingIcon final : public rex::ui::ImGuiDialog {
   std::function<bool()> native_panel_ready_;
   std::function<bool()> native_splash_ready_;
   std::function<bool()> native_logo_load_started_;
-  boot_loading_art::BootLoadingFrames frames_rgba_;
-  std::array<ImTextureID, boot_loading_art::kAnimationFrameCount> textures_{};
+  std::array<std::vector<uint8_t>, kAtlasCount> atlases_rgba_;
+  std::array<ImTextureID, kAtlasCount> textures_{};
   uint64_t texture_generation_ = 0;
   std::chrono::steady_clock::time_point animation_started_ =
       std::chrono::steady_clock::now();
