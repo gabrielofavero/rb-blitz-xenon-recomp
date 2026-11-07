@@ -60,6 +60,9 @@ function checkIcon(icon, assetsDir, problems, label) {
     const info = lstatSync(join(assetsDir, matches[0]));
     if (!info.isFile() || info.size > 1024 * 1024) throw new Error('not a file or larger than 1 MiB');
   } catch (error) { problems.push(`${label}: icon ${icon}: ${error.message}`); }
+  // The current guest row callback can select only authored RndMat objects.
+  // A local bitmap can be packaged, but it cannot be bound to an inbox row.
+  problems.push(`${label}: icon ${icon}: custom images cannot be rendered by the current inbox row material binding`);
 }
 
 function checkFeed(feed, assetsDir, problems) {
@@ -90,6 +93,9 @@ function checkFeed(feed, assetsDir, problems) {
       problems.push(`${label}: duplicate id ${message.id}`);
     } else ids.add(message.id);
     if (!visibleLength(message.title, 64)) problems.push(`${label}: title must have 1..64 visible characters`);
+    if (message.notification !== undefined && !visibleLength(message.notification, 64)) {
+      problems.push(`${label}: notification must have 1..64 visible characters`);
+    }
     if (!visibleLength(message.body, 1024, true)) problems.push(`${label}: body must have 1..1024 visible characters`);
     if (!validDate(message.published)) problems.push(`${label}: invalid published date`);
     else {

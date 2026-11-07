@@ -194,6 +194,23 @@ if ($allowed.Count -eq 0) {
 }
 $allowed += "payload-manifest.toml"
 
+# The packer admits local image files using the feed's filename and size rules.
+# Derive their allowed payload paths from the checkout, then require the manifest
+# and copied files to agree with those names and bytes.
+$messageIconProblems = New-Object System.Collections.Generic.List[string]
+$messageIconSource = Join-Path $repoRoot 'assets/messages'
+$seenMessageIcons = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($iconFile in (Get-ChildItem -LiteralPath $messageIconSource -File)) {
+    if ($iconFile.Extension -notin @('.png', '.jpg', '.jpeg')) { continue }
+    if ($iconFile.Name -notmatch '^[a-z0-9][a-z0-9_-]{0,63}\.(png|jpg|jpeg)$' -or
+        ($iconFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        $iconFile.Length -gt 1MB -or -not $seenMessageIcons.Add($iconFile.Name)) {
+        $messageIconProblems.Add("invalid local message icon source: $($iconFile.Name)")
+        continue
+    }
+    $allowed += ('assets/messages/' + $iconFile.Name)
+}
+
 # vulkan-1.dll is added to $wanted dynamically when the build offers Vulkan (the SDK opens
 # it with LoadLibrary, so it is never an import and the literal list cannot name it). It is
 # allowed exactly when the snapshot's manifest records a Vulkan build; build.ps1 already
@@ -209,6 +226,7 @@ if ($payloadFiles.Count -eq 0) {
 } else {
     $rows = New-Object System.Collections.Generic.List[string]
     $problems = New-Object System.Collections.Generic.List[string]
+    foreach ($problem in $messageIconProblems) { $problems.Add($problem) }
     $payloadRoot = (Resolve-Path -LiteralPath $PayloadDir).Path.TrimEnd('\', '/')
     $actual = @($payloadFiles | ForEach-Object {
         $_.FullName.Substring($payloadRoot.Length + 1).Replace('\', '/')
@@ -247,6 +265,13 @@ if ($payloadFiles.Count -eq 0) {
             if ($item.Length -ne $size -or $digest -ne $sha) {
                 $problems.Add("manifest mismatch for $path ($($item.Length) bytes, sha256 $digest)")
             }
+            if ($path -like 'assets/messages/*' -and $path -ne 'assets/messages/feed.json') {
+                $source = Join-Path $repoRoot $path
+                if (-not (Test-Path -LiteralPath $source -PathType Leaf) -or
+                    (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $digest) {
+                    $problems.Add("local message icon differs from source: $path")
+                }
+            }
             $rows.Add(("{0,-26} {1,12:N0} bytes  sha256 {2}" -f $path, $item.Length, $digest))
         }
         foreach ($name in $allowed) {
@@ -260,7 +285,7 @@ if ($payloadFiles.Count -eq 0) {
                 $problems.Add('Node.js is required to validate the bundled feed')
             } else {
                 $validator = Join-Path $repoRoot 'scripts/messages/check_feed.mjs'
-                $feedCheck = @(& node $validator --feed $feedPath 2>&1)
+                $feedCheck = @(& node $validator --feed $feedPath --assets-dir (Join-Path $PayloadDir 'assets/messages') 2>&1)
                 if ($LASTEXITCODE -ne 0) {
                     $problems.Add("bundled feed is invalid: $($feedCheck -join ' | ')")
                 }

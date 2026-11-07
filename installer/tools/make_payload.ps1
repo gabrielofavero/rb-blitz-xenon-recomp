@@ -195,6 +195,23 @@ $wanted = [ordered]@{
     'assets/messages/feed.json' = $repoRoot
 }
 
+# Local message images are copied beside the feed, even though the current
+# inbox row material binding cannot display them yet. Keep the payload input
+# constrained to the feed's local-name and size contract; never copy a link.
+$messagesAssets = Join-Path $repoRoot 'assets/messages'
+$seenMessageIcons = New-Object System.Collections.Generic.HashSet[string] ([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($iconFile in (Get-ChildItem -LiteralPath $messagesAssets -File)) {
+    if ($iconFile.Extension -notin @('.png', '.jpg', '.jpeg')) { continue }
+    if ($iconFile.Name -notmatch '^[a-z0-9][a-z0-9_-]{0,63}\.(png|jpg|jpeg)$') {
+        throw "invalid local message icon name: $($iconFile.Name)"
+    }
+    if (($iconFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        $iconFile.Length -gt 1MB -or -not $seenMessageIcons.Add($iconFile.Name)) {
+        throw "unsafe, oversized or ambiguous local message icon: $($iconFile.Name)"
+    }
+    $wanted[('assets/messages/' + $iconFile.Name)] = $repoRoot
+}
+
 # Where the loader that was actually shipped came from, kept in a variable of its own: naming
 # it $VulkanLoaderDir would be the same variable as the -VulkanLoaderDir parameter (PowerShell
 # names are case-insensitive), and assigning it here would wipe the answer before it is read -

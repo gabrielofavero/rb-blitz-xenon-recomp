@@ -72,6 +72,7 @@
 #include "input/native_menu.h"
 #include "input/remap.h"
 #include "input/title_input.h"
+#include "messages/messages_update.h"
 #include "profile/profile_apply.h"
 #include "settings/boot.h"
 #include "settings/bridge_sink.h"
@@ -701,6 +702,11 @@ void RunHotApplyDiagnostic() {
 
 bool TakeExists(PPCContext& ctx, uint8_t* base) {
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  bool update_answer = false;
+  if (::rb_blitz::messages::AnswerUpdateQuery(path, &update_answer)) {
+    WriteResultCell(base, ctx.r3.u32, update_answer ? 1u : 0u);
+    return true;
+  }
   bool recovery_answer = false;
   if (::rb_blitz::loading::CrashRecoveryQuery(path, &recovery_answer)) {
     WriteResultCell(base, ctx.r3.u32, recovery_answer ? 1u : 0u);
@@ -778,6 +784,10 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
 
 bool TakeRead(PPCContext& ctx, uint8_t* base) {
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  if (path == "rbbz-messages/update/message") {
+    ::rb_blitz::shell_music::ReturnSongSymbol(ctx, base, ::rb_blitz::messages::UpdateMessage());
+    return true;
+  }
   // Independent of the settings channel, like the rbbz-play/begin query. Use
   // the same native Symbol constructor as binding text below, preserving the
   // exact metadata spelling that SongMgr expects (DataNode type 5).
@@ -868,6 +878,10 @@ bool TakeRead(PPCContext& ctx, uint8_t* base) {
 
 bool TakeWrite(PPCContext& ctx, uint8_t* base) {
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  if (::rb_blitz::messages::HandleUpdateWrite(path)) {
+    WriteResultCell(base, ctx.r3.u32, 0);
+    return true;
+  }
   if (::rb_blitz::store::HandleArtWrite(path, ::rb_blitz::store::Settings()->enabled)) {
     WriteResultCell(base, ctx.r3.u32, 0);
     return true;

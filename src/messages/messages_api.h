@@ -16,6 +16,7 @@ struct Message {
   std::string body;
   std::string published;
   std::string icon = "icon_misc";
+  std::string notification;
 };
 
 struct MessageFeed {

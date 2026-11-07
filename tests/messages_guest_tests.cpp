@@ -31,24 +31,29 @@ int main() {
 
   test::BeginCase("date and title form the row, body remains separate");
   Message first{"welcome", "Welcome to Rock Band Blitz 0.1.0 :)", "Body", "2026-11-06"};
+  first.notification = "Welcome";
   CHECK_TRUE(SubjectLine(first) == "2026-11-06  Welcome to Rock Band Blitz 0.1.0 :)");
+  CHECK_TRUE(NotificationLine(first) == "2026-11-06  Welcome");
   Message empty{"messages-empty", "No messages", "Empty body", ""};
   CHECK_TRUE(SubjectLine(empty) == "No messages");
+  CHECK_TRUE(NotificationLine(empty) == "No messages");
 
   test::BeginCase("guest object survives rebuild and changed content gets a new object");
   GuestObjectPool pool;
   CHECK_TRUE(pool.Find(first) == nullptr);
-  pool.Remember(first, {0x11110000, 0x22220000, 0x33330000});
+  pool.Remember(first, {0x11110000, 0x22220000, 0x33330000, 0x44440000});
   CHECK_TRUE(pool.Find(first) != nullptr);
   CHECK_EQ(pool.Find(first)->message, 0x11110000);
   CHECK_EQ(pool.Find(first)->subject_string, 0x22220000);
   CHECK_EQ(pool.Find(first)->body_chars, 0x33330000);
+  CHECK_EQ(pool.FindByAddress(0x11110000)->notification_string, 0x44440000);
+  CHECK_TRUE(pool.FindByAddress(0x99990000) == nullptr);
   Message second = first;
-  second.body = "Revised body";
+  second.notification = "New notification";
   CHECK_TRUE(pool.Find(second) == nullptr);
-  pool.Remember(second, {0x44440000, 0x55550000, 0x66660000});
+  pool.Remember(second, {0x55550000, 0x66660000, 0x77770000, 0x88880000});
   CHECK_EQ(pool.size(), 2);
   CHECK_EQ(pool.Find(first)->message, 0x11110000);
-  CHECK_EQ(pool.Find(second)->message, 0x44440000);
+  CHECK_EQ(pool.Find(second)->message, 0x55550000);
   return test::Finish();
 }

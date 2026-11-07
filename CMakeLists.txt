@@ -272,6 +272,7 @@ set(RBBLITZ_SOURCES
     src/messages/messages_cache.cpp
     src/messages/messages_service.cpp
     src/messages/messages_guest.cpp
+    src/messages/messages_update.cpp
 )
 
 if(WIN32)
@@ -281,7 +282,8 @@ if(WIN32)
     list(APPEND RBBLITZ_SOURCES src/store/store_http.cpp src/store/store_transfer_winhttp.cpp
          src/store/store_search_service.cpp src/store/store_catalogue.cpp
          src/store/album_art_service.cpp)
-    list(APPEND RBBLITZ_SOURCES src/messages/messages_runtime.cpp)
+    list(APPEND RBBLITZ_SOURCES src/messages/messages_runtime.cpp
+         src/messages/messages_update_runtime.cpp)
 endif()
 
 if(WIN32)
@@ -326,6 +328,10 @@ add_custom_target(rb_blitz_stage_gpu
     VERBATIM)
 add_dependencies(rb_blitz rb_blitz_stage_gpu)
 if(WIN32)
+    # Acceptance-only diagnostic opener. The game gives this process the fixed
+    # Releases URL; it writes the URL to an inherited environment path.
+    add_executable(rb_blitz_messages_browser_stub
+        scripts/acceptance/messages_browser_stub.cpp)
     add_executable(rb_blitz_load_monitor WIN32 tools/song_load_monitor_main.cpp
         src/platform/song_load_monitor.cpp src/platform/game_restart.cpp)
     target_include_directories(rb_blitz_load_monitor PRIVATE src)
@@ -387,7 +393,7 @@ set_source_files_properties(src/graphics/development_coverage.cpp PROPERTIES COM
     "RBBLITZ_DEVELOPMENT_DIRECTORY_HASH=\"${RBBLITZ_DEVELOPMENT_DIRECTORY_HASH}\";RBBLITZ_DEVELOPMENT_JOURNAL=\"${RBBLITZ_DEVELOPMENT_JOURNAL}\"")
 target_link_libraries(rb_blitz PRIVATE xxhash)
 if(WIN32)
-    target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32 runtimeobject dbghelp)
+    target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32 runtimeobject dbghelp shell32)
 endif()
 
 # The store's fault logger (src/store/store_probe.cpp) prints host frames, which are resolved
@@ -563,6 +569,10 @@ add_executable(rb_blitz_shader_microcode_hash tools/shader_microcode_hash.cpp)
 target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 
 if(BUILD_TESTING)
+    add_executable(rb_blitz_messages_update_tests
+        tests/messages_update_tests.cpp src/messages/messages_update.cpp)
+    target_include_directories(rb_blitz_messages_update_tests PRIVATE src)
+    add_test(NAME messages_update COMMAND rb_blitz_messages_update_tests)
     add_executable(rb_blitz_messages_guest_tests tests/messages_guest_tests.cpp)
     target_include_directories(rb_blitz_messages_guest_tests PRIVATE src)
     add_test(NAME messages_guest COMMAND rb_blitz_messages_guest_tests)

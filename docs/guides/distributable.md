@@ -35,8 +35,12 @@ The executable payload contains the recompiled build's runtime files: `rb_blitz.
 game loads (`rexruntime.dll`, `rexgpu-xenos.dll`) and the four Visual C++ runtime DLLs the
 executable imports, plus `payload-manifest.toml`, which records their sizes and digests so the
 helper can hash what it placed before it reports success. It also contains the validated
-`assets/messages/feed.json` as a read-only first-launch offline message source. The audit walks
-that subdirectory, checks its manifest entry and reruns the feed validator. One player-facing executable is the payload
+`assets/messages/feed.json` as a read-only first-launch offline message source. The packer also copies
+local PNG/JPEG files in that folder when their names meet the feed's safe filename rule and each is at most
+1 MiB. The audit walks that subdirectory, checks each file against the manifest and checkout, and reruns
+the feed validator against the payload folder. The current inbox row hook can draw built-in materials only,
+so a feed referencing a local image is refused for publication; see
+[known-issues.md](../reference/known-issues.md). One player-facing executable is the payload
 since the external settings application retired on 2026-10-19 (gameplay-mapping plan §19);
 the list lives in one place,
 `$wanted` in [`installer/tools/make_payload.ps1`](../../installer/tools/make_payload.ps1),

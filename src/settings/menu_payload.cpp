@@ -414,6 +414,83 @@ bool RouteLibraryHeaderNavigation(std::vector<Node>* roots, LibraryHeader curren
   return true;
 }
 
+bool ConfigureMessagesUpdateInbox(std::vector<Node>* roots, std::string* why) {
+  if (!roots) { if (why) *why = "no inbox record"; return false; }
+  auto staged = *roots;
+  Node* help = PanelMethod(&staged, "inbox_panel", "update_inline_help");
+  Node* buttons = PanelMethod(&staged, "inbox_panel", "BUTTON_DOWN_MSG");
+  Node* enter = PanelMethod(&staged, "inbox_panel", "enter");
+  std::vector<Node*> start_cases;
+  if (buttons) FindTriggerCases(*buttons, "kAction_Start", &start_cases);
+  if (!help || !enter || start_cases.size() != 1 || start_cases[0]->kids.size() != 3 ||
+      start_cases[0]->kids[1].tag != ui::dtb::kCommand ||
+      start_cases[0]->kids[1].kids.empty() ||
+      start_cases[0]->kids[1].kids[0].text != "options_screen" ||
+      start_cases[0]->kids[2].tag != ui::dtb::kCommand ||
+      start_cases[0]->kids[2].kids.empty() ||
+      start_cases[0]->kids[2].kids[0].text != "ui") {
+    if (why) *why = "inbox START action changed";
+    return false;
+  }
+  Node* token = nullptr;
+  auto find_token = [&](auto&& self, Node& node) -> void {
+    if (node.tag == ui::dtb::kCommand && node.kids.size() == 4 &&
+        node.kids[0].text == "InlineHelp.ihp" &&
+        node.kids[1].text == "set_action_token" &&
+        node.kids[2].text == "kAction_Start" &&
+        node.kids[3].text == "inline_help_options") {
+      if (!token) token = &node;
+      else token = help;  // Ambiguous retail shape: refuse instead of patching one copy.
+      return;
+    }
+    for (auto& child : node.kids) self(self, child);
+  };
+  find_token(find_token, *help);
+  if (!token || token == help) {
+    if (why) *why = "inbox START inline-help token changed";
+    return false;
+  }
+  // D6: the query reads the *active* feed. A network answer can arrive after the
+  // payload was built, so both the hint and action must consult it on use.
+  const auto available = [] {
+    return Node::Command({Node::Symbol("file_exists"),
+                          Node::String("rbbz-messages/update/available")});
+  };
+  token->kids[3] = Node::Symbol("inline_help_update_game");
+  *token = Node::Command({Node::Symbol("if"), available(), std::move(*token)});
+  *start_cases[0] = Node::Array({Node::Symbol("kAction_Start"),
+      Node::Command({Node::Symbol("if"), available(),
+          Node::Command({Node::Symbol("do"),
+              Node::Command({Node::Symbol("messages_update_screen"), Node::Symbol("set"),
+                             Node::Symbol("back_screen"), Node::Symbol("inbox_screen")}),
+              Node::Command({Node::Symbol("ui"), Node::Symbol("goto_screen"),
+                             Node::Symbol("messages_update_screen")})})})});
+  // A fetched answer can land while Messages is idle. One cheap query per poll
+  // refreshes the guest's own InlineHelp only when availability changes.
+  constexpr const char* kLast = "rbbz_messages_update_available_last";
+  enter->kids.push_back(Node::Command({Node::Symbol("set"), Node::Var(kLast), available()}));
+  const Node refresh = Node::Command({Node::Symbol("if"),
+      Node::Command({Node::Symbol("!="), available(), Node::Var(kLast)}),
+      Node::Command({Node::Symbol("do"),
+          Node::Command({Node::Symbol("set"), Node::Var(kLast), available()}),
+          Node::Command({Node::Var("this"), Node::Symbol("update_inline_help")})})});
+  if (Node* poll = PanelMethod(&staged, "inbox_panel", "poll")) {
+    poll->kids.push_back(refresh);
+  } else {
+    for (auto& root : staged) {
+      if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 &&
+          root.kids[0].text == "new" && root.kids[2].text == "inbox_panel") {
+        root.kids.push_back(Node::Array({Node::Symbol("poll"), refresh}));
+        break;
+      }
+    }
+  }
+  for (auto& node : ui::screen::MessagesUpdateRoots()) staged.push_back(std::move(node));
+  *roots = std::move(staged);
+  if (why) why->clear();
+  return true;
+}
+
 bool SetRefreshRowLabel(std::vector<ui::dtb::Node>* roots, bool refresh_row_active) {
   if (!refresh_row_active) return false;
   std::string why;
@@ -912,6 +989,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         for (const auto& panel : screen::PanelNames()) {
           if (!screen::AddPanelLoad(&roots, panel, error)) return false;
         }
+        if (!screen::AddPanelLoad(&roots, "messages_update_panel", error)) return false;
         return true;
       }) || !edit("ui/splash/gen/splash.dtb", [&](auto& roots) {
         if (!AddCrashRecoveryHooks(&roots, error)) return false;
@@ -1151,6 +1229,17 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           return false;
         }
       }
+      for (const auto& [key, text] : std::initializer_list<std::pair<const char*, const char*>>{
+          {"inline_help_update_game", "UPDATE GAME"},
+          {"messages_update_open", "Open releases"},
+          {"messages_update_later", "Later"},
+          {"messages_update_open_failed", "The releases page could not be opened."}}) {
+        std::string why;
+        if (!screen::AddLocaleEntry(&roots, key, text, &why)) {
+          if (error) *error = "Messages update locale entry refused: " + why;
+          return false;
+        }
+      }
       SetRefreshRowLabel(&roots, refresh_row_active);
       // Retail's own strings this surface restyles (the AV page's two checkboxes). A locale that
       // does not carry them, or carries a translation, is left alone by the same call.
@@ -1322,7 +1411,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       {"ui/inbox/gen/inbox.dtb", LibraryHeader::kMessages},
       {"ui/recommendations/gen/recommendations.dtb", LibraryHeader::kRecommendations}}}) {
     if (!edit(path, [&](auto& roots) {
-          return RouteLibraryHeaderNavigation(&roots, tab, headers, error);
+          if (!RouteLibraryHeaderNavigation(&roots, tab, headers, error)) return false;
+          return tab != LibraryHeader::kMessages || ConfigureMessagesUpdateInbox(&roots, error);
         })) return false;
   }
   // P3's data lane (RhythmVerse plan §5/P3). With the store's master switch on, the retail store's

@@ -47,6 +47,11 @@ void Parser() {
   CHECK_TRUE(feed.messages[0].icon == "icon_more_stars");
   CHECK_TRUE(feed.messages[1].icon == "icon_misc");
   CHECK_TRUE(feed.latest_version.empty());
+  CHECK_TRUE(ParseFeed(R"feed({"schema_version":1,"messages":[{"id":"short","notification":"Welcome","title":"Welcome to version 0.1.0 :)","body":"Hello","published":"2026-11-06"},{"id":"fallback","notification":"   ","title":"Full title","body":"Hello","published":"2026-11-05"}]})feed", &feed, &error));
+  CHECK_EQ(feed.messages.size(), 2);
+  CHECK_TRUE(feed.messages[0].notification == "Welcome");
+  CHECK_TRUE(feed.messages[1].notification.empty());
+  CHECK_TRUE(feed.messages[1].title == "Full title");
   CHECK_EQ(static_cast<int>(CompareVersions("0.9.0", "0.10.0")),
            static_cast<int>(VersionStatus::kUpdateAvailable));
   CHECK_EQ(static_cast<int>(CompareVersions("1.0.0", "0.10.0")),
@@ -139,6 +144,7 @@ void BundledBuildAndNoSource(const fs::path& build_dir, const fs::path& scratch)
   CHECK_TRUE(Load(build_dir / "assets/messages/feed.json", &bundled, &error));
   CHECK_TRUE(!bundled.messages.empty());
   CHECK_TRUE(bundled.latest_version == "0.1.0");
+  CHECK_TRUE(bundled.messages[0].notification == "Welcome");
 
   test::BeginCase("without cache or bundle, a failed fetch leaves no snapshot");
   FeedService service;

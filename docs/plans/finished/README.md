@@ -6,6 +6,7 @@ decisions behind code that is running today, and the per-prompt tables are how a
 
 | Plan | Delivered |
 | --- | --- |
+| [`2026-10-23-messages-and-update-feed-plan.md`](2026-10-23-messages-and-update-feed-plan.md) | Built-in feed, bundled/cache/online order, guest text and built-in icons, and guest-authored Update Game route. Code, release build, host tests, feed validator and payload audit delivered 2026-11-06. Owner UI matrix and first public setup/Pages deployment remain outstanding; custom files use the documented built-in icon fallback. |
 | [`2026-10-19-button-layout-hotswap-plan.md`](2026-10-19-button-layout-hotswap-plan.md) | Controller Layout with ten authored layouts, source-keyed icons and binding-aware guest hints. Closed 2026-11-06 at the owner's request; the remaining live routes and unavailable extra-button hardware test are recorded as unverified for independent testing. |
 | [`2026-10-13-rhythmverse-store-plan.md`](2026-10-13-rhythmverse-store-plan.md) | The RhythmVerse store's P0–P8 acceptance passed on 2026-10-22 (69 steps, 0 failures). The plan records the later P9 owner adjustments and their remaining verification. |
 | [`2026-10-22-in-game-binding-rows-plan.md`](2026-10-22-in-game-binding-rows-plan.md) | Guest-drawn binding rows replaced the Interface Mapping overlay on 2026-10-25; gameplay verification remains deferred at the owner's request. |

@@ -2587,6 +2587,67 @@ std::vector<dtb::Node> EarlyDefinitionRoots() {
   return roots;
 }
 
+std::vector<dtb::Node> MessagesUpdateRoots() {
+  // Plan D7/M4: reuse the title's confirmation scene, list and input routing.
+  // The host supplies the active feed's sentence when this screen is entered,
+  // so a fetched feed can supersede the bundled version after payload creation.
+  PanelSpec panel{"messages_update_panel", "messages_update_screen", "inbox_screen",
+                  {"background_panel", "shell_music_panel", "menu_cache_panel",
+                   "inbox_panel", "error_popup_panel"},
+                  {InfoRow("messages_update_open", "Open releases",
+                           "Closes the game and opens the releases page."),
+                   InfoRow("messages_update_later", "Later", "Return to Messages.")},
+                  "../pause/settings_confirmation.milo", "messages_update_message"};
+  const auto is_symbol = [](const Node& node, std::string_view name) {
+    return node.tag == dtb::kSymbol && node.text == name;
+  };
+  Node definition = PanelDefinition(panel);
+  for (Node& member : definition.kids) {
+    if (member.tag != dtb::kArray || member.kids.empty()) continue;
+    if (is_symbol(member.kids[0], "enter")) {
+      member.kids.push_back(Cmd({Sym("set"), Var("rbbz_messages_update_error_shown"),
+                                 Node::Int(0)}));
+      for (Node& statement : member.kids) {
+        if (statement.tag == dtb::kCommand && statement.kids.size() == 3 &&
+            is_symbol(statement.kids[0], "pause.lbl") &&
+            is_symbol(statement.kids[1], "set_token_fmt") &&
+            is_symbol(statement.kids[2], "messages_update_message")) {
+          statement.kids[2] = Cmd({Sym("read_file"),
+                                   Str("rbbz-messages/update/message")});
+        }
+      }
+    } else if (is_symbol(member.kids[0], "select_row") && member.kids.size() == 2 &&
+               member.kids[1].tag == dtb::kCommand) {
+      for (Node& item : member.kids[1].kids) {
+        if (item.tag != dtb::kArray || item.kids.empty()) continue;
+        if (is_symbol(item.kids[0], "messages_update_open")) {
+          item.kids = {Sym("messages_update_open"),
+              Cmd({Sym("set"), Var("rbbz_messages_update_error_shown"), Node::Int(0)}),
+              Cmd({Sym("pause.lbl"), Sym("set_token_fmt"),
+                   Cmd({Sym("read_file"), Str("rbbz-messages/update/message")})}),
+              Write("rbbz-messages/update/open-releases/0"),
+          };
+        } else if (is_symbol(item.kids[0], "messages_update_later")) {
+          item.kids = {Sym("messages_update_later"), Leave()};
+        }
+      }
+    }
+  }
+  // Browser opening runs on a host worker; the answer can arrive after the
+  // button handler returns. Poll the guest's own label until the failure lands.
+  definition.kids.push_back(Arr({Sym("poll"),
+      Cmd({Sym("if"),
+           Cmd({Sym("&&"),
+                Cmd({Sym("!"), Var("rbbz_messages_update_error_shown")}),
+                Cmd({Sym("file_exists"), Str("rbbz-messages/update/open-failed")})}),
+           Cmd({Sym("do"),
+                Cmd({Sym("pause.lbl"), Sym("set_token_fmt"),
+                     Sym("messages_update_open_failed")}),
+                Cmd({Sym("set"), Var("rbbz_messages_update_error_shown"),
+                     Node::Int(1)})})})}));
+  return {std::move(definition), ScreenDefinition(panel)};
+}
+
 bool AddDeferredScreens(std::vector<dtb::Node>* nodes, std::string* reason) {
   Hit anchor;
   FindInRoots(nodes, IsFirstScreenSet, &anchor);

@@ -129,6 +129,17 @@ bool ParseFeed(std::string_view body, MessageFeed* feed, std::string* error) {
       if (icon->is_string() && Icon(icon->get<std::string>())) message.icon = icon->get<std::string>();
       else parsed.warnings.push_back("icon " + message.id + ": invalid; using icon_misc");
     }
+    auto notification = row.find("notification");
+    if (notification != row.end()) {
+      if (notification->is_string()) {
+        const auto value = notification->get<std::string>();
+        if (Visible(value, 64, false) && value.find_first_not_of(' ') != std::string::npos)
+          message.notification = value;
+        else parsed.warnings.push_back("notification " + message.id + ": invalid; using title");
+      } else {
+        parsed.warnings.push_back("notification " + message.id + ": invalid; using title");
+      }
+    }
     parsed.messages.push_back(std::move(message));
   }
   *feed = std::move(parsed);

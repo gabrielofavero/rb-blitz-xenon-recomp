@@ -19,10 +19,12 @@
 REX_EXTERN(__imp__sub_822D5928);  // retail InboxProvider::build_list
 REX_EXTERN(__imp__sub_822D4E70);  // retail InboxProvider material initialization
 REX_EXTERN(__imp__sub_822D52D8);  // retail InboxProvider row material callback
+REX_EXTERN(__imp__sub_822D4D30);  // retail row/detail subject String copy
 REX_EXTERN(__imp__sub_823E0C00);  // guest allocator
 REX_EXTERN(sub_82402DE8);         // ObjectDir::Find
 REX_EXTERN(sub_824EC398);         // checked RndMat cast
 REX_EXTERN(sub_82459130);         // String(char*) constructor; retail uses this for inbox text
+REX_EXTERN(sub_824591D0);         // String copy constructor
 REX_EXTERN(sub_82747578);         // InboxMessage constructor
 REX_EXTERN(sub_824AF4E0);         // frees one provider entry, as retail build_list does
 REX_EXTERN(sub_823A0158);         // clears the provider's vector
@@ -123,9 +125,12 @@ std::uint32_t MakeMessage(PPCContext& caller, std::uint8_t* base,
                           const Message& message) {
   if (const auto* existing = g_objects.Find(message)) return existing->message;
   const auto subject = MakeString(caller, base, SubjectLine(message));
+  const auto notification = message.notification.empty()
+                                ? 0 : MakeString(caller, base, NotificationLine(message));
   const auto body = MakeChars(caller, base, message.body);
   const auto object = Allocate(caller, base, 188);
-  if (!subject || !body || !object) return 0;
+  if (!subject || (!message.notification.empty() && !notification) || !body || !object)
+    return 0;
   PPCContext call = caller;
   call.r3.u64 = object;
   call.r4.u64 = body;
@@ -140,7 +145,7 @@ std::uint32_t MakeMessage(PPCContext& caller, std::uint8_t* base,
     REXLOG_WARN("messages: InboxMessage constructor shape changed; retaining retail list");
     return 0;
   }
-  g_objects.Remember(message, {object, subject, body});
+  g_objects.Remember(message, {object, subject, body, notification});
   return object;
 }
 
@@ -258,4 +263,26 @@ REX_HOOK_RAW(sub_822D52D8) {
   if (!is_icon) return;
   const auto material = rb_blitz::messages::RowIcon(provider, row);
   if (material) ctx.r3.u64 = material;
+}
+
+REX_HOOK_RAW(sub_822D4D30) {
+  // InboxProvider's subject_line mesh copies the subject via this call site.
+  // The detail pane calls the same helper from a different address, so it
+  // retains the full title stored in InboxMessage.
+  if (rb_blitz::messages::g_installed && ctx.lr == 0x822D5068) {
+    std::uint32_t notification = 0;
+    {
+      std::lock_guard lock(rb_blitz::messages::g_pool_mutex);
+      if (const auto* object = rb_blitz::messages::g_objects.FindByAddress(ctx.r4.u32))
+        notification = object->notification_string;
+    }
+    if (notification) {
+      const auto destination = ctx.r3.u32;
+      ctx.r4.u64 = notification;
+      sub_824591D0(ctx, base);
+      ctx.r3.u64 = destination;
+      return;
+    }
+  }
+  __imp__sub_822D4D30(ctx, base);
 }

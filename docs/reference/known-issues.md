@@ -21,10 +21,24 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
-**Inbox icon assets:** `icons_unplayed_songs` has no row material in
-`list_inbox.milo_xbox`, and `icon_challenge` has a row material but no verified
-bitmap in the main ark. Both feed IDs draw `icon_misc` until their assets are
-available and verified. Custom image files are a later messages milestone.
+**Messages update route (2026-11-06):** The guest-authored UPDATE GAME hint and
+confirmation, dynamic version text, Later route, browser success/close and browser failure
+text pass code/build and host checks, but the owner reserved the final game UI test. The
+acceptance matrix in `out/messages-acceptance/summary.json` marks all ten routes unmeasured.
+The public repository has no setup release yet, so the Pages publication gate cannot serve
+the first feed. The automatic installer updater remains dormant; this release's action opens
+GitHub Releases only.
+
+**Inbox icon assets (messages M6, 2026-11-06):** `icons_unplayed_songs` has no row
+material in `list_inbox.milo_xbox`, and `icon_challenge` has a row material but
+no verified bitmap in the main ark. Both feed IDs draw `icon_misc`. The measured
+per-row hook chooses an existing `RndMat` pointer from that scene; it has no
+verified route for constructing a new material and binding a file texture.
+Consequently a PNG/JPEG icon name also resolves to `icon_misc` in the guest.
+The feed validator refuses custom icon names for release publication even when
+the local file passes its filename and 1 MiB checks. Setup packaging can carry
+valid local image files, but carrying a file is not evidence that it draws.
+No owner-run custom icon screen check has been performed.
 
 **Controller icon family switching (2026-10-28):** the raw-input tracker,
 selected-layout separation and resolver snapshot pass host tests and the

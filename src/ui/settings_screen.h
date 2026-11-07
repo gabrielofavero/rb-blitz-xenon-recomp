@@ -504,4 +504,7 @@ std::vector<std::string> PanelBindingText(std::string_view panel,
 bool AddLocaleEntry(std::vector<dtb::Node>* nodes, std::string_view key, std::string_view text,
                     std::string* reason);
 
+// Guest-authored Messages update confirmation, using the retail confirmation scene and list.
+std::vector<dtb::Node> MessagesUpdateRoots();
+
 }  // namespace rb_blitz::ui::screen

@@ -203,6 +203,9 @@ final defaults (2026-10-23) are **Messages On / Recommendations Off**:
 | Show Messages | `interface.show_messages` | 87 |
 | Show Recommendations | `interface.show_recommendations` | 88 |
 
+Show Messages controls whether the tab appears. The built-in feed fetch and version check still run
+at boot when the tab is hidden; there is no separate Messages feed toggle.
+
 The retired combined id 86 is never reused. Its old key seeds an absent new
 key, while explicit new keys win; loading does not rewrite the profile.
 `src/settings/store.cpp` uses the same fallback for optimistic conflict checks.

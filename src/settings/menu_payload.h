@@ -87,6 +87,8 @@ bool ConfigureLibraryHeaderBar(std::vector<ui::dtb::Node>* roots,
                                 LibraryHeaderOptions options, std::string* why);
 bool RouteLibraryHeaderNavigation(std::vector<ui::dtb::Node>* roots, LibraryHeader current,
                                    LibraryHeaderOptions options, std::string* why);
+// Messages-only START hint/action and guest confirmation (plan D6/D7, M4).
+bool ConfigureMessagesUpdateInbox(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Extend an existing patch index with our records. Existing records retain their offsets,
 // compression and checksums, and the ark keeps the part count it had: when the mounted index has a
 // single part its bytes are carried into the new one (`mounted_part`) and only the last records

@@ -17,6 +17,7 @@ struct GuestObject {
   std::uint32_t message = 0;
   std::uint32_t subject_string = 0;
   std::uint32_t body_chars = 0;
+  std::uint32_t notification_string = 0;
 };
 
 class GuestObjectPool {
@@ -25,21 +26,33 @@ class GuestObjectPool {
     auto it = objects_.find(Key(message));
     return it == objects_.end() ? nullptr : &it->second;
   }
+  const GuestObject* FindByAddress(std::uint32_t address) const {
+    auto it = by_address_.find(address);
+    return it == by_address_.end() ? nullptr : it->second;
+  }
   void Remember(const Message& message, GuestObject object) {
-    objects_.emplace(Key(message), object);
+    auto [it, inserted] = objects_.emplace(Key(message), object);
+    if (inserted) by_address_[object.message] = &it->second;
   }
   std::size_t size() const { return objects_.size(); }
 
  private:
   static std::string Key(const Message& message) {
     // Explicit separators prevent different field tuples from sharing one guest object.
-    return message.id + '\0' + message.published + '\0' + message.title + '\0' + message.body;
+    return message.id + '\0' + message.published + '\0' + message.title + '\0' +
+           message.body + '\0' + message.notification;
   }
   std::map<std::string, GuestObject> objects_;
+  std::map<std::uint32_t, const GuestObject*> by_address_;
 };
 
 inline std::string SubjectLine(const Message& message) {
   return message.published.empty() ? message.title : message.published + "  " + message.title;
+}
+
+inline std::string NotificationLine(const Message& message) {
+  const auto& label = message.notification.empty() ? message.title : message.notification;
+  return message.published.empty() ? label : message.published + "  " + label;
 }
 
 // A provider entry is four big-endian words in guest memory: symbol, message pointer, type 1,

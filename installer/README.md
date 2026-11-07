@@ -334,7 +334,12 @@ id in `pins.toml`, or pass `-PayloadCommit`.
 
 ## Updating
 
-**There is no update check any more.** The settings application used to ask for a release
+The game checks the static Messages feed at boot. When its version is newer than this build,
+the Messages screen offers **Update Game**: it opens this project's GitHub Releases page in the
+default browser and closes the game after the browser accepts the URL. The player then downloads
+and runs the newest setup executable. This action does not start the updater executable.
+
+The former settings application has no update check. It used to ask for a release
 manifest on every start, offer an update, and run an updater that installed the build
 the manifest named (D19 of [2026-09-27-launcher-plan.md](../docs/plans/finished/2026-09-27-launcher-plan.md)). That was
 removed on 2026-10-15, and the application itself retired on 2026-10-19 (gameplay-mapping
@@ -349,9 +354,8 @@ What replacing an install means now:
 | one exact version | download that release's `RockBandBlitzSetup-<version>.exe` and run it |
 
 All three end the same way: a wizard installs over what is there, keeping the user's
-game data, DLC library and saved games, and replacing the files it owns. Nothing checks
-for anything in the background, nothing asks on a timer, and an install that nobody
-touches stays exactly as it is.
+game data, DLC library and saved games, and replacing the files it owns. The game fetches
+the Messages feed once at boot; it does not install an update in the background or ask on a timer.
 
 ### The updater executable and its manifest
 

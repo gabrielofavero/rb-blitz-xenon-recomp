@@ -1,6 +1,6 @@
 # Messages feed and in-game update flow — plan (2026-10-23)
 
-**Status: M0 committed and pushed; M1 committed locally; M2 built and visually verified (2026-11-06); M3–M8 pending. Pages deployment and release publication have not been verified in this session.**
+**Status: M0–M8 implementation delivered 2026-11-06. M2/M3 were visually verified; the owner's final UI matrix, live Pages 200 and release publication remain unmeasured or unavailable. M6 uses the documented built-in icon fallback for custom files.**
 Revised 2026-11-06 for GitHub Pages, a shipped offline feed, and a release-page update action.
 This document is the plan for a
 built-in (not toggleable) message feed served as static JSON by GitHub Pages, plus the
@@ -226,6 +226,7 @@ Every decision is citable as `D<n>` from code comments.
   "messages": [
     {
       "id": "2026-11-06-welcome",
+      "notification": "Welcome",
       "title": "Welcome to Messages",
       "body": "Project messages are available here, including when you are offline.",
       "published": "2026-11-06",
@@ -247,6 +248,7 @@ This is example content for the first shipped file, not a claim that it is imple
 | `messages` | array | ≤ 32 entries, **newest first**; the game preserves the order. | Missing/wrong type → the document is refused; an empty array is valid. |
 | `messages[].id` | string | `^[a-z0-9][a-z0-9-]{0,63}$` — path-safe, used for the log lines. | That message is dropped, the rest are used. |
 | `messages[].title` | string | 1…64 visible characters, no control characters. | Message dropped. |
+| `messages[].notification` | string, optional | 1…64 visible characters; short left-list label beside the icon. The published date still precedes it. | The list uses `title` instead; the detail heading still uses `title`. |
 | `messages[].body` | string | 1…1024 characters; `\n` allowed; no other control characters. | Message dropped. |
 | `messages[].published` | string | `YYYY-MM-DD`, a real date. | Message dropped. |
 | `messages[].icon` | string, optional | Either a **built-in id** (the scene texture name, `^(icons?)_[a-z0-9_]+$` — §9.1's table) or a **custom file name** from `assets/messages/` (`^[a-z0-9][a-z0-9_-]{0,63}\.(png|jpg|jpeg)$`, case-insensitive, ≤ 1 MiB). | The message is drawn with the default icon (`icon_misc`), one log line. |
@@ -619,7 +621,7 @@ test executables through `rb_blitz_windows_test_runner.exe` as directed by `AGEN
 ### Prompt M0 — Static feed and release gate
 
 ```text
-Read docs/plans/todo/2026-10-23-messages-and-update-feed-plan.md §§1, 3–6,
+Read docs/plans/finished/2026-10-23-messages-and-update-feed-plan.md §§1, 3–6,
 10.5 and 12. Implement only M0. Inspect the working tree and preserve unrelated
 changes. Add a valid, nonempty assets/messages/feed.json for the planned 0.1.0
 release, using the §4 schema and at least one useful offline message. Add the
@@ -790,6 +792,20 @@ Exit: guest evidence for the newer-version prompt/confirmation and current-
 version absence, or a recorded guest-route blocker with its exact fault.
 ```
 
+**M4 handoff (2026-11-06, static/host validation):** The inbox record changes its START
+hint and action through the `rbbz-messages/update/available` query. The query reads the active
+snapshot, so a newer network answer arriving after payload creation can enable the route; an
+inbox poll refreshes inline help when availability changes. No available update leaves the
+START hint absent and its press without navigation. The guest-authored confirmation reuses the
+settings confirmation scene, reads the active version sentence through
+`rbbz-messages/update/message` (including the UPDATE GAME heading in the scene's only message
+label), and has Open releases and Later rows. Its panel polls for the
+asynchronous browser failure and displays guest-authored error text. The focused menu payload
+test passed 2,945 checks before the last poll change. The combined release build and focused
+`menu_payload` CTest passed after it.
+`set_token_fmt` with the dynamic `read_file` Symbol and the scene's draw remain for the owner's
+final UI pass.
+
 ### Prompt M5 — Open GitHub Releases and close the game
 
 ```text
@@ -811,6 +827,16 @@ Exit: a stand-in receives the fixed URL before close, a failing opener leaves
 the game usable, and the exact build/test/live evidence is reported.
 ```
 
+**M5 handoff (2026-11-06, host validated):**
+`messages_update` owns the fixed Releases URL and an action state machine. The guest write
+`rbbz-messages/update/open-releases/0` queues the browser handoff on a host worker; successful
+opening queues the UI close and rejects repeat presses. A failed open leaves the game running,
+exposes `rbbz-messages/update/open-failed` for guest-authored error text, and allows retry.
+`messages_browser_opener_path` is a host-only diagnostic executable override; the acceptance
+stub records the fixed URL through an inherited receipt path. `messages_update` CTest passed;
+the full release build passed. The actual browser and guest
+failure routes remain unmeasured until the owner's UI pass.
+
 ### Prompt M6 — Custom local message icons
 
 ```text
@@ -830,6 +856,15 @@ limitation; do not treat an encoded cache file alone as a visible icon.
 Exit: a custom icon visibly draws with zero faults, or the measured limitation
 and release-safe fallback are recorded with test results.
 ```
+
+**M6 handoff (2026-11-06, documented §9.4 fallback):** The M3 row callback chooses an
+already-authored `RndMat` pointer; there is no verified way to create a new row material and
+bind a local PNG/JPEG texture. A custom icon name therefore resolves to `icon_misc` at runtime.
+The publication validator checks local file name, uniqueness, regular-file type and 1 MiB bound,
+then rejects feeds that reference custom images so a release cannot promise art it cannot draw.
+The payload packer copies safe optional image files and the audit checks their manifest/source
+hashes. The validator's 7/7 tests and canonical feed check passed; both changed PowerShell files
+parse. No custom-icon guest route was run at the owner's request to test the final UI themselves.
 
 ### Prompt M7 — Run the complete feed and update matrix
 
@@ -853,6 +888,17 @@ check or any unperformed owner-run route.
 Exit: every §12 leg has a pass/fail/unmeasured verdict and reproducible evidence.
 ```
 
+**M7 preparation (2026-11-06):** `scripts/acceptance/acceptance_messages.ps1`
+prepares isolated current/newer feed fixtures, scratch user roots, a no-bundled-feed executable
+directory, a loopback server command, a browser receipt stub, exact game launch commands, and
+`out/messages-acceptance/runbook.md` plus `summary.json`. The script only prepares and records
+owner observations; it does not drive the UI. The local server returned HTTP 200, both fixture
+feeds validated, the stub recorded the fixed Releases URL, and PowerShell syntax passed. All
+ten matrix entries remain **unmeasured** until the owner's UI run or a live Pages result.
+
+The final release build passed, and `-Mode Prepare -Reuse` refreshed the runbook and build
+hash from that executable. The owner can record verdicts through the script's `Record` mode.
+
 ### Prompt M8 — Reconcile docs and release readiness
 
 ```text
@@ -872,23 +918,34 @@ Exit: docs match actual behavior and M7 evidence; list any remaining release
 blocker or unmeasured UI route without presenting it as complete.
 ```
 
+**M8 handoff (2026-11-06):** The engine, diagnostic, toggle, distributable, installer,
+asset and known-issues docs were reconciled with the M0–M7 implementation. The release
+build passed; six focused CTests passed; the feed validator's 7/7 checks passed. A
+scratch setup payload contains `assets/messages/feed.json` at the pinned `0.1.0` version,
+and the distributable audit passed all eight checks. No setup release exists on the
+public GitHub Releases page, so the Pages publication gate correctly has nothing to
+publish; the live Pages 200 and final guest update routes remain unmeasured. The
+documentation checker finished with zero errors (182 pre-existing or nonfatal warnings).
+
 ---
 
 ## 12. Tests and acceptance
 
-### Unit (ctest, SDK-free)
+### Host and payload checks
 
-| Suite | Pins |
+| Suite or command | Verified scope |
 | --- | --- |
-| `messages_api` | The parse matrix (missing keys, wrong types, oversize title/body, bad date, duplicate/unsafe id, unknown `schema_version`, 33 messages), the version compare (`0.10.0 > 0.9.0`, malformed, local-newer), the **icon** field (built-in id, custom file name, path separators/`..` refused, unknown id → default), ordering preservation, the "drop one message, keep the rest" rule. |
-| `messages_cache` | Atomic write, corrupt/partial cache refused, folder creation, a failed save leaves the previous file intact; source precedence is fetched answer > valid cache > valid bundled `feed.json` > untouched retail inbox. Invalid or missing bundled JSON does not overwrite the cache. |
-| `messages_icons` | The `assets/messages/` scan (allowed extensions, 1 MiB bound, case-insensitive names), the encode shape (512×512 DXT1, 6 mips, 174,752 B) and the cache key. |
-| `messages_payload` | The inbox record with and without an update: `inline_help_update_game` present/absent, the START case rewritten, the appended screen and locale entries, and the record still parses. |
-| `messages_guest` | Whatever is pure in the guest half (entry layout arithmetic, the string buffer bookkeeping); the hook itself is boot-proven. |
-| `messages_update` | The browser opener receives only the fixed Releases URL; success requests one close, failure leaves the game open and exposes the guest error; repeated presses do not open multiple tabs. |
-| `feed_publish` | Valid feed and local icons; a missing release, missing setup asset, or mismatched `latest_version` refuses Pages publication. The shipped file is present in the payload audit. |
+| `messages_feed` CTest | JSON parsing, version ordering, source precedence, cache and network fallback. |
+| `messages_guest` CTest | Entry layout, text lifetime key and built-in icon material fallback. |
+| `menu_payload`, `settings_screen`, `payload_overlay` CTests | Authored inbox START gate, confirmation record shape and parse, existing settings/payload compatibility. |
+| `messages_update` CTest | Fixed Releases URL, open-before-close order, failure/retry and duplicate press suppression. |
+| `node scripts/messages/check_feed.test.mjs` | Shipped version match, local icon safety/fallback, and Pages refusal for missing release, setup asset or version mismatch (7/7). |
+| Scratch payload plus `audit_distributable.ps1 -SkipSetup` | Bundled feed included with version `0.1.0`; manifest and source hashes, allow-list and seven other release checks (8/8). |
 
-### Live (`scripts/acceptance/acceptance_messages.ps1`)
+The originally proposed custom-image codec/cache tests do not apply to M6's measured
+`icon_misc` fallback: no new guest texture is encoded or bound.
+
+### Live (owner-run matrix prepared by `scripts/acceptance/acceptance_messages.ps1`)
 
 A local HTTP server serves a fixture `feed.json`; the boot passes
 `--messages_api_url=http://127.0.0.1:<port>/feed.json` and a scratch `--user_data_root`:
@@ -910,8 +967,9 @@ A local HTTP server serves a fixture `feed.json`; the boot passes
    URL and the game exits. A failing opener leaves the game on the confirmation screen.
 7. **Current leg** — `latest_version == RBBLITZ_GAME_VERSION`: no START prompt on the screen.
 
-The script drives the UI; per the owner's standing directive, ask before running it (or run it only
-when the owner says "work autonomously").
+The owner chose to perform final UI testing. The script prepares fixtures and launch commands,
+then records the owner's verdicts and evidence; it does not drive the game. Host checks and a
+release build may run independently.
 
 ---
 
@@ -929,7 +987,7 @@ when the owner says "work autonomously").
 | `installer/README.md` | Explain that this release's in-game Update Game action opens GitHub Releases; the dormant updater and one-file release model remain as documented. |
 | `docs/guides/build-and-run.md` | Only if the version read introduces a configure gate worth naming. |
 
-Code comments cite this plan as `docs/plans/todo/2026-10-23-messages-and-update-feed-plan.md` §n and
+Code comments cite this plan as `docs/plans/finished/2026-10-23-messages-and-update-feed-plan.md` §n and
 must be re-pointed by `move_docs.py --map` when the plan moves to `in-progress/`.
 
 ---

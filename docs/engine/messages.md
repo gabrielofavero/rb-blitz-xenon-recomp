@@ -2,7 +2,7 @@
 
 How the title's MESSAGES tab is built and filled, what was measured about it on 2026-10-23, and what
 is still unknown. This is the study the messages feed work builds on; the plan is
-[`../plans/todo/2026-10-23-messages-and-update-feed-plan.md`](../plans/todo/2026-10-23-messages-and-update-feed-plan.md).
+[`../plans/finished/2026-10-23-messages-and-update-feed-plan.md`](../plans/finished/2026-10-23-messages-and-update-feed-plan.md).
 
 Evidence is regenerated on demand under the gitignored `out/_swap/` (§7).
 
@@ -33,6 +33,9 @@ The screen is `inbox_screen`, declared in `ui/inbox/gen/inbox.dtb` (10,339 bytes
 
 So the list is a retail `UIList` (`songs.lst`) over a native provider, and the right-hand pane is two
 labels (`subject.lbl`, `message.lbl`) filled by that provider from the selected row.
+The list's `subject_line` copy call at `0x822D5068` now receives the optional feed
+`notification` label. Other calls to the same copy helper keep the full `title`
+for the detail pane. Both headings retain the published date.
 
 ## 2. The provider and its message data
 
@@ -223,8 +226,9 @@ python out\_swap\find_str_refs.py 0x82042F04 0x82042EC8 0x82042EE0 0x82042EF0
 
 ## 8. Open
 
-- **How the row picks an icon** is unproven (§5.2). The type (`+60`) or `UIListMesh`'s own state is
-  the likely driver; no boot has shown two different icons yet.
+- **Custom file icons** remain unproven (§5.3). The M3 hook chooses existing row materials and the
+  two-row capture `out/m3-ui/messages-distinct.png` proves distinct built-in icons, but it does not
+  establish a new texture binding for PNG/JPEG files.
 - **`icon_challenge`'s bitmap** is not in the main ark, although both scenes declare the texture and
   the material. Where the challenge icon comes from is unknown.
 - **No custom texture has ever been loaded into the inbox:** the `Tex::set_file` route and the
@@ -233,8 +237,8 @@ python out\_swap\find_str_refs.py 0x82042F04 0x82042EC8 0x82042EE0 0x82042EF0
   `1` = a plain text message (the empty state) and `10` = the trial upsell. The getters
   `is_challenge`, `is_store_offer`, `is_song_bonus`, `is_rbw_upsell`, `is_buy_full_game` read fields
   we have not walked.
-- **Whether the label setters localize raw text**: the default message draws locale tokens; offer
-  titles draw raw strings through a different provider. Unproven for this provider.
+- **New update confirmation text** uses `set_token_fmt` with a `read_file` Symbol; the authored
+  record parses, but this specific dynamic label route awaits the owner's UI check.
 - **`sub_821CDCF0`'s meaning** (the gate between the trial-upsell entry and the manager list) is
   unproven; the branch shape is measured, the predicate is not.
 - **The `+0` symbol** of a 16-byte entry is interned from the pointer at `0x8280A594` (`build_list`,
@@ -249,6 +253,28 @@ python out\_swap\find_str_refs.py 0x82042F04 0x82042EC8 0x82042EE0 0x82042EF0
 
 ## 9. Implementation
 
-The messages feed (worker, boot fetch, cache, list injection, image, update prompt) is planned in
-[`../plans/todo/2026-10-23-messages-and-update-feed-plan.md`](../plans/todo/2026-10-23-messages-and-update-feed-plan.md).
-Nothing in this document depends on that plan being executed.
+The feed's host fetch, cache, bundled fallback, guest list injection and built-in row icons are
+implemented. M2's dated rows and detail switching were visually verified in `out/m2-ui/`; M3's
+two distinct built-in icons were visually verified in `out/m3-ui/messages-distinct.png`.
+
+At boot, `FeedService::Init` validates `<user_data_root>/messages/feed.json` first, then
+`<exe dir>/assets/messages/feed.json`. A worker makes one GET to the fixed GitHub Pages feed;
+a valid answer replaces the active snapshot and is atomically cached. A failed answer retains
+the chosen local snapshot. With no valid source, `InboxProvider::build_list` keeps the retail
+result. With a valid empty feed, it creates the retail plain-text empty-state row. The injected
+rows show `YYYY-MM-DD  Title`; the pane shows the supplied body. The host never fetches icon
+image bytes from the feed. Built-in icon names resolve to local row materials; unsupported names
+fall back to `icon_misc`. A custom PNG/JPEG name also falls back at runtime and is refused by
+publication validation because no new texture binding is verified.
+
+The game compares the compiled `[installer] version` against the active feed numerically. The
+guest inbox asks `rbbz-messages/update/available` for its START hint and action, and its poll
+refreshes the hint if the worker fetch changes that answer while the screen is open. A newer
+version opens the guest-authored confirmation with Open releases and Later. The Open releases
+write asks a host worker to open the fixed project Releases URL; a successful browser handoff
+queues game close, and a failure leaves the game open and exposes a guest error query. The
+guest update screen and browser routes await the owner's UI test. The first release does not
+launch the dormant updater.
+
+Implementation and acceptance evidence are tracked in the
+[`messages feed plan`](../plans/finished/2026-10-23-messages-and-update-feed-plan.md).

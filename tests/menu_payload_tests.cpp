@@ -636,6 +636,66 @@ void TestHeaderVisibility() {
   CHECK_FALSE(settings::ConfigureLibraryHeaderBar(&invalid, State(0), &why));
   CHECK_TRUE(dtb::Compile(invalid) == before);
 }
+void TestMessagesUpdateInbox() {
+  using namespace header_test;
+  BeginCase("Messages START hint and action share the active-version gate; confirmation stays guest-authored");
+  auto roots = std::vector<Node>{C({S("new"), S("InboxPanel"), S("inbox_panel"),
+      A({S("enter"), C({S("retail_enter")})}),
+      A({S("poll"), C({S("retail_poll")})}),
+      A({S("update_inline_help"), C({S("do"),
+          C({S("InlineHelp.ihp"), S("clear_action_token"), S("kAction_Start")}),
+          C({S("InlineHelp.ihp"), S("set_action_token"), S("kAction_Start"),
+             S("inline_help_options")})})}),
+      A({S("BUTTON_DOWN_MSG"), C({S("switch"), Node::Var("action"),
+          A({S("kAction_Start"),
+             C({S("options_screen"), S("set"), S("back_screen"), S("inbox_screen")}),
+             C({S("ui"), S("goto_screen"), S("options_screen")})})})})})};
+  std::string why;
+  CHECK_TRUE(settings::ConfigureMessagesUpdateInbox(&roots, &why));
+  CHECK_EQ(roots.size(), 3u);
+  const auto* help = Method(roots, "inbox_panel", "update_inline_help");
+  const auto* buttons = Method(roots, "inbox_panel", "BUTTON_DOWN_MSG");
+  const auto* inbox_poll = Method(roots, "inbox_panel", "poll");
+  CHECK_TRUE(help && buttons);
+  CHECK_TRUE(inbox_poll && Has(*inbox_poll, "retail_poll") &&
+             Has(*inbox_poll, "rbbz_messages_update_available_last") &&
+             Has(*inbox_poll, "update_inline_help"));
+  if (help && buttons) {
+    const auto* hint = Find(*help, dtb::kCommand, "if");
+    const auto* start = Case(*buttons, "kAction_Start");
+    CHECK_TRUE(hint && start);
+    if (hint && start) {
+      CHECK_TRUE(Has(*hint, "rbbz-messages/update/available"));
+      CHECK_TRUE(Has(*hint, "inline_help_update_game"));
+      CHECK_FALSE(Has(*hint, "inline_help_options"));
+      CHECK_TRUE(Has(*start, "rbbz-messages/update/available"));
+      CHECK_TRUE(Has(*start, "messages_update_screen"));
+      CHECK_FALSE(Has(*start, "options_screen"));
+      CHECK_EQ(start->kids.size(), 2u);  // false query has no action
+    }
+  }
+  const auto* enter = Method(roots, "messages_update_panel", "enter");
+  const auto* select = Method(roots, "messages_update_panel", "select_row");
+  const auto* poll = Method(roots, "messages_update_panel", "poll");
+  CHECK_TRUE(enter && select && poll);
+  if (enter && select && poll) {
+    CHECK_TRUE(Has(*enter, "rbbz-messages/update/message"));
+    CHECK_TRUE(Has(*select, "rbbz-messages/update/open-releases/0"));
+    CHECK_TRUE(Has(*select, "messages_update_later"));
+    CHECK_TRUE(Has(*poll, "rbbz-messages/update/open-failed"));
+    CHECK_TRUE(Has(*poll, "messages_update_open_failed"));
+  }
+  CHECK_TRUE(Has(roots.back(), "inbox_screen"));
+  const auto bytes = dtb::Compile(roots);
+  std::vector<Node> reparsed;
+  dtb::RootHeader header;
+  CHECK_TRUE(dtb::Parse(bytes.data(), bytes.size(), &reparsed, &header, &why));
+  CHECK_EQ(reparsed.size(), roots.size());
+  auto invalid = std::vector<Node>{C({S("new"), S("InboxPanel"), S("inbox_panel")})};
+  const auto before = dtb::Compile(invalid);
+  CHECK_FALSE(settings::ConfigureMessagesUpdateInbox(&invalid, &why));
+  CHECK_TRUE(dtb::Compile(invalid) == before);
+}
 void TestCurrencyVisibility() {
   using namespace header_test;
   BeginCase("currency chrome is hidden after retail setup without changing purchase or reward data");
@@ -1509,6 +1569,7 @@ int main(int argc, char** argv) {
   TestHeaderVisibility();
   TestCurrencyVisibility();
   TestHeaderNavigation();
+  TestMessagesUpdateInbox();
   TestDiscoveryWaitingLabel();
   BeginCase("the generated locale renames the downloadable-content row when R7 owns it");
   {
