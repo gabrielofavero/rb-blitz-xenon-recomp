@@ -14,6 +14,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <rex/graphics/pipeline/texture/cache.h>
@@ -141,6 +142,7 @@ struct FontJob {
 };
 struct FontResult {
   uint64_t revision = 0;
+  bool valid = true;
   std::array<FontVariant, 3> variants;
 };
 
@@ -155,11 +157,17 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     worker_cv_.notify_all();
   }
   const controller_schemes::Registry* Registry() const { return &registry_; }
-  bool Select(const std::string& id) {
+  bool Select(const std::string& id, uint64_t* ticket) {
     if (id != "retail" && !registry_.Find(id)) return false;
     std::lock_guard lock(pending_mutex_);
     pending_ = id;
+    pending_ticket_ = completion_.Request();
+    if (ticket) *ticket = pending_ticket_;
     return true;
+  }
+  std::optional<ControllerSchemeProgress> LatestApplied() {
+    std::lock_guard lock(pending_mutex_);
+    return completion_.LatestApplied();
   }
   void PublishIcons(std::string signature, std::vector<input::icons::Icon> icons) {
     std::lock_guard lock(pending_mutex_);
@@ -215,6 +223,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
             !input_font_atlas::ComposeRetail(*job.original_font, composed, &variant.retail) ||
             !input_font_atlas::ComposePrivate(*job.original_buttons, scheme, icons,
                                                &variant.private_font)) {
+          result.valid = false;
           REXLOG_WARN("input_icons: background font preparation failed for family {}", family);
         }
         variant.calibration = ComposeCalibrationIcon(registry_, job.calibration[family]);
@@ -229,6 +238,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   }
   void Poll() override {
     std::string next;
+    uint64_t next_ticket = 0;
     std::vector<input::icons::Icon> icons;
     std::array<std::vector<input::icons::Icon>, 3> hints;
     std::array<input::icons::Icon, 3> calibration;
@@ -239,6 +249,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       std::lock_guard lock(pending_mutex_);
       next = std::move(pending_);
       pending_.clear();
+      next_ticket = std::exchange(pending_ticket_, 0);
       if (has_pending_icons_) {
         icons = std::move(pending_icons_);
         has_pending_icons_ = false;
@@ -324,6 +335,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     {
       std::lock_guard lock(worker_mutex_);
       if (completed_job_ && completed_job_->revision == font_revision_) {
+        if (completed_job_->valid) installed_font_revision_ = font_revision_;
         font_variants_ = std::move(completed_job_->variants);
         completed_job_.reset();
         fonts_ready = true;
@@ -333,6 +345,16 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         refresh_font_after_buttons_) {
       refresh_font_after_buttons_ = false;
       rex::graphics::InvalidateTextureOverrides();
+    }
+    {
+      std::lock_guard lock(pending_mutex_);
+      if (next_ticket) {
+        const uint64_t required_font_revision =
+            queued_font_revision_ == font_revision_ &&
+            installed_font_revision_ < font_revision_ ? font_revision_ : 0;
+        completion_.Selected(next_ticket, selected_, required_font_revision);
+      }
+      completion_.Complete(installed_font_revision_);
     }
   }
   bool GetOverride(const rex::graphics::TextureOverrideRequest& request,
@@ -543,10 +565,13 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   bool refresh_font_after_buttons_ = false;
   uint64_t font_revision_ = 0;
   uint64_t queued_font_revision_ = 0;
+  uint64_t installed_font_revision_ = 0;
   std::map<uint64_t, std::vector<std::vector<uint8_t>>> pads_;
   std::unordered_set<uint64_t> logged_;
   std::mutex pending_mutex_;
   std::string pending_;
+  uint64_t pending_ticket_ = 0;
+  ControllerSchemeCompletion completion_;
   std::mutex worker_mutex_;
   std::condition_variable worker_cv_;
   std::optional<FontJob> pending_job_;
@@ -694,8 +719,8 @@ void InstallControllerSchemes(const std::filesystem::path& install_root,
   REXLOG_INFO("button_schemes: active retail (device controller)");
 }
 
-bool SelectControllerScheme(const std::string& id) {
-  if (!g_scheme_provider || !g_scheme_provider->Select(id)) return false;
+bool SelectControllerScheme(const std::string& id, uint64_t* ticket) {
+  if (!g_scheme_provider || !g_scheme_provider->Select(id, ticket)) return false;
   const auto before = input::last_device::Current();
   input::last_device::SelectScheme(id);
   if (before.scheme != id) {
@@ -704,6 +729,10 @@ bool SelectControllerScheme(const std::string& id) {
                 before.family == input::last_device::Family::kMouse ? "mouse" : "keyboard");
   }
   return true;
+}
+
+std::optional<ControllerSchemeProgress> LatestAppliedControllerScheme() {
+  return g_scheme_provider ? g_scheme_provider->LatestApplied() : std::nullopt;
 }
 
 void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons) {

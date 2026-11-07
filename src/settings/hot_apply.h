@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,8 @@ enum class HotApplyStatus : uint8_t {
 
 const char* HotApplyStatusToken(HotApplyStatus status);
 
+struct HotApplyOutcome;
+
 // The host half of a live apply. One instance per boot; every call runs on the caller's thread,
 // and the caller is responsible for the project rule that a *guest* thread never touches the cvar
 // registry (docs/plans/cancelled/2026-10-10-song-cache-plan.md §7) - which is why the runtime implementation of this
@@ -61,6 +64,10 @@ class HotApplier {
   // Performs the write. False plus `error` when it did not happen; a `kHot` row whose write
   // failed must not be reported as applied.
   virtual bool Apply(SettingId id, const Value& value, std::string* error) = 0;
+
+  // A commit may contain dependent rows. The default preserves single-row behavior; a domain
+  // applier can validate and publish an entire group before any consumer sees an intermediate state.
+  virtual std::vector<HotApplyOutcome> ApplyBatch(const std::map<SettingId, Value>& values);
 };
 
 // One commit's rows, split by §5.5's strategy.
@@ -78,6 +85,37 @@ struct HotApplyOutcome {
   SettingId id = SettingId::kUnknown;
   HotApplyStatus status = HotApplyStatus::kNoApplier;
   std::string error;  // non-empty for kRefused/kFailed
+};
+
+// A committed row's runtime completion boundary is distinct from its availability and from an
+// uncommitted edit. Only kNow is represented by ApplicationStrategy::kHot today; the other
+// boundaries are retained as explicit state while their handlers are developed.
+struct ApplicationRecord {
+  Value saved;
+  Value running;
+  ApplyBoundary boundary = ApplyBoundary::kProcessRestart;
+  ApplyPhase phase = ApplyPhase::kApplied;
+  uint64_t revision = 0;
+  uint64_t generation = 0;
+  std::string reason;
+};
+
+// The runtime ledger does not infer a live effect from persistence. A completion may arrive after
+// a newer request; its actual value is recorded and the newer request remains pending.
+class ApplicationLedger {
+ public:
+  void Seed(const std::map<SettingId, Value>& running);
+  uint64_t Queue(uint64_t revision, const std::map<SettingId, Value>& saved,
+                 ApplyBoundary boundary);
+  void Complete(SettingId id, uint64_t generation, HotApplyStatus status,
+                const std::optional<Value>& actual, std::string reason = {});
+  const ApplicationRecord* Find(SettingId id) const;
+  std::map<SettingId, Value> RunningValues() const;
+  std::vector<SettingId> PendingRestartRows() const;
+
+ private:
+  uint64_t generation_ = 0;
+  std::map<SettingId, ApplicationRecord> records_;
 };
 
 // Splits `changed` (typically Service::last_commit_changes()) by each row's strategy. A row that
@@ -100,7 +138,14 @@ std::vector<HotApplyOutcome> ApplyHotPlan(const HotApplyPlan& plan, HotApplier* 
 std::vector<SettingId> RestartSetAfterApply(const HotApplyPlan& plan,
                                             const std::vector<HotApplyOutcome>& outcomes);
 
-// The rows a restart is still owed for, **by value**: what the running process has (`boot_values`,
+// Advance the running baseline only for acknowledged writes. Clear an older failure for a row
+// whose retry succeeded. This is deliberately separate from saved and uncommitted edit values.
+void AcknowledgeRunningValues(std::map<SettingId, Value>* running_values,
+                              std::vector<SettingId>* forced_restart,
+                              const std::map<SettingId, Value>& requested,
+                              const std::vector<HotApplyOutcome>& outcomes);
+
+// The rows a restart is still owed for, **by value**: what the running process has (`running_values`,
 // captured when the boot finished) against what the store says now (`current_values`). A row whose
 // saved value is back to the running one is not pending any more, which is what makes "change it,
 // then change it back" leave Help & Options without a prompt - the sticky "a restart-scoped change
@@ -111,7 +156,7 @@ std::vector<SettingId> RestartSetAfterApply(const HotApplyPlan& plan,
 // strategy says `hot`, and they keep it only while their value really differs from the running one.
 // Rows present in only one of the two maps are ignored - a row the boot never saw cannot be
 // compared.
-std::vector<SettingId> PendingRestartRows(const std::map<SettingId, Value>& boot_values,
+std::vector<SettingId> PendingRestartRows(const std::map<SettingId, Value>& running_values,
                                           const std::map<SettingId, Value>& current_values,
                                           const std::vector<Descriptor>& descriptors,
                                           const std::vector<SettingId>& forced = {});

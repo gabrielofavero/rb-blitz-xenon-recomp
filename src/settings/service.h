@@ -18,6 +18,7 @@
 
 #include "profile/profile.h"
 #include "settings/model.h"
+#include "settings/hot_apply.h"
 #include "settings/migration.h"
 #include "settings/paths.h"
 #include "settings/store.h"
@@ -93,6 +94,7 @@ class Service {
   bool has_provider_sink() const { return provider_ != nullptr; }
   void SetProviderChoices(std::map<SettingId, std::vector<Choice>> choices);
   void SetProviderValues(std::map<SettingId, Value> values);
+  void SetProviderDefaults(std::map<SettingId, Value> values);
   // Values an explicit developer config / environment / CLI won, with the source that won.
   void SetOverrides(std::map<SettingId, Value> values, std::map<SettingId, Source> sources);
   void SetBootValues(std::map<SettingId, Value> values, std::string reason);
@@ -118,6 +120,7 @@ class Service {
   uint64_t BeginEdit(uint64_t base_revision);
   ValidationResult Set(uint64_t txn, SettingId id, const Value& value,
                        uint64_t capability_revision);
+  ValidationResult StageDefaults(uint64_t txn);
   Value CancelField(uint64_t txn, SettingId id);
   CommitResult Commit(uint64_t txn);
   void Cancel(uint64_t txn);
@@ -127,6 +130,9 @@ class Service {
   // --- helpers the UI and the boot wiring read ---------------------------
   const Descriptor* DescriptorFor(SettingId id) const;
   Value RequestedValue(SettingId id) const;
+  // The provider file's last durably loaded or saved value, excluding staged edits and
+  // settings.toml or command-line overrides. Runtime guest assignment must read this source.
+  const Value* CommittedProviderValue(SettingId id) const;
   Value EffectiveValue(SettingId id) const;
   Source EffectiveSource(SettingId id) const;
   bool IsOverridden(SettingId id) const;
@@ -136,6 +142,9 @@ class Service {
   // the restart prompt. Empty before the first commit, and cleared by a commit with nothing to
   // write. Commit clears its own `pending_`, so this is the only way to ask afterwards.
   const std::map<SettingId, Value>& last_commit_changes() const { return last_commit_changes_; }
+  // The boot owns runtime execution; it publishes acknowledged application state here so a
+  // snapshot never has to infer a live effect from a successful file save.
+  void SetApplicationRecord(SettingId id, const ApplicationRecord& record);
 
  private:
   void RefreshDescriptors();
@@ -152,13 +161,14 @@ class Service {
   CapabilitySnapshot capabilities_;
   std::vector<Descriptor> descriptors_;
   std::map<SettingId, Value> provider_values_;
+  std::map<SettingId, Value> provider_defaults_;
   std::map<SettingId, std::vector<Choice>> provider_choices_;
   std::string recovery_error_;
   std::map<SettingId, Value> external_;
   std::map<SettingId, Source> external_source_;
   std::map<SettingId, Value> boot_effective_;
   std::map<SettingId, Value> boot_corrections_;
-  std::string boot_correction_reason_;
+  std::map<SettingId, std::string> boot_correction_reasons_;
   DocumentStatus load_status_ = DocumentStatus::kMissing;
   Reconciler default_reconciler_;
   const Reconciler* reconciler_ = nullptr;
@@ -168,8 +178,11 @@ class Service {
   uint64_t capability_revision_ = 1;
   uint64_t txn_seq_ = 0;
   uint64_t txn_ = 0;
+  uint64_t pending_capability_revision_ = 0;
   std::map<SettingId, Value> pending_;
+  bool pending_defaults_ = false;
   std::map<SettingId, Value> last_commit_changes_;
+  std::map<SettingId, ApplicationRecord> application_records_;
   bool restart_requested_ = false;
   uint64_t restart_request_id_ = 0;
 };

@@ -46,6 +46,7 @@
 #include "profile/input_rows.h"
 #include "profile/remap.h"
 #include "settings/schema.h"
+#include "settings/ultimate_runtime.h"
 #include "store/store_settings.h"
 #include "ui/dtb_author.h"
 #include "ui/help_topics.h"
@@ -70,11 +71,13 @@ using namespace rb_blitz::test;
 
 using dtb::Node;
 
-constexpr size_t kExpectedPagesPerContext = 64;
+constexpr size_t kExpectedPagesPerContext = 66;
 constexpr size_t kExpectedPages = 2 * kExpectedPagesPerContext;
 
 bool SuppressesSettingsCaption(const std::string_view name) {
   return name.starts_with("settings_restart") ||
+         name.starts_with("settings_restore_defaults") ||
+         name.starts_with("settings_display_confirm") ||
          name.starts_with("settings_save_error") ||
          name.starts_with("settings_achievements_confirm") ||
          name.starts_with("settings_linked") ||
@@ -650,6 +653,9 @@ void TestRequestPathsParse() {
     std::string why;
     if (ParseTextRequest(path, &request, &why) && request.op == Op::kInvoke)
       CHECK_TRUE(request.setting == "linked.confirm" || request.setting == "linked.cancel" ||
+                 request.setting == "settings.restore_defaults" ||
+                 request.setting == "display.keep" || request.setting == "display.revert" ||
+                 request.setting.starts_with("display.preview.") ||
                  request.setting == "controller.capture_confirm" ||
                  request.setting == "controller.capture_cancel");
   }
@@ -691,6 +697,12 @@ void TestRequestPathsParse() {
       CHECK_TRUE(row < PanelRowSymbols(panel).size());
       CHECK_TRUE(suffix.substr(row_end + 1) == "next" ||
                  suffix.substr(row_end + 1) == "prev");
+      continue;
+    }
+    if (literal.starts_with("rbbz-settings/ultimate/")) {
+      // These typed hook resources are not text requests parsed by the bridge dispatcher.
+      CHECK_TRUE(literal == "rbbz-settings/ultimate/trial-enabled" ||
+                 rb_blitz::settings::ultimate_runtime::BindingForValuePath(literal) != nullptr);
       continue;
     }
     ++checked;
@@ -1685,12 +1697,21 @@ void TestButtonTableIsOneSwitch() {
       CollectRowTables(*scroll, &inside);
       in_scroll += static_cast<int>(inside.size());
     }
+    std::vector<const dtb::Node*> ultimate_members;
+    CollectMembers(root, "apply_ultimate_value", &ultimate_members);
+    int in_ultimate = 0;
+    for (const dtb::Node* member : ultimate_members) {
+      std::vector<const dtb::Node*> inside;
+      CollectRowTables(*member, &inside);
+      in_ultimate += static_cast<int>(inside.size());
+    }
     const std::string panel_name =
         (root.kids.size() >= 3 && root.kids[2].tag == dtb::kSymbol) ? root.kids[2].text : "";
     const bool suppressed = SuppressesSettingsCaption(panel_name);
     CHECK_EQ(in_scroll, suppressed ? 0 : 1);
     const size_t extra =
-        all.size() - 1u - static_cast<size_t>(in_moves) - static_cast<size_t>(in_scroll);
+        all.size() - 1u - static_cast<size_t>(in_moves) - static_cast<size_t>(in_scroll) -
+        static_cast<size_t>(in_ultimate);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
   CHECK_EQ(row_tables, kExpectedPages);  // one row table per panel, in both contexts
@@ -1726,37 +1747,98 @@ void TestSelectAdvancesAndWraps() {
         "settings_display_fullscreen",
     };
     const char* next[] = {
-        "rbbz-settings/set/graphics.display/t:borderless",
-        "rbbz-settings/set/graphics.display/t:fullscreen",
-        "rbbz-settings/set/graphics.display/t:windowed",  // wrap
+        "rbbz-settings/invoke/display.preview.borderless/-",
+        "rbbz-settings/invoke/display.preview.fullscreen/-",
+        "rbbz-settings/invoke/display.preview.windowed/-",  // wrap
+    };
+    const char* previous[] = {
+        "rbbz-settings/invoke/display.preview.fullscreen/-",  // wrap
+        "rbbz-settings/invoke/display.preview.windowed/-",
+        "rbbz-settings/invoke/display.preview.borderless/-",
+    };
+    const auto previewPaths = [](const std::vector<std::string>& words) {
+      std::vector<std::string> paths;
+      for (const std::string& word : words) {
+        if (word.starts_with("rbbz-settings/invoke/display.preview.")) paths.push_back(word);
+      }
+      return paths;
     };
     for (size_t i = 0; i < 3; ++i) {
       const std::vector<std::string> words = SwitchCaseWords(table, step[i]);
       CHECK_TRUE(!words.empty());
-      CHECK_TRUE(std::find(words.begin(), words.end(), next[i]) != words.end());
-      CHECK_TRUE(std::find(words.begin(), words.end(), "rbbz-settings/commit/-/-") != words.end());
+      CHECK_TRUE(previewPaths(words) == std::vector<std::string>{next[i]});
+      CHECK_TRUE(std::find(words.begin(), words.end(),
+                           "rbbz-settings/snapshot/display.preview_active/b:1") != words.end());
+      CHECK_TRUE(std::find(words.begin(), words.end(), "settings_display_confirm_screen") != words.end() ||
+                 std::find(words.begin(), words.end(), "settings_display_confirm_pause_screen") != words.end());
       // The staged-edit machine this replaces is gone.
       CHECK_TRUE(std::find(words.begin(), words.end(), "rbbz_settings_editing") == words.end());
       CHECK_TRUE(std::find(words.begin(), words.end(), "rbbz-settings/cancel/-/-") == words.end());
     }
 
-    // The arrows make the same one-step change, and commit it the same way.
+    // The arrows must take opposite steps. A keyboard A can also send Confirm,
+    // so inspect the generated action tables instead of inferring direction from that key.
     dtb::Node& mutable_root = const_cast<dtb::Node&>(root);
     dtb::Node* buttons = FindButtonTable(&mutable_root);
     CHECK_TRUE(buttons != nullptr);
     if (buttons != nullptr) {
-      for (const char* key : {"kAction_Left", "kAction_Right"}) {
-        const std::vector<std::string> words = SwitchCaseWords(*buttons, key);
-        CHECK_TRUE(!words.empty());
-        CHECK_TRUE(std::find(words.begin(), words.end(), "rbbz-settings/set/graphics.display/") != words.end() ||
-                   std::any_of(words.begin(), words.end(), [](const std::string& w) {
-                     return w.rfind("rbbz-settings/set/graphics.display/", 0) == 0;
-                   }));
-        CHECK_TRUE(std::find(words.begin(), words.end(), "rbbz-settings/commit/-/-") != words.end());
+      for (const auto& [action, targets] : {
+               std::pair{"kAction_Left", previous},
+               std::pair{"kAction_Right", next},
+           }) {
+        const dtb::Node* direction = nullptr;
+        for (const dtb::Node& candidate : buttons->kids) {
+          if (candidate.tag == dtb::kArray && candidate.kids.size() >= 2 &&
+              candidate.kids[0].text == action) {
+            direction = &candidate.kids[1];
+            break;
+          }
+        }
+        CHECK_TRUE(direction != nullptr);
+        if (direction == nullptr) continue;
+        CHECK_TRUE(direction->tag == dtb::kCommand && !direction->kids.empty() &&
+                   direction->kids[0].text == "switch");
+        for (size_t i = 0; i < 3; ++i) {
+          const std::vector<std::string> words = SwitchCaseWords(*direction, step[i]);
+          CHECK_TRUE(previewPaths(words) == std::vector<std::string>{targets[i]});
+        }
       }
     }
   }
   CHECK_EQ(pages, 2);  // both contexts
+}
+
+void TestDisplayConfirmation() {
+  BeginCase("Window Mode preview opens a guest Keep/Revert page in both contexts");
+  const std::vector<std::string> expected = {"settings_display_revert", "settings_display_keep"};
+  CHECK_TRUE(PanelRowSymbols("settings_display_confirm_panel") == expected);
+  CHECK_TRUE(PanelRowSymbols("settings_display_confirm_pause_panel") == expected);
+  int panels = 0;
+  for (const dtb::Node& root : DefinitionRoots()) {
+    if (root.kids.size() < 3 ||
+        (root.kids[2].text != "settings_display_confirm_panel" &&
+         root.kids[2].text != "settings_display_confirm_pause_panel")) continue;
+    ++panels;
+    const std::vector<std::string> words = Words(root);
+    CHECK_TRUE(std::find(words.begin(), words.end(),
+                         "rbbz-settings/invoke/display.keep/-") != words.end());
+    CHECK_TRUE(std::find(words.begin(), words.end(),
+                         "rbbz-settings/invoke/display.revert/-") != words.end());
+    CHECK_TRUE(std::find(words.begin(), words.end(),
+                         "rbbz-settings/snapshot/display.keep_ok/b:1") != words.end());
+    // A host-side timeout can end the preview without a button press. The
+    // guest page must observe that state and leave instead of staying stale.
+    std::vector<const dtb::Node*> polls;
+    CollectMembers(root, "poll", &polls);
+    CHECK_EQ(polls.size(), 1u);
+    if (!polls.empty()) {
+      const auto poll_words = Words(*polls.front());
+      CHECK_TRUE(std::find(poll_words.begin(), poll_words.end(),
+                           "rbbz-settings/snapshot/display.preview_active/b:1") !=
+                 poll_words.end());
+    }
+  }
+  CHECK_EQ(panels, 2);
 }
 
 void TestRestartPromptOnlyOnLeave() {
@@ -4331,6 +4413,99 @@ void TestControllerLayoutCatalogPage() {
   CHECK_TRUE(PanelRowSymbols("settings_input_types_panel").empty());
 }
 
+void TestUltimateTrialDispatchIsCommitGuarded() {
+  BeginCase("Ultimate trial assignment follows a successful menu commit for only its selected row");
+  const auto roots = DefinitionRoots();
+  const dtb::Node* menu = nullptr;
+  const dtb::Node* pause = nullptr;
+  for (const dtb::Node& root : roots) {
+    if (root.tag != dtb::kCommand || root.kids.size() < 3 ||
+        root.kids[2].tag != dtb::kSymbol) continue;
+    if (root.kids[2].text == "settings_tracks_panel") menu = &root;
+    if (root.kids[2].text == "settings_tracks_pause_panel") pause = &root;
+  }
+  CHECK_TRUE(menu != nullptr);
+  CHECK_TRUE(pause != nullptr);
+  if (!menu || !pause) return;
+
+  std::vector<const dtb::Node*> methods;
+  CollectMembers(*menu, "apply_ultimate_value", &methods);
+  CHECK_EQ(methods.size(), 1u);
+  if (methods.empty()) return;
+  CHECK_TRUE(HasText(*methods.front(), "rbbz-settings/ultimate/trial-enabled"));
+  CHECK_TRUE(HasText(*methods.front(), "rbbz-settings/ultimate/value/gameplay.gems"));
+  CHECK_TRUE(HasText(*methods.front(), "rbbz-settings/ultimate/value/gameplay.precision_mode"));
+  CHECK_FALSE(HasText(*methods.front(), "rbbz-settings/ultimate/value/gameplay.game_speed"));
+  methods.clear();
+  CollectMembers(*pause, "apply_ultimate_value", &methods);
+  CHECK_TRUE(methods.empty());
+  CHECK_FALSE(HasText(*pause, "rbbz-settings/ultimate/trial-enabled"));
+
+  // The installed provider polls Gold Star Progress from a score callback. A paused song may
+  // trial that assignment after commit; scene construction and Game Speed stay out of this path.
+  const dtb::Node* pause_hud = nullptr;
+  for (const dtb::Node& root : roots) {
+    if (root.tag == dtb::kCommand && root.kids.size() >= 3 &&
+        root.kids[2].tag == dtb::kSymbol &&
+        root.kids[2].text == "settings_hud_elements_pause_panel") pause_hud = &root;
+  }
+  CHECK_TRUE(pause_hud != nullptr);
+  if (pause_hud) {
+    methods.clear();
+    CollectMembers(*pause_hud, "apply_ultimate_value", &methods);
+    CHECK_EQ(methods.size(), 1u);
+    if (!methods.empty()) {
+      CHECK_TRUE(HasText(*methods.front(), "rbbz-settings/ultimate/trial-enabled"));
+      CHECK_TRUE(HasText(*methods.front(), "rbbz-settings/ultimate/value/interface.goldprogress"));
+      CHECK_FALSE(HasText(*methods.front(), "rbbz-settings/ultimate/value/interface.hide_hud"));
+      CHECK_FALSE(HasText(*methods.front(), "rbbz-settings/ultimate/value/interface.progressbar"));
+    }
+  }
+  CHECK_TRUE(HelpTextFor("settings_hud_timer_next_song").find("Applies next song.") !=
+             std::string::npos);
+  CHECK_TRUE(HelpTextFor("settings_hud_gold_next_song").empty());
+  CHECK_TRUE(HelpTextFor("settings_show_messages_menu_return").find(
+                 "Applies when you return to the main menu.") != std::string::npos);
+  CHECK_TRUE(HelpTextFor("settings_show_messages_menu_return").find("Requires a restart") ==
+             std::string::npos);
+  CHECK_TRUE(HelpTextFor("settings_mm_leaderboard_menu_return").find("Restart to apply") ==
+             std::string::npos);
+  CHECK_TRUE(HelpTextFor("no_such_menu_row_menu_return").empty());
+  CHECK_TRUE(HelpTextFor("settings_hud_pb_next_selection").find(
+                 "Applies on next song selection.") != std::string::npos);
+
+  std::vector<const dtb::Node*> select_members;
+  CollectMembers(*menu, "select_row", &select_members);
+  CHECK_EQ(select_members.size(), 1u);
+  if (select_members.empty()) return;
+  std::vector<const dtb::Node*> tables;
+  CollectRowTables(*select_members.front(), &tables);
+  CHECK_EQ(tables.size(), 1u);
+  if (tables.empty()) return;
+  const dtb::Node* gem_case = nullptr;
+  for (const dtb::Node& candidate : tables.front()->kids) {
+    if (candidate.tag == dtb::kArray && !candidate.kids.empty() &&
+        candidate.kids.front().tag == dtb::kSymbol &&
+        candidate.kids.front().text == "settings_gems_default") gem_case = &candidate;
+  }
+  CHECK_TRUE(gem_case != nullptr);
+  if (!gem_case) return;
+  bool guarded_success = false;
+  std::vector<const dtb::Node*> stack{gem_case};
+  while (!stack.empty()) {
+    const dtb::Node* node = stack.back();
+    stack.pop_back();
+    if (node->tag == dtb::kCommand && node->kids.size() == 4 &&
+        node->kids[0].tag == dtb::kSymbol && node->kids[0].text == "if_else" &&
+        HasText(node->kids[1], "rbbz-settings/snapshot/commit.ok/b:1")) {
+      guarded_success = HasText(node->kids[2], "apply_ultimate_value") &&
+                        !HasText(node->kids[3], "apply_ultimate_value");
+    }
+    for (const dtb::Node& kid : node->kids) stack.push_back(&kid);
+  }
+  CHECK_TRUE(guarded_success);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -4383,6 +4558,7 @@ int main(int argc, char** argv) {
   TestEveryDestinationExists();
   TestButtonTableIsOneSwitch();
   TestSelectAdvancesAndWraps();
+  TestDisplayConfirmation();
   TestRestartPromptOnlyOnLeave();
   TestRestartPromptLeavesTheSurface();
   TestInvertedBoolRow();
@@ -4407,5 +4583,6 @@ int main(int argc, char** argv) {
   TestLoadGuardSurface();
   TestAchievementActionWording();
   TestControllerLayoutCatalogPage();
+  TestUltimateTrialDispatchIsCommitGuarded();
   return Finish();
 }

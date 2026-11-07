@@ -43,7 +43,8 @@ std::string JournalValue(const Value& value) {
 void JournalSet(toml::Document& document, std::string_view section, SettingId id,
                 const Value& value) {
   document.Set(section, std::to_string(static_cast<int>(id)),
-               value.kind == ValueKind::kList ? toml::RenderStringList(value.list)
+               value.kind == ValueKind::kNone ? toml::RenderBasic("absent")
+               : value.kind == ValueKind::kList ? toml::RenderStringList(value.list)
                                               : toml::RenderBasic(JournalValue(value)));
 }
 
@@ -62,6 +63,10 @@ bool JournalRead(const toml::Document& document, std::string_view section,
     const auto item = document.Get(section, key);
     Value value;
     value.kind = descriptor->value_kind;
+    if (value.kind == ValueKind::kList && item.scalar && item.value == "absent") {
+      (*values)[descriptor->id] = Value{};
+      continue;
+    }
     if (value.kind == ValueKind::kList) {
       if (!item.list_ok) return false;
       value.list = item.list;
@@ -157,6 +162,10 @@ Service::~Service() = default;
 
 DocumentStatus Service::Boot(const Profile* legacy, const PathEntry& existing_paths,
                              MigrationResult* migration, bool legacy_usable) {
+  application_records_.clear();
+  boot_effective_.clear();
+  boot_corrections_.clear();
+  boot_correction_reasons_.clear();
   load_status_ = store_.Load().status;
   if (legacy != nullptr) {
     MigrationOptions options;
@@ -223,15 +232,21 @@ void Service::SetProviderValues(std::map<SettingId, Value> values) {
   provider_values_ = std::move(values);
 }
 
+void Service::SetProviderDefaults(std::map<SettingId, Value> values) {
+  provider_defaults_ = std::move(values);
+}
+
 void Service::SetOverrides(std::map<SettingId, Value> values, std::map<SettingId, Source> sources) {
   external_ = std::move(values);
   external_source_ = std::move(sources);
 }
 
 void Service::SetBootValues(std::map<SettingId, Value> values, std::string reason) {
-  boot_corrections_ = std::move(values);
-  boot_correction_reason_ = std::move(reason);
-  for (const auto& [id, value] : boot_corrections_) boot_effective_[id] = value;
+  for (auto& [id, value] : values) {
+    boot_corrections_[id] = value;
+    boot_effective_[id] = std::move(value);
+    boot_correction_reasons_[id] = reason;
+  }
 }
 
 void Service::SetMenuRows(std::vector<Choice> rows) {
@@ -267,6 +282,13 @@ Value Service::RequestedValue(SettingId id) const {
   return descriptor->compiled_default;
 }
 
+const Value* Service::CommittedProviderValue(SettingId id) const {
+  const Descriptor* descriptor = DescriptorFor(id);
+  if (descriptor == nullptr || descriptor->provider != Provider::kUltimate) return nullptr;
+  const auto found = provider_values_.find(id);
+  return found == provider_values_.end() ? nullptr : &found->second;
+}
+
 Source Service::SourceFor(SettingId id, bool provider_row) const {
   if (external_source_.count(id) != 0) {
     return external_source_.at(id);
@@ -290,7 +312,7 @@ Value Service::ReconcileEffective(const Descriptor& descriptor, const Value& req
                                   bool* corrected, std::string* correction_reason_key) const {
   if (const auto it = boot_corrections_.find(descriptor.id); it != boot_corrections_.end()) {
     if (corrected) *corrected = !ValueEquals(it->second, requested);
-    if (correction_reason_key) *correction_reason_key = boot_correction_reason_;
+    if (correction_reason_key) *correction_reason_key = boot_correction_reasons_.at(descriptor.id);
     return it->second;
   }
   const Reconciler* reconciler = reconciler_ != nullptr ? reconciler_ : &default_reconciler_;
@@ -316,6 +338,10 @@ Value Service::EffectiveValue(SettingId id) const {
   bool corrected = false;
   std::string reason;
   return ReconcileEffective(*descriptor, RequestedValue(id), &corrected, &reason);
+}
+
+void Service::SetApplicationRecord(SettingId id, const ApplicationRecord& record) {
+  application_records_[id] = record;
 }
 
 Source Service::EffectiveSource(SettingId id) const {
@@ -368,6 +394,19 @@ Snapshot Service::GetSnapshot() const {
       field.restart_required =
           descriptor.restart_scoped() && !ValueEquals(field.requested, boot->second);
     }
+    field.running = field.effective;
+    if (const auto applied = application_records_.find(descriptor.id);
+        applied != application_records_.end()) {
+      const ApplicationRecord& record = applied->second;
+      field.running = record.running;
+      field.application_boundary = record.boundary;
+      field.application_phase = record.phase;
+      field.application_generation = record.generation;
+      field.application_reason = record.reason;
+      field.restart_required = !ValueEquals(record.saved, record.running) &&
+          (record.boundary == ApplyBoundary::kProcessRestart ||
+           record.phase == ApplyPhase::kFailed || record.phase == ApplyPhase::kRefused);
+    }
     snapshot.fields.push_back(std::move(field));
   }
   return snapshot;
@@ -378,6 +417,8 @@ uint64_t Service::BeginEdit(uint64_t base_revision) {
     return 0;  // stale: the caller re-reads GetSnapshot() and starts again
   }
   pending_.clear();
+  pending_defaults_ = false;
+  pending_capability_revision_ = 0;
   txn_ = ++txn_seq_;
   return txn_;
 }
@@ -411,13 +452,44 @@ ValidationResult Service::Set(uint64_t txn, SettingId id, const Value& value,
     // The choices this edit was based on are stale; refuse rather than clamp by index.
     return ValidationResult{false, "settings.capabilities_changed"};
   }
+  if (pending_capability_revision_ != 0 &&
+      pending_capability_revision_ != capability_revision) {
+    return ValidationResult{false, "settings.capabilities_changed"};
+  }
   const Reconciler* reconciler = reconciler_ != nullptr ? reconciler_ : &default_reconciler_;
   const ValidationResult validation = reconciler->Validate(id, *descriptor, value, capabilities_);
   if (!validation.ok) {
     return validation;
   }
   pending_[id] = value;
+  pending_capability_revision_ = capability_revision;
   return validation;
+}
+
+ValidationResult Service::StageDefaults(uint64_t txn) {
+  if (txn == 0 || txn != txn_) return {false, "settings.stale_transaction"};
+  // Build a complete batch before changing the transaction. Provider file rows are included
+  // whenever an installed compatible payload has a safe writer, even for an inactive target.
+  std::map<SettingId, Value> defaults;
+  for (const Descriptor& descriptor : descriptors_) {
+    if (descriptor.widget == WidgetKind::kAction || external_.contains(descriptor.id)) continue;
+    if (IsProviderFileRow(descriptor.id) &&
+        (!provider_ || provider_->Readiness() != ProviderReadiness::kCompatible)) continue;
+    const auto provider_default = provider_defaults_.find(descriptor.id);
+    const Value& value = provider_default == provider_defaults_.end()
+                             ? descriptor.compiled_default : provider_default->second;
+    if (ValueEquals(RequestedValue(descriptor.id), value)) continue;
+    const Reconciler* reconciler = reconciler_ ? reconciler_ : &default_reconciler_;
+    const ValidationResult valid = value.kind == ValueKind::kNone
+        ? ValidationResult{true, ""}
+        : reconciler->Validate(descriptor.id, descriptor, value, capabilities_);
+    if (!valid.ok) return valid;
+    defaults.emplace(descriptor.id, value);
+  }
+  pending_ = std::move(defaults);
+  pending_defaults_ = true;
+  pending_capability_revision_ = capability_revision_;
+  return {true, ""};
 }
 
 Value Service::CancelField(uint64_t txn, SettingId id) {
@@ -426,6 +498,7 @@ Value Service::CancelField(uint64_t txn, SettingId id) {
   }
   const Value previous = RequestedValue(id);
   pending_.erase(id);
+  if (pending_.empty()) pending_capability_revision_ = 0;
   return previous;
 }
 
@@ -448,8 +521,38 @@ CommitResult Service::Commit(uint64_t txn) {
   }
   if (pending_.empty()) {
     result.status = CommitStatus::kNoChanges;
+    pending_defaults_ = false;
+    pending_capability_revision_ = 0;
     txn_ = 0;
     return result;
+  }
+  if (pending_capability_revision_ != capability_revision_) {
+    result.status = CommitStatus::kInvalid;
+    result.errors.push_back("settings.capabilities_changed");
+    return result;
+  }
+  const Reconciler* reconciler = reconciler_ != nullptr ? reconciler_ : &default_reconciler_;
+  for (const auto& [id, value] : pending_) {
+    const Descriptor* descriptor = DescriptorFor(id);
+    const bool provider_restore = pending_defaults_ && IsProviderFileRow(id) && provider_ &&
+                                  provider_->Readiness() == ProviderReadiness::kCompatible;
+    if (descriptor == nullptr ||
+        ((descriptor->availability == Availability::kHidden ||
+          descriptor->availability == Availability::kVisibleDisabled) && !provider_restore) ||
+        external_.count(id) != 0) {
+      result.status = CommitStatus::kInvalid;
+      result.errors.push_back("settings.row_unavailable");
+      return result;
+    }
+    const ValidationResult validation = value.kind == ValueKind::kNone &&
+                                        descriptor->compiled_default.kind == ValueKind::kNone
+        ? ValidationResult{true, ""}
+        : reconciler->Validate(id, *descriptor, value, capabilities_);
+    if (!validation.ok) {
+      result.status = CommitStatus::kInvalid;
+      result.errors.push_back(validation.reason_key);
+      return result;
+    }
   }
 
   rb_blitz::fs::FileLock commit_lock;
@@ -479,7 +582,6 @@ CommitResult Service::Commit(uint64_t txn) {
     } else {
       native_rows[id] = value;
     }
-    last_commit_changes_[id] = value;
     const Descriptor* descriptor = DescriptorFor(id);
     if (descriptor != nullptr && descriptor->restart_scoped()) {
       restart = true;
@@ -577,8 +679,15 @@ CommitResult Service::Commit(uint64_t txn) {
   result.saved_revision = revision_;
   result.restart_required = result.status != CommitStatus::kPartial && restart && (wrote_native || provider_written);
   result.provider_written = provider_written;
+  // Report only values whose own persistence succeeded. A partial provider failure can follow a
+  // durable native write; the runtime applier must never consume the unsaved provider half.
+  if (wrote_native) last_commit_changes_.insert(native_rows.begin(), native_rows.end());
+  if (provider_written && result.status != CommitStatus::kPartial)
+    last_commit_changes_.insert(provider_rows.begin(), provider_rows.end());
   if (result.status != CommitStatus::kPartial) {
     pending_.clear();
+    pending_defaults_ = false;
+    pending_capability_revision_ = 0;
     txn_ = 0;
   }
   return result;
@@ -682,6 +791,7 @@ bool Service::RecoverCommit(std::string* error) {
 void Service::Cancel(uint64_t txn) {
   if (txn == txn_) {
     pending_.clear();
+    pending_defaults_ = false;
     txn_ = 0;
   }
 }

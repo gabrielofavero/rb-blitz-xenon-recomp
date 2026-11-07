@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // P9 - the runtime half of the live apply (src/settings/hot_apply.h owns the seam). This file is
-// the only place that knows HOW a `hot` row reaches the running game, and it knows two kinds:
+// the only place that knows HOW a `hot` row reaches the running game, and it knows three kinds:
 //
 //   * `graphics.vsync` and `interface.settings_labels` write a cvar **by name**, because `vsync`
 //     is defined in `rexruntime.dll`'s GPU category and `settings_help_overlay` by the game's own
@@ -12,6 +12,9 @@
 //   * The five RhythmVerse **filter** leaves replace the store's in-process settings snapshot,
 //     which its workers read before every request (src/store/store_settings.h). The master is not
 //     here: it is `restart` (plan §9/P9-2), because the switch also owns what the boot drew.
+//   * Controller Layout queues a monotonic ticket for the texture provider's GPU Poll. The
+//     caller binds that ticket to its ledger generation and acknowledges after Poll publishes
+//     the prepared override and texture-invalidation generation.
 //
 // Two constraints from the project, both structural rather than stylistic:
 //
@@ -30,6 +33,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string_view>
 
 #include "settings/hot_apply.h"
@@ -40,6 +44,11 @@ namespace rb_blitz::settings {
 // The one applier a boot has. Never null; a row it does not know is reported as `kNoApplier` by
 // the seam, so an unwired row honestly asks for a restart instead of pretending.
 HotApplier* RuntimeHotApplier();
+
+// The GPU provider's monotonic request ticket for the last successful
+// controller.scheme apply. The guest bridge binds it to its ledger generation;
+// a later GPU-poll completion must match both before it can acknowledge.
+uint64_t RuntimeControllerSchemeTicket();
 
 // The stable token -> id lookup the guest channel needs (`graphics.vsync` on the wire). kUnknown
 // for a token this build does not describe, so a stale path can never be applied.

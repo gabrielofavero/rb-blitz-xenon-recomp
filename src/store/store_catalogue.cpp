@@ -346,12 +346,10 @@ void RunOne() {
     REXLOG_INFO("store_catalogue: page {} -> {} eligible offer(s) of {} record(s) ({} total)",
                 page_number, shaped.size(), page.returned, offers.size());
     PublishStatus(State::kFetching, fetched, offers.size(), {});
-    // The covers for the offers that just landed. The player is still on the front menu - Recent is
-    // pressed seconds later - so most textures are encoded before a row is selected, which matters
-    // because the retail art loader asks once per selection and does not retry a path it already
-    // set (`album_art.h` has the DTA). The worker's queue is bounded, so a long list simply fills
-    // it and the rest is asked for again when the page is served (`StartArtPrefetch`).
-    RequestAlbumArt(offers);
+    // Boot can still be opening the guest's first screen here. Encoding every
+    // fetched cover at once competes with those reads for disk and CPU. A served
+    // store page requests its own covers through StartArtPrefetch, and a selected
+    // texture is promoted by RequestAlbumArtTexture.
     // P7's chunking cursor: the server's own page number, never the count of offers kept.
     const int after = NextPageAfter(page, fetched, g_pages);
     if (after == 0) {

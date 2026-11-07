@@ -7,6 +7,7 @@
 #include <rex/cvar.h>
 #include <rex/kernel/xam/module.h>
 #include "hooks/help_observer.h"
+#include "hooks/menu_filter.h"
 #include "hooks/action_hint_probe.h"
 #include "ui/input_font_scene.h"
 #include "loading/load_trace.h"
@@ -169,6 +170,10 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
                                              U32(base, manager + 16) != 0);
   if (screen != current_screen || focus != current_focus || allowed != menu_available) {
     if (screen != current_screen) ++screen_generation;
+    // A panel-entry refresh may replace the splash provider's row array before
+    // its first draw. Never hit-test or dispatch against indices captured from
+    // the preceding screen or list generation.
+    geometry = {};
     header_geometry = {};
     clicked_header = -1;
     MenuRail stale; PublishRail(stale);
@@ -280,6 +285,11 @@ bool AnswerMenuHeaderQuery(std::string_view path, bool* answer) {
   const auto slash = suffix.rfind('/');
   if (slash == std::string_view::npos || slash + 2 != suffix.size() ||
       suffix.back() < '0' || suffix.back() > '3') return true;
+  const int target = suffix.back() - '0';
+  const auto visibility = rb_blitz::menu_filter::SnapshotRuntimeVisibility();
+  if ((target == 1 && !visibility.rhythmverse) ||
+      (target == 2 && !visibility.messages) ||
+      (target == 3 && !visibility.recommendations)) return true;
   std::lock_guard lock(mutex);
   if (queue.enabled() && MouseSupportEnabled() && header_click_frame == frame_number &&
       suffix.substr(0, slash) == current_panel_name && clicked_header == suffix.back() - '0') {
@@ -860,6 +870,7 @@ REX_HOOK_RAW(sub_824B2958) {
   const auto manager = ctx.r3.u32;
   rb_blitz::input::PollMouse(ctx, base, manager);
   __imp__sub_824B2958(ctx, base);
+  rb_blitz::content_progress::Tick(ctx, base);
   rb_blitz::loading::ObserveLoadFrame(base, manager);
   rb_blitz::input::Context(ctx, base, manager);
   // The help captions' observer (owner request, 2026-10-13): the frame's input has been

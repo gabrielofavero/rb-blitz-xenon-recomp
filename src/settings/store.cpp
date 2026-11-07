@@ -1049,6 +1049,11 @@ SaveOutcome SaveSettingsDocument(const fs::path& file, const SaveRequest& reques
   doc.SetIfAbsent("", "schema_version", "1");
 
   for (const auto& [id, value] : request.changed) {
+    if (value.kind == ValueKind::kNone) {
+      const StorageKey storage = StorageKeyFor(id);
+      if (storage.persisted()) doc.Erase(storage.section, storage.key);
+      continue;
+    }
     std::string rendered;
     toml::Style style = toml::Style::kBare;
     if (!PersistedValue(id, value, &rendered, &style)) {
@@ -1141,10 +1146,15 @@ DocumentLoad Store::Load() {
 }
 
 void Store::MarkChanged(SettingId id, const Value& value, Origin origin) {
-  document_.values[id] = value;
-  document_.origins[id] = origin;
+  if (value.kind == ValueKind::kNone) {
+    document_.values.erase(id);
+    document_.origins.erase(id);
+  } else {
+    document_.values[id] = value;
+    document_.origins[id] = origin;
+  }
   changed_[id] = value;
-  origins_[id] = origin;
+  origins_[id] = value.kind == ValueKind::kNone ? Origin::kDefault : origin;
 }
 
 void Store::MarkOverride(std::string key, const Value& value) {
@@ -1197,7 +1207,8 @@ SaveOutcome Store::Save() {
   SaveOutcome outcome = SaveSettingsDocument(paths_.settings_file, request);
   if (outcome.wrote) {
     for (const auto& [id, value] : changed_) {
-      base_[id] = value;
+      if (value.kind == ValueKind::kNone) base_.erase(id);
+      else base_[id] = value;
     }
     changed_.clear();
     origins_.clear();

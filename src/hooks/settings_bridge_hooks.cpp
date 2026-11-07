@@ -65,6 +65,7 @@
 #include "hooks/action_hint_probe.h"
 #include "hooks/shell_music.h"
 #include "hooks/menu_music_guest.h"
+#include "hooks/menu_filter.h"
 #include "hooks/hot_apply_runtime.h"
 #include "input/input_store.h"
 #include "input/input_icons.h"
@@ -78,14 +79,17 @@
 #include "settings/bridge_sink.h"
 #include "settings/hot_apply.h"
 #include "settings/input_bindings.h"
+#include "settings/menu_compat.h"
 #include "settings/schema.h"
 #include "settings/ultimate_adapter.h"
+#include "settings/ultimate_runtime.h"
 #include "store/store_catalogue.h"
 #include "store/album_art.h"
 #include "store/store_download_service.h"
 #include "store/store_search.h"
 #include "store/store_settings.h"
 #include "ui/settings_screen.h"
+#include "ui/menu_options.h"
 #include "ui/input_icon_rows.h"
 #include "ui/input_font_scene.h"
 
@@ -134,12 +138,21 @@ REXCVAR_DEFINE_BOOL(settings_hot_apply_diagnostic, false, "Settings",
                     "`REX_SETTINGS_HOT_APPLY_DIAGNOSTIC`.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+REXCVAR_DEFINE_BOOL(settings_ultimate_refresh_trial, false, "Settings",
+                    "Trial guarded Ultimate guest assignments after a durable settings commit. "
+                    "The setting remains restart-scoped until its consumer is verified.")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
 namespace rb_blitz::settings::bridge {
 namespace {
 
 // Set once in Configure() on a host thread; the hooks only read them.
 bool g_enabled = true;
 bool g_forward_only = false;
+bool g_ultimate_refresh_trial = false;
+ultimate_runtime::SongEntryReceipt g_song_entry_receipt;
+ultimate_runtime::SelectionReceipt g_selection_receipt;
 
 // The guest mapping list keeps its row identities while left/right pages through long image rows.
 // These offsets are display state only: binding changes do not write the settings profile.
@@ -338,7 +351,7 @@ bool ParseAnyRequest(const std::string_view path, Request* out, std::string* err
 void PersistProviderRows();
 
 // P9's live half, defined below with the rest of the application-strategy seam.
-void ApplyHotRows();
+void ApplyHotRows(bool force_restart = false);
 
 void HandleRequest(const std::string_view path) {
   Request request;
@@ -353,7 +366,10 @@ void HandleRequest(const std::string_view path) {
   // result to build). No sink means no overlay in this build; the request is still consumed.
   if (request.op == Op::kHelp) {
     if (HelpSink* sink = GetHelpSink()) {
-      sink->Show(request.setting);
+      if (auto* boot = boot::SettingsBoot::Current(); boot && boot->service())
+        sink->Show(ultimate_runtime::HelpSymbolForApplicationState(
+            request.setting, boot->service()->GetSnapshot()));
+      else sink->Show(request.setting);
     }
     REXLOG_DEBUG("settings_bridge: help '{}'", request.setting.empty() ? "-" : request.setting);
     return;
@@ -363,14 +379,19 @@ void HandleRequest(const std::string_view path) {
               request.setting.empty() ? "-" : request.setting, StatusName(response.status),
               response.message.empty() ? "no message" : response.message,
               g_dispatcher.last_outcome() == Dispatcher::Outcome::kReplayed ? ", replayed" : "");
-  if (request.op == Op::kCommit && response.status == Status::kOk &&
-      g_dispatcher.last_outcome() == Dispatcher::Outcome::kForwarded) {
+  if (request.op == Op::kCommit &&
+      g_dispatcher.last_outcome() == Dispatcher::Outcome::kForwarded &&
+      (response.status == Status::kOk ||
+       (dynamic_cast<ServiceSink*>(g_sink) &&
+        static_cast<ServiceSink*>(g_sink)->last_commit_durable()))) {
     // A committed session is written through to the provider's own file, because that file is what
     // the provider's own loader reads on the next boot. A replayed commit is not written again.
-    if (g_sink == static_cast<RequestSink*>(&g_memory)) PersistProviderRows();
+    if (response.status == Status::kOk && g_sink == static_cast<RequestSink*>(&g_memory))
+      PersistProviderRows();
     // P9: and every row the commit changed whose strategy is `hot` is applied to the running
     // process now; the rest keep their restart, which is what the menu's prompt covers.
-    ApplyHotRows();
+    const auto* service_sink = dynamic_cast<ServiceSink*>(g_sink);
+    ApplyHotRows(service_sink && service_sink->last_commit_restored_defaults());
   }
 }
 
@@ -464,6 +485,28 @@ bool ValueFromWire(const ProviderBinding& binding, const WireValue& wire, ModelV
     default:
       return false;
   }
+}
+
+// A read of this namespace is a typed guest assignment source, not a provider-file reload.
+// The guest command calls file_exists first; both probes use this same validator so an invalid
+// token can never turn a provider global into the read hook's absent-value zero.
+bool UltimateRuntimeValue(std::string_view path,
+                          ::rb_blitz::settings::ultimate_runtime::RuntimeValue* out) {
+  using namespace ::rb_blitz::settings;
+  const ProviderBinding* binding = ultimate_runtime::BindingForValuePath(path);
+  // Product commits use the Service's provider sink. Those values are never in ServiceSink's
+  // local map; that map is only the memory fallback. The provider's committed map advances only
+  // after the installed provider file was written durably. It excludes staged edits and native
+  // overrides, so the guest cannot assign an unsaved or unrelated value.
+  auto* sink = dynamic_cast<ServiceSink*>(g_sink);
+  auto* boot = boot::SettingsBoot::Current();
+  if (binding == nullptr || sink == nullptr || boot == nullptr || boot->service() == nullptr ||
+      !::rb_blitz::ultimate::Provider().Active())
+    return false;
+  const ModelValue* value = boot->service()->CommittedProviderValue(binding->id);
+  if (value == nullptr) return false;
+  return ultimate_runtime::EncodeRuntimeValue(::rb_blitz::ultimate::Provider(), *binding,
+                                              *value, out);
 }
 
 // The provider's readiness and its current values, put into the store before the guest can ask.
@@ -592,7 +635,52 @@ void PersistProviderRows() {
 // the row's declared `value_kind` as the arbiter, so a wrong-kind value is refused rather than
 // coerced. It is the same function the store's own set path uses.
 
-void ApplyHotRows() {
+void PublishTrialMenuVisibility(const std::map<::rb_blitz::settings::SettingId, ModelValue>& changed) {
+  using ::rb_blitz::settings::SettingId;
+  bool menu_changed = false;
+  for (const auto& [id, value] : changed) {
+    (void)value;
+    if (id == SettingId::kHiddenMainMenu || id == SettingId::kHideMainMenu ||
+        id == SettingId::kRefreshMusicLibrary || id == SettingId::kPlayCurrentSong ||
+        id == SettingId::kHideDownloadContent || id == SettingId::kShowMessages ||
+        id == SettingId::kShowRecommendations) {
+      menu_changed = true;
+      break;
+    }
+  }
+  if (!menu_changed) return;
+  const auto* boot = ::rb_blitz::settings::boot::SettingsBoot::Current();
+  if (!boot || !boot->service()) return;
+  const auto* service = boot->service();
+  auto visibility = ::rb_blitz::menu_filter::SnapshotRuntimeVisibility();
+  visibility.refresh_songs = service->EffectiveValue(SettingId::kRefreshMusicLibrary).boolean;
+  visibility.play_current_song = service->EffectiveValue(SettingId::kPlayCurrentSong).boolean &&
+                                 ::rb_blitz::shell_music::HasPool();
+  visibility.download_content = !service->EffectiveValue(SettingId::kHideDownloadContent).boolean;
+  visibility.messages = service->EffectiveValue(SettingId::kShowMessages).boolean;
+  visibility.recommendations = service->EffectiveValue(SettingId::kShowRecommendations).boolean;
+  ::rb_blitz::settings::menu_compat::HideRequest request;
+  const auto selected = service->EffectiveValue(SettingId::kHiddenMainMenu);
+  request.selection_explicit = service->EffectiveSource(SettingId::kHiddenMainMenu) !=
+                               ::rb_blitz::settings::Source::kCompiledDefault;
+  request.master = service->EffectiveValue(SettingId::kHideMainMenu).boolean ||
+                   request.selection_explicit;
+  request.selected = selected.list;
+  request.defaults = ::rb_blitz::menu_options::ParseRowNames(
+      ::rb_blitz::menu_options::kDefaultRows);
+  request.refresh_row_enabled = visibility.refresh_songs;
+  visibility.hidden_rows = ::rb_blitz::settings::menu_compat::DecideHiddenRows(request).hidden;
+  visibility.revision = service->revision();
+  const bool leaderboard_hidden = std::find(visibility.hidden_rows.begin(),
+      visibility.hidden_rows.end(), "splash_leaderboard") != visibility.hidden_rows.end();
+  REXLOG_INFO("settings_bridge: menu visibility rev={} selected={} hidden={} leaderboard_hidden={}",
+              visibility.revision, selected.list.size(), visibility.hidden_rows.size(),
+              leaderboard_hidden);
+  ::rb_blitz::menu_filter::PublishRuntimeVisibility(std::move(visibility));
+  REXLOG_INFO("settings_bridge: published menu visibility after durable commit");
+}
+
+void ApplyHotRows(bool force_restart) {
   const std::vector<std::string>& tokens = g_queries->last_commit_changes();
   if (tokens.empty()) {
     return;
@@ -624,17 +712,55 @@ void ApplyHotRows() {
     return;
   }
 
-  const ::rb_blitz::settings::HotApplyPlan plan =
+  if (!force_restart) PublishTrialMenuVisibility(changed);
+
+  ::rb_blitz::settings::HotApplyPlan plan =
       ::rb_blitz::settings::PlanHotApplyByStrategy(changed);
+  if (force_restart) {
+    plan.live.clear();
+    plan.pending_restart.clear();
+    for (const auto& [id, value] : changed) plan.pending_restart.push_back(id);
+  }
+  auto* boot = ::rb_blitz::settings::boot::SettingsBoot::Current();
+  const uint64_t generation = boot ? boot->NoteCommittedRows(
+      changed, plan, boot->service() ? boot->service()->revision() : 0) : 0;
+  if (!force_restart && boot && boot->service() && ::rb_blitz::menu_filter::RuntimeMenuRefreshReady())
+    boot->NoteMenuReturnRows(changed, boot->service()->revision());
+  if (!force_restart && boot && boot->service() && ultimate_runtime::CanRunSongEntry(
+          ::rb_blitz::ultimate::Provider(), ultimate_runtime::SongEntryRouteReady(),
+          g_ultimate_refresh_trial, g_enabled, g_forward_only)) {
+    boot->NoteNextSongRows(changed, boot->service()->revision());
+    g_song_entry_receipt.Queue(changed, boot->service()->revision());
+  }
+  if (!force_restart && boot && boot->service() && ultimate_runtime::CanRunSongEntry(
+          ::rb_blitz::ultimate::Provider(), ultimate_runtime::SelectionRouteReady(),
+          g_ultimate_refresh_trial, g_enabled, g_forward_only)) {
+    boot->NoteSongSelectionRows(changed, boot->service()->revision());
+    g_selection_receipt.Queue(changed, boot->service()->revision());
+  }
   if (plan.live.empty()) {
-    REXLOG_DEBUG("settings_bridge: the commit changed {} row(s); every one of them needs a new "
-                 "process",
+    REXLOG_DEBUG("settings_bridge: the commit changed {} row(s) with no immediate live apply",
                  plan.pending_restart.size());
     return;
   }
 
-  const std::vector<::rb_blitz::settings::HotApplyOutcome> outcomes =
+  std::vector<::rb_blitz::settings::HotApplyOutcome> outcomes =
       ::rb_blitz::settings::ApplyHotPlan(plan, ::rb_blitz::settings::RuntimeHotApplier());
+  std::vector<::rb_blitz::settings::HotApplyOutcome> completed;
+  for (auto& outcome : outcomes) {
+    if (outcome.id == ::rb_blitz::settings::SettingId::kButtonScheme &&
+        outcome.status == ::rb_blitz::settings::HotApplyStatus::kApplied) {
+      const uint64_t ticket = ::rb_blitz::settings::RuntimeControllerSchemeTicket();
+      if (boot && ticket != 0) {
+        boot->NoteControllerLayoutQueued(ticket, generation, plan.live.at(outcome.id));
+        continue;
+      }
+      outcome.status = ::rb_blitz::settings::HotApplyStatus::kFailed;
+      outcome.error = "controller layout has no GPU completion ticket";
+    }
+    completed.push_back(outcome);
+  }
+  if (boot) boot->NoteAppliedRows(plan.live, completed, generation);
   const std::vector<::rb_blitz::settings::SettingId> restart =
       ::rb_blitz::settings::RestartSetAfterApply(plan, outcomes);
   if (!restart.empty()) {
@@ -651,7 +777,11 @@ void ApplyHotRows() {
     const auto found = tokens_by_id.find(outcome.id);
     const std::string token =
         found == tokens_by_id.end() ? std::string(SettingIdToken(outcome.id)) : found->second;
-    if (outcome.status == ::rb_blitz::settings::HotApplyStatus::kApplied) {
+    if (outcome.id == ::rb_blitz::settings::SettingId::kButtonScheme &&
+        outcome.status == ::rb_blitz::settings::HotApplyStatus::kApplied) {
+      REXLOG_INFO("settings_bridge: queued '{}' for provider refresh at the GPU poll boundary",
+                  token);
+    } else if (outcome.status == ::rb_blitz::settings::HotApplyStatus::kApplied) {
       ++applied;
       REXLOG_INFO("settings_bridge: applied '{}' to the running game; the row carries no pending "
                   "state",
@@ -702,6 +832,84 @@ void RunHotApplyDiagnostic() {
 
 bool TakeExists(PPCContext& ctx, uint8_t* base) {
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+  // Read the GPU provider's completed ticket on this guest thread, where the
+  // settings service and ledger are owned. No GPU thread mutates either one.
+  if (const auto progress = ::rb_blitz::assets::LatestAppliedControllerScheme()) {
+    if (auto* boot = ::rb_blitz::settings::boot::SettingsBoot::Current())
+      boot->AcknowledgeControllerLayout(progress->ticket, progress->scheme);
+  }
+  const bool selection_enabled = ::rb_blitz::settings::ultimate_runtime::CanRunSongEntry(
+      ::rb_blitz::ultimate::Provider(),
+      ::rb_blitz::settings::ultimate_runtime::SelectionRouteReady(),
+      g_ultimate_refresh_trial, g_enabled, g_forward_only);
+  if (path == ::rb_blitz::settings::ultimate_runtime::kSelectionTrialQuery) {
+    if (selection_enabled) g_selection_receipt.Begin();
+    WriteResultCell(base, ctx.r3.u32, selection_enabled ? 1u : 0u);
+    return true;
+  }
+  if (path == ::rb_blitz::settings::ultimate_runtime::kSelectionSetQuery) {
+    WriteResultCell(base, ctx.r3.u32,
+                    selection_enabled && g_selection_receipt.Witness(path) ? 1u : 0u);
+    return true;
+  }
+  if (path == ::rb_blitz::settings::ultimate_runtime::kSelectionAppliedQuery) {
+    bool dispatched = false;
+    if (selection_enabled) {
+      if (auto* boot = ::rb_blitz::settings::boot::SettingsBoot::Current();
+          boot && boot->service() && g_selection_receipt.Ready(boot->service()->revision())) {
+        boot->AcknowledgeSongSelectionRefresh(boot->service()->revision());
+        g_selection_receipt.Complete();
+        dispatched = true;
+      }
+    }
+    WriteResultCell(base, ctx.r3.u32, dispatched ? 1u : 0u);
+    return true;
+  }
+  if (path == ::rb_blitz::settings::ultimate_runtime::kSongBeginQuery) {
+    const bool enabled = ::rb_blitz::settings::ultimate_runtime::CanRunSongEntry(
+        ::rb_blitz::ultimate::Provider(),
+        ::rb_blitz::settings::ultimate_runtime::SongEntryRouteReady(),
+        g_ultimate_refresh_trial, g_enabled, g_forward_only);
+    if (enabled) g_song_entry_receipt.BeginSong();
+    WriteResultCell(base, ctx.r3.u32, enabled ? 1u : 0u);
+    return true;
+  }
+  if (::rb_blitz::settings::ultimate_runtime::CanRunSongEntry(
+          ::rb_blitz::ultimate::Provider(),
+          ::rb_blitz::settings::ultimate_runtime::SongEntryRouteReady(),
+          g_ultimate_refresh_trial, g_enabled, g_forward_only) &&
+      g_song_entry_receipt.Witness(path)) {
+    WriteResultCell(base, ctx.r3.u32, 1u);
+    return true;
+  }
+  if (path == ::rb_blitz::settings::ultimate_runtime::kSongAppliedQuery) {
+    bool dispatched = false;
+    uint64_t revision = 0;
+    if (::rb_blitz::settings::ultimate_runtime::CanRunSongEntry(
+            ::rb_blitz::ultimate::Provider(),
+            ::rb_blitz::settings::ultimate_runtime::SongEntryRouteReady(),
+            g_ultimate_refresh_trial, g_enabled, g_forward_only)) {
+      if (auto* boot = ::rb_blitz::settings::boot::SettingsBoot::Current();
+          boot && boot->service()) {
+        revision = boot->service()->revision();
+        if (g_song_entry_receipt.Ready(revision)) {
+          boot->AcknowledgeNextSongRefresh(revision);
+          g_song_entry_receipt.Complete();
+          dispatched = true;
+        }
+      }
+    }
+    WriteResultCell(base, ctx.r3.u32, dispatched ? 1u : 0u);
+    REXLOG_INFO("settings_bridge: Ultimate song-entry command completed for revision {} ({})",
+                revision,
+                dispatched ? "sent to the pending-row ledger" : "not eligible");
+    return true;
+  }
+  bool menu_answer = false;
+  if (::rb_blitz::menu_filter::AnswerRuntimeMenuQuery(path, &menu_answer)) {
+    WriteResultCell(base, ctx.r3.u32, menu_answer ? 1u : 0u);
+    return true;
+  }
   bool update_answer = false;
   if (::rb_blitz::messages::AnswerUpdateQuery(path, &update_answer)) {
     WriteResultCell(base, ctx.r3.u32, update_answer ? 1u : 0u);
@@ -773,6 +981,17 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
   if (!g_enabled || g_forward_only) {
     return false;
   }
+  if (path == "rbbz-settings/ultimate/trial-enabled") {
+    WriteResultCell(base, ctx.r3.u32,
+                    g_ultimate_refresh_trial && ::rb_blitz::ultimate::Provider().Active()
+                        ? 1u : 0u);
+    return true;
+  }
+  if (path.starts_with(::rb_blitz::settings::ultimate_runtime::kValuePrefix)) {
+    ::rb_blitz::settings::ultimate_runtime::RuntimeValue value;
+    WriteResultCell(base, ctx.r3.u32, UltimateRuntimeValue(path, &value) ? 1u : 0u);
+    return true;
+  }
   if (!IsNamespacedPath(path)) {
     return false;
   }
@@ -798,6 +1017,21 @@ bool TakeRead(PPCContext& ctx, uint8_t* base) {
   }
   if (!g_enabled || g_forward_only) return false;
   if (!IsNamespacedPath(path)) return false;
+  if (path.starts_with(::rb_blitz::settings::ultimate_runtime::kValuePrefix)) {
+    ::rb_blitz::settings::ultimate_runtime::RuntimeValue value;
+    if (!UltimateRuntimeValue(path, &value)) {
+      WriteResultCell(base, ctx.r3.u32, 0);
+      return true;
+    }
+    if (value.kind == ::rb_blitz::settings::ultimate_runtime::RuntimeValue::Kind::kSymbol) {
+      ::rb_blitz::shell_music::ReturnSongSymbol(ctx, base, value.symbol);
+    } else {
+      WriteResultCell(base, ctx.r3.u32, value.scalar,
+                      value.kind == ::rb_blitz::settings::ultimate_runtime::RuntimeValue::Kind::kFloat
+                          ? 1u : 0u);
+    }
+    return true;
+  }
   constexpr std::string_view prefix = "rbbz-settings/text/";
   const auto snapshot = ::rb_blitz::input::CurrentInput();
   std::vector<std::string> lines;
@@ -936,6 +1170,9 @@ bool TakeWrite(PPCContext& ctx, uint8_t* base) {
 void Configure() {
   g_enabled = REXCVAR_GET(settings_bridge);
   g_forward_only = REXCVAR_GET(settings_bridge_forward_only);
+  g_ultimate_refresh_trial = REXCVAR_GET(settings_ultimate_refresh_trial);
+  g_song_entry_receipt.Complete();
+  g_selection_receipt.Complete();
 
   // P7: one writer for the controller profile. The two device gates are read from the cvars here
   // - the boot applied the profile at config rank before this point, so an explicit command-line

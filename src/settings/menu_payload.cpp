@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <numeric>
+#include <set>
 #include "store/store_metadata.h"
 #include "store/store_payload.h"
 #include "ui/settings_screen.h"
@@ -73,6 +74,144 @@ Node* PanelMethod(std::vector<Node>* roots, std::string_view panel, std::string_
   }
   return nullptr;
 }
+}  // namespace
+
+bool CaptureMainMenuInventory(const std::vector<Node>& roots, Node* inventory, std::string* why) {
+  if (!inventory) { if (why) *why = "no inventory destination"; return false; }
+  std::vector<Node> copy = roots;
+  const Node* method = PanelMethod(&copy, "splash_panel", "check_trial");
+  if (!method) { if (why) *why = "splash_panel lacks check_trial"; return false; }
+  const Node* found = nullptr;
+  unsigned matches = 0;
+  const auto walk = [&](auto&& self, const Node& node) -> void {
+    if (node.tag == ui::dtb::kArray) {
+      bool start = false, exit = false;
+      for (const auto& kid : node.kids) {
+        start |= kid.tag == ui::dtb::kSymbol && kid.text == "splash_start";
+        exit |= kid.tag == ui::dtb::kSymbol && kid.text == "splash_exit";
+      }
+      if (start && exit) { found = &node; ++matches; }
+    }
+    for (const auto& kid : node.kids) self(self, kid);
+  };
+  walk(walk, *method);
+  if (matches != 1) {
+    if (why) *why = "check_trial lacks one complete splash option array";
+    return false;
+  }
+  *inventory = *found;
+  if (why) why->clear();
+  return true;
+}
+
+bool AddLoadedMainMenuRefresh(std::vector<Node>* roots, const Node& inventory,
+                               bool trial_mode, std::string* why) {
+  if (!roots || inventory.tag != ui::dtb::kArray) {
+    if (why) *why = "no canonical splash inventory";
+    return false;
+  }
+  auto staged = *roots;
+  Node* enter = PanelMethod(&staged, "splash_screen", "enter");
+  if (!enter || PanelMethod(&staged, "splash_panel", "rbbz_refresh_menu")) {
+    if (why) *why = "splash_screen entry or refresh method changed";
+    return false;
+  }
+  std::vector<std::string> rows;
+  std::set<std::string> seen;
+  for (const auto& kid : inventory.kids) {
+    if (kid.tag == ui::dtb::kSymbol) {
+      if (!seen.insert(kid.text).second) {
+        if (why) *why = "canonical splash inventory repeats a row";
+        return false;
+      }
+      rows.push_back(kid.text);
+    } else if (kid.tag != ui::dtb::kIfdef && kid.tag != ui::dtb::kEndif &&
+               kid.tag != 0x23) {
+      if (why) *why = "canonical splash inventory has an unknown node";
+      return false;
+    }
+  }
+  if (rows.empty() || rows.front() != "splash_start" || rows.back() != "splash_exit" ||
+      !seen.contains("splash_options")) {
+    if (why) *why = "canonical splash inventory lacks protected rows";
+    return false;
+  }
+  const auto sym = [](std::string_view name) { return Node::Symbol(name); };
+  const auto var = [](std::string_view name) { return Node::Var(name); };
+  const auto cmd = [](std::vector<Node> kids) { return Node::Command(std::move(kids)); };
+  const auto query = [&](std::string_view row) {
+    return cmd({sym("file_exists"), Node::String("rbbz-menu/visible/" + std::string(row))});
+  };
+  const auto absent = [&](std::string_view row) {
+    return cmd({sym("file_exists"), Node::String("rbbz-menu/hidden/" + std::string(row))});
+  };
+  // The screen's enter calls check_trial *after* the panel's enter. check_trial
+  // fills start.lst from the boot-filtered inventory, so a panel-enter refresh
+  // is overwritten on every return. Insert directly after that one retail call.
+  size_t trial_call = 0;
+  size_t trial_calls = 0;
+  for (size_t i = 1; i < enter->kids.size(); ++i) {
+    const Node& kid = enter->kids[i];
+    if (kid.tag == ui::dtb::kCommand && kid.kids.size() == 2 &&
+        kid.kids[0].tag == ui::dtb::kSymbol && kid.kids[0].text == "splash_panel" &&
+        kid.kids[1].tag == ui::dtb::kSymbol && kid.kids[1].text == "check_trial") {
+      trial_call = i;
+      ++trial_calls;
+    }
+  }
+  if (trial_calls != 1) {
+    if (why) *why = "splash_screen entry lacks one direct check_trial call";
+    return false;
+  }
+  enter->kids.insert(enter->kids.begin() + trial_call,
+      cmd({sym("set"), var("rbbz_menu_previous"), cmd({sym("start.lst"), sym("selected_sym")})}));
+  enter->kids.insert(enter->kids.begin() + trial_call + 2,
+      cmd({sym("splash_panel"), sym("rbbz_refresh_menu")}));
+  // Adding a method may relocate the screen entry, so find the panel after its edit.
+  Node* panel = nullptr;
+  for (auto& root : staged)
+    if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 &&
+        root.kids[0].text == "new" && root.kids[2].text == "splash_panel") panel = &root;
+  if (!panel) { if (why) *why = "splash_panel definition changed"; return false; }
+  // Array declarations execute inside a `do`, as in retail's check_trial and
+  // the generated settings populate_menu. A sibling array at method level can
+  // leave options_array uninitialized when remove_elem first reads it.
+  std::vector<Node> body{sym("do"),
+      Node::Array({var("options_array"), cmd({sym("array"), inventory})})};
+  // Trial mode is a process choice. It removes a different retail row, exactly
+  // as check_trial does; the host visibility snapshot governs the remaining rows.
+  const std::string trial_removed = trial_mode ? "splash_dlc" : "splash_upgrade";
+  body.push_back(cmd({sym("remove_elem"), var("options_array"), sym(trial_removed)}));
+  for (const auto& row : rows) {
+    if (row == "splash_start" || row == "splash_options" || row == "splash_exit") continue;
+    body.push_back(cmd({sym("if"), absent(row),
+                        cmd({sym("remove_elem"), var("options_array"), sym(row)})}));
+  }
+  body.push_back(cmd({sym("start.lst"), sym("set_data"), var("options_array")}));
+  body.push_back(cmd({sym("start.lst"), sym("set_selected"), Node::Int(0)}));
+  std::vector<Node> selection{sym("switch"), var("rbbz_menu_previous")};
+  for (size_t i = 0; i < rows.size(); ++i) {
+    Node rank = Node::Int(0);
+    for (size_t before = 0; before < i; ++before) {
+      if (rows[before] == trial_removed) continue;
+      Node present = rows[before] == "splash_start" || rows[before] == "splash_options"
+          ? Node::Int(1)
+          : cmd({sym("if_else"), query(rows[before]), Node::Int(1), Node::Int(0)});
+      rank = cmd({sym("+"), std::move(rank), std::move(present)});
+    }
+    selection.push_back(Node::Array({sym(rows[i]),
+        cmd({sym("start.lst"), sym("set_selected"), std::move(rank)})}));
+  }
+  body.push_back(cmd(std::move(selection)));
+  // This is deliberately after both provider replacement and focus restoration.
+  // The host treats the query as a one-way completion signal for this revision.
+  body.push_back(cmd({sym("file_exists"), Node::String("rbbz-menu/rows-applied")}));
+  panel->kids.push_back(Node::Array({sym("rbbz_refresh_menu"), cmd(std::move(body))}));
+  *roots = std::move(staged);
+  if (why) why->clear();
+  return true;
+}
+namespace {
 void FindTriggerCases(Node& node, std::string_view action, std::vector<Node*>* cases) {
   if (node.tag == ui::dtb::kArray && !node.kids.empty()) {
     const auto& first = node.kids[0];
@@ -327,6 +466,135 @@ bool ConfigureLibraryHeaderBar(std::vector<Node>* roots, LibraryHeaderOptions op
   return true;
 }
 
+namespace {
+Node HeaderPredicate(std::string_view name) {
+  return Node::Command({Node::Symbol("file_exists"),
+                        Node::String("rbbz-menu/" + std::string(name))});
+}
+Node HeaderMask() {
+  // A single expression is used for the label group and both trigger routes.
+  // Bits are Store, Messages, Recommendations, in that order.
+  const auto choice = [](Node predicate, Node yes, Node no) {
+    return Node::Command({Node::Symbol("if_else"), std::move(predicate),
+                          std::move(yes), std::move(no)});
+  };
+  const auto rec = [&choice](int base) {
+    return choice(HeaderPredicate("recommendations"), Node::Int(base | 4), Node::Int(base));
+  };
+  return choice(HeaderPredicate("rhythmverse"),
+      choice(HeaderPredicate("messages"), rec(3), rec(1)),
+      choice(HeaderPredicate("messages"), rec(2), rec(0)));
+}
+Node SetHeaderLabel(std::string_view name, bool showing) {
+  return Node::Command({Node::Symbol(name), Node::Symbol("set_showing"),
+                        Node::Symbol(showing ? "TRUE" : "FALSE")});
+}
+void HeaderPositionCommands(int mask, std::vector<Node>* body) {
+  constexpr std::array<const char*, 5> transforms = {"main_home.trans", "main_mySongs.trans",
+      "main_store.trans", "main_inbox.trans", "main_newMessage.trans"};
+  constexpr std::array<int, 4> slots = {-345, -43, 91, 226};
+  const std::array<bool, 4> visible = {bool(mask & 4), true, bool(mask & 1), bool(mask & 2)};
+  for (int frame = 0; frame <= 4; ++frame) {
+    int slot = 0;
+    for (int offset = 0; offset < 4; ++offset) {
+      const int header = (frame + offset) % 4;
+      if (!visible[header]) continue;
+      const int x = header == 0 && slot == 3 ? 235 : slots[slot];
+      const auto set_x = [&](int transform) {
+        body->push_back(Node::Command({
+            Node::Command({Node::Var("this"), Node::Symbol("find"), Node::Symbol("TextShift.anim")}),
+            Node::Symbol("set_key_val"),
+            Node::Command({Node::Var("this"), Node::Symbol("find"), Node::Symbol(transforms[transform])}),
+            Node::Array({Node::Symbol("local_xfm"), Node::Symbol("x")}),
+            Node::Int(frame * 10), Node::Int(static_cast<uint32_t>(x))}));
+      };
+      set_x(header);
+      if (header == 3) set_x(4);
+      ++slot;
+    }
+  }
+}
+}  // namespace
+
+bool ConfigureLibraryHeaderRuntimeBar(std::vector<Node>* roots, std::string* why) {
+  if (!roots) { if (why) *why = "no runtime background record"; return false; }
+  // Use the complete retail group as the base. Its static path adds no hides or
+  // compacted keys, so a later On transition has every original label to restore.
+  auto staged = *roots;
+  if (!ConfigureLibraryHeaderBar(&staged, {true, true, true}, why)) return false;
+  auto* mode = PanelMethod(&staged, "background_panel", "set_offline_mode_headers");
+  auto* inbox = PanelMethod(&staged, "background_panel", "update_inbox_header");
+  auto* enter = PanelMethod(&staged, "background_panel", "enter");
+  if (!mode || !inbox || !enter || inbox->kids.size() < 3 ||
+      inbox->kids[1].tag != ui::dtb::kArray || inbox->kids[1].kids.size() != 1 ||
+      inbox->kids[1].kids[0].tag != ui::dtb::kVar) {
+    if (why) *why = "runtime background panel callbacks changed";
+    return false;
+  }
+  Node* flow = nullptr;
+  for (auto& command : mode->kids)
+    if (command.tag == ui::dtb::kCommand && command.kids.size() == 4 &&
+        command.kids[0].text == "if_else") flow = &command;
+  if (!flow) { if (why) *why = "runtime background Flow changed"; return false; }
+  flow->kids[1] = Node::Command({Node::Symbol("=="), HeaderMask(), Node::Int(0)});
+  // A mask can change while the background panel stays loaded. Re-run the
+  // authored Flow choice only at the refresh boundary; a label-only poll would
+  // leave LT/RT and offline styling in their previous state.
+  const Node refresh_flow = *flow;
+  // The badge's retail callback remains authoritative for the new-message count.
+  // Remember its most recent count so an Off -> On change can invoke the same
+  // callback and restore the badge only when retail would have drawn it.
+  inbox->kids.insert(inbox->kids.begin() + 2,
+      Node::Command({Node::Symbol("set"), Node::Var("rbbz_header_new_msgs"),
+                     inbox->kids[1].kids[0]}));
+  inbox->kids.push_back(Node::Command({Node::Symbol("if"),
+      Node::Command({Node::Symbol("=="), HeaderPredicate("messages"), Node::Int(0)}),
+      SetHeaderLabel("main_new_msg.lbl", false)}));
+  auto* panel = static_cast<Node*>(nullptr);
+  for (auto& root : staged)
+    if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 &&
+        root.kids[0].text == "new" && root.kids[2].text == "background_panel") panel = &root;
+  if (!panel) { if (why) *why = "runtime background definition changed"; return false; }
+  std::vector<Node> refresh{Node::Symbol("rbbz_refresh_headers"),
+      Node::Command({Node::Symbol("set"), Node::Var("rbbz_header_mask"), HeaderMask()}),
+      refresh_flow};
+  for (int mask = 0; mask < 8; ++mask) {
+    std::vector<Node> body{Node::Symbol("do"),
+        SetHeaderLabel("main_store.lbl", mask & 1),
+        SetHeaderLabel("main_inbox.lbl", mask & 2),
+        SetHeaderLabel("main_Home.lbl", mask & 4)};
+    if (!(mask & 2)) body.push_back(SetHeaderLabel("main_new_msg.lbl", false));
+    HeaderPositionCommands(mask, &body);
+    refresh.push_back(Node::Command({Node::Symbol("if"),
+        Node::Command({Node::Symbol("=="), Node::Var("rbbz_header_mask"), Node::Int(mask)}),
+        Node::Command(std::move(body))}));
+  }
+  refresh.push_back(Node::Command({Node::Var("this"),
+      Node::Symbol("update_inbox_header"), Node::Var("rbbz_header_new_msgs")}));
+  refresh.push_back(Node::Command({Node::Symbol("file_exists"),
+      Node::String("rbbz-menu/headers-applied")}));
+  panel->kids.push_back(Node::Array(std::move(refresh)));
+  // Appending the method relocates the panel children; reacquire before editing.
+  enter = PanelMethod(&staged, "background_panel", "enter");
+  if (!enter) { if (why) *why = "runtime background entry relocated"; return false; }
+  const auto call = [] { return Node::Command({Node::Var("this"), Node::Symbol("rbbz_refresh_headers")}); };
+  enter->kids.push_back(call());
+  auto* poll = PanelMethod(&staged, "background_panel", "poll");
+  Node changed = Node::Command({Node::Symbol("!="), HeaderMask(), Node::Var("rbbz_header_mask")});
+  Node update = Node::Command({Node::Symbol("if"), std::move(changed), call()});
+  if (poll) poll->kids.push_back(std::move(update));
+  else {
+    for (auto& root : staged)
+      if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 &&
+          root.kids[0].text == "new" && root.kids[2].text == "background_panel") {
+        root.kids.push_back(Node::Array({Node::Symbol("poll"), std::move(update)}));
+        break;
+      }
+  }
+  *roots = std::move(staged);
+  return true;
+}
+
 bool RouteLibraryHeaderNavigation(std::vector<Node>* roots, LibraryHeader current,
                                    LibraryHeaderOptions options, std::string* why) {
   if (!roots) { if (why) *why = "no navigation record"; return false; }
@@ -408,6 +676,51 @@ bool RouteLibraryHeaderNavigation(std::vector<Node>* roots, LibraryHeader curren
           }
         }
       }
+    }
+  }
+  *roots = std::move(staged);
+  return true;
+}
+
+bool RouteLibraryHeaderRuntimeNavigation(std::vector<Node>* roots,
+                                          LibraryHeader current, std::string* why) {
+  if (!roots) { if (why) *why = "no runtime navigation record"; return false; }
+  std::array<std::vector<Node>, 8> variants;
+  for (int mask = 0; mask < 8; ++mask) {
+    variants[mask] = *roots;
+    if (!RouteLibraryHeaderNavigation(&variants[mask], current,
+                                      {bool(mask & 1), bool(mask & 2), bool(mask & 4)}, why))
+      return false;
+  }
+  auto staged = variants[7];  // includes all direct mouse destinations
+  const std::array<std::vector<const char*>, 4> panels = {{
+      {"song_select_panel"}, {"store_menu_panel", "store_browser_panel"},
+      {"inbox_panel"}, {"recommendation_panel"}}};
+  for (const char* panel : panels[static_cast<int>(current)]) {
+    for (const char* action : {"kAction_PageDown", "kAction_PageUp"}) {
+      std::vector<Node*> target;
+      auto* buttons = PanelMethod(&staged, panel, "BUTTON_DOWN_MSG");
+      if (buttons) FindTriggerCases(*buttons, action, &target);
+      if (target.size() != 1) {
+        if (why) *why = std::string(panel) + " lacks its runtime trigger";
+        return false;
+      }
+      std::vector<Node> branches{Node::Symbol("cond")};
+      for (int mask = 0; mask < 8; ++mask) {
+        auto* variant_buttons = PanelMethod(&variants[mask], panel, "BUTTON_DOWN_MSG");
+        std::vector<Node*> cases;
+        if (variant_buttons) FindTriggerCases(*variant_buttons, action, &cases);
+        if (cases.size() != 1 || cases[0]->kids.size() < 2) {
+          if (why) *why = std::string(panel) + " lacks one runtime mask route";
+          return false;
+        }
+        std::vector<Node> body{Node::Symbol("do")};
+        body.insert(body.end(), cases[0]->kids.begin() + 1, cases[0]->kids.end());
+        branches.push_back(Node::Array({
+            Node::Command({Node::Symbol("=="), HeaderMask(), Node::Int(mask)}),
+            Node::Command(std::move(body))}));
+      }
+      target[0]->kids = {target[0]->kids[0], Node::Command(std::move(branches))};
     }
   }
   *roots = std::move(staged);
@@ -933,9 +1246,12 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       bool refresh_row_active,
                       std::vector<std::string>* notes,
                       const std::vector<std::string>& hidden_menu_rows,
-                      bool skip_startup_logos) {
+                      bool skip_startup_logos,
+                      MenuRefreshRoutes* refresh_routes) {
   namespace screen = ui::screen;
   MenuRecords built;
+  MenuRefreshRoutes installed_routes;
+  if (refresh_routes) *refresh_routes = {};
   auto note = [notes](std::string line) {
     if (notes != nullptr) notes->push_back(std::move(line));
   };
@@ -1010,19 +1326,23 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         // The restored Download Content row (owner request, 2026-10-20) must be cloned *before*
         // that call: it copies the shipped `splash_dlc` action verbatim, which R7 is about to
         // replace with the refresh body.
-        if (screen::CurrentMenuConfiguration().download_content_row) {
+        if (screen::CurrentMenuConfiguration().download_content_row ||
+            screen::CurrentMenuConfiguration().menu_refresh_trial) {
           std::string why;
           if (!screen::AddDownloadContentRow(&roots, &why)) {
             note("the Download Content row was refused: " + why);
           }
         }
-        SetRefreshRowAction(&roots, refresh_row_active);
+        SetRefreshRowAction(&roots, refresh_row_active ||
+                                     screen::CurrentMenuConfiguration().menu_refresh_trial);
         // The Play Current Song entry (owner feature, 2026-10-14), when the boot configured it:
         // the row right after PLAY, and the case that starts the song the menu is playing. A boot
         // with no pool refuses, and that refusal is *not* fatal - a menu without the row is exactly
         // what "no DLC song is playing" means. (No log here: this file is also compiled into the
         // SDK-free menu_payload test; settings_payload.cpp reports the configuration it passed in.)
-        if (screen::CurrentMenuConfiguration().play_current_song) {
+        if (screen::CurrentMenuConfiguration().play_current_song ||
+            (screen::CurrentMenuConfiguration().menu_refresh_trial &&
+             !screen::CurrentMenuConfiguration().menu_music_songs.empty())) {
           std::string why;
           if (!screen::AddPlayCurrentSongRow(&roots, &why)) {
             note("the Play Current Song row was refused: " + why);
@@ -1037,13 +1357,34 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             note("the RhythmVerse row was refused: " + why);
           }
         }
+        // Save the complete ordered list before the boot hide edit removes rows.
+        // The loaded-panel refresh must start from this inventory on every entry;
+        // reusing a filtered list could never restore a row switched back on.
+        if (screen::CurrentMenuConfiguration().menu_refresh_trial) {
+          std::string why;
+          if (!screen::OrderMainMenuRows(&roots, &why))
+            note("ordering the complete main-menu inventory was refused: " + why);
+        }
+        Node canonical;
+        std::string inventory_why;
+        const bool have_canonical = screen::CurrentMenuConfiguration().menu_refresh_trial &&
+            CaptureMainMenuInventory(roots, &canonical, &inventory_why);
+        if (screen::CurrentMenuConfiguration().menu_refresh_trial && !have_canonical)
+          note("the loaded main-menu inventory was refused: " + inventory_why);
         // The R5 hide decision, baked into the record this payload generates. The in-flight twin
         // (menu_filter::HideRows) cannot deliver it for this file when it spans two ark reads
         // (measured 2026-10-20), and the rows it was meant to hide are what pushed the store entry
         // off the visible page. Applied last, so the anchors above still find the shipped rows.
-        if (!hidden_menu_rows.empty()) {
+        std::vector<std::string> boot_hidden = hidden_menu_rows;
+        if (screen::CurrentMenuConfiguration().menu_refresh_trial) {
+          if (!screen::CurrentMenuConfiguration().download_content_row)
+            boot_hidden.push_back(screen::kDownloadContentRow);
+          if (!screen::CurrentMenuConfiguration().play_current_song)
+            boot_hidden.push_back(screen::kPlayCurrentRow);
+        }
+        if (!boot_hidden.empty()) {
           std::string why;
-          if (!screen::HideMenuRows(&roots, hidden_menu_rows, &why)) {
+          if (!screen::HideMenuRows(&roots, boot_hidden, &why)) {
             note("hiding the main-menu rows was refused: " + why);
           }
         }
@@ -1055,6 +1396,14 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           if (!screen::OrderMainMenuRows(&roots, &why)) {
             note("ordering the main-menu rows was refused: " + why);
           }
+        }
+        if (have_canonical) {
+          std::string why;
+          if (AddLoadedMainMenuRefresh(&roots, canonical,
+                                       screen::CurrentMenuConfiguration().trial_mode, &why))
+            installed_routes.rows = true;
+          else
+            note("the loaded main-menu refresh was refused: " + why);
         }
         return screen::RerouteRow(&roots, screen::kMainMenuRow, screen::MainMenuRouteBody(), error);
       }) || !edit("ui/pause/gen/pause.dtb", [&](auto& roots) {
@@ -1240,7 +1589,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           return false;
         }
       }
-      SetRefreshRowLabel(&roots, refresh_row_active);
+      SetRefreshRowLabel(&roots, refresh_row_active ||
+                                  screen::CurrentMenuConfiguration().menu_refresh_trial);
       // Retail's own strings this surface restyles (the AV page's two checkboxes). A locale that
       // does not carry them, or carries a translation, is left alone by the same call.
       for (const auto& entry : screen::LocaleOverrides()) {
@@ -1400,7 +1750,9 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   const LibraryHeaderOptions headers{menu_config.rhythmverse_row, menu_config.show_messages,
                                      menu_config.show_recommendations};
   if (!edit("ui/background/gen/background.dtb", [&](auto& roots) {
-        return ConfigureLibraryHeaderBar(&roots, headers, error);
+        return menu_config.menu_refresh_trial
+            ? ConfigureLibraryHeaderRuntimeBar(&roots, error)
+            : ConfigureLibraryHeaderBar(&roots, headers, error);
       })) return false;
   if (!edit("ui/gen/transition_screens.dtb", [&](auto& roots) {
         return ConfigureLibraryHeaderAnimations(&roots, error);
@@ -1411,10 +1763,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       {"ui/inbox/gen/inbox.dtb", LibraryHeader::kMessages},
       {"ui/recommendations/gen/recommendations.dtb", LibraryHeader::kRecommendations}}}) {
     if (!edit(path, [&](auto& roots) {
-          if (!RouteLibraryHeaderNavigation(&roots, tab, headers, error)) return false;
+          if (!(menu_config.menu_refresh_trial
+              ? RouteLibraryHeaderRuntimeNavigation(&roots, tab, error)
+              : RouteLibraryHeaderNavigation(&roots, tab, headers, error))) return false;
           return tab != LibraryHeader::kMessages || ConfigureMessagesUpdateInbox(&roots, error);
         })) return false;
   }
+  installed_routes.headers = menu_config.menu_refresh_trial;
   // P3's data lane (RhythmVerse plan §5/P3). With the store's master switch on, the retail store's
   // own DTA records are edited so the retail screens can show our catalogue:
   //
@@ -1640,7 +1995,14 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           }
           built[ui::input_font::kSplashRecord] = std::move(splash);
           std::vector<uint8_t> song_select_source, song_select;
-          if (!read(ui::input_font::kSongSelectRecord, &song_select_source, &why) ||
+          if (const auto existing = built.find(ui::input_font::kSongSelectRecord);
+              existing != built.end()) {
+            song_select_source = existing->second;
+          } else if (!read(ui::input_font::kSongSelectRecord, &song_select_source, &why)) {
+            if (error) *error = "song sort icon font source was refused: " + why;
+            return false;
+          }
+          if (
               !ui::input_font::PrepareSongSelect(song_select_source, &song_select, &why)) {
             if (error) *error = "song sort icon font preparation was refused: " + why;
             return false;
@@ -1696,6 +2058,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     }
   }
   *records = std::move(built);
+  if (refresh_routes) *refresh_routes = installed_routes;
   return true;
 }
 

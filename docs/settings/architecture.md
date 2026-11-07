@@ -1349,6 +1349,14 @@ items are left to the coordinator / a later UI pass, named in §6 rather than im
 
 ### 1. What this package is, and what it is not
 
+**Current application contract (2026-11-07):** the historical P9 description below predates
+the [active hot-apply plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md).
+`ApplicationLedger` now tracks saved, running and pending values with now, menu-return,
+next-song and process-restart boundaries. The bridge applies only durably saved rows, including
+the native portion of a partial provider save; guest row/selection receipts and controller GPU
+tickets acknowledge deferred consumers. Display preview uses a recovery marker and authored
+Keep/Revert page. These routes remain strategy-gated until the plan's runtime acceptance passes.
+
 §5.5 replaced "v1 is restart-only" with a per-row decision: a row is `hot` when its value can be applied to
 the **running** process **with a measured live effect**, `restart` otherwise. §8 then defines what happens
 for the rest: save first, spawn exactly one child that waits for this process to die, and only then close.

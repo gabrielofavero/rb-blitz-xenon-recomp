@@ -143,6 +143,65 @@ void TestTextFormEditsTheRealStore() {
   CHECK_TRUE(again.EffectiveSource(SettingId::kHideOfflinePrompts) == Source::kSettingsFile);
 }
 
+void TestRestoreDefaultsConfirmationAction() {
+  BeginCase("restore defaults stages a durable batch and requires a restart");
+  Harness h;
+  CHECK_TRUE(h.Send("rbbz-settings/set/general.startup/t:fast").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/set/graphics.vsync/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kStartup).text == "fast");
+  CHECK_FALSE(h.service.RequestedValue(SettingId::kVsync).boolean);
+  Value hidden;
+  hidden.kind = ValueKind::kList;
+  hidden.list = {"splash_leaderboard"};
+  const uint64_t edit = h.service.BeginEdit(h.service.revision());
+  CHECK_TRUE(h.service.Set(edit, SettingId::kHiddenMainMenu, hidden,
+                           h.service.capability_revision()).ok);
+  CHECK_TRUE(h.service.Commit(edit).status == CommitStatus::kSaved);
+
+  // Opening and cancelling the guest confirmation never sends this action.
+  const auto before = ReadText(h.paths.settings_file);
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kStartup).text == "fast");
+  CHECK_TRUE(ReadText(h.paths.settings_file) == before);
+
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/settings.restore_defaults/-").status == Status::kOk);
+  CHECK_TRUE(ReadText(h.paths.settings_file) == before);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.sink.last_commit_restored_defaults());
+  CHECK_TRUE(h.sink.last_commit_requires_restart());
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kStartup).text == "normal");
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kVsync).boolean);
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kHiddenMainMenu).kind == ValueKind::kNone);
+  CHECK_TRUE(ReadText(h.paths.settings_file).find("hidden_main_menu") == std::string::npos);
+  Service reloaded(h.paths);
+  reloaded.Boot(nullptr, PathEntry{}, nullptr);
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kStartup).text == "normal");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kVsync).boolean);
+}
+
+void TestRestoreDefaultsRetryAfterConflict() {
+  BeginCase("a conflicted default restore can be confirmed again and retried");
+  Harness h;
+  CHECK_TRUE(h.Send("rbbz-settings/set/general.startup/t:fast").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/set/graphics.vsync/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/settings.restore_defaults/-").status == Status::kOk);
+  std::string external = ReadText(h.paths.settings_file);
+  const size_t fast = external.find("fast");
+  CHECK_TRUE(fast != std::string::npos);
+  if (fast == std::string::npos) return;
+  external.replace(fast, 4, "normal");
+  {
+    std::ofstream stream(h.paths.settings_file, std::ios::binary | std::ios::trunc);
+    stream << external;
+  }
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kConflict);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/settings.restore_defaults/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kStartup).text == "normal");
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kVsync).boolean);
+}
+
 void TestFramedFormCarriesTheRequestId() {
   BeginCase("the framed form carries a request id, and only a durable write is acknowledged");
   Harness h;
@@ -234,6 +293,53 @@ void TestProviderRowsStayOutOfTheSettingsFile() {
   CHECK_TRUE(h.Holds("general.unlock_all", WireValue::Bool(true)));
   const std::string after = ReadText(h.paths.settings_file);
   CHECK_TRUE(after.find("unlock_all") == std::string::npos);
+}
+
+void TestSavedProviderValueIgnoresStagedEdits() {
+  BeginCase("runtime provider reads use the saved value through staging and save failure");
+  Harness h;
+  h.sink.SeedLocal("interface.hide_hud", WireValue::Bool(false));
+  WireValue saved;
+  CHECK_TRUE(h.sink.GetSavedLocal("interface.hide_hud", &saved));
+  CHECK_FALSE(saved.boolean);
+  CHECK_TRUE(h.Send("rbbz-settings/set/interface.hide_hud/b:1").status == Status::kOk);
+  CHECK_TRUE(h.sink.Get("interface.hide_hud", &saved));
+  CHECK_TRUE(saved.boolean);  // the menu previews the staged value
+  CHECK_TRUE(h.sink.GetSavedLocal("interface.hide_hud", &saved));
+  CHECK_FALSE(saved.boolean); // guest runtime commands still see the saved value
+  h.sink.SetProviderSaver([](const auto&, std::string* error) {
+    *error = "provider file refused the write";
+    return false;
+  });
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kIoError);
+  CHECK_TRUE(h.sink.GetSavedLocal("interface.hide_hud", &saved));
+  CHECK_FALSE(saved.boolean);
+  h.sink.SetProviderSaver([](const auto&, std::string*) { return true; });
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.sink.GetSavedLocal("interface.hide_hud", &saved));
+  CHECK_TRUE(saved.boolean);
+  CHECK_FALSE(h.sink.GetSavedLocal("interface.not_a_provider_row", &saved));
+}
+
+void TestDurableNativeRowSurvivesPartialProviderFailure() {
+  BeginCase("a partial provider failure still exposes the durable native row for live apply");
+  Harness h;
+  h.sink.SetProviderSaver([](const auto&, std::string* error) {
+    *error = "provider file refused the write";
+    return false;
+  });
+  const bool before = h.service.EffectiveValue(SettingId::kVsync).boolean;
+  CHECK_TRUE(h.Send(std::string("rbbz-settings/set/graphics.vsync/b:") +
+                    (before ? "0" : "1")).status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/set/gameplay.forceplot/t:plot_bodega_a").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kIoError);
+  CHECK_TRUE(h.sink.last_commit_durable());
+  CHECK_TRUE(h.sink.last_commit_failure() == ServiceSink::CommitFailure::kProvider);
+  CHECK_TRUE(h.sink.last_commit_changes() == std::vector<std::string>{"graphics.vsync"});
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kVsync).boolean == !before);
+  h.sink.SetProviderSaver([](const auto&, std::string*) { return true; });
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.sink.last_commit_changes() == std::vector<std::string>{"gameplay.forceplot"});
 }
 
 void TestProviderGateAndUnknownTokens() {
@@ -681,7 +787,80 @@ void TestLinkedSaveFailureRetry() {
   CHECK_FALSE(h.service.EffectiveValue(SettingId::kMusicPlayer).boolean);
 }
 
+void TestApplicationQueries() {
+  BeginCase("bridge: runtime phase and boundary are queryable separately from edits");
+  Harness h;
+  ApplicationRecord record;
+  record.saved.kind = record.running.kind = ValueKind::kBool;
+  record.saved.boolean = false;
+  record.running.boolean = true;
+  record.boundary = ApplyBoundary::kNow;
+  record.phase = ApplyPhase::kFailed;
+  h.service.SetApplicationRecord(SettingId::kVsync, record);
+  CHECK_TRUE(h.Holds("application.pending.graphics.vsync", WireValue::Bool(true)));
+  CHECK_TRUE(h.Holds("application.phase.graphics.vsync", WireValue::Text("failed")));
+  CHECK_TRUE(h.Holds("application.boundary.graphics.vsync", WireValue::Text("now")));
+  WireValue value;
+  CHECK_TRUE(h.sink.Get("application.phase.graphics.vsync", &value));
+  CHECK_TRUE(value.kind == bridge::ValueKind::kText && value.text == "failed");
+}
+
+void TestDisplayPreviewPersistsOnlyOnKeep() {
+  BeginCase("display preview is unsaved until Keep, and stale saves revert");
+  Harness h;
+  bool active = false;
+  bool presented = false;
+  int acknowledgments = 0;
+  ServiceSink::DisplayPreviewHooks hooks;
+  hooks.begin = [&](std::string_view, std::string*) {
+    active = true;
+    return true;
+  };
+  hooks.keep = [&](const auto& persist, std::string* error) {
+    if (!presented) {
+      *error = "no new presentation";
+      return false;
+    }
+    const bool saved = persist(error);
+    if (saved) active = false;
+    return saved;
+  };
+  hooks.revert = [&](std::string*) { active = false; return true; };
+  hooks.active = [&] { return active; };
+  hooks.applied = [&](const Value&, uint64_t) { ++acknowledgments; };
+  h.sink.SetDisplayPreviewHooks(std::move(hooks));
+  const std::string old = h.service.EffectiveValue(SettingId::kDisplay).text;
+  const std::string requested = old == "windowed" ? "borderless" : "windowed";
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/display.preview." + requested + "/-").status ==
+             Status::kOk);
+  CHECK_TRUE(h.Holds("display.preview_active", WireValue::Bool(true)));
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kDisplay).text == old);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/display.keep/-").status == Status::kIoError);
+  CHECK_TRUE(!h.Holds("display.keep_ok", WireValue::Bool(true)) && active);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kDisplay).text == old);
+  presented = true;
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/display.keep/-").status == Status::kOk);
+  CHECK_TRUE(!active && h.Holds("display.keep_ok", WireValue::Bool(true)));
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kDisplay).text == requested);
+  CHECK_TRUE(acknowledgments == 1);
+  CHECK_TRUE(ReadText(h.paths.settings_file).find("display") != std::string::npos);
+
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/display.preview." + old + "/-").status == Status::kOk);
+  const uint64_t txn = h.service.BeginEdit(h.service.revision());
+  Value changed;
+  changed.kind = ValueKind::kBool;
+  changed.boolean = !h.service.EffectiveValue(SettingId::kVsync).boolean;
+  CHECK_TRUE(h.service.Set(txn, SettingId::kVsync, changed,
+                           h.service.capability_revision()).ok);
+  CHECK_TRUE(h.service.Commit(txn).status == CommitStatus::kSaved);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/display.keep/-").status == Status::kStaleRequest);
+  CHECK_TRUE(!active && acknowledgments == 1);
+  CHECK_TRUE(h.service.EffectiveValue(SettingId::kDisplay).text == requested);
+}
+
 int main() {
+  TestRestoreDefaultsConfirmationAction();
+  TestRestoreDefaultsRetryAfterConflict();
   TestLinkedMusicConfirmCancelAndReenable();
   TestLinkedStore();
   TestLinkedFailuresSaveNothing();
@@ -693,6 +872,8 @@ int main() {
   TestFramedFormCarriesTheRequestId();
   TestNoOpCommitReportsNothing();
   TestProviderRowsStayOutOfTheSettingsFile();
+  TestSavedProviderValueIgnoresStagedEdits();
+  TestDurableNativeRowSurvivesPartialProviderFailure();
   TestProviderGateAndUnknownTokens();
   TestCancelAndRestart();
   TestRestartPendingFollowsTheQuery();
@@ -700,5 +881,7 @@ int main() {
   TestCommitFailureReasons();
   TestWireModelConversions();
   TestRendererSelectionSurvivesCommitAndReload();
+  TestApplicationQueries();
+  TestDisplayPreviewPersistsOnlyOnKeep();
   return Finish();
 }

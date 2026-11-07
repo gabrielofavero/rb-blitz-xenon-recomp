@@ -1,0 +1,29 @@
+diff --git a/include/rex/ui/presenter.h b/include/rex/ui/presenter.h
+--- a/include/rex/ui/presenter.h
++++ b/include/rex/ui/presenter.h
+@@ -352,5 +352,10 @@ class Presenter {
+   uint64_t successful_present_sequence() const {
+     return successful_present_sequence_.load(std::memory_order_acquire);
+   }
++  // UI paint is serialized with Window::SetDisplayMode on the UI thread.
++  // A frame submitted by the guest output thread before the switch cannot advance this counter.
++  uint64_t successful_ui_present_sequence() const {
++    return successful_ui_present_sequence_.load(std::memory_order_acquire);
++  }
+ 
+   // Pass 0 as width or height to disable guest output until the next refresh
+@@ -942,3 +947,4 @@ class Presenter {
+   std::atomic<uint64_t> successful_present_sequence_{0};
++  std::atomic<uint64_t> successful_ui_present_sequence_{0};
+ 
+   std::mutex guest_output_paint_config_mutex_;
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -492,2 +492,6 @@ void Presenter::PaintFromUIThread(bool force_paint) {
+       paint_result = PaintAndPresent(draw_ui);
++      if (paint_result == PaintResult::kPresented ||
++          paint_result == PaintResult::kPresentedSuboptimal) {
++        successful_ui_present_sequence_.fetch_add(1, std::memory_order_release);
++      }
+       if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated) {

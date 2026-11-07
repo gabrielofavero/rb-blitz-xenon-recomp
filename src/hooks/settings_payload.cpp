@@ -20,10 +20,12 @@
 #include "settings/menu_payload.h"
 #include "settings/store.h"
 #include "settings/schema.h"
+#include "settings/ultimate_runtime.h"
 #include "store/store_probe.h"
 #include "ui/settings_screen.h"
 #include "platform/game_restart.h"
 #include "ui/menu_options.h"
+
 
 namespace rb_blitz::settings {
 namespace {
@@ -101,6 +103,8 @@ std::string ResolutionChoiceLabel(const DisplayMode& size) {
 }
 
 bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
+  ultimate_runtime::SetSongEntryRouteReady(false);
+  ultimate_runtime::SetSelectionRouteReady(false);
   const auto started = std::chrono::steady_clock::now();
   auto* vfs = runtime->file_system();
   ArkIndex main, patch;
@@ -344,6 +348,10 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
                   configuration.store_local_server_root);
     }
     configuration.menu_music_songs = menu_music_songs;
+    // Every boot carries the complete main-menu inventory and the runtime header
+    // routes. Settings commits publish visibility; the guest applies that snapshot
+    // at its existing menu-entry boundary.
+    configuration.menu_refresh_trial = true;
     configuration.download_content_row = download_content_row;
     // Shortcut settings have a fixed inventory; these boot values control the actual menu rows.
     configuration.refresh_row_on = refresh_row_on;
@@ -351,17 +359,54 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
     for (const auto& row : schema::MenuRows()) {
       configuration.menu_rows.emplace_back(row.token, row.label);
     }
+    menu_filter::RuntimeVisibility visibility;
+    visibility.revision = boot->service()->revision();
+    visibility.hidden_rows = menu_filter::HiddenRows();
+    visibility.refresh_songs = refresh_row_on;
+    visibility.play_current_song = play_current_row;
+    visibility.download_content = download_content_row;
+    visibility.rhythmverse = rhythmverse_setting;
+    visibility.messages = configuration.show_messages;
+    visibility.recommendations = configuration.show_recommendations;
+    menu_filter::PublishRuntimeVisibility(std::move(visibility));
     ui::screen::ConfigureMenu(std::move(configuration));
   }
   MenuRecords records;
+  MenuRefreshRoutes refresh_routes;
   std::vector<std::string> build_notes;
   const bool skip_startup_logos = settings_restart_boot ||
       rex::cvar::GetFlagByName("startup_mode") == "fast" ||
       rex::cvar::GetFlagByName("song_load_recovered") == "true";
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), refresh_row_on, &build_notes, menu_filter::HiddenRows(),
-                        skip_startup_logos))
+                        skip_startup_logos, &refresh_routes))
     return fail();
+  bool song_entry_patched = false;
+  bool song_selection_patched = false;
+  if (ultimate::Provider().Active()) {
+    constexpr char kSongEntry[] = "ulti/gen/ulti_game_enter.dtb";
+    Bytes original;
+    std::string reason;
+    if (read(kSongEntry, &original, &reason)) {
+      Bytes patched;
+      if (ultimate_runtime::PatchSongEntryRecord(original, &patched, &reason)) {
+        records[kSongEntry] = std::move(patched);
+        song_entry_patched = true;
+      }
+    }
+    if (!song_entry_patched)
+      REXLOG_WARN("settings_menu: Ultimate song-entry refresh unavailable: {}", reason);
+    constexpr char kSongSelection[] = "ui/song_select/gen/song_select.dtb";
+    if (const auto found = records.find(kSongSelection); found != records.end()) {
+      Bytes patched;
+      if (ultimate_runtime::PatchSongSelectionRecord(found->second, &patched, &reason)) {
+        found->second = std::move(patched);
+        song_selection_patched = true;
+      }
+    }
+    if (!song_selection_patched)
+      REXLOG_WARN("settings_menu: Ultimate Personal Best selection refresh unavailable: {}", reason);
+  }
   if (skip_startup_logos) REXLOG_INFO("startup: native logo playlist skipped for this boot");
   // What the boot asked for and the authoring side refused. Not fatal - the menu it produced is
   // still a menu - but each line is a difference between the configuration and what the guest
@@ -420,6 +465,15 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot) {
     if (!vfs->RegisterSymbolicLink(alias, mount)) { error = "cannot route UI archive"; return fail(); }
   }
   ultimate::EnableSettingsArchive(runtime);
+  ultimate_runtime::SetSongEntryRouteReady(song_entry_patched);
+  ultimate_runtime::SetSelectionRouteReady(song_selection_patched);
+  if (song_entry_patched)
+    REXLOG_INFO("settings_menu: Ultimate song-entry refresh installed in the mounted archive");
+  menu_filter::SetRuntimeMenuRefreshReady(refresh_routes.ready());
+  if (!refresh_routes.ready())
+    REXLOG_WARN("settings_menu: menu-return refresh unavailable (rows={}, headers={}); "
+                "affected settings retain their restart requirement",
+                refresh_routes.rows, refresh_routes.headers);
   for (const auto& [path, replacement] : records) {
     const auto original = originals.find(path);
     if (original == originals.end()) continue;

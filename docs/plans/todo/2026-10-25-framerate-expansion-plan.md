@@ -222,7 +222,7 @@ Explain the effective rate when V-Sync/guest refresh constrains a requested cap.
 Persist the player's request, log the effective cap/guest Hz/presentation policy,
 and require restart under D6. Test command-line overrides, invalid/old values and
 save/cancel. Coordinate with the
-[hot-apply plan](2026-10-24-settings-hot-apply-plan.md) without promising a hot
+[hot-apply plan](../in-progress/2026-10-24-settings-hot-apply-plan.md) without promising a hot
 refresh update it has not implemented. Route discovery acceleration through D9.
 
 **Gate:** settings tests cover policy combinations, migration, persistence,

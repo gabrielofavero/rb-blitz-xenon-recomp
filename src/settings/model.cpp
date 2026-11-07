@@ -234,6 +234,27 @@ std::string_view ApplicationStrategyToken(ApplicationStrategy strategy) {
   return "restart";
 }
 
+std::string_view ApplyBoundaryToken(ApplyBoundary boundary) {
+  switch (boundary) {
+    case ApplyBoundary::kNow: return "now";
+    case ApplyBoundary::kMenuReturn: return "menu_return";
+    case ApplyBoundary::kNextSong: return "next_song";
+    case ApplyBoundary::kProcessRestart: return "process_restart";
+  }
+  return "process_restart";
+}
+
+std::string_view ApplyPhaseToken(ApplyPhase phase) {
+  switch (phase) {
+    case ApplyPhase::kApplied: return "applied";
+    case ApplyPhase::kQueued: return "queued";
+    case ApplyPhase::kDeferred: return "deferred";
+    case ApplyPhase::kRefused: return "refused";
+    case ApplyPhase::kFailed: return "failed";
+  }
+  return "failed";
+}
+
 std::string_view SourceToken(Source source) {
   switch (source) {
     case Source::kCompiledDefault:

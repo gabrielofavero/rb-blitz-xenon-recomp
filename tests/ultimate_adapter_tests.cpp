@@ -27,6 +27,7 @@
 
 #include "check.h"
 #include "settings/ultimate_adapter.h"
+#include "settings/ultimate_runtime.h"
 #include "ui/dtb_author.h"
 
 namespace {
@@ -291,6 +292,326 @@ void TestBindings() {
     if (binding.id == SettingId::kForcePlot || binding.id == SettingId::kForceSkybox) continue;
     CHECK_FALSE(binding.position_value);
   }
+}
+
+void TestRuntimeCommands() {
+  using namespace rb_blitz::settings::ultimate_runtime;
+  rb_blitz::test::BeginCase("Ultimate runtime commands validate active shape and typed values");
+  ProviderRuntime runtime;
+  runtime.shape = CheckShape(FixtureRecords());
+  runtime.readiness = ProviderReadiness::kCompatible;
+  runtime.choices = runtime.shape.choices;
+  CHECK_TRUE(runtime.shape.ok);
+  CHECK_TRUE(CanRunSongEntry(runtime, true, true, true, false));
+  CHECK_FALSE(CanRunSongEntry(runtime, false, true, true, false));
+  CHECK_FALSE(CanRunSongEntry(runtime, true, false, true, false));
+  CHECK_FALSE(CanRunSongEntry(runtime, true, true, false, false));
+  CHECK_FALSE(CanRunSongEntry(runtime, true, true, true, true));
+  RuntimeValue result;
+  std::string why;
+  const auto encode = [&](const char* variable, Value value) {
+    return EncodeRuntimeValue(runtime, *BindingForVariable(variable), value, &result, &why);
+  };
+  Value value;
+  value.kind = ValueKind::kBool;
+  value.boolean = false;
+  CHECK_TRUE(encode("hide_hud", value));
+  CHECK_TRUE(result.kind == RuntimeValue::Kind::kInt);
+  CHECK_EQ(result.scalar, 0);
+  value.boolean = true;
+  CHECK_TRUE(encode("hide_hud", value));
+  CHECK_EQ(result.scalar, 1);
+
+  value.kind = ValueKind::kInt;
+  value.integer = 105;
+  CHECK_TRUE(encode("speedmod", value));
+  CHECK_TRUE(result.kind == RuntimeValue::Kind::kFloat);
+  float speed = 0;
+  std::memcpy(&speed, &result.scalar, sizeof(speed));
+  CHECK_TRUE(speed > 1.049f && speed < 1.051f);
+  value.integer = 107;
+  CHECK_FALSE(encode("speedmod", value));
+
+  value.kind = ValueKind::kEnum;
+  value.text = "low";
+  CHECK_TRUE(encode("camera_angle", value));
+  CHECK_EQ(result.scalar, 2);
+  value.text = "plot_bodega_a";
+  CHECK_TRUE(encode("forceplot", value));
+  CHECK_EQ(result.scalar, 1);
+  value.text = "off";
+  CHECK_TRUE(encode("forceplot", value));
+  CHECK_EQ(result.scalar, 0);
+  value.text = "not_installed";
+  CHECK_FALSE(encode("forceplot", value));
+  value.text = "default_skybox";
+  CHECK_TRUE(encode("which_skybox", value));
+  CHECK_EQ(result.scalar, 0);
+  value.text = "monkey";
+  CHECK_TRUE(encode("gems", value));
+  CHECK_TRUE(result.kind == RuntimeValue::Kind::kSymbol);
+  CHECK_TRUE(result.symbol == "monkey");
+  value.text = "foreign";
+  CHECK_FALSE(encode("gems", value));
+
+  const RowBinding& binding = *BindingForVariable("hide_hud");
+  const std::string path = ValuePath(binding.token);
+  CHECK_TRUE(BindingForValuePath(path) == &binding);
+  CHECK_TRUE(BindingForValuePath(path + "/bad") == nullptr);
+  CHECK_TRUE(CanTrialDuringSong(*BindingForVariable("goldprogress")));
+  CHECK_FALSE(CanTrialDuringSong(*BindingForVariable("speedmod")));
+  CHECK_FALSE(CanTrialDuringSong(*BindingForVariable("hide_hud")));
+  {
+    rb_blitz::settings::Snapshot snapshot;
+    rb_blitz::settings::FieldState field;
+    field.id = SettingId::kShowTimer;
+    field.application_boundary = rb_blitz::settings::ApplyBoundary::kNextSong;
+    field.application_phase = rb_blitz::settings::ApplyPhase::kDeferred;
+    snapshot.fields.push_back(field);
+    CHECK_TRUE(HelpSymbolForApplicationState("settings_hud_timer", snapshot) ==
+               "settings_hud_timer_next_song");
+    CHECK_TRUE(HelpSymbolForApplicationState("settings_hud_progress", snapshot) ==
+               "settings_hud_progress");
+    CHECK_TRUE(HelpSymbolForApplicationState("settings_hud_gold", snapshot) ==
+               "settings_hud_gold");
+    snapshot.fields[0].application_boundary = rb_blitz::settings::ApplyBoundary::kProcessRestart;
+    CHECK_TRUE(HelpSymbolForApplicationState("settings_hud_timer", snapshot) ==
+               "settings_hud_timer");
+    field.id = SettingId::kShowMessages;
+    field.application_boundary = rb_blitz::settings::ApplyBoundary::kMenuReturn;
+    field.application_phase = rb_blitz::settings::ApplyPhase::kDeferred;
+    snapshot.fields[0] = field;
+    CHECK_TRUE(HelpSymbolForApplicationState("settings_show_messages", snapshot) ==
+               "settings_show_messages_menu_return");
+    snapshot.fields[0].application_phase = rb_blitz::settings::ApplyPhase::kFailed;
+    CHECK_TRUE(HelpSymbolForApplicationState("settings_show_messages", snapshot) ==
+               "settings_show_messages");
+    snapshot.fields[0].id = SettingId::kShowTimer;
+    snapshot.fields[0].application_boundary = rb_blitz::settings::ApplyBoundary::kNextSong;
+    snapshot.fields[0].application_phase = rb_blitz::settings::ApplyPhase::kApplied;
+    CHECK_TRUE(HelpSymbolForApplicationState("settings_hud_timer", snapshot) ==
+               "settings_hud_timer");
+    snapshot.fields[0].id = SettingId::kShowPb;
+    snapshot.fields[0].application_phase = rb_blitz::settings::ApplyPhase::kDeferred;
+    CHECK_TRUE(HelpSymbolForApplicationState("settings_hud_pb", snapshot) ==
+               "settings_hud_pb_next_selection");
+  }
+  // The installed callback record is a structural guard for the one paused-song candidate:
+  // it reads the global after the game has entered. A consumer observation is still required
+  // before claiming that the row applies immediately in play.
+  {
+    std::filesystem::path callback;
+    for (auto root = std::filesystem::current_path(); !root.empty();) {
+      const auto candidate = root / "assets/game/360/ulti/gen/beatmatcher_callbacks.dtb";
+      if (std::filesystem::exists(candidate)) { callback = candidate; break; }
+      const auto parent = root.parent_path();
+      if (parent == root) break;
+      root = parent;
+    }
+    std::vector<uint8_t> bytes;
+    std::string error;
+    CHECK_TRUE(ReadFileBytes(callback, &bytes, &error));
+    std::vector<Node> roots;
+    rb_blitz::ui::dtb::RootHeader header;
+    CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &error));
+    const auto has_global = [](const auto& self, const Node& node, const char* name) -> bool {
+      if (node.tag == rb_blitz::ui::dtb::kVar && node.text == name) return true;
+      return std::any_of(node.kids.begin(), node.kids.end(), [&](const Node& child) {
+        return self(self, child, name);
+      });
+    };
+    CHECK_TRUE(std::any_of(roots.begin(), roots.end(), [&](const Node& root) {
+      return has_global(has_global, root, "goldprogress");
+    }));
+  }
+  {
+    std::filesystem::path entry;
+    for (auto root = std::filesystem::current_path(); !root.empty();) {
+      const auto candidate = root / "assets/game/360/ulti/gen/ulti_game_enter.dtb";
+      if (std::filesystem::exists(candidate)) { entry = candidate; break; }
+      const auto parent = root.parent_path();
+      if (parent == root) break;
+      root = parent;
+    }
+    std::vector<uint8_t> bytes;
+    std::string error;
+    CHECK_TRUE(ReadFileBytes(entry, &bytes, &error));
+    std::vector<uint8_t> patched;
+    CHECK_TRUE(PatchSongEntryRecord(bytes, &patched, &error));
+    std::vector<Node> before, after;
+    rb_blitz::ui::dtb::RootHeader header;
+    CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &before, &header, &error));
+    CHECK_TRUE(rb_blitz::ui::dtb::Parse(patched.data(), patched.size(), &after, &header, &error));
+    CHECK_EQ(before.size(), 3u);
+    CHECK_EQ(after.size(), 5u);
+    if (after.size() == 5 && before.size() == 3) {
+      CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(before) ==
+                 rb_blitz::ui::dtb::SerializeNodes({after[1], after[2], after[3]}));
+      CHECK_TRUE(after.front().kids[1].kids[1].text == kTrialQuery);
+      CHECK_EQ(after.front().kids[2].kids.size(), kSongEntryTokens.size() + 2);
+      CHECK_TRUE(after.front().kids[2].kids[1].kids[1].text == kSongBeginQuery);
+      for (size_t i = 0; i < kSongEntryTokens.size(); ++i) {
+        const Node& guarded = after.front().kids[2].kids[i + 2];
+        CHECK_TRUE(guarded.kids.size() == 3);
+        CHECK_TRUE(guarded.kids[2].kids.size() == 3);
+        CHECK_TRUE(guarded.kids[2].kids[2].kids[1].text ==
+                   SongSetPath(kSongEntryTokens[i]));
+      }
+      CHECK_TRUE(after.back().kids[2].kids[1].text == kSongAppliedQuery);
+    }
+    {
+      std::vector<Node> wrong_consumer = before;
+      const auto change_timer_method = [](const auto& self, Node* node) -> bool {
+        if (node->tag == rb_blitz::ui::dtb::kCommand && node->kids.size() == 3 &&
+            node->kids[0].text == "timer.lbl" && node->kids[1].text == "set_showing" &&
+            node->kids[2].text == "show_timer") {
+          node->kids[1].text = "unrelated_method";
+          return true;
+        }
+        for (Node& child : node->kids) if (self(self, &child)) return true;
+        return false;
+      };
+      bool changed_method = false;
+      for (Node& root : wrong_consumer)
+        if (!changed_method) changed_method = change_timer_method(change_timer_method, &root);
+      CHECK_TRUE(changed_method);
+      if (changed_method) {
+        const auto changed_bytes = rb_blitz::ui::dtb::Compile(wrong_consumer, header);
+        CHECK_FALSE(PatchSongEntryRecord(changed_bytes, &patched, &error));
+        CHECK_TRUE(error.find("timer visibility consumer") != std::string::npos);
+      }
+    }
+    const auto remove_read = [](const auto& self, Node* node) -> bool {
+      if (node->tag == rb_blitz::ui::dtb::kVar && node->text == "show_timer") {
+        node->text = "changed_provider_read";
+        return true;
+      }
+      for (Node& child : node->kids) if (self(self, &child)) return true;
+      return false;
+    };
+    bool changed = false;
+    for (Node& root : before) if (!changed) changed = remove_read(remove_read, &root);
+    CHECK_TRUE(changed);
+    if (changed) {
+      const auto changed_bytes = rb_blitz::ui::dtb::Compile(before, header);
+      CHECK_FALSE(PatchSongEntryRecord(changed_bytes, &patched, &error));
+      CHECK_TRUE(error.find("consumer") != std::string::npos);
+    }
+    CHECK_FALSE(PatchSongEntryRecord({}, &patched, &error));
+    CHECK_FALSE(error.empty());
+  }
+  {
+    std::filesystem::path selection;
+    for (auto root = std::filesystem::current_path(); !root.empty();) {
+      const auto candidate = root / "assets/game/360/ui/song_select/gen/song_select.dtb";
+      if (std::filesystem::exists(candidate)) { selection = candidate; break; }
+      const auto parent = root.parent_path();
+      if (parent == root) break;
+      root = parent;
+    }
+    std::vector<uint8_t> bytes, patched;
+    std::string error;
+    CHECK_TRUE(ReadFileBytes(selection, &bytes, &error));
+    CHECK_TRUE(PatchSongSelectionRecord(bytes, &patched, &error));
+    std::vector<Node> before, after;
+    rb_blitz::ui::dtb::RootHeader header;
+    CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &before, &header, &error));
+    CHECK_TRUE(rb_blitz::ui::dtb::Parse(patched.data(), patched.size(), &after, &header, &error));
+    CHECK_EQ(before.size(), after.size());
+    if (!before.empty() && !after.empty()) {
+      auto find_enter = [](std::vector<Node>& roots) -> Node* {
+        for (Node& root : roots)
+          if (root.tag == rb_blitz::ui::dtb::kCommand && root.kids.size() >= 3 &&
+              root.kids[2].text == "song_select_panel")
+            for (Node& child : root.kids)
+              if (child.tag == rb_blitz::ui::dtb::kArray && !child.kids.empty() &&
+                  child.kids[0].text == "enter") return &child;
+        return nullptr;
+      };
+      Node* original_enter = find_enter(before);
+      Node* patched_enter = find_enter(after);
+      CHECK_TRUE(original_enter && patched_enter);
+      if (original_enter && patched_enter) {
+        CHECK_EQ(patched_enter->kids.size(), original_enter->kids.size() + 1);
+        CHECK_TRUE(patched_enter->kids[1].kids[1].kids[1].text == kSelectionTrialQuery);
+        CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(
+            {patched_enter->kids[0]}) == rb_blitz::ui::dtb::SerializeNodes(
+            {original_enter->kids[0]}));
+        patched_enter->kids.erase(patched_enter->kids.begin() + 1);
+        CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(after) ==
+                   rb_blitz::ui::dtb::SerializeNodes(before));
+      }
+      auto changed = before;
+      const auto rename_read = [](const auto& self, Node* node) -> bool {
+        if (node->tag == rb_blitz::ui::dtb::kVar && node->text == "show_pb") {
+          node->text = "changed_provider_read";
+          return true;
+        }
+        for (Node& child : node->kids) if (self(self, &child)) return true;
+        return false;
+      };
+      bool changed_read = false;
+      for (Node& root : changed)
+        if (!changed_read) changed_read = rename_read(rename_read, &root);
+      CHECK_TRUE(changed_read);
+      if (changed_read) {
+        const auto changed_bytes = rb_blitz::ui::dtb::Compile(changed, header);
+        CHECK_FALSE(PatchSongSelectionRecord(changed_bytes, &patched, &error));
+      }
+    }
+    CHECK_FALSE(PatchSongSelectionRecord({}, &patched, &error));
+    CHECK_FALSE(error.empty());
+    SelectionReceipt receipt;
+    receipt.Queue({{SettingId::kShowPb, Value{ValueKind::kBool}}}, 7);
+    CHECK_FALSE(receipt.Ready(7));
+    CHECK_FALSE(receipt.Witness("rbbz-ultimate/selection-set/other"));
+    CHECK_TRUE(receipt.Witness(kSelectionSetQuery));
+    CHECK_FALSE(receipt.Ready(6));
+    CHECK_TRUE(receipt.Ready(7));
+    receipt.Begin();
+    CHECK_FALSE(receipt.Ready(7));
+    receipt.Complete();
+    CHECK_FALSE(receipt.Ready(7));
+  }
+  const Node command = GuestAssignmentFor(binding);
+  CHECK_TRUE(command.tag == rb_blitz::ui::dtb::kCommand);
+  CHECK_TRUE(command.kids.size() == 3);
+  CHECK_TRUE(command.kids[1].kids[1].text == path);
+  CHECK_TRUE(command.kids[2].kids[1].text == "hide_hud");
+  CHECK_TRUE(command.kids[2].kids[2].kids[1].text == path);
+  {
+    SongEntryReceipt receipt;
+    const std::map<SettingId, Value> changed{{SettingId::kHideHud, Value{ValueKind::kBool}},
+                                             {SettingId::kShowTimer, Value{ValueKind::kBool}}};
+    receipt.Queue(changed, 5);
+    CHECK_FALSE(receipt.Ready(5));
+    CHECK_FALSE(receipt.Witness(SongSetPath("unknown.row")));
+    CHECK_TRUE(receipt.Witness(SongSetPath("interface.hide_hud")));
+    CHECK_FALSE(receipt.Ready(5));
+    CHECK_TRUE(receipt.Witness(SongSetPath("interface.show_timer")));
+    CHECK_FALSE(receipt.Ready(4));
+    CHECK_TRUE(receipt.Ready(5));
+    receipt.BeginSong();
+    CHECK_FALSE(receipt.Ready(5));
+    CHECK_TRUE(receipt.Witness(SongSetPath("interface.hide_hud")));
+    CHECK_TRUE(receipt.Witness(SongSetPath("interface.show_timer")));
+    CHECK_TRUE(receipt.Ready(5));
+    receipt.Queue({{SettingId::kShowTimer, Value{ValueKind::kBool}}}, 6);
+    CHECK_FALSE(receipt.Ready(6));
+    receipt.Complete();
+    CHECK_FALSE(receipt.Ready(6));
+  }
+
+  runtime.readiness = ProviderReadiness::kInactiveTarget;
+  CHECK_FALSE(CanRunSongEntry(runtime, true, true, true, false));
+  CHECK_FALSE(encode("hide_hud", Value{ValueKind::kBool}));
+  runtime.readiness = ProviderReadiness::kUnrecognizedShape;
+  CHECK_FALSE(CanRunSongEntry(runtime, true, true, true, false));
+  CHECK_FALSE(encode("hide_hud", Value{ValueKind::kBool}));
+  runtime.readiness = ProviderReadiness::kCompatible;
+  runtime.shape.ok = false;
+  CHECK_FALSE(CanRunSongEntry(runtime, true, true, true, false));
+  CHECK_FALSE(encode("hide_hud", Value{ValueKind::kBool}));
 }
 
 void TestShapeAcceptsAFixture() {
@@ -968,6 +1289,29 @@ void TestRealPayload(const char* payload_root) {
   // A row the file does not carry still answers with the payload's default.
   const Value* reloaded_letterbox = reloaded.ValueFor(SettingId::kLetterbox);
   CHECK_TRUE(reloaded_letterbox != nullptr && !reloaded_letterbox->boolean);
+  // A later, unrelated provider edit must preserve values already committed for runtime use,
+  // and the next process must read the same pairs from the provider's own file.
+  CHECK_TRUE(SaveProviderFile(runtime.settings_path, {{"show_timer", "FALSE"}}, &error));
+  ProviderRuntime later_reload;
+  ConfigureProvider(&later_reload, payload_root, user_root, true);
+  CHECK_TRUE(later_reload.Active());
+  const Value* later_timer = later_reload.ValueFor(SettingId::kShowTimer);
+  const Value* later_hud = later_reload.ValueFor(SettingId::kHideHud);
+  const Value* later_gems = later_reload.ValueFor(SettingId::kGems);
+  const Value* later_gold = later_reload.ValueFor(SettingId::kGoldProgress);
+  CHECK_TRUE(later_timer != nullptr && !later_timer->boolean);
+  CHECK_TRUE(later_hud != nullptr && !later_hud->boolean);
+  CHECK_TRUE(later_gems != nullptr && later_gems->text == "ulti");
+  CHECK_TRUE(later_gold != nullptr && !later_gold->boolean);
+  // The same installation with a base-game target keeps its file but cannot issue live commands.
+  ProviderRuntime inactive_reload;
+  ConfigureProvider(&inactive_reload, payload_root, user_root, false);
+  CHECK_TRUE(inactive_reload.readiness == ProviderReadiness::kInactiveTarget);
+  CHECK_FALSE(rb_blitz::settings::ultimate_runtime::CanRunSongEntry(
+      inactive_reload, true, true, true, false));
+  rb_blitz::settings::ultimate_runtime::RuntimeValue blocked_value;
+  CHECK_FALSE(rb_blitz::settings::ultimate_runtime::EncodeRuntimeValue(
+      inactive_reload, *BindingForVariable("show_timer"), *later_timer, &blocked_value));
   // A value that does not belong to its row is refused, and the rest are still encoded.
   std::map<std::string, std::string> partial;
   std::map<SettingId, Value> bad;
@@ -1007,6 +1351,7 @@ void TestRealPayload(const char* payload_root) {
 int main(int argc, char** argv) {
   TestRecordTable();
   TestBindings();
+  TestRuntimeCommands();
   TestShapeAcceptsAFixture();
   TestShapeRefusals();
   TestReadiness();

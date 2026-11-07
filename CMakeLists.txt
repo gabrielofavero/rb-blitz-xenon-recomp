@@ -191,6 +191,7 @@ set(RBBLITZ_SOURCES
     # area without changing its aspect, and the logical/physical conversion the SDK's window cvars
     # are expressed in). SDK-free; the boot is the caller and the probe is Win32, like ProbeDisplay.
     src/settings/window_policy.cpp
+    src/settings/display_runtime.cpp
     # P9's two additions: the application-strategy seam (§5.5 - which committed rows apply to the
     # running game and which wait for the restart prompt) and the restart coordinator (§8 - the
     # exactly-once request, the rebuilt command line and the bootstrap's verified-identity wait).
@@ -337,6 +338,8 @@ if(WIN32)
     target_include_directories(rb_blitz_load_monitor PRIVATE src)
     target_link_libraries(rb_blitz_load_monitor PRIVATE shell32)
     add_dependencies(rb_blitz rb_blitz_load_monitor)
+    add_executable(rb_blitz_function_registration_probe tools/function_registration_probe.cpp)
+    target_link_libraries(rb_blitz_function_registration_probe PRIVATE rex::runtime)
 endif()
 
 # P0 of the RhythmVerse store plan: its JSON dependency is the copy the SDK tree already vendors
@@ -883,7 +886,16 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_window_policy_tests PRIVATE src)
     add_test(NAME window_policy COMMAND rb_blitz_window_policy_tests)
 
-    add_executable(rb_blitz_display_mode_tests tests/display_mode_tests.cpp)
+    add_executable(rb_blitz_display_mode_tests
+        tests/display_mode_tests.cpp
+        src/settings/display_runtime.cpp
+        src/settings/store.cpp
+        src/settings/schema.cpp
+        src/settings/model.cpp
+        src/profile/profile.cpp
+        src/profile/profile_path.cpp
+    )
+    target_include_directories(rb_blitz_display_mode_tests PRIVATE src)
     target_link_libraries(rb_blitz_display_mode_tests PRIVATE rex::runtime)
     add_test(NAME display_mode COMMAND rb_blitz_display_mode_tests)
 
@@ -1000,6 +1012,7 @@ if(BUILD_TESTING)
         # compiled default, so the schema table is linked rather than re-spelled here.
         src/settings/model.cpp
         src/settings/schema.cpp
+        src/settings/ultimate_adapter.cpp
         # P7: the surface now emits the Controls rows, whose token grammar and labels live in the
         # profile's own vocabulary.
         src/profile/input_rows.cpp
@@ -1302,6 +1315,15 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_ultimate_adapter_tests PRIVATE src)
     add_test(NAME ultimate_adapter COMMAND rb_blitz_ultimate_adapter_tests)
+    # P0: read-only, bounded audit of the owner's installed provider DTBs. Run manually;
+    # it emits only known variable reference counts and original callback names as JSON.
+    add_executable(rb_blitz_settings_provider_audit
+        tools/settings_provider_audit.cpp
+        src/settings/ultimate_adapter.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp
+    )
+    target_include_directories(rb_blitz_settings_provider_audit PRIVATE src)
     # The same binary, run against the installed payload, is the fidelity check for the fixture.
     # Registered only when that payload is actually in the checkout: `game/` is local, gitignored
     # content, so an unconfigured clone must not gain a test that cannot pass.
@@ -1309,6 +1331,9 @@ if(BUILD_TESTING)
         add_test(NAME ultimate_adapter_payload
                  COMMAND rb_blitz_ultimate_adapter_tests
                          "${CMAKE_CURRENT_SOURCE_DIR}/game/ultimate")
+        add_test(NAME settings_provider_audit_payload
+                 COMMAND rb_blitz_settings_provider_audit
+                         "${CMAKE_CURRENT_SOURCE_DIR}/game/ultimate" --check)
     endif()
 
     # P9's application-strategy seam (src/settings/hot_apply.h). SDK-free: it links the schema

@@ -57,7 +57,6 @@ void SettingsBoot::MenuFrame() {}
 namespace rb_blitz::settings::menu_compat {
 std::string LegacyPoolCountNote(int32_t) { return {}; }
 }
-namespace rb_blitz::content_progress { void Tick() {} }
 namespace rb_blitz::graphics { bool GraphicsLoadingPending() { return native_loading; } }
 namespace rb_blitz::dlc {
 bool RefreshArmed() { return false; }

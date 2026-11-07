@@ -10,6 +10,11 @@
 namespace rb_blitz::settings {
 using RecordReader = std::function<bool(const std::string&, std::vector<uint8_t>*, std::string*)>;
 using MenuRecords = std::map<std::string, std::vector<uint8_t>>;
+struct MenuRefreshRoutes {
+  bool rows = false;
+  bool headers = false;
+  bool ready() const { return rows && headers; }
+};
 
 // Read through the mounted archive view, so provider edits survive the extension.
 //
@@ -24,7 +29,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       bool refresh_row_active = false,
                       std::vector<std::string>* notes = nullptr,
                       const std::vector<std::string>& hidden_menu_rows = {},
-                      bool skip_startup_logos = false);
+                      bool skip_startup_logos = false,
+                      MenuRefreshRoutes* refresh_routes = nullptr);
 // Empty the native startup playlist and release its wait, before the guest boots.
 bool SkipStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Remove the retail balance chrome from the two screens that draw it.
@@ -70,6 +76,14 @@ bool AddRecompilationCredits(std::vector<ui::dtb::Node>* roots, bool ultimate, s
 // while every read that carried the row was rewritten - out/_swap/menu-run/refresh14). False when
 // the flag is off, when the roots hold no such case, or when it already carries the sentinel.
 bool SetRefreshRowAction(std::vector<ui::dtb::Node>* roots, bool refresh_row_active);
+// Capture the complete ordered splash inventory before boot visibility edits, then
+// install an entry-time guest refresh after those edits. Both functions refuse
+// unfamiliar panel/list shapes without mutating the record.
+bool CaptureMainMenuInventory(const std::vector<ui::dtb::Node>& roots,
+                              ui::dtb::Node* inventory, std::string* why);
+bool AddLoadedMainMenuRefresh(std::vector<ui::dtb::Node>* roots,
+                               const ui::dtb::Node& inventory, bool trial_mode,
+                               std::string* why);
 // The shared header ring is Your Songs -> RhythmVerse -> Messages -> Recommended.
 // Your Songs is always enabled; every trigger skips disabled entries.
 // Clicks on the drawn headers use direct destinations and the same departure work.
@@ -85,8 +99,13 @@ inline constexpr const char* kLibraryHeaderTransition = "rbbz_header_transition_
 bool ConfigureLibraryHeaderAnimations(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool ConfigureLibraryHeaderBar(std::vector<ui::dtb::Node>* roots,
                                 LibraryHeaderOptions options, std::string* why);
+// Opt-in runtime header path. Rebuilds the shared label/position group on panel
+// entry and whenever the three host predicates change while a panel is loaded.
+bool ConfigureLibraryHeaderRuntimeBar(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool RouteLibraryHeaderNavigation(std::vector<ui::dtb::Node>* roots, LibraryHeader current,
                                    LibraryHeaderOptions options, std::string* why);
+bool RouteLibraryHeaderRuntimeNavigation(std::vector<ui::dtb::Node>* roots,
+                                          LibraryHeader current, std::string* why);
 // Messages-only START hint/action and guest confirmation (plan D6/D7, M4).
 bool ConfigureMessagesUpdateInbox(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Extend an existing patch index with our records. Existing records retain their offsets,

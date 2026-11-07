@@ -552,6 +552,31 @@ void TestStoreResetAndSave() {
   CHECK_FALSE(store->Matches("input.reset.general", true));
 }
 
+void TestRestoreWaitsForRestart() {
+  rb_blitz::test::BeginCase("whole-settings restore saves controls without applying them live");
+  const auto path = ScratchDir() / "launcher.toml";
+  int live_switches = 0;
+  int publications = 0;
+  rb_blitz::input::InputStoreOptions options;
+  options.keyboard_support = false;
+  options.mouse_support = true;
+  options.apply_switch = [&](std::string_view, bool, std::string*) {
+    ++live_switches;
+    return true;
+  };
+  options.on_published = [&] { ++publications; };
+  auto store = rb_blitz::input::InputStore::Load(path, WriteFixture(path), options);
+  std::string error;
+  CHECK_TRUE(store->StageBool("input.keyboard_support", true, &error));
+  CHECK_TRUE(store->StageResetAll("input.reset.general", &error));
+  CHECK_TRUE(store->CommitForRestart(&error));
+  CHECK_EQ(live_switches, 0);
+  CHECK_EQ(publications, 0);
+  const std::string saved = Slurp(path);
+  CHECK_TRUE(saved.find("\na = ") == std::string::npos);
+  CHECK_TRUE(saved.find("keyboard_support") == std::string::npos);
+}
+
 // P3 (interface/gameplay mapping restructure plan, D2): the Interface page draws nine rows, but
 // Reset All is still the whole `[remap]` table's reset - all sixteen targets, the seven the page
 // no longer shows included. This is the store half; the settings-surface suite pins the single
@@ -1103,6 +1128,7 @@ int main() {
   TestCaptureCountdown();
   TestCaptureBindsImmediately();
   TestStoreResetAndSave();
+  TestRestoreWaitsForRestart();
   TestResetAllCoversHiddenTargets();
   TestStoreSwitchAndRecovery();
   TestLegacyCustomKeysAreInert();

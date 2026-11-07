@@ -97,6 +97,7 @@
 #include "profile/profile_apply.h"
 #include "platform/crash_diagnostics.h"
 #include "settings/boot.h"
+#include "settings/display_runtime.h"
 #include "platform/game_restart.h"
 #include "store/store_fetch.h"
 #include "store/store_catalogue.h"
@@ -147,6 +148,9 @@ class RbBlitzApp : public rex::ReXApp {
   // The `rexgpu-xenos` DLL is staged next to the executable via
   // rexglue_setup_target(rb_blitz GPU_PLUGINS xenos) in CMakeLists.txt.
   void OnPreSetup(rex::RuntimeConfig& config) override {
+    // The settings/config paths are final here. Header I/O can run while the
+    // renderer initializes, before the content manager needs the exact list.
+    rb_blitz::dlc::PrepareBootLibraryScan(game_data_root());
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = "xenos";
     }
@@ -405,6 +409,80 @@ class RbBlitzApp : public rex::ReXApp {
       return false;
     });
     if (auto* sink = settings_boot_->sink()) {
+      if (window() && !settings_boot_->paths().settings_file.empty()) {
+        display_preview_ = std::make_unique<rb_blitz::settings::DisplayPreviewTransaction>(
+            app_context(), *window(), settings_boot_->paths().settings_file);
+        rb_blitz::settings::ServiceSink::DisplayPreviewHooks hooks;
+        hooks.begin = [this](std::string_view requested, std::string* error) {
+          auto* graphics = runtime()->graphics_system();
+          auto* presenter = graphics ? graphics->presenter() : nullptr;
+          if (!display_preview_ || !presenter || !window()) {
+            if (error) *error = "display presenter is unavailable";
+            return false;
+          }
+          std::string previous;
+          if (!app_context().CallInUIThreadSynchronous([this, &previous] {
+                using Mode = rex::ui::Window::DisplayMode;
+                switch (window()->GetDisplayMode()) {
+                  case Mode::kWindowed: previous = "windowed"; break;
+                  case Mode::kBorderless: previous = "borderless"; break;
+                  case Mode::kFullscreen: previous = "fullscreen"; break;
+                }
+              })) {
+            if (error) *error = "display UI thread is unavailable";
+            return false;
+          }
+          if (!display_preview_->Begin(previous, requested, error)) return false;
+          display_preview_requested_mode_ = requested;
+          // Only a successful UI-thread paint after this sample can confirm the new mode.
+          // A guest-output present started before the switch cannot satisfy Keep.
+          display_preview_present_sequence_ = presenter->successful_ui_present_sequence();
+          window()->RequestPaint();
+          return true;
+        };
+        hooks.keep = [this](const rb_blitz::settings::DisplayPreviewTransaction::Persist& persist,
+                            std::string* error) {
+          auto* graphics = runtime()->graphics_system();
+          auto* presenter = graphics ? graphics->presenter() : nullptr;
+          if (!display_preview_ || !presenter || !display_preview_->active() ||
+              presenter->successful_ui_present_sequence() <= display_preview_present_sequence_) {
+            if (error) *error = "the new window mode has not presented yet";
+            return false;
+          }
+          bool mode_matches = false;
+          if (!app_context().CallInUIThreadSynchronous([this, &mode_matches] {
+                using Mode = rex::ui::Window::DisplayMode;
+                const Mode mode = window()->GetDisplayMode();
+                mode_matches =
+                    (display_preview_requested_mode_ == "windowed" && mode == Mode::kWindowed) ||
+                    (display_preview_requested_mode_ == "borderless" && mode == Mode::kBorderless) ||
+                    (display_preview_requested_mode_ == "fullscreen" && mode == Mode::kFullscreen);
+              }) || !mode_matches) {
+            if (error) *error = "the native window is no longer in the previewed mode";
+            return false;
+          }
+          return display_preview_->Keep(true, persist, error);
+        };
+        hooks.revert = [this](std::string* error) {
+          const bool reverted = display_preview_ && display_preview_->Revert(error);
+          if (reverted) display_preview_requested_mode_.clear();
+          return reverted;
+        };
+        hooks.active = [this] { return display_preview_ && display_preview_->active(); };
+        hooks.applied = [this](const rb_blitz::settings::Value& value, uint64_t revision) {
+          using namespace rb_blitz::settings;
+          if (!settings_boot_) return;
+          const std::map<SettingId, Value> changed = {{SettingId::kDisplay, value}};
+          HotApplyPlan plan;
+          plan.live = changed;
+          const uint64_t generation = settings_boot_->NoteCommittedRows(changed, plan, revision);
+          settings_boot_->NoteAppliedRows(changed,
+              {{SettingId::kDisplay, HotApplyStatus::kApplied, {}}}, generation);
+          REXLOG_INFO("settings_display: confirmed and acknowledged '{}' at revision {}",
+                      value.text, revision);
+        };
+        sink->SetDisplayPreviewHooks(std::move(hooks));
+      }
       sink->SetRestartHandler([this](uint64_t saved, uint64_t current, uint64_t id,
                                      const std::string& target, std::string* error) {
         rb_blitz::platform::LaunchContext context;
@@ -515,6 +593,11 @@ class RbBlitzApp : public rex::ReXApp {
   }
 
   bool OnWindowCloseRequested() override {
+    if (display_preview_ && display_preview_->active()) {
+      std::string error;
+      if (!display_preview_->Revert(&error))
+        REXLOG_WARN("settings_display: close could not revert preview: {}", error);
+    }
     rb_blitz::diag::boot_heartbeat::Finish("window close");
     rb_blitz::loading::EndCrashRecoveryAttempt();
     rb_blitz::shell_music::CloseQueuedPool();
@@ -697,6 +780,9 @@ class RbBlitzApp : public rex::ReXApp {
   // for the process lifetime because the guest channel, the menu-rows seam and the restart
   // handshake all reach the same store.
   std::unique_ptr<rb_blitz::settings::boot::SettingsBoot> settings_boot_;
+  std::unique_ptr<rb_blitz::settings::DisplayPreviewTransaction> display_preview_;
+  std::string display_preview_requested_mode_;
+  uint64_t display_preview_present_sequence_ = 0;
 
   // The backend this boot really loaded, when it named one (empty when the SDK chose). Reported by
   // the settings store as the active renderer.

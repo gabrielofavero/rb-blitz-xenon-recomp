@@ -3,13 +3,50 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "input/input_icons.h"
 
 namespace rb_blitz::assets {
+
+struct ControllerSchemeProgress {
+  uint64_t ticket = 0;
+  std::string scheme;
+};
+
+// Monotonic request identity across GPU polls. A newer request supersedes an
+// older font job even when its scheme token is the same (A/B/A). The provider
+// calls Complete only after texture invalidation and any required font result.
+class ControllerSchemeCompletion {
+ public:
+  uint64_t Request() {
+    waiting_.reset();
+    return ++last_request_;
+  }
+  void Selected(uint64_t ticket, std::string scheme, uint64_t font_revision) {
+    if (ticket != last_request_) return;
+    waiting_ = ControllerSchemeProgress{ticket, std::move(scheme)};
+    required_font_revision_ = font_revision;
+  }
+  void Complete(uint64_t installed_font_revision) {
+    if (!waiting_ || (required_font_revision_ != 0 &&
+                      installed_font_revision < required_font_revision_)) return;
+    applied_ = std::move(waiting_);
+    waiting_.reset();
+  }
+  std::optional<ControllerSchemeProgress> LatestApplied() const { return applied_; }
+
+ private:
+  uint64_t last_request_ = 0;
+  uint64_t required_font_revision_ = 0;
+  std::optional<ControllerSchemeProgress> waiting_;
+  std::optional<ControllerSchemeProgress> applied_;
+};
 
 // Unused action-hint slots carry the header's Previous/Next binding images to
 // the button-sheet provider. The header labels themselves use buttons.milo.
@@ -23,7 +60,8 @@ void InstallP1TextureOverride();
 void InstallControllerSchemes(const std::filesystem::path& install_root,
                               const std::filesystem::path& user_root);
 // Queue a selected, validated token for the GPU thread. Returns false for an unavailable token.
-bool SelectControllerScheme(const std::string& id);
+bool SelectControllerScheme(const std::string& id, uint64_t* ticket = nullptr);
+std::optional<ControllerSchemeProgress> LatestAppliedControllerScheme();
 // Publish the image glyphs used by the currently entered mapping page. The guest list text
 // receives matching character codes; the GPU thread consumes this immutable batch in Poll().
 void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons);

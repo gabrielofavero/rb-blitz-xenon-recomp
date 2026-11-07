@@ -98,6 +98,10 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   // editor from what this boot actually built, then retire each baseline after its first save.
   void SeedMenuVisibility(std::vector<std::string> hidden, bool refresh_visible);
   bool GetLocal(std::string_view token, bridge::WireValue* out) const;
+  // Runtime guest commands must never see an uncommitted provider edit. The ordinary Get/GetLocal
+  // intentionally show staged values to the settings screen; this accessor reads only the
+  // provider value last seeded from disk or durably saved by a successful commit.
+  bool GetSavedLocal(std::string_view token, bridge::WireValue* out) const;
 
   // --- what the boot asks after a commit ----------------------------------
   // The guest's own restart request (`rbbz-settings/restart/-/-`), for P9's coordinator. The sink
@@ -110,6 +114,7 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   bool last_commit_durable() const { return last_commit_durable_; }
   uint64_t saved_revision() const { return saved_revision_; }
   bool last_commit_requires_restart() const { return last_commit_requires_restart_; }
+  bool last_commit_restored_defaults() const { return last_commit_restored_defaults_; }
   void RequireRestartAfterApply() { last_commit_requires_restart_ = true; }
   // The merged root's restart prompt (owner decision, 2026-10-13): true once this session has
   // committed a change that needs a restart, and it stays true - the prompt is asked when the
@@ -119,7 +124,8 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   // the sharper question - does what the player saved still differ from what this process runs - so
   // a value changed and changed back does not prompt, and a hot row whose live write failed does.
   bool restart_pending() const {
-    return restart_pending_query_ ? restart_pending_query_() : restart_pending_;
+    return restore_restart_pending_ ||
+           (restart_pending_query_ ? restart_pending_query_() : restart_pending_);
   }
   // "kSaved" / "kNoChanges" / ... for the log line.
   std::string_view last_commit_status() const { return CommitStatusToken(last_commit_status_); }
@@ -153,6 +159,20 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   using RestartPendingQuery = std::function<bool()>;
   void SetRestartPendingQuery(RestartPendingQuery query) {
     restart_pending_query_ = std::move(query);
+  }
+
+  // The app owns the window, presenter and preview lifetime. The sink owns the
+  // validated durable edit; Keep invokes persist only after the app has proved
+  // that the requested mode presented after the switch.
+  struct DisplayPreviewHooks {
+    std::function<bool(std::string_view, std::string*)> begin;
+    std::function<bool(const std::function<bool(std::string*)>&, std::string*)> keep;
+    std::function<bool(std::string*)> revert;
+    std::function<bool()> active;
+    std::function<void(const Value&, uint64_t)> applied;
+  };
+  void SetDisplayPreviewHooks(DisplayPreviewHooks hooks) {
+    display_preview_hooks_ = std::move(hooks);
   }
 
   // P7: the controller profile's binding rows. Null in a build without the store (the bridge
@@ -191,11 +211,14 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   bool last_commit_durable_ = false;
   uint64_t saved_revision_ = 0;
   bool last_commit_requires_restart_ = false;
+  bool restore_defaults_staged_ = false;
+  bool last_commit_restored_defaults_ = false;
   // True while an `input.*` row is staged in the input store. A commit persists that store
   // alongside the settings transaction; its own failure is reported as a save failure.
   bool input_staged_ = false;
   InputBindingStore* input_store_ = nullptr;
   bool restart_pending_ = false;
+  bool restore_restart_pending_ = false;
   CommitStatus last_commit_status_ = CommitStatus::kNoChanges;
   CommitFailure last_commit_failure_ = CommitFailure::kNone;
   ProviderSaver provider_saver_;
@@ -204,6 +227,11 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   bool restart_ok_ = true;
   RestartHandler restart_handler_;
   RestartPendingQuery restart_pending_query_;
+  DisplayPreviewHooks display_preview_hooks_;
+  std::string display_preview_requested_;
+  uint64_t display_preview_revision_ = 0;
+  uint64_t display_preview_capability_revision_ = 0;
+  bool display_keep_ok_ = false;
 };
 
 }  // namespace rb_blitz::settings

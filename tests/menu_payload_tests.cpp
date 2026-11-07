@@ -18,6 +18,7 @@
 
 #include "settings/menu_payload.h"
 #include "settings/ultimate_adapter.h"
+#include "settings/ultimate_runtime.h"
 #include "ui/menu_options.h"
 #include "ui/input_font_scene.h"
 #include <array>
@@ -310,6 +311,19 @@ bool Has(const Node& node, const char* text) {
   if (node.text == text) return true;
   for (const auto& child : node.kids) if (Has(child, text)) return true;
   return false;
+}
+const Node* CompleteSplashArray(const Node& node) {
+  if (node.tag == dtb::kArray) {
+    bool start = false, exit = false;
+    for (const auto& child : node.kids) {
+      start |= child.tag == dtb::kSymbol && child.text == "splash_start";
+      exit |= child.tag == dtb::kSymbol && child.text == "splash_exit";
+    }
+    if (start && exit) return &node;
+  }
+  for (const auto& child : node.kids)
+    if (const Node* found = CompleteSplashArray(child)) return found;
+  return nullptr;
 }
 const Node* Case(const Node& node, const char* action) {
   if (node.tag == dtb::kArray && !node.kids.empty()) {
@@ -636,6 +650,114 @@ void TestHeaderVisibility() {
   CHECK_FALSE(settings::ConfigureLibraryHeaderBar(&invalid, State(0), &why));
   CHECK_TRUE(dtb::Compile(invalid) == before);
 }
+void TestHeaderRuntimeRefresh() {
+  using namespace header_test;
+  BeginCase("runtime header bar refreshes all eight masks and both trigger routes as one authored group");
+  auto background = Background();
+  std::string why;
+  CHECK_TRUE(settings::ConfigureLibraryHeaderRuntimeBar(&background, &why));
+  const auto* refresh = Method(background, "background_panel", "rbbz_refresh_headers");
+  const auto* enter = Method(background, "background_panel", "enter");
+  const auto* poll = Method(background, "background_panel", "poll");
+  const auto* mode = Method(background, "background_panel", "set_offline_mode_headers");
+  const auto* inbox = Method(background, "background_panel", "update_inbox_header");
+  CHECK_TRUE(refresh && enter && poll && mode && inbox);
+  if (refresh && enter && poll && mode && inbox) {
+    CHECK_EQ(refresh->kids.size(), 13u); // method, mask, Flow, eight layouts, badge, acknowledgement
+    CHECK_TRUE(refresh->kids[2].tag == dtb::kCommand &&
+               refresh->kids[2].kids[0].text == "if_else" &&
+               Has(refresh->kids[2], "rbbz-menu/rhythmverse") &&
+               Has(refresh->kids[2], "rbbz-menu/messages") &&
+               Has(refresh->kids[2], "rbbz-menu/recommendations"));
+    for (int mask = 0; mask < 8; ++mask) {
+      const auto& group = refresh->kids[mask + 3];
+      CHECK_TRUE(group.tag == dtb::kCommand && group.kids.size() == 3 &&
+                 group.kids[0].text == "if" && group.kids[1].kids[2].scalar == unsigned(mask) &&
+                 group.kids[2].kids[0].text == "do");
+      CHECK_TRUE(Has(group, "main_store.lbl") && Has(group, "main_inbox.lbl") &&
+                 Has(group, "main_Home.lbl") && Has(group, "TextShift.anim"));
+      for (const auto& [label, bit] : std::array<std::pair<const char*, int>, 3>{{
+          {"main_store.lbl", 1}, {"main_inbox.lbl", 2}, {"main_Home.lbl", 4}}}) {
+        const auto* setter = Find(group, dtb::kCommand, label);
+        CHECK_TRUE(setter && setter->kids.size() == 3);
+        if (setter) CHECK_TRUE(setter->kids[2].text == ((mask & bit) ? "TRUE" : "FALSE"));
+      }
+      // The badge is hidden with Messages; on restoration the retail callback below
+      // decides whether the saved message count warrants displaying it.
+      CHECK_EQ(Has(group, "main_new_msg.lbl"), !(mask & 2));
+    }
+    CHECK_TRUE(Has(refresh->kids[2], "offline_flow") &&
+               Has(refresh->kids[2], "online_flow") &&
+               Has(refresh->kids[2], "rbbz-menu/rhythmverse") &&
+               Has(refresh->kids[2], "rbbz-menu/messages") &&
+               Has(refresh->kids[2], "rbbz-menu/recommendations"));
+    CHECK_TRUE(Has(*enter, "rbbz_refresh_headers"));
+    CHECK_TRUE(Has(*poll, "rbbz_refresh_headers"));
+    CHECK_TRUE(Has(*poll, "rbbz_header_mask") && Has(*poll, "!="));
+    CHECK_FALSE(Has(*mode, "rbbz_refresh_headers"));
+    CHECK_TRUE(Has(*inbox, "rbbz-menu/messages"));
+    CHECK_TRUE(Has(*inbox, "rbbz_header_new_msgs") &&
+               Has(refresh->kids[refresh->kids.size() - 2], "update_inbox_header"));
+    CHECK_TRUE(refresh->kids.back().kids.size() == 2 &&
+               refresh->kids.back().kids[1].text == "rbbz-menu/headers-applied");
+  }
+  for (int current = 0; current < 4; ++current) {
+    auto roots = Fixture(current);
+    CHECK_TRUE(settings::RouteLibraryHeaderRuntimeNavigation(&roots, static_cast<Tab>(current), &why));
+    for (const char* panel : kPanels[current]) {
+      const auto* buttons = Method(roots, panel, "BUTTON_DOWN_MSG");
+      const auto* mouse = Method(roots, panel, "poll");
+      CHECK_TRUE(buttons && Has(*buttons, "rbbz-menu/rhythmverse") &&
+                 Has(*buttons, "rbbz-menu/messages") &&
+                 Has(*buttons, "rbbz-menu/recommendations"));
+      CHECK_TRUE(mouse != nullptr);
+      if (mouse) {
+        const auto& routes = mouse->kids.back();
+        CHECK_EQ(routes.kids.size(), 4u);  // cond plus each other header
+        for (int target = 0; target < 4; ++target) {
+          if (target == current) continue;
+          const std::string path = std::string("rbbz-mouse/header/") + panel +
+                                   "/" + std::to_string(target);
+          CHECK_TRUE(Has(*mouse, path.c_str()));
+          const Node* route = nullptr;
+          for (size_t i = 1; i < routes.kids.size(); ++i)
+            if (routes.kids[i].kids[0].kids[1].text == path) route = &routes.kids[i];
+          CHECK_TRUE(route != nullptr);
+          if (route) {
+            const bool right = (target - current + 4) % 4 <= 2;
+            std::vector<int> destinations;
+            Destinations(*route, &destinations, right);
+            CHECK_EQ(destinations.size(), 1u);
+            if (!destinations.empty()) CHECK_EQ(destinations[0], target);
+          }
+        }
+      }
+      if (!buttons) continue;
+      for (bool right : {true, false}) {
+        const auto* action = Case(*buttons, right ? "kAction_PageDown" : "kAction_PageUp");
+        CHECK_TRUE(action && action->kids.size() == 2 &&
+                   action->kids[1].tag == dtb::kCommand &&
+                   action->kids[1].kids.size() == 9);
+        if (!action || action->kids.size() != 2 || action->kids[1].kids.size() != 9) continue;
+        for (int mask = 0; mask < 8; ++mask) {
+          const auto& branch = action->kids[1].kids[mask + 1];
+          CHECK_TRUE(branch.tag == dtb::kArray && branch.kids.size() == 2 &&
+                     branch.kids[0].kids[0].text == "==" &&
+                     branch.kids[0].kids[2].scalar == unsigned(mask));
+          std::vector<int> destinations;
+          Destinations(branch, &destinations, right);
+          const int expected = right ? kRight[mask][current] : kLeft[mask][current];
+          CHECK_EQ(destinations.size(), expected == current ? 0u : 1u);
+          if (!destinations.empty()) CHECK_EQ(destinations[0], expected);
+        }
+      }
+    }
+    const auto bytes = dtb::Compile(roots);
+    std::vector<Node> reparsed;
+    dtb::RootHeader header;
+    CHECK_TRUE(dtb::Parse(bytes.data(), bytes.size(), &reparsed, &header, &why));
+  }
+}
 void TestMessagesUpdateInbox() {
   using namespace header_test;
   BeginCase("Messages START hint and action share the active-version gate; confirmation stays guest-authored");
@@ -816,6 +938,115 @@ void CheckPrivateFontGeometry(const std::vector<uint8_t>& scene, bool hint) {
 }
 
 // Optional integration check against extracted records; never boots or drives the game.
+int CheckInstalledRuntimeHeaderRecords(const char* asset_root) {
+  namespace fs = std::filesystem;
+  namespace screen = rb_blitz::ui::screen;
+  using namespace header_test;
+  settings::RecordReader read = [&](const std::string& name, std::vector<uint8_t>* bytes, std::string* why) {
+    std::ifstream file(fs::path(asset_root) / name, std::ios::binary);
+    if (!file) { if (why) *why = "missing " + name; return false; }
+    bytes->assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    return true;
+  };
+  screen::MenuConfiguration config;
+  config.menu_refresh_trial = true;
+  config.rhythmverse_row = true;
+  config.show_messages = true;
+  config.show_recommendations = true;
+  config.controller_layout_enabled = true;
+  screen::ConfigureMenu(config);
+  settings::MenuRecords records;
+  settings::MenuRefreshRoutes routes;
+  std::string why;
+  std::vector<std::string> notes;
+  if (!settings::BuildMenuRecords(read, {"ui/locale/eng/gen/locale_keep.dtb"},
+                                  &records, &why, false, false, &notes, {}, false, &routes)) {
+    std::printf("runtime header records refused: %s\n", why.c_str()); return 1;
+  }
+  for (const auto& note : notes) std::printf("record note: %s\n", note.c_str());
+  CHECK_TRUE(notes.empty());
+  CHECK_TRUE(routes.rows && routes.headers && routes.ready());
+  const auto splash = records.find("ui/splash/gen/splash.dtb");
+  CHECK_TRUE(splash != records.end());
+  if (splash != records.end()) {
+    std::vector<Node> roots;
+    dtb::RootHeader header;
+    CHECK_TRUE(dtb::Parse(splash->second.data(), splash->second.size(), &roots, &header, &why));
+    const Node* refresh = Method(roots, "splash_panel", "rbbz_refresh_menu");
+    CHECK_TRUE(refresh != nullptr);
+    if (refresh) {
+      const Node* inventory = CompleteSplashArray(*refresh);
+      CHECK_TRUE(inventory != nullptr);
+      if (inventory) {
+        CHECK_TRUE(std::any_of(inventory->kids.begin(), inventory->kids.end(),
+            [](const Node& row) { return row.tag == dtb::kSymbol &&
+                row.text == "splash_leaderboard"; }));
+      }
+    }
+  }
+  for (int current = 0; current < 4; ++current) {
+    const auto found = records.find(kRecords[current]);
+    CHECK_TRUE(found != records.end());
+    if (found == records.end()) continue;
+    std::vector<Node> roots;
+    dtb::RootHeader header;
+    CHECK_TRUE(dtb::Parse(found->second.data(), found->second.size(), &roots, &header, &why));
+    for (const char* panel : kPanels[current]) {
+      const auto* buttons = Method(roots, panel, "BUTTON_DOWN_MSG");
+      CHECK_TRUE(buttons && Has(*buttons, "rbbz-menu/rhythmverse") &&
+                 Has(*buttons, "rbbz-menu/messages") &&
+                 Has(*buttons, "rbbz-menu/recommendations"));
+    }
+  }
+  {
+    const auto found = records.find("ui/song_select/gen/song_select.dtb");
+    CHECK_TRUE(found != records.end());
+    if (found != records.end()) {
+      std::vector<uint8_t> selection_trial;
+      CHECK_TRUE(settings::ultimate_runtime::PatchSongSelectionRecord(
+          found->second, &selection_trial, &why));
+      CHECK_FALSE(selection_trial.empty());
+    }
+  }
+  const auto background = records.find("ui/background/gen/background.dtb");
+  CHECK_TRUE(background != records.end());
+  if (background != records.end()) {
+    std::vector<Node> roots;
+    dtb::RootHeader header;
+    CHECK_TRUE(dtb::Parse(background->second.data(), background->second.size(), &roots, &header, &why));
+    CHECK_TRUE(Method(roots, "background_panel", "rbbz_refresh_headers") != nullptr);
+  }
+  BeginCase("a refused splash refresh leaves the menu-return route unavailable");
+  settings::RecordReader without_inventory = [&](const std::string& name,
+                                                   std::vector<uint8_t>* bytes,
+                                                   std::string* reason) {
+    if (!read(name, bytes, reason)) return false;
+    if (name != "ui/splash/gen/splash.dtb") return true;
+    std::vector<Node> roots;
+    dtb::RootHeader header;
+    if (!dtb::Parse(bytes->data(), bytes->size(), &roots, &header, reason)) return false;
+    for (Node& root : roots) {
+      if (root.tag != dtb::kCommand || root.kids.size() < 3 ||
+          root.kids[2].text != "splash_panel") continue;
+      root.kids.erase(std::remove_if(root.kids.begin(), root.kids.end(), [](const Node& member) {
+        return member.tag == dtb::kArray && !member.kids.empty() &&
+               member.kids[0].text == "check_trial";
+      }), root.kids.end());
+    }
+    *bytes = dtb::Compile(roots, header);
+    return true;
+  };
+  settings::MenuRecords degraded_records;
+  settings::MenuRefreshRoutes degraded_routes;
+  notes.clear();
+  CHECK_TRUE(settings::BuildMenuRecords(without_inventory,
+      {"ui/locale/eng/gen/locale_keep.dtb"}, &degraded_records, &why,
+      false, false, &notes, {}, false, &degraded_routes));
+  CHECK_FALSE(degraded_routes.rows);
+  CHECK_TRUE(degraded_routes.headers);
+  CHECK_FALSE(degraded_routes.ready());
+  return Finish();
+}
 int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
                                 bool single = false) {
   namespace fs = std::filesystem;
@@ -1313,6 +1544,106 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
   CHECK_EQ(ignore.menus,1);
 }
 
+void TestLoadedMenuRefresh() {
+  using rb_blitz::ui::dtb::Node;
+  using rb_blitz::ui::dtb::kArray;
+  using rb_blitz::ui::dtb::kCommand;
+  BeginCase("loaded splash refresh rebuilds from the pre-hide inventory and keeps selection by symbol");
+  const auto sym = [](const char* s) { return Node::Symbol(s); };
+  std::vector<Node> roots{Node::Command({sym("new"), sym("UIPanel"), sym("splash_panel"),
+      Node::Array({sym("enter"), Node::Command({sym("this"), sym("check_trial")})}),
+      Node::Array({sym("check_trial"), Node::Array({Node::Var("options_array"),
+          Node::Command({sym("array"), Node::Array({sym("splash_start"),
+              sym("splash_play_current"), sym("splash_dlc"), sym("splash_options"),
+              sym("splash_exit")})})})})}),
+      Node::Command({sym("new"), sym("UIScreen"), sym("splash_screen"),
+          Node::Array({sym("enter"), Node::Command({sym("splash_panel"),
+                                                    sym("check_trial")})})})};
+  const auto source = roots;
+  std::string why;
+  Node inventory;
+  CHECK_TRUE(rb_blitz::settings::CaptureMainMenuInventory(roots, &inventory, &why));
+  CHECK_EQ(inventory.kids.size(), 5u);
+  CHECK_TRUE(rb_blitz::ui::screen::HideMenuRows(&roots,
+      {"splash_play_current", "splash_dlc"}, &why));
+  CHECK_TRUE(rb_blitz::settings::AddLoadedMainMenuRefresh(&roots, inventory, false, &why));
+  CHECK_EQ(roots[0].kids.size(), 6u);
+  const Node& enter = roots[1].kids[3];
+  CHECK_TRUE(enter.kids.size() == 4 && enter.kids[1].kids[0].text == "set" &&
+             enter.kids[2].kids[1].text == "check_trial" &&
+             enter.kids[3].kids[1].text == "rbbz_refresh_menu");
+  const Node& refresh = roots[0].kids.back();
+  CHECK_TRUE(refresh.tag == kArray && refresh.kids[0].text == "rbbz_refresh_menu");
+  CHECK_TRUE(refresh.kids.size() == 2 && refresh.kids[1].tag == kCommand &&
+             refresh.kids[1].kids[0].text == "do");
+  const Node& statements = refresh.kids[1];
+  CHECK_TRUE(statements.kids[1].tag == kArray &&
+             statements.kids[1].kids.size() == 2 &&
+             statements.kids[1].kids[0].tag == rb_blitz::ui::dtb::kVar &&
+             statements.kids[1].kids[0].text == "options_array" &&
+             statements.kids[1].kids[1].kids[1].tag == kArray &&
+             statements.kids[1].kids[1].kids[1].kids.size() == 5);
+  const Node& selection = statements.kids[statements.kids.size() - 2];
+  CHECK_TRUE(selection.tag == kCommand && selection.kids[0].text == "switch");
+  CHECK_TRUE(statements.kids.back().kids.size() == 2 &&
+             statements.kids.back().kids[1].text == "rbbz-menu/rows-applied");
+  {
+    const auto evaluate = [&](auto&& self, const Node& node, bool play, bool refresh_on) -> int {
+      if (node.tag == rb_blitz::ui::dtb::kInt) return int(node.scalar);
+      if (node.tag != kCommand || node.kids.empty()) return -100;
+      if (node.kids[0].text == "+")
+        return self(self, node.kids[1], play, refresh_on) +
+               self(self, node.kids[2], play, refresh_on);
+      if (node.kids[0].text == "if_else") {
+        const std::string& path = node.kids[1].kids[1].text;
+        const bool visible = path == "rbbz-menu/visible/splash_play_current" ? play :
+                             path == "rbbz-menu/visible/splash_dlc" ? refresh_on : false;
+        return self(self, node.kids[visible ? 2 : 3], play, refresh_on);
+      }
+      return -100;
+    };
+    const std::array<const char*, 5> previous = {"splash_start", "splash_play_current",
+        "splash_dlc", "splash_options", "splash_exit"};
+    for (int mask = 0; mask < 4; ++mask) {
+      const bool play = (mask & 1) != 0, dlc = (mask & 2) != 0;
+      const std::array<int, 5> expected = {0, 1, 1 + int(play),
+          1 + int(play) + int(dlc), 2 + int(play) + int(dlc)};
+      for (size_t row = 0; row < previous.size(); ++row) {
+        const Node* selected = nullptr;
+        for (const auto& kid : selection.kids)
+          if (kid.tag == kArray && !kid.kids.empty() && kid.kids[0].text == previous[row])
+            selected = &kid;
+        CHECK_TRUE(selected && selected->kids.size() == 2 &&
+                   selected->kids[1].kids.size() == 3 &&
+                   selected->kids[1].kids[1].text == "set_selected");
+        if (selected) CHECK_EQ(evaluate(evaluate, selected->kids[1].kids[2], play, dlc),
+                               expected[row]);
+      }
+    }
+    // An unknown previous symbol falls through the switch and keeps the initial first-row choice.
+    CHECK_TRUE(statements.kids[statements.kids.size() - 3].kids.size() == 3 &&
+               statements.kids[statements.kids.size() - 3].kids[1].text == "set_selected" &&
+               statements.kids[statements.kids.size() - 3].kids[2].scalar == 0);
+  }
+  const auto bytes = rb_blitz::ui::dtb::Compile(roots);
+  std::vector<Node> decoded;
+  rb_blitz::ui::dtb::RootHeader header;
+  CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &decoded, &header, &why));
+  const auto before = rb_blitz::ui::dtb::Compile(roots);
+  CHECK_FALSE(rb_blitz::settings::AddLoadedMainMenuRefresh(&roots, inventory, false, &why));
+  CHECK_TRUE(rb_blitz::ui::dtb::Compile(roots) == before);
+  for (bool duplicate : {false, true}) {
+    auto incompatible = source;
+    auto& screen_enter = incompatible[1].kids[3];
+    if (duplicate) screen_enter.kids.push_back(screen_enter.kids[1]);
+    else screen_enter.kids.erase(screen_enter.kids.begin() + 1);
+    const auto original = rb_blitz::ui::dtb::Compile(incompatible);
+    CHECK_FALSE(rb_blitz::settings::AddLoadedMainMenuRefresh(
+        &incompatible, inventory, false, &why));
+    CHECK_TRUE(rb_blitz::ui::dtb::Compile(incompatible) == original);
+  }
+}
+
 int main(int argc, char** argv) {
   rb_blitz::test::SuppressWindowsTestCrashDialogs();
   if (argc == 3 && std::string(argv[1]) == "check-inline-help") {
@@ -1562,11 +1893,15 @@ int main(int argc, char** argv) {
   if (argc == 4 && std::string(argv[1]) == "check-header-records") {
     return CheckInstalledHeaderRecords(argv[2], argv[3]);
   }
+  if (argc == 3 && std::string(argv[1]) == "check-runtime-header-records") {
+    return CheckInstalledRuntimeHeaderRecords(argv[2]);
+  }
   if (argc == 4 && std::string(argv[1]) == "check-p10-records") {
     return CheckInstalledHeaderRecords(argv[2], argv[3], true);
   }
   TestHeaderAnimations();
   TestHeaderVisibility();
+  TestHeaderRuntimeRefresh();
   TestCurrencyVisibility();
   TestHeaderNavigation();
   TestMessagesUpdateInbox();
@@ -1734,5 +2069,6 @@ int main(int argc, char** argv) {
   TestExtendingKeepsOnePart();
   TestBaseArkGetsItsOwnPart();
   TestMountedPartOfTheWrongSizeIsNotCarried();
+  TestLoadedMenuRefresh();
   return Finish();
 }

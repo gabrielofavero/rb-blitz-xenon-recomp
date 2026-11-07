@@ -480,7 +480,11 @@ bool InputStore::ApplyToProfile(profile::Profile* profile, std::string* error) c
   return true;
 }
 
-bool InputStore::Commit(std::string* error) {
+bool InputStore::Commit(std::string* error) { return CommitImpl(error, true); }
+
+bool InputStore::CommitForRestart(std::string* error) { return CommitImpl(error, false); }
+
+bool InputStore::CommitImpl(std::string* error, bool apply_live) {
   if (!usable_) {
     if (error != nullptr) {
       *error = "the profile could not be read, so it is left untouched: " + unreadable_;
@@ -541,14 +545,16 @@ bool InputStore::Commit(std::string* error) {
       }
     }
   };
-  apply(kKeyboardKey, keyboard_support_, running_keyboard_);
-  apply(kMouseKey, mouse_support_, running_mouse_);
+  if (apply_live) {
+    apply(kKeyboardKey, keyboard_support_, running_keyboard_);
+    apply(kMouseKey, mouse_support_, running_mouse_);
+  }
 
   staged_rows_.clear();
   staged_switches_.clear();
   staged_reset_all_.clear();
   dirty_ = false;
-  Publish();
+  if (apply_live) Publish();
   if (!applied) {
     if (error != nullptr) {
       *error = "the mapping was saved, but applying it to this game failed (" + apply_error +

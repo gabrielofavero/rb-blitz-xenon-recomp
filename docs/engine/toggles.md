@@ -1,5 +1,19 @@
 # Enhancement toggles
 
+The menu-return refresh is part of every boot and has no diagnostic toggle. After a durable
+settings commit, the guest rebuilds the splash rows and authored library header using current
+visibility. The header has routes for all eight Messages, Recommendations and RhythmVerse
+combinations. The RhythmVerse master is still boot-seeded; these settings retain their restart
+strategies until the full route is verified. See [hot-apply plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md)
+P6 and [menu payload](../../src/settings/menu_payload.cpp).
+
+`settings_ultimate_refresh_trial` (default false) enables guarded guest assignments after durable
+Ultimate commits. The provider must be active and compatible. Seven HUD/visual rows are assigned
+before the installed song-entry construction commands and acknowledged when those commands return;
+Gold Star Progress has a separate guarded trial. Visible consumers and restart survival are
+unverified, so all Ultimate rows retain restart strategy. See [hot-apply plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md)
+P5 and [settings screen](../../src/ui/settings_screen.cpp).
+
 `song_load_crash_recovery` (Runtime, default **true**, restart-scoped) enables
 the Windows external monitor that restarts a fatal process exit during an active
 song load, returning through normal discovery to the native main-menu crash

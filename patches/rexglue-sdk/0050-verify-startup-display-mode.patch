@@ -1,0 +1,15 @@
+diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
+--- a/src/ui/window_sdl.cpp
++++ b/src/ui/window_sdl.cpp
+@@ -210,7 +210,10 @@ bool WindowSDL::OpenImpl() {
+   }
+ 
+   desktop_mode_applied_ = false;
+-  ApplyDisplayModeNow();
++  if (!ApplyDisplayModeNow()) {
++    DestroySDLWindow();
++    return false;
++  }
+ #if REX_PLATFORM_MAC
+   CFPreferencesSetAppValue(CFSTR("ApplePressAndHoldEnabled"), kCFBooleanFalse,
+                            kCFPreferencesCurrentApplication);

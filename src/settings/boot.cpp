@@ -5,6 +5,7 @@
 // items this pass states instead of guessing.
 
 #include "settings/boot.h"
+#include "settings/display_runtime.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -266,14 +267,18 @@ class InstalledProviderSink final : public ProviderSink {
  public:
   InstalledProviderSink() : values_(::rb_blitz::ultimate::Provider().values) {}
   ProviderReadiness Readiness() const override {
-    return ::rb_blitz::ultimate::Provider().Active() ? ProviderReadiness::kCompatible
-                                                    : ProviderReadiness::kInactiveTarget;
+    const auto& provider = ::rb_blitz::ultimate::Provider();
+    return provider.payload_present && provider.shape.ok ? ProviderReadiness::kCompatible
+                                                          : ProviderReadiness::kInactiveTarget;
   }
   std::map<SettingId, Value> ReadValues() const override { return values_; }
   ProviderSaveResult Save(const std::map<SettingId, Value>& values) override {
     ProviderSaveResult result;
     const auto& provider = ::rb_blitz::ultimate::Provider();
-    if (!provider.Active()) { result.error = "the Ultimate provider is not active"; return result; }
+    if (!provider.payload_present || !provider.shape.ok) {
+      result.error = "the Ultimate provider is not compatible";
+      return result;
+    }
     std::map<std::string, std::string> updates;
     if (!ultimate_adapter::EncodeProviderValues(values, &updates, &result.error)) return result;
     for (auto& [variable, encoded] : updates) {
@@ -473,6 +478,28 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
         value = reconciler_.Reconcile(id, *service_->DescriptorFor(id), value, capability_snapshot_).effective;
       service_->SetBootValues(std::move(selected), "settings.graphics.recovered_from_failure");
       diagnostics_.push_back("safe graphics selected; requested preferences are retained and editable");
+    }
+  }
+
+  // A display preview can end in a crash before Keep/Revert. Its marker names the last working
+  // choice; use that choice for this boot without rewriting the saved preference. Clear the marker
+  // only after the same presented-frame probe that protects graphics recovery succeeds.
+  display_preview_recovery_pending_ = false;
+  if (service_ && !paths_.settings_file.empty()) {
+    std::string previous;
+    bool pending = false;
+    std::string error;
+    if (!ReadUnconfirmedDisplayPreview(paths_.settings_file, &previous, &pending, &error)) {
+      diagnostics_.push_back("display preview recovery marker could not be read: " + error);
+    } else if (pending) {
+      Value recovered_display;
+      recovered_display.kind = ValueKind::kEnum;
+      recovered_display.text = previous;
+      service_->SetBootValues({{SettingId::kDisplay, std::move(recovered_display)}},
+                              "settings.display.recovered_unconfirmed_preview");
+      display_preview_recovery_pending_ = true;
+      diagnostics_.push_back("unconfirmed display preview: using the previous window mode until "
+                             "a menu frame presents");
     }
   }
 
@@ -951,7 +978,8 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
 }
 
 void SettingsBoot::MenuFrame() {
-  if (menu_presented_ || !graphics_boot_.active() || !presented_probe_) return;
+  if (menu_presented_ || (!graphics_boot_.active() && !display_preview_recovery_pending_) ||
+      !presented_probe_) return;
   // The shell poll proves the menu is active. Wait several frames, then verify an
   // actual guest GPU image; process creation or a black host window isn't success.
   if (++menu_frames_ % 30 != 0) return;
@@ -959,13 +987,27 @@ void SettingsBoot::MenuFrame() {
   if (menu_presented_) return;
   if (!presented_probe_()) return;
   std::string error;
-  if (graphics_boot_.Presented(&error)) {
-    menu_presented_ = true;
-    REXLOG_INFO("settings_boot: presented menu frame; graphics marked last-known-good");
-  } else {
-    menu_presented_ = true;
-    REXLOG_WARN("settings_boot: cannot mark graphics ready: {}", error);
+  if (graphics_boot_.active() && !graphics_marker_attempted_) {
+    graphics_marker_attempted_ = true;
+    if (graphics_boot_.Presented(&error)) {
+      REXLOG_INFO("settings_boot: presented menu frame; graphics marked last-known-good");
+    } else {
+      REXLOG_WARN("settings_boot: cannot mark graphics ready: {}", error);
+    }
   }
+  if (display_preview_recovery_pending_) {
+    error.clear();
+    if (ClearUnconfirmedDisplayPreview(paths_.settings_file, &error)) {
+      display_preview_recovery_pending_ = false;
+      REXLOG_INFO("settings_boot: presented previous display mode; unconfirmed preview recovered");
+    } else {
+      REXLOG_WARN("settings_boot: presented previous display mode but preview marker remains: {}",
+                  error);
+    }
+  }
+  // A failed marker removal must be retried while this verified menu frame is
+  // available. Otherwise the next boot would recover an already-recovered mode.
+  menu_presented_ = !display_preview_recovery_pending_;
 }
 
 void SettingsBoot::Closing() {
@@ -991,8 +1033,9 @@ void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
     ++capability_snapshot_.revision;
     service_->SetCapabilities(capability_snapshot_);
     service_->SetProviderValues(provider.values);
+    service_->SetProviderDefaults(ultimate_adapter::DefaultsFromShape(provider.shape));
   }
-  if (service_ && provider.Active()) {
+  if (service_ && provider.payload_present && provider.shape.ok) {
     std::map<SettingId, std::vector<Choice>> choices;
     for (const auto& binding : ultimate_adapter::RowBindings()) {
       const auto found = provider.choices.find(std::string(binding.variable));
@@ -1132,11 +1175,15 @@ void SettingsBoot::FinishInit() {
     }
     service_->SetOverrides(override_values_, overrides_);
   }
-  // The restart prompt's baseline: what every row's effective value is *now*, with the process
-  // running it. A later `RestartPending()` compares the store against this, so a value the player
-  // put back the way it was is not a pending restart.
+  // Start the restart prompt's running baseline at the boot-effective values. Successful hot
+  // writes advance it later; a failed revert must still compare against the last live value.
   for (const auto& descriptor : service_->descriptors()) {
-    boot_values_[descriptor.id] = service_->EffectiveValue(descriptor.id);
+    running_values_[descriptor.id] = service_->EffectiveValue(descriptor.id);
+  }
+  application_ledger_.Seed(running_values_);
+  for (const auto& descriptor : service_->descriptors()) {
+    if (const auto* record = application_ledger_.Find(descriptor.id))
+      service_->SetApplicationRecord(descriptor.id, *record);
   }
   REXLOG_INFO("settings_boot: {} of {} applied value(s) stood; {} row(s) are owned by an explicit "
               "source",
@@ -1162,21 +1209,272 @@ void SettingsBoot::NoteRestartRows(const std::vector<SettingId>& rows) {
   }
 }
 
+uint64_t SettingsBoot::NoteCommittedRows(const std::map<SettingId, Value>& changed,
+                                          const HotApplyPlan& plan, uint64_t revision) {
+  const uint64_t live_generation = application_ledger_.Queue(revision, plan.live,
+                                                              ApplyBoundary::kNow);
+  std::map<SettingId, Value> restart;
+  for (SettingId id : plan.pending_restart) {
+    if (const auto value = changed.find(id); value != changed.end()) restart[id] = value->second;
+  }
+  application_ledger_.Queue(revision, restart, ApplyBoundary::kProcessRestart);
+  if (service_) {
+    for (const auto& [id, value] : changed) {
+      if (const auto* record = application_ledger_.Find(id)) {
+        service_->SetApplicationRecord(id, *record);
+        if (application_diagnostics_logged_ < 96) {
+          std::string old_value = ValueToString(record->running);
+          std::string new_value = ValueToString(value);
+          old_value.resize(std::min<size_t>(old_value.size(), 96));
+          new_value.resize(std::min<size_t>(new_value.size(), 96));
+          REXLOG_INFO("settings_apply: request {} rev={} gen={} boundary={} old='{}' new='{}'",
+                      SettingIdToken(id), record->revision, record->generation,
+                      ApplyBoundaryToken(record->boundary), old_value, new_value);
+          ++application_diagnostics_logged_;
+        }
+      }
+    }
+  }
+  return live_generation;
+}
+
+namespace {
+bool MenuRefreshOwns(SettingId id, MenuRefreshSurface surface) {
+  if (surface == MenuRefreshSurface::kHeaders)
+    return id == SettingId::kShowMessages || id == SettingId::kShowRecommendations;
+  return id == SettingId::kHideMainMenu || id == SettingId::kHiddenMainMenu ||
+         id == SettingId::kRefreshMusicLibrary || id == SettingId::kPlayCurrentSong ||
+         id == SettingId::kHideDownloadContent;
+}
+bool NextSongRefreshOwns(SettingId id) {
+  return id == SettingId::kHideHud || id == SettingId::kProgressBar ||
+         id == SettingId::kShowTimer || id == SettingId::kShowSteak ||
+         id == SettingId::kInputViewer || id == SettingId::kCameraAngle ||
+         id == SettingId::kGems;
+}
+}  // namespace
+
+void SettingsBoot::NoteMenuReturnRows(const std::map<SettingId, Value>& changed,
+                                      uint64_t revision) {
+  if (!service_) return;
+  std::map<SettingId, Value> deferred;
+  for (const auto& [id, value] : changed)
+    if (!service_->IsOverridden(id) &&
+        (MenuRefreshOwns(id, MenuRefreshSurface::kRows) ||
+         MenuRefreshOwns(id, MenuRefreshSurface::kHeaders)))
+      deferred[id] = value;
+  if (deferred.empty()) return;
+  application_ledger_.Queue(revision, deferred, ApplyBoundary::kMenuReturn);
+  for (const auto& [id, value] : deferred) {
+    (void)value;
+    if (const auto* record = application_ledger_.Find(id))
+      service_->SetApplicationRecord(id, *record);
+    if (application_diagnostics_logged_ < 96) {
+      REXLOG_INFO("settings_apply: defer {} rev={} gen={} boundary=menu_return",
+                  SettingIdToken(id), revision, application_ledger_.Find(id)->generation);
+      ++application_diagnostics_logged_;
+    }
+  }
+}
+
+void SettingsBoot::AcknowledgeMenuRefresh(MenuRefreshSurface surface, uint64_t revision) {
+  // A callback may precede an unrelated settings save. Each row still needs
+  // its own saved revision at or before the visibility snapshot it consumed.
+  if (!service_) return;
+  for (const auto& descriptor : service_->descriptors()) {
+    const SettingId id = descriptor.id;
+    if (!MenuRefreshOwns(id, surface)) continue;
+    const ApplicationRecord* record = application_ledger_.Find(id);
+    if (!record || record->boundary != ApplyBoundary::kMenuReturn ||
+        record->phase != ApplyPhase::kDeferred ||
+        record->revision > revision ||
+        !ValueEquals(record->saved, service_->EffectiveValue(id))) continue;
+    const Value applied = record->saved;
+    const uint64_t generation = record->generation;
+    if (application_diagnostics_logged_ < 96) {
+      REXLOG_INFO("settings_apply: consumer {} rev={} gen={} surface={} value='{}'",
+                  SettingIdToken(id), revision, generation,
+                  surface == MenuRefreshSurface::kRows ? "rows" : "headers",
+                  ValueToString(applied).substr(0, 96));
+      ++application_diagnostics_logged_;
+    }
+    NoteAppliedRows({{id, applied}}, {{id, HotApplyStatus::kApplied, {}}}, generation);
+  }
+}
+
+void SettingsBoot::NoteNextSongRows(const std::map<SettingId, Value>& changed,
+                                    uint64_t revision) {
+  if (!service_ || !service_->capabilities().provider.active ||
+      !service_->capabilities().provider.compatible) return;
+  std::map<SettingId, Value> deferred;
+  for (const auto& [id, value] : changed)
+    if (NextSongRefreshOwns(id) && !service_->IsOverridden(id)) deferred[id] = value;
+  if (deferred.empty()) return;
+  application_ledger_.Queue(revision, deferred, ApplyBoundary::kNextSong);
+  for (const auto& [id, value] : deferred) {
+    (void)value;
+    const auto* record = application_ledger_.Find(id);
+    if (!record) continue;
+    service_->SetApplicationRecord(id, *record);
+    if (application_diagnostics_logged_ < 96) {
+      REXLOG_INFO("settings_apply: defer {} rev={} gen={} boundary=next_song",
+                  SettingIdToken(id), revision, record->generation);
+      ++application_diagnostics_logged_;
+    }
+  }
+}
+
+void SettingsBoot::AcknowledgeNextSongRefresh(uint64_t revision) {
+  if (!service_) return;
+  for (const auto& descriptor : service_->descriptors()) {
+    const SettingId id = descriptor.id;
+    if (!NextSongRefreshOwns(id)) continue;
+    const ApplicationRecord* record = application_ledger_.Find(id);
+    if (!record || record->boundary != ApplyBoundary::kNextSong ||
+        record->phase != ApplyPhase::kDeferred || record->revision > revision ||
+        !ValueEquals(record->saved, service_->EffectiveValue(id))) continue;
+    const Value applied = record->saved;
+    const uint64_t generation = record->generation;
+    if (application_diagnostics_logged_ < 96) {
+      REXLOG_INFO("settings_apply: consumer {} rev={} gen={} surface=song value='{}'",
+                  SettingIdToken(id), revision, generation,
+                  ValueToString(applied).substr(0, 96));
+      ++application_diagnostics_logged_;
+    }
+    NoteAppliedRows({{id, applied}}, {{id, HotApplyStatus::kApplied, {}}}, generation);
+  }
+}
+
+void SettingsBoot::NoteSongSelectionRows(const std::map<SettingId, Value>& changed,
+                                         uint64_t revision) {
+  if (!service_ || !service_->capabilities().provider.active ||
+      !service_->capabilities().provider.compatible ||
+      service_->IsOverridden(SettingId::kShowPb)) return;
+  const auto found = changed.find(SettingId::kShowPb);
+  if (found == changed.end()) return;
+  application_ledger_.Queue(revision, {{found->first, found->second}}, ApplyBoundary::kNextSong);
+  if (const auto* record = application_ledger_.Find(SettingId::kShowPb)) {
+    service_->SetApplicationRecord(SettingId::kShowPb, *record);
+    if (application_diagnostics_logged_ < 96) {
+      REXLOG_INFO("settings_apply: defer {} rev={} gen={} boundary=next_song_selection",
+                  SettingIdToken(SettingId::kShowPb), revision, record->generation);
+      ++application_diagnostics_logged_;
+    }
+  }
+}
+
+void SettingsBoot::AcknowledgeSongSelectionRefresh(uint64_t revision) {
+  if (!service_) return;
+  const auto* record = application_ledger_.Find(SettingId::kShowPb);
+  if (!record || record->boundary != ApplyBoundary::kNextSong ||
+      record->phase != ApplyPhase::kDeferred || record->revision > revision ||
+      !ValueEquals(record->saved, service_->EffectiveValue(SettingId::kShowPb))) return;
+  const Value applied = record->saved;
+  const uint64_t generation = record->generation;
+  if (application_diagnostics_logged_ < 96) {
+    REXLOG_INFO("settings_apply: consumer {} rev={} gen={} surface=song_selection value='{}'",
+                SettingIdToken(SettingId::kShowPb), revision, generation,
+                ValueToString(applied).substr(0, 96));
+    ++application_diagnostics_logged_;
+  }
+  NoteAppliedRows({{SettingId::kShowPb, applied}},
+                  {{SettingId::kShowPb, HotApplyStatus::kApplied, {}}}, generation);
+}
+
+void SettingsBoot::NoteControllerLayoutQueued(uint64_t ticket, uint64_t generation,
+                                              const Value& value) {
+  if (!service_ || ticket == 0 || value.kind != ValueKind::kEnum) return;
+  const auto* record = application_ledger_.Find(SettingId::kButtonScheme);
+  if (!record || record->generation != generation || record->phase != ApplyPhase::kQueued ||
+      !ValueEquals(record->saved, value)) return;
+  controller_layout_ticket_ = ticket;
+  controller_layout_generation_ = generation;
+  controller_layout_value_ = value;
+  if (application_diagnostics_logged_ < 96) {
+    REXLOG_INFO("settings_apply: defer {} rev={} gen={} boundary=next_gpu_frame ticket={}",
+                SettingIdToken(SettingId::kButtonScheme), record->revision, generation, ticket);
+    ++application_diagnostics_logged_;
+  }
+}
+
+void SettingsBoot::AcknowledgeControllerLayout(uint64_t ticket, const std::string& scheme) {
+  if (!service_ || ticket == 0 || ticket != controller_layout_ticket_ ||
+      controller_layout_value_.text != scheme ||
+      !ValueEquals(service_->EffectiveValue(SettingId::kButtonScheme),
+                   controller_layout_value_)) return;
+  const auto* record = application_ledger_.Find(SettingId::kButtonScheme);
+  if (!record || record->generation != controller_layout_generation_ ||
+      record->phase != ApplyPhase::kQueued) return;
+  const Value applied = controller_layout_value_;
+  const uint64_t generation = controller_layout_generation_;
+  controller_layout_ticket_ = 0;
+  if (application_diagnostics_logged_ < 96) {
+    REXLOG_INFO("settings_apply: consumer {} rev={} gen={} surface=gpu_frame ticket={} value='{}'",
+                SettingIdToken(SettingId::kButtonScheme), record->revision, generation,
+                ticket, scheme.substr(0, 96));
+    ++application_diagnostics_logged_;
+  }
+  NoteAppliedRows({{SettingId::kButtonScheme, applied}},
+                  {{SettingId::kButtonScheme, HotApplyStatus::kApplied, {}}}, generation);
+}
+
+void SettingsBoot::NoteAppliedRows(const std::map<SettingId, Value>& requested,
+                                   const std::vector<HotApplyOutcome>& outcomes,
+                                   uint64_t generation) {
+  for (const HotApplyOutcome& outcome : outcomes) {
+    const auto value = requested.find(outcome.id);
+    application_ledger_.Complete(outcome.id, generation, outcome.status,
+                                  outcome.status == HotApplyStatus::kApplied && value != requested.end()
+                                      ? std::optional<Value>(value->second) : std::nullopt,
+                                  outcome.error);
+    // The ledger reconciles late completions against the newest request. Use its actual running
+    // value, and clear a fallback only when that reconciliation says the saved value is applied.
+    if (const auto* record = application_ledger_.Find(outcome.id)) {
+      running_values_[outcome.id] = record->running;
+      if (record->phase == ApplyPhase::kApplied) {
+        std::erase(restart_rows_noted_, outcome.id);
+      }
+    }
+    if (service_) {
+      if (const auto* record = application_ledger_.Find(outcome.id))
+        service_->SetApplicationRecord(outcome.id, *record);
+    }
+    if (application_diagnostics_logged_ < 96) {
+      const ApplicationRecord* record = application_ledger_.Find(outcome.id);
+      REXLOG_INFO("settings_apply: ack {} rev={} gen={} status={} phase={} running='{}' reason='{}'",
+                  SettingIdToken(outcome.id), record ? record->revision : 0, generation,
+                  HotApplyStatusToken(outcome.status),
+                  record ? ApplyPhaseToken(record->phase) : "unknown",
+                  record ? ValueToString(record->running).substr(0, 96) : std::string{},
+                  outcome.error.substr(0, 96));
+      ++application_diagnostics_logged_;
+    }
+  }
+}
+
 bool SettingsBoot::RestartPending() const {
-  if (!service_ || boot_values_.empty()) {
+  if (!service_ || running_values_.empty()) {
     return false;
   }
   // Rows an explicit source owns are not editable, so they can never be the reason for a prompt.
   std::map<SettingId, Value> current;
   for (const auto& descriptor : service_->descriptors()) {
-    if (overrides_.contains(descriptor.id) || !boot_values_.contains(descriptor.id)) {
+    if (overrides_.contains(descriptor.id) || !running_values_.contains(descriptor.id)) {
       continue;
     }
     current[descriptor.id] = service_->EffectiveValue(descriptor.id);
   }
-  return !PendingRestartRows(boot_values_, current, service_->descriptors(),
-                             restart_rows_noted_)
-              .empty();
+  for (SettingId id : PendingRestartRows(running_values_, current, service_->descriptors(),
+                                         restart_rows_noted_)) {
+    const ApplicationRecord* record = application_ledger_.Find(id);
+    if (record && id == SettingId::kButtonScheme &&
+        record->phase == ApplyPhase::kQueued && controller_layout_ticket_ != 0) continue;
+    if (record && (record->boundary == ApplyBoundary::kMenuReturn ||
+                   record->boundary == ApplyBoundary::kNextSong) &&
+        record->phase == ApplyPhase::kDeferred) continue;
+    return true;
+  }
+  return false;
 }
 
 }  // namespace rb_blitz::settings::boot

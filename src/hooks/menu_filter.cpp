@@ -9,9 +9,11 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <shared_mutex>
 #include <set>
 #include <string>
 #include <vector>
@@ -64,6 +66,22 @@ struct Settings {
 
 Settings g_settings;
 bool g_configured = false;
+std::shared_mutex g_runtime_visibility_mutex;
+rb_blitz::menu_filter::RuntimeVisibility g_runtime_visibility;
+std::atomic<bool> g_runtime_menu_refresh_ready{false};
+std::atomic<unsigned> g_runtime_menu_query_logs{0};
+
+bool Visible(const rb_blitz::menu_filter::RuntimeVisibility& state, std::string_view row) {
+  // The entry into settings and the menu's fixed endpoints must survive every
+  // saved hide list, including one imported from an older settings file.
+  if (row == "splash_start" || row == "splash_options" || row == "splash_exit") return true;
+  if (row == "splash_dlc" && !state.refresh_songs) return false;
+  if (row == "splash_play_current" && !state.play_current_song) return false;
+  if (row == "splash_dlc_store" && !state.download_content) return false;
+  if (row == "rbbz_rhythmverse" && !state.rhythmverse) return false;
+  return std::find(state.hidden_rows.begin(), state.hidden_rows.end(), row) ==
+         state.hidden_rows.end();
+}
 
 // A candidate file the last read cut short: where its bytes are in guest memory, how
 // many contiguous bytes followed them, and the archive offset they came from. The next
@@ -557,6 +575,70 @@ void Configure(bool settings_restart_boot) {
 }
 
 const std::vector<std::string>& HiddenRows() { return g_settings.rows; }
+
+void PublishRuntimeVisibility(RuntimeVisibility visibility) {
+  std::unique_lock lock(g_runtime_visibility_mutex);
+  g_runtime_visibility = std::move(visibility);
+}
+
+RuntimeVisibility SnapshotRuntimeVisibility() {
+  std::shared_lock lock(g_runtime_visibility_mutex);
+  return g_runtime_visibility;
+}
+
+void SetRuntimeMenuRefreshReady(bool ready) {
+  g_runtime_menu_refresh_ready.store(ready, std::memory_order_release);
+  REXLOG_INFO("menu_filter: loaded menu refresh route {}", ready ? "ready" : "unavailable");
+}
+
+bool RuntimeMenuRefreshReady() {
+  return g_runtime_menu_refresh_ready.load(std::memory_order_acquire);
+}
+
+bool AnswerRuntimeMenuQuery(std::string_view path, bool* answer) {
+  constexpr std::string_view prefix = "rbbz-menu/";
+  if (!path.starts_with(prefix)) return false;
+  if (!answer) return true;
+  *answer = false;
+  const auto suffix = path.substr(prefix.size());
+  if (suffix == "rows-applied" || suffix == "headers-applied") {
+    uint64_t revision = 0;
+    {
+      std::shared_lock lock(g_runtime_visibility_mutex);
+      revision = g_runtime_visibility.revision;
+    }
+    if (RuntimeMenuRefreshReady()) {
+      if (auto* boot = rb_blitz::settings::boot::SettingsBoot::Current()) {
+        boot->AcknowledgeMenuRefresh(
+            suffix == "rows-applied"
+                ? rb_blitz::settings::boot::MenuRefreshSurface::kRows
+                : rb_blitz::settings::boot::MenuRefreshSurface::kHeaders,
+            revision);
+      }
+    }
+    if (g_runtime_menu_query_logs.fetch_add(1, std::memory_order_relaxed) < 64)
+      REXLOG_INFO("menu_filter: guest {} rev={} route_ready={}", suffix, revision,
+                  RuntimeMenuRefreshReady());
+    return true;
+  }
+  std::shared_lock lock(g_runtime_visibility_mutex);
+  if (suffix.starts_with("visible/")) {
+    *answer = Visible(g_runtime_visibility, suffix.substr(8));
+  } else if (suffix.starts_with("hidden/")) {
+    *answer = !Visible(g_runtime_visibility, suffix.substr(7));
+  } else if (suffix == "messages") {
+    *answer = g_runtime_visibility.messages;
+  } else if (suffix == "recommendations") {
+    *answer = g_runtime_visibility.recommendations;
+  } else if (suffix == "rhythmverse") {
+    *answer = g_runtime_visibility.rhythmverse;
+  }
+  if (suffix == "hidden/splash_leaderboard" &&
+      g_runtime_menu_query_logs.fetch_add(1, std::memory_order_relaxed) < 64)
+    REXLOG_INFO("menu_filter: guest hidden/splash_leaderboard={} rev={} route_ready={}",
+                *answer, g_runtime_visibility.revision, RuntimeMenuRefreshReady());
+  return true;
+}
 
 }  // namespace rb_blitz::menu_filter
 

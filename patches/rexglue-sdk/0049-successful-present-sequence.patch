@@ -1,0 +1,40 @@
+diff --git a/include/rex/ui/presenter.h b/include/rex/ui/presenter.h
+--- a/include/rex/ui/presenter.h
++++ b/include/rex/ui/presenter.h
+@@ -347,6 +347,13 @@
+   // them too.
+   void PaintFromUIThread(bool force_paint = false);
+ 
++  // Increments only after the backend successfully submits a painted frame to
++  // the OS presentation connection. Can be sampled from any thread to confirm
++  // that a display change was followed by a successful presentation.
++  uint64_t successful_present_sequence() const {
++    return successful_present_sequence_.load(std::memory_order_acquire);
++  }
++
+   // Pass 0 as width or height to disable guest output until the next refresh
+   // with an actual size. The display aspect ratio may be specified like 16:9 or
+   // like 1280:720, both are accepted, for simplicity, the guest display size
+@@ -934,6 +941,8 @@
+   // repaint request anyway.
+   std::atomic<bool> ui_thread_paint_requested_{false};
+ 
++  std::atomic<uint64_t> successful_present_sequence_{0};
++
+   std::mutex guest_output_paint_config_mutex_;
+   // UI thread: writable, guest output thread: read-only.
+   GuestOutputPaintConfig guest_output_paint_config_;
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -1507,8 +1507,10 @@
+   switch (result) {
+     case PaintResult::kPresented:
+       surface_paint_connection_was_optimal_at_successful_paint_ = true;
++      successful_present_sequence_.fetch_add(1, std::memory_order_release);
+       break;
+     case PaintResult::kPresentedSuboptimal:
++      successful_present_sequence_.fetch_add(1, std::memory_order_release);
+       // Make outdated if previously optimal, now suboptimal, but don't cause
+       // the connection to become outdated if it has been suboptimal from the
+       // very beginning.

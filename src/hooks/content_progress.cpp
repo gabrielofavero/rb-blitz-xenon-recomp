@@ -45,6 +45,8 @@ Model g_model;
 std::atomic<uint32_t> g_object{0};
 // The last whole percent handed to the title's bar, under g_mutex; -1 = nothing pushed.
 int g_pushed_percent = -1;
+int g_delivered_percent = -1;
+bool g_guest_owns_panel = false;
 uint64_t g_native_increments = 0;
 int64_t g_start_us = 0;
 int64_t g_last_enum_us = 0;
@@ -196,6 +198,8 @@ void BeginAttempt() { // g_mutex held
   g_metadata_reads = g_cache_reads = g_cache_writes = 0;
   g_metadata_us = g_cache_read_us = g_cache_write_us = 0;
   g_pushed_percent = -1;
+  g_delivered_percent = -1;
+  g_guest_owns_panel = false;
   REXLOG_INFO("content_pipeline: attempt {} started", g_model.Get().attempt);
   REXLOG_INFO("dlc_load: begin attempt={} pacing={}", g_model.Get().attempt,
               g_uncap_enabled);
@@ -224,8 +228,6 @@ void WatchXmsg(PPCContext& ctx, uint8_t* base, const char* symbol, bool overlapp
   // XAM_OVERLAPPED.result (xam_msg.cpp / AppManager::DispatchMessageAsync).
   uint32_t result = ctx.r3.u32;
   if (overlapped && result == kPending) result = Be32(base + overlapped);
-  uint32_t counted = 0, expected = 0;
-  int percent = -1;
   {
     std::lock_guard lock(g_mutex);
     if (!g_model.Get().active()) BeginAttempt();
@@ -241,21 +243,11 @@ void WatchXmsg(PPCContext& ctx, uint8_t* base, const char* symbol, bool overlapp
     }
     // The title's bar: the Flow asks the panel for these two numbers, summed over every
     // batch of the attempt, so parallel walks read as one monotonic count.
-    counted = g_model.ItemsCounted();
-    expected = g_model.ItemsExpected();
+    const auto counted = g_model.ItemsCounted();
+    const auto expected = g_model.ItemsExpected();
     if (expected != 0) {
-      const int moved = static_cast<int>((static_cast<uint64_t>(counted) * 100) / expected);
-      if (moved != g_pushed_percent) {
-        g_pushed_percent = moved;
-        percent = moved;
-      }
+      g_pushed_percent = static_cast<int>((static_cast<uint64_t>(counted) * 100) / expected);
     }
-  }
-  if (percent < 0) return;
-  PushProgress(ctx, base, counted, expected);
-  if (percent == 0 || percent == 25 || percent == 50 || percent == 75 || percent == 100) {
-    REXLOG_INFO("content_pipeline: the title's own bar is at {} of {} item(s) ({}%)", counted,
-                expected, percent);
   }
 }
 } // namespace
@@ -268,7 +260,28 @@ void Configure() {
               "batches; pacing={}",
               g_uncap_enabled);
 }
-void Tick() {} // kept for the shell poll; completion is UIManager's verified panel
+void Tick(PPCContext& ctx, uint8_t* base) {
+  uint32_t counted = 0, expected = 0;
+  int percent = -1;
+  {
+    std::lock_guard lock(g_mutex);
+    if (g_guest_owns_panel || g_pushed_percent < 0 ||
+        g_pushed_percent == g_delivered_percent) {
+      return;
+    }
+    counted = g_model.ItemsCounted();
+    expected = g_model.ItemsExpected();
+    percent = g_pushed_percent;
+    g_delivered_percent = percent;
+  }
+  // The enumeration callbacks run on workers. Only the main guest poll may
+  // update the title's Flow object while its UI is being traversed.
+  PushProgress(ctx, base, counted, expected);
+  if (percent == 0 || percent == 25 || percent == 50 || percent == 75 || percent == 100) {
+    REXLOG_INFO("content_pipeline: the title's own bar is at {} of {} item(s) ({}%)", counted,
+                expected, percent);
+  }
+}
 
 void ObserveScreen(std::string_view screen, std::string_view panel, bool available) {
   std::lock_guard lock(g_mutex);
@@ -343,6 +356,7 @@ extern "C" REX_FUNC(sub_827593A8) {
   uint32_t counted = 0, expected = 0;
   {
     std::lock_guard lock(g_mutex);
+    g_guest_owns_panel = true;
     counted = g_model.ItemsCounted();
     expected = g_model.ItemsExpected();
   }
@@ -369,6 +383,7 @@ extern "C" REX_FUNC(sub_827593B8) {
 extern "C" REX_FUNC(sub_827593C8) {
   {
     std::lock_guard lock(g_mutex);
+    g_guest_owns_panel = true;
     REXLOG_INFO("content_pipeline: guest subphase complete native_increments={}; the title "
                 "owns the panel from here",
                 g_native_increments);

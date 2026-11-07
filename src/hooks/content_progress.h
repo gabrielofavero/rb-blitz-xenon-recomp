@@ -4,9 +4,11 @@
 #include <string_view>
 #include "ui/content_progress.h"
 
+struct PPCContext;
+
 namespace rb_blitz::content_progress {
 void Configure();
-void Tick();
+void Tick(PPCContext& ctx, uint8_t* base);
 // UIManager::Poll supplies the focused panel and transition state. The phase itself is
 // shown by the title's own UI (the connect panel's bar), not by a host overlay.
 void ObserveScreen(std::string_view screen, std::string_view panel, bool available);

@@ -39,6 +39,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rb_blitz::menu_filter {
@@ -57,5 +58,24 @@ void RetargetRecord(uint8_t* guest_base, const uint8_t before[20], const uint8_t
 // payload builder needs the same list to bake into the record it generates, because the in-flight
 // edit cannot deliver it to a splash record that spans two ark reads (measured 2026-10-20).
 const std::vector<std::string>& HiddenRows();
+
+// Guest-side menu predicates. The publisher supplies one coherent generation after a
+// durable settings commit. A loaded panel can query these through file_exists;
+// the read hook's boot copy remains immutable.
+struct RuntimeVisibility {
+  uint64_t revision = 0;
+  std::vector<std::string> hidden_rows;
+  bool refresh_songs = false;
+  bool play_current_song = false;
+  bool download_content = false;
+  bool rhythmverse = false;
+  bool messages = true;
+  bool recommendations = false;
+};
+void PublishRuntimeVisibility(RuntimeVisibility visibility);
+RuntimeVisibility SnapshotRuntimeVisibility();
+void SetRuntimeMenuRefreshReady(bool ready);
+bool RuntimeMenuRefreshReady();
+bool AnswerRuntimeMenuQuery(std::string_view path, bool* answer);
 
 }  // namespace rb_blitz::menu_filter

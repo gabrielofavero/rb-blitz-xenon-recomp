@@ -93,6 +93,7 @@ class InputStore final : public settings::InputBindingStore {
   bool StageReset(std::string_view token, std::string* error) override;
   bool StageResetAll(std::string_view token, std::string* error) override;
   bool Commit(std::string* error) override;
+  bool CommitForRestart(std::string* error) override;
   bool BeginCapture(std::string_view token, std::string* error) override;
   bool BeginCaptureReplace(std::string_view token, std::string* error) override;
   void CancelCapture() override;
@@ -116,6 +117,7 @@ class InputStore final : public settings::InputBindingStore {
   const std::filesystem::path& path() const { return path_; }
 
  private:
+  bool CommitImpl(std::string* error, bool apply_live);
   enum class TableSel : uint8_t { kGeneral, kController, kKeyboardMouse, kMusic };
 
   InputStore(std::filesystem::path path, profile::ProfileLoadResult load,

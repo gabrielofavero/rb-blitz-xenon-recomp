@@ -204,6 +204,37 @@ void TestControllerSchemeRoundTrip() {
   schema::SetControllerSchemes({{"retail", "Xbox 360"}});
 }
 
+void TestCommitRevalidatesCurrentCatalogAndOverride() {
+  BeginCase("service: a package removed after Set cannot be saved by Commit");
+  schema::SetControllerSchemes({{"retail", "Xbox 360"}, {"one-glyph", "One Glyph"}});
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  Service service(paths);
+  service.Boot(nullptr, PathEntry{}, nullptr);
+  service.SetCapabilities(CapabilitySnapshot{});
+  const uint64_t capability = service.capability_revision();
+  const auto txn = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(txn, SettingId::kButtonScheme, EnumV("one-glyph"), capability).ok);
+  schema::SetControllerSchemes({{"retail", "Xbox 360"}});
+  service.RefreshControllerSchemes();
+  CHECK_EQ(service.capability_revision(), capability);
+  const CommitResult absent_package = service.Commit(txn);
+  CHECK_TRUE(absent_package.status == CommitStatus::kInvalid);
+  CHECK_EQ(service.revision(), 0u);
+  CHECK_FALSE(fs::exists(paths.settings_file));
+  service.Cancel(txn);
+
+  BeginCase("service: a newly explicit override invalidates an already staged edit");
+  const auto override_txn = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(override_txn, SettingId::kVsync, BoolV(false), capability).ok);
+  service.SetOverrides({{SettingId::kVsync, BoolV(true)}},
+                       {{SettingId::kVsync, Source::kCommandLine}});
+  const CommitResult overridden = service.Commit(override_txn);
+  CHECK_TRUE(overridden.status == CommitStatus::kInvalid);
+  CHECK_EQ(service.revision(), 0u);
+  CHECK_FALSE(fs::exists(paths.settings_file));
+}
+
 void TestLoadGuardRoundTrip() {
   BeginCase("load guard: strict native hot enum persists and invalid values cannot commit");
   Scratch scratch;
@@ -462,6 +493,20 @@ void TestValidationAndPending() {
   service.Cancel(txn2);
   const CommitResult after_cancel = service.Commit(txn2);
   CHECK_TRUE(after_cancel.status == CommitStatus::kInvalid);
+
+  BeginCase("service: capability changes invalidate staged values before disk I/O");
+  const uint64_t txn3 = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(txn3, SettingId::kResolution, ResolutionV(1920, 1080),
+                         service.capability_revision()).ok);
+  CapabilitySnapshot changed = Capabilities(2);
+  changed.supported_resolutions.pop_back();
+  service.SetCapabilities(std::move(changed));
+  const CommitResult stale_commit = service.Commit(txn3);
+  CHECK_TRUE(stale_commit.status == CommitStatus::kInvalid);
+  CHECK_TRUE(!stale_commit.errors.empty() &&
+             stale_commit.errors.front() == "settings.capabilities_changed");
+  CHECK_EQ(service.revision(), 0u);
+  CHECK_FALSE(fs::exists(paths.settings_file));
 }
 
 void TestOverridesAndCorrections() {
@@ -563,6 +608,7 @@ void TestProviderSeam() {
     CHECK_TRUE(partial.status == CommitStatus::kPartial);
     CHECK_FALSE(partial.provider_written);
     CHECK_FALSE(partial.restart_required);
+    CHECK_TRUE(service.last_commit_changes().empty());
   }
 
   BeginCase("service: a durable provider save is reported and a failed one is not");
@@ -571,20 +617,48 @@ void TestProviderSeam() {
   {
     const uint64_t txn = service.BeginEdit(service.revision());
     CHECK_TRUE(service.Set(txn, SettingId::kHideHud, BoolV(true), service.capability_revision()).ok);
+    CHECK_TRUE(service.CommittedProviderValue(SettingId::kHideHud) == nullptr);
     const CommitResult saved = service.Commit(txn);
     CHECK_TRUE(saved.status == CommitStatus::kSaved);
     CHECK_TRUE(saved.provider_written);
     CHECK_EQ(provider.saves, 1);
     CHECK_TRUE(provider.values.empty());
+    const Value* committed = service.CommittedProviderValue(SettingId::kHideHud);
+    CHECK_TRUE(committed != nullptr && committed->boolean);
   }
   provider.durable = false;
   {
     const uint64_t txn = service.BeginEdit(service.revision());
     CHECK_TRUE(service.Set(txn, SettingId::kShowTimer, BoolV(true), service.capability_revision()).ok);
+    CHECK_TRUE(service.CommittedProviderValue(SettingId::kShowTimer) == nullptr);
     const CommitResult failed = service.Commit(txn);
     CHECK_TRUE(failed.status == CommitStatus::kPartial);
     CHECK_FALSE(failed.provider_written);
+    CHECK_TRUE(service.last_commit_changes().empty());
+    CHECK_TRUE(service.CommittedProviderValue(SettingId::kShowTimer) == nullptr);
+    CHECK_TRUE(service.CommittedProviderValue(SettingId::kHideHud)->boolean);
+    provider.durable = true;
+    const CommitResult retried = service.Commit(txn);
+    CHECK_TRUE(retried.status == CommitStatus::kSaved && retried.provider_written);
+    CHECK_TRUE(service.CommittedProviderValue(SettingId::kShowTimer)->boolean);
   }
+  BeginCase("service: a later provider save preserves earlier committed runtime values");
+  {
+    const uint64_t txn = service.BeginEdit(service.revision());
+    CHECK_TRUE(service.Set(txn, SettingId::kGoldProgress, BoolV(true),
+                           service.capability_revision()).ok);
+    const CommitResult later = service.Commit(txn);
+    CHECK_TRUE(later.status == CommitStatus::kSaved && later.provider_written);
+    CHECK_TRUE(service.CommittedProviderValue(SettingId::kGoldProgress)->boolean);
+    CHECK_TRUE(service.CommittedProviderValue(SettingId::kShowTimer)->boolean);
+    CHECK_TRUE(service.CommittedProviderValue(SettingId::kHideHud)->boolean);
+  }
+  BeginCase("service: runtime provider read excludes native overrides and non-provider rows");
+  service.SetOverrides({{SettingId::kHideHud, BoolV(false)}},
+                       {{SettingId::kHideHud, Source::kCommandLine}});
+  CHECK_FALSE(service.EffectiveValue(SettingId::kHideHud).boolean);
+  CHECK_TRUE(service.CommittedProviderValue(SettingId::kHideHud)->boolean);
+  CHECK_TRUE(service.CommittedProviderValue(SettingId::kVsync) == nullptr);
 }
 
 void TestCombinedCommitAndRestart() {
@@ -635,6 +709,9 @@ void TestInterruptedCommitRecovery() {
     CHECK_TRUE(service.Set(txn, SettingId::kHideHud, BoolV(true), 1).ok);
     const auto result = service.Commit(txn);
     CHECK_TRUE(result.status == CommitStatus::kPartial);
+    CHECK_EQ(service.last_commit_changes().size(), 1u);
+    CHECK_EQ(service.last_commit_changes().count(SettingId::kVsync), 1u);
+    CHECK_EQ(service.last_commit_changes().count(SettingId::kHideHud), 0u);
     CHECK_EQ(service.revision(), 0u);
     CHECK_FALSE(result.restart_required);
     CHECK_TRUE(fs::exists(journal));
@@ -843,10 +920,84 @@ void TestCvarVocabulary() {
   CHECK_TRUE(SourceRank(Source::kEnvironment) > SourceRank(Source::kDeveloperConfig));
 }
 
+void TestApplicationSnapshot() {
+  BeginCase("snapshot: saved, running and uncommitted values have separate fields");
+  Scratch scratch;
+  Service service(Paths(scratch));
+  service.Boot(nullptr, {}, nullptr);
+  service.SetCapabilities(Capabilities());
+  const auto txn = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(txn, SettingId::kVsync, BoolV(false),
+                         service.capability_revision()).ok);
+  CHECK_TRUE(service.Commit(txn).status == CommitStatus::kSaved);
+  ApplicationRecord record;
+  record.saved = BoolV(false);
+  record.running = BoolV(true);
+  record.boundary = ApplyBoundary::kNow;
+  record.phase = ApplyPhase::kFailed;
+  record.generation = 7;
+  record.reason = "write failed";
+  service.SetApplicationRecord(SettingId::kVsync, record);
+  bool found = false;
+  for (const FieldState& field : service.GetSnapshot().fields) {
+    if (field.id != SettingId::kVsync) continue;
+    found = true;
+    CHECK_TRUE(field.running.boolean);
+    CHECK_FALSE(field.requested.boolean == field.running.boolean);
+    CHECK_TRUE(field.application_phase == ApplyPhase::kFailed);
+    CHECK_EQ(field.application_generation, 7u);
+    CHECK_TRUE(field.restart_required);
+  }
+  CHECK_TRUE(found);
+}
+
+void TestIndependentBootRecoveryReasons() {
+  BeginCase("service: graphics and display recovery keep independent effective values");
+  Scratch scratch;
+  Service service(Paths(scratch));
+  service.Boot(nullptr, {}, nullptr);
+  service.SetCapabilities(Capabilities());
+  service.SetBootValues({{SettingId::kRenderer, EnumV("vulkan")}},
+                        "settings.graphics.recovered_from_failure");
+  service.SetBootValues({{SettingId::kDisplay, EnumV("windowed")}},
+                        "settings.display.recovered_unconfirmed_preview");
+  CHECK_TRUE(service.EffectiveValue(SettingId::kRenderer).text == "vulkan");
+  CHECK_TRUE(service.EffectiveValue(SettingId::kDisplay).text == "windowed");
+  for (const FieldState& field : service.GetSnapshot().fields) {
+    if (field.id == SettingId::kRenderer)
+      CHECK_TRUE(field.correction_reason_key == "settings.graphics.recovered_from_failure");
+    if (field.id == SettingId::kDisplay)
+      CHECK_TRUE(field.correction_reason_key ==
+                 "settings.display.recovered_unconfirmed_preview");
+  }
+}
+
+void TestProviderRestoreUsesInstalledDefaults() {
+  BeginCase("restore defaults uses the installed provider's default values");
+  Scratch scratch;
+  Service service(Paths(scratch));
+  service.Boot(nullptr, {}, nullptr);
+  CapabilitySnapshot caps = Capabilities();
+  caps.provider.active = false;  // Restore also covers an installed, inactive Ultimate target.
+  caps.provider.compatible = false;
+  service.SetCapabilities(caps);
+  FakeProvider provider;
+  provider.values[SettingId::kHideHud] = BoolV(true);
+  service.SetProviderSink(&provider);
+  service.SetProviderDefaults({{SettingId::kHideHud, BoolV(false)}});
+  const uint64_t txn = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageDefaults(txn).ok);
+  const CommitResult saved = service.Commit(txn);
+  CHECK_TRUE(saved.status == CommitStatus::kSaved);
+  CHECK_EQ(provider.saves, 1);
+  CHECK_FALSE(service.CommittedProviderValue(SettingId::kHideHud)->boolean);
+}
+
 }  // namespace
 
 int main() {
   TestControllerSchemeRoundTrip();
+  TestCommitRevalidatesCurrentCatalogAndOverride();
   TestStartupRoundTrip();
   TestRefreshSongsDefaultAndOverride();
   TestLoadGuardRoundTrip();
@@ -862,5 +1013,8 @@ int main() {
   TestInterruptedCommitRecovery();
   TestUnfinishableCommitJournal();
   TestCvarVocabulary();
+  TestApplicationSnapshot();
+  TestIndependentBootRecoveryReasons();
+  TestProviderRestoreUsesInstalledDefaults();
   return Finish();
 }

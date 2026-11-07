@@ -1,0 +1,64 @@
+diff --git a/src/system/runtime.cpp b/src/system/runtime.cpp
+--- a/src/system/runtime.cpp
++++ b/src/system/runtime.cpp
+@@ -9,6 +9,7 @@
+  *              See LICENSE file in the project root for full license text.
+  */
+ 
++#include <chrono>
+ #include <rex/chrono/clock.h>
+ #include <rex/cvar.h>
+ #include <rex/filesystem/devices/host_path_device.h>
+@@ -214,6 +215,7 @@
+   }
+ 
+   if (image_info.func_mappings) {
++    const auto registration_started = std::chrono::steady_clock::now();
+     int count = 0;
+     int duplicates = 0;
+     int rejected = 0;
+@@ -233,8 +235,12 @@
+         ++count;
+       }
+     }
+-    REXSYS_DEBUG("Registered {} recompiled functions ({} duplicates, {} rejected)", count,
+-                 duplicates, rejected);
++    REXSYS_INFO("Registered {} recompiled functions in {:.1f} ms ({} duplicates, {} rejected)",
++                count,
++                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
++                                                           registration_started)
++                    .count(),
++                duplicates, rejected);
+     if (rejected > 0) {
+       REXSYS_ERROR("PPCImageInfo registration: {} func_mappings entries rejected", rejected);
+       Shutdown();
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <array>
++#include <chrono>
+ #include <filesystem>
+ 
+ #include <rex/assert.h>
+@@ -56,6 +57,7 @@
+     attached_window_ = window;
+     window->AddListener(this);
+     window->app_context().CallInUIThreadSynchronous([this]() {
++      const auto input_started = std::chrono::steady_clock::now();
+       // Initialize SDL events subsystem
+       if (!SDL_InitSubSystem(SDL_INIT_EVENTS)) {
+         REXLOG_ERROR("SDL: Failed to init events subsystem: {}", SDL_GetError());
+@@ -94,6 +96,10 @@
+         return;
+       }
+       SDL_Gamepad_initialized_ = true;
++      REXLOG_INFO("SDL gamepad subsystem initialized in {:.1f} ms",
++                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
++                                                             input_started)
++                      .count());
+ 
+       // Load custom controller mappings if available
+       if (!REXCVAR_GET(hid_mappings_file).empty()) {

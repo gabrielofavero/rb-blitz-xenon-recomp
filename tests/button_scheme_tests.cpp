@@ -2,6 +2,7 @@
 #include "controller_schemes/schemes.h"
 #include "assets/texture_codec.h"
 #include "assets/input_font_atlas.h"
+#include "assets/texture_override.h"
 #include "ui/input_font_scene.h"
 
 #include <cassert>
@@ -44,6 +45,35 @@ static void Check(bool value, const char* message) {
   if (!value) { std::cerr << message << '\n'; std::abort(); }
 }
 int main() {
+  {
+    rb_blitz::assets::ControllerSchemeCompletion completion;
+    const uint64_t first = completion.Request();
+    completion.Selected(first, "one", 7);
+    completion.Complete(6);
+    Check(!completion.LatestApplied(), "layout acknowledged before its font revision");
+    const uint64_t second = completion.Request();
+    completion.Selected(first, "one", 7);  // stale GPU poll after a newer request
+    completion.Complete(7);
+    Check(!completion.LatestApplied(), "superseded layout was acknowledged");
+    completion.Selected(second, "two", 8);
+    completion.Complete(7);
+    Check(!completion.LatestApplied(), "second layout acknowledged before font completion");
+    const uint64_t third = completion.Request();
+    completion.Selected(second, "two", 8);
+    completion.Selected(third, "one", 9);  // A/B/A keeps the newest ticket
+    completion.Complete(8);
+    Check(!completion.LatestApplied(), "A/B/A acknowledged an old font result");
+    completion.Complete(9);
+    const auto applied = completion.LatestApplied();
+    Check(applied && applied->ticket == third && applied->scheme == "one",
+          "A/B/A failed to acknowledge the newest selected layout");
+    const uint64_t fourth = completion.Request();
+    completion.Selected(fourth, "retail", 0);
+    completion.Complete(0);
+    const auto retail = completion.LatestApplied();
+    Check(retail && retail->ticket == fourth && retail->scheme == "retail",
+          "layout without a font job did not acknowledge after invalidation");
+  }
   const fs::path root = fs::temp_directory_path() / "rb_blitz_button_scheme_tests";
   std::error_code ec;
   fs::remove_all(root, ec);

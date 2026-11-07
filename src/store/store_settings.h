@@ -21,6 +21,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -61,6 +62,11 @@ bool ApplyRowToSettings(settings::SettingId id, const settings::Value& value, St
 
 // The hot applier's single entry point: load, apply, publish. `error` explains a refusal.
 bool ApplyCommittedRow(settings::SettingId id, const settings::Value& value, std::string* error);
+
+// Validate all committed store rows, then publish one immutable snapshot. A bad row leaves the
+// current generation untouched, so a worker cannot observe half of one settings commit.
+bool ApplyCommittedRows(const std::map<settings::SettingId, settings::Value>& values,
+                        std::string* error);
 
 // Answers the DTA's one-bit store queries, which ride the guest's `file_exists` builtin:
 //

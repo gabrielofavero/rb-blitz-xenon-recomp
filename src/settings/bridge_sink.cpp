@@ -462,28 +462,8 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         break;
       }
       last_commit_changes_.clear();
-      // P7: the input store commits its staged rows through the profile's own surgical save and
-      // publishes the new binding snapshot. It is committed first so a settings failure cannot
-      // leave a half-applied Controls edit behind; a failure here refuses the whole commit.
-      bool input_ok = true;
-      bool input_committed = false;
-      std::string input_error;
-      if (input_store_ != nullptr && input_staged_) {
-        input_ok = input_store_->Commit(&input_error);
-        input_committed = input_ok;
-        if (!input_ok) {
-          last_commit_durable_ = false;
-          last_commit_requires_restart_ = false;
-          last_commit_status_ = CommitStatus::kIoError;
-          last_commit_failure_ = CommitFailure::kNotWritable;
-          commit_ok_ = false;
-          status = Status::kIoError;
-          response.message = input_error.empty() ? "the controller profile could not be saved"
-                                                 : input_error;
-          break;
-        }
-        input_staged_ = false;
-      }
+      last_commit_restored_defaults_ = restore_defaults_staged_;
+      restore_defaults_staged_ = false;
       if (edit_failed_) {
         if (service_ && txn_) service_->Cancel(txn_);
         txn_ = 0;
@@ -498,6 +478,30 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         response.message = "the edit was refused; nothing saved";
         break;
       }
+      // P7: the input store commits its staged rows through the profile's own surgical save and
+      // publishes the new binding snapshot. It is committed first so a settings failure cannot
+      // leave a half-applied Controls edit behind; a failure here refuses the whole commit.
+      bool input_ok = true;
+      bool input_committed = false;
+      std::string input_error;
+      if (input_store_ != nullptr && input_staged_) {
+        input_ok = last_commit_restored_defaults_
+                       ? input_store_->CommitForRestart(&input_error)
+                       : input_store_->Commit(&input_error);
+        input_committed = input_ok;
+        if (!input_ok) {
+          last_commit_durable_ = false;
+          last_commit_requires_restart_ = false;
+          last_commit_status_ = CommitStatus::kIoError;
+          last_commit_failure_ = CommitFailure::kNotWritable;
+          commit_ok_ = false;
+          status = Status::kIoError;
+          response.message = input_error.empty() ? "the controller profile could not be saved"
+                                                 : input_error;
+          break;
+        }
+        input_staged_ = false;
+      }
       CommitResult result;
       if (service_ != nullptr && txn_ != 0) {
         result = service_->Commit(txn_);
@@ -507,7 +511,8 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       saved_revision_ = result.status == CommitStatus::kNoChanges && service_
                             ? service_->revision() : result.saved_revision;
       last_commit_durable_ = result.status == CommitStatus::kSaved;
-      last_commit_requires_restart_ = result.restart_required;
+      last_commit_requires_restart_ = result.restart_required ||
+                                      (last_commit_restored_defaults_ && result.status == CommitStatus::kSaved);
       bool local_saved = true;
       bool local_provider_failed = false;
       std::map<std::string, WireValue> provider_changes;
@@ -629,6 +634,11 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
         last_commit_durable_ = true;
         saved_revision_ = service_ ? service_->revision() : 0;
       }
+      if (status == Status::kOk && last_commit_restored_defaults_ &&
+          (last_commit_durable_ || input_committed)) {
+        last_commit_requires_restart_ = true;
+        restore_restart_pending_ = true;
+      }
       commit_ok_ = status == Status::kOk;
       last_commit_status_ = result.status;
       // A journal this commit had to set aside is reported exactly once, through the commit's own
@@ -646,6 +656,183 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kInvoke: {
+      if (request.setting == "settings.restore_defaults") {
+        if (txn_ != 0 && last_commit_restored_defaults_ && !edit_failed_) {
+          restore_defaults_staged_ = true;
+          response.message = "default settings ready to retry";
+          break;
+        }
+        if (service_ == nullptr || txn_ != 0 || input_staged_ || !staged_local_.empty() ||
+            linked_plan_ || !display_preview_requested_.empty()) {
+          status = Status::kInvalid;
+          response.message = "finish the current edit before restoring defaults";
+          edit_failed_ = true;
+          break;
+        }
+        if (!EnsureTransaction(&response)) {
+          status = response.status;
+          edit_failed_ = true;
+          break;
+        }
+        const ValidationResult staged = service_->StageDefaults(txn_);
+        if (!staged.ok) {
+          status = Status::kInvalid;
+          response.message = staged.reason_key;
+          edit_failed_ = true;
+          break;
+        }
+        for (const FieldState& field : service_->GetSnapshot().fields) {
+          if (ValueEquals(field.requested, field.pending)) continue;
+          staged_base_[field.id] = field.requested;
+          staged_token_[field.id] = std::string(SettingIdToken(field.id));
+          staged_[field.id] = field.pending;
+        }
+        if (input_store_) {
+          std::string why;
+          bool input_changed = false;
+          for (const char* token : {"input.keyboard_support", "input.mouse_support"}) {
+            const bool was_default = input_store_->Matches(token, true);
+            if (was_default) continue;
+            if (input_store_->StageBool(token, true, &why)) {
+              input_changed = true;
+              continue;
+            }
+            // A higher-priority source owns this switch; leave its saved value alone.
+          }
+          for (const char* token : {"input.reset.general", "input.reset.music",
+                                    "input.reset.controller", "input.reset.keyboard_mouse"}) {
+            input_changed |= input_store_->Matches(token, true);
+            if (input_store_->StageResetAll(token, &why)) continue;
+            status = Status::kInvalid;
+            response.message = why;
+            edit_failed_ = true;
+            break;
+          }
+          if (status == Status::kOk) input_staged_ = input_changed;
+        }
+        if (status != Status::kOk) break;
+        restore_defaults_staged_ = true;
+        response.message = "default settings staged";
+        break;
+      }
+      constexpr std::string_view preview_prefix = "display.preview.";
+      if (request.setting.starts_with(preview_prefix)) {
+        display_keep_ok_ = false;
+        const std::string mode = request.setting.substr(preview_prefix.size());
+        const Descriptor* display = service_ ? service_->DescriptorFor(SettingId::kDisplay) : nullptr;
+        const bool offered = display && display->availability == Availability::kVisible &&
+            std::any_of(display->choices.begin(), display->choices.end(),
+                        [&](const Choice& choice) { return choice.token == mode; });
+        if (!service_ || !display_preview_hooks_.begin || !display_preview_hooks_.active ||
+            txn_ != 0 || !staged_local_.empty() || input_staged_ ||
+            service_->IsOverridden(SettingId::kDisplay) ||
+            !offered) {
+          status = Status::kInvalid;
+          response.message = "display preview is unavailable or an edit is pending";
+          break;
+        }
+        if (display_preview_hooks_.active()) {
+          status = Status::kConflict;
+          response.message = "a display preview is already active";
+          break;
+        }
+        std::string why;
+        if (!display_preview_hooks_.begin(mode, &why)) {
+          status = Status::kIoError;
+          response.message = why.empty() ? "display switch was refused" : why;
+          break;
+        }
+        display_preview_requested_ = mode;
+        display_preview_revision_ = service_->revision();
+        display_preview_capability_revision_ = service_->capability_revision();
+        response.message = "display preview active; choose Keep or Revert";
+        break;
+      }
+      if (request.setting == "display.revert") {
+        if (!display_preview_hooks_.revert) {
+          status = Status::kUnsupported;
+          response.message = "display preview is unavailable";
+          break;
+        }
+        std::string why;
+        if (!display_preview_hooks_.revert(&why)) {
+          status = Status::kIoError;
+          response.message = why.empty() ? "display rollback failed" : why;
+          break;
+        }
+        display_preview_requested_.clear();
+        display_keep_ok_ = false;
+        response.message = "previous display mode restored";
+        break;
+      }
+      if (request.setting == "display.keep") {
+        display_keep_ok_ = false;
+        if (!service_ || !display_preview_hooks_.keep || !display_preview_hooks_.active ||
+            !display_preview_hooks_.active() || display_preview_requested_.empty()) {
+          status = Status::kInvalid;
+          response.message = "no active display preview";
+          break;
+        }
+        if (service_->revision() != display_preview_revision_ ||
+            service_->capability_revision() != display_preview_capability_revision_ ||
+            service_->IsOverridden(SettingId::kDisplay)) {
+          std::string rollback_error;
+          const bool reverted = display_preview_hooks_.revert &&
+                                display_preview_hooks_.revert(&rollback_error);
+          status = Status::kStaleRequest;
+          response.message = reverted
+              ? "display capabilities or saved settings changed; preview reverted"
+              : "display capabilities or saved settings changed; display rollback failed: " +
+                    rollback_error;
+          break;
+        }
+        Value requested;
+        requested.kind = ValueKind::kEnum;
+        requested.text = display_preview_requested_;
+        std::string why;
+        const bool kept = display_preview_hooks_.keep(
+            [&](std::string* save_error) {
+              const uint64_t txn = service_->BeginEdit(display_preview_revision_);
+              if (!txn) {
+                if (save_error) *save_error = "display save revision changed";
+                return false;
+              }
+              const ValidationResult valid = service_->Set(
+                  txn, SettingId::kDisplay, requested, display_preview_capability_revision_);
+              if (!valid.ok) {
+                service_->Cancel(txn);
+                if (save_error) *save_error = valid.reason_key;
+                return false;
+              }
+              const CommitResult committed = service_->Commit(txn);
+              if (committed.status != CommitStatus::kSaved &&
+                  committed.status != CommitStatus::kNoChanges) {
+                service_->Cancel(txn);
+                if (save_error) {
+                  *save_error = committed.errors.empty() ? "display save failed"
+                                                          : committed.errors.front();
+                }
+                return false;
+              }
+              last_commit_durable_ = true;
+              saved_revision_ = service_->revision();
+              last_commit_status_ = committed.status;
+              return true;
+            }, &why);
+        if (!kept) {
+          status = Status::kIoError;
+          response.message = why.empty() ? "display preview was not confirmed" : why;
+          break;
+        }
+        display_keep_ok_ = true;
+        commit_ok_ = true;
+        last_commit_failure_ = CommitFailure::kNone;
+        if (display_preview_hooks_.applied)
+          display_preview_hooks_.applied(requested, service_->revision());
+        display_preview_requested_.clear();
+        response.message = "display mode saved and applied";
+        break;
+      }
       if (request.setting == "controller.capture_cancel" ||
           request.setting == "controller.capture_confirm") {
         std::string why;
@@ -825,6 +1012,32 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
 }
 
 bool ServiceSink::Matches(const bridge::Request& request) const {
+  if (request.setting == "display.preview_active")
+    return WireValuesEqual(WireValue::Bool(display_preview_hooks_.active &&
+                                          display_preview_hooks_.active()), request.value);
+  if (request.setting == "display.keep_ok")
+    return WireValuesEqual(WireValue::Bool(display_keep_ok_), request.value);
+  constexpr std::string_view application_prefix = "application.";
+  if (service_ && request.setting.starts_with(application_prefix)) {
+    const std::string_view query = std::string_view(request.setting).substr(application_prefix.size());
+    const auto dot = query.find('.');
+    if (dot == std::string_view::npos) return false;
+    const SettingId id = schema::IdForToken(query.substr(dot + 1));
+    for (const FieldState& field : service_->GetSnapshot().fields) {
+      if (field.id != id) continue;
+      if (query.substr(0, dot) == "pending")
+        return WireValuesEqual(WireValue::Bool(field.application_phase != ApplyPhase::kApplied),
+                               request.value);
+      if (query.substr(0, dot) == "boundary")
+        return WireValuesEqual(WireValue::Text(std::string(ApplyBoundaryToken(field.application_boundary))),
+                               request.value);
+      if (query.substr(0, dot) == "phase")
+        return WireValuesEqual(WireValue::Text(std::string(ApplyPhaseToken(field.application_phase))),
+                               request.value);
+      return false;
+    }
+    return false;
+  }
   if (request.setting == "controller.capture_pending")
     return WireValuesEqual(WireValue::Bool(input_store_ &&
                                             input_store_->HasPendingControllerCapture()),
@@ -879,6 +1092,31 @@ bool ServiceSink::Acknowledged(const uint64_t request_id) const {
 }
 
 bool ServiceSink::Get(const std::string_view setting, WireValue* out) const {
+  constexpr std::string_view application_prefix = "application.";
+  if (service_ && setting.starts_with(application_prefix)) {
+    const std::string_view query = setting.substr(application_prefix.size());
+    const auto dot = query.find('.');
+    if (dot == std::string_view::npos) return false;
+    const SettingId id = schema::IdForToken(query.substr(dot + 1));
+    for (const FieldState& field : service_->GetSnapshot().fields) {
+      if (field.id != id) continue;
+      if (out == nullptr) return true;
+      if (query.substr(0, dot) == "pending") {
+        *out = WireValue::Bool(field.application_phase != ApplyPhase::kApplied);
+        return true;
+      }
+      if (query.substr(0, dot) == "boundary") {
+        *out = WireValue::Text(std::string(ApplyBoundaryToken(field.application_boundary)));
+        return true;
+      }
+      if (query.substr(0, dot) == "phase") {
+        *out = WireValue::Text(std::string(ApplyPhaseToken(field.application_phase)));
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }
   if (input_store_ != nullptr && input_store_->IsToken(setting)) {
     if (out != nullptr) {
       *out = WireValue::Bool(input_store_->Matches(setting, true));
@@ -930,6 +1168,13 @@ bool ServiceSink::GetLocal(const std::string_view token, WireValue* out) const {
   return true;
 }
 
+bool ServiceSink::GetSavedLocal(const std::string_view token, WireValue* out) const {
+  const auto found = local_.find(std::string(token));
+  if (found == local_.end()) return false;
+  if (out != nullptr) *out = found->second;
+  return true;
+}
+
 void ServiceSink::Reset() {
   linked_plan_.reset();
   if (service_ && txn_) service_->Cancel(txn_);
@@ -950,9 +1195,14 @@ void ServiceSink::Reset() {
   last_commit_durable_ = false;
   saved_revision_ = 0;
   last_commit_requires_restart_ = false;
+  restore_defaults_staged_ = false;
+  last_commit_restored_defaults_ = false;
   restart_pending_ = false;
+  restore_restart_pending_ = false;
   last_commit_status_ = CommitStatus::kNoChanges;
   input_staged_ = false;
+  display_preview_requested_.clear();
+  display_keep_ok_ = false;
 }
 
 }  // namespace rb_blitz::settings

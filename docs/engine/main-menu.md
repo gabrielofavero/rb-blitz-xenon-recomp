@@ -655,6 +655,38 @@ rows by the logged bounds (`native_mouse: row=… bounds=…`), never by taps: o
 two rows on this title (the duplicate-press note in
 [diagnostics.md](diagnostics.md)).
 
+### 7.5 Loaded-list and header refresh (2026-11-06)
+
+The generated splash record keeps the complete ordered option array before the boot hide edit.
+On `splash_screen` entry it captures `start.lst selected_sym`, lets the screen's existing
+`splash_panel check_trial` call reset the list, then calls `splash_panel rbbz_refresh_menu`.
+That method rebuilds `options_array` from the inventory, removes rows denied by the current
+`rbbz-menu/hidden/<row>` predicates, calls `start.lst set_data`, and selects the old row by
+symbol or the nearest surviving position. Only after those guest operations does it call the
+`rbbz-menu/rows-applied` host query, which acknowledges the saved revision. The order matters:
+refreshing in `splash_panel` entry was overwritten by the later `check_trial` call on screen
+entry. Generation refuses the live row route if that call cannot be identified uniquely; the
+read-hook copy remains a boot fallback. `menu_filter::PublishRuntimeVisibility` updates the
+predicates after a durable save. `native_menu::Context` drops stale list and header mouse
+geometry when the screen or focus changes.
+
+The authored background panel computes one mask from the current RhythmVerse, Messages and
+Recommendations predicates. On entry, and on a mask change during `poll`, it updates labels,
+the message badge, compact animation positions and the authored LT/RT Flow/offline styling as
+one group. It signals
+`rbbz-menu/headers-applied` only after this group finishes. LT/RT trigger cases
+select one of eight matching navigation routes, and mouse destinations check the same live
+predicates. The generated path is now enabled on every boot. The RhythmVerse master and store
+catalogue are still boot-seeded, so this does not establish a live master switch. The host
+payload test checks all eight generated header masks and trigger routes, the matching mouse
+destinations, recovery of every selected splash row across visibility combinations, and
+atomic refusal when the screen-entry call is absent or ambiguous. On 2026-11-07, one
+same-process D3D12 LEADERBOARDS hide/show roundtrip appeared on the first returned splash
+frame in `out/_swap/hot-settings/runtime-acceptance/` (`retest3_menu_hidden2.png`,
+`retest3_menu_visible2.png`; matching predicates and acknowledgments in
+`out/build/win-amd64-release/logs/rb_blitz_557.log`). Repeated cycles, other rows,
+selected-row focus, Back/swipe and header visuals remain unverified in the game.
+
 ### 8. Evidence
 
 **The ark-side bed** (`scripts/hide-test.ps1`: the payload's entry edited before boot) — alive, no

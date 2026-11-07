@@ -50,6 +50,7 @@
 #include "settings/cvars.h"
 #include "settings/graphics_policy.h"
 #include "settings/graphics_boot.h"
+#include "settings/hot_apply.h"
 #include "settings/migration.h"
 #include "settings/model.h"
 #include "settings/paths.h"
@@ -58,6 +59,8 @@
 #include "settings/window_policy.h"
 
 namespace rb_blitz::settings::boot {
+
+enum class MenuRefreshSurface : uint8_t { kRows, kHeaders };
 
 // The licence masks the target translation writes. The same values the app's own default uses
 // (`license_mask = 1` means "this console owns the title"), and 0 is the emulated console that owns
@@ -138,7 +141,7 @@ class SettingsBoot {
 
   // The restart prompt's real question (owner requirement, 2026-10-13): does anything the player
   // saved still differ from what this process is running, in a way only a new process can fix?
-  // Answered by value against the snapshot taken when the boot finished, so changing a value and
+  // Answered by value against the last acknowledged running values, so changing a value and
   // changing it back leaves Help & Options without a prompt - the sticky "a restart-scoped change
   // happened" bit alone cannot tell those apart.
   bool RestartPending() const;
@@ -146,6 +149,24 @@ class SettingsBoot {
   // applier or a refused write. They are owed a restart while their value still differs from the
   // running one. Called by the guest channel's commit path.
   void NoteRestartRows(const std::vector<SettingId>& rows);
+  uint64_t NoteCommittedRows(const std::map<SettingId, Value>& changed,
+                             const HotApplyPlan& plan, uint64_t revision);
+  // Menu rows and headers are acknowledged when their authored guest methods
+  // finish. A saved choice alone never advances the running baseline.
+  void NoteMenuReturnRows(const std::map<SettingId, Value>& changed, uint64_t revision);
+  void AcknowledgeMenuRefresh(MenuRefreshSurface surface, uint64_t revision);
+  // Provider variables consumed while a new song constructs its HUD are
+  // acknowledged only after the authored song-entry commands return.
+  void NoteNextSongRows(const std::map<SettingId, Value>& changed, uint64_t revision);
+  void AcknowledgeNextSongRefresh(uint64_t revision);
+  void NoteSongSelectionRows(const std::map<SettingId, Value>& changed, uint64_t revision);
+  void AcknowledgeSongSelectionRefresh(uint64_t revision);
+  void NoteControllerLayoutQueued(uint64_t ticket, uint64_t generation, const Value& value);
+  void AcknowledgeControllerLayout(uint64_t ticket, const std::string& scheme);
+  // A successful live write advances the running baseline. A failed write leaves it unchanged,
+  // including when the requested value happens to equal the original boot value.
+  void NoteAppliedRows(const std::map<SettingId, Value>& requested,
+                       const std::vector<HotApplyOutcome>& outcomes, uint64_t generation);
 
   // The process-wide instance, for the hooks that need the store (the menu-rows seam). Owned by the
   // app; null before it is set.
@@ -194,13 +215,20 @@ class SettingsBoot {
   std::function<bool()> presented_probe_;
   unsigned menu_frames_ = 0;
   std::atomic<bool> menu_presented_{false};
+  bool graphics_marker_attempted_ = false;
+  bool display_preview_recovery_pending_ = false;
   std::mutex graphics_marker_mutex_;
   // The rows staged locally, for diagnostics.
   std::map<SettingId, Source> overrides_;
   std::map<SettingId, Value> override_values_;
-  // What every row's effective value was when this boot finished (FinishInit): the "what the game
-  // is running" side of `RestartPending()`.
-  std::map<SettingId, Value> boot_values_;
+  // The last acknowledged running value of every row. Initialized at boot, then advanced only
+  // after an applier reports success.
+  std::map<SettingId, Value> running_values_;
+  ApplicationLedger application_ledger_;
+  uint64_t controller_layout_ticket_ = 0;
+  uint64_t controller_layout_generation_ = 0;
+  Value controller_layout_value_;
+  unsigned application_diagnostics_logged_ = 0;
   // Rows a live apply pass could not apply this session (see `NoteRestartRows`).
   std::vector<SettingId> restart_rows_noted_;
   std::string active_renderer_;

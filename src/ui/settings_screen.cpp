@@ -22,6 +22,7 @@
 #include "profile/input_rows.h"
 #include "profile/remap.h"
 #include "settings/dependencies.h"
+#include "settings/ultimate_runtime.h"
 #include "store/store_settings.h"
 #include "ui/input_font_scene.h"
 
@@ -30,6 +31,7 @@ namespace {
 
 using dtb::Node;
 MenuConfiguration g_configuration;
+bool g_emitting_pause = false;
 
 // The one select row whose list belongs to the machine and whose *disappearance* is a decision
 // rather than a failure - see the `Kind::kSelect` branch in `BuildPanels`.
@@ -49,6 +51,7 @@ Node Cmd(std::vector<Node> kids) { return Node::Command(std::move(kids)); }
 // `../resource/lists/list_options_main.milo`). One scene per context - `kSceneName` for the
 // main-menu pages, `kPauseSceneName` for the in-song ones, for the same reason.
 constexpr char kList[] = "options.lst";
+constexpr char kUltimateTrialQuery[] = "rbbz-settings/ultimate/trial-enabled";
 
 // The two statements that fill a list and place its selection:
 // `{options.lst set_data {var rows}}` and `{options.lst set_selected 0}`, emitted as a *pair* and
@@ -305,8 +308,11 @@ enum class Kind {
   kAchievements,
   kLinkedConfirm,
   kLinkedCancel,
+  kDisplayKeep,
+  kDisplayRevert,
   kControllerCaptureConfirm,
   kControllerCaptureCancel,
+  kRestoreDefaultsApply,
 };
 
 struct Choice {
@@ -1050,6 +1056,9 @@ std::vector<PanelSpec> AllPanels() {
                                          "Achievement notifications and content unlocks."),
                               RouteRow("credits", "credits_screen", "back_screen", "",
                                        "View the game's credits."),
+                              SubmenuRow("settings_restore_defaults", "settings_restore_defaults_screen",
+                                         "Restore default settings",
+                                         "Restore every available setting and control to its default. Restart to apply."),
                           }});
 
   out.push_back(PanelSpec{"settings_launch_panel", "settings_launch_screen", "settings_general_screen",
@@ -1426,6 +1435,23 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_restart_panel", "settings_restart_screen", kRootScreen,
                          MenuPanels(), {ignore, restart}, "../pause/settings_confirmation.milo",
                          "settings_restart_message"});
+  Row restore_cancel = InfoRow("settings_restore_cancel", "Cancel", "Keep your settings.");
+  restore_cancel.kind = Kind::kClose;
+  Row restore_apply = InfoRow("settings_restore_confirm", "Restore defaults",
+                              "Save the default settings and restart to apply them.");
+  restore_apply.kind = Kind::kRestoreDefaultsApply;
+  out.push_back(PanelSpec{"settings_restore_defaults_panel", "settings_restore_defaults_screen",
+                          "settings_general_screen", MenuPanels(), {restore_cancel, restore_apply},
+                          "../pause/settings_confirmation.milo", "settings_restore_defaults_message"});
+  Row display_revert = InfoRow("settings_display_revert", "Revert",
+                               "Restore the previous window mode without saving.");
+  display_revert.kind = Kind::kDisplayRevert;
+  Row display_keep = InfoRow("settings_display_keep", "Keep",
+                             "Save this window mode after it appears on screen.");
+  display_keep.kind = Kind::kDisplayKeep;
+  out.push_back(PanelSpec{"settings_display_confirm_panel", "settings_display_confirm_screen",
+                          "settings_display_screen", MenuPanels(), {display_revert, display_keep},
+                          "../pause/settings_confirmation.milo", "settings_display_confirm_message"});
   out.push_back(PanelSpec{"settings_save_error_panel", "settings_save_error_screen", kRootScreen,
                          MenuPanels(), {close}, "../pause/settings_confirmation.milo",
                          "settings_save_error_message",
@@ -1672,6 +1698,43 @@ Node DropAll(const std::vector<std::string>& symbols) {
   return Cmd(std::move(kids));
 }
 
+// The trial command is owned by the page that contains the selected provider row. The selected
+// symbol still names the edited row immediately after commit, before populate_menu changes the
+// list. The pause page admits only rows whose provider consumer is read after resume.
+bool HasUltimateBinding(const PanelSpec& panel) {
+  return std::any_of(panel.rows.begin(), panel.rows.end(), [](const Row& row) {
+    const auto* binding = settings::ultimate_adapter::BindingForToken(row.setting);
+    return binding != nullptr &&
+           (!g_emitting_pause || settings::ultimate_runtime::CanTrialDuringSong(*binding));
+  });
+}
+
+Node UltimateTrialMember(const PanelSpec& panel) {
+  std::vector<Node> cases = {Sym("switch"), Cmd({Sym(kList), Sym("selected_sym")})};
+  for (const Row& row : panel.rows) {
+    const auto* binding = settings::ultimate_adapter::BindingForToken(row.setting);
+    if (binding == nullptr ||
+        (g_emitting_pause && !settings::ultimate_runtime::CanTrialDuringSong(*binding))) continue;
+    for (const std::string& symbol : RowSymbols(row)) {
+      cases.push_back(Arr({Sym(symbol), settings::ultimate_runtime::GuestAssignmentFor(*binding)}));
+    }
+  }
+  return Arr({Sym("apply_ultimate_value"),
+              Cmd({Sym("if"), Cmd({Sym("file_exists"), Str(kUltimateTrialQuery)}),
+                   Cmd(std::move(cases))})});
+}
+
+Node UltimateTrialSuccess(const Row& row) {
+  const auto* binding = settings::ultimate_adapter::BindingForToken(row.setting);
+  if (binding == nullptr ||
+      (g_emitting_pause && !settings::ultimate_runtime::CanTrialDuringSong(*binding))) {
+    return Cmd({Sym("do"), Cmd({Var("this"), Sym("populate_menu")}),
+                HelpWrite(row.symbol)});
+  }
+  return Cmd({Sym("do"), Cmd({Var("this"), Sym("apply_ultimate_value")}),
+              Cmd({Var("this"), Sym("populate_menu")}), HelpWrite(row.symbol)});
+}
+
 // `populate_menu`: build the row array, drop what does not apply, then fill the list.
 //
 //   `{var rows {array (<every symbol>)} }`   - the literal array holds both spellings of every
@@ -1787,6 +1850,17 @@ Node CommitResult(const bool pause, Node success) {
               std::move(success), EnterScreen(destination("settings_save_error_screen"))});
 }
 
+Node PreviewDisplayChoice(const Choice& choice, const bool pause) {
+  const std::string destination = pause ? PauseScreen("settings_display_confirm_screen")
+                                        : "settings_display_confirm_screen";
+  return Cmd({Sym("do"), Write(Path("invoke", "display.preview." + choice.token, "-")),
+              Cmd({Sym("if_else"),
+                   Cmd({Sym("file_exists"), Str(Path("snapshot", "display.preview_active", "b:1"))}),
+                   EnterScreen(destination),
+                   Cmd({Sym("pause.lbl"), Sym("set_token_fmt"),
+                        Sym("settings_display_preview_error")})})});
+}
+
 // Linked edits are previews until the player confirms. Ordinary settings keep their usual
 // immediate commit. The native Audio page uses this same route as generated settings pages.
 Node ChangeSetting(const std::string_view setting, const std::string_view value,
@@ -1812,7 +1886,6 @@ size_t ChoiceIndexForSymbol(const Row& row, const std::string_view symbol) {
   return 0;
 }
 
-bool g_emitting_pause = false;
 Node RowCase(const Row& row, const std::string_view symbol) {
   switch (row.kind) {
     case Kind::kBool: {
@@ -1827,16 +1900,18 @@ Node RowCase(const Row& row, const std::string_view symbol) {
       // shows `On` while its setting is *false*, so it writes the opposite of that.
       const bool write_on_value = is_on != row.inverted;
       return Arr({Sym(symbol), ChangeSetting(row.setting, write_on_value ? "b:0" : "b:1",
-                  g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
+                  g_emitting_pause, UltimateTrialSuccess(row))});
     }
     case Kind::kSelect: {
       // Confirm advances to the **next** choice and wraps at the last one: a horizontal selector
       // steps with A, which is the interaction the owner asked for after using the staged version.
       const size_t index = ChoiceIndexForSymbol(row, symbol);
       const size_t next = (index + 1) % row.choices.size();
+      if (row.setting == "graphics.display")
+        return Arr({Sym(symbol), PreviewDisplayChoice(row.choices[next], g_emitting_pause)});
       return Arr({Sym(symbol), Write(ChoiceSet(row, row.choices[next])),
                   Write(Path("commit", "-", "-")),
-                  CommitResult(g_emitting_pause, Cmd({Var("this"), Sym("populate_menu")}))});
+                  CommitResult(g_emitting_pause, UltimateTrialSuccess(row))});
     }
     case Kind::kSubmenu:
     case Kind::kBoolSubmenu:
@@ -1895,8 +1970,20 @@ Node RowCase(const Row& row, const std::string_view symbol) {
       return Arr({Sym(symbol), Leave()});
     case Kind::kLinkedCancel:
       return Arr({Sym(symbol), Write(Path("invoke", "linked.cancel", "-")), Leave()});
+    case Kind::kDisplayRevert:
+      return Arr({Sym(symbol), Write(Path("invoke", "display.revert", "-")), Leave()});
+    case Kind::kDisplayKeep:
+      return Arr({Sym(symbol), Write(Path("invoke", "display.keep", "-")),
+                  Cmd({Sym("if_else"),
+                       Cmd({Sym("file_exists"), Str(Path("snapshot", "display.keep_ok", "b:1"))}),
+                       Leave(),
+                       Cmd({Sym("pause.lbl"), Sym("set_token_fmt"),
+                            Sym("settings_display_keep_error")})})});
     case Kind::kLinkedConfirm:
       return Arr({Sym(symbol), Write(Path("invoke", "linked.confirm", "-")),
+                  Write(Path("commit", "-", "-")), CommitResult(g_emitting_pause, Leave())});
+    case Kind::kRestoreDefaultsApply:
+      return Arr({Sym(symbol), Write(Path("invoke", "settings.restore_defaults", "-")),
                   Write(Path("commit", "-", "-")), CommitResult(g_emitting_pause, Leave())});
     case Kind::kControllerCaptureConfirm:
       return Arr({Sym(symbol), Write(Path("invoke", "controller.capture_confirm", "-")),
@@ -2004,10 +2091,11 @@ std::vector<Node> DirectionCases(const PanelSpec& panel, const bool forward) {
           forward ? (i + 1) % row.choices.size()
                   : (i + row.choices.size() - 1) % row.choices.size();
       cases.push_back(Arr({Sym(row.symbol + "_" + SymbolToken(row.choices[i].token)),
-                           Write(ChoiceSet(row, row.choices[target])),
-                           Write(Path("commit", "-", "-")),
-                           CommitResult(g_emitting_pause,
-                                        Cmd({Var("this"), Sym("populate_menu")}))}));
+                           row.setting == "graphics.display"
+                               ? PreviewDisplayChoice(row.choices[target], g_emitting_pause)
+                               : Cmd({Sym("do"), Write(ChoiceSet(row, row.choices[target])),
+                                      Write(Path("commit", "-", "-")),
+                                      CommitResult(g_emitting_pause, UltimateTrialSuccess(row))})}));
     }
   }
   return cases;
@@ -2193,6 +2281,9 @@ Node PanelDefinition(const PanelSpec& panel) {
       Arr({Sym("exit"), Cmd({Sym("shell_sfx"), Sym("clear_interceptor")})});
   if (panel.message_query == "linked.prompt")
     exit_member.kids.push_back(Write(Path("invoke", "linked.cancel", "-")));
+  if (panel.name == "settings_display_confirm_panel" ||
+      panel.name == "settings_display_confirm_pause_panel")
+    exit_member.kids.push_back(Write(Path("invoke", "display.revert", "-")));
   if (panel.name == "settings_controller_capture_warning_panel" ||
       panel.name == "settings_controller_capture_warning_pause_panel")
     exit_member.kids.push_back(Write(Path("invoke", "controller.capture_cancel", "-")));
@@ -2239,6 +2330,19 @@ Node PanelDefinition(const PanelSpec& panel) {
       std::move(exit_member),
       Arr({Sym("on_select_msg"), Cmd({Sym("shell_sfx"), Sym("play_select")})}),
   };
+  if (panel.name == "settings_display_confirm_panel" ||
+      panel.name == "settings_display_confirm_pause_panel") {
+    // The host timer can revert without a button press. Leave the guest's
+    // confirmation page as soon as the preview is no longer active.
+    members.push_back(Arr({Sym("poll"),
+        Cmd({Sym("if"),
+             Cmd({Sym("!"), Cmd({Sym("file_exists"),
+                                  Str(Path("snapshot", "display.preview_active", "b:1"))})}),
+             Leave()})}));
+  }
+  if (HasUltimateBinding(panel)) {
+    members.push_back(UltimateTrialMember(panel));
+  }
   if (!SuppressesHelp(panel)) {
     // `ScrollHelpCases` is the whole `{switch {options.lst selected_sym} ...}` body.
     members.push_back(Arr({Sym("SCROLL_MSG"), Cmd(ScrollHelpCases(panel))}));
@@ -2365,7 +2469,14 @@ std::vector<std::string> RequestPaths() {
   add(Path("restart", "-", "-"));
   add(Path("snapshot", "linked.pending", "b:1"));
   add(Path("invoke", "linked.confirm", "-"));
+  add(Path("invoke", "settings.restore_defaults", "-"));
   add(Path("invoke", "linked.cancel", "-"));
+  for (const char* mode : {"windowed", "borderless", "fullscreen"})
+    add(Path("invoke", std::string("display.preview.") + mode, "-"));
+  add(Path("invoke", "display.keep", "-"));
+  add(Path("invoke", "display.revert", "-"));
+  add(Path("snapshot", "display.preview_active", "b:1"));
+  add(Path("snapshot", "display.keep_ok", "b:1"));
   for (const auto& feature : settings::dependencies::kFeatures)
     for (const char* value : {"b:0", "b:1"})
       add(Path("set", "linked." + std::string(feature.token), value));
@@ -2451,6 +2562,38 @@ std::vector<std::string> RequestPaths() {
 }
 
 std::string HelpTextFor(const std::string_view symbol) {
+  if (symbol == "settings_hud_pb_next_selection")
+    return HelpTextFor("settings_hud_pb") + " Applies on next song selection.";
+  constexpr std::string_view kMenuReturnSuffix = "_menu_return";
+  if (symbol.ends_with(kMenuReturnSuffix)) {
+    const auto base = symbol.substr(0, symbol.size() - kMenuReturnSuffix.size());
+    for (const PanelSpec& panel : AllPanels()) {
+      for (const Row& row : panel.rows) {
+        if (row.symbol != base) continue;
+        std::string description = row.description;
+        for (const std::string_view restart : {"Requires a restart.", "Restart to apply."}) {
+          const auto at = description.find(restart);
+          if (at != std::string::npos) description.erase(at, restart.size());
+        }
+        while (!description.empty() && description.back() == ' ') description.pop_back();
+        return description + " Applies when you return to the main menu.";
+      }
+    }
+    return {};
+  }
+  constexpr std::string_view kNextSongSuffix = "_next_song";
+  if (symbol.ends_with(kNextSongSuffix)) {
+    const auto base = symbol.substr(0, symbol.size() - kNextSongSuffix.size());
+    for (const PanelSpec& panel : AllPanels()) {
+      for (const Row& row : panel.rows) {
+        const auto* binding = settings::ultimate_adapter::BindingForToken(row.setting);
+        if (row.symbol == base && binding &&
+            settings::ultimate_runtime::IsSongEntryBinding(*binding))
+          return row.description + " Applies next song.";
+      }
+    }
+    return {};
+  }
   if (symbol == "settings_dlc_menu_songs")
     return "Default restores the original music implementation. DLC enables library music and linked features. Restart to apply.";
   if (symbol == "settings_music_navigation")
@@ -3225,7 +3368,7 @@ bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason) {
   if (nodes == nullptr) {
     return refuse("nothing to edit");
   }
-  if (!g_configuration.play_current_song) {
+  if (!g_configuration.play_current_song && !g_configuration.menu_refresh_trial) {
     return refuse("the Play Current Song setting is off");
   }
   if (g_configuration.menu_music_songs.empty()) {
@@ -3249,7 +3392,7 @@ bool AddDownloadContentRow(std::vector<dtb::Node>* nodes, std::string* reason) {
   if (nodes == nullptr) {
     return refuse("nothing to edit");
   }
-  if (!g_configuration.download_content_row) {
+  if (!g_configuration.download_content_row && !g_configuration.menu_refresh_trial) {
     return refuse("the Download Content row is off");
   }
   // The shipped action, exactly as the retail record carries it. The option array also lists
@@ -3574,6 +3717,11 @@ std::vector<std::pair<std::string, std::string>> Labels() {
   for (const auto& prompt : settings::dependencies::Prompts())
     out.emplace_back("settings_linked_" + SymbolToken(prompt.key), prompt.text);
   out.emplace_back("settings_restart_message", "Settings saved. Restart the game to apply these changes.");
+  out.emplace_back("settings_restore_defaults_message",
+                   "Restore all default settings, including controls? Your current choices will be replaced. Restart to apply.");
+  out.emplace_back("settings_display_confirm_message", "Keep this window mode? It will revert in 15 seconds.");
+  out.emplace_back("settings_display_preview_error", "The window mode could not be previewed. Try again.");
+  out.emplace_back("settings_display_keep_error", "The window mode was not saved. Check the display and try again, or Revert.");
   out.emplace_back("settings_save_error_message", "Settings could not be saved. Check that the settings folder is writable, then try again.");
   out.emplace_back("settings_save_error_provider", "Saved, but the Ultimate mod's own settings file could not be written. Close this message and try again.");
   out.emplace_back("settings_save_error_conflict", "Something else changed the settings file. Close this message and try again.");

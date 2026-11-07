@@ -4,6 +4,15 @@ Plans that are actively being worked. A plan moves here from [`../todo/`](../tod
 and leaves for [`../finished/`](../finished/) when it is delivered — one `git mv`, keeping its
 `YYYY-MM-DD-` prefix.
 
+The [settings hot-apply plan](2026-10-24-settings-hot-apply-plan.md) is active as of
+2026-11-07. Running-value acknowledgement and partial-save filtering are implemented;
+all six display-mode transitions and timeout rollback were observed on D3D12 and Vulkan. Resolution has a
+negative live-reconstruction feasibility gate. A disposable D3D12 run hid and restored the
+LEADERBOARDS row on menu return, and a guarded Ultimate trial hid and restored Timer across
+song entries. A guarded Personal Best selection route and a fix for composing header navigation
+with controller icon fonts were added on 2026-11-07; their visible behavior and the remaining
+Ultimate/menu routes still require runtime evidence. Its §0 table records each package's state.
+
 Song Load Guard **finished on 2026-10-26** and moved to
 [`2026-10-13-load-guard.md`](../finished/2026-10-13-load-guard.md).
 The owner confirmed fatal-load recovery, Can't Hold Us playback, 30s timeout/dialog,

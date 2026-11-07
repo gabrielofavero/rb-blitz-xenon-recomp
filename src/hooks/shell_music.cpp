@@ -1628,10 +1628,6 @@ extern "C" REX_FUNC(sub_827586D8) {
   if (rb_blitz::dlc::RefreshArmed()) {
     rb_blitz::dlc::PublishPendingRefresh();
   }
-  // R7's frame pacing for the discovery is settled from here too: this poll is proof the menu is
-  // up, and the discovery screen is not, which is the one end of the enumeration the counters
-  // inside it cannot see. One atomic load when nothing is in flight.
-  rb_blitz::content_progress::Tick();
   const uint32_t music = ctx.r3.u32;
   PublishNavigator(base, music);
   if (g_navigation_enabled && !g_nav_probe.empty() && rb_blitz::input::MainMenuMusicInputAvailable()) {

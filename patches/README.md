@@ -12,6 +12,11 @@ checkout.
 
 ## Patches
 
+`0052-boot-stage-timings.patch` logs the duration of guest function registration
+and SDL gamepad initialization at info level. These are the two unmeasured stages
+between function-table creation and the first controller log in a slow boot.
+It is temporary diagnostic instrumentation for the large-DLC startup issue.
+
 `0036-keyboard-dialog-theme.patch` adds an opt-in theme for the existing XAM
 keyboard modal. The title enables it for My Songs and RhythmVerse searches:
 a compact, centered, resolution-scaled translucent black panel, three glowing
@@ -87,6 +92,10 @@ make untracked files are excluded; tracked edits and moved gitlinks remain visib
 
 | Patch | Purpose | Upstream candidate |
 | --- | --- | --- |
+| `rexglue-sdk/0051-ui-present-display-confirmation.patch` | Counts successful UI-thread paints separately so an older guest-output present cannot confirm a new display mode. | maybe |
+| `rexglue-sdk/0050-verify-startup-display-mode.patch` | Refuses startup when SDL cannot apply the saved native display mode. | yes |
+| `rexglue-sdk/0049-successful-present-sequence.patch` | Counts successful presenter submissions for runtime display diagnostics. | maybe |
+| `rexglue-sdk/0048-atomic-runtime-display-mode.patch` | Adds one UI-thread operation for Windowed, Borderless and Full Screen, with SDL rollback and window placement restoration. | maybe |
 | `rexglue-sdk/0047-content-device-validation.patch` | Lets the title inspect a mounted content device before registering it for guest access. Rock Band Blitz uses this to refuse executable song DTA from primary, structured, and flat-library content; see [DaTArrest security](../docs/reference/datarrest-security.md). | maybe |
 | `rexglue-sdk/0045-distinct-sdl-extra-buttons.patch` | Keeps SDL misc, touchpad and paddle buttons separate from XInput aliases, and exposes the connected pad's available and held extra controls for gameplay capture. | maybe |
 | `rexglue-sdk/0046-indirect-ringbuffer-recovery.patch` | Propagates a failed indirect GPU packet to its primary-ring caller, retries from the failed primary packet, and skips the full indirect call when bounded recovery is exhausted. This preserves the chance to reach later frame packets after the library-loading overflow seen in `rb_blitz_443.log`. Live recovery remains to be checked. | maybe |

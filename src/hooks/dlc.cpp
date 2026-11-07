@@ -67,6 +67,8 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
+#include <future>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -227,6 +229,22 @@ std::vector<std::filesystem::path> DiscoverLibraryRoots(const std::filesystem::p
   }
   return fs::UniqueLibraryRoots(roots);
 }
+
+struct BootScanResult {
+  fs::LibraryScanResult library;
+  double scan_ms = 0;
+};
+
+struct BootScanJob {
+  std::vector<std::filesystem::path> roots;
+  uint32_t content_type = 0;
+  uint32_t threads = 0;
+  std::future<BootScanResult> result;
+};
+
+// Only the app setup thread owns this slot. The worker owns its paths and
+// promise, so an aborted setup can leave it to finish without runtime access.
+std::optional<BootScanJob> g_boot_scan;
 
 // The same threaded scan serves boot and refresh. Capture the thread count at boot so
 // the worker never reads the cvar registry.
@@ -391,6 +409,39 @@ void StartRefreshWorker(const char* why) {
 
 }  // namespace
 
+void PrepareBootLibraryScan(const std::filesystem::path& game_data_root) {
+  std::error_code ec;
+  const auto root = std::filesystem::absolute(
+      fs::ResolveDlcRoot(REXCVAR_GET(dlc_root), game_data_root), ec);
+  const bool flat_root = std::filesystem::is_directory(root, ec) && !ec &&
+                         !fs::HasStructuredLayout(root);
+  auto roots = DiscoverLibraryRoots(game_data_root, root, flat_root);
+  if (roots.empty()) return;
+
+  BootScanJob job;
+  job.roots = roots;
+  job.content_type = ForceContentTypeFromCvar();
+  job.threads = REXCVAR_GET(dlc_scan_threads);
+  std::promise<BootScanResult> promise;
+  job.result = promise.get_future();
+  const auto content_type = job.content_type;
+  const auto threads = job.threads;
+  std::thread([roots = std::move(roots), content_type, threads,
+               promise = std::move(promise)]() mutable {
+    try {
+      const auto started = std::chrono::steady_clock::now();
+      auto library = fs::ScanDlcLibraries(roots, content_type, threads);
+      const double scan_ms = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - started).count();
+      promise.set_value({std::move(library), scan_ms});
+    } catch (...) {
+      promise.set_exception(std::current_exception());
+    }
+  }).detach();
+  g_boot_scan.emplace(std::move(job));
+  REXLOG_INFO("dlc: started the boot library scan during graphics setup");
+}
+
 void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
   if (runtime == nullptr) {
     return;
@@ -489,8 +540,31 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
                                                    std::string(artist), std::string(song)})
         .value_or(std::string());
   });
-  const fs::LibraryScanResult library =
-      ScanLibrary(library_roots, force_content_type, g_scan_threads, "this boot");
+  fs::LibraryScanResult library;
+  if (g_boot_scan && g_boot_scan->roots == library_roots &&
+      g_boot_scan->content_type == force_content_type &&
+      g_boot_scan->threads == g_scan_threads) {
+    const auto wait_started = std::chrono::steady_clock::now();
+    try {
+      auto completed = g_boot_scan->result.get();
+      library = std::move(completed.library);
+      REXLOG_INFO("dlc: boot scan overlapped graphics setup; scan_ms={:.3f} waited_ms={:.3f}",
+                  completed.scan_ms,
+                  std::chrono::duration<double, std::milli>(
+                      std::chrono::steady_clock::now() - wait_started).count());
+    } catch (const std::exception& error) {
+      REXLOG_WARN("dlc: early scan failed ({}); scanning now", error.what());
+      library = ScanLibrary(library_roots, force_content_type, g_scan_threads, "this boot");
+    }
+  } else {
+    library = ScanLibrary(library_roots, force_content_type, g_scan_threads, "this boot");
+  }
+  g_boot_scan.reset();
+  REXLOG_INFO("dlc: this boot scanned roots='{}' content_type={:08X} packages={} files={}",
+              JoinLibraryRoots(library_roots), force_content_type, library.items.size(),
+              library.files_seen);
+  for (const auto& rejected : library.rejected)
+    REXLOG_WARN("dlc: ignoring {} ({})", rejected.entry, rejected.reason);
   g_content_count = scan.packages.size() + library.items.size();
   g_structured_paths.clear();
   g_structured_paths.reserve(scan.packages.size());

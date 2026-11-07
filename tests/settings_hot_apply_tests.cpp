@@ -69,6 +69,17 @@ class ScriptedApplier : public HotApplier {
   std::map<SettingId, std::string> reasons_;
 };
 
+class IncompleteBatchApplier : public HotApplier {
+ public:
+  bool Knows(SettingId) const override { return true; }
+  bool Apply(SettingId, const Value&, std::string*) override { return true; }
+  std::vector<HotApplyOutcome> ApplyBatch(const std::map<SettingId, Value>&) override {
+    return {{SettingId::kVsync, HotApplyStatus::kApplied, {}},
+            {SettingId::kVsync, HotApplyStatus::kApplied, {}},
+            {SettingId::kUnknown, HotApplyStatus::kApplied, {}}};
+  }
+};
+
 Value Bool(bool value) {
   Value out;
   out.kind = rb_blitz::settings::ValueKind::kBool;
@@ -391,6 +402,158 @@ void PendingRestartIsValueBased() {
   CHECK_EQ(rb_blitz::settings::PendingRestartRows(boot, unseen, descriptors).size(), 0u);
 }
 
+void AcknowledgedValueSurvivesFailedRevert() {
+  test::BeginCase("pending: boot A, apply B, fail A keeps A pending; a retry clears it");
+  const auto descriptors = rb_blitz::settings::schema::BuildDescriptors(CapabilitySnapshot{});
+  std::map<SettingId, Value> running{{SettingId::kVsync, Bool(true)}};
+  std::vector<SettingId> forced;
+  const std::map<SettingId, Value> b{{SettingId::kVsync, Bool(false)}};
+  const std::map<SettingId, Value> a{{SettingId::kVsync, Bool(true)}};
+  rb_blitz::settings::AcknowledgeRunningValues(
+      &running, &forced, b, {{SettingId::kVsync, HotApplyStatus::kApplied, ""}});
+  CHECK_FALSE(running.at(SettingId::kVsync).boolean);
+  CHECK_EQ(rb_blitz::settings::PendingRestartRows(running, b, descriptors, forced).size(), 0u);
+
+  const std::vector<HotApplyOutcome> failed{{SettingId::kVsync, HotApplyStatus::kFailed,
+                                              "window no longer available"}};
+  rb_blitz::settings::AcknowledgeRunningValues(&running, &forced, a, failed);
+  forced.push_back(SettingId::kVsync);
+  CHECK_FALSE(running.at(SettingId::kVsync).boolean);
+  CHECK_EQ(rb_blitz::settings::PendingRestartRows(running, a, descriptors, forced).size(), 1u);
+
+  rb_blitz::settings::AcknowledgeRunningValues(
+      &running, &forced, a, {{SettingId::kVsync, HotApplyStatus::kApplied, ""}});
+  CHECK_TRUE(running.at(SettingId::kVsync).boolean);
+  CHECK_TRUE(forced.empty());
+  CHECK_EQ(rb_blitz::settings::PendingRestartRows(running, a, descriptors, forced).size(), 0u);
+}
+
+void ApplicationLedgerTracksLateCompletion() {
+  test::BeginCase("ledger: late physical completion preserves the newest saved request");
+  using rb_blitz::settings::ApplicationLedger;
+  using rb_blitz::settings::ApplyBoundary;
+  using rb_blitz::settings::ApplyPhase;
+  ApplicationLedger ledger;
+  ledger.Seed({{SettingId::kVsync, Bool(true)}, {SettingId::kHideHud, Bool(false)}});
+  const auto b = ledger.Queue(1, {{SettingId::kVsync, Bool(false)}}, ApplyBoundary::kNow);
+  const auto a = ledger.Queue(2, {{SettingId::kVsync, Bool(true)}}, ApplyBoundary::kNow);
+  CHECK_TRUE(b < a);
+  ledger.Complete(SettingId::kVsync, b, HotApplyStatus::kApplied, Bool(false));
+  const auto* state = ledger.Find(SettingId::kVsync);
+  CHECK_TRUE(state != nullptr);
+  if (state) {
+    CHECK_FALSE(state->running.boolean);
+    CHECK_TRUE(state->saved.boolean);
+    CHECK_TRUE(state->phase == ApplyPhase::kQueued);
+    CHECK_EQ(state->revision, 2u);
+    CHECK_EQ(state->generation, a);
+  }
+  ledger.Complete(SettingId::kVsync, a, HotApplyStatus::kFailed, std::nullopt, "write failed");
+  CHECK_EQ(ledger.PendingRestartRows().size(), 1u);
+  const auto retry = ledger.Queue(3, {{SettingId::kVsync, Bool(true)}}, ApplyBoundary::kNow);
+  ledger.Complete(SettingId::kVsync, retry, HotApplyStatus::kApplied, Bool(true));
+  CHECK_TRUE(ledger.PendingRestartRows().empty());
+  CHECK_TRUE(ledger.Find(SettingId::kVsync)->reason.empty());
+
+  const auto hud = ledger.Queue(4, {{SettingId::kHideHud, Bool(true)}},
+                                ApplyBoundary::kNextSong);
+  CHECK_TRUE(ledger.Find(SettingId::kHideHud)->phase == ApplyPhase::kDeferred);
+  CHECK_TRUE(ledger.PendingRestartRows().empty());
+  ledger.Complete(SettingId::kHideHud, hud, HotApplyStatus::kApplied, Bool(true));
+  CHECK_TRUE(ledger.Find(SettingId::kHideHud)->phase == ApplyPhase::kApplied);
+}
+
+void StaleFailureCannotEraseCurrentFailure() {
+  test::BeginCase("ledger: a stale failure cannot erase the newest failure or its reason");
+  using rb_blitz::settings::ApplicationLedger;
+  using rb_blitz::settings::ApplyBoundary;
+  using rb_blitz::settings::ApplyPhase;
+  ApplicationLedger ledger;
+  ledger.Seed({{SettingId::kVsync, Bool(false)}});
+  const auto first = ledger.Queue(1, {{SettingId::kVsync, Bool(true)}}, ApplyBoundary::kNow);
+  const auto second = ledger.Queue(2, {{SettingId::kVsync, Bool(true)}}, ApplyBoundary::kNow);
+  ledger.Complete(SettingId::kVsync, second, HotApplyStatus::kFailed, std::nullopt,
+                  "newest backend write failed");
+  ledger.Complete(SettingId::kVsync, first, HotApplyStatus::kFailed, std::nullopt,
+                  "old write failed");
+  const auto* state = ledger.Find(SettingId::kVsync);
+  CHECK_TRUE(state != nullptr);
+  if (state) {
+    CHECK_TRUE(state->phase == ApplyPhase::kFailed);
+    CHECK_TRUE(state->reason == "newest backend write failed");
+    CHECK_EQ(state->revision, 2u);
+    CHECK_EQ(state->generation, second);
+  }
+  CHECK_EQ(ledger.PendingRestartRows().size(), 1u);
+  // A stale completion that observes the old physical value also cannot erase the failure.
+  ledger.Complete(SettingId::kVsync, first, HotApplyStatus::kApplied, Bool(false));
+  CHECK_TRUE(ledger.Find(SettingId::kVsync)->phase == ApplyPhase::kFailed);
+  CHECK_TRUE(ledger.Find(SettingId::kVsync)->reason == "newest backend write failed");
+  const auto retry = ledger.Queue(3, {{SettingId::kVsync, Bool(true)}}, ApplyBoundary::kNow);
+  ledger.Complete(SettingId::kVsync, retry, HotApplyStatus::kApplied, Bool(true));
+  CHECK_TRUE(ledger.Find(SettingId::kVsync)->phase == ApplyPhase::kApplied);
+  CHECK_TRUE(ledger.Find(SettingId::kVsync)->reason.empty());
+
+  const auto mismatch = ledger.Queue(4, {{SettingId::kVsync, Bool(false)}}, ApplyBoundary::kNow);
+  ledger.Complete(SettingId::kVsync, mismatch, HotApplyStatus::kApplied, Bool(true));
+  CHECK_TRUE(ledger.Find(SettingId::kVsync)->phase == ApplyPhase::kFailed);
+  CHECK_TRUE(!ledger.Find(SettingId::kVsync)->reason.empty());
+  CHECK_EQ(ledger.PendingRestartRows().size(), 1u);
+  const auto no_actual = ledger.Queue(5, {{SettingId::kVsync, Bool(false)}},
+                                      ApplyBoundary::kNow);
+  ledger.Complete(SettingId::kVsync, no_actual, HotApplyStatus::kApplied, std::nullopt);
+  CHECK_TRUE(ledger.Find(SettingId::kVsync)->phase == ApplyPhase::kFailed);
+  CHECK_TRUE(ledger.Find(SettingId::kVsync)->reason ==
+             "applier reported success without a running value");
+}
+
+void MixedBoundariesKeepIndependentPendingState() {
+  test::BeginCase("ledger: mixed now, next-song and restart rows acknowledge independently");
+  using rb_blitz::settings::ApplicationLedger;
+  using rb_blitz::settings::ApplyBoundary;
+  using rb_blitz::settings::ApplyPhase;
+  ApplicationLedger ledger;
+  ledger.Seed({{SettingId::kVsync, Bool(true)}, {SettingId::kHideHud, Bool(false)},
+               {SettingId::kTarget, Enum("common")}});
+  const auto now = ledger.Queue(8, {{SettingId::kVsync, Bool(false)}}, ApplyBoundary::kNow);
+  const auto song = ledger.Queue(8, {{SettingId::kHideHud, Bool(true)}},
+                                 ApplyBoundary::kNextSong);
+  ledger.Queue(8, {{SettingId::kTarget, Enum("ultimate")}},
+               ApplyBoundary::kProcessRestart);
+  CHECK_TRUE(ledger.Find(SettingId::kVsync)->phase == ApplyPhase::kQueued);
+  CHECK_TRUE(ledger.Find(SettingId::kHideHud)->phase == ApplyPhase::kDeferred);
+  CHECK_TRUE(ledger.Find(SettingId::kTarget)->phase == ApplyPhase::kDeferred);
+  CHECK_EQ(ledger.PendingRestartRows().size(), 1u);
+  ledger.Complete(SettingId::kVsync, now, HotApplyStatus::kApplied, Bool(false));
+  CHECK_TRUE(ledger.Find(SettingId::kVsync)->phase == ApplyPhase::kApplied);
+  CHECK_TRUE(ledger.Find(SettingId::kHideHud)->phase == ApplyPhase::kDeferred);
+  CHECK_EQ(ledger.PendingRestartRows().size(), 1u);
+  ledger.Complete(SettingId::kHideHud, song, HotApplyStatus::kRefused, std::nullopt,
+                  "unsupported song route");
+  CHECK_TRUE(ledger.Find(SettingId::kHideHud)->phase == ApplyPhase::kRefused);
+  CHECK_EQ(ledger.PendingRestartRows().size(), 2u);
+  const auto retry = ledger.Queue(9, {{SettingId::kHideHud, Bool(true)}},
+                                  ApplyBoundary::kNextSong);
+  ledger.Complete(SettingId::kHideHud, retry, HotApplyStatus::kApplied, Bool(true));
+  CHECK_TRUE(ledger.Find(SettingId::kHideHud)->phase == ApplyPhase::kApplied);
+  CHECK_EQ(ledger.PendingRestartRows().size(), 1u);
+}
+
+void MissingOrDuplicateBatchCompletionKeepsRestartFallback() {
+  test::BeginCase("incomplete domain acknowledgements retain the restart fallback");
+  HotApplyPlan plan;
+  plan.live[SettingId::kVsync] = Bool(false);
+  plan.live[SettingId::kSettingsLabels] = Bool(false);
+  IncompleteBatchApplier applier;
+  const auto outcomes = rb_blitz::settings::ApplyHotPlan(plan, &applier);
+  CHECK_EQ(outcomes.size(), 2u);
+  CHECK_TRUE(outcomes[0].id == SettingId::kVsync &&
+             outcomes[0].status == HotApplyStatus::kFailed);
+  CHECK_TRUE(outcomes[1].id == SettingId::kSettingsLabels &&
+             outcomes[1].status == HotApplyStatus::kNoApplier);
+  CHECK_EQ(rb_blitz::settings::RestartSetAfterApply(plan, outcomes).size(), 2u);
+}
+
 void PlanByStrategyMatchesTheDescriptorPlan() {
   test::BeginCase("plan: the schema-driven split agrees with the descriptor-driven one");
 
@@ -449,6 +612,11 @@ int main() {
   PlanByStrategyMatchesTheDescriptorPlan();
   ApplyReportsWhatHappened();
   PendingRestartIsValueBased();
+  AcknowledgedValueSurvivesFailedRevert();
+  ApplicationLedgerTracksLateCompletion();
+  StaleFailureCannotEraseCurrentFailure();
+  MixedBoundariesKeepIndependentPendingState();
+  MissingOrDuplicateBatchCompletionKeepsRestartFallback();
   StrategyTokensAreFrozen();
   return test::Finish();
 }

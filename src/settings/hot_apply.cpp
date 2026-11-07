@@ -34,6 +34,94 @@ const char* HotApplyStatusToken(HotApplyStatus status) {
   return "?";
 }
 
+void ApplicationLedger::Seed(const std::map<SettingId, Value>& running) {
+  records_.clear();
+  generation_ = 0;
+  for (const auto& [id, value] : running) {
+    ApplicationRecord record;
+    record.saved = value;
+    record.running = value;
+    records_[id] = std::move(record);
+  }
+}
+
+uint64_t ApplicationLedger::Queue(uint64_t revision, const std::map<SettingId, Value>& saved,
+                                   ApplyBoundary boundary) {
+  if (saved.empty()) return generation_;
+  const uint64_t generation = ++generation_;
+  for (const auto& [id, value] : saved) {
+    auto found = records_.find(id);
+    if (found == records_.end()) continue;  // no running baseline: never claim application
+    ApplicationRecord& record = found->second;
+    record.saved = value;
+    record.revision = revision;
+    record.generation = generation;
+    record.boundary = boundary;
+    record.reason.clear();
+    record.phase = ValueEquals(record.saved, record.running) ? ApplyPhase::kApplied
+                    : boundary == ApplyBoundary::kNow ? ApplyPhase::kQueued
+                                                     : ApplyPhase::kDeferred;
+  }
+  return generation;
+}
+
+void ApplicationLedger::Complete(SettingId id, uint64_t generation, HotApplyStatus status,
+                                  const std::optional<Value>& actual, std::string reason) {
+  const auto found = records_.find(id);
+  if (found == records_.end()) return;
+  ApplicationRecord& record = found->second;
+  // A late completion can have changed reality. A stale failure without an observed value has
+  // changed nothing, however, and must not erase a newer failure or its restart fallback.
+  if (generation != record.generation) {
+    if (!actual.has_value()) return;
+    record.running = *actual;
+    if (ValueEquals(record.running, record.saved)) {
+      record.phase = ApplyPhase::kApplied;
+      record.reason.clear();
+    } else if (record.phase != ApplyPhase::kFailed && record.phase != ApplyPhase::kRefused) {
+      record.phase = record.boundary == ApplyBoundary::kNow ? ApplyPhase::kQueued
+                                                            : ApplyPhase::kDeferred;
+    }
+    return;
+  }
+  if (actual.has_value()) record.running = *actual;
+  if (status == HotApplyStatus::kApplied && actual.has_value() &&
+      ValueEquals(record.saved, record.running)) {
+    record.phase = ApplyPhase::kApplied;
+    record.reason.clear();
+  } else {
+    record.phase = status == HotApplyStatus::kRefused || status == HotApplyStatus::kNoApplier
+                       ? ApplyPhase::kRefused
+                       : ApplyPhase::kFailed;
+    record.reason = std::move(reason);
+    if (record.reason.empty() && status == HotApplyStatus::kApplied)
+      record.reason = actual.has_value() ? "applier reported a different running value"
+                                         : "applier reported success without a running value";
+  }
+}
+
+const ApplicationRecord* ApplicationLedger::Find(SettingId id) const {
+  const auto found = records_.find(id);
+  return found == records_.end() ? nullptr : &found->second;
+}
+
+std::map<SettingId, Value> ApplicationLedger::RunningValues() const {
+  std::map<SettingId, Value> values;
+  for (const auto& [id, record] : records_) values[id] = record.running;
+  return values;
+}
+
+std::vector<SettingId> ApplicationLedger::PendingRestartRows() const {
+  std::vector<SettingId> rows;
+  for (const auto& [id, record] : records_) {
+    if (ValueEquals(record.saved, record.running)) continue;
+    if (record.boundary == ApplyBoundary::kProcessRestart ||
+        record.phase == ApplyPhase::kRefused || record.phase == ApplyPhase::kFailed)
+      rows.push_back(id);
+  }
+  return rows;
+}
+
 HotApplyPlan PlanHotApply(const std::map<SettingId, Value>& changed,
                           const std::vector<Descriptor>& descriptors) {
   HotApplyPlan plan;
@@ -65,17 +153,58 @@ HotApplyPlan PlanHotApplyByStrategy(const std::map<SettingId, Value>& changed) {
 }
 
 std::vector<HotApplyOutcome> ApplyHotPlan(const HotApplyPlan& plan, HotApplier* applier) {
+  if (applier != nullptr) {
+    // Domain handlers may complete a group with one outcome per row. Never let a
+    // missing or duplicate acknowledgement turn a saved value into an apparent
+    // success: the restart fallback must see every requested row exactly once.
+    const std::vector<HotApplyOutcome> reported = applier->ApplyBatch(plan.live);
+    std::map<SettingId, HotApplyOutcome> by_id;
+    for (const HotApplyOutcome& outcome : reported) {
+      if (!plan.live.contains(outcome.id)) continue;
+      const auto [it, inserted] = by_id.emplace(outcome.id, outcome);
+      if (!inserted) {
+        it->second = {outcome.id, HotApplyStatus::kFailed,
+                      "domain handler reported a duplicate completion"};
+      }
+    }
+    std::vector<HotApplyOutcome> normalized;
+    normalized.reserve(plan.live.size());
+    for (const auto& [id, value] : plan.live) {
+      (void)value;
+      const auto found = by_id.find(id);
+      normalized.push_back(found == by_id.end()
+          ? HotApplyOutcome{id, HotApplyStatus::kNoApplier,
+                            "domain handler did not acknowledge this row"}
+          : std::move(found->second));
+    }
+    return normalized;
+  }
   std::vector<HotApplyOutcome> outcomes;
   outcomes.reserve(plan.live.size());
   for (const auto& [id, value] : plan.live) {
+    (void)value;
     HotApplyOutcome outcome;
     outcome.id = id;
-    if (applier == nullptr || !applier->Knows(id)) {
+    outcome.status = HotApplyStatus::kNoApplier;
+    outcome.error = "no live applier for this row in this build";
+    outcomes.push_back(std::move(outcome));
+  }
+  return outcomes;
+}
+
+std::vector<HotApplyOutcome> HotApplier::ApplyBatch(
+    const std::map<SettingId, Value>& values) {
+  std::vector<HotApplyOutcome> outcomes;
+  outcomes.reserve(values.size());
+  for (const auto& [id, value] : values) {
+    HotApplyOutcome outcome;
+    outcome.id = id;
+    if (!Knows(id)) {
       outcome.status = HotApplyStatus::kNoApplier;
       outcome.error = "no live applier for this row in this build";
     } else {
       std::string error;
-      if (applier->Apply(id, value, &error)) {
+      if (Apply(id, value, &error)) {
         outcome.status = HotApplyStatus::kApplied;
       } else {
         outcome.status = error.empty() ? HotApplyStatus::kFailed : HotApplyStatus::kRefused;
@@ -103,7 +232,22 @@ std::vector<SettingId> RestartSetAfterApply(const HotApplyPlan& plan,
   return pending;
 }
 
-std::vector<SettingId> PendingRestartRows(const std::map<SettingId, Value>& boot_values,
+void AcknowledgeRunningValues(std::map<SettingId, Value>* running_values,
+                              std::vector<SettingId>* forced_restart,
+                              const std::map<SettingId, Value>& requested,
+                              const std::vector<HotApplyOutcome>& outcomes) {
+  if (running_values == nullptr || forced_restart == nullptr) return;
+  for (const HotApplyOutcome& outcome : outcomes) {
+    if (outcome.status != HotApplyStatus::kApplied) continue;
+    const auto value = requested.find(outcome.id);
+    if (value == requested.end()) continue;
+    (*running_values)[outcome.id] = value->second;
+    forced_restart->erase(std::remove(forced_restart->begin(), forced_restart->end(), outcome.id),
+                          forced_restart->end());
+  }
+}
+
+std::vector<SettingId> PendingRestartRows(const std::map<SettingId, Value>& running_values,
                                           const std::map<SettingId, Value>& current_values,
                                           const std::vector<Descriptor>& descriptors,
                                           const std::vector<SettingId>& forced) {
@@ -111,11 +255,11 @@ std::vector<SettingId> PendingRestartRows(const std::map<SettingId, Value>& boot
   // added by a capability change, say) cannot be compared and is skipped rather than guessed at.
   std::map<SettingId, Value> changed;
   for (const auto& [id, current] : current_values) {
-    const auto boot = boot_values.find(id);
-    if (boot == boot_values.end()) {
+    const auto running = running_values.find(id);
+    if (running == running_values.end()) {
       continue;
     }
-    if (!ValueEquals(current, boot->second)) {
+    if (!ValueEquals(current, running->second)) {
       changed[id] = current;
     }
   }

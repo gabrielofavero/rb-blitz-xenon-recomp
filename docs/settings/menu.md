@@ -9,7 +9,7 @@ preserved; repeated baseline/build/test prose and duplicated evidence lists were
 records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.md](contracts.md) and
 [status.md](status.md).
 
-## Current organization (2026-11-02)
+## Current organization (2026-11-07)
 
 The root shows Controls, Calibration, General, Audio/Video, Gameplay, and How to Play.
 Gameplay appears only with Ultimate. Every category has at most six visible entries, in both menu
@@ -17,7 +17,7 @@ and in-song contexts.
 
 | Page | Entries |
 | --- | --- |
-| General | Launch; Interface; Song Library; Achievements & Unlocks; Credits |
+| General | Launch; Interface; Song Library; Achievements & Unlocks; Credits; Restore default settings |
 | Launch | Game Version (Rock Band Blitz / Ultimate / Demo); Startup (Normal / Fast); Load Guard (Off / 30s / 60s) |
 | Controls | Layout; Controller Presets; Interface Mapping; Gameplay Mapping. Layout opens Xbox, PlayStation, Nintendo Switch and Others; choosing a named layout applies it. Keyboard and mouse are always enabled. |
 | Gameplay Mapping | Notes; Move Lane; Pause & Power-up; Reset All. Each action row keeps its name beside the keyboard and mouse bindings, with Add Key, Replace, and Reset on its page. Mapping pages hide the bottom settings caption. A first controller button asks for confirmation, then custom controller bindings replace the preset for all actions. |
@@ -29,10 +29,40 @@ and in-song contexts.
 | Music Library & Store | Messages; Recommendations |
 | Song Library | RhythmVerse; Scan Threads |
 | RhythmVerse | Store Access; Filters (Guitar, Bass, Drums, Vocals, Keys) |
+
+Restore default settings opens the game's confirmation page. Confirming saves native preferences,
+control bindings, and the installed compatible Ultimate provider's preferences back to their
+defaults. The restored values are restart scoped; leaving Help & Options offers the restart prompt.
+Explicit command-line and environment overrides remain in control of the running process.
 | Achievements & Unlocks | Achievement Alerts; Unlock All; Unlock Online Achievements |
 | Audio | Active Track Volume; Sound Volume; Bass Boost; Background Music; Menu Music Navigation |
 | Video | Display; Graphics; Renderer (when more than one backend is available) |
 | Display | Window Mode; Resolution; V-Sync; Overscan |
+
+As of 2026-11-06 [measured], selecting a different Window Mode opens the guest's own confirmation
+screen with Keep and Revert. Keep saves after a successful frame presentation; Revert restores the
+previous mode without saving. A disposable D3D12 run in `out/_swap/hot-settings/runtime-acceptance/`
+observed all six directed Windowed/Borderless/Full Screen changes and explicit Revert. After a
+rebuild, the 15-second timeout restored the native mode and exited the confirmation page.
+The same six changes, Revert and timeout were observed on Vulkan in the disposable profile.
+Saved Full Screen relaunch and input through Help & Options were observed on both backends;
+Vulkan Full Screen desktop captures were black. Repeated placement/input, Vulkan relaunch visuals
+and owner acceptance remain open. Resolution remains a restart
+setting while live guest-frame reconstruction is unproven (see the hot-apply plan P3).
+
+On 2026-11-07 [measured], the disposable D3D12 profile in
+`out/_swap/hot-settings/runtime-acceptance/` hid LEADERBOARDS on the first return from
+Help & Options and restored it on the next return, without relaunching. The saved revisions,
+guest row-completion queries and screenshots agree. The generated splash refresh now runs after
+the retail `check_trial` on screen entry; that call had overwritten the earlier panel refresh.
+Other menu rows, selected-row recovery, input paths and header visuals remain unverified, so their
+restart strategy metadata is unchanged.
+
+On 2026-11-07 [source], the song-selection record now composes runtime header navigation
+with the controller icon-font transformation. A separate guarded Ultimate trial assigns
+the durably saved Personal Best preference at panel entry, before its song-update and
+selection consumers. The assignment receipt records the next-selection boundary;
+the visible effect and reversal are unverified.
 
 Shortcut and library-tab preferences use Visible/Hidden. Background Music uses Default/Library;
 Store Access uses Enabled/Disabled. Hiding the RhythmVerse shortcut does not disable the store.

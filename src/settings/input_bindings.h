@@ -56,6 +56,8 @@ class InputBindingStore {
   // running process, and publishes the new binding snapshot. A failure leaves the previous
   // effective mapping intact and names what failed.
   virtual bool Commit(std::string* error) = 0;
+  // Save a whole-settings reset while the running input mapping waits for restart.
+  virtual bool CommitForRestart(std::string* error) { return Commit(error); }
 
   // Arms the listening session for a binding token (the row's table decides the accepted source
   // kinds). The dialog itself is the generated menu's screen; this only starts the host half.

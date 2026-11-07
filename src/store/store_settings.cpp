@@ -88,20 +88,27 @@ bool ApplyRowToSettings(settings::SettingId id, const settings::Value& value, St
 }
 
 bool ApplyCommittedRow(settings::SettingId id, const settings::Value& value, std::string* error) {
-  if (!IsStoreSetting(id)) {
-    if (error != nullptr) {
-      *error = "the row is not a RhythmVerse setting";
+  return ApplyCommittedRows({{id, value}}, error);
+}
+
+bool ApplyCommittedRows(const std::map<settings::SettingId, settings::Value>& values,
+                        std::string* error) {
+  if (values.empty()) return true;
+  const std::lock_guard<std::mutex> lock(g_mutex);
+  StoreSettings next = *g_settings;
+  for (const auto& [id, value] : values) {
+    if (!IsStoreSetting(id)) {
+      if (error) *error = "the row is not a RhythmVerse setting";
+      return false;
     }
-    return false;
-  }
-  StoreSettings next = *Settings();
-  if (!ApplyRowToSettings(id, value, &next)) {
-    if (error != nullptr) {
-      *error = "the row's value is not a boolean";
+    if (!ApplyRowToSettings(id, value, &next)) {
+      if (error) *error = "the row's value is not a boolean";
+      return false;
     }
-    return false;
   }
-  PublishSettings(next);
+  if (SameSettings(*g_settings, next)) return true;
+  g_settings = std::make_shared<const StoreSettings>(std::move(next));
+  ++g_generation;
   return true;
 }
 

@@ -109,6 +109,8 @@ struct MenuConfiguration {
   // Refresh Songs owns the retail `splash_dlc` action, so Download Content uses
   // its restored row.
   bool download_content_row = false;
+  // Opt-in owner diagnostic for the unverified loaded-list refresh path.
+  bool menu_refresh_trial = false;
   bool trial_mode = false;
   bool controller_layout_enabled = false;
   // The refresh shortcut's visibility. Its control stays reachable under Main Menu / Extra Items.

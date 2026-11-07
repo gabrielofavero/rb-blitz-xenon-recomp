@@ -8,6 +8,38 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **Settings hot apply (2026-11-07):** the [active plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md)
+  has a nine-row immediate baseline and a 48-row static consumer audit. Saved, running and pending
+  application are tracked separately; a commit rechecks capabilities before writing, partial provider
+  saves expose only durable rows, and RhythmVerse filters publish one validated snapshot per group.
+  The authored Window Mode Keep/Revert page waits for a successful post-switch presentation before
+  saving. A disposable D3D12 run in `out/_swap/hot-settings/runtime-acceptance/` observed all six
+  directed Windowed/Borderless/Full Screen changes with Keep and an explicit Revert. Its 15-second
+  timeout now restores the saved mode and exits the guest confirmation page, observed after a rebuild.
+  The same disposable profile also exercised all six changes, Revert and timeout on Vulkan.
+  Later runs without a CLI display override saved Full Screen, relaunched into that SDL mode, and
+  returned through Help & Options to a fitted Windowed client on D3D12 and Vulkan. Vulkan Full Screen
+  desktop captures were black, so its relaunch visual and repeated placement/input checks remain
+  unverified. Resolution remains restart-scoped because the guest frame
+  and backend caches lack a proven live reconstruction boundary. Menu row/header refresh is enabled
+  on every boot with guest completion acknowledgments. After moving the splash refresh past the
+  retail `check_trial`, a disposable D3D12 run hid and restored LEADERBOARDS on the first returned
+  splash frame; saved revisions and guest acknowledgments matched both directions. Other rows and
+  header visuals remain unverified. `--settings_ultimate_refresh_trial=true` guards committed
+  Ultimate assignments and seven next-song HUD/visual refreshes; per-row receipts now prevent a
+  skipped assignment from being acknowledged. A disposable same-process run hid Timer on the next
+  song and restored it on a third song, with matching guest acknowledgments. Other provider rows,
+  later provider saves and restart persistence remain unverified. Display, Ultimate
+  and loaded-menu strategy metadata stay restart-scoped until the advertised boundaries pass acceptance.
+
+  The 2026-11-07 host follow-up adds a guarded Personal Best assignment before
+  the song-selection panel reads it, with a per-row guest receipt and an
+  "Applies on next song selection" caption while deferred. It also composes
+  loaded header navigation with the controller icon-font edit, applies a durable
+  native row after a partial provider-save failure, and keeps display recovery
+  active until its marker is removed. These changes have host checks only;
+  Personal Best's visible hide/show cycle remains unverified.
+
 - **Refresh Songs default (2026-10-28):** the main-menu shortcut defaults Off in both the settings
   schema and its cvar. Existing saved On choices still take effect.
 

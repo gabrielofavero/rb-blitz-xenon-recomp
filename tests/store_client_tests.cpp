@@ -963,6 +963,23 @@ void TestStoreSettings() {
   CHECK_TRUE(Settings()->instruments.keys);
   CHECK_FALSE(Settings()->enabled);  // the master is unaffected by a leaf
 
+  // A commit changing several leaves publishes one generation, and a malformed companion row
+  // cannot expose the valid leaf ahead of the refusal.
+  const std::uint64_t before_batch = SettingsGeneration();
+  CHECK_TRUE(ApplyCommittedRows({{settings::SettingId::kRhythmVerseBass, off},
+                                 {settings::SettingId::kRhythmVerseDrums, off}}, &error));
+  CHECK_EQ(SettingsGeneration(), before_batch + 1);
+  CHECK_FALSE(Settings()->instruments.bass);
+  CHECK_FALSE(Settings()->instruments.drums);
+  const std::uint64_t after_batch = SettingsGeneration();
+  CHECK_FALSE(ApplyCommittedRows({{settings::SettingId::kRhythmVerseGuitar, on},
+                                  {settings::SettingId::kRhythmVerseKeys, settings::Value{}}},
+                                 &error));
+  CHECK_EQ(SettingsGeneration(), after_batch);
+  CHECK_FALSE(Settings()->instruments.guitar);
+  CHECK_TRUE(ApplyCommittedRows({{settings::SettingId::kRhythmVerseBass, on},
+                                 {settings::SettingId::kRhythmVerseDrums, on}}, &error));
+
   // A row that is not ours, and a value of the wrong kind, are refused and change nothing.
   const std::uint64_t before_refusals = SettingsGeneration();
   CHECK_FALSE(ApplyCommittedRow(settings::SettingId::kVsync, on, &error));

@@ -15,6 +15,9 @@ class Runtime;
 }  // namespace rex
 
 namespace rb_blitz::dlc {
+// Begin the host-only flat-library scan while graphics presentation is being set up.
+// Configure() consumes this result before the guest starts.
+void PrepareBootLibraryScan(const std::filesystem::path& game_data_root);
 
 // Registers the DLC sources as extra read-only content, so packages dropped there
 // enumerate and open exactly like content installed under Documents\Rock Band Blitz:

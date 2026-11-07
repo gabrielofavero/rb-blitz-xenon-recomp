@@ -59,3 +59,27 @@ shortcut during gameplay and compare performance before and after returning.
 The owner must choose who drives that test under `AGENTS.md`. Focus recovery is
 a candidate remedy, not a confirmed explanation or verified fix for the reported
 capture slowdown.
+
+## Guest Window Mode preview (2026-11-06)
+
+[tree] SDK patch [`0048`](../../patches/rexglue-sdk/0048-atomic-runtime-display-mode.patch)
+adds the UI-thread mode transition and native rollback. Patch
+[`0049`](../../patches/rexglue-sdk/0049-successful-present-sequence.patch) counts successful
+present calls. Patch [`0050`](../../patches/rexglue-sdk/0050-verify-startup-display-mode.patch)
+refuses a startup window whose native display mode failed to apply. Patch
+[`0051`](../../patches/rexglue-sdk/0051-ui-present-display-confirmation.patch) counts successful
+UI-thread paints separately, so a guest-output present that started before the switch cannot
+confirm Keep. The authored Window Mode row in `src/ui/settings_screen.cpp` now opens a guest
+Keep/Revert page. `src/settings/display_runtime.cpp` marks the old mode before switching and
+rolls it back on Revert or a 15-second timeout. Keep requires a later successful present and
+the requested native mode, then saves through `ServiceSink` and acknowledges the running
+mode. Boot consumes an abandoned marker and retries removal after a verified frame.
+
+[measured] A disposable D3D12 run in `out/_swap/hot-settings/runtime-acceptance/` on 2026-11-06
+observed all six directed Windowed/Borderless/Full Screen transitions with Keep and an explicit
+Revert. The 15-second timeout restored the saved mode and, after a rebuild, the confirmation page
+exited through its `display.preview_active` poll. The same six transitions, Revert and timeout
+were observed on Vulkan in the disposable profile. Later launches without a CLI display override
+restored saved Full Screen on both backends, and input reached Help & Options before a kept return
+to Windowed. [unverified] Repeated placement/input and the Vulkan Full Screen relaunch visual
+still need acceptance; its desktop captures were black. The schema remains restart-scoped.

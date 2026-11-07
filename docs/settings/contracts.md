@@ -362,6 +362,12 @@ A `Snapshot` is an **immutable by-value copy**. No host object pointer, `std::st
 storage, or reference is ever handed across the guest boundary. Opening the menu takes a fresh
 snapshot; the bridge cannot mutate the service's state.
 
+The active [hot-apply plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md)
+extends each field with saved/running/pending application facts and an application boundary.
+The frozen v1 shape above records the original contract; current `src/settings/model.h` and
+`src/settings/hot_apply.h` define the added fields and acknowledgment rules. Menu return and
+next-song completion are distinct from an immediate hot result.
+
 ### 5.4 Native settings file (frozen shape)
 
 ```toml

@@ -6,7 +6,9 @@
 
 #include "hooks/hot_apply_runtime.h"
 
+#include <atomic>
 #include <string>
+#include <map>
 #include <thread>
 
 #include <rex/cvar.h>
@@ -19,6 +21,8 @@
 
 namespace rb_blitz::settings {
 namespace {
+
+std::atomic<uint64_t> g_controller_scheme_ticket{0};
 
 // The cvar a hot row writes, by name, and the wire token the guest names it by. One entry per row
 // the applier knows; a row that is `hot` in the schema but absent here is refused honestly (the
@@ -114,6 +118,37 @@ bool WriteCvar(const std::string& name, const std::string& text, std::string* er
 
 class CvarHotApplier : public HotApplier {
  public:
+  std::vector<HotApplyOutcome> ApplyBatch(
+      const std::map<SettingId, Value>& values) override {
+    std::map<SettingId, Value> store_rows;
+    std::map<SettingId, Value> other_rows;
+    for (const auto& [id, value] : values) {
+      (FindStoreRow(id) ? store_rows : other_rows)[id] = value;
+    }
+    std::map<SettingId, HotApplyOutcome> by_id;
+    if (!store_rows.empty()) {
+      std::string error;
+      const bool applied = store::ApplyCommittedRows(store_rows, &error);
+      for (const auto& [id, value] : store_rows) {
+        (void)value;
+        by_id[id] = {id, applied ? HotApplyStatus::kApplied : HotApplyStatus::kRefused,
+                     applied ? std::string{} : error};
+      }
+      if (applied)
+        REXLOG_INFO("hot_apply: published {} RhythmVerse filters in one store snapshot",
+                    store_rows.size());
+    }
+    for (HotApplyOutcome& outcome : HotApplier::ApplyBatch(other_rows))
+      by_id[outcome.id] = std::move(outcome);
+    std::vector<HotApplyOutcome> outcomes;
+    outcomes.reserve(values.size());
+    for (const auto& [id, value] : values) {
+      (void)value;
+      outcomes.push_back(std::move(by_id.at(id)));
+    }
+    return outcomes;
+  }
+
   bool Knows(SettingId id) const override {
     if (id == SettingId::kButtonScheme) return true;
     if (FindStoreRow(id) != nullptr) {
@@ -129,12 +164,16 @@ class CvarHotApplier : public HotApplier {
 
   bool Apply(SettingId id, const Value& value, std::string* error) override {
     if (id == SettingId::kButtonScheme) {
+      uint64_t ticket = 0;
       if (value.kind != ValueKind::kEnum ||
-          !assets::SelectControllerScheme(value.text)) {
+          !assets::SelectControllerScheme(value.text, &ticket)) {
+        g_controller_scheme_ticket.store(0, std::memory_order_release);
         *error = "controller layout is not in this boot's catalog";
         return false;
       }
-      REXLOG_INFO("button_schemes: queued selected layout '{}' for the next GPU frame", value.text);
+      g_controller_scheme_ticket.store(ticket, std::memory_order_release);
+      REXLOG_INFO("button_schemes: queued selected layout '{}' ticket={} for the next GPU frame",
+                  value.text, ticket);
       return true;
     }
     if (const StoreRow* store_row = FindStoreRow(id)) {
@@ -186,6 +225,10 @@ CvarHotApplier& Instance() {
 }  // namespace
 
 HotApplier* RuntimeHotApplier() { return &Instance(); }
+
+uint64_t RuntimeControllerSchemeTicket() {
+  return g_controller_scheme_ticket.load(std::memory_order_acquire);
+}
 
 SettingId IdForToken(std::string_view token) {
   // The vocabulary now lives with the table it searches (P11a moved it to schema.cpp), because the

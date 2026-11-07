@@ -145,6 +145,11 @@ struct Choice {
 // is hot-first, and moving a row means measuring it.
 enum class ApplicationStrategy : uint8_t { kHot = 0, kRestart = 1 };
 
+// Completion boundary and runtime state are separate from the schema's proven strategy. The
+// existing snapshot fields retain their meanings; these fields describe application after save.
+enum class ApplyBoundary : uint8_t { kNow, kMenuReturn, kNextSong, kProcessRestart };
+enum class ApplyPhase : uint8_t { kApplied, kQueued, kDeferred, kRefused, kFailed };
+
 struct Descriptor {
   SettingId id = SettingId::kUnknown;
   Category category = Category::kGeneral;
@@ -187,6 +192,11 @@ struct FieldState {
   Value requested;  // last desired value (persisted intent)
   Value effective;  // what boot actually applied / will apply
   Value pending;    // edited this session, not yet committed
+  Value running;    // last acknowledged value in this process
+  ApplyBoundary application_boundary = ApplyBoundary::kProcessRestart;
+  ApplyPhase application_phase = ApplyPhase::kApplied;
+  uint64_t application_generation = 0;
+  std::string application_reason;
   Source effective_source = Source::kCompiledDefault;
   Origin origin = Origin::kDefault;
   bool overridden = false;  // explicit CLI/env/devconfig won -> edit disabled, explain
@@ -317,6 +327,8 @@ std::string_view CategoryToken(Category category);
 std::string_view ProviderToken(Provider provider);
 std::string_view WidgetToken(WidgetKind widget);
 std::string_view ApplicationStrategyToken(ApplicationStrategy strategy);
+std::string_view ApplyBoundaryToken(ApplyBoundary boundary);
+std::string_view ApplyPhaseToken(ApplyPhase phase);
 std::string_view SourceToken(Source source);
 std::string_view OriginToken(Origin origin);
 std::string_view CommitStatusToken(CommitStatus status);
