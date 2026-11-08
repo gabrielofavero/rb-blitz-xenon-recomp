@@ -219,12 +219,6 @@ WelcomeLabel2=This is a PC decompilation project of the Xbox 360 version of Rock
 WizardSelectTasks=Shortcuts
 SelectTasksDesc=Choose which shortcuts to create.
 SelectTasksLabel2=Select the shortcuts you would like Setup to create, then click Next.
-; Inno Setup counts only the files it places itself - the recompiled build, about
-; 67 MB - while the game data the user supplies is several hundred megabytes more
-; and is not known until the next page. Its own sentence would therefore be a
-; confidently wrong answer to "is there room?"; the wizard measures the real
-; requirement before the install starts instead.
-DiskSpaceMBLabel=The game data you provide is not counted here; the free space is checked again before the install starts.
 
 [Tasks]
 ; Every shortcut is a task, so this page is the one place that decides what is
@@ -474,6 +468,10 @@ var
   MethodPromptLabel: TNewStaticText;
   MethodPathEdit: TNewEdit;
   MethodBrowseButton: TNewButton;
+  gMethodPackagePath: String;
+  gMethodFolderPath: String;
+  gMethodLastChoice: Integer;
+  gChangingMethodPath: Boolean;
   UltimatePromptLabel: TNewStaticText;
   UltimatePathEdit: TNewEdit;
   UltimateBrowseButton: TNewButton;
@@ -491,7 +489,7 @@ var
   SavePromptLabel: TNewStaticText;
   SavePathEdit: TNewEdit;
   SaveBrowseButton: TNewButton;
-  LocationStatusLabel: TNewStaticText;
+  LocationHintLabel: TNewStaticText;
   gPrefillingLocations: Boolean;
   gDlcAnswered: Boolean;
   gSaveAnswered: Boolean;
@@ -1231,13 +1229,8 @@ end;
 
 // --- the picker that shares its page with the choice ----------------------
 
-// The option list is drawn at the very left of the page, where the radios' own
-// marker sits against the page edge; it is indented so the marker has room. The
-// band that leaves under the list is where the picker for the chosen kind of
-// source goes, which is why the list is shortened here rather than sized by Inno -
-// and it is a wide band on purpose: the radios and the picker they control read as
-// one question only while the gap between them is clearly larger than the one
-// between the radios themselves (owner request, 2026-10-14).
+// Keep the picker directly below the choices. Inno gives the option list most of
+// the page height by default, which stranded the related path field at the bottom.
 //
 // `Note` is the other thing that band can hold. A page whose choice has an answer
 // with nothing to pick (the mod's "do not install") explains itself in the same
@@ -1251,7 +1244,7 @@ begin
   list := Page.CheckListBox;
   list.Left := ScaleX(8);
   list.Width := list.Width - ScaleX(8);
-  list.Height := list.Height - ScaleY(72);
+  list.Height := ScaleY(23) * list.Items.Count + ScaleY(4);
 
   // The prompt's own height is fixed here rather than measured: it is one line, and
   // the edit below it is placed from it before any caption has been set.
@@ -1259,7 +1252,7 @@ begin
   Prompt.AutoSize := False;
   Prompt.WordWrap := False;
   Prompt.Left := list.Left;
-  Prompt.Top := list.Top + list.Height + ScaleY(20);
+  Prompt.Top := list.Top + list.Height + ScaleY(12);
   Prompt.Width := list.Width;
   Prompt.Height := ScaleY(15);
 
@@ -1328,8 +1321,32 @@ begin
 end;
 
 procedure MethodChoiceChanged(Sender: TObject);
+var
+  choice: Integer;
 begin
+  if gChangingMethodPath then
+    Exit;
+  if gMethodLastChoice = MethodPackage then
+    gMethodPackagePath := MethodPathEdit.Text
+  else if gMethodLastChoice = MethodFolder then
+    gMethodFolderPath := MethodPathEdit.Text;
+
+  if Sender = MethodPathEdit then
+    Exit;
   RefreshMethodPage;
+  choice := MethodPage.SelectedValueIndex;
+  if choice <> gMethodLastChoice then
+  begin
+    gChangingMethodPath := True;
+    if choice = MethodFolder then
+      MethodPathEdit.Text := gMethodFolderPath
+    else if choice = MethodPackage then
+      MethodPathEdit.Text := gMethodPackagePath
+    else
+      MethodPathEdit.Text := '';
+    gMethodLastChoice := choice;
+    gChangingMethodPath := False;
+  end;
   UpdateMethodPicker;
 end;
 
@@ -1439,24 +1456,11 @@ begin
   SaveBrowseButton.Width := DlcBrowseButton.Width;
   SaveBrowseButton.Height := DlcBrowseButton.Height;
 
-  LocationStatusLabel.Left := WizardForm.DirEdit.Left;
-  // What the two answers turned out to be is a line of its own, not a caption: the
-  // save row ends and this begins a clear line below it (owner report, 2026-10-14),
-  // because read any closer the folder a Browse button picked looks like part of the
-  // line that reports it.
-  LocationStatusLabel.Top := SavePathEdit.Top + SavePathEdit.Height + ScaleY(16);
-  LocationStatusLabel.Width := WizardForm.DirEdit.Width;
-  LocationStatusLabel.Height := ScaleY(15);
-
-  // What the DLC folder turned out to be, and where the saves will go, is more use
-  // than Inno Setup's own free-space sentence - which this release already replaces
-  // in [Messages] because it counts only the files Setup itself places. That line
-  // keeps the last position when there is room and is dropped when there is not:
-  // it is a remark, and the two answers above it are not.
-  WizardForm.DiskSpaceLabel.Top := LocationStatusLabel.Top + LocationStatusLabel.Height + ScaleY(8);
-  if WizardForm.DiskSpaceLabel.Top + WizardForm.DiskSpaceLabel.Height >
-     WizardForm.DiskSpaceLabel.Parent.Height - ScaleY(6) then
-    WizardForm.DiskSpaceLabel.Visible := False;
+  LocationHintLabel.Left := WizardForm.DirEdit.Left;
+  LocationHintLabel.Top := SavePathEdit.Top + SavePathEdit.Height + ScaleY(16);
+  LocationHintLabel.Width := WizardForm.DirEdit.Width;
+  LocationHintLabel.Height := ScaleY(42);
+  WizardForm.DiskSpaceLabel.Visible := False;
 end;
 
 // The two answers. The fields are what the user sees and can change, so they are
@@ -1490,37 +1494,6 @@ begin
     Result := True
   else
     Result := ParamDlcDirGiven or ParamSaveDirGiven or gLocationAnswerFound;
-end;
-
-// What the last validate-paths said, in one line for the page. Only called when the
-// probe succeeded, so every key is present.
-function LocationStatusText: String;
-var
-  layout, count: String;
-begin
-  if SummaryFlag(gProbeSummaryFile, 'dlc_default') then
-    Result := 'DLC: the game''s own folder'
-  else
-  begin
-    layout := SummaryText(gProbeSummaryFile, 'dlc_layout', '');
-    count := SummaryText(gProbeSummaryFile, 'dlc_packages', '0');
-    if layout = 'structured' then
-      Result := 'DLC: ' + count + ' package(s) in the title/content layout'
-    else if layout = 'flat' then
-      Result := 'DLC: ' + count + ' file(s), read as a library'
-    else if layout = 'empty' then
-      Result := 'DLC: empty, so the game starts with no songs'
-    else
-      Result := 'DLC: not there yet, so the game starts with no songs';
-  end;
-  if SummaryFlag(gProbeSummaryFile, 'save_default') then
-    Result := Result + ';  saves: the game''s own folder'
-  else
-    Result := Result + ';  saves: ' + SummaryText(gProbeSummaryFile, 'save_dir', '');
-  if SummaryText(gProbeSummaryFile, 'note_count', '0') <> '0' then
-    Result := Result + '  (' + SummaryText(gProbeSummaryFile, 'note_0', '') + ')';
-  if gLocationsUi then
-    LocationStatusLabel.Caption := Result;
 end;
 
 // Fills the two fields. The order is parent plan §9.1's: the unattended parameter,
@@ -1610,8 +1583,6 @@ var
   args, dir: String;
 begin
   Result := '';
-  if gLocationsUi then
-    LocationStatusLabel.Caption := '';
 
   // Both boxes are answers, not extras (owner request, 2026-10-14): what the page
   // shows is what gets recorded, so an empty one means the question is not answered
@@ -1639,7 +1610,6 @@ begin
     Result := HelperError(gProbeSummaryFile);
     Exit;
   end;
-  LocationStatusText;
 end;
 
 procedure DlcBrowseClick(Sender: TObject);
@@ -1677,7 +1647,6 @@ begin
     gDlcAnswered := True
   else if Sender = SavePathEdit then
     gSaveAnswered := True;
-  LocationStatusLabel.Caption := '';
 end;
 
 // --- the Shortcuts page starts from no answer -----------------------------
@@ -2137,6 +2106,9 @@ begin
   MethodPage.Add('Use an extracted game folder');
   MethodPage.Add('Use the game data already in the install folder');
   MethodPage.SelectedValueIndex := MethodPackage;
+  gMethodLastChoice := MethodPackage;
+  gMethodPackagePath := '';
+  gMethodFolderPath := '';
 
   UltimatePage := CreateInputOptionPage(MethodPage.ID,
     'Rock Band Blitz Ultimate',
@@ -2184,8 +2156,8 @@ begin
               UltimateNoteLabel);
 
 
-  MethodPage.CheckListBox.OnClick := @MethodChoiceChanged;
-  UltimatePage.CheckListBox.OnClick := @UltimateChoiceChanged;
+  MethodPage.CheckListBox.OnClickCheck := @MethodChoiceChanged;
+  UltimatePage.CheckListBox.OnClickCheck := @UltimateChoiceChanged;
 
   // The install folder page asks for three locations, so it grows two rows: the DLC
   // library and the save folder. They are created here rather than on a page of their
@@ -2213,15 +2185,18 @@ begin
   SaveBrowseButton.Caption := 'Browse...';
   SaveBrowseButton.OnClick := @SaveBrowseClick;
 
-  LocationStatusLabel := TNewStaticText.Create(WizardForm);
-  LocationStatusLabel.Parent := WizardForm.DirEdit.Parent;
+  LocationHintLabel := TNewStaticText.Create(WizardForm);
+  LocationHintLabel.Parent := WizardForm.DirEdit.Parent;
+  LocationHintLabel.AutoSize := False;
+  LocationHintLabel.WordWrap := True;
+  LocationHintLabel.Caption := 'If you play other music games, you can share the same DLC folder. ' +
+    'Only Xbox 360 CON / LIVE packages are supported at the moment.';
   gLocationsUi := True;
 
   StagePage := CreateOutputProgressPage('Installing',
     'The installer is building your game folder. This takes a few minutes for the game data.');
 
-  RefreshMethodPage;
-  UpdateMethodPicker;
+  MethodChoiceChanged(nil);
   UpdateUltimatePicker;
   LayoutSelectDirHeader;
   LayoutLocationFields;
@@ -2299,7 +2274,7 @@ begin
   // install has spent minutes on it.
   if CurPageID = wpSelectDir then
   begin
-    RefreshMethodPage;
+    MethodChoiceChanged(nil);
     PrefillLocations;
     problem := CheckLocations(False);
     if problem <> '' then
@@ -2318,7 +2293,7 @@ begin
   // moves on, which is what the follow-on page used to do.
   if CurPageID = MethodPage.ID then
   begin
-    RefreshMethodPage;
+    MethodChoiceChanged(nil);
     if MethodPage.SelectedValueIndex = MethodInstalled then
       Exit;
     if Trim(MethodPathEdit.Text) = '' then
@@ -2868,8 +2843,7 @@ begin
   // data item only stays offered while there is data to keep.
   if CurPageID = MethodPage.ID then
   begin
-    RefreshMethodPage;
-    UpdateMethodPicker;
+    MethodChoiceChanged(nil);
   end
   else if CurPageID = UltimatePage.ID then
     UpdateUltimatePicker;
