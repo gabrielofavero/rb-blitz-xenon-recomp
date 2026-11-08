@@ -975,6 +975,29 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     if (graphics_boot_.active() && !graphics_boot_.Begin(effective, &error))
       REXLOG_WARN("settings_boot: {}", error);
   }
+  // Async pipeline creation can skip the title's first logo/title draws while
+  // their PSOs are pending, presenting only the guest clear (blue on D3D12,
+  // black on Vulkan). Keep startup draws synchronous, then restore the user's
+  // setting at the first usable menu. Four owner-tested routes rendered without
+  // the blank interval with this cvar disabled.
+  if (rex::cvar::GetFlagByName("async_shader_compilation") == "true") {
+    if (rex::cvar::SetFlagByName("async_shader_compilation", "false")) {
+      restore_async_shader_compilation_ = true;
+      REXLOG_INFO("settings_boot: shader compilation is synchronous during startup");
+    } else {
+      REXLOG_WARN("settings_boot: could not make startup shader compilation synchronous");
+    }
+  }
+}
+
+void SettingsBoot::RestoreAsyncShaderCompilation() {
+  if (!restore_async_shader_compilation_) return;
+  if (!rex::cvar::SetFlagByName("async_shader_compilation", "true")) {
+    REXLOG_WARN("settings_boot: could not restore asynchronous shader compilation");
+    return;
+  }
+  restore_async_shader_compilation_ = false;
+  REXLOG_INFO("settings_boot: asynchronous shader compilation restored at usable menu");
 }
 
 void SettingsBoot::MenuFrame() {

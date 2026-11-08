@@ -1563,7 +1563,8 @@ std::map<SettingId, Value> DefaultsFromShape(const ShapeReport& shape) {
   std::map<SettingId, Value> defaults;
   // The default is decoded with the *row's* kind, not with a kind of its own, so a payload that
   // changes a row's kind changes its default's reading too - one place to look.
-  auto take = [&](SettingId id, std::string_view variable, RowKind kind) {
+  auto take = [&](SettingId id, std::string_view variable, RowKind kind,
+                  bool position_value) {
     const auto pair = shape.defaults.find(std::string(variable));
     if (pair == shape.defaults.end()) {
       return;
@@ -1576,17 +1577,34 @@ std::map<SettingId, Value> DefaultsFromShape(const ShapeReport& shape) {
     binding.kind = kind;
     Value value;
     if (DecodeProviderValue(binding, pair->second, &value)) {
+      if (position_value) {
+        const auto choices = shape.choices.find(std::string(variable));
+        if (choices == shape.choices.end() || choices->second.empty()) return;
+        const auto& tokens = choices->second;
+        if (std::find(tokens.begin(), tokens.end(), value.text) == tokens.end()) {
+          int32_t index = 0;
+          if (ParseIntText(value.text, &index) && index >= 0 &&
+              static_cast<size_t>(index) < tokens.size()) {
+            value.text = tokens[static_cast<size_t>(index)];
+          } else if (value.text == "FALSE" || value.text == "false" ||
+                     value.text == "TRUE" || value.text == "true") {
+            value.text = tokens.front();
+          } else {
+            return;
+          }
+        }
+      }
       defaults[id] = std::move(value);
     }
   };
   for (const RowBinding& binding : FileBackedBindings()) {
-    take(binding.id, binding.variable, binding.kind);
+    take(binding.id, binding.variable, binding.kind, binding.position_value);
   }
   // The rows whose default is still the provider's even though their value is not persisted in
   // the provider's file (`unlockall`, plan §6.2). Honoring it is the difference between "the
   // payload ships this off" and inventing a value.
   for (const NativeDefault& entry : NativeDefaultBindings()) {
-    take(entry.id, entry.variable, entry.kind);
+    take(entry.id, entry.variable, entry.kind, false);
   }
   return defaults;
 }

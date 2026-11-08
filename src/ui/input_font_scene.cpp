@@ -377,8 +377,10 @@ bool PrepareHintScene(const std::vector<uint8_t>& icon_scene, std::vector<uint8_
         Be32(bytes.data() + table - 8) !=
             std::bit_cast<uint32_t>(kPrivateFontCellHeight / kAtlasSize))
       return Fail(error, "prepared icon font cell dimensions changed");
-    for (uint32_t action = 0; action < kHintCount; ++action) {
-      const uint32_t code = GlyphCode(action);
+    for (uint32_t action = 1; action < kHintCount; ++action) {
+      // Slot 0 remains the header's Previous cue. The splash owns a distinct
+      // image slot, while its label keeps the already-authored 0x80 glyph.
+      const uint32_t code = action == kSplashStartHint ? kSplashGlyphCode : GlyphCode(action);
       uint8_t* glyph = bytes.data() + table + code * 18;
       if (glyph[0] != 0 || glyph[1] != code)
         return Fail(error, "prepared icon font early glyph changed");

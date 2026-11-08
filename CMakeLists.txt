@@ -1280,11 +1280,19 @@ if(BUILD_TESTING)
         src/settings/migration.cpp
         src/settings/cvars.cpp
         src/settings/service.cpp
+        src/settings/ultimate_adapter.cpp
+        src/ui/dtb_author.cpp
+        src/ui/menu_options.cpp
         src/profile/profile.cpp
         src/profile/profile_path.cpp
     )
     target_include_directories(rb_blitz_settings_service_tests PRIVATE src)
     add_test(NAME settings_service COMMAND rb_blitz_settings_service_tests)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game/ultimate/gen/patch_xbox.hdr")
+        add_test(NAME settings_restore_payload
+                 COMMAND rb_blitz_settings_service_tests
+                         "${CMAKE_CURRENT_SOURCE_DIR}/game/ultimate")
+    endif()
 
     # P4: graphics capabilities and the graphics policy. The same SDK-free settings modules the
     # service test links (the policy implements the service's Reconciler interface), plus the

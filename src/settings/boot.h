@@ -108,6 +108,9 @@ class SettingsBoot {
   void FinishInit();
   void SetPresentedProbe(std::function<bool()> probe) { presented_probe_ = std::move(probe); }
   void MenuFrame();
+  // Restore the player's shader compilation preference after the native
+  // startup and content discovery have reached the usable menu.
+  void RestoreAsyncShaderCompilation();
   void Closing();
 
   // The store. Null only when this machine has nowhere to keep settings (no profile path and no app
@@ -216,6 +219,7 @@ class SettingsBoot {
   unsigned menu_frames_ = 0;
   std::atomic<bool> menu_presented_{false};
   bool graphics_marker_attempted_ = false;
+  bool restore_async_shader_compilation_ = false;
   bool display_preview_recovery_pending_ = false;
   std::mutex graphics_marker_mutex_;
   // The rows staged locally, for diagnostics.

@@ -395,6 +395,16 @@ Icon Hint(const View& view, const profile::InputRowToken& row) {
   return FirstOf(view, all);
 }
 
+Icon SplashStartHint(const View& view) {
+  auto all = Ordered(view, {profile::InputRowKind::kGeneralBinding, "start"});
+  // The splash has no list to hit-test; its native left-click pulse starts it.
+  // Keep this pointer route local to the splash rather than advertising a click
+  // for Start on other screens.
+  all.insert(all.begin(), Resolve({SourceKind::kMouse, "left"},
+                                  view.controller_scheme, view.registry));
+  return FirstOf(view, all);
+}
+
 Icon First(const View& view, profile::gameplay_remap::Action action) {
   std::vector<Icon> all;
   if (view.input) {

@@ -173,16 +173,16 @@ void TestMigrateDefault() {
   Profile legacy = LegacyProfile();
   legacy.source_text = ReadFile(paths.legacy_profile);
 
-  BeginCase("migrate: a default profile imports the target and nothing that is already default");
+  BeginCase("migrate: a legacy profile imports values that differ from current defaults");
   Store store(paths);
   store.Load();
   MigrationResult result = Migrate(legacy, store, PathEntry{});
   CHECK_TRUE(result.status == MigrationStatus::kMigrated);
   CHECK_TRUE(result.wrote_settings);
   CHECK_TRUE(result.stats.target_imported);
-  // Keep the old target, 4x filtering, explicitly stored 720p resolution and
-  // the DLC Menu Songs choice. The retired host cache preference is dropped.
-  CHECK_EQ(result.stats.imported, 4);
+  // Keep the old target, 4x filtering, explicitly stored 720p resolution,
+  // DLC Menu Songs and the explicit choice to show all main-menu rows.
+  CHECK_EQ(result.stats.imported, 5);
   CHECK_EQ(result.stats.translated, 2);
   CHECK_EQ(result.stats.dropped, 5);      // retired cache + rename + pool count + fullscreen + monitor
   CHECK_EQ(result.stats.preserved, 1);    // input_backend
@@ -190,6 +190,7 @@ void TestMigrateDefault() {
   CHECK_STR_EQ(ReadFile(result.backup), ReadFile(paths.legacy_profile));
   const DocumentLoad loaded = LoadSettingsDocument(paths.settings_file);
   CHECK_TRUE(loaded.document.values.at(SettingId::kTarget).text == "ultimate");
+  CHECK_FALSE(loaded.document.values.at(SettingId::kHideMainMenu).boolean);
   CHECK_TRUE(loaded.document.values.at(SettingId::kDlcMenuSongs).boolean == false);
   // No legacy key names the new row, so nothing is written for it: its compiled default (`true`)
   // is what the next boot reads.
@@ -248,7 +249,7 @@ void TestMigrateTranslations() {
   CHECK_STR_EQ(loaded.document.values.at(SettingId::kFiltering).text, "16x");
   CHECK_STR_EQ(loaded.document.values.at(SettingId::kAntiAliasing).text, "fxaa");
   CHECK_TRUE(loaded.document.values.at(SettingId::kDlcScanThreads).integer == 8);
-  CHECK_TRUE(loaded.document.values.at(SettingId::kHideMainMenu).boolean == true);
+  CHECK_FALSE(loaded.document.values.contains(SettingId::kHideMainMenu));
   CHECK_TRUE(loaded.document.values.at(SettingId::kHideOfflinePrompts).boolean == false);
   CHECK_EQ(loaded.document.values.at(SettingId::kHiddenMainMenu).list.size(), 2);
   CHECK_STR_EQ(loaded.document.values.at(SettingId::kHiddenMainMenu).list[0], "splash_start");

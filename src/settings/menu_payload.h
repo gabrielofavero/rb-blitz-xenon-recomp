@@ -34,10 +34,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       const std::function<void()>& pump_startup_window = {});
 // Empty the native startup playlist and release its wait, before the guest boots.
 bool SkipStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
-// Keep the provider's authored playlist, but wait for it on a normal boot.
-bool WaitForStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
-// Reorder the installed Ultimate playlist to Harmonix, Ultimate Mods, then regional notices.
-bool OrderUltimateStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
+// Validate a normal boot's playlist while preserving the title's authored wait flag.
+bool KeepStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
+// Use the installed Ultimate Mods scene as that route's sole startup logo.
+bool SelectUltimateStartupLogo(std::vector<ui::dtb::Node>* roots, std::string* why);
+// Select the title's authored autosave warning on normal boots, and the title
+// screen directly on fast boots, for either retail or Ultimate UI records.
+bool SetFirstBootScreen(std::vector<ui::dtb::Node>* roots, bool fast, std::string* why);
 // Remove the retail balance chrome from the two screens that draw it.
 bool HidePowerupCurrency(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool HideResultsCurrency(std::vector<ui::dtb::Node>* roots, std::string* why);
@@ -46,6 +49,7 @@ bool HideResultsCurrency(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool SetDiscoveryStartLabel(std::vector<ui::dtb::Node>* roots);
 // Existing splash lifecycle and native error_popup_panel, preserving provider handlers.
 bool AddCrashRecoveryHooks(std::vector<ui::dtb::Node>* roots, std::string* why);
+bool BypassAutomaticUnlockError(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Replace every connect-panel menu continuation with the same deferred guest
 // method. Refuses an unknown shape instead of leaving an ungated menu route.
 bool AddGraphicsLoadingGate(std::vector<ui::dtb::Node>* roots, std::string* why);

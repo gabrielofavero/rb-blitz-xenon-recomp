@@ -338,7 +338,7 @@ std::vector<SchemaRow> BuildTable() {
                      "Show the main menu's Download content entry."));
   {
     Descriptor d = Make(SettingId::kHideMainMenu, Category::kInterface, Provider::kNative,
-                        WidgetKind::kBooleanWithSubmenu, ValueKind::kBool, BoolValue(false));
+                        WidgetKind::kBooleanWithSubmenu, ValueKind::kBool, BoolValue(true));
     d.submenu_parent = SettingId::kHiddenMainMenu;
     rows.push_back(Row(std::move(d), {"interface", "hide_main_menu"}, "hide_items", "Main Menu",
                        "Hide the chosen main-menu rows."));
@@ -387,7 +387,7 @@ std::vector<SchemaRow> BuildTable() {
                              "plots", "Force Plot", "Force a background while plots are on."));
   rows.push_back(ProviderRow(Make(SettingId::kForceSkybox, Category::kGameplay,
                                   Provider::kUltimate, WidgetKind::kBooleanWithSubmenu,
-                                  ValueKind::kEnum, EnumValue("default"), "provider"),
+                                  ValueKind::kEnum, EnumValue("default_skybox"), "provider"),
                              "plots", "Force Skybox", "Force a skybox."));
   rows.push_back(ProviderRow(Make(SettingId::kGems, Category::kGameplay, Provider::kUltimate,
                                   WidgetKind::kHorizontalSelect, ValueKind::kEnum,

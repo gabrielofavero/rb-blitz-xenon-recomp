@@ -420,7 +420,10 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
   MenuRecords records;
   MenuRefreshRoutes refresh_routes;
   std::vector<std::string> build_notes;
-  const bool skip_startup_logos =
+  // A settings restart is a one-shot short boot regardless of the saved
+  // startup preference. The handoff already auto-starts the local user and
+  // skips offline prompts; use the same reason for the logo and first screen.
+  const bool skip_startup_logos = settings_restart_boot ||
       rex::cvar::GetFlagByName("startup_mode") == "fast";
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), refresh_row_on, &build_notes, menu_filter::HiddenRows(),
@@ -453,7 +456,8 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
     if (!song_selection_patched)
       REXLOG_WARN("settings_menu: Ultimate Personal Best selection refresh unavailable: {}", reason);
   }
-  if (skip_startup_logos) REXLOG_INFO("startup: native logo playlist skipped for this boot");
+  if (skip_startup_logos) REXLOG_INFO("startup: native logo playlist skipped for this boot ({})",
+                                      settings_restart_boot ? "settings restart" : "fast preference");
   // What the boot asked for and the authoring side refused. Not fatal - the menu it produced is
   // still a menu - but each line is a difference between the configuration and what the guest
   // sees, so it is said rather than inferred from a later screenshot.

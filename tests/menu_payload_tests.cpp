@@ -33,6 +33,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -913,7 +914,7 @@ void CheckPrivateFontGeometry(const std::vector<uint8_t>& scene, bool hint) {
            uint32_t(scene[at + 2]) << 8 | scene[at + 3];
   };
   const float cell = font::kPrivateFontCellWidth;
-  const uint32_t index = hint ? font::kHintFirst : 0;
+  const uint32_t index = hint ? font::kHintFirst + font::kSplashStartHint : 0;
   const float glyph_width = float(font::kPrivateIconSize) / cell;
   const float glyph_x = float(font::PrivateIconX(index)) / font::kAtlasSize;
   const float glyph_y = float(font::PrivateIconY(index) - font::kPrivateInset) / font::kAtlasSize;
@@ -928,7 +929,7 @@ void CheckPrivateFontGeometry(const std::vector<uint8_t>& scene, bool hint) {
     const size_t table = at - 576;
     CHECK_EQ(be32(table - 12), std::bit_cast<uint32_t>(cell / font::kAtlasSize));
     CHECK_EQ(be32(table - 8), std::bit_cast<uint32_t>(cell / font::kAtlasSize));
-    const size_t glyph = table + font::GlyphCode(0) * 18;
+    const size_t glyph = table + (hint ? font::kSplashGlyphCode : font::GlyphCode(0)) * 18;
     CHECK_EQ(be32(glyph + 2), std::bit_cast<uint32_t>(glyph_x));
     CHECK_EQ(be32(glyph + 6), std::bit_cast<uint32_t>(glyph_y));
     CHECK_EQ(be32(glyph + 10), std::bit_cast<uint32_t>(glyph_width));
@@ -1083,6 +1084,18 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
     }
     for (const auto& note : notes) std::printf("record note: %s\n", note.c_str());
     CHECK_TRUE(notes.empty());
+    const auto error_flow = records.find("ui/net/gen/error_flow.dtb");
+    CHECK_TRUE((error_flow != records.end()) == fast);
+    if (error_flow != records.end()) {
+      std::vector<dtb::Node> roots;
+      dtb::RootHeader header;
+      CHECK_TRUE(dtb::Parse(error_flow->second.data(), error_flow->second.size(),
+                            &roots, &header, &why));
+      const auto* enter = Method(roots, "error_screen", "enter");
+      CHECK_TRUE(enter && enter->kids.size() == 3 &&
+                 enter->kids[2].kids[1].kids[2].text ==
+                     "error_signin_unlocked_full_game");
+    }
     for (const auto& [path, panel, names] :
          std::array<std::tuple<const char*, const char*, std::array<const char*, 2>>, 2>{{
              {"ui/powerup_select/gen/powerup_select.dtb", "powerup_select_panel",
@@ -1290,7 +1303,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
               root.kids[1].text.find("<alt1>\xC2\x86</alt1>") != std::string::npos)
             loading_powerup = true;
           if (root.kids[0].text == "splash_press_start" &&
-              root.kids[1].text.find("<alt1>\xC2\x84</alt1>") != std::string::npos)
+              root.kids[1].text.find("<alt1>\xC2\x80</alt1>") != std::string::npos)
             splash_start = true;
           if (root.kids[0].text == "song_sort_str" &&
               root.kids[1].text.find("<alt1>\xC2\x85</alt1>") != std::string::npos)
@@ -1320,7 +1333,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
         for (const auto& root : localized)
           if (root.tag == rb_blitz::ui::dtb::kArray && root.kids.size() >= 2 &&
               root.kids[0].text == "splash_press_start" &&
-              root.kids[1].text.find("<alt1>\xC2\x84</alt1>") != std::string::npos)
+              root.kids[1].text.find("<alt1>\xC2\x80</alt1>") != std::string::npos)
             ++splash_starts;
         for (const auto& root : localized)
           if (root.tag == rb_blitz::ui::dtb::kArray && root.kids.size() >= 2 &&
@@ -1389,7 +1402,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
         for (const auto& root : roots) {
           if (root.kids.empty()) continue;
           if (root.kids[0].text == "splash_order") CHECK_TRUE(fast ? root.kids.size() == 1u : root.kids.size() > 1u);
-          if (root.kids[0].text == "wait_for_splash") CHECK_TRUE(root.kids[1].text == (fast ? "FALSE" : "TRUE"));
+          if (root.kids[0].text == "wait_for_splash") CHECK_TRUE(root.kids[1].text == "FALSE");
         }
       }
       if (name == "ui/gen/transition_screens.dtb") CheckAnimations(roots, mask);
@@ -1646,6 +1659,23 @@ void TestLoadedMenuRefresh() {
 
 int main(int argc, char** argv) {
   rb_blitz::test::SuppressWindowsTestCrashDialogs();
+  if (argc == 3 && std::string(argv[1]) == "check-unlock-error-source") {
+    namespace dtb = rb_blitz::ui::dtb;
+    std::ifstream input(argv[2], std::ios::binary);
+    CHECK_TRUE(bool(input));
+    if (!input) return Finish();
+    std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input),
+                               std::istreambuf_iterator<char>()};
+    std::vector<dtb::Node> roots;
+    dtb::RootHeader header;
+    std::string why;
+    CHECK_TRUE(dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why));
+    CHECK_TRUE(rb_blitz::settings::BypassAutomaticUnlockError(&roots, &why));
+    const auto compiled = dtb::Compile(roots, header);
+    std::vector<dtb::Node> reparsed;
+    CHECK_TRUE(dtb::Parse(compiled.data(), compiled.size(), &reparsed, &header, &why));
+    return Finish();
+  }
   if (argc == 3 && std::string(argv[1]) == "check-inline-help") {
     std::ifstream input(argv[2], std::ios::binary);
     CHECK_TRUE(bool(input));
@@ -1788,24 +1818,52 @@ int main(int argc, char** argv) {
   }
   {
     using namespace rb_blitz::ui::dtb;
-    BeginCase("normal boot waits for the provider's authored splash playlist");
-    std::vector<Node> roots{
-        Node::Array({Node::Symbol("wait_for_splash"), Node::Symbol("FALSE")}),
-        Node::Array({Node::Symbol("splash_order"),
-            Node::Array({Node::Symbol("ulti/ultimate_mods.milo"), Node::Int(5)}),
-            Node::Array({Node::Symbol("ui/startup/hmx_logo_screen.milo"), Node::Int(5)})})};
-    const auto playlist = Compile({roots[1]});
-    std::string why;
-    CHECK_TRUE(rb_blitz::settings::WaitForStartupLogos(&roots, &why));
-    CHECK_TRUE(roots[0].kids[1].text == "TRUE");
-    CHECK_TRUE(Compile({roots[1]}) == playlist);
-    CHECK_TRUE(rb_blitz::settings::WaitForStartupLogos(&roots, &why));
-    roots[1].kids.resize(1);
-    CHECK_FALSE(rb_blitz::settings::WaitForStartupLogos(&roots, &why));
+    BeginCase("the autosave warning is selected only on normal boots");
+    for (const bool ultimate : {false, true}) {
+      const char* source = ultimate ? "splash_screen" : "autosave_warning_screen";
+      for (const bool fast : {false, true}) {
+        std::vector<Node> roots{Node::Array({Node::Symbol("init"),
+            Node::Symbol("init.dta"), Node::Command({Node::Symbol("app_label_register")}),
+            Node::Command({Node::Symbol("set"), Node::Var("first_screen"), Node::Symbol(source)}),
+            Node::Command({Node::Symbol("ui"), Node::Symbol("my_init")})})};
+        std::string why;
+        CHECK_TRUE(rb_blitz::settings::SetFirstBootScreen(&roots, fast, &why));
+        const size_t assignment_index = fast ? 4 : 3;
+        CHECK_TRUE(roots[0].kids[assignment_index].kids[2].text ==
+                   (fast ? "splash_screen" : "autosave_warning_screen"));
+        CHECK_EQ(roots[0].kids.size(), fast ? size_t{6} : size_t{5});
+        if (fast) {
+          CHECK_TRUE(roots[0].kids[3].kids[0].text == "splash_panel");
+          CHECK_TRUE(roots[0].kids[3].kids[1].text == "load");
+        }
+        const auto selected = Compile(roots);
+        CHECK_TRUE(rb_blitz::settings::SetFirstBootScreen(&roots, fast, &why));
+        CHECK_TRUE(Compile(roots) == selected);
+      }
+    }
   }
   {
     using namespace rb_blitz::ui::dtb;
-    BeginCase("Ultimate startup presents Harmonix before its logo in both regions");
+    BeginCase("normal boot preserves the authored splash wait flag and playlist");
+    std::vector<Node> roots{
+        Node::Array({Node::Symbol("wait_for_splash"), Node::Symbol("FALSE")}),
+        Node::Array({Node::Symbol("splash_order"),
+            Node::Array({Node::Symbol("ui/startup/hmx_logo_screen.milo"), Node::Int(5)}),
+            Node::Array({Node::Symbol("ui/startup/esrb.milo"), Node::Int(5)})})};
+    const auto playlist = Compile({roots[1]});
+    std::string why;
+    CHECK_TRUE(rb_blitz::settings::KeepStartupLogos(&roots, &why));
+    CHECK_TRUE(roots[0].kids[1].text == "FALSE");
+    CHECK_TRUE(Compile({roots[1]}) == playlist);
+    roots[0].kids[1] = Node::Symbol("TRUE");
+    CHECK_TRUE(rb_blitz::settings::KeepStartupLogos(&roots, &why));
+    CHECK_TRUE(roots[0].kids[1].text == "TRUE");
+    roots[1].kids.resize(1);
+    CHECK_FALSE(rb_blitz::settings::KeepStartupLogos(&roots, &why));
+  }
+  {
+    using namespace rb_blitz::ui::dtb;
+    BeginCase("Ultimate startup selects its own logo in both regions");
     Node other_region;
     other_region.tag = 0x08; // #else
     const Node hmx = Node::Array({Node::Symbol("ui/startup/hmx_logo_screen.milo"), Node::Int(5)});
@@ -1816,21 +1874,17 @@ int main(int argc, char** argv) {
         Node::Array({Node::Symbol("splash_order"), ultimate, Node::Ifdef("REGION_NA"),
                      hmx, esrb, other_region, hmx, Node::Endif()})};
     std::string why;
-    if (!rb_blitz::settings::OrderUltimateStartupLogos(&roots, &why)) {
-      std::printf("synthetic Ultimate startup reorder refused: %s\n", why.c_str());
+    if (!rb_blitz::settings::SelectUltimateStartupLogo(&roots, &why)) {
+      std::printf("synthetic Ultimate startup selection refused: %s\n", why.c_str());
       return 1;
     }
-    CHECK_TRUE(rb_blitz::settings::WaitForStartupLogos(&roots, &why));
+    CHECK_TRUE(rb_blitz::settings::KeepStartupLogos(&roots, &why));
     const auto& order = roots[1].kids;
-    CHECK_EQ(order.size(), size_t{6});
-    CHECK_TRUE(SerializeNodes({order[1]}) == SerializeNodes({hmx}));
-    CHECK_TRUE(SerializeNodes({order[2]}) == SerializeNodes({ultimate}));
-    CHECK_EQ(order[3].tag, kIfdef);
-    CHECK_TRUE(SerializeNodes({order[4]}) == SerializeNodes({esrb}));
-    CHECK_EQ(order[5].tag, kEndif);
-    CHECK_TRUE(roots[0].kids[1].text == "TRUE");
+    CHECK_EQ(order.size(), size_t{2});
+    CHECK_TRUE(SerializeNodes({order[1]}) == SerializeNodes({ultimate}));
+    CHECK_TRUE(roots[0].kids[1].text == "FALSE");
     const auto after = Compile(roots);
-    CHECK_FALSE(rb_blitz::settings::OrderUltimateStartupLogos(&roots, &why));
+    CHECK_FALSE(rb_blitz::settings::SelectUltimateStartupLogo(&roots, &why));
     CHECK_TRUE(Compile(roots) == after);
   }
   {
@@ -1857,7 +1911,35 @@ int main(int argc, char** argv) {
     CHECK_FALSE(rb_blitz::settings::SkipStartupLogos(&roots, &why));
     CHECK_TRUE(Compile(roots) == before);
   }
-  if (argc == 3 && std::string(argv[1]) == "check-ultimate-startup-order") {
+  if (argc == 3 && std::string(argv[1]) == "check-first-screen-source") {
+    using namespace rb_blitz::ui::dtb;
+    std::ifstream input(argv[2], std::ios::binary);
+    std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    std::vector<Node> roots;
+    RootHeader header;
+    std::string why;
+    CHECK_TRUE(Parse(bytes.data(), bytes.size(), &roots, &header, &why));
+    for (const bool fast : {false, true}) {
+      auto selected = roots;
+      CHECK_TRUE(rb_blitz::settings::SetFirstBootScreen(&selected, fast, &why));
+      const auto output = Compile(selected, header);
+      CHECK_TRUE(Parse(output.data(), output.size(), &selected, &header, &why));
+      bool found = false;
+      for (const auto& root : selected) {
+        if (root.kids.empty() || root.kids[0].text != "init") continue;
+        for (const auto& statement : root.kids) {
+          if (statement.tag != kCommand || statement.kids.size() != 3 ||
+              statement.kids[1].text != "first_screen") continue;
+          found = true;
+          CHECK_TRUE(statement.kids[2].text ==
+                     (fast ? "splash_screen" : "autosave_warning_screen"));
+        }
+      }
+      CHECK_TRUE(found);
+    }
+    return Finish();
+  }
+  if (argc == 3 && std::string(argv[1]) == "check-ultimate-startup-source") {
     std::ifstream input(argv[2], std::ios::binary);
     std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
     std::vector<rb_blitz::ui::dtb::Node> roots;
@@ -1866,20 +1948,18 @@ int main(int argc, char** argv) {
     if (!rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why)) {
       std::printf("parse failed: %s\n", why.c_str()); return 1;
     }
-    if (!rb_blitz::settings::OrderUltimateStartupLogos(&roots, &why)) {
-      std::printf("installed Ultimate startup reorder refused: %s\n", why.c_str());
+    if (!rb_blitz::settings::SelectUltimateStartupLogo(&roots, &why)) {
+      std::printf("installed Ultimate startup selection refused: %s\n", why.c_str());
       return 1;
     }
-    CHECK_TRUE(rb_blitz::settings::WaitForStartupLogos(&roots, &why));
+    CHECK_TRUE(rb_blitz::settings::KeepStartupLogos(&roots, &why));
     for (const auto& root : roots) {
       if (root.kids.empty() || root.kids[0].text != "splash_order") continue;
-      CHECK_EQ(root.kids.size(), size_t{6});
-      CHECK_TRUE(root.kids[1].kids[0].text == "ui/startup/hmx_logo_screen.milo");
-      CHECK_TRUE(root.kids[2].kids[0].text == "ulti/ultimate_mods.milo");
-      CHECK_TRUE(root.kids[4].kids[0].text == "ui/startup/esrb.milo");
+      CHECK_EQ(root.kids.size(), size_t{2});
+      CHECK_TRUE(root.kids[1].kids[0].text == "ulti/ultimate_mods.milo");
     }
-    const auto reordered = rb_blitz::ui::dtb::Compile(roots, header);
-    CHECK_TRUE(rb_blitz::ui::dtb::Parse(reordered.data(), reordered.size(), &roots, &header, &why));
+    const auto selected = rb_blitz::ui::dtb::Compile(roots, header);
+    CHECK_TRUE(rb_blitz::ui::dtb::Parse(selected.data(), selected.size(), &roots, &header, &why));
     return Finish();
   }
   if (argc == 3 && std::string(argv[1]) == "check-startup-record") {
@@ -1891,6 +1971,26 @@ int main(int argc, char** argv) {
     std::string why;
     CHECK_TRUE(Parse(bytes.data(), bytes.size(), &roots, &header, &why));
     CHECK_TRUE(Compile(roots, header) == bytes);
+    bool has_harmonix = false;
+    bool has_ultimate = false;
+    std::vector<uint8_t> retail_playlist;
+    for (const auto& root : roots) {
+      if (root.kids.empty() || root.kids[0].text != "splash_order") continue;
+      retail_playlist = Compile({root}, header);
+      for (const auto& entry : root.kids) {
+        if (entry.kids.empty()) continue;
+        has_harmonix |= entry.kids[0].text == "ui/startup/hmx_logo_screen.milo";
+        has_ultimate |= entry.kids[0].text == "ulti/ultimate_mods.milo";
+      }
+    }
+    CHECK_TRUE(has_harmonix);
+    CHECK_FALSE(has_ultimate);
+    CHECK_TRUE(rb_blitz::settings::KeepStartupLogos(&roots, &why));
+    for (const auto& root : roots) {
+      if (root.kids.empty()) continue;
+      if (root.kids[0].text == "splash_order") CHECK_TRUE(Compile({root}, header) == retail_playlist);
+      if (root.kids[0].text == "wait_for_splash") CHECK_TRUE(root.kids[1].text == "TRUE");
+    }
     CHECK_TRUE(rb_blitz::settings::SkipStartupLogos(&roots, &why));
     for (const auto& root : roots) {
       if (root.kids.empty()) continue;
@@ -1901,6 +2001,97 @@ int main(int argc, char** argv) {
     CHECK_TRUE(Parse(skipped.data(), skipped.size(), &roots, &header, &why));
     CHECK_TRUE(Compile(roots, header) == skipped);
     return Finish();
+  }
+  if (argc == 4 && std::string(argv[1]) == "check-startup-output") {
+    using namespace rb_blitz::ui::dtb;
+    const bool ultimate_route = std::string(argv[3]) == "ultimate";
+    if (!ultimate_route && std::string(argv[3]) != "retail") return 2;
+    std::ifstream input(argv[2], std::ios::binary);
+    std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    std::vector<Node> roots;
+    RootHeader header;
+    std::string why;
+    CHECK_TRUE(Parse(bytes.data(), bytes.size(), &roots, &header, &why));
+    CHECK_TRUE(Compile(roots, header) == bytes);
+    size_t playlists = 0;
+    size_t waits = 0;
+    for (const auto& root : roots) {
+      if (root.kids.empty()) continue;
+      if (root.kids[0].text == "wait_for_splash") {
+        ++waits;
+        CHECK_TRUE(root.kids.size() == 2 && root.kids[1].text == (ultimate_route ? "FALSE" : "TRUE"));
+      }
+      if (root.kids[0].text != "splash_order") continue;
+      ++playlists;
+      bool has_harmonix = false;
+      bool has_ultimate = false;
+      for (const auto& entry : root.kids) {
+        if (entry.kids.empty()) continue;
+        has_harmonix |= entry.kids[0].text == "ui/startup/hmx_logo_screen.milo";
+        has_ultimate |= entry.kids[0].text == "ulti/ultimate_mods.milo";
+      }
+      if (ultimate_route) {
+        CHECK_EQ(root.kids.size(), size_t{2});
+        CHECK_TRUE(has_ultimate);
+        CHECK_FALSE(has_harmonix);
+      } else {
+        CHECK_TRUE(root.kids.size() > 1);
+        CHECK_TRUE(has_harmonix);
+        CHECK_FALSE(has_ultimate);
+      }
+    }
+    CHECK_EQ(playlists, size_t{1});
+    CHECK_EQ(waits, size_t{1});
+    return Finish();
+  }
+  {
+    namespace dtb = rb_blitz::ui::dtb;
+    using dtb::Node;
+    BeginCase("short purchased boot reroutes only the automatic full-game error");
+    std::vector<Node> roots{Node::Command({Node::Symbol("new"), Node::Symbol("UIPanel"),
+        Node::Symbol("error_panel"), Node::Array({Node::Symbol("file"),
+        Node::String("error_screen.milo")})}),
+        Node::Command({Node::Symbol("new"), Node::Symbol("UIScreen"),
+        Node::Symbol("error_screen"), Node::Array({Node::Symbol("panels"),
+        Node::Symbol("shell_music_panel"), Node::Symbol("error_panel")}),
+        Node::Array({Node::Symbol("enter"),
+        Node::Command({Node::Var("this"), Node::Symbol("reset_audio")}),
+        Node::Command({Node::Symbol("status.lbl"), Node::Symbol("set"),
+                       Node::Symbol("text_token"),
+                       Node::Property({Node::Symbol("error_token")})})})})};
+    std::string why;
+    CHECK_TRUE(rb_blitz::settings::BypassAutomaticUnlockError(&roots, &why));
+    const auto* panel_load = header_test::Method(roots, "error_panel", "load");
+    CHECK_TRUE(panel_load != nullptr);
+    if (panel_load) CHECK_TRUE(panel_load->kids[1].kids[2].text == "FALSE");
+    const auto* screen_panels = header_test::Method(roots, "error_screen", "panels");
+    CHECK_TRUE(screen_panels != nullptr);
+    if (screen_panels) {
+      CHECK_EQ(screen_panels->kids.size(), size_t{4});
+      CHECK_TRUE(screen_panels->kids[2].text == "splash_panel");
+    }
+    const auto* method = header_test::Method(roots, "error_screen", "enter");
+    CHECK_TRUE(method != nullptr);
+    if (method) {
+      CHECK_EQ(method->kids.size(), size_t{3});
+      const auto& route = method->kids[2];
+      CHECK_TRUE(route.kids[0].text == "if_else");
+      CHECK_TRUE(route.kids[1].kids[2].text == "error_signin_unlocked_full_game");
+      CHECK_TRUE(route.kids[2].kids[3].kids[1].text == "goto_screen");
+      CHECK_TRUE(route.kids[2].kids[3].kids[2].text == "server_connect_screen");
+      CHECK_TRUE(route.kids[3].kids[1].kids[0].text == "error_panel");
+      CHECK_TRUE(route.kids[3].kids[1].kids[2].text == "TRUE");
+      CHECK_TRUE(route.kids[3].kids[2].kids[1].text == "reset_audio");
+    }
+    const auto compiled = dtb::Compile(roots);
+    std::vector<Node> reparsed;
+    dtb::RootHeader header;
+    CHECK_TRUE(dtb::Parse(compiled.data(), compiled.size(), &reparsed, &header, &why));
+    std::vector<Node> invalid{Node::Command({Node::Symbol("new"), Node::Symbol("UIScreen"),
+        Node::Symbol("error_screen")})};
+    const auto before = dtb::Compile(invalid);
+    CHECK_FALSE(rb_blitz::settings::BypassAutomaticUnlockError(&invalid, &why));
+    CHECK_TRUE(dtb::Compile(invalid) == before);
   }
   {
     namespace dtb = rb_blitz::ui::dtb;
@@ -1963,7 +2154,11 @@ int main(int argc, char** argv) {
     return Finish();
   }
   if (argc == 4 && std::string(argv[1]) == "check-header-records") {
-    return CheckInstalledHeaderRecords(argv[2], argv[3]);
+    try { return CheckInstalledHeaderRecords(argv[2], argv[3]); }
+    catch (const std::exception& error) {
+      std::printf("header record check threw: %s\n", error.what());
+      return 1;
+    }
   }
   if (argc == 3 && std::string(argv[1]) == "check-runtime-header-records") {
     return CheckInstalledRuntimeHeaderRecords(argv[2]);

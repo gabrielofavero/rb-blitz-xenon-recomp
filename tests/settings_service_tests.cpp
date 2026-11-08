@@ -13,6 +13,7 @@
 
 #include "settings/cvars.h"
 #include "settings/service.h"
+#include "settings/ultimate_adapter.h"
 #include "settings/schema.h"
 
 #include <cstdint>
@@ -1003,6 +1004,127 @@ void TestProviderRestoreUsesInstalledDefaults() {
   CHECK_FALSE(service.CommittedProviderValue(SettingId::kHideHud)->boolean);
 }
 
+void TestRestoreUsesInstalledFirstRunTarget() {
+  BeginCase("restore selects the installed Ultimate first-run target");
+  Scratch scratch;
+  const StorePaths paths = Paths(scratch);
+  Service service(paths);
+  service.Boot(nullptr, {}, nullptr);
+  service.SetCapabilities(Capabilities());
+  FakeProvider provider;
+  service.SetProviderSink(&provider);
+
+  const uint64_t restore = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageDefaults(restore).ok);
+  CHECK_TRUE(service.Commit(restore).status == CommitStatus::kSaved);
+  CHECK_TRUE(service.RequestedValue(SettingId::kTarget).text == "ultimate");
+
+  Service reloaded(paths);
+  reloaded.Boot(nullptr, {}, nullptr);
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kTarget).text == "ultimate");
+}
+
+void TestRestoreHidesFreshMenuRows() {
+  BeginCase("restore brings back the fresh-install hidden main-menu rows");
+  Scratch scratch;
+  const StorePaths paths = Paths(scratch);
+  Service service(paths);
+  service.Boot(nullptr, {}, nullptr);
+  service.SetCapabilities(Capabilities());
+  CHECK_TRUE(service.RequestedValue(SettingId::kHideMainMenu).boolean);
+  CHECK_TRUE(service.RequestedValue(SettingId::kHiddenMainMenu).kind == ValueKind::kNone);
+
+  const uint64_t edit = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.Set(edit, SettingId::kHideMainMenu, BoolV(false),
+                         service.capability_revision()).ok);
+  CHECK_TRUE(service.Commit(edit).status == CommitStatus::kSaved);
+
+  const uint64_t restore = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageDefaults(restore).ok);
+  CHECK_TRUE(service.Commit(restore).status == CommitStatus::kSaved);
+  CHECK_TRUE(service.RequestedValue(SettingId::kHideMainMenu).boolean);
+  CHECK_FALSE(service.store().document().values.contains(SettingId::kHideMainMenu));
+
+  Service reloaded(paths);
+  reloaded.Boot(nullptr, {}, nullptr);
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kHideMainMenu).boolean);
+}
+
+void TestRestoreRemovesRetiredHeaderFallback() {
+  BeginCase("restore removes the retired combined header preference");
+  Scratch scratch;
+  const StorePaths paths = Paths(scratch);
+  WriteFile(paths.settings_file,
+            "schema_version = 1\n[interface]\nshow_messages_recommendations = false\n");
+  Service service(paths);
+  service.Boot(nullptr, {}, nullptr);
+  service.SetCapabilities(Capabilities());
+  CHECK_FALSE(service.RequestedValue(SettingId::kShowMessages).boolean);
+
+  const uint64_t restore = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageDefaults(restore).ok);
+  CHECK_TRUE(service.Commit(restore).status == CommitStatus::kSaved);
+
+  Service reloaded(paths);
+  reloaded.Boot(nullptr, {}, nullptr);
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kShowMessages).boolean);
+  CHECK_FALSE(reloaded.RequestedValue(SettingId::kShowRecommendations).boolean);
+}
+
+void TestProviderRestoreUsesOfferedDefaultChoice() {
+  BeginCase("restore chooses the provider's offered default when it declares no value");
+  Scratch scratch;
+  Service service(Paths(scratch));
+  service.Boot(nullptr, {}, nullptr);
+  service.SetCapabilities(Capabilities());
+  FakeProvider provider;
+  provider.values[SettingId::kForceSkybox] = EnumV("no_skybox");
+  service.SetProviderChoices({{SettingId::kForceSkybox,
+                               {{"provider_default_skybox", "Default"},
+                                {"no_skybox", "None"}}}});
+  service.SetProviderSink(&provider);
+  const uint64_t txn = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageDefaults(txn).ok);
+  const CommitResult saved = service.Commit(txn);
+  CHECK_TRUE(saved.status == CommitStatus::kSaved);
+  CHECK_EQ(provider.saves, 1);
+  const Value* restored = service.CommittedProviderValue(SettingId::kForceSkybox);
+  CHECK_TRUE(restored != nullptr && restored->text == "provider_default_skybox");
+}
+
+void TestRestoreWithInstalledProvider(const char* payload_root) {
+  if (payload_root == nullptr) return;
+  BeginCase("restore accepts every default from the installed provider");
+  namespace adapter = rb_blitz::settings::ultimate_adapter;
+  adapter::RecordBytes records;
+  std::string error;
+  CHECK_TRUE(adapter::ReadProviderRecords(payload_root, &records, &error));
+  const adapter::ShapeReport shape = adapter::CheckShape(records);
+  CHECK_TRUE(shape.ok);
+  Scratch scratch;
+  Service service(Paths(scratch));
+  service.Boot(nullptr, {}, nullptr);
+  service.SetCapabilities(Capabilities());
+  std::map<SettingId, std::vector<Choice>> choices;
+  FakeProvider provider;
+  for (const auto& binding : adapter::RowBindings()) {
+    const auto found = shape.choices.find(std::string(binding.variable));
+    if (found == shape.choices.end()) continue;
+    for (const std::string& token : found->second)
+      choices[binding.id].push_back({token, token});
+    if (found->second.size() > 1)
+      provider.values[binding.id] = EnumV(found->second.back());
+  }
+  service.SetProviderChoices(std::move(choices));
+  service.SetProviderDefaults(adapter::DefaultsFromShape(shape));
+  service.SetProviderSink(&provider);
+  const uint64_t txn = service.BeginEdit(service.revision());
+  const ValidationResult staged = service.StageDefaults(txn);
+  if (!staged.ok) std::printf("         installed default refused: %s\n", staged.reason_key.c_str());
+  CHECK_TRUE(staged.ok);
+  if (staged.ok) CHECK_TRUE(service.Commit(txn).status == CommitStatus::kSaved);
+}
+
 void TestRestoreClearsUnsupportedNativeDefaultWithProvider() {
   BeginCase("restore clears native keys even when a compiled default is unavailable");
   Scratch scratch;
@@ -1039,7 +1161,7 @@ void TestRestoreClearsUnsupportedNativeDefaultWithProvider() {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   TestControllerSchemeRoundTrip();
   TestCommitRevalidatesCurrentCatalogAndOverride();
   TestStartupRoundTrip();
@@ -1060,6 +1182,11 @@ int main() {
   TestApplicationSnapshot();
   TestIndependentBootRecoveryReasons();
   TestProviderRestoreUsesInstalledDefaults();
+  TestRestoreUsesInstalledFirstRunTarget();
+  TestRestoreHidesFreshMenuRows();
+  TestRestoreRemovesRetiredHeaderFallback();
+  TestProviderRestoreUsesOfferedDefaultChoice();
+  TestRestoreWithInstalledProvider(argc > 1 ? argv[1] : nullptr);
   TestRestoreClearsUnsupportedNativeDefaultWithProvider();
   return Finish();
 }

@@ -38,8 +38,11 @@ On 2026-11-07 [measured], Restore default settings opened a legible confirmation
 disposable Ultimate profile. Cancel left the settings files unchanged. Confirm saved native and
 compatible Ultimate provider defaults, then offered Restart now when leaving Help & Options. The
 restarted game opened the standard Rock Band Blitz menu, kept the provider defaults and did not
-reimport the old Ultimate target from the legacy launcher profile. Explicit command-line and
-environment overrides still outrank stored settings.
+reimport the old Ultimate target from the legacy launcher profile. This was the defect corrected
+on 2026-11-08: Restore now selects Ultimate when a compatible install is present, and the fresh
+main-menu default hides Leaderboards and Achievements; Refresh Songs and Download Content are
+also off by their own defaults. Explicit command-line
+and environment overrides still outrank stored settings.
 
 As of 2026-11-06 [measured], selecting a different Window Mode opens the guest's own confirmation
 screen with Keep and Revert. Keep saves after a successful frame presentation; Revert restores the
@@ -77,17 +80,23 @@ Controls, gameplay, graphics quality, and their deeper pages retain their previo
 
 Startup defaults to Normal: show startup logos, the splash screen, and "Press A to Start". Fast
 skips the native startup playlist (including Harmonix and Ultimate Mods logos),
+starts on the title screen instead of the autosave warning,
 selects the local user, and continues automatically through discovery to the main
-menu, skipping offline prompts for that boot. Settings and recovery restarts
-still auto-start the local user, but only Fast clears the startup logo playlist;
-only recovery shows an error popup. The preference is saved as `[general] startup = "normal" | "fast"`
+menu, skipping offline prompts for that boot. A settings restart takes the same
+short route once, even when the saved preference is Normal. Recovery restarts
+still auto-start the local user; only recovery shows an error popup. The
+preference is saved as `[general] startup = "normal" | "fast"`
 and applies on the next launch (`startup_mode` is its cvar).
 
-The installed Ultimate startup record puts **Ultimate Mods first**, then the regional
-Harmonix/ESRB entries, and sets `wait_for_splash FALSE`. Retail starts with Harmonix and
-uses `TRUE`. Normal Ultimate startup presents Harmonix, Ultimate Mods, then the North
-American ESRB notice when applicable, and waits for the playlist to finish before the
-title advances.
+The Normal route shows the title's autosave warning after either startup logo.
+
+The installed Ultimate startup record puts **Ultimate Mods first**, then regional
+Harmonix/ESRB entries, and sets `wait_for_splash FALSE`. Normal Ultimate startup keeps
+only the Ultimate Mods scene and its authored wait setting so the guest can present
+the logo while startup continues. The retail route keeps its native Harmonix playlist
+and wait setting. See the
+[splash investigation](../engine/startup-splash-investigation.md) for the scene-handoff
+findings that led to this route-specific selection.
 
 Startup music preparation never waits for a DLC package to mount. The library player
 uses a complete metadata catalog and uniform draws without replacement, including songs

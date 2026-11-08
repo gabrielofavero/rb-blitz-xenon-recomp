@@ -1155,8 +1155,8 @@ bool AddCrashRecoveryHooks(std::vector<Node>* roots, std::string* why) {
   };
   enter->kids.push_back(set(query("active")));
   const auto start_action = cmd({sym("do"),
-      cmd({sym("user_mgr"), sym("set_participating_user"), Node::Var("rbbz_recovery_user")}),
-      query("starting"), cmd({sym("ui"), sym("goto_screen"), sym("server_connect_screen")})});
+      query("starting"), cmd({sym("ui"), sym("goto_screen"), sym("server_connect_screen")}),
+      cmd({sym("user_mgr"), sym("set_participating_user"), Node::Var("rbbz_recovery_user")})});
   const auto user = Node::Array({Node::Var("rbbz_recovery_user"),
       cmd({sym("user_mgr"), sym("get_user_from_pad_num"), Node::Int(0)})});
   const auto start = cmd({sym("if"), query("start"), cmd({sym("do"), user,
@@ -1185,6 +1185,64 @@ bool AddCrashRecoveryHooks(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
+bool BypassAutomaticUnlockError(std::vector<Node>* roots, std::string* why) {
+  if (!roots) return false;
+  auto staged = *roots;
+  auto* enter = PanelMethod(&staged, "error_screen", "enter");
+  auto* panels = PanelMethod(&staged, "error_screen", "panels");
+  Node* visual = nullptr;
+  for (auto& root : staged) {
+    if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 &&
+        root.kids[0].text == "new" && root.kids[2].text == "error_panel") {
+      visual = &root;
+      break;
+    }
+  }
+  if (!enter || enter->kids.size() < 3 || enter->kids[1].tag != ui::dtb::kCommand ||
+      enter->kids[1].kids.size() < 2 || enter->kids[1].kids[1].text != "reset_audio" ||
+      enter->kids[2].tag != ui::dtb::kCommand || enter->kids[2].kids.size() < 3 ||
+      enter->kids[2].kids[1].text != "set" || enter->kids[2].kids[2].text != "text_token" ||
+      !panels || panels->kids.size() != 3 || panels->kids[1].text != "shell_music_panel" ||
+      panels->kids[2].text != "error_panel" || !visual ||
+      PanelMethod(&staged, "error_panel", "load")) {
+    if (why) *why = "unsupported native error-screen entry";
+    return false;
+  }
+  const auto sym = [](const char* s) { return Node::Symbol(s); };
+  const auto cmd = [](std::vector<Node> kids) { return Node::Command(std::move(kids)); };
+  // The automatic error transition occupies several rendered frames. Keep
+  // the title's own scene behind its hidden error panel until discovery takes
+  // over; the opaque error panel still covers it for every other token.
+  panels->kids.insert(panels->kids.begin() + 2, sym("splash_panel"));
+  // The screen transition can present its panel before error_screen.enter runs.
+  // Hide the guest's panel when it loads, then reveal it on the original error
+  // branch. This keeps every other error visible without a host overlay.
+  visual->kids.push_back(Node::Array({sym("load"),
+      cmd({Node::Var("this"), sym("set_showing"), sym("FALSE")})}));
+  std::vector<Node> original{sym("do")};
+  original.insert(original.end(), enter->kids.begin() + 1, enter->kids.end());
+  original.insert(original.begin() + 1,
+      cmd({sym("error_panel"), sym("set_showing"), sym("TRUE")}));
+  enter->kids.erase(enter->kids.begin() + 1, enter->kids.end());
+  const auto marker = [&](const char* leaf) {
+    return cmd({sym("file_exists"),
+                Node::String(std::string("rbbz-load/recovery/") + leaf)});
+  };
+  const auto matches = cmd({sym("=="), Node::Property({sym("error_token")}),
+                            sym("error_signin_unlocked_full_game")});
+  // This is the full-screen native error route. The purchased licence was
+  // selected before launch, so the automatic Fast sign-in is not an upgrade.
+  // Clear the spurious error and take the normal guest discovery route again.
+  enter->kids.push_back(marker("unlock_error_enter"));
+  enter->kids.push_back(cmd({sym("if_else"), matches,
+      cmd({sym("do"), marker("unlock_error_match"), cmd({sym("ui"), sym("reset_error")}),
+           cmd({sym("ui"), sym("goto_screen"), sym("server_connect_screen")})}),
+      cmd(std::move(original))}));
+  *roots = std::move(staged);
+  if (why) why->clear();
+  return true;
+}
+
 bool SkipStartupLogos(std::vector<Node>* roots, std::string* why) {
   if (!roots) return false;
   Node* order = nullptr;
@@ -1207,7 +1265,7 @@ bool SkipStartupLogos(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
-bool WaitForStartupLogos(std::vector<Node>* roots, std::string* why) {
+bool KeepStartupLogos(std::vector<Node>* roots, std::string* why) {
   if (!roots) return false;
   Node* order = nullptr;
   Node* wait = nullptr;
@@ -1228,11 +1286,10 @@ bool WaitForStartupLogos(std::vector<Node>* roots, std::string* why) {
     if (why) *why = "unsupported startup splash playlist";
     return false;
   }
-  wait->kids[1] = Node::Symbol("TRUE");
   return true;
 }
 
-bool OrderUltimateStartupLogos(std::vector<Node>* roots, std::string* why) {
+bool SelectUltimateStartupLogo(std::vector<Node>* roots, std::string* why) {
   if (!roots) return false;
   Node* order = nullptr;
   for (auto& root : *roots) {
@@ -1259,17 +1316,55 @@ bool OrderUltimateStartupLogos(std::vector<Node>* roots, std::string* why) {
     if (why) *why = "unsupported Ultimate startup splash order";
     return false;
   }
-  // Both regional branches contain the same Harmonix entry. Put one copy before
-  // the provider logo, and keep the ESRB entry conditional on North America.
-  std::vector<Node> reordered;
-  reordered.reserve(6);
-  reordered.push_back(order->kids[0]);
-  reordered.push_back(order->kids[3]);
-  reordered.push_back(order->kids[1]);
-  reordered.push_back(order->kids[2]);
-  reordered.push_back(order->kids[4]);
-  reordered.push_back(order->kids[7]);
-  order->kids = std::move(reordered);
+  // The second logo in a multi-scene sequence has not rendered reliably in the
+  // recomp. Keep the provider's own first scene and its authored duration.
+  order->kids.resize(2);
+  return true;
+}
+
+bool SetFirstBootScreen(std::vector<Node>* roots, bool fast, std::string* why) {
+  if (!roots) return false;
+  Node* assignment = nullptr;
+  Node* init = nullptr;
+  size_t app_label_index = 0;
+  bool has_splash_load = false;
+  for (auto& root : *roots) {
+    if (root.tag != ui::dtb::kArray || root.kids.empty() ||
+        root.kids[0].tag != ui::dtb::kSymbol || root.kids[0].text != "init") continue;
+    for (size_t i = 0; i < root.kids.size(); ++i) {
+      auto& statement = root.kids[i];
+      if (statement.tag == ui::dtb::kCommand && statement.kids.size() == 2 &&
+          statement.kids[0].text == "splash_panel" && statement.kids[1].text == "load")
+        has_splash_load = true;
+      if (statement.tag == ui::dtb::kCommand && statement.kids.size() == 1 &&
+          statement.kids[0].text == "app_label_register") app_label_index = i;
+      if (statement.tag != ui::dtb::kCommand || statement.kids.size() < 2 ||
+          statement.kids[0].tag != ui::dtb::kSymbol || statement.kids[0].text != "set" ||
+          statement.kids[1].tag != ui::dtb::kVar || statement.kids[1].text != "first_screen") continue;
+      if (assignment) {
+        if (why) *why = "duplicate first_screen assignment";
+        return false;
+      }
+      assignment = &statement;
+      init = &root;
+    }
+  }
+  if (!assignment || assignment->kids.size() != 3 ||
+      assignment->kids[2].tag != ui::dtb::kSymbol ||
+      (assignment->kids[2].text != "splash_screen" &&
+       assignment->kids[2].text != "autosave_warning_screen")) {
+    if (why) *why = "unsupported first_screen assignment";
+    return false;
+  }
+  assignment->kids[2] = Node::Symbol(fast ? "splash_screen" : "autosave_warning_screen");
+  if (fast && !has_splash_load) {
+    // Load the guest title scene before the first screen transition. The
+    // default init loads other panels here, but leaves splash_panel lazy;
+    // the first few presented frames can therefore be a bare guest clear.
+    const auto position = app_label_index ? app_label_index + 1 : 1;
+    init->kids.insert(init->kids.begin() + position,
+        Node::Command({Node::Symbol("splash_panel"), Node::Symbol("load")}));
+  }
   return true;
 }
 
@@ -1354,10 +1449,14 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       !edit("config/gen/beatmatch_controller.dtb", [&](auto& roots) {
         return PatchTutorialButtonNames(&roots, error);
       })) return false;
+  if (skip_startup_logos && !screen::CurrentMenuConfiguration().trial_mode &&
+      !edit("ui/net/gen/error_flow.dtb", [&](auto& roots) {
+        return BypassAutomaticUnlockError(&roots, error);
+      })) return false;
   if (!edit("ui/startup/gen/startup.dtb", [&](auto& roots) {
         if (skip_startup_logos) return SkipStartupLogos(&roots, error);
-        return (!merge_provider || OrderUltimateStartupLogos(&roots, error)) &&
-               WaitForStartupLogos(&roots, error);
+        return (!merge_provider || SelectUltimateStartupLogo(&roots, error)) &&
+               KeepStartupLogos(&roots, error);
       })) return false;
   if (!screen::CurrentMenuConfiguration().show_currency) {
     if (!edit("ui/powerup_select/gen/powerup_select.dtb", [&](auto& roots) {
@@ -1376,7 +1475,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           if (!screen::AddPanelLoad(&roots, panel, error)) return false;
         }
         if (!screen::AddPanelLoad(&roots, "messages_update_panel", error)) return false;
-        return true;
+        return SetFirstBootScreen(&roots, skip_startup_logos, error);
       }) || !edit("ui/splash/gen/splash.dtb", [&](auto& roots) {
         if (!AddCrashRecoveryHooks(&roots, error)) return false;
         if (merge_provider) {
@@ -1536,7 +1635,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           root.kids[1].text.replace(at, matched_glyph.size(),
                                     prompt ? "<alt1>\xC2\x81</alt1>" :
                                     tip ? "<alt1>\xC2\x86</alt1>" :
-                                          "<alt1>\xC2\x84</alt1>");
+                                          "<alt1>\xC2\x80</alt1>");
           if (prompt) loading_prompt = true;
           else if (tip) loading_powerup_tip = true;
           else splash_start = true;

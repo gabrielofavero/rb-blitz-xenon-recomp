@@ -103,6 +103,9 @@ void ObserveRecoveryScreen(std::string_view name, bool stable) {
   presentation.menu_ready = stable && name == "splash_screen";
 }
 bool CrashRecoveryQuery(std::string_view path, bool* answer) {
+  if (path == "rbbz-load/recovery/unlock_error_enter" ||
+      path == "rbbz-load/recovery/unlock_error_match")
+    REXLOG_WARN("startup: purchased short-boot error-screen probe: {}", path);
   const bool handled = presentation.Query(path, answer);
   if (handled && *answer && path == "rbbz-load/recovery/popup") {
     REXLOG_INFO("load_recovery: main menu ready; consuming native crash dialog once");

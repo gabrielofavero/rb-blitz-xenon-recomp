@@ -13,6 +13,7 @@
 // with its own `Increment` calls (measured, out/_swap/dlc-native-bar/bar-2, 2026-10-15).
 #include "hooks/content_progress.h"
 #include "diag/boot_heartbeat.h"
+#include "settings/boot.h"
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -304,6 +305,8 @@ void ObserveScreen(std::string_view screen, std::string_view panel, bool availab
                 g_last_enum_us ? (NowMicros() - g_last_enum_us) / 1000.0 : 0.0,
                 p.successful, p.failures);
     RequestFrameRateRestore("the usable main menu is current with no transition pending");
+    if (auto* settings = rb_blitz::settings::boot::SettingsBoot::Current())
+      settings->RestoreAsyncShaderCompilation();
     rb_blitz::diag::boot_heartbeat::Finish("usable menu");
   }
 }

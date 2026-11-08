@@ -67,7 +67,7 @@ REXCVAR_DEFINE_BOOL(enhancements_icon_schemes, true, "Enhancements",
                     "in Help & Options. Faithful: the art the title ships.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_hide_menu_options, false, "Enhancements",
+REXCVAR_DEFINE_BOOL(enhancements_hide_menu_options, true, "Enhancements",
                     "R5 hiding categories: remove named entries from the main menu's option list, "
                     "in the list the guest navigates and not only in the drawing. Needs "
                     "enhancements_hidden_menu_options to name them. Faithful: every shipped entry "
@@ -77,7 +77,7 @@ REXCVAR_DEFINE_BOOL(enhancements_hide_menu_options, false, "Enhancements",
 REXCVAR_DEFINE_STRING(enhancements_hidden_menu_options, rb_blitz::menu_options::kDefaultRows,
                       "Enhancements",
                       "R5 the main menu rows enhancements_hide_menu_options hides, comma "
-                      "separated. The compiled default is the three that only ever worked online: "
+                      "separated. The compiled default is the legacy three-entry list: "
                       "splash_leaderboard, splash_achievements, splash_dlc.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 

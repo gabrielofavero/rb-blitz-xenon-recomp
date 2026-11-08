@@ -633,6 +633,14 @@ void TestShapeAcceptsAFixture() {
   CHECK_TRUE(report.choices.at("gems")[0] == "default");
   CHECK_EQ(report.choices.at("which_skybox").size(), 3);
   CHECK_EQ(report.choices.at("forceplot").size(), 3);
+  // The provider's initialization record can spell these defaults as positions,
+  // while the merged menu and provider writer require choice tokens.
+  ShapeReport positioned = report;
+  positioned.defaults["forceplot"] = "0";
+  positioned.defaults["which_skybox"] = "2";
+  const auto positioned_defaults = DefaultsFromShape(positioned);
+  CHECK_TRUE(positioned_defaults.at(SettingId::kForcePlot).text == "off");
+  CHECK_TRUE(positioned_defaults.at(SettingId::kForceSkybox).text == "nfs_mw2012");
   // A submenu's destination is read, because the merged screen has to route back into its parent.
   CHECK_TRUE(report.Row("os_hud_settings")->target_screen == "mod_hud_settings_screen");
   CHECK_TRUE(report.Row("os_force_plot")->target_screen == "mod_force_plot_screen");
@@ -1208,6 +1216,19 @@ void TestRealPayload(const char* payload_root) {
   CHECK_TRUE(default_of("letterbox") == "FALSE");
   CHECK_TRUE(default_of("gems") == "default");
   const std::map<SettingId, Value> defaults = DefaultsFromShape(report);
+  for (const char* variable : {"forceplot", "which_skybox"}) {
+    const RowBinding* binding = BindingForVariable(variable);
+    const auto choices = report.choices.find(variable);
+    CHECK_TRUE(binding != nullptr && choices != report.choices.end());
+    if (binding == nullptr || choices == report.choices.end() ||
+        !report.defaults.contains(variable)) continue;
+    const auto restored = defaults.find(binding->id);
+    CHECK_TRUE(restored != defaults.end());
+    if (restored != defaults.end()) {
+      CHECK_TRUE(std::find(choices->second.begin(), choices->second.end(),
+                           restored->second.text) != choices->second.end());
+    }
+  }
   CHECK_TRUE(defaults.count(SettingId::kUnlockAll) == 1 &&
              defaults.at(SettingId::kUnlockAll).boolean);
   CHECK_TRUE(defaults.count(SettingId::kCameraAngle) == 1 &&

@@ -12,6 +12,7 @@
 
 #include "settings/service.h"
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <charconv>
@@ -474,6 +475,17 @@ ValidationResult Service::StageDefaults(uint64_t txn) {
   for (const Descriptor& descriptor : descriptors_) {
     if (descriptor.widget == WidgetKind::kAction || external_.contains(descriptor.id)) continue;
     if (!IsProviderFileRow(descriptor.id)) {
+      if (descriptor.id == SettingId::kTarget && provider_ &&
+          provider_->Readiness() == ProviderReadiness::kCompatible) {
+        // A new installed profile selects Ultimate (the launcher's first-run target).
+        // Clearing this key instead selects the schema's base-game fallback, which made
+        // Restore defaults boot the wrong game even with a compatible payload present.
+        Value first_run_target = descriptor.compiled_default;
+        first_run_target.text = "ultimate";
+        if (!ValueEquals(RequestedValue(descriptor.id), first_run_target))
+          defaults.emplace(descriptor.id, first_run_target);
+        continue;
+      }
       // An omitted native key means "use the default". Clearing the saved value also works
       // when a compiled graphics default is unavailable on this device; the normal boot
       // reconciler then selects its supported effective value.
@@ -483,8 +495,16 @@ ValidationResult Service::StageDefaults(uint64_t txn) {
     }
     if (!provider_ || provider_->Readiness() != ProviderReadiness::kCompatible) continue;
     const auto provider_default = provider_defaults_.find(descriptor.id);
-    const Value& value = provider_default == provider_defaults_.end()
-                             ? descriptor.compiled_default : provider_default->second;
+    Value value = provider_default == provider_defaults_.end()
+                      ? descriptor.compiled_default : provider_default->second;
+    if (provider_default == provider_defaults_.end() && value.kind == ValueKind::kEnum &&
+        !descriptor.choices.empty() &&
+        std::none_of(descriptor.choices.begin(), descriptor.choices.end(),
+                     [&](const Choice& choice) { return choice.token == value.text; })) {
+      // An installed provider may add or rename its first (off/default) choice without
+      // declaring a matching initialization value. Its own inventory is authoritative.
+      value.text = descriptor.choices.front().token;
+    }
     if (ValueEquals(RequestedValue(descriptor.id), value)) continue;
     const Reconciler* reconciler = reconciler_ ? reconciler_ : &default_reconciler_;
     const ValidationResult valid = value.kind == ValueKind::kNone

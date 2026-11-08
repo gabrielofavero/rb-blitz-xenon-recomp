@@ -49,7 +49,7 @@ namespace {
 // reading them on a guest thread would be a lock nobody needs. A guest read
 // that arrives before the boot hook has run finds the faithful defaults.
 struct Settings {
-  bool hide_rows = false;
+  bool hide_rows = true;
   std::vector<std::string> rows;
   bool rename_settings_row = false;
   bool skip_offline_prompts = false;
@@ -571,7 +571,7 @@ void Configure(bool settings_restart_boot) {
   // main-menu entry's visibility directly, so an explicit selection is authoritative even though
   // the old `hide_main_menu` master is no longer drawn: the master stays in the file for backward
   // compatibility, but a selection the player made - including an explicitly empty one - is what
-  // applies. An untouched config keeps the old "nothing hidden" default.
+  // applies. An untouched config hides the default list's entries.
   const std::string configured_rows = REXCVAR_GET(enhancements_hidden_menu_options);
   rb_blitz::settings::menu_compat::HideRequest request;
   request.selection_explicit = configured_rows != menu_options::kDefaultRows;

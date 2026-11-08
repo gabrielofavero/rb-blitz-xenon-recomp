@@ -79,10 +79,12 @@ inline constexpr uint32_t kAtlasSize = 1024;
 static_assert(kAtlasSize == kRetailAtlasSize);
 inline constexpr uint32_t kIconFirst = 0x80;
 inline constexpr uint32_t kIconCount = 180;
-inline constexpr uint32_t kHintCount = 15;
-// Image slots 101..115 belong to action hints. The hint font aliases early
+inline constexpr uint32_t kHintCount = 16;
+// Image slots 101..116 belong to action hints. The hint font aliases early
 // private glyph codes to these tiles, leaving P9's row glyphs unchanged.
 inline constexpr uint32_t kHintFirst = 101;
+inline constexpr uint32_t kSplashStartHint = 15;
+inline constexpr uint32_t kSplashGlyphCode = 0x80;
 inline constexpr uint32_t kInterfaceStartHint = 4;
 // The loading screen's rotating power-up tip is a gameplay action, unlike its
 // begin-song prompt and the footer actions. It uses an unused hint tile.
@@ -160,6 +162,7 @@ inline constexpr uint32_t GlyphCode(uint32_t index) {
 }
 static_assert(GlyphCode(kGameplayPowerupHint) == 0x86);
 static_assert(GlyphCode(kInterfaceStartHint) == 0x84);
+static_assert(kSplashGlyphCode == 0x80);
 static_assert(GlyphCode(kGameplayMoveLeftHint) == 0x8B);
 static_assert(GlyphCode(kGameplayPauseHint) == 0x8D);
 

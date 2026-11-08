@@ -262,7 +262,7 @@ void TestHintFallbacks() {
   input->general.Set(remap::Target::kX,
                      {Source("pad:x"), Source("key:X"), Source("mouse:x1")});
   input->general.Set(remap::Target::kY, {Source("pad:y"), Source("key:Y")});
-  input->general.Set(remap::Target::kStart, {Source("pad:start")});
+  input->general.Set(remap::Target::kStart, {Source("pad:start"), Source("key:Space")});
   input->general.Set(remap::Target::kBack, {Source("mouse:wheel_up")});
   input->general.Set(remap::Target::kRightShoulder, {});
   input->controller.Set(gameplay::Action::kPowerup, {Source("pad:y")});
@@ -285,7 +285,7 @@ void TestHintFallbacks() {
   CHECK_TRUE(icons::First(keyboard, x).source.kind == remap::SourceKind::kKey);
   CHECK_TRUE(icons::First(mouse, x).source.kind == remap::SourceKind::kMouse);
   CHECK_TRUE(icons::First(mouse, y).source.kind == remap::SourceKind::kKey);
-  CHECK_TRUE(icons::First(keyboard, start).source.kind == remap::SourceKind::kPad);
+  CHECK_TRUE(icons::First(keyboard, start).source.name == "Space");
   CHECK_TRUE(icons::First(controller, back).source.kind == remap::SourceKind::kMouse);
   CHECK_TRUE(icons::First(mouse, shoulder).art == icons::Art::kUnbound);
   CHECK_EQ(icons::First(mouse, shoulder).width, 32u);
@@ -300,6 +300,10 @@ void TestHintFallbacks() {
                  .source.name == "left");
   CHECK_TRUE(icons::Hint(mouse, {rb_blitz::profile::InputRowKind::kGeneralBinding, "b"})
                  .source.name == "right");
+  CHECK_TRUE(icons::SplashStartHint(mouse).source.kind == remap::SourceKind::kMouse);
+  CHECK_TRUE(icons::SplashStartHint(mouse).source.name == "left");
+  CHECK_TRUE(icons::SplashStartHint(keyboard).source.name == "Space");
+  CHECK_TRUE(icons::SplashStartHint(controller).source.name == "start");
   input = rb_blitz::input::CopyCurrentInput();
   input->general.Set(remap::Target::kY, {Source("key:~"), Source("pad:y")});
   rb_blitz::input::PublishInput(input);

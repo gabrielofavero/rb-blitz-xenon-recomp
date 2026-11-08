@@ -30,7 +30,9 @@ namespace {
 namespace font = rb_blitz::ui::input_font;
 constexpr std::array<const char*, font::kHintCount> kTargets{
     "", "a", "b", "y", "start", "back", "", "", "", "", "",
-    "right_shoulder", "", "", "x"};
+    "right_shoulder", "", "", "x", ""};
+static_assert(font::kSplashStartHint != rb_blitz::assets::kHeaderPreviousIcon);
+static_assert(font::kSplashStartHint != rb_blitz::assets::kHeaderNextIcon);
 struct Entry { uint32_t label, action; };
 thread_local const std::vector<Entry>* g_entries = nullptr;
 
@@ -94,6 +96,7 @@ void Publish(const rb_blitz::input::icons::View& view, const std::string& signat
     for (const char* target : kTargets)
       icons.push_back(rb_blitz::input::icons::Hint(family_view,
           {rb_blitz::profile::InputRowKind::kGeneralBinding, target}));
+    icons[font::kSplashStartHint] = rb_blitz::input::icons::SplashStartHint(family_view);
     // The header's LT/RT labels use the retail buttons font. Supply their
     // effective actions to the texture provider for its keyboard/mouse sheets.
     icons[rb_blitz::assets::kHeaderPreviousIcon] = rb_blitz::input::icons::First(family_view,

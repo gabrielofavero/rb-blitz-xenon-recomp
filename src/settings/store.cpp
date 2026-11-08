@@ -787,7 +787,8 @@ bool ParseValueFromItem(const Descriptor& descriptor, const toml::Item& item, Va
 
 // A missing split preference inherits the retired combined switch. Use the same
 // read for loading and optimistic conflict checks, so an inherited Off can be saved.
-// Explicit new keys (including malformed ones) take precedence; old bytes survive.
+// Explicit new keys (including malformed ones) take precedence. Ordinary edits
+// preserve the old bytes; a whole-settings restore removes the retired pair.
 toml::Item PreferenceItem(const toml::Document& doc, const StorageKey& storage) {
   auto item = doc.Get(storage.section, storage.key);
   if (!item.found && storage.section == "interface" &&
@@ -1061,6 +1062,14 @@ SaveOutcome SaveSettingsDocument(const fs::path& file, const SaveRequest& reques
     }
     const StorageKey storage = StorageKeyFor(id);
     doc.Set(storage.section, storage.key, rendered);
+  }
+  const auto reset_messages = request.changed.find(SettingId::kShowMessages);
+  const auto reset_recommendations = request.changed.find(SettingId::kShowRecommendations);
+  if (reset_messages != request.changed.end() &&
+      reset_recommendations != request.changed.end() &&
+      reset_messages->second.kind == ValueKind::kNone &&
+      reset_recommendations->second.kind == ValueKind::kNone) {
+    doc.Erase("interface", "show_messages_recommendations");
   }
 
   // Provenance is per field; a row back at its default drops its entry so the table stays
