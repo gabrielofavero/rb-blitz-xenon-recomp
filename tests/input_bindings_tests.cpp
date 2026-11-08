@@ -322,10 +322,14 @@ void TestIconSourceCatalog() {
     CHECK_TRUE(!icon.slot.empty() || !icon.rgba.empty());
   }
   for (const auto direction : remap::PadDirections()) {
+    const std::string name(remap::PadDirectionName(direction));
     const auto icon = icons::Resolve({remap::SourceKind::kPad,
-                                      std::string(remap::PadDirectionName(direction))}, "retail");
-    CHECK_TRUE(icon.art == icons::Art::kBuiltIn);
-    CHECK_TRUE(!icon.rgba.empty());
+                                      name}, "retail");
+    const std::string slot = name.starts_with("lstick_") ?
+        "left_stick_" + name.substr(7) : "right_stick_" + name.substr(7);
+    CHECK_TRUE(icon.art == icons::Art::kSchemeSlot);
+    CHECK_TRUE(icon.slot == slot);
+    CHECK_TRUE(icon.rgba.empty());
   }
   for (const char* name : {"left", "right", "middle", "x1", "x2", "wheel_up", "wheel_down"}) {
     const auto icon = icons::Resolve({remap::SourceKind::kMouse, name}, "retail");

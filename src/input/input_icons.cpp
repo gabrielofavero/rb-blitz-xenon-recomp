@@ -154,6 +154,8 @@ std::string Slot(std::string_view name) {
   if (name == "left_trigger" || name == "right_trigger") return std::string(name);
   if (name == "left_thumb") return "left_stick";
   if (name == "right_thumb") return "right_stick";
+  if (name.starts_with("lstick_")) return "left_stick_" + std::string(name.substr(7));
+  if (name.starts_with("rstick_")) return "right_stick_" + std::string(name.substr(7));
   if (name == "start") return "start_button";
   if (name == "back") return "back_button";
   return {};

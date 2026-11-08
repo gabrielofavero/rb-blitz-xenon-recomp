@@ -113,6 +113,7 @@ make untracked files are excluded; tracked edits and moved gitlinks remain visib
 | Patch | Purpose | Upstream candidate |
 | --- | --- | --- |
 | `rexglue-sdk/0054-sync-pixel-size-after-restore.patch` | Reconciles the actual pixel size and reconnects presentation after minimize/restore. | yes |
+| `rexglue-sdk/0055-time-bound-incomplete-gpu-packets.patch` | Waits up to one second without guest write-pointer progress before treating an incomplete primary GPU packet as corrupt. The old 64 retries finished in about a millisecond in `rb_blitz_693.log`, then exhausted resynchronisation and froze the discovery picture. | yes |
 | `rexglue-sdk/0053-startup-paint-and-guest-output-signal.patch` | Lets a title opt in to an immediate startup paint, service later paints without running startup-sensitive callbacks, and identify the first active guest output. | maybe |
 | `rexglue-sdk/0051-ui-present-display-confirmation.patch` | Counts successful UI-thread paints separately so an older guest-output present cannot confirm a new display mode. | maybe |
 | `rexglue-sdk/0050-verify-startup-display-mode.patch` | Refuses startup when SDL cannot apply the saved native display mode. | yes |

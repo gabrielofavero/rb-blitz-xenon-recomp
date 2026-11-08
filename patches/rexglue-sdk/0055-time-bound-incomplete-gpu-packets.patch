@@ -1,0 +1,89 @@
+# Give an incomplete primary GPU packet time to finish publishing before resynchronising.
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -12,6 +12,7 @@
+ #pragma once
+ 
+ #include <atomic>
++#include <chrono>
+ #include <cstring>
+ #include <filesystem>
+ #include <functional>
+@@ -304,10 +305,15 @@
+   // call) instead of discarding the rest of the ring - discarding it also threw
+   // away the frame's swap packet, which froze this title's picture for good
+   // (docs/reference/known-issues.md, 2026-10-18). Only a packet that is still
+-  // incomplete after kMaxIncompletePacketRetries is treated as a desync.
+-  static constexpr uint32_t kMaxIncompletePacketRetries = 64;
++  // incomplete without write-pointer progress for a full second is treated as
++  // a desync. A retry count is not a useful deadline: 64 retries can finish in
++  // less than a millisecond while the guest is still writing the packet.
++  static constexpr auto kIncompletePacketStall = std::chrono::seconds(1);
+   static constexpr uint32_t kMaxResyncPerBoot = 8;
+   uint32_t incomplete_packet_retries_ = 0;
++  uint32_t incomplete_packet_offset_ = ~uint32_t{0};
++  uint32_t incomplete_packet_write_index_ = ~uint32_t{0};
++  std::chrono::steady_clock::time_point incomplete_packet_since_{};
+   uint32_t resync_bad_packets_ = 0;
+   // Set by a packet-type length check that ran out of published bytes, cleared
+   // by every packet read. It is the difference between "wait for more" and
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -680,6 +680,7 @@
+     const uint32_t packet_start = reader.read_offset();
+     if (ExecutePacket(&reader)) {
+       incomplete_packet_retries_ = 0;
++      incomplete_packet_offset_ = ~uint32_t{0};
+       continue;
+     }
+ 
+@@ -699,15 +700,30 @@
+     // froze this title's picture for good: the frame's swap packet was thrown
+     // away with it, nothing was presented again, and the guest kept running
+     // behind a dead picture (docs/reference/known-issues.md, 2026-10-18).
+-    if (last_packet_incomplete_ && incomplete_packet_retries_ < kMaxIncompletePacketRetries) {
+-      ++incomplete_packet_retries_;
+-      REXGPU_WARN(
+-          "**** PRIMARY RINGBUFFER: packet at {:08X} is incomplete ({} byte(s) published); "
+-          "retrying ({} of {})",
+-          packet_start, reader.read_count(), incomplete_packet_retries_,
+-          kMaxIncompletePacketRetries);
+-      reader.set_read_offset(packet_start);
+-      return packet_start / sizeof(uint32_t);
++    if (last_packet_incomplete_) {
++      const auto now = std::chrono::steady_clock::now();
++      if (incomplete_packet_offset_ != packet_start ||
++          incomplete_packet_write_index_ != write_index) {
++        incomplete_packet_offset_ = packet_start;
++        incomplete_packet_write_index_ = write_index;
++        incomplete_packet_since_ = now;
++        incomplete_packet_retries_ = 0;
++      }
++      if (now - incomplete_packet_since_ < kIncompletePacketStall) {
++        ++incomplete_packet_retries_;
++        if (incomplete_packet_retries_ == 1 || incomplete_packet_retries_ % 100 == 0) {
++          REXGPU_WARN(
++              "**** PRIMARY RINGBUFFER: packet at {:08X} is incomplete "
++              "({} byte(s) published); waiting for guest write (retry {})",
++              packet_start, reader.read_count(), incomplete_packet_retries_);
++        }
++        reader.set_read_offset(packet_start);
++        rex::thread::Wait(write_ptr_index_event_.get(), true, std::chrono::milliseconds(1));
++        return packet_start / sizeof(uint32_t);
++      }
++      REXGPU_ERROR("**** PRIMARY RINGBUFFER: packet at {:08X} stalled for 1 second "
++                   "({} byte(s) published); resynchronising",
++                   packet_start, reader.read_count());
+     }
+ 
+     // Still incomplete after every retry, or malformed outright: resynchronise.
+@@ -718,6 +734,7 @@
+     reader.set_read_offset(std::max(packet_start + uint32_t(sizeof(uint32_t)),
+                                     reader.read_offset()));
+     incomplete_packet_retries_ = 0;
++    incomplete_packet_offset_ = ~uint32_t{0};
+     if (++resync_bad_packets_ > kMaxResyncPerBoot) {
+       REXGPU_ERROR("**** PRIMARY RINGBUFFER: packet at {:08X} still failing after {} resync(s); "
+                    "dropping the rest of the ring",
