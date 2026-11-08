@@ -1292,19 +1292,26 @@ bool KeepStartupLogos(std::vector<Node>* roots, std::string* why) {
 bool SelectUltimateStartupLogo(std::vector<Node>* roots, std::string* why) {
   if (!roots) return false;
   Node* order = nullptr;
+  Node* wait = nullptr;
   for (auto& root : *roots) {
     if (root.tag != ui::dtb::kArray || root.kids.empty() ||
-        root.kids[0].tag != ui::dtb::kSymbol ||
-        root.kids[0].text != "splash_order") continue;
-    if (order) { if (why) *why = "duplicate startup splash playlist"; return false; }
-    order = &root;
+        root.kids[0].tag != ui::dtb::kSymbol) continue;
+    if (root.kids[0].text == "splash_order") {
+      if (order) { if (why) *why = "duplicate startup splash playlist"; return false; }
+      order = &root;
+    } else if (root.kids[0].text == "wait_for_splash") {
+      if (wait) { if (why) *why = "duplicate startup splash wait"; return false; }
+      wait = &root;
+    }
   }
   auto scene = [](const Node& node, std::string_view path) {
     return node.tag == ui::dtb::kArray && node.kids.size() == 2 &&
            node.kids[0].tag == ui::dtb::kSymbol && node.kids[0].text == path &&
            node.kids[1].tag == ui::dtb::kInt;
   };
-  if (!order || order->kids.size() != 8 ||
+  if (!order || !wait || wait->kids.size() != 2 ||
+      wait->kids[1].tag != ui::dtb::kSymbol ||
+      wait->kids[1].text != "FALSE" || order->kids.size() != 8 ||
       !scene(order->kids[1], "ulti/ultimate_mods.milo") ||
       order->kids[2].tag != ui::dtb::kIfdef || order->kids[2].text != "REGION_NA" ||
       !scene(order->kids[3], "ui/startup/hmx_logo_screen.milo") ||
@@ -1316,9 +1323,54 @@ bool SelectUltimateStartupLogo(std::vector<Node>* roots, std::string* why) {
     if (why) *why = "unsupported Ultimate startup splash order";
     return false;
   }
-  // The second logo in a multi-scene sequence has not rendered reliably in the
-  // recomp. Keep the provider's own first scene and its authored duration.
-  order->kids.resize(2);
+  // Put Harmonix first, then the ESRB scene with Ultimate Mods art. The next
+  // authored screen is the autosave warning. Without the wait flag, the native
+  // state-7 readiness path retires every remaining logo in a single poll.
+  // The authored Ultimate scene reuses HMX_logo.tex, so the second draw reuses
+  // the first scene's image. The ESRB scene has a separate texture identity;
+  // BuildUltimateRatingScene replaces its bitmap with Ultimate Mods artwork.
+  const Node harmonix = order->kids[3];
+  const Node esrb = order->kids[4];
+  order->kids = {Node::Symbol("splash_order"), harmonix, esrb};
+  wait->kids[1] = Node::Symbol("TRUE");
+  return true;
+}
+
+bool BuildUltimateRatingScene(const RecordReader& read, std::vector<uint8_t>* output,
+                             std::string* why) {
+  if (!output) return false;
+  std::vector<uint8_t> ultimate;
+  std::vector<uint8_t> esrb;
+  if (!read("ulti/gen/ultimate_mods.milo_xbox", &ultimate, why) ||
+      !read("ui/startup/gen/esrb.milo_xbox", &esrb, why)) return false;
+  // Both installed scenes store a 1024x512 bitmap in their first, uncompressed
+  // chunk. Copy only its pixel bytes, leaving ESRB's material, mesh and unique
+  // esrb_keep.tex name intact. These offsets are checked against both assets.
+  constexpr size_t chunk = 0x810;
+  constexpr size_t ultimate_pixels = chunk + 768;
+  constexpr size_t esrb_pixels = chunk + 829;
+  constexpr size_t pixel_bytes = 349455;
+  constexpr std::array<uint8_t, 4> next_object{0xAD, 0xDE, 0xAD, 0xDE};
+  constexpr std::array<uint8_t, 12> bitmap_format{
+      0x04, 0x00, 0x00, 0x00, 0x08, 0x05, 0x04, 0x00, 0x02, 0x00, 0x02, 0x00};
+  const auto matches = [](const std::vector<uint8_t>& bytes, size_t offset,
+                          auto expected) {
+    return offset + expected.size() <= bytes.size() &&
+           std::equal(expected.begin(), expected.end(), bytes.begin() + offset);
+  };
+  if (ultimate.size() != 352580 || esrb.size() != 352645 ||
+      !matches(ultimate, chunk + 48, std::string_view("HMX_logo.tex")) ||
+      !matches(esrb, chunk + 48, std::string_view("esrb_keep.tex")) ||
+      !matches(ultimate, ultimate_pixels - bitmap_format.size(), bitmap_format) ||
+      !matches(esrb, esrb_pixels - bitmap_format.size(), bitmap_format) ||
+      !matches(ultimate, ultimate_pixels + pixel_bytes, next_object) ||
+      !matches(esrb, esrb_pixels + pixel_bytes, next_object)) {
+    if (why) *why = "unsupported Ultimate or ESRB startup scene bitmap layout";
+    return false;
+  }
+  std::copy_n(ultimate.begin() + ultimate_pixels, pixel_bytes,
+              esrb.begin() + esrb_pixels);
+  *output = std::move(esrb);
   return true;
 }
 
@@ -1458,6 +1510,11 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         return (!merge_provider || SelectUltimateStartupLogo(&roots, error)) &&
                KeepStartupLogos(&roots, error);
       })) return false;
+  if (merge_provider && !skip_startup_logos) {
+    if (!BuildUltimateRatingScene(read, &built["ui/startup/gen/esrb.milo_xbox"],
+                                  error)) return false;
+    if (pump_startup_window) pump_startup_window();
+  }
   if (!screen::CurrentMenuConfiguration().show_currency) {
     if (!edit("ui/powerup_select/gen/powerup_select.dtb", [&](auto& roots) {
           return HidePowerupCurrency(&roots, error);

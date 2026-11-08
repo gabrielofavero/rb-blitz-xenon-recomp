@@ -36,8 +36,11 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
 bool SkipStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Validate a normal boot's playlist while preserving the title's authored wait flag.
 bool KeepStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
-// Use the installed Ultimate Mods scene as that route's sole startup logo.
+// Show Harmonix, then the ESRB scene carrying Ultimate Mods art, on Normal Ultimate boots.
 bool SelectUltimateStartupLogo(std::vector<ui::dtb::Node>* roots, std::string* why);
+// Copy the installed Ultimate bitmap into the distinct ESRB splash scene.
+bool BuildUltimateRatingScene(const RecordReader& read, std::vector<uint8_t>* output,
+                             std::string* why);
 // Select the title's authored autosave warning on normal boots, and the title
 // screen directly on fast boots, for either retail or Ultimate UI records.
 bool SetFirstBootScreen(std::vector<ui::dtb::Node>* roots, bool fast, std::string* why);

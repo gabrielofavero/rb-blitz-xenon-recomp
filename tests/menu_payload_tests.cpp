@@ -1863,7 +1863,7 @@ int main(int argc, char** argv) {
   }
   {
     using namespace rb_blitz::ui::dtb;
-    BeginCase("Ultimate startup selects its own logo in both regions");
+    BeginCase("Ultimate startup selects Harmonix then the distinct rating scene in both regions");
     Node other_region;
     other_region.tag = 0x08; // #else
     const Node hmx = Node::Array({Node::Symbol("ui/startup/hmx_logo_screen.milo"), Node::Int(5)});
@@ -1880,9 +1880,10 @@ int main(int argc, char** argv) {
     }
     CHECK_TRUE(rb_blitz::settings::KeepStartupLogos(&roots, &why));
     const auto& order = roots[1].kids;
-    CHECK_EQ(order.size(), size_t{2});
-    CHECK_TRUE(SerializeNodes({order[1]}) == SerializeNodes({ultimate}));
-    CHECK_TRUE(roots[0].kids[1].text == "FALSE");
+    CHECK_EQ(order.size(), size_t{3});
+    CHECK_TRUE(SerializeNodes({order[1]}) == SerializeNodes({hmx}));
+    CHECK_TRUE(SerializeNodes({order[2]}) == SerializeNodes({esrb}));
+    CHECK_TRUE(roots[0].kids[1].text == "TRUE");
     const auto after = Compile(roots);
     CHECK_FALSE(rb_blitz::settings::SelectUltimateStartupLogo(&roots, &why));
     CHECK_TRUE(Compile(roots) == after);
@@ -1955,11 +1956,40 @@ int main(int argc, char** argv) {
     CHECK_TRUE(rb_blitz::settings::KeepStartupLogos(&roots, &why));
     for (const auto& root : roots) {
       if (root.kids.empty() || root.kids[0].text != "splash_order") continue;
-      CHECK_EQ(root.kids.size(), size_t{2});
-      CHECK_TRUE(root.kids[1].kids[0].text == "ulti/ultimate_mods.milo");
+      CHECK_EQ(root.kids.size(), size_t{3});
+      CHECK_TRUE(root.kids[1].kids[0].text == "ui/startup/hmx_logo_screen.milo");
+      CHECK_TRUE(root.kids[2].kids[0].text == "ui/startup/esrb.milo");
     }
     const auto selected = rb_blitz::ui::dtb::Compile(roots, header);
     CHECK_TRUE(rb_blitz::ui::dtb::Parse(selected.data(), selected.size(), &roots, &header, &why));
+    return Finish();
+  }
+  if (argc == 3 && std::string(argv[1]) == "check-ultimate-rating-source") {
+    namespace fs = std::filesystem;
+    const fs::path root = argv[2];
+    rb_blitz::settings::RecordReader read = [&](const std::string& name,
+        std::vector<uint8_t>* bytes, std::string* why) {
+      std::ifstream file(root / name, std::ios::binary);
+      if (!file) { if (why) *why = "missing " + name; return false; }
+      bytes->assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+      return true;
+    };
+    std::vector<uint8_t> scene, original, source;
+    std::string why;
+    CHECK_TRUE(rb_blitz::settings::BuildUltimateRatingScene(read, &scene, &why));
+    CHECK_TRUE(read("ui/startup/gen/esrb.milo_xbox", &original, &why));
+    CHECK_TRUE(read("ulti/gen/ultimate_mods.milo_xbox", &source, &why));
+    constexpr size_t target_start = 0x810 + 829;
+    constexpr size_t source_start = 0x810 + 768;
+    constexpr size_t image_size = 349455;
+    CHECK_TRUE(scene.size() == original.size());
+    CHECK_TRUE(std::equal(scene.begin(), scene.begin() + target_start, original.begin()));
+    CHECK_TRUE(std::equal(scene.begin() + target_start + image_size, scene.end(),
+                          original.begin() + target_start + image_size));
+    CHECK_TRUE(std::equal(scene.begin() + target_start,
+                          scene.begin() + target_start + image_size,
+                          source.begin() + source_start));
+    CHECK_TRUE(scene != original);
     return Finish();
   }
   if (argc == 3 && std::string(argv[1]) == "check-startup-record") {
@@ -2019,7 +2049,7 @@ int main(int argc, char** argv) {
       if (root.kids.empty()) continue;
       if (root.kids[0].text == "wait_for_splash") {
         ++waits;
-        CHECK_TRUE(root.kids.size() == 2 && root.kids[1].text == (ultimate_route ? "FALSE" : "TRUE"));
+        CHECK_TRUE(root.kids.size() == 2 && root.kids[1].text == "TRUE");
       }
       if (root.kids[0].text != "splash_order") continue;
       ++playlists;
@@ -2031,9 +2061,11 @@ int main(int argc, char** argv) {
         has_ultimate |= entry.kids[0].text == "ulti/ultimate_mods.milo";
       }
       if (ultimate_route) {
-        CHECK_EQ(root.kids.size(), size_t{2});
-        CHECK_TRUE(has_ultimate);
-        CHECK_FALSE(has_harmonix);
+        CHECK_EQ(root.kids.size(), size_t{3});
+        CHECK_TRUE(root.kids[1].kids[0].text == "ui/startup/hmx_logo_screen.milo");
+        CHECK_TRUE(root.kids[2].kids[0].text == "ui/startup/esrb.milo");
+        CHECK_FALSE(has_ultimate);
+        CHECK_TRUE(has_harmonix);
       } else {
         CHECK_TRUE(root.kids.size() > 1);
         CHECK_TRUE(has_harmonix);

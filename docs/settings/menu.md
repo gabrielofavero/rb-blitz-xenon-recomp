@@ -88,15 +88,17 @@ still auto-start the local user; only recovery shows an error popup. The
 preference is saved as `[general] startup = "normal" | "fast"`
 and applies on the next launch (`startup_mode` is its cvar).
 
-The Normal route shows the title's autosave warning after either startup logo.
+The Normal route shows the title's autosave warning after its startup logos.
 
 The installed Ultimate startup record puts **Ultimate Mods first**, then regional
-Harmonix/ESRB entries, and sets `wait_for_splash FALSE`. Normal Ultimate startup keeps
-only the Ultimate Mods scene and its authored wait setting so the guest can present
-the logo while startup continues. The retail route keeps its native Harmonix playlist
-and wait setting. See the
-[splash investigation](../engine/startup-splash-investigation.md) for the scene-handoff
-findings that led to this route-specific selection.
+Harmonix/ESRB entries, and sets `wait_for_splash FALSE`. Normal Ultimate startup
+selects Harmonix followed by the ESRB scene carrying Ultimate Mods art. The
+second scene keeps its unique `esrb_keep.tex` identity so the guest loads a new
+image. Both scenes keep their authored durations, and `wait_for_splash TRUE`
+prevents the guest from draining the second logo when the UI becomes ready.
+The autosave warning follows. The retail route keeps its native Harmonix
+playlist and wait setting. The owner verified the full sequence; see the
+[splash investigation](../engine/startup-splash-investigation.md).
 
 Startup music preparation never waits for a DLC package to mount. The library player
 uses a complete metadata catalog and uniform draws without replacement, including songs

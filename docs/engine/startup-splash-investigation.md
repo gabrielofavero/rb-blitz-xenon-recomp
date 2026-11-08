@@ -246,3 +246,26 @@ Harmonix, autosave, and menu sequence. That run used the usual 2x render scale.
 restoration at the usable menu after content discovery. The other three routes
 were verified with the explicit `false` diagnostic flag; their automatic
 switch remains inferred from this shared boot path.
+
+### Two-scene Ultimate retry
+
+With synchronous startup pipeline creation now verified on Retail Normal, the
+owner asked to retry Harmonix followed by Ultimate Mods on Normal Ultimate.
+The installed Ultimate record already has both MILO scenes. The Normal route
+selects those two scenes in that order, keeps their authored durations, and
+drops the regional ESRB branch. `first_screen` remains
+`autosave_warning_screen`, so the intended sequence is Harmonix, Ultimate Mods,
+autosave warning, then title/menu. The owner saw only Harmonix and autosave.
+The next run's splasher trace showed both different scene objects loading, but
+the guest retired Ultimate Mods immediately after loading it. The native state-7
+readiness path drains all remaining scenes while its wait flag is false. The
+two-scene Ultimate route now sets `wait_for_splash TRUE` to keep the second scene
+active for its authored duration. The owner's next check still saw Harmonix for
+both five-second slots. The installed Ultimate MILO is a modified Harmonix scene
+with the same `HMX_logo.tex` name, and the second draw used the first image.
+Replacing the second playlist slot with the distinct ESRB scene showed the ESRB
+rating image correctly. That confirms a scene with a separate texture identity
+can display after Harmonix. The Normal Ultimate route now copies only the
+Ultimate scene's bitmap bytes into the ESRB scene, keeping `esrb_keep.tex`, its
+material, and its mesh. The owner verified the visible sequence: Harmonix,
+Ultimate Mods, autosave warning, then menu.
