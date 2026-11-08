@@ -9,10 +9,10 @@
 
 namespace rb_blitz::ui::boot_loading_art {
 
-// 60 phases of the installed spinner's authored wedge mesh and plate material.
+// One 240-frame cycle of the installed spinner's wedge mesh and plate material.
 // No game artwork is distributed with this project.
-inline constexpr uint32_t kFrameSize = 128;
-inline constexpr size_t kAnimationFrameCount = 60;
+inline constexpr uint32_t kFrameSize = 72;
+inline constexpr size_t kAnimationFrameCount = 240;
 using BootLoadingFrames = std::array<std::vector<uint8_t>, kAnimationFrameCount>;
 
 bool LoadBootLoadingFrames(const std::filesystem::path& game_data_root,

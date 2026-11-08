@@ -1,0 +1,104 @@
+diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
+--- a/include/rex/rex_app.h
++++ b/include/rex/rex_app.h
+@@ -311,6 +311,7 @@
+   std::unique_ptr<Runtime> runtime_;
+   std::unique_ptr<ui::Window> window_;
+   std::thread module_thread_;
++  std::thread startup_preparation_thread_;
+   std::atomic<bool> shutting_down_{false};
+   std::unique_ptr<ui::ImmediateDrawer> immediate_drawer_;
+   std::unique_ptr<ui::ImGuiDrawer> imgui_drawer_;
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -472,38 +472,53 @@
+     const bool has_shader_storage =
+         graphics_system && !runtime_->cache_root().empty() && title_id != 0 &&
+         !DeferShaderStoragePreparation();
+-    // P4: preparation can run beside the guest instead of before it. The
+-    // blocking call below returns only after every stored pipeline exists, which
+-    // is why the loading UI cannot animate during it; the asynchronous form
+-    // starts the same work after the guest resumes and services it in bounded
+-    // slices on the command processor thread. The cvar is the measurement and
+-    // integration switch (P6 owns the visible phase); the default keeps the
+-    // launch-time behaviour.
++    // P4: preparation can run beside the guest instead of before it. For an
++    // app with startup paint, the default still waits for preparation before
++    // resuming the guest, but waits on another thread so its UI can animate.
+     const bool async_preparation =
+         rex::cvar::GetFlagByName("shader_storage_async_preparation") == "true";
++    auto resume_guest = [this, main_thread, graphics_system, has_shader_storage,
++                         async_preparation, title_id]() mutable {
++      OnPostLaunchModule(main_thread.get());
++      main_thread->Resume();
++
++      if (has_shader_storage && async_preparation) {
++        REXLOG_INFO("Preparing shader storage for title {:08X} beside the guest...", title_id);
++        if (!graphics_system->BeginShaderStoragePreparation(runtime_->cache_root(), title_id, 0)) {
++          REXLOG_WARN("Shader storage preparation could not start (a generation is already active)");
++        }
++      }
++
++      module_thread_ = std::thread([this, main_thread = std::move(main_thread)]() mutable {
++        main_thread->Wait(0, 0, 0, nullptr);
++        OnGuestThreadExit(main_thread.get());
++        REXLOG_INFO("Execution complete");
++        if (!shutting_down_.load(std::memory_order_acquire)) {
++          app_context().CallInUIThread([this]() { app_context().QuitFromUIThread(); });
++        }
++      });
++    };
++
++    if (has_shader_storage && !async_preparation && WantsStartupPaint() &&
++        graphics_system->BeginShaderStoragePreparation(runtime_->cache_root(), title_id, 0)) {
++      REXLOG_INFO("Preparing shader storage for title {:08X} with startup paint...", title_id);
++      startup_preparation_thread_ = std::thread([this, graphics_system, resume_guest]() mutable {
++        const auto progress = graphics_system->WaitForShaderStoragePreparation();
++        REXLOG_INFO("Startup shader preparation finished: {}",
++                    graphics::GraphicsPreparationPhaseName(progress.phase));
++        if (!shutting_down_.load(std::memory_order_acquire)) {
++          app_context().CallInUIThreadDeferred([this, resume_guest]() mutable {
++            if (!shutting_down_.load(std::memory_order_acquire)) resume_guest();
++          });
++        }
++      });
++      return;
++    }
+     if (has_shader_storage && !async_preparation) {
+       REXLOG_INFO("Initializing shader storage for title {:08X}...", title_id);
+       graphics_system->InitializeShaderStorage(runtime_->cache_root(), title_id, true);
+     }
+-
+-    OnPostLaunchModule(main_thread.get());
+-    main_thread->Resume();
+-
+-    if (has_shader_storage && async_preparation) {
+-      REXLOG_INFO("Preparing shader storage for title {:08X} beside the guest...", title_id);
+-      if (!graphics_system->BeginShaderStoragePreparation(runtime_->cache_root(), title_id, 0)) {
+-        REXLOG_WARN("Shader storage preparation could not start (a generation is already active)");
+-      }
+-    }
+-
+-    module_thread_ = std::thread([this, main_thread = std::move(main_thread)]() mutable {
+-      main_thread->Wait(0, 0, 0, nullptr);
+-      OnGuestThreadExit(main_thread.get());
+-      REXLOG_INFO("Execution complete");
+-      if (!shutting_down_.load(std::memory_order_acquire)) {
+-        app_context().CallInUIThread([this]() { app_context().QuitFromUIThread(); });
+-      }
+-    });
++    resume_guest();
+   });
+ }
+ 
+@@ -623,6 +638,9 @@
+   if (window_) {
+     window_->SetPresenter(nullptr);
+   }
++  if (startup_preparation_thread_.joinable()) {
++    startup_preparation_thread_.join();
++  }
+   if (module_thread_.joinable()) {
+     module_thread_.join();
+   }

@@ -161,7 +161,9 @@ void RasterTriangle(const std::array<RasterVertex, 3>& triangle,
       if (wa < -0.00001f || wb < -0.00001f || wc < -0.00001f) continue;
 
       // spinner_base.mat scales U to one quarter of the four-emblem plate.
-      // spinner.mnm then translates U through four wraps over 240 frames.
+      // spinner.mnm's four-unit scroll is applied before that scale, so a
+      // 240-frame cycle traverses the plate once. The screen-space direction
+      // is opposite to the positive guest texture coordinate.
       float u = (wa * a.u + wb * b.u + wc * c.u) * 0.25f + phase;
       float v = wa * a.v + wb * b.v + wc * c.v;
       u -= std::floor(u);
@@ -317,7 +319,7 @@ bool LoadBootLoadingFrames(const std::filesystem::path& game_data_root,
   for (size_t frame = 0; frame < ready.size(); ++frame) {
     auto& pixels = ready[frame];
     pixels.assign(kFrameSize * kFrameSize * 4, 0);
-    const float phase = float(frame) / float(ready.size());
+    const float phase = -float(frame) / float(ready.size());
     for (size_t copy = 0; copy < 8; ++copy) {
       const float angle = float(copy) * kPi / 4.0f;
       const float cosine = std::cos(angle);

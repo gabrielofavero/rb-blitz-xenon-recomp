@@ -53,6 +53,10 @@ int main() {
     }
     CHECK_FALSE(std::equal(frames[0].begin(), frames[0].end(),
                            frames[1].begin(), frames[1].end()));
+    // A quarter-cycle must advance to the next plate emblem rather than
+    // repeating the entire four-emblem sheet after two seconds.
+    CHECK_FALSE(std::equal(frames[0].begin(), frames[0].end(),
+                           frames[60].begin(), frames[60].end()));
   }
   return rb_blitz::test::Finish();
 }

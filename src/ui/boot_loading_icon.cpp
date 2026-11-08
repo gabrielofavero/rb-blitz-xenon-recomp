@@ -14,8 +14,8 @@ namespace rb_blitz::ui {
 namespace {
 
 ImU32 AuthoredSpinnerTint(float seconds) {
-  // spinner.mnm's five color keys span 240 frames at 30 fps. Keep color
-  // interpolation separate from the 60-frame texture scroll cycle.
+  // spinner.mnm's five color keys and texture scroll both span 240 frames
+  // at 30 fps.
   struct Key {
     float frame, r, g, b;
   };
@@ -129,8 +129,8 @@ void BootLoadingIcon::OnDraw(ImGuiIO& io) {
     ReleaseTextures();
     texture_generation_ = generation;
   }
-  // The SDK allows at most eight 512x512 image textures. Four atlases hold
-  // all sixty frames, so later frames never disappear when that limit is hit.
+  // Five 504x504 atlases hold the full 240-frame authored scroll at 30 fps
+  // within the SDK's eight-texture limit.
   for (size_t i = 0; i < textures_.size(); ++i) {
     if (!textures_[i] && !atlases_rgba_[i].empty())
       textures_[i] = imgui_drawer()->CreateImageTexture(
@@ -143,17 +143,13 @@ void BootLoadingIcon::OnDraw(ImGuiIO& io) {
   // The 2339x986 reference puts its visible motif near (1860, 72), about
   // 48 px across. The source frame has transparent padding around that motif.
   const float side = io.DisplaySize.y * 0.055f;
-  // PropAnim.anim rotates spinner.trans by -45 degrees over 45 frames at
-  // 30 fps. Eightfold symmetry makes the authored reset seamless.
-  constexpr float kRadiansPerSecond = -3.14159265f / 6.0f;
-  const float angle = seconds * kRadiansPerSecond;
-  const float cosine = std::cos(angle), sine = std::sin(angle);
+  // The startup warning's motif stays oriented while its material scrolls.
+  // The separate spinner panel's PropAnim rotation is not played here.
   const float half = side * 0.5f;
   const float center_x = io.DisplaySize.x * 0.795f;
   const float center_y = io.DisplaySize.y * 0.073f;
   auto corner = [&](float x, float y) {
-    return ImVec2{center_x + x * cosine - y * sine,
-                  center_y + x * sine + y * cosine};
+    return ImVec2{center_x + x, center_y + y};
   };
   const size_t cell = frame_index % kFramesPerAtlas;
   const float uv_left = float((cell % kAtlasColumns) * boot_loading_art::kFrameSize) /

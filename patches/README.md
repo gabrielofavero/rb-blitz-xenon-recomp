@@ -12,6 +12,12 @@ checkout.
 
 ## Patches
 
+`0057-animate-startup-during-shader-preparation.patch` keeps an app's startup
+paint loop active while stored shaders are prepared. For apps opting into startup
+paint, the command processor runs its existing sliced preparation and a waiter
+resumes the guest only when that generation finishes. The default launch barrier
+is preserved; the visible preboot spinner can continue animating during it.
+
 `0054-sync-pixel-size-after-restore.patch` reconciles the presenter's pixel
 size on SDL resize, focus, expose, and restore events. Windows can report a
 zero-height SDL size during minimization without a matching pixel-size event

@@ -133,11 +133,12 @@ The boot window now paints the autosave motif from the title's installed
 `spinner_autosave.milo_xbox` before opening the window. It rasterizes the
 scene's 21-vertex wedge mesh eight times, samples both the plate and bloom
 textures through the material's quarter-width U scale, and applies the
-authored material scroll, color keys, and transform rotation. The icon now
+autosave warning's 240-frame reverse material scroll and color keys without
+rotating the motif. The icon now
 occupies about 5% of the window height near (79.5%, 7.3%), matching its
 placement on the title's menu. A user recording showed the first implementation
 going black after about 2.6 seconds: it tried to upload 60 separate textures, but
-the SDK permits only eight. The frames now occupy four 512x512 atlases, so
+the SDK permits only eight. The frames now occupy five 504x504 atlases, so
 every animation frame remains available. The optional caption was removed
 after the recording showed its host font did not match the warning screen. The
 startup paint is an SDK opt-in; while synchronous setup runs, its paint pump

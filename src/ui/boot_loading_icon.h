@@ -27,8 +27,8 @@ class BootLoadingIcon final : public rex::ui::ImGuiDialog {
   void SetFrames(boot_loading_art::BootLoadingFrames frames);
 
  private:
-  static constexpr size_t kAtlasColumns = 4;
-  static constexpr size_t kAtlasRows = 4;
+  static constexpr size_t kAtlasColumns = 7;
+  static constexpr size_t kAtlasRows = 7;
   static constexpr size_t kFramesPerAtlas = kAtlasColumns * kAtlasRows;
   static constexpr size_t kAtlasCount =
       (boot_loading_art::kAnimationFrameCount + kFramesPerAtlas - 1) /
