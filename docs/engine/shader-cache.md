@@ -2078,10 +2078,9 @@ fallback. Verification needs a genuinely missing recipe and should check zero
 runtime `compile_wait`/processor `compile_drain`, eventual real creation, frame
 continuity, audio/input timing and visual recovery.
 
-The owner also requested passive discovery during ordinary development play. The
-executable starts a background-priority coverage worker only when its directory equals
-the CMake build directory compiled into it. A copied installer executable does not
-start collection. No special P8 launch or `shader_compile_trace` setting is needed.
+The owner also requested passive discovery during ordinary play. The executable
+starts a background-priority coverage worker in both development and installed
+builds. No special P8 launch or `shader_compile_trace` setting is needed.
 The worker checks the four portable recipe stores under the **effective cache root**
 every five seconds, rereads changed stores only, validates headers, storage versions
 and XXH3 recipe hashes, and appends uncovered recipes to:
@@ -2089,6 +2088,12 @@ and XXH3 recipe hashes, and appends uncovered recipes to:
 ```text
 out/shader-coverage/discoveries.jsonl
 ```
+
+For installed builds, the journal instead lives at
+`<selected save root>/diagnostics/unmapped-shaders.jsonl`. The journal appends
+unique discoveries across launches, with a 64 MiB safety limit. It is never
+cleared when launch logs rotate. The player can share the `diagnostics` directory
+with a developer.
 
 The journal grows with unique discoveries across launches. Each line includes the
 path, storage generation, description hash/raw portable recipe, referenced shader
@@ -2099,7 +2104,7 @@ observation time is **not** evidence of an in-song compile or a particular song.
 Known recipes and repeated draws do not grow the file. Partial records are retried;
 a truncated journal line is preserved and separated from subsequent valid lines.
 The first uncovered recipe creates the file. A final scan runs on orderly teardown;
-any later buffered cache write is recovered on the next development launch.
+any later buffered cache write is recovered on the next launch.
 Collection requires `store_shaders=true` (the default). Structural/hash validation
 of a discovered recipe does not prove successful driver creation or correct visuals.
 Windows cache reads share delete access, so they cannot block preparation's atomic
@@ -2110,6 +2115,8 @@ Report discoveries, then produce a new manifest for review:
 ```powershell
 python scripts/shaders/shader_coverage.py
 python scripts/shaders/shader_coverage.py --candidate-out out/shader-coverage/candidate.json
+# For a journal supplied by a player:
+python scripts/shaders/shader_coverage.py --journal "<save root>/diagnostics/unmapped-shaders.jsonl"
 ```
 
 The tool rehashes journal records with the SDK helper, preserves all current recipes,
@@ -2117,8 +2124,9 @@ deduplicates additions and refuses to overwrite an output. New shader identities
 without source locators block candidate publication: resolve those with the existing
 local resolver first. Promoting the candidate to `config/graphics_preparation.json`
 and rebuilding is a separate deliberate step. Collection never rewrites the shipped
-catalogue, local caches or player data. The journal is ignored development evidence,
-not an installer payload input.
+catalogue, local caches or player data. The journal is diagnostic evidence,
+not an installer payload input. An installed journal is also only evidence; it is
+not read as a catalogue or packaged into an update.
 
 Validation: `cmake --build --preset win-amd64-release` succeeds with the current
 executable and GPU DLL staged together. Patch replay verifies all 33 patches with

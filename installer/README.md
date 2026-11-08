@@ -679,6 +679,11 @@ installer's to delete, and a reinstall finds them again.
 
 ## The DLC library and the saved games
 
+Installed game diagnostics are stored under the selected saved-game folder's
+`diagnostics` subdirectory. It holds the current and previous game logs (up to
+about 8 MiB total) and a deduplicated `unmapped-shaders.jsonl` journal. The
+installer leaves these files with the player's saves.
+
 The install folder page asks for three locations, and the last two are stored in
 `paths.toml`, which sits **beside the installed `rb_blitz.exe`** — one file per
 installation, so finding it never depends on the folder it selects. The game reads

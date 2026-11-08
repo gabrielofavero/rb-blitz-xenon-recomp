@@ -1,0 +1,72 @@
+diff --git a/include/rex/logging/types.h b/include/rex/logging/types.h
+--- a/include/rex/logging/types.h
++++ b/include/rex/logging/types.h
+@@ -12,6 +12,7 @@
+ #pragma once
+ 
+ #include <cstdint>
++#include <cstddef>
+ #include <map>
+ #include <memory>
+ #include <optional>
+@@ -73,6 +74,10 @@ struct LogConfig {
+   /** Path to a log file, or nullptr for no file logging. */
+   const char* log_file = nullptr;
+ 
++  /** Zero uses the log_max_file_size_mb and log_max_files cvars. */
++  size_t max_file_size_bytes = 0;
++  size_t max_files = 0;
++
+   /** spdlog pattern string for the stdout console sink. */
+   std::string console_pattern = "[%^%l%$] [%n] [t%t] %v";
+ 
+diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
+--- a/include/rex/rex_app.h
++++ b/include/rex/rex_app.h
+@@ -33,6 +33,7 @@
+ namespace rex {
+ 
+ class LogCaptureSink;
++struct LogConfig;
+ 
+ /// Content path configuration, passed to OnConfigurePaths().
+ /// All paths start with sensible defaults derived from CLI args and cvars.
+@@ -154,6 +155,9 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
+   /// Called after logging is initialized. Add log sinks here.
+   virtual void OnPostInitLogging() {}
+ 
++  /// Called after the app config is loaded and before the file sink is created.
++  virtual void OnConfigureLogging(LogConfig& config) { (void)config; }
++
+   /// Called after Runtime::LoadXexImage() succeeds. The XEX is loaded and
+   /// mapped into guest memory but the module has not launched.
+   /// Use this for data patches and recomp-specific achievement registration.
+diff --git a/src/core/logging.cpp b/src/core/logging.cpp
+--- a/src/core/logging.cpp
++++ b/src/core/logging.cpp
+@@ -227,8 +227,11 @@ void InitLogging(const LogConfig& config) {
+   }
+   if (!resolved_path.empty()) {
+     auto sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+-        resolved_path, static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
+-        static_cast<size_t>(REXCVAR_GET(log_max_files)), false);
++        resolved_path,
++        config.max_file_size_bytes ? config.max_file_size_bytes
++                                   : static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
++        config.max_files ? config.max_files : static_cast<size_t>(REXCVAR_GET(log_max_files)),
++        false);
+     sink->set_level(spdlog::level::trace);
+     sink->set_pattern(config.file_pattern);
+     g_file_sink = sink;
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -171,6 +171,8 @@ bool ReXApp::SetupEnvironment() {
+     log_config.log_dir = (exe_dir / "logs").string();
+   }
+ 
++  OnConfigureLogging(log_config);
++
+   rex::InitLogging(log_config);
+   rex::RegisterLogLevelCallback();
+ 

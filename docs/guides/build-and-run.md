@@ -570,11 +570,17 @@ patch 0008 the first of those ended the process with `0xC0000005` and the loader
 [known-issues.md](../reference/known-issues.md)). And the gate refuses all three on the same file
 (`SIZE MISMATCH`), which is the half that covers the build.
 
-Each launch writes a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:
+Development launches write a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:
 
 ```powershell
 Get-ChildItem logs\*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1 Name,Length,LastWriteTime
 ```
+
+Installed launches keep the current and previous sessions under the selected save
+root's `diagnostics` directory: `game.log`, `game.1.log`, `previous.log`, and
+`previous.1.log`. Each session has a 2 MiB file and one rotated file, so the total
+log budget is about 8 MiB. A new launch moves the former `game` files to `previous`.
+An explicit `log_file` setting still writes to that requested path.
 
 On Windows, the boot log also reports its process ID and crash-dump directory.
 An unhandled native exception writes a matching `.txt` record (exception code,

@@ -97,6 +97,7 @@ set(RBBLITZ_SOURCES
     src/diag/gameplay_probe.cpp
     src/diag/shader_trace.cpp
     src/diag/boot_heartbeat.cpp
+    src/diag/session_logs.cpp
     src/graphics/preparation_assets.cpp
     src/graphics/preparation_state.cpp
     src/graphics/preparation_loading.cpp
@@ -709,6 +710,9 @@ if(BUILD_TESTING)
         "${REXSDK_DIR}/thirdparty/inja/third_party/include")
     target_link_libraries(rb_blitz_shader_coverage_tests PRIVATE xxhash)
     add_test(NAME shader_coverage COMMAND rb_blitz_shader_coverage_tests)
+    add_executable(rb_blitz_session_logs_tests tests/session_logs_tests.cpp src/diag/session_logs.cpp)
+    target_include_directories(rb_blitz_session_logs_tests PRIVATE src tests)
+    add_test(NAME session_logs COMMAND rb_blitz_session_logs_tests)
 
     # P4: the cancellable graphics-preparation lifecycle both backends drive
     # from the command processor thread (rexglue-sdk/include/rex/graphics/

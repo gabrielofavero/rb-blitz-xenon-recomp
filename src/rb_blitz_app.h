@@ -60,10 +60,12 @@
 #include <rex/graphics/compile_trace.h>
 #include "diag/shader_trace.h"
 #include "diag/boot_heartbeat.h"
+#include "diag/session_logs.h"
 #include "graphics/preparation_loading.h"
 #include "graphics/shader_coverage.h"
 #include <rex/filesystem.h>
 #include <rex/logging/macros.h>
+#include <rex/logging.h>
 #include <rex/platform/dynlib.h>
 #include <rex/rex_app.h>
 #include <rex/system/flags.h>
@@ -611,8 +613,8 @@ class RbBlitzApp : public rex::ReXApp {
     rb_blitz::loading::ConfigureLoadTrace();
     rb_blitz::loading::ConfigureCrashRecovery(runtime(), settings_restart_boot_);
     rb_blitz::graphics::ConfigureLoading(runtime());
-    coverage_recorder_ = rb_blitz::graphics::StartDevelopmentCoverage(
-        rex::filesystem::GetExecutablePath(),runtime()->cache_root());
+    coverage_recorder_ = rb_blitz::graphics::StartCoverage(
+        rex::filesystem::GetExecutablePath(),runtime()->cache_root(),runtime()->user_data_root());
     rb_blitz::diag::shader_trace::LogConfiguration();
     REXLOG_INFO("boot_timing: guest_launch_ready elapsed_ms={}",
                 std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -654,6 +656,19 @@ class RbBlitzApp : public rex::ReXApp {
     if (settings_boot_) {
       settings_boot_->LogConfigured();
     }
+  }
+
+  void OnConfigureLogging(rex::LogConfig& config) override {
+    // Explicit logging paths remain available for support runs and automation.
+    if (!REXCVAR_GET(log_file).empty()) return;
+    const auto executable = rex::filesystem::GetExecutablePath();
+    if (rb_blitz::graphics::IsDevelopmentBuild(executable)) return;
+    const auto path = rb_blitz::diag::PrepareSessionLog(user_data_root());
+    if (path.empty()) return;
+    diagnostics_log_file_ = path.string();
+    config.log_file = diagnostics_log_file_.c_str();
+    config.max_file_size_bytes = 2 * 1024 * 1024;
+    config.max_files = 1;
   }
 
   // The help captions' typeface (owner request, 2026-10-14). The SDK registers its own font
@@ -830,6 +845,7 @@ class RbBlitzApp : public rex::ReXApp {
   std::unique_ptr<rex::ui::ImGuiDialog> mouse_cursor_;
   bool graphics_loading_payload_ready_ = false;
   std::unique_ptr<rb_blitz::graphics::CoverageRecorder> coverage_recorder_;
+  std::string diagnostics_log_file_;
   // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings
   // bridge's caption sink, because the sink object lives beside the dialog.
   std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;

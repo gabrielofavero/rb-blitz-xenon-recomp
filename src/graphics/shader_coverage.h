@@ -1,4 +1,4 @@
-// Development-only discovery of portable recipes missing from the catalogue.
+// Discovery of portable recipes missing from the catalogue.
 #pragma once
 #include <filesystem>
 #include <functional>
@@ -35,4 +35,8 @@ class CoverageRecorder {
 
 std::unique_ptr<CoverageRecorder> StartDevelopmentCoverage(
     const std::filesystem::path& executable, const std::filesystem::path& cache);
+bool IsDevelopmentBuild(const std::filesystem::path& executable);
+std::unique_ptr<CoverageRecorder> StartCoverage(
+    const std::filesystem::path& executable, const std::filesystem::path& cache,
+    const std::filesystem::path& user_data_root);
 }  // namespace rb_blitz::graphics
