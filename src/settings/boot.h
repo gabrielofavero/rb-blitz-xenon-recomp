@@ -214,6 +214,7 @@ class SettingsBoot {
   std::vector<Applied> deferred_writes_;
   RenderPathLimits render_limits_;
   GuestScreenPlan screen_plan_;
+  bool probe_render_active_ = false;
   GraphicsBootState graphics_boot_;
   std::function<bool()> presented_probe_;
   unsigned menu_frames_ = 0;

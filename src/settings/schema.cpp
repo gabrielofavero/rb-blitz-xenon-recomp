@@ -12,6 +12,7 @@
 // leaves them empty with `choices_source = "provider"`.
 
 #include "settings/schema.h"
+#include "settings/capabilities.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -214,7 +215,7 @@ std::vector<SchemaRow> BuildTable() {
                         WidgetKind::kHorizontalSelect, ValueKind::kResolution,
                         ResolutionValue(0, 0), "resolutions");
     rows.push_back(Row(std::move(d), {"graphics", "resolution"}, "", "Resolution",
-                       "The rendered resolution."));
+                       "Auto matches your display resolution each time the game starts."));
   }
   rows.push_back(Row(Make(SettingId::kVsync, Category::kGraphics, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
@@ -605,7 +606,7 @@ void FillChoiceSource(Descriptor& descriptor, const CapabilitySnapshot& caps) {
   } else if (source == "resolutions") {
     descriptor.choices.push_back(Choice{"auto", "Auto"});
     for (const DisplayMode& mode : caps.supported_resolutions) {
-      if (mode.width <= 0 || mode.height <= 0) {
+      if (!IsResolutionPreset(mode)) {
         continue;
       }
       const std::string token = std::to_string(mode.width) + "x" + std::to_string(mode.height);

@@ -175,6 +175,101 @@ void TestSupportedResolutions() {
   CHECK_TRUE(IsSize(too_small[0], 1280, 720));
 }
 
+void TestAutoResolutionBounds() {
+  BeginCase("resolution: Auto follows the native display; manual choices are 16:9 presets");
+  const RenderPathLimits limits = TitleRenderPath();
+  CHECK_TRUE(PlanGuestScreen(limits, {960, 540}).supported);
+  CHECK_FALSE(PlanGuestScreen(limits, {854, 480}).supported);
+  CHECK_FALSE(PlanGuestScreen(limits, {1280, 800}).supported);
+  for (const DisplayMode size : {DisplayMode{720, 540}, DisplayMode{800, 600},
+                                 DisplayMode{960, 720}, DisplayMode{1440, 1080},
+                                 DisplayMode{1600, 1200}, DisplayMode{1920, 1440},
+                                 DisplayMode{2880, 2160}}) {
+    const GuestScreenPlan plan = PlanGuestScreen(limits, size);
+    CHECK_TRUE(plan.supported);
+    CHECK_EQ(plan.guest_size.width * plan.draw_scale, size.width);
+    CHECK_EQ(plan.guest_size.height * plan.draw_scale, size.height);
+  }
+  CHECK_FALSE(PlanGuestScreen(limits, {1024, 768}).supported);
+  CHECK_FALSE(PlanGuestScreen(limits, {1280, 960}).supported);
+  CHECK_FALSE(PlanGuestScreen(limits, {3840, 1600}).supported);
+  CHECK_FALSE(PlanGuestScreen(limits, {3440, 1440}).supported);
+  CHECK_TRUE(PlanGuestScreen(limits, {3456, 1440}).supported);
+  CHECK_TRUE(PlanGuestScreen(limits, {3840, 1080}).supported);
+  CHECK_FALSE(PlanGuestScreen(limits, {5120, 1440}).supported);
+  CHECK_FALSE(PlanGuestScreen(limits, {5120, 2160}).supported);
+  CHECK_FALSE(PlanGuestScreen(limits, {7680, 2160}).supported);
+  CHECK_FALSE(PlanGuestScreen(limits, {7681, 2160}).supported);
+  CHECK_FALSE(PlanGuestScreen(limits, {7680, 2400}).supported);
+  const RenderPathLimits probe = DiagnosticTitleRenderPath();
+  CHECK_TRUE(PlanGuestScreen(probe, {1024, 768}).supported);
+  for (const DisplayMode candidate : {DisplayMode{3840, 1600}, DisplayMode{3440, 1440},
+                                      DisplayMode{5120, 1440}, DisplayMode{5120, 2160},
+                                      DisplayMode{7680, 2160}})
+    CHECK_TRUE(PlanGuestScreen(probe, candidate).supported);
+
+  auto native_caps = [&](DisplayMode desktop) {
+    CapabilityInputs inputs;
+    inputs.display_enumeration_available = true;
+    inputs.primary_display_size = desktop;
+    inputs.display_modes = {desktop};
+    inputs.render_path = limits;
+    return BuildCapabilitySnapshot(inputs);
+  };
+  GraphicsReconciler policy;
+  {
+    const CapabilitySnapshot caps = native_caps({3840, 1600});
+    CHECK_FALSE(IsSupportedResolution(caps, {3840, 1600}));
+    const auto descriptors = schema::BuildDescriptors(caps);
+    const Descriptor* resolution = Find(descriptors, SettingId::kResolution);
+    CHECK_TRUE(resolution != nullptr);
+    CHECK_TRUE(IsRes(policy.Reconcile(SettingId::kResolution, *resolution,
+                                    ResolutionV(0, 0), caps).effective, 2560, 1440));
+  }
+  {
+    const CapabilitySnapshot caps = native_caps({1024, 768});
+    CHECK_FALSE(IsSupportedResolution(caps, {1024, 768}));
+    const auto descriptors = schema::BuildDescriptors(caps);
+    const Descriptor* resolution = Find(descriptors, SettingId::kResolution);
+    CHECK_TRUE(resolution != nullptr);
+    CHECK_TRUE(IsRes(policy.Reconcile(SettingId::kResolution, *resolution,
+                                    ResolutionV(0, 0), caps).effective, 960, 720));
+  }
+  for (const DisplayMode desktop : {DisplayMode{800, 600}, DisplayMode{960, 720},
+                                    DisplayMode{1440, 1080}, DisplayMode{1600, 1200},
+                                    DisplayMode{1920, 1440}, DisplayMode{2880, 2160}}) {
+    const CapabilitySnapshot caps = native_caps(desktop);
+    CHECK_TRUE(IsSupportedResolution(caps, desktop));
+    const auto descriptors = schema::BuildDescriptors(caps);
+    const Descriptor* resolution = Find(descriptors, SettingId::kResolution);
+    CHECK_TRUE(resolution != nullptr);
+    for (const Choice& choice : resolution->choices)
+      CHECK_FALSE(choice.token == DisplayModeToken(desktop));
+    CHECK_TRUE(IsRes(policy.Reconcile(SettingId::kResolution, *resolution,
+                                    ResolutionV(0, 0), caps).effective,
+                     desktop.width, desktop.height));
+    CHECK_FALSE(policy.Validate(SettingId::kResolution, *resolution,
+                                ResolutionV(desktop.width, desktop.height), caps).ok);
+  }
+  for (const DisplayMode desktop : {DisplayMode{2560, 1080}, DisplayMode{3456, 1440},
+                                    DisplayMode{3840, 1080}}) {
+    const CapabilitySnapshot caps = native_caps(desktop);
+    CHECK_TRUE(IsSupportedResolution(caps, desktop));
+    const auto descriptors = schema::BuildDescriptors(caps);
+    const Descriptor* resolution = Find(descriptors, SettingId::kResolution);
+    CHECK_TRUE(resolution != nullptr);
+    for (const Choice& choice : resolution->choices)
+      CHECK_FALSE(choice.token == DisplayModeToken(desktop));
+    CHECK_TRUE(IsRes(policy.Reconcile(SettingId::kResolution, *resolution,
+                                    ResolutionV(0, 0), caps).effective,
+                     desktop.width, desktop.height));
+    CHECK_FALSE(policy.Validate(SettingId::kResolution, *resolution,
+                                ResolutionV(desktop.width, desktop.height), caps).ok);
+    CHECK_TRUE(IsAutoResolution(ResolutionPreferenceForBoot(
+        caps, ResolutionV(desktop.width, desktop.height))));
+  }
+}
+
 void TestBuildSnapshot() {
   BeginCase("capabilities: an unusable backend is never published as usable");
 
@@ -207,7 +302,7 @@ void TestBuildSnapshot() {
   const RendererCapability* d3d12 = FindRenderer(caps, "d3d12");
   CHECK_TRUE(d3d12 != nullptr && d3d12->usable && d3d12->active);
   CHECK_TRUE(ActiveRenderer(caps) == d3d12);
-  CHECK_TRUE(SizesToString(caps.supported_resolutions) == "1920x1080,1280x720,960x540");
+  CHECK_TRUE(SizesToString(caps.supported_resolutions) == "1920x1080,1280x720");
   CHECK_TRUE(IsSupportedResolution(caps, {1920, 1080}));
   CHECK_FALSE(IsSupportedResolution(caps, {2560, 1440}));
 
@@ -887,6 +982,7 @@ void TestGraphicsBootJournal() {
 int main() {
   TestRenderPathSizes();
   TestSupportedResolutions();
+  TestAutoResolutionBounds();
   TestBuildSnapshot();
   TestLogicalProcessors();
   TestDisplayReconnection();

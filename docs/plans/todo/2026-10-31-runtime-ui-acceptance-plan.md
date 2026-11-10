@@ -123,7 +123,7 @@ arm is listed explicitly rather than inferred from the base-game route.
 Post-A shader loading and renderer-specific recovery belong to the
 [engine compatibility plan](2026-10-31-engine-compatibility-closeout-plan.md).
 Resolution expansion and settings hot apply have existing
-[resolution](2026-10-19-resolution-scale-expansion-plan.md) and
+[resolution](../in-progress/2026-10-19-resolution-scale-expansion-plan.md) and
 [hot-apply](../finished/2026-10-24-settings-hot-apply-plan.md) plans. Multi-DPI window fit,
 installer migration from the retired Controller Settings profile and installer
 caption automation are later release checks, not blockers claimed by this plan.

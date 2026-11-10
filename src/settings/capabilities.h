@@ -49,25 +49,25 @@ namespace rb_blitz::settings {
 // lets one list describe 16:9, 4:3, 16:10 and ultrawide guest sizes alike.
 struct RenderPathLimits {
   std::vector<DisplayMode> base_sizes = {{1280, 720}};
-  // Draw scales the render path offers. The SDK's ceiling is 7; the project offers the
-  // scales that correspond to standard sizes rather than every integer.
+  // Draw scales the render path offers. The SDK's ceiling is 7.
   std::vector<int32_t> scales = {1, 2, 3};
-  // Largest render dimension the project offers (the plan's §7.1 matrix tops out at 4K).
+  // Generic defaults used by synthetic probes; TitleRenderPath sets the product bounds.
   DisplayMode offer_ceiling = {3840, 2160};
+  DisplayMode offer_floor = {0, 0};
   // --- the window a *forced* guest size has to stay inside (measured 2026-10-12) ---
   //
   // A request whose aspect no base size has is realised by forcing the guest's width beside a
   // height the title does lay out at: 720 is the shipping size and 540 the title's own
   // half-resolution one, both measured rendering their exact size with the UI following. A height
   // the title never lays out at is what corrupts its title-screen artwork (1080 was measured), so
-  // the height is the bounded axis. The width is bounded by the frame's EDRAM pitch: 21 tiles
-  // (1680 px) was measured working at scale 1.
+  // the height is the bounded axis. Width also matters: 1920x540 at 2x reached
+  // gameplay, while 2560x720 at 2x corrupted the title art (2026-11-10).
   uint32_t min_guest_height = 540;
   uint32_t max_guest_height = 720;
   uint32_t min_guest_width = 640;
   uint32_t max_guest_width = 2048;
-  // Aspects the layout is not proven at are refused rather than guessed at: 1.0:1 up to 3.2:1
-  // covers 16:10, 16:9, 21:9 and 32:10 without reaching the shapes nothing has measured.
+  bool require_width_alignment = false;
+  // Generic bounds used by synthetic probes; TitleRenderPath limits the product to 4:3..32:9.
   uint32_t min_aspect_x1000 = 1000;
   uint32_t max_aspect_x1000 = 3200;
 };
@@ -83,10 +83,33 @@ std::vector<DisplayMode> DiagnosticGuestBases();
 // whatever one boot's diagnostic instrument asks for.
 inline RenderPathLimits TitleRenderPath() {
   RenderPathLimits limits;
-  limits.base_sizes = {{960, 540}, {1280, 720}};
+  // The title has a native 4:3 frame at 960x720. Its 720x540 half-resolution frame
+  // also gives exact 4:3 output at 1440x1080 without raising the guest-height gate.
+  limits.base_sizes = {{720, 540}, {960, 540}, {960, 720}, {1280, 720}};
+  // A scale-4 title probe squeezes the artwork horizontally (2026-11-10).
+  limits.scales = {1, 2, 3};
+  limits.offer_floor = {720, 540};
+  limits.offer_ceiling = {7680, 2160};
+  // Height 800 and width 2560 both corrupt title artwork in windowed probes.
+  limits.max_guest_height = 720;
+  limits.max_guest_width = 1920;
+  limits.require_width_alignment = true;
+  limits.min_aspect_x1000 = 1333;  // 4:3, rounded down to integer per-mille.
+  limits.max_aspect_x1000 = 3555;  // 32:9, rounded down to integer per-mille.
   for (const DisplayMode& size : DiagnosticGuestBases()) {
     limits.base_sizes.push_back(size);
   }
+  return limits;
+}
+
+// Diagnostic-only candidates remain probeable in a window on a smaller desktop.
+// They do not enter Auto or the user's visible preset list.
+inline RenderPathLimits DiagnosticTitleRenderPath() {
+  RenderPathLimits limits = TitleRenderPath();
+  limits.scales.push_back(4);
+  limits.max_guest_height = 800;
+  limits.max_guest_width = 2560;
+  limits.require_width_alignment = false;
   return limits;
 }
 
@@ -94,6 +117,16 @@ inline RenderPathLimits TitleRenderPath() {
 // anything above the offer ceiling, deduplicated and sorted by area then width, largest
 // first. Deterministic, so the UI order is stable across boots.
 std::vector<DisplayMode> RenderPathSizes(const RenderPathLimits& limits);
+
+// The fixed 16:9 choices shown beside Auto. Native display shapes are Auto-only.
+inline bool IsResolutionPreset(const DisplayMode& size) {
+  for (const DisplayMode preset : {DisplayMode{960, 540}, DisplayMode{1280, 720},
+                                   DisplayMode{1920, 1080}, DisplayMode{2560, 1440},
+                                   DisplayMode{2880, 1620}, DisplayMode{3840, 2160}}) {
+    if (size.width == preset.width && size.height == preset.height) return true;
+  }
+  return false;
+}
 
 // --- the render path's guest-size plan -----------------------------------------------------
 //

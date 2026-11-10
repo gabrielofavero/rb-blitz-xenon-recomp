@@ -44,7 +44,7 @@ counts as immediate hot apply in the results.
 Keep existing setting IDs, storage keys, precedence, provider persistence and restart recovery.
 Changing the launch target remains a process restart. Renderer backend switching is outside the
 initial conversion work. Do not expand the supported resolution catalogue here; use the existing
-planner and coordinate with the [resolution expansion plan](../todo/2026-10-19-resolution-scale-expansion-plan.md).
+planner and coordinate with the [resolution expansion plan](../in-progress/2026-10-19-resolution-scale-expansion-plan.md).
 
 ## 2. What the current implementation establishes
 

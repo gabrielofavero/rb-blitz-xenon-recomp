@@ -1,6 +1,29 @@
 # Resolution and scale expansion
 
-**Status: planning, 2026-10-19. No code has been changed by this document.** The measured facts it
+**Status: in progress, updated 2026-11-10.** The 2026-10-19 requirements and packages below are
+preserved as the original plan. The current product contract is in
+[`settings/graphics.md`](../../settings/graphics.md) part 3 §5: the visible choices are Auto and fixed
+16:9 presets; Auto resolves the current desktop mode on each launch, within 720×540 (4:3) and
+7680×2160 (32:9). The ledger below supersedes conflicting decisions in the original plan. This plan
+is not finished until the remaining size and game validation work is resolved.
+
+### Progress ledger (2026-11-10, after windowed probes)
+
+| Status | Original scope | Current result or next gate |
+| --- | --- | --- |
+| **Done with a measured gate** | R3, R7–R9; D1's size/aspect envelope, D6–D8; the relevant P1 planner and label work | The outside envelope is 720×540 through 7680×2160 and 4:3–32:9; labels have no `(wide)`/`(tall)` suffix. Windowed probes exposed title defects at scale 4, guest height 800, guest width 2560, and an unaligned guest width. Production Auto now uses scales 1–3, a 720 guest-height ceiling, 1920 guest-width ceiling, and 16-pixel-aligned forced guest widths. The wider candidates remain diagnostic-only until fixed. The 4:3 extension still awaits visual acceptance. |
+| **Done** | The visible-choice and Auto portions of P4, under the revised contract | Auto retains `auto` in the profile and resolves the current desktop on each launch; manual choices are fixed 16:9 presets. A 2026-11-10 boot on a 2560×1080 display and captures under `out/_swap/resolution-ui-2026-11-10/` verify the Auto label, its short explanation, three presets, wraparound, and 2560×1080 guest 1280×540 ×2. A changed physical display between launches has not been tested. |
+| **Revised** | R2, R4–R6; D2–D4 and D9–D10; P1's 4:3 catalogue/offer rule, and P2's 4:3 layout work | The owner's 2026-11-10 direction limits manual choices to 16:9 presets and gives other supported shapes, including 4:3, only to Auto. Auto targets the native desktop when the measured guest path supports it. The original all-mode catalogue and offer rules are superseded; 4:3 framing needs visual acceptance. |
+| **Done** | P0's useful diagnostic intent, revised for Auto-only choices | `RBBLITZ_PROBE_RENDER_SIZE=WxH` drives an isolated windowed render probe without adding a visible choice or saving a preference. It uses expanded diagnostic bounds, so the rejected candidates remain testable on this machine and by beta testers. Captures and logs are under `out/_swap/resolution-probe-2026-11-10/`. |
+| **Measured failure; open for a fix** | R1 and D5 for 3840×1600 | Guest 1920×800 at 2× booted without a guest fault but duplicated title art. The previous synthetic planner acceptance is superseded by this visual result; production Auto rejects the size until the artwork path is fixed. The old 4:3 height probes are superseded. |
+| **Partly measured; open** | P3 and the remaining P4 acceptance | Gameplay at 2592×1080 and 3840×1080 reached a song with intact HUD and scene. Title 3456×1440 is clean, but 3440×1440 has a center seam. 3840×2160 has a clean title; 5120×1440, 5120×2160 and 7680×2160 booted without observed guest faults but have title defects. The 7680×2160 title run lasted 32 seconds. Fix or contain the defects, then beta-test matching native displays, restarts, HUD and longer sessions. A short windowed boot cannot establish crash freedom. |
+| **Built; visual gate open** | 4:3 Auto and the owner's 2026-11-10 interface direction | The planner accepts exact 4:3 output at 720×540, 800×600, 960×720, 1440×1080, 1600×1200, 1920×1440 and 2880×2160. The in-game list stays Auto plus 16:9 presets. The existing signed HUD rule moves anchors inward. A release build and graphics/HUD/window tests pass; menu crop, secondary-page framing and gameplay need captures. 1024×768 and 1280×960 remain outside production's 720 guest-height gate; 1024×768 can be probed diagnostically. |
+| **Open** | P5 close-out | Update measured evidence and known limits, then move this plan to `finished/` only after the remaining gates pass or are explicitly resolved. |
+
+**Original plan (2026-10-19) follows.** Its “today,” verdicts, package order, and reproduction
+commands describe that date and should not be read as the current implementation.
+
+**Original status: planning, 2026-10-19. No code had been changed by this document.** The measured facts it
 cites are the ones already in [`settings/graphics.md`](../../settings/graphics.md); every new size in
 §4 is unmeasured until the packages in §5 run.
 
@@ -181,6 +204,23 @@ are unchanged.
   its own window. The Ultimate gameplay letterbox setting is a separate feature and is not
   touched.
 
+### 2026-11-10 visual pass
+
+At diagnostic 1440×1080 (guest 720×540 at 2×), the main menu and settings tolerate the side crop.
+The Library and Messages panels did not: their 16:9-authored content was cut off. The 4:3 boot now
+authors `set_local_scale 0.75` on those panels and the other library panels, while the background
+panel keeps its full-frame moving texture. The shared header's label animation keys and trigger
+arrows are moved inward. The guest's 0.75 inverse-aspect mapping remains in place, so typography
+and artwork retain their proportions; the earlier experiment with a smaller inverse-aspect value
+was rejected because it compressed the interface horizontally.
+
+Captured evidence: `out/_swap/resolution-probe-2026-11-10/4x3-arrows/song-list.png` and
+`gameplay.png`, `out/_swap/resolution-probe-2026-11-10/4x3-settings/main-menu.png`,
+`display.png` and `messages.png`, and
+`out/_swap/resolution-probe-2026-11-10/4x3-store/rhythmverse-stable.png`. Gameplay uses
+the 4:3 camera crop and the existing inward HUD re-anchoring; the note highway follows the selected
+lane. The captures are windowed diagnostic boots on this machine, not native fullscreen mode tests.
+
 ## 9. Documents this change owes
 
 | When | Document | What changes |
@@ -234,3 +274,24 @@ Remove-Item Env:\RBBLITZ_PROBE_GUEST_BASES, Env:\RBBLITZ_PROBE_RESOLUTIONS
 `acceptance_resolutions.ps1` is the tracked deliverable of P0; until it exists, the scratch
 harness `out/_swap/ultrawide/run.ps1` is the model. Evidence goes under
 `out/_swap/resolutions/<label>/` so the plan and `graphics.md` can cite it.
+
+## 12. Current beta acceptance (2026-11-10)
+
+The preceding override and harness instructions are historical and superseded. A beta tester with
+a native display matching one of §4.1's sizes can validate the current product path:
+
+1. Use the current Windows release build with `RBBLITZ_PROBE_GUEST_BASES` unset. Set the Windows
+   desktop to the target native size, select **Auto** in Video settings, and restart the game.
+2. Record the boot log's effective resolution, guest base, draw scale, video mode and window client
+   size. The saved resolution preference should remain `auto`; the settings row should still offer
+   only Auto and 16:9 presets.
+3. Capture the title, Video settings, main menu and an in-song frame. Check for round artwork,
+   absence of presenter bars or stretch, readable labels and HUD elements anchored to the edges.
+4. Change away from and back to the target desktop mode between launches. Confirm Auto follows the
+   new native size, then returns to the target on the next launch. Record any guest fault or restart
+   fallback with the log and screenshot.
+
+For 3840×1600, the expected exact plan is guest 1920×800 at 2×. For 7680×2160, it is guest
+1920×540 at 4×. Store each tester's log and captures under `out/_swap/resolutions/<label>/` and
+record the observed result here before closing P3/P4. The local 2560×1080 evidence does not stand in
+for these native-display passes.

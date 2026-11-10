@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <numeric>
 #include <set>
 #include "store/store_metadata.h"
@@ -73,6 +74,88 @@ Node* PanelMethod(std::vector<Node>* roots, std::string_view panel, std::string_
     }
   }
   return nullptr;
+}
+
+bool FitFourByThreePanel(std::vector<Node>* roots, std::string_view panel,
+                          std::string* error) {
+  Node* enter = PanelMethod(roots, panel, "enter");
+  Node scale;
+  scale.tag = ui::dtb::kFloat;
+  scale.scalar = std::bit_cast<uint32_t>(0.75f);
+  Node statement = Node::Command({
+      Node::Command({Node::Var("this"), Node::Symbol("loaded_dir")}),
+      Node::Symbol("set_local_scale"),
+                                  scale, scale, scale});
+  if (enter) {
+    enter->kids.push_back(std::move(statement));
+    return true;
+  }
+  // A few retail panels (the Store banner among them) have no authored enter.
+  for (auto& root : *roots) {
+    if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 &&
+        root.kids[0].text == "new" && root.kids[2].text == panel) {
+      root.kids.push_back(Node::Array({Node::Symbol("enter"), std::move(statement)}));
+      return true;
+    }
+  }
+  if (error) *error = "4:3 panel definition changed: " + std::string(panel);
+  return false;
+}
+
+bool FitFourByThreeHeader(std::vector<Node>* roots, std::string* error) {
+  Node* refresh = PanelMethod(roots, "background_panel", "rbbz_refresh_headers");
+  Node* enter = PanelMethod(roots, "background_panel", "enter");
+  if (!refresh || !enter) {
+    if (error) *error = "4:3 header callbacks changed";
+    return false;
+  }
+  unsigned keys = 0;
+  const auto fit_keys = [&](auto&& self, Node& node) -> void {
+    if (node.tag == ui::dtb::kCommand && node.kids.size() == 6 &&
+        node.kids[1].text == "set_key_val" &&
+        node.kids[3].tag == ui::dtb::kArray && node.kids[3].kids.size() == 2 &&
+        node.kids[3].kids[0].text == "local_xfm" && node.kids[3].kids[1].text == "x" &&
+        node.kids[5].tag == ui::dtb::kInt) {
+      const int x = int32_t(node.kids[5].scalar);
+      node.kids[5] = Node::Int(uint32_t((x * 3) / 4 + 35));
+      ++keys;
+    }
+    for (auto& child : node.kids) self(self, child);
+  };
+  fit_keys(fit_keys, *refresh);
+  if (keys < 25) {
+    if (error) *error = "4:3 header position keys changed";
+    return false;
+  }
+  Node scale;
+  scale.tag = ui::dtb::kFloat;
+  scale.scalar = std::bit_cast<uint32_t>(0.75f);
+  for (std::string_view transform : {"main_home.trans", "main_mySongs.trans", "main_store.trans",
+                                     "main_inbox.trans", "main_newMessage.trans"}) {
+    enter->kids.push_back(Node::Command({Node::Symbol(transform), Node::Symbol("set_local_scale"),
+                                          scale, scale, scale}));
+  }
+  const auto arrow = [](std::string_view name, std::string_view prefix, int offset) {
+    const std::string x = std::string(prefix) + "_x";
+    const std::string y = std::string(prefix) + "_y";
+    const std::string z = std::string(prefix) + "_z";
+    return std::array<Node, 2>{
+        Node::Command({Node::Symbol(name), Node::Symbol("get_local_pos"),
+                       Node::Var(x), Node::Var(y), Node::Var(z)}),
+        Node::Command({Node::Symbol(name), Node::Symbol("set_local_pos"),
+                       Node::Command({Node::Symbol("+"), Node::Var(x), Node::Int(uint32_t(offset))}),
+                       Node::Var(y), Node::Var(z)})};
+  };
+  const auto left = arrow("Left_arrow.grp", "rbbz_4x3_left_arrow", 100);
+  const auto right = arrow("Rt_arrow.grp", "rbbz_4x3_right_arrow", -100);
+  Node loaded_dir = Node::Command({Node::Var("this"), Node::Symbol("loaded_dir")});
+  enter->kids.push_back(Node::Command({Node::Symbol("unless"),
+      Node::Command({loaded_dir, Node::Symbol("has"),
+                     Node::Array({Node::Symbol("rbbz_4x3_arrows_placed")})}),
+      Node::Command({Node::Symbol("do"), left[0], left[1], right[0], right[1],
+          Node::Command({loaded_dir, Node::Symbol("set"),
+                         Node::Symbol("rbbz_4x3_arrows_placed"), Node::Symbol("TRUE")})})}));
+  return true;
 }
 }  // namespace
 
@@ -1973,12 +2056,14 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   }
   // Independently enabled tabs share one cyclic route and one header appearance.
   const auto& menu_config = screen::CurrentMenuConfiguration();
+  const bool four_by_three = menu_config.four_by_three;
   const LibraryHeaderOptions headers{menu_config.rhythmverse_row, menu_config.show_messages,
                                      menu_config.show_recommendations};
   if (!edit("ui/background/gen/background.dtb", [&](auto& roots) {
-        return menu_config.menu_refresh_trial
+        if (!(menu_config.menu_refresh_trial
             ? ConfigureLibraryHeaderRuntimeBar(&roots, error)
-            : ConfigureLibraryHeaderBar(&roots, headers, error);
+            : ConfigureLibraryHeaderBar(&roots, headers, error))) return false;
+        return !four_by_three || FitFourByThreeHeader(&roots, error);
       })) return false;
   if (!edit("ui/gen/transition_screens.dtb", [&](auto& roots) {
         return ConfigureLibraryHeaderAnimations(&roots, error);
@@ -1992,7 +2077,18 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           if (!(menu_config.menu_refresh_trial
               ? RouteLibraryHeaderRuntimeNavigation(&roots, tab, error)
               : RouteLibraryHeaderNavigation(&roots, tab, headers, error))) return false;
-          return tab != LibraryHeader::kMessages || ConfigureMessagesUpdateInbox(&roots, error);
+          if (tab == LibraryHeader::kMessages &&
+              !ConfigureMessagesUpdateInbox(&roots, error)) return false;
+          if (!four_by_three) return true;
+          if (tab == LibraryHeader::kStore) {
+            for (std::string_view panel : {"store_menu_panel", "store_banner_panel",
+                                           "store_browser_panel", "store_details_panel"})
+              if (!FitFourByThreePanel(&roots, panel, error)) return false;
+            return true;
+          }
+          const std::string_view panel = tab == LibraryHeader::kSongs ? "song_select_panel" :
+              tab == LibraryHeader::kMessages ? "inbox_panel" : "recommendation_panel";
+          return FitFourByThreePanel(&roots, panel, error);
         })) return false;
   }
   installed_routes.headers = menu_config.menu_refresh_trial;

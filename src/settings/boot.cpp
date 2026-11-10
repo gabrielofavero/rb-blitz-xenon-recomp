@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -973,6 +974,33 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
           "settings.graphics.safe_mode");
     }
   }
+  // One-process render probe for windowed acceptance on a smaller physical display.
+  // It bypasses only the display's offer gate, never the production render planner,
+  // and does not change the settings service, visible choices or saved profile.
+  if (const char* raw = std::getenv("RBBLITZ_PROBE_RENDER_SIZE"); raw != nullptr && *raw != '\0') {
+    DisplayMode requested;
+    if (REXCVAR_GET(settings_safe_graphics) || overrides_.contains(SettingId::kResolution)) {
+      REXLOG_WARN("settings_boot: render probe '{}' skipped: safe graphics or an explicit "
+                  "resolution-scale override is active", raw);
+    } else if (!ParseDisplayModeToken(std::string_view(raw), &requested)) {
+      REXLOG_WARN("settings_boot: render probe '{}' skipped: expected one WxH token", raw);
+    } else if (const GuestScreenPlan probe = PlanGuestScreen(DiagnosticTitleRenderPath(), requested);
+               !probe.supported) {
+      REXLOG_WARN("settings_boot: render probe {} skipped: outside the diagnostic planner's "
+                  "bounds", raw);
+    } else if (!rex::cvar::SetFlagByName("resolution_scale",
+                                          std::to_string(probe.draw_scale)) ||
+               rex::cvar::GetFlagByName("resolution_scale") !=
+                   std::to_string(probe.draw_scale)) {
+      REXLOG_WARN("settings_boot: render probe {} skipped: draw scale could not be applied", raw);
+    } else {
+      screen_plan_ = probe;
+      probe_render_active_ = true;
+      REXLOG_WARN("settings_boot: diagnostic render probe {} -> guest {}x{} at {}x; "
+                  "saved resolution and menu choices unchanged", raw,
+                  probe.guest_size.width, probe.guest_size.height, probe.draw_scale);
+    }
+  }
   if (screen_plan_.supported && !overrides_.contains(SettingId::kResolution)) {
     // Both halves of the guest size, because the title derives its width from its height and
     // the aspect the user picked is not one the title can compute (src/hooks/render_settings.h).
@@ -996,7 +1024,8 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
                           SettingId::kAntiAliasing, SettingId::kFiltering})
       effective[id] = service_->EffectiveValue(id);
     std::string error;
-    if (graphics_boot_.active() && !graphics_boot_.Begin(effective, &error))
+    if (graphics_boot_.active() && !probe_render_active_ &&
+        !graphics_boot_.Begin(effective, &error))
       REXLOG_WARN("settings_boot: {}", error);
   }
   // Async pipeline creation can skip the title's first logo/title draws while
@@ -1034,7 +1063,7 @@ void SettingsBoot::MenuFrame() {
   if (menu_presented_) return;
   if (!presented_probe_()) return;
   std::string error;
-  if (graphics_boot_.active() && !graphics_marker_attempted_) {
+  if (graphics_boot_.active() && !probe_render_active_ && !graphics_marker_attempted_) {
     graphics_marker_attempted_ = true;
     if (graphics_boot_.Presented(&error)) {
       REXLOG_INFO("settings_boot: presented menu frame; graphics marked last-known-good");

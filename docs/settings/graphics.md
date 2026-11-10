@@ -588,6 +588,9 @@ The SDK's presenter builds its letterbox region from the **video mode** aspect, 
 
 ### 5. The planner: which requested sizes are offered, and which are refused
 
+The original measurements and examples below describe the 2026-10-12 planner. The dated 2026-11-10
+update after the table states the current Auto, bounds, and beta-validation policy.
+
 `RenderPathLimits` (source) now carries the window a *forced* guest size has to stay inside, and `PlanGuestScreen` (moved to `settings/capabilities.{h,cpp}` so the offer set and the boot answer "can this size be rendered?" with one rule) has two paths:
 
 1. **The title's own sizes.** An exact `base x scale` match — the catalogue is `{960x540, 1280x720}` at scales `{1,2,3}`, so every shipped 16:9 size keeps the title's own layout and behaviour.
@@ -605,6 +608,10 @@ Worked examples (the thresholds are deliberately conservative; each one below is
 | 2560x1600 (16:10) | **refused** | needs guest 1280x800 (height above the measured window) or 853x533 (below it) |
 
 `SupportedResolutions` now also offers a **display's own mode** when the planner can produce it, so a 21:9 primary gets its native 2560x1080 in the list — which is what made the `uw-native` arm work with no diagnostic flag at all. With no display enumeration the catalogue is published unchanged (the existing rule 3 is preserved).
+
+**Resolution setting update (2026-11-10):** The visible choices are Auto and the fixed 16:9 presets. Auto retains its token in `settings.toml` and resolves the current desktop size on every launch, including a supported ultrawide or 32:9 native size; other enumerated display modes do not appear as choices. The product floor is 960x540 at 16:9 and the outer size/aspect ceiling remains 7680x2160 at 32:9, but a mode inside that envelope must also pass the measured guest-path gates: scales 1–3, forced guest height 540–720, guest width at most 1920, and 16-pixel-aligned forced widths. A candidate that fails falls back through the existing Auto recovery path. The 2026-11-10 windowed probes showed clean title and gameplay at 2592x1080 and 3840x1080, and a clean title at 3456x1440. They found a center seam at 3440x1440 (guest width 1720), duplicate artwork at 3840x1600 (guest height 800) and 5120x1440 (guest width 2560), and horizontally squeezed title art at 5120x2160 and 7680x2160 (scale 4). Those shapes remain available through `RBBLITZ_PROBE_RENDER_SIZE` for diagnostic and beta work only. 3840x2160 (16:9 4K) booted to a clean title; the larger probes reached the title without a guest fault, which does not prove long-session stability. A previously saved non-preset resolution changes to Auto at boot. The earlier limits and examples in this section record the 2026-10-12 state and do not define the current production bounds.
+
+**4:3 update (2026-11-10, windowed visual pass complete):** This supersedes the preceding 16:9 floor/aspect bound. Auto now accepts 4:3 native modes that fit the existing guest-height gate: 720x540, 800x600, 960x720, 1440x1080, 1600x1200, 1920x1440 and 2880x2160. The title's 4:3 guest bases (720x540 and 960x720), the existing inverse-aspect write and the signed HUD shift produce exact 4:3 frames without a host overlay. The Resolution row still lists only Auto and fixed 16:9 presets. 1024x768 and 1280x960 require guest heights above 720, so Auto does not select them yet; 1024x768 is available through `RBBLITZ_PROBE_RENDER_SIZE` for a visual gate. Main menu, settings, Music Library, Messages, RhythmVerse and gameplay were captured at 1440x1080 in a fitted window; native fullscreen remains untested (part 3 §12).
 
 ### 6. What the menu background actually is (the owner's question)
 
@@ -1178,9 +1185,9 @@ fourth arm that named only the video mode read `display=2354x993` while asking f
   against the created window's own (`SDL_GetWindowBordersSize` needs the window to exist). No boot has
   been taken at 125/150/300 %, on a non-primary target monitor, or in borderless/fullscreen reached by
   switching from windowed **at runtime** rather than by restarting.
-- A display whose own mode the planner cannot produce (an aspect outside 1.0..3.2 — a 32:9 panel is
-  3.556) still falls back to a 16:9 size. That is unmeasured rather than stretched, and the offer set
-  never names a size the render path cannot make.
+- The 2026-10-14 planner fell back to 16:9 on a 32:9 panel (3.556 exceeded its former 3.2 limit).
+  Since 2026-11-10 the planner admits 16:9..32:9 and Auto targets the current desktop mode when
+  producible. Scale 4 and 32:9 game boots remain unmeasured; beta display passes are still needed.
 - `window_resizable=false` is verified as "the window style carries no `WS_THICKFRAME` and no
   `WS_MAXIMIZEBOX`", not by driving a drag. The separate Controller Settings utility built its own SDL
   window (`controller-settings/main.cpp`) and never reads the cvar.
@@ -1189,3 +1196,20 @@ fourth arm that named only the video mode read `display=2354x993` while asking f
 Evidence: `out/_swap/p2/run.ps1` (the harness: fresh/user-root legs, Win32 window metrics, a capture),
 `fresh/` (`fresh.log`, `window.png`), `manual-720/`, `control-pre/` (`control-pre.log`, `window.png`),
 `control-old/`, and the standalone `window_policy_tests.exe`.
+
+### 12. 4:3 interface capture (2026-11-10)
+
+The 1440×1080 diagnostic boot renders guest 720×540 at 2×. Main menu and settings use their unused
+side margins. The Library, Store, Recommendations and Messages panels instead use the title's own
+`set_local_scale` message at 0.75 on their loaded scene directories. Their text and artwork keep
+their proportions inside the narrower frame; the separate moving background still fills it. The
+shared header's animated label positions and LT/RT arrows are moved inward. The guest layout aspect
+remains 4:3 (`height / width = 0.75`); a temporary inverse-aspect compromise was discarded because
+it squeezed the interface horizontally.
+
+The measured captures are `out/_swap/resolution-probe-2026-11-10/4x3-arrows/song-list.png` and
+`gameplay.png`, `out/_swap/resolution-probe-2026-11-10/4x3-settings/display.png` and `messages.png`,
+and `out/_swap/resolution-probe-2026-11-10/4x3-store/rhythmverse-stable.png`. The Library,
+Messages and RhythmVerse captures show all primary content and header controls in frame. The song capture shows
+the 3D horizontal crop and inward-anchored HUD. These are windowed diagnostic captures; a native
+4:3 fullscreen display remains untested.

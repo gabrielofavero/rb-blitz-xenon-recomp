@@ -16,6 +16,7 @@
 
 #include "fs/payload_overlay.h"
 #include "hooks/menu_filter.h"
+#include "hooks/render_settings.h"
 #include "hooks/dlc.h"
 #include "hooks/shell_music.h"
 #include "hooks/ultimate.h"
@@ -117,26 +118,6 @@ void CollectLocale(const ui::dtb::Node& node, std::map<std::string, std::string>
   for (const auto& child : node.kids) CollectLocale(child, labels);
 }
 
-// How a render size reads in the Resolution row. The token alone for 16:9 - the shape every monitor
-// in the catalogue shares - and the aspect spelled out for the sizes that are not, because that is
-// exactly what the owner has to be able to recognise: a 21:9 mode beside a pile of 16:9 numbers is
-// invisible without the caption, and a "more height than 16:9" mode is the same problem.
-std::string ResolutionChoiceLabel(const DisplayMode& size) {
-  const std::string token = DisplayModeToken(size);
-  if (size.height <= 0 || size.width <= 0) {
-    return token;
-  }
-  // 16:9 within 1%, in integers: real modes are not exact ratios (1176x664 is a 16:9 TV mode while
-  // 1920x1080 is not 16:9 in integers), so the caption marks what is *not* the shape every monitor in
-  // the catalogue shares - which is exactly the entry the owner has to be able to spot.
-  const int64_t lhs = int64_t(size.width) * 9;
-  const int64_t rhs = int64_t(size.height) * 16;
-  const int64_t difference = lhs > rhs ? lhs - rhs : rhs - lhs;
-  if (difference * 100 <= rhs) {
-    return token;
-  }
-  return token + (lhs > rhs ? " (wide)" : " (tall)");
-}
 }
 
 bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
@@ -292,7 +273,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
           configuration.choices[token].emplace_back(choice.token, choice.label);
       }
       if (boot->service()->IsOverridden(descriptor.id))
-        configuration.disabled[token] = "Externally configured";
+        configuration.disabled[token] = "External";
     }
     const auto renderer = boot->service()->EffectiveValue(SettingId::kRenderer).text;
     for (const auto& [key, tokens] : std::map<std::string, std::vector<std::string>>{
@@ -304,12 +285,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
       for (const auto& token : tokens)
         choices.emplace_back(token, schema::LabelForToken(*descriptor, token));
     }
-    // The Resolution row lists what this machine and this render path can actually make, and the
-    // same planner the boot applies decides it - so the row cannot offer a size a boot would refuse.
-    // A display's own mode is in that list when the render path can produce it, which is how a 21:9
-    // primary gets its own 2560x1080 instead of only the 16:9 catalogue (docs/plans/
-    // ultrawide-findings.md §5). The schema's static list is the fallback for a boot whose
-    // capabilities never got compiled.
+    // Auto uses the current desktop on each boot; only the fixed 16:9 presets are listed.
     {
       const auto& supported = boot->capabilities().supported_resolutions;
       if (!supported.empty()) {
@@ -318,9 +294,10 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
         choices.emplace_back("auto", "Auto");
         std::string listed;
         for (const auto& size : supported) {
+          if (!IsResolutionPreset(size)) continue;
           const std::string token = DisplayModeToken(size);
-          choices.emplace_back(token, ResolutionChoiceLabel(size));
-          listed += (listed.empty() ? "" : ", ") + ResolutionChoiceLabel(size);
+          choices.emplace_back(token, token);
+          listed += (listed.empty() ? "" : ", ") + token;
         }
         REXLOG_INFO("settings_menu: Resolution offers {} size(s): {}", choices.size(), listed);
       }
@@ -403,6 +380,8 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
     // routes. Settings commits publish visibility; the guest applies that snapshot
     // at its existing menu-entry boundary.
     configuration.menu_refresh_trial = true;
+    configuration.four_by_three = uint64_t(BootRenderWidth()) * 3 ==
+                                  uint64_t(BootRenderHeight()) * 4;
     configuration.download_content_row = download_content_row;
     // Shortcut settings have a fixed inventory; these boot values control the actual menu rows.
     configuration.refresh_row_on = refresh_row_on;

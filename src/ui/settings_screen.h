@@ -113,6 +113,7 @@ struct MenuConfiguration {
   bool download_content_row = false;
   // Opt-in owner diagnostic for the unverified loaded-list refresh path.
   bool menu_refresh_trial = false;
+  bool four_by_three = false;
   bool trial_mode = false;
   bool controller_layout_enabled = false;
   // The refresh shortcut's visibility. Its control stays reachable under Main Menu / Extra Items.

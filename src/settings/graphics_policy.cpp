@@ -154,7 +154,8 @@ ValidationResult GraphicsReconciler::ValidateForRenderer(SettingId id, const Des
       if (value.kind != ValueKind::kResolution) {
         return ValidationResult{false, std::string(kGraphicsUnsupportedResolution)};
       }
-      if (!IsSupportedResolution(caps, DisplayMode{value.width, value.height})) {
+      if (!IsResolutionPreset({value.width, value.height}) ||
+          !IsSupportedResolution(caps, DisplayMode{value.width, value.height})) {
         return ValidationResult{false, std::string(kGraphicsUnsupportedResolution)};
       }
       return base;
@@ -195,6 +196,12 @@ Reconciliation GraphicsReconciler::Reconcile(SettingId id, const Descriptor& des
 
   switch (id) {
     case SettingId::kResolution: {
+      if (IsAutoResolution(requested) &&
+          IsSupportedResolution(caps, caps.primary_display_size)) {
+        result.effective = MakeResolution(caps.primary_display_size.width,
+                                          caps.primary_display_size.height);
+        return result;
+      }
       if (requested.kind == ValueKind::kResolution &&
           IsSupportedResolution(caps, DisplayMode{requested.width, requested.height})) {
         return result;  // a valid manual choice is never re-optimized
@@ -301,6 +308,7 @@ GraphicsRecommendation RecommendGraphics(const CapabilitySnapshot& caps) {
 
 Value ResolutionPreferenceForBoot(const CapabilitySnapshot& caps, const Value& requested) {
   if (IsAutoResolution(requested)) return requested;
+  if (!IsResolutionPreset({requested.width, requested.height})) return MakeResolution(0, 0);
   // Do not erase a choice merely because display enumeration failed.
   if (caps.primary_display_size.width > 0 &&
       (!IsSupportedResolution(caps, {requested.width, requested.height}) ||

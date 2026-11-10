@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <functional>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -644,6 +645,39 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
             state.gamepad.buttons =
                 uint16_t((uint16_t(state.gamepad.buttons) & ~overlay.clear_buttons) |
                          overlay.set_buttons);
+          }
+          // Offscreen UI acceptance on a desktop whose foreground window is unavailable.
+          // A diagnostic command file contains a serial and one XInput button mask, for example
+          // "12 0x1000" for A. Each new serial produces one short press; a held file cannot
+          // repeat navigation. Unset in ordinary launches, with no file I/O on that path.
+          if (user_index == 0 && !capture_armed && !modal_blocked) {
+            static const std::string probe_pad_file = [] {
+              const char* path = std::getenv("RBBLITZ_PROBE_PAD_FILE");
+              return path == nullptr ? std::string{} : std::string(path);
+            }();
+            if (!probe_pad_file.empty()) {
+              using Clock = std::chrono::steady_clock;
+              static thread_local uint64_t seen_serial = 0;
+              static thread_local uint16_t pulse_buttons = 0;
+              static thread_local Clock::time_point pulse_end{};
+              static thread_local Clock::time_point next_read{};
+              const auto now = Clock::now();
+              if (now >= next_read) {
+                next_read = now + std::chrono::milliseconds(40);
+                std::ifstream command(probe_pad_file);
+                uint64_t serial = 0;
+                unsigned int buttons = 0;
+                if (command >> serial >> std::hex >> buttons && serial != seen_serial) {
+                  seen_serial = serial;
+                  pulse_buttons = static_cast<uint16_t>(buttons);
+                  pulse_end = now + std::chrono::milliseconds(180);
+                  REXLOG_INFO("input: diagnostic pad serial {} buttons {:#06x}", serial,
+                              pulse_buttons);
+                }
+              }
+              if (now < pulse_end)
+                state.gamepad.buttons = uint16_t(state.gamepad.buttons) | pulse_buttons;
+            }
           }
           // Publish the identity of the state actually delivered, after both
           // remapping and native mouse input. Taking max(device packets) can

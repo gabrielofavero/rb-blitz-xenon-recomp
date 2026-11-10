@@ -4,6 +4,12 @@ Plans that are actively being worked. A plan moves here from [`../todo/`](../tod
 and leaves for [`../finished/`](../finished/) when it is delivered — one `git mv`, keeping its
 `YYYY-MM-DD-` prefix.
 
+The [resolution and scale expansion plan](2026-10-19-resolution-scale-expansion-plan.md) moved here
+on 2026-11-10. Auto, fixed 16:9 presets, planner bounds and the 2560×1080 boot are recorded as done;
+the former 4:3 and diagnostic-choice work is superseded. The 3840×1600 Auto path now passes a
+Windows release build and focused tests; its guest visuals and scale-4/32:9 game validation remain
+open for beta testers with matching displays.
+
 The [Linux and macOS release plan](2026-11-09-linux-macos-release-plan.md) started on 2026-11-10.
 Its settings pre-step is implemented and passes the Windows release build and focused host tests.
 Linux/macOS builds, guest menu and renderer observations, and all packaging/play gates remain open;

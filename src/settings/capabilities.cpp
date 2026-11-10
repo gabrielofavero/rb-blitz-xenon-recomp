@@ -34,22 +34,12 @@ bool LargerFirst(const DisplayMode& lhs, const DisplayMode& rhs) {
 
 bool Positive(const DisplayMode& size) { return size.width > 0 && size.height > 0; }
 
-// An aspect in per-mille (1920x1080 -> 1777) so two sizes compare without floating point.
-int64_t AspectPerMille(const DisplayMode& size) {
-  if (!Positive(size)) {
-    return 0;
-  }
-  return int64_t(size.width) * 1000 / size.height;
-}
-
-// Same shape within 1%: real modes are not exact ratios (a 21:9 frame reports 2.370, and 1176x664 is
-// 16:9 in practice while 1920x1080 is not 16:9 in integers).
-bool SameAspect(int64_t lhs, int64_t rhs) {
-  if (lhs <= 0 || rhs <= 0) {
-    return lhs == rhs;
-  }
-  const int64_t difference = lhs > rhs ? lhs - rhs : rhs - lhs;
-  return difference * 100 <= rhs;
+bool WithinOfferBounds(const RenderPathLimits& limits, const DisplayMode& size) {
+  if (!Positive(size) || size.width < limits.offer_floor.width ||
+      size.height < limits.offer_floor.height || size.width > limits.offer_ceiling.width ||
+      size.height > limits.offer_ceiling.height) return false;
+  const int64_t aspect = int64_t(size.width) * 1000 / size.height;
+  return aspect >= limits.min_aspect_x1000 && aspect <= limits.max_aspect_x1000;
 }
 
 }  // namespace
@@ -116,9 +106,8 @@ std::vector<DisplayMode> RenderPathSizes(const RenderPathLimits& limits) {
         continue;
       }
       const DisplayMode scaled{base.width * scale, base.height * scale};
-      // Above the offer ceiling the EDRAM and render targets stop being reasonable and no
-      // display in the plan's matrix asks for it, so it is not offered.
-      if (scaled.width > limits.offer_ceiling.width || scaled.height > limits.offer_ceiling.height) {
+      // The product floor, ceiling and aspect range apply to both presets and Auto.
+      if (!WithinOfferBounds(limits, scaled)) {
         continue;
       }
       sizes.push_back(scaled);
@@ -156,45 +145,10 @@ std::vector<DisplayMode> SupportedResolutions(const RenderPathLimits& limits,
       out.push_back(size);
     }
   }
-  // A display's own mode is offered when the render path can produce it, even though it is not in
-  // the 16:9/4:3 catalogue: that is precisely the ultrawide case (2560x1080 on a 21:9 primary gets
-  // planned as a forced 1280x540 guest frame at 2x). The two questions - "can the render path make
-  // this size?" and "is this size in the catalogue?" - are answered by the same planner.
-  //
-  // Only the *primary display's own aspect family* is added, though. A 21:9 monitor also advertises
-  // 4:3 and PAL modes, and offering them would put sizes in the list whose only effect is the black
-  // bars this project is trying to remove (the presenter letterboxes a frame whose aspect is not the
-  // window's). A mode off that family is not a render size this project offers; 16:9 is the
-  // catalogue's job, so the family check only ever *adds* wide/native shapes.
-  const int64_t ceiling_aspect = AspectPerMille(ceiling);
-  for (const DisplayMode& mode : NormalizeDisplayModes(display_modes)) {
-    if (mode.width > limits.offer_ceiling.width || mode.height > limits.offer_ceiling.height) {
-      continue;
-    }
-    if (!PlanGuestScreen(limits, mode).supported) {
-      continue;
-    }
-    const bool in_catalogue = [&] {
-      for (const DisplayMode& produced : producible) {
-        if (produced.width == mode.width && produced.height == mode.height) {
-          return true;
-        }
-      }
-      return false;
-    }();
-    if (!in_catalogue && !SameAspect(AspectPerMille(mode), ceiling_aspect)) {
-      continue;
-    }
-    bool duplicate = false;
-    for (const DisplayMode& kept : out) {
-      if (kept.width == mode.width && kept.height == mode.height) {
-        duplicate = true;
-        break;
-      }
-    }
-    if (!duplicate) {
-      out.push_back(mode);
-    }
+  // Only the current desktop size is an Auto target. Other enumerated modes do not become
+  // manual choices or compete with the desktop when Auto resolves on the next launch.
+  if (WithinOfferBounds(limits, ceiling) && PlanGuestScreen(limits, ceiling).supported) {
+    out.push_back(ceiling);
   }
   out = NormalizeDisplayModes(std::move(out));
   if (out.empty()) {
@@ -207,7 +161,7 @@ std::vector<DisplayMode> SupportedResolutions(const RenderPathLimits& limits,
 
 GuestScreenPlan PlanGuestScreen(const RenderPathLimits& limits, const DisplayMode& requested) {
   GuestScreenPlan plan;
-  if (requested.width <= 0 || requested.height <= 0) {
+  if (!WithinOfferBounds(limits, requested)) {
     return plan;
   }
   // The title's own sizes first, largest guest size then largest scale: a request those can reach
@@ -245,6 +199,11 @@ GuestScreenPlan PlanGuestScreen(const RenderPathLimits& limits, const DisplayMod
       continue;
     }
     const DisplayMode guest{requested.width / scale, requested.height / scale};
+    // Guest widths that are not 16-pixel aligned can leave a seam through the
+    // title artwork (3440x1440 / 1720 guest); 3456x1440 / 1728 is clean.
+    if (limits.require_width_alignment && guest.width % 16 != 0) {
+      continue;
+    }
     if (guest.width < static_cast<int32_t>(limits.min_guest_width) ||
         guest.width > static_cast<int32_t>(limits.max_guest_width) ||
         guest.height < static_cast<int32_t>(limits.min_guest_height) ||
