@@ -720,11 +720,21 @@ void ApplyHotRows(bool force_restart) {
     for (const auto& [id, value] : plan.deferred_menu) plan.pending_restart.push_back(id);
     plan.deferred_menu.clear();
   }
-  if (!ultimate_runtime::CanRunSongEntry(::rb_blitz::ultimate::Provider(),
-          ultimate_runtime::SongEntryRouteReady(), g_ultimate_refresh_trial,
-          g_enabled, g_forward_only)) {
-    for (const auto& [id, value] : plan.deferred_song) plan.pending_restart.push_back(id);
-    plan.deferred_song.clear();
+  const bool song_entry_ready = ultimate_runtime::CanRunSongEntry(
+      ::rb_blitz::ultimate::Provider(), ultimate_runtime::SongEntryRouteReady(),
+      g_ultimate_refresh_trial, g_enabled, g_forward_only);
+  const bool selection_ready = ultimate_runtime::CanRunSongEntry(
+      ::rb_blitz::ultimate::Provider(), ultimate_runtime::SelectionRouteReady(),
+      g_ultimate_refresh_trial, g_enabled, g_forward_only);
+  for (auto it = plan.deferred_song.begin(); it != plan.deferred_song.end();) {
+    const bool ready = it->first == ::rb_blitz::settings::SettingId::kShowPb
+                           ? selection_ready : song_entry_ready;
+    if (ready) {
+      ++it;
+    } else {
+      plan.pending_restart.push_back(it->first);
+      it = plan.deferred_song.erase(it);
+    }
   }
   if (force_restart) {
     plan.live.clear();
@@ -745,7 +755,7 @@ void ApplyHotRows(bool force_restart) {
       boot->NoteNextSongRows(changed, boot->service()->revision());
     g_song_entry_receipt.Queue(changed, boot->service()->revision(), g_ultimate_refresh_trial);
   }
-  if (!force_restart && boot && boot->service() && ultimate_runtime::CanRunTrial(
+  if (!force_restart && boot && boot->service() && ultimate_runtime::CanRunSongEntry(
           ::rb_blitz::ultimate::Provider(), ultimate_runtime::SelectionRouteReady(),
           g_ultimate_refresh_trial, g_enabled, g_forward_only)) {
     boot->NoteSongSelectionRows(changed, boot->service()->revision());
@@ -851,7 +861,7 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
     if (auto* boot = ::rb_blitz::settings::boot::SettingsBoot::Current())
       boot->AcknowledgeControllerLayout(progress->ticket, progress->scheme);
   }
-  const bool selection_enabled = ::rb_blitz::settings::ultimate_runtime::CanRunTrial(
+  const bool selection_enabled = ::rb_blitz::settings::ultimate_runtime::CanRunSongEntry(
       ::rb_blitz::ultimate::Provider(),
       ::rb_blitz::settings::ultimate_runtime::SelectionRouteReady(),
       g_ultimate_refresh_trial, g_enabled, g_forward_only);

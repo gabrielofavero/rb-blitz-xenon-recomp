@@ -185,8 +185,10 @@ void StrategyTableIsComplete() {
   // promotes another row must also record its evidence, and this expectation moves with it.
   CHECK_EQ(hot, 10);
   CHECK_EQ(menu_return, 2);
-  CHECK_EQ(next_song, 1);
+  CHECK_EQ(next_song, 2);
   CHECK_TRUE(rb_blitz::settings::schema::StrategyOf(SettingId::kShowTimer) ==
+             ApplicationStrategy::kNextSong);
+  CHECK_TRUE(rb_blitz::settings::schema::StrategyOf(SettingId::kShowPb) ==
              ApplicationStrategy::kNextSong);
   for (const SettingId id : {SettingId::kPlayCurrentSong, SettingId::kHideDownloadContent}) {
     const auto* row = rb_blitz::settings::schema::FindRow(id);

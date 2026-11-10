@@ -1400,6 +1400,7 @@ void SettingsBoot::NoteSongSelectionRows(const std::map<SettingId, Value>& chang
                                          uint64_t revision) {
   if (!service_ || !service_->capabilities().provider.active ||
       !service_->capabilities().provider.compatible ||
+      schema::StrategyOf(SettingId::kShowPb) != ApplicationStrategy::kRestart ||
       service_->IsOverridden(SettingId::kShowPb)) return;
   const auto found = changed.find(SettingId::kShowPb);
   if (found == changed.end()) return;

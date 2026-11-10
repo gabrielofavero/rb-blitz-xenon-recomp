@@ -138,7 +138,8 @@ struct Choice {
 //
 //   kHot      the value can be applied to the running process with a **measured** live effect.
 //   kMenuReturn  the guest acknowledges the value on its next menu entry.
-//   kNextSong    the guest acknowledges the value at the next song entry.
+//   kNextSong    the guest acknowledges the value at its next song boundary; Personal Best
+//                uses song selection, while song-entry rows use construction.
 //   kRestart  it is persisted and takes effect in a new process. This is the default, and the
 //             honest answer for a row nothing has been measured for.
 //

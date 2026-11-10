@@ -62,8 +62,8 @@ RESTART_GATES = {
                  "A repeatable same-process startup/menu transition applies both modes."),
     "kRefreshMusicLibrary": ("The menu-return row rebuild lacks full owner acceptance.",
                              "Verify hide/show, selection, input and reverse transitions on menu return."),
-    "kDlcScanThreads": ("The DLC worker captures its scan-thread count at initialization.",
-                        "An idle-worker reconfiguration is owned and tested before the next scan."),
+    "kDlcScanThreads": ("The boot scan captures its thread count, and no settings handoff updates the refresh worker.",
+                        "Synchronize an idle-worker count snapshot before the next scan, with running-scan and rollback tests."),
     "kDlcMenuSongs": ("The menu-music pool and active stream mounts are built at Configure.",
                       "Swap the pool at a safe audio boundary without releasing active mounts."),
     "kPlayCurrentSong": ("The menu-return row rebuild lacks full owner acceptance.",
@@ -72,18 +72,18 @@ RESTART_GATES = {
                      "Atomically refresh store access, header, menu row and disabled-state gates."),
     "kUnlockAll": ("Provider unlock state is seeded at boot and read by song selection.",
                    "Trace and verify the provider consumer after a same-process change and reversal."),
-    "kHideAchievements": ("Achievement dialog behavior is captured at construction.",
-                          "Verify new dialogs and reversal without retaining a stale constructed dialog."),
+    "kHideAchievements": ("The SDK constructs its achievement dialog and callback once at module launch.",
+                          "Own UI-thread dialog/listener reconfiguration and verify both visibility directions on new events."),
     "kResolution": ("Guest frame and backend GPU caches lack safe live reconstruction.",
                     "Prove screen ownership and transactional renderer reconfiguration per transition."),
     "kRenderer": ("Backend selection initializes the graphics worker and caches.",
                   "A separate backend teardown/recreation project proves a safe transition."),
     "kDisplay": ("Preview works, but the full transition/backend acceptance matrix is incomplete.",
                  "Verify all directed modes, rollback, placement, input and relaunch on both backends."),
-    "kAntiAliasing": ("MSAA changes backend resources; FXAA has no verified settings applier.",
-                      "Measure each offered submode and add a transactional applier where safe."),
-    "kFiltering": ("Sampler state is captured in backend caches.",
-                   "Prove cache invalidation and each offered filtering step on both backends."),
+    "kAntiAliasing": ("Every choice also writes native MSAA, which is captured by backend render-target caches; FXAA has no settings-owned GPU applier.",
+                      "Expose an FXAA-only applier with value-specific strategy, receipt and rollback; verify each choice on both backends."),
+    "kFiltering": ("Both backends derive sampler parameters at draws, but settings has no owned apply receipt or rollback.",
+                   "Verify a narrow GPU-thread handoff and every filtering step and reversal on both backends."),
     "kHideDownloadContent": ("The menu-return row rebuild lacks full owner acceptance.",
                              "Verify removal, restoration, navigation and reversal on menu return."),
     "kShowMessages": ("Header refresh has a guest sentinel but lacks owner visual acceptance.",
@@ -92,8 +92,8 @@ RESTART_GATES = {
                              "Verify all header combinations, navigation and reverse transitions."),
     "kShowCurrency": ("Currency visibility is built into the loaded store header.",
                       "Add an owned header refresh and verify label and placement on reversal."),
-    "kHideOfflinePrompts": ("The menu filter captures this policy at Configure.",
-                            "Add a safe prompt-policy refresh and test both prompt routes."),
+    "kHideOfflinePrompts": ("The menu filter patches prompt records at Configure; neither live prompt route has a policy refresh.",
+                            "Add a guest-safe policy query for both routes and verify reversal without disturbing an open modal."),
     "kBackgroundMusicNavigation": ("Music navigation spans shell and menu input state.",
                                    "Refresh bindings and verify both input directions while audio plays."),
     "kMusicPlayer": ("Player visibility and shell availability have no acknowledged refresh.",
@@ -146,7 +146,7 @@ def main():
     parser.add_argument("--provider-audit", type=Path,
                         help="JSON emitted by rb_blitz_settings_provider_audit")
     parser.add_argument("--p7-markdown", action="store_true",
-                        help="print the 39-row restart gate table for the owning plan")
+                        help="print the current restart gate table for the owning plan")
     args = parser.parse_args()
     provider_audit = None
     provider_details = {}
@@ -202,7 +202,7 @@ def main():
         "kGems": ("ulti_game_enter; ulti_funcs/load_gems", "next_song_candidate"),
     }
     rows = []
-    for match in re.finditer(r'\{SettingId::(k\w+),\s*ApplicationStrategy::(kHot|kRestart)', table):
+    for match in re.finditer(r'\{SettingId::(k\w+),\s*ApplicationStrategy::(kHot|kMenuReturn|kNextSong|kRestart)', table):
         ident = match.group(1)
         if ident in ("kLetterbox", "kUnlockOnlineAchievements"):
             continue  # legacy/retired row and one-shot action, not player-facing preferences
@@ -239,19 +239,21 @@ def main():
             sites = [{**site, "kind": "compiled_dtb_variable_reference"}
                      for site in detail["references"]]
         gate = RESTART_GATES.get(ident)
-        if match.group(2) == "kRestart" and gate is None:
+        strategy = {"kHot": "hot", "kMenuReturn": "menu_return",
+                    "kNextSong": "next_song", "kRestart": "restart"}[match.group(2)]
+        if strategy == "restart" and gate is None:
             raise ValueError(f"missing restart gate for {ident}")
         rows.append({
             "id": ident, "token": names.get(ident, "unknown"),
             "visible_contexts": ["main_menu_settings", "in_song_settings"],
             "availability": ("active_compatible_ultimate_only" if binding or ident == "kUnlockAll"
                              else "capability_dependent"),
-            "current_strategy": "hot" if match.group(2) == "kHot" else "restart",
+            "current_strategy": strategy,
             "source": "ultimate_provider" if binding or ident == "kUnlockAll" else "native",
             "persistence": ("ultimate_provider_file" if binding else "settings_file"),
             "consumer": consumer, "proposed_boundary": boundary,
-            "restart_reason": gate[0] if gate else "",
-            "revisit_condition": gate[1] if gate else "",
+            "restart_reason": gate[0] if strategy == "restart" else "",
+            "revisit_condition": gate[1] if strategy == "restart" else "",
             "consumer_sites": sites,
             "original_row_callbacks": detail["callbacks"] if detail else [],
             "original_row_macro": detail["row_macro"] if detail else "",
@@ -265,13 +267,14 @@ def main():
                 "provider_variable": binding["provider_variable"]} if binding else {}),
         })
     assert len(rows) == 48, f"expected 48 preferences, found {len(rows)}"
-    assert sum(row["current_strategy"] == "hot" for row in rows) == 9
+    assert len({row["id"] for row in rows}) == len(rows), "duplicate preference strategy"
     assert len(RESTART_GATES) == 39
-    assert set(RESTART_GATES) == {row["id"] for row in rows if row["current_strategy"] == "restart"}
+    assert {row["id"] for row in rows if row["current_strategy"] == "restart"} <= set(RESTART_GATES)
     assert len(bindings) == 17
     counts = {"immediate": 0, "menu_return": 0, "next_song": 0, "process_restart": 0}
     for row in rows:
-        counts["immediate" if row["current_strategy"] == "hot" else "process_restart"] += 1
+        counts[{"hot": "immediate", "menu_return": "menu_return",
+                "next_song": "next_song", "restart": "process_restart"}[row["current_strategy"]]] += 1
     if args.p7_markdown:
         print("| Setting | Reason restart remains required | Revisit when |")
         print("| --- | --- | --- |")
@@ -282,7 +285,7 @@ def main():
     print(json.dumps({"audit": "static", "schema": "src/settings/schema.cpp",
                       "adapter": "src/settings/ultimate_adapter.cpp",
                       "provider_audit": ("all_42_installed_dtbs" if provider_audit else "not_supplied"),
-                      "baseline_counts": counts, "rows": rows}, indent=2))
+                      "current_counts": counts, "rows": rows}, indent=2))
 
 
 if __name__ == "__main__":

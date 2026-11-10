@@ -254,7 +254,7 @@ void TestBindings() {
     CHECK_FALSE(bindings[i].token.empty());
     CHECK_FALSE(bindings[i].variable.empty());
     CHECK_TRUE(bindings[i].id != SettingId::kUnknown);
-    if (bindings[i].id == SettingId::kShowTimer) {
+    if (bindings[i].id == SettingId::kShowTimer || bindings[i].id == SettingId::kShowPb) {
       CHECK_TRUE(bindings[i].strategy == Strategy::kNextSong);
       CHECK_FALSE(bindings[i].evidence.empty());
     } else {

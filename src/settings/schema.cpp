@@ -455,7 +455,7 @@ constexpr StrategyEntry kStrategies[] = {
     // OnPostLoadXexImage), so a new process is what a change needs.
     {SettingId::kDlcMenuSongs, ApplicationStrategy::kRestart, ""},
     {SettingId::kPlayCurrentSong, ApplicationStrategy::kMenuReturn,
-     "D3D12 hide and restore on first menu return: docs/plans/in-progress/2026-10-24-settings-hot-apply-plan.md C2 (2026-11-09)"},
+     "D3D12 hide and restore on first menu return: docs/plans/finished/2026-10-24-settings-hot-apply-plan.md C2 (2026-11-09)"},
     // RhythmVerse store (plan P6; the master made restart-scoped by the owner pass, plan §9/P9-2,
     // 2026-10-22). The **master** owns what is drawn, not only what a worker reads: the main-menu
     // row is baked into the record the boot generates (plan §5/P1) and the store's heading is a
@@ -510,7 +510,7 @@ constexpr StrategyEntry kStrategies[] = {
     // Interface
     {SettingId::kLetterbox, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideDownloadContent, ApplicationStrategy::kMenuReturn,
-     "D3D12 show and hide on first menu return: docs/plans/in-progress/2026-10-24-settings-hot-apply-plan.md C2 (2026-11-09)"},
+     "D3D12 show and hide on first menu return: docs/plans/finished/2026-10-24-settings-hot-apply-plan.md C2 (2026-11-09)"},
     {SettingId::kShowMessages, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowRecommendations, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowCurrency, ApplicationStrategy::kRestart, ""},
@@ -524,8 +524,11 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kProgressBar, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowTimer, ApplicationStrategy::kNextSong,
      "C3 2026-11-09: Hidden at next song and Visible after in-song reversal; guest song-entry "
-     "receipts and restart readback in docs/plans/in-progress/2026-10-24-settings-hot-apply-plan.md"},
-    {SettingId::kShowPb, ApplicationStrategy::kRestart, ""},
+     "receipts and restart readback in docs/plans/finished/2026-10-24-settings-hot-apply-plan.md"},
+    {SettingId::kShowPb, ApplicationStrategy::kNextSong,
+     "C3 2026-11-10: with a recorded 9,770-point score, next-selection Hidden removed the "
+     "in-song Your Best marker and Visible restored it; guest receipts in "
+     "docs/plans/finished/2026-10-24-settings-hot-apply-plan.md"},
     {SettingId::kShowSteak, ApplicationStrategy::kRestart, ""},
     {SettingId::kInputViewer, ApplicationStrategy::kRestart, ""},
     // The second hot row, and the same shape as `kVsync`: the caption overlay re-reads its cvar in

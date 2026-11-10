@@ -295,8 +295,8 @@ RowKind KindOfMacro(std::string_view macro) {
 // The bindings
 // ------------------------------------------------------------------------------------------------
 // P5b's frozen row identity on the left (the token the merged screen writes into a request path),
-// the provider's own vocabulary on the right. The `why not hot` column is the point of §5.5: a row
-// is `restart` until a live effect has been *observed*, and none has.
+// the provider's own vocabulary on the right. A row stays `restart` until its effect has been
+// observed at a narrower boundary.
 
 const std::vector<RowBinding>& AllBindings() {
   static const std::vector<RowBinding> bindings{
@@ -332,8 +332,12 @@ const std::vector<RowBinding>& AllBindings() {
       {SettingId::kShowTimer, "interface.show_timer", "show_timer", RowKind::kBool,
        Strategy::kNextSong,
        "C3 2026-11-09: Hidden at next song and Visible after in-song reversal; guest song-entry "
-       "receipts and restart readback in docs/plans/in-progress/2026-10-24-settings-hot-apply-plan.md"},
-      {SettingId::kShowPb, "interface.show_pb", "show_pb", RowKind::kBool, Strategy::kRestart, ""},
+       "receipts and restart readback in docs/plans/finished/2026-10-24-settings-hot-apply-plan.md"},
+      {SettingId::kShowPb, "interface.show_pb", "show_pb", RowKind::kBool,
+       Strategy::kNextSong,
+       "C3 2026-11-10: with a recorded 9,770-point score, next-selection Hidden removed the "
+       "in-song Your Best marker and Visible restored it; guest receipts in "
+       "docs/plans/finished/2026-10-24-settings-hot-apply-plan.md"},
       {SettingId::kShowSteak, "interface.show_steak", "show_steak", RowKind::kBool,
        Strategy::kRestart, ""},
       {SettingId::kInputViewer, "interface.input_viewer", "input_viewer", RowKind::kBool,

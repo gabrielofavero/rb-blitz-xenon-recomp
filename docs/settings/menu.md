@@ -74,7 +74,7 @@ reads `DOWNLOAD CONTENT`. These two rows are classified menu-return, with guest 
 no restart prompt. Refresh Songs also showed and hid at menu return, but its shared hidden-row
 list remains restart-scoped pending the rest of Main Menu acceptance. All eight header visibility
 masks were captured across Store Access on/off boots; keyboard/controller navigation, Search entry
-and unread badge remain unverified. The [C2 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09)
+and unread badge remain unverified. The [C2 record](../plans/finished/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09)
 names the screenshots and remaining gates.
 
 On 2026-11-07 [source], the song-selection record now composes runtime header navigation

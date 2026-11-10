@@ -1116,16 +1116,19 @@ payload inventory), `interface.letterbox`←`letterbox`, `interface.hide_hud`←
 `interface.show_timer`←`show_timer`, `interface.show_pb`←`show_pb`, `interface.show_steak`←`show_steak`,
 `interface.input_viewer`←`input_viewer` (all boolean).
 
-As of C3 on 2026-11-09, Timer is `next_song`. A compatible Ultimate run with the trial flag off
+As of C3 on 2026-11-10, Timer and Personal Best are `next_song`. A compatible Ultimate run with the trial flag off
 acknowledged `show_timer` on song entry, hid and restored the elapsed-time HUD, retained the value
-after a later provider save, and read it back after process restart. The other 16 Ultimate rows
-remain `restart`; see the [C3 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c3-implementation-and-runtime-validation--2026-11-09).
+after a later provider save, and read it back after process restart. Personal Best was hidden
+and restored after a recorded score, with selection receipts and matching in-song **Your Best**
+marker states. The other 15 Ultimate rows remain `restart`; see the
+[C3 final strategy pass](../plans/finished/2026-10-24-settings-hot-apply-plan.md#c3-final-strategy-pass--2026-11-10).
 
 `TestsBindings` fails if a row claims a non-restart strategy with an empty evidence string, so
 "make this row live" is a measurement, not an edit. The provider's file write alone does not change
 the running game. Timer's guest song-entry assignment reaches its consumer in the same process;
 the other provider rows still need a proven boundary. `Hide HUD`'s P1 live effect was the *stub*
-store's, not the provider's.
+store's, not the provider's. Personal Best is acknowledged at song selection, while Timer is
+acknowledged at song entry.
 
 Where the choices come from (plan §3.4, "the provider's inventory is authoritative"):
 
@@ -1367,22 +1370,22 @@ items are left to the coordinator / a later UI pass, named in §6 rather than im
 ### 1. What this package is, and what it is not
 
 **Current application contract (2026-11-09):** the historical P9 description below predates
-the [active hot-apply plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md).
+the [finished hot-apply plan](../plans/finished/2026-10-24-settings-hot-apply-plan.md).
 `ApplicationLedger` now tracks saved, running and pending values with now, menu-return,
 next-song and process-restart boundaries. The bridge applies only durably saved rows, including
 the native portion of a partial provider save; guest row/selection receipts and controller GPU
 tickets acknowledge deferred consumers. Display preview uses a recovery marker and authored
 Keep/Revert page. Window Mode is immediate through that measured route. Play Current Song and
 Download Content now use `menu_return`: the loaded splash consumes their saved values and sends a
-guest receipt on the first returned frame. Other Ultimate and loaded-menu rows remain strategy-gated
-until their runtime acceptance passes. The [C2 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09)
+guest receipt on the first returned frame. Ultimate rows beyond Timer and Personal Best and other loaded-menu rows remain strategy-gated
+until their runtime acceptance passes. The [C2 record](../plans/finished/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09)
 contains the game screenshots and receipts.
 The C3 trial also prepends guarded assignments to the installed scoring, track and plot records
 for five provider choices; `src/settings/ultimate_runtime.h` verifies each variable is present
 before authoring the replacement, and `src/hooks/settings_bridge_hooks.cpp` logs a guest receipt
 after the assignment runs. These records' next-song execution and visible effects are unverified;
-the [C3 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c3-implementation-and-host-validation--2026-11-09)
-keeps their strategies at restart pending the owner's checks.
+the [C3 final strategy pass](../plans/finished/2026-10-24-settings-hot-apply-plan.md#c3-final-strategy-pass--2026-11-10)
+keeps their strategies at restart because the needed construction receipt was not observed.
 
 §5.5 replaced "v1 is restart-only" with a per-row decision: a row is `hot` when its value can be applied to
 the **running** process **with a measured live effect**, `restart` otherwise. §8 then defines what happens
@@ -1391,8 +1394,8 @@ for the rest: save first, spawn exactly one child that waits for this process to
 | Piece | File | What it owns |
 | --- | --- | --- |
 | Strategy in the frozen model | `src/settings/model.h` | `Descriptor::strategy` + `strategy_evidence`, replacing the v1 `restart_scoped = true` constant |
-| The strategy table | `src/settings/schema.cpp` | One entry per `SettingId`, with evidence for immediate and menu-return rows |
-| The application seam | `src/settings/hot_apply.{h,cpp}` | Split a commit into now, menu return and restart; never claim an apply before its receipt |
+| The strategy table | `src/settings/schema.cpp` | One entry per `SettingId`, with evidence for each non-restart row |
+| The application seam | `src/settings/hot_apply.{h,cpp}` | Split a commit into now, menu return, next song and restart; never claim an apply before its receipt |
 | The runtime applier | `src/hooks/hot_apply_runtime.{h,cpp}` | The one place that knows **how** a hot row reaches the game |
 | The channel's live half | `src/hooks/settings_bridge_hooks.cpp` | After a durable commit: plan, apply, log, keep what did not take effect in the restart set |
 | The restart coordinator | `src/platform/game_restart.{h,cpp}` | Handoff token, argument rebuild, exactly-once request, spawn, wait, bootstrap |

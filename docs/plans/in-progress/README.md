@@ -4,21 +4,6 @@ Plans that are actively being worked. A plan moves here from [`../todo/`](../tod
 and leaves for [`../finished/`](../finished/) when it is delivered — one `git mv`, keeping its
 `YYYY-MM-DD-` prefix.
 
-The [settings hot-apply plan](2026-10-24-settings-hot-apply-plan.md) is active as of
-2026-11-09. Running-value acknowledgement and partial-save filtering are implemented;
-all six display-mode transitions and timeout rollback were observed on D3D12 and Vulkan.
-Window Mode is classified immediate through its measured preview/Keep route as of 2026-11-07;
-Resolution still requires a guest-frame and SDK-worker reconstruction boundary. A disposable D3D12 run hid and restored the
-LEADERBOARDS row on menu return, and C3's production Ultimate route hid and restored Timer across
-song entries. A guarded Personal Best selection route and a fix for composing header navigation
-with controller icon fonts were added on 2026-11-07; their visible behavior and the remaining
-Ultimate/menu routes still require runtime evidence. Its §0 table records each package's state.
-On 2026-11-09, C3 added a guarded scoring/track/plot construction trial and passed the
-Release build plus focused host checks. The owner authorized agent-driven game/UI checks.
-Timer alone is promoted to next-song after matching guest receipts, both visible directions,
-a later provider save and restart readback. The other Ultimate rows remain restart-scoped;
-C3's remaining validation gates are recorded in the active plan.
-
 The [Linux and macOS release plan](2026-11-09-linux-macos-release-plan.md) started on 2026-11-10.
 Its settings pre-step is implemented and passes the Windows release build and focused host tests.
 Linux/macOS builds, guest menu and renderer observations, and all packaging/play gates remain open;

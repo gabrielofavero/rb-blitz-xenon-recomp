@@ -1,8 +1,8 @@
 # Expand settings hot apply
 
-Date: 2026-10-24. Status: **in progress**. The 2026-11-06–07 work below adds acknowledged
+Date: 2026-10-24. Status: **finished 2026-11-10**. The 2026-11-06–07 work below adds acknowledged
 application state, observed D3D12 and Vulkan display transitions, and guarded Ultimate and menu routes.
-Window Mode is the tenth immediate strategy, Timer is a next-song strategy, and Resolution
+Window Mode is the tenth immediate strategy, Timer and Personal Best are next-song strategies, and Resolution
 remains restart-scoped.
 
 ## 0. Progress record (2026-11-06–07)
@@ -14,11 +14,11 @@ remains restart-scoped.
 | P2 | Window Mode accepted on the tested desktop; strategy promoted | The authored Window Mode row previews through SDK `SetDisplayMode`, a recovery marker, and a 15-second Keep/Revert page. Disposable runs under `out/_swap/hot-settings/runtime-acceptance/` observed all six directed changes, Revert, timeout and saved Full Screen relaunch on both backends. C1 repeated both cycles, verified windowed placement and focus/input, and captured a visible Vulkan Full Screen relaunch under `out/_swap/hot-settings/c1-2026-11-07/`. SDK patch 0054 fixed Vulkan input after minimize/restore. Other DPI/monitor configurations remain unverified; Window Mode is the tenth immediate strategy. |
 | P3 | Negative feasibility gate for this implementation | `sub_823F3698` allocates the guest frame; `SetBootRenderFrame` is consumed during construction. Both SDK backends capture draw scale when creating render-target/texture/pipeline caches. Replacing those caches at a swap boundary would discard live EDRAM ownership and scaled resolves that ordinary cache clearing deliberately retains. No general migration or menu reset operation exists. The guest aspect patch is one-shot, and no ownership-safe live teardown of the screen object at `0x8298ACA8` was established. None of the scale/base/aspect transitions pass P3's safety preflight. Keep Resolution restart-scoped until retained GPU state can be migrated or proven obsolete, and a guest-screen reconstruction seam exists for base/aspect changes. |
 | P4 | No supported transition after P3 gate | A transactional scale operation needs a GPU-worker boundary, migration or proven invalidation of EDRAM and scaled resolves on both backends, shader/pipeline regeneration, failure rollback, and matching presentation/window updates. Base/aspect changes additionally need guest-frame reconstruction. No safe live render reconfiguration is implemented. |
-| P5 | Timer promoted; other provider routes guarded | The bridge serves only durably committed values for active compatible Ultimate. Timer is assigned at song entry in production; C3 matched its guest acknowledgments to hidden and visible HUD states from both settings contexts, a later provider save, and restart readback. With `--settings_ultimate_refresh_trial=true`, the remaining six player-facing HUD/visual rows receive guarded assignments at the start of `ulti_game_enter`; a separate guarded Personal Best assignment runs at song-selection entry. C3 also added guarded assignments at the installed scoring, track and plot records, but their next-song construction boundary was not observed. Other provider rows retain restart strategy pending visible effect and reversal checks. |
+| P5 | Timer and Personal Best promoted; other provider routes guarded | The bridge serves only durably committed values for active compatible Ultimate. Timer is assigned at song entry in production; C3 matched its guest acknowledgments to hidden and visible HUD states from both settings contexts, a later provider save, and restart readback. Personal Best is assigned at song-selection entry in production; a scored same-process run matched hide/show receipts to the in-song Your Best marker. With `--settings_ultimate_refresh_trial=true`, the other song-entry HUD/visual rows receive guarded assignments at the start of `ulti_game_enter`. C3 also added guarded assignments at the installed scoring, track and plot records, but their next-song construction boundary was not observed. Other provider rows retain restart strategy pending visible effect and reversal checks. |
 | P6 | Loaded menu/header route enabled; two shortcuts promoted | Every boot publishes durable visibility changes and installs loaded splash and header refresh records. On 2026-11-09 a rebuilt disposable D3D12 run showed and hid Download Content and hid and restored Play Current Song on the first returned splash frames; guest receipts matched. All eight header masks were captured across Store Access on/off boots. Refresh Songs also appeared and disappeared at menu return. Download Content and Play Current Song now have menu-return strategies. Main Menu selection recovery, keyboard/controller header navigation, Search entry and badge remain open; the other menu/header rows stay restart-scoped. RhythmVerse master stays boot-seeded. |
-| P7 | Static candidate audit complete; no promotions | DLC Menu Songs constructs its pool and stream mounts at Configure; Scan Threads is captured by the DLC worker; Unlock All is boot-seeded; Hide Achievements is captured by dialog construction. Filtering samplers and native MSAA use backend caches, while FXAA has a live SDK method but no verified settings applier. Exact read sites are recorded below; all remain restart-scoped pending an owned live boundary. |
+| P7 | Static inventory and C4 bounded decisions complete; no further promotions | DLC Menu Songs constructs its pool and stream mounts at Configure; Scan Threads lacks a synchronized worker handoff; Unlock All is boot-seeded; Hide Achievements is captured by dialog construction. Both graphics backends derive Filtering samplers at draws, but settings lacks an acknowledged handoff; native MSAA uses retained render-target caches, and FXAA lacks a settings-facing applier. C4 records exact failed gates and revisit conditions. The updated inventory exporter accounts for all 48 rows and reports the current 34 restart rows. |
 
-**Current strategy count:** 10 immediate, 2 menu-return, 1 next-song, 35 restart. P0's
+**Current strategy count:** 10 immediate, 2 menu-return, 2 next-song, 34 restart. P0's
 9/0/0/39 baseline and later dated records below describe the state before Window Mode promotion.
 
 The D3D12 and Vulkan display runs above used disposable profiles. C1 placement/input passed
@@ -221,7 +221,7 @@ the last known applied value and restores 16:9 correctly. Invalidate HUD object 
 replacement and compute anchors from original positions so repeated changes do not accumulate shifts.
 Reconcile Auto against the active display without overwriting the saved Auto intent.
 
-Coordinate with the [shader-cache plan](../finished/2026-10-10-shader-cache-plan.md): scale/AA/path
+Coordinate with the [shader-cache plan](2026-10-10-shader-cache-plan.md): scale/AA/path
 changes can change pipeline keys. Cancel/drain old preparation generations, prepare newly required
 variants through the graphics owner, and reject stale completion. Do not invalidate unrelated cache
 data or collide with the graphics-preparation work already in progress.
@@ -294,12 +294,13 @@ currently require rows such as the RhythmVerse master to stay restart-scoped. Up
 contracts, architecture, graphics, menu, status and affected plan records. Leave a named reason and
 revisit condition for each remaining restart setting.
 
-**P7 static restart gates (2026-11-06 snapshot).** The table below was generated by
-`python scripts/settings/export_hot_apply_inventory.py --p7-markdown` from the schema and the
-gate map in that exporter. It names the 39 restart-scoped player preferences at that date;
-Display was promoted on 2026-11-07 and the current count is 38. The table preserves its
-historical gate. These are source-level reasons and required revisit evidence; none alone
-proves a live transition. The full per-row consumer references and boundaries are in
+**P7 restart gates (2026-11-06 inventory; five C4 reasons updated 2026-11-10).** The table below
+started from `python scripts/settings/export_hot_apply_inventory.py --p7-markdown` and the gate
+map in that exporter. It names the 39 restart-scoped player preferences at the original date.
+Display, Play Current Song, Download Content, Timer and Personal Best have since been promoted;
+the current 34-row subset is emitted by the updated exporter. The table preserves superseded
+promoted-row entries, while C4 refreshed the five bounded candidate gates. These are source-level reasons and required
+revisit evidence; none alone proves a live transition. The full per-row consumer references and boundaries are in
 `out/_swap/hot-settings/p0/inventory.json`.
 
 | Setting | Reason restart remains required | Revisit when |
@@ -307,22 +308,22 @@ proves a live transition. The full per-row consumer references and boundaries ar
 | `target` | Launch target selects a different guest content image. | A separate supported in-process content switch replaces the process boundary. |
 | `startup` | Startup behavior is consumed during boot. | A repeatable same-process startup/menu transition applies both modes. |
 | `refresh_music_library` | The menu-return row rebuild lacks full owner acceptance. | Verify hide/show, selection, input and reverse transitions on menu return. |
-| `dlc_scan_threads` | The DLC worker captures its scan-thread count at initialization. | An idle-worker reconfiguration is owned and tested before the next scan. |
+| `dlc_scan_threads` | The boot scan captures its thread count, and no settings handoff updates the refresh worker. | Synchronize an idle-worker count snapshot before the next scan, with running-scan and rollback tests. |
 | `dlc_menu_songs` | The menu-music pool and active stream mounts are built at Configure. | Swap the pool at a safe audio boundary without releasing active mounts. |
 | `play_current_song` | The menu-return row rebuild lacks full owner acceptance. | Verify appearance, selection and reversal after returning to the menu. |
 | `rhythmverse` | The store master and menu route are boot-seeded separately. | Atomically refresh store access, header, menu row and disabled-state gates. |
 | `unlock_all` | Provider unlock state is seeded at boot and read by song selection. | Trace and verify the provider consumer after a same-process change and reversal. |
-| `hide_achievements` | Achievement dialog behavior is captured at construction. | Verify new dialogs and reversal without retaining a stale constructed dialog. |
+| `hide_achievements` | The SDK constructs its achievement dialog and callback once at module launch. | Own UI-thread dialog/listener reconfiguration and verify both visibility directions on new events. |
 | `resolution` | Guest frame and backend GPU caches lack safe live reconstruction. | Prove screen ownership and transactional renderer reconfiguration per transition. |
 | `renderer` | Backend selection initializes the graphics worker and caches. | A separate backend teardown/recreation project proves a safe transition. |
 | `display` | Preview works, but the full transition/backend acceptance matrix is incomplete. | Verify all directed modes, rollback, placement, input and relaunch on both backends. |
-| `anti_aliasing` | MSAA changes backend resources; FXAA has no verified settings applier. | Measure each offered submode and add a transactional applier where safe. |
-| `filtering` | Sampler state is captured in backend caches. | Prove cache invalidation and each offered filtering step on both backends. |
+| `anti_aliasing` | Every choice also writes native MSAA, which is captured by backend render-target caches; FXAA has no settings-owned GPU applier. | Expose an FXAA-only applier with value-specific strategy, receipt and rollback; verify each choice on both backends. |
+| `filtering` | Both backends derive sampler parameters at draws, but settings has no owned apply receipt or rollback. | Verify a narrow GPU-thread handoff and every filtering step and reversal on both backends. |
 | `hide_download_content` | The menu-return row rebuild lacks full owner acceptance. | Verify removal, restoration, navigation and reversal on menu return. |
 | `show_messages` | Header refresh has a guest sentinel but lacks owner visual acceptance. | Verify all header combinations, badge, positions and reverse transitions. |
 | `show_recommendations` | Header refresh has a guest sentinel but lacks owner visual acceptance. | Verify all header combinations, navigation and reverse transitions. |
 | `show_currency` | Currency visibility is built into the loaded store header. | Add an owned header refresh and verify label and placement on reversal. |
-| `hide_offline_prompts` | The menu filter captures this policy at Configure. | Add a safe prompt-policy refresh and test both prompt routes. |
+| `hide_offline_prompts` | The menu filter patches prompt records at Configure; neither live prompt route has a policy refresh. | Add a guest-safe policy query for both routes and verify reversal without disturbing an open modal. |
 | `background_music_navigation` | Music navigation spans shell and menu input state. | Refresh bindings and verify both input directions while audio plays. |
 | `music_player` | Player visibility and shell availability have no acknowledged refresh. | Verify show/hide and reversal with an active stream at menu return. |
 | `hide_main_menu` | The menu-return row rebuild lacks full owner acceptance. | Verify every eligible row, selected-row removal and restoration. |
@@ -928,6 +929,59 @@ proof exists. Keep Depth of Field restart-scoped until its effect consumer is id
   Force Plot, Force Skybox and Gems choices, including Default/Off restoration. C3's visual exit
   gate remains open pending those results; C4 and C5 remain unstarted.
 
+#### C3 final strategy pass — 2026-11-10
+
+- Personal Best now uses the production next-selection route without the Ultimate trial flag.
+  In `out/_swap/hot-settings/c3-pb-prod-2026-11-10/`, a same-process One Week run recorded
+  9,770 points (`shots/scored-song-select.png`). Main-menu Help & Options set Hidden; `game.log`
+  lines 454 and 465–466 show the `next_song` request, selection consumer and applied receipt.
+  The next song's `shots/prod-pb-hidden-playing.png` has no **Your Best** marker. In-song Help &
+  Options restored Visible; lines 489 and 499–500 show the reverse selection receipt, and
+  `shots/prod-pb-visible-restored.png` shows **Your Best** again. The song-list PERSONAL BEST
+  label remains in both states because it is unconditional. The provider file retained
+  `(show_pb TRUE)` after a later save. A separate scored trial in
+  `c3-pb-2026-11-10/` reproduced the hide/show cycle with 5,600 points. Selection receipt
+  queuing and acknowledgment now run when the compatible selection route is ready in production.
+  The count becomes **10 immediate, 2 menu-return, 2 next-song, 34 restart**; the strategy is
+  named next-song in the ledger but applies on the **next song selection**.
+- The remaining HUD rows failed a required promotion gate. `c3-2026-11-10/` staged All HUD
+  Hidden and restored it after a song, but that authored action changed Hide HUD, Gold Star
+  Progress, Song Progress Bar, Timer, Personal Best and Note Streak together; it cannot prove
+  Hide HUD alone. `c3-pb-2026-11-10/shots/progressbar-hidden-playing.png` still shows the top
+  arc after a `progressbar=false` song-entry receipt, so the consumer is not isolated. In
+  `c3-hud-2026-11-10/`, `show_steak=false` received a song-entry receipt yet the strike-line
+  counter remained visible in `shots/streak-off-playing.png`; Input Viewer On/Off received
+  song-entry receipts but no identifiable viewer was found. In `c3-hud-final-2026-11-10/`,
+  Gold Star Progress Hidden saved while paused and a scored continuation reached 1,150 points
+  (`shots/gold-off-score.png`), but there was no live assignment receipt or attributable visual
+  change. These rows remain restart-scoped. Timer retains its 2026-11-09 promotion.
+- Construction and visual choices remain restart-scoped. In `c3-pb-2026-11-10/`, Camera Angle
+  Default, High, Low and Default received song-entry receipts; Low changed the highway framing,
+  but High could not be distinguished reliably from Default. `c3-clean-2026-11-10/` showed
+  distinct Freq, Amp 2003, Ulti and X gem shapes after song-entry receipts; Amp 2016 and Monkey
+  were captured without notes, and Bolt failed to yield a next-song receipt. A later Bolt edit
+  in `c3-hud-2026-11-10/` was saved, but that run closed before song restart. Neither row has
+  complete choice-and-restoration proof. The installed scoring, track and plot construction
+  records still produced no next-song assignment receipts after Precision Mode, Track Wiggles
+  and Disable Plots were staged on 2026-11-09; Force Plot and Skybox use the same record. Their
+  required boundary is unproven, so an option matrix cannot justify promotion. Game Speed and
+  Depth of Field retain their existing restart gates.
+- The strategy decision pass is closed with only Timer and Personal Best promoted. The original
+  exhaustive visual matrix, game-level inactive/foreign-provider run, and a separate restart
+  readback for Personal Best were not completed; no claim is made for those gates. The host
+  installed-provider tests cover inactive/foreign refusal and provider save/readback. Remaining
+  rows stay at restart unless a later investigation establishes their missing boundary and
+  visual reversals. The Release build passed; focused `settings_screen`, `ultimate_adapter`,
+  `ultimate_adapter_payload`, `settings_hot_apply` and `settings_bridge_service` CTests passed
+  5/5, and the installed provider audit parsed 42 DTBs and checked 18 known variables. C4 and
+  C5 remain unstarted.
+
+**C3 close-out decision (2026-11-10):** the owner asked to close the plan with unproven
+conversions recorded and kept at restart. The remaining C3 visual matrix, game-level
+inactive/foreign-provider check and separate Personal Best restart readback are explicit
+unverified limits, not implementation claims. All required C3 strategy and host gates are
+settled; no other Ultimate row is advertised as live.
+
 ### C4 — Make bounded P7 decisions, then stop
 
 Try Hide Achievements at the next dialog, Offline Mode Prompts at the next prompt, and Scan Threads
@@ -942,6 +996,28 @@ DLC Background Music and Unlock All until a separate player need warrants their 
 **Exit:** every remaining restart row has an explicit reason and revisit condition; no candidate
 is advertised as live merely because its saved value changed.
 
+#### C4 bounded decisions — 2026-11-10
+
+The current inventory exporter reports 34 restart rows. Its `--p7-markdown` output is the
+current subset of the gate table in §5 P7; every row has a restart reason and revisit
+condition. Five C4 candidates received the following narrow-owner review. No live handler or
+rollback was added, and none is promoted from a saved-value change alone.
+
+| Candidate | Consumer and failed live gate | Revisit condition |
+| --- | --- | --- |
+| Hide Achievements | `src/rb_blitz_app.h` constructs or omits the SDK toast dialog; `rexglue-sdk/src/ui/rex_app.cpp` creates it once at module launch and registers its callback only when present. A settings edit cannot create/remove that owned dialog and listener safely. | Implement a UI-thread dialog/listener handoff, then test new achievement events and reversal. |
+| Skip Offline Prompts | `src/hooks/menu_filter.cpp` patches `server_connect.dtb` at Configure and captures policy at boot. The two authored transitions in `src/ui/menu_options.cpp` have no live policy query. | Add a guest-safe predicate in both prompt routes and test Off/On without dismissing an unrelated open modal. |
+| Scan Threads | `src/hooks/dlc.cpp` captures the boot scan count and refresh worker count; settings has no synchronized idle-worker publication. A running scan cannot be treated as a new-count consumer. | Snapshot a new count under worker ownership before the next scan, with running-scan semantics and rollback tests. |
+| Filtering | D3D12 and Vulkan derive sampler parameters during draws, so a narrow live path may be possible. There is no settings-owned GPU handoff, completion receipt, rollback or both-backend choice matrix. | Verify a GPU-thread handoff and every offered filtering step plus reversal on both backends. |
+| Anti-Aliasing / FXAA | Every AA token writes native 2x MSAA, captured by backend render-target caches. FXAA has a GPU-thread setter and prepared pipelines, but the settings-facing graphics plugin interface does not expose that setter; the post-effect cvar is boot-only. | Add a value-specific FXAA-only route with exposed applier, frame receipt and rollback; verify None/FXAA/FXAA Extreme on both backends. Native MSAA stays restart-scoped. |
+
+Static negative gates preclude a meaningful same-process UI reversal in the current build;
+the C4 prompt/scan experiments would only demonstrate persistence, not a live consumer.
+Host tests for the affected boot/policy paths are named in C5. This closes C4 with all five
+rows restart-scoped and explicit revisit conditions. The RhythmVerse master, DLC Background
+Music, Unlock All, live Resolution, renderer/backend and launch target remain the separate
+deferred work named above.
+
 ### C5 — Reconcile and close the plan
 
 Recount immediate, menu-return, next-song/selection and restart rows from the schema and provider
@@ -954,3 +1030,37 @@ action and the removed letterbox row as compatibility only.
 **Exit:** move this plan to `finished/` only when C1–C4 have their required implementation and
 automated gates completed, with owner UI observations or explicit unverified limits recorded.
 Otherwise leave it in `in-progress/` with the remaining owner and next action named.
+
+#### C5 final reconciliation — 2026-11-10
+
+- `scripts/settings/export_hot_apply_inventory.py` now parses all four current strategy kinds.
+  It emits 48 unique player preferences and **10 immediate, 2 menu-return, 2 next-song,
+  34 process-restart**. `--p7-markdown` emits 34 current restart gates, each with a reason and
+  revisit condition; the 2026-11-06 table in §5 remains the historical 39-row snapshot.
+  The schema, Ultimate binding metadata, ledger and UI caption agree that Timer completes at
+  song entry and Personal Best completes at song selection. Renderer, Resolution, launch target
+  and Startup stay process/boot settings. The online achievement grant is an action and the
+  removed letterbox row is compatibility only; neither is counted as a player preference.
+- The Release build passed with `cmake --build --preset win-amd64-release --parallel 4`.
+  Nineteen relevant CTests passed, covering settings, menu/payload, installed Ultimate,
+  achievements, DLC/refresh, graphics policy, window/display and restart paths. The installed
+  provider audit parsed 42 DTBs and checked 18 known variables. The inventory exporter and
+  `--p7-markdown` both completed; Python compilation of the exporter passed.
+- A wider serial CTest run passed 101/104. Two shader-resolver installation tests lacked
+  `scripts/xex` on `PYTHONPATH`; both passed on rerun with that path. The unrelated
+  `path_policy` test still fails at `tests/path_policy_tests.cpp:88` for a nonexistent nested
+  descendant path; it also failed on a standalone rerun. No hot-apply test failed. This
+  filesystem-policy failure is outside the hot-apply changes and is recorded, not counted as a
+  hot-apply acceptance.
+- The owner authorized autonomous C3 game/UI testing and directed that unproven conversions
+  remain restart-scoped with their limitations documented. C1's tested desktop and C2's
+  measured menu rows passed earlier; their other monitor/DPI and navigation cases, C3's
+  exhaustive choice matrix, game-level inactive/foreign provider run, and separate Personal
+  Best restart readback remain explicit unverified UI limits. C4 has no owned live route to
+  exercise; its five decisions remain restart with the conditions above. No required C1–C4
+  implementation or plan-specific automated gate remains. This plan closes with those limits;
+  follow-up conversions require their own measured owner and boundary.
+- After moving the plan to `finished/`, the documentation checker reported 644 files,
+  0 errors and 187 pre-existing warnings. `git diff --check` passed for working and staged
+  changes. The plan index, settings tracker, source evidence paths and other cross-references
+  now point to the finished record.

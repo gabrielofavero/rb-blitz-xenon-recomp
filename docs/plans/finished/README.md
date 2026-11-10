@@ -6,6 +6,7 @@ decisions behind code that is running today, and the per-prompt tables are how a
 
 | Plan | Delivered |
 | --- | --- |
+| [`2026-10-24-settings-hot-apply-plan.md`](2026-10-24-settings-hot-apply-plan.md) | Closed 2026-11-10: acknowledged application state, Window Mode preview/rollback, two menu-return and two next-song rows. The current 48-row inventory is 10 immediate / 2 menu-return / 2 next-song / 34 restart; unproven C3/C4 conversions retain named restart gates. The plan records visual limits and the unrelated full-suite failure. |
 | [`2026-10-23-messages-and-update-feed-plan.md`](2026-10-23-messages-and-update-feed-plan.md) | Built-in feed, bundled/cache/online order, guest text and built-in icons, and guest-authored Update Game route. Code, release build, host tests, feed validator and payload audit delivered 2026-11-06. Owner UI matrix and first public setup/Pages deployment remain outstanding; custom files use the documented built-in icon fallback. |
 | [`2026-10-19-button-layout-hotswap-plan.md`](2026-10-19-button-layout-hotswap-plan.md) | Controller Layout with ten authored layouts, source-keyed icons and binding-aware guest hints. Closed 2026-11-06 at the owner's request; the remaining live routes and unavailable extra-button hardware test are recorded as unverified for independent testing. |
 | [`2026-10-13-rhythmverse-store-plan.md`](2026-10-13-rhythmverse-store-plan.md) | The RhythmVerse store's P0–P8 acceptance passed on 2026-10-22 (69 steps, 0 failures). The plan records the later P9 owner adjustments and their remaining verification. |

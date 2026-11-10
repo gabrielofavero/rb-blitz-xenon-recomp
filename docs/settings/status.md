@@ -14,7 +14,7 @@ Part 1 wherever they disagree.
   hides Renderer and uses Vulkan even with a saved DirectX choice. Windows build and host simulations
   pass; native target builds and visible guest behavior remain unverified.
 
-- **Settings hot apply (2026-11-07):** the [active plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md)
+- **Settings hot apply (finished 2026-11-10):** the [hot-apply plan](../plans/finished/2026-10-24-settings-hot-apply-plan.md)
   began with a nine-row immediate baseline and has a 48-row static consumer audit. Saved, running and pending
   application are tracked separately; a commit rechecks capabilities before writing, partial provider
   saves expose only durable rows, and RhythmVerse filters publish one validated snapshot per group.
@@ -31,7 +31,7 @@ Part 1 wherever they disagree.
   Vulkan menu input after minimize/restore. Other DPI/monitor configurations remain unverified.
   Resolution remains restart-scoped: rebuilding the backend caches at a swap would
   discard live EDRAM owners and scaled resolves, and no guest menu reset or state migration is
-  proven. Live Resolution is parked as a separate renderer project; the hot-apply plan now focuses
+  proven. Live Resolution is parked as a separate renderer project; the later hot-apply work focused
   on bounded menu and next-song candidates. Menu row/header refresh is enabled
   on every boot with guest completion acknowledgments. After moving the splash refresh past the
   retail `check_trial`, a disposable D3D12 run hid and restored LEADERBOARDS on the first returned
@@ -40,25 +40,28 @@ Part 1 wherever they disagree.
   and showed and hid Refresh Songs on menu return. All eight Messages/Recommendations/RhythmVerse
   header masks were captured across two Store Access boot states. Initially hidden Download Content
   now has its locale label ready for live reveal. Play Current Song and Download Content have
-  menu-return strategies; after C3 Timer is next-song (10 immediate, 2 menu-return, 1 next-song,
-  35 restart). The broader Main
+  menu-return strategies; after C3 Timer and Personal Best are next-song (10 immediate,
+  2 menu-return, 2 next-song, 34 restart). The broader Main
   Menu hide-list group, header input/Search/badge checks and other menu candidates remain open.
-  Evidence and limits are in the [C2 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09).
+  Evidence and limits are in the [C2 record](../plans/finished/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09).
   `--settings_ultimate_refresh_trial=true` guards the remaining Ultimate next-song HUD/visual
   assignments; per-row receipts prevent a skipped assignment from being acknowledged. C3's
   production run with that flag off hid Timer at the next song from main-menu Help & Options,
   restored it at the next song from in-song Help & Options, and matched guest acknowledgments
   to both HUD states. A later provider save retained Timer, and the same profile showed its
-  Visible value after restart. Timer is the sole Ultimate next-song strategy. Other Ultimate
-  rows and the remaining loaded-menu rows stay restart-scoped until their boundaries pass acceptance.
+  Visible value after restart. Personal Best now uses the production next-selection route:
+  after a 9,770-point score, Hidden removed the in-song **Your Best** marker and Visible
+  restored it, with matching selection receipts in both directions. The ledger calls this
+  next-song, but it applies on the next song selection. Other Ultimate rows and the remaining
+  loaded-menu rows stay restart-scoped until their boundaries pass acceptance.
 
   The 2026-11-07 host follow-up adds a guarded Personal Best assignment before
   the song-selection panel reads it, with a per-row guest receipt and an
   "Applies on next song selection" caption while deferred. It also composes
   loaded header navigation with the controller icon-font edit, applies a durable
   native row after a partial provider-save failure, and keeps display recovery
-  active until its marker is removed. These changes have host checks only;
-  Personal Best's visible hide/show cycle remains unverified.
+  active until its marker is removed. The later scored C3 run completed Personal Best's
+  visible hide/show cycle.
 
   On 2026-11-09, C3 added a guarded construction trial to the installed scoring,
   track and plot records for Precision Mode, Track Wiggles, Plots, Force Plot and
@@ -68,9 +71,20 @@ Part 1 wherever they disagree.
   unverified. The owner authorized agent-driven game/UI checks. The construction records
   yielded no next-song assignment receipts after Precision Mode, Track Wiggles and Disable
   Plots were staged and a song entered in the same process; scenery remained visible with
-  Disable Plots staged. The Personal Best and Song Progress Bar visual effects were not
-  isolated. Those rows stay restart-scoped.
-  See [C3](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c3-implementation-and-runtime-validation--2026-11-09).
+  Disable Plots staged. Song Progress Bar's top arc persisted after its Hidden receipt;
+  Note Streak's counter also remained visible after an Off receipt. Hide HUD was exercised
+  only through the linked All HUD action, Input Viewer lacked an identifiable visual, and
+  Gold Star Progress had no live assignment receipt. Camera Angle and Gems lacked complete
+  choice-and-restoration proof. Those rows stay restart-scoped. C3's strategy decisions are
+  closed with Timer and Personal Best promoted; the exhaustive visual matrix and game-level
+  inactive/foreign-provider check were not completed. See the
+  [C3 final strategy pass](../plans/finished/2026-10-24-settings-hot-apply-plan.md#c3-final-strategy-pass--2026-11-10).
+  C4 kept Hide Achievements, Skip Offline Prompts, Scan Threads, Filtering and Anti-Aliasing
+  restart-scoped after tracing their owners: each lacks a settings-owned live receipt and
+  rollback, and native MSAA also owns backend render-target state. The 34 current restart rows
+  have individual reasons and revisit conditions in the plan's P7 gate map.
+  The Release build and 19 plan-relevant CTests passed at close-out; the broader suite's
+  unrelated `path_policy` failure is recorded in C5.
 
 - **Refresh Songs default (2026-10-28):** the main-menu shortcut defaults Off in both the settings
   schema and its cvar. Existing saved On choices still take effect.
