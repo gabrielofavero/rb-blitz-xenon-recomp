@@ -1236,6 +1236,7 @@ uint64_t SettingsBoot::NoteCommittedRows(const std::map<SettingId, Value>& chang
                                           const HotApplyPlan& plan, uint64_t revision) {
   const uint64_t live_generation = application_ledger_.Queue(revision, plan.live,
                                                               ApplyBoundary::kNow);
+  application_ledger_.Queue(revision, plan.deferred_menu, ApplyBoundary::kMenuReturn);
   std::map<SettingId, Value> restart;
   for (SettingId id : plan.pending_restart) {
     if (const auto value = changed.find(id); value != changed.end()) restart[id] = value->second;
@@ -1283,6 +1284,7 @@ void SettingsBoot::NoteMenuReturnRows(const std::map<SettingId, Value>& changed,
   std::map<SettingId, Value> deferred;
   for (const auto& [id, value] : changed)
     if (!service_->IsOverridden(id) &&
+        schema::StrategyOf(id) != ApplicationStrategy::kMenuReturn &&
         (MenuRefreshOwns(id, MenuRefreshSurface::kRows) ||
          MenuRefreshOwns(id, MenuRefreshSurface::kHeaders)))
       deferred[id] = value;

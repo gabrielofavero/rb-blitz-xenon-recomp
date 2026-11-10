@@ -29,14 +29,21 @@ Part 1 wherever they disagree.
   on bounded menu and next-song candidates. Menu row/header refresh is enabled
   on every boot with guest completion acknowledgments. After moving the splash refresh past the
   retail `check_trial`, a disposable D3D12 run hid and restored LEADERBOARDS on the first returned
-  splash frame; saved revisions and guest acknowledgments matched both directions. Other rows and
-  header visuals remain unverified. `--settings_ultimate_refresh_trial=true` guards committed
+  splash frame; saved revisions and guest acknowledgments matched both directions. On 2026-11-09,
+  a disposable D3D12 run also showed and hid Download Content, hid and restored Play Current Song,
+  and showed and hid Refresh Songs on menu return. All eight Messages/Recommendations/RhythmVerse
+  header masks were captured across two Store Access boot states. Initially hidden Download Content
+  now has its locale label ready for live reveal. Play Current Song and Download Content have
+  menu-return strategies (10 immediate, 2 menu-return, 0 next-song, 36 restart); the broader Main
+  Menu hide-list group, header input/Search/badge checks and other menu candidates remain open.
+  Evidence and limits are in the [C2 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09).
+  `--settings_ultimate_refresh_trial=true` guards committed
   Ultimate assignments and seven next-song HUD/visual refreshes; per-row receipts now prevent a
   skipped assignment from being acknowledged. A disposable same-process run hid Timer on the next
   song and restored it on a third song, with matching guest acknowledgments. Other provider rows,
   later provider saves and restart persistence remain unverified. Window Mode is now the tenth
-  immediate strategy through the authored preview/Keep route; Ultimate and loaded-menu metadata
-  stay restart-scoped until their advertised boundaries pass acceptance.
+  immediate strategy through the authored preview/Keep route; Ultimate rows and the remaining
+  loaded-menu rows stay restart-scoped until their advertised boundaries pass acceptance.
 
   The 2026-11-07 host follow-up adds a guarded Personal Best assignment before
   the song-selection panel reads it, with a per-row guest receipt and an

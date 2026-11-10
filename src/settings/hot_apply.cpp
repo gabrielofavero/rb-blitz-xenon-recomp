@@ -130,9 +130,12 @@ HotApplyPlan PlanHotApply(const std::map<SettingId, Value>& changed,
                                  [id](const Descriptor& d) { return d.id == id; });
     // An id this build does not describe is never applied live: a restart is the only honest
     // answer for a row whose strategy is unknown.
-    const bool hot = it != descriptors.end() && it->strategy == ApplicationStrategy::kHot;
-    if (hot) {
+    const ApplicationStrategy strategy = it == descriptors.end()
+        ? ApplicationStrategy::kRestart : it->strategy;
+    if (strategy == ApplicationStrategy::kHot) {
       plan.live[id] = value;
+    } else if (strategy == ApplicationStrategy::kMenuReturn) {
+      plan.deferred_menu[id] = value;
     } else {
       plan.pending_restart.push_back(id);
     }
@@ -143,8 +146,11 @@ HotApplyPlan PlanHotApply(const std::map<SettingId, Value>& changed,
 HotApplyPlan PlanHotApplyByStrategy(const std::map<SettingId, Value>& changed) {
   HotApplyPlan plan;
   for (const auto& [id, value] : changed) {
-    if (schema::StrategyOf(id) == ApplicationStrategy::kHot) {
+    const ApplicationStrategy strategy = schema::StrategyOf(id);
+    if (strategy == ApplicationStrategy::kHot) {
       plan.live[id] = value;
+    } else if (strategy == ApplicationStrategy::kMenuReturn) {
+      plan.deferred_menu[id] = value;
     } else {
       plan.pending_restart.push_back(id);
     }

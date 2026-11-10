@@ -9,65 +9,24 @@ release publishes exactly one file - the setup executable itself, nothing else
 
 Everything the game needs travels inside the setup executable: the payload snapshot
 in out\payload is compressed into it, so the installer needs no network access at
-all. The build is made from the working tree it is run in, records the checkout's
-commit in every install manifest, and is named after the version in
+all. The build is made from the working tree it is run in and is named after the version in
 config\pins.toml: RockBandBlitzSetup-<version>.exe.
 
 The version is one value: [installer] version in config\pins.toml. Change it there
 and run this script again - the file name, the wizard's title (AppVerName) and the
 version recorded in the install manifest all follow it.
 
-There is one older, optional mode - -PayloadUrl/-PayloadSha256, where the wizard
-downloads a pinned payload archive at install time instead of embedding one. It is
-kept working - it is the engine the dormant updater executable installs with - and
-it is not what a release uses: a release publishes one file, so its payload travels
-inside that file.
+The game build in this workspace is always embedded in the setup executable.
 
 Nothing here is needed to play the game - this script only builds the installer.
 The Rock Band Blitz Ultimate mod is never embedded and never re-hosted; its
 release URL lives in config\pins.toml and the user's copy is downloaded from
 upstream, or supplied by the user, while the installer runs. See README.md.
 
-RockBandBlitzUpdater.exe (this same wizard with /DUpdaterMode=1, placed under the
-user's local application data by the setup executable) is still built. Nothing calls
-it: its only caller, Controller Settings' Update control, retired with that
-executable on 2026-10-19 (gameplay-mapping plan §19). See README.md, section
-"Updating".
-
-.PARAMETER PayloadUrl
-Download the recompiled build from this URL at install time instead of embedding
-it. Requires -PayloadSha256.
-
-.PARAMETER PayloadSha256
-Lower-case hex SHA-256 of the file at -PayloadUrl. The installer refuses to
-install a download that does not match it, so pass the real one.
-
-.PARAMETER PayloadSize
-Size of the file at -PayloadUrl in bytes. Optional; only used for the free-space
-pre-check.
-
-.PARAMETER PayloadVersion
-Version string recorded in the install manifest for the recompiled build.
-Defaults to the [installer] version in config\pins.toml.
-
-.PARAMETER PayloadCommit
-Commit the recompiled build was built from, recorded in every install manifest
-and in the installation report. Defaults to the [payload] commit pin in
-config\pins.toml, which is resolved here: "HEAD" (the repository default) is the
-commit of the checkout being built, and any other value is a ref or an id that
-git resolves. Pass a 40-character commit id to record something other than the
-current commit, or set commit = "" in config\pins.toml to record nothing.
-
-.PARAMETER AllowUnverifiedPayload
-Permit -PayloadUrl without -PayloadSha256. Only for testing a build of your own;
-a published installer must name the hash of what it downloads.
+No updater executable is built or installed. See README.md, section "Updating".
 
 .PARAMETER PayloadDir
 Directory holding (or receiving) the payload snapshot. Defaults to out\payload.
-
-.PARAMETER SourceDir
-Recompiled build tree to snapshot. Defaults to out\build\win-amd64-release in
-this checkout, which is what the emulator build produces.
 
 .PARAMETER IsccPath
 ISCC.exe to use. Discovered from the registry, PATH and the usual install
@@ -80,12 +39,6 @@ installer-release-msvc uses cl.exe from a Visual Studio developer prompt.
 .PARAMETER SkipTests
 Do not run the installer helper's test suite.
 
-.PARAMETER SkipPayload
-Keep an existing payload snapshot exactly as it is, whatever it holds. Use with
--PayloadUrl, or when the snapshot was made deliberately by tools\make_payload.ps1:
-the release path verifies a snapshot against the build tree before it reuses one,
-and this is the only way to keep one that does not match it.
-
 .PARAMETER RefreshPayload
 Recreate the payload snapshot even when the existing one already matches the
 build tree. It is not needed to replace a stale snapshot: that happens on its own.
@@ -95,28 +48,18 @@ Do not refresh the side wizard image (tools\make_art.ps1). It is optional and is
 not committed, so a failed download is not a build failure.
 
 .PARAMETER SkipSetup
-Build and test the helper only; do not compile the setup executable or the updater.
+Build and test the helper only; do not compile the setup executable.
 
 .EXAMPLE
 powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1
 
-.EXAMPLE
-powershell -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1 -PayloadUrl https://example.invalid/rb_blitz-0.1.0.zip -PayloadSha256 0123abcd... -PayloadSize 52446752
 #>
 [CmdletBinding()]
 param(
-    [string] $PayloadUrl,
-    [string] $PayloadSha256,
-    [long]   $PayloadSize = 0,
-    [string] $PayloadVersion,
-    [string] $PayloadCommit,
-    [switch] $AllowUnverifiedPayload,
     [string] $PayloadDir,
-    [string] $SourceDir,
     [string] $IsccPath,
     [string] $Preset = 'installer-release',
     [switch] $SkipTests,
-    [switch] $SkipPayload,
     [switch] $RefreshPayload,
     [switch] $SkipArt,
     [switch] $SkipSetup
@@ -134,7 +77,7 @@ $repoRoot = Split-Path -Parent $installerDir
 . (Join-Path $installerDir 'tools\payload_provenance.ps1')
 
 if (-not $PayloadDir) { $PayloadDir = Join-Path $installerDir 'out\payload' }
-if (-not $SourceDir) { $SourceDir = Join-Path $repoRoot 'out\build\win-amd64-release' }
+$SourceDir = Join-Path $repoRoot 'out\build\win-amd64-release'
 
 $generatedDir = Join-Path $installerDir 'out\generated'
 $distDir = Join-Path $installerDir 'out\dist'
@@ -221,68 +164,6 @@ function Get-SizeText {
     return ('{0:N0} bytes' -f $Bytes)
 }
 
-# The one pin this script has to read itself, because it decides what gets
-# compiled in. A missing or empty pin means "record nothing".
-function Read-PinnedCommit {
-    param([string] $PinsFile)
-
-    $table = ''
-    foreach ($line in Get-Content -LiteralPath $PinsFile) {
-        if ($line -match '^\s*\[(?<name>[^\]]+)\]') {
-            $table = $Matches['name'].Trim()
-            continue
-        }
-        if ($table -eq 'payload' -and $line -match '^\s*commit\s*=\s*"(?<value>[^"]*)"') {
-            return $Matches['value']
-        }
-    }
-    return ''
-}
-
-# A ref (the repository pin ships as "HEAD", the commit of the checkout being
-# built) or an id: resolved here, before the pins are compiled in, so that neither
-# the helper nor the wizard ever sees a name it could only look up at install
-# time - on a machine that is not a git checkout.
-function Resolve-PayloadCommit {
-    param(
-        [string] $Spec,
-        [string] $RepoRoot
-    )
-
-    if ($Spec -match '^[0-9a-fA-F]{40}$') { return $Spec.ToLowerInvariant() }
-
-    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-        throw ("the [payload] commit pin is '$Spec', which needs git to resolve, and git is not on " +
-               'PATH. Install git, pass -PayloadCommit <40 hex digits>, or set commit = "" in ' +
-               'config\pins.toml to record nothing.')
-    }
-
-    $revision = $Spec
-    $saved = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        # stderr is folded into the pipeline so git's own words can be reported
-        # below. It talks even when it succeeds - "warning: unable to find all
-        # commit-graph files" on this repository - so the commit is the line that
-        # is a commit, not the first line.
-        $output = @(& git -c safe.directory=* -C $RepoRoot rev-parse --verify --quiet "$revision^{commit}" 2>&1)
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $saved
-    }
-
-    foreach ($line in $output) {
-        if ("$line" -match '^([0-9a-fA-F]{40})$') { return $Matches[1].ToLowerInvariant() }
-    }
-
-    $message = ("the [payload] commit pin is '$Spec', and git could not resolve it to a commit " +
-                "in $RepoRoot (exit code $exitCode). Fix the pin in config\pins.toml, or pass " +
-                '-PayloadCommit <40 hex digits>.')
-    $detail = (@($output | ForEach-Object { "$_" }) -join ' | ').Trim()
-    if ($detail) { $message = $message + " git said: $detail" }
-    throw $message
-}
-
 # --------------------------------------------------------------------------
 # 1. the payload
 # --------------------------------------------------------------------------
@@ -297,130 +178,66 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 & node $feedValidator
 if ($LASTEXITCODE -ne 0) { throw 'assets/messages/feed.json failed validation.' }
 
-$embedPayload = -not $PayloadUrl
 $embedArgs = @()
+if (-not (Test-Path -LiteralPath $SourceDir)) {
+    throw "no recompiled build to snapshot: $SourceDir does not exist. Build the game first."
+}
 
-# Which commit this build says it is. The pin is deliberate - "HEAD" is the
-# commit of this checkout, any other name is whatever git resolves it to - so it
-# is resolved here rather than left to the compiled helper, which may run on a
-# machine with no git and no checkout.
-$pinsFile = Join-Path $installerDir 'config\pins.toml'
-if ($PSBoundParameters.ContainsKey('PayloadCommit')) {
-    if (-not $PayloadCommit) {
-        throw ('-PayloadCommit was given an empty value. Pass the commit this build is from, or ' +
-               'set commit = "" in config\pins.toml to record nothing.')
-    }
-    $commitSpec = $PayloadCommit
+$treeBackends = Get-PayloadBackends -BuildDir $SourceDir
+$haveSnapshot = Test-Path -LiteralPath $payloadManifest
+
+# A snapshot is a copy of a build tree that was correct the day it was taken, so it can
+# only be reused for *that* tree. The check compares the snapshot's recorded provenance
+# and the bytes of every file the tree owns; the failure it exists for is a plain release
+# build keeping a snapshot from before `REXGLUE_USE_VULKAN=ON`, which shipped a game
+# whose Renderer row had one choice (owner report, 2026-10-14).
+$stale = @()
+if ($haveSnapshot) {
+    $stale = @(Test-PayloadSnapshotCurrent -PayloadDir $PayloadDir -SourceDir $SourceDir `
+                -ExpectedBackends $treeBackends)
+}
+
+if ($haveSnapshot -and -not $RefreshPayload -and $stale.Count -eq 0) {
+    Write-Host "   mode    : embedded in the setup executable"
+    Write-Host "   snapshot: $PayloadDir (matches $SourceDir; -RefreshPayload rebuilds it anyway)"
 } else {
-    $commitSpec = Read-PinnedCommit -PinsFile $pinsFile
-}
-$payloadCommit = ''
-if ($commitSpec) {
-    $payloadCommit = Resolve-PayloadCommit -Spec $commitSpec -RepoRoot $repoRoot
-    $embedArgs += @('--payload-commit', $payloadCommit)
-}
-
-# What the setup executable calls the build it installs: the [installer] version
-# unless -PayloadVersion says otherwise (tools/embed_config.cpp derives AppVerName
-# from it).
-$payloadVersionForPins = $PayloadVersion
-
-if ($PayloadUrl) {
-    if (-not $PayloadSha256) {
-        if (-not $AllowUnverifiedPayload) {
-            throw ('-PayloadUrl needs -PayloadSha256: an installer that downloads its own build must ' +
-                   'say which build it is. Pass -AllowUnverifiedPayload only to test a build of your own.')
-        }
-        Write-Warning 'downloading the payload without a hash: -AllowUnverifiedPayload is set.'
-    } elseif ($PayloadSha256 -notmatch '^[0-9a-fA-F]{64}$') {
-        throw "-PayloadSha256 must be 64 hex characters, got '$PayloadSha256'."
+    if ($haveSnapshot -and $stale.Count -gt 0) {
+        Write-Host '   stale   : the existing snapshot is not this build tree:'
+        foreach ($reason in $stale) { Write-Host "             - $reason" }
+        Write-Host '   action  : rebuilding the snapshot from the build tree'
+    } elseif ($RefreshPayload) {
+        Write-Host '   refresh : -RefreshPayload'
     }
+    Write-Host "   mode    : embedded in the setup executable"
+    Write-Host "   snapshot: rebuilding from $SourceDir"
+    $nativeArgs = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $makePayload,
+                     '-SourceDir', $SourceDir, '-PayloadDir', $PayloadDir, '-Clean')
+    Invoke-Native -Exe 'powershell.exe' -Arguments $nativeArgs -What 'make_payload.ps1'
 
-    if ($PayloadSha256) { $embedArgs += @('--payload-sha256', $PayloadSha256.ToLowerInvariant()) }
-    if ($PayloadSize -gt 0) { $embedArgs += @('--payload-size', $PayloadSize.ToString()) }
-    if ($payloadVersionForPins) { $embedArgs += @('--payload-version', $payloadVersionForPins) }
-    $embedArgs += @('--payload-url', $PayloadUrl)
+    # A snapshot that does not describe the tree it was just taken from is a bug in
+    # the packaging half, and embedding it would hide it until after the install.
+    $problems = @(Test-PayloadSnapshotCurrent -PayloadDir $PayloadDir -SourceDir $SourceDir `
+                     -ExpectedBackends $treeBackends)
+    if ($problems.Count -gt 0) {
+        throw ("the payload snapshot does not match the build tree it was taken from:`n  " +
+               ($problems -join "`n  "))
+    }
+}
 
-    Write-Host "   mode    : downloaded at install time"
-    Write-Host "   url     : $PayloadUrl"
-    Write-Host "   sha256  : $(if ($PayloadSha256) { $PayloadSha256.ToLowerInvariant() } else { '(unverified)' })"
+if ($treeBackends -contains 'vulkan') {
+    Write-Host "   backends: $($treeBackends -join ', ') - Vulkan and its loader are in the payload"
+} elseif ($treeBackends.Count -gt 0) {
+    Write-Warning ("this build tree offers only $($treeBackends -join ', '), so the installed game's " +
+                   'Renderer row will have a single choice. Configure with -DREXGLUE_USE_VULKAN=ON ' +
+                   '(the Windows presets do) and rebuild the game.')
 } else {
-    $treeBackends = Get-PayloadBackends -BuildDir $SourceDir
-    $haveSnapshot = Test-Path -LiteralPath $payloadManifest
-
-    # A snapshot is a copy of a build tree that was correct the day it was taken, so it can
-    # only be reused for *that* tree. The check compares the snapshot's recorded provenance
-    # and the bytes of every file the tree owns; the failure it exists for is a plain release
-    # build keeping a snapshot from before `REXGLUE_USE_VULKAN=ON`, which shipped a game
-    # whose Renderer row had one choice (owner report, 2026-10-14).
-    $stale = @()
-    if ($haveSnapshot) {
-        $stale = @(Test-PayloadSnapshotCurrent -PayloadDir $PayloadDir -SourceDir $SourceDir `
-                    -ExpectedBackends $treeBackends -ExpectedCommit $payloadCommit)
-    }
-
-    if ($SkipPayload) {
-        if (-not $haveSnapshot) {
-            throw "-SkipPayload was given but $payloadManifest does not exist."
-        }
-        Write-Host "   mode    : embedded in the setup executable"
-        Write-Host "   snapshot: $PayloadDir (kept; -SkipPayload)"
-        foreach ($reason in $stale) {
-            Write-Warning "the kept snapshot was not taken from this build tree: $reason"
-        }
-    } elseif ($haveSnapshot -and -not $RefreshPayload -and $stale.Count -eq 0) {
-        Write-Host "   mode    : embedded in the setup executable"
-        Write-Host "   snapshot: $PayloadDir (matches $SourceDir; -RefreshPayload rebuilds it anyway)"
-    } else {
-        if (-not (Test-Path -LiteralPath $SourceDir)) {
-            throw ("no recompiled build to snapshot: $SourceDir does not exist. Build the emulator " +
-                   'first, or pass -PayloadUrl to download the build at install time instead.')
-        }
-        if ($haveSnapshot -and $stale.Count -gt 0) {
-            Write-Host '   stale   : the existing snapshot is not this build tree:'
-            foreach ($reason in $stale) { Write-Host "             - $reason" }
-            Write-Host '   action  : rebuilding the snapshot from the build tree'
-        } elseif ($RefreshPayload) {
-            Write-Host '   refresh : -RefreshPayload'
-        }
-        Write-Host "   mode    : embedded in the setup executable"
-        Write-Host "   snapshot: rebuilding from $SourceDir"
-        $nativeArgs = @('-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', $makePayload,
-                        '-SourceDir', $SourceDir,
-                        '-PayloadDir', $PayloadDir, '-Commit', $payloadCommit, '-Clean')
-        Invoke-Native -Exe 'powershell.exe' -Arguments $nativeArgs -What 'make_payload.ps1'
-
-        # A snapshot that does not describe the tree it was just taken from is a bug in
-        # the packaging half, and embedding it would hide it until after the install.
-        $problems = @(Test-PayloadSnapshotCurrent -PayloadDir $PayloadDir -SourceDir $SourceDir `
-                        -ExpectedBackends $treeBackends -ExpectedCommit $payloadCommit)
-        if ($problems.Count -gt 0) {
-            throw ("the payload snapshot does not match the build tree it was taken from:`n  " +
-                   ($problems -join "`n  "))
-        }
-    }
-
-    if ($treeBackends -contains 'vulkan') {
-        Write-Host "   backends: $($treeBackends -join ', ') - Vulkan and its loader are in the payload"
-    } elseif ($treeBackends.Count -gt 0) {
-        Write-Warning ("this build tree offers only $($treeBackends -join ', '), so the installed game's " +
-                       'Renderer row will have a single choice. Configure with -DREXGLUE_USE_VULKAN=ON ' +
-                       '(the Windows presets do) and rebuild the game, or pass -SkipPayload to keep this ' +
-                       'snapshot deliberately.')
-    } else {
-        Write-Warning "no CMakeCache.txt in $SourceDir, so the payload's renderer backends were not read"
-    }
-
-    # -SkipPayload can deliberately keep an older snapshot, but it must never
-    # embed a missing or malformed offline feed.
-    $bundledFeed = Join-Path $PayloadDir 'assets/messages/feed.json'
-    & node $feedValidator --feed $bundledFeed
-    if ($LASTEXITCODE -ne 0) { throw "the payload's assets/messages/feed.json failed validation." }
-
-    if ($payloadVersionForPins) { $embedArgs += @('--payload-version', $payloadVersionForPins) }
+    Write-Warning "no CMakeCache.txt in $SourceDir, so the payload's renderer backends were not read"
 }
 
-Write-Host "   commit  : $(if ($payloadCommit) { $payloadCommit } else { 'not recorded' })"
+# Validate the offline feed in the snapshot before embedding it.
+$bundledFeed = Join-Path $PayloadDir 'assets/messages/feed.json'
+& node $feedValidator --feed $bundledFeed
+if ($LASTEXITCODE -ne 0) { throw "the payload's assets/messages/feed.json failed validation." }
 
 # --------------------------------------------------------------------------
 # 2. the helper and its tests
@@ -428,8 +245,8 @@ Write-Host "   commit  : $(if ($payloadCommit) { $payloadCommit } else { 'not re
 Write-Step 'Configuring and building the helper'
 
 $configureArgs = @('--preset', $Preset)
-# Always passed, even when empty: the value is cached, so leaving it out would
-# keep the previous build's download pin and quietly ship the wrong payload.
+# Always passed, even when empty: a cached override from an earlier build could
+# otherwise cause the helper and wizard to name a different payload.
 $configureArgs += "-DRBBLITZ_EMBED_EXTRA_ARGS=$($embedArgs -join ';')"
 Invoke-Native -Exe 'cmake' -Arguments $configureArgs -What 'cmake --preset' -WorkingDirectory $installerDir
 
@@ -452,17 +269,10 @@ if (-not $SkipTests) {
 # override list is a cached CMake variable, so a stale one quietly ships a setup
 # executable that claims to be a different build.
 $appVersion = ''
-$generatedCommit = ''
 foreach ($line in Get-Content -LiteralPath (Join-Path $generatedDir 'pins.iss')) {
     if ($line -match '^#define AppVersion "([^"]*)"') { $appVersion = $Matches[1] }
-    if ($line -match '^#define PayloadCommit "([^"]*)"') { $generatedCommit = $Matches[1] }
 }
 if (-not $appVersion) { throw 'could not read AppVersion from the generated pins.iss.' }
-if ($generatedCommit -ne $payloadCommit) {
-    throw ("the generated pins.iss says commit '$generatedCommit' but this build resolved " +
-           "'$payloadCommit'. -DRBBLITZ_EMBED_EXTRA_ARGS is cached in CMakeCache.txt, so delete " +
-           "$buildDir and build again.")
-}
 
 if ($SkipSetup) {
     Write-Host ''
@@ -486,7 +296,7 @@ if (-not $SkipArt -and (Test-Path -LiteralPath $makeArt)) {
 }
 
 # --------------------------------------------------------------------------
-# 4. the updater, and the setup executable that carries it
+# 4. the setup executable
 # --------------------------------------------------------------------------
 Write-Step 'Staging owner-authored controller layouts'
 $schemeSource = Join-Path $repoRoot 'assets/controller'
@@ -503,37 +313,15 @@ Invoke-Native -Exe 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '
     '-File', $stageSchemes, '-Output', (Join-Path $generatedDir 'controller_schemes.iss')) `
     -What 'stage_controller_schemes.ps1'
 
-Write-Step 'Compiling the updater'
-
 $iscc = Find-Iscc
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 New-Item -ItemType Directory -Force -Path $generatedDir | Out-Null
+# Older builds left this unused executable in the generated directory.
+Remove-Item -LiteralPath (Join-Path $generatedDir 'RockBandBlitzUpdater.exe') -ErrorAction SilentlyContinue
 
 # The version in the file name is the one this build actually compiled in, read
 # back from the generated pins.iss above.
 $setupBaseName = "RockBandBlitzSetup-$appVersion"
-
-# The updater is this same wizard built with /DUpdaterMode=1: it carries no payload
-# (it installs the build the release manifest names) and drops the pages it has no
-# question about. The setup executable embeds it and puts it under the user's local
-# application data. Nothing runs it since Controller Settings retired (2026-10-19) -
-# it is built so the machinery stays working and tested, not because a release path
-# needs it today. It is compiled *first*, because the setup's [Files] entry reads the
-# file at compile time.
-$updaterBaseName = 'RockBandBlitzUpdater'
-$updaterExe = Join-Path $generatedDir "$updaterBaseName.exe"
-$updaterArgs = @('/Q',
-                 "/DGeneratedDir=$generatedDir",
-                 "/DDistDir=$generatedDir",
-                 "/DArtDir=$artDir",
-                 '/DUpdaterMode=1',
-                 "/F$updaterBaseName",
-                 $setupScript)
-Invoke-Native -Exe $iscc -Arguments $updaterArgs -What 'ISCC (updater)'
-if (-not (Test-Path -LiteralPath $updaterExe)) {
-    throw "ISCC reported success but $updaterExe is missing."
-}
-Write-Host "   updater : $(Get-SizeText (Get-Item -LiteralPath $updaterExe).Length) -> $updaterExe"
 
 Write-Step 'Compiling the setup executable'
 
@@ -560,19 +348,8 @@ Write-Host ('   setup   : {0}' -f $setupInfo.FullName)
 Write-Host ('   size    : {0}' -f (Get-SizeText $setupInfo.Length))
 Write-Host ('   sha256  : {0}' -f $setupHash)
 Write-Host ('   helper  : {0}' -f (Get-SizeText $helperSize))
-Write-Host ('   updater : {0}' -f (Get-SizeText (Get-Item -LiteralPath $updaterExe).Length))
-Write-Host ('   commit  : {0}' -f $(if ($generatedCommit) { $generatedCommit } else { 'not recorded' }))
-if ($embedPayload) {
-    Write-Host ('   payload : embedded from {0}' -f $PayloadDir)
-    Write-Host  '             the setup executable is not byte-reproducible across build machines (ISCC'
-    Write-Host  '             embeds the payload it finds in that directory), so publish the checksum you'
-    Write-Host  '             measured here rather than a fixed one.'
-} else {
-    Write-Host ("   payload : downloaded from {0} at install time" -f $PayloadUrl)
-    Write-Host  '             the release asset this URL points at is not byte-reproducible either: the zip'
-    Write-Host  '             make_payload.ps1 writes depends on the deflate implementation of the machine'
-    Write-Host  '             that ran it. Publish the checksum, and pass the same one here.'
-}
+Write-Host ('   payload : embedded from {0}' -f $PayloadDir)
+Write-Host  '             publish the checksum measured here rather than a fixed one.'
 Write-Host ''
 Write-Host 'Publish, in one release:' -ForegroundColor Green
 Write-Host ("   {0}" -f $setupInfo.Name)

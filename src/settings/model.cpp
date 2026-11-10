@@ -222,12 +222,13 @@ std::string_view WidgetToken(WidgetKind widget) {
   return "boolean";
 }
 
-// §5.5's two words, and the same two the provider adapter's own table uses, so a log line, a
-// handoff doc and the acceptance matrix cannot spell "needs a restart" three different ways.
+// Stable strategy tokens used by the schema, diagnostics and application seam.
 std::string_view ApplicationStrategyToken(ApplicationStrategy strategy) {
   switch (strategy) {
     case ApplicationStrategy::kHot:
       return "hot";
+    case ApplicationStrategy::kMenuReturn:
+      return "menu_return";
     case ApplicationStrategy::kRestart:
       return "restart";
   }

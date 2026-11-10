@@ -985,6 +985,15 @@ void TestPlayCurrentSongRow() {
   for (const auto& label : Labels()) {
     CHECK_TRUE(label.first != kPlayCurrentRow);
   }
+  configuration.play_current_song = false;
+  configuration.menu_refresh_trial = true;
+  ConfigureMenu(configuration);
+  CHECK_TRUE(AddPlayCurrentSongRow(&none, &reason));
+  const auto trial_labels = Labels();
+  CHECK_TRUE(std::any_of(trial_labels.begin(), trial_labels.end(), [](const auto& label) {
+    return label.first == kPlayCurrentRow && label.second == kPlayCurrentLabel;
+  }));
+  ConfigureMenu(MenuConfiguration{});
 }
 
 void TestDownloadContentRow() {
@@ -1066,6 +1075,16 @@ void TestDownloadContentRow() {
   for (const auto& label : Labels()) {
     CHECK_TRUE(label.first != kDownloadContentRow);
   }
+  configuration.download_content_row = false;
+  configuration.menu_refresh_trial = true;
+  ConfigureMenu(configuration);
+  auto hidden_at_boot = fixture();
+  CHECK_TRUE(AddDownloadContentRow(&hidden_at_boot, &reason));
+  const auto trial_labels = Labels();
+  CHECK_TRUE(std::any_of(trial_labels.begin(), trial_labels.end(), [](const auto& label) {
+    return label.first == kDownloadContentRow && label.second == kDownloadContentLabel;
+  }));
+  ConfigureMenu(MenuConfiguration{});
 }
 
 std::vector<std::string> PageRows(const std::string& panel_name);

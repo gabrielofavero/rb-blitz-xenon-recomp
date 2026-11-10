@@ -156,8 +156,8 @@ std::vector<SchemaRow> BuildTable() {
                        "Restart to the main menu if a song takes too long to load. Unsaved progress may be lost."));
   }
   // `general.play_current_song`: the main menu's second entry exists only while this row is on and
-  // the menu really has a DLC track playing (owner feature, 2026-10-14). It is consumed at boot, so
-  // it is a restart row like the rest of the menu-shaping ones. On by default, like the cache row
+  // the menu really has a track playing (owner feature, 2026-10-14). The loaded menu now rebuilds
+  // this row at menu return. On by default, like the cache row
   // (owner request, 2026-10-20). The shortcut preference remains reachable without DLC; its
   // caption explains the missing dependency while the actual shortcut is absent.
   rows.push_back(Row(Make(SettingId::kPlayCurrentSong, Category::kGeneral, Provider::kNative,
@@ -454,8 +454,8 @@ constexpr StrategyEntry kStrategies[] = {
     // Read while the menu's music pool is built (src/hooks/shell_music.cpp, at
     // OnPostLoadXexImage), so a new process is what a change needs.
     {SettingId::kDlcMenuSongs, ApplicationStrategy::kRestart, ""},
-    // Consumed by the boot that builds the menu payload, for the same reason.
-    {SettingId::kPlayCurrentSong, ApplicationStrategy::kRestart, ""},
+    {SettingId::kPlayCurrentSong, ApplicationStrategy::kMenuReturn,
+     "D3D12 hide and restore on first menu return: docs/plans/in-progress/2026-10-24-settings-hot-apply-plan.md C2 (2026-11-09)"},
     // RhythmVerse store (plan P6; the master made restart-scoped by the owner pass, plan §9/P9-2,
     // 2026-10-22). The **master** owns what is drawn, not only what a worker reads: the main-menu
     // row is baked into the record the boot generates (plan §5/P1) and the store's heading is a
@@ -509,7 +509,8 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kFiltering, ApplicationStrategy::kRestart, ""},
     // Interface
     {SettingId::kLetterbox, ApplicationStrategy::kRestart, ""},
-    {SettingId::kHideDownloadContent, ApplicationStrategy::kRestart, ""},
+    {SettingId::kHideDownloadContent, ApplicationStrategy::kMenuReturn,
+     "D3D12 show and hide on first menu return: docs/plans/in-progress/2026-10-24-settings-hot-apply-plan.md C2 (2026-11-09)"},
     {SettingId::kShowMessages, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowRecommendations, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowCurrency, ApplicationStrategy::kRestart, ""},

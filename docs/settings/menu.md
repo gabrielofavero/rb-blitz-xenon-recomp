@@ -65,8 +65,17 @@ On 2026-11-07 [measured], the disposable D3D12 profile in
 Help & Options and restored it on the next return, without relaunching. The saved revisions,
 guest row-completion queries and screenshots agree. The generated splash refresh now runs after
 the retail `check_trial` on screen entry; that call had overwritten the earlier panel refresh.
-Other menu rows, selected-row recovery, input paths and header visuals remain unverified, so their
-restart strategy metadata is unchanged.
+On 2026-11-09 [measured], a rebuilt disposable D3D12 run in
+`out/_swap/hot-settings/c2-2026-11-09-fix/` showed and hid Download Content and hid and restored
+Play Current Song on the first returned menu frames. The initially hidden Download Content row
+first drew its bare `SPLASH_DLC_STORE` locale key; the menu-return inventory now installs the
+Download Content and Play Current Song labels before either row is revealed. The rebuilt capture
+reads `DOWNLOAD CONTENT`. These two rows are classified menu-return, with guest receipts and
+no restart prompt. Refresh Songs also showed and hid at menu return, but its shared hidden-row
+list remains restart-scoped pending the rest of Main Menu acceptance. All eight header visibility
+masks were captured across Store Access on/off boots; keyboard/controller navigation, Search entry
+and unread badge remain unverified. The [C2 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09)
+names the screenshots and remaining gates.
 
 On 2026-11-07 [source], the song-selection record now composes runtime header navigation
 with the controller icon-font transformation. A separate guarded Ultimate trial assigns

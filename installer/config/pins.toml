@@ -37,14 +37,9 @@ default_dir_name = "Rock Band Blitz"
 min_windows_build = "10.0.17763"
 
 [payload]
-# The recompiled game the installer places. Either embedded in the setup
-# executable at build time (tools/make_payload.ps1 + build.ps1, the default) or
-# downloaded from `url` at install time; `build.ps1 -PayloadUrl/-PayloadSha256`
-# override the values below for a build without editing this file.
-#
-# The downloaded form is the updater's engine, not a release path: a release
-# publishes exactly one file, so an install that fetched its payload would need a
-# second one on the release page (README.md, section "The one product").
+# The recompiled game is embedded from this workspace's release build by
+# tools/make_payload.ps1 and build.ps1. These empty download fields are retained
+# for compatibility with the helper's existing config schema.
 #
 # Left empty in the repository: a pin that does not exist yet is worse than a
 # clear "no payload source configured" message.
@@ -52,45 +47,16 @@ version = ""
 url = ""
 sha256 = ""
 size = 0
-# Commit of the recompiled build this setup ships, recorded in the install
-# manifest and in the installation report - recorded, never verified, the way
-# `version` above is. build.ps1 resolves it before the pins are compiled in:
-# "HEAD" is the commit of the checkout being built, and any other value is a ref
-# or a commit id git has to resolve to one, so neither half of the installer ever
-# sees a ref. A build that does not go through build.ps1 has nothing to resolve it
-# and refuses a pin that is not a 40-character commit id (write one here, or pass
-# -PayloadCommit <id>); empty means "record nothing".
-commit = "HEAD"
+# Kept empty for compatibility with existing install manifests. Builds use the
+# workspace contents and the [installer] version; no commit is pinned or recorded.
+commit = ""
 
 [update]
-# Dormant since 2026-10-15: Controller Settings no longer checks for updates, so
-# nothing reads `manifest_url` on a schedule any more, and a release no longer
-# publishes the file it points at (README.md, section "Updating"). It is kept - and
-# still compiled into the dormant updater and the helper - so the update path can be
-# picked up again without re-deriving the pins it needs.
-#
-# `manifest_url` is where Controller Settings used to look on every start.
-# tools/embed_config.cpp generates the file it points at (out/generated/update.toml)
-# from this same file, so the version compared against was never a second copy of
-# this one. The URL names the *latest* release's asset on purpose: GitHub redirects
-# it, so a reader built today keeps finding tomorrow's release without being
-# rebuilt.
-manifest_url = "https://github.com/gabrielofavero/rb-blitz-xenon-recomp/releases/latest/download/update.toml"
-# The folder, under the user's own local application data, that holds the updater
-# the setup executable puts on disk (RockBandBlitzUpdater.exe). It is deliberately
-# not the install folder: the install folder carries the game and its payload, and
-# a second copy of an installer in it would be one more file to explain (and one more
-# file the payload audit has to allow).
+# Legacy helper schema and cleanup location for installations made by old
+# setup executables. Current releases have no auto updater or update manifest.
+manifest_url = ""
 dir_name = "rb_blitz"
-# Whether this release changes what the game reads out of the user's own game
-# files. `false` - the usual case, where a release only moves the recompiled
-# code around - installs the payload and keeps the game data that is already
-# there, going straight to the progress bar. `true` asks for the package or the
-# folder again, because this release's payload needs the data re-derived from it.
-# It describes the delta from the release before it, so it is written by whoever
-# cuts the release, and it travels in update.toml.
 requires_game_data = false
-
 [ultimate]
 # Rock Band Blitz Ultimate, a fan mod maintained at the repository below. Its
 # files are downloaded on demand from the upstream release - never mirrored,

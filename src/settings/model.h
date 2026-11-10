@@ -143,7 +143,7 @@ struct Choice {
 // `kHot` is never a design wish: a row carries it only with `strategy_evidence` non-empty and
 // naming what was observed (a log line, a capture, a game-state read). The direction of travel
 // is hot-first, and moving a row means measuring it.
-enum class ApplicationStrategy : uint8_t { kHot = 0, kRestart = 1 };
+enum class ApplicationStrategy : uint8_t { kHot = 0, kRestart = 1, kMenuReturn = 2 };
 
 // Completion boundary and runtime state are separate from the schema's proven strategy. The
 // existing snapshot fields retain their meanings; these fields describe application after save.

@@ -716,8 +716,13 @@ void ApplyHotRows(bool force_restart) {
 
   ::rb_blitz::settings::HotApplyPlan plan =
       ::rb_blitz::settings::PlanHotApplyByStrategy(changed);
+  if (!::rb_blitz::menu_filter::RuntimeMenuRefreshReady()) {
+    for (const auto& [id, value] : plan.deferred_menu) plan.pending_restart.push_back(id);
+    plan.deferred_menu.clear();
+  }
   if (force_restart) {
     plan.live.clear();
+    plan.deferred_menu.clear();
     plan.pending_restart.clear();
     for (const auto& [id, value] : changed) plan.pending_restart.push_back(id);
   }

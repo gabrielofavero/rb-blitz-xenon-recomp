@@ -133,8 +133,10 @@ function Test-PayloadSnapshotCurrent {
                 $reasons += "the snapshot was built for $was and the build tree is configured for $($ExpectedBackends -join ',')"
             }
         }
-        if ($ExpectedCommit.Length -gt 0 -and $manifest.Commit.Length -gt 0 -and
-            $manifest.Commit.ToLowerInvariant() -ne $ExpectedCommit.ToLowerInvariant()) {
+        if ($manifest.Commit.Length -gt 0 -and $ExpectedCommit.Length -eq 0) {
+            $reasons += 'the snapshot records a commit; workspace builds no longer record commits'
+        } elseif ($ExpectedCommit.Length -gt 0 -and $manifest.Commit.Length -gt 0 -and
+                  $manifest.Commit.ToLowerInvariant() -ne $ExpectedCommit.ToLowerInvariant()) {
             $reasons += "the snapshot says it is commit $($manifest.Commit) and this build is $ExpectedCommit"
         }
     }

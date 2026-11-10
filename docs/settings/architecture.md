@@ -1349,14 +1349,17 @@ items are left to the coordinator / a later UI pass, named in §6 rather than im
 
 ### 1. What this package is, and what it is not
 
-**Current application contract (2026-11-07):** the historical P9 description below predates
+**Current application contract (2026-11-09):** the historical P9 description below predates
 the [active hot-apply plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md).
 `ApplicationLedger` now tracks saved, running and pending values with now, menu-return,
 next-song and process-restart boundaries. The bridge applies only durably saved rows, including
 the native portion of a partial provider save; guest row/selection receipts and controller GPU
 tickets acknowledge deferred consumers. Display preview uses a recovery marker and authored
-Keep/Revert page. Window Mode is now immediate through that measured route; the remaining
-Ultimate and loaded-menu routes remain strategy-gated until their runtime acceptance passes.
+Keep/Revert page. Window Mode is immediate through that measured route. Play Current Song and
+Download Content now use `menu_return`: the loaded splash consumes their saved values and sends a
+guest receipt on the first returned frame. Other Ultimate and loaded-menu rows remain strategy-gated
+until their runtime acceptance passes. The [C2 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09)
+contains the game screenshots and receipts.
 
 §5.5 replaced "v1 is restart-only" with a per-row decision: a row is `hot` when its value can be applied to
 the **running** process **with a measured live effect**, `restart` otherwise. §8 then defines what happens
@@ -1365,8 +1368,8 @@ for the rest: save first, spawn exactly one child that waits for this process to
 | Piece | File | What it owns |
 | --- | --- | --- |
 | Strategy in the frozen model | `src/settings/model.h` | `Descriptor::strategy` + `strategy_evidence`, replacing the v1 `restart_scoped = true` constant |
-| The strategy table | `src/settings/schema.cpp` | One entry per `SettingId`, with the evidence string for a `hot` row |
-| The application seam | `src/settings/hot_apply.{h,cpp}` | Split a commit into "apply now" and "needs a new process"; never claim an apply that did not happen |
+| The strategy table | `src/settings/schema.cpp` | One entry per `SettingId`, with evidence for immediate and menu-return rows |
+| The application seam | `src/settings/hot_apply.{h,cpp}` | Split a commit into now, menu return and restart; never claim an apply before its receipt |
 | The runtime applier | `src/hooks/hot_apply_runtime.{h,cpp}` | The one place that knows **how** a hot row reaches the game |
 | The channel's live half | `src/hooks/settings_bridge_hooks.cpp` | After a durable commit: plan, apply, log, keep what did not take effect in the restart set |
 | The restart coordinator | `src/platform/game_restart.{h,cpp}` | Handoff token, argument rebuild, exactly-once request, spawn, wait, bootstrap |
@@ -1378,7 +1381,7 @@ It is **not** the authored restart prompt (§6.1) and **not** the boot wiring th
 
 `src/settings/schema.cpp` carries a single table (`kStrategies`), materialized into `Descriptor::strategy`
 by `BuildDescriptors` and read without a descriptor list by `schema::StrategyOf`. Tests assert the table is
-complete, that a `hot` row always carries evidence, that a `restart` row never does, and that it agrees
+complete, that `hot` and `menu_return` rows carry evidence, that a `restart` row never does, and that it agrees
 **row by row** with the provider adapter's own `RowBindings()` table
 (`tests/settings_hot_apply_tests.cpp`).
 

@@ -2185,13 +2185,11 @@ static void TestPayloadScripts() {
   CHECK_TRUE(last_check != std::string::npos);
   CHECK_TRUE(first_check < pack);
   CHECK_TRUE(last_check > pack);
-  CHECK_CONTAINS(build, "-ExpectedCommit $payloadCommit");
-  CHECK_CONTAINS(build, "'-Commit', $payloadCommit");
-  // A stale snapshot is rebuilt rather than kept, and keeping one anyway is the explicit
-  // -SkipPayload - which then says out loud what it kept.
+  CHECK_FALSE(build.find("Resolve-PayloadCommit") != std::string::npos);
+  CHECK_FALSE(build.find("-ExpectedCommit") != std::string::npos);
+  // A stale snapshot is rebuilt rather than kept.
   CHECK_CONTAINS(build, "rebuilding the snapshot from the build tree");
-  CHECK_CONTAINS(build, "-SkipPayload");
-  CHECK_CONTAINS(build, "the kept snapshot was not taken from this build tree");
+  CHECK_FALSE(build.find("-SkipPayload") != std::string::npos);
   CHECK_CONTAINS(build, "the payload snapshot does not match the build tree it was taken from");
 }
 

@@ -5,7 +5,7 @@
 //
 //   * the §5.5 classification (src/settings/schema.cpp) and its use by the application seam
 //     (src/settings/hot_apply.*), including the invariant the docs depend on - a `hot` row carries
-//     the evidence that earned it, and today no row has any;
+//     the evidence that earned it; menu-return rows carry their own observed boundary too;
 //   * the agreement between the schema's table and the provider adapter's own row table, which is
 //     what keeps the two from drifting apart as rows move.
 //
@@ -154,15 +154,18 @@ void StrategyTableIsComplete() {
       rb_blitz::settings::schema::Rows();
   CHECK_TRUE(rows.size() >= 30);
   int hot = 0;
+  int menu_return = 0;
   for (const rb_blitz::settings::schema::SchemaRow& row : rows) {
     const Descriptor& descriptor = row.descriptor;
     CHECK_TRUE(descriptor.id != SettingId::kUnknown);
     const bool valid = descriptor.strategy == ApplicationStrategy::kHot ||
+                       descriptor.strategy == ApplicationStrategy::kMenuReturn ||
                        descriptor.strategy == ApplicationStrategy::kRestart;
     CHECK_TRUE(valid);
-    if (descriptor.strategy == ApplicationStrategy::kHot) {
-      ++hot;
-      // The one rule the docs rest on: `hot` is evidence, never a wish.
+    if (descriptor.strategy != ApplicationStrategy::kRestart) {
+      if (descriptor.strategy == ApplicationStrategy::kHot) ++hot;
+      if (descriptor.strategy == ApplicationStrategy::kMenuReturn) ++menu_return;
+      // A non-restart strategy needs an observed consumer boundary.
       CHECK_FALSE(descriptor.strategy_evidence.empty());
     } else {
       // A restart row with evidence would be a row whose measurement was recorded but whose
@@ -178,6 +181,13 @@ void StrategyTableIsComplete() {
   // because its cvar was tagged reloadable (see src/settings/schema.cpp). A future session that
   // promotes another row must also record its evidence, and this expectation moves with it.
   CHECK_EQ(hot, 10);
+  CHECK_EQ(menu_return, 2);
+  for (const SettingId id : {SettingId::kPlayCurrentSong, SettingId::kHideDownloadContent}) {
+    const auto* row = rb_blitz::settings::schema::FindRow(id);
+    CHECK_TRUE(row != nullptr && row->descriptor.strategy == ApplicationStrategy::kMenuReturn);
+    CHECK_TRUE(row != nullptr && row->descriptor.strategy_evidence.find(" C2 ") !=
+                                    std::string::npos);
+  }
   for (const SettingId id : kRowsThatMustBeHot) {
     const rb_blitz::settings::schema::SchemaRow* row = rb_blitz::settings::schema::FindRow(id);
     CHECK_TRUE(row != nullptr);
@@ -257,6 +267,14 @@ void PlanSplitsByStrategy() {
   CHECK_EQ(plan.live.size(), 1);
   CHECK_EQ(plan.pending_restart.size(), 2);
   CHECK_EQ(plan.live.count(SettingId::kVsync), 1);
+
+  // A promoted menu row is queued for the guest's menu receipt and causes no restart prompt.
+  const auto menu = rb_blitz::settings::PlanHotApply(
+      {{SettingId::kPlayCurrentSong, Bool(false)}}, descriptors);
+  CHECK_EQ(menu.deferred_menu.size(), 1);
+  CHECK_TRUE(menu.live.empty());
+  CHECK_FALSE(menu.restart_needed());
+  CHECK_EQ(menu.size(), 1);
 
   // A row this build does not describe is never applied live.
   std::map<SettingId, Value> unknown;
@@ -514,17 +532,23 @@ void MixedBoundariesKeepIndependentPendingState() {
   using rb_blitz::settings::ApplyPhase;
   ApplicationLedger ledger;
   ledger.Seed({{SettingId::kVsync, Bool(true)}, {SettingId::kHideHud, Bool(false)},
+               {SettingId::kPlayCurrentSong, Bool(true)},
                {SettingId::kTarget, Enum("common")}});
   const auto now = ledger.Queue(8, {{SettingId::kVsync, Bool(false)}}, ApplyBoundary::kNow);
   const auto song = ledger.Queue(8, {{SettingId::kHideHud, Bool(true)}},
                                  ApplyBoundary::kNextSong);
+  const auto menu = ledger.Queue(8, {{SettingId::kPlayCurrentSong, Bool(false)}},
+                                 ApplyBoundary::kMenuReturn);
   ledger.Queue(8, {{SettingId::kTarget, Enum("ultimate")}},
                ApplyBoundary::kProcessRestart);
   CHECK_TRUE(ledger.Find(SettingId::kVsync)->phase == ApplyPhase::kQueued);
   CHECK_TRUE(ledger.Find(SettingId::kHideHud)->phase == ApplyPhase::kDeferred);
+  CHECK_TRUE(ledger.Find(SettingId::kPlayCurrentSong)->phase == ApplyPhase::kDeferred);
   CHECK_TRUE(ledger.Find(SettingId::kTarget)->phase == ApplyPhase::kDeferred);
   CHECK_EQ(ledger.PendingRestartRows().size(), 1u);
   ledger.Complete(SettingId::kVsync, now, HotApplyStatus::kApplied, Bool(false));
+  ledger.Complete(SettingId::kPlayCurrentSong, menu, HotApplyStatus::kApplied, Bool(false));
+  CHECK_TRUE(ledger.Find(SettingId::kPlayCurrentSong)->phase == ApplyPhase::kApplied);
   CHECK_TRUE(ledger.Find(SettingId::kVsync)->phase == ApplyPhase::kApplied);
   CHECK_TRUE(ledger.Find(SettingId::kHideHud)->phase == ApplyPhase::kDeferred);
   CHECK_EQ(ledger.PendingRestartRows().size(), 1u);
@@ -600,6 +624,8 @@ void StrategyTokensAreFrozen() {
   test::BeginCase("strategy: the two tokens are the plan's own words");
   CHECK_TRUE(std::string(rb_blitz::settings::ApplicationStrategyToken(
                  ApplicationStrategy::kHot)) == "hot");
+  CHECK_TRUE(std::string(rb_blitz::settings::ApplicationStrategyToken(
+                 ApplicationStrategy::kMenuReturn)) == "menu_return");
   CHECK_TRUE(std::string(rb_blitz::settings::ApplicationStrategyToken(
                  ApplicationStrategy::kRestart)) == "restart");
   // The bridge's per-row strategy reader (P11's cutover) has one vocabulary to compare against.

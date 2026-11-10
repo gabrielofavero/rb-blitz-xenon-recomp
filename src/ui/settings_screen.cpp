@@ -3780,14 +3780,15 @@ std::vector<std::pair<std::string, std::string>> Labels() {
   }
   // The Play Current Song entry is not a row of this surface, so its label is not derived from the
   // table above: the main menu draws the text of the symbol `kPlayCurrentRow`, which is a locale key
-  // of its own. Added only on the boot that builds the row, so a payload without the feature carries
-  // no string for a row no menu has.
-  if (g_configuration.play_current_song && !g_configuration.menu_music_songs.empty()) {
+  // of its own. The menu-return route builds the row even when it starts hidden,
+  // so its label must already be in the locale before the first live reveal.
+  if ((g_configuration.play_current_song || g_configuration.menu_refresh_trial) &&
+      !g_configuration.menu_music_songs.empty()) {
     add(kPlayCurrentRow, kPlayCurrentLabel);
   }
   // The restored Download Content entry (owner request, 2026-10-20) is the same kind of key: added
-  // only on the boot that builds the main-menu row.
-  if (g_configuration.download_content_row) {
+  // whenever the boot builds the row, including the initially hidden menu-return inventory.
+  if (g_configuration.download_content_row || g_configuration.menu_refresh_trial) {
     add(kDownloadContentRow, kDownloadContentLabel);
   }
   // The RhythmVerse entry (plan P1) is the same kind of key: only the boot that builds the

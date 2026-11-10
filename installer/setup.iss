@@ -10,25 +10,15 @@
 ; Build it with build.ps1, which compiles the helper, refreshes the payload
 ; snapshot and calls ISCC. See README.md.
 ;
-; The same script is compiled twice, and /DUpdaterMode decides which of the two
-; builds the result is (README.md, section "Updating"):
-;
-;   the setup executable, as before - it embeds (or downloads) the payload and
-;   asks for the game data, mod, and install locations, and it puts RockBandBlitzUpdater.exe under the
-;   user's local application data;
-;
-;   the updater - the same wizard with the payload taken from the release
-;   manifest instead of its own build, and with the pages it has no question
-;   about removed. Nothing starts it since Controller Settings retired
-;   (2026-10-19); it is built so the update machinery stays working, and it
-;   never carries a payload and never touches the install folder's shortcuts.
+; The current build produces one setup executable with the local game payload.
+; An old /DUpdaterMode path remains in the script for legacy reference, but is
+; not built, installed, or called by any current user path.
 ;
 ; The directories below can be overridden from the command line so a release can
 ; point at artefacts built elsewhere:
-;   /DGeneratedDir=<dir>  holds pins.iss, update.toml, a copy of the helper and
-;                         the updater the setup embeds
+;   /DGeneratedDir=<dir>  holds pins.iss and a copy of the helper
 ;   /DPayloadDir=<dir>    holds the recompiled build that gets embedded
-;   /DDistDir=<dir>       receives the setup executable (and the updater)
+;   /DDistDir=<dir>       receives the setup executable
 ;   /DArtDir=<dir>        optional side wizard image (default: the repository's
 ;                         assets\installer\ directory; see tools/make_art.ps1)
 ; ---------------------------------------------------------------------------
@@ -67,10 +57,7 @@
 ; release could have created; nothing else in the install folder is touched.
 #define ObsoleteControllerSettingsExeName "rb_blitz_controller_settings.exe"
 
-; The updater the setup executable places under the user's local application data
-; (see "Updating" in README.md). build.ps1 compiles it from this same script with
-; /DUpdaterMode=1 before the setup, so the setup can embed it - a build without it
-; is refused below rather than shipping an update path that cannot work.
+; Legacy updater name retained for the inactive /DUpdaterMode code path.
 #ifndef UpdaterExeName
   #define UpdaterExeName "RockBandBlitzUpdater.exe"
 #endif
@@ -94,11 +81,6 @@
   #error the helper is missing from the generated directory: build.ps1 copies it there.
 #endif
 
-#ifndef UpdaterMode
-  #if !FileExists(UpdaterExePath)
-    #error the updater is missing from the generated directory: build.ps1 compiles it before the setup.
-  #endif
-#endif
 
 ; Without a pinned download the recompiled build has to travel inside the setup
 ; executable, so the payload directory must have been made first. With a pinned
@@ -122,10 +104,7 @@
 [Setup]
 AppId={{92C7B4E1-3F5A-4D2E-9B18-7A6C4E0D5F31}
 AppName={#AppName}
-; What the wizard calls this build: the product plus the version of the recompiled
-; build inside it. It is the [installer] version unless build.ps1 was told to
-; record another payload version (tools/embed_config.cpp derives it). AppVersion
-; stays the numeric pins version, which is what the version resource needs.
+; The wizard, game and installed payload share [installer] version.
 AppVerName={#AppVerName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
@@ -158,7 +137,7 @@ DisableDirPage=no
 UsePreviousTasks=no
 ; An administrative install, because that is the mode autopf resolves to the system
 ; programs folder in: the default destination is the Rock Band Blitz folder there, where a
-; game belongs, and the setup, the uninstaller and the updater ask for the
+; game belongs, and the setup and uninstaller ask for the
 ; elevation the files there need. /CURRENTUSER is still honoured and installs under
 ; the user's own profile instead, which is what an unattended run that may not
 ; elevate has to pass.
@@ -272,11 +251,6 @@ Source: "{#GeneratedDirPath}{#HelperExeName}"; DestDir: "{app}"; Flags: ignoreve
 Source: "{#GeneratedDirPath}{#HelperExeName}"; DestDir: "{app}"; Flags: onlyifdoesntexist
 #endif
 #ifndef UpdaterMode
-; The updater, under the user's local application data rather than in the install
-; folder: the install folder is the game's own (the payload audit lists what may
-; ship in it). It is small - a wizard with no payload in it - and
-; [UninstallDelete] takes it away again.
-Source: "{#UpdaterExePath}"; DestDir: "{localappdata}\{#UpdateDirName}\update"; Flags: ignoreversion
   #if PayloadHasDownload == 0
 ; The recompiled build and its runtime DLLs, straight into the install folder.
 ; The payload directory is a plain snapshot of the release build (see
@@ -302,6 +276,9 @@ Name: "{autodesktop}\{#AppShortName}"; Filename: "{app}\{#GameExeName}"; Paramet
 Type: files; Name: "{app}\{#ObsoleteControllerSettingsExeName}"
 Type: files; Name: "{autoprograms}\{#ObsoleteControllerSettingsShortcutName}.lnk"
 Type: files; Name: "{autodesktop}\{#ObsoleteControllerSettingsShortcutName}.lnk"
+; Remove the updater installed by older releases; no current UI calls it and its
+; release manifest is no longer published.
+Type: filesandordirs; Name: "{localappdata}\{#UpdateDirName}\update"
 
 ; D8 replaced the single postinstall [Run] entry with the finish page's two-way
 ; choice (see [Code] below): Inno can run at most one entry with a checkbox, and
@@ -328,10 +305,7 @@ Type: files; Name: "{app}\game-source-details.txt"
 Type: files; Name: "{app}\install.log"
 Type: filesandordirs; Name: "{app}\.staging"
 Type: filesandordirs; Name: "{app}\{#GameDirName}\.staging"
-; The updater the setup placed under the user's local application data, and the
-; folder it lives in. It is outside the install folder on purpose (D19): a second
-; copy of an installer inside the game's own directory would be one more file the
-; payload audit has to allow.
+; Clean up the updater left by an older release on uninstall.
 Type: filesandordirs; Name: "{localappdata}\{#UpdateDirName}\update"
 Type: dirifempty; Name: "{app}"
 

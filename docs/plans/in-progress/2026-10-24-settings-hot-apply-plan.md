@@ -14,10 +14,10 @@ Window Mode is now the tenth immediate strategy; Resolution remains restart-scop
 | P3 | Negative feasibility gate for this implementation | `sub_823F3698` allocates the guest frame; `SetBootRenderFrame` is consumed during construction. Both SDK backends capture draw scale when creating render-target/texture/pipeline caches. Replacing those caches at a swap boundary would discard live EDRAM ownership and scaled resolves that ordinary cache clearing deliberately retains. No general migration or menu reset operation exists. The guest aspect patch is one-shot, and no ownership-safe live teardown of the screen object at `0x8298ACA8` was established. None of the scale/base/aspect transitions pass P3's safety preflight. Keep Resolution restart-scoped until retained GPU state can be migrated or proven obsolete, and a guest-screen reconstruction seam exists for base/aspect changes. |
 | P4 | No supported transition after P3 gate | A transactional scale operation needs a GPU-worker boundary, migration or proven invalidation of EDRAM and scaled resolves on both backends, shader/pipeline regeneration, failure rollback, and matching presentation/window updates. Base/aspect changes additionally need guest-frame reconstruction. No safe live render reconfiguration is implemented. |
 | P5 | Guarded next-song and Personal Best selection routes delivered; Timer cycle and All HUD hide observed | All 17 provider-file bindings retain restart strategy. The bridge serves only durably committed values for active compatible Ultimate. With `--settings_ultimate_refresh_trial=true`, seven player-facing HUD/visual rows are assigned at the start of the installed `ulti_game_enter` record, before its original construction commands. A separate guarded Personal Best assignment runs at song-selection entry before both identified consumers. Each guarded assignment reports a row receipt. A disposable run hid Timer on the next song and restored it on a third song. Another run hid All HUD Elements from in-song Help & Options; the next song visibly lost the score, timer and left HUD meter with matching guest acknowledgments. Personal Best's visible effect, individual provider consumers, later provider saves, restart survival and Game Speed synchronization remain unverified. |
-| P6 | Loaded menu/header route enabled; one live row cycle passed | Every boot publishes durable visibility changes and installs loaded splash and header refresh records. Header refresh covers all eight Messages/Recommendations/RhythmVerse masks, positions, badges, LT/RT Flow and offline style. On 2026-11-07 a disposable D3D12 run hid and restored LEADERBOARDS on the first returned splash frame, with saved revisions and guest acknowledgments matching both changes. The refresh now runs after `splash_screen` calls the retail `check_trial`, which previously overwrote it. Other rows, repeated cycles, selected-row recovery, input paths and header visuals remain unverified; schema stays restart-scoped. RhythmVerse master stays boot-seeded. |
+| P6 | Loaded menu/header route enabled; two shortcuts promoted | Every boot publishes durable visibility changes and installs loaded splash and header refresh records. On 2026-11-09 a rebuilt disposable D3D12 run showed and hid Download Content and hid and restored Play Current Song on the first returned splash frames; guest receipts matched. All eight header masks were captured across Store Access on/off boots. Refresh Songs also appeared and disappeared at menu return. Download Content and Play Current Song now have menu-return strategies. Main Menu selection recovery, keyboard/controller header navigation, Search entry and badge remain open; the other menu/header rows stay restart-scoped. RhythmVerse master stays boot-seeded. |
 | P7 | Static candidate audit complete; no promotions | DLC Menu Songs constructs its pool and stream mounts at Configure; Scan Threads is captured by the DLC worker; Unlock All is boot-seeded; Hide Achievements is captured by dialog construction. Filtering samplers and native MSAA use backend caches, while FXAA has a live SDK method but no verified settings applier. Exact read sites are recorded below; all remain restart-scoped pending an owned live boundary. |
 
-**Current strategy count:** 10 immediate, 0 menu-return, 0 next-song, 38 restart. P0's
+**Current strategy count:** 10 immediate, 2 menu-return, 0 next-song, 36 restart. P0's
 9/0/0/39 baseline and later dated records below describe the state before Window Mode promotion.
 
 The D3D12 and Vulkan display runs above used disposable profiles. C1 placement/input passed
@@ -818,6 +818,47 @@ loaded owners and reversal can be bounded within this route.
 **Exit:** promote each row to menu-return only after its first visible frame and reversal pass;
 leave other rows restart-scoped with a named failed or unverified gate. Record guest receipts,
 screen evidence and the resulting strategy counts.
+
+#### C2 validation — 2026-11-09
+
+- A disposable D3D12 profile under `out/_swap/hot-settings/c2-2026-11-09-fix/` used the current
+  Release executable and the installed game data. The preceding run in
+  `out/_swap/hot-settings/c2-2026-11-09/` exposed a missing locale entry: revealing an initially
+  hidden Download Content row drew `SPLASH_DLC_STORE`. `src/ui/settings_screen.cpp` now supplies
+  that label and Play Current Song's label when the menu-return inventory contains an initially
+  hidden row. `tests/settings_screen_tests.cpp` covers both cases. On the rebuilt first return,
+  `shots/04-download-visible.png` reads `DOWNLOAD CONTENT`; `05-download-hidden.png` is the
+  reversal. `06-refresh-visible-pcs-hidden.png` and `07-refresh-hidden-pcs-visible.png` show the
+  Refresh Songs and Play Current Song reverse pair. The prior LEADERBOARDS hide/show remains in
+  the 2026-11-07 record above. The test log records menu-return `consumer` and `ack ... applied`
+  receipts for the changed rows. The Help & Options entry remained reachable after each return.
+- `shots/08-header-m0-r1.png`, `13-header-m1-r1.png`, `14-header-m0-r0.png` and
+  `15-header-m1-r0.png` cover all four Messages/Recommendations states with RhythmVerse enabled.
+  After confirming Store Access Off and restarting the disposable profile,
+  `25-header-store0-m1-r0.png` through `28-header-store0-m0-r0.png` cover the other four masks.
+  Labels disappear and return at compact positions. A direct mouse click entered Recommendations
+  (`11-recommended.png`), and Back returned to the main menu (`12-recommended-back.png`).
+- Play Current Song and Download Content earned `menu_return` in `src/settings/schema.cpp`; the
+  split, ledger and guest completion boundary now carry that strategy instead of a restart
+  fallback when the loaded route is ready. The resulting count is 10 immediate, 2 menu-return,
+  0 next-song, 36 restart. The runtime falls back to restart when the loaded route is unavailable.
+  Refresh Songs remains restart-scoped because its edit also rewrites the shared hidden-row list;
+  the group needs its own complete acceptance. Main Menu hide-list entries beyond LEADERBOARDS,
+  selected-row removal/focus recovery, repeated cycles for all rows, controller input, Search
+  entry and unread-message badge remain unverified. Injected Page Down did not navigate the
+  header (`09-header-pagedown.png`); verify the actual keyboard/controller binding before
+  promoting Messages or Recommendations. Currency, Background Music Navigation and Music Player
+  have no bounded loaded-owner reversal in this pass and remain restart-scoped.
+- After the strategy change, `cmake --build --preset win-amd64-release --parallel 1` passed.
+  Focused CTest (`menu_payload`, `settings_screen`, `settings_service`, `settings_hot_apply`,
+  `settings_bridge_service`, `menu_compat`) passed 6/6; the installed runtime-header check passed
+  114 checks. The final disposable run in `out/_swap/hot-settings/c2-2026-11-09-promoted/` showed
+  Download Content while removing Play Current Song (`shots/01-promoted-apply.png`), then reversed
+  both (`shots/02-promoted-reversal.png`). Its log records `boundary=menu_return` requests and
+  matching guest `consumer` and `ack ... applied` receipts in both directions, without a process
+  restart. `check_docs.py` reported zero errors and 194 warnings; `git diff --check`
+  passed. C2's measured promotions are complete; the named unverified gates above keep the other
+  rows at restart. C3–C5 remain in this in-progress plan.
 
 ### C3 — Finish Ultimate values at their real boundary
 
