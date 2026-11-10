@@ -136,6 +136,8 @@ HotApplyPlan PlanHotApply(const std::map<SettingId, Value>& changed,
       plan.live[id] = value;
     } else if (strategy == ApplicationStrategy::kMenuReturn) {
       plan.deferred_menu[id] = value;
+    } else if (strategy == ApplicationStrategy::kNextSong) {
+      plan.deferred_song[id] = value;
     } else {
       plan.pending_restart.push_back(id);
     }
@@ -151,6 +153,8 @@ HotApplyPlan PlanHotApplyByStrategy(const std::map<SettingId, Value>& changed) {
       plan.live[id] = value;
     } else if (strategy == ApplicationStrategy::kMenuReturn) {
       plan.deferred_menu[id] = value;
+    } else if (strategy == ApplicationStrategy::kNextSong) {
+      plan.deferred_song[id] = value;
     } else {
       plan.pending_restart.push_back(id);
     }

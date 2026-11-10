@@ -34,16 +34,17 @@ Part 1 wherever they disagree.
   and showed and hid Refresh Songs on menu return. All eight Messages/Recommendations/RhythmVerse
   header masks were captured across two Store Access boot states. Initially hidden Download Content
   now has its locale label ready for live reveal. Play Current Song and Download Content have
-  menu-return strategies (10 immediate, 2 menu-return, 0 next-song, 36 restart); the broader Main
+  menu-return strategies; after C3 Timer is next-song (10 immediate, 2 menu-return, 1 next-song,
+  35 restart). The broader Main
   Menu hide-list group, header input/Search/badge checks and other menu candidates remain open.
   Evidence and limits are in the [C2 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09).
-  `--settings_ultimate_refresh_trial=true` guards committed
-  Ultimate assignments and seven next-song HUD/visual refreshes; per-row receipts now prevent a
-  skipped assignment from being acknowledged. A disposable same-process run hid Timer on the next
-  song and restored it on a third song, with matching guest acknowledgments. Other provider rows,
-  later provider saves and restart persistence remain unverified. Window Mode is now the tenth
-  immediate strategy through the authored preview/Keep route; Ultimate rows and the remaining
-  loaded-menu rows stay restart-scoped until their advertised boundaries pass acceptance.
+  `--settings_ultimate_refresh_trial=true` guards the remaining Ultimate next-song HUD/visual
+  assignments; per-row receipts prevent a skipped assignment from being acknowledged. C3's
+  production run with that flag off hid Timer at the next song from main-menu Help & Options,
+  restored it at the next song from in-song Help & Options, and matched guest acknowledgments
+  to both HUD states. A later provider save retained Timer, and the same profile showed its
+  Visible value after restart. Timer is the sole Ultimate next-song strategy. Other Ultimate
+  rows and the remaining loaded-menu rows stay restart-scoped until their boundaries pass acceptance.
 
   The 2026-11-07 host follow-up adds a guarded Personal Best assignment before
   the song-selection panel reads it, with a per-row guest receipt and an
@@ -52,6 +53,18 @@ Part 1 wherever they disagree.
   native row after a partial provider-save failure, and keeps display recovery
   active until its marker is removed. These changes have host checks only;
   Personal Best's visible hide/show cycle remains unverified.
+
+  On 2026-11-09, C3 added a guarded construction trial to the installed scoring,
+  track and plot records for Precision Mode, Track Wiggles, Plots, Force Plot and
+  Force Skybox. The installed-record host tests pass, and each assignment can
+  log a guest receipt when the Ultimate trial flag is on. Whether these records
+  rerun at the next song and whether each choice changes the consumer remain
+  unverified. The owner authorized agent-driven game/UI checks. The construction records
+  yielded no next-song assignment receipts after Precision Mode, Track Wiggles and Disable
+  Plots were staged and a song entered in the same process; scenery remained visible with
+  Disable Plots staged. The Personal Best and Song Progress Bar visual effects were not
+  isolated. Those rows stay restart-scoped.
+  See [C3](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c3-implementation-and-runtime-validation--2026-11-09).
 
 - **Refresh Songs default (2026-10-28):** the main-menu shortcut defaults Off in both the settings
   schema and its cvar. Existing saved On choices still take effect.

@@ -3,8 +3,11 @@
 
 #include <chrono>
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <set>
+#include <span>
+#include <utility>
 #include <rex/cvar.h>
 #include <rex/runtime.h>
 #include <rex/logging.h>
@@ -445,6 +448,29 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
     }
     if (!song_entry_patched)
       REXLOG_WARN("settings_menu: Ultimate song-entry refresh unavailable: {}", reason);
+    // These scripts own the construction expressions for five more rows. Install a guarded
+    // trial before each original record; a receipt will show whether that record actually runs
+    // after a same-process edit. Nothing here changes the row's restart strategy.
+    for (const auto& [path, tokens] : std::array{
+             std::pair{"config/gen/scoring.dtb",
+                       std::span<const std::string_view>(ultimate_runtime::kScoringTokens)},
+             std::pair{"config/gen/track.dtb",
+                       std::span<const std::string_view>(ultimate_runtime::kTrackTokens)},
+             std::pair{"config/gen/plot_info.dtb",
+                       std::span<const std::string_view>(ultimate_runtime::kPlotTokens)}}) {
+      Bytes original;
+      std::string trial_reason;
+      if (read(path, &original, &trial_reason)) {
+        Bytes patched;
+        if (ultimate_runtime::PatchConstructionRecord(original, tokens, &patched, &trial_reason)) {
+          records[path] = std::move(patched);
+          REXLOG_INFO("settings_menu: Ultimate construction trial installed at '{}'", path);
+          continue;
+        }
+      }
+      REXLOG_WARN("settings_menu: Ultimate construction trial unavailable at '{}': {}",
+                  path, trial_reason);
+    }
     constexpr char kSongSelection[] = "ui/song_select/gen/song_select.dtb";
     if (const auto found = records.find(kSongSelection); found != records.end()) {
       Bytes patched;

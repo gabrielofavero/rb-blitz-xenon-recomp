@@ -330,7 +330,9 @@ const std::vector<RowBinding>& AllBindings() {
       {SettingId::kProgressBar, "interface.progressbar", "progressbar", RowKind::kBool,
        Strategy::kRestart, ""},
       {SettingId::kShowTimer, "interface.show_timer", "show_timer", RowKind::kBool,
-       Strategy::kRestart, ""},
+       Strategy::kNextSong,
+       "C3 2026-11-09: Hidden at next song and Visible after in-song reversal; guest song-entry "
+       "receipts and restart readback in docs/plans/in-progress/2026-10-24-settings-hot-apply-plan.md"},
       {SettingId::kShowPb, "interface.show_pb", "show_pb", RowKind::kBool, Strategy::kRestart, ""},
       {SettingId::kShowSteak, "interface.show_steak", "show_steak", RowKind::kBool,
        Strategy::kRestart, ""},

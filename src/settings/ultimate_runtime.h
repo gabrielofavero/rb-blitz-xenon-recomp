@@ -9,6 +9,7 @@
 #include <cstring>
 #include <map>
 #include <optional>
+#include <span>
 #include <set>
 #include <string>
 #include <string_view>
@@ -28,6 +29,25 @@ inline constexpr std::string_view kSongSetPrefix = "rbbz-ultimate/song-set/";
 inline constexpr std::string_view kSelectionTrialQuery = "rbbz-ultimate/selection-trial";
 inline constexpr std::string_view kSelectionSetQuery = "rbbz-ultimate/selection-set/show_pb";
 inline constexpr std::string_view kSelectionAppliedQuery = "rbbz-ultimate/selection-applied";
+inline constexpr std::string_view kConstructionSetPrefix = "rbbz-ultimate/construction-set/";
+
+inline constexpr std::array<std::string_view, 1> kScoringTokens = {
+    "gameplay.precision_mode"};
+inline constexpr std::array<std::string_view, 1> kTrackTokens = {
+    "gameplay.disable_random_wiggles"};
+inline constexpr std::array<std::string_view, 3> kPlotTokens = {
+    "gameplay.disable_plots", "gameplay.forceplot", "gameplay.which_skybox"};
+
+inline bool IsConstructionBinding(const ultimate_adapter::RowBinding& binding) {
+  const auto has = [&](std::span<const std::string_view> tokens) {
+    return std::find(tokens.begin(), tokens.end(), binding.token) != tokens.end();
+  };
+  return has(kScoringTokens) || has(kTrackTokens) || has(kPlotTokens);
+}
+
+inline std::string ConstructionSetPath(std::string_view token) {
+  return std::string(kConstructionSetPrefix) + std::string(token);
+}
 
 // These eight provider globals are read by the installed ulti_game_enter record while it builds
 // the HUD, camera or gem visuals. Other provider settings have different or untraced consumers.
@@ -55,8 +75,16 @@ inline bool SelectionRouteReady() {
 inline bool CanRunSongEntry(const ultimate_adapter::ProviderRuntime& provider,
                             bool route_ready, bool trial_enabled,
                             bool bridge_enabled, bool forward_only) {
-  return bridge_enabled && !forward_only && trial_enabled && route_ready &&
+  (void)trial_enabled;
+  return bridge_enabled && !forward_only && route_ready &&
          provider.Active() && provider.shape.ok;
+}
+
+inline bool CanRunTrial(const ultimate_adapter::ProviderRuntime& provider,
+                        bool route_ready, bool trial_enabled,
+                        bool bridge_enabled, bool forward_only) {
+  return trial_enabled && CanRunSongEntry(provider, route_ready, trial_enabled,
+                                          bridge_enabled, forward_only);
 }
 
 inline bool IsSongEntryBinding(const ultimate_adapter::RowBinding& binding) {
@@ -72,10 +100,12 @@ inline std::string SongSetPath(std::string_view token) {
 // assignment ran. A failed value guard must leave the row deferred for a later song or restart.
 class SongEntryReceipt {
  public:
-  void Queue(const std::map<SettingId, Value>& changed, uint64_t revision) {
+  void Queue(const std::map<SettingId, Value>& changed, uint64_t revision,
+             bool trial_enabled = true) {
     for (const auto token : kSongEntryTokens) {
       const auto* binding = ultimate_adapter::BindingForToken(token);
       if (!binding || binding->id == SettingId::kLetterbox ||
+          (!trial_enabled && binding->id != SettingId::kShowTimer) ||
           changed.find(binding->id) == changed.end()) continue;
       pending_[binding->id] = revision;
       witnessed_.erase(binding->id);
@@ -280,6 +310,55 @@ inline ui::dtb::Node SongEntryAssignmentFor(const ultimate_adapter::RowBinding& 
   return guarded;
 }
 
+// This trial is installed in the original scoring, track and plot records, before their own
+// expressions read the provider globals. It does not claim those records reload every song: the
+// receipt only proves the assignment ran, and the row stays restart-scoped pending a game check.
+inline bool PatchConstructionRecord(const std::vector<uint8_t>& source,
+                                    std::span<const std::string_view> tokens,
+                                    std::vector<uint8_t>* patched,
+                                    std::string* reason = nullptr) {
+  using ui::dtb::Node;
+  const auto fail = [&](const char* why) {
+    if (reason) *reason = why;
+    return false;
+  };
+  if (!patched || tokens.empty()) return fail("no construction output or bindings");
+  std::vector<Node> roots;
+  ui::dtb::RootHeader header;
+  std::string parse_error;
+  if (!ui::dtb::Parse(source.data(), source.size(), &roots, &header, &parse_error) || roots.empty())
+    return fail("cannot parse construction record");
+  const auto reads_var = [](const auto& self, const Node& node, std::string_view variable) -> bool {
+    if (node.tag == ui::dtb::kVar && node.text == variable) return true;
+    return std::any_of(node.kids.begin(), node.kids.end(), [&](const Node& child) {
+      return self(self, child, variable);
+    });
+  };
+  std::vector<Node> assignments{Node::Symbol("do")};
+  for (const auto token : tokens) {
+    const auto* binding = ultimate_adapter::BindingForToken(token);
+    if (!binding || !IsConstructionBinding(*binding))
+      return fail("unknown construction binding");
+    if (!std::any_of(roots.begin(), roots.end(), [&](const Node& root) {
+          return reads_var(reads_var, root, binding->variable);
+        })) return fail("construction consumer is absent from installed record");
+    Node guarded = GuestAssignmentFor(*binding);
+    Node assignment = std::move(guarded.kids[2]);
+    guarded.kids[2] = Node::Command({
+        Node::Symbol("do"), std::move(assignment),
+        Node::Command({Node::Symbol("file_exists"),
+                       Node::String(ConstructionSetPath(token))})});
+    assignments.push_back(std::move(guarded));
+  }
+  roots.insert(roots.begin(), Node::Command({
+      Node::Symbol("if"),
+      Node::Command({Node::Symbol("file_exists"), Node::String(kTrialQuery)}),
+      Node::Command(std::move(assignments))}));
+  *patched = ui::dtb::Compile(roots, header);
+  if (reason) reason->clear();
+  return true;
+}
+
 inline bool PatchSongSelectionRecord(const std::vector<uint8_t>& source,
                                      std::vector<uint8_t>* patched,
                                      std::string* reason = nullptr) {
@@ -372,25 +451,28 @@ inline bool PatchSongEntryRecord(const std::vector<uint8_t>& source,
   if (!std::any_of(roots.begin(), roots.end(), [&](const Node& root) {
         return has_timer_consumer(has_timer_consumer, root);
       })) return fail("timer visibility consumer is absent from installed record");
-  std::vector<Node> assignments{
-      Node::Symbol("do"),
-      Node::Command({Node::Symbol("file_exists"), Node::String(kSongBeginQuery)})};
+  std::vector<Node> assignments{Node::Symbol("do")};
   for (const auto token : kSongEntryTokens) {
     const auto* binding = ultimate_adapter::BindingForToken(token);
     if (binding == nullptr) return fail("missing song-entry binding");
     if (!std::any_of(roots.begin(), roots.end(), [&](const Node& root) {
           return contains_var(contains_var, root, binding->variable);
         })) return fail("song-entry consumer is absent from installed record");
-    assignments.push_back(SongEntryAssignmentFor(*binding));
+    if (binding->id != SettingId::kShowTimer)
+      assignments.push_back(SongEntryAssignmentFor(*binding));
   }
+  const auto* timer = ultimate_adapter::BindingForToken("interface.show_timer");
+  if (!timer) return fail("missing Timer binding");
   roots.insert(roots.begin(), Node::Command({
       Node::Symbol("if"),
       Node::Command({Node::Symbol("file_exists"), Node::String(kTrialQuery)}),
       Node::Command(std::move(assignments))}));
-  roots.push_back(Node::Command({
+  roots.insert(roots.begin(), Node::Command({
       Node::Symbol("if"),
-      Node::Command({Node::Symbol("file_exists"), Node::String(kTrialQuery)}),
-      Node::Command({Node::Symbol("file_exists"), Node::String(kSongAppliedQuery)})}));
+      Node::Command({Node::Symbol("file_exists"), Node::String(kSongBeginQuery)}),
+      SongEntryAssignmentFor(*timer)}));
+  roots.push_back(Node::Command({
+      Node::Symbol("file_exists"), Node::String(kSongAppliedQuery)}));
   *patched = ui::dtb::Compile(roots, header);
   if (reason) reason->clear();
   return true;

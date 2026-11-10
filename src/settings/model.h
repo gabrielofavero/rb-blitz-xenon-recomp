@@ -137,13 +137,16 @@ struct Choice {
 // acceptance matrix and the docs read one table instead of three prose claims.
 //
 //   kHot      the value can be applied to the running process with a **measured** live effect.
+//   kMenuReturn  the guest acknowledges the value on its next menu entry.
+//   kNextSong    the guest acknowledges the value at the next song entry.
 //   kRestart  it is persisted and takes effect in a new process. This is the default, and the
 //             honest answer for a row nothing has been measured for.
 //
-// `kHot` is never a design wish: a row carries it only with `strategy_evidence` non-empty and
+// A non-restart strategy is never a design wish: a row carries it only with `strategy_evidence` non-empty and
 // naming what was observed (a log line, a capture, a game-state read). The direction of travel
 // is hot-first, and moving a row means measuring it.
-enum class ApplicationStrategy : uint8_t { kHot = 0, kRestart = 1, kMenuReturn = 2 };
+enum class ApplicationStrategy : uint8_t { kHot = 0, kRestart = 1, kMenuReturn = 2,
+                                           kNextSong = 3 };
 
 // Completion boundary and runtime state are separate from the schema's proven strategy. The
 // existing snapshot fields retain their meanings; these fields describe application after save.

@@ -74,11 +74,12 @@ class HotApplier {
 struct HotApplyPlan {
   std::map<SettingId, Value> live;         // `kHot` rows: apply now
   std::map<SettingId, Value> deferred_menu; // `kMenuReturn` rows: await guest menu receipt
+  std::map<SettingId, Value> deferred_song; // `kNextSong` rows: await guest song-entry receipt
   std::vector<SettingId> pending_restart;  // `kRestart` rows: the §8 prompt covers these
 
-  bool empty() const { return live.empty() && deferred_menu.empty() && pending_restart.empty(); }
+  bool empty() const { return live.empty() && deferred_menu.empty() && deferred_song.empty() && pending_restart.empty(); }
   bool restart_needed() const { return !pending_restart.empty(); }
-  size_t size() const { return live.size() + deferred_menu.size() + pending_restart.size(); }
+  size_t size() const { return live.size() + deferred_menu.size() + deferred_song.size() + pending_restart.size(); }
 };
 
 // What one live application did.

@@ -213,10 +213,11 @@ ProviderReadiness Readiness(bool payload_present, bool active_target, const Shap
 // 4. The rows: P5b's frozen identity, bound to the provider's own vocabulary
 // ------------------------------------------------------------------------------------------------
 // §5.5: `kHot` requires an observed live effect in a boot; nothing is measured for a provider row
-// today, so every one of them is `kRestart` and the table says so with an empty evidence string.
-// The direction of travel is hot-first, and moving a row means measuring it, not asserting it.
+// initially, so they began as `kRestart` with an empty evidence string. Timer is now
+// `kNextSong` after a measured guest receipt and visible reversal. Moving another row means
+// measuring it, not asserting it.
 
-enum class Strategy : uint8_t { kHot, kRestart };
+enum class Strategy : uint8_t { kHot, kRestart, kNextSong };
 
 struct RowBinding {
   SettingId id = SettingId::kUnknown;

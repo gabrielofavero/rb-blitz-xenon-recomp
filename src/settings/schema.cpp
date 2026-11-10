@@ -522,7 +522,9 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kHideHud, ApplicationStrategy::kRestart, ""},
     {SettingId::kGoldProgress, ApplicationStrategy::kRestart, ""},
     {SettingId::kProgressBar, ApplicationStrategy::kRestart, ""},
-    {SettingId::kShowTimer, ApplicationStrategy::kRestart, ""},
+    {SettingId::kShowTimer, ApplicationStrategy::kNextSong,
+     "C3 2026-11-09: Hidden at next song and Visible after in-song reversal; guest song-entry "
+     "receipts and restart readback in docs/plans/in-progress/2026-10-24-settings-hot-apply-plan.md"},
     {SettingId::kShowPb, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowSteak, ApplicationStrategy::kRestart, ""},
     {SettingId::kInputViewer, ApplicationStrategy::kRestart, ""},

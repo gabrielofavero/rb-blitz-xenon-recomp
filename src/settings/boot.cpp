@@ -1237,6 +1237,7 @@ uint64_t SettingsBoot::NoteCommittedRows(const std::map<SettingId, Value>& chang
   const uint64_t live_generation = application_ledger_.Queue(revision, plan.live,
                                                               ApplyBoundary::kNow);
   application_ledger_.Queue(revision, plan.deferred_menu, ApplyBoundary::kMenuReturn);
+  application_ledger_.Queue(revision, plan.deferred_song, ApplyBoundary::kNextSong);
   std::map<SettingId, Value> restart;
   for (SettingId id : plan.pending_restart) {
     if (const auto value = changed.find(id); value != changed.end()) restart[id] = value->second;
@@ -1333,7 +1334,8 @@ void SettingsBoot::NoteNextSongRows(const std::map<SettingId, Value>& changed,
       !service_->capabilities().provider.compatible) return;
   std::map<SettingId, Value> deferred;
   for (const auto& [id, value] : changed)
-    if (NextSongRefreshOwns(id) && !service_->IsOverridden(id)) deferred[id] = value;
+    if (NextSongRefreshOwns(id) && schema::StrategyOf(id) == ApplicationStrategy::kRestart &&
+        !service_->IsOverridden(id)) deferred[id] = value;
   if (deferred.empty()) return;
   application_ledger_.Queue(revision, deferred, ApplyBoundary::kNextSong);
   for (const auto& [id, value] : deferred) {

@@ -15,12 +15,14 @@
 // SDK-free: `src/settings/ultimate_adapter.cpp` plus the two UI modules the DTB parser needs.
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <span>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -252,10 +254,13 @@ void TestBindings() {
     CHECK_FALSE(bindings[i].token.empty());
     CHECK_FALSE(bindings[i].variable.empty());
     CHECK_TRUE(bindings[i].id != SettingId::kUnknown);
-    // §5.5: nothing is hot until a live effect has been *observed*, so every provider row ships
-    // as restart with an empty evidence string. A row that becomes hot has to say why.
-    CHECK_TRUE(bindings[i].strategy == Strategy::kRestart);
-    CHECK_TRUE(bindings[i].evidence.empty());
+    if (bindings[i].id == SettingId::kShowTimer) {
+      CHECK_TRUE(bindings[i].strategy == Strategy::kNextSong);
+      CHECK_FALSE(bindings[i].evidence.empty());
+    } else {
+      CHECK_TRUE(bindings[i].strategy == Strategy::kRestart);
+      CHECK_TRUE(bindings[i].evidence.empty());
+    }
     for (size_t j = i + 1; j < bindings.size(); ++j) {
       CHECK_FALSE(bindings[i].token == bindings[j].token);
       CHECK_FALSE(bindings[i].variable == bindings[j].variable);
@@ -304,7 +309,8 @@ void TestRuntimeCommands() {
   CHECK_TRUE(runtime.shape.ok);
   CHECK_TRUE(CanRunSongEntry(runtime, true, true, true, false));
   CHECK_FALSE(CanRunSongEntry(runtime, false, true, true, false));
-  CHECK_FALSE(CanRunSongEntry(runtime, true, false, true, false));
+  CHECK_TRUE(CanRunSongEntry(runtime, true, false, true, false));
+  CHECK_FALSE(CanRunTrial(runtime, true, false, true, false));
   CHECK_FALSE(CanRunSongEntry(runtime, true, true, false, false));
   CHECK_FALSE(CanRunSongEntry(runtime, true, true, true, true));
   RuntimeValue result;
@@ -425,6 +431,47 @@ void TestRuntimeCommands() {
     }));
   }
   {
+    rb_blitz::test::BeginCase("Ultimate construction trials preserve installed consumers");
+    for (const auto& [path, tokens] : std::array{
+             std::pair{"assets/game/360/config/gen/scoring.dtb",
+                       std::span<const std::string_view>(kScoringTokens)},
+             std::pair{"assets/game/360/config/gen/track.dtb",
+                       std::span<const std::string_view>(kTrackTokens)},
+             std::pair{"assets/game/360/config/gen/plot_info.dtb",
+                       std::span<const std::string_view>(kPlotTokens)}}) {
+      std::filesystem::path source;
+      for (auto root = std::filesystem::current_path(); !root.empty();) {
+        const auto candidate = root / path;
+        if (std::filesystem::exists(candidate)) { source = candidate; break; }
+        const auto parent = root.parent_path();
+        if (parent == root) break;
+        root = parent;
+      }
+      std::vector<uint8_t> bytes, patched;
+      std::string error;
+      CHECK_TRUE(ReadFileBytes(source, &bytes, &error));
+      CHECK_TRUE(PatchConstructionRecord(bytes, tokens, &patched, &error));
+      std::vector<Node> before, after;
+      rb_blitz::ui::dtb::RootHeader header;
+      CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &before, &header, &error));
+      CHECK_TRUE(rb_blitz::ui::dtb::Parse(patched.data(), patched.size(), &after, &header, &error));
+      CHECK_EQ(after.size(), before.size() + 1);
+      if (after.size() == before.size() + 1) {
+        CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(before) ==
+                   rb_blitz::ui::dtb::SerializeNodes(
+                       std::vector<Node>(after.begin() + 1, after.end())));
+        CHECK_TRUE(after.front().kids[1].kids[1].text == kTrialQuery);
+        CHECK_EQ(after.front().kids[2].kids.size(), tokens.size() + 1);
+        for (size_t i = 0; i < tokens.size(); ++i)
+          CHECK_TRUE(after.front().kids[2].kids[i + 1].kids[2].kids[2].kids[1].text ==
+                     ConstructionSetPath(tokens[i]));
+      }
+      const std::array<std::string_view, 1> unrelated{"interface.show_timer"};
+      CHECK_FALSE(PatchConstructionRecord(bytes, unrelated, &patched, &error));
+      CHECK_FALSE(PatchConstructionRecord({}, tokens, &patched, &error));
+    }
+  }
+  {
     std::filesystem::path entry;
     for (auto root = std::filesystem::current_path(); !root.empty();) {
       const auto candidate = root / "assets/game/360/ulti/gen/ulti_game_enter.dtb";
@@ -443,21 +490,25 @@ void TestRuntimeCommands() {
     CHECK_TRUE(rb_blitz::ui::dtb::Parse(bytes.data(), bytes.size(), &before, &header, &error));
     CHECK_TRUE(rb_blitz::ui::dtb::Parse(patched.data(), patched.size(), &after, &header, &error));
     CHECK_EQ(before.size(), 3u);
-    CHECK_EQ(after.size(), 5u);
-    if (after.size() == 5 && before.size() == 3) {
+    CHECK_EQ(after.size(), 6u);
+    if (after.size() == 6 && before.size() == 3) {
       CHECK_TRUE(rb_blitz::ui::dtb::SerializeNodes(before) ==
-                 rb_blitz::ui::dtb::SerializeNodes({after[1], after[2], after[3]}));
-      CHECK_TRUE(after.front().kids[1].kids[1].text == kTrialQuery);
-      CHECK_EQ(after.front().kids[2].kids.size(), kSongEntryTokens.size() + 2);
-      CHECK_TRUE(after.front().kids[2].kids[1].kids[1].text == kSongBeginQuery);
+                 rb_blitz::ui::dtb::SerializeNodes({after[2], after[3], after[4]}));
+      CHECK_TRUE(after.front().kids[1].kids[1].text == kSongBeginQuery);
+      CHECK_TRUE(after[1].kids[1].kids[1].text == kTrialQuery);
+      CHECK_EQ(after[1].kids[2].kids.size(), kSongEntryTokens.size());
+      CHECK_TRUE(after.front().kids[2].kids[2].kids[2].kids[1].text ==
+                 SongSetPath("interface.show_timer"));
       for (size_t i = 0; i < kSongEntryTokens.size(); ++i) {
-        const Node& guarded = after.front().kids[2].kids[i + 2];
+        if (kSongEntryTokens[i] == "interface.show_timer") continue;
+        const size_t trial_index = i < 1 ? i + 1 : i;
+        const Node& guarded = after[1].kids[2].kids[trial_index];
         CHECK_TRUE(guarded.kids.size() == 3);
         CHECK_TRUE(guarded.kids[2].kids.size() == 3);
         CHECK_TRUE(guarded.kids[2].kids[2].kids[1].text ==
                    SongSetPath(kSongEntryTokens[i]));
       }
-      CHECK_TRUE(after.back().kids[2].kids[1].text == kSongAppliedQuery);
+      CHECK_TRUE(after.back().kids[1].text == kSongAppliedQuery);
     }
     {
       std::vector<Node> wrong_consumer = before;

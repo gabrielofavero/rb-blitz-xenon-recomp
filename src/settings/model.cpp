@@ -229,6 +229,8 @@ std::string_view ApplicationStrategyToken(ApplicationStrategy strategy) {
       return "hot";
     case ApplicationStrategy::kMenuReturn:
       return "menu_return";
+    case ApplicationStrategy::kNextSong:
+      return "next_song";
     case ApplicationStrategy::kRestart:
       return "restart";
   }

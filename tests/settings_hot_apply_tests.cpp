@@ -155,16 +155,19 @@ void StrategyTableIsComplete() {
   CHECK_TRUE(rows.size() >= 30);
   int hot = 0;
   int menu_return = 0;
+  int next_song = 0;
   for (const rb_blitz::settings::schema::SchemaRow& row : rows) {
     const Descriptor& descriptor = row.descriptor;
     CHECK_TRUE(descriptor.id != SettingId::kUnknown);
     const bool valid = descriptor.strategy == ApplicationStrategy::kHot ||
                        descriptor.strategy == ApplicationStrategy::kMenuReturn ||
+                       descriptor.strategy == ApplicationStrategy::kNextSong ||
                        descriptor.strategy == ApplicationStrategy::kRestart;
     CHECK_TRUE(valid);
     if (descriptor.strategy != ApplicationStrategy::kRestart) {
       if (descriptor.strategy == ApplicationStrategy::kHot) ++hot;
       if (descriptor.strategy == ApplicationStrategy::kMenuReturn) ++menu_return;
+      if (descriptor.strategy == ApplicationStrategy::kNextSong) ++next_song;
       // A non-restart strategy needs an observed consumer boundary.
       CHECK_FALSE(descriptor.strategy_evidence.empty());
     } else {
@@ -182,6 +185,9 @@ void StrategyTableIsComplete() {
   // promotes another row must also record its evidence, and this expectation moves with it.
   CHECK_EQ(hot, 10);
   CHECK_EQ(menu_return, 2);
+  CHECK_EQ(next_song, 1);
+  CHECK_TRUE(rb_blitz::settings::schema::StrategyOf(SettingId::kShowTimer) ==
+             ApplicationStrategy::kNextSong);
   for (const SettingId id : {SettingId::kPlayCurrentSong, SettingId::kHideDownloadContent}) {
     const auto* row = rb_blitz::settings::schema::FindRow(id);
     CHECK_TRUE(row != nullptr && row->descriptor.strategy == ApplicationStrategy::kMenuReturn);
@@ -234,7 +240,8 @@ void SchemaAndAdapterAgree() {
     const ApplicationStrategy from_adapter =
         binding.strategy == rb_blitz::settings::ultimate_adapter::Strategy::kHot
             ? ApplicationStrategy::kHot
-            : ApplicationStrategy::kRestart;
+            : binding.strategy == rb_blitz::settings::ultimate_adapter::Strategy::kNextSong
+                ? ApplicationStrategy::kNextSong : ApplicationStrategy::kRestart;
     CHECK_EQ(from_schema == from_adapter, true);
     // The two evidence strings are the same claim in two files; a divergence is a drift bug.
     CHECK_TRUE(std::string(binding.evidence) == row->descriptor.strategy_evidence);
@@ -275,6 +282,10 @@ void PlanSplitsByStrategy() {
   CHECK_TRUE(menu.live.empty());
   CHECK_FALSE(menu.restart_needed());
   CHECK_EQ(menu.size(), 1);
+  const auto song = rb_blitz::settings::PlanHotApply(
+      {{SettingId::kShowTimer, Bool(false)}}, descriptors);
+  CHECK_EQ(song.deferred_song.size(), 1);
+  CHECK_FALSE(song.restart_needed());
 
   // A row this build does not describe is never applied live.
   std::map<SettingId, Value> unknown;
@@ -626,6 +637,8 @@ void StrategyTokensAreFrozen() {
                  ApplicationStrategy::kHot)) == "hot");
   CHECK_TRUE(std::string(rb_blitz::settings::ApplicationStrategyToken(
                  ApplicationStrategy::kMenuReturn)) == "menu_return");
+  CHECK_TRUE(std::string(rb_blitz::settings::ApplicationStrategyToken(
+                 ApplicationStrategy::kNextSong)) == "next_song");
   CHECK_TRUE(std::string(rb_blitz::settings::ApplicationStrategyToken(
                  ApplicationStrategy::kRestart)) == "restart");
   // The bridge's per-row strategy reader (P11's cutover) has one vocabulary to compare against.

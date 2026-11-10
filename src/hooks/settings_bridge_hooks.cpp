@@ -720,9 +720,16 @@ void ApplyHotRows(bool force_restart) {
     for (const auto& [id, value] : plan.deferred_menu) plan.pending_restart.push_back(id);
     plan.deferred_menu.clear();
   }
+  if (!ultimate_runtime::CanRunSongEntry(::rb_blitz::ultimate::Provider(),
+          ultimate_runtime::SongEntryRouteReady(), g_ultimate_refresh_trial,
+          g_enabled, g_forward_only)) {
+    for (const auto& [id, value] : plan.deferred_song) plan.pending_restart.push_back(id);
+    plan.deferred_song.clear();
+  }
   if (force_restart) {
     plan.live.clear();
     plan.deferred_menu.clear();
+    plan.deferred_song.clear();
     plan.pending_restart.clear();
     for (const auto& [id, value] : changed) plan.pending_restart.push_back(id);
   }
@@ -734,10 +741,11 @@ void ApplyHotRows(bool force_restart) {
   if (!force_restart && boot && boot->service() && ultimate_runtime::CanRunSongEntry(
           ::rb_blitz::ultimate::Provider(), ultimate_runtime::SongEntryRouteReady(),
           g_ultimate_refresh_trial, g_enabled, g_forward_only)) {
-    boot->NoteNextSongRows(changed, boot->service()->revision());
-    g_song_entry_receipt.Queue(changed, boot->service()->revision());
+    if (g_ultimate_refresh_trial)
+      boot->NoteNextSongRows(changed, boot->service()->revision());
+    g_song_entry_receipt.Queue(changed, boot->service()->revision(), g_ultimate_refresh_trial);
   }
-  if (!force_restart && boot && boot->service() && ultimate_runtime::CanRunSongEntry(
+  if (!force_restart && boot && boot->service() && ultimate_runtime::CanRunTrial(
           ::rb_blitz::ultimate::Provider(), ultimate_runtime::SelectionRouteReady(),
           g_ultimate_refresh_trial, g_enabled, g_forward_only)) {
     boot->NoteSongSelectionRows(changed, boot->service()->revision());
@@ -843,7 +851,7 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
     if (auto* boot = ::rb_blitz::settings::boot::SettingsBoot::Current())
       boot->AcknowledgeControllerLayout(progress->ticket, progress->scheme);
   }
-  const bool selection_enabled = ::rb_blitz::settings::ultimate_runtime::CanRunSongEntry(
+  const bool selection_enabled = ::rb_blitz::settings::ultimate_runtime::CanRunTrial(
       ::rb_blitz::ultimate::Provider(),
       ::rb_blitz::settings::ultimate_runtime::SelectionRouteReady(),
       g_ultimate_refresh_trial, g_enabled, g_forward_only);
@@ -908,6 +916,21 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
     REXLOG_INFO("settings_bridge: Ultimate song-entry command completed for revision {} ({})",
                 revision,
                 dispatched ? "sent to the pending-row ledger" : "not eligible");
+    return true;
+  }
+  if (path.starts_with(::rb_blitz::settings::ultimate_runtime::kConstructionSetPrefix)) {
+    const std::string_view token = std::string_view(path).substr(
+        ::rb_blitz::settings::ultimate_runtime::kConstructionSetPrefix.size());
+    const auto* binding = ::rb_blitz::settings::ultimate_adapter::BindingForToken(token);
+    const bool accepted = binding &&
+        ::rb_blitz::settings::ultimate_runtime::IsConstructionBinding(*binding) &&
+        ::rb_blitz::settings::ultimate_runtime::CanRunTrial(
+            ::rb_blitz::ultimate::Provider(), true, g_ultimate_refresh_trial,
+            g_enabled, g_forward_only);
+    WriteResultCell(base, ctx.r3.u32, accepted ? 1u : 0u);
+    if (accepted)
+      REXLOG_INFO("settings_bridge: Ultimate construction assignment '{}' ran on guest thread",
+                  token);
     return true;
   }
   bool menu_answer = false;

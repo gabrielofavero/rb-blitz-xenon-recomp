@@ -2,7 +2,8 @@
 
 Date: 2026-10-24. Status: **in progress**. The 2026-11-06–07 work below adds acknowledged
 application state, observed D3D12 and Vulkan display transitions, and guarded Ultimate and menu routes.
-Window Mode is now the tenth immediate strategy; Resolution remains restart-scoped.
+Window Mode is the tenth immediate strategy, Timer is a next-song strategy, and Resolution
+remains restart-scoped.
 
 ## 0. Progress record (2026-11-06–07)
 
@@ -13,11 +14,11 @@ Window Mode is now the tenth immediate strategy; Resolution remains restart-scop
 | P2 | Window Mode accepted on the tested desktop; strategy promoted | The authored Window Mode row previews through SDK `SetDisplayMode`, a recovery marker, and a 15-second Keep/Revert page. Disposable runs under `out/_swap/hot-settings/runtime-acceptance/` observed all six directed changes, Revert, timeout and saved Full Screen relaunch on both backends. C1 repeated both cycles, verified windowed placement and focus/input, and captured a visible Vulkan Full Screen relaunch under `out/_swap/hot-settings/c1-2026-11-07/`. SDK patch 0054 fixed Vulkan input after minimize/restore. Other DPI/monitor configurations remain unverified; Window Mode is the tenth immediate strategy. |
 | P3 | Negative feasibility gate for this implementation | `sub_823F3698` allocates the guest frame; `SetBootRenderFrame` is consumed during construction. Both SDK backends capture draw scale when creating render-target/texture/pipeline caches. Replacing those caches at a swap boundary would discard live EDRAM ownership and scaled resolves that ordinary cache clearing deliberately retains. No general migration or menu reset operation exists. The guest aspect patch is one-shot, and no ownership-safe live teardown of the screen object at `0x8298ACA8` was established. None of the scale/base/aspect transitions pass P3's safety preflight. Keep Resolution restart-scoped until retained GPU state can be migrated or proven obsolete, and a guest-screen reconstruction seam exists for base/aspect changes. |
 | P4 | No supported transition after P3 gate | A transactional scale operation needs a GPU-worker boundary, migration or proven invalidation of EDRAM and scaled resolves on both backends, shader/pipeline regeneration, failure rollback, and matching presentation/window updates. Base/aspect changes additionally need guest-frame reconstruction. No safe live render reconfiguration is implemented. |
-| P5 | Guarded next-song and Personal Best selection routes delivered; Timer cycle and All HUD hide observed | All 17 provider-file bindings retain restart strategy. The bridge serves only durably committed values for active compatible Ultimate. With `--settings_ultimate_refresh_trial=true`, seven player-facing HUD/visual rows are assigned at the start of the installed `ulti_game_enter` record, before its original construction commands. A separate guarded Personal Best assignment runs at song-selection entry before both identified consumers. Each guarded assignment reports a row receipt. A disposable run hid Timer on the next song and restored it on a third song. Another run hid All HUD Elements from in-song Help & Options; the next song visibly lost the score, timer and left HUD meter with matching guest acknowledgments. Personal Best's visible effect, individual provider consumers, later provider saves, restart survival and Game Speed synchronization remain unverified. |
+| P5 | Timer promoted; other provider routes guarded | The bridge serves only durably committed values for active compatible Ultimate. Timer is assigned at song entry in production; C3 matched its guest acknowledgments to hidden and visible HUD states from both settings contexts, a later provider save, and restart readback. With `--settings_ultimate_refresh_trial=true`, the remaining six player-facing HUD/visual rows receive guarded assignments at the start of `ulti_game_enter`; a separate guarded Personal Best assignment runs at song-selection entry. C3 also added guarded assignments at the installed scoring, track and plot records, but their next-song construction boundary was not observed. Other provider rows retain restart strategy pending visible effect and reversal checks. |
 | P6 | Loaded menu/header route enabled; two shortcuts promoted | Every boot publishes durable visibility changes and installs loaded splash and header refresh records. On 2026-11-09 a rebuilt disposable D3D12 run showed and hid Download Content and hid and restored Play Current Song on the first returned splash frames; guest receipts matched. All eight header masks were captured across Store Access on/off boots. Refresh Songs also appeared and disappeared at menu return. Download Content and Play Current Song now have menu-return strategies. Main Menu selection recovery, keyboard/controller header navigation, Search entry and badge remain open; the other menu/header rows stay restart-scoped. RhythmVerse master stays boot-seeded. |
 | P7 | Static candidate audit complete; no promotions | DLC Menu Songs constructs its pool and stream mounts at Configure; Scan Threads is captured by the DLC worker; Unlock All is boot-seeded; Hide Achievements is captured by dialog construction. Filtering samplers and native MSAA use backend caches, while FXAA has a live SDK method but no verified settings applier. Exact read sites are recorded below; all remain restart-scoped pending an owned live boundary. |
 
-**Current strategy count:** 10 immediate, 2 menu-return, 0 next-song, 36 restart. P0's
+**Current strategy count:** 10 immediate, 2 menu-return, 1 next-song, 35 restart. P0's
 9/0/0/39 baseline and later dated records below describe the state before Window Mode promotion.
 
 The D3D12 and Vulkan display runs above used disposable profiles. C1 placement/input passed
@@ -329,8 +330,7 @@ proves a live transition. The full per-row consumer references and boundaries ar
 | `hide_hud` | The provider constructs HUD objects at song entry. | Verify the guarded next-song assignment and both visibility directions. |
 | `goldprogress` | The provider's score callback trial lacks visual acceptance. | Verify the next star update and reversal in the same song. |
 | `progressbar` | The provider constructs this widget at song entry. | Verify the guarded next-song assignment and both visibility directions. |
-| `show_timer` | One same-process hide/show cycle passed only under the opt-in trial; production strategy and persistence remain unvalidated. | Verify later provider save, restart persistence, both settings contexts and inactive/mismatched providers before next-song promotion. |
-| `show_pb` | A guarded assignment and guest receipt now run before the installed song-selection consumers, but visible effect and persistence remain unverified. | Verify hide/show, later provider save, restart persistence and both settings contexts before next-selection promotion. |
+| `show_pb` | A guarded assignment and guest receipt run before the installed song-selection consumers, but the saved-score list label is unconditional and the in-song progress effect was not isolated. | Verify hide/show against an in-song progress display with a recorded score before next-selection promotion. |
 | `show_steak` | The provider constructs this widget at song entry. | Verify the guarded next-song assignment and both visibility directions. |
 | `input_viewer` | The provider constructs this widget at song entry. | Verify the guarded next-song assignment and both visibility directions. |
 | `precision_mode` | The scoring configuration reads the provider global at song load. | Add a guarded load boundary and verify judgment behavior in both directions. |
@@ -872,6 +872,61 @@ choice and Default/Off restoration. Avoid live asset reloads during an active so
 **Exit:** promote individually to next-song or next-selection only with a matching guest receipt
 and observed behavior. Keep Game Speed restart-scoped unless a separate full audio/chart timing
 proof exists. Keep Depth of Field restart-scoped until its effect consumer is identified.
+
+#### C3 implementation and runtime validation — 2026-11-09
+
+- The owner authorized agent-driven UI checks. Disposable D3D12 runs used an active, compatible
+  Ultimate provider and an isolated profile. The guarded trial run exercised main-menu and
+  in-song Help & Options. Timer Hidden removed the lower-left elapsed time on the next One Week
+  entry; Timer Visible restored it on the next song. In the production run with
+  `--settings_ultimate_refresh_trial=false`, `show_timer=false` received the song-entry consumer
+  and applied acknowledgment in `game.log` at lines 430–431, with no elapsed time in
+  `shots/11-timer-hidden-song.png`. The in-song reversal to `show_timer=true` received matching
+  lines 464–465 and showed `0:04 / 2:52` in `shots/30-timer-visible-song.png`. A later provider
+  save toggled Personal Best off and back on without changing Timer; the provider file retained
+  `(show_timer TRUE)`. After restarting the same disposable profile, the main-menu HUD Elements
+  page showed Timer Visible (`shots/45-restart-timer-value.png`). These artifacts are under
+  `out/_swap/hot-settings/c3-production-2026-11-09/`. Timer alone is now a production
+  next-song row; the count is 10 immediate, 2 menu-return, 1 next-song, 35 restart.
+- The trial run saved Personal Best Hidden and received a selection-entry acknowledgment after
+  a recorded 500-point score. The song-list `PERSONAL BEST 500` label remained because that
+  installed label is unconditional; the `show_pb` value feeds the separate in-song progress
+  display. This is not a visual acceptance result for Personal Best. Song Progress Bar Hidden
+  also received a song-entry acknowledgment, but the visible top arc could not be isolated as
+  its consumer. In a separate trial run, Precision Mode, Disable Random Track Wiggles and Disable
+  Plots were saved On at revisions 1, 2 and 5. The native restart prompt was dismissed with
+  Ignore and Continue; One Week then entered and played in the same process. No construction
+  assignment receipt appeared for any of the three pending values, and scenery remained visible
+  with Disable Plots staged (`out/_swap/hot-settings/c3-2026-11-09/shots/68-construction-song.png`).
+  This fails their next-song gate. Force Plot and Force Skybox share the plot construction record;
+  their individual choice effects were not tested. All of these rows remain restart-scoped.
+- `src/settings/ultimate_runtime.h` now supplies guarded trial assignments for the installed
+  `config/gen/scoring.dtb`, `config/gen/track.dtb`, and `config/gen/plot_info.dtb` records. Their
+  identified variables are Precision Mode, Disable Random Track Wiggles, Disable Plots, Force Plot,
+  and Force Skybox. `src/hooks/settings_payload.cpp` adds the modified records to the mounted
+  archive only for an active compatible provider; the original commands remain in order.
+  `src/hooks/settings_bridge_hooks.cpp` logs each construction assignment receipt on the guest
+  thread when `--settings_ultimate_refresh_trial=true`. A receipt proves that assignment ran,
+  not that the record was re-evaluated for the next song or that its visual/gameplay consumer
+  changed. Camera Angle and Gems already have guarded song-entry assignments; all offered choices
+  and Default/Off reversals still need a visible pass. Game Speed and Depth of Field keep their
+  original restart gates.
+- The Release build passed (`cmake --build --preset win-amd64-release --parallel 4`). Focused
+  CTest `settings_screen`, `menu_payload`, `ultimate_adapter`, `settings_hot_apply`, and
+  `settings_bridge_service` passed 5/5. The installed provider run through
+  `rb_blitz_windows_test_runner.exe` passed 1,038 checks, including original-command preservation
+  for all three construction records, later provider-save retention, and inactive/foreign
+  provider refusal. After Timer promotion, 5/5 focused CTests and 1,037 installed-provider
+  checks passed; the game validation ran with the trial flag off. The final docs check reported
+  624 files, 0 errors and 193 existing warnings, and `git diff --check` passed.
+- C3 remains open for individual HUD/visual reversals beyond Timer, Personal Best hide/show
+  with a recorded score at its actual in-song progress consumer, and game-level inactive or
+  mismatched-provider behavior. The host-level inactive/foreign provider checks passed. For
+  construction candidates, compare each `construction assignment` receipt's
+  timestamp with the next song construction and inspect the effect before considering a strategy
+  change. If a record runs only at boot, its row stays restart-scoped. Test all Camera Angle,
+  Force Plot, Force Skybox and Gems choices, including Default/Off restoration. C3's visual exit
+  gate remains open pending those results; C4 and C5 remain unstarted.
 
 ### C4 — Make bounded P7 decisions, then stop
 

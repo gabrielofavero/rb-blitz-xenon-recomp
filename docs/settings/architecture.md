@@ -1092,8 +1092,8 @@ present, active target, shape ok.
 ### 3. The rows, bound to the provider's own vocabulary
 
 P5b froze the row identity (`<category>.<id>` tokens); this package binds each to the provider's variable,
-kind and **application strategy** (§5.5). **All 17 rows are `restart`, with no measured evidence** (so no
-evidence column is needed): `gameplay.precision_mode`←`freq_ms` (boolean), `gameplay.disable_random_wiggles`
+kind and **application strategy** (§5.5). At the P5b baseline, **all 17 rows were `restart`, with no
+measured evidence**: `gameplay.precision_mode`←`freq_ms` (boolean), `gameplay.disable_random_wiggles`
 ←`disable_random_wiggles` (boolean), `gameplay.camera_angle`←`camera_angle` (slider, tokens
 `default`/`high`/`low`), `gameplay.game_speed`←`speedmod` (slider, percent 100–150),
 `gameplay.disable_dof`←`disable_dof` (boolean), `gameplay.disable_plots`←`disable_plots` (boolean,
@@ -1104,11 +1104,16 @@ payload inventory), `interface.letterbox`←`letterbox`, `interface.hide_hud`←
 `interface.show_timer`←`show_timer`, `interface.show_pb`←`show_pb`, `interface.show_steak`←`show_steak`,
 `interface.input_viewer`←`input_viewer` (all boolean).
 
-`TestsBindings` fails if any row ever claims `hot` with an empty evidence string, so "make this row live" is
-a measurement, not an edit. **Nothing provider-side is hot today**: a provider row's value is read out of
-the DTA variables the payload's loader filled *before the first frame*, so writing the file (what this
-package does) cannot change the running game — only the next boot. `Hide HUD`'s P1 live effect was the
-*stub* store's, not the provider's.
+As of C3 on 2026-11-09, Timer is `next_song`. A compatible Ultimate run with the trial flag off
+acknowledged `show_timer` on song entry, hid and restored the elapsed-time HUD, retained the value
+after a later provider save, and read it back after process restart. The other 16 Ultimate rows
+remain `restart`; see the [C3 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c3-implementation-and-runtime-validation--2026-11-09).
+
+`TestsBindings` fails if a row claims a non-restart strategy with an empty evidence string, so
+"make this row live" is a measurement, not an edit. The provider's file write alone does not change
+the running game. Timer's guest song-entry assignment reaches its consumer in the same process;
+the other provider rows still need a proven boundary. `Hide HUD`'s P1 live effect was the *stub*
+store's, not the provider's.
 
 Where the choices come from (plan §3.4, "the provider's inventory is authoritative"):
 
@@ -1360,6 +1365,12 @@ Download Content now use `menu_return`: the loaded splash consumes their saved v
 guest receipt on the first returned frame. Other Ultimate and loaded-menu rows remain strategy-gated
 until their runtime acceptance passes. The [C2 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c2-validation--2026-11-09)
 contains the game screenshots and receipts.
+The C3 trial also prepends guarded assignments to the installed scoring, track and plot records
+for five provider choices; `src/settings/ultimate_runtime.h` verifies each variable is present
+before authoring the replacement, and `src/hooks/settings_bridge_hooks.cpp` logs a guest receipt
+after the assignment runs. These records' next-song execution and visible effects are unverified;
+the [C3 record](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md#c3-implementation-and-host-validation--2026-11-09)
+keeps their strategies at restart pending the owner's checks.
 
 §5.5 replaced "v1 is restart-only" with a per-row decision: a row is `hot` when its value can be applied to
 the **running** process **with a measured live effect**, `restart` otherwise. §8 then defines what happens
