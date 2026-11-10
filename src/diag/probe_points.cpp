@@ -43,6 +43,7 @@
 #include <rex/system/xmemory.h>
 
 #include "diag/probe.h"
+#include "diag/framerate_probe.h"
 #include "hooks/render_settings.h"
 
 REX_EXTERN(__imp__ByteGrinder_GetEncMethod);
@@ -344,6 +345,7 @@ extern "C" REX_FUNC(sub_8251D580) {
   const bool poke = REXCVAR_GET(probe_screen_fields);
   const uint32_t object = uint32_t(ctx.r3.u32);
   __imp__sub_8251D580(ctx, base);
+  rb_blitz::diag::framerate_probe::CompleteGuestPresent();
   // Belt and braces: the screen constructor runs before the boot has necessarily published the
   // requested size, and this hook runs every frame, so the layout aspect is applied here as well.
   rb_blitz::settings::WriteGuestLayoutAspect(base);

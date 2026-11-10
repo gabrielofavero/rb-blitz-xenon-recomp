@@ -1,5 +1,13 @@
 # Enhancement toggles
 
+`probe_framerate` (Diagnostics, default **false**, restart-scoped) writes one
+bounded line per wall-clock second with completed guest main-loop draw counts,
+guest present-routine call counts, and the sample count and latest input/output
+of Blitz's song-clock filter. The probe has no on-screen UI and does not change
+the guest refresh or limit. These counts do not measure physical display
+scanout. See the [framerate expansion plan](../plans/todo/2026-10-25-framerate-expansion-plan.md)
+and [framerate_probe.cpp](../../src/diag/framerate_probe.cpp).
+
 The menu-return refresh is part of every boot and has no diagnostic toggle. After a durable
 settings commit, the guest rebuilds the splash rows and authored library header using current
 visibility. The header has routes for all eight Messages, Recommendations and RhythmVerse

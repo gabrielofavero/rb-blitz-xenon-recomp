@@ -4,6 +4,10 @@ Plans that are actively being worked. A plan moves here from [`../todo/`](../tod
 and leaves for [`../finished/`](../finished/) when it is delivered — one `git mv`, keeping its
 `YYYY-MM-DD-` prefix.
 
+The [framerate expansion plan](../todo/2026-10-25-framerate-expansion-plan.md) had a
+diagnostic pass on 2026-11-10 and returned to `todo/`. No higher rate is validated
+or offered in settings.
+
 The [resolution and scale expansion plan](2026-10-19-resolution-scale-expansion-plan.md) moved here
 on 2026-11-10. Auto, fixed 16:9 presets, planner bounds and the 2560×1080 boot are recorded as done;
 the former 4:3 and diagnostic-choice work is superseded. The 3840×1600 Auto path now passes a

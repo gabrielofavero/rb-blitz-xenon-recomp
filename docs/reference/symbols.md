@@ -329,3 +329,28 @@ Rock Band 3 — fixes the same bug the same way (its patch group 1 swaps
 64-byte key table at `0x82C76258`, byte-identical to Blitz's obscured table at
 `0x8280C568`). See [rb3-references.md](rb3-references.md) §5.
 
+## Guest draw and present boundaries (framerate expansion, 2026-11-10)
+
+| Guest address | Evidence | Confidence |
+| --- | --- | --- |
+| `0x82190568` (`sub_82190568`) | Main-loop body calls `sub_82190218` at `0x82190644` and resumes at `0x821905AC`. The draw call occurs once per observed loop iteration. | 8/10 for loop/draw boundary. |
+| `0x82190218` (`sub_82190218`) | A post-call diagnostic hook counts completed draw calls. At the 60 Hz title screen it recorded roughly 60 calls per wall-clock second with V-Sync on. | 8/10 for completed guest draw count; this is not physical scanout. |
+| `0x8251D580` (`sub_8251D580`) | Existing graphics hook calls the original guest present routine and then counts its calls for the same diagnostic window. It can also run outside the main draw path during startup/loading. | 8/10 for guest present-routine calls; not a displayed-frame count. |
+
+The opt-in counters are in [framerate_probe.cpp](../../src/diag/framerate_probe.cpp).
+They do not yet establish task or audio clock drift or gameplay correctness.
+
+## Song-clock smoothing candidate (framerate expansion, 2026-11-10)
+
+| Guest address | Evidence | Confidence |
+| --- | --- | --- |
+| `0x82470248` (`sub_82470248`) | Reads the Blitz literal `dejitter_disable` at `0x8208FCCC` on first use; accepts a floating-point time in `f1` and an output pointer in `r5`; keeps a 32-slot sample ring at object offsets `+0..+124`, ring index at `+128`, sample count at `+132`, smoothed estimate at `+136`, and prior output at `+140`. Its sample count reaches 30, and it returns the filtered time in `f1`. This is the Blitz equivalent of a DeJitter-style `NewMs` filter, not an RB3 address transplant. | 9/10 for filter role; exact source-level class name remains unproved. |
+| `0x8245D3E8` (`sub_8245D3E8`) | Its call at `0x8245D55C` passes `this+180` to the filter, using a virtual time reading plus `this+104` as input. The returned time is scaled and passed into further song/task processing. This is the filter's only direct generated caller. | 8/10 for audio-time caller; ownership of the downstream task setter remains to be established. |
+
+The filter's history and smoothing are per call, so a different poll cadence can
+change its effective smoothing interval. Whether that changes Blitz judgements,
+scoring, or song synchronization is **unmeasured**. Compare actual audio samples,
+filter output and judgement timestamps before altering the body. The evidence is
+in `generated/default/rb_blitz_recomp.13.cpp` and `.51.cpp`; generated code is not
+edited.
+

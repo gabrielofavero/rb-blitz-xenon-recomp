@@ -25,11 +25,21 @@
 param(
     [string]$BuildDir = "out/build/win-amd64-release",
     [string]$OutDir = "out/m5-pacing",
+    # Reuse a disposable profile/cache across paired warm runs. Evidence and
+    # logs still live in each run's unique -Tag directory.
+    [string]$ProfileRoot,
     [string]$GameRoot,
     # GPU vblank emulation, the SDK's `vsync` cvar. "on" is the shipping
     # default; "off" runs the guest's frame loop without the vblank pace as the
     # contrast case.
     [ValidateSet("on", "off")][string]$Vsync = "on",
+    # Boot-only guest vblank request; the original 60 Hz launch omits this flag.
+    [ValidateRange(24, 240)][double]$RefreshHz = 60,
+    [ValidateSet("any", "d3d12", "vulkan")][string]$GpuBackend = "any",
+    [ValidateSet(0, 1)][int]$UltimateMode = 0,
+    # One-process diagnostic render probe; unlike video_mode_width/height this
+    # selects the actual guest render base (for example 960x540).
+    [ValidatePattern('^[0-9]+x[0-9]+$')][string]$RenderSize,
     # Subdirectory to write under -OutDir; defaults to the vsync setting.
     [string]$Tag,
     # 1-based row in the artist-sorted song list: 1 Random Song, 2 One Week,
@@ -62,10 +72,18 @@ if (-not $GameRoot) { $GameRoot = Join-Path $root "game" }
 if (-not $Tag) { $Tag = "vsync-$Vsync" }
 $capDir = Join-Path $root (Join-Path $OutDir $Tag)
 $logDir = Join-Path $capDir "logs"
+$logs = Join-Path $capDir "raw-logs"
+$stateRoot = if ($ProfileRoot) {
+    if ([IO.Path]::IsPathRooted($ProfileRoot)) { [IO.Path]::GetFullPath($ProfileRoot) }
+    else { [IO.Path]::GetFullPath((Join-Path $root $ProfileRoot)) }
+} else { $capDir }
+$profilePath = Join-Path $stateRoot "profile.toml"
+$userDataDir = Join-Path $stateRoot "user-data"
+$cacheDir = Join-Path $stateRoot "cache"
 # One directory per run: an evidence set that mixed two runs' logs would confuse
 # the marker-envelope walk and the log accounting.
-if (Test-Path $capDir) { Remove-Item -Recurse -Force $capDir }
-New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+if (Test-Path $capDir) { throw "measurement directory already exists; choose a fresh -Tag: $capDir" }
+New-Item -ItemType Directory -Force -Path $logDir, $logs, $userDataDir, $cacheDir | Out-Null
 
 if (-not (Test-Path $exe)) { throw "not found: $exe" }
 if (-not (Test-Path (Join-Path $GameRoot "default.xex"))) { throw "no default.xex under $GameRoot" }
@@ -331,7 +349,6 @@ function Wait-ForSongPlayback([int]$StableSec, [int]$TimeoutSec, [string]$Label)
 
 # ------------------------------------------------------------------- main ---
 
-Get-LogFiles | Remove-Item -Force
 # `vsync` is a bool cvar, and the traces are noisy-gated (`log_noisy`), so both
 # have to be set on the command line rather than left to the local toml.
 # `mnk_mode` is the same argument again: the harness drives the menus with
@@ -339,24 +356,37 @@ Get-LogFiles | Remove-Item -Force
 # gitignored, so a fresh checkout has no input path without it.
 $vsyncValue = if ($Vsync -eq "on") { "true" } else { "false" }
 $exeArgs = @(
-    "--game_data_root=$GameRoot",
-    "--ultimate_mode=0",
+    "--game_data_root=`"$GameRoot`"",
+    "--launcher_profile=`"$profilePath`"",
+    "--user_data_root=`"$userDataDir`"",
+    "--cache_root=`"$cacheDir`"",
+    "--log_file=`"$(Join-Path $logs 'run.log')`"",
+    "--ultimate_mode=$UltimateMode",
     # The route below was measured pressing A at each of the title's two dialogs,
     # and the skip now ships on by default (docs/engine/main-menu.md (part 1, the option list), R3).
     "--enhancements_skip_offline_dialog=false",
     "--vsync=$vsyncValue",
     "--log_level=$LogLevel",
     "--log_noisy=true",
+    "--probe_framerate=true",
     "--mnk_mode=1"
 )
+if ($PSBoundParameters.ContainsKey('RefreshHz')) { $exeArgs += "--video_mode_refresh_rate=$RefreshHz" }
+if ($PSBoundParameters.ContainsKey('GpuBackend')) { $exeArgs += "--gpu_backend=$GpuBackend" }
 
 $notes = New-Object System.Collections.ArrayList
 $injections = New-Object System.Collections.ArrayList
 $result = [ordered]@{
-    Tag = $Tag; Vsync = $Vsync; LogLevel = $LogLevel; Song = $Song; SongName = $SongName
+    Tag = $Tag; Vsync = $Vsync; RefreshHz = $RefreshHz
+    TargetFps = $(if ($Vsync -eq 'on' -and $PSBoundParameters.ContainsKey('RefreshHz')) { $RefreshHz } else { 0 })
+    GpuBackend = $GpuBackend; UltimateMode = $UltimateMode; RenderSize = $RenderSize
+    ProbeFramerate = $true
+    ProfileRoot = $stateRoot; ProfilePath = $profilePath
+    UserDataRoot = $userDataDir; CacheRoot = $cacheDir
+    LogLevel = $LogLevel; Song = $Song; SongName = $SongName
     Pilot = [bool]$Pilot; ProbeCount = $ProbeCount; ProbeIntervalSec = $ProbeIntervalSec
     ProbeHoldsMs = ($probeHoldsMs -join ","); Exe = $exe; ExeArgs = ($exeArgs -join " ")
-    Boot = $false; SongList = $false; Gameplay = $false; SongEnd = $false; Clean = $false; Fatal = $false
+    Boot = $false; SongList = $false; Gameplay = $false; SongEnd = $false; Clean = $false; Fatal = $false; Error = ""
     ProcessStartLocal = ""; ProcessExitLocal = ""; WindowReadyLocal = ""
     GameplayStartLocal = ""; FirstProbeLocal = ""; LastProbeLocal = ""
     SongStartLocal = ""; SongStopLocal = ""; SongSeconds = 0
@@ -365,7 +395,15 @@ $result = [ordered]@{
 
 $p = $null
 try {
-    $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList $exeArgs
+    $oldRenderSize = [Environment]::GetEnvironmentVariable('RBBLITZ_PROBE_RENDER_SIZE', 'Process')
+    try {
+        if ($RenderSize) {
+            [Environment]::SetEnvironmentVariable('RBBLITZ_PROBE_RENDER_SIZE', $RenderSize, 'Process')
+        }
+        $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList $exeArgs
+    } finally {
+        [Environment]::SetEnvironmentVariable('RBBLITZ_PROBE_RENDER_SIZE', $oldRenderSize, 'Process')
+    }
     $result.ProcessStartLocal = $p.StartTime.ToString("yyyy-MM-dd HH:mm:ss.fff")
 
     if (-not (Wait-ForWindow $p $BootTimeoutSec)) { $notes.Add("no game window appeared") | Out-Null }
@@ -461,6 +499,9 @@ try {
     } else {
         $notes.Add("process exited on its own (exit code $($p.ExitCode))") | Out-Null
     }
+} catch {
+    $result.Error = $_.Exception.Message
+    $notes.Add("route exception: $($result.Error)") | Out-Null
 } finally {
     if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force }
     $result.ProcessExitLocal = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss.fff")
@@ -506,5 +547,5 @@ Write-Host "logs: $($result.LogFiles -join ', ')"
 
 # The route has to have happened, otherwise the evidence is about the wrong
 # screen. The pacing verdict itself is the analyzer's job.
-if (-not ($result.Boot -and $result.SongList -and $result.Gameplay -and $result.Clean -and -not $result.Fatal)) { exit 1 }
+if (-not ($result.Boot -and $result.SongList -and $result.Gameplay -and $result.Clean -and -not $result.Fatal -and -not $result.Error)) { exit 1 }
 exit 0

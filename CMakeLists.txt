@@ -109,6 +109,7 @@ set(RBBLITZ_SOURCES
     src/diag/probe_overlay.cpp
     src/diag/probe_points.cpp
     src/diag/probe_trace.cpp
+    src/diag/framerate_probe.cpp
     src/diag/gameplay_probe.cpp
     src/diag/shader_trace.cpp
     src/diag/boot_heartbeat.cpp

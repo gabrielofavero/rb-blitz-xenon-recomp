@@ -1,6 +1,6 @@
 # Framerate expansion: feasibility and implementation plan
 
-**Status: planning, 2026-10-25. No runtime changes or new gameplay tests.**
+**Status: to do (paused 2026-11-10 after P0/P1 diagnostic work). No higher rate is validated.**
 This analysis uses the current source, the recorded 2026-09-20 pacing experiment,
 and public RB3 sources inspected on 2026-10-25. Higher-rate gameplay, scoring and
 physics correctness remain unproven. Existing shader-preparation changes in the
@@ -266,8 +266,8 @@ Update the graphics setting contract/status and
 [known-issues.md](../../reference/known-issues.md), and update RB3 provenance only
 if code is actually adapted. Preserve raw results under
 `out/_swap/framerate/<build>/<backend>/<payload>/<rate>/` and summarize dates,
-build identity, coverage and failures here. Move this plan to `in-progress/` when
-P0 implementation starts and to `finished/` only when the shipped choices pass.
+build identity, coverage and failures here. Move this plan back to `in-progress/`
+when implementation resumes and to `finished/` only when the shipped choices pass.
 Run relevant non-UI tests, a release build, the documentation checker and
 `git diff --check`.
 
@@ -282,5 +282,44 @@ Run relevant non-UI tests, a release build, the documentation checker and
   those title-specific questions.
 - No tested upper safe FPS ceiling is known from this research. 120 is a proposed
   first target; 240 is only inside the SDK's configurable refresh range.
-- This is a documentation-only analysis. No build, game navigation or claim of
-  newly validated high-FPS behavior is part of it.
+- The 2026-10-25 version was a documentation-only analysis. Section 7 records
+  later build and gameplay probes; no high-FPS gameplay rate has been validated.
+
+## 7. Implementation log (2026-11-10)
+
+The owner's 2026-11-10 request authorized autonomous UI and gameplay testing for
+this plan, superseding D10's manual-test choice for this work. The plan returned
+to `todo/` after the initial diagnostic pass. No public higher-rate setting or
+host overlay was added.
+
+The release build at Git `41281d8` plus this worktree builds with
+`cmake --build --preset win-amd64-release`. An opt-in `probe_framerate` hook now
+counts completed guest main-loop draws, guest present-routine calls and samples
+from Blitz's song-clock filter once per wall-clock second. The filter's latest
+raw and filtered readings are logged without changing its output. These are
+guest counters, not physical display scanout. The existing pacing harness now
+accepts diagnostic refresh, backend, Ultimate and render-size overrides, and
+its target-aware analyzer rejects a false 120 FPS result in its self-test.
+
+Initial D3D12 measurements used an isolated profile, the bundled **These Days**
+chart, V-Sync on, and lightweight info logging. `RBBLITZ_PROBE_RENDER_SIZE`
+selected a real guest render base without changing saved graphics preferences.
+The title/splash observations were deliberately separated from gameplay:
+
+| Run | Guest render base | Observed completed guest draws | Evidence and limit |
+| --- | --- | --- | --- |
+| Retail, guest refresh 75 Hz | 960×540 | Stable windows of 75–76/s | `out/_swap/framerate/shared-bundled/title75.log`; title only. |
+| Retail, guest refresh 90 Hz | 960×540 | Stable windows of 90–91/s | `out/_swap/framerate/shared-bundled/title90.log`; title only. |
+| Retail, guest refresh 120 Hz | 960×540 | Stable windows of 118–121/s | `out/_swap/framerate/shared-bundled/title120.log`; title only. |
+| Retail, guest refresh 60 Hz | 960×540 | 41.0/s mean across 319.5 s, median one-second count 43; 314 of 315 windows below 60 | `out/_swap/framerate/shared-bundled/clean60-fixed.log`; in-song performance pilot, manually stopped before a results receipt. Audio underrun warnings occurred. This run predates the added song-clock hook. |
+| Ultimate with Disable Plots, guest refresh 60 Hz | 720×540 | 20.5/s mean across 41.1 s, median one-second count 22 | `out/_swap/framerate/ultimate-plotless/run60.log`; cold gameplay pilot. The provider loaded `(disable_plots TRUE)` from its own redirected record, and the screenshot shows the reduced scenery. The clock filter was sampled once per completed draw. |
+| Ultimate with Disable Plots, guest refresh 120 Hz | 720×540 | 26.5/s mean across 46.9 s, median one-second count 28 | `out/_swap/framerate/ultimate-plotless/run120.log`; warmer-cache gameplay pilot on the same build. The title reached roughly 120/s before song entry, then fell far below target in gameplay. |
+
+The machine has not sustained even the 60 Hz control in these gameplay pilots.
+Therefore title-screen success does not pass P1, and there is no evidence to
+release 75, 90 or 120 FPS. The Ultimate result is a different payload and cold
+cache; it is not a controlled claim that Disable Plots reduces performance.
+The 60/120 Ultimate pair also differs in cache warmth, so the numerical gap is
+not an engine-rate effect. Repeated warm controls, full-song timing,
+judgement, collision, pause and backend tests remain open. P2 and P3 are gated
+by those results.

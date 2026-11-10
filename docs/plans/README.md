@@ -6,7 +6,7 @@ the age of a plan is visible from its name.
 
 | Folder | Meaning |
 | --- | --- |
-| [`todo/`](todo) | Written, not started. |
+| [`todo/`](todo) | Written and awaiting work, including plans paused after an initial investigation. |
 | [`in-progress/`](in-progress) | Actively being worked. |
 | [`finished/`](finished) | Delivered; kept because the measurements and decisions are still cited. |
 | [`cancelled/`](cancelled) | Abandoned or superseded before delivery, kept so the same ground is not walked twice. |

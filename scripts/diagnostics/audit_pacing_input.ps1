@@ -28,6 +28,9 @@ param(
     [string]$Tag,
     [string]$OutDir,
     [string]$InjectionsPath,
+    # Explicit target, or run.json TargetFps. Zero retains the historical
+    # 60 Hz vsync control and makes an uncapped run descriptive only.
+    [ValidateRange(0, 240)][double]$TargetFps = 0,
     # Synthesize a healthy and a broken measurement and assert the verdicts.
     [switch]$SelfTest,
     # --- thresholds ---------------------------------------------------------
@@ -59,6 +62,7 @@ $ErrorActionPreference = "Stop"
 
 $vdRe = [regex]::new('\[VdSwap\] n=(\d+) dt_us=(\d+) guest_tick=(\d+)', 'Compiled')
 $xeRe = [regex]::new('\[XE_SWAP\] n=(\d+) dt_us=(\d+) guest_tick=(\d+)', 'Compiled')
+$probeRe = [regex]::new('framerate_probe: window_ms=(\d+) guest_iterations=(\d+) guest_present_calls=(\d+) total_iterations=(\d+) total_present_calls=(\d+)', 'Compiled')
 $pollRe = [regex]::new('\[XamInputGetState\] user=(\d+) flags=(0x[0-9a-fA-F]+) st=(0x[0-9a-fA-F]+) buttons=(0x[0-9a-fA-F]+) lt=(\d+) rt=(\d+) lx=(-?\d+) ly=(-?\d+) rx=(-?\d+) ry=(-?\d+) guest_tick=(\d+)', 'Compiled')
 $startMarker = 'XMPSetPlaybackController(00000000, 00000001)'
 $stopMarker = 'XMPSetPlaybackController(00000000, 00000000)'
@@ -181,10 +185,29 @@ function Measure-Traces([object]$Sweep, [datetime]$WindowStart, [datetime]$Windo
         GapMaxMs = 0.0; NonUser0 = 0; Unsuccessful = 0; UnexpectedMasks = @{}; Capture = (New-Object System.Collections.ArrayList)
     }
     $nonUser0Buttons = 0
+    $guestProbe = New-Object System.Collections.ArrayList
 
     foreach ($fi in $Sweep.Files) {
         if ($fi.Last -lt $WindowStart -or $fi.First -gt $WindowEnd) { continue }
         foreach ($line in [IO.File]::ReadLines($fi.Path)) {
+            if ($line.IndexOf('framerate_probe:') -ge 0) {
+                $t = Get-LineTime $line
+                if ($null -ne $t -and $t -ge $WindowStart -and $t -le $WindowEnd) {
+                    $m = $probeRe.Match($line)
+                    if ($m.Success -and [double]$m.Groups[1].Value -gt 0) {
+                        $seconds = [double]$m.Groups[1].Value / 1000.0
+                        $guestProbe.Add([pscustomobject]@{
+                            Time = $t.ToString('yyyy-MM-dd HH:mm:ss.fff')
+                            WindowMs = [int]$m.Groups[1].Value
+                            Iterations = [int]$m.Groups[2].Value
+                            Presents = [int]$m.Groups[3].Value
+                            IterationsPerSec = [double]$m.Groups[2].Value / $seconds
+                            PresentsPerSec = [double]$m.Groups[3].Value / $seconds
+                        }) | Out-Null
+                    }
+                }
+                continue
+            }
             $isFrame = $false; $isPoll = $false
             if ($line.IndexOf('[VdSwap]') -ge 0) { $isFrame = $true }
             elseif ($line.IndexOf('[XE_SWAP]') -ge 0) { $isPoll = $false; $isFrame = $true }
@@ -249,10 +272,10 @@ function Measure-Traces([object]$Sweep, [datetime]$WindowStart, [datetime]$Windo
             }
         }
     }
-    return [pscustomobject]@{ Frames = $frames; Poll = $poll }
+    return [pscustomobject]@{ Frames = $frames; Poll = $poll; GuestProbe = $guestProbe }
 }
 
-function New-SyntheticRun([string]$Path, [switch]$Broken) {
+function New-SyntheticRun([string]$Path, [switch]$Broken, [double]$RequestedFps = 0) {
     # A healthy run paces one frame per 16.667 ms and polls every 4 ms; the
     # broken one paces at 40 ms with a 300 ms stall every 20 frames and polls
     # every 500 ms. Both carry the same song envelope and probe schedule.
@@ -335,12 +358,17 @@ function New-SyntheticRun([string]$Path, [switch]$Broken) {
             $lastPollTick = $tick
         }
     }
+    for ($second = 1; $second -lt $songSec; $second++) {
+        $ts = $songStart.AddSeconds($second)
+        $sb.AppendLine((Fmt $ts) + "framerate_probe: window_ms=1000 guest_iterations=60 guest_present_calls=60 total_iterations=$($second * 60) total_present_calls=$($second * 60)") | Out-Null
+    }
     $stopTs = $songStart.AddSeconds($songSec)
     $sb.AppendLine((Fmt $stopTs) + "XMPSetPlaybackController(00000000, 00000000)") | Out-Null
     [IO.File]::WriteAllText((Join-Path $Path "logs\log01-synthetic.log"), $sb.ToString())
 
     $run = [ordered]@{
-        Tag = "self-test"; Vsync = "on"; LogLevel = "trace"; Gameplay = $true
+        Tag = "self-test"; Vsync = "on"; TargetFps = $RequestedFps; ProbeFramerate = $true
+        LogLevel = "trace"; Gameplay = $true
         Boot = $true; SongList = $true; SongEnd = $true; Clean = $true; Fatal = $false
         SongStartLocal = $songStart.ToString("yyyy-MM-dd HH:mm:ss.fff")
         SongStopLocal = $stopTs.ToString("yyyy-MM-dd HH:mm:ss.fff")
@@ -364,6 +392,9 @@ function Invoke-Analysis([string]$Path, [string]$OutPath, [string]$TagOverride) 
     $run = $null
     if (Test-Path $runJson) { $run = Get-Content -LiteralPath $runJson -Raw | ConvertFrom-Json }
     $vsync = if ($run -and $run.Vsync) { [string]$run.Vsync } else { "" }
+    $expectedFps = if ($TargetFps -gt 0) { $TargetFps } elseif ($run -and $run.TargetFps) { [double]$run.TargetFps } else { 0.0 }
+    $assertTarget = $expectedFps -gt 0
+    if (-not $assertTarget -and $vsync -eq 'on') { $expectedFps = 60.0 }
 
     $sweep = Get-LogSweep (Join-Path $Path "logs")
     if ($sweep.Files.Count -eq 0) {
@@ -438,7 +469,7 @@ function Invoke-Analysis([string]$Path, [string]$OutPath, [string]$TagOverride) 
     Add-Check "E4" "gameplay window length" ">= $MinWindowSec s" ("{0:N1} s" -f $windowSec) ($windowSec -ge $MinWindowSec)
 
     if (-not $haveEnvelope) {
-        return (Write-Verdict $Path $OutPath $TagOverride $vsync $sweep $null $probes $null "" $windowSec $envelopeClosed)
+        return (Write-Verdict $Path $OutPath $TagOverride $vsync $expectedFps $assertTarget ([bool]($run -and $run.ProbeFramerate)) $sweep $null $probes $null "" $windowSec $envelopeClosed)
     }
 
     # Polls are captured only near the probes, so build the capture zones first.
@@ -450,10 +481,11 @@ function Invoke-Analysis([string]$Path, [string]$OutPath, [string]$TagOverride) 
     }
 
     $m = Measure-Traces $sweep $windowStart $windowEnd $probeWindows
-    return (Write-Verdict $Path $OutPath $TagOverride $vsync $sweep $m $probes $probeWindows (Format-Stamp $windowStart) $windowSec $envelopeClosed)
+    return (Write-Verdict $Path $OutPath $TagOverride $vsync $expectedFps $assertTarget ([bool]($run -and $run.ProbeFramerate)) $sweep $m $probes $probeWindows (Format-Stamp $windowStart) $windowSec $envelopeClosed)
 }
 
 function Write-Verdict([string]$Path, [string]$OutPath, [string]$TagOverride, [string]$vsync,
+                       [double]$expectedFps, [bool]$assertTarget, [bool]$probeRequired,
                        [object]$sweep, [object]$m, [object]$probes, [object]$probeWindows,
                        [string]$windowStartText, [double]$windowSec = 0, [bool]$envelopeClosed = $false) {
     $frames = $null
@@ -461,6 +493,7 @@ function Write-Verdict([string]$Path, [string]$OutPath, [string]$TagOverride, [s
     $frameReport = @{}
     $inputReport = [ordered]@{}
     $probeReport = New-Object System.Collections.ArrayList
+    $guestProbeReport = $null
     $windowStart = $null
     $windowEnd = $null
     if ($windowStartText) {
@@ -518,6 +551,11 @@ function Write-Verdict([string]$Path, [string]$OutPath, [string]$TagOverride, [s
             GapMaxMs = $(if ($pollSorted.Count) { [double]$pollSorted[-1] } else { 0 })
             GuestTickHz = $guestFreq
         }
+        $guestProbeReport = [ordered]@{
+            Windows = $m.GuestProbe.Count
+            IterationsPerSecMedian = (Get-Median @($m.GuestProbe | ForEach-Object { $_.IterationsPerSec } | Sort-Object))
+            PresentsPerSecMedian = (Get-Median @($m.GuestProbe | ForEach-Object { $_.PresentsPerSec } | Sort-Object))
+        }
 
         # --- frame checks ---------------------------------------------------
         Add-Check "F1" "guest frame traces present" ">= 100 VdSwap + XE_SWAP in window" `
@@ -526,22 +564,44 @@ function Write-Verdict([string]$Path, [string]$OutPath, [string]$TagOverride, [s
             ("VdSwap missing={0} dup={1}; XE_SWAP missing={2} dup={3}" -f $vd.Missing, $vd.Dup, $xe.Missing, $xe.Dup) `
             ($vd.Missing -eq 0 -and $vd.Dup -eq 0 -and $xe.Missing -eq 0 -and $xe.Dup -eq 0)
         $r = $frameReport["XE_SWAP"]
-        Add-Check "F3" "presented frame cadence" ("median dt <= {0:N1} ms" -f $MaxMedianDtMs) `
-            ("median {0:N2} ms ({1:N1} fps)" -f $r.MedianMs, $r.Fps) ($r.MedianMs -le $MaxMedianDtMs)
-        Add-Check "F4" "frame time tail" ("p99 dt <= {0:N1} ms" -f $MaxP99DtMs) `
-            ("p90 {0:N2} ms, p99 {1:N2} ms, max {2:N1} ms" -f $r.P90Ms, $r.P99Ms, $r.MaxMs) ($r.P99Ms -le $MaxP99DtMs)
+        $medianLimit = if ($assertTarget) { [Math]::Min($MaxMedianDtMs, 1200.0 / $expectedFps) } else { $MaxMedianDtMs }
+        $p99Limit = if ($assertTarget) { [Math]::Min($MaxP99DtMs, 2400.0 / $expectedFps) } else { $MaxP99DtMs }
+        Add-Check "F3" "presented frame cadence" ("median dt <= {0:N1} ms" -f $medianLimit) `
+            ("median {0:N2} ms ({1:N1} fps)" -f $r.MedianMs, $r.Fps) ($r.MedianMs -le $medianLimit)
+        Add-Check "F4" "frame time tail" ("p99 dt <= {0:N1} ms" -f $p99Limit) `
+            ("p90 {0:N2} ms, p99 {1:N2} ms, max {2:N1} ms" -f $r.P90Ms, $r.P99Ms, $r.MaxMs) ($r.P99Ms -le $p99Limit)
         Add-Check "F5" "hitch budget" ("frames > {0}x median <= {1:N1}%" -f $HitchFactor, $MaxHitchPct) `
             ("{0} hitch(es) of {1} frames ({2:N2}%)" -f $r.Hitches, $framesMinusOne, $r.HitchPct) ($r.HitchPct -le $MaxHitchPct)
         $driftCount = [Math]::Abs($vd.Count - $xe.Count)
         $driftFps = [Math]::Abs($frameReport["VdSwap"].Fps - $r.Fps)
         Add-Check "F6" "submit/present agree" "|nVdSwap - nXE_SWAP| <= 2 and |fps diff| <= 2" `
             ("dn={0}, dfps={1:N2}" -f $driftCount, $driftFps) ($driftCount -le 2 -and $driftFps -le 2)
-        if ($vsync -eq "on") {
+        if ($assertTarget) {
+            $idealMs = 1000.0 / $expectedFps
+            $lowMs = 0.8 * $idealMs; $highMs = 1.2 * $idealMs
+            $pacOk = ($r.MedianMs -ge $lowMs -and $r.MedianMs -le $highMs)
+            Add-Check "F7" "requested target interval" ("median dt in [{0:N2}, {1:N2}] ms" -f $lowMs, $highMs) `
+                ("median {0:N2} ms" -f $r.MedianMs) $pacOk
+            $submitFps = $frameReport["VdSwap"].Fps
+            $rateOk = $submitFps -ge (0.9 * $expectedFps) -and $submitFps -le (1.1 * $expectedFps) -and `
+                      $r.Fps -ge (0.9 * $expectedFps) -and $r.Fps -le (1.1 * $expectedFps)
+            Add-Check "F8" "submitted and packet rates reach target" ("both rates in [{0:N1}, {1:N1}] fps" -f (0.9 * $expectedFps), (1.1 * $expectedFps)) `
+                ("VdSwap {0:N1}, XE_SWAP {1:N1} fps" -f $submitFps, $r.Fps) $rateOk
+        } elseif ($vsync -eq "on") {
             $pacOk = ($r.MedianMs -ge 14.0 -and $r.MedianMs -le 20.0)
             Add-Check "F7" "guest paced to the 60 Hz vblank" "median dt in [14.0, 20.0] ms" `
                 ("median {0:N2} ms" -f $r.MedianMs) $pacOk
         } else {
             Add-Note ("vsync={0}: no fixed-rate assertion; the median dt is reported as the contrast case." -f $vsync)
+        }
+        if ($probeRequired) {
+            Add-Check "F9" "completed guest iteration probe present" ">= 2 in-song windows" `
+                ("{0} windows" -f $guestProbeReport.Windows) ($guestProbeReport.Windows -ge 2)
+            if ($assertTarget -and $guestProbeReport.Windows -ge 2) {
+                $iterationRate = $guestProbeReport.IterationsPerSecMedian
+                Add-Check "F10" "completed guest iterations reach target" ("median in [{0:N1}, {1:N1}] per second" -f (0.9 * $expectedFps), (1.1 * $expectedFps)) `
+                    ("{0:N1}/s" -f $iterationRate) ($iterationRate -ge (0.9 * $expectedFps) -and $iterationRate -le (1.1 * $expectedFps))
+            }
         }
 
         # --- input checks ---------------------------------------------------
@@ -621,7 +681,7 @@ function Write-Verdict([string]$Path, [string]$OutPath, [string]$TagOverride, [s
     $verdict = if ($checks.Count -eq 0 -or $failed.Count -gt 0) { "FAIL" } else { "PASS" }
 
     $report = [ordered]@{
-        Tag = $TagOverride; Vsync = $vsync
+        Tag = $TagOverride; Vsync = $vsync; TargetFps = $(if ($assertTarget) { $expectedFps } else { 0 })
         Verdict = $verdict
         WindowStart = $windowStartText
         WindowEnd = $(if ($null -ne $windowEnd) { $windowEnd.ToString("yyyy-MM-dd HH:mm:ss.fff") } else { "" })
@@ -631,6 +691,7 @@ function Write-Verdict([string]$Path, [string]$OutPath, [string]$TagOverride, [s
         LogBytes = $sweep.Bytes
         Checks = @($checks)
         Frames = $(if ($m) { [pscustomobject]$frameReport } else { $null })
+        GuestProbe = $guestProbeReport
         Input = $inputReport
         Probes = @($probeReport)
         Notes = @($notes)
@@ -646,6 +707,7 @@ function Write-Verdict([string]$Path, [string]$OutPath, [string]$TagOverride, [s
     $md.Add("Verdict: **$verdict**" + $(if ($failed.Count) { " ($($failed.Count) check(s) failed: $(($failed | ForEach-Object { $_.Id }) -join ', '))" } else { "" })) | Out-Null
     $md.Add("") | Out-Null
     $md.Add("- vsync setting: ``$vsync``") | Out-Null
+    if ($assertTarget) { $md.Add("- requested frame target: $expectedFps fps") | Out-Null }
     $md.Add("- gameplay window: $($report.WindowStart) -> $($report.WindowEnd) ($([Math]::Round($windowSec, 1)) s, envelope closed: $envelopeClosed)") | Out-Null
     $md.Add("- log set: $($sweep.Files.Count) file(s), $([Math]::Round($sweep.Bytes / 1MB, 1)) MB, $($sweep.Lines) lines") | Out-Null
     $md.Add("") | Out-Null
@@ -667,6 +729,9 @@ function Write-Verdict([string]$Path, [string]$OutPath, [string]$TagOverride, [s
         }
         $md.Add("") | Out-Null
         $md.Add("*VdSwap* is the guest's frame submission, *XE_SWAP* the host present; dt comes from the host-microsecond delta recorded next to each event. Guest tick frequency derived from the frame series: $([Math]::Round($inputReport.GuestTickHz / 1e6, 3)) MHz.") | Out-Null
+        if ($guestProbeReport.Windows -gt 0) {
+            $md.Add("Completed guest draw iterations: median $([Math]::Round($guestProbeReport.IterationsPerSecMedian, 1))/s; guest present calls: median $([Math]::Round($guestProbeReport.PresentsPerSecMedian, 1))/s across $($guestProbeReport.Windows) one-second windows.") | Out-Null
+        }
         $md.Add("") | Out-Null
         $md.Add("## Input polling") | Out-Null
         $md.Add("") | Out-Null
@@ -706,24 +771,37 @@ if ($SelfTest) {
     try {
         $good = Join-Path $tmp "good"
         $bad = Join-Path $tmp "bad"
-        New-SyntheticRun $good
+        $false120 = Join-Path $tmp "false-120"
+        New-SyntheticRun $good -RequestedFps 60
         New-SyntheticRun $bad -Broken
+        New-SyntheticRun $false120 -RequestedFps 120
 
         $rGood = Invoke-Analysis $good $good "self-test-good"
         $rBad = Invoke-Analysis $bad $bad "self-test-bad"
+        $rFalse120 = Invoke-Analysis $false120 $false120 "self-test-false-120"
         $badIds = @($rBad.Failed | ForEach-Object { $_.Id })
+        $false120Ids = @($rFalse120.Failed | ForEach-Object { $_.Id })
 
         Write-Host "self-test good run  -> $($rGood.Verdict) ($(@($rGood.Failed).Count) failed)"
         Write-Host "self-test bad run   -> $($rBad.Verdict) (failed: $($badIds -join ', '))"
+        Write-Host "self-test false 120 -> $($rFalse120.Verdict) (failed: $($false120Ids -join ', '))"
         $ok = $true
         if ($rGood.Verdict -ne "PASS") {
             Write-Host "  !! the healthy synthetic run did not pass:"
             foreach ($c in $rGood.Failed) { Write-Host "     $($c.Id): $($c.What) expected $($c.Expected), measured $($c.Measured)" }
             $ok = $false
         }
+        foreach ($id in "F9", "F10") {
+            if (@($rGood.Checks | Where-Object { $_.Id -eq $id -and $_.Status -eq 'PASS' }).Count -ne 1) {
+                Write-Host "  !! the healthy run did not pass $id"; $ok = $false
+            }
+        }
         if ($rBad.Verdict -ne "FAIL") { Write-Host "  !! the broken synthetic run passed"; $ok = $false }
         foreach ($id in "F4", "F5", "I2", "I3") {
             if ($badIds -notcontains $id) { Write-Host "  !! the broken run did not fail $id"; $ok = $false }
+        }
+        foreach ($id in "F7", "F8", "F10") {
+            if ($false120Ids -notcontains $id) { Write-Host "  !! the false 120 run did not fail $id"; $ok = $false }
         }
         Write-Host $(if ($ok) { "self-test PASS" } else { "self-test FAIL" })
         if (-not $ok) { exit 1 }

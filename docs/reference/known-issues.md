@@ -21,6 +21,15 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
+**Higher framerates are unvalidated (2026-11-10):** Diagnostic 75/90/120 Hz
+guest-refresh runs reached their targets on the title screen. D3D12 gameplay on
+this GTX 970 machine averaged 41 guest draws/s in a 960×540 retail pilot; Ultimate
+with Disable Plots at 720×540 averaged 20.5/s at 60 Hz and 26.5/s at 120 Hz in
+short pilots with different cache warmth. These results do not pass the sustained
+gameplay or timing gates, so the original refresh behavior remains in place.
+See the [framerate expansion plan](../plans/todo/2026-10-25-framerate-expansion-plan.md)
+for conditions and raw log paths.
+
 **Messages update route (2026-11-06):** The guest-authored UPDATE GAME hint and
 confirmation, dynamic version text, Later route, browser success/close and browser failure
 text pass code/build and host checks, but the owner reserved the final game UI test. The

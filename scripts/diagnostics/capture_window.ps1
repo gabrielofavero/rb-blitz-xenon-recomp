@@ -42,6 +42,7 @@ public class Win32 {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int value);
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
@@ -80,8 +81,7 @@ for ($i = 0; $i -lt 25; $i++) {
     [Win32]::SetForegroundWindow($h) | Out-Null
     Start-Sleep -Milliseconds 150
 }
-if (-not $fg) { Write-Error "game window did not come to the foreground; refusing to save a capture of the wrong window"; exit 1 }
-Start-Sleep -Milliseconds 400
+if ($fg) { Start-Sleep -Milliseconds 400 }
 
 $r = New-Object Win32+RECT
 [Win32]::GetWindowRect($h, [ref]$r) | Out-Null
@@ -105,7 +105,28 @@ if ($w -le 0 -or $ht -le 0) { Write-Error "bad window rect"; exit 1 }
 
 $bmp = New-Object System.Drawing.Bitmap $w, $ht
 $g = [System.Drawing.Graphics]::FromImage($bmp)
-$g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
+if ($fg) {
+    $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
+} else {
+    # A locked or disconnected desktop reports no foreground window. PrintWindow
+    # asks the identified SDL window for its own pixels, so an occluding window
+    # cannot be mistaken for the game. This path has been observed to return the
+    # title screen on the Windows D3D12 pilot (2026-11-10).
+    if ($ClientArea) { Write-Error "background client-area capture is unsupported"; exit 1 }
+    $dc = $g.GetHdc()
+    try { $printed = [Win32]::PrintWindow($h, $dc, 2) } finally { $g.ReleaseHdc($dc) }
+    if (-not $printed) { Write-Error "game window did not come to the foreground and PrintWindow failed"; exit 1 }
+    # PrintWindow can report success yet return only a title bar and a black
+    # client for a windowed GPU surface. Reject that image as evidence.
+    $hasPixels = $false
+    foreach ($yf in @(0.25, 0.5, 0.75)) {
+        foreach ($xf in @(0.25, 0.5, 0.75)) {
+            $pixel = $bmp.GetPixel([int]($w * $xf), [int]($ht * $yf))
+            if ($pixel.R -gt 2 -or $pixel.G -gt 2 -or $pixel.B -gt 2) { $hasPixels = $true }
+        }
+    }
+    if (-not $hasPixels) { Write-Error "PrintWindow returned a blank game client"; exit 1 }
+}
 $dir = Split-Path -Parent $OutFile
 if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
 $outPath = [System.IO.Path]::GetFullPath($OutFile)
