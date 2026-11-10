@@ -155,7 +155,8 @@ Reconciliation Reconciler::Reconcile(SettingId id, const Descriptor& descriptor,
   return result;
 }
 
-Service::Service(StorePaths paths) : paths_(std::move(paths)), store_(paths_) {
+Service::Service(StorePaths paths, schema::ReleaseSettings release)
+    : paths_(std::move(paths)), release_(std::move(release)), store_(paths_) {
   RefreshDescriptors();
 }
 
@@ -180,7 +181,7 @@ DocumentStatus Service::Boot(const Profile* legacy, const PathEntry& existing_pa
 }
 
 void Service::RefreshDescriptors() {
-  descriptors_ = schema::BuildDescriptors(capabilities_);
+  descriptors_ = schema::BuildDescriptors(capabilities_, release_);
   for (auto& descriptor : descriptors_) {
     const auto it = provider_choices_.find(descriptor.id);
     if (it != provider_choices_.end()) descriptor.choices = it->second;
@@ -238,6 +239,17 @@ void Service::SetProviderDefaults(std::map<SettingId, Value> values) {
 }
 
 void Service::SetOverrides(std::map<SettingId, Value> values, std::map<SettingId, Source> sources) {
+  for (const auto& [id, rule] : release_.rules) {
+    if (rule.fixed_default) {
+      const auto it = values.find(id);
+      const Descriptor* descriptor = DescriptorFor(id);
+      if (it != values.end() && descriptor != nullptr &&
+          !ValueEquals(it->second, descriptor->compiled_default)) {
+        values.erase(it);
+        sources.erase(id);
+      }
+    }
+  }
   external_ = std::move(values);
   external_source_ = std::move(sources);
 }
@@ -311,6 +323,19 @@ Source Service::SourceFor(SettingId id, bool provider_row) const {
 
 Value Service::ReconcileEffective(const Descriptor& descriptor, const Value& requested,
                                   bool* corrected, std::string* correction_reason_key) const {
+  if (const auto rule = release_.rules.find(descriptor.id); rule != release_.rules.end()) {
+    bool use_default = rule->second.fixed_default;
+    if (rule->second.choices && !use_default &&
+        (requested.kind == ValueKind::kEnum || requested.kind == ValueKind::kString)) {
+      use_default = std::none_of(rule->second.choices->begin(), rule->second.choices->end(),
+                                [&](const Choice& choice) { return choice.token == requested.text; });
+    }
+    if (use_default) {
+      if (corrected) *corrected = !ValueEquals(requested, descriptor.compiled_default);
+      if (correction_reason_key) *correction_reason_key = "settings.release_choice_unavailable";
+      return descriptor.compiled_default;
+    }
+  }
   if (const auto it = boot_corrections_.find(descriptor.id); it != boot_corrections_.end()) {
     if (corrected) *corrected = !ValueEquals(it->second, requested);
     if (correction_reason_key) *correction_reason_key = boot_correction_reasons_.at(descriptor.id);

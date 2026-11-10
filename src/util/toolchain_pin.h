@@ -57,6 +57,8 @@ struct PinnedComponent {
 
 struct Pin {
   int schema_version = 0;
+  std::string target;  // optional target triplet; the build must match it
+  std::string compiler_family;  // optional: Clang or AppleClang
   std::vector<PinnedComponent> components;  // in report order
 };
 

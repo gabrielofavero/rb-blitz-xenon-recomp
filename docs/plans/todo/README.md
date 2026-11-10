@@ -12,7 +12,6 @@ Plans that are written but not started. Each carries its `YYYY-MM-DD-` creation 
 | [`2026-10-31-engine-compatibility-closeout-plan.md`](2026-10-31-engine-compatibility-closeout-plan.md) | Ultimate scripted acceptance, shader preparation, compile-trace counts, selective RB3 porting and first-release evidence. Planning only (E1–E6, with E3/E5 split into prompts). |
 | [`2026-10-31-content-and-music-closeout-plan.md`](2026-10-31-content-and-music-closeout-plan.md) | Current-build DLC list fault, same-session store refresh, Search header, and menu-music listening routes. Planning only (C1a–C5). |
 | [`2026-10-31-runtime-ui-acceptance-plan.md`](2026-10-31-runtime-ui-acceptance-plan.md) | HUD, Ultimate setting restart, graphics recovery note, Load Guard and remaining live input acceptance. Planning only (U1–U6b). |
-| [`2026-11-09-linux-macos-release-plan.md`](2026-11-09-linux-macos-release-plan.md) | Shared portability and first-launch import, Linux `.deb`/`.rpm`, macOS `.app`/`.pkg`, platform acceptance and multi-asset release gates. Planning only (Prompts 0–5); mobile is separate. |
 
 The Load Guard document moved to [`../in-progress/`](../in-progress/) when its controller work started
 on 2026-10-25; its merge record is in [`../in-progress/README.md`](../in-progress/README.md). The

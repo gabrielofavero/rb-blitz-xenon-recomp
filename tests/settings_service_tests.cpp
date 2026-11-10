@@ -1159,6 +1159,81 @@ void TestRestoreClearsUnsupportedNativeDefaultWithProvider() {
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kAntiAliasing).text == "native");
 }
 
+void TestReleaseSettingsMigration() {
+  BeginCase("release settings: supported choices survive, obsolete choices use the new default");
+  Scratch scratch;
+  const StorePaths paths = Paths(scratch);
+  WriteFile(paths.settings_file,
+            "schema_version = 1\n[general]\nstartup = 'normal'\n[graphics]\nrenderer = 'd3d12'\n");
+  schema::RowRule startup;
+  startup.default_value = EnumV("fast");
+  startup.choices = std::vector<Choice>{{"fast", "Fast"}};
+  schema::RowRule hidden_load_guard;
+  hidden_load_guard.hidden = true;
+  const std::vector<schema::VersionRule> rules{
+      {schema::HostPlatform::kWindows, "2.0.0", SettingId::kStartup, startup},
+      {schema::HostPlatform::kWindows, "2.0.0", SettingId::kLoadGuard, hidden_load_guard}};
+  auto older = schema::SettingsForRelease(schema::HostPlatform::kWindows, "1.0.0", rules);
+  Service old_service(paths, older);
+  CHECK_TRUE(old_service.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+  CHECK_TRUE(old_service.EffectiveValue(SettingId::kStartup).text == "normal");
+  CHECK_TRUE(old_service.EffectiveValue(SettingId::kRenderer).text == "d3d12");
+  CHECK_TRUE(old_service.DescriptorFor(SettingId::kLoadGuard)->availability == Availability::kVisible);
+
+  auto newer = schema::SettingsForRelease(schema::HostPlatform::kWindows, "2.0.0", rules);
+  Service new_service(paths, newer);
+  CHECK_TRUE(new_service.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+  CHECK_TRUE(new_service.RequestedValue(SettingId::kStartup).text == "normal");
+  CHECK_TRUE(new_service.EffectiveValue(SettingId::kStartup).text == "fast");
+  const auto* changed = new_service.DescriptorFor(SettingId::kStartup);
+  CHECK_TRUE(changed != nullptr && changed->choices.size() == 1 &&
+             changed->compiled_default.text == "fast");
+  CHECK_TRUE(new_service.DescriptorFor(SettingId::kLoadGuard)->availability == Availability::kHidden);
+  const uint64_t restore = new_service.BeginEdit(new_service.revision());
+  CHECK_TRUE(new_service.StageDefaults(restore).ok);
+  CHECK_TRUE(new_service.Commit(restore).status == CommitStatus::kSaved);
+  Service restored(paths, newer);
+  CHECK_TRUE(restored.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+  CHECK_TRUE(restored.RequestedValue(SettingId::kStartup).text == "fast");
+
+  WriteFile(paths.settings_file,
+            "schema_version = 1\n[general]\nstartup = 'fast'\n[graphics]\nrenderer = 'd3d12'\n");
+  Service supported(paths, newer);
+  CHECK_TRUE(supported.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+  CHECK_TRUE(supported.EffectiveValue(SettingId::kStartup).text == "fast");
+  CHECK_TRUE(supported.RequestedValue(SettingId::kStartup).text == "fast");
+}
+
+void TestVulkanOnlyReleaseSettings() {
+  BeginCase("Linux and macOS: Renderer hidden and saved DirectX cannot replace Vulkan");
+  for (const auto platform : {schema::HostPlatform::kLinux, schema::HostPlatform::kMacOS}) {
+    Scratch scratch;
+    const StorePaths paths = Paths(scratch);
+    WriteFile(paths.settings_file, "schema_version = 1\n[graphics]\nrenderer = 'd3d12'\n");
+    const auto release = schema::SettingsForRelease(platform, "1.0.0");
+    Service service(paths, release);
+    CHECK_TRUE(service.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+    const auto* renderer = service.DescriptorFor(SettingId::kRenderer);
+    CHECK_TRUE(renderer != nullptr && renderer->availability == Availability::kHidden);
+    CHECK_TRUE(renderer != nullptr && renderer->compiled_default.text == "vulkan");
+    CHECK_TRUE(renderer != nullptr && renderer->choices.size() == 1 &&
+               renderer->choices.front().token == "vulkan");
+    CHECK_TRUE(service.RequestedValue(SettingId::kRenderer).text == "d3d12");
+    CHECK_TRUE(service.EffectiveValue(SettingId::kRenderer).text == "vulkan");
+    service.SetOverrides({{SettingId::kRenderer, EnumV("d3d12")}},
+                         {{SettingId::kRenderer, Source::kCommandLine}});
+    CHECK_TRUE(service.EffectiveValue(SettingId::kRenderer).text == "vulkan");
+    const uint64_t edit = service.BeginEdit(service.revision());
+    CHECK_FALSE(service.Set(edit, SettingId::kRenderer, EnumV("d3d12"),
+                            service.capability_revision()).ok);
+    CHECK_TRUE(service.StageDefaults(edit).ok);
+    CHECK_TRUE(service.Commit(edit).status == CommitStatus::kSaved);
+    Service reloaded(paths, release);
+    CHECK_TRUE(reloaded.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+    CHECK_TRUE(reloaded.RequestedValue(SettingId::kRenderer).text == "vulkan");
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1188,5 +1263,7 @@ int main(int argc, char** argv) {
   TestProviderRestoreUsesOfferedDefaultChoice();
   TestRestoreWithInstalledProvider(argc > 1 ? argv[1] : nullptr);
   TestRestoreClearsUnsupportedNativeDefaultWithProvider();
+  TestReleaseSettingsMigration();
+  TestVulkanOnlyReleaseSettings();
   return Finish();
 }

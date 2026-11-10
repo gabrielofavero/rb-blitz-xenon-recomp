@@ -15,9 +15,9 @@
 //                     upstream release or from an archive/folder the user has.
 //   4. the manifest and report - what was installed, from where, and the log.
 //
-// Everything below runs inside the install directory the wizard chose, and each
-// step stages and verifies before it commits: a component that fails its
-// fingerprint check leaves the previous install untouched.
+// The Windows helper uses the directory the wizard chose. The shared game-data
+// core also accepts an explicit destination outside that directory. Each game
+// import stages and verifies before swapping the live tree.
 //
 // Layout of an installed {app} directory:
 //
@@ -139,9 +139,10 @@ struct GameSourcePlan {
 bool PlanGameFolder(const std::filesystem::path& folder, GameSourcePlan* out, std::string* error);
 bool PlanGamePackage(const std::filesystem::path& package, GameSourcePlan* out, std::string* error);
 
-// Copies every present file into <game_root>/.staging, verifies the mandatory
-// ones there, and only then moves them into place. `game_root` is created when
-// missing. On failure nothing is committed and the staging directory is removed.
+// Stages a complete next game tree beside `game_root`, verifies mandatory files,
+// then swaps the tree through a sibling backup. Existing optional content and
+// user files survive an update. A failed import restores the previous tree;
+// VerifyGameTree recovers a backup left by an interrupted process.
 bool ImportGame(const GameSourcePlan& plan, const std::filesystem::path& game_root,
                 const ProgressSink& progress, std::string* error);
 

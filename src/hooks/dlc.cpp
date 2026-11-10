@@ -575,9 +575,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     downloads.layout.destination_root = root;
     downloads.layout.structured = structured;
     downloads.receipt_path = runtime->user_data_root() / "store" / "downloads.tsv";
-#if defined(_WIN32)
-    downloads.transfer = store::WinHttpTransfer();
-#endif
+    downloads.transfer = store::PlatformTransfer();
     downloads.refresh = [] { RefreshAfterStoreInstall(); };
     downloads.packages = store::InstalledSongPackages;
     downloads.forget_package = store::ForgetInstalledPackage;

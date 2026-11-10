@@ -78,6 +78,7 @@ constexpr const char* kSdkDir = "rexglue-sdk";
 struct Options {
   fs::path project_dir = kDefaultProjectDir;
   fs::path pin;
+  std::string target;
   fs::path sdk_dir;
   fs::path cxx = "clang++";
   fs::path cmake = "cmake";
@@ -89,7 +90,7 @@ struct Options {
 };
 
 void PrintUsage() {
-  std::cout << "Usage: rb_blitz_toolchain [--project-dir <dir>] [--pin <file>] [--check]\n"
+  std::cout << "Usage: rb_blitz_toolchain [--project-dir <dir>] [--pin <file>] [--target <name>] [--check]\n"
                "                         [--cxx <path>] [--cmake <path>] [--ninja <path>]\n"
                "                         [--sdk-dir <dir>] [--strict] [--allow-other-toolchain]\n"
                "                         [--emit-header <file>] [--quiet]\n"
@@ -101,6 +102,7 @@ void PrintUsage() {
                "  --pin <file>             frozen record (default <project-dir>/"
             << kPinFile
             << ")\n"
+               "  --target <name>          require the pin's recorded build target\n"
                "  --check                  compare and report, the default action\n"
                "  --cxx <path>             compiler to ask (default clang++ from PATH)\n"
                "  --cmake <path>           CMake to ask (default cmake from PATH)\n"
@@ -139,7 +141,7 @@ bool ParseOptions(int argc, char** argv, Options* options, std::string* error) {
       options->allow_other_toolchain = true;
     } else if (arg == "--quiet") {
       options->quiet = true;
-    } else if (arg == "--project-dir" || arg == "--pin" || arg == "--sdk-dir" ||
+    } else if (arg == "--project-dir" || arg == "--pin" || arg == "--target" || arg == "--sdk-dir" ||
                arg == "--cxx" || arg == "--cmake" || arg == "--ninja" ||
                arg == "--emit-header") {
       const char* value = take_value(&i, arg);
@@ -150,6 +152,8 @@ bool ParseOptions(int argc, char** argv, Options* options, std::string* error) {
         options->project_dir = value;
       } else if (arg == "--pin") {
         options->pin = value;
+      } else if (arg == "--target") {
+        options->target = value;
       } else if (arg == "--sdk-dir") {
         options->sdk_dir = value;
       } else if (arg == "--cxx") {
@@ -221,7 +225,8 @@ std::string FirstMatch(const std::string& text, const std::regex& pattern, int g
 // its version, the MSVC toolset whose headers it will include, and the Windows SDK
 // version those headers come from. This is the check docs/guides/build-and-run.md §1
 // describes for a hand-written toolchain check, with the parsing done for you.
-void ProbeCompiler(const fs::path& cxx, Reported* compiler, Reported* msvc, Reported* windows_sdk) {
+void ProbeCompiler(const fs::path& cxx, Reported* compiler, Reported* family,
+                   Reported* msvc, Reported* windows_sdk) {
   const fs::path probe = fs::temp_directory_path() / "rb_blitz_toolchain_probe.cpp";
   {
     std::ofstream file(probe, std::ios::binary);
@@ -240,6 +245,10 @@ void ProbeCompiler(const fs::path& cxx, Reported* compiler, Reported* msvc, Repo
   }
 
   compiler->value = FirstMatch(output, std::regex("clang version ([0-9]+\\.[0-9]+\\.[0-9]+)"));
+  family->value = output.find("Apple clang version ") != std::string::npos
+                      ? "AppleClang"
+                      : (compiler->value.empty() ? "" : "Clang");
+  family->detail = cxx.string();
   const std::string installed_dir = FirstMatch(output, std::regex("InstalledDir: (.+)"));
   if (compiler->value.empty()) {
     // Something ran but did not describe itself as clang, which is worth saying
@@ -269,10 +278,12 @@ std::map<std::string, Reported> Probe(const Options& options) {
   std::map<std::string, Reported> reported;
 
   Reported compiler;
+  Reported family;
   Reported msvc;
   Reported windows_sdk;
-  ProbeCompiler(options.cxx, &compiler, &msvc, &windows_sdk);
+  ProbeCompiler(options.cxx, &compiler, &family, &msvc, &windows_sdk);
   reported["clang"] = compiler;
+  reported["compiler_family"] = family;
   reported["msvc"] = msvc;
   reported["windows_sdk"] = windows_sdk;
 
@@ -384,13 +395,30 @@ int main(int argc, char** argv) {
     std::cerr << "rb_blitz_toolchain: " << options.pin.string() << ": " << error << "\n";
     return kExitUsage;
   }
+  if (!options.target.empty() && pin.target != options.target) {
+    std::cerr << "rb_blitz_toolchain: " << options.pin.string() << " targets '" << pin.target
+              << "', but this build targets '" << options.target << "'\n";
+    return kExitUsage;
+  }
 
   CheckOptions check_options;
   check_options.strict = options.strict;
   check_options.allow_other_toolchain = options.allow_other_toolchain;
 
+  const auto reported = Probe(options);
+  if (!pin.compiler_family.empty()) {
+    const auto family = reported.find("compiler_family");
+    const std::string actual = family == reported.end() ? "" : family->second.value;
+    if (actual != pin.compiler_family) {
+      std::cerr << "rb_blitz_toolchain: " << options.pin.string() << " requires "
+                << pin.compiler_family << ", compiler reported "
+                << (actual.empty() ? "unknown" : actual)
+                << (options.allow_other_toolchain ? " (override enabled)\n" : "\n");
+      if (!options.allow_other_toolchain) return kExitToolchain;
+    }
+  }
   const std::vector<ComponentCheck> checks =
-      rb_blitz::toolchain::ComparePin(pin, Probe(options), check_options);
+      rb_blitz::toolchain::ComparePin(pin, reported, check_options);
 
   if (!options.emit_header.empty()) {
     std::string header;

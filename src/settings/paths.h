@@ -40,7 +40,30 @@ struct PathFileResult {
   std::string error;
 };
 
-// <executable_dir>/paths.toml.
+// Caller-supplied environment keeps the installed writable layout testable
+// without changing a process's HOME/XDG variables. Empty fields use HOME.
+struct NativePathEnvironment {
+  std::filesystem::path home;
+  std::filesystem::path xdg_data_home;
+  std::filesystem::path xdg_config_home;
+  std::filesystem::path xdg_cache_home;
+  std::filesystem::path xdg_state_home;
+};
+
+struct NativeUserRoots {
+  std::filesystem::path data;
+  std::filesystem::path config;
+  std::filesystem::path cache;
+  std::filesystem::path state;
+};
+
+// Installed, per-user native roots. Does not create folders. Windows keeps its
+// existing SDK/installer locations; on Windows this returns empty paths.
+NativeUserRoots ResolveNativeUserRoots(const NativePathEnvironment& environment);
+NativeUserRoots NativeUserRootsFromEnvironment();
+
+// Windows and explicit portable mode: <executable_dir>/paths.toml.
+// Installed Linux/macOS: per-user native config root/paths.toml.
 std::filesystem::path ResolvePathFile(const std::filesystem::path& executable_dir);
 
 // Reads the path file. A missing file is not an error and yields the defaults (both empty).

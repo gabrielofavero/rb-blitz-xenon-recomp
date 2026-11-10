@@ -7,16 +7,19 @@
 //
 //   1. the handoff token  - a fixed-shape, bounded, space-free string of numbers plus the target;
 //   2. the command line   - an allowlist rebuild, never a replay of the old line;
-//   3. the process half   - `CreateProcessW` / `WaitForSingleObject`, and the bootstrap's
-//                           verified-identity wait.
+//   3. the process half   - native spawn and the bootstrap's verified-identity wait.
 //
 // Everything in parts 1 and 2 is platform-independent and is what the tests spend most of their
-// checks on; part 3 is guarded, so a non-Windows build still compiles the state machine.
+// checks on; part 3 has Windows and POSIX implementations.
 
 #include "platform/game_restart.h"
 
 #include <array>
+#include <chrono>
 #include <cstdio>
+#include <fstream>
+#include <sstream>
+#include <thread>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -26,6 +29,21 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#elif defined(__linux__) || defined(__APPLE__)
+#include <cerrno>
+#include <csignal>
+#include <cstring>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#if defined(__APPLE__)
+#include <crt_externs.h>
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+#else
+extern char** environ;
+#endif
 #endif
 
 namespace rb_blitz::platform {
@@ -98,7 +116,7 @@ constexpr std::array<TargetWord, 3> kTargets{{
 // only the yes/no answer is wanted.
 bool HandoffTokenText(std::string_view argument, std::string_view* out) {
   constexpr std::string_view kSwitch = kHandoffSwitch;
-  if (argument.size() <= kSwitch.size() || argument.substr(0, kSwitch.size()) != kSwitch) {
+  if (argument.size() < kSwitch.size() || argument.substr(0, kSwitch.size()) != kSwitch) {
     return false;
   }
   if (out != nullptr) {
@@ -124,6 +142,41 @@ std::wstring ToWide(std::string_view text) {
 
 uint64_t TicksOf(const FILETIME& time) {
   return (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime;
+}
+#elif defined(__linux__)
+// Linux /proc stat field 22 is the process start tick. Locate the closing parenthesis first:
+// the command name in field 2 may itself contain spaces or parentheses.
+bool LinuxProcessStat(uint32_t pid, uint64_t* created, char* state) {
+  std::ifstream input("/proc/" + std::to_string(pid) + "/stat");
+  std::string line;
+  if (!std::getline(input, line)) return false;
+  const size_t command_end = line.rfind(')');
+  if (command_end == std::string::npos || command_end + 2 >= line.size()) return false;
+  std::istringstream fields(line.substr(command_end + 2));
+  std::string field;
+  for (unsigned number = 3; number <= 22; ++number) {
+    if (!(fields >> field)) return false;
+    if (number == 3 && state) *state = field[0];
+    if (number == 22) {
+      try {
+        *created = std::stoull(field);
+      } catch (...) {
+        return false;
+      }
+    }
+  }
+  return *created != 0;
+}
+#elif defined(__APPLE__)
+bool MacProcessStat(uint32_t pid, uint64_t* created, bool* zombie) {
+  int name[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, static_cast<int>(pid)};
+  kinfo_proc info{};
+  size_t size = sizeof(info);
+  if (sysctl(name, 4, &info, &size, nullptr, 0) != 0 || size != sizeof(info)) return false;
+  const auto& start = info.kp_proc.p_starttime;
+  *created = static_cast<uint64_t>(start.tv_sec) * 1000000ull + start.tv_usec;
+  if (zombie) *zombie = info.kp_proc.p_stat == SZOMB;
+  return *created != 0;
 }
 #endif
 
@@ -196,6 +249,10 @@ bool DecodeHandoff(std::string_view text, HandoffToken* out, std::string* error)
   }
   if (pid == 0 || pid > 0xFFFFFFFFull) {
     *error = "the handoff token has no valid parent process";
+    return false;
+  }
+  if (created == 0) {
+    *error = "the handoff token has no valid parent creation time";
     return false;
   }
   if (nonce == 0) {
@@ -338,6 +395,8 @@ std::string BuildCommandLine(const std::filesystem::path& executable,
 uint32_t ThisProcessId() {
 #if defined(_WIN32)
   return static_cast<uint32_t>(GetCurrentProcessId());
+#elif defined(__linux__) || defined(__APPLE__)
+  return static_cast<uint32_t>(getpid());
 #else
   return 0;
 #endif
@@ -353,6 +412,9 @@ uint64_t ThisProcessCreatedTicks() {
     return 0;
   }
   return TicksOf(created);
+#elif defined(__linux__) || defined(__APPLE__)
+  uint64_t created = 0;
+  return ProcessCreatedTicks(ThisProcessId(), &created) ? created : 0;
 #else
   return 0;
 #endif
@@ -379,8 +441,14 @@ bool ProcessCreatedTicks(uint32_t pid, uint64_t* out) {
   *out = TicksOf(created);
   return true;
 #else
+#if defined(__linux__)
+  return LinuxProcessStat(pid, out, nullptr);
+#elif defined(__APPLE__)
+  return MacProcessStat(pid, out, nullptr);
+#else
   (void)pid;
   return false;
+#endif
 #endif
 }
 
@@ -498,11 +566,163 @@ class WindowsParentWaiter : public ParentWaiter {
 };
 #endif
 
+#if defined(__linux__) || defined(__APPLE__)
+class PosixChildLauncher : public ChildLauncher {
+ public:
+  bool Spawn(const std::filesystem::path& executable,
+             const std::vector<std::string>& arguments,
+             const std::filesystem::path& working_directory, std::string* error) override {
+    if (pid_ != 0) {
+      *error = "a restart child is already running";
+      return false;
+    }
+    if (executable.empty()) {
+      *error = "there is no executable to start";
+      return false;
+    }
+    const std::string program = executable.string();
+    const std::string directory = working_directory.string();
+    std::vector<char*> argv;
+    argv.reserve(arguments.size() + 2);
+    argv.push_back(const_cast<char*>(program.c_str()));
+    for (const auto& argument : arguments) argv.push_back(const_cast<char*>(argument.c_str()));
+    argv.push_back(nullptr);
+
+    // The close-on-exec pipe distinguishes a successful exec from a fork that merely succeeded.
+    // A failed chdir/exec leaves the original game running and reports a useful error.
+    int pipe_fd[2];
+    if (pipe(pipe_fd) != 0) {
+      *error = "restart pipe failed: " + std::string(std::strerror(errno));
+      return false;
+    }
+    if (fcntl(pipe_fd[1], F_SETFD, FD_CLOEXEC) == -1) {
+      const int code = errno;
+      close(pipe_fd[0]);
+      close(pipe_fd[1]);
+      *error = "restart pipe setup failed: " + std::string(std::strerror(code));
+      return false;
+    }
+    const pid_t child = fork();
+    if (child == 0) {
+      close(pipe_fd[0]);
+      if (!directory.empty() && chdir(directory.c_str()) != 0) {
+        const int code = errno;
+        (void)write(pipe_fd[1], &code, sizeof(code));
+        _exit(127);
+      }
+#if defined(__APPLE__)
+      execve(program.c_str(), argv.data(), *_NSGetEnviron());
+#else
+      execve(program.c_str(), argv.data(), environ);
+#endif
+      const int code = errno;
+      (void)write(pipe_fd[1], &code, sizeof(code));
+      _exit(127);
+    }
+    const int fork_error = errno;
+    close(pipe_fd[1]);
+    if (child < 0) {
+      close(pipe_fd[0]);
+      *error = "fork failed: " + std::string(std::strerror(fork_error));
+      return false;
+    }
+    int child_error = 0;
+    ssize_t received;
+    do {
+      received = read(pipe_fd[0], &child_error, sizeof(child_error));
+    } while (received < 0 && errno == EINTR);
+    const int read_error = errno;
+    close(pipe_fd[0]);
+    if (received != 0) {
+      if (received != sizeof(child_error)) (void)kill(child, SIGKILL);
+      int status = 0;
+      (void)waitpid(child, &status, 0);
+      *error = received == sizeof(child_error)
+                   ? "restart child failed to start: " + std::string(std::strerror(child_error))
+                   : "restart child handshake failed: " + std::string(std::strerror(read_error));
+      return false;
+    }
+    pid_ = child;
+    return true;
+  }
+
+  bool WaitForExit(uint32_t timeout_ms, std::string* error) override {
+    if (pid_ == 0) {
+      *error = "no child to wait for";
+      return false;
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (true) {
+      int status = 0;
+      const pid_t waited = waitpid(pid_, &status, WNOHANG);
+      if (waited == pid_) {
+        pid_ = 0;
+        return true;
+      }
+      if (waited < 0) {
+        *error = "waitpid failed: " + std::string(std::strerror(errno));
+        pid_ = 0;
+        return false;
+      }
+      if (std::chrono::steady_clock::now() >= deadline) {
+        *error = "the child did not exit within the timeout";
+        return false;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+
+  uint32_t ChildPid() const override { return static_cast<uint32_t>(pid_); }
+
+ private:
+  pid_t pid_ = 0;
+};
+
+class PosixParentWaiter : public ParentWaiter {
+ public:
+  WaitResult WaitForExit(uint32_t pid, uint64_t created, uint32_t timeout_ms,
+                         std::string* error) override {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (true) {
+      uint64_t actual = 0;
+      bool zombie = false;
+      bool found = false;
+#if defined(__linux__)
+      char state = 0;
+      found = LinuxProcessStat(pid, &actual, &state);
+      zombie = state == 'Z' || state == 'X';
+#else
+      found = MacProcessStat(pid, &actual, &zombie);
+#endif
+      if (!found) {
+        if (kill(static_cast<pid_t>(pid), 0) == -1 && errno == ESRCH) {
+          return WaitResult::kAlreadyGone;
+        }
+        *error = "could not verify the parent process identity";
+        return WaitResult::kFailed;
+      }
+      if (created != 0 && actual != created) {
+        *error = "the pid now belongs to a different process";
+        return WaitResult::kIdentityMismatch;
+      }
+      if (zombie) return WaitResult::kExited;
+      if (std::chrono::steady_clock::now() >= deadline) {
+        *error = "the parent did not exit within the timeout";
+        return WaitResult::kTimeout;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+};
+#endif
+
 }  // namespace
 
 std::unique_ptr<ChildLauncher> CreateChildLauncher() {
 #if defined(_WIN32)
   return std::make_unique<WindowsChildLauncher>();
+#elif defined(__linux__) || defined(__APPLE__)
+  return std::make_unique<PosixChildLauncher>();
 #else
   return nullptr;
 #endif
@@ -511,6 +731,8 @@ std::unique_ptr<ChildLauncher> CreateChildLauncher() {
 std::unique_ptr<ParentWaiter> CreateParentWaiter() {
 #if defined(_WIN32)
   return std::make_unique<WindowsParentWaiter>();
+#elif defined(__linux__) || defined(__APPLE__)
+  return std::make_unique<PosixParentWaiter>();
 #else
   return nullptr;
 #endif
@@ -575,6 +797,14 @@ RestartOutcome RestartCoordinator::Request(uint64_t saved_revision, uint64_t cur
   token_ = HandoffToken{};
   token_.parent_pid = ThisProcessId();
   token_.parent_created = ThisProcessCreatedTicks();
+  if (token_.parent_pid == 0 || token_.parent_created == 0) {
+    phase_ = RestartPhase::kFailed;
+    error_ = "could not determine the parent process identity";
+    outcome.status = rb_blitz::settings::RestartStatus::kChildFailed;
+    outcome.phase = phase_;
+    outcome.error = error_;
+    return outcome;
+  }
   // A DTA script sends request id 0 ("no id"), so the one-shot identity is derived instead of
   // taken: it only has to be non-zero and unique to this request.
   const uint64_t derived = 0x9E3779B97F4A7C15ull * (static_cast<uint64_t>(token_.parent_pid) + 1) ^

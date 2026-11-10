@@ -666,7 +666,47 @@ SettingId IdForToken(std::string_view token) {
 ApplicationStrategy StrategyOf(SettingId id) {
   const SchemaRow* row = FindRow(id);
   return row == nullptr ? ApplicationStrategy::kRestart : row->descriptor.strategy;
-}std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps) {
+}
+
+ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view version,
+                                   std::span<const VersionRule> version_rules) {
+  ReleaseSettings release;
+  release.platform = platform;
+  release.version = version;
+  if (platform == HostPlatform::kLinux || platform == HostPlatform::kMacOS) {
+    RowRule renderer;
+    renderer.hidden = true;
+    renderer.fixed_default = true;
+    renderer.default_value = EnumValue("vulkan");
+    renderer.choices = Choices({{"vulkan", "Vulkan"}});
+    release.rules.emplace(SettingId::kRenderer, std::move(renderer));
+  }
+  // A future release adds its reviewed rules here. Exact-version rules take precedence over
+  // platform-wide ones; saved values keep their stable IDs and are reconciled by the service.
+  for (const std::string_view match : {std::string_view("*"), version})
+    for (const VersionRule& entry : version_rules)
+      if (entry.platform == platform && entry.version == match)
+        release.rules[entry.id] = entry.rule;
+  return release;
+}
+
+ReleaseSettings CurrentReleaseSettings() {
+#if defined(RBBLITZ_GAME_VERSION)
+  constexpr std::string_view version = RBBLITZ_GAME_VERSION;
+#else
+  constexpr std::string_view version = "unversioned";
+#endif
+#if defined(_WIN32)
+  return SettingsForRelease(HostPlatform::kWindows, version);
+#elif defined(__APPLE__)
+  return SettingsForRelease(HostPlatform::kMacOS, version);
+#else
+  return SettingsForRelease(HostPlatform::kLinux, version);
+#endif
+}
+
+std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps,
+                                         const ReleaseSettings& release) {
   std::vector<Descriptor> descriptors;
   descriptors.reserve(Rows().size());
   for (const SchemaRow& row : Rows()) {
@@ -681,6 +721,11 @@ ApplicationStrategy StrategyOf(SettingId id) {
       } else {
         descriptor.availability = Availability::kVisible;
       }
+    }
+    if (const auto rule = release.rules.find(descriptor.id); rule != release.rules.end()) {
+      if (rule->second.default_value) descriptor.compiled_default = *rule->second.default_value;
+      if (rule->second.choices) descriptor.choices = *rule->second.choices;
+      if (rule->second.hidden) descriptor.availability = Availability::kHidden;
     }
     descriptors.push_back(std::move(descriptor));
   }

@@ -5,6 +5,34 @@ the log excerpt that blocker entries in [bringup-log.md](../history/bringup-log.
 
 Everything below is PowerShell, run from the repository root unless noted.
 
+The Linux and macOS presets are under bring-up and have no accepted native build
+yet. Their target-specific bootstrap toolchain records are selected by CMake;
+the required native configure/codegen/link sequence and blockers are in the
+[platform expansion plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md).
+The Windows commands below remain the current supported build route.
+
+Prompt 2's Linux desktop launcher and package staging code are in
+[`installer/linux/README.md`](../../installer/linux/README.md). The Windows host
+can validate the shared importer and package metadata, but a native Linux
+configure/codegen/link and package dependency inventory remain required before
+the Linux package command can run.
+The corresponding Mac build and app/package staging entry point is
+[`installer/macos/README.md`](../../installer/macos/README.md). It uses the Mac
+presets and must run on native Mac hardware; no macOS release build is accepted yet.
+
+Prompt 1's SDK-free game importer can be built on a native host without the game
+SDK or Inno Setup. From the repository root:
+
+```sh
+cmake -S installer/portable -B out/build/portable-import -G Ninja
+cmake --build out/build/portable-import
+ctest --test-dir out/build/portable-import -R '^portable_import$' --output-on-failure
+```
+
+This tests the shared transaction with synthetic game bytes and checks that
+the repository's supported fingerprint rejects them. It does not establish a
+Linux/macOS game build or graphical importer.
+
 > **Where to start:** §0 is once per checkout and §1 once per machine. On a checkout whose
 > toolchain and build tree are already in place, **§3 is the entry point** for a normal
 > source change; §2 is only for a build tree that has been moved or copied.

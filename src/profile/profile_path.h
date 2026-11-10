@@ -85,8 +85,8 @@ bool IsPortable(const std::filesystem::path& executable_dir);
 // command_line_value to the caller, which has the argv.
 ProfilePathInputs ProfilePathInputsFromEnvironment(std::filesystem::path executable_dir);
 
-// The roaming application data directory: %APPDATA% on Windows, then $XDG_CONFIG_HOME,
-// then $HOME/.config. Empty when the environment names none of them.
+// The roaming application data directory: %APPDATA% on Windows, macOS
+// Application Support, or $XDG_CONFIG_HOME / $HOME/.config on Linux.
 std::filesystem::path RoamingAppDataDir();
 
 }  // namespace rb_blitz::profile

@@ -8,6 +8,18 @@ service, boot wiring, Ultimate provider adapter, hot apply + restart). Each part
 headings and section numbers, demoted one level, so references such as "§3" still resolve. Evidence tags
 are the sources' own ([boot], [tree], [cited], [measured]).
 
+## 2026-11-10 addendum — release-specific settings
+
+[Tree] `src/settings/schema.{h,cpp}` now keeps a release/platform rule set beside the stable row
+table. A rule can hide a row, replace its choices or compiled default, and require the default
+when a saved value is unsupported. `Service` resolves these rules for descriptors, effective
+values and Restore Defaults; the authored menu receives hidden-row tokens and omits them when
+building the guest's own definition. On Linux and macOS the rule hides Renderer and fixes it to
+Vulkan. Windows keeps the existing D3D12 default and backend choices. The file format and stable
+setting IDs are unchanged, so an older value remains in storage until the player restores defaults
+or changes it on a build where it is supported. Host tests cover version selection and both
+target-platform policies; native Linux/macOS boot and visible menu behavior are unverified.
+
 ## Sources
 
 | Part | Original document | Package | Status |

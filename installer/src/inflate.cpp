@@ -5,6 +5,9 @@
 
 #include <algorithm>
 #include <cstring>
+#ifndef _WIN32
+#include <sys/types.h>
+#endif
 
 namespace rb_blitz::installer {
 namespace {
@@ -328,23 +331,40 @@ FileSource::~FileSource() { Close(); }
 
 bool FileSource::Open(const std::filesystem::path& path, std::string* error) {
   Close();
+#ifdef _WIN32
   file_ = _wfopen(path.c_str(), L"rb");
+#else
+  file_ = std::fopen(path.c_str(), "rb");
+#endif
   if (file_ == nullptr) {
-    *error = S("cannot open ", Narrow(path.native()), ": ", LastWin32Error());
+    SetError(error, S("cannot open ", PosixPath(path), ": ", LastWin32Error()));
     return false;
   }
+#ifdef _WIN32
   if (_fseeki64(file_, 0, SEEK_END) != 0) {
-    *error = S("cannot seek in ", Narrow(path.native()));
+    SetError(error, S("cannot seek in ", PosixPath(path)));
     Close();
     return false;
   }
   const __int64 size = _ftelli64(file_);
-  if (size < 0) {
-    *error = S("cannot determine the size of ", Narrow(path.native()));
+#else
+  if (fseeko(file_, 0, SEEK_END) != 0) {
+    SetError(error, S("cannot seek in ", PosixPath(path)));
     Close();
     return false;
   }
+  const off_t size = ftello(file_);
+#endif
+  if (size < 0) {
+    SetError(error, S("cannot determine the size of ", PosixPath(path)));
+    Close();
+    return false;
+  }
+#ifdef _WIN32
   _fseeki64(file_, 0, SEEK_SET);
+#else
+  fseeko(file_, 0, SEEK_SET);
+#endif
   size_ = static_cast<std::uint64_t>(size);
   cache_.resize(kInputBufferSize);
   cache_offset_ = 0;
@@ -374,13 +394,21 @@ std::size_t FileSource::Read(std::uint64_t offset, std::uint8_t* out, std::size_
   }
   if (size >= cache_.size() / 2) {
     // A big read is cheaper straight from the file than through the cache.
+#ifdef _WIN32
     if (_fseeki64(file_, static_cast<__int64>(offset), SEEK_SET) != 0) {
+#else
+    if (fseeko(file_, static_cast<off_t>(offset), SEEK_SET) != 0) {
+#endif
       return 0;
     }
     return std::fread(out, 1, size, file_);
   }
 
+#ifdef _WIN32
   if (_fseeki64(file_, static_cast<__int64>(offset), SEEK_SET) != 0) {
+#else
+  if (fseeko(file_, static_cast<off_t>(offset), SEEK_SET) != 0) {
+#endif
     return 0;
   }
   const std::size_t want = static_cast<std::size_t>(
@@ -416,10 +444,14 @@ bool FileSink::Open(const std::filesystem::path& path, std::string* error) {
   if (!EnsureParentDirectory(path, error)) {
     return false;
   }
+#ifdef _WIN32
   file_ = _wfopen(path.c_str(), L"wb");
+#else
+  file_ = std::fopen(path.c_str(), "wb");
+#endif
   if (file_ == nullptr) {
-    error_ = S("cannot create ", Narrow(path.native()), ": ", LastWin32Error());
-    *error = error_;
+    error_ = S("cannot create ", PosixPath(path), ": ", LastWin32Error());
+    SetError(error, error_);
     return false;
   }
   written_ = 0;

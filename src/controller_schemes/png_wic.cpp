@@ -84,14 +84,50 @@ bool DecodePngWic(const std::filesystem::path& path, Image* image, std::string* 
 }
 }  // namespace rb_blitz::controller_schemes
 #else
+#include <algorithm>
+#include <array>
+#include <fstream>
+#include <utility>
+#include <vector>
+
+#include "platform/image_decode.h"
+
 namespace rb_blitz::controller_schemes {
-bool DecodePngWic(const std::filesystem::path&, Image*, std::string* why) {
-  *why = "WIC PNG decoder requires Windows";
-  return false;
+bool DecodePngWic(const std::filesystem::path& path, Image* image, std::string* why) {
+  std::ifstream input(path, std::ios::binary | std::ios::ate);
+  if (!input) { *why = "cannot read PNG"; return false; }
+  const auto length = input.tellg();
+  if (length < 26 || length > 8 * 1024 * 1024) {
+    *why = "PNG size outside 26 bytes..8 MB";
+    return false;
+  }
+  std::vector<uint8_t> bytes(static_cast<size_t>(length));
+  input.seekg(0);
+  if (!input.read(reinterpret_cast<char*>(bytes.data()), length)) {
+    *why = "cannot read PNG";
+    return false;
+  }
+  return DecodePngWicBytes(bytes.data(), bytes.size(), image, why);
 }
-bool DecodePngWicBytes(const uint8_t*, size_t, Image*, std::string* why) {
-  *why = "WIC PNG decoder requires Windows";
-  return false;
+bool DecodePngWicBytes(const uint8_t* bytes, size_t size, Image* image, std::string* why) {
+  if (!bytes || size < 26 || size > 8 * 1024 * 1024 ||
+      !std::equal(bytes, bytes + 8,
+                  std::array<uint8_t, 8>{137, 80, 78, 71, 13, 10, 26, 10}.begin()) ||
+      bytes[8] != 0 || bytes[9] != 0 || bytes[10] != 0 || bytes[11] != 13 ||
+      bytes[12] != 'I' || bytes[13] != 'H' || bytes[14] != 'D' || bytes[15] != 'R' ||
+      bytes[24] != 8 || bytes[25] != 6) {
+    *why = "PNG must have an 8-bit RGBA IHDR";
+    return false;
+  }
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  std::vector<uint8_t> rgba;
+  if (!platform::DecodeImageRgba(bytes, size, 2048, &rgba, &width, &height, why))
+    return false;
+  image->width = width;
+  image->height = height;
+  image->rgba = std::move(rgba);
+  return true;
 }
 }
 #endif

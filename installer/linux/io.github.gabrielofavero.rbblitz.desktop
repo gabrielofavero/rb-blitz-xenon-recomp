@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Rock Band Blitz
+Comment=Play with your own supported Rock Band Blitz game data
+Exec=/opt/rock-band-blitz-recomp/bin/rb_blitz_linux_launcher
+Icon=io.github.gabrielofavero.rbblitz
+Categories=Game;
+Terminal=false

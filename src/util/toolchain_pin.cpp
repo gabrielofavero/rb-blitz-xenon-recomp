@@ -351,6 +351,13 @@ bool ParsePin(std::string_view text, Pin* out, std::string* error) {
                            ")");
   }
 
+  if (const auto target = top_level.find("target"); target != top_level.end()) {
+    pin.target = target->second;
+  }
+  if (const auto family = top_level.find("compiler_family"); family != top_level.end()) {
+    pin.compiler_family = family->second;
+  }
+
   for (const std::string& name : section_order) {
     PinnedComponent component;
     bool has_pin = false;

@@ -9,6 +9,7 @@
 // is still exactly as the user left it.
 
 #include "install.h"
+#include "game_import_core.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -141,27 +142,6 @@ void LogChecks(const std::vector<FileCheck>& checks) {
   }
 }
 
-// Verifies `roles` under `root` and fails the whole step on any mismatch: this is
-// used where a wrong file is worse than no file at all.
-bool RequireMatch(const GameFingerprint& print, const fs::path& root,
-                  const std::vector<std::string>& roles, std::string_view subject,
-                  std::string* evidence, std::string* error) {
-  std::vector<FileCheck> checks;
-  if (!fingerprint::VerifyRoles(print, root, roles, &checks, error)) {
-    return false;
-  }
-  const std::string lines = FingerprintLines(checks);
-  if (evidence != nullptr) {
-    *evidence = lines;
-  }
-  LogChecks(checks);
-  if (fingerprint::AllMatched(checks)) {
-    return true;
-  }
-  SetError(error, S("the ", subject, " does not match the supported dump:\n", lines));
-  return false;
-}
-
 bool MissingOrUnreadable(const std::vector<FileCheck>& checks) {
   return std::any_of(checks.begin(), checks.end(), [](const FileCheck& check) {
     return check.verdict == fingerprint::FileVerdict::kMissing ||
@@ -182,11 +162,6 @@ std::vector<std::string> PathsForRoles(const GameFingerprint& print,
   return paths;
 }
 
-bool IsOptionalGameFile(std::string_view path) {
-  return std::find(std::begin(kOptionalGameFiles), std::end(kOptionalGameFiles), path) !=
-         std::end(kOptionalGameFiles);
-}
-
 // --- file system ----------------------------------------------------------
 
 bool PresentIn(const fs::path& root, std::string_view relative) {
@@ -205,52 +180,6 @@ std::size_t CountPresent(const fs::path& root, const std::vector<std::string>& r
     }
   }
   return present;
-}
-
-void AddPlanFile(GameSourcePlan* plan, std::string_view path, std::uint64_t size, std::string sha256,
-                 bool required, bool present) {
-  for (const GameFilePlan& existing : plan->files) {
-    if (existing.path == path) {
-      return;
-    }
-  }
-  GameFilePlan file;
-  file.path = std::string(path);
-  file.size = size;
-  file.sha256 = std::move(sha256);
-  file.required = required;
-  file.present = present;
-  plan->files.push_back(std::move(file));
-}
-
-// Shared by both planners: the three fingerprinted files that identify the dump,
-// then the extras that make an imported root look like the user's own.
-void FillPlanFiles(const GameFingerprint& print, const fs::path& root, GameSourcePlan* plan) {
-  const std::vector<std::string> roles = Roles(kGameRoles);
-  for (const fingerprint::FileFingerprint& file : print.files) {
-    const bool required = std::find(roles.begin(), roles.end(), file.role) != roles.end();
-    if (!required && !IsOptionalGameFile(file.path)) {
-      continue;
-    }
-    AddPlanFile(plan, file.path, file.size, file.sha256, required, PresentIn(root, file.path));
-  }
-  for (const std::string_view path : kOptionalGameFiles) {
-    AddPlanFile(plan, path, 0, {}, false, PresentIn(root, path));
-  }
-}
-
-// Exact match first, then case-insensitively: the file table of a real package
-// uses the same casing as the dump, but nothing in the format enforces it.
-const StfsEntry* FindStfsEntry(const StfsContainer& container, std::string_view path) {
-  if (const StfsEntry* entry = container.Find(path); entry != nullptr && !entry->is_directory) {
-    return entry;
-  }
-  for (const StfsEntry& entry : container.entries()) {
-    if (!entry.is_directory && EqualsIgnoreCase(entry.path, path)) {
-      return &entry;
-    }
-  }
-  return nullptr;
 }
 
 // Chunk size for the copies the wizard watches. A megabyte keeps the progress
@@ -350,19 +279,6 @@ bool MoveOne(const fs::path& source, const fs::path& destination, std::string* e
   std::error_code ignored;
   fs::remove(source, ignored);
   return true;
-}
-
-// The sink knows why a write failed; the container only knows that its sink
-// refused, so the sink's own message wins when there is one.
-std::string WriteFailureReason(const FileSink& sink, const std::string& close_reason,
-                              const std::string* error) {
-  if (!close_reason.empty()) {
-    return close_reason;
-  }
-  if (!sink.error().empty()) {
-    return sink.error();
-  }
-  return error != nullptr ? *error : std::string("the write failed");
 }
 
 std::vector<fs::path> Children(const fs::path& directory, std::string* error) {
@@ -530,10 +446,6 @@ fs::path FindTreeWithFiles(const fs::path& root, const fs::path& preferred,
     }
   }
   return {};
-}
-
-bool Overlaps(const fs::path& left, const fs::path& right) {
-  return PathIsWithin(left, right) || PathIsWithin(right, left);
 }
 
 // --- archives -------------------------------------------------------------
@@ -774,264 +686,37 @@ void ProgressSink::Report(int percent, std::string_view detail) const {
 
 // --- game data ------------------------------------------------------------
 
-std::size_t GameSourcePlan::RequiredCount() const {
-  return static_cast<std::size_t>(std::count_if(files.begin(), files.end(),
-                                                [](const GameFilePlan& file) { return file.required; }));
-}
-
-std::size_t GameSourcePlan::PresentCount() const {
-  return static_cast<std::size_t>(std::count_if(files.begin(), files.end(),
-                                                [](const GameFilePlan& file) { return file.present; }));
-}
-
-std::uint64_t GameSourcePlan::PresentBytes() const {
-  std::uint64_t total = 0;
-  for (const GameFilePlan& file : files) {
-    if (file.present) {
-      total += file.size;
-    }
-  }
-  return total;
-}
-
-std::vector<std::string> GameSourcePlan::Missing() const {
-  std::vector<std::string> missing;
-  for (const GameFilePlan& file : files) {
-    if (file.required && !file.present) {
-      missing.push_back(file.path);
-    }
-  }
-  return missing;
-}
-
+// The Windows helper keeps its public API. The probe, verification, and
+// transaction live in the SDK-free core also used by native hosts.
 bool PlanGameFolder(const std::filesystem::path& folder, GameSourcePlan* out, std::string* error) {
-  if (out == nullptr) {
-    SetError(error, "PlanGameFolder needs somewhere to write the plan");
-    return false;
-  }
-  if (!DirectoryExists(folder)) {
-    SetError(error, S(Display(folder), " is not a folder"));
-    return false;
-  }
-
-  const GameFingerprint& print = GameFingerprintConfig();
-  const std::vector<std::string> required = PathsForRoles(print, Roles(kGameRoles));
-
-  // The user may point at the dump root itself or at the folder that contains
-  // it, so both levels are considered and the best match wins.
-  std::vector<fs::path> candidates{folder};
-  for (const fs::path& child : Children(folder, nullptr)) {
-    if (DirectoryExists(child)) {
-      candidates.push_back(child);
-    }
-  }
-
-  fs::path best;
-  std::size_t found = 0;
-  for (const fs::path& candidate : candidates) {
-    const std::size_t count = CountPresent(candidate, required, nullptr);
-    if (count == required.size()) {
-      best = candidate;
-      found = count;
-      break;
-    }
-    if (best.empty() || count > found) {
-      best = candidate;
-      found = count;
-    }
-  }
-  if (found != required.size()) {
-    std::vector<std::string> missing;
-    CountPresent(best, required, &missing);
-    SetError(error, S("cannot find the supported Rock Band Blitz files in ", Display(best), " (",
-                     found, " of ", required.size(), " found, missing ", Join(missing, ", "),
-                     "); point the installer at the folder holding your extracted dump"));
-    return false;
-  }
-
-  GameSourcePlan plan;
-  plan.kind = GameSourceKind::kFolder;
-  plan.location = best;
-  FillPlanFiles(print, best, &plan);
-  plan.description = S("folder ", Display(best));
-  *out = plan;
-  log::Info(S("planned an import from ", plan.description, ": ", plan.PresentCount(), " files"));
-  return true;
+  return portable::ProbeFolder(folder, GameFingerprintConfig(), Roles(kGameRoles),
+                               std::vector<std::string>(std::begin(kOptionalGameFiles),
+                                                        std::end(kOptionalGameFiles)), out, error);
 }
 
 bool PlanGamePackage(const std::filesystem::path& package, GameSourcePlan* out, std::string* error) {
-  if (out == nullptr) {
-    SetError(error, "PlanGamePackage needs somewhere to write the plan");
-    return false;
-  }
-  if (!FileExists(package)) {
-    SetError(error, S(Display(package), " does not exist"));
-    return false;
-  }
-
-  StfsContainer container;
-  if (!container.Open(package, error)) {
-    return false;
-  }
-
-  const GameFingerprint& print = GameFingerprintConfig();
-  const StfsInfo& info = container.info();
-  GameSourcePlan plan;
-  plan.kind = GameSourceKind::kPackage;
-  plan.location = package;
-  plan.volume = info;
-  plan.package_entries = container.entries().size();
-
-  const std::vector<std::string> roles = Roles(kGameRoles);
-  for (const fingerprint::FileFingerprint& file : print.files) {
-    const bool required = std::find(roles.begin(), roles.end(), file.role) != roles.end();
-    const bool extra = IsOptionalGameFile(file.path);
-    if (!required && !extra) {
-      continue;
-    }
-    const StfsEntry* entry = FindStfsEntry(container, file.path);
-    AddPlanFile(&plan, file.path, file.size, file.sha256, required, entry != nullptr);
-  }
-  for (std::string_view path : kOptionalGameFiles) {
-    AddPlanFile(&plan, path, 0, {}, false, FindStfsEntry(container, path) != nullptr);
-  }
-
-  const std::vector<std::string> missing = plan.Missing();
-  if (!missing.empty()) {
-    SetError(error, S(Display(package), " (title ", HexU32(info.title_id), ") does not hold the "
-                     "supported Rock Band Blitz content; missing ", Join(missing, ", ")));
-    return false;
-  }
-
-  plan.description = S("package ", Display(package), " (title ", HexU32(info.title_id), ", ",
-                       plan.package_entries, " entries, ", HumanBytes(info.file_bytes), ")");
-  *out = plan;
-  log::Info(S("planned an import from ", plan.description, ": ", plan.PresentCount(), " files"));
-  return true;
+  return portable::ProbePackage(package, GameFingerprintConfig(), Roles(kGameRoles),
+                                std::vector<std::string>(std::begin(kOptionalGameFiles),
+                                                         std::end(kOptionalGameFiles)), out, error);
 }
 
 bool ImportGame(const GameSourcePlan& plan, const std::filesystem::path& game_root,
                 const ProgressSink& progress, std::string* error) {
-  const std::vector<std::string> plan_missing = plan.Missing();
-  if (!plan_missing.empty()) {
-    SetError(error, S("the source is missing ", Join(plan_missing, ", ")));
-    return false;
-  }
-  if (plan.location.empty()) {
-    SetError(error, "the source has no location");
-    return false;
-  }
-  if (plan.kind == GameSourceKind::kFolder && Overlaps(plan.location, game_root)) {
-    SetError(error, S("the folder you picked (", Display(plan.location),
-                     ") overlaps the game data folder (", Display(game_root),
-                     "); pick the folder you extracted your own dump to"));
-    return false;
-  }
-
-  const fs::path staging = StagingRoot(game_root);
-  RemoveOnExit cleanup(staging);
-  if (!RemoveTree(staging, error) || !EnsureDirectory(staging, error)) {
-    return false;
-  }
-
-  StfsContainer container;
-  if (plan.kind == GameSourceKind::kPackage && !container.Open(plan.location, error)) {
-    return false;
-  }
-
-  // The copy gets the bulk of the stage: it is the only part of the import that
-  // reads and writes the whole dump, while the check that follows only reads it.
-  const std::uint64_t total = plan.PresentBytes();
-  StepProgress step(progress, total, 0, 75);
-  progress.Report(0, plan.kind == GameSourceKind::kFolder ? "copying your dump"
-                                                          : "unpacking the package");
-
-  std::uint64_t done = 0;
-  std::size_t copied = 0;
-  for (const GameFilePlan& file : plan.files) {
-    if (!file.present) {
-      continue;
-    }
-    const fs::path relative = SafeRelativePath(file.path, error);
-    if (relative.empty()) {
-      return false;
-    }
-    const fs::path target = staging / relative;
-
-    if (plan.kind == GameSourceKind::kFolder) {
-      std::uint64_t reported = 0;
-      if (!CopyOne(plan.location / relative, target, error, [&](std::uint64_t bytes) {
-            done += bytes - reported;
-            reported = bytes;
-            step.Report(done, file.path);
-          })) {
-        return false;
-      }
-    } else {
-      const StfsEntry* entry = FindStfsEntry(container, file.path);
-      if (entry == nullptr) {
-        SetError(error, S("the package changed while it was being read: ", file.path, " is gone"));
-        return false;
-      }
-      FileSink sink;
-      if (!sink.Open(target, error)) {
-        return false;
-      }
-      // The sink is where the extraction writes, so counting its bytes reports
-      // progress without the extractor knowing anything about progress.
-      const Sink write = [&](const std::uint8_t* data, std::size_t size) {
-        if (!sink(data, size)) {
-          return false;
-        }
-        done += size;
-        step.Report(done, file.path);
-        return true;
-      };
-      const bool extracted = container.Extract(*entry, write, error);
-      std::string close_reason;
-      const bool closed = sink.Close(&close_reason);
-      if (!extracted || !closed) {
-        SetError(error, S("cannot write ", Display(target), ": ",
-                         WriteFailureReason(sink, close_reason, error)));
-        return false;
-      }
-    }
-    ++copied;
-    step.Report(done, file.path);
-  }
-
-  // Hashing the staged copy is a second full read of the dump, so it gets the
-  // rest of the stage bar that the copy did not use.
-  progress.Report(75, "checking the imported files");
-  std::string evidence;
-  if (!RequireMatch(GameFingerprintConfig(), staging, Roles(kGameRoles),
-                    S("data read from ", plan.description), &evidence, error)) {
-    return false;
-  }
-  log::Info(evidence);
-
-  progress.Report(95, "installing the game files");
-  if (!EnsureDirectory(game_root, error)) {
-    return false;
-  }
-  std::size_t moved = 0;
-  if (!MoveTree(staging, game_root, &moved, error)) {
-    return false;
-  }
-  progress.Report(100, "installed");
-  log::Info(S("imported ", copied, " of ", plan.files.size(), " known files (", HumanBytes(total),
-              ") from ", plan.description));
-  return true;
+  portable::ImportCallbacks callbacks;
+  callbacks.progress = [&progress](int percent, std::string_view detail) {
+    progress.Report(percent, detail);
+  };
+  return portable::Import(plan, game_root, GameFingerprintConfig(), Roles(kGameRoles),
+                          std::vector<std::string>(std::begin(kOptionalGameFiles),
+                                                   std::end(kOptionalGameFiles)), callbacks, error);
 }
 
 bool VerifyGameTree(const std::filesystem::path& game_root, std::string* evidence,
                     std::string* error) {
-  if (!DirectoryExists(game_root)) {
-    SetError(error, S(Display(game_root), " does not exist"));
+  if (!portable::RecoverImport(game_root, GameFingerprintConfig(), Roles(kGameRoles), error)) {
     return false;
   }
-  return RequireMatch(GameFingerprintConfig(), game_root, Roles(kGameRoles),
-                      S("game data in ", Display(game_root)), evidence, error);
+  return portable::VerifyTree(game_root, GameFingerprintConfig(), Roles(kGameRoles), evidence, error);
 }
 
 // --- sources --------------------------------------------------------------

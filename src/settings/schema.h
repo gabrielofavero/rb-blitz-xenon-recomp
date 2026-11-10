@@ -19,6 +19,9 @@
 
 #pragma once
 
+#include <map>
+#include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -35,6 +38,32 @@ struct SchemaRow {
   std::string label;    // English fallback for label_key (P5 localizes)
   std::string help;     // English fallback for help_key
 };
+
+// A release may change which guest-authored rows and choices it exposes and which value a
+// missing or obsolete preference uses. Keep these rules separate from the stable storage IDs.
+enum class HostPlatform { kWindows, kLinux, kMacOS };
+struct RowRule {
+  bool hidden = false;
+  bool fixed_default = false;  // an unsupported saved value cannot select another backend
+  std::optional<Value> default_value;
+  std::optional<std::vector<Choice>> choices;
+};
+struct ReleaseSettings {
+  HostPlatform platform = HostPlatform::kWindows;
+  std::string version;
+  std::map<SettingId, RowRule> rules;
+};
+
+struct VersionRule {
+  HostPlatform platform;
+  std::string_view version;  // exact release version; "*" applies to every version
+  SettingId id;
+  RowRule rule;
+};
+
+ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view version,
+                                   std::span<const VersionRule> version_rules = {});
+ReleaseSettings CurrentReleaseSettings();
 
 // Every row, in the parent plan §3 presentation order. Static for the process lifetime.
 const std::vector<SchemaRow>& Rows();
@@ -57,7 +86,8 @@ ApplicationStrategy StrategyOf(SettingId id);
 // A fresh descriptor list with capability/provider-dependent choices resolved and the
 // availability of provider rows set from `caps.provider`. The returned descriptors are a
 // by-value copy, never a reference into the static table.
-std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps);
+std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps,
+                                         const ReleaseSettings& release = CurrentReleaseSettings());
 
 // Provider rows seen with a menu-row source rather than a capability source: the caller
 // (P10 for Hide Main Menu) supplies the row tokens and labels. `rows` replaces every

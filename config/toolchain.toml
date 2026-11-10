@@ -24,6 +24,8 @@
 # legitimately holds backslashes.
 
 schema_version = 1
+target = "win-amd64"
+compiler_family = "Clang"
 
 [sdk]
 # The pinned ReXGlue SDK submodule. The gitlink in the parent commit already

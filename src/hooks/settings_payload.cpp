@@ -285,6 +285,8 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
     for (const auto& descriptor : boot->service()->descriptors()) {
       const std::string token = std::string(CategoryToken(descriptor.category)) + "." +
                                 std::string(SettingIdToken(descriptor.id));
+      if (descriptor.availability == Availability::kHidden)
+        configuration.hidden.insert(token);
       if (!descriptor.choices.empty()) {
         for (const auto& choice : descriptor.choices)
           configuration.choices[token].emplace_back(choice.token, choice.label);

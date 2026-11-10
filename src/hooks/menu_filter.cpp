@@ -26,6 +26,7 @@
 #include <rex/types.h>
 
 #include "hooks/content_progress.h"
+#include "platform/runtime_symbol.h"
 #include "settings/menu_compat.h"
 #include "settings/boot.h"
 #include "ui/menu_options.h"
@@ -538,9 +539,8 @@ ReadFunc ResolveOriginal(bool scatter) {
   static ReadFunc scatter_fn = nullptr;
   ReadFunc* slot = scatter ? &scatter_fn : &plain;
   if (*slot == nullptr) {
-    HMODULE runtime = GetModuleHandleA("rexruntime.dll");
     const char* symbol = scatter ? "__imp__NtReadFileScatter" : "__imp__NtReadFile";
-    *slot = runtime ? reinterpret_cast<ReadFunc>(GetProcAddress(runtime, symbol)) : nullptr;
+    *slot = reinterpret_cast<ReadFunc>(rb_blitz::platform::ResolveRuntimeSymbol(symbol));
     if (*slot == nullptr) {
       REXLOG_ERROR("menu_filter: cannot resolve {} from rexruntime.dll; reads will be dropped",
                    symbol);

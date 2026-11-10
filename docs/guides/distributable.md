@@ -6,6 +6,28 @@ payload or in a packaged build. A negative claim is worth exactly as much as the
 behind it, so this file describes that check - [`scripts/setup/audit_distributable.ps1`](../../scripts/setup/audit_distributable.ps1),
 whose exit code is the answer - and the one thing it found.
 
+This audit currently covers the Windows PE/Inno payload. The Linux ELF and macOS
+Mach-O/package manifests and their negative checks are defined in the
+[platform expansion plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md);
+no native package has passed that audit or release acceptance yet.
+The Prompt 2 Linux stage recipe in `installer/linux/package.py` now copies only
+declared files and rejects non-ELF target binaries and obvious retail/resource
+signatures. It deliberately refuses `.deb`/`.rpm` generation until the native
+dependency inventory and full payload audit can be completed on Linux.
+The macOS source recipe in `installer/macos/package.py` similarly stages an
+explicit app tree, checks Mach-O architecture and linked paths, and defines a
+post-`pkgbuild` payload comparison. Its release gate remains closed until the
+native dependency, toolchain, icon and full audit checks are completed on Macs.
+`installer/config/platform-packaging.json` now records the proposed Linux and
+macOS stage paths and the pinned nFPM archive; `python
+installer/tools/check_platform_packaging.py` validates their metadata and
+refuses a stage audit until native dependency inventories and Mac packaging
+inputs are completed.
+Prompt 1's portable importer is source shared with the Windows helper, not a
+new packaged binary. The native store adapter now requires libcurl 7.62+ at
+build time; its shipped versus system dependency choice remains a native
+inventory gate before either package manifest can be accepted.
+
 ```
 .\scripts\setup\audit_distributable.ps1
 ```

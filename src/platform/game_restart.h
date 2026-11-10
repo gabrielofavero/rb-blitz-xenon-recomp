@@ -59,7 +59,8 @@ inline constexpr char kBootstrapSwitch[] = "--restart-bootstrap";
 //
 //   v1.<parent_pid hex>.<parent_created hex>.<nonce hex>.<target>
 //
-// `parent_created` is the parent's process creation time (Windows FILETIME ticks). It is what makes
+// `parent_created` is the parent's process creation time (Windows FILETIME ticks, Linux /proc
+// start ticks, or macOS process start microseconds). It is what makes
 // the wait bind to the *process* rather than to a reused pid: the child opens the pid, compares
 // the creation time, and refuses to wait on a stranger. `target` is the persisted target's frozen
 // spelling, and it is the only non-numeric field - which is why the token is validated, not parsed
@@ -156,8 +157,8 @@ class ChildLauncher {
   virtual uint32_t ChildPid() const = 0;
 };
 
-// The platform Controller Settings: `CreateProcessW` with a UTF-8 command line converted properly, and a
-// `WaitForSingleObject` bound. Null only if the platform has no implementation.
+// The platform implementation: CreateProcessW on Windows or fork/execve on POSIX, with a bounded
+// wait. Null only if the platform has no implementation.
 std::unique_ptr<ChildLauncher> CreateChildLauncher();
 
 // The identity a handoff token carries: this process's pid and creation time, and the same two

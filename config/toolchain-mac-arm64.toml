@@ -1,0 +1,20 @@
+# macOS arm64 bootstrap record for Prompt 0, not native acceptance evidence.
+# Freeze measured versions and Xcode/SDK deployment inputs on a Mac before release.
+schema_version = 1
+target = "mac-arm64"
+compiler_family = "AppleClang"
+
+[sdk]
+commit = "c94f5ebdcb3c9d1a460ca48e04f9758448f8d518"
+
+[clang]
+# The SDK requires AppleClang >= 16 (Xcode 16+) or LLVM Clang >= 18.
+version = "16.0.0"
+minimum = "16"
+
+[cmake]
+version = "3.25.0"
+minimum = "3.25"
+
+[ninja]
+version = "1.11.0"

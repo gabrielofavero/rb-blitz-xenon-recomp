@@ -5,6 +5,10 @@
 cmake_minimum_required(VERSION 3.25)
 project(rb_blitz LANGUAGES CXX)
 
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -77,10 +81,21 @@ if(EXISTS "${RBBLITZ_SOURCES_FILE}")
 endif()
 ]=])
     string(TOLOWER "${CMAKE_BUILD_TYPE}" rbblitz_build_type)
+    if(WIN32)
+        set(rbblitz_codegen_preset "win-amd64-${rbblitz_build_type}")
+    elseif(APPLE)
+        if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+            set(rbblitz_codegen_preset "mac-arm64-${rbblitz_build_type}")
+        else()
+            set(rbblitz_codegen_preset "mac-amd64-${rbblitz_build_type}")
+        endif()
+    else()
+        set(rbblitz_codegen_preset "linux-amd64-${rbblitz_build_type}")
+    endif()
     add_custom_command(TARGET rb_blitz_codegen POST_BUILD
         COMMAND ${CMAKE_COMMAND}
                 "-DRBBLITZ_SOURCES_FILE=${CMAKE_CURRENT_SOURCE_DIR}/generated/default/sources.cmake"
-                "-DRBBLITZ_PRESET=win-amd64-${rbblitz_build_type}"
+                "-DRBBLITZ_PRESET=${rbblitz_codegen_preset}"
                 -P "${RBBLITZ_CODEGEN_CHECK}"
         COMMENT "Checking that this build system knows about the generated code"
         VERBATIM
@@ -205,6 +220,7 @@ set(RBBLITZ_SOURCES
     # pool, the rename's scope). SDK-free, and read by the menu hooks the mod already owns.
     src/settings/menu_compat.cpp
     src/platform/game_restart.cpp
+    src/platform/runtime_symbol.cpp
     src/platform/virtual_keyboard.cpp
     # The compiled-DTA parser, promoted out of the test-only targets: the provider adapter reads
     # the payload's own definitions with it at boot (it was P1's authoring module, with no
@@ -288,6 +304,17 @@ if(WIN32)
          src/store/album_art_service.cpp)
     list(APPEND RBBLITZ_SOURCES src/messages/messages_runtime.cpp
          src/messages/messages_update_runtime.cpp)
+else()
+    # The non-Windows decoder uses the SDK's vendored stb_image header and is
+    # shared by controller art and store album art.
+    list(APPEND RBBLITZ_SOURCES
+        src/platform/image_decode_stb.cpp
+        src/store/store_curl.cpp
+        src/store/store_search_service.cpp
+        src/store/store_catalogue.cpp
+        src/store/album_art_service.cpp
+        src/messages/messages_runtime.cpp
+        src/messages/messages_update_runtime.cpp)
 endif()
 
 if(WIN32)
@@ -350,6 +377,9 @@ endif()
 # the transport links WinHTTP (src/store/store_http.cpp is the only file that includes it).
 target_include_directories(rb_blitz PRIVATE
     "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+if(NOT WIN32)
+    target_include_directories(rb_blitz PRIVATE "${REXSDK_DIR}/thirdparty/stb")
+endif()
 set(RBBLITZ_PINS "${CMAKE_CURRENT_SOURCE_DIR}/installer/config/pins.toml")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RBBLITZ_PINS}")
 file(STRINGS "${RBBLITZ_PINS}" RBBLITZ_PIN_LINES)
@@ -400,6 +430,37 @@ set_source_files_properties(src/graphics/development_coverage.cpp PROPERTIES COM
 target_link_libraries(rb_blitz PRIVATE xxhash)
 if(WIN32)
     target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32 runtimeobject dbghelp shell32)
+else()
+    # The native adapter uses curl_url() for strict HTTPS URL parsing.
+    find_package(CURL 7.62 REQUIRED)
+    target_link_libraries(rb_blitz PRIVATE CURL::libcurl ${CMAKE_DL_LIBS})
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
+    # Native desktop first-launch importers use the same SDK-free transaction
+    # core as the Windows setup helper.
+    add_library(rb_blitz_game_import_core STATIC
+        installer/src/game_import_core.cpp
+        installer/src/stfs.cpp
+        installer/src/inflate.cpp
+        installer/src/util.cpp
+        src/util/game_fingerprint.cpp
+        src/util/sha256.cpp)
+    target_include_directories(rb_blitz_game_import_core PUBLIC installer/src src)
+    target_compile_features(rb_blitz_game_import_core PUBLIC cxx_std_20)
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(rb_blitz_linux_launcher installer/linux/importer_main.cpp)
+    target_link_libraries(rb_blitz_linux_launcher PRIVATE rb_blitz_game_import_core)
+    set_target_properties(rb_blitz PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+elseif(APPLE)
+    add_executable(rb_blitz_macos_launcher installer/macos/importer_main.mm)
+    set_target_properties(rb_blitz_macos_launcher PROPERTIES
+        OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+    target_link_libraries(rb_blitz_macos_launcher PRIVATE rb_blitz_game_import_core "-framework Cocoa")
+    set_target_properties(rb_blitz PROPERTIES
+        BUILD_RPATH "@executable_path;@loader_path"
+        INSTALL_RPATH "@executable_path;@loader_path")
 endif()
 
 # The store's fault logger (src/store/store_probe.cpp) prints host frames, which are resolved
@@ -519,7 +580,26 @@ option(RBBLITZ_STRICT_TOOLCHAIN
 option(RBBLITZ_ALLOW_OTHER_TOOLCHAIN
     "Report a toolchain that is not the frozen one, but never fail the build" OFF)
 
-set(RBBLITZ_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/config/toolchain.toml")
+if(WIN32)
+    set(RBBLITZ_TOOLCHAIN_RECORD "toolchain.toml")
+    set(RBBLITZ_TOOLCHAIN_TARGET "win-amd64")
+elseif(APPLE)
+    if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+        set(RBBLITZ_TOOLCHAIN_RECORD "toolchain-mac-arm64.toml")
+        set(RBBLITZ_TOOLCHAIN_TARGET "mac-arm64")
+    elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+        set(RBBLITZ_TOOLCHAIN_RECORD "toolchain-mac-amd64.toml")
+        set(RBBLITZ_TOOLCHAIN_TARGET "mac-amd64")
+    else()
+        message(FATAL_ERROR "Select one macOS architecture for the toolchain record")
+    endif()
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+    set(RBBLITZ_TOOLCHAIN_RECORD "toolchain-linux-amd64.toml")
+    set(RBBLITZ_TOOLCHAIN_TARGET "linux-amd64")
+else()
+    message(FATAL_ERROR "No toolchain record for ${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+set(RBBLITZ_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/config/${RBBLITZ_TOOLCHAIN_RECORD}")
 set(RBBLITZ_TOOLCHAIN_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/generated/toolchain_build.h")
 
 add_executable(rb_blitz_toolchain
@@ -530,16 +610,18 @@ target_include_directories(rb_blitz_toolchain PRIVATE src)
 
 set(RBBLITZ_TOOLCHAIN_PROBE_ARGS
     --project-dir "${CMAKE_CURRENT_SOURCE_DIR}"
+    --pin "${RBBLITZ_TOOLCHAIN_FILE}"
+    --target "${RBBLITZ_TOOLCHAIN_TARGET}"
     --cxx "${CMAKE_CXX_COMPILER}"
     --cmake "${CMAKE_COMMAND}"
     --ninja "${CMAKE_MAKE_PROGRAM}"
 )
+if(RBBLITZ_ALLOW_OTHER_TOOLCHAIN)
+    list(APPEND RBBLITZ_TOOLCHAIN_PROBE_ARGS --allow-other-toolchain)
+endif()
 set(RBBLITZ_TOOLCHAIN_GATE_ARGS ${RBBLITZ_TOOLCHAIN_PROBE_ARGS})
 if(RBBLITZ_STRICT_TOOLCHAIN)
     list(APPEND RBBLITZ_TOOLCHAIN_GATE_ARGS --strict)
-endif()
-if(RBBLITZ_ALLOW_OTHER_TOOLCHAIN)
-    list(APPEND RBBLITZ_TOOLCHAIN_GATE_ARGS --allow-other-toolchain)
 endif()
 
 # The stamp the binary reports at boot. Generated rather than configured, because
@@ -1519,6 +1601,11 @@ if(BUILD_TESTING)
     if(WIN32)
         target_sources(rb_blitz_button_scheme_tests PRIVATE src/controller_schemes/png_wic.cpp)
         target_link_libraries(rb_blitz_button_scheme_tests PRIVATE windowscodecs ole32)
+    else()
+        target_sources(rb_blitz_button_scheme_tests PRIVATE
+            src/controller_schemes/png_wic.cpp src/platform/image_decode_stb.cpp)
+        target_include_directories(rb_blitz_button_scheme_tests PRIVATE
+            "${REXSDK_DIR}/thirdparty/stb")
     endif()
     target_include_directories(rb_blitz_button_scheme_tests PRIVATE src)
     target_compile_definitions(rb_blitz_button_scheme_tests PRIVATE

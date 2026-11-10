@@ -306,6 +306,7 @@ void HandoffRefusals() {
       {"v2.1.2.3.common", "a version from a different build"},
       {"v1.1.2.zz.common", "a non-hex field"},
       {"v1.0.2.3.common", "no parent process"},
+      {"v1.1.0.3.common", "no parent creation time"},
       {"v1.1.2.0.common", "no request identity"},
       {"v1.1.2.3.platinum", "an unknown target"},
       {"v1.1.2.3.", "an empty target"},
@@ -367,6 +368,13 @@ void HandoffFromCommandLine() {
       HandoffFromArguments(static_cast<int>(broken.size()), broken.data(), &error).has_value());
   CHECK_FALSE(error.empty());
   CHECK_TRUE(IsHandoffSwitch(bad));
+  const std::string empty = kHandoffSwitch;
+  std::vector<const char*> empty_token = {a0.c_str(), empty.c_str()};
+  error.clear();
+  CHECK_FALSE(HandoffFromArguments(static_cast<int>(empty_token.size()), empty_token.data(), &error)
+                  .has_value());
+  CHECK_FALSE(error.empty());
+  CHECK_TRUE(IsHandoffSwitch(empty));
   CHECK_FALSE(IsHandoffSwitch("--game_data_root=D:\\Games"));
 }
 

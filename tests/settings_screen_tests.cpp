@@ -3522,6 +3522,16 @@ void TestRendererRowVisibility() {
     CHECK_TRUE(video_page_has_its_groups());
   }
 
+  // A release policy can hide a row even when its capability list has choices.
+  {
+    MenuConfiguration configuration;
+    configuration.choices["graphics.renderer"] = {{"d3d12", "D3D12"}, {"vulkan", "Vulkan"}};
+    configuration.hidden.insert("graphics.renderer");
+    ConfigureMenu(configuration);
+    CHECK_FALSE(has_renderer_row());
+    CHECK_TRUE(video_page_has_its_groups());
+  }
+
   // One backend - a plugin built with a single backend, or a machine with no Vulkan loader.
   {
     MenuConfiguration configuration;

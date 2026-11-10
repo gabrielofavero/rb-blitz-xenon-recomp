@@ -2,9 +2,11 @@
 // rb_blitz - ReXGlue Recompiled Project
 
 #include <cstdlib>
+#include <fstream>
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -14,6 +16,9 @@
 #include <windows.h>
 
 #include <shellapi.h>
+#elif defined(__APPLE__)
+#include <crt_externs.h>
+#endif
 
 #include "generated/default/rb_blitz_init.h"
 
@@ -26,14 +31,19 @@
 // decision rather than the SDK's: the GPU plugin can only run a backend it was compiled with,
 // and the app is what knows how to fall back when it cannot.
 //
-// "any" is the SDK's own word for "whichever this build has", so it is the default: Controller Settings
-// that never touches the row passes nothing and the behaviour is the one that existed before
-// the cvar did.
+// Windows keeps the SDK's historical "any" default. Linux and macOS have no DirectX backend,
+// so their default is explicitly Vulkan even before settings.toml is read.
+#if defined(_WIN32)
 REXCVAR_DEFINE_STRING(gpu_backend, "any", "GPU",
                       "Graphics backend to render with: d3d12, vulkan, or any (whichever this "
                       "build has)")
     .allowed({"d3d12", "vulkan", "any"})
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+#else
+REXCVAR_DEFINE_STRING(gpu_backend, "vulkan", "GPU", "Graphics backend to render with: vulkan")
+    .allowed({"vulkan"})
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+#endif
 
 REX_DEFINE_APP(rb_blitz, RbBlitzApp::Create)
 
@@ -65,6 +75,7 @@ REX_DEFINE_APP(rb_blitz, RbBlitzApp::Create)
 // not this file's.
 
 std::vector<std::string> rb_blitz::platform::CommandLineArguments() {
+#if defined(_WIN32)
   int count = 0;
   wchar_t** wide = CommandLineToArgvW(GetCommandLineW(), &count);
   std::vector<std::string> out;
@@ -84,6 +95,25 @@ std::vector<std::string> rb_blitz::platform::CommandLineArguments() {
   }
   LocalFree(wide);
   return out;
+#elif defined(__APPLE__)
+  std::vector<std::string> out;
+  const int count = *_NSGetArgc();
+  char* const* arguments = *_NSGetArgv();
+  if (arguments == nullptr) return out;
+  out.reserve(static_cast<size_t>(count));
+  for (int index = 0; index < count; ++index) out.emplace_back(arguments[index]);
+  return out;
+#elif defined(__linux__)
+  // /proc preserves the original argv bytes, including arguments with spaces. Read it before
+  // the SDK entry point so a restart child cannot mount the game beside its parent.
+  std::ifstream input("/proc/self/cmdline", std::ios::binary);
+  std::vector<std::string> out;
+  std::string argument;
+  while (std::getline(input, argument, '\0')) out.push_back(argument);
+  return out;
+#else
+#error Restart bootstrap needs a command-line implementation for this platform.
+#endif
 }
 
 namespace {
@@ -100,17 +130,21 @@ struct RestartBootstrap {
     }
     const rb_blitz::platform::BootstrapResult result = rb_blitz::platform::RunBootstrap(
         static_cast<int>(argv.size()), argv.data(), /*waiter=*/nullptr);
-    if (!result.error.empty()) {
+    if (result.action == rb_blitz::platform::BootstrapAction::kNone && !result.error.empty()) {
       // The parent is still alive, or its identity could not be confirmed. Starting the title now
       // would be the second instance §8 forbids.
+#if defined(_WIN32)
       ExitProcess(kBootstrapRefusedExitCode);
+#else
+      std::_Exit(kBootstrapRefusedExitCode);
+#endif
     }
     if (result.action == rb_blitz::platform::BootstrapAction::kNone) return;
     // The parent is gone: this process is the game, and it boots normally from here.
   }
 };
 
-// Runs before wWinMain; see the comment above.
+// Runs before the SDK's platform entry point; see the comment above.
 const RestartBootstrap g_restart_bootstrap;
 
 }  // namespace

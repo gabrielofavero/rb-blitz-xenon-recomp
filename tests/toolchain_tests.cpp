@@ -17,6 +17,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "check.h"
@@ -499,6 +500,8 @@ void TestRealPinFile(const fs::path& project_dir) {
     return;
   }
   CHECK_EQ(pin.schema_version, rb_blitz::toolchain::kSupportedSchemaVersion);
+  CHECK_STR_EQ(pin.target, "win-amd64");
+  CHECK_STR_EQ(pin.compiler_family, "Clang");
   CHECK_EQ(pin.components.size(), 6);
 
   const PinnedComponent* sdk = FindComponent(pin, "sdk");
@@ -530,6 +533,32 @@ void TestRealPinFile(const fs::path& project_dir) {
     CHECK_TRUE(component != nullptr);
     if (component != nullptr) {
       CHECK_FALSE(component->expected.empty());
+    }
+  }
+
+  for (const auto& [file, target, clang_minimum] :
+       {std::tuple{"toolchain-linux-amd64.toml", "linux-amd64", "18"},
+        std::tuple{"toolchain-mac-arm64.toml", "mac-arm64", "16"},
+        std::tuple{"toolchain-mac-amd64.toml", "mac-amd64", "16"}}) {
+    Pin platform_pin;
+    const fs::path platform_path = project_dir / "config" / file;
+    CHECK_TRUE(rb_blitz::toolchain::LoadPin(platform_path, &platform_pin, &error));
+    if (platform_pin.components.empty()) continue;
+    CHECK_STR_EQ(platform_pin.target, target);
+    CHECK_STR_EQ(platform_pin.compiler_family,
+                 std::string_view(target) == "linux-amd64" ? "Clang" : "AppleClang");
+    CHECK_EQ(platform_pin.components.size(), 4);
+    const PinnedComponent* platform_sdk = FindComponent(platform_pin, "sdk");
+    const PinnedComponent* platform_clang = FindComponent(platform_pin, "clang");
+    CHECK_TRUE(platform_sdk != nullptr);
+    CHECK_TRUE(platform_clang != nullptr);
+    CHECK_TRUE(FindComponent(platform_pin, "msvc") == nullptr);
+    CHECK_TRUE(FindComponent(platform_pin, "windows_sdk") == nullptr);
+    if (platform_sdk != nullptr && sdk != nullptr) {
+      CHECK_STR_EQ(platform_sdk->expected, sdk->expected);
+    }
+    if (platform_clang != nullptr) {
+      CHECK_STR_EQ(platform_clang->minimum, clang_minimum);
     }
   }
 }

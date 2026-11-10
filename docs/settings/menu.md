@@ -31,7 +31,7 @@ and in-song contexts.
 | RhythmVerse | Store Access; Filters (Guitar, Bass, Drums, Vocals, Keys) |
 | Achievements & Unlocks | Achievement Alerts; Unlock All; Unlock Online Achievements |
 | Audio | Active Track Volume; Sound Volume; Bass Boost; Background Music; Menu Music Navigation |
-| Video | Display; Graphics; Renderer (when more than one backend is available) |
+| Video | Display; Graphics; Renderer on Windows when more than one backend is available. The Linux/macOS release policy hides Renderer and uses Vulkan. |
 | Display | Window Mode; Resolution; V-Sync; Overscan |
 
 On 2026-11-07 [measured], Restore default settings opened a legible confirmation page in a

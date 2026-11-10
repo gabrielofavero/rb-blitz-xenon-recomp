@@ -28,6 +28,11 @@
 #include "store/store_serve.h"
 #include "store/store_settings.h"
 
+#if !defined(_WIN32)
+#include "platform/image_decode.h"
+#endif
+
+#if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -37,6 +42,7 @@
 #include <windows.h>
 
 #include <wincodec.h>
+#endif
 
 REXCVAR_DEFINE_BOOL(store_art_off, false, "Diagnostics",
                     "Serve no album art: the offer records carry no `preview_art`, so the retail "
@@ -60,7 +66,7 @@ namespace {
 // error page (or a hostile redirect target that passed the URL rule) from becoming a memory
 // problem. The decoder's own bound is separate: a 4096x4096 image is refused rather than resized.
 constexpr std::size_t kMaxArtBytes = 2 * 1024 * 1024;
-constexpr UINT kMaxArtDimension = 4096;
+constexpr std::uint32_t kMaxArtDimension = 4096;
 
 // A page is 24 offers; the queue holds several pages' worth so a burst of "Download Again" rows
 // cannot grow it without bound. Beyond that the extra keys are simply dropped - the next visit to
@@ -84,6 +90,7 @@ enum class State { kOff, kIdle, kQueued, kFetching, kFailed };
 std::atomic<State> g_state{State::kOff};
 std::atomic<std::size_t> g_encoded{0};
 
+#if defined(_WIN32)
 // A COM pointer without pulling in WRL: the worker owns a handful of these for one call each.
 template <class T>
 class ComPtr {
@@ -178,6 +185,14 @@ bool DecodeImageToRgba(const std::string& bytes, std::vector<std::uint8_t>* rgba
   *height = frame_height;
   return true;
 }
+#else
+bool DecodeImageToRgba(const std::string& bytes, std::vector<std::uint8_t>* rgba,
+                       std::uint32_t* width, std::uint32_t* height, std::string* why) {
+  return platform::DecodeImageRgba(
+      reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size(), kMaxArtDimension,
+      rgba, width, height, why);
+}
+#endif
 
 // The per-file id the envelope carries. Opaque to the engine (it identifies the asset), so any
 // stable value works; FNV-1a 32 over the key keeps a boot's textures distinguishable in a capture
@@ -309,7 +324,9 @@ void ProcessKey(const std::string& key) {
 }
 
 void WorkerMain() {
+#if defined(_WIN32)
   const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+#endif
   for (;;) {
     std::string key;
     {
@@ -332,9 +349,9 @@ void WorkerMain() {
       }
     }
   }
-  if (SUCCEEDED(com)) {
-    CoUninitialize();
-  }
+#if defined(_WIN32)
+  if (SUCCEEDED(com)) CoUninitialize();
+#endif
 }
 
 void Enqueue(std::string key, bool selected = false) {

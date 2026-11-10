@@ -74,6 +74,7 @@
 
 #include <string>
 #include <map>
+#include <set>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -89,6 +90,7 @@ namespace rb_blitz::ui::screen {
 // Frozen before generating the installed menu. Values come from the boot service and provider.
 struct MenuConfiguration {
   std::map<std::string, std::vector<std::pair<std::string, std::string>>> choices;
+  std::set<std::string> hidden;  // release-specific rows omitted from the guest-authored menu
   std::map<std::string, std::string> disabled;
   // Availability changes the caption, never removes the preference needed to restore a shortcut.
   std::map<std::string, std::string> availability;

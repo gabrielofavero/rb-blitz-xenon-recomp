@@ -14,6 +14,7 @@
 #include "hooks/content_progress.h"
 #include "diag/boot_heartbeat.h"
 #include "settings/boot.h"
+#include "platform/runtime_symbol.h"
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -93,8 +94,7 @@ void PushProgress(PPCContext& ctx, uint8_t* base, uint32_t current, uint32_t tot
 }
 using ImportFunc = void (*)(PPCContext&, uint8_t*);
 ImportFunc ResolveImport(const char* symbol) {
-  const auto runtime = GetModuleHandleA("rexruntime.dll");
-  return runtime ? reinterpret_cast<ImportFunc>(GetProcAddress(runtime, symbol)) : nullptr;
+  return reinterpret_cast<ImportFunc>(rb_blitz::platform::ResolveRuntimeSymbol(symbol));
 }
 void Forward(const char* symbol, PPCContext& ctx, uint8_t* base) {
   // Each wrapper owns a static resolved function; no mutable cross-thread slot.

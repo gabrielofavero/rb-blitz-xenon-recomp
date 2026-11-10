@@ -21,6 +21,7 @@
 #include "settings/hot_apply.h"
 #include "settings/migration.h"
 #include "settings/paths.h"
+#include "settings/schema.h"
 #include "settings/store.h"
 
 namespace rb_blitz::settings {
@@ -76,7 +77,8 @@ class Reconciler {
 // §5.8. Every method runs on the caller's thread; no guest pointer crosses it.
 class Service {
  public:
-  explicit Service(StorePaths paths);
+  explicit Service(StorePaths paths,
+                   schema::ReleaseSettings release = schema::CurrentReleaseSettings());
   ~Service();
 
   // --- boot ---------------------------------------------------------------
@@ -157,6 +159,7 @@ class Service {
   bool ParkJournal(const std::string& reason);
 
   StorePaths paths_;
+  schema::ReleaseSettings release_;
   Store store_;
   CapabilitySnapshot capabilities_;
   std::vector<Descriptor> descriptors_;

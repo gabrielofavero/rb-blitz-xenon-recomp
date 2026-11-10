@@ -2,7 +2,7 @@
 
 The toolchain this project is built, accepted and released with, recorded in the
 repository rather than in one machine's build tree. This file is the prose half;
-[config/toolchain.toml](../../config/toolchain.toml) is the machine-readable half, and
+the target record in `config/` is the machine-readable half, and
 `rb_blitz_toolchain --check` (built from
 [tools/toolchain_check.cpp](../../tools/toolchain_check.cpp), run by every build before
 codegen) is what compares a machine against it.
@@ -22,6 +22,23 @@ Two things follow from it being recorded rather than assumed:
 - a build **states** the toolchain it is about to use, in its own output, every time;
 - a built binary **states** it too, at boot, next to the build and game data identity:
   `toolchain: rexglue-sdk c94f5eb, clang 23.1.1, … (frozen set)`.
+
+## Target records
+
+`config/toolchain.toml` is the accepted Windows x86-64 set described below. The
+Linux x86-64, macOS arm64 and macOS x86-64 records have their own files in
+`config/`. CMake selects the record by target OS and architecture and passes both
+`--pin` and `--target` to the checker; a mismatched record is an error. The new
+records contain the SDK commit and bootstrap minimums. Their versions have not
+been measured on native target builders and are **not** release acceptance pins.
+They must be updated after native configure, codegen, link and gameplay evidence.
+The macOS records currently describe AppleClang 16+; LLVM Clang on a Mac must
+meet the SDK's separate 18+ floor and have a matching record. The checker also
+requires the recorded compiler family, preventing an LLVM 16/17 build from
+passing the AppleClang 16 floor.
+Prompt 1's native store adapter also requires libcurl headers and library
+version 7.62 or newer for URL parsing. The first native builders must record
+the exact libcurl version and whether the final package declares or bundles it.
 
 ## The set
 
@@ -115,9 +132,10 @@ Both are cached like any CMake option, so turn them back off by naming them
 
 - **The installer's own toolchain.** [installer/](../../installer) needs Inno Setup 6
   (`ISCC`) and PowerShell 5.1; neither is in the record or checked.
-- **Anything outside `win-amd64`.** The linux and mac presets exist, but the record is
-  one platform's — on another host every component reports differently, and the check
-  can only report that, not judge it.
+- **Native Linux/macOS acceptance.** Target records now prevent Windows MSVC and
+  Windows SDK values from being compared on those hosts, but native compiler,
+  OS ABI and graphics evidence is still pending. See the
+  [platform expansion plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md).
 - **Python.** The diagnostics under `scripts/*.py` and the installer helper use it;
   the build does not.
 - **The graphics driver and the machine itself.** Frame pacing, and whether a graphics

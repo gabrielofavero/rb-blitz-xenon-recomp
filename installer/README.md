@@ -167,6 +167,8 @@ A copy of everything the helper did is left next to the game:
 | `setup.iss` | The wizard: pages, sequencing, progress mapping and uninstall. The current build embeds the payload. |
 | `src/` | `rb_blitz_setup_helper.exe`: STFS extraction, zip inflate, WinHTTP download, SHA-256 verification, file placement, manifests. |
 | `src/commands.cpp` | The helper's command line: one command per stage, `--summary` / `--log` / `--progress` for each. |
+| `src/game_import_core.{h,cpp}` | SDK-free folder/STFS probe, fingerprint check and recoverable import transaction shared by the Windows helper and native hosts. |
+| `portable/CMakeLists.txt` | Standalone host build of that importer and its synthetic non-UI tests, without Inno Setup or the game SDK. |
 | `src/paths.cpp` | The two folders: reading `paths.toml` for the folder page's prefill, checking the answers, and committing them. The file format itself comes from the game (`src/settings/paths.cpp`, compiled in), so the installer cannot write a file the game reads differently. |
 | `config/pins.toml` | The only file that names the outside world: version, URLs, sizes, hashes. |
 | `config/ultimate_fingerprints.toml` | What the mod's files hash to, in the same schema as `../config/game_fingerprints.toml`. |
@@ -188,6 +190,23 @@ Build the game and installer from this workspace with `.\dev.ps1 build-installer
 The version is `[installer] version` in `installer\config\pins.toml`. It is also the game's compiled version, the setup file name, the wizard version and the installed payload version. The installer snapshots the current release build and checks the snapshot against the build tree before embedding it. It does not look up Git commits or download a different game build.
 
 Windows, CMake 3.25+, Ninja, a C++20 toolchain, Node.js and Inno Setup 6 are required. Run `ctest --preset installer-release --output-on-failure` from `installer\` for the helper tests. `-SkipArt`, `-SkipTests`, `-RefreshPayload`, `-SkipSetup` and `-IsccPath` remain available on `installer\build.ps1`.
+
+The portable importer can be built separately on any target host from the
+repository root:
+
+```sh
+cmake -S installer/portable -B out/build/portable-import -G Ninja
+cmake --build out/build/portable-import
+ctest --test-dir out/build/portable-import -R '^portable_import$' --output-on-failure
+```
+
+It accepts a caller-supplied native source picker, progress callback and
+cancellation callback. The native player window and first-launch wiring are
+part of the Linux/macOS prompts in the
+[platform expansion plan](../docs/plans/in-progress/2026-11-09-linux-macos-release-plan.md).
+The native build and staging routes now have instructions in
+[`linux/README.md`](linux/README.md) and [`macos/README.md`](macos/README.md).
+Their release gates still require testing on the target machines.
 
 ### Why the helper has a static CRT
 

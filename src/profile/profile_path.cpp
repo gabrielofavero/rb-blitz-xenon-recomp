@@ -137,9 +137,16 @@ fs::path ResolveProfilePath(const ProfilePathInputs& inputs) {
 }
 
 fs::path RoamingAppDataDir() {
+#if defined(_WIN32)
   if (fs::path appdata = FromEnvironment("APPDATA"); !appdata.empty()) {
     return appdata;
   }
+#elif defined(__APPLE__)
+  if (fs::path home = FromEnvironment("HOME"); !home.empty()) {
+    return home / "Library" / "Application Support";
+  }
+  return {};
+#endif
   if (fs::path config_home = FromEnvironment("XDG_CONFIG_HOME"); !config_home.empty()) {
     return config_home;
   }

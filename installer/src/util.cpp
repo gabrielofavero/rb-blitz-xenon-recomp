@@ -3,10 +3,19 @@
 
 #include "util.h"
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <chrono>
+#include <codecvt>
+#include <cstdlib>
+#include <locale>
+#endif
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
+#include <ctime>
 #include <fstream>
 #include <mutex>
 #include <system_error>
@@ -48,12 +57,26 @@ LogState& State() {
 }
 
 std::string Timestamp() {
+#ifdef _WIN32
   SYSTEMTIME now{};
   GetLocalTime(&now);
   return S('[', now.wHour < 10 ? "0" : "", now.wHour, ':', now.wMinute < 10 ? "0" : "",
            now.wMinute, ':', now.wSecond < 10 ? "0" : "", now.wSecond, '.',
            now.wMilliseconds < 100 ? (now.wMilliseconds < 10 ? "00" : "0") : "", now.wMilliseconds,
            ']');
+#else
+  using namespace std::chrono;
+  const auto now = system_clock::now();
+  const auto seconds = time_point_cast<std::chrono::seconds>(now);
+  const auto millis = duration_cast<milliseconds>(now - seconds).count();
+  const std::time_t time = system_clock::to_time_t(now);
+  std::tm local{};
+  localtime_r(&time, &local);
+  char buffer[32];
+  std::snprintf(buffer, sizeof(buffer), "[%02d:%02d:%02d.%03d]", local.tm_hour, local.tm_min,
+                local.tm_sec, static_cast<int>(millis));
+  return buffer;
+#endif
 }
 
 void Emit(std::string_view level, std::string_view message) {
@@ -70,7 +93,11 @@ void Emit(std::string_view level, std::string_view message) {
   if (!state.opened) {
     return;
   }
+#ifdef _WIN32
   std::FILE* file = _wfopen(state.path.c_str(), L"ab");
+#else
+  std::FILE* file = std::fopen(state.path.c_str(), "ab");
+#endif
   if (file == nullptr) {
     return;
   }
@@ -208,6 +235,7 @@ std::string Join(const std::vector<std::string>& parts, std::string_view separat
 }
 
 std::string FormatWin32Error(unsigned long code) {
+#ifdef _WIN32
   LPWSTR buffer = nullptr;
   const DWORD length = FormatMessageW(
       FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
@@ -224,9 +252,18 @@ std::string FormatWin32Error(unsigned long code) {
     message = S(message, " (", code, ')');
   }
   return message;
+#else
+  return S("error ", code);
+#endif
 }
 
-std::string LastWin32Error() { return FormatWin32Error(GetLastError()); }
+std::string LastWin32Error() {
+#ifdef _WIN32
+  return FormatWin32Error(GetLastError());
+#else
+  return std::generic_category().message(errno);
+#endif
+}
 
 void SetError(std::string* error, std::string message) {
   if (error != nullptr) {
@@ -237,6 +274,7 @@ void SetError(std::string* error, std::string message) {
 // --- Windows helpers ------------------------------------------------------
 
 std::wstring Widen(std::string_view utf8) {
+#ifdef _WIN32
   if (utf8.empty()) {
     return {};
   }
@@ -248,9 +286,14 @@ std::wstring Widen(std::string_view utf8) {
   std::wstring wide(static_cast<std::size_t>(length), L'\0');
   MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), wide.data(), length);
   return wide;
+#else
+  std::wstring_convert<std::codecvt_utf8<wchar_t>> convert;
+  return convert.from_bytes(utf8.data(), utf8.data() + utf8.size());
+#endif
 }
 
 std::string Narrow(std::wstring_view wide) {
+#ifdef _WIN32
   if (wide.empty()) {
     return {};
   }
@@ -263,11 +306,20 @@ std::string Narrow(std::wstring_view wide) {
   WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), utf8.data(), length,
                       nullptr, nullptr);
   return utf8;
+#else
+  std::wstring_convert<std::codecvt_utf8<wchar_t>> convert;
+  return convert.to_bytes(wide.data(), wide.data() + wide.size());
+#endif
 }
 
-void EnableUtf8Console() { SetConsoleOutputCP(CP_UTF8); }
+void EnableUtf8Console() {
+#ifdef _WIN32
+  SetConsoleOutputCP(CP_UTF8);
+#endif
+}
 
 std::optional<std::filesystem::path> EnvironmentPath(std::wstring_view name) {
+#ifdef _WIN32
   const std::wstring key(name);
   const DWORD needed = GetEnvironmentVariableW(key.c_str(), nullptr, 0);
   if (needed == 0) {
@@ -283,9 +335,16 @@ std::optional<std::filesystem::path> EnvironmentPath(std::wstring_view name) {
     return std::nullopt;
   }
   return std::filesystem::path(value);
+#else
+  const std::string key = Narrow(name);
+  const char* value = std::getenv(key.c_str());
+  return value == nullptr || *value == '\0' ? std::nullopt
+                                              : std::optional(std::filesystem::path(value));
+#endif
 }
 
 std::uint32_t WindowsBuildNumber() {
+#ifdef _WIN32
   // RTL_OSVERSIONINFOW, declared here so this file does not need winternl.h and
   // whatever the local SDK version spells it as.
   struct OsVersionInfo {
@@ -313,9 +372,13 @@ std::uint32_t WindowsBuildNumber() {
     return 0;
   }
   return info.build;
+#else
+  return 0;
+#endif
 }
 
 std::uint64_t FreeBytesAvailable(const std::filesystem::path& path) {
+#ifdef _WIN32
   ULARGE_INTEGER available{};
   ULARGE_INTEGER total{};
   ULARGE_INTEGER free_total{};
@@ -323,9 +386,15 @@ std::uint64_t FreeBytesAvailable(const std::filesystem::path& path) {
     return 0;
   }
   return available.QuadPart;
+#else
+  std::error_code code;
+  const auto info = std::filesystem::space(path, code);
+  return code ? 0 : info.available;
+#endif
 }
 
 std::uint64_t TotalBytes(const std::filesystem::path& path) {
+#ifdef _WIN32
   ULARGE_INTEGER available{};
   ULARGE_INTEGER total{};
   ULARGE_INTEGER free_total{};
@@ -333,9 +402,15 @@ std::uint64_t TotalBytes(const std::filesystem::path& path) {
     return 0;
   }
   return total.QuadPart;
+#else
+  std::error_code code;
+  const auto info = std::filesystem::space(path, code);
+  return code ? 0 : info.capacity;
+#endif
 }
 
 std::string MachineArchitecture() {
+#ifdef _WIN32
   SYSTEM_INFO info{};
   GetNativeSystemInfo(&info);
   switch (info.wProcessorArchitecture) {
@@ -348,6 +423,13 @@ std::string MachineArchitecture() {
     default:
       return S("unknown (", info.wProcessorArchitecture, ')');
   }
+#elif defined(__aarch64__) || defined(__arm64__)
+  return "arm64";
+#elif defined(__x86_64__)
+  return "x64";
+#else
+  return "unknown";
+#endif
 }
 
 // --- file primitives ------------------------------------------------------
@@ -355,7 +437,7 @@ std::string MachineArchitecture() {
 bool ReadFileBytes(const std::filesystem::path& path, Bytes* out, std::string* error) {
   std::ifstream stream(path, std::ios::binary);
   if (!stream) {
-    SetError(error, S("cannot open ", Narrow(path.native()), ": ", LastWin32Error()));
+    SetError(error, S("cannot open ", PosixPath(path), ": ", LastWin32Error()));
     return false;
   }
   stream.seekg(0, std::ios::end);
@@ -363,7 +445,7 @@ bool ReadFileBytes(const std::filesystem::path& path, Bytes* out, std::string* e
   stream.seekg(0, std::ios::beg);
   out->assign(static_cast<std::size_t>(size > 0 ? size : 0), 0);
   if (size > 0 && !stream.read(reinterpret_cast<char*>(out->data()), size)) {
-    SetError(error, S("cannot read ", Narrow(path.native()), " (expected ", size, " bytes)"));
+    SetError(error, S("cannot read ", PosixPath(path), " (expected ", size, " bytes)"));
     return false;
   }
   return true;
@@ -385,14 +467,14 @@ bool WriteFileBytes(const std::filesystem::path& path, const std::uint8_t* data,
   }
   std::ofstream stream(path, std::ios::binary | (append ? std::ios::app : std::ios::trunc));
   if (!stream) {
-    SetError(error, S("cannot open ", Narrow(path.native()), " for writing: ", LastWin32Error()));
+    SetError(error, S("cannot open ", PosixPath(path), " for writing: ", LastWin32Error()));
     return false;
   }
   if (size != 0) {
     stream.write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(size));
   }
   if (!stream) {
-    SetError(error, S("cannot write ", Narrow(path.native())));
+    SetError(error, S("cannot write ", PosixPath(path)));
     return false;
   }
   return true;
@@ -413,12 +495,12 @@ bool EnsureDirectory(const std::filesystem::path& path, std::string* error) {
     if (std::filesystem::is_directory(path, code)) {
       return true;
     }
-    SetError(error, S(Narrow(path.native()), " exists and is not a directory"));
+    SetError(error, S(PosixPath(path), " exists and is not a directory"));
     return false;
   }
   std::filesystem::create_directories(path, code);
   if (code) {
-    SetError(error, S("cannot create ", Narrow(path.native()), ": ", code.message()));
+    SetError(error, S("cannot create ", PosixPath(path), ": ", code.message()));
     return false;
   }
   return true;
@@ -439,7 +521,7 @@ bool RemoveFile(const std::filesystem::path& path, std::string* error) {
   }
   std::filesystem::remove(path, code);
   if (code) {
-    SetError(error, S("cannot delete ", Narrow(path.native()), ": ", code.message()));
+    SetError(error, S("cannot delete ", PosixPath(path), ": ", code.message()));
     return false;
   }
   return true;
@@ -464,7 +546,7 @@ bool RemoveTree(const std::filesystem::path& path, std::string* error) {
   }
   std::filesystem::remove_all(path, code);
   if (code || std::filesystem::exists(path, walk_code)) {
-    SetError(error, S("cannot delete ", Narrow(path.native()), ": ",
+    SetError(error, S("cannot delete ", PosixPath(path), ": ",
                       code ? code.message() : std::string("still present after delete")));
     return false;
   }
@@ -592,7 +674,11 @@ std::filesystem::path SafeRelativePath(std::string_view posix_relative, std::str
     if (IsReservedName(component)) {
       return fail("reserved device name");
     }
+#ifdef _WIN32
     out /= Widen(component);
+#else
+    out /= std::filesystem::u8path(component);
+#endif
     if (end == normalised.size()) {
       break;
     }
@@ -600,9 +686,11 @@ std::filesystem::path SafeRelativePath(std::string_view posix_relative, std::str
   }
   // Also covers the wizard's 260-character MAX_PATH limit without long-path
   // opt-in, both for the staging path and for the final install location.
+#ifdef _WIN32
   if (out.native().size() > 240) {
     return fail("path too long");
   }
+#endif
   return out;
 }
 
@@ -622,7 +710,11 @@ bool PathIsWithin(const std::filesystem::path& root, const std::filesystem::path
     if (candidate_part == resolved_candidate.end()) {
       return false;
     }
+#ifdef _WIN32
     if (!EqualsIgnoreCase(Narrow(root_part->native()), Narrow(candidate_part->native()))) {
+#else
+    if (*root_part != *candidate_part) {
+#endif
       return false;
     }
   }
@@ -630,8 +722,13 @@ bool PathIsWithin(const std::filesystem::path& root, const std::filesystem::path
 }
 
 std::string PosixPath(const std::filesystem::path& path) {
+#ifdef _WIN32
   std::string text = Narrow(path.generic_wstring());
   return text;
+#else
+  const auto utf8 = path.generic_u8string();
+  return std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size());
+#endif
 }
 
 // --- logging --------------------------------------------------------------

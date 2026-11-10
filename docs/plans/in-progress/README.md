@@ -19,6 +19,11 @@ Timer alone is promoted to next-song after matching guest receipts, both visible
 a later provider save and restart readback. The other Ultimate rows remain restart-scoped;
 C3's remaining validation gates are recorded in the active plan.
 
+The [Linux and macOS release plan](2026-11-09-linux-macos-release-plan.md) started on 2026-11-10.
+Its settings pre-step is implemented and passes the Windows release build and focused host tests.
+Linux/macOS builds, guest menu and renderer observations, and all packaging/play gates remain open;
+Prompt 0 has not started.
+
 Song Load Guard **finished on 2026-10-26** and moved to
 [`2026-10-13-load-guard.md`](../finished/2026-10-13-load-guard.md).
 The owner confirmed fatal-load recovery, Can't Hold Us playback, 30s timeout/dialog,

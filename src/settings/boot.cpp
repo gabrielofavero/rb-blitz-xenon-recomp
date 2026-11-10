@@ -71,7 +71,11 @@ constexpr int32_t kShippedFilteringCeiling = 3;
 // contains. A target that compiles this file without that definition (a unit-test build) reports the
 // backend this project has always shipped.
 #if !defined(RBBLITZ_BACKENDS)
+#if defined(_WIN32)
 #define RBBLITZ_BACKENDS "d3d12"
+#else
+#define RBBLITZ_BACKENDS "vulkan"
+#endif
 #endif
 
 std::vector<std::string_view> ShippedBackends() {
@@ -88,9 +92,12 @@ std::vector<std::string_view> ShippedBackends() {
   return out;
 }
 
-// The backend an unnamed/"any" choice lands on, and the one the boot names when nobody named one:
-// this project has always run D3D12, so it stays the default even now that Vulkan is offered.
+// The backend an unnamed/"any" choice lands on, and the one the boot names when nobody named one.
+#if defined(_WIN32)
 constexpr char kFallbackBackend[] = "d3d12";
+#else
+constexpr char kFallbackBackend[] = "vulkan";
+#endif
 
 // True when the Vulkan loader is present and looks like a loader - the same check
 // `RbBlitzApp::SelectGpuBackend` makes before committing to the backend. The SDK opens the loader
@@ -406,7 +413,9 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
       probe.detected = loader;
       probe.usable = loader;
       probe.note = loader ? "not probed: a backend this project ships and has run"
-                          : "the Vulkan loader (vulkan-1.dll) is not present here";
+                          : "the Vulkan loader (" +
+                                std::string(rex::platform::lib_names::kVulkanLoader) +
+                                ") is not present here";
     } else {
       probe.note = "not probed: a backend this project ships and has run";
     }
@@ -420,11 +429,16 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     // Auto follows the current display on every boot, without running a benchmark.
     constexpr int kPolicyVersion = 3;
     const auto recommendation = RecommendGraphics(capability_snapshot_);
-    const GraphicsValues recommendations = {
+    GraphicsValues recommendations = {
         {SettingId::kRenderer, recommendation.renderer},
         {SettingId::kResolution, recommendation.resolution},
         {SettingId::kAntiAliasing, recommendation.anti_aliasing},
         {SettingId::kFiltering, recommendation.filtering}};
+#if !defined(_WIN32)
+    // The graphics policy's conservative no-device fallback is Windows D3D12. A Vulkan-only
+    // release must never write that fallback into settings.toml when a loader is missing.
+    recommendations[SettingId::kRenderer].text = "vulkan";
+#endif
     auto& store = service_->store();
     if (load_status_ == DocumentStatus::kOk || load_status_ == DocumentStatus::kMissing) {
       for (const auto& [id, value] : recommendations) {
@@ -528,6 +542,16 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
           WriteCvar("user_data_root", roots.user_data_root, SettingId::kUnknown);
     }
   }
+#if !defined(_WIN32)
+  else if (const auto native_data = NativeUserRootsFromEnvironment().data;
+           !native_data.empty() && !ExplicitlyOwned("user_data_root", SettingId::kUnknown)) {
+    // Native packages are read-only. Keep saves under the user's data root when
+    // paths.toml does not explicitly select another location.
+    roots.user_data_root = PathText(native_data);
+    roots.have_user_data_root =
+        WriteCvar("user_data_root", roots.user_data_root, SettingId::kUnknown);
+  }
+#endif
 
   // --- the rows, at the config rank ---------------------------------------------------------
   if (service_) {

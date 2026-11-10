@@ -333,7 +333,7 @@ TransferResult Perform(const std::string_view url, const TransferReceiver& recei
 
 }  // namespace
 
-TransferFn WinHttpTransfer() {
+TransferFn PlatformTransfer() {
   return [](const std::string_view url, const TransferReceiver& receiver) {
     return Perform(url, receiver);
   };

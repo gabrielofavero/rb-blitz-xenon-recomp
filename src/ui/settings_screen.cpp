@@ -1485,6 +1485,7 @@ std::vector<PanelSpec> AllPanels() {
 
   for (auto& panel : out) {
     std::erase_if(panel.rows, [](Row& row) {
+      if (g_configuration.hidden.contains(row.setting)) return true;
       if (const auto available = g_configuration.availability.find(row.setting);
           available != g_configuration.availability.end()) {
         row.description = "Currently unavailable: " + available->second + ". Your visibility preference is saved. Restart to apply.";

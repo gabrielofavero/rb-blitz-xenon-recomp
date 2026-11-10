@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "messages/messages_update.h"
 
+#if defined(_WIN32)
 #include <windows.h>
 #include <shellapi.h>
+#else
+#include <spawn.h>
+#include <sys/wait.h>
+extern char** environ;
+#endif
 
 #include <filesystem>
 #include <memory>
@@ -25,6 +31,7 @@ namespace {
 std::unique_ptr<UpdateAction> g_action;
 constexpr std::string_view kPrefix = "rbbz-messages/update/";
 
+#if defined(_WIN32)
 std::wstring Wide(const std::string& utf8) {
   if (utf8.empty()) return {};
   const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
@@ -36,8 +43,10 @@ std::wstring Wide(const std::string& utf8) {
     return {};
   return result;
 }
+#endif
 
 bool OpenBrowser(const std::string& diagnostic_path, std::string_view url) {
+#if defined(_WIN32)
   const std::wstring wide_url = Wide(std::string(url));
   if (wide_url.empty()) return false;
   if (!diagnostic_path.empty()) {
@@ -58,6 +67,27 @@ bool OpenBrowser(const std::string& diagnostic_path, std::string_view url) {
   }
   return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", wide_url.c_str(),
                                                   nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+#else
+  // The guest cannot supply this URL: UpdateAction passes the fixed Releases URL.
+  // argv avoids shell interpretation of a diagnostic path or future URL bytes.
+  const std::string executable = diagnostic_path.empty()
+#if defined(__APPLE__)
+      ? "open" : diagnostic_path;
+#else
+      ? "xdg-open" : diagnostic_path;
+#endif
+  if (!diagnostic_path.empty() && !std::filesystem::path(diagnostic_path).is_absolute())
+    return false;
+  std::string target(url);
+  char* argv[] = {const_cast<char*>(executable.c_str()), target.data(), nullptr};
+  pid_t process = 0;
+  const int status = diagnostic_path.empty()
+      ? posix_spawnp(&process, executable.c_str(), nullptr, nullptr, argv, environ)
+      : posix_spawn(&process, executable.c_str(), nullptr, nullptr, argv, environ);
+  if (status != 0) return false;
+  std::thread([process] { int child_status = 0; waitpid(process, &child_status, 0); }).detach();
+  return true;
+#endif
 }
 }  // namespace
 

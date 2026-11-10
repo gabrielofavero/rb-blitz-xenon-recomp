@@ -9,6 +9,7 @@
 #include "settings/paths.h"
 
 #include <string>
+#include <cstdlib>
 
 #include "settings/store.h"
 #include "fs/atomic_file.h"
@@ -17,15 +18,62 @@ namespace rb_blitz::settings {
 
 namespace fs = std::filesystem;
 
+NativeUserRoots ResolveNativeUserRoots(const NativePathEnvironment& environment) {
+  NativeUserRoots result;
+#if defined(__APPLE__)
+  if (environment.home.empty()) return result;
+  const fs::path library = environment.home / "Library";
+  result.data = library / "Application Support" / profile::kProfileDirName;
+  result.config = result.data;
+  result.cache = library / "Caches" / profile::kProfileDirName;
+  result.state = library / "Logs" / profile::kProfileDirName;
+#elif defined(__linux__)
+  const auto root = [&](const fs::path& configured, const char* fallback) -> fs::path {
+    if (configured.is_absolute()) return configured / profile::kProfileDirName;
+    return environment.home.empty() ? fs::path{}
+                                    : environment.home / fallback / profile::kProfileDirName;
+  };
+  result.data = root(environment.xdg_data_home, ".local/share");
+  result.config = root(environment.xdg_config_home, ".config");
+  result.cache = root(environment.xdg_cache_home, ".cache");
+  result.state = root(environment.xdg_state_home, ".local/state");
+#else
+  (void)environment;
+#endif
+  return result;
+}
+
+NativeUserRoots NativeUserRootsFromEnvironment() {
+#if defined(_WIN32)
+  return {};
+#else
+  const auto read = [](const char* name) -> fs::path {
+    const char* value = std::getenv(name);
+    return value && *value ? fs::path(value) : fs::path{};
+  };
+  return ResolveNativeUserRoots({read("HOME"), read("XDG_DATA_HOME"),
+                                 read("XDG_CONFIG_HOME"), read("XDG_CACHE_HOME"),
+                                 read("XDG_STATE_HOME")});
+#endif
+}
+
 fs::path ResolvePathFile(const fs::path& executable_dir) {
   if (executable_dir.empty()) {
     return {};
   }
+#if !defined(_WIN32)
+  if (!profile::IsPortable(executable_dir)) {
+    const fs::path config = NativeUserRootsFromEnvironment().config;
+    if (!config.empty()) return config / kPathFileName;
+    return {};  // an installed program tree must not become a write fallback
+  }
+#endif
   return executable_dir / kPathFileName;
 }
 
 PathFileResult LoadPathFile(const fs::path& file) {
   PathFileResult result;
+  if (file.empty()) return result;
   std::string text;
   bool existed = false;
   if (!ReadFileText(file, &text, &existed)) {
@@ -79,6 +127,10 @@ PathFileResult LoadPathFile(const fs::path& file) {
 }
 
 bool SavePathFile(const fs::path& file, const PathEntry& entry, std::string* error) {
+  if (file.empty()) {
+    if (error) *error = "no path-file location is available";
+    return false;
+  }
   rb_blitz::fs::FileLock lock;
   if (!lock.Acquire(file, error)) return false;
   std::string text;

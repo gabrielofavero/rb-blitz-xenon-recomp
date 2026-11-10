@@ -78,6 +78,7 @@ set(RBBLITZ_HELPER_SOURCES
     src/commands.cpp
     src/config.cpp
     src/download.cpp
+    src/game_import_core.cpp
     src/inflate.cpp
     src/install.cpp
     src/main.cpp
@@ -165,6 +166,7 @@ if(BUILD_TESTING)
         src/commands.cpp
         src/config.cpp
         src/download.cpp
+        src/game_import_core.cpp
         src/inflate.cpp
         src/install.cpp
         src/paths.cpp

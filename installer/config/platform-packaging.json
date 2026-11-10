@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "versionSource": "installer/config/pins.toml:[installer].version",
+  "applicationId": "io.github.gabrielofavero.rbblitz",
+  "linux": {
+    "architecture": "amd64",
+    "packageName": "rock-band-blitz-recomp",
+    "installPrefix": "/opt/rock-band-blitz-recomp",
+    "nfpmVersion": "2.48.0",
+    "nfpmArchiveSha256": "6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750",
+    "stageManifest": [
+      { "fromTarget": "rb_blitz", "to": "opt/rock-band-blitz-recomp/bin/rb_blitz" },
+      { "fromTarget": "rb_blitz_linux_launcher", "to": "opt/rock-band-blitz-recomp/bin/rb_blitz_linux_launcher" },
+      { "fromTarget": "rexruntime", "to": "opt/rock-band-blitz-recomp/bin/librexruntime.so" },
+      { "fromTarget": "rexgpu-xenos", "to": "opt/rock-band-blitz-recomp/bin/librexgpu-xenos.so" },
+      { "from": "config/graphics_preparation.json", "to": "opt/rock-band-blitz-recomp/bin/graphics-preparation.json" },
+      { "from": "config/game_fingerprints.toml", "to": "opt/rock-band-blitz-recomp/bin/game-fingerprints.toml" },
+      { "from": "assets/messages/feed.json", "to": "opt/rock-band-blitz-recomp/bin/assets/messages/feed.json" },
+      { "from": "assets/icon/blitz.png", "to": "usr/share/icons/hicolor/256x256/apps/io.github.gabrielofavero.rbblitz.png" },
+      { "from": "installer/linux/io.github.gabrielofavero.rbblitz.desktop", "to": "usr/share/applications/io.github.gabrielofavero.rbblitz.desktop" },
+      { "from": "LICENSE", "to": "opt/rock-band-blitz-recomp/share/licenses/LICENSE" }
+    ],
+    "desktopEntry": "usr/share/applications/io.github.gabrielofavero.rbblitz.desktop",
+    "nativeDependencyInventoryPending": true,
+    "releaseAuditPending": true
+  },
+  "macos": {
+    "architectures": ["arm64", "x86_64"],
+    "bundleName": "Rock Band Blitz.app",
+    "bundleId": "io.github.gabrielofavero.rbblitz",
+    "packageId": "io.github.gabrielofavero.rbblitz",
+    "installLocation": "/Applications",
+    "deploymentTargetCandidate": "13.0",
+    "pkgbuildFrom": "xcrun --find pkgbuild",
+    "xcodeMinimum": "16",
+    "xcodeBuildPinPending": true,
+    "componentProperties": "installer/macos/components.plist",
+    "stageManifest": [
+      { "fromTemplate": "installer/macos/Info.plist.in", "to": "Rock Band Blitz.app/Contents/Info.plist" },
+      { "fromTarget": "rb_blitz_macos_launcher", "to": "Rock Band Blitz.app/Contents/MacOS/rb_blitz_macos_launcher" },
+      { "fromTarget": "rb_blitz", "to": "Rock Band Blitz.app/Contents/MacOS/rb_blitz" },
+      { "fromTarget": "rexruntime", "to": "Rock Band Blitz.app/Contents/MacOS/librexruntime.dylib" },
+      { "fromTarget": "rexgpu-xenos", "to": "Rock Band Blitz.app/Contents/MacOS/librexgpu-xenos.dylib" },
+      { "from": "config/graphics_preparation.json", "to": "Rock Band Blitz.app/Contents/MacOS/graphics-preparation.json" },
+      { "from": "config/game_fingerprints.toml", "to": "Rock Band Blitz.app/Contents/MacOS/game-fingerprints.toml" },
+      { "from": "assets/messages/feed.json", "to": "Rock Band Blitz.app/Contents/MacOS/assets/messages/feed.json" },
+      { "fromGenerated": "blitz.icns", "to": "Rock Band Blitz.app/Contents/Resources/blitz.icns" },
+      { "from": "LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/LICENSE" },
+      { "fromSdkStage": "vulkan/lib/libvulkan.1.dylib", "to": "Rock Band Blitz.app/Contents/MacOS/vulkan/lib/libvulkan.1.dylib" },
+      { "fromSdkStage": "vulkan/lib/libMoltenVK.dylib", "to": "Rock Band Blitz.app/Contents/MacOS/vulkan/lib/libMoltenVK.dylib" },
+      { "fromSdkStage": "vulkan/share/vulkan/icd.d/MoltenVK_icd.json", "to": "Rock Band Blitz.app/Contents/MacOS/vulkan/share/vulkan/icd.d/MoltenVK_icd.json" }
+    ],
+    "nativeDependencyInventoryPending": true,
+    "iconConversionPending": true,
+    "releaseAuditPending": true
+  }
+}

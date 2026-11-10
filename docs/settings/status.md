@@ -8,6 +8,12 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **Platform/version settings pre-step (2026-11-10):** the active
+  [Linux/macOS plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md) adds release-specific
+  row visibility, choices and defaults without changing stable setting IDs. Linux/macOS policy
+  hides Renderer and uses Vulkan even with a saved DirectX choice. Windows build and host simulations
+  pass; native target builds and visible guest behavior remain unverified.
+
 - **Settings hot apply (2026-11-07):** the [active plan](../plans/in-progress/2026-10-24-settings-hot-apply-plan.md)
   began with a nine-row immediate baseline and has a 48-row static consumer audit. Saved, running and pending
   application are tracked separately; a commit rechecks capabilities before writing, partial provider

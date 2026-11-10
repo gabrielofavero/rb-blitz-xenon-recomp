@@ -101,6 +101,7 @@
 #include "profile/profile_apply.h"
 #include "platform/crash_diagnostics.h"
 #include "settings/boot.h"
+#include "settings/paths.h"
 #include "settings/display_runtime.h"
 #include "platform/game_restart.h"
 #include "store/store_fetch.h"
@@ -177,8 +178,13 @@ class RbBlitzApp : public rex::ReXApp {
     if (config.gpu_plugin.empty()) {
       config.gpu_plugin = "xenos";
     }
-      if (rex::cvar::GetFlagByName("settings_safe_graphics") == "true")
-        rex::cvar::SetFlagByName("gpu_backend", "d3d12");
+    if (rex::cvar::GetFlagByName("settings_safe_graphics") == "true") {
+#if defined(_WIN32)
+      rex::cvar::SetFlagByName("gpu_backend", "d3d12");
+#else
+      rex::cvar::SetFlagByName("gpu_backend", "vulkan");
+#endif
+    }
       SelectGpuBackend(config);
     // Load the default plugin here too: its cvars must exist before presentation and runtime
     // setup consume them. Loading creates the graphics object; SetupPresentation follows later.
@@ -324,17 +330,28 @@ class RbBlitzApp : public rex::ReXApp {
       redirect_if_inside_game_root(paths.user_data_root);
     }
 
-    // Writable roots default outside the game tree (platform user dir). The runtime has already
-    // filled user_data_root with GetUserFolder()/GetName() ("rb_blitz") before this hook, so when
-    // nothing named a root explicitly it is replaced with the folder Controller Settings' *Save game
-    // location* row shows - one spelling of the default, in both places. An explicit
-    // --user_data_root, the cvar, or a hand-edited profile is left exactly as it is.
+    // Writable roots default outside the game tree. Windows preserves the established
+    // user-folder layout. Native desktop builds use separate platform data/cache roots;
+    // explicit cvar and path-file choices continue to win.
+#if defined(_WIN32)
     if (REXCVAR_GET(user_data_root).empty()) {
       paths.user_data_root = rex::filesystem::GetUserFolder() / "Rock Band Blitz";
     }
     if (REXCVAR_GET(cache_root).empty()) {
       paths.cache_root = paths.user_data_root / "cache";
     }
+#else
+    const auto native_roots = rb_blitz::settings::NativeUserRootsFromEnvironment();
+    if (REXCVAR_GET(user_data_root).empty() && !native_roots.data.empty()) {
+      paths.user_data_root = native_roots.data;
+    }
+    if (REXCVAR_GET(cache_root).empty() && !native_roots.cache.empty()) {
+      paths.cache_root = native_roots.cache;
+    }
+    if (REXCVAR_GET(update_data_root).empty() && !native_roots.data.empty()) {
+      paths.update_data_root = native_roots.data / "updates";
+    }
+#endif
   }
 
   // Boot identity and mod compatibility. Called once the XEX is loaded and the
@@ -607,7 +624,8 @@ class RbBlitzApp : public rex::ReXApp {
     rex::cvar::FinalizeInit();
     if (rb_blitz::platform::InstallCrashDiagnostics(runtime()->cache_root()))
       REXLOG_INFO("crash_diagnostics: pid={} fatal native exceptions write records to {}",
-                  GetCurrentProcessId(), (runtime()->cache_root() / "crash-dumps").string());
+                  rb_blitz::platform::ThisProcessId(),
+                  (runtime()->cache_root() / "crash-dumps").string());
     else
       REXLOG_WARN("crash_diagnostics: could not install native crash capture");
     rb_blitz::loading::ConfigureLoadTrace();
