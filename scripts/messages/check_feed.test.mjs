@@ -16,7 +16,7 @@ function fixture(run) {
     const feed = structuredClone(canonical);
     const release = {
       tag_name: `v${feed.latest_version}`, draft: false, prerelease: false,
-      assets: [{ name: `RockBandBlitzSetup-${feed.latest_version}.exe`, size: 123 }],
+      assets: [{ name: `RockBandBlitz-${feed.latest_version}-windows-amd64.exe`, size: 123 }],
     };
     const feedPath = join(directory, 'feed.json');
     const releasePath = join(directory, 'release.json');
@@ -103,6 +103,10 @@ test('missing setup asset and wrong release version refuse publication', () => {
     assert.equal(result.status, 1);
     assert.match(result.stderr, /missing nonempty setup asset/);
     release.assets = [{ name: 'RockBandBlitzSetup-0.1.0.exe', size: 123 }];
+    result = check(true);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /missing nonempty setup asset/);
+    release.assets = [{ name: `RockBandBlitz-${release.tag_name.slice(1)}-windows-amd64.exe`, size: 123 }];
     release.tag_name = 'v0.2.0';
     result = check(true);
     assert.equal(result.status, 1);

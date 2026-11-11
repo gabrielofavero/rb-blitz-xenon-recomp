@@ -3,14 +3,12 @@
 Builds the Rock Band Blitz installer (rb_blitz_setup_helper.exe + setup.iss + ISCC) from this checkout.
 
 .DESCRIPTION
-One command, one product: the complete package. Each build is a single .exe, and a
-release publishes exactly one file - the setup executable itself, nothing else
-(README.md, section "The one product").
+Builds a Windows x86-64 setup executable containing the game payload.
 
 Everything the game needs travels inside the setup executable: the payload snapshot
 in out\payload is compressed into it, so the installer needs no network access at
 all. The build is made from the working tree it is run in and is named after the version in
-config\pins.toml: RockBandBlitzSetup-<version>.exe.
+config\pins.toml: RockBandBlitz-<version>-windows-amd64.exe.
 
 The version is one value: [installer] version in config\pins.toml. Change it there
 and run this script again - the file name, the wizard's title (AppVerName) and the
@@ -321,7 +319,7 @@ Remove-Item -LiteralPath (Join-Path $generatedDir 'RockBandBlitzUpdater.exe') -E
 
 # The version in the file name is the one this build actually compiled in, read
 # back from the generated pins.iss above.
-$setupBaseName = "RockBandBlitzSetup-$appVersion"
+$setupBaseName = "RockBandBlitz-$appVersion-windows-amd64"
 
 Write-Step 'Compiling the setup executable'
 
@@ -342,17 +340,7 @@ $setupInfo = Get-Item -LiteralPath $setupExe
 $setupHash = (Get-FileHash -LiteralPath $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
 
 Write-Host ''
-Write-Host 'Built' -ForegroundColor Green
-Write-Host '   product : the complete package, built from this checkout'
-Write-Host ('   setup   : {0}' -f $setupInfo.FullName)
-Write-Host ('   size    : {0}' -f (Get-SizeText $setupInfo.Length))
-Write-Host ('   sha256  : {0}' -f $setupHash)
-Write-Host ('   helper  : {0}' -f (Get-SizeText $helperSize))
-Write-Host ('   payload : embedded from {0}' -f $PayloadDir)
-Write-Host  '             publish the checksum measured here rather than a fixed one.'
-Write-Host ''
-Write-Host 'Publish, in one release:' -ForegroundColor Green
-Write-Host ("   {0}" -f $setupInfo.Name)
-Write-Host  '   and nothing else: a release is one file. The game files the user already has, the'
-Write-Host  '   Ultimate mod (fetched from upstream) and this release''s own checksum printed above'
-Write-Host  '   are all the rest of the release notes.'
+Write-Host 'Installer build complete' -ForegroundColor Green
+Write-Host ('  File:    {0}' -f $setupInfo.FullName)
+Write-Host ('  Size:    {0}' -f (Get-SizeText $setupInfo.Length))
+Write-Host ('  SHA-256: {0}' -f $setupHash)

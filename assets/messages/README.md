@@ -23,7 +23,7 @@ names one for publication, even if the file itself is valid. Such a name in a
 downloaded feed draws `icon_misc` as a safe fallback.
 
 The Pages workflow checks the latest published GitHub release and its
-`RockBandBlitzSetup-<version>.exe` asset before publishing. After a release,
+`RockBandBlitz-<version>-windows-amd64.exe` asset before publishing. After a release,
 message-only edits can be dispatched manually while `latest_version` remains
 the latest published setup version. GitHub Pages must be configured to use
 GitHub Actions as its publishing source; this repository change does not enable

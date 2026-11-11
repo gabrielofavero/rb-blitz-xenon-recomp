@@ -3,7 +3,7 @@
 Proves the installer names itself as the build it is.
 
 .DESCRIPTION
-The product is one file, `RockBandBlitzSetup-<version>.exe`, and its window must say
+The product is one file, `RockBandBlitz-<version>-windows-amd64.exe`, and its window must say
 `Setup - Rock Band Blitz <version>`: the file name and the caption have to agree,
 because a screenshot of a failure is how most of these get reported and a version
 string in the wrong place sends the reader looking in the wrong direction.
@@ -18,7 +18,7 @@ window it puts up is read, and every setup process of that product is then kille
 nothing is driven past its first page, and nothing is installed.
 
 One detail decides how this is done. Setup re-executes itself from a temporary copy
-(`RockBandBlitzSetup-0.1.0.tmp` for `RockBandBlitzSetup-0.1.0.exe`), so the process
+(`RockBandBlitz-0.1.0-windows-amd64.tmp` for `RockBandBlitz-0.1.0-windows-amd64.exe`), so the process
 that is started is not the one with the window: the caption belongs to the child, and
 reading MainWindowTitle from the parent returns nothing (measured 2026-10-15). The
 child is found by the name Setup gives it, and both are killed at the end.
@@ -59,16 +59,16 @@ function Check {
 }
 
 # The caption every built setup executable is expected to carry, derived from its own
-# file name: `RockBandBlitzSetup-<version>.exe` says `Setup - Rock Band Blitz <version>`.
+# file name: `RockBandBlitz-<version>-windows-amd64.exe` says `Setup - Rock Band Blitz <version>`.
 # Which files exist depends on what was built last, and this script is about what the
 # ones that exist say.
 $expected = [ordered]@{}
-foreach ($file in Get-ChildItem -Path $DistDir -Filter 'RockBandBlitzSetup-*.exe' -ErrorAction SilentlyContinue) {
-    $version = $file.BaseName -replace '^RockBandBlitzSetup-', ''
+foreach ($file in Get-ChildItem -Path $DistDir -Filter 'RockBandBlitz-*-windows-amd64.exe' -ErrorAction SilentlyContinue) {
+    $version = $file.BaseName -replace '^RockBandBlitz-(.*)-windows-amd64$', '$1'
     $expected[$file.Name] = "Setup - Rock Band Blitz $version"
 }
 
-# Setup's own temporary copy of itself: `RockBandBlitzSetup-0.1.0.tmp.exe`, which is
+# Setup's own temporary copy of itself: `RockBandBlitz-0.1.0-windows-amd64.tmp.exe`, which is
 # the process that owns the window and the caption. Everything that looks like a setup
 # is cleared first, because a setup that finds another instance of itself running says
 # so in a box titled "Setup" and never shows a caption of its own (which is how one
@@ -76,7 +76,7 @@ foreach ($file in Get-ChildItem -Path $DistDir -Filter 'RockBandBlitzSetup-*.exe
 # were still up).
 function Clear-Setups {
     Get-Process -ErrorAction SilentlyContinue |
-        Where-Object ProcessName -like 'RockBandBlitzSetup*' |
+        Where-Object ProcessName -like 'RockBandBlitz-*' |
         Stop-Process -Force -ErrorAction SilentlyContinue
 }
 

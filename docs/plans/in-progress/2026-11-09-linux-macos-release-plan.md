@@ -8,7 +8,7 @@ A player downloads a prebuilt native package, installs it through the desktop OS
 
 | Target | First release artifact | Player path | Release gate |
 | --- | --- | --- | --- |
-| Windows | Existing `RockBandBlitzSetup-<version>.exe` | Existing Inno wizard imports the user's game data. | Preserve current installed behavior and release audit. |
+| Windows | `RockBandBlitz-<version>-windows-amd64.exe` | Existing Inno wizard imports the user's game data. | Preserve current installed behavior and release audit. |
 | Linux x86-64 | One `.deb` for Debian/Ubuntu and one `.rpm` for Fedora-family systems | Install in a graphical package manager, launch from the application menu, import the game package/folder in a pre-game window. | Both installed packages play on native Linux hardware. |
 | macOS Apple Silicon and Intel | One `.pkg` per architecture, or one universal `.pkg` only after both slices and dependencies are validated | Run Installer, use the documented Gatekeeper override if needed, launch the `.app` from Finder, then import the game package/folder. | Each advertised architecture plays on a real Mac. |
 

@@ -1,9 +1,7 @@
 # Builds the Rock Band Blitz installer from a tag and publishes it.
 #
-# The release model is one product and one file per release (installer/README.md,
-# section "The one product"): the complete package built from the tagged commit, whose
-# one asset is the setup executable itself - no manifest, no payload archive, no
-# checksum file to keep in step with it. A release is cut by pushing a tag that matches
+# This Windows workflow publishes the setup executable built from the tagged commit.
+# A release is cut by pushing a tag that matches
 # [installer] version in installer\config\pins.toml; for an installer that is not a
 # release, run installer\build.ps1 on the machine that has the game data.
 #
@@ -33,7 +31,7 @@ concurrency:
 
 jobs:
   package:
-    name: the complete package, and the release it goes on
+    name: Build and publish Windows installer
     runs-on: [self-hosted, windows, x64]
     defaults:
       run:
@@ -72,7 +70,7 @@ jobs:
           cmake --preset win-amd64-release
           cmake --build --preset win-amd64-release
 
-      - name: Which product this is
+      - name: Check release version
         id: product
         run: |
           $version = (Select-String -Path installer\config\pins.toml -Pattern '^\s*version\s*=\s*"([^"]+)"' |
@@ -86,17 +84,15 @@ jobs:
             throw ("the tag ($tag) and the pinned version ($version) disagree: bump " +
                    "[installer] version in installer\config\pins.toml, or tag $version")
           }
-          "name=RockBandBlitzSetup-$version" >> $env:GITHUB_OUTPUT
+          "name=RockBandBlitz-$version-windows-amd64" >> $env:GITHUB_OUTPUT
           "title=Rock Band Blitz $version" >> $env:GITHUB_OUTPUT
-          Write-Host "product: tag ${{ github.ref_name }} -> RockBandBlitzSetup-$version.exe"
+          Write-Host "Installer asset: RockBandBlitz-$version-windows-amd64.exe"
 
       - name: Build the installer
         run: |
-          # The tagged commit is the commit the release records: -PayloadCommit is
-          # passed explicitly so the install manifest names it.
-          pwsh -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1 -PayloadCommit '${{ github.sha }}'
+          pwsh -ExecutionPolicy Bypass -NoProfile -File installer\build.ps1
 
-      - name: Publish the one file
+      - name: Publish release
         run: |
           $asset = "installer\out\dist\${{ steps.product.outputs.name }}.exe"
           if (-not (Test-Path $asset)) { throw "$asset was not built" }

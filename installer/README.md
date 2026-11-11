@@ -7,9 +7,8 @@ from, whether they want Rock Band Blitz Ultimate, and which shortcuts to create,
 gets a folder with a launchable `rb_blitz.exe` in it — no compiler, no CMake, no
 instructions to follow.
 
-One product is built from this directory: the *complete package* — one wizard with the
-recompiled build inside it, made from the working tree it is run in ([the section
-below](#the-one-product)). A release publishes this one file and nothing else.
+The Windows package is one wizard with the recompiled build inside it, made from
+the working tree it is run in ([the section below](#the-one-product)).
 
 Everything in this directory is *packaging*. Nothing here is needed to build or
 run the game, and none of it is compiled into `rb_blitz.exe`.
@@ -18,19 +17,17 @@ run the game, and none of it is compiled into `rb_blitz.exe`.
 
 | Product | What it is | What a release publishes |
 | --- | --- | --- |
-| `RockBandBlitzSetup-<version>.exe` | **The complete package.** `setup.iss` with the payload inside it: it installs with no network access at all. Built from the checkout `build.ps1` runs in, named after the version in `config/pins.toml`. | this file, alone |
+| `RockBandBlitz-<version>-windows-amd64.exe` | **The complete package.** `setup.iss` with the payload inside it: it installs with no network access at all. Built from the checkout `build.ps1` runs in, named after the version in `config/pins.toml`. | this file, alone |
 
 Why it is shaped that way:
 
-* **One file per release, always.** A release is the setup executable and nothing
-  else: no manifest, no payload archive, no checksum file to keep in step with it. A
-  release that published a second file would be a release that can be published
-  halfway.
+* **One file for the Windows package.** The setup executable includes the game
+  payload; it needs no separate archive or manifest.
 * **The build is the workspace.** `build-installer` builds the game in this workspace,
   snapshots its release build tree, and embeds it in the setup executable.
 
 ```powershell
-# from the repository root; the result is installer\out\dist\RockBandBlitzSetup-<version>.exe
+# from the repository root; the result is installer\out\dist\RockBandBlitz-<version>-windows-amd64.exe
 .\dev.ps1 build-installer
 ```
 
@@ -185,7 +182,7 @@ version and Ultimate release details agree.
 
 ## Building it
 
-Build the game and installer from this workspace with `.\dev.ps1 build-installer` (or dot source `dev.ps1` and run `build-installer`). The command builds the release game tree first, then runs `installer\build.ps1`. The result is `installer\out\dist\RockBandBlitzSetup-<version>.exe`.
+Build the game and installer from this workspace with `.\dev.ps1 build-installer` (or dot source `dev.ps1` and run `build-installer`). The command builds the release game tree first, then runs `installer\build.ps1`. The result is `installer\out\dist\RockBandBlitz-<version>-windows-amd64.exe`.
 
 The version is `[installer] version` in `installer\config\pins.toml`. It is also the game's compiled version, the setup file name, the wizard version and the installed payload version. The installer snapshots the current release build and checks the snapshot against the build tree before embedding it. It does not look up Git commits or download a different game build.
 
@@ -391,7 +388,7 @@ Setup's own switches.
 Example — unattended install from a package, with the pinned mod, no dialog at all:
 
 ```bat
-RockBandBlitzSetup-0.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
+RockBandBlitz-0.1.0-windows-amd64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
   /CURRENTUSER /DIR="C:\Games\Rock Band Blitz" /LOG="%TEMP%\rbb-install.log" ^
   /GAMEMETHOD=package /GAMEPACKAGE="<the extracted package folder>" ^
   /DLCDIR="D:\Rock Band DLC" /SAVEDIR="D:\Rock Band Saves" ^

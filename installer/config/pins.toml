@@ -23,7 +23,7 @@ name = "Rock Band Blitz"
 short_name = "Rock Band Blitz"
 # The version of the installer and of the build inside it. Change this and run
 # installer\build.ps1 again: the setup executable is named after it
-# (RockBandBlitzSetup-<version>.exe), the wizard is titled with it and every
+# (RockBandBlitz-<version>-windows-amd64.exe), the wizard is titled with it and every
 # install manifest records it.
 version = "0.1.0"
 publisher = "Gabriel Fávero"

@@ -131,7 +131,7 @@ function checkRelease(feed, release, problems) {
   if (release.tag_name !== version && release.tag_name !== `v${version}`) {
     problems.push(`release: tag ${JSON.stringify(release.tag_name)} does not match feed version ${version}`);
   }
-  const asset = `RockBandBlitzSetup-${version}.exe`;
+  const asset = `RockBandBlitz-${version}-windows-amd64.exe`;
   if (!Array.isArray(release.assets) || !release.assets.some(item => item?.name === asset && item?.size > 0)) {
     problems.push(`release: missing nonempty setup asset ${asset}`);
   }
