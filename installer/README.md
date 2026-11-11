@@ -8,16 +8,16 @@ gets a folder with a launchable `rb_blitz.exe` in it — no compiler, no CMake, 
 instructions to follow.
 
 The Windows package is one wizard with the recompiled build inside it, made from
-the working tree it is run in ([the section below](#the-one-product)).
+the working tree it is run in ([the section below](#windows-package)).
 
 Everything in this directory is *packaging*. Nothing here is needed to build or
 run the game, and none of it is compiled into `rb_blitz.exe`.
 
-## The one product
+## Windows package
 
-| Product | What it is | What a release publishes |
+| File | What it is | Windows release asset |
 | --- | --- | --- |
-| `RockBandBlitz-<version>-windows-amd64.exe` | **The complete package.** `setup.iss` with the payload inside it: it installs with no network access at all. Built from the checkout `build.ps1` runs in, named after the version in `config/pins.toml`. | this file, alone |
+| `RockBandBlitz-<version>-windows-amd64.exe` | `setup.iss` with the payload inside it. Built from the checkout `build.ps1` runs in, named after the version in `config/pins.toml`. | Setup executable |
 
 Why it is shaped that way:
 

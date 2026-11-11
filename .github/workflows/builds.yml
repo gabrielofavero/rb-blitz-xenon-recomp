@@ -1,9 +1,9 @@
 # Builds the Rock Band Blitz installer from a tag and publishes it.
 #
 # This Windows workflow publishes the setup executable built from the tagged commit.
-# A release is cut by pushing a tag that matches
-# [installer] version in installer\config\pins.toml; for an installer that is not a
-# release, run installer\build.ps1 on the machine that has the game data.
+# A release is cut by pushing a tag that matches [installer] version in
+# installer\config\pins.toml. For a local installer build, run installer\build.ps1
+# on the machine that has the game data.
 #
 # Everything runs on a self-hosted Windows runner, and that is a fact about the
 # project rather than a preference: building the game needs `game/default.xex` and the
