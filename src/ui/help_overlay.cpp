@@ -44,6 +44,7 @@
 #include "store/store_catalogue_status.h"
 #include "store/store_search.h"
 #include "ui/help_topics.h"
+#include "ui/help_layout.h"
 #include "ui/settings_screen.h"
 
 // `store::SearchStatusText()` and the store's own P7 sentences are read every frame by the draw
@@ -55,6 +56,9 @@ REXCVAR_DEFINE_BOOL(settings_help_overlay, true, "Settings",
                     "while a settings menu is open (Help & Options and the retail pages it "
                     "opens). The same switch as Interface -> Settings Labels, applied live. "
                     "Faithful: off draws nothing at all.");
+
+REXCVAR_DEFINE_STRING(settings_help_size, "normal", "Settings",
+                      "Settings description size: normal, big, or biggest. Applied live.");
 
 namespace rb_blitz::ui::help {
 namespace {
@@ -74,26 +78,8 @@ ImFont* g_caption_font = nullptr;
 // The atlas bakes the face at this size, and it is the ceiling for the drawn size (see the file
 // comment: this backend cannot add glyphs after the atlas is built, and upscaling a bake is what
 // makes text soft).
-constexpr float kCaptionBakedSize = 40.0f;
-// The drawn size, as a fraction of the display height, and its bounds. 0.028 of 1080 is 30 px:
-// three times the 10 px the overlay used to inherit, and about the height of a retail row label at
-// that resolution.
-constexpr float kCaptionSizeFraction = 0.028f;
-constexpr float kCaptionMinSize = 16.0f;
-constexpr float kCaptionMaxSize = kCaptionBakedSize;
-// The transparent panel, tuned against the settings buttons the caption sits over. It was 0.72 -
-// an opaque slab the size of a paragraph.
+constexpr float kCaptionBakedSize = 96.0f;
 constexpr float kCaptionBackgroundAlpha = 0.32f;
-// How far the caption's bottom edge sits above the frame's bottom. The A/B prompts live in the
-// last tenth of the screen, so the caption is placed clear of them; the floor keeps it readable on
-// a short window, and the fraction keeps the gap proportional on a tall one.
-constexpr float kCaptionBottomFraction = 0.135f;
-constexpr float kCaptionBottomMin = 56.0f;
-// The wrap width as a fraction of the display width, and its floor.
-constexpr float kCaptionWrapFraction = 0.72f;
-constexpr float kCaptionWrapMin = 320.0f;
-// The panel padding, as a fraction of the drawn text height.
-constexpr float kCaptionPadFraction = 0.42f;
 
 // The system faces to try, in order of preference: the Windows UI face first, then two broadly
 // present sans faces. Tried by name under the Windows font directory, so the list names faces and
@@ -113,10 +99,6 @@ std::string SystemFontDirectory() {
 #else
   return {};
 #endif
-}
-
-float CaptionFontSize(const ImVec2 display) {
-  return std::clamp(display.y * kCaptionSizeFraction, kCaptionMinSize, kCaptionMaxSize);
 }
 
 class CaptionSink final : public settings::bridge::HelpSink {
@@ -192,35 +174,46 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
       return;
     }
 
-    const float size = CaptionFontSize(io.DisplaySize);
-    const float pad = std::max(6.0f, size * kCaptionPadFraction);
-    const float max_width = std::max(kCaptionWrapMin, io.DisplaySize.x * kCaptionWrapFraction);
-    const float bottom = std::max(kCaptionBottomMin, io.DisplaySize.y * kCaptionBottomFraction);
-
-    // The face is pushed for the window's own frame, so every metric below (padding, rounding,
-    // wrap) is expressed against the size actually drawn.
+    // Status messages keep their original size; the preference controls settings
+    // descriptions. Every source uses the same bounded strip above the footer.
+    const bool status = capturing || recovering || searching || store_speaking;
+    const auto layout = LayoutCaption(io.DisplaySize.x, io.DisplaySize.y,
+                                     status ? "normal" : REXCVAR_GET(settings_help_size));
+    const float size = layout.font_size;
     ImGui::PushFont(g_caption_font, size);
-    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - bottom),
+    ImFont* font = ImGui::GetFont();
+    const auto measure = [&](const std::string& value) {
+      return font->CalcTextSizeA(size, 1e9f, layout.TextWidth(), value.c_str());
+    };
+    text = FitCaption(std::move(text), [&](const std::string& value) {
+      const auto bounds = measure(value);
+      return bounds.x <= layout.TextWidth() && bounds.y <= layout.TextHeight();
+    });
+    const float panel_height = std::min(layout.bottom - layout.top,
+                                        measure(text).y + 2 * layout.pad_y);
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, layout.bottom),
                             ImGuiCond_Always, ImVec2(0.5f, 1.0f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(max_width + pad * 2.0f, 1e5f));
+    ImGui::SetNextWindowSize(ImVec2(layout.width, panel_height), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(kCaptionBackgroundAlpha);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoNav |
                                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                    ImGuiWindowFlags_NoInputs |
                                    ImGuiWindowFlags_NoFocusOnAppearing |
-                                   ImGuiWindowFlags_AlwaysAutoResize;
+                                   ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse;
+    // The default ImGui minimum window height exceeds the strip in tiny windows.
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1.0f, 1.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, std::max(2.0f, size * 0.22f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad * 0.55f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(layout.pad_x, layout.pad_y));
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
     if (ImGui::Begin("##rb_blitz_help", nullptr, flags)) {
-      ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + max_width);
+      ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + layout.TextWidth());
       ImGui::TextUnformatted(text.c_str());
       ImGui::PopTextWrapPos();
     }
     ImGui::End();
     ImGui::PopStyleColor();
-    ImGui::PopStyleVar(3);
+    ImGui::PopStyleVar(4);
     ImGui::PopFont();
   }
 };

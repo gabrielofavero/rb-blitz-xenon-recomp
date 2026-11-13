@@ -95,6 +95,7 @@ enum class SettingId : uint16_t {
   kShowRecommendations = 88,
   kButtonScheme = 89,  // selected controller art; stable scheme id
   kShowCurrency = 90,  // coin and Blitz Cred displays in menus and results
+  kSettingsLabelSize = 91,  // caption size; stable tokens normal / big / biggest
 };
 
 enum class ValueKind : uint8_t { kNone = 0, kBool, kInt, kEnum, kString, kList, kResolution };

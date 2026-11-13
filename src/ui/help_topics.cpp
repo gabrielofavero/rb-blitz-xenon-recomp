@@ -31,7 +31,7 @@ namespace {
 std::vector<std::string_view> RetailRows(const std::string_view screen) {
   if (screen == "av_options_screen" || screen == "av_options_pause_screen") {
     return {"av_active_track_volume", "av_sound_volume", "av_bass_boost",
-            "settings_dlc_menu_songs", "settings_music_navigation"};
+            "settings_menu_music"};
   }
   if (screen == "tutorials_screen" || screen == "tutorials_pause_screen") {
     return {"tutorialsong", "tutorialsong3"};

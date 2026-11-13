@@ -302,9 +302,8 @@ std::string PausePanel(std::string_view panel);
 std::string InSongDestination(std::string_view screen);
 
 // The rows the pause panel's own in-song Help & Options page is filled with, in the merged root's
-// order: `pause_tutorial` (How to Play), `calibration`, `settings_general`, `pause_controls`
-// (Controls), `audio_video_options`, and `settings_gameplay` only when the provider is active. The
-// two retail spellings are reused so retail's own cases dispatch the same pages, and
+// order: Controls, Audio & Video, Gameplay, Interface, Library & Store, System & Help.
+// Calibration lives under Controls and How to Play under System & Help.
 // `provider_active` false drops `settings_gameplay` because a base install must never be offered a
 // dead row (plan §3).
 std::vector<std::string> PauseRootRows(bool provider_active);
@@ -476,7 +475,10 @@ std::vector<std::string> RequestPaths();
 
 // The longest text the table may carry. The overlay wraps at its own width; the bound is the
 // "short, 1-2 lines" contract from the request, enforced by tests/settings_screen_tests.cpp.
-inline constexpr size_t kMaxHelpTextChars = 128;
+// Keep authored descriptions <=96 ASCII characters, including apply-boundary suffixes.
+// Aim for one short sentence (two at most). Big/Biggest must fit between the
+// six-row option list and the footer; the renderer ellipsizes overflow, never overlaps.
+inline constexpr size_t kMaxHelpTextChars = 96;
 
 // The description registered for a row's canonical symbol, or empty when there is none (the
 // overlay treats empty as "nothing to show", which is also what an unknown symbol gets).

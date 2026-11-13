@@ -24,3 +24,12 @@
   overlays keeps them, so the overlay a new item expects there (e.g. a new
   Help & Options setting and its label/caption) needs no new ask. Never use an
   overlay to dodge an inconvenient guest route.
+
+- Settings descriptions: keep authored captions to at most 96 ASCII characters,
+  including any added apply/restart suffix. Use one short sentence where possible;
+  no manual line breaks. Keep option names concise (28 characters maximum including
+  the displayed value). Settings Labels has Normal, Big, and Biggest sizes: measure
+  wrapped text with the actual font and keep the caption and background within the
+  reserved strip below the six-option list and above the footer icons. Shorten long
+  captions instead of covering options or Start/Back hints. Preserve the six-entry
+  maximum on every settings page. See `src/ui/help_layout.h`.

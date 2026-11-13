@@ -607,11 +607,11 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_layout_nintendo_panel", "NINTENDO SWITCH"},
       {"settings_layout_others_panel", "OTHERS"},
       {"settings_input_types_panel", "INPUT TYPES"},
-      {"settings_interface_mapping_panel", "INTERFACE MAPPING"},
+      {"settings_interface_mapping_panel", "MENU BINDINGS"},
       {"settings_interface_music_play_panel", "BACKGROUND MUSIC PLAY"},
       {"settings_interface_navigation_panel", "NAVIGATION"},
       {"settings_interface_music_library_panel", "MUSIC LIBRARY OPTIONS"},
-      {"settings_gameplay_mapping_panel", "GAMEPLAY MAPPING"},
+      {"settings_gameplay_mapping_panel", "GAMEPLAY BINDINGS"},
       {"settings_gameplay_controller_panel", "CONTROLLER"},
       {"settings_gameplay_keyboard_mouse_panel", "MOUSE & KEYBOARD"},
       {"settings_controller_actions_panel", "CUSTOM MAPPING"},
@@ -623,29 +623,32 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_keyboard_mouse_move_lane_panel", "MOVE LANE"},
       {"settings_keyboard_mouse_pause_powerup_panel", "PAUSE & POWER-UP"},
       {"settings_listen_panel", "ASSIGN INPUT"},
-      {"settings_general_panel", "GENERAL"},
-      {"settings_launch_panel", "LAUNCH"},
+      {"settings_general_panel", "SYSTEM & HELP"},
+      {"settings_launch_panel", "STARTUP"},
       {"settings_target_panel", "GAME VERSION"},
-      {"settings_dlc_panel", "SONG LIBRARY"},
+      {"settings_dlc_panel", "LIBRARY & STORE"},
       {"settings_rhythmverse_panel", "RHYTHMVERSE"},
-      {"settings_music_library_store_panel", "MUSIC LIBRARY & STORE"},
+      {"settings_music_library_store_panel", "LIBRARY DISPLAY"},
       {"settings_rhythmverse_filter_panel", "RHYTHMVERSE FILTERS"},
-      {"settings_achievements_panel", "ACHIEVEMENTS & UNLOCKS"},
+      {"settings_achievements_panel", "UNLOCKS"},
       {"settings_interface_panel", "INTERFACE"},
-      {"settings_prompts_labels_panel", "PROMPTS & LABELS"},
+      {"settings_labels_panel", "SETTINGS LABELS"},
       {"settings_main_menu_panel", "MAIN MENU"},
-      {"settings_main_menu_base_panel", "BASE GAME ITEMS"},
-      {"settings_main_menu_extra_panel", "EXTRA ITEMS"},
+      {"settings_main_menu_base_panel", "OTHER SHORTCUTS"},
+      {"settings_main_menu_extra_panel", "MUSIC SHORTCUTS"},
       {"settings_hud_panel", "HUD"},
       {"settings_hud_elements_panel", "HUD ELEMENTS"},
-      {"settings_av_panel", "AUDIO/VIDEO"},
-      {"settings_video_panel", "VIDEO"},
+      {"settings_av_panel", "AUDIO & VIDEO"},
+      {"settings_system_advanced_panel", "ADVANCED"},
+      {"settings_library_advanced_panel", "ADVANCED"},
+      {"settings_graphics_advanced_panel", "ADVANCED"},
+      {"settings_menu_music_panel", "MENU MUSIC"},
       {"settings_display_panel", "DISPLAY"},
       {"settings_graphics_panel", "GRAPHICS"},
       {"settings_aa_panel", "ANTI-ALIASING"},
       {"settings_gameplay_panel", "GAMEPLAY"},
       {"settings_tracks_panel", "TRACKS & GEMS"},
-      {"settings_plots_panel", "PLOTS & SKYBOXES"},
+      {"settings_plots_panel", "SCENERY"},
   };
   if (panel == nullptr || !panel->title.empty()) {
     return;
@@ -741,23 +744,18 @@ std::vector<PanelSpec> AllPanels() {
   // main menu uses for its entries. The Main Menu mirror panel is the deliberate exception: it lists
   // the menu's own rows, so it mirrors the menu's own spelling ("PLAY", "EXIT GAME").
 
-  // 0. The merged root: six rows (five on a base install), in the owner's order. Calibration and
-  // How to Play are retail's own pages; Controls, General, Audio/Video and Gameplay are ours.
-  out.push_back(PanelSpec{kRootPanel, kRootScreen, "splash_screen", MenuPanels(),
-                          {
-                              SubmenuRow("controls", "settings_controls_screen", "",
+  // The merged root: six categories, or five without Ultimate gameplay options.
+  out.push_back(PanelSpec{kRootPanel, kRootScreen, "splash_screen", MenuPanels(), {
+      SubmenuRow("controls", "settings_controls_screen", "",
                                          "Choose the devices and the controller mappings that play the game."),
-                              RouteRow("calibration", "cal_welcome_screen", "cancel_screen", "",
-                                       "Line up the audio and video so notes hit in time with the music."),
-                              SubmenuRow("settings_general", "settings_general_screen", "General",
-                                         "Launch, interface, song library, achievements, recovery, and credits."),
-                              SubmenuRow("audio_video_options", "settings_av_screen", "",
+      SubmenuRow("audio_video_options", "settings_av_screen", "Audio & Video",
                                          "Audio, video, and graphics settings."),
-                              SubmenuRow("settings_gameplay", "settings_gameplay_screen", "Gameplay",
+      SubmenuRow("settings_gameplay", "settings_gameplay_screen", "Gameplay",
                                          "Camera, HUD, tracks, and scenery options from the Ultimate mod.", true),
-                              RouteRow("tutorial", "tutorials_screen", "back_screen", "",
-                                       "Watch the game's how-to-play tutorials."),
-                          }});
+      SubmenuRow("settings_interface", "settings_interface_screen", "Interface", "Menus, library display, notifications, and setting descriptions."),
+      SubmenuRow("settings_dlc", "settings_dlc_screen", "Library & Store", "RhythmVerse access, instrument filters, and scanning options."),
+      SubmenuRow("settings_general", "settings_general_screen", "System & Help", "Startup, unlocks, advanced options, help, and defaults.")
+  }});
 
   // ----------------------------------------------------------------------------------------------
   // P7's Controls tree (plan §14.1), rebalanced by P2/P3/P4 of the interface/gameplay restructure
@@ -769,21 +767,21 @@ std::vector<PanelSpec> AllPanels() {
   // Mapping draws two, its Controller page two, each table's groups page four and each group two
   // (P4), and every binding page owns two.
   // ----------------------------------------------------------------------------------------------
-  out.push_back(PanelSpec{"settings_controls_panel", "settings_controls_screen", kRootScreen,
-                          MenuPanels(),
-                          {
-                              SubmenuRow("settings_controls_layout", "settings_controller_layout_screen",
+  out.push_back(PanelSpec{"settings_controls_panel", "settings_controls_screen", kRootScreen, MenuPanels(), {
+      SubmenuRow("settings_controls_layout", "settings_controller_layout_screen",
                                          "Layout", "Choose a controller layout by platform."),
-                              RouteRow("settings_controller_presets", "controller_config_screen",
+      RouteRow("settings_controller_presets", "controller_config_screen",
                                        "back_screen", "Controller Presets",
                                        "Choose a preset. It applies when no custom controller bindings exist."),
-                              SubmenuRow("settings_controls_interface",
-                                         "settings_interface_mapping_screen", "Interface Mapping",
-                                         "The inputs that drive the interface only. Gameplay in a song uses Gameplay Mapping; a pause returns to these."),
-                              SubmenuRow("settings_controls_gameplay",
-                                         "settings_gameplay_mapping_screen", "Gameplay Mapping",
+      SubmenuRow("settings_controls_interface",
+                                         "settings_interface_mapping_screen", "Menu Bindings",
+                                         "Bind menu navigation and actions. Songs use Gameplay Bindings; pause menus use Menu Bindings."),
+      SubmenuRow("settings_controls_gameplay",
+                                         "settings_gameplay_mapping_screen", "Gameplay Bindings",
                                          "The inputs that play notes, change lanes, use power-ups, and pause."),
-                          }});
+      RouteRow("calibration", "cal_welcome_screen", "cancel_screen", "",
+                                       "Line up the audio and video so notes hit in time with the music.")
+  }});
 
   // The boot catalog contains the built-in Xbox 360 layout and every valid package.
   // Group only known platform prefixes; arbitrary user packages stay discoverable
@@ -1040,39 +1038,27 @@ std::vector<PanelSpec> AllPanels() {
                                       "after a short countdown."),
                           }});
 
-  // General: launch and recovery settings are grouped together.
-  out.push_back(PanelSpec{"settings_general_panel", "settings_general_screen", kRootScreen,
-                          MenuPanels(),
-                          {
-                              SubmenuRow("settings_launch", "settings_launch_screen", "Launch",
-                                         "Choose the game version, startup behavior, and load guard."),
-                              SubmenuRow("settings_interface", "settings_interface_screen", "Interface",
-                                         "Main-menu visibility and the settings caption."),
-                              SubmenuRow("settings_dlc", "settings_dlc_screen",
-                                         "Song Library",
-                                         "Song scanning, caching, and RhythmVerse store settings."),
-                              SubmenuRow("settings_achievements", "settings_achievements_screen",
-                                         "Achievements & Unlocks",
-                                         "Achievement notifications and content unlocks."),
-                              RouteRow("credits", "credits_screen", "back_screen", "",
+  // System & Help: startup, unlocks, recovery, tutorials, credits, and defaults.
+  out.push_back(PanelSpec{"settings_general_panel", "settings_general_screen", kRootScreen, MenuPanels(), {
+      SubmenuRow("settings_launch", "settings_launch_screen", "Startup", "Choose the game version and startup behavior."),
+      SubmenuRow("settings_achievements", "settings_achievements_screen", "Unlocks", "Content and achievement unlocks.", true),
+      SubmenuRow("settings_system_advanced", "settings_system_advanced_screen", "Advanced", "Song loading recovery options."),
+      RouteRow("tutorial", "tutorials_screen", "back_screen", "",
+                                       "Watch the game's how-to-play tutorials."),
+      RouteRow("credits", "credits_screen", "back_screen", "",
                                        "View the game's credits."),
-                              SubmenuRow("settings_restore_defaults", "settings_restore_defaults_screen",
+      SubmenuRow("settings_restore_defaults", "settings_restore_defaults_screen",
                                          "Restore default settings",
-                                         "Restore every available setting and control to its default. Restart to apply."),
-                          }});
+                                         "Restore every available setting and control to its default. Restart to apply.")
+  }});
 
-  out.push_back(PanelSpec{"settings_launch_panel", "settings_launch_screen", "settings_general_screen",
-                          MenuPanels(),
-                          {
-                              SubmenuRow("settings_target", "settings_target_screen", "Game Version",
+  out.push_back(PanelSpec{"settings_launch_panel", "settings_launch_screen", "settings_general_screen", MenuPanels(), {
+      SubmenuRow("settings_target", "settings_target_screen", "Game Version",
                                          "Choose which version starts: Rock Band Blitz, Ultimate, or the Demo."),
-                              SelectRow("settings_startup", "general.startup", "Startup",
-                                        "Normal: Show startup logos and 'Press A to Start'. Fast: Skip both and continue automatically to the main menu.",
-                                        Choices({"normal", "Normal", "fast", "Fast"})),
-                              SelectRow("settings_load_guard", "general.load_guard", "Load Guard",
-                                        "Restart to the main menu if a song takes too long to load. Unsaved progress may be lost.",
-                                        Choices({"off", "Off", "30s", "30s", "60s", "60s"})),
-                          }});
+      SelectRow("settings_startup", "general.startup", "Startup",
+                                        "Normal shows logos and 'Press A to Start'. Fast goes straight to the main menu.",
+                                        Choices({"normal", "Normal", "fast", "Fast"}))
+  }});
 
   // 1a. Target: choose one, commit, leave. `ultimate_mode`/`license_mask` are consumed before
   // Ultimate configures, so the row is restart-scoped (plan §5.5) and the restart prompt is P9's.
@@ -1092,17 +1078,11 @@ std::vector<PanelSpec> AllPanels() {
                           }});
 
   // Song Library: store access, package caching, and scan performance.
-  out.push_back(PanelSpec{"settings_dlc_panel", "settings_dlc_screen", "settings_general_screen",
-                          MenuPanels(),
-                          {
-                              SubmenuRow("settings_rhythmverse_menu", "settings_rhythmverse_screen",
+  out.push_back(PanelSpec{"settings_dlc_panel", "settings_dlc_screen", kRootScreen, MenuPanels(), {
+      SubmenuRow("settings_rhythmverse_menu", "settings_rhythmverse_screen",
                                          "RhythmVerse", "Browse store settings and the Filters page."),
-                              SelectRow("settings_dlc_threads", "general.dlc_scan_threads",
-                                        "Scan Threads",
-                                        "How many threads scan your packages. More threads scan faster.",
-                                        Choices({"1", "1", "2", "2", "4", "4", "8", "8"}),
-                                        false, "i:"),
-                          }});
+      SubmenuRow("settings_library_advanced", "settings_library_advanced_screen", "Advanced", "Song scan performance options.")
+  }});
 
   // The filter remains reachable with the master off. Both contexts use this same page. P9-11's
   // follow-up (2026-10-23) shortened the row to `Filters` and the page title to `RhythmVerse
@@ -1139,49 +1119,30 @@ std::vector<PanelSpec> AllPanels() {
                           }});
 
   // 1c. Achievements & Unlocks. Notification visibility is native; grants need Ultimate.
-  out.push_back(PanelSpec{"settings_achievements_panel", "settings_achievements_screen",
-                          "settings_general_screen", MenuPanels(),
-                          {
-                              VisibilityRow("settings_hide_achievements", "general.hide_achievements",
-                                      "Achievement Alerts",
-                                      "Hide achievement unlock notifications. Achievements are still earned and saved."),
-                              BoolRow("settings_unlock_all", "general.unlock_all", "Unlock All",
+  out.push_back(PanelSpec{"settings_achievements_panel", "settings_achievements_screen", "settings_general_screen", MenuPanels(), {
+      BoolRow("settings_unlock_all", "general.unlock_all", "Unlock All",
                                       "Unlock everything, including songs, plots, and power-ups.",
                                       true),
-                              ActionRow("settings_unlock_online",
+      ActionRow("settings_unlock_online",
                                         "general.unlock_online_achievements",
                                         "Unlock Online Achievements",
-                                        "Grant the achievements that normally need online play.", true),
-                          }});
+                                        "Grant the achievements that normally need online play.", true)
+  }});
 
   // Audio retains the native sliders and save handlers; ReorganizeAudioPage adds music controls.
-  out.push_back(PanelSpec{"settings_av_panel", "settings_av_screen", kRootScreen, MenuPanels(),
-                          {
-                              RouteRow("settings_audio", "av_options_screen", "back_screen",
+  out.push_back(PanelSpec{"settings_av_panel", "settings_av_screen", kRootScreen, MenuPanels(), {
+      RouteRow("settings_audio", "av_options_screen", "back_screen",
                                        "Audio", "Volume, bass boost, background music, and music navigation."),
-                              SubmenuRow("settings_video", "settings_video_screen", "Video",
-                                         "Display, resolution, graphics, and renderer options."),
-                          }});
-
-  // 3a. Video: three entries - the two groups and the backend. Retail's own Overscan row stays on
-  // the retail page it is drawn on (plan §3.3's fallback), so it is deliberately not duplicated
-  // here; the display name is the row's own group, which is why it appears at both levels.
-  out.push_back(PanelSpec{"settings_video_panel", "settings_video_screen", "settings_av_screen",
-                          MenuPanels(),
-                          {
-                              SubmenuRow("settings_display_menu", "settings_display_screen",
+      SubmenuRow("settings_display_menu", "settings_display_screen",
                                          "Display", "Window mode, render size, and V-Sync."),
-                              SubmenuRow("settings_graphics_menu", "settings_graphics_screen",
+      SubmenuRow("settings_graphics_menu", "settings_graphics_screen",
                                          "Graphics",
-                                         "Rendering quality: anti-aliasing, filtering, and depth of field."),
-                              SelectRow("settings_renderer", "graphics.renderer", "Renderer",
-                                        "Which graphics backend renders the game. Restart to apply.",
-                                        Choices({"d3d12", "D3D12", "vulkan", "Vulkan"})),
-                          }});
+                                         "Rendering quality: anti-aliasing, filtering, and depth of field.")
+  }});
 
   // 3a-i. Display: the window mode, the render size and V-Sync.
   out.push_back(PanelSpec{"settings_display_panel", "settings_display_screen",
-                          "settings_video_screen", MenuPanels(),
+                          "settings_av_screen", MenuPanels(),
                           {
                               SelectRow("settings_display", "graphics.display", "Window Mode",
                                         "Run the game windowed, borderless, or full screen.",
@@ -1204,7 +1165,7 @@ std::vector<PanelSpec> AllPanels() {
   // in the positive sense (`Depth of Field: On`), because that is what the provider variable
   // means when it is off.
   out.push_back(PanelSpec{"settings_graphics_panel", "settings_graphics_screen",
-                          "settings_video_screen", MenuPanels(),
+                          "settings_av_screen", MenuPanels(),
                           {
                               BoolSubmenuRow("settings_aa", "graphics.anti_aliasing",
                                              "settings_aa_screen", "Anti-Aliasing",
@@ -1219,6 +1180,7 @@ std::vector<PanelSpec> AllPanels() {
                                               "Depth of Field",
                                               "Blur distant scenery for a cinematic look. Turn off for a cleaner image.",
                                               true),
+                              SubmenuRow("settings_graphics_advanced", "settings_graphics_advanced_screen", "Advanced", "Choose the graphics backend."),
                           }});
 
   // 3b. Anti-aliasing: the compound row's choice list, "None" included (the Force-Skybox model).
@@ -1261,7 +1223,7 @@ std::vector<PanelSpec> AllPanels() {
                                          "Tracks & Gems",
                                          "Note, gem, and track appearance options.", true),
                               SubmenuRow("settings_plots", "settings_plots_screen",
-                                         "Plots & Skyboxes",
+                                         "Scenery",
                                          "Choose what scenery plays behind the track.", true),
                           }});
 
@@ -1314,38 +1276,30 @@ std::vector<PanelSpec> AllPanels() {
                           }});
 
   // Interface: shortcut and library-tab visibility, with a separate page for prompts and labels.
-  out.push_back(PanelSpec{"settings_interface_panel", "settings_interface_screen",
-                          "settings_general_screen", MenuPanels(),
-                          {
-                              SubmenuRow("settings_main_menu", "settings_main_menu_screen",
+  out.push_back(PanelSpec{"settings_interface_panel", "settings_interface_screen", kRootScreen, MenuPanels(), {
+      SubmenuRow("settings_main_menu", "settings_main_menu_screen",
                                          "Main Menu",
                                          "Choose which main-menu entries are visible."),
-                              SubmenuRow("settings_music_library_store", "settings_music_library_store_screen",
-                                         "Music Library & Store",
-                                         "Choose which headers appear in Your Songs and the store."),
-                              SubmenuRow("settings_prompts_labels", "settings_prompts_labels_screen",
-                                         "Prompts & Labels",
-                                         "Choose offline prompt and setting description behavior."),
-                          }});
-
-  out.push_back(PanelSpec{"settings_prompts_labels_panel", "settings_prompts_labels_screen",
-                          "settings_interface_screen", MenuPanels(),
-                          {
-                              // Owner request, 2026-10-23: the row says what the switch *does*
-                              // rather than naming the prompts it removes. `hide_offline_prompts`
-                              // true *is* the skip, so the ordinary `On`/`Off` spelling is the
-                              // honest one here - `Hidden`/`Visible` made the player translate a
-                              // negation before flipping the row.
-                              BoolRow("settings_offline", "interface.hide_offline_prompts",
+      SubmenuRow("settings_music_library_store", "settings_music_library_store_screen", "Library Display", "Library tabs and currency balances."),
+      VisibilityRow("settings_hide_achievements", "general.hide_achievements",
+                                      "Achievement Alerts",
+                                      "Hide achievement unlock notifications. Achievements are still earned and saved."),
+      BoolRow("settings_offline", "interface.hide_offline_prompts",
                                       "Skip Offline Prompts",
                                       "Skip the connection prompts and go straight to the menu in offline mode."),
-                              // The caption overlay's own switch (owner request, 2026-10-14). It is
-                              // the surface's second `hot` row - flipping it hides or shows the
-                              // caption on the next frame, with no restart prompt.
-                              BoolRow("settings_labels", "interface.settings_labels",
-                                      "Setting Descriptions",
-                                      "Show a description of the highlighted row at the bottom of the screen."),
-                          }});
+      SubmenuRow("settings_labels_menu", "settings_labels_screen", "Settings Labels",
+                 "Choose whether settings descriptions are shown and how large they appear.")
+  }});
+
+
+  out.push_back(PanelSpec{"settings_labels_panel", "settings_labels_screen",
+                          "settings_interface_screen", MenuPanels(), {
+      BoolRow("settings_labels", "interface.settings_labels", "Enabled",
+              "Show a description of the selected setting."),
+      SelectRow("settings_label_size", "interface.settings_label_size", "Size",
+                "Choose Normal, Big, or Biggest text. Applies immediately.",
+                Choices({"normal", "Normal", "big", "Big", "biggest", "Biggest"}))
+  }});
 
   out.push_back(PanelSpec{"settings_music_library_store_panel", "settings_music_library_store_screen",
                           "settings_interface_screen", MenuPanels(),
@@ -1395,34 +1349,54 @@ std::vector<PanelSpec> AllPanels() {
                           }});
 
   // Stable shortcut pages also list entries that are hidden or unavailable this boot.
-  out.push_back(PanelSpec{"settings_main_menu_panel", "settings_main_menu_screen",
-                          "settings_interface_screen", MenuPanels(), {
-      SubmenuRow("settings_main_menu_base", "settings_main_menu_base_screen", "Base Game Items",
-                 "Choose which original main-menu entries appear."),
-      SubmenuRow("settings_main_menu_extra", "settings_main_menu_extra_screen", "Extra Items",
-                 "Choose which additional main-menu shortcuts appear."),
+  out.push_back(PanelSpec{"settings_main_menu_panel", "settings_main_menu_screen", "settings_interface_screen", MenuPanels(), {
+      SubmenuRow("settings_main_menu_extra", "settings_main_menu_extra_screen", "Music Shortcuts", "Song and store shortcuts on the main menu."),
+      SubmenuRow("settings_main_menu_base", "settings_main_menu_base_screen", "Other Shortcuts", "Leaderboards, achievements, and full-game upgrade shortcuts.")
   }});
-  out.push_back(PanelSpec{"settings_main_menu_base_panel", "settings_main_menu_base_screen",
-                          "settings_main_menu_screen", MenuPanels(), {
+  out.push_back(PanelSpec{"settings_main_menu_base_panel", "settings_main_menu_base_screen", "settings_main_menu_screen", MenuPanels(), {
       VisibilityRow("settings_mm_leaderboard", "interface.hidden_main_menu.splash_leaderboard",
                     "Leaderboards", "Show or hide Leaderboards. Restart to apply."),
       VisibilityRow("settings_mm_achievements", "interface.hidden_main_menu.splash_achievements",
                     "Achievements", "Show or hide Achievements. Restart to apply."),
       VisibilityRow("settings_mm_upgrade", "interface.hidden_main_menu.splash_upgrade",
-                    "Unlock Full Game", "Show or hide Unlock Full Game. Only available in the Demo. Restart to apply."),
-      VisibilityRow("settings_mm_download_content", "interface.hide_download_content",
-                    "Download Content", "Show or hide Download Content. Only available in the full game. Restart to apply."),
+                    "Unlock Full Game", "Show or hide Unlock Full Game. Only available in the Demo. Restart to apply.")
   }});
-  out.push_back(PanelSpec{"settings_main_menu_extra_panel", "settings_main_menu_extra_screen",
-                          "settings_main_menu_screen", MenuPanels(), {
+  out.push_back(PanelSpec{"settings_main_menu_extra_panel", "settings_main_menu_extra_screen", "settings_main_menu_screen", MenuPanels(), {
       ElementVisibilityRow("settings_dlc_refresh", "general.refresh_music_library", "Refresh Songs",
                            "Show the shortcut that re-scans your songs. Restart to apply."),
       ElementVisibilityRow("settings_play_current", "general.play_current_song", "Play Current Song",
-                           "Show the shortcut for the background song. Needs Background Music: Library and a playable song. Restart to apply."),
+                           "Show a shortcut for the playing library song. Needs Background Music: Library. Restart to apply."),
+      VisibilityRow("settings_mm_download_content", "interface.hide_download_content",
+                    "Download Content", "Show or hide Download Content. Only available in the full game. Restart to apply."),
+      VisibilityRow("settings_mm_rhythmverse", "interface.hidden_main_menu.rbbz_rhythmverse",
+                    "RhythmVerse", "Show the RhythmVerse shortcut. Store Access is controlled in Library & Store. Restart to apply.")
+  }});
+
+  out.push_back(PanelSpec{"settings_system_advanced_panel", "settings_system_advanced_screen", "settings_general_screen", MenuPanels(), {
+      SelectRow("settings_load_guard", "general.load_guard", "Song Load Timeout",
+                                        "Restart to the main menu if a song takes too long to load. Unsaved progress may be lost.",
+                                        Choices({"off", "Off", "30s", "30s", "60s", "60s"}))
+  }});
+
+  out.push_back(PanelSpec{"settings_library_advanced_panel", "settings_library_advanced_screen", "settings_dlc_screen", MenuPanels(), {
+      SelectRow("settings_dlc_threads", "general.dlc_scan_threads",
+                                        "Scan Threads",
+                                        "How many threads scan your packages. More threads scan faster.",
+                                        Choices({"1", "1", "2", "2", "4", "4", "8", "8"}),
+                                        false, "i:")
+  }});
+
+  out.push_back(PanelSpec{"settings_graphics_advanced_panel", "settings_graphics_advanced_screen", "settings_graphics_screen", MenuPanels(), {
+      SelectRow("settings_renderer", "graphics.renderer", "Renderer",
+                                        "Which graphics backend renders the game. Restart to apply.",
+                                        Choices({"d3d12", "D3D12", "vulkan", "Vulkan"}))
+  }});
+
+  out.push_back(PanelSpec{"settings_menu_music_panel", "settings_menu_music_screen", "av_options_screen", MenuPanels(), {
+      BoolRow("settings_dlc_menu_songs", "general.dlc_menu_songs", "Background Music", "Choose the original soundtrack or music from your library."),
       ElementVisibilityRow("settings_music_player", "interface.music_player", "Music Player",
                            "Show the bottom-right music player. Requires Background Music: Library. Restart to apply."),
-      VisibilityRow("settings_mm_rhythmverse", "interface.hidden_main_menu.rbbz_rhythmverse",
-                    "RhythmVerse", "Show the RhythmVerse shortcut. Store Access is controlled in Song Library. Restart to apply."),
+      BoolRow("settings_music_navigation", "interface.background_music_navigation", "Menu Music Navigation", "Navigate library menu music with controller buttons or keyboard/media keys. Restart to apply.")
   }});
 
   // The confirmation scene is copied from the installation under our own name, as with the menu.
@@ -1486,6 +1460,12 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(std::move(linked));
 
   for (auto& panel : out) {
+    for (auto& row : panel.rows) {
+      if (row.symbol == "settings_dlc_menu_songs") {
+        row.on_label = "Background Music: Library";
+        row.off_label = "Background Music: Default";
+      }
+    }
     std::erase_if(panel.rows, [](Row& row) {
       if (g_configuration.hidden.contains(row.setting)) return true;
       if (const auto available = g_configuration.availability.find(row.setting);
@@ -1539,6 +1519,16 @@ std::vector<PanelSpec> AllPanels() {
       return false;
     });
   }
+  // Hide the Graphics Advanced entry when the platform offers no renderer choice.
+  const bool has_renderer = std::any_of(out.begin(), out.end(), [](const auto& panel) {
+    return panel.name == "settings_graphics_advanced_panel" && !panel.rows.empty();
+  });
+  if (!has_renderer) {
+    for (auto& panel : out) {
+      if (panel.name == "settings_graphics_panel")
+        std::erase_if(panel.rows, [](const auto& row) { return row.symbol == "settings_graphics_advanced"; });
+    }
+  }
   // Background Music Play is always discoverable. The navigation switch gates
   // runtime commands (P2), not the row/page or its in-song twin.
   for (PanelSpec& panel : out) {
@@ -1547,6 +1537,37 @@ std::vector<PanelSpec> AllPanels() {
       panel.title_key = "settings_title_" + SymbolToken(panel.name);
     }
   }
+  // Installed layout catalogs can grow beyond one page. Reserve the sixth row for
+  // navigation so even user-provided catalogs respect the six-entry limit.
+  std::vector<PanelSpec> continuations;
+  for (auto& panel : out) {
+    if (panel.rows.size() <= 6) continue;
+    auto remaining = std::move(panel.rows);
+    const std::string stem = panel.name.substr(0, panel.name.size() - 6);
+    std::string previous = panel.screen;
+    for (size_t offset = 0, page = 0; offset < remaining.size(); ++page) {
+      const bool more = remaining.size() - offset > 6;
+      const size_t count = more ? 5 : remaining.size() - offset;
+      PanelSpec part = panel;
+      if (page) {
+        part.name = stem + "_page_" + std::to_string(page + 1) + "_panel";
+        part.screen = stem + "_page_" + std::to_string(page + 1) + "_screen";
+        part.back = previous;
+      }
+      part.rows.assign(remaining.begin() + offset, remaining.begin() + offset + count);
+      offset += count;
+      if (more) {
+        const std::string next = stem + "_page_" + std::to_string(page + 2);
+        part.rows.push_back(SubmenuRow((next + "_next").c_str(), (next + "_screen").c_str(),
+                                      "More...", "Show more options in this category."));
+      }
+      previous = part.screen;
+      if (page == 0) panel.rows = std::move(part.rows);
+      else continuations.push_back(std::move(part));
+    }
+  }
+  out.insert(out.end(), std::make_move_iterator(continuations.begin()),
+             std::make_move_iterator(continuations.end()));
   return out;
 }
 
@@ -1586,6 +1607,8 @@ std::vector<PanelSpec> InSongPanels() {
     // record declares (measured by `TestEveryDestinationExists` when the rule did suffix it).
     if (panel.back == "splash_screen") {
       panel.back = "game_screen";
+    } else if (panel.back == "av_options_screen") {
+      panel.back = "av_options_pause_screen";
     } else if (panel.back.rfind("settings_", 0) == 0) {
       panel.back = PauseScreen(panel.back);
     }
@@ -2597,10 +2620,12 @@ std::string HelpTextFor(const std::string_view symbol) {
     }
     return {};
   }
+  if (symbol == "settings_menu_music")
+    return "Choose background music, player visibility, and music navigation.";
   if (symbol == "settings_dlc_menu_songs")
-    return "Default restores the original music implementation. DLC enables library music and linked features. Restart to apply.";
+    return "Default uses original music. Library adds your songs and music features. Restart to apply.";
   if (symbol == "settings_music_navigation")
-    return "Navigate library menu music with controller buttons or keyboard/media keys. Music Player visibility is separate. Restart to apply.";
+    return "Navigate library music with controller buttons or keyboard/media keys. Restart to apply.";
   if (symbol.empty()) {
     return {};
   }
@@ -2898,12 +2923,11 @@ std::vector<std::string> PauseRootRows(const bool provider_active) {
   // what keeps those rows working without new bodies. `settings_gameplay` is dropped on a boot
   // whose provider gate answers false - the same rule the root panel applies to itself, applied
   // here to the list retail's pause panel fills.
-  std::vector<std::string> rows{"pause_controls", "calibration", "settings_general",
-                                "audio_video_options"};
+  std::vector<std::string> rows{"pause_controls", "audio_video_options"};
   if (provider_active) {
     rows.push_back("settings_gameplay");
   }
-  rows.push_back("pause_tutorial");
+  rows.insert(rows.end(), {"settings_interface", "settings_dlc", "settings_general"});
   return rows;
 }
 
@@ -3731,10 +3755,7 @@ bool ReplaceLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view ke
 // retail row symbol whose text the installed locale already carries, so nothing is added for it.
 std::vector<std::pair<std::string, std::string>> Labels() {
   std::vector<std::pair<std::string, std::string>> out;
-  out.emplace_back("settings_dlc_menu_songs", "Background Music: %s");
-  out.emplace_back("settings_background_original", "Default");
-  out.emplace_back("settings_background_dlc", "Library");
-  out.emplace_back("settings_music_navigation", "Menu Music Navigation: %s");
+  out.emplace_back("settings_menu_music", "Menu Music");
   out.emplace_back("settings_linked_message", "This change also changes linked settings. Continue?");
   out.emplace_back("settings_controller_capture_warning_message",
                    "Custom controller binds turn off presets. Set each controller action yourself. Continue?");
@@ -3905,36 +3926,14 @@ bool ReorganizeAudioPage(std::vector<Node>* nodes, std::string* reason) {
     return false;
   }
   rows.kids.erase(rows.kids.begin());
-  const auto query = [](const char* token) {
-    return Cmd({Sym("file_exists"), Str(Path("snapshot", token, "b:1"))});
-  };
-  for (const auto& [symbol, token, on, off] : {
-      std::array<const char*, 4>{"settings_dlc_menu_songs", "general.dlc_menu_songs",
-                                 "settings_background_dlc", "settings_background_original"},
-      std::array<const char*, 4>{"settings_music_navigation", "interface.background_music_navigation",
-                                 "enabled_token", "disabled_token"}}) {
-    rows.kids.push_back(Arr({Sym(symbol), Cmd({Sym("if_else"), query(token), Sym(on), Sym(off)})}));
-  }
-  // Mutate the selection switch only after finishing the row list, so vector growth cannot
-  // invalidate a node used above. Native sliders, focus changes and save handlers stay intact.
+  rows.kids.push_back(Sym("settings_menu_music"));
   Node& cases = selection.parent->kids[selection.index];
   std::erase_if(cases.kids, [](const Node& node) {
     return node.tag == dtb::kArray && !node.kids.empty() && IsSymbol(node.kids[0], "av_overscan");
   });
-  int selected_index = 3;
-  for (const auto& [symbol, token] : {
-      std::pair{"settings_dlc_menu_songs", "general.dlc_menu_songs"},
-      std::pair{"settings_music_navigation", "interface.background_music_navigation"}}) {
-    const Node success = Cmd({Sym("do"), Cmd({Var("this"), Sym("enter_audio_video")}),
-                              Cmd({Sym("checkbox.lst"), Sym("set_selected"), Node::Int(selected_index++)})});
-    const auto change = [&](bool pause) {
-      return Cmd({Sym("if_else"), query(token), ChangeSetting(token, "b:0", pause, success),
-                                               ChangeSetting(token, "b:1", pause, success)});
-    };
-    cases.kids.push_back(Arr({Sym(symbol), Cmd({Sym("if_else"),
-        Cmd({Sym("=="), Cmd({Sym("ui"), Sym("current_screen")}), Sym("av_options_pause_screen")}),
-        change(true), change(false)})}));
-  }
+  cases.kids.push_back(Arr({Sym("settings_menu_music"), Cmd({Sym("if_else"),
+      Cmd({Sym("=="), Cmd({Sym("ui"), Sym("current_screen")}), Sym("av_options_pause_screen")}),
+      EnterScreen("settings_menu_music_pause_screen"), EnterScreen("settings_menu_music_screen")})}));
   *nodes = std::move(staged);
   if (reason) reason->clear();
   return true;

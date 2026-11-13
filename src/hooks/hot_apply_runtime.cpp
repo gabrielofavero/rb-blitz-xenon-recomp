@@ -40,6 +40,7 @@ constexpr HotRow kHotRows[] = {
     // itself (src/ui/help_overlay.cpp) and read on every draw, so the write takes effect on the
     // next frame; the row is `kHot` in the schema for that measured reason.
     {SettingId::kSettingsLabels, "interface.settings_labels", "settings_help_overlay"},
+    {SettingId::kSettingsLabelSize, "interface.settings_label_size", "settings_help_size"},
 };
 
 // The RhythmVerse store's filter rows (plan P6). They write no cvar: their consumer is the store's
@@ -77,6 +78,12 @@ constexpr char kCvarError[] = "the applier has no cvar for this row";
 // The value as the cvar's own text form. `vsync` is a bool cvar; a value of the wrong kind is
 // refused rather than spelled, because a guessed spelling is how a write silently does nothing.
 bool CvarText(SettingId id, const Value& value, std::string* out) {
+  if (id == SettingId::kSettingsLabelSize) {
+    if (value.kind != ValueKind::kEnum ||
+        (value.text != "normal" && value.text != "big" && value.text != "biggest")) return false;
+    *out = value.text;
+    return true;
+  }
   if (id == SettingId::kLoadGuard) {
     uint32_t seconds = 0;
     if (value.kind != ValueKind::kEnum || !loading::ParseLoadGuardSeconds(value.text, &seconds)) return false;

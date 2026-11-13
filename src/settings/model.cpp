@@ -76,6 +76,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "music_player";
     case SettingId::kSettingsLabels:
       return "settings_labels";
+    case SettingId::kSettingsLabelSize:
+      return "settings_label_size";
     case SettingId::kHideDownloadContent:
       return "hide_download_content";
     case SettingId::kShowMessages:

@@ -26,7 +26,7 @@ These enhancements aim to make the game feel native on PC and improve the offlin
 | Custom bindings                                                | Toggle   | Done        | Map menu and gameplay controls independently.                                           |
 | In-game Custom Settings                                        | Built-in | Done        | Configure options in the game, without a launcher.                                      |
 | Simple DLC Directory                                           | Built-in | Done        | Place CON and LIVE DLC in one directory.                                                |
-| Settings Labels Overlay                                        | Toggle   | Done        | Show optional descriptions for selected settings.                                       |
+| Settings Labels Overlay                                        | Toggle   | Done        | Show optional settings descriptions in Normal, Big, or Biggest text.                                       |
 | Refresh Songs quick button                                     | Toggle   | Done        | Refresh your library without returning to the main menu.                                |
 | Compile shaders on Main Menu                                   | Built-in | Done        | Precompile shaders to reduce first-play stutter.                                        |
 | Load Guard                                                     | Toggle   | Done        | Restart after a bad DLC load or a configurable loading timeout.                         |

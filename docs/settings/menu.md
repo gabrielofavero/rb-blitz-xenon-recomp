@@ -9,30 +9,56 @@ preserved; repeated baseline/build/test prose and duplicated evidence lists were
 records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.md](contracts.md) and
 [status.md](status.md).
 
-## Current organization (2026-11-07)
+## Current organization (2026-11-13)
 
-The root shows Controls, Calibration, General, Audio/Video, Gameplay, and How to Play.
-Gameplay appears only with Ultimate. Every category has at most six visible entries, in both menu
-and in-song contexts.
+The root shows Controls, Audio & Video, Gameplay, Interface, Library & Store, and
+System & Help. Gameplay appears only with Ultimate. Every page has at most six
+entries in both menu and in-song contexts. Larger installed controller-layout
+catalogs use More... pages; all layouts remain available.
 
 | Page | Entries |
 | --- | --- |
-| General | Launch; Interface; Song Library; Achievements & Unlocks; Credits; Restore default settings |
-| Launch | Game Version (Rock Band Blitz / Ultimate / Demo); Startup (Normal / Fast); Load Guard (Off / 30s / 60s) |
-| Controls | Layout; Controller Presets; Interface Mapping; Gameplay Mapping. Layout opens Xbox, PlayStation, Nintendo Switch and Others; choosing a named layout applies it. Keyboard and mouse are always enabled. |
-| Gameplay Mapping | Notes; Move Lane; Pause & Power-up; Reset All. Each action row keeps its name beside the keyboard and mouse bindings, with Add Key, Replace, and Reset on its page. Mapping pages hide the bottom settings caption. A first controller button asks for confirmation, then custom controller bindings replace the preset for all actions. |
-| Interface | Main Menu; Music Library & Store; Prompts & Labels |
-| Prompts & Labels | Skip Offline Prompts; Setting Descriptions |
-| Main Menu | Base Game Items; Extra Items |
-| Base Game Items | Leaderboards; Achievements; Unlock Full Game; Download Content |
-| Extra Items | Refresh Songs; Play Current Song; Music Player; RhythmVerse |
-| Music Library & Store | Messages; Recommendations |
-| Song Library | RhythmVerse; Scan Threads |
-| RhythmVerse | Store Access; Filters (Guitar, Bass, Drums, Vocals, Keys) |
-| Achievements & Unlocks | Achievement Alerts; Unlock All; Unlock Online Achievements |
-| Audio | Active Track Volume; Sound Volume; Bass Boost; Background Music; Menu Music Navigation |
-| Video | Display; Graphics; Renderer on Windows when more than one backend is available. The Linux/macOS release policy hides Renderer and uses Vulkan. |
+| Controls | Layout; Controller Presets; Menu Bindings; Gameplay Bindings; Calibration |
+| Audio & Video | Audio; Display; Graphics |
+| Audio | Active Track Volume; Sound Volume; Bass Boost; Menu Music |
+| Menu Music | Background Music (Default / Library); Music Player; Menu Music Navigation |
 | Display | Window Mode; Resolution; V-Sync; Overscan |
+| Graphics | Anti-Aliasing; Anisotropic Filtering; Depth of Field (Ultimate); Advanced |
+| Graphics / Advanced | Renderer on Windows when more than one backend is available. Linux/macOS hide Renderer and use Vulkan. |
+| Gameplay | Camera Angle; Game Speed; HUD; Tracks & Gems; Scenery (Ultimate only) |
+| Interface | Main Menu; Library Display; Achievement Alerts; Skip Offline Prompts; Settings Labels |
+| Settings Labels | Enabled (On / Off); Size (Normal / Big / Biggest) |
+| Main Menu | Music Shortcuts; Other Shortcuts |
+| Music Shortcuts | Refresh Songs; Play Current Song; Download Content; RhythmVerse |
+| Other Shortcuts | Leaderboards; Achievements; Unlock Full Game |
+| Library Display | Messages; Recommendations; Coins & Blitz Cred |
+| Library & Store | RhythmVerse; Advanced |
+| RhythmVerse | Store Access; Filters (Guitar, Bass, Drums, Vocals, Keys) |
+| Library & Store / Advanced | Scan Threads |
+| System & Help | Startup; Unlocks; Advanced; How to Play; Credits; Restore default settings |
+| Startup | Game Version (Rock Band Blitz / Ultimate / Demo); Startup (Normal / Fast) |
+| Unlocks | Unlock All; Unlock Online Achievements |
+| System & Help / Advanced | Song Load Timeout (Off / 30s / 60s) |
+
+Menu Bindings and Gameplay Bindings retain their existing action groups and binding
+flows. Keyboard and mouse are always enabled. Calibration keeps the native route,
+including the in-song confirmation to leave the song. Audio keeps native volume
+sliders and bass-boost save handlers; its Menu Music entry opens an authored guest
+page in both contexts. Music source and navigation continue using the existing
+linked-setting confirmations.
+
+The Settings Labels size is saved as `interface.settings_label_size` (stable ID 91),
+defaults to Normal, and applies immediately. The existing visibility key stays
+`interface.settings_labels`. The caption uses a bounded strip from 76.5% to 86.5%
+of the window height, below the six-row list and above the footer. Font-measured
+wrapping and word-boundary ellipsis prevent overflow; descriptions must stay within
+96 ASCII characters including apply-boundary suffixes (see `AGENTS.md` and
+`src/ui/help_layout.h`). Live visual acceptance at each size remains pending.
+
+The preceding menu reorganization preserved stored setting IDs, keys, defaults, and
+apply boundaries are unchanged. Main-menu shortcuts are grouped by purpose;
+Music Player visibility is configured alongside the other menu-music preferences.
+The removed Video and Prompts & Labels intermediary pages are no longer generated.
 
 On 2026-11-07 [measured], Restore default settings opened a legible confirmation page in a
 disposable Ultimate profile. Cancel left the settings files unchanged. Confirm saved native and

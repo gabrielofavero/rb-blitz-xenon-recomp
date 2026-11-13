@@ -301,8 +301,15 @@ std::vector<SchemaRow> BuildTable() {
   // it `kHot` and the runtime applier writes that cvar.
   rows.push_back(Row(Make(SettingId::kSettingsLabels, Category::kInterface, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"interface", "settings_labels"}, "", "Setting Descriptions",
+                     {"interface", "settings_labels"}, "settings_labels", "Enabled",
                      "Show a description of the highlighted row at the bottom of the screen."));
+  {
+    Descriptor d = Make(SettingId::kSettingsLabelSize, Category::kInterface, Provider::kNative,
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("normal"));
+    d.choices = Choices({{"normal", "Normal"}, {"big", "Big"}, {"biggest", "Biggest"}});
+    rows.push_back(Row(std::move(d), {"interface", "settings_label_size"}, "settings_labels",
+                       "Size", "Choose the settings description size. Applies immediately."));
+  }
   rows.push_back(Row(Make(SettingId::kButtonScheme, Category::kController, Provider::kNative,
                           WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("retail"),
                           "controller_schemes"),
@@ -541,6 +548,8 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kSettingsLabels, ApplicationStrategy::kHot,
      "the overlay re-reads `settings_help_overlay` every draw, so flipping the row in Help & Options "
      "hid the caption on the next frame (docs/settings/status.md, Settings Labels)"},
+    {SettingId::kSettingsLabelSize, ApplicationStrategy::kHot,
+     "the caption renderer reads settings_help_size on every draw; no guest rebuild is needed"},
     {SettingId::kButtonScheme, ApplicationStrategy::kHot,
      "P3 owner screenshots show One Glyph changing A, Test Markers changing A/B, and Xbox 360 "
      "restoring retail art in the Controls footer. The live log records GPU texture invalidation "
