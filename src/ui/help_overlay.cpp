@@ -41,14 +41,12 @@
 #include "input/input_capture.h"
 #include "input/remap.h"
 #include "settings/input_bindings.h"
-#include "store/store_catalogue_status.h"
 #include "store/store_search.h"
 #include "ui/help_topics.h"
 #include "ui/help_layout.h"
 #include "ui/settings_screen.h"
 
-// `store::SearchStatusText()` and the store's own P7 sentences are read every frame by the draw
-// below; the namespace alias keeps the calls readable beside the other status sources.
+// Only live text-entry feedback belongs in the caption strip. Outcomes use notifications.
 namespace store_ns = rb_blitz::store;
 
 REXCVAR_DEFINE_BOOL(settings_help_overlay, true, "Settings",
@@ -126,57 +124,30 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
       std::lock_guard lock(g_text_mutex);
       text = g_text;
     }
-    // P7: the listening dialog's live state is not a row caption - it changes while the player
-    // holds the page, and a wrong-kind press must say so without waiting for a selection move. It
-    // is drawn even when Settings Labels is off, because a capture that cannot be cancelled is a
-    // navigation problem rather than optional help.
+    // Listening instructions and countdown stay with the input surface, including with
+    // Settings Labels off. Wrong-kind presses and save failures use notifications.
     const std::string capture_status = input::capture::StatusText();
     const bool capturing = !capture_status.empty();
-    // P8: the same rule for recovery. A profile with both host gates off and no pad leaves no
-    // route at all, so the "hold F10" sentence cannot be optional either; it outranks a row
-    // caption, and the two live states never apply at once (one needs a menu, the other needs no
-    // usable input).
-    const std::string recovery_status = input::RecoveryNotice();
-    const bool recovering = !recovery_status.empty();
-    // RhythmVerse plan P4: the search's field and its progress are input feedback too - the key
-    // pages draw static labels, so the only place the typed query can appear is here. It outranks
-    // every caption while the search surface is open (or a request is in flight), and it is drawn
-    // with Settings Labels off for the same reason a capture is: a field a player cannot read is
-    // an input problem, not optional help.
-    // Loading belongs to the focused retail modal; do not duplicate it in the caption strip.
-    const std::string search_status = store_ns::SearchInFlight()
-                                          ? std::string{} : store_ns::SearchStatusText();
+    // Only the editing field belongs here. Search progress has a guest modal, and terminal
+    // results, validation and errors use notifications.
+    const std::string search_status = store_ns::SearchEditingText();
     const bool searching = !search_status.empty();
-    // P7: the store's own words - the loading sentence while the first page is in flight, and the
-    // empty/offline sentence after it (the credit line that used to open the store was removed on
-    // the owner's request, 2026-10-23). It yields to every input surface (the search field, the
-    // recovery notice, a capture) and outranks a row caption: it is what
-    // explains a page that has nothing on it. The module itself says nothing outside a short window
-    // after the store served a record, so the line cannot follow a player out of the store.
-    const std::string store_status = store_ns::CatalogueStatusText();
-    const bool store_speaking = !store_status.empty();
     if (searching) {
       text = search_status;
-    } else if (recovering) {
-      text = recovery_status;
     } else if (capturing) {
       text = capture_status;
-    } else if (store_speaking) {
-      text = store_status;
     }
     // Off is invisible, not "drawn and empty", and the cvar is re-read here so the toggle is
     // live - the probe overlay's rule, and what makes Interface -> Settings Labels a `hot` row.
-    // The store's own sentences are drawn regardless: an empty or unreachable catalogue is a state
-    // a player cannot explain from the screen, the same rule the search field follows.
     if (text.empty() ||
-        (!capturing && !recovering && !searching && !store_speaking &&
+        (!capturing && !searching &&
          !REXCVAR_GET(settings_help_overlay))) {
       return;
     }
 
     // Status messages keep their original size; the preference controls settings
     // descriptions. Every source uses the same bounded strip above the footer.
-    const bool status = capturing || recovering || searching || store_speaking;
+    const bool status = capturing || searching;
     const auto layout = LayoutCaption(io.DisplaySize.x, io.DisplaySize.y,
                                      status ? "normal" : REXCVAR_GET(settings_help_size));
     const float size = layout.font_size;

@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "store/store_settings.h"
+#include "ui/notifications.h"
 
 namespace rb_blitz::store {
 namespace {
@@ -231,6 +232,41 @@ std::string StatusTextLocked() {
   return {};
 }
 
+void NotifyOutcomeLocked() {
+  using ui::notifications::Level;
+  Level level = Level::kInfo;
+  std::string title;
+  std::string text;
+  switch (g_state) {
+    case SearchState::kTooShort:
+      level = Level::kWarning;
+      title = "Search needs more text";
+      text = kSearchTooShort;
+      break;
+    case SearchState::kDisabled:
+      level = Level::kWarning;
+      title = "RhythmVerse is disabled";
+      text = kSearchDisabled;
+      break;
+    case SearchState::kFailed:
+      level = Level::kError;
+      title = "RhythmVerse search failed";
+      text = "Could not complete the search. Check your connection and try again.";
+      break;
+    case SearchState::kNoResults:
+      title = "No search results";
+      text = "No matches for " + Quote(g_text.text()) + ". " + kSearchRetryHint;
+      break;
+    case SearchState::kResults:
+      title = "RhythmVerse search";
+      text = CountNoun(g_offers.size()) + Quote(g_text.text()) + ". " +
+             (g_offers.size() == 1 ? kSearchListHintOne : kSearchListHint);
+      break;
+    default: return;  // Editing stays beside the field; progress has a guest loading modal.
+  }
+  ui::notifications::Post("store.search", level, std::move(title), std::move(text));
+}
+
 }  // namespace
 
 std::size_t CodePointCount(std::string_view utf8) {
@@ -272,6 +308,7 @@ void SearchOpen() {
   const SettingsSnapshot settings = Settings();
   if (!settings->enabled) {
     g_state = SearchState::kDisabled;
+    NotifyOutcomeLocked();
     return;
   }
   // Re-entering shows the field that was being typed; an answer already on screen stays until a
@@ -344,6 +381,7 @@ SearchSubmit SearchSubmitQuery() {
     g_state = SearchState::kDisabled;
     out.state = g_state;
     out.why = kSearchDisabled;
+    NotifyOutcomeLocked();
     return out;
   }
   Query query;
@@ -363,6 +401,7 @@ SearchSubmit SearchSubmitQuery() {
     out.state = g_state;
     out.why = g_state == SearchState::kTooShort ? std::string(kSearchTooShort)
                                                 : std::string(QueryProblemText(problem));
+    NotifyOutcomeLocked();
     return out;
   }
   // Plan P7's backoff: a failure the worker reported named a wait (Retry-After, 5xx, or the
@@ -382,6 +421,8 @@ SearchSubmit SearchSubmitQuery() {
       g_state = SearchState::kFailed;
     }
     out.state = g_state;
+    ui::notifications::Post("store.search", ui::notifications::Level::kWarning,
+                            "RhythmVerse is busy", out.why + ".");
     return out;
   }
   ++g_generation;
@@ -399,6 +440,7 @@ SearchSubmit SearchSubmitQuery() {
   g_show = false;
   g_retry_at = {};
   g_state = SearchState::kSearching;
+  ui::notifications::Dismiss("store.search");
   g_open = true;
   // P9-11: a submit consumes the diagnostic seed - the next Search press shows the keyboard again.
   g_seed = false;
@@ -458,6 +500,7 @@ SearchPageAnswer SearchAcceptPage(std::uint64_t generation, const ListingPage& p
   g_pending = Pending{};
   g_state = g_offers.empty() ? SearchState::kNoResults : SearchState::kResults;
   g_show = true;
+  NotifyOutcomeLocked();
   return out;
 }
 
@@ -472,6 +515,13 @@ bool SearchFailAfter(std::uint64_t generation, std::string reason,
       g_state != SearchState::kSearching) {
     return false;
   }
+  if (SettingsGeneration() != g_pending.settings_generation || !Settings()->enabled) {
+    g_pending = Pending{};
+    ++g_generation;
+    g_offers.clear();
+    g_state = Settings()->enabled ? SearchState::kEditing : SearchState::kDisabled;
+    return false;
+  }
   g_pending = Pending{};
   g_retry_at = std::chrono::steady_clock::now() + retry_after;
   if (!g_offers.empty()) {
@@ -481,13 +531,16 @@ bool SearchFailAfter(std::uint64_t generation, std::string reason,
     g_failure.clear();
     g_state = SearchState::kResults;
     g_show = true;
+    ui::notifications::Post("store.search", ui::notifications::Level::kWarning,
+        "RhythmVerse search incomplete", "Some results could not be loaded. Try the search again later.");
     return true;
   }
   g_failure = std::move(reason);
   g_state = SearchState::kFailed;
-  // A failure is presented the same way: the Search row opens the (empty) page, which is what
-  // returns the store to its menu, and the strip carries the reason until the store is left.
+  // Keep the guest's result-list route, with a notification carrying the failure independently
+  // of whether the keyboard is still open.
   g_show = true;
+  NotifyOutcomeLocked();
   return true;
 }
 
@@ -618,9 +671,14 @@ SearchSnapshot SearchCurrent() {
 }
 
 std::string SearchStatusText() {
-  // The overlay draws this every frame, and the worker writes the state, so the caption is read
-  // under the same lock every command takes.
+  // Diagnostic summary retained for callers/tests; rendered captions use SearchEditingText.
   const std::lock_guard<std::mutex> guard(g_mutex);
+  return StatusTextLocked();
+}
+
+std::string SearchEditingText() {
+  const std::lock_guard<std::mutex> guard(g_mutex);
+  if (!g_open || g_state != SearchState::kEditing) return {};
   return StatusTextLocked();
 }
 

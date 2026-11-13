@@ -92,13 +92,11 @@ bool Armed();
 // Consumes one raw frame. Only the armed session is evaluated; unarmed calls are free.
 Tick Observe(const Observation& observation);
 
-// The sentence the help overlay shows while the dialog is open: the live listening state with
-// the countdown's remaining seconds, a wrong-kind message (the count keeps running beside it), or
-// a save failure the caller posted with `PostStatusMessage`. Empty when idle.
+// Live listening instructions and countdown, shown with the input surface. Empty when idle.
+// Wrong-kind presses and save failures go to notifications instead.
 std::string StatusText();
 
-// A one-off sentence shown until the next Arm/Cancel: a refused source ("that is a pad control;
-// this table takes keys and mouse") or a failed save ("the profile could not be written").
+// Reports a failed binding save, including after capture has disarmed.
 // Spelled PostStatusMessage rather than PostMessage: <winuser.h> defines the latter as a macro,
 // and a name that silently grows an A suffix is not one to build a message channel on.
 void PostStatusMessage(std::string message);

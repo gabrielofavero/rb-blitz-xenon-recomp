@@ -24,6 +24,7 @@
 #include "profile/remap.h"
 #include "ui/input_icon_rows.h"
 #include "ui/input_font_scene.h"
+#include "ui/notifications.h"
 
 namespace {
 
@@ -465,13 +466,13 @@ void TestCaptureCountdown() {
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   CHECK_TRUE(capture::StatusText().find("Closing in 1") != std::string::npos);
 
-  // A wrong-kind press inside the window is feedback only: the count keeps running beside it.
+  // Wrong-kind feedback is a notification; the countdown keeps its own caption.
   capture::Observation wrong = Frame();
   wrong.any_key_down = true;
   wrong.new_keys.push_back("G");
   capture::Tick tick = capture::Observe(wrong);
   CHECK_FALSE(tick.captured.has_value());
-  CHECK_TRUE(capture::StatusText().find("keyboard key") != std::string::npos);
+  CHECK_TRUE(capture::StatusText().find("keyboard key") == std::string::npos);
   CHECK_TRUE(capture::StatusText().find("Closing in 1") != std::string::npos);
 
   // Three seconds after neutral, the next observation leaves the dialog with nothing bound.
@@ -482,6 +483,31 @@ void TestCaptureCountdown() {
   CHECK_FALSE(capture::Armed());
   CHECK_TRUE(capture::StatusText().empty());
   capture::Cancel();
+}
+
+void TestCaptureNotifications() {
+  rb_blitz::test::BeginCase("capture failures remain visible independently of the listening caption");
+  namespace notices = rb_blitz::ui::notifications;
+  notices::SharedQueue().Clear();
+  capture::Arm({"input.general.a", {rb_blitz::profile::remap::SourceKind::kPad}});
+  capture::Observe(Frame());
+  capture::Observation wrong = Frame();
+  wrong.new_keys.push_back("G");
+  wrong.any_key_down = true;
+  CHECK_FALSE(capture::Observe(wrong).captured.has_value());
+  const auto warning = notices::SharedQueue().Tick();
+  CHECK_TRUE(warning.has_value());
+  CHECK_TRUE(warning->notice.level == notices::Level::kWarning);
+  CHECK_TRUE(warning->notice.description.find("keyboard key") != std::string::npos);
+  capture::Cancel();
+  notices::SharedQueue().Clear();
+  capture::PostStatusMessage("The profile could not be written.");
+  CHECK_TRUE(capture::StatusText().empty());
+  const auto failure = notices::SharedQueue().Tick();
+  CHECK_TRUE(failure.has_value());
+  CHECK_TRUE(failure->notice.level == notices::Level::kError);
+  CHECK_TRUE(failure->notice.description == "The profile could not be written.");
+  notices::SharedQueue().Clear();
 }
 
 // D11: the binding decision does not wait for a release. A press is the answer on its own frame,
@@ -1140,6 +1166,7 @@ int main() {
   TestCaptureWrongKind();
   TestCaptureCancelAndTimeout();
   TestCaptureCountdown();
+  TestCaptureNotifications();
   TestCaptureBindsImmediately();
   TestStoreResetAndSave();
   TestRestoreWaitsForRestart();

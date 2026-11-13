@@ -62,6 +62,7 @@
 // needs a runtime.
 
 #include "hooks/dlc.h"
+#include "ui/notifications.h"
 
 #include <algorithm>
 #include <atomic>
@@ -747,6 +748,8 @@ bool PublishInitialScanIfReady() {
   if (!g_initial_scan_pending) return true;
   if (!g_boot_scan) {
     REXLOG_ERROR("dlc: initial scan job was lost; continuing native discovery without flat DLC");
+    ui::notifications::Post("dlc.discovery", ui::notifications::Level::kError,
+        "Downloaded songs could not be loaded", "Library discovery failed. Use Refresh Songs to try again.");
     g_initial_scan_pending = false;
     return true;
   }
@@ -774,6 +777,8 @@ bool PublishInitialScanIfReady() {
       return false;
     }
     REXLOG_ERROR("dlc: initial scan failed twice ({}); continuing without flat DLC", error.what());
+    ui::notifications::Post("dlc.discovery", ui::notifications::Level::kError,
+        "Downloaded songs could not be loaded", "Library discovery failed. Use Refresh Songs to try again.");
     g_boot_scan.reset();
     g_initial_scan_pending = false;
     return true;
@@ -791,6 +796,9 @@ bool PublishInitialScanIfReady() {
   } else {
     REXLOG_WARN("dlc: initial scan found {} package(s), but no content manager is available",
                 completed.library.items.size());
+    if (!completed.library.items.empty())
+      ui::notifications::Post("dlc.discovery", ui::notifications::Level::kError,
+          "Downloaded songs could not be loaded", "The song library is unavailable. Restart the game to try again.");
   }
   RebuildPackagePaths(completed.library.items);
   g_content_count = g_structured_paths.size() + completed.library.items.size();

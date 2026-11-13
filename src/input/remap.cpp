@@ -5,6 +5,7 @@
 // binding means; this file is only the device side of it.
 
 #include "input/remap.h"
+#include "ui/notifications.h"
 #include "hooks/gameplay_input.h"
 #include "input/effective_input.h"
 #include "input/host_pad.h"
@@ -362,6 +363,8 @@ void TickInputRecovery() {
     fire = g_recovery.hold.Observe(needed, key_down, std::chrono::steady_clock::now());
   }
   if (announce) {
+    ui::notifications::Post("input.recovery", ui::notifications::Level::kWarning,
+                            "No input is available", RecoveryNotice());
     REXLOG_WARN(
         "input recovery: no usable input - Keyboard and Mouse support are both off and no pad is "
         "connected; hold {} for {} ms to reopen the keyboard",
@@ -377,15 +380,18 @@ void TickInputRecovery() {
       std::lock_guard lock(g_recovery.mutex);
       g_recovery.confirmed_until = std::chrono::steady_clock::now() + kRecoveryConfirmFor;
     }
+    ui::notifications::Post("input.recovery", ui::notifications::Level::kInfo,
+        "Keyboard support restored", "Keyboard Support is back on. Check Help & Options > Controls > Input Types for other switches.");
     REXLOG_INFO(
         "input recovery: {} held for {} ms with no usable input; keyboard_support is on again "
         "(one switch saved through the Controls store; nothing else was changed)",
         kRecoveryKeyLabel, static_cast<long long>(kRecoveryHold.count()));
   } else {
-    // A locked switch (command line or environment) or an unwritable profile. Logged, never
-    // reported as success, and the notice keeps asking for the hold once the key is released.
+    // A locked switch or unwritable profile must report failure as well as logging it.
     REXLOG_WARN("input recovery: {} held, but the keyboard gate was not reopened: {}",
                 kRecoveryKeyLabel, why);
+    ui::notifications::Post("input.recovery", ui::notifications::Level::kError,
+        "Could not restore keyboard support", "Connect a controller and check your input settings.");
   }
 }
 
@@ -518,15 +524,15 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
             if (tick.captured.has_value()) {
               settings::InputBindingStore* store = settings::InputBindings();
               std::string why;
-              if (store != nullptr &&
-                  store->CompleteCapture(tick.captured->token, tick.captured->source, &why)) {
-                // Leave the dialog the way a player's B would: a real pad bit for two polls.
-                PulseHostPad(0x2000);
-              } else {
+              if (store == nullptr ||
+                  !store->CompleteCapture(tick.captured->token, tick.captured->source, &why)) {
                 capture::PostStatusMessage("Could not save: " +
                                            (why.empty() ? std::string("the profile was refused")
                                                         : why));
               }
+              // Capture has disarmed on either outcome. Return to the row even on failure;
+              // the notification remains readable after leaving the listening surface.
+              PulseHostPad(0x2000);
             } else if (tick.leave) {
               // The 3-second countdown expired (D11). The row is untouched because nothing was
               // ever staged, and the dialog leaves the same way a capture does.

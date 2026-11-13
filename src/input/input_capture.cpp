@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "input/source_gates.h"
+#include "ui/notifications.h"
 
 namespace rb_blitz::input::capture {
 namespace {
@@ -25,7 +26,6 @@ struct Session {
   bool armed = false;
   CaptureTarget target;
   bool waiting_neutral = true;
-  std::string message;
   // When the countdown started: the first neutral frame after `Arm`. Until then the session is
   // still waiting for the press that opened the page to be released, and no count runs.
   std::chrono::steady_clock::time_point counting_since{};
@@ -167,7 +167,6 @@ void Arm(const CaptureTarget& target) {
   session.armed = true;
   session.target = target;
   session.waiting_neutral = true;
-  session.message.clear();
   session.counting_since = std::chrono::steady_clock::now();
   session.have_previous = false;
   session.previous_pad = {};
@@ -179,7 +178,6 @@ void Cancel() {
   std::lock_guard lock(Mutex());
   Session& session = State();
   session.armed = false;
-  session.message.clear();
   session.have_previous = false;
 }
 
@@ -231,7 +229,6 @@ Tick Observe(const Observation& observation) {
   // presses - a press that arrives after zero leaves the row untouched.
   if (std::chrono::steady_clock::now() - session.counting_since >= kCountdown) {
     session.armed = false;
-    session.message.clear();
     tick.leave = true;
     return tick;
   }
@@ -250,15 +247,16 @@ Tick Observe(const Observation& observation) {
   if (accepted == nullptr) {
     // Feedback, not a binding - and deliberately not a pause: D11 keeps the count running, so the
     // dialog still closes itself on time and the player is never stuck on this page.
-    session.message = std::string("That is ") + KindName(presses.front().kind) + "; this row takes " +
+    const std::string message = std::string("That is ") + KindName(presses.front().kind) + "; this row takes " +
                       AllowedKindText(session.target.allowed) + ".";
+    ui::notifications::Post("input.capture.source", ui::notifications::Level::kWarning,
+                            "Input type not accepted", message);
     return tick;
   }
   // D11: a valid press is the answer. The binding decision does not wait for a release - which is
   // also why the dialog leaves through the host Back pulse in the same poll.
   tick.captured = Result{session.target.token, *accepted};
   session.armed = false;
-  session.message.clear();
   return tick;
 }
 
@@ -271,18 +269,15 @@ std::string StatusText() {
   if (session.waiting_neutral) {
     return "Listening: release the input you used to open this page.";
   }
-  // D11: the remaining seconds are the live state, so they are drawn beside a wrong-kind sentence
-  // too - the count must be readable whatever the player just pressed.
+  // The countdown belongs to the listening surface; refusals use notifications.
   const std::string countdown = "Closing in " + std::to_string(SecondsLeft(session)) + ".";
-  if (!session.message.empty()) {
-    return session.message + " " + countdown;
-  }
   return "Listening for " + AllowedKindText(session.target.allowed) + ". " + countdown;
 }
 
 void PostStatusMessage(std::string message) {
-  std::lock_guard lock(Mutex());
-  State().message = std::move(message);
+  // CompleteCapture has already disarmed the session. A caption would be invisible here.
+  ui::notifications::Post("input.capture.save", ui::notifications::Level::kError,
+                          "Could not save binding", std::move(message));
 }
 
 std::string AllowedKindText(const std::vector<SourceKind>& allowed) {

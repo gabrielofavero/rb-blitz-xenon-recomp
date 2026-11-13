@@ -115,6 +115,8 @@
 #include "store/store_probe.h"
 #include "store/store_search_service.h"
 #include "ui/help_overlay.h"
+#include "ui/notification_overlay.h"
+#include "ui/notifications.h"
 #include "ui/boot_loading_art.h"
 #include "ui/boot_loading_icon.h"
 #include "hooks/startup_splasher.h"
@@ -753,6 +755,8 @@ class RbBlitzApp : public rex::ReXApp {
     probe_overlay_.reset();
     music_player_.reset();
     help_overlay_.reset();
+    notification_overlay_.reset();
+    rb_blitz::ui::notifications::SharedQueue().Clear();
     mouse_cursor_.reset();
     boot_loading_icon_.reset();
   }
@@ -768,6 +772,7 @@ class RbBlitzApp : public rex::ReXApp {
     // bridge's caption sink; whether it draws is the `settings_help_overlay` cvar's decision,
     // re-read every frame, which is what makes the toggle live.
     help_overlay_ = rb_blitz::ui::help::CreateOverlay(drawer);
+    notification_overlay_ = rb_blitz::ui::notifications::CreateOverlay(drawer);
     music_player_ = rb_blitz::ui::music::CreatePlayer(drawer);
 
     probe_overlay_ = rb_blitz::diag::CreateOverlayDialog(drawer, [this] {
@@ -883,6 +888,7 @@ class RbBlitzApp : public rex::ReXApp {
   // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings
   // bridge's caption sink, because the sink object lives beside the dialog.
   std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;
+  std::unique_ptr<rex::ui::ImGuiDialog> notification_overlay_;
   std::unique_ptr<rex::ui::ImGuiDialog> music_player_;
 
   // What Controller Settings' profile contributed at OnConfigurePaths, reported once logging exists.

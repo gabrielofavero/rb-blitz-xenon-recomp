@@ -8,6 +8,7 @@
 
 #include "hooks/local_save.h"
 #include "fs/local_save.h"
+#include "ui/notifications.h"
 
 #include <chrono>
 #include <cstdio>
@@ -111,12 +112,16 @@ bool Restore(PPCContext& ctx, uint8_t* base, const char* when) {
   if (!stream.address) {
     REXLOG_ERROR("local_save: cannot allocate a stream to restore {} ({})",
                  save_path.string(), when);
+    ui::notifications::Post("progress.restore", ui::notifications::Level::kError,
+        "Progress could not be restored", "Your previous save is still on disk. Restart the game to try again.");
     return false;
   }
   stream.Construct(last_saved);
   if (!stream.payload) {
     REXLOG_ERROR("local_save: cannot allocate a buffer to restore {} ({})",
                  save_path.string(), when);
+    ui::notifications::Post("progress.restore", ui::notifications::Level::kError,
+        "Progress could not be restored", "Your previous save is still on disk. Restart the game to try again.");
     return false;
   }
   const auto object = Load32(base, kSaveData);
@@ -135,7 +140,12 @@ void Checkpoint(PPCContext& ctx, uint8_t* base) {
   const auto data = Load32(base, kSaveData);
   if (!data) return;
   GuestStream stream(ctx, base, false);
-  if (!stream.address) return;
+  if (!stream.address) {
+    ui::notifications::Post("progress.save", ui::notifications::Level::kError,
+        "Progress could not be saved", "Not enough memory to save progress. Your previous save was kept.");
+    retry_at = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    return;
+  }
   stream.Construct();
   stream.call.r3.u64 = data;
   stream.call.r4.u64 = stream.address;
@@ -144,6 +154,9 @@ void Checkpoint(PPCContext& ctx, uint8_t* base) {
   const uint32_t end = Load32(base, stream.address + 28);
   if (!begin || end < begin || end - begin > kMaxPayload) {
     REXLOG_ERROR("local_save: guest serializer returned an invalid buffer");
+    ui::notifications::Post("progress.save", ui::notifications::Level::kError,
+        "Progress could not be saved", "Your previous save was kept. New progress has not been saved.");
+    retry_at = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     return;
   }
   const auto* p = rex::memory::GuestPtr<const uint8_t*>(base, begin);
@@ -154,6 +167,8 @@ void Checkpoint(PPCContext& ctx, uint8_t* base) {
       REXLOG_WARN("local_save: the guest serialized an empty SaveData while {} still holds "
                   "progress; keeping that file and not overwriting it",
                   save_path.string());
+      ui::notifications::Post("progress.save", ui::notifications::Level::kWarning,
+          "Previous progress preserved", "The game returned empty progress. Your previous save was kept.");
       dirty = false;
       return;
     }
@@ -161,10 +176,13 @@ void Checkpoint(PPCContext& ctx, uint8_t* base) {
     if (!Save(save_path, bytes, error)) {
       REXLOG_ERROR("local_save: could not save {}: {}; retaining previous save",
                    save_path.string(), error);
+      ui::notifications::Post("progress.save", ui::notifications::Level::kError,
+          "Progress could not be saved", "Check free space and write permissions. Your previous save was kept.");
       retry_at = std::chrono::steady_clock::now() + std::chrono::seconds(5);
       return;
     }
     last_saved = std::move(bytes);
+    ui::notifications::Dismiss("progress.save");
     REXLOG_INFO("local_save: saved {} bytes to {}", last_saved.size(), save_path.string());
   }
   dirty = false;
@@ -196,6 +214,8 @@ extern "C" REX_FUNC(sub_821CA620) {
     writable = false;
     REXLOG_ERROR("local_save: cannot read or validate {}; preserving it, local progress writes "
                  "disabled for this session", save_path.string());
+    rb_blitz::ui::notifications::Post("progress.invalid", rb_blitz::ui::notifications::Level::kError,
+        "Local save could not be loaded", "The file was preserved. Progress will not be saved during this session.");
   } else if (result == LoadResult::Loaded) {
     last_saved = std::move(bytes);
     Restore(ctx, base, "at initialization");

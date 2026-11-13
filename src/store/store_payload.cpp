@@ -520,13 +520,9 @@ bool AddSearchKeyboard(std::vector<ui::dtb::Node>* store_ui_roots, std::string* 
   const Node deactivate = cmd({sym("set"), active, sym("FALSE")});
   const Node hide = cmd({sym("all.grp"), sym("set_showing"), sym("FALSE")});
   const Node close = cmd({sym(kSearchLoadingPanel), sym("hide_popup")});
-  const auto notice = [&](const char* token) {
-    return cmd({sym("error_popup_panel"), sym("show_popup"), sym(token), sym("store_menu_panel")});
-  };
-  const Node terminal_notice = cmd({sym("do"), WriteCommand("rbbz-store/search/shown"),
-      cmd({sym("if_else"), FileExistsCommand(kSearchEmptyQuery), notice(kSearchEmptyToken),
-           cmd({sym("if_else"), FileExistsCommand(kSearchShortQuery), notice(kSearchShortToken),
-                notice(kSearchFailedToken)})})});
+  // Terminal feedback comes from the shared notification interface. Keep the guest's
+  // loading/cancel/focus route, without a second generic popup for the same outcome.
+  const Node terminal_notice = WriteCommand("rbbz-store/search/shown");
   Node loading = cmd({sym("new"), sym("UIPanel"), sym(kSearchLoadingPanel),
       Node::Array({sym("file"), Node::String("../error/error_general.milo")}),
       Node::Array({sym("active"), sym("FALSE")}),

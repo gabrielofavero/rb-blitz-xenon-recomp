@@ -37,6 +37,7 @@
 // cached flags.
 
 #include "hooks/settings_bridge.h"
+#include "ui/notifications.h"
 #include "graphics/preparation_loading.h"
 #include "loading/crash_recovery.h"
 
@@ -375,6 +376,16 @@ void HandleRequest(const std::string_view path) {
     return;
   }
   const Response response = g_dispatcher.Dispatch(request);
+  // Save/restart errors already have dedicated guest dialogs. A refused Controls row
+  // change has no such route and otherwise leaves the player with an unexplained no-op.
+  if (g_dispatcher.last_outcome() == Dispatcher::Outcome::kForwarded &&
+      response.status != Status::kOk && request.setting.starts_with("input.") &&
+      (request.op == Op::kSet || request.op == Op::kBindReset ||
+       request.op == Op::kBindResetAll || request.op == Op::kCapture)) {
+    ::rb_blitz::ui::notifications::Post("input.change", ::rb_blitz::ui::notifications::Level::kWarning,
+        "Input setting could not change", response.message.empty()
+            ? "The input setting was refused. Check your controls and try again." : response.message);
+  }
   REXLOG_INFO("settings_bridge: {} '{}' -> {} ({}{})", OpName(request.op),
               request.setting.empty() ? "-" : request.setting, StatusName(response.status),
               response.message.empty() ? "no message" : response.message,

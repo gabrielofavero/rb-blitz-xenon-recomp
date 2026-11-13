@@ -20,6 +20,7 @@ extern char** environ;
 #include <rex/logging.h>
 
 #include "messages/messages_service.h"
+#include "ui/notifications.h"
 
 REXCVAR_DEFINE_STRING(messages_browser_opener_path, "", "Diagnostics",
                       "Host-only absolute path to a browser stand-in executable for Messages "
@@ -105,7 +106,11 @@ void InstallUpdateAction(UpdateAction::Close close) {
       },
       [close = std::move(close)] {
         const bool queued = close();
-        if (!queued) REXLOG_ERROR("messages: browser opened but game close was not queued");
+        if (!queued) {
+          REXLOG_ERROR("messages: browser opened but game close was not queued");
+          ui::notifications::Post("messages.update.close", ui::notifications::Level::kError,
+              "Game could not close for update", "The releases page opened. Close the game before installing the update.");
+        }
         return queued;
       },
       [](std::function<void()> work) { std::thread(std::move(work)).detach(); });

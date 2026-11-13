@@ -278,6 +278,8 @@ struct SearchSnapshot {
 };
 SearchSnapshot SearchCurrent();
 std::string SearchStatusText();
+// Live query/guidance only; request outcomes are delivered through notifications.
+std::string SearchEditingText();
 
 // The worker seam: `store_search_service.cpp` installs the transport at boot
 // (`InstallSearchTransport`), and a test simply leaves it unset - a submit then reports

@@ -235,6 +235,7 @@ set(RBBLITZ_SOURCES
     # ImGui overlay the captions are drawn on.
     src/ui/help_topics.cpp
     src/ui/help_overlay.cpp
+    src/ui/notification_overlay.cpp
     src/ui/boot_loading_art.cpp
     src/ui/boot_loading_icon.cpp
     src/ui/menu_music_player.cpp
@@ -660,6 +661,16 @@ add_executable(rb_blitz_shader_microcode_hash tools/shader_microcode_hash.cpp)
 target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 
 if(BUILD_TESTING)
+    add_executable(rb_blitz_notifications_tests
+        tests/notifications_tests.cpp
+        src/store/store_catalogue_status.cpp
+        src/store/store_search.cpp
+        src/store/store_settings.cpp
+        src/store/rhythmverse_client.cpp)
+    target_include_directories(rb_blitz_notifications_tests PRIVATE
+        src "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+    add_test(NAME notifications COMMAND rb_blitz_notifications_tests)
+
     add_executable(rb_blitz_messages_update_tests
         tests/messages_update_tests.cpp src/messages/messages_update.cpp)
     target_include_directories(rb_blitz_messages_update_tests PRIVATE src)

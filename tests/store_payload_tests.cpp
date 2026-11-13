@@ -1356,7 +1356,10 @@ void TestSearchKeyboardScreenMethods() {
   if (poll && buttons && show) {
     CHECK_TRUE(contains(contains, *poll, rb_blitz::store::kSearchBusyQuery));
     CHECK_TRUE(contains(contains, *poll, rb_blitz::store::kSearchPageRequest));
-    CHECK_TRUE(contains(contains, *poll, rb_blitz::store::kSearchEmptyToken));
+    CHECK_TRUE(contains(contains, *poll, "rbbz-store/search/shown"));
+    CHECK_FALSE(contains(contains, *poll, "error_popup_panel"));
+    CHECK_FALSE(contains(contains, *poll, rb_blitz::store::kSearchEmptyToken));
+    CHECK_FALSE(contains(contains, *poll, rb_blitz::store::kSearchFailedToken));
     CHECK_TRUE(contains(contains, *buttons, "kAction_Cancel"));
     CHECK_FALSE(contains(contains, *buttons, "kAction_Confirm"));
     CHECK_TRUE(contains(contains, *buttons, "rbbz-store/search/cancel"));
