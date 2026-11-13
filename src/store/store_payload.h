@@ -386,7 +386,8 @@ bool RouteDownloadButtons(std::vector<ui::dtb::Node>* store_info_roots, std::str
 //
 //   show_popup ($job)  stores the job token, sets the loading sentence and the Cancel prompt,
 //                      shows `all.grp` and takes the screen's focus;
-//   poll               waits here for the job's terminal state
+//   poll               displays whole percentages while the response size is known,
+//                      and waits here for the job's terminal state
 //                      (`state/<job>/installed|failed|cancelled`, the bridge grammar
 //                      `store_download.h` owns): `installed` switches the labels to
 //                      `Downloaded '<name>'.` and the Close prompt, `failed`/`cancelled` to the
@@ -430,6 +431,8 @@ bool RouteDownloadButtons(std::vector<ui::dtb::Node>* store_info_roots, std::str
 inline constexpr char kDownloadPanelName[] = "rbbz_download_panel";
 inline constexpr char kDownloadLoadingToken[] = "rbbz_download_loading";
 inline constexpr char kDownloadLoadingText[] = "Downloading from RhythmVerse...";
+inline constexpr char kDownloadProgressToken[] = "rbbz_download_progress";
+inline constexpr char kDownloadProgressText[] = "Downloading from RhythmVerse... %i%%";
 inline constexpr char kDownloadCancelToken[] = "rbbz_download_cancel";
 inline constexpr char kDownloadCancelText[] = "Press <alt1>B</alt1> to Cancel";
 inline constexpr char kDownloadCloseToken[] = "rbbz_download_close";

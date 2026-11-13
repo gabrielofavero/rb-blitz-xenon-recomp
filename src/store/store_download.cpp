@@ -278,14 +278,15 @@ int ProgressBucket(const std::uint64_t received, const std::uint64_t total) {
   if (total == 0) {
     return 0;
   }
-  const std::uint64_t percent = std::min<std::uint64_t>(100, received * 100 / total);
-  int bucket = 0;
-  for (const int candidate : kProgressBuckets) {
-    if (percent >= static_cast<std::uint64_t>(candidate)) {
-      bucket = candidate;
-    }
+  if (received >= total) return 100;
+  // Find the highest percentage whose rounded-up byte threshold was reached,
+  // without overflowing even for a uint64-sized total.
+  for (int percent = 99; percent > 0; --percent) {
+    const auto threshold = (total / 100) * percent +
+                           ((total % 100) * percent + 99) / 100;
+    if (received >= threshold) return percent;
   }
-  return bucket;
+  return 0;
 }
 
 std::optional<JobQuery> ParseJobQuery(const std::string_view rest) {
@@ -329,7 +330,7 @@ std::optional<JobQuery> ParseJobQuery(const std::string_view rest) {
     JobQuery query;
     query.kind = JobQueryKind::kProgressAtLeast;
     query.token = std::string(token);
-    if (!IsValidJobToken(query.token) || bucket_text.size() > 3) {
+    if (!IsValidJobToken(query.token) || bucket_text.empty() || bucket_text.size() > 3) {
       return std::nullopt;
     }
     int bucket = 0;
@@ -339,8 +340,7 @@ std::optional<JobQuery> ParseJobQuery(const std::string_view rest) {
       }
       bucket = bucket * 10 + (c - '0');
     }
-    if (std::find(std::begin(kProgressBuckets), std::end(kProgressBuckets), bucket) ==
-        std::end(kProgressBuckets)) {
+    if (bucket > 100) {
       return std::nullopt;
     }
     query.bucket = bucket;
@@ -535,6 +535,7 @@ TransferOutcome TransferPackage(const OfferRecord& offer, const std::filesystem:
                 return false;
               }
               body_wanted = true;
+              report_progress(static_cast<std::uint64_t>(content_length.value_or(0)));
               return true;
             },
         .on_data =

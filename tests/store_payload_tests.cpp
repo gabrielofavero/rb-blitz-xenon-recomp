@@ -2359,6 +2359,9 @@ void TestDownloadPopup() {
   CHECK_TRUE(has("finish_installed"));
   CHECK_TRUE(has("finish_failed"));
   CHECK_TRUE(has(rb_blitz::store::kDownloadLoadingToken));
+  CHECK_TRUE(has(rb_blitz::store::kDownloadProgressToken));
+  CHECK_TRUE(has("rbbz-store/progress/%s/at-least/0"));
+  CHECK_TRUE(has("rbbz-store/progress/%s/at-least/100"));
   CHECK_TRUE(has(rb_blitz::store::kDownloadCancelToken));
   CHECK_TRUE(has(rb_blitz::store::kDownloadCloseToken));
   CHECK_TRUE(has(rb_blitz::store::kDownloadRefreshToken));

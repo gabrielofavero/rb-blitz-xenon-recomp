@@ -88,10 +88,7 @@ std::optional<JobState> JobStateFromToken(std::string_view token);
 
 // --- Bridge grammar -------------------------------------------------------------------------------
 
-inline constexpr int kProgressBuckets[] = {10, 25, 50, 75, 100};
-inline constexpr std::size_t kProgressBucketCount = 5;
-
-// The highest bucket `received / total` has passed, or 0 when `total` is unknown.
+// Whole percentage received (0..100), or 0 when `total` is unknown.
 int ProgressBucket(std::uint64_t received, std::uint64_t total);
 
 enum class JobQueryKind { kState, kProgressAtLeast, kError };

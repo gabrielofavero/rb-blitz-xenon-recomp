@@ -1387,6 +1387,26 @@ Node JobStateQuery(std::string_view state) {
                       CurrentJobRead()})});
 }
 
+Node JobProgressQuery(int percent) {
+  return Node::Command({Node::Symbol("file_exists"),
+      Node::Command({Node::Symbol("sprintf"),
+          Node::String("rbbz-store/progress/%s/at-least/" + std::to_string(percent)),
+          CurrentJobRead()})});
+}
+
+// Binary search keeps the guest's per-frame work to at most eight host queries.
+// Each leaf writes a whole percentage using the existing dialog label.
+Node DownloadProgressText(int low, int high) {
+  if (low == high) {
+    return Node::Command({Node::Symbol("error.lbl"), Node::Symbol("set_token_fmt"),
+                          Node::Symbol(kDownloadProgressToken), Node::Int(low)});
+  }
+  const int middle = (low + high + 1) / 2;
+  return Node::Command({Node::Symbol("if_else"), JobProgressQuery(middle),
+                        DownloadProgressText(middle, high),
+                        DownloadProgressText(low, middle - 1)});
+}
+
 // `{write_file {sprintf "rbbz-store/download/cancel/%s" <job>} 0}` - the bridge's cancel command,
 // written inside a `do` that has bound the offer. A cancel of a job that already finished is a
 // no-op in the service (measured: it looks the token up in the active job and the queue only), so
@@ -1501,9 +1521,11 @@ bool AddDownloadPopup(std::vector<ui::dtb::Node>* store_info_roots, std::string*
   const Node failed_state =
       cmd({sym("||"), JobStateQuery("failed"), JobStateQuery("cancelled")});
   const Node state_switch =
-      cmd({sym("if"), JobStateQuery("installed"),
+      cmd({sym("if_else"), JobStateQuery("installed"),
            cmd({Node::Var("this"), sym("finish_installed")}),
-           cmd({sym("if"), failed_state, cmd({Node::Var("this"), sym("finish_failed")})})});
+           cmd({sym("if_else"), failed_state, cmd({Node::Var("this"), sym("finish_failed")}),
+                cmd({sym("if_else"), JobProgressQuery(0), DownloadProgressText(0, 100),
+                     loading})})});
   const Node poll_body =
       cmd({sym("if"), running,
            cmd({sym("do"), BindCurrentOffer(),

@@ -108,11 +108,20 @@ bool StopRequested() {
 
 void UpdateProgress(const std::string& token, const std::uint64_t received,
                     const std::uint64_t total) {
-  std::lock_guard<std::mutex> lock(S().mutex);
-  JobStatus& status = S().jobs[token];
-  status.received = received;
-  status.total = total;
-  status.bucket = total == 0 ? 0 : ProgressBucket(received, total);
+  bool report = false;
+  const int percent = ProgressBucket(received, total);
+  {
+    std::lock_guard<std::mutex> lock(S().mutex);
+    JobStatus& status = S().jobs[token];
+    report = status.total != total || percent / 10 != status.bucket / 10;
+    status.received = received;
+    status.total = total;
+    status.bucket = percent;
+  }
+  if (report) {
+    LogLine("store_download: job " + token + " progress " + std::to_string(percent) +
+            "% (" + std::to_string(received) + "/" + std::to_string(total) + " bytes)");
+  }
 }
 
 void RunJob(const std::string& token) {
@@ -153,6 +162,9 @@ void RunJob(const std::string& token) {
       return;
     }
     DiscardStagedFile(*install);
+    LogLine("store_download: job " + token + " requesting '" + offer.title +
+            "' (attempt " + std::to_string(attempt + 1) + ")");
+    UpdateProgress(token, 0, 0);
     const TransferOutcome outcome = TransferPackage(
         offer, install->part_path, config.transfer, &S().cancel, enabled,
         [&token](const std::uint64_t received, const std::uint64_t total) {
@@ -544,7 +556,8 @@ bool AnswerDownloadQuery(const std::string_view path, bool* answer) {
         value = status.state == query->state;
         break;
       case JobQueryKind::kProgressAtLeast:
-        value = status.state == JobState::kDownloading && status.bucket >= query->bucket;
+        value = status.state == JobState::kDownloading && status.total != 0 &&
+                status.bucket >= query->bucket;
         break;
       case JobQueryKind::kError:
         // A refused start is `cancelled` with kDisabled, and a user cancel is `cancelled` with

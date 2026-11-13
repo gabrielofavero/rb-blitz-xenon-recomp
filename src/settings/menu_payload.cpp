@@ -1970,12 +1970,24 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                  // its line from the offer, so it needs no entry here; P9-14 adds the prompt that
                  // state draws (A Refresh   B Close).
                  std::pair{store::kDownloadLoadingToken, store::kDownloadLoadingText},
+                 std::pair{store::kDownloadProgressToken, store::kDownloadProgressText},
                  std::pair{store::kDownloadCancelToken, store::kDownloadCancelText},
                  std::pair{store::kDownloadCloseToken, store::kDownloadCloseText},
                  std::pair{store::kDownloadRefreshToken, store::kDownloadRefreshText},
                  std::pair{store::kDownloadFailedToken, store::kDownloadFailedText}}) {
           why.clear();
-          if (!screen::AddLocaleEntry(&roots, key, text, &why) &&
+          // error_general's alternate font uses the live action glyphs when
+          // controller layouts are enabled. Retail A/B codes are blank there.
+          std::string caption(text);
+          if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
+            for (const auto& [before, after] : {
+                     std::pair{"<alt1>A</alt1>", "<alt1>\xC2\x81</alt1>"},
+                     std::pair{"<alt1>B</alt1>", "<alt1>\xC2\x82</alt1>"}}) {
+              const auto at = caption.find(before);
+              if (at != std::string::npos) caption.replace(at, std::string_view(before).size(), after);
+            }
+          }
+          if (!screen::AddLocaleEntry(&roots, key, caption, &why) &&
               why != "the locale already has that key") {
             note("the search popup label was refused: " + why);
           }

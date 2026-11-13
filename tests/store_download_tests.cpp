@@ -222,7 +222,13 @@ void TestBridgeGrammar() {
   CHECK_TRUE(error && error->error == DownloadError::kArchive);
 
   CHECK_FALSE(ParseJobQuery("state/" + token + "/making-tea").has_value());
-  CHECK_FALSE(ParseJobQuery("progress/" + token + "/at-least/33").has_value());
+  for (int percent = 0; percent <= 100; ++percent) {
+    const auto query = ParseJobQuery("progress/" + token + "/at-least/" + std::to_string(percent));
+    CHECK_TRUE(query.has_value());
+    CHECK_EQ(query ? query->bucket : -1, percent);
+  }
+  CHECK_FALSE(ParseJobQuery("progress/" + token + "/at-least/101").has_value());
+  CHECK_FALSE(ParseJobQuery("progress/" + token + "/at-least/").has_value());
   CHECK_FALSE(ParseJobQuery("progress/" + token + "/at-least/10x").has_value());
   CHECK_FALSE(ParseJobQuery("state/not-a-token/installed").has_value());
   CHECK_FALSE(ParseJobQuery("error/" + token + "/nonsense").has_value());
@@ -242,9 +248,12 @@ void TestBridgeGrammar() {
 
   CHECK_EQ(ProgressBucket(0, 0), 0);
   CHECK_EQ(ProgressBucket(0, 100), 0);
-  CHECK_EQ(ProgressBucket(9, 100), 0);
+  CHECK_EQ(ProgressBucket(9, 100), 9);
   CHECK_EQ(ProgressBucket(10, 100), 10);
-  CHECK_EQ(ProgressBucket(74, 100), 50);
+  CHECK_EQ(ProgressBucket(74, 100), 74);
+  CHECK_EQ(ProgressBucket(1, 3), 33);
+  CHECK_EQ(ProgressBucket(2, 3), 66);
+  CHECK_EQ(ProgressBucket(UINT64_MAX - 1, UINT64_MAX), 99);
   CHECK_EQ(ProgressBucket(100, 100), 100);
   CHECK_EQ(ProgressBucket(200, 100), 100);
 }
@@ -747,6 +756,40 @@ void TestServiceInstall() {
   CHECK_EQ(f.refresh_calls, 2);
 }
 
+void TestServiceProgress() {
+  BeginCase("live progress answers whole percentages and distinguishes unknown file sizes");
+  for (const bool unknown_size : {false, true}) {
+    ServiceFixture f;
+    const std::string token = JobTokenForFileId("progress");
+    const std::string url = "https://rhythmverse.co/download_file/progress";
+    ScriptedResponse response;
+    response.body = StfsBody(kRb3TitleId, 1, 64);
+    response.chunk = 4096;
+    response.omit_length = unknown_size;
+    bool observed = false;
+    const auto total = response.body.size();
+    response.after_first_chunk = [&] {
+      observed = true;
+      const auto status = QueryJob(token);
+      CHECK_TRUE(status && status->state == JobState::kDownloading);
+      CHECK_EQ(status ? status->received : 0, size_t{4096});
+      const int percent = unknown_size ? 0 : ProgressBucket(4096, total);
+      for (int threshold = 0; threshold <= 100; ++threshold) {
+        bool answer = false;
+        CHECK_TRUE(AnswerDownloadQuery("rbbz-store/progress/" + token + "/at-least/" +
+                                      std::to_string(threshold), &answer));
+        CHECK_EQ(answer, !unknown_size && threshold <= percent);
+      }
+    };
+    f.server.Add(url, response);
+    CHECK_TRUE(RegisterOffer({"progress", url, total}).has_value());
+    HandleDownloadWrite("rbbz-store/download/start/" + token);
+    WaitForDownloadsIdle();
+    CHECK_TRUE(observed);
+    CHECK_TRUE(QueryJob(token)->state == JobState::kInstalled);
+  }
+}
+
 void TestServiceCancelAndOff() {
   BeginCase("cancel, queued cancel and master Off leave no package and no receipt");
   const std::string body = StfsBody(kRb3TitleId, 1, 64);
@@ -1031,6 +1074,7 @@ int main() {
   TestTransferLengths();
   TestTransferStatusAndCancel();
   TestServiceInstall();
+  TestServiceProgress();
   TestServiceCancelAndOff();
   TestServiceUnknownOffer();
   TestStagingExclusion();
