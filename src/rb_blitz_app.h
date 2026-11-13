@@ -76,6 +76,7 @@
 #include <rex/system/interfaces/graphics.h>
 #include <rex/ui/window.h>
 #include <rex/ui/windowed_app_context_sdl.h>
+#include <rex/ui/window_sdl.h>
 #include <rex/version.h>
 
 #include "generated/fingerprint_expected.h"
@@ -105,6 +106,7 @@
 #include "settings/paths.h"
 #include "settings/display_runtime.h"
 #include "platform/game_restart.h"
+#include "platform/window_host.h"
 #include "platform/exit_deadline.h"
 #include "store/store_fetch.h"
 #include "store/store_catalogue.h"
@@ -158,6 +160,8 @@ class RbBlitzApp : public rex::ReXApp {
   // The `rexgpu-xenos` DLL is staged next to the executable via
   // rexglue_setup_target(rb_blitz GPU_PLUGINS xenos) in CMakeLists.txt.
   void OnPreSetup(rex::RuntimeConfig& config) override {
+    if (rb_blitz::platform::window_host::Active())
+      rex::ui::WindowSDL::SetNativeHost(&native_window_host_);
     // Read the title's own autosave icon before opening the game window, so
     // even a cold archive read cannot leave an unpainted window on screen.
     std::string boot_art_error;
@@ -547,7 +551,11 @@ class RbBlitzApp : public rex::ReXApp {
           const auto outcome = restart_coordinator_.Request(saved, current, id, context);
           *error = outcome.error;
           ready = restart_coordinator_.CloseRequested();
-          if (ready) REXLOG_INFO("settings_restart: replacement child is waiting for parent exit");
+          if (ready && !rb_blitz::platform::window_host::ExpectRestart(restart_launcher_->ChildPid())) {
+            ready = false;
+            *error = "the native window could not accept the replacement game";
+          }
+          if (ready) REXLOG_INFO("settings_restart: replacement game is waiting; native window stays open");
           else REXLOG_ERROR("settings_restart: {}", *error);
         });
         if (!dispatched || !ready) return false;
@@ -893,6 +901,15 @@ class RbBlitzApp : public rex::ReXApp {
   // the settings store as the active renderer.
   std::string selected_backend_;
   bool settings_restart_boot_ = false;
+  class NativeWindowHost final : public rex::ui::WindowSDL::NativeHost {
+    bool Attach(void* window, bool resizable, std::function<void(bool)> focus_changed) override {
+      return rb_blitz::platform::window_host::Attach(window, resizable, std::move(focus_changed));
+    }
+    bool SetDisplayMode(rex::ui::Window::DisplayMode mode) override {
+      return rb_blitz::platform::window_host::SetDisplayMode(static_cast<int>(mode));
+    }
+    void SetTitle(std::string_view title) override { rb_blitz::platform::window_host::SetTitle(title); }
+  } native_window_host_;
   std::unique_ptr<rb_blitz::platform::ChildLauncher> restart_launcher_ =
       rb_blitz::platform::CreateChildLauncher();
   rb_blitz::platform::RestartCoordinator restart_coordinator_{restart_launcher_.get()};

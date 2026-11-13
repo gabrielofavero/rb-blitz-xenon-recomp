@@ -28,6 +28,7 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+#include "platform/window_host.h"
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -442,6 +443,40 @@ void ChildArgumentsAreAnAllowlist() {
 
 }
 
+void PersistentWindowIdentity() {
+  test::BeginCase("window host: strict identity and restart argument preservation");
+  namespace host = rb_blitz::platform::window_host;
+  const host::Identity identity{0x1234, 0x1abcdef012345678, 0xabcdef};
+  const auto text = host::Encode(identity);
+  host::Identity decoded;
+  CHECK_TRUE(host::Decode(text, &decoded));
+  CHECK_EQ(decoded.pid, identity.pid);
+  CHECK_EQ(decoded.created, identity.created);
+  CHECK_EQ(decoded.window, identity.window);
+  for (const std::string_view invalid : {"", "1.2", "1.2.3.4", "0.2.3", "1.0.3", "1.2.0",
+       "100000000.2.3", "1.2.fffffffffffffffff", "1.2.-3", "1.2.0x3", "1.2.F", "1.2.3 "}) {
+    host::Identity untouched{7, 8, 9};
+    CHECK_FALSE(host::Decode(invalid, &untouched));
+    CHECK_EQ(untouched.pid, 7u);
+    CHECK_EQ(untouched.created, 8u);
+    CHECK_EQ(untouched.window, 9u);
+  }
+  LaunchContext context;
+  const auto argument = std::string(host::kSwitch) + text;
+  context.developer_arguments = {argument};
+  HandoffToken token;
+  token.parent_pid = 1;
+  token.parent_created = 2;
+  token.nonce = 3;
+  const auto arguments = BuildChildArguments(context, token);
+  CHECK_EQ(arguments.size(), 2u);
+  CHECK_TRUE(arguments[0] == argument);
+  // A second restart must retain the same window and replace its one-shot
+  // game-process handoff rather than accumulating old handoffs.
+  context.developer_arguments = arguments;
+  CHECK_TRUE(BuildChildArguments(context, token) == arguments);
+}
+
 void ArgumentRetirement() {
   test::BeginCase("command line: the one-shot policy");
   // A previous handoff is consumed by the boot that received it; rebuilding it would make the
@@ -801,6 +836,7 @@ int main(int argc, char** argv) {
   HandoffFromCommandLine();
   QuotingFollowsTheWindowsRule();
   ChildArgumentsAreAnAllowlist();
+  PersistentWindowIdentity();
   ArgumentRetirement();
   CoordinatorIsExactlyOnce();
   CoordinatedSpawnFailureKeepsTheParent();

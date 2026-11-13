@@ -221,6 +221,7 @@ set(RBBLITZ_SOURCES
     # pool, the rename's scope). SDK-free, and read by the menu hooks the mod already owns.
     src/settings/menu_compat.cpp
     src/platform/game_restart.cpp
+    src/platform/window_host.cpp
     src/platform/exit_deadline.cpp
     src/platform/runtime_symbol.cpp
     src/platform/virtual_keyboard.cpp
@@ -431,7 +432,7 @@ set_source_files_properties(src/graphics/development_coverage.cpp PROPERTIES COM
     "RBBLITZ_DEVELOPMENT_DIRECTORY_HASH=\"${RBBLITZ_DEVELOPMENT_DIRECTORY_HASH}\";RBBLITZ_DEVELOPMENT_JOURNAL=\"${RBBLITZ_DEVELOPMENT_JOURNAL}\"")
 target_link_libraries(rb_blitz PRIVATE xxhash)
 if(WIN32)
-    target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32 runtimeobject dbghelp shell32)
+    target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32 runtimeobject dbghelp shell32 user32 gdi32)
 else()
     # The native adapter uses curl_url() for strict HTTPS URL parsing.
     find_package(CURL 7.62 REQUIRED)
@@ -1474,8 +1475,12 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_game_restart_tests
         tests/game_restart_tests.cpp
         src/platform/game_restart.cpp
+        src/platform/window_host.cpp
     )
     target_include_directories(rb_blitz_game_restart_tests PRIVATE src)
+    if(WIN32)
+        target_link_libraries(rb_blitz_game_restart_tests PRIVATE user32 gdi32)
+    endif()
     add_test(NAME game_restart COMMAND rb_blitz_game_restart_tests)
 
     # P11a: the guest channel's real store (src/settings/bridge_sink.h) - the same frames and ops

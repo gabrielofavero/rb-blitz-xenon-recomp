@@ -1,0 +1,121 @@
+diff --git a/include/rex/ui/window_sdl.h b/include/rex/ui/window_sdl.h
+--- a/include/rex/ui/window_sdl.h
++++ b/include/rex/ui/window_sdl.h
+@@ -15,6 +15,7 @@
+ 
+ #include <atomic>
+ #include <cstdint>
++#include <functional>
+ #include <memory>
+ #include <string_view>
+ 
+@@ -27,6 +28,19 @@
+ 
+ class WindowSDL final : public Window {
+  public:
++  // Optional embedding seam. The host owns the top-level window; SDL retains
++  // ownership of the rendering/input child and its native event procedure.
++  class NativeHost {
++   public:
++    virtual ~NativeHost() = default;
++    virtual bool Attach(void* native_window, bool resizable,
++                        std::function<void(bool)> focus_changed) = 0;
++    virtual bool SetDisplayMode(DisplayMode mode) = 0;
++    virtual void SetTitle(std::string_view title) = 0;
++  };
++  // UI thread only, before creating windows. The host must outlive them.
++  static void SetNativeHost(NativeHost* host);
++
+   WindowSDL(WindowedAppContext& app_context, const std::string_view title,
+             uint32_t desired_logical_width, uint32_t desired_logical_height);
+   ~WindowSDL() override;
+@@ -83,6 +97,7 @@
+   float GetPixelDensity() const;
+ 
+   SDL_Window* sdl_window_ = nullptr;
++  NativeHost* native_host_ = nullptr;
+   SDL_WindowID sdl_window_id_ = 0;
+   // SDL's fullscreen restore geometry doesn't cover ordinary borderless mode.
+   SDL_Rect windowed_bounds_{};
+diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
+--- a/src/ui/window_sdl.cpp
++++ b/src/ui/window_sdl.cpp
+@@ -28,6 +28,12 @@
+ #include <rex/ui/flags.h>
+ #include <rex/ui/sdl_virtual_key.h>
+ 
++// SDL's pinned Windows backend compares the foreground HWND to the rendering
++// HWND. An embedded child has a different foreground root, so its native focus
++// events must update SDL's keyboard focus explicitly. Keep this internal SDL
++// call inside the SDK, which owns and pins the SDL implementation.
++extern "C" bool SDL_SetKeyboardFocus(SDL_Window* window);
++
+ #if REX_PLATFORM_WIN32
+ #include <rex/ui/surface_win.h>
+ #elif REX_PLATFORM_MAC
+@@ -43,6 +49,8 @@
+ namespace rex::ui {
+ 
+ namespace {
++
++WindowSDL::NativeHost* native_host = nullptr;
+ 
+ // The display scale the window is about to be created at. There is no window yet, so this is the
+ // same source WindowSDL::GetLatestDpiImpl falls back to before one exists - the primary display's
+@@ -166,7 +174,10 @@
+ 
+ WindowSDL::WindowSDL(WindowedAppContext& app_context, const std::string_view title,
+                      uint32_t desired_logical_width, uint32_t desired_logical_height)
+-    : Window(app_context, title, desired_logical_width, desired_logical_height) {}
++    : Window(app_context, title, desired_logical_width, desired_logical_height),
++      native_host_(native_host) {}
++
++void WindowSDL::SetNativeHost(NativeHost* host) { native_host = host; }
+ 
+ WindowSDL::~WindowSDL() {
+   EnterDestructor();
+@@ -211,6 +222,15 @@
+   }
+ 
+   desktop_mode_applied_ = false;
++  if (native_host_ && !native_host_->Attach(GetNativeWindowHandle(), REXCVAR_GET(window_resizable),
++      [this](bool focused) {
++        if (focused || SDL_GetKeyboardFocus() == sdl_window_)
++          SDL_SetKeyboardFocus(focused ? sdl_window_ : nullptr);
++      })) {
++    REXLOG_ERROR("Native window host refused the rendering child");
++    DestroySDLWindow();
++    return false;
++  }
+   if (!ApplyDisplayModeNow()) {
+     DestroySDLWindow();
+     return false;
+@@ -231,7 +251,7 @@
+   // the draw scale and the presenter's output region from one resolution row) can therefore refuse a
+   // drag that would leave a shape its picture cannot fill, while the separate Controller Settings
+   // utility - which builds its own SDL window - keeps SDL's default.
+-  if (!REXCVAR_GET(window_resizable)) {
++  if (!native_host_ && !REXCVAR_GET(window_resizable)) {
+     SDL_SetWindowResizable(sdl_window_, false);
+   }
+   SDL_ShowWindow(sdl_window_);
+@@ -350,6 +370,11 @@
+ }
+ 
+ bool WindowSDL::ApplyDisplayModeNow() {
++  if (native_host_) {
++    if (!native_host_->SetDisplayMode(GetDisplayMode())) return false;
++    native_host_->SetTitle(GetTitle());
++    return true;
++  }
+   SDL_Rect old_rect{};
+   SDL_GetWindowPosition(sdl_window_, &old_rect.x, &old_rect.y);
+   SDL_GetWindowSize(sdl_window_, &old_rect.w, &old_rect.h);
+@@ -451,6 +476,7 @@
+     return;
+   }
+   SDL_SetWindowTitle(sdl_window_, GetTitle().c_str());
++  if (native_host_) native_host_->SetTitle(GetTitle());
+ }
+ 
+ void WindowSDL::ApplyNewMouseCapture() {

@@ -12,6 +12,12 @@ checkout.
 
 ## Patches
 
+`0058-native-window-host.patch` lets an application embed SDL's rendering/input
+window in a persistent native frame. The host handles display modes and titles;
+SDL keeps rendering, mouse and keyboard events in the game process. Native focus
+notifications also update SDL keyboard focus, because SDL's foreground HWND test
+assumes its window is top-level. Unhosted windows keep the existing behavior.
+
 `0057-animate-startup-during-shader-preparation.patch` keeps an app's startup
 paint loop active while stored shaders are prepared. For apps opting into startup
 paint, the command processor runs its existing sliced preparation and a waiter

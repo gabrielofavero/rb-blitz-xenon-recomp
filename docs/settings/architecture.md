@@ -1362,6 +1362,18 @@ not deliverables.
 
 ## Part 6 — Hot apply and the restart coordinator (was `docs/plans/in-game-settings-hot-apply-restart.md`, P9)
 
+As of 2026-11-13, Windows boots through `src/platform/window_host.cpp`: a small
+host process owns the visible native frame, and the game process renders into
+its client area. Restart keeps that frame, its placement and taskbar entry alive
+while replacing the game process. The restart handler registers the replacement
+with the host before closing the old rendering child; the replacement still
+waits for the old game's verified process identity to exit before entering the
+SDK. Settings, saves, guest memory and renderer state therefore get a fresh boot.
+The existing song-load recovery process can also reconnect to this frame.
+Other platforms retain their previous restart behavior. The native restart,
+focus, display-mode and shutdown paths require an in-game acceptance check;
+host tests cover identity parsing and preservation across repeated handoffs.
+
 Status: **P9's host half executed** (2026-10-11). Per-row strategy recorded; one row proven hot and applied
 live in a boot; the restart coordinator and its bootstrap written and measured against real processes. Two
 items are left to the coordinator / a later UI pass, named in §6 rather than implied away. Parent plan:

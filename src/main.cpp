@@ -23,6 +23,7 @@
 #include "generated/default/rb_blitz_init.h"
 
 #include "platform/game_restart.h"
+#include "platform/window_host.h"
 #include "rb_blitz_app.h"
 
 // The graphics backend the game renders with - the Renderer row of Controller Settings' Audio / Video
@@ -123,6 +124,7 @@ constexpr int kBootstrapRefusedExitCode = 2;
 struct RestartBootstrap {
   RestartBootstrap() {
     std::vector<std::string> arguments = rb_blitz::platform::CommandLineArguments();
+    rb_blitz::platform::window_host::Bootstrap(arguments);
     std::vector<const char*> argv;
     argv.reserve(arguments.size());
     for (const std::string& argument : arguments) {
