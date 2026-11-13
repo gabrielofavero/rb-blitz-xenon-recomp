@@ -85,6 +85,7 @@ bool Tracker::Tick(uint64_t now_ms) {
 }
 
 bool Tracker::KeyDown(uint64_t now_ms) { return focused_ && Switch(Family::kKeyboard, now_ms); }
+bool Tracker::Touch(uint64_t now_ms) { return focused_ && Switch(Family::kController, now_ms); }
 bool Tracker::MouseButton(uint64_t now_ms) {
   return kMouseButtonAndWheelSelectKeyboardLayout && focused_ &&
          Switch(Family::kMouse, now_ms);
@@ -124,6 +125,9 @@ void SelectScheme(std::string scheme) {
 void Focus(bool focused) { std::lock_guard lock(g_mutex); g_tracker.Focus(focused); }
 std::optional<State> KeyDown() {
   return Observe([](Tracker& t, uint64_t now) { return t.KeyDown(now); });
+}
+std::optional<State> Touch() {
+  return Observe([](Tracker& t, uint64_t now) { return t.Touch(now); });
 }
 std::optional<State> MouseButton() {
   return Observe([](Tracker& t, uint64_t now) { return t.MouseButton(now); });

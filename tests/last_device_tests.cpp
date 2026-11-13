@@ -69,5 +69,27 @@ int main() {
   blurred.Focus(false);
   Check(!blurred.Tick(310), "focus loss cancels pending switch");
   Check(blurred.Current().family == Family::kMouse, "focus loss preserves mouse");
+
+  Tracker touch;
+  touch.SelectScheme("deck");
+  Check(!touch.Touch(0), "unfocused touch");
+  touch.Focus(true);
+  Check(!touch.Touch(10), "touch keeps boot controller layout");
+  Check(touch.MouseButton(200), "real click still selects mouse");
+  Check(!touch.Touch(220), "touch waits for layout debounce");
+  Check(touch.Tick(300), "deferred touch selects controller");
+  Check(touch.Current().family == Family::kController, "touch uses controller hints");
+  Check(touch.Current().scheme == "deck", "touch preserves controller scheme");
+  Check(!touch.MouseButton(320), "real click waits for debounce after touch");
+  Check(!touch.Touch(330), "touch cancels pending mouse layout");
+  Check(!touch.Tick(400), "pending mouse layout stays cancelled");
+  Check(touch.MouseButton(500), "real click selects mouse after touch");
+  Check(touch.Touch(610), "touch restores controller after mouse");
+  Check(touch.KeyDown(720), "keyboard still selects keyboard after touch");
+  Check(touch.Touch(830), "touch restores controller after keyboard");
+  touch.Focus(false);
+  Check(!touch.Touch(940), "blurred touch cannot switch layout");
+  touch.Focus(true);
+  Check(touch.MouseWheel(1050), "real wheel still selects mouse after touch");
   std::cout << "last_device: OK\n";
 }

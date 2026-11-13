@@ -12,6 +12,10 @@ checkout.
 
 ## Patches
 
+`0059-preserve-touch-mouse-source.patch` preserves SDL's touchscreen source on
+mouse events so the title can keep controller hints for touch while retaining
+mouse hints for physical mouse clicks. Pointer navigation is unchanged.
+
 `0058-native-window-host.patch` lets an application embed SDL's rendering/input
 window in a persistent native frame. The host handles display modes and titles;
 SDL keeps rendering, mouse and keyboard events in the game process. Native focus

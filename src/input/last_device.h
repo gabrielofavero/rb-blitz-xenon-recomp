@@ -30,6 +30,7 @@ class Tracker {
   void SelectScheme(std::string scheme);
   void Focus(bool focused);
   bool KeyDown(uint64_t now_ms);
+  bool Touch(uint64_t now_ms);
   bool MouseButton(uint64_t now_ms);
   bool MouseWheel(uint64_t now_ms);
   bool MouseMove(int x, int y, uint64_t now_ms);
@@ -55,6 +56,7 @@ State Current();
 void SelectScheme(std::string scheme);
 void Focus(bool focused);
 std::optional<State> KeyDown();
+std::optional<State> Touch();
 std::optional<State> MouseButton();
 std::optional<State> MouseWheel();
 std::optional<State> MouseMove(int x, int y);
