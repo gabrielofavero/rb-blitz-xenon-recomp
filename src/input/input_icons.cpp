@@ -398,10 +398,11 @@ Icon Hint(const View& view, const profile::InputRowToken& row) {
 }
 
 Icon SplashStartHint(const View& view) {
-  auto all = Ordered(view, {profile::InputRowKind::kGeneralBinding, "start"});
+  // Advertise Confirm, matching the retail A prompt and its interface mapping.
+  auto all = Ordered(view, {profile::InputRowKind::kGeneralBinding, "a"});
   // The splash has no list to hit-test; its native left-click pulse starts it.
   // Keep this pointer route local to the splash rather than advertising a click
-  // for Start on other screens.
+  // for other actions on other screens.
   all.insert(all.begin(), Resolve({SourceKind::kMouse, "left"},
                                   view.controller_scheme, view.registry));
   return FirstOf(view, all);

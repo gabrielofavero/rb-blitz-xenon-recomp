@@ -259,6 +259,12 @@ void TestHintFallbacks() {
   namespace remap = rb_blitz::profile::remap;
   namespace gameplay = rb_blitz::profile::gameplay_remap;
   auto input = std::make_shared<rb_blitz::input::EffectiveInput>();
+  rb_blitz::input::PublishInput(input);
+  CHECK_TRUE(icons::SplashStartHint(icons::Capture("retail", icons::Family::kController))
+                 .slot == "a_button");
+  CHECK_TRUE(icons::SplashStartHint(icons::Capture("retail", icons::Family::kKeyboard))
+                 .source.name == "Return");
+  input->general.Set(remap::Target::kA, {Source("pad:y"), Source("key:G")});
   input->general.Set(remap::Target::kX,
                      {Source("pad:x"), Source("key:X"), Source("mouse:x1")});
   input->general.Set(remap::Target::kY, {Source("pad:y"), Source("key:Y")});
@@ -302,8 +308,8 @@ void TestHintFallbacks() {
                  .source.name == "right");
   CHECK_TRUE(icons::SplashStartHint(mouse).source.kind == remap::SourceKind::kMouse);
   CHECK_TRUE(icons::SplashStartHint(mouse).source.name == "left");
-  CHECK_TRUE(icons::SplashStartHint(keyboard).source.name == "Space");
-  CHECK_TRUE(icons::SplashStartHint(controller).source.name == "start");
+  CHECK_TRUE(icons::SplashStartHint(keyboard).source.name == "G");
+  CHECK_TRUE(icons::SplashStartHint(controller).source.name == "y");
   input = rb_blitz::input::CopyCurrentInput();
   input->general.Set(remap::Target::kY, {Source("key:~"), Source("pad:y")});
   rb_blitz::input::PublishInput(input);

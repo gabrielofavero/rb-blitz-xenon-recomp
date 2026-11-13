@@ -3326,7 +3326,7 @@ Node SetVar(const std::string_view name, Node value) {
   return Cmd({Sym("set"), Var(name), std::move(value)});
 }
 
-std::vector<Node> PlayCurrentSongBody() {
+std::vector<Node> PlayCurrentSongBody(bool ultimate_provider) {
   // SongMgr::Handle at 0x8244938C reads a Symbol payload (0x823F94A0), not a
   // string. A string's DataArray pointer was being looked up as a symbol, returning
   // zero even for songs already in the library. Preserve the package's spelling.
@@ -3340,15 +3340,35 @@ std::vector<Node> PlayCurrentSongBody() {
         Cmd({Sym("file_exists"), Str(std::string("rbbz-play/result/") + reason)}),
         EnterScreen("settings_play_unavailable_screen")});
   };
-  const Node choose = Cmd({Sym("do"),
+  std::vector<Node> choose_body{Sym("do"),
       Cmd({Sym("file_exists"), Str("rbbz-play/result/resolved")}),
       // The metadata also becomes the panel's current song, so returning to the library
       // and the power-up flow agree with the song handed to the loading screen.
-      Cmd({Sym("song_select_panel"), Sym("set_current_song"), Var(kPlayDataVar)}),
+      Cmd({Sym("song_select_panel"), Sym("set_current_song"), Var(kPlayDataVar)})};
+  if (ultimate_provider) {
+    // set_current_song only updates the native panel. Ultimate normally sets these
+    // globals in update_current_song (or SELECT_MSG's random-song branch). The
+    // shortcut bypasses both, so a previous selection's $pb used to leak into
+    // an unplayed song's HUD. Use the resolved metadata, never the list cursor.
+    for (const auto& [variable, method] :
+         {std::pair{"cur_song_name", "title"}, {"cur_song_artist", "artist"},
+          {"cur_song_short_name", "short_name"}, {"cur_song_id", "id"}}) {
+      choose_body.push_back(SetVar(variable, Cmd({Var(kPlayDataVar), Sym(method)})));
+    }
+    choose_body.push_back(SetVar("pb", Sym("FALSE")));
+    choose_body.push_back(Cmd({Sym("do"),
+        Arr({Var("rbbz_play_score"),
+             Cmd({Sym("find"), Var("scoresArray"), Var("cur_song_id")})}),
+        Cmd({Sym("if"), Cmd({Sym("&&"), Var("show_pb"), Var("rbbz_play_score"),
+            Cmd({Sym("!"), Cmd({Sym("user_mgr"), Sym("is_participating_user_online")})})}),
+            SetVar("pb", Cmd({Sym("elem"), Var("rbbz_play_score"), Node::Int(1)}))})}));
+  }
+  choose_body.insert(choose_body.end(), {
       Cmd({Sym("loading_screen"), Sym("set_song"), Var(kPlayDataVar)}),
       Cmd({Sym("song_select_panel"), Sym("mount_current_content"), Var(kPlayIdVar)}),
       Cmd({Sym("song_select_screen"), Sym("song_chosen"),
            Cmd({Sym("user_mgr"), Sym("get_participating_user")})})});
+  const Node choose = Cmd(std::move(choose_body));
   statements.push_back(Cmd({Sym("if_else"), Cmd({Sym("!="), Var(kPlaySongVar), Sym("")}),
       Cmd({Sym("do"),
            SetVar(kPlayIdVar,
@@ -3363,7 +3383,8 @@ std::vector<Node> PlayCurrentSongBody() {
 }
 }  // namespace
 
-bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason) {
+bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason,
+                           bool ultimate_provider) {
   auto refuse = [reason](const char* why) {
     if (reason != nullptr) *reason = why;
     return false;
@@ -3384,7 +3405,7 @@ bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason) {
     return false;
   }
   return AddMainMenuSwitchCase(nodes, kPlayCurrentRow,
-                               PlayCurrentSongBody(), reason);
+                               PlayCurrentSongBody(ultimate_provider), reason);
 }
 
 bool AddDownloadContentRow(std::vector<dtb::Node>* nodes, std::string* reason) {

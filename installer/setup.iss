@@ -388,7 +388,6 @@ const
     the page. }
   DataDirName = 'Rock Band Blitz';
   DlcDirLeaf = 'Downloaded Content';
-  SaveDirLeaf = 'Saved Games';
 
   { The sentinel that a param expansion returns when the parameter was not given at
     all. Inno Setup cannot tell "absent" from "present and empty" any other way, and
@@ -568,7 +567,7 @@ end;
 
 function DefaultSaveDir: String;
 begin
-  Result := JoinPath(JoinPath(ExpandConstant('{userdocs}'), DataDirName), SaveDirLeaf);
+  Result := JoinPath(ExpandConstant('{userdocs}'), DataDirName);
 end;
 
 // The scratch files every stage and probe writes. Resolved before the first page
@@ -1473,7 +1472,7 @@ end;
 // Fills the two fields. The order is parent plan §9.1's: the unattended parameter,
 // the installation's own paths.toml, the profile the game used to read, then the
 // installer's own default - Documents\Rock Band Blitz\Downloaded Content and
-// ...\Saved Games, which is the rung that changed on 2026-10-14. It used to be an
+// the same save root the game uses by default. It used to be an
 // empty field, meaning "the game's own folder", and the page offered that as an
 // answer; both boxes now always name a folder, so the same two are also what a silent
 // install that was asked nothing writes. A field the user has already answered is

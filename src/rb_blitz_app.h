@@ -49,6 +49,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -104,6 +105,7 @@
 #include "settings/paths.h"
 #include "settings/display_runtime.h"
 #include "platform/game_restart.h"
+#include "platform/exit_deadline.h"
 #include "store/store_fetch.h"
 #include "store/store_catalogue.h"
 #include "store/album_art_service.h"
@@ -660,6 +662,12 @@ class RbBlitzApp : public rex::ReXApp {
   bool DeferShaderStoragePreparation() const override { return true; }
   bool CanLaunchModule() const override { return graphics_loading_payload_ready_; }
   void OnGuestThreadExit(rex::system::XThread*) override {
+    // EXIT GAME uses SDK destruction instead of OnClosing's hard exit. That
+    // cleanup can stall after audio stops (issues 1.zip, 2026-11-11). Bound the
+    // entire host-only tail, including the work below, without delaying a clean
+    // exit or touching saves while the guest is still running.
+    if (!rb_blitz::platform::ArmExitDeadline()) std::_Exit(0);
+    REXLOG_INFO("shutdown: guest exited; host cleanup has a 2000 ms process-exit deadline");
     rb_blitz::diag::boot_heartbeat::Finish("guest thread exit");
     rb_blitz::shell_music::CloseQueuedPool();
     rb_blitz::graphics::CloseLoading();

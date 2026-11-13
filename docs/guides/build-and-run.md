@@ -695,6 +695,21 @@ uses: the guest's own exit prints `KernelState::TerminateTitle` and `Execution
 complete`, where closing the window prints `Title terminated; hard-exiting
 process.`
 
+The menu-exit host cleanup has a two-second process deadline after the guest
+main thread exits. Ordinary cleanup can finish sooner. If a host destructor or
+worker wait hangs, an independent watchdog ends the process without taking
+application or logging locks. This also covers static destruction; repeated
+requests do not extend the deadline. It starts after guest execution ends, so
+it does not interrupt gameplay or the menu's own guest exit work. An unfinished
+host cache may need rebuilding on the next boot. The log marker is
+`shutdown: guest exited; host cleanup has a 2000 ms process-exit deadline`.
+
+This bounds the intermittent hang reported in `issues 1.zip`: `game.log`
+reached `Execution complete` at 05:48:18.082 on November 11, 2026, then printed
+audio totals at 05:48:18.950. The exact cleanup wait was not logged. The
+`exit_deadline` process tests cover prompt normal exit, blocked cleanup, a
+blocked static destructor, and repeated arming without opening the game UI.
+
 ```powershell
 .\scripts\acceptance\acceptance_screens.ps1
 ```

@@ -1653,7 +1653,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             (screen::CurrentMenuConfiguration().menu_refresh_trial &&
              !screen::CurrentMenuConfiguration().menu_music_songs.empty())) {
           std::string why;
-          if (!screen::AddPlayCurrentSongRow(&roots, &why)) {
+          if (!screen::AddPlayCurrentSongRow(&roots, &why, merge_provider)) {
             note("the Play Current Song row was refused: " + why);
           }
         }

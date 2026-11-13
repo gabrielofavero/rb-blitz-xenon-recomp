@@ -942,6 +942,50 @@ void TestPlayCurrentSongRow() {
   }
   CHECK_TRUE(std::find(body.begin(), body.end(), kRootScreen) == body.end());
 
+  // The native setter does not refresh Ultimate's script globals. In particular,
+  // an unplayed song must clear a previous selection's comparison before loading.
+  CHECK_TRUE(std::find(body.begin(), body.end(), "scoresArray") == body.end());
+  std::vector<dtb::Node> ultimate = SplashFixture();
+  CHECK_TRUE(AddPlayCurrentSongRow(&ultimate, &reason, true));
+  const auto find_choose = [](const auto& self, const Node& node) -> const Node* {
+    if (node.tag == dtb::kCommand && !node.kids.empty() && node.kids[0].text == "do") {
+      for (const Node& child : node.kids)
+        if (child.tag == dtb::kCommand && child.kids.size() >= 2 &&
+            child.kids[1].text == "song_chosen") return &node;
+    }
+    for (const Node& child : node.kids)
+      if (const Node* found = self(self, child)) return found;
+    return nullptr;
+  };
+  const Node* choose = find_choose(find_choose, ultimate[0]);
+  CHECK_TRUE(choose != nullptr);
+  if (choose && choose->kids.size() == 12) {
+    // Metadata and the score lookup must agree on the resolved song, with no
+    // dependence on the library cursor (which the shortcut never navigates).
+    const Node& id = choose->kids[6];
+    CHECK_TRUE(id.kids[0].text == "set" && id.kids[1].text == "cur_song_id");
+    CHECK_TRUE(id.kids[2].kids[0].text == "rbbz_play_data");
+    CHECK_TRUE(id.kids[2].kids[1].text == "id");
+    const Node& reset = choose->kids[7];
+    CHECK_TRUE(reset.kids[0].text == "set" && reset.kids[1].text == "pb");
+    CHECK_TRUE(reset.kids[2].text == "FALSE");
+    const Node& score = choose->kids[8].kids[1].kids[1];
+    CHECK_TRUE(score.kids[0].text == "find");
+    CHECK_TRUE(score.kids[1].text == "scoresArray");
+    CHECK_TRUE(score.kids[2].text == "cur_song_id");
+    const Node& condition = choose->kids[8].kids[2].kids[1];
+    CHECK_TRUE(condition.kids[0].text == "&&");
+    CHECK_TRUE(condition.kids[1].text == "show_pb");
+    CHECK_TRUE(condition.kids[2].text == "rbbz_play_score");
+    CHECK_TRUE(condition.kids[3].kids[0].text == "!");
+    CHECK_TRUE(condition.kids[3].kids[1].kids[1].text == "is_participating_user_online");
+    CHECK_TRUE(choose->kids[9].kids[1].text == "set_song");
+  } else {
+    CHECK_TRUE(false);
+  }
+  std::string ultimate_error;
+  CHECK_TRUE(Reparse(ultimate, &ultimate_error).size() == ultimate.size());
+
   // The label exists exactly while the row does (the menu draws the symbol's locale text).
   bool labelled = false;
   for (const auto& label : Labels()) {

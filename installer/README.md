@@ -374,7 +374,7 @@ Setup's own switches.
 | `/GAMEFOLDER` | folder | With `folder`: the extract root, or any folder above it. |
 | `/GAMEPACKAGE` | file | With `package`: the Xbox 360 container file. |
 | `/DLCDIR` | folder | Where the DLC library is. Omitted, the installation's own `paths.toml` is read, then the legacy settings profile, then the default under the user's Documents; given empty (`/DLCDIR=`), the game's own `<game data>\dlc` is stored. |
-| `/SAVEDIR` | folder | Where the saves go. Same rule as `/DLCDIR`; its default is `Documents\Rock Band Blitz\Saved Games`, and empty means the game's own save root under the user's Documents. |
+| `/SAVEDIR` | folder | Where the saves go. Same rule as `/DLCDIR`; its default is `Documents\Rock Band Blitz`, matching the game's own default. |
 | `/ULTIMATESOURCE` | `none` (default), `pin`, `zip`, `folder` | Whether and how to install the mod. |
 | `/ULTIMATEZIP` | file | With `zip`. |
 | `/ULTIMATEFOLDER` | folder | With `folder`. |
@@ -494,16 +494,24 @@ The page is prefilled in this order, and the first answer that exists wins:
 | 1 | `/DLCDIR` or `/SAVEDIR` on the command line — a silent install's answers |
 | 2 | the installation's own `paths.toml`, when it parses |
 | 3 | the legacy settings profile (`%APPDATA%\rb_blitz\launcher.toml`, or beside a portable install), the file the game's input configuration uses — its `[settings] user_data_root`/`dlc_root`, or the older `[launch] user_data_dir`/`dlc_dir` |
-| 4 | the installer's own default, a folder under the user's Documents: `Documents\Rock Band Blitz\Downloaded Content` and `Documents\Rock Band Blitz\Saved Games` |
+| 4 | the installer's own default, a folder under the user's Documents: `Documents\Rock Band Blitz\Downloaded Content` and `Documents\Rock Band Blitz` |
 
 Rung 4 is a folder rather than an empty field since 2026-10-14, and it is what makes
 both boxes *answers*: the page refuses an empty one, so what is recorded is what the
 page shows, and a silent install that was asked nothing writes the same two. The save
 root is the folder the game itself means by an empty one (its own settings row reads
 "Empty uses Documents\Rock Band Blitz"), so the installer records the answer the
-runtime would have fallen back to. The DLC root is this installer's own choice: the
-game's fallback is a `dlc` directory inside the read-only game data, which is nothing
-to ask a player for, so the library folder beside the saves is offered instead.
+runtime would have fallen back to.
+
+The installer and runtime save defaults have matched since 2026-11-13. Earlier
+installers added a `Saved Games` leaf; existing explicit choices remain honored
+on upgrades. Saves, achievements, Ultimate preferences, diagnostics and caches
+are all relative to the selected save root, so an upgrade must not silently
+switch that root. Native settings remain in `%APPDATA%\rb_blitz` by default.
+
+The DLC root is this installer's own choice: the game's fallback is a `dlc`
+directory inside the read-only game data, so the library folder beneath the
+save root is offered instead.
 
 The legacy profile is only consulted when the install is **not** running elevated:
 an all-users install started by an administrator must not import that

@@ -548,6 +548,19 @@ so the song list's own current-song state agrees with what plays. A press with *
 carry draws an explicit message — *"The background song is not available to play. Please try again
 when another song starts."* (`settings_play_unavailable_screen`) — instead of the old silent no-op.
 
+**2026-11-13 comparison-state fix:** the native `set_current_song` setter does not
+run Ultimate's `update_current_song` script. The shortcut now also refreshes
+`cur_song_name`, `cur_song_artist`, `cur_song_short_name` and `cur_song_id` from the
+resolved metadata, clears `pb`, and looks up that song in `scoresArray` before
+loading. A stored score supplies `pb` only when Personal Best is enabled and the
+participating user is offline, matching the installed selection script. This is
+authored only for a merged Ultimate provider. Previously, an unplayed shortcut
+song could inherit another selection's comparison value. The supplied
+`issues 1.zip` logs identify `TurntheLightsOff_1-0_rb3c` as the last shortcut
+selection at 05:43:35 on November 11; the preceding Gold Star Progress edit was
+queued for process restart. The stale-state route is established by code
+inspection; visual reproduction and validation remain pending.
+
 **Measured (2026-10-15)** — `out/_swap/music-fix/final-press` (two-package library, disposable profile,
 windowed D3D12). *Play Current Song* was pressed while `highvoltage_live` was audibly playing: the host
 answered the probe (`Play Current Song: the menu is playing pool 1 of 2 ("highvoltage_live")`), the

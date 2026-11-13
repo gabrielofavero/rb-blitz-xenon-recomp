@@ -364,7 +364,9 @@ bool RemoveRow(std::vector<dtb::Node>* nodes, std::string_view row, std::string*
 // probes (see the .cpp for the shipped statements it is assembled from). Refuses, leaving `nodes`
 // untouched, when the record has no option array bearing `splash_start`, when the row is already
 // there (a second pass), or when the pool is empty - the caller decides what an empty pool means.
-bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason);
+// A merged Ultimate provider also needs its per-selection globals refreshed.
+bool AddPlayCurrentSongRow(std::vector<dtb::Node>* nodes, std::string* reason,
+                           bool ultimate_provider = false);
 
 // Adds the restored "Download Content" entry: `kDownloadContentRow` right after `splash_dlc` in
 // the option array, plus a case that carries a copy of the shipped `splash_dlc` action. Must run

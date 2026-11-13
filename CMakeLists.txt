@@ -221,6 +221,7 @@ set(RBBLITZ_SOURCES
     # pool, the rename's scope). SDK-free, and read by the menu hooks the mod already owns.
     src/settings/menu_compat.cpp
     src/platform/game_restart.cpp
+    src/platform/exit_deadline.cpp
     src/platform/runtime_symbol.cpp
     src/platform/virtual_keyboard.cpp
     # The compiled-DTA parser, promoted out of the test-only targets: the provider adapter reads
@@ -796,6 +797,19 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_session_logs_tests tests/session_logs_tests.cpp src/diag/session_logs.cpp)
     target_include_directories(rb_blitz_session_logs_tests PRIVATE src tests)
     add_test(NAME session_logs COMMAND rb_blitz_session_logs_tests)
+
+    add_executable(rb_blitz_exit_deadline_fixture tests/exit_deadline_fixture.cpp
+        src/platform/exit_deadline.cpp)
+    target_include_directories(rb_blitz_exit_deadline_fixture PRIVATE src)
+    if(WIN32)
+        set(exit_deadline_launcher "$<TARGET_FILE:rb_blitz_windows_test_runner>")
+    else()
+        set(exit_deadline_launcher "")
+    endif()
+    add_test(NAME exit_deadline COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/exit_deadline_tests.py"
+        "$<TARGET_FILE:rb_blitz_exit_deadline_fixture>" "${exit_deadline_launcher}")
+    set_tests_properties(exit_deadline PROPERTIES TIMEOUT 20)
 
     # P4: the cancellable graphics-preparation lifecycle both backends drive
     # from the command processor thread (rexglue-sdk/include/rex/graphics/

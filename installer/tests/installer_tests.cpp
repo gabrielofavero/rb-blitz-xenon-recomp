@@ -2115,7 +2115,10 @@ static void TestWizardScript() {
   CHECK_CONTAINS(script, "DlcPromptLabel.Caption := 'DLC folder:';");
   CHECK_CONTAINS(script, "SavePromptLabel.Caption := 'Saved games:';");
   CHECK_CONTAINS(script, "DlcDirLeaf = 'Downloaded Content'");
-  CHECK_CONTAINS(script, "SaveDirLeaf = 'Saved Games'");
+  // Fresh installs and an empty path-file value must use the same save root;
+  // adding a Saved Games leaf here split saves, achievements and caches.
+  CHECK_CONTAINS(script, "Result := JoinPath(ExpandConstant('{userdocs}'), DataDirName);");
+  CHECK_FALSE(script.find("SaveDirLeaf") != std::string::npos);
   CHECK_FALSE(script.find("Ps3Page") != std::string::npos);
   CHECK_FALSE(script.find("probe-ps3") != std::string::npos);
   CHECK_FALSE(script.find("install-ps3-scheme") != std::string::npos);

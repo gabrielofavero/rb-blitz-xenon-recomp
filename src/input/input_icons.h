@@ -53,7 +53,7 @@ Icon First(const View& view, const profile::InputRowToken& row);
 Icon First(const View& view, profile::gameplay_remap::Action action);
 // Action hints also include pointer actions handled by the native guest menu route.
 Icon Hint(const View& view, const profile::InputRowToken& row);
-// The title prompt accepts a left click through its native menu route, in addition to Start.
+// The title prompt advertises Confirm and accepts a left click through its native menu route.
 Icon SplashStartHint(const View& view);
 
 }  // namespace rb_blitz::input::icons
