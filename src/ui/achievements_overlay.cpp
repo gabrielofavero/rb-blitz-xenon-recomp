@@ -88,6 +88,11 @@ class Browser final : public rex::ui::ImGuiDialog {
     ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(.025f, .015f, .02f, .97f));
     ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0, 0, 0, .55f));
     ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, theme.border);
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, ImVec4(.30f, .30f, .30f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, ImVec4(.24f, .24f, .24f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(.18f, .18f, .18f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(.28f, .28f, .28f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(.22f, .22f, .22f, 1));
     constexpr auto flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav;
     if (ImGui::BeginPopupModal("##blitz_achievements", nullptr, flags)) {
@@ -196,7 +201,7 @@ class Browser final : public rex::ui::ImGuiDialog {
             const std::string status = std::to_string(entry.gamerscore) + " G  |  " +
                                        (unlocked ? "Unlocked" : "Locked");
             cards->AddText(body, 18 * scale, ImVec2(text_x, status_y),
-                          ImGui::GetColorU32(unlocked ? ImVec4(.6f, 1, .65f, 1) : theme.muted_text),
+                          ImGui::GetColorU32(unlocked ? ImVec4(.45f, .45f, .45f, 1) : theme.muted_text),
                           status.c_str());
             cards->AddText(body, 18 * scale, ImVec2(text_x, status_y + 25 * scale),
                           ImGui::GetColorU32(theme.muted_text), description(entry).c_str(),
@@ -222,7 +227,7 @@ class Browser final : public rex::ui::ImGuiDialog {
       }
       ImGui::EndPopup();
     }
-    ImGui::PopStyleColor(5);
+    ImGui::PopStyleColor(10);
     ImGui::PopStyleVar(5);
   }
 
