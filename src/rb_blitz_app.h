@@ -117,6 +117,7 @@
 #include "store/store_search_service.h"
 #include "ui/help_overlay.h"
 #include "ui/notification_overlay.h"
+#include "ui/achievements_overlay.h"
 #include "ui/notifications.h"
 #include "ui/boot_loading_art.h"
 #include "ui/boot_loading_icon.h"
@@ -135,6 +136,11 @@ REXCVAR_DECLARE(std::string, gpu_backend);
 class RbBlitzApp : public rex::ReXApp {
  public:
   using rex::ReXApp::ReXApp;
+
+  std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override {
+    rb_blitz::ui::achievements::Toggle();
+    return nullptr;  // The app owns the persistent browser used by the guest action too.
+  }
 
   // The SDK creates the toast once per launch. Suppressing its UI leaves the
   // achievement manager's unlock, save, and reload paths running normally.
@@ -758,6 +764,7 @@ class RbBlitzApp : public rex::ReXApp {
     music_player_.reset();
     help_overlay_.reset();
     notification_overlay_.reset();
+    achievement_browser_.reset();
     rb_blitz::ui::notifications::SharedQueue().Clear();
     mouse_cursor_.reset();
     boot_loading_icon_.reset();
@@ -775,6 +782,8 @@ class RbBlitzApp : public rex::ReXApp {
     // re-read every frame, which is what makes the toggle live.
     help_overlay_ = rb_blitz::ui::help::CreateOverlay(drawer);
     notification_overlay_ = rb_blitz::ui::notifications::CreateOverlay(drawer);
+    achievement_browser_ = rb_blitz::ui::achievements::CreateOverlay(
+        drawer, immediate_drawer(), runtime(), &achievements());
     music_player_ = rb_blitz::ui::music::CreatePlayer(drawer);
 
     probe_overlay_ = rb_blitz::diag::CreateOverlayDialog(drawer, [this] {
@@ -891,6 +900,7 @@ class RbBlitzApp : public rex::ReXApp {
   // bridge's caption sink, because the sink object lives beside the dialog.
   std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;
   std::unique_ptr<rex::ui::ImGuiDialog> notification_overlay_;
+  std::unique_ptr<rex::ui::ImGuiDialog> achievement_browser_;
   std::unique_ptr<rex::ui::ImGuiDialog> music_player_;
 
   // What Controller Settings' profile contributed at OnConfigurePaths, reported once logging exists.

@@ -6,6 +6,7 @@
 
 #include "input/remap.h"
 #include "ui/notifications.h"
+#include "ui/achievements_overlay.h"
 #include "hooks/gameplay_input.h"
 #include "input/effective_input.h"
 #include "input/host_pad.h"
@@ -457,7 +458,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // P8: the Controls recovery path observes one host-wide key once per poll (plan
           // §17.2). It is also observed by the settings overlay, because this filter does not
           // run at all when no device enumerates - see remap.h.
-          const bool system_ui = rex::kernel::xam::xeXamIsUIActive();
+          const bool system_ui = rex::kernel::xam::xeXamIsUIActive() || ui::achievements::Active();
           if (IsGameplayUser(user_index) && !system_ui) {
             TickInputRecovery();
           }

@@ -16,6 +16,7 @@
 #include "input/remap.h"
 #include "input/title_input.h"
 #include "ui/help_overlay.h"
+#include "ui/achievements_overlay.h"
 #include "ui/menu_music_artwork.h"
 #include "ui/menu_music_text.h"
 
@@ -37,6 +38,7 @@ bool Eligible(const NowPlayingSnapshot& s) {
          s.playback.track.source != shell_music::MusicSource::kNone &&
          input::MainMenuMusicInputAvailable() && input::HostInputFocused() &&
          !input::capture::Armed() && !rex::kernel::xam::xeXamIsUIActive() &&
+         !achievements::Active() &&
          !graphics::GraphicsLoadingPending();
 }
 std::array<bool, 3> Enabled(const NowPlayingSnapshot& s) {

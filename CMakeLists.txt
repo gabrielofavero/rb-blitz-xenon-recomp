@@ -238,6 +238,7 @@ set(RBBLITZ_SOURCES
     src/ui/help_topics.cpp
     src/ui/help_overlay.cpp
     src/ui/notification_overlay.cpp
+    src/ui/achievements_overlay.cpp
     src/ui/boot_loading_art.cpp
     src/ui/boot_loading_icon.cpp
     src/ui/menu_music_player.cpp
@@ -787,6 +788,10 @@ if(BUILD_TESTING)
                 $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_achievement_persistence_tests>)
     endif()
     add_test(NAME achievement_persistence COMMAND rb_blitz_achievement_persistence_tests)
+
+    add_executable(rb_blitz_achievement_navigation_tests tests/achievement_navigation_tests.cpp)
+    target_include_directories(rb_blitz_achievement_navigation_tests PRIVATE src tests)
+    add_test(NAME achievement_navigation COMMAND rb_blitz_achievement_navigation_tests)
 
     # Shader-storage preload accounting and the blocking barrier, the component
     # both backends use (rexglue-sdk/include/rex/graphics/pipeline_preload.h).
