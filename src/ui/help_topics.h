@@ -2,7 +2,7 @@
 // rb_blitz - ReXGlue Recompiled Project
 //
 // The caption table for the pages the merged Help & Options surface **routes into**: the retail
-// screens it re-points its own rows at (`av_options`, `tutorials`, `controller_config`) and the
+// screens it re-points its own rows at (`av_options`, `tutorials`) and the
 // in-song pause panel's own inline list.
 //
 // Why there are two tables (owner request, 2026-10-13). Every row of the *generated* surface
@@ -17,8 +17,7 @@
 //     record fills its list with - `av_options`' `checkbox.lst` is `set_data (av_overscan
 //     av_active_track_volume av_sound_volume av_bass_boost)`, `tutorials`' `options.lst` is the
 //     two-element `tutorial_list`, and the in-song pause list is the merged root's own rows;
-//   * a page that is not a row list at all gets one **screen-level** caption (the controller
-//     mapping is a horizontal picker).
+// Controller Presets is deliberately caption-free and keeps its native instructions.
 //
 // What is deliberately absent, so nobody re-derives it: the **calibration wizard** gets no caption
 // (owner request, 2026-10-14) - its own screens draw their instructions and A/B prompts, and it

@@ -137,11 +137,7 @@ std::string CaptionFor(const Observation& observation) {
   // deliberately absent from this function *and* from `KnowsScreen`, which is what makes the
   // observer's transition rule clear the caption rather than describe the screen.
 
-  // The controller mapping screen is a horizontal picker, not a list: one caption for the screen.
-  if (observation.screen == "controller_config_screen" ||
-      observation.screen == "controller_config_pause_screen") {
-    return "Choose the controller preset used during play. Left/Right cycles presets.";
-  }
+  // Controller Presets keeps its own instructions and draws no settings label.
 
   return {};
 }
@@ -149,8 +145,7 @@ std::string CaptionFor(const Observation& observation) {
 bool KnowsScreen(const std::string_view screen) {
   return screen == "game_screen" || screen == "av_options_screen" ||
          screen == "av_options_pause_screen" || screen == "tutorials_screen" ||
-         screen == "tutorials_pause_screen" || screen == "controller_config_screen" ||
-         screen == "controller_config_pause_screen";
+         screen == "tutorials_pause_screen";
 }
 
 bool IsGuestScreen(const std::string_view screen) {

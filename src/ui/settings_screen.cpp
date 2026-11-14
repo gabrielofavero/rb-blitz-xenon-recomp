@@ -637,7 +637,9 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_main_menu_base_panel", "OTHER SHORTCUTS"},
       {"settings_main_menu_extra_panel", "MUSIC SHORTCUTS"},
       {"settings_hud_panel", "HUD"},
-      {"settings_hud_elements_panel", "HUD ELEMENTS"},
+      {"settings_hud_score_panel", "SCORE GOALS"},
+      {"settings_hud_song_panel", "SONG PROGRESS"},
+      {"settings_hud_feedback_panel", "PLAYER FEEDBACK"},
       {"settings_av_panel", "AUDIO & VIDEO"},
       {"settings_system_advanced_panel", "ADVANCED"},
       {"settings_library_advanced_panel", "ADVANCED"},
@@ -1314,38 +1316,51 @@ std::vector<PanelSpec> AllPanels() {
                                       "Show currency balances on power-up selection and song results. Requires a restart."),
                           }});
 
-  // 5a. HUD: the element visibility page, then the two provider switches that read On/Off. The
-  // HUD page itself is three rows, so it stays inside the six-row budget, and the element page is
-  // five; the original spellings are preserved (`show_steak`).
+  // 5a. HUD: one master visibility control and three groups by gameplay context.
+  // Individual controls keep their provider semantics and original spelling (`show_steak`).
   out.push_back(PanelSpec{"settings_hud_panel", "settings_hud_screen",
                           "settings_gameplay_screen", MenuPanels(),
-                          {
-                              SubmenuRow("settings_hud_elements", "settings_hud_elements_screen",
-                                         "HUD Elements",
-                                         "Choose which heads-up displays appear during play.", true),
-                              BoolRow("settings_hud_streak", "interface.show_steak", "Note Streak",
-                                      "Show the current note streak counter.", true),
-                              BoolRow("settings_hud_input", "interface.input_viewer",
-                                      "Input Viewer", "Show a live view of your controller input.",
-                                      true),
-                          }});
-  out.push_back(PanelSpec{"settings_hud_elements_panel", "settings_hud_elements_screen",
-                          "settings_hud_screen", MenuPanels(),
                           {
                               VisibilityRow("settings_hud_hide", "interface.hide_hud",
                                             "All HUD Elements",
                                             "Hide every on-screen display during play.", true),
+                              SubmenuRow("settings_hud_score", "settings_hud_score_screen",
+                                         "Score Goals",
+                                         "Gold-star and personal-best score displays.", true),
+                              SubmenuRow("settings_hud_song", "settings_hud_song_screen",
+                                         "Song Progress",
+                                         "Song progress and elapsed-time displays.", true),
+                              SubmenuRow("settings_hud_feedback", "settings_hud_feedback_screen",
+                                         "Player Feedback",
+                                         "Note streak and live controller input displays.", true),
+                          }});
+  out.push_back(PanelSpec{"settings_hud_score_panel", "settings_hud_score_screen",
+                          "settings_hud_screen", MenuPanels(),
+                          {
                               ElementVisibilityRow("settings_hud_gold", "interface.goldprogress",
                                                    "Gold Star Progress",
                                                    "Show progress toward the gold-star goal.", true),
+                              ElementVisibilityRow("settings_hud_pb", "interface.show_pb",
+                                                   "Personal Best",
+                                                   "Show progress toward your personal best score.", true),
+                          }});
+  out.push_back(PanelSpec{"settings_hud_song_panel", "settings_hud_song_screen",
+                          "settings_hud_screen", MenuPanels(),
+                          {
                               ElementVisibilityRow("settings_hud_progress", "interface.progressbar",
                                                    "Song Progress Bar",
                                                    "Show the song progress bar.", true),
                               ElementVisibilityRow("settings_hud_timer", "interface.show_timer",
                                                    "Timer", "Show the elapsed song time.", true),
-                              ElementVisibilityRow("settings_hud_pb", "interface.show_pb",
-                                                   "Personal Best",
-                                                   "Show progress toward your personal best score.", true),
+                          }});
+  out.push_back(PanelSpec{"settings_hud_feedback_panel", "settings_hud_feedback_screen",
+                          "settings_hud_screen", MenuPanels(),
+                          {
+                              BoolRow("settings_hud_streak", "interface.show_steak", "Note Streak",
+                                      "Show the current note streak counter.", true),
+                              BoolRow("settings_hud_input", "interface.input_viewer",
+                                      "Input Viewer", "Show a live view of your controller input.",
+                                      true),
                           }});
 
   // Stable shortcut pages also list entries that are hidden or unavailable this boot.
@@ -2211,12 +2226,14 @@ Node DirectionTable(const std::vector<Cell>& cells, const bool forward, const bo
 // surfaces (owner request, 2026-10-14): a panel with a `pause.lbl set_token_fmt <token>` body is
 // the restart confirmation, the save-error report, or the achievements confirmation - each of which
 // draws a *real* message and a handful of buttons, and each of which would otherwise show a stale
-// row description over its own text. The three panels that carry a message are the whole set; no
-// ordinary page does, so no ordinary page loses its caption.
+// row description over its own text. Controls, bindings, and controller layout pages
+// also suppress captions so their controls and native instructions stand on their own.
 bool SuppressesHelp(const PanelSpec& panel) {
   const std::string_view name = panel.name;
   return !panel.message.empty() ||
          name.starts_with("settings_controls_") ||
+         name.starts_with("settings_controller_layout_") ||
+         name.starts_with("settings_layout_") ||
          name.starts_with("settings_interface_mapping_") ||
          name.starts_with("settings_interface_navigation_") ||
          name.starts_with("settings_interface_music_library_") ||

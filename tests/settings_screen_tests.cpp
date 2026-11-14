@@ -72,7 +72,7 @@ using namespace rb_blitz::test;
 
 using dtb::Node;
 
-constexpr size_t kExpectedPagesPerContext = 69;
+constexpr size_t kExpectedPagesPerContext = 71;
 constexpr size_t kExpectedPages = 2 * kExpectedPagesPerContext;
 
 bool SuppressesSettingsCaption(const std::string_view name) {
@@ -84,6 +84,8 @@ bool SuppressesSettingsCaption(const std::string_view name) {
          name.starts_with("settings_linked") ||
          name.starts_with("settings_controller_capture_warning") ||
          name.starts_with("settings_controls_") ||
+         name.starts_with("settings_controller_layout_") ||
+         name.starts_with("settings_layout_") ||
          name.starts_with("settings_interface_mapping_") ||
          name.starts_with("settings_interface_navigation_") ||
          name.starts_with("settings_interface_music_library_") ||
@@ -3132,8 +3134,10 @@ void TestHelpTopicsResolve() {
   // may describe it. The root row that opens it still carries its caption.
   CHECK_TRUE(CaptionFor({"cal_welcome_screen", "", -1, false}).empty());
   CHECK_TRUE(!HelpTextFor("calibration").empty());
-  CHECK_TRUE(!CaptionFor({"controller_config_screen", "", -1, false}).empty());
-  CHECK_TRUE(!CaptionFor({"controller_config_pause_screen", "", -1, false}).empty());
+  CHECK_TRUE(CaptionFor({"controller_config_screen", "", -1, false}).empty());
+  CHECK_TRUE(CaptionFor({"controller_config_pause_screen", "", -1, false}).empty());
+  CHECK_FALSE(KnowsScreen("controller_config_screen"));
+  CHECK_FALSE(KnowsScreen("controller_config_pause_screen"));
 
   // Ownership: the observer manages only its own screens, and the guest's screens are off limits
   // to its clear (the guest's entry event has already published the destination's caption).
@@ -3227,10 +3231,9 @@ void TestConfirmationPagesAreCaptionFree() {
       names.begin(), names.end(), SuppressesSettingsCaption)));
 }
 
-// Gameplay -> HUD (owner request, 2026-10-19): the page is three rows, and its five element
-// switches live one level down as Visible/Hidden rows so neither page exceeds the six-row budget.
+// Gameplay -> HUD: a master control and three groups by gameplay context.
 void TestHudShapeAndVisibilityLabels() {
-  BeginCase("HUD is a three-row page with a five-row elements submenu");
+  BeginCase("HUD groups score goals, song progress, and player feedback under a master control");
 
   const std::vector<dtb::Node> roots = DefinitionRoots();
   const auto has_symbol = [&roots](const char* symbol) {
@@ -3241,7 +3244,19 @@ void TestHudShapeAndVisibilityLabels() {
     }
     return false;
   };
-  CHECK_TRUE(has_symbol("settings_hud_elements_screen"));
+  CHECK_FALSE(has_symbol("settings_hud_elements_screen"));
+  for (bool pause : {false, true}) {
+    const auto panel = [&](const char* name) { return pause ? PausePanel(name) : std::string(name); };
+    CHECK_TRUE(PanelRowSymbols(panel("settings_hud_panel")) ==
+        std::vector<std::string>({"settings_hud_hide", "settings_hud_score",
+                                  "settings_hud_song", "settings_hud_feedback"}));
+    CHECK_TRUE(PanelRowSymbols(panel("settings_hud_score_panel")) ==
+        std::vector<std::string>({"settings_hud_gold", "settings_hud_pb"}));
+    CHECK_TRUE(PanelRowSymbols(panel("settings_hud_song_panel")) ==
+        std::vector<std::string>({"settings_hud_progress", "settings_hud_timer"}));
+    CHECK_TRUE(PanelRowSymbols(panel("settings_hud_feedback_panel")) ==
+        std::vector<std::string>({"settings_hud_streak", "settings_hud_input"}));
+  }
   CHECK_TRUE(has_symbol("settings_hud_streak_on"));
   CHECK_TRUE(has_symbol("settings_hud_input_on"));
   CHECK_TRUE(has_symbol("settings_hud_hide_on"));
@@ -4548,7 +4563,7 @@ void TestUltimateTrialDispatchIsCommitGuarded() {
   for (const dtb::Node& root : roots) {
     if (root.tag == dtb::kCommand && root.kids.size() >= 3 &&
         root.kids[2].tag == dtb::kSymbol &&
-        root.kids[2].text == "settings_hud_elements_pause_panel") pause_hud = &root;
+        root.kids[2].text == "settings_hud_score_pause_panel") pause_hud = &root;
   }
   CHECK_TRUE(pause_hud != nullptr);
   if (pause_hud) {

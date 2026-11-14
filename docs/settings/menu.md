@@ -9,7 +9,7 @@ preserved; repeated baseline/build/test prose and duplicated evidence lists were
 records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.md](contracts.md) and
 [status.md](status.md).
 
-## Current organization (2026-11-13)
+## Current organization (2026-11-14)
 
 The root shows Controls, Audio & Video, Gameplay, Interface, Library & Store, and
 System & Help. Gameplay appears only with Ultimate. Every page has at most six
@@ -26,6 +26,10 @@ catalogs use More... pages; all layouts remain available.
 | Graphics | Anti-Aliasing; Anisotropic Filtering; Depth of Field (Ultimate); Advanced |
 | Graphics / Advanced | Renderer on Windows when more than one backend is available. Linux/macOS hide Renderer and use Vulkan. |
 | Gameplay | Camera Angle; Game Speed; HUD; Tracks & Gems; Scenery (Ultimate only) |
+| HUD | All HUD Elements; Score Goals; Song Progress; Player Feedback |
+| HUD / Score Goals | Gold Star Progress; Personal Best |
+| HUD / Song Progress | Song Progress Bar; Timer |
+| HUD / Player Feedback | Note Streak; Input Viewer |
 | Interface | Main Menu; Library Display; Achievement Alerts; Skip Offline Prompts; Settings Labels |
 | Settings Labels | Enabled (On / Off); Size (Normal / Big / Biggest) |
 | Main Menu | Music Shortcuts; Other Shortcuts |
@@ -54,6 +58,9 @@ of the window height, below the six-row list and above the footer. Font-measured
 wrapping and word-boundary ellipsis prevent overflow; descriptions must stay within
 96 ASCII characters including apply-boundary suffixes (see `AGENTS.md` and
 `src/ui/help_layout.h`). Live visual acceptance at each size remains pending.
+Each wrapped line is centered, and the black background fits the measured text
+with padding. Controller layout groups, layout choices, and Controller Presets
+draw no settings labels in either menu context.
 
 The preceding menu reorganization preserved stored setting IDs, keys, defaults, and
 apply boundaries are unchanged. Main-menu shortcuts are grouped by purpose;

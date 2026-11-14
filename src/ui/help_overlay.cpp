@@ -153,18 +153,54 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     const float size = layout.font_size;
     ImGui::PushFont(g_caption_font, size);
     ImFont* font = ImGui::GetFont();
+    // Use the same measured lines for fitting, panel bounds, and drawing. Drawing
+    // each line separately centers short final lines as well as single-line captions.
+    const auto wrap = [&](const std::string& value) {
+      std::vector<std::string_view> lines;
+      const char* begin = value.data();
+      const char* end = begin + value.size();
+      while (begin < end) {
+        const char* newline = std::find(begin, end, '\n');
+        const char* line_end = font->CalcWordWrapPosition(size, begin, newline,
+                                                         layout.TextWidth());
+        // ImGui can return one byte for a glyph wider than the available space.
+        // Keep UTF-8 intact even in an unusually narrow window.
+        while (line_end < newline &&
+               (static_cast<unsigned char>(*line_end) & 0xC0) == 0x80) ++line_end;
+        const char* trimmed = line_end;
+        while (trimmed > begin && (trimmed[-1] == ' ' || trimmed[-1] == '\t')) --trimmed;
+        lines.emplace_back(begin, trimmed - begin);
+        begin = line_end;
+        while (begin < end && (*begin == ' ' || *begin == '\t')) ++begin;
+        if (begin < end && *begin == '\n') ++begin;
+      }
+      return lines;
+    };
+    const auto measure_line = [&](std::string_view line) {
+      return font->CalcTextSizeA(size, 1e9f, 0.0f, line.data(), line.data() + line.size());
+    };
     const auto measure = [&](const std::string& value) {
-      return font->CalcTextSizeA(size, 1e9f, layout.TextWidth(), value.c_str());
+      const auto lines = wrap(value);
+      ImVec2 bounds(0.0f, size * lines.size());
+      for (const auto line : lines) bounds.x = std::max(bounds.x, measure_line(line).x);
+      return bounds;
     };
     text = FitCaption(std::move(text), [&](const std::string& value) {
       const auto bounds = measure(value);
       return bounds.x <= layout.TextWidth() && bounds.y <= layout.TextHeight();
     });
+    if (text.empty()) {
+      ImGui::PopFont();
+      return;
+    }
+    const auto lines = wrap(text);
+    const auto bounds = measure(text);
+    const float panel_width = std::min(layout.width, bounds.x + 2 * layout.pad_x);
     const float panel_height = std::min(layout.bottom - layout.top,
-                                        measure(text).y + 2 * layout.pad_y);
+                                        bounds.y + 2 * layout.pad_y);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, layout.bottom),
                             ImGuiCond_Always, ImVec2(0.5f, 1.0f));
-    ImGui::SetNextWindowSize(ImVec2(layout.width, panel_height), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(panel_width, panel_height), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(kCaptionBackgroundAlpha);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoNav |
                                    ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
@@ -178,9 +214,14 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(layout.pad_x, layout.pad_y));
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
     if (ImGui::Begin("##rb_blitz_help", nullptr, flags)) {
-      ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + layout.TextWidth());
-      ImGui::TextUnformatted(text.c_str());
-      ImGui::PopTextWrapPos();
+      const auto origin = ImGui::GetWindowPos();
+      float y = origin.y + layout.pad_y;
+      for (const auto line : lines) {
+        const float x = origin.x + (panel_width - measure_line(line).x) * 0.5f;
+        ImGui::GetWindowDrawList()->AddText(font, size, ImVec2(x, y),
+            ImGui::GetColorU32(ImGuiCol_Text), line.data(), line.data() + line.size());
+        y += size;
+      }
     }
     ImGui::End();
     ImGui::PopStyleColor();
