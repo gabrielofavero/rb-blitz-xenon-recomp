@@ -183,8 +183,11 @@ P6 needs an explicit graphics-owned lifetime and counter handoff.
 
 ### Instrument coverage and limits
 
-`--shader_compile_trace=true` enables the instrument (restart required; default
-false). One shared owner in `rexruntime.dll` supplies a monotonic microsecond clock,
+The instrument is enabled by default as of 2026-11-14. Use
+`--shader_compile_trace=false` to disable it for a timing comparison (restart required).
+It adds clock reads, short shared-counter locks and bounded logging; its gameplay
+overhead has not been measured. It does not change compilation, rendering or audio
+policy. One shared owner in `rexruntime.dll` supplies a monotonic microsecond clock,
 phase state and counters to both the executable and GPU plugin.
 
 - Phases: `boot`, `pre_a`, `post_a_loading`, `menu`, `song_loading`, `active_song`,

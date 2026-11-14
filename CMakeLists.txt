@@ -776,6 +776,7 @@ if(BUILD_TESTING)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_shader_compile_trace_tests>)
     endif()
+    add_test(NAME shader_compile_trace_default COMMAND rb_blitz_shader_compile_trace_tests)
     add_test(NAME shader_compile_trace_enabled COMMAND rb_blitz_shader_compile_trace_tests enabled)
     add_test(NAME shader_compile_trace_disabled COMMAND rb_blitz_shader_compile_trace_tests disabled)
 

@@ -1,0 +1,20 @@
+diff --git a/src/system/compile_trace.cpp b/src/system/compile_trace.cpp
+--- a/src/system/compile_trace.cpp
++++ b/src/system/compile_trace.cpp
+@@ -1,4 +1,4 @@
+-// Opt-in, bounded shader-cache P0 measurements. One owner in rexruntime so
++// Default-on, bounded shader-cache measurements. One owner in rexruntime so
+ // runtime helper creation and GPU-plugin work share a clock, phase and budget.
+ #include <rex/graphics/compile_trace.h>
+ #include <rex/cvar.h>
+@@ -9,9 +9,9 @@
+ #include <chrono>
+ #include <mutex>
+ 
+-REXCVAR_DEFINE_BOOL(shader_compile_trace, false, "Diagnostics",
++REXCVAR_DEFINE_BOOL(shader_compile_trace, true, "Diagnostics",
+                     "Bounded compilation, wait and frame-gap measurements; restart required.")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ 
+ namespace rex::graphics::compile_trace {
+ namespace {

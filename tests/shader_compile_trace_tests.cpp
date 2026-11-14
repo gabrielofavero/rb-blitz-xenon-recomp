@@ -9,9 +9,16 @@
 
 namespace t = rex::graphics::compile_trace;
 int main(int argc, char **argv) {
-  const bool enabled = argc > 1 && std::string_view(argv[1]) == "enabled";
-  CHECK_TRUE(rex::cvar::SetFlagByName("shader_compile_trace",
-                                      enabled ? "true" : "false"));
+  const bool use_default = argc <= 1;
+  const bool enabled = use_default || std::string_view(argv[1]) == "enabled";
+  if (use_default) {
+    CHECK_TRUE(rex::cvar::GetFlagByName("shader_compile_trace") == "true");
+    CHECK_TRUE(rex::cvar::GetFlagSource("shader_compile_trace") ==
+               rex::cvar::Source::kDefault);
+  } else {
+    CHECK_TRUE(rex::cvar::SetFlagByName("shader_compile_trace",
+                                        enabled ? "true" : "false"));
+  }
   CHECK_EQ(t::Enabled(), enabled);
   t::SetPhase(t::Phase::kPostALoading, "test");
   CHECK_EQ(t::CurrentPhase(),
