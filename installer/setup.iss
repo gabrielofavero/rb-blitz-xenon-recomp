@@ -722,10 +722,18 @@ end;
 // reads evenly when all three carry the same gap, so they are re-placed here - on
 // every page change, because the wizard hides and shows Back as it goes and each
 // page is laid out again when it appears.
-procedure LayoutWizardButtons;
+procedure LayoutWizardButtons(const CurPageID: Integer);
 var
   gap, left: Integer;
 begin
+  // Finish uses NextButton, but Cancel is hidden on this page. Align Finish
+  // with the footer's right edge instead of reserving the empty Cancel slot.
+  if CurPageID = wpFinished then
+  begin
+    WizardForm.NextButton.Left := WizardForm.CancelButton.Left +
+      WizardForm.CancelButton.Width - WizardForm.NextButton.Width;
+    Exit;
+  end;
   gap := ScaleX(10);
   left := WizardForm.CancelButton.Left - gap - WizardForm.NextButton.Width;
   WizardForm.NextButton.Left := left;
@@ -2950,7 +2958,7 @@ end;
 // what to do - so the radios only appear on a successful interactive install.
 procedure CurPageChanged(CurPageID: Integer);
 begin
-  LayoutWizardButtons;
+  LayoutWizardButtons(CurPageID);
   // The two rows this release adds to the install folder page are prefilled and
   // checked every time the page appears: the install folder may have changed since
   // it was last shown, and what paths.toml already says is a function of it.
