@@ -118,6 +118,16 @@ external folders are asked for, so a reinstall has to show it; Inno Setup's own
 registered with, so an update lands on the game rather than beside it. `/DIR`
 overrides it either way.
 
+For each destination folder, the game-files page defaults to reusing detected
+game data. The Ultimate page likewise defaults to **Use the Ultimate mod already
+in the install folder** when both `game\ultimate\gen\patch_xbox.hdr` and
+`game\ultimate\gen\patch_xbox_0.ark` exist. Reuse skips the import or mod install
+stage; Ultimate remains recorded as installed. These are file-presence checks;
+the finishing stage still verifies the files and records fingerprint mismatches.
+The user can choose a replacement source, and returning to a page preserves that
+choice until the destination changes. Missing files disable the corresponding
+reuse option. A fresh destination keeps the package and pinned-download defaults.
+
 ### The finish page
 
 The last page asks what to do when the wizard closes, with the game preselected:
@@ -325,14 +335,15 @@ search always ran through to its last resort. Measured then: a `-VulkanLoaderDir
 
 An optional community mod. It is *not* needed to play: the runtime reproduces the
 mod's three edits host-side, and an installed payload works by drag-and-drop
-(`docs/guides/ultimate-compat.md`). The installer offers three ways to get it, and none
-of them involve us distributing it:
+(`docs/guides/ultimate-compat.md`). The installer can reuse an existing mod or
+obtain it from the following sources without us distributing it:
 
 | `ULTIMATESOURCE` | What happens |
 | --- | --- |
 | `pin` | Helper downloads the release named in `config/pins.toml`, verifies the size and the hash, extracts only the `archive_prefix` subtree into `<game root>\ultimate`. |
 | `zip` | Helper reads a zip the user already has, same subtree rule. |
 | `folder` | Helper copies the mod's `gen/patch_xbox.hdr` and `gen/patch_xbox_0.ark` from a folder the user points at (the folder may be the extract root or a folder above it). |
+| `installed` | Reuses the mod already in `<game root>\ultimate`, requiring both archive files. No download or copy is performed. |
 
 The mod's own `default.xex` is deliberately never installed: it would shadow the
 user's entrypoint, and the runtime derives the mod's delta from the *vanilla*
@@ -346,6 +357,12 @@ shape — `ultimate/gen/patch_xbox.hdr` plus `ultimate/gen/patch_xbox_0.ark` —
 that is what the runtime reads.
 
 ## Wizard images
+
+The game-source, Ultimate and Shortcuts lists use DPI-scaled internal glyph
+margins and minimum row heights so themed radio buttons and checkboxes have
+room to draw. Source-page list heights follow the measured rows, including
+wrapped labels, while reserving room for the path picker or note. If the rows
+cannot all fit, the list scrolls instead of covering the picker.
 
 `assets/icon/`, at the repository root, holds the images Inno Setup shows next to
 `blitz.ico`. That icon is the app's, compiled into `rb_blitz.exe` by `rb_blitz.rc`
@@ -375,7 +392,7 @@ Setup's own switches.
 | `/GAMEPACKAGE` | file | With `package`: the Xbox 360 container file. |
 | `/DLCDIR` | folder | Where the DLC library is. Omitted, the installation's own `paths.toml` is read, then the legacy settings profile, then the default under the user's Documents; given empty (`/DLCDIR=`), the game's own `<game data>\dlc` is stored. |
 | `/SAVEDIR` | folder | Where the saves go. Same rule as `/DLCDIR`; its default is `Documents\Rock Band Blitz`, matching the game's own default. |
-| `/ULTIMATESOURCE` | `none` (default), `pin`, `zip`, `folder` | Whether and how to install the mod. |
+| `/ULTIMATESOURCE` | `none` (default), `pin`, `zip`, `folder`, `installed` | Whether and how to install or reuse the mod. |
 | `/ULTIMATEZIP` | file | With `zip`. |
 | `/ULTIMATEFOLDER` | folder | With `folder`. |
 | `/TASKS` | `startmenu,desktopicon` (Inno Setup) | Which shortcuts to create. Nothing is created without this: the declarations are unchecked and a silent install starts from no answer. |

@@ -352,6 +352,7 @@ const
   GameEntryPointRel = 'default.xex';
   GameArchiveDataRel = 'gen\main_xbox_0.ark';
   UltimateHeaderRel = 'gen\patch_xbox.hdr';
+  UltimateDataRel = 'gen\patch_xbox_0.ark';
   UltimateWrapperDir = 'Xbox';
 
   { The updater: a second build of this script (/DUpdaterMode=1) that carries no
@@ -412,7 +413,8 @@ const
   UltimatePinned = 0;
   UltimateZip = 1;
   UltimateFolder = 2;
-  UltimateNothing = 3;
+  UltimateInstalled = 3;
+  UltimateNothing = 4;
 
   { The wizard's own registration key: the AppId from [Setup], which Inno Setup
     registers an installation under. Read back at start-up to find a game that is
@@ -446,6 +448,7 @@ var
   gMethodFolderPath: String;
   gMethodLastChoice: Integer;
   gChangingMethodPath: Boolean;
+  gAssetDefaultsDir: String;
   UltimatePromptLabel: TNewStaticText;
   UltimatePathEdit: TNewEdit;
   UltimateBrowseButton: TNewButton;
@@ -1143,6 +1146,15 @@ begin
   Result := GameDataIn(WizardDirValue);
 end;
 
+function UltimatePresent: Boolean;
+var
+  folder: String;
+begin
+  folder := JoinPath(GameDataDirectory, 'ultimate');
+  Result := FileExists(JoinPath(folder, UltimateHeaderRel)) and
+            FileExists(JoinPath(folder, UltimateDataRel));
+end;
+
 // Whether the updater still has to ask where the game data comes from: the release
 // says its payload changes what the game reads out of it, or the data is not in the
 // install folder any more (deleted, or the install was moved by hand). Both are the
@@ -1237,7 +1249,29 @@ begin
   end;
 end;
 
+procedure RefreshUltimatePage;
+begin
+  UltimatePage.CheckListBox.ItemEnabled[UltimateInstalled] := UltimatePresent;
+  if (UltimatePage.SelectedValueIndex = UltimateInstalled) and (not UltimatePresent) then
+  begin
+    if '{#UltimateUrl}' <> '' then
+      UltimatePage.SelectedValueIndex := UltimatePinned
+    else
+      UltimatePage.SelectedValueIndex := UltimateNothing;
+  end;
+end;
+
 // --- the picker that shares its page with the choice ----------------------
+
+// Inno's list glyphs can be wider than their legacy bitmap gutter at high DPI.
+// Moving the control does not enlarge that gutter: give themed checkboxes and
+// radios space inside each row, both horizontally and vertically. Set the minimum
+// first so changing Offset also remeasures existing rows.
+procedure LayoutChoiceList(const list: TNewCheckListBox);
+begin
+  list.MinItemHeight := ScaleY(28);
+  list.Offset := ScaleX(12);
+end;
 
 // Keep the picker directly below the choices. Inno gives the option list most of
 // the page height by default, which stranded the related path field at the bottom.
@@ -1250,11 +1284,27 @@ procedure PlacePicker(const Page: TInputOptionWizardPage; const Prompt: TNewStat
                       const Note: TNewStaticText);
 var
   list: TNewCheckListBox;
+  index, rowHeight, height, available: Integer;
 begin
   list := Page.CheckListBox;
+  LayoutChoiceList(list);
   list.Left := ScaleX(8);
-  list.Width := list.Width - ScaleX(8);
-  list.Height := ScaleY(23) * list.Items.Count + ScaleY(4);
+  list.Width := Page.SurfaceWidth - list.Left;
+  // Read the actual row heights, including wrapped text, rather than assuming
+  // 23 pixels per choice. Reserve space for the picker/note and leave complete
+  // rows visible; the list scrolls if larger fonts require more room.
+  available := Page.SurfaceHeight - list.Top - ScaleY(64);
+  height := ScaleY(4);
+  for index := 0 to list.Items.Count - 1 do
+  begin
+    rowHeight := SendMessage(list.Handle, $01A1, index, 0); // LB_GETITEMHEIGHT
+    if rowHeight < list.MinItemHeight then
+      rowHeight := list.MinItemHeight;
+    if (index > 0) and (height + rowHeight > available) then
+      Break;
+    height := height + rowHeight;
+  end;
+  list.Height := height;
 
   // The prompt's own height is fixed here rather than measured: it is one line, and
   // the edit below it is placed from it before any caption has been set.
@@ -1324,8 +1374,10 @@ begin
   // the game folder (docs/guides/ultimate-compat.md), so the second half of that
   // answer is something a user can do without this wizard at all (owner request,
   // 2026-10-14).
-  UltimateNoteLabel.Visible := choice = UltimateNothing;
-  if UltimateNoteLabel.Visible then
+  UltimateNoteLabel.Visible := (choice = UltimateNothing) or (choice = UltimateInstalled);
+  if choice = UltimateInstalled then
+    UltimateNoteLabel.Caption := 'The installed mod will be kept without downloading or copying it again.'
+  else if choice = UltimateNothing then
     UltimateNoteLabel.Caption := 'You can add the mod later: run this installer again, or copy ' +
       'the release''s Xbox folder into game\ultimate in the install folder.';
 end;
@@ -1362,6 +1414,33 @@ end;
 
 procedure UltimateChoiceChanged(Sender: TObject);
 begin
+  RefreshUltimatePage;
+  UpdateUltimatePicker;
+end;
+
+// Pick defaults once per destination. Returning to a page must preserve a user's
+// explicit replacement choice, while a different install folder needs fresh defaults.
+procedure RefreshAssetChoices;
+var
+  dir: String;
+begin
+  dir := AddBackslash(ExpandFileName(WizardDirValue));
+  if CompareText(dir, gAssetDefaultsDir) <> 0 then
+  begin
+    gAssetDefaultsDir := dir;
+    if GameDataPresent then
+      MethodPage.SelectedValueIndex := MethodInstalled
+    else
+      MethodPage.SelectedValueIndex := MethodPackage;
+    if UltimatePresent then
+      UltimatePage.SelectedValueIndex := UltimateInstalled
+    else if '{#UltimateUrl}' <> '' then
+      UltimatePage.SelectedValueIndex := UltimatePinned
+    else
+      UltimatePage.SelectedValueIndex := UltimateNothing;
+  end;
+  MethodChoiceChanged(nil);
+  RefreshUltimatePage;
   UpdateUltimatePicker;
 end;
 
@@ -1781,6 +1860,8 @@ begin
   gUltimateActive := False;
   gUltimateArchive := '';
   gUltimateFolder := '';
+  gUltimateSourceDescription := '';
+  gUltimateVersion := '';
 
   // An update never reinstalls or removes the mod, and it has no page to ask on:
   // its Ultimate pages are skipped, so the page's preselected answer must not be
@@ -1801,9 +1882,9 @@ begin
       gUltimateArchive := ParamUltimateZip
     else if mode = 'folder' then
       gUltimateFolder := ParamUltimateFolder
-    else if mode <> 'none' then
+    else if (mode <> 'none') and (mode <> 'installed') then
     begin
-      Result := 'ULTIMATESOURCE must be none, pin, zip or folder, not ''' + mode + '''.';
+      Result := 'ULTIMATESOURCE must be none, pin, zip, folder or installed, not ''' + mode + '''.';
       Exit;
     end;
   end
@@ -1821,12 +1902,27 @@ begin
       mode := 'folder';
       gUltimateFolder := Trim(UltimatePathEdit.Text);
     end
+    else if UltimatePage.SelectedValueIndex = UltimateInstalled then
+      mode := 'installed'
     else
       mode := 'none';
   end;
 
   if mode = 'none' then
     Exit;
+
+  if mode = 'installed' then
+  begin
+    if not UltimatePresent then
+    begin
+      Result := 'The install folder holds no complete Ultimate mod to reuse. Choose another mod source.';
+      Exit;
+    end;
+    gUltimateMode := 'installed';
+    gUltimateSourceDescription := 'the Ultimate mod already in the install folder';
+    gUltimateVersion := 'unknown (reused installation)';
+    Exit;
+  end;
 
   if mode = 'pin' then
   begin
@@ -2128,6 +2224,7 @@ begin
   UltimatePage.Add('Download Rock Band Blitz Ultimate {#UltimateVersion} from GitHub');
   UltimatePage.Add('Install from a zip file');
   UltimatePage.Add('Install from a folder');
+  UltimatePage.Add('Use the Ultimate mod already in the install folder');
   UltimatePage.Add('Do not install the mod');
   // The download is the answer this page is here to offer, so it is the one the
   // page opens on - unless this build pinned no release to download, in which case
@@ -2206,18 +2303,18 @@ begin
   StagePage := CreateOutputProgressPage('Installing',
     'The installer is building your game folder. This takes a few minutes for the game data.');
   // Inno hides the wizard's navigation buttons on a custom progress page.
+  // Keep the replacement in the same bottom-right footer slot as Cancel.
   StageCancelButton := TNewButton.Create(WizardForm);
-  StageCancelButton.Parent := StagePage.Surface;
+  StageCancelButton.Parent := WizardForm.CancelButton.Parent;
   StageCancelButton.Caption := SetupMessage(msgButtonCancel);
   StageCancelButton.Cancel := True;
-  StageCancelButton.SetBounds(0,
-    StagePage.ProgressBar.Top + StagePage.ProgressBar.Height + ScaleY(12),
+  StageCancelButton.SetBounds(WizardForm.CancelButton.Left, WizardForm.CancelButton.Top,
     WizardForm.CancelButton.Width, WizardForm.CancelButton.Height);
+  StageCancelButton.Anchors := WizardForm.CancelButton.Anchors;
   StageCancelButton.OnClick := @StageCancelClick;
   StageCancelButton.Visible := False;
 
-  MethodChoiceChanged(nil);
-  UpdateUltimatePicker;
+  RefreshAssetChoices;
   LayoutSelectDirHeader;
   LayoutLocationFields;
   // The page the folder starts on, and whatever paths.toml or the user's input
@@ -2230,6 +2327,7 @@ begin
   // install's answer from reappearing, and /TASKS or /MERGETASKS is what ticks one.
   // A silent install has no page to ask on, so this is also what it creates.
   ApplyTaskDefaults;
+  LayoutChoiceList(WizardForm.TasksList);
 
   // D8: the finish page's choice. The [Run] entry is gone; these two radios
   // replace it, and DeinitializeSetup runs whichever is selected. RunList is
@@ -2294,7 +2392,7 @@ begin
   // install has spent minutes on it.
   if CurPageID = wpSelectDir then
   begin
-    MethodChoiceChanged(nil);
+    RefreshAssetChoices;
     PrefillLocations;
     problem := CheckLocations(False);
     if problem <> '' then
@@ -2662,7 +2760,7 @@ begin
   // the build it just installed, which is the one the install manifest should name.
   if gUpdater and (gUpdatePayloadCommit <> '') then
     args := args + ' --payload-commit ' + QuoteArg(gUpdatePayloadCommit);
-  if gUltimateActive then
+  if gUltimateActive or (gUltimateMode = 'installed') then
   begin
     args := args + ' --ultimate 1';
     if gUltimateSourceDescription <> '' then
@@ -2785,7 +2883,9 @@ begin
   else
     lines := lines + Space + 'Game data: ' + ChosenGamePackage + NewLine;
 
-  if gUltimateActive then
+  if gUltimateMode = 'installed' then
+    lines := lines + Space + 'Rock Band Blitz Ultimate: keep what is already installed' + NewLine
+  else if gUltimateActive then
   begin
     if gUltimateMode = 'pin' then
       lines := lines + Space + 'Rock Band Blitz Ultimate ' + '{#UltimateVersion}' +
@@ -2865,10 +2965,17 @@ begin
   // data item only stays offered while there is data to keep.
   if CurPageID = MethodPage.ID then
   begin
-    MethodChoiceChanged(nil);
+    PlacePicker(MethodPage, MethodPromptLabel, MethodPathEdit, MethodBrowseButton, nil);
+    RefreshAssetChoices;
   end
   else if CurPageID = UltimatePage.ID then
-    UpdateUltimatePicker;
+  begin
+    PlacePicker(UltimatePage, UltimatePromptLabel, UltimatePathEdit, UltimateBrowseButton,
+                UltimateNoteLabel);
+    RefreshAssetChoices;
+  end
+  else if CurPageID = wpSelectTasks then
+    LayoutChoiceList(WizardForm.TasksList);
 
   if CurPageID <> wpFinished then
     Exit;
