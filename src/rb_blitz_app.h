@@ -88,6 +88,7 @@
 #include "hooks/dlc.h"
 #include "hooks/content_progress.h"
 #include "hooks/local_save.h"
+#include "hooks/screenshots.h"
 #include "hooks/settings_bridge_hooks.h"
 #include "hooks/settings_payload.h"
 #include "hooks/shell_music.h"
@@ -391,6 +392,7 @@ class RbBlitzApp : public rex::ReXApp {
     // registry, so the toggle and the row list are captured once (P1's D7).
     rb_blitz::menu_filter::Configure(settings_restart_boot_);
     rb_blitz::local_save::Configure(runtime());
+    rb_blitz::screenshots::Configure(runtime());
     rb_blitz::ultimate::Configure(runtime(), game_data_root());
     log_stage("identity_and_ultimate");
     // After ultimate::Configure, which decides what the guest-visible game tree

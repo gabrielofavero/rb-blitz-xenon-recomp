@@ -61,6 +61,30 @@ for byte, when no payload is present.
 - The mod also targets **PS3** (a `.pkg`). That flavour is not consumable here and is
   out of scope.
 
+### Results screenshots in the recomp
+
+The existing **Save Screenshot** button calls `Rnd::ScreenDumpUnique`
+(`0x82205C88`). The recomp hooks this boundary and captures the latest guest
+image through the renderer's presenter, supported by both Direct3D 12 and Vulkan.
+It saves standard, uncompressed **24-bit BMP** files named
+`<song-short-name>_000001.bmp`, incrementing the number without replacing files.
+Captures contain the guest image at its rendered dimensions, without desktop
+contents, window borders or host overlays.
+
+The destination is `<user_data_root>/Pictures`, created on the first capture.
+For older configurations whose root ends in `Saved Games` (case-insensitive),
+it is instead the sibling `Pictures` folder. For example, both
+`Documents/Rock Band Blitz` and `Documents/Rock Band Blitz/Saved Games` put images
+in `Documents/Rock Band Blitz/Pictures`. Explicit custom user roots are honored.
+The guest's `screenshots/_keepme` and relative fallback no longer determine the
+host destination, and the game data does not need write access.
+
+The log records each successful filename and capture/write errors. Ultimate's
+authored footer still changes to `Screenshot Saved` without checking success;
+that label alone is not proof that a file was written. Host tests cover the BMP
+pixels, dimensions, row padding, destination selection and collision/error paths;
+visual verification of the results button remains a gameplay check.
+
 ## 3. The evidence: the mod's executable differs from retail in 12 bytes
 
 `scripts/xex/decrypt_xex.py` mirrors the SDK's `XexModule::ReadImage` (retail key, CBC IV
