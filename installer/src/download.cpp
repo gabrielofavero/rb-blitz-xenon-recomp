@@ -252,6 +252,11 @@ bool DownloadToFile(const DownloadRequest& request, DownloadResult* out, std::st
   int last_percent = -1;
   bool ok = true;
   for (;;) {
+    if (CancellationRequested(request.progress_file)) {
+      SetError(error, "download canceled");
+      ok = false;
+      break;
+    }
     DWORD available = 0;
     if (WinHttpQueryDataAvailable(http_request.get(), &available) == FALSE) {
       *error = S("connection lost after ", HumanBytes(total), ": ", LastWin32Error());

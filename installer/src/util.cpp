@@ -569,6 +569,13 @@ std::uint64_t FileSizeOrZero(const std::filesystem::path& path) {
   return code ? 0 : static_cast<std::uint64_t>(size);
 }
 
+bool CancellationRequested(const std::filesystem::path& progress_file) {
+  if (progress_file.empty()) return false;
+  auto request = progress_file;
+  request += L".cancel";
+  return FileExists(request);
+}
+
 void WriteProgressFile(const std::filesystem::path& path, int percent) {
   WriteProgressFile(path, percent, {});
 }

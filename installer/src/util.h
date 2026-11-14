@@ -91,6 +91,8 @@ std::uint64_t FileSizeOrZero(const std::filesystem::path& path);
 // newline. Errors are logged, never fatal.
 void WriteProgressFile(const std::filesystem::path& path, int percent);
 void WriteProgressFile(const std::filesystem::path& path, int percent, std::string_view detail);
+// The wizard leaves a sidecar request until the active helper has stopped.
+bool CancellationRequested(const std::filesystem::path& progress_file);
 // `--summary` output: `key=value;key=value` on a single line, written atomically
 // enough for the wizard to poll it.
 void WriteSummaryFile(const std::filesystem::path& path, const std::vector<std::pair<std::string, std::string>>& pairs);

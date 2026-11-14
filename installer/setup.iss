@@ -433,6 +433,7 @@ var
   MethodPage: TInputOptionWizardPage;
   UltimatePage: TInputOptionWizardPage;
   StagePage: TOutputProgressWizardPage;
+  StageCancelButton: TNewButton;
 
   { The file and folder pickers sit on the option page that asks the question they
     belong to: the radio says which kind of source it is, and the prompt line, the
@@ -485,6 +486,7 @@ var
   gGameDetailsFile: String;
 
   gStageActive: Boolean;
+  gStageCancelled: Boolean;
   gStageTitle: String;
   { The stage's own sentence - what it is doing, why it takes a while - which is the
     progress page's second line whenever the helper has no detail of its own to put
@@ -942,9 +944,8 @@ end;
 
 // --- the progress page ----------------------------------------------------
 
-// Inno Setup does not pump messages while [Code] is running, so the wizard
-// would otherwise not repaint during a stage: UpdateWindow through
-// TControl.Refresh is the only way to make the page follow the helper.
+// SetText/SetProgress pump messages, including the progress page's Cancel button.
+// Refresh also paints updates before the next polling sleep.
 procedure PumpStagePaint;
 begin
   StagePage.Msg1Label.Refresh;
@@ -976,6 +977,8 @@ begin
   second := detail;
   if second = '' then
     second := gStageSubtitle;
+  if gStageCancelled then
+    second := 'Cancelling... waiting for the current operation to stop safely.';
   StagePage.SetText(headline, second);
   PumpStagePaint;
 end;
@@ -1001,17 +1004,40 @@ begin
   if not gStageVisible then
   begin
     StagePage.Show;
+    StageCancelButton.Visible := not WizardSilent;
+    StageCancelButton.Enabled := True;
     gStageVisible := True;
   end;
 end;
 
 procedure EndStages;
 begin
+  StageCancelButton.Visible := False;
+  gStageActive := False;
   if gStageVisible then
   begin
     StagePage.Hide;
     gStageVisible := False;
   end;
+end;
+
+procedure StageCancelClick(Sender: TObject);
+begin
+  if gStageCancelled then
+    Exit;
+  if SuppressibleMsgBox('Cancel installation?' + kCrLf + kCrLf +
+                        'Files already installed will remain. You can run Setup again to finish.',
+                        mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) <> IDYES then
+    Exit;
+  // Let the helper unwind its staging transaction; never kill it during a swap.
+  if not SaveStringToFile(gProgressFile + '.cancel', 'cancel', False) then
+  begin
+    SuppressibleMsgBox('Could not request cancellation. Please try again.',
+                       mbError, MB_OK, IDOK);
+    Exit;
+  end;
+  gStageCancelled := True;
+  StageCancelButton.Enabled := False;
 end;
 
 procedure PollStage(const startPercent, endPercent: Integer);
@@ -1023,7 +1049,7 @@ var
 begin
   waited := 0;
   quiet := 0;
-  while waited < StagePollLimit do
+  while (waited < StagePollLimit) or gStageCancelled do
   begin
     if HelperFinished(gStageSummaryFile) then
       Exit;
@@ -1041,7 +1067,7 @@ begin
       StageUpdate(-1, detail)
     else
       StageUpdate(startPercent + (percent * (endPercent - startPercent)) div 100, detail);
-    if quiet > SilencePollLimit then
+    if (quiet > SilencePollLimit) and (not gStageCancelled) then
     begin
       gFailureText := 'the helper stopped reporting progress';
       Exit;
@@ -1054,16 +1080,27 @@ end;
 
 // Runs one stage of the install on the progress page. The helper is launched
 // without waiting: the wizard watches its progress file instead, which is what
-// keeps the page updating at all - Inno Setup cannot pump messages while
-// CurStepChanged is running.
+// keeps the page responsive through SetText/SetProgress while waiting.
 function RunStage(const title, subtitle, args: String; const startPercent,
                   endPercent: Integer): Boolean;
 begin
   gFailureText := '';
   ShowStage(title, subtitle);
+  if gStageCancelled then
+  begin
+    gFailed := True;
+    EndStages;
+    Abort;
+  end;
   RunHelper(args + ' --progress ' + QuoteArg(gProgressFile), gStageSummaryFile, gLogFile, gAppDir,
             False);
   PollStage(startPercent, endPercent);
+  if gStageCancelled then
+  begin
+    gFailed := True;
+    EndStages;
+    Abort;
+  end;
   Result := SummaryFlag(gStageSummaryFile, 'ok');
   if Result then
     gFailureText := ''
@@ -2168,6 +2205,16 @@ begin
 
   StagePage := CreateOutputProgressPage('Installing',
     'The installer is building your game folder. This takes a few minutes for the game data.');
+  // Inno hides the wizard's navigation buttons on a custom progress page.
+  StageCancelButton := TNewButton.Create(WizardForm);
+  StageCancelButton.Parent := StagePage.Surface;
+  StageCancelButton.Caption := SetupMessage(msgButtonCancel);
+  StageCancelButton.Cancel := True;
+  StageCancelButton.SetBounds(0,
+    StagePage.ProgressBar.Top + StagePage.ProgressBar.Height + ScaleY(12),
+    WizardForm.CancelButton.Width, WizardForm.CancelButton.Height);
+  StageCancelButton.OnClick := @StageCancelClick;
+  StageCancelButton.Visible := False;
 
   MethodChoiceChanged(nil);
   UpdateUltimatePicker;
@@ -2490,6 +2537,8 @@ begin
   gGameDetailsFile := JoinPath(gAppDir, 'game-source-details.txt');
   gFailed := False;
   gStageActive := True;
+  gStageCancelled := False;
+  DeleteFile(gProgressFile + '.cancel');
   BeginStages;
 
   // 1. the recompiled build
@@ -2704,13 +2753,11 @@ end;
 
 procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
 begin
-  if (not gStageActive) or Cancel then
+  if not gStageActive then
     Exit;
+  Cancel := False;
   Confirm := False;
-  if SuppressibleMsgBox('The installer is still working on your game folder.' + kCrLf + kCrLf +
-                        'Stopping now can leave the install half finished. Stop anyway?',
-                        mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then
-    Cancel := True;
+  StageCancelClick(nil);
 end;
 
 function UpdateReadyMemo(const Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo,
@@ -2790,7 +2837,9 @@ end;
 
 function GetCustomSetupExitCode: Integer;
 begin
-  if gFailed then
+  if gStageCancelled then
+    Result := 2
+  else if gFailed then
     Result := 9
   else
     Result := 0;
@@ -2823,6 +2872,14 @@ begin
 
   if CurPageID <> wpFinished then
     Exit;
+  if gStageCancelled then
+  begin
+    WizardForm.FinishedHeadingLabel.Caption := 'Installation cancelled';
+    WizardForm.FinishedLabel.Caption :=
+      'Setup stopped before completing all installation steps. ' +
+      'Files already installed remain in the destination folder. ' +
+      'Run Setup again to finish installing.';
+  end;
   if gUpdater or gFailed or WizardSilent then
   begin
     EndGameRadio.Visible := False;

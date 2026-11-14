@@ -93,6 +93,7 @@ struct ProgressSink {
 
   void Report(int percent) const;
   void Report(int percent, std::string_view detail) const;
+  bool Cancelled() const;
 };
 
 // --- paths ----------------------------------------------------------------

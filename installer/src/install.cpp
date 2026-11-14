@@ -677,6 +677,8 @@ std::filesystem::path StagingRoot(const std::filesystem::path& app_dir) {
 
 void ProgressSink::Report(int percent) const { Report(percent, {}); }
 
+bool ProgressSink::Cancelled() const { return CancellationRequested(file); }
+
 void ProgressSink::Report(int percent, std::string_view detail) const {
   if (file.empty()) {
     return;
@@ -703,6 +705,8 @@ bool PlanGamePackage(const std::filesystem::path& package, GameSourcePlan* out, 
 bool ImportGame(const GameSourcePlan& plan, const std::filesystem::path& game_root,
                 const ProgressSink& progress, std::string* error) {
   portable::ImportCallbacks callbacks;
+  callbacks.cancelled = [&progress] { return progress.Cancelled(); };
+  callbacks.continue_at = [&progress](portable::ImportPhase) { return !progress.Cancelled(); };
   callbacks.progress = [&progress](int percent, std::string_view detail) {
     progress.Report(percent, detail);
   };
@@ -764,6 +768,10 @@ bool InstallPayload(const SourceRef& source, const std::filesystem::path& app_di
                    progress, "recompiled build", &tree, error)) {
     return false;
   }
+  if (progress.Cancelled()) {
+    SetError(error, "installation canceled");
+    return false;
+  }
 
   ComponentResult result;
   if (!VerifyPayloadTree(tree, pins, S("from ", DescribeSource(source)), &result, error)) {
@@ -774,6 +782,10 @@ bool InstallPayload(const SourceRef& source, const std::filesystem::path& app_di
     result.version = source.version;
   }
 
+  if (progress.Cancelled()) {
+    SetError(error, "installation canceled");
+    return false;
+  }
   std::size_t moved = 0;
   if (!MoveTree(tree, app_dir, &moved, error)) {
     return false;
@@ -819,6 +831,10 @@ bool InstallUltimate(const SourceRef& source, const std::filesystem::path& game_
                    RejectedUltimateFile, progress, "Ultimate archive", &tree, error)) {
     return false;
   }
+  if (progress.Cancelled()) {
+    SetError(error, "installation canceled");
+    return false;
+  }
 
   std::vector<FileCheck> checks;
   if (!fingerprint::VerifyRoles(print, tree, roles, &checks, error)) {
@@ -846,6 +862,10 @@ bool InstallUltimate(const SourceRef& source, const std::filesystem::path& game_
   }
 
   const fs::path ultimate_root = game_root / PathOf(kUltimateDirName);
+  if (progress.Cancelled()) {
+    SetError(error, "installation canceled");
+    return false;
+  }
   if (DirectoryExists(ultimate_root) && !RemoveTree(ultimate_root, error)) {
     return false;
   }

@@ -1136,6 +1136,19 @@ static void TestPayloadAndFinalize() {
   // which backends and which commit its build was (2026-10-14).
   CHECK_CONTAINS(ReadFileOrEmpty(app / kPayloadManifestName), "backends = \"d3d12,vulkan\"");
 
+  BeginCase("cancelling a payload install preserves the installed files and cleans staging");
+  const fs::path cancel_file = fs::path(progress_file.wstring() + L".cancel");
+  CHECK_FALSE(CancellationRequested({}));
+  CHECK_FALSE(CancellationRequested(progress_file));
+  WriteText(cancel_file, "cancel");
+  CHECK_TRUE(CancellationRequested(progress_file));
+  const std::string installed_exe = ReadFileOrEmpty(app / kRuntimeExeName);
+  CHECK_FALSE(InstallPayload(source, app, embedded, ProgressSink{progress_file}, nullptr, &error));
+  CHECK_STR_EQ(error, "installation canceled");
+  CHECK_STR_EQ(ReadFileOrEmpty(app / kRuntimeExeName), installed_exe);
+  CHECK_FALSE(DirectoryExists(StagingRoot(app)));
+  RemovePath(cancel_file);
+
   BeginCase("the installed payload verifies and detects tampering");
 
   ComponentResult verify;

@@ -63,7 +63,7 @@ build machine's path in it — and [`../docs/guides/ultimate-compat.md`](../docs
 | Rock Band Blitz Ultimate | Download the pinned release from the mod's own GitHub release (selected by default), use a zip, use a folder, or do not install it. The zip or folder is asked for on this page, and *do not install* puts how to add it later in the same place: run this installer again, or copy the release's `Xbox` folder into `<install folder>\game\ultimate`. |
 | Shortcuts | Which of the two shortcuts to create — both are the game ([details below](#shortcuts)). |
 | Ready to install | The destination, version and answers, for a last look before anything is written. |
-| Progress | One bar across four stages (build, game data, mod, finishing). The first line names the stage and how far it has got ("Installing Rock Band Blitz Ultimate  (71%)"), the second what the helper is doing inside it ("adding the mod's songs and modes…"), which is what the stage's own sentence says until the helper has reported. Cancel asks for confirmation while a stage runs. |
+| Progress | One bar across four stages (build, game data, mod, finishing). The first line names the stage and how far it has got ("Installing Rock Band Blitz Ultimate  (71%)"), the second what the helper is doing inside it ("adding the mod's songs and modes…"), which is what the stage's own sentence says until the helper has reported. A Cancel button stays available while a stage runs. After confirmation, Setup stops at a safe point and skips the remaining stages; files already installed remain so Setup can be run again. |
 | Finish | A two-way choice — launch the game, or do nothing ([details below](#the-finish-page)). |
 
 The licence has no page: nothing in this wizard is agreed to, so the GPL-2.0 text
