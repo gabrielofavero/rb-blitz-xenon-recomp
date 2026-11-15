@@ -5,6 +5,7 @@
 #include "input/remap.h"
 #include <rex/hook.h>
 #include <rex/cvar.h>
+#include <rex/graphics/compile_trace.h>
 #include <rex/kernel/xam/module.h>
 #include "hooks/help_observer.h"
 #include "hooks/menu_filter.h"
@@ -868,6 +869,8 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
 } // namespace rb_blitz::input
 
 REX_HOOK_RAW(sub_824B2958) {
+  rex::graphics::compile_trace::Scope trace_poll(
+      rex::graphics::compile_trace::Event::kGuestWork, "guest.ui_poll", 0x824B2958);
   const auto manager = ctx.r3.u32;
   rb_blitz::input::PollMouse(ctx, base, manager);
   __imp__sub_824B2958(ctx, base);
@@ -882,6 +885,7 @@ REX_HOOK_RAW(sub_824B2958) {
                                      rb_blitz::input::CurrentFocus(),
                                      rb_blitz::input::FocusedListDrawn(),
                                      rb_blitz::input::MenuAvailable()});
+  trace_poll.Success();
 }
 REX_HOOK_RAW(sub_824E5020) {
   rb_blitz::input::DrawList(ctx, base);

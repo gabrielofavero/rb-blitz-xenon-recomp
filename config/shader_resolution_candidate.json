@@ -140,6 +140,10 @@
       "hash": "28c32aa31cdf0e8a"
     },
     {
+      "stage": "vertex",
+      "hash": "29bbc4da7896db8f"
+    },
+    {
       "stage": "pixel",
       "hash": "2a2c75ef047d1bd7"
     },

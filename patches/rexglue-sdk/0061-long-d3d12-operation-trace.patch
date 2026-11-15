@@ -1,0 +1,200 @@
+diff --git a/include/rex/graphics/compile_trace.h b/include/rex/graphics/compile_trace.h
+--- a/include/rex/graphics/compile_trace.h
++++ b/include/rex/graphics/compile_trace.h
+@@ -26,6 +26,9 @@
+   kCompileWait,
+   kGuestFrame,
+   kGpuFrame,
++  // CPU spans in non-compilation GPU work. Only spans >= 50 ms are retained;
++  // short operations return before taking the shared trace lock.
++  kGpuOperation,
+   kCount
+ };
+ bool Enabled();
+diff --git a/src/system/compile_trace.cpp b/src/system/compile_trace.cpp
+--- a/src/system/compile_trace.cpp
++++ b/src/system/compile_trace.cpp
+@@ -20,7 +20,8 @@
+                                        "song_loading", "active_song", "paused",         "unknown"};
+ constexpr const char* kEventNames[] = {"translation",     "guest_pipeline", "placeholder",
+                                        "helper_graphics", "helper_compute", "compile_drain",
+-                                       "compile_wait",    "guest_frame",    "gpu_frame"};
++                                       "compile_wait",    "guest_frame",    "gpu_frame",
++                                       "gpu_operation"};
+ struct Counter {
+   uint64_t count = 0, failed = 0, total = 0, worst = 0;
+   uint64_t over50 = 0, over100 = 0, over250 = 0, suppressed = 0;
+@@ -115,6 +116,8 @@
+             uint64_t end, bool success, uint64_t variant) {
+   if (!Enabled())
+     return;
++  if (event == Event::kGpuOperation && (end < begin || end - begin < 50000))
++    return;
+   std::lock_guard lock(mutex);
+   RecordLocked(event, start_phase, site, key, begin, end, success, variant);
+ }
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -1979,6 +1979,8 @@
+ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontbuffer_width,
+                                       uint32_t frontbuffer_height) {
+   SCOPE_profile_cpu_f("gpu");
++  rex::graphics::compile_trace::Scope trace_swap(
++      rex::graphics::compile_trace::Event::kGpuOperation, "d3d12.swap", frontbuffer_ptr);
+   vertex_buffers_in_sync_[0] = 0;
+   vertex_buffers_in_sync_[1] = 0;
+ 
+@@ -2366,6 +2368,7 @@
+   // End the frame even if did not present for any reason (the image refresher
+   // was not called), to prevent leaking per-frame resources.
+   EndSubmission(true);
++  trace_swap.Success();
+ }
+ 
+ void D3D12CommandProcessor::OnPrimaryBufferEnd() {
+@@ -3218,6 +3221,8 @@
+ 
+ HRESULT D3D12CommandProcessor::WaitForFenceEvent(
+     ID3D12Fence* fence, uint64_t value, const char* scope) {
++  rex::graphics::compile_trace::Scope trace_wait(
++      rex::graphics::compile_trace::Event::kGpuOperation, scope, value);
+   const ULONGLONG begin = GetTickCount64();
+   ULONGLONG next_report_ms = 1000;
+   while (true) {
+@@ -3229,7 +3234,10 @@
+     if (FAILED(removed)) return removed;
+     const uint64_t completed = fence->GetCompletedValue();
+     if (completed == UINT64_MAX) return DXGI_ERROR_DEVICE_REMOVED;
+-    if (completed >= value) return S_OK;
++    if (completed >= value) {
++      trace_wait.Success();
++      return S_OK;
++    }
+     const ULONGLONG elapsed = GetTickCount64() - begin;
+     if (elapsed >= next_report_ms) {
+       REXGPU_WARN("D3D12 fence wait: scope={} target={} completed={} elapsed_ms={}",
+@@ -3536,6 +3544,9 @@
+ }
+ 
+ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
++  rex::graphics::compile_trace::Scope trace_submission(
++      rex::graphics::compile_trace::Event::kGpuOperation, "d3d12.end_submission",
++      submission_current_, is_swap);
+   const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
+ 
+   // Make sure there is a command allocator to write commands to.
+@@ -3589,10 +3600,22 @@
+         command_allocator_writable_first_->command_allocator;
+     command_allocator->Reset();
+     command_list_->Reset(command_allocator, nullptr);
+-    deferred_command_list_.Execute(command_list_, command_list_1_);
+-    command_list_->Close();
++    {
++      rex::graphics::compile_trace::Scope trace_execute(
++          rex::graphics::compile_trace::Event::kGpuOperation, "d3d12.command_list_replay",
++          submission_current_);
++      deferred_command_list_.Execute(command_list_, command_list_1_);
++      command_list_->Close();
++      trace_execute.Success();
++    }
+     ID3D12CommandList* execute_command_lists[] = {command_list_};
+-    direct_queue->ExecuteCommandLists(1, execute_command_lists);
++    {
++      rex::graphics::compile_trace::Scope trace_execute(
++          rex::graphics::compile_trace::Event::kGpuOperation, "d3d12.queue_execute",
++          submission_current_);
++      direct_queue->ExecuteCommandLists(1, execute_command_lists);
++      trace_execute.Success();
++    }
+     command_allocator_writable_first_->last_usage_submission = submission_current_;
+     if (command_allocator_submitted_last_) {
+       command_allocator_submitted_last_->next = command_allocator_writable_first_;
+@@ -3662,6 +3685,7 @@
+     }
+   }
+ 
++  trace_submission.Success();
+   return true;
+ }
+ 
+diff --git a/src/graphics/d3d12/shared_memory.cpp b/src/graphics/d3d12/shared_memory.cpp
+--- a/src/graphics/d3d12/shared_memory.cpp
++++ b/src/graphics/d3d12/shared_memory.cpp
+@@ -15,6 +15,7 @@
+ 
+ #include <rex/assert.h>
+ #include <rex/cvar.h>
++#include <rex/graphics/compile_trace.h>
+ #include <rex/graphics/d3d12/command_processor.h>
+ #include <rex/graphics/d3d12/shared_memory.h>
+ #include <rex/logging.h>
+@@ -278,7 +279,10 @@
+   heap_desc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
+   heap_desc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS | provider.GetHeapFlagCreateNotZeroed();
+   ID3D12Heap* heap;
+-  if (FAILED(device->CreateHeap(&heap_desc, IID_PPV_ARGS(&heap)))) {
++  if (FAILED(rex::graphics::compile_trace::Call(
++          rex::graphics::compile_trace::Event::kGpuOperation, "d3d12.shared_heap_create",
++          offset_bytes, [&] { return device->CreateHeap(&heap_desc, IID_PPV_ARGS(&heap)); },
++          length_bytes))) {
+     REXGPU_ERROR("Shared memory: Failed to create a tile heap");
+     return false;
+   }
+@@ -294,9 +298,15 @@
+   region_size.UseBox = FALSE;
+   D3D12_TILE_RANGE_FLAGS range_flags = D3D12_TILE_RANGE_FLAG_NONE;
+   UINT heap_range_start_offset = 0;
+-  direct_queue->UpdateTileMappings(buffer_, 1, &region_start_coordinates, &region_size, heap, 1,
+-                                   &range_flags, &heap_range_start_offset, &region_size.NumTiles,
+-                                   D3D12_TILE_MAPPING_FLAG_NONE);
++  {
++    rex::graphics::compile_trace::Scope trace_mapping(
++        rex::graphics::compile_trace::Event::kGpuOperation, "d3d12.shared_tile_mapping",
++        offset_bytes, length_bytes);
++    direct_queue->UpdateTileMappings(buffer_, 1, &region_start_coordinates, &region_size, heap, 1,
++                                     &range_flags, &heap_range_start_offset, &region_size.NumTiles,
++                                     D3D12_TILE_MAPPING_FLAG_NONE);
++    trace_mapping.Success();
++  }
+   command_processor_.NotifyQueueOperationsDoneDirectly();
+   return true;
+ }
+@@ -306,6 +316,9 @@
+   if (upload_page_ranges.empty()) {
+     return true;
+   }
++  rex::graphics::compile_trace::Scope trace_upload(
++      rex::graphics::compile_trace::Event::kGpuOperation, "d3d12.shared_upload",
++      upload_page_ranges.front().first << page_size_log2(), upload_page_ranges.size());
+   CommitUAVWritesAndTransitionBuffer(D3D12_RESOURCE_STATE_COPY_DEST);
+   command_processor_.SubmitBarriers();
+   auto& command_list = command_processor_.GetDeferredCommandList();
+@@ -335,6 +348,7 @@
+       upload_range_length -= upload_buffer_pages;
+     }
+   }
++  trace_upload.Success();
+   return true;
+ }
+ 
+diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -1598,9 +1598,13 @@
+   // Assuming untiling will be the next operation.
+   D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
+   Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+-  if (FAILED(device->CreateCommittedResource(&ui::d3d12::util::kHeapPropertiesDefault,
+-                                             provider.GetHeapFlagCreateNotZeroed(), &desc,
+-                                             resource_state, nullptr, IID_PPV_ARGS(&resource)))) {
++  if (FAILED(rex::graphics::compile_trace::Call(
++          rex::graphics::compile_trace::Event::kGpuOperation, "d3d12.texture_create",
++          (uint64_t(desc.Width) << 32) | desc.Height, [&] {
++            return device->CreateCommittedResource(&ui::d3d12::util::kHeapPropertiesDefault,
++                provider.GetHeapFlagCreateNotZeroed(), &desc, resource_state, nullptr,
++                IID_PPV_ARGS(&resource));
++          }, uint64_t(desc.Format)))) {
+     return nullptr;
+   }
+   return std::unique_ptr<Texture>(new D3D12Texture(*this, key, resource.Get(), resource_state));

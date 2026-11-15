@@ -1,0 +1,13 @@
+diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -501,7 +501,8 @@
+       if (pending_keyboard_request_ && theme.request_keyboard && !action.cancel) {
+         keyboard_requested_ |= theme.request_keyboard();
+       }
+-      pending_keyboard_request_ = action.show_keyboard;
++      // Opening follows the same deferred request as A, after text gains focus.
++      pending_keyboard_request_ = first_draw || action.show_keyboard;
+       // Enter is the submit shortcut; controller B cancels independently of typing.
+       bool confirmed = entered || ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+                        ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);

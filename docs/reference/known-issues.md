@@ -21,6 +21,13 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
+**Bounce Man first-play stalls remain undiagnosed (2026-11-15):** the supplied
+session has seven 791–823 ms guest submission gaps with no recorded compilation
+overlap; the replay has no comparable mid-song gap. Two missing pipeline recipes
+were added to startup preparation, but their worker compilation occurred during
+the smooth replay. A new capture with the long D3D12 operation timing is needed.
+See the [shader-cache investigation](../engine/shader-cache.md#bounce-man-first-play-stalls-2026-11-15).
+
 **Higher framerates are unvalidated (2026-11-10):** Diagnostic 75/90/120 Hz
 guest-refresh runs reached their targets on the title screen. D3D12 gameplay on
 this GTX 970 machine averaged 41 guest draws/s in a 960×540 retail pilot; Ultimate

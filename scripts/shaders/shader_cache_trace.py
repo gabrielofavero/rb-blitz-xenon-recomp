@@ -158,35 +158,53 @@ def collect(args):
 
 def report_file(log, output):
     events, counters, phases = [], {}, []
-    for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+    damaged = []
+    for number, line in enumerate(log.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
         if "shader_trace:" not in line:
             continue
-        fields = dict(re.findall(r"(\w+)=([^\s]+)", line))
-        if "summary snapshot=" in line:
-            counters[fields["phase"] + "/" + fields["event"]] = fields
-        elif "begin_us" in fields:
-            for key in ["begin_us", "end_us", "duration_us"]:
-                fields[key] = int(fields[key])
-            events.append(fields)
-        elif "previous" in fields and "phase" in fields:
-            phases.append(fields)
-    compile_events = [e for e in events if e["event"] not in {"gpu_frame", "guest_frame"}]
+        try:
+            fields = dict(re.findall(r'(\w+)=("(?:\\.|[^"\\])*"|[^\s]+)', line))
+            # New logs quote sites; older unquoted call sites remain supported.
+            for key, value in fields.items():
+                if value.startswith('"'):
+                    fields[key] = json.loads(value)
+            if "summary snapshot=" in line:
+                int(fields.get("suppressed", 0))
+                counters[fields["phase"] + "/" + fields["event"]] = fields
+            elif "event=" in line:
+                thread = re.search(r'\[t(\d+)\]', line)
+                fields["thread_id"] = int(thread[1]) if thread else None
+                for key in ["begin_us", "end_us", "duration_us"]:
+                    fields[key] = int(fields[key])
+                if not fields.get("event") or fields["end_us"] < fields["begin_us"]:
+                    raise ValueError("invalid event or interval")
+                events.append(fields)
+            elif "previous" in fields and "phase" in fields:
+                phases.append(fields)
+        except (ValueError, KeyError) as error:
+            damaged.append({"line": number, "reason": str(error)})
+    operations = [e for e in events if e["event"] not in {"gpu_frame", "guest_frame"}]
     gaps = []
     for frame in events:
         if frame["event"] not in {"gpu_frame", "guest_frame"}:
             continue
-        overlaps = [e for e in compile_events if e["begin_us"] < frame["end_us"]
+        overlaps = [e for e in operations if e["begin_us"] < frame["end_us"]
                     and e["end_us"] > frame["begin_us"]]
         gaps.append({**frame, "overlapping_work": overlaps,
                      "assessment": "temporal overlap; causation unproven" if overlaps
-                     else "unresolved: no recorded compilation/wait overlap"})
+                     else "unresolved: no recorded operation overlap"})
     result = {"schema": 1, "log_sha256": digest(log), "phases": phases,
+              "damaged_trace_lines": damaged,
               "latest_cumulative_counters": counters, "long_frames": gaps,
               "detail_truncated": any(int(c.get("suppressed", 0)) for c in counters.values()),
               "limits": ["summaries are cumulative; do not sum snapshots",
                          "CPU work can overlap across workers; do not sum durations as wall time",
                          "suppressed details and final work after last summary limit attribution",
-                         "no resource/readback/GPU timing instrument; remaining stalls are unresolved"]}
+                         "damaged or partial trace lines are listed; their coverage is unknown",
+                         "long guest/file/idle/present/GPU operations retain only CPU spans >=50 ms",
+                         "file reads include file-lock and completion work; GPU idle includes yielding and preparation",
+                         "nested work and work on other threads are not additive or proof of blocking",
+                         "untimed operations and remaining stalls are unresolved"]}
     output.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(output)
 

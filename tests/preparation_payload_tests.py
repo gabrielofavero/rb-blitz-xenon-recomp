@@ -26,10 +26,12 @@ class PreparationPayloadTests(unittest.TestCase):
         import os
         env = dict(os.environ, P9_MODULE=str(ROOT / 'installer/tools/preparation_payload.ps1'),
                    P9_DIRECTORY=str(self.directory))
-        result = subprocess.run([SHELL, '-NoProfile', '-NonInteractive', '-Command',
+        result = subprocess.run([SHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
             "$ErrorActionPreference='Stop'; . $env:P9_MODULE; "
+            "[Console]::Error.WriteLine('preparation-module-loaded'); "
             'Get-PreparationPayload -Directory $env:P9_DIRECTORY | ConvertTo-Json -Depth 4'],
             env=env, capture_output=True, text=True)
+        self.assertIn('preparation-module-loaded', result.stderr, result.stdout + result.stderr)
         self.assertEqual(result.returncode == 0, accepted, result.stdout + result.stderr)
         return json.loads(result.stdout) if accepted else None
 

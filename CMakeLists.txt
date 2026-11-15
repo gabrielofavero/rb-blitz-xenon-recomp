@@ -422,6 +422,12 @@ configure_file(src/graphics/preparation_catalogue.h.in
 # verifies that this build-tree copy is also the catalogue embedded in the PE.
 configure_file(config/graphics_preparation.json
     "${CMAKE_CURRENT_BINARY_DIR}/graphics-preparation.json" COPYONLY)
+if(WIN32)
+    configure_file(scripts/diagnostics/collect_diagnostics.ps1
+        "${CMAKE_CURRENT_BINARY_DIR}/collect_diagnostics.ps1" COPYONLY)
+    configure_file("scripts/diagnostics/Collect Diagnostics.cmd"
+        "${CMAKE_CURRENT_BINARY_DIR}/Collect Diagnostics.cmd" COPYONLY)
+endif()
 target_include_directories(rb_blitz PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 # The installed PE must not carry developer machine paths. Keep the development
 # directory gate as a digest, and resolve its journal relative to that directory.
@@ -752,6 +758,12 @@ if(BUILD_TESTING)
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_cache_p8_tools_tests.py")
     add_test(NAME preparation_payload
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/preparation_payload_tests.py")
+    if(WIN32)
+        add_test(NAME diagnostic_collection
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/diagnostic_collection_tests.py")
+    endif()
+    add_test(NAME shader_cache_trace_tools
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_cache_trace_tools_tests.py")
     add_test(NAME shader_coverage_tools
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_coverage_tools_tests.py"
                 --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>

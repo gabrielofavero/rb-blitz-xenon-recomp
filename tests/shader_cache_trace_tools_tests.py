@@ -40,10 +40,47 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(report["latest_cumulative_counters"]["active_song/translation"]["count"], "3000")
         self.assertIn("unresolved", report["long_frames"][0]["assessment"])
 
+    def test_non_compile_gpu_operation_preserves_site_and_uncertainty(self):
+        report = self.report([
+            "shader_trace: event=gpu_operation phase=active_song end_phase=active_song site=d3d12.queue_execute key=42 begin_us=100 end_us=800100 duration_us=800000 success=true",
+            "shader_trace: event=gpu_frame phase=active_song end_phase=active_song site=swap key=0 begin_us=50 end_us=800150 duration_us=800100 success=true",
+        ])
+        frame = report["long_frames"][0]
+        self.assertEqual(frame["overlapping_work"][0]["event"], "gpu_operation")
+        self.assertEqual(frame["overlapping_work"][0]["site"], "d3d12.queue_execute")
+        self.assertIn("causation unproven", frame["assessment"])
+
     def test_run_names_cannot_escape_out(self):
         for name in ["../cache", "..", "D:/normal-cache", "", "a/b"]:
             with self.assertRaises(ValueError):
                 trace.run_dir(name)
+
+    def test_file_path_and_producer_thread_survive_quoted_site(self):
+        source = 'cnt0001:\\songs\\Bounce Man\\a "quoted"\n.mogg'
+        report = self.report([
+            '[info] [core] [t123] shader_trace: event=file_read phase=active_song '
+            f'end_phase=active_song site={json.dumps(source)} key=FF variant=100 '
+            'begin_us=100 end_us=100100 duration_us=100000 success=true',
+            '[info] [core] [t456] shader_trace: event=gpu_frame phase=active_song '
+            'end_phase=active_song site="swap" key=0 begin_us=1 end_us=200001 '
+            'duration_us=200000 success=true',
+        ])
+        frame = report['long_frames'][0]
+        self.assertEqual(frame['thread_id'], 456)
+        self.assertEqual(frame['overlapping_work'][0]['thread_id'], 123)
+        self.assertEqual(frame['overlapping_work'][0]['site'], source)
+        self.assertIn('causation unproven', frame['assessment'])
+
+    def test_partial_records_are_reported_without_losing_usable_evidence(self):
+        report = self.report([
+            'shader_trace: event=gpu_frame phase=active_song end_phase=active_song '
+            'site=swap key=0 begin_us=1 end_us=100001 duration_us=100000 success=true',
+            'shader_trace: event=file_read site="truncated path',
+            'shader_trace: event=file_read phase=active_song begin_us=500',
+        ])
+        self.assertEqual(len(report['long_frames']), 1)
+        self.assertEqual([r['line'] for r in report['damaged_trace_lines']], [2, 3])
+        self.assertIn('unresolved', report['long_frames'][0]['assessment'])
 
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ def hashes(codes):
     return r.sdk_hashes(codes, HELPER)
 
 
-def fixture(pixel=bytes(range(36)), vertex=bytes(range(36, 72)), variants=2):
+def fixture(pixel=bytes(range(36)), vertex=bytes(range(36, 72)), variants=2, fetches=()):
     def obj(stage, code):
         header = 40 if stage == "pixel" else 872
         # A constants prefix tests the code descriptor; a whole-bank hash is wrong.
@@ -58,6 +58,10 @@ def fixture(pixel=bytes(range(36)), vertex=bytes(range(36, 72)), variants=2):
                          metadata_size, len(code) + 16)
         struct.pack_into(">I", data, header + 24, 36)
         struct.pack_into(">II", data, header + 36, 16, len(code))
+        if stage == "vertex":
+            struct.pack_into(">II", data, header + 60, 0, len(fetches))
+            for i, fetch in enumerate(fetches):
+                struct.pack_into(">I", data, header + 72 + i * 4, fetch)
         return bytes(data), bytes(16) + code + bytes(12)
     pm, pc = obj("pixel", pixel)
     vm, vc = obj("vertex", vertex)
@@ -304,6 +308,17 @@ class ResolverTests(unittest.TestCase):
             other.add_vertex_sources(image, changed, {})
         self.assertFalse(other.vertex_linked)
         self.assertIsNone(other.resolve("vertex", identity))
+
+    def test_linked_source_index_preserves_asset_fetch_table(self):
+        image, manifest = vertex_fixture()
+        code = struct.pack(">9I", 0, 0, 0, 1 << 12, 0x688, 0, 2 << 12, 0x688, 0)
+        fetches = (0x100001, 0x205002)
+        resolver = r.Resolver({"synthetic": (fixture(vertex=code, fetches=fetches), {})}, hashes)
+        resolver.add_vertex_sources(image, manifest, {})
+        sources = [s for row in resolver.index()["resolved"] if row["stage"] == "vertex"
+                   for s in row["sources"]]
+        self.assertTrue(sources)
+        self.assertTrue(all(s["fetches"] == list(fetches) for s in sources))
 
     def test_vertex_source_malformed_recipes_and_bounds(self):
         image, manifest = vertex_fixture()

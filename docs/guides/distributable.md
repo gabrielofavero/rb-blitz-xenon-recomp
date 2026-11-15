@@ -10,6 +10,13 @@ This audit currently covers the Windows PE/Inno payload. The Linux ELF and macOS
 Mach-O/package manifests and their negative checks are defined in the
 [platform expansion plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md);
 no native package has passed that audit or release acceptance yet.
+
+Windows payloads also carry `Collect Diagnostics.cmd` and
+`collect_diagnostics.ps1`. They create a local, bounded report ZIP from the
+selected diagnostics folder, with evidence digests and collection-time build
+hashes. The build stages the scripts beside the executable; payload provenance
+includes both so a collector-only edit invalidates an old snapshot. See
+[sharing stutter diagnostics](../engine/diagnostics.md#sharing-stutter-diagnostics).
 The Prompt 2 Linux stage recipe in `installer/linux/package.py` now copies only
 declared files and rejects non-ELF target binaries and obvious retail/resource
 signatures. It deliberately refuses `.deb`/`.rpm` generation until the native

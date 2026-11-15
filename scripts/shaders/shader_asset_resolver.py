@@ -329,7 +329,7 @@ class Resolver:
                     generated[key] = code
                 requests.append((key, {"asset": asset, "entry": p.entry,
                     "permutation": f"{p.permutation:016x}", "offset": p.offset,
-                    "bytes": len(p.code), "vertex_layout": name}))
+                    "bytes": len(p.code), "vertex_layout": name, "fetches": list(p.fetches)}))
         codes = list(generated.values()) + [code for _, code in bootstraps]
         hashes = self.hasher(codes)
         identities = dict(zip(generated, hashes))

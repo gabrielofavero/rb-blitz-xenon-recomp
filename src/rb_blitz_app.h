@@ -654,6 +654,10 @@ class RbBlitzApp : public rex::ReXApp {
     coverage_recorder_ = rb_blitz::graphics::StartCoverage(
         rex::filesystem::GetExecutablePath(),runtime()->cache_root(),runtime()->user_data_root());
     rb_blitz::diag::shader_trace::LogConfiguration();
+    if (!diagnostics_log_file_.empty() &&
+        !rb_blitz::diag::WriteSessionInfo(runtime()->user_data_root(), REXGLUE_BUILD_STAMP,
+            RBBLITZ_TOOLCHAIN_STAMP, rex::filesystem::GetExecutablePath()))
+      REXLOG_WARN("diagnostics: could not write session build identity");
     REXLOG_INFO("boot_timing: guest_launch_ready elapsed_ms={}",
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - started).count());

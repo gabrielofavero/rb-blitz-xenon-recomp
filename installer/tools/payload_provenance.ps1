@@ -19,7 +19,8 @@
 # the Visual C++ runtime DLLs and the Vulkan loader - comes from directories the build tree
 # does not own, so those are checked for presence rather than by content.
 function Get-PayloadTreeFiles {
-    return @('rb_blitz.exe', 'rb_blitz_load_monitor.exe', 'rexruntime.dll', 'rexgpu-xenos.dll', 'graphics-preparation.json')
+    return @('rb_blitz.exe', 'rb_blitz_load_monitor.exe', 'rexruntime.dll', 'rexgpu-xenos.dll',
+             'graphics-preparation.json', 'collect_diagnostics.ps1', 'Collect Diagnostics.cmd')
 }
 
 # Authored repository files are not in SourceDir but still determine the bytes

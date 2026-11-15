@@ -127,7 +127,7 @@ intervals carried by patch 0019's swap observations.
 
 | Cvar | Default | What it does |
 | --- | --- | --- |
-| `shader_compile_trace` | `false` | Enables the counters and their log lines (restart required). Details are capped at 2,048 per event type, summaries at 256 snapshots; only frame gaps >= 50 ms and drains >= 1 ms get individual lines. |
+| `shader_compile_trace` | `true` | Enables the counters and their log lines (restart required). Details are capped at 2,048 per event type and summaries at 256 snapshots; allowances renew on entry to active playback, with cumulative counters and snapshot IDs retained. Long-operation details require >= 50 ms and compile drains >= 1 ms. |
 
 Phases (`boot`, `pre_a`, `post_a_loading`, `menu`, `song_loading`, `active_song`,
 `paused`, `unknown`) come from the shared `UIManager::Poll` observation, so they do not
@@ -135,8 +135,79 @@ depend on mouse or focus settings; `active_song` is an input-enabled controller 
 **not** an audio-clock boundary. The parser and the report correlation live in
 `scripts/shaders/shader_cache_trace.py`, whose `report.json` names overlaps and says
 `unresolved` when a long frame records none. The instrument itself perturbs timing:
-repeat a suspect route with tracing off, and note that resource I/O, texture conversion
-and readback are not timed.
+repeat a suspect route with tracing off. Selected resource/I/O/presentation CPU
+spans are timed as described below; coverage is not a full CPU or GPU profiler.
+
+### Sharing stutter diagnostics
+
+In builds carrying SDK patches 0061/0062, normal play records long operations
+without a diagnostic launch flag. After a stutter:
+
+1. Note the song, approximate point in the song, first play versus replay, and
+   whether audio, picture and input all paused or only one did.
+2. Close the game normally so buffered log lines reach disk. Before updating
+   the game or launching another session, run **Collect Diagnostics.cmd** beside
+   the executable. It creates **rb-blitz-diagnostics-<UTC timestamp>.zip** on
+   the Desktop and prints its source directory and output path.
+3. Share that ZIP and the observations from step 1. The ZIP is created locally;
+   the collector does not send it anywhere.
+
+The default input is the system Documents folder's
+`Rock Band Blitz/Saved Games/diagnostics`. For a custom save location, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\collect_diagnostics.ps1 `
+  -DiagnosticsDirectory "<selected save root>\diagnostics" `
+  -Note "Song name, approximate song time, first play or replay"
+```
+
+These defaults follow installed builds. Development builds and explicit
+`--log_file` overrides keep their existing log destinations; share those logs
+and the development shader journal explicitly rather than collecting an older
+installed session from the default folder.
+
+The fixed input set is `game.log`, `game.1.log`, `previous.log`,
+`previous.1.log`, `session-info.txt`, `previous-session-info.txt` and
+`unmapped-shaders.jsonl`. Current and previous session identities rotate with
+their logs, keeping the launched build and toolchain available after the boot
+lines rotate away. The collector copies these files verbatim and records
+their SHA-256 digests, source paths, missing/oversized files and any incomplete
+snapshot in `manifest.json`. It also records hashes of the executable, runtime,
+GPU plugin and preparation catalogue at collection time. Those hashes are not
+proof that the same files were loaded before a subsequent update. The manifest
+also includes a collection-time OS, processor-count and video-driver snapshot;
+an unavailable video query is reported explicitly. Each evidence
+file is limited to 64 MiB and total copied evidence to 128 MiB. A file collected
+while the game runs may end in a partial record. A failed collection retains a
+`.partial` file and does not publish a completed ZIP or overwrite an earlier one.
+
+The trace distinguishes shader translation/creation/waits from these CPU spans:
+
+| Event | Observation | Attribution limit |
+| --- | --- | --- |
+| `guest_work` | Guest main-loop draw or UI polling took >= 50 ms | Includes nested calls, synchronization and time descheduled; does not locate an inner guest function. |
+| `file_read` | A guest read or scatter read took >= 50 ms; site is the guest VFS path, key is requested byte offset, variant is requested byte count | Includes waiting for the file lock, memory callbacks and completion work; not a disk-only timer. All-ones offset means the caller selected current file position. |
+| `gpu_idle` | GPU command processor waited >= 50 ms with an empty ring | Includes yielding and any preparation serviced there; not a measurement of GPU hardware idleness. |
+| `gpu_operation` | Selected D3D12 resource allocation, upload, submission or fence work took >= 50 ms | Coverage is selected call sites; CPU durations are not GPU execution time. |
+| `present` | Shared paint/present, DXGI Present or Vulkan queue present took >= 50 ms | Includes applicable driver/display waits; not an actual displayed-frame timestamp. |
+
+Only long non-compilation operations take the shared trace lock or enter counters;
+the extra clock-read overhead is unmeasured. Audio starvation and device callback
+gaps are already reported by the SDL audio driver. These observations and the
+producer thread IDs can narrow a stall to guest work, I/O, rendering, presentation
+or compilation. Nested spans and worker overlap must not be summed as wall time.
+Missing overlap remains unknown. Driver-internal work and OS scheduling can still
+require an ETW/stack capture if these files do not establish the cause. Gameplay
+coverage of the new probes remains unverified; host tests do not establish it.
+
+Validation (2026-11-15): the release build and seven focused CTests pass,
+including runtime trace enable/disable, actual site quoting, per-playback budget
+renewal, partial-log reporting, session identity rotation and collector ZIP
+contents. The Windows payload snapshot includes both collector files; a stale
+collector invalidates the old snapshot, and the new snapshot matches the build.
+All 62 SDK patches replay with no unexpected edits. Evidence is retained under
+`out/stutter-diagnostics/`. Gameplay was not driven. The documentation checker
+still reports seven pre-existing broken links outside the edited study.
 
 Since shader-cache P1 (2026-10-24) a storage preload also logs its own result whether
 or not the trace switch is on. Since P4 the line names the terminal phase and carries

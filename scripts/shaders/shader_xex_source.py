@@ -5,8 +5,11 @@ recipes are allowed only after the installed XEX matches the project fingerprint
 """
 import hashlib
 import struct
+import sys
 import tomllib
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "xex"))
 
 MAX_IMAGE = 32 * 1024 * 1024
 

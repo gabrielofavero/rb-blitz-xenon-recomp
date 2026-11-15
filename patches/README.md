@@ -12,6 +12,27 @@ checkout.
 
 ## Patches
 
+`0063-auto-open-search-keyboard.patch` requests the OS keyboard automatically
+when the themed search dialog opens, on the frame after text receives focus.
+A can still reopen it; the existing submit, cancel and dismissal paths remain.
+
+`0062-stutter-attribution.patch` adds long guest-work, guest file-read,
+GPU-command-ring idle and presentation spans to the same default-on trace.
+File sites are JSON quoted so paths retain spaces and backslashes; counters
+remain cumulative while logging allowances renew on entry to active playback.
+The shared presenter span covers both backends, with separate DXGI/Vulkan
+present calls. No scheduling, I/O or rendering policy changes. See
+[sharing stutter diagnostics](../docs/engine/diagnostics.md#sharing-stutter-diagnostics).
+
+`0061-long-d3d12-operation-trace.patch` records selected non-compilation D3D12
+CPU spans lasting at least 50 ms: submission/replay/queue execution, swap, fence
+waits, texture creation and sparse shared-memory allocation/mapping/uploads.
+Short spans return before the shared trace lock. This fills an attribution gap
+in the owner's Bounce Man first-play log, whose seven roughly 0.8-second pauses
+have no compilation overlap. It changes no rendering or synchronization policy;
+clock-read overhead is unmeasured and a new runtime capture is still needed.
+See the [shader-cache study](../docs/engine/shader-cache.md).
+
 `0060-default-shader-compilation-trace.patch` enables the bounded shader, wait
 and frame-gap instrument by default so normal session logs retain evidence for
 intermittent stalls. Explicit config, environment and CLI overrides can disable

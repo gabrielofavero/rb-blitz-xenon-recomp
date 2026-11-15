@@ -217,17 +217,65 @@ phase state and counters to both the executable and GPU plugin.
   at least 50/100/250 ms. Details are capped at **2,048 per event type**. Only frame
   gaps at least 50 ms and processor drains at least 1 ms get individual detail lines.
   Summaries are cumulative, emitted on phase changes, every 10 seconds at swaps and
-  window close, with at most **256 snapshots**; UI/phase details are also capped.
-  Counter collection continues after detail caps, but a long run can exhaust the
-  summary budget. Preserve logs promptly and keep comparison runs short.
+  window close, with at most **256 snapshots** per logging allowance; UI/phase
+  details are also capped. Since patch 0062, entry to active playback renews
+  detail and summary allowances, preserving cumulative counters and snapshot IDs
+  so earlier activity does not consume a later song's entire allowance. Preserve
+  logs promptly; the normal log still rotates.
 - A scope keeps its starting phase and records the ending phase. A boot operation
   finishing late is not silently recategorized as new gameplay work.
 
-There is no per-draw disk logging. The opt-in instrument still performs locking
+There is no per-draw disk logging. The instrument still performs locking
 and logging, which can perturb timing: repeat a problematic route with tracing
 off before attributing a change in performance to the renderer. Resource loading,
-texture conversion, readback and other synchronization are **not timed here**.
+texture conversion, readback and synchronization are not comprehensively timed;
+the selected D3D12 CPU spans added below cover only part of that work.
 Temporal overlap is evidence to investigate, not proof of causation.
+
+### Bounce Man first-play stalls (2026-11-15)
+
+The owner's supplied session log, analyzed in
+`out/bounceman-investigation/trace-report.json`, contains two Bounce Man plays:
+10:43:34.755–10:46:54.122 and 10:47:35.409–10:50:44.365. The first has seven
+in-song guest submission gaps of 791–823 ms, paired with command-processor gaps
+of 748–783 ms. None overlaps recorded shader translation, guest/helper pipeline
+creation, a compilation drain or a compilation wait. The trace is below its
+detail caps. The replay has no comparable mid-song gap.
+
+Two uncovered D3D12 RTV recipes, `f850a27d3e475707` and `4dae27e45805de23`,
+compile concurrently on workers at 10:50:29.908–10:50:30.293 during the replay,
+for about 385 ms each. No long submission gap overlaps them. Both use vertex
+`29bbc4da7896db8f`, reconstructed and hash-verified from the installed
+`xbox_preinit_shaders` standard permutation `4000020000030090`, offset 144500,
+852 bytes, linked with `mesh-packed`. The preparation manifest now includes
+that source locator and both recipes; no guest instruction bytes are shipped.
+This repairs preparation coverage but does not establish the cause of the
+first-play stalls. The resolver's moved XEX helper import is also repaired so
+the documented CLI can verify vertex sources without a custom Python path.
+
+SDK patch `0061-long-d3d12-operation-trace.patch` extends the same diagnostic
+with `gpu_operation`: selected CPU spans for swap, submission, command-list
+replay, queue execution, fence waits, texture creation, sparse shared-memory
+heap creation/tile mapping and uploads. Only spans lasting at least 50 ms
+enter counters/logging; shorter spans return before the shared trace lock.
+Counters therefore describe long operations only, and nested spans must not be
+summed. Keys identify a submission, fence value, guest address or dimensions;
+variants retain the relevant swap flag, allocation length, range count or format.
+These are CPU durations, not GPU execution or displayed-frame timestamps.
+They change no synchronization or rendering policy. Their clock-read overhead
+is unmeasured. A fresh first-play capture is required to locate the stall;
+guest loading, untimed renderer operations, driver work and scheduling remain
+unresolved rather than being attributed to shaders.
+
+Validation: the release build succeeds; all 60 SDK patches replay exactly with
+no unexpected SDK edits. The production C++ archive-preparation check verifies
+the updated manifest in an isolated empty cache. The 12 selected CTests have
+10 passes and two resolver failures because their configured Python 3.14 lacks
+`Crypto`; running those resolver checks with the available Python 3.12 passes
+20 hermetic cases and all 210 installed candidate identities. The four trace
+report tests pass. The documentation checker reports seven existing broken
+links outside this change. No new gameplay run was performed; the owner
+deferred runtime testing.
 
 ### Measured runs (2026-10-24)
 
@@ -2125,7 +2173,9 @@ python scripts/shaders/shader_coverage.py --journal "<save root>/diagnostics/unm
 The tool rehashes journal records with the SDK helper, preserves all current recipes,
 deduplicates additions and refuses to overwrite an output. New shader identities
 without source locators block candidate publication: resolve those with the existing
-local resolver first. Promoting the candidate to `config/graphics_preparation.json`
+local resolver first. Linked vertex locators exported by that resolver include
+their parsed fetch table, required by runtime preparation as well as the layout.
+Promoting the candidate to `config/graphics_preparation.json`
 and rebuilding is a separate deliberate step. Collection never rewrites the shipped
 catalogue, local caches or player data. The journal is diagnostic evidence,
 not an installer payload input. An installed journal is also only evidence; it is

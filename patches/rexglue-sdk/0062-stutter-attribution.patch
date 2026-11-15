@@ -1,0 +1,258 @@
+diff --git a/include/rex/graphics/compile_trace.h b/include/rex/graphics/compile_trace.h
+--- a/include/rex/graphics/compile_trace.h
++++ b/include/rex/graphics/compile_trace.h
+@@ -29,8 +29,16 @@
+   // CPU spans in non-compilation GPU work. Only spans >= 50 ms are retained;
+   // short operations return before taking the shared trace lock.
+   kGpuOperation,
++  kGuestWork,
++  kFileRead,
++  kGpuIdle,
++  kPresent,
+   kCount
+ };
++constexpr bool IsLongOperation(Event event) {
++  return event == Event::kGpuOperation || event == Event::kGuestWork ||
++         event == Event::kFileRead || event == Event::kGpuIdle || event == Event::kPresent;
++}
+ bool Enabled();
+ uint64_t Now();
+ Phase CurrentPhase();
+diff --git a/src/system/compile_trace.cpp b/src/system/compile_trace.cpp
+--- a/src/system/compile_trace.cpp
++++ b/src/system/compile_trace.cpp
+@@ -21,7 +21,7 @@
+ constexpr const char* kEventNames[] = {"translation",     "guest_pipeline", "placeholder",
+                                        "helper_graphics", "helper_compute", "compile_drain",
+                                        "compile_wait",    "guest_frame",    "gpu_frame",
+-                                       "gpu_operation"};
++                                       "gpu_operation", "guest_work", "file_read", "gpu_idle", "present"};
+ struct Counter {
+   uint64_t count = 0, failed = 0, total = 0, worst = 0;
+   uint64_t over50 = 0, over100 = 0, over250 = 0, suppressed = 0;
+@@ -30,15 +30,16 @@
+ std::array<std::array<Counter, kEvents>, kPhases> counters{};
+ std::array<uint64_t, kEvents> details{};
+ std::atomic<Phase> phase{Phase::kBoot};
+-uint32_t snapshots = 0, transitions = 0;
++uint32_t snapshots = 0, snapshot_budget_used = 0, transitions = 0;
+ // Each producer has its own last-frame timestamp (all guarded by mutex).
+ uint64_t last_guest = 0, last_gpu = 0;
+ Phase last_guest_phase = Phase::kBoot, last_gpu_phase = Phase::kBoot;
+ uint64_t last_snapshot = 0;
+ 
+ void SnapshotLocked(const char* reason) {
+-  if (snapshots >= 256)
++  if (snapshot_budget_used >= 256)
+     return;
++  ++snapshot_budget_used;
+   ++snapshots;
+   for (size_t p = 0; p < kPhases; ++p) {
+     for (size_t e = 0; e < kEvents; ++e) {
+@@ -52,6 +53,18 @@
+           c.over50, c.over100, c.over250, c.suppressed);
+     }
+   }
++}
++// JSON quoting retains file names containing whitespace, quotes or control bytes.
++// It runs only for details that actually fit the logging allowance.
++std::string QuoteSite(const char* site) {
++  std::string quoted = "\"";
++  for (unsigned char c : std::string_view(site)) {
++    if (c == '"' || c == '\\') quoted += '\\';
++    if (c < 0x20) quoted += fmt::format("\\u{:04x}", unsigned(c));
++    else quoted += char(c);
++  }
++  quoted += '"';
++  return quoted;
+ }
+ void RecordLocked(Event event, Phase start_phase, const char* site, uint64_t key, uint64_t begin,
+                   uint64_t end, bool success, uint64_t variant = 0) {
+@@ -77,7 +90,7 @@
+     REXLOG_INFO(
+         "shader_trace: event={} phase={} end_phase={} site={} key={:016X} variant={:016X} "
+         "begin_us={} end_us={} duration_us={} success={}",
+-        kEventNames[e], kPhaseNames[p], kPhaseNames[size_t(phase.load())], site, key, variant,
++        kEventNames[e], kPhaseNames[p], kPhaseNames[size_t(phase.load())], QuoteSite(site), key, variant,
+         begin, end, us, success);
+   } else {
+     ++c.suppressed;
+@@ -110,13 +123,19 @@
+     REXLOG_INFO("shader_trace: phase={} previous={} t_us={} reason={}", kPhaseNames[size_t(value)],
+                 kPhaseNames[size_t(before)], Now(), reason);
+   }
++  // Later songs retain diagnostic capacity. Identities and counters stay
++  // cumulative; only the per-playback logging allowances renew.
++  if (value == Phase::kActiveSong) {
++    details.fill(0);
++    snapshot_budget_used = 0;
++  }
+   SnapshotLocked("phase_change");
+ }
+ void Record(Event event, Phase start_phase, const char* site, uint64_t key, uint64_t begin,
+             uint64_t end, bool success, uint64_t variant) {
+   if (!Enabled())
+     return;
+-  if (event == Event::kGpuOperation && (end < begin || end - begin < 50000))
++  if (IsLongOperation(event) && (end < begin || end - begin < 50000))
+     return;
+   std::lock_guard lock(mutex);
+   RecordLocked(event, start_phase, site, key, begin, end, success, variant);
+diff --git a/src/system/xfile.cpp b/src/system/xfile.cpp
+--- a/src/system/xfile.cpp
++++ b/src/system/xfile.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <rex/filesystem/vfs.h>
++#include <rex/graphics/compile_trace.h>
+ #include <rex/logging.h>
+ #include <rex/math.h>
+ #include <rex/memory.h>
+@@ -104,9 +105,15 @@
+ 
+ X_STATUS XFile::Read(uint32_t buffer_guest_address, uint32_t buffer_length, uint64_t byte_offset,
+                      uint32_t* out_bytes_read, uint32_t apc_context, bool notify_completion) {
+-  std::lock_guard<std::mutex> lock(file_lock_);
+-  return ReadInternal(buffer_guest_address, buffer_length, byte_offset, out_bytes_read, apc_context,
+-                      notify_completion);
++  rex::graphics::compile_trace::Scope trace_read(
++      rex::graphics::compile_trace::Event::kFileRead,
++      file_->entry() ? file_->entry()->absolute_path().c_str() : "unknown_file",
++      byte_offset, buffer_length);
++  std::lock_guard<std::mutex> lock(file_lock_);
++  const auto result = ReadInternal(buffer_guest_address, buffer_length, byte_offset, out_bytes_read,
++                                   apc_context, notify_completion);
++  trace_read.Success(XSUCCEEDED(result));
++  return result;
+ }
+ 
+ X_STATUS XFile::ReadInternal(uint32_t buffer_guest_address, uint32_t buffer_length,
+@@ -200,6 +207,10 @@
+ 
+ X_STATUS XFile::ReadScatter(uint32_t segments_guest_address, uint32_t length, uint64_t byte_offset,
+                             uint32_t* out_bytes_read, uint32_t apc_context) {
++  rex::graphics::compile_trace::Scope trace_read(
++      rex::graphics::compile_trace::Event::kFileRead,
++      file_->entry() ? file_->entry()->absolute_path().c_str() : "unknown_file",
++      byte_offset, length);
+   std::lock_guard<std::mutex> lock(file_lock_);
+   X_STATUS result = X_STATUS_SUCCESS;
+ 
+@@ -251,6 +262,7 @@
+ 
+   async_event_->Set();
+ 
++  trace_read.Success(XSUCCEEDED(result));
+   return result;
+ }
+ 
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -271,23 +271,28 @@
+       // We spin here waiting for new ones, as the overhead of waiting on our
+       // event is too high.
+       PrepareForWait();
+-      uint32_t loop_count = 0;
+-      do {
+-        // If we spin around too much, revert to a "low-power" state.
+-        if (loop_count > 500) {
+-          const int wait_time_ms = 5;
+-          rex::thread::Wait(write_ptr_index_event_.get(), true,
+-                            std::chrono::milliseconds(wait_time_ms));
+-        }
+-
+-        rex::thread::MaybeYield();
+-        loop_count++;
+-        // The guest is waiting for the next frame, but preparation is not:
+-        // advance it while nothing else needs the thread.
+-        ServiceShaderStoragePreparation();
+-        write_ptr_index = write_ptr_index_.load();
+-      } while (worker_running_ && pending_fns_.empty() &&
+-               (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index));
++      {
++        rex::graphics::compile_trace::Scope trace_idle(
++            rex::graphics::compile_trace::Event::kGpuIdle, "gpu.command_ring_empty");
++        uint32_t loop_count = 0;
++        do {
++          // If we spin around too much, revert to a "low-power" state.
++          if (loop_count > 500) {
++            const int wait_time_ms = 5;
++            rex::thread::Wait(write_ptr_index_event_.get(), true,
++                              std::chrono::milliseconds(wait_time_ms));
++          }
++
++          rex::thread::MaybeYield();
++          loop_count++;
++          // The guest is waiting for the next frame, but preparation is not:
++          // advance it while nothing else needs the thread.
++          ServiceShaderStoragePreparation();
++          write_ptr_index = write_ptr_index_.load();
++        } while (worker_running_ && pending_fns_.empty() &&
++                 (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index));
++        trace_idle.Success();
++      }
+       ReturnFromWait();
+       if (!worker_running_ || !pending_fns_.empty()) {
+         continue;
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -16,6 +16,7 @@
+ 
+ #include <rex/assert.h>
+ #include <rex/cvar.h>
++#include <rex/graphics/compile_trace.h>
+ #include <rex/logging.h>
+ #include <rex/platform.h>
+ #include <rex/ui/presenter.h>
+@@ -1511,7 +1512,12 @@
+ Presenter::PaintResult Presenter::PaintAndPresent(bool execute_ui_drawers) {
+   assert_false(execute_ui_drawers && !is_in_ui_thread_paint_);
+   assert_true(surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedPaintable);
++  rex::graphics::compile_trace::Scope trace_present(
++      rex::graphics::compile_trace::Event::kPresent, "presenter.paint_and_present",
++      0, execute_ui_drawers);
+   PaintResult result = PaintAndPresentImpl(execute_ui_drawers);
++  trace_present.Success(result == PaintResult::kPresented ||
++                        result == PaintResult::kPresentedSuboptimal);
+   switch (result) {
+     case PaintResult::kPresented:
+       surface_paint_connection_was_optimal_at_successful_paint_ = true;
+diff --git a/src/ui/d3d12/d3d12_presenter.cpp b/src/ui/d3d12/d3d12_presenter.cpp
+--- a/src/ui/d3d12/d3d12_presenter.cpp
++++ b/src/ui/d3d12/d3d12_presenter.cpp
+@@ -1156,9 +1156,15 @@
+   // fullscreen is ever used in, the allow tearing flag must not be passed in
+   // fullscreen, but DXGI fullscreen is largely unneeded with the flip
+   // presentation model used in Direct3D 12).
+-  HRESULT present_result = paint_context_.swap_chain->Present(
+-      0, DXGI_PRESENT_RESTART |
+-             (paint_context_.swap_chain_allows_tearing ? DXGI_PRESENT_ALLOW_TEARING : 0));
++  HRESULT present_result;
++  {
++    rex::graphics::compile_trace::Scope trace_present(
++        rex::graphics::compile_trace::Event::kPresent, "d3d12.dxgi_present");
++    present_result = paint_context_.swap_chain->Present(
++        0, DXGI_PRESENT_RESTART |
++               (paint_context_.swap_chain_allows_tearing ? DXGI_PRESENT_ALLOW_TEARING : 0));
++    trace_present.Success(SUCCEEDED(present_result));
++  }
+   // Even if presentation has failed, work might have been enqueued anyway
+   // internally before the failure according to Jesse Natalie from the DirectX
+   // Discord server.
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -2241,7 +2241,10 @@
+   {
+     const VulkanDevice::Queue::Acquisition queue_acquisition =
+         vulkan_device_->AcquireQueue(paint_context_.present_queue_family, 0);
++    rex::graphics::compile_trace::Scope trace_present(
++        rex::graphics::compile_trace::Event::kPresent, "vulkan.queue_present");
+     present_result = dfn.vkQueuePresentKHR(queue_acquisition.queue(), &present_info);
++    trace_present.Success(present_result == VK_SUCCESS || present_result == VK_SUBOPTIMAL_KHR);
+   }
+   switch (present_result) {
+     case VK_SUCCESS:
