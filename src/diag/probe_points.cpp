@@ -32,11 +32,6 @@
 #include <string>
 #include <vector>
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-
 #include <rex/cvar.h>
 #include <rex/hook.h>
 #include <rex/logging.h>
@@ -45,6 +40,7 @@
 #include "diag/probe.h"
 #include "diag/framerate_probe.h"
 #include "hooks/render_settings.h"
+#include "platform/guest_memory.h"
 
 REX_EXTERN(__imp__ByteGrinder_GetEncMethod);
 REX_EXTERN(__imp__ByteGrinder_HvDecrypt);
@@ -201,14 +197,7 @@ extern "C" REX_FUNC(sub_823F3698) {
       // refused as a guest access violation. Our own process owns the page, so the experiment opens
       // it for the write and closes it again - the product version of this needs the same, done
       // once at boot, or a code-level hook on whatever reads it.
-      DWORD previous = 0;
-      const bool writable =
-          ::VirtualProtect(constant, sizeof(uint32_t), PAGE_READWRITE, &previous) != 0;
-      if (writable) {
-        StoreBe32(constant, bits);
-        DWORD ignored = 0;
-        ::VirtualProtect(constant, sizeof(uint32_t), previous, &ignored);
-      }
+      const bool writable = rb_blitz::platform::WriteProtectedGuestBe32(constant, bits);
       REXLOG_INFO("probe/aspect: 0x{:08X} {:#010X} -> {} ({:#010X} before, writable {})",
                   kAspect16By9Address, bits, aspect, before, writable);
     } else {
@@ -331,12 +320,7 @@ void PokeLayoutFields(uint8_t* base) {
     if (p == nullptr) {
       continue;
     }
-    DWORD previous = 0;
-    if (::VirtualProtect(p, sizeof(uint32_t), PAGE_READWRITE, &previous)) {
-      StoreBe32(p, site.value);
-      DWORD ignored = 0;
-      ::VirtualProtect(p, sizeof(uint32_t), previous, &ignored);
-    }
+    rb_blitz::platform::WriteProtectedGuestBe32(p, site.value);
   }
 }
 

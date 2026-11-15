@@ -21,6 +21,26 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
+**macOS gameplay acceptance remains pending (2026-11-15):** the internal M1
+build boots and startup texture seams/outlines are corrected by SDK patch 0065.
+The synthetic Vulkan fragment-gradient regression passes at 1×/2×/4× and retains
+separate arithmetic rounding. Native display detection now resolves Auto with
+the display's aspect: M1 selects 2304×1440 for its 2880×1800 screen because the
+3× resolve buffer would exceed Metal's 4 GiB per-buffer limit. The title fills
+the screen without bars. SDK patch 0066 avoids painting while occluded and
+preserves the live swapchain on same-size focus gains; the owner confirms
+the picture returns normally after switching away/back on the rebuilt game.
+The startup cache hang and subsequent zero-recipe failure are corrected:
+shared native loading hooks now run on Mac, and SDK patch 0067 fixes append-stream
+reads and the Clang packed-record ABI. The owner confirms preparation completes;
+the log records 409/409 pipelines in 59,153 ms with no failures or missing entries
+(`out/macos/cache-portability-game.log`). Preparing-state Skip now follows the
+main-menu continuation and passes the authored menu-routing test; live Skip
+navigation remains unverified.
+This does not establish full-song graphics,
+audio/input stability, Intel Mac support or installer acceptance. See the
+[native Mac release evidence](../plans/in-progress/2026-11-09-linux-macos-release-plan.md).
+
 **Bounce Man first-play stalls remain undiagnosed (2026-11-15):** the supplied
 session has seven 791–823 ms guest submission gaps with no recorded compilation
 overlap; the replay has no comparable mid-song gap. Two missing pipeline recipes

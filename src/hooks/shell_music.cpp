@@ -71,8 +71,8 @@
 #include "graphics/preparation_loading.h"
 
 #if defined(_WIN32)
-
 #include <windows.h>
+#endif
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table. Both are read here: the
 // first is the carrier of the in-game "DLC Menu Songs" row (the boot writes the row into it at the
@@ -116,6 +116,7 @@ struct MusicFaultScope {
 
 std::atomic<uintptr_t> g_music_fault_base{0};
 
+#if defined(_WIN32)
 LONG CALLBACK LogMusicFault(EXCEPTION_POINTERS* info) {
   const auto* scope = MusicFaultScope::current;
   if (!info || !info->ExceptionRecord ||
@@ -144,6 +145,7 @@ LONG CALLBACK LogMusicFault(EXCEPTION_POINTERS* info) {
     REXLOG_ERROR("music_nav: fault frame {} {:X}", i, reinterpret_cast<uintptr_t>(frames[i]));
   return EXCEPTION_CONTINUE_SEARCH;
 }
+#endif
 
 void CallMusicGuest(void (*function)(PPCContext&, uint8_t*), PPCContext& ctx,
                     uint8_t* base, const char* stage) {
@@ -1360,10 +1362,12 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   g_music_fault_base.store(g_navigation_enabled && runtime && runtime->memory()
       ? reinterpret_cast<uintptr_t>(runtime->memory()->virtual_membase()) : 0,
       std::memory_order_relaxed);
+#if defined(_WIN32)
   if (g_music_fault_base.load(std::memory_order_relaxed)) {
     static const auto handler = AddVectoredExceptionHandler(1, LogMusicFault);
     REXLOG_INFO("music_nav: native fault trace {}", handler ? "installed" : "unavailable");
   }
+#endif
   g_nav_pause_trace = REXCVAR_GET(background_music_nav_pause_trial);
   g_nav_paused_stream = 0;
   g_nav_epoch = rb_blitz::shell_music::NowPlaying().Reset();
@@ -1902,5 +1906,3 @@ extern "C" REX_FUNC(sub_827586D8) {
   __imp__sub_827586D8(ctx, base);
   PublishNavigator(base, music);
 }
-
-#endif  // _WIN32

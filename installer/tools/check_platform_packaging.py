@@ -12,11 +12,13 @@ import plistlib
 import re
 from pathlib import Path, PurePosixPath
 
+from native_assets import controller_entries
+
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "installer/config/platform-packaging.json"
 SOURCES = {"from", "fromTarget", "fromSdkStage", "fromTemplate", "fromGenerated"}
-TARGETS = {"rb_blitz", "rb_blitz_linux_launcher", "rb_blitz_macos_launcher", "rexruntime", "rexgpu-xenos"}
+TARGETS = {"rb_blitz", "rb_blitz_linux_launcher", "rb_blitz_macos_launcher", "rexruntime", "rexgpu-xenos", "TracyClient"}
 
 
 def fail(message: str) -> None:
@@ -34,6 +36,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage-root", type=Path, help="check an exact staged file tree")
     parser.add_argument("--target", choices=("linux", "macos"), help="stage target")
+    parser.add_argument("--controller-validator", type=Path)
+    parser.add_argument("--arch", choices=("arm64", "x86_64"))
     args = parser.parse_args()
     if bool(args.stage_root) != bool(args.target):
         fail("--stage-root and --target must be given together")
@@ -49,7 +53,16 @@ def main() -> None:
 
     for target in ("linux", "macos"):
         config = data[target]
-        entries = config["stageManifest"]
+        if target == "macos" and args.target == target:
+            if not args.arch:
+                fail("macOS stage audit requires --arch")
+            config.update(config.get("nativeValidation", {}).get(args.arch, {}))
+        entries = list(config["stageManifest"])
+        if args.target == target and config.get("controllerAssets"):
+            if not args.controller_validator:
+                fail("stage audit requires --controller-validator")
+            entries += controller_entries(ROOT, args.controller_validator.resolve(),
+                                          config["controllerAssets"])
         destinations: set[str] = set()
         for entry in entries:
             sources = SOURCES.intersection(entry)
@@ -106,6 +119,8 @@ def main() -> None:
                 fail("macOS Info.plist deployment target differs from contract")
             if f"{config['bundleName']}/Contents/Resources/blitz.icns" not in destinations:
                 fail("macOS bundle icon is missing from the manifest")
+            if args.target == target:
+                destinations.add(f"{config['bundleName']}/Contents/_CodeSignature/CodeResources")
 
         if args.target == target:
             if config["nativeDependencyInventoryPending"] or config.get("releaseAuditPending") or config.get("iconConversionPending") or config.get("xcodeBuildPinPending"):

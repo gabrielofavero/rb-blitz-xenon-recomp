@@ -1151,7 +1151,7 @@ std::vector<PanelSpec> AllPanels() {
                                         Choices({"windowed", "Windowed", "borderless",
                                                  "Borderless", "fullscreen", "Full Screen"})),
                               SelectRow("settings_resolution", "graphics.resolution", "Resolution",
-                                        "Auto matches your display resolution each time the game starts.",
+                                        "Auto fits your display using the highest supported resolution.",
                                         Choices({"auto", "Auto", "960x540", "960x540",
                                                  "1280x720", "1280x720", "1920x1080", "1920x1080",
                                                  "2560x1440", "2560x1440", "2880x1620",

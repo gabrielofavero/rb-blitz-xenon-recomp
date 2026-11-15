@@ -7,7 +7,9 @@
 #include <mutex>
 #include <set>
 #include <string>
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 #include <rex/cvar.h>
 #include <rex/hook.h>
 #include <rex/logging.h>
@@ -228,6 +230,7 @@ void LogCache(uint32_t manager, const std::string& path) {
 // Measured 2026-10-21: this is what the store's two open P3 faults needed. The SDK's line names the
 // address and the thread and nothing else, and both faults are null reads inside UI code that runs
 // several guest frames below the last hook that can log.
+#if defined(_WIN32)
 LONG CALLBACK LogFault(EXCEPTION_POINTERS* info) {
   static std::atomic<int> seen{0};
   static std::atomic<int> entries{0};
@@ -274,6 +277,7 @@ LONG CALLBACK LogFault(EXCEPTION_POINTERS* info) {
                frames);
   return EXCEPTION_CONTINUE_SEARCH;
 }
+#endif
 
 }  // namespace
 
@@ -281,6 +285,7 @@ void InstallPathProbe() {
   const bool on = REXCVAR_GET(store_trace);
   g_trace_on.store(on, std::memory_order_relaxed);
   fs::SetStorePathObserver(on ? &Observe : nullptr);
+#if defined(_WIN32)
   if (on) {
     // A guest null read ends the boot with one line that names the address and nothing else. The
     // handler turns it into a host backtrace, which `out/_swap/map_lookup.py` resolves against
@@ -294,6 +299,7 @@ void InstallPathProbe() {
                 memory != nullptr ? reinterpret_cast<uintptr_t>(memory->virtual_membase()) : 0,
                 memory != nullptr ? reinterpret_cast<uintptr_t>(memory->physical_membase()) : 0);
   }
+#endif
   REXLOG_INFO("store-probe: path trace {}; the local server root is '{}'", on ? "on" : "off",
               LocalServerRoot());
 }

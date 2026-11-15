@@ -177,14 +177,21 @@ bool InstallCrashDiagnostics(const std::filesystem::path& cache_root) {
   sigemptyset(&action.sa_mask);
   action.sa_flags = SA_SIGINFO | SA_RESETHAND;
   struct sigaction previous[sizeof(kFatalSignals) / sizeof(kFatalSignals[0])]{};
+  bool installed[sizeof(kFatalSignals) / sizeof(kFatalSignals[0])]{};
   for (size_t index = 0; index < sizeof(kFatalSignals) / sizeof(kFatalSignals[0]); ++index) {
-    if (sigaction(kFatalSignals[index], &action, &previous[index]) != 0) {
+    // The SDK owns recoverable memory faults (SIGBUS on macOS is also its GPU
+    // page-write notification). Replacing that handler turns ordinary guest
+    // writes into fatal crashes. Preserve handlers already installed by the runtime.
+    const bool queried = sigaction(kFatalSignals[index], nullptr, &previous[index]) == 0;
+    if (queried && previous[index].sa_handler != SIG_DFL) continue;
+    if (!queried || sigaction(kFatalSignals[index], &action, nullptr) != 0) {
       while (index != 0) {
         --index;
-        (void)sigaction(kFatalSignals[index], &previous[index], nullptr);
+        if (installed[index]) (void)sigaction(kFatalSignals[index], &previous[index], nullptr);
       }
       return false;
     }
+    installed[index] = true;
   }
   return true;
 #endif

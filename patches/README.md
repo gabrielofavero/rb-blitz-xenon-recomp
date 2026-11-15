@@ -12,6 +12,48 @@ checkout.
 
 ## Patches
 
+`0067-portable-vulkan-shader-storage.patch` rewinds append/update streams before
+reading shader and recipe headers, avoiding macOS's initial EOF position. It
+also makes the packed recipe layout explicit: a 60-byte description with render
+targets at byte 44 and a 68-byte stored record, matching the shipped catalogue
+on Clang as well as Windows. Static assertions guard those values. Valid recipes
+unsupported by the current GPU stay on disk rather than causing an incorrect
+truncation to the filtered count. The M1 import now reads 409 supported recipes
+and skips 25 unsupported ones without corrupt records; live completion evidence
+is tracked in [shader-cache.md](../docs/engine/shader-cache.md), part 6.
+
+`0066-macos-drawable-visibility.patch` treats hidden, minimized and occluded
+Cocoa windows as unavailable for presentation even when their pixel size is
+positive. Queued and expose paints check the latest SDL visibility after
+event pumping, so they cannot enter Metal drawable acquisition ahead of the
+queued hide event. Ordinary Mac focus gains retain the live swapchain when
+its size is unchanged, and expose repaints it; Windows keeps forced focus
+reconnection. The owner reported a black fullscreen window after
+switching away/back; the captured UI thread was waiting in `nextDrawable`
+while the GPU thread waited for its queue. The final build preserves the
+live Metal swapchain; the owner confirms the picture returns normally after
+switching away/back (2026-11-15). A separate blank capture during the guest's
+post-A transition does not establish a task-switch failure.
+
+`0065-moltenvk-fragment-gradients.patch` avoids non-inlined Metal precision
+helpers in translated fragment shaders. On M1/MoltenVK 1.4.1, their results are
+incorrect for helper invocations outside MSAA triangles, corrupting derivatives
+and texture mip selection along sprite borders and diagonals. MoltenVK fragment
+arithmetic uses explicitly rounded Fma equivalents for add/subtract/multiply
+and vector scaling, retaining NoContraction and the sign of zero products.
+Other drivers and vertex shaders retain their existing translation. Shader
+storage version 13 invalidates old translations. The synthetic headless
+`vulkan_fragment_gradient` test renders the production builder's operations,
+checks derivatives at 1×/2×/4× and verifies separate arithmetic rounding;
+`--baseline` reproduces the defect. See the dated native Mac evidence in the
+[release plan](../docs/plans/in-progress/2026-11-09-linux-macos-release-plan.md).
+
+`0064-macos-vulkan-icd-stage.patch` resolves the in-tree MoltenVK ICD relative
+to the SDK helper's definition. A parent project does not inherit the SDK's
+directory-local `REXGLUE_ROOT`, so the old post-link command tried to copy
+`/cmake/MoltenVK_icd.json` and failed after linking the Mac game. Reproduced
+and rebuilt on Apple Silicon on 2026-11-15; the installed-SDK route is unchanged.
+
 `0063-auto-open-search-keyboard.patch` requests the OS keyboard automatically
 when the themed search dialog opens, on the frame after text receives focus.
 A can still reopen it; the existing submit, cancel and dismissal paths remain.

@@ -20,11 +20,14 @@
 
 namespace rb_blitz::ui::input_font {
 namespace {
-std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_original_bc3;
-std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_private_bc3;
-std::atomic<std::shared_ptr<const std::vector<uint8_t>>> g_original_buttons_bc3;
-std::atomic<std::shared_ptr<const RetailPsPads>> g_original_ps_pads_bc3;
-std::atomic<std::shared_ptr<const CalibrationButtons>> g_calibration_buttons;
+// Use the C++11 shared_ptr atomic operations: Apple libc++ does not yet
+// implement the C++20 atomic<shared_ptr<T>> specialization. These retain the
+// same sequentially consistent publication and owned-reader lifetime.
+std::shared_ptr<const std::vector<uint8_t>> g_original_bc3;
+std::shared_ptr<const std::vector<uint8_t>> g_private_bc3;
+std::shared_ptr<const std::vector<uint8_t>> g_original_buttons_bc3;
+std::shared_ptr<const RetailPsPads> g_original_ps_pads_bc3;
+std::shared_ptr<const CalibrationButtons> g_calibration_buttons;
 uint32_t Le32(const uint8_t* p) {
   return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 | uint32_t(p[3]) << 24;
 }
@@ -166,7 +169,7 @@ bool PrepareOriginalButtons(const std::vector<uint8_t>& source, std::string* err
     original[i] = bytes[kPayload + i + 1];
     original[i + 1] = bytes[kPayload + i];
   }
-  g_original_buttons_bc3.store(
+  std::atomic_store(&g_original_buttons_bc3,
       std::make_shared<const std::vector<uint8_t>>(std::move(original)));
   if (error) error->clear();
   return true;
@@ -213,7 +216,7 @@ bool PrepareRetailPsPads(const std::vector<uint8_t>& source, std::string* error)
       offset += size;
     }
   }
-  g_original_ps_pads_bc3.store(std::make_shared<const RetailPsPads>(std::move(pads)));
+  std::atomic_store(&g_original_ps_pads_bc3, std::make_shared<const RetailPsPads>(std::move(pads)));
   if (error) error->clear();
   return true;
 }
@@ -309,8 +312,8 @@ bool PrepareScene(const std::vector<uint8_t>& source, std::vector<uint8_t>* scen
   }
   // A single stored chunk is valid Milo and avoids a second compressor.
   if (!PackStored(bytes, scene, error)) return false;
-  g_original_bc3.store(std::make_shared<const std::vector<uint8_t>>(*original_bc3));
-  g_private_bc3.store(std::make_shared<const std::vector<uint8_t>>(std::move(private_bc3)));
+  std::atomic_store(&g_original_bc3, std::make_shared<const std::vector<uint8_t>>(*original_bc3));
+  std::atomic_store(&g_private_bc3, std::make_shared<const std::vector<uint8_t>>(std::move(private_bc3)));
   if (error) error->clear();
   return true;
 }
@@ -546,12 +549,12 @@ bool PrepareCalibration(const std::vector<uint8_t>& source, std::vector<uint8_t>
   if (!ReplaceAnchoredFonts(&bytes, "../resource/fonts/buttons.milo",
                             "../resource/fonts/inline_help_icons.milo",
                             {"cal_metronome.grp"}, 2, error)) return false;
-  g_calibration_buttons.store(
+  std::atomic_store(&g_calibration_buttons,
       std::make_shared<const CalibrationButtons>(std::move(originals)));
   return PackStored(bytes, scene, error);
 }
 std::shared_ptr<const CalibrationButtons> OriginalCalibrationButtons() {
-  return g_calibration_buttons.load();
+  return std::atomic_load(&g_calibration_buttons);
 }
 bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                      std::string* error) {
@@ -590,15 +593,15 @@ bool PrepareAccountLink(const std::vector<uint8_t>& source, std::vector<uint8_t>
   return PackStored(bytes, scene, error);
 }
 std::shared_ptr<const std::vector<uint8_t>> OriginalBc3() {
-  return g_original_bc3.load();
+  return std::atomic_load(&g_original_bc3);
 }
 std::shared_ptr<const std::vector<uint8_t>> PrivateBc3() {
-  return g_private_bc3.load();
+  return std::atomic_load(&g_private_bc3);
 }
 std::shared_ptr<const std::vector<uint8_t>> OriginalButtonsBc3() {
-  return g_original_buttons_bc3.load();
+  return std::atomic_load(&g_original_buttons_bc3);
 }
 std::shared_ptr<const RetailPsPads> OriginalPsPadsBc3() {
-  return g_original_ps_pads_bc3.load();
+  return std::atomic_load(&g_original_ps_pads_bc3);
 }
 }  // namespace rb_blitz::ui::input_font

@@ -96,9 +96,7 @@
 #include "store/store_download_service.h"
 #include "store/store_library.h"
 #include "store/store_serve.h"
-#if defined(_WIN32)
 #include "store/store_transfer.h"
-#endif
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
 

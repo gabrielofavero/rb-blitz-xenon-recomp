@@ -202,6 +202,18 @@ Reconciliation GraphicsReconciler::Reconcile(SettingId id, const Descriptor& des
                                           caps.primary_display_size.height);
         return result;
       }
+      if (IsAutoResolution(requested) && caps.primary_display_size.width > 0 &&
+          caps.primary_display_size.height > 0) {
+        for (const auto& size : caps.supported_resolutions) {
+          if (size.width <= caps.primary_display_size.width &&
+              size.height <= caps.primary_display_size.height &&
+              int64_t(size.width) * caps.primary_display_size.height ==
+                  int64_t(size.height) * caps.primary_display_size.width) {
+            result.effective = MakeResolution(size.width, size.height);
+            return result;
+          }
+        }
+      }
       if (requested.kind == ValueKind::kResolution &&
           IsSupportedResolution(caps, DisplayMode{requested.width, requested.height})) {
         return result;  // a valid manual choice is never re-optimized

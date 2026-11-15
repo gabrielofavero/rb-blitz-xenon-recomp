@@ -20,6 +20,23 @@ The corresponding Mac build and app/package staging entry point is
 [`installer/macos/README.md`](../../installer/macos/README.md). It uses the Mac
 presets and must run on native Mac hardware; no macOS release build is accepted yet.
 
+On 2026-11-15, the internal `mac-arm64-release` build linked on an M1 with
+Xcode 26.0.1 (17A400), AppleClang 17.0.0, SDK 26.0, CMake 3.31.6, and Ninja
+1.13.2. This is bring-up evidence, not release acceptance. Select the intended
+Xcode with `DEVELOPER_DIR` and put the tools and Python 3.11+ on `PATH`; apply
+patches with `python3 scripts/setup/apply_sdk_patches.py`, then configure/build
+`mac-arm64-release`. Launch the internal executable with
+`out/build/mac-arm64-release/rb_blitz --game_data_root="<checkout>/game"`.
+The native import lookup, protected-memory and signal-handler preservation
+regressions have focused tests. The Mac-only `vulkan_fragment_gradient` CTest
+renders synthetic triangles through the production SPIR-V arithmetic builder
+and the pinned MoltenVK stack, without game assets or a window. It verifies the
+fragment precision-helper workaround from SDK patch 0065 at 1×/2×/4× and checks
+separate arithmetic rounding. Build `rb_blitz_vulkan_fragment_gradient_tests`
+and run `ctest --test-dir out/build/mac-arm64-release -R '^vulkan_fragment_gradient$' --output-on-failure`.
+Logs and startup before/after captures for this pass are under `out/macos/`.
+The owner performs game navigation and gameplay acceptance.
+
 Prompt 1's SDK-free game importer can be built on a native host without the game
 SDK or Inno Setup. From the repository root:
 

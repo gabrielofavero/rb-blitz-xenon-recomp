@@ -28,8 +28,6 @@
 #include <rex/system/xmemory.h>
 #include <rex/types.h>
 
-#if defined(_WIN32)
-#include <windows.h>
 REXCVAR_DECLARE(bool, enhancements_dlc_uncap_enumeration);
 REX_EXTERN(__imp__sub_82759190);  // the engine's own push into the panel
 REX_EXTERN(__imp__sub_82759308);
@@ -409,4 +407,3 @@ extern "C" REX_FUNC(__imp__NtWriteFile) {
   const auto result = iosb && !(ctx.r3.u32 & 0x80000000u) ? Be32(base + iosb) : ctx.r3.u32;
   rb_blitz::content_progress::EndIo(io, result);
 }
-#endif

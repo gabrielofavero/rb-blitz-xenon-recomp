@@ -433,6 +433,31 @@ bool LoadingQuery(std::string_view path, uint32_t* answer) {
       PollLoading();
       *answer = 1;
     }
+  } else if (path == "skip") {
+    if (pending && content_ready && !released) {
+      // Skip is a forward continuation, not the connect panel's native Back.
+      // Retire optional preparation without joining its worker on the guest
+      // thread; normal content/save loading has already completed here.
+      {
+        std::lock_guard lock(extraction_mutex);
+        if (extraction.joinable()) extraction.request_stop();
+      }
+      ignored = true;
+      released = true;
+      pending = false;
+      auto* gpu = runtime ? runtime->graphics_system() : nullptr;
+      if (gpu && generation) {
+        progress = gpu->QueryShaderStoragePreparation();
+        RecordAttempt(true);
+        gpu->CancelShaderStoragePreparation();
+      } else if (gpu) {
+        // No preparation generation opened storage yet. Preserve ordinary
+        // shader learning/caching without certifying graphics readiness.
+        gpu->InitializeShaderStorage(runtime->cache_root(), 0x5841122D, false);
+      }
+      *answer = 1;
+      REXLOG_WARN("graphics_loading: attempt {} skipped; continuing to the main menu with normal demand compilation/caching, readiness not certified", attempt);
+    }
   } else if (path == "ignore") {
     if (pending && content_ready && failed && !released) {
       // A failed generation is terminal. If local extraction failed before the

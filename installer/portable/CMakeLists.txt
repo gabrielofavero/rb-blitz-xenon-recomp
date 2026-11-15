@@ -25,6 +25,17 @@ if(WIN32)
         _CRT_SECURE_NO_WARNINGS WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 
+if(APPLE)
+    # Also prove the actual Finder entry point compiles without building the SDK
+    # or requiring a private game dump. This is the same launcher shipped in the app.
+    enable_language(OBJCXX)
+    add_executable(rb_blitz_macos_launcher ../macos/importer_main.mm)
+    set_target_properties(rb_blitz_macos_launcher PROPERTIES
+        OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
+    target_link_libraries(rb_blitz_macos_launcher PRIVATE
+        rb_blitz_game_import_core "-framework Cocoa")
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(rb_blitz_portable_import_tests ../tests/portable_import_tests.cpp)

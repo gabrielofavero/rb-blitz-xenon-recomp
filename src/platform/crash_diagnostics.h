@@ -5,6 +5,7 @@
 namespace rb_blitz::platform {
 // Install after the cache path is configured, before launching the guest.
 // Windows writes a text record and minidump for fatal exceptions. POSIX hosts write a small
-// async-signal-safe text record, then restore the default fatal-signal action.
+// async-signal-safe text record for signals without an existing handler. SDK
+// handlers for recoverable guest memory faults are retained.
 bool InstallCrashDiagnostics(const std::filesystem::path& cache_root);
 }

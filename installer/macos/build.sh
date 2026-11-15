@@ -24,18 +24,35 @@ if [ "$(uname -m)" != "$arch" ]; then
   exit 1
 fi
 
-for command in cmake ninja python3 xcrun pkgutil lipo otool sips iconutil; do
+for command in cmake ninja python3 git xcrun pkgutil lipo otool sips iconutil codesign install_name_tool strip; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required build tool: $command" >&2
     exit 1
   }
 done
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3.11+ is required; put it first on PATH")'
+# Respect DEVELOPER_DIR, including a side-by-side Xcode selected for this build.
+# /usr/bin/clang may otherwise select obsolete Command Line Tools instead.
+clang=$(xcrun --find clang)
+clangxx=$(xcrun --find clang++)
+sdk=$(xcrun --show-sdk-path)
+if ! test -f game/default.xex; then
+  echo 'Missing supported game/default.xex; extract your own game package before building' >&2
+  exit 1
+fi
+if ! test -f rexglue-sdk/CMakeLists.txt; then
+  git submodule update --init --recursive
+fi
+python3 scripts/setup/apply_sdk_patches.py
+# Keep fetched MoltenVK dependencies within the path-remapped checkout.
+export CPM_SOURCE_CACHE="$repo/out/macos/dependencies"
 echo "Host: $(sw_vers -productVersion) $(uname -m)"
 echo "Apple SDK: $(xcrun --show-sdk-version)"
 echo "Clang: $(xcrun clang --version | head -n 1)"
 if command -v xcodebuild >/dev/null 2>&1; then xcodebuild -version || true; fi
 
-cmake --preset "$preset"
+cmake --preset "$preset" -DCMAKE_C_COMPILER="$clang" -DCMAKE_CXX_COMPILER="$clangxx" \
+  -DCMAKE_OBJC_COMPILER="$clang" -DCMAKE_OBJCXX_COMPILER="$clangxx" -DCMAKE_OSX_SYSROOT="$sdk"
 if [ ! -f generated/default/sources.cmake ]; then
   mkdir -p out/macos
   log=out/macos/codegen-bootstrap.log
@@ -51,5 +68,5 @@ if [ ! -f generated/default/sources.cmake ]; then
   }
   cmake --preset "$preset"
 fi
-cmake --build --preset "$preset"
+cmake --build --preset "$preset" --target rb_blitz rb_blitz_macos_launcher rb_blitz_controller_schemes
 python3 installer/macos/package.py --arch "$arch" --build-dir "out/build/$preset" "$@"

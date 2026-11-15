@@ -15,9 +15,15 @@ void* ResolveRuntimeSymbol(const char* symbol) {
   const HMODULE runtime = GetModuleHandleA("rexruntime.dll");
   return runtime ? reinterpret_cast<void*>(GetProcAddress(runtime, symbol)) : nullptr;
 #else
-  // The SDK loads rexruntime into this process before guest imports are used.
-  // RTLD_DEFAULT searches its exported symbols without opening another copy.
-  return dlsym(RTLD_DEFAULT, symbol);
+  // The executable deliberately overrides several __imp__ imports. Searching
+  // RTLD_DEFAULT resolves those hooks back to themselves (NtReadFile recurses
+  // until its stack overflows). Search the already-loaded SDK image explicitly.
+#if defined(__APPLE__)
+  static void* const runtime = dlopen("@rpath/librexruntime.dylib", RTLD_LAZY | RTLD_NOLOAD);
+#else
+  static void* const runtime = dlopen("librexruntime.so", RTLD_LAZY | RTLD_NOLOAD);
+#endif
+  return runtime ? dlsym(runtime, symbol) : nullptr;
 #endif
 }
 

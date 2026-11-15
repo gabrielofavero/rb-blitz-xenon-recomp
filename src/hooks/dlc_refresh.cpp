@@ -11,7 +11,6 @@
 #include "hooks/dlc.h"
 #include "graphics/preparation_loading.h"
 
-#if defined(_WIN32)
 REX_EXTERN(__imp__sub_822CA460);
 REX_EXTERN(__imp__sub_822CB618);
 REX_EXTERN(__imp__sub_824B5F68);
@@ -44,7 +43,6 @@ extern "C" REX_FUNC(sub_822CA460) {
   }
   __imp__sub_822CA460(ctx, base);
 }
-
 extern "C" REX_FUNC(sub_822CB618) {
   const uint32_t panel = ctx.r3.u32;
   if (Be32(base + panel + 56) != 28) g_state28_started.store(false);
@@ -74,5 +72,3 @@ extern "C" REX_FUNC(sub_822CB618) {
     __imp__sub_824B5F68(call,base);
   }
 }
-
-#endif  // _WIN32

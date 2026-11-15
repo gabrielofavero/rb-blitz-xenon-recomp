@@ -365,6 +365,11 @@ add_custom_target(rb_blitz_stage_gpu
     COMMENT "Staging the current GPU plugin beside rb_blitz"
     VERBATIM)
 add_dependencies(rb_blitz rb_blitz_stage_gpu)
+if(APPLE)
+    target_sources(rb_blitz PRIVATE src/settings/display_probe_mac.mm)
+    target_link_libraries(rb_blitz PRIVATE "-framework AppKit" "-framework Metal")
+    set_target_properties(rb_blitz PROPERTIES OBJCXX_STANDARD 23 OBJCXX_STANDARD_REQUIRED ON)
+endif()
 if(WIN32)
     # Acceptance-only diagnostic opener. The game gives this process the fixed
     # Releases URL; it writes the URL to an inherited environment path.
@@ -474,6 +479,24 @@ elseif(APPLE)
     set_target_properties(rb_blitz PROPERTIES
         BUILD_RPATH "@executable_path;@loader_path"
         INSTALL_RPATH "@executable_path;@loader_path")
+endif()
+
+# Native packagers use the same parser and image validation as the game.
+if(APPLE)
+    add_executable(rb_blitz_controller_schemes
+        tools/controller_schemes_main.cpp
+        src/controller_schemes/schemes.cpp
+        src/controller_schemes/png_wic.cpp
+        src/platform/image_decode_stb.cpp
+        src/assets/texture_codec.cpp)
+    target_include_directories(rb_blitz_controller_schemes PRIVATE
+        src "${REXSDK_DIR}/thirdparty/stb")
+    # MoltenVK fetches these pinned dependencies through CPM. Copy their notices
+    # to stable build paths rather than teaching the packager about CPM caches.
+    configure_file("${SPIRV-Cross_SOURCE_DIR}/LICENSE"
+        "${CMAKE_BINARY_DIR}/licenses/spirv-cross-LICENSE" COPYONLY)
+    configure_file("${cereal_SOURCE_DIR}/LICENSE"
+        "${CMAKE_BINARY_DIR}/licenses/cereal-LICENSE" COPYONLY)
 endif()
 
 # The store's fault logger (src/store/store_probe.cpp) prints host frames, which are resolved
@@ -670,6 +693,37 @@ add_executable(rb_blitz_shader_microcode_hash tools/shader_microcode_hash.cpp)
 target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 
 if(BUILD_TESTING)
+    if(APPLE)
+        if(REXGLUE_USE_VULKAN)
+            add_executable(rb_blitz_vulkan_fragment_gradient_tests
+                tests/vulkan_fragment_gradient_tests.cpp
+                "${REXSDK_DIR}/src/graphics/pipeline/shader/spirv_builder.cpp"
+                "${REXSDK_DIR}/thirdparty/glslang/StandAlone/ResourceLimits.cpp")
+            target_include_directories(rb_blitz_vulkan_fragment_gradient_tests PRIVATE
+                "${REXSDK_DIR}/include" "${REXSDK_DIR}/thirdparty/glslang")
+            target_link_libraries(rb_blitz_vulkan_fragment_gradient_tests PRIVATE
+                rex::runtime Vulkan::Loader Vulkan::Headers glslang::SPIRV glslang)
+            _rexglue_stage_macos_vulkan_runtime(rb_blitz_vulkan_fragment_gradient_tests)
+            add_test(NAME vulkan_fragment_gradient COMMAND rb_blitz_vulkan_fragment_gradient_tests)
+            set_tests_properties(vulkan_fragment_gradient PROPERTIES SKIP_RETURN_CODE 77
+                ENVIRONMENT "VK_ICD_FILENAMES=$<TARGET_FILE_DIR:rb_blitz_vulkan_fragment_gradient_tests>/vulkan/share/vulkan/icd.d/MoltenVK_icd.json")
+        endif()
+        add_executable(rb_blitz_guest_memory_tests tests/guest_memory_tests.cpp)
+        target_include_directories(rb_blitz_guest_memory_tests PRIVATE src)
+        target_link_libraries(rb_blitz_guest_memory_tests PRIVATE rex::runtime)
+        add_test(NAME guest_memory COMMAND rb_blitz_guest_memory_tests)
+        add_executable(rb_blitz_runtime_symbol_tests tests/runtime_symbol_tests.cpp
+            src/platform/runtime_symbol.cpp)
+        target_include_directories(rb_blitz_runtime_symbol_tests PRIVATE src)
+        target_link_libraries(rb_blitz_runtime_symbol_tests PRIVATE rex::runtime)
+        set_target_properties(rb_blitz_runtime_symbol_tests PROPERTIES
+            ENABLE_EXPORTS ON BUILD_RPATH "@executable_path;$<TARGET_FILE_DIR:rexruntime>")
+        add_test(NAME runtime_symbol COMMAND rb_blitz_runtime_symbol_tests)
+        add_executable(rb_blitz_crash_diagnostics_posix_tests
+            tests/crash_diagnostics_posix_tests.cpp src/platform/crash_diagnostics.cpp)
+        target_include_directories(rb_blitz_crash_diagnostics_posix_tests PRIVATE src)
+        add_test(NAME crash_diagnostics_posix COMMAND rb_blitz_crash_diagnostics_posix_tests)
+    endif()
     add_executable(rb_blitz_notifications_tests
         tests/notifications_tests.cpp
         src/store/store_catalogue_status.cpp

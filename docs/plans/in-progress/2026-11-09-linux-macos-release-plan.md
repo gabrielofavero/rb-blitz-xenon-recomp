@@ -159,6 +159,107 @@ Port the shared runtime/importer adapters to macOS: prove the Vulkan path suppor
 | 2026-11-10 | Windows x86-64, Mac source preparation | `python installer/tools/check_platform_packaging.py`; `python -m py_compile installer/macos/package.py`; `bash -n installer/macos/build.sh` through WSL | Metadata, Python and shell syntax passed; the macOS CMake/Objective-C++ build and stage/package commands require a Mac. |
 | 2026-11-10 | Windows x86-64, shared regression | `cmake --build --preset win-amd64-release`; `ctest --test-dir out/build/portable-import -R '^portable_import$' --output-on-failure`; `ctest --test-dir out/build/win-amd64-release -R '^(settings_service\|settings_screen\|settings_migration\|game_restart\|crash_diagnostics)$' --output-on-failure` | Windows release linked; portable importer and five focused non-UI suites passed. No Mac native UI or package test was run. |
 
+**Native Mac bring-up, 2026-11-15; Prompt 4 is in progress.** On Apple M1,
+macOS 27.2.1, the internal `mac-arm64-release` game now links with Xcode 26.0.1
+(17A400), AppleClang 17.0.0/SDK 26.0, CMake 3.31.6, Ninja 1.13.2, and Python
+3.12.16. The owner-supplied Downloads STFS package was extracted to ignored
+`game/` and all three supported fingerprints passed. The SDK was initialized
+at the existing pin and the tracked patches replayed without changing its gitlink.
+
+Native compilation exposed Windows memory APIs in graphics probes/HUD layout,
+a missing platform transfer declaration, unavailable libc++ `atomic<shared_ptr>`
+specializations, Windows-only guards around shared menu/music/progress logic,
+and the SDK ICD staging path defect. The fixes use native memory queries/protection,
+shared-pointer atomic operations and scoped platform guards; SDK patch 0064 fixes
+the ICD lookup. The first boot created an M1 Vulkan device/window but crashed from
+recursive `RTLD_DEFAULT` import lookup. A second reached guest graphics but exposed
+crash diagnostics replacing the SDK's recoverable SIGBUS handler. Import lookup
+now selects the SDK module and diagnostics preserve existing signal handlers.
+The owner requested pausing installer work to test this internal game build.
+The first successful relaunch reached the pre-A title phase
+(`out/macos/internal-game.log`). The subsequent graphics investigation below
+was authorized by the owner; installer work remains paused.
+
+**Mac texture artifacts, 2026-11-15 [measured].** Screen captures reproduced
+dotted triangle diagonals, sprite bounding boxes and text outlines on M1 with
+MoltenVK 1.4.1. Base-mip-only sampling removed them, identifying the derivative/LOD
+path. A synthetic native Metal reproduction isolated non-inlined `optnone`
+precision helpers before derivatives. SDK patch 0065 replaces affected fragment
+arithmetic with NoContraction Fma equivalents on MoltenVK, retaining mipmapping
+and the existing MSAA mode; shader storage version 13 invalidates old translations.
+The production-builder headless Vulkan regression reports zero bad gradient
+pixels at 1×, 2× and emulated-2×-via-4× sampling, including a separate-rounding
+check with runtime inputs. Disabling the workaround reproduces 1,124 bad pixels
+at 2× (`out/macos/gradient-baseline.log`). The rebuilt title screen and autosave
+notice are visibly clean (`out/macos/texture-fma-title.png`,
+`out/macos/texture-fma.png`); this is startup rendering evidence, not gameplay
+acceptance. Keyboard automation is still blocked by macOS accessibility access.
+Full-song graphics, audio and input acceptance remain unverified.
+
+**Mac Auto and visibility, 2026-11-15 [measured].** The owner reported black
+after switching away/back and top/bottom bars with Auto. Auto was saved, but
+the Windows-only display probe returned 0×0 on Mac, selecting 1280×720. Native
+SDL/Cocoa probes now measure backing pixels, usable area and frame decorations;
+Retina window sizes convert to points even when no shrinking is needed. An
+initial native 2880×1800 attempt exposed a 4.5 GiB scaled resolve allocation
+exceeding this M1's 4 GiB Metal buffer limit. Native capabilities now exclude
+unallocatable scales; Auto prefers the highest supported size with the exact
+display aspect. M1 selects 1152×720 at 2×, yielding 2304×1440 on the 2880×1800
+screen. `out/macos/display-final-game.log` records the plan, and
+`out/macos/display-auto-title.png` shows a clean title filling the screen.
+The development failure's recovery journal was backed up under `out/macos/`
+and cleared; the owner's saved Auto token was retained.
+
+The pre-fix sample (`out/macos/focus-black-sample-full.txt`) has the UI thread
+in Metal drawable acquisition and the GPU thread waiting for its queue. SDK
+patch 0066 skips queued/expose paints while hidden/occluded and retains the
+live Metal swapchain on same-size focus gains. A blank capture during the
+post-A guest transition (`out/macos/display-after-return.png`) is separate
+from the owner's task-switch result. Automated external app
+activation returned success without changing the foreground application, so
+the owner was asked to verify an actual switch away/back after the rebuild.
+The owner confirms the picture returns normally after switching away/back
+on the rebuilt game (`out/macos/focus-preserve-normal-game.log`).
+An optional fast-start diagnostic hit
+an unrelated guest null read; it was stopped and the normal startup restored.
+The `settings_graphics`, `window_policy`, `settings_screen` and
+`vulkan_fragment_gradient` suites pass (`out/macos/display-final-tests.log`).
+
+**Mac startup cache, 2026-11-15 [measured].** The native content-ready/base-panel
+hooks were compiled only on Windows, leaving Mac waiting indefinitely. Enabling
+the shared hooks exposes the real preparation result. SDK patch 0067 then fixes
+macOS append-stream header reads and the Clang packed Vulkan recipe layout;
+compile-time assertions retain the canonical Windows format. It also preserves
+valid unsupported recipes instead of truncating the un-compacted stream. The
+rebuilt native game imports 409 supported recipes, skips 25 unsupported geometry
+recipes, and successfully prepares 409/409 with zero failures or missing entries.
+The continuation releases once after 59,153 ms, and the owner confirms preparation
+completes (`out/macos/cache-portability-game.log`). Preparing-state Skip now cancels
+optional work without joining the extraction worker on the guest thread and uses
+the saved main-menu continuation rather than native Back. The authored menu test
+proves that route; live Skip navigation remains unverified. The `menu_payload`,
+`preparation_assets`, and `preparation_state` suites pass
+(`out/macos/cache-gate-tests.log`); all 66 SDK patches replay without drift
+(`out/macos/cache-portability-patch-check.log`). Installer work remains paused.
+
+| Date | Machine/target | Command or evidence | Result and limit |
+| --- | --- | --- | --- |
+| 2026-11-15 | Mac arm64, importer | Build `installer/portable`, then CTest `portable_import` | Shared importer and Cocoa launcher linked; synthetic importer suite passed. The real package also extracted and matched the production fingerprints without UI. |
+| 2026-11-15 | Mac arm64, internal game | `cmake --build --preset mac-arm64-release --target rb_blitz`; logs under `out/macos/` | Game, native runtime, Vulkan/MoltenVK and controller validator linked. All 1,182 declared controller files validated and staged for internal play. No gameplay acceptance claimed. |
+| 2026-11-15 | Mac arm64, focused regressions | CTest `guest_memory`, `runtime_symbol`, `crash_diagnostics_posix`, `settings_screen` | Four suites passed: unaligned protected writes restore permissions; SDK lookup bypasses the host override; recoverable signal handlers survive diagnostics installation; settings authoring remains valid. |
+| 2026-11-15 | M1, MoltenVK fragment gradients | `vulkan_fragment_gradient`; `out/macos/gradient-test.log`; `out/macos/texture-final-build.log` | Production arithmetic passes the headless GPU regression at 1×/2×/4× with separate rounding preserved; baseline fails at 2×. Native game rebuilt; startup text and title textures observed without the reported artifacts. Gameplay acceptance is pending. |
+| 2026-11-15 | Mac arm64, packaging implementation | `python3 -m unittest discover -s installer/tests -p '*packaging_tests.py' -v`; `out/macos/packaging-tests.log` | 13 non-UI checks passed using tiny non-game Mach-O fixtures and real `pkgbuild` expansion. Authored icon converted. Actual game app/package staging and final inventory remain pending; no release package has been produced. |
+
+The package implementation now includes controller validation and dependency
+notices, rewrites actual dylib IDs/rpaths, signs final bytes ad hoc, checks every
+Mach-O slice/minimum OS/signature and real rpath resolution, scans large binaries,
+verifies the embedded portable graphics catalogue, and compares the entire expanded
+package payload and modes. A development-package route retains the release gate.
+Architecture-specific native audit records are still required before it can run.
+Windows regression builds are unavailable on this Mac; Intel Mac, installed Finder
+launch, unsigned security flow, Ultimate picker/download, guest repair route,
+update preservation, graphics and gameplay acceptance remain open.
+
 ### Prompt 5 — Validate macOS play and publish the multi-platform release
 
 On real Macs for every advertised architecture, test fresh install, update, uninstall behavior, Finder/Dock launch, security override, import and repair failures, a full song/results, Ultimate and DLC, store/Messages, settings, controller and keyboard/mouse input, audio, saves, display/retina/fullscreen, sleep/resume, restart and crash recovery. Rerun the Windows acceptance gate after shared changes. Extend `.github/workflows/builds.yml` with isolated Linux and macOS self-hosted builders (or an equivalent reviewed release process) that can access authorized build inputs without uploading them. Validate tag/version and SHA-256 per artifact; publish only artifacts whose platform gates passed. Update README, install instructions, supported OS/architecture matrix, known issues and uninstall/data-location guidance.

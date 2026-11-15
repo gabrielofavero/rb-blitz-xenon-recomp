@@ -19,6 +19,7 @@
 //   last-known-good recovery                    TestRecovery
 
 #include "check.h"
+#include <algorithm>
 
 #include "settings/capabilities.h"
 #include "settings/graphics_policy.h"
@@ -224,7 +225,7 @@ void TestAutoResolutionBounds() {
     const Descriptor* resolution = Find(descriptors, SettingId::kResolution);
     CHECK_TRUE(resolution != nullptr);
     CHECK_TRUE(IsRes(policy.Reconcile(SettingId::kResolution, *resolution,
-                                    ResolutionV(0, 0), caps).effective, 2560, 1440));
+                                    ResolutionV(0, 0), caps).effective, 3456, 1440));
   }
   {
     const CapabilitySnapshot caps = native_caps({1024, 768});
@@ -440,7 +441,12 @@ void TestReconcileRenderer() {
   const auto both_descriptors = schema::BuildDescriptors(both);
   const auto* both_renderer = Find(both_descriptors, SettingId::kRenderer);
   CHECK_TRUE(schema::LabelForToken(*both_renderer, "vulkan") == "Vulkan");
+#if defined(_WIN32)
   CHECK_TRUE(schema::LabelForToken(*both_renderer, "d3d12") == "D3D12");
+#else
+  CHECK_TRUE(std::none_of(both_renderer->choices.begin(), both_renderer->choices.end(),
+      [](const auto& choice) { return choice.token == "d3d12"; }));
+#endif
   const auto selected = reconciler.Reconcile(SettingId::kRenderer, *renderer, EnumV("vulkan"), both);
   CHECK_FALSE(selected.corrected);
   CHECK_TRUE(IsToken(selected.effective, "vulkan"));
@@ -670,6 +676,28 @@ void TestFirstRun() {
   CHECK_TRUE(IsAutoResolution(ResolutionPreferenceForBoot(measured_1080, ResolutionV(3840, 2160))));
   CHECK_TRUE(IsRes(ResolutionPreferenceForBoot(measured_4k, ResolutionV(1920, 1080)), 1920, 1080));
   CHECK_TRUE(IsRes(ResolutionPreferenceForBoot(CapabilitySnapshot{}, ResolutionV(3840, 2160)), 3840, 2160));
+
+  // A Retina M1 can present 2880x1800 but cannot allocate the 4.5 GiB
+  // non-sparse resolve buffer needed by scale 3. Auto must retain 16:10.
+  CapabilityInputs retina;
+  retina.display_enumeration_available = true;
+  retina.primary_display_size = {2880, 1800};
+  retina.display_modes = {{2880, 1800}};
+  retina.render_path = TitleRenderPath();
+  retina.render_path.scales = {1, 2};
+  const auto bounded = BuildCapabilitySnapshot(retina);
+  const auto fitted = policy.Reconcile(SettingId::kResolution, row->descriptor,
+      on_1080.resolution, bounded);
+  CHECK_TRUE(IsRes(fitted.effective, 2304, 1440));
+  CHECK_FALSE(fitted.corrected);  // Auto remains the saved preference.
+  const auto plan = PlanGuestScreen(retina.render_path, {2304, 1440});
+  CHECK_TRUE(plan.supported);
+  CHECK_EQ(plan.guest_size.width, 1152);
+  CHECK_EQ(plan.guest_size.height, 720);
+  CHECK_EQ(plan.draw_scale, 2);
+  retina.render_path.scales.push_back(3);
+  CHECK_TRUE(IsRes(policy.Reconcile(SettingId::kResolution, row->descriptor,
+      on_1080.resolution, BuildCapabilitySnapshot(retina)).effective, 2880, 1800));
 
   // Unknown hardware: the bounded conservative route, and it says so.
   const GraphicsRecommendation unknown = RecommendGraphics(CapabilitySnapshot{});

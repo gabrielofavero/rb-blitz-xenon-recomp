@@ -1,0 +1,67 @@
+diff --git a/include/rex/graphics/vulkan/pipeline_cache.h b/include/rex/graphics/vulkan/pipeline_cache.h
+--- a/include/rex/graphics/vulkan/pipeline_cache.h
++++ b/include/rex/graphics/vulkan/pipeline_cache.h
+@@ -227,4 +227,8 @@
+     xenos::CompareFunction stencil_back_compare_op : 3;  // 9
+     uint32_t sample_rate_shading : 1;                    // 10
++    // Complete the second 32-bit allocation unit explicitly. MSVC already
++    // rounds it to 4 bytes; packed Clang/GCC would start render_targets two
++    // bytes earlier, breaking portable stored recipes and their hashes.
++    uint32_t : 19;
+ 
+     // Filled only for the attachments present in the render pass object.
+@@ -262,4 +266,7 @@
+     PipelineDescription description;
+   });
++  static_assert_size(PipelineDescription, 60);
++  static_assert(offsetof(PipelineDescription, render_targets) == 44);
++  static_assert_size(PipelineStoredDescription, 68);
+ 
+   struct Pipeline {
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -711,4 +711,5 @@
+   // <Shader hash, modification bits>.
+   std::set<std::pair<uint64_t, uint64_t>> shader_translations_needed;
++  size_t pipeline_storage_valid_record_count = 0;
+   auto pipeline_storage_file_path =
+       shader_storage_shareable_root /
+@@ -733,5 +734,8 @@
+     uint32_t version_swapped;
+   } pipeline_storage_file_header;
+-  if (fread(&pipeline_storage_file_header, sizeof(pipeline_storage_file_header), 1,
++  // a+b has an unspecified initial read position (EOF on BSD/macOS). Always
++  // rewind before validating an existing store, or valid inputs are truncated.
++  if (rex::filesystem::Seek(pipeline_storage_file_, 0, SEEK_SET) &&
++      fread(&pipeline_storage_file_header, sizeof(pipeline_storage_file_header), 1,
+             pipeline_storage_file_) &&
+       pipeline_storage_file_header.magic == pipeline_storage_magic &&
+@@ -783,4 +787,5 @@
+         }
+       }
++      pipeline_storage_valid_record_count = pipeline_storage_read_count;
+       pipeline_stored_descriptions.resize(pipeline_storage_kept_count);
+       if (pipeline_storage_skipped_unsupported_count || pipeline_storage_skipped_corrupted_count) {
+@@ -815,5 +820,6 @@
+   // 'XESH'.
+   const uint32_t shader_storage_magic = 0x48534558;
+-  if (fread(&shader_storage_file_header, sizeof(shader_storage_file_header), 1,
++  if (rex::filesystem::Seek(shader_storage_file_, 0, SEEK_SET) &&
++      fread(&shader_storage_file_header, sizeof(shader_storage_file_header), 1,
+             shader_storage_file_) &&
+       shader_storage_file_header.magic == shader_storage_magic &&
+@@ -881,5 +887,5 @@
+   // Write the header for an empty storage, or truncate an invalid tail. This is
+   // the import's own bookkeeping and does not depend on pipeline creation.
+-  if (pipeline_stored_descriptions.empty()) {
++  if (!pipeline_storage_valid_record_count) {
+     rex::filesystem::TruncateStdioFile(pipeline_storage_file_, 0);
+     pipeline_storage_file_header.magic = pipeline_storage_magic;
+@@ -892,5 +898,5 @@
+         pipeline_storage_file_,
+         uint64_t(sizeof(pipeline_storage_file_header) +
+-                 sizeof(PipelineStoredDescription) * pipeline_stored_descriptions.size()));
++                 sizeof(PipelineStoredDescription) * pipeline_storage_valid_record_count));
+   }
+ 

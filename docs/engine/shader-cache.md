@@ -1434,13 +1434,45 @@ current/total return integer DataNodes, and all other files retain their normal
 behavior. The channel is independent of the settings bridge diagnostic switches.
 The record tests live readiness before changing a visible widget: if work completed
 during ordinary loading, the original continuation executes immediately. Otherwise
-Confirm/Option are suppressed during work and Back keeps the original title return.
+Confirm/Option are suppressed during work. Since 2026-11-15, the displayed
+Skip action retires optional preparation and executes the saved main-menu
+continuation; it no longer falls through to native Back and the title screen.
 On failure, A retries graphics in the same connect attempt and B explicitly ignores
 preparation for this process (owner refinement below). Exit retires the pending continuation. The host releases a requested attempt exactly
 once, only for its expected successful P4 generation and configuration epoch.
 A zero-entry, missing, failed, cancelled or stale generation cannot release it as
 ready. The owner-authorized Ignore action is a separate, logged bypass that makes
 no readiness claim.
+
+**Native Mac corrections (2026-11-15 [tree/measured]):** The content-ready and
+base-panel polling hooks in `src/hooks/dlc_refresh.cpp` were compiled only on
+Windows. Removing that guard enables the same state-29 predicate and authored
+poll on Mac; the gate now advances rather than waiting forever. The owner then
+reported a real preparation failure: extraction produced 210 shaders and 434
+FBO recipes, but the renderer imported zero entries
+(`out/macos/cache-gate-game.log`). SDK patch 0067 explicitly rewinds append/update
+streams before header reads (BSD/macOS initially positions them at EOF), and
+completes the packed Vulkan state word so Clang uses the canonical 60-byte
+description/68-byte record with render targets at byte 44. Compile-time size
+and offset assertions guard the ABI. Unsupported-but-valid records remain on
+disk; only a corrupt tail is truncated. The rebuilt import reads 409 supported
+recipes, skips 25 requiring unavailable geometry shaders, and finds no corrupt
+records (`out/macos/cache-portability-game.log`). The same run prepares all
+409 required pipelines successfully (16 already present), with zero failed,
+missing or cancelled entries, and releases the continuation exactly once after
+59,153 ms. The owner confirms preparation completes on the rebuilt game.
+
+The preparing-state Skip now requests extraction/renderer cancellation without
+joining extraction on the guest thread, retains ordinary demand compilation and
+caching, and follows the existing authored main-menu continuation. It requires
+native content/save completion and never marks skipped work ready. Host
+`menu_payload` tests execute the real authored button branch: Skip continues once
+without restarting discovery, while Confirm does not bypass preparation. The
+failure-only Try Again/Ignore routes are unchanged. `menu_payload`,
+`preparation_assets`, and `preparation_state` pass on Mac
+(`out/macos/cache-gate-tests.log`).
+Live preparing-state Skip navigation remains unverified; the completion run
+above exercised successful preparation rather than cancellation.
 
 ### Local inputs and renderer lifecycle
 

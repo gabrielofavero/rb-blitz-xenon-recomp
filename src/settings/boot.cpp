@@ -6,6 +6,9 @@
 
 #include "settings/boot.h"
 #include "settings/display_runtime.h"
+#if defined(__APPLE__)
+#include "settings/display_probe_mac.h"
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -133,6 +136,8 @@ void ProbeDisplay(CapabilityInputs& inputs) {
                                       static_cast<int32_t>(mode.dmPelsHeight)});
     }
   }
+#elif defined(__APPLE__)
+  ProbeMacDisplay(inputs);
 #endif
 }
 
@@ -224,8 +229,9 @@ DesktopMetrics ProbeDesktop(const int32_t monitor_index) {
   return desktop;
 }
 
+#elif defined(__APPLE__)
+DesktopMetrics ProbeDesktop(int32_t monitor_index) { return ProbeMacDesktop(monitor_index); }
 #else
-
 DesktopMetrics ProbeDesktop(int32_t) { return DesktopMetrics{}; }
 
 #endif  // _WIN32
@@ -394,6 +400,9 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   // The stable title modes are 960x540 and 1280x720. Larger output modes come
   // from the backend's integer draw scale, not a larger guest EDRAM allocation.
   render_limits_ = TitleRenderPath();
+#if defined(__APPLE__)
+  LimitMacRenderPath(render_limits_);
+#endif
   cap_inputs.render_path = render_limits_;
   for (const std::string_view token : ShippedBackends()) {
     RendererProbe probe;
@@ -809,11 +818,17 @@ void SettingsBoot::ApplyWindowPolicy() {
       std::strtol(rex::cvar::GetFlagByName("monitor").c_str(), nullptr, 10);
   const DesktopMetrics desktop = ProbeDesktop(static_cast<int32_t>(monitor_index));
   const ClientFit fit = FitClientToDesktop(render, desktop);
+  bool needs_logical_size = false;
+#if defined(__APPLE__)
+  // Cocoa's video-mode fallback is interpreted as points, while render sizes
+  // are backing pixels. Convert even when the physical client already fits.
+  needs_logical_size = desktop.available && desktop.scale_percent != 100;
+#endif
   const double aspect = double(render.width) / double(render.height);
   if (!desktop.available) {
     REXLOG_INFO("settings_boot: window {}x{} (aspect {:.4f}); no usable desktop measurement, so it "
                 "is created at the render size", render.width, render.height, aspect);
-  } else if (!fit.shrunk) {
+  } else if (!fit.shrunk && !needs_logical_size) {
     // The video mode already gives exactly this size, so nothing is written. If somebody named the
     // window's size instead, it is theirs and the line says so rather than implying this policy
     // chose it.

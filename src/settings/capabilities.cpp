@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <numeric>
 #include <string_view>
 
 namespace rb_blitz::settings {
@@ -145,10 +146,28 @@ std::vector<DisplayMode> SupportedResolutions(const RenderPathLimits& limits,
       out.push_back(size);
     }
   }
-  // Only the current desktop size is an Auto target. Other enumerated modes do not become
-  // manual choices or compete with the desktop when Auto resolves on the next launch.
+  // Prefer the current desktop, with an exactly matching aspect as fallback.
+  // Other enumerated modes don't become manual choices or Auto targets.
   if (WithinOfferBounds(limits, ceiling) && PlanGuestScreen(limits, ceiling).supported) {
     out.push_back(ceiling);
+  } else if (Positive(ceiling)) {
+    // Auto may be limited by the backend's available draw scales. Keep the
+    // display's shape at the highest exactly producible size that fits.
+    const int32_t divisor = std::gcd(ceiling.width, ceiling.height);
+    const DisplayMode unit{ceiling.width / divisor, ceiling.height / divisor};
+    DisplayMode best{};
+    for (uint32_t multiple = 1; multiple <= limits.max_guest_height / uint32_t(unit.height);
+         ++multiple) {
+      for (int32_t scale : limits.scales) {
+        if (scale < 1) continue;
+        const DisplayMode candidate{unit.width * int32_t(multiple) * scale,
+                                     unit.height * int32_t(multiple) * scale};
+        if (candidate.width <= ceiling.width && candidate.height <= ceiling.height &&
+            Area(candidate) > Area(best) && PlanGuestScreen(limits, candidate).supported)
+          best = candidate;
+      }
+    }
+    if (Positive(best)) out.push_back(best);
   }
   out = NormalizeDisplayModes(std::move(out));
   if (out.empty()) {

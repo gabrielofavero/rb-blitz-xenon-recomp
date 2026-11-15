@@ -27,13 +27,15 @@
 
 #include "hooks/content_progress.h"
 #include "platform/runtime_symbol.h"
+#include "platform/guest_memory.h"
+#include <rex/thread.h>
 #include "settings/menu_compat.h"
 #include "settings/boot.h"
 #include "ui/menu_options.h"
 
 #if defined(_WIN32)
-
 #include <windows.h>
+#endif
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
 // Define named symbols the same way, so the cvar declarations live next to their table.
@@ -145,7 +147,7 @@ void ObserveBootRead(bool scatter, uint32_t completed_bytes,
                 "completed_bytes={} runtime_read_ms={:.1f} max_runtime_read_ms={:.1f} "
                 "post_read_scan_ms={:.1f} max_post_read_scan_ms={:.1f}",
                 std::chrono::duration_cast<std::chrono::milliseconds>(scan_done - window.last_report).count(),
-                GetCurrentThreadId(), window.plain_calls, window.scatter_calls,
+                rex::thread::current_thread_id(), window.plain_calls, window.scatter_calls,
                 window.completed_bytes, window.original_us / 1000.0,
                 window.max_original_us / 1000.0, window.scan_us / 1000.0,
                 window.max_scan_us / 1000.0);
@@ -162,6 +164,7 @@ constexpr uint32_t kImageBase = 0x82000000;
 constexpr uint32_t kImageSize = 0x00A40000;
 
 bool ReadableHost(const void* address) {
+#if defined(_WIN32)
   MEMORY_BASIC_INFORMATION info{};
   if (VirtualQuery(address, &info, sizeof(info)) == 0 || info.State != MEM_COMMIT) {
     return false;
@@ -177,6 +180,9 @@ bool ReadableHost(const void* address) {
     default:
       return false;
   }
+#else
+  return rb_blitz::platform::GuestRangeReadable(address, 1);
+#endif
 }
 
 std::string HexDigest(const uint8_t digest[20]) {
@@ -213,11 +219,22 @@ uint32_t RetargetChecksumRow(uint8_t* base, const uint8_t before[20], const uint
   uint8_t* const first = base + kImageBase;
   uint8_t* const limit = first + kImageSize;
   for (uint8_t* at = first; at + 20 <= limit;) {
+#if defined(_WIN32)
     MEMORY_BASIC_INFORMATION info{};
     if (VirtualQuery(at, &info, sizeof(info)) == 0) {
       break;
     }
     uint8_t* region_end = static_cast<uint8_t*>(info.BaseAddress) + info.RegionSize;
+#else
+    size_t available = 0;
+    rex::memory::PageAccess access = rex::memory::PageAccess::kNoAccess;
+    if (!rex::memory::QueryProtect(at, available, access)) {
+      const size_t page = rex::memory::page_size();
+      at += std::min(size_t(limit - at), page - reinterpret_cast<uintptr_t>(at) % page);
+      continue;
+    }
+    uint8_t* region_end = at + std::min(size_t(limit - at), available);
+#endif
     if (region_end > limit) {
       region_end = limit;
     }
@@ -739,5 +756,3 @@ extern "C" REX_FUNC(__imp__NtReadFileScatter) {
   ObserveBootRead(true, result == 0 ? args.length : 0, started, read_done,
                   read_done, read_done);
 }
-
-#endif  // _WIN32

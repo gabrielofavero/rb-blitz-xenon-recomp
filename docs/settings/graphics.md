@@ -613,6 +613,21 @@ Worked examples (the thresholds are deliberately conservative; each one below is
 
 **4:3 update (2026-11-10, windowed visual pass complete):** This supersedes the preceding 16:9 floor/aspect bound. Auto now accepts 4:3 native modes that fit the existing guest-height gate: 720x540, 800x600, 960x720, 1440x1080, 1600x1200, 1920x1440 and 2880x2160. The title's 4:3 guest bases (720x540 and 960x720), the existing inverse-aspect write and the signed HUD shift produce exact 4:3 frames without a host overlay. The Resolution row still lists only Auto and fixed 16:9 presets. 1024x768 and 1280x960 require guest heights above 720, so Auto does not select them yet; 1024x768 is available through `RBBLITZ_PROBE_RENDER_SIZE` for a visual gate. Main menu, settings, Music Library, Messages, RhythmVerse and gameplay were captured at 1440x1080 in a fitted window; native fullscreen remains untested (part 3 §12).
 
+**Mac display/Auto update (2026-11-15 [measured]):** Native SDL/Cocoa probes
+now measure the current display and usable desktop in backing pixels; the
+earlier Windows-only probe returned 0×0 and made Mac Auto select 1280×720.
+Retina window dimensions convert back to points even when the physical client
+already fits. Mac render capabilities omit draw scales whose non-sparse
+512 MiB × scale² resolve buffer exceeds the selected Metal device's maximum
+buffer length. When the exact desktop size is unavailable, Auto prefers the
+highest supported size with the exact display aspect before using the general
+fallback. On this M1, the 4 GiB limit excludes scale 3; Auto selects 2304×1440
+(1152×720 at 2×) for the 2880×1800 screen, filling it without top/bottom bars.
+The saved token remains Auto and the manual preset list is unchanged. Evidence:
+`out/macos/display-final-game.log`, `out/macos/display-auto-title.png`, and the
+`settings_graphics`/`window_policy` tests. This is title-screen evidence, not
+full-song acceptance.
+
 ### 6. What the menu background actually is (the owner's question)
 
 **Measured/decoded:** the main menu is not a set of layered 2D images stacked by the UI system. It is a **3D scene** with several `RndDir`s that the shell renders through one camera:

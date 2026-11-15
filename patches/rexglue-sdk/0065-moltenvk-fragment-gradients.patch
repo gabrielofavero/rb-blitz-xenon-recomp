@@ -1,0 +1,96 @@
+diff --git a/include/rex/graphics/pipeline/shader/spirv_builder.h b/include/rex/graphics/pipeline/shader/spirv_builder.h
+--- a/include/rex/graphics/pipeline/shader/spirv_builder.h
++++ b/include/rex/graphics/pipeline/shader/spirv_builder.h
+@@ -31,4 +31,11 @@
+   // Make public rather than protected.
+   using spv::Builder::createSelectionMerge;
++
++  // On MoltenVK, NoContraction arithmetic is lowered to non-inlined Metal
++  // functions which don't compute helper-lane values needed by derivatives.
++  // Explicit Fma operations preserve single-operation rounding without calls.
++  void setNoContractionFma(spv::Id glsl_ext_inst) {
++    no_contraction_fma_ext_inst_ = glsl_ext_inst;
++  }
+ 
+   spv::Id createQuadOp(spv::Op op_code, spv::Id type_id, spv::Id operand1, spv::Id operand2,
+@@ -142,4 +149,6 @@
+     Branch current_branch_ = Branch::kSelection;
+   };
++ private:
++  spv::Id no_contraction_fma_ext_inst_ = spv::NoResult;
+ };
+ 
+diff --git a/src/graphics/pipeline/shader/spirv_builder.cpp b/src/graphics/pipeline/shader/spirv_builder.cpp
+--- a/src/graphics/pipeline/shader/spirv_builder.cpp
++++ b/src/graphics/pipeline/shader/spirv_builder.cpp
+@@ -14,4 +14,6 @@
+ #include <vector>
+ 
++#include <SPIRV/GLSL.std.450.h>
++
+ #include <rex/assert.h>
+ #include <rex/graphics/pipeline/shader/spirv_builder.h>
+@@ -49,4 +51,30 @@
+ spv::Id SpirvBuilder::createNoContractionBinOp(spv::Op op_code, spv::Id type_id, spv::Id operand1,
+                                                spv::Id operand2) {
++  if (no_contraction_fma_ext_inst_ != spv::NoResult &&
++      (op_code == spv::OpFAdd || op_code == spv::OpFSub || op_code == spv::OpFMul ||
++       op_code == spv::OpVectorTimesScalar)) {
++    auto splat = [this, type_id](spv::Id scalar) {
++      return isVectorType(type_id) ? smearScalar(spv::NoPrecision, scalar, type_id) : scalar;
++    };
++    spv::Id a, b, c;
++    if (op_code == spv::OpFAdd) {
++      a = splat(makeFloatConstant(1.0f));
++      b = operand1;
++      c = operand2;
++    } else if (op_code == spv::OpFSub) {
++      a = splat(makeFloatConstant(-1.0f));
++      b = operand2;
++      c = operand1;
++    } else {
++      a = operand1;
++      b = op_code == spv::OpVectorTimesScalar ? splat(operand2) : operand2;
++      // -0 preserves the sign of a zero product, including -0 * positive.
++      c = splat(makeFloatConstant(-0.0f));
++    }
++    spv::Id result =
++        createTriBuiltinCall(type_id, no_contraction_fma_ext_inst_, GLSLstd450Fma, a, b, c);
++    addDecoration(result, spv::DecorationNoContraction);
++    return result;
++  }
+   spv::Id result = createBinOp(op_code, type_id, operand1, operand2);
+   addDecoration(result, spv::DecorationNoContraction);
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -34,5 +34,5 @@
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+-    static constexpr uint32_t kVersion = 12;
++    static constexpr uint32_t kVersion = 13;
+ 
+     enum class DepthStencilMode : uint32_t {
+@@ -400,4 +400,5 @@
+     bool demote_to_helper_invocation;
+     bool sample_rate_shading;
++    bool moltenvk_fragment_fma = false;
+   };
+ 
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -61,4 +61,5 @@
+       demote_to_helper_invocation(vulkan_device->properties().shaderDemoteToHelperInvocation),
+       sample_rate_shading(vulkan_device->properties().sampleRateShading) {
++  moltenvk_fragment_fma = vulkan_device->properties().driverID == VK_DRIVER_ID_MOLTENVK;
+   const uint32_t vulkan_api_version = vulkan_device->properties().apiVersion;
+   if (vulkan_api_version >= VK_MAKE_API_VERSION(0, 1, 2, 0)) {
+@@ -186,4 +187,7 @@
+   }
+   ext_inst_glsl_std_450_ = builder_->import("GLSL.std.450");
++  if (is_pixel_shader() && features_.moltenvk_fragment_fma) {
++    builder_->setNoContractionFma(ext_inst_glsl_std_450_);
++  }
+   builder_->setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
+   builder_->setSource(spv::SourceLanguageUnknown, 0);

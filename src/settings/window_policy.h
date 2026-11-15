@@ -39,7 +39,7 @@ namespace rb_blitz::settings {
 // *physical* pixels: that is the space SDL creates a window in on Windows and the space the Win32
 // frame metrics are expressed in.
 struct DesktopMetrics {
-  // False when nothing could be measured (a non-Windows host, or a monitor query that failed).
+  // False when nothing could be measured (an unsupported host, or a failed monitor query).
   // Nothing is fitted then: a window is created at exactly the size that was asked for, which is
   // what a build without this information has always done.
   bool available = false;

@@ -1481,7 +1481,7 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
   struct Machine {
     const std::vector<Node>& roots;
     bool pending = true, failed = true;
-    int retries = 0, ignores = 0, menus = 0, discoveries = 0;
+    int retries = 0, ignores = 0, skips = 0, menus = 0, discoveries = 0;
     std::string action;
     std::map<std::string,std::string> hints;
     std::map<std::string,bool> showing;
@@ -1503,6 +1503,7 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
         if (path == "rbbz-graphics/failed") return Node::Int(failed);
         if (path == "rbbz-graphics/retry") { ++retries; failed=false; return Node::Int(1); }
         if (path == "rbbz-graphics/ignore") { ++ignores; return Node::Int(1); }
+        if (path == "rbbz-graphics/skip") { ++skips; return Node::Int(1); }
         if (path == "rbbz-graphics/checking") return Node::Int(1);
         return Node::Int(0);
       }
@@ -1555,6 +1556,20 @@ void TestGraphicsRecovery(const std::vector<rb_blitz::ui::dtb::Node>& roots) {
   CHECK_FALSE(ignore.pending);
   ignore.Method("rbbz_graphics_poll");
   CHECK_EQ(ignore.menus,1);
+  BeginCase("Skip during preparation continues to the main menu exactly once");
+  Machine skip{roots}; skip.failed = false; skip.action = "kAction_Cancel";
+  skip.Method("rbbz_graphics_poll");
+  CHECK_TRUE(skip.hints["back.ihp"] == "rbbz_graphics_back");
+  skip.Method("BUTTON_DOWN_MSG");
+  CHECK_EQ(skip.skips,1); CHECK_EQ(skip.ignores,0); CHECK_EQ(skip.discoveries,0);
+  CHECK_EQ(skip.menus,1); CHECK_FALSE(skip.pending);
+  skip.Method("rbbz_graphics_poll");
+  CHECK_EQ(skip.menus,1);
+  BeginCase("Confirm while preparing neither skips nor restarts discovery");
+  Machine preparing{roots}; preparing.failed = false; preparing.action = "kAction_Confirm";
+  preparing.Method("BUTTON_DOWN_MSG");
+  CHECK_TRUE(preparing.pending); CHECK_EQ(preparing.skips,0);
+  CHECK_EQ(preparing.discoveries,0); CHECK_EQ(preparing.menus,0);
 }
 
 void TestLoadedMenuRefresh() {

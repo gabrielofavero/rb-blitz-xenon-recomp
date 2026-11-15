@@ -4,10 +4,7 @@
 #include <atomic>
 #include <cstring>
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
+#include "platform/guest_memory.h"
 
 #include <rex/hook.h>
 #include <rex/logging.h>
@@ -132,14 +129,10 @@ void rb_blitz::settings::WriteGuestLayoutAspect(uint8_t* base) {
                   address, before, guard, what);
       return false;
     }
-    DWORD previous = 0;
-    if (::VirtualProtect(field, sizeof(uint32_t), PAGE_READWRITE, &previous) == 0) {
+    if (!rb_blitz::platform::WriteProtectedGuestBe32(field, value)) {
       REXLOG_WARN("render: 0x{:08X} could not be opened for the {}", address, what);
       return false;
     }
-    StoreGuestBe32(field, value);
-    DWORD ignored = 0;
-    ::VirtualProtect(field, sizeof(uint32_t), previous, &ignored);
     REXLOG_INFO("render: {} 0x{:08X} {:#010X} -> {:#010X}", what, address, before, value);
     return true;
   };

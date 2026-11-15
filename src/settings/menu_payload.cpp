@@ -1181,10 +1181,11 @@ bool AddGraphicsLoadingGate(std::vector<Node>* roots, std::string* why) {
   const auto recovery = cmd({sym("switch"),Node::Var("action"),
       Node::Array({sym("kAction_Confirm"),cmd({sym("if"),query("retry"),call("rbbz_graphics_poll")})}),
       Node::Array({sym("kAction_Cancel"),cmd({sym("if"),query("ignore"),call("rbbz_finish_graphics")})})});
-  buttons->kids = {sym("BUTTON_DOWN_MSG"),cmd({sym("if_else"),
-      cmd({sym("&&"),pending,query("failed")}),recovery,
-      cmd({sym("if"),cmd({sym("||"),cmd({sym("!"),pending}),
-          cmd({sym("=="),Node::Var("action"),sym("kAction_Cancel")})}),cmd(std::move(original))})})};
+  const auto skip = cmd({sym("if"),cmd({sym("&&"),
+      cmd({sym("=="),Node::Var("action"),sym("kAction_Cancel")}),query("skip")}),
+      call("rbbz_finish_graphics")});
+  buttons->kids = {sym("BUTTON_DOWN_MSG"),cmd({sym("if_else"),pending,
+      cmd({sym("if_else"),query("failed"),recovery,skip}),cmd(std::move(original))})};
   const auto set_label = [&](const char* token) { return cmd({sym("status.lbl"),sym("set"),sym("text_token"),sym(token)}); };
   const auto preparing_label = cmd({sym("status.lbl"),sym("set_token_fmt"),sym("rbbz_graphics_preparing"),
       query("current"),query("total")});

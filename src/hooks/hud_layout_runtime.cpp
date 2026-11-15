@@ -8,7 +8,9 @@
 #include <cstring>
 #include <string_view>
 
+#if defined(_WIN32)
 #include <windows.h>
+#endif
 
 #include <rex/cvar.h>
 #include <rex/hook.h>
@@ -17,6 +19,7 @@
 
 #include "hooks/hud_layout.h"
 #include "hooks/render_settings.h"
+#include "platform/guest_memory.h"
 
 REX_EXTERN(__imp__sub_821F13D0);  // RndTransformable::WorldXfm
 REX_EXTERN(sub_821F13D0);
@@ -93,11 +96,15 @@ bool HudPath(const uint8_t* base, uint32_t address) {
   // these words can be unrelated data: validate this speculative string with
   // VirtualQuery directly, never the expensive guest heap QueryRegionInfo.
   // There is no permanent positive/negative page cache to go stale on reload.
+#if defined(_WIN32)
   MEMORY_BASIC_INFORMATION info{};
   if (!VirtualQuery(base + address, &info, sizeof(info)) || info.State != MEM_COMMIT ||
       (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0 ||
       base + address + sizeof(path) >
           static_cast<const uint8_t*>(info.BaseAddress) + info.RegionSize) return false;
+#else
+  if (!rb_blitz::platform::GuestRangeReadable(base + address, sizeof(path))) return false;
+#endif
   return std::memcmp(base + address, path, sizeof(path)) == 0;
 }
 

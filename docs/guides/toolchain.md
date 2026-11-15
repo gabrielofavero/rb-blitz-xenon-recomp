@@ -40,6 +40,15 @@ Prompt 1's native store adapter also requires libcurl headers and library
 version 7.62 or newer for URL parsing. The first native builders must record
 the exact libcurl version and whether the final package declares or bundles it.
 
+**Native bring-up measurement, 2026-11-15:** Apple M1, macOS 27.2.1;
+Xcode 26.0.1 build 17A400, AppleClang 17.0.0, Apple SDK 26.0, CMake 3.31.6,
+Ninja 1.13.2, Python 3.12.16, and the SDK's system libcurl 8.7.1 headers/stub.
+The game linked with `mac-arm64-release`; configure/build logs are under
+`out/macos/`. The current toolchain TOML remains a bootstrap record until
+native gameplay is accepted. The system-selected Command Line Tools had
+AppleClang 14.0.3/SDK 13.3, so this pass selected a side-by-side Xcode through
+`DEVELOPER_DIR` instead of changing the machine's global selection.
+
 ## The set
 
 Measured on the machine the acceptance runs are made on, Windows x86-64

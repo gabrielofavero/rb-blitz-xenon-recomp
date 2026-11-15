@@ -215,7 +215,7 @@ std::vector<SchemaRow> BuildTable() {
                         WidgetKind::kHorizontalSelect, ValueKind::kResolution,
                         ResolutionValue(0, 0), "resolutions");
     rows.push_back(Row(std::move(d), {"graphics", "resolution"}, "", "Resolution",
-                       "Auto matches your display resolution each time the game starts."));
+                       "Auto fits your display using the highest supported resolution."));
   }
   rows.push_back(Row(Make(SettingId::kVsync, Category::kGraphics, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
