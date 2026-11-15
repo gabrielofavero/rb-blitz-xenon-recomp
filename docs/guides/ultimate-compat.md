@@ -339,8 +339,8 @@ rb_blitz.exe --game_data_root=<game root>
 - Want it somewhere else? `--ultimate_payload_root=D:\mods\blitz-ultimate`.
 - Want vanilla without moving files? `--ultimate_mode=0`.
 - Already merged the payload into the data root (the mod's own install shape, or a
-  copied `gen/`)? That is detected and the overlay is skipped; only the three edits
-  are applied.
+  copied `gen/`)? That is detected. The overlay still supplies the provider's
+  writable user-file redirects without replacing the executable.
 
 ## 9. Hazards and limits
 
@@ -348,12 +348,50 @@ rb_blitz.exe --game_data_root=<game root>
 | --- | --- | --- |
 | A header without its ark | `gen/patch_xbox.hdr` without `patch_xbox_0.ark` makes the game report a damaged disc. The overlay warns at boot. | this file, §2 |
 | The payload's content pair is only reachable through the content-device edit | With `--ultimate_patches=0` or `6`, the guest looks in `update:`, which this dump does not have, and the payload is inert. | §6 |
-| The mod's own settings files are absent | `game:\ulti_settings.dta`, `game:\ulti_settings.ini` and `game:\scores` are requested and missing (`0xc000000f`); the guest tolerates all three. If a future release needs them, they are user-supplied content, not something we ship. | §7 |
+| Provider files on the read-only game mount | Initial missing settings/scores reads (`0xc000000f`) are tolerated, but denied score writes discard the comparison table across restart. Settings and recognized score records now redirect to writable user storage; the legacy INI remains an import source. | Sections 7 and 9.1 |
 | Fingerprinting | The gate describes `default.xex` in the data root. Because an installed payload is a *separate directory*, the root's identity is unchanged (the "game data identity" line reports the same 9,023,488-byte / `e2195d62…` image on every route). Replacing the root's `default.xex` would change it: the build gate fails closed and can be relaxed with `-DRBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON`, while the boot-time check only warns — measured on the payload's own image by `scripts/acceptance/acceptance_wrong_data.ps1`, which logs `MODIFIED` and then reaches the title screen anyway ([bringup-log.md](../history/bringup-log.md) "The runtime half of the wrong-data check"). | [known-issues.md](../reference/known-issues.md), [build-and-run.md](build-and-run.md) §3 |
 | Menu/input data is replaced | The payload ships its own `_ark/ui/…` and `config` data; a missing or renamed DTA block can silently kill every menu binding. | [rb3-references.md](../reference/rb3-references.md) §7.2 |
 | Content-enumeration counts change | Our verified offline state (`XamContentCreateEnumerator: added 2 items`, aggregate enumerator `0 items`) is a **vanilla** baseline. | [bringup-log.md](../history/bringup-log.md), [engine compatibility plan](../plans/todo/2026-10-31-engine-compatibility-closeout-plan.md) |
 | A payload release with a different shape | We reproduce 12 bytes of an image and union a directory. An extra ark, a real `update:` device or a second executable would make the payload unreachable again, and this file has to be revisited. The executable itself has been frozen since 1.0 (§3), so compare the release's `default.xex` hash against `390e0ae0…` first. | this file |
 | Mod churn | Its install instructions can change between releases; the only shape we promise is the one in §2. | this file |
+
+### 9.1 Personal-best comparisons across restart (2026-11-15)
+
+The owner's Vulkan log reports `game:\scores` missing at 10:56:42.245
+(`0xc000000f`) and its write denied at 11:02:23.707 (`0xc0000022`). Native
+`local_save.bin` restoration succeeds for 184 bytes at initialization and again
+after teardown; its checkpoint also succeeds after the song. The earlier D3D12
+session has the same denied score writes, including 10:47:06.989. Evidence and
+read-only dumps of the installed provider records are retained under
+`out/comparison-restart/`.
+
+The provider's `ulti/gen/ulti_init.dtb` sets `$scores_path` to `GAME:/SCORES`
+and initializes `$scoresArray` from that file. Results update `(song-id score
+stars)` records in memory and call `write_file`. Song selection sets `$pb` from
+that table when Personal Best is enabled and the user is offline; the game-enter
+script attaches the right-side **Your Best** comparison only with a nonzero
+`$pb`. Thus the in-process replay can have a comparison while a restarted process
+has none. This is a persistence defect independent of renderer selection, and
+the separate native progress checkpoint does not populate this script table.
+
+The adapter now records the recognized literal score initializer as a parsed
+provider fact. Active providers redirect that record to
+`<user_data_root>/ultimate/scores` alongside their settings file. Dynamic or
+unsupported score-path expressions do not gain a guessed redirect. An existing
+legacy score file is copied verbatim in overlay precedence on first use;
+original files and an existing user copy are preserved. An import failure keeps
+the original read-only route and logs the problem. New writes use the redirect's
+canonical host spelling, while guest lookups remain case-insensitive.
+
+A related overlay defect let an old game-root entry remain ahead of its
+redirected copy. A real VFS regression reproduced wrong reads for both `scores`
+and `ulti_settings.dta`, plus two children named `scores` (3/41 checks failed).
+The overlay now excludes redirected names from the ordinary merge so each
+record has one backing owner. New and repeated score writes, remount/reload, both `game:` and
+`d:` aliases, legacy precedence and unrelated read-only files are covered by
+headless tests. A new gameplay/renderer-switch visual check remains unperformed.
+The fix does not manufacture comparison history for writes that failed earlier;
+a new completed run may be needed before a later play has a reference score.
 
 ## 10. Acceptance criteria for "Ultimate works"
 
@@ -363,8 +401,8 @@ rb_blitz.exe --game_data_root=<game root>
 2. Every recomp-side change needed for that is a documented hook or patch with a
    guest address and evidence: no monkey-patching, no per-variant build flags, no
    forked `default.xex`.
-3. The overlay never writes to the payload: an uninstall is deleting one directory,
-   with nothing cached outside it.
+3. The overlay never writes to the payload. Removing its content restores the
+   retail target; player-owned settings and comparison scores remain in save storage.
 4. Anyone can re-derive §3 from the two images with one script.
 
 Points 2, 3 and 4 hold as of 2026-09-20. The "plays a song" half of point 1 rests on

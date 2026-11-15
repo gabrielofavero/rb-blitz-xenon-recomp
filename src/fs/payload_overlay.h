@@ -77,8 +77,8 @@ class PayloadOverlayDevice final : public rex::filesystem::Device {
   // union, compared case-insensitively with either separator.
   //
   // `settings_root` is a **writable** directory of the player's own (the provider's settings
-  // file lives there) and `redirects` are the overlay-relative records it serves. A
-  // redirect is root-level only: the provider writes `<game root>/ulti_settings.dta`, and a
+  // and comparison scores live there) and `redirects` are the overlay-relative records it serves. A
+  // redirect is root-level only: the provider writes files at the game root, and a
   // nested redirect would need the union to own a directory it does not.
   PayloadOverlayDevice(std::string_view mount_path, const std::filesystem::path& payload_root,
                        const std::filesystem::path& base_root, bool base_read_only,

@@ -6,6 +6,7 @@
 // shape check, the frozen row bindings, and the provider's own settings file.
 
 #include "settings/ultimate_adapter.h"
+#include "fs/overlay_merge.h"
 
 #include <algorithm>
 #include <array>
@@ -1086,6 +1087,15 @@ ShapeReport CheckShape(const RecordBytes& records) {
       if (name == nullptr || value == nullptr || name->text.empty()) {
         continue;
       }
+      if (name->text == "scores_path") {
+        const auto* path = value;
+        if (value->tag == ui::dtb::kCommand && KidText(*value, 0) == "sprint" &&
+            value->kids.size() == 2) path = Kid(*value, 1);
+        if (path && path->tag == ui::dtb::kString &&
+            fs::FoldGuestPath(path->text) == "game:\\scores")
+          report.scores_path = path->text;
+        continue; // File identity is not a setting default.
+      }
       report.defaults[name->text] = AtomText(*value);
     }
   }
@@ -1617,6 +1627,54 @@ std::map<SettingId, Value> DefaultsFromShape(const ShapeReport& shape) {
 
 bool PayloadWritesSettingsFile(const ShapeReport& shape) {
   return shape.settings_path_macro.find(kSettingsFileName) != std::string::npos;
+}
+
+std::vector<std::string> ProviderUserRecords(const ProviderRuntime& runtime) {
+  if (!runtime.active_target || runtime.user_root.empty()) return {};
+  std::vector<std::string> records;
+  if (PayloadWritesSettingsFile(runtime.shape)) records.emplace_back(kProviderRecord);
+  if (!runtime.shape.scores_path.empty()) records.emplace_back(kScoresRecord);
+  return records;
+}
+
+bool ImportProviderScores(const ProviderRuntime& runtime,
+                          std::span<const std::filesystem::path> legacy_roots,
+                          std::string* error) {
+  if (error) error->clear();
+  if (!runtime.active_target || runtime.user_root.empty() || runtime.shape.scores_path.empty())
+    return true;
+  std::error_code ec;
+  // The guest VFS is case-insensitive even on a case-sensitive host. Preserve
+  // the actual source spelling rather than manufacturing a second score file.
+  const auto find = [&](const std::filesystem::path& root) {
+    std::filesystem::path found;
+    if (root.empty() || !std::filesystem::exists(root, ec)) return found;
+    for (std::filesystem::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+      if (fs::FoldName(it->path().filename().string()) != kScoresRecord) continue;
+      if (!found.empty()) {
+        ec = std::make_error_code(std::errc::file_exists);
+        return std::filesystem::path{};
+      }
+      found = it->path();
+    }
+    return found;
+  };
+  const auto destination = runtime.user_root / kScoresRecord;
+  if (!find(runtime.user_root).empty() && !ec) return true;
+  if (!ec) {
+    for (const auto& root : legacy_roots) {
+      const auto source = find(root);
+      if (ec) break;
+      if (source.empty()) continue;
+      std::filesystem::create_directories(runtime.user_root, ec);
+      if (ec) break;
+      std::filesystem::copy_file(source, destination,
+          std::filesystem::copy_options::skip_existing, ec);
+      break;
+    }
+  }
+  if (ec && error) *error = ec.message();
+  return !ec;
 }
 
 // ------------------------------------------------------------------------------------------------

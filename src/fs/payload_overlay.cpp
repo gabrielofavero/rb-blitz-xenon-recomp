@@ -112,6 +112,9 @@ bool PayloadOverlayDevice::AddSettingsSide(const std::filesystem::path& settings
   redirects_ = std::move(root_level);
   REXLOG_INFO("ultimate: {} record(s) redirected to {}: {}", redirects_.size(),
               settings_root.string(), redirects_.front());
+  for (const auto& record : redirects_)
+    REXLOG_INFO("ultimate: writable provider record {} -> {}", record,
+                (settings_root / record).string());
   return true;
 }
 
@@ -221,12 +224,17 @@ rex::filesystem::Entry* PayloadOverlayDevice::CreateSettingsEntry(std::string_vi
   if (root == nullptr) {
     return nullptr;
   }
+  // Redirect names own the host spelling, independent of the guest's casing.
+  const auto record = std::find_if(redirects_.begin(), redirects_.end(), [&](const auto& candidate) {
+    return FoldName(candidate) == FoldName(name);
+  });
+  if (record == redirects_.end()) return nullptr;
   // The host file is created here, on the guest's first write. Nothing pre-creates it, so a
   // player who never opens the provider's settings never grows an empty file.
-  rex::filesystem::Entry* created = root->CreateEntry(name, attributes);
+  rex::filesystem::Entry* created = root->CreateEntry(*record, attributes);
   if (created == nullptr) {
     // An entry the host already has (a file written by an earlier boot) is not a failure.
-    created = settings_device_->ResolvePath(name);
+    created = settings_device_->ResolvePath(*record);
   }
   return created;
 }
@@ -272,6 +280,9 @@ void PayloadOverlayEntry::MergeChildren() {
       VisiblePayloadChildren(payload_children, path_, device->hidden(), &device->stats_.hidden);
 
   for (const OverlayChild& child : MergeOverlayChildren(payload_children, base_children)) {
+    // A redirected record has exactly one owner. Keeping its old root entry
+    // would make GetChild return that read-only copy before the writable one.
+    if (parent_ == nullptr && device->IsRedirected(child.name)) continue;
     Entry* payload = child.in_payload ? payload_->GetChild(child.name) : nullptr;
     Entry* base = child.in_base ? base_->GetChild(child.name) : nullptr;
     const std::string relative = rex::string::utf8_join_guest_paths(path_, child.name);
@@ -353,10 +364,8 @@ X_STATUS PayloadOverlayEntry::Open(uint32_t desired_access, File** out_file) {
   }
   const X_STATUS result = backing->Open(desired_access, out_file);
   ObserveStorePath(path_, /*open=*/true, desired_access, static_cast<int32_t>(result));
-  // The redirected settings record is the one record whose *guest-side* open is worth a line: it is
-  // the only observable proof that a call the guest made on `GAME:/ulti_settings.dta` reached the
-  // player's own storage instead of the read-only game mount, and it happens a handful of times per
-  // boot (the provider checks for its file, then reads it).
+  // Log redirected settings/score opens so a normal session proves whether the
+  // provider reached player storage instead of the read-only game mount.
   if (settings_ != nullptr) {
     REXLOG_INFO("ultimate: the guest opened {} for {:#x} -> {:#x}", absolute_path(),
                 desired_access, static_cast<uint32_t>(result));

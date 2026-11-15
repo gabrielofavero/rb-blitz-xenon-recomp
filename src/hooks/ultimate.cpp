@@ -89,6 +89,7 @@
 #include "hooks/ultimate.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -349,10 +350,13 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     // watches - a *separate* question from whether the whole payload is one we integrate with.
     // On an unrecognized payload this still repairs the provider's own save, which is the plan's
     // compatibility fallback (§6.1); elsewhere it is the file our rows read and write.
-    std::vector<std::string> redirects;
-    if (settings::ultimate_adapter::PayloadWritesSettingsFile(g_provider.shape) &&
-        !g_provider.user_root.empty()) {
-      redirects.emplace_back(settings::ultimate_adapter::kProviderRecord);
+    auto redirects = settings::ultimate_adapter::ProviderUserRecords(g_provider);
+    const std::array legacy_roots{provider_root, game_data_root};
+    std::string import_error;
+    if (!settings::ultimate_adapter::ImportProviderScores(g_provider, legacy_roots, &import_error)) {
+      REXLOG_WARN("ultimate: could not preserve the existing comparison scores: {}; "
+                  "keeping their original read-only location", import_error);
+      std::erase(redirects, std::string(settings::ultimate_adapter::kScoresRecord));
     }
     MountOverlay(runtime, provider_root, game_data_root, g_provider.user_root, redirects);
   }

@@ -43,6 +43,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -193,6 +194,8 @@ struct ShapeReport {
   std::vector<std::string> macros;     // ulti_macros' own #define names
   std::map<std::string, std::string> defaults;  // ulti_init's `{set $x V}` defaults
   std::string settings_path_macro;              // "GAME:/ulti_settings.dta"
+  // Recognized literal GAME:/SCORES initializer; empty for unsupported expressions.
+  std::string scores_path;
 
   // A choice list a panel declared for a row whose choices live in the payload rather than in
   // our schema (`(data (off plot_... ))` for Force Plot, `(array (default freq ...))` for Gems).
@@ -263,10 +266,10 @@ inline constexpr char kAchievementVariable[] = "os_online_acc";
 // ------------------------------------------------------------------------------------------------
 // 5. The provider's own settings file
 // ------------------------------------------------------------------------------------------------
-// The mod writes `GAME:/ulti_settings.dta` - `MOD_SETTINGS_PATH` in its own macros - and it is the
-// only mutable file the payload has. The game mount is read-only by construction (§6.2: do not
-// make the whole game mount writable), so the runtime redirects exactly this record to user
-// storage. These are the names that redirect is spelled with.
+// The mod writes settings to `GAME:/ulti_settings.dta` and offline comparisons
+// to `GAME:/SCORES`. These player-owned records are redirected to user storage;
+// the game mount remains read-only. The score initializer is checked separately
+// from settings compatibility, using the parsed source fact above.
 
 inline constexpr char kSettingsFileName[] = "ulti_settings.dta";
 inline constexpr char kUserSubdirectory[] = "ultimate";
@@ -274,6 +277,7 @@ inline constexpr char kUserSubdirectory[] = "ultimate";
 // redirect rule matches (`<payload-or-game-root>/ulti_settings.dta`).
 inline constexpr char kProviderGuestPath[] = "GAME:/ulti_settings.dta";
 inline constexpr char kProviderRecord[] = "ulti_settings.dta";
+inline constexpr char kScoresRecord[] = "scores";
 // The provider's legacy file, read once as an import source and never written.
 inline constexpr char kLegacySettingsRecord[] = "ulti_settings.ini";
 
@@ -368,6 +372,14 @@ struct ProviderRuntime {
     return found == choices.end() ? nullptr : &found->second;
   }
 };
+
+// Root-level provider files that belong in the player's writable storage.
+std::vector<std::string> ProviderUserRecords(const ProviderRuntime& runtime);
+// Preserve an existing legacy score file verbatim on first redirection. Roots
+// are in overlay read precedence. Never replace an existing user score file.
+bool ImportProviderScores(const ProviderRuntime& runtime,
+                          std::span<const std::filesystem::path> legacy_roots,
+                          std::string* error);
 
 // Reads the installation, checks the shape, reads the player's provider file over the payload's
 // compiled defaults, and computes readiness. `active_target` is the caller's answer to "is this

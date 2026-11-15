@@ -192,6 +192,8 @@ std::vector<Node> ProviderFixture() {
   roots.push_back(Cmd({Sym("set"), Var("letterbox"), Sym("FALSE")}));
   roots.push_back(Cmd({Sym("set"), Var("camera_angle"), Int(0)}));
   roots.push_back(Cmd({Sym("set"), Var("gems"), Sym("default")}));
+  roots.push_back(Cmd({Sym("set"), Var("scores_path"),
+                       Cmd({Sym("sprint"), Str("GAME:/SCORES")})}));
   roots.push_back(Cmd({Sym("set"), Var("speedmod"), Float(1.0f)}));
   return roots;
 }
@@ -994,6 +996,30 @@ void TestRedirectNames() {
   CHECK_TRUE(ProviderSettingsPath("").empty());
   CHECK_TRUE(std::string(kProviderRecord) == "ulti_settings.dta");
   CHECK_TRUE(std::string(kProviderGuestPath) == "GAME:/ulti_settings.dta");
+  ProviderRuntime runtime;
+  runtime.active_target = true;
+  runtime.user_root = root / "ultimate";
+  runtime.shape = CheckShape(FixtureRecords());
+  CHECK_TRUE(runtime.shape.scores_path == "GAME:/SCORES");
+  const auto records = ProviderUserRecords(runtime);
+  CHECK_TRUE(records == std::vector<std::string>({kProviderRecord, kScoresRecord}));
+  auto unknown = FixtureRecords();
+  auto roots = ProviderFixture();
+  for (auto& node : roots) {
+    if (node.tag == rb_blitz::ui::dtb::kCommand && node.kids.size() == 3 &&
+        node.kids[1].text == "scores_path")
+      node.kids[2] = Cmd({Sym("sprint"), Var("unknown_path")});
+  }
+  unknown.ulti_init = Compiled(roots);
+  runtime.shape = CheckShape(unknown);
+  CHECK_TRUE(runtime.shape.scores_path.empty());
+  CHECK_TRUE(ProviderUserRecords(runtime) == std::vector<std::string>({kProviderRecord}));
+  runtime.shape = CheckShape(FixtureRecords());
+  runtime.active_target = false;
+  CHECK_TRUE(ProviderUserRecords(runtime).empty());
+  runtime.active_target = true;
+  runtime.user_root.clear();
+  CHECK_TRUE(ProviderUserRecords(runtime).empty());
   // The record the redirect matches is the guest path's own last component.
   CHECK_TRUE(std::string(kProviderGuestPath).rfind(std::string("/") + kProviderRecord) !=
              std::string::npos);
@@ -1013,6 +1039,37 @@ std::filesystem::path Scratch(const char* name) {
 std::string ReadText(const std::filesystem::path& path) {
   std::ifstream file(path, std::ios::binary);
   return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+}
+
+void TestScoreFileImport() {
+  rb_blitz::test::BeginCase("existing comparison scores migrate once without replacing player data");
+  ProviderRuntime runtime;
+  runtime.active_target = true;
+  runtime.shape = CheckShape(FixtureRecords());
+  runtime.user_root = Scratch("scores-redirect");
+  const auto legacy = Scratch("scores-legacy");
+  const auto base = Scratch("scores-base");
+  const std::array legacy_roots{legacy, base};
+  { std::ofstream file(legacy / "SCORES", std::ios::binary); file << "(123 456 5)\n"; }
+  { std::ofstream file(base / kScoresRecord, std::ios::binary); file << "(123 100 3)\n"; }
+  std::string error;
+  CHECK_TRUE(ImportProviderScores(runtime, legacy_roots, &error));
+  CHECK_TRUE(ReadText(runtime.user_root / kScoresRecord) == "(123 456 5)\n");
+  CHECK_TRUE(ReadText(legacy / "SCORES") == "(123 456 5)\n");
+  { std::ofstream file(legacy / "SCORES"); file << "changed legacy"; }
+  CHECK_TRUE(ImportProviderScores(runtime, legacy_roots, &error));
+  CHECK_TRUE(ReadText(runtime.user_root / kScoresRecord) == "(123 456 5)\n");
+  std::filesystem::remove(runtime.user_root / kScoresRecord);
+  std::filesystem::remove(legacy / "SCORES");
+  std::filesystem::remove(base / kScoresRecord);
+  std::filesystem::remove(runtime.user_root);
+  { std::ofstream blocked(runtime.user_root); blocked << "not a directory"; }
+  CHECK_FALSE(ImportProviderScores(runtime, legacy_roots, &error));
+  CHECK_FALSE(error.empty());
+  CHECK_TRUE(ReadText(runtime.user_root) == "not a directory");
+  std::filesystem::remove(runtime.user_root);
+  std::filesystem::remove(legacy);
+  std::filesystem::remove(base);
 }
 
 void TestProviderFileSave() {
@@ -1290,6 +1347,7 @@ void TestRealPayload(const char* payload_root) {
              defaults.at(SettingId::kGameSpeed).integer == 100);
   CHECK_TRUE(Readiness(true, true, report) == ProviderReadiness::kCompatible);
   CHECK_TRUE(PayloadWritesSettingsFile(report));
+  CHECK_TRUE(report.scores_path == "GAME:/SCORES");
 
   // The whole integration, host-side: configure against the real payload and a scratch user root,
   // then save one row through the adapter and read it back out of the provider's own file. This is
@@ -1448,6 +1506,7 @@ int main(int argc, char** argv) {
   TestProviderFile();
   TestValueTranslation();
   TestRedirectNames();
+  TestScoreFileImport();
   TestProviderFileSave();
   TestNativeProviderFileSave();
   TestConfigureProviderWithoutAPayload();

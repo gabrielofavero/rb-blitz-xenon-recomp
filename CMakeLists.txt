@@ -993,6 +993,11 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_payload_overlay_tests PRIVATE src)
     add_payload_test(payload_overlay rb_blitz_payload_overlay_tests)
+    add_executable(rb_blitz_payload_overlay_runtime_tests
+        tests/payload_overlay_runtime_tests.cpp src/fs/payload_overlay.cpp)
+    target_include_directories(rb_blitz_payload_overlay_runtime_tests PRIVATE src tests)
+    target_link_libraries(rb_blitz_payload_overlay_runtime_tests PRIVATE rex::runtime)
+    add_payload_test(payload_overlay_runtime rb_blitz_payload_overlay_runtime_tests)
 
     # The HUD re-anchor rule (src/hooks/hud_layout.h). Header-only: the policy is arithmetic
     # and has no boot frame, no guest and no SDK in it, which is the point of the seam.
