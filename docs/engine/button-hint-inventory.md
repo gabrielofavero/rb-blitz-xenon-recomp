@@ -30,6 +30,41 @@ evidence that ordinary hints are correct.
 | In-song Continue prompt | `press_start_to_continue` is the default token for a tutorial label in `track/gen/hud.milo_xbox`, absent from direct UI DTB calls. The gameplay input path sends Gameplay Pause as the native Start bit in a song. | The original locale used glyph 0x8C while the font assigns Gameplay Pause 0x8D. After correction, the in-song tutorial showed Esc and pressing Esc advanced it. Rebound refresh remains open. |
 | Other inline glyph strings | The English locale has action text in `active_description`, `autoplay_desc`, `grenade_desc`, `jackpot_desc`, `overdrive_desc`, `plasma_desc`, `ripple_desc`, `error_return_button`, and account-link keys. `loading_tip_58` mentions old Typewriter controls as historical advice. | Power-up descriptions in Loading and Power-up Select now use Gameplay Power-up's glyph and patched label fonts. `error_return_button` and all three account-link email-entry variants use Interface Confirm's glyph and the corresponding scene font. Six-locale record checks pass; live appearance needs owner acceptance. `loading_tip_58` remains historical advice. |
 
+## iOS touch HUD (2026-11-16)
+
+The animated in-song X reminder belongs to `track/gen/hud.milo_xbox`:
+`remedial_help.grp` owns `help_bg.mesh` and the two lane-switch arrows;
+`remedial_help.lbl` is drawn separately and inherits that group's transform.
+`help_bg_change.anim` selects `help_bg_powerup.tex` for the circular background,
+and `help_powerup.anim` pulses the label's scale. The native remedial Flow owns
+when the reminder appears and disappears.
+
+`input_font::PrepareTouchHud` derives a pause group from these installed records
+on iOS. It copies the circular background material, adds two black guest mesh
+bars, and copies the power-up pulse into a PropAnim targeting their group.
+The generated `game_screen.enter` starts that animation with the guest's own
+`animate (loop 0 480)` route. `hud.grp` draws it; ImGui no longer draws pause.
+No retail art is checked into the project.
+
+While touch is the active input, pause occupies the first top-left slot and the
+original reminder occupies the second. The HUD transform hook and touch hit
+test share the safe-area layout. A physical controller, keyboard, or mouse
+event restores the original reminder placement and hides touch pause; an idle
+connected controller does not steal the touch source. Touch retains controller
+hint artwork while tracking its source separately.
+
+Help & Options → Controls now contains Calibration, Controller & Keyboard,
+and Touch. Controller & Keyboard contains Layout, Controller Presets, Menu
+Bindings, and Gameplay Bindings. On iOS, Touch contains `Touch Buttons: On/Off`;
+`controller.touch_buttons` defaults to On, persists in the settings file, and
+applies immediately. Off hides pause and the reminder during touch play while
+preserving touch input. Desktop releases omit the empty Touch branch. Both
+settings contexts carry the hierarchy and their corresponding Back routes.
+
+Generated-record checks, touch gesture checks, input-source checks, and settings
+tests cover these routes. On-device appearance, animation, and input switching
+still require owner acceptance.
+
 ## Evidence and next measurements
 
 The static scan parsed all 65 installed `assets/game/360/ui/**/*.dtb` records

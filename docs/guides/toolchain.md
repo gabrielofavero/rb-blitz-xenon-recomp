@@ -12,6 +12,10 @@ with the `ios-arm64-release` preset (iOS 17.0 minimum). Full Xcode supplies the
 iPhoneOS SDK. Native Mac `rexglue`, fingerprint and toolchain executables run
 build-time work; they are imported into the cross-build rather than compiled
 for and executed as iPhone binaries. See [the CLI guide](../../installer/ios/README.md).
+The separate `ios-arm64-importer-release` preset inherits this toolchain and
+links the native first-launch importer; the Mac also embeds its pinned importer
+configuration. Both presets compile native code on the Mac. The importer performs
+one-time asset extraction/preparation on device, then reuses verified data.
 This bootstrap record is not device acceptance evidence.
 
 ## Why it is frozen

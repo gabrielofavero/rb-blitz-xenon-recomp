@@ -1,0 +1,22 @@
+diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
+--- a/include/rex/rex_app.h
++++ b/include/rex/rex_app.h
+@@ -243,6 +243,10 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener {
+   virtual std::unique_ptr<ui::AchievementNotificationDialog> CreateAchievementNotificationDialog();
+ 
+   // --- Init phase methods (called in order from OnInitialize) ---
++
++  // Subclasses may complete native preflight asynchronously, then invoke the
++  // existing coordinator on the UI thread without duplicating its phases.
++  bool OnInitialize() override;
+ 
+   /// Resolve path defaults, load config TOML, initialize logging.
+   /// Populates `resolved_defaults_` with the PathConfig produced by
+@@ -287,7 +291,6 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener {
+   void SetupOverlays(ui::Presenter* presenter, ui::ImmediateDrawer* drawer);
+ 
+   // WindowedApp overrides
+-  bool OnInitialize() override;
+   void OnDestroy() override;
+ 
+   // WindowListener overrides

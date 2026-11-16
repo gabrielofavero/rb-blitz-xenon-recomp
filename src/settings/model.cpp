@@ -52,6 +52,8 @@ std::string_view SettingIdToken(SettingId id) {
   switch (id) {
     case SettingId::kButtonScheme:
       return "scheme";
+    case SettingId::kTouchButtons:
+      return "touch_buttons";
     case SettingId::kTarget:
       return "target";
     case SettingId::kDlcScanThreads:

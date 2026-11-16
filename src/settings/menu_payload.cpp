@@ -1538,6 +1538,21 @@ bool HideResultsCurrency(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
+bool AddTouchHudAnimation(std::vector<ui::dtb::Node>* roots, std::string* why) {
+  auto* enter = PanelMethod(roots, "game_screen", "enter");
+  if (!enter || enter->kids.size() < 2) {
+    if (why) *why = "game_screen enter method changed";
+    return false;
+  }
+  const auto get_game = Node::Command({Node::Var("this"), Node::Symbol("get_game")});
+  const auto hud = Node::Command({get_game, Node::Symbol("get_hud_dir")});
+  const auto anim = Node::Command({hud, Node::Symbol("find"), Node::Symbol("touch_pause.anim")});
+  // Native RndAnimatable::animate syntax, also used by calibration.dtb.
+  enter->kids.push_back(Node::Command({anim, Node::Symbol("animate"),
+      Node::Array({Node::Symbol("loop"), Node::Int(0), Node::Int(480)})}));
+  return true;
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
                       bool refresh_row_active,
@@ -2275,6 +2290,17 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       note("the guest heap size was left unchanged: " + why);
     }
   }
+#if defined(RB_BLITZ_IOS)
+  if (!edit("ui/gen/game.dtb", [&](auto& roots) {
+        return AddTouchHudAnimation(&roots, error);
+      })) return false;
+  {
+    std::vector<uint8_t> source;
+    if (!read(ui::input_font::kHudRecord, &source, error) ||
+        !ui::input_font::PrepareTouchHud(source, &built[ui::input_font::kHudRecord], error))
+      return false;
+  }
+#endif
   {
     std::vector<uint8_t> original;
     std::vector<uint8_t> prepared;
@@ -2345,7 +2371,11 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           built[ui::input_font::kSongSelectRecord] = std::move(song_select);
           auto prepare_hint_scene = [&](const char* path, auto prepare) {
             std::vector<uint8_t> source, generated;
-            if (!read(path, &source, &why) || !prepare(source, &generated, &why)) {
+            const auto existing = built.find(path);
+            const bool have_source = existing != built.end();
+            if (have_source) source = existing->second;
+            if ((!have_source && !read(path, &source, &why)) ||
+                !prepare(source, &generated, &why)) {
               if (error) *error = std::string("action hint scene preparation was refused: ") +
                                   path + ": " + why;
               return false;

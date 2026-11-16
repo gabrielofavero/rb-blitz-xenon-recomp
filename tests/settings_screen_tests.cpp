@@ -72,7 +72,7 @@ using namespace rb_blitz::test;
 
 using dtb::Node;
 
-constexpr size_t kExpectedPagesPerContext = 71;
+constexpr size_t kExpectedPagesPerContext = 73;
 constexpr size_t kExpectedPages = 2 * kExpectedPagesPerContext;
 
 bool SuppressesSettingsCaption(const std::string_view name) {
@@ -3770,7 +3770,7 @@ void TestGameplayMappingTreeAfterP4() {
   MenuConfiguration configuration;
   configuration.controller_layout_enabled = true;
   ConfigureMenu(configuration);
-  const auto controls = PanelRowSymbols("settings_controls_panel");
+  const auto controls = PanelRowSymbols("settings_controls_devices_panel");
   CHECK_TRUE(std::find(controls.begin(), controls.end(), "settings_controller_presets") != controls.end());
   CHECK_TRUE(std::find(controls.begin(), controls.end(), "settings_controls_layout") != controls.end());
   CHECK_TRUE(controls[0] == "settings_controls_layout");
@@ -4540,10 +4540,15 @@ void TestControllerLayoutCatalogPage() {
 
   const auto panels = PanelNames();
   CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_controller_layout_panel") != panels.end());
-  const std::vector<std::string> expected = {
-      "settings_controls_layout", "settings_controller_presets",
-      "settings_controls_interface", "settings_controls_gameplay", "calibration"};
+  const std::vector<std::string> expected = {"calibration", "settings_controls_devices", "settings_controls_touch"};
   CHECK_TRUE(PanelRowSymbols("settings_controls_panel") == expected);
+  const std::vector<std::string> devices = {
+      "settings_controls_layout", "settings_controller_presets",
+      "settings_controls_interface", "settings_controls_gameplay"};
+  CHECK_TRUE(PanelRowSymbols("settings_controls_devices_panel") == devices);
+  CHECK_TRUE(PanelRowSymbols("settings_controls_devices_pause_panel") == devices);
+  CHECK_TRUE(PageRows("settings_touch_panel") == std::vector<std::string>{"settings_touch_buttons"});
+  CHECK_TRUE(PageRows("settings_touch_pause_panel") == PageRows("settings_touch_panel"));
   CHECK_TRUE(PageRows("settings_controls_pause_panel") ==
              PageRows("settings_controls_panel"));
   const std::vector<std::string> groups = {
@@ -4587,7 +4592,13 @@ void TestControllerLayoutCatalogPage() {
                        "rbbz-settings/set/controller.scheme/t:retail") == current.end());
 
   ConfigureMenu(MenuConfiguration{});
-  CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 5u);
+  CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 3u);
+  configuration.hidden.insert("controller.touch_buttons");
+  ConfigureMenu(configuration);
+  CHECK_TRUE(PageRows("settings_controls_panel") ==
+             std::vector<std::string>({"calibration", "settings_controls_devices"}));
+  CHECK_TRUE(PageRows("settings_touch_panel").empty());
+  ConfigureMenu(MenuConfiguration{});
   CHECK_TRUE(PanelRowSymbols("settings_layout_xbox_panel") ==
              std::vector<std::string>({"settings_layout_choice_retail"}));
   CHECK_TRUE(PanelRowSymbols("settings_layout_others_panel") ==

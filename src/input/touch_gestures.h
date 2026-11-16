@@ -24,6 +24,7 @@ struct Rect {
 struct Layout {
   float width = 0, height = 0;
   Rect pause;
+  Rect powerup;  // Guest remedial prompt placement; its visibility stays native.
   bool operator==(const Layout&) const = default;
 };
 Layout MakeLayout(float width, float height, Rect safe_area);

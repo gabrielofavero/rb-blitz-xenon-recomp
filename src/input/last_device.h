@@ -20,6 +20,8 @@ struct State {
   Family family = Family::kController;
   std::string scheme = "retail";
   uint64_t revision = 0;
+  // Touch shares controller hint art, but owns a separate HUD visibility gate.
+  bool using_touch = false;
 };
 
 // Plain-data tracker. Times are monotonic milliseconds supplied by the caller.
@@ -40,6 +42,7 @@ class Tracker {
 
  private:
   bool Switch(Family family, uint64_t now_ms);
+  bool TouchSource(bool touch);
   State state_;
   bool focused_ = false;
   bool pad_active_ = false;
@@ -51,7 +54,7 @@ class Tracker {
   std::optional<Family> pending_family_;
 };
 
-// Process-wide bridge. Each observation returns a state only when the family changes.
+// Process-wide bridge. Observations publish family or touch-source changes.
 State Current();
 void SelectScheme(std::string scheme);
 void Focus(bool focused);

@@ -120,6 +120,7 @@ constexpr SettingId kRowsThatMustBeHot[] = {
     SettingId::kVsync,             SettingId::kSettingsLabels,  SettingId::kRhythmVerseGuitar,
     SettingId::kRhythmVerseBass,   SettingId::kRhythmVerseDrums, SettingId::kRhythmVerseVocals,
     SettingId::kRhythmVerseKeys,   SettingId::kButtonScheme, SettingId::kSettingsLabelSize,
+    SettingId::kTouchButtons,
 };
 
 void ControllerCatalogUsesStableTokens() {
@@ -180,10 +181,10 @@ void StrategyTableIsComplete() {
              descriptor.strategy == ApplicationStrategy::kRestart);
   }
 
-  // Exactly eleven rows are hot today, and each is hot because something measured the effect, not
+  // Exactly twelve rows are hot today, and each has an identified live consumer, not
   // because its cvar was tagged reloadable (see src/settings/schema.cpp). A future session that
   // promotes another row must also record its evidence, and this expectation moves with it.
-  CHECK_EQ(hot, 11);
+  CHECK_EQ(hot, 12);
   CHECK_EQ(menu_return, 2);
   CHECK_EQ(next_song, 2);
   CHECK_TRUE(rb_blitz::settings::schema::StrategyOf(SettingId::kShowTimer) ==

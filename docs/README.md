@@ -128,6 +128,10 @@ budget, and the row-text budget — are a skill:
 
 ### Plans
 
+The [iOS importer plan](plans/finished/2026-11-16-ios-importer-plan.md) tracks
+the separate first-launch Files importer, optional Ultimate setup and asset-free
+IPA build; the original bundled-assets route remains available.
+
 | Document | Status |
 | --- | --- |
 | [`plans/todo/2026-11-15-rexglue-patch-refactoring-plan.md`](plans/todo/2026-11-15-rexglue-patch-refactoring-plan.md) | Planning only: dated SDK patch assessment, mandatory fresh kickoff audit, unused-code retirement, source-equivalent consolidation and replay CI. |

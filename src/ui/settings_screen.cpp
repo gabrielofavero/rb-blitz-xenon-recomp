@@ -601,6 +601,8 @@ void ApplyDefaultTitle(PanelSpec* panel) {
   static const std::map<std::string, std::string> kTitles{
       {"settings_panel", "HELP & OPTIONS"},
       {"settings_controls_panel", "CONTROLS"},
+      {"settings_controls_devices_panel", "CONTROLLER & KEYBOARD"},
+      {"settings_touch_panel", "TOUCH"},
       {"settings_controller_layout_panel", "CONTROLLER LAYOUT"},
       {"settings_layout_xbox_panel", "XBOX"},
       {"settings_layout_playstation_panel", "PLAYSTATION"},
@@ -760,16 +762,24 @@ std::vector<PanelSpec> AllPanels() {
   }});
 
   // ----------------------------------------------------------------------------------------------
-  // P7's Controls tree (plan §14.1), rebalanced by P2/P3/P4 of the interface/gameplay restructure
-  // plan. The root's `controls` row opens this page instead of adopting retail's controller
-  // screen in place; Gameplay Mapping's Controller page is where retail's preset page is reached.
-  //
-  // Every page stays within the in-game-settings skill's six-visible-row budget: Interface Mapping
-  // draws five rows and its two submenus four and three (P3 replaced the 16-row list), Gameplay
-  // Mapping draws two, its Controller page two, each table's groups page four and each group two
-  // (P4), and every binding page owns two.
+  // Controls separates calibration, controller/keyboard configuration, and
+  // touch visibility. Each branch has the same in-song twin and Back route.
   // ----------------------------------------------------------------------------------------------
   out.push_back(PanelSpec{"settings_controls_panel", "settings_controls_screen", kRootScreen, MenuPanels(), {
+      RouteRow("calibration", "cal_welcome_screen", "cancel_screen", "",
+               "Line up the audio and video so notes hit in time with the music."),
+      SubmenuRow("settings_controls_devices", "settings_controls_devices_screen",
+                 "Controller & Keyboard", "Controller art, presets, and menu and gameplay bindings."),
+      SubmenuRow("settings_controls_touch", "settings_touch_screen", "Touch",
+                 "Choose which buttons and hints appear while using touch.")
+  }});
+  out.push_back(PanelSpec{"settings_touch_panel", "settings_touch_screen",
+                          "settings_controls_screen", MenuPanels(), {
+      BoolRow("settings_touch_buttons", "controller.touch_buttons", "Touch Buttons",
+              "Show the pause button and power-up hint while using touch. Applies immediately.")
+  }});
+  out.push_back(PanelSpec{"settings_controls_devices_panel", "settings_controls_devices_screen",
+                          "settings_controls_screen", MenuPanels(), {
       SubmenuRow("settings_controls_layout", "settings_controller_layout_screen",
                                          "Layout", "Choose a controller layout by platform."),
       RouteRow("settings_controller_presets", "controller_config_screen",
@@ -777,12 +787,10 @@ std::vector<PanelSpec> AllPanels() {
                                        "Choose a preset. It applies when no custom controller bindings exist."),
       SubmenuRow("settings_controls_interface",
                                          "settings_interface_mapping_screen", "Menu Bindings",
-                                         "Bind menu navigation and actions. Songs use Gameplay Bindings; pause menus use Menu Bindings."),
+                                         "Bind menu navigation and actions, including pause menus."),
       SubmenuRow("settings_controls_gameplay",
                                          "settings_gameplay_mapping_screen", "Gameplay Bindings",
-                                         "The inputs that play notes, change lanes, use power-ups, and pause."),
-      RouteRow("calibration", "cal_welcome_screen", "cancel_screen", "",
-                                       "Line up the audio and video so notes hit in time with the music.")
+                                         "The inputs that play notes, change lanes, use power-ups, and pause.")
   }});
 
   // The boot catalog contains the built-in Xbox 360 layout and every valid package.
@@ -814,7 +822,7 @@ std::vector<PanelSpec> AllPanels() {
                             std::move(layout_rows[i])});
   }
   out.push_back(PanelSpec{"settings_controller_layout_panel", "settings_controller_layout_screen",
-                          "settings_controls_screen", MenuPanels(), std::move(group_rows)});
+                          "settings_controls_devices_screen", MenuPanels(), std::move(group_rows)});
 
   // 6b. Interface Mapping (P3). The page owns the *interface*: the four directions, confirm, back,
   // and the song library's five actions - eleven rows in three groups, each with its own Assign/Reset
@@ -825,7 +833,7 @@ std::vector<PanelSpec> AllPanels() {
   // resets all sixteen.
   {
     out.push_back(PanelSpec{"settings_interface_mapping_panel", "settings_interface_mapping_screen",
-                            "settings_controls_screen", MenuPanels(),
+                            "settings_controls_devices_screen", MenuPanels(),
                             {
                                 SubmenuRow("settings_interface_navigation",
                                            "settings_interface_navigation_screen", "Navigation",
@@ -933,7 +941,7 @@ std::vector<PanelSpec> AllPanels() {
   // Pause & Power-up, two actions each, plus a plain Reset All. Each action page returns to its
   // group after capture or reset.
   out.push_back(PanelSpec{"settings_gameplay_mapping_panel", "settings_gameplay_mapping_screen",
-                          "settings_controls_screen", MenuPanels(),
+                          "settings_controls_devices_screen", MenuPanels(),
                           {
                               SubmenuRow("settings_keyboard_mouse_notes",
                                          "settings_keyboard_mouse_notes_screen", "Notes",

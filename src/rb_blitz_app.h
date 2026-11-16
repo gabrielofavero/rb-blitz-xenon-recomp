@@ -112,6 +112,9 @@
 #include "settings/paths.h"
 #include "settings/display_runtime.h"
 #include "platform/game_restart.h"
+#if defined(RB_BLITZ_IOS_IMPORTER)
+#include "platform/ios_importer.h"
+#endif
 #include "platform/window_host.h"
 #include "platform/exit_deadline.h"
 #include "store/store_fetch.h"
@@ -141,6 +144,24 @@ REXCVAR_DECLARE(std::string, gpu_backend);
 class RbBlitzApp : public rex::ReXApp {
  public:
   using rex::ReXApp::ReXApp;
+#if defined(RB_BLITZ_IOS_IMPORTER)
+  std::unique_ptr<rb_blitz::platform::IOSImporter> ios_importer_;
+#endif
+
+#if defined(RB_BLITZ_IOS_IMPORTER)
+  bool OnInitialize() override {
+    // Keep UIKit pumping without constructing settings/runtime against missing
+    // assets. Completion re-enters the existing startup on the SDL UI thread.
+    ios_importer_ = rb_blitz::platform::StartIOSImporter([this] {
+      app_context().CallInUIThreadDeferred([this] {
+        if (!ios_importer_ || !ios_importer_->PrepareLaunch()) return;
+        ios_importer_.reset();
+        if (!rex::ReXApp::OnInitialize()) app_context().QuitFromUIThread();
+      });
+    });
+    return true;
+  }
+#endif
 
   std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override {
     rb_blitz::ui::achievements::Toggle();
@@ -307,8 +328,11 @@ class RbBlitzApp : public rex::ReXApp {
   void OnConfigurePaths(rex::PathConfig& paths) override {
 #if defined(RB_BLITZ_IOS)
     ios_documents_root_ = rb_blitz::platform::PrepareIOSDocuments();
-    // This first device route embeds a verified private import in the IPA.
+#if defined(RB_BLITZ_IOS_IMPORTER)
+    paths.game_data_root = rb_blitz::platform::IOSImportedGameRoot();
+#else
     paths.game_data_root = rex::filesystem::GetExecutableFolder() / "game";
+#endif
 #endif
     // D3's rank 4, and the reason R4's standalone half works at all: Controller Settings' own rows,
     // applied at the config rank. This hook runs before the SDK loads the game's own
@@ -495,9 +519,8 @@ class RbBlitzApp : public rex::ReXApp {
       for (size_t i = 0; i + 3 < frame.data.size(); i += 4)
         if (frame.data[i] || frame.data[i + 1] || frame.data[i + 2]) {
 #if defined(RB_BLITZ_IOS)
-          if (!ios_startup_frame_saved_) {
-            ios_startup_frame_saved_ = true;
-            rb_blitz::platform::SaveIOSStartupFrame(ios_documents_root_, frame);
+          if (!ios_presentation_state_logged_) {
+            ios_presentation_state_logged_ = true;
             app_context().CallInUIThreadDeferred([] { rb_blitz::platform::LogIOSPresentationState(); });
           }
 #endif
@@ -963,7 +986,7 @@ class RbBlitzApp : public rex::ReXApp {
   std::filesystem::path diagnostics_root_;
 #if defined(RB_BLITZ_IOS)
   std::filesystem::path ios_documents_root_;
-  bool ios_startup_frame_saved_ = false;
+  bool ios_presentation_state_logged_ = false;
   std::unique_ptr<rex::ui::ImGuiDialog> touch_controls_;
 #endif
   // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings

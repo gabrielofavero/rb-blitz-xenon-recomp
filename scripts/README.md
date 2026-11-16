@@ -9,7 +9,7 @@ documentation and build configuration use these directories:
 | `assets/` | Game archive, scene, texture, and icon tools. |
 | `controllers/` | Controller scheme assets, templates, and pad art generators. |
 | `diagnostics/` | UI observation, probes, captures, and process diagnostics. Some launch and drive the game. |
-| `ios/` | Build a private device IPA with supplied game assets. |
+| `ios/` | Build either a private bundled-assets IPA or a separate first-launch importer IPA. |
 | `macos/` | Direct native build, validated asset staging, and local launch. |
 | `setup/` | Checkout repair, SDK patch application, and distributable audit. |
 | `shaders/` | Shader discovery, catalogue, cache, and coverage tools. |

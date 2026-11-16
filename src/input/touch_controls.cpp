@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "input/touch_controls.h"
 #include <rex/ui/imgui_dialog.h>
+#include <rex/cvar.h>
+
+REXCVAR_DEFINE_BOOL(touch_buttons, true, "Input", "Show gameplay buttons while touch is the active input.");
 
 #if defined(RB_BLITZ_IOS)
 #include <atomic>
@@ -24,6 +27,8 @@ std::mutex g_mutex;
 Gestures g_gestures;
 MouseGate g_mouse_gate;
 std::atomic<bool> g_foreground{true};
+std::atomic<bool> g_visible{false};
+Layout g_layout;
 bool Available() {
   return g_foreground && GameScreenActive() && HostInputFocused() &&
          !rex::kernel::xam::xeXamIsUIActive() && !ui::achievements::Active() && !capture::Armed();
@@ -66,10 +71,11 @@ class Controls final : public rex::ui::ImGuiDialog {
       if (active && phase == Phase::kDown) g_mouse_gate.Capture();
       g_gestures.Observe({finger.touchID, finger.fingerID, phase, finger.x, finger.y});
     }
-    if (active && phase == Phase::kDown) last_device::Touch();
+    // Menu touches also establish the source before a song's HUD appears.
+    if (phase == Phase::kDown && g_foreground && HostInputFocused()) last_device::Touch();
     return true;
   }
-  void OnDraw(ImGuiIO& io) override {
+  void OnDraw(ImGuiIO&) override {
     auto* window = window_();
     int count = 0;
     SDL_Window** windows = SDL_GetWindows(&count);
@@ -87,19 +93,11 @@ class Controls final : public rex::ui::ImGuiDialog {
     const bool active = window && window->HasFocus() && Available() && window_id_;
     {
       std::lock_guard lock(g_mutex);
+      g_layout = layout;
       g_gestures.SetLayout(layout);
       g_gestures.SetActive(active);
     }
-    if (!active || layout.width <= 0 || layout.height <= 0) return;
-    const float sx = io.DisplaySize.x / layout.width, sy = io.DisplaySize.y / layout.height;
-    const auto& p = layout.pause;
-    const ImVec2 a(p.x * sx, p.y * sy), b((p.x + p.width) * sx, (p.y + p.height) * sy);
-    auto* draw = ImGui::GetForegroundDrawList();
-    draw->AddRectFilled(a, b, IM_COL32(0, 0, 0, 70), 8 * sy);
-    for (float x : {.36f, .57f})
-      draw->AddRectFilled(ImVec2(a.x + p.width * sx * x, a.y + p.height * sy * .28f),
-          ImVec2(a.x + p.width * sx * (x + .08f), a.y + p.height * sy * .72f),
-          IM_COL32(255, 255, 255, 210), sy);
+    g_visible = active && layout.pause.width > 0;
   }
   std::function<rex::ui::Window*()> window_;
   std::atomic<SDL_WindowID> window_id_{0};
@@ -110,7 +108,14 @@ Actions SampleGameplay(bool active) {
   g_gestures.SetActive(active && g_foreground);
   return g_gestures.Sample();
 }
-void CancelGameplay() { std::lock_guard lock(g_mutex); g_gestures.Cancel(); }
+void CancelGameplay() {
+  g_visible = false;
+  std::lock_guard lock(g_mutex); g_gestures.Cancel();
+}
+Layout CurrentLayout() { std::lock_guard lock(g_mutex); return g_layout; }
+bool TouchInputActive() { return last_device::Current().using_touch; }
+bool ButtonsEnabled() { return REXCVAR_GET(touch_buttons); }
+bool ControlsVisible() { return g_visible && g_foreground && TouchInputActive() && ButtonsEnabled(); }
 std::vector<GameplayEvent> DrainGameplay() {
   std::lock_guard lock(g_mutex);
   return g_gestures.DrainGameplay();
@@ -130,6 +135,10 @@ Actions SampleGameplay(bool) { return {}; }
 void CancelGameplay() {}
 std::vector<GameplayEvent> DrainGameplay() { return {}; }
 bool ConsumeMouse(bool, Phase, bool) { return false; }
+Layout CurrentLayout() { return {}; }
+bool ControlsVisible() { return false; }
+bool TouchInputActive() { return false; }
+bool ButtonsEnabled() { return REXCVAR_GET(touch_buttons); }
 std::unique_ptr<rex::ui::ImGuiDialog> CreateControls(
     rex::ui::ImGuiDrawer*, std::function<rex::ui::Window*()>) { return {}; }
 }

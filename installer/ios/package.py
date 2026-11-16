@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a device build and the owner's verified game data into a private IPA."""
+"""Package a bundled-assets or first-launch importer iPhone/iPad IPA."""
 from __future__ import annotations
 
 import argparse
@@ -26,6 +26,7 @@ SYSTEM_PREFIXES = ("/usr/lib/", "/System/Library/")
 LOAD_COMMANDS = {"LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB", "LC_REEXPORT_DYLIB", "LC_LOAD_UPWARD_DYLIB"}
 GAME_FILES = {"default.xex", "gen/main_xbox.hdr", "gen/main_xbox_0.ark"}
 ULTIMATE_FILES = {"gen/patch_xbox.hdr", "gen/patch_xbox_0.ark"}
+IMPORTER_IDENTITY = b"RB_BLITZ_IOS_IMPORTER_V1"
 VA_ENTITLEMENT = "com.apple.developer.kernel.extended-virtual-addressing"
 
 
@@ -286,13 +287,21 @@ def copy_file(source: Path, target: Path, executable: bool = False) -> None:
     target.chmod(0o755 if executable else 0o644)
 
 
-def stage_resources(app: Path, build: Path, game: Path, validator: Path) -> None:
+def stage_game_resources(app: Path, game: Path, mode: str) -> None:
+    if mode == "importer":
+        return
+    if mode != "bundled":
+        fail(f"unknown asset mode: {mode}")
     fingerprints = ROOT / "config/game_fingerprints.toml"
     verify_ultimate(game / "ultimate")
     for name in verify_game(game, fingerprints):
         copy_file(safe_file(game, name), app / "game" / name)
     verify_game(app / "game", fingerprints)
     stage_ultimate(app, game)
+
+
+def stage_resources(app: Path, build: Path, game: Path, validator: Path, mode: str = "bundled") -> None:
+    stage_game_resources(app, game, mode)
     resources = [("config/game_fingerprints.toml", "game-fingerprints.toml"),
                  ("installer/config/ultimate_fingerprints.toml", "ultimate-fingerprints.toml"),
                  ("config/graphics_preparation.json", "graphics-preparation.json"),
@@ -321,7 +330,20 @@ def audit_preparation(app: Path) -> None:
             fail("game does not embed the staged graphics catalogue; rebuild before packaging")
 
 
-def write_info(app: Path, bundle_id: str, version: str, minimum: str) -> None:
+def audit_asset_mode(app: Path, mode: str) -> None:
+    # Refuse the wrong executable: an asset-free IPA without a linked importer
+    # would install successfully but have no way to reach the game.
+    with (app / "rb_blitz").open("rb") as stream, mmap.mmap(stream.fileno(), 0, access=mmap.ACCESS_READ) as binary:
+        has_importer = binary.find(IMPORTER_IDENTITY) >= 0
+    if has_importer != (mode == "importer"):
+        fail("executable does not match the requested asset mode; use the corresponding build preset")
+    if mode == "importer":
+        for path in app.rglob("*"):
+            if path.relative_to(app).parts[0] == "game" or path.suffix.lower() in {".xex", ".ark", ".hdr"}:
+                fail(f"retail/mod asset in importer IPA: {path.relative_to(app)}")
+
+
+def write_info(app: Path, bundle_id: str, version: str, minimum: str, mode: str = "bundled") -> None:
     icons = []
     for pixels in (120, 152, 167, 180):
         name = f"BlitzIcon{pixels}.png"
@@ -333,6 +355,7 @@ def write_info(app: Path, bundle_id: str, version: str, minimum: str) -> None:
     info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Rock Band Blitz",
             "CFBundleName": "Rock Band Blitz", "CFBundleExecutable": "rb_blitz",
             "CFBundleIdentifier": bundle_id, "CFBundleInfoDictionaryVersion": "6.0",
+            "RBBlitzAssetMode": mode,
             "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version,
             "CFBundleVersion": version, "MinimumOSVersion": minimum,
             "CFBundleSupportedPlatforms": ["iPhoneOS"], "LSRequiresIPhoneOS": True,
@@ -361,17 +384,20 @@ def archive_ipa(payload: Path, output: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=("bundled", "importer"), default="bundled")
     parser.add_argument("--build-dir", type=Path, required=True)
     parser.add_argument("--game-dir", type=Path, default=ROOT / "game")
     parser.add_argument("--output", type=Path, default=ROOT / "out/ios/packages")
     parser.add_argument("--controller-validator", type=Path, required=True,
                         help="native macOS validator executable, never the cross-compiled one")
     parser.add_argument("--library-dir", type=Path, action="append", default=[])
-    parser.add_argument("--bundle-id", default="io.github.gabrielofavero.rbblitz")
+    parser.add_argument("--bundle-id")
     parser.add_argument("--minimum-ios", default="17.0")
     parser.add_argument("--sign-identity")
     parser.add_argument("--provisioning-profile", type=Path)
     args = parser.parse_args()
+    args.bundle_id = args.bundle_id or ("io.github.gabrielofavero.rbblitz" +
+                                        (".importer" if args.mode == "importer" else ""))
     if bool(args.sign_identity) != bool(args.provisioning_profile):
         parser.error("--sign-identity and --provisioning-profile must be supplied together")
     if not re.fullmatch(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", args.bundle_id):
@@ -386,7 +412,8 @@ def main() -> None:
     version_tuple(version)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    destination = output / f"RockBandBlitz-{version}-arm64-ios.ipa"
+    suffix = "-importer" if args.mode == "importer" else ""
+    destination = output / f"RockBandBlitz-{version}-arm64-ios{suffix}.ipa"
     if destination.exists():
         fail(f"archive the existing IPA before rebuilding: {destination}")
     libraries = collect_libraries(build, roots, args.minimum_ios)
@@ -397,9 +424,10 @@ def main() -> None:
         copy_file(build / "rb_blitz", app / "rb_blitz", executable=True)
         for name, source in libraries.items():
             stage_framework(app, source, name, args.bundle_id, version, args.minimum_ios)
-        stage_resources(app, build, args.game_dir.absolute(), args.controller_validator.resolve())
+        stage_resources(app, build, args.game_dir.absolute(), args.controller_validator.resolve(), args.mode)
         audit_preparation(app)
-        write_info(app, args.bundle_id, version, args.minimum_ios)
+        audit_asset_mode(app, args.mode)
+        write_info(app, args.bundle_id, version, args.minimum_ios, args.mode)
         binaries = prepare_binaries(app, args.minimum_ios, list(libraries))
         if args.sign_identity:
             sign_app(app, binaries, args.sign_identity, args.provisioning_profile.resolve(),
@@ -408,9 +436,11 @@ def main() -> None:
         archive_ipa(payload, candidate)
         report = {"version": version, "platform": "iOS", "architecture": "arm64",
                   "minimumOS": args.minimum_ios, "bundleId": args.bundle_id,
-                  "signed": bool(args.sign_identity), "containsPrivateGameData": True,
-                  "deviceGameplayVerified": False, "includesUltimate": True,
-                  "defaultGameVersion": "ultimate", "sha256": sha256(candidate),
+                  "signed": bool(args.sign_identity), "assetMode": args.mode,
+                  "containsPrivateGameData": args.mode == "bundled",
+                  "deviceGameplayVerified": False, "includesUltimate": args.mode == "bundled",
+                  "defaultGameVersion": "selectedDuringImport" if args.mode == "importer" else "ultimate",
+                  "sha256": sha256(candidate),
                   "files": {path.relative_to(app).as_posix(): sha256(path)
                             for path in sorted(app.rglob("*")) if path.is_file()}}
         candidate.replace(destination)
@@ -420,7 +450,10 @@ def main() -> None:
     print(destination)
     if not args.sign_identity:
         print("Unsigned IPA: re-sign for your device with a profile permitting extended virtual addressing.")
-    print("Contains your private game assets; keep this IPA private. Device gameplay remains unverified.")
+    if args.mode == "bundled":
+        print("Contains your private game assets; keep this IPA private. Device gameplay remains unverified.")
+    else:
+        print("Importer IPA: no retail/Ultimate assets bundled. Select your game on first launch.")
 
 
 if __name__ == "__main__":

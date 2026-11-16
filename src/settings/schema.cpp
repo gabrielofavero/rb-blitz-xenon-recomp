@@ -330,6 +330,10 @@ std::vector<SchemaRow> BuildTable() {
                           "controller_schemes"),
                      {"controller", "scheme"}, "", "Controller Layout",
                      "Choose controller icons and preset art. Each selection applies immediately."));
+  rows.push_back(Row(Make(SettingId::kTouchButtons, Category::kController, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"controller", "touch_buttons"}, "touch", "Touch Buttons",
+                     "Show the pause button and power-up hint while using touch. Applies immediately."));
   rows.push_back(Row(Make(SettingId::kBackgroundMusicNavigation, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "background_music_navigation"}, "", "Menu Music Navigation",
@@ -571,6 +575,8 @@ constexpr StrategyEntry kStrategies[] = {
      "P3 owner screenshots show One Glyph changing A, Test Markers changing A/B, and Xbox 360 "
      "restoring retail art in the Controls footer. The live log records GPU texture invalidation "
      "and button-sheet replacement (docs/settings/status.md, Layout selector)."},
+    {SettingId::kTouchButtons, ApplicationStrategy::kHot,
+     "Guest HUD draw and placement hooks read touch_buttons each frame; no scene reload is needed."},
     // Gameplay (Ultimate provider)
     {SettingId::kPrecisionMode, ApplicationStrategy::kRestart, ""},
     {SettingId::kDisableRandomWiggles, ApplicationStrategy::kRestart, ""},
@@ -710,6 +716,11 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
   ReleaseSettings release;
   release.platform = platform;
   release.version = version;
+  if (platform != HostPlatform::kIOS) {
+    RowRule touch;
+    touch.hidden = true;
+    release.rules.emplace(SettingId::kTouchButtons, std::move(touch));
+  }
   if (platform == HostPlatform::kLinux || platform == HostPlatform::kMacOS ||
       platform == HostPlatform::kIOS) {
     RowRule renderer;
@@ -721,7 +732,11 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
   }
   if (platform == HostPlatform::kIOS) {
     RowRule target;
+#if defined(RB_BLITZ_IOS_IMPORTER)
+    target.default_value = EnumValue("common");
+#else
     target.default_value = EnumValue("ultimate");
+#endif
     release.rules.emplace(SettingId::kTarget, std::move(target));
     // Follow the device's aspect at 1x. The boot planner supplies the internal
     // pixel size; copied desktop preferences cannot choose the device layout.

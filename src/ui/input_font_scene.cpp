@@ -565,6 +565,125 @@ bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* s
                             {"remedial_help.grp", "tutorial_pane.grp"}, 4, error)) return false;
   return PackStored(bytes, scene, error);
 }
+bool PrepareTouchHud(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                     std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  // Pinned installed HUD: the tail after the inline Flow directories contains
+  // these ordinary root objects in declaration order. Refuse other revisions
+  // before editing offsets, including an already generated HUD.
+  if (bytes.size() != 4838050 || Crc32(bytes.data(), bytes.size()) != 0xA70E19B1)
+    return Fail(error, "touch HUD source revision changed");
+  auto copy = [&](size_t from, size_t to) {
+    return std::vector<uint8_t>(bytes.begin() + from, bytes.begin() + to);
+  };
+  auto append_u32 = [](std::vector<uint8_t>& out, uint32_t value) {
+    const size_t at = out.size(); out.resize(at + 4);
+    PutBe32(out.data() + at, value);
+  };
+  auto append_string = [&](std::vector<uint8_t>& out, std::string_view value) {
+    append_u32(out, uint32_t(value.size()));
+    out.insert(out.end(), value.begin(), value.end());
+  };
+  auto rename = [&](std::vector<uint8_t>& out, std::string_view from, std::string_view to) {
+    // All matches in these small measured records are length-prefixed strings.
+    for (size_t at = 4; at + from.size() <= out.size(); ++at) {
+      if (Be32(out.data() + at - 4) != from.size() ||
+          std::memcmp(out.data() + at, from.data(), from.size()) != 0) continue;
+      PutBe32(out.data() + at - 4, uint32_t(to.size()));
+      out.erase(out.begin() + at, out.begin() + at + from.size());
+      out.insert(out.begin() + at, to.begin(), to.end());
+      at += to.size();
+    }
+  };
+  auto members = [&](std::vector<uint8_t>& out, std::string_view first,
+                     std::initializer_list<std::string_view> names) {
+    const auto at = std::search(out.begin(), out.end(), first.begin(), first.end());
+    const size_t count = size_t(at - out.begin()) - 8;
+    // Group revision 16 ends in a five-byte LOD/environment trailer and marker.
+    const auto tail = std::vector<uint8_t>(out.end() - 9, out.end());
+    out.resize(count);
+    append_u32(out, uint32_t(names.size()));
+    for (auto name : names) append_string(out, name);
+    out.insert(out.end(), tail.begin(), tail.end());
+  };
+  auto matrix = [](std::vector<uint8_t>& out, size_t at, float x, float y, float z,
+                   float sx, float sy, float sz) {
+    for (size_t i = 0; i < 12; ++i) PutFloat(out.data() + at + i * 4, 0);
+    PutFloat(out.data() + at, sx);
+    PutFloat(out.data() + at + 16, sy);
+    PutFloat(out.data() + at + 32, sz);
+    PutFloat(out.data() + at + 36, x);
+    PutFloat(out.data() + at + 40, y);
+    PutFloat(out.data() + at + 44, z);
+  };
+  struct Object { std::string_view type, name; std::vector<uint8_t> data; };
+  std::vector<Object> objects;
+  auto bg = copy(0x48265F, 0x48277C);
+  rename(bg, "remedial_help_bg.tex", "help_bg_powerup.tex");
+  objects.push_back({"Mat", "touch_pause_bg.mat", std::move(bg)});
+  auto ink = copy(0x48265F, 0x48277C);
+  for (size_t at : {0x19, 0x1D, 0x21}) PutFloat(ink.data() + at, 0);
+  PutFloat(ink.data() + 0x25, 1);
+  rename(ink, "remedial_help_bg.tex", "");
+  objects.push_back({"Mat", "touch_pause_ink.mat", std::move(ink)});
+  auto group = copy(0x4830A4, 0x4831A5);
+  group[0x9A] = 1; // showing, independently of the optional remedial prompt
+  members(group, "help_bg.mesh", {"touch_pause_bg.mesh", "touch_pause_icon.grp"});
+  objects.push_back({"Group", "touch_pause.grp", std::move(group)});
+  auto icon = copy(0x4830A4, 0x4831A5);
+  icon[0x9A] = 1;
+  matrix(icon, 0x21, 0, 0, 0, 1, 1, 1);
+  matrix(icon, 0x51, 0, 0, 0, 1, 1, 1);
+  members(icon, "help_bg.mesh", {"touch_pause_l.mesh", "touch_pause_r.mesh"});
+  rename(icon, "PanelDir", "touch_pause.grp");
+  objects.push_back({"Group", "touch_pause_icon.grp", std::move(icon)});
+  for (int part = 0; part < 3; ++part) {
+    const std::string_view name = part == 0 ? "touch_pause_bg.mesh" :
+                                  part == 1 ? "touch_pause_l.mesh" : "touch_pause_r.mesh";
+    auto mesh = copy(0x489711, 0x48996D);
+    if (part) {
+      const float x = part == 1 ? -10.f : 10.f;
+      matrix(mesh, 0x15, x, -1, 0, .06f, 1, .4f);
+      matrix(mesh, 0x45, x, -1, 0, .06f, 1, .4f);
+    }
+    rename(mesh, "remedial_help.grp", part ? "touch_pause_icon.grp" : "touch_pause.grp");
+    rename(mesh, "help_bg.mat", part ? "touch_pause_ink.mat" : "touch_pause_bg.mat");
+    rename(mesh, "help_bg.mesh", name);
+    objects.push_back({"Mesh", name, std::move(mesh)});
+  }
+  auto anim = copy(0x489BBF, 0x489C5F);
+  // Preserve the native interpolation and timing, normalized for a Group
+  // instead of the UILabel whose base scale is 1.875.
+  for (size_t key : {0x63, 0x73, 0x83})
+    for (size_t axis = 0; axis < 3; ++axis) {
+      auto* value = anim.data() + key + axis * 4;
+      PutFloat(value, std::bit_cast<float>(Be32(value)) / 1.875f);
+    }
+  rename(anim, "remedial_help.lbl", "touch_pause_icon.grp");
+  objects.push_back({"PropAnim", "touch_pause.anim", std::move(anim)});
+
+  // Add the new group to the title's hud.grp traversal. The original remedial
+  // Flow, its visibility, its arrows, label, and animations remain guest-owned.
+  auto hud = copy(0x482C71, 0x482D6E);
+  members(hud, "band_meter_hud", {"band_meter_hud", "blitz_text_flat.mesh",
+                                   "blitz_meter.grp", "touch_pause.grp"});
+  bytes.erase(bytes.begin() + 0x482C71, bytes.begin() + 0x482D6E);
+  bytes.insert(bytes.begin() + 0x482C71, hud.begin(), hud.end());
+  std::vector<uint8_t> declarations;
+  uint32_t name_bytes = 0;
+  for (const auto& object : objects) {
+    append_string(declarations, object.type);
+    append_string(declarations, object.name);
+    name_bytes += uint32_t(object.name.size() + 1);
+    bytes.insert(bytes.end(), object.data.begin(), object.data.end());
+  }
+  PutBe32(bytes.data() + 0x1C, 226 + uint32_t(objects.size()) * 2);
+  PutBe32(bytes.data() + 0x20, 2047 + name_bytes);
+  PutBe32(bytes.data() + 0x25, 112 + uint32_t(objects.size()));
+  bytes.insert(bytes.begin() + 0xDA4, declarations.begin(), declarations.end());
+  return PackStored(bytes, scene, error);
+}
 bool PreparePowerupSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                           std::string* error) {
   std::vector<uint8_t> bytes;

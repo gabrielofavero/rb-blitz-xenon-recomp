@@ -27,8 +27,19 @@ bool RemoveIfPresent(const fs::path& path) {
 
 fs::path PrepareSessionLog(const fs::path& user_data_root) {
   if (user_data_root.empty()) return {};
-  const fs::path directory = user_data_root / "diagnostics";
+  const fs::path directory = user_data_root / "Diagnostics";
   std::error_code error;
+  const fs::path legacy_directory = user_data_root / "diagnostics";
+  if (fs::exists(legacy_directory, error)) {
+    const bool destination_exists = fs::exists(directory, error);
+    if (error) return {};
+    // Also rename on case-insensitive filesystems so Files shows the new spelling.
+    if (!destination_exists || fs::equivalent(legacy_directory, directory, error)) {
+      fs::rename(legacy_directory, directory, error);
+      if (error) return {};
+    }
+  }
+  if (error) return {};
   fs::create_directories(directory, error);
   if (error) return {};
 
@@ -47,7 +58,7 @@ fs::path PrepareSessionLog(const fs::path& user_data_root) {
 
 bool WriteSessionInfo(const fs::path& user_data_root, std::string_view build,
                       std::string_view toolchain, const fs::path& executable) {
-  std::ofstream output(user_data_root / "diagnostics" / "session-info.txt",
+  std::ofstream output(user_data_root / "Diagnostics" / "session-info.txt",
                        std::ios::binary | std::ios::trunc);
   output << "schema=1\nstarted_unix_ms="
          << std::chrono::duration_cast<std::chrono::milliseconds>(

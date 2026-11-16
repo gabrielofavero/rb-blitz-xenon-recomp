@@ -50,6 +50,10 @@ using CalibrationButtons = std::array<std::vector<std::vector<uint8_t>>, 4>;
 std::shared_ptr<const CalibrationButtons> OriginalCalibrationButtons();
 bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                      std::string* error);
+// iOS pause is authored into the installed guest HUD, using its own prompt art
+// and PropAnim. Call before PrepareHudHints; no retail bytes are packaged here.
+bool PrepareTouchHud(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                     std::string* error);
 bool PreparePowerupSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                           std::string* error);
 bool PrepareErrorReturn(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,

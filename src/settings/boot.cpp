@@ -6,6 +6,9 @@
 
 #include "settings/boot.h"
 #include "settings/ios_defaults.h"
+#if defined(RB_BLITZ_IOS_IMPORTER)
+#include "platform/ios_importer.h"
+#endif
 #include <SDL3/SDL.h>
 #include "settings/display_runtime.h"
 #if defined(__APPLE__) && !defined(RB_BLITZ_IOS)
@@ -458,7 +461,9 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     service_->SetReconciler(&reconciler_);
     service_->SetCapabilities(capability_snapshot_);
     // Auto follows the current display on every boot, without running a benchmark.
-#if defined(RB_BLITZ_IOS)
+#if defined(RB_BLITZ_IOS_IMPORTER)
+    constexpr int kPolicyVersion = kIOSImporterPolicyVersion;
+#elif defined(RB_BLITZ_IOS)
     constexpr int kPolicyVersion = kIOSPolicyVersion;
 #else
     constexpr int kPolicyVersion = 4;
@@ -498,8 +503,14 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
         diagnostics_.push_back("saved resolution is incompatible with this display; switched to Auto");
       }
 #if defined(RB_BLITZ_IOS)
+#if defined(RB_BLITZ_IOS_IMPORTER)
+      if (ApplyIOSImportLaunchDefault(store, rb_blitz::platform::IOSImportUsesUltimate(),
+                                      rb_blitz::platform::IOSImportCompletedSetup()))
+        diagnostics_.push_back("iOS Game Version default follows the completed import");
+#else
       if (UpgradeIOSLaunchDefault(store))
         diagnostics_.push_back("iOS default Game Version upgraded to bundled Ultimate");
+#endif
 #endif
       if (store.has_changes()) {
         store.MarkPolicyVersion(kPolicyVersion);
@@ -672,7 +683,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
           SettingId::kHideMainMenu, SettingId::kHiddenMainMenu, SettingId::kVsync,
           SettingId::kFiltering, SettingId::kResolution, SettingId::kAntiAliasing,
           SettingId::kDisplay, SettingId::kSettingsLabels, SettingId::kSettingsLabelSize, SettingId::kHideAchievements,
-          SettingId::kBackgroundMusicNavigation, SettingId::kMusicPlayer}) {
+          SettingId::kBackgroundMusicNavigation, SettingId::kMusicPlayer, SettingId::kTouchButtons}) {
       ApplyRow(id, /*defer_unregistered=*/true);
     }
   }

@@ -4,6 +4,7 @@
 #include "hooks/hud_layout_runtime.h"
 
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <string_view>
@@ -20,6 +21,9 @@
 #include "hooks/hud_layout.h"
 #include "hooks/render_settings.h"
 #include "platform/guest_memory.h"
+#if defined(RB_BLITZ_IOS)
+#include "input/touch_controls.h"
+#endif
 
 REX_EXTERN(__imp__sub_821F13D0);  // RndTransformable::WorldXfm
 REX_EXTERN(sub_821F13D0);
@@ -132,14 +136,31 @@ struct Anchor {
   int32_t transform_offset;  // from Hmx::Object, measured in §9.2.5
   int side;
 };
-constexpr std::array<Anchor, 6> kAnchors{{
+constexpr auto kAnchors = std::to_array<Anchor>({
     {"star_board",          0x8201C784, -0x114,  1},
     {"band_meter_hud",      0x8201C784, -0x114, -1},
     {"letter_collect_hud",  0x8201C784, -0x114, -1},
     {"remedial_help.grp",   0x82024C4C, -0x108, -1},
     {"dynamic_leaderboard", 0x82018EA4, -0x1B4,  1},
     {"score.lbl",           0x8203A95C,  0x07C,  1},
-}};
+#if defined(RB_BLITZ_IOS)
+    {"touch_pause.grp",     0x82024C4C, -0x108, -1},
+#endif
+});
+
+bool TouchAnchor(const Anchor& anchor) {
+#if defined(RB_BLITZ_IOS)
+  return anchor.name == "touch_pause.grp" || anchor.name == "remedial_help.grp";
+#else
+  return false;
+#endif
+}
+constexpr bool kTouchHud =
+#if defined(RB_BLITZ_IOS)
+    true;
+#else
+    false;
+#endif
 
 const Anchor* AnchorFor(const uint8_t* base, uint32_t transformable) {
   const uint32_t header = ObjectBase(base, transformable);
@@ -209,17 +230,32 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
     double delta = 0;
     std::array<uint8_t, 0xC0> state{};
     std::array<uint8_t, 64> parent_world{};
+#if defined(RB_BLITZ_IOS)
+    bool touch_mode = false;
+    rb_blitz::input::touch::Layout touch_layout;
+#endif
   };
   static thread_local std::array<Prepared, 16> prepared{};
   static thread_local size_t next_prepared = 0;
   const double delta = ActiveDelta();
   const uint32_t parent = U32(base, transformable + kParent);
   const bool has_parent = HeapRange(parent, 0xC0);
+#if defined(RB_BLITZ_IOS)
+  const bool touch_mode = TouchAnchor(anchor) && rb_blitz::input::touch::TouchInputActive() &&
+                          rb_blitz::input::touch::ButtonsEnabled();
+  const auto touch_layout = touch_mode ? rb_blitz::input::touch::CurrentLayout()
+                                       : rb_blitz::input::touch::Layout{};
+#endif
   Prepared* previous = nullptr;
   for (auto& entry : prepared) {
     if (entry.base != base || entry.transformable != transformable) continue;
     previous = &entry;
-    if (!base[transformable + 189] && (!has_parent || !base[parent + 189]) &&
+    if (
+#if defined(RB_BLITZ_IOS)
+        entry.touch_mode == touch_mode && entry.touch_layout == touch_layout &&
+#endif
+        !base[transformable + 189] &&
+        (!has_parent || !base[parent + 189]) &&
         entry.delta == delta &&
         std::memcmp(entry.state.data(), base + transformable, entry.state.size()) == 0 &&
         (!has_parent || std::memcmp(entry.parent_world.data(), base + parent + 72,
@@ -237,6 +273,10 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
   previous->base = base;
   previous->transformable = transformable;
   previous->delta = delta;
+#if defined(RB_BLITZ_IOS)
+  previous->touch_mode = touch_mode;
+  previous->touch_layout = touch_layout;
+#endif
   std::memcpy(previous->state.data(), base + transformable, previous->state.size());
   const uint32_t resolved_parent = U32(base, transformable + kParent);
   if (HeapRange(resolved_parent, 0xC0))
@@ -281,7 +321,7 @@ void PrepareTransformAncestry(PPCContext& ctx, uint8_t* base, uint32_t current) 
 // can belong to the comparison dir and inherit that dir's transform even when
 // draw.grp itself has no transform parent. Prepare named owning dirs as well.
 void PrepareHudDraw(PPCContext& ctx, uint8_t* base) {
-  if (ActiveDelta() == 0.0) return;
+  if (ActiveDelta() == 0.0 && !kTouchHud) return;
   const uint32_t header = ObjectBase(base, ctx.r3.u32);
   if (!header) return;
   // These hooks also see the entire 3D venue. Only the named HUD entry points
@@ -318,9 +358,38 @@ void PrepareHudDraw(PPCContext& ctx, uint8_t* base) {
 
 bool rb_blitz::hooks::HudReanchorWorld(uint8_t* base, uint32_t transformable) {
   const double delta = ActiveDelta();
-  if (delta == 0.0) return false;
+  if (delta == 0.0 && !kTouchHud) return false;
   const Anchor* anchor = AnchorFor(base, transformable);
   if (!anchor) return false;
+#if defined(RB_BLITZ_IOS)
+  if (TouchAnchor(*anchor) && rb_blitz::input::touch::TouchInputActive() &&
+      rb_blitz::input::touch::ButtonsEnabled()) {
+    const auto layout = rb_blitz::input::touch::CurrentLayout();
+    if (layout.width > 0 && layout.height > 0) {
+      const auto& rect = anchor->name == "touch_pause.grp" ? layout.pause : layout.powerup;
+      const float height = float(rb_blitz::settings::BootRenderHeight());
+      const float width = float(rb_blitz::settings::BootRenderWidth());
+      const float aspect = width > 0 && height > 0 ? width / height : 16.f / 9.f;
+      const float x = ((rect.x + rect.width / 2) / layout.width - .5f) * aspect * 480;
+      const float z = (.5f - (rect.y + rect.height / 2) / layout.height) * 480;
+      const float scale = rect.height * 480 / (layout.height * 54);
+      // Preserve the native group transform and all animated children; only
+      // map the disc's centre and diameter to the same safe-area hit rectangle.
+      for (uint32_t row = 0; row < 3; ++row)
+        for (uint32_t column = 0; column < 3; ++column) {
+          const auto address = transformable + 72 + row * 16 + column * 4;
+          const auto value = std::bit_cast<float>(U32(base, address));
+          rex::memory::store_and_swap<uint32_t>(base + address,
+              std::bit_cast<uint32_t>(value * scale));
+        }
+      rex::memory::store_and_swap<uint32_t>(base + transformable + kWorldX,
+                                           std::bit_cast<uint32_t>(x));
+      rex::memory::store_and_swap<uint32_t>(base + transformable + kWorldX + 8,
+                                           std::bit_cast<uint32_t>(z));
+      return true;
+    }
+  }
+#endif
   const double correction = double(anchor->side - InheritedSide(base, transformable)) * delta;
   if (correction == 0.0) return true;
   const uint32_t bits = U32(base, transformable + kWorldX);
@@ -345,7 +414,7 @@ bool rb_blitz::hooks::HudReanchorWorld(uint8_t* base, uint32_t transformable) {
 
 extern "C" REX_FUNC(sub_821F13D0) {
   const uint32_t transformable = ctx.r3.u32;
-  const bool active = ActiveDelta() != 0.0;
+  const bool active = ActiveDelta() != 0.0 || kTouchHud;
   std::array<uint8_t, 64> previous{};
   if (active) std::memcpy(previous.data(), base + transformable + 72, previous.size());
   __imp__sub_821F13D0(ctx, base);
@@ -376,6 +445,17 @@ extern "C" REX_FUNC(sub_821F65C8) {
 }
 
 extern "C" REX_FUNC(sub_82226CD8) {
+#if defined(RB_BLITZ_IOS)
+  const auto header = ObjectBase(base, ctx.r3.u32);
+  if (header && U32(base, header) == 0x82024C4C) {
+    const auto name = U32(base, header + 32);
+    const bool hidden_pause = NameIs(base, name, "touch_pause.grp") &&
+        !rb_blitz::input::touch::ControlsVisible();
+    const bool hidden_hint = NameIs(base, name, "remedial_help.grp") &&
+        rb_blitz::input::touch::TouchInputActive() && !rb_blitz::input::touch::ButtonsEnabled();
+    if ((hidden_pause || hidden_hint) && InHud(base, header)) return;
+  }
+#endif
   PrepareHudDraw(ctx, base);
   __imp__sub_82226CD8(ctx, base);
 }

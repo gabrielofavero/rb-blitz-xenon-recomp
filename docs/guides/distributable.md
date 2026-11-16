@@ -18,6 +18,12 @@ distributable and must not be uploaded as a release artifact. Its packaging
 checks cover iPhoneOS arm64 images, framework dependencies, file hashes and ZIP
 integrity; they do not replace the public desktop payload's no-retail-data audit.
 Signing and device gameplay acceptance remain distinct gates.
+The separate `sh scripts/ios/build-importer.sh` route omits retail and Ultimate
+assets. Its packager requires a linked importer identity, rejects game/mod asset
+paths, and records `assetMode = importer`, `containsPrivateGameData = false` and
+the file inventory in the sidecar. Users supply retail content through the device
+picker; downloading Ultimate requires their explicit first-run choice. Both
+routes still need device signing and hardware acceptance.
 
 Windows payloads also carry `Collect Diagnostics.cmd` and
 `collect_diagnostics.ps1`. They create a local, bounded report ZIP from the

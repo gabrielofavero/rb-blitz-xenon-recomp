@@ -8,10 +8,17 @@
 #include <chrono>
 #include <cstring>
 #include <limits>
+#if defined(_WIN32)
 #include <windows.h>
+#else
+#include <sys/mman.h>
+#endif
 #include <rex/cvar.h>
 #include <rex/hook.h>
 #include <rex/system/xmemory.h>
+#if defined(RB_BLITZ_IOS)
+#include "input/touch_controls.h"
+#endif
 
 REX_EXTERN(sub_821F13D0);
 REX_EXTERN(sub_821F65C8);
@@ -34,6 +41,10 @@ unsigned dirty_calls = 0, draw_calls = 0;
 std::array<uint32_t, 16> transforms{};
 uint32_t drawn_child = 0;
 float drawn_x = 0;
+#if defined(RB_BLITZ_IOS)
+bool using_touch = false, buttons_enabled = true;
+rb_blitz::input::touch::Layout touch_layout{874, 402, {90, 28, 46, 46}, {146, 28, 46, 46}};
+#endif
 
 
 void Word(uint32_t a, uint32_t v) { rex::memory::store_and_swap<uint32_t>(memory + a, v); }
@@ -131,6 +142,14 @@ namespace rb_blitz::settings {
 uint32_t BootRenderWidth() { return width; }
 uint32_t BootRenderHeight() { return height; }
 }
+#if defined(RB_BLITZ_IOS)
+namespace rb_blitz::input::touch {
+Layout CurrentLayout() { return touch_layout; }
+bool TouchInputActive() { return using_touch; }
+bool ButtonsEnabled() { return buttons_enabled; }
+bool ControlsVisible() { return using_touch && buttons_enabled; }
+}
+#endif
 
 // Stand-in for the original guest evaluator: fresh local -> world; dirty parents
 // resolve through the production hook before their child inherits the result.
@@ -142,6 +161,9 @@ extern "C" REX_FUNC(__imp__sub_821F13D0) {
     ctx.r3.u32 = parent;
     sub_821F13D0(ctx, base);
   }
+  for (uint32_t row = 0; row < 3; ++row)
+    for (uint32_t column = 0; column < 3; ++column)
+      Float(t + 72 + row * 16 + column * 4, row == column ? 1.f : 0.f);
   for (uint32_t axis = 0; axis < 12; axis += 4) {
     Float(t + 0x78 + axis, Float(t + 0x38 + axis) +
           (parent ? Float(parent + 0x78 + axis) : 0));
@@ -180,12 +202,22 @@ extern "C" REX_FUNC(__imp__sub_82226CD8) { __imp__sub_821F65C8(ctx, base); }
 int main() {
   using namespace rb_blitz::test;
   // Reserve an addressable guest range, committing only two tiny fixture regions.
+#if defined(_WIN32)
   memory = static_cast<uint8_t*>(VirtualAlloc(nullptr, size_t(0x83000000), MEM_RESERVE, PAGE_NOACCESS));
   CHECK_TRUE(memory != nullptr);
   if (!memory) return Finish();
   CHECK_TRUE(VirtualAlloc(memory + kHeap, 0x10000, MEM_COMMIT, PAGE_READWRITE) != nullptr);
   CHECK_TRUE(VirtualAlloc(memory + kTables, 0x10000, MEM_COMMIT, PAGE_READWRITE) != nullptr);
+#else
+  memory = static_cast<uint8_t*>(mmap(nullptr, size_t(0x83000000), PROT_NONE,
+                                     MAP_PRIVATE | MAP_ANON, -1, 0));
+  CHECK_TRUE(memory != MAP_FAILED);
+  if (memory == MAP_FAILED) return Finish();
+  CHECK_EQ(mprotect(memory + kHeap, 0x10000, PROT_READ | PROT_WRITE), 0);
+  CHECK_EQ(mprotect(memory + kTables, 0x10000, PROT_READ | PROT_WRITE), 0);
+#endif
 
+#if !defined(RB_BLITZ_IOS)
   BeginCase("16:9 and disabled reanchoring inspect no guest metadata");
   width = 0;
   rb_blitz::hooks::HudReanchorWorld(nullptr, kHeap);
@@ -198,6 +230,7 @@ int main() {
   REXCVAR_SET(hud_reanchor_apply, false);
   rb_blitz::hooks::HudReanchorWorld(nullptr, kHeap);
   REXCVAR_SET(hud_reanchor_apply, true);
+#endif
 
   BeginCase("every subset of missing HUD elements places the survivors on their first resolve");
   for (unsigned subset = 0; subset < 64; ++subset) {
@@ -456,6 +489,48 @@ int main() {
   Float(t2 + 0x38, std::numeric_limits<float>::infinity());
   Resolve(t2); CHECK_TRUE(std::isinf(Float(t2 + 0x78)));
 
+#if defined(RB_BLITZ_IOS)
+  BeginCase("touch pause and reminder match hit rectangles at 16:9 and restore native placement");
+  Reset();
+  width = 1920; height = 1080;
+  using_touch = true;
+  const Shape pause_shape{"touch_pause.grp", 0x82024C4C, -0x108, -1};
+  const auto pause = Make(0, pause_shape, -289.338f);
+  const auto hint = Make(1, shapes[3], -289.338f);
+  for (auto t : {pause, hint}) {
+    Resolve(t);
+    const auto rect = t == pause ? touch_layout.pause : touch_layout.powerup;
+    const auto expected_x = ((rect.x + rect.width / 2) / touch_layout.width - .5f) * (1920.f / 1080.f) * 480;
+    const auto expected_z = (.5f - (rect.y + rect.height / 2) / touch_layout.height) * 480;
+    Close(Float(t + 0x78), expected_x);
+    Close(Float(t + 0x80), expected_z);
+    const auto scale = rect.height * 480 / (touch_layout.height * 54);
+    Close(Float(t + 72), scale);
+    Resolve(t);
+    Close(Float(t + 72), scale); // fresh guest matrix; never compound scale
+  }
+  Draw(hint, shapes[3], true);
+  using_touch = false;
+  Draw(hint, shapes[3], true); // source change invalidates the prepared placement
+  Close(Float(hint + 0x78), -289.338f);
+  Close(Float(hint + 0x80), 4.35f);
+  auto old_draws = draw_calls;
+  ObjectView(pause - 64, pause + 0x108);
+  PPCContext call{}; call.r3.u32 = pause - 64;
+  sub_82226CD8(call, memory);
+  CHECK_EQ(draw_calls, old_draws); // controller never draws touch pause
+  using_touch = true; buttons_enabled = false;
+  call.r3.u32 = hint - 64;
+  sub_82226CD8(call, memory);
+  CHECK_EQ(draw_calls, old_draws); // Off hides the guest reminder during touch
+  call.r3.u32 = pause - 64;
+  sub_82226CD8(call, memory);
+  CHECK_EQ(draw_calls, old_draws);
+#endif
+#if defined(_WIN32)
   VirtualFree(memory, 0, MEM_RELEASE);
+#else
+  munmap(memory, size_t(0x83000000));
+#endif
   return Finish();
 }

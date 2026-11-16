@@ -10,8 +10,9 @@ instructions to follow.
 The Windows package is one wizard with the recompiled build inside it, made from
 the working tree it is run in ([the section below](#windows-package)).
 
-Everything in this directory is *packaging*. Nothing here is needed to build or
-run the game, and none of it is compiled into `rb_blitz.exe`.
+Most files here implement packaging. The shared portable import core also runs
+in desktop launchers and the separate iOS first-launch importer build. The
+Windows runtime remains separate from its setup executable.
 
 ## Package filenames
 
@@ -19,14 +20,16 @@ All platforms use `RockBandBlitz-<version>-<architecture>-<platform>.<extension>
 The version comes from `[installer].version` in `config/pins.toml`. Architecture
 is `amd64` or `arm64` (native macOS `x86_64` is named `amd64` in artifacts).
 Platform is `windows`, `macos`, `linux`, or `ios`. Development and signing status
-are recorded in the audit sidecar, which uses the same base filename.
+are recorded in the audit sidecar, which uses the same base filename. The
+separate iOS importer adds `-importer` before `.ipa` to distinguish the two modes.
 
 | Platform | Package filename |
 | --- | --- |
 | Windows | `RockBandBlitz-<version>-amd64-windows.exe` |
 | macOS | `RockBandBlitz-<version>-<architecture>-macos.pkg` |
 | Linux | `RockBandBlitz-<version>-amd64-linux.deb` and `.rpm` |
-| iOS | `RockBandBlitz-<version>-arm64-ios.ipa` |
+| iOS (bundled) | `RockBandBlitz-<version>-arm64-ios.ipa` |
+| iOS (importer) | `RockBandBlitz-<version>-arm64-ios-importer.ipa` |
 
 ## Windows package
 

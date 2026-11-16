@@ -84,15 +84,29 @@ bool Tracker::Tick(uint64_t now_ms) {
   return Switch(*pending_family_, now_ms);
 }
 
-bool Tracker::KeyDown(uint64_t now_ms) { return focused_ && Switch(Family::kKeyboard, now_ms); }
-bool Tracker::Touch(uint64_t now_ms) { return focused_ && Switch(Family::kController, now_ms); }
+bool Tracker::TouchSource(bool touch) {
+  if (state_.using_touch == touch) return false;
+  state_.using_touch = touch;
+  ++state_.revision;
+  return true;
+}
+bool Tracker::KeyDown(uint64_t now_ms) {
+  if (!focused_) return false;
+  const bool source_changed = TouchSource(false);
+  return Switch(Family::kKeyboard, now_ms) || source_changed;
+}
+bool Tracker::Touch(uint64_t now_ms) {
+  if (!focused_) return false;
+  const bool source_changed = TouchSource(true);
+  return Switch(Family::kController, now_ms) || source_changed;
+}
 bool Tracker::MouseButton(uint64_t now_ms) {
-  return kMouseButtonAndWheelSelectKeyboardLayout && focused_ &&
-         Switch(Family::kMouse, now_ms);
+  if (!kMouseButtonAndWheelSelectKeyboardLayout || !focused_) return false;
+  const bool source_changed = TouchSource(false);
+  return Switch(Family::kMouse, now_ms) || source_changed;
 }
 bool Tracker::MouseWheel(uint64_t now_ms) {
-  return kMouseButtonAndWheelSelectKeyboardLayout && focused_ &&
-         Switch(Family::kMouse, now_ms);
+  return MouseButton(now_ms);
 }
 
 bool Tracker::MouseMove(int x, int y, uint64_t now_ms) {
@@ -107,14 +121,17 @@ bool Tracker::MouseMove(int x, int y, uint64_t now_ms) {
   pointer_x_ = x; pointer_y_ = y;
   if (motion_ < kMouseMotionPixels) return false;
   motion_ = 0;
-  return Switch(Family::kMouse, now_ms);
+  const bool source_changed = TouchSource(false);
+  return Switch(Family::kMouse, now_ms) || source_changed;
 }
 
 bool Tracker::Pad(bool connected, const profile::remap::PadState& pad, uint64_t now_ms) {
   const bool active = connected && Active(pad);
   const bool edge = active && !pad_active_;
   pad_active_ = active;
-  return focused_ && edge && Switch(Family::kController, now_ms);
+  if (!focused_ || !edge) return false;
+  const bool source_changed = TouchSource(false);
+  return Switch(Family::kController, now_ms) || source_changed;
 }
 
 State Current() { std::lock_guard lock(g_mutex); return g_tracker.Current(); }

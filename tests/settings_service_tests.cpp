@@ -267,6 +267,39 @@ void TestLoadGuardRoundTrip() {
   }
 }
 
+void TestTouchButtonsRoundTrip() {
+  BeginCase("touch buttons: iOS visibility is live, persistent, and absent on desktop");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  const auto release = schema::SettingsForRelease(schema::HostPlatform::kIOS, "test");
+  Service service(paths, release);
+  service.Boot(nullptr, PathEntry{}, nullptr);
+  service.SetCapabilities(CapabilitySnapshot{});
+  constexpr auto id = SettingId::kTouchButtons;
+  const auto* descriptor = service.DescriptorFor(id);
+  CHECK_TRUE(descriptor && descriptor->availability != Availability::kHidden);
+  CHECK_TRUE(descriptor && descriptor->strategy == ApplicationStrategy::kHot);
+  CHECK_TRUE(service.EffectiveValue(id).boolean);
+  CHECK_TRUE(CvarForSetting(id) == "touch_buttons");
+  CHECK_TRUE(schema::IdForToken("controller.touch_buttons") == id);
+  for (const bool enabled : {false, true}) {
+    const auto txn = service.BeginEdit(service.revision());
+    CHECK_TRUE(service.Set(txn, id, BoolV(enabled), service.capability_revision()).ok);
+    const auto result = service.Commit(txn);
+    CHECK_TRUE(result.status == CommitStatus::kSaved);
+    CHECK_FALSE(result.restart_required);
+    Service reloaded(paths, release);
+    reloaded.Boot(nullptr, PathEntry{}, nullptr);
+    CHECK_EQ(reloaded.EffectiveValue(id).boolean, enabled);
+  }
+  for (const auto platform : {schema::HostPlatform::kWindows, schema::HostPlatform::kMacOS,
+                             schema::HostPlatform::kLinux}) {
+    const auto rows = schema::BuildDescriptors(CapabilitySnapshot{}, schema::SettingsForRelease(platform, "test"));
+    const auto found = std::find_if(rows.begin(), rows.end(), [](const auto& row) { return row.id == id; });
+    CHECK_TRUE(found != rows.end() && found->availability == Availability::kHidden);
+  }
+}
+
 void TestSettingsLabelSizeRoundTrip() {
   BeginCase("settings label size: live enum persists and rejects unknown sizes");
   Scratch scratch;
@@ -1310,6 +1343,37 @@ void TestIOSUltimateDefaultUpgrade() {
   CHECK_TRUE(service.EffectiveValue(SettingId::kTarget).text == "ultimate");
 }
 
+void TestIOSImporterDefault() {
+  BeginCase("iOS importer persists skip/import choice and preserves later settings");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  const auto ios = schema::SettingsForRelease(schema::HostPlatform::kIOS, "test");
+  {
+    Service service(paths, ios);
+    CHECK_TRUE(service.Boot(nullptr, {}, nullptr) == DocumentStatus::kMissing);
+    CHECK_TRUE(ApplyIOSImportLaunchDefault(service.store(), false));
+    CHECK_TRUE(service.EffectiveValue(SettingId::kTarget).text == "common");
+    CHECK_TRUE(service.store().Save().errors.empty());
+  }
+  {
+    Service service(paths, ios);
+    CHECK_TRUE(service.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+    CHECK_FALSE(ApplyIOSImportLaunchDefault(service.store(), true));
+    CHECK_TRUE(service.EffectiveValue(SettingId::kTarget).text == "common");
+    CHECK_TRUE(ApplyIOSImportLaunchDefault(service.store(), true, true));
+    CHECK_TRUE(service.EffectiveValue(SettingId::kTarget).text == "ultimate");
+    CHECK_TRUE(service.store().Save().errors.empty());
+  }
+  WriteFile(paths.settings_file, "schema_version = 1\n[automatic]\npolicy_version = 5\n"
+            "[general]\ntarget = 'ultimate'\n");
+  {
+    Service service(paths, ios);
+    CHECK_TRUE(service.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+    CHECK_TRUE(ApplyIOSImportLaunchDefault(service.store(), false));
+    CHECK_TRUE(service.EffectiveValue(SettingId::kTarget).text == "common");
+  }
+}
+
 void TestIOSReleaseSettings() {
   BeginCase("iOS: hidden desktop display preferences cannot replace the device baseline");
   Scratch scratch;
@@ -1359,6 +1423,7 @@ int main(int argc, char** argv) {
   TestRefreshSongsDefaultAndOverride();
   TestLoadGuardRoundTrip();
   TestSettingsLabelSizeRoundTrip();
+  TestTouchButtonsRoundTrip();
   TestHideAchievementsRoundTrip();
   TestMusicNavigationRoundTrip();
   TestShowHeadersRoundTrip();
@@ -1384,5 +1449,6 @@ int main(int argc, char** argv) {
   TestVulkanOnlyReleaseSettings();
   TestIOSReleaseSettings();
   TestIOSUltimateDefaultUpgrade();
+  TestIOSImporterDefault();
   return Finish();
 }

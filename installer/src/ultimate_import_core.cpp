@@ -3,7 +3,9 @@
 #include "zip.h"
 #include "util/sha256.h"
 
+#if !defined(RB_BLITZ_IOS)
 #include <curl/curl.h>
+#endif
 #include <algorithm>
 #include <fstream>
 #include <mutex>
@@ -25,6 +27,10 @@ bool Cancelled(const ImportCallbacks& callbacks, std::string* error) {
 
 bool Download(const fs::path& file, const PinsUltimate& pins, const ImportCallbacks& callbacks,
               std::string* error) {
+#if defined(RB_BLITZ_IOS)
+  SetError(error, "The iOS Ultimate download transport is unavailable");
+  return false;
+#else
   static std::once_flag initialized;
   static CURLcode init_result;
   std::call_once(initialized, [] { init_result = curl_global_init(CURL_GLOBAL_DEFAULT); });
@@ -81,6 +87,7 @@ bool Download(const fs::path& file, const PinsUltimate& pins, const ImportCallba
     SetError(error, "The Ultimate download does not match the pinned size and SHA-256"); return false;
   }
   return true;
+#endif
 }
 }  // namespace
 
@@ -114,7 +121,18 @@ bool InstallUltimate(const std::filesystem::path& source, const std::filesystem:
   fs::path input = source;
   if (input.empty()) {
     input = work / "download.zip";
-    if (!Download(input, config.pins, callbacks, error)) return false;
+    if (!config.pins.url.starts_with("https://") || config.pins.size == 0 ||
+        config.pins.sha256.size() != 64) {
+      SetError(error, "The Ultimate download configuration is invalid"); return false;
+    }
+    if (!(config.download ? config.download(input, config.pins, callbacks, error)
+                          : Download(input, config.pins, callbacks, error))) return false;
+    if (Cancelled(callbacks, error)) return false;
+    std::error_code code;
+    if (fs::file_size(input, code) != config.pins.size || code ||
+        rb_blitz::util::HashFileHex(input, nullptr, code) != config.pins.sha256 || code) {
+      SetError(error, "The Ultimate download does not match the pinned size and SHA-256"); return false;
+    }
   }
   fs::path tree = input;
   if (!DirectoryExists(input)) {

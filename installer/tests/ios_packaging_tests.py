@@ -22,6 +22,74 @@ spec.loader.exec_module(package)
 
 
 class PackagingTests(unittest.TestCase):
+    def test_importer_stages_no_private_assets_and_checks_binary_mode(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            app = root / "app"
+            app.mkdir()
+            # No source game tree exists: importer packaging must not consult it.
+            package.stage_game_resources(app, root / "absent-game", "importer")
+            self.assertEqual(list(app.iterdir()), [])
+            (app / "rb_blitz").write_bytes(b"fixture" + package.IMPORTER_IDENTITY)
+            package.audit_asset_mode(app, "importer")
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                package.audit_asset_mode(app, "bundled")
+            (app / "leaked.xex").write_bytes(b"private")
+            with self.assertRaisesRegex(ValueError, "asset in importer"):
+                package.audit_asset_mode(app, "importer")
+            (app / "leaked.xex").unlink()
+            (app / "game").mkdir()
+            with self.assertRaisesRegex(ValueError, "asset in importer"):
+                package.audit_asset_mode(app, "importer")
+            (app / "game").rmdir()
+            (app / "rb_blitz").write_bytes(b"bundled fixture")
+            package.audit_asset_mode(app, "bundled")
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                package.audit_asset_mode(app, "importer")
+
+    def test_importer_plist_declares_its_mode(self):
+        with tempfile.TemporaryDirectory() as name:
+            app = Path(name)
+            with patch.object(package, "run"):
+                package.write_info(app, "example.blitz.importer", "0.1.0", "17.0", "importer")
+            info = plistlib.loads((app / "Info.plist").read_bytes())
+            self.assertEqual(info["RBBlitzAssetMode"], "importer")
+            self.assertEqual(info["CFBundleIdentifier"], "example.blitz.importer")
+
+    def test_importer_cli_has_separate_filename_and_honest_audit(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            build = root / "build"
+            build.mkdir()
+            (build / "rb_blitz").write_bytes(b"fixture" + package.IMPORTER_IDENTITY)
+            output = root / "packages"
+            def resources(app, build, game, validator, mode):
+                self.assertEqual(mode, "importer")
+                package.stage_game_resources(app, game, mode)
+            arguments = ["package.py", "--mode", "importer", "--build-dir", str(build),
+                         "--game-dir", str(root / "absent"), "--controller-validator", "unused",
+                         "--output", str(output)]
+            with patch.object(sys, "argv", arguments), \
+                 patch.object(package, "collect_libraries", return_value={}), \
+                 patch.object(package, "stage_resources", side_effect=resources), \
+                 patch.object(package, "audit_preparation"), \
+                 patch.object(package, "write_info"), \
+                 patch.object(package, "prepare_binaries", return_value=[]), \
+                 patch("builtins.print"):
+                package.main()
+            import json
+            archives = list(output.glob("*.ipa"))
+            self.assertEqual(len(archives), 1)
+            self.assertTrue(archives[0].name.endswith("-arm64-ios-importer.ipa"))
+            report = json.loads(archives[0].with_suffix(".audit.json").read_text())
+            self.assertEqual(report["assetMode"], "importer")
+            self.assertFalse(report["containsPrivateGameData"])
+            self.assertFalse(report["includesUltimate"])
+            self.assertEqual(report["defaultGameVersion"], "selectedDuringImport")
+            self.assertTrue(report["bundleId"].endswith(".importer"))
+            with zipfile.ZipFile(archives[0]) as archive:
+                self.assertFalse(any("/game/" in path for path in archive.namelist()))
+
     def test_documents_are_shared_with_files(self):
         with tempfile.TemporaryDirectory() as name:
             app = Path(name)

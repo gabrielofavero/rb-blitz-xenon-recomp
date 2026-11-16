@@ -1,49 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "platform/ios_runtime.h"
 #include <stdexcept>
-#include <algorithm>
 #include <condition_variable>
 #include <mutex>
-#include "fs/screenshots.h"
 #include "fs/ios_documents.h"
 #include <rex/logging.h>
-#include <rex/ui/presenter.h>
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/CAMetalLayer.h>
 
 namespace rb_blitz::platform {
-void SaveIOSStartupFrame(const std::filesystem::path& documents, const rex::ui::RawImage& frame) {
-  const auto directory = documents / "diagnostics";
-  size_t nonblack = 0, visible = 0;
-  uint8_t peak = 0;
-  for (size_t i = 0; i + 3 < frame.data.size(); i += 4) {
-    const auto value = std::max({frame.data[i], frame.data[i + 1], frame.data[i + 2]});
-    nonblack += value != 0;
-    visible += value > 16;
-    peak = std::max(peak, value);
-  }
-  REXLOG_INFO("ios_frame: guest={}x{} nonblack={} visible={} pixels={} peak_rgb={}",
-              frame.width, frame.height, nonblack, visible, frame.data.size() / 4, unsigned(peak));
-  std::filesystem::path saved;
-  std::string error;
-  if (!rb_blitz::screenshots::SaveBitmap(directory, "ios-guest-frame", frame.width,
-          frame.height, frame.stride, frame.data, saved, error)) {
-    REXLOG_WARN("ios_frame: could not save guest image: {}", error);
-    return;
-  }
-  // POSIX rename replaces the preceding capture atomically; keep only one image.
-  std::error_code ec;
-  const auto latest = directory / "ios-guest-frame.bmp";
-  std::filesystem::rename(saved, latest, ec);
-  if (ec) {
-    REXLOG_WARN("ios_frame: could not publish guest image: {}", ec.message());
-    std::filesystem::remove(saved, ec);
-  } else {
-    REXLOG_INFO("ios_frame: guest image saved to {}", latest.string());
-  }
-}
-
 namespace {
 std::mutex g_activation_mutex;
 std::condition_variable g_activation_changed;

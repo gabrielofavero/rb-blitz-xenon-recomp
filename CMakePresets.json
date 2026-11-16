@@ -210,6 +210,7 @@
             },
             "cacheVariables": {
                 "CMAKE_SYSTEM_NAME": "iOS",
+                "RBBLITZ_IOS_IMPORTER": "OFF",
                 "CMAKE_OSX_SYSROOT": "iphoneos",
                 "CMAKE_OSX_ARCHITECTURES": "arm64",
                 "CMAKE_OSX_DEPLOYMENT_TARGET": "17.0",
@@ -222,6 +223,14 @@
                 "REXGLUE_USE_VULKAN": "ON",
                 "REXGLUE_ENABLE_TRACY": "OFF",
                 "BUILD_TESTING": "OFF"
+            }
+        },
+        {
+            "name": "ios-arm64-importer-release",
+            "displayName": "iOS ARM64 Release (first-launch importer)",
+            "inherits": "ios-arm64-release",
+            "cacheVariables": {
+                "RBBLITZ_IOS_IMPORTER": "ON"
             }
         }
     ],
@@ -244,6 +253,7 @@
         { "name": "mac-arm64-debug", "configurePreset": "mac-arm64-debug" },
         { "name": "mac-arm64-release", "configurePreset": "mac-arm64-release" },
         { "name": "mac-arm64-relwithdebinfo", "configurePreset": "mac-arm64-relwithdebinfo" },
-        { "name": "ios-arm64-release", "configurePreset": "ios-arm64-release" }
+        { "name": "ios-arm64-release", "configurePreset": "ios-arm64-release" },
+        { "name": "ios-arm64-importer-release", "configurePreset": "ios-arm64-importer-release" }
     ]
 }

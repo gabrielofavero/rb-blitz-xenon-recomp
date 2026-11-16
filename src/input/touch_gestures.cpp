@@ -16,9 +16,16 @@ Layout MakeLayout(float width, float height, Rect safe) {
   if (width <= 0 || height <= 0 || !std::isfinite(width) || !std::isfinite(height)) return {};
   if (safe.width <= 0 || safe.height <= 0) safe = {0, 0, width, height};
   const float margin = std::min(12.0f, height * .025f);
-  const float side = std::min({std::clamp(height * .09f, 44.0f, 60.0f),
-                              safe.width - margin * 2, safe.height - margin * 2});
-  return {width, height, {safe.x + safe.width - margin - side, safe.y + margin, side, side}};
+  const float gap = std::max(8.f, height * .025f);
+  // The installed HUD's prompt is a 54-unit disc in a 480-unit-high scene.
+  // Keep its authored top/left inset where possible, then respect the notch.
+  const float side = std::max(0.f, std::min({std::max(height * .1125f, 44.f),
+      (safe.width - margin * 2 - gap) / 2, safe.height - margin * 2}));
+  const float x = std::clamp(height * (137.328f / 480.f) - side / 2,
+      safe.x + margin, safe.x + std::max(margin, safe.width - margin - side * 2 - gap));
+  const float y = std::clamp(height * (59.3836f / 480.f) - side / 2,
+      safe.y + margin, safe.y + std::max(margin, safe.height - margin - side));
+  return {width, height, {x, y, side, side}, {x + side + gap, y, side, side}};
 }
 void Gestures::SetLayout(Layout layout) {
   if (layout_ == layout) return;

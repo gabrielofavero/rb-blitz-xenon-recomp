@@ -5,6 +5,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(rb_blitz LANGUAGES CXX)
 
+option(RBBLITZ_IOS_IMPORTER "Build the separate first-launch iOS importer" OFF)
 set(RBBLITZ_IOS OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(RBBLITZ_IOS ON)
@@ -15,6 +16,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
             message(FATAL_ERROR "Build native tools first with installer/ios/build.sh: missing ${tool}")
         endif()
     endforeach()
+endif()
+
+if(RBBLITZ_IOS_IMPORTER AND NOT RBBLITZ_IOS)
+    message(FATAL_ERROR "RBBLITZ_IOS_IMPORTER requires an iOS target")
 endif()
 
 if(APPLE)
@@ -392,6 +397,9 @@ add_dependencies(rb_blitz rb_blitz_stage_gpu)
 if(APPLE)
     target_sources(rb_blitz PRIVATE src/ui/apple_font.cpp)
     target_link_libraries(rb_blitz PRIVATE "-framework CoreText" "-framework CoreFoundation")
+endif()
+if(RBBLITZ_IOS_IMPORTER)
+    include(installer/ios/importer.cmake)
 endif()
 if(RBBLITZ_IOS)
     target_link_libraries(rb_blitz PRIVATE "-framework UIKit" "-framework Foundation" "-framework Metal")
@@ -1157,7 +1165,7 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_hud_layout_tests PRIVATE src)
     add_test(NAME hud_layout COMMAND rb_blitz_hud_layout_tests)
 
-    if(WIN32)
+    if(WIN32 OR APPLE)
         # Exercise the production WorldXfm hook with isolated live-object fixtures.
         add_executable(rb_blitz_hud_layout_runtime_tests
             tests/hud_layout_runtime_tests.cpp src/hooks/hud_layout_runtime.cpp)
@@ -1167,6 +1175,17 @@ if(BUILD_TESTING)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_hud_layout_runtime_tests>)
         add_test(NAME hud_layout_runtime COMMAND rb_blitz_hud_layout_runtime_tests)
+        # The same isolated fixtures also exercise the iOS-only placement and
+        # input-source gate on a native host, without navigating the game.
+        add_executable(rb_blitz_touch_hud_runtime_tests
+            tests/hud_layout_runtime_tests.cpp src/hooks/hud_layout_runtime.cpp)
+        target_compile_definitions(rb_blitz_touch_hud_runtime_tests PRIVATE RB_BLITZ_IOS=1)
+        target_include_directories(rb_blitz_touch_hud_runtime_tests PRIVATE src tests)
+        target_link_libraries(rb_blitz_touch_hud_runtime_tests PRIVATE rex::runtime)
+        add_custom_command(TARGET rb_blitz_touch_hud_runtime_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_touch_hud_runtime_tests>)
+        add_test(NAME touch_hud_runtime COMMAND rb_blitz_touch_hud_runtime_tests)
     endif()
 
     # The window's own size (src/settings/window_policy.h, P2): how a fixed-size window is fitted

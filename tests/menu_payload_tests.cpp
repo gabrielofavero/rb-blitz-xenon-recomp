@@ -1673,6 +1673,89 @@ void TestLoadedMenuRefresh() {
 }
 
 int main(int argc, char** argv) {
+  if (argc == 4 && std::string(argv[1]) == "check-touch-hud") {
+    namespace font = rb_blitz::ui::input_font;
+    namespace dtb = rb_blitz::ui::dtb;
+    auto read = [](const char* path) {
+      std::ifstream file(path, std::ios::binary);
+      return std::vector<uint8_t>(std::istreambuf_iterator<char>(file), {});
+    };
+    const auto source = read(argv[2]);
+    const auto before = source;
+    std::vector<uint8_t> scene;
+    std::string why;
+    CHECK_TRUE(font::PrepareTouchHud(source, &scene, &why));
+    CHECK_TRUE(source == before);
+    if (scene.size() <= 0x810) return Finish();
+    const auto* data = scene.data() + 0x810;
+    auto u32 = [](const uint8_t* p) {
+      return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
+    };
+    CHECK_EQ(u32(data + 0x25), uint32_t(120));
+    size_t at = 0x29;
+    std::vector<std::string> names;
+    for (unsigned i = 0; i < 120; ++i) {
+      const auto type_size = u32(data + at); at += 4 + type_size;
+      const auto name_size = u32(data + at); at += 4;
+      names.emplace_back(reinterpret_cast<const char*>(data + at), name_size);
+      at += name_size;
+    }
+    const std::array<std::string, 8> added{"touch_pause_bg.mat", "touch_pause_ink.mat",
+        "touch_pause.grp", "touch_pause_icon.grp", "touch_pause_bg.mesh",
+        "touch_pause_l.mesh", "touch_pause_r.mesh", "touch_pause.anim"};
+    for (size_t i = 0; i < added.size(); ++i) CheckStrEq(names[112 + i], added[i]);
+    std::vector<size_t> markers;
+    for (size_t i = 0x810; i + 4 <= scene.size(); ++i)
+      if (u32(scene.data() + i) == 0xADDEADDE) markers.push_back(i);
+    CHECK_TRUE(markers.size() >= 9);
+    if (markers.size() < 9) return Finish();
+    auto object = [&](size_t i) {
+      const size_t start = markers[markers.size() - 9 + i] + 4;
+      const size_t end = markers[markers.size() - 8 + i] + 4;
+      return std::vector<uint8_t>(scene.begin() + start, scene.begin() + end);
+    };
+    auto contains = [](const std::vector<uint8_t>& bytes, std::string_view text) {
+      return std::search(bytes.begin(), bytes.end(), text.begin(), text.end()) != bytes.end();
+    };
+    CHECK_TRUE(contains(object(0), "help_bg_powerup.tex"));
+    const auto ink = object(1);
+    for (size_t offset : {0x19, 0x1D, 0x21}) CHECK_EQ(u32(ink.data() + offset), uint32_t(0));
+    CHECK_EQ(u32(ink.data() + 0x25), uint32_t(0x3F800000));
+    CHECK_FALSE(contains(ink, ".tex"));
+    CHECK_EQ(object(2)[0x9A], uint8_t(1));
+    CHECK_TRUE(contains(object(2), "touch_pause_icon.grp"));
+    CHECK_TRUE(contains(object(3), "touch_pause.grp"));
+    CHECK_TRUE(contains(object(4), "touch_pause_bg.mat"));
+    for (size_t i : {5, 6}) {
+      CHECK_TRUE(contains(object(i), "touch_pause_ink.mat"));
+      CHECK_TRUE(contains(object(i), "touch_pause_icon.grp"));
+    }
+    CHECK_TRUE(contains(object(7), "touch_pause_icon.grp"));
+    CHECK_FALSE(contains(object(7), "remedial_help.lbl"));
+    std::vector<uint8_t> hints;
+    CHECK_TRUE(font::PrepareHudHints(scene, &hints, &why));
+    CHECK_FALSE(font::PrepareTouchHud(scene, &hints, &why)); // never double-apply offsets
+
+    const auto game = read(argv[3]);
+    std::vector<dtb::Node> roots;
+    dtb::RootHeader header;
+    CHECK_TRUE(dtb::Parse(game.data(), game.size(), &roots, &header, &why));
+    const auto* original_enter = header_test::Method(roots, "game_screen", "enter");
+    const size_t statements = original_enter ? original_enter->kids.size() : 0;
+    CHECK_TRUE(rb_blitz::settings::AddTouchHudAnimation(&roots, &why));
+    const auto* enter = header_test::Method(roots, "game_screen", "enter");
+    CHECK_TRUE(enter && enter->kids.size() == statements + 1);
+    if (enter && !enter->kids.empty()) {
+      const auto& animate = enter->kids.back();
+      CheckStrEq(animate.kids[0].kids[2].text, "touch_pause.anim");
+      CheckStrEq(animate.kids[1].text, "animate");
+      CheckStrEq(animate.kids[2].kids[0].text, "loop");
+      CHECK_EQ(animate.kids[2].kids[2].scalar, uint32_t(480));
+    }
+    const auto compiled = dtb::Compile(roots, header);
+    CHECK_TRUE(dtb::Parse(compiled.data(), compiled.size(), &roots, &header, &why));
+    return Finish();
+  }
   rb_blitz::test::SuppressWindowsTestCrashDialogs();
   if (argc == 3 && std::string(argv[1]) == "check-unlock-error-source") {
     namespace dtb = rb_blitz::ui::dtb;

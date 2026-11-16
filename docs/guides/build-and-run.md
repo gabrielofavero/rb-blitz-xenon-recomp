@@ -26,6 +26,11 @@ The experimental iPhone/iPad builder is `sh scripts/ios/build.sh --source
 and device binaries use separate build trees. The IPA embeds the owner's private
 assets and requires device signing. See [the iOS CLI guide](../../installer/ios/README.md)
 for signing options and the exact unverified device gates.
+A separate `sh scripts/ios/build-importer.sh` flow builds an IPA without retail
+or Ultimate assets. On device it greets the player, imports a game file/folder
+through Files, offers skip/local/GitHub choices for Ultimate, and reuses the
+verified preparation on subsequent launches. The original bundled-assets flow
+remains available; developer-side code generation still requires local game input.
 
 The Mac direct builder is `sh scripts/macos/build.sh`, followed by
 `sh scripts/macos/run.sh`. Supply `--source '/path/to/package-or-folder'` on the
@@ -642,7 +647,7 @@ Get-ChildItem logs\*.log | Sort-Object LastWriteTime -Descending | Select-Object
 ```
 
 Installed launches keep the current and previous sessions under the selected save
-root's `diagnostics` directory: `game.log`, `game.1.log`, `previous.log`, and
+root's `Diagnostics` directory: `game.log`, `game.1.log`, `previous.log`, and
 `previous.1.log`. Each session has a 2 MiB file and one rotated file, so the total
 log budget is about 8 MiB. A new launch moves the former `game` files to `previous`.
 An explicit `log_file` setting still writes to that requested path.

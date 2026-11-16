@@ -12,6 +12,12 @@ checkout.
 
 ## Patches
 
+`0079-chainable-application-initialization.patch` exposes the existing app
+initialization coordinator to subclasses. The separate iOS importer completes
+native setup before paths/settings/graphics initialize, then calls that same
+coordinator on the UI thread. Initialization order and lifecycle handling stay
+in one SDK implementation.
+
 `0078-ios-application-lifecycle.patch` handles UIKit activation synchronously
 through SDL's event watch. It stops inactive UI paints, pauses audio and guest
 time, gates all Vulkan queue acquisitions and waits for submitted GPU work before

@@ -22,9 +22,12 @@ identified in their text. The Button Layout route audit was updated with a
 ## Open
 
 **iOS bring-up (2026-11-16):** the [CLI IPA builder](../../installer/ios/README.md)
-embeds private supplied assets for an initial controller experiment. Device
-installation/startup, VM aliases, memory pressure, rendering, audio and gameplay
-remain unverified. Touch controls and an on-device asset picker are deferred.
+retains the private bundled-assets route and adds a separate asset-free importer
+IPA. Its native Files picker and optional local/GitHub Ultimate setup reuse
+verified data across launches; device acceptance of the importer routes remains
+unproven. The owner confirmed bundled installation and visible menu output;
+memory pressure and gameplay touch acceptance remain unverified. See the
+[importer plan](../plans/finished/2026-11-16-ios-importer-plan.md).
 iOS cannot spawn a replacement process: restart-required settings need a manual
 close/reopen, and automatic load-failure relaunch is unavailable. The signing
 profile must permit extended virtual addressing. See the

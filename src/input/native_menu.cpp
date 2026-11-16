@@ -3,6 +3,9 @@
 #include "input/native_menu.h"
 #include "diag/shader_trace.h"
 #include "input/remap.h"
+#if defined(RB_BLITZ_IOS)
+#include "input/touch_controls.h"
+#endif
 #include <rex/hook.h>
 #include <rex/cvar.h>
 #include <rex/graphics/compile_trace.h>
@@ -904,6 +907,12 @@ REX_HOOK_RAW(sub_824E9A90) {
 }
 REX_HOOK_RAW(sub_824BC668) {
   const auto label = ctx.r3.u32 - 260;
+#if defined(RB_BLITZ_IOS)
+  // The hint UILabel is drawn separately from remedial_help.grp by the guest.
+  if (rb_blitz::input::touch::TouchInputActive() && !rb_blitz::input::touch::ButtonsEnabled() &&
+      rb_blitz::input::ObjectName(base, rb_blitz::input::ObjectBase(base, label)) ==
+          "remedial_help.lbl") return;
+#endif
   rb_blitz::input::UpdateCalibrationSideLabel(ctx, base, label);
   __imp__sub_824BC668(ctx, base);
   rb_blitz::input::CaptureHeader(ctx, base, label);

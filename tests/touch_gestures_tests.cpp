@@ -135,6 +135,15 @@ int main() {
   CHECK_TRUE(layout.pause.x >= 62);
   CHECK_TRUE(layout.pause.x + layout.pause.width <= 812);
   CHECK_TRUE(layout.pause.height >= 44);
+  CHECK_TRUE(layout.pause.x + layout.pause.width < layout.width / 2);
+  CHECK_TRUE(layout.powerup.x > layout.pause.x + layout.pause.width);
+  CHECK_EQ(layout.pause.y, layout.powerup.y);
+  for (const auto& sized : {layout, MakeLayout(1194, 834, {0, 24, 1194, 790}),
+                          MakeLayout(402, 874, {0, 62, 402, 778})}) {
+    CHECK_TRUE(sized.pause.x >= 0 && sized.pause.y >= 0);
+    CHECK_TRUE(sized.powerup.x + sized.powerup.width <= sized.width);
+    CHECK_TRUE(sized.pause.y + sized.pause.height < sized.height);
+  }
   const float px = (layout.pause.x + layout.pause.width / 2) / layout.width;
   const float py = (layout.pause.y + layout.pause.height / 2) / layout.height;
   g = Ready();
@@ -152,6 +161,17 @@ int main() {
   CHECK_TRUE(g.DrainGameplay().empty());
   CHECK_TRUE(Held(g.Sample(), Action::kPause));
   CHECK_TRUE(Empty(g.Sample()));
+
+  BeginCase("the former top-right pause position is ordinary gameplay; dragging off pause cancels");
+  g = Ready();
+  Tap(g, .9f, .08f);
+  CHECK_TRUE(Held(g.Sample(), Action::kSecondNote));
+  g = Ready();
+  Event(g, Phase::kDown, px, py);
+  Event(g, Phase::kMove, px + .2f, py);
+  Event(g, Phase::kUp, px, py);
+  CHECK_TRUE(Empty(g.Sample()));
+  CHECK_TRUE(g.DrainGameplay().empty());
 
   BeginCase("cancellation releases and discards a touch's pending wrong press");
   g = Ready();

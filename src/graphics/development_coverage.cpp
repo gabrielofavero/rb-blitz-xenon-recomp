@@ -24,7 +24,7 @@ std::unique_ptr<CoverageRecorder> StartCoverage(
   if (IsDevelopmentBuild(executable)) return StartDevelopmentCoverage(executable, cache);
   if (user_data_root.empty()) return {};
   return std::make_unique<CoverageRecorder>(
-      kPreparationCatalogue, cache, user_data_root / "diagnostics" / "unmapped-shaders.jsonl",
+      kPreparationCatalogue, cache, user_data_root / "Diagnostics" / "unmapped-shaders.jsonl",
       [](const std::string& message) { REXLOG_INFO("shader_coverage: {}", message); });
 }
 }  // namespace rb_blitz::graphics

@@ -1,9 +1,10 @@
 # Experimental iOS IPA builder
 
 Build a private arm64 iPhone/iPad package on a Mac with full Xcode, CMake 3.25+,
-Ninja, Python 3.11+, and Git. The initial route embeds your verified game assets
-in the IPA. An on-device asset picker is future work.
-Ultimate 2.11 is included in private IPAs and is the default Game Version.
+Ninja, Python 3.11+, and Git. Two separate build routes are available: the
+original private IPA with bundled assets, and an importer IPA that asks for
+your game on the device. Ultimate 2.11 is included in private bundled IPAs and
+is optional in importer IPAs.
 Use the existing controller support for this experiment.
 
 ```sh
@@ -11,6 +12,71 @@ export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 # Put CMake, Ninja and Python 3.11+ on PATH.
 sh scripts/ios/build.sh --source '/path/to/your/package-or-extracted-folder'
 ```
+
+## First-launch importer IPA
+
+```sh
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+sh scripts/ios/build-importer.sh
+# On a fresh developer checkout, supply --source for build-time code generation:
+# sh scripts/ios/build-importer.sh --source '/path/to/your/game-package'
+```
+
+This builds the separate `ios-arm64-importer-release` preset and writes
+`out/ios/packages/RockBandBlitz-0.1.0-arm64-ios-importer.ipa`. Its default bundle
+identifier ends in `.importer`, so it can coexist with the bundled game. It
+accepts the same output/signing flags. `--ultimate-source` belongs to the bundled
+route; choose Ultimate on the device in this route.
+
+The developer build still needs verified local `game/` input to generate native
+game code. Packaging the importer does not read or embed that input or Ultimate,
+and does not download Ultimate. The packager checks the binary's importer
+identity and rejects game/mod assets in this IPA. Each mode has a distinct
+filename and records its mode and asset inventory in the audit sidecar.
+
+On first launch:
+
+1. The welcome screen offers **Choose game file** (including extensionless
+   Xbox LIVE/STFS packages) or **Choose extracted game folder** in Files.
+2. Setup copies and fingerprints the three required retail files off the UI
+   thread. The original source remains untouched.
+3. Choose **Play without Ultimate**, import a local Ultimate ZIP/folder, or
+   explicitly download the pinned Ultimate release from GitHub. No retail game
+   download is offered. Downloads must match the pinned size and SHA-256.
+4. Setup prepares the data once, saves completion, then starts the game in the
+   same process. Native engine/game code already ships compiled in the IPA;
+   the device performs asset extraction and verification. Graphics shaders keep
+   their existing runtime compilation/cache behavior.
+
+Game assets and setup state live in Application Support, outside Documents and
+separate from saves/settings/caches. Imported assets are excluded from cloud
+backup. On later launches, setup verifies and reuses the import without another
+picker or download. A failed or canceled Ultimate step retains the base game;
+reopening resumes at the optional choice. A corrupt base import requires
+selecting the source again. File access is security scoped and coordinated,
+including cloud-backed Files providers. Cancel stops preparation safely;
+provider operations and a hash already in progress can take time to return.
+If preparation finishes while backgrounded, game startup waits for activation.
+Deleting the app removes its imported data; no original source is deleted.
+
+Local Ultimate revisions retain the desktop importer's compatibility warning.
+The setup record snapshots installed file hashes so later validation can reuse
+that exact local revision. The mod's `default.xex` is excluded. The selected
+initial Game Version is saved; subsequent explicit settings choices survive
+relaunch. Device picker/cloud-provider acceptance and all three setup routes
+remain unverified until tested on hardware.
+
+2026-11-16 build evidence: the complete importer CLI produces an audited unsigned
+64 MiB IPA, and the original bundled CLI still packages its private game data.
+Fifteen packaging tests, six importer CTest suites and the settings service suite
+pass. This is build/host evidence; no importer UI has been navigated. The exact
+validation and owner checks are in the
+[importer plan](../../docs/plans/finished/2026-11-16-ios-importer-plan.md).
+
+## Bundled-assets IPA
+
+The original `sh scripts/ios/build.sh` flow is unchanged. The paragraphs below
+refer to this private, bundled-assets route unless stated otherwise.
 
 Later builds can omit `--source` to verify and reuse the private `game/` input.
 If Ultimate is missing, the native importer downloads the pinned upstream release.
@@ -66,17 +132,15 @@ After the first launch, Files shows **On My iPhone > Rock Band Blitz** (or
   Captures contain the game image, without host overlays. The folder exists from
   first launch. Empty old `Import`/`Imports` placeholders are removed; folders
   containing files are preserved. Asset import will use a file picker.
-- `diagnostics`: `game.log` holds the latest session and `game.1.log` its rotated
+- `Diagnostics`: `game.log` holds the latest session and `game.1.log` its rotated
   portion; the preceding session is retained as `previous.log` and
   `previous.1.log`. Build details are saved beside them in `session-info.txt`.
   Logs are bounded to 2 MiB per file and flushed after every emitted line.
-  During iOS bring-up, `ios-guest-frame.bmp` also records the first non-black
-  splash/menu GPU image each session. Only the latest capture is kept. The
-  `ios_frame`, `ios_view` and `ios_present` log lines distinguish guest image
-  generation, UIKit visibility and final swapchain painting.
+  The `ios_view` and `ios_present` log lines record UIKit visibility and final
+  swapchain painting.
 
 Settings, saves and caches use the app's writable sandbox under `Library`;
-the bundled game remains read-only. Restart-required settings currently require
+the game mount remains read-only (bundled or imported). Restart-required settings currently require
 closing and reopening the app; spawning a replacement process is unavailable on
 iOS. Automatic load-failure relaunch is also unavailable in this first route.
 
@@ -115,7 +179,10 @@ python3 installer/ios/package.py --build-dir out/build/ios-arm64-release \
   --controller-validator out/build/mac-arm64-release/rb_blitz_controller_schemes
 ```
 
-The package checks iPhoneOS arm64 Mach-O platform/minimum versions, relocates
+For an existing importer build, use the same packaging command with
+`--mode importer --build-dir out/build/ios-arm64-importer-release` (no
+`--game-dir` is needed). Both package modes check iPhoneOS arm64 Mach-O
+platform/minimum versions and relocate
 native dependencies into frameworks, copies only the three fingerprinted game
 files and declared authored resources, and verifies archive integrity. Its
 audit marks device gameplay unverified. The resulting IPA contains your private

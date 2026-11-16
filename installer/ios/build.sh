@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build native tools, import the owner's asset, cross-compile, and package a private IPA.
+# Build native tools and package either a private bundled IPA or a first-launch importer.
 set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo"
@@ -9,6 +9,8 @@ output=out/ios/packages
 bundle_id=io.github.gabrielofavero.rbblitz
 sign_identity=
 profile=
+mode=bundled
+bundle_id_explicit=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --source|--ultimate-source|--output|--bundle-id|--sign-identity|--provisioning-profile)
@@ -17,14 +19,16 @@ while [ "$#" -gt 0 ]; do
         --source) source_path=$2 ;;
         --ultimate-source) ultimate_source=$2 ;;
         --output) output=$2 ;;
-        --bundle-id) bundle_id=$2 ;;
+        --bundle-id) bundle_id=$2; bundle_id_explicit=1 ;;
         --sign-identity) sign_identity=$2 ;;
         --provisioning-profile) profile=$2 ;;
       esac
       shift 2 ;;
+    --importer) mode=importer; shift ;;
     --help|-h)
       echo 'Usage: sh scripts/ios/build.sh [--source PACKAGE_OR_FOLDER] [--ultimate-source ZIP_OR_FOLDER] [--output DIR] [--bundle-id ID] [--sign-identity ID --provisioning-profile FILE]'
-      echo 'Without signing options, creates an unsigned private IPA for re-signing.'
+      echo 'Add --importer (or use scripts/ios/build-importer.sh) for first-launch on-device import.'
+      echo 'Without signing options, creates an unsigned IPA for re-signing.'
       echo 'Select full Xcode with DEVELOPER_DIR; requires CMake, Ninja and Python 3.11+.'
       exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
@@ -40,6 +44,13 @@ for command in cmake ninja python3 git xcrun codesign security; do
   command -v "$command" >/dev/null 2>&1 || { echo "Missing build tool: $command" >&2; exit 1; }
 done
 python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3.11+ is required")'
+if [ "$mode" = importer ]; then
+  test -z "$ultimate_source" || { echo 'Select Ultimate on device; --ultimate-source applies to bundled builds only' >&2; exit 2; }
+  if [ -z "$bundle_id_explicit" ]; then bundle_id=io.github.gabrielofavero.rbblitz.importer; fi
+  device_preset=ios-arm64-importer-release
+else
+  device_preset=ios-arm64-release
+fi
 device_sdk=$(xcrun --sdk iphoneos --show-sdk-path) || {
   echo 'Select full Xcode with DEVELOPER_DIR; Command Line Tools have no iPhoneOS SDK' >&2
   exit 1
@@ -53,7 +64,7 @@ case "$(uname -m)" in
   *) echo 'Unsupported Mac host architecture' >&2; exit 1 ;;
 esac
 
-# The importer and build-time generators run on the Mac, never on the device.
+# This build-input importer and the code generators run on the Mac.
 cmake -S installer/portable -B out/build/ios-import -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
   -DCMAKE_CXX_COMPILER="$clangxx" -DCMAKE_OBJCXX_COMPILER="$clangxx" \
@@ -67,9 +78,11 @@ else
   out/build/ios-import/rb_blitz_import --fingerprints config/game_fingerprints.toml \
     --destination game --verify
 fi
-# Private IPAs include Ultimate. Reuse an installed payload, or obtain the
+# Bundled private IPAs include Ultimate. Reuse an installed payload, or obtain the
 # pinned upstream release with the existing transactional native importer.
-if [ -n "$ultimate_source" ]; then
+if [ "$mode" = importer ]; then
+  : # Ultimate is selected on device. Never fetch/bundle it for this route.
+elif [ -n "$ultimate_source" ]; then
   out/build/ios-import/rb_blitz_import --fingerprints config/game_fingerprints.toml \
     --destination game --verify --ultimate-source "$ultimate_source"
 elif ! test -f game/ultimate/gen/patch_xbox.hdr || ! test -f game/ultimate/gen/patch_xbox_0.ark; then
@@ -95,17 +108,17 @@ if [ ! -f generated/default/sources.cmake ]; then
   fi
   test -f generated/default/sources.cmake || { echo 'Code generation failed' >&2; exit 1; }
 fi
-cmake --preset ios-arm64-release -DCMAKE_C_COMPILER="$clang" -DCMAKE_CXX_COMPILER="$clangxx" \
+cmake --preset "$device_preset" -DCMAKE_C_COMPILER="$clang" -DCMAKE_CXX_COMPILER="$clangxx" \
   -DCMAKE_OBJC_COMPILER="$clang" -DCMAKE_OBJCXX_COMPILER="$clangxx" \
   -DCMAKE_OSX_SYSROOT="$device_sdk" -DCPM_SOURCE_CACHE="$CPM_SOURCE_CACHE" \
   -DREXGLUE_HOST_EXECUTABLE="$repo/rexglue-sdk/out/$host_platform/rexglue" \
   -DRBBLITZ_HOST_BUILD_DIR="$repo/out/build/$host_preset"
-cmake --build --preset ios-arm64-release --target rb_blitz
+cmake --build --preset "$device_preset" --target rb_blitz
 if [ -n "$sign_identity" ]; then
   set -- --sign-identity "$sign_identity" --provisioning-profile "$profile"
 else
   set --
 fi
-python3 installer/ios/package.py --build-dir out/build/ios-arm64-release \
+python3 installer/ios/package.py --mode "$mode" --build-dir "out/build/$device_preset" \
   --game-dir game --controller-validator "out/build/$host_preset/rb_blitz_controller_schemes" \
   --output "$output" --bundle-id "$bundle_id" "$@"

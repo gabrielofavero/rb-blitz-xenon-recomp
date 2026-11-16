@@ -41,6 +41,7 @@ constexpr HotRow kHotRows[] = {
     // next frame; the row is `kHot` in the schema for that measured reason.
     {SettingId::kSettingsLabels, "interface.settings_labels", "settings_help_overlay"},
     {SettingId::kSettingsLabelSize, "interface.settings_label_size", "settings_help_size"},
+    {SettingId::kTouchButtons, "controller.touch_buttons", "touch_buttons"},
 };
 
 // The RhythmVerse store's filter rows (plan P6). They write no cvar: their consumer is the store's

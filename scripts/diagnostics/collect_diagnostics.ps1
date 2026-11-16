@@ -19,7 +19,7 @@ Add-Type -AssemblyName System.IO.Compression
 
 if (-not $DiagnosticsDirectory) {
     $documents = [Environment]::GetFolderPath('MyDocuments')
-    $DiagnosticsDirectory = Join-Path $documents 'Rock Band Blitz\Saved Games\diagnostics'
+    $DiagnosticsDirectory = Join-Path $documents 'Rock Band Blitz\Saved Games\Diagnostics'
 }
 $inputDirectory = (Get-Item -LiteralPath $DiagnosticsDirectory).FullName
 if (-not (Test-Path -LiteralPath $inputDirectory -PathType Container)) {
