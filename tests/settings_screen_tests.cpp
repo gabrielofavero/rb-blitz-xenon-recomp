@@ -1164,7 +1164,7 @@ void TestDownloadContentVisibilityAndNoDlc() {
   const std::vector<std::string> extras = {"settings_dlc_refresh", "settings_play_current", "settings_mm_download_content", "settings_mm_rhythmverse"};
   CHECK_TRUE(PanelRowSymbols("settings_main_menu_extra_panel") == extras);
   CHECK_TRUE(PageRows(PausePanel("settings_main_menu_extra_panel")) == extras);
-  CHECK_EQ(PanelRowSymbols("settings_main_menu_base_panel").size(), 3u);
+  CHECK_EQ(PanelRowSymbols("settings_main_menu_base_panel").size(), 4u);
   CHECK_TRUE(HelpTextFor("settings_play_current").find("no playable DLC songs") != std::string::npos);
   bool upgrade_unavailable = false;
   bool refresh_visible = false;
@@ -2103,6 +2103,24 @@ void AddProviderRowToFixture(dtb::Node* node, bool* case_added, bool* row_added)
   for (dtb::Node& kid : node->kids) {
     AddProviderRowToFixture(&kid, case_added, row_added);
   }
+}
+
+void TestHideMobileExit() {
+  BeginCase("hiding Exit Game preserves menu editing, ordering and the settings route");
+  auto nodes = SplashFixture();
+  std::string why;
+  CHECK_TRUE(HideMenuRows(&nodes, {"splash_exit", "splash_leaderboard"}, &why));
+  CHECK_TRUE(OrderMainMenuRows(&nodes, &why));
+  CHECK_TRUE(RerouteRow(&nodes, kMainMenuRow, MainMenuRouteBody(), &why));
+  // A second edit still finds the option list after Exit Game is absent.
+  CHECK_TRUE(HideMenuRows(&nodes, {"splash_achievements"}, &why));
+  std::string error;
+  CHECK_TRUE(Reparse(nodes, &error).size() == nodes.size());
+  const auto paths = RequestPaths();
+  CHECK_TRUE(std::find(paths.begin(), paths.end(),
+      "rbbz-settings/set/controller.touch_lane_swipe/t:normal") != paths.end());
+  CHECK_TRUE(std::find(paths.begin(), paths.end(),
+      "rbbz-settings/set/controller.touch_lane_swipe/t:inverted") != paths.end());
 }
 
 void TestProviderRowRemoval() {
@@ -4547,7 +4565,7 @@ void TestControllerLayoutCatalogPage() {
       "settings_controls_interface", "settings_controls_gameplay"};
   CHECK_TRUE(PanelRowSymbols("settings_controls_devices_panel") == devices);
   CHECK_TRUE(PanelRowSymbols("settings_controls_devices_pause_panel") == devices);
-  CHECK_TRUE(PageRows("settings_touch_panel") == std::vector<std::string>({"settings_touch_buttons", "settings_touch_shake_deploy"}));
+  CHECK_TRUE(PanelRowSymbols("settings_touch_panel") == std::vector<std::string>({"settings_touch_buttons", "settings_touch_lane_swipe", "settings_touch_shake_deploy"}));
   CHECK_TRUE(PageRows("settings_touch_pause_panel") == PageRows("settings_touch_panel"));
   CHECK_TRUE(PageRows("settings_controls_pause_panel") ==
              PageRows("settings_controls_panel"));
@@ -4593,6 +4611,7 @@ void TestControllerLayoutCatalogPage() {
 
   ConfigureMenu(MenuConfiguration{});
   CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 3u);
+  configuration.hidden.insert("controller.touch_lane_swipe");
   configuration.hidden.insert("controller.touch_buttons");
   configuration.hidden.insert("controller.touch_shake_deploy");
   ConfigureMenu(configuration);
@@ -4757,6 +4776,7 @@ int main(int argc, char** argv) {
   TestRestartPromptLeavesTheSurface();
   TestInvertedBoolRow();
   TestProviderRowRemoval();
+  TestHideMobileExit();
   TestRendererRowVisibility();
   TestHiddenDisplayGroup();
   TestAspectAndRenderScaleRows();

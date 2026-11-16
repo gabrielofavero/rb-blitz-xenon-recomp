@@ -3,8 +3,9 @@
 #include <rex/ui/imgui_dialog.h>
 #include <rex/cvar.h>
 
+REXCVAR_DEFINE_STRING(touch_lane_swipe, "inverted", "Input", "Lane swipe direction: inverted or normal.");
 REXCVAR_DEFINE_BOOL(touch_buttons, true, "Input", "Show gameplay buttons while touch is the active input.");
-REXCVAR_DEFINE_BOOL(touch_shake_deploy, true, "Input", "Rapidly shake the device to deploy a ready power-up.");
+REXCVAR_DEFINE_BOOL(touch_shake_deploy, true, "Input", "Tilt or shake sharply once to deploy a ready power-up.");
 
 #if defined(RB_BLITZ_IOS)
 #include <atomic>
@@ -41,6 +42,7 @@ bool Available() {
 }
 void UpdateGestures(bool active) {
   g_gestures.SetActive(active);
+  g_gestures.SetInvertedLaneSwipe(REXCVAR_GET(touch_lane_swipe) != "normal");
   g_gestures.SetPowerupAvailable(active && g_powerup_ready);
   const auto now = SDL_GetTicksNS();
   const auto rect = g_lane_timestamp && now - g_lane_timestamp < 100'000'000
@@ -71,7 +73,7 @@ class Controls final : public rex::ui::ImGuiDialog {
     }
     sensor_id_ = sensor_ ? SDL_GetSensorID(sensor_) : 0;
     if (!sensor_) REXLOG_WARN("touch_controls: shake deployment unavailable: {}", SDL_GetError());
-    REXLOG_INFO("touch_controls: fixed left/right taps, horizontal swipes and pause enabled; notes fire on down; inverted swipes forgive their starting wrong press");
+    REXLOG_INFO("touch_controls: fixed left/right taps, horizontal swipes and pause enabled; notes fire on down; lane swipes forgive their starting wrong press");
   }
   ~Controls() override {
     SDL_RemoveEventWatch(Watch, this);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Retail guest ABI and validation: docs/engine/input-flow.md.
 #include "input/native_menu.h"
+#include "input/inline_help.h"
 #include "diag/shader_trace.h"
 #include "input/remap.h"
 #if defined(RB_BLITZ_IOS)
@@ -764,9 +765,14 @@ std::optional<MenuBounds> ProjectLabel(PPCContext& ctx, uint8_t* base, uint32_t 
   // DrawShowing skips fully transparent label styles; those are not hit targets.
   if (!(F32(base, c.r3.u32 + 36) > 0)) return {};
   // Resolve the same virtual RndTransformable base used by UIListLabelElement::Draw.
-  c.r3.u32 = label + 72 + U32(base, U32(base, label + 72) + 16);
-  sub_821F13D0(c, base);
-  const auto transform = c.r3.u32;
+  const auto transformable = label + 72 + U32(base, U32(base, label + 72) + 16);
+  const auto transform = WorldTransformForDraw(transformable,
+      [base](uint32_t address) { return base[address]; },
+      [&](uint32_t object) {
+        c.r3.u32 = object;
+        sub_821F13D0(c, base);
+        return c.r3.u32;
+      });
   const auto local = call.scratch, world = local + 16, projected = local + 32;
   MenuBounds bounds{INFINITY, INFINITY, -INFINITY, -INFINITY};
   for (unsigned corner = 0; corner < 4; ++corner) {

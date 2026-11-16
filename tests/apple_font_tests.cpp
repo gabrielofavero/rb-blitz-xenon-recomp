@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ui/apple_font.h"
+#include "ui/help_layout.h"
 
 #include <cfloat>
 #include <cstdio>
@@ -32,6 +33,22 @@ int main() {
     const auto wide = font->CalcTextSizeA(24, FLT_MAX, 0, "WWWW").x;
     ok &= narrow > 0 && wide > narrow * 2;
     std::printf("%s: iiii=%.2f, WWWW=%.2f\n", font->GetDebugName(), narrow, wide);
+  }
+  // Measure mobile captions with the actual Apple sans face at every supported size.
+  for (const auto viewport : {ImVec2(874, 402), ImVec2(844, 390), ImVec2(1024, 768), ImVec2(640, 480)}) {
+    for (const char* size : {"normal", "big", "biggest"}) {
+      const auto layout = rb_blitz::ui::help::LayoutCaption(viewport.x, viewport.y, size);
+      for (const char* text : {
+          "Normal follows your swipe; Inverted reverses it.",
+          "Tilt or shake sharply once to deploy a ready power-up.",
+          "Show or hide Exit Game. Restart to apply."}) {
+        const auto bounds = caption->CalcTextSizeA(layout.font_size, FLT_MAX, layout.TextWidth(), text);
+        const bool fits = bounds.x <= layout.TextWidth() && bounds.y <= layout.TextHeight();
+        if (!fits) std::fprintf(stderr, "Caption overflow at %.0fx%.0f %s: %s\n",
+                                viewport.x, viewport.y, size, text);
+        ok &= fits;
+      }
+    }
   }
   ImGui::DestroyContext();
   return ok ? 0 : 1;

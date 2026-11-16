@@ -683,7 +683,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
           SettingId::kHideMainMenu, SettingId::kHiddenMainMenu, SettingId::kVsync,
           SettingId::kFiltering, SettingId::kResolution, SettingId::kAntiAliasing,
           SettingId::kDisplay, SettingId::kSettingsLabels, SettingId::kSettingsLabelSize, SettingId::kHideAchievements,
-          SettingId::kBackgroundMusicNavigation, SettingId::kMusicPlayer, SettingId::kTouchButtons, SettingId::kTouchShakeDeploy}) {
+          SettingId::kBackgroundMusicNavigation, SettingId::kMusicPlayer, SettingId::kTouchButtons, SettingId::kTouchShakeDeploy,
+          SettingId::kTouchLaneSwipe, SettingId::kHideExitGame}) {
       ApplyRow(id, /*defer_unregistered=*/true);
     }
   }
@@ -1476,7 +1477,7 @@ bool MenuRefreshOwns(SettingId id, MenuRefreshSurface surface) {
     return id == SettingId::kShowMessages || id == SettingId::kShowRecommendations;
   return id == SettingId::kHideMainMenu || id == SettingId::kHiddenMainMenu ||
          id == SettingId::kRefreshMusicLibrary || id == SettingId::kPlayCurrentSong ||
-         id == SettingId::kHideDownloadContent;
+         id == SettingId::kHideDownloadContent || id == SettingId::kHideExitGame;
 }
 bool NextSongRefreshOwns(SettingId id) {
   return id == SettingId::kHideHud || id == SettingId::kProgressBar ||

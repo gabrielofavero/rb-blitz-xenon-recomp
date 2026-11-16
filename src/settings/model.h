@@ -100,6 +100,8 @@ enum class SettingId : uint16_t {
   kSettingsLabelSize = 91,  // caption size; stable tokens normal / big / biggest
   kTouchButtons = 92,
   kTouchShakeDeploy = 93,
+  kTouchLaneSwipe = 94,
+  kHideExitGame = 95,
 };
 
 enum class ValueKind : uint8_t { kNone = 0, kBool, kInt, kEnum, kString, kList, kResolution };

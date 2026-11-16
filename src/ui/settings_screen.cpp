@@ -771,14 +771,17 @@ std::vector<PanelSpec> AllPanels() {
       SubmenuRow("settings_controls_devices", "settings_controls_devices_screen",
                  "Controller & Keyboard", "Controller art, presets, and menu and gameplay bindings."),
       SubmenuRow("settings_controls_touch", "settings_touch_screen", "Touch",
-                 "Choose touch buttons and shake controls.")
+                 "Choose touch buttons, lane swipes, and shake controls.")
   }});
   out.push_back(PanelSpec{"settings_touch_panel", "settings_touch_screen",
                           "settings_controls_screen", MenuPanels(), {
       BoolRow("settings_touch_buttons", "controller.touch_buttons", "Touch Buttons",
               "Show the pause and power-up buttons while using touch. Applies immediately."),
+      SelectRow("settings_touch_lane_swipe", "controller.touch_lane_swipe", "Lane Swipe",
+                "Normal follows your swipe; Inverted reverses it.",
+                Choices({"inverted", "Inverted", "normal", "Normal"})),
       BoolRow("settings_touch_shake_deploy", "controller.touch_shake_deploy", "Shake to Deploy",
-              "Rapidly shake your device to deploy a ready power-up. Applies immediately.")
+              "Tilt or shake sharply once to deploy a ready power-up.")
   }});
   out.push_back(PanelSpec{"settings_controls_devices_panel", "settings_controls_devices_screen",
                           "settings_controls_screen", MenuPanels(), {
@@ -1383,6 +1386,8 @@ std::vector<PanelSpec> AllPanels() {
                     "Leaderboards", "Show or hide Leaderboards. Restart to apply."),
       VisibilityRow("settings_mm_achievements", "interface.hidden_main_menu.splash_achievements",
                     "Achievements", "Show or hide Achievements. Restart to apply."),
+      VisibilityRow("settings_mm_exit", "interface.hide_exit_game", "Exit Game",
+                    "Show or hide Exit Game. Restart to apply."),
       VisibilityRow("settings_mm_upgrade", "interface.hidden_main_menu.splash_upgrade",
                     "Unlock Full Game", "Show or hide Unlock Full Game. Only available in the Demo. Restart to apply.")
   }});
@@ -3017,7 +3022,7 @@ bool RerouteRow(std::vector<dtb::Node>* nodes, const std::string_view row,
   return true;
 }
 
-// The main menu's option array: an array holding both the first and the last retail row symbol.
+// The main menu's option array: Play and Help & Options survive mobile exit hiding.
 // Transcribed from `menu_options::FindOptionArray` (which owns the same idea for the live edit); it
 // is repeated rather than shared because this module must not depend on that one's file logic.
 bool IsMenuOptionArray(const Node& node) {
@@ -3028,7 +3033,8 @@ bool IsMenuOptionArray(const Node& node) {
   bool last = false;
   for (const Node& kid : node.kids) {
     first = first || (kid.tag == dtb::kSymbol && kid.text == "splash_start");
-    last = last || (kid.tag == dtb::kSymbol && kid.text == "splash_exit");
+    last = last || (kid.tag == dtb::kSymbol &&
+                    (kid.text == "splash_exit" || kid.text == "splash_options"));
   }
   return first && last;
 }
@@ -3226,7 +3232,7 @@ bool AddMainMenuSwitchCase(std::vector<dtb::Node>* nodes, const std::string_view
 }
 
 // Inserts a symbol into the main menu's option array, directly after `after_row`. The array is the
-// one `IsMenuOptionArray` recognises (it holds both `splash_start` and `splash_exit`), which is the
+// one `IsMenuOptionArray` recognises (it holds both `splash_start` and `splash_options`), which is the
 // same identification the live edit uses (`menu_options::FindOptionArray`); the insertion is refused
 // when the row is already an element, so a second pass cannot duplicate it.
 bool InsertMenuRow(std::vector<dtb::Node>* nodes, const std::string_view after_row,
@@ -3344,8 +3350,7 @@ bool ParkedRowBlock(const Node& array, std::string_view row, size_t* begin, size
 }
 
 // The main menu's option array in either shipped shape. A direct `splash_start` element is what no
-// other array carries; `splash_exit` is a direct element in the payload's record and a parked one in
-// retail's.
+// other array carries; Help & Options remains present when mobile hides Exit Game.
 bool IsMainMenuArray(const Node& node) {
   if (node.tag != dtb::kArray) {
     return false;
@@ -3362,11 +3367,12 @@ bool IsMainMenuArray(const Node& node) {
   size_t begin = 0;
   size_t end = 0;
   for (const Node& kid : node.kids) {
-    if (IsSymbol(kid, kMainMenuExitRow)) {
+    if (IsSymbol(kid, kMainMenuExitRow) || IsSymbol(kid, "splash_options")) {
       return true;
     }
   }
-  return ParkedRowBlock(node, kMainMenuExitRow, &begin, &end);
+  return ParkedRowBlock(node, kMainMenuExitRow, &begin, &end) ||
+         ParkedRowBlock(node, "splash_options", &begin, &end);
 }
 
 // ------------------------------------------------------------------------------------------------

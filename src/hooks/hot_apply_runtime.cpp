@@ -41,6 +41,7 @@ constexpr HotRow kHotRows[] = {
     // next frame; the row is `kHot` in the schema for that measured reason.
     {SettingId::kSettingsLabels, "interface.settings_labels", "settings_help_overlay"},
     {SettingId::kSettingsLabelSize, "interface.settings_label_size", "settings_help_size"},
+    {SettingId::kTouchLaneSwipe, "controller.touch_lane_swipe", "touch_lane_swipe"},
     {SettingId::kTouchButtons, "controller.touch_buttons", "touch_buttons"},
     {SettingId::kTouchShakeDeploy, "controller.touch_shake_deploy", "touch_shake_deploy"},
 };
@@ -80,6 +81,12 @@ constexpr char kCvarError[] = "the applier has no cvar for this row";
 // The value as the cvar's own text form. `vsync` is a bool cvar; a value of the wrong kind is
 // refused rather than spelled, because a guessed spelling is how a write silently does nothing.
 bool CvarText(SettingId id, const Value& value, std::string* out) {
+  if (id == SettingId::kTouchLaneSwipe) {
+    if (value.kind != ValueKind::kEnum ||
+        (value.text != "inverted" && value.text != "normal")) return false;
+    *out = value.text;
+    return true;
+  }
   if (id == SettingId::kSettingsLabelSize) {
     if (value.kind != ValueKind::kEnum ||
         (value.text != "normal" && value.text != "big" && value.text != "biggest")) return false;

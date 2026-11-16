@@ -302,6 +302,54 @@ void TestTouchButtonsRoundTrip() {
   }
 }
 
+void TestMobileDefaultsAndLaneSwipe() {
+  BeginCase("mobile hides Exit Game by default and persists both lane swipe modes");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  for (const auto platform : {schema::HostPlatform::kIOS, schema::HostPlatform::kAndroid}) {
+    const auto release = schema::SettingsForRelease(platform, "test");
+    Service service(paths, release);
+    service.Boot(nullptr, {}, nullptr);
+    CHECK_TRUE(service.EffectiveValue(SettingId::kHideExitGame).boolean);
+    constexpr auto id = SettingId::kTouchLaneSwipe;
+    const auto* row = service.DescriptorFor(id);
+    CHECK_TRUE(row && row->availability == Availability::kVisible);
+    CHECK_TRUE(row && row->strategy == ApplicationStrategy::kHot);
+    CHECK_TRUE(service.EffectiveValue(id).text == "inverted");
+    CHECK_TRUE(CvarForSetting(id) == "touch_lane_swipe");
+    CHECK_TRUE(schema::IdForToken("controller.touch_lane_swipe") == id);
+    for (const auto* mode : {"normal", "inverted"}) {
+      const auto edit = service.BeginEdit(service.revision());
+      CHECK_FALSE(service.Set(edit, id, EnumV("sideways"), service.capability_revision()).ok);
+      CHECK_TRUE(service.Set(edit, id, EnumV(mode), service.capability_revision()).ok);
+      const auto saved = service.Commit(edit);
+      CHECK_TRUE(saved.status == CommitStatus::kSaved);
+      CHECK_FALSE(saved.restart_required);
+      Service reloaded(paths, release);
+      reloaded.Boot(nullptr, {}, nullptr);
+      CHECK_TRUE(reloaded.EffectiveValue(id).text == mode);
+    }
+    const auto edit = service.BeginEdit(service.revision());
+    CHECK_TRUE(service.Set(edit, SettingId::kHideExitGame, BoolV(false),
+                           service.capability_revision()).ok);
+    CHECK_TRUE(service.Commit(edit).restart_required);
+    Service reloaded(paths, release);
+    reloaded.Boot(nullptr, {}, nullptr);
+    CHECK_FALSE(reloaded.EffectiveValue(SettingId::kHideExitGame).boolean);
+    // Clear the file before checking the other platform's first-run default.
+    std::error_code error;
+    fs::remove(paths.settings_file, error);
+  }
+  for (const auto platform : {schema::HostPlatform::kWindows, schema::HostPlatform::kMacOS,
+                             schema::HostPlatform::kLinux}) {
+    Service desktop(paths, schema::SettingsForRelease(platform, "test"));
+    desktop.Boot(nullptr, {}, nullptr);
+    CHECK_FALSE(desktop.EffectiveValue(SettingId::kHideExitGame).boolean);
+    CHECK_TRUE(desktop.DescriptorFor(SettingId::kTouchLaneSwipe)->availability == Availability::kHidden);
+    CHECK_TRUE(desktop.DescriptorFor(SettingId::kHideExitGame)->availability == Availability::kHidden);
+  }
+}
+
 void TestSettingsLabelSizeRoundTrip() {
   BeginCase("settings label size: live enum persists and rejects unknown sizes");
   Scratch scratch;
@@ -1426,6 +1474,7 @@ int main(int argc, char** argv) {
   TestLoadGuardRoundTrip();
   TestSettingsLabelSizeRoundTrip();
   TestTouchButtonsRoundTrip();
+  TestMobileDefaultsAndLaneSwipe();
   TestHideAchievementsRoundTrip();
   TestMusicNavigationRoundTrip();
   TestShowHeadersRoundTrip();

@@ -39,6 +39,7 @@
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
 // Define named symbols the same way, so the cvar declarations live next to their table.
+REXCVAR_DECLARE(bool, hide_exit_game);
 REXCVAR_DECLARE(bool, enhancements_hide_menu_options);
 REXCVAR_DECLARE(std::string, enhancements_hidden_menu_options);
 REXCVAR_DECLARE(bool, enhancements_rename_mod_settings);
@@ -76,9 +77,9 @@ std::atomic<bool> g_runtime_menu_refresh_ready{false};
 std::atomic<unsigned> g_runtime_menu_query_logs{0};
 
 bool Visible(const rb_blitz::menu_filter::RuntimeVisibility& state, std::string_view row) {
-  // The entry into settings and the menu's fixed endpoints must survive every
-  // saved hide list, including one imported from an older settings file.
-  if (row == "splash_start" || row == "splash_options" || row == "splash_exit") return true;
+  // Keep Play and the route back to settings available. Exit Game may be hidden on mobile.
+  if (row == "splash_start" || row == "splash_options") return true;
+  if (row == "splash_exit") return state.exit_game;
   if (row == "splash_dlc" && !state.refresh_songs) return false;
   if (row == "splash_play_current" && !state.play_current_song) return false;
   if (row == "splash_dlc_store" && !state.download_content) return false;
@@ -604,10 +605,11 @@ void Configure(bool settings_restart_boot) {
   const rb_blitz::settings::menu_compat::HideDecision decision =
       rb_blitz::settings::menu_compat::DecideHiddenRows(request);
   g_settings.rows = decision.hidden;
+  if (REXCVAR_GET(hide_exit_game)) g_settings.rows.push_back("splash_exit");
   // The list is edited whenever the decision named a row: the hide master governs the *selection*,
   // not the refresh entry's own switch, which takes its row away with the master on or off (the
   // decision above says which rows those are, and its note is logged below).
-  g_settings.hide_rows = !decision.hidden.empty();
+  g_settings.hide_rows = !g_settings.rows.empty();
 
   if (g_settings.tap_refresh_row) {
     // R7 gives the downloadable-content row a new job (TapNativeDiscovery), so it stays in the list

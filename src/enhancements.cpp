@@ -74,6 +74,13 @@ REXCVAR_DEFINE_BOOL(enhancements_hide_menu_options, true, "Enhancements",
                     "is present.")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
+#if defined(RB_BLITZ_IOS) || defined(__ANDROID__)
+REXCVAR_DEFINE_BOOL(hide_exit_game, true, "Enhancements", "Hide Exit Game on the main menu.")
+#else
+REXCVAR_DEFINE_BOOL(hide_exit_game, false, "Enhancements", "Hide Exit Game on the main menu.")
+#endif
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 REXCVAR_DEFINE_STRING(enhancements_hidden_menu_options, rb_blitz::menu_options::kDefaultRows,
                       "Enhancements",
                       "R5 the main menu rows enhancements_hide_menu_options hides, comma "

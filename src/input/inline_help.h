@@ -7,6 +7,15 @@
 namespace rb_blitz::input {
 struct InlineHelpEntry { uint32_t label, action; };
 
+// SetWorldXfm writes the draw matrix at +72 and clears the dirty byte at +189.
+// WorldXfm is an evaluator: calling it on a clean object rebuilds from its local
+// transform and discards temporary placement assigned by InlineHelp::DrawShowing.
+// Match the guest draw path by using its cached matrix while it is clean.
+template <typename Read8, typename Evaluate>
+uint32_t WorldTransformForDraw(uint32_t transformable, Read8 read8, Evaluate evaluate) {
+  return read8(transformable + 189) ? evaluate(transformable) : transformable + 72;
+}
+
 // Guest InlineHelp has parallel action records (28 bytes) and UILabel pointers.
 // Keep the full label pointer from the footer; a nested DrawShowing receiver can
 // be a base-class pointer instead. read32 supplies the guest big-endian reader.

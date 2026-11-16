@@ -266,7 +266,7 @@ bool AddLoadedMainMenuRefresh(std::vector<Node>* roots, const Node& inventory,
   const std::string trial_removed = trial_mode ? "splash_dlc" : "splash_upgrade";
   body.push_back(cmd({sym("remove_elem"), var("options_array"), sym(trial_removed)}));
   for (const auto& row : rows) {
-    if (row == "splash_start" || row == "splash_options" || row == "splash_exit") continue;
+    if (row == "splash_start" || row == "splash_options") continue;
     body.push_back(cmd({sym("if"), absent(row),
                         cmd({sym("remove_elem"), var("options_array"), sym(row)})}));
   }

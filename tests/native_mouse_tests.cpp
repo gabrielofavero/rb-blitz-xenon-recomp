@@ -8,6 +8,25 @@ using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("footer hit capture preserves SetWorldXfm placement instead of recomputing the local origin");
+  constexpr uint32_t transformable = 0x40100500;
+  unsigned evaluations = 0;
+  uint8_t dirty = 0;
+  const auto read_dirty = [&](uint32_t address) {
+    CHECK_EQ(address, transformable + 189);
+    return dirty;
+  };
+  const auto evaluate = [&](uint32_t object) {
+    CHECK_EQ(object, transformable);
+    ++evaluations;
+    return uint32_t{0x40100800}; // Evaluator would replace the footer's temporary matrix.
+  };
+  CHECK_EQ(WorldTransformForDraw(transformable, read_dirty, evaluate), transformable + 72);
+  CHECK_EQ(evaluations, 0); // A clean footer must keep its rendered bottom-of-screen position.
+  dirty = 1;
+  CHECK_EQ(WorldTransformForDraw(transformable, read_dirty, evaluate), 0x40100800);
+  CHECK_EQ(evaluations, 1); // Dirty labels still resolve their current parent/local placement.
+
   BeginCase("guest footer records preserve full labels and their native actions");
   constexpr uint32_t footer = 0x40001000, actions = 0x40002000, labels = 0x40003000;
   std::unordered_map<uint32_t, uint32_t> words{

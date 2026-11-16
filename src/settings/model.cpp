@@ -52,6 +52,10 @@ std::string_view SettingIdToken(SettingId id) {
   switch (id) {
     case SettingId::kButtonScheme:
       return "scheme";
+    case SettingId::kTouchLaneSwipe:
+      return "touch_lane_swipe";
+    case SettingId::kHideExitGame:
+      return "hide_exit_game";
     case SettingId::kTouchButtons:
       return "touch_buttons";
     case SettingId::kTouchShakeDeploy:

@@ -392,6 +392,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
     menu_filter::RuntimeVisibility visibility;
     visibility.revision = boot->service()->revision();
     visibility.hidden_rows = menu_filter::HiddenRows();
+    visibility.exit_game = !boot->service()->EffectiveValue(SettingId::kHideExitGame).boolean;
     visibility.refresh_songs = refresh_row_on;
     visibility.play_current_song = play_current_row;
     visibility.download_content = download_content_row;

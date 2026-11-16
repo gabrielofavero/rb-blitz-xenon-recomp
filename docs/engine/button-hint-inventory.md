@@ -50,8 +50,19 @@ taps. Capture now runs directly from `InlineHelp::DrawShowing` using its own
 full label pointers and action records after it assigns the final transforms;
 it no longer relies on matching nested UILabel draw receivers. The host suite
 also checks the guest's parallel action/label arrays. Bounded target and miss
-records in the normal log expose the geometry on device. Live mouse and
-on-device touch acceptance of this correction are still pending.
+records in the normal log expose the geometry on device.
+
+The wired-device log from the owner's 16:18 session identified the remaining
+fault: Back taps arrived around `(0.30, 0.90)`, while all four footer targets
+were incorrectly centered at `(0.50, 0.50)`. `ProjectLabel` called `WorldXfm`
+unconditionally. That function rebuilds from the local transform even when
+the dirty byte is clear, replacing the temporary world matrix that InlineHelp
+assigned for drawing. Capture now follows the guest's draw rule: use the cached
+world matrix at transformable +72 when +189 is clear, and evaluate only when
+dirty. The regression test asserts that clean footer placement never calls the
+evaluator. Device evidence is retained locally in
+`out/ios/footer-touch-20261116/game-before-fix.log`. Live mouse and on-device
+touch acceptance of the transform correction are still pending.
 
 ## iOS touch HUD (2026-11-16)
 
@@ -98,19 +109,24 @@ removes their hit areas while preserving the lane target.
 
 Help & Options → Controls now contains Calibration, Controller & Keyboard,
 and Touch. Controller & Keyboard contains Layout, Controller Presets, Menu
-Bindings, and Gameplay Bindings. On iOS, Touch contains `Touch Buttons: On/Off` and `Shake to Deploy: On/Off`;
+Bindings, and Gameplay Bindings. On mobile, Touch contains `Touch Buttons: On/Off`,
+`Lane Swipe: Inverted/Normal`, and `Shake to Deploy: On/Off`;
 `controller.touch_buttons` defaults to On, persists in the settings file, and
 applies immediately. Off hides both buttons during touch play while
 preserving touch input. Desktop releases omit the empty Touch branch. Both
 settings contexts carry the hierarchy and their corresponding Back routes.
+`controller.touch_lane_swipe` defaults to `inverted` and applies immediately;
+`normal` moves lanes in the swipe direction. Mobile releases also default
+`interface.hide_exit_game` to true. Main Menu → Other Shortcuts can restore Exit
+Game after a restart; desktop defaults keep it visible.
 
 `controller.touch_shake_deploy` also defaults to On, persists, and applies
 immediately. SDL's iOS CoreMotion accelerometer feeds a gravity-filtered
-recognizer requiring three alternating impulses above 18 m/s² within 450 ms,
-at least 40 ms apart, followed by a one-second cooldown. Slow tilts and isolated
-bumps do not deploy. Samples are gated by foreground, focus, active gameplay,
+recognizer accepting one sharp movement above 12 m/s² after gravity filtering,
+followed by a one-second cooldown and a quiet sample below 6 m/s² to rearm.
+Slow movement does not deploy. Samples are gated by foreground, focus, active gameplay,
 touch as the active device, modal/capture state, readiness, and the setting.
-Pause and cancellation discard partial shakes. SDK patch 0081 enables the
+Pause and cancellation reset the motion baseline. SDK patch 0081 enables the
 sensor subsystem for iOS. Host checks cover deliberate shakes, ordinary motion,
 all six icon selections, lane taps, and settings persistence; device acceptance
 of appearance and physical shake sensitivity remains pending.

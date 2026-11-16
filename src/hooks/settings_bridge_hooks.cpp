@@ -656,7 +656,8 @@ void PublishTrialMenuVisibility(const std::map<::rb_blitz::settings::SettingId, 
     (void)value;
     if (id == SettingId::kHiddenMainMenu || id == SettingId::kHideMainMenu ||
         id == SettingId::kRefreshMusicLibrary || id == SettingId::kPlayCurrentSong ||
-        id == SettingId::kHideDownloadContent || id == SettingId::kShowMessages ||
+        id == SettingId::kHideDownloadContent || id == SettingId::kHideExitGame ||
+        id == SettingId::kShowMessages ||
         id == SettingId::kShowRecommendations) {
       menu_changed = true;
       break;
@@ -667,6 +668,7 @@ void PublishTrialMenuVisibility(const std::map<::rb_blitz::settings::SettingId, 
   if (!boot || !boot->service()) return;
   const auto* service = boot->service();
   auto visibility = ::rb_blitz::menu_filter::SnapshotRuntimeVisibility();
+  visibility.exit_game = !service->EffectiveValue(SettingId::kHideExitGame).boolean;
   visibility.refresh_songs = service->EffectiveValue(SettingId::kRefreshMusicLibrary).boolean;
   visibility.play_current_song = service->EffectiveValue(SettingId::kPlayCurrentSong).boolean &&
                                  ::rb_blitz::shell_music::HasPool();

@@ -121,6 +121,10 @@ std::string_view CvarForSetting(SettingId id) {
       return "enhancements_music_player";
     case SettingId::kSettingsLabelSize:
       return "settings_help_size";
+    case SettingId::kTouchLaneSwipe:
+      return "touch_lane_swipe";
+    case SettingId::kHideExitGame:
+      return "hide_exit_game";
     case SettingId::kTouchButtons:
       return "touch_buttons";
     case SettingId::kTouchShakeDeploy:

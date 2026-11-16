@@ -67,6 +67,7 @@ const std::vector<std::string>& HiddenRows();
 struct RuntimeVisibility {
   uint64_t revision = 0;
   std::vector<std::string> hidden_rows;
+  bool exit_game = true;
   bool refresh_songs = false;
   bool play_current_song = false;
   bool download_content = false;

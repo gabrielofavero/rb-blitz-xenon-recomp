@@ -1593,7 +1593,7 @@ void TestLoadedMenuRefresh() {
   CHECK_TRUE(rb_blitz::settings::CaptureMainMenuInventory(roots, &inventory, &why));
   CHECK_EQ(inventory.kids.size(), 5u);
   CHECK_TRUE(rb_blitz::ui::screen::HideMenuRows(&roots,
-      {"splash_play_current", "splash_dlc"}, &why));
+      {"splash_exit", "splash_play_current", "splash_dlc"}, &why));
   CHECK_TRUE(rb_blitz::settings::AddLoadedMainMenuRefresh(&roots, inventory, false, &why));
   CHECK_EQ(roots[0].kids.size(), 6u);
   const Node& enter = roots[1].kids[3];
@@ -1605,6 +1605,18 @@ void TestLoadedMenuRefresh() {
   CHECK_TRUE(refresh.kids.size() == 2 && refresh.kids[1].tag == kCommand &&
              refresh.kids[1].kids[0].text == "do");
   const Node& statements = refresh.kids[1];
+  // Exit visibility must be queried on every return, despite being absent at boot.
+  bool filters_exit = false;
+  for (const auto& statement : statements.kids) {
+    if (statement.tag != kCommand || statement.kids.size() != 3 ||
+        statement.kids[0].text != "if") continue;
+    const auto& query = statement.kids[1];
+    const auto& remove = statement.kids[2];
+    if (query.kids.size() == 2 && query.kids[1].text == "rbbz-menu/hidden/splash_exit" &&
+        remove.kids.size() == 3 && remove.kids[0].text == "remove_elem" &&
+        remove.kids[2].text == "splash_exit") filters_exit = true;
+  }
+  CHECK_TRUE(filters_exit);
   CHECK_TRUE(statements.kids[1].tag == kArray &&
              statements.kids[1].kids.size() == 2 &&
              statements.kids[1].kids[0].tag == rb_blitz::ui::dtb::kVar &&

@@ -51,6 +51,7 @@ class Gestures {
   void SetLayout(Layout layout);
   void SetActive(bool active);
   void SetPowerupAvailable(bool available);
+  void SetInvertedLaneSwipe(bool inverted) { inverted_lane_swipe_ = inverted; }
   // Projected lane icon, independent of the optional top-left buttons.
   void SetLanePowerup(Rect rect);
   void DeployPowerup();
@@ -71,6 +72,7 @@ class Gestures {
   std::vector<GameplayEvent> gameplay_;
   Layout layout_;
   bool active_ = false;
+  bool inverted_lane_swipe_ = true;
   bool pause_requested_ = false;
   bool powerup_available_ = false;
   Rect lane_powerup_;
@@ -79,16 +81,16 @@ class Gestures {
   std::array<uint8_t, profile::gameplay_remap::kActionCount> held_polls_{};
 };
 
-// Acceleration includes gravity, in m/s^2. Requires three strong alternating
-// impulses within 450 ms; a single bump or slow tilt never counts as a shake.
+// Acceleration includes gravity, in m/s^2. One sharp movement deploys; slow
+// motion is filtered out. Settle and wait one second before another deployment.
 class ShakeDetector {
  public:
   bool Observe(uint64_t timestamp_ns, float x, float y, float z);
   void Reset();
  private:
-  std::array<float, 3> gravity_{}, impulse_{};
-  uint64_t last_ = 0, started_ = 0, peak_ = 0, cooldown_ = 0;
-  unsigned impulses_ = 0;
+  std::array<float, 3> gravity_{};
+  uint64_t last_ = 0, cooldown_ = 0;
+  bool armed_ = true;
 };
 
 // Only SDL's touch-generated mouse stream is swallowed. Its release remains

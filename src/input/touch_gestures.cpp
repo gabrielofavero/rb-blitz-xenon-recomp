@@ -115,7 +115,8 @@ void Gestures::Observe(const FingerEvent& event) {
   }
   if (!finger.swiped && std::abs(dx) >= kSwipeDistance && std::abs(dx) >= std::abs(dy) * 1.5f) {
     finger.swiped = true;
-    const auto action = dx > 0 ? Action::kMoveLaneLeft : Action::kMoveLaneRight;
+    const bool left = (dx > 0) == inverted_lane_swipe_;
+    const auto action = left ? Action::kMoveLaneLeft : Action::kMoveLaneRight;
     Emit(action);
     gameplay_.push_back({GameplayKind::kSwipe, finger.token, action, true});
   }
@@ -163,20 +164,11 @@ bool ShakeDetector::Observe(uint64_t now, float x, float y, float z) {
     linear[axis] = sample[axis] - gravity_[axis];
     magnitude2 += linear[axis] * linear[axis];
   }
-  if (now < cooldown_) return false;
-  if (impulses_ && now - started_ > 450'000'000) impulses_ = 0;
-  if (magnitude2 < 18.f * 18.f) return false;
-  if (impulses_) {
-    if (now - peak_ < 40'000'000) return false;
-    float dot = 0;
-    for (size_t axis = 0; axis < 3; ++axis) dot += impulse_[axis] * linear[axis];
-    if (dot >= -0.5f * std::sqrt(magnitude2)) return false;
-  } else started_ = now;
-  const float magnitude = std::sqrt(magnitude2);
-  for (size_t axis = 0; axis < 3; ++axis) impulse_[axis] = linear[axis] / magnitude;
-  peak_ = now;
-  if (++impulses_ < 3) return false;
-  impulses_ = 0;
+  // A brisk tilt or flick is enough; no reversal or repeated shaking is needed.
+  // Require a quieter sample before rearming so the same motion cannot deploy twice.
+  if (magnitude2 < 6.f * 6.f) armed_ = true;
+  if (now < cooldown_ || !armed_ || magnitude2 < 12.f * 12.f) return false;
+  armed_ = false;
   cooldown_ = now + 1'000'000'000;
   return true;
 }

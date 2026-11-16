@@ -330,10 +330,21 @@ std::vector<SchemaRow> BuildTable() {
                           "controller_schemes"),
                      {"controller", "scheme"}, "", "Controller Layout",
                      "Choose controller icons and preset art. Each selection applies immediately."));
+  {
+    Descriptor d = Make(SettingId::kTouchLaneSwipe, Category::kController, Provider::kNative,
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("inverted"));
+    d.choices = Choices({{"inverted", "Inverted"}, {"normal", "Normal"}});
+    rows.push_back(Row(std::move(d), {"controller", "touch_lane_swipe"}, "touch", "Lane Swipe",
+                       "Normal follows your swipe; Inverted reverses it."));
+  }
+  rows.push_back(Row(Make(SettingId::kHideExitGame, Category::kInterface, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
+                     {"interface", "hide_exit_game"}, "main_menu_base", "Exit Game",
+                     "Show or hide Exit Game. Restart to apply."));
   rows.push_back(Row(Make(SettingId::kTouchShakeDeploy, Category::kController, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"controller", "touch_shake_deploy"}, "touch", "Shake to Deploy",
-                     "Rapidly shake your device to deploy a ready power-up. Applies immediately."));
+                     "Tilt or shake sharply once to deploy a ready power-up."));
   rows.push_back(Row(Make(SettingId::kTouchButtons, Category::kController, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"controller", "touch_buttons"}, "touch", "Touch Buttons",
@@ -579,6 +590,9 @@ constexpr StrategyEntry kStrategies[] = {
      "P3 owner screenshots show One Glyph changing A, Test Markers changing A/B, and Xbox 360 "
      "restoring retail art in the Controls footer. The live log records GPU texture invalidation "
      "and button-sheet replacement (docs/settings/status.md, Layout selector)."},
+    {SettingId::kHideExitGame, ApplicationStrategy::kRestart, ""},
+    {SettingId::kTouchLaneSwipe, ApplicationStrategy::kHot,
+     "The touch event handler reads touch_lane_swipe before recognizing each swipe."},
     {SettingId::kTouchButtons, ApplicationStrategy::kHot,
      "Guest HUD draw and placement hooks read touch_buttons each frame; no scene reload is needed."},
     {SettingId::kTouchShakeDeploy, ApplicationStrategy::kHot,
@@ -722,9 +736,11 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
   ReleaseSettings release;
   release.platform = platform;
   release.version = version;
-  if (platform != HostPlatform::kIOS) {
+  if (!IsMobile(platform)) {
     RowRule touch;
     touch.hidden = true;
+    release.rules.emplace(SettingId::kTouchLaneSwipe, touch);
+    release.rules.emplace(SettingId::kHideExitGame, touch);
     release.rules.emplace(SettingId::kTouchButtons, touch);
     release.rules.emplace(SettingId::kTouchShakeDeploy, std::move(touch));
   }
@@ -736,6 +752,11 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
     renderer.default_value = EnumValue("vulkan");
     renderer.choices = Choices({{"vulkan", "Vulkan"}});
     release.rules.emplace(SettingId::kRenderer, std::move(renderer));
+  }
+  if (IsMobile(platform)) {
+    RowRule exit;
+    exit.default_value = BoolValue(true);
+    release.rules.emplace(SettingId::kHideExitGame, std::move(exit));
   }
   if (platform == HostPlatform::kIOS) {
     RowRule target;
@@ -779,6 +800,8 @@ ReleaseSettings CurrentReleaseSettings() {
   return SettingsForRelease(HostPlatform::kWindows, version);
 #elif defined(RB_BLITZ_IOS)
   return SettingsForRelease(HostPlatform::kIOS, version);
+#elif defined(__ANDROID__)
+  return SettingsForRelease(HostPlatform::kAndroid, version);
 #elif defined(__APPLE__)
   return SettingsForRelease(HostPlatform::kMacOS, version);
 #else

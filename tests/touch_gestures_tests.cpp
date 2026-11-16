@@ -43,19 +43,22 @@ int main() {
   CHECK_TRUE(Held(g.Sample(), Action::kSecondNote));
   CHECK_TRUE(Empty(g.Sample()));
 
-  BeginCase("swipes invert direction and forgive only their own starting press");
-  for (bool right : {false, true}) {
+  BeginCase("both swipe directions forgive only their own starting press");
+  for (bool inverted : {true, false}) for (bool right : {false, true}) {
     g = Ready();
+    if (!inverted) g.SetInvertedLaneSwipe(false); // untouched default remains inverted
     const float start = right ? .1f : .8f, end = right ? .8f : .1f;
     Event(g, Phase::kDown, start);
     CHECK_TRUE(Held(g.Sample(), right ? Action::kFirstNote : Action::kSecondNote));
     events = g.DrainGameplay();
     const auto token = events[0].token;
     Event(g, Phase::kMove, end);
-    CHECK_TRUE(Held(g.Sample(), right ? Action::kMoveLaneLeft : Action::kMoveLaneRight));
+    const auto lane = right == inverted ? Action::kMoveLaneLeft : Action::kMoveLaneRight;
+    CHECK_TRUE(Held(g.Sample(), lane));
     events = g.DrainGameplay();
     CHECK_EQ(events.size(), size_t(1));
     CHECK_TRUE(events[0].kind == GameplayKind::kSwipe);
+    CHECK_TRUE(events[0].action == lane);
     CHECK_EQ(events[0].token, token);
     CHECK_TRUE(events[0].swiped);
     CHECK_TRUE(Empty(g.Sample()));
@@ -226,7 +229,7 @@ int main() {
   g.DeployPowerup();
   CHECK_TRUE(g.DrainGameplay().empty());
 
-  BeginCase("shake requires rapid strong reversals; ordinary movement and a bump do not deploy");
+  BeginCase("one sharp movement deploys, with cooldown and quiet rearming");
   ShakeDetector shake;
   uint64_t now = 1'000'000'000;
   auto acceleration = [&](float x, float y = 9.80665f, float z = 0) {
@@ -235,29 +238,29 @@ int main() {
   };
   CHECK_FALSE(acceleration(0));
   for (int i = 0; i < 30; ++i) CHECK_FALSE(acceleration(float(i % 3) - 1));
-  CHECK_FALSE(acceleration(25)); // one bump, then settles
-  for (int i = 0; i < 15; ++i) CHECK_FALSE(acceleration(0));
-  CHECK_FALSE(acceleration(25));
-  CHECK_FALSE(acceleration(-25));
-  CHECK_TRUE(acceleration(25));
-  for (int i = 0; i < 12; ++i) CHECK_FALSE(acceleration(i % 2 ? -25 : 25));
+  CHECK_TRUE(acceleration(20)); // a single deliberate flick
+  CHECK_FALSE(acceleration(-20)); // its rebound cannot deploy again
+  for (int i = 0; i < 25; ++i) CHECK_FALSE(acceleration(0));
+  CHECK_TRUE(acceleration(-20)); // settled and cooldown elapsed
+  shake.Reset();
+  CHECK_FALSE(acceleration(0, 0, -9.80665f));
+  CHECK_TRUE(acceleration(0, 0, 10)); // one sharp tilt, in another orientation
+  for (int i = 0; i < 25; ++i) CHECK_FALSE(acceleration(0, 0, -9.80665f));
+  CHECK_TRUE(acceleration(0, 20, -9.80665f)); // any axis can trigger it
   shake.Reset();
   CHECK_FALSE(acceleration(0));
-  for (int i = 0; i < 3; ++i) {
+  for (int i = 0; i < 100; ++i) CHECK_FALSE(acceleration(float(i) * .25f)); // slow motion
+  shake.Reset();
+  CHECK_FALSE(acceleration(0));
+  for (int i = 0; i < 30; ++i) {
     now += 500'000'000;
-    CHECK_FALSE(acceleration(i % 2 ? -25 : 25)); // slow movements cannot accumulate
+    CHECK_FALSE(acceleration(i % 2 ? -20 : 20)); // stale samples establish a new baseline
   }
   shake.Reset();
-  CHECK_FALSE(acceleration(0, 0, -9.80665f)); // same shake held in another orientation
-  CHECK_FALSE(acceleration(0, 0, 16));
-  CHECK_FALSE(acceleration(0, 0, -35));
-  CHECK_TRUE(acceleration(0, 0, 16));
-  shake.Reset();
   CHECK_FALSE(acceleration(0));
-  CHECK_FALSE(acceleration(25));
-  CHECK_FALSE(acceleration(-25));
   CHECK_FALSE(acceleration(std::numeric_limits<float>::quiet_NaN()));
-  CHECK_FALSE(acceleration(25)); // invalid sample discards partially recognized motion
+  CHECK_FALSE(acceleration(20)); // invalid sample discards the baseline
+  CHECK_FALSE(shake.Observe(now, 0, 0, 0)); // non-increasing timestamps reset too
 
   BeginCase("the former top-right pause position is ordinary gameplay; dragging off pause cancels");
   g = Ready();
