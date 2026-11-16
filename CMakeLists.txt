@@ -105,6 +105,7 @@ endif()
 # Sources
 set(RBBLITZ_SOURCES
     src/main.cpp
+    src/hooks/audio_stream.cpp
     src/diag/probe.cpp
     src/diag/probe_overlay.cpp
     src/diag/probe_points.cpp
@@ -910,6 +911,11 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_audio_stability_tests tests/audio_stability_tests.cpp)
     target_include_directories(rb_blitz_audio_stability_tests PRIVATE src "${REXSDK_DIR}/include")
     add_test(NAME audio_stability COMMAND rb_blitz_audio_stability_tests)
+    add_executable(rb_blitz_shared_memory_upload_hazards_tests
+        tests/shared_memory_upload_hazards_tests.cpp)
+    target_include_directories(rb_blitz_shared_memory_upload_hazards_tests PRIVATE
+        "${REXSDK_DIR}/include")
+    add_test(NAME shared_memory_upload_hazards COMMAND rb_blitz_shared_memory_upload_hazards_tests)
     add_executable(rb_blitz_preparation_assets_tests
         tests/preparation_assets_tests.cpp src/graphics/preparation_assets.cpp
         src/graphics/preparation_state.cpp

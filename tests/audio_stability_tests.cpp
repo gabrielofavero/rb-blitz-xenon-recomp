@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
 #include "hooks/menu_audio_policy.h"
+#include "hooks/audio_stream_policy.h"
 #include <rex/audio/frame_queue.h>
 #include <rex/graphics/preparation_budget.h>
 #include <array>
@@ -21,6 +22,36 @@ int main() {
   CHECK_TRUE(StreamBufferSeconds(false,1.2)==1.2);
   CHECK_TRUE(StreamBufferSeconds(true,-1)==-1);
   CHECK_TRUE(std::isnan(StreamBufferSeconds(true,std::numeric_limits<double>::quiet_NaN())));
+
+  BeginCase("stream refill catches skipped blocks in either direction around the ring");
+  using namespace rb_blitz::audio_stream;
+  CHECK_FALSE(MissedRefill(8, 0, 3 * kBlockBytes));
+  CHECK_FALSE(MissedRefill(8, 0, 4 * kBlockBytes)); // The retail check handles equality.
+  CHECK_TRUE(MissedRefill(8, 0, 5 * kBlockBytes));
+  CHECK_TRUE(MissedRefill(8, 3, 0)); // Cursor wrapped; the write cursor has not.
+  CHECK_FALSE(MissedRefill(8, 7, 0));
+  CHECK_FALSE(MissedRefill(0, 0, 0));
+  CHECK_FALSE(MissedRefill(7, 0, 0));
+  CHECK_FALSE(MissedRefill(8, 8, 0));
+  CHECK_FALSE(MissedRefill(8, 0, 8 * kBlockBytes));
+  CHECK_TRUE(NeedsDecodedAudio(8, 12, 3 * kBlockBytes, 44100));
+  CHECK_FALSE(NeedsDecodedAudio(8, 12, 0, 44100));
+  CHECK_FALSE(NeedsDecodedAudio(0, 0, 0, 44100));
+  CHECK_FALSE(NeedsDecodedAudio(8, 0, 0, 0));
+
+  BeginCase("audio read expansion requires the paired allocation and exact call site");
+  PendingRead pending;
+  CHECK_EQ(pending.Consume(kReadFileCaller, 0x40010000, kBlockBytes), kBlockBytes);
+  pending.buffer = 0x40010000;
+  CHECK_EQ(pending.Consume(0x1234, pending.buffer, kBlockBytes), kBlockBytes);
+  CHECK_EQ(pending.Consume(kReadFileCaller, 0x40010000, kBlockBytes), kReadBytes);
+  CHECK_EQ(pending.Consume(kReadFileCaller, 0x40010000, kBlockBytes), kBlockBytes);
+  pending.buffer = 0x40010000;
+  CHECK_EQ(pending.Consume(kReadFileCaller, 0x40020000, kBlockBytes), kBlockBytes);
+  CHECK_EQ(pending.buffer, 0u);
+  pending.buffer = 0x40010000;
+  CHECK_EQ(pending.Consume(kReadFileCaller, pending.buffer, 4096), 4096u);
+  CHECK_EQ(pending.buffer, 0u);
 
   BeginCase("preparation reserves CPU headroom and has no workers for empty input");
   using rex::graphics::PreparationWorkerCount;

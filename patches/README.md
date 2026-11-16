@@ -12,6 +12,24 @@ checkout.
 
 ## Patches
 
+`0069-moltenvk-nonblocking-pending-pipelines.patch` removes synchronous placeholder
+pipeline creation on MoltenVK. Pending draws were already skipped, but constructing
+the unused placeholder could still block the command processor for 600 ms. New
+recipes and unready entries retained after a cancelled preload now queue the real
+pipeline once and skip its draws until the existing completion handoff publishes
+its handle/layout. Startup and explicit synchronous compilation retain their
+barriers; other Vulkan drivers keep their existing placeholder route. This targets
+first-use hitches, not the sustained M1 rendering slowdown. See the
+[Mac performance investigation](../docs/engine/vulkan-performance.md#macos-m1-investigation-2026-11-15).
+
+`0068-vulkan-stall-attribution.patch` adds bounded, >=50 ms Vulkan spans for
+command replay, guest/paint submissions (including queue acquisition), swapchain
+image acquisition and submission/paint fence waits. It uses the existing shared
+trace and its budgets; it changes no rendering or scheduling policy. On M1 the
+samples locate Metal drawable acquisition inside paint submission, while the
+command processor waits for the same queue. This complements the existing
+D3D12 attribution spans.
+
 `0067-portable-vulkan-shader-storage.patch` rewinds append/update streams before
 reading shader and recipe headers, avoiding macOS's initial EOF position. It
 also makes the packed recipe layout explicit: a 60-byte description with render

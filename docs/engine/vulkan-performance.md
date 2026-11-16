@@ -167,3 +167,101 @@ effects through a song ending. An old explicit `readback_resolve` or
 
 The shader-cache preparation/native persistence work remains separate. This change
 does not implement P4–P9 or establish full gameplay pipeline coverage.
+
+
+## macOS M1 investigation (2026-11-15)
+
+The owner reported clean graphics with heavy gameplay slowdown after the Mac
+shader-cache fixes. The existing `out/macos/cache-portability-game.log` prepared
+409/409 supported recipes successfully, then recorded 761 guest frame intervals
+in 71.506 seconds of `active_song` (10.64 intervals/s). Seven additional real
+pipelines took 826 ms of summed worker time; seven synchronous placeholders took
+1,079 ms, including a 600 ms call. One first-use transfer helper took 223 ms.
+Those calls explain some individual hitches, not the sustained frame rate.
+
+Native probes used the Apple M1's seven-core GPU, 8 GiB shared RAM, the Release
+arm64 build and MoltenVK 1.4.1. The owner's saved Auto selected a 1152x720 guest
+base at 2x, rendering 2304x1440. Normal gameplay samples showed 92–97% GPU device
+utilization and about 3.8–4.1 GB of graphics memory in use through IORegistry.
+`sample` places much of the UI thread inside `CAMetalLayer nextDrawable`, reached
+from `vkQueueSubmit`, while the command processor waits for its queue or fences.
+These are CPU stacks and driver counters, not GPU timestamps or a per-pass GPU
+profile. They identify GPU/presentation backpressure in the current backend; they
+do not establish the M1's best achievable performance or justify a hardware upgrade.
+`pmset` reports Low Power Mode disabled for both battery and AC, with no recorded
+thermal or performance warning. This is a status check, not a sustained thermal profile.
+
+The One Week route was repeated with input injected through SDL events by a local
+ignored diagnostic harness. No host overlay was added. Logs and stack samples are
+under `out/macos/performance/`:
+
+| Capture | Change from baseline | Guest frame intervals | Active interval time | Intervals/s |
+| --- | --- | ---: | ---: | ---: |
+| `baseline-r3.log` | Warm caches, normal settings | 415 | 46.117 s | 9.00 |
+| `bounds.log` | Prototype union of draw scissors for attachment render areas | 254 | 28.221 s | 9.00 |
+| `async.log` | `MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0` | 170 | 18.517 s | 9.18 |
+| `scale1.log` | `--resolution_scale=1` | 792 | 70.238 s | 11.28 |
+| `native2x.log` | `--native_2x_msaa=true` | 255 | 27.307 s | 9.34 |
+
+These are differently sized windows including the input-enabled song intro;
+they are diagnostic comparisons, not a controlled benchmark or displayed-FPS
+measurement. Tracing was enabled for that table. A separate final warm run with
+`--shader_compile_trace=false --probe_framerate=true` still reports roughly ten
+completed guest draws/presents per second in song (9.02 draws/s over 56 windows
+in `trace-off.log`); the once-per-
+second counter avoids the detailed trace. IORegistry still reports 96% GPU use,
+and `trace-off-sample.txt` still shows drawable acquisition and queue waits.
+Disabling the detailed trace does not restore full speed. Lowering the draw scale also restores the
+normal guest base/aspect because the explicit override bypasses the saved screen
+plan. It helped modestly and did not approach full speed. Native two-sample
+attachments and asynchronous queue submission gave no substantial improvement.
+The render-area prototype was removed. An FSI run (`fsi.log`) visibly corrupted
+the title/offline screens, so it was stopped without a gameplay performance claim.
+No experimental resolution, MSAA, queue or render-target settings were saved.
+
+SDK patch 0068 retains the useful bounded Vulkan attribution spans. The Vulkan
+specification permits restricting attachment work through
+[render areas](https://docs.vulkan.org/refpages/latest/refpages/source/VkRenderPassBeginInfo.html),
+but that alone did not improve this workload in the prototype. A real GPU capture
+breaking down render/transfer/compute time remains necessary before selecting a
+broader backend optimization. The current measurements do not prove full-speed
+play is impossible on this Mac.
+
+SDK patch 0069 fixes the confirmed async-path stall: MoltenVK no longer creates a
+throwaway placeholder pipeline synchronously before queueing the real one.
+`IssueDraw` already skipped placeholders, so a null pending entry follows the
+same visible fallback. Its pending flag prevents repeated draws from compiling
+or enqueueing it again; real handles and layouts still publish through the
+existing submission-boundary completion queue. Entries left unready by cancelled
+preparation use this route too, rather than falling back to a synchronous driver
+call. Startup preparation and explicit synchronous mode retain their waits.
+A first-use draw may still be absent while its real pipeline compiles; shader
+translation, driver work on workers and first-use helper creation still have costs.
+This change targets hitches and does not claim to fix the sustained low frame rate.
+
+Validation uses the native game build, the existing pipeline completion/preload,
+preparation, native-cache, trace and gradient regressions, and isolated cold-cache
+runs that press the authored Skip control before entering One Week. Original
+player cache files are retained; diagnostic caches live under the ignored output
+directory. A full test-target build also exposed an unrelated existing macOS
+compile failure in `tests/path_policy_tests.cpp:122` (native narrow path compared
+with a wide literal); the focused targets build independently.
+
+
+The final cold-cache/Skip regression (`pending-cold-r2.log`) records 90 gameplay
+pipeline creations on six runtime worker threads, none on the GPU command thread,
+and zero placeholder creations. The earlier intermediate cold run had created
+103 retained, unready recipes synchronously on the GPU thread; this observation
+led to the second half of patch 0069. Both runs rendered the One Week highway,
+notes and city successfully. The final run covered 58.123 seconds of the
+input-enabled song phase. It still averaged 9.08 guest frame intervals/s; the
+worst gap was 327 ms. Those figures are not an FPS improvement claim and do not
+attribute every remaining long gap. Live preparing-state Skip reached the main
+menu and song successfully in both isolated runs.
+
+The final game target builds with `cmake --build --preset mac-arm64-release
+--target rb_blitz`. Fourteen focused non-UI tests pass, including the production
+fragment-gradient GPU regression at 1x/2x/4x. All 68 SDK patches replay with no
+drift. Build/test/audit outputs are `pending-final-build.log`, `final-tests.log`
+and `patch-check.log` in the performance output directory. Windows and Intel
+Mac regression runs are unavailable on this host.

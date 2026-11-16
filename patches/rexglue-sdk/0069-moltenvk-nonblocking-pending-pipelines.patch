@@ -1,0 +1,84 @@
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -1690,8 +1690,13 @@
+     }
+   }
+ 
++  // MoltenVK may spend hundreds of milliseconds compiling even a placeholder.
++  // IssueDraw already skips pending pipelines, so a pending entry needs no PSO.
++  const bool use_null_placeholder =
++      command_processor_.GetVulkanDevice()->properties().driverID == VK_DRIVER_ID_MOLTENVK;
+   bool use_async = REXCVAR_GET(async_shader_compilation) && !creation_threads_.empty() &&
+-                   pixel_shader && placeholder_pixel_shader_ != VK_NULL_HANDLE;
++                   pixel_shader &&
++                   (use_null_placeholder || placeholder_pixel_shader_ != VK_NULL_HANDLE);
+   uint8_t async_priority = pipeline_util::kPriorityLowest;
+   if (use_async) {
+     uint32_t bound_rts =
+@@ -1707,10 +1712,24 @@
+   auto it = pipelines_.find(description);
+   if (it != pipelines_.end()) {
+     VkPipeline found_pipeline = it->second.pipeline.load(std::memory_order_acquire);
+-    if (found_pipeline == VK_NULL_HANDLE) {
++    if (found_pipeline == VK_NULL_HANDLE &&
++        !(use_async && it->second.is_placeholder.load(std::memory_order_acquire))) {
+       PipelineCreationArguments creation_arguments;
+-      if (!TryGetPipelineCreationArgumentsForDescription(description, &*it, creation_arguments) ||
+-          !EnsurePipelineCreated(creation_arguments)) {
++      if (!TryGetPipelineCreationArgumentsForDescription(description, &*it, creation_arguments)) {
++        return false;
++      }
++      if (use_async && use_null_placeholder) {
++        // Entries left unready by a cancelled preload must follow the same
++        // demand-compilation path as entirely new entries, without a GPU-thread
++        // driver call. is_placeholder also prevents duplicate queued requests.
++        it->second.is_placeholder.store(true, std::memory_order_release);
++        creation_arguments.priority = async_priority;
++        {
++          std::lock_guard<std::mutex> lock(creation_request_lock_);
++          creation_queue_.push(creation_arguments);
++        }
++        creation_request_cond_.notify_one();
++      } else if (!EnsurePipelineCreated(creation_arguments)) {
+         return false;
+       }
+       found_pipeline = it->second.pipeline.load(std::memory_order_acquire);
+@@ -1723,7 +1742,8 @@
+     if (pipeline_handle_out) {
+       *pipeline_handle_out = &it->second;
+     }
+-    return pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr;
++    return (use_async && it->second.is_placeholder.load(std::memory_order_acquire)) ||
++           (pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr);
+   }
+ 
+   // Create the pipeline if not already existing.
+@@ -1736,7 +1756,16 @@
+   }
+ 
+   bool queued_async_creation = false;
+-  if (use_async) {
++  if (use_async && use_null_placeholder) {
++    pipeline.second.is_placeholder.store(true, std::memory_order_release);
++    creation_arguments_real.priority = async_priority;
++    {
++      std::lock_guard<std::mutex> lock(creation_request_lock_);
++      creation_queue_.push(creation_arguments_real);
++    }
++    creation_request_cond_.notify_one();
++    queued_async_creation = true;
++  } else if (use_async) {
+     creation_arguments_real.priority = async_priority;
+     PipelineCreationArguments creation_arguments_placeholder;
+     if (TryGetPipelineCreationArgumentsForDescription(description, &pipeline,
+@@ -1781,7 +1810,8 @@
+   if (pipeline_handle_out) {
+     *pipeline_handle_out = &pipeline.second;
+   }
+-  return pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr;
++  return queued_async_creation ||
++         (pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr);
+ }
+ 
+ bool VulkanPipelineCache::IsCreatingPipelines() const {

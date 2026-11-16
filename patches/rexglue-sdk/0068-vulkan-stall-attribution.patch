@@ -1,0 +1,87 @@
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -1536,8 +1536,11 @@
+       paint_context_.submission_tracker.GetCurrentSubmission();
+   uint64_t paint_submission_count = uint64_t(paint_context_.submissions.size());
+   if (current_paint_submission_index >= paint_submission_count) {
++    rex::graphics::compile_trace::Scope trace_wait(
++        rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.paint_fence_wait");
+     paint_context_.submission_tracker.AwaitSubmissionCompletion(current_paint_submission_index -
+                                                                 paint_submission_count);
++    trace_wait.Success();
+   }
+   const PaintContext::Submission& paint_submission =
+       *paint_context_.submissions[current_paint_submission_index % paint_submission_count];
+@@ -1570,9 +1573,11 @@
+ 
+   VkSemaphore acquire_semaphore = paint_submission.acquire_semaphore();
+   uint32_t swapchain_image_index;
+-  VkResult acquire_result =
+-      dfn.vkAcquireNextImageKHR(device, paint_context_.swapchain, UINT64_MAX, acquire_semaphore,
+-                                VK_NULL_HANDLE, &swapchain_image_index);
++  VkResult acquire_result = rex::graphics::compile_trace::Call(
++      rex::graphics::compile_trace::Event::kPresent, "vulkan.acquire_image", 0, [&] {
++        return dfn.vkAcquireNextImageKHR(device, paint_context_.swapchain, UINT64_MAX,
++                                       acquire_semaphore, VK_NULL_HANDLE, &swapchain_image_index);
++      });
+   switch (acquire_result) {
+     case VK_SUCCESS:
+     case VK_SUBOPTIMAL_KHR:
+@@ -2197,10 +2202,13 @@
+     }
+     VkResult submit_result;
+     {
++      rex::graphics::compile_trace::Scope trace_submit(
++          rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.paint_submit");
+       const VulkanDevice::Queue::Acquisition queue_acquisition =
+           vulkan_device_->AcquireQueue(vulkan_device_->queue_family_graphics_compute(), 0);
+       submit_result =
+           dfn.vkQueueSubmit(queue_acquisition.queue(), 1, &submit_info, fence_acqusition.fence());
++      trace_submit.Success(submit_result == VK_SUCCESS);
+       if (ui_fence_acquisition.fence() != VK_NULL_HANDLE && submit_result == VK_SUCCESS) {
+         if (dfn.vkQueueSubmit(queue_acquisition.queue(), 0, nullptr,
+                               ui_fence_acquisition.fence()) != VK_SUCCESS) {
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -5051,9 +5051,12 @@
+     // defined by vkQueueSubmit additionally include in the first
+     // synchronization scope all commands that occur earlier in submission
+     // order."
++    rex::graphics::compile_trace::Scope trace_wait(
++        rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.submission_fence_wait");
+     VkResult wait_result =
+         dfn.vkWaitForFences(device, uint32_t(await_submission - submission_completed_),
+                             submissions_in_flight_fences_.data(), VK_TRUE, UINT64_MAX);
++    trace_wait.Success(wait_result == VK_SUCCESS);
+     if (wait_result == VK_SUCCESS) {
+       fences_awaited += await_submission - submission_completed_;
+     } else {
+@@ -5469,7 +5472,12 @@
+       REXGPU_ERROR("Failed to begin a Vulkan command buffer");
+       return false;
+     }
+-    deferred_command_buffer_.Execute(command_buffer.buffer);
++    {
++      rex::graphics::compile_trace::Scope trace_replay(
++          rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.command_replay");
++      deferred_command_buffer_.Execute(command_buffer.buffer);
++      trace_replay.Success();
++    }
+     if (dfn.vkEndCommandBuffer(command_buffer.buffer) != VK_SUCCESS) {
+       REXGPU_ERROR("Failed to end a Vulkan command buffer");
+       return false;
+@@ -5499,9 +5507,12 @@
+     }
+     VkResult submit_result;
+     {
++      rex::graphics::compile_trace::Scope trace_submit(
++          rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.guest_submit");
+       ui::vulkan::VulkanDevice::Queue::Acquisition queue_acquisition =
+           vulkan_device->AcquireQueue(vulkan_device->queue_family_graphics_compute(), 0);
+       submit_result = dfn.vkQueueSubmit(queue_acquisition.queue(), 1, &submit_info, fence);
++      trace_submit.Success(submit_result == VK_SUCCESS);
+     }
+     if (submit_result != VK_SUCCESS) {
+       REXGPU_ERROR("Failed to submit a Vulkan command buffer");

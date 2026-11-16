@@ -35,8 +35,13 @@ shared native loading hooks now run on Mac, and SDK patch 0067 fixes append-stre
 reads and the Clang packed-record ABI. The owner confirms preparation completes;
 the log records 409/409 pipelines in 59,153 ms with no failures or missing entries
 (`out/macos/cache-portability-game.log`). Preparing-state Skip now follows the
-main-menu continuation and passes the authored menu-routing test; live Skip
-navigation remains unverified.
+main-menu continuation and passes the authored menu-routing test; two isolated
+cold-cache runs also exercised live Skip through the main menu into One Week.
+Gameplay remains slow on this M1 (roughly 9–11 completed guest draws per second
+in the diagnostic runs, also reproduced with detailed tracing off). SDK patches
+0068/0069 add Vulkan stall attribution and move first-use placeholder/unready
+pipeline work off the command thread; they do not fix the sustained slowdown.
+See the [Mac performance investigation](../engine/vulkan-performance.md#macos-m1-investigation-2026-11-15).
 This does not establish full-song graphics,
 audio/input stability, Intel Mac support or installer acceptance. See the
 [native Mac release evidence](../plans/in-progress/2026-11-09-linux-macos-release-plan.md).

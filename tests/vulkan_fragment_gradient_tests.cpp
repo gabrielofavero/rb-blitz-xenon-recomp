@@ -21,28 +21,72 @@ void Require(bool condition, const char* message) {
 }
 void Check(VkResult result) { Require(result == VK_SUCCESS, "Vulkan operation failed"); }
 
-std::vector<uint32_t> VertexShader() {
-  const char* source = R"(
-#version 450
-layout(location=0) out vec2 uv;
-void main() {
-  vec2 p[6] = vec2[](vec2(-.8,-.8),vec2(-.8,.8),vec2(.8,.8),
-                     vec2(-.8,-.8),vec2(.8,.8),vec2(.8,-.8));
-  gl_Position=vec4(p[gl_VertexIndex],0,1);
-  uv=p[gl_VertexIndex]*.5+.5;
-})";
-  glslang::TShader shader(EShLangVertex);
-  shader.setStrings(&source, 1);
-  shader.setEnvInput(glslang::EShSourceGlsl, EShLangVertex, glslang::EShClientVulkan, 450);
-  shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_0);
-  shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_0);
-  auto messages = EShMessages(EShMsgSpvRules | EShMsgVulkanRules);
-  Require(shader.parse(&glslang::DefaultTBuiltInResource, 450, false, messages), shader.getInfoLog());
-  glslang::TProgram program;
-  program.addShader(&shader);
-  Require(program.link(messages), program.getInfoLog());
+std::vector<uint32_t> VertexShader(bool workaround) {
+  rex::graphics::SpirvBuilder b(spv::Spv_1_0, 0, nullptr);
+  b.addCapability(spv::CapabilityShader);
+  b.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
+  auto glsl = b.import("GLSL.std.450");
+  if (workaround) b.setNoContractionFma(glsl);
+  auto scalar = b.makeFloatType(32), v2 = b.makeVectorType(scalar, 2);
+  auto v4 = b.makeVectorType(scalar, 4), boolean = b.makeBoolType();
+  auto index = b.createVariable(spv::NoPrecision, spv::StorageClassInput,
+      b.makeIntType(32), "index");
+  b.addDecoration(index, spv::DecorationBuiltIn, spv::BuiltInVertexIndex);
+  auto position = b.createVariable(spv::NoPrecision, spv::StorageClassOutput, v4, "position");
+  b.addDecoration(position, spv::DecorationBuiltIn, spv::BuiltInPosition);
+  auto uv = b.createVariable(spv::NoPrecision, spv::StorageClassOutput, v2, "uv");
+  b.addDecoration(uv, spv::DecorationLocation, 0);
+  auto precision = b.createVariable(spv::NoPrecision, spv::StorageClassOutput, scalar, "precision");
+  b.addDecoration(precision, spv::DecorationLocation, 1);
+  b.addDecoration(precision, spv::DecorationFlat);
+  auto constants_type = b.makeStructType({v4}, "Constants");
+  b.addDecoration(constants_type, spv::DecorationBlock);
+  b.addMemberDecoration(constants_type, 0, spv::DecorationOffset, 0);
+  auto constants = b.createVariable(spv::NoPrecision, spv::StorageClassPushConstant,
+      constants_type, "constants");
+  std::vector<spv::Id> points;
+  for (auto point : {std::array<float, 2>{-.8f,-.8f}, {-.8f,.8f}, {.8f,.8f},
+                     {-.8f,-.8f}, {.8f,.8f}, {.8f,-.8f}}) {
+    points.push_back(b.makeCompositeConstant(v2,
+        {b.makeFloatConstant(point[0]), b.makeFloatConstant(point[1])}));
+  }
+  auto array = b.makeArrayType(v2, b.makeUintConstant(6), 0);
+  auto positions = b.createVariable(spv::NoPrecision, spv::StorageClassPrivate,
+      array, "positions", b.makeCompositeConstant(array, points));
+  spv::Block* entry;
+  auto function = b.makeFunctionEntry(spv::NoPrecision, b.makeVoidType(), "main", {}, {}, &entry);
+  auto ep = b.addEntryPoint(spv::ExecutionModelVertex, function, "main");
+  for (auto interface : {index, position, uv, precision}) ep->addIdOperand(interface);
+  auto point = b.createLoad(b.createAccessChain(spv::StorageClassPrivate, positions,
+      std::vector<spv::Id>{b.createLoad(index, spv::NoPrecision)}), spv::NoPrecision);
+  b.createStore(b.createCompositeConstruct(v4, {b.createCompositeExtract(point, scalar, 0),
+      b.createCompositeExtract(point, scalar, 1), b.makeFloatConstant(0), b.makeFloatConstant(1)}),
+      position);
+  auto half = b.makeFloatConstant(.5f);
+  auto value = b.createNoContractionBinOp(spv::OpVectorTimesScalar, v2, point, half);
+  value = b.createNoContractionBinOp(spv::OpFAdd, v2, value,
+      b.makeCompositeConstant(v2, {half, half}));
+  b.createStore(value, uv);
+  auto inputs = b.createLoad(b.createAccessChain(spv::StorageClassPushConstant, constants,
+      std::vector<spv::Id>{b.makeIntConstant(0)}), spv::NoPrecision);
+  auto a = b.createCompositeExtract(inputs, scalar, 0);
+  auto c = b.createCompositeExtract(inputs, scalar, 1);
+  auto product = b.createNoContractionBinOp(spv::OpFMul, scalar, a, a);
+  auto difference = b.createNoContractionBinOp(spv::OpFSub, scalar, product, c);
+  auto bad = b.createBinOp(spv::OpFUnordNotEqual, boolean, difference, b.makeFloatConstant(0));
+  // Runtime -0 multiplied by +1 must retain its sign in the replacement Fma.
+  auto zero = b.createCompositeExtract(inputs, scalar, 2);
+  auto one = b.createCompositeExtract(inputs, scalar, 3);
+  auto zero_product = b.createNoContractionBinOp(spv::OpFMul, scalar, zero, one);
+  auto uint_type = b.makeUintType(32);
+  auto wrong_sign = b.createBinOp(spv::OpINotEqual, boolean,
+      b.createUnaryOp(spv::OpBitcast, uint_type, zero_product), b.makeUintConstant(0x80000000));
+  bad = b.createBinOp(spv::OpLogicalOr, boolean, bad, wrong_sign);
+  b.createStore(b.createTriOp(spv::OpSelect, scalar, bad,
+      b.makeFloatConstant(1), b.makeFloatConstant(0)), precision);
+  b.makeReturn(false); b.leaveFunction();
   std::vector<uint32_t> result;
-  glslang::GlslangToSpv(*program.getIntermediate(EShLangVertex), result);
+  b.dump(result);
   return result;
 }
 
@@ -57,6 +101,10 @@ std::vector<uint32_t> FragmentShader(bool workaround) {
   auto b2 = b.makeVectorType(boolean, 2);
   auto input = b.createVariable(spv::NoPrecision, spv::StorageClassInput, v2, "uv");
   auto output = b.createVariable(spv::NoPrecision, spv::StorageClassOutput, v4, "color");
+  auto vertex_precision = b.createVariable(spv::NoPrecision, spv::StorageClassInput,
+      scalar, "vertex_precision");
+  b.addDecoration(vertex_precision, spv::DecorationLocation, 1);
+  b.addDecoration(vertex_precision, spv::DecorationFlat);
   auto constants_type = b.makeStructType({v4}, "Constants");
   b.addDecoration(constants_type, spv::DecorationBlock);
   b.addMemberDecoration(constants_type, 0, spv::DecorationOffset, 0);
@@ -67,7 +115,7 @@ std::vector<uint32_t> FragmentShader(bool workaround) {
   spv::Block* entry;
   auto function = b.makeFunctionEntry(spv::NoPrecision, b.makeVoidType(), "main", {}, {}, &entry);
   auto ep = b.addEntryPoint(spv::ExecutionModelFragment, function, "main");
-  ep->addIdOperand(input); ep->addIdOperand(output);
+  ep->addIdOperand(input); ep->addIdOperand(output); ep->addIdOperand(vertex_precision);
   b.addExecutionMode(function, spv::ExecutionModeOriginUpperLeft);
   auto splat = [&](float value, unsigned count) {
     return b.makeCompositeConstant(count == 2 ? v2 : v4,
@@ -87,6 +135,9 @@ std::vector<uint32_t> FragmentShader(bool workaround) {
   };
   auto bad_x = bad_gradient(spv::OpDPdx), bad_y = bad_gradient(spv::OpDPdy);
   auto bad = b.createBinOp(spv::OpLogicalOr, boolean, bad_x, bad_y);
+  auto bad_vertex = b.createBinOp(spv::OpFUnordNotEqual, boolean,
+      b.createLoad(vertex_precision, spv::NoPrecision), b.makeFloatConstant(0));
+  bad = b.createBinOp(spv::OpLogicalOr, boolean, bad, bad_vertex);
   // Exercise separate rounding with runtime values: (1+2^-23)^2 rounds to
   // 1+2^-22. Subtracting that must give zero, rather than the fused 2^-46.
   auto values = b.createLoad(b.createAccessChain(spv::StorageClassPushConstant, constants,
@@ -190,7 +241,7 @@ struct Gpu {
     Check(vkBindBufferMemory(device, buffer, buffer_memory, 0));
     Check(vkMapMemory(device, buffer_memory, 0, VK_WHOLE_SIZE, 0, reinterpret_cast<void**>(&pixels)));
     VkPipelineLayoutCreateInfo l{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16};
+    VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16};
     l.pushConstantRangeCount = 1; l.pPushConstantRanges = &push;
     Check(vkCreatePipelineLayout(device, &l, nullptr, &layout));
     std::printf("Headless graphics device: %s\n", properties.deviceName);
@@ -265,7 +316,7 @@ struct Gpu {
     VkFramebuffer framebuffer;
     Check(vkCreateFramebuffer(device, &fb, nullptr, &framebuffer));
     VkShaderModule modules[2];
-    auto vs = VertexShader(), fs = FragmentShader(workaround);
+    auto vs = VertexShader(workaround), fs = FragmentShader(workaround);
     for (unsigned i = 0; i < 2; ++i) {
       const auto& code = i ? fs : vs;
       VkShaderModuleCreateInfo m{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -313,8 +364,8 @@ struct Gpu {
     render.clearValueCount = 1; render.pClearValues = &clear;
     vkCmdBeginRenderPass(cmd, &render, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    const float precision_inputs[] = {0x1.000002p0f, 0x1.000004p0f, 0, 0};
-    vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+    const float precision_inputs[] = {0x1.000002p0f, 0x1.000004p0f, -0.0f, 1.0f};
+    vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
         sizeof(precision_inputs), precision_inputs);
     vkCmdDraw(cmd, 6, 1, 0, 0);
     vkCmdEndRenderPass(cmd);
