@@ -12,6 +12,25 @@ checkout.
 
 ## Patches
 
+`0082-forward-unhandled-posix-faults.patch` forwards rejected native faults to
+the prior signal handler or the OS, preserving recoverable guest page faults.
+Previously a rejected fault returned to the same instruction indefinitely.
+
+`rexglue-sdk/thirdparty/moltenvk/0001-retain-presentation-drawable.patch` protects
+shared drawable ownership and retains each presentation's drawable before its
+callbacks capture it. Drawable acquisition remains outside the ownership lock;
+release happens outside it too, so callbacks can retire objects without deadlock.
+Completion callbacks finish accessing the image before releasing it. The iPhone
+watchdog reports from 2026-11-16 captured an invalid read in `objc_retain` during
+presentation, with both UI and GPU workers waiting on fences. This matches the
+drawable lifetime race reported in
+[MoltenVK issue 2791](https://github.com/KhronosGroup/MoltenVK/issues/2791).
+The exact device failure still requires confirmation with the rebuilt IPA.
+
+Both patch scripts recursively replay nested dependency patch sets, check their
+upstream pins, and audit their contents before accounting for a dirty gitlink.
+The upstream SDK and MoltenVK pins remain unchanged.
+
 `0079-chainable-application-initialization.patch` exposes the existing app
 initialization coordinator to subclasses. The separate iOS importer completes
 native setup before paths/settings/graphics initialize, then calls that same

@@ -19,15 +19,22 @@ def git(directory: Path, *arguments: str, check: bool = True) -> bytes:
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
-    sdk = ROOT / "rexglue-sdk"
-    pinned = git(ROOT, "ls-tree", "HEAD", "rexglue-sdk").decode().split()[2]
+def apply_patch_set(sdk: Path, patch_directory: Path, pinned: str, check: bool) -> None:
     if git(sdk, "rev-parse", "HEAD").decode().strip() != pinned:
-        raise SystemExit("SDK is not at the parent repository's pinned commit")
-    patches = sorted((ROOT / "patches/rexglue-sdk").glob("*.patch"))
+        raise SystemExit(f"{sdk} is not at the parent repository's pinned commit")
+    # Nested dependencies retain their upstream pins and their own exact replay
+    # audit. Only a successfully audited child may account for a dirty gitlink.
+    audited_children = set()
+    for entry in git(sdk, "ls-tree", "-rz", "HEAD").decode().split("\0"):
+        if not entry.startswith("160000 commit "):
+            continue
+        metadata, name = entry.split("\t", 1)
+        child_patches = patch_directory / name
+        if not any(child_patches.glob("*.patch")):
+            continue
+        apply_patch_set(sdk / name, child_patches, metadata.split()[2], check)
+        audited_children.add(name)
+    patches = sorted(patch_directory.glob("*.patch"))
     paths = set()
     for patch in patches:
         for line in patch.read_text().splitlines():
@@ -61,10 +68,11 @@ def main() -> None:
         # Audit dirt outside the patch set as well (the parent ignores SDK dirt).
         changed = git(sdk, "diff", "HEAD", "--name-only", "-z").decode().split("\0")
         changed += git(sdk, "ls-files", "--others", "--exclude-standard", "-z").decode().split("\0")
-        unexpected = [name for name in changed if name and Path(name) not in paths]
+        unexpected = [name for name in changed
+                      if name and Path(name) not in paths and name not in audited_children]
         if unexpected:
             raise SystemExit(f"SDK has edits outside the patch set: {unexpected}")
-        if args.check and replacements:
+        if check and replacements:
             raise SystemExit(f"SDK patches need applying ({len(replacements)} files)")
         for path, expected in replacements:
             destination = sdk / path
@@ -73,7 +81,15 @@ def main() -> None:
             else:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(expected)
-        print(f"SDK patches: {len(patches)} replayed, {len(replacements)} files updated")
+        print(f"{sdk.name} patches: {len(patches)} replayed, {len(replacements)} files updated")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args()
+    pinned = git(ROOT, "ls-tree", "HEAD", "rexglue-sdk").decode().split()[2]
+    apply_patch_set(ROOT / "rexglue-sdk", ROOT / "patches/rexglue-sdk", pinned, args.check)
 
 
 if __name__ == "__main__":

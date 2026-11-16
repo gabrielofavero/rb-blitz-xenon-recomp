@@ -98,6 +98,27 @@ function Get-DiffSections {
 $sdkPath = Join-Path $RepoRoot $SdkDir
 $patchPath = Join-Path $RepoRoot (Join-Path $PatchRoot $SdkDir)
 
+# Audit nested dependency patches with the same replay rules before accounting
+# for their dirty gitlinks in the enclosing SDK audit.
+$auditedChildren = @{}
+$children = Invoke-Git @('-C', $sdkPath, 'ls-tree', '-r', 'HEAD')
+foreach ($entry in $children.Output) {
+    if ("$entry" -notmatch '^160000 commit ([0-9a-f]{40})\t(.+)$') { continue }
+    $childPin = $matches[1]
+    $childName = $matches[2]
+    $childPatches = Join-Path $patchPath $childName
+    if (-not (Test-Path -LiteralPath $childPatches)) { continue }
+    if (@(Get-ChildItem -LiteralPath $childPatches -Filter '*.patch' -File).Count -eq 0) { continue }
+    $childHead = Invoke-Git @('-C', (Join-Path $sdkPath $childName), 'rev-parse', 'HEAD')
+    if ($childHead.ExitCode -ne 0 -or ($childHead.Output -join '').Trim() -ne $childPin) {
+        Write-Error "Nested dependency $childName differs from its pinned commit"
+        exit 1
+    }
+    & $PSCommandPath -RepoRoot $RepoRoot -SdkDir "$SdkDir/$childName" -PatchRoot $PatchRoot -Check:$Check
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $auditedChildren[$childName] = $true
+}
+
 if (-not (Test-Path -LiteralPath (Join-Path $sdkPath '.git'))) {
     Write-Error "SDK submodule is not initialised: $sdkPath (run: git submodule update --init --recursive $SdkDir)"
     exit 1
@@ -269,6 +290,10 @@ foreach ($raw in $status.Output) {
     if ($line.Trim().Length -eq 0) { continue }
 
     $entryPath = $line.Substring(3).Trim()
+    if ($auditedChildren.ContainsKey($entryPath)) {
+        $accounted += "$entryPath (nested patch audit)"
+        continue
+    }
     if ($line.StartsWith('??') -and -not $patchSections.ContainsKey($entryPath)) {
         $untracked += $entryPath; continue
     }

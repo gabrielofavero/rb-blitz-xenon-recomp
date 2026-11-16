@@ -768,11 +768,24 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_touch_gestures_tests PRIVATE src tests)
     add_test(NAME touch_gestures COMMAND rb_blitz_touch_gestures_tests)
     if(APPLE)
+        add_executable(rb_blitz_posix_exception_forwarding_tests tests/posix_exception_forwarding_tests.cpp)
+        target_include_directories(rb_blitz_posix_exception_forwarding_tests PRIVATE tests)
+        target_link_libraries(rb_blitz_posix_exception_forwarding_tests PRIVATE rex::core)
+        add_test(NAME posix_exception_forwarding COMMAND rb_blitz_posix_exception_forwarding_tests)
+        set_tests_properties(posix_exception_forwarding PROPERTIES TIMEOUT 20)
+
         add_executable(rb_blitz_metal_surface_tests tests/metal_surface_tests.mm)
         target_include_directories(rb_blitz_metal_surface_tests PRIVATE tests)
         target_link_libraries(rb_blitz_metal_surface_tests PRIVATE rex::runtime "-framework QuartzCore")
         add_test(NAME metal_surface COMMAND rb_blitz_metal_surface_tests)
         if(REXGLUE_USE_VULKAN)
+            add_executable(rb_blitz_moltenvk_drawable_lifetime_tests tests/moltenvk_drawable_lifetime_tests.mm)
+            target_include_directories(rb_blitz_moltenvk_drawable_lifetime_tests PRIVATE tests
+                "${REXSDK_DIR}/thirdparty/moltenvk/MoltenVK/MoltenVK/Utility")
+            target_link_libraries(rb_blitz_moltenvk_drawable_lifetime_tests PRIVATE "-framework Foundation")
+            add_test(NAME moltenvk_drawable_lifetime COMMAND rb_blitz_moltenvk_drawable_lifetime_tests)
+            set_tests_properties(moltenvk_drawable_lifetime PROPERTIES TIMEOUT 20)
+
             add_executable(rb_blitz_moltenvk_queue_policy_tests
                 tests/moltenvk_queue_policy_tests.cpp
                 "${REXSDK_DIR}/src/ui/vulkan/vulkan_moltenvk.cpp")
@@ -839,6 +852,8 @@ if(BUILD_TESTING)
         "${REXSDK_DIR}/thirdparty/inja/third_party/include")
     add_test(NAME messages_feed COMMAND rb_blitz_messages_feed_tests "${CMAKE_CURRENT_BINARY_DIR}")
     find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME sdk_nested_patches
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdk_nested_patch_tests.py")
     if(WIN32)
         # Set the inherited Windows error mode before a payload test starts, so even
         # faults during startup end in CTest's log instead of opening a desktop dialog.

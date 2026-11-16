@@ -1,0 +1,63 @@
+diff --git a/src/core/exception_handler_posix.cpp b/src/core/exception_handler_posix.cpp
+--- a/src/core/exception_handler_posix.cpp
++++ b/src/core/exception_handler_posix.cpp
+@@ -20,6 +20,7 @@
+ #if REX_PLATFORM_LINUX || REX_PLATFORM_MAC
+ 
+ #include <signal.h>
++#include <unistd.h>
+ 
+ #include <cstdint>
+ #include <cstring>
+@@ -48,6 +49,34 @@
+ // All custom handlers, left-aligned and null terminated.
+ // Executed in order.
+ std::pair<ExceptionHandler::Handler, void*> handlers_[kMaxHandlerCount];
++
++// A rejected native fault must reach the previous handler (or the OS). Returning
++// to the unchanged instruction otherwise faults forever, hiding the crash and
++// leaving other threads blocked on work the faulting thread can never finish.
++static void ForwardUnhandledSignal(int number, siginfo_t* info, void* context) {
++  const struct sigaction* previous = &original_sigill_handler_;
++  if (number == SIGSEGV) previous = &original_sigsegv_handler_;
++#if REX_PLATFORM_MAC
++  if (number == SIGBUS) previous = &original_sigbus_handler_;
++#endif
++  if (previous->sa_handler != SIG_DFL && previous->sa_handler != SIG_IGN) {
++    if (previous->sa_flags & SA_RESETHAND) {
++      struct sigaction action{};
++      action.sa_handler = SIG_DFL;
++      sigemptyset(&action.sa_mask);
++      sigaction(number, &action, nullptr);
++    }
++    if (previous->sa_flags & SA_SIGINFO) previous->sa_sigaction(number, info, context);
++    else previous->sa_handler(number);
++    return;
++  }
++  // Ignoring a synchronous memory/instruction fault cannot make it recoverable.
++  struct sigaction action{};
++  action.sa_handler = SIG_DFL;
++  sigemptyset(&action.sa_mask);
++  sigaction(number, &action, nullptr);
++  if (raise(number) != 0) _exit(128 + number);
++}
+ 
+ static void ExceptionHandlerCallback(int signal_number, siginfo_t* signal_info,
+                                      void* signal_context) {
+@@ -174,7 +203,7 @@
+ #if !REX_PLATFORM_MAC
+       // On non-Mac POSIX, SIGBUS is a bus error (misaligned access), not a
+       // protection fault — don't handle it here.
+-      assert_unhandled_case(signal_number);
++      ForwardUnhandledSignal(signal_number, signal_info, signal_context);
+       return;
+ #endif
+       [[fallthrough]];
+@@ -417,6 +446,7 @@
+       return;
+     }
+   }
++  ForwardUnhandledSignal(signal_number, signal_info, signal_context);
+ }
+ 
+ void ExceptionHandler::Install(Handler fn, void* data) {
