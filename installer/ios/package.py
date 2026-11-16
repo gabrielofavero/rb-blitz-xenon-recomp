@@ -384,10 +384,9 @@ def main() -> None:
     with (ROOT / "installer/config/pins.toml").open("rb") as stream:
         version = tomllib.load(stream)["installer"]["version"]
     version_tuple(version)
-    suffix = "signed" if args.sign_identity else "unsigned"
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    destination = output / f"RockBandBlitz-{version}-ios-arm64-{suffix}.ipa"
+    destination = output / f"RockBandBlitz-{version}-arm64-ios.ipa"
     if destination.exists():
         fail(f"archive the existing IPA before rebuilding: {destination}")
     libraries = collect_libraries(build, roots, args.minimum_ios)

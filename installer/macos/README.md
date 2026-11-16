@@ -43,7 +43,8 @@ Cocoa importer, and controller asset validator. MoltenVK's fetched dependencies
 stay under `out/macos/dependencies`.
 
 The app is staged at `out/macos/stage/<arch>/Rock Band Blitz.app`. Test installers
-are named `out/macos/packages/RockBandBlitz-<version>-mac-<arch>-development.pkg`.
+are named `out/macos/packages/RockBandBlitz-<version>-<architecture>-macos.pkg`,
+where `<architecture>` is `arm64` or `amd64` (for native `x86_64`).
 Every package has a sibling `.audit.json` containing its SHA-256 and the exact
 staged file hashes. Move an existing package aside before rebuilding the same
 name. Without `--development`, pending release acceptance prevents packaging.

@@ -39,5 +39,6 @@ python3 installer/linux/package.py --build-dir out/build/linux-amd64-release --s
 
 After the dependency inventory, asset stage, and ELF/package audit are complete,
 pass the pinned nFPM archive to `package.py --nfpm-archive <archive>` to produce
-the `.deb` and `.rpm`. Installed graphical launch, import, game boot, and a
+`RockBandBlitz-<version>-amd64-linux.deb` and
+`RockBandBlitz-<version>-amd64-linux.rpm`. Installed graphical launch, import, game boot, and a
 second launch still need native acceptance before either package is published.

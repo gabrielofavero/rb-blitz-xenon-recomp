@@ -422,8 +422,8 @@ def main() -> None:
         pkgbuild = run("xcrun", "--find", "pkgbuild")
         output = args.output.resolve()
         output.mkdir(parents=True, exist_ok=True)
-        suffix = "-development" if args.development else ""
-        package = output / f"RockBandBlitz-{version}-mac-{args.arch}{suffix}.pkg"
+        artifact_arch = "amd64" if args.arch == "x86_64" else args.arch
+        package = output / f"RockBandBlitz-{version}-{artifact_arch}-macos.pkg"
         if package.exists():
             fail(f"archive the existing package before rebuilding: {package}")
         candidate = temporary / package.name

@@ -26,7 +26,7 @@ builds the Mac tools separately, applies tracked SDK patches, cross-compiles the
 It never launches the game or installs to a device.
 
 The default output is
-`out/ios/packages/RockBandBlitz-0.1.0-ios-arm64-unsigned.ipa`, with a sibling
+`out/ios/packages/RockBandBlitz-0.1.0-arm64-ios.ipa`, with a sibling
 `.audit.json` inventory and `.entitlements.plist`. An unsigned IPA must be signed
 for the target device before installation. Keep its requested extended virtual
 addressing entitlement when signing: the guest reserves several GiB of virtual
@@ -45,8 +45,9 @@ sh scripts/ios/build.sh --source '/path/to/your/game-package' \
 
 The signer checks the profile's platform, expiration, application identifier,
 required entitlement and signing certificate. Signing credentials are supplied
-locally; the builder does not obtain or create them. Signed output uses the
-`-signed.ipa` suffix. Move an existing IPA aside before rebuilding the same name.
+locally; the builder does not obtain or create them. Signed and unsigned builds
+use the same filename; the audit sidecar records signing status. Move an existing
+IPA aside before rebuilding the same name.
 
 The minimum target is iOS/iPadOS 17.0; the experiment uses landscape fullscreen,
 Vulkan through MoltenVK, automatic device aspect and 1x render scale with

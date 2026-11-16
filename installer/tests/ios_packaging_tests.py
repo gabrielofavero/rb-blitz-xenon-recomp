@@ -181,7 +181,7 @@ class PackagingTests(unittest.TestCase):
             root = Path(name)
             with (ROOT / "installer/config/pins.toml").open("rb") as stream:
                 version = tomllib.load(stream)["installer"]["version"]
-            existing = root / f"RockBandBlitz-{version}-ios-arm64-unsigned.ipa"
+            existing = root / f"RockBandBlitz-{version}-arm64-ios.ipa"
             existing.write_bytes(b"previous artifact")
             arguments = ["package.py", "--build-dir", name, "--controller-validator", "unused",
                          "--output", name]

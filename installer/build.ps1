@@ -8,7 +8,7 @@ Builds a Windows x86-64 setup executable containing the game payload.
 Everything the game needs travels inside the setup executable: the payload snapshot
 in out\payload is compressed into it, so the installer needs no network access at
 all. The build is made from the working tree it is run in and is named after the version in
-config\pins.toml: RockBandBlitz-<version>-windows-amd64.exe.
+config\pins.toml: RockBandBlitz-<version>-amd64-windows.exe.
 
 The version is one value: [installer] version in config\pins.toml. Change it there
 and run this script again - the file name, the wizard's title (AppVerName) and the
@@ -319,7 +319,7 @@ Remove-Item -LiteralPath (Join-Path $generatedDir 'RockBandBlitzUpdater.exe') -E
 
 # The version in the file name is the one this build actually compiled in, read
 # back from the generated pins.iss above.
-$setupBaseName = "RockBandBlitz-$appVersion-windows-amd64"
+$setupBaseName = "RockBandBlitz-$appVersion-amd64-windows"
 
 Write-Step 'Compiling the setup executable'
 

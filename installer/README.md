@@ -13,11 +13,26 @@ the working tree it is run in ([the section below](#windows-package)).
 Everything in this directory is *packaging*. Nothing here is needed to build or
 run the game, and none of it is compiled into `rb_blitz.exe`.
 
+## Package filenames
+
+All platforms use `RockBandBlitz-<version>-<architecture>-<platform>.<extension>`.
+The version comes from `[installer].version` in `config/pins.toml`. Architecture
+is `amd64` or `arm64` (native macOS `x86_64` is named `amd64` in artifacts).
+Platform is `windows`, `macos`, `linux`, or `ios`. Development and signing status
+are recorded in the audit sidecar, which uses the same base filename.
+
+| Platform | Package filename |
+| --- | --- |
+| Windows | `RockBandBlitz-<version>-amd64-windows.exe` |
+| macOS | `RockBandBlitz-<version>-<architecture>-macos.pkg` |
+| Linux | `RockBandBlitz-<version>-amd64-linux.deb` and `.rpm` |
+| iOS | `RockBandBlitz-<version>-arm64-ios.ipa` |
+
 ## Windows package
 
 | File | What it is | Windows release asset |
 | --- | --- | --- |
-| `RockBandBlitz-<version>-windows-amd64.exe` | `setup.iss` with the payload inside it. Built from the checkout `build.ps1` runs in, named after the version in `config/pins.toml`. | Setup executable |
+| `RockBandBlitz-<version>-amd64-windows.exe` | `setup.iss` with the payload inside it. Built from the checkout `build.ps1` runs in, named after the version in `config/pins.toml`. | Setup executable |
 
 Why it is shaped that way:
 
@@ -27,7 +42,7 @@ Why it is shaped that way:
   snapshots its release build tree, and embeds it in the setup executable.
 
 ```powershell
-# from the repository root; the result is installer\out\dist\RockBandBlitz-<version>-windows-amd64.exe
+# from the repository root; the result is installer\out\dist\RockBandBlitz-<version>-amd64-windows.exe
 .\dev.ps1 build-installer
 ```
 
@@ -192,7 +207,7 @@ version and Ultimate release details agree.
 
 ## Building it
 
-Build the game and installer from this workspace with `.\dev.ps1 build-installer` (or dot source `dev.ps1` and run `build-installer`). The command builds the release game tree first, then runs `installer\build.ps1`. The result is `installer\out\dist\RockBandBlitz-<version>-windows-amd64.exe`.
+Build the game and installer from this workspace with `.\dev.ps1 build-installer` (or dot source `dev.ps1` and run `build-installer`). The command builds the release game tree first, then runs `installer\build.ps1`. The result is `installer\out\dist\RockBandBlitz-<version>-amd64-windows.exe`.
 
 The version is `[installer] version` in `installer\config\pins.toml`. It is also the game's compiled version, the setup file name, the wizard version and the installed payload version. The installer snapshots the current release build and checks the snapshot against the build tree before embedding it. It does not look up Git commits or download a different game build.
 
@@ -405,7 +420,7 @@ Setup's own switches.
 Example — unattended install from a package, with the pinned mod, no dialog at all:
 
 ```bat
-RockBandBlitz-0.1.0-windows-amd64.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
+RockBandBlitz-0.1.0-amd64-windows.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
   /CURRENTUSER /DIR="C:\Games\Rock Band Blitz" /LOG="%TEMP%\rbb-install.log" ^
   /GAMEMETHOD=package /GAMEPACKAGE="<the extracted package folder>" ^
   /DLCDIR="D:\Rock Band DLC" /SAVEDIR="D:\Rock Band Saves" ^

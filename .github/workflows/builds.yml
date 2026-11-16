@@ -84,9 +84,9 @@ jobs:
             throw ("the tag ($tag) and the pinned version ($version) disagree: bump " +
                    "[installer] version in installer\config\pins.toml, or tag $version")
           }
-          "name=RockBandBlitz-$version-windows-amd64" >> $env:GITHUB_OUTPUT
+          "name=RockBandBlitz-$version-amd64-windows" >> $env:GITHUB_OUTPUT
           "title=Rock Band Blitz $version" >> $env:GITHUB_OUTPUT
-          Write-Host "Installer asset: RockBandBlitz-$version-windows-amd64.exe"
+          Write-Host "Installer asset: RockBandBlitz-$version-amd64-windows.exe"
 
       - name: Build the installer
         run: |

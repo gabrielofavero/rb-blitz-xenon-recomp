@@ -126,7 +126,7 @@ def package(stage_root: Path, out: Path, nfpm: Path, version: str, config: dict)
                 lines.extend([f"  - src: {yaml_string(str(source))}",
                               f"    dst: {yaml_string('/' + entry['to'])}"])
             recipe.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            artifact = out / f"RockBandBlitz-{version}-linux-amd64.{kind}"
+            artifact = out / f"RockBandBlitz-{version}-{config['architecture']}-linux.{kind}"
             subprocess.run([str(nfpm), "pack", "--packager", kind, "--config", str(recipe),
                             "--target", str(artifact)], check=True)
             print(f"{artifact.name} sha256={sha256(artifact)}")
