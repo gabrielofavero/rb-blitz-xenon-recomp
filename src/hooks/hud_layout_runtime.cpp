@@ -276,7 +276,7 @@ void PlacePortraitHud(uint8_t* base, uint32_t transformable, const Anchor& ancho
   else if (anchor.name == "band_meter_hud") { x = -half_width + 115 * scale; z = 0; }
   else if (anchor.name == "letter_collect_hud") { x = 0; z = 110; }
   else if (anchor.name == "dynamic_leaderboard") { x = half_width * (2.f / 3.f); z = 0; }
-  else if (anchor.name == "timer.lbl") { x = 0; z = -184; }
+  else if (anchor.name == "timer.lbl") { x = 0; z = -202; }
   else if (anchor.name == "streak.lbl") { x = -half_width + 12; z = -80; }
   else if (anchor.name == "inputs.lbl") { x = -half_width + 12; z = -160; }
   else if (anchor.name == "pb.lbl") {

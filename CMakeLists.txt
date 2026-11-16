@@ -1062,6 +1062,10 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME native_pipeline_cache COMMAND rb_blitz_native_pipeline_cache_tests)
 
+    add_executable(rb_blitz_visible_region_tests tests/visible_region_tests.cpp)
+    target_include_directories(rb_blitz_visible_region_tests PRIVATE "${REXSDK_DIR}/include")
+    add_test(NAME visible_region COMMAND rb_blitz_visible_region_tests)
+
     if(WIN32 AND REXGLUE_USE_VULKAN)
         add_executable(rb_blitz_vulkan_texture_descriptor_cache_tests
             tests/vulkan_texture_descriptor_cache_tests.cpp)

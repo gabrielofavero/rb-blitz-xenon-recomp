@@ -380,13 +380,13 @@ int main() {
   const auto cropped_timer = Make(2, timer_shape, -123, kHud, cropped_meter);
   Resolve(cropped_timer);
   Close(Float(cropped_timer + 0x78), 0);
-  Close(Float(cropped_timer + 0x80), -184);
+  Close(Float(cropped_timer + 0x80), -202);
   Close(Float(cropped_timer + 72), .7);
   // Visibility/animation changes rebuild the world matrix without accumulating scale.
   for (int frame = 0; frame < 30; ++frame) {
     Resolve(cropped_timer);
     Close(Float(cropped_timer + 72), .7);
-    Close(Float(cropped_timer + 0x80), -184);
+    Close(Float(cropped_timer + 0x80), -202);
   }
   const Shape streak_shape{"streak.lbl", 0x8203A95C, 0x7C, 0};
   const auto cropped_streak = Make(7, streak_shape, -123, kHud, cropped_meter);

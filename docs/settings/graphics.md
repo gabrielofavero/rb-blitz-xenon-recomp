@@ -1319,7 +1319,7 @@ The score is centred at the top, with the star meter at the same height on the
 right; both use a 0.5 scale. The multiplier ladder
 and personal-best comparator share a 0.65 scale at centre left and centre right;
 collected letters sit above them. The song progress bar rotates 90 degrees
-clockwise near the bottom at a 0.8 scale, with the centred textual timer above.
+clockwise near the bottom at a 0.8 scale, with the centred textual timer just above the bar.
 The transient personal-best message is right-aligned above the comparator.
 The streak uses a 1.2 scale below the multiplier ladder. Temporary achievement toasts may overlap it. Label draw
 preparation handles clean guest transform
@@ -1343,3 +1343,22 @@ The crop and full HUD are validated on macOS Vulkan; screenshots and logs are
 under `out/macos/portrait-crop/`. iOS uses the same layout and declares portrait
 support, with the selected orientation supplied to SDL before window creation.
 Device portrait rotation and touch placement still need a device visual check.
+
+Portrait rendering cutoff (SDK patch 0085) now intersects the main-frame draw
+scissor with the visible crop, plus a 32-source-pixel filtering apron on each
+side. It keeps the existing viewport/projection and maps the crop into each
+horizontal EDRAM tile before applying the render multiplier. At 1280x720 with
+a 405-pixel crop, eligible draws retain x=[405,875): 470 pixels including the
+apron, instead of 1280. Main color/depth identity and viewport checks preserve
+auxiliary shadow/bloom/downsample passes, small helper clears, memory exports,
+visibility queries, and multiple-render-target draws. The GPU thread snapshots
+the opt-in policy at swap boundaries; leaving gameplay disables it.
+
+This reduces main-scene pixel shading, not geometry submission, full-size
+attachment allocation, or all resolve/presentation work. The main EDRAM pair
+is guarded by its measured register identity, so an unrecognized layout keeps
+full rendering. `--portrait_render_cutoff=false` restores the original full
+rendering for comparisons; `--draw_visible_region_probe=true` records bounded
+scissor-area counters. Those counters describe rasterization bounds, not actual
+fragment invocations or GPU timestamps. The comparison evidence and scale
+results are recorded in [the Vulkan performance record](../engine/vulkan-performance.md).

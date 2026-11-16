@@ -7,6 +7,10 @@
 #include "hooks/render_settings.h"
 #include "input/native_menu.h"
 
+REXCVAR_DEFINE_BOOL(portrait_render_cutoff, true, "Diagnostics",
+                    "Skip hidden main-frame pixels during portrait gameplay; disable for comparison")
+    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 namespace rb_blitz::ui {
 namespace {
 class GameplayPresentation final : public rex::ui::ImGuiDialog {
@@ -23,6 +27,20 @@ class GameplayPresentation final : public rex::ui::ImGuiDialog {
     auto* presenter = presenter_();
     if (!presenter) return;
     auto config = presenter->GetGuestOutputPaintConfigFromUIThread();
+    rex::cvar::SetFlagByName("draw_visible_region", "false");
+    if (crop && REXCVAR_GET(portrait_render_cutoff)) {
+      const auto height = settings::BootRenderHeight();
+      const auto width = settings::BootRenderWidth();
+      rex::cvar::SetFlagByName("draw_visible_source_width",
+                             std::to_string(width ? width : height * 16 / 9));
+      rex::cvar::SetFlagByName("draw_visible_source_height", std::to_string(height));
+      rex::cvar::SetFlagByName("draw_visible_width", std::to_string(settings::BootPortraitWidth()));
+      // Measured main-frame EDRAM pair. Dimensions and viewport/tile checks in
+      // the backend exclude the shadow, bloom, downsample and helper passes.
+      rex::cvar::SetFlagByName("draw_visible_color_info", "608");
+      rex::cvar::SetFlagByName("draw_visible_depth_info", "66864"); // 0x10530
+      rex::cvar::SetFlagByName("draw_visible_region", "true");
+    }
     if (crop) {
       safe_x_ = rex::cvar::GetFlagByName("present_safe_area_x");
       safe_y_ = rex::cvar::GetFlagByName("present_safe_area_y");
