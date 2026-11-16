@@ -59,6 +59,14 @@ proven fixed. About 12.5 GB system swap and competing processes were present;
 its game footprint was 2.2 GiB. Authored settings save/restart was not observed
 before the owner stopped further launches; the final UI-focused run was closed
 at the offline prompt. The delivery record names the remaining manual gate.
+The preserved full-song log has 167 guest intervals above 50 ms, compared with
+two in the earlier native-scale 16:9 run. Queue submission and presentation
+contain long CPU stalls; a sample shows Metal drawable acquisition inside the
+presenter's synchronous queue submission while guest submission waits for the
+same queue mutex. SDK patch 0073 defaults Mac to ordered asynchronous MoltenVK
+encoding and adds separate lock/driver spans. Headless correctness checks cover
+both queue modes; its gameplay pacing improvement is unverified. See the
+[preserved-run investigation](../engine/vulkan-performance.md#native-scale-frame-pacing-and-queue-serialization-2026-11-15).
 Heavy paging remains a practical limit: the earlier near-freeze coincided with
 about 14 GB of system swap and a 4.4 GB game peak footprint; this does not isolate
 one process as its cause. The vertex/fragment arithmetic GPU fixture passes on

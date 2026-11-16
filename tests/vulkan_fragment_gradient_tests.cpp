@@ -379,7 +379,25 @@ struct Gpu {
     Check(vkEndCommandBuffer(cmd));
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1; submit.pCommandBuffers = &cmd;
-    Check(vkQueueSubmit(queue, 1, &submit, {})); Check(vkQueueWaitIdle(queue));
+    // Match the presenter's render -> semaphore -> tracking-fence handoff.
+    // Run with synchronous and asynchronous MoltenVK submission to ensure
+    // queued Metal encoding finishes before the host reads or recycles data.
+    VkSemaphoreCreateInfo semaphore_info{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+    VkSemaphore rendered;
+    Check(vkCreateSemaphore(device, &semaphore_info, nullptr, &rendered));
+    VkFenceCreateInfo fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkFence completed;
+    Check(vkCreateFence(device, &fence_info, nullptr, &completed));
+    submit.signalSemaphoreCount = 1; submit.pSignalSemaphores = &rendered;
+    Check(vkQueueSubmit(queue, 1, &submit, {}));
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    VkSubmitInfo track{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    track.waitSemaphoreCount = 1; track.pWaitSemaphores = &rendered;
+    track.pWaitDstStageMask = &wait_stage;
+    Check(vkQueueSubmit(queue, 1, &track, completed));
+    Check(vkWaitForFences(device, 1, &completed, VK_TRUE, 10'000'000'000ull));
+    vkDestroyFence(device, completed, nullptr);
+    vkDestroySemaphore(device, rendered, nullptr);
     unsigned bad = 0, covered = 0;
     for (unsigned i = 0; i < kSize * kSize; ++i) {
       if (pixels[i * 4]) ++bad;

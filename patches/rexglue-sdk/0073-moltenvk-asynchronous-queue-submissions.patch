@@ -1,0 +1,85 @@
+diff --git a/src/ui/vulkan/vulkan_moltenvk.cpp b/src/ui/vulkan/vulkan_moltenvk.cpp
+--- a/src/ui/vulkan/vulkan_moltenvk.cpp
++++ b/src/ui/vulkan/vulkan_moltenvk.cpp
+@@ -187,6 +187,13 @@
+ }
+ 
+ void ConfigureMacOSVulkanEnvironment(const MacOSVulkanRuntimePaths& paths) {
++  // The presenter and guest renderer externally synchronize one Vulkan queue.
++  // MoltenVK's synchronous default can wait for a CAMetalDrawable while holding
++  // that queue's host mutex, stalling guest command processing as well. Dispatch
++  // Metal encoding on MoltenVK's ordered queue instead. Vulkan semaphore/fence
++  // ordering remains unchanged. Preserve explicit diagnostic overrides.
++  setenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", "0", 0);
++
+   if (!paths.sdk_root.empty()) {
+     const char* vulkan_sdk = std::getenv("VULKAN_SDK");
+     if (!vulkan_sdk || !vulkan_sdk[0]) {
+diff --git a/src/ui/vulkan/vulkan_instance.cpp b/src/ui/vulkan/vulkan_instance.cpp
+--- a/src/ui/vulkan/vulkan_instance.cpp
++++ b/src/ui/vulkan/vulkan_instance.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <cstdlib>
+ #include <sstream>
+ #include <string>
+ #include <unordered_map>
+@@ -48,6 +49,8 @@
+ #if REX_PLATFORM_MAC
+   const MacOSVulkanRuntimePaths macos_runtime_paths = DetectMacOSVulkanRuntimePaths();
+   ConfigureMacOSVulkanEnvironment(macos_runtime_paths);
++  REXLOG_INFO("MoltenVK: MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS={}",
++              std::getenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS"));
+ 
+   std::vector<std::filesystem::path> loader_candidates = macos_runtime_paths.loader_candidates;
+   loader_candidates.emplace_back(platform::lib_names::kVulkanLoader);
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -5532,9 +5532,17 @@
+     {
+       rex::graphics::compile_trace::Scope trace_submit(
+           rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.guest_submit");
+-      ui::vulkan::VulkanDevice::Queue::Acquisition queue_acquisition =
+-          vulkan_device->AcquireQueue(vulkan_device->queue_family_graphics_compute(), 0);
++      auto queue_acquisition = [&] {
++        rex::graphics::compile_trace::Scope trace_queue_wait(
++            rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.guest_queue_wait");
++        auto acquisition = vulkan_device->AcquireQueue(vulkan_device->queue_family_graphics_compute(), 0);
++        trace_queue_wait.Success();
++        return acquisition;
++      }();
++      rex::graphics::compile_trace::Scope trace_driver_submit(
++          rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.guest_driver_submit");
+       submit_result = dfn.vkQueueSubmit(queue_acquisition.queue(), 1, &submit_info, fence);
++      trace_driver_submit.Success(submit_result == VK_SUCCESS);
+       trace_submit.Success(submit_result == VK_SUCCESS);
+     }
+     if (submit_result != VK_SUCCESS) {
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -2204,10 +2204,17 @@
+     {
+       rex::graphics::compile_trace::Scope trace_submit(
+           rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.paint_submit");
+-      const VulkanDevice::Queue::Acquisition queue_acquisition =
+-          vulkan_device_->AcquireQueue(vulkan_device_->queue_family_graphics_compute(), 0);
+-      submit_result =
+-          dfn.vkQueueSubmit(queue_acquisition.queue(), 1, &submit_info, fence_acqusition.fence());
++      auto queue_acquisition = [&] {
++        rex::graphics::compile_trace::Scope trace_queue_wait(
++            rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.paint_queue_wait");
++        auto acquisition = vulkan_device_->AcquireQueue(vulkan_device_->queue_family_graphics_compute(), 0);
++        trace_queue_wait.Success();
++        return acquisition;
++      }();
++      submit_result = rex::graphics::compile_trace::Call(
++          rex::graphics::compile_trace::Event::kGpuOperation, "vulkan.paint_driver_submit", 0,
++          [&] { return dfn.vkQueueSubmit(queue_acquisition.queue(), 1, &submit_info,
++                                       fence_acqusition.fence()); });
+       trace_submit.Success(submit_result == VK_SUCCESS);
+       if (ui_fence_acquisition.fence() != VK_NULL_HANDLE && submit_result == VK_SUCCESS) {
+         if (dfn.vkQueueSubmit(queue_acquisition.queue(), 0, nullptr,

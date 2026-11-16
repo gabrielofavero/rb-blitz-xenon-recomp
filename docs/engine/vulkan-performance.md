@@ -383,3 +383,76 @@ unavailable; the same final binary **passed with device access** in 0.22 seconds
 (`vertex-gradient-escalated.log`). The SDK audit reports **70 patches replayed,
 zero files updated**. Windows, Intel Mac, other songs, installed payloads and
 physical-controller acceptance remain unverified for this follow-up.
+
+### Native-scale frame pacing and queue serialization (2026-11-15)
+
+The owner reports that the full 720p/16:10 song remained visibly uneven and that
+Vulkan on a base ROG Ally under Windows felt smoother. This is useful comparative
+feedback, not a matched hardware benchmark or proof of an M1 horsepower limit.
+The owner clarified that further launches risk losing the two retained sessions.
+No game/UI was launched during this follow-up. Fifteen existing evidence files,
+including the complete song and following startup, were copied into
+`out/macos/preserved-stutter-2026-11-15/`; `manifest.json` records original/copy
+paths, sizes and SHA-256 hashes. Both sources and copies were verified unchanged.
+
+The detailed trace confirms a pacing problem hidden by the average rate:
+
+| Existing capture | Guest frame intervals | Intervals above 50 ms | Worst guest interval |
+| --- | ---: | ---: | ---: |
+| `native1x-final.log`, original 16:9 guest with stretched presentation | 10,204 | 2 | 85.0 ms |
+| `aspect-bars-fixed.log`, correct 1152x720 guest/16:10 presentation | 9,067 | 167 | 2,017.2 ms |
+
+These totals come from the active-song trace summaries, not physical display
+scanout. The full-song raw clock reaches 172,043.8 ms with no backward windows.
+The second run includes substantial external memory/CPU pressure, so the table
+does not isolate an aspect-ratio performance regression.
+
+Of its 63 recorded slow GPU-operation CPU spans, 59 are guest queue submission;
+that category reaches 1,837.9 ms. Presenter submission reaches 1,782.5 ms and
+presenter fence waiting reaches 1,504.0 ms. These spans overlap; summing them would
+double-count the same stalls. Seven pipeline creations total 4.60 worker-seconds,
+including four concurrent 1.06-1.39 s calls near the end. Most earlier recurring
+stutters have no recorded pipeline compilation overlap. A warm shader catalogue
+therefore does not explain away the submit/presentation stalls.
+
+`aspect-bars-fixed-sample.txt` captures the main thread inside MoltenVK
+`vkQueueSubmit` -> render-pass encoding -> `CAMetalLayer nextDrawable`, while the
+guest command thread also waits to acquire the shared queue. SDK submission holds
+that queue's external-synchronization mutex across the driver call. MoltenVK's
+synchronous default performs Metal encoding on that calling thread, so a drawable
+wait can prevent the guest renderer from submitting unrelated work. The sample
+also contains guest-memory upload copies and fence waits: this is one confirmed
+blocking mechanism, not an attribution of every long frame.
+
+SDK patch **0073-moltenvk-asynchronous-queue-submissions.patch** defaults
+`MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS` to `0` before loading the Mac Vulkan runtime.
+Explicit environment choices remain authoritative. MoltenVK dispatches encoding
+onto its ordered queue, outside the application's queue-lock critical section.
+This follows [MoltenVK's documented submission modes](https://github.com/KhronosGroup/MoltenVK/blob/main/Docs/MoltenVK_Configuration_Parameters.md#mvk_config_synchronous_queue_submits).
+Queue ordering, Vulkan semaphores/fences, frame limits and resource retirement
+remain in place; no guest timing or graphics-quality setting changes.
+
+The earlier `async.log` experiment averaged 9.18 intervals/s before upload batching
+and arithmetic optimization, with no sustained improvement. That negative result
+is retained. The new default targets the now-observed CPU serialization path; it
+is not evidence that the current native-scale game becomes smooth.
+
+The patch logs the selected queue preference and retains the aggregate
+`vulkan.guest_submit`/`vulkan.paint_submit` spans while adding
+`vulkan.guest_queue_wait`, `vulkan.paint_queue_wait`,
+`vulkan.guest_driver_submit` and `vulkan.paint_driver_submit`. The next manual log
+can distinguish lock contention from work inside the driver. These are bounded
+CPU spans, not GPU timestamps.
+
+The native Release build passes. The loader-policy test covers the missing-value
+default, repeated configuration, and preservation of explicit `1`, `0` and empty
+values. The headless vertex/fragment-gradient fixture uses a render -> semaphore
+-> tracking-fence handoff before reading or recycling GPU data, at supported
+1x/2x/4x sample counts. Both synchronous and asynchronous modes pass with real
+Metal access. Gameplay performance after this patch remains unverified: the owner
+retains control of the next manual run, and no further game launch was performed.
+Build/test/audit records are in the preserved evidence directory. All eight
+focused CTest registrations pass: loader policy, both real-device queue modes,
+three trace modes, pipeline completion and upload hazards. The SDK audit replays
+72 patches with zero drift. The documentation checker reports zero errors and
+51 existing warnings.

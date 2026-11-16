@@ -12,6 +12,18 @@ checkout.
 
 ## Patches
 
+`0073-moltenvk-asynchronous-queue-submissions.patch` defaults Mac queue submission
+to MoltenVK's ordered asynchronous encoder, preserving explicit
+`MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS` overrides. The preserved 720p/16:10 song
+shows presenter drawable waits inside synchronous submission while the guest
+command thread waits for the same externally synchronized queue. The patch also
+separates queue-lock wait spans from driver-submit spans and logs the selected
+preference. Semaphore/fence ordering and resource retirement stay in place.
+The real-device vertex/gradient fixture now includes a render/semaphore/fence
+handoff and runs in both queue modes. Gameplay pacing after this change is
+unverified; the owner requested no further game launches. See the
+[preserved-run investigation](../docs/engine/vulkan-performance.md#native-scale-frame-pacing-and-queue-serialization-2026-11-15).
+
 `0072-explicit-native-video-mode.patch` preserves explicitly configured video
 width/height even when they equal the defaults. The kernel query and SDL path
 now consider the cvar source as well as its value. Previously explicit height

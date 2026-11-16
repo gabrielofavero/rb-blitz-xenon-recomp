@@ -1,5 +1,14 @@
 # Enhancement toggles
 
+`MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS` (MoltenVK environment variable,
+restart-scoped) now defaults to **0 on macOS** when absent. Metal command encoding
+and drawable acquisition run on MoltenVK's ordered dispatch queue, preventing
+those CPU waits from holding the app's shared Vulkan queue mutex. Explicit **1**
+retains the driver's synchronous caller-thread path. Both paths preserve Vulkan
+semaphore/fence ordering. SDK patch 0073 implements the default in the Mac loader;
+the [frame-pacing study](vulkan-performance.md#native-scale-frame-pacing-and-queue-serialization-2026-11-15)
+records the confirmed blocking path and the pending manual performance check.
+
 `probe_framerate` (Diagnostics, default **false**, restart-scoped) writes one
 bounded line per wall-clock second with completed guest main-loop draw counts,
 guest present-routine call counts, and the sample count and latest input/output

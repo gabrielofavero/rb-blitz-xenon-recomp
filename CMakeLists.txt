@@ -696,6 +696,14 @@ target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 if(BUILD_TESTING)
     if(APPLE)
         if(REXGLUE_USE_VULKAN)
+            add_executable(rb_blitz_moltenvk_queue_policy_tests
+                tests/moltenvk_queue_policy_tests.cpp
+                "${REXSDK_DIR}/src/ui/vulkan/vulkan_moltenvk.cpp")
+            target_include_directories(rb_blitz_moltenvk_queue_policy_tests PRIVATE
+                "${REXSDK_DIR}/src/ui/vulkan")
+            target_link_libraries(rb_blitz_moltenvk_queue_policy_tests PRIVATE rex::core)
+            add_test(NAME moltenvk_queue_policy COMMAND rb_blitz_moltenvk_queue_policy_tests)
+
             add_executable(rb_blitz_vulkan_fragment_gradient_tests
                 tests/vulkan_fragment_gradient_tests.cpp
                 "${REXSDK_DIR}/src/graphics/pipeline/shader/spirv_builder.cpp"
@@ -706,8 +714,11 @@ if(BUILD_TESTING)
                 rex::runtime Vulkan::Loader Vulkan::Headers glslang::SPIRV glslang)
             _rexglue_stage_macos_vulkan_runtime(rb_blitz_vulkan_fragment_gradient_tests)
             add_test(NAME vulkan_fragment_gradient COMMAND rb_blitz_vulkan_fragment_gradient_tests)
+            add_test(NAME vulkan_fragment_gradient_async COMMAND rb_blitz_vulkan_fragment_gradient_tests)
             set_tests_properties(vulkan_fragment_gradient PROPERTIES SKIP_RETURN_CODE 77
-                ENVIRONMENT "VK_ICD_FILENAMES=$<TARGET_FILE_DIR:rb_blitz_vulkan_fragment_gradient_tests>/vulkan/share/vulkan/icd.d/MoltenVK_icd.json")
+                ENVIRONMENT "VK_ICD_FILENAMES=$<TARGET_FILE_DIR:rb_blitz_vulkan_fragment_gradient_tests>/vulkan/share/vulkan/icd.d/MoltenVK_icd.json;MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1")
+            set_tests_properties(vulkan_fragment_gradient_async PROPERTIES SKIP_RETURN_CODE 77
+                ENVIRONMENT "VK_ICD_FILENAMES=$<TARGET_FILE_DIR:rb_blitz_vulkan_fragment_gradient_tests>/vulkan/share/vulkan/icd.d/MoltenVK_icd.json;MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0")
         endif()
         add_executable(rb_blitz_guest_memory_tests tests/guest_memory_tests.cpp)
         target_include_directories(rb_blitz_guest_memory_tests PRIVATE src)
