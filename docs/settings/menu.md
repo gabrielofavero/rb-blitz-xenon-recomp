@@ -9,6 +9,14 @@ preserved; repeated baseline/build/test prose and duplicated evidence lists were
 records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.md](contracts.md) and
 [status.md](status.md).
 
+2026-11-16 [tree]: the experimental iOS release hides desktop display mode,
+resolution, aspect, scale, VSync, overscan and renderer controls. Empty authored
+submenus are pruned after availability filtering. Graphics quality and input
+controls remain available. Auto resolution follows the device's proportions at
+1x render scale, with a 16-pixel-aligned guest width and exact device aspect for
+presentation. Service and menu host tests cover filtering; device
+UI layout is unverified. See [the iOS CLI guide](../../installer/ios/README.md).
+
 ## Current organization (2026-11-15)
 
 The root shows Controls, Audio & Video, Gameplay, Interface, Library & Store, and

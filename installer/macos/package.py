@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT / "installer/tools"))
 from native_assets import controller_entries
 
 CONFIG = ROOT / "installer/config/platform-packaging.json"
+INSTALL_SCRIPTS = ROOT / "installer/macos/scripts"
 MACHO_MAGIC = {b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe",
                b"\xbe\xba\xfe\xca", b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"}
 FORBIDDEN_EXTENSIONS = {".xex", ".ark", ".hdr", ".con", ".live", ".pirs", ".pdb", ".map", ".dsym",
@@ -328,9 +329,22 @@ def compare_expanded_pkg(package: Path, stage_root: Path, temporary: Path, confi
     metadata = ET.parse(expanded / "PackageInfo").getroot()
     if (metadata.get("identifier") != config["packageId"] or
             metadata.get("version") != version or
-            metadata.get("install-location") != config["installLocation"] or
-            metadata.find("scripts") is not None):
-        fail("expanded package identity/location/scripts differ from contract")
+            metadata.get("install-location") != config["installLocation"]):
+        fail("expanded package identity/location differ from contract")
+    scripts = metadata.find("scripts")
+    if (scripts is None or len(scripts) != 1 or scripts[0].tag != "postinstall" or
+            scripts[0].get("file") not in ("setup-user", "./setup-user") or
+            scripts[0].get("component-id") != config["bundleId"] or
+            scripts[0].get("timeout") != "3600"):
+        fail("expanded package setup script metadata differs from contract")
+    script_root = expanded / "Scripts"
+    script_files = {path.relative_to(script_root).as_posix(): path
+                    for path in script_root.rglob("*") if path.is_file()}
+    if (set(script_files) != {"setup-user"} or
+            script_files["setup-user"].is_symlink() or
+            sha256(script_files["setup-user"]) != sha256(INSTALL_SCRIPTS / "setup-user") or
+            script_files["setup-user"].stat().st_mode & 0o777 != 0o755):
+        fail("expanded package setup scripts differ from the reviewed source")
     payload = expanded / "Payload"
     if any(path.is_symlink() for path in expanded.rglob("*")):
         fail("expanded package contains a symlink")
@@ -390,6 +404,7 @@ def main() -> None:
         inventory = {path.relative_to(stage_root).as_posix(): sha256(path)
                      for path in sorted(app.rglob("*")) if path.is_file()}
         report = {"version": version, "architecture": args.arch,
+                  "setupScripts": {"setup-user": sha256(INSTALL_SCRIPTS / "setup-user")},
                   "development": args.development, "releaseAcceptancePending": config["releaseAuditPending"],
                   "files": inventory, "hostOS": run("sw_vers", "-productVersion"),
                   "toolchainInputs": inputs,
@@ -415,7 +430,7 @@ def main() -> None:
         run(pkgbuild, "--root", str(stage_root), "--install-location", config["installLocation"],
             "--component-plist", str(ROOT / config["componentProperties"]),
             "--identifier", config["packageId"], "--version", version,
-            "--ownership", "recommended", str(candidate))
+            "--scripts", str(INSTALL_SCRIPTS), "--ownership", "recommended", str(candidate))
         compare_expanded_pkg(candidate, stage_root, temporary, config, version)
         shutil.copyfile(candidate, package)
         report["packageSha256"] = sha256(package)

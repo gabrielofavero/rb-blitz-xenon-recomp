@@ -1,5 +1,10 @@
 # Finished plans
 
+The [iOS CLI installer plan](2026-11-16-ios-cli-installer-plan.md) was delivered
+on 2026-11-16: the device Release build, verified private unsigned IPA and focused
+host checks pass. Signing with real credentials and device gameplay remain
+unverified.
+
 Delivered plans, kept because they are still read: each one carries the measurements and the
 decisions behind code that is running today, and the per-prompt tables are how a reader finds out
 *why* something is the way it is.

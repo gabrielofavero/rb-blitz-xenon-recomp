@@ -710,13 +710,30 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
   ReleaseSettings release;
   release.platform = platform;
   release.version = version;
-  if (platform == HostPlatform::kLinux || platform == HostPlatform::kMacOS) {
+  if (platform == HostPlatform::kLinux || platform == HostPlatform::kMacOS ||
+      platform == HostPlatform::kIOS) {
     RowRule renderer;
     renderer.hidden = true;
     renderer.fixed_default = true;
     renderer.default_value = EnumValue("vulkan");
     renderer.choices = Choices({{"vulkan", "Vulkan"}});
     release.rules.emplace(SettingId::kRenderer, std::move(renderer));
+  }
+  if (platform == HostPlatform::kIOS) {
+    // Follow the device's aspect at 1x. The boot planner supplies the internal
+    // pixel size; copied desktop preferences cannot choose the device layout.
+    for (const auto& [id, value] : std::map<SettingId, Value>{
+             {SettingId::kDisplay, EnumValue("fullscreen")},
+             {SettingId::kResolution, ResolutionValue(0, 0)},
+             {SettingId::kAspectRatio, EnumValue("auto")},
+             {SettingId::kRenderScale, EnumValue("1x")},
+             {SettingId::kVsync, BoolValue(true)}}) {
+      RowRule rule;
+      rule.hidden = true;
+      rule.fixed_default = id != SettingId::kResolution;
+      rule.default_value = value;
+      release.rules.emplace(id, std::move(rule));
+    }
   }
   // A future release adds its reviewed rules here. Exact-version rules take precedence over
   // platform-wide ones; saved values keep their stable IDs and are reconciled by the service.
@@ -735,6 +752,8 @@ ReleaseSettings CurrentReleaseSettings() {
 #endif
 #if defined(_WIN32)
   return SettingsForRelease(HostPlatform::kWindows, version);
+#elif defined(RB_BLITZ_IOS)
+  return SettingsForRelease(HostPlatform::kIOS, version);
 #elif defined(__APPLE__)
   return SettingsForRelease(HostPlatform::kMacOS, version);
 #else

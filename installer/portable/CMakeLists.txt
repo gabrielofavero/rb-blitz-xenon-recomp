@@ -37,16 +37,21 @@ if(APPLE)
     # Also prove the actual Finder entry point compiles without building the SDK
     # or requiring a private game dump. This is the same launcher shipped in the app.
     enable_language(OBJCXX)
+    include(../macos/setup.cmake)
     add_executable(rb_blitz_macos_launcher ../macos/importer_main.mm)
     set_target_properties(rb_blitz_macos_launcher PROPERTIES
         OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
     target_link_libraries(rb_blitz_macos_launcher PRIVATE
-        rb_blitz_ultimate_import_core "-framework Cocoa")
+        rb_blitz_ultimate_import_core rb_blitz_macos_setup "-framework Cocoa")
 endif()
 
 include(CTest)
 if(BUILD_TESTING)
     if(APPLE)
+        add_executable(rb_blitz_macos_setup_tests ../tests/macos_setup_tests.cpp)
+        target_include_directories(rb_blitz_macos_setup_tests PRIVATE "${RBBLITZ_ROOT}/tests")
+        target_link_libraries(rb_blitz_macos_setup_tests PRIVATE rb_blitz_macos_setup)
+        add_test(NAME macos_setup COMMAND rb_blitz_macos_setup_tests)
         add_executable(rb_blitz_ultimate_cancel_tests ../tests/ultimate_cancel_tests.cpp)
         target_link_libraries(rb_blitz_ultimate_cancel_tests PRIVATE rb_blitz_ultimate_import_core)
         add_test(NAME ultimate_cancel COMMAND rb_blitz_ultimate_cancel_tests)

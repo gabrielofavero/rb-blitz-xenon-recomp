@@ -139,6 +139,7 @@ class NativePackagingTests(unittest.TestCase):
         self.audit()
         output = Path(self.temporary_stage.name) / "fixture.pkg"
         package.run("pkgbuild", "--root", str(self.stage), "--install-location", "/Applications",
+                    "--scripts", str(package.INSTALL_SCRIPTS),
                     "--component-plist", str(ROOT / self.config["componentProperties"]),
                     "--identifier", self.config["packageId"], "--version", "0.1.0", str(output))
         package.compare_expanded_pkg(output, self.stage, Path(self.temporary_stage.name), self.config, "0.1.0")
@@ -197,8 +198,33 @@ class NativePackagingTests(unittest.TestCase):
         (self.stage / "unrelated-file").write_text("not part of the app")
         output = Path(self.temporary_stage.name) / "extra.pkg"
         package.run("pkgbuild", "--root", str(self.stage), "--install-location", "/Applications",
+                    "--scripts", str(package.INSTALL_SCRIPTS),
+                    "--component-plist", str(ROOT / self.config["componentProperties"]),
                     "--identifier", self.config["packageId"], "--version", "0.1.0", str(output))
         with self.assertRaisesRegex(SystemExit, "outside the application"):
+            package.compare_expanded_pkg(output, self.stage, Path(self.temporary_stage.name), self.config, "0.1.0")
+
+    def test_expanded_package_requires_setup_script(self):
+        self.prepare()
+        output = Path(self.temporary_stage.name) / "no-setup.pkg"
+        package.run("pkgbuild", "--root", str(self.stage), "--install-location", "/Applications",
+                    "--identifier", self.config["packageId"], "--version", "0.1.0", str(output))
+        with self.assertRaisesRegex(SystemExit, "setup script metadata"):
+            package.compare_expanded_pkg(output, self.stage, Path(self.temporary_stage.name), self.config, "0.1.0")
+
+    def test_expanded_package_rejects_modified_setup_script(self):
+        self.prepare()
+        scripts = Path(self.temporary_stage.name) / "scripts"
+        scripts.mkdir()
+        script = scripts / "setup-user"
+        script.write_text("#!/bin/sh\nexit 0\n")
+        script.chmod(0o755)
+        output = Path(self.temporary_stage.name) / "wrong-setup.pkg"
+        package.run("pkgbuild", "--root", str(self.stage), "--install-location", "/Applications",
+                    "--scripts", str(scripts), "--identifier", self.config["packageId"],
+                    "--component-plist", str(ROOT / self.config["componentProperties"]),
+                    "--version", "0.1.0", str(output))
+        with self.assertRaisesRegex(SystemExit, "reviewed source"):
             package.compare_expanded_pkg(output, self.stage, Path(self.temporary_stage.name), self.config, "0.1.0")
 
 

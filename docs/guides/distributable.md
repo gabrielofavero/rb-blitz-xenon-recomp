@@ -12,6 +12,13 @@ Mach-O/package manifests and their negative checks are defined in the
 the Apple Silicon development app/package passed its native audit on 2026-11-16.
 Linux and Intel packages and macOS installed-player release acceptance remain pending.
 
+The experimental [iOS CLI](../../installer/ios/README.md) deliberately creates a
+**private** IPA containing the owner's verified game input. It is not a public
+distributable and must not be uploaded as a release artifact. Its packaging
+checks cover iPhoneOS arm64 images, framework dependencies, file hashes and ZIP
+integrity; they do not replace the public desktop payload's no-retail-data audit.
+Signing and device gameplay acceptance remain distinct gates.
+
 Windows payloads also carry `Collect Diagnostics.cmd` and
 `collect_diagnostics.ps1`. They create a local, bounded report ZIP from the
 selected diagnostics folder, with evidence digests and collection-time build
@@ -31,6 +38,9 @@ file hashes/modes. Resources use `Contents/Resources`, with code in
 `Contents/MacOS` and the SDK-supported Vulkan resource tree. Packaging inputs are
 pinned per architecture; `--development` makes a local unsigned installer while
 the installed-player release gate remains closed. No retail source is staged.
+The package's reviewed component script runs Xbox 360 import and then optional
+Ultimate setup as the active desktop user before Installer completes. Expanded
+package auditing also checks the exact script bytes and executable permissions.
 `installer/config/platform-packaging.json` now records the proposed Linux and
 macOS stage paths and the pinned nFPM archive; `python
 installer/tools/check_platform_packaging.py` validates their metadata and

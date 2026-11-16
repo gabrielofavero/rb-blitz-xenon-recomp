@@ -4,6 +4,8 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <shellapi.h>
+#elif defined(RB_BLITZ_IOS)
+#include <SDL3/SDL.h>
 #else
 #include <spawn.h>
 #include <sys/wait.h>
@@ -68,6 +70,9 @@ bool OpenBrowser(const std::string& diagnostic_path, std::string_view url) {
   }
   return reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", wide_url.c_str(),
                                                   nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+#elif defined(RB_BLITZ_IOS)
+  if (!diagnostic_path.empty()) return false;
+  return SDL_OpenURL(std::string(url).c_str());
 #else
   // The guest cannot supply this URL: UpdateAction passes the fixed Releases URL.
   // argv avoids shell interpretation of a diagnostic path or future URL bytes.

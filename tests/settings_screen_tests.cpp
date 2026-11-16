@@ -3743,6 +3743,28 @@ std::vector<std::string> PageRows(const std::string& panel_name) {
   return out;
 }
 
+void TestHiddenDisplayGroup() {
+  BeginCase("hidden device display rows remove the empty Display and Advanced routes");
+  MenuConfiguration configuration;
+  configuration.hidden = {"graphics.display", "graphics.aspect_ratio", "graphics.render_scale",
+                           "graphics.vsync", "graphics.renderer", "guest.overscan"};
+  ConfigureMenu(configuration);
+  CHECK_TRUE(PageRows("settings_av_panel") ==
+             std::vector<std::string>({"settings_audio", "settings_graphics_menu"}));
+  CHECK_TRUE(PageRows("settings_display_panel").empty());
+  CHECK_TRUE(PanelRowSymbols("settings_graphics_panel") ==
+             std::vector<std::string>({"settings_aa", "settings_filtering", "settings_dof"}));
+  CHECK_FALSE(PageRows("settings_controls_panel").empty());
+
+  // An emptied quality group must also disappear from Audio & Video. Retail audio remains.
+  configuration.hidden.insert("graphics.anti_aliasing");
+  configuration.hidden.insert("graphics.filtering");
+  configuration.hidden.insert("gameplay.disable_dof");
+  ConfigureMenu(configuration);
+  CHECK_TRUE(PageRows("settings_av_panel") == std::vector<std::string>({"settings_audio"}));
+  ConfigureMenu(MenuConfiguration{});
+}
+
 void TestGameplayMappingTreeAfterP4() {
   BeginCase("Gameplay Mapping: one action list, keyboard text, and controller confirmation");
   MenuConfiguration configuration;
@@ -4724,6 +4746,7 @@ int main(int argc, char** argv) {
   TestInvertedBoolRow();
   TestProviderRowRemoval();
   TestRendererRowVisibility();
+  TestHiddenDisplayGroup();
   TestAspectAndRenderScaleRows();
   TestScreenBindingRows();
   TestLiveBindingText();

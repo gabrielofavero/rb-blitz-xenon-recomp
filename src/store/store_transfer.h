@@ -9,7 +9,7 @@
 // `store_download.cpp` resolves every `Location` itself) and **nothing here touches the game**
 // (the download worker calls it on a host thread).
 //
-// Windows binds this interface to WinHTTP; Linux and macOS bind it to libcurl.
+// Windows binds this interface to WinHTTP; Linux/macOS use libcurl and iOS uses NSURLSession.
 
 #pragma once
 
@@ -17,9 +17,9 @@
 
 namespace rb_blitz::store {
 
-// The production binding for `TransferFn`: HTTPS only, redirects disabled, transparent content
-// decoding disabled (so the length the policy compares is the length that arrived), and the body
-// handed to the receiver in 64 KiB chunks.
+// The production binding for `TransferFn`: HTTPS only, redirects disabled, and the body handed to
+// the receiver in chunks of at most 64 KiB. Content decoding is disabled where supported; iOS
+// requests identity and rejects other encodings before body delivery so lengths remain truthful.
 TransferFn PlatformTransfer();
 
 }  // namespace rb_blitz::store

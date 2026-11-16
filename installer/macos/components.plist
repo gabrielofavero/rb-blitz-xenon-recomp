@@ -8,6 +8,8 @@
         <key>BundleIsVersionChecked</key><false/>
         <key>BundleHasStrictIdentifier</key><true/>
         <key>BundleOverwriteAction</key><string>upgrade</string>
+        <key>BundlePostInstallScriptPath</key><string>setup-user</string>
+        <key>BundleInstallScriptTimeout</key><integer>3600</integer>
     </dict>
 </array>
 </plist>

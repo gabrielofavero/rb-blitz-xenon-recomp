@@ -4,7 +4,8 @@ The native route builds a Finder application and an unsigned Installer package
 that places **Rock Band Blitz.app** in `/Applications`. The bundle ID and package
 receipt are `io.github.gabrielofavero.rbblitz`; the version comes from
 `installer/config/pins.toml`. Bundle relocation is disabled, and an update replaces
-the app at that destination. There are no privileged install scripts.
+the app at that destination. A reviewed component install script starts setup as
+the logged-in desktop user and waits for completion; it never imports as root.
 
 Release acceptance is still pending. `--development` produces a local test package
 after the same binary, resource, and expanded-payload audits. It does not assert
@@ -118,28 +119,47 @@ The audit checks every Mach-O file's CPU slice, minimum OS, signature, and actua
 for build-machine paths and rejects retail, foreign executable, shader-cache,
 and key file types/signatures. The staged portable graphics catalogue must match
 the full catalogue embedded in the game. After `pkgbuild`, the package is expanded:
-its identity, destination, absence of scripts, file list, hashes, and permissions
+its identity, destination, exact reviewed setup script, file list, hashes, and permissions
 must agree with the audited stage. An unsuccessful package is not copied to the
 output directory.
 
-## First launch and user data
+## Installation and user data
 
-Finder starts `rb_blitz_macos_launcher`. It offers a package or extracted-folder
-picker, shows the matched version, required space, and destination, then verifies
-and imports under `~/Library/Application Support/rb_blitz/game`. A verified import
-skips the picker on later launches. `rb_blitz_macos_launcher --repair` reimports;
-canceling or failing preserves a previous valid set. A guest Settings action for
-repair remains pending.
+The `.pkg` installs the app, then runs `rb_blitz_macos_launcher --setup-only`
+before Installer reports completion. Setup first asks for the user's **Xbox 360**
+package or extracted folder, shows the matched version, required space, and
+destination, then verifies and imports under
+`~/Library/Application Support/rb_blitz/game`. Setup then offers Ultimate. The
+package contains neither source; the build machine's private `game/` is never
+copied into the app or installer.
+
+Setup runs in the active desktop account with that user's home and privileges,
+even when a different administrator authorizes installation. A logged-in desktop
+and the running system volume are required. Canceling or failing setup causes
+Installer to report failure; committed data and the installed app remain available
+for retry. Rerunning the installer resumes setup. Setup does not start the game.
+The component allows up to one hour on macOS versions honoring script timeouts;
+macOS 13/14 retain Apple's ten-minute limit, so finish setup promptly there.
+
+Finder starts the same launcher. After completed installation, it verifies the
+import and launches directly, without repeating either choice. Updates reuse
+verified content and completed choices. If data/setup is missing (including a
+standalone `.app` copy), the launcher retains the same setup flow as recovery.
+`rb_blitz_macos_launcher --repair` reimports; canceling or failing preserves a
+previous valid set. A guest Settings action for repair remains pending.
 
 After base import, the app offers **Download 2.11**, **Choose ZIP or folder**, and
-**Play without Ultimate**. The download comes directly from the pinned official
+**Skip Ultimate**. The download comes directly from the pinned official
 Ultimate release and must match its size, SHA-256, and payload fingerprints.
 Local ZIPs/folders follow the Windows installer's warning policy for other
 revisions. Only the Xbox data is installed, under `game/ultimate`; the mod's
 `default.xex` is excluded. Canceling or failing preserves the base and any previous
 overlay. A completed or skipped choice is remembered outside the app; canceled
-or failed first-time setup is offered again on the next launch. The in-game
-**Game Version** setting selects **Rock Band Blitz Ultimate** after installation.
+or failed setup can be retried. Successful installation saves **Rock Band Blitz
+Ultimate** as the **Game Version**, with no success toast or instruction to change
+settings. The first game launch uses Ultimate. Later launches preserve any Game
+Version change the user makes. The old installer's completed Ultimate choice is
+migrated once to select Ultimate; an old skipped choice stays skipped.
 
 To reopen the Ultimate choice after skipping it, quit the game and run:
 

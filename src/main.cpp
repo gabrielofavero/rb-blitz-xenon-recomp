@@ -16,6 +16,8 @@
 #include <windows.h>
 
 #include <shellapi.h>
+#elif defined(RB_BLITZ_IOS)
+#include "platform/ios_runtime.h"
 #elif defined(__APPLE__)
 #include <crt_externs.h>
 #endif
@@ -96,6 +98,8 @@ std::vector<std::string> rb_blitz::platform::CommandLineArguments() {
   }
   LocalFree(wide);
   return out;
+#elif defined(RB_BLITZ_IOS)
+  return IOSCommandLineArguments();
 #elif defined(__APPLE__)
   std::vector<std::string> out;
   const int count = *_NSGetArgc();
@@ -147,6 +151,8 @@ struct RestartBootstrap {
 };
 
 // Runs before the SDK's platform entry point; see the comment above.
+#if !defined(RB_BLITZ_IOS)
 const RestartBootstrap g_restart_bootstrap;
+#endif
 
 }  // namespace

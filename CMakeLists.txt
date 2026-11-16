@@ -5,6 +5,18 @@
 cmake_minimum_required(VERSION 3.25)
 project(rb_blitz LANGUAGES CXX)
 
+set(RBBLITZ_IOS OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(RBBLITZ_IOS ON)
+    add_compile_definitions(RB_BLITZ_IOS=1)
+    set(RBBLITZ_HOST_BUILD_DIR "" CACHE PATH "Native Mac build containing build-time tools")
+    foreach(tool rb_blitz_fingerprint rb_blitz_toolchain)
+        if(NOT EXISTS "${RBBLITZ_HOST_BUILD_DIR}/${tool}")
+            message(FATAL_ERROR "Build native tools first with installer/ios/build.sh: missing ${tool}")
+        endif()
+    endforeach()
+endif()
+
 if(APPLE)
     enable_language(OBJCXX)
 endif()
@@ -83,6 +95,8 @@ endif()
     string(TOLOWER "${CMAKE_BUILD_TYPE}" rbblitz_build_type)
     if(WIN32)
         set(rbblitz_codegen_preset "win-amd64-${rbblitz_build_type}")
+    elseif(RBBLITZ_IOS)
+        set(rbblitz_codegen_preset "ios-arm64-${rbblitz_build_type}")
     elseif(APPLE)
         if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
             set(rbblitz_codegen_preset "mac-arm64-${rbblitz_build_type}")
@@ -317,12 +331,18 @@ else()
     # shared by controller art and store album art.
     list(APPEND RBBLITZ_SOURCES
         src/platform/image_decode_stb.cpp
-        src/store/store_curl.cpp
         src/store/store_search_service.cpp
         src/store/store_catalogue.cpp
         src/store/album_art_service.cpp
         src/messages/messages_runtime.cpp
         src/messages/messages_update_runtime.cpp)
+    if(RBBLITZ_IOS)
+        list(APPEND RBBLITZ_SOURCES src/store/store_apple.mm src/platform/ios_runtime.mm)
+        set_source_files_properties(src/store/store_apple.mm src/platform/ios_runtime.mm
+            PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    else()
+        list(APPEND RBBLITZ_SOURCES src/store/store_curl.cpp)
+    endif()
 endif()
 
 if(WIN32)
@@ -355,6 +375,7 @@ endif()
 
 rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)
 
+
 # The SDK stages runtime-loaded plugins only in the executable's POST_BUILD
 # step. A renderer-only rebuild need not relink the executable, leaving an old
 # DLL beside it. Make staging a dependency of every game build as well.
@@ -366,7 +387,13 @@ add_custom_target(rb_blitz_stage_gpu
     COMMENT "Staging the current GPU plugin beside rb_blitz"
     VERBATIM)
 add_dependencies(rb_blitz rb_blitz_stage_gpu)
-if(APPLE)
+if(RBBLITZ_IOS)
+    target_link_libraries(rb_blitz PRIVATE "-framework UIKit" "-framework Foundation" "-framework Metal")
+    set_target_properties(rb_blitz PROPERTIES
+        MACOSX_BUNDLE FALSE
+        OBJCXX_STANDARD 23 OBJCXX_STANDARD_REQUIRED ON
+        INSTALL_RPATH "@executable_path/Frameworks" BUILD_WITH_INSTALL_RPATH ON)
+elseif(APPLE)
     target_sources(rb_blitz PRIVATE src/settings/display_probe_mac.mm)
     target_link_libraries(rb_blitz PRIVATE "-framework AppKit" "-framework Metal")
     set_target_properties(rb_blitz PROPERTIES OBJCXX_STANDARD 23 OBJCXX_STANDARD_REQUIRED ON)
@@ -449,13 +476,13 @@ set_source_files_properties(src/graphics/development_coverage.cpp PROPERTIES COM
 target_link_libraries(rb_blitz PRIVATE xxhash)
 if(WIN32)
     target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32 runtimeobject dbghelp shell32 user32 gdi32)
-else()
+elseif(NOT RBBLITZ_IOS)
     # The native adapter uses curl_url() for strict HTTPS URL parsing.
     find_package(CURL 7.62 REQUIRED)
     target_link_libraries(rb_blitz PRIVATE CURL::libcurl ${CMAKE_DL_LIBS})
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR (APPLE AND NOT RBBLITZ_IOS))
     # Native desktop first-launch importers use the same SDK-free transaction
     # core as the Windows setup helper.
     add_library(rb_blitz_game_import_core STATIC
@@ -472,19 +499,20 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(rb_blitz_linux_launcher installer/linux/importer_main.cpp)
     target_link_libraries(rb_blitz_linux_launcher PRIVATE rb_blitz_game_import_core)
     set_target_properties(rb_blitz PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
-elseif(APPLE)
+elseif(APPLE AND NOT RBBLITZ_IOS)
     include(installer/portable/ultimate.cmake)
+    include(installer/macos/setup.cmake)
     add_executable(rb_blitz_macos_launcher installer/macos/importer_main.mm)
     set_target_properties(rb_blitz_macos_launcher PROPERTIES
         OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
-    target_link_libraries(rb_blitz_macos_launcher PRIVATE rb_blitz_ultimate_import_core "-framework Cocoa")
+    target_link_libraries(rb_blitz_macos_launcher PRIVATE rb_blitz_ultimate_import_core rb_blitz_macos_setup "-framework Cocoa")
     set_target_properties(rb_blitz PROPERTIES
         BUILD_RPATH "@executable_path;@loader_path"
         INSTALL_RPATH "@executable_path;@loader_path")
 endif()
 
 # Native packagers use the same parser and image validation as the game.
-if(APPLE)
+if(APPLE AND NOT RBBLITZ_IOS)
     add_executable(rb_blitz_controller_schemes
         tools/controller_schemes_main.cpp
         src/controller_schemes/schemes.cpp
@@ -493,6 +521,8 @@ if(APPLE)
         src/assets/texture_codec.cpp)
     target_include_directories(rb_blitz_controller_schemes PRIVATE
         src "${REXSDK_DIR}/thirdparty/stb")
+endif()
+if(APPLE)
     # MoltenVK fetches these pinned dependencies through CPM. Copy their notices
     # to stable build paths rather than teaching the packager about CPM caches.
     configure_file("${SPIRV-Cross_SOURCE_DIR}/LICENSE"
@@ -550,12 +580,18 @@ set(RBBLITZ_FINGERPRINT_FILE "${CMAKE_CURRENT_SOURCE_DIR}/config/game_fingerprin
 set(RBBLITZ_GAME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/game")
 set(RBBLITZ_EXPECTED_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/generated/fingerprint_expected.h")
 
+if(RBBLITZ_IOS)
+    add_executable(rb_blitz_fingerprint IMPORTED GLOBAL)
+    set_target_properties(rb_blitz_fingerprint PROPERTIES
+        IMPORTED_LOCATION "${RBBLITZ_HOST_BUILD_DIR}/rb_blitz_fingerprint")
+else()
 add_executable(rb_blitz_fingerprint
     tools/fingerprint_check.cpp
     src/util/sha256.cpp
     src/util/game_fingerprint.cpp
 )
 target_include_directories(rb_blitz_fingerprint PRIVATE src)
+endif()
 
 # The header is generated, so it is built rather than committed; it lands in
 # generated/, which is ignored apart from generated/rexglue.cmake.
@@ -621,6 +657,9 @@ option(RBBLITZ_ALLOW_OTHER_TOOLCHAIN
 if(WIN32)
     set(RBBLITZ_TOOLCHAIN_RECORD "toolchain.toml")
     set(RBBLITZ_TOOLCHAIN_TARGET "win-amd64")
+elseif(RBBLITZ_IOS)
+    set(RBBLITZ_TOOLCHAIN_RECORD "toolchain-ios-arm64.toml")
+    set(RBBLITZ_TOOLCHAIN_TARGET "ios-arm64")
 elseif(APPLE)
     if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
         set(RBBLITZ_TOOLCHAIN_RECORD "toolchain-mac-arm64.toml")
@@ -638,13 +677,22 @@ else()
     message(FATAL_ERROR "No toolchain record for ${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 set(RBBLITZ_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/config/${RBBLITZ_TOOLCHAIN_RECORD}")
-set(RBBLITZ_TOOLCHAIN_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/generated/toolchain_build.h")
+# Host tools and device builds share guest sources, but must retain their own stamps.
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(RBBLITZ_TOOLCHAIN_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/toolchain_build.h")
+target_include_directories(rb_blitz BEFORE PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
+if(RBBLITZ_IOS)
+    add_executable(rb_blitz_toolchain IMPORTED GLOBAL)
+    set_target_properties(rb_blitz_toolchain PROPERTIES
+        IMPORTED_LOCATION "${RBBLITZ_HOST_BUILD_DIR}/rb_blitz_toolchain")
+else()
 add_executable(rb_blitz_toolchain
     tools/toolchain_check.cpp
     src/util/toolchain_pin.cpp
 )
 target_include_directories(rb_blitz_toolchain PRIVATE src)
+endif()
 
 set(RBBLITZ_TOOLCHAIN_PROBE_ARGS
     --project-dir "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -696,6 +744,10 @@ target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 
 if(BUILD_TESTING)
     if(APPLE)
+        add_executable(rb_blitz_metal_surface_tests tests/metal_surface_tests.mm)
+        target_include_directories(rb_blitz_metal_surface_tests PRIVATE tests)
+        target_link_libraries(rb_blitz_metal_surface_tests PRIVATE rex::runtime "-framework QuartzCore")
+        add_test(NAME metal_surface COMMAND rb_blitz_metal_surface_tests)
         if(REXGLUE_USE_VULKAN)
             add_executable(rb_blitz_moltenvk_queue_policy_tests
                 tests/moltenvk_queue_policy_tests.cpp
@@ -1840,6 +1892,23 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_store_catalogue_status_tests PRIVATE src)
     add_test(NAME store_catalogue_status COMMAND rb_blitz_store_catalogue_status_tests)
+
+    if(APPLE AND NOT RBBLITZ_IOS)
+        # Exercise the iOS Foundation transport on macOS without a device or network.
+        add_executable(rb_blitz_store_apple_tests
+            tests/store_apple_tests.mm
+            src/store/store_apple.mm
+            src/store/rhythmverse_client.cpp
+        )
+        target_include_directories(rb_blitz_store_apple_tests PRIVATE src
+            "${REXSDK_DIR}/thirdparty/inja/third_party/include")
+        set_target_properties(rb_blitz_store_apple_tests PROPERTIES
+            OBJCXX_STANDARD 23 OBJCXX_STANDARD_REQUIRED ON)
+        target_compile_options(rb_blitz_store_apple_tests PRIVATE
+            "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
+        target_link_libraries(rb_blitz_store_apple_tests PRIVATE "-framework Foundation")
+        add_test(NAME store_apple COMMAND rb_blitz_store_apple_tests)
+    endif()
 endif()
 
 # Controller Settings used to be a second executable in this build tree (launcher plan D1). It

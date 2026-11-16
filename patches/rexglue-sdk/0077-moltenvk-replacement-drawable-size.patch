@@ -1,0 +1,75 @@
+diff --git a/src/ui/CMakeLists.txt b/src/ui/CMakeLists.txt
+--- a/src/ui/CMakeLists.txt
++++ b/src/ui/CMakeLists.txt
+@@ -71,6 +71,7 @@
+ elseif(APPLE)
+     set(REXUI_PLATFORM_SOURCES
+         surface_mac.cpp
++        surface_mac_metal.mm
+     )
+ else()
+     set(REXUI_PLATFORM_SOURCES
+@@ -162,7 +163,7 @@
+         ${WAYLAND_LIBRARIES}
+     )
+ elseif(APPLE)
+-    target_link_libraries(rexui PRIVATE "-framework CoreFoundation")
++    target_link_libraries(rexui PRIVATE "-framework CoreFoundation" "-framework QuartzCore")
+ endif()
+ 
+ if(WIN32)
+diff --git a/include/rex/ui/surface_mac.h b/include/rex/ui/surface_mac.h
+--- a/include/rex/ui/surface_mac.h
++++ b/include/rex/ui/surface_mac.h
+@@ -28,6 +28,8 @@
+ 
+   TypeIndex GetType() const override { return kTypeIndex_CAMetalLayer; }
+   const void* layer() const { return layer_; }
++  // Restore the replacement swapchain's extent after retirement of the old one.
++  bool RestoreDrawableSize(uint32_t width, uint32_t height) const;
+ 
+  protected:
+   bool GetSizeImpl(uint32_t& width_out, uint32_t& height_out) const override;
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -889,6 +889,14 @@
+   // From now on, in case of failure,
+   // paint_context_.DestroySwapchainAndVulkanSurface must be called before
+   // returning.
++
++#if REX_PLATFORM_MAC
++  // Same-size MoltenVK swapchain replacement may leave the layer at 1x1
++  // while completing the old swapchain's pending presentations. Both creation
++  // and retirement are finished here, so the new extent is authoritative.
++  static_cast<const CAMetalLayerSurface&>(new_surface).RestoreDrawableSize(
++      paint_context_.swapchain_extent.width, paint_context_.swapchain_extent.height);
++#endif
+ 
+   // Update the render pass to the new format.
+   if (paint_context_.swapchain_render_pass_format != new_swapchain_format) {
+diff --git a/src/ui/surface_mac_metal.mm b/src/ui/surface_mac_metal.mm
+new file mode 100644
+--- /dev/null
++++ b/src/ui/surface_mac_metal.mm
+@@ -0,0 +1,20 @@
++// Released under the BSD license - see LICENSE in the root.
++#include <rex/ui/surface_mac.h>
++#include <rex/logging.h>
++#import <QuartzCore/CAMetalLayer.h>
++
++namespace rex::ui {
++bool CAMetalLayerSurface::RestoreDrawableSize(uint32_t width, uint32_t height) const {
++  if (!layer_ || !width || !height) return false;
++  CAMetalLayer* metal_layer = (__bridge CAMetalLayer*)layer_;
++  const CGSize before = metal_layer.drawableSize;
++  if (before.width == width && before.height == height) return false;
++  // MoltenVK 1.4.1 can flush pending presentations by setting this to 1x1
++  // after initializing a replacement swapchain. Restore the committed extent
++  // only after the old swapchain has finished retiring.
++  metal_layer.drawableSize = CGSizeMake(width, height);
++  REXLOG_INFO("Metal surface: restored drawable {}x{} -> {}x{} after swapchain replacement",
++              double(before.width), double(before.height), width, height);
++  return true;
++}
++}  // namespace rex::ui

@@ -37,11 +37,11 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(RB_BLITZ_IOS)
 #include <crt_externs.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
-#else
+#elif !defined(RB_BLITZ_IOS)
 extern char** environ;
 #endif
 #endif
@@ -167,7 +167,7 @@ bool LinuxProcessStat(uint32_t pid, uint64_t* created, char* state) {
   }
   return *created != 0;
 }
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && !defined(RB_BLITZ_IOS)
 bool MacProcessStat(uint32_t pid, uint64_t* created, bool* zombie) {
   int name[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, static_cast<int>(pid)};
   kinfo_proc info{};
@@ -443,7 +443,7 @@ bool ProcessCreatedTicks(uint32_t pid, uint64_t* out) {
 #else
 #if defined(__linux__)
   return LinuxProcessStat(pid, out, nullptr);
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && !defined(RB_BLITZ_IOS)
   return MacProcessStat(pid, out, nullptr);
 #else
   (void)pid;
@@ -566,7 +566,7 @@ class WindowsParentWaiter : public ParentWaiter {
 };
 #endif
 
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(__linux__) || (defined(__APPLE__) && !defined(RB_BLITZ_IOS))
 class PosixChildLauncher : public ChildLauncher {
  public:
   bool Spawn(const std::filesystem::path& executable,
@@ -721,7 +721,7 @@ class PosixParentWaiter : public ParentWaiter {
 std::unique_ptr<ChildLauncher> CreateChildLauncher() {
 #if defined(_WIN32)
   return std::make_unique<WindowsChildLauncher>();
-#elif defined(__linux__) || defined(__APPLE__)
+#elif defined(__linux__) || (defined(__APPLE__) && !defined(RB_BLITZ_IOS))
   return std::make_unique<PosixChildLauncher>();
 #else
   return nullptr;
@@ -731,7 +731,7 @@ std::unique_ptr<ChildLauncher> CreateChildLauncher() {
 std::unique_ptr<ParentWaiter> CreateParentWaiter() {
 #if defined(_WIN32)
   return std::make_unique<WindowsParentWaiter>();
-#elif defined(__linux__) || defined(__APPLE__)
+#elif defined(__linux__) || (defined(__APPLE__) && !defined(RB_BLITZ_IOS))
   return std::make_unique<PosixParentWaiter>();
 #else
   return nullptr;

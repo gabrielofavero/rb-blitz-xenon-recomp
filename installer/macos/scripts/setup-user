@@ -1,0 +1,16 @@
+#!/bin/sh
+# Installer waits for setup, but all pickers, imports and settings run as the
+# logged-in desktop user, never as the privileged Installer service.
+set -eu
+if [ "${3:-/}" != / ]; then
+  echo 'Rock Band Blitz setup requires installation on the running system.' >&2
+  exit 1
+fi
+desktop_uid=$(/usr/bin/stat -f %u /dev/console)
+if [ "$desktop_uid" -eq 0 ]; then
+  echo 'Log into a desktop account, then run the Rock Band Blitz installer again.' >&2
+  exit 1
+fi
+desktop_user=$(/usr/bin/id -nu "$desktop_uid")
+exec /bin/launchctl asuser "$desktop_uid" /usr/bin/sudo -H -u "$desktop_user" -- \
+  '/Applications/Rock Band Blitz.app/Contents/MacOS/rb_blitz_macos_launcher' --setup-only

@@ -1038,6 +1038,16 @@ void TestAspectAndRenderScale() {
 }
 
 int main() {
+  BeginCase("iOS Auto uses the device's proportions at 1x");
+  auto mobile_limits = TitleRenderPath();
+  mobile_limits.scales = {1};
+  const auto iphone = PlanRenderSettings(mobile_limits, {2622, 1206}, "auto", 1);
+  CHECK_TRUE(iphone.supported);
+  CHECK_TRUE(IsSize(iphone.guest_size, 1568, 720));
+  CHECK_EQ(iphone.draw_scale, 1);
+  const auto ipad = PlanRenderSettings(mobile_limits, {2732, 2048}, "auto", 1);
+  CHECK_TRUE(ipad.supported);
+  CHECK_TRUE(IsSize(ipad.guest_size, 960, 720));
   TestAspectAndRenderScale();
   TestRenderPathSizes();
   TestSupportedResolutions();

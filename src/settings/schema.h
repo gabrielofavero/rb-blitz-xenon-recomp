@@ -41,7 +41,7 @@ struct SchemaRow {
 
 // A release may change which guest-authored rows and choices it exposes and which value a
 // missing or obsolete preference uses. Keep these rules separate from the stable storage IDs.
-enum class HostPlatform { kWindows, kLinux, kMacOS };
+enum class HostPlatform { kWindows, kLinux, kMacOS, kIOS };
 struct RowRule {
   bool hidden = false;
   bool fixed_default = false;  // an unsupported saved value cannot select another backend

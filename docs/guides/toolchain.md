@@ -7,6 +7,13 @@ the target record in `config/` is the machine-readable half, and
 [tools/toolchain_check.cpp](../../tools/toolchain_check.cpp), run by every build before
 codegen) is what compares a machine against it.
 
+The experimental iOS device target selects `config/toolchain-ios-arm64.toml`
+with the `ios-arm64-release` preset (iOS 17.0 minimum). Full Xcode supplies the
+iPhoneOS SDK. Native Mac `rexglue`, fingerprint and toolchain executables run
+build-time work; they are imported into the cross-build rather than compiled
+for and executed as iPhone binaries. See [the CLI guide](../../installer/ios/README.md).
+This bootstrap record is not device acceptance evidence.
+
 ## Why it is frozen
 
 Until 2026-09-28 the only record of "which toolchain does this build work with" was
@@ -140,7 +147,8 @@ Both are cached like any CMake option, so turn them back off by naming them
 1. `rb_blitz_toolchain_gate` runs before codegen, next to the game-data gate, on every
    build: `[N/M] Checking the toolchain against config/toolchain.toml`. A fatal
    deviation stops the build there, before anything is translated.
-2. `--emit-header` writes [generated/toolchain_build.h](../../generated) (not committed)
+2. `--emit-header` writes `out/build/<preset>/generated/toolchain_build.h` (not committed;
+   each host/device build keeps its own stamp)
    with `RBBLITZ_TOOLCHAIN_STAMP` — what *this* machine reported, so a binary built off
    the frozen set says so.
 3. [src/rb_blitz_app.h](../../src/rb_blitz_app.h) logs that stamp at boot, between the

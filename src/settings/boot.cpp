@@ -7,7 +7,7 @@
 #include "settings/boot.h"
 #include <SDL3/SDL.h>
 #include "settings/display_runtime.h"
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(RB_BLITZ_IOS)
 #include "settings/display_probe_mac.h"
 #endif
 
@@ -111,7 +111,13 @@ constexpr char kFallbackBackend[] = "vulkan";
 // fails inside presentation setup, where there is nothing left to fall back to.
 bool VulkanLoaderIsUsable() {
   rex::platform::DynamicLibrary loader;
+#if defined(RB_BLITZ_IOS)
+  const auto framework = rex::filesystem::GetExecutableFolder() /
+      "Frameworks" / "MoltenVK.framework" / "MoltenVK";
+  if (!loader.Load(framework)) return false;
+#else
   if (!loader.Load(rex::platform::lib_names::kVulkanLoader)) return false;
+#endif
   return loader.GetRawSymbol("vkGetInstanceProcAddr") != nullptr;
 }
 
@@ -137,7 +143,7 @@ void ProbeDisplay(CapabilityInputs& inputs) {
                                       static_cast<int32_t>(mode.dmPelsHeight)});
     }
   }
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && !defined(RB_BLITZ_IOS)
   ProbeMacDisplay(inputs);
 #else
   const SDL_DisplayID display = SDL_GetPrimaryDisplay();
@@ -240,7 +246,7 @@ DesktopMetrics ProbeDesktop(const int32_t monitor_index) {
   return desktop;
 }
 
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) && !defined(RB_BLITZ_IOS)
 DesktopMetrics ProbeDesktop(int32_t monitor_index) { return ProbeMacDesktop(monitor_index); }
 #else
 DesktopMetrics ProbeDesktop(int32_t) { return DesktopMetrics{}; }
@@ -412,7 +418,9 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   // The stable title modes are 960x540 and 1280x720. Larger output modes come
   // from the backend's integer draw scale, not a larger guest EDRAM allocation.
   render_limits_ = TitleRenderPath();
-#if defined(__APPLE__)
+#if defined(RB_BLITZ_IOS)
+  render_limits_.scales = {1};
+#elif defined(__APPLE__)
   LimitMacRenderPath(render_limits_);
 #endif
   cap_inputs.render_path = render_limits_;
@@ -492,12 +500,17 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     }
     // The legacy resolution value remains the internal, exact pixel plan used
     // by the renderer/recovery journal. Only the two new preferences choose it.
+#if defined(RB_BLITZ_IOS)
+    const auto aspect = service_->EffectiveValue(SettingId::kAspectRatio);
+    const auto scale_value = service_->EffectiveValue(SettingId::kRenderScale);
+#else
     const auto aspect = reconciler_.Reconcile(SettingId::kAspectRatio,
         *service_->DescriptorFor(SettingId::kAspectRatio),
         service_->RequestedValue(SettingId::kAspectRatio), capability_snapshot_).effective;
     const auto scale_request = service_->RequestedValue(SettingId::kRenderScale);
     const auto scale_value = reconciler_.Reconcile(SettingId::kRenderScale,
         *service_->DescriptorFor(SettingId::kRenderScale), scale_request, capability_snapshot_).effective;
+#endif
     int32_t scale = scale_value.text.size() == 2 ? scale_value.text[0] - '0' : 1;
     auto plan = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
                                   aspect.text, scale);
@@ -870,8 +883,16 @@ void SettingsBoot::ApplyWindowPolicy() {
   // be reported there or the correct frame is squashed into a 16:9-shaped region. The title itself
   // never reads the video mode (part 1 §4); the presenter and the startup window's own default size
   // are what do.
-  WriteWindowCvar("video_mode_width", std::to_string(render.width));
-  WriteWindowCvar("video_mode_height", std::to_string(render.height));
+  DisplayMode presentation = render;
+#if defined(RB_BLITZ_IOS)
+  // Guest widths are aligned to 16 pixels. Use the display's exact aspect
+  // for presentation so rounding that width cannot introduce tiny side bars.
+  if (capability_snapshot_.primary_display_size.width > 0 &&
+      capability_snapshot_.primary_display_size.height > 0)
+    presentation = capability_snapshot_.primary_display_size;
+#endif
+  WriteWindowCvar("video_mode_width", std::to_string(presentation.width));
+  WriteWindowCvar("video_mode_height", std::to_string(presentation.height));
 
   // The window itself: the same size, unless the decorated window would not fit the display's
   // usable area (a render size equal to the display mode never does). `window_width`/`window_height`
@@ -883,7 +904,7 @@ void SettingsBoot::ApplyWindowPolicy() {
   const DesktopMetrics desktop = ProbeDesktop(static_cast<int32_t>(monitor_index));
   const ClientFit fit = FitClientToDesktop(render, desktop);
   bool needs_logical_size = false;
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(RB_BLITZ_IOS)
   // Cocoa's video-mode fallback is interpreted as points, while render sizes
   // are backing pixels. Convert even when the physical client already fits.
   needs_logical_size = desktop.available && desktop.scale_percent != 100;

@@ -21,6 +21,12 @@ The corresponding Mac build and app/package staging entry point is
 [`installer/macos/README.md`](../../installer/macos/README.md). It uses the Mac
 presets and must run on native Mac hardware; no macOS release build is accepted yet.
 
+The experimental iPhone/iPad builder is `sh scripts/ios/build.sh --source
+'/path/to/package-or-folder'`. Full Xcode provides the iPhoneOS SDK; Mac tools
+and device binaries use separate build trees. The IPA embeds the owner's private
+assets and requires device signing. See [the iOS CLI guide](../../installer/ios/README.md)
+for signing options and the exact unverified device gates.
+
 The Mac direct builder is `sh scripts/macos/build.sh`, followed by
 `sh scripts/macos/run.sh`. Supply `--source '/path/to/package-or-folder'` on the
 first build to import and verify private `game/` input without navigating the

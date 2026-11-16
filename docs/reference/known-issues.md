@@ -21,15 +21,27 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
+**iOS bring-up (2026-11-16):** the [CLI IPA builder](../../installer/ios/README.md)
+embeds private supplied assets for an initial controller experiment. Device
+installation/startup, VM aliases, memory pressure, rendering, audio and gameplay
+remain unverified. Touch controls and an on-device asset picker are deferred.
+iOS cannot spawn a replacement process: restart-required settings need a manual
+close/reopen, and automatic load-failure relaunch is unavailable. The signing
+profile must permit extended virtual addressing. See the
+[iOS plan](../plans/finished/2026-11-16-ios-cli-installer-plan.md).
+
 **macOS installed-player acceptance (2026-11-16):** the Apple Silicon direct
 builder and development `.app`/`.pkg` now build and pass native package audits.
 The owner is testing installation and first launch. Unsigned first-open behavior,
 updates and clean minimum-OS support remain unverified; Intel has no accepted
 native package. See [the Mac installer guide](../../installer/macos/README.md)
 and [release plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md).
-The macOS pre-game importer now offers optional Ultimate download/local import;
-its headless download, extraction and cancellation checks pass. The owner still
-needs to verify that native choice and picker flow.
+The macOS package now runs Xbox 360 import followed by optional Ultimate setup
+inside installation, under the active desktop account. Successful Ultimate setup
+saves its boot target without a success prompt. Headless import, settings and
+package-script audits pass; the owner still needs to verify Installer's session
+handoff and native picker flow. macOS 13/14 retain Apple's ten-minute install-script
+limit; newer systems use the component's one-hour timeout.
 
 **macOS gameplay acceptance remains pending (2026-11-15):** the internal M1
 build boots and startup texture seams/outlines are corrected by SDK patch 0065.

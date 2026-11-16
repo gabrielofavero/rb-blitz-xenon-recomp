@@ -1,0 +1,400 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -167,6 +167,12 @@
+         set(REX_PLATFORM "linux-${REX_TARGET_PROCESSOR}")
+     endif()
+     add_compile_definitions(REX_PLATFORM_LINUX=1)
++elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    if(NOT REX_TARGET_PROCESSOR STREQUAL "arm64")
++        message(FATAL_ERROR "ReXGlue iOS supports arm64 devices only")
++    endif()
++    set(REX_PLATFORM "ios-arm64")
++    add_compile_definitions(REX_PLATFORM_MAC=1 REX_PLATFORM_IOS=1)
+ elseif(APPLE)
+     if(REX_TARGET_PROCESSOR MATCHES "AMD64|x86_64")
+         set(REX_PLATFORM "mac-amd64")
+@@ -259,8 +265,17 @@
+ add_subdirectory(src/graphics)
+ add_subdirectory(src/system)
+ add_subdirectory(src/kernel)
+-add_subdirectory(src/codegen)
+-add_subdirectory(src/rexglue)
++if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    set(REXGLUE_HOST_EXECUTABLE "" CACHE FILEPATH "Native host rexglue for cross-compilation")
++    if(NOT EXISTS "${REXGLUE_HOST_EXECUTABLE}")
++        message(FATAL_ERROR "iOS requires REXGLUE_HOST_EXECUTABLE pointing to a native Mac rexglue")
++    endif()
++    add_executable(rex::rexglue IMPORTED GLOBAL)
++    set_target_properties(rex::rexglue PROPERTIES IMPORTED_LOCATION "${REXGLUE_HOST_EXECUTABLE}")
++else()
++    add_subdirectory(src/codegen)
++    add_subdirectory(src/rexglue)
++endif()
+ 
+ # Add tests subdirectory if tests are enabled
+ if(REXGLUE_BUILD_TESTS)
+diff --git a/cmake/rexglue_helpers.cmake b/cmake/rexglue_helpers.cmake
+--- a/cmake/rexglue_helpers.cmake
++++ b/cmake/rexglue_helpers.cmake
+@@ -9,6 +9,15 @@
+ include_guard(GLOBAL)
+ 
+ function(_rexglue_stage_macos_vulkan_runtime target_name)
++    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
++        add_custom_command(TARGET ${target_name} POST_BUILD
++            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target_name}>/Frameworks"
++            COMMAND ${CMAKE_COMMAND} -E copy_if_different
++                "$<TARGET_FILE:MoltenVK::MoltenVK>"
++                "$<TARGET_FILE_DIR:${target_name}>/Frameworks/libMoltenVK.dylib"
++            VERBATIM)
++        return()
++    endif()
+     if(TARGET Vulkan::Loader AND TARGET MoltenVK::MoltenVK)
+         set(_rexglue_vulkan_loader Vulkan::Loader)
+         set(_rexglue_moltenvk MoltenVK::MoltenVK)
+@@ -94,7 +103,7 @@
+         # libTracyClient, ...) next to the executable. Pairs with the runtime
+         # dylib staging below so the app is self-contained.
+         set_target_properties(${target_name} PROPERTIES
+-            INSTALL_RPATH "@executable_path"
++            INSTALL_RPATH "@executable_path;@executable_path/Frameworks"
+             BUILD_WITH_INSTALL_RPATH ON
+         )
+     endif()
+@@ -115,12 +124,18 @@
+         # (paired with the @executable_path rpath above). Everything else the
+         # runtime links (fmt, spdlog, SDL3, ...) is static. Target names
+         # differ between an in-tree build and an installed SDK import.
++        set(_rexglue_runtime_destination "$<TARGET_FILE_DIR:${target_name}>")
++        if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
++            set(_rexglue_runtime_destination "$<TARGET_FILE_DIR:${target_name}>/Frameworks")
++            add_custom_command(TARGET ${target_name} POST_BUILD
++                COMMAND ${CMAKE_COMMAND} -E make_directory "${_rexglue_runtime_destination}" VERBATIM)
++        endif()
+         foreach(_rexglue_runtime_lib rex::runtime rexruntime rex::TracyClient TracyClient)
+             if(TARGET ${_rexglue_runtime_lib})
+                 add_custom_command(TARGET ${target_name} POST_BUILD
+                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                         $<TARGET_FILE:${_rexglue_runtime_lib}>
+-                        $<TARGET_FILE_DIR:${target_name}>
++                        "${_rexglue_runtime_destination}"
+                     VERBATIM
+                 )
+             endif()
+@@ -157,10 +172,14 @@
+                 "rexglue_configure_target: unknown GPU plugin '${_plugin}' "
+                 "(no target rexgpu-${_plugin} or rex::gpu-${_plugin})")
+         endif()
++        set(_rexglue_plugin_destination "$<TARGET_FILE_DIR:${target_name}>")
++        if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
++            set(_rexglue_plugin_destination "$<TARGET_FILE_DIR:${target_name}>/Frameworks")
++        endif()
+         add_custom_command(TARGET ${target_name} POST_BUILD
+             COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                 $<TARGET_FILE:${_plugin_target}>
+-                $<TARGET_FILE_DIR:${target_name}>
++                "${_rexglue_plugin_destination}"
+             VERBATIM
+         )
+         unset(_plugin_target)
+diff --git a/include/rex/platform.h b/include/rex/platform.h
+--- a/include/rex/platform.h
++++ b/include/rex/platform.h
+@@ -28,7 +28,10 @@
+ #include <TargetConditionals.h>
+ #endif
+ 
+-#if defined(TARGET_OS_MAC) && TARGET_OS_MAC
++#if defined(TARGET_OS_IOS) && TARGET_OS_IOS
++#define REX_PLATFORM_IOS 1
++#define REX_PLATFORM_MAC 1
++#elif defined(TARGET_OS_MAC) && TARGET_OS_MAC
+ #define REX_PLATFORM_MAC 1
+ #elif defined(WIN32) || defined(_WIN32)
+ #define REX_PLATFORM_WIN32 1
+@@ -44,6 +47,9 @@
+ 
+ // Ensure all platform macros are always defined (0 when inactive)
+ // so they can be used in static_assert and regular expressions.
++#ifndef REX_PLATFORM_IOS
++#define REX_PLATFORM_IOS 0
++#endif
+ #ifndef REX_PLATFORM_MAC
+ #define REX_PLATFORM_MAC 0
+ #endif
+diff --git a/src/core/memory_posix.cpp b/src/core/memory_posix.cpp
+--- a/src/core/memory_posix.cpp
++++ b/src/core/memory_posix.cpp
+@@ -21,7 +21,9 @@
+ 
+ #if REX_PLATFORM_MAC
+ #include <mach/mach.h>
++#if !REX_PLATFORM_IOS
+ #include <mach/mach_vm.h>
++#endif
+ #include <mach/vm_region.h>
+ #endif  // REX_PLATFORM_MAC
+ 
+@@ -127,9 +129,18 @@
+     case PageAccess::kReadWrite:
+       return PROT_READ | PROT_WRITE;
+     case PageAccess::kExecuteReadOnly:
++#if REX_PLATFORM_IOS
++      // Guest instructions are data; generated native functions are in signed text.
++      return PROT_READ;
++#else
+       return PROT_READ | PROT_EXEC;
++#endif
+     case PageAccess::kExecuteReadWrite:
++#if REX_PLATFORM_IOS
++      return PROT_READ | PROT_WRITE;
++#else
+       return PROT_READ | PROT_WRITE | PROT_EXEC;
++#endif
+     default:
+       assert_unhandled_case(access);
+       return PROT_NONE;
+@@ -278,9 +289,11 @@
+ 
+   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+ #if REX_PLATFORM_MAC
++#if !REX_PLATFORM_IOS
+   if (access == PageAccess::kExecuteReadWrite || access == PageAccess::kExecuteReadOnly) {
+     flags |= MAP_JIT;
+   }
++#endif
+   if (base_address) {
+     flags |= MAP_FIXED;
+   }
+@@ -375,24 +388,36 @@
+ 
+ bool QueryProtect(void* base_address, size_t& length, PageAccess& access_out) {
+ #if REX_PLATFORM_MAC
+-  mach_vm_address_t address = reinterpret_cast<mach_vm_address_t>(base_address);
++#if REX_PLATFORM_IOS
++  vm_address_t address = reinterpret_cast<vm_address_t>(base_address);
++  vm_size_t region_size = 0;
++#else
++  mach_vm_address_t address = reinterpret_cast<uintptr_t>(base_address);
+   mach_vm_size_t region_size = 0;
++#endif
+   vm_region_basic_info_data_64_t info;
+   mach_msg_type_number_t info_count = VM_REGION_BASIC_INFO_COUNT_64;
+   mach_port_t object_name;
+ 
+   kern_return_t kr =
++#if REX_PLATFORM_IOS
++      vm_region_64(mach_task_self(), &address, &region_size, VM_REGION_BASIC_INFO_64,
++#else
+       mach_vm_region(mach_task_self(), &address, &region_size, VM_REGION_BASIC_INFO_64,
++#endif
+                      reinterpret_cast<vm_region_info_t>(&info), &info_count, &object_name);
+   if (kr != KERN_SUCCESS) {
+     return false;
+   }
+-  if (address > reinterpret_cast<mach_vm_address_t>(base_address)) {
++  if (object_name != MACH_PORT_NULL) {
++    mach_port_deallocate(mach_task_self(), object_name);
++  }
++  if (address > reinterpret_cast<uintptr_t>(base_address)) {
+     return false;
+   }
+ 
+   length = static_cast<size_t>((address + region_size) -
+-                               reinterpret_cast<mach_vm_address_t>(base_address));
++                               reinterpret_cast<uintptr_t>(base_address));
+ 
+   if ((info.protection & (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE)) ==
+       (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE)) {
+@@ -454,6 +479,25 @@
+     return kFileMappingHandleInvalid;
+   }
+   return static_cast<FileMappingHandle>(ashmem_fd);
++#elif REX_PLATFORM_IOS
++  // Named POSIX shared memory is outside an iOS application sandbox. A sparse,
++  // unlinked private temp file supplies the same shared-alias backing semantics.
++  const char* temp_dir = std::getenv("TMPDIR");
++  std::string temporary = (std::filesystem::path(temp_dir ? temp_dir : "/tmp") /
++                           "rex-memory-XXXXXX").string();
++  int fd = mkstemp(temporary.data());
++  if (fd < 0) {
++    REXSYS_ERROR("iOS guest memory backing file could not be created: {}", std::strerror(errno));
++    return kFileMappingHandleInvalid;
++  }
++  unlink(temporary.c_str());
++  if (rex_ftruncate64(fd, static_cast<off_t>(length)) != 0) {
++    REXSYS_ERROR("iOS guest memory backing file could not be resized to 0x{:X}: {}",
++                 length, std::strerror(errno));
++    close(fd);
++    return kFileMappingHandleInvalid;
++  }
++  return static_cast<FileMappingHandle>(fd);
+ #else
+   int oflag;
+   switch (access) {
+@@ -489,7 +533,7 @@
+ 
+ void CloseFileMappingHandle(FileMappingHandle handle, const std::filesystem::path& path) {
+   close(static_cast<int>(handle));
+-#if !REX_PLATFORM_ANDROID
++#if !REX_PLATFORM_ANDROID && !REX_PLATFORM_IOS
+   auto full_path = MakeShmName(path);
+   shm_unlink(full_path.c_str());
+ #endif
+diff --git a/src/system/gpu_plugin_loader.cpp b/src/system/gpu_plugin_loader.cpp
+--- a/src/system/gpu_plugin_loader.cpp
++++ b/src/system/gpu_plugin_loader.cpp
+@@ -55,7 +55,20 @@
+ }  // namespace
+ 
+ std::unique_ptr<IGraphicsSystem> LoadGpuPlugin(std::string_view name, std::string_view backend) {
+-  auto path = rex::filesystem::GetExecutableFolder() / PluginFileName(name);
++  auto plugin_directory = rex::filesystem::GetExecutableFolder();
++#if REX_PLATFORM_IOS
++  plugin_directory /= "Frameworks";
++#endif
++  auto path = plugin_directory / PluginFileName(name);
++#if REX_PLATFORM_IOS
++  // iOS packages third-party native code as signed frameworks. Keep the loose
++  // build-output path as a fallback for local staging before IPA packaging.
++  const std::string framework_name = fmt::format("rexgpu_{}", name);
++  auto framework_path = plugin_directory / (framework_name + ".framework") / framework_name;
++  if (std::filesystem::exists(framework_path)) {
++    path = std::move(framework_path);
++  }
++#endif
+   if (!std::filesystem::exists(path)) {
+     REXSYS_ERROR(
+         "GPU plugin '{}' not found at {}. Stage it next to the executable "
+diff --git a/src/ui/vulkan/vulkan_instance.cpp b/src/ui/vulkan/vulkan_instance.cpp
+--- a/src/ui/vulkan/vulkan_instance.cpp
++++ b/src/ui/vulkan/vulkan_instance.cpp
+@@ -17,6 +17,7 @@
+ #include <vector>
+ 
+ #include <rex/cvar.h>
++#include <rex/filesystem.h>
+ #include <rex/logging.h>
+ #include <rex/platform.h>
+ #include <rex/ui/vulkan/instance.h>
+@@ -52,10 +53,18 @@
+   REXLOG_INFO("MoltenVK: MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS={}",
+               std::getenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS"));
+ 
++#if REX_PLATFORM_IOS
++  // The signed implementation is bundled with the app; desktop ICD discovery
++  // and the desktop Vulkan loader are unnecessary on an iOS device.
++  std::vector<std::filesystem::path> loader_candidates = {
++      rex::filesystem::GetExecutableFolder() / "Frameworks" / "MoltenVK.framework" / "MoltenVK",
++      rex::filesystem::GetExecutableFolder() / "Frameworks" / "libMoltenVK.dylib"};
++#else
+   std::vector<std::filesystem::path> loader_candidates = macos_runtime_paths.loader_candidates;
+   loader_candidates.emplace_back(platform::lib_names::kVulkanLoader);
+   loader_candidates.emplace_back("libvulkan.dylib");
+   loader_candidates.emplace_back("libMoltenVK.dylib");
++#endif
+ 
+   std::vector<std::string> attempted_loader_paths;
+   attempted_loader_paths.reserve(loader_candidates.size());
+diff --git a/src/ui/windowed_app_main_sdl.cpp b/src/ui/windowed_app_main_sdl.cpp
+--- a/src/ui/windowed_app_main_sdl.cpp
++++ b/src/ui/windowed_app_main_sdl.cpp
+@@ -21,6 +21,11 @@
+ #include <rex/platform.h>
+ #include <rex/ui/windowed_app.h>
+ #include <rex/ui/windowed_app_context_sdl.h>
++
++#if REX_PLATFORM_IOS
++// Starts UIApplicationMain before entering the existing SDL application loop.
++#include <SDL3/SDL_main.h>
++#endif
+ 
+ #if REX_PLATFORM_WIN32
+ #ifndef WIN32_LEAN_AND_MEAN
+diff --git a/src/ui/windowed_app_context_sdl.cpp b/src/ui/windowed_app_context_sdl.cpp
+--- a/src/ui/windowed_app_context_sdl.cpp
++++ b/src/ui/windowed_app_context_sdl.cpp
+@@ -42,7 +42,11 @@
+   // Picked before SDL_InitSubSystem, long before a graphics instance can say
+   // which surface extensions it has, so the cvar is the escape hatch.
+   std::string requested_driver = REXCVAR_GET(video_driver);
+-#if REX_PLATFORM_MAC
++#if REX_PLATFORM_IOS
++  if (requested_driver.empty()) {
++    requested_driver = "uikit";
++  }
++#elif REX_PLATFORM_MAC
+   // macOS presents via a CAMetalLayer surface obtained from the Cocoa driver.
+   if (requested_driver.empty()) {
+     requested_driver = "cocoa";
+@@ -94,6 +98,10 @@
+       return EXIT_FAILURE;
+     }
+     ProcessEvent(event);
++#if REX_PLATFORM_IOS
++    // A permanently busy paint queue must still service the UIKit run loop.
++    SDL_PumpEvents();
++#endif
+   }
+   return EXIT_SUCCESS;
+ }
+diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
+--- a/thirdparty/CMakeLists.txt
++++ b/thirdparty/CMakeLists.txt
+@@ -50,7 +50,10 @@
+         spirv-headers spirv-tools glslang
+     )
+     if(APPLE)
+-        list(APPEND REQUIRED_SUBMODULES vulkan-loader moltenvk)
++        list(APPEND REQUIRED_SUBMODULES moltenvk)
++        if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
++            list(APPEND REQUIRED_SUBMODULES vulkan-loader)
++        endif()
+     endif()
+ endif()
+ 
+@@ -210,12 +213,26 @@
+         set(LOADER_CODEGEN OFF CACHE BOOL "" FORCE)
+         string(REGEX REPLACE "\\.[0-9]+$" "" VulkanHeaders_VERSION
+             "${REXGLUE_VULKAN_SDK_VERSION}")
+-        add_subdirectory(vulkan-loader EXCLUDE_FROM_ALL)
+-        set_target_properties(vulkan PROPERTIES EXCLUDE_FROM_ALL FALSE)
++        if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
++            add_subdirectory(vulkan-loader EXCLUDE_FROM_ALL)
++            set_target_properties(vulkan PROPERTIES EXCLUDE_FROM_ALL FALSE)
++        else()
++            # MoltenVK supports iOS in source, but its CMake Common target still
++            # names desktop frameworks. Supply UIKit for those desktop slots.
++            find_library(REXGLUE_UIKIT_LIBRARY UIKit REQUIRED)
++            set(APPKIT_LIBRARY "${REXGLUE_UIKIT_LIBRARY}")
++            set(IOKIT_LIBRARY "${REXGLUE_UIKIT_LIBRARY}")
++        endif()
+ 
+         set(MVK_BUILD_SHADER_CONVERTER_TOOL OFF CACHE BOOL "" FORCE)
+         set(MVK_EXCLUDE_SPIRV_TOOLS ON CACHE BOOL "" FORCE)
+         add_subdirectory(moltenvk)
++        if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
++            # Color-space helpers in MVKPresentationSurface use CoreGraphics;
++            # AppKit supplies this transitively only in desktop builds.
++            find_library(REXGLUE_COREGRAPHICS_LIBRARY CoreGraphics REQUIRED)
++            target_link_libraries(MoltenVK PRIVATE "${REXGLUE_COREGRAPHICS_LIBRARY}")
++        endif()
+     endif()
+ endif()
+ 
+diff --git a/src/system/xmemory.cpp b/src/system/xmemory.cpp
+--- a/src/system/xmemory.cpp
++++ b/src/system/xmemory.cpp
+@@ -326,6 +326,11 @@
+   void* reserved_base = mmap(nullptr, total_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+   if (reserved_base == MAP_FAILED) {
+     REXSYS_ERROR("MapViewsMac: reserve failed: {}", std::strerror(errno));
++#if REX_PLATFORM_IOS
++    REXSYS_ERROR("iOS guest mapping needs 0x{:X} bytes of virtual address space; the signing "
++                 "profile must allow com.apple.developer.kernel.extended-virtual-addressing",
++                 total_size);
++#endif
+     return 1;
+   }
+ 

@@ -1482,6 +1482,10 @@ std::vector<PanelSpec> AllPanels() {
       }
     }
     std::erase_if(panel.rows, [](Row& row) {
+#if defined(RB_BLITZ_IOS)
+      // Overscan belongs to the retail guest, so it has no native schema descriptor to hide.
+      if (row.setting == "guest.overscan") return true;
+#endif
       if (g_configuration.hidden.contains(row.setting)) return true;
       if (const auto available = g_configuration.availability.find(row.setting);
           available != g_configuration.availability.end()) {
@@ -1534,16 +1538,22 @@ std::vector<PanelSpec> AllPanels() {
       return false;
     });
   }
-  // Hide the Graphics Advanced entry when the platform offers no renderer choice.
-  const bool has_renderer = std::any_of(out.begin(), out.end(), [](const auto& panel) {
-    return panel.name == "settings_graphics_advanced_panel" && !panel.rows.empty();
-  });
-  if (!has_renderer) {
+  // Release policies can remove every row in a group (Display on iOS, for example).
+  // Prune links to empty authored groups, including parents emptied by that pruning.
+  bool removed_group;
+  do {
+    removed_group = false;
     for (auto& panel : out) {
-      if (panel.name == "settings_graphics_panel")
-        std::erase_if(panel.rows, [](const auto& row) { return row.symbol == "settings_graphics_advanced"; });
+      const auto count = std::erase_if(panel.rows, [&](const auto& row) {
+        if (row.kind != Kind::kSubmenu && row.kind != Kind::kBoolSubmenu) return false;
+        const auto target = std::find_if(out.begin(), out.end(), [&](const auto& candidate) {
+          return candidate.screen == row.screen;
+        });
+        return target != out.end() && target->rows.empty();
+      });
+      removed_group = removed_group || count != 0;
     }
-  }
+  } while (removed_group);
   // Background Music Play is always discoverable. The navigation switch gates
   // runtime commands (P2), not the row/page or its in-song twin.
   for (PanelSpec& panel : out) {

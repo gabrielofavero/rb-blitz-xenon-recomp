@@ -1239,8 +1239,9 @@ void TestReleaseSettingsMigration() {
 }
 
 void TestVulkanOnlyReleaseSettings() {
-  BeginCase("Linux and macOS: Renderer hidden and saved DirectX cannot replace Vulkan");
-  for (const auto platform : {schema::HostPlatform::kLinux, schema::HostPlatform::kMacOS}) {
+  BeginCase("Vulkan-only releases: Renderer hidden and saved DirectX cannot replace Vulkan");
+  for (const auto platform : {schema::HostPlatform::kLinux, schema::HostPlatform::kMacOS,
+                              schema::HostPlatform::kIOS}) {
     Scratch scratch;
     const StorePaths paths = Paths(scratch);
     WriteFile(paths.settings_file, "schema_version = 1\n[graphics]\nrenderer = 'd3d12'\n");
@@ -1265,6 +1266,46 @@ void TestVulkanOnlyReleaseSettings() {
     Service reloaded(paths, release);
     CHECK_TRUE(reloaded.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
     CHECK_TRUE(reloaded.RequestedValue(SettingId::kRenderer).text == "vulkan");
+  }
+}
+
+void TestIOSReleaseSettings() {
+  BeginCase("iOS: hidden desktop display preferences cannot replace the device baseline");
+  Scratch scratch;
+  const StorePaths paths = Paths(scratch);
+  WriteFile(paths.settings_file,
+            "schema_version = 1\n[graphics]\ndisplay = 'windowed'\n"
+            "resolution = [3840, 2160]\naspect_ratio = '32:9'\nrender_scale = '3x'\n"
+            "vsync = false\n[controller]\nscheme = 'retail'\n");
+  Service service(paths, schema::SettingsForRelease(schema::HostPlatform::kIOS, "test"));
+  CHECK_TRUE(service.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+  CHECK_TRUE(service.RequestedValue(SettingId::kDisplay).text == "windowed");
+  CHECK_TRUE(service.EffectiveValue(SettingId::kDisplay).text == "fullscreen");
+  CHECK_TRUE(service.EffectiveValue(SettingId::kAspectRatio).text == "auto");
+  CHECK_TRUE(service.EffectiveValue(SettingId::kRenderScale).text == "1x");
+  // The boot's device planner replaces the stored desktop pixel size.
+  Value device_pixels;
+  device_pixels.kind = ValueKind::kResolution;
+  device_pixels.width = 1568;
+  device_pixels.height = 720;
+  service.SetBootValues({{SettingId::kResolution, device_pixels}}, "settings.graphics.aspect_scale");
+  CHECK_TRUE(service.EffectiveValue(SettingId::kResolution).width == 1568);
+  CHECK_TRUE(service.EffectiveValue(SettingId::kResolution).height == 720);
+  CHECK_TRUE(service.EffectiveValue(SettingId::kVsync).boolean);
+  const uint64_t edit = service.BeginEdit(service.revision());
+  for (const auto id : {SettingId::kDisplay, SettingId::kResolution, SettingId::kAspectRatio,
+                        SettingId::kRenderScale, SettingId::kVsync, SettingId::kRenderer}) {
+    const auto* row = service.DescriptorFor(id);
+    CHECK_TRUE(row != nullptr && row->availability == Availability::kHidden);
+    if (row == nullptr) continue;
+    CHECK_FALSE(service.Set(edit, id, row->compiled_default, service.capability_revision()).ok);
+    if (id == SettingId::kResolution) continue;  // internal, device-derived size
+    service.SetOverrides({{id, service.RequestedValue(id)}}, {{id, Source::kCommandLine}});
+    CHECK_TRUE(ValueEquals(service.EffectiveValue(id), row->compiled_default));
+  }
+  for (const auto id : {SettingId::kAntiAliasing, SettingId::kFiltering, SettingId::kButtonScheme}) {
+    const auto* row = service.DescriptorFor(id);
+    CHECK_TRUE(row != nullptr && row->availability == Availability::kVisible);
   }
 }
 
@@ -1300,5 +1341,6 @@ int main(int argc, char** argv) {
   TestRestoreClearsUnsupportedNativeDefaultWithProvider();
   TestReleaseSettingsMigration();
   TestVulkanOnlyReleaseSettings();
+  TestIOSReleaseSettings();
   return Finish();
 }

@@ -12,6 +12,15 @@ checkout.
 
 ## Patches
 
+`0077-moltenvk-replacement-drawable-size.patch` restores the Metal layer's drawable
+extent after replacement swapchain creation and old-swapchain retirement. The
+pinned MoltenVK 1.4.1 can flush pending presentations by shrinking that shared
+layer to 1x1 after the replacement has initialized it. This matches the owner's
+iPhone report: a correct captured guest splash with persistent suboptimal screen
+presentation and black visible output. The correction leaves an already-correct
+drawable alone and is covered by a native CAMetalLayer test without a window.
+Device confirmation remains pending.
+
 `0073-moltenvk-asynchronous-queue-submissions.patch` defaults Mac queue submission
 to MoltenVK's ordered asynchronous encoder, preserving explicit
 `MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS` overrides. The preserved 720p/16:10 song
@@ -375,6 +384,13 @@ and the [shader-cache record](../docs/engine/shader-cache.md) (part 5).
 
 ## Apply / verify
 
+`0076-ios-presentation-diagnostics.patch` adds bounded iOS-only records of the
+guest output dimensions, paint effects, final draw rectangle and queue-present
+result. It supports investigation of the owner's A18 Pro black-screen report;
+it changes no rendering decisions. The app also saves its first non-black
+guest GPU image and records UIKit view visibility in the shared diagnostics
+folder. Device acceptance remains open.
+
 ```powershell
 # Apply every patch set to the pinned SDK checkout (idempotent; safe to re-run).
 # `-ExecutionPolicy Bypass` is required on this machine, where the policy is
@@ -655,3 +671,23 @@ resource destruction behind submission fences. Calls must run on the UI/draw thr
 eight images, at most 512×512 each. The menu-music player keeps one 256×256 cover and rebuilds it
 from owned CPU pixels after replacement. Host tests/build and exact patch replay are covered;
 real image rendering and reset/soak acceptance await the owner.
+
+
+`0074-ios-runtime.patch` adds the experimental iOS arm64 platform, native host
+codegen import, UIKit SDL startup and event pumping, signed-framework discovery
+for GPU/MoltenVK, and sandbox-compatible guest memory backing/protection queries.
+Guest instructions remain data; generated native functions run from signed code.
+The existing Darwin fiber APIs compile/link against the device SDK. Patch replay
+and device source compilation are checked; actual VM aliases, memory pressure,
+fibers and gameplay remain unverified. See the
+[iOS CLI plan](../docs/plans/finished/2026-11-16-ios-cli-installer-plan.md).
+
+
+`0075-table-function-registration.patch` reuses the generated image's existing
+sentinel-terminated function mapping table for registration. Its filter and
+order match the old straight-line template: all 38,457 entries matched in the
+2026-11-16 device-build input. This avoids a giant registration function that
+kept AppleClang busy for minutes even without optimization; the equivalent
+loop compiled for iOS arm64 at `-O3` in 2.06 seconds. The registration calls and
+gameplay function pointers are unchanged. See the
+[iOS CLI plan](../docs/plans/finished/2026-11-16-ios-cli-installer-plan.md).

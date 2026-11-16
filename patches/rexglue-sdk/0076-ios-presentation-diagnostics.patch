@@ -1,0 +1,65 @@
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -1651,6 +1651,9 @@
+     // multiple threads can't paint the main target at the same time).
+   }
+ 
++#if REX_PLATFORM_IOS
++  bool ios_trace_paint = false;
++#endif
+   if (guest_output_image) {
+     VkExtent2D max_framebuffer_extent =
+         util::GetMax2DFramebufferExtent(vulkan_device_->properties());
+@@ -1658,6 +1661,23 @@
+         guest_output_properties, paint_context_.swapchain_extent.width,
+         paint_context_.swapchain_extent.height, max_framebuffer_extent.width,
+         max_framebuffer_extent.height, guest_output_paint_config);
++#if REX_PLATFORM_IOS
++    // Device bring-up: prove that a live guest image reaches the final paint.
++    // Bound this independently of frame rate so normal logs stay small.
++    static uint64_t guest_paints = 0;
++    ++guest_paints;
++    ios_trace_paint = guest_paints <= 3 || guest_paints == 60 || guest_paints == 300;
++    if (ios_trace_paint) {
++      REXLOG_INFO("ios_present: frame={} guest={}x{} image={}x{} aspect={}:{} "
++                  "swapchain={}x{} output={},{} effects={} ui_thread={}", guest_paints,
++                  guest_output_properties.frontbuffer_width, guest_output_properties.frontbuffer_height,
++                  guest_output_image->extent().width, guest_output_image->extent().height,
++                  guest_output_properties.display_aspect_ratio_x, guest_output_properties.display_aspect_ratio_y,
++                  paint_context_.swapchain_extent.width, paint_context_.swapchain_extent.height,
++                  guest_output_flow.output_x, guest_output_flow.output_y,
++                  guest_output_flow.effect_count, execute_ui_drawers);
++    }
++#endif
+     if (guest_output_flow.effect_count) {
+       // Store the main target reference to the guest output image so it's not
+       // destroyed while it's still potentially in use by main target painting
+@@ -2075,6 +2095,16 @@
+           }
+ 
+           dfn.vkCmdDraw(draw_command_buffer, 4, 1, 0, 0);
++#if REX_PLATFORM_IOS
++          if (ios_trace_paint) {
++            REXLOG_INFO("ios_present: draw effect={} final={} rect={},{} {}x{} "
++                        "viewport={}x{} ndc={},{},{}x{}", unsigned(effect), is_final_effect,
++                        effect_rect_x, effect_rect_y, effect_rect_size.first, effect_rect_size.second,
++                        guest_output_viewport.width, guest_output_viewport.height,
++                        effect_rect_constants.x, effect_rect_constants.y,
++                        effect_rect_constants.width, effect_rect_constants.height);
++          }
++#endif
+ 
+           if (is_final_effect) {
+             // Clear the letterbox around the guest output if the guest output
+@@ -2261,6 +2291,10 @@
+     present_result = dfn.vkQueuePresentKHR(queue_acquisition.queue(), &present_info);
+     trace_present.Success(present_result == VK_SUCCESS || present_result == VK_SUBOPTIMAL_KHR);
+   }
++#if REX_PLATFORM_IOS
++  if (ios_trace_paint)
++    REXLOG_INFO("ios_present: vkQueuePresentKHR={}", int(present_result));
++#endif
+   switch (present_result) {
+     case VK_SUCCESS:
+       return PaintResult::kPresented;

@@ -197,6 +197,32 @@
             "displayName": "macOS ARM64 RelWithDebInfo",
             "inherits": "mac-arm64-base",
             "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+        },
+        {
+            "name": "ios-arm64-release",
+            "displayName": "iOS ARM64 Release (device)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "cacheVariables": {
+                "CMAKE_SYSTEM_NAME": "iOS",
+                "CMAKE_OSX_SYSROOT": "iphoneos",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "17.0",
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "CMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED": "NO",
+                "REXSDK_DIR": "${sourceDir}/rexglue-sdk",
+                "REXGLUE_USE_VULKAN": "ON",
+                "REXGLUE_ENABLE_TRACY": "OFF",
+                "BUILD_TESTING": "OFF"
+            }
         }
     ],
     "buildPresets": [
@@ -217,6 +243,7 @@
         { "name": "mac-amd64-relwithdebinfo", "configurePreset": "mac-amd64-relwithdebinfo" },
         { "name": "mac-arm64-debug", "configurePreset": "mac-arm64-debug" },
         { "name": "mac-arm64-release", "configurePreset": "mac-arm64-release" },
-        { "name": "mac-arm64-relwithdebinfo", "configurePreset": "mac-arm64-relwithdebinfo" }
+        { "name": "mac-arm64-relwithdebinfo", "configurePreset": "mac-arm64-relwithdebinfo" },
+        { "name": "ios-arm64-release", "configurePreset": "ios-arm64-release" }
     ]
 }

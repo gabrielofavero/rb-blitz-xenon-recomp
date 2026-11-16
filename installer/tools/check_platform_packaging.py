@@ -111,6 +111,10 @@ def main() -> None:
                 "BundleHasStrictIdentifier"
             ) is not True or components[0].get("BundleOverwriteAction") != "upgrade":
                 fail("macOS component upgrade/relocation policy differs from contract")
+            if (components[0].get("BundlePostInstallScriptPath") != "setup-user" or
+                    components[0].get("BundleInstallScriptTimeout") != 3600 or
+                    not (ROOT / "installer/macos/scripts/setup-user").is_file()):
+                fail("macOS user setup script differs from contract")
             info_text = (ROOT / "installer/macos/Info.plist.in").read_text(encoding="utf-8")
             info = plistlib.loads(info_text.replace("@RBBLITZ_GAME_VERSION@", "0.1.0").encode())
             if info.get("CFBundleIdentifier") != app_id or info.get("CFBundleExecutable") != "rb_blitz_macos_launcher":

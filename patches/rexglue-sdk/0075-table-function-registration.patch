@@ -1,0 +1,19 @@
+diff --git a/resources/templates/codegen/register_cpp.inja b/resources/templates/codegen/register_cpp.inja
+--- a/resources/templates/codegen/register_cpp.inja
++++ b/resources/templates/codegen/register_cpp.inja
+@@ -17,8 +17,13 @@
+ {% else %}
+ void {{ project }}_RegisterFunctions(rex::runtime::IModuleRegistrar* registrar) {
+ {% endif %}
+-{% for fn in functions %}{% if not fn.below_code_base or fn.is_import %}  registrar->SetFunction({{ fn.address }}, {{ fn.name }});
+-{% endif %}{% endfor %}}
++  // init.cpp emits this table with the same address filter and registration
++  // order. Reuse it to avoid one enormous function with a call per guest symbol.
++  for (const PPCFuncMapping* entry = PPCImageConfig.func_mappings;
++       entry->guest != 0; ++entry) {
++    registrar->SetFunction(static_cast<uint32_t>(entry->guest), entry->host);
++  }
++}
+ 
+ {% if is_dll %}
+ // The runtime uses this baked layout for the dispatch table. It must match the

@@ -15,9 +15,10 @@ The script draws the supplied artwork without redrawing the logo or background.
 `blitz-macos.png` is a 1024px canvas with a rounded 824px tile, 100px transparent
 padding, and a thin border, following the sibling Zombies project's classic
 macOS treatment. The packager generates all `.icns` representations from it.
-`blitz-apple.png` is an unmasked square 1024px version for future iOS use; it is
-upscaled from the supplied source, not new high-resolution artwork. No iOS target
-or Icon Composer integration is implied.
+`blitz-apple.png` is the opaque, unmasked square 1024px source for the
+[experimental iOS IPA builder](../../installer/ios/README.md). The packager derives
+iPhone/iPad PNG sizes from it. It is upscaled from the supplied source, not new
+high-resolution artwork. Icon Composer integration remains separate.
 
 Apple's [app icon guidance](https://developer.apple.com/design/human-interface-guidelines/app-icons)
 describes square source artwork and system masking for modern asset catalogs.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Normal-user pre-game importer for the Finder-launched application bundle.
+// Normal-user setup, called by Installer and retained for repair/Finder imports.
 #import <Cocoa/Cocoa.h>
 
 #include <atomic>
@@ -19,6 +19,9 @@
 #include "game_import_core.h"
 #include "ultimate_import_core.h"
 #include "platform/bundle_resources.h"
+#include "settings/paths.h"
+#include "settings/store.h"
+#include "setup_preferences.h"
 
 namespace fs = std::filesystem;
 namespace portable = rb_blitz::installer::portable;
@@ -73,8 +76,8 @@ bool Confirm(const std::string& message) {
 enum class SourceType { kCanceled, kPackage, kFolder };
 SourceType ChooseSourceType() {
   NSAlert* alert = [[NSAlert alloc] init];
-  [alert setMessageText:@"Choose your game source"];
-  [alert setInformativeText:@"Select your own supported Rock Band Blitz package or extracted folder."];
+  [alert setMessageText:@"Choose your Xbox 360 game source"];
+  [alert setInformativeText:@"Select your own supported Xbox 360 Rock Band Blitz package or extracted folder. Game assets are not included in this installer."];
   [alert addButtonWithTitle:@"Package file"];
   [alert addButtonWithTitle:@"Extracted folder"];
   [alert addButtonWithTitle:@"Cancel"];
@@ -194,21 +197,58 @@ bool ImportWithProgress(const rb_blitz::installer::GameSourcePlan& source,
   }, error);
 }
 
-void OfferUltimate(const fs::path& game, bool force) {
-  const fs::path choice = game.parent_path() / "ultimate-choice-v1";
-  if (!force && (fs::exists(choice) || portable::HasUltimate(game))) return;
+bool OfferUltimate(const fs::path& bin, const fs::path& game, bool force) {
+  // v2 also records that the installer's target was saved. Older installers
+  // wrote "installed" without selecting Ultimate, so migrate that state once.
+  const fs::path choice = game.parent_path() / "ultimate-choice-v2";
+  std::string choice_text, error;
+  bool choice_exists = false;
+  if (!rb_blitz::settings::ReadFileText(choice, &choice_text, &choice_exists)) {
+    Alert(NSAlertStyleCritical, "Cannot read the Ultimate setup choice.");
+    return false;
+  }
+  const auto record = [&](const std::string& value) {
+    if (rb_blitz::settings::WriteFileAtomic(choice, value, &error)) return true;
+    Alert(NSAlertStyleCritical, "Cannot save the Ultimate setup choice: " + error);
+    return false;
+  };
+  const auto select_installed = [&] {
+    // Keep a durable pending state if saving settings fails. A retry must finish
+    // selecting Ultimate even though its payload has already been committed.
+    if (!record("select-ultimate\n")) return false;
+    const auto inputs = rb_blitz::profile::ProfilePathInputsFromEnvironment(bin);
+    if (!rb_blitz::installer::macos::SelectUltimate(
+            rb_blitz::settings::ResolveSettingsFile(inputs), &error)) {
+      Alert(NSAlertStyleCritical, "Cannot select Ultimate for the next launch: " + error);
+      return false;
+    }
+    return record("installed\n");
+  };
+  if (!force) {
+    if (choice_text == "select-ultimate\n") return select_installed();
+    if (choice_exists) return true;
+    if (portable::HasUltimate(game)) return select_installed();
+    std::string legacy_choice;
+    bool legacy_exists = false;
+    if (!rb_blitz::settings::ReadFileText(game.parent_path() / "ultimate-choice-v1",
+                                        &legacy_choice, &legacy_exists)) {
+      Alert(NSAlertStyleCritical, "Cannot read the previous Ultimate setup choice.");
+      return false;
+    }
+    if (legacy_choice == "skipped\n") return record("skipped\n");
+  }
   const auto config = portable::EmbeddedUltimateConfig();
   NSAlert* offer = [[NSAlert alloc] init];
   [offer setMessageText:@"Install Rock Band Blitz Ultimate?"];
   [offer setInformativeText:@"Ultimate is an optional fan mod. Download it from its official release, or choose a ZIP or extracted folder you already have."];
   [offer addButtonWithTitle:Text("Download " + config.pins.version)];
   [offer addButtonWithTitle:@"Choose ZIP or folder"];
-  [offer addButtonWithTitle:@"Play without Ultimate"];
+  [offer addButtonWithTitle:@"Skip Ultimate"];
   const auto answer = [offer runModal];
   if (answer == NSAlertThirdButtonReturn) {
-    rb_blitz::installer::WriteFileText(choice, "skipped\n", false, nullptr);
-    return;
+    return record("skipped\n");
   }
+  if (answer != NSAlertFirstButtonReturn && answer != NSAlertSecondButtonReturn) return false;
   fs::path source;
   if (answer == NSAlertSecondButtonReturn) {
     NSOpenPanel* picker = [NSOpenPanel openPanel];
@@ -216,26 +256,25 @@ void OfferUltimate(const fs::path& game, bool force) {
     [picker setCanChooseDirectories:YES];
     [picker setAllowsMultipleSelection:NO];
     [picker setMessage:@"Select an Ultimate ZIP archive or extracted Xbox folder."];
-    if ([picker runModal] != NSModalResponseOK) return;
+    if ([picker runModal] != NSModalResponseOK) return false;
     const char* selected = [[[picker URL] path] fileSystemRepresentation];
-    if (!selected) return;
+    if (!selected) return false;
     source = selected;
   }
-  std::string error, warning;
+  std::string warning;
   const bool installed = WorkWithProgress(@"Installing Rock Band Blitz Ultimate", [&](const auto& callbacks, auto* why) {
     return portable::InstallUltimate(source, game, config, callbacks, &warning, why);
   }, &error);
   if (!installed) {
-    Alert(NSAlertStyleWarning, "Ultimate was not installed. Your base game is ready to play.\n\n" + error);
-    return;  // Leave the choice pending so next launch can retry.
+    Alert(NSAlertStyleWarning, "Ultimate setup did not finish. Run setup again to retry, or choose Skip Ultimate.\n\n" + error);
+    return false;
   }
-  rb_blitz::installer::WriteFileText(choice, "installed\n", false, nullptr);
-  Alert(NSAlertStyleInformational, "Ultimate is installed. Select Rock Band Blitz Ultimate in the in-game Game Version setting." +
-      (warning.empty() ? "" : "\n\n" + warning));
+  if (!select_installed()) return false;
+  if (!warning.empty()) Alert(NSAlertStyleWarning, warning);
+  return true;
 }
 
-int LaunchGame(const fs::path& bin, const fs::path& game, bool ultimate) {
-  OfferUltimate(game, ultimate);
+int LaunchGame(const fs::path& bin, const fs::path& game) {
   const fs::path executable = bin / "rb_blitz";
   const std::string root_arg = "--game_data_root=" + game.string();
   char* arguments[] = {const_cast<char*>(executable.c_str()),
@@ -249,8 +288,11 @@ int LaunchGame(const fs::path& bin, const fs::path& game, bool ultimate) {
 
 int main(int argc, char** argv) {
   @autoreleasepool {
+    // Installer must drop its privileges before invoking any user-data or UI code.
+    if (geteuid() == 0) return 1;
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    [NSApp activateIgnoringOtherApps:YES];
     const fs::path bin = ExecutableDir();
     const fs::path game = GameDestination();
     if (bin.empty() || game.empty()) {
@@ -267,20 +309,26 @@ int main(int argc, char** argv) {
       Alert(NSAlertStyleCritical, "Cannot recover the previous import: " + error);
       return 1;
     }
-    bool repair = false, ultimate = false;
+    bool repair = false, ultimate = false, setup_only = false;
     for (int i = 1; i < argc; ++i) {
       repair |= std::string_view(argv[i]) == "--repair";
       ultimate |= std::string_view(argv[i]) == "--ultimate";
+      setup_only |= std::string_view(argv[i]) == "--setup-only";
     }
+    const auto finish = [&] {
+      if (!OfferUltimate(bin, game, ultimate)) return 1;
+      return setup_only ? 0 : LaunchGame(bin, game);
+    };
+    const auto canceled = [&] { return setup_only ? 1 : 0; };
     error.clear();
     const bool valid = portable::VerifyTree(game, expected, kRoles, nullptr, &error);
     if (!valid || repair) {
       if (valid && !Confirm("Choose a supported source to replace the current import. Cancel keeps the current game data."))
-        return LaunchGame(bin, game, ultimate);
+        return setup_only ? 1 : finish();
       const SourceType type = ChooseSourceType();
-      if (type == SourceType::kCanceled) return valid ? LaunchGame(bin, game, ultimate) : 0;
+      if (type == SourceType::kCanceled) return canceled();
       const fs::path selected = PickSource(type);
-      if (selected.empty()) return valid ? LaunchGame(bin, game, ultimate) : 0;
+      if (selected.empty()) return canceled();
       rb_blitz::installer::GameSourcePlan source;
       error.clear();
       const bool probed = type == SourceType::kFolder
@@ -288,20 +336,19 @@ int main(int argc, char** argv) {
           : portable::ProbePackage(selected, expected, kRoles, kOptional, &source, &error);
       if (!probed) {
         Alert(NSAlertStyleCritical, error);
-        return valid ? LaunchGame(bin, game, ultimate) : 1;
+        return 1;
       }
       const std::string preview = "Source: " + source.description +
           "\nExpected game version: " + expected.xex_version +
           "\nRequired space: at least " + SizeLabel(source.PresentBytes()) +
           "\nDestination: " + game.string() + "\n\nImport now?";
-      if (!Confirm(preview)) return valid ? LaunchGame(bin, game, ultimate) : 0;
+      if (!Confirm(preview)) return canceled();
       error.clear();
       if (!ImportWithProgress(source, game, expected, &error)) {
         Alert(NSAlertStyleCritical, "Game import failed: " + error);
-        return valid && portable::VerifyTree(game, expected, kRoles, nullptr, nullptr)
-            ? LaunchGame(bin, game, ultimate) : 1;
+        return 1;
       }
     }
-    return LaunchGame(bin, game, ultimate);
+    return finish();
   }
 }

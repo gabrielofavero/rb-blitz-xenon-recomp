@@ -59,6 +59,9 @@
 #include <rex/cvar.h>
 #include "assets/texture_override.h"
 #include "platform/bundle_resources.h"
+#if defined(RB_BLITZ_IOS)
+#include "platform/ios_runtime.h"
+#endif
 #include <rex/graphics/compile_trace.h>
 #include "diag/shader_trace.h"
 #include "diag/boot_heartbeat.h"
@@ -278,9 +281,17 @@ class RbBlitzApp : public rex::ReXApp {
   // a second Vulkan initialization in the same process, and the provider has to do it anyway.
   static bool VulkanLoaderIsUsable() {
     rex::platform::DynamicLibrary loader;
+#if defined(RB_BLITZ_IOS)
+    const auto frameworks = rex::filesystem::GetExecutableFolder() / "Frameworks";
+    if (!loader.Load(frameworks / "MoltenVK.framework" / "MoltenVK") &&
+        !loader.Load(frameworks / "libMoltenVK.dylib")) {
+      return false;
+    }
+#else
     if (!loader.Load(rex::platform::lib_names::kVulkanLoader)) {
       return false;
     }
+#endif
     return loader.GetRawSymbol("vkGetInstanceProcAddr") != nullptr;
   }
 
@@ -293,6 +304,11 @@ class RbBlitzApp : public rex::ReXApp {
   // other directory is honoured as given - see rb_blitz::fs::IsSameOrInside()
   // for why the check is not a std::filesystem::relative() call.
   void OnConfigurePaths(rex::PathConfig& paths) override {
+#if defined(RB_BLITZ_IOS)
+    ios_documents_root_ = rb_blitz::platform::PrepareIOSDocuments();
+    // This first device route embeds a verified private import in the IPA.
+    paths.game_data_root = rex::filesystem::GetExecutableFolder() / "game";
+#endif
     // D3's rank 4, and the reason R4's standalone half works at all: Controller Settings' own rows,
     // applied at the config rank. This hook runs before the SDK loads the game's own
     // `<exe>.toml` (rex_app.cpp's SetupEnvironment), so the game's file still outranks the
@@ -367,6 +383,11 @@ class RbBlitzApp : public rex::ReXApp {
     if (REXCVAR_GET(update_data_root).empty() && !native_roots.data.empty()) {
       paths.update_data_root = native_roots.data / "updates";
     }
+#if defined(RB_BLITZ_IOS)
+    paths.config_path = native_roots.config / "rb_blitz.toml";
+    if (rex::cvar::GetFlagByName("dlc_root").empty())
+      rex::cvar::SetFlagByName("dlc_root", (ios_documents_root_ / "DLCs").string());
+#endif
 #endif
   }
 
@@ -467,7 +488,16 @@ class RbBlitzApp : public rex::ReXApp {
         return false;
       // Reject a blank startup surface; alpha alone is not evidence of a guest frame.
       for (size_t i = 0; i + 3 < frame.data.size(); i += 4)
-        if (frame.data[i] || frame.data[i + 1] || frame.data[i + 2]) return true;
+        if (frame.data[i] || frame.data[i + 1] || frame.data[i + 2]) {
+#if defined(RB_BLITZ_IOS)
+          if (!ios_startup_frame_saved_) {
+            ios_startup_frame_saved_ = true;
+            rb_blitz::platform::SaveIOSStartupFrame(ios_documents_root_, frame);
+            app_context().CallInUIThreadDeferred([] { rb_blitz::platform::LogIOSPresentationState(); });
+          }
+#endif
+          return true;
+        }
       return false;
     });
     if (auto* sink = settings_boot_->sink()) {
@@ -656,7 +686,7 @@ class RbBlitzApp : public rex::ReXApp {
         rex::filesystem::GetExecutablePath(),runtime()->cache_root(),runtime()->user_data_root());
     rb_blitz::diag::shader_trace::LogConfiguration();
     if (!diagnostics_log_file_.empty() &&
-        !rb_blitz::diag::WriteSessionInfo(runtime()->user_data_root(), REXGLUE_BUILD_STAMP,
+        !rb_blitz::diag::WriteSessionInfo(diagnostics_root_, REXGLUE_BUILD_STAMP,
             RBBLITZ_TOOLCHAIN_STAMP, rex::filesystem::GetExecutablePath()))
       REXLOG_WARN("diagnostics: could not write session build identity");
     REXLOG_INFO("boot_timing: guest_launch_ready elapsed_ms={}",
@@ -708,11 +738,21 @@ class RbBlitzApp : public rex::ReXApp {
   }
 
   void OnConfigureLogging(rex::LogConfig& config) override {
+#if defined(RB_BLITZ_IOS)
+    // Keep emitted lines on disk even if iOS terminates a suspended session.
+    config.flush_level = spdlog::level::trace;
+#endif
     // Explicit logging paths remain available for support runs and automation.
     if (!REXCVAR_GET(log_file).empty()) return;
+#if !defined(RB_BLITZ_IOS)
     const auto executable = rex::filesystem::GetExecutablePath();
     if (rb_blitz::graphics::IsDevelopmentBuild(executable)) return;
-    const auto path = rb_blitz::diag::PrepareSessionLog(user_data_root());
+#endif
+    diagnostics_root_ = user_data_root();
+#if defined(RB_BLITZ_IOS)
+    diagnostics_root_ = ios_documents_root_;
+#endif
+    const auto path = rb_blitz::diag::PrepareSessionLog(diagnostics_root_);
     if (path.empty()) return;
     diagnostics_log_file_ = path.string();
     config.log_file = diagnostics_log_file_.c_str();
@@ -901,6 +941,11 @@ class RbBlitzApp : public rex::ReXApp {
   bool graphics_loading_payload_ready_ = false;
   std::unique_ptr<rb_blitz::graphics::CoverageRecorder> coverage_recorder_;
   std::string diagnostics_log_file_;
+  std::filesystem::path diagnostics_root_;
+#if defined(RB_BLITZ_IOS)
+  std::filesystem::path ios_documents_root_;
+  bool ios_startup_frame_saved_ = false;
+#endif
   // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings
   // bridge's caption sink, because the sink object lives beside the dialog.
   std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;

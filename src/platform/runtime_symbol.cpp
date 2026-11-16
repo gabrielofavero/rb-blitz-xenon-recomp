@@ -18,7 +18,9 @@ void* ResolveRuntimeSymbol(const char* symbol) {
   // The executable deliberately overrides several __imp__ imports. Searching
   // RTLD_DEFAULT resolves those hooks back to themselves (NtReadFile recurses
   // until its stack overflows). Search the already-loaded SDK image explicitly.
-#if defined(__APPLE__)
+#if defined(RB_BLITZ_IOS)
+  static void* const runtime = dlopen("@rpath/rexruntime.framework/rexruntime", RTLD_LAZY | RTLD_NOLOAD);
+#elif defined(__APPLE__)
   static void* const runtime = dlopen("@rpath/librexruntime.dylib", RTLD_LAZY | RTLD_NOLOAD);
 #else
   static void* const runtime = dlopen("librexruntime.so", RTLD_LAZY | RTLD_NOLOAD);

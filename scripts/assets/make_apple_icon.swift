@@ -51,5 +51,5 @@ func writeIcon(_ filename: String, macOS: Bool) throws {
 }
 
 try writeIcon("blitz-macos.png", macOS: true)
-// iOS applies its own mask. Keep an opaque, square copy for future integration.
+// iOS applies its own mask. Keep an opaque, square copy for iOS packaging.
 try writeIcon("blitz-apple.png", macOS: false)
