@@ -1048,6 +1048,28 @@ int main() {
   const auto ipad = PlanRenderSettings(mobile_limits, {2732, 2048}, "auto", 1);
   CHECK_TRUE(ipad.supported);
   CHECK_TRUE(IsSize(ipad.guest_size, 960, 720));
+  BeginCase("iOS recovery cannot stretch a desktop safe/last-good layout across the phone");
+  const auto ios = schema::SettingsForRelease(schema::HostPlatform::kIOS, "test");
+  for (const auto shape : {"16:9", "32:9"}) {
+    GraphicsValues recovered{{SettingId::kAspectRatio, EnumV(shape)},
+                             {SettingId::kRenderScale, EnumV("3x")},
+                             {SettingId::kRenderer, EnumV("d3d12")},
+                             {SettingId::kResolution, ResolutionV(1280, 720)},
+                             {SettingId::kAntiAliasing, EnumV("none")}};
+    ApplyReleaseGraphicsRules(recovered, ios);
+    CHECK_TRUE(recovered.at(SettingId::kAspectRatio).text == "auto");
+    CHECK_TRUE(recovered.at(SettingId::kRenderScale).text == "1x");
+    CHECK_TRUE(recovered.at(SettingId::kRenderer).text == "vulkan");
+    CHECK_TRUE(recovered.at(SettingId::kAntiAliasing).text == "none");
+    const auto plan = PlanRenderSettings(mobile_limits, {2622,1206},
+        recovered.at(SettingId::kAspectRatio).text, 1);
+    CHECK_TRUE(plan.supported);
+    CHECK_TRUE(IsSize(plan.guest_size, 1568,720));
+  }
+  GraphicsValues desktop{{SettingId::kAspectRatio, EnumV("16:9")},
+                          {SettingId::kRenderScale, EnumV("1x")}};
+  ApplyReleaseGraphicsRules(desktop, schema::SettingsForRelease(schema::HostPlatform::kWindows, "test"));
+  CHECK_TRUE(desktop.at(SettingId::kAspectRatio).text == "16:9");
   TestAspectAndRenderScale();
   TestRenderPathSizes();
   TestSupportedResolutions();

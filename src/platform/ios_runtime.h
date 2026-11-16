@@ -12,5 +12,7 @@ std::vector<std::string> IOSCommandLineArguments();
 std::filesystem::path PrepareIOSDocuments();
 // Bounded device evidence for guest rendering versus UIKit presentation failures.
 void SaveIOSStartupFrame(const std::filesystem::path& documents, const rex::ui::RawImage& frame);
+void SetIOSApplicationActive(bool active);
+void WaitForIOSForeground();  // Guest main-loop checkpoint; never called by the UI thread.
 void LogIOSPresentationState();  // UI thread only.
 }  // namespace rb_blitz::platform

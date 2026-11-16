@@ -720,6 +720,9 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
     release.rules.emplace(SettingId::kRenderer, std::move(renderer));
   }
   if (platform == HostPlatform::kIOS) {
+    RowRule target;
+    target.default_value = EnumValue("ultimate");
+    release.rules.emplace(SettingId::kTarget, std::move(target));
     // Follow the device's aspect at 1x. The boot planner supplies the internal
     // pixel size; copied desktop preferences cannot choose the device layout.
     for (const auto& [id, value] : std::map<SettingId, Value>{

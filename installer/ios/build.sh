@@ -4,16 +4,18 @@ set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo"
 source_path=
+ultimate_source=
 output=out/ios/packages
 bundle_id=io.github.gabrielofavero.rbblitz
 sign_identity=
 profile=
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --source|--output|--bundle-id|--sign-identity|--provisioning-profile)
+    --source|--ultimate-source|--output|--bundle-id|--sign-identity|--provisioning-profile)
       test "$#" -ge 2 || { echo "Missing value for $1" >&2; exit 2; }
       case "$1" in
         --source) source_path=$2 ;;
+        --ultimate-source) ultimate_source=$2 ;;
         --output) output=$2 ;;
         --bundle-id) bundle_id=$2 ;;
         --sign-identity) sign_identity=$2 ;;
@@ -21,7 +23,7 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2 ;;
     --help|-h)
-      echo 'Usage: sh scripts/ios/build.sh [--source PACKAGE_OR_FOLDER] [--output DIR] [--bundle-id ID] [--sign-identity ID --provisioning-profile FILE]'
+      echo 'Usage: sh scripts/ios/build.sh [--source PACKAGE_OR_FOLDER] [--ultimate-source ZIP_OR_FOLDER] [--output DIR] [--bundle-id ID] [--sign-identity ID --provisioning-profile FILE]'
       echo 'Without signing options, creates an unsigned private IPA for re-signing.'
       echo 'Select full Xcode with DEVELOPER_DIR; requires CMake, Ninja and Python 3.11+.'
       exit 0 ;;
@@ -64,6 +66,15 @@ if [ -n "$source_path" ]; then
 else
   out/build/ios-import/rb_blitz_import --fingerprints config/game_fingerprints.toml \
     --destination game --verify
+fi
+# Private IPAs include Ultimate. Reuse an installed payload, or obtain the
+# pinned upstream release with the existing transactional native importer.
+if [ -n "$ultimate_source" ]; then
+  out/build/ios-import/rb_blitz_import --fingerprints config/game_fingerprints.toml \
+    --destination game --verify --ultimate-source "$ultimate_source"
+elif ! test -f game/ultimate/gen/patch_xbox.hdr || ! test -f game/ultimate/gen/patch_xbox_0.ark; then
+  out/build/ios-import/rb_blitz_import --fingerprints config/game_fingerprints.toml \
+    --destination game --verify --ultimate
 fi
 if ! test -f rexglue-sdk/CMakeLists.txt; then git submodule update --init --recursive; fi
 python3 scripts/setup/apply_sdk_patches.py

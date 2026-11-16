@@ -5,6 +5,7 @@
 #include "input/last_device.h"
 #include "input/source_gates.h"
 #include "input/title_input.h"
+#include "input/touch_controls.h"
 #include "ui/menu_music_player.h"
 
 #include <cstring>
@@ -357,6 +358,10 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     return p;
   }
   void OnMouseMove(rex::ui::MouseEvent& e) override {
+    if (touch::ConsumeMouse(e.is_touch(), touch::Phase::kMove, GameScreenActive())) {
+      e.set_handled(true);
+      return;
+    }
     if (auto changed = e.is_touch() ? last_device::Touch() : last_device::MouseMove(e.x(), e.y()))
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
                   e.is_touch() ? "touch" : "mouse");
@@ -377,6 +382,10 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     e.set_handled(true);
   }
   void OnMouseDown(rex::ui::MouseEvent& e) override {
+    if (touch::ConsumeMouse(e.is_touch(), touch::Phase::kDown, GameScreenActive())) {
+      e.set_handled(true);
+      return;
+    }
     if (auto changed = e.is_touch() ? last_device::Touch() : last_device::MouseButton())
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
                   e.is_touch() ? "touch" : "mouse");
@@ -406,6 +415,10 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     e.set_handled(true);
   }
   void OnMouseUp(rex::ui::MouseEvent& e) override {
+    if (touch::ConsumeMouse(e.is_touch(), touch::Phase::kUp, GameScreenActive())) {
+      e.set_handled(true);
+      return;
+    }
     g_mouse_buttons.fetch_and(~MouseMask(e.button()));
     if (PlayerEvent(ui::music::PointerEvent::kUp, e)) return;
     if (REXCVAR_GET(mouse_native_trace))

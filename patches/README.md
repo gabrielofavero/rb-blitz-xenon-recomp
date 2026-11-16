@@ -12,6 +12,16 @@ checkout.
 
 ## Patches
 
+`0078-ios-application-lifecycle.patch` handles UIKit activation synchronously
+through SDL's event watch. It stops inactive UI paints, pauses audio and guest
+time, gates all Vulkan queue acquisitions and waits for submitted GPU work before
+background entry. Foreground resumes queue waiters and requests a new paint;
+interrupted startup uploads on the UI thread keep pumping UIKit notifications.
+The owner's failed run reported Metal `BackgroundExecutionNotPermitted` followed
+by `VK_ERROR_DEVICE_LOST`. Host regressions cover draining, blocked submissions,
+duplicate events, repeated resume, startup pumping and guest-clock continuity.
+Device lock/unlock and app switching remain acceptance checks.
+
 `0077-moltenvk-replacement-drawable-size.patch` restores the Metal layer's drawable
 extent after replacement swapchain creation and old-swapchain retirement. The
 pinned MoltenVK 1.4.1 can flush pending presentations by shrinking that shared

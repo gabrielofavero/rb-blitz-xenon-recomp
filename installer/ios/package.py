@@ -25,6 +25,7 @@ from native_assets import controller_entries
 SYSTEM_PREFIXES = ("/usr/lib/", "/System/Library/")
 LOAD_COMMANDS = {"LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB", "LC_REEXPORT_DYLIB", "LC_LOAD_UPWARD_DYLIB"}
 GAME_FILES = {"default.xex", "gen/main_xbox.hdr", "gen/main_xbox_0.ark"}
+ULTIMATE_FILES = {"gen/patch_xbox.hdr", "gen/patch_xbox_0.ark"}
 VA_ENTITLEMENT = "com.apple.developer.kernel.extended-virtual-addressing"
 
 
@@ -70,6 +71,33 @@ def verify_game(game: Path, fingerprints: Path) -> list[str]:
         if path.stat().st_size != item["size"] or sha256(path) != item["sha256"]:
             fail(f"unsupported or corrupt game input: {item['path']}")
     return sorted(GAME_FILES)
+
+
+def verify_ultimate(payload: Path, fingerprints: Path = ROOT / "installer/config/ultimate_fingerprints.toml") -> list[str]:
+    with fingerprints.open("rb") as stream:
+        records = [item for item in tomllib.load(stream)["files"]
+                   if item["role"] in {"ultimate-archive-header", "ultimate-archive-data"}]
+    if {item["path"] for item in records} != ULTIMATE_FILES or len(records) != len(ULTIMATE_FILES):
+        fail("Ultimate fingerprint manifest differs from the two-file payload contract")
+    for item in records:
+        path = safe_file(payload, item["path"])
+        if path.stat().st_size != item["size"] or sha256(path) != item["sha256"]:
+            fail(f"unsupported or corrupt Ultimate input: {item['path']}")
+    return sorted(ULTIMATE_FILES)
+
+
+def stage_ultimate(app: Path, game: Path,
+                   fingerprints: Path = ROOT / "installer/config/ultimate_fingerprints.toml") -> None:
+    # Bundle only the supported data pair. The mod's XEX must never replace the
+    # owner's verified retail entrypoint; runtime hooks apply its required delta.
+    for name in verify_ultimate(game / "ultimate", fingerprints):
+        copy_file(safe_file(game / "ultimate", name), app / "game/ultimate" / name)
+    verify_ultimate(app / "game/ultimate", fingerprints)
+    # Ultimate's authored menu offers Save Screenshot only if this guest folder
+    # exists. Actual captures are redirected to Documents/Pictures by the host.
+    placeholder = app / "game/ultimate/screenshots/_keepme"
+    placeholder.parent.mkdir(parents=True, exist_ok=True)
+    placeholder.write_bytes(b"zxc")
 
 
 def load_commands(binary: Path) -> list[tuple[str, str]]:
@@ -260,10 +288,13 @@ def copy_file(source: Path, target: Path, executable: bool = False) -> None:
 
 def stage_resources(app: Path, build: Path, game: Path, validator: Path) -> None:
     fingerprints = ROOT / "config/game_fingerprints.toml"
+    verify_ultimate(game / "ultimate")
     for name in verify_game(game, fingerprints):
         copy_file(safe_file(game, name), app / "game" / name)
     verify_game(app / "game", fingerprints)
+    stage_ultimate(app, game)
     resources = [("config/game_fingerprints.toml", "game-fingerprints.toml"),
+                 ("installer/config/ultimate_fingerprints.toml", "ultimate-fingerprints.toml"),
                  ("config/graphics_preparation.json", "graphics-preparation.json"),
                  ("assets/messages/feed.json", "assets/messages/feed.json"),
                  ("LICENSE", "LICENSE")]
@@ -379,7 +410,8 @@ def main() -> None:
         report = {"version": version, "platform": "iOS", "architecture": "arm64",
                   "minimumOS": args.minimum_ios, "bundleId": args.bundle_id,
                   "signed": bool(args.sign_identity), "containsPrivateGameData": True,
-                  "deviceGameplayVerified": False, "sha256": sha256(candidate),
+                  "deviceGameplayVerified": False, "includesUltimate": True,
+                  "defaultGameVersion": "ultimate", "sha256": sha256(candidate),
                   "files": {path.relative_to(app).as_posix(): sha256(path)
                             for path in sorted(app.rglob("*")) if path.is_file()}}
         candidate.replace(destination)

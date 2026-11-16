@@ -173,7 +173,7 @@ int main() {
     CHECK_TRUE(ResolvePayloadRoot("../other", game) == game.parent_path() / "other");
 
     // An absolute value is honoured as given.
-    const fs::path absolute = "D:/elsewhere/ultimate";
+    const fs::path absolute = fs::temp_directory_path() / "elsewhere" / "ultimate";
     CHECK_TRUE(ResolvePayloadRoot(absolute.string(), game) == absolute);
 
     // A relative value is resolved, never left dangling: the answer is not a function

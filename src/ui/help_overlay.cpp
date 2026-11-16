@@ -45,6 +45,9 @@
 #include "ui/help_topics.h"
 #include "ui/help_layout.h"
 #include "ui/settings_screen.h"
+#ifdef __APPLE__
+#include "ui/apple_font.h"
+#endif
 
 // Only live text-entry feedback belongs in the caption strip. Outcomes use notifications.
 namespace store_ns = rb_blitz::store;
@@ -240,6 +243,15 @@ void ConfigureCaptionFont(ImFontAtlas* atlas) {
   }
   const std::string directory = SystemFontDirectory();
   static const ImWchar ranges[] = {0x20,0x024F,0x0370,0x052F,0x2000,0x206F,0};
+#ifdef __APPLE__
+  constexpr const char* names[] = {"ArialMT", "Helvetica"};
+  g_caption_font = LoadAppleFont(atlas, kCaptionBakedSize, names, ranges);
+  if (g_caption_font) {
+    REXLOG_INFO("help_overlay: Apple sans font '{}' baked at {:.0f} px",
+                g_caption_font->GetDebugName(), static_cast<double>(kCaptionBakedSize));
+    return;
+  }
+#endif
   for (const char* candidate : kCaptionFontCandidates) {
     if (directory.empty()) {
       break;
@@ -258,7 +270,7 @@ void ConfigureCaptionFont(ImFontAtlas* atlas) {
   g_caption_font = nullptr;
   REXLOG_WARN("help_overlay: no system sans font could be loaded from '{}'; the caption uses the "
               "SDK's own font at the caption size",
-              directory.empty() ? "(no WINDIR)" : directory);
+              directory.empty() ? "(platform font lookup)" : directory);
 }
 
 void PublishText(std::string text) {

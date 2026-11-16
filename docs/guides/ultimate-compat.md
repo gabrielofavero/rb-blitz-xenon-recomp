@@ -76,8 +76,14 @@ For older configurations whose root ends in `Saved Games` (case-insensitive),
 it is instead the sibling `Pictures` folder. For example, both
 `Documents/Rock Band Blitz` and `Documents/Rock Band Blitz/Saved Games` put images
 in `Documents/Rock Band Blitz/Pictures`. Explicit custom user roots are honored.
-The guest's `screenshots/_keepme` and relative fallback no longer determine the
-host destination, and the game data does not need write access.
+On iOS, the destination is the Files-visible `Documents/Pictures` folder,
+created at first launch. Private iOS IPAs include Ultimate 2.11 and start with it
+by default; the first upgrade from the former retail default switches once.
+Subsequent Game Version choices remain available and are preserved.
+
+The guest's `screenshots/_keepme` still makes Ultimate's authored capture button
+available, and the private IPA supplies that placeholder. It and the relative
+fallback no longer determine the host destination; game data stays read-only.
 
 The log records each successful filename and capture/write errors. Ultimate's
 authored footer still changes to `Screenshot Saved` without checking success;

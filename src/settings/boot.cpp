@@ -5,6 +5,7 @@
 // items this pass states instead of guessing.
 
 #include "settings/boot.h"
+#include "settings/ios_defaults.h"
 #include <SDL3/SDL.h>
 #include "settings/display_runtime.h"
 #if defined(__APPLE__) && !defined(RB_BLITZ_IOS)
@@ -457,7 +458,11 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     service_->SetReconciler(&reconciler_);
     service_->SetCapabilities(capability_snapshot_);
     // Auto follows the current display on every boot, without running a benchmark.
+#if defined(RB_BLITZ_IOS)
+    constexpr int kPolicyVersion = kIOSPolicyVersion;
+#else
     constexpr int kPolicyVersion = 4;
+#endif
     const auto recommendation = RecommendGraphics(capability_snapshot_);
     GraphicsValues recommendations = {
         {SettingId::kRenderer, recommendation.renderer},
@@ -492,6 +497,10 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
         store.MarkChanged(SettingId::kResolution, compatible, Origin::kAutomatic);
         diagnostics_.push_back("saved resolution is incompatible with this display; switched to Auto");
       }
+#if defined(RB_BLITZ_IOS)
+      if (UpgradeIOSLaunchDefault(store))
+        diagnostics_.push_back("iOS default Game Version upgraded to bundled Ultimate");
+#endif
       if (store.has_changes()) {
         store.MarkPolicyVersion(kPolicyVersion);
         const auto saved = store.Save();
@@ -559,6 +568,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
           "the saved graphics request failed to present before; this boot retries it once");
     }
     if (graphics_boot_.recovered() || forced_safe) {
+      ApplyReleaseGraphicsRules(selected, schema::CurrentReleaseSettings());
       for (auto& [id, value] : selected) {
         if (id != SettingId::kResolution)
           value = reconciler_.Reconcile(id, *service_->DescriptorFor(id), value, capability_snapshot_).effective;
@@ -1064,11 +1074,22 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
         {"resolution_scale", "1"}, {"native_2x_msaa", "false"},
         {"swap_post_effect", "none"}, {"anisotropic_override", "-1"}})
       rex::cvar::SetFlagByName(name, value);
+#if defined(RB_BLITZ_IOS)
+    screen_plan_ = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size, "auto", 1);
+#else
     screen_plan_ = PlanGuestScreen(render_limits_, {1280, 720});
+#endif
     overrides_.erase(SettingId::kResolution);
     if (service_) {
       auto safe = RecoverGraphics(capability_snapshot_, service_->RequestedValue(SettingId::kResolution),
                                   kFallbackBackend, true);
+#if defined(RB_BLITZ_IOS)
+      if (screen_plan_.supported) {
+        safe.resolution.kind = ValueKind::kResolution;
+        safe.resolution.width = screen_plan_.guest_size.width;
+        safe.resolution.height = screen_plan_.guest_size.height;
+      }
+#endif
       service_->SetBootValues({{SettingId::kResolution, safe.resolution}, {SettingId::kRenderer, safe.renderer},
           {SettingId::kAntiAliasing, safe.anti_aliasing}, {SettingId::kFiltering, safe.filtering}},
           "settings.graphics.safe_mode");

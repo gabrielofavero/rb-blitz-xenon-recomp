@@ -1276,3 +1276,24 @@ and `out/_swap/resolution-probe-2026-11-10/4x3-store/rhythmverse-stable.png`. Th
 Messages and RhythmVerse captures show all primary content and header controls in frame. The song capture shows
 the 3D horizontal crop and inward-anchored HUD. These are windowed diagnostic captures; a native
 4:3 fullscreen display remains untested.
+
+### iOS startup recovery and background GPU loss (2026-11-16)
+
+The owner's two device logs isolated separate failures in the same IPA. In the
+failed sizing run, recovery selected guest 1280x720 while the presenter correctly
+used the device's 2622:1206 aspect. The successful run selected guest 1568x720.
+Recovery now reapplies fixed release rules before replanning the selected pixels;
+iOS retains Auto/1x for both safe and last-good recovery. Explicit safe graphics
+uses the same device-shaped plan. Desktop recovery keeps its existing aspect.
+
+The failed background run ends with `VK_ERROR_DEVICE_LOST` and Metal's
+`BackgroundExecutionNotPermitted` error. SDK patch 0078 handles UIKit lifecycle
+notifications synchronously through SDL's event watch, gates every Vulkan queue
+acquisition and drains completed submissions before backgrounding. It suppresses
+inactive UI paints, pauses audio and guest time, and requests painting on resume.
+The title's main draw seam waits for foreground, while queue waiters retain their
+pending submissions. Lifecycle diagnostics use the `ios_lifecycle` prefix.
+
+Headless regressions cover queue draining, blocked background submissions,
+duplicate notifications, repeated resume, startup event pumping, clock continuity,
+and old safe/desktop recovery values. Device switching remains a manual gate.

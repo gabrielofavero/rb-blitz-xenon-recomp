@@ -7,6 +7,9 @@
 #include <cstdint>
 
 #include <rex/cvar.h>
+#if defined(RB_BLITZ_IOS)
+#include "platform/ios_runtime.h"
+#endif
 #include <rex/graphics/compile_trace.h>
 #include <rex/hook.h>
 #include <rex/logging.h>
@@ -83,6 +86,9 @@ void CompleteIteration() {
 // 0x821905AC. Counting after the original returns marks completed draw calls in
 // complete guest main-loop iterations without replacing the loop's PPC body.
 REX_HOOK_RAW(sub_82190218) {
+#if defined(RB_BLITZ_IOS)
+  rb_blitz::platform::WaitForIOSForeground();
+#endif
   rex::graphics::compile_trace::Scope trace_draw(
       rex::graphics::compile_trace::Event::kGuestWork, "guest.main_loop_draw", 0x82190218);
   __imp__sub_82190218(ctx, base);

@@ -54,6 +54,41 @@ class PackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "linked source"):
                 package.verify_game(root / "game", manifest)
 
+    def test_ultimate_is_bundled_without_mod_executable_or_private_settings(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            game = root / "game"
+            app = root / "app"
+            records = []
+            for role, relative in (("ultimate-archive-header", "gen/patch_xbox.hdr"),
+                                   ("ultimate-archive-data", "gen/patch_xbox_0.ark")):
+                target = game / "ultimate" / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                data = relative.encode()
+                target.write_bytes(data)
+                records.append(f'[[files]]\nrole = "{role}"\npath = "{relative}"\n'
+                               f'size = {len(data)}\nsha256 = "{hashlib.sha256(data).hexdigest()}"\n')
+            (game / "ultimate/default.xex").write_bytes(b"mod executable")
+            (game / "ultimate/private-settings.txt").write_bytes(b"private preferences")
+            fingerprints = root / "fingerprints.toml"
+            fingerprints.write_text("\n".join(records))
+            package.stage_ultimate(app, game, fingerprints)
+            self.assertEqual({p.relative_to(app / "game/ultimate").as_posix()
+                              for p in (app / "game/ultimate").rglob("*") if p.is_file()},
+                             package.ULTIMATE_FILES | {"screenshots/_keepme"})
+            self.assertEqual((app / "game/ultimate/screenshots/_keepme").read_bytes(), b"zxc")
+            target = game / "ultimate/gen/patch_xbox_0.ark"
+            target.write_bytes(b"corrupt")
+            with self.assertRaisesRegex(ValueError, "corrupt Ultimate"):
+                package.verify_ultimate(game / "ultimate", fingerprints)
+            target.unlink()
+            target.symlink_to(fingerprints)
+            with self.assertRaisesRegex(ValueError, "linked source"):
+                package.verify_ultimate(game / "ultimate", fingerprints)
+            target.unlink()
+            with self.assertRaisesRegex(ValueError, "missing or escaping source"):
+                package.verify_ultimate(game / "ultimate", fingerprints)
+
     def test_parent_link_is_rejected(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)

@@ -11,7 +11,9 @@ namespace rb_blitz::screenshots {
 
 // The normal user-data root is the Blitz folder itself. Older installations
 // selected a Saved Games child instead; keep Pictures alongside that child.
-std::filesystem::path PicturesDirectory(const std::filesystem::path& user_data_root);
+// iOS supplies its shared Documents root so captures are visible in Files.
+std::filesystem::path PicturesDirectory(const std::filesystem::path& user_data_root,
+                                       const std::filesystem::path& shared_documents = {});
 
 // Presenter pixels are top-down R8 G8 B8 X8; the final row may omit stride padding.
 // Writes a standard, uncompressed 24-bit BMP, choosing a new numbered filename

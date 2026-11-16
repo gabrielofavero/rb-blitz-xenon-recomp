@@ -19,6 +19,7 @@
 #include "input/pad_packet.h"
 #include "input/source_gates.h"
 #include "input/title_input.h"
+#include "input/touch_controls.h"
 #include "settings/input_bindings.h"
 
 #include <array>
@@ -263,6 +264,12 @@ struct RemapContext {
           TableActive(routing, profile::gameplay_remap::TableKind::kKeyboardMouse, gameplay);
       poll.controller_buttons = controller_buttons;
     }
+    // Touch has fixed bindings and never produces mouse or pad sources.
+    const auto touch_actions = touch::SampleGameplay(gameplay && input.window_focused);
+    // Touch notes/swipes retain their origin and gesture identity at the guest
+    // seam. Only Pause joins the pad overlay; physical bindings keep their path.
+    const auto pause = static_cast<size_t>(profile::gameplay_remap::Action::kPause);
+    poll.held[pause] = poll.held[pause] || touch_actions[pause];
     // Logged outside the lock: a trace line is a formatted string and a write, and no other poll
     // should wait on it.
     for (const TraceLine& line : lines) {
@@ -338,6 +345,7 @@ constexpr char kRecoveryKeyLabel[] = "F10";
 bool KeyboardSupportEnabled() { return true; }
 
 void InvalidateGameplayInput() {
+  touch::CancelGameplay();
   g_gameplay_boundary.fetch_add(1, std::memory_order_relaxed);
   // P3 (plan D5): the dispatcher drops what it queued and releases what the guest already holds
   // on its next frame, so a press or release from the old context can never arrive late - and a
@@ -511,6 +519,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           std::vector<std::string> new_keys;
           HostKeyEventsSince(&key_serial, &new_keys);
           const bool capture_armed = capture::Armed() && !modal_blocked;
+          if (IsGameplayUser(user_index) && capture_armed) touch::CancelGameplay();
           if (capture_armed) {
             capture::Observation observation;
             observation.focused = physical.window_focused;

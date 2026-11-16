@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
 #include "fs/screenshots.h"
+#include "fs/ios_documents.h"
 
 #include <array>
 #include <chrono>
@@ -31,11 +32,34 @@ int main() {
   CHECK_TRUE(PicturesDirectory("Blitz/saved games/") == std::filesystem::path("Blitz/Pictures"));
   CHECK_TRUE(PicturesDirectory("custom-data") == std::filesystem::path("custom-data/Pictures"));
   CHECK_TRUE(PicturesDirectory({}).empty());
+  CHECK_TRUE(PicturesDirectory("Library/rb_blitz", "Documents") ==
+             std::filesystem::path("Documents/Pictures"));
+  CHECK_TRUE(PicturesDirectory({}, "Documents") == std::filesystem::path("Documents/Pictures"));
 
   const auto root = std::filesystem::temp_directory_path() /
       ("rb-blitz-screenshots-" + std::to_string(
           std::chrono::steady_clock::now().time_since_epoch().count()));
   const auto directory = root / std::filesystem::path(u8"Blitz-\u00e7") / "Pictures";
+  BeginCase("iOS Files folders retire empty import placeholders and preserve user data");
+  const auto documents = root / "Documents";
+  std::filesystem::create_directories(documents / "Import");
+  std::filesystem::create_directories(documents / "Imports");
+  std::ofstream(documents / "Imports/keep.dat") << "keep";
+  rb_blitz::fs::PrepareIOSDocumentsFolders(documents);
+  CHECK_TRUE(std::filesystem::is_directory(documents / "DLCs"));
+  CHECK_TRUE(std::filesystem::is_directory(documents / "Pictures"));
+  CHECK_FALSE(std::filesystem::exists(documents / "Import"));
+  CHECK_TRUE(Read(documents / "Imports/keep.dat") == std::vector<uint8_t>({'k','e','e','p'}));
+  std::filesystem::remove(documents / "Imports/keep.dat");
+  rb_blitz::fs::PrepareIOSDocumentsFolders(documents);
+  CHECK_FALSE(std::filesystem::exists(documents / "Imports"));
+  std::ofstream(documents / "Imports") << "keep";
+  std::filesystem::create_directories(root / "another-folder");
+  std::filesystem::create_directory_symlink(root / "another-folder", documents / "Import");
+  rb_blitz::fs::PrepareIOSDocumentsFolders(documents);
+  CHECK_TRUE(std::filesystem::is_symlink(documents / "Import"));
+  CHECK_TRUE(Read(documents / "Imports") == std::vector<uint8_t>({'k','e','e','p'}));
+
   // Top row red, green, blue; bottom row white, black, yellow. Source padding
   // has sentinel bytes and the final row omits padding, per RawImage's contract.
   const std::array<uint8_t, 28> rgba = {

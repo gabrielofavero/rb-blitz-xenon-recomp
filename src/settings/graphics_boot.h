@@ -9,6 +9,9 @@
 
 namespace rb_blitz::settings {
 using GraphicsValues = std::map<SettingId, Value>;
+namespace schema { struct ReleaseSettings; }
+// A recovery journal may contain settings from a different platform/release.
+void ApplyReleaseGraphicsRules(GraphicsValues& values, const schema::ReleaseSettings& release);
 
 // Per-profile graphics startup journal. It never rewrites requested preferences.
 //

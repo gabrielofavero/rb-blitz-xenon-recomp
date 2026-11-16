@@ -27,7 +27,9 @@ void Put32(std::array<uint8_t, 54>& header, size_t offset, uint32_t value) {
 
 }  // namespace
 
-std::filesystem::path PicturesDirectory(const std::filesystem::path& user_data_root) {
+std::filesystem::path PicturesDirectory(const std::filesystem::path& user_data_root,
+                                       const std::filesystem::path& shared_documents) {
+  if (!shared_documents.empty()) return shared_documents / "Pictures";
   if (user_data_root.empty()) return {};
   auto root = user_data_root.lexically_normal();
   if (root.filename().empty()) root = root.parent_path();

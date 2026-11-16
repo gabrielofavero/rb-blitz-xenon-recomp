@@ -61,6 +61,7 @@
 #include "platform/bundle_resources.h"
 #if defined(RB_BLITZ_IOS)
 #include "platform/ios_runtime.h"
+#include "input/touch_controls.h"
 #endif
 #include <rex/graphics/compile_trace.h>
 #include "diag/shader_trace.h"
@@ -420,7 +421,11 @@ class RbBlitzApp : public rex::ReXApp {
     // registry, so the toggle and the row list are captured once (P1's D7).
     rb_blitz::menu_filter::Configure(settings_restart_boot_);
     rb_blitz::local_save::Configure(runtime());
+#if defined(RB_BLITZ_IOS)
+    rb_blitz::screenshots::Configure(runtime(), ios_documents_root_);
+#else
     rb_blitz::screenshots::Configure(runtime());
+#endif
     rb_blitz::ultimate::Configure(runtime(), game_data_root());
     log_stage("identity_and_ultimate");
     // After ultimate::Configure, which decides what the guest-visible game tree
@@ -788,6 +793,9 @@ class RbBlitzApp : public rex::ReXApp {
   // handed over as a callback rather than a pointer - the same lazily-called shape
   // as the menu cursor's window lookup.
   void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
+#if defined(RB_BLITZ_IOS)
+    touch_controls_ = rb_blitz::input::touch::CreateControls(drawer, [this] { return window(); });
+#endif
     boot_loading_icon_ = std::make_unique<rb_blitz::ui::BootLoadingIcon>(
         drawer, [this] {
           auto* graphics = runtime() ? runtime()->graphics_system() : nullptr;
@@ -799,6 +807,14 @@ class RbBlitzApp : public rex::ReXApp {
     if (boot_icon_art_loaded_)
       boot_loading_icon_->SetFrames(std::move(boot_loading_frames_));
   }
+
+#if defined(RB_BLITZ_IOS)
+  void OnApplicationActiveChanged(bool active) override {
+    rb_blitz::platform::SetIOSApplicationActive(active);
+    if (!active) rb_blitz::input::InvalidateGameplayInput();
+    else rb_blitz::platform::LogIOSPresentationState();
+  }
+#endif
 
   bool WantsStartupPaint() const override { return boot_icon_art_loaded_; }
 
@@ -812,6 +828,9 @@ class RbBlitzApp : public rex::ReXApp {
     achievement_browser_.reset();
     rb_blitz::ui::notifications::SharedQueue().Clear();
     mouse_cursor_.reset();
+#if defined(RB_BLITZ_IOS)
+    touch_controls_.reset();
+#endif
     boot_loading_icon_.reset();
   }
 
@@ -945,6 +964,7 @@ class RbBlitzApp : public rex::ReXApp {
 #if defined(RB_BLITZ_IOS)
   std::filesystem::path ios_documents_root_;
   bool ios_startup_frame_saved_ = false;
+  std::unique_ptr<rex::ui::ImGuiDialog> touch_controls_;
 #endif
   // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings
   // bridge's caption sink, because the sink object lives beside the dialog.

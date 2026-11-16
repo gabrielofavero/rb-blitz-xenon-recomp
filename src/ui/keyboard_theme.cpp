@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ui/keyboard_theme.h"
+#ifdef __APPLE__
+#include "ui/apple_font.h"
+#endif
 
 #include "input/native_menu.h"
 #include "input/title_input.h"
@@ -55,6 +58,16 @@ void ConfigureKeyboardFonts(ImFontAtlas *atlas) {
   const char *heading[] = {"arialbd.ttf", "tahomabd.ttf", "seguisb.ttf"};
   g_font = LoadFont(atlas, regular, 3);
   g_heading_font = LoadFont(atlas, heading, 3);
+#ifdef __APPLE__
+  const char* apple_regular[] = {"ArialNarrow-Bold", "Arial-BoldMT", "Helvetica-Bold"};
+  const char* apple_heading[] = {"Arial-BoldMT", "Helvetica-Bold"};
+  g_font = LoadAppleFont(atlas, kBakedSize, apple_regular);
+  g_heading_font = LoadAppleFont(atlas, kBakedSize, apple_heading);
+  if (g_font && g_heading_font) {
+    REXLOG_INFO("keyboard: Apple sans fonts '{}' / '{}' baked at 64 px",
+                g_font->GetDebugName(), g_heading_font->GetDebugName());
+  }
+#endif
   if (!g_font) {
     ImFontConfig config;
     config.SizePixels = kBakedSize;

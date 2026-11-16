@@ -38,6 +38,14 @@ GraphicsValues ReadValues(const toml::Document& doc, const char* section) {
 }
 }
 
+void ApplyReleaseGraphicsRules(GraphicsValues& values, const schema::ReleaseSettings& release) {
+  for (auto& [id, value] : values) {
+    const auto rule = release.rules.find(id);
+    if (rule != release.rules.end() && rule->second.fixed_default && rule->second.default_value)
+      value = *rule->second.default_value;
+  }
+}
+
 bool GraphicsBootState::Open(const std::filesystem::path& settings_file, std::string* error) {
   if (settings_file.empty()) return false;
   file_ = settings_file;

@@ -13,6 +13,7 @@
 
 #include "settings/cvars.h"
 #include "settings/service.h"
+#include "settings/ios_defaults.h"
 #include "settings/ultimate_adapter.h"
 #include "settings/schema.h"
 
@@ -1269,6 +1270,46 @@ void TestVulkanOnlyReleaseSettings() {
   }
 }
 
+void TestIOSUltimateDefaultUpgrade() {
+  BeginCase("iOS upgrades the old retail default once, then preserves later choices");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  const auto ios = schema::SettingsForRelease(schema::HostPlatform::kIOS, "test");
+  WriteFile(paths.settings_file, "schema_version = 1\n[automatic]\npolicy_version = 4\n"
+            "[general]\ntarget = 'common'\n");
+  {
+    Service service(paths, ios);
+    CHECK_TRUE(service.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+    CHECK_TRUE(UpgradeIOSLaunchDefault(service.store()));
+    CHECK_TRUE(service.EffectiveValue(SettingId::kTarget).text == "ultimate");
+    CHECK_TRUE(service.store().Save().errors.empty());
+    CHECK_FALSE(UpgradeIOSLaunchDefault(service.store()));
+    Value retail;
+    retail.kind = ValueKind::kEnum;
+    retail.text = "common";
+    service.store().MarkChanged(SettingId::kTarget, retail, Origin::kManual);
+    CHECK_TRUE(service.store().Save().errors.empty());
+  }
+  {
+    Service service(paths, ios);
+    CHECK_TRUE(service.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+    CHECK_FALSE(UpgradeIOSLaunchDefault(service.store()));
+    CHECK_TRUE(service.EffectiveValue(SettingId::kTarget).text == "common");
+  }
+  WriteFile(paths.settings_file, "schema_version = 1\n[automatic]\npolicy_version = 4\n"
+            "[general]\ntarget = 'demo'\n");
+  {
+    Service service(paths, ios);
+    CHECK_TRUE(service.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+    CHECK_TRUE(UpgradeIOSLaunchDefault(service.store()));
+    CHECK_TRUE(service.EffectiveValue(SettingId::kTarget).text == "demo");
+  }
+  Scratch fresh;
+  Service service(Paths(fresh), ios);
+  CHECK_TRUE(service.Boot(nullptr, {}, nullptr) == DocumentStatus::kMissing);
+  CHECK_TRUE(service.EffectiveValue(SettingId::kTarget).text == "ultimate");
+}
+
 void TestIOSReleaseSettings() {
   BeginCase("iOS: hidden desktop display preferences cannot replace the device baseline");
   Scratch scratch;
@@ -1342,5 +1383,6 @@ int main(int argc, char** argv) {
   TestReleaseSettingsMigration();
   TestVulkanOnlyReleaseSettings();
   TestIOSReleaseSettings();
+  TestIOSUltimateDefaultUpgrade();
   return Finish();
 }

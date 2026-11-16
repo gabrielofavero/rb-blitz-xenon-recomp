@@ -17,6 +17,12 @@ controls remain available. Auto resolution follows the device's proportions at
 presentation. Service and menu host tests cover filtering; device
 UI layout is unverified. See [the iOS CLI guide](../../installer/ios/README.md).
 
+The iOS touch gameplay defaults are fixed and have no settings rows: left/right
+half presses hit First/Second Note immediately, inverted horizontal swipes move
+one lane, and the top-right `||` touch overlay pauses. A wrong starting press is
+deferred until release and forgiven if its touch swipes. Missed chart notes retain
+their penalties. Mouse and controller bindings remain independent.
+
 ## Current organization (2026-11-15)
 
 The root shows Controls, Audio & Video, Gameplay, Interface, Library & Store, and

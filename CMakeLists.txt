@@ -174,6 +174,8 @@ set(RBBLITZ_SOURCES
     src/fs/payload_overlay.cpp
     src/input/remap.cpp
     src/input/mouse_ui.cpp
+    src/input/touch_controls.cpp
+    src/input/touch_gestures.cpp
     src/input/native_menu.cpp
     # P3 of the gameplay-mapping plan: the guest adapter that dispatches a gameplay table's
     # actions through the title's own validated boundary (the controller factory/destructor, the
@@ -387,6 +389,10 @@ add_custom_target(rb_blitz_stage_gpu
     COMMENT "Staging the current GPU plugin beside rb_blitz"
     VERBATIM)
 add_dependencies(rb_blitz rb_blitz_stage_gpu)
+if(APPLE)
+    target_sources(rb_blitz PRIVATE src/ui/apple_font.cpp)
+    target_link_libraries(rb_blitz PRIVATE "-framework CoreText" "-framework CoreFoundation")
+endif()
 if(RBBLITZ_IOS)
     target_link_libraries(rb_blitz PRIVATE "-framework UIKit" "-framework Foundation" "-framework Metal")
     set_target_properties(rb_blitz PROPERTIES
@@ -743,6 +749,16 @@ add_executable(rb_blitz_shader_microcode_hash tools/shader_microcode_hash.cpp)
 target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 
 if(BUILD_TESTING)
+    add_executable(rb_blitz_ios_lifecycle_tests tests/ios_lifecycle_tests.cpp)
+    target_include_directories(rb_blitz_ios_lifecycle_tests PRIVATE tests)
+    target_link_libraries(rb_blitz_ios_lifecycle_tests PRIVATE rex::core)
+    add_test(NAME ios_lifecycle COMMAND rb_blitz_ios_lifecycle_tests)
+    set_tests_properties(ios_lifecycle PROPERTIES TIMEOUT 10)
+
+    add_executable(rb_blitz_touch_gestures_tests tests/touch_gestures_tests.cpp
+        src/input/touch_gestures.cpp)
+    target_include_directories(rb_blitz_touch_gestures_tests PRIVATE src tests)
+    add_test(NAME touch_gestures COMMAND rb_blitz_touch_gestures_tests)
     if(APPLE)
         add_executable(rb_blitz_metal_surface_tests tests/metal_surface_tests.mm)
         target_include_directories(rb_blitz_metal_surface_tests PRIVATE tests)
@@ -833,6 +849,12 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_keyboard_controller_tests PRIVATE "${REXSDK_DIR}/include")
     target_link_libraries(rb_blitz_keyboard_controller_tests PRIVATE imgui)
     add_test(NAME keyboard_controller COMMAND rb_blitz_keyboard_controller_tests)
+    if(APPLE)
+        add_executable(rb_blitz_apple_font_tests tests/apple_font_tests.cpp src/ui/apple_font.cpp)
+        target_include_directories(rb_blitz_apple_font_tests PRIVATE src)
+        target_link_libraries(rb_blitz_apple_font_tests PRIVATE imgui "-framework CoreText" "-framework CoreFoundation")
+        add_test(NAME apple_font COMMAND rb_blitz_apple_font_tests)
+    endif()
     # Compile the production driver into the test so its SDL registry and the
     # virtual-pad fixture share one module (SDL is static in rexruntime.dll).
     add_executable(rb_blitz_keyboard_controller_driver_tests

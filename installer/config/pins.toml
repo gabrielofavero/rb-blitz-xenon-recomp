@@ -59,8 +59,9 @@ dir_name = "rb_blitz"
 requires_game_data = false
 [ultimate]
 # Rock Band Blitz Ultimate, a fan mod maintained at the repository below. Its
-# files are downloaded on demand from the upstream release - never mirrored,
-# re-hosted or bundled - and only when the user asks for them.
+# public installers download on demand from the upstream release, only when
+# requested. Owner-built private iOS IPAs embed the supported data pair and
+# screenshot placeholder; public installer distributions do not bundle it.
 #
 # Schema-compatibility pin: the runtime in this repository looks for
 # ultimate/gen/patch_xbox.hdr and ultimate/gen/patch_xbox_0.ark under the game

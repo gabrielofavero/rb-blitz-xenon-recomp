@@ -19,9 +19,9 @@ rex::Runtime* g_runtime = nullptr;
 std::filesystem::path g_directory;
 }  // namespace
 
-void Configure(rex::Runtime* runtime) {
+void Configure(rex::Runtime* runtime, const std::filesystem::path& shared_documents) {
   g_runtime = runtime;
-  g_directory = PicturesDirectory(runtime->user_data_root());
+  g_directory = PicturesDirectory(runtime->user_data_root(), shared_documents);
   REXLOG_INFO("screenshots: results captures use 24-bit BMP in {}", g_directory.string());
 }
 

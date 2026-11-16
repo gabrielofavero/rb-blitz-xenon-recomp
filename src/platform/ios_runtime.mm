@@ -2,7 +2,10 @@
 #include "platform/ios_runtime.h"
 #include <stdexcept>
 #include <algorithm>
+#include <condition_variable>
+#include <mutex>
 #include "fs/screenshots.h"
+#include "fs/ios_documents.h"
 #include <rex/logging.h>
 #include <rex/ui/presenter.h>
 #import <Foundation/Foundation.h>
@@ -42,6 +45,9 @@ void SaveIOSStartupFrame(const std::filesystem::path& documents, const rex::ui::
 }
 
 namespace {
+std::mutex g_activation_mutex;
+std::condition_variable g_activation_changed;
+bool g_active = true;
 void LogView(UIView* view, unsigned depth, unsigned& remaining) {
   if (!view || !remaining || depth > 6) return;
   --remaining;
@@ -57,6 +63,18 @@ void LogView(UIView* view, unsigned depth, unsigned& remaining) {
     REXLOG_INFO("ios_view: Metal drawable={}x{}", double(drawable.width), double(drawable.height));
   }
 }
+}
+
+void SetIOSApplicationActive(bool active) {
+  {
+    std::lock_guard lock(g_activation_mutex);
+    g_active = active;
+  }
+  if (active) g_activation_changed.notify_all();
+}
+void WaitForIOSForeground() {
+  std::unique_lock lock(g_activation_mutex);
+  g_activation_changed.wait(lock, [] { return g_active; });
 }
 
 void LogIOSPresentationState() {
@@ -78,8 +96,7 @@ std::filesystem::path PrepareIOSDocuments() {
     if (!documents)
       throw std::runtime_error("Could not locate the iOS Documents directory");
     const std::filesystem::path root(documents.fileSystemRepresentation);
-    std::filesystem::create_directories(root / "DLCs");
-    std::filesystem::create_directories(root / "Import");
+    rb_blitz::fs::PrepareIOSDocumentsFolders(root);
     return root;
   }
 }
