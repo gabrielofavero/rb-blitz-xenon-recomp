@@ -162,6 +162,7 @@ set(RBBLITZ_SOURCES
     src/hooks/render_settings.cpp
     src/hooks/settings_payload.cpp
     src/settings/menu_payload.cpp
+    src/ui/gameplay_presentation.cpp
     src/ui/settings_screen.cpp
     src/ui/input_font_scene.cpp
     src/ui/input_icon_rows.cpp
@@ -453,7 +454,7 @@ endforeach()
 if(NOT RBBLITZ_GAME_VERSION)
     message(FATAL_ERROR "installer/config/pins.toml [installer] version is missing or invalid")
 endif()
-target_compile_definitions(rb_blitz PRIVATE "RBBLITZ_GAME_VERSION=\"${RBBLITZ_GAME_VERSION}\"")
+target_compile_definitions(rb_blitz PRIVATE RB_BLITZ_TOUCH_HUD=1 "RBBLITZ_GAME_VERSION=\"${RBBLITZ_GAME_VERSION}\"")
 message(STATUS "rb_blitz: game version ${RBBLITZ_GAME_VERSION}")
 # A checkout boot runs rb_blitz.exe from the build tree; make its offline fallback available there
 # too. The installer stages the canonical source file separately in make_payload.ps1.

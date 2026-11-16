@@ -115,7 +115,7 @@ locally; the builder does not obtain or create them. Signed and unsigned builds
 use the same filename; the audit sidecar records signing status. Move an existing
 IPA aside before rebuilding the same name.
 
-The minimum target is iOS/iPadOS 17.0; the experiment uses landscape fullscreen,
+The minimum target is iOS/iPadOS 17.0; the experiment uses fullscreen (landscape by default; Display > Orientation also offers portrait),
 Vulkan through MoltenVK, automatic device aspect and 1x render scale with
 VSync. The existing Auto planner chooses an aligned guest width at 720p (or
 540p for very wide displays); an A18 Pro iPhone reporting 2622x1206 uses

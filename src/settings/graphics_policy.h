@@ -78,7 +78,8 @@ std::string PolicyRenderer(const CapabilitySnapshot& caps, std::string_view want
 
 // Resolve aspect and quality independently into one verified guest/render plan.
 GuestScreenPlan PlanRenderSettings(const RenderPathLimits& limits, const DisplayMode& display,
-                                   std::string_view aspect, int32_t scale);
+                                   std::string_view aspect, int32_t scale,
+                                   std::string_view orientation = "landscape");
 
 // --- the reconciler -----------------------------------------------------------------------
 

@@ -71,6 +71,12 @@ inline constexpr DisplayMode kMinClientSize{640, 360};
 // unmeasured desktop is not evidence that the request does not fit.
 ClientFit FitClientToDesktop(const DisplayMode& requested, const DesktopMetrics& desktop);
 
+// Equivalent aspect within the SDK video-mode cvar bounds (640x480..4095x4095).
+// Only describes presentation; it never changes the guest render allocation.
+DisplayMode PresentationVideoMode(const DisplayMode& render);
+// The upright viewport cropped from a landscape source, retaining its full height.
+DisplayMode PortraitCropSize(const DisplayMode& source);
+
 // Physical -> logical, the conversion `Window::SizeToPhysical` inverts (`logical * dpi / 96`).
 // Rounded to nearest, never below 1. `scale_percent` is `dpi * 100 / 96`, so 100 is the identity.
 DisplayMode PhysicalToLogical(const DisplayMode& physical, uint32_t scale_percent);

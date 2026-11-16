@@ -1020,6 +1020,20 @@ void TestAspectAndRenderScale() {
     CHECK_TRUE(IsSize(PlanRenderSettings(limits, {1280,720}, "21:9", scale).guest_size,1680,720));
     CHECK_TRUE(IsSize(PlanRenderSettings(limits, {1280,720}, "32:9", scale).guest_size,1920,540));
   }
+  BeginCase("portrait plans crop horizontally at every render scale without widening landscape offers");
+  for (int scale : {1, 2, 3}) {
+    const auto portrait = PlanRenderSettings(limits, {1920, 1080}, "16:9", scale, "portrait");
+    CHECK_TRUE(portrait.supported);
+    CHECK_TRUE(IsSize(portrait.guest_size, 1280, 720));
+    CHECK_EQ(portrait.draw_scale, scale);
+    CHECK_TRUE(PlanGuestScreen(limits, {1280 * scale, 720 * scale}).supported);
+    CHECK_FALSE(PlanGuestScreen(limits, {400 * scale, 720 * scale}).supported);
+    const auto native = PlanRenderSettings(limits, {1800, 2880}, "auto", scale, "portrait");
+    CHECK_TRUE(IsSize(native.guest_size, 1152, 720));
+    const auto desktop = PlanRenderSettings(limits, {2880, 1800}, "auto", scale, "portrait");
+    CHECK_TRUE(IsSize(desktop.guest_size, 1152, 720));
+  }
+  CHECK_FALSE(PlanRenderSettings(limits, {1280,720}, "16:9", 1, "invalid").supported);
   CHECK_FALSE(PlanRenderSettings(limits, {1280,720}, "99:1", 1).supported);
   CHECK_FALSE(PlanRenderSettings(limits, {1280,720}, "auto", 4).supported);
   CapabilityInputs inputs;

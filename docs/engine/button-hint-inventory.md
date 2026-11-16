@@ -64,6 +64,19 @@ evaluator. Device evidence is retained locally in
 `out/ios/footer-touch-20261116/game-before-fix.log`. Live mouse and on-device
 touch acceptance of the transform correction are still pending.
 
+Dialog controls use the same pointer path. The song library's Shortcuts focus
+owns `shortcuts.lst` and `pop_up_help.ihp`, so its rows and Select/Close legends
+are targets while the background footer and header are excluded. The error,
+search, download and library-management popup panels own their own input scope.
+Their drawn `continue.lbl` prompts supply action spans from the normal native
+UTF-16 layout's cumulative advances (`8229FD60`, scoped by `UILabel::SetText`
+at `824BC7D0`). A single Cancel/Close prompt uses its entire text rectangle;
+multiple actions such as Refresh/Close or Delete/Cancel keep separate measured
+regions and an inert gap. No additional layout calls, widgets or overlays are
+introduced. Panel changes clear queued presses even when both panels have no
+focused list. Host tests cover action spans, modal ownership and panel boundaries;
+live dialog mouse/touch acceptance is pending.
+
 ## iOS touch HUD (2026-11-16)
 
 The animated in-song X reminder belongs to `track/gen/hud.milo_xbox`:

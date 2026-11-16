@@ -3595,7 +3595,8 @@ void TestAspectAndRenderScaleRows() {
   ConfigureMenu({});
   for (const auto* panel : {"settings_display_panel", "settings_display_pause_panel"}) {
     const auto rows = PanelRowSymbols(panel);
-    CHECK_EQ(rows.size(), 5u);
+    CHECK_EQ(rows.size(), 6u);
+    CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_orientation") != rows.end());
     CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_aspect_ratio") != rows.end());
     CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_render_scale") != rows.end());
     CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_resolution") == rows.end());
@@ -3603,6 +3604,10 @@ void TestAspectAndRenderScaleRows() {
   const auto paths = RequestPaths();
   for (const auto* ratio : {"auto", "16:9", "16:10", "4:3", "21:9", "32:9"}) {
     const std::string set = std::string("rbbz-settings/set/graphics.aspect_ratio/t:") + ratio;
+    CHECK_TRUE(std::find(paths.begin(), paths.end(), set) != paths.end());
+  }
+  for (const auto* orientation : {"landscape", "portrait"}) {
+    const std::string set = std::string("rbbz-settings/set/graphics.orientation/t:") + orientation;
     CHECK_TRUE(std::find(paths.begin(), paths.end(), set) != paths.end());
   }
   for (const auto* scale : {"auto", "1x", "2x", "3x"}) {
@@ -3614,7 +3619,7 @@ void TestAspectAndRenderScaleRows() {
     if (symbol.starts_with("settings_aspect_ratio_") || symbol.starts_with("settings_render_scale_"))
       CHECK_TRUE(label.size() <= 28);
   }
-  for (const auto* symbol : {"settings_aspect_ratio", "settings_render_scale"}) {
+  for (const auto* symbol : {"settings_orientation", "settings_aspect_ratio", "settings_render_scale"}) {
     const auto caption = HelpTextFor(symbol);
     CHECK_TRUE(caption.size() <= 96);
     CHECK_TRUE(caption.find("Restart to apply.") != std::string::npos);
@@ -3764,7 +3769,7 @@ std::vector<std::string> PageRows(const std::string& panel_name) {
 void TestHiddenDisplayGroup() {
   BeginCase("hidden device display rows remove the empty Display and Advanced routes");
   MenuConfiguration configuration;
-  configuration.hidden = {"graphics.display", "graphics.aspect_ratio", "graphics.render_scale",
+  configuration.hidden = {"graphics.orientation", "graphics.display", "graphics.aspect_ratio", "graphics.render_scale",
                            "graphics.vsync", "graphics.renderer", "guest.overscan"};
   ConfigureMenu(configuration);
   CHECK_TRUE(PageRows("settings_av_panel") ==

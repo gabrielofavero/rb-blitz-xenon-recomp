@@ -2,12 +2,75 @@
 #include "check.h"
 #include "input/native_menu.h"
 #include "input/inline_help.h"
+#include "input/dialog_prompts.h"
 #include "input/pad_packet.h"
 #include <unordered_map>
 using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("dialogs own their prompts and background footer targets cannot receive presses");
+  CHECK_TRUE(DialogScopeFor("song_select_panel", "shortcuts.lst") == MenuDialogScope::kShortcuts);
+  CHECK_TRUE(DialogScopeFor("song_select_panel", "songs.lst") == MenuDialogScope::kNone);
+  for (const auto panel : {"rbbz_download_panel", "rbbz_search_loading_panel",
+                           "rbbz_library_panel", "error_popup_panel"})
+    CHECK_TRUE(DialogScopeFor(panel, "") == MenuDialogScope::kPanel);
+  const std::vector<MenuHintTarget> scoped{
+      {1, 2, 10, {.2f, .8f, .4f, .9f}, 0x1000, 0},
+      {1, 2, 10, {.2f, .6f, .4f, .7f}, 0x2000, 42}};
+  CHECK_EQ(HitMenuHint({.3f, .65f}, scoped, 1, 2, 11, 42), 0x2000);
+  CHECK_EQ(HitMenuHint({.3f, .85f}, scoped, 1, 2, 11, 42), 0);
+  CHECK_EQ(HitMenuHint({.3f, .65f}, scoped, 1, 2, 11), 0);
+  CHECK_EQ(HitMenuHint({.3f, .85f}, scoped, 1, 2, 11), 0x1000);
+  MenuMouseQueue popup_queue;
+  popup_queue.Context(1, 0, true, 20);
+  popup_queue.Push(MouseAction::kAccept);
+  popup_queue.PulseButton(0x1000);
+  popup_queue.Context(1, 0, true, 21); // focus-less popup replaces another panel
+  CHECK_EQ(popup_queue.SamplePad(), 0);
+  CHECK_FALSE(popup_queue.NextFrame());
+
+  BeginCase("dialog action spans use native measured advances and leave the gap inert");
+  const auto measure_fixture = [](std::u16string_view text) {
+    std::vector<float> widths{0};
+    float width = 0;
+    bool tag = false;
+    for (const auto ch : text) {
+      if (ch == u'<') tag = true;
+      if (!tag) width += ch == u' ' ? 2.f : ch == u'A' || ch == u'B' ? 12.f : 7.f;
+      widths.push_back(width);
+      if (ch == u'>') tag = false;
+    }
+    return widths;
+  };
+  const std::u16string cancel = u"Press <alt1>B</alt1> to Cancel";
+  const auto cancel_spans = DialogPromptSpans(cancel, measure_fixture(cancel));
+  CHECK_EQ(cancel_spans.size(), 1);
+  CHECK_EQ(cancel_spans.at(0).action, 2);
+  CHECK_TRUE(cancel_spans.at(0).left == 0 && cancel_spans.at(0).right == 1);
+  const std::u16string dual = u"<alt1>A</alt1> Refresh   <alt1>B</alt1> Close";
+  const auto spans = DialogPromptSpans(dual, measure_fixture(dual));
+  CHECK_EQ(spans.size(), 2);
+  CHECK_EQ(spans.at(0).action, 1);
+  CHECK_EQ(spans.at(1).action, 2);
+  CHECK_TRUE(spans.at(0).right > .5f && spans.at(0).right < spans.at(1).left);
+  const std::vector<MenuHintTarget> dual_targets{
+      {1, 0, 10, {spans.at(0).left, .6f, spans.at(0).right, .7f}, 0x1000, 42},
+      {1, 0, 10, {spans.at(1).left, .6f, spans.at(1).right, .7f}, 0x2000, 42}};
+  CHECK_EQ(HitMenuHint({.25f, .65f}, dual_targets, 1, 0, 11, 42), 0x1000);
+  CHECK_EQ(HitMenuHint({.85f, .65f}, dual_targets, 1, 0, 11, 42), 0x2000);
+  CHECK_EQ(HitMenuHint({(spans[0].right + spans[1].left) / 2, .65f},
+                       dual_targets, 1, 0, 11, 42), 0);
+  for (const std::u16string text : {u"Please wait", u"<alt1>Z</alt1> Unknown", u"<alt1>B Broken"})
+    CHECK_TRUE(DialogPromptSpans(text, measure_fixture(text)).empty());
+  CHECK_TRUE(DialogPromptSpans(cancel, {}).empty());
+  auto bad_widths = measure_fixture(cancel); bad_widths.back() = NAN;
+  CHECK_TRUE(DialogPromptSpans(cancel, bad_widths).empty());
+  const std::u16string private_cancel = u"<alt>\x82</alt> Close";
+  CHECK_EQ(DialogPromptSpans(private_cancel, measure_fixture(private_cancel)).at(0).action, 2);
+  const std::u16string uppercase = u"Press <ALT1>B</ALT1> to Cancel";
+  CHECK_EQ(DialogPromptSpans(uppercase, measure_fixture(uppercase)).at(0).action, 2);
+
   BeginCase("footer hit capture preserves SetWorldXfm placement instead of recomputing the local origin");
   constexpr uint32_t transformable = 0x40100500;
   unsigned evaluations = 0;
@@ -116,19 +179,37 @@ int main() {
   BeginCase("preset arrows dispatch their matching D-pad directions only on their art");
   const MenuBounds left_arrow{.22f, .25f, .24f, .31f};
   const MenuBounds right_arrow{.74f, .25f, .76f, .31f};
-  CHECK_TRUE(HitPresetArrow({.23f, .28f}, left_arrow, right_arrow) == MouseAction::kLeft);
-  CHECK_TRUE(HitPresetArrow({.75f, .28f}, left_arrow, right_arrow) == MouseAction::kRight);
-  CHECK_FALSE(HitPresetArrow({.5f, .28f}, left_arrow, right_arrow));
-  CHECK_FALSE(HitPresetArrow({.23f, .35f}, left_arrow, right_arrow));
-  CHECK_FALSE(HitPresetArrow({NAN, .28f}, left_arrow, right_arrow));
-  CHECK_FALSE(HitPresetArrow({.23f, .28f}, std::nullopt, std::nullopt));
+  CHECK_TRUE(HitMenuArrow({.23f, .28f}, left_arrow, right_arrow) == MouseAction::kLeft);
+  CHECK_TRUE(HitMenuArrow({.75f, .28f}, left_arrow, right_arrow) == MouseAction::kRight);
+  CHECK_FALSE(HitMenuArrow({.5f, .28f}, left_arrow, right_arrow));
+  CHECK_FALSE(HitMenuArrow({.23f, .35f}, left_arrow, right_arrow));
+  CHECK_FALSE(HitMenuArrow({NAN, .28f}, left_arrow, right_arrow));
+  CHECK_FALSE(HitMenuArrow({.23f, .28f}, std::nullopt, std::nullopt));
   MenuMouseQueue preset_clicks;
   preset_clicks.Context(1, 2, true);
-  preset_clicks.Pulse(*HitPresetArrow({.23f, .28f}, left_arrow, right_arrow));
+  preset_clicks.Pulse(*HitMenuArrow({.23f, .28f}, left_arrow, right_arrow));
   CHECK_EQ(preset_clicks.SamplePad(), 4);
   preset_clicks.Reset();
-  preset_clicks.Pulse(*HitPresetArrow({.75f, .28f}, left_arrow, right_arrow));
+  preset_clicks.Pulse(*HitMenuArrow({.75f, .28f}, left_arrow, right_arrow));
   CHECK_EQ(preset_clicks.SamplePad(), 8);
+
+  BeginCase("powerup paging targets only arrows drawn for the current page");
+  // The first page has no back arrow; the last page has no next arrow.
+  CHECK_FALSE(HitMenuArrow({.23f, .28f}, std::nullopt, right_arrow));
+  CHECK_TRUE(HitMenuArrow({.75f, .28f}, std::nullopt, right_arrow) == MouseAction::kRight);
+  CHECK_TRUE(HitMenuArrow({.23f, .28f}, left_arrow, std::nullopt) == MouseAction::kLeft);
+  CHECK_FALSE(HitMenuArrow({.75f, .28f}, left_arrow, std::nullopt));
+  // A small margin makes the thin arrow art practical to tap.
+  CHECK_TRUE(HitMenuArrow({.77f, .28f}, std::nullopt, right_arrow) == MouseAction::kRight);
+  CHECK_FALSE(HitMenuArrow({.79f, .28f}, std::nullopt, right_arrow));
+  // Five visible icons from seven entries: either arrow reveals the other end.
+  CHECK_EQ(MenuArrowPage(0, 5, 2, MouseAction::kRight), 2);
+  CHECK_EQ(MenuArrowPage(2, 5, 2, MouseAction::kLeft), 0);
+  CHECK_EQ(MenuArrowPage(0, 5, 2, MouseAction::kLeft), 0);
+  CHECK_EQ(MenuArrowPage(2, 5, 2, MouseAction::kRight), 2);
+  CHECK_EQ(MenuArrowPage(5, 5, 15, MouseAction::kRight), 10);
+  CHECK_EQ(MenuArrowPage(10, 5, 15, MouseAction::kLeft), 5);
+  CHECK_EQ(MenuArrowPage(0, 5, 0, MouseAction::kRight), 0);
 
   BeginCase("pointer mapping respects letterboxing, stretch and overscan");
   auto p = MenuPointer(1280, 360, 2560, 720, 16, 9, true, false, 90, 90);

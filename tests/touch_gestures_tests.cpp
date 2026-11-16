@@ -148,6 +148,11 @@ int main() {
     CHECK_TRUE(sized.powerup.x + sized.powerup.width <= sized.width);
     CHECK_TRUE(sized.pause.y + sized.pause.height < sized.height);
   }
+  const auto portrait_controls = MakeLayout(405, 720, {0, 24, 405, 662});
+  CHECK_EQ(portrait_controls.pause.width, 44.f);
+  CHECK_EQ(portrait_controls.pause.x, portrait_controls.powerup.x);
+  CHECK_TRUE(portrait_controls.powerup.y > portrait_controls.pause.y + portrait_controls.pause.height);
+  CHECK_TRUE(portrait_controls.powerup.y + portrait_controls.powerup.height < 200);
   const float px = (layout.pause.x + layout.pause.width / 2) / layout.width;
   const float py = (layout.pause.y + layout.pause.height / 2) / layout.height;
   g = Ready();

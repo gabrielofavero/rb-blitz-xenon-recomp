@@ -7,7 +7,12 @@ REXCVAR_DEFINE_STRING(touch_lane_swipe, "inverted", "Input", "Lane swipe directi
 REXCVAR_DEFINE_BOOL(touch_buttons, true, "Input", "Show gameplay buttons while touch is the active input.");
 REXCVAR_DEFINE_BOOL(touch_shake_deploy, true, "Input", "Tilt or shake sharply once to deploy a ready power-up.");
 
-#if defined(RB_BLITZ_IOS)
+REXCVAR_DEFINE_BOOL(touch_preview, false, "Diagnostics", "Preview the iOS guest controls on desktop, including a ready power-up.");
+namespace rb_blitz::input::touch {
+bool PreviewEnabled() { return REXCVAR_GET(touch_preview); }
+}
+
+#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
 #include <atomic>
 #include <mutex>
 #include <SDL3/SDL.h>
@@ -174,7 +179,13 @@ void PublishLanePowerup(Rect rect) {
   g_lane_timestamp = SDL_GetTicksNS();
 }
 Layout CurrentLayout() { std::lock_guard lock(g_mutex); return g_layout; }
-bool TouchInputActive() { return last_device::Current().using_touch; }
+bool TouchInputActive() {
+#if defined(RB_BLITZ_IOS)
+  return PreviewEnabled() || last_device::Current().using_touch;
+#else
+  return PreviewEnabled();
+#endif
+}
 bool ButtonsEnabled() { return REXCVAR_GET(touch_buttons); }
 void PublishPowerupReady(bool ready) {
   static std::atomic<bool> observed{false};
@@ -183,7 +194,7 @@ void PublishPowerupReady(bool ready) {
   if (!observed.exchange(true) || changed)
     REXLOG_INFO("touch_hud: native power-up deployable={}", ready);
 }
-bool PowerupReady() { return g_powerup_ready; }
+bool PowerupReady() { return PreviewEnabled() || g_powerup_ready; }
 bool ControlsVisible() { return g_visible && g_foreground && TouchInputActive() && ButtonsEnabled(); }
 std::vector<GameplayEvent> DrainGameplay() {
   std::lock_guard lock(g_mutex);
@@ -195,6 +206,9 @@ bool ConsumeMouse(bool is_touch, Phase phase, bool gameplay) {
 }
 std::unique_ptr<rex::ui::ImGuiDialog> CreateControls(
     rex::ui::ImGuiDrawer* drawer, std::function<rex::ui::Window*()> window) {
+#if !defined(RB_BLITZ_IOS)
+  if (!PreviewEnabled()) return {};
+#endif
   return std::make_unique<Controls>(drawer, std::move(window));
 }
 }

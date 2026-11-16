@@ -121,6 +121,15 @@ is animating (state +48 differs from +52), the next wheel detent stays queued;
 button release still runs immediately. This prevents fast bursts losing steps at
 the visible edge of a song or powerup list.
 
+The powerup selection submenu's yellow arrows accept mouse clicks and touch taps.
+`UIListWidget::DrawMesh` captures each visible `arrow_lt.mesh` / `arrow_rt.mesh`
+under the focused list's draw, before its temporary slot transform is restored.
+Only the preceding frame's geometry for the current focus can receive a press;
+hidden arrows have no target. A press pages the native viewport by `numDisplay`,
+clamped to `NumData - numDisplay`, through the same native selection/scroll
+notifications used by the library rail. It preserves the equipped item and does
+not emit Confirm. Mouse and touch use the same queue and presentation mapping.
+
 On every list that is *not* a vertical scrolled list — the horizontal powerup rows,
 for instance — a detent becomes a D-pad press, not stick travel. Retail steps a
 list once per directional press, while a two-frame analog pulse depends on the

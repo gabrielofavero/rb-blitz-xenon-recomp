@@ -14,6 +14,7 @@ namespace {
 // 0 = the title derives the width from the height, exactly as it ships.
 std::atomic<uint32_t> g_render_width{0};
 std::atomic<uint32_t> g_render_height{720};
+std::atomic<uint32_t> g_portrait_width{0}, g_portrait_height{0};
 
 // The title's own screen-space -> 16:9 mapping constants (measured 2026-10-12, see the header):
 // two adjacent 9/16 floats in the literal pool of the code that lays the UI out.
@@ -50,6 +51,13 @@ uint32_t rb_blitz::settings::BootRenderWidth() {
 uint32_t rb_blitz::settings::BootRenderHeight() {
   return g_render_height.load(std::memory_order_relaxed);
 }
+
+void rb_blitz::settings::SetBootPortraitFrame(uint32_t width, uint32_t height) {
+  g_portrait_width = width;
+  g_portrait_height = height;
+}
+uint32_t rb_blitz::settings::BootPortraitWidth() { return g_portrait_width.load(); }
+uint32_t rb_blitz::settings::BootPortraitHeight() { return g_portrait_height.load(); }
 
 // 0x823F382C, the title's own `li r11,720`, before it stores its choice at +68 and derives the
 // width from it. Setting r11 here is what lets the title lay out at a height it would not have

@@ -30,7 +30,7 @@ REXCVAR_DECLARE(bool, hud_reanchor_apply);
 REXCVAR_DECLARE(bool, hud_reanchor_scan);
 
 namespace {
-uint32_t width = 2560, height = 1080;
+uint32_t width = 2560, height = 1080, crop_width = 0, crop_height = 0;
 uint8_t* memory = nullptr;
 constexpr uint32_t kHeap = 0x40000000;
 constexpr uint32_t kTables = 0x82010000;
@@ -81,7 +81,7 @@ void Reset() {
   transforms = {}; drawn_child = 0;
   next_string = kHeap + 0xD000;
   next_table = kTables;
-  width = 2560; height = 1080;
+  width = 2560; height = 1080; crop_width = crop_height = 0;
   ObjectView(kHud, kHud + 0x200);
   Word(kHud + 0x64, Text("track/hud.milo"));
   ObjectView(kOtherDir, kOtherDir + 0x200);
@@ -145,6 +145,8 @@ constexpr double delta = (2560.0 / 1080.0 - 16.0 / 9.0) * 240.0;
 namespace rb_blitz::settings {
 uint32_t BootRenderWidth() { return width; }
 uint32_t BootRenderHeight() { return height; }
+uint32_t BootPortraitWidth() { return crop_width; }
+uint32_t BootPortraitHeight() { return crop_height; }
 }
 #if defined(RB_BLITZ_IOS)
 namespace rb_blitz::input {
@@ -152,6 +154,7 @@ void CaptureTouchPowerup(PPCContext&, uint8_t*, uint32_t) {}
 }
 namespace rb_blitz::input::touch {
 Layout CurrentLayout() { return touch_layout; }
+bool PreviewEnabled() { return false; }
 bool TouchInputActive() { return using_touch; }
 bool ButtonsEnabled() { return buttons_enabled; }
 bool ControlsVisible() { return using_touch && buttons_enabled; }
@@ -177,7 +180,7 @@ extern "C" REX_FUNC(__imp__sub_821F13D0) {
   }
   for (uint32_t row = 0; row < 3; ++row)
     for (uint32_t column = 0; column < 3; ++column)
-      Float(t + 72 + row * 16 + column * 4, row == column ? 1.f : 0.f);
+      Float(t + 72 + row * 16 + column * 4, parent ? Float(parent + 72 + row * 16 + column * 4) : (row == column ? 1.f : 0.f));
   for (uint32_t axis = 0; axis < 12; axis += 4) {
     Float(t + 0x78 + axis, Float(t + 0x38 + axis) +
           (parent ? Float(parent + 0x78 + axis) : 0));
@@ -332,6 +335,114 @@ int main() {
   Resolve(t); Close(Float(t + 0x78), -300 - (4.0 / 3.0 - 16.0 / 9.0) * 240.0);
   width = 1920;
   Resolve(t); Close(Float(t + 0x78), -300);
+
+  BeginCase("portrait HUD uses separate compact slots and fresh matrices on repeated resolves");
+  Reset();
+  width = 400; height = 720;
+  const auto portrait_stars = Make(0, shapes[0], 270);
+  const auto portrait_score = Make(1, shapes[5], 0, kHud, portrait_stars);
+  const auto portrait_meter = Make(2, shapes[1], -300);
+  const auto portrait_comparison = Make(3, shapes[4], 300);
+  const auto portrait_letters = Make(5, shapes[2], -294);
+  for (int frame = 0; frame < 20; ++frame) {
+    Resolve(portrait_stars);
+    Resolve(portrait_score);
+    Resolve(portrait_meter);
+    Resolve(portrait_comparison);
+    Resolve(portrait_letters);
+    Close(Float(portrait_stars + 0x78), 400.0 / 720 * 240 - 24);
+    Close(Float(portrait_stars + 0x80), 210);
+    Close(Float(portrait_score + 0x78), 0);
+    Close(Float(portrait_score + 0x80), 210);
+    Close(Float(portrait_meter + 0x80), 0);
+    Close(Float(portrait_comparison + 0x80), 0);
+    Close(Float(portrait_letters + 0x80), 110);
+    Close(Float(portrait_stars + 72), .5);
+    Close(Float(portrait_score + 72), .5); // parent scale inherited exactly once
+    Close(Float(portrait_meter + 72), .65);
+    Close(Float(portrait_comparison + 72), .65);
+    Close(Float(portrait_stars + 0x38), 270); // local animation data stays authored
+  }
+  const auto portrait_menu = Make(4, shapes[0], 270, kOtherDir);
+  Resolve(portrait_menu);
+  Close(Float(portrait_menu + 0x78), 270);
+  Close(Float(portrait_menu + 72), 1);
+
+  BeginCase("portrait layout uses crop bounds while the guest renders an unchanged landscape source");
+  Reset();
+  width = 1280; height = 720; crop_width = 405; crop_height = 720;
+  const auto cropped_stars = Make(0, shapes[0], 270);
+  const auto cropped_meter = Make(1, shapes[1], -300);
+  Resolve(cropped_stars); Resolve(cropped_meter);
+  Close(Float(cropped_stars + 0x78), 111);
+  Close(Float(cropped_meter + 0x78), -60.25);
+  const Shape timer_shape{"timer.lbl", 0x8203A95C, 0x7C, 0};
+  const auto cropped_timer = Make(2, timer_shape, -123, kHud, cropped_meter);
+  Resolve(cropped_timer);
+  Close(Float(cropped_timer + 0x78), 0);
+  Close(Float(cropped_timer + 0x80), -184);
+  Close(Float(cropped_timer + 72), .7);
+  // Visibility/animation changes rebuild the world matrix without accumulating scale.
+  for (int frame = 0; frame < 30; ++frame) {
+    Resolve(cropped_timer);
+    Close(Float(cropped_timer + 72), .7);
+    Close(Float(cropped_timer + 0x80), -184);
+  }
+  const Shape streak_shape{"streak.lbl", 0x8203A95C, 0x7C, 0};
+  const auto cropped_streak = Make(7, streak_shape, -123, kHud, cropped_meter);
+  Resolve(cropped_streak);
+  Close(Float(cropped_streak + 0x78), -123);
+  Close(Float(cropped_streak + 0x80), -80);
+  Close(Float(cropped_streak + 72), 1.2);
+  BeginCase("the compact multiplier ladder stays at centre left without changing the score counter");
+  Close(Float(cropped_meter + 0x78), -60.25);
+  Close(Float(cropped_meter + 0x80), 0);
+  Close(Float(cropped_meter + 72), .65);
+  const auto unchanged_score = Make(4, shapes[5], 270);
+  Resolve(unchanged_score);
+  Close(Float(unchanged_score + 0x78), 0);
+  Close(Float(unchanged_score + 72), .5);
+  const auto cropped_comparison = Make(5, shapes[4], 300);
+  Resolve(cropped_comparison);
+  Close(Float(cropped_comparison + 0x78), 90);
+  Close(Float(cropped_comparison + 0x80), 0);
+  Close(Float(cropped_comparison + 72), .65);
+
+  BeginCase("personal-best notification sits above the comparator and retains hidden animation keys");
+  const Shape personal_best_shape{"pb.lbl", 0x8203A95C, 0x7C, 0};
+  const auto personal_best = Make(8, personal_best_shape, -257, kHud, cropped_comparison);
+  Resolve(personal_best);
+  Close(Float(personal_best + 0x78), 123);
+  Close(Float(personal_best + 0x80), 70);
+  Close(Float(personal_best + 72), .5);
+  Float(personal_best + 0x38, 900);
+  Resolve(personal_best);
+  Close(Float(personal_best + 0x78), 1035);
+  Float(personal_best + 0x38, -257);
+  Resolve(personal_best);
+  Close(Float(personal_best + 0x78), 123);
+
+  BeginCase("portrait song progress rotates clockwise at the bottom without accumulating rotation");
+  const auto cropped_progress = Make(6, slider, 123);
+  for (int frame = 0; frame < 30; ++frame) {
+    Resolve(cropped_progress);
+    Close(Float(cropped_progress + 0x78), -67.2);
+    Close(Float(cropped_progress + 0x80), -212);
+    // Local right points down; local up points right. Depth is preserved.
+    Close(Float(cropped_progress + 72), 0);
+    Close(Float(cropped_progress + 80), -.8);
+    Close(Float(cropped_progress + 92), .8);
+    Close(Float(cropped_progress + 104), .8);
+    Close(Float(cropped_progress + 112), 0);
+  }
+  crop_width = crop_height = 0;
+  Resolve(cropped_meter); Resolve(cropped_timer); Resolve(cropped_progress);
+  Close(Float(cropped_timer + 0x78), -423); // landscape local placement remains authored
+  Close(Float(cropped_progress + 72), 1);
+  Close(Float(cropped_progress + 80), 0);
+  Close(Float(cropped_progress + 104), 0);
+  Close(Float(cropped_progress + 112), 1);
+  Close(Float(cropped_progress + 0x78), 123);
 
   BeginCase("first draw repairs fully cached left HUD loaded before its path was assigned");
   Reset();

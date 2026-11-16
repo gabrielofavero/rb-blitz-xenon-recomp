@@ -206,7 +206,8 @@ REX_HOOK_RAW(sub_824D8FF0) {
 }
 
 REX_HOOK_RAW(sub_824D85E8) {
-  const auto entries = ctx.r3.u32 >= 224 ? Entries(base, ctx.r3.u32 - 224) : std::vector<Entry>{};
+  const uint32_t owner = ctx.r3.u32 >= 224 ? ctx.r3.u32 - 224 : 0;
+  const auto entries = owner ? Entries(base, owner) : std::vector<Entry>{};
   if (TraceEnabled()) {
     static std::mutex mutex;
     static std::unordered_set<uint32_t> seen;
@@ -248,7 +249,7 @@ REX_HOOK_RAW(sub_824D85E8) {
   // UILabel callback (which may receive an adjusted base-class this pointer).
   __imp__sub_824D85E8(ctx, base);
   for (const auto& entry : entries)
-    rb_blitz::input::CaptureMenuHint(ctx, base, entry.label, entry.action);
+    rb_blitz::input::CaptureMenuHint(ctx, base, entry.label, entry.action, owner);
 }
 
 REX_HOOK_RAW(sub_822C45A8) {

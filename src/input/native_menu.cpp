@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Retail guest ABI and validation: docs/engine/input-flow.md.
 #include "input/native_menu.h"
+#include "hooks/hud_layout_runtime.h"
 #include "input/inline_help.h"
+#include "input/dialog_prompts.h"
 #include "diag/shader_trace.h"
 #include "input/remap.h"
-#if defined(RB_BLITZ_IOS)
+#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
 #include "input/touch_controls.h"
 #endif
 #include <rex/hook.h>
@@ -50,6 +52,8 @@ REX_EXTERN(sub_821F13D0);       // RndTransformable::WorldXfm
 REX_EXTERN(__imp__sub_824BC668); // UILabel::DrawShowing (label +260)
 REX_EXTERN(sub_824BA9F8);       // UILabel::LabelStyle
 REX_EXTERN(sub_824BC7D0);       // UILabel::SetText
+REX_EXTERN(__imp__sub_824BC7D0);
+REX_EXTERN(__imp__sub_8229FD60); // RndText: cumulative UTF-16 advances during normal layout
 
 namespace rb_blitz::input {
 namespace {
@@ -78,6 +82,11 @@ bool window_focused = false;
 bool menu_available = false;
 bool game_screen_active = false;
 uint32_t current_screen = 0, current_focus = 0;
+uint32_t current_panel = 0;
+thread_local uint32_t current_panel_dir = 0, current_input_scope = 0;
+thread_local MenuDialogScope dialog_scope = MenuDialogScope::kNone;
+thread_local uint32_t setting_prompt_label = 0;
+thread_local std::unordered_map<uint32_t, std::vector<DialogPromptSpan>> dialog_prompts;
 uint64_t screen_generation = 0;
 // The current screen's guest object name, used by native mouse navigation.
 std::string current_screen_name;
@@ -91,6 +100,7 @@ struct Geometry {
   bool horizontal = false;
   MenuBounds bounds;
   std::vector<MenuRow> rows;
+  std::optional<MenuBounds> left_arrow, right_arrow;
   // The focused row's logical data index, preserved while the viewport scrolls.
   int selected = -1;
 };
@@ -165,17 +175,25 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   const uint32_t panel = screen ? U32(base, screen + 52) : 0;
   const std::string name = ObjectName(base, screen);
   const std::string panel_name = ObjectName(base, ObjectBase(base, panel));
+  const auto scope = DialogScopeFor(panel_name, ObjectName(base, ObjectBase(base, focus)));
+  const uint32_t input_scope = scope == MenuDialogScope::kShortcuts ? focus :
+                               scope == MenuDialogScope::kPanel ? panel : 0;
   rb_blitz::hooks::PublishActionHints();
   // game_screen owns pause_panel too; its focused panel distinguishes a live song
   // from pause and its nested menus. A transition is never an input destination.
   const bool allowed = screen && U32(base, manager + 16) == 0 &&
-      (name != "game_screen" || panel_name == "pause_panel");
-  const bool in_song = screen != 0 && name == "game_screen" && panel_name != "pause_panel";
+      (name != "game_screen" || panel_name == "pause_panel" || scope == MenuDialogScope::kPanel);
+  const bool in_song = screen != 0 && name == "game_screen" && panel_name != "pause_panel" &&
+      scope != MenuDialogScope::kPanel;
   rb_blitz::loading::ObserveRecoveryScreen(name, allowed);
   rb_blitz::content_progress::ObserveScreen(name, panel_name, allowed);
   rb_blitz::diag::shader_trace::ObserveScreen(name, panel_name, ObjectName(base, ObjectBase(base, focus)),
                                              U32(base, manager + 16) != 0);
-  if (screen != current_screen || focus != current_focus || allowed != menu_available) {
+  if (screen != current_screen || focus != current_focus || panel != current_panel ||
+      input_scope != current_input_scope || allowed != menu_available) {
+    if (input_scope != current_input_scope)
+      REXLOG_INFO("native_mouse: dialog context panel={} focus={} scope={:08X}", panel_name,
+                  ObjectName(base, ObjectBase(base, focus)), input_scope);
     if (screen != current_screen) ++screen_generation;
     // A panel-entry refresh may replace the splash provider's row array before
     // its first draw. Never hit-test or dispatch against indices captured from
@@ -199,12 +217,16 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   }
   std::lock_guard lock(mutex);
   current_screen = screen; current_focus = focus; menu_available = allowed;
+  current_panel = panel;
+  current_panel_dir = panel ? U32(base, panel + 52) : 0;
+  current_input_scope = input_scope;
+  dialog_scope = scope;
   observed_menu_frame = frame_number;
   if (current_screen_name != name) current_screen_name = name;
   game_screen_active = in_song;
   current_panel_name = panel_name;
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled() &&
-                !rex::kernel::xam::xeXamIsUIActive() && !ui::achievements::Active());
+                !rex::kernel::xam::xeXamIsUIActive() && !ui::achievements::Active(), panel);
 }
 // UIListState::Selected - the list's live selection - read with isolated registers like
 // every other side call (the same read the hit test's ordering uses).
@@ -316,7 +338,7 @@ void MouseMenuFocus(bool focused) {
     REXLOG_INFO("native_mouse: window focus={} queue={}", focused, focused && menu_available && MouseSupportEnabled());
   window_focused = focused;
   queue.Context(current_screen, current_focus, focused && menu_available && MouseSupportEnabled() &&
-                !rex::kernel::xam::xeXamIsUIActive() && !ui::achievements::Active());
+                !rex::kernel::xam::xeXamIsUIActive() && !ui::achievements::Active(), current_panel);
   // P2 (plan D5): losing the window drops every gameplay hold. The physical layer already
   // reports nothing while unfocused; this makes the *edge* disappear too, so a key released
   // behind another window cannot be delivered as one the guest acted on.
@@ -430,7 +452,7 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   // Touch-generated left presses use this same queue as physical mouse clicks.
   if (event->action == MouseAction::kAccept) {
     if (const auto button = HitMenuHint(event->point, hint_targets,
-                                        current_screen, current_focus, frame_number)) {
+                                        current_screen, current_focus, frame_number, current_input_scope)) {
       scroll_follow.Reset();
       REXLOG_INFO("native_mouse: legend click screen={} point={:.4f},{:.4f} button={:04X}",
                   current_screen_name, event->point.x, event->point.y, button);
@@ -450,7 +472,8 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   }
   // Header clicks precede the focused list's hit test and never become A.
   // Only a label actually drawn in the last frame can receive the click.
-  if (event->action == MouseAction::kAccept && LibraryHeaderForScreen(current_screen_name) >= 0) {
+  if (!current_input_scope && event->action == MouseAction::kAccept &&
+      LibraryHeaderForScreen(current_screen_name) >= 0) {
     for (int i = 0; i < int(header_geometry.size()); ++i) {
       const auto& header = header_geometry[i];
       if (header.screen != current_screen || header.focus != current_focus ||
@@ -467,7 +490,20 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       return;
     }
   }
-  if (event->action == MouseAction::kAccept) {
+  if (!current_input_scope && event->action == MouseAction::kAccept) {
+    if (fresh && current_screen_name == "powerup_select_screen") {
+      if (const auto arrow = HitMenuArrow(event->point, geometry.left_arrow, geometry.right_arrow)) {
+        // The guest only draws arrows when more icons are available. Page the
+        // viewport independently of the hovered/equipped item; never send A.
+        if (can_scroll && EnsureRailMap(ctx, base, current_focus)) {
+          const int first = int(U32(base, current_focus + 228));
+          const int display = int(U32(base, current_focus + 180));
+          ScrollListTo(ctx, base, current_focus,
+                       MenuArrowPage(first, display, rail_map.max_first, *arrow), event->point);
+        }
+        return;
+      }
+    }
     if (const auto arrow = PresetArrowAt(ctx, base, event->point)) {
       // The art belongs to the guest's preset page. A controller D-pad pulse
       // reaches its own left/right handler, including its normal wrap behavior.
@@ -476,6 +512,9 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       event->action = *arrow;
     }
   }
+  // A dialog consumes empty-space clicks. Its own captured list still supports
+  // direct row selection; a dialog with no list never falls through to Confirm.
+  if (current_input_scope && !fresh && event->action != MouseAction::kBack) return;
   // Scrollbar traffic drives the list's view directly (no pad pulse, no horizontal
   // remap), so it is handled before the directional path below.
   if (event->action == MouseAction::kScrollbarDown || event->action == MouseAction::kScrollbarDrag ||
@@ -667,13 +706,13 @@ std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoi
   const uint32_t right = dir ? SceneMesh(ctx, base, dir, "arrow_rt.mesh") : 0;
   auto left_bounds = left ? ProjectMesh(ctx, base, left) : std::nullopt;
   auto right_bounds = right ? ProjectMesh(ctx, base, right) : std::nullopt;
-  auto hit = HitPresetArrow(point, left_bounds, right_bounds);
+  auto hit = HitMenuArrow(point, left_bounds, right_bounds);
   // The static meshes do not always yield a usable projected box. The authored
   // panel keeps both arrows at these guest coordinates; MenuPointer already
   // accounts for the window's size and presentation rectangle. These narrow
   // targets keep a click on the visible art from falling through to Confirm.
-  if (!hit) hit = HitPresetArrow(point, MenuBounds{.365f, .31f, .378f, .35f},
-                                 MenuBounds{.622f, .31f, .635f, .35f});
+  if (!hit) hit = HitMenuArrow(point, MenuBounds{.365f, .31f, .378f, .35f},
+                              MenuBounds{.622f, .31f, .635f, .35f});
   REXLOG_INFO("native_mouse: preset click point={},{} panel={:08X} dir={:08X} meshes={:08X}/{:08X} projected={}/{} action={}",
               point.x, point.y, panel, dir, left, right, left_bounds.has_value(),
               right_bounds.has_value(), hit ? (*hit == MouseAction::kLeft ? "left" : "right") : "confirm");
@@ -791,14 +830,19 @@ std::optional<MenuBounds> ProjectLabel(PPCContext& ctx, uint8_t* base, uint32_t 
   return bounds;
 }
 void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
-  if (!menu_available || LibraryHeaderForScreen(current_screen_name) < 0) return;
+  if (!menu_available || current_input_scope || LibraryHeaderForScreen(current_screen_name) < 0) return;
   const int index = LibraryHeaderForLabel(ObjectName(base, ObjectBase(base, label)));
   if (index < 0) return;
   if (const auto bounds = ProjectLabel(ctx, base, label))
     header_geometry[index] = {current_screen, current_focus, frame_number, *bounds};
 }
-void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t action) {
+void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t action,
+                     uint32_t owner) {
   if (!menu_available) return;
+  const auto header = ObjectBase(base, owner);
+  if (dialog_scope == MenuDialogScope::kShortcuts && ObjectName(base, header) != "pop_up_help.ihp") return;
+  if (dialog_scope == MenuDialogScope::kPanel &&
+      (!header || U32(base, header + 36) != current_panel_dir)) return;
   const uint16_t button = MenuHintButton(action);
   if (!button) return;
   const auto bounds = ProjectLabel(ctx, base, label);
@@ -818,13 +862,39 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
   // being clickable on the next poll even when its guest label is reused.
   if (!hint_targets.empty() && hint_targets.back().frame != frame_number)
     hint_targets.clear();
-  hint_targets.push_back({current_screen, current_focus, frame_number, *bounds, button});
+  hint_targets.push_back({current_screen, current_focus, frame_number, *bounds, button, current_input_scope});
   static thread_local std::unordered_map<uint32_t, uint32_t> traced;
   if (traced.size() > 128) traced.clear();
   if (traced[label] != current_screen) {
     traced[label] = current_screen;
     REXLOG_INFO("native_mouse: legend target screen={} action={} label={:08X} bounds={:.4f},{:.4f},{:.4f},{:.4f}",
                 current_screen_name, action, label, bounds->left, bounds->top, bounds->right, bounds->bottom);
+  }
+}
+void CaptureDialogPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  if (!menu_available || dialog_scope != MenuDialogScope::kPanel) return;
+  const auto header = ObjectBase(base, label);
+  if (!header || ObjectName(base, header) != "continue.lbl" ||
+      U32(base, header + 36) != current_panel_dir) return;
+  const auto it = dialog_prompts.find(label);
+  if (it == dialog_prompts.end()) return;
+  const auto bounds = ProjectLabel(ctx, base, label);
+  if (!bounds) return;
+  if (!hint_targets.empty() && hint_targets.back().frame != frame_number) hint_targets.clear();
+  for (const auto& span : it->second) {
+    const float width = bounds->right - bounds->left;
+    MenuBounds part{bounds->left + width * span.left, bounds->top,
+                    bounds->left + width * span.right, bounds->bottom};
+    hint_targets.push_back({current_screen, current_focus, frame_number, part,
+                            MenuHintButton(span.action), current_input_scope});
+  }
+  static thread_local std::unordered_map<uint32_t, uint32_t> traced;
+  if (traced.size() > 128) traced.clear();
+  if (traced[label] != current_input_scope) {
+    traced[label] = current_input_scope;
+    REXLOG_INFO("native_mouse: dialog prompt panel={} label={:08X} actions={} bounds={:.4f},{:.4f},{:.4f},{:.4f}",
+                current_panel_name, label, it->second.size(), bounds->left, bounds->top,
+                bounds->right, bounds->bottom);
   }
 }
 void UpdateCalibrationSideLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
@@ -868,7 +938,10 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   // the settings overlay's row text (P1), which must work on a pad-only machine too. Only the
   // mouse-specific use of the result (Select, the hover lift, the wheel's rail) reads the
   // preference - the queue is disabled when it is off, so none of those ever runs.
-  if (ctx.r9.u32 || list != current_focus || !menu_available) {
+  const auto list_header = ObjectBase(base, list);
+  const bool belongs = dialog_scope != MenuDialogScope::kPanel ||
+      (list_header && U32(base, list_header + 36) == current_panel_dir);
+  if (ctx.r9.u32 || list != current_focus || !menu_available || !belongs) {
     __imp__sub_824E5020(ctx, base); return;
   }
   DrawCapture capture;
@@ -990,7 +1063,8 @@ REX_HOOK_RAW(sub_824E9A90) {
 }
 REX_HOOK_RAW(sub_824BC668) {
   const auto label = ctx.r3.u32 - 260;
-#if defined(RB_BLITZ_IOS)
+  rb_blitz::hooks::PrepareHudLabel(ctx, base, label);
+#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
   // The hint UILabel is drawn separately from remedial_help.grp by the guest.
   if (rb_blitz::input::touch::TouchInputActive() &&
       rb_blitz::input::ObjectName(base, rb_blitz::input::ObjectBase(base, label)) ==
@@ -998,7 +1072,39 @@ REX_HOOK_RAW(sub_824BC668) {
 #endif
   rb_blitz::input::UpdateCalibrationSideLabel(ctx, base, label);
   __imp__sub_824BC668(ctx, base);
+  rb_blitz::input::CaptureDialogPrompt(ctx, base, label);
   rb_blitz::input::CaptureHeader(ctx, base, label);
+}
+
+REX_HOOK_RAW(sub_824BC7D0) {
+  using namespace rb_blitz::input;
+  const uint32_t label = ctx.r3.u32;
+  const auto previous = setting_prompt_label;
+  setting_prompt_label = ObjectName(base, ObjectBase(base, label)) == "continue.lbl" ? label : 0;
+  if (setting_prompt_label) dialog_prompts.erase(label);
+  __imp__sub_824BC7D0(ctx, base);
+  setting_prompt_label = previous;
+}
+
+REX_HOOK_RAW(sub_8229FD60) {
+  using namespace rb_blitz::input;
+  const uint32_t label = setting_prompt_label;
+  const uint32_t text_address = ctx.r4.u32, advances_address = ctx.r5.u32;
+  std::u16string text;
+  if (label && ctx.r3.u32 == label + 72) {
+    for (size_t i = 0; i < 1024; ++i) {
+      const auto code = rex::memory::load_and_swap<uint16_t>(base + text_address + i * 2);
+      if (!code) break;
+      text.push_back(char16_t(code));
+    }
+  }
+  __imp__sub_8229FD60(ctx, base);
+  if (text.empty() || text.size() == 1024) return;
+  std::vector<float> advances;
+  for (size_t i = 0; i <= text.size(); ++i)
+    advances.push_back(F32(base, advances_address + uint32_t(i * 4)));
+  if (dialog_prompts.size() > 128) dialog_prompts.clear();
+  dialog_prompts[label] = DialogPromptSpans(text, advances);
 }
 REX_HOOK_RAW(sub_824E0900) {
   using namespace rb_blitz::input;
@@ -1011,6 +1117,14 @@ REX_HOOK_RAW(sub_824E0900) {
   if (bar && drawing->suppress) return;
   __imp__sub_824E0900(ctx, base);
   if (bar) drawing->highlight = ProjectMesh(ctx, base, mesh);
+  // UIListArrow::Draw calls DrawMesh only for a visible scroll arrow, with
+  // its final slot transform applied. Capture here before its caller restores
+  // the mesh transform, using the camera that actually drew the list.
+  if (drawing && current_screen_name == "powerup_select_screen") {
+    const auto name = ObjectName(base, ObjectBase(base, mesh));
+    if (name == "arrow_lt.mesh") drawing->result.left_arrow = ProjectMesh(ctx, base, mesh);
+    if (name == "arrow_rt.mesh") drawing->result.right_arrow = ProjectMesh(ctx, base, mesh);
+  }
 }
 
 REX_HOOK_RAW(sub_823F0118) {

@@ -1297,3 +1297,49 @@ pending submissions. Lifecycle diagnostics use the `ios_lifecycle` prefix.
 Headless regressions cover queue draining, blocked background submissions,
 duplicate notifications, repeated resume, startup event pumping, clock continuity,
 and old safe/desktop recovery values. Device switching remains a manual gate.
+
+
+## Portrait gameplay experiment (2026-11-16)
+
+Audio & Video > Display > Orientation offers Landscape (default) and Portrait,
+applied after restarting. Both orientations render the same landscape source;
+portrait gameplay crops its centre at a uniform scale. For 16:9 at 1x the source
+is still 1280x720, with a 405x720 visible viewport. The camera projection and
+vertical FOV are unchanged. Menus fit the original landscape image inside the
+portrait window; their layout has not been redesigned.
+
+The initial narrow-frame implementation was stretched and its visual validation
+was insufficient. It is superseded by the landscape-source crop above. The
+presenter needed SDK patch 0083: its runtime configuration setter previously
+ignored changes to the overscan-cutoff flag. Cropping now uses the existing
+centred presentation arithmetic, and restores normal presentation outside play.
+
+HUD positions use the visible crop bounds independently of the source frame.
+The score is centred at the top, with the star meter at the same height on the
+right; both use a 0.5 scale. The multiplier ladder
+and personal-best comparator share a 0.65 scale at centre left and centre right;
+collected letters sit above them. The song progress bar rotates 90 degrees
+clockwise near the bottom at a 0.8 scale, with the centred textual timer above.
+The transient personal-best message is right-aligned above the comparator.
+The streak uses a 1.2 scale below the multiplier ladder. Temporary achievement toasts may overlap it. Label draw
+preparation handles clean guest transform
+caches, while scaling inherited named anchors only once. Landscape authored
+positions are unchanged. The hidden keys of the personal-best animation remain
+offscreen during normal play.
+
+Portrait touch buttons use 44-point squares stacked at the safe left edge,
+pause above power-up. The guest draws these controls; hit testing uses the same
+rectangles. Achievement toasts are centred at the bottom of portrait surfaces
+(SDK patch 0084), with a reserved strip below the permanent HUD labels.
+
+`--touch_preview=true` enables a desktop visual test of the real iOS guest
+controls, including a ready power-up and the transient personal-best label.
+The input viewer follows its normal setting; the visual test disables it. The preview requests a real achievement toast
+without unlocking an achievement. It is off by default and does not change
+normal desktop or iOS gameplay. Optional HUD settings and comparison scores in
+the validation run belong to an isolated profile under `out/macos/portrait/`.
+
+The crop and full HUD are validated on macOS Vulkan; screenshots and logs are
+under `out/macos/portrait-crop/`. iOS uses the same layout and declares portrait
+support, with the selected orientation supplied to SDL before window creation.
+Device portrait rotation and touch placement still need a device visual check.

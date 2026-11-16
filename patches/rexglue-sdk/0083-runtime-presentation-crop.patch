@@ -1,0 +1,14 @@
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -670,6 +670,10 @@ void Presenter::SetGuestOutputPaintConfigFromUIThread(const GuestOutputPaintConfig& new_config) {
+   // request UI thread guest output redraws when not needed.
+   bool modified = false;
+   bool request_repaint = false;
++  if (guest_output_paint_config_.GetAllowOverscanCutoff() != new_config.GetAllowOverscanCutoff()) {
++    modified = true;
++    request_repaint = true;
++  }
+   if (guest_output_paint_config_.GetEffect() != new_config.GetEffect()) {
+     modified = true;
+     request_repaint = true;

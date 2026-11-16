@@ -66,7 +66,7 @@ std::string HighestFilteringTokenAtMost(int32_t ceiling) {
 }  // namespace
 
 GuestScreenPlan PlanRenderSettings(const RenderPathLimits& limits, const DisplayMode& display,
-                                   std::string_view aspect, int32_t scale) {
+                                   std::string_view aspect, int32_t scale, std::string_view orientation) {
   if (std::find(limits.scales.begin(), limits.scales.end(), scale) == limits.scales.end()) return {};
   DisplayMode ratio = display;
   if (aspect == "16:9") ratio = {16, 9};
@@ -76,6 +76,10 @@ GuestScreenPlan PlanRenderSettings(const RenderPathLimits& limits, const Display
   else if (aspect == "32:9") ratio = {32, 9};
   else if (aspect != "auto") return {};
   if (ratio.width <= 0 || ratio.height <= 0) ratio = {16, 9};
+  if (orientation != "landscape" && orientation != "portrait") return {};
+  // Render the same landscape source in either orientation. Portrait is a
+  // centred presentation crop, never a differently shaped guest framebuffer.
+  if (ratio.width < ratio.height) std::swap(ratio.width, ratio.height);
   // Retain the title's verified native layouts: wide 32:9 uses its 540p layout
   // to stay below the 1920-pixel guest-width gate. Scale never changes shape.
   for (int32_t height : {720, 540}) {

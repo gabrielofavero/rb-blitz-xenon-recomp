@@ -412,7 +412,8 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
       rex::cvar::GetFlagByName("startup_mode") == "fast";
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), refresh_row_on, &build_notes, menu_filter::HiddenRows(),
-                        skip_startup_logos, &refresh_routes, maybe_pump))
+                        skip_startup_logos, &refresh_routes, maybe_pump,
+                        BootPortraitWidth() != 0))
     return fail();
   PumpStartupWindow(pump_startup_window);
   bool song_entry_patched = false;

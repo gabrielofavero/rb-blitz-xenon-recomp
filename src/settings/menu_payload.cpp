@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "settings/menu_payload.h"
+#include "input/touch_controls.h"
 
 #include <algorithm>
 #include <array>
@@ -1607,7 +1608,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       const std::vector<std::string>& hidden_menu_rows,
                       bool skip_startup_logos,
                       MenuRefreshRoutes* refresh_routes,
-                      const std::function<void()>& pump_startup_window) {
+                      const std::function<void()>& pump_startup_window,
+                      bool portrait_hud) {
   namespace screen = ui::screen;
   MenuRecords built;
   MenuRefreshRoutes installed_routes;
@@ -2337,16 +2339,57 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       note("the guest heap size was left unchanged: " + why);
     }
   }
+  const bool touch_hud =
 #if defined(RB_BLITZ_IOS)
-  if (!edit("ui/gen/game.dtb", [&](auto& roots) {
-        return AddTouchHudAnimation(&roots, error) && AddIOSAutoPause(&roots, error);
+      true;
+#elif defined(RB_BLITZ_TOUCH_HUD)
+      rb_blitz::input::touch::PreviewEnabled();
+#else
+      false;
+#endif
+  if ((portrait_hud || touch_hud) && !edit("ui/gen/game.dtb", [&](auto& roots) {
+        if (portrait_hud) {
+          auto* enter = PanelMethod(&roots, "game_screen", "enter");
+          if (!enter) {
+            if (error) *error = "game_screen enter method changed";
+            return false;
+          }
+          const auto game = Node::Command({Node::Var("this"), Node::Symbol("get_game")});
+          const auto hud = Node::Command({game, Node::Symbol("get_hud_dir")});
+          for (const char* name : {"score.lbl", "timer.lbl"}) {
+            const auto label = Node::Command({hud, Node::Symbol("find"), Node::Symbol(name),
+                                             Node::Int(0)});
+            // Use the guest's own text alignment so changing digit counts stays centred.
+            enter->kids.push_back(Node::Command({Node::Symbol("if"), label,
+                Node::Command({label, Node::Symbol("set"), Node::Symbol("alignment"),
+                               Node::Int(0x22)})})); // middle centre
+          }
+          const auto personal_best = Node::Command({hud, Node::Symbol("find"),
+              Node::Symbol("pb.lbl"), Node::Int(0)});
+          enter->kids.push_back(Node::Command({Node::Symbol("if"), personal_best,
+              Node::Command({personal_best, Node::Symbol("set"), Node::Symbol("alignment"),
+                             Node::Int(0x24)})})); // middle right
+        }
+#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
+        if (touch_hud && !AddTouchHudAnimation(&roots, error)) return false;
+#if defined(RB_BLITZ_IOS)
+        return AddIOSAutoPause(&roots, error);
+#else
+        return true;
+#endif
+#else
+        return true;
+#endif
       })) return false;
+#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
+  if (touch_hud) {
   {
     std::vector<uint8_t> source, icons;
     if (!read(ui::input_font::kHudRecord, &source, error) ||
         !read("track/gen/powerup_icon.milo_xbox", &icons, error) ||
         !ui::input_font::PrepareTouchHud(source, icons, &built[ui::input_font::kHudRecord], error))
       return false;
+  }
   }
 #endif
   {

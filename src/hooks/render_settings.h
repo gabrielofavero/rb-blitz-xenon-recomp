@@ -28,6 +28,10 @@ void SetBootRenderFrame(uint32_t width, uint32_t height);
 void SetBootRenderHeight(uint32_t height);
 uint32_t BootRenderWidth();
 uint32_t BootRenderHeight();
+// The visible portrait crop; zero outside portrait mode. Rendering stays landscape.
+void SetBootPortraitFrame(uint32_t width, uint32_t height);
+uint32_t BootPortraitWidth();
+uint32_t BootPortraitHeight();
 
 // The other half of a non-16:9 frame: the space the title lays its UI out in.
 //

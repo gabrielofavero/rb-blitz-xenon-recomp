@@ -6,6 +6,7 @@
 namespace rex::ui { class ImGuiDialog; class ImGuiDrawer; class Window; }
 
 namespace rb_blitz::input::touch {
+bool PreviewEnabled();
 Actions SampleGameplay(bool active);
 void CancelGameplay();
 std::vector<GameplayEvent> DrainGameplay();

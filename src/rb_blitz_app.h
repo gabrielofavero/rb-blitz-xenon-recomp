@@ -61,8 +61,9 @@
 #include "platform/bundle_resources.h"
 #if defined(RB_BLITZ_IOS)
 #include "platform/ios_runtime.h"
-#include "input/touch_controls.h"
 #endif
+#include "input/touch_controls.h"
+#include "ui/gameplay_presentation.h"
 #include <rex/graphics/compile_trace.h>
 #include "diag/shader_trace.h"
 #include "diag/boot_heartbeat.h"
@@ -816,9 +817,18 @@ class RbBlitzApp : public rex::ReXApp {
   // handed over as a callback rather than a pointer - the same lazily-called shape
   // as the menu cursor's window lookup.
   void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
-#if defined(RB_BLITZ_IOS)
+    gameplay_presentation_ = rb_blitz::ui::CreateGameplayPresentation(drawer, [this] {
+      auto* graphics = runtime() ? runtime()->graphics_system() : nullptr;
+      return graphics ? graphics->presenter() : nullptr;
+    }, [this] {
+      // Visual preview only: use the real notification without unlocking or
+      // changing any achievement state.
+      if (rb_blitz::input::touch::PreviewEnabled()) {
+        const auto entries = achievements().ListAchievements();
+        if (!entries.empty()) achievements().ShowAchievementNotification(entries.front().id);
+      }
+    });
     touch_controls_ = rb_blitz::input::touch::CreateControls(drawer, [this] { return window(); });
-#endif
     boot_loading_icon_ = std::make_unique<rb_blitz::ui::BootLoadingIcon>(
         drawer, [this] {
           auto* graphics = runtime() ? runtime()->graphics_system() : nullptr;
@@ -851,9 +861,8 @@ class RbBlitzApp : public rex::ReXApp {
     achievement_browser_.reset();
     rb_blitz::ui::notifications::SharedQueue().Clear();
     mouse_cursor_.reset();
-#if defined(RB_BLITZ_IOS)
+    gameplay_presentation_.reset();
     touch_controls_.reset();
-#endif
     boot_loading_icon_.reset();
   }
 
@@ -987,8 +996,9 @@ class RbBlitzApp : public rex::ReXApp {
 #if defined(RB_BLITZ_IOS)
   std::filesystem::path ios_documents_root_;
   bool ios_presentation_state_logged_ = false;
-  std::unique_ptr<rex::ui::ImGuiDialog> touch_controls_;
 #endif
+  std::unique_ptr<rex::ui::ImGuiDialog> touch_controls_;
+  std::unique_ptr<rex::ui::ImGuiDialog> gameplay_presentation_;
   // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings
   // bridge's caption sink, because the sink object lives beside the dialog.
   std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;

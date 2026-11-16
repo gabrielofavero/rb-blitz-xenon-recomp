@@ -218,6 +218,13 @@ std::vector<SchemaRow> BuildTable() {
                        "Auto fits your display using the highest supported resolution."));
   }
   {
+    Descriptor d = Make(SettingId::kOrientation, Category::kGraphics, Provider::kNative,
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("landscape"));
+    d.choices = Choices({{"landscape", "Landscape"}, {"portrait", "Portrait"}});
+    rows.push_back(Row(std::move(d), {"graphics", "orientation"}, "", "Orientation",
+                       "Portrait crops gameplay and rearranges the HUD. Restart to apply."));
+  }
+  {
     Descriptor d = Make(SettingId::kAspectRatio, Category::kGraphics, Provider::kNative,
                         WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("auto"));
     d.choices = Choices({{"auto", "Auto"}, {"16:9", "16:9"}, {"16:10", "16:10"},
@@ -531,6 +538,7 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kHideAchievements, ApplicationStrategy::kRestart, ""},
     // Graphics
     {SettingId::kResolution, ApplicationStrategy::kRestart, ""},
+    {SettingId::kOrientation, ApplicationStrategy::kRestart, ""},
     {SettingId::kAspectRatio, ApplicationStrategy::kRestart, ""},
     {SettingId::kRenderScale, ApplicationStrategy::kRestart, ""},
     // The first row promoted to `hot`, and its evidence is a measurement rather than a guess about
