@@ -214,8 +214,23 @@ std::vector<SchemaRow> BuildTable() {
     Descriptor d = Make(SettingId::kResolution, Category::kGraphics, Provider::kNative,
                         WidgetKind::kHorizontalSelect, ValueKind::kResolution,
                         ResolutionValue(0, 0), "resolutions");
-    rows.push_back(Row(std::move(d), {"graphics", "resolution"}, "", "Resolution",
+    rows.push_back(Row(std::move(d), {"graphics", "resolution"}, "legacy_resolution", "Resolution",
                        "Auto fits your display using the highest supported resolution."));
+  }
+  {
+    Descriptor d = Make(SettingId::kAspectRatio, Category::kGraphics, Provider::kNative,
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("auto"));
+    d.choices = Choices({{"auto", "Auto"}, {"16:9", "16:9"}, {"16:10", "16:10"},
+                         {"4:3", "4:3"}, {"21:9", "21:9"}, {"32:9", "32:9"}});
+    rows.push_back(Row(std::move(d), {"graphics", "aspect_ratio"}, "", "Aspect Ratio",
+                       "Auto follows your display's proportions."));
+  }
+  {
+    Descriptor d = Make(SettingId::kRenderScale, Category::kGraphics, Provider::kNative,
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("auto"),
+                        "render_scales");
+    rows.push_back(Row(std::move(d), {"graphics", "render_scale"}, "", "Render Scale",
+                       "Higher scales sharpen the picture and use more GPU power and memory."));
   }
   rows.push_back(Row(Make(SettingId::kVsync, Category::kGraphics, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
@@ -497,6 +512,8 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kHideAchievements, ApplicationStrategy::kRestart, ""},
     // Graphics
     {SettingId::kResolution, ApplicationStrategy::kRestart, ""},
+    {SettingId::kAspectRatio, ApplicationStrategy::kRestart, ""},
+    {SettingId::kRenderScale, ApplicationStrategy::kRestart, ""},
     // The first row promoted to `hot`, and its evidence is a measurement rather than a guess about
     // reloadability: with the guest running, the host flipped this exact cvar and the discovery
     // rate moved from 16.66 ms per item to 5.68 ms (46.7 s -> 15.96 s for 2,807 items), with the
@@ -612,6 +629,13 @@ void FillChoiceSource(Descriptor& descriptor, const CapabilitySnapshot& caps) {
       if (renderer.token == "vulkan") label = "Vulkan";
       descriptor.choices.push_back(Choice{renderer.token, label});
     }
+  } else if (source == "render_scales") {
+    descriptor.choices.push_back(Choice{"auto", "Auto"});
+    for (int32_t scale : caps.supported_render_scales) {
+      if (scale < 1 || scale > 3) continue;
+      const std::string token = std::to_string(scale) + "x";
+      descriptor.choices.push_back(Choice{token, token});
+    }
   } else if (source == "resolutions") {
     descriptor.choices.push_back(Choice{"auto", "Auto"});
     for (const DisplayMode& mode : caps.supported_resolutions) {
@@ -725,6 +749,7 @@ std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps,
   for (const SchemaRow& row : Rows()) {
     Descriptor descriptor = row.descriptor;
     FillChoiceSource(descriptor, caps);
+    if (row.group == "legacy_resolution") descriptor.availability = Availability::kHidden;
     if (descriptor.provider == Provider::kUltimate) {
       if (!caps.provider.installed || !caps.provider.compatible) {
         descriptor.availability = Availability::kHidden;

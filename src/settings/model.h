@@ -47,12 +47,14 @@ enum class SettingId : uint16_t {
   kLoadGuard = 10,
   kStartup = 11,
   // Graphics
-  kResolution = 20,
+  kResolution = 20,  // legacy/internal resolved dimensions; no longer a visible row
   kVsync = 21,
   kRenderer = 22,
   kAntiAliasing = 23,
   kFiltering = 24,
   kDisplay = 25,  // windowed / borderless / full screen (owner decision, 2026-10-13)
+  kAspectRatio = 26,
+  kRenderScale = 27,
   // Interface
   kLetterbox = 40,
   kHideOfflinePrompts = 41,
@@ -115,6 +117,10 @@ struct Value {
 inline bool IsAutoResolution(const Value& value) {
   return value.kind == ValueKind::kResolution && value.width == 0 && value.height == 0;
 }
+
+// Translate exact legacy render dimensions into the two independent preferences.
+// Unknown shapes or dimensions remain in the legacy document, without guessing.
+bool SplitLegacyResolution(const Value& resolution, Value* aspect, Value* scale);
 
 enum class WidgetKind : uint8_t {
   kBoolean,
@@ -245,6 +251,8 @@ struct CapabilitySnapshot {
   // Populated only by a measured performance profile for this device/backend.
   // Display size or CPU count alone is never performance evidence.
   DisplayMode verified_sustainable_resolution;
+  std::vector<int32_t> supported_render_scales = {1, 2, 3};
+  int32_t recommended_render_scale = 1;
   rb_blitz::profile::LaunchTarget active_target = rb_blitz::profile::LaunchTarget::kCommon;
   ProviderState provider;
 };

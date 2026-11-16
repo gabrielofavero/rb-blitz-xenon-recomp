@@ -107,6 +107,9 @@ struct Document {
   std::map<SettingId, Value> values;    // requested values actually persisted
   std::map<SettingId, Origin> origins;  // [provenance]
   int32_t automatic_policy_version = 1;
+  // Transient: boot may persist the derived new preferences once, without removing legacy data.
+  bool graphics_preferences_migrated = false;
+  std::vector<SettingId> migrated_graphics_preferences;
   bool migration_imported = false;                  // [migration] imported
   std::map<std::string, Value> ultimate_overrides;  // [ultimate_overrides]
 };

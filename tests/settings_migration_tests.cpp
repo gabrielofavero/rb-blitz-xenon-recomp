@@ -182,7 +182,7 @@ void TestMigrateDefault() {
   CHECK_TRUE(result.stats.target_imported);
   // Keep the old target, 4x filtering, explicitly stored 720p resolution,
   // DLC Menu Songs and the explicit choice to show all main-menu rows.
-  CHECK_EQ(result.stats.imported, 5);
+  CHECK_EQ(result.stats.imported, 7);
   CHECK_EQ(result.stats.translated, 2);
   CHECK_EQ(result.stats.dropped, 5);      // retired cache + rename + pool count + fullscreen + monitor
   CHECK_EQ(result.stats.preserved, 1);    // input_backend
@@ -246,6 +246,8 @@ void TestMigrateTranslations() {
   const DocumentLoad loaded = LoadSettingsDocument(paths.settings_file);
   CHECK_EQ(loaded.document.values.at(SettingId::kResolution).width, 2560);
   CHECK_EQ(loaded.document.values.at(SettingId::kResolution).height, 1440);
+  CHECK_TRUE(loaded.document.values.at(SettingId::kAspectRatio).text == "16:9");
+  CHECK_TRUE(loaded.document.values.at(SettingId::kRenderScale).text == "2x");
   CHECK_STR_EQ(loaded.document.values.at(SettingId::kFiltering).text, "16x");
   CHECK_STR_EQ(loaded.document.values.at(SettingId::kAntiAliasing).text, "fxaa");
   CHECK_TRUE(loaded.document.values.at(SettingId::kDlcScanThreads).integer == 8);

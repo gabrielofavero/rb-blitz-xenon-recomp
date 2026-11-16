@@ -367,6 +367,11 @@ MigrationResult Migrate(const Profile& legacy, Store& store, const PathEntry& ex
         if (Import(store, SettingId::kResolution, value, &result)) {
           ++result.stats.translated;
         }
+        Value aspect, render_scale;
+        if (SplitLegacyResolution(value, &aspect, &render_scale)) {
+          Import(store, SettingId::kAspectRatio, aspect, &result);
+          Import(store, SettingId::kRenderScale, render_scale, &result);
+        }
       }
     } else if (key == "anisotropic_override") {
       int64_t code = 0;

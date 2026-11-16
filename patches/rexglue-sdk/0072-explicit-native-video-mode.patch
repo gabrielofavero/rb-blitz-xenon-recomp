@@ -1,0 +1,59 @@
+diff --git a/include/rex/graphics/video_mode_util.h b/include/rex/graphics/video_mode_util.h
+--- a/include/rex/graphics/video_mode_util.h
++++ b/include/rex/graphics/video_mode_util.h
+@@ -19,6 +19,13 @@
+ #include <rex/ui/flags.h>
+ 
+ namespace rex::graphics::video_mode_util {
++
++// An explicit native 1280x720 mode is still configured. Comparing values alone
++// loses that intent and may substitute a window size measured in logical pixels.
++inline bool HasConfiguredVideoModeDimension(std::string_view name) {
++  return rex::cvar::GetFlagSource(name) != rex::cvar::Source::kDefault ||
++         rex::cvar::HasNonDefaultValue(name);
++}
+ 
+ inline bool TryParsePositiveInt32(std::string_view value, int32_t& value_out) {
+   if (value.empty()) {
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_video.cpp b/src/kernel/xboxkrnl/xboxkrnl_video.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_video.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_video.cpp
+@@ -43,7 +43,7 @@
+ 
+ uint32_t GetConfiguredVideoModeWidth() {
+   int32_t configured_width = REXCVAR_GET(video_mode_width);
+-  if (!rex::cvar::HasNonDefaultValue("video_mode_width")) {
++  if (!rex::graphics::video_mode_util::HasConfiguredVideoModeDimension("video_mode_width")) {
+     if (rex::cvar::HasNonDefaultValue("window_width") && REXCVAR_GET(window_width) > 0) {
+       configured_width = REXCVAR_GET(window_width);
+     } else {
+@@ -60,7 +60,7 @@
+ 
+ uint32_t GetConfiguredVideoModeHeight() {
+   int32_t configured_height = REXCVAR_GET(video_mode_height);
+-  if (!rex::cvar::HasNonDefaultValue("video_mode_height")) {
++  if (!rex::graphics::video_mode_util::HasConfiguredVideoModeDimension("video_mode_height")) {
+     if (rex::cvar::HasNonDefaultValue("window_height") && REXCVAR_GET(window_height) > 0) {
+       configured_height = REXCVAR_GET(window_height);
+     } else {
+diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
+--- a/src/ui/window_sdl.cpp
++++ b/src/ui/window_sdl.cpp
+@@ -78,7 +78,7 @@
+     return uint32_t(REXCVAR_GET(window_width));
+   }
+   if (!rex::cvar::HasNonDefaultValue("window_width")) {
+-    if (rex::cvar::HasNonDefaultValue("video_mode_width") && REXCVAR_GET(video_mode_width) > 0) {
++    if (rex::graphics::video_mode_util::HasConfiguredVideoModeDimension("video_mode_width") && REXCVAR_GET(video_mode_width) > 0) {
+       return PixelsToWindowLogical(REXCVAR_GET(video_mode_width));
+     }
+     int32_t preset_width = 0;
+@@ -96,7 +96,7 @@
+     return uint32_t(REXCVAR_GET(window_height));
+   }
+   if (!rex::cvar::HasNonDefaultValue("window_height")) {
+-    if (rex::cvar::HasNonDefaultValue("video_mode_height") && REXCVAR_GET(video_mode_height) > 0) {
++    if (rex::graphics::video_mode_util::HasConfiguredVideoModeDimension("video_mode_height") && REXCVAR_GET(video_mode_height) > 0) {
+       return PixelsToWindowLogical(REXCVAR_GET(video_mode_height));
+     }
+     int32_t preset_width = 0;

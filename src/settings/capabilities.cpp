@@ -274,6 +274,19 @@ CapabilitySnapshot BuildCapabilitySnapshot(const CapabilityInputs& inputs) {
   caps.supported_resolutions =
       SupportedResolutions(inputs.render_path, inputs.display_modes,
                            inputs.display_enumeration_available, inputs.primary_display_size);
+  caps.supported_render_scales = inputs.render_path.scales;
+  // Match the display without automatic supersampling. Low-memory hosts keep
+  // the 512 MiB shared resolve buffer at native scale rather than growing it
+  // by scale squared. This is a recommendation, not a GPU benchmark.
+  const int32_t baseline_height = int64_t(inputs.primary_display_size.width) * 720 >
+      int64_t(inputs.primary_display_size.height) * 1920 ? 540 : 720;
+  const int32_t display_scale = std::max(1, inputs.primary_display_size.height / baseline_height);
+  const int32_t memory_scale = !inputs.system_memory_mb ? 1 :
+      inputs.system_memory_mb <= 8192 ? 1 : inputs.system_memory_mb <= 16384 ? 2 : 3;
+  caps.recommended_render_scale = 1;
+  for (int32_t scale : caps.supported_render_scales)
+    if (scale <= display_scale && scale <= memory_scale)
+      caps.recommended_render_scale = std::max(caps.recommended_render_scale, scale);
   return caps;
 }
 

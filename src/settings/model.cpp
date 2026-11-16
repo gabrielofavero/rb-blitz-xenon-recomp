@@ -8,9 +8,45 @@
 
 #include "settings/model.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <utility>
 
 namespace rb_blitz::settings {
+
+bool SplitLegacyResolution(const Value& resolution, Value* aspect, Value* scale) {
+  if (!aspect || !scale || resolution.kind != ValueKind::kResolution) return false;
+  Value ratio, multiplier;
+  ratio.kind = multiplier.kind = ValueKind::kEnum;
+  ratio.text = multiplier.text = "auto";
+  if (!IsAutoResolution(resolution)) {
+    if (resolution.width <= 0 || resolution.height <= 0) return false;
+    for (const auto& entry : {std::pair{16, 9}, {16, 10}, {4, 3}, {21, 9}, {32, 9}}) {
+      if (int64_t(resolution.width) * entry.second == int64_t(resolution.height) * entry.first)
+        ratio.text = std::to_string(entry.first) + ":" + std::to_string(entry.second);
+    }
+    if (ratio.text == "auto") return false;
+    // First verify that the legacy dimensions were an exact measured layout.
+    // Its 540-line layout made 1080p at 2x; carrying that literal scale into
+    // the new 720-line baseline would increase both memory and GPU work.
+    for (const int height : {720, 540}) {
+      if (resolution.height % height) continue;
+      const int factor = resolution.height / height;
+      if (factor < 1 || factor > 3 || resolution.width % factor) continue;
+      const int width = resolution.width / factor;
+      if (width < 640 || width > 1920 || (width & 15)) continue;
+      multiplier.text = std::to_string(factor) + "x";
+      break;
+    }
+    if (multiplier.text == "auto") return false;
+    const int baseline = ratio.text == "32:9" ? 540 : 720;
+    const int new_scale = std::max(1, std::min(3, resolution.height / baseline));
+    multiplier.text = std::to_string(new_scale) + "x";
+  }
+  *aspect = std::move(ratio);
+  *scale = std::move(multiplier);
+  return true;
+}
 
 std::string_view SettingIdToken(SettingId id) {
   switch (id) {
@@ -36,6 +72,10 @@ std::string_view SettingIdToken(SettingId id) {
       return "load_guard";
     case SettingId::kStartup:
       return "startup";
+    case SettingId::kAspectRatio:
+      return "aspect_ratio";
+    case SettingId::kRenderScale:
+      return "render_scale";
     case SettingId::kResolution:
       return "resolution";
     case SettingId::kVsync:

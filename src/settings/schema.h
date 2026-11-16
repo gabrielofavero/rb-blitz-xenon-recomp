@@ -12,9 +12,9 @@
 //     without inventing a second SettingId for each container row.
 //
 // `choices_source` is frozen as "" | "renderers" | "resolutions" | "provider". P3 adds
-// "processor_count" and "menu_rows" for the two rows whose choices are not a capability
-// record: the DLC scan-thread ceiling (§3.1) and the Hide Main Menu row list (§3.3, P10's
-// seam). Both are resolved in BuildDescriptors; an unknown source leaves the row's static
+// "processor_count", "render_scales", and "menu_rows" for the DLC scan-thread ceiling (§3.1),
+// supported render multipliers, and Hide Main Menu row list (§3.3, P10's seam).
+// All are resolved in BuildDescriptors; an unknown source leaves the row's static
 // choices in place.
 
 #pragma once

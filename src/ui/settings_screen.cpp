@@ -1136,13 +1136,13 @@ std::vector<PanelSpec> AllPanels() {
       RouteRow("settings_audio", "av_options_screen", "back_screen",
                                        "Audio", "Volume, bass boost, background music, and music navigation."),
       SubmenuRow("settings_display_menu", "settings_display_screen",
-                                         "Display", "Window mode, render size, and V-Sync."),
+                                         "Display", "Window mode, aspect ratio, render scale, and V-Sync."),
       SubmenuRow("settings_graphics_menu", "settings_graphics_screen",
                                          "Graphics",
                                          "Rendering quality: anti-aliasing, filtering, and depth of field.")
   }});
 
-  // 3a-i. Display: the window mode, the render size and V-Sync.
+  // 3a-i. Display: aspect and rendering density are independent; the page stays below six rows.
   out.push_back(PanelSpec{"settings_display_panel", "settings_display_screen",
                           "settings_av_screen", MenuPanels(),
                           {
@@ -1150,13 +1150,13 @@ std::vector<PanelSpec> AllPanels() {
                                         "Run the game windowed, borderless, or full screen.",
                                         Choices({"windowed", "Windowed", "borderless",
                                                  "Borderless", "fullscreen", "Full Screen"})),
-                              SelectRow("settings_resolution", "graphics.resolution", "Resolution",
-                                        "Auto fits your display using the highest supported resolution.",
-                                        Choices({"auto", "Auto", "960x540", "960x540",
-                                                 "1280x720", "1280x720", "1920x1080", "1920x1080",
-                                                 "2560x1440", "2560x1440", "2880x1620",
-                                                 "2880x1620", "3840x2160",
-                                                 "3840x2160"})),
+                              SelectRow("settings_aspect_ratio", "graphics.aspect_ratio", "Aspect Ratio",
+                                        "Auto follows your display shape. Restart to apply.",
+                                        Choices({"auto", "Auto", "16:9", "16:9", "16:10", "16:10",
+                                                 "4:3", "4:3", "21:9", "21:9", "32:9", "32:9"})),
+                              SelectRow("settings_render_scale", "graphics.render_scale", "Render Scale",
+                                        "More detail costs speed. Restart to apply.",
+                                        Choices({"auto", "Auto", "1x", "1x", "2x", "2x", "3x", "3x"})),
                               BoolRow("settings_vsync", "graphics.vsync", "V-Sync",
                                       "Match the frame rate to your display to remove screen tearing."),
                               BoolRow("settings_overscan", "guest.overscan", "Overscan",

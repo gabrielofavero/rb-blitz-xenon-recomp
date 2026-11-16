@@ -164,6 +164,7 @@ struct RendererProbe {
 };
 
 struct CapabilityInputs {
+  uint64_t system_memory_mb = 0;  // zero means unavailable; used only for initial recommendations
   uint32_t logical_processors = 1;  // usable logical processors (the thread-count ceiling)
   bool display_enumeration_available = false;
   std::string primary_display_id;

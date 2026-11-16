@@ -222,10 +222,10 @@ No experimental resolution, MSAA, queue or render-target settings were saved.
 SDK patch 0068 retains the useful bounded Vulkan attribution spans. The Vulkan
 specification permits restricting attachment work through
 [render areas](https://docs.vulkan.org/refpages/latest/refpages/source/VkRenderPassBeginInfo.html),
-but that alone did not improve this workload in the prototype. A real GPU capture
-breaking down render/transfer/compute time remains necessary before selecting a
-broader backend optimization. The current measurements do not prove full-speed
-play is impossible on this Mac.
+but that alone did not improve this workload in the prototype. At this stage a real
+GPU capture was still needed. The follow-up below records that capture and the
+resulting optimizations; the original measurements did not prove full-speed play
+was impossible on this Mac.
 
 SDK patch 0069 fixes the confirmed async-path stall: MoltenVK no longer creates a
 throwaway placeholder pipeline synchronously before queueing the real one.
@@ -265,3 +265,121 @@ fragment-gradient GPU regression at 1x/2x/4x. All 68 SDK patches replay with no
 drift. Build/test/audit outputs are `pending-final-build.log`, `final-tests.log`
 and `patch-check.log` in the performance output directory. Windows and Intel
 Mac regression runs are unavailable on this host.
+
+
+### Root-cause follow-up: rendering cost and audio rewind (2026-11-15)
+
+The owner described repeated audio and backward highway movement, then confirmed
+forward playback with the combined fix. The guest song clock comes from the audio
+stream; the clock filter was observing a real ring-position regression. The fix
+keeps that audio-derived clock and does not clamp or replace song time.
+
+`src/hooks/audio_stream.cpp` preserves the guest Vorbis decoder, MOGG decryption,
+stream copy completion and pause/seek routes. It changes three related limits on
+Mac by default (`audio_stream_catchup`, restart-scoped):
+
+- A compressed input request reserves and reads 128 KiB instead of 16 KiB at the
+  verified `VorbisReader` call sites (`0x827687A0` allocation return and
+  `0x827687C4` read return). The larger `ArkFile::ReadAsync` request is coupled to
+  the exact enlarged buffer; unrelated readers retain their sizes.
+- `StandardStream::PollStream` (`0x823E61E0`) forwards at most 2,048 samples per
+  original poll. Low-buffer catch-up uses at most four extra original polls, a
+  four-millisecond budget and an immediate stop when neither PCM nor a copy
+  progresses. It stays on the owning guest thread and restores its FP control.
+- `StreamReceiver::Poll` (`0x823E9828`) originally starts a refill only at an exact
+  half-ring block distance. A long render frame can skip that block. Catch-up
+  records the missed crossing while retaining the original queued-PCM and
+  outstanding-copy checks. The original DMA may otherwise replay old PCM and
+  make the audio-derived gameplay clock wrap backward.
+
+The Metal System Trace in `out/macos/root-cause/song.trace` found about 1,080
+encoders in a gameplay command buffer, including roughly 500 render passes and
+500 blits. Temporary counters in `combined.log` found no memory exports or index
+snapshots in the sampled frames: guest vertex/index uploads caused most pass
+interruptions, with roughly 300–500 guest render-pass starts and 9–20 MB of
+uploads per frame. These counters were removed from production.
+
+SDK patch **0070-moltenvk-shared-memory-upload-batching.patch** batches independent
+staging snapshots before the current deferred render pass. Conservative 4 KiB
+read/write tracking rejects aliases with earlier draws or uploads; memory-export
+and untracked helper work retain the ordered path. Index/vertex cache hits still
+contribute reads. Upload snapshots retain the existing submission-fence lifetime,
+and transfer barriers bracket the batch. MoltenVK is the enabled path; other
+Vulkan drivers retain their ordering. The sampled gameplay pass count fell to 26.
+
+SDK patch **0071-moltenvk-vertex-arithmetic.patch** extends the existing explicit
+Fma arithmetic lowering to MoltenVK vertex shaders. The pinned SPIRV-Cross lowers
+ordinary `NoContraction` arithmetic to `[[clang::optnone]]` Metal helper calls.
+The replacement retains separate operation rounding and signed zero without
+those calls. Other drivers keep the previous arithmetic; shader modification
+version 14 invalidates translations created under the old lowering.
+
+Observed One Week runs on the same M1/8 GiB host:
+
+| Capture under `out/macos/root-cause/` | Effective path | Completed guest draws/s | Clock result |
+| --- | --- | ---: | --- |
+| `combined.log` | Warm baseline at Auto 2x | 9.24 | 84 backward one-second windows in the measured sample |
+| `hoist.log` | Upload batching at Auto 2x | 17.03 | Rewinds remained |
+| `catchup-all.log` | Combined initial audio fix and batching | 14.03 | No backward windows; later near-freeze |
+| `vertex-fma.log` | Bounded audio fix, batching and vertex arithmetic at Auto 2x | 26.27 | No backward windows; reached the 172-second song ending |
+| `native1x-final.log` | Final arithmetic/audio path, explicit 1x override | About 60 | Reached the song ending; owner reported the best run but visible stretching |
+| `aspect-bars-fixed` run | Integrated Auto aspect/1x, SDK 0072 | 50.63 | No backward windows; reached song ending with correct 16:10 presentation |
+
+Auto 2x used a 1152x720 guest base and 2304x1440 internal rendering. The explicit
+1x override bypassed the saved guest-size plan and used a 1280x720 guest on the
+16:10 display. It demonstrates the rendering-cost difference but is not an
+aspect-correct acceptance run. The owner's resulting
+[desktop render-settings plan](../plans/finished/2026-11-15-desktop-render-settings-plan.md)
+separates aspect from scale so reducing work does not change the guest proportions.
+These are observed runs across different portions of the song, not a matched-scene
+benchmark or physical scanout measurement. No graphics preferences were saved by
+the diagnostic command-line overrides.
+
+The first integrated Aspect Ratio/Render Scale Auto/1x run did not pass aspect
+acceptance: the owner saw horizontal bars and closed before the menu
+(`aspect-auto-final.log`). Its boot log reported the intended 1152x720 guest and
+video-mode cvars, but did not record the actual SDK video-mode query. Source
+inspection found that explicit height 720 compared equal to the default, so
+`GetConfiguredVideoModeHeight` treated it as unset and substituted the Retina
+window's 360 logical pixels, clamped to 480. Width remained 1152, producing a
+2.4:1 queried aspect instead of 16:10. SDK patch
+`0072-explicit-native-video-mode.patch` now preserves the explicit cvar source in
+the kernel/SDL dimension predicate; `video_mode_intent` exercises that predicate
+with the real cvar registry. The updated audit replayed 71 patches with zero
+drift. The current Release build (`aspect-bars-build.log`) and all nine affected
+CTest registrations (`aspect-bars-tests.log`) passed.
+
+The rebuilt `aspect-bars-fixed` run passed the aspect check on the 16:10 display:
+the pre-A, gameplay and results captures fill the screen with round interface
+elements and no horizontal bars. The gameplay capture is named
+`aspect-bars-fixed-menu.png`; the other two are `-prea.png` and `-results.png`.
+The metrics JSON reports raw song time 172043.765625 ms, 176 measured windows,
+zero backward windows, 50.63 weighted completed guest draws/s and a slowest
+window of 10.06/s. This is full-song, aspect-correct acceptance, not locked 60 FPS.
+`aspect-bars-fixed-vmmap.txt` reports a 2.2 GiB current/peak physical footprint,
+versus the earlier 2x snapshot's 4.4 GiB peak. At the time, the system still had
+about 12.5 GB swap, `photolibraryd` near 90% CPU and another project's `dotnet`
+build near 32%. `aspect-bars-fixed-sample.txt` includes presenter-fence/drawable
+waits. That competition prevents treating the rates as a clean scale benchmark
+or proving that all frame-pacing limits are fixed. Authored settings
+save/restart/relaunch remains unverified: the owner closed the final UI-focused
+launch at the offline prompt, then explicitly stopped further game/UI launches.
+The desktop settings delivery record names that remaining manual gate.
+
+A prior near-freeze coincided with heavy system paging and about 14 GB of swap,
+while another project's builds were also active. A game snapshot reported a
+4.4 GB peak physical footprint and about 3.1 GB of graphics allocations; the 2x
+scaled-resolve address space alone is 2 GiB on MoltenVK. This supports memory
+pressure as a contributor, not a proof that one external process caused the
+freeze. The later complete 2x song did not reproduce that collapse; performance
+under arbitrary competing workloads remains unproven.
+
+The native Release build and the audio/hazard host tests pass. The upload-hazard
+fixture reports **3,627 checks**, including aliasing, repeated writes, boundary
+ranges and an independent draw-value replay oracle. The expanded native GPU
+fixture checks vertex and fragment arithmetic, signed zero and fragment gradients
+at supported 1x/2x/4x sample counts. Its sandboxed run skipped because Metal was
+unavailable; the same final binary **passed with device access** in 0.22 seconds
+(`vertex-gradient-escalated.log`). The SDK audit reports **70 patches replayed,
+zero files updated**. Windows, Intel Mac, other songs, installed payloads and
+physical-controller acceptance remain unverified for this follow-up.

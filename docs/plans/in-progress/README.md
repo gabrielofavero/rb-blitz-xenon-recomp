@@ -8,7 +8,7 @@ The [framerate expansion plan](../todo/2026-10-25-framerate-expansion-plan.md) h
 diagnostic pass on 2026-11-10 and returned to `todo/`. No higher rate is validated
 or offered in settings.
 
-The [resolution and scale expansion plan](2026-10-19-resolution-scale-expansion-plan.md) moved here
+The [resolution and scale expansion plan](../finished/2026-10-19-resolution-scale-expansion-plan.md) moved here
 on 2026-11-10. Auto, fixed 16:9 presets, planner bounds and the 2560×1080 boot are recorded as done;
 the former 4:3 and diagnostic-choice work is superseded. The 3840×1600 Auto path now passes a
 Windows release build and focused tests; its guest visuals and scale-4/32:9 game validation remain
@@ -70,3 +70,10 @@ See [`../README.md`](../README.md) for the status taxonomy.
 Binding rows are now implemented in the guest, and the plan moved to `finished/`;
 gameplay verification is deferred at the owner's request. See
 [`2026-10-22-in-game-binding-rows-plan.md`](../finished/2026-10-22-in-game-binding-rows-plan.md).
+
+The [desktop render-settings plan](../finished/2026-11-15-desktop-render-settings-plan.md)
+was delivered on 2026-11-15: separate Aspect Ratio and Render Scale controls,
+legacy migration, the native Release build, nine focused tests, SDK replay and a
+full-song 16:10 M1 aspect gate passed. The owner stopped further launches before
+authored settings save/restart was observed; the finished record keeps that exact
+manual gate unverified.

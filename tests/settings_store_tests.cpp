@@ -13,6 +13,7 @@
 #include "fs/atomic_file.h"
 #include "settings/store.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -263,7 +264,32 @@ void TestFailedWritePreservesBytes() {
 
   BeginCase("save: an unwritable destination keeps its bytes, and the failure names the reason");
   std::error_code code;
+#ifdef _WIN32
+  const auto original_permissions = fs::status(file, code).permissions();
   fs::permissions(file, fs::perms::owner_read, fs::perm_options::replace, code);
+#else
+  // Atomic replacement needs write permission on the directory, not on the existing file.
+  // Create the sidecar first so this case reaches replacement rather than failing to lock.
+  {
+    rb_blitz::fs::FileLock lock;
+    CHECK_TRUE(lock.Acquire(file, nullptr));
+  }
+  const auto original_permissions = fs::status(scratch.base, code).permissions();
+  fs::permissions(scratch.base, fs::perms::owner_read | fs::perms::owner_exec,
+                  fs::perm_options::replace, code);
+  CHECK_FALSE(static_cast<bool>(code));
+  const auto probe = scratch.base / "permission-probe";
+  std::ofstream probe_stream(probe);
+  const bool permissions_bypassed = probe_stream.is_open();
+  probe_stream.close();
+  if (permissions_bypassed) {
+    fs::permissions(scratch.base, original_permissions, fs::perm_options::replace, code);
+    fs::remove(probe, code);
+    std::printf("[ SKIP ] process privileges allow writing the protected directory\n");
+    CHECK_STR_EQ(ReadFile(file), original);
+    return;
+  }
+#endif
   // The base has to agree with what the file holds or this is a *conflict* - which writes nothing and
   // reports no I/O error at all, so the write path this case means to fail would never be reached.
   // (The earlier shape of this test did exactly that: its base named a key the file does not have.)
@@ -273,16 +299,23 @@ void TestFailedWritePreservesBytes() {
   const SaveOutcome failed = SaveSettingsDocument(file, write);
   CHECK_FALSE(failed.wrote);
   CHECK_EQ(static_cast<int>(failed.status), static_cast<int>(CommitStatus::kIoError));
-  // The failure names the operation, the path and the OS's reason, and says the previous file is
-  // still there (P3/D5: never a generic "saving" state). This is the text the channel logs and the
-  // menu's own error screen stands on.
+  // The failure names the operation, the path and the OS's reason. On Windows replacement of the
+  // read-only file fails; POSIX instead refuses to create the temporary file in the directory.
   CHECK_TRUE(!failed.errors.empty());
   if (!failed.errors.empty()) {
     CHECK_CONTAINS(failed.errors.front(), file.filename().string());
     CHECK_CONTAINS(failed.errors.front(), "cannot ");
+#ifdef _WIN32
     CHECK_CONTAINS(failed.errors.front(), "unchanged");
+#else
+    CHECK_CONTAINS(failed.errors.front(), "errno");
+#endif
   }
-  fs::permissions(file, fs::perms::owner_all, fs::perm_options::replace, code);
+#ifdef _WIN32
+  fs::permissions(file, original_permissions, fs::perm_options::replace, code);
+#else
+  fs::permissions(scratch.base, original_permissions, fs::perm_options::replace, code);
+#endif
   CHECK_STR_EQ(ReadFile(file), original);
 }
 
@@ -309,7 +342,11 @@ void TestLockErrorsSayWhichFailure() {
   }
   CHECK_CONTAINS(contended, "settings.toml.lock");  // the sidecar the lock is taken on
   CHECK_CONTAINS(contended, "cannot lock");
-  CHECK_CONTAINS(contended, "error");  // the numeric code is always there
+#ifdef _WIN32
+  CHECK_CONTAINS(contended, "error");
+#else
+  CHECK_CONTAINS(contended, "errno");
+#endif
 
   // A path that cannot hold the sidecar at all: `<a regular file>/nested.lock` has no directory.
   const fs::path unusable = file / "nested";
@@ -363,6 +400,67 @@ void TestStoreFacade() {
   CHECK_TRUE(reloaded.document.values.at(SettingId::kDlcMenuSongs).boolean == false);
 }
 
+void TestResolutionPreferenceMigration() {
+  Scratch scratch;
+  const auto file = scratch.base / "settings.toml";
+  BeginCase("store: split legacy dimensions, inherit provenance, preserve the original text");
+  const std::string old = "schema_version = 1\n[graphics]\nresolution = [1920, 1080] # keep\n"
+                          "unknown = 'untouched'\n[provenance]\n'graphics.resolution' = 'manual'\n";
+  WriteFile(file, old);
+  const auto loaded = LoadSettingsDocument(file);
+  CHECK_TRUE(loaded.document.graphics_preferences_migrated);
+  CHECK_STR_EQ(loaded.document.values.at(SettingId::kAspectRatio).text, "16:9");
+  CHECK_STR_EQ(loaded.document.values.at(SettingId::kRenderScale).text, "1x");
+  CHECK_TRUE(loaded.document.origins.at(SettingId::kAspectRatio) == Origin::kManual);
+  CHECK_STR_EQ(ReadFile(file), old);
+  SaveRequest save;
+  save.base = loaded.document.values;
+  save.changed[SettingId::kAspectRatio] = loaded.document.values.at(SettingId::kAspectRatio);
+  save.changed[SettingId::kRenderScale] = loaded.document.values.at(SettingId::kRenderScale);
+  CHECK_TRUE(SaveSettingsDocument(file, save).status == CommitStatus::kSaved);
+  CHECK_CONTAINS(ReadFile(file), "resolution = [1920, 1080] # keep");
+  CHECK_CONTAINS(ReadFile(file), "unknown = 'untouched'");
+  CHECK_FALSE(LoadSettingsDocument(file).document.graphics_preferences_migrated);
+
+  BeginCase("store: legacy high resolutions choose a scale without increasing pixel cost");
+  for (const auto& entry : {std::array<int32_t, 3>{1280, 720, 1}, {2560, 1440, 2},
+                           {2880, 1620, 2}, {3840, 2160, 3}, {3840, 1080, 2}}) {
+    Value legacy;
+    legacy.kind = ValueKind::kResolution;
+    legacy.width = entry[0]; legacy.height = entry[1];
+    Value ratio, scale;
+    CHECK_TRUE(SplitLegacyResolution(legacy, &ratio, &scale));
+    CHECK_STR_EQ(scale.text, std::to_string(entry[2]) + "x");
+  }
+
+  BeginCase("store: explicit new preferences win independently, including invalid hand edits");
+  WriteFile(file, "schema_version = 1\n[graphics]\nresolution = [2560, 1440]\n"
+                  "aspect_ratio = '4:3'\nrender_scale = 'unsupported' # left for the user\n");
+  const auto explicit_rows = LoadSettingsDocument(file);
+  CHECK_STR_EQ(explicit_rows.document.values.at(SettingId::kAspectRatio).text, "4:3");
+  CHECK_STR_EQ(explicit_rows.document.values.at(SettingId::kRenderScale).text, "unsupported");
+  CHECK_FALSE(explicit_rows.document.graphics_preferences_migrated);
+
+  BeginCase("store: concurrent edits of the legacy source are conflicts during conversion");
+  WriteFile(file, old);
+  save.base = LoadSettingsDocument(file).document.values;
+  WriteFile(file, "schema_version = 1\n[graphics]\nresolution = [2560, 1440]\n");
+  CHECK_TRUE(SaveSettingsDocument(file, save).status == CommitStatus::kConflict);
+
+  BeginCase("store: unknown legacy resolutions survive without guessed scale preferences");
+  WriteFile(file, "schema_version = 1\n[graphics]\nresolution = [1234, 777]\n");
+  const auto unsupported = LoadSettingsDocument(file);
+  CHECK_FALSE(unsupported.document.graphics_preferences_migrated);
+  CHECK_FALSE(unsupported.document.values.contains(SettingId::kRenderScale));
+  CHECK_EQ(unsupported.document.values.at(SettingId::kResolution).width, 1234);
+
+  BeginCase("store: legacy Auto stays Auto instead of turning into a fixed aspect");
+  WriteFile(file, "schema_version = 1\n[graphics]\nresolution = 'auto'\n");
+  const auto automatic = LoadSettingsDocument(file);
+  CHECK_STR_EQ(automatic.document.values.at(SettingId::kAspectRatio).text, "auto");
+  CHECK_STR_EQ(automatic.document.values.at(SettingId::kRenderScale).text, "auto");
+}
+
 }  // namespace
 
 int main() {
@@ -373,5 +471,6 @@ int main() {
   TestFailedWritePreservesBytes();
   TestLockErrorsSayWhichFailure();
   TestStoreFacade();
+  TestResolutionPreferenceMigration();
   return Finish();
 }

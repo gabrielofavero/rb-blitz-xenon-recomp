@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <cmath>
 #include <string>
 
 #include "settings/cvars.h"
@@ -64,8 +65,32 @@ std::string HighestFilteringTokenAtMost(int32_t ceiling) {
 
 }  // namespace
 
+GuestScreenPlan PlanRenderSettings(const RenderPathLimits& limits, const DisplayMode& display,
+                                   std::string_view aspect, int32_t scale) {
+  if (std::find(limits.scales.begin(), limits.scales.end(), scale) == limits.scales.end()) return {};
+  DisplayMode ratio = display;
+  if (aspect == "16:9") ratio = {16, 9};
+  else if (aspect == "16:10") ratio = {16, 10};
+  else if (aspect == "4:3") ratio = {4, 3};
+  else if (aspect == "21:9") ratio = {21, 9};
+  else if (aspect == "32:9") ratio = {32, 9};
+  else if (aspect != "auto") return {};
+  if (ratio.width <= 0 || ratio.height <= 0) ratio = {16, 9};
+  // Retain the title's verified native layouts: wide 32:9 uses its 540p layout
+  // to stay below the 1920-pixel guest-width gate. Scale never changes shape.
+  for (int32_t height : {720, 540}) {
+    const int64_t width = (int64_t(height) * ratio.width + ratio.height / 2) / ratio.height;
+    const int32_t aligned = int32_t((width + 8) / 16 * 16);
+    const auto plan = PlanGuestScreen(limits, {aligned * scale, height * scale});
+    if (plan.supported && plan.draw_scale == scale) return plan;
+  }
+  return {};
+}
+
 bool IsGraphicsRow(SettingId id) {
   switch (id) {
+    case SettingId::kAspectRatio:
+    case SettingId::kRenderScale:
     case SettingId::kResolution:
     case SettingId::kRenderer:
     case SettingId::kAntiAliasing:
@@ -195,6 +220,25 @@ Reconciliation GraphicsReconciler::Reconcile(SettingId id, const Descriptor& des
   const std::string renderer = PolicyRenderer(caps, "");
 
   switch (id) {
+    case SettingId::kAspectRatio: {
+      if (!PlanRenderSettings(TitleRenderPath(), caps.primary_display_size, requested.text, 1).supported) {
+        result.effective = MakeEnum("auto");
+        result.corrected = true;
+      }
+      return result;
+    }
+    case SettingId::kRenderScale: {
+      const int wanted = requested.text.size() == 2 && requested.text[1] == 'x'
+          ? requested.text[0] - '0' : 0;
+      const bool supported = std::find(caps.supported_render_scales.begin(),
+          caps.supported_render_scales.end(), wanted) != caps.supported_render_scales.end();
+      if (requested.text == "auto" || !supported) {
+        result.effective = MakeEnum(std::to_string(caps.recommended_render_scale) + "x");
+        result.corrected = requested.text != "auto";
+        if (result.corrected) result.correction_reason_key = std::string(kGraphicsCorrectedUnsupported);
+      }
+      return result;
+    }
     case SettingId::kResolution: {
       if (IsAutoResolution(requested) &&
           IsSupportedResolution(caps, caps.primary_display_size)) {

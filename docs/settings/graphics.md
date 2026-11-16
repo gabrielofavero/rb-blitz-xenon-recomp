@@ -15,6 +15,54 @@ classified immediate after measured transitions on both backends;
 Resolution, filtering and native MSAA remain restart-scoped pending their own
 resource-lifetime proofs.
 
+## Desktop control redesign (delivered 2026-11-15)
+
+The owner has superseded the visible fixed-resolution/Auto row with a request for
+independent **Aspect Ratio** and **Render Scale** controls on every desktop. The
+[delivery record](../plans/finished/2026-11-15-desktop-render-settings-plan.md)
+records migration, automatic recommendation, guest/presenter integration and
+six-entry-page acceptance. The historical studies below remain evidence for the
+planner's bounds; the delivery record distinguishes the completed code and
+native-scale aspect gates from the unverified authored UI save/restart gate.
+
+The implemented policy uses Auto/16:9/16:10/4:3/21:9/32:9 aspect tokens and
+Auto/1x/2x/3x scale tokens, with unsupported scales omitted. Auto scale takes the
+largest supported scale at or below `max(1, floor(display_height / baseline))`.
+The baseline is 540 for a display aspect wider than 1920:720 and 720 otherwise.
+RAM caps that recommendation at 1x through 8 GiB, 2x through 16 GiB and 3x above
+that; an unavailable memory query uses 1x. For example, 3840x1080 at 32:9 and
+32 GiB recommends 2x. This metadata-only recommendation is not a GPU benchmark. Manual
+choices remain available within backend limits. The normal guest base has height
+720 and aligned width; 32:9 uses 1920x540 because the measured guest-width ceiling
+is 1920. That lets scale change render cost while the chosen aspect stays fixed.
+Invalid aspect recovery preserves the requested scale, and safe graphics recovery
+replans output pixels from the recovered aspect and scale, without an old preset
+clamp. An explicit command-line `resolution_scale` keeps the planned guest shape,
+and the visible Render Scale reports that effective override.
+
+The immediate evidence is in the [Mac performance follow-up](../engine/vulkan-performance.md#root-cause-follow-up-rendering-cost-and-audio-rewind-2026-11-15):
+full native-scale gameplay sustained about 60 completed draws/s, but setting only
+`resolution_scale=1` bypassed the display-shaped guest plan and stretched 16:9
+content onto 16:10. Scale must therefore be applied together with the selected
+aspect, guest frame dimensions, HUD coordinate mapping and presenter shape.
+
+The first new Auto/1x live gate failed with horizontal bars before the menu. The
+boot log showed the intended 1152x720 values, but the SDK queried 1152x480: its
+height fallback treated explicit 720 as unset because it matched the default,
+then clamped the Retina logical-window height of 360 to 480. SDK patch
+`0072-explicit-native-video-mode.patch` preserves explicitly sourced native
+dimensions in the kernel and SDL paths, with a production-predicate fixture using
+the real cvar registry. Its new Release build and all nine affected CTest cases
+passed, and the subsequent full One Week run filled the 16:10 display without
+bars or distorted circles (`out/macos/root-cause/aspect-bars-fixed-*.png`). The
+176 measured windows had no backward song-clock windows, a weighted 50.63
+completed draws/s and a slowest window of 10.06/s; system paging and competing
+processes were still present. This passes the native-scale aspect check, without
+establishing locked 60 FPS or authored settings save/restart/relaunch. The
+owner stopped further launches after the last UI-focused run was closed at the
+offline prompt, so that exact manual gate remains unverified. The original cvar
+log alone had not proved the queried video aspect.
+
 ## Sources
 
 | Part | Original document | Package | Status |

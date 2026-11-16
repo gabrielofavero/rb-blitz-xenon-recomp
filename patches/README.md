@@ -12,6 +12,33 @@ checkout.
 
 ## Patches
 
+`0072-explicit-native-video-mode.patch` preserves explicitly configured video
+width/height even when they equal the defaults. The kernel query and SDL path
+now consider the cvar source as well as its value. Previously explicit height
+720 fell through to a Retina logical-window height of 360, clamped to 480;
+width 1152 stayed explicit, producing horizontal bars from a 2.4:1 video aspect.
+The `video_mode_intent` host fixture uses the real cvar registry to cover native
+1280x720, 1152x720 and reset-to-default behavior. The native Release build,
+nine affected tests and a full-song 16:10 live run passed after this fix; the
+earlier boot log had shown cvar intent without proving the query.
+
+`0071-moltenvk-vertex-arithmetic.patch` applies the explicit, separately rounded
+Fma lowering to vertex shaders as well as fragments on MoltenVK. It avoids the
+pinned SPIRV-Cross's unoptimized arithmetic helper calls, retains signed zero,
+and raises shader modification version to 14. A full One Week run at the previous
+Auto 2x path averaged 26.27 guest draws/s, compared with roughly 17 after batching
+alone. The expanded headless GPU test covers vertex/fragment arithmetic and
+fragment gradients. Other drivers retain their previous lowering.
+
+`0070-moltenvk-shared-memory-upload-batching.patch` moves independent staging
+uploads before a deferred MoltenVK render pass to avoid repeated attachment
+store/reload. Conservative page dependencies include cached vertex/index reads;
+aliasing uploads, memory-export draws and untracked helper work keep the ordered
+path. Sources retain submission-fence retirement, and transfer barriers bracket
+the batch. Sampled gameplay pass starts fell from roughly 300–500 to 26; observed
+completed guest draws rose from about 9 to 17 per second. See the
+[Mac root-cause follow-up](../docs/engine/vulkan-performance.md#root-cause-follow-up-rendering-cost-and-audio-rewind-2026-11-15).
+
 `0069-moltenvk-nonblocking-pending-pipelines.patch` removes synchronous placeholder
 pipeline creation on MoltenVK. Pending draws were already skipped, but constructing
 the unused placeholder could still block the command processor for 600 ms. New
@@ -59,8 +86,9 @@ incorrect for helper invocations outside MSAA triangles, corrupting derivatives
 and texture mip selection along sprite borders and diagonals. MoltenVK fragment
 arithmetic uses explicitly rounded Fma equivalents for add/subtract/multiply
 and vector scaling, retaining NoContraction and the sign of zero products.
-Other drivers and vertex shaders retain their existing translation. Shader
-storage version 13 invalidates old translations. The synthetic headless
+Other drivers retained their existing translation. This patch initially left
+vertex shaders unchanged and used shader modification version 13; patch 0071
+extends the MoltenVK lowering to vertex shaders and advances that version to 14. The synthetic headless
 `vulkan_fragment_gradient` test renders the production builder's operations,
 checks derivatives at 1×/2×/4× and verifies separate arithmetic rounding;
 `--baseline` reproduces the defect. See the dated native Mac evidence in the

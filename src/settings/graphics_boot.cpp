@@ -5,7 +5,8 @@
 
 namespace rb_blitz::settings {
 namespace {
-constexpr SettingId kRows[] = {SettingId::kRenderer, SettingId::kResolution,
+constexpr SettingId kRows[] = {SettingId::kAspectRatio, SettingId::kRenderScale,
+                               SettingId::kRenderer, SettingId::kResolution,
                                SettingId::kAntiAliasing, SettingId::kFiltering};
 std::string Signature(const GraphicsValues& values) {
   std::string result;
@@ -106,7 +107,7 @@ GraphicsValues GraphicsBootState::Select(const GraphicsValues& requested,
     if (retrying_) retried_ = true;
     return effective;
   }
-  return good_.size() == 4 && Signature(good_) != attempt ? good_ : safe;
+  return good_.size() == effective.size() && Signature(good_) != attempt ? good_ : safe;
 }
 
 bool GraphicsBootState::Begin(const GraphicsValues& effective, std::string* error) {

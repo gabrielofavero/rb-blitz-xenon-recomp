@@ -4,7 +4,7 @@ Status: known guest-owned actionable hint routes have code and generated-record
 coverage as of 2026-11-05. Main-menu footer, loading Confirm, and prior image
 checks have owner acceptance. Authorized autonomous D3D12 runs captured default
 and rebound splash, menu, Help, Song Select, loading, tutorial, audio calibration,
-pause, results and store hints. The [2026-11-05 screenshot index](../../out/button-schemes/p10-live-20261105/README.md)
+pause, results and store hints. The 2026-11-05 local screenshot index (`out/button-schemes/p10-live-20261105/README.md`)
 names each observed result and each route the offline run could not prove.
 
 This inventory distinguishes the *action* a hint promises from the button character

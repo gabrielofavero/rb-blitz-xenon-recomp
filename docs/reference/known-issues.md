@@ -37,13 +37,33 @@ the log records 409/409 pipelines in 59,153 ms with no failures or missing entri
 (`out/macos/cache-portability-game.log`). Preparing-state Skip now follows the
 main-menu continuation and passes the authored menu-routing test; two isolated
 cold-cache runs also exercised live Skip through the main menu into One Week.
-Gameplay remains slow on this M1 (roughly 9–11 completed guest draws per second
-in the diagnostic runs, also reproduced with detailed tracing off). SDK patches
-0068/0069 add Vulkan stall attribution and move first-use placeholder/unready
-pipeline work off the command thread; they do not fix the sustained slowdown.
-See the [Mac performance investigation](../engine/vulkan-performance.md#macos-m1-investigation-2026-11-15).
-This does not establish full-song graphics,
-audio/input stability, Intel Mac support or installer acceptance. See the
+The initial 9–11 completed-draw/s slowdown is superseded by the
+[Mac root-cause follow-up](../engine/vulkan-performance.md#root-cause-follow-up-rendering-cost-and-audio-rewind-2026-11-15):
+SDK patches 0070/0071 reduce render-pass interruptions and unoptimized vertex
+arithmetic, while the bounded guest audio catch-up route prevents ring replay and
+backward song time. A full One Week run at the old Auto 2x path averaged 26.27
+completed guest draws/s without rewinds or the prior late collapse. A final 1x
+run sustained about 60 and finished the song, but the owner reported stretching:
+that CLI override bypassed the 16:10 guest-size plan. The
+[desktop render-settings change](../plans/finished/2026-11-15-desktop-render-settings-plan.md)
+delivers separate aspect and scale controls on every desktop platform. Its
+first new Auto/1x live run still showed horizontal bars and was closed before the
+menu. The SDK mistook explicit height 720 for an unset default, used the Retina
+logical window height and clamped it to 480, while width stayed 1152. That 2.4:1
+query result defeats the intended 16:10 presentation despite correct boot cvars.
+SDK patch 0072 now preserves the explicit source in the kernel and SDL dimension
+predicate. The rebuilt full-song follow-up passed the 16:10 aspect check: no
+bars, intact circles and no backward clock windows. Its 176 windows averaged
+50.63 completed draws/s with a slowest window of 10.06/s, so frame pacing is not
+proven fixed. About 12.5 GB system swap and competing processes were present;
+its game footprint was 2.2 GiB. Authored settings save/restart was not observed
+before the owner stopped further launches; the final UI-focused run was closed
+at the offline prompt. The delivery record names the remaining manual gate.
+Heavy paging remains a practical limit: the earlier near-freeze coincided with
+about 14 GB of system swap and a 4.4 GB game peak footprint; this does not isolate
+one process as its cause. The vertex/fragment arithmetic GPU fixture passes on
+the native Metal device. Other songs, physical input, Intel Mac and installer
+acceptance remain unproven. See the
 [native Mac release evidence](../plans/in-progress/2026-11-09-linux-macos-release-plan.md).
 
 **Bounce Man first-play stalls remain undiagnosed (2026-11-15):** the supplied
@@ -307,7 +327,7 @@ for the follow-up record and evidence.
 
 | **The installer is machine-wide by default, so the folder page reaches the legacy Controller Settings profile only on a per-user install** (owner decision, 2026-10-14) | The setup is `PrivilegesRequired=admin` so that its default destination can be `C:\Program Files\Rock Band Blitz`, and `installer/setup.iss` reads `%APPDATA%\rb_blitz\launcher.toml` only while the install is **not** elevated — an elevated install's app-data folder is not necessarily the player's, which is what parent plan §9.1 asks for. An ordinary install is elevated now, so that rung of the prefill is reached by a `/CURRENTUSER` install only: a fresh machine-wide install opens on the installer's own defaults (`Documents\Rock Band Blitz\Downloaded Content` and `...\Saved Games`) rather than on the folders the user's old Controller Settings profile named. Both boxes are editable and a reinstall reads the installation's own `paths.toml` first, so this bites the *first* install on a machine whose old profile named a custom folder. Closing it needs a decision rather than a flag — Inno Setup exposes no test for "is the elevating user the player" — so it is written down here instead of guessed at. | `installer/README.md` (The DLC library and the saved games), [launcher-plan.md](../plans/finished/2026-09-27-launcher-plan.md) §9.1 |
 | **The window's fit is measured from the system DPI and the primary display's frame metrics (measured 2026-10-14)** | The boot sizes the game window from the effective render size and the display's usable area ([src/settings/window_policy.h](../../src/settings/window_policy.h), [graphics.md](../settings/graphics.md) part 3 §11). Two fit corners remain unproven: `GetDpiForSystem` and `AdjustWindowRectExForDpi(WS_OVERLAPPEDWINDOW)` use system/primary metrics rather than the created window's own border size, so a **multi-DPI** desktop or a non-primary target monitor may fit differently; no boot has been taken at 125/150/300 % or on a second display. `window_resizable=false` is verified through the window *style* (no `WS_THICKFRAME`, no `WS_MAXIMIZEBOX`), not by driving a drag. | [graphics.md](../settings/graphics.md) part 3 §11, [installed-game-fix-prompts.md](../plans/finished/2026-10-14-installed-game-fix-prompts.md) P2 |
-| **Auto upper shapes are gated after windowed probes (measured 2026-11-10)** | A hidden render-size override let the 2560×1080 machine boot larger virtual frames in a fitted window. 2592×1080 and 3840×1080 reached gameplay with intact HUD and full-width scene; 3456×1440 had a clean title. 3440×1440 showed a center seam at guest width 1720, while width 1728 was clean. 3840×1600 (guest height 800) and 5120×1440 (guest width 2560) duplicated/corrupted title art. 5120×2160 and 7680×2160 (scale 4) horizontally squeezed it. 3840×2160 (16:9 4K) had a clean title. All larger probes booted without an observed guest fault during their short title runs, including a 32-second 7680×2160 run; this is a boot smoke check, not long-session stability proof. Auto now gates the visibly failing paths; diagnostic probes and beta investigation remain open. Captures and logs: `out/_swap/resolution-probe-2026-11-10/`. | [resolution expansion plan](../plans/in-progress/2026-10-19-resolution-scale-expansion-plan.md), [graphics.md](../settings/graphics.md) part 3 §5 |
+| **Auto upper shapes are gated after windowed probes (measured 2026-11-10)** | A hidden render-size override let the 2560×1080 machine boot larger virtual frames in a fitted window. 2592×1080 and 3840×1080 reached gameplay with intact HUD and full-width scene; 3456×1440 had a clean title. 3440×1440 showed a center seam at guest width 1720, while width 1728 was clean. 3840×1600 (guest height 800) and 5120×1440 (guest width 2560) duplicated/corrupted title art. 5120×2160 and 7680×2160 (scale 4) horizontally squeezed it. 3840×2160 (16:9 4K) had a clean title. All larger probes booted without an observed guest fault during their short title runs, including a 32-second 7680×2160 run; this is a boot smoke check, not long-session stability proof. Auto now gates the visibly failing paths; diagnostic probes and beta investigation remain open. Captures and logs: `out/_swap/resolution-probe-2026-11-10/`. | [resolution expansion plan](../plans/finished/2026-10-19-resolution-scale-expansion-plan.md), [graphics.md](../settings/graphics.md) part 3 §5 |
 
 | **The installed build's identity is its file digests, not its commit (measured 2026-10-14)** | A payload snapshot now records the backends and the commit it was taken at, in `payload-manifest.toml`'s `[payload]` table, and `build.ps1` refuses to reuse a snapshot whose provenance or file digests disagree with the build tree — which is how an installed game came to offer D3D12 alone after `REXGLUE_USE_VULKAN=ON` (2026-10-13) left an older `installer/out/payload` in place. Two things that does **not** buy, both worth knowing before trusting the record: the commit is the checkout's `HEAD`, so a build from a modified working tree names a commit that is not what was compiled, and the per-file digests are what actually decide whether two snapshots are the same build; and the fatal "no `vulkan-1.dll` anywhere" branch is unreachable on a machine whose `%WINDIR%\System32` has one, so the loader search's last resort always succeeds here. `-VulkanLoaderDir` was dead until 2026-10-14 (it assigned a variable of the parameter's own name, PowerShell names being case-insensitive), so the explicit-directory refusal could not be observed either; that works now, and pointing it at an empty directory is how that branch is exercised. | [installer/README.md](../../installer/README.md) §The payload allow-list, [installed-game-fix-prompts.md](../plans/finished/2026-10-14-installed-game-fix-prompts.md) P1 |
 

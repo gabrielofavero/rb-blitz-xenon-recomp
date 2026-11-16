@@ -5,6 +5,7 @@
 // items this pass states instead of guessing.
 
 #include "settings/boot.h"
+#include <SDL3/SDL.h>
 #include "settings/display_runtime.h"
 #if defined(__APPLE__)
 #include "settings/display_probe_mac.h"
@@ -138,6 +139,16 @@ void ProbeDisplay(CapabilityInputs& inputs) {
   }
 #elif defined(__APPLE__)
   ProbeMacDisplay(inputs);
+#else
+  const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+  const SDL_DisplayMode* mode = display ? SDL_GetCurrentDisplayMode(display) : nullptr;
+  if (mode) {
+    const float density = mode->pixel_density > 0 ? mode->pixel_density : 1.0f;
+    inputs.primary_display_size = {int32_t(mode->w * density), int32_t(mode->h * density)};
+    inputs.primary_display_id = "sdl:" + std::to_string(display);
+    inputs.display_enumeration_available = true;
+    inputs.display_modes.push_back(inputs.primary_display_size);
+  }
 #endif
 }
 
@@ -394,6 +405,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   // there is nothing to detect before the plugin loads). A compiled backend this machine cannot run
   // is reported as such rather than offered, which is what keeps the Renderer row honest.
   CapabilityInputs cap_inputs;
+  cap_inputs.system_memory_mb = uint64_t(SDL_GetSystemRAM());
   const unsigned cpus = std::thread::hardware_concurrency();
   cap_inputs.logical_processors = cpus == 0 ? 1u : static_cast<uint32_t>(cpus);
   ProbeDisplay(cap_inputs);
@@ -437,11 +449,13 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     service_->SetReconciler(&reconciler_);
     service_->SetCapabilities(capability_snapshot_);
     // Auto follows the current display on every boot, without running a benchmark.
-    constexpr int kPolicyVersion = 3;
+    constexpr int kPolicyVersion = 4;
     const auto recommendation = RecommendGraphics(capability_snapshot_);
     GraphicsValues recommendations = {
         {SettingId::kRenderer, recommendation.renderer},
         {SettingId::kResolution, recommendation.resolution},
+        {SettingId::kAspectRatio, [] { Value v; v.kind = ValueKind::kEnum; v.text = "auto"; return v; }()},
+        {SettingId::kRenderScale, [] { Value v; v.kind = ValueKind::kEnum; v.text = "auto"; return v; }()},
         {SettingId::kAntiAliasing, recommendation.anti_aliasing},
         {SettingId::kFiltering, recommendation.filtering}};
 #if !defined(_WIN32)
@@ -451,6 +465,12 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
 #endif
     auto& store = service_->store();
     if (load_status_ == DocumentStatus::kOk || load_status_ == DocumentStatus::kMissing) {
+      for (const auto id : store.document().migrated_graphics_preferences) {
+        const auto& doc = store.document();
+        const auto found = doc.values.find(id);
+        if (found != doc.values.end())
+          store.MarkChanged(id, found->second, doc.origins.contains(id) ? doc.origins.at(id) : Origin::kManual);
+      }
       for (const auto& [id, value] : recommendations) {
         const auto& doc = store.document();
         if (!doc.values.contains(id) ||
@@ -470,6 +490,28 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
         if (!saved.errors.empty()) diagnostics_.push_back(saved.errors.front());
       }
     }
+    // The legacy resolution value remains the internal, exact pixel plan used
+    // by the renderer/recovery journal. Only the two new preferences choose it.
+    const auto aspect = reconciler_.Reconcile(SettingId::kAspectRatio,
+        *service_->DescriptorFor(SettingId::kAspectRatio),
+        service_->RequestedValue(SettingId::kAspectRatio), capability_snapshot_).effective;
+    const auto scale_request = service_->RequestedValue(SettingId::kRenderScale);
+    const auto scale_value = reconciler_.Reconcile(SettingId::kRenderScale,
+        *service_->DescriptorFor(SettingId::kRenderScale), scale_request, capability_snapshot_).effective;
+    int32_t scale = scale_value.text.size() == 2 ? scale_value.text[0] - '0' : 1;
+    auto plan = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
+                                  aspect.text, scale);
+    if (!plan.supported) plan = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
+                                                   "auto", 1);
+    if (plan.supported) {
+      Value pixels; pixels.kind = ValueKind::kResolution;
+      pixels.width = plan.guest_size.width * plan.draw_scale;
+      pixels.height = plan.guest_size.height * plan.draw_scale;
+      service_->SetBootValues({{SettingId::kResolution, pixels}}, "settings.graphics.aspect_scale");
+      REXLOG_INFO("settings_boot: aspect {} render scale {} -> {}x{} (recommended {}x)",
+          aspect.text, scale_value.text, pixels.width, pixels.height,
+          capability_snapshot_.recommended_render_scale);
+    }
     std::string error;
     if (!graphics_boot_.Open(paths_.settings_file, &error) && !error.empty())
       diagnostics_.push_back(error);
@@ -481,6 +523,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     GraphicsValues wanted;
     GraphicsValues attempt;
     for (const SettingId id : {SettingId::kRenderer, SettingId::kResolution,
+                               SettingId::kAspectRatio, SettingId::kRenderScale,
                                SettingId::kAntiAliasing, SettingId::kFiltering}) {
       wanted[id] = service_->RequestedValue(id);
       attempt[id] = service_->EffectiveValue(id);
@@ -492,14 +535,35 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
                                  {SettingId::kAntiAliasing, fallback.anti_aliasing},
                                  {SettingId::kFiltering, fallback.filtering}};
     const bool forced_safe = REXCVAR_GET(settings_safe_graphics);
-    auto selected = graphics_boot_.Select(wanted, attempt, safe, forced_safe);
+    auto safe_values = safe;
+    Value safe_aspect; safe_aspect.kind = ValueKind::kEnum; safe_aspect.text = "16:9";
+    Value safe_scale; safe_scale.kind = ValueKind::kEnum; safe_scale.text = "1x";
+    safe_values[SettingId::kAspectRatio] = safe_aspect;
+    safe_values[SettingId::kRenderScale] = safe_scale;
+    auto selected = graphics_boot_.Select(wanted, attempt, safe_values, forced_safe);
     if (graphics_boot_.retrying()) {
       diagnostics_.push_back(
           "the saved graphics request failed to present before; this boot retries it once");
     }
     if (graphics_boot_.recovered() || forced_safe) {
-      for (auto& [id, value] : selected)
-        value = reconciler_.Reconcile(id, *service_->DescriptorFor(id), value, capability_snapshot_).effective;
+      for (auto& [id, value] : selected) {
+        if (id != SettingId::kResolution)
+          value = reconciler_.Reconcile(id, *service_->DescriptorFor(id), value, capability_snapshot_).effective;
+      }
+      // Internal pixel plans may exceed the display's old preset offer gate.
+      // Rebuild them from recovered controls rather than clamping their shape.
+      if (selected.contains(SettingId::kAspectRatio) && selected.contains(SettingId::kRenderScale)) {
+        const auto token = selected.at(SettingId::kRenderScale).text;
+        const int recovered_scale = token.size() == 2 ? token[0] - '0' : 1;
+        const auto recovered = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
+            selected.at(SettingId::kAspectRatio).text, recovered_scale);
+        if (recovered.supported) {
+          auto& pixels = selected[SettingId::kResolution];
+          pixels.kind = ValueKind::kResolution;
+          pixels.width = recovered.guest_size.width * recovered.draw_scale;
+          pixels.height = recovered.guest_size.height * recovered.draw_scale;
+        }
+      }
       service_->SetBootValues(std::move(selected), "settings.graphics.recovered_from_failure");
       diagnostics_.push_back("safe graphics selected; requested preferences are retained and editable");
     }
@@ -1016,7 +1080,23 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
                   probe.guest_size.width, probe.guest_size.height, probe.draw_scale);
     }
   }
-  if (screen_plan_.supported && !overrides_.contains(SettingId::kResolution)) {
+  if (screen_plan_.supported && overrides_.contains(SettingId::kResolution)) {
+    // An explicit draw scale changes pixel density, not the selected aspect.
+    // Keep guest geometry and presentation in agreement even for diagnostic flags.
+    int64_t scale = 1;
+    toml::ParseBareInt(rex::cvar::GetFlagByName("resolution_scale"), &scale);
+    screen_plan_.draw_scale = static_cast<int32_t>(std::clamp<int64_t>(scale, 1, 7));
+    overrides_[SettingId::kRenderScale] = overrides_.at(SettingId::kResolution);
+    Value value; value.kind = ValueKind::kEnum;
+    value.text = std::to_string(screen_plan_.draw_scale) + "x";
+    override_values_[SettingId::kRenderScale] = value;
+    value.kind = ValueKind::kResolution;
+    value.width = screen_plan_.guest_size.width * screen_plan_.draw_scale;
+    value.height = screen_plan_.guest_size.height * screen_plan_.draw_scale;
+    override_values_[SettingId::kResolution] = value;
+    if (service_) service_->SetOverrides(override_values_, overrides_);
+  }
+  if (screen_plan_.supported) {
     // Both halves of the guest size, because the title derives its width from its height and
     // the aspect the user picked is not one the title can compute (src/hooks/render_settings.h).
     SetBootRenderFrame(screen_plan_.guest_size.width, screen_plan_.guest_size.height);
@@ -1036,6 +1116,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
   if (service_) {
     GraphicsValues effective;
     for (const auto id : {SettingId::kRenderer, SettingId::kResolution,
+                          SettingId::kAspectRatio, SettingId::kRenderScale,
                           SettingId::kAntiAliasing, SettingId::kFiltering})
       effective[id] = service_->EffectiveValue(id);
     std::string error;
@@ -1198,7 +1279,8 @@ void SettingsBoot::FinishInit() {
     const auto id = descriptor.id;
     std::vector<std::string> names;
     if (id == SettingId::kTarget) names = {"ultimate_mode", "license_mask"};
-    else if (id == SettingId::kResolution) names = {"resolution_scale"};
+    else if (id == SettingId::kResolution || id == SettingId::kRenderScale)
+      names = {"resolution_scale"};
     else if (id == SettingId::kAntiAliasing) names = {"native_2x_msaa", "swap_post_effect"};
     else if (id == SettingId::kFiltering) names = {"anisotropic_override"};
     else if (id == SettingId::kDisplay) names = {"fullscreen", "borderless"};
@@ -1221,12 +1303,16 @@ void SettingsBoot::FinishInit() {
     if (id == SettingId::kTarget) {
       value.text = flag("ultimate_mode") == "1" ? "ultimate" :
           flag("license_mask") == "0" ? "demo" : "common";
-    } else if (id == SettingId::kResolution) {
+    } else if (id == SettingId::kResolution || id == SettingId::kRenderScale) {
       int64_t scale = 1;
       toml::ParseBareInt(flag("resolution_scale"), &scale);
       scale = std::clamp<int64_t>(scale, 1, 7);
-      value.width = static_cast<int32_t>(1280 * scale);
-      value.height = static_cast<int32_t>(720 * scale);
+      if (id == SettingId::kRenderScale) {
+        value.text = std::to_string(scale) + "x";
+      } else {
+        value.width = static_cast<int32_t>((screen_plan_.supported ? screen_plan_.guest_size.width : 1280) * scale);
+        value.height = static_cast<int32_t>((screen_plan_.supported ? screen_plan_.guest_size.height : 720) * scale);
+      }
     } else if (id == SettingId::kAntiAliasing) {
       const auto post = flag("swap_post_effect");
       value.text = post == "fxaa" || post == "fxaa_extreme" ? post :
@@ -1259,7 +1345,7 @@ void SettingsBoot::FinishInit() {
   }
   service_->SetOverrides(override_values_, overrides_);
   if (REXCVAR_GET(settings_safe_graphics)) {
-    for (const auto id : {SettingId::kResolution, SettingId::kRenderer,
+    for (const auto id : {SettingId::kResolution, SettingId::kRenderScale, SettingId::kRenderer,
                           SettingId::kAntiAliasing, SettingId::kFiltering}) {
       overrides_.erase(id);
       override_values_.erase(id);

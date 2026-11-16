@@ -159,7 +159,7 @@ Adding H after Enter kept Enter as the first-source prompt and displayed both
 keys on the mapping row; Reset restored Enter. Replacing Gameplay First Note
 with J changed the tutorial entry and in-song goal to J while the Interface
 Confirm instruction stayed Enter. One Week completed through score and offline
-notice without a crash. [The screenshot index](../../../out/button-schemes/p10-live-20261105/README.md)
+notice without a crash. The local screenshot index (`out/button-schemes/p10-live-20261105/README.md`)
 links each positive result and each unavailable route. The offline profile
 did not open Messages/Inbox or online leaderboard content; automatic video
 calibration still requires a successful audio measurement. Randomized Power-up

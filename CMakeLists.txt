@@ -939,6 +939,10 @@ if(BUILD_TESTING)
     # recipes (rexglue-sdk/include/rex/graphics/native_pipeline_cache.h). Header
     # only; the cases use a real scratch directory, so atomic replacement, the
     # identity check and the bounds are pinned without a GPU or a boot.
+    add_executable(rb_blitz_video_mode_intent_tests tests/video_mode_intent_tests.cpp)
+    target_link_libraries(rb_blitz_video_mode_intent_tests PRIVATE rex::core)
+    add_test(NAME video_mode_intent COMMAND rb_blitz_video_mode_intent_tests)
+
     add_executable(rb_blitz_native_pipeline_cache_tests tests/native_pipeline_cache_tests.cpp)
     target_include_directories(rb_blitz_native_pipeline_cache_tests PRIVATE
         "${REXSDK_DIR}/thirdparty/xxHash")

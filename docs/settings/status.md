@@ -8,6 +8,27 @@ Part 1 wherever they disagree.
 
 ## At a glance
 
+- **Desktop render settings (delivered, 2026-11-15):** the owner requested separate
+  Aspect Ratio and Render Scale controls across Windows, Linux and macOS. Auto
+  aspect follows the display; scale uses a cheap initial hardware/capability
+  recommendation and remains manually selectable. The old preset list, migration,
+  boot/recovery path and six-row guest pages were updated together. The
+  [delivery plan](../plans/finished/2026-11-15-desktop-render-settings-plan.md)
+  records delivered gates and the remaining unverified manual UI check. The preceding M1 performance fixes completed One Week at
+  about 60 guest draws/s with a 1x override, but the owner reported stretching;
+  that run is performance evidence, not aspect-ratio acceptance. The first new
+  Auto/1x live run also failed: horizontal bars appeared before the menu. Source
+  inspection found explicit `video_mode_height=720` was mistaken for an unset
+  default, replacing it with a Retina logical-window height clamped to 480. The
+  source-aware SDK dimension fix in patch 0072 now passes the native Release
+  build, nine affected tests and a full-song 16:10 aspect check without bars or
+  distorted circles. The run had no backward clock windows, but averaged
+  50.63 completed draws/s with a slowest window of 10.06/s amid system paging and
+  competing processes. Authored settings save/restart/relaunch was not observed:
+  the last UI-focused launch was closed at the offline prompt, and the owner
+  explicitly stopped further game/UI launches. The delivery plan records the
+  exact manual gate for a future owner-led pass.
+
 - **Platform/version settings pre-step (2026-11-10):** the active
   [Linux/macOS plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md) adds release-specific
   row visibility, choices and defaults without changing stable setting IDs. Linux/macOS policy

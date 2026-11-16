@@ -969,6 +969,23 @@ DocumentLoad LoadSettingsDocument(const fs::path& file) {
     }
   }
 
+  const auto legacy_resolution = load.document.values.find(SettingId::kResolution);
+  Value aspect, scale;
+  if (legacy_resolution != load.document.values.end() &&
+      SplitLegacyResolution(legacy_resolution->second, &aspect, &scale)) {
+    const auto origin = load.document.origins.find(SettingId::kResolution);
+    const Origin inherited = origin != load.document.origins.end() ? origin->second
+        : IsAutoResolution(legacy_resolution->second) ? Origin::kDefault : Origin::kManual;
+    for (const auto& [id, value] : std::map<SettingId, Value>{
+        {SettingId::kAspectRatio, aspect}, {SettingId::kRenderScale, scale}}) {
+      const auto storage = StorageKeyFor(id);
+      if (doc.Has(storage.section, storage.key)) continue;
+      load.document.values[id] = value;
+      load.document.origins[id] = inherited;
+      load.document.graphics_preferences_migrated = true;
+      load.document.migrated_graphics_preferences.push_back(id);
+    }
+  }
   load.status = DocumentStatus::kOk;
   return load;
 }
@@ -1013,6 +1030,20 @@ SaveOutcome SaveSettingsDocument(const fs::path& file, const SaveRequest& reques
     }
   }
 
+  // Older documents expose their converted preferences in the loaded base.
+  // Reconstruct the same view for conflict checks while the real keys are absent.
+  std::map<SettingId, Value> converted_preferences;
+  if (request.changed.contains(SettingId::kAspectRatio) ||
+      request.changed.contains(SettingId::kRenderScale)) {
+    const auto* legacy = schema::FindRow(SettingId::kResolution);
+    Value resolution, aspect, scale;
+    if (legacy && ParseValueFromItem(legacy->descriptor, PreferenceItem(doc, legacy->storage),
+                                   &resolution) &&
+        SplitLegacyResolution(resolution, &aspect, &scale)) {
+      converted_preferences = {{SettingId::kAspectRatio, aspect}, {SettingId::kRenderScale, scale}};
+    }
+  }
+
   // Conflict detection: a key whose on-disk value differs from the loaded base is another
   // writer's, so nothing is written rather than clobbering it.
   for (const auto& [id, desired] : request.changed) {
@@ -1027,6 +1058,13 @@ SaveOutcome SaveSettingsDocument(const fs::path& file, const SaveRequest& reques
     if (item.found) {
       const schema::SchemaRow* row = schema::FindRow(id);
       if (row != nullptr && ParseValueFromItem(row->descriptor, item, &disk)) {
+        disk_found = true;
+      }
+    }
+    if (!item.found && (id == SettingId::kAspectRatio || id == SettingId::kRenderScale)) {
+      const auto derived = converted_preferences.find(id);
+      if (derived != converted_preferences.end()) {
+        disk = derived->second;
         disk_found = true;
       }
     }

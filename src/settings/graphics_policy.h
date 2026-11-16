@@ -76,6 +76,10 @@ std::string PolicyRenderer(const CapabilitySnapshot& caps, std::string_view want
 // The plan itself (GuestScreenPlan, PlanGuestScreen) lives in settings/capabilities.h, because the
 // offer set and the boot must answer "can this size be rendered?" with one rule.
 
+// Resolve aspect and quality independently into one verified guest/render plan.
+GuestScreenPlan PlanRenderSettings(const RenderPathLimits& limits, const DisplayMode& display,
+                                   std::string_view aspect, int32_t scale);
+
 // --- the reconciler -----------------------------------------------------------------------
 
 class GraphicsReconciler final : public Reconciler {

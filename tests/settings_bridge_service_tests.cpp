@@ -29,6 +29,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -72,6 +73,19 @@ std::string ReadText(const fs::path& file) {
   return out.str();
 }
 
+// A directory at the sidecar's path prevents a write lock on every desktop. Making only the
+// destination file read-only still permits POSIX atomic replacement in a writable directory.
+fs::path BlockSettingsWrite(const fs::path& file) {
+  fs::path lock = file;
+  lock += ".lock";
+  std::error_code code;
+  fs::remove(lock, code);
+  CHECK_FALSE(code);
+  CHECK_TRUE(fs::create_directory(lock, code));
+  CHECK_FALSE(code);
+  return lock;
+}
+
 // The text form a DTA script writes, parsed with P1's own parser - so the test exercises the same
 // grammar the merged screen's literals use rather than a second spelling of it.
 Request Text(const std::string& path) {
@@ -91,7 +105,8 @@ struct Harness {
   ServiceSink sink{&service};
   bridge::Dispatcher dispatcher{&sink};
 
-  Harness() {
+  explicit Harness(schema::ReleaseSettings release = schema::CurrentReleaseSettings())
+      : service(paths, std::move(release)) {
     MigrationResult migration;
     service.Boot(nullptr, PathEntry{}, &migration, true);
   }
@@ -482,10 +497,9 @@ void TestCommitFailureReasons() {
   CHECK_TRUE(h.Holds("commit.failed", WireValue::Text("none")));
   CHECK_TRUE(h.Holds("commit.ok", WireValue::Bool(true)));
 
-  // The settings file cannot be replaced. This is the one failure the "check that the settings
-  // folder is writable" text is true of, and the reason token says so.
+  // A blocked settings lock prevents a native save and keeps the previous file intact.
+  const auto blocked_lock = BlockSettingsWrite(h.paths.settings_file);
   std::error_code code;
-  fs::permissions(h.paths.settings_file, fs::perms::owner_read, fs::perm_options::replace, code);
   CHECK_TRUE(h.Send(back).status == Status::kOk);
   const Response failed = h.Send("rbbz-settings/commit/-/-");
   CHECK_TRUE(failed.status == Status::kIoError);
@@ -497,7 +511,8 @@ void TestCommitFailureReasons() {
 
   // The edit is still staged, so the retry the panel asks for is a real one - and it clears the
   // reason, so the panel cannot explain the next save with this failure.
-  fs::permissions(h.paths.settings_file, fs::perms::owner_all, fs::perm_options::replace, code);
+  CHECK_TRUE(fs::remove(blocked_lock, code));
+  CHECK_FALSE(code);
   const Response retry = h.Send("rbbz-settings/commit/-/-");
   CHECK_TRUE(retry.status == Status::kOk);
   CHECK_TRUE(h.sink.last_commit_failure() == ServiceSink::CommitFailure::kNone);
@@ -561,7 +576,10 @@ void TestWireModelConversions() {
 
 void TestRendererSelectionSurvivesCommitAndReload() {
   BeginCase("a usable inactive renderer can be selected, saved, and used on the next boot");
-  Harness h;
+  // This models the Windows release with two backends, even when the host running the test has
+  // a Vulkan-only release whose Renderer row is intentionally hidden.
+  const auto release = schema::SettingsForRelease(schema::HostPlatform::kWindows, "test");
+  Harness h(release);
   CapabilityInputs inputs;
   for (const std::string token : {"d3d12", "vulkan"}) {
     RendererProbe probe;
@@ -591,7 +609,7 @@ void TestRendererSelectionSurvivesCommitAndReload() {
   CHECK_TRUE(h.service.EffectiveValue(SettingId::kRenderer).text == "vulkan");
 
   // Boot applies EffectiveValue to gpu_backend before the plugin is loaded.
-  Service again(h.paths);
+  Service again(h.paths, release);
   again.Boot(nullptr, PathEntry{}, nullptr, true);
   again.SetReconciler(&reconciler);
   again.SetCapabilities(caps);
@@ -771,14 +789,15 @@ void TestLinkedSaveFailureRetry() {
   CHECK_TRUE(h.Send("rbbz-settings/set/general.load_guard/t:30s").status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
   const auto before = ReadText(h.paths.settings_file);
+  const auto blocked_lock = BlockSettingsWrite(h.paths.settings_file);
   std::error_code ec;
-  fs::permissions(h.paths.settings_file, fs::perms::owner_read, fs::perm_options::replace, ec);
   CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.dlc_menu_songs/b:0").status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kIoError);
   CHECK_TRUE(ReadText(h.paths.settings_file) == before);
   CHECK_TRUE(h.service.EffectiveValue(SettingId::kMusicPlayer).boolean);
-  fs::permissions(h.paths.settings_file, fs::perms::owner_all, fs::perm_options::replace, ec);
+  CHECK_TRUE(fs::remove(blocked_lock, ec));
+  CHECK_FALSE(ec);
   CHECK_TRUE(h.Send("rbbz-settings/set/linked.general.dlc_menu_songs/b:0").status == Status::kOk);
   CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
   CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);

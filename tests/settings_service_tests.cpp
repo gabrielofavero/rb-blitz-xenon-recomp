@@ -65,14 +65,6 @@ Value EnumV(std::string token) {
   return out;
 }
 
-Value ResolutionV(int32_t width, int32_t height) {
-  Value out;
-  out.kind = ValueKind::kResolution;
-  out.width = width;
-  out.height = height;
-  return out;
-}
-
 void WriteFile(const fs::path& path, const std::string& text) {
   std::error_code code;
   fs::create_directories(path.parent_path(), code);
@@ -509,7 +501,7 @@ void TestValidationAndPending() {
 
   BeginCase("service: a stale capability revision is refused instead of clamped");
   const ValidationResult stale =
-      service.Set(txn, SettingId::kResolution, ResolutionV(1280, 720), 77);
+      service.Set(txn, SettingId::kRenderScale, EnumV("1x"), 77);
   CHECK_FALSE(stale.ok);
   CHECK_TRUE(stale.reason_key == "settings.capabilities_changed");
 
@@ -535,10 +527,10 @@ void TestValidationAndPending() {
 
   BeginCase("service: capability changes invalidate staged values before disk I/O");
   const uint64_t txn3 = service.BeginEdit(service.revision());
-  CHECK_TRUE(service.Set(txn3, SettingId::kResolution, ResolutionV(1920, 1080),
+  CHECK_TRUE(service.Set(txn3, SettingId::kRenderScale, EnumV("2x"),
                          service.capability_revision()).ok);
   CapabilitySnapshot changed = Capabilities(2);
-  changed.supported_resolutions.pop_back();
+  changed.supported_render_scales = {1};
   service.SetCapabilities(std::move(changed));
   const CommitResult stale_commit = service.Commit(txn3);
   CHECK_TRUE(stale_commit.status == CommitStatus::kInvalid);
@@ -778,12 +770,23 @@ void TestInterruptedCommitRecovery() {
   service.Boot(nullptr, {}, nullptr);
   service.SetCapabilities(Capabilities());
   const auto txn = service.BeginEdit(service.revision());
-  CHECK_TRUE(service.Set(txn, SettingId::kResolution, ResolutionV(1920, 1080), 1).ok);
+  CHECK_TRUE(service.Set(txn, SettingId::kAspectRatio, EnumV("4:3"), 1).ok);
+  CHECK_TRUE(service.Set(txn, SettingId::kRenderScale, EnumV("2x"), 1).ok);
   CHECK_TRUE(service.Commit(txn).status == CommitStatus::kSaved);
   const auto automatic = service.BeginEdit(service.revision());
-  CHECK_TRUE(service.Set(automatic, SettingId::kResolution, ResolutionV(0, 0), 1).ok);
+  CHECK_TRUE(service.Set(automatic, SettingId::kAspectRatio, EnumV("auto"), 1).ok);
+  CHECK_TRUE(service.Set(automatic, SettingId::kRenderScale, EnumV("auto"), 1).ok);
   CHECK_TRUE(service.Commit(automatic).status == CommitStatus::kSaved);
-  CHECK_TRUE(IsAutoResolution(LoadSettingsDocument(paths.settings_file).document.values.at(SettingId::kResolution)));
+  const auto saved = LoadSettingsDocument(paths.settings_file);
+  for (const auto id : {SettingId::kAspectRatio, SettingId::kRenderScale}) {
+    const auto found = saved.document.values.find(id);
+    CHECK_TRUE(found != saved.document.values.end() && found->second.text == "auto");
+  }
+  Service reloaded(paths);
+  CHECK_TRUE(reloaded.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+  reloaded.SetCapabilities(Capabilities());
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kAspectRatio).text == "auto");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kRenderScale).text == "auto");
 }
 
 void TestUnfinishableCommitJournal() {
@@ -993,7 +996,10 @@ void TestApplicationSnapshot() {
 void TestIndependentBootRecoveryReasons() {
   BeginCase("service: graphics and display recovery keep independent effective values");
   Scratch scratch;
-  Service service(Paths(scratch));
+  // Model a release that permits backend selection; Vulkan-only platform rules intentionally
+  // supply their own Renderer correction reason and would mask the recovery reason under test.
+  Service service(Paths(scratch),
+                  schema::SettingsForRelease(schema::HostPlatform::kWindows, "test"));
   service.Boot(nullptr, {}, nullptr);
   service.SetCapabilities(Capabilities());
   service.SetBootValues({{SettingId::kRenderer, EnumV("vulkan")}},

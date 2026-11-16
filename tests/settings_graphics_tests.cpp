@@ -816,7 +816,7 @@ void TestServiceIntegration() {
                   .Set(txn, SettingId::kFiltering, EnumV("16x"), service.capability_revision())
                   .ok);
   CHECK_TRUE(service
-                 .Set(txn, SettingId::kResolution, ResolutionV(1920, 1080),
+                 .Set(txn, SettingId::kRenderScale, EnumV("1x"),
                       service.capability_revision())
                  .ok);
   service.Cancel(txn);
@@ -1007,7 +1007,38 @@ void TestGraphicsBootJournal() {
   std::filesystem::remove_all(directory, ec);
 }
 
+void TestAspectAndRenderScale() {
+  BeginCase("aspect and scale keep the same guest layout and presentation proportions");
+  const auto limits = TitleRenderPath();
+  for (int scale : {1,2,3}) {
+    const auto mac = PlanRenderSettings(limits, {2880,1800}, "auto", scale);
+    CHECK_TRUE(mac.supported);
+    CHECK_TRUE(IsSize(mac.guest_size, 1152,720));
+    CHECK_EQ(mac.draw_scale, scale);
+    CHECK_TRUE(IsSize(PlanRenderSettings(limits, {1280,720}, "16:9", scale).guest_size,1280,720));
+    CHECK_TRUE(IsSize(PlanRenderSettings(limits, {1280,720}, "4:3", scale).guest_size,960,720));
+    CHECK_TRUE(IsSize(PlanRenderSettings(limits, {1280,720}, "21:9", scale).guest_size,1680,720));
+    CHECK_TRUE(IsSize(PlanRenderSettings(limits, {1280,720}, "32:9", scale).guest_size,1920,540));
+  }
+  CHECK_FALSE(PlanRenderSettings(limits, {1280,720}, "99:1", 1).supported);
+  CHECK_FALSE(PlanRenderSettings(limits, {1280,720}, "auto", 4).supported);
+  CapabilityInputs inputs;
+  inputs.render_path = limits;
+  inputs.primary_display_size = {3840,2160};
+  inputs.system_memory_mb = 8192;
+  CHECK_EQ(BuildCapabilitySnapshot(inputs).recommended_render_scale,1);
+  inputs.system_memory_mb = 16384;
+  CHECK_EQ(BuildCapabilitySnapshot(inputs).recommended_render_scale,2);
+  inputs.system_memory_mb = 32768;
+  CHECK_EQ(BuildCapabilitySnapshot(inputs).recommended_render_scale,3);
+  inputs.primary_display_size = {3840,1080};
+  CHECK_EQ(BuildCapabilitySnapshot(inputs).recommended_render_scale,2);
+  inputs.primary_display_size = {1280,720};
+  CHECK_EQ(BuildCapabilitySnapshot(inputs).recommended_render_scale,1);
+}
+
 int main() {
+  TestAspectAndRenderScale();
   TestRenderPathSizes();
   TestSupportedResolutions();
   TestAutoResolutionBounds();

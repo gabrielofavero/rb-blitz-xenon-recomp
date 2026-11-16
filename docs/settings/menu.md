@@ -9,7 +9,7 @@ preserved; repeated baseline/build/test prose and duplicated evidence lists were
 records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.md](contracts.md) and
 [status.md](status.md).
 
-## Current organization (2026-11-14)
+## Current organization (2026-11-15)
 
 The root shows Controls, Audio & Video, Gameplay, Interface, Library & Store, and
 System & Help. Gameplay appears only with Ultimate. Every page has at most six
@@ -22,7 +22,7 @@ catalogs use More... pages; all layouts remain available.
 | Audio & Video | Audio; Display; Graphics |
 | Audio | Active Track Volume; Sound Volume; Bass Boost; Menu Music |
 | Menu Music | Background Music (Default / Library); Music Player; Menu Music Navigation |
-| Display | Window Mode; Resolution; V-Sync; Overscan |
+| Display | Window Mode; Aspect Ratio; Render Scale; V-Sync; Overscan |
 | Graphics | Anti-Aliasing; Anisotropic Filtering; Depth of Field (Ultimate); Advanced |
 | Graphics / Advanced | Renderer on Windows when more than one backend is available. Linux/macOS hide Renderer and use Vulkan. |
 | Gameplay | Camera Angle; Game Speed; HUD; Tracks & Gems; Scenery (Ultimate only) |
@@ -43,6 +43,21 @@ catalogs use More... pages; all layouts remain available.
 | Startup | Game Version (Rock Band Blitz / Ultimate / Demo); Startup (Normal / Fast) |
 | Unlocks | Unlock All; Unlock Online Achievements |
 | System & Help / Advanced | Song Load Timeout (Off / 30s / 60s) |
+
+The desktop rendering redesign replaces the old Resolution row with Aspect Ratio
+and Render Scale on the existing Display page, leaving five rows. Auto aspect
+follows the display, including 16:10; explicit choices are 16:9, 16:10, 4:3,
+21:9 and 32:9. Render Scale offers Auto and backend-supported 1x/2x/3x choices.
+Both controls save independently and require a restart. Their short captions are
+"Auto follows your display shape. Restart to apply." and "More detail costs
+speed. Restart to apply." The [delivery record](../plans/finished/2026-11-15-desktop-render-settings-plan.md)
+records full-song Auto/1x aspect acceptance and the unverified authored-control
+save/restart gate. The owner stopped further launches after closing the last
+UI-focused run at the offline prompt. The settings-screen host fixture passed
+132,112 checks. The bundled macOS ProggyTiny font passed 48 caption-fit cases
+covering both captions, Normal/Big/Biggest and eight display dimensions. The
+50/42-character captions and displayed labels pass the 96/28-character limits.
+These are source and host/font checks, not a new live UI measurement.
 
 Menu Bindings and Gameplay Bindings retain their existing action groups and binding
 flows. Keyboard and mouse are always enabled. Calibration keeps the native route,

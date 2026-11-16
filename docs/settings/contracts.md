@@ -24,6 +24,24 @@ repository; **frozen** = a decision made here, binding on P1–P12.
 
 ---
 
+## Desktop render-setting extension (2026-11-15)
+
+The owner's desktop settings redesign adds stable `kAspectRatio = 26` and
+`kRenderScale = 27`; existing IDs are not renumbered. `kResolution = 20` remains
+an internal legacy/migration and graphics-recovery value, with its former visible
+row superseded by the two new controls. The implementation and acceptance status
+are recorded in the [desktop render-settings plan](../plans/finished/2026-11-15-desktop-render-settings-plan.md).
+
+The new native storage keys are `graphics.aspect_ratio` and
+`graphics.render_scale`, both enum tokens with default `auto`. Explicit aspect
+tokens are `16:9`, `16:10`, `4:3`, `21:9` and `32:9`; scale tokens are `1x`, `2x`
+and `3x` where the backend supports them. Migration infers these fields from a
+legacy exact resolution only when the corresponding new key is absent. New
+explicit keys retain precedence, and unrelated document fields remain owned by
+their original writers. Both controls retain the restart application boundary.
+The historical P0 shapes and examples below describe the original resolution
+contract; this extension supersedes its visible resolution-row choice model.
+
 ## 1. Baseline record (measured, 2026-10-10)
 
 | Item | Value |

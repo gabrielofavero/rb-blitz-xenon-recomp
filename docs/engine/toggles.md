@@ -8,6 +8,20 @@ the guest refresh or limit. These counts do not measure physical display
 scanout. See the [framerate expansion plan](../plans/todo/2026-10-25-framerate-expansion-plan.md)
 and [framerate_probe.cpp](../../src/diag/framerate_probe.cpp).
 
+`audio_stream_catchup` (Audio, default **true on macOS**, **false elsewhere**,
+restart-scoped) uses bounded original guest polls, paired 128 KiB compressed reads
+and missed half-ring refill handling to prevent audio DMA replay after long
+render frames. Off retains the title's original buffering cadence; it does not
+change the audio device's latency setting or replace the song clock. Implemented
+in [audio_stream.cpp](../../src/hooks/audio_stream.cpp); verified addresses and
+measurements are in the [Mac performance follow-up](vulkan-performance.md#root-cause-follow-up-rendering-cost-and-audio-rewind-2026-11-15).
+
+`vulkan_shared_memory_upload_batching` (GPU/Vulkan, default **true**, hot-reload)
+enables dependency-checked upload batching on MoltenVK. Off retains immediate
+ordered transfers; other drivers keep that route regardless. SDK patch 0070 and
+the same [performance study](vulkan-performance.md#root-cause-follow-up-rendering-cost-and-audio-rewind-2026-11-15)
+record its barriers, alias checks and measured limits.
+
 The menu-return refresh is part of every boot and has no diagnostic toggle. After a durable
 settings commit, the guest rebuilds the splash rows and authored library header using current
 visibility. The header has routes for all eight Messages, Recommendations and RhythmVerse
