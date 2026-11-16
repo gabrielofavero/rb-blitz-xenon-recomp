@@ -1691,27 +1691,28 @@ int main(int argc, char** argv) {
     auto u32 = [](const uint8_t* p) {
       return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
     };
-    CHECK_EQ(u32(data + 0x25), uint32_t(120));
+    CHECK_EQ(u32(data + 0x25), uint32_t(124));
     size_t at = 0x29;
     std::vector<std::string> names;
-    for (unsigned i = 0; i < 120; ++i) {
+    for (unsigned i = 0; i < 124; ++i) {
       const auto type_size = u32(data + at); at += 4 + type_size;
       const auto name_size = u32(data + at); at += 4;
       names.emplace_back(reinterpret_cast<const char*>(data + at), name_size);
       at += name_size;
     }
-    const std::array<std::string, 8> added{"touch_pause_bg.mat", "touch_pause_ink.mat",
+    const std::array<std::string, 12> added{"touch_pause_bg.mat", "touch_pause_ink.mat",
         "touch_pause.grp", "touch_pause_icon.grp", "touch_pause_bg.mesh",
-        "touch_pause_l.mesh", "touch_pause_r.mesh", "touch_pause.anim"};
+        "touch_pause_l.mesh", "touch_pause_r.mesh", "touch_pause.anim",
+        "touch_powerup.grp", "touch_powerup_bg.mesh", "touch_powerup.lbl", "touch_powerup.anim"};
     for (size_t i = 0; i < added.size(); ++i) CheckStrEq(names[112 + i], added[i]);
     std::vector<size_t> markers;
     for (size_t i = 0x810; i + 4 <= scene.size(); ++i)
       if (u32(scene.data() + i) == 0xADDEADDE) markers.push_back(i);
-    CHECK_TRUE(markers.size() >= 9);
-    if (markers.size() < 9) return Finish();
+    CHECK_TRUE(markers.size() >= 13);
+    if (markers.size() < 13) return Finish();
     auto object = [&](size_t i) {
-      const size_t start = markers[markers.size() - 9 + i] + 4;
-      const size_t end = markers[markers.size() - 8 + i] + 4;
+      const size_t start = markers[markers.size() - 13 + i] + 4;
+      const size_t end = markers[markers.size() - 12 + i] + 4;
       return std::vector<uint8_t>(scene.begin() + start, scene.begin() + end);
     };
     auto contains = [](const std::vector<uint8_t>& bytes, std::string_view text) {
@@ -1719,7 +1720,9 @@ int main(int argc, char** argv) {
     };
     CHECK_TRUE(contains(object(0), "help_bg_powerup.tex"));
     const auto ink = object(1);
-    for (size_t offset : {0x19, 0x1D, 0x21}) CHECK_EQ(u32(ink.data() + offset), uint32_t(0));
+    CHECK_EQ(u32(ink.data() + 0x19), std::bit_cast<uint32_t>(.92f));
+    CHECK_EQ(u32(ink.data() + 0x1D), std::bit_cast<uint32_t>(.96f));
+    CHECK_EQ(u32(ink.data() + 0x21), std::bit_cast<uint32_t>(1.f));
     CHECK_EQ(u32(ink.data() + 0x25), uint32_t(0x3F800000));
     CHECK_FALSE(contains(ink, ".tex"));
     CHECK_EQ(object(2)[0x9A], uint8_t(1));
@@ -1732,6 +1735,12 @@ int main(int argc, char** argv) {
     }
     CHECK_TRUE(contains(object(7), "touch_pause_icon.grp"));
     CHECK_FALSE(contains(object(7), "remedial_help.lbl"));
+    CHECK_TRUE(contains(object(8), "touch_powerup.lbl"));
+    CHECK_TRUE(contains(object(9), "touch_powerup.grp"));
+    CHECK_TRUE(contains(object(10), "touch_powerup.grp"));
+    CHECK_TRUE(contains(object(10), "fonts/buttons.milo"));
+    CHECK_FALSE(contains(object(10), "inline_help_icons"));
+    CHECK_TRUE(contains(object(11), "touch_powerup.lbl"));
     std::vector<uint8_t> hints;
     CHECK_TRUE(font::PrepareHudHints(scene, &hints, &why));
     CHECK_FALSE(font::PrepareTouchHud(scene, &hints, &why)); // never double-apply offsets
@@ -1744,13 +1753,18 @@ int main(int argc, char** argv) {
     const size_t statements = original_enter ? original_enter->kids.size() : 0;
     CHECK_TRUE(rb_blitz::settings::AddTouchHudAnimation(&roots, &why));
     const auto* enter = header_test::Method(roots, "game_screen", "enter");
-    CHECK_TRUE(enter && enter->kids.size() == statements + 1);
+    CHECK_TRUE(enter && enter->kids.size() == statements + 3);
     if (enter && !enter->kids.empty()) {
-      const auto& animate = enter->kids.back();
+      const auto& animate = enter->kids[statements];
       CheckStrEq(animate.kids[0].kids[2].text, "touch_pause.anim");
       CheckStrEq(animate.kids[1].text, "animate");
       CheckStrEq(animate.kids[2].kids[0].text, "loop");
       CHECK_EQ(animate.kids[2].kids[2].scalar, uint32_t(480));
+      const auto& label = enter->kids[statements + 1];
+      CheckStrEq(label.kids[0].kids[2].text, "touch_powerup.lbl");
+      CheckStrEq(label.kids[1].text, "set_token_fmt");
+      CheckStrEq(label.kids[2].text, "rbbz_touch_powerup");
+      CheckStrEq(enter->kids.back().kids[0].kids[2].text, "touch_powerup.anim");
     }
     const auto compiled = dtb::Compile(roots, header);
     CHECK_TRUE(dtb::Parse(compiled.data(), compiled.size(), &roots, &header, &why));

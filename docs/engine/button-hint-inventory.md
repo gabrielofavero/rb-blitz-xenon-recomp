@@ -30,6 +30,23 @@ evidence that ordinary hints are correct.
 | In-song Continue prompt | `press_start_to_continue` is the default token for a tutorial label in `track/gen/hud.milo_xbox`, absent from direct UI DTB calls. The gameplay input path sends Gameplay Pause as the native Start bit in a song. | The original locale used glyph 0x8C while the font assigns Gameplay Pause 0x8D. After correction, the in-song tutorial showed Esc and pressing Esc advanced it. Rebound refresh remains open. |
 | Other inline glyph strings | The English locale has action text in `active_description`, `autoplay_desc`, `grenade_desc`, `jackpot_desc`, `overdrive_desc`, `plasma_desc`, `ripple_desc`, `error_return_button`, and account-link keys. `loading_tip_58` mentions old Typewriter controls as historical advice. | Power-up descriptions in Loading and Power-up Select now use Gameplay Power-up's glyph and patched label fonts. `error_return_button` and all three account-link email-entry variants use Interface Confirm's glyph and the corresponding scene font. Six-locale record checks pass; live appearance needs owner acceptance. `loading_tip_58` remains historical advice. |
 
+## Clickable footer legends (2026-11-16)
+
+Mouse left-clicks and menu touch presses on a drawn `InlineHelp` legend send
+that legend's native action (Confirm, Cancel, Option, Start, ViewModify,
+PageDown or ShellOption). Both the icon and caption use the guest label's
+projected text rectangle. The action bypasses source rebinding and uses the
+existing pad pulse/release queue; it acts on the current selection without
+requiring the pointer to be over a list row. This is always enabled, including
+with retail controller artwork, and adds no interface setting or drawing.
+
+Only labels drawn in the preceding UI frame in the same screen/focus context
+are targets. Transparent, cleared and retired legends cannot retain a target.
+Clicks outside these rectangles, right-click Back, wheel scrolling and gameplay
+touch gestures retain their existing paths. `native_mouse` host tests cover
+block boundaries, gaps, stale geometry and delivery of every supported action.
+Live mouse and on-device touch acceptance are still pending.
+
 ## iOS touch HUD (2026-11-16)
 
 The animated in-song X reminder belongs to `track/gen/hud.milo_xbox`:
@@ -40,30 +57,43 @@ and `help_powerup.anim` pulses the label's scale. The native remedial Flow owns
 when the reminder appears and disappears.
 
 `input_font::PrepareTouchHud` derives a pause group from these installed records
-on iOS. It copies the circular background material, adds two black guest mesh
+on iOS. It copies the circular background material, adds two pale guest mesh
 bars, and copies the power-up pulse into a PropAnim targeting their group.
 The generated `game_screen.enter` starts that animation with the guest's own
 `animate (loop 0 480)` route. `hud.grp` draws it; ImGui no longer draws pause.
 No retail art is checked into the project.
 
-While touch is the active input, pause occupies the first top-left slot and the
-original reminder occupies the second. The HUD transform hook and touch hit
-test share the safe-area layout. A physical controller, keyboard, or mouse
-event restores the original reminder placement and hides touch pause; an idle
-connected controller does not steal the touch source. Touch retains controller
-hint artwork while tracking its source separately.
+The pause circle is dark translucent gray, with a pale blue-white symbol.
+Pause starts immediately inside the safe left margin; no authored blank slot
+precedes it. A second copied guest group owns the native X label and circle,
+with its own power-up pulse animation and the original `buttons.milo` font.
+It appears as soon as `Hmx::Object::SetProperty` at `823FF258` publishes
+`powerup_can_deploy` on `powerups_state.ep`, including thresholds below a full
+meter. A tap dispatches the native Power-up action, without a note or swipe.
+Charging changes availability without cancelling held notes.
+
+During touch, the delayed remedial poll (`823A38C8`) updates its song clock but
+does not start controller-reminder work. Its original group and separate label
+are hidden; the dedicated ready control occupies the second slot. Controller,
+keyboard, and mouse input restore the original reminder flow and placement and
+hide both touch controls. An idle connected controller does not steal touch.
+The HUD transform hook and hit tests share one safe-area layout.
 
 Help & Options → Controls now contains Calibration, Controller & Keyboard,
 and Touch. Controller & Keyboard contains Layout, Controller Presets, Menu
 Bindings, and Gameplay Bindings. On iOS, Touch contains `Touch Buttons: On/Off`;
 `controller.touch_buttons` defaults to On, persists in the settings file, and
-applies immediately. Off hides pause and the reminder during touch play while
+applies immediately. Off hides both buttons during touch play while
 preserving touch input. Desktop releases omit the empty Touch branch. Both
 settings contexts carry the hierarchy and their corresponding Back routes.
 
 Generated-record checks, touch gesture checks, input-source checks, and settings
-tests cover these routes. On-device appearance, animation, and input switching
-still require owner acceptance.
+tests cover these routes. The owner verified the first pause render and then
+requested the revised placement, color, and immediate ready state. Acceptance
+of these revisions and resume stability is pending. The supplied stall log
+ended after two same-size swapchain reconnections following an iOS resume,
+without a fatal exception. SDK patch 0080 retains that swapchain; this addresses
+the observed resume path, while the stall's precise cause remains unconfirmed.
 
 ## Evidence and next measurements
 

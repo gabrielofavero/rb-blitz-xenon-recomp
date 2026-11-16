@@ -56,7 +56,7 @@ bool BypassAutomaticUnlockError(std::vector<ui::dtb::Node>* roots, std::string* 
 // Replace every connect-panel menu continuation with the same deferred guest
 // method. Refuses an unknown shape instead of leaving an ungated menu route.
 bool AddGraphicsLoadingGate(std::vector<ui::dtb::Node>* roots, std::string* why);
-// Start the guest HUD's iOS pause PropAnim when entering a song.
+// Initialize the touch power-up label and start both guest button animations.
 bool AddTouchHudAnimation(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Applied the same way, for the main menu's downloadable-content row: with R7 on the row *is*
 // the library refresh (`TapNativeDiscovery`), so the label it draws has to say so. Built into the

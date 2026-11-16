@@ -133,6 +133,7 @@ int main() {
   BeginCase("pause stays inside the safe area and cancels pending touch judgements");
   const auto layout = MakeLayout(874, 402, {62, 0, 750, 381});
   CHECK_TRUE(layout.pause.x >= 62);
+  CHECK_TRUE(layout.pause.x < 74); // exactly the first safe slot, no authored blank before pause
   CHECK_TRUE(layout.pause.x + layout.pause.width <= 812);
   CHECK_TRUE(layout.pause.height >= 44);
   CHECK_TRUE(layout.pause.x + layout.pause.width < layout.width / 2);
@@ -161,6 +162,32 @@ int main() {
   CHECK_TRUE(g.DrainGameplay().empty());
   CHECK_TRUE(Held(g.Sample(), Action::kPause));
   CHECK_TRUE(Empty(g.Sample()));
+
+  BeginCase("ready power-up is a button, not a note, and appears at the first available poll");
+  const float power_x = (layout.powerup.x + layout.powerup.width / 2) / layout.width;
+  g = Ready();
+  g.SetPowerupAvailable(true);
+  Tap(g, power_x, py);
+  events = g.DrainGameplay();
+  CHECK_EQ(events.size(), size_t(2));
+  CHECK_TRUE(events[0].kind == GameplayKind::kPress && events[0].action == Action::kPowerup);
+  CHECK_TRUE(events[1].kind == GameplayKind::kRelease && events[1].action == Action::kPowerup);
+  CHECK_TRUE(Empty(g.Sample()));
+  g = Ready();
+  Tap(g, power_x, py);
+  CHECK_TRUE(Held(g.Sample(), Action::kFirstNote)); // no invisible unavailable button
+  g = Ready();
+  g.SetPowerupAvailable(true);
+  Event(g, Phase::kDown, power_x, py);
+  g.SetPowerupAvailable(false);
+  Event(g, Phase::kUp, power_x, py);
+  CHECK_TRUE(g.DrainGameplay().empty()); // readiness lost while held cannot deploy
+  g = Ready();
+  Event(g, Phase::kDown, .2f, .6f);
+  g.SetPowerupAvailable(true);
+  events = g.DrainGameplay();
+  CHECK_EQ(events.size(), size_t(1));
+  CHECK_TRUE(events[0].kind == GameplayKind::kPress); // charging cannot cancel held notes
 
   BeginCase("the former top-right pause position is ordinary gameplay; dragging off pause cancels");
   g = Ready();

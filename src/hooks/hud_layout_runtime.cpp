@@ -30,6 +30,10 @@ REX_EXTERN(sub_821F13D0);
 REX_EXTERN(sub_821F0300);        // SetWorldDirty, propagates to transform children
 REX_EXTERN(__imp__sub_821F65C8); // RndDir::DrawShowing (RndDrawable view)
 REX_EXTERN(__imp__sub_82226CD8); // RndGroup child draw traversal (RndDrawable view)
+#if defined(RB_BLITZ_IOS)
+REX_EXTERN(__imp__sub_823FF258); // Hmx::Object::SetProperty(Symbol, DataNode)
+REX_EXTERN(__imp__sub_823A38C8); // Remedial help timer poll; no gameplay work
+#endif
 
 REXCVAR_DEFINE_BOOL(hud_reanchor, true, "Graphics",
                     "Re-anchor the in-song HUD on non-16:9 frames during world-transform "
@@ -145,12 +149,13 @@ constexpr auto kAnchors = std::to_array<Anchor>({
     {"score.lbl",           0x8203A95C,  0x07C,  1},
 #if defined(RB_BLITZ_IOS)
     {"touch_pause.grp",     0x82024C4C, -0x108, -1},
+    {"touch_powerup.grp",   0x82024C4C, -0x108, -1},
 #endif
 });
 
 bool TouchAnchor(const Anchor& anchor) {
 #if defined(RB_BLITZ_IOS)
-  return anchor.name == "touch_pause.grp" || anchor.name == "remedial_help.grp";
+  return anchor.name == "touch_pause.grp" || anchor.name == "touch_powerup.grp";
 #else
   return false;
 #endif
@@ -446,16 +451,57 @@ extern "C" REX_FUNC(sub_821F65C8) {
 
 extern "C" REX_FUNC(sub_82226CD8) {
 #if defined(RB_BLITZ_IOS)
+  static thread_local bool powerup_was_visible = false;
+  bool trace_powerup = false;
   const auto header = ObjectBase(base, ctx.r3.u32);
   if (header && U32(base, header) == 0x82024C4C) {
     const auto name = U32(base, header + 32);
     const bool hidden_pause = NameIs(base, name, "touch_pause.grp") &&
         !rb_blitz::input::touch::ControlsVisible();
+    const bool powerup = NameIs(base, name, "touch_powerup.grp");
+    const bool hidden_powerup = powerup &&
+        (!rb_blitz::input::touch::ControlsVisible() || !rb_blitz::input::touch::PowerupReady());
     const bool hidden_hint = NameIs(base, name, "remedial_help.grp") &&
-        rb_blitz::input::touch::TouchInputActive() && !rb_blitz::input::touch::ButtonsEnabled();
-    if ((hidden_pause || hidden_hint) && InHud(base, header)) return;
+        rb_blitz::input::touch::TouchInputActive();
+    if (powerup && InHud(base, header)) {
+      trace_powerup = !hidden_powerup && !powerup_was_visible;
+      powerup_was_visible = !hidden_powerup;
+    }
+    if ((hidden_pause || hidden_powerup || hidden_hint) && InHud(base, header)) return;
   }
+  if (trace_powerup) REXLOG_INFO("touch_hud: ready power-up draw begin");
 #endif
   PrepareHudDraw(ctx, base);
   __imp__sub_82226CD8(ctx, base);
+#if defined(RB_BLITZ_IOS)
+  if (trace_powerup) REXLOG_INFO("touch_hud: ready power-up draw completed");
+#endif
 }
+
+#if defined(RB_BLITZ_IOS)
+extern "C" REX_FUNC(sub_823A38C8) {
+  if (rb_blitz::input::touch::TouchInputActive()) {
+    // Touch uses the real deploy property and its own guest group. Don't run
+    // the delayed controller-reminder animation or assign its private glyph.
+    // Keep the helper's current song time for its action/reset handlers.
+    rex::memory::store_and_swap<uint32_t>(base + ctx.r3.u32 + 64,
+        std::bit_cast<uint32_t>(float(ctx.f1.f64)));
+    return;
+  }
+  __imp__sub_823A38C8(ctx, base);
+}
+
+extern "C" REX_FUNC(sub_823FF258) {
+  // Observe the live provider write used by the native power-up manager
+  // (8239139C), including thresholds below a full energy meter. No heap scan,
+  // guest side call, or saved pointer survives a song unload.
+  const uint32_t object = ctx.r3.u32, symbol = ctx.r4.u32, value = ctx.r5.u32;
+  const bool readiness = HeapRange(object, 40) && HeapRange(value, 8) &&
+      NameIs(base, symbol, "powerup_can_deploy") &&
+      NameIs(base, U32(base, object + 32), "powerups_state.ep") &&
+      (U32(base, value + 4) & 0x1F) == 0;
+  const bool ready = readiness && U32(base, value) != 0;
+  __imp__sub_823FF258(ctx, base);
+  if (readiness) rb_blitz::input::touch::PublishPowerupReady(ready);
+}
+#endif

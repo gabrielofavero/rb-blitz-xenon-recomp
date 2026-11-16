@@ -627,7 +627,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           if (user_index == 0) {
             const auto mouse = SampleMenuMousePadState();
             if (!capture_armed) {
-              state.gamepad.buttons = uint16_t(state.gamepad.buttons) | (mouse & 0x300F);
+              state.gamepad.buttons = uint16_t(state.gamepad.buttons) | mouse;
             }
             // P7: the host's own Back pulse (the listening dialog leaving itself). It follows the
             // same delivery as a player press and is never gated by Mouse Support.

@@ -6,6 +6,44 @@ using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("footer clicks and touch presses hit only visible legend blocks in the current context");
+  const std::vector<MenuHintTarget> hints{
+      {1, 2, 10, {.1f, .85f, .3f, .95f}, MenuHintButton(1)},
+      {1, 2, 10, {.4f, .85f, .6f, .95f}, MenuHintButton(2)},
+      {1, 2, 10, {.7f, .85f, .9f, .95f}, MenuHintButton(4)}};
+  CHECK_EQ(HitMenuHint({.11f, .9f}, hints, 1, 2, 11), 0x1000); // icon
+  CHECK_EQ(HitMenuHint({.29f, .9f}, hints, 1, 2, 11), 0x1000); // caption
+  CHECK_EQ(HitMenuHint({.5f, .9f}, hints, 1, 2, 11), 0x2000);
+  CHECK_EQ(HitMenuHint({.8f, .9f}, hints, 1, 2, 11), 0x10); // Search
+  CHECK_EQ(HitMenuHint({.35f, .9f}, hints, 1, 2, 11), 0); // gap
+  CHECK_EQ(HitMenuHint({.5f, .8f}, hints, 1, 2, 11), 0);
+  CHECK_EQ(HitMenuHint({NAN, .9f}, hints, 1, 2, 11), 0);
+  CHECK_EQ(HitMenuHint({.5f, .9f}, hints, 3, 2, 11), 0); // retired screen
+  CHECK_EQ(HitMenuHint({.5f, .9f}, hints, 1, 3, 11), 0); // retired focus
+  CHECK_EQ(HitMenuHint({.5f, .9f}, hints, 1, 2, 12), 0); // no longer drawn
+  CHECK_EQ(HitMenuHint({.5f, .9f}, hints, 1, 2, 10), 0);
+  CHECK_EQ(MenuHintButton(0), 0);
+  CHECK_EQ(MenuHintButton(99), 0);
+
+  BeginCase("all footer actions survive repeated pad polls and deliver a release");
+  for (const auto [action, button] : std::vector<std::pair<uint32_t, uint16_t>>{
+           {1, 0x1000}, {2, 0x2000}, {3, 0x8000}, {4, 0x10},
+           {5, 0x20}, {11, 0x200}, {14, 0x4000}}) {
+    MenuMouseQueue clicks;
+    clicks.Context(1, 2, true);
+    clicks.PulseButton(MenuHintButton(action));
+    CHECK_EQ(clicks.SamplePad(), button);
+    CHECK_EQ(clicks.SamplePad(), button);
+    CHECK_FALSE(clicks.NextFrame());
+    CHECK_FALSE(clicks.NextFrame());
+    CHECK_EQ(clicks.SamplePad(), 0);
+    clicks.Push(MouseAction::kBack);
+    CHECK_TRUE(clicks.NextFrame().has_value());
+    clicks.PulseButton(button);
+    clicks.Context(3, 2, true);
+    CHECK_EQ(clicks.SamplePad(), 0); // context change cancels a pending press
+  }
+
   BeginCase("library wheel scales with content and never exceeds a visible page");
   CHECK_EQ(LibraryWheelRows(51, 10), 1);
   CHECK_EQ(LibraryWheelRows(100, 10), 1);

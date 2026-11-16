@@ -776,7 +776,7 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_touch_panel", "settings_touch_screen",
                           "settings_controls_screen", MenuPanels(), {
       BoolRow("settings_touch_buttons", "controller.touch_buttons", "Touch Buttons",
-              "Show the pause button and power-up hint while using touch. Applies immediately.")
+              "Show the pause and power-up buttons while using touch. Applies immediately.")
   }});
   out.push_back(PanelSpec{"settings_controls_devices_panel", "settings_controls_devices_screen",
                           "settings_controls_screen", MenuPanels(), {

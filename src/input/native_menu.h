@@ -71,6 +71,34 @@ struct MenuBounds {
            p.x >= left && p.x <= right && p.y >= top && p.y <= bottom;
   }
 };
+
+// Native joypad action IDs from InlineHelp's action_chars table. These are
+// destination buttons, so rebinding the displayed source does not change them.
+inline uint16_t MenuHintButton(uint32_t action) {
+  switch (action) {
+    case 1: return 0x1000;  // Confirm / A
+    case 2: return 0x2000;  // Cancel / B
+    case 3: return 0x8000;  // Option / Y
+    case 4: return 0x0010;  // Start (Search, Help & Options, etc.)
+    case 5: return 0x0020;  // ViewModify / Back
+    case 11: return 0x0200; // PageDown / right shoulder
+    case 14: return 0x4000; // ShellOption / X
+    default: return 0;
+  }
+}
+struct MenuHintTarget {
+  uint32_t screen = 0, focus = 0, frame = 0;
+  MenuBounds bounds;
+  uint16_t button = 0;
+};
+inline uint16_t HitMenuHint(MenuPoint point, const std::vector<MenuHintTarget>& targets,
+                            uint32_t screen, uint32_t focus, uint32_t frame) {
+  // Reverse draw order gives a later drawn footer priority if labels overlap.
+  for (auto it = targets.rbegin(); it != targets.rend(); ++it)
+    if (it->screen == screen && it->focus == focus && it->frame + 1 == frame &&
+        it->bounds.Contains(point)) return it->button;
+  return 0;
+}
 struct MenuRow {
   MenuPoint center;
   int index = -1;
@@ -333,10 +361,13 @@ class MenuMouseQueue {
     // Directions are D-pad bits (up 1, down 2, left 4, right 8) rather than stick
     // travel: the guest steps a list once per press, so one wheel detent is one
     // native step and no analog threshold or repeat rule can drop or multiply it.
-    pulse_ = action == MouseAction::kAccept ? 0x1000 :
+    PulseButton(action == MouseAction::kAccept ? 0x1000 :
              action == MouseAction::kBack ? 0x2000 :
              action == MouseAction::kUp ? 1 : action == MouseAction::kDown ? 2 :
-             action == MouseAction::kLeft ? 4 : action == MouseAction::kRight ? 8 : 0;
+             action == MouseAction::kLeft ? 4 : action == MouseAction::kRight ? 8 : 0);
+  }
+  void PulseButton(uint16_t button) {
+    pulse_ = button;
     frames_ = pulse_ ? 1 : 0; // two guest frames down, then one frame released
     sampled_ = false;
   }

@@ -97,6 +97,7 @@ thread_local Geometry geometry;
 thread_local uint32_t frame_number = 0;
 struct HeaderGeometry { uint32_t screen = 0, focus = 0, frame = 0; MenuBounds bounds; };
 thread_local std::array<HeaderGeometry, 4> header_geometry;
+thread_local std::vector<MenuHintTarget> hint_targets;
 thread_local int clicked_header = -1;
 thread_local uint32_t header_click_frame = 0;
 thread_local std::string current_panel_name;
@@ -180,6 +181,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     // the preceding screen or list generation.
     geometry = {};
     header_geometry = {};
+    hint_targets.clear();
     clicked_header = -1;
     MenuRail stale; PublishRail(stale);
     last_selected_row = -1;
@@ -422,6 +424,18 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     }
   }
   if (!event) return;
+  // Footer labels act on the existing selection. Handle them before row hit
+  // testing, which would otherwise reject a footer click as empty space.
+  // Touch-generated left presses use this same queue as physical mouse clicks.
+  if (event->action == MouseAction::kAccept) {
+    if (const auto button = HitMenuHint(event->point, hint_targets,
+                                        current_screen, current_focus, frame_number)) {
+      scroll_follow.Reset();
+      std::lock_guard lock(mutex);
+      if (queue.enabled()) queue.PulseButton(button);
+      return;
+    }
+  }
   // Header clicks precede the focused list's hit test and never become A.
   // Only a label actually drawn in the last frame can receive the click.
   if (event->action == MouseAction::kAccept && LibraryHeaderForScreen(current_screen_name) >= 0) {
@@ -710,19 +724,17 @@ void CaptureLabel(PPCContext& ctx, uint8_t* base) {
   CaptureRow(base, bounds);
 }
 
-void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
-  if (!menu_available || LibraryHeaderForScreen(current_screen_name) < 0) return;
-  const int index = LibraryHeaderForLabel(ObjectName(base, ObjectBase(base, label)));
+std::optional<MenuBounds> ProjectLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   const auto camera = U32(base, 0x8284A108);
-  if (index < 0 || !camera) return;
+  if (!camera) return {};
   const float x = F32(base, label + 144), z = F32(base, label + 148);
   const float width = F32(base, label + 152), height = F32(base, label + 156);
-  if (!(width > 0) || height == 0) return;
+  if (!(width > 0) || height == 0) return {};
   GuestCall call(ctx); auto& c = call.frame.ctx;
   c.r3.u32 = label; c.r4.u32 = 0;
   sub_824BA9F8(c, base);
   // DrawShowing skips fully transparent label styles; those are not hit targets.
-  if (!(F32(base, c.r3.u32 + 36) > 0)) return;
+  if (!(F32(base, c.r3.u32 + 36) > 0)) return {};
   // Resolve the same virtual RndTransformable base used by UIListLabelElement::Draw.
   c.r3.u32 = label + 72 + U32(base, U32(base, label + 72) + 16);
   sub_821F13D0(c, base);
@@ -738,11 +750,31 @@ void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
     c.r3.u32 = camera; c.r4.u32 = world; c.r5.u32 = projected;
     sub_821FF4A0(c, base);
     const float px = F32(base, projected), py = F32(base, projected + 4);
-    if (!std::isfinite(px) || !std::isfinite(py)) return;
+    if (!std::isfinite(px) || !std::isfinite(py)) return {};
     bounds.left = std::min(bounds.left, px); bounds.right = std::max(bounds.right, px);
     bounds.top = std::min(bounds.top, py); bounds.bottom = std::max(bounds.bottom, py);
   }
-  header_geometry[index] = {current_screen, current_focus, frame_number, bounds};
+  return bounds;
+}
+void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  if (!menu_available || LibraryHeaderForScreen(current_screen_name) < 0) return;
+  const int index = LibraryHeaderForLabel(ObjectName(base, ObjectBase(base, label)));
+  if (index < 0) return;
+  if (const auto bounds = ProjectLabel(ctx, base, label))
+    header_geometry[index] = {current_screen, current_focus, frame_number, *bounds};
+}
+void CaptureInlineHelp(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  if (!menu_available) return;
+  const auto action = hooks::DrawingInlineHelpAction(label);
+  const uint16_t button = action ? MenuHintButton(*action) : 0;
+  if (!button) return;
+  const auto bounds = ProjectLabel(ctx, base, label);
+  if (!bounds) return;
+  // Keep only the current draw's geometry; a hidden or cleared legend must stop
+  // being clickable on the next poll even when its guest label is reused.
+  if (!hint_targets.empty() && hint_targets.back().frame != frame_number)
+    hint_targets.clear();
+  hint_targets.push_back({current_screen, current_focus, frame_number, *bounds, button});
 }
 void UpdateCalibrationSideLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   // These two UILabels flank the metronome. Their scene font is redirected to
@@ -909,12 +941,13 @@ REX_HOOK_RAW(sub_824BC668) {
   const auto label = ctx.r3.u32 - 260;
 #if defined(RB_BLITZ_IOS)
   // The hint UILabel is drawn separately from remedial_help.grp by the guest.
-  if (rb_blitz::input::touch::TouchInputActive() && !rb_blitz::input::touch::ButtonsEnabled() &&
+  if (rb_blitz::input::touch::TouchInputActive() &&
       rb_blitz::input::ObjectName(base, rb_blitz::input::ObjectBase(base, label)) ==
           "remedial_help.lbl") return;
 #endif
   rb_blitz::input::UpdateCalibrationSideLabel(ctx, base, label);
   __imp__sub_824BC668(ctx, base);
+  rb_blitz::input::CaptureInlineHelp(ctx, base, label);
   rb_blitz::input::CaptureHeader(ctx, base, label);
 }
 REX_HOOK_RAW(sub_824E0900) {

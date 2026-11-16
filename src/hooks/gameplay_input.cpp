@@ -392,6 +392,9 @@ REX_HOOK_RAW(sub_82435EB0) {
   if (controller == 0) {
     return;
   }
+#if defined(RB_BLITZ_IOS)
+  rb_blitz::input::touch::PublishPowerupReady(false);
+#endif
   using rb_blitz::gameplay_input::detail::Dispatcher;
   using rb_blitz::gameplay_input::detail::State;
   rb_blitz::gameplay_input::detail::g_controller.store(controller,
@@ -433,6 +436,9 @@ REX_HOOK_RAW(sub_82443C20) {
       rb_blitz::gameplay_input::detail::g_controller.load(std::memory_order_relaxed) ==
           controller) {
     rb_blitz::diag::gameplay_probe::ControllerDestroyed(controller);
+#if defined(RB_BLITZ_IOS)
+    rb_blitz::input::touch::PublishPowerupReady(false);
+#endif
     rb_blitz::gameplay_input::detail::g_controller.store(0, std::memory_order_relaxed);
     rb_blitz::gameplay_input::detail::g_base.store(nullptr, std::memory_order_relaxed);
     // The controller's own held-action state dies with it, so there is nothing to release.

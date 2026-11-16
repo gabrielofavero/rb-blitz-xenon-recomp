@@ -333,7 +333,7 @@ std::vector<SchemaRow> BuildTable() {
   rows.push_back(Row(Make(SettingId::kTouchButtons, Category::kController, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"controller", "touch_buttons"}, "touch", "Touch Buttons",
-                     "Show the pause button and power-up hint while using touch. Applies immediately."));
+                     "Show the pause and power-up buttons while using touch. Applies immediately."));
   rows.push_back(Row(Make(SettingId::kBackgroundMusicNavigation, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "background_music_navigation"}, "", "Menu Music Navigation",

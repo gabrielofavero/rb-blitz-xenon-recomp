@@ -1,0 +1,29 @@
+diff --git a/src/ui/window.cpp b/src/ui/window.cpp
+--- a/src/ui/window.cpp
++++ b/src/ui/window.cpp
+@@ -605,9 +605,9 @@
+ }
+ 
+ void Window::OnFocusUpdate(bool new_has_focus, WindowDestructionReceiver& destruction_receiver) {
+-  // Cocoa preserves its CAMetalLayer across app/space switches. Retain the
++  // Cocoa/UIKit preserve their CAMetalLayer across app switches. Retain the
+   // swapchain when its size is unchanged; expose will repaint the live layer.
+-#if REX_PLATFORM_MAC
++#if REX_PLATFORM_MAC || REX_PLATFORM_IOS
+   constexpr bool force_reconnect = false;
+ #else
+   constexpr bool force_reconnect = true;
+@@ -668,7 +668,13 @@
+ 
+ void Window::OnRestored(WindowDestructionReceiver& destruction_receiver) {
+   if (presenter_surface_) {
++#if REX_PLATFORM_IOS
++    // UIKit keeps the surface. A resize/out-of-date result will rebuild it if
++    // needed; don't retire a just-restored swapchain again on SDL restore.
++    presenter_->OnSurfaceResizeFromUIThread(false);
++#else
+     presenter_->OnSurfaceResizeFromUIThread(true);
++#endif
+   }
+   if (!CanSendEventsToListeners()) {
+     return;

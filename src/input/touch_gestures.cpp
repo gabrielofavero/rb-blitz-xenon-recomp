@@ -18,11 +18,10 @@ Layout MakeLayout(float width, float height, Rect safe) {
   const float margin = std::min(12.0f, height * .025f);
   const float gap = std::max(8.f, height * .025f);
   // The installed HUD's prompt is a 54-unit disc in a 480-unit-high scene.
-  // Keep its authored top/left inset where possible, then respect the notch.
+  // Pause always starts at the safe left edge; never reserve a slot before it.
   const float side = std::max(0.f, std::min({std::max(height * .1125f, 44.f),
       (safe.width - margin * 2 - gap) / 2, safe.height - margin * 2}));
-  const float x = std::clamp(height * (137.328f / 480.f) - side / 2,
-      safe.x + margin, safe.x + std::max(margin, safe.width - margin - side * 2 - gap));
+  const float x = safe.x + margin;
   const float y = std::clamp(height * (59.3836f / 480.f) - side / 2,
       safe.y + margin, safe.y + std::max(margin, safe.height - margin - side));
   return {width, height, {x, y, side, side}, {x + side + gap, y, side, side}};
@@ -37,6 +36,7 @@ void Gestures::SetActive(bool active) {
   Cancel();
   active_ = active;
 }
+void Gestures::SetPowerupAvailable(bool available) { powerup_available_ = available; }
 void Gestures::Cancel() {
   gameplay_.clear();
   gameplay_.push_back({GameplayKind::kCancel});
@@ -56,7 +56,7 @@ void Gestures::Observe(const FingerEvent& event) {
   auto cancel_finger = [&] {
     const auto it = fingers_.find(key);
     if (it != fingers_.end()) {
-      if (!it->second.pause) gameplay_.push_back({GameplayKind::kRelease, it->second.token,
+      if (!it->second.pause && !it->second.powerup) gameplay_.push_back({GameplayKind::kRelease, it->second.token,
           it->second.x < layout_.width * .5f ? Action::kFirstNote : Action::kSecondNote, true});
       fingers_.erase(it);
     }
@@ -69,8 +69,9 @@ void Gestures::Observe(const FingerEvent& event) {
   if (event.phase == Phase::kDown) {
     if (fingers_.size() >= 10 || event.x < 0 || event.x > 1 || event.y < 0 || event.y > 1) return;
     const auto [it, inserted] = fingers_.try_emplace(key,
-        Finger{x, y, 0, ++next_token_, layout_.pause.Contains(x, y)});
-    if (inserted && !it->second.pause) {
+        Finger{x, y, 0, ++next_token_, layout_.pause.Contains(x, y),
+               powerup_available_ && layout_.powerup.Contains(x, y)});
+    if (inserted && !it->second.pause && !it->second.powerup) {
       const auto action = x < layout_.width * .5f ? Action::kFirstNote : Action::kSecondNote;
       Emit(action);
       gameplay_.push_back({GameplayKind::kPress, it->second.token, action});
@@ -82,10 +83,13 @@ void Gestures::Observe(const FingerEvent& event) {
   auto& finger = it->second;
   const float dx = x - finger.x, dy = y - finger.y;
   finger.travel = std::max(finger.travel, std::hypot(dx, dy));
-  if (finger.pause) {
-    finger.moved |= !layout_.pause.Contains(x, y) || finger.travel > kTapSlop;
+  if (finger.pause || finger.powerup) {
+    const auto& rect = finger.pause ? layout_.pause : layout_.powerup;
+    finger.moved |= !rect.Contains(x, y) || finger.travel > kTapSlop;
     if (event.phase == Phase::kUp) {
-      const bool pause = !finger.moved;
+      const bool pause = finger.pause && !finger.moved;
+      const bool powerup = finger.powerup && !finger.moved && powerup_available_;
+      const auto token = finger.token;
       fingers_.erase(it);
       if (pause) {
         // Pause owns this frame. Other fingers must not leave notes queued for resume.
@@ -93,6 +97,10 @@ void Gestures::Observe(const FingerEvent& event) {
         active_ = true;
         Emit(Action::kPause);
         pause_requested_ = true;
+      } else if (powerup) {
+        // Use the same native action boundary as a controller's Power-up.
+        gameplay_.push_back({GameplayKind::kPress, token, Action::kPowerup});
+        gameplay_.push_back({GameplayKind::kRelease, token, Action::kPowerup});
       }
     }
     return;

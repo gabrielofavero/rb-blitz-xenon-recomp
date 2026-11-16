@@ -707,3 +707,10 @@ kept AppleClang busy for minutes even without optimization; the equivalent
 loop compiled for iOS arm64 at `-O3` in 2.06 seconds. The registration calls and
 gameplay function pointers are unchanged. See the
 [iOS CLI plan](../docs/plans/finished/2026-11-16-ios-cli-installer-plan.md).
+
+`0080-ios-resume-swapchain-retention.patch` retains a same-size iOS Metal
+swapchain on focus and restore, matching the existing macOS focus policy.
+The 2026-11-16 device stall log recreated it twice immediately after resume,
+then stopped producing guest frames while audio repeated. Genuine surface
+resizes and Vulkan out-of-date results still reconnect. Patch replay and host
+lifecycle checks cover the change; device resume acceptance remains pending.

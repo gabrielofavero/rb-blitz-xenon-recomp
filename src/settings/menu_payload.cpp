@@ -1550,6 +1550,12 @@ bool AddTouchHudAnimation(std::vector<ui::dtb::Node>* roots, std::string* why) {
   // Native RndAnimatable::animate syntax, also used by calibration.dtb.
   enter->kids.push_back(Node::Command({anim, Node::Symbol("animate"),
       Node::Array({Node::Symbol("loop"), Node::Int(0), Node::Int(480)})}));
+  const auto powerup_label = Node::Command({hud, Node::Symbol("find"), Node::Symbol("touch_powerup.lbl")});
+  enter->kids.push_back(Node::Command({powerup_label, Node::Symbol("set_token_fmt"),
+                                      Node::Symbol("rbbz_touch_powerup")}));
+  const auto powerup_anim = Node::Command({hud, Node::Symbol("find"), Node::Symbol("touch_powerup.anim")});
+  enter->kids.push_back(Node::Command({powerup_anim, Node::Symbol("animate"),
+      Node::Array({Node::Symbol("loop"), Node::Int(0), Node::Int(480)})}));
   return true;
 }
 
@@ -1754,6 +1760,14 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       })) return false;
   for (const auto& locale : locales) {
     if (!edit(locale, [&](auto& roots) {
+#if defined(RB_BLITZ_IOS)
+      std::string touch_why;
+      if (!screen::AddLocaleEntry(&roots, "rbbz_touch_powerup", "<alt>X</alt>", &touch_why) &&
+          touch_why != "the locale already has that key") {
+        if (error) *error = "touch power-up locale entry refused: " + touch_why;
+        return false;
+      }
+#endif
       // InlineHelp's action character uses the same private image font as P9
       // mapping rows. The retail <alt> tag selects the old button style; the
       // private font is reached through the numbered alternate style.

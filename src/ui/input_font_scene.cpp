@@ -621,9 +621,12 @@ bool PrepareTouchHud(const std::vector<uint8_t>& source, std::vector<uint8_t>* s
   std::vector<Object> objects;
   auto bg = copy(0x48265F, 0x48277C);
   rename(bg, "remedial_help_bg.tex", "help_bg_powerup.tex");
+  for (size_t at : {0x19, 0x1D, 0x21}) PutFloat(bg.data() + at, .35f);
   objects.push_back({"Mat", "touch_pause_bg.mat", std::move(bg)});
   auto ink = copy(0x48265F, 0x48277C);
-  for (size_t at : {0x19, 0x1D, 0x21}) PutFloat(ink.data() + at, 0);
+  PutFloat(ink.data() + 0x19, .92f);
+  PutFloat(ink.data() + 0x1D, .96f);
+  PutFloat(ink.data() + 0x21, 1);
   PutFloat(ink.data() + 0x25, 1);
   rename(ink, "remedial_help_bg.tex", "");
   objects.push_back({"Mat", "touch_pause_ink.mat", std::move(ink)});
@@ -663,11 +666,31 @@ bool PrepareTouchHud(const std::vector<uint8_t>& source, std::vector<uint8_t>* s
   rename(anim, "remedial_help.lbl", "touch_pause_icon.grp");
   objects.push_back({"PropAnim", "touch_pause.anim", std::move(anim)});
 
+  // An independent copy of the native X prompt. Its visibility follows the
+  // real powerup_can_deploy property; the delayed remedial Flow never owns it.
+  auto powerup = copy(0x4830A4, 0x4831A5);
+  powerup[0x9A] = 1;
+  members(powerup, "help_bg.mesh", {"touch_powerup_bg.mesh", "touch_powerup.lbl"});
+  objects.push_back({"Group", "touch_powerup.grp", std::move(powerup)});
+  auto powerup_bg = copy(0x489711, 0x48996D);
+  rename(powerup_bg, "remedial_help.grp", "touch_powerup.grp");
+  rename(powerup_bg, "help_bg.mat", "touch_pause_bg.mat");
+  rename(powerup_bg, "help_bg.mesh", "touch_powerup_bg.mesh");
+  objects.push_back({"Mesh", "touch_powerup_bg.mesh", std::move(powerup_bg)});
+  auto label = copy(0x49C46B, 0x49C5E7);
+  rename(label, "remedial_help.grp", "touch_powerup.grp");
+  // Keep the original buttons font for this fixed touch X. It does not need
+  // the remap-aware private font or a late texture-atlas update.
+  objects.push_back({"UILabel", "touch_powerup.lbl", std::move(label)});
+  auto powerup_anim = copy(0x489BBF, 0x489C5F);
+  rename(powerup_anim, "remedial_help.lbl", "touch_powerup.lbl");
+  objects.push_back({"PropAnim", "touch_powerup.anim", std::move(powerup_anim)});
+
   // Add the new group to the title's hud.grp traversal. The original remedial
   // Flow, its visibility, its arrows, label, and animations remain guest-owned.
   auto hud = copy(0x482C71, 0x482D6E);
   members(hud, "band_meter_hud", {"band_meter_hud", "blitz_text_flat.mesh",
-                                   "blitz_meter.grp", "touch_pause.grp"});
+                                   "blitz_meter.grp", "touch_pause.grp", "touch_powerup.grp"});
   bytes.erase(bytes.begin() + 0x482C71, bytes.begin() + 0x482D6E);
   bytes.insert(bytes.begin() + 0x482C71, hud.begin(), hud.end());
   std::vector<uint8_t> declarations;

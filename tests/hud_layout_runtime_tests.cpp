@@ -18,6 +18,8 @@
 #include <rex/system/xmemory.h>
 #if defined(RB_BLITZ_IOS)
 #include "input/touch_controls.h"
+REX_EXTERN(sub_823FF258);
+REX_EXTERN(sub_823A38C8);
 #endif
 
 REX_EXTERN(sub_821F13D0);
@@ -42,7 +44,9 @@ std::array<uint32_t, 16> transforms{};
 uint32_t drawn_child = 0;
 float drawn_x = 0;
 #if defined(RB_BLITZ_IOS)
-bool using_touch = false, buttons_enabled = true;
+bool using_touch = false, buttons_enabled = true, powerup_ready = false;
+unsigned property_writes = 0;
+unsigned reminder_polls = 0;
 rb_blitz::input::touch::Layout touch_layout{874, 402, {90, 28, 46, 46}, {146, 28, 46, 46}};
 #endif
 
@@ -148,7 +152,14 @@ Layout CurrentLayout() { return touch_layout; }
 bool TouchInputActive() { return using_touch; }
 bool ButtonsEnabled() { return buttons_enabled; }
 bool ControlsVisible() { return using_touch && buttons_enabled; }
+bool PowerupReady() { return powerup_ready; }
+void PublishPowerupReady(bool ready) { powerup_ready = ready; }
 }
+extern "C" REX_FUNC(__imp__sub_823FF258) {
+  ++property_writes;
+  ctx.r3.u32 = 0x12345678;
+}
+extern "C" REX_FUNC(__imp__sub_823A38C8) { ++reminder_polls; }
 #endif
 
 // Stand-in for the original guest evaluator: fresh local -> world; dirty parents
@@ -490,13 +501,14 @@ int main() {
   Resolve(t2); CHECK_TRUE(std::isinf(Float(t2 + 0x78)));
 
 #if defined(RB_BLITZ_IOS)
-  BeginCase("touch pause and reminder match hit rectangles at 16:9 and restore native placement");
+  BeginCase("touch pause and ready power-up match hit rectangles at 16:9 and restore native placement");
   Reset();
   width = 1920; height = 1080;
   using_touch = true;
   const Shape pause_shape{"touch_pause.grp", 0x82024C4C, -0x108, -1};
   const auto pause = Make(0, pause_shape, -289.338f);
-  const auto hint = Make(1, shapes[3], -289.338f);
+  const Shape powerup_shape{"touch_powerup.grp", 0x82024C4C, -0x108, -1};
+  const auto hint = Make(1, powerup_shape, -289.338f);
   for (auto t : {pause, hint}) {
     Resolve(t);
     const auto rect = t == pause ? touch_layout.pause : touch_layout.powerup;
@@ -509,9 +521,10 @@ int main() {
     Resolve(t);
     Close(Float(t + 72), scale); // fresh guest matrix; never compound scale
   }
-  Draw(hint, shapes[3], true);
+  powerup_ready = true;
+  Draw(hint, powerup_shape, true);
   using_touch = false;
-  Draw(hint, shapes[3], true); // source change invalidates the prepared placement
+  Resolve(hint); // source change restores the authored transform while hidden
   Close(Float(hint + 0x78), -289.338f);
   Close(Float(hint + 0x80), 4.35f);
   auto old_draws = draw_calls;
@@ -526,6 +539,47 @@ int main() {
   call.r3.u32 = pause - 64;
   sub_82226CD8(call, memory);
   CHECK_EQ(draw_calls, old_draws);
+
+  BeginCase("native deploy readiness drives touch immediately, independently of the reminder");
+  Reset();
+  const auto provider = kHeap + 0xE000, node = kHeap + 0xF000;
+  Word(provider + 32, Text("powerups_state.ep"));
+  const auto property = Text("powerup_can_deploy");
+  using_touch = true; buttons_enabled = true;
+  const auto ready_group = Make(0, powerup_shape, -289.338f);
+  ObjectView(ready_group - 64, ready_group + 0x108);
+  Word(node + 4, 0); // native boolean is a DataNode integer
+  for (const bool ready : {false, true, false, true}) {
+    Word(node, ready ? 1 : 0);
+    PPCContext write{};
+    write.r3.u32 = provider; write.r4.u32 = property; write.r5.u32 = node;
+    const auto calls = property_writes;
+    sub_823FF258(write, memory);
+    CHECK_EQ(property_writes, calls + 1);
+    CHECK_EQ(write.r3.u32, uint32_t(0x12345678)); // preserve original return registers
+    CHECK_EQ(powerup_ready, ready);
+    PPCContext draw{};
+    draw.r3.u32 = ready_group - 64; draw.r4.u32 = 0xCAFEBABE;
+    const auto before_draw = draw_calls;
+    sub_82226CD8(draw, memory);
+    CHECK_EQ(draw_calls, before_draw + (ready ? 1 : 0)); // same-frame visibility; no help delay
+  }
+  Word(provider + 32, Text("unrelated.ep"));
+  Word(node, 0);
+  call.r3.u32 = provider; call.r4.u32 = property; call.r5.u32 = node;
+  sub_823FF258(call, memory);
+  CHECK_TRUE(powerup_ready); // unrelated providers cannot hide the control
+
+  BeginCase("only touch bypasses delayed reminder work and retains the helper's song clock");
+  call.r3.u32 = provider; call.f1.f64 = 12.5;
+  using_touch = true;
+  const auto old_polls = reminder_polls;
+  sub_823A38C8(call, memory);
+  Close(Float(provider + 64), 12.5f);
+  CHECK_EQ(reminder_polls, old_polls);
+  using_touch = false;
+  sub_823A38C8(call, memory);
+  CHECK_EQ(reminder_polls, old_polls + 1);
 #endif
 #if defined(_WIN32)
   VirtualFree(memory, 0, MEM_RELEASE);

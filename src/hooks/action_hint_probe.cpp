@@ -35,6 +35,7 @@ static_assert(font::kSplashStartHint != rb_blitz::assets::kHeaderPreviousIcon);
 static_assert(font::kSplashStartHint != rb_blitz::assets::kHeaderNextIcon);
 struct Entry { uint32_t label, action; };
 thread_local const std::vector<Entry>* g_entries = nullptr;
+thread_local const std::vector<Entry>* g_draw_entries = nullptr;
 
 bool TraceEnabled() {
   static const bool enabled = [] {
@@ -136,6 +137,13 @@ void TraceInlineHelp(const uint8_t* base, uint32_t draw) {
 }  // namespace
 
 namespace rb_blitz::hooks {
+std::optional<uint32_t> DrawingInlineHelpAction(uint32_t label) {
+  if (g_draw_entries)
+    for (const auto& entry : *g_draw_entries)
+      if (entry.label == label) return entry.action;
+  return {};
+}
+
 std::shared_ptr<const ui::input_icon_rows::Catalog> EnsureInputCatalog(
     const input::icons::View& view) {
   static std::mutex mutex;
@@ -219,6 +227,7 @@ REX_HOOK_RAW(sub_824D8FF0) {
 }
 
 REX_HOOK_RAW(sub_824D85E8) {
+  const auto entries = ctx.r3.u32 >= 224 ? Entries(base, ctx.r3.u32 - 224) : std::vector<Entry>{};
   if (TraceEnabled()) {
     static std::mutex mutex;
     static std::unordered_set<uint32_t> seen;
@@ -231,7 +240,6 @@ REX_HOOK_RAW(sub_824D85E8) {
   }
   if (rb_blitz::assets::InputIconsAvailable() && ctx.r3.u32 >= 224) {
     const uint32_t object = ctx.r3.u32 - 224;
-    const auto entries = Entries(base, object);
     if (!entries.empty()) {
       const auto view = rb_blitz::input::icons::CaptureActive(
           rb_blitz::assets::ControllerSchemeRegistry());
@@ -256,7 +264,12 @@ REX_HOOK_RAW(sub_824D85E8) {
       }
     }
   }
+  // Observe labels inside the draw, after InlineHelp assigns each one's final
+  // transform. This also works with retail icons / Controller Layout disabled.
+  const auto* previous = g_draw_entries;
+  g_draw_entries = &entries;
   __imp__sub_824D85E8(ctx, base);
+  g_draw_entries = previous;
 }
 
 REX_HOOK_RAW(sub_822C45A8) {

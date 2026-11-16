@@ -28,6 +28,7 @@ Gestures g_gestures;
 MouseGate g_mouse_gate;
 std::atomic<bool> g_foreground{true};
 std::atomic<bool> g_visible{false};
+std::atomic<bool> g_powerup_ready{false};
 Layout g_layout;
 bool Available() {
   return g_foreground && GameScreenActive() && HostInputFocused() &&
@@ -68,6 +69,7 @@ class Controls final : public rex::ui::ImGuiDialog {
     {
       std::lock_guard lock(g_mutex);
       g_gestures.SetActive(active);
+      g_gestures.SetPowerupAvailable(active && g_powerup_ready);
       if (active && phase == Phase::kDown) g_mouse_gate.Capture();
       g_gestures.Observe({finger.touchID, finger.fingerID, phase, finger.x, finger.y});
     }
@@ -96,6 +98,7 @@ class Controls final : public rex::ui::ImGuiDialog {
       g_layout = layout;
       g_gestures.SetLayout(layout);
       g_gestures.SetActive(active);
+      g_gestures.SetPowerupAvailable(active && g_powerup_ready);
     }
     g_visible = active && layout.pause.width > 0;
   }
@@ -115,6 +118,13 @@ void CancelGameplay() {
 Layout CurrentLayout() { std::lock_guard lock(g_mutex); return g_layout; }
 bool TouchInputActive() { return last_device::Current().using_touch; }
 bool ButtonsEnabled() { return REXCVAR_GET(touch_buttons); }
+void PublishPowerupReady(bool ready) {
+  static std::atomic<bool> observed{false};
+  const bool changed = g_powerup_ready.exchange(ready) != ready;
+  if (!observed.exchange(true) || changed)
+    REXLOG_INFO("touch_hud: native power-up deployable={}", ready);
+}
+bool PowerupReady() { return g_powerup_ready; }
 bool ControlsVisible() { return g_visible && g_foreground && TouchInputActive() && ButtonsEnabled(); }
 std::vector<GameplayEvent> DrainGameplay() {
   std::lock_guard lock(g_mutex);
@@ -139,6 +149,8 @@ Layout CurrentLayout() { return {}; }
 bool ControlsVisible() { return false; }
 bool TouchInputActive() { return false; }
 bool ButtonsEnabled() { return REXCVAR_GET(touch_buttons); }
+void PublishPowerupReady(bool) {}
+bool PowerupReady() { return false; }
 std::unique_ptr<rex::ui::ImGuiDialog> CreateControls(
     rex::ui::ImGuiDrawer*, std::function<rex::ui::Window*()>) { return {}; }
 }

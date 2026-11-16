@@ -15,6 +15,9 @@ Layout CurrentLayout();
 bool ControlsVisible();
 bool TouchInputActive();
 bool ButtonsEnabled();
+// Published by the guest's powerup_can_deploy property setter, not its help timer.
+void PublishPowerupReady(bool ready);
+bool PowerupReady();
 std::unique_ptr<rex::ui::ImGuiDialog> CreateControls(
     rex::ui::ImGuiDrawer* drawer, std::function<rex::ui::Window*()> window);
 }  // namespace rb_blitz::input::touch
