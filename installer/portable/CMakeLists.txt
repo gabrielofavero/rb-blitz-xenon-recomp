@@ -25,7 +25,15 @@ if(WIN32)
         _CRT_SECURE_NO_WARNINGS WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 
+add_executable(rb_blitz_import import_main.cpp)
+if(NOT APPLE)
+    target_link_libraries(rb_blitz_import PRIVATE rb_blitz_game_import_core)
+endif()
+
 if(APPLE)
+    include(ultimate.cmake)
+    target_link_libraries(rb_blitz_import PRIVATE rb_blitz_ultimate_import_core)
+    target_compile_definitions(rb_blitz_import PRIVATE RBBLITZ_ULTIMATE_IMPORT=1)
     # Also prove the actual Finder entry point compiles without building the SDK
     # or requiring a private game dump. This is the same launcher shipped in the app.
     enable_language(OBJCXX)
@@ -33,14 +41,28 @@ if(APPLE)
     set_target_properties(rb_blitz_macos_launcher PROPERTIES
         OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
     target_link_libraries(rb_blitz_macos_launcher PRIVATE
-        rb_blitz_game_import_core "-framework Cocoa")
+        rb_blitz_ultimate_import_core "-framework Cocoa")
 endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    if(APPLE)
+        add_executable(rb_blitz_ultimate_cancel_tests ../tests/ultimate_cancel_tests.cpp)
+        target_link_libraries(rb_blitz_ultimate_cancel_tests PRIVATE rb_blitz_ultimate_import_core)
+        add_test(NAME ultimate_cancel COMMAND rb_blitz_ultimate_cancel_tests)
+    endif()
     add_executable(rb_blitz_portable_import_tests ../tests/portable_import_tests.cpp)
     target_link_libraries(rb_blitz_portable_import_tests PRIVATE rb_blitz_game_import_core)
     target_compile_definitions(rb_blitz_portable_import_tests PRIVATE
         RBBLITZ_ROOT_DIR="${RBBLITZ_ROOT}")
     add_test(NAME portable_import COMMAND rb_blitz_portable_import_tests)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME import_cli COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tests/import_cli_tests.py" $<TARGET_FILE:rb_blitz_import>)
+        if(APPLE)
+            add_test(NAME ultimate_cli COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../tests/ultimate_cli_tests.py" $<TARGET_FILE:rb_blitz_import>)
+        endif()
+    endif()
 endif()

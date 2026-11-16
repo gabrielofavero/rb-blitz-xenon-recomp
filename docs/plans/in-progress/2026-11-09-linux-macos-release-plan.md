@@ -1,6 +1,6 @@
 # Linux and macOS release plan
 
-**Status: in progress, 2026-11-10.** The settings pre-step, Prompt 0 planning inputs, and Prompt 1 shared implementation have Windows build and non-UI test evidence below. No Linux or macOS build, package, installed launch, or gameplay acceptance is claimed by this document. Implement the desktop targets in order: Linux, then macOS. Mobile belongs in a separate plan.
+**Status: in progress, updated 2026-11-16.** The settings pre-step, Prompt 0 planning inputs, and Prompt 1 shared implementation have Windows build and non-UI test evidence below. The owner resumed macOS packaging after the M1 bring-up: the direct builder and audited Apple Silicon development `.app`/`.pkg` are now delivered. Installed launch, security flow and release acceptance remain pending. Linux and Intel Mac gates remain open. Mobile belongs in a separate plan.
 
 ## Goal and release contract
 
@@ -259,6 +259,82 @@ Architecture-specific native audit records are still required before it can run.
 Windows regression builds are unavailable on this Mac; Intel Mac, installed Finder
 launch, unsigned security flow, Ultimate picker/download, guest repair route,
 update preservation, graphics and gameplay acceptance remain open.
+
+**Apple Silicon installer and direct builder, 2026-11-16 [measured].** The owner
+resumed packaging and requested the sibling Zombies project's separate direct
+build/run path. `sh scripts/macos/build.sh` now verifies private `game/` input,
+builds the native Release game, and stages all 1,182 validated controller files.
+`--source` accepts a supported package or extracted folder through the SDK-free
+`rb_blitz_import` CLI; the atomic transaction preserves existing extra files.
+`sh scripts/macos/run.sh` and `out/macos/Run Rock Band Blitz.command` launch this
+local build without installing or entering the app's importer. The builder itself
+does not start the game. The owner's newly downloaded 512px Blitz icon is preserved
+as the Apple source; the Swift generator adds only the rounded border/padding for
+macOS and makes a separate opaque, unmasked square for future iOS use.
+
+The actual bundle audit found two gaps absent from the earlier fixtures:
+`install_name_tool` rejects removing and adding the same rpath in one invocation,
+and signing rejects controller PNGs in `Contents/MacOS`. The packager now retains
+canonical existing rpaths. Authored resources and the SDK-supported Vulkan tree
+live under `Contents/Resources`; the launcher and game resolve bundle resources
+there, while direct builds retain executable-adjacent resources. The native test
+fixtures include an existing `@loader_path` and the corrected resource layout.
+
+`sh installer/macos/build.sh --development` built
+`out/macos/packages/RockBandBlitz-0.1.0-mac-arm64-development.pkg` (65 MiB displayed).
+The app and expanded package contain 1,229 files and seven arm64 Mach-O images.
+Signature, CPU, declared macOS 13.0 minimum, actual loader resolution, content/path
+scans, embedded preparation catalogue, expanded file hashes and modes all passed.
+The only external dependencies are Apple system libraries/frameworks, including
+`/usr/lib/libcurl.4.dylib`. Measured Apple Silicon dependency and Xcode/SDK/compiler
+inputs are recorded in `platform-packaging.json`; other architectures retain
+their pending gates. The package is unsigned and the app is signed ad hoc.
+Release acceptance remains closed. The owner chose to perform installation and
+first-launch testing themselves; no installed app/UI test was run in this pass.
+
+| Date | Machine/target | Command or evidence | Result and limit |
+| --- | --- | --- | --- |
+| 2026-11-16 | M1, native Release | `sh scripts/macos/build.sh`; `out/macos/direct-build-final.log` | Game/importer/controller validator linked; 1,182 controller files staged; local Finder command created. No game launch. |
+| 2026-11-16 | M1, initial base-only app/package | `sh installer/macos/build.sh --development`; `out/macos/installer-package.log`; archived artifacts under `out/macos/packages/previous-base-only/` | Real `.pkg` built and expanded payload matched all 1,229 signed-app files and modes. SHA-256 `df5b852d0942f13d53727f4d4571ef72297ba92e61e5405db630553a8116c151`. Superseded below by the Ultimate-capable build. No installation. |
+| 2026-11-16 | Mac, packaging fixtures | `python3 -m unittest discover -s installer/tests -p '*packaging_tests.py' -v`; `out/macos/installer-tests.log` | 14 tests passed, including native package expansion, relative-rpath retention, and toolchain pin rejection. |
+| 2026-11-16 | Mac, import core/CLI | CTest in `out/build/macos-import`; `out/macos/importer-tests.log` | `portable_import` and `import_cli` passed. CLI cases cover spaces in paths, verification, corrupt source rollback, and local DLC preservation. |
+
+Apple's `iconutil` reported `Invalid Iconset` inside the agent sandbox for a valid
+PNG set; the same conversion and full native packaging succeeded outside that
+sandbox. The normal build script requires no system installation or launch to
+produce its artifacts. Windows regression builds, Intel Mac, clean macOS 13,
+installed Finder launch, unsigned security flow, update preservation and the
+remaining Prompt 4/5 player flows remain unverified.
+
+**Optional Ultimate added, 2026-11-16 [measured].** The owner found the missing
+Ultimate setup choice while testing the initial package. The Cocoa launcher now
+offers the pinned official download, a local ZIP/extracted folder, or Play without
+Ultimate after base import. Skip/success is remembered outside the app; failed or
+canceled first setup remains retryable, and `--ultimate` explicitly reopens the
+choice. The game's Game Version setting selects the installed mod.
+
+The native core reuses the Windows helper's config embedder/parser, release pins,
+ZIP/inflate reader, path validation, SHA-256 and fingerprint code. The download
+uses Apple's system libcurl with HTTPS-only redirects, cancellation and strict
+size/hash checks. Local revisions retain Windows's mismatch-warning policy.
+The existing portable import transaction commits the overlay and restores old
+files on cancellation/failure. The mod's `default.xex` is excluded, and neither
+the mod archive nor its extracted data enters the package manifest. The direct
+builder accepts `--ultimate` and `--ultimate-source ZIP_OR_FOLDER` too.
+
+The real pinned 2.11 download and install passed in
+`out/macos/ultimate-download-check/` against an isolated synthetic base tree;
+both installed payload fingerprints matched. No game was launched. Four native
+CTest suites pass (`ultimate_cancel`, `portable_import`, `import_cli`,
+`ultimate_cli`), covering ZIP/folder import, traversal rejection, corrupt archives,
+base preservation, XEX exclusion, cancellation before download and rollback after
+moving the previous overlay (`out/macos/ultimate-tests.log`). The new Release
+build/package passed the complete app/expanded-payload audit again
+(`out/macos/ultimate-game-build.log`, `out/macos/ultimate-package.log`). The latest
+package SHA-256 is
+`4658702aeaf32e0ce2429a210a730f036243934d9aa2442ea8c419ae3176a5d5`.
+It replaces the base-only package at the usual output path; the old artifact is
+archived. The owner retains manual installation, picker and Ultimate game checks.
 
 ### Prompt 5 — Validate macOS play and publish the multi-platform release
 

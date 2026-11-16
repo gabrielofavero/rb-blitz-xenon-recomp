@@ -21,6 +21,16 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
+**macOS installed-player acceptance (2026-11-16):** the Apple Silicon direct
+builder and development `.app`/`.pkg` now build and pass native package audits.
+The owner is testing installation and first launch. Unsigned first-open behavior,
+updates and clean minimum-OS support remain unverified; Intel has no accepted
+native package. See [the Mac installer guide](../../installer/macos/README.md)
+and [release plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md).
+The macOS pre-game importer now offers optional Ultimate download/local import;
+its headless download, extraction and cancellation checks pass. The owner still
+needs to verify that native choice and picker flow.
+
 **macOS gameplay acceptance remains pending (2026-11-15):** the internal M1
 build boots and startup texture seams/outlines are corrected by SDK patch 0065.
 The synthetic Vulkan fragment-gradient regression passes at 1×/2×/4× and retains

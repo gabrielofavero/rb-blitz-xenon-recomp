@@ -21,6 +21,15 @@ spec.loader.exec_module(package)
 
 
 class MetadataTests(unittest.TestCase):
+    def test_native_toolchain_pin_rejects_another_xcode(self):
+        config = {"xcodeBuildPinPending": False,
+                  "toolchainInputs": {"xcode": "Xcode fixture\nBuild version fixture"}}
+        package.check_toolchain(config, config["toolchainInputs"])
+        with self.assertRaisesRegex(SystemExit, "expected xcode"):
+            package.check_toolchain(config, {"xcode": "another Xcode"})
+        with self.assertRaisesRegex(SystemExit, "record is missing"):
+            package.check_toolchain({"xcodeBuildPinPending": False}, {})
+
     def test_metadata(self):
         subprocess.run([sys.executable, str(ROOT / "installer/tools/check_platform_packaging.py")],
                        check=True, capture_output=True)
@@ -42,8 +51,10 @@ class MetadataTests(unittest.TestCase):
             app = Path(temp)
             macos = app / "Contents/MacOS"
             macos.mkdir(parents=True)
+            resources = app / "Contents/Resources"
+            resources.mkdir()
             raw = (ROOT / "config/graphics_preparation.json").read_bytes().replace(b"\r\n", b"\n")
-            (macos / "graphics-preparation.json").write_bytes(raw)
+            (resources / "graphics-preparation.json").write_bytes(raw)
             (macos / "rb_blitz").write_bytes(b"fixture" + raw)
             package.audit_preparation(app)
             (macos / "rb_blitz").write_bytes(b"stale fixture")
@@ -55,9 +66,11 @@ class MetadataTests(unittest.TestCase):
             app = Path(temp)
             macos = app / "Contents/MacOS"
             macos.mkdir(parents=True)
+            resources = app / "Contents/Resources"
+            resources.mkdir()
             data = json.loads((ROOT / "config/graphics_preparation.json").read_text())
             data["sources"][0]["bytecode"] = "do not ship"
-            (macos / "graphics-preparation.json").write_text(json.dumps(data))
+            (resources / "graphics-preparation.json").write_text(json.dumps(data))
             with self.assertRaisesRegex(SystemExit, "unexpected"):
                 package.audit_preparation(app)
 
@@ -82,6 +95,7 @@ class NativePackagingTests(unittest.TestCase):
             subprocess.run(["xcrun", "clang", str(source), "-o", str(cls.build / name),
                             "-mmacosx-version-min=13.0",
                             "-Wl,-headerpad_max_install_names", "-Wl,-rpath," + str(cls.build),
+                            "-Wl,-rpath,@loader_path",
                             str(cls.build / "librexruntime.dylib")], check=True, capture_output=True)
 
     @classmethod
@@ -99,8 +113,10 @@ class NativePackagingTests(unittest.TestCase):
         for source in self.build.iterdir():
             if source.suffix == ".c":
                 continue
-            relative = ("vulkan/lib/" if source.name in ("libvulkan.1.dylib", "libMoltenVK.dylib") else "") + source.name
-            destination = self.macos / relative
+            if source.name in ("libvulkan.1.dylib", "libMoltenVK.dylib"):
+                destination = self.app / "Contents/Resources/vulkan/lib" / source.name
+            else:
+                destination = self.macos / source.name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
             entries.append({"to": destination.relative_to(self.stage).as_posix()})

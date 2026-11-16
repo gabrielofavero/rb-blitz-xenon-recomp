@@ -396,7 +396,7 @@ bool ZipArchive::ExtractAll(const std::filesystem::path& destination,
     }
     ++extracted;
   }
-  log::Detail(S("extracted ", extracted, " files into ", Narrow(destination.native())));
+  log::Detail(S("extracted ", extracted, " files into ", PosixPath(destination)));
   return true;
 }
 

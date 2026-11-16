@@ -49,6 +49,16 @@ native gameplay is accepted. The system-selected Command Line Tools had
 AppleClang 14.0.3/SDK 13.3, so this pass selected a side-by-side Xcode through
 `DEVELOPER_DIR` instead of changing the machine's global selection.
 
+**Packaging measurement, 2026-11-16:** the same Xcode 26.0.1/17A400, SDK 26.0 and
+AppleClang 17.0.0 inputs built the direct Release target and audited development
+app/package. `installer/config/platform-packaging.json` now pins those packaging
+inputs under `macos.nativeValidation.arm64`; the packager rejects another selected
+Xcode/SDK/compiler. The seven Mach-O images use bundled dependencies and Apple
+system libraries, including system libcurl. This freezes a reproducible local
+packaging route; it does not close installed-player release acceptance or establish
+Intel/clean-minimum-OS support. Evidence: `out/macos/installer-package.log` and
+the sibling package `.audit.json` under `out/macos/packages/`.
+
 ## The set
 
 Measured on the machine the acceptance runs are made on, Windows x86-64

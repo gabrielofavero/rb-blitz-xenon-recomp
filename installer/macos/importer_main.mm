@@ -17,6 +17,8 @@
 #include <unistd.h>
 
 #include "game_import_core.h"
+#include "ultimate_import_core.h"
+#include "platform/bundle_resources.h"
 
 namespace fs = std::filesystem;
 namespace portable = rb_blitz::installer::portable;
@@ -115,15 +117,14 @@ std::string SizeLabel(std::uint64_t bytes) {
   return std::to_string((bytes + 1048575) / 1048576) + " MiB";
 }
 
-bool ImportWithProgress(const rb_blitz::installer::GameSourcePlan& source,
-                        const fs::path& destination,
-                        const fingerprint::GameFingerprint& expected,
+bool WorkWithProgress(NSString* title,
+                        const std::function<bool(const portable::ImportCallbacks&, std::string*)>& work,
                         std::string* error) {
   NSRect bounds = NSMakeRect(0, 0, 460, 138);
   NSWindow* window = [[NSWindow alloc] initWithContentRect:bounds
       styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable)
       backing:NSBackingStoreBuffered defer:NO];
-  [window setTitle:@"Importing Rock Band Blitz"];
+  [window setTitle:title];
   [window center];
 
   NSTextField* detail = [NSTextField labelWithString:@"Preparing game data…"];
@@ -162,8 +163,11 @@ bool ImportWithProgress(const rb_blitz::installer::GameSourcePlan& source,
   callbacks.cancelled = [&] { return cancelled.load(); };
   callbacks.continue_at = [&](portable::ImportPhase) { return !cancelled.load(); };
   std::thread worker([&] {
-    imported = portable::Import(source, destination, expected, kRoles, kOptional,
-                                callbacks, error);
+    try {
+      imported = work(callbacks, error);
+    } catch (const std::exception& exception) {
+      *error = exception.what();
+    }
     done.store(true);
   });
   while (!done.load()) {
@@ -181,7 +185,57 @@ bool ImportWithProgress(const rb_blitz::installer::GameSourcePlan& source,
   return imported;
 }
 
-int LaunchGame(const fs::path& bin, const fs::path& game) {
+bool ImportWithProgress(const rb_blitz::installer::GameSourcePlan& source,
+                        const fs::path& destination,
+                        const fingerprint::GameFingerprint& expected,
+                        std::string* error) {
+  return WorkWithProgress(@"Importing Rock Band Blitz", [&](const auto& callbacks, auto* why) {
+    return portable::Import(source, destination, expected, kRoles, kOptional, callbacks, why);
+  }, error);
+}
+
+void OfferUltimate(const fs::path& game, bool force) {
+  const fs::path choice = game.parent_path() / "ultimate-choice-v1";
+  if (!force && (fs::exists(choice) || portable::HasUltimate(game))) return;
+  const auto config = portable::EmbeddedUltimateConfig();
+  NSAlert* offer = [[NSAlert alloc] init];
+  [offer setMessageText:@"Install Rock Band Blitz Ultimate?"];
+  [offer setInformativeText:@"Ultimate is an optional fan mod. Download it from its official release, or choose a ZIP or extracted folder you already have."];
+  [offer addButtonWithTitle:Text("Download " + config.pins.version)];
+  [offer addButtonWithTitle:@"Choose ZIP or folder"];
+  [offer addButtonWithTitle:@"Play without Ultimate"];
+  const auto answer = [offer runModal];
+  if (answer == NSAlertThirdButtonReturn) {
+    rb_blitz::installer::WriteFileText(choice, "skipped\n", false, nullptr);
+    return;
+  }
+  fs::path source;
+  if (answer == NSAlertSecondButtonReturn) {
+    NSOpenPanel* picker = [NSOpenPanel openPanel];
+    [picker setCanChooseFiles:YES];
+    [picker setCanChooseDirectories:YES];
+    [picker setAllowsMultipleSelection:NO];
+    [picker setMessage:@"Select an Ultimate ZIP archive or extracted Xbox folder."];
+    if ([picker runModal] != NSModalResponseOK) return;
+    const char* selected = [[[picker URL] path] fileSystemRepresentation];
+    if (!selected) return;
+    source = selected;
+  }
+  std::string error, warning;
+  const bool installed = WorkWithProgress(@"Installing Rock Band Blitz Ultimate", [&](const auto& callbacks, auto* why) {
+    return portable::InstallUltimate(source, game, config, callbacks, &warning, why);
+  }, &error);
+  if (!installed) {
+    Alert(NSAlertStyleWarning, "Ultimate was not installed. Your base game is ready to play.\n\n" + error);
+    return;  // Leave the choice pending so next launch can retry.
+  }
+  rb_blitz::installer::WriteFileText(choice, "installed\n", false, nullptr);
+  Alert(NSAlertStyleInformational, "Ultimate is installed. Select Rock Band Blitz Ultimate in the in-game Game Version setting." +
+      (warning.empty() ? "" : "\n\n" + warning));
+}
+
+int LaunchGame(const fs::path& bin, const fs::path& game, bool ultimate) {
+  OfferUltimate(game, ultimate);
   const fs::path executable = bin / "rb_blitz";
   const std::string root_arg = "--game_data_root=" + game.string();
   char* arguments[] = {const_cast<char*>(executable.c_str()),
@@ -205,7 +259,7 @@ int main(int argc, char** argv) {
     }
     fingerprint::GameFingerprint expected;
     std::string error;
-    if (!fingerprint::LoadGameFingerprint(bin / "game-fingerprints.toml", &expected, &error)) {
+    if (!fingerprint::LoadGameFingerprint(rb_blitz::platform::BundleResources(bin) / "game-fingerprints.toml", &expected, &error)) {
       Alert(NSAlertStyleCritical, "The installed game fingerprint record is invalid: " + error);
       return 1;
     }
@@ -213,16 +267,20 @@ int main(int argc, char** argv) {
       Alert(NSAlertStyleCritical, "Cannot recover the previous import: " + error);
       return 1;
     }
-    const bool repair = argc > 1 && std::string_view(argv[1]) == "--repair";
+    bool repair = false, ultimate = false;
+    for (int i = 1; i < argc; ++i) {
+      repair |= std::string_view(argv[i]) == "--repair";
+      ultimate |= std::string_view(argv[i]) == "--ultimate";
+    }
     error.clear();
     const bool valid = portable::VerifyTree(game, expected, kRoles, nullptr, &error);
     if (!valid || repair) {
       if (valid && !Confirm("Choose a supported source to replace the current import. Cancel keeps the current game data."))
-        return LaunchGame(bin, game);
+        return LaunchGame(bin, game, ultimate);
       const SourceType type = ChooseSourceType();
-      if (type == SourceType::kCanceled) return valid ? LaunchGame(bin, game) : 0;
+      if (type == SourceType::kCanceled) return valid ? LaunchGame(bin, game, ultimate) : 0;
       const fs::path selected = PickSource(type);
-      if (selected.empty()) return valid ? LaunchGame(bin, game) : 0;
+      if (selected.empty()) return valid ? LaunchGame(bin, game, ultimate) : 0;
       rb_blitz::installer::GameSourcePlan source;
       error.clear();
       const bool probed = type == SourceType::kFolder
@@ -230,20 +288,20 @@ int main(int argc, char** argv) {
           : portable::ProbePackage(selected, expected, kRoles, kOptional, &source, &error);
       if (!probed) {
         Alert(NSAlertStyleCritical, error);
-        return valid ? LaunchGame(bin, game) : 1;
+        return valid ? LaunchGame(bin, game, ultimate) : 1;
       }
       const std::string preview = "Source: " + source.description +
           "\nExpected game version: " + expected.xex_version +
           "\nRequired space: at least " + SizeLabel(source.PresentBytes()) +
           "\nDestination: " + game.string() + "\n\nImport now?";
-      if (!Confirm(preview)) return valid ? LaunchGame(bin, game) : 0;
+      if (!Confirm(preview)) return valid ? LaunchGame(bin, game, ultimate) : 0;
       error.clear();
       if (!ImportWithProgress(source, game, expected, &error)) {
         Alert(NSAlertStyleCritical, "Game import failed: " + error);
         return valid && portable::VerifyTree(game, expected, kRoles, nullptr, nullptr)
-            ? LaunchGame(bin, game) : 1;
+            ? LaunchGame(bin, game, ultimate) : 1;
       }
     }
-    return LaunchGame(bin, game);
+    return LaunchGame(bin, game, ultimate);
   }
 }

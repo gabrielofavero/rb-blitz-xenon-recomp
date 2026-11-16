@@ -58,6 +58,7 @@
 
 #include <rex/cvar.h>
 #include "assets/texture_override.h"
+#include "platform/bundle_resources.h"
 #include <rex/graphics/compile_trace.h>
 #include "diag/shader_trace.h"
 #include "diag/boot_heartbeat.h"
@@ -427,7 +428,7 @@ class RbBlitzApp : public rex::ReXApp {
     if (rex::cvar::GetFlagByName("enhancements_icon_schemes") == "true") {
       REXLOG_INFO("boot_timing: controller_schemes begin");
       rb_blitz::assets::InstallControllerSchemes(
-          rex::filesystem::GetExecutableFolder() / "assets" / "controller" / "schemes",
+          rb_blitz::platform::BundleResources(rex::filesystem::GetExecutableFolder()) / "assets" / "controller" / "schemes",
           runtime()->user_data_root() / "controller_schemes",
           [this] { PumpStartupWindow(); });
       std::string selected = "retail";
@@ -594,7 +595,7 @@ class RbBlitzApp : public rex::ReXApp {
     rb_blitz::store::InstallAlbumArt();
     // M1: resolve cache/bundled feed before guest launch; only the host worker fetches Pages.
     rb_blitz::messages::Install(runtime()->user_data_root(),
-                                rex::filesystem::GetExecutableFolder());
+        rb_blitz::platform::BundleResources(rex::filesystem::GetExecutableFolder()));
     rb_blitz::messages::InstallUpdateAction([this] {
       return app_context().CallInUIThreadDeferred([this] { window()->RequestClose(); });
     });

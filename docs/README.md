@@ -129,6 +129,7 @@ budget, and the row-text budget — are a skill:
 
 | Document | Status |
 | --- | --- |
+| [`plans/todo/2026-11-15-rexglue-patch-refactoring-plan.md`](plans/todo/2026-11-15-rexglue-patch-refactoring-plan.md) | Planning only: dated SDK patch assessment, mandatory fresh kickoff audit, unused-code retirement, source-equivalent consolidation and replay CI. |
 | [`plans/finished/2026-11-15-desktop-render-settings-plan.md`](plans/finished/2026-11-15-desktop-render-settings-plan.md) | Delivered 2026-11-15: separate Aspect Ratio and Render Scale, legacy migration, bounded automatic recommendation and aspect-correct native-scale M1 gameplay. Release build, nine tests and SDK replay pass; authored settings save/restart remains unverified after the owner stopped launches. |
 | [`plans/todo/2026-10-26-in-game-song-management-plan.md`](plans/todo/2026-10-26-in-game-song-management-plan.md) | Planning only: native My Songs X Manage, shared RhythmVerse entry, per-song hiding and search settings, exact-package deletion, DLC date tracking and default-On Auto-hide Failed Songs; Off preserves current load-guard recovery. |
 | [`plans/todo/2026-10-31-engine-compatibility-closeout-plan.md`](plans/todo/2026-10-31-engine-compatibility-closeout-plan.md) | Planning only: scripted Ultimate acceptance, shader release evidence, compile-trace counts and selective engine knowledge porting. |

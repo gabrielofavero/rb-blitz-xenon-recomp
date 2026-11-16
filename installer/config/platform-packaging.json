@@ -35,7 +35,7 @@
     "xcodeMinimum": "16",
     "xcodeBuildPinPending": true,
     "componentProperties": "installer/macos/components.plist",
-    "controllerAssets": "Rock Band Blitz.app/Contents/MacOS/assets/controller",
+    "controllerAssets": "Rock Band Blitz.app/Contents/Resources/assets/controller",
     "stageManifest": [
       {"fromTemplate": "installer/macos/Info.plist.in", "to": "Rock Band Blitz.app/Contents/Info.plist"},
       {"fromTarget": "rb_blitz_macos_launcher", "to": "Rock Band Blitz.app/Contents/MacOS/rb_blitz_macos_launcher"},
@@ -43,16 +43,16 @@
       {"fromTarget": "rexruntime", "to": "Rock Band Blitz.app/Contents/MacOS/librexruntime.dylib"},
       {"fromTarget": "rexgpu-xenos", "to": "Rock Band Blitz.app/Contents/MacOS/librexgpu-xenos.dylib"},
       {"fromTarget": "TracyClient", "to": "Rock Band Blitz.app/Contents/MacOS/libTracyClient.dylib"},
-      {"from": "config/graphics_preparation.json", "to": "Rock Band Blitz.app/Contents/MacOS/graphics-preparation.json"},
-      {"from": "config/game_fingerprints.toml", "to": "Rock Band Blitz.app/Contents/MacOS/game-fingerprints.toml"},
-      {"from": "assets/messages/feed.json", "to": "Rock Band Blitz.app/Contents/MacOS/assets/messages/feed.json"},
+      {"from": "config/graphics_preparation.json", "to": "Rock Band Blitz.app/Contents/Resources/graphics-preparation.json"},
+      {"from": "config/game_fingerprints.toml", "to": "Rock Band Blitz.app/Contents/Resources/game-fingerprints.toml"},
+      {"from": "assets/messages/feed.json", "to": "Rock Band Blitz.app/Contents/Resources/assets/messages/feed.json"},
       {"fromGenerated": "blitz.icns", "to": "Rock Band Blitz.app/Contents/Resources/blitz.icns"},
       {"from": "LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/LICENSE"},
       {"fromSdkStage": "licenses/cereal-LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/cereal/LICENSE"},
       {"fromSdkStage": "licenses/spirv-cross-LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/spirv-cross/LICENSE"},
-      {"fromSdkStage": "vulkan/lib/libvulkan.1.dylib", "to": "Rock Band Blitz.app/Contents/MacOS/vulkan/lib/libvulkan.1.dylib"},
-      {"fromSdkStage": "vulkan/lib/libMoltenVK.dylib", "to": "Rock Band Blitz.app/Contents/MacOS/vulkan/lib/libMoltenVK.dylib"},
-      {"fromSdkStage": "vulkan/share/vulkan/icd.d/MoltenVK_icd.json", "to": "Rock Band Blitz.app/Contents/MacOS/vulkan/share/vulkan/icd.d/MoltenVK_icd.json"},
+      {"fromSdkStage": "vulkan/lib/libvulkan.1.dylib", "to": "Rock Band Blitz.app/Contents/Resources/vulkan/lib/libvulkan.1.dylib"},
+      {"fromSdkStage": "vulkan/lib/libMoltenVK.dylib", "to": "Rock Band Blitz.app/Contents/Resources/vulkan/lib/libMoltenVK.dylib"},
+      {"fromSdkStage": "vulkan/share/vulkan/icd.d/MoltenVK_icd.json", "to": "Rock Band Blitz.app/Contents/Resources/vulkan/share/vulkan/icd.d/MoltenVK_icd.json"},
       {"from": "rexglue-sdk/thirdparty/stb/stb_image.h", "to": "Rock Band Blitz.app/Contents/Resources/licenses/stb_image.h"},
       {"from": "rexglue-sdk/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/LICENSE"},
       {"from": "rexglue-sdk/thirdparty/crypto/des/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/crypto/des/LICENSE"},
@@ -85,7 +85,18 @@
       {"from": "rexglue-sdk/thirdparty/moltenvk/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/moltenvk/LICENSE"}
     ],
     "nativeDependencyInventoryPending": true,
-    "iconConversionPending": true,
-    "releaseAuditPending": true
+    "iconConversionPending": false,
+    "releaseAuditPending": true,
+    "nativeValidation": {
+      "arm64": {
+        "nativeDependencyInventoryPending": false,
+        "xcodeBuildPinPending": false,
+        "toolchainInputs": {
+          "xcode": "Xcode 26.0.1\nBuild version 17A400",
+          "appleSDK": "26.0",
+          "clang": "Apple clang version 17.0.0 (clang-1700.3.19.1)"
+        }
+      }
+    }
   }
 }

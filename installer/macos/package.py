@@ -52,8 +52,23 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def toolchain_inputs() -> dict[str, str]:
+    return {"xcode": run("xcodebuild", "-version"),
+            "appleSDK": run("xcrun", "--show-sdk-version"),
+            "clang": run("xcrun", "clang", "--version").splitlines()[0]}
+
+
+def check_toolchain(config: dict, actual: dict[str, str]) -> None:
+    expected = config.get("toolchainInputs", {})
+    if not config["xcodeBuildPinPending"] and not expected:
+        fail("native toolchain audit record is missing")
+    for key, value in expected.items():
+        if actual.get(key) != value:
+            fail(f"expected {key} {value!r}; found {actual.get(key)!r}")
+
+
 def create_icon(destination: Path, temporary: Path) -> None:
-    source = ROOT / "assets/icon/blitz.png"
+    source = ROOT / "assets/icon/blitz-macos.png"
     if not source.is_file():
         fail("authored PNG icon is missing")
     iconset = temporary / "RockBandBlitz.iconset"
@@ -139,7 +154,7 @@ def macho_files(app: Path) -> list[Path]:
 def audit_preparation(app: Path) -> None:
     """The recipe catalogue may ship; installed shader bytes and native caches may not."""
     macos = app / "Contents/MacOS"
-    raw = (macos / "graphics-preparation.json").read_bytes().replace(b"\r\n", b"\n")
+    raw = (app / "Contents/Resources/graphics-preparation.json").read_bytes().replace(b"\r\n", b"\n")
     data = json.loads(raw)
     def keys(value: dict, allowed: set[str]) -> None:
         if not isinstance(value, dict) or set(value) - allowed:
@@ -197,14 +212,17 @@ def prepare_binaries(app: Path) -> None:
     libraries = {path.name: path for path in binaries if path.suffix == ".dylib"}
     identities = {value: path for path in binaries for kind, value in load_commands(path)
                   if kind == "LC_ID_DYLIB"}
+    desired_rpaths = ("@loader_path", "@executable_path", "@executable_path/../Resources/vulkan/lib")
     for binary in binaries:
         commands = load_commands(binary)
+        existing_rpaths = {value for kind, value in commands if kind == "LC_RPATH"}
         arguments = []
         for kind, value in commands:
             if kind == "LC_ID_DYLIB":
                 arguments += ["-id", f"@rpath/{binary.name}"]
             elif kind == "LC_RPATH":
-                arguments += ["-delete_rpath", value]
+                if value not in desired_rpaths:
+                    arguments += ["-delete_rpath", value]
             elif kind.endswith("_DYLIB") and not value.startswith(("/usr/lib/", "/System/Library/")):
                 target = identities.get(value)
                 if target is None and value.startswith("@"):
@@ -212,8 +230,9 @@ def prepare_binaries(app: Path) -> None:
                 if target is None:
                     fail(f"unreviewed dependency in {binary.name}: {value}")
                 arguments += ["-change", value, f"@rpath/{target.name}"]
-        for value in ("@loader_path", "@executable_path", "@executable_path/vulkan/lib"):
-            arguments += ["-add_rpath", value]
+        for value in desired_rpaths:
+            if value not in existing_rpaths:
+                arguments += ["-add_rpath", value]
         run("install_name_tool", *arguments, str(binary))
         run("strip", "-S", str(binary))
         run("codesign", "--force", "--sign", "-", "--timestamp=none", str(binary))
@@ -246,8 +265,8 @@ def audit_app(app: Path, stage_root: Path, arch: str, config: dict) -> None:
     required = [macos / "rb_blitz", macos / "rb_blitz_macos_launcher",
              macos / "librexruntime.dylib", macos / "librexgpu-xenos.dylib",
              macos / "libTracyClient.dylib",
-             macos / "vulkan/lib/libvulkan.1.dylib",
-             macos / "vulkan/lib/libMoltenVK.dylib"]
+             app / "Contents/Resources/vulkan/lib/libvulkan.1.dylib",
+             app / "Contents/Resources/vulkan/lib/libMoltenVK.dylib"]
     macho = macho_files(app)
     resolved_macho = {path.resolve() for path in macho}
     if any(binary not in macho for binary in required):
@@ -348,6 +367,8 @@ def main() -> None:
     data = json.loads(CONFIG.read_text(encoding="utf-8"))
     config = data["macos"]
     config.update(config.get("nativeValidation", {}).get(args.arch, {}))
+    inputs = toolchain_inputs()
+    check_toolchain(config, inputs)
     subprocess.run([sys.executable, str(ROOT / "installer/tools/check_platform_packaging.py")], check=True)
     if args.arch not in config["architectures"]:
         fail("architecture is absent from the stage contract")
@@ -366,6 +387,15 @@ def main() -> None:
         prepare_binaries(app)
         audit_preparation(app)
         audit_app(app, stage_root, args.arch, config)
+        inventory = {path.relative_to(stage_root).as_posix(): sha256(path)
+                     for path in sorted(app.rglob("*")) if path.is_file()}
+        report = {"version": version, "architecture": args.arch,
+                  "development": args.development, "releaseAcceptancePending": config["releaseAuditPending"],
+                  "files": inventory, "hostOS": run("sw_vers", "-productVersion"),
+                  "toolchainInputs": inputs,
+                  "nativeDependencies": {
+                      path.relative_to(app).as_posix(): load_commands(path) for path in macho_files(app)}}
+        stage_root.with_suffix(".audit.json").write_text(json.dumps(report, indent=2) + "\n")
         print(f"staged and inspected {app}")
         if args.stage_only:
             return
@@ -388,14 +418,7 @@ def main() -> None:
             "--ownership", "recommended", str(candidate))
         compare_expanded_pkg(candidate, stage_root, temporary, config, version)
         shutil.copyfile(candidate, package)
-        inventory = {path.relative_to(stage_root).as_posix(): sha256(path)
-                     for path in sorted(app.rglob("*")) if path.is_file()}
-        report = {"version": version, "architecture": args.arch,
-                  "development": args.development, "releaseAcceptancePending": config["releaseAuditPending"],
-                  "packageSha256": sha256(package), "files": inventory,
-                  "hostOS": run("sw_vers", "-productVersion"),
-                  "xcode": run("xcodebuild", "-version"),
-                  "appleSDK": run("xcrun", "--show-sdk-version")}
+        report["packageSha256"] = sha256(package)
         package.with_suffix(".audit.json").write_text(json.dumps(report, indent=2) + "\n")
         print(f"{package.name} sha256={sha256(package)}")
 

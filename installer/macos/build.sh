@@ -10,9 +10,35 @@ if [ "$(uname -s)" != Darwin ]; then
 fi
 
 arch=$(uname -m)
-if [ "$#" -ge 2 ] && [ "$1" = --arch ]; then
-  arch=$2
-  shift 2
+direct=false
+source_path=
+ultimate=false
+ultimate_source=
+output=out/macos/packages
+mode=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --direct) direct=true; shift ;;
+    --ultimate) ultimate=true; shift ;;
+    --stage-only|--development) mode=$1; shift ;;
+    --arch|--source|--output|--ultimate-source)
+      test "$#" -ge 2 || { echo "Missing value for $1" >&2; exit 2; }
+      case "$1" in
+        --arch) arch=$2 ;;
+        --source) source_path=$2 ;;
+        --output) output=$2 ;;
+        --ultimate-source) ultimate_source=$2; ultimate=true ;;
+      esac
+      shift 2 ;;
+    --help|-h)
+      echo 'Usage: sh installer/macos/build.sh [--direct | --stage-only | --development] [--source FILE_OR_FOLDER] [--ultimate | --ultimate-source ZIP_OR_FOLDER] [--arch arm64|x86_64] [--output DIR]'
+      exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+if [ "$direct" = true ] && [ -n "$mode" ]; then
+  echo '--direct cannot be combined with --stage-only or --development' >&2
+  exit 2
 fi
 case "$arch" in
   arm64) preset=mac-arm64-release ;;
@@ -36,9 +62,27 @@ python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else "Python 3
 clang=$(xcrun --find clang)
 clangxx=$(xcrun --find clang++)
 sdk=$(xcrun --show-sdk-path)
-if ! test -f game/default.xex; then
-  echo 'Missing supported game/default.xex; extract your own game package before building' >&2
-  exit 1
+# Prepare/verify private build inputs with the same SDK-free importer as the app.
+cmake -S installer/portable -B out/build/macos-import -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$clangxx" \
+  -DCMAKE_OBJCXX_COMPILER="$clangxx" -DCMAKE_OSX_SYSROOT="$sdk" \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_OSX_ARCHITECTURES="$arch"
+cmake --build out/build/macos-import --target rb_blitz_import
+if [ -n "$source_path" ]; then
+  out/build/macos-import/rb_blitz_import --fingerprints config/game_fingerprints.toml \
+    --destination game --source "$source_path"
+else
+  out/build/macos-import/rb_blitz_import --fingerprints config/game_fingerprints.toml \
+    --destination game --verify
+fi
+if [ "$ultimate" = true ]; then
+  if [ -n "$ultimate_source" ]; then
+    out/build/macos-import/rb_blitz_import --fingerprints config/game_fingerprints.toml \
+      --destination game --verify --ultimate-source "$ultimate_source"
+  else
+    out/build/macos-import/rb_blitz_import --fingerprints config/game_fingerprints.toml \
+      --destination game --verify --ultimate
+  fi
 fi
 if ! test -f rexglue-sdk/CMakeLists.txt; then
   git submodule update --init --recursive
@@ -52,7 +96,9 @@ echo "Clang: $(xcrun clang --version | head -n 1)"
 if command -v xcodebuild >/dev/null 2>&1; then xcodebuild -version || true; fi
 
 cmake --preset "$preset" -DCMAKE_C_COMPILER="$clang" -DCMAKE_CXX_COMPILER="$clangxx" \
-  -DCMAKE_OBJC_COMPILER="$clang" -DCMAKE_OBJCXX_COMPILER="$clangxx" -DCMAKE_OSX_SYSROOT="$sdk"
+  -DCMAKE_OBJC_COMPILER="$clang" -DCMAKE_OBJCXX_COMPILER="$clangxx" -DCMAKE_OSX_SYSROOT="$sdk" \
+  -U CPM_DIRECTORY -U CPM_FILE -U CPM_VERSION \
+  -DCPM_SOURCE_CACHE="$CPM_SOURCE_CACHE"
 if [ ! -f generated/default/sources.cmake ]; then
   mkdir -p out/macos
   log=out/macos/codegen-bootstrap.log
@@ -69,4 +115,9 @@ if [ ! -f generated/default/sources.cmake ]; then
   cmake --preset "$preset"
 fi
 cmake --build --preset "$preset" --target rb_blitz rb_blitz_macos_launcher rb_blitz_controller_schemes
-python3 installer/macos/package.py --arch "$arch" --build-dir "out/build/$preset" "$@"
+if [ "$direct" = true ]; then
+  python3 scripts/macos/stage_direct.py --build-dir "out/build/$preset"
+else
+  if [ -n "$mode" ]; then set -- "$mode"; else set --; fi
+  python3 installer/macos/package.py --arch "$arch" --build-dir "out/build/$preset" --output "$output" "$@"
+fi

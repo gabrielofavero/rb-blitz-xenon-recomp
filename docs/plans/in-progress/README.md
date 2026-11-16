@@ -16,8 +16,10 @@ open for beta testers with matching displays.
 
 The [Linux and macOS release plan](2026-11-09-linux-macos-release-plan.md) started on 2026-11-10.
 Its settings pre-step is implemented and passes the Windows release build and focused host tests.
-Linux/macOS builds, guest menu and renderer observations, and all packaging/play gates remain open;
-Prompt 0 has not started.
+The native M1 build and audited Apple Silicon development app/installer are delivered,
+with a separate direct build/run route (2026-11-16). The owner is testing installation
+and first launch. Linux, Intel Mac, clean-machine security/update behavior and release
+acceptance remain open; the plan records each prompt's evidence and limits.
 
 Song Load Guard **finished on 2026-10-26** and moved to
 [`2026-10-13-load-guard.md`](../finished/2026-10-13-load-guard.md).

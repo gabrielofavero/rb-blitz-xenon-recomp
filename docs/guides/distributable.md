@@ -9,7 +9,8 @@ whose exit code is the answer - and the one thing it found.
 This audit currently covers the Windows PE/Inno payload. The Linux ELF and macOS
 Mach-O/package manifests and their negative checks are defined in the
 [platform expansion plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md);
-no native package has passed that audit or release acceptance yet.
+the Apple Silicon development app/package passed its native audit on 2026-11-16.
+Linux and Intel packages and macOS installed-player release acceptance remain pending.
 
 Windows payloads also carry `Collect Diagnostics.cmd` and
 `collect_diagnostics.ps1`. They create a local, bounded report ZIP from the
@@ -23,8 +24,13 @@ signatures. It deliberately refuses `.deb`/`.rpm` generation until the native
 dependency inventory and full payload audit can be completed on Linux.
 The macOS source recipe in `installer/macos/package.py` similarly stages an
 explicit app tree, checks Mach-O architecture and linked paths, and defines a
-post-`pkgbuild` payload comparison. Its release gate remains closed until the
-native dependency, toolchain, icon and full audit checks are completed on Macs.
+post-`pkgbuild` payload comparison. The real Apple Silicon app and expanded package
+now pass these checks: 1,229 files, seven arm64 Mach-O images, relative library
+resolution, macOS 13.0 binary minimum, signatures, content/path scans, and matched
+file hashes/modes. Resources use `Contents/Resources`, with code in
+`Contents/MacOS` and the SDK-supported Vulkan resource tree. Packaging inputs are
+pinned per architecture; `--development` makes a local unsigned installer while
+the installed-player release gate remains closed. No retail source is staged.
 `installer/config/platform-packaging.json` now records the proposed Linux and
 macOS stage paths and the pinned nFPM archive; `python
 installer/tools/check_platform_packaging.py` validates their metadata and
@@ -33,7 +39,8 @@ inputs are completed.
 Prompt 1's portable importer is source shared with the Windows helper, not a
 new packaged binary. The native store adapter now requires libcurl 7.62+ at
 build time; its shipped versus system dependency choice remains a native
-inventory gate before either package manifest can be accepted.
+inventory gate on Linux. The measured Apple Silicon package uses Apple's
+`/usr/lib/libcurl.4.dylib`; other native dependencies are bundled or OS frameworks.
 
 ```
 .\scripts\setup\audit_distributable.ps1

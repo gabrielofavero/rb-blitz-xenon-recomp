@@ -473,10 +473,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(rb_blitz_linux_launcher PRIVATE rb_blitz_game_import_core)
     set_target_properties(rb_blitz PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
 elseif(APPLE)
+    include(installer/portable/ultimate.cmake)
     add_executable(rb_blitz_macos_launcher installer/macos/importer_main.mm)
     set_target_properties(rb_blitz_macos_launcher PROPERTIES
         OBJCXX_STANDARD 20 OBJCXX_STANDARD_REQUIRED ON)
-    target_link_libraries(rb_blitz_macos_launcher PRIVATE rb_blitz_game_import_core "-framework Cocoa")
+    target_link_libraries(rb_blitz_macos_launcher PRIVATE rb_blitz_ultimate_import_core "-framework Cocoa")
     set_target_properties(rb_blitz PROPERTIES
         BUILD_RPATH "@executable_path;@loader_path"
         INSTALL_RPATH "@executable_path;@loader_path")

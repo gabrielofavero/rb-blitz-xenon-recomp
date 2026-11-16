@@ -5,8 +5,9 @@ the log excerpt that blocker entries in [bringup-log.md](../history/bringup-log.
 
 Everything below is PowerShell, run from the repository root unless noted.
 
-The Linux and macOS presets are under bring-up and have no accepted native build
-yet. Their target-specific bootstrap toolchain records are selected by CMake;
+The Linux and macOS releases remain under bring-up. The internal Apple Silicon
+build links on native hardware; Linux and Intel Mac acceptance remain pending.
+Their target-specific bootstrap toolchain records are selected by CMake;
 the required native configure/codegen/link sequence and blockers are in the
 [platform expansion plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md).
 The Windows commands below remain the current supported build route.
@@ -19,6 +20,19 @@ the Linux package command can run.
 The corresponding Mac build and app/package staging entry point is
 [`installer/macos/README.md`](../../installer/macos/README.md). It uses the Mac
 presets and must run on native Mac hardware; no macOS release build is accepted yet.
+
+The Mac direct builder is `sh scripts/macos/build.sh`, followed by
+`sh scripts/macos/run.sh`. Supply `--source '/path/to/package-or-folder'` on the
+first build to import and verify private `game/` input without navigating the
+importer. Later builds verify that input and stage the validated controller art.
+The builder also creates `out/macos/Run Rock Band Blitz.command`; it never starts
+the game. Select Xcode through `DEVELOPER_DIR` and put CMake, Ninja, and Python
+3.11+ on `PATH`. The same build pipeline feeds
+`sh installer/macos/build.sh --development` for a local unsigned installer.
+Add `--ultimate` to the direct builder for the pinned official Ultimate download,
+or `--ultimate-source '/path/to/ZIP-or-folder'` for local import. The packaged
+app offers the same optional mod setup after base import; its data never ships
+inside the installer. Select Ultimate with the in-game Game Version setting.
 
 On 2026-11-15, the internal `mac-arm64-release` build linked on an M1 with
 Xcode 26.0.1 (17A400), AppleClang 17.0.0, SDK 26.0, CMake 3.31.6, and Ninja
