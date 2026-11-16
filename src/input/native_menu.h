@@ -11,6 +11,8 @@
 #include <string_view>
 #include <vector>
 
+struct PPCContext;
+
 namespace rb_blitz::input {
 
 struct MenuPoint { float x = 0, y = 0; };
@@ -91,6 +93,9 @@ struct MenuHintTarget {
   MenuBounds bounds;
   uint16_t button = 0;
 };
+// Guest-thread draw bridge: the footer supplies its own full UILabel pointer
+// and native action after assigning the label's final world transform.
+void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t action);
 inline uint16_t HitMenuHint(MenuPoint point, const std::vector<MenuHintTarget>& targets,
                             uint32_t screen, uint32_t focus, uint32_t frame) {
   // Reverse draw order gives a later drawn footer priority if labels overlap.

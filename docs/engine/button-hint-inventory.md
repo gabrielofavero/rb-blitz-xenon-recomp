@@ -45,7 +45,13 @@ are targets. Transparent, cleared and retired legends cannot retain a target.
 Clicks outside these rectangles, right-click Back, wheel scrolling and gameplay
 touch gestures retain their existing paths. `native_mouse` host tests cover
 block boundaries, gaps, stale geometry and delivery of every supported action.
-Live mouse and on-device touch acceptance are still pending.
+The owner's iOS check found the first implementation did not respond to footer
+taps. Capture now runs directly from `InlineHelp::DrawShowing` using its own
+full label pointers and action records after it assigns the final transforms;
+it no longer relies on matching nested UILabel draw receivers. The host suite
+also checks the guest's parallel action/label arrays. Bounded target and miss
+records in the normal log expose the geometry on device. Live mouse and
+on-device touch acceptance of this correction are still pending.
 
 ## iOS touch HUD (2026-11-16)
 

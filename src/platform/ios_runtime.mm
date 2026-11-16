@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "platform/ios_runtime.h"
+#include "platform/ios_auto_pause.h"
 #include <stdexcept>
 #include <condition_variable>
 #include <mutex>
@@ -14,6 +15,7 @@ namespace {
 std::mutex g_activation_mutex;
 std::condition_variable g_activation_changed;
 bool g_active = true;
+IOSAutoPause g_auto_pause;
 void LogView(UIView* view, unsigned depth, unsigned& remaining) {
   if (!view || !remaining || depth > 6) return;
   --remaining;
@@ -35,8 +37,19 @@ void SetIOSApplicationActive(bool active) {
   {
     std::lock_guard lock(g_activation_mutex);
     g_active = active;
+    g_auto_pause.SetActive(active);
   }
   if (active) g_activation_changed.notify_all();
+}
+void SetIOSInSong(bool in_song) {
+  std::lock_guard lock(g_activation_mutex);
+  g_auto_pause.SetInSong(in_song);
+}
+bool ConsumeIOSAutoPause() {
+  std::lock_guard lock(g_activation_mutex);
+  const bool pending = g_auto_pause.Consume();
+  if (pending) REXLOG_INFO("ios_lifecycle: requesting native gameplay pause after inactivity");
+  return pending;
 }
 void WaitForIOSForeground() {
   std::unique_lock lock(g_activation_mutex);

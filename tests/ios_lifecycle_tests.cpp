@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
+#include "platform/ios_auto_pause.h"
 #include <rex/chrono/clock.h>
 #include <rex/ui/vulkan/queue_lifecycle.h>
 #include <atomic>
@@ -20,6 +21,45 @@ bool PumpForeground() {
 }
 }
 int main() {
+  BeginCase("iOS inactivity queues one pause, consumed only after returning");
+  rb_blitz::platform::IOSAutoPause pause;
+  pause.SetInSong(true);
+  CHECK_FALSE(pause.Consume());
+  pause.SetActive(false);
+  CHECK_FALSE(pause.Consume());
+  pause.SetActive(false);
+  pause.SetActive(true);
+  CHECK_TRUE(pause.Consume());
+  CHECK_FALSE(pause.Consume());
+  pause.SetActive(true);
+  CHECK_FALSE(pause.Consume());
+
+  BeginCase("menu inactivity and a retired song never pause the next song");
+  pause.SetInSong(false);
+  pause.SetActive(false);
+  pause.SetActive(true);
+  CHECK_FALSE(pause.Consume());
+  pause.SetInSong(true);
+  pause.SetActive(false);
+  pause.SetActive(true);
+  pause.SetInSong(false);
+  pause.SetInSong(true);
+  CHECK_FALSE(pause.Consume());
+
+  BeginCase("a song entering during suspension pauses when gameplay becomes available");
+  pause.SetInSong(false);
+  pause.SetActive(false);
+  pause.SetInSong(true);
+  CHECK_FALSE(pause.Consume());
+  pause.SetActive(true);
+  CHECK_TRUE(pause.Consume());
+  for (unsigned i = 0; i < 8; ++i) {
+    pause.SetActive(false);
+    pause.SetActive(true);
+    CHECK_TRUE(pause.Consume());
+    CHECK_FALSE(pause.Consume());
+  }
+
   BeginCase("suspending waits for an in-flight queue call before draining the GPU");
   QueueLifecycle gate;
   auto operation = std::make_unique<QueueLifecycle::Permit>(&gate);

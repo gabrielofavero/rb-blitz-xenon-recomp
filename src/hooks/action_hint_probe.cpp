@@ -16,6 +16,8 @@
 #include "hooks/action_hint_probe.h"
 #include "assets/texture_override.h"
 #include "input/input_icons.h"
+#include "input/inline_help.h"
+#include "input/native_menu.h"
 #include "profile/input_rows.h"
 #include "ui/input_font_scene.h"
 #include "ui/input_icon_rows.h"
@@ -33,9 +35,8 @@ constexpr std::array<const char*, font::kHintCount> kTargets{
     "right_shoulder", "", "", "x", ""};
 static_assert(font::kSplashStartHint != rb_blitz::assets::kHeaderPreviousIcon);
 static_assert(font::kSplashStartHint != rb_blitz::assets::kHeaderNextIcon);
-struct Entry { uint32_t label, action; };
+using Entry = rb_blitz::input::InlineHelpEntry;
 thread_local const std::vector<Entry>* g_entries = nullptr;
-thread_local const std::vector<Entry>* g_draw_entries = nullptr;
 
 bool TraceEnabled() {
   static const bool enabled = [] {
@@ -44,27 +45,12 @@ bool TraceEnabled() {
   }();
   return enabled;
 }
-bool GuestRange(uint32_t address, uint32_t size) {
-  return address >= 0x40000000 && uint64_t(address) + size <= 0x7F000000;
-}
 uint32_t Be32(const uint8_t* base, uint32_t address) {
   return rex::memory::load_and_swap<uint32_t>(base + address);
 }
 std::vector<Entry> Entries(const uint8_t* base, uint32_t object) {
-  if (!GuestRange(object, 100)) return {};
-  const uint32_t begin = Be32(base, object + 80);
-  const uint32_t end = Be32(base, object + 84);
-  const uint32_t labels = Be32(base, object + 92);
-  const uint32_t labels_end = Be32(base, object + 96);
-  if (end < begin || end - begin > 15 * 28 || (end - begin) % 28 ||
-      labels_end < labels || labels_end - labels != (end - begin) / 7 ||
-      !GuestRange(begin, end - begin) || !GuestRange(labels, labels_end - labels)) return {};
-  std::vector<Entry> result;
-  for (uint32_t i = 0; i < (end - begin) / 28; ++i) {
-    const uint32_t label = Be32(base, labels + i * 4);
-    if (GuestRange(label, 4)) result.push_back({label, Be32(base, begin + i * 28)});
-  }
-  return result;
+  return rb_blitz::input::ReadInlineHelpEntries(object,
+      [base](uint32_t address) { return Be32(base, address); });
 }
 std::string Signature(const rb_blitz::input::icons::View& view) {
   return std::to_string(view.revision) + ":" + std::to_string(view.device_revision) +
@@ -137,13 +123,6 @@ void TraceInlineHelp(const uint8_t* base, uint32_t draw) {
 }  // namespace
 
 namespace rb_blitz::hooks {
-std::optional<uint32_t> DrawingInlineHelpAction(uint32_t label) {
-  if (g_draw_entries)
-    for (const auto& entry : *g_draw_entries)
-      if (entry.label == label) return entry.action;
-  return {};
-}
-
 std::shared_ptr<const ui::input_icon_rows::Catalog> EnsureInputCatalog(
     const input::icons::View& view) {
   static std::mutex mutex;
@@ -264,12 +243,12 @@ REX_HOOK_RAW(sub_824D85E8) {
       }
     }
   }
-  // Observe labels inside the draw, after InlineHelp assigns each one's final
-  // transform. This also works with retail icons / Controller Layout disabled.
-  const auto* previous = g_draw_entries;
-  g_draw_entries = &entries;
+  // InlineHelp sets every label's world transform before drawing it. Capture
+  // those labels directly after the draw instead of depending on a nested
+  // UILabel callback (which may receive an adjusted base-class this pointer).
   __imp__sub_824D85E8(ctx, base);
-  g_draw_entries = previous;
+  for (const auto& entry : entries)
+    rb_blitz::input::CaptureMenuHint(ctx, base, entry.label, entry.action);
 }
 
 REX_HOOK_RAW(sub_822C45A8) {

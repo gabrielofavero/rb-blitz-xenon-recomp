@@ -1538,6 +1538,50 @@ bool HideResultsCurrency(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
+bool AddIOSAutoPause(std::vector<ui::dtb::Node>* roots, std::string* why) {
+  if (!roots) return false;
+  auto staged = *roots;
+  auto* enter = PanelMethod(&staged, "game_screen", "enter");
+  auto* exit = PanelMethod(&staged, "game_screen", "exit");
+  if (!enter || !exit || !PanelMethod(&staged, "game_screen", "check_pause")) {
+    if (why) *why = "game_screen lifecycle or native pause method changed";
+    return false;
+  }
+  const auto sym = [](const char* name) { return Node::Symbol(name); };
+  const auto activity = [&](const char* path) {
+    return Node::Command({sym("write_file"), Node::String(path), Node::Int(0)});
+  };
+  enter->kids.push_back(activity("rbbz-ios/game/enter"));
+  exit->kids.push_back(activity("rbbz-ios/game/exit"));
+  // Defer consumption until the native game can pause (including song intro).
+  // check_pause guards is_paused itself, so inactivity can never resume a song.
+  const auto game = Node::Command({sym("game_panel"), sym("get_game")});
+  const auto poll = Node::Command({sym("if"), Node::Command({sym("&&"),
+      Node::Command({game, sym("can_pause")}),
+      Node::Command({sym("file_exists"), Node::String("rbbz-ios/pause-request")})}),
+      Node::Command({sym("game_screen"), sym("check_pause")})});
+  bool found_panel = false;
+  if (auto* existing = PanelMethod(&staged, "game_panel", "poll")) {
+    existing->kids.push_back(poll);
+    found_panel = true;
+  } else {
+    for (auto& root : staged) {
+      if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 &&
+          root.kids[0].text == "new" && root.kids[2].text == "game_panel") {
+        root.kids.push_back(Node::Array({sym("poll"), poll}));
+        found_panel = true;
+        break;
+      }
+    }
+  }
+  if (!found_panel) {
+    if (why) *why = "game_panel definition changed";
+    return false;
+  }
+  *roots = std::move(staged);
+  return true;
+}
+
 bool AddTouchHudAnimation(std::vector<ui::dtb::Node>* roots, std::string* why) {
   auto* enter = PanelMethod(roots, "game_screen", "enter");
   if (!enter || enter->kids.size() < 2) {
@@ -2306,7 +2350,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   }
 #if defined(RB_BLITZ_IOS)
   if (!edit("ui/gen/game.dtb", [&](auto& roots) {
-        return AddTouchHudAnimation(&roots, error);
+        return AddTouchHudAnimation(&roots, error) && AddIOSAutoPause(&roots, error);
       })) return false;
   {
     std::vector<uint8_t> source;

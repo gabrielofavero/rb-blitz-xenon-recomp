@@ -758,7 +758,7 @@ target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
 
 if(BUILD_TESTING)
     add_executable(rb_blitz_ios_lifecycle_tests tests/ios_lifecycle_tests.cpp)
-    target_include_directories(rb_blitz_ios_lifecycle_tests PRIVATE tests)
+    target_include_directories(rb_blitz_ios_lifecycle_tests PRIVATE src tests)
     target_link_libraries(rb_blitz_ios_lifecycle_tests PRIVATE rex::core)
     add_test(NAME ios_lifecycle COMMAND rb_blitz_ios_lifecycle_tests)
     set_tests_properties(ios_lifecycle PROPERTIES TIMEOUT 10)

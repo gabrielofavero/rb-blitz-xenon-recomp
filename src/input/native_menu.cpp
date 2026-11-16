@@ -431,10 +431,21 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     if (const auto button = HitMenuHint(event->point, hint_targets,
                                         current_screen, current_focus, frame_number)) {
       scroll_follow.Reset();
+      REXLOG_INFO("native_mouse: legend click screen={} point={:.4f},{:.4f} button={:04X}",
+                  current_screen_name, event->point.x, event->point.y, button);
       std::lock_guard lock(mutex);
       if (queue.enabled()) queue.PulseButton(button);
       return;
     }
+    // One line per press, bounded to the first 24 misses in a screen. This is
+    // useful on devices where we cannot attach a debugger to inspect hit areas.
+    static thread_local uint32_t traced_screen = 0;
+    static thread_local unsigned misses = 0;
+    if (traced_screen != current_screen) { traced_screen = current_screen; misses = 0; }
+    if (event->point.y > .8f && misses++ < 24)
+      REXLOG_INFO("native_mouse: legend miss screen={} point={:.4f},{:.4f} targets={} drawn_frame={} poll_frame={}",
+                  current_screen_name, event->point.x, event->point.y, hint_targets.size(),
+                  hint_targets.empty() ? 0 : hint_targets.back().frame, frame_number);
   }
   // Header clicks precede the focused list's hit test and never become A.
   // Only a label actually drawn in the last frame can receive the click.
@@ -763,18 +774,35 @@ void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (const auto bounds = ProjectLabel(ctx, base, label))
     header_geometry[index] = {current_screen, current_focus, frame_number, *bounds};
 }
-void CaptureInlineHelp(PPCContext& ctx, uint8_t* base, uint32_t label) {
+void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t action) {
   if (!menu_available) return;
-  const auto action = hooks::DrawingInlineHelpAction(label);
-  const uint16_t button = action ? MenuHintButton(*action) : 0;
+  const uint16_t button = MenuHintButton(action);
   if (!button) return;
   const auto bounds = ProjectLabel(ctx, base, label);
-  if (!bounds) return;
+  if (!bounds) {
+    static thread_local std::unordered_map<uint32_t, uint32_t> rejected;
+    if (rejected.size() > 128) rejected.clear();
+    if (rejected[label] != current_screen) {
+      rejected[label] = current_screen;
+      REXLOG_INFO("native_mouse: legend has no bounds screen={} action={} label={:08X} rect={},{},{},{} camera={:08X}",
+                  current_screen_name, action, label, F32(base, label + 144),
+                  F32(base, label + 148), F32(base, label + 152), F32(base, label + 156),
+                  U32(base, 0x8284A108));
+    }
+    return;
+  }
   // Keep only the current draw's geometry; a hidden or cleared legend must stop
   // being clickable on the next poll even when its guest label is reused.
   if (!hint_targets.empty() && hint_targets.back().frame != frame_number)
     hint_targets.clear();
   hint_targets.push_back({current_screen, current_focus, frame_number, *bounds, button});
+  static thread_local std::unordered_map<uint32_t, uint32_t> traced;
+  if (traced.size() > 128) traced.clear();
+  if (traced[label] != current_screen) {
+    traced[label] = current_screen;
+    REXLOG_INFO("native_mouse: legend target screen={} action={} label={:08X} bounds={:.4f},{:.4f},{:.4f},{:.4f}",
+                current_screen_name, action, label, bounds->left, bounds->top, bounds->right, bounds->bottom);
+  }
 }
 void UpdateCalibrationSideLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   // These two UILabels flank the metronome. Their scene font is redirected to
@@ -947,7 +975,6 @@ REX_HOOK_RAW(sub_824BC668) {
 #endif
   rb_blitz::input::UpdateCalibrationSideLabel(ctx, base, label);
   __imp__sub_824BC668(ctx, base);
-  rb_blitz::input::CaptureInlineHelp(ctx, base, label);
   rb_blitz::input::CaptureHeader(ctx, base, label);
 }
 REX_HOOK_RAW(sub_824E0900) {

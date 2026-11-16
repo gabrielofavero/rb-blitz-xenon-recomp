@@ -1,11 +1,39 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
 #include "input/native_menu.h"
+#include "input/inline_help.h"
 #include "input/pad_packet.h"
+#include <unordered_map>
 using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("guest footer records preserve full labels and their native actions");
+  constexpr uint32_t footer = 0x40001000, actions = 0x40002000, labels = 0x40003000;
+  std::unordered_map<uint32_t, uint32_t> words{
+      {footer + 80, actions}, {footer + 84, actions + 4 * 28},
+      {footer + 92, labels}, {footer + 96, labels + 4 * 4},
+      {actions, 1}, {actions + 28, 2}, {actions + 56, 4}, {actions + 84, 3},
+      {labels, 0x40100100}, {labels + 4, 0x40100200},
+      {labels + 8, 0x40100300}, {labels + 12, 0x40100400}};
+  const auto read = [&words](uint32_t address) { return words.at(address); };
+  const auto entries = ReadInlineHelpEntries(footer, read);
+  CHECK_EQ(entries.size(), 4);
+  for (size_t i = 0; i < entries.size(); ++i) {
+    CHECK_EQ(entries[i].label, 0x40100100 + i * 0x100);
+    CHECK_EQ(entries[i].action, read(actions + uint32_t(i) * 28));
+  }
+  CHECK_EQ(MenuHintButton(entries.at(1).action), 0x2000); // Back uses its own record
+  CHECK_EQ(MenuHintButton(entries.at(2).action), 0x10);   // Search is Start
+  words[footer + 96] += 4;
+  CHECK_TRUE(ReadInlineHelpEntries(footer, read).empty()); // inconsistent parallel arrays
+  words[footer + 96] -= 4;
+  words[labels + 4] = 0;
+  CHECK_EQ(ReadInlineHelpEntries(footer, read).size(), 3); // never dereference an invalid label
+  words[footer + 84] = actions - 28;
+  CHECK_TRUE(ReadInlineHelpEntries(footer, read).empty());
+  CHECK_TRUE(ReadInlineHelpEntries(0, read).empty()); // reject before touching guest memory
+
   BeginCase("footer clicks and touch presses hit only visible legend blocks in the current context");
   const std::vector<MenuHintTarget> hints{
       {1, 2, 10, {.1f, .85f, .3f, .95f}, MenuHintButton(1)},

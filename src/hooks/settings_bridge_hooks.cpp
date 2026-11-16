@@ -40,6 +40,9 @@
 #include "ui/notifications.h"
 #include "graphics/preparation_loading.h"
 #include "loading/crash_recovery.h"
+#if defined(RB_BLITZ_IOS)
+#include "platform/ios_runtime.h"
+#endif
 
 #include <algorithm>
 #include <charconv>
@@ -866,6 +869,12 @@ void RunHotApplyDiagnostic() {
 
 bool TakeExists(PPCContext& ctx, uint8_t* base) {
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+#if defined(RB_BLITZ_IOS)
+  if (path == "rbbz-ios/pause-request") {
+    WriteResultCell(base, ctx.r3.u32, ::rb_blitz::platform::ConsumeIOSAutoPause() ? 1u : 0u);
+    return true;
+  }
+#endif
   // Read the GPU provider's completed ticket on this guest thread, where the
   // settings service and ledger are owned. No GPU thread mutates either one.
   if (const auto progress = ::rb_blitz::assets::LatestAppliedControllerScheme()) {
@@ -1161,6 +1170,13 @@ bool TakeRead(PPCContext& ctx, uint8_t* base) {
 
 bool TakeWrite(PPCContext& ctx, uint8_t* base) {
   const std::string path = ArgumentString(base, ctx, ctx.r4.u32, 0);
+#if defined(RB_BLITZ_IOS)
+  if (path == "rbbz-ios/game/enter" || path == "rbbz-ios/game/exit") {
+    ::rb_blitz::platform::SetIOSInSong(path == "rbbz-ios/game/enter");
+    WriteResultCell(base, ctx.r3.u32, 0);
+    return true;
+  }
+#endif
   if (::rb_blitz::messages::HandleUpdateWrite(path)) {
     WriteResultCell(base, ctx.r3.u32, 0);
     return true;

@@ -20,6 +20,25 @@ The old screenshot detector, hover aligner, relative-motion stepper and their
 configuration flags have been removed. `enhancements_native_mouse` was an unused
 placeholder; R6 uses `mouse_ui_nav` as its single switch.
 
+## iOS inactivity pause
+
+On iOS, losing scene activation freezes guest time and latches a pause request
+for an entered `game_screen`. The iOS-only `game.dtb` edit records screen
+enter/exit through the builtin bridge and checks the request from `game_panel`'s
+authored `poll`. Consumption waits for foreground activation and native
+`can_pause`; the script then calls the existing `game_screen check_pause`.
+That method guards `is_paused` and opens the title's pause panel. Returning to
+the app never resumes the song automatically. Exiting the screen clears any
+unconsumed request. This applies to every input method on iOS, independently
+of Touch Buttons, and does not change desktop focus behavior.
+
+The lifecycle thread only updates mutex-protected host state in
+`platform/ios_runtime.mm`; it never calls guest code. `ios_lifecycle` tests cover
+duplicate notifications, repeated switches, menu inactivity, song retirement
+and entering a song while inactive. `menu_payload` checks the authored route
+and preservation of the existing callbacks. Device interruption testing remains
+necessary.
+
 ## Retail engine path
 
 The addresses below refer to the supported retail executable. Hooks live in

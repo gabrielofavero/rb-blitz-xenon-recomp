@@ -58,6 +58,8 @@ bool BypassAutomaticUnlockError(std::vector<ui::dtb::Node>* roots, std::string* 
 bool AddGraphicsLoadingGate(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Initialize the touch power-up label and start both guest button animations.
 bool AddTouchHudAnimation(std::vector<ui::dtb::Node>* roots, std::string* why);
+// Deliver iOS inactivity to the native pause method from the game panel's poll.
+bool AddIOSAutoPause(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Applied the same way, for the main menu's downloadable-content row: with R7 on the row *is*
 // the library refresh (`TapNativeDiscovery`), so the label it draws has to say so. Built into the
 // locale record here rather than left to the in-flight menu_filter relabel, which cannot reach a

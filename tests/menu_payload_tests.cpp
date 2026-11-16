@@ -1672,6 +1672,45 @@ void TestLoadedMenuRefresh() {
   }
 }
 
+void TestIOSAutoPause() {
+  using rb_blitz::settings::AddIOSAutoPause;
+  using rb_blitz::ui::dtb::Node;
+  BeginCase("iOS lifecycle preserves guest callbacks and uses the guarded native pause action");
+  const auto sym = [](const char* name) { return Node::Symbol(name); };
+  const auto original_poll = Node::Command({sym("original_poll")});
+  std::vector<Node> roots{
+      Node::Command({sym("new"), sym("GamePanel"), sym("game_panel"),
+          Node::Array({sym("poll"), original_poll})}),
+      Node::Command({sym("new"), sym("GameScreen"), sym("game_screen"),
+          Node::Array({sym("enter"), Node::Command({sym("original_enter")})}),
+          Node::Array({sym("exit"), Node::Command({sym("original_exit")})}),
+          Node::Array({sym("check_pause"), Node::Command({sym("native_pause_guard")})})})};
+  std::string why;
+  const auto before = roots;
+  CHECK_TRUE(AddIOSAutoPause(&roots, &why));
+  const auto* enter = header_test::Method(roots, "game_screen", "enter");
+  const auto* exit = header_test::Method(roots, "game_screen", "exit");
+  const auto* poll = header_test::Method(roots, "game_panel", "poll");
+  CHECK_EQ(enter->kids.size(), size_t(3));
+  CHECK_EQ(exit->kids.size(), size_t(3));
+  CheckStrEq(enter->kids[1].kids[0].text, "original_enter");
+  CheckStrEq(exit->kids[1].kids[0].text, "original_exit");
+  CheckStrEq(poll->kids[1].kids[0].text, "original_poll");
+  CheckStrEq(enter->kids.back().kids[1].text, "rbbz-ios/game/enter");
+  CheckStrEq(exit->kids.back().kids[1].text, "rbbz-ios/game/exit");
+  const auto& request = poll->kids.back();
+  CheckStrEq(request.kids[1].kids[1].kids[1].text, "can_pause");
+  CheckStrEq(request.kids[1].kids[2].kids[1].text, "rbbz-ios/pause-request");
+  CheckStrEq(request.kids[2].kids[1].text, "check_pause");
+  CheckStrEq(header_test::Method(roots, "game_screen", "check_pause")->kids[1].kids[0].text,
+             "native_pause_guard");
+  roots = before;
+  roots[1].kids.pop_back(); // Unknown guest pause contract must leave the record intact.
+  const auto incompatible = rb_blitz::ui::dtb::Compile(roots);
+  CHECK_FALSE(AddIOSAutoPause(&roots, &why));
+  CHECK_TRUE(rb_blitz::ui::dtb::Compile(roots) == incompatible);
+}
+
 int main(int argc, char** argv) {
   if (argc == 4 && std::string(argv[1]) == "check-touch-hud") {
     namespace font = rb_blitz::ui::input_font;
@@ -1766,6 +1805,10 @@ int main(int argc, char** argv) {
       CheckStrEq(label.kids[2].text, "rbbz_touch_powerup");
       CheckStrEq(enter->kids.back().kids[0].kids[2].text, "touch_powerup.anim");
     }
+    CHECK_TRUE(rb_blitz::settings::AddIOSAutoPause(&roots, &why));
+    CHECK_TRUE(header_test::Method(roots, "game_panel", "poll") != nullptr);
+    const auto* exit = header_test::Method(roots, "game_screen", "exit");
+    CHECK_TRUE(exit && exit->kids.back().kids[1].text == "rbbz-ios/game/exit");
     const auto compiled = dtb::Compile(roots, header);
     CHECK_TRUE(dtb::Parse(compiled.data(), compiled.size(), &roots, &header, &why));
     return Finish();
@@ -2311,6 +2354,7 @@ int main(int argc, char** argv) {
     return CheckInstalledHeaderRecords(argv[2], argv[3], true);
   }
   TestHeaderAnimations();
+  TestIOSAutoPause();
   TestHeaderVisibility();
   TestHeaderRuntimeRefresh();
   TestCurrencyVisibility();
