@@ -52,7 +52,8 @@ bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* s
                      std::string* error);
 // iOS touch buttons are authored into the installed guest HUD, using its prompt art
 // and PropAnim. Call before PrepareHudHints; no retail bytes are packaged here.
-bool PrepareTouchHud(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+bool PrepareTouchHud(const std::vector<uint8_t>& source, const std::vector<uint8_t>& icons,
+                     std::vector<uint8_t>* scene,
                      std::string* error);
 bool PreparePowerupSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                           std::string* error);

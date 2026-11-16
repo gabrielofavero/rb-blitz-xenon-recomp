@@ -362,6 +362,7 @@ def write_info(app: Path, bundle_id: str, version: str, minimum: str, mode: str 
             "UIDeviceFamily": [1, 2], "UIRequiresFullScreen": True,
             "UIFileSharingEnabled": True, "LSSupportsOpeningDocumentsInPlace": True,
             "UIRequiredDeviceCapabilities": ["arm64", "metal"],
+            "NSMotionUsageDescription": "Rapid shakes deploy your ready power-up when Shake to Deploy is on.",
             "UISupportedInterfaceOrientations": ["UIInterfaceOrientationLandscapeLeft",
                                                    "UIInterfaceOrientationLandscapeRight"],
             "UIViewControllerBasedStatusBarAppearance": False, "UIStatusBarHidden": True,

@@ -275,28 +275,30 @@ void TestTouchButtonsRoundTrip() {
   Service service(paths, release);
   service.Boot(nullptr, PathEntry{}, nullptr);
   service.SetCapabilities(CapabilitySnapshot{});
-  constexpr auto id = SettingId::kTouchButtons;
-  const auto* descriptor = service.DescriptorFor(id);
-  CHECK_TRUE(descriptor && descriptor->availability != Availability::kHidden);
-  CHECK_TRUE(descriptor && descriptor->strategy == ApplicationStrategy::kHot);
-  CHECK_TRUE(service.EffectiveValue(id).boolean);
-  CHECK_TRUE(CvarForSetting(id) == "touch_buttons");
-  CHECK_TRUE(schema::IdForToken("controller.touch_buttons") == id);
-  for (const bool enabled : {false, true}) {
-    const auto txn = service.BeginEdit(service.revision());
-    CHECK_TRUE(service.Set(txn, id, BoolV(enabled), service.capability_revision()).ok);
-    const auto result = service.Commit(txn);
-    CHECK_TRUE(result.status == CommitStatus::kSaved);
-    CHECK_FALSE(result.restart_required);
-    Service reloaded(paths, release);
-    reloaded.Boot(nullptr, PathEntry{}, nullptr);
-    CHECK_EQ(reloaded.EffectiveValue(id).boolean, enabled);
-  }
-  for (const auto platform : {schema::HostPlatform::kWindows, schema::HostPlatform::kMacOS,
-                             schema::HostPlatform::kLinux}) {
-    const auto rows = schema::BuildDescriptors(CapabilitySnapshot{}, schema::SettingsForRelease(platform, "test"));
-    const auto found = std::find_if(rows.begin(), rows.end(), [](const auto& row) { return row.id == id; });
-    CHECK_TRUE(found != rows.end() && found->availability == Availability::kHidden);
+  for (const auto id : {SettingId::kTouchButtons, SettingId::kTouchShakeDeploy}) {
+    const auto* descriptor = service.DescriptorFor(id);
+    CHECK_TRUE(descriptor && descriptor->availability != Availability::kHidden);
+    CHECK_TRUE(descriptor && descriptor->strategy == ApplicationStrategy::kHot);
+    CHECK_TRUE(service.EffectiveValue(id).boolean);
+    const auto cvar = id == SettingId::kTouchButtons ? "touch_buttons" : "touch_shake_deploy";
+    CHECK_TRUE(CvarForSetting(id) == cvar);
+    CHECK_TRUE(schema::IdForToken(std::string("controller.") + cvar) == id);
+    for (const bool enabled : {false, true}) {
+      const auto txn = service.BeginEdit(service.revision());
+      CHECK_TRUE(service.Set(txn, id, BoolV(enabled), service.capability_revision()).ok);
+      const auto result = service.Commit(txn);
+      CHECK_TRUE(result.status == CommitStatus::kSaved);
+      CHECK_FALSE(result.restart_required);
+      Service reloaded(paths, release);
+      reloaded.Boot(nullptr, PathEntry{}, nullptr);
+      CHECK_EQ(reloaded.EffectiveValue(id).boolean, enabled);
+    }
+    for (const auto platform : {schema::HostPlatform::kWindows, schema::HostPlatform::kMacOS,
+                               schema::HostPlatform::kLinux}) {
+      const auto rows = schema::BuildDescriptors(CapabilitySnapshot{}, schema::SettingsForRelease(platform, "test"));
+      const auto found = std::find_if(rows.begin(), rows.end(), [id](const auto& row) { return row.id == id; });
+      CHECK_TRUE(found != rows.end() && found->availability == Availability::kHidden);
+    }
   }
 }
 

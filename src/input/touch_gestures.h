@@ -51,6 +51,9 @@ class Gestures {
   void SetLayout(Layout layout);
   void SetActive(bool active);
   void SetPowerupAvailable(bool available);
+  // Projected lane icon, independent of the optional top-left buttons.
+  void SetLanePowerup(Rect rect);
+  void DeployPowerup();
   void Cancel();
   void Observe(const FingerEvent& event);
   std::vector<GameplayEvent> DrainGameplay();
@@ -61,6 +64,7 @@ class Gestures {
     float x, y, travel = 0;
     uint64_t token = 0;
     bool pause = false, powerup = false, moved = false, swiped = false;
+    Rect button;
   };
   void Emit(Action action);
   uint64_t next_token_ = 0;
@@ -69,9 +73,22 @@ class Gestures {
   bool active_ = false;
   bool pause_requested_ = false;
   bool powerup_available_ = false;
+  Rect lane_powerup_;
   std::map<std::pair<uint64_t, uint64_t>, Finger> fingers_;
   std::array<uint8_t, profile::gameplay_remap::kActionCount> pending_{};
   std::array<uint8_t, profile::gameplay_remap::kActionCount> held_polls_{};
+};
+
+// Acceleration includes gravity, in m/s^2. Requires three strong alternating
+// impulses within 450 ms; a single bump or slow tilt never counts as a shake.
+class ShakeDetector {
+ public:
+  bool Observe(uint64_t timestamp_ns, float x, float y, float z);
+  void Reset();
+ private:
+  std::array<float, 3> gravity_{}, impulse_{};
+  uint64_t last_ = 0, started_ = 0, peak_ = 0, cooldown_ = 0;
+  unsigned impulses_ = 0;
 };
 
 // Only SDL's touch-generated mouse stream is swallowed. Its release remains

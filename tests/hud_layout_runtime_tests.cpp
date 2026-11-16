@@ -147,6 +147,9 @@ uint32_t BootRenderWidth() { return width; }
 uint32_t BootRenderHeight() { return height; }
 }
 #if defined(RB_BLITZ_IOS)
+namespace rb_blitz::input {
+void CaptureTouchPowerup(PPCContext&, uint8_t*, uint32_t) {}
+}
 namespace rb_blitz::input::touch {
 Layout CurrentLayout() { return touch_layout; }
 bool TouchInputActive() { return using_touch; }
@@ -569,6 +572,30 @@ int main() {
   call.r3.u32 = provider; call.r4.u32 = property; call.r5.u32 = node;
   sub_823FF258(call, memory);
   CHECK_TRUE(powerup_ready); // unrelated providers cannot hide the control
+
+  BeginCase("touch artwork follows all six equipped power-ups and rejects unknown selections");
+  Word(provider + 32, Text("powerups_state.ep"));
+  const auto selected = Text("active_powerup");
+  const std::array<const char*, 7> powerups{
+      "autoplay", "grenade", "jackpot", "overdrive", "plasma", "ripple", "none"};
+  const std::array<const char*, 6> icons{
+      "touch_autoplay.grp", "touch_grenade.grp", "touch_jackpot.grp",
+      "touch_overdrive.grp", "touch_plasma.grp", "touch_ripple.grp"};
+  Word(node + 4, 5); // DataNode symbol, as published by the native manager
+  for (size_t selection = 0; selection < powerups.size(); ++selection) {
+    Word(node, Text(powerups[selection]));
+    call.r3.u32 = provider; call.r4.u32 = selected; call.r5.u32 = node;
+    sub_823FF258(call, memory);
+    for (size_t i = 0; i < icons.size(); ++i) {
+      const Shape shape{icons[i], 0x82024C4C, -0x108, -1};
+      const auto icon = Make(unsigned(i + 1), shape, 0);
+      ObjectView(icon - 64, icon + 0x108);
+      call.r3.u32 = icon - 64; call.r4.u32 = 0xCAFEBABE;
+      const auto before_draw = draw_calls;
+      sub_82226CD8(call, memory);
+      CHECK_EQ(draw_calls, before_draw + (selection == i ? 1 : 0));
+    }
+  }
 
   BeginCase("only touch bypasses delayed reminder work and retains the helper's song clock");
   call.r3.u32 = provider; call.f1.f64 = 12.5;

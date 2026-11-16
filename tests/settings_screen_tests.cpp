@@ -4547,7 +4547,7 @@ void TestControllerLayoutCatalogPage() {
       "settings_controls_interface", "settings_controls_gameplay"};
   CHECK_TRUE(PanelRowSymbols("settings_controls_devices_panel") == devices);
   CHECK_TRUE(PanelRowSymbols("settings_controls_devices_pause_panel") == devices);
-  CHECK_TRUE(PageRows("settings_touch_panel") == std::vector<std::string>{"settings_touch_buttons"});
+  CHECK_TRUE(PageRows("settings_touch_panel") == std::vector<std::string>({"settings_touch_buttons", "settings_touch_shake_deploy"}));
   CHECK_TRUE(PageRows("settings_touch_pause_panel") == PageRows("settings_touch_panel"));
   CHECK_TRUE(PageRows("settings_controls_pause_panel") ==
              PageRows("settings_controls_panel"));
@@ -4594,6 +4594,7 @@ void TestControllerLayoutCatalogPage() {
   ConfigureMenu(MenuConfiguration{});
   CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 3u);
   configuration.hidden.insert("controller.touch_buttons");
+  configuration.hidden.insert("controller.touch_shake_deploy");
   ConfigureMenu(configuration);
   CHECK_TRUE(PageRows("settings_controls_panel") ==
              std::vector<std::string>({"calibration", "settings_controls_devices"}));

@@ -189,6 +189,76 @@ int main() {
   CHECK_EQ(events.size(), size_t(1));
   CHECK_TRUE(events[0].kind == GameplayKind::kPress); // charging cannot cancel held notes
 
+  BeginCase("lane icon deploys without striking a note and retains its original tap bounds");
+  g = Ready();
+  g.SetPowerupAvailable(true);
+  g.SetLanePowerup({400, 330, 74, 64});
+  Event(g, Phase::kDown, .5f, .9f);
+  g.SetLanePowerup({500, 330, 74, 64}); // native icon can move during the tap
+  Event(g, Phase::kUp, .5f, .9f);
+  events = g.DrainGameplay();
+  CHECK_EQ(events.size(), size_t(2));
+  CHECK_TRUE(events[0].action == Action::kPowerup);
+  CHECK_TRUE(events[1].action == Action::kPowerup);
+  CHECK_TRUE(Empty(g.Sample()));
+  g.SetLanePowerup({400, 330, 74, 64});
+  Event(g, Phase::kDown, .5f, .9f);
+  Event(g, Phase::kMove, .6f, .9f);
+  Event(g, Phase::kUp, .5f, .9f);
+  CHECK_TRUE(g.DrainGameplay().empty());
+  g.SetActive(false);
+  g.SetActive(true);
+  g.DrainGameplay();
+  Tap(g, .5f, .9f);
+  CHECK_TRUE(Held(g.Sample(), Action::kSecondNote)); // cancelled target is gone
+
+  BeginCase("motion uses the same readiness, pause, and active gameplay gates as taps");
+  g = Ready();
+  g.DeployPowerup();
+  CHECK_TRUE(g.DrainGameplay().empty());
+  g.SetPowerupAvailable(true);
+  g.DeployPowerup();
+  events = g.DrainGameplay();
+  CHECK_EQ(events.size(), size_t(2));
+  CHECK_TRUE(events[0].action == Action::kPowerup);
+  Tap(g, px, py);
+  g.DrainGameplay();
+  g.DeployPowerup();
+  CHECK_TRUE(g.DrainGameplay().empty());
+
+  BeginCase("shake requires rapid strong reversals; ordinary movement and a bump do not deploy");
+  ShakeDetector shake;
+  uint64_t now = 1'000'000'000;
+  auto acceleration = [&](float x, float y = 9.80665f, float z = 0) {
+    now += 50'000'000;
+    return shake.Observe(now, x, y, z);
+  };
+  CHECK_FALSE(acceleration(0));
+  for (int i = 0; i < 30; ++i) CHECK_FALSE(acceleration(float(i % 3) - 1));
+  CHECK_FALSE(acceleration(25)); // one bump, then settles
+  for (int i = 0; i < 15; ++i) CHECK_FALSE(acceleration(0));
+  CHECK_FALSE(acceleration(25));
+  CHECK_FALSE(acceleration(-25));
+  CHECK_TRUE(acceleration(25));
+  for (int i = 0; i < 12; ++i) CHECK_FALSE(acceleration(i % 2 ? -25 : 25));
+  shake.Reset();
+  CHECK_FALSE(acceleration(0));
+  for (int i = 0; i < 3; ++i) {
+    now += 500'000'000;
+    CHECK_FALSE(acceleration(i % 2 ? -25 : 25)); // slow movements cannot accumulate
+  }
+  shake.Reset();
+  CHECK_FALSE(acceleration(0, 0, -9.80665f)); // same shake held in another orientation
+  CHECK_FALSE(acceleration(0, 0, 16));
+  CHECK_FALSE(acceleration(0, 0, -35));
+  CHECK_TRUE(acceleration(0, 0, 16));
+  shake.Reset();
+  CHECK_FALSE(acceleration(0));
+  CHECK_FALSE(acceleration(25));
+  CHECK_FALSE(acceleration(-25));
+  CHECK_FALSE(acceleration(std::numeric_limits<float>::quiet_NaN()));
+  CHECK_FALSE(acceleration(25)); // invalid sample discards partially recognized motion
+
   BeginCase("the former top-right pause position is ordinary gameplay; dragging off pause cancels");
   g = Ready();
   Tap(g, .9f, .08f);

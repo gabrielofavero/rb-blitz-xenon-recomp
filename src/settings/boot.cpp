@@ -683,7 +683,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
           SettingId::kHideMainMenu, SettingId::kHiddenMainMenu, SettingId::kVsync,
           SettingId::kFiltering, SettingId::kResolution, SettingId::kAntiAliasing,
           SettingId::kDisplay, SettingId::kSettingsLabels, SettingId::kSettingsLabelSize, SettingId::kHideAchievements,
-          SettingId::kBackgroundMusicNavigation, SettingId::kMusicPlayer, SettingId::kTouchButtons}) {
+          SettingId::kBackgroundMusicNavigation, SettingId::kMusicPlayer, SettingId::kTouchButtons, SettingId::kTouchShakeDeploy}) {
       ApplyRow(id, /*defer_unregistered=*/true);
     }
   }

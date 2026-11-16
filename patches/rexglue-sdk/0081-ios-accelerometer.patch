@@ -1,0 +1,17 @@
+diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
+--- a/thirdparty/CMakeLists.txt
++++ b/thirdparty/CMakeLists.txt
+@@ -286,7 +286,12 @@ endif()
+ endif()
+ set(SDL_RENDER OFF CACHE BOOL "" FORCE)
+ set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
+-set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
++if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    # The title's touch controls use the device accelerometer for deliberate shakes.
++    set(SDL_SENSOR ON CACHE BOOL "" FORCE)
++else()
++    set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
++endif()
+ set(SDL_POWER OFF CACHE BOOL "" FORCE)
+ set(SDL_FILESYSTEM OFF CACHE BOOL "" FORCE)
+ set(SDL_LOCALE ON CACHE BOOL "" FORCE)

@@ -123,6 +123,8 @@ std::string_view CvarForSetting(SettingId id) {
       return "settings_help_size";
     case SettingId::kTouchButtons:
       return "touch_buttons";
+    case SettingId::kTouchShakeDeploy:
+      return "touch_shake_deploy";
     case SettingId::kSettingsLabels:
       // The caption overlay's own switch. The definition lives in the game's own translation unit
       // (src/ui/help_overlay.cpp), not in the SDK, so the write is the ordinary config-rank one and

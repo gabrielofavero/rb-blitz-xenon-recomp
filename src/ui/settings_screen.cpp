@@ -771,12 +771,14 @@ std::vector<PanelSpec> AllPanels() {
       SubmenuRow("settings_controls_devices", "settings_controls_devices_screen",
                  "Controller & Keyboard", "Controller art, presets, and menu and gameplay bindings."),
       SubmenuRow("settings_controls_touch", "settings_touch_screen", "Touch",
-                 "Choose which buttons and hints appear while using touch.")
+                 "Choose touch buttons and shake controls.")
   }});
   out.push_back(PanelSpec{"settings_touch_panel", "settings_touch_screen",
                           "settings_controls_screen", MenuPanels(), {
       BoolRow("settings_touch_buttons", "controller.touch_buttons", "Touch Buttons",
-              "Show the pause and power-up buttons while using touch. Applies immediately.")
+              "Show the pause and power-up buttons while using touch. Applies immediately."),
+      BoolRow("settings_touch_shake_deploy", "controller.touch_shake_deploy", "Shake to Deploy",
+              "Rapidly shake your device to deploy a ready power-up. Applies immediately.")
   }});
   out.push_back(PanelSpec{"settings_controls_devices_panel", "settings_controls_devices_screen",
                           "settings_controls_screen", MenuPanels(), {

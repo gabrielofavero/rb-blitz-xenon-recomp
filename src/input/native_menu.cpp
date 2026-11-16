@@ -636,6 +636,23 @@ uint32_t SceneMesh(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* nam
   return it->second;
 }
 
+void CaptureTouchPowerup(PPCContext& ctx, uint8_t* base, uint32_t dir) {
+#if defined(RB_BLITZ_IOS)
+  if (!GameScreenActive() || !touch::PowerupReady() || !touch::TouchInputActive()) return;
+  if (ObjectName(base, ObjectBase(base, dir)) != "powerup_icon") return;
+  const auto mesh = SceneMesh(ctx, base, dir, "powerup_icon.mesh");
+  if (!mesh) return;
+  const auto bounds = ProjectMesh(ctx, base, mesh);
+  if (!bounds) return;
+  // WorldToScreen returns normalized guest coordinates. Retain only a fresh
+  // visible icon; no guest object pointer leaves this draw call.
+  const float left = std::max(0.f, bounds->left), top = std::max(0.f, bounds->top);
+  const float right = std::min(1.f, bounds->right), bottom = std::min(1.f, bounds->bottom);
+  if (right > left && bottom > top)
+    touch::PublishLanePowerup({left, top, right - left, bottom - top});
+#endif
+}
+
 namespace {
 std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   if (current_screen_name != "controller_config_screen" &&

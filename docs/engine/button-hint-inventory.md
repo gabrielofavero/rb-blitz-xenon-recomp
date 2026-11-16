@@ -71,8 +71,12 @@ No retail art is checked into the project.
 
 The pause circle is dark translucent gray, with a pale blue-white symbol.
 Pause starts immediately inside the safe left margin; no authored blank slot
-precedes it. A second copied guest group owns the native X label and circle,
-with its own power-up pulse animation and the original `buttons.milo` font.
+precedes it. A second guest group uses the equipped power-up's icon and its own pulse
+animation. The six icon textures (`autoplay`, `grenade`, `jackpot`, `overdrive`,
+`plasma` and `ripple`) are copied from the installed
+`track/gen/powerup_icon.milo_xbox`; the live `active_powerup` symbol on
+`powerups_state.ep` selects the matching child group. Controller and keyboard
+reminders retain their native button glyphs.
 It appears as soon as `Hmx::Object::SetProperty` at `823FF258` publishes
 `powerup_can_deploy` on `powerups_state.ep`, including thresholds below a full
 meter. A tap dispatches the native Power-up action, without a note or swipe.
@@ -85,13 +89,31 @@ keyboard, and mouse input restore the original reminder flow and placement and
 hide both touch controls. An idle connected controller does not steal touch.
 The HUD transform hook and hit tests share one safe-area layout.
 
+The shiny power-up icon below the lane is also tappable when ready. Its native
+`powerup.grp` draw projects `powerup_icon.mesh` through the current camera; only
+normalized screen bounds leave the draw, and targets expire after 100 ms.
+Both tap targets dispatch the same native Power-up press/release pair and do
+not strike notes. Dragging off a target cancels its tap. Hiding Touch Buttons
+removes their hit areas while preserving the lane target.
+
 Help & Options → Controls now contains Calibration, Controller & Keyboard,
 and Touch. Controller & Keyboard contains Layout, Controller Presets, Menu
-Bindings, and Gameplay Bindings. On iOS, Touch contains `Touch Buttons: On/Off`;
+Bindings, and Gameplay Bindings. On iOS, Touch contains `Touch Buttons: On/Off` and `Shake to Deploy: On/Off`;
 `controller.touch_buttons` defaults to On, persists in the settings file, and
 applies immediately. Off hides both buttons during touch play while
 preserving touch input. Desktop releases omit the empty Touch branch. Both
 settings contexts carry the hierarchy and their corresponding Back routes.
+
+`controller.touch_shake_deploy` also defaults to On, persists, and applies
+immediately. SDL's iOS CoreMotion accelerometer feeds a gravity-filtered
+recognizer requiring three alternating impulses above 18 m/s² within 450 ms,
+at least 40 ms apart, followed by a one-second cooldown. Slow tilts and isolated
+bumps do not deploy. Samples are gated by foreground, focus, active gameplay,
+touch as the active device, modal/capture state, readiness, and the setting.
+Pause and cancellation discard partial shakes. SDK patch 0081 enables the
+sensor subsystem for iOS. Host checks cover deliberate shakes, ordinary motion,
+all six icon selections, lane taps, and settings persistence; device acceptance
+of appearance and physical shake sensitivity remains pending.
 
 Generated-record checks, touch gesture checks, input-source checks, and settings
 tests cover these routes. The owner verified the first pause render and then

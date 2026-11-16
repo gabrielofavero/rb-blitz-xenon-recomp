@@ -330,6 +330,10 @@ std::vector<SchemaRow> BuildTable() {
                           "controller_schemes"),
                      {"controller", "scheme"}, "", "Controller Layout",
                      "Choose controller icons and preset art. Each selection applies immediately."));
+  rows.push_back(Row(Make(SettingId::kTouchShakeDeploy, Category::kController, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"controller", "touch_shake_deploy"}, "touch", "Shake to Deploy",
+                     "Rapidly shake your device to deploy a ready power-up. Applies immediately."));
   rows.push_back(Row(Make(SettingId::kTouchButtons, Category::kController, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"controller", "touch_buttons"}, "touch", "Touch Buttons",
@@ -577,6 +581,8 @@ constexpr StrategyEntry kStrategies[] = {
      "and button-sheet replacement (docs/settings/status.md, Layout selector)."},
     {SettingId::kTouchButtons, ApplicationStrategy::kHot,
      "Guest HUD draw and placement hooks read touch_buttons each frame; no scene reload is needed."},
+    {SettingId::kTouchShakeDeploy, ApplicationStrategy::kHot,
+     "The accelerometer event handler reads touch_shake_deploy for every sample."},
     // Gameplay (Ultimate provider)
     {SettingId::kPrecisionMode, ApplicationStrategy::kRestart, ""},
     {SettingId::kDisableRandomWiggles, ApplicationStrategy::kRestart, ""},
@@ -719,7 +725,8 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
   if (platform != HostPlatform::kIOS) {
     RowRule touch;
     touch.hidden = true;
-    release.rules.emplace(SettingId::kTouchButtons, std::move(touch));
+    release.rules.emplace(SettingId::kTouchButtons, touch);
+    release.rules.emplace(SettingId::kTouchShakeDeploy, std::move(touch));
   }
   if (platform == HostPlatform::kLinux || platform == HostPlatform::kMacOS ||
       platform == HostPlatform::kIOS) {

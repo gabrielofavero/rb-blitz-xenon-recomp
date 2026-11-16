@@ -37,11 +37,19 @@ void Gestures::SetActive(bool active) {
   active_ = active;
 }
 void Gestures::SetPowerupAvailable(bool available) { powerup_available_ = available; }
+void Gestures::SetLanePowerup(Rect rect) { lane_powerup_ = rect; }
+void Gestures::DeployPowerup() {
+  if (!active_ || pause_requested_ || !powerup_available_ || gameplay_.size() >= 254) return;
+  const auto token = ++next_token_;
+  gameplay_.push_back({GameplayKind::kPress, token, Action::kPowerup});
+  gameplay_.push_back({GameplayKind::kRelease, token, Action::kPowerup});
+}
 void Gestures::Cancel() {
   gameplay_.clear();
   gameplay_.push_back({GameplayKind::kCancel});
   active_ = false;
   pause_requested_ = false;
+  lane_powerup_ = {};
   fingers_.clear();
   pending_.fill(0);
   held_polls_.fill(0);
@@ -68,9 +76,11 @@ void Gestures::Observe(const FingerEvent& event) {
   const float x = event.x * layout_.width, y = event.y * layout_.height;
   if (event.phase == Phase::kDown) {
     if (fingers_.size() >= 10 || event.x < 0 || event.x > 1 || event.y < 0 || event.y > 1) return;
+    const Rect button = layout_.powerup.Contains(x, y) ? layout_.powerup : lane_powerup_;
     const auto [it, inserted] = fingers_.try_emplace(key,
         Finger{x, y, 0, ++next_token_, layout_.pause.Contains(x, y),
-               powerup_available_ && layout_.powerup.Contains(x, y)});
+               powerup_available_ && button.Contains(x, y), false, false,
+               layout_.pause.Contains(x, y) ? layout_.pause : button});
     if (inserted && !it->second.pause && !it->second.powerup) {
       const auto action = x < layout_.width * .5f ? Action::kFirstNote : Action::kSecondNote;
       Emit(action);
@@ -84,12 +94,11 @@ void Gestures::Observe(const FingerEvent& event) {
   const float dx = x - finger.x, dy = y - finger.y;
   finger.travel = std::max(finger.travel, std::hypot(dx, dy));
   if (finger.pause || finger.powerup) {
-    const auto& rect = finger.pause ? layout_.pause : layout_.powerup;
+    const auto& rect = finger.button;
     finger.moved |= !rect.Contains(x, y) || finger.travel > kTapSlop;
     if (event.phase == Phase::kUp) {
       const bool pause = finger.pause && !finger.moved;
       const bool powerup = finger.powerup && !finger.moved && powerup_available_;
-      const auto token = finger.token;
       fingers_.erase(it);
       if (pause) {
         // Pause owns this frame. Other fingers must not leave notes queued for resume.
@@ -99,8 +108,7 @@ void Gestures::Observe(const FingerEvent& event) {
         pause_requested_ = true;
       } else if (powerup) {
         // Use the same native action boundary as a controller's Power-up.
-        gameplay_.push_back({GameplayKind::kPress, token, Action::kPowerup});
-        gameplay_.push_back({GameplayKind::kRelease, token, Action::kPowerup});
+        DeployPowerup();
       }
     }
     return;
@@ -136,6 +144,41 @@ Actions Gestures::Sample() {
     }
   }
   return sample;
+}
+void ShakeDetector::Reset() { *this = {}; }
+bool ShakeDetector::Observe(uint64_t now, float x, float y, float z) {
+  const std::array<float, 3> sample{x, y, z};
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) { Reset(); return false; }
+  if (!last_ || now <= last_ || now - last_ > 250'000'000) {
+    Reset(); gravity_ = sample; last_ = now; return false;
+  }
+  const float dt = float(now - last_) / 1e9f;
+  last_ = now;
+  std::array<float, 3> linear;
+  float magnitude2 = 0;
+  // A time-based low pass removes gravity at any device orientation.
+  const float alpha = dt / (.3f + dt);
+  for (size_t axis = 0; axis < 3; ++axis) {
+    gravity_[axis] += alpha * (sample[axis] - gravity_[axis]);
+    linear[axis] = sample[axis] - gravity_[axis];
+    magnitude2 += linear[axis] * linear[axis];
+  }
+  if (now < cooldown_) return false;
+  if (impulses_ && now - started_ > 450'000'000) impulses_ = 0;
+  if (magnitude2 < 18.f * 18.f) return false;
+  if (impulses_) {
+    if (now - peak_ < 40'000'000) return false;
+    float dot = 0;
+    for (size_t axis = 0; axis < 3; ++axis) dot += impulse_[axis] * linear[axis];
+    if (dot >= -0.5f * std::sqrt(magnitude2)) return false;
+  } else started_ = now;
+  const float magnitude = std::sqrt(magnitude2);
+  for (size_t axis = 0; axis < 3; ++axis) impulse_[axis] = linear[axis] / magnitude;
+  peak_ = now;
+  if (++impulses_ < 3) return false;
+  impulses_ = 0;
+  cooldown_ = now + 1'000'000'000;
+  return true;
 }
 bool MouseGate::Consume(bool is_touch, Phase phase, bool gameplay) {
   if (!is_touch) return false;

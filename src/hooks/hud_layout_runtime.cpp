@@ -4,6 +4,7 @@
 #include "hooks/hud_layout_runtime.h"
 
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstring>
@@ -23,6 +24,7 @@
 #include "platform/guest_memory.h"
 #if defined(RB_BLITZ_IOS)
 #include "input/touch_controls.h"
+#include "input/native_menu.h"
 #endif
 
 REX_EXTERN(__imp__sub_821F13D0);  // RndTransformable::WorldXfm
@@ -54,6 +56,14 @@ REXCVAR_DEFINE_BOOL(hud_reanchor_scan, false, "Diagnostics",
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace {
+#if defined(RB_BLITZ_IOS)
+constexpr std::array<std::string_view, 6> kPowerups{
+    "autoplay", "grenade", "jackpot", "overdrive", "plasma", "ripple"};
+constexpr std::array<std::string_view, 6> kTouchIcons{
+    "touch_autoplay.grp", "touch_grenade.grp", "touch_jackpot.grp",
+    "touch_overdrive.grp", "touch_plasma.grp", "touch_ripple.grp"};
+std::atomic<int> g_powerup_icon{-1};
+#endif
 constexpr uint32_t kImageBegin = 0x82000000;
 constexpr uint32_t kImageEnd = 0x82A40000;
 constexpr uint32_t kHeapBegin = 0x40000000;
@@ -456,6 +466,11 @@ extern "C" REX_FUNC(sub_82226CD8) {
   const auto header = ObjectBase(base, ctx.r3.u32);
   if (header && U32(base, header) == 0x82024C4C) {
     const auto name = U32(base, header + 32);
+    for (size_t i = 0; i < kTouchIcons.size(); ++i)
+      if (NameIs(base, name, kTouchIcons[i]) && InHud(base, header) &&
+          int(i) != g_powerup_icon.load(std::memory_order_relaxed)) return;
+    if (NameIs(base, name, "powerup.grp"))
+      rb_blitz::input::CaptureTouchPowerup(ctx, base, U32(base, header + 36));
     const bool hidden_pause = NameIs(base, name, "touch_pause.grp") &&
         !rb_blitz::input::touch::ControlsVisible();
     const bool powerup = NameIs(base, name, "touch_powerup.grp");
@@ -501,7 +516,16 @@ extern "C" REX_FUNC(sub_823FF258) {
       NameIs(base, U32(base, object + 32), "powerups_state.ep") &&
       (U32(base, value + 4) & 0x1F) == 0;
   const bool ready = readiness && U32(base, value) != 0;
+  const bool selection = HeapRange(object, 40) && HeapRange(value, 8) &&
+      NameIs(base, symbol, "active_powerup") &&
+      NameIs(base, U32(base, object + 32), "powerups_state.ep") &&
+      (U32(base, value + 4) & 0x1F) == 5;
+  int icon = -1;
+  if (selection)
+    for (size_t i = 0; i < kPowerups.size(); ++i)
+      if (NameIs(base, U32(base, value), kPowerups[i])) { icon = int(i); break; }
   __imp__sub_823FF258(ctx, base);
   if (readiness) rb_blitz::input::touch::PublishPowerupReady(ready);
+  if (selection) g_powerup_icon.store(icon, std::memory_order_relaxed);
 }
 #endif
