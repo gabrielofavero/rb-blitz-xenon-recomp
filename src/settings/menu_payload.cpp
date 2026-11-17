@@ -12,6 +12,7 @@
 #include "ui/settings_screen.h"
 #include "ui/input_font_scene.h"
 #include "ui/menu_options.h"
+#include "ui/portrait_menu.h"
 
 namespace rb_blitz::settings {
 namespace {
@@ -1601,6 +1602,94 @@ bool AddTouchHudAnimation(std::vector<ui::dtb::Node>* roots, std::string* why) {
   return true;
 }
 
+bool AddPortraitSplashLayout(std::vector<Node>* roots, float aspect, std::string* why) {
+  if (!roots) return false;
+  auto staged = *roots;
+  auto* enter = PanelMethod(&staged, "splash_panel", "enter");
+  if (!enter || !PanelMethod(&staged, "splash_panel", "BUTTON_DOWN_MSG") ||
+      PanelMethod(&staged, "splash_panel", "rbbz_portrait_layout")) {
+    if (why) *why = "portrait splash lifecycle changed";
+    return false;
+  }
+  const auto layout = ui::PortraitSplash(aspect);
+  const auto sym = [](std::string_view s) { return Node::Symbol(s); };
+  const auto cmd = [](std::vector<Node> kids) { return Node::Command(std::move(kids)); };
+  const auto number = [](float value) {
+    Node n; n.tag = ui::dtb::kFloat; n.scalar = std::bit_cast<uint32_t>(value); return n;
+  };
+  const auto place = [&](std::string_view name, float scale, float x, float y, float z) {
+    return cmd({sym("do"),
+        cmd({sym(name), sym("set_local_scale"), number(scale), number(scale), number(scale)}),
+        cmd({sym(name), sym("set_local_pos"), number(x), number(y), number(z)})});
+  };
+  const auto call = cmd({Node::Var("this"), sym("rbbz_portrait_layout")});
+  enter->kids.push_back(cmd({Node::Var("this"), sym("set"), sym("rbbz_portrait_main"),
+                              Node::Int(uint32_t(-1))}));
+  enter->kids.push_back(call);
+  if (auto* poll = PanelMethod(&staged, "splash_panel", "poll")) poll->kids.push_back(call);
+  else for (auto& root : staged)
+    if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 && root.kids[2].text == "splash_panel")
+      root.kids.push_back(Node::Array({sym("poll"), call}));
+  Node main = cmd({sym("=="),
+      cmd({cmd({Node::Var("this"), sym("loaded_dir")}), sym("get"), sym("state")}),
+      sym("main_menu")});
+  Node apply = cmd({sym("unless"),
+      cmd({sym("=="), Node::Property({sym("rbbz_portrait_main")}), main}),
+      cmd({sym("do"),
+          cmd({Node::Var("this"), sym("set"), sym("rbbz_portrait_main"), main}),
+          cmd({sym("if_else"), main,
+              place("anim_logo.grp", layout.menu_logo_scale, layout.menu_logo_x, 0, layout.menu_logo_z),
+              place("anim_logo.grp", layout.title_logo_scale, layout.title_logo_x, 0, layout.title_logo_z)}),
+          place("start_panel.grp", layout.start_scale, 0, 8, layout.start_z),
+          place("list.grp", 1, 0, -15.76387f, 0),
+          place("start.lst", layout.list_scale, 0, 0, layout.list_z),
+          // The city's transform parent is the scene, not its draw group.
+          place("splash_city.mesh", layout.city_scale, 0, 82.35371f, layout.city_z),
+          cmd({sym("continue.ihp"), sym("set_showing"), sym("FALSE")}),
+          cmd({sym("back.ihp"), sym("set_showing"), sym("FALSE")}),
+          cmd({sym("start_inner_neon.mesh"), sym("set_showing"), sym("FALSE")}),
+          cmd({sym("start_outer_neon.mesh"), sym("set_showing"), sym("FALSE")})})});
+  for (auto& root : staged)
+    if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 && root.kids[2].text == "splash_panel") {
+      root.kids.push_back(Node::Array({sym("rbbz_portrait_main"), Node::Int(uint32_t(-1))}));
+      root.kids.push_back(Node::Array({sym("rbbz_portrait_layout"), std::move(apply)}));
+    }
+  *roots = std::move(staged);
+  return true;
+}
+
+bool AddPortraitLoadingLayout(std::vector<Node>* roots, bool song_loading,
+                              float aspect, std::string* why) {
+  if (!roots) return false;
+  auto staged = *roots;
+  auto* enter = PanelMethod(&staged, song_loading ? "loading_screen" : "server_connect_panel", "enter");
+  if (!enter) {
+    if (why) *why = "portrait loading entry changed";
+    return false;
+  }
+  const auto number = [](float value) {
+    Node n; n.tag = ui::dtb::kFloat; n.scalar = std::bit_cast<uint32_t>(value); return n;
+  };
+  const float scale = std::min(ui::PortraitSplash(aspect).width / (song_loading ? 640.f : 520.f), .7f);
+  const Node dir = Node::Command({Node::Symbol(song_loading ? "loading_panel" : "server_connect_panel"),
+                                   Node::Symbol("loaded_dir")});
+  enter->kids.push_back(Node::Command({dir, Node::Symbol("set_local_scale"),
+                                       number(scale), number(scale), number(scale)}));
+  if (song_loading) {
+    const auto position = [&](const char* name, float z) {
+      enter->kids.push_back(Node::Command({Node::Symbol(name), Node::Symbol("set_local_pos"),
+                                          number(0), number(0), number(z / scale)}));
+    };
+    position("splash.grp", 0);
+    position("tip.lbl", 150);
+    position("Powerups.grp", 15);
+    position("load_vert.grp", -80);
+    position("loading.lbl", -175);
+  }
+  *roots = std::move(staged);
+  return true;
+}
+
 bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& locales,
                       MenuRecords* records, std::string* error, bool merge_provider,
                       bool refresh_row_active,
@@ -1683,6 +1772,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         return SetFirstBootScreen(&roots, skip_startup_logos, error);
       }) || !edit("ui/splash/gen/splash.dtb", [&](auto& roots) {
         if (!AddCrashRecoveryHooks(&roots, error)) return false;
+        if (portrait_hud && !AddPortraitSplashLayout(
+            &roots, screen::CurrentMenuConfiguration().portrait_aspect, error)) return false;
         if (merge_provider) {
           // A compatible provider's own settings entry is *removed*: its pages are all reachable
           // from Help & Options now, so keeping a second button to the same things is one button
@@ -2492,6 +2583,29 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       note("input image font is unavailable: " + why);
     }
   }
+  if (portrait_hud) {
+    if (!edit("ui/loading/gen/loading.dtb", [&](auto& roots) {
+          return AddPortraitLoadingLayout(&roots, true,
+              screen::CurrentMenuConfiguration().portrait_aspect, error);
+        })) return false;
+    std::vector<uint8_t> source, buttons, scene;
+    if (!read(ui::input_font::kSplashListRecord, &source, error) ||
+        !read(ui::input_font::kListRecord, &buttons, error) ||
+        !ui::input_font::PreparePortraitSplashList(source, buttons, &scene, error)) return false;
+    built[ui::input_font::kSplashListRecord] = std::move(scene);
+    if (!read("ui/resource/fonts/gen/pentatonic_boldsmall.milo_xbox", &source, error) ||
+        !ui::input_font::PreparePortraitSplashFont(source, &scene, error)) return false;
+    built[ui::input_font::kPortraitSplashFontRecord] = std::move(scene);
+    std::vector<uint8_t> splash, themed;
+    if (!read(ui::input_font::kSplashRecord, &splash, error) ||
+        !ui::input_font::PreparePortraitSplash(splash,
+            screen::CurrentMenuConfiguration().portrait_aspect, &themed, error)) return false;
+    if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
+      if (!ui::input_font::PrepareSplash(themed, &splash, error)) return false;
+      themed = std::move(splash);
+    }
+    built[ui::input_font::kSplashRecord] = std::move(themed);
+  }
   if (!read("ui/pause/gen/confirmation_message.milo_xbox",
             &built["ui/pause/gen/settings_confirmation.milo_xbox"], error)) return false;
   built["ui/pause/gen/settings_confirmation_pause.milo_xbox"] =
@@ -2506,7 +2620,9 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     std::string why;
     if (read(path, &bytes, &why) &&
         ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why) &&
-        SetDiscoveryStartLabel(&roots) && AddGraphicsLoadingGate(&roots,&why)) {
+        SetDiscoveryStartLabel(&roots) && AddGraphicsLoadingGate(&roots,&why) &&
+        (!portrait_hud || AddPortraitLoadingLayout(&roots, false,
+            screen::CurrentMenuConfiguration().portrait_aspect, &why))) {
       built[path] = ui::dtb::Compile(roots, header);
     } else {
       if (error) *error = "the required graphics loading gate could not be authored: " + why;

@@ -20,6 +20,7 @@
 #include "hooks/action_hint_probe.h"
 #include "ui/input_font_scene.h"
 #include "ui/achievements_overlay.h"
+#include "ui/portrait_menu.h"
 #include "loading/load_trace.h"
 #include "loading/crash_recovery.h"
 #include "hooks/content_progress.h"
@@ -84,6 +85,7 @@ MenuMouseQueue queue;
 bool window_focused = false;
 bool menu_available = false;
 bool game_screen_active = false;
+bool portrait_splash_active = false;
 uint32_t current_screen = 0, current_focus = 0;
 uint32_t current_panel = 0;
 thread_local uint32_t current_panel_dir = 0, current_input_scope = 0;
@@ -227,6 +229,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   observed_menu_frame = frame_number;
   if (current_screen_name != name) current_screen_name = name;
   game_screen_active = in_song;
+  portrait_splash_active = ui::PortraitSplashScreen(name, panel_name);
   current_panel_name = panel_name;
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled() &&
                 !rex::kernel::xam::xeXamIsUIActive() && !ui::achievements::Active(), panel);
@@ -412,6 +415,10 @@ bool MainMenuMusicInputAvailable() {
 bool GameScreenActive() {
   std::lock_guard lock(mutex);
   return game_screen_active;
+}
+bool PortraitSplashActive() {
+  std::lock_guard lock(mutex);
+  return portrait_splash_active;
 }
 
 void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {

@@ -126,10 +126,11 @@ class Player final : public rex::ui::ImGuiDialog {
     auto* draw = ImGui::GetForegroundDrawList();
     const float s = layout.scale;
     draw->AddRectFilled(TL(layout.panel), BR(layout.panel),
-                        IM_COL32(0, 0, 0, 190), 7 * s);
-    if (texture_)
+                        layout.compact ? IM_COL32(16, 12, 30, 240) : IM_COL32(0, 0, 0, 190),
+                        layout.compact ? 0 : 7 * s);
+    if (!layout.compact && texture_)
       draw->AddImage(texture_, TL(layout.cover), BR(layout.cover));
-    else {
+    else if (!layout.compact) {
       draw->AddRectFilled(TL(layout.cover), BR(layout.cover),
                           IM_COL32(20, 20, 20, 210), 3 * s);
       const float cx = (layout.cover.left + layout.cover.right) * .5f;
@@ -138,12 +139,14 @@ class Player final : public rex::ui::ImGuiDialog {
                       2 * s);
       draw->AddCircleFilled({cx, cy}, 5 * s, ImGui::GetColorU32(theme.muted_text));
     }
-    const float left = layout.controls[0].left,
-                width = layout.panel.right - left - 12 * s;
-    Label(draw, title_font, 18 * s, {left, layout.panel.top + 12 * s}, width,
+    const float left = layout.compact ? layout.panel.left + 12 * s : layout.controls[0].left;
+    const float width = (layout.compact ? layout.controls[0].left : layout.panel.right) - left - 12 * s;
+    Label(draw, title_font, (layout.compact ? 16 : 18) * s,
+          {left, layout.panel.top + (layout.compact ? 16 : 12) * s}, width,
           ImGui::GetColorU32(theme.text),
           track.title.empty() ? "Menu music" : track.title);
-    Label(draw, font, 14 * s, {left, layout.panel.top + 36 * s}, width,
+    Label(draw, font, (layout.compact ? 13 : 14) * s,
+          {left, layout.panel.top + (layout.compact ? 40 : 36) * s}, width,
           ImGui::GetColorU32(theme.muted_text),
           track.artist.empty() ? "Unknown artist" : track.artist);
     const auto enabled = Enabled(snapshot);
@@ -156,7 +159,9 @@ class Player final : public rex::ui::ImGuiDialog {
       const bool pressed = pointer.armed() == i;
       draw->AddRectFilled(TL(b), BR(b), !enabled[i] ? IM_COL32(24, 24, 24, 180) :
           pressed ? IM_COL32(28, 28, 28, 255) : hover ? IM_COL32(65, 65, 65, 245) :
-          IM_COL32(45, 45, 45, 230), 2 * s);
+          layout.compact ? IM_COL32(16, 13, 28, 170) : IM_COL32(45, 45, 45, 230),
+          layout.compact ? 0 : 2 * s);
+      if (layout.compact) draw->AddRect(TL(b), BR(b), IM_COL32(255, 255, 255, 48));
       const ImU32 ink = ImGui::GetColorU32(enabled[i] ? theme.text :
           ImVec4(theme.muted_text.x, theme.muted_text.y, theme.muted_text.z, .4f));
       const float cx = (b.left + b.right) * .5f, cy = (b.top + b.bottom) * .5f;

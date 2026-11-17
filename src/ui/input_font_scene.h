@@ -39,6 +39,17 @@ bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* sc
 // Point the splash start label at the action-hint font.
 bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                    std::string* error);
+// Flat native Start button and a soft, vertex-alpha vignette behind the UI.
+bool PreparePortraitSplash(const std::vector<uint8_t>& source, float aspect,
+                           std::vector<uint8_t>* scene, std::string* error);
+// Derive persistent native buttons and a selection cell for the six portrait rows.
+bool PreparePortraitSplashFont(const std::vector<uint8_t>& source,
+                              std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitSplashList(const std::vector<uint8_t>& source,
+                               const std::vector<uint8_t>& button_source, std::vector<uint8_t>* scene,
+                               std::string* error);
+inline constexpr char kSplashListRecord[] = "ui/resource/lists/gen/list_splash.milo_xbox";
+inline constexpr char kPortraitSplashFontRecord[] = "ui/resource/fonts/gen/portrait_splash.milo_xbox";
 // Give the song-list sort label the live Interface Sort icon font.
 bool PrepareSongSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                        std::string* error);

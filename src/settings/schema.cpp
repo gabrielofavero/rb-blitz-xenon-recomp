@@ -222,7 +222,7 @@ std::vector<SchemaRow> BuildTable() {
                         WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("landscape"));
     d.choices = Choices({{"landscape", "Landscape"}, {"portrait", "Portrait"}});
     rows.push_back(Row(std::move(d), {"graphics", "orientation"}, "", "Orientation",
-                       "Portrait crops gameplay and rearranges the HUD. Restart to apply."));
+                       "Portrait arranges the menus, HUD and gameplay. Restart to apply."));
   }
   {
     Descriptor d = Make(SettingId::kAspectRatio, Category::kGraphics, Provider::kNative,

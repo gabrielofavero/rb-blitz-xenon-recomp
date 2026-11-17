@@ -1164,7 +1164,7 @@ std::vector<PanelSpec> AllPanels() {
                                         Choices({"windowed", "Windowed", "borderless",
                                                  "Borderless", "fullscreen", "Full Screen"})),
                               SelectRow("settings_orientation", "graphics.orientation", "Orientation",
-                                        "Portrait crops gameplay and rearranges the HUD. Restart to apply.",
+                                        "Portrait arranges the menus, HUD and gameplay. Restart to apply.",
                                         Choices({"landscape", "Landscape", "portrait", "Portrait"})),
                               SelectRow("settings_aspect_ratio", "graphics.aspect_ratio", "Aspect Ratio",
                                         "Auto follows your display shape. Restart to apply.",

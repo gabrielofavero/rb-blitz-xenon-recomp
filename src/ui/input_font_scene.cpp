@@ -8,7 +8,9 @@
 #include <cstring>
 #include <cstdlib>
 #include <initializer_list>
+#include <cmath>
 #include <string_view>
+#include "ui/portrait_menu.h"
 
 // stb's project dependency supplies the raw DEFLATE decoder used by Milo chunks.
 // Keep its definitions local: the SDK has another image decoder in a separate library.
@@ -476,6 +478,230 @@ bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* sce
   bytes.insert(bytes.begin() + offset, new_font.begin(), new_font.end());
   return PackStored(bytes, scene, error);
 }
+namespace {
+struct PortraitObject { std::string type, name; std::vector<uint8_t> data; };
+void SceneWord(std::vector<uint8_t>& out, uint32_t value) {
+  const auto at = out.size(); out.resize(at + 4); PutBe32(out.data() + at, value);
+}
+void SceneString(std::vector<uint8_t>& out, std::string_view value) {
+  SceneWord(out, uint32_t(value.size())); out.insert(out.end(), value.begin(), value.end());
+}
+void RenameSceneString(std::vector<uint8_t>& out, std::string_view from, std::string_view to) {
+  for (size_t at = 4; at + from.size() <= out.size(); ++at) {
+    if (Be32(out.data() + at - 4) != from.size() ||
+        std::memcmp(out.data() + at, from.data(), from.size())) continue;
+    PutBe32(out.data() + at - 4, uint32_t(to.size()));
+    out.erase(out.begin() + at, out.begin() + at + from.size());
+    out.insert(out.begin() + at, to.begin(), to.end()); at += to.size();
+  }
+}
+void SceneColor(std::vector<uint8_t>& out, size_t at, float r, float g, float b, float a) {
+  PutFloat(out.data() + at, r); PutFloat(out.data() + at + 4, g);
+  PutFloat(out.data() + at + 8, b); PutFloat(out.data() + at + 12, a);
+}
+void SceneMatrix(std::vector<uint8_t>& out, size_t at, float sx, float sz,
+                 float x = 0, float y = 0, float z = 0) {
+  std::fill(out.begin() + at, out.begin() + at + 48, uint8_t(0));
+  PutFloat(out.data() + at, sx); PutFloat(out.data() + at + 16, 1);
+  PutFloat(out.data() + at + 32, sz); PutFloat(out.data() + at + 36, x);
+  PutFloat(out.data() + at + 40, y); PutFloat(out.data() + at + 44, z);
+}
+}  // namespace
+
+bool PreparePortraitSplash(const std::vector<uint8_t>& source, float aspect,
+                           std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (bytes.size() != 10448706 || Crc32(bytes.data(), bytes.size()) != 0x6234458E)
+    return Fail(error, "portrait splash art source revision changed");
+  auto copy = [&](size_t from, size_t to) {
+    return std::vector<uint8_t>(bytes.begin() + from, bytes.begin() + to);
+  };
+  // Preserve the sky's authored colors, moving texture and animation.
+  SceneColor(bytes, 10405295 + 0x19, .03f, .02f, .045f, 1);
+  auto start_material = copy(10407827, 10408107);
+  RenameSceneString(start_material, "start_panel.tex", "");
+  SceneColor(start_material, 0x19, 1, .855f, .086f, 1);
+  auto start_mesh = copy(0x9F6B5F, 0x9F6CF9);
+  start_mesh[149] = 1; // RndDrawable::showing; retail hides the textured panel.
+  for (size_t matrix : {size_t(0x15), size_t(0x45)})
+    SceneMatrix(start_mesh, matrix, 1, .677f);
+  auto start_label = copy(0x9F656C, 0x9F6704);
+  PutFloat(start_label.data() + 0x13E, 20.f);
+
+  auto shade_material = copy(10406977, 10407257);
+  RenameSceneString(shade_material, "splash_vig1.tex", "");
+  SceneColor(shade_material, 0x19, .025f, .018f, .045f, 1);
+  shade_material[0x2A] = 1; // pre_lit enables the packed vertex color/alpha.
+  auto shade_mesh = copy(0x9F6B5F, 0x9F6CF9);
+  shade_mesh[149] = 1;
+  // Preserve the native packed vertex format, normals, UVs, two-sided material
+  // and face-group trailer. Eight cells per axis provide a smooth dark edge.
+  constexpr size_t vertices = 235, vertex_count = 222;
+  const auto vertex_template = std::vector<uint8_t>(shade_mesh.begin() + vertices,
+                                                   shade_mesh.begin() + vertices + 36);
+  const auto tail = std::vector<uint8_t>(shade_mesh.begin() + 395, shade_mesh.end());
+  shade_mesh.resize(vertices);
+  PutBe32(shade_mesh.data() + vertex_count, 81);
+  const float half_width = ui::PortraitSplash(aspect).width * .5f;
+  const auto smooth = [](float v) { return v * v * (3 - 2 * v); };
+  for (int z = 0; z <= 8; ++z) for (int x = 0; x <= 8; ++x) {
+    const float nx = (x - 4) / 4.f, nz = (z - 4) / 4.f;
+    const auto edge = [&](float v) { return smooth(std::max(0.f, (std::abs(v) - .5f) * 2)); };
+    const float alpha = .22f * edge(nx) + .07f * edge(nz);
+    auto vertex = vertex_template;
+    PutFloat(vertex.data(), nx * half_width * 1.08f); PutFloat(vertex.data() + 4, 0);
+    PutFloat(vertex.data() + 8, nz * 260);
+    PutBe32(vertex.data() + 12, (uint32_t(std::lround(alpha * 255)) << 24) | 0xFFFFFF);
+    shade_mesh.insert(shade_mesh.end(), vertex.begin(), vertex.end());
+  }
+  SceneWord(shade_mesh, 128);
+  const auto index = [&](uint16_t v) { shade_mesh.push_back(uint8_t(v >> 8)); shade_mesh.push_back(uint8_t(v)); };
+  for (int z = 0; z < 8; ++z) for (int x = 0; x < 8; ++x) {
+    const uint16_t a = uint16_t(z * 9 + x), b = uint16_t(a + 9);
+    for (auto v : {uint16_t(a + 1), uint16_t(b + 1), a, b, a, uint16_t(b + 1)}) index(v);
+  }
+  shade_mesh.insert(shade_mesh.end(), tail.begin(), tail.end());
+  // The single native face group contains all 128 triangles.
+  shade_mesh[shade_mesh.size() - tail.size() + 4] = 128;
+  RenameSceneString(shade_mesh, "start_panel.grp", "splash");
+  RenameSceneString(shade_mesh, "start_panel.mat", "portrait_shade.mat");
+  RenameSceneString(shade_mesh, "start_panel.mesh", "portrait_shade.mesh");
+  for (size_t matrix : {size_t(0x15), size_t(0x45)})
+    SceneMatrix(shade_mesh, matrix, 1, 1, 0, 45, 0);
+
+  auto group = copy(0x9ED20A, 0x9ED303);
+  constexpr std::string_view city = "City_Splash_Elements.grp";
+  auto found = std::search(group.begin(), group.end(), city.begin(), city.end());
+  const size_t member = size_t(found - group.begin());
+  if (found == group.end() || member < 8 || Be32(group.data() + member - 8) != 3)
+    return Fail(error, "portrait splash draw group changed");
+  PutBe32(group.data() + member - 8, 4);
+  std::vector<uint8_t> added_member; SceneString(added_member, "portrait_shade.mesh");
+  group.insert(group.begin() + member + city.size(), added_member.begin(), added_member.end());
+  struct Edit { size_t begin, end; std::vector<uint8_t> data; };
+  // Descending source offsets keep every measured replacement independent.
+  std::array<Edit, 4> edits{{
+      {0x9F6B5F, 0x9F6CF9, std::move(start_mesh)},
+      {0x9F656C, 0x9F6704, std::move(start_label)},
+      {0x9ED20A, 0x9ED303, std::move(group)},
+      {10407827, 10408107, std::move(start_material)}}};
+  std::sort(edits.begin(), edits.end(), [](const auto& a, const auto& b) { return a.begin > b.begin; });
+  for (const auto& edit : edits) {
+    bytes.erase(bytes.begin() + edit.begin, bytes.begin() + edit.end);
+    bytes.insert(bytes.begin() + edit.begin, edit.data.begin(), edit.data.end());
+  }
+  const std::array<PortraitObject, 2> added{{
+      {"Mat", "portrait_shade.mat", std::move(shade_material)},
+      {"Mesh", "portrait_shade.mesh", std::move(shade_mesh)}}};
+  std::vector<uint8_t> declarations;
+  uint32_t names = 0;
+  for (const auto& object : added) {
+    SceneString(declarations, object.type); SceneString(declarations, object.name);
+    names += uint32_t(object.name.size() + 1);
+    bytes.insert(bytes.end(), object.data.begin(), object.data.end());
+  }
+  PutBe32(bytes.data() + 0x1A, 152);
+  PutBe32(bytes.data() + 0x1E, 1103 + names);
+  PutBe32(bytes.data() + 0x23, 75);
+  bytes.insert(bytes.begin() + 0x7B3, declarations.begin(), declarations.end());
+  return PackStored(bytes, scene, error);
+}
+
+bool PreparePortraitSplashList(const std::vector<uint8_t>& source,
+                               const std::vector<uint8_t>& button_source, std::vector<uint8_t>* scene,
+                               std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error) || !DecodeStream(button_source, &buttons, error)) return false;
+  if (bytes.size() != 4423 || Crc32(bytes.data(), bytes.size()) != 0x4B1EEE24)
+    return Fail(error, "portrait splash list source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait button template revision changed");
+  PutFloat(bytes.data() + 0x54A, 58.5f);
+  // UILabel's explicit normal/selected color references, rather than the
+  // directory's unused fallback color names, determine the visible text.
+  SceneColor(bytes, 0xA45, .96f, .96f, .98f, 1);
+  SceneColor(bytes, 0xA6A, .09f, .065f, .025f, 1);
+  SceneColor(bytes, 0x102C, .09f, .065f, .025f, 1);
+  PutFloat(bytes.data() + 0xBFB, 27.5f);
+
+  std::vector<size_t> markers;
+  for (size_t at = 0; at + 4 <= bytes.size(); ++at)
+    if (Be32(bytes.data() + at) == 0xADDEADDE) markers.push_back(at);
+  if (markers.size() != 24) return Fail(error, "portrait list object boundaries changed");
+  std::vector<PortraitObject> objects;
+  size_t at = 0x29;
+  auto string = [&] {
+    const auto size = Be32(bytes.data() + at); at += 4;
+    std::string value(reinterpret_cast<const char*>(bytes.data() + at), size); at += size; return value;
+  };
+  for (size_t i = 0; i < 23; ++i) {
+    auto type = string(), name = string();
+    // UIListHighlight reshapes its mesh into an underline during Draw. Use
+    // the options list's ordinary Mesh slots for both button states instead.
+    if (type == "UIListHighlight") continue;
+    objects.push_back({std::move(type), std::move(name),
+        {bytes.begin() + markers[i] + 4, bytes.begin() + markers[i + 1] + 4}});
+  }
+  for (auto& object : objects)
+    if (object.name == "button.lbl")
+      RenameSceneString(object.data, "../fonts/pentatonic.milo", "../fonts/portrait_splash.milo");
+  auto original = [&](std::string_view name) {
+    return std::find_if(objects.begin(), objects.end(), [&](const auto& o) { return o.name == name; })->data;
+  };
+  const auto prototype_material = original("highlight.mat");
+  const auto prototype_mesh = original("highlight.mesh");
+  auto button = [&](std::string name, bool selected, bool border) {
+    auto material = prototype_material;
+    if (border) SceneColor(material, 0x19, .90f, .85f, .95f, .19f);
+    else if (selected) SceneColor(material, 0x19, 1, .855f, .086f, 1);
+    else SceneColor(material, 0x19, .063f, .051f, .11f, .67f);
+    auto mesh = prototype_mesh;
+    const float width = border ? 367.f : 364.5f, height = border ? 55.25f : 52.75f;
+    for (size_t matrix : {size_t(0x15), size_t(0x45)})
+      SceneMatrix(mesh, matrix, width / 405.f, height / 26.f, -192.5f * width / 405.f);
+    RenameSceneString(mesh, "highlight.mat", name + ".mat");
+    RenameSceneString(mesh, "highlight.mesh", name + ".mesh");
+    std::vector<uint8_t> widget(buttons.begin() + 0x163E0, buttons.begin() + 0x16466);
+    PutBe32(widget.data() + 101, selected ? 1 : 2);
+    // UIListWidget::draw_order precedes the color references. Labels draw at
+    // order 1; paint the button surfaces first, leaving their text unobscured.
+    PutFloat(widget.data() + 25, border ? -2.f : -1.f);
+    RenameSceneString(widget, "slot.mesh", name + ".mesh");
+    RenameSceneString(widget, "slot.mat", name + ".mat");
+    objects.push_back({"Mat", name + ".mat", std::move(material)});
+    objects.push_back({"Mesh", name + ".mesh", std::move(mesh)});
+    objects.push_back({"UIListMesh", name, std::move(widget)});
+  };
+  button("portrait_border", false, true);
+  button("portrait_button", false, false);
+  button("portrait_selected", true, false);
+  std::vector<uint8_t> result(bytes.begin(), bytes.begin() + 0x29);
+  uint32_t name_bytes = 0;
+  for (const auto& object : objects) {
+    SceneString(result, object.type); SceneString(result, object.name);
+    name_bytes += uint32_t(object.name.size() + 1);
+  }
+  PutBe32(result.data() + 0x1C, uint32_t(objects.size()) * 2 + 2);
+  PutBe32(result.data() + 0x20, name_bytes + 8); // includes the root's "default" name
+  PutBe32(result.data() + 0x25, uint32_t(objects.size()));
+  result.insert(result.end(), bytes.begin() + 0x304, bytes.begin() + 0x567);
+  for (const auto& object : objects) result.insert(result.end(), object.data.begin(), object.data.end());
+  return PackStored(result, scene, error);
+}
+
+bool PreparePortraitSplashFont(const std::vector<uint8_t>& source,
+                               std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (bytes.size() != 72649 || Crc32(bytes.data(), bytes.size()) != 0x31A0083B)
+    return Fail(error, "portrait button font source revision changed");
+  // A private copy keeps the menu's white/black labels independent of the
+  // moving background lights, without changing the shared font elsewhere.
+  bytes[0x104BB + 0x29] = 0; // Mat::use_environ
+  return PackStored(bytes, scene, error);
+}
+
 bool PrepareSongSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                        std::string* error) {
   std::vector<uint8_t> bytes;

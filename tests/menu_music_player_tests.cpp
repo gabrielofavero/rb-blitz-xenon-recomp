@@ -59,6 +59,30 @@ void PointerTests() {
     }
   }
   CHECK_EQ(PlayerLayout(0, 0).scale, 0);
+  BeginCase("portrait music player shares a compact bottom bar and full touch targets");
+  for (const auto size : {MenuPoint{320, 568}, {402, 874}, {768, 1024}}) {
+    const auto compact = PlayerLayout(size.x, size.y);
+    CHECK_TRUE(compact.compact);
+    CHECK_TRUE(compact.panel.left > 0 && compact.panel.right < size.x);
+    CHECK_TRUE(compact.panel.top > size.y * .75f);
+    CHECK_TRUE(compact.panel.bottom <= size.y - 44);
+    CHECK_TRUE(compact.controls[0].left > compact.panel.left + 100);
+    for (int i = 0; i < 3; ++i) {
+      const auto control = compact.controls[i];
+      CHECK_TRUE(control.right - control.left >= 44);
+      CHECK_TRUE(control.bottom - control.top >= 44);
+      CHECK_TRUE(compact.panel.Contains(Center(control)));
+      if (i) CHECK_TRUE(compact.controls[i - 1].right < control.left);
+      PointerRouter touch;
+      touch.Present(compact, 1, 7, true, {true, true, true});
+      CHECK_TRUE(touch.Route(PointerEvent::kDown, Center(control)).consumed);
+      CHECK_EQ(*touch.Route(PointerEvent::kUp, Center(control)).clicked, i);
+    }
+  }
+  CHECK_FALSE(PlayerLayout(1280, 720).compact);
+  const auto narrow = PlayerLayout(203, 360);
+  CHECK_TRUE(narrow.compact && narrow.scale > 0);
+  CHECK_TRUE(narrow.panel.left > 0 && narrow.panel.right < 203);
   BeginCase(
       "one release on the armed control posts once; hold, disabled, drag and "
       "boundaries");

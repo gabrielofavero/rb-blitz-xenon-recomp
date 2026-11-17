@@ -22,13 +22,15 @@ class GameplayPresentation final : public rex::ui::ImGuiDialog {
         preview_notification_(std::move(preview_notification)) {}
  private:
   void OnDraw(ImGuiIO&) override {
-    const bool crop = settings::BootPortraitWidth() && input::GameScreenActive();
-    if (crop == cropped_) return;
+    const bool game = input::GameScreenActive();
+    const bool crop = settings::BootPortraitWidth() && (game || input::PortraitSplashActive());
+    const bool render_cutoff = crop && game && REXCVAR_GET(portrait_render_cutoff);
+    if (crop == cropped_ && render_cutoff == render_cutoff_) return;
     auto* presenter = presenter_();
     if (!presenter) return;
     auto config = presenter->GetGuestOutputPaintConfigFromUIThread();
     rex::cvar::SetFlagByName("draw_visible_region", "false");
-    if (crop && REXCVAR_GET(portrait_render_cutoff)) {
+    if (render_cutoff) {
       const auto height = settings::BootRenderHeight();
       const auto width = settings::BootRenderWidth();
       rex::cvar::SetFlagByName("draw_visible_source_width",
@@ -41,7 +43,7 @@ class GameplayPresentation final : public rex::ui::ImGuiDialog {
       rex::cvar::SetFlagByName("draw_visible_depth_info", "66864"); // 0x10530
       rex::cvar::SetFlagByName("draw_visible_region", "true");
     }
-    if (crop) {
+    if (crop && !cropped_) {
       safe_x_ = rex::cvar::GetFlagByName("present_safe_area_x");
       safe_y_ = rex::cvar::GetFlagByName("present_safe_area_y");
       cutoff_ = rex::cvar::GetFlagByName("present_allow_overscan_cutoff");
@@ -53,20 +55,22 @@ class GameplayPresentation final : public rex::ui::ImGuiDialog {
       rex::cvar::SetFlagByName("present_safe_area_y", "100");
       rex::cvar::SetFlagByName("present_allow_overscan_cutoff", "true");
       config.SetAllowOverscanCutoff(true);
-    } else {
+    } else if (!crop && cropped_) {
       rex::cvar::SetFlagByName("present_safe_area_x", safe_x_);
       rex::cvar::SetFlagByName("present_safe_area_y", safe_y_);
       rex::cvar::SetFlagByName("present_allow_overscan_cutoff", cutoff_);
       config.SetAllowOverscanCutoff(allow_cutoff_);
     }
     presenter->SetGuestOutputPaintConfigFromUIThread(config);
+    const bool entering_crop = crop && !cropped_;
     cropped_ = crop;
-    if (crop && preview_notification_) preview_notification_();
+    render_cutoff_ = render_cutoff;
+    if (entering_crop && preview_notification_) preview_notification_();
     REXLOG_INFO("portrait: {} landscape source, preserving both axes", crop ? "cropping" : "fitting");
   }
   std::function<rex::ui::Presenter*()> presenter_;
   std::function<void()> preview_notification_;
-  bool cropped_ = false, allow_cutoff_ = false;
+  bool cropped_ = false, allow_cutoff_ = false, render_cutoff_ = false;
   std::string safe_x_, safe_y_, cutoff_;
 };
 }

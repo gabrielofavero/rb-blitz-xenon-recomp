@@ -21,6 +21,7 @@
 #include "settings/ultimate_runtime.h"
 #include "ui/menu_options.h"
 #include "ui/input_font_scene.h"
+#include "ui/portrait_menu.h"
 #include <array>
 #include "ui/settings_screen.h"
 
@@ -1723,7 +1724,190 @@ void TestIOSAutoPause() {
   CHECK_TRUE(rb_blitz::ui::dtb::Compile(roots) == incompatible);
 }
 
+void TestPortraitSplash() {
+  namespace dtb = rb_blitz::ui::dtb;
+  using dtb::Node;
+  using namespace header_test;
+  BeginCase("portrait splash fits both logo poses and six menu cells above the footer");
+  for (float aspect : {402.f / 874, 9.f / 16, .625f, .75f, .9f}) {
+    const auto l = rb_blitz::ui::PortraitSplash(aspect);
+    CHECK_TRUE(l.title_logo_scale >= l.menu_logo_scale);
+    CHECK_EQ(l.title_logo_x, 0);
+    CHECK_EQ(l.menu_logo_x, 0);
+    CHECK_TRUE(std::abs(l.city_z - 131.94f * l.city_scale + 240) < .001f);
+    CHECK_TRUE(l.city_z + 548.6727f * l.city_scale < -70);
+    CHECK_TRUE(499.4504f * l.title_logo_scale <= l.width * .95f);
+    const float flow = std::min(l.width, 270.f);
+    CHECK_TRUE(std::abs(l.list_z - (240 - flow * .7825f)) < .001f);
+    CHECK_TRUE(std::abs(l.menu_logo_z + 15.408f * l.menu_logo_scale - (240 - flow * .42625f)) < .001f);
+    CHECK_TRUE(l.list_z - (5 * 58.5f + 26.375f) * l.list_scale > -165);
+    CHECK_TRUE(52.75f * l.list_scale < 58.5f * l.list_scale);
+  }
+  CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("splash_screen", "splash_panel"));
+  CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("splash_screen", "upsell_panel"));
+  CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("confirm_exit_game_screen", "pause_exit_game_panel"));
+  CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("options_screen", "options_panel"));
+  CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("server_connect_screen", "server_connect_panel"));
+  CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("loading_screen", "loading_panel"));
+  CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("server_connect_screen", "error_popup_panel"));
+
+  BeginCase("authored portrait splash changes pose on Start and Back, with no repeated transform writes");
+  std::vector<Node> roots{C({S("new"), S("UIPanel"), S("splash_panel"),
+      A({S("enter"), C({S("native_enter")})}),
+      A({S("poll"), C({S("native_poll")})}),
+      A({S("BUTTON_DOWN_MSG"), C({S("native_buttons")})})})};
+  const auto before = roots;
+  std::string why;
+  CHECK_TRUE(rb_blitz::settings::AddPortraitSplashLayout(&roots, 402.f / 874, &why));
+  CHECK_TRUE(dtb::SerializeNodes(Method(roots, "splash_panel", "BUTTON_DOWN_MSG")->kids) ==
+             dtb::SerializeNodes(Method(before, "splash_panel", "BUTTON_DOWN_MSG")->kids));
+  struct Machine {
+    const std::vector<Node>& roots;
+    std::string state = "start";
+    Node cached = Node::Int(uint32_t(-1));
+    std::map<std::string, std::array<float, 3>> scales, positions;
+    int writes = 0, native_enters = 0, native_polls = 0;
+    Node Method(const std::string& name) {
+      const auto* method = header_test::Method(roots, "splash_panel", name.c_str());
+      CHECK_TRUE(method != nullptr);
+      if (method) for (size_t i = 1; i < method->kids.size(); ++i) Eval(method->kids[i]);
+      return Node::Int(0);
+    }
+    Node Eval(const Node& n) {
+      if (n.tag == dtb::kProperty) return cached;
+      if (n.tag != dtb::kCommand || n.kids.empty()) return n;
+      const auto& op = n.kids[0].text;
+      if (op == "==") {
+        const auto a = Eval(n.kids[1]), b = Eval(n.kids[2]);
+        return Node::Int(a.tag == b.tag && a.scalar == b.scalar && a.text == b.text);
+      }
+      if (op == "unless") { if (!Eval(n.kids[1]).scalar) Eval(n.kids[2]); return Node::Int(0); }
+      if (op == "if_else") return Eval(n.kids[Eval(n.kids[1]).scalar ? 2 : 3]);
+      if (op == "do") { for (size_t i = 1; i < n.kids.size(); ++i) Eval(n.kids[i]); return Node::Int(0); }
+      if (op == "native_enter") ++native_enters;
+      if (op == "native_poll") ++native_polls;
+      if (n.kids.size() >= 2) {
+        const auto& action = n.kids[1].text;
+        if (action == "get") return Node::Symbol(state);
+        if (action == "set") { cached = Eval(n.kids[3]); return cached; }
+        if (action == "rbbz_portrait_layout") return Method(action);
+        if (action == "set_local_scale" || action == "set_local_pos") {
+          auto& vector = action == "set_local_scale" ? scales[op] : positions[op];
+          for (int i = 0; i < 3; ++i) vector[i] = std::bit_cast<float>(n.kids[i + 2].scalar);
+          ++writes;
+        }
+      }
+      return Node::Int(0);
+    }
+  } machine{roots};
+  machine.Method("enter");
+  const auto title_scale = machine.scales.at("anim_logo.grp");
+  const int title_writes = machine.writes;
+  machine.Method("poll");
+  CHECK_EQ(machine.writes, title_writes);
+  machine.state = "main_menu";
+  machine.Method("poll");
+  CHECK_TRUE(machine.scales.at("anim_logo.grp")[0] < title_scale[0]);
+  const auto menu_positions = machine.positions;
+  const int menu_writes = machine.writes;
+  for (int i = 0; i < 30; ++i) machine.Method("poll");
+  CHECK_EQ(machine.writes, menu_writes);
+  CHECK_TRUE(machine.positions == menu_positions);
+  machine.state = "start";
+  machine.Method("poll");
+  CHECK_TRUE(machine.scales.at("anim_logo.grp") == title_scale);
+  CHECK_EQ(machine.native_enters, 1);
+  CHECK_EQ(machine.native_polls, 33);
+  const auto bytes = dtb::Compile(roots);
+  std::vector<Node> roundtrip;
+  dtb::RootHeader header;
+  CHECK_TRUE(dtb::Parse(bytes.data(), bytes.size(), &roundtrip, &header, &why));
+  CHECK_FALSE(rb_blitz::settings::AddPortraitSplashLayout(&roots, .5f, &why));
+  CHECK_TRUE(dtb::Compile(roots) == bytes);
+  roots = before;
+  roots[0].kids.pop_back();
+  const auto unknown = dtb::Compile(roots);
+  CHECK_FALSE(rb_blitz::settings::AddPortraitSplashLayout(&roots, .5f, &why));
+  CHECK_TRUE(dtb::Compile(roots) == unknown);
+
+  BeginCase("portrait connection and song loading preserve native entry work");
+  for (const bool song : {false, true}) {
+    const char* name = song ? "loading_screen" : "server_connect_panel";
+    std::vector<Node> loading{C({S("new"), S(song ? "LoadingScreen" : "ServerConnectPanel"), S(name),
+        A({S("enter"), C({S("native_loading")})})})};
+    CHECK_TRUE(rb_blitz::settings::AddPortraitLoadingLayout(&loading, song, .5625f, &why));
+    const auto* enter = Method(loading, name, "enter");
+    CHECK_TRUE(enter && enter->kids[1].kids[0].text == "native_loading");
+    CheckStrEq(enter->kids[2].kids[1].text, "set_local_scale");
+    const float scale = std::bit_cast<float>(enter->kids[2].kids[2].scalar);
+    CHECK_TRUE(scale > 0 && scale < 1);
+    CHECK_EQ(enter->kids.size(), song ? size_t(8) : size_t(3));
+  }
+}
+
 int main(int argc, char** argv) {
+  if (argc == 6 && std::string(argv[1]) == "check-portrait-menu") {
+    namespace dtb = rb_blitz::ui::dtb;
+    namespace font = rb_blitz::ui::input_font;
+    auto read = [](const char* path) {
+      std::ifstream file(path, std::ios::binary);
+      return std::vector<uint8_t>(std::istreambuf_iterator<char>(file), {});
+    };
+    const auto source = read(argv[2]), list = read(argv[3]), buttons = read(argv[4]);
+    std::vector<dtb::Node> roots;
+    dtb::RootHeader header;
+    std::string why;
+    CHECK_TRUE(dtb::Parse(source.data(), source.size(), &roots, &header, &why));
+    const auto before = roots;
+    CHECK_TRUE(rb_blitz::settings::AddPortraitSplashLayout(&roots, 402.f / 874, &why));
+    for (const auto* name : {"BUTTON_DOWN_MSG", "SELECT_MSG", "check_trial", "exit"})
+      CHECK_TRUE(dtb::SerializeNodes(header_test::Method(roots, "splash_panel", name)->kids) ==
+                 dtb::SerializeNodes(header_test::Method(before, "splash_panel", name)->kids));
+    std::vector<uint8_t> scene;
+    CHECK_TRUE(font::PreparePortraitSplashList(list, buttons, &scene, &why));
+    if (scene.size() <= 0x810 + 4423) return 1;
+    const auto u32 = [](const uint8_t* p) {
+      return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
+    };
+    const auto* data = scene.data() + 0x810;
+    CHECK_EQ(u32(data + 0x25), uint32_t(31));
+    size_t at = 0x29;
+    std::vector<std::pair<std::string, std::string>> declarations;
+    for (int i = 0; i < 31; ++i) {
+      const auto n = u32(data + at); at += 4;
+      const std::string type(reinterpret_cast<const char*>(data + at), n); at += n;
+      const auto m = u32(data + at); at += 4;
+      const std::string name(reinterpret_cast<const char*>(data + at), m); at += m;
+      declarations.emplace_back(type, name);
+    }
+    CHECK_TRUE(declarations[30] == std::make_pair(std::string("UIListMesh"), std::string("portrait_selected")));
+    CHECK_TRUE(std::search(scene.begin(), scene.end(), declarations[24].second.begin(),
+                           declarations[24].second.end()) != scene.end());
+    // Native Mesh slots draw behind labels. The selected surface uses the
+    // engine's highlight-only slot, rather than its reshaping underline widget.
+    std::vector<size_t> markers;
+    for (size_t i = 0x810; i + 4 <= scene.size(); ++i)
+      if (u32(scene.data() + i) == 0xADDEADDE) markers.push_back(i);
+    CHECK_EQ(markers.size(), size_t(32));
+    const size_t widget = markers[markers.size() - 2] + 4;
+    CHECK_TRUE(std::bit_cast<float>(u32(scene.data() + widget + 25)) < 1.f);
+    CHECK_EQ(u32(scene.data() + widget + 101), uint32_t(1));
+    CHECK_EQ(u32(scene.data() + widget + 105), uint32_t(std::string("portrait_selected.mesh").size()));
+    CHECK_TRUE(std::none_of(declarations.begin(), declarations.end(), [](const auto& d) {
+      return d.first == "UIListHighlight";
+    }));
+    std::vector<uint8_t> rejected;
+    CHECK_FALSE(font::PreparePortraitSplashList(scene, buttons, &rejected, &why));
+    const auto output = std::filesystem::path(argv[5]);
+    std::filesystem::create_directories(output);
+    const auto record = dtb::Compile(roots, header);
+    std::ofstream splash_file(output / "splash.dtb", std::ios::binary);
+    splash_file.write(reinterpret_cast<const char*>(record.data()), record.size());
+    std::ofstream list_file(output / "list_splash.milo_xbox", std::ios::binary);
+    list_file.write(reinterpret_cast<const char*>(scene.data()), scene.size());
+    TestPortraitSplash();
+    return Finish();
+  }
   if (argc == 5 && std::string(argv[1]) == "check-touch-hud") {
     namespace font = rb_blitz::ui::input_font;
     namespace dtb = rb_blitz::ui::dtb;
@@ -2368,8 +2552,90 @@ int main(int argc, char** argv) {
   if (argc == 4 && std::string(argv[1]) == "check-p10-records") {
     return CheckInstalledHeaderRecords(argv[2], argv[3], true);
   }
+  if (argc == 4 && std::string(argv[1]) == "check-portrait-records") {
+    namespace settings = rb_blitz::settings;
+    namespace dtb = rb_blitz::ui::dtb;
+    namespace screen = rb_blitz::ui::screen;
+    const auto input = std::filesystem::path(argv[2]);
+    settings::RecordReader read = [&](const std::string& name, std::vector<uint8_t>* bytes, std::string* why) {
+      std::ifstream file(input / name, std::ios::binary);
+      if (!file) { if (why) *why = "missing " + name; return false; }
+      bytes->assign(std::istreambuf_iterator<char>(file), {});
+      return true;
+    };
+    screen::MenuConfiguration config;
+    config.controller_layout_enabled = true;
+    screen::ConfigureMenu(config);
+    settings::MenuRecords landscape, portrait;
+    std::string why;
+    for (const bool enabled : {false, true}) {
+      std::vector<std::string> notes;
+      if (!settings::BuildMenuRecords(read, {"ui/locale/eng/gen/locale_keep.dtb"},
+          enabled ? &portrait : &landscape, &why, false, false, &notes, {}, false,
+          nullptr, {}, enabled)) {
+        std::printf("portrait records refused: %s\n", why.c_str()); return 1;
+      }
+      for (const auto& note : notes) std::printf("record note: %s\n", note.c_str());
+      CHECK_TRUE(notes.empty());
+    }
+    BeginCase("portrait payload changes splash buttons, loading layouts and the existing gameplay HUD route");
+    CHECK_EQ(portrait.size(), landscape.size() + 2 + !landscape.contains("ui/gen/game.dtb") +
+                                      !landscape.contains("ui/loading/gen/loading.dtb"));
+    for (const auto& [path, original] : landscape) {
+      CHECK_TRUE(portrait.contains(path));
+      if (path != "ui/splash/gen/splash.dtb" && path != "ui/gen/game.dtb" &&
+          path != "ui/net/gen/server_connect.dtb" && path != rb_blitz::ui::input_font::kSplashRecord)
+        CHECK_TRUE(portrait.at(path) == original);
+    }
+    CHECK_TRUE(portrait.contains(rb_blitz::ui::input_font::kSplashListRecord));
+    const auto& button_font = portrait.at(rb_blitz::ui::input_font::kPortraitSplashFontRecord);
+    CHECK_TRUE(button_font.size() > 0x810 + 0x104BB + 0x29);
+    CHECK_EQ(button_font[0x810 + 0x104BB + 0x29], uint8_t(0)); // stable full-bright label ink
+    BeginCase("portrait vignette has visible, translucent native geometry with valid faces");
+    const auto& art = portrait.at(rb_blitz::ui::input_font::kSplashRecord);
+    const auto u32 = [](const uint8_t* p) {
+      return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
+    };
+    CHECK_TRUE(art.size() > 0x810);
+    CHECK_EQ(u32(art.data() + 0x810 + 0x23), uint32_t(75));
+    std::vector<size_t> markers;
+    for (size_t at = 0x810; at + 4 <= art.size(); ++at)
+      if (u32(art.data() + at) == 0xADDEADDE) markers.push_back(at);
+    CHECK_TRUE(markers.size() >= 3);
+    if (markers.size() < 3) return Finish();
+    const auto* material = art.data() + markers[markers.size() - 3] + 4;
+    const auto* mesh = art.data() + markers[markers.size() - 2] + 4;
+    CHECK_EQ(material[0x2A], uint8_t(1)); // pre-lit: honor packed vertex alpha
+    CHECK_EQ(mesh[140], uint8_t(1)); // visible
+    CHECK_EQ(u32(mesh + 219), uint32_t(81));
+    CHECK_EQ(u32(mesh + 224), uint32_t(36));
+    const auto alpha = [&](size_t vertex) { return u32(mesh + 232 + vertex * 36 + 12) >> 24; };
+    CHECK_EQ(alpha(40), uint32_t(0)); // leave the centre completely untouched
+    CHECK_TRUE(alpha(0) >= 60 && alpha(80) >= 60); // a light shade at the edges
+    CHECK_TRUE(alpha(0) < 90 && alpha(80) < 90);
+    const auto* faces = mesh + 232 + 81 * 36;
+    CHECK_EQ(u32(faces), uint32_t(128));
+    bool valid_faces = true;
+    for (size_t i = 0; i < 128 * 3; ++i)
+      valid_faces &= (uint32_t(faces[4 + i * 2]) << 8 | faces[5 + i * 2]) < 81;
+    CHECK_TRUE(valid_faces);
+    const auto& splash = portrait.at("ui/splash/gen/splash.dtb");
+    std::vector<dtb::Node> roots;
+    dtb::RootHeader header;
+    CHECK_TRUE(dtb::Parse(splash.data(), splash.size(), &roots, &header, &why));
+    CHECK_TRUE(header_test::Method(roots, "splash_panel", "rbbz_portrait_layout") != nullptr);
+    for (const auto& [path, bytes] : portrait) {
+      const auto output = std::filesystem::path(argv[3]) / path;
+      std::filesystem::create_directories(output.parent_path());
+      std::ofstream file(output, std::ios::binary);
+      file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+      CHECK_TRUE(bool(file));
+    }
+    return Finish();
+  }
   TestHeaderAnimations();
   TestIOSAutoPause();
+  TestPortraitSplash();
   TestHeaderVisibility();
   TestHeaderRuntimeRefresh();
   TestCurrencyVisibility();

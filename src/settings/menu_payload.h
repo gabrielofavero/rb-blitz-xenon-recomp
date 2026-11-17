@@ -53,6 +53,10 @@ bool HideResultsCurrency(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool SetDiscoveryStartLabel(std::vector<ui::dtb::Node>* roots);
 // Existing splash lifecycle and native error_popup_panel, preserving provider handlers.
 bool AddCrashRecoveryHooks(std::vector<ui::dtb::Node>* roots, std::string* why);
+// Center the existing splash art, start button, list and hints in portrait.
+bool AddPortraitSplashLayout(std::vector<ui::dtb::Node>* roots, float aspect, std::string* why);
+bool AddPortraitLoadingLayout(std::vector<ui::dtb::Node>* roots, bool song_loading,
+                              float aspect, std::string* why);
 bool BypassAutomaticUnlockError(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Replace every connect-panel menu continuation with the same deferred guest
 // method. Refuses an unknown shape instead of leaving an ungated menu route.
