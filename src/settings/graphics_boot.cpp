@@ -5,7 +5,7 @@
 
 namespace rb_blitz::settings {
 namespace {
-constexpr SettingId kRows[] = {SettingId::kAspectRatio, SettingId::kRenderScale,
+constexpr SettingId kRows[] = {SettingId::kOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
                                SettingId::kRenderer, SettingId::kResolution,
                                SettingId::kAntiAliasing, SettingId::kFiltering};
 std::string Signature(const GraphicsValues& values) {

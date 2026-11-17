@@ -12,6 +12,20 @@ checkout.
 
 ## Patches
 
+`0086-macos-skipped-paint-recovery.patch` acknowledges a queued paint skipped
+while Cocoa reports the window hidden, minimized or occluded. Leaving the
+presenter's request pending made later guest frames coalesce into an event that
+had already been consumed, freezing the initial black loading image even after
+the guest reached the title. Focus also requests a repaint without replacing
+an unchanged Metal swapchain. Expose can reconnect a previously unavailable
+surface even without a size change. A headless regression exercises request
+coalescing, skipped paints, repeated focus gains and unavailable-surface recovery
+through the real presenter/window state machines. The startup was reproduced locally;
+bringing its window forward restored the live title immediately.
+The final rebuilt portrait run displays the title and retires the loading icon;
+the presenter regression passes 12 checks, four related CTest suites pass, and
+both macOS and iOS builds and the exact patch replay audit pass.
+
 `0082-forward-unhandled-posix-faults.patch` forwards rejected native faults to
 the prior signal handler or the OS, preserving recoverable guest page faults.
 Previously a rejected fault returned to the same instruction indefinitely.

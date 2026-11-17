@@ -31,7 +31,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       const std::vector<std::string>& hidden_menu_rows = {},
                       bool skip_startup_logos = false,
                       MenuRefreshRoutes* refresh_routes = nullptr,
-                      const std::function<void()>& pump_startup_window = {});
+                      const std::function<void()>& pump_startup_window = {},
+                      bool portrait_hud = false);
 // Empty the native startup playlist and release its wait, before the guest boots.
 bool SkipStartupLogos(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Validate a normal boot's playlist while preserving the title's authored wait flag.
@@ -52,6 +53,10 @@ bool HideResultsCurrency(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool SetDiscoveryStartLabel(std::vector<ui::dtb::Node>* roots);
 // Existing splash lifecycle and native error_popup_panel, preserving provider handlers.
 bool AddCrashRecoveryHooks(std::vector<ui::dtb::Node>* roots, std::string* why);
+// Center the existing splash art, start button, list and hints in portrait.
+bool AddPortraitSplashLayout(std::vector<ui::dtb::Node>* roots, float aspect, std::string* why);
+bool AddPortraitLoadingLayout(std::vector<ui::dtb::Node>* roots, bool song_loading,
+                              float aspect, std::string* why);
 bool BypassAutomaticUnlockError(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Replace every connect-panel menu continuation with the same deferred guest
 // method. Refuses an unknown shape instead of leaving an ungated menu route.

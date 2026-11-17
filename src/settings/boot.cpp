@@ -531,11 +531,12 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     const auto scale_value = reconciler_.Reconcile(SettingId::kRenderScale,
         *service_->DescriptorFor(SettingId::kRenderScale), scale_request, capability_snapshot_).effective;
 #endif
+    const auto orientation = service_->EffectiveValue(SettingId::kOrientation);
     int32_t scale = scale_value.text.size() == 2 ? scale_value.text[0] - '0' : 1;
     auto plan = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
-                                  aspect.text, scale);
+                                  aspect.text, scale, orientation.text);
     if (!plan.supported) plan = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
-                                                   "auto", 1);
+                                                   "auto", 1, orientation.text);
     if (plan.supported) {
       Value pixels; pixels.kind = ValueKind::kResolution;
       pixels.width = plan.guest_size.width * plan.draw_scale;
@@ -556,7 +557,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     GraphicsValues wanted;
     GraphicsValues attempt;
     for (const SettingId id : {SettingId::kRenderer, SettingId::kResolution,
-                               SettingId::kAspectRatio, SettingId::kRenderScale,
+                               SettingId::kOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
                                SettingId::kAntiAliasing, SettingId::kFiltering}) {
       wanted[id] = service_->RequestedValue(id);
       attempt[id] = service_->EffectiveValue(id);
@@ -571,6 +572,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     auto safe_values = safe;
     Value safe_aspect; safe_aspect.kind = ValueKind::kEnum; safe_aspect.text = "16:9";
     Value safe_scale; safe_scale.kind = ValueKind::kEnum; safe_scale.text = "1x";
+    Value safe_orientation; safe_orientation.kind = ValueKind::kEnum; safe_orientation.text = "landscape";
+    safe_values[SettingId::kOrientation] = safe_orientation;
     safe_values[SettingId::kAspectRatio] = safe_aspect;
     safe_values[SettingId::kRenderScale] = safe_scale;
     auto selected = graphics_boot_.Select(wanted, attempt, safe_values, forced_safe);
@@ -590,7 +593,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
         const auto token = selected.at(SettingId::kRenderScale).text;
         const int recovered_scale = token.size() == 2 ? token[0] - '0' : 1;
         const auto recovered = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
-            selected.at(SettingId::kAspectRatio).text, recovered_scale);
+            selected.at(SettingId::kAspectRatio).text, recovered_scale,
+            selected.contains(SettingId::kOrientation) ? selected.at(SettingId::kOrientation).text : "landscape");
         if (recovered.supported) {
           auto& pixels = selected[SettingId::kResolution];
           pixels.kind = ValueKind::kResolution;
@@ -897,22 +901,36 @@ void SettingsBoot::ApplyWindowPolicy() {
     REXLOG_INFO("settings_boot: no render plan this boot; the window keeps the title's own size");
     return;
   }
-  const DisplayMode render{screen_plan_.guest_size.width * screen_plan_.draw_scale,
+  const DisplayMode source{screen_plan_.guest_size.width * screen_plan_.draw_scale,
                            screen_plan_.guest_size.height * screen_plan_.draw_scale};
+  const bool portrait = BootPortraitWidth() != 0;
+  const DisplayMode render = portrait
+      ? DisplayMode{int32_t(BootPortraitWidth()) * screen_plan_.draw_scale,
+                    int32_t(BootPortraitHeight()) * screen_plan_.draw_scale} : source;
 
   // The presenter derives the shape of its output region from the *video mode* aspect, not from the
   // frame's (docs/settings/graphics.md part 1 §3), so a size the title would not have chosen has to
   // be reported there or the correct frame is squashed into a 16:9-shaped region. The title itself
   // never reads the video mode (part 1 §4); the presenter and the startup window's own default size
   // are what do.
-  DisplayMode presentation = render;
+  DisplayMode presentation = source;
 #if defined(RB_BLITZ_IOS)
   // Guest widths are aligned to 16 pixels. Use the display's exact aspect
   // for presentation so rounding that width cannot introduce tiny side bars.
-  if (capability_snapshot_.primary_display_size.width > 0 &&
-      capability_snapshot_.primary_display_size.height > 0)
+  if (!portrait && capability_snapshot_.primary_display_size.width > 0 &&
+      capability_snapshot_.primary_display_size.height > 0) {
     presentation = capability_snapshot_.primary_display_size;
+    if (presentation.width < presentation.height) std::swap(presentation.width, presentation.height);
+  }
 #endif
+#if defined(RB_BLITZ_IOS)
+  SDL_SetHint(SDL_HINT_ORIENTATIONS,
+      service_ && service_->EffectiveValue(SettingId::kOrientation).text == "portrait"
+          ? "Portrait" : "LandscapeLeft LandscapeRight");
+#endif
+  // The video mode describes the aspect, independently of the render allocation.
+  // Portrait targets can be narrower than the SDK's 640-pixel video-mode floor.
+  presentation = PresentationVideoMode(presentation);
   WriteWindowCvar("video_mode_width", std::to_string(presentation.width));
   WriteWindowCvar("video_mode_height", std::to_string(presentation.height));
 
@@ -933,9 +951,13 @@ void SettingsBoot::ApplyWindowPolicy() {
 #endif
   const double aspect = double(render.width) / double(render.height);
   if (!desktop.available) {
+    if (portrait) {
+      WriteWindowCvar("window_width", std::to_string(render.width));
+      WriteWindowCvar("window_height", std::to_string(render.height));
+    }
     REXLOG_INFO("settings_boot: window {}x{} (aspect {:.4f}); no usable desktop measurement, so it "
                 "is created at the render size", render.width, render.height, aspect);
-  } else if (!fit.shrunk && !needs_logical_size) {
+  } else if (!fit.shrunk && !needs_logical_size && !portrait) {
     // The video mode already gives exactly this size, so nothing is written. If somebody named the
     // window's size instead, it is theirs and the line says so rather than implying this policy
     // chose it.
@@ -1154,6 +1176,9 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     // Both halves of the guest size, because the title derives its width from its height and
     // the aspect the user picked is not one the title can compute (src/hooks/render_settings.h).
     SetBootRenderFrame(screen_plan_.guest_size.width, screen_plan_.guest_size.height);
+    const bool portrait = service_ && service_->EffectiveValue(SettingId::kOrientation).text == "portrait";
+    const auto crop = portrait ? PortraitCropSize(screen_plan_.guest_size) : DisplayMode{};
+    SetBootPortraitFrame(crop.width, crop.height);
     REXLOG_INFO("settings_boot: guest render base {}x{}, draw scale {} (before graphics setup)",
                 screen_plan_.guest_size.width, screen_plan_.guest_size.height,
                 screen_plan_.draw_scale);
@@ -1170,7 +1195,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
   if (service_) {
     GraphicsValues effective;
     for (const auto id : {SettingId::kRenderer, SettingId::kResolution,
-                          SettingId::kAspectRatio, SettingId::kRenderScale,
+                          SettingId::kOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
                           SettingId::kAntiAliasing, SettingId::kFiltering})
       effective[id] = service_->EffectiveValue(id);
     std::string error;

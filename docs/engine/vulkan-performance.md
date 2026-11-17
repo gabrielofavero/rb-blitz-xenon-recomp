@@ -456,3 +456,59 @@ focused CTest registrations pass: loader policy, both real-device queue modes,
 three trace modes, pipeline completion and upload hazards. The SDK audit replays
 72 patches with zero drift. The documentation checker reports zero errors and
 51 existing warnings.
+
+### Portrait main-scene cutoff (2026-11-16)
+
+Portrait V1 rendered the full landscape source before the presenter cropped it.
+SDK patch `0085-visible-gameplay-region.patch` now intersects eligible Vulkan
+and D3D12 draw scissors with the central visible region, before applying the
+integer render multiplier. It preserves viewport/projection values and maps
+full-frame coordinates into the title's horizontal EDRAM tiles. The title opts
+in only during portrait gameplay, identifying its measured main `RB_COLOR_INFO`
+`0x260` / `RB_DEPTH_INFO` `0x10530` pair. A 32-source-pixel filtering apron avoids
+cutting at the visible sampling edge. A 1280x720 source with a 405x720 visible
+crop retains 470 pixels of main-frame scissor width, including the apron:
+63.28% less scissor area for eligible draws. This is not a fragment-invocation
+count or a reduction in all frame work.
+
+The cutoff preserves auxiliary targets, viewport layouts it cannot identify,
+small helper/clear scissors, memory exports, active occlusion queries and draws
+writing additional render targets. Both backends read the opt-in policy on the
+GPU thread at swap boundaries through the synchronized cvar registry. Turning
+it off restores each draw's authored scissor. Attachment allocations, geometry,
+full-size resolves and presentation work remain; a higher multiplier still
+increases memory use. The separate bloom/shadow passes retain their scissors.
+
+Native macOS Vulkan comparisons on the M1/8 GiB host used the same Queen
+*Death on Two Legs* selection, portrait 16:9 source, no AA, all optional HUD
+except the input viewer, the iOS control preview, and no gameplay input. Each
+run reached 50 seconds of song time. The table includes one-second probe
+windows ending between song clocks 10 and 45 seconds, excluding startup and
+the intro. Logs, power-up screens confirming song selection, screenshots,
+launch arguments and `metrics.json` are under `out/macos/portrait-perf/`.
+
+| Run | Scale | Cutoff | Completed guest draws/presents per second | Slowest sampled window |
+| --- | --- | --- | ---: | ---: |
+| `cutoff-1x` | 1x | On | 59.99 | 58.94 |
+| `full-2x-r2` | 2x | Off | 27.41 | 23.67 |
+| `cutoff-2x` | 2x | On | 30.47 | 28.24 |
+
+The 2x cutoff run improved completed frame rate by about 11.1%. Its 810x1440
+visible internal region is sharper on the Retina window than 1x's 405x720
+region, but this host did not sustain 60 FPS at 2x. The saved scale remains 1x;
+2x remains an existing explicit setting. These are completed guest draw/present
+counts rather than physical scanout measurements or GPU timestamps. The song
+and clock segment match, but individual camera frames are not synchronized.
+The host reported 18.2 GiB of swap in use during the comparison, so these samples
+do not establish a hardware-independent ceiling. No measured windows moved the
+song clock backwards. The first attempted uncut 2x startup stalled during
+content discovery and was excluded; its retry and the clipped run completed the
+sample. This work does not establish a fix for intermittent startup stalls.
+
+The pure production clipping-policy fixture passes 101,492 checks, including
+full frames, 320/640/1280-wide tiles, intersections with existing scissors,
+render multipliers, auxiliary targets, clear helpers, hidden/disabled policies,
+non-finite viewports and side-effecting draws. Eight focused CTest registrations
+pass. macOS and iOS builds and the SDK patch audit are recorded in the same
+evidence directory. iOS device performance and Windows/D3D12 compilation and
+visual acceptance remain unverified.

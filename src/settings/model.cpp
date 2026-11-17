@@ -80,6 +80,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "load_guard";
     case SettingId::kStartup:
       return "startup";
+    case SettingId::kOrientation:
+      return "orientation";
     case SettingId::kAspectRatio:
       return "aspect_ratio";
     case SettingId::kRenderScale:

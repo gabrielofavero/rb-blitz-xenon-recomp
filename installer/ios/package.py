@@ -363,7 +363,8 @@ def write_info(app: Path, bundle_id: str, version: str, minimum: str, mode: str 
             "UIFileSharingEnabled": True, "LSSupportsOpeningDocumentsInPlace": True,
             "UIRequiredDeviceCapabilities": ["arm64", "metal"],
             "NSMotionUsageDescription": "Rapid shakes deploy your ready power-up when Shake to Deploy is on.",
-            "UISupportedInterfaceOrientations": ["UIInterfaceOrientationLandscapeLeft",
+            "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait",
+                                                   "UIInterfaceOrientationLandscapeLeft",
                                                    "UIInterfaceOrientationLandscapeRight"],
             "UIViewControllerBasedStatusBarAppearance": False, "UIStatusBarHidden": True,
             "UILaunchScreen": {}, "CFBundleIcons": icon_data, "CFBundleIcons~ipad": icon_data}

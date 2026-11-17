@@ -1149,7 +1149,7 @@ std::vector<PanelSpec> AllPanels() {
       RouteRow("settings_audio", "av_options_screen", "back_screen",
                                        "Audio", "Volume, bass boost, background music, and music navigation."),
       SubmenuRow("settings_display_menu", "settings_display_screen",
-                                         "Display", "Window mode, aspect ratio, render scale, and V-Sync."),
+                                         "Display", "Window mode, orientation, aspect ratio, render scale, and V-Sync."),
       SubmenuRow("settings_graphics_menu", "settings_graphics_screen",
                                          "Graphics",
                                          "Rendering quality: anti-aliasing, filtering, and depth of field.")
@@ -1163,6 +1163,9 @@ std::vector<PanelSpec> AllPanels() {
                                         "Run the game windowed, borderless, or full screen.",
                                         Choices({"windowed", "Windowed", "borderless",
                                                  "Borderless", "fullscreen", "Full Screen"})),
+                              SelectRow("settings_orientation", "graphics.orientation", "Orientation",
+                                        "Portrait arranges the menus, HUD and gameplay. Restart to apply.",
+                                        Choices({"landscape", "Landscape", "portrait", "Portrait"})),
                               SelectRow("settings_aspect_ratio", "graphics.aspect_ratio", "Aspect Ratio",
                                         "Auto follows your display shape. Restart to apply.",
                                         Choices({"auto", "Auto", "16:9", "16:9", "16:10", "16:10",
@@ -2887,6 +2890,15 @@ std::vector<std::string> PanelNames() {
     }
   }
   return out;
+}
+
+std::string PanelScene(std::string_view name) {
+  if (name == "messages_update_panel") return "../pause/settings_confirmation.milo";
+  if (!name.starts_with("settings_")) return {};
+  for (const auto& context : {AllPanels(), InSongPanels()})
+    for (const auto& panel : context)
+      if (panel.name == name) return panel.scene;
+  return {};
 }
 
 std::vector<std::string> ScreenNames() {

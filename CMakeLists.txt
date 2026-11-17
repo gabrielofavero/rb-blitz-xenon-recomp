@@ -162,6 +162,7 @@ set(RBBLITZ_SOURCES
     src/hooks/render_settings.cpp
     src/hooks/settings_payload.cpp
     src/settings/menu_payload.cpp
+    src/ui/gameplay_presentation.cpp
     src/ui/settings_screen.cpp
     src/ui/input_font_scene.cpp
     src/ui/input_icon_rows.cpp
@@ -453,7 +454,7 @@ endforeach()
 if(NOT RBBLITZ_GAME_VERSION)
     message(FATAL_ERROR "installer/config/pins.toml [installer] version is missing or invalid")
 endif()
-target_compile_definitions(rb_blitz PRIVATE "RBBLITZ_GAME_VERSION=\"${RBBLITZ_GAME_VERSION}\"")
+target_compile_definitions(rb_blitz PRIVATE RB_BLITZ_TOUCH_HUD=1 "RBBLITZ_GAME_VERSION=\"${RBBLITZ_GAME_VERSION}\"")
 message(STATUS "rb_blitz: game version ${RBBLITZ_GAME_VERSION}")
 # A checkout boot runs rb_blitz.exe from the build tree; make its offline fallback available there
 # too. The installer stages the canonical source file separately in make_payload.ps1.
@@ -778,6 +779,10 @@ if(BUILD_TESTING)
         target_include_directories(rb_blitz_metal_surface_tests PRIVATE tests)
         target_link_libraries(rb_blitz_metal_surface_tests PRIVATE rex::runtime "-framework QuartzCore")
         add_test(NAME metal_surface COMMAND rb_blitz_metal_surface_tests)
+        add_executable(rb_blitz_presenter_paint_recovery_tests tests/presenter_paint_recovery_tests.cpp)
+        target_include_directories(rb_blitz_presenter_paint_recovery_tests PRIVATE tests)
+        target_link_libraries(rb_blitz_presenter_paint_recovery_tests PRIVATE rex::runtime)
+        add_test(NAME presenter_paint_recovery COMMAND rb_blitz_presenter_paint_recovery_tests)
         if(REXGLUE_USE_VULKAN)
             add_executable(rb_blitz_moltenvk_drawable_lifetime_tests tests/moltenvk_drawable_lifetime_tests.mm)
             target_include_directories(rb_blitz_moltenvk_drawable_lifetime_tests PRIVATE tests
@@ -1060,6 +1065,10 @@ if(BUILD_TESTING)
         target_link_libraries(rb_blitz_native_pipeline_cache_tests PRIVATE ws2_32)
     endif()
     add_test(NAME native_pipeline_cache COMMAND rb_blitz_native_pipeline_cache_tests)
+
+    add_executable(rb_blitz_visible_region_tests tests/visible_region_tests.cpp)
+    target_include_directories(rb_blitz_visible_region_tests PRIVATE "${REXSDK_DIR}/include")
+    add_test(NAME visible_region COMMAND rb_blitz_visible_region_tests)
 
     if(WIN32 AND REXGLUE_USE_VULKAN)
         add_executable(rb_blitz_vulkan_texture_descriptor_cache_tests

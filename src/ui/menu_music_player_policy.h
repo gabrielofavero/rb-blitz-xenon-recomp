@@ -12,11 +12,21 @@ struct Layout {
   MenuBounds panel, cover;
   std::array<MenuBounds, 3> controls{};
   float scale = 0;
+  bool compact = false;
 };
 // Logical (96 DPI) units, shared by drawing and the event listener. Keep the
 // player low in the right margin, alongside the guest's left/center prompts.
 inline Layout PlayerLayout(float width, float height) {
-  if (width < 320 || height < 240) return {};
+  if (width < (width < height ? 160 : 320) || height < 240) return {};
+  if (width < height) {
+    const float s = width < 320 ? width / 402.f : std::clamp(width / 402.f, 1.f, 1.6f);
+    const float right = width - 16 * s, bottom = height - 44 * s;
+    Layout l{{16 * s, bottom - 72 * s, right, bottom}, {}, {}, s, true};
+    for (int i = 0; i < 3; ++i)
+      l.controls[i] = {right - (150 - 48 * i) * s, bottom - 58 * s,
+                       right - (106 - 48 * i) * s, bottom - 14 * s};
+    return l;
+  }
   const float s = std::min({height / 720.f, width / 960.f, 1.6f});
   const float right = width - 24 * s, bottom = height - 24 * s;
   Layout l{{right - 332 * s, bottom - 100 * s, right, bottom},

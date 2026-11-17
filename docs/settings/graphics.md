@@ -1297,3 +1297,110 @@ pending submissions. Lifecycle diagnostics use the `ios_lifecycle` prefix.
 Headless regressions cover queue draining, blocked background submissions,
 duplicate notifications, repeated resume, startup event pumping, clock continuity,
 and old safe/desktop recovery values. Device switching remains a manual gate.
+
+
+## Portrait gameplay experiment (2026-11-16)
+
+Audio & Video > Display > Orientation offers Landscape (default) and Portrait,
+applied after restarting. Both orientations render the same landscape source;
+portrait gameplay crops its centre at a uniform scale. For 16:9 at 1x the source
+is still 1280x720, with a 405x720 visible viewport. The camera projection and
+vertical FOV are unchanged. The title, main menu, connection/content scan and song loading fill the portrait
+window, using the first two layouts in the
+[portrait reference](../reference/rock-band-blitz-portrait.html). Other menus
+fit the original landscape image inside the portrait window. Native confirmations
+(including Exit Game and settings prompts) and error popups keep portrait
+presentation, with their content scaled to fit the visible width. The confirmation
+animation's scale keys use the same fit; its full-screen shade stays unscaled.
+
+The initial narrow-frame implementation was stretched and its visual validation
+was insufficient. It is superseded by the landscape-source crop above. The
+presenter needed SDK patch 0083: its runtime configuration setter previously
+ignored changes to the overscan-cutoff flag. Cropping now uses the existing
+centred presentation arithmetic, and restores fitted presentation outside play
+and the splash panel.
+
+The generated splash DTA places the existing animated logo, start button and
+option list, and hides the redundant Select/Back footer hints. The logo has a larger title pose and a smaller
+main-menu pose. Horizontal placement centers the wordmark mesh itself; its
+asymmetric decorations do not determine its center. The city mesh is scaled
+independently, with its bottom at the viewport bottom, to fit more skyline
+across the narrow frame. An entry/poll callback updates transforms only when the native
+start/main-menu state changes; native selection, Back, focus and scrolling
+handlers remain intact. Layout sizes follow the boot's visible portrait aspect,
+with vertical limits reserving the top inset, six rows and music player.
+The installed `list_splash.milo_xbox` supplies wider selection cells and increased
+row spacing only in portrait builds. Its native `UIListMesh` button slot is
+derived from the installed options list: normal rows have a dark background
+and white text, and the selected row uses a yellow native mesh. The original
+`UIListHighlight` reshapes its geometry into an underline during Draw, so both
+button states use `UIListMesh` slots drawn before the labels. A private copy of
+the installed bold font disables environment lighting for those labels, keeping
+their white/black contrast consistent as background lights move. Selection and
+actions stay with the original list. The title panel uses its existing mesh,
+made visible and colored gold, without its old neon strips. A native vertex-alpha
+mesh adds a soft edge shade (at most 29% opacity in the corners), leaving the
+central half completely transparent. The original sky colors, moving pattern,
+rays and flash animation remain intact. Connection and song loading preserve
+their native entry work and fit their content to the portrait width; song tips,
+power-ups and the begin prompt occupy separate vertical slots. The existing
+music player becomes a compact bottom bar with title,
+artist and three outlined controls at least 44 logical pixels square on phone-sized
+surfaces; very small desktop windows scale the bar to remain visible. Landscape retains
+its existing player and splash layout. Host checks exercise state transitions,
+layout bounds, native record preservation, vignette vertex alpha and face indices,
+and pointer actions. The title and main menu were also driven on macOS and compared
+against WebKit snapshots of the HTML at the same aspect ratio. Captures under
+`out/portrait-menu/compare/` record the corrected button states, typography, skyline,
+music bar and lighter animated background. Device-specific safe areas still need
+an iOS device check. A native song-selection run also confirmed that loading
+fills the portrait surface and keeps the tip, power-ups and Begin prompt separate.
+
+HUD positions use the visible crop bounds independently of the source frame.
+The score is centred at the top, with the star meter at the same height on the
+right; both use a 0.5 scale. The multiplier ladder
+and personal-best comparator share a 0.65 scale at centre left and centre right;
+collected letters sit above them. The song progress bar rotates 90 degrees
+clockwise near the bottom at a 0.8 scale, with the centred textual timer just above the bar.
+The transient personal-best message is right-aligned above the comparator.
+The streak uses a 1.2 scale below the multiplier ladder. Temporary achievement toasts may overlap it. Label draw
+preparation handles clean guest transform
+caches, while scaling inherited named anchors only once. Landscape authored
+positions are unchanged. The hidden keys of the personal-best animation remain
+offscreen during normal play.
+
+Portrait touch buttons use 44-point squares stacked at the safe left edge,
+pause above power-up. The guest draws these controls; hit testing uses the same
+rectangles. Achievement toasts are centred at the bottom of portrait surfaces
+(SDK patch 0084), with a reserved strip below the permanent HUD labels.
+
+`--touch_preview=true` enables a desktop visual test of the real iOS guest
+controls, including a ready power-up and the transient personal-best label.
+The input viewer follows its normal setting; the visual test disables it. The preview requests a real achievement toast
+without unlocking an achievement. It is off by default and does not change
+normal desktop or iOS gameplay. Optional HUD settings and comparison scores in
+the validation run belong to an isolated profile under `out/macos/portrait/`.
+
+The crop and full HUD are validated on macOS Vulkan; screenshots and logs are
+under `out/macos/portrait-crop/`. iOS uses the same layout and declares portrait
+support, with the selected orientation supplied to SDL before window creation.
+Device portrait rotation and touch placement still need a device visual check.
+
+Portrait rendering cutoff (SDK patch 0085) now intersects the main-frame draw
+scissor with the visible crop, plus a 32-source-pixel filtering apron on each
+side. It keeps the existing viewport/projection and maps the crop into each
+horizontal EDRAM tile before applying the render multiplier. At 1280x720 with
+a 405-pixel crop, eligible draws retain x=[405,875): 470 pixels including the
+apron, instead of 1280. Main color/depth identity and viewport checks preserve
+auxiliary shadow/bloom/downsample passes, small helper clears, memory exports,
+visibility queries, and multiple-render-target draws. The GPU thread snapshots
+the opt-in policy at swap boundaries; leaving gameplay disables it.
+
+This reduces main-scene pixel shading, not geometry submission, full-size
+attachment allocation, or all resolve/presentation work. The main EDRAM pair
+is guarded by its measured register identity, so an unrecognized layout keeps
+full rendering. `--portrait_render_cutoff=false` restores the original full
+rendering for comparisons; `--draw_visible_region_probe=true` records bounded
+scissor-area counters. Those counters describe rasterization bounds, not actual
+fragment invocations or GPU timestamps. The comparison evidence and scale
+results are recorded in [the Vulkan performance record](../engine/vulkan-performance.md).

@@ -114,6 +114,7 @@ struct MenuConfiguration {
   // Opt-in owner diagnostic for the unverified loaded-list refresh path.
   bool menu_refresh_trial = false;
   bool four_by_three = false;
+  float portrait_aspect = 9.f / 16.f;
   bool trial_mode = false;
   bool controller_layout_enabled = false;
   // The refresh shortcut's visibility. Its control stays reachable under Main Menu / Extra Items.
@@ -260,6 +261,8 @@ bool AddDeferredScreens(std::vector<dtb::Node>* nodes, std::string* reason);
 // The panel names, in declaration order. The root is first, and every panel appears twice: once for
 // the main-menu context, once for the in-song one.
 std::vector<std::string> PanelNames();
+// Authored scene path for a project-owned panel; empty for an unknown panel.
+std::string PanelScene(std::string_view panel);
 
 // The screen names, in declaration order. The two contexts of each screen are adjacent.
 std::vector<std::string> ScreenNames();

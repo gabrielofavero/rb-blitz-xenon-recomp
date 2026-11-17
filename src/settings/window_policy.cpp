@@ -6,6 +6,9 @@
 
 #include "settings/window_policy.h"
 
+#include <algorithm>
+#include <numeric>
+
 namespace rb_blitz::settings {
 namespace {
 
@@ -66,12 +69,14 @@ ClientFit FitClientToDesktop(const DisplayMode& requested, const DesktopMetrics&
 
   // Never below the floor. The first clamp that fires decides the other axis, so the shape stays
   // the request's shape even at the floor.
-  if (width < kMinClientSize.width) {
-    width = kMinClientSize.width;
+  const DisplayMode minimum = requested.width < requested.height
+      ? DisplayMode{kMinClientSize.height, kMinClientSize.width} : kMinClientSize;
+  if (width < minimum.width) {
+    width = minimum.width;
     height = HeightForWidth(width, requested);
   }
-  if (height < kMinClientSize.height) {
-    height = kMinClientSize.height;
+  if (height < minimum.height) {
+    height = minimum.height;
     width = WidthForHeight(height, requested);
   }
 
@@ -79,6 +84,22 @@ ClientFit FitClientToDesktop(const DisplayMode& requested, const DesktopMetrics&
   fit.client.height = int32_t(height);
   fit.shrunk = fit.client.width != requested.width || fit.client.height != requested.height;
   return fit;
+}
+
+DisplayMode PortraitCropSize(const DisplayMode& source) {
+  if (!Positive(source)) return {};
+  return {int32_t(RoundDiv(int64_t(source.height) * source.height, source.width)), source.height};
+}
+
+DisplayMode PresentationVideoMode(const DisplayMode& render) {
+  if (!Positive(render)) return render;
+  if (render.width >= 640 && render.height >= 480 &&
+      render.width <= 4095 && render.height <= 4095) return render;
+  const int divisor = std::gcd(render.width, render.height);
+  const DisplayMode ratio{render.width / divisor, render.height / divisor};
+  const int multiple = std::max((640 + ratio.width - 1) / ratio.width,
+                                (480 + ratio.height - 1) / ratio.height);
+  return {ratio.width * multiple, ratio.height * multiple};
 }
 
 DisplayMode PhysicalToLogical(const DisplayMode& physical, const uint32_t scale_percent) {

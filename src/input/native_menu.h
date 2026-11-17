@@ -95,15 +95,17 @@ struct MenuHintTarget {
   uint32_t screen = 0, focus = 0, frame = 0;
   MenuBounds bounds;
   uint16_t button = 0;
+  uint32_t scope = 0; // zero for the ordinary page; otherwise the active dialog owner
 };
 // Guest-thread draw bridge: the footer supplies its own full UILabel pointer
 // and native action after assigning the label's final world transform.
-void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t action);
+void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t action,
+                     uint32_t owner);
 inline uint16_t HitMenuHint(MenuPoint point, const std::vector<MenuHintTarget>& targets,
-                            uint32_t screen, uint32_t focus, uint32_t frame) {
+                            uint32_t screen, uint32_t focus, uint32_t frame, uint32_t scope = 0) {
   // Reverse draw order gives a later drawn footer priority if labels overlap.
   for (auto it = targets.rbegin(); it != targets.rend(); ++it)
-    if (it->screen == screen && it->focus == focus && it->frame + 1 == frame &&
+    if (it->screen == screen && it->focus == focus && it->frame + 1 == frame && it->scope == scope &&
         it->bounds.Contains(point)) return it->button;
   return 0;
 }
@@ -134,12 +136,12 @@ enum class MouseAction { kMove, kAccept, kBack, kUp, kDown, kLeft, kRight,
                          kScrollbarDown, kScrollbarDrag, kScrollbarUp };
 struct MenuMouseEvent { MouseAction action; MenuPoint point; };
 
-// The preset page's arrows are meshes, not focused list rows. Their projected
+// Menu arrows are meshes, not focused list rows. Their projected
 // rectangles are supplied by the guest scene; a small margin makes the thin
 // arrow art practical to click without turning the space between them into a target.
-inline std::optional<MouseAction> HitPresetArrow(MenuPoint point,
-                                                const std::optional<MenuBounds>& left,
-                                                const std::optional<MenuBounds>& right) {
+inline std::optional<MouseAction> HitMenuArrow(MenuPoint point,
+                                             const std::optional<MenuBounds>& left,
+                                             const std::optional<MenuBounds>& right) {
   const auto hit = [point](const std::optional<MenuBounds>& bounds) {
     return bounds && MenuBounds{bounds->left - .012f, bounds->top - .012f,
                                 bounds->right + .012f, bounds->bottom + .012f}.Contains(point);
@@ -147,6 +149,13 @@ inline std::optional<MouseAction> HitPresetArrow(MenuPoint point,
   if (hit(left)) return MouseAction::kLeft;
   if (hit(right)) return MouseAction::kRight;
   return {};
+}
+
+// Page the visible icons without accepting or changing the equipped powerup.
+inline int MenuArrowPage(int first, int display, int max_first, MouseAction direction) {
+  const int step = std::max(1, display);
+  return int(std::clamp(int64_t(first) + (direction == MouseAction::kLeft ? -int64_t(step) : step),
+                        int64_t(0), int64_t(std::max(0, max_first))));
 }
 
 // Small lists retain precise single-row scrolling. Large song libraries scale to
@@ -305,9 +314,9 @@ struct MenuRailDrag {
 // Every screen/focus boundary discards queued input, including partial wheel ticks.
 class MenuMouseQueue {
  public:
-  void Context(uint32_t screen, uint32_t focus, bool enabled) {
-    if (screen != screen_ || focus != focus_ || enabled != enabled_) Reset();
-    screen_ = screen; focus_ = focus; enabled_ = enabled;
+  void Context(uint32_t screen, uint32_t focus, bool enabled, uint32_t panel = 0) {
+    if (screen != screen_ || focus != focus_ || enabled != enabled_ || panel != panel_) Reset();
+    screen_ = screen; focus_ = focus; enabled_ = enabled; panel_ = panel;
   }
   void Reset() {
     events_.clear(); scrollbar_.clear(); wheel_ = 0;
@@ -384,7 +393,7 @@ class MenuMouseQueue {
   // driver's connectivity/packet queries must not consume the pulse.
   uint16_t SamplePad() { sampled_ = true; return pulse(); }
  private:
-  uint32_t screen_ = 0, focus_ = 0;
+  uint32_t screen_ = 0, focus_ = 0, panel_ = 0;
   bool enabled_ = false;
   int wheel_ = 0, frames_ = 0;
   uint16_t pulse_ = 0;
@@ -448,6 +457,8 @@ bool MenuAvailable();
 bool MenuScreenIs(std::string_view name);
 // One coherent view of the splash option list; pre-press title has no drawn list.
 bool MainMenuMusicInputAvailable();
+// Portrait title/main menu, loading panels, and native confirmation/error prompts.
+bool PortraitSplashActive();
 
 // A live song: the screen is `game_screen` and the focused panel is not the pause panel
 // (the same split `MenuAvailable` uses to let pause take the pad). False on every menu, on

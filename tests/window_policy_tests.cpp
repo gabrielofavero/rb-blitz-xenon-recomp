@@ -168,5 +168,40 @@ int main() {
     CHECK_FALSE(SameAspect({1280, 720}, {960, 720}));
   }
 
+  BeginCase("portrait is a full-height crop of the same landscape image");
+  {
+    const auto crop = rb_blitz::settings::PortraitCropSize({1280, 720});
+    CHECK_EQ(crop.width, 405);
+    CHECK_EQ(crop.height, 720);
+    // Same scale on both axes: 1280x720 fills a 405x720 viewport with only
+    // the horizontal excess clipped. The centre line and vertical FOV stay fixed.
+    const double scale = 1440.0 / 720;
+    CHECK_EQ(int(1280 * scale), 2560);
+    CHECK_EQ(int(crop.width * scale), 810);
+    CHECK_EQ((2560 - 810) / 2, 875);
+    CHECK_EQ(rb_blitz::settings::PortraitCropSize({1152, 720}).width, 450);
+  }
+
+  BeginCase("portrait video mode preserves the exact render aspect inside SDK cvar bounds");
+  for (const DisplayMode render : {DisplayMode{400, 720}, DisplayMode{448, 720},
+                                   DisplayMode{624, 2160}, DisplayMode{1200, 2160},
+                                   DisplayMode{1280, 720}, DisplayMode{5760, 2160}}) {
+    const auto video = rb_blitz::settings::PresentationVideoMode(render);
+    CHECK_TRUE(video.width >= 640 && video.height >= 480);
+    CHECK_TRUE(video.width <= 4095 && video.height <= 4095);
+    CHECK_EQ(int64_t(video.width) * render.height, int64_t(video.height) * render.width);
+  }
+  BeginCase("a large portrait window fits the desktop without the landscape minimum pushing it out");
+  {
+    DesktopMetrics desktop;
+    desktop.available = true;
+    desktop.work_area = {1440, 900};
+    desktop.frame_extent = {0, 32};
+    const auto fit = FitClientToDesktop({1200, 2160}, desktop);
+    CHECK_TRUE(fit.client.width <= desktop.work_area.width);
+    CHECK_TRUE(fit.client.height <= desktop.work_area.height - desktop.frame_extent.height);
+    CHECK_TRUE(SameAspect(fit.client, {1200, 2160}, 2));
+  }
+
   return Finish();
 }

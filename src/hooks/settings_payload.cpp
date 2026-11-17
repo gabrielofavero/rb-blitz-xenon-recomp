@@ -382,6 +382,8 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
     configuration.menu_refresh_trial = true;
     configuration.four_by_three = uint64_t(BootRenderWidth()) * 3 ==
                                   uint64_t(BootRenderHeight()) * 4;
+    if (BootPortraitHeight())
+      configuration.portrait_aspect = float(BootPortraitWidth()) / BootPortraitHeight();
     configuration.download_content_row = download_content_row;
     // Shortcut settings have a fixed inventory; these boot values control the actual menu rows.
     configuration.refresh_row_on = refresh_row_on;
@@ -412,7 +414,8 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
       rex::cvar::GetFlagByName("startup_mode") == "fast";
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), refresh_row_on, &build_notes, menu_filter::HiddenRows(),
-                        skip_startup_logos, &refresh_routes, maybe_pump))
+                        skip_startup_logos, &refresh_routes, maybe_pump,
+                        BootPortraitWidth() != 0))
     return fail();
   PumpStartupWindow(pump_startup_window);
   bool song_entry_patched = false;

@@ -19,12 +19,16 @@ Layout MakeLayout(float width, float height, Rect safe) {
   const float gap = std::max(8.f, height * .025f);
   // The installed HUD's prompt is a 54-unit disc in a 480-unit-high scene.
   // Pause always starts at the safe left edge; never reserve a slot before it.
-  const float side = std::max(0.f, std::min({std::max(height * .1125f, 44.f),
+  const bool portrait = width < height;
+  const float preferred_side = portrait ? 44.f : std::max(height * .1125f, 44.f);
+  const float side = std::max(0.f, std::min({preferred_side,
       (safe.width - margin * 2 - gap) / 2, safe.height - margin * 2}));
   const float x = safe.x + margin;
-  const float y = std::clamp(height * (59.3836f / 480.f) - side / 2,
+  const float y = portrait ? safe.y + margin : std::clamp(height * (59.3836f / 480.f) - side / 2,
       safe.y + margin, safe.y + std::max(margin, safe.height - margin - side));
-  return {width, height, {x, y, side, side}, {x + side + gap, y, side, side}};
+  const Rect powerup = portrait ? Rect{x, y + side + gap, side, side}
+                                : Rect{x + side + gap, y, side, side};
+  return {width, height, {x, y, side, side}, powerup};
 }
 void Gestures::SetLayout(Layout layout) {
   if (layout_ == layout) return;
