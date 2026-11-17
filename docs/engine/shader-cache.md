@@ -10,6 +10,22 @@ below, and the plan that scopes them is
 Cite as "`docs/engine/shader-cache.md` part N §X". Part numbers are stable; section numbers repeat
 across parts on purpose.
 
+## SDK maintenance evidence (2026-11-17)
+
+The [current SDK patch ledger](../../patches/README.md#current-stack-and-lineage-2026-11-17)
+records source-equivalent consolidation of preparation accounting/lifecycle and
+native cache rejection replacement. Payload readiness, audio scheduling and
+nonblocking pipeline publication keep separate patch boundaries. Translator
+version 14 and native-cache identity/version contracts are preserved.
+
+The unused SDK startup preparation waiter was removed: Blitz's
+`DeferShaderStoragePreparation()` always returns true, including the inherited
+iOS importer route. The default SDK app does not request startup paint. This
+removal preserves the title's post-A preparation, independent startup paint,
+guest refresh sequence and UI-only display confirmation. The unused general
+present counter and guest-output boolean were also removed. Clean replay and
+host checks do not establish new runtime or performance acceptance.
+
 ## Part 1 — Loading boundary and measurement workflow (was `docs/engine/shader-cache-p0.md`, P0)
 
 > Update, 2026-10-24: part 6 now implements the source-supported

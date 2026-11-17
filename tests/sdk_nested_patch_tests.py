@@ -39,33 +39,40 @@ class NestedPatchTests(unittest.TestCase):
                     fromfile="a/" + path, tofile="b/" + path))
 
             git(child, "init", "-q")
-            (child / "a.txt").write_text("original\n")
-            (child / "untouched.txt").write_text("keep\n")
+            git(child, "config", "core.autocrlf", "false")
+            (child / "a.txt").write_text("original\n", newline="\n")
+            (child / "untouched.txt").write_text("keep\n", newline="\n")
             commit(child)
             git(sdk, "init", "-q")
-            (sdk / "a.txt").write_text("parent\n")
+            git(sdk, "config", "core.autocrlf", "false")
+            (sdk / "a.txt").write_text("parent\n", newline="\n")
             pin = commit(sdk)
-            (patches / "0001.patch").write_text(patch("a.txt", "parent\n", "patched parent\n"))
-            (nested / "0001.patch").write_text(patch("a.txt", "original\n", "first\n"))
-            (nested / "0002.patch").write_text(patch("a.txt", "first\n", "final\n"))
+            (patches / "0001.patch").write_text(patch("a.txt", "parent\n", "patched parent\n"), newline="\n")
+            (nested / "0001.patch").write_text(patch("a.txt", "original\n", "first\n"), newline="\n")
+            (nested / "0002.patch").write_text(patch("a.txt", "first\n", "final\n"), newline="\n")
 
             with self.assertRaises(SystemExit):
                 patcher.apply_patch_set(sdk, patches, pin, True)
             self.assertEqual((child / "a.txt").read_text(), "original\n")
+            (sdk / "a.txt").write_text("parent conflict\n", newline="\n")
+            with self.assertRaises(SystemExit):
+                patcher.apply_patch_set(sdk, patches, pin, False)
+            self.assertEqual((child / "a.txt").read_bytes(), b"original\n")
+            (sdk / "a.txt").write_text("parent\n", newline="\n")
             patcher.apply_patch_set(sdk, patches, pin, False)
             patcher.apply_patch_set(sdk, patches, pin, True)
             patcher.apply_patch_set(sdk, patches, pin, False)
             self.assertEqual((child / "a.txt").read_text(), "final\n")
 
-            (child / "a.txt").write_text("user edit\n")
+            (child / "a.txt").write_text("user edit\n", newline="\n")
             with self.assertRaises(SystemExit):
                 patcher.apply_patch_set(sdk, patches, pin, False)
             self.assertEqual((child / "a.txt").read_text(), "user edit\n")
-            (child / "a.txt").write_text("final\n")
-            (child / "untouched.txt").write_text("user edit\n")
+            (child / "a.txt").write_text("final\n", newline="\n")
+            (child / "untouched.txt").write_text("user edit\n", newline="\n")
             with self.assertRaises(SystemExit):
                 patcher.apply_patch_set(sdk, patches, pin, True)
-            (child / "untouched.txt").write_text("keep\n")
+            (child / "untouched.txt").write_text("keep\n", newline="\n")
 
             commit(child)
             with self.assertRaisesRegex(SystemExit, "pinned commit"):

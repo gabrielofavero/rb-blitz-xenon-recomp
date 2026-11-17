@@ -1088,10 +1088,8 @@ if(BUILD_TESTING)
         add_test(NAME vulkan_texture_conversion COMMAND rb_blitz_vulkan_texture_conversion_tests)
         set_tests_properties(vulkan_texture_conversion PROPERTIES SKIP_RETURN_CODE 77)
     endif()
-    if(WIN32)
-        add_test(NAME sdk_patch_stack
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdk_patch_stack_tests.py")
-    endif()
+    add_test(NAME sdk_patch_stack
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdk_patch_stack_tests.py")
     if(WIN32 AND REXGLUE_USE_D3D12)
         add_executable(rb_blitz_d3d12_fence_sync_tests tests/d3d12_fence_sync_tests.cpp)
         target_include_directories(rb_blitz_d3d12_fence_sync_tests PRIVATE "${REXSDK_DIR}/include")

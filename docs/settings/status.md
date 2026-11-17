@@ -530,7 +530,7 @@ No game/UI navigation was performed for this delivery.
 - **The window follows the resolution now (P2 of the installed-game review, 2026-10-14)**: the boot
   writes `video_mode_width/height` (the presenter scales into a region of the frame's own shape),
   `window_width/height` when the decorated window would not fit the desktop's usable area, and
-  `window_resizable = false` ([patch 0017](../../patches/rexglue-sdk/0017-fixed-size-window.patch)) —
+  `window_resizable = false` ([patch 0017](../../patches/rexglue-sdk/0016-desktop-display-mode.patch)) —
   measured: a first run with **nothing stored** reaches 2560x1080 on this machine's 21:9 primary with
   a 2354x993 client and no `WS_THICKFRAME`. The game window is deliberately one size; the Controller
   Settings utility is untouched. See [graphics.md](graphics.md) part 3 §11.

@@ -122,13 +122,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_pa
    **Do not** try to fix this by setting `core.symlinks true` in the submodules:
    checkout then fails with `unable to create symlink …: Function not implemented`
    and deletes the file.
-2. **`apply_sdk_patches.ps1`** applies [patches/rexglue-sdk/](../../patches/rexglue-sdk)
-   to the pinned checkout — currently the log-once fix for the "Too few processor
-   cores" warning, and the 32-bit fixed-point texture support that the note
-   highway needs ([bringup-log.md](../history/bringup-log.md) B-010). It prints each patch as
-   *already applied*, *applied now*, or *failed* (exit 1, with guidance). `-Check`
-   reports without writing. It also audits the SDK work tree: any edit not covered
-   by a patch is listed as `UNEXPECTED` and exits 1.
+2. **`apply_sdk_patches.ps1`** replays the complete
+   [SDK patch stack](../../patches/README.md), including the initialized pinned
+   MoltenVK dependency, using the shared Python engine (Python 3.10+ on `PATH`).
+   Initialize with `git submodule update --init --recursive` before applying.
+   It verifies final source and pins before writing; conflicts or tracked edits
+   outside patch coverage fail. `-Check` audits without writing. PowerShell accepts
+   CRLF equivalents and reports unrelated untracked files; native Python requires
+   exact bytes and rejects them. Both reject pin drift. Hosted Linux/Windows
+   push/PR checks in `.github/workflows/sdk-patches.yml` exercise clean replay and
+   repeated invocation without private game data or SDK compilation.
 
 Afterwards the submodule showing ` M` on the files the patch set names is the
 expected, correct state — they are the applied patches, not drift to be cleaned.

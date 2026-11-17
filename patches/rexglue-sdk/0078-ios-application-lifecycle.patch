@@ -1,3 +1,131 @@
+diff --git a/include/rex/chrono/clock.h b/include/rex/chrono/clock.h
+--- a/include/rex/chrono/clock.h
++++ b/include/rex/chrono/clock.h
+@@ -53,6 +53,8 @@
+ 
+   // Guest time scalar.
+   static double guest_time_scalar();
++  // Exclude application suspension without changing duration scaling.
++  static void SetGuestPaused(bool paused);
+   // Sets the guest time scalar, adjusting tick and wall clock speed.
+   // Ex: 1x=normal, 2x=double speed, 1/2x=half speed.
+   static void set_guest_time_scalar(double scalar);
+diff --git a/include/rex/graphics/vulkan/graphics_system.h b/include/rex/graphics/vulkan/graphics_system.h
+--- a/include/rex/graphics/vulkan/graphics_system.h
++++ b/include/rex/graphics/vulkan/graphics_system.h
+@@ -25,6 +25,7 @@
+   static bool IsAvailable() { return true; }
+ 
+   std::string name() const override;
++  void SetApplicationActive(bool active) override;
+ 
+  protected:
+   void CreateProvider(bool with_presentation) override;
+diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
+--- a/include/rex/rex_app.h
++++ b/include/rex/rex_app.h
+@@ -104,6 +104,8 @@
+ 
+   /// Called after runtime is fully initialized, before window creation.
+   virtual void OnPostSetup() {}
++
++  virtual void OnApplicationActiveChanged(bool active) { (void)active; }
+ 
+   /// Called after ImGui drawer is created. Add custom dialogs here.
+   virtual void OnCreateDialogs(ui::ImGuiDrawer* drawer) { (void)drawer; }
+@@ -276,6 +278,7 @@
+   void SetGuestFrameStats(ui::DebugOverlayDialog::FrameStatsProvider provider);
+ 
+  private:
++  void HandleApplicationActivation(bool active);
+   std::function<void(PathConfig)> MakeResumeCallback();
+ 
+   // Stand up the ImGui overlay stack (drawer, F3/Backtick/F4 binds, dialogs)
+diff --git a/include/rex/system/interfaces/audio.h b/include/rex/system/interfaces/audio.h
+--- a/include/rex/system/interfaces/audio.h
++++ b/include/rex/system/interfaces/audio.h
+@@ -24,6 +24,8 @@
+   virtual ~IAudioSystem() = default;
+   virtual X_STATUS Setup(KernelState* kernel_state) = 0;
+   virtual void Shutdown() = 0;
++  virtual void Pause() {}
++  virtual void Resume() {}
+ };
+ 
+ }  // namespace rex::system
+diff --git a/include/rex/system/interfaces/graphics.h b/include/rex/system/interfaces/graphics.h
+--- a/include/rex/system/interfaces/graphics.h
++++ b/include/rex/system/interfaces/graphics.h
+@@ -50,6 +50,8 @@
+                                  KernelState* kernel_state) = 0;
+ 
+   virtual bool has_presentation() const = 0;
++
++  virtual void SetApplicationActive(bool active) { (void)active; }
+ 
+   // --- Optional capabilities, default no-op -------------------------------
+ 
+diff --git a/include/rex/ui/vulkan/device.h b/include/rex/ui/vulkan/device.h
+--- a/include/rex/ui/vulkan/device.h
++++ b/include/rex/ui/vulkan/device.h
+@@ -16,6 +16,7 @@
+ #include <vector>
+ 
+ #include <rex/ui/vulkan/instance.h>
++#include <rex/ui/vulkan/queue_lifecycle.h>
+ 
+ namespace rex {
+ namespace ui {
+@@ -261,15 +262,19 @@
+     std::recursive_mutex mutex;
+     VkQueue queue = nullptr;
+ 
+-    explicit Queue(const VkQueue queue) : queue(queue) {}
++    QueueLifecycle* lifecycle = nullptr;
++    explicit Queue(const VkQueue queue, QueueLifecycle* lifecycle = nullptr)
++        : queue(queue), lifecycle(lifecycle) {}
+ 
+     class Acquisition {
+      public:
+-      explicit Acquisition(Queue& queue) : lock_(queue.mutex), queue_(queue.queue) {}
++      explicit Acquisition(Queue& queue)
++          : permit_(queue.lifecycle), lock_(queue.mutex), queue_(queue.queue) {}
+ 
+       VkQueue queue() const { return queue_; }
+ 
+      private:
++      QueueLifecycle::Permit permit_;
+       std::unique_lock<std::recursive_mutex> lock_;
+       VkQueue queue_;
+     };
+@@ -294,6 +299,8 @@
+     return queue_families()[queue_family_index].queues[queue_index]->Acquire();
+   }
+ 
++  void SetApplicationActive(bool active);
++
+   struct MemoryTypes {
+     uint32_t device_local = 0b0;
+     uint32_t host_visible = 0b0;
+@@ -312,6 +319,7 @@
+   Properties properties_;
+   Extensions extensions_;
+ 
++  QueueLifecycle queue_lifecycle_;
+   VkDevice device_ = nullptr;
+ 
+   mutable std::atomic<VkPipelineCache> shared_pipeline_cache_{VK_NULL_HANDLE};
+diff --git a/include/rex/ui/vulkan/functions/device_1_0.inc b/include/rex/ui/vulkan/functions/device_1_0.inc
+--- a/include/rex/ui/vulkan/functions/device_1_0.inc
++++ b/include/rex/ui/vulkan/functions/device_1_0.inc
+@@ -83,6 +83,7 @@
+ XE_UI_VULKAN_FUNCTION(vkResetFences)
+ XE_UI_VULKAN_FUNCTION(vkQueueBindSparse)
+ XE_UI_VULKAN_FUNCTION(vkQueueSubmit)
++XE_UI_VULKAN_FUNCTION(vkDeviceWaitIdle)
+ XE_UI_VULKAN_FUNCTION(vkUnmapMemory)
+ XE_UI_VULKAN_FUNCTION(vkUpdateDescriptorSets)
+ XE_UI_VULKAN_FUNCTION(vkWaitForFences)
 diff --git a/include/rex/ui/vulkan/queue_lifecycle.h b/include/rex/ui/vulkan/queue_lifecycle.h
 new file mode 100644
 --- /dev/null
@@ -67,166 +195,6 @@ new file mode 100644
 +  Pump pump_;
 +};
 +}  // namespace rex::ui::vulkan
-diff --git a/include/rex/ui/vulkan/device.h b/include/rex/ui/vulkan/device.h
---- a/include/rex/ui/vulkan/device.h
-+++ b/include/rex/ui/vulkan/device.h
-@@ -16,6 +16,7 @@
- #include <vector>
- 
- #include <rex/ui/vulkan/instance.h>
-+#include <rex/ui/vulkan/queue_lifecycle.h>
- 
- namespace rex {
- namespace ui {
-@@ -261,15 +262,19 @@
-     std::recursive_mutex mutex;
-     VkQueue queue = nullptr;
- 
--    explicit Queue(const VkQueue queue) : queue(queue) {}
-+    QueueLifecycle* lifecycle = nullptr;
-+    explicit Queue(const VkQueue queue, QueueLifecycle* lifecycle = nullptr)
-+        : queue(queue), lifecycle(lifecycle) {}
- 
-     class Acquisition {
-      public:
--      explicit Acquisition(Queue& queue) : lock_(queue.mutex), queue_(queue.queue) {}
-+      explicit Acquisition(Queue& queue)
-+          : permit_(queue.lifecycle), lock_(queue.mutex), queue_(queue.queue) {}
- 
-       VkQueue queue() const { return queue_; }
- 
-      private:
-+      QueueLifecycle::Permit permit_;
-       std::unique_lock<std::recursive_mutex> lock_;
-       VkQueue queue_;
-     };
-@@ -294,6 +299,8 @@
-     return queue_families()[queue_family_index].queues[queue_index]->Acquire();
-   }
- 
-+  void SetApplicationActive(bool active);
-+
-   struct MemoryTypes {
-     uint32_t device_local = 0b0;
-     uint32_t host_visible = 0b0;
-@@ -312,6 +319,7 @@
-   Properties properties_;
-   Extensions extensions_;
- 
-+  QueueLifecycle queue_lifecycle_;
-   VkDevice device_ = nullptr;
- 
-   mutable std::atomic<VkPipelineCache> shared_pipeline_cache_{VK_NULL_HANDLE};
-diff --git a/src/ui/vulkan/vulkan_device.cpp b/src/ui/vulkan/vulkan_device.cpp
---- a/src/ui/vulkan/vulkan_device.cpp
-+++ b/src/ui/vulkan/vulkan_device.cpp
-@@ -19,6 +19,9 @@
- #include <rex/cvar.h>
- #include <rex/logging.h>
- #include <rex/platform.h>
-+#if REX_PLATFORM_IOS
-+#include <SDL3/SDL.h>
-+#endif
- #include <rex/string.h>
- #include <rex/ui/vulkan/device.h>
- 
-@@ -821,7 +824,7 @@
-       VkQueue queue;
-       dfn.vkGetDeviceQueue(device->device_, uint32_t(queue_family_index), uint32_t(queue_index),
-                            &queue);
--      queue_family.queues[queue_index] = std::make_unique<Queue>(queue);
-+      queue_family.queues[queue_index] = std::make_unique<Queue>(queue, REX_PLATFORM_IOS ? &device->queue_lifecycle_ : nullptr);
-     }
-   }
- 
-@@ -851,6 +854,17 @@
-   return device;
- }
- 
-+void VulkanDevice::SetApplicationActive(bool active) {
-+#if REX_PLATFORM_IOS
-+  queue_lifecycle_.SetActive(active, [this] {
-+    const VkResult result = functions_.vkDeviceWaitIdle(device_);
-+    REXLOG_INFO("ios_lifecycle: GPU queues drained before background, result={}", int(result));
-+  });
-+#else
-+  (void)active;
-+#endif
-+}
-+
- VulkanDevice::~VulkanDevice() {
-   if (device_) {
-     vulkan_instance_->functions().vkDestroyDevice(device_, nullptr);
-@@ -859,7 +873,18 @@
- 
- VulkanDevice::VulkanDevice(const VulkanInstance* const vulkan_instance,
-                            const VkPhysicalDevice physical_device)
--    : vulkan_instance_(vulkan_instance), physical_device_(physical_device) {
-+    : vulkan_instance_(vulkan_instance), physical_device_(physical_device),
-+      queue_lifecycle_(
-+#if REX_PLATFORM_IOS
-+          []() -> bool {
-+            if (!SDL_IsMainThread()) return false;
-+            SDL_PumpEvents();
-+            return true;
-+          }
-+#else
-+          nullptr
-+#endif
-+      ) {
-   assert_not_null(vulkan_instance);
-   assert_not_null(physical_device);
- }
-diff --git a/include/rex/system/interfaces/graphics.h b/include/rex/system/interfaces/graphics.h
---- a/include/rex/system/interfaces/graphics.h
-+++ b/include/rex/system/interfaces/graphics.h
-@@ -50,6 +50,8 @@
-                                  KernelState* kernel_state) = 0;
- 
-   virtual bool has_presentation() const = 0;
-+
-+  virtual void SetApplicationActive(bool active) { (void)active; }
- 
-   // --- Optional capabilities, default no-op -------------------------------
- 
-diff --git a/include/rex/graphics/vulkan/graphics_system.h b/include/rex/graphics/vulkan/graphics_system.h
---- a/include/rex/graphics/vulkan/graphics_system.h
-+++ b/include/rex/graphics/vulkan/graphics_system.h
-@@ -25,6 +25,7 @@
-   static bool IsAvailable() { return true; }
- 
-   std::string name() const override;
-+  void SetApplicationActive(bool active) override;
- 
-  protected:
-   void CreateProvider(bool with_presentation) override;
-diff --git a/src/graphics/vulkan/graphics_system.cpp b/src/graphics/vulkan/graphics_system.cpp
---- a/src/graphics/vulkan/graphics_system.cpp
-+++ b/src/graphics/vulkan/graphics_system.cpp
-@@ -24,6 +24,11 @@
-   return "Vulkan";
- }
- 
-+void VulkanGraphicsSystem::SetApplicationActive(bool active) {
-+  if (provider_)
-+    static_cast<ui::vulkan::VulkanProvider*>(provider_.get())->vulkan_device()->SetApplicationActive(active);
-+}
-+
- void VulkanGraphicsSystem::CreateProvider(bool with_presentation) {
-   provider_ = rex::ui::vulkan::VulkanProvider::Create(true, with_presentation);
- }
-diff --git a/include/rex/system/interfaces/audio.h b/include/rex/system/interfaces/audio.h
---- a/include/rex/system/interfaces/audio.h
-+++ b/include/rex/system/interfaces/audio.h
-@@ -24,6 +24,8 @@
-   virtual ~IAudioSystem() = default;
-   virtual X_STATUS Setup(KernelState* kernel_state) = 0;
-   virtual void Shutdown() = 0;
-+  virtual void Pause() {}
-+  virtual void Resume() {}
- };
- 
- }  // namespace rex::system
 diff --git a/include/rex/ui/windowed_app_context_sdl.h b/include/rex/ui/windowed_app_context_sdl.h
 --- a/include/rex/ui/windowed_app_context_sdl.h
 +++ b/include/rex/ui/windowed_app_context_sdl.h
@@ -260,62 +228,6 @@ diff --git a/include/rex/ui/windowed_app_context_sdl.h b/include/rex/ui/windowed
    bool event_watch_registered_ = false;
    bool startup_paint_pumping_ = false;
  };
-diff --git a/src/ui/windowed_app_context_sdl.cpp b/src/ui/windowed_app_context_sdl.cpp
---- a/src/ui/windowed_app_context_sdl.cpp
-+++ b/src/ui/windowed_app_context_sdl.cpp
-@@ -219,6 +219,17 @@
- 
- bool SDLCALL SDLWindowedAppContext::WatchEvent(void* userdata, SDL_Event* event) {
-   auto* context = static_cast<SDLWindowedAppContext*>(userdata);
-+#if REX_PLATFORM_IOS
-+  // UIKit's will-resign-active notification is synchronous. Waiting for the
-+  // queued SDL event is too late: Metal may already reject background work.
-+  if (event->type == SDL_EVENT_WILL_ENTER_BACKGROUND ||
-+      event->type == SDL_EVENT_DID_ENTER_BACKGROUND ||
-+      event->type == SDL_EVENT_DID_ENTER_FOREGROUND) {
-+    const bool active = event->type == SDL_EVENT_DID_ENTER_FOREGROUND;
-+    if (context->application_active_.exchange(active) != active && context->application_active_callback_)
-+      context->application_active_callback_(active);
-+  }
-+#endif
-   if (event->type == SDL_EVENT_QUIT && SDL_IsMainThread() && context->IsInUIThread()) {
-     // Cocoa stops making Metal drawables available as part of its termination
-     // request. Handle the request synchronously while SDL is queueing it,
-diff --git a/src/ui/window.cpp b/src/ui/window.cpp
---- a/src/ui/window.cpp
-+++ b/src/ui/window.cpp
-@@ -18,6 +18,9 @@
- #include <rex/ui/imgui_drawer.h>
- #include <rex/ui/presenter.h>
- #include <rex/ui/window.h>
-+#if REX_PLATFORM_IOS
-+#include <rex/ui/windowed_app_context_sdl.h>
-+#endif
- 
- #include <imgui.h>
- 
-@@ -675,6 +678,9 @@
- }
- 
- void Window::OnPaint(bool force_paint) {
-+#if REX_PLATFORM_IOS
-+  if (!static_cast<SDLWindowedAppContext&>(app_context_).IsApplicationActive()) return;
-+#endif
-   if (is_painting_) {
-     return;
-   }
-diff --git a/include/rex/chrono/clock.h b/include/rex/chrono/clock.h
---- a/include/rex/chrono/clock.h
-+++ b/include/rex/chrono/clock.h
-@@ -53,6 +53,8 @@
- 
-   // Guest time scalar.
-   static double guest_time_scalar();
-+  // Exclude application suspension without changing duration scaling.
-+  static void SetGuestPaused(bool paused);
-   // Sets the guest time scalar, adjusting tick and wall clock speed.
-   // Ex: 1x=normal, 2x=double speed, 1/2x=half speed.
-   static void set_guest_time_scalar(double scalar);
 diff --git a/src/core/clock.cpp b/src/core/clock.cpp
 --- a/src/core/clock.cpp
 +++ b/src/core/clock.cpp
@@ -356,26 +268,21 @@ diff --git a/src/core/clock.cpp b/src/core/clock.cpp
  }
  
  double Clock::guest_time_scalar() {
-diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
---- a/include/rex/rex_app.h
-+++ b/include/rex/rex_app.h
-@@ -104,6 +104,8 @@
+diff --git a/src/graphics/vulkan/graphics_system.cpp b/src/graphics/vulkan/graphics_system.cpp
+--- a/src/graphics/vulkan/graphics_system.cpp
++++ b/src/graphics/vulkan/graphics_system.cpp
+@@ -24,6 +24,11 @@
+   return "Vulkan";
+ }
  
-   /// Called after runtime is fully initialized, before window creation.
-   virtual void OnPostSetup() {}
++void VulkanGraphicsSystem::SetApplicationActive(bool active) {
++  if (provider_)
++    static_cast<ui::vulkan::VulkanProvider*>(provider_.get())->vulkan_device()->SetApplicationActive(active);
++}
 +
-+  virtual void OnApplicationActiveChanged(bool active) { (void)active; }
- 
-   /// Called after ImGui drawer is created. Add custom dialogs here.
-   virtual void OnCreateDialogs(ui::ImGuiDrawer* drawer) { (void)drawer; }
-@@ -276,6 +278,7 @@
-   void SetGuestFrameStats(ui::DebugOverlayDialog::FrameStatsProvider provider);
- 
-  private:
-+  void HandleApplicationActivation(bool active);
-   std::function<void(PathConfig)> MakeResumeCallback();
- 
-   // Stand up the ImGui overlay stack (drawer, F3/Backtick/F4 binds, dialogs)
+ void VulkanGraphicsSystem::CreateProvider(bool with_presentation) {
+   provider_ = rex::ui::vulkan::VulkanProvider::Create(true, with_presentation);
+ }
 diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
 --- a/src/ui/rex_app.cpp
 +++ b/src/ui/rex_app.cpp
@@ -434,7 +341,7 @@ diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
    if (!SetupEnvironment())
      return false;
    if (!SetupPresentation())
-@@ -597,6 +628,10 @@
+@@ -578,6 +609,10 @@
  }
  
  void ReXApp::OnDestroy() {
@@ -445,14 +352,112 @@ diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
    // Notify subclass before cleanup
    OnShutdown();
  
-diff --git a/include/rex/ui/vulkan/functions/device_1_0.inc b/include/rex/ui/vulkan/functions/device_1_0.inc
---- a/include/rex/ui/vulkan/functions/device_1_0.inc
-+++ b/include/rex/ui/vulkan/functions/device_1_0.inc
-@@ -83,6 +83,7 @@
- XE_UI_VULKAN_FUNCTION(vkResetFences)
- XE_UI_VULKAN_FUNCTION(vkQueueBindSparse)
- XE_UI_VULKAN_FUNCTION(vkQueueSubmit)
-+XE_UI_VULKAN_FUNCTION(vkDeviceWaitIdle)
- XE_UI_VULKAN_FUNCTION(vkUnmapMemory)
- XE_UI_VULKAN_FUNCTION(vkUpdateDescriptorSets)
- XE_UI_VULKAN_FUNCTION(vkWaitForFences)
+diff --git a/src/ui/vulkan/vulkan_device.cpp b/src/ui/vulkan/vulkan_device.cpp
+--- a/src/ui/vulkan/vulkan_device.cpp
++++ b/src/ui/vulkan/vulkan_device.cpp
+@@ -19,6 +19,9 @@
+ #include <rex/cvar.h>
+ #include <rex/logging.h>
+ #include <rex/platform.h>
++#if REX_PLATFORM_IOS
++#include <SDL3/SDL.h>
++#endif
+ #include <rex/string.h>
+ #include <rex/ui/vulkan/device.h>
+ 
+@@ -821,7 +824,12 @@
+       VkQueue queue;
+       dfn.vkGetDeviceQueue(device->device_, uint32_t(queue_family_index), uint32_t(queue_index),
+                            &queue);
+-      queue_family.queues[queue_index] = std::make_unique<Queue>(queue);
++#if REX_PLATFORM_IOS
++      auto* lifecycle = &device->queue_lifecycle_;
++#else
++      QueueLifecycle* lifecycle = nullptr;
++#endif
++      queue_family.queues[queue_index] = std::make_unique<Queue>(queue, lifecycle);
+     }
+   }
+ 
+@@ -851,6 +859,17 @@
+   return device;
+ }
+ 
++void VulkanDevice::SetApplicationActive(bool active) {
++#if REX_PLATFORM_IOS
++  queue_lifecycle_.SetActive(active, [this] {
++    const VkResult result = functions_.vkDeviceWaitIdle(device_);
++    REXLOG_INFO("ios_lifecycle: GPU queues drained before background, result={}", int(result));
++  });
++#else
++  (void)active;
++#endif
++}
++
+ VulkanDevice::~VulkanDevice() {
+   if (device_) {
+     vulkan_instance_->functions().vkDestroyDevice(device_, nullptr);
+@@ -859,7 +878,18 @@
+ 
+ VulkanDevice::VulkanDevice(const VulkanInstance* const vulkan_instance,
+                            const VkPhysicalDevice physical_device)
+-    : vulkan_instance_(vulkan_instance), physical_device_(physical_device) {
++    : vulkan_instance_(vulkan_instance), physical_device_(physical_device),
++      queue_lifecycle_(
++#if REX_PLATFORM_IOS
++          []() -> bool {
++            if (!SDL_IsMainThread()) return false;
++            SDL_PumpEvents();
++            return true;
++          }
++#else
++          nullptr
++#endif
++      ) {
+   assert_not_null(vulkan_instance);
+   assert_not_null(physical_device);
+ }
+diff --git a/src/ui/window.cpp b/src/ui/window.cpp
+--- a/src/ui/window.cpp
++++ b/src/ui/window.cpp
+@@ -18,6 +18,9 @@
+ #include <rex/ui/imgui_drawer.h>
+ #include <rex/ui/presenter.h>
+ #include <rex/ui/window.h>
++#if REX_PLATFORM_IOS
++#include <rex/ui/windowed_app_context_sdl.h>
++#endif
+ 
+ #include <imgui.h>
+ 
+@@ -675,6 +678,9 @@
+ }
+ 
+ void Window::OnPaint(bool force_paint) {
++#if REX_PLATFORM_IOS
++  if (!static_cast<SDLWindowedAppContext&>(app_context_).IsApplicationActive()) return;
++#endif
+   if (is_painting_) {
+     return;
+   }
+diff --git a/src/ui/windowed_app_context_sdl.cpp b/src/ui/windowed_app_context_sdl.cpp
+--- a/src/ui/windowed_app_context_sdl.cpp
++++ b/src/ui/windowed_app_context_sdl.cpp
+@@ -219,6 +219,17 @@
+ 
+ bool SDLCALL SDLWindowedAppContext::WatchEvent(void* userdata, SDL_Event* event) {
+   auto* context = static_cast<SDLWindowedAppContext*>(userdata);
++#if REX_PLATFORM_IOS
++  // UIKit's will-resign-active notification is synchronous. Waiting for the
++  // queued SDL event is too late: Metal may already reject background work.
++  if (event->type == SDL_EVENT_WILL_ENTER_BACKGROUND ||
++      event->type == SDL_EVENT_DID_ENTER_BACKGROUND ||
++      event->type == SDL_EVENT_DID_ENTER_FOREGROUND) {
++    const bool active = event->type == SDL_EVENT_DID_ENTER_FOREGROUND;
++    if (context->application_active_.exchange(active) != active && context->application_active_callback_)
++      context->application_active_callback_(active);
++  }
++#endif
+   if (event->type == SDL_EVENT_QUIT && SDL_IsMainThread() && context->IsInUIThread()) {
+     // Cocoa stops making Metal drawables available as part of its termination
+     // request. Handle the request synchronously while SDL is queueing it,

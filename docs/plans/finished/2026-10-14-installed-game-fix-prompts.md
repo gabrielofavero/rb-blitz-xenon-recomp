@@ -296,7 +296,7 @@ the display's usable area, and `window_resizable = false`. Every write stands as
 another source already named and is read back before it is reported. The fit is SDK-free arithmetic
 (`src/settings/window_policy.{h,cpp}`, ctest `window_policy`, 68 checks) against Win32 measurements of
 the desktop (work area, `AdjustWindowRectExForDpi(WS_OVERLAPPEDWINDOW)`, `GetDpiForSystem`). The
-non-resizable half is [patch 0017](../../../patches/rexglue-sdk/0017-fixed-size-window.patch), which
+non-resizable half is [patch 0017](../../../patches/rexglue-sdk/0016-desktop-display-mode.patch), which
 adds the SDK's `window_resizable` cvar (default **true** = SDL's own behaviour) and applies it with
 `SDL_SetWindowResizable` before the window is shown; the Controller Settings utility builds its own SDL
 window and never reads it.

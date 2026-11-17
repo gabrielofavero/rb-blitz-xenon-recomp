@@ -70,6 +70,9 @@ python .github/skills/documentation/scripts/check_docs.py
 - **The SDK is patch-driven.** Changes to `rexglue-sdk/` land as a patch under `patches/`, applied by
   `scripts/setup/apply_sdk_patches.ps1` (see `patches/README.md`). Never hand-edit the submodule and never
   `git checkout` inside it — a patch owns those files.
+  Before adding or extending a patch, follow `AGENTS.md` section "ReXGlue SDK patch changes":
+  assess whether an existing patch should own it, whether it supersedes existing work, and its
+  platform/backend/version scope across the supported configurations.
 - **Gates.** The toolchain record (`config/toolchain.toml`) and the game-data fingerprint
   (`game/default.xex`) are deliberate gates; see `docs/guides/toolchain.md` and
   `docs/guides/build-and-run.md` before relaxing one.

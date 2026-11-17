@@ -1,0 +1,44 @@
+name: SDK patch replay
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Applier regression fixtures
+        run: python tests/sdk_patch_stack_tests.py
+      - name: Nested replay regression fixtures
+        run: python tests/sdk_nested_patch_tests.py
+      - name: Pristine pinned Python replay, audit and repeated invocation
+        if: runner.os != 'Windows'
+        run: |
+          python scripts/setup/apply_sdk_patches.py
+          python scripts/setup/apply_sdk_patches.py --check
+          python scripts/setup/apply_sdk_patches.py
+      - name: Pristine pinned Windows replay, audit and repeated invocation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/apply_sdk_patches.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/apply_sdk_patches.ps1 -Check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          pwsh -NoProfile -File scripts/setup/apply_sdk_patches.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          pwsh -NoProfile -File scripts/setup/apply_sdk_patches.ps1 -Check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

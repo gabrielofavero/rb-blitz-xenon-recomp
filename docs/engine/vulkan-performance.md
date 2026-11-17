@@ -6,6 +6,16 @@ ReXGlue. The existing captures identify this machine as a GeForce GTX 970; the
 backend/driver/hardware combination can matter, but those captures do not establish
 the cause of every steady-state performance difference.
 
+## Patch lineage (2026-11-17)
+
+The [current patch ledger](../../patches/README.md#current-stack-and-lineage-2026-11-17)
+maps the original Vulkan GPU conversion into 0002 and the fragment/vertex lowering
+into 0065, preserving translator version 14. Clean full-stack replay proves their
+final source byte-equivalent after consolidation. The nonblocking placeholder,
+upload batching, attribution and queue-policy changes retain separate patches.
+Historical measurements below retain their original IDs; no new frame-pacing or
+hardware result is claimed by the maintenance work.
+
 ## Avoidable texture round trip
 
 SDK patch 0002 added 32-bit fixed-point/integer texture support for the highway.

@@ -37,3 +37,24 @@
   reserved strip below the six-option list and above the footer icons. Shorten long
   captions instead of covering options or Start/Back hints. Preserve the six-entry
   maximum on every settings page. See `src/ui/help_layout.h`.
+
+# ReXGlue SDK patch changes
+
+Before creating or extending a patch under `patches/rexglue-sdk/`:
+
+- Decide whether a new patch file is necessary. Inspect the existing patch that
+  owns the behavior and its later corrections. Prefer updating that patch when
+  the change belongs to the same responsibility; use a new file for a distinct
+  responsibility and explain the boundary.
+- Check whether the change supersedes an existing patch, implementation or API.
+  Search current consumers, tests and reachable launch routes before removing
+  anything. Fold corrections into the owning patch where practical, retire only
+  confirmed obsolete code, regenerate dependent contexts and update the lineage
+  in `patches/README.md`. Preserve unrelated changes and verify full-stack replay.
+- Define the platform scope before editing. Consider Windows, Linux, macOS and
+  iOS, their supported architectures and applicable D3D12/Vulkan/MoltenVK paths.
+  State whether the change is shared or specific to a platform, backend, version
+  or title variant. Guard specific behavior at the appropriate boundary and
+  preserve other configurations, defaults and dependencies. Validate the
+  available affected configurations and explicitly record those not tested;
+  success on one platform does not establish correctness on the others.

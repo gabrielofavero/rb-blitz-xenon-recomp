@@ -1,7 +1,8 @@
 diff --git a/include/rex/graphics/pipeline/shader/spirv_builder.h b/include/rex/graphics/pipeline/shader/spirv_builder.h
 --- a/include/rex/graphics/pipeline/shader/spirv_builder.h
 +++ b/include/rex/graphics/pipeline/shader/spirv_builder.h
-@@ -31,4 +31,11 @@
+@@ -30,6 +30,13 @@
+ 
    // Make public rather than protected.
    using spv::Builder::createSelectionMerge;
 +
@@ -13,24 +14,50 @@ diff --git a/include/rex/graphics/pipeline/shader/spirv_builder.h b/include/rex/
 +  }
  
    spv::Id createQuadOp(spv::Op op_code, spv::Id type_id, spv::Id operand1, spv::Id operand2,
-@@ -142,4 +149,6 @@
+                        spv::Id operand3, spv::Id operand4);
+@@ -141,6 +148,8 @@
+ 
      Branch current_branch_ = Branch::kSelection;
    };
 + private:
 +  spv::Id no_contraction_fma_ext_inst_ = spv::NoResult;
  };
  
+ }  // namespace rex::graphics
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -33,7 +33,7 @@
+     // TODO(Triang3l): Change to 0xYYYYMMDD once it's out of the rapid
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+-    static constexpr uint32_t kVersion = 12;
++    static constexpr uint32_t kVersion = 14;
+ 
+     enum class DepthStencilMode : uint32_t {
+       kNoModifiers,
+@@ -399,6 +399,7 @@
+ 
+     bool demote_to_helper_invocation;
+     bool sample_rate_shading;
++    bool moltenvk_no_contraction_fma = false;
+   };
+ 
+   SpirvShaderTranslator(const Features& features, bool native_2x_msaa_with_attachments,
 diff --git a/src/graphics/pipeline/shader/spirv_builder.cpp b/src/graphics/pipeline/shader/spirv_builder.cpp
 --- a/src/graphics/pipeline/shader/spirv_builder.cpp
 +++ b/src/graphics/pipeline/shader/spirv_builder.cpp
-@@ -14,4 +14,6 @@
+@@ -13,6 +13,8 @@
+ #include <utility>
  #include <vector>
  
 +#include <SPIRV/GLSL.std.450.h>
 +
  #include <rex/assert.h>
  #include <rex/graphics/pipeline/shader/spirv_builder.h>
-@@ -49,4 +51,30 @@
+ 
+@@ -48,6 +50,32 @@
+ 
  spv::Id SpirvBuilder::createNoContractionBinOp(spv::Op op_code, spv::Id type_id, spv::Id operand1,
                                                 spv::Id operand2) {
 +  if (no_contraction_fma_ext_inst_ != spv::NoResult &&
@@ -61,36 +88,25 @@ diff --git a/src/graphics/pipeline/shader/spirv_builder.cpp b/src/graphics/pipel
 +  }
    spv::Id result = createBinOp(op_code, type_id, operand1, operand2);
    addDecoration(result, spv::DecorationNoContraction);
-diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
---- a/include/rex/graphics/pipeline/shader/spirv_translator.h
-+++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
-@@ -34,5 +34,5 @@
-     // prototyping stage (easier to do small granular updates with an
-     // incremental counter).
--    static constexpr uint32_t kVersion = 12;
-+    static constexpr uint32_t kVersion = 13;
- 
-     enum class DepthStencilMode : uint32_t {
-@@ -400,4 +400,5 @@
-     bool demote_to_helper_invocation;
-     bool sample_rate_shading;
-+    bool moltenvk_fragment_fma = false;
-   };
- 
+   return result;
 diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
 --- a/src/graphics/pipeline/shader/spirv_translator.cpp
 +++ b/src/graphics/pipeline/shader/spirv_translator.cpp
-@@ -61,4 +61,5 @@
+@@ -60,6 +60,7 @@
+       fragment_shader_sample_interlock(vulkan_device->properties().fragmentShaderSampleInterlock),
        demote_to_helper_invocation(vulkan_device->properties().shaderDemoteToHelperInvocation),
        sample_rate_shading(vulkan_device->properties().sampleRateShading) {
-+  moltenvk_fragment_fma = vulkan_device->properties().driverID == VK_DRIVER_ID_MOLTENVK;
++  moltenvk_no_contraction_fma = vulkan_device->properties().driverID == VK_DRIVER_ID_MOLTENVK;
    const uint32_t vulkan_api_version = vulkan_device->properties().apiVersion;
    if (vulkan_api_version >= VK_MAKE_API_VERSION(0, 1, 2, 0)) {
-@@ -186,4 +187,7 @@
+     spirv_version = spv::Spv_1_5;
+@@ -185,6 +186,9 @@
+     }
    }
    ext_inst_glsl_std_450_ = builder_->import("GLSL.std.450");
-+  if (is_pixel_shader() && features_.moltenvk_fragment_fma) {
++  if (features_.moltenvk_no_contraction_fma) {
 +    builder_->setNoContractionFma(ext_inst_glsl_std_450_);
 +  }
    builder_->setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
    builder_->setSource(spv::SourceLanguageUnknown, 0);
+ 

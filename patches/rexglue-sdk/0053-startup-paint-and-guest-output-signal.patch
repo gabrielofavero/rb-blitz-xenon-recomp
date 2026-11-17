@@ -1,3 +1,41 @@
+diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
+--- a/include/rex/rex_app.h
++++ b/include/rex/rex_app.h
+@@ -106,6 +106,10 @@
+ 
+   /// Called after ImGui drawer is created. Add custom dialogs here.
+   virtual void OnCreateDialogs(ui::ImGuiDrawer* drawer) { (void)drawer; }
++
++  /// Opt in to one startup paint after the presenter is attached and custom
++  /// dialogs are installed, before Runtime construction begins.
++  virtual bool WantsStartupPaint() const { return false; }
+ 
+   /// Called before cleanup begins. Release custom resources here.
+   virtual void OnShutdown() {}
+diff --git a/include/rex/ui/presenter.h b/include/rex/ui/presenter.h
+--- a/include/rex/ui/presenter.h
++++ b/include/rex/ui/presenter.h
+@@ -353,6 +353,12 @@
+     return successful_ui_present_sequence_.load(std::memory_order_acquire);
+   }
+ 
++  // Counts active guest images successfully published to the presenter mailbox.
++  // Can be sampled before a loading-state transition to require a later frame.
++  uint64_t guest_output_refresh_sequence() const {
++    return guest_output_refresh_sequence_.load(std::memory_order_acquire);
++  }
++
+   // Pass 0 as width or height to disable guest output until the next refresh
+   // with an actual size. The display aspect ratio may be specified like 16:9 or
+   // like 1280:720, both are accepted, for simplicity, the guest display size
+@@ -940,6 +946,7 @@
+   // repaint request anyway.
+   std::atomic<bool> ui_thread_paint_requested_{false};
+ 
++  std::atomic<uint64_t> guest_output_refresh_sequence_{0};
+   std::atomic<uint64_t> successful_ui_present_sequence_{0};
+ 
+   std::mutex guest_output_paint_config_mutex_;
 diff --git a/include/rex/ui/windowed_app_context.h b/include/rex/ui/windowed_app_context.h
 --- a/include/rex/ui/windowed_app_context.h
 +++ b/include/rex/ui/windowed_app_context.h
@@ -35,6 +73,33 @@ diff --git a/include/rex/ui/windowed_app_context_sdl.h b/include/rex/ui/windowed
  };
  
  }  // namespace rex::ui
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -602,6 +602,9 @@
+       last_acquired_and_ready,
+       (last_acquired_and_ready & 3) | (guest_output_mailbox_writable_ << 2),
+       std::memory_order_acq_rel, std::memory_order_relaxed)) {}
++  if (is_active) {
++    guest_output_refresh_sequence_.fetch_add(1, std::memory_order_release);
++  }
+   // Now, it's known that `ready == writable` on the host presentation side.
+   // Take the next `writable` with this assumption about its current value in
+   // mind.
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -369,6 +369,10 @@
+       }
+     }
+     window_->SetPresenter(presenter);
++    if (WantsStartupPaint()) {
++      window_->RequestPaint();
++      app_context().PumpStartupPaint();
++    }
+   } else if (!graphics_system) {
+     // Detached mode: the app brings its own renderer and drives its own paint
+     // loop. ReXApp owns the returned drawer via immediate_drawer_.
 diff --git a/src/ui/windowed_app_context_sdl.cpp b/src/ui/windowed_app_context_sdl.cpp
 --- a/src/ui/windowed_app_context_sdl.cpp
 +++ b/src/ui/windowed_app_context_sdl.cpp
@@ -74,75 +139,3 @@ diff --git a/src/ui/windowed_app_context_sdl.cpp b/src/ui/windowed_app_context_s
  }
  
  void SDLWindowedAppContext::ProcessEvent(SDL_Event& event) {
-diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
---- a/include/rex/rex_app.h
-+++ b/include/rex/rex_app.h
-@@ -106,6 +106,10 @@
- 
-   /// Called after ImGui drawer is created. Add custom dialogs here.
-   virtual void OnCreateDialogs(ui::ImGuiDrawer* drawer) { (void)drawer; }
-+
-+  /// Opt in to one startup paint after the presenter is attached and custom
-+  /// dialogs are installed, before Runtime construction begins.
-+  virtual bool WantsStartupPaint() const { return false; }
- 
-   /// Called before cleanup begins. Release custom resources here.
-   virtual void OnShutdown() {}
-diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
---- a/src/ui/rex_app.cpp
-+++ b/src/ui/rex_app.cpp
-@@ -369,6 +369,10 @@
-       }
-     }
-     window_->SetPresenter(presenter);
-+    if (WantsStartupPaint()) {
-+      window_->RequestPaint();
-+      app_context().PumpStartupPaint();
-+    }
-   } else if (!graphics_system) {
-     // Detached mode: the app brings its own renderer and drives its own paint
-     // loop. ReXApp owns the returned drawer via immediate_drawer_.
-diff --git a/include/rex/ui/presenter.h b/include/rex/ui/presenter.h
---- a/include/rex/ui/presenter.h
-+++ b/include/rex/ui/presenter.h
-@@ -359,6 +359,17 @@
-     return successful_ui_present_sequence_.load(std::memory_order_acquire);
-   }
- 
-+  // True once a successfully refreshed active guest image has been published
-+  // to the presenter mailbox. UI-only paints do not advance this indicator.
-+  bool has_guest_output_ever_refreshed() const {
-+    return has_guest_output_ever_refreshed_.load(std::memory_order_acquire);
-+  }
-+  // Counts active guest images successfully published to the presenter mailbox.
-+  // Can be sampled before a loading-state transition to require a later frame.
-+  uint64_t guest_output_refresh_sequence() const {
-+    return guest_output_refresh_sequence_.load(std::memory_order_acquire);
-+  }
-+
-   // Pass 0 as width or height to disable guest output until the next refresh
-   // with an actual size. The display aspect ratio may be specified like 16:9 or
-   // like 1280:720, both are accepted, for simplicity, the guest display size
-@@ -947,6 +958,8 @@
-   std::atomic<bool> ui_thread_paint_requested_{false};
- 
-   std::atomic<uint64_t> successful_present_sequence_{0};
-+  std::atomic<bool> has_guest_output_ever_refreshed_{false};
-+  std::atomic<uint64_t> guest_output_refresh_sequence_{0};
-   std::atomic<uint64_t> successful_ui_present_sequence_{0};
- 
-   std::mutex guest_output_paint_config_mutex_;
-diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
---- a/src/ui/presenter.cpp
-+++ b/src/ui/presenter.cpp
-@@ -602,6 +602,10 @@
-       last_acquired_and_ready,
-       (last_acquired_and_ready & 3) | (guest_output_mailbox_writable_ << 2),
-       std::memory_order_acq_rel, std::memory_order_relaxed)) {}
-+  if (is_active) {
-+    has_guest_output_ever_refreshed_.store(true, std::memory_order_release);
-+    guest_output_refresh_sequence_.fetch_add(1, std::memory_order_release);
-+  }
-   // Now, it's known that `ready == writable` on the host presentation side.
-   // Take the next `writable` with this assumption about its current value in
-   // mind.

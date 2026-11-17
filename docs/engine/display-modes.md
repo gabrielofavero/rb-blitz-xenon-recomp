@@ -24,9 +24,8 @@ did not refresh the presentation connection. D3D12 also treated
 [DXGI status documentation](https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/dxgi-status)
 calls for resizing the swap-chain buffers after that status.
 
-SDK patch
-[`0035`](../../patches/rexglue-sdk/0035-borderless-hotkey-presentation-recovery.patch)
-adds:
+The display-mode implementation (original 0035, now
+[`0016`](../../patches/rexglue-sdk/0016-desktop-display-mode.patch)) adds:
 
 - Alt+Enter (including keypad Enter) toggles Windowed and Borderless. From Full
   Screen it returns to Windowed. Repeats and the chord's key release are consumed
@@ -62,14 +61,15 @@ capture slowdown.
 
 ## Guest Window Mode preview (2026-11-06)
 
-[tree] SDK patch [`0048`](../../patches/rexglue-sdk/0048-atomic-runtime-display-mode.patch)
-adds the UI-thread mode transition and native rollback. Patch
-[`0049`](../../patches/rexglue-sdk/0049-successful-present-sequence.patch) counts successful
-present calls. Patch [`0050`](../../patches/rexglue-sdk/0050-verify-startup-display-mode.patch)
-refuses a startup window whose native display mode failed to apply. Patch
-[`0051`](../../patches/rexglue-sdk/0051-ui-present-display-confirmation.patch) counts successful
-UI-thread paints separately, so a guest-output present that started before the switch cannot
-confirm Keep. The authored Window Mode row in `src/ui/settings_screen.cpp` now opens a guest
+[tree] The consolidated
+[`0016`](../../patches/rexglue-sdk/0016-desktop-display-mode.patch) includes the
+original 0048 UI-thread transition/rollback, 0050 startup verification and 0051
+UI-only successful-paint counter. A guest-output present that started before the
+switch cannot confirm Keep. Original 0049's general present counter was removed
+on 2026-11-17 after a complete caller search found no readers; the UI-only
+counter remains. The [patch ledger](../../patches/README.md#current-stack-and-lineage-2026-11-17)
+records the source-equivalence evidence and all original IDs.
+The authored Window Mode row in `src/ui/settings_screen.cpp` now opens a guest
 Keep/Revert page. `src/settings/display_runtime.cpp` marks the old mode before switching and
 rolls it back on Revert or a 15-second timeout. Keep requires a later successful present and
 the requested native mode, then saves through `ServiceSink` and acknowledges the running

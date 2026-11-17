@@ -1,5 +1,4 @@
 diff --git a/include/rex/graphics/d3d12/pipeline_cache.h b/include/rex/graphics/d3d12/pipeline_cache.h
-index 89990fc..6365ad9 100644
 --- a/include/rex/graphics/d3d12/pipeline_cache.h
 +++ b/include/rex/graphics/d3d12/pipeline_cache.h
 @@ -32,6 +32,7 @@
@@ -10,7 +9,7 @@ index 89990fc..6365ad9 100644
  #include <rex/graphics/pipeline/shader/dxbc_translator.h>
  #include <rex/graphics/pipeline_preload.h>
  #include <rex/graphics/primitive_processor.h>
-@@ -94,6 +95,9 @@ class PipelineCache {
+@@ -94,6 +95,9 @@
    const PipelinePreloadResult& shader_storage_preload_result() const {
      return shader_storage_preload_result_;
    }
@@ -20,10 +19,11 @@ index 89990fc..6365ad9 100644
  
    void EndSubmission();
    bool IsCreatingPipelines();
-@@ -326,6 +330,18 @@ class PipelineCache {
+@@ -325,6 +329,18 @@
+   ID3D12PipelineState* CreateD3D12Pipeline(const PipelineRuntimeDescription& runtime_description);
    bool PrepareRuntimeDescriptionForQueuedCreation(Pipeline* pipeline,
                                                    PipelineRuntimeDescription& runtime_description);
- 
++
 +  // --- Native cached PSO blobs (P5) ----------------------------------------
 +  // Opens shaders/local/<title>.<rtv|rov>.d3d12/ for this adapter and driver
 +  // build. Called from OpenShaderStorage once the render path is known; a
@@ -35,15 +35,13 @@ index 89990fc..6365ad9 100644
 +  // no session writes native data while the guest is playing.
 +  void FlushNativeCache(const char* reason);
 +  NativePipelineCacheStore native_cache_;
-+
+ 
    D3D12CommandProcessor& command_processor_;
    const RegisterFile& register_file_;
-   const D3D12RenderTargetCache& render_target_cache_;
 diff --git a/include/rex/graphics/flags.h b/include/rex/graphics/flags.h
-index 2cf24c4..fda5dc2 100644
 --- a/include/rex/graphics/flags.h
 +++ b/include/rex/graphics/flags.h
-@@ -18,6 +18,10 @@ REXCVAR_DECLARE(bool, vsync);
+@@ -18,6 +18,10 @@
  REXCVAR_DECLARE(bool, clear_memory_page_state);
  REXCVAR_DECLARE(bool, half_pixel_offset);
  REXCVAR_DECLARE(bool, async_shader_compilation);
@@ -56,7 +54,6 @@ index 2cf24c4..fda5dc2 100644
  REXCVAR_DECLARE(int32_t, resolution_scale);
 diff --git a/include/rex/graphics/native_pipeline_cache.h b/include/rex/graphics/native_pipeline_cache.h
 new file mode 100644
-index 0000000..905ef0d
 --- /dev/null
 +++ b/include/rex/graphics/native_pipeline_cache.h
 @@ -0,0 +1,594 @@
@@ -655,7 +652,6 @@ index 0000000..905ef0d
 +
 +}  // namespace rex::graphics
 diff --git a/include/rex/graphics/vulkan/pipeline_cache.h b/include/rex/graphics/vulkan/pipeline_cache.h
-index 23438fc..3979c80 100644
 --- a/include/rex/graphics/vulkan/pipeline_cache.h
 +++ b/include/rex/graphics/vulkan/pipeline_cache.h
 @@ -29,6 +29,7 @@
@@ -666,7 +662,7 @@ index 23438fc..3979c80 100644
  #include <rex/graphics/pipeline_preload.h>
  #include <rex/hash.h>
  #include <rex/platform.h>
-@@ -92,6 +93,11 @@ class VulkanPipelineCache {
+@@ -92,6 +93,11 @@
    const PipelinePreloadResult& shader_storage_preload_result() const {
      return shader_storage_preload_result_;
    }
@@ -678,7 +674,7 @@ index 23438fc..3979c80 100644
  
    VulkanShader* LoadShader(xenos::ShaderType shader_type, const uint32_t* host_address,
                             uint32_t dword_count);
-@@ -507,6 +513,23 @@ class VulkanPipelineCache {
+@@ -507,6 +513,23 @@
    // so cancellation and progress share one owner.
    PipelinePreloadResult shader_storage_preload_result_;
  
@@ -703,7 +699,6 @@ index 23438fc..3979c80 100644
    bool OpenShaderStorage(const std::filesystem::path& cache_root, uint32_t title_id);
    size_t TranslatePreparationShaders(size_t max_count);
 diff --git a/include/rex/ui/vulkan/device.h b/include/rex/ui/vulkan/device.h
-index 947817f..1caea71 100644
 --- a/include/rex/ui/vulkan/device.h
 +++ b/include/rex/ui/vulkan/device.h
 @@ -10,6 +10,7 @@
@@ -714,7 +709,7 @@ index 947817f..1caea71 100644
  #include <memory>
  #include <mutex>
  #include <vector>
-@@ -205,6 +206,20 @@ class VulkanDevice {
+@@ -205,6 +206,20 @@
  
    VkDevice device() const { return device_; }
  
@@ -735,7 +730,7 @@ index 947817f..1caea71 100644
    struct Functions {
  #define XE_UI_VULKAN_FUNCTION(name) PFN_##name name = nullptr;
  #define XE_UI_VULKAN_FUNCTION_PROMOTED(extension_name, core_name) \
-@@ -299,6 +314,8 @@ class VulkanDevice {
+@@ -299,6 +314,8 @@
  
    VkDevice device_ = nullptr;
  
@@ -745,10 +740,9 @@ index 947817f..1caea71 100644
  
    std::vector<QueueFamily> queue_families_;
 diff --git a/include/rex/ui/vulkan/functions/device_1_0.inc b/include/rex/ui/vulkan/functions/device_1_0.inc
-index aa55a4a..c0d6eb1 100644
 --- a/include/rex/ui/vulkan/functions/device_1_0.inc
 +++ b/include/rex/ui/vulkan/functions/device_1_0.inc
-@@ -44,6 +44,7 @@ XE_UI_VULKAN_FUNCTION(vkCreateGraphicsPipelines)
+@@ -44,6 +44,7 @@
  XE_UI_VULKAN_FUNCTION(vkCreateImage)
  XE_UI_VULKAN_FUNCTION(vkCreateImageView)
  XE_UI_VULKAN_FUNCTION(vkCreatePipelineLayout)
@@ -756,7 +750,7 @@ index aa55a4a..c0d6eb1 100644
  XE_UI_VULKAN_FUNCTION(vkCreateQueryPool)
  XE_UI_VULKAN_FUNCTION(vkCreateRenderPass)
  XE_UI_VULKAN_FUNCTION(vkCreateSampler)
-@@ -60,6 +61,7 @@ XE_UI_VULKAN_FUNCTION(vkDestroyImage)
+@@ -60,6 +61,7 @@
  XE_UI_VULKAN_FUNCTION(vkDestroyImageView)
  XE_UI_VULKAN_FUNCTION(vkDestroyPipeline)
  XE_UI_VULKAN_FUNCTION(vkDestroyPipelineLayout)
@@ -764,7 +758,7 @@ index aa55a4a..c0d6eb1 100644
  XE_UI_VULKAN_FUNCTION(vkDestroyQueryPool)
  XE_UI_VULKAN_FUNCTION(vkDestroyRenderPass)
  XE_UI_VULKAN_FUNCTION(vkDestroySampler)
-@@ -70,6 +72,8 @@ XE_UI_VULKAN_FUNCTION(vkFlushMappedMemoryRanges)
+@@ -70,6 +72,8 @@
  XE_UI_VULKAN_FUNCTION(vkFreeMemory)
  XE_UI_VULKAN_FUNCTION(vkGetBufferMemoryRequirements)
  XE_UI_VULKAN_FUNCTION(vkGetDeviceQueue)
@@ -774,10 +768,9 @@ index aa55a4a..c0d6eb1 100644
  XE_UI_VULKAN_FUNCTION(vkGetImageMemoryRequirements)
  XE_UI_VULKAN_FUNCTION(vkInvalidateMappedMemoryRanges)
 diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
-index c90af8a..ab53391 100644
 --- a/src/graphics/d3d12/pipeline_cache.cpp
 +++ b/src/graphics/d3d12/pipeline_cache.cpp
-@@ -83,6 +83,54 @@ namespace shaders {
+@@ -83,6 +83,54 @@
  #include "../shaders/bytecode/d3d12_5_1/tessellation_indexed_vs.h"
  }  // namespace shaders
  
@@ -832,7 +825,7 @@ index c90af8a..ab53391 100644
  PipelineCache::PipelineCache(D3D12CommandProcessor& command_processor,
                               const RegisterFile& register_file,
                               const D3D12RenderTargetCache& render_target_cache,
-@@ -261,6 +309,67 @@ void PipelineCache::BeginShaderStoragePreparation(const std::filesystem::path& c
+@@ -261,6 +309,67 @@
    }
  }
  
@@ -900,7 +893,7 @@ index c90af8a..ab53391 100644
  bool PipelineCache::OpenShaderStorage(const std::filesystem::path& cache_root,
                                        uint32_t title_id) {
    // Every exit from this function reports explicit counts; the early storage
-@@ -294,6 +403,10 @@ bool PipelineCache::OpenShaderStorage(const std::filesystem::path& cache_root,
+@@ -294,6 +403,10 @@
        render_target_cache_.GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
    preparation.SetRenderer(GraphicsPreparationBackend::kD3D12, edram_rov_used ? 1u : 0u);
    preparation_edram_rov_used_ = edram_rov_used;
@@ -911,7 +904,7 @@ index c90af8a..ab53391 100644
  
    // Initialize the pipeline storage stream - read pipeline descriptions and
    // collect used shader modifications to translate.
-@@ -992,6 +1105,10 @@ void PipelineCache::FinishShaderStoragePreparation(
+@@ -992,6 +1105,10 @@
    // counts final.
    ShutdownPreparationWorkers();
  
@@ -922,7 +915,7 @@ index c90af8a..ab53391 100644
    // Start the storage writing thread - it owns the streams for the rest of the
    // run and must exist before any shader or pipeline is written.
    storage_write_flush_shaders_ = false;
-@@ -1066,6 +1183,10 @@ void PipelineCache::ShutdownShaderStorage() {
+@@ -1066,6 +1183,10 @@
  
    shader_storage_cache_root_.clear();
    shader_storage_title_id_ = 0;
@@ -933,7 +926,7 @@ index c90af8a..ab53391 100644
  }
  
  void PipelineCache::EndSubmission() {
-@@ -3363,13 +3484,43 @@ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
+@@ -3363,13 +3484,44 @@
  
    // Create the D3D12 pipeline state object.
    ID3D12Device* device = command_processor_.GetD3D12Provider().GetDevice();
@@ -942,7 +935,7 @@ index c90af8a..ab53391 100644
 +  // damaged one is refused before it reaches the driver.
 +  const uint64_t native_cache_key = XXH3_64bits(&description, sizeof(description));
 +  std::vector<uint8_t> native_cached_blob;
-+  const bool native_blob_loaded =
++  bool native_blob_loaded =
 +      native_cache_.enabled() && native_cache_.Load(native_cache_key, native_cached_blob);
 +  if (native_blob_loaded) {
 +    state_desc.CachedPSO.pCachedBlob = native_cached_blob.data();
@@ -972,6 +965,7 @@ index c90af8a..ab53391 100644
 +        uint32_t(create_result));
 +    native_cache_.Forget(native_cache_key);
 +    state_desc.CachedPSO.pCachedBlob = nullptr;
++    native_blob_loaded = false;
 +    state_desc.CachedPSO.CachedBlobSizeInBytes = 0;
 +    create_result = rex::graphics::compile_trace::Call(
 +        rex::graphics::compile_trace::Event::kGuestPipeline,
@@ -983,7 +977,7 @@ index c90af8a..ab53391 100644
      if (runtime_description.pixel_shader != nullptr) {
        REXGPU_ERROR("Failed to create graphics pipeline with VS {:016X}, PS {:016X}",
                     runtime_description.vertex_shader->shader().ucode_data_hash(),
-@@ -3390,6 +3541,17 @@ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
+@@ -3390,6 +3542,17 @@
          fmt::format("VS {:016X}", runtime_description.vertex_shader->shader().ucode_data_hash()));
    }
    state->SetName(reinterpret_cast<LPCWSTR>(name.c_str()));
@@ -1002,26 +996,24 @@ index c90af8a..ab53391 100644
  }
  
 diff --git a/src/graphics/graphics_system.cpp b/src/graphics/graphics_system.cpp
-index 0f92be3..87dff98 100644
 --- a/src/graphics/graphics_system.cpp
 +++ b/src/graphics/graphics_system.cpp
-@@ -39,6 +39,11 @@ REXCVAR_DEFINE_BOOL(store_shaders, true, "GPU",
+@@ -38,6 +38,11 @@
+ REXCVAR_DEFINE_BOOL(store_shaders, true, "GPU",
                      "Store shaders persistently and load them when loading games to avoid "
                      "runtime spikes and freezes when playing the game not for the first time.");
- 
++
 +REXCVAR_DEFINE_BOOL(native_pipeline_cache, true, "GPU",
 +                    "Persist driver-specific pipeline state (D3D12 cached PSO blobs, a Vulkan "
 +                    "pipeline cache) beside the shareable recipes, keyed by adapter, driver and "
 +                    "translator versions, so a later boot reuses the driver's own results.");
-+
+ 
  REXCVAR_DEFINE_BOOL(shader_storage_async_preparation, false, "GPU",
                      "Prepare the persistent shader and pipeline storage in bounded slices after "
-                     "the guest starts, instead of blocking the launch before it. The loading UI "
 diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
-index 8fcc27d..5420ae8 100644
 --- a/src/graphics/vulkan/command_processor.cpp
 +++ b/src/graphics/vulkan/command_processor.cpp
-@@ -1748,8 +1748,8 @@ bool VulkanCommandProcessor::SetupContext() {
+@@ -1748,8 +1748,8 @@
          rex::graphics::compile_trace::HelperKey(rex::graphics::compile_trace::HelperKind::kSwapChain,
                                                  uint64_t(i)),
          [&] {
@@ -1032,7 +1024,7 @@ index 8fcc27d..5420ae8 100644
                                                 swap_apply_gamma_pipelines[i]);
          });
    }
-@@ -1775,9 +1775,9 @@ bool VulkanCommandProcessor::SetupContext() {
+@@ -1775,9 +1775,9 @@
                rex::graphics::compile_trace::HelperKey(
                    rex::graphics::compile_trace::HelperKind::kSwapChain, 0x100 | variant),
                [&] {
@@ -1046,10 +1038,9 @@ index 8fcc27d..5420ae8 100644
          REXGPU_WARN("Failed to create {} pipeline", pipeline_name);
          pipeline_out = VK_NULL_HANDLE;
 diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
-index 390a146..e087158 100644
 --- a/src/graphics/vulkan/pipeline_cache.cpp
 +++ b/src/graphics/vulkan/pipeline_cache.cpp
-@@ -273,6 +273,60 @@ void main() {
+@@ -273,6 +273,60 @@
  
  }  // namespace
  
@@ -1110,10 +1101,12 @@ index 390a146..e087158 100644
  VulkanPipelineCache::VulkanPipelineCache(VulkanCommandProcessor& command_processor,
                                           const RegisterFile& register_file,
                                           VulkanRenderTargetCache& render_target_cache,
-@@ -389,6 +443,187 @@ bool VulkanPipelineCache::Initialize() {
-   return true;
- }
+@@ -387,6 +441,187 @@
+   }
  
+   return true;
++}
++
 +void VulkanPipelineCache::OpenNativeCache(const std::filesystem::path& shader_local_root,
 +                                          uint32_t title_id,
 +                                          bool edram_fragment_shader_interlock) {
@@ -1293,12 +1286,10 @@ index 390a146..e087158 100644
 +  }
 +  native_loaded_data_.clear();
 +  native_store_.Reset();
-+}
-+
+ }
+ 
  PipelinePreloadResult VulkanPipelineCache::InitializeShaderStorage(
-     const std::filesystem::path& cache_root, uint32_t title_id, bool blocking) {
-   // The synchronous form of the generation: it owns the slices while it runs.
-@@ -461,6 +696,9 @@ bool VulkanPipelineCache::OpenShaderStorage(const std::filesystem::path& cache_r
+@@ -461,6 +696,9 @@
        render_target_cache_.GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
    preparation.SetRenderer(GraphicsPreparationBackend::kVulkan,
                            edram_fragment_shader_interlock ? 1u : 0u);
@@ -1308,7 +1299,7 @@ index 390a146..e087158 100644
  
    // Initialize the pipeline storage stream - read pipeline descriptions and
    // collect used shader modifications to translate.
-@@ -964,6 +1202,10 @@ void VulkanPipelineCache::FinishShaderStoragePreparation(
+@@ -964,6 +1202,10 @@
    // publish a pipeline after the result is reported.
    ShutdownPreparationWorkers();
  
@@ -1319,7 +1310,7 @@ index 390a146..e087158 100644
    // Start the storage writing thread; it owns the streams for the rest of the
    // run and must exist before any shader or pipeline is written.
    storage_write_flush_shaders_ = false;
-@@ -1041,6 +1283,11 @@ void VulkanPipelineCache::ShutdownShaderStorage() {
+@@ -1041,6 +1283,11 @@
  
    shader_storage_cache_root_.clear();
    shader_storage_title_id_ = 0;
@@ -1331,7 +1322,7 @@ index 390a146..e087158 100644
  }
  
  void VulkanPipelineCache::EndSubmission() {
-@@ -3799,8 +4046,11 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
+@@ -3799,8 +4046,11 @@
                             : rex::graphics::compile_trace::Event::kGuestPipeline,
        "src/graphics/vulkan/pipeline_cache.cpp:3492", XXH3_64bits(&description, sizeof(description)),
        [&] {
@@ -1346,10 +1337,9 @@ index 390a146..e087158 100644
    if (create_result != VK_SUCCESS) {
      uint64_t ps_hash = creation_arguments.pixel_shader
 diff --git a/src/graphics/vulkan/render_target_cache.cpp b/src/graphics/vulkan/render_target_cache.cpp
-index c7291c3..894e541 100644
 --- a/src/graphics/vulkan/render_target_cache.cpp
 +++ b/src/graphics/vulkan/render_target_cache.cpp
-@@ -4558,8 +4558,9 @@ VkPipeline const* VulkanRenderTargetCache::GetTransferPipelines(TransferPipeline
+@@ -4558,8 +4558,9 @@
                    rex::graphics::compile_trace::HelperKind::kTransfer,
                    (uint64_t(key.render_pass_key.key) << 32) | uint64_t(key.shader_key.key)),
                [&] {
@@ -1362,10 +1352,9 @@ index c7291c3..894e541 100644
                uint64_t(i)) != VK_SUCCESS) {
          REXGPU_ERROR(
 diff --git a/src/ui/vulkan/vulkan_immediate_drawer.cpp b/src/ui/vulkan/vulkan_immediate_drawer.cpp
-index 63d60c2..7d37e05 100644
 --- a/src/ui/vulkan/vulkan_immediate_drawer.cpp
 +++ b/src/ui/vulkan/vulkan_immediate_drawer.cpp
-@@ -676,8 +676,10 @@ bool VulkanImmediateDrawer::EnsurePipelinesCreatedForCurrentRenderPass() {
+@@ -676,8 +676,10 @@
    if (rex::graphics::compile_trace::Call(rex::graphics::compile_trace::Event::kHelperGraphics,
                                           "src/ui/vulkan/vulkan_immediate_drawer.cpp:675", 0, [&] {
                                             return dfn.vkCreateGraphicsPipelines(
@@ -1378,7 +1367,7 @@ index 63d60c2..7d37e05 100644
                                           }) != VK_SUCCESS) {
      REXLOG_ERROR("VulkanImmediateDrawer: Failed to create the triangle list pipeline");
      dfn.vkDestroyShaderModule(device, stages[1].module, nullptr);
-@@ -695,8 +697,8 @@ bool VulkanImmediateDrawer::EnsurePipelinesCreatedForCurrentRenderPass() {
+@@ -695,8 +697,8 @@
    VkResult pipeline_line_create_result = rex::graphics::compile_trace::Call(
        rex::graphics::compile_trace::Event::kHelperGraphics,
        "src/ui/vulkan/vulkan_immediate_drawer.cpp:690", 0, [&] {
@@ -1390,10 +1379,9 @@ index 63d60c2..7d37e05 100644
    dfn.vkDestroyShaderModule(device, stages[1].module, nullptr);
    dfn.vkDestroyShaderModule(device, stages[0].module, nullptr);
 diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
-index f9fe4e1..a58d2e1 100644
 --- a/src/ui/vulkan/vulkan_presenter.cpp
 +++ b/src/ui/vulkan/vulkan_presenter.cpp
-@@ -2659,8 +2659,9 @@ VkPipeline VulkanPresenter::CreateGuestOutputPaintPipeline(GuestOutputPaintEffec
+@@ -2659,8 +2659,9 @@
                rex::graphics::compile_trace::HelperKind::kPresenter,
                uint64_t(size_t(effect)) | (intermediate ? 0x100 : 0)),
            [&] {
@@ -1406,10 +1394,9 @@ index f9fe4e1..a58d2e1 100644
      REXLOG_ERROR(
          "VulkanPresenter: Failed to create the guest output painting pipeline "
 diff --git a/src/ui/vulkan/vulkan_util.cpp b/src/ui/vulkan/vulkan_util.cpp
-index e284e96..686072b 100644
 --- a/src/ui/vulkan/vulkan_util.cpp
 +++ b/src/ui/vulkan/vulkan_util.cpp
-@@ -196,8 +196,8 @@ VkPipeline CreateComputePipeline(const VulkanDevice* const vulkan_device,
+@@ -196,8 +196,8 @@
            rex::graphics::compile_trace::Event::kHelperCompute, "src/ui/vulkan/vulkan_util.cpp:194",
            trace_key, [&] {
              return vulkan_device->functions().vkCreateComputePipelines(

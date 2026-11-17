@@ -11,19 +11,6 @@ diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
  
    /// Called after the main guest thread is created but before it starts
    /// executing. The thread is suspended -- attach debuggers/monitors here.
-diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
---- a/src/ui/rex_app.cpp
-+++ b/src/ui/rex_app.cpp
-@@ -460,7 +460,8 @@
-     uint32_t title_id =
-         (graphics_system && runtime_->kernel_state()) ? runtime_->kernel_state()->title_id() : 0;
-     const bool has_shader_storage =
--        graphics_system && !runtime_->cache_root().empty() && title_id != 0;
-+        graphics_system && !runtime_->cache_root().empty() && title_id != 0 &&
-+        !DeferShaderStoragePreparation();
-     // P4: preparation can run beside the guest instead of before it. The
-     // blocking call below returns only after every stored pipeline exists, which
-     // is why the loading UI cannot animate during it; the asynchronous form
 diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
 --- a/src/graphics/d3d12/pipeline_cache.cpp
 +++ b/src/graphics/d3d12/pipeline_cache.cpp
@@ -50,3 +37,16 @@ diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeli
    preparation_blocking_ = false;
    if (!OpenShaderStorage(cache_root, title_id)) {
      command_processor_.preparation().Finish(GraphicsPreparationPhase::kFailed);
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -459,7 +459,8 @@
+     uint32_t title_id =
+         (graphics_system && runtime_->kernel_state()) ? runtime_->kernel_state()->title_id() : 0;
+     const bool has_shader_storage =
+-        graphics_system && !runtime_->cache_root().empty() && title_id != 0;
++        graphics_system && !runtime_->cache_root().empty() && title_id != 0 &&
++        !DeferShaderStoragePreparation();
+     // Asynchronous preparation starts after guest resume and is serviced
+     // in bounded slices on the command processor thread. The default
+     // retains blocking initialization before the guest starts.

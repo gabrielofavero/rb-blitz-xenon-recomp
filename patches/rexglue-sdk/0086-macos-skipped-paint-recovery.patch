@@ -12,20 +12,32 @@ diff --git a/include/rex/ui/presenter.h b/include/rex/ui/presenter.h
 +    ui_thread_paint_requested_.store(false, std::memory_order_relaxed);
 +  }
 +
-   // Increments only after the backend successfully submits a painted frame to
-   // the OS presentation connection. Can be sampled from any thread to confirm
-   // that a display change was followed by a successful presentation.
-diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
---- a/src/ui/window_sdl.cpp
-+++ b/src/ui/window_sdl.cpp
-@@ -615,6 +615,7 @@
-   // is dispatched. Don't block Cocoa in nextDrawable ahead of that event.
-   if (SDL_GetWindowFlags(sdl_window_) &
-       (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED)) {
-+    if (presenter()) presenter()->OnPaintSkippedFromUIThread();
-     return;
-   }
- #endif
+   // UI paint is serialized with Window::SetDisplayMode on the UI thread.
+   // A frame submitted by the guest output thread before the switch cannot advance this counter.
+   uint64_t successful_ui_present_sequence() const {
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -472,7 +472,9 @@
+     }
+     // Try to recover from the connection becoming outdated in the previous
+     // paint.
+-    if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated) {
++    if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated ||
++        (force_paint && surface_paint_connection_state_ ==
++                            SurfacePaintConnectionState::kUnconnectedRetryAtStateChange)) {
+       UpdateSurfacePaintConnectionFromUIThread(nullptr, false);
+     }
+     // If still paintable or recovered successfully, paint.
+@@ -1403,7 +1405,7 @@
+           surface_paint_connection_has_implicit_vsync_ = is_vsync_implicit;
+           surface_width_in_paint_connection_ = surface_width;
+           surface_height_in_paint_connection_ = surface_height;
+-          if (!is_reconnect) {
++          if (!is_reconnect && repaint_needed_out) {
+             *repaint_needed_out = true;
+           }
+           break;
 diff --git a/src/ui/window.cpp b/src/ui/window.cpp
 --- a/src/ui/window.cpp
 +++ b/src/ui/window.cpp
@@ -51,26 +63,14 @@ diff --git a/src/ui/window.cpp b/src/ui/window.cpp
    }
    UISetupEvent e(this);
    if (has_focus_) {
-diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
---- a/src/ui/presenter.cpp
-+++ b/src/ui/presenter.cpp
-@@ -472,7 +472,9 @@
-     }
-     // Try to recover from the connection becoming outdated in the previous
-     // paint.
--    if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated) {
-+    if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated ||
-+        (force_paint && surface_paint_connection_state_ ==
-+                            SurfacePaintConnectionState::kUnconnectedRetryAtStateChange)) {
-       UpdateSurfacePaintConnectionFromUIThread(nullptr, false);
-     }
-     // If still paintable or recovered successfully, paint.
-@@ -1404,7 +1406,7 @@
-           surface_paint_connection_has_implicit_vsync_ = is_vsync_implicit;
-           surface_width_in_paint_connection_ = surface_width;
-           surface_height_in_paint_connection_ = surface_height;
--          if (!is_reconnect) {
-+          if (!is_reconnect && repaint_needed_out) {
-             *repaint_needed_out = true;
-           }
-           break;
+diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
+--- a/src/ui/window_sdl.cpp
++++ b/src/ui/window_sdl.cpp
+@@ -615,6 +615,7 @@
+   // is dispatched. Don't block Cocoa in nextDrawable ahead of that event.
+   if (SDL_GetWindowFlags(sdl_window_) &
+       (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED)) {
++    if (presenter()) presenter()->OnPaintSkippedFromUIThread();
+     return;
+   }
+ #endif

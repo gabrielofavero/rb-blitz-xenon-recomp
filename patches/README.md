@@ -10,7 +10,138 @@ guarantee).
 Instead, SDK fixes are kept here as patch files and applied to the pinned
 checkout.
 
-## Patches
+## Current stack and lineage (2026-11-17)
+
+There are **71 SDK patches and one nested MoltenVK patch**. The SDK pin remains
+`c94f5ebdcb3c9d1a460ca48e04f9758448f8d518`; MoltenVK remains at
+`db445ff2042d9ce348c439ad8451112f354b8d2a`. IDs have gaps deliberately; 0004's
+earlier trace work was already represented by 0019 before this refactor.
+
+Seven families were consolidated: texture conversion, desktop display state,
+GPU packet recovery, preparation lifecycle, native driver caches, MoltenVK shader
+lowering and iOS lifecycle platform guards. Each family replayed against the
+unchanged pin with all 150 covered paths and the final file set byte-identical
+to the post-retirement snapshot. There were no added or deleted source files.
+Preparation payload hooks, audio scheduling, asynchronous pipeline publication,
+MoltenVK placeholder avoidance, upload batching and queue policy retain distinct
+patches. Skipped-paint recovery remains separate from display-mode transitions.
+Tracing implementation, helper identities, attribution spans and default policy
+also remain separate; boot timings and bounded tracing retain operational value.
+No tracing-overhead improvement or upstream replacement is claimed.
+
+The only intentional source delta removes the unconsumed general presentation
+counter, the unconsumed guest-output boolean, and the unused startup preparation
+waiter/launch branch. `successful_ui_present_sequence()` remains the display
+confirmation signal; `guest_output_refresh_sequence()` remains the boot-icon
+signal. Blitz always defers shader storage preparation, including the inherited
+iOS importer route; the SDK's default app does not opt into startup paint.
+Independent startup painting and the title's post-A preparation remain available.
+
+The ledger covers every original patch through 0088, including later platform
+work. A named host test covers its component, not an entire rendering backend or
+live UI route. Entries with build or static caller evidence remain unproven at
+runtime. Audit scripts, original hashes, omissions, retirement diff, per-family
+manifests and final hashes are under ignored `out/sdk-patch-refactor/2026-11-17/`.
+The owning [delivery plan](../docs/plans/finished/2026-11-15-rexglue-patch-refactoring-plan.md)
+records validation and platform limits.
+
+| Original ID | Disposition | Current patch | Responsibility and evidence |
+| --- | --- | --- | --- |
+| 0001 | Keep | [0001-xthread-log-once-core-count-warning.patch](rexglue-sdk/0001-xthread-log-once-core-count-warning.patch) | XThread diagnostics; release build |
+| 0002 | Consolidated | [0002-32-bit-fixed-point-texture-conversion.patch](rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch) | Both texture backends; texture_conversion / vulkan_texture_conversion |
+| 0003 | Keep | [0003-trace-ntwritefile-and-scatter-reads.patch](rexglue-sdk/0003-trace-ntwritefile-and-scatter-reads.patch) | Guest file I/O diagnostics; release build |
+| 0005 | Keep | [0005-codegen-skip-stamp-and-gapfill-refinement.patch](rexglue-sdk/0005-codegen-skip-stamp-and-gapfill-refinement.patch) | Code generation; release build |
+| 0006 | Keep | [0006-content-container-packages-and-extra-content-root.patch](rexglue-sdk/0006-content-container-packages-and-extra-content-root.patch) | Content mounts; content and payload callers |
+| 0007 | Keep | [0007-xamalloc-heap-flag-word.patch](rexglue-sdk/0007-xamalloc-heap-flag-word.patch) | Guest allocation flags; release build |
+| 0008 | Keep | [0008-xex-image-bounds-checks.patch](rexglue-sdk/0008-xex-image-bounds-checks.patch) | Module image loading; release build |
+| 0009 | Keep | [0009-log-levels-table-not-cvars.patch](rexglue-sdk/0009-log-levels-table-not-cvars.patch) | Cvar registry logging; release build |
+| 0010 | Keep | [0010-input-system-state-filter.patch](rexglue-sdk/0010-input-system-state-filter.patch) | Input activity filtering; keyboard_controller_driver |
+| 0011 | Keep | [0011-deferred-overlapped-delay-cvar.patch](rexglue-sdk/0011-deferred-overlapped-delay-cvar.patch) | Kernel overlapped scheduling; release build |
+| 0012 | Keep | [0012-stale-native-object-handles.patch](rexglue-sdk/0012-stale-native-object-handles.patch) | Kernel object handles; release build |
+| 0013 | Keep | [0013-cvar-config-source.patch](rexglue-sdk/0013-cvar-config-source.patch) | Settings cvar sources; video_mode_intent |
+| 0014 | Keep | [0014-resolution-preset-window-pixels.patch](rexglue-sdk/0014-resolution-preset-window-pixels.patch) | SDL window pixels; window_policy / video_mode_intent |
+| 0015 | Keep | [0015-render-resolution-instrumentation.patch](rexglue-sdk/0015-render-resolution-instrumentation.patch) | Resolution diagnostics; release build |
+| 0016 | Consolidated | [0016-desktop-display-mode.patch](rexglue-sdk/0016-desktop-display-mode.patch) | Desktop display state; display_mode / window_policy |
+| 0017 | Consolidated | [0016-desktop-display-mode.patch](rexglue-sdk/0016-desktop-display-mode.patch) | Fixed window sizing; display_mode / window_policy |
+| 0018 | Consolidated | [0018-gpu-packet-recovery.patch](rexglue-sdk/0018-gpu-packet-recovery.patch) | Primary GPU packet recovery; release build; live recovery unverified |
+| 0019 | Keep | [0019-trace-frame-swaps-and-input-polls.patch](rexglue-sdk/0019-trace-frame-swaps-and-input-polls.patch) | Frame/input diagnostics; trace consumers |
+| 0020 | Keep | [0020-bounded-shader-compilation-trace.patch](rexglue-sdk/0020-bounded-shader-compilation-trace.patch) | Shared compilation trace; shader_compile_trace tests |
+| 0021 | Consolidated | [0021-graphics-preparation-lifecycle.patch](rexglue-sdk/0021-graphics-preparation-lifecycle.patch) | Backend preload completion; pipeline_preload / graphics_preparation |
+| 0022 | Consolidated | [0002-32-bit-fixed-point-texture-conversion.patch](rexglue-sdk/0002-32-bit-fixed-point-texture-conversion.patch) | GPU texture conversion; vulkan_texture_conversion |
+| 0023 | Keep | [0023-vulkan-texture-descriptor-cache.patch](rexglue-sdk/0023-vulkan-texture-descriptor-cache.patch) | Descriptor cache; vulkan_texture_descriptor_cache |
+| 0024 | Keep | [0024-vulkan-descriptor-binding-reuse.patch](rexglue-sdk/0024-vulkan-descriptor-binding-reuse.patch) | Descriptor binding state; vulkan_texture_descriptor_cache |
+| 0025 | Keep | [0025-d3d12-fence-and-resolve-readback.patch](rexglue-sdk/0025-d3d12-fence-and-resolve-readback.patch) | D3D12 fence/readback; d3d12_fence_sync |
+| 0026 | Keep | [0026-helper-pipeline-key-identity.patch](rexglue-sdk/0026-helper-pipeline-key-identity.patch) | Helper identities; shader_cache_trace_tools |
+| 0027 | Consolidated | [0021-graphics-preparation-lifecycle.patch](rexglue-sdk/0021-graphics-preparation-lifecycle.patch) | Cancellable preparation; graphics_preparation / preparation_state |
+| 0028 | Consolidated | [0028-native-pipeline-caches.patch](rexglue-sdk/0028-native-pipeline-caches.patch) | Native driver caches; native_pipeline_cache |
+| 0029 | Keep | [0029-application-loading-preparation.patch](rexglue-sdk/0029-application-loading-preparation.patch) | Post-A preparation seam; preparation_state / preparation_payload |
+| 0030 | Keep | [0030-required-loading-payload.patch](rexglue-sdk/0030-required-loading-payload.patch) | Required payload gate; preparation_payload |
+| 0031 | Keep | [0031-audio-loading-scheduling.patch](rexglue-sdk/0031-audio-loading-scheduling.patch) | Preparation/audio scheduling; audio_stability / graphics_preparation |
+| 0032 | Keep | [0032-bounded-audio-device-handoff.patch](rexglue-sdk/0032-bounded-audio-device-handoff.patch) | Audio device handoff; audio_stability |
+| 0033 | Keep | [0033-vulkan-presenter-reuse-paint-pipeline.patch](rexglue-sdk/0033-vulkan-presenter-reuse-paint-pipeline.patch) | Vulkan presenter pipeline reuse; release build |
+| 0034 | Keep | [0034-nonblocking-async-pipeline-submission.patch](rexglue-sdk/0034-nonblocking-async-pipeline-submission.patch) | Async pipeline publication; pipeline_completion_queue |
+| 0035 | Consolidated | [0016-desktop-display-mode.patch](rexglue-sdk/0016-desktop-display-mode.patch) | Display hotkey and presentation recovery; display_mode / window_policy |
+| 0036 | Keep | [0036-keyboard-dialog-theme.patch](rexglue-sdk/0036-keyboard-dialog-theme.patch) | Authored keyboard theme; keyboard_controller |
+| 0037 | Keep | [0037-keyboard-controller-navigation.patch](rexglue-sdk/0037-keyboard-controller-navigation.patch) | Controller keyboard navigation; keyboard_controller |
+| 0038 | Keep | [0038-achievement-toast-theme.patch](rexglue-sdk/0038-achievement-toast-theme.patch) | Achievement styling seam; release build |
+| 0039 | Keep | [0039-host-dialog-controller-state.patch](rexglue-sdk/0039-host-dialog-controller-state.patch) | Host-dialog physical input; keyboard_controller_driver |
+| 0040 | Keep | [0040-device-open-file-accounting.patch](rexglue-sdk/0040-device-open-file-accounting.patch) | Mounted file lifetime; content callers / release build |
+| 0041 | Keep | [0041-media-keys.patch](rexglue-sdk/0041-media-keys.patch) | Music media keys; menu_music_nav callers |
+| 0042 | Keep | [0042-imgui-image-textures.patch](rexglue-sdk/0042-imgui-image-textures.patch) | Drawer image textures; application UI callers |
+| 0043 | Keep | [0043-texture-override.patch](rexglue-sdk/0043-texture-override.patch) | BC3 override seam; button_scheme callers |
+| 0044 | Consolidated | [0028-native-pipeline-caches.patch](rexglue-sdk/0028-native-pipeline-caches.patch) | Rejected D3D12 cache replacement; native_pipeline_cache / release build |
+| 0045 | Keep | [0045-distinct-sdl-extra-buttons.patch](rexglue-sdk/0045-distinct-sdl-extra-buttons.patch) | Extra controller buttons; input binding callers |
+| 0046 | Consolidated | [0018-gpu-packet-recovery.patch](rexglue-sdk/0018-gpu-packet-recovery.patch) | Indirect GPU recovery propagation; release build |
+| 0047 | Keep | [0047-content-device-validation.patch](rexglue-sdk/0047-content-device-validation.patch) | Content validation callback; song_content_safety callers |
+| 0048 | Consolidated | [0016-desktop-display-mode.patch](rexglue-sdk/0016-desktop-display-mode.patch) | Atomic display changes; display_mode |
+| 0049 | Retired | None | No callers; remove API, atomic and increments |
+| 0050 | Consolidated | [0016-desktop-display-mode.patch](rexglue-sdk/0016-desktop-display-mode.patch) | Startup display verification; display_mode / window_policy |
+| 0051 | Consolidated | [0016-desktop-display-mode.patch](rexglue-sdk/0016-desktop-display-mode.patch) | UI-only confirmation; RbBlitzApp display trial caller / release build |
+| 0052 | Keep | [0052-boot-stage-timings.patch](rexglue-sdk/0052-boot-stage-timings.patch) | Keep startup-stage operational evidence; release build; overhead unmeasured |
+| 0053 | Trimmed | [0053-startup-paint-and-guest-output-signal.patch](rexglue-sdk/0053-startup-paint-and-guest-output-signal.patch) | Keep startup pump and guest refresh sequence; remove unconsumed boolean; boot_loading_art |
+| 0054 | Consolidated | [0016-desktop-display-mode.patch](rexglue-sdk/0016-desktop-display-mode.patch) | Pixel-size restore recovery; display_mode / window_policy |
+| 0055 | Consolidated | [0018-gpu-packet-recovery.patch](rexglue-sdk/0018-gpu-packet-recovery.patch) | Time-bound packet retries; release build |
+| 0056 | Keep | [0056-app-session-logging.patch](rexglue-sdk/0056-app-session-logging.patch) | Session diagnostics; session_logs |
+| 0057 | Retired | None | No reachable opted-in route; Blitz defers preparation on desktop and iOS |
+| 0058 | Keep | [0058-native-window-host.patch](rexglue-sdk/0058-native-window-host.patch) | Native host frame seam; application host-window callers |
+| 0059 | Keep | [0059-preserve-touch-mouse-source.patch](rexglue-sdk/0059-preserve-touch-mouse-source.patch) | Touch source identity; touch_gestures |
+| 0060 | Keep | [0060-default-shader-compilation-trace.patch](rexglue-sdk/0060-default-shader-compilation-trace.patch) | Bounded trace default policy; shader_compile_trace tests; overhead unmeasured |
+| 0061 | Keep | [0061-long-d3d12-operation-trace.patch](rexglue-sdk/0061-long-d3d12-operation-trace.patch) | D3D12 stall instrumentation; shader_compile_trace tests |
+| 0062 | Keep | [0062-stutter-attribution.patch](rexglue-sdk/0062-stutter-attribution.patch) | Shared stall attribution; shader_compile_trace tests |
+| 0063 | Keep | [0063-auto-open-search-keyboard.patch](rexglue-sdk/0063-auto-open-search-keyboard.patch) | Search keyboard opening; keyboard_controller |
+| 0064 | Keep | [0064-macos-vulkan-icd-stage.patch](rexglue-sdk/0064-macos-vulkan-icd-stage.patch) | Mac ICD staging; native validation unavailable |
+| 0065 | Consolidated | [0065-moltenvk-shader-lowering.patch](rexglue-sdk/0065-moltenvk-shader-lowering.patch) | MoltenVK shader lowering; translator v14; native GPU validation unavailable |
+| 0066 | Consolidated | [0016-desktop-display-mode.patch](rexglue-sdk/0016-desktop-display-mode.patch) | Mac drawable visibility; native validation unavailable |
+| 0067 | Keep | [0067-portable-vulkan-shader-storage.patch](rexglue-sdk/0067-portable-vulkan-shader-storage.patch) | Portable shader storage layout; release build |
+| 0068 | Keep | [0068-vulkan-stall-attribution.patch](rexglue-sdk/0068-vulkan-stall-attribution.patch) | Vulkan stall attribution; shared trace consumers |
+| 0069 | Keep | [0069-moltenvk-nonblocking-pending-pipelines.patch](rexglue-sdk/0069-moltenvk-nonblocking-pending-pipelines.patch) | MoltenVK pending pipeline scheduling; native validation unavailable |
+| 0070 | Keep | [0070-moltenvk-shared-memory-upload-batching.patch](rexglue-sdk/0070-moltenvk-shared-memory-upload-batching.patch) | Upload hazard tracking; shared_memory_upload_hazards |
+| 0071 | Consolidated | [0065-moltenvk-shader-lowering.patch](rexglue-sdk/0065-moltenvk-shader-lowering.patch) | Vertex/fragment arithmetic and translator v14; native GPU validation unavailable |
+| 0072 | Keep | [0072-explicit-native-video-mode.patch](rexglue-sdk/0072-explicit-native-video-mode.patch) | Explicit video dimensions; video_mode_intent |
+| 0073 | Keep | [0073-moltenvk-asynchronous-queue-submissions.patch](rexglue-sdk/0073-moltenvk-asynchronous-queue-submissions.patch) | MoltenVK queue policy; native validation unavailable |
+| 0074 | Keep | [0074-ios-runtime.patch](rexglue-sdk/0074-ios-runtime.patch) | iOS runtime/toolchain; native build unavailable |
+| 0075 | Keep | [0075-table-function-registration.patch](rexglue-sdk/0075-table-function-registration.patch) | Generated registration table; release build |
+| 0076 | Keep | [0076-ios-presentation-diagnostics.patch](rexglue-sdk/0076-ios-presentation-diagnostics.patch) | iOS presentation diagnostics; device validation unavailable |
+| 0077 | Keep | [0077-moltenvk-replacement-drawable-size.patch](rexglue-sdk/0077-moltenvk-replacement-drawable-size.patch) | Metal drawable extent; native validation unavailable |
+| 0078 | Consolidated | [0078-ios-application-lifecycle.patch](rexglue-sdk/0078-ios-application-lifecycle.patch) | iOS suspension, queues and clock; ios_lifecycle |
+| 0079 | Keep | [0079-chainable-application-initialization.patch](rexglue-sdk/0079-chainable-application-initialization.patch) | Importer initialization seam; inherited application coordinator |
+| 0080 | Keep | [0080-ios-resume-swapchain-retention.patch](rexglue-sdk/0080-ios-resume-swapchain-retention.patch) | iOS swapchain retention; device validation unavailable |
+| 0081 | Keep | [0081-ios-accelerometer.patch](rexglue-sdk/0081-ios-accelerometer.patch) | iOS accelerometer configuration; device validation unavailable |
+| 0082 | Keep | [0082-forward-unhandled-posix-faults.patch](rexglue-sdk/0082-forward-unhandled-posix-faults.patch) | Rejected POSIX fault forwarding; native validation unavailable |
+| 0083 | Keep | [0083-runtime-presentation-crop.patch](rexglue-sdk/0083-runtime-presentation-crop.patch) | Runtime presenter crop; visible_region / application callers |
+| 0084 | Keep | [0084-portrait-achievement-position.patch](rexglue-sdk/0084-portrait-achievement-position.patch) | Portrait achievement placement; device appearance unverified |
+| 0085 | Keep | [0085-visible-gameplay-region.patch](rexglue-sdk/0085-visible-gameplay-region.patch) | Visible gameplay region; visible_region |
+| 0086 | Keep | [0086-macos-skipped-paint-recovery.patch](rexglue-sdk/0086-macos-skipped-paint-recovery.patch) | Skipped-paint request recovery; separate presenter responsibility |
+| 0087 | Consolidated | [0078-ios-application-lifecycle.patch](rexglue-sdk/0078-ios-application-lifecycle.patch) | Windows lifecycle platform guard; release build |
+| 0088 | Keep | [0088-windows-core-socket-dependency.patch](rexglue-sdk/0088-windows-core-socket-dependency.patch) | Windows socket dependency; release build / ios_lifecycle |
+| MoltenVK/0001 | Keep | [Drawable lifetime](rexglue-sdk/thirdparty/moltenvk/0001-retain-presentation-drawable.patch) | Exact nested replay; device race confirmation remains unverified |
+
+## Implementation notes
+
+The notes below preserve original patch IDs and historical measurements. Use the
+lineage ledger above to find their current implementation. Descriptions of an
+earlier implementation are historical where a later correction is described.
+The Apply / verify section is the current replay contract.
 
 `0088-windows-core-socket-dependency.patch` declares `ws2_32` as a public Windows
 rexcore dependency. The object library includes `socket_win.cpp`; consumers such
@@ -222,11 +353,10 @@ SDL keeps rendering, mouse and keyboard events in the game process. Native focus
 notifications also update SDL keyboard focus, because SDL's foreground HWND test
 assumes its window is top-level. Unhosted windows keep the existing behavior.
 
-`0057-animate-startup-during-shader-preparation.patch` keeps an app's startup
-paint loop active while stored shaders are prepared. For apps opting into startup
-paint, the command processor runs its existing sliced preparation and a waiter
-resumes the guest only when that generation finishes. The default launch barrier
-is preserved; the visible preboot spinner can continue animating during it.
+Original 0057's animated startup preparation route was retired on 2026-11-17:
+Blitz's deferral override makes its shader-storage condition false. The waiter,
+member thread and shutdown join are removed. Original 0053's startup paint pump
+and guest refresh sequence remain in use independently.
 
 `0054-sync-pixel-size-after-restore.patch` reconciles the presenter's pixel
 size on SDL resize, focus, expose, and restore events. Windows can report a
@@ -315,16 +445,15 @@ Shader-cache P1 adds `0021-preload-completion-accounting.patch`: the shared
 both caches, the corrected D3D12 worker-growth count, and the blocking preload barrier
 moved out of the temporary-worker cleanup (it skipped the no-growth case entirely).
 The restructuring replaces the D3D12 preload drain/wait sites that 0020 originally
-instrumented, so **those two hunks live in 0021 now** — a patch whose post-image
-another patch rewrites can never `--reverse --check` again, which the audit reads as
-drift. 0020 keeps the rest of the instrument. See the P1 record in the
+instrumented, so those two hunks belong to the preparation family — a patch whose post-image
+another patch rewrites cannot reliably pass an individual reverse check. Full
+replay validates the resulting source instead. 0020 keeps the rest of the instrument. See the P1 record in the
 [shader-cache plan](../docs/plans/finished/2026-10-10-shader-cache-plan.md#p1--make-backend-completion-and-failure-reporting-trustworthy).
 
-The patch audit now replays the full stack against pristine HEAD files under
-ignored `out/sdk-patch-audit/` and compares final contents (normalizing CRLF).
-This handles new files and disjoint edits added out of source order; concatenated
-hunk bodies could not validate those cases. Nested dependency artifacts that only
-make untracked files are excluded; tracked edits and moved gitlinks remain visible.
+The current audit replays the complete series against pristine pinned files in
+a disposable directory. It compares final contents, including new files, and
+validates patched nested dependencies before writing. The current platform
+differences are specified in Apply / verify below.
 
 | Patch | Purpose | Upstream candidate |
 | --- | --- | --- |
@@ -333,7 +462,7 @@ make untracked files are excluded; tracked edits and moved gitlinks remain visib
 | `rexglue-sdk/0053-startup-paint-and-guest-output-signal.patch` | Lets a title opt in to an immediate startup paint, service later paints without running startup-sensitive callbacks, and identify the first active guest output. | maybe |
 | `rexglue-sdk/0051-ui-present-display-confirmation.patch` | Counts successful UI-thread paints separately so an older guest-output present cannot confirm a new display mode. | maybe |
 | `rexglue-sdk/0050-verify-startup-display-mode.patch` | Refuses startup when SDL cannot apply the saved native display mode. | yes |
-| `rexglue-sdk/0049-successful-present-sequence.patch` | Counts successful presenter submissions for runtime display diagnostics. | maybe |
+| `rexglue-sdk/0049-successful-present-sequence.patch` | Retired 2026-11-17: the API, storage and increments had no readers. | maybe |
 | `rexglue-sdk/0048-atomic-runtime-display-mode.patch` | Adds one UI-thread operation for Windowed, Borderless and Full Screen, with SDL rollback and window placement restoration. | maybe |
 | `rexglue-sdk/0047-content-device-validation.patch` | Lets the title inspect a mounted content device before registering it for guest access. Rock Band Blitz uses this to refuse executable song DTA from primary, structured, and flat-library content; see [DaTArrest security](../docs/reference/datarrest-security.md). | maybe |
 | `rexglue-sdk/0045-distinct-sdl-extra-buttons.patch` | Keeps SDL misc, touchpad and paddle buttons separate from XInput aliases, and exposes the connected pad's available and held extra controls for gameplay capture. | maybe |
@@ -447,143 +576,75 @@ the layer. See the
 [P5 record](../docs/plans/finished/2026-10-10-shader-cache-plan.md#p5--persist-native-results-for-faster-subsequent-boots-on-both-backends)
 and the [shader-cache record](../docs/engine/shader-cache.md) (part 5).
 
+`0076-ios-presentation-diagnostics.patch` adds bounded iOS-only dimensions,
+paint-effect, draw-rectangle and queue-present diagnostics. It changes no rendering
+decisions; device acceptance remains unverified.
+
 ## Apply / verify
 
-`0076-ios-presentation-diagnostics.patch` adds bounded iOS-only records of the
-guest output dimensions, paint effects, final draw rectangle and queue-present
-result. It supports investigation of the owner's A18 Pro black-screen report;
-it changes no rendering decisions. The app also saves its first non-black
-guest GPU image and records UIKit view visibility in the shared diagnostics
-folder. Device acceptance remains open.
+Initialize the pinned SDK and its patched MoltenVK dependency before replay.
+Python 3.10+ and Git are required. The PowerShell entry point uses the same Python
+engine, so final-state validation and replacement logic have one implementation.
 
 ```powershell
-# Apply every patch set to the pinned SDK checkout (idempotent; safe to re-run).
-# `-ExecutionPolicy Bypass` is required on this machine, where the policy is
-# Restricted and a bare `.\scripts\...ps1` fails with UnauthorizedAccess.
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_patches.ps1
-
-# Same, without touching the working tree
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_patches.ps1 -Check
+git submodule update --init --recursive
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/apply_sdk_patches.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/apply_sdk_patches.ps1 -Check
 ```
 
-The script reports each patch as *already applied*, *applied now*, or *failed*,
-and warns if the SDK checkout no longer matches the gitlink recorded in the
-parent commit. Manual equivalent, from the repository root:
+```sh
+python3 scripts/setup/apply_sdk_patches.py
+python3 scripts/setup/apply_sdk_patches.py --check
+```
+
+The engine verifies each checkout's exact gitlink pin, collects touched paths and
+replays patches in filename order against pristine HEAD bytes with Git newline
+conversion disabled. It includes newly created and deleted files. A live covered
+file must match either pristine or final source; arbitrary partial hunks and local
+conflicts fail. Check mode rejects files still needing application. A whole
+pristine file can be completed by a normal invocation. All patched dependencies
+and the parent are validated before any replacement, so a later parent conflict
+does not partially update a dependency. Failure during filesystem writes is not
+an atomic filesystem transaction.
+
+Both entry points reject pin drift and tracked edits outside patch coverage.
+PowerShell additionally accepts CRLF-equivalent files and reports/preserves
+unrelated untracked files. Native Python requires exact bytes and rejects
+unrelated untracked files; `--windows-compatible` explicitly selects PowerShell's
+policy when invoking Python directly. Already-correct bytes are preserved.
+Untracked artifacts inside unpatched dependencies do not dirty their gitlinks;
+tracked child edits and moved gitlinks remain errors. An uninitialized patched
+dependency is an error, not a successful audit of its enclosing repository.
+
+Re-run after any SDK checkout update. Builds do not apply patches automatically.
+Use the full stack checker; an individual reverse-apply check cannot validate a
+patch whose implementation was replaced later. Hunk location, spacing and source
+order impose no extra ordering rules beyond successful ordered replay.
+
+`.github/workflows/sdk-patches.yml` runs on pushes and pull requests on hosted
+Linux and Windows runners. It initializes the pinned dependencies, runs production
+applier fixtures, and performs pristine replay, check and repeated invocation.
+It requires no private game data, SDK compilation or game launch. Windows fixtures
+exercise Windows PowerShell and PowerShell Core when installed. Local equivalents:
 
 ```powershell
-# Use absolute paths: `git -C <dir>` resolves relative ones against <dir>.
-$p = (Resolve-Path patches\rexglue-sdk\0001-xthread-log-once-core-count-warning.patch).Path
-
-git -C rexglue-sdk apply --reverse --check $p   # exit 0 => already applied
-git -C rexglue-sdk apply --check         $p     # exit 0 => applies cleanly
-git -C rexglue-sdk apply                 $p     # apply it
+python tests/sdk_patch_stack_tests.py
+python tests/sdk_nested_patch_tests.py
 ```
-
-The patches are intentionally **not** applied automatically by the build: apply
-them once after a fresh submodule checkout.
 
 ## Why the parent repository stays clean
 
-`.gitmodules` marks the submodule:
+`.gitmodules` marks `rexglue-sdk` as `ignore = dirty`, so expected applied SDK
+edits do not obscure parent changes. The replay audit replaces that missing drift
+signal. `git -C rexglue-sdk status --porcelain` shows the underlying state.
+The pin remains upstream-reproducible; never commit local-only SDK revisions.
 
-```ini
-[submodule "rexglue-sdk"]
-	ignore = dirty
-```
-
-so an applied patch no longer shows up as a modified submodule forever. `git
-status`, `git diff` and `git status --porcelain=v2` (what editor SCM panels use)
-in the parent report nothing for the SDK, while the submodule itself still shows
-` M` on the files the patch set touches (`src/system/xthread.cpp` for 0001;
-`include/rex/graphics/d3d12/shared_memory.h`,
-`include/rex/graphics/d3d12/texture_cache.h`,
-`include/rex/graphics/pipeline/texture/cache.h`,
-`src/graphics/d3d12/texture_cache.cpp`, `src/graphics/pipeline/texture/cache.cpp`,
-`include/rex/ui/graphics_upload_buffer_pool.h`,
-`include/rex/ui/d3d12/d3d12_upload_buffer_pool.h`,
-`src/ui/graphics_upload_buffer_pool.cpp` and
-`src/ui/d3d12/d3d12_upload_buffer_pool.cpp` for 0002; `src/kernel/xboxkrnl/xboxkrnl_io.cpp` for 0003;
-`src/kernel/xboxkrnl/xboxkrnl_video.cpp`, `src/graphics/command_processor.cpp`
-and `src/kernel/xam/xam_input.cpp` for 0019; `src/codegen/manifest.cpp`,
-`src/codegen/output_stamp.cpp`, `src/codegen/phase_gapfill.cpp`,
-`src/codegen/function_graph.cpp` and `include/rex/codegen/function_node.h` for
-0005; `include/rex/system/xam/content_manager.h`,
-`src/system/xam/content_manager.cpp` and `src/kernel/xam/xam_content_aggregate.cpp`
-for 0006; `src/kernel/xam/xam_info.cpp` for
-0007; `src/system/xex_module.cpp` and `src/system/user_module.cpp` for 0008; `src/core/cvar.cpp` for 0009;
-`include/rex/input/input_system.h` and `src/input/input_system.cpp` for 0010;
-`include/rex/system/flags.h` and `src/system/kernel_state.cpp` for 0011);
-`include/rex/system/xobject.h`, `src/system/xobject.cpp` and
-`src/kernel/xboxkrnl/xboxkrnl_ob.cpp` for 0012; `include/rex/cvar.h` and
-`src/core/cvar.cpp` for 0013 — the second patch to touch `src/core/cvar.cpp`
-after 0009, which is why `apply_sdk_patches.ps1`'s audit compares hunk *bodies*
-per file and unions a file's hunks across the whole patch set; `src/ui/window_sdl.cpp`
-for 0014).
-
-`src/ui/window_sdl.cpp` is touched by **three** patches (0014, 0016 and 0017). The union
-above is why that works, but it also means the patch that is *lower in the file* must be the
-one with the higher number, and that two patches' hunks for one file must not be close enough
-for the live `git diff` to merge them into one hunk — the merged body then stops matching the
-per-patch concatenation. Measured 2026-10-14 while adding 0017: a hunk three lines after
-0016's made `include/rex/ui/flags.h` read as UNEXPECTED until it was moved to the far side of
-the `// Display` group (the same reason 0017's `window_sdl.cpp` change sits beside the other
-desired-state applies rather than in the window's flag list).
-
-`ignore = dirty` hides work-tree edits only. A **moved gitlink is still
-reported**: verified 2026-09-19 by pointing the index entry at a different
-commit, which produced `MM rexglue-sdk`. That is the case that matters — a pin
-bump must never be silent.
-
-Because the setting also hides *accidental* SDK edits, `apply_sdk_patches.ps1`
-audits the work tree on every run: each modified file must match a patch here
-(the `index` line is ignored, since its abbreviation length follows
-`core.abbrev`). Anything else is listed as `UNEXPECTED` and the script exits 1.
-
-```
-SDK work tree      : 33 patched, 0 UNEXPECTED, 0 untracked
-    patched    : include/rex/codegen/function_node.h
-    patched    : include/rex/graphics/d3d12/shared_memory.h
-    patched    : include/rex/graphics/d3d12/texture_cache.h
-    patched    : include/rex/graphics/pipeline/texture/cache.h
-    patched    : include/rex/input/input_system.h
-    patched    : include/rex/system/flags.h
-    patched    : include/rex/system/xam/content_manager.h
-    patched    : include/rex/system/xobject.h
-    patched    : include/rex/ui/d3d12/d3d12_upload_buffer_pool.h
-    patched    : include/rex/ui/graphics_upload_buffer_pool.h
-    patched    : src/codegen/function_graph.cpp
-    patched    : src/codegen/manifest.cpp
-    patched    : src/codegen/output_stamp.cpp
-    patched    : src/codegen/phase_gapfill.cpp
-    patched    : src/core/cvar.cpp
-    patched    : src/graphics/command_processor.cpp
-    patched    : src/graphics/d3d12/texture_cache.cpp
-    patched    : src/graphics/pipeline/texture/cache.cpp
-    patched    : src/input/input_system.cpp
-    patched    : src/kernel/xam/xam_content_aggregate.cpp
-    patched    : src/kernel/xam/xam_info.cpp
-    patched    : src/kernel/xam/xam_input.cpp
-    patched    : src/kernel/xboxkrnl/xboxkrnl_io.cpp
-    patched    : src/kernel/xboxkrnl/xboxkrnl_ob.cpp
-    patched    : src/kernel/xboxkrnl/xboxkrnl_video.cpp
-    patched    : src/system/kernel_state.cpp
-    patched    : src/system/user_module.cpp
-    patched    : src/system/xam/content_manager.cpp
-    patched    : src/system/xex_module.cpp
-    patched    : src/system/xobject.cpp
-    patched    : src/system/xthread.cpp
-    patched    : src/ui/d3d12/d3d12_upload_buffer_pool.cpp
-    patched    : src/ui/graphics_upload_buffer_pool.cpp
-```
-
-Untracked files are listed for information only, not treated as drift. To bypass
-the setting and see the raw state:
-
-```powershell
-git -C rexglue-sdk status --porcelain
-```
-
-When a patch lands upstream, drop the file here and bump the submodule pin.
+Historical audit evidence: on 2026-10-14 the hunk-concatenation checker needed
+0017's insertion away from 0016's context; an insertion three lines after it was
+reported as unexpected. Its sample inventory showed 33 patched files, zero
+unexpected edits and zero untracked files. Those placement restrictions are
+obsolete under full replay. On 2026-09-19 a moved gitlink still produced
+`MM rexglue-sdk`; `ignore = dirty` has never hidden commit changes.
 
 ## Making the SDK tree sane on Windows
 

@@ -1,9 +1,11 @@
 # ReXGlue SDK patch refactoring
 
-**Status (2026-11-15): planning only.** The initial source and replay audit is
-recorded below. No patches have been removed, consolidated or renumbered by this
-plan. **P0 must refresh the assessment against the checkout present when work
-begins**, including patches added after this document was written.
+**Status (2026-11-17): delivered.** The refreshed audit covered all
+87 SDK patches through 0088 and the nested MoltenVK patch. The delivered stack
+has 71 SDK patches plus the unchanged nested patch. Confirmed retirements change
+four source files; seven consolidation families pass independent byte-equivalence
+gates. The original dated assessment is preserved below. Current dispositions are
+in the [complete patch ledger](../../../patches/README.md#current-stack-and-lineage-2026-11-17).
 
 ## Request and intended result
 
@@ -119,11 +121,11 @@ native Python applier coverage. Refresh these findings in P0.
 
 | Prompt | Dependency | Deliverable and exit condition | Status |
 | --- | --- | --- | --- |
-| P0 — Refresh the audit | Current checkout | Complete inventory, replay evidence, semantic usage review, updated dispositions and revised execution scope. | Not started |
-| P1 — Strengthen replay checks | P0 | Game-data-free CI replay check and meaningful applier regression coverage on native Python and PowerShell where available. | Not started |
-| P2 — Retire confirmed unused changes | P0/P1 | Small, justified source deltas for candidates still unconsumed; dependent patches regenerated and affected checks passing. | Not started |
-| P3 — Consolidate patch families | P2 | Coherent patches with identical final source before/after each consolidation, complete ID mapping and clean replay. | Not started |
-| P4 — Documentation and integration | P1–P3 | Current patch instructions, verified links, build/test evidence and explicit remaining platform/UI limits. | Not started |
+| P0 — Refresh the audit | Current checkout | Complete inventory, replay evidence, semantic usage review, updated dispositions and revised execution scope. | Complete 2026-11-17; inventory, omissions and ledger recorded |
+| P1 — Strengthen replay checks | P0 | Game-data-free CI replay check and meaningful applier regression coverage on native Python and PowerShell where available. | Complete 2026-11-17; 33 stack fixtures and nested regression pass |
+| P2 — Retire confirmed unused changes | P0/P1 | Small, justified source deltas for candidates still unconsumed; dependent patches regenerated and affected checks passing. | Complete 2026-11-17; Release build and 31 affected CTest suites pass |
+| P3 — Consolidate patch families | P2 | Coherent patches with identical final source before/after each consolidation, complete ID mapping and clean replay. | Complete 2026-11-17; seven independent byte-equivalence gates |
+| P4 — Documentation and integration | P1–P3 | Current patch instructions, verified links, build/test evidence and explicit remaining platform/UI limits. | Complete 2026-11-17; replay, build, host tests and documentation gates pass |
 
 ### Prompt P0 — Mandatory kickoff review (copy and run when work begins)
 
@@ -229,7 +231,149 @@ unexplained SDK drift, all accepted removals justified, source equivalence prove
 for consolidations, replay CI and applier checks in place, and updated documentation
 with passing available build/test gates. A final count is a result, not a quota.
 
-Currently unresolved: which candidates remain unused when P0 runs; whether any
-new patches change the proposed families; how much default tracing costs; whether
-general fixes have landed upstream; and which platform/runtime checks will be
-available. No runtime regression or performance improvement is claimed by this plan.
+Retirements and consolidation boundaries are resolved in the delivery evidence
+below. Default tracing overhead and upstream replacement status remain unmeasured;
+neither is used as a removal justification. No runtime regression or performance
+improvement is claimed by this plan.
+
+## Delivery evidence — 2026-11-17
+
+### Refreshed assessment and scope
+
+The parent snapshot is `7f14cde5ed1d8e16d559ba02455b5dcb0afb36d5`.
+The SDK HEAD and gitlink both remain
+`c94f5ebdcb3c9d1a460ca48e04f9758448f8d518`. All 87 original SDK patches were
+committed by the time the audit snapshot was captured, including 0087/0088.
+Existing settings work was preserved. MoltenVK was uninitialized on this Windows
+checkout; initializing its existing `db445ff2042d9ce348c439ad8451112f354b8d2a`
+pin enabled the recursive audit without changing either gitlink.
+
+The original replay covers 150 paths and adds 18 source files. Live contents
+match it after accounting for Windows CRLF equivalents; no unexplained source
+drift was found. Thirty-four omission experiments fail application; 53 replay
+but change final source. None yields an identical final tree. A second replay
+without unchanged context succeeds for 12 of those 34 failures, identifying
+context-sensitive dependencies. Twenty-two still fail on removed lines or file
+dependencies. Context-free application is not behavioral or semantic proof.
+Usage review, rather than omission results, determines retirement safety.
+`origins.py` / `origins.json` record 87 distinct patch identities and mechanical
+line-survival accounting; no identical patch changes were found. Surviving added
+lines do not account for a patch's deletions and do not prove ongoing necessity.
+
+The complete per-patch inventory, hashes, parent/SDK status, replay states,
+omissions and commands are captured under ignored
+`out/sdk-patch-refactor/2026-11-17/`: `audit.py`, `inventory.json`, `states.pkl`,
+`omissions.json`, `audit.log` and `original-patches/`. The
+[standing patch ledger](../../../patches/README.md#current-stack-and-lineage-2026-11-17)
+records one disposition, destination and consumer/component evidence for every
+original patch, including all additions after 0073 and the nested patch.
+
+The refreshed scope retains boot timings, bounded tracing and its existing
+defaults as useful operational evidence. It preserves later iOS lifecycle,
+drawable ownership, portrait/crop, visible-region, skipped-paint and Windows
+dependency fixes. Preparation hooks, audio scheduling, asynchronous publication,
+nonblocking placeholders, upload batching and queue policy retain distinct
+responsibilities. Skipped-paint recovery remains separate from the display
+transition state machine. No upstream-based removal or SDK-pin update is made.
+
+### Replay protection
+
+`apply_sdk_patches.py` owns replay and final-state validation for both entry
+points; PowerShell is a thin Windows-policy wrapper. Both now reject pin drift.
+Replay disables Git newline conversion for deterministic bytes. Native Python
+requires exact bytes and rejects unrelated untracked files; PowerShell accepts
+CRLF equivalents and reports/preserves unrelated untracked files. Tracked edits
+outside coverage always fail. Patched dependencies and the enclosing SDK are all
+validated before any write. The checks do not make filesystem writes crash-atomic.
+
+`tests/sdk_patch_stack_tests.py` passes 33 cases across native Python, Windows
+PowerShell and PowerShell Core: replaced hunks, new/deleted files, check-mode
+nonmutation, incomplete paths, pristine-file repair, conflicting covered/new
+files, outside-coverage edits, untracked policy, CRLF policy, pin mismatch and
+invalid replay. The CRLF cases include pristine Windows checkouts with Git
+newline conversion enabled. `tests/sdk_nested_patch_tests.py` passes nested replay,
+idempotence, pin/edit rejection and preservation of an untouched child when the
+parent conflicts. Logs: `applier-tests.log`, `nested-tests.log`.
+
+`.github/workflows/sdk-patches.yml` adds hosted Linux/Windows push/PR replay and
+fixture gates without private game data or SDK compilation. This workflow has
+not yet executed remotely; local execution of its replay and fixture commands
+is the available evidence. `sdk_patch_stack` is registered with CTest on all
+hosts, with unavailable PowerShell fixtures explicitly skipped.
+
+### Accepted retirement delta
+
+Searches of application, SDK, tests and tools found no readers for original
+0049's `successful_present_sequence()` or 0053's
+`has_guest_output_ever_refreshed()`. Only their APIs, atomics and writes are
+removed. `RbBlitzApp` reads `successful_ui_present_sequence()` for display
+confirmation and `guest_output_refresh_sequence()` for its boot icon; both remain.
+
+Original 0057 requires `has_shader_storage`, which includes
+`!DeferShaderStoragePreparation()`. Blitz's override always returns true,
+including the inherited iOS importer route. The generic SDK app's
+`WantsStartupPaint()` defaults to false; no other opted-in launch consumer was
+found. The animation branch, waiter member and shutdown join are removed, and
+the original blocking/asynchronous launch body is restored with functional
+comments. Independent startup paints and the title's post-A preparation remain.
+
+The exact intended delta is `retirement.diff`: only
+`include/rex/rex_app.h`, `include/rex/ui/presenter.h`, `src/ui/presenter.cpp` and
+`src/ui/rex_app.cpp` change. Dependent patch contexts were regenerated from
+these intended intermediate states; no arbitrary deletion-and-replay result
+was accepted. Original 0049 and 0057 disappear; 0053 retains its active parts.
+
+### Consolidation and equivalence
+
+`refactor.py` starts from the accepted post-retirement source, merges original
+changes in each family's new order, rejects conflicts and regenerates affected
+patch contexts. Every family then independently replays the entire generated
+series from pristine pinned bytes and compares every covered file and the full
+resulting file set with the post-retirement snapshot. `results.json` records
+per-family SHA-256 manifests, no file additions/deletions and byte equality.
+`delivery.pkl`, `mapping.json` and `delivered-hashes.json` identify the installed
+result. These are audit evidence, not a new maintained patch-generation tool.
+
+| Original IDs | Current patch | Full-series count after gate |
+| --- | --- | --- |
+| 0028 + 0044 | 0028 native pipeline caches | 84 |
+| 0065 + 0071 | 0065 MoltenVK shader lowering | 83 |
+| 0018 + 0046 + 0055 | 0018 GPU packet recovery | 81 |
+| 0002 + 0022 | 0002 texture conversion | 80 |
+| 0021 + 0027 | 0021 graphics preparation lifecycle | 79 |
+| 0016 + 0017 + 0035 + 0048 + 0050 + 0051 + 0054 + 0066 | 0016 desktop display mode | 72 |
+| 0078 + 0087 | 0078 iOS application lifecycle | 71 |
+
+All other IDs keep their responsibilities and numbering. Names broaden where
+the resulting family requires it; the ledger preserves every original ID.
+Translator version 14, cache versions, platform guards, defaults, cancellation,
+resource retirement and error paths are byte-preserved by these gates.
+
+### Integration and remaining acceptance
+
+The baseline Windows Release build passed (`build-baseline.log`). The current
+71-patch stack and nested patch pass the live PowerShell check with zero files
+needing updates (`replay-final.log`). A separate clean local clone is used for
+native Python apply/check/repeat and final-byte comparison (`verify_replay.py`,
+`pristine-replay.log`). `cmake --build --preset win-amd64-release` passes with
+the delivered source (`build-final.log`). All 31 focused CTest suites pass
+with no skips (`component-tests.log`, 127.19 seconds), including the 33-case
+applier suite, nested replay, lifecycle, display policy, preparation, native
+caches, shader traces, texture conversion, upload hazards, settings hot apply
+and boot art. No payload executable was launched directly.
+
+The documentation checker reports zero errors and 164 existing warnings, down
+from the initial zero errors / 166 warnings (`docs-check.log`). Active build,
+display, shader and Vulkan records and the patch README now point to the
+current implementation; the single changed link in the older finished plan
+preserves its original label and conclusions. Documentation status moves and
+index maintenance are included in the final checker run. `git diff --check`
+passes. Hosted CI execution and native platform/UI gates remain unverified.
+
+Linux, macOS and iOS native builds and device/GPU acceptance are unavailable in
+this Windows session. No game was launched or navigated. Owner checks remain
+explicitly unverified: boot-icon handoff and post-A preparation, Windowed /
+Borderless / Full Screen with preview rollback and minimize/restore, and a song
+on Vulkan and D3D12. Platform follow-up includes macOS drawable/focus recovery
+and shader lowering, plus iOS suspend/resume and portrait presentation. These
+limits do not turn source equivalence or host tests into observed UI behavior.

@@ -1193,7 +1193,7 @@ product path never did.
 | --- | --- | --- |
 | `video_mode_width`/`_height` | the effective render size | the presenter derives its output region's shape from this, and it is also the startup window's own default size |
 | `window_width`/`window_height` | the fitted client size, **only when the decorated window would not fit the desktop** | the render size can equal the display mode (2560x1080 here), and the window's frame is then taller and wider than the usable area |
-| `window_resizable` | `false` | the window is one size; a drag must not be able to leave a shape the picture cannot fill ([patch 0017](../../patches/rexglue-sdk/0017-fixed-size-window.patch)) |
+| `window_resizable` | `false` | the window is one size; a drag must not be able to leave a shape the picture cannot fill ([patch 0017](../../patches/rexglue-sdk/0016-desktop-display-mode.patch)) |
 
 Every write stands aside for a cvar another source already named (`rb_blitz.toml`, the environment,
 the command line) and says so, and each value is read back before it is reported — `SetFlagFromConfig`
