@@ -40,6 +40,35 @@ inline float PortraitPromptScale(float aspect, bool error_popup = false) {
   return std::min(PortraitSplash(aspect).width * .84f / (error_popup ? 640.f : 350.f), 1.f);
 }
 
+struct PortraitLoadingLayout {
+  float width, logo_scale, logo_z;
+  float text_width, button_width, button_x, button_scale;
+};
+
+inline PortraitLoadingLayout PortraitLoading(float aspect) {
+  const float width = PortraitSplash(aspect).width;
+  const float button_width = (width * .90f - 10) / 2;
+  return {width, std::min(width * .48f / 499.4504f, .36f), 158,
+          width * .84f, button_width, (button_width + 10) / 2,
+          std::min(1.f, button_width / 90)};
+}
+
+struct PortraitSettingsLayout {
+  float content_scale;
+  float back_width;
+  float back_top = -182;
+  float back_bottom = -212;
+};
+
+inline PortraitSettingsLayout PortraitSettings(float aspect) {
+  const float width = PortraitSplash(aspect).width;
+  return {std::min(width * .92f / 300.f, 1.f), std::min(width * .92f, 300.f)};
+}
+
+inline bool PortraitSettingsScene(std::string_view scene) {
+  return scene == "settings_menu.milo" || scene == "settings_menu_pause.milo";
+}
+
 // Confirmation scenes are also used by settings under private file aliases.
 // Recognize the authored scene so new prompts using that scene inherit portrait.
 inline bool PortraitPromptScene(std::string_view scene) {
@@ -59,6 +88,7 @@ inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel
          panel == "pause_exit_game_panel" || panel == "error_popup_panel" ||
          panel == "rbbz_download_panel" || panel == "rbbz_search_loading_panel" ||
          panel == "rbbz_library_panel" ||
+         PortraitSettingsScene(scene) ||
          PortraitPromptScene(scene);
 }
 

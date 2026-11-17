@@ -536,6 +536,134 @@ bool PreparePortraitPrompt(const std::vector<uint8_t>& source, float aspect,
   return PackStored(bytes, scene, error);
 }
 
+bool PreparePortraitSettings(const std::vector<uint8_t>& source,
+                             const std::vector<uint8_t>& button_source, float aspect,
+                             std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error) || !DecodeStream(button_source, &buttons, error))
+    return false;
+  if (bytes.size() != 17455 || Crc32(bytes.data(), bytes.size()) != 0x0E190262)
+    return Fail(error, "portrait settings source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait settings button template revision changed");
+  const auto layout = ui::PortraitSettings(aspect);
+  // Keep the cropped marquee/backdrop at its authored size. Uniformly fit
+  // only the title and six-row list, retaining the original vertical anchors.
+  for (size_t matrix : {size_t(0x41EC), size_t(0x421C), size_t(0x432C), size_t(0x435C)})
+    for (size_t axis : {size_t(0), size_t(16), size_t(32)})
+      PutFloat(bytes.data() + matrix + axis, layout.content_scale);
+
+  // InlineHelp's first entry is Select; its second is the native Cancel/Back
+  // action. Keep Back alone and center it inside the bottom button. The normal
+  // input hint formatter still supplies the current device's icon and locale.
+  for (size_t matrix : {size_t(0x3F6C), size_t(0x3F9C)})
+    SceneMatrix(bytes, matrix, 1, 1, 0, 0, -190);
+  PutBe32(bytes.data() + 0x3EF1, 1);
+
+  // Derive the button from the installed options slot, including its packed
+  // vertex format and valid face trailer. Its material already lives in this
+  // scene; the list's own materials and selection behavior remain independent.
+  std::vector<uint8_t> mesh(buttons.begin() + 91238, buttons.begin() + 91635);
+  for (size_t matrix : {size_t(0x15), size_t(0x45)}) {
+    PutFloat(mesh.data() + matrix, layout.back_width / 300.f);
+    PutFloat(mesh.data() + matrix + 36, -layout.back_width / 2);
+    PutFloat(mesh.data() + matrix + 44, layout.back_top);
+  }
+  RenameSceneString(mesh, "options_menu.grp", "options.grp");
+  RenameSceneString(mesh, "slot.mesh", "portrait_back.mesh");
+  SceneColor(bytes, 0x3A57 + 0x19, .063f, .051f, .11f, .8f);
+  bytes.insert(bytes.end(), mesh.begin(), mesh.end());
+
+  // Apply variable-length edits from the end so every measured source offset
+  // above remains valid. Draw the background before the InlineHelp text.
+  bytes.erase(bytes.begin() + 0x3EF5, bytes.begin() + 0x3F07);
+  PutBe32(bytes.data() + 0x3CF5, 5);
+  std::vector<uint8_t> member;
+  SceneString(member, "portrait_back.mesh");
+  bytes.insert(bytes.begin() + 0x3D08, member.begin(), member.end());
+  std::vector<uint8_t> declaration;
+  SceneString(declaration, "Mesh"); SceneString(declaration, "portrait_back.mesh");
+  bytes.insert(bytes.begin() + 0x2AF, declaration.begin(), declaration.end());
+  PutBe32(bytes.data() + 0x1E, 44);
+  PutBe32(bytes.data() + 0x22, 390 + 19); // name table includes each terminating NUL
+  PutBe32(bytes.data() + 0x27, 21);
+  return PackStored(bytes, scene, error);
+}
+
+bool PreparePortraitConnection(const std::vector<uint8_t>& source,
+                               const std::vector<uint8_t>& button_source, float aspect,
+                               std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error) || !DecodeStream(button_source, &buttons, error))
+    return false;
+  if (bytes.size() != 148693 || Crc32(bytes.data(), bytes.size()) != 0x61948B05)
+    return Fail(error, "portrait connection source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait connection button template revision changed");
+  const auto layout = ui::PortraitLoading(aspect);
+  std::vector<PortraitObject> added;
+  auto material = std::vector<uint8_t>(buttons.begin() + 88961, buttons.begin() + 89242);
+  SceneColor(material, 0x19, .063f, .051f, .11f, .92f);
+  RenameSceneString(material, "options_slot.tex", "");
+  added.push_back({"Mat", "portrait_action.mat", std::move(material)});
+  auto color = std::vector<uint8_t>(bytes.begin() + 143303, bytes.begin() + 143340);
+  SceneColor(color, 17, .97f, .97f, .99f, 1);
+  added.push_back({"UIColor", "portrait_action.color", std::move(color)});
+  std::vector<uint8_t> members;
+  for (const char* action : {"continue", "back", "skip"}) {
+    const std::string name = std::string("portrait_") + action + ".mesh";
+    auto mesh = std::vector<uint8_t>(buttons.begin() + 91238, buttons.begin() + 91635);
+    // The slot's vertices lie in X/Y; retain its authored rotation into X/Z.
+    // Each mesh follows its own native hint, including the responsive scale.
+    for (size_t matrix : {size_t(0x15), size_t(0x45)}) {
+      PutFloat(mesh.data() + matrix, layout.button_width / (300 * layout.button_scale));
+      PutFloat(mesh.data() + matrix + 20, 38 / (30 * layout.button_scale));
+      PutFloat(mesh.data() + matrix + 36, -layout.button_width / (2 * layout.button_scale));
+      PutFloat(mesh.data() + matrix + 44, 12 / layout.button_scale);
+    }
+    RenameSceneString(mesh, "options_menu.grp", std::string(action) + ".ihp");
+    RenameSceneString(mesh, "slot.mat", "portrait_action.mat");
+    RenameSceneString(mesh, "slot.mesh", name);
+    SceneString(members, name);
+    added.push_back({"Mesh", name, std::move(mesh)});
+  }
+  // Apply changes to the measured hint records before inserting their longer
+  // color references. Their labels keep the normal device/localization path.
+  struct Edit { size_t begin, end; std::vector<uint8_t> data; };
+  std::vector<Edit> edits;
+  for (const auto [begin, end] : {std::pair<size_t, size_t>{147259, 147550},
+                                {144026, 144321}, {143406, 143697}}) {
+    auto hint = std::vector<uint8_t>(bytes.begin() + begin, bytes.begin() + end);
+    RenameSceneString(hint, "UIColor.color", "portrait_action.color");
+    edits.push_back({begin, end, std::move(hint)});
+  }
+  auto group = std::vector<uint8_t>(bytes.begin() + 142967, bytes.begin() + 143303);
+  constexpr std::string_view first = "facebook.mesh";
+  const auto member = std::search(group.begin(), group.end(), first.begin(), first.end());
+  if (member == group.end()) return Fail(error, "portrait connection draw group changed");
+  const size_t at = size_t(member - group.begin());
+  if (at < 8 || Be32(group.data() + at - 8) != 8)
+    return Fail(error, "portrait connection draw count changed");
+  PutBe32(group.data() + at - 8, 11);
+  group.insert(group.begin() + at - 4, members.begin(), members.end());
+  edits.push_back({142967, 143303, std::move(group)});
+  for (const auto& edit : edits) {
+    bytes.erase(bytes.begin() + edit.begin, bytes.begin() + edit.end);
+    bytes.insert(bytes.begin() + edit.begin, edit.data.begin(), edit.data.end());
+  }
+  std::vector<uint8_t> declarations;
+  uint32_t names = 0;
+  for (const auto& object : added) {
+    SceneString(declarations, object.type); SceneString(declarations, object.name);
+    names += uint32_t(object.name.size() + 1);
+    bytes.insert(bytes.end(), object.data.begin(), object.data.end());
+  }
+  PutBe32(bytes.data() + 0x26, 529 + names);
+  PutBe32(bytes.data() + 0x2B, 36);
+  bytes.insert(bytes.begin() + 0x3B7, declarations.begin(), declarations.end());
+  return PackStored(bytes, scene, error);
+}
+
 bool PreparePortraitSplash(const std::vector<uint8_t>& source, float aspect,
                            std::vector<uint8_t>* scene, std::string* error) {
   std::vector<uint8_t> bytes;
@@ -545,21 +673,21 @@ bool PreparePortraitSplash(const std::vector<uint8_t>& source, float aspect,
   auto copy = [&](size_t from, size_t to) {
     return std::vector<uint8_t>(bytes.begin() + from, bytes.begin() + to);
   };
-  // Preserve the sky's authored colors, moving texture and animation.
-  SceneColor(bytes, 10405295 + 0x19, .03f, .02f, .045f, 1);
-  auto start_material = copy(10407827, 10408107);
-  RenameSceneString(start_material, "start_panel.tex", "");
-  SceneColor(start_material, 0x19, 1, .855f, .086f, 1);
-  auto start_mesh = copy(0x9F6B5F, 0x9F6CF9);
-  start_mesh[149] = 1; // RndDrawable::showing; retail hides the textured panel.
-  for (size_t matrix : {size_t(0x15), size_t(0x45)})
-    SceneMatrix(start_mesh, matrix, 1, .677f);
-  auto start_label = copy(0x9F656C, 0x9F6704);
-  PutFloat(start_label.data() + 0x13E, 20.f);
+  // Show the authored backdrop's full horizontal color range in portrait.
+  // Cropping its bright center discarded the landscape's saturated red edges.
+  // Preserve all original material colors, including the city silhouette.
+  const float backdrop_x = ui::PortraitSplash(aspect).width / (480 * 16.f / 9);
+  for (size_t matrix : {size_t(0x9F63C5 + 0x15), size_t(0x9F63C5 + 0x45)}) {
+    PutFloat(bytes.data() + matrix, backdrop_x);
+    PutFloat(bytes.data() + matrix + 36, 7.1868896f * backdrop_x);
+  }
+  // Keep the retail text-only Start prompt, including the alternate icon
+  // style's size and baseline relative to the primary text. Shrinking only
+  // the text made the A glyph oversized and visibly displaced in portrait.
 
   auto shade_material = copy(10406977, 10407257);
   RenameSceneString(shade_material, "splash_vig1.tex", "");
-  SceneColor(shade_material, 0x19, .025f, .018f, .045f, 1);
+  SceneColor(shade_material, 0x19, 0, 0, 0, 1);
   shade_material[0x2A] = 1; // pre_lit enables the packed vertex color/alpha.
   auto shade_mesh = copy(0x9F6B5F, 0x9F6CF9);
   shade_mesh[149] = 1;
@@ -607,18 +735,8 @@ bool PreparePortraitSplash(const std::vector<uint8_t>& source, float aspect,
   PutBe32(group.data() + member - 8, 4);
   std::vector<uint8_t> added_member; SceneString(added_member, "portrait_shade.mesh");
   group.insert(group.begin() + member + city.size(), added_member.begin(), added_member.end());
-  struct Edit { size_t begin, end; std::vector<uint8_t> data; };
-  // Descending source offsets keep every measured replacement independent.
-  std::array<Edit, 4> edits{{
-      {0x9F6B5F, 0x9F6CF9, std::move(start_mesh)},
-      {0x9F656C, 0x9F6704, std::move(start_label)},
-      {0x9ED20A, 0x9ED303, std::move(group)},
-      {10407827, 10408107, std::move(start_material)}}};
-  std::sort(edits.begin(), edits.end(), [](const auto& a, const auto& b) { return a.begin > b.begin; });
-  for (const auto& edit : edits) {
-    bytes.erase(bytes.begin() + edit.begin, bytes.begin() + edit.end);
-    bytes.insert(bytes.begin() + edit.begin, edit.data.begin(), edit.data.end());
-  }
+  bytes.erase(bytes.begin() + 0x9ED20A, bytes.begin() + 0x9ED303);
+  bytes.insert(bytes.begin() + 0x9ED20A, group.begin(), group.end());
   const std::array<PortraitObject, 2> added{{
       {"Mat", "portrait_shade.mat", std::move(shade_material)},
       {"Mesh", "portrait_shade.mesh", std::move(shade_mesh)}}};

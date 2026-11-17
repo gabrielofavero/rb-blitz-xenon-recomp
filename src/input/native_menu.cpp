@@ -21,6 +21,7 @@
 #include "ui/input_font_scene.h"
 #include "ui/achievements_overlay.h"
 #include "ui/portrait_menu.h"
+#include "hooks/render_settings.h"
 #include "ui/settings_screen.h"
 #include "loading/load_trace.h"
 #include "loading/crash_recovery.h"
@@ -860,7 +861,27 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
       (!header || U32(base, header + 36) != current_panel_dir)) return;
   const uint16_t button = MenuHintButton(action);
   if (!button) return;
-  const auto bounds = ProjectLabel(ctx, base, label);
+  auto bounds = ProjectLabel(ctx, base, label);
+  // The portrait settings footer is a full native button. Its mesh supplies
+  // the hit area, so tapping beside the Back text also sends Cancel.
+  if (bounds && action == 2 && ui::PortraitSettingsScene(current_panel_scene)) {
+    const auto dir = header ? U32(base, header + 36) : 0;
+    const auto mesh = dir ? SceneMesh(ctx, base, dir, "portrait_back.mesh") : 0;
+    if (mesh) {
+      if (const auto button_bounds = ProjectMesh(ctx, base, mesh)) bounds = button_bounds;
+    }
+  }
+  if (bounds && current_panel_name == "server_connect_panel" &&
+      rb_blitz::settings::BootPortraitWidth()) {
+    const char* name = action == 1 ? "portrait_continue.mesh" :
+                       action == 2 ? "portrait_back.mesh" :
+                       action == 3 ? "portrait_skip.mesh" : nullptr;
+    const auto dir = header ? U32(base, header + 36) : 0;
+    const auto mesh = name && dir ? SceneMesh(ctx, base, dir, name) : 0;
+    if (mesh) {
+      if (const auto button_bounds = ProjectMesh(ctx, base, mesh)) bounds = button_bounds;
+    }
+  }
   if (!bounds) {
     static thread_local std::unordered_map<uint32_t, uint32_t> rejected;
     if (rejected.size() > 128) rejected.clear();

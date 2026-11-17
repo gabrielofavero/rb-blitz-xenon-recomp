@@ -1630,16 +1630,19 @@ bool AddPortraitSplashLayout(std::vector<Node>* roots, float aspect, std::string
   else for (auto& root : staged)
     if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 && root.kids[2].text == "splash_panel")
       root.kids.push_back(Node::Array({sym("poll"), call}));
-  Node main = cmd({sym("=="),
-      cmd({cmd({Node::Var("this"), sym("loaded_dir")}), sym("get"), sym("state")}),
-      sym("main_menu")});
+  const Node state = cmd({cmd({Node::Var("this"), sym("loaded_dir")}), sym("get"), sym("state")});
+  Node main = cmd({sym("=="), state, sym("main_menu")});
+  const auto loading = ui::PortraitLoading(aspect);
   Node apply = cmd({sym("unless"),
-      cmd({sym("=="), Node::Property({sym("rbbz_portrait_main")}), main}),
+      cmd({sym("=="), Node::Property({sym("rbbz_portrait_main")}), state}),
       cmd({sym("do"),
-          cmd({Node::Var("this"), sym("set"), sym("rbbz_portrait_main"), main}),
+          cmd({Node::Var("this"), sym("set"), sym("rbbz_portrait_main"), state}),
           cmd({sym("if_else"), main,
               place("anim_logo.grp", layout.menu_logo_scale, layout.menu_logo_x, 0, layout.menu_logo_z),
-              place("anim_logo.grp", layout.title_logo_scale, layout.title_logo_x, 0, layout.title_logo_z)}),
+              cmd({sym("if_else"), cmd({sym("=="), state, sym("waiting")}),
+                  place("anim_logo.grp", loading.logo_scale, 0, 0,
+                        loading.logo_z - 15.408f * loading.logo_scale),
+                  place("anim_logo.grp", layout.title_logo_scale, layout.title_logo_x, 0, layout.title_logo_z)})}),
           place("start_panel.grp", layout.start_scale, 0, 8, layout.start_z),
           place("list.grp", 1, 0, -15.76387f, 0),
           place("start.lst", layout.list_scale, 0, 0, layout.list_z),
@@ -1685,6 +1688,104 @@ bool AddPortraitLoadingLayout(std::vector<Node>* roots, bool song_loading,
     position("Powerups.grp", 15);
     position("load_vert.grp", -80);
     position("loading.lbl", -175);
+  } else {
+    const auto sym = [](const char* value) { return Node::Symbol(value); };
+    const auto set = [&](const char* name, Node property, Node value) {
+      enter->kids.push_back(Node::Command({sym(name), sym("set"),
+                                          std::move(property), std::move(value)}));
+    };
+    const auto size = [&](const char* name, float x, float z) {
+      enter->kids.push_back(Node::Command({sym(name), sym("set_local_scale"),
+                                          number(x / scale), number(1), number(z / scale)}));
+    };
+    const auto position = [&](const char* name, float z, float x = 0) {
+      enter->kids.push_back(Node::Command({sym(name), sym("set_local_pos"),
+                                          number(x / scale), number(0), number(z / scale)}));
+    };
+    const auto layout = ui::PortraitLoading(aspect);
+    // Keep the scene fit for its native footer/login controls. Size the
+    // loading content independently so narrow screens retain readable text.
+    size("status.lbl", 1, 1);
+    set("status.lbl", sym("width"), number(layout.text_width));
+    set("status.lbl", sym("height"), number(180));
+    set("status.lbl", sym("alignment"), Node::Int(0x22)); // middle center
+    set("status.lbl", Node::Array({sym("styles"), Node::Int(0), sym("text_size")}), number(26));
+    // The status and footer transform directly under the scene. The count
+    // and bar's enumeration parent has a net zero authored translation.
+    position("status.lbl", 15);
+    size("content_percent.lbl", 16.f / 30, 16.f / 30);
+    position("content_percent.lbl", -88);
+    // The native frame spans 256 x 32 units. Preserve its animated fill.
+    size("progress_bar.grp", layout.width * .66f / 256, 4.f / 32);
+    position("progress_bar.grp", -108);
+    for (const char* hint : {"continue.ihp", "back.ihp", "skip.ihp"})
+      size(hint, layout.button_scale, layout.button_scale);
+    position("continue.ihp", -187, layout.button_x);
+    position("back.ihp", -187, -layout.button_x);
+    position("skip.ihp", -187, -layout.button_x);
+
+    const auto cmd = [](std::vector<Node> n) { return Node::Command(std::move(n)); };
+    const auto query = [&](const char* name) {
+      return cmd({sym("file_exists"), Node::String(std::string("rbbz-graphics/") + name)});
+    };
+    // Portrait has two real actions while preparing: Back returns to Start,
+    // Skip continues with demand compilation. Failed preparation keeps Retry/Ignore.
+    if (auto* graphics_poll = PanelMethod(&staged, "server_connect_panel", "rbbz_graphics_poll")) {
+      auto* buttons = PanelMethod(&staged, "server_connect_panel", "BUTTON_DOWN_MSG");
+      if (!buttons || buttons->kids.size() != 2 || buttons->kids[1].kids.size() != 4 ||
+          buttons->kids[1].kids[2].kids.size() != 4) {
+        if (why) *why = "portrait graphics actions changed";
+        return false;
+      }
+      const auto back = cmd({sym("do"), query("cancel"),
+          cmd({sym("set"), Node::Property({sym("rbbz_graphics_pending")}), sym("FALSE")}),
+          cmd({sym("user_mgr"), sym("set_participating_user")}),
+          cmd({cmd({sym("splash_panel"), sym("loaded_dir")}), sym("set"), sym("state"), sym("start")}),
+          cmd({sym("ui"), sym("goto_screen"), sym("splash_screen")})});
+      buttons->kids[1].kids[2].kids[3] = cmd({sym("switch"), Node::Var("action"),
+          Node::Array({sym("kAction_Confirm"), cmd({sym("if"), query("skip"),
+              cmd({Node::Var("this"), sym("rbbz_finish_graphics")})})}),
+          Node::Array({sym("kAction_Cancel"), back})});
+      const auto adapt = [&](auto&& self, Node& n) -> void {
+        if (n.tag == ui::dtb::kCommand && n.kids.size() >= 3) {
+          if (n.kids[0].text == "continue.ihp" && n.kids[1].text == "set_showing")
+            n.kids[2] = sym("TRUE");
+          if (n.kids.size() == 4 && n.kids[1].text == "set_action_token") {
+            const bool confirm = n.kids[0].text == "continue.ihp";
+            if (confirm || n.kids[0].text == "back.ihp")
+              n.kids[3] = cmd({sym("if_else"), query("failed"),
+                  sym(confirm ? "rbbz_loading_retry" : "rbbz_graphics_ignore"),
+                  sym(confirm ? "rbbz_graphics_back" : "inline_help_back")});
+          }
+        }
+        for (auto& child : n.kids) self(self, child);
+      };
+      adapt(adapt, *graphics_poll);
+    }
+    enter = PanelMethod(&staged, "server_connect_panel", "enter");
+    enter->kids.push_back(cmd({sym("continue.ihp"), sym("set_action_token"),
+                              sym("kAction_Confirm"), sym("rbbz_loading_continue")}));
+    // Native state changes still own hint visibility. The matching button
+    // backgrounds and hit areas follow those hints, with at most two slots.
+    std::vector<Node> update{sym("do")};
+    for (const char* action : {"continue", "back", "skip"}) {
+      update.push_back(cmd({Node::Symbol(std::string("portrait_") + action + ".mesh"),
+          sym("set_showing"), cmd({Node::Symbol(std::string(action) + ".ihp"),
+                                   sym("get"), sym("showing")})}));
+    }
+    update.push_back(cmd({sym("skip.ihp"), sym("set_local_pos"),
+        cmd({sym("if_else"), cmd({sym("back.ihp"), sym("get"), sym("showing")}),
+             number(layout.button_x / scale), number(-layout.button_x / scale)}),
+        number(0), number(-187 / scale)}));
+    const auto apply = cmd({Node::Var("this"), sym("rbbz_portrait_loading")});
+    enter->kids.push_back(apply);
+    if (auto* poll = PanelMethod(&staged, "server_connect_panel", "poll")) poll->kids.push_back(apply);
+    else for (auto& root : staged)
+      if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 && root.kids[2].text == "server_connect_panel")
+        root.kids.push_back(Node::Array({sym("poll"), apply}));
+    for (auto& root : staged)
+      if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 && root.kids[2].text == "server_connect_panel")
+        root.kids.push_back(Node::Array({sym("rbbz_portrait_loading"), cmd(std::move(update))}));
   }
   *roots = std::move(staged);
   return true;
@@ -2032,6 +2133,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           {"rbbz_graphics_failed_data","Game shader data is missing or unreadable."},
           {"rbbz_graphics_failed_cache","The graphics cache folder is not writable."},
           {"rbbz_graphics_retry","Try Again"},
+          {"rbbz_loading_retry","Retry"},
+          {"rbbz_loading_continue","Continue"},
           {"rbbz_graphics_ignore","Ignore"},
           {"rbbz_graphics_back","Skip"},
           {"rbbz_load_crashed","The game crashed while loading a song and was restarted. Returned to the main menu. Try another song."},
@@ -2413,6 +2516,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     }
   }
   if (!read(screen::kSceneSourceRecord, &built[screen::kSceneRecord], error)) return false;
+  if (portrait_hud) {
+    std::vector<uint8_t> buttons, scene;
+    if (!read(ui::input_font::kListRecord, &buttons, error) ||
+        !ui::input_font::PreparePortraitSettings(built[screen::kSceneRecord], buttons,
+            screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
+    built[screen::kSceneRecord] = std::move(scene);
+  }
   built[screen::kPauseSceneRecord] = built[screen::kSceneRecord];
   {
     // Size the guest heap before the title creates it. This is the direct
@@ -2589,6 +2699,11 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
               screen::CurrentMenuConfiguration().portrait_aspect, error);
         })) return false;
     std::vector<uint8_t> source, buttons, scene;
+    if (!read(ui::input_font::kConnectionRecord, &source, error) ||
+        !read(ui::input_font::kListRecord, &buttons, error) ||
+        !ui::input_font::PreparePortraitConnection(source, buttons,
+            screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
+    built[ui::input_font::kConnectionRecord] = std::move(scene);
     if (!read(ui::input_font::kSplashListRecord, &source, error) ||
         !read(ui::input_font::kListRecord, &buttons, error) ||
         !ui::input_font::PreparePortraitSplashList(source, buttons, &scene, error)) return false;
