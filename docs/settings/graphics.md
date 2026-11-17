@@ -1308,7 +1308,10 @@ is still 1280x720, with a 405x720 visible viewport. The camera projection and
 vertical FOV are unchanged. The title, main menu, connection/content scan and song loading fill the portrait
 window, using the first two layouts in the
 [portrait reference](../reference/rock-band-blitz-portrait.html). Other menus
-and modal dialogs fit the original landscape image inside the portrait window.
+fit the original landscape image inside the portrait window. Native confirmations
+(including Exit Game and settings prompts) and error popups keep portrait
+presentation, with their content scaled to fit the visible width. The confirmation
+animation's scale keys use the same fit; its full-screen shade stays unscaled.
 
 The initial narrow-frame implementation was stretched and its visual validation
 was insufficient. It is superseded by the landscape-source crop above. The

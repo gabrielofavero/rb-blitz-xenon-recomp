@@ -21,6 +21,7 @@
 #include "ui/input_font_scene.h"
 #include "ui/achievements_overlay.h"
 #include "ui/portrait_menu.h"
+#include "ui/settings_screen.h"
 #include "loading/load_trace.h"
 #include "loading/crash_recovery.h"
 #include "hooks/content_progress.h"
@@ -117,6 +118,7 @@ thread_local std::vector<MenuHintTarget> hint_targets;
 thread_local int clicked_header = -1;
 thread_local uint32_t header_click_frame = 0;
 thread_local std::string current_panel_name;
+thread_local std::string current_panel_scene;
 // The last row a draw positively identified as selected. The guest sets the selected
 // *slot* to -1 when a scroll left the selection outside the band, so the slot cannot
 // be the anchor; this survives that and is reset on every screen or focus change.
@@ -180,6 +182,8 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   const uint32_t panel = screen ? U32(base, screen + 52) : 0;
   const std::string name = ObjectName(base, screen);
   const std::string panel_name = ObjectName(base, ObjectBase(base, panel));
+  if (panel_name != current_panel_name)
+    current_panel_scene = ui::screen::PanelScene(panel_name);
   const auto scope = DialogScopeFor(panel_name, ObjectName(base, ObjectBase(base, focus)));
   const uint32_t input_scope = scope == MenuDialogScope::kShortcuts ? focus :
                                scope == MenuDialogScope::kPanel ? panel : 0;
@@ -218,7 +222,8 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     // press or release from the old context can never arrive late in the new one.
     InvalidateGameplayInput();
     if (REXCVAR_GET(mouse_native_trace))
-      REXLOG_INFO("native_mouse: screen={} panel={} focus={:08X} available={}", name, panel_name, focus, allowed);
+      REXLOG_INFO("native_mouse: screen={} panel={} scene={} focus={:08X} available={}",
+                  name, panel_name, current_panel_scene, focus, allowed);
   }
   std::lock_guard lock(mutex);
   current_screen = screen; current_focus = focus; menu_available = allowed;
@@ -229,7 +234,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   observed_menu_frame = frame_number;
   if (current_screen_name != name) current_screen_name = name;
   game_screen_active = in_song;
-  portrait_splash_active = ui::PortraitSplashScreen(name, panel_name);
+  portrait_splash_active = ui::PortraitSplashScreen(name, panel_name, current_panel_scene);
   current_panel_name = panel_name;
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled() &&
                 !rex::kernel::xam::xeXamIsUIActive() && !ui::achievements::Active(), panel);

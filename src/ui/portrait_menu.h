@@ -36,12 +36,30 @@ inline PortraitSplashLayout PortraitSplash(float aspect) {
           list_scale, list_z, city_scale, -240 + 131.94f * city_scale};
 }
 
-// Only panels with authored portrait content fill the surface. Other menus
-// and guest dialogs keep their existing fitted presentation.
-inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel) {
+inline float PortraitPromptScale(float aspect, bool error_popup = false) {
+  return std::min(PortraitSplash(aspect).width * .84f / (error_popup ? 640.f : 350.f), 1.f);
+}
+
+// Confirmation scenes are also used by settings under private file aliases.
+// Recognize the authored scene so new prompts using that scene inherit portrait.
+inline bool PortraitPromptScene(std::string_view scene) {
+  return scene == "confirmation_message" || scene == "settings_confirmation" ||
+         scene == "settings_confirmation_pause" || scene == "error_general" ||
+         scene == "../pause/settings_confirmation.milo" ||
+         scene == "../pause/settings_confirmation_pause.milo";
+}
+
+// Panels with authored portrait content fill the surface, including modal
+// prompts. Other menus keep their existing fitted presentation.
+inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel,
+                                std::string_view scene = {}) {
   return (screen == "splash_screen" && panel == "splash_panel") ||
          (screen == "server_connect_screen" && panel == "server_connect_panel") ||
-         (screen == "loading_screen" && panel == "loading_panel");
+         (screen == "loading_screen" && panel == "loading_panel") ||
+         panel == "pause_exit_game_panel" || panel == "error_popup_panel" ||
+         panel == "rbbz_download_panel" || panel == "rbbz_search_loading_panel" ||
+         panel == "rbbz_library_panel" ||
+         PortraitPromptScene(scene);
 }
 
 }  // namespace rb_blitz::ui

@@ -1745,11 +1745,28 @@ void TestPortraitSplash() {
   }
   CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("splash_screen", "splash_panel"));
   CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("splash_screen", "upsell_panel"));
-  CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("confirm_exit_game_screen", "pause_exit_game_panel"));
+  CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("confirm_exit_game_screen", "pause_exit_game_panel"));
+  CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("settings_restart_screen", "settings_restart_panel",
+                                              "settings_confirmation"));
+  CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("settings_restart_pause_screen", "settings_restart_pause_panel",
+                                              "confirmation_message"));
   CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("options_screen", "options_panel"));
   CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("server_connect_screen", "server_connect_panel"));
   CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("loading_screen", "loading_panel"));
-  CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("server_connect_screen", "error_popup_panel"));
+  CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("server_connect_screen", "error_popup_panel"));
+  for (const char* panel : {"rbbz_download_panel", "rbbz_search_loading_panel", "rbbz_library_panel"})
+    CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("store_info_screen", panel));
+  for (const char* panel : {"settings_restart_panel", "settings_restore_defaults_panel",
+                            "settings_restart_pause_panel", "messages_update_panel"}) {
+    const auto scene = rb_blitz::ui::screen::PanelScene(panel);
+    CHECK_TRUE(rb_blitz::ui::PortraitPromptScene(scene));
+    CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("settings_prompt_screen", panel, scene));
+  }
+  CHECK_FALSE(rb_blitz::ui::PortraitPromptScene(rb_blitz::ui::screen::PanelScene("settings_av_panel")));
+  for (float aspect : {402.f / 874, 9.f / 16, .75f}) {
+    CHECK_TRUE(rb_blitz::ui::PortraitPromptScale(aspect) * 350 <= rb_blitz::ui::PortraitSplash(aspect).width * .85f);
+    CHECK_TRUE(rb_blitz::ui::PortraitPromptScale(aspect, true) * 640 <= rb_blitz::ui::PortraitSplash(aspect).width * .85f);
+  }
 
   BeginCase("authored portrait splash changes pose on Start and Back, with no repeated transform writes");
   std::vector<Node> roots{C({S("new"), S("UIPanel"), S("splash_panel"),
@@ -2579,12 +2596,15 @@ int main(int argc, char** argv) {
       CHECK_TRUE(notes.empty());
     }
     BeginCase("portrait payload changes splash buttons, loading layouts and the existing gameplay HUD route");
-    CHECK_EQ(portrait.size(), landscape.size() + 2 + !landscape.contains("ui/gen/game.dtb") +
+    CHECK_EQ(portrait.size(), landscape.size() + 3 + !landscape.contains("ui/gen/game.dtb") +
                                       !landscape.contains("ui/loading/gen/loading.dtb"));
     for (const auto& [path, original] : landscape) {
       CHECK_TRUE(portrait.contains(path));
       if (path != "ui/splash/gen/splash.dtb" && path != "ui/gen/game.dtb" &&
-          path != "ui/net/gen/server_connect.dtb" && path != rb_blitz::ui::input_font::kSplashRecord)
+          path != "ui/net/gen/server_connect.dtb" && path != rb_blitz::ui::input_font::kSplashRecord &&
+          path != rb_blitz::ui::input_font::kErrorReturnRecord &&
+          path != "ui/pause/gen/settings_confirmation.milo_xbox" &&
+          path != "ui/pause/gen/settings_confirmation_pause.milo_xbox")
         CHECK_TRUE(portrait.at(path) == original);
     }
     CHECK_TRUE(portrait.contains(rb_blitz::ui::input_font::kSplashListRecord));
@@ -2597,6 +2617,18 @@ int main(int argc, char** argv) {
       return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
     };
     CHECK_TRUE(art.size() > 0x810);
+    BeginCase("shared portrait prompts preserve native shade and animation timing across aliases");
+    const auto& confirmation = portrait.at("ui/pause/gen/confirmation_message.milo_xbox");
+    CHECK_TRUE(confirmation == portrait.at("ui/pause/gen/settings_confirmation.milo_xbox"));
+    CHECK_TRUE(confirmation == portrait.at("ui/pause/gen/settings_confirmation_pause.milo_xbox"));
+    const auto* prompt = confirmation.data() + 0x810;
+    const float prompt_scale = rb_blitz::ui::PortraitPromptScale(config.portrait_aspect);
+    CHECK_EQ(std::bit_cast<float>(u32(prompt + 0x2DF8)), prompt_scale);
+    CHECK_EQ(std::bit_cast<float>(u32(prompt + 0x32B7)), .5f * prompt_scale);
+    CHECK_EQ(std::bit_cast<float>(u32(prompt + 0x32B7 + 32)), prompt_scale);
+    CHECK_EQ(std::bit_cast<float>(u32(prompt + 0x32B7 + 12)), 0.f);
+    CHECK_EQ(std::bit_cast<float>(u32(prompt + 0x32B7 + 44)), 10.f);
+    CHECK_EQ(std::bit_cast<float>(u32(prompt + 0x3089 + 0x15)), 1.f); // unscaled dimmer
     CHECK_EQ(u32(art.data() + 0x810 + 0x23), uint32_t(75));
     std::vector<size_t> markers;
     for (size_t at = 0x810; at + 4 <= art.size(); ++at)

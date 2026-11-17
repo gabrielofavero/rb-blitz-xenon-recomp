@@ -2892,6 +2892,15 @@ std::vector<std::string> PanelNames() {
   return out;
 }
 
+std::string PanelScene(std::string_view name) {
+  if (name == "messages_update_panel") return "../pause/settings_confirmation.milo";
+  if (!name.starts_with("settings_")) return {};
+  for (const auto& context : {AllPanels(), InSongPanels()})
+    for (const auto& panel : context)
+      if (panel.name == name) return panel.scene;
+  return {};
+}
+
 std::vector<std::string> ScreenNames() {
   std::vector<std::string> out;
   for (const std::vector<PanelSpec>& context : {AllPanels(), InSongPanels()}) {

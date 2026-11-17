@@ -457,7 +457,7 @@ bool MenuAvailable();
 bool MenuScreenIs(std::string_view name);
 // One coherent view of the splash option list; pre-press title has no drawn list.
 bool MainMenuMusicInputAvailable();
-// Portrait title/main menu and loading panels, excluding their modal dialogs.
+// Portrait title/main menu, loading panels, and native confirmation/error prompts.
 bool PortraitSplashActive();
 
 // A live song: the screen is `game_screen` and the focused panel is not the pause panel

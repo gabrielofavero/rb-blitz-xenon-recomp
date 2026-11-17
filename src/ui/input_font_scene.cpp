@@ -508,6 +508,34 @@ void SceneMatrix(std::vector<uint8_t>& out, size_t at, float sx, float sz,
 }
 }  // namespace
 
+bool PreparePortraitPrompt(const std::vector<uint8_t>& source, float aspect,
+                           std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  const auto crc = Crc32(bytes.data(), bytes.size());
+  const bool confirmation = bytes.size() == 13645 && crc == 0x7EFF956D;
+  const bool popup = bytes.size() == 2803318 && crc == 0x6790B076;
+  if (!confirmation && !popup) return Fail(error, "portrait prompt source revision changed");
+  const float scale = ui::PortraitPromptScale(aspect, popup);
+  // Scale the content's transform parent. The confirmation's full-screen
+  // Shade.mesh belongs to its draw group but has no transform parent, so it
+  // continues dimming the entire portrait background.
+  const size_t matrix = confirmation ? 0x2DF8 : 0x2AC307;
+  for (size_t at : {matrix, matrix + 48})
+    for (size_t axis : {size_t(0), size_t(16), size_t(32)})
+      PutFloat(bytes.data() + at + axis, scale);
+  if (confirmation) {
+    // on.anim animates Group.grp::scale on every entry. Scale each vector key,
+    // preserving its times and easing, so the animation cannot undo the fit.
+    for (size_t key = 0; key < 3; ++key)
+      for (size_t axis = 0; axis < 3; ++axis) {
+        const size_t at = 0x32B7 + key * 16 + axis * 4;
+        PutFloat(bytes.data() + at, std::bit_cast<float>(Be32(bytes.data() + at)) * scale);
+      }
+  }
+  return PackStored(bytes, scene, error);
+}
+
 bool PreparePortraitSplash(const std::vector<uint8_t>& source, float aspect,
                            std::vector<uint8_t>* scene, std::string* error) {
   std::vector<uint8_t> bytes;

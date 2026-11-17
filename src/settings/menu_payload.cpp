@@ -2605,9 +2605,25 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       themed = std::move(splash);
     }
     built[ui::input_font::kSplashRecord] = std::move(themed);
+    if (!read(ui::input_font::kErrorReturnRecord, &source, error) ||
+        !ui::input_font::PreparePortraitPrompt(source,
+            screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
+    if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
+      if (!ui::input_font::PrepareErrorReturn(scene, &source, error)) return false;
+      scene = std::move(source);
+    }
+    built[ui::input_font::kErrorReturnRecord] = std::move(scene);
   }
   if (!read("ui/pause/gen/confirmation_message.milo_xbox",
             &built["ui/pause/gen/settings_confirmation.milo_xbox"], error)) return false;
+  if (portrait_hud) {
+    std::vector<uint8_t> scene;
+    if (!ui::input_font::PreparePortraitPrompt(
+          built["ui/pause/gen/settings_confirmation.milo_xbox"],
+          screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
+    built["ui/pause/gen/confirmation_message.milo_xbox"] = scene;
+    built["ui/pause/gen/settings_confirmation.milo_xbox"] = std::move(scene);
+  }
   built["ui/pause/gen/settings_confirmation_pause.milo_xbox"] =
       built["ui/pause/gen/settings_confirmation.milo_xbox"];
   // This record may grow in the generated archive. Retain all original constants

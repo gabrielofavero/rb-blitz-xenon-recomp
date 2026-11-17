@@ -261,6 +261,8 @@ bool AddDeferredScreens(std::vector<dtb::Node>* nodes, std::string* reason);
 // The panel names, in declaration order. The root is first, and every panel appears twice: once for
 // the main-menu context, once for the in-song one.
 std::vector<std::string> PanelNames();
+// Authored scene path for a project-owned panel; empty for an unknown panel.
+std::string PanelScene(std::string_view panel);
 
 // The screen names, in declaration order. The two contexts of each screen are adjacent.
 std::vector<std::string> ScreenNames();

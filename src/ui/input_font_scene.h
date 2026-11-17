@@ -42,6 +42,9 @@ bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* sce
 // Flat native Start button and a soft, vertex-alpha vignette behind the UI.
 bool PreparePortraitSplash(const std::vector<uint8_t>& source, float aspect,
                            std::vector<uint8_t>* scene, std::string* error);
+// Fit native confirmation/error content to portrait; preserve its shade and input.
+bool PreparePortraitPrompt(const std::vector<uint8_t>& source, float aspect,
+                           std::vector<uint8_t>* scene, std::string* error);
 // Derive persistent native buttons and a selection cell for the six portrait rows.
 bool PreparePortraitSplashFont(const std::vector<uint8_t>& source,
                               std::vector<uint8_t>* scene, std::string* error);
