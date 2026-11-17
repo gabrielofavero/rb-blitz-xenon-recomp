@@ -2119,6 +2119,9 @@ void TestHideMobileExit() {
       "rbbz-settings/set/controller.touch_lane_swipe/t:normal") != paths.end());
   CHECK_TRUE(std::find(paths.begin(), paths.end(),
       "rbbz-settings/set/controller.touch_lane_swipe/t:inverted") != paths.end());
+  for (const auto* mode : {"tilt", "shake", "none"})
+    CHECK_TRUE(std::find(paths.begin(), paths.end(),
+        std::string("rbbz-settings/set/controller.touch_motion_deploy/t:") + mode) != paths.end());
 }
 
 void TestProviderRowRemoval() {
@@ -4605,7 +4608,7 @@ void TestControllerLayoutCatalogPage() {
       "settings_controls_interface", "settings_controls_gameplay", "settings_controls_touch"};
   CHECK_TRUE(PanelRowSymbols("settings_controls_panel") == devices);
   CHECK_TRUE(PanelRowSymbols("settings_controls_pause_panel") == devices);
-  CHECK_TRUE(PanelRowSymbols("settings_touch_panel") == std::vector<std::string>({"settings_touch_buttons", "settings_touch_lane_swipe", "settings_touch_shake_deploy"}));
+  CHECK_TRUE(PanelRowSymbols("settings_touch_panel") == std::vector<std::string>({"settings_touch_buttons", "settings_touch_lane_swipe", "settings_touch_motion_deploy"}));
   CHECK_TRUE(PageRows("settings_touch_pause_panel") == PageRows("settings_touch_panel"));
   CHECK_TRUE(PageRows("settings_controls_pause_panel") ==
              PageRows("settings_controls_panel"));
@@ -4653,7 +4656,7 @@ void TestControllerLayoutCatalogPage() {
   CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 5u);
   configuration.hidden.insert("controller.touch_lane_swipe");
   configuration.hidden.insert("controller.touch_buttons");
-  configuration.hidden.insert("controller.touch_shake_deploy");
+  configuration.hidden.insert("controller.touch_motion_deploy");
   ConfigureMenu(configuration);
   CHECK_TRUE(PageRows("settings_controls_panel") ==
              std::vector<std::string>({"settings_controls_layout", "settings_controller_presets", "settings_controls_interface", "settings_controls_gameplay"}));

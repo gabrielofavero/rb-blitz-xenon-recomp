@@ -43,7 +43,7 @@ constexpr HotRow kHotRows[] = {
     {SettingId::kSettingsLabelSize, "interface.settings_label_size", "settings_help_size"},
     {SettingId::kTouchLaneSwipe, "controller.touch_lane_swipe", "touch_lane_swipe"},
     {SettingId::kTouchButtons, "controller.touch_buttons", "touch_buttons"},
-    {SettingId::kTouchShakeDeploy, "controller.touch_shake_deploy", "touch_shake_deploy"},
+    {SettingId::kTouchMotionDeploy, "controller.touch_motion_deploy", "touch_motion_deploy"},
 };
 
 // The RhythmVerse store's filter rows (plan P6). They write no cvar: their consumer is the store's
@@ -81,6 +81,12 @@ constexpr char kCvarError[] = "the applier has no cvar for this row";
 // The value as the cvar's own text form. `vsync` is a bool cvar; a value of the wrong kind is
 // refused rather than spelled, because a guessed spelling is how a write silently does nothing.
 bool CvarText(SettingId id, const Value& value, std::string* out) {
+  if (id == SettingId::kTouchMotionDeploy) {
+    if (value.kind != ValueKind::kEnum ||
+        (value.text != "tilt" && value.text != "shake" && value.text != "none")) return false;
+    *out = value.text;
+    return true;
+  }
   if (id == SettingId::kTouchLaneSwipe) {
     if (value.kind != ValueKind::kEnum ||
         (value.text != "inverted" && value.text != "normal")) return false;

@@ -4,6 +4,7 @@ Plans awaiting work, including plans paused after an initial investigation. Each
 
 | Plan | What it covers |
 | --- | --- |
+| [`2026-11-17-rexglue-v0.11-migration-plan.md`](2026-11-17-rexglue-v0.11-migration-plan.md) | Planning only: direct v0.11.0 migration, all 71 SDK patch dispositions, API/build and native platform integration, reproducible dependencies, packaging and matched performance gates. |
 | [`2026-11-17-custom-loading-texts-plan.md`](2026-11-17-custom-loading-texts-plan.md) | Planning only: exact loading-screen/message inventory, selective JSON replacements, semantic inline input images, and live controller/keyboard/mouse/touch wording. |
 | [`2026-10-25-framerate-expansion-plan.md`](2026-10-25-framerate-expansion-plan.md) | Paused after P0/P1 diagnostics and gameplay pilots. No higher rate passed the in-song performance gate; the diagnostic code and results remain recorded for a later attempt. |
 | [`2026-10-26-offline-powerups-restoration-plan.md`](2026-10-26-offline-powerups-restoration-plan.md) | Independently restore free offline powerups on the full default target: one default-on Unlock Powerups setting, native selection/unlocks, disabled costs and purchases, replay routes, and unchanged Ultimate/trial behavior. Planning only (P0–P4). |

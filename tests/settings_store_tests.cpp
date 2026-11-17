@@ -461,6 +461,43 @@ void TestResolutionPreferenceMigration() {
   CHECK_STR_EQ(automatic.document.values.at(SettingId::kRenderScale).text, "auto");
 }
 
+void TestMotionDeployMigration() {
+  BeginCase("store: legacy motion opt-out survives and enabled installs adopt Tilt");
+  Scratch scratch;
+  const auto file = scratch.base / "settings.toml";
+  constexpr auto id = SettingId::kTouchMotionDeploy;
+  for (const bool enabled : {false, true}) {
+    const std::string original = std::string("schema_version = 1\n[controller]\ntouch_shake_deploy = ") +
+        (enabled ? "true" : "false") + " # keep\nunknown = 'untouched'\n";
+    WriteFile(file, original);
+    const auto loaded = LoadSettingsDocument(file);
+    CHECK_TRUE(loaded.status == DocumentStatus::kOk);
+    CHECK_STR_EQ(loaded.document.values.at(id).text, enabled ? "tilt" : "none");
+    CHECK_STR_EQ(ReadFile(file), original);
+    SaveRequest request;
+    request.base = loaded.document.values;
+    Value shake; shake.kind = ValueKind::kEnum; shake.text = "shake";
+    request.changed[id] = shake;
+    CHECK_TRUE(SaveSettingsDocument(file, request).status == CommitStatus::kSaved);
+    CHECK_STR_EQ(LoadSettingsDocument(file).document.values.at(id).text, "shake");
+    CHECK_CONTAINS(ReadFile(file), "unknown = 'untouched'");
+    request.base = LoadSettingsDocument(file).document.values;
+    request.changed[id] = {};
+    CHECK_TRUE(SaveSettingsDocument(file, request).status == CommitStatus::kSaved);
+    CHECK_FALSE(LoadSettingsDocument(file).document.values.contains(id));
+    CHECK_TRUE(ReadFile(file).find("touch_shake_deploy") == std::string::npos);
+  }
+  BeginCase("store: explicit motion mode wins and concurrent legacy edits conflict");
+  WriteFile(file, "schema_version = 1\n[controller]\ntouch_shake_deploy = false\ntouch_motion_deploy = 'tilt'\n");
+  CHECK_STR_EQ(LoadSettingsDocument(file).document.values.at(id).text, "tilt");
+  WriteFile(file, "schema_version = 1\n[controller]\ntouch_shake_deploy = false\n");
+  SaveRequest request;
+  request.base = LoadSettingsDocument(file).document.values;
+  request.changed[id] = request.base.at(id);
+  WriteFile(file, "schema_version = 1\n[controller]\ntouch_shake_deploy = true\n");
+  CHECK_TRUE(SaveSettingsDocument(file, request).status == CommitStatus::kConflict);
+}
+
 }  // namespace
 
 int main() {
@@ -472,5 +509,6 @@ int main() {
   TestLockErrorsSayWhichFailure();
   TestStoreFacade();
   TestResolutionPreferenceMigration();
+  TestMotionDeployMigration();
   return Finish();
 }

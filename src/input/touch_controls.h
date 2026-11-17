@@ -11,6 +11,9 @@ Actions SampleGameplay(bool active);
 void CancelGameplay();
 std::vector<GameplayEvent> DrainGameplay();
 bool ConsumeMouse(bool is_touch, Phase phase, bool gameplay);
+// Physical mouse coordinates normalized to the presented guest frame.
+bool ConsumeLanePointer(Phase phase, float guest_x, float guest_y);
+bool LanePowerupAvailable();
 // Shared with the guest HUD transform seam; drawing and hit testing use one layout.
 Layout CurrentLayout();
 bool ControlsVisible();

@@ -348,14 +348,17 @@ std::vector<SchemaRow> BuildTable() {
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
                      {"interface", "hide_exit_game"}, "main_menu_base", "Exit Game",
                      "Show or hide Exit Game. Restart to apply."));
-  rows.push_back(Row(Make(SettingId::kTouchShakeDeploy, Category::kController, Provider::kNative,
-                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"controller", "touch_shake_deploy"}, "touch", "Shake to Deploy",
-                     "Tilt or shake sharply once to deploy a ready power-up."));
+  {
+    Descriptor d = Make(SettingId::kTouchMotionDeploy, Category::kController, Provider::kNative,
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("tilt"));
+    d.choices = Choices({{"tilt", "Tilt"}, {"shake", "Shake"}, {"none", "None"}});
+    rows.push_back(Row(std::move(d), {"controller", "touch_motion_deploy"}, "touch", "Motion Deploy",
+                       "Tilt away or shake lightly; None disables motion."));
+  }
   rows.push_back(Row(Make(SettingId::kTouchButtons, Category::kController, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
-                     {"controller", "touch_buttons"}, "touch", "Touch Buttons",
-                     "Show the pause and power-up buttons while using touch. Applies immediately."));
+                     {"controller", "touch_buttons"}, "touch", "Pause Button",
+                     "Show the pause button while using touch. Applies immediately."));
   rows.push_back(Row(Make(SettingId::kBackgroundMusicNavigation, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "background_music_navigation"}, "", "Menu Music Navigation",
@@ -603,8 +606,8 @@ constexpr StrategyEntry kStrategies[] = {
      "The touch event handler reads touch_lane_swipe before recognizing each swipe."},
     {SettingId::kTouchButtons, ApplicationStrategy::kHot,
      "Guest HUD draw and placement hooks read touch_buttons each frame; no scene reload is needed."},
-    {SettingId::kTouchShakeDeploy, ApplicationStrategy::kHot,
-     "The accelerometer event handler reads touch_shake_deploy for every sample."},
+    {SettingId::kTouchMotionDeploy, ApplicationStrategy::kHot,
+     "The accelerometer event handler reads touch_motion_deploy for every sample."},
     // Gameplay (Ultimate provider)
     {SettingId::kPrecisionMode, ApplicationStrategy::kRestart, ""},
     {SettingId::kDisableRandomWiggles, ApplicationStrategy::kRestart, ""},
@@ -749,7 +752,7 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
     touch.hidden = true;
     release.rules.emplace(SettingId::kTouchLaneSwipe, touch);
     release.rules.emplace(SettingId::kTouchButtons, touch);
-    release.rules.emplace(SettingId::kTouchShakeDeploy, std::move(touch));
+    release.rules.emplace(SettingId::kTouchMotionDeploy, std::move(touch));
   }
   if (platform == HostPlatform::kLinux || platform == HostPlatform::kMacOS ||
       platform == HostPlatform::kIOS) {

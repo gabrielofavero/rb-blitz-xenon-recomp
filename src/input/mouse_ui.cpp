@@ -276,6 +276,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     if (window_) window_->ReleaseMouse();
   }
   void Detach() {
+    EndLanePointer();
     if (!window_) return;
     EndDrag();
     ui::music::CancelPlayerPointer();
@@ -287,6 +288,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
   }
   void OnClosing(rex::ui::UIEvent&) override { Detach(); }
   void OnLostFocus(rex::ui::UISetupEvent&) override {
+    EndLanePointer();
     EndDrag();
     ui::music::CancelPlayerPointer();
     // A lost window has no held buttons or keys from the host's point of view: the releases that
@@ -314,6 +316,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
       MouseMenuFocus(g_window_focused);
     }
     MouseMenuFocus(window_->HasFocus() && !io.WantCaptureMouse && !ui::music::PlayerPointerOver());
+    if (lane_pointer_captured_ && (!touch::LanePowerupAvailable() || io.WantCaptureMouse)) EndLanePointer();
     if (!MouseMenuAvailable() || io.WantCaptureMouse ||
         (dragging_ && (CurrentScreen() != drag_screen_ || CurrentFocus() != drag_focus_))) EndDrag();
     // The focus facts are read on the main thread where SDL allows them, and per frame because
@@ -331,11 +334,10 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     // events keep arriving), so re-reading it here would erase a press the events just recorded.
     // Focus loss clears the latch; a press that never delivers its up is the same kind of stale
     // input the native queue discards on a boundary.
-    // P2: the cursor rule is one pure function (source_gates.h), so "the cursor stays hidden in
-    // gameplay" is a test rather than a reading of this expression. A live song has no native
-    // menu to point at, and no overlay asked for capture, so nothing is shown.
+    // The native lane icon is a pointer target while ready, including in a live song.
+    const bool lane_target = !last_device::Current().using_touch && touch::LanePowerupAvailable();
     const bool visible = CursorVisible(MouseSupportEnabled(), MouseMenuAvailable(),
-                                       io.WantCaptureMouse, ui::music::PlayerPointerOver());
+                                       io.WantCaptureMouse, ui::music::PlayerPointerOver(), lane_target);
     const auto visibility = visible ? rex::ui::Window::CursorVisibility::kVisible
                                     : rex::ui::Window::CursorVisibility::kHidden;
     auto* window = window_;
@@ -366,6 +368,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
                   e.is_touch() ? "touch" : "mouse");
     if (PlayerEvent(ui::music::PointerEvent::kMove, e)) return;
+    if (LaneEvent(touch::Phase::kMove, e)) return;
     if (!MouseSupportEnabled()) return;
     const bool moved = e.x() != last_x_ || e.y() != last_y_;
     if (auto p = Point(e, !dragging_)) {
@@ -390,6 +393,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
                   e.is_touch() ? "touch" : "mouse");
     if (PlayerEvent(ui::music::PointerEvent::kDown, e)) return;
+    if (LaneEvent(touch::Phase::kDown, e)) return;
     // The raw mask is device state, so it is recorded whatever the gates say: the sampler applies
     // the gates, and a mouse button recorded while Mouse Support is off must not look "never
     // pressed" once it is turned on.
@@ -421,6 +425,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     }
     g_mouse_buttons.fetch_and(~MouseMask(e.button()));
     if (PlayerEvent(ui::music::PointerEvent::kUp, e)) return;
+    if (LaneEvent(touch::Phase::kUp, e)) return;
     if (REXCVAR_GET(mouse_native_trace))
       REXLOG_INFO("native_mouse: button={} up mask={:02X}", static_cast<int>(e.button()),
                   g_mouse_buttons.load());
@@ -451,6 +456,30 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     if (auto p = Point(e)) QueueMenuWheel(e.scroll_y(), *p);
     e.set_handled(true);
   }
+  void EndLanePointer() {
+    if (!lane_pointer_captured_) return;
+    const float miss = std::numeric_limits<float>::quiet_NaN();
+    touch::ConsumeLanePointer(touch::Phase::kCancel, miss, miss);
+    lane_pointer_captured_ = false;
+    if (window_) window_->ReleaseMouse();
+  }
+  bool LaneEvent(touch::Phase phase, rex::ui::MouseEvent& e) {
+    if (e.is_touch() || (phase != touch::Phase::kMove &&
+        e.button() != rex::ui::MouseEvent::Button::kLeft)) return false;
+    if (GetIO().WantCaptureMouse) phase = touch::Phase::kCancel;
+    const float miss = std::numeric_limits<float>::quiet_NaN();
+    const auto point = Point(e, false).value_or(MenuPoint{miss, miss});
+    if (!touch::ConsumeLanePointer(phase, point.x, point.y)) return false;
+    if (phase == touch::Phase::kDown && window_) {
+      window_->CaptureMouse();
+      lane_pointer_captured_ = true;
+    } else if (phase == touch::Phase::kUp || phase == touch::Phase::kCancel) {
+      lane_pointer_captured_ = false;
+      if (window_) window_->ReleaseMouse();
+    }
+    e.set_handled(true);
+    return true;
+  }
   bool PlayerEvent(ui::music::PointerEvent type, rex::ui::MouseEvent& e) {
     if (!window_) return false;
     // The SDK drawer observes these events first but does not mark mouse events
@@ -474,6 +503,7 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
   rex::ui::Window* window_ = nullptr;
   int last_x_ = -1, last_y_ = -1;
   bool dragging_ = false;
+  bool lane_pointer_captured_ = false;
   uint32_t drag_screen_ = 0, drag_focus_ = 0;
 };
 }

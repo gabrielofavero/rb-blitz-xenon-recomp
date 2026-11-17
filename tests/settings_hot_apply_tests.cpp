@@ -122,7 +122,7 @@ constexpr SettingId kRowsThatMustBeHot[] = {
     SettingId::kRhythmVerseKeys,   SettingId::kButtonScheme, SettingId::kSettingsLabelSize,
     SettingId::kTouchLaneSwipe,
     SettingId::kTouchButtons,
-    SettingId::kTouchShakeDeploy,
+    SettingId::kTouchMotionDeploy,
 };
 
 void ControllerCatalogUsesStableTokens() {

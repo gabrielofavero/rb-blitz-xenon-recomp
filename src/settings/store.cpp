@@ -785,12 +785,23 @@ bool ParseValueFromItem(const Descriptor& descriptor, const toml::Item& item, Va
   return false;
 }
 
-// A missing split preference inherits the retired combined switch. Use the same
-// read for loading and optimistic conflict checks, so an inherited Off can be saved.
+// Missing replacement preferences inherit retired switches. Use the same read
+// for loading and optimistic conflict checks, so inherited values can be saved.
 // Explicit new keys (including malformed ones) take precedence. Ordinary edits
 // preserve the old bytes; a whole-settings restore removes the retired pair.
 toml::Item PreferenceItem(const toml::Document& doc, const StorageKey& storage) {
   auto item = doc.Get(storage.section, storage.key);
+  if (!item.found && storage.section == "controller" && storage.key == "touch_motion_deploy") {
+    // Keep an explicit motion opt-out; enabled legacy installs adopt Tilt.
+    const auto legacy = doc.Get("controller", "touch_shake_deploy");
+    bool enabled = true;
+    if (legacy.found && legacy.scalar && legacy.style == toml::Style::kBare &&
+        toml::ParseBareBool(legacy.value, &enabled)) {
+      item = legacy;
+      item.style = toml::Style::kLiteral;
+      item.value = enabled ? "tilt" : "none";
+    }
+  }
   if (!item.found && storage.section == "interface" &&
       (storage.key == "show_messages" || storage.key == "show_recommendations")) {
     item = doc.Get("interface", "show_messages_recommendations");
@@ -1091,6 +1102,7 @@ SaveOutcome SaveSettingsDocument(const fs::path& file, const SaveRequest& reques
     if (value.kind == ValueKind::kNone) {
       const StorageKey storage = StorageKeyFor(id);
       if (storage.persisted()) doc.Erase(storage.section, storage.key);
+      if (id == SettingId::kTouchMotionDeploy) doc.Erase("controller", "touch_shake_deploy");
       continue;
     }
     std::string rendered;

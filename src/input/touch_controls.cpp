@@ -4,15 +4,14 @@
 #include <rex/cvar.h>
 
 REXCVAR_DEFINE_STRING(touch_lane_swipe, "inverted", "Input", "Lane swipe direction: inverted or normal.");
-REXCVAR_DEFINE_BOOL(touch_buttons, true, "Input", "Show gameplay buttons while touch is the active input.");
-REXCVAR_DEFINE_BOOL(touch_shake_deploy, true, "Input", "Tilt or shake sharply once to deploy a ready power-up.");
+REXCVAR_DEFINE_BOOL(touch_buttons, true, "Input", "Show the pause button while touch is the active input.");
+REXCVAR_DEFINE_STRING(touch_motion_deploy, "tilt", "Input", "Power-up motion: tilt, shake, or none.");
 
 REXCVAR_DEFINE_BOOL(touch_preview, false, "Diagnostics", "Preview the iOS guest controls on desktop, including a ready power-up.");
 namespace rb_blitz::input::touch {
 bool PreviewEnabled() { return REXCVAR_GET(touch_preview); }
 }
 
-#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
 #include <atomic>
 #include <mutex>
 #include <SDL3/SDL.h>
@@ -33,7 +32,8 @@ static_assert(static_cast<uint64_t>(SDL_MOUSE_TOUCHID) == UINT64_MAX);
 static_assert(static_cast<uint64_t>(SDL_PEN_TOUCHID) == UINT64_MAX - 1);
 std::mutex g_mutex;
 Gestures g_gestures;
-ShakeDetector g_shake;
+MotionDetector g_motion;
+PowerupTarget g_powerup_target;
 Rect g_lane_powerup;
 uint64_t g_lane_timestamp = 0;
 MouseGate g_mouse_gate;
@@ -60,7 +60,13 @@ void UpdateGestures(bool active) {
   };
   const auto first = to_window(rect.x, rect.y);
   const auto last = to_window(rect.x + rect.width, rect.y + rect.height);
-  g_gestures.SetLanePowerup({first.x, first.y, last.x - first.x, last.y - first.y});
+  g_powerup_target.SetTarget({first.x, first.y, last.x - first.x, last.y - first.y},
+                            active && g_powerup_ready && rect.width > 0);
+}
+PointerResult ObserveLanePointer(const FingerEvent& event) {
+  const auto result = g_powerup_target.Observe(event);
+  if (result.deploy) g_gestures.DeployPowerup();
+  return result;
 }
 class Controls final : public rex::ui::ImGuiDialog {
  public:
@@ -68,7 +74,13 @@ class Controls final : public rex::ui::ImGuiDialog {
       : ImGuiDialog(drawer), window_(std::move(window)) {
     if (!SDL_AddEventWatch(Watch, this))
       REXLOG_ERROR("touch_controls: could not register touch events: {}", SDL_GetError());
-    sensor_initialized_ = SDL_InitSubSystem(SDL_INIT_SENSOR);
+    // Motion sensors are needed by mobile play and the explicit desktop preview.
+#if defined(RB_BLITZ_IOS)
+    const bool motion_enabled = true;
+#else
+    const bool motion_enabled = PreviewEnabled();
+#endif
+    sensor_initialized_ = motion_enabled && SDL_InitSubSystem(SDL_INIT_SENSOR);
     if (sensor_initialized_) {
       int count = 0;
       auto* ids = SDL_GetSensors(&count);
@@ -77,8 +89,8 @@ class Controls final : public rex::ui::ImGuiDialog {
       SDL_free(ids);
     }
     sensor_id_ = sensor_ ? SDL_GetSensorID(sensor_) : 0;
-    if (!sensor_) REXLOG_WARN("touch_controls: shake deployment unavailable: {}", SDL_GetError());
-    REXLOG_INFO("touch_controls: fixed left/right taps, horizontal swipes and pause enabled; notes fire on down; lane swipes forgive their starting wrong press");
+    if (motion_enabled && !sensor_) REXLOG_WARN("touch_controls: motion deployment unavailable: {}", SDL_GetError());
+    REXLOG_INFO("touch_controls: native lane power-up pointer enabled; mobile taps, swipes and pause use direct touch");
   }
   ~Controls() override {
     SDL_RemoveEventWatch(Watch, this);
@@ -96,12 +108,13 @@ class Controls final : public rex::ui::ImGuiDialog {
       g_foreground = true;
     }
     if (event->type == SDL_EVENT_SENSOR_UPDATE && event->sensor.which == self.sensor_id_) {
-      const bool active = Available() && TouchInputActive() && REXCVAR_GET(touch_shake_deploy);
+      const auto mode = ParseMotionMode(REXCVAR_GET(touch_motion_deploy));
+      const bool active = Available() && TouchInputActive() && mode != MotionMode::kNone;
       std::lock_guard lock(g_mutex);
-      if (!active || !g_powerup_ready) { g_shake.Reset(); return true; }
+      if (!active || !g_powerup_ready) { g_motion.Reset(); return true; }
       const auto& sample = event->sensor;
       UpdateGestures(active);
-      if (g_shake.Observe(sample.timestamp, sample.data[0], sample.data[1], sample.data[2]))
+      if (g_motion.Observe(mode, sample.timestamp, sample.data[0], sample.data[1], sample.data[2]))
         g_gestures.DeployPowerup();
       return true;
     }
@@ -122,8 +135,16 @@ class Controls final : public rex::ui::ImGuiDialog {
     {
       std::lock_guard lock(g_mutex);
       UpdateGestures(active);
-      if (active && phase == Phase::kDown) g_mouse_gate.Capture();
-      g_gestures.Observe({finger.touchID, finger.fingerID, phase, finger.x, finger.y});
+      const bool target = ObserveLanePointer({finger.touchID, finger.fingerID, phase,
+          finger.x * g_layout.width, finger.y * g_layout.height}).consumed;
+#if defined(RB_BLITZ_IOS)
+      const bool touch_gameplay = true;
+#else
+      const bool touch_gameplay = PreviewEnabled();
+#endif
+      if (active && phase == Phase::kDown && (target || touch_gameplay)) g_mouse_gate.Capture();
+      if (!target && touch_gameplay)
+        g_gestures.Observe({finger.touchID, finger.fingerID, phase, finger.x, finger.y});
     }
     // Menu touches also establish the source before a song's HUD appears.
     if (phase == Phase::kDown && g_foreground && HostInputFocused()) last_device::Touch();
@@ -147,12 +168,14 @@ class Controls final : public rex::ui::ImGuiDialog {
     const bool active = window && window->HasFocus() && Available() && window_id_;
     {
       std::lock_guard lock(g_mutex);
+      if (g_layout != layout) g_powerup_target.Cancel();
       g_layout = layout;
       auto hit_layout = layout;
-      if (!ButtonsEnabled()) { hit_layout.pause = {}; hit_layout.powerup = {}; }
+      if (!ButtonsEnabled()) hit_layout.pause = {};
       g_gestures.SetLayout(hit_layout);
       UpdateGestures(active);
-      if (!active || !TouchInputActive() || !REXCVAR_GET(touch_shake_deploy)) g_shake.Reset();
+      if (!active || !TouchInputActive() || ParseMotionMode(REXCVAR_GET(touch_motion_deploy)) == MotionMode::kNone)
+        g_motion.Reset();
     }
     g_visible = active && layout.pause.width > 0;
   }
@@ -171,7 +194,8 @@ Actions SampleGameplay(bool active) {
 void CancelGameplay() {
   g_visible = false;
   std::lock_guard lock(g_mutex);
-  g_gestures.Cancel(); g_shake.Reset(); g_lane_powerup = {}; g_lane_timestamp = 0;
+  g_gestures.Cancel(); g_motion.Reset(); g_powerup_target.Cancel();
+  g_lane_powerup = {}; g_lane_timestamp = 0;
 }
 void PublishLanePowerup(Rect rect) {
   std::lock_guard lock(g_mutex);
@@ -190,11 +214,32 @@ bool ButtonsEnabled() { return REXCVAR_GET(touch_buttons); }
 void PublishPowerupReady(bool ready) {
   static std::atomic<bool> observed{false};
   const bool changed = g_powerup_ready.exchange(ready) != ready;
-  if (!ready && changed) { std::lock_guard lock(g_mutex); g_shake.Reset(); }
+  if (!ready && changed) {
+    std::lock_guard lock(g_mutex);
+    g_motion.Reset();
+    g_powerup_target.SetTarget({}, false);
+  }
   if (!observed.exchange(true) || changed)
     REXLOG_INFO("touch_hud: native power-up deployable={}", ready);
 }
 bool PowerupReady() { return PreviewEnabled() || g_powerup_ready; }
+bool LanePowerupAvailable() {
+  if (!Available() || !g_powerup_ready) return false;
+  std::lock_guard lock(g_mutex);
+  const auto now = SDL_GetTicksNS();
+  return g_lane_timestamp && now - g_lane_timestamp < 100'000'000 &&
+      g_lane_powerup.width > 0 && g_lane_powerup.height > 0;
+}
+bool ConsumeLanePointer(Phase phase, float x, float y) {
+  const bool active = Available();
+  std::lock_guard lock(g_mutex);
+  UpdateGestures(active);
+  const auto point = MenuPointToWindow({x, y}, int(g_layout.width), int(g_layout.height),
+      REXCVAR_GET(video_mode_width), REXCVAR_GET(video_mode_height),
+      REXCVAR_GET(present_letterbox), REXCVAR_GET(present_allow_overscan_cutoff),
+      REXCVAR_GET(present_safe_area_x), REXCVAR_GET(present_safe_area_y));
+  return ObserveLanePointer({UINT64_MAX, 0, phase, point.x, point.y}).consumed;
+}
 bool ControlsVisible() { return g_visible && g_foreground && TouchInputActive() && ButtonsEnabled(); }
 std::vector<GameplayEvent> DrainGameplay() {
   std::lock_guard lock(g_mutex);
@@ -202,30 +247,10 @@ std::vector<GameplayEvent> DrainGameplay() {
 }
 bool ConsumeMouse(bool is_touch, Phase phase, bool gameplay) {
   std::lock_guard lock(g_mutex);
-  return g_mouse_gate.Consume(is_touch, phase, gameplay);
+  return g_mouse_gate.Consume(is_touch, phase, gameplay && TouchInputActive());
 }
 std::unique_ptr<rex::ui::ImGuiDialog> CreateControls(
     rex::ui::ImGuiDrawer* drawer, std::function<rex::ui::Window*()> window) {
-#if !defined(RB_BLITZ_IOS)
-  if (!PreviewEnabled()) return {};
-#endif
   return std::make_unique<Controls>(drawer, std::move(window));
 }
 }
-#else
-namespace rb_blitz::input::touch {
-Actions SampleGameplay(bool) { return {}; }
-void CancelGameplay() {}
-std::vector<GameplayEvent> DrainGameplay() { return {}; }
-bool ConsumeMouse(bool, Phase, bool) { return false; }
-Layout CurrentLayout() { return {}; }
-bool ControlsVisible() { return false; }
-bool TouchInputActive() { return false; }
-bool ButtonsEnabled() { return REXCVAR_GET(touch_buttons); }
-void PublishPowerupReady(bool) {}
-void PublishLanePowerup(Rect) {}
-bool PowerupReady() { return false; }
-std::unique_ptr<rex::ui::ImGuiDialog> CreateControls(
-    rex::ui::ImGuiDrawer*, std::function<rex::ui::Window*()>) { return {}; }
-}
-#endif

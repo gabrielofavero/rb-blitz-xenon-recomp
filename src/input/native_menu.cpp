@@ -692,9 +692,8 @@ uint32_t SceneMesh(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* nam
   return it->second;
 }
 
-void CaptureTouchPowerup(PPCContext& ctx, uint8_t* base, uint32_t dir) {
-#if defined(RB_BLITZ_IOS)
-  if (!GameScreenActive() || !touch::PowerupReady() || !touch::TouchInputActive()) return;
+void CaptureLanePowerup(PPCContext& ctx, uint8_t* base, uint32_t dir) {
+  if (!GameScreenActive() || !touch::PowerupReady()) return;
   if (ObjectName(base, ObjectBase(base, dir)) != "powerup_icon") return;
   const auto mesh = SceneMesh(ctx, base, dir, "powerup_icon.mesh");
   if (!mesh) return;
@@ -706,7 +705,6 @@ void CaptureTouchPowerup(PPCContext& ctx, uint8_t* base, uint32_t dir) {
   const float right = std::min(1.f, bounds->right), bottom = std::min(1.f, bounds->bottom);
   if (right > left && bottom > top)
     touch::PublishLanePowerup({left, top, right - left, bottom - top});
-#endif
 }
 
 namespace {
@@ -1128,12 +1126,6 @@ REX_HOOK_RAW(sub_824BC668) {
   const auto label = ctx.r3.u32 - 260;
   rb_blitz::input::UpdateStartPrompt(ctx, base, label);
   rb_blitz::hooks::PrepareHudLabel(ctx, base, label);
-#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
-  // The hint UILabel is drawn separately from remedial_help.grp by the guest.
-  if (rb_blitz::input::touch::TouchInputActive() &&
-      rb_blitz::input::ObjectName(base, rb_blitz::input::ObjectBase(base, label)) ==
-          "remedial_help.lbl") return;
-#endif
   rb_blitz::input::UpdateCalibrationSideLabel(ctx, base, label);
   __imp__sub_824BC668(ctx, base);
   rb_blitz::input::CaptureDialogPrompt(ctx, base, label);

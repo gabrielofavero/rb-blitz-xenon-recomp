@@ -58,6 +58,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "hide_exit_game";
     case SettingId::kTouchButtons:
       return "touch_buttons";
+    case SettingId::kTouchMotionDeploy:
+      return "touch_motion_deploy";
     case SettingId::kTouchShakeDeploy:
       return "touch_shake_deploy";
     case SettingId::kTarget:

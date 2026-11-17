@@ -16,7 +16,7 @@ struct PPCContext;
 namespace rb_blitz::input {
 
 // Called while the lane icon's native group owns the current render camera.
-void CaptureTouchPowerup(PPCContext& ctx, uint8_t* base, uint32_t dir);
+void CaptureLanePowerup(PPCContext& ctx, uint8_t* base, uint32_t dir);
 
 struct MenuPoint { float x = 0, y = 0; };
 // The presented rectangle inside a `w` x `h` frame: the part of the window the guest's frame

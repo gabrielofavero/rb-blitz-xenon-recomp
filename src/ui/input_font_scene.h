@@ -65,6 +65,9 @@ inline constexpr char kPortraitSplashFontRecord[] = "ui/resource/fonts/gen/portr
 // Give the song-list sort label the live Interface Sort icon font.
 bool PrepareSongSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                        std::string* error);
+// Center the resting speaker artwork on the calibration countdown's axis.
+bool PrepareCalibrationLayout(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                              std::string* error);
 bool PrepareCalibration(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                         std::string* error);
 // The four calibration button textures, in Xbox released/pressed, PS3
@@ -73,9 +76,9 @@ using CalibrationButtons = std::array<std::vector<std::vector<uint8_t>>, 4>;
 std::shared_ptr<const CalibrationButtons> OriginalCalibrationButtons();
 bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                      std::string* error);
-// iOS touch buttons are authored into the installed guest HUD, using its prompt art
+// The iOS pause button is authored into the installed guest HUD, using its prompt art
 // and PropAnim. Call before PrepareHudHints; no retail bytes are packaged here.
-bool PrepareTouchHud(const std::vector<uint8_t>& source, const std::vector<uint8_t>& icons,
+bool PrepareTouchHud(const std::vector<uint8_t>& source,
                      std::vector<uint8_t>* scene,
                      std::string* error);
 bool PreparePowerupSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,

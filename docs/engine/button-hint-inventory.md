@@ -95,37 +95,30 @@ No retail art is checked into the project.
 
 The pause circle is dark translucent gray, with a pale blue-white symbol.
 Pause starts immediately inside the safe left margin; no authored blank slot
-precedes it. A second guest group uses the equipped power-up's icon and its own pulse
-animation. The six icon textures (`autoplay`, `grenade`, `jackpot`, `overdrive`,
-`plasma` and `ripple`) are copied from the installed
-`track/gen/powerup_icon.milo_xbox`; the live `active_powerup` symbol on
-`powerups_state.ep` selects the matching child group. Controller and keyboard
-reminders retain their native button glyphs.
-It appears as soon as `Hmx::Object::SetProperty` at `823FF258` publishes
-`powerup_can_deploy` on `powerups_state.ep`, including thresholds below a full
-meter. A tap dispatches the native Power-up action, without a note or swipe.
-Charging changes availability without cancelling held notes.
+precedes it. The generated HUD adds only Pause; power-up deployment uses the
+title's existing ready icon on the lane. The native remedial reminder retains
+its original flow, placement, glyph, and animation.
 
-During touch, the delayed remedial poll (`823A38C8`) updates its song clock but
-does not start controller-reminder work. Its original group and separate label
-are hidden; the dedicated ready control occupies the second slot. Controller,
-keyboard, and mouse input restore the original reminder flow and placement and
-hide both touch controls. An idle connected controller does not steal touch.
-The HUD transform hook and hit tests share one safe-area layout.
+The shiny power-up icon below the lane accepts a left mouse click or a direct
+touch on every platform, including desktop touchscreens. Its native `powerup.grp`
+draw projects `powerup_icon.mesh` through the current camera; only normalized
+screen bounds leave the draw, and targets expire after 100 ms. Letterboxing,
+overscan, and safe-area presentation use the same conversion as native menu
+input. The mouse cursor is shown while a ready lane target is available.
 
-The shiny power-up icon below the lane is also tappable when ready. Its native
-`powerup.grp` draw projects `powerup_icon.mesh` through the current camera; only
-normalized screen bounds leave the draw, and targets expire after 100 ms.
-Both tap targets dispatch the same native Power-up press/release pair and do
-not strike notes. Dragging off a target cancels its tap. Hiding Touch Buttons
-removes their hit areas while preserving the lane target.
+Press and release inside the original icon bounds dispatch the same native
+Power-up action pair as motion and controller deployment. The pointer is
+consumed before mouse gameplay bindings or touch note gestures see it. Dragging
+off, losing readiness/focus, pausing, or cancelling prevents deployment. Hiding
+the optional pause button or choosing Motion Deploy: None keeps the lane target
+available; no extra power-up button is generated beside Pause.
 
 Help & Options → Controls now contains Calibration, Controller & Keyboard,
 and Touch. Controller & Keyboard contains Layout, Controller Presets, Menu
-Bindings, and Gameplay Bindings. On mobile, Touch contains `Touch Buttons: On/Off`,
-`Lane Swipe: Inverted/Normal`, and `Shake to Deploy: On/Off`;
+Bindings, and Gameplay Bindings. On mobile, Touch contains `Pause Button: On/Off`,
+`Lane Swipe: Inverted/Normal`, and `Motion Deploy: Tilt/Shake/None`;
 `controller.touch_buttons` defaults to On, persists in the settings file, and
-applies immediately. Off hides both buttons during touch play while
+applies immediately. Off hides Pause during touch play while
 preserving touch input. Desktop releases omit the empty Touch branch. Both
 settings contexts carry the hierarchy and their corresponding Back routes.
 `controller.touch_lane_swipe` defaults to `inverted` and applies immediately;
@@ -133,16 +126,30 @@ settings contexts carry the hierarchy and their corresponding Back routes.
 `interface.hide_exit_game` to true. Main Menu → Other Shortcuts can restore Exit
 Game after a restart; desktop defaults keep it visible.
 
-`controller.touch_shake_deploy` also defaults to On, persists, and applies
-immediately. SDL's iOS CoreMotion accelerometer feeds a gravity-filtered
-recognizer accepting one sharp movement above 12 m/s² after gravity filtering,
-followed by a one-second cooldown and a quiet sample below 6 m/s² to rearm.
-Slow movement does not deploy. Samples are gated by foreground, focus, active gameplay,
-touch as the active device, modal/capture state, readiness, and the setting.
-Pause and cancellation reset the motion baseline. SDK patch 0081 enables the
-sensor subsystem for iOS. Host checks cover deliberate shakes, ordinary motion,
-all six icon selections, lane taps, and settings persistence; device acceptance
-of appearance and physical shake sensitivity remains pending.
+`controller.touch_motion_deploy` defaults to `tilt`, persists, and applies immediately.
+Tilt uses SDL's iOS CoreMotion accelerometer to recognize a quick forward wrist
+rotation: tip the top edge away so the screen moves toward face-up. After a
+150 ms stable baseline, the filtered pitch must advance 22 degrees, completing
+within 450 ms of a 6-degree onset and lasting at least 80 ms. Sideways roll,
+backward tilts, gradual grip changes, and acceleration outside 0.8–1.2 g do not
+deploy. Return within 8 degrees of the playing angle for 150 ms and wait one
+second before another deployment. Pitch is independent of the portrait or
+landscape sensor axes.
+
+`shake` accepts a light flick in any direction above 8 m/s² after gravity
+filtering (previously 12 m/s²), with a one-second cooldown and a quiet sample
+below 4 m/s² to rearm. `none` disables motion deployment; touch targets remain
+available. The retired `controller.touch_shake_deploy = false` inherits `none`
+until a new mode is saved; true inherits `tilt`. Explicit new modes take priority.
+Restoring the default removes the retired switch too.
+
+Samples are gated by foreground, focus, active gameplay, touch as the active
+device, modal/capture state, readiness, and the setting. Pause, cancellation,
+and mode changes reset the detector. SDK patch 0081 enables the iOS sensor
+subsystem. Host tests cover both motion recognizers, mode switching, mouse/touch lane targets,
+generated settings requests, persistence, and legacy opt-outs. Physical gesture
+feel, iOS builds, and Apple font caption measurements require device/macOS validation;
+they have not been validated by the Windows host checks.
 
 Generated-record checks, touch gesture checks, input-source checks, and settings
 tests cover these routes. The owner verified the first pause render and then

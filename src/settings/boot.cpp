@@ -687,7 +687,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
           SettingId::kHideMainMenu, SettingId::kHiddenMainMenu, SettingId::kVsync,
           SettingId::kFiltering, SettingId::kResolution, SettingId::kAntiAliasing,
           SettingId::kDisplay, SettingId::kSettingsLabels, SettingId::kSettingsLabelSize, SettingId::kHideAchievements,
-          SettingId::kBackgroundMusicNavigation, SettingId::kMusicPlayer, SettingId::kTouchButtons, SettingId::kTouchShakeDeploy,
+          SettingId::kBackgroundMusicNavigation, SettingId::kMusicPlayer, SettingId::kTouchButtons, SettingId::kTouchMotionDeploy,
           SettingId::kTouchLaneSwipe, SettingId::kHideExitGame}) {
       ApplyRow(id, /*defer_unregistered=*/true);
     }

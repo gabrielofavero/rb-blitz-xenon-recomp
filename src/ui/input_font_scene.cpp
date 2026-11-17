@@ -869,6 +869,24 @@ bool PrepareSongSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>*
   bytes.insert(bytes.begin() + at, new_font.begin(), new_font.end());
   return PackStored(bytes, scene, error);
 }
+bool PrepareCalibrationLayout(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
+                              std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (bytes.size() != 3336387 || Crc32(bytes.data(), bytes.size()) != 0x375728BA)
+    return Fail(error, "calibration layout source revision changed");
+  // The resting speaker occupies x=[4,139) of its 256-pixel animation canvas.
+  // Center that visible artwork, preserving the space for waves to its right.
+  // Both serialized matrices move together; the guest also recomputes world
+  // transforms from the local matrix when the panel enters.
+  constexpr size_t group = 0x325DFF; // audio_anim.grp
+  constexpr float shift = 29.613494f;
+  for (size_t offset : {size_t(0x45), size_t(0x75)}) {
+    auto* x = bytes.data() + group + offset;
+    PutFloat(x, std::bit_cast<float>(Be32(x)) + shift);
+  }
+  return PackStored(bytes, scene, error);
+}
 bool PrepareCalibration(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                         std::string* error) {
   std::vector<uint8_t> bytes;
@@ -937,7 +955,7 @@ bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* s
                             {"remedial_help.grp", "tutorial_pane.grp"}, 4, error)) return false;
   return PackStored(bytes, scene, error);
 }
-bool PrepareTouchHud(const std::vector<uint8_t>& source, const std::vector<uint8_t>& icons,
+bool PrepareTouchHud(const std::vector<uint8_t>& source,
                      std::vector<uint8_t>* scene,
                      std::string* error) {
   std::vector<uint8_t> bytes;
@@ -947,10 +965,6 @@ bool PrepareTouchHud(const std::vector<uint8_t>& source, const std::vector<uint8
   // before editing offsets, including an already generated HUD.
   if (bytes.size() != 4838050 || Crc32(bytes.data(), bytes.size()) != 0xA70E19B1)
     return Fail(error, "touch HUD source revision changed");
-  std::vector<uint8_t> icon_bytes;
-  if (!DecodeStream(icons, &icon_bytes, error)) return false;
-  if (icon_bytes.size() != 531206 || Crc32(icon_bytes.data(), icon_bytes.size()) != 0x3C6775BD)
-    return Fail(error, "touch power-up icon source revision changed");
   auto copy = [&](size_t from, size_t to) {
     return std::vector<uint8_t>(bytes.begin() + from, bytes.begin() + to);
   };
@@ -1043,53 +1057,11 @@ bool PrepareTouchHud(const std::vector<uint8_t>& source, const std::vector<uint8
   rename(anim, "remedial_help.lbl", "touch_pause_icon.grp");
   objects.push_back({"PropAnim", "touch_pause.anim", std::move(anim)});
 
-  // Copy the title's actual deployable artwork from its installed icon scene.
-  // Each small child group is selected by the live active_powerup property.
-  auto powerup = copy(0x4830A4, 0x4831A5);
-  powerup[0x9A] = 1;
-  members(powerup, "help_bg.mesh", {"touch_autoplay.grp", "touch_grenade.grp",
-      "touch_jackpot.grp", "touch_overdrive.grp", "touch_plasma.grp", "touch_ripple.grp"});
-  objects.push_back({"Group", "touch_powerup.grp", std::move(powerup)});
-  constexpr std::array<std::string_view, 6> powerups{
-      "autoplay", "grenade", "jackpot", "overdrive", "plasma", "ripple"};
-  constexpr size_t texture_bounds[]{0x1451, 0x169CA, 0x2BF42, 0x414BA, 0x56A34, 0x6BFAB, 0x81522};
-  for (size_t i = 0; i < powerups.size(); ++i) {
-    const auto prefix = "touch_" + std::string(powerups[i]);
-    const auto texture = prefix + ".tex", mat = prefix + ".mat";
-    const auto group_name = prefix + ".grp", mesh_name = prefix + ".mesh";
-    objects.push_back({"Tex", texture, {icon_bytes.begin() + texture_bounds[i],
-                                      icon_bytes.begin() + texture_bounds[i + 1]}});
-    auto material = copy(0x48265F, 0x48277C);
-    rename(material, "remedial_help_bg.tex", texture);
-    for (size_t at : {0x19, 0x1D, 0x21, 0x25}) PutFloat(material.data() + at, 1.f);
-    objects.push_back({"Mat", mat, std::move(material)});
-    auto child = copy(0x4830A4, 0x4831A5);
-    child[0x9A] = 1;
-    matrix(child, 0x21, 0, 0, 0, 1, 1, 1);
-    matrix(child, 0x51, 0, 0, 0, 1, 1, 1);
-    rename(child, "PanelDir", "touch_powerup.grp");
-    members(child, "help_bg.mesh", {mesh_name});
-    objects.push_back({"Group", group_name, std::move(child)});
-    auto mesh = copy(0x489711, 0x48996D);
-    rename(mesh, "remedial_help.grp", group_name);
-    rename(mesh, "help_bg.mat", mat);
-    rename(mesh, "help_bg.mesh", mesh_name);
-    objects.push_back({"Mesh", mesh_name, std::move(mesh)});
-  }
-  auto powerup_anim = copy(0x489BBF, 0x489C5F);
-  for (size_t key : {0x63, 0x73, 0x83})
-    for (size_t axis = 0; axis < 3; ++axis) {
-      auto* value = powerup_anim.data() + key + axis * 4;
-      PutFloat(value, std::bit_cast<float>(Be32(value)) / 1.875f);
-    }
-  rename(powerup_anim, "remedial_help.lbl", "touch_powerup.grp");
-  objects.push_back({"PropAnim", "touch_powerup.anim", std::move(powerup_anim)});
-
   // Add the new group to the title's hud.grp traversal. The original remedial
   // Flow, its visibility, its arrows, label, and animations remain guest-owned.
   auto hud = copy(0x482C71, 0x482D6E);
   members(hud, "band_meter_hud", {"band_meter_hud", "blitz_text_flat.mesh",
-                                   "blitz_meter.grp", "touch_pause.grp", "touch_powerup.grp"});
+                                   "blitz_meter.grp", "touch_pause.grp"});
   bytes.erase(bytes.begin() + 0x482C71, bytes.begin() + 0x482D6E);
   bytes.insert(bytes.begin() + 0x482C71, hud.begin(), hud.end());
   std::vector<uint8_t> declarations;

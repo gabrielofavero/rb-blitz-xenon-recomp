@@ -546,7 +546,7 @@ int main() {
     CHECK_FALSE(HostDeviceConnected({false, false}));
   }
 
-  BeginCase("the cursor is hidden in gameplay and visible wherever a menu can use it");
+  BeginCase("the cursor is visible for native menus, ready lane targets and captured surfaces");
   {
     // Gameplay: no native menu, no overlay capture -> hidden.
     CHECK_FALSE(CursorVisible(true, false, false));
@@ -560,6 +560,8 @@ int main() {
     CHECK_TRUE(CursorVisible(true, false, false, true));
     CHECK_FALSE(CursorVisible(false, false, false, true));
     CHECK_FALSE(CursorVisible(true, false, false, false));
+    CHECK_TRUE(CursorVisible(true, false, false, false, true));
+    CHECK_FALSE(CursorVisible(false, false, false, false, true));
   }
 
   BeginCase("a remapped key changes the delivered pad, and the packet number says so");

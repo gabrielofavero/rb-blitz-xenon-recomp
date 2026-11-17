@@ -763,17 +763,18 @@ std::vector<PanelSpec> AllPanels() {
       RouteRow("settings_controller_presets", "controller_config_screen", "back_screen", "Controller Presets", "Choose a preset. It applies when no custom controller bindings exist."),
       SubmenuRow("settings_controls_interface", "settings_interface_mapping_screen", "Menu Bindings", "Bind menu navigation and actions, including pause menus."),
       SubmenuRow("settings_controls_gameplay", "settings_gameplay_mapping_screen", "Gameplay Bindings", "Bind notes, lane changes, power-ups, and pause."),
-      SubmenuRow("settings_controls_touch", "settings_touch_screen", "Touch", "Choose touch buttons, lane swipes, and shake controls.")
+      SubmenuRow("settings_controls_touch", "settings_touch_screen", "Touch", "Choose touch buttons, lane swipes, and tilt controls.")
   }});
   out.push_back(PanelSpec{"settings_touch_panel", "settings_touch_screen",
                           "settings_controls_screen", MenuPanels(), {
-      BoolRow("settings_touch_buttons", "controller.touch_buttons", "Touch Buttons",
-              "Show the pause and power-up buttons while using touch. Applies immediately."),
+      BoolRow("settings_touch_buttons", "controller.touch_buttons", "Pause Button",
+              "Show the pause button while using touch. Applies immediately."),
       SelectRow("settings_touch_lane_swipe", "controller.touch_lane_swipe", "Lane Swipe",
                 "Normal follows your swipe; Inverted reverses it.",
                 Choices({"inverted", "Inverted", "normal", "Normal"})),
-      BoolRow("settings_touch_shake_deploy", "controller.touch_shake_deploy", "Shake to Deploy",
-              "Tilt or shake sharply once to deploy a ready power-up.")
+      SelectRow("settings_touch_motion_deploy", "controller.touch_motion_deploy", "Motion Deploy",
+                "Tilt away or shake lightly; None disables motion.",
+                Choices({"tilt", "Tilt", "shake", "Shake", "none", "None"}))
   }});
 
   // The boot catalog contains the built-in Xbox 360 layout and every valid package.

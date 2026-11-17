@@ -275,12 +275,12 @@ void TestTouchButtonsRoundTrip() {
   Service service(paths, release);
   service.Boot(nullptr, PathEntry{}, nullptr);
   service.SetCapabilities(CapabilitySnapshot{});
-  for (const auto id : {SettingId::kTouchButtons, SettingId::kTouchShakeDeploy}) {
+  for (const auto id : {SettingId::kTouchButtons}) {
     const auto* descriptor = service.DescriptorFor(id);
     CHECK_TRUE(descriptor && descriptor->availability != Availability::kHidden);
     CHECK_TRUE(descriptor && descriptor->strategy == ApplicationStrategy::kHot);
     CHECK_TRUE(service.EffectiveValue(id).boolean);
-    const auto cvar = id == SettingId::kTouchButtons ? "touch_buttons" : "touch_shake_deploy";
+    const auto cvar = "touch_buttons";
     CHECK_TRUE(CvarForSetting(id) == cvar);
     CHECK_TRUE(schema::IdForToken(std::string("controller.") + cvar) == id);
     for (const bool enabled : {false, true}) {
@@ -299,6 +299,43 @@ void TestTouchButtonsRoundTrip() {
       const auto found = std::find_if(rows.begin(), rows.end(), [id](const auto& row) { return row.id == id; });
       CHECK_TRUE(found != rows.end() && found->availability == Availability::kHidden);
     }
+  }
+}
+
+void TestMotionDeployRoundTrip() {
+  BeginCase("motion deploy: Tilt defaults, three live modes persist, invalid modes are refused");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  for (const auto platform : {schema::HostPlatform::kIOS, schema::HostPlatform::kAndroid}) {
+    const auto release = schema::SettingsForRelease(platform, "test");
+    Service service(paths, release);
+    service.Boot(nullptr, {}, nullptr);
+    constexpr auto id = SettingId::kTouchMotionDeploy;
+    const auto* row = service.DescriptorFor(id);
+    CHECK_TRUE(row && row->availability == Availability::kVisible);
+    CHECK_TRUE(row && row->strategy == ApplicationStrategy::kHot);
+    CHECK_TRUE(row && row->choices.size() == 3);
+    CHECK_TRUE(service.EffectiveValue(id).text == "tilt");
+    CHECK_TRUE(CvarForSetting(id) == "touch_motion_deploy");
+    CHECK_TRUE(schema::IdForToken("controller.touch_motion_deploy") == id);
+    for (const auto* mode : {"shake", "none", "tilt"}) {
+      const auto edit = service.BeginEdit(service.revision());
+      CHECK_FALSE(service.Set(edit, id, EnumV("unknown"), service.capability_revision()).ok);
+      CHECK_FALSE(service.Set(edit, id, BoolV(true), service.capability_revision()).ok);
+      CHECK_TRUE(service.Set(edit, id, EnumV(mode), service.capability_revision()).ok);
+      const auto saved = service.Commit(edit);
+      CHECK_TRUE(saved.status == CommitStatus::kSaved);
+      CHECK_FALSE(saved.restart_required);
+      Service reloaded(paths, release);
+      reloaded.Boot(nullptr, {}, nullptr);
+      CHECK_TRUE(reloaded.EffectiveValue(id).text == mode);
+    }
+  }
+  for (const auto platform : {schema::HostPlatform::kWindows, schema::HostPlatform::kMacOS,
+                             schema::HostPlatform::kLinux}) {
+    Service desktop(paths, schema::SettingsForRelease(platform, "test"));
+    desktop.Boot(nullptr, {}, nullptr);
+    CHECK_TRUE(desktop.DescriptorFor(SettingId::kTouchMotionDeploy)->availability == Availability::kHidden);
   }
 }
 
@@ -1568,6 +1605,7 @@ int main(int argc, char** argv) {
   TestLoadGuardRoundTrip();
   TestSettingsLabelSizeRoundTrip();
   TestTouchButtonsRoundTrip();
+  TestMotionDeployRoundTrip();
   TestMobileDefaultsAndLaneSwipe();
   TestHideAchievementsRoundTrip();
   TestMusicNavigationRoundTrip();

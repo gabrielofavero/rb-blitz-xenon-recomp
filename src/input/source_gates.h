@@ -265,13 +265,11 @@ class ActionEdges {
 // contributes no pad state of its own.
 inline bool HostDeviceConnected(const SourceGates& gates) { return gates.keyboard || gates.mouse; }
 
-// Whether the OS cursor belongs on screen: only while a native menu can use it, or while an
-// host player owns the pointer, or an ImGui dialog asked for capture. A live song shows no cursor (D3), which is also the
-// reason a gameplay mouse press cannot reach the native-menu queue - the queue only accepts
-// input while a menu is available.
+// Show the cursor for native menus, a ready lane power-up target, the host
+// player, or an ImGui capture. Native menu queueing still requires a menu.
 inline bool CursorVisible(bool mouse_support, bool menu_available, bool imgui_wants_capture,
-                          bool player_pointer = false) {
-  return mouse_support && (menu_available || imgui_wants_capture || player_pointer);
+                          bool player_pointer = false, bool lane_powerup = false) {
+  return mouse_support && (menu_available || imgui_wants_capture || player_pointer || lane_powerup);
 }
 
 // ---------------------------------------------------------------------------------------------

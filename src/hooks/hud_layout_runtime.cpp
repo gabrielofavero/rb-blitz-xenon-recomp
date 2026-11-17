@@ -23,20 +23,15 @@
 #include "hooks/hud_layout.h"
 #include "hooks/render_settings.h"
 #include "platform/guest_memory.h"
-#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
 #include "input/touch_controls.h"
 #include "input/native_menu.h"
-#endif
 
 REX_EXTERN(__imp__sub_821F13D0);  // RndTransformable::WorldXfm
 REX_EXTERN(sub_821F13D0);
 REX_EXTERN(sub_821F0300);        // SetWorldDirty, propagates to transform children
 REX_EXTERN(__imp__sub_821F65C8); // RndDir::DrawShowing (RndDrawable view)
 REX_EXTERN(__imp__sub_82226CD8); // RndGroup child draw traversal (RndDrawable view)
-#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
 REX_EXTERN(__imp__sub_823FF258); // Hmx::Object::SetProperty(Symbol, DataNode)
-REX_EXTERN(__imp__sub_823A38C8); // Remedial help timer poll; no gameplay work
-#endif
 
 REXCVAR_DEFINE_BOOL(hud_reanchor, true, "Graphics",
                     "Re-anchor the in-song HUD on non-16:9 frames during world-transform "
@@ -57,14 +52,6 @@ REXCVAR_DEFINE_BOOL(hud_reanchor_scan, false, "Diagnostics",
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace {
-#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
-constexpr std::array<std::string_view, 6> kPowerups{
-    "autoplay", "grenade", "jackpot", "overdrive", "plasma", "ripple"};
-constexpr std::array<std::string_view, 6> kTouchIcons{
-    "touch_autoplay.grp", "touch_grenade.grp", "touch_jackpot.grp",
-    "touch_overdrive.grp", "touch_plasma.grp", "touch_ripple.grp"};
-std::atomic<int> g_powerup_icon{-1};
-#endif
 constexpr uint32_t kImageBegin = 0x82000000;
 constexpr uint32_t kImageEnd = 0x82A40000;
 constexpr uint32_t kHeapBegin = 0x40000000;
@@ -166,13 +153,12 @@ constexpr auto kAnchors = std::to_array<Anchor>({
     {"progress_bar.sld",     0,           0,      0, true},
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
     {"touch_pause.grp",     0x82024C4C, -0x108, -1},
-    {"touch_powerup.grp",   0x82024C4C, -0x108, -1},
 #endif
 });
 
 bool TouchAnchor(const Anchor& anchor) {
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
-  return anchor.name == "touch_pause.grp" || anchor.name == "touch_powerup.grp";
+  return anchor.name == "touch_pause.grp";
 #else
   return false;
 #endif
@@ -497,7 +483,7 @@ bool rb_blitz::hooks::HudReanchorWorld(uint8_t* base, uint32_t transformable) {
       rb_blitz::input::touch::ButtonsEnabled()) {
     const auto layout = rb_blitz::input::touch::CurrentLayout();
     if (layout.width > 0 && layout.height > 0) {
-      const auto& rect = anchor->name == "touch_pause.grp" ? layout.pause : layout.powerup;
+      const auto& rect = layout.pause;
       const float height = float(HudHeight());
       const float width = float(HudWidth());
       const float aspect = width > 0 && height > 0 ? width / height : 16.f / 9.f;
@@ -580,51 +566,18 @@ extern "C" REX_FUNC(sub_821F65C8) {
 }
 
 extern "C" REX_FUNC(sub_82226CD8) {
-#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
-  static thread_local bool powerup_was_visible = false;
-  bool trace_powerup = false;
   const auto header = ObjectBase(base, ctx.r3.u32);
   if (header && U32(base, header) == 0x82024C4C) {
     const auto name = U32(base, header + 32);
-    for (size_t i = 0; i < kTouchIcons.size(); ++i)
-      if (NameIs(base, name, kTouchIcons[i]) && InHud(base, header) &&
-          int(i) != (rb_blitz::input::touch::PreviewEnabled() && g_powerup_icon.load() < 0
-                        ? 1 : g_powerup_icon.load(std::memory_order_relaxed))) return;
     if (NameIs(base, name, "powerup.grp"))
-      rb_blitz::input::CaptureTouchPowerup(ctx, base, U32(base, header + 36));
-    const bool hidden_pause = NameIs(base, name, "touch_pause.grp") &&
-        !rb_blitz::input::touch::ControlsVisible();
-    const bool powerup = NameIs(base, name, "touch_powerup.grp");
-    const bool hidden_powerup = powerup &&
-        (!rb_blitz::input::touch::ControlsVisible() || !rb_blitz::input::touch::PowerupReady());
-    const bool hidden_hint = NameIs(base, name, "remedial_help.grp") &&
-        rb_blitz::input::touch::TouchInputActive();
-    if (powerup && InHud(base, header)) {
-      trace_powerup = !hidden_powerup && !powerup_was_visible;
-      powerup_was_visible = !hidden_powerup;
-    }
-    if ((hidden_pause || hidden_powerup || hidden_hint) && InHud(base, header)) return;
-  }
-  if (trace_powerup) REXLOG_INFO("touch_hud: ready power-up draw begin");
+      rb_blitz::input::CaptureLanePowerup(ctx, base, U32(base, header + 36));
+#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
+    if (NameIs(base, name, "touch_pause.grp") && InHud(base, header) &&
+        !rb_blitz::input::touch::ControlsVisible()) return;
 #endif
+  }
   PrepareHudDraw(ctx, base);
   __imp__sub_82226CD8(ctx, base);
-#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
-  if (trace_powerup) REXLOG_INFO("touch_hud: ready power-up draw completed");
-#endif
-}
-
-#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
-extern "C" REX_FUNC(sub_823A38C8) {
-  if (rb_blitz::input::touch::TouchInputActive()) {
-    // Touch uses the real deploy property and its own guest group. Don't run
-    // the delayed controller-reminder animation or assign its private glyph.
-    // Keep the helper's current song time for its action/reset handlers.
-    rex::memory::store_and_swap<uint32_t>(base + ctx.r3.u32 + 64,
-        std::bit_cast<uint32_t>(float(ctx.f1.f64)));
-    return;
-  }
-  __imp__sub_823A38C8(ctx, base);
 }
 
 extern "C" REX_FUNC(sub_823FF258) {
@@ -637,16 +590,6 @@ extern "C" REX_FUNC(sub_823FF258) {
       NameIs(base, U32(base, object + 32), "powerups_state.ep") &&
       (U32(base, value + 4) & 0x1F) == 0;
   const bool ready = readiness && U32(base, value) != 0;
-  const bool selection = HeapRange(object, 40) && HeapRange(value, 8) &&
-      NameIs(base, symbol, "active_powerup") &&
-      NameIs(base, U32(base, object + 32), "powerups_state.ep") &&
-      (U32(base, value + 4) & 0x1F) == 5;
-  int icon = -1;
-  if (selection)
-    for (size_t i = 0; i < kPowerups.size(); ++i)
-      if (NameIs(base, U32(base, value), kPowerups[i])) { icon = int(i); break; }
   __imp__sub_823FF258(ctx, base);
   if (readiness) rb_blitz::input::touch::PublishPowerupReady(ready);
-  if (selection) g_powerup_icon.store(icon, std::memory_order_relaxed);
 }
-#endif

@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include "profile/gameplay_remap.h"
@@ -24,7 +25,6 @@ struct Rect {
 struct Layout {
   float width = 0, height = 0;
   Rect pause;
-  Rect powerup;
   bool operator==(const Layout&) const = default;
 };
 Layout MakeLayout(float width, float height, Rect safe_area);
@@ -34,6 +34,21 @@ struct FingerEvent {
   uint64_t device = 0, finger = 0;
   Phase phase = Phase::kDown;
   float x = 0, y = 0;  // normalized full-screen coordinates
+};
+
+struct PointerResult { bool consumed = false, deploy = false; };
+// The native lane artwork is a target for both mouse and direct touch. A press
+// owns its original bounds until release; moving off or losing readiness cancels.
+class PowerupTarget {
+ public:
+  void SetTarget(Rect bounds, bool available);
+  PointerResult Observe(const FingerEvent& event);  // window coordinates in points
+  void Cancel();
+ private:
+  struct Press { Rect bounds; float x, y; bool moved = false; };
+  Rect bounds_;
+  bool available_ = false;
+  std::map<std::pair<uint64_t, uint64_t>, Press> presses_;
 };
 
 enum class GameplayKind { kPress, kSwipe, kRelease, kCancel };
@@ -52,8 +67,6 @@ class Gestures {
   void SetActive(bool active);
   void SetPowerupAvailable(bool available);
   void SetInvertedLaneSwipe(bool inverted) { inverted_lane_swipe_ = inverted; }
-  // Projected lane icon, independent of the optional top-left buttons.
-  void SetLanePowerup(Rect rect);
   void DeployPowerup();
   void Cancel();
   void Observe(const FingerEvent& event);
@@ -64,7 +77,7 @@ class Gestures {
   struct Finger {
     float x, y, travel = 0;
     uint64_t token = 0;
-    bool pause = false, powerup = false, moved = false, swiped = false;
+    bool pause = false, moved = false, swiped = false;
     Rect button;
   };
   void Emit(Action action);
@@ -75,14 +88,25 @@ class Gestures {
   bool inverted_lane_swipe_ = true;
   bool pause_requested_ = false;
   bool powerup_available_ = false;
-  Rect lane_powerup_;
   std::map<std::pair<uint64_t, uint64_t>, Finger> fingers_;
   std::array<uint8_t, profile::gameplay_remap::kActionCount> pending_{};
   std::array<uint8_t, profile::gameplay_remap::kActionCount> held_polls_{};
 };
 
-// Acceleration includes gravity, in m/s^2. One sharp movement deploys; slow
-// motion is filtered out. Settle and wait one second before another deployment.
+// Acceleration includes gravity, in m/s^2. Tip the screen toward face-up
+// briefly to deploy; return to the playing angle before another deployment.
+// Pitch uses the screen normal, independent of portrait/landscape orientation.
+class TiltDetector {
+ public:
+  bool Observe(uint64_t timestamp_ns, float x, float y, float z);
+  void Reset();
+ private:
+  float pitch_ = 0, baseline_ = 0;
+  uint64_t last_ = 0, cooldown_ = 0, settled_since_ = 0, movement_since_ = 0;
+  bool initialized_ = false, calibrated_ = false, armed_ = true;
+};
+
+// A light flick in any direction, with a quiet sample and one second to rearm.
 class ShakeDetector {
  public:
   bool Observe(uint64_t timestamp_ns, float x, float y, float z);
@@ -91,6 +115,18 @@ class ShakeDetector {
   std::array<float, 3> gravity_{};
   uint64_t last_ = 0, cooldown_ = 0;
   bool armed_ = true;
+};
+
+enum class MotionMode { kNone, kTilt, kShake };
+MotionMode ParseMotionMode(std::string_view token);
+class MotionDetector {
+ public:
+  bool Observe(MotionMode mode, uint64_t timestamp_ns, float x, float y, float z);
+  void Reset();
+ private:
+  MotionMode mode_ = MotionMode::kNone;
+  TiltDetector tilt_;
+  ShakeDetector shake_;
 };
 
 // Only SDL's touch-generated mouse stream is swallowed. Its release remains

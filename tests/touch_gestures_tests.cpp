@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
 #include "input/touch_gestures.h"
+#include <algorithm>
 #include <limits>
+#include <cmath>
 
 using namespace rb_blitz::test;
 using namespace rb_blitz::input::touch;
@@ -140,19 +142,13 @@ int main() {
   CHECK_TRUE(layout.pause.x + layout.pause.width <= 812);
   CHECK_TRUE(layout.pause.height >= 44);
   CHECK_TRUE(layout.pause.x + layout.pause.width < layout.width / 2);
-  CHECK_TRUE(layout.powerup.x > layout.pause.x + layout.pause.width);
-  CHECK_EQ(layout.pause.y, layout.powerup.y);
   for (const auto& sized : {layout, MakeLayout(1194, 834, {0, 24, 1194, 790}),
                           MakeLayout(402, 874, {0, 62, 402, 778})}) {
     CHECK_TRUE(sized.pause.x >= 0 && sized.pause.y >= 0);
-    CHECK_TRUE(sized.powerup.x + sized.powerup.width <= sized.width);
     CHECK_TRUE(sized.pause.y + sized.pause.height < sized.height);
   }
   const auto portrait_controls = MakeLayout(405, 720, {0, 24, 405, 662});
   CHECK_EQ(portrait_controls.pause.width, 44.f);
-  CHECK_EQ(portrait_controls.pause.x, portrait_controls.powerup.x);
-  CHECK_TRUE(portrait_controls.powerup.y > portrait_controls.pause.y + portrait_controls.pause.height);
-  CHECK_TRUE(portrait_controls.powerup.y + portrait_controls.powerup.height < 200);
   const float px = (layout.pause.x + layout.pause.width / 2) / layout.width;
   const float py = (layout.pause.y + layout.pause.height / 2) / layout.height;
   g = Ready();
@@ -171,54 +167,51 @@ int main() {
   CHECK_TRUE(Held(g.Sample(), Action::kPause));
   CHECK_TRUE(Empty(g.Sample()));
 
-  BeginCase("ready power-up is a button, not a note, and appears at the first available poll");
-  const float power_x = (layout.powerup.x + layout.powerup.width / 2) / layout.width;
+  BeginCase("the removed power-up button is ordinary gameplay, even when ready");
   g = Ready();
   g.SetPowerupAvailable(true);
-  Tap(g, power_x, py);
+  Tap(g, (layout.pause.x + layout.pause.width + 30) / layout.width, py);
   events = g.DrainGameplay();
   CHECK_EQ(events.size(), size_t(2));
-  CHECK_TRUE(events[0].kind == GameplayKind::kPress && events[0].action == Action::kPowerup);
-  CHECK_TRUE(events[1].kind == GameplayKind::kRelease && events[1].action == Action::kPowerup);
-  CHECK_TRUE(Empty(g.Sample()));
-  g = Ready();
-  Tap(g, power_x, py);
-  CHECK_TRUE(Held(g.Sample(), Action::kFirstNote)); // no invisible unavailable button
-  g = Ready();
-  g.SetPowerupAvailable(true);
-  Event(g, Phase::kDown, power_x, py);
-  g.SetPowerupAvailable(false);
-  Event(g, Phase::kUp, power_x, py);
-  CHECK_TRUE(g.DrainGameplay().empty()); // readiness lost while held cannot deploy
-  g = Ready();
-  Event(g, Phase::kDown, .2f, .6f);
-  g.SetPowerupAvailable(true);
-  events = g.DrainGameplay();
-  CHECK_EQ(events.size(), size_t(1));
-  CHECK_TRUE(events[0].kind == GameplayKind::kPress); // charging cannot cancel held notes
+  CHECK_TRUE(events[0].action == Action::kFirstNote);
 
-  BeginCase("lane icon deploys without striking a note and retains its original tap bounds");
-  g = Ready();
-  g.SetPowerupAvailable(true);
-  g.SetLanePowerup({400, 330, 74, 64});
-  Event(g, Phase::kDown, .5f, .9f);
-  g.SetLanePowerup({500, 330, 74, 64}); // native icon can move during the tap
-  Event(g, Phase::kUp, .5f, .9f);
-  events = g.DrainGameplay();
-  CHECK_EQ(events.size(), size_t(2));
-  CHECK_TRUE(events[0].action == Action::kPowerup);
-  CHECK_TRUE(events[1].action == Action::kPowerup);
-  CHECK_TRUE(Empty(g.Sample()));
-  g.SetLanePowerup({400, 330, 74, 64});
-  Event(g, Phase::kDown, .5f, .9f);
-  Event(g, Phase::kMove, .6f, .9f);
-  Event(g, Phase::kUp, .5f, .9f);
-  CHECK_TRUE(g.DrainGameplay().empty());
-  g.SetActive(false);
-  g.SetActive(true);
-  g.DrainGameplay();
-  Tap(g, .5f, .9f);
-  CHECK_TRUE(Held(g.Sample(), Action::kSecondNote)); // cancelled target is gone
+  BeginCase("native lane icon accepts mouse and direct touch without generating note events");
+  for (uint64_t device : {uint64_t(1), UINT64_MAX}) {
+    PowerupTarget target;
+    target.SetTarget({400, 330, 74, 64}, true);
+    CHECK_FALSE(target.Observe({device, 1, Phase::kDown, 390, 350}).consumed);
+    CHECK_FALSE(target.Observe({device, 1, Phase::kUp, 420, 350}).deploy);
+    CHECK_TRUE(target.Observe({device, 1, Phase::kDown, 420, 350}).consumed);
+    target.SetTarget({500, 330, 74, 64}, true); // moving artwork retains original press bounds
+    const auto released = target.Observe({device, 1, Phase::kUp, 420, 350});
+    CHECK_TRUE(released.consumed && released.deploy);
+    CHECK_FALSE(target.Observe({device, 1, Phase::kUp, 420, 350}).consumed);
+    target.SetTarget({400, 330, 74, 64}, true);
+    CHECK_TRUE(target.Observe({device, 1, Phase::kDown, 420, 350}).consumed);
+    CHECK_TRUE(target.Observe({device, 1, Phase::kMove, 500, 350}).consumed);
+    CHECK_FALSE(target.Observe({device, 1, Phase::kUp, 420, 350}).deploy);
+    target.Observe({device, 1, Phase::kDown, 420, 350});
+    target.SetTarget({}, false); // pause, stale bounds, lost readiness, or focus loss
+    target.SetTarget({400, 330, 74, 64}, true);
+    CHECK_FALSE(target.Observe({device, 1, Phase::kUp, 420, 350}).deploy);
+    target.Observe({device, 1, Phase::kDown, 420, 350});
+    CHECK_FALSE(target.Observe({device, 1, Phase::kCancel, 420, 350}).deploy);
+    CHECK_FALSE(target.Observe({device, 1, Phase::kUp, 420, 350}).consumed);
+    target.Observe({device, 1, Phase::kDown, 420, 350});
+    CHECK_FALSE(target.Observe({device, 1, Phase::kMove, std::numeric_limits<float>::quiet_NaN(), 350}).deploy);
+    CHECK_FALSE(target.Observe({device, 1, Phase::kUp, 420, 350}).deploy);
+    target.Observe({device, 1, Phase::kDown, 420, 350});
+    target.Cancel();
+    CHECK_FALSE(target.Observe({device, 1, Phase::kUp, 420, 350}).deploy);
+  }
+  BeginCase("simultaneous mouse and touch contacts share the ready power-up");
+  PowerupTarget target;
+  target.SetTarget({400, 330, 74, 64}, true);
+  target.Observe({1, 1, Phase::kDown, 420, 350});
+  target.Observe({UINT64_MAX, 0, Phase::kDown, 420, 350});
+  CHECK_TRUE(target.Observe({1, 1, Phase::kUp, 420, 350}).deploy);
+  target.SetTarget({400, 330, 74, 64}, true);
+  CHECK_FALSE(target.Observe({UINT64_MAX, 0, Phase::kUp, 420, 350}).deploy);
 
   BeginCase("motion uses the same readiness, pause, and active gameplay gates as taps");
   g = Ready();
@@ -234,7 +227,7 @@ int main() {
   g.DeployPowerup();
   CHECK_TRUE(g.DrainGameplay().empty());
 
-  BeginCase("one sharp movement deploys, with cooldown and quiet rearming");
+  BeginCase("a lighter shake deploys, with cooldown and quiet rearming");
   ShakeDetector shake;
   uint64_t now = 1'000'000'000;
   auto acceleration = [&](float x, float y = 9.80665f, float z = 0) {
@@ -243,7 +236,7 @@ int main() {
   };
   CHECK_FALSE(acceleration(0));
   for (int i = 0; i < 30; ++i) CHECK_FALSE(acceleration(float(i % 3) - 1));
-  CHECK_TRUE(acceleration(20)); // a single deliberate flick
+  CHECK_TRUE(acceleration(10)); // below the former 12 m/s^2 filtered threshold
   CHECK_FALSE(acceleration(-20)); // its rebound cannot deploy again
   for (int i = 0; i < 25; ++i) CHECK_FALSE(acceleration(0));
   CHECK_TRUE(acceleration(-20)); // settled and cooldown elapsed
@@ -266,6 +259,82 @@ int main() {
   CHECK_FALSE(acceleration(std::numeric_limits<float>::quiet_NaN()));
   CHECK_FALSE(acceleration(20)); // invalid sample discards the baseline
   CHECK_FALSE(shake.Observe(now, 0, 0, 0)); // non-increasing timestamps reset too
+
+  BeginCase("forward wrist tilt deploys once and rearms only after returning, in every orientation");
+  for (const int step_ms : {10, 20, 50}) for (const float axis : {0.f, 1.5707963f, 3.1415926f, 4.712389f}) {
+    TiltDetector tilt;
+    uint64_t clock = 0;
+    int deployments = 0;
+    auto pose = [&](float degrees, float roll = 0.f) {
+      const float radians = degrees / 57.2957795f;
+      clock += uint64_t(step_ms) * 1'000'000;
+      deployments += tilt.Observe(clock, 9.80665f * std::cos(radians) * std::cos(axis + roll),
+          9.80665f * std::cos(radians) * std::sin(axis + roll), 9.80665f * std::sin(radians));
+    };
+    auto hold = [&](float degrees, int ms) { for (int t = 0; t < ms; t += step_ms) pose(degrees); };
+    auto tip = [&] { for (int t = step_ms; t <= 200; t += step_ms) pose(35.f + 35.f * t / 200.f); };
+    hold(35, 300);
+    tip(); hold(70, 200);
+    CHECK_EQ(deployments, 1);
+    hold(70, 1500); // cooldown alone cannot rearm a held tilt
+    CHECK_EQ(deployments, 1);
+    for (int t = step_ms; t <= 200; t += step_ms) pose(70.f - 35.f * t / 200.f);
+    hold(35, 400);
+    CHECK_EQ(deployments, 1); // returning is not another deployment
+    tip(); hold(70, 200);
+    CHECK_EQ(deployments, 2);
+  }
+  BeginCase("tilt rejects taps, sideways roll, backwards tilt, slow grip changes, and linear shakes");
+  for (int scenario = 0; scenario < 5; ++scenario) {
+    TiltDetector tilt;
+    uint64_t clock = 1'000'000'000;
+    auto pose = [&](float degrees, float roll = 0.f, float jolt = 0.f) {
+      const float radians = degrees / 57.2957795f;
+      clock += 20'000'000;
+      return tilt.Observe(clock, 9.80665f * std::cos(radians) * std::cos(roll) + jolt,
+          9.80665f * std::cos(radians) * std::sin(roll), 9.80665f * std::sin(radians));
+    };
+    for (int i = 0; i < 20; ++i) CHECK_FALSE(pose(35));
+    for (int i = 0; i < 150; ++i) {
+      if (scenario == 0) CHECK_FALSE(pose(35.f + (i % 3 - 1)));
+      if (scenario == 1) CHECK_FALSE(pose(35, i * .04f));
+      if (scenario == 2) CHECK_FALSE(pose(35.f - std::min(i, 50) * .7f));
+      if (scenario == 3) CHECK_FALSE(pose(35.f + std::min(i, 100) * .35f));
+      if (scenario == 4) CHECK_FALSE(pose(35, 0, i % 2 ? 10.f : -10.f));
+    }
+  }
+  BeginCase("invalid, stale, reversed and reset tilt samples discard partial gestures");
+  for (int scenario = 0; scenario < 5; ++scenario) {
+    TiltDetector tilt;
+    uint64_t clock = 1'000'000'000;
+    auto pose = [&](float degrees) {
+      const float radians = degrees / 57.2957795f;
+      clock += 20'000'000;
+      return tilt.Observe(clock, 9.80665f * std::cos(radians), 0, 9.80665f * std::sin(radians));
+    };
+    for (int i = 0; i < 20; ++i) CHECK_FALSE(pose(35));
+    for (int i = 1; i <= 4; ++i) CHECK_FALSE(pose(35.f + i * 4.f));
+    if (scenario == 0) tilt.Reset();
+    if (scenario == 1) CHECK_FALSE(tilt.Observe(clock + 1, std::numeric_limits<float>::quiet_NaN(), 0, 0));
+    if (scenario == 2) CHECK_FALSE(tilt.Observe(clock + 1, 0, 0, std::numeric_limits<float>::infinity()));
+    if (scenario == 3) clock += 500'000'000;
+    if (scenario == 4) CHECK_FALSE(tilt.Observe(clock, 0, 0, 9.80665f));
+    for (int i = 0; i < 30; ++i) CHECK_FALSE(pose(70));
+  }
+  BeginCase("motion selection disables input or starts a fresh detector when switching modes");
+  CHECK_TRUE(ParseMotionMode("tilt") == MotionMode::kTilt);
+  CHECK_TRUE(ParseMotionMode("shake") == MotionMode::kShake);
+  CHECK_TRUE(ParseMotionMode("none") == MotionMode::kNone);
+  CHECK_TRUE(ParseMotionMode("invalid") == MotionMode::kNone);
+  MotionDetector motion;
+  now = 1'000'000'000;
+  CHECK_FALSE(motion.Observe(MotionMode::kShake, now, 0, 9.80665f, 0));
+  CHECK_TRUE(motion.Observe(MotionMode::kShake, now += 50'000'000, 10, 9.80665f, 0));
+  CHECK_FALSE(motion.Observe(MotionMode::kNone, now += 50'000'000, -20, 9.80665f, 0));
+  CHECK_FALSE(motion.Observe(MotionMode::kTilt, now += 50'000'000, 0, 0, 9.80665f));
+  CHECK_FALSE(motion.Observe(MotionMode::kShake, now += 50'000'000, -20, 9.80665f, 0));
+  motion.Reset();
+  CHECK_FALSE(motion.Observe(MotionMode::kShake, now += 50'000'000, 20, 9.80665f, 0));
 
   BeginCase("the former top-right pause position is ordinary gameplay; dragging off pause cancels");
   g = Ready();

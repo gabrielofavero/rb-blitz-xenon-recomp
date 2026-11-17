@@ -16,19 +16,41 @@ Layout MakeLayout(float width, float height, Rect safe) {
   if (width <= 0 || height <= 0 || !std::isfinite(width) || !std::isfinite(height)) return {};
   if (safe.width <= 0 || safe.height <= 0) safe = {0, 0, width, height};
   const float margin = std::min(12.0f, height * .025f);
-  const float gap = std::max(8.f, height * .025f);
   // The installed HUD's prompt is a 54-unit disc in a 480-unit-high scene.
   // Pause always starts at the safe left edge; never reserve a slot before it.
   const bool portrait = width < height;
   const float preferred_side = portrait ? 44.f : std::max(height * .1125f, 44.f);
   const float side = std::max(0.f, std::min({preferred_side,
-      (safe.width - margin * 2 - gap) / 2, safe.height - margin * 2}));
+      safe.width - margin * 2, safe.height - margin * 2}));
   const float x = safe.x + margin;
   const float y = portrait ? safe.y + margin : std::clamp(height * (59.3836f / 480.f) - side / 2,
       safe.y + margin, safe.y + std::max(margin, safe.height - margin - side));
-  const Rect powerup = portrait ? Rect{x, y + side + gap, side, side}
-                                : Rect{x + side + gap, y, side, side};
-  return {width, height, {x, y, side, side}, powerup};
+  return {width, height, {x, y, side, side}};
+}
+void PowerupTarget::SetTarget(Rect bounds, bool available) {
+  bounds_ = bounds;
+  available_ = available && bounds.width > 0 && bounds.height > 0;
+  if (!available_) for (auto& [key, press] : presses_) press.moved = true;
+}
+void PowerupTarget::Cancel() { *this = {}; }
+PointerResult PowerupTarget::Observe(const FingerEvent& event) {
+  const auto key = std::make_pair(event.device, event.finger);
+  auto it = presses_.find(key);
+  const bool finite = std::isfinite(event.x) && std::isfinite(event.y);
+  if (event.phase == Phase::kDown && it == presses_.end()) {
+    if (!finite || !available_ || !bounds_.Contains(event.x, event.y) || presses_.size() >= 10) return {};
+    presses_.emplace(key, Press{bounds_, event.x, event.y});
+    return {true, false};
+  }
+  if (it == presses_.end()) return {};
+  auto& press = it->second;
+  press.moved |= !finite || !press.bounds.Contains(event.x, event.y) ||
+      std::hypot(event.x - press.x, event.y - press.y) > kTapSlop;
+  const bool deploy = event.phase == Phase::kUp && available_ && !press.moved;
+  if (event.phase == Phase::kUp || event.phase == Phase::kCancel) presses_.erase(it);
+  // Only one release from simultaneous contacts may deploy the current ready state.
+  if (deploy) { available_ = false; for (auto& [key, other] : presses_) other.moved = true; }
+  return {true, deploy};
 }
 void Gestures::SetLayout(Layout layout) {
   if (layout_ == layout) return;
@@ -41,7 +63,6 @@ void Gestures::SetActive(bool active) {
   active_ = active;
 }
 void Gestures::SetPowerupAvailable(bool available) { powerup_available_ = available; }
-void Gestures::SetLanePowerup(Rect rect) { lane_powerup_ = rect; }
 void Gestures::DeployPowerup() {
   if (!active_ || pause_requested_ || !powerup_available_ || gameplay_.size() >= 254) return;
   const auto token = ++next_token_;
@@ -53,7 +74,6 @@ void Gestures::Cancel() {
   gameplay_.push_back({GameplayKind::kCancel});
   active_ = false;
   pause_requested_ = false;
-  lane_powerup_ = {};
   fingers_.clear();
   pending_.fill(0);
   held_polls_.fill(0);
@@ -68,7 +88,7 @@ void Gestures::Observe(const FingerEvent& event) {
   auto cancel_finger = [&] {
     const auto it = fingers_.find(key);
     if (it != fingers_.end()) {
-      if (!it->second.pause && !it->second.powerup) gameplay_.push_back({GameplayKind::kRelease, it->second.token,
+      if (!it->second.pause) gameplay_.push_back({GameplayKind::kRelease, it->second.token,
           it->second.x < layout_.width * .5f ? Action::kFirstNote : Action::kSecondNote, true});
       fingers_.erase(it);
     }
@@ -80,12 +100,10 @@ void Gestures::Observe(const FingerEvent& event) {
   const float x = event.x * layout_.width, y = event.y * layout_.height;
   if (event.phase == Phase::kDown) {
     if (fingers_.size() >= 10 || event.x < 0 || event.x > 1 || event.y < 0 || event.y > 1) return;
-    const Rect button = layout_.powerup.Contains(x, y) ? layout_.powerup : lane_powerup_;
     const auto [it, inserted] = fingers_.try_emplace(key,
         Finger{x, y, 0, ++next_token_, layout_.pause.Contains(x, y),
-               powerup_available_ && button.Contains(x, y), false, false,
-               layout_.pause.Contains(x, y) ? layout_.pause : button});
-    if (inserted && !it->second.pause && !it->second.powerup) {
+               false, false, layout_.pause});
+    if (inserted && !it->second.pause) {
       const auto action = x < layout_.width * .5f ? Action::kFirstNote : Action::kSecondNote;
       Emit(action);
       gameplay_.push_back({GameplayKind::kPress, it->second.token, action});
@@ -97,12 +115,11 @@ void Gestures::Observe(const FingerEvent& event) {
   auto& finger = it->second;
   const float dx = x - finger.x, dy = y - finger.y;
   finger.travel = std::max(finger.travel, std::hypot(dx, dy));
-  if (finger.pause || finger.powerup) {
+  if (finger.pause) {
     const auto& rect = finger.button;
     finger.moved |= !rect.Contains(x, y) || finger.travel > kTapSlop;
     if (event.phase == Phase::kUp) {
       const bool pause = finger.pause && !finger.moved;
-      const bool powerup = finger.powerup && !finger.moved && powerup_available_;
       fingers_.erase(it);
       if (pause) {
         // Pause owns this frame. Other fingers must not leave notes queued for resume.
@@ -110,9 +127,6 @@ void Gestures::Observe(const FingerEvent& event) {
         active_ = true;
         Emit(Action::kPause);
         pause_requested_ = true;
-      } else if (powerup) {
-        // Use the same native action boundary as a controller's Power-up.
-        DeployPowerup();
       }
     }
     return;
@@ -150,6 +164,63 @@ Actions Gestures::Sample() {
   }
   return sample;
 }
+void TiltDetector::Reset() { *this = {}; }
+bool TiltDetector::Observe(uint64_t now, float x, float y, float z) {
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) { Reset(); return false; }
+  const float magnitude = std::hypot(std::hypot(x, y), z);
+  // A jolt is not an orientation measurement. Recalibrate after translation
+  // rather than treating a strong shake as a forward wrist tilt.
+  if (magnitude < 9.80665f * .8f || magnitude > 9.80665f * 1.2f) {
+    Reset(); return false;
+  }
+  constexpr float kDegrees = 57.2957795f;
+  const float pitch = std::atan2(z, std::hypot(x, y)) * kDegrees;
+  if (!initialized_ || now <= last_ || now - last_ > 250'000'000) {
+    Reset();
+    initialized_ = true;
+    pitch_ = baseline_ = pitch;
+    last_ = settled_since_ = now;
+    return false;
+  }
+  const float dt = float(now - last_) / 1e9f;
+  last_ = now;
+  pitch_ += dt / (.04f + dt) * (pitch - pitch_);
+  const float delta = pitch_ - baseline_;
+  if (!calibrated_) {
+    if (std::abs(delta) > 3.f) { baseline_ = pitch_; settled_since_ = now; }
+    calibrated_ = now - settled_since_ >= 150'000'000;
+    return false;
+  }
+  if (!armed_) {
+    // Holding the tipped pose or its rebound must not deploy again. Keep the
+    // original playing angle until the device has returned for 150 ms.
+    if (std::abs(delta) > 8.f) settled_since_ = now;
+    if (now >= cooldown_ && now - settled_since_ >= 150'000'000 && std::abs(delta) <= 8.f) {
+      armed_ = true;
+      baseline_ = pitch_;
+    }
+    return false;
+  }
+  if (delta < 6.f) {
+    movement_since_ = 0;
+    // Follow gradual grip changes while retaining a reference for a quick tilt.
+    baseline_ += dt / (.5f + dt) * delta;
+    return false;
+  }
+  if (!movement_since_) movement_since_ = now;
+  const auto elapsed = now - movement_since_;
+  if (elapsed > 450'000'000) {
+    baseline_ = pitch_;
+    movement_since_ = 0;
+    return false;
+  }
+  if (now < cooldown_ || elapsed < 80'000'000 || delta < 22.f) return false;
+  armed_ = false;
+  movement_since_ = 0;
+  settled_since_ = now;
+  cooldown_ = now + 1'000'000'000;
+  return true;
+}
 void ShakeDetector::Reset() { *this = {}; }
 bool ShakeDetector::Observe(uint64_t now, float x, float y, float z) {
   const std::array<float, 3> sample{x, y, z};
@@ -159,22 +230,31 @@ bool ShakeDetector::Observe(uint64_t now, float x, float y, float z) {
   }
   const float dt = float(now - last_) / 1e9f;
   last_ = now;
-  std::array<float, 3> linear;
   float magnitude2 = 0;
-  // A time-based low pass removes gravity at any device orientation.
   const float alpha = dt / (.3f + dt);
   for (size_t axis = 0; axis < 3; ++axis) {
     gravity_[axis] += alpha * (sample[axis] - gravity_[axis]);
-    linear[axis] = sample[axis] - gravity_[axis];
-    magnitude2 += linear[axis] * linear[axis];
+    const float linear = sample[axis] - gravity_[axis];
+    magnitude2 += linear * linear;
   }
-  // A brisk tilt or flick is enough; no reversal or repeated shaking is needed.
-  // Require a quieter sample before rearming so the same motion cannot deploy twice.
-  if (magnitude2 < 6.f * 6.f) armed_ = true;
-  if (now < cooldown_ || !armed_ || magnitude2 < 12.f * 12.f) return false;
+  // Lower activation effort while retaining gravity filtering and rebound protection.
+  if (magnitude2 < 4.f * 4.f) armed_ = true;
+  if (now < cooldown_ || !armed_ || magnitude2 < 8.f * 8.f) return false;
   armed_ = false;
   cooldown_ = now + 1'000'000'000;
   return true;
+}
+MotionMode ParseMotionMode(std::string_view token) {
+  if (token == "tilt") return MotionMode::kTilt;
+  if (token == "shake") return MotionMode::kShake;
+  return MotionMode::kNone;
+}
+void MotionDetector::Reset() { *this = {}; }
+bool MotionDetector::Observe(MotionMode mode, uint64_t now, float x, float y, float z) {
+  if (mode != mode_) { Reset(); mode_ = mode; }
+  if (mode == MotionMode::kTilt) return tilt_.Observe(now, x, y, z);
+  if (mode == MotionMode::kShake) return shake_.Observe(now, x, y, z);
+  return false;
 }
 bool MouseGate::Consume(bool is_touch, Phase phase, bool gameplay) {
   if (!is_touch) return false;

@@ -40,7 +40,7 @@ int main() {
       const auto layout = rb_blitz::ui::help::LayoutCaption(viewport.x, viewport.y, size);
       for (const char* text : {
           "Normal follows your swipe; Inverted reverses it.",
-          "Tilt or shake sharply once to deploy a ready power-up.",
+          "Tilt away or shake lightly; None disables motion.",
           "Show or hide Exit Game. Restart to apply."}) {
         const auto bounds = caption->CalcTextSizeA(layout.font_size, FLT_MAX, layout.TextWidth(), text);
         const bool fits = bounds.x <= layout.TextWidth() && bounds.y <= layout.TextHeight();

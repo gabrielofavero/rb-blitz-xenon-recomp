@@ -16,11 +16,8 @@
 #include <rex/cvar.h>
 #include <rex/hook.h>
 #include <rex/system/xmemory.h>
-#if defined(RB_BLITZ_IOS)
 #include "input/touch_controls.h"
 REX_EXTERN(sub_823FF258);
-REX_EXTERN(sub_823A38C8);
-#endif
 
 REX_EXTERN(sub_821F13D0);
 REX_EXTERN(sub_821F65C8);
@@ -43,12 +40,10 @@ unsigned dirty_calls = 0, draw_calls = 0;
 std::array<uint32_t, 16> transforms{};
 uint32_t drawn_child = 0;
 float drawn_x = 0;
-#if defined(RB_BLITZ_IOS)
 bool using_touch = false, buttons_enabled = true, powerup_ready = false;
 unsigned property_writes = 0;
-unsigned reminder_polls = 0;
-rb_blitz::input::touch::Layout touch_layout{874, 402, {90, 28, 46, 46}, {146, 28, 46, 46}};
-#endif
+unsigned lane_captures = 0;
+rb_blitz::input::touch::Layout touch_layout{874, 402, {90, 28, 46, 46}};
 
 
 void Word(uint32_t a, uint32_t v) { rex::memory::store_and_swap<uint32_t>(memory + a, v); }
@@ -148,9 +143,8 @@ uint32_t BootRenderHeight() { return height; }
 uint32_t BootPortraitWidth() { return crop_width; }
 uint32_t BootPortraitHeight() { return crop_height; }
 }
-#if defined(RB_BLITZ_IOS)
 namespace rb_blitz::input {
-void CaptureTouchPowerup(PPCContext&, uint8_t*, uint32_t) {}
+void CaptureLanePowerup(PPCContext&, uint8_t*, uint32_t) { ++lane_captures; }
 }
 namespace rb_blitz::input::touch {
 Layout CurrentLayout() { return touch_layout; }
@@ -165,8 +159,7 @@ extern "C" REX_FUNC(__imp__sub_823FF258) {
   ++property_writes;
   ctx.r3.u32 = 0x12345678;
 }
-extern "C" REX_FUNC(__imp__sub_823A38C8) { ++reminder_polls; }
-#endif
+
 
 // Stand-in for the original guest evaluator: fresh local -> world; dirty parents
 // resolve through the production hook before their child inherits the result.
@@ -615,53 +608,37 @@ int main() {
   Resolve(t2); CHECK_TRUE(std::isinf(Float(t2 + 0x78)));
 
 #if defined(RB_BLITZ_IOS)
-  BeginCase("touch pause and ready power-up match hit rectangles at 16:9 and restore native placement");
+  BeginCase("touch pause matches its hit rectangle at 16:9 and hides outside touch play");
   Reset();
   width = 1920; height = 1080;
   using_touch = true;
   const Shape pause_shape{"touch_pause.grp", 0x82024C4C, -0x108, -1};
   const auto pause = Make(0, pause_shape, -289.338f);
-  const Shape powerup_shape{"touch_powerup.grp", 0x82024C4C, -0x108, -1};
-  const auto hint = Make(1, powerup_shape, -289.338f);
-  for (auto t : {pause, hint}) {
-    Resolve(t);
-    const auto rect = t == pause ? touch_layout.pause : touch_layout.powerup;
-    const auto expected_x = ((rect.x + rect.width / 2) / touch_layout.width - .5f) * (1920.f / 1080.f) * 480;
-    const auto expected_z = (.5f - (rect.y + rect.height / 2) / touch_layout.height) * 480;
-    Close(Float(t + 0x78), expected_x);
-    Close(Float(t + 0x80), expected_z);
-    const auto scale = rect.height * 480 / (touch_layout.height * 54);
-    Close(Float(t + 72), scale);
-    Resolve(t);
-    Close(Float(t + 72), scale); // fresh guest matrix; never compound scale
-  }
-  powerup_ready = true;
-  Draw(hint, powerup_shape, true);
-  using_touch = false;
-  Resolve(hint); // source change restores the authored transform while hidden
-  Close(Float(hint + 0x78), -289.338f);
-  Close(Float(hint + 0x80), 4.35f);
-  auto old_draws = draw_calls;
+  Resolve(pause);
+  const auto rect = touch_layout.pause;
+  Close(Float(pause + 0x78), ((rect.x + rect.width / 2) / touch_layout.width - .5f) * (1920.f / 1080.f) * 480);
+  Close(Float(pause + 0x80), (.5f - (rect.y + rect.height / 2) / touch_layout.height) * 480);
+  const auto scale = rect.height * 480 / (touch_layout.height * 54);
+  Close(Float(pause + 72), scale);
+  Resolve(pause);
+  Close(Float(pause + 72), scale);
   ObjectView(pause - 64, pause + 0x108);
   PPCContext call{}; call.r3.u32 = pause - 64;
-  sub_82226CD8(call, memory);
-  CHECK_EQ(draw_calls, old_draws); // controller never draws touch pause
-  using_touch = true; buttons_enabled = false;
-  call.r3.u32 = hint - 64;
-  sub_82226CD8(call, memory);
-  CHECK_EQ(draw_calls, old_draws); // Off hides the guest reminder during touch
-  call.r3.u32 = pause - 64;
+  using_touch = false;
+  const auto old_draws = draw_calls;
   sub_82226CD8(call, memory);
   CHECK_EQ(draw_calls, old_draws);
+  using_touch = true; buttons_enabled = false;
+  sub_82226CD8(call, memory);
+  CHECK_EQ(draw_calls, old_draws);
+#endif
 
-  BeginCase("native deploy readiness drives touch immediately, independently of the reminder");
+  BeginCase("native deploy readiness is published on every platform, independently of the reminder");
   Reset();
   const auto provider = kHeap + 0xE000, node = kHeap + 0xF000;
   Word(provider + 32, Text("powerups_state.ep"));
   const auto property = Text("powerup_can_deploy");
   using_touch = true; buttons_enabled = true;
-  const auto ready_group = Make(0, powerup_shape, -289.338f);
-  ObjectView(ready_group - 64, ready_group + 0x108);
   Word(node + 4, 0); // native boolean is a DataNode integer
   for (const bool ready : {false, true, false, true}) {
     Word(node, ready ? 1 : 0);
@@ -672,53 +649,24 @@ int main() {
     CHECK_EQ(property_writes, calls + 1);
     CHECK_EQ(write.r3.u32, uint32_t(0x12345678)); // preserve original return registers
     CHECK_EQ(powerup_ready, ready);
-    PPCContext draw{};
-    draw.r3.u32 = ready_group - 64; draw.r4.u32 = 0xCAFEBABE;
-    const auto before_draw = draw_calls;
-    sub_82226CD8(draw, memory);
-    CHECK_EQ(draw_calls, before_draw + (ready ? 1 : 0)); // same-frame visibility; no help delay
   }
   Word(provider + 32, Text("unrelated.ep"));
   Word(node, 0);
-  call.r3.u32 = provider; call.r4.u32 = property; call.r5.u32 = node;
-  sub_823FF258(call, memory);
+  PPCContext unrelated{};
+  unrelated.r3.u32 = provider; unrelated.r4.u32 = property; unrelated.r5.u32 = node;
+  sub_823FF258(unrelated, memory);
   CHECK_TRUE(powerup_ready); // unrelated providers cannot hide the control
 
-  BeginCase("touch artwork follows all six equipped power-ups and rejects unknown selections");
-  Word(provider + 32, Text("powerups_state.ep"));
-  const auto selected = Text("active_powerup");
-  const std::array<const char*, 7> powerups{
-      "autoplay", "grenade", "jackpot", "overdrive", "plasma", "ripple", "none"};
-  const std::array<const char*, 6> icons{
-      "touch_autoplay.grp", "touch_grenade.grp", "touch_jackpot.grp",
-      "touch_overdrive.grp", "touch_plasma.grp", "touch_ripple.grp"};
-  Word(node + 4, 5); // DataNode symbol, as published by the native manager
-  for (size_t selection = 0; selection < powerups.size(); ++selection) {
-    Word(node, Text(powerups[selection]));
-    call.r3.u32 = provider; call.r4.u32 = selected; call.r5.u32 = node;
-    sub_823FF258(call, memory);
-    for (size_t i = 0; i < icons.size(); ++i) {
-      const Shape shape{icons[i], 0x82024C4C, -0x108, -1};
-      const auto icon = Make(unsigned(i + 1), shape, 0);
-      ObjectView(icon - 64, icon + 0x108);
-      call.r3.u32 = icon - 64; call.r4.u32 = 0xCAFEBABE;
-      const auto before_draw = draw_calls;
-      sub_82226CD8(call, memory);
-      CHECK_EQ(draw_calls, before_draw + (selection == i ? 1 : 0));
-    }
-  }
-
-  BeginCase("only touch bypasses delayed reminder work and retains the helper's song clock");
-  call.r3.u32 = provider; call.f1.f64 = 12.5;
-  using_touch = true;
-  const auto old_polls = reminder_polls;
-  sub_823A38C8(call, memory);
-  Close(Float(provider + 64), 12.5f);
-  CHECK_EQ(reminder_polls, old_polls);
-  using_touch = false;
-  sub_823A38C8(call, memory);
-  CHECK_EQ(reminder_polls, old_polls + 1);
-#endif
+  BeginCase("native lane group publishes its target on every platform without replacing its draw");
+  Reset();
+  const Shape lane_shape{"powerup.grp", 0x82024C4C, -0x108, 0};
+  const auto lane = Make(0, lane_shape, 0);
+  ObjectView(lane - 64, lane + 0x108);
+  PPCContext lane_draw{}; lane_draw.r3.u32 = lane - 64; lane_draw.r4.u32 = 0xCAFEBABE;
+  const auto captures_before = lane_captures, draws_before = draw_calls;
+  sub_82226CD8(lane_draw, memory);
+  CHECK_EQ(lane_captures, captures_before + 1);
+  CHECK_EQ(draw_calls, draws_before + 1);
 #if defined(_WIN32)
   VirtualFree(memory, 0, MEM_RELEASE);
 #else

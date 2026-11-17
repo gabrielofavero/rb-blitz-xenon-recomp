@@ -64,7 +64,7 @@ same tree in main-menu and in-song contexts.
 | Move Lane | Move Right; Move Left |
 | Pause & Power-up | Pause; Power-up |
 | Each individual binding | Add Key; Replace; Reset |
-| Touch (mobile) | Touch Buttons; Lane Swipe (Inverted / Normal); Shake to Deploy |
+| Touch (mobile) | Pause Button; Lane Swipe (Inverted / Normal); Motion Deploy (Tilt / Shake / None) |
 | Audio / Video | Audio; Video |
 | Audio | Active Track Boost; Sound Effects Volume; Bass Boost |
 | Video | Display; Graphics |

@@ -31,6 +31,7 @@
 #include <tuple>
 
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -1155,6 +1156,31 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
       }
       const auto& row_font = records.at(rb_blitz::ui::input_font::kIconSceneRecord);
       CheckIconScene(row_font);
+      {
+        // Project the resting speaker's visible alpha bounds through its mesh
+        // and parent transforms, independently of the font configuration.
+        const auto& scene = records.at(rb_blitz::ui::input_font::kCalibrationRecord);
+        const auto f = [&](size_t at) {
+          const auto* p = scene.data() + 0x810 + at;
+          return std::bit_cast<float>(uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 |
+                                      uint32_t(p[2]) << 8 | p[3]);
+        };
+        constexpr size_t mesh = 0x327362, group = 0x325DFF;
+        const float u = 71.5f / 256, v = 135.f / 256;
+        const float left = f(mesh + 0xE8 + 3 * 36);
+        const float x = left + u * (f(mesh + 0xE8 + 36) - left) +
+                               v * (f(mesh + 0xE8 + 2 * 36) - left);
+        const float world_x = f(group + 0x75) + f(group + 0x21) * (f(mesh + 0x39) + x);
+        constexpr std::string_view token = "calibration_countdown_go";
+        const auto at = std::search(scene.begin(), scene.end(), token.begin(), token.end());
+        CHECK_TRUE(at != scene.end());
+        if (at != scene.end()) {
+          const size_t label = size_t(at - scene.begin()) - 0x810 - 0xB9;
+          CHECK_TRUE(std::abs(world_x - f(label + 0x6D)) < .001f);
+        }
+        CHECK_TRUE(std::abs(f(group + 0x75) - f(group + 0x45) -
+                            (f(0x325CB3 + 0x45))) < .001f);
+      }
       const auto original_buttons = rb_blitz::ui::input_font::OriginalButtonsBc3();
       CHECK_TRUE(original_buttons != nullptr);
       if (original_buttons) {
@@ -1272,7 +1298,7 @@ int CheckInstalledHeaderRecords(const char* asset_root, const char* output_root,
         CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kLoadingRecord));
         CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kSplashRecord));
         CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kSongSelectRecord));
-        CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kCalibrationRecord));
+        CHECK_TRUE(records.contains(rb_blitz::ui::input_font::kCalibrationRecord));
         CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kHudRecord));
         CHECK_FALSE(records.contains(rb_blitz::ui::input_font::kAccountLinkRecord));
         CHECK_FALSE(records.contains("ui/resource/fonts/gen/hintbtn.milo_xbox"));
@@ -1897,6 +1923,62 @@ void TestPortraitSplash() {
 }
 
 int main(int argc, char** argv) {
+  if (argc == 4 && std::string(argv[1]) == "check-calibration-source") {
+    namespace settings = rb_blitz::settings;
+    namespace font = rb_blitz::ui::input_font;
+    namespace dtb = rb_blitz::ui::dtb;
+    const auto read = [&](const char* path) {
+      std::ifstream file(std::filesystem::path(argv[2]) / path, std::ios::binary);
+      return std::vector<uint8_t>(std::istreambuf_iterator<char>(file), {});
+    };
+    std::string why;
+    const auto source = read(font::kCalibrationRecord);
+    std::vector<uint8_t> layout, hinted;
+    CHECK_TRUE(font::PrepareCalibrationLayout(source, &layout, &why));
+    CHECK_TRUE(font::PrepareCalibration(layout, &hinted, &why));
+    std::vector<uint8_t> refused;
+    CHECK_FALSE(font::PrepareCalibrationLayout(layout, &refused, &why));
+    const auto record = read("ui/calibration/gen/calibration.dtb");
+    std::vector<dtb::Node> roots;
+    dtb::RootHeader header;
+    CHECK_TRUE(dtb::Parse(record.data(), record.size(), &roots, &header, &why));
+    CHECK_TRUE(settings::FadeCalibrationButtonAfterCountdown(&roots, &why));
+    const auto compiled = dtb::Compile(roots, header);
+    CHECK_TRUE(settings::FadeCalibrationButtonAfterCountdown(&roots, &why));
+    CHECK_TRUE(dtb::Compile(roots, header) == compiled);
+    const auto check = [&](auto&& self, const dtb::Node& n) -> size_t {
+      size_t found = 0;
+      if (n.tag == dtb::kArray && !n.kids.empty() && n.kids[0].text == "script") {
+        for (size_t i = 1; i + 1 < n.kids.size(); ++i) {
+          const auto& wait = n.kids[i];
+          const auto& fade = n.kids[i + 1];
+          if (wait.kids.size() != 3 || wait.kids[0].text != "task" ||
+              wait.kids[1].text != "wait") continue;
+          CHECK_TRUE(fade.kids.size() == 4 && fade.kids[0].text == "if" &&
+              fade.kids[1].kids[0].text == "is_video");
+          CHECK_TRUE(fade.kids[2].kids[0].text == "button_press_xbox_fade_out.mnm");
+          CHECK_TRUE(fade.kids[3].kids[0].text == "button_press_ps3_fade_out.mnm");
+          CHECK_TRUE(n.kids[i + 2].kids[0].text == "if_else");
+          ++found;
+        }
+      }
+      for (const auto& child : n.kids) found += self(self, child);
+      return found;
+    };
+    size_t handoffs = 0;
+    for (const auto& root : roots) handoffs += check(check, root);
+    CHECK_EQ(handoffs, size_t{1});
+    const auto output = std::filesystem::path(argv[3]);
+    std::filesystem::create_directories(output);
+    for (const auto& [name, bytes] : std::array<std::pair<const char*, const std::vector<uint8_t>*>, 3>{{
+        {"cal_auto-layout.milo_xbox", &layout}, {"cal_auto-hints.milo_xbox", &hinted},
+        {"calibration.dtb", &compiled}}}) {
+      std::ofstream file(output / name, std::ios::binary);
+      file.write(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+      CHECK_TRUE(bool(file));
+    }
+    return Finish();
+  }
   if (argc == 6 && std::string(argv[1]) == "check-portrait-menu") {
     namespace dtb = rb_blitz::ui::dtb;
     namespace font = rb_blitz::ui::input_font;
@@ -1959,7 +2041,7 @@ int main(int argc, char** argv) {
     TestPortraitSplash();
     return Finish();
   }
-  if (argc == 5 && std::string(argv[1]) == "check-touch-hud") {
+  if (argc == 4 && std::string(argv[1]) == "check-touch-hud") {
     namespace font = rb_blitz::ui::input_font;
     namespace dtb = rb_blitz::ui::dtb;
     auto read = [](const char* path) {
@@ -1970,18 +2052,17 @@ int main(int argc, char** argv) {
     const auto before = source;
     std::vector<uint8_t> scene;
     std::string why;
-    const auto icons = read(argv[4]);
-    CHECK_TRUE(font::PrepareTouchHud(source, icons, &scene, &why));
+    CHECK_TRUE(font::PrepareTouchHud(source, &scene, &why));
     CHECK_TRUE(source == before);
     if (scene.size() <= 0x810) return Finish();
     const auto* data = scene.data() + 0x810;
     auto u32 = [](const uint8_t* p) {
       return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
     };
-    CHECK_EQ(u32(data + 0x25), uint32_t(146));
+    CHECK_EQ(u32(data + 0x25), uint32_t(120));
     size_t at = 0x29;
     std::vector<std::string> names;
-    for (unsigned i = 0; i < 146; ++i) {
+    for (unsigned i = 0; i < 120; ++i) {
       const auto type_size = u32(data + at); at += 4 + type_size;
       const auto name_size = u32(data + at); at += 4;
       names.emplace_back(reinterpret_cast<const char*>(data + at), name_size);
@@ -1989,20 +2070,17 @@ int main(int argc, char** argv) {
     }
     std::vector<std::string> added{"touch_pause_bg.mat", "touch_pause_ink.mat",
         "touch_pause.grp", "touch_pause_icon.grp", "touch_pause_bg.mesh",
-        "touch_pause_l.mesh", "touch_pause_r.mesh", "touch_pause.anim", "touch_powerup.grp"};
-    for (const auto* powerup : {"autoplay", "grenade", "jackpot", "overdrive", "plasma", "ripple"})
-      for (const auto* suffix : {".tex", ".mat", ".grp", ".mesh"})
-        added.push_back(std::string("touch_") + powerup + suffix);
-    added.push_back("touch_powerup.anim");
+        "touch_pause_l.mesh", "touch_pause_r.mesh", "touch_pause.anim"};
+    CHECK_TRUE(std::find(names.begin(), names.end(), "touch_powerup.grp") == names.end());
     for (size_t i = 0; i < added.size(); ++i) CheckStrEq(names[112 + i], added[i]);
     std::vector<size_t> markers;
     for (size_t i = 0x810; i + 4 <= scene.size(); ++i)
       if (u32(scene.data() + i) == 0xADDEADDE) markers.push_back(i);
-    CHECK_TRUE(markers.size() >= 35);
-    if (markers.size() < 35) return Finish();
+    CHECK_TRUE(markers.size() >= 9);
+    if (markers.size() < 9) return Finish();
     auto object = [&](size_t i) {
-      const size_t start = markers[markers.size() - 35 + i] + 4;
-      const size_t end = markers[markers.size() - 34 + i] + 4;
+      const size_t start = markers[markers.size() - 9 + i] + 4;
+      const size_t end = markers[markers.size() - 8 + i] + 4;
       return std::vector<uint8_t>(scene.begin() + start, scene.begin() + end);
     };
     auto contains = [](const std::vector<uint8_t>& bytes, std::string_view text) {
@@ -2025,18 +2103,9 @@ int main(int argc, char** argv) {
     }
     CHECK_TRUE(contains(object(7), "touch_pause_icon.grp"));
     CHECK_FALSE(contains(object(7), "remedial_help.lbl"));
-    CHECK_FALSE(contains(object(8), ".lbl"));
-    for (size_t i = 0; i < 6; ++i) {
-      CHECK_TRUE(contains(object(8), added[11 + i * 4]));
-      CHECK_TRUE(contains(object(10 + i * 4), added[9 + i * 4]));
-      CHECK_TRUE(contains(object(11 + i * 4), "touch_powerup.grp"));
-      CHECK_TRUE(contains(object(12 + i * 4), added[10 + i * 4]));
-      CHECK_EQ(u32(object(10 + i * 4).data() + 0x19), std::bit_cast<uint32_t>(1.f));
-    }
-    CHECK_TRUE(contains(object(33), "touch_powerup.grp"));
     std::vector<uint8_t> hints;
     CHECK_TRUE(font::PrepareHudHints(scene, &hints, &why));
-    CHECK_FALSE(font::PrepareTouchHud(scene, icons, &hints, &why)); // never double-apply offsets
+    CHECK_FALSE(font::PrepareTouchHud(scene, &hints, &why)); // never double-apply offsets
 
     const auto game = read(argv[3]);
     std::vector<dtb::Node> roots;
@@ -2046,14 +2115,13 @@ int main(int argc, char** argv) {
     const size_t statements = original_enter ? original_enter->kids.size() : 0;
     CHECK_TRUE(rb_blitz::settings::AddTouchHudAnimation(&roots, &why));
     const auto* enter = header_test::Method(roots, "game_screen", "enter");
-    CHECK_TRUE(enter && enter->kids.size() == statements + 2);
+    CHECK_TRUE(enter && enter->kids.size() == statements + 1);
     if (enter && !enter->kids.empty()) {
       const auto& animate = enter->kids[statements];
       CheckStrEq(animate.kids[0].kids[2].text, "touch_pause.anim");
       CheckStrEq(animate.kids[1].text, "animate");
       CheckStrEq(animate.kids[2].kids[0].text, "loop");
       CHECK_EQ(animate.kids[2].kids[2].scalar, uint32_t(480));
-      CheckStrEq(enter->kids.back().kids[0].kids[2].text, "touch_powerup.anim");
     }
     CHECK_TRUE(rb_blitz::settings::AddIOSAutoPause(&roots, &why));
     CHECK_TRUE(header_test::Method(roots, "game_panel", "poll") != nullptr);

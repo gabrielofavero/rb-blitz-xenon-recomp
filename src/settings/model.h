@@ -100,9 +100,10 @@ enum class SettingId : uint16_t {
   kShowCurrency = 90,  // coin and Blitz Cred displays in menus and results
   kSettingsLabelSize = 91,  // caption size; stable tokens normal / big / biggest
   kTouchButtons = 92,
-  kTouchShakeDeploy = 93,
+  kTouchShakeDeploy = 93,  // retired boolean; never reused
   kTouchLaneSwipe = 94,
   kHideExitGame = 95,
+  kTouchMotionDeploy = 96,
 };
 
 enum class ValueKind : uint8_t { kNone = 0, kBool, kInt, kEnum, kString, kList, kResolution };

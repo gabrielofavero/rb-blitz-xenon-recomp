@@ -1540,6 +1540,41 @@ bool HideResultsCurrency(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
+bool FadeCalibrationButtonAfterCountdown(std::vector<ui::dtb::Node>* roots, std::string* why) {
+  if (!roots) return false;
+  for (auto& root : *roots) {
+    auto* countdown = FindNode(root, ui::dtb::kArray, "start_countdown");
+    auto* script = countdown ? FindNode(*countdown, ui::dtb::kArray, "script") : nullptr;
+    if (!script) continue;
+    // Input processing starts after the native 3-2-1 sequence. Run the scene's
+    // own alpha fade explicitly at this handoff, independently of the looping
+    // pressed/released texture animation and live texture replacements.
+    for (size_t i = 1; i < script->kids.size(); ++i) {
+      const auto& wait = script->kids[i];
+      if (wait.tag != ui::dtb::kCommand || wait.kids.size() != 3 ||
+          wait.kids[0].tag != ui::dtb::kVar || wait.kids[0].text != "task" ||
+          wait.kids[1].text != "wait" || wait.kids[2].tag != ui::dtb::kCommand ||
+          wait.kids[2].kids.size() != 2 ||
+          wait.kids[2].kids[0].tag != ui::dtb::kVar || wait.kids[2].kids[0].text != "this" ||
+          wait.kids[2].kids[1].text != "is_processing_input") continue;
+      const auto fade = [](const char* name) {
+        return Node::Command({Node::Symbol(name), Node::Symbol("animate"),
+            Node::Array({Node::Symbol("range"), Node::Int(0), Node::Int(4)})});
+      };
+      const auto statement = Node::Command({Node::Symbol("if"),
+          Node::Property({Node::Symbol("is_video")}),
+          fade("button_press_xbox_fade_out.mnm"), fade("button_press_ps3_fade_out.mnm")});
+      if (i + 1 == script->kids.size() ||
+          ui::dtb::SerializeNodes({script->kids[i + 1]}) != ui::dtb::SerializeNodes({statement}))
+        script->kids.insert(script->kids.begin() + i + 1, statement);
+      return true;
+    }
+    break;
+  }
+  if (why) *why = "calibration countdown input handoff changed";
+  return false;
+}
+
 bool AddIOSAutoPause(std::vector<ui::dtb::Node>* roots, std::string* why) {
   if (!roots) return false;
   auto staged = *roots;
@@ -1595,9 +1630,6 @@ bool AddTouchHudAnimation(std::vector<ui::dtb::Node>* roots, std::string* why) {
   const auto anim = Node::Command({hud, Node::Symbol("find"), Node::Symbol("touch_pause.anim")});
   // Native RndAnimatable::animate syntax, also used by calibration.dtb.
   enter->kids.push_back(Node::Command({anim, Node::Symbol("animate"),
-      Node::Array({Node::Symbol("loop"), Node::Int(0), Node::Int(480)})}));
-  const auto powerup_anim = Node::Command({hud, Node::Symbol("find"), Node::Symbol("touch_powerup.anim")});
-  enter->kids.push_back(Node::Command({powerup_anim, Node::Symbol("animate"),
       Node::Array({Node::Symbol("loop"), Node::Int(0), Node::Int(480)})}));
   return true;
 }
@@ -1835,6 +1867,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     if (pump_startup_window) pump_startup_window();
     return true;
   };
+  {
+    std::vector<uint8_t> source;
+    if (!read(ui::input_font::kCalibrationRecord, &source, error) ||
+        !ui::input_font::PrepareCalibrationLayout(
+            source, &built[ui::input_font::kCalibrationRecord], error)) return false;
+  }
+  if (!edit("ui/calibration/gen/calibration.dtb", [&](auto& roots) {
+        return FadeCalibrationButtonAfterCountdown(&roots, error);
+      })) return false;
   if (screen::CurrentMenuConfiguration().controller_layout_enabled &&
       !edit("config/gen/beatmatch_controller.dtb", [&](auto& roots) {
         return PatchTutorialButtonNames(&roots, error);
@@ -2585,10 +2626,9 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
   if (touch_hud) {
   {
-    std::vector<uint8_t> source, icons;
+    std::vector<uint8_t> source;
     if (!read(ui::input_font::kHudRecord, &source, error) ||
-        !read("track/gen/powerup_icon.milo_xbox", &icons, error) ||
-        !ui::input_font::PrepareTouchHud(source, icons, &built[ui::input_font::kHudRecord], error))
+        !ui::input_font::PrepareTouchHud(source, &built[ui::input_font::kHudRecord], error))
       return false;
   }
   }
