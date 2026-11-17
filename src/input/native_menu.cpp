@@ -4,6 +4,8 @@
 #include "hooks/hud_layout_runtime.h"
 #include "input/inline_help.h"
 #include "input/dialog_prompts.h"
+#include "input/last_device.h"
+#include "input/start_prompt.h"
 #include "diag/shader_trace.h"
 #include "input/remap.h"
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
@@ -22,6 +24,7 @@
 #include "loading/crash_recovery.h"
 #include "hooks/content_progress.h"
 #include <bit>
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -921,6 +924,33 @@ void UpdateCalibrationSideLabel(PPCContext& ctx, uint8_t* base, uint32_t label) 
   call.frame.ctx.r5.u32 = 0;
   sub_824BC7D0(call.frame, base);
 }
+void UpdateStartPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  // UILabel keeps its locale Symbol at +164 and its RndText UTF-8 string
+  // at +80 (RndText +8). SetText(clear_token=false) preserves that Symbol.
+  const uint32_t token_address = U32(base, label + 164);
+  if (!token_address) return;
+  const char* token = reinterpret_cast<const char*>(base + token_address);
+  const std::string_view name(token, strnlen(token, 64));
+  const auto found = std::find(kStartPromptTokens.begin(), kStartPromptTokens.end(), name);
+  if (found == kStartPromptTokens.end()) return;
+  const uint32_t text_address = U32(base, label + 80);
+  if (!text_address) return;
+  const char* text = reinterpret_cast<const char*>(base + text_address);
+  const std::string_view actual(text, strnlen(text, 256));
+  if (actual.size() == 256) return;
+  thread_local std::array<StartPromptText, kStartPromptTokens.size()> prompts;
+  auto& prompt = prompts[size_t(found - kStartPromptTokens.begin())];
+  const auto desired = prompt.Update(actual, last_device::Current().using_touch);
+  if (desired == actual || desired.size() >= 256) return;
+  rex::CallFrame call(ctx);
+  call.ctx.r1.u32 -= 512;
+  const uint32_t chars = call.ctx.r1.u32 + 128;
+  std::memcpy(base + chars, desired.c_str(), desired.size() + 1);
+  call.ctx.r3.u32 = label;
+  call.ctx.r4.u32 = chars;
+  call.ctx.r5.u32 = 0;
+  __imp__sub_824BC7D0(call, base);
+}
 // Defined after DrawList; declared here because the draw is what discovers a new list.
 void DrawList(PPCContext& ctx, uint8_t* base) {
   const uint32_t list = ctx.r5.u32 - 176;
@@ -1063,6 +1093,7 @@ REX_HOOK_RAW(sub_824E9A90) {
 }
 REX_HOOK_RAW(sub_824BC668) {
   const auto label = ctx.r3.u32 - 260;
+  rb_blitz::input::UpdateStartPrompt(ctx, base, label);
   rb_blitz::hooks::PrepareHudLabel(ctx, base, label);
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
   // The hint UILabel is drawn separately from remedial_help.grp by the guest.

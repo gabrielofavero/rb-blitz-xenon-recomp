@@ -949,3 +949,15 @@ and locale routes pass host checks, but their on-screen appearance and refresh
 still need owner validation. Other actionable locale strings and tutorial or
 calibration scene images remain open in the
 [hint inventory](button-hint-inventory.md).
+
+Touch start prompts (2026-11-16): `last_device` starts in touch mode on mobile.
+Real touch selects that mode on desktop too. Before the guest draws a UILabel
+with `splash_press_start`, `loading_press_button`, or `press_start_to_continue`,
+the existing draw hook replaces the press verb and button with the localized
+touch verb, preserving the original action (start, begin, or continue). The
+guest's font, animation and label layout still draw the text. The original
+string returns live on physical keyboard, mouse button/wheel, controller
+activity, or deliberate mouse motion out of touch mode. An idle connected pad
+does not change the source. Host tests cover launch defaults, source changes,
+all six locale forms, exact text restoration, and scene/text replacement;
+on-screen appearance remains a manual check.

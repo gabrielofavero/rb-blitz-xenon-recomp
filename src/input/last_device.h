@@ -20,7 +20,7 @@ struct State {
   Family family = Family::kController;
   std::string scheme = "retail";
   uint64_t revision = 0;
-  // Touch shares controller hint art, but owns a separate HUD visibility gate.
+  // Touch shares controller hint art, but owns HUD visibility and start wording.
   bool using_touch = false;
 };
 
@@ -28,6 +28,7 @@ struct State {
 // Only new physical activity changes family; held controls and focus changes do not.
 class Tracker {
  public:
+  explicit Tracker(bool touch_at_launch = false) { state_.using_touch = touch_at_launch; }
   State Current() const { return state_; }
   void SelectScheme(std::string scheme);
   void Focus(bool focused);

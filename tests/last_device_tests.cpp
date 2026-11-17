@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "input/last_device.h"
+#include "input/start_prompt.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -15,6 +16,11 @@ void Check(bool condition, const char* message) {
 }
 
 int main() {
+#if defined(RB_BLITZ_IOS) || defined(__ANDROID__)
+  Check(rb_blitz::input::last_device::Current().using_touch, "process defaults to touch on mobile");
+#else
+  Check(!rb_blitz::input::last_device::Current().using_touch, "process defaults to physical input on desktop");
+#endif
   Tracker tracker;
   Check(tracker.Current().family == Family::kController, "boot controller");
   Check(tracker.Current().scheme == "retail", "boot layout");
@@ -106,5 +112,55 @@ int main() {
   Check(touch.Current().using_touch, "touch stays active against held controller input");
   Check(touch.KeyDown(1800), "keyboard clears touch source");
   Check(!touch.Current().using_touch, "keyboard restores native HUD");
+
+  Tracker mobile(true);
+  Check(mobile.Current().using_touch, "mobile launches with touch prompts before focus or a tap");
+  mobile.Focus(true);
+  Check(!mobile.Pad(true, {}, 0), "connected idle controller preserves mobile launch prompts");
+  Check(mobile.KeyDown(10), "keyboard replaces mobile launch prompts immediately");
+  Check(!mobile.Current().using_touch, "keyboard restores physical prompts on mobile");
+  mobile.Touch(200);
+  Check(!mobile.MouseMove(100, 100, 300), "first real mouse position establishes origin");
+  Check(!mobile.MouseMove(105, 100, 310), "small mouse jitter keeps touch prompts");
+  Check(mobile.MouseMove(120, 100, 320), "real mouse motion leaves touch mode");
+  Check(!mobile.Current().using_touch && mobile.Current().family == Family::kMouse,
+        "real mouse motion restores mouse prompts");
+  Check(!mobile.MouseMove(150, 100, 330), "ordinary mouse motion keeps existing hint policy");
+
+  using rb_blitz::input::TouchStartPrompt;
+  Check(TouchStartPrompt("PRESS <alt1>\xC2\x80</alt1> TO START") == "TOUCH TO START",
+        "splash removes private button glyph");
+  Check(TouchStartPrompt("PRESS <alt1>A</alt1>TO BEGIN") == "TOUCH TO BEGIN",
+        "loading inserts missing retail glyph spacing");
+  Check(TouchStartPrompt("Press START to continue") == "Touch to continue",
+        "continue preserves sentence casing");
+  Check(TouchStartPrompt("Press <alt1>\xC2\x8D</alt1> to continue") == "Touch to continue",
+        "continue removes remapped Start glyph");
+  Check(TouchStartPrompt("PULSA <alt1>A</alt1>PARA EMPEZAR") == "TOCA PARA EMPEZAR",
+        "Spanish keeps original action");
+  Check(TouchStartPrompt("PRESSIONE <alt1>A</alt1> PARA COMEÇAR") == "TOQUE PARA COMEÇAR",
+        "Portuguese keeps original action");
+  Check(TouchStartPrompt("DRÜCKE <alt1>A</alt1>, UM ZU BEGINNEN") == "TIPPE, UM ZU BEGINNEN",
+        "German keeps punctuation");
+  Check(TouchStartPrompt("DRÜCKE <alt1>A</alt1>") == "TIPPE", "German splash has no added action");
+  Check(TouchStartPrompt("PREMI <alt1>A</alt1> PER INIZIARE") == "TOCCA PER INIZIARE",
+        "Italian keeps original action");
+  Check(TouchStartPrompt("APPUIE SUR <alt1>A</alt1> POUR DÉMARRER") == "TOUCHE POUR DÉMARRER",
+        "French keeps original action");
+  Check(TouchStartPrompt("PRESS <alt1>A") == "PRESS <alt1>A", "malformed markup is preserved");
+  Check(TouchStartPrompt("Loading...") == "Loading...", "other text is preserved");
+  rb_blitz::input::StartPromptText prompt;
+  const std::string original = "PRESS <alt1>A</alt1>TO BEGIN";
+  Check(prompt.Update(original, false) == original, "physical boot preserves prompt exactly");
+  Check(prompt.Update(original, true) == "TOUCH TO BEGIN", "visible prompt switches to touch");
+  Check(prompt.Update("TOUCH TO BEGIN", true) == "TOUCH TO BEGIN", "touch remains stable across frames");
+  Check(prompt.Update("TOUCH TO BEGIN", false) == original, "physical input restores exact original prompt");
+  Check(prompt.Update("TOUCH TO BEGIN", false) == original,
+        "another label with the same token also restores its button prompt");
+  Check(prompt.Update(original, true) == "TOUCH TO BEGIN", "touch can switch back repeatedly");
+  Check(prompt.Update("Press START to continue", true) == "Touch to continue",
+        "guest reassignment replaces saved text even at the same address");
+  Check(prompt.Update(original, true) == "TOUCH TO BEGIN", "scene reload captures the new label");
+  Check(prompt.Update("TOUCH TO BEGIN", false) == original, "scene reload restores its own original");
   std::cout << "last_device: OK\n";
 }

@@ -29,7 +29,11 @@ bool Active(const profile::remap::PadState& pad) {
 }
 
 std::mutex g_mutex;
+#if defined(RB_BLITZ_IOS) || defined(__ANDROID__)
+Tracker g_tracker(true);
+#else
 Tracker g_tracker;
+#endif
 
 template <typename F>
 std::optional<State> Observe(F&& observe) {
@@ -87,6 +91,8 @@ bool Tracker::Tick(uint64_t now_ms) {
 bool Tracker::TouchSource(bool touch) {
   if (state_.using_touch == touch) return false;
   state_.using_touch = touch;
+  have_pointer_ = false;
+  motion_ = 0;
   ++state_.revision;
   return true;
 }
@@ -110,7 +116,9 @@ bool Tracker::MouseWheel(uint64_t now_ms) {
 }
 
 bool Tracker::MouseMove(int x, int y, uint64_t now_ms) {
-  if (!kMouseMotionSelectsKeyboardLayout) return false;
+  // Physical mouse motion can leave touch mode without changing the ordinary
+  // keyboard/controller motion policy. Touch-generated mouse events use Touch().
+  if (!kMouseMotionSelectsKeyboardLayout && !state_.using_touch) return false;
   if (!focused_) return false;
   if (!have_pointer_) {
     pointer_x_ = x; pointer_y_ = y; have_pointer_ = true;
