@@ -55,7 +55,7 @@ namespace store_ns = rb_blitz::store;
 REXCVAR_DEFINE_BOOL(settings_help_overlay, true, "Settings",
                     "Show a short description of the highlighted row at the bottom of the screen "
                     "while a settings menu is open (Help & Options and the retail pages it "
-                    "opens). The same switch as Interface -> Settings Labels, applied live. "
+                    "opens). The same switch as Game -> Extra Features -> Settings Labels, applied live. "
                     "Faithful: off draws nothing at all.");
 
 REXCVAR_DEFINE_STRING(settings_help_size, "normal", "Settings",
@@ -141,7 +141,7 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
       text = capture_status;
     }
     // Off is invisible, not "drawn and empty", and the cvar is re-read here so the toggle is
-    // live - the probe overlay's rule, and what makes Interface -> Settings Labels a `hot` row.
+    // live - the probe overlay's rule, and what makes Game -> Extra Features -> Settings Labels a `hot` row.
     if (text.empty() ||
         (!capturing && !searching &&
          !REXCVAR_GET(settings_help_overlay))) {

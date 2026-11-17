@@ -1,0 +1,9 @@
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -54,4 +54,5 @@
+     )
+     target_compile_definitions(rexcore PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
++    target_link_libraries(rexcore PUBLIC ws2_32)
+ elseif(UNIX)
+     # Linux and macOS/Darwin share the POSIX sources; Darwin-specific behavior

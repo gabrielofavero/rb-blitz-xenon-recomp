@@ -1786,13 +1786,17 @@ void TestPortraitSplash() {
   CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("server_connect_screen", "error_popup_panel"));
   for (const char* panel : {"rbbz_download_panel", "rbbz_search_loading_panel", "rbbz_library_panel"})
     CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("store_info_screen", panel));
-  for (const char* panel : {"settings_restart_panel", "settings_restore_defaults_panel",
-                            "settings_restart_pause_panel", "messages_update_panel"}) {
+  for (const char* panel : {"settings_restart_panel", "settings_restore_recommended_panel",
+                            "settings_restore_vanilla_panel", "settings_restore_recommended_pause_panel",
+                            "settings_restore_vanilla_pause_panel", "settings_restart_pause_panel",
+                            "messages_update_panel"}) {
     const auto scene = rb_blitz::ui::screen::PanelScene(panel);
     CHECK_TRUE(rb_blitz::ui::PortraitPromptScene(scene));
     CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("settings_prompt_screen", panel, scene));
   }
   CHECK_FALSE(rb_blitz::ui::PortraitPromptScene(rb_blitz::ui::screen::PanelScene("settings_av_panel")));
+  CHECK_FALSE(rb_blitz::ui::PortraitPromptScene(rb_blitz::ui::screen::PanelScene("settings_restore_defaults_panel")));
+  CHECK_TRUE(rb_blitz::ui::PortraitSettingsScene(rb_blitz::ui::screen::PanelScene("settings_restore_defaults_panel")));
   for (float aspect : {402.f / 874, 9.f / 16, .75f}) {
     CHECK_TRUE(rb_blitz::ui::PortraitPromptScale(aspect) * 350 <= rb_blitz::ui::PortraitSplash(aspect).width * .85f);
     CHECK_TRUE(rb_blitz::ui::PortraitPromptScale(aspect, true) * 640 <= rb_blitz::ui::PortraitSplash(aspect).width * .85f);

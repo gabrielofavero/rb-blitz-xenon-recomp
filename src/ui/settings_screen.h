@@ -304,16 +304,14 @@ std::string PausePanel(std::string_view panel);
 // calibration route goes through `pause_confirm_quit_song_screen` and stays retail's own case.
 std::string InSongDestination(std::string_view screen);
 
-// The rows the pause panel's own in-song Help & Options page is filled with, in the merged root's
-// order: Controls, Audio & Video, Gameplay, Interface, Library & Store, System & Help.
-// Calibration lives under Controls and How to Play under System & Help.
-// `provider_active` false drops `settings_gameplay` because a base install must never be offered a
-// dead row (plan §3).
+// The authored root's order in retail's pause-symbol spellings: Game,
+// Calibration, Controls, Audio / Video, How to Play, Credits. Both game versions
+// have six root rows; Ultimate-only choices now live inside Game.
 std::vector<std::string> PauseRootRows(bool provider_active);
 
 // Rewrites the array `pause_panel`'s `{enter}` hands to its inline `options.lst`, so the in-song
 // page lists the merged root's rows instead of retail's five. The statement becomes gate-aware:
-// the six-row list when the provider gate answers, the five-row one when it does not.
+// both provider states use the six-row root; the generated branch remains compatible.
 //
 // Refuses (leaving `nodes` untouched) unless the record still holds retail's own five-symbol fill,
 // so a changed retail record is reported rather than mangled.
@@ -427,7 +425,7 @@ bool AppendPanelEnterStatements(std::vector<dtb::Node>* nodes, std::string_view 
 // 0x821F1678, three float arguments); the earlier `local_xfm` spelling did not move the list, and
 // the owner's capture from it showed Overscan off on entry (measured 2026-10-19, out/audio-fix/probe3).
 std::vector<dtb::Node> AudioPageEnterStatements();
-// Keep the native volume sliders/save handlers; move Overscan out and add the two music rows.
+// Keep the three native audio rows and their save handlers; move Overscan to Display.
 bool ReorganizeAudioPage(std::vector<dtb::Node>* nodes, std::string* reason);
 
 // The statement an earlier P4 measurement appended to the retail store screen's `{enter}`. Retired

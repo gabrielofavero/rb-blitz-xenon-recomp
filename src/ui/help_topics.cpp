@@ -30,8 +30,7 @@ namespace {
 // the arrays the retail records fill their lists with.
 std::vector<std::string_view> RetailRows(const std::string_view screen) {
   if (screen == "av_options_screen" || screen == "av_options_pause_screen") {
-    return {"av_active_track_volume", "av_sound_volume", "av_bass_boost",
-            "settings_menu_music"};
+    return {"av_active_track_volume", "av_sound_volume", "av_bass_boost"};
   }
   if (screen == "tutorials_screen" || screen == "tutorials_pause_screen") {
     return {"tutorialsong", "tutorialsong3"};
@@ -86,7 +85,7 @@ std::string TextForSymbol(const std::string_view symbol) {
 
 std::string CaptionFor(const Observation& observation) {
   // The in-song pause panel's inline `options.lst`: the merged root's own rows, filled by the
-  // payload's `MergePauseListRows`, so the text is the root's own (five or six rows by the gate).
+  // authored root, with the same six rows in both game versions.
   if (observation.screen == "game_screen") {
     if (observation.focus == "options.lst" && observation.index >= 0) {
       const std::vector<std::string> rows = screen::PauseRootRows(observation.provider_active);
@@ -99,7 +98,7 @@ std::string CaptionFor(const Observation& observation) {
     return {};
   }
 
-  // The retail audio/video page: its list of four rows, plus the two sliders the volume rows open.
+  // The retail Audio page: three audio rows, plus the two sliders the volume rows open.
   if (observation.screen == "av_options_screen" ||
       observation.screen == "av_options_pause_screen") {
     if (observation.focus == "track_sound_slider.sld") {

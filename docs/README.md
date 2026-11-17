@@ -77,6 +77,12 @@ endings and orphaned documents. Auditing without editing is the read-only `docs-
 
 ## Index
 
+### Current settings delivery
+
+[Feature-focused settings and restore profiles](settings/menu.md#current-organization-2026-11-17)
+documents the menu reorganization and Recommended/Vanilla profiles; validation is
+in the [settings status](settings/status.md#feature-focused-settings-and-restore-profiles-2026-11-17).
+
 ### Guides
 
 | Document | What it is |
@@ -134,6 +140,7 @@ IPA build; the original bundled-assets route remains available.
 
 | Document | Status |
 | --- | --- |
+| [`plans/todo/2026-11-17-custom-loading-texts-plan.md`](plans/todo/2026-11-17-custom-loading-texts-plan.md) | Planning only: loading-message inventory and selective JSON replacements with inline action images and live controller/keyboard/mouse/touch variants. |
 | [`plans/todo/2026-11-15-rexglue-patch-refactoring-plan.md`](plans/todo/2026-11-15-rexglue-patch-refactoring-plan.md) | Planning only: dated SDK patch assessment, mandatory fresh kickoff audit, unused-code retirement, source-equivalent consolidation and replay CI. |
 | [`plans/finished/2026-11-15-desktop-render-settings-plan.md`](plans/finished/2026-11-15-desktop-render-settings-plan.md) | Delivered 2026-11-15: separate Aspect Ratio and Render Scale, legacy migration, bounded automatic recommendation and aspect-correct native-scale M1 gameplay. Release build, nine tests and SDK replay pass; authored settings save/restart remains unverified after the owner stopped launches. |
 | [`plans/todo/2026-10-26-in-game-song-management-plan.md`](plans/todo/2026-10-26-in-game-song-management-plan.md) | Planning only: native My Songs X Manage, shared RhythmVerse entry, per-song hiding and search settings, exact-package deletion, DLC date tracking and default-On Auto-hide Failed Songs; Off preserves current load-guard recovery. |

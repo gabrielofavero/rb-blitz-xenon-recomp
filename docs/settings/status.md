@@ -6,6 +6,69 @@ investigation, and the handover that preceded it. It consolidates three document
 `docs/plans/` (see [Sources](#sources)). Parts 2 and 3 keep the research history and are superseded by
 Part 1 wherever they disagree.
 
+## Feature-focused settings and restore profiles (2026-11-17)
+
+[tree] The owner-approved root is Game / Calibration / Controls / Audio / Video /
+How to Play / Credits. Game separates startup, unlocks, gameplay, menus/prompts,
+extra features, and restore profiles. Show Achievements uses positive On/Off;
+Exit Game visibility is editable everywhere; Settings Labels is an Extra Feature.
+Native Audio retains its three controls. See [the current tree and profiles](menu.md#current-organization-2026-11-17)
+and the validation record below.
+
+Recommended restores first-boot defaults; Vanilla requests base-game presentation,
+16:9/1x, original menu shortcuts/soundtrack, offline prompts, and disabled optional
+store/library/music/caption features. External ownership and device constraints
+remain authoritative. Both profiles preserve native calibration, audio, overscan,
+controller preset, scores, and earned achievements. Vanilla preserves the retail
+Exit Game row and native Coins & Blitz Cred display; Messages, Recommendations,
+and RhythmVerse are disabled. Live game/UI acceptance remains unverified.
+
+### Delivery validation
+
+- [docs] Documentation checker passed with zero errors; 166 existing repository
+  warnings remain. `git diff --check HEAD` passed. Evidence:
+  `out/feature-settings-docs-check.log`.
+- [build] `cmake --build --preset win-amd64-release` passed with the final profile
+  values; `rb_blitz.exe` was relinked. Evidence: `out/feature-settings-release-build.log`.
+- [host] Focused settings screen, service, and bridge suites passed. The screen
+  fixture covers 140 authored screens, destination/back routes, six-entry limits,
+  caption constraints, profile confirmation/cancel actions, and both contexts.
+  Service checks cover Vanilla save/reload/idempotence, return to Recommended,
+  installed provider defaults, external overrides, platform restrictions, and
+  preservation of native files. Final CTest validation passed all 18 selected
+  suites in 12.11 seconds: settings screen/service/bridge/store/migration/graphics,
+  installed-provider audit/restore, hot apply, input bindings/gates, menu options,
+  menu/store payloads, payload overlays/runtime, and iOS lifecycle. Evidence:
+  `out/feature-settings-final-tests.log`. The portrait payload fixture now checks
+  separate Recommended/Vanilla confirmations and the ordinary profile selector.
+- [font] The actual Windows Segoe UI caption font at the 96px bake passed 2,352
+  measurements: 98 authored captions, three sizes, eight landscape/portrait
+  dimensions. Ninety cases used the existing word-boundary ellipsis. Text and
+  padded backgrounds stayed within the 76.5%-86.5% strip. This headless check used
+  the Windows test runner. Fixture/report:
+  `out/_scratch/feature-settings-font-fit.cpp`, `out/feature-settings-font-fit.log`.
+- [build environment] The checkout lacked recorded SDK prerequisites. Synchronized
+  the Windows root patch stack independently of the unused/uninitialized MoltenVK
+  checkout using `out/_scratch/windows-sdk-patches/`; the initial exact root audit
+  passed (59 existing, 27 applied, zero failures/unexpected edits). Recorded patch
+  0087 guards iOS-only queue wiring on Windows; 0088 declares rexcore's Windows
+  socket dependency publicly. Both new patches passed reverse-application checks.
+  The final full-stack audit reports drift in patch 0054's unrelated window files;
+  those window changes were preserved. Evidence: `out/feature-settings-sdk-patches.log`
+  and `out/feature-settings-sdk-final-check.log`.
+- [build environment] Added NOMINMAX before the shared Windows test crash helper's
+  windows.h include so portrait std::min helpers compile. Future configure/source
+  mtimes caused repeated regeneration/recompilation; aligned generated configure
+  outputs/Ninja records and normalized 156 future source mtimes to the completed
+  SDK-audit boundary without changing their contents. Older outputs and later
+  source edits remained stale. Evidence:
+  `out/feature-settings-timestamp-normalization.log`.
+
+Owner UI checks remain: both menu contexts and Back routes; Cancel versus Apply
+for each profile; restart into Vanilla's base-game/16:9/1x presentation and then
+Recommended; confirm native calibration, audio, preset, and progress are retained.
+No game/UI navigation was performed for this delivery.
+
 ## At a glance
 
 - **Desktop render settings (delivered, 2026-11-15):** the owner requested separate

@@ -492,7 +492,7 @@ ValidationResult Service::Set(uint64_t txn, SettingId id, const Value& value,
   return validation;
 }
 
-ValidationResult Service::StageDefaults(uint64_t txn) {
+ValidationResult Service::StageRestore(uint64_t txn, RestoreProfile profile) {
   if (txn == 0 || txn != txn_) return {false, "settings.stale_transaction"};
   // Build a complete batch before changing the transaction. Provider file rows are included
   // whenever an installed compatible payload has a safe writer, even for an inactive target.
@@ -537,6 +537,65 @@ ValidationResult Service::StageDefaults(uint64_t txn) {
         : reconciler->Validate(descriptor.id, descriptor, value, capabilities_);
     if (!valid.ok) return valid;
     defaults.emplace(descriptor.id, value);
+  }
+  if (profile == RestoreProfile::kVanilla) {
+    // Begin with the same release/provider defaults as Recommended, then replace only
+    // the preferences that differ from the retail presentation. Never invoke an action
+    // or touch ConsoleSaveData/SaveData (calibration, audio, presets, or progress).
+    const auto boolean = [](bool on) { Value v; v.kind = ValueKind::kBool; v.boolean = on; return v; };
+    const auto token = [](const char* text) { Value v; v.kind = ValueKind::kEnum; v.text = text; return v; };
+    Value hidden;
+    hidden.kind = ValueKind::kList;
+    hidden.list = {"rbbz_rhythmverse"};
+    const std::map<SettingId, Value> vanilla{
+        {SettingId::kTarget, token("common")},
+        {SettingId::kStartup, token("normal")},
+        {SettingId::kLoadGuard, token("off")},
+        {SettingId::kDlcMenuSongs, boolean(false)},
+        {SettingId::kPlayCurrentSong, boolean(false)},
+        {SettingId::kRefreshMusicLibrary, boolean(false)},
+        {SettingId::kHideAchievements, boolean(false)},
+        {SettingId::kUnlockAll, boolean(false)},
+        {SettingId::kDisplay, token("fullscreen")},
+        {SettingId::kOrientation, token("landscape")},
+        {SettingId::kAspectRatio, token("16:9")},
+        {SettingId::kRenderScale, token("1x")},
+        {SettingId::kVsync, boolean(true)},
+        {SettingId::kAntiAliasing, token("native")},
+        {SettingId::kFiltering, token("native")},
+        {SettingId::kHideOfflinePrompts, boolean(false)},
+        {SettingId::kHideMainMenu, boolean(true)},
+        {SettingId::kHiddenMainMenu, hidden},
+        {SettingId::kHideDownloadContent, boolean(false)},
+        {SettingId::kHideExitGame, boolean(false)},
+        {SettingId::kRhythmVerse, boolean(false)},
+        {SettingId::kMusicPlayer, boolean(false)},
+        {SettingId::kBackgroundMusicNavigation, boolean(false)},
+        {SettingId::kShowMessages, boolean(false)},
+        {SettingId::kShowRecommendations, boolean(false)},
+        {SettingId::kShowCurrency, boolean(true)},
+        {SettingId::kSettingsLabels, boolean(false)},
+        {SettingId::kButtonScheme, token("retail")},
+    };
+    const Reconciler* reconciler = reconciler_ ? reconciler_ : &default_reconciler_;
+    for (const auto& [id, value] : vanilla) {
+      const Descriptor* descriptor = DescriptorFor(id);
+      if (!descriptor || external_.contains(id)) continue;
+      const bool provider = IsProviderFileRow(id);
+      if (provider && (!provider_ || provider_->Readiness() != ProviderReadiness::kCompatible)) continue;
+      // Platform-fixed controls stay at the release default (e.g. device aspect on iOS).
+      // Hidden legacy preferences were already removed by the default batch above.
+      if (!provider && descriptor->availability != Availability::kVisible) continue;
+      const ValidationResult valid = reconciler->Validate(id, *descriptor, value, capabilities_);
+      if (!valid.ok) {
+        // A backend may not support retail AA/filtering. Falling back to its recommended
+        // default is closer than retaining a previous custom setting or refusing the profile.
+        if (id == SettingId::kAntiAliasing || id == SettingId::kFiltering) continue;
+        return valid;
+      }
+      if (!ValueEquals(RequestedValue(id), value)) defaults[id] = value;
+      else defaults.erase(id);  // replace a pending default deletion with this explicit value
+    }
   }
   pending_ = std::move(defaults);
   pending_defaults_ = true;

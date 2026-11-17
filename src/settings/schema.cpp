@@ -363,7 +363,7 @@ std::vector<SchemaRow> BuildTable() {
   rows.push_back(Row(Make(SettingId::kMusicPlayer, Category::kInterface, Provider::kNative,
                           WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
                      {"interface", "music_player"}, "main_menu_extra", "Music Player",
-                     "Show the music player at the bottom right of the main menu. Requires Background Music: Library."));
+                     "Show the music player at the bottom right of the main menu. Requires Music Source: Library."));
   // P9-4: the shared background panel is authored once at boot.
   rows.push_back(Row(Make(SettingId::kShowMessages, Category::kInterface,
                           Provider::kNative, WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
@@ -748,7 +748,6 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
     RowRule touch;
     touch.hidden = true;
     release.rules.emplace(SettingId::kTouchLaneSwipe, touch);
-    release.rules.emplace(SettingId::kHideExitGame, touch);
     release.rules.emplace(SettingId::kTouchButtons, touch);
     release.rules.emplace(SettingId::kTouchShakeDeploy, std::move(touch));
   }

@@ -1,0 +1,16 @@
+diff --git a/src/ui/vulkan/vulkan_device.cpp b/src/ui/vulkan/vulkan_device.cpp
+--- a/src/ui/vulkan/vulkan_device.cpp
++++ b/src/ui/vulkan/vulkan_device.cpp
+@@ -824,6 +824,11 @@
+       VkQueue queue;
+       dfn.vkGetDeviceQueue(device->device_, uint32_t(queue_family_index), uint32_t(queue_index),
+                            &queue);
+-      queue_family.queues[queue_index] = std::make_unique<Queue>(queue, REX_PLATFORM_IOS ? &device->queue_lifecycle_ : nullptr);
++#if REX_PLATFORM_IOS
++      auto* lifecycle = &device->queue_lifecycle_;
++#else
++      QueueLifecycle* lifecycle = nullptr;
++#endif
++      queue_family.queues[queue_index] = std::make_unique<Queue>(queue, lifecycle);
+     }
+   }

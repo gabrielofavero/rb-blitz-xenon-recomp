@@ -72,12 +72,13 @@ using namespace rb_blitz::test;
 
 using dtb::Node;
 
-constexpr size_t kExpectedPagesPerContext = 73;
+constexpr size_t kExpectedPagesPerContext = 70;
 constexpr size_t kExpectedPages = 2 * kExpectedPagesPerContext;
 
 bool SuppressesSettingsCaption(const std::string_view name) {
   return name.starts_with("settings_restart") ||
-         name.starts_with("settings_restore_defaults") ||
+         name.starts_with("settings_restore_recommended") ||
+         name.starts_with("settings_restore_vanilla") ||
          name.starts_with("settings_display_confirm") ||
          name.starts_with("settings_save_error") ||
          name.starts_with("settings_achievements_confirm") ||
@@ -457,7 +458,7 @@ void TestDefinitionRoundTrip() {
 }
 
 void TestMergedRootShape() {
-  BeginCase("the merged root carries the plan's six rows, with the retail three in their slots");
+  BeginCase("the merged root carries the six feature-focused entries in their approved order");
 
   const std::vector<std::string> panels = PanelNames();
   CHECK_EQ(panels.size(), kExpectedPages);
@@ -485,8 +486,7 @@ void TestMergedRootShape() {
     }
     return words.size();
   };
-  const char* order[] = {"controls", "audio_video_options", "settings_gameplay",
-                         "settings_interface", "settings_dlc", "settings_general"};
+  const char* order[] = {"settings_general", "calibration", "controls", "audio_video_options", "tutorial", "credits"};
   for (size_t i = 0; i + 1 < 6; ++i) {
     CHECK_TRUE(at(order[i]) < words.size());
     CHECK_TRUE(at(order[i]) < at(order[i + 1]));
@@ -494,8 +494,8 @@ void TestMergedRootShape() {
 
   // Gameplay is the provider-only row: the gate query in this panel is what drops it, which is how
   // a base install shows five root rows and an Ultimate install six.
-  CHECK_TRUE(HasText(DefinitionRoots().front(), kProviderQuery));
-  CHECK_TRUE(HasText(DefinitionRoots().front(), "settings_gameplay"));
+  CHECK_FALSE(HasText(DefinitionRoots().front(), kProviderQuery));
+  CHECK_FALSE(HasText(DefinitionRoots().front(), "settings_gameplay"));
   CHECK_FALSE(HasText(DefinitionRoots().front(), "settings_gameplay_on"));
   for (const auto& panel : PanelNames()) CHECK_TRUE(PanelRowSymbols(panel).size() <= 6u);
   MenuConfiguration many_layouts;
@@ -671,7 +671,8 @@ void TestRequestPathsParse() {
     std::string why;
     if (ParseTextRequest(path, &request, &why) && request.op == Op::kInvoke)
       CHECK_TRUE(request.setting == "linked.confirm" || request.setting == "linked.cancel" ||
-                 request.setting == "settings.restore_defaults" ||
+                 request.setting == "settings.restore_recommended" ||
+                 request.setting == "settings.restore_vanilla" ||
                  request.setting == "display.keep" || request.setting == "display.revert" ||
                  request.setting.starts_with("display.preview.") ||
                  request.setting == "controller.capture_confirm" ||
@@ -827,7 +828,7 @@ void TestPanelEnterAppend() {
 }
 
 void TestNativeAudioOrganization() {
-  BeginCase("native Audio keeps sliders/save handlers and gains music controls within five rows");
+  BeginCase("native Audio keeps only its three sliders/toggle rows and their save handlers");
   const auto overscan = Arr({Sym("av_overscan"), Sym("enabled_token")});
   const auto slider = Cmd({Sym("track_sound_slider.sld"), Sym("set_showing"), Sym("TRUE")});
   std::vector<Node> roots = {Cmd({Sym("new"), Sym("UIPanel"), Sym("av_options_panel"),
@@ -848,11 +849,11 @@ void TestNativeAudioOrganization() {
   CHECK_TRUE(HasSymbol(roots[0], "native_slider_confirm_cancel_and_save"));
   CHECK_TRUE(HasSymbol(roots[0], "native_sound_slider"));
   CHECK_TRUE(HasSymbol(roots[0], "native_bass_save"));
-  CHECK_TRUE(HasSymbol(roots[0], "settings_menu_music"));
-  CHECK_TRUE(HasSymbol(roots[0], "settings_menu_music_screen"));
-  CHECK_TRUE(HasSymbol(roots[0], "settings_menu_music_pause_screen"));
+  CHECK_FALSE(HasSymbol(roots[0], "settings_menu_music"));
+  CHECK_FALSE(HasSymbol(roots[0], "settings_menu_music_screen"));
+  CHECK_FALSE(HasSymbol(roots[0], "settings_menu_music_pause_screen"));
   CHECK_TRUE(PanelRowSymbols("settings_menu_music_panel") ==
-      std::vector<std::string>({"settings_dlc_menu_songs", "settings_music_player", "settings_music_navigation"}));
+      std::vector<std::string>({"settings_dlc_menu_songs", "settings_music_player", "settings_music_navigation", "settings_play_current"}));
   const auto definitions = DefinitionRoots();
   CHECK_TRUE(HasSymbol(definitions.front(), "settings_av_screen"));
   std::vector<std::string> strings;
@@ -1159,12 +1160,11 @@ void TestDownloadContentVisibilityAndNoDlc() {
   configuration.rhythmverse_row = false;
   configuration.availability["general.play_current_song"] = "no playable DLC songs found";
   ConfigureMenu(configuration);
-  CHECK_TRUE(PanelRowSymbols("settings_main_menu_panel") ==
-             std::vector<std::string>({"settings_main_menu_extra", "settings_main_menu_base"}));
-  const std::vector<std::string> extras = {"settings_dlc_refresh", "settings_play_current", "settings_mm_download_content", "settings_mm_rhythmverse"};
-  CHECK_TRUE(PanelRowSymbols("settings_main_menu_extra_panel") == extras);
-  CHECK_TRUE(PageRows(PausePanel("settings_main_menu_extra_panel")) == extras);
-  CHECK_EQ(PanelRowSymbols("settings_main_menu_base_panel").size(), 4u);
+  const std::vector<std::string> shortcuts = {"settings_dlc_refresh", "settings_mm_download_content", "settings_mm_leaderboard", "settings_mm_exit", "settings_mm_upgrade"};
+  CHECK_TRUE(PanelRowSymbols("settings_main_menu_panel") == shortcuts);
+  CHECK_TRUE(PageRows(PausePanel("settings_main_menu_panel")) == shortcuts);
+  CHECK_TRUE(PanelRowSymbols("settings_main_menu_extra_panel").empty());
+  CHECK_TRUE(PanelRowSymbols("settings_main_menu_base_panel").empty());
   CHECK_TRUE(HelpTextFor("settings_play_current").find("no playable DLC songs") != std::string::npos);
   bool upgrade_unavailable = false;
   bool refresh_visible = false;
@@ -1240,11 +1240,9 @@ void TestInSongContext() {
   const std::vector<std::string> six = PauseRootRows(true);
   const std::vector<std::string> five = PauseRootRows(false);
   CHECK_EQ(six.size(), 6u);
-  CHECK_EQ(five.size(), 5u);
-  CHECK_TRUE(six == std::vector<std::string>({"pause_controls", "audio_video_options",
-      "settings_gameplay", "settings_interface", "settings_dlc", "settings_general"}));
-  CHECK_TRUE(five == std::vector<std::string>({"pause_controls", "audio_video_options",
-      "settings_interface", "settings_dlc", "settings_general"}));
+  CHECK_EQ(five.size(), 6u);
+  CHECK_TRUE(six == std::vector<std::string>({"settings_general", "calibration", "pause_controls", "audio_video_options", "pause_tutorial", "credits"}));
+  CHECK_TRUE(five == six);
 
   // A row of ours in song jumps to its twin and points that twin's Back at whoever sent us.
   const dtb::Node body = Cmd({InSongRowBody("settings_general_screen")});
@@ -1349,7 +1347,7 @@ void TestPauseMergeEdits() {
   CHECK_TRUE(std::find(words.begin(), words.end(), "file_exists") != words.end());
   CHECK_TRUE(std::find(words.begin(), words.end(), kProviderQuery) != words.end());
   CHECK_TRUE(std::find(words.begin(), words.end(), "settings_general") != words.end());
-  CHECK_TRUE(std::find(words.begin(), words.end(), "settings_gameplay") != words.end());
+  CHECK_TRUE(std::find(words.begin(), words.end(), "settings_gameplay") == words.end());  // nested under Game
   CHECK_TRUE(std::find(words.begin(), words.end(), "pause_controls") != words.end());
   // Retail's five are still named (both branches carry the ones that survive), and the rows retail
   // had but the merge moves under General are gone from the *list*.
@@ -3112,7 +3110,7 @@ void TestHelpTopicsResolve() {
   const std::vector<std::string> six = PauseRootRows(true);
   const std::vector<std::string> five = PauseRootRows(false);
   CHECK_EQ(six.size(), 6u);
-  CHECK_EQ(five.size(), 5u);
+  CHECK_EQ(five.size(), 6u);
   for (size_t i = 0; i < six.size(); ++i) {
     CHECK_TRUE(CaptionFor({"game_screen", "options.lst", static_cast<int>(i), true}) ==
                HelpTextFor(six[i]));
@@ -3121,21 +3119,20 @@ void TestHelpTopicsResolve() {
     CHECK_TRUE(CaptionFor({"game_screen", "options.lst", static_cast<int>(i), false}) ==
                HelpTextFor(five[i]));
   }
-  CHECK_TRUE(CaptionFor({"game_screen", "options.lst", 5, false}).empty());  // five-row world
+  CHECK_TRUE(CaptionFor({"game_screen", "options.lst", 6, false}).empty());  // five-row world
   CHECK_TRUE(CaptionFor({"game_screen", "pause.lst", 0, true}).empty());   // not a settings list
   CHECK_TRUE(CaptionFor({"game_screen", "", -1, true}).empty());           // nothing focused
 
   // The retail audio page: its four checkbox rows, in the order the record fills the list, plus
   // the two sliders the volume rows open.
-  const char* av_rows[] = {"av_active_track_volume", "av_sound_volume", "av_bass_boost",
-                           "settings_menu_music"};
-  for (int i = 0; i < 4; ++i) {
+  const char* av_rows[] = {"av_active_track_volume", "av_sound_volume", "av_bass_boost"};
+  for (int i = 0; i < 3; ++i) {
     CHECK_TRUE(CaptionFor({"av_options_screen", "checkbox.lst", i, true}) ==
                TextForSymbol(av_rows[i]));
     CHECK_TRUE(CaptionFor({"av_options_pause_screen", "checkbox.lst", i, true}) ==
                TextForSymbol(av_rows[i]));
   }
-  CHECK_TRUE(CaptionFor({"av_options_screen", "checkbox.lst", 4, false}).empty());
+  CHECK_TRUE(CaptionFor({"av_options_screen", "checkbox.lst", 3, false}).empty());
   CHECK_TRUE(CaptionFor({"av_options_screen", "track_sound_slider.sld", -1, false}) ==
              TextForSymbol("av_active_track_volume"));
   CHECK_TRUE(CaptionFor({"av_options_screen", "sound_effects_slider.sld", -1, false}) ==
@@ -3312,8 +3309,7 @@ void TestHudShapeAndVisibilityLabels() {
 void TestShowHeadersRow() {
   BeginCase("independent Messages / Recommendations rows fit and retain both context Back targets");
   CHECK_TRUE(PanelRowSymbols("settings_interface_panel") ==
-      std::vector<std::string>({"settings_main_menu", "settings_music_library_store",
-          "settings_hide_achievements", "settings_offline", "settings_labels_menu"}));
+      std::vector<std::string>({"settings_main_menu", "settings_music_library_store", "settings_offline"}));
   CHECK_TRUE(PageRows(PausePanel("settings_interface_panel")) == PageRows("settings_interface_panel"));
   CHECK_TRUE(PanelRowSymbols("settings_prompts_labels_panel").empty());
   CHECK_TRUE(PanelRowSymbols("settings_music_library_store_panel") ==
@@ -3372,8 +3368,51 @@ void TestShowHeadersRow() {
 // `settings_service`); this is the row half, which lives in this table.
 std::vector<std::string> PageRows(const std::string& panel_name);
 
+void TestFeatureTreeAndRestoreProfiles() {
+  BeginCase("feature groups have one home and confirmed restore actions in both contexts");
+  ConfigureMenu({});
+  const auto roots = DefinitionRoots();
+  for (const bool pause : {false, true}) {
+    const auto panel = [&](const char* name) { return pause ? PausePanel(name) : std::string(name); };
+    const auto screen = [&](const char* name) { return pause ? PauseScreen(name) : std::string(name); };
+    CHECK_TRUE(PanelRowSymbols(panel("settings_general_panel")) == std::vector<std::string>({
+        "settings_launch", "settings_achievements", "settings_gameplay", "settings_interface", "settings_dlc", "settings_restore_defaults"}));
+    CHECK_TRUE(PanelRowSymbols(panel("settings_achievements_panel")) == std::vector<std::string>({
+        "settings_unlock_all", "settings_unlock_online", "settings_hide_achievements", "settings_mm_achievements"}));
+    CHECK_TRUE(PanelRowSymbols(panel("settings_dlc_panel")) == std::vector<std::string>({
+        "settings_rhythmverse_menu", "settings_menu_music", "settings_labels_menu"}));
+    CHECK_TRUE(PanelRowSymbols(panel("settings_av_panel")) == std::vector<std::string>({"settings_audio", "settings_video_menu"}));
+    CHECK_TRUE(PanelRowSymbols(panel("settings_video_panel")) == std::vector<std::string>({"settings_display_menu", "settings_graphics_menu"}));
+    CHECK_TRUE(PanelRowSymbols(panel("settings_restore_defaults_panel")) == std::vector<std::string>({"settings_restore_recommended", "settings_restore_vanilla"}));
+    for (const std::string profile : {"recommended", "vanilla"}) {
+      const auto base = "settings_restore_" + profile;
+      CHECK_TRUE(PanelRowSymbols(panel((base + "_panel").c_str())) == std::vector<std::string>({"settings_restore_cancel", base + "_confirm"}));
+      bool found = false;
+      for (const auto& root : roots) {
+        ScreenFacts facts;
+        if (ReadScreenFacts(root, &facts) && facts.name == screen((base + "_screen").c_str())) {
+          CHECK_TRUE(facts.back == screen("settings_restore_defaults_screen"));
+          found = true;
+        }
+      }
+      CHECK_TRUE(found);
+      const auto apply = CaseWords(roots, base + "_confirm");
+      const auto action = std::find(apply.begin(), apply.end(), "rbbz-settings/invoke/settings.restore_" + profile + "/-");
+      const auto commit = std::find(apply.begin(), apply.end(), "rbbz-settings/commit/-/-");
+      CHECK_TRUE(action != apply.end() && commit != apply.end() && action < commit);
+      // Native save defaults are explicitly outside these profiles' scope.
+      CHECK_TRUE(std::find(apply.begin(), apply.end(), "console_data") == apply.end());
+      CHECK_TRUE(std::find(apply.begin(), apply.end(), "save_data") == apply.end());
+    }
+  }
+  const auto cancel = CaseWords(roots, "settings_restore_cancel");
+  CHECK_TRUE(std::none_of(cancel.begin(), cancel.end(), [](const auto& word) {
+    return word.starts_with("rbbz-settings/invoke/") || word == "rbbz-settings/commit/-/-";
+  }));
+}
+
 void TestLaunchSurface() {
-  BeginCase("Launch groups Game Version, Startup, and Load Guard in both menu contexts");
+  BeginCase("Startup groups Game Version, Fast Boot, loading threads, and timeout in both contexts");
   ConfigureMenu({});
   const auto roots = DefinitionRoots();
   for (bool pause : {false, true}) {
@@ -3383,8 +3422,8 @@ void TestLaunchSurface() {
     CHECK_TRUE(std::find(general.begin(), general.end(), "settings_launch") != general.end());
     CHECK_TRUE(std::find(general.begin(), general.end(), "settings_target") == general.end());
     CHECK_TRUE(std::find(general.begin(), general.end(), "settings_load_guard") == general.end());
-    CHECK_TRUE(PageRows(panel("settings_launch_panel")) ==
-               std::vector<std::string>({"settings_target", "settings_startup_normal", "settings_startup_fast"}));
+    CHECK_TRUE(PanelRowSymbols(panel("settings_launch_panel")) ==
+               std::vector<std::string>({"settings_target", "settings_startup", "settings_dlc_threads", "settings_load_guard"}));
     for (const auto& root : roots) {
       ScreenFacts facts;
       if (!ReadScreenFacts(root, &facts)) continue;
@@ -3395,9 +3434,9 @@ void TestLaunchSurface() {
     }
   }
   const auto labels = Labels();
-  for (const char* choice : {"Normal", "Fast"}) {
+  for (const char* choice : {"Off", "On"}) {
     CHECK_TRUE(std::any_of(labels.begin(), labels.end(), [&](const auto& entry) {
-      return entry.second == std::string("Startup: ") + choice;
+      return entry.second == std::string("Fast Boot: ") + choice;
     }));
   }
   CHECK_TRUE(std::any_of(labels.begin(), labels.end(), [](const auto& entry) {
@@ -3408,7 +3447,7 @@ void TestLaunchSurface() {
 
 void TestLoadGuardSurface() {
   BeginCase("load guard is a native selector in both Launch settings contexts");
-  for (const auto& panel : {std::string("settings_system_advanced_panel"), PausePanel("settings_system_advanced_panel")}) {
+  for (const auto& panel : {std::string("settings_launch_panel"), PausePanel("settings_launch_panel")}) {
     const auto rows = PageRows(panel);
     CHECK_EQ(std::count_if(rows.begin(), rows.end(), [](const auto& row) {
       return row == "settings_load_guard" || row.starts_with("settings_load_guard_");
@@ -3424,7 +3463,7 @@ void TestLoadGuardSurface() {
 void TestMusicNavigationSurface() {
   BeginCase("music navigation: live bindings, Add/Replace/Reset pages and both back targets");
   ConfigureMenu({});
-  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 5u);
+  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 3u);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
   const std::vector<std::string> actions{"settings_bind_music_next", "settings_bind_music_previous", "settings_bind_music_pause"};
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
@@ -3475,7 +3514,7 @@ void TestMusicNavigationSurface() {
   // Off must keep the identical tree, including the command page in both contexts.
   CHECK_EQ(PanelNames().size(), kExpectedPages);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
-  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 5u);
+  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 3u);
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
   CHECK_TRUE(PageRows(PausePanel("settings_interface_music_play_panel")) == actions);
   const auto before = dtb::Compile(roots);
@@ -3578,9 +3617,9 @@ void TestAchievementActionWording() {
   };
   CHECK_TRUE(label_for("settings_unlock_online") == "Unlock Online Achievements");
   CHECK_TRUE(label_for("settings_earn_achievements") == "Unlock Online Achievements");
-  CHECK_TRUE(label_for("settings_hide_achievements_on") == "Achievement Alerts: Hidden");
-  CHECK_TRUE(label_for("settings_hide_achievements_off") == "Achievement Alerts: Visible");
-  CHECK_TRUE(HelpTextFor("settings_hide_achievements").find("still earned and saved") !=
+  CHECK_TRUE(label_for("settings_hide_achievements_on") == "Show Achievements: On");
+  CHECK_TRUE(label_for("settings_hide_achievements_off") == "Show Achievements: Off");
+  CHECK_TRUE(HelpTextFor("settings_hide_achievements").find("earned and saved") !=
              std::string::npos);
 
   // The row's own caption still says what the grant does, and no surface spells the old wording.
@@ -3773,7 +3812,7 @@ void TestHiddenDisplayGroup() {
                            "graphics.vsync", "graphics.renderer", "guest.overscan"};
   ConfigureMenu(configuration);
   CHECK_TRUE(PageRows("settings_av_panel") ==
-             std::vector<std::string>({"settings_audio", "settings_graphics_menu"}));
+             std::vector<std::string>({"settings_audio", "settings_video_menu"}));
   CHECK_TRUE(PageRows("settings_display_panel").empty());
   CHECK_TRUE(PanelRowSymbols("settings_graphics_panel") ==
              std::vector<std::string>({"settings_aa", "settings_filtering", "settings_dof"}));
@@ -3793,7 +3832,7 @@ void TestGameplayMappingTreeAfterP4() {
   MenuConfiguration configuration;
   configuration.controller_layout_enabled = true;
   ConfigureMenu(configuration);
-  const auto controls = PanelRowSymbols("settings_controls_devices_panel");
+  const auto controls = PanelRowSymbols("settings_controls_panel");
   CHECK_TRUE(std::find(controls.begin(), controls.end(), "settings_controller_presets") != controls.end());
   CHECK_TRUE(std::find(controls.begin(), controls.end(), "settings_controls_layout") != controls.end());
   CHECK_TRUE(controls[0] == "settings_controls_layout");
@@ -4122,9 +4161,9 @@ void TestRhythmVerseRows() {
 
   // P9-3: the store submenu leads the five-row page in both contexts.
   const std::vector<std::string> expected_dlc = {
-      "settings_rhythmverse_menu", "settings_library_advanced"};
+      "settings_rhythmverse_menu", "settings_menu_music", "settings_labels_menu"};
   const std::vector<std::string> expected_store = {
-      "settings_rhythmverse", "settings_rhythmverse_filter"};
+      "settings_rhythmverse", "settings_mm_rhythmverse", "settings_rhythmverse_filter"};
   CHECK_TRUE(PanelRowSymbols("settings_dlc_panel") == expected_dlc);
   CHECK_TRUE(PanelRowSymbols("settings_rhythmverse_panel") == expected_store);
   // Pause twins are generated from these rows; verify their navigation declarations too.
@@ -4156,12 +4195,8 @@ void TestRhythmVerseRows() {
                                                    "settings_rv_keys"};
   CHECK_TRUE(filter == expected_filter);
 
-  // The two menu-music rows moved together, in the order they had on the parent page.
-  const std::vector<std::string> menu = PanelRowSymbols("settings_main_menu_extra_panel");
-  CHECK_EQ(menu.size(), 4u);
-  CHECK_TRUE(menu.size() == 4u && menu[0] == "settings_dlc_refresh" &&
-             menu[1] == "settings_play_current" && menu[2] == "settings_mm_download_content" &&
-             menu[3] == "settings_mm_rhythmverse");
+  CHECK_TRUE(PanelRowSymbols("settings_menu_music_panel") ==
+      std::vector<std::string>({"settings_dlc_menu_songs", "settings_music_player", "settings_music_navigation", "settings_play_current"}));
 
   // Both new pages have a screen in each context, so a song reaches them too.
   const std::vector<std::string> panels = PanelNames();
@@ -4169,8 +4204,8 @@ void TestRhythmVerseRows() {
              panels.end());
   CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_rhythmverse_filter_pause_panel") !=
              panels.end());
-  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_main_menu_extra_panel") != panels.end());
-  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_main_menu_extra_pause_panel") !=
+  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_menu_music_panel") != panels.end());
+  CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_menu_music_pause_panel") !=
              panels.end());
 
   // Text: the owner's spellings, and every drawn line within the measured 28-character budget.
@@ -4196,12 +4231,12 @@ void TestRhythmVerseRows() {
       guitar_on = true;
       CHECK_TRUE(label.second == "Guitar: On");
     }
-    if (label.first == "settings_main_menu_extra") {
+    if (label.first == "settings_menu_music") {
       menu_title = true;
-      CHECK_TRUE(label.second == "Music Shortcuts");
+      CHECK_TRUE(label.second == "Background Music");
     }
     if (label.first.rfind("settings_rhythmverse", 0) == 0 ||
-        label.first.rfind("settings_rv_", 0) == 0 || label.first == "settings_main_menu_extra") {
+        label.first.rfind("settings_rv_", 0) == 0 || label.first == "settings_menu_music") {
       CHECK_TRUE(label.second.size() <= 28u);
     }
   }
@@ -4563,13 +4598,13 @@ void TestControllerLayoutCatalogPage() {
 
   const auto panels = PanelNames();
   CHECK_TRUE(std::find(panels.begin(), panels.end(), "settings_controller_layout_panel") != panels.end());
-  const std::vector<std::string> expected = {"calibration", "settings_controls_devices", "settings_controls_touch"};
+  const std::vector<std::string> expected = {"settings_controls_layout", "settings_controller_presets", "settings_controls_interface", "settings_controls_gameplay", "settings_controls_touch"};
   CHECK_TRUE(PanelRowSymbols("settings_controls_panel") == expected);
   const std::vector<std::string> devices = {
       "settings_controls_layout", "settings_controller_presets",
-      "settings_controls_interface", "settings_controls_gameplay"};
-  CHECK_TRUE(PanelRowSymbols("settings_controls_devices_panel") == devices);
-  CHECK_TRUE(PanelRowSymbols("settings_controls_devices_pause_panel") == devices);
+      "settings_controls_interface", "settings_controls_gameplay", "settings_controls_touch"};
+  CHECK_TRUE(PanelRowSymbols("settings_controls_panel") == devices);
+  CHECK_TRUE(PanelRowSymbols("settings_controls_pause_panel") == devices);
   CHECK_TRUE(PanelRowSymbols("settings_touch_panel") == std::vector<std::string>({"settings_touch_buttons", "settings_touch_lane_swipe", "settings_touch_shake_deploy"}));
   CHECK_TRUE(PageRows("settings_touch_pause_panel") == PageRows("settings_touch_panel"));
   CHECK_TRUE(PageRows("settings_controls_pause_panel") ==
@@ -4615,13 +4650,13 @@ void TestControllerLayoutCatalogPage() {
                        "rbbz-settings/set/controller.scheme/t:retail") == current.end());
 
   ConfigureMenu(MenuConfiguration{});
-  CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 3u);
+  CHECK_EQ(PanelRowSymbols("settings_controls_panel").size(), 5u);
   configuration.hidden.insert("controller.touch_lane_swipe");
   configuration.hidden.insert("controller.touch_buttons");
   configuration.hidden.insert("controller.touch_shake_deploy");
   ConfigureMenu(configuration);
   CHECK_TRUE(PageRows("settings_controls_panel") ==
-             std::vector<std::string>({"calibration", "settings_controls_devices"}));
+             std::vector<std::string>({"settings_controls_layout", "settings_controller_presets", "settings_controls_interface", "settings_controls_gameplay"}));
   CHECK_TRUE(PageRows("settings_touch_panel").empty());
   ConfigureMenu(MenuConfiguration{});
   CHECK_TRUE(PanelRowSymbols("settings_layout_xbox_panel") ==
@@ -4800,6 +4835,7 @@ int main(int argc, char** argv) {
   TestShowHeadersRow();
   TestSettingsLabelsRow();
   TestMusicNavigationSurface();
+  TestFeatureTreeAndRestoreProfiles();
   TestLaunchSurface();
   TestLoadGuardSurface();
   TestAchievementActionWording();

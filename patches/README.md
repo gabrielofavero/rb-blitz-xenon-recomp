@@ -12,6 +12,22 @@ checkout.
 
 ## Patches
 
+`0088-windows-core-socket-dependency.patch` declares `ws2_32` as a public Windows
+rexcore dependency. The object library includes `socket_win.cpp`; consumers such
+as the iOS lifecycle and video-mode intent host tests otherwise fail to link
+`closesocket` and `ioctlsocket`. Existing application links already named this
+library. The dependency now propagates to every rexcore consumer. Added during
+the 2026-11-17 settings delivery's full Windows Release build.
+
+
+`0087-windows-vulkan-lifecycle-guard.patch` keeps the iOS queue lifecycle gate
+behind its platform preprocessor guard. Non-iOS SDK builds do not define
+`REX_PLATFORM_IOS` as a C++ value; patch 0078's unconditional ternary failed the
+Windows Release build at `vulkan_device.cpp`. Windows and other non-iOS builds
+continue passing a null gate to Queue. Added while validating the 2026-11-17
+settings reorganization; validation is recorded in the settings status document.
+
+
 `0086-macos-skipped-paint-recovery.patch` acknowledges a queued paint skipped
 while Cocoa reports the window hidden, minimized or occluded. Leaving the
 presenter's request pending made later guest frames coalesce into an event that

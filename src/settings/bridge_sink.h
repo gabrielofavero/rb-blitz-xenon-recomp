@@ -211,6 +211,7 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   bool last_commit_durable_ = false;
   uint64_t saved_revision_ = 0;
   bool last_commit_requires_restart_ = false;
+  std::string restore_profile_;  // guards retries against switching profiles mid-transaction
   bool restore_defaults_staged_ = false;
   bool last_commit_restored_defaults_ = false;
   // True while an `input.*` row is staged in the input store. A commit persists that store

@@ -17,13 +17,122 @@ controls remain available. Auto resolution follows the device's proportions at
 presentation. Service and menu host tests cover filtering; device
 UI layout is unverified. See [the iOS CLI guide](../../installer/ios/README.md).
 
-The iOS touch gameplay defaults are fixed and have no settings rows: left/right
+The initial iOS touch implementation had fixed defaults and no settings rows (superseded by the Touch page below): left/right
 half presses hit First/Second Note immediately, inverted horizontal swipes move
 one lane, and the top-right `||` touch overlay pauses. A wrong starting press is
 deferred until release and forgiven if its touch swipes. Missed chart notes retain
 their penalties. Mouse and controller bindings remain independent.
 
-## Current organization (2026-11-15)
+## Current organization (2026-11-17)
+
+[tree] The six root entries are Game, Calibration, Controls, Audio / Video,
+How to Play, and Credits. Every fixed page has at most six entries; installed
+layout catalogs retain More... pagination. `src/ui/settings_screen.cpp` owns the
+same tree in main-menu and in-song contexts.
+
+| Page | Entries in display order |
+| --- | --- |
+| Game | Startup; Achievements & Unlocks; Gameplay (Ultimate); Menus & Prompts; Extra Features; Restore Settings |
+| Startup | Game Version; Fast Boot (Off / On); DLC Loading Threads; Song Load Timeout |
+| Game Version | Rock Band Blitz; Rock Band Blitz Ultimate (when installed); Rock Band Blitz Demo |
+| Achievements & Unlocks | Unlock All (Ultimate); Unlock Online Achievements (Ultimate); Show Achievements (On / Off); Main Menu Shortcut |
+| Gameplay (Ultimate) | Camera Angle; Game Speed; HUD; Tracks & Gems; Scenery |
+| HUD | All HUD Elements; Score Goals; Song Progress; Player Feedback |
+| Score Goals | Gold Star Progress; Personal Best |
+| Song Progress | Song Progress Bar; Timer |
+| Player Feedback | Note Streak; Input Viewer |
+| Tracks & Gems | Precision Mode; Disable Random Track Wiggles; Gems |
+| Scenery | Disable Plots; Force Plot; Force Skybox |
+| Menus & Prompts | Main Menu; Library Display; Skip Offline Prompts |
+| Main Menu | Refresh Songs; Download Content; Leaderboards; Exit Game; Unlock Full Game |
+| Library Display | Messages; Recommendations; Coins & Blitz Cred |
+| Extra Features | RhythmVerse; Background Music; Settings Labels |
+| RhythmVerse | Store Access; Main Menu Shortcut; Filters |
+| Filters | Guitar; Bass; Drums; Vocals; Keys |
+| Background Music | Music Source (Default / Library); Music Player; Menu Music Navigation; Play Current Song |
+| Settings Labels | Enabled (On / Off); Size (Normal / Big / Biggest) |
+| Restore Settings | Recommended Settings; Vanilla Settings |
+| Calibration | Native calibration wizard and manual audio/video offset flow |
+| Controls | Layout; Controller Presets; Menu Bindings; Gameplay Bindings; Touch (mobile) |
+| Layout | Xbox; PlayStation; Nintendo Switch; Others, each with installed choices |
+| Menu Bindings | Navigation; Confirm; Go Back; Music Library Options; Background Music Play; Reset All |
+| Navigation | Up; Down; Left; Right |
+| Music Library Options | Search; Shortcuts; Sort; Previous Header; Next Header |
+| Background Music Play | Next Track; Previous Track; Play/Pause |
+| Gameplay Bindings | Notes; Move Lane; Pause & Power-up; Reset All |
+| Notes | First Note; Second Note |
+| Move Lane | Move Right; Move Left |
+| Pause & Power-up | Pause; Power-up |
+| Each individual binding | Add Key; Replace; Reset |
+| Touch (mobile) | Touch Buttons; Lane Swipe (Inverted / Normal); Shake to Deploy |
+| Audio / Video | Audio; Video |
+| Audio | Active Track Boost; Sound Effects Volume; Bass Boost |
+| Video | Display; Graphics |
+| Display | Window Mode; Orientation; Aspect Ratio; Render Scale; V-Sync; Overscan |
+| Graphics | Anti-Aliasing; Anisotropic Filtering; Depth of Field (Ultimate); Renderer (Windows with multiple backends) |
+| Anti-Aliasing | None; Native (2x); FXAA; FXAA Extreme, subject to backend capabilities |
+| How to Play | Basic Tutorial; Advanced Tutorial |
+| Credits | Native credits page |
+
+Controls has no Controller & Keyboard intermediary. Music and shortcut switches
+live beside their feature; native Audio has only its three audio controls. The
+old shortcut-group and Advanced intermediary pages are retired. Fast Boot retains
+`general.startup` tokens `normal` / `fast`; Show Achievements positively presents
+`general.hide_achievements`. All stored IDs and keys retain their meanings.
+Main Menu Shortcut and Play Current Song are short labels whose states fit the
+28-character limit. Exit Game visibility is editable on desktop and mobile,
+keeping its existing defaults (visible on desktop, hidden on mobile).
+
+On iOS, Window Mode, Aspect Ratio, Render Scale, V-Sync, Overscan, and Renderer
+remain hidden/fixed by device policy. Orientation stays available. Linux/macOS
+use Vulkan and hide Renderer. Empty authored groups are pruned. Edition rules
+still mark Download Content unavailable in Demo and Unlock Full Game unavailable
+in full. Live game/UI navigation of this reorganization is unverified.
+
+### Restore profiles
+
+Both choices open a guest confirmation with Cancel first and Apply Settings
+second. Browsing/cancelling saves nothing. Confirm uses the existing settings
+transaction, provider journal, project binding save, and restart prompt. The
+bridge actions are `settings.restore_recommended` and `settings.restore_vanilla`;
+`settings.restore_defaults` remains an alias for Recommended. Failed saves stay
+on the error/retry route; switching profiles during a pending retry is refused
+until the edit is cancelled.
+
+**Recommended Settings** restores exactly the defaults of a missing settings
+file: release-aware native defaults, the compatible installed Ultimate provider's
+initialization defaults and first-run target, and default project input bindings.
+Native preference keys are removed rather than copying current user values. On
+restart, the existing hardware-aware graphics recommendation fills missing keys,
+including Auto aspect/scale. Legacy preferences cannot replace restored values.
+External configuration/environment/command-line ownership remains authoritative.
+The existing one-shot fast route for a settings-triggered restart is retained;
+Fast Boot Off governs subsequent ordinary launches.
+
+**Vanilla Settings** starts with that default batch, then requests:
+
+| Area | Vanilla values |
+| --- | --- |
+| Game | Rock Band Blitz; Fast Boot Off; Song Load Timeout Off; Unlock All Off |
+| Display | Full Screen; Landscape; 16:9; 1x; V-Sync On |
+| Graphics | Native anti-aliasing/filtering, with supported recommended fallback if unavailable |
+| Main menu | Leaderboards, Achievements, Download Content, Exit Game visible; native upgrade rules; Refresh Songs, Play Current Song, RhythmVerse hidden |
+| Features | Default soundtrack; Music Player and Menu Music Navigation Off; RhythmVerse Store Access Off; Settings Labels Off; retail Xbox 360 layout |
+| Library and prompts | Messages and Recommendations hidden; native Coins & Blitz Cred visible; offline prompts and achievement popups shown |
+
+Platform restrictions take precedence (device aspect/1x on iOS, for example).
+Ultimate configuration may be reset while the base target is selected, but no
+achievement grant action is invoked. Both profiles preserve **native save data**,
+per the owner's clarification: audio levels, bass boost, overscan, calibration,
+native controller preset, scores, stars, and earned achievements. Project custom
+input bindings return to defaults. Vanilla retains compatibility/persistence
+fixes and the reorganized settings menu; unavailable Xbox LIVE services remain
+unavailable.
+
+See the [delivery validation](status.md#feature-focused-settings-and-restore-profiles-2026-11-17)
+for build/test evidence and owner UI checks.
+
+## Previous organization (2026-11-15; superseded above)
 
 The root shows Controls, Audio & Video, Gameplay, Interface, Library & Store, and
 System & Help. Gameplay appears only with Ultimate. Every page has at most six

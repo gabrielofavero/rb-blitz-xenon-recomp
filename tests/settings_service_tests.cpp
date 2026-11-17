@@ -346,7 +346,7 @@ void TestMobileDefaultsAndLaneSwipe() {
     desktop.Boot(nullptr, {}, nullptr);
     CHECK_FALSE(desktop.EffectiveValue(SettingId::kHideExitGame).boolean);
     CHECK_TRUE(desktop.DescriptorFor(SettingId::kTouchLaneSwipe)->availability == Availability::kHidden);
-    CHECK_TRUE(desktop.DescriptorFor(SettingId::kHideExitGame)->availability == Availability::kHidden);
+    CHECK_TRUE(desktop.DescriptorFor(SettingId::kHideExitGame)->availability == Availability::kVisible);
   }
 }
 
@@ -1464,9 +1464,103 @@ void TestIOSReleaseSettings() {
   }
 }
 
+void TestRestoreProfilesRoundTrip() {
+  BeginCase("Vanilla presentation persists, then Recommended restores all first-boot preferences");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  const auto release = schema::SettingsForRelease(schema::HostPlatform::kWindows, "test");
+  Service service(paths, release);
+  service.Boot(nullptr, {}, nullptr);
+  service.SetCapabilities(Capabilities());
+  FakeProvider provider;
+  service.SetProviderSink(&provider);
+  service.SetProviderDefaults({{SettingId::kHideHud, BoolV(false)}});
+  // The retail files are outside the settings transaction and must remain byte-identical.
+  const auto native_save = scratch.base / "local_save.bin";
+  const auto console_save = scratch.base / "globaloptions";
+  WriteFile(native_save, "scores, stars, achievements and controller preset");
+  WriteFile(console_save, "calibration, audio and overscan");
+  const auto vanilla = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageRestore(vanilla, Service::RestoreProfile::kVanilla).ok);
+  CHECK_TRUE(service.RequestedValue(SettingId::kRhythmVerse).boolean); // staged, not saved
+  service.Cancel(vanilla);
+  CHECK_TRUE(service.RequestedValue(SettingId::kRhythmVerse).boolean);
+  const auto apply = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageRestore(apply, Service::RestoreProfile::kVanilla).ok);
+  CHECK_TRUE(service.Commit(apply).status == CommitStatus::kSaved);
+  Service reloaded(paths, release);
+  reloaded.Boot(nullptr, {}, nullptr);
+  reloaded.SetCapabilities(Capabilities());
+  for (const auto id : {SettingId::kRhythmVerse, SettingId::kDlcMenuSongs,
+      SettingId::kMusicPlayer, SettingId::kBackgroundMusicNavigation, SettingId::kPlayCurrentSong,
+      SettingId::kRefreshMusicLibrary, SettingId::kShowMessages, SettingId::kShowRecommendations,
+      SettingId::kSettingsLabels, SettingId::kHideOfflinePrompts,
+      SettingId::kHideAchievements, SettingId::kHideDownloadContent}) {
+    CHECK_FALSE(reloaded.RequestedValue(id).boolean);
+  }
+  CHECK_FALSE(reloaded.RequestedValue(SettingId::kHideExitGame).boolean);
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kShowCurrency).boolean);
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kVsync).boolean);
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kTarget).text == "common");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kStartup).text == "normal");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kDisplay).text == "fullscreen");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kOrientation).text == "landscape");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kAspectRatio).text == "16:9");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kRenderScale).text == "1x");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kAntiAliasing).text == "native");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kFiltering).text == "native");
+  const auto hidden = reloaded.RequestedValue(SettingId::kHiddenMainMenu).list;
+  CHECK_TRUE(hidden == std::vector<std::string>({"rbbz_rhythmverse"}));
+
+  const auto repeat = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageRestore(repeat, Service::RestoreProfile::kVanilla).ok);
+  CHECK_TRUE(service.Commit(repeat).status == CommitStatus::kNoChanges);
+  CHECK_FALSE(service.RequestedValue(SettingId::kRhythmVerse).boolean);
+  CHECK_TRUE(service.RequestedValue(SettingId::kAspectRatio).text == "16:9");
+
+  const auto recommended = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageRestore(recommended, Service::RestoreProfile::kRecommended).ok);
+  CHECK_TRUE(service.Commit(recommended).status == CommitStatus::kSaved);
+  // A missing settings file is the native default source; installed Ultimate supplies its
+  // own provider defaults and selects the same first-run target as the launcher policy.
+  for (const auto& descriptor : service.descriptors()) {
+    if (descriptor.widget == WidgetKind::kAction || descriptor.provider == Provider::kUltimate) continue;
+    const auto actual = service.RequestedValue(descriptor.id);
+    CHECK_TRUE(descriptor.id == SettingId::kTarget ? actual.text == "ultimate"
+        : ValueEquals(actual, descriptor.compiled_default));
+  }
+  std::ifstream player(native_save, std::ios::binary), console(console_save, std::ios::binary);
+  CHECK_TRUE(std::string(std::istreambuf_iterator<char>(player), {}) == "scores, stars, achievements and controller preset");
+  CHECK_TRUE(std::string(std::istreambuf_iterator<char>(console), {}) == "calibration, audio and overscan");
+}
+
+void TestVanillaRespectsOverridesAndRelease() {
+  BeginCase("Vanilla honors external ownership and mobile display constraints; Exit is editable everywhere");
+  for (const auto platform : {schema::HostPlatform::kWindows, schema::HostPlatform::kLinux,
+      schema::HostPlatform::kMacOS, schema::HostPlatform::kIOS, schema::HostPlatform::kAndroid}) {
+    Scratch scratch;
+    Service service(Paths(scratch), schema::SettingsForRelease(platform, "test"));
+    service.Boot(nullptr, {}, nullptr);
+    service.SetCapabilities(Capabilities());
+    CHECK_TRUE(service.DescriptorFor(SettingId::kHideExitGame)->availability == Availability::kVisible);
+    service.SetOverrides({{SettingId::kSettingsLabels, BoolV(true)}}, {{SettingId::kSettingsLabels, Source::kCommandLine}});
+    const auto txn = service.BeginEdit(service.revision());
+    CHECK_TRUE(service.StageRestore(txn, Service::RestoreProfile::kVanilla).ok);
+    CHECK_TRUE(service.Commit(txn).status == CommitStatus::kSaved);
+    CHECK_TRUE(service.EffectiveValue(SettingId::kSettingsLabels).boolean);
+    CHECK_FALSE(service.store().document().values.contains(SettingId::kSettingsLabels));
+    if (platform == schema::HostPlatform::kIOS) {
+      CHECK_TRUE(service.EffectiveValue(SettingId::kAspectRatio).text == "auto");
+      CHECK_TRUE(service.EffectiveValue(SettingId::kRenderScale).text == "1x");
+    }
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  TestRestoreProfilesRoundTrip();
+  TestVanillaRespectsOverridesAndRelease();
   TestControllerSchemeRoundTrip();
   TestCommitRevalidatesCurrentCatalogAndOverride();
   TestStartupRoundTrip();

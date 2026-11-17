@@ -14,8 +14,8 @@
 //
 //   * the screen's name and the focused component's name are read from the guest objects;
 //   * the selected row is the focused list's logical index, which is also the order the retail
-//     record fills its list with - `av_options`' `checkbox.lst` is `set_data (av_overscan
-//     av_active_track_volume av_sound_volume av_bass_boost)`, `tutorials`' `options.lst` is the
+//     record fills its list with - the patched Audio page has `av_active_track_volume`,
+//     `av_sound_volume`, and `av_bass_boost`; `tutorials`' `options.lst` is the
 //     two-element `tutorial_list`, and the in-song pause list is the merged root's own rows;
 // Controller Presets is deliberately caption-free and keeps its native instructions.
 //

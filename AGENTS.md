@@ -1,5 +1,9 @@
 # User preferences
 
+- Keep documentation, code comments, and other project text focused on functionality,
+  behavior, and technical rationale. Do not quote user prompts, reference prompt
+  identifiers such as P1 or P2, attribute changes to owner requests, or mention AI
+  involvement unless that information is necessary to explain the functionality.
 - Before testing behavior by navigating the game or driving its UI (manually or
   through automation), ask whether the user wants to perform the test themselves.
   Wait for their answer before driving the UI. This does not block independent

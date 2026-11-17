@@ -1,5 +1,14 @@
 # The main menu — option list, labels, offline prompts, refresh row, background music
 
+2026-11-17 [tree]: shortcut visibility now lives in Game > Menus & Prompts > Main
+Menu, except Achievements (Achievements & Unlocks), RhythmVerse (Extra Features >
+RhythmVerse), and Play Current Song (Extra Features > Background Music). Exit Game
+visibility is editable on every platform, keeping existing defaults. Recommended
+restores first-boot visibility; Vanilla shows retail shortcuts, hides port-only
+entries, disables RhythmVerse/library music, and restores offline prompts. Native
+saves are preserved. See [the settings tree](../settings/menu.md#current-organization-2026-11-17).
+Live navigation of the new tree is unverified.
+
 Current refresh behavior is described under **At a glance**. Dated R7 sections
 below retain the old persisted-cache and sentinel measurements as history.
 

@@ -50,7 +50,7 @@ enum class CatalogueFetchState { kIdle, kFetching, kReady, kFailed };
 // The empty state: the catalogue answered, and nothing survived the filter. The sentence names
 // where the filter lives, because that is the only thing the player can change.
 inline constexpr char kCatalogueEmptyText[] =
-    "RhythmVerse has no offers for this filter. Change it in Help & Options, Downloadable Content.";
+    "RhythmVerse has no offers for this filter. Change Filters in Help & Options > Game > Extra Features > RhythmVerse.";
 
 // The diagnostics state (`--store_catalogue_off`): the store is honest about why it is empty.
 inline constexpr char kCatalogueDisabledText[] =

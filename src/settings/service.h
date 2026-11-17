@@ -122,7 +122,12 @@ class Service {
   uint64_t BeginEdit(uint64_t base_revision);
   ValidationResult Set(uint64_t txn, SettingId id, const Value& value,
                        uint64_t capability_revision);
-  ValidationResult StageDefaults(uint64_t txn);
+  enum class RestoreProfile { kRecommended, kVanilla };
+  // Presets affect project settings only; native console/player saves are untouched.
+  ValidationResult StageRestore(uint64_t txn, RestoreProfile profile);
+  ValidationResult StageDefaults(uint64_t txn) {
+    return StageRestore(txn, RestoreProfile::kRecommended);
+  }
   Value CancelField(uint64_t txn, SettingId id);
   CommitResult Commit(uint64_t txn);
   void Cancel(uint64_t txn);

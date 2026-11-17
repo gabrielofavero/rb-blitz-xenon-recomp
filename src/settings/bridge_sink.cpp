@@ -446,6 +446,9 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kCancelEdit: {
+      restore_profile_.clear();
+      restore_defaults_staged_ = false;
+      last_commit_restored_defaults_ = false;
       linked_plan_.reset();
       edit_failed_ = false;
       staged_.clear();
@@ -661,8 +664,12 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
       break;
     }
     case bridge::Op::kInvoke: {
-      if (request.setting == "settings.restore_defaults") {
-        if (txn_ != 0 && last_commit_restored_defaults_ && !edit_failed_) {
+      if (request.setting == "settings.restore_defaults" ||
+          request.setting == "settings.restore_recommended" ||
+          request.setting == "settings.restore_vanilla") {
+        const std::string profile = request.setting == "settings.restore_vanilla" ? "vanilla" : "recommended";
+        if (txn_ != 0 && last_commit_restored_defaults_ && !edit_failed_ &&
+            restore_profile_ == profile) {
           restore_defaults_staged_ = true;
           response.message = "default settings ready to retry";
           break;
@@ -679,7 +686,8 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
           edit_failed_ = true;
           break;
         }
-        const ValidationResult staged = service_->StageDefaults(txn_);
+        const ValidationResult staged = service_->StageRestore(txn_, profile == "vanilla"
+            ? Service::RestoreProfile::kVanilla : Service::RestoreProfile::kRecommended);
         if (!staged.ok) {
           status = Status::kInvalid;
           response.message = staged.reason_key;
@@ -716,8 +724,9 @@ bridge::Response ServiceSink::Handle(const bridge::Request& request) {
           if (status == Status::kOk) input_staged_ = input_changed;
         }
         if (status != Status::kOk) break;
+        restore_profile_ = profile;
         restore_defaults_staged_ = true;
-        response.message = "default settings staged";
+        response.message = profile + " settings staged";
         break;
       }
       constexpr std::string_view preview_prefix = "display.preview.";
@@ -1200,6 +1209,7 @@ void ServiceSink::Reset() {
   last_commit_durable_ = false;
   saved_revision_ = 0;
   last_commit_requires_restart_ = false;
+  restore_profile_.clear();
   restore_defaults_staged_ = false;
   last_commit_restored_defaults_ = false;
   restart_pending_ = false;

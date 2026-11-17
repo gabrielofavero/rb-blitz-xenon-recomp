@@ -194,6 +194,28 @@ void TestRestoreDefaultsConfirmationAction() {
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kVsync).boolean);
 }
 
+void TestNamedRestoreProfiles() {
+  BeginCase("named restore profiles stage without saving, cancel cleanly, and save with a restart");
+  Harness h;
+  const auto before = ReadText(h.paths.settings_file);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/settings.restore_vanilla/-").status == Status::kOk);
+  CHECK_TRUE(ReadText(h.paths.settings_file) == before);
+  CHECK_TRUE(h.Send("rbbz-settings/cancel/-/-").status == Status::kOk);
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kRhythmVerse).boolean);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/settings.restore_recommended/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/settings.restore_vanilla/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.sink.last_commit_restored_defaults());
+  CHECK_TRUE(h.sink.last_commit_requires_restart());
+  CHECK_FALSE(h.service.RequestedValue(SettingId::kRhythmVerse).boolean);
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kAspectRatio).text == "16:9");
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/settings.restore_recommended/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kRhythmVerse).boolean);
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kAspectRatio).text == "auto");
+}
+
 void TestRestoreDefaultsRetryAfterConflict() {
   BeginCase("a conflicted default restore can be confirmed again and retried");
   Harness h;
@@ -883,6 +905,7 @@ void TestDisplayPreviewPersistsOnlyOnKeep() {
 
 int main() {
   TestRestoreDefaultsConfirmationAction();
+  TestNamedRestoreProfiles();
   TestRestoreDefaultsRetryAfterConflict();
   TestLinkedMusicConfirmCancelAndReenable();
   TestLinkedStore();

@@ -301,7 +301,7 @@ inline constexpr char kSearchTooShort[] =
 inline constexpr char kSearchRetryHint[] =
     "Try just the artist name or just the song title.";
 inline constexpr char kSearchDisabled[] =
-    "RhythmVerse is switched off. Turn it on in Help & Options, Downloadable Content.";
+    "RhythmVerse is switched off. Enable Store Access in Help & Options > Game > Extra Features > RhythmVerse.";
 // The route from an answer to the browser: the keyboard closes onto the same store menu, so the
 // Search row the player just used asks for the page the answer fills.
 inline constexpr char kSearchListHint[] = "Press Search to list them.";
