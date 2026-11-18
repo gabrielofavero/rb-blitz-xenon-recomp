@@ -83,5 +83,38 @@ class ReportTests(unittest.TestCase):
         self.assertIn('unresolved', report['long_frames'][0]['assessment'])
 
 
+class CaptureArgumentsTests(unittest.TestCase):
+    def arguments(self, extra):
+        args = type("CaptureArgs", (), dict(game=Path("game"), backend="vulkan",
+                    variant="ultimate", game_arg=extra))()
+        return trace.capture_arguments(Path("rb_blitz.exe"), args, Path("run"), Path("run/cache"))
+
+    def test_default_log_level_is_exactly_one_info_option(self):
+        argv = self.arguments([])
+        self.assertEqual([arg for arg in argv if arg.startswith("--log_level")], ["--log_level=info"])
+        self.assertIn("--game_data_root=game", argv)
+        self.assertIn("--ultimate_mode=1", argv)
+
+    def test_explicit_level_replaces_default_without_changing_other_arguments(self):
+        extra = ["--probe_framerate=true", "--log_level=debug", "--vsync=true"]
+        argv = self.arguments(extra)
+        self.assertEqual([arg for arg in argv if arg.startswith("--log_level")], ["--log_level=debug"])
+        self.assertEqual(argv[-len(extra):], extra)
+        self.assertIn("--game_data_root=game", argv)
+        self.assertIn("--log_file="+str(Path("run/game.log")), argv)
+
+    def test_duplicate_or_malformed_explicit_log_levels_are_rejected(self):
+        for extra in (["--log_level=info", "--log_level=debug"],
+                      ["--log_level=debug", "--log_level=debug"], ["--log_level"],
+                      ["--log_level="], ["--log_level=debug=info"], ["--log_level=debug info"]):
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, "at most one"):
+                self.arguments(extra)
+
+    def test_protected_capture_paths_remain_unconditionally_rejected(self):
+        for option in ("--cache_root", "--user_data_root", "--launcher_profile", "--log_file"):
+            with self.subTest(option=option), self.assertRaisesRegex(ValueError, "isolated"):
+                self.arguments(["--log_level=debug", option+"=other"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -43,6 +43,25 @@ def run_dir(name):
     return RUNS / name
 
 
+def capture_arguments(exe, args, run, cache):
+    """Build one scalar log-level option while preserving isolated capture roots."""
+    extra = list(args.game_arg)
+    protected = ("--cache_root", "--user_data_root", "--launcher_profile", "--log_file")
+    if any(arg.startswith(protected) for arg in extra):
+        raise ValueError("extra arguments cannot override isolated cache/save/profile/log roots")
+    levels = [arg for arg in extra if arg.startswith("--log_level")]
+    if len(levels) > 1 or any(not re.fullmatch(r"--log_level=[A-Za-z][A-Za-z0-9_-]*", arg) for arg in levels):
+        raise ValueError("provide at most one log level as --log_level=VALUE")
+    argv = [str(exe), f"--game_data_root={args.game}", f"--user_data_root={run / 'user-data'}",
+            f"--launcher_profile={run / 'launcher.toml'}", f"--cache_root={cache}",
+            f"--gpu_backend={args.backend}", f"--ultimate_mode={1 if args.variant == 'ultimate' else 0}",
+            "--shader_compile_trace=true"]
+    if not levels:
+        argv.append("--log_level=info")
+    argv.append(f"--log_file={run / 'game.log'}")
+    return argv + extra
+
+
 def prepare(args):
     run = run_dir(args.name)
     if run.exists():
@@ -108,15 +127,7 @@ def prepare(args):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
     # Cache and save overrides are explicit; they outrank paths.toml/profile values.
-    argv = [str(exe), f"--game_data_root={args.game}", f"--user_data_root={run / 'user-data'}",
-            f"--launcher_profile={run / 'launcher.toml'}", f"--cache_root={cache}",
-            f"--gpu_backend={args.backend}", f"--ultimate_mode={1 if args.variant == 'ultimate' else 0}",
-            "--shader_compile_trace=true", "--log_level=info", f"--log_file={run / 'game.log'}"]
-    argv.extend(args.game_arg)
-    # Extra flags must not silently redirect the safety boundaries of the experiment.
-    protected = ("--cache_root", "--user_data_root", "--launcher_profile", "--log_file")
-    if any(a.startswith(protected) for a in args.game_arg):
-        raise ValueError("extra arguments cannot override isolated cache/save/profile/log roots")
+    argv = capture_arguments(exe, args, run, cache)
     headers = {str(p.relative_to(args.game)): digest(p) for p in
                [args.game / "gen/main_xbox.hdr", args.game / "gen/patch_xbox.hdr",
                 args.game / "ultimate/gen/patch_xbox.hdr"] if p.is_file()}
