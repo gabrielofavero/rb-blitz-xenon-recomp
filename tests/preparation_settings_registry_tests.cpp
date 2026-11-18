@@ -55,7 +55,26 @@ class RegistryApp final : public rex::app::App {
         (*update_root).GetLayer() == SettingLayer::kFile;
     REX_TRY_VOID(registry.SetText(SettingLayer::kTitle,"native_pipeline_cache","false"));
     REX_TRY_VOID(registry.SetText(SettingLayer::kTitle,"vulkan_shared_memory_upload_batching","false"));
+    BeginCase("Graphics preferences queue before the Xenos owner registers");
+    for (const auto& [name, value] : std::initializer_list<std::pair<const char*, const char*>>{
+         {"native_2x_msaa", "false"}, {"swap_post_effect", "fxaa"},
+         {"gpu.xenos.present_source_aspect", "true"}}) {
+      CHECK_FALSE(InspectRuntimeSetting(name).registered);
+      CHECK_TRUE(WriteRuntimeSetting(name, value, SettingLayer::kTitle).state ==
+                 RuntimeSettingWrite::kDeferred);
+    }
     REX_TRY_VOID(registry.Register(xenos));
+    BeginCase("Queued graphics preferences become active before startup freezes");
+    for (const auto& [name, value] : std::initializer_list<std::pair<const char*, const char*>>{
+         {"native_2x_msaa", "false"}, {"swap_post_effect", "fxaa"},
+         {"gpu.xenos.present_source_aspect", "true"}}) {
+      const auto actual = InspectRuntimeSetting(name);
+      CHECK_TRUE(actual.registered);
+      CHECK_TRUE(actual.active_value == value);
+      CHECK_TRUE(actual.staged_value == value);
+      CHECK_TRUE(actual.staged_source == SettingLayer::kTitle);
+      CHECK_FALSE(actual.restart_pending);
+    }
     REX_TRY_VOID(registry.Register(d3d12));
     REX_TRY_VOID(registry.Register(vulkan));
     late_aliases_applied = !xenos.native_pipeline_cache.Get() && !vulkan.shared_memory_upload_batching.Get();

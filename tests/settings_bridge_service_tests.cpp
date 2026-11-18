@@ -197,6 +197,9 @@ void TestRestoreDefaultsConfirmationAction() {
 void TestNamedRestoreProfiles() {
   BeginCase("named restore profiles stage without saving, cancel cleanly, and save with a restart");
   Harness h;
+  CapabilitySnapshot caps;
+  caps.primary_display_size = {1920, 1080};
+  h.service.SetCapabilities(caps);
   const auto before = ReadText(h.paths.settings_file);
   CHECK_TRUE(h.Send("rbbz-settings/invoke/settings.restore_vanilla/-").status == Status::kOk);
   CHECK_TRUE(ReadText(h.paths.settings_file) == before);
@@ -209,11 +212,11 @@ void TestNamedRestoreProfiles() {
   CHECK_TRUE(h.sink.last_commit_restored_defaults());
   CHECK_TRUE(h.sink.last_commit_requires_restart());
   CHECK_FALSE(h.service.RequestedValue(SettingId::kRhythmVerse).boolean);
-  CHECK_TRUE(h.service.RequestedValue(SettingId::kAspectRatio).text == "16:9");
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kInterfaceResolution).text == "1280x720");
   CHECK_TRUE(h.Send("rbbz-settings/invoke/settings.restore_recommended/-").status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
   CHECK_TRUE(h.service.RequestedValue(SettingId::kRhythmVerse).boolean);
-  CHECK_TRUE(h.service.RequestedValue(SettingId::kAspectRatio).text == "auto");
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kInterfaceResolution).text == "native");
 }
 
 void TestRestoreDefaultsRetryAfterConflict() {

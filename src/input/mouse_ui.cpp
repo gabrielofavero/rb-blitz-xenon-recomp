@@ -6,6 +6,7 @@
 #include "input/source_gates.h"
 #include "input/title_input.h"
 #include "input/touch_controls.h"
+#include "hooks/render_settings.h"
 #include "ui/menu_music_player.h"
 
 #include <cstring>
@@ -309,9 +310,13 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
 
   std::optional<MenuPoint> Point(const rex::InputEvent& e, bool clip = true) const {
     if (!ui_.HasWindow()) return {};
+    const bool source_aspect = rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_source_aspect");
+    const int frame_height = rb_blitz::settings::BootRenderHeight();
+    const int frame_width = rb_blitz::settings::BootRenderWidth();
     auto p = MenuPointer(float(e.x), float(e.y),
         Width(), Height(),
-        rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_width"), rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_height"),
+        source_aspect ? (frame_width ? frame_width : frame_height * 16 / 9) : rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_width"),
+        source_aspect ? frame_height : rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_height"),
         rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_letterbox"), rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_allow_overscan_cutoff"),
         rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_x"), rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_y"));
     if (!std::isfinite(p.x) || !std::isfinite(p.y) ||

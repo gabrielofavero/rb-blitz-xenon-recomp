@@ -38,6 +38,7 @@
 #include <rex/platform.h>
 #include "settings/runtime_values.h"
 #include "settings/graphics_settings.h"
+#include "settings/resolution_profiles.h"
 #include <rex/logging/log_category.h>
 #include <rex/platform/dynlib.h>
 
@@ -540,7 +541,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
         if (!saved.errors.empty()) diagnostics_.push_back(saved.errors.front());
       }
     }
-    // The legacy resolution value remains the internal, exact pixel plan used
+    // The legacy resolution value remains the internal pixel plan used
     // by the renderer/recovery journal. Only the two new preferences choose it.
 #if defined(RB_BLITZ_IOS)
     const auto aspect = service_->EffectiveValue(SettingId::kAspectRatio);
@@ -560,6 +561,19 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     if (!plan.supported) plan = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
                                                    "auto", 1, orientation.text);
     if (plan.supported) {
+      auto native = capability_snapshot_.primary_display_size;
+      if (native.width <= 0 || native.height <= 0) native = {1280, 720};
+      auto landscape = native;
+      if (landscape.width < landscape.height) std::swap(landscape.width, landscape.height);
+      profile_draw_scale_ = std::max((landscape.width + 1919) / 1920,
+                                     (landscape.height + 719) / 720);
+      const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings().platform);
+      const auto profile_pixels = mobile
+          ? ScaledProfileResolution(native, service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
+          : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text, native);
+      const auto profile_plan = ProfileGuestFrame(profile_pixels, profile_draw_scale_);
+      if (profile_plan.supported) plan = profile_plan;
+      else profile_draw_scale_ = 0;
       Value pixels; pixels.kind = ValueKind::kResolution;
       pixels.width = plan.guest_size.width * plan.draw_scale;
       pixels.height = plan.guest_size.height * plan.draw_scale;
@@ -579,6 +593,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     GraphicsValues wanted;
     GraphicsValues attempt;
     for (const SettingId id : {SettingId::kRenderer, SettingId::kResolution,
+                               SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
+                               SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale,
                                SettingId::kOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
                                SettingId::kAntiAliasing, SettingId::kFiltering}) {
       wanted[id] = service_->RequestedValue(id);
@@ -598,6 +614,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     safe_values[SettingId::kOrientation] = safe_orientation;
     safe_values[SettingId::kAspectRatio] = safe_aspect;
     safe_values[SettingId::kRenderScale] = safe_scale;
+    AddSafeResolutionProfiles(safe_values, capability_snapshot_.primary_display_size);
     auto selected = graphics_boot_.Select(wanted, attempt, safe_values, forced_safe);
     if (graphics_boot_.retrying()) {
       diagnostics_.push_back(
@@ -611,7 +628,20 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
       }
       // Internal pixel plans may exceed the display's old preset offer gate.
       // Rebuild them from recovered controls rather than clamping their shape.
-      if (selected.contains(SettingId::kAspectRatio) && selected.contains(SettingId::kRenderScale)) {
+      if (profile_draw_scale_) {
+        const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings().platform);
+        const auto native = capability_snapshot_.primary_display_size;
+        const auto pixels = mobile
+            ? ScaledProfileResolution(native, selected.at(SettingId::kInterfaceRenderScale).integer)
+            : ProfileResolution(selected.at(SettingId::kInterfaceResolution).text, native);
+        const auto recovered = ProfileGuestFrame(pixels, profile_draw_scale_);
+        if (recovered.supported) {
+          auto& value = selected[SettingId::kResolution];
+          value.kind = ValueKind::kResolution;
+          value.width = recovered.guest_size.width * recovered.draw_scale;
+          value.height = recovered.guest_size.height * recovered.draw_scale;
+        }
+      } else if (selected.contains(SettingId::kAspectRatio) && selected.contains(SettingId::kRenderScale)) {
         const auto token = selected.at(SettingId::kRenderScale).text;
         const int recovered_scale = token.size() == 2 ? token[0] - '0' : 1;
         const auto recovered = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
@@ -775,7 +805,8 @@ void SettingsBoot::ApplyRow(const SettingId id, const bool defer_unregistered) {
       return;
     }
     case SettingId::kResolution: {
-      screen_plan_ = PlanGuestScreen(render_limits_, {value.width, value.height});
+      screen_plan_ = profile_draw_scale_ ? ProfileGuestFrame({value.width, value.height}, profile_draw_scale_)
+                                         : PlanGuestScreen(render_limits_, {value.width, value.height});
       if (screen_plan_.supported) {
         ApplyCvars({{"gpu.resolution_scale_x", std::to_string(screen_plan_.draw_scale)},
                     {"gpu.resolution_scale_y", std::to_string(screen_plan_.draw_scale)}}, id,
@@ -846,7 +877,9 @@ void SettingsBoot::ApplyCvars(const std::vector<CvarAssignment>& assignments, co
 
 bool SettingsBoot::WriteCvar(const std::string& name, const std::string& value, const SettingId id) {
   const auto result=WriteRuntimeSetting(name,value,rex::SettingLayer::kTitle);
-  if (!result.accepted() || result.state==RuntimeSettingWrite::kDeferred) return false;
+  if (!result.accepted()) return false;
+  // Late GPU owners replay queued title values when they register. Keep their
+  // ownership record too; FinishInit verifies the active value after replay.
   if (id != SettingId::kUnknown) {
     applied_.push_back(Applied{id, name, value, false});
   }
@@ -923,12 +956,17 @@ void SettingsBoot::ApplyWindowPolicy() {
     REXLOG_INFO("settings_boot: no render plan this boot; the window keeps the title's own size");
     return;
   }
-  const DisplayMode source{screen_plan_.guest_size.width * screen_plan_.draw_scale,
-                           screen_plan_.guest_size.height * screen_plan_.draw_scale};
+  DisplayMode source{screen_plan_.guest_size.width * screen_plan_.draw_scale,
+                     screen_plan_.guest_size.height * screen_plan_.draw_scale};
+  // Render profiles only change the picture inside the window. Seed the
+  // startup window from the display, independently of the selected profile.
+  if (profile_draw_scale_ && capability_snapshot_.primary_display_size.width > 0 &&
+      capability_snapshot_.primary_display_size.height > 0) {
+    source = capability_snapshot_.primary_display_size;
+    if (source.width < source.height) std::swap(source.width, source.height);
+  }
   const bool portrait = BootPortraitWidth() != 0;
-  const DisplayMode render = portrait
-      ? DisplayMode{int32_t(BootPortraitWidth()) * screen_plan_.draw_scale,
-                    int32_t(BootPortraitHeight()) * screen_plan_.draw_scale} : source;
+  const DisplayMode render = portrait ? PortraitCropSize(source) : source;
 
   // The presenter derives the shape of its output region from the *video mode* aspect, not from the
   // frame's (docs/settings/graphics.md part 1 ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§3), so a size the title would not have chosen has to
@@ -1004,10 +1042,10 @@ void SettingsBoot::ApplyWindowPolicy() {
     }
   }
 
-  // One size, decided here: the window is a picture, and dragging it into a shape the render size
-  // cannot fill is exactly the distortion this project removed. The separate Controller Settings
-  // utility builds its own SDL window (controller-settings/main.cpp) and never reads this cvar.
-  WriteWindowCvar("window_resizable", "false");
+  // The presenter preserves the frame's aspect inside a freely resizable client area.
+  const auto resize_source = InspectRuntimeSetting("window_resizable").staged_source;
+  if (resize_source <= rex::SettingLayer::kFile)
+    WriteRuntimeSetting("window_resizable", "true", rex::SettingLayer::kRuntime);
   // The aspect the window shows and the aspect the render size has must be the same, or the
   // presenter letterboxes what it was handed. Stated rather than assumed, so a mismatch is a log
   // line and not a screenshot somebody has to interpret.
@@ -1117,8 +1155,9 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
   }
   deferred_writes_.clear();
   if (rb_blitz::settings::title::settings_safe_graphics.Get()) {
+    const auto safe_draw_scale = std::to_string(profile_draw_scale_ ? profile_draw_scale_ : 1);
     for (const auto& [name, value] : std::map<std::string, std::string>{
-        {"gpu.resolution_scale_x", "1"}, {"gpu.resolution_scale_y", "1"}, {"native_2x_msaa", "false"},
+        {"gpu.resolution_scale_x", safe_draw_scale}, {"gpu.resolution_scale_y", safe_draw_scale}, {"native_2x_msaa", "false"},
         {"swap_post_effect", "none"}, {"anisotropic_override", "-1"}})
       WriteRuntimeSetting(name, value, rex::SettingLayer::kRuntime);
 #if defined(RB_BLITZ_IOS)
@@ -1126,6 +1165,13 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
 #else
     screen_plan_ = PlanGuestScreen(render_limits_, {1280, 720});
 #endif
+    if (profile_draw_scale_ && service_) {
+      const auto native = capability_snapshot_.primary_display_size;
+      const auto pixels = schema::IsMobile(schema::CurrentReleaseSettings().platform)
+          ? ScaledProfileResolution(native, service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
+          : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text, native);
+      screen_plan_ = ProfileGuestFrame(pixels, profile_draw_scale_);
+    }
     overrides_.erase(SettingId::kResolution);
     if (service_) {
       auto safe = RecoverGraphics(capability_snapshot_, service_->RequestedValue(SettingId::kResolution),
@@ -1137,6 +1183,11 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
         safe.resolution.height = screen_plan_.guest_size.height;
       }
 #endif
+      if (profile_draw_scale_ && screen_plan_.supported) {
+        safe.resolution.kind = ValueKind::kResolution;
+        safe.resolution.width = screen_plan_.guest_size.width * screen_plan_.draw_scale;
+        safe.resolution.height = screen_plan_.guest_size.height * screen_plan_.draw_scale;
+      }
       service_->SetBootValues({{SettingId::kResolution, safe.resolution}, {SettingId::kRenderer, safe.renderer},
           {SettingId::kAntiAliasing, safe.anti_aliasing}, {SettingId::kFiltering, safe.filtering}},
           "settings.graphics.safe_mode");
@@ -1184,6 +1235,15 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     if (service_) service_->SetOverrides(override_values_, overrides_);
   }
   if (screen_plan_.supported) {
+    if (profile_draw_scale_ && service_) {
+      std::map<SettingId, Value> profiles;
+      for (const auto id : {SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
+                            SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale})
+        profiles[id] = service_->EffectiveValue(id);
+      ConfigureResolutionProfiles(capability_snapshot_.primary_display_size, screen_plan_.draw_scale,
+          schema::IsMobile(schema::CurrentReleaseSettings().platform), profiles);
+      WriteRuntimeSetting("gpu.xenos.present_source_aspect", "true", rex::SettingLayer::kTitle);
+    }
     // Both halves of the guest size, because the title derives its width from its height and
     // the aspect the user picked is not one the title can compute (src/hooks/render_settings.h).
     SetBootRenderFrame(screen_plan_.guest_size.width, screen_plan_.guest_size.height);
@@ -1206,6 +1266,8 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
   if (service_) {
     GraphicsValues effective;
     for (const auto id : {SettingId::kRenderer, SettingId::kResolution,
+                          SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
+                          SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale,
                           SettingId::kOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
                           SettingId::kAntiAliasing, SettingId::kFiltering})
       effective[id] = service_->EffectiveValue(id);
@@ -1441,6 +1503,19 @@ void SettingsBoot::FinishInit() {
       schema::ParseTokenToValue(descriptor, InspectRuntimeSetting(names.front()).active_value, &value);
     }
     override_values_[id] = std::move(value);
+  }
+  // Startup configuration selects the initial native mode. The guest preview
+  // takes runtime ownership and can change it, unless the SDK explicitly locks it.
+  const auto fullscreen = REX_SETTINGS().Find("ui.fullscreen");
+  const auto exclusive = REX_SETTINGS().Find("ui.fullscreen_exclusive");
+  if (fullscreen && exclusive && !(*fullscreen)->IsFrozen() && !(*exclusive)->IsFrozen() &&
+      (*fullscreen)->GetLayer() != rex::SettingLayer::kLock &&
+      (*exclusive)->GetLayer() != rex::SettingLayer::kLock) {
+    overrides_.erase(SettingId::kDisplay);
+    override_values_.erase(SettingId::kDisplay);
+    auto mode = service_->EffectiveValue(SettingId::kDisplay);
+    mode.text = ActiveDisplayMode();
+    service_->SetBootValues({{SettingId::kDisplay, mode}}, "settings.graphics.startup_mode");
   }
   service_->SetOverrides(override_values_, overrides_);
   if (rb_blitz::settings::title::settings_safe_graphics.Get()) {
@@ -1699,6 +1774,21 @@ void SettingsBoot::AcknowledgeControllerLayout(uint64_t ticket, const std::strin
                   {{SettingId::kButtonScheme, HotApplyStatus::kApplied, {}}}, generation);
 }
 
+void SettingsBoot::NoteResolutionProfileQueued(SettingId id, uint64_t generation, const Value& value) {
+  resolution_profiles_queued_[id] = {generation, value};
+}
+
+void SettingsBoot::AcknowledgeResolutionProfile(SettingId id, const Value& value, bool applied,
+                                                const std::string& error) {
+  const auto queued = resolution_profiles_queued_.find(id);
+  if (queued == resolution_profiles_queued_.end() || !ValueEquals(queued->second.second, value)) return;
+  const auto generation = queued->second.first;
+  resolution_profiles_queued_.erase(queued);
+  NoteAppliedRows({{id, value}}, {{id, applied ? HotApplyStatus::kApplied : HotApplyStatus::kFailed, error}},
+                  generation);
+  if (!applied) NoteRestartRows({id});
+}
+
 void SettingsBoot::NoteAppliedRows(const std::map<SettingId, Value>& requested,
                                    const std::vector<HotApplyOutcome>& outcomes,
                                    uint64_t generation) {
@@ -1740,6 +1830,8 @@ bool SettingsBoot::RestartPending() const {
   // Rows an explicit source owns are not editable, so they can never be the reason for a prompt.
   std::map<SettingId, Value> current;
   for (const auto& descriptor : service_->descriptors()) {
+    if (profile_draw_scale_ && (descriptor.id == SettingId::kAspectRatio ||
+                               descriptor.id == SettingId::kRenderScale)) continue;
     if (overrides_.contains(descriptor.id) || !running_values_.contains(descriptor.id)) {
       continue;
     }
@@ -1748,6 +1840,8 @@ bool SettingsBoot::RestartPending() const {
   for (SettingId id : PendingRestartRows(running_values_, current, service_->descriptors(),
                                          restart_rows_noted_)) {
     const ApplicationRecord* record = application_ledger_.Find(id);
+    if (record && IsResolutionProfile(id) && resolution_profiles_queued_.contains(id) &&
+        record->phase == ApplyPhase::kQueued) continue;
     if (record && id == SettingId::kButtonScheme &&
         record->phase == ApplyPhase::kQueued && controller_layout_ticket_ != 0) continue;
     if (record && (record->boundary == ApplyBoundary::kMenuReturn ||

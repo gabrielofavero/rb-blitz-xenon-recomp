@@ -24,6 +24,8 @@
 #include "settings/capabilities.h"
 #include "settings/graphics_policy.h"
 #include "settings/graphics_boot.h"
+#include "settings/resolution_profiles.h"
+#include "settings/render_profile_resources.h"
 #include "settings/schema.h"
 #include "settings/service.h"
 
@@ -816,7 +818,7 @@ void TestServiceIntegration() {
                   .Set(txn, SettingId::kFiltering, EnumV("16x"), service.capability_revision())
                   .ok);
   CHECK_TRUE(service
-                 .Set(txn, SettingId::kRenderScale, EnumV("1x"),
+                 .Set(txn, SettingId::kInterfaceResolution, EnumV("1280x720"),
                       service.capability_revision())
                  .ok);
   service.Cancel(txn);
@@ -1051,7 +1053,136 @@ void TestAspectAndRenderScale() {
   CHECK_EQ(BuildCapabilitySnapshot(inputs).recommended_render_scale,1);
 }
 
+void TestProfileResolveTextures() {
+  BeginCase("profile textures: lock outputs accept high-bit guest addresses and clear both resources");
+  const std::array<uint32_t, 2> resources{0xA0001000u, 0xA0002000u};
+  std::vector<uint32_t> locked, cleared, unlocked;
+  std::vector<size_t> clear_sizes;
+  CHECK_TRUE(InitializeProfileResolveTextures(resources, 640, 360,
+      [&](uint32_t resource) {
+        locked.push_back(resource);
+        return ProfileTextureLock{2560, resource + 0x10000};
+      },
+      [&](uint32_t data, size_t bytes) { cleared.push_back(data); clear_sizes.push_back(bytes); },
+      [&](uint32_t resource) { unlocked.push_back(resource); }));
+  CHECK_TRUE(locked == std::vector<uint32_t>(resources.begin(), resources.end()));
+  CHECK_TRUE(unlocked == locked);
+  CHECK_TRUE(cleared == std::vector<uint32_t>({0xA0011000u, 0xA0012000u}));
+  CHECK_TRUE(clear_sizes == std::vector<size_t>({983040, 983040}));
+
+  BeginCase("profile textures: absent lock data refuses the replacement without clearing address zero");
+  for (const uint32_t absent : resources) {
+    locked.clear(); cleared.clear(); unlocked.clear();
+    CHECK_FALSE(InitializeProfileResolveTextures(resources, 1280, 720,
+        [&](uint32_t resource) {
+          locked.push_back(resource);
+          return ProfileTextureLock{5120, resource == absent ? 0u : resource + 0x10000};
+        },
+        [&](uint32_t data, size_t) { cleared.push_back(data); },
+        [&](uint32_t resource) { unlocked.push_back(resource); }));
+    const size_t completed = absent == resources.front() ? 0 : 1;
+    CHECK_EQ(locked.size(), completed + 1);
+    CHECK_EQ(cleared.size(), completed);
+    CHECK_EQ(unlocked.size(), completed);
+    CHECK_TRUE(std::none_of(cleared.begin(), cleared.end(), [](uint32_t data) { return data == 0; }));
+  }
+}
+
+void TestSafeResolutionProfiles() {
+  BeginCase("graphics recovery: both contexts use safe profiles without replacing unrelated choices");
+  for (const auto& [native, expected] : std::initializer_list<std::pair<DisplayMode, const char*>>{
+       {{2560, 1080}, "1280x720"}, {{1280, 720}, "native"}, {{1024, 600}, "native"}}) {
+    std::map<SettingId, Value> safe{{SettingId::kFiltering, EnumV("4x")},
+                                   {SettingId::kInterfaceResolution, EnumV("native")},
+                                   {SettingId::kGameplayResolution, EnumV("native")}};
+    AddSafeResolutionProfiles(safe, native);
+    CHECK_TRUE(IsToken(safe.at(SettingId::kInterfaceResolution), expected));
+    CHECK_TRUE(IsToken(safe.at(SettingId::kGameplayResolution), expected));
+    CHECK_EQ(safe.at(SettingId::kInterfaceRenderScale).integer, 5);
+    CHECK_EQ(safe.at(SettingId::kGameplayRenderScale).integer, 5);
+    CHECK_TRUE(IsToken(safe.at(SettingId::kFiltering), "4x"));
+  }
+}
+
+void TestProfileResolutionChoices() {
+  BeginCase("desktop profiles offer native and lower native-aspect and 16:9 sizes");
+  for (const auto& [native, expected] :
+       std::initializer_list<std::pair<DisplayMode, const char*>>{
+         {{2560, 1080}, "native,1920x1080,2133x900,1600x900,1707x720,1280x720"},
+         {{3440, 1440}, "native,2560x1440,2580x1080,1920x1080,2150x900,1600x900,1720x720,1280x720"},
+         {{1920, 1200}, "native,1920x1080,1728x1080,1600x900,1440x900,1280x720,1152x720"},
+         {{1600, 1200}, "native,1440x1080,1600x900,1200x900,1280x720,960x720"},
+         {{1920, 1080}, "native,1600x900,1280x720"},
+         {{1280, 720}, "native"}, {{1024, 600}, "native"}}) {
+    const auto choices = ProfileResolutionChoices(native);
+    CHECK_TRUE(choices.front().token == "native");
+    CHECK_TRUE(choices.front().label == ResolutionToken(native));
+    std::string tokens;
+    DisplayMode previous = native;
+    for (size_t i = 0; i < choices.size(); ++i) {
+      if (!tokens.empty()) tokens += ',';
+      tokens += choices[i].token;
+      if (i == 0) continue;
+      const auto size = ProfileResolution(choices[i].token, native);
+      CHECK_TRUE(size.width > 0 && size.width <= native.width);
+      CHECK_TRUE(size.height >= 720 && size.height <= native.height);
+      CHECK_TRUE(size.height < previous.height ||
+                 (size.height == previous.height && size.width < previous.width));
+      CHECK_FALSE(IsSize(size, native.width, native.height));
+      CHECK_TRUE(choices[i].label == ResolutionToken(size));
+      previous = size;
+    }
+    CHECK_TRUE(tokens == expected);
+  }
+  for (const auto invalid : {DisplayMode{0, 1080}, {-1, 720}, {1920, 0}, {1920, -1}}) {
+    const auto choices = ProfileResolutionChoices(invalid);
+    CHECK_EQ(choices.size(), 1);
+    CHECK_TRUE(choices.front().token == "native");
+    CHECK_TRUE(choices.front().label == "1280x720");
+  }
+}
+
 int main() {
+  TestProfileResolveTextures();
+  TestSafeResolutionProfiles();
+  TestProfileResolutionChoices();
+  BeginCase("desktop profile resolution tokens retain precise native dimensions");
+  const auto ultrawide_profiles = ProfileResolutionChoices({2560,1080});
+  CHECK_TRUE(ultrawide_profiles.front().token == "native");
+  CHECK_TRUE(ultrawide_profiles.front().label == "2560x1080");
+  CHECK_TRUE(ultrawide_profiles[1].token == "1920x1080");
+  CHECK_TRUE(ultrawide_profiles.back().token == "1280x720");
+  CHECK_TRUE(ProfileResolutionChoices({2880,1800})[1].token == "2880x1620");
+  CHECK_TRUE(IsSize(ProfileResolution("native", {2560,1080}),2560,1080));
+  CHECK_TRUE(IsSize(ProfileResolution("1600x900", {2560,1080}),1600,900));
+  CHECK_TRUE(IsSize(ProfileResolution("1600x900junk", {2560,1080}),0,0));
+  CHECK_TRUE(IsSize(ScaledProfileResolution({2622,1206},10),2622,1206));
+  CHECK_TRUE(IsSize(ScaledProfileResolution({2622,1206},5),1311,603));
+  CHECK_TRUE(IsSize(ProfileGuestFrame({1920,1080},2).guest_size,960,540));
+  CHECK_TRUE(IsSize(ProfileGuestFrame({1280,720},2).guest_size,640,360));
+  CHECK_TRUE(IsSize(ProfileGuestFrame({3440,1440},2).guest_size,1720,720));
+  CHECK_EQ(ProfileTileExtent(1720), 864);
+  CHECK_EQ(ProfileTileExtent(1311), 672);
+  CHECK_FALSE(ProfileGuestFrame({7680,4320},1).supported);
+  for (auto platform : {schema::HostPlatform::kWindows, schema::HostPlatform::kLinux,
+                        schema::HostPlatform::kMacOS, schema::HostPlatform::kIOS,
+                        schema::HostPlatform::kAndroid}) {
+    CapabilitySnapshot caps; caps.primary_display_size = {2560,1440}; caps.logical_processors = 12;
+    const auto rows = schema::BuildDescriptors(caps, schema::SettingsForRelease(platform,"test"));
+    for (const auto& row : rows) {
+      if (row.id == SettingId::kDlcScanThreads) CHECK_EQ(row.compiled_default.integer,12);
+      if (row.id == SettingId::kLoadGuard) CHECK_TRUE(row.compiled_default.text == "60s");
+      if (row.id == SettingId::kSettingsLabelSize) CHECK_TRUE(row.compiled_default.text == "big");
+      if (row.id == SettingId::kInterfaceResolution || row.id == SettingId::kGameplayResolution) {
+        CHECK_TRUE(row.compiled_default.text == "native");
+        CHECK_EQ(row.availability == Availability::kHidden, schema::IsMobile(platform));
+      }
+      if (row.id == SettingId::kInterfaceRenderScale || row.id == SettingId::kGameplayRenderScale) {
+        CHECK_EQ(row.compiled_default.integer,10);
+        CHECK_EQ(row.availability == Availability::kHidden, !schema::IsMobile(platform));
+      }
+    }
+  }
   BeginCase("iOS Auto uses the device's proportions at 1x");
   auto mobile_limits = TitleRenderPath();
   mobile_limits.scales = {1};

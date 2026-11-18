@@ -13,11 +13,13 @@
 
 #include "settings/schema.h"
 #include "settings/capabilities.h"
+#include "settings/resolution_profiles.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <utility>
+#include <tuple>
 
 namespace rb_blitz::settings::schema {
 
@@ -151,7 +153,7 @@ std::vector<SchemaRow> BuildTable() {
                      "Play bundled songs and installed DLC as the main menu's background music."));
   {
     Descriptor d = Make(SettingId::kLoadGuard, Category::kGeneral, Provider::kNative,
-                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("off"));
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("60s"));
     d.choices = Choices({{"off", "Off"}, {"30s", "30s"}, {"60s", "60s"}});
     rows.push_back(Row(std::move(d), {"general", "load_guard"}, "", "Load Guard",
                        "Restart to the main menu if a song takes too long to load. Unsaved progress may be lost."));
@@ -210,6 +212,25 @@ std::vector<SchemaRow> BuildTable() {
                              "Grant the online-only achievements once."));
 
   // --- Graphics ------------------------------------------------------------
+  for (const auto& [id, key, label] : {
+      std::tuple{SettingId::kInterfaceResolution, "interface_resolution", "Interface"},
+      std::tuple{SettingId::kGameplayResolution, "gameplay_resolution", "Gameplay"}}) {
+    auto d = Make(id, Category::kGraphics, Provider::kNative,
+                  WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("native"),
+                  "profile_resolutions");
+    rows.push_back(Row(std::move(d), {"graphics", key}, "resolution_profiles", label,
+                       "Choose the rendering resolution for this part of the game."));
+  }
+  for (const auto& [id, key, label] : {
+      std::tuple{SettingId::kInterfaceRenderScale, "interface_render_scale", "Interface"},
+      std::tuple{SettingId::kGameplayRenderScale, "gameplay_render_scale", "Gameplay"}}) {
+    auto d = Make(id, Category::kGraphics, Provider::kNative,
+                  WidgetKind::kHorizontalSelect, ValueKind::kInt, IntValue(10));
+    for (int i = 5; i <= 10; ++i)
+      d.choices.push_back({std::to_string(i), i == 10 ? "1.0" : "0." + std::to_string(i)});
+    rows.push_back(Row(std::move(d), {"graphics", key}, "render_scale_profiles", label,
+                       "Render from half to full screen resolution in steps of 0.1."));
+  }
   {
     Descriptor d = Make(SettingId::kResolution, Category::kGraphics, Provider::kNative,
                         WidgetKind::kHorizontalSelect, ValueKind::kResolution,
@@ -327,8 +348,8 @@ std::vector<SchemaRow> BuildTable() {
                      "Show a description of the highlighted row at the bottom of the screen."));
   {
     Descriptor d = Make(SettingId::kSettingsLabelSize, Category::kInterface, Provider::kNative,
-                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("normal"));
-    d.choices = Choices({{"normal", "Normal"}, {"big", "Big"}, {"biggest", "Biggest"}});
+                        WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("big"));
+    d.choices = Choices({{"normal", "Small"}, {"big", "Normal"}, {"biggest", "Big"}});
     rows.push_back(Row(std::move(d), {"interface", "settings_label_size"}, "settings_labels",
                        "Size", "Choose the settings description size. Applies immediately."));
   }
@@ -540,6 +561,14 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kUnlockOnlineAchievements, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideAchievements, ApplicationStrategy::kRestart, ""},
     // Graphics
+    {SettingId::kInterfaceResolution, ApplicationStrategy::kHot,
+     "guest frame boundary rebuilds render targets and resolve textures; visual acceptance pending"},
+    {SettingId::kGameplayResolution, ApplicationStrategy::kHot,
+     "guest frame boundary rebuilds render targets and resolve textures; visual acceptance pending"},
+    {SettingId::kInterfaceRenderScale, ApplicationStrategy::kHot,
+     "guest frame boundary rebuilds render targets and resolve textures; visual acceptance pending"},
+    {SettingId::kGameplayRenderScale, ApplicationStrategy::kHot,
+     "guest frame boundary rebuilds render targets and resolve textures; visual acceptance pending"},
     {SettingId::kResolution, ApplicationStrategy::kRestart, ""},
     {SettingId::kOrientation, ApplicationStrategy::kRestart, ""},
     {SettingId::kAspectRatio, ApplicationStrategy::kRestart, ""},
@@ -673,6 +702,8 @@ void FillChoiceSource(Descriptor& descriptor, const CapabilitySnapshot& caps) {
       const std::string token = std::to_string(scale) + "x";
       descriptor.choices.push_back(Choice{token, token});
     }
+  } else if (source == "profile_resolutions") {
+    descriptor.choices = ProfileResolutionChoices(caps.primary_display_size);
   } else if (source == "resolutions") {
     descriptor.choices.push_back(Choice{"auto", "Auto"});
     for (const DisplayMode& mode : caps.supported_resolutions) {
@@ -826,6 +857,14 @@ std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps,
   for (const SchemaRow& row : Rows()) {
     Descriptor descriptor = row.descriptor;
     FillChoiceSource(descriptor, caps);
+    if (descriptor.id == SettingId::kAspectRatio || descriptor.id == SettingId::kRenderScale ||
+        ((descriptor.id == SettingId::kInterfaceResolution || descriptor.id == SettingId::kGameplayResolution)
+             ? IsMobile(release.platform)
+             : (descriptor.id == SettingId::kInterfaceRenderScale || descriptor.id == SettingId::kGameplayRenderScale)
+                   && !IsMobile(release.platform)))
+      descriptor.availability = Availability::kHidden;
+    if (descriptor.id == SettingId::kDlcScanThreads && !descriptor.choices.empty())
+      descriptor.compiled_default = IntValue(std::stoll(descriptor.choices.back().token));
     if (row.group == "legacy_resolution") descriptor.availability = Availability::kHidden;
     if (descriptor.provider == Provider::kUltimate) {
       if (!caps.provider.installed || !caps.provider.compatible) {

@@ -551,5 +551,26 @@ int main() {
   PadPacket player_two;
   CHECK_EQ(player_two.Observe({}), 1);
   CHECK_EQ(packets.Observe(pad), packet);
+  BeginCase("settings wheels use six bounded pointer positions");
+  const MenuBounds slider_bounds{.284f, .86f, .716f, .97f};
+  CHECK_EQ(SliderStepAt({.284f, .91f}, slider_bounds), 0);
+  CHECK_EQ(SliderStepAt({.716f, .91f}, slider_bounds), 5);
+  CHECK_EQ(SliderStepAt({.5f, .91f}, slider_bounds), 3);
+  CHECK_EQ(SliderStepAt({.5f, .5f}, slider_bounds), -1);
+  CHECK_EQ(SliderStepAt({NAN, .91f}, slider_bounds), -1);
+  CHECK_TRUE(IsSettingsWheel("sound_effects_slider.sld"));
+  CHECK_TRUE(IsSettingsWheel("track_sound_slider.sld"));
+  CHECK_FALSE(IsSettingsWheel("options.lst"));
+  BeginCase("profile aspect changes letterbox within the same ultrawide window");
+  const auto native_frame = MenuPresentedRect(2560, 1080, 2560, 1080, true, false, 90, 90);
+  const auto hd_frame = MenuPresentedRect(2560, 1080, 1280, 720, true, false, 90, 90);
+  CHECK_EQ(native_frame.width, 2560);
+  CHECK_EQ(native_frame.height, 1080);
+  CHECK_EQ(hd_frame.width, 1920);
+  CHECK_EQ(hd_frame.height, 1080);
+  // The 320-pixel side bars are outside the guest's pointer space.
+  CHECK_TRUE(MenuPointer(319, 540, 2560, 1080, 1280, 720, true, false, 90, 90).x < 0);
+  CHECK_TRUE(MenuPointer(2241, 540, 2560, 1080, 1280, 720, true, false, 90, 90).x > 1);
+  CHECK_EQ(MenuPointer(1280, 540, 2560, 1080, 1280, 720, true, false, 90, 90).x, .5f);
   return Finish();
 }

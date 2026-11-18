@@ -2565,6 +2565,10 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     built[screen::kSceneRecord] = std::move(scene);
   }
   built[screen::kPauseSceneRecord] = built[screen::kSceneRecord];
+  if (!read("ui/av_options/gen/av_options.milo_xbox",
+            &built["ui/av_options/gen/settings_scale.milo_xbox"], error)) return false;
+  built["ui/av_options/gen/settings_scale_pause.milo_xbox"] =
+      built["ui/av_options/gen/settings_scale.milo_xbox"];
   {
     // Size the guest heap before the title creates it. This is the direct
     // remedy for a large texture request that fails against a fragmented

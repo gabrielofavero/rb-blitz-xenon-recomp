@@ -77,6 +77,7 @@ CapabilitySnapshot Capabilities(uint64_t revision = 1) {
   CapabilitySnapshot caps;
   caps.revision = revision;
   caps.logical_processors = 4;
+  caps.primary_display_size = {1920, 1080};
   caps.supported_resolutions.push_back(DisplayMode{1280, 720});
   caps.supported_resolutions.push_back(DisplayMode{1920, 1080});
   RendererCapability renderer;
@@ -252,7 +253,7 @@ void TestLoadGuardRoundTrip() {
   if (!descriptor) return;
   CHECK_TRUE(descriptor->provider == Provider::kNative);
   CHECK_TRUE(descriptor->strategy == ApplicationStrategy::kHot);
-  CHECK_TRUE(service.EffectiveValue(id).text == "off");
+  CHECK_TRUE(service.EffectiveValue(id).text == "60s");
   CHECK_TRUE(CvarForSetting(id) == "song_load_guard");
   for (const auto* token : {"30s", "60s", "off"}) {
     const auto txn = service.BeginEdit(service.revision());
@@ -400,9 +401,9 @@ void TestSettingsLabelSizeRoundTrip() {
   if (!descriptor) return;
   CHECK_TRUE(descriptor->provider == Provider::kNative);
   CHECK_TRUE(descriptor->strategy == ApplicationStrategy::kHot);
-  CHECK_TRUE(service.EffectiveValue(id).text == "normal");
+  CHECK_TRUE(service.EffectiveValue(id).text == "big");
   CHECK_TRUE(CvarForSetting(id) == "settings_help_size");
-  for (const auto* token : {"big", "biggest", "normal"}) {
+  for (const auto* token : {"normal", "biggest", "big"}) {
     const auto txn = service.BeginEdit(service.revision());
     CHECK_FALSE(service.Set(txn, id, EnumV("huge"), service.capability_revision()).ok);
     CHECK_TRUE(service.Set(txn, id, EnumV(token), service.capability_revision()).ok);
@@ -622,7 +623,7 @@ void TestValidationAndPending() {
 
   BeginCase("service: a stale capability revision is refused instead of clamped");
   const ValidationResult stale =
-      service.Set(txn, SettingId::kRenderScale, EnumV("1x"), 77);
+      service.Set(txn, SettingId::kInterfaceResolution, EnumV("native"), 77);
   CHECK_FALSE(stale.ok);
   CHECK_TRUE(stale.reason_key == "settings.capabilities_changed");
 
@@ -648,10 +649,10 @@ void TestValidationAndPending() {
 
   BeginCase("service: capability changes invalidate staged values before disk I/O");
   const uint64_t txn3 = service.BeginEdit(service.revision());
-  CHECK_TRUE(service.Set(txn3, SettingId::kRenderScale, EnumV("2x"),
+  CHECK_TRUE(service.Set(txn3, SettingId::kInterfaceResolution, EnumV("1280x720"),
                          service.capability_revision()).ok);
   CapabilitySnapshot changed = Capabilities(2);
-  changed.supported_render_scales = {1};
+  changed.primary_display_size = {1280, 720};
   service.SetCapabilities(std::move(changed));
   const CommitResult stale_commit = service.Commit(txn3);
   CHECK_TRUE(stale_commit.status == CommitStatus::kInvalid);
@@ -886,28 +887,28 @@ void TestInterruptedCommitRecovery() {
     CHECK_EQ(provider.saves, 1);
   }
 
-  BeginCase("Auto survives a durable save and reload as intent, without fixing a pixel size");
+  BeginCase("Native profiles survive a durable save and reload as intent, without fixing a pixel size");
   Service service(paths);
   service.Boot(nullptr, {}, nullptr);
   service.SetCapabilities(Capabilities());
   const auto txn = service.BeginEdit(service.revision());
-  CHECK_TRUE(service.Set(txn, SettingId::kAspectRatio, EnumV("4:3"), 1).ok);
-  CHECK_TRUE(service.Set(txn, SettingId::kRenderScale, EnumV("2x"), 1).ok);
+  CHECK_TRUE(service.Set(txn, SettingId::kInterfaceResolution, EnumV("1280x720"), 1).ok);
+  CHECK_TRUE(service.Set(txn, SettingId::kGameplayResolution, EnumV("1280x720"), 1).ok);
   CHECK_TRUE(service.Commit(txn).status == CommitStatus::kSaved);
   const auto automatic = service.BeginEdit(service.revision());
-  CHECK_TRUE(service.Set(automatic, SettingId::kAspectRatio, EnumV("auto"), 1).ok);
-  CHECK_TRUE(service.Set(automatic, SettingId::kRenderScale, EnumV("auto"), 1).ok);
+  CHECK_TRUE(service.Set(automatic, SettingId::kInterfaceResolution, EnumV("native"), 1).ok);
+  CHECK_TRUE(service.Set(automatic, SettingId::kGameplayResolution, EnumV("native"), 1).ok);
   CHECK_TRUE(service.Commit(automatic).status == CommitStatus::kSaved);
   const auto saved = LoadSettingsDocument(paths.settings_file);
-  for (const auto id : {SettingId::kAspectRatio, SettingId::kRenderScale}) {
+  for (const auto id : {SettingId::kInterfaceResolution, SettingId::kGameplayResolution}) {
     const auto found = saved.document.values.find(id);
-    CHECK_TRUE(found != saved.document.values.end() && found->second.text == "auto");
+    CHECK_TRUE(found != saved.document.values.end() && found->second.text == "native");
   }
   Service reloaded(paths);
   CHECK_TRUE(reloaded.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
   reloaded.SetCapabilities(Capabilities());
-  CHECK_TRUE(reloaded.RequestedValue(SettingId::kAspectRatio).text == "auto");
-  CHECK_TRUE(reloaded.RequestedValue(SettingId::kRenderScale).text == "auto");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kInterfaceResolution).text == "native");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kGameplayResolution).text == "native");
 }
 
 void TestUnfinishableCommitJournal() {
@@ -1542,8 +1543,8 @@ void TestRestoreProfilesRoundTrip() {
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kStartup).text == "normal");
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kDisplay).text == "fullscreen");
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kOrientation).text == "landscape");
-  CHECK_TRUE(reloaded.RequestedValue(SettingId::kAspectRatio).text == "16:9");
-  CHECK_TRUE(reloaded.RequestedValue(SettingId::kRenderScale).text == "1x");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kInterfaceResolution).text == "1280x720");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kGameplayResolution).text == "1280x720");
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kAntiAliasing).text == "native");
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kFiltering).text == "native");
   const auto hidden = reloaded.RequestedValue(SettingId::kHiddenMainMenu).list;
@@ -1553,7 +1554,7 @@ void TestRestoreProfilesRoundTrip() {
   CHECK_TRUE(service.StageRestore(repeat, Service::RestoreProfile::kVanilla).ok);
   CHECK_TRUE(service.Commit(repeat).status == CommitStatus::kNoChanges);
   CHECK_FALSE(service.RequestedValue(SettingId::kRhythmVerse).boolean);
-  CHECK_TRUE(service.RequestedValue(SettingId::kAspectRatio).text == "16:9");
+  CHECK_TRUE(service.RequestedValue(SettingId::kInterfaceResolution).text == "1280x720");
 
   const auto recommended = service.BeginEdit(service.revision());
   CHECK_TRUE(service.StageRestore(recommended, Service::RestoreProfile::kRecommended).ok);

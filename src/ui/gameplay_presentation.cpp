@@ -23,7 +23,11 @@ class GameplayPresentation final : public rex::ui::DialogBase {
     const bool game = input::GameScreenActive();
     const bool crop = settings::BootPortraitWidth() && (game || input::PortraitSplashActive());
     const bool render_cutoff = crop && game && rb_blitz::settings::title::portrait_render_cutoff.Get();
-    if (crop == cropped_ && render_cutoff == render_cutoff_) return true;
+    const auto source_width = settings::BootRenderWidth();
+    const auto source_height = settings::BootRenderHeight();
+    const auto visible_width = settings::BootPortraitWidth();
+    if (crop == cropped_ && render_cutoff == render_cutoff_ && source_width == source_width_ &&
+        source_height == source_height_ && visible_width == visible_width_) return true;
     if (!presentation_()) return true;
     rb_blitz::settings::WriteRuntimeSetting("draw_visible_region", "false", rex::SettingLayer::kRuntime).accepted();
     if (render_cutoff) {
@@ -57,6 +61,9 @@ class GameplayPresentation final : public rex::ui::DialogBase {
     const bool entering_crop = crop && !cropped_;
     cropped_ = crop;
     render_cutoff_ = render_cutoff;
+    source_width_ = source_width;
+    source_height_ = source_height;
+    visible_width_ = visible_width;
     if (entering_crop && preview_notification_) preview_notification_();
     REXLOG_INFO("portrait: {} landscape source, preserving both axes", crop ? "cropping" : "fitting");
     return true;
@@ -64,6 +71,7 @@ class GameplayPresentation final : public rex::ui::DialogBase {
   std::function<rex::gpu::IGraphicsPresentation*()> presentation_;
   std::function<void()> preview_notification_;
   bool cropped_ = false, render_cutoff_ = false;
+  uint32_t source_width_ = 0, source_height_ = 0, visible_width_ = 0;
   std::string safe_x_, safe_y_, cutoff_;
 };
 }

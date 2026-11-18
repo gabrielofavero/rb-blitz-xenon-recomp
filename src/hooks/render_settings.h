@@ -2,6 +2,11 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
+#include <string>
+#include "settings/model.h"
+
+struct PPCContext;
 
 namespace rb_blitz::settings {
 // The guest's own screen size, set by the host before the guest starts.
@@ -46,4 +51,8 @@ uint32_t BootPortraitHeight();
 // A 16:9 (and the title's own 4:3) frame is left completely alone. `base` is the guest memory
 // base the caller's hook received.
 void WriteGuestLayoutAspect(uint8_t* base);
+void ConfigureResolutionProfiles(DisplayMode native, int draw_scale, bool mobile,
+                                 const std::map<SettingId, Value>& values);
+bool QueueResolutionProfile(SettingId id, const Value& value, std::string* error);
+void UpdateResolutionProfile(PPCContext& ctx, uint8_t* base, uint32_t renderer);
 }

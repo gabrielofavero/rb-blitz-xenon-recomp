@@ -19,7 +19,8 @@ body { margin:0; }
 <style>
 #blitz-portrait {display:grid;justify-items:center;gap:10px;padding:12px;font:14px system-ui}
 #blitz-portrait .bp-picker,#blitz-portrait .bp-nav {display:flex;align-items:center;justify-content:space-between;gap:10px;width:min(100%,350px)}
-#blitz-portrait select,#blitz-portrait .bp-nav button {font:inherit;color:inherit;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:7px 9px;min-height:40px}
+#blitz-portrait select,#blitz-portrait button {border-radius:2px}
+#blitz-portrait select,#blitz-portrait .bp-nav button {font:inherit;color:inherit;background:var(--card);border:1px solid var(--border);padding:7px 9px;min-height:40px}
 #blitz-portrait select {max-width:85%;flex:1}
 #blitz-portrait .bp-phone {width:min(100%,350px);aspect-ratio:402/874;container-type:inline-size;position:relative;overflow:hidden;background:#090812;color:#fff;box-shadow:0 0 0 2px #555;font-family:Arial,sans-serif}
 #blitz-portrait .bp-island,#blitz-portrait .bp-home {position:absolute;left:50%;translate:-50% 0;background:#000;z-index:5;border-radius:99px}
@@ -68,20 +69,28 @@ body { margin:0; }
 #blitz-portrait .bp-grid button {display:grid;justify-items:center;align-content:center;gap:2cqw;font-size:3.3cqw}
 #blitz-portrait .bp-disc {display:grid;place-items:center;width:15cqw;aspect-ratio:1;border-radius:50%;border:2px solid #eee;background:linear-gradient(#aaa,#272731 60%);margin:0 auto 1cqw;font-size:6cqw;font-weight:900;color:white}
 #blitz-portrait .bp-powericons button {padding:0;border:0;background:transparent;font-size:5cqw;min-width:0}
-#blitz-portrait .bp-powericons .bp-disc {width:11cqw;margin:0 auto;font-size:4cqw}
-#blitz-portrait .bp-tip {margin:14cqw 3cqw;text-align:center;line-height:1.4}
-#blitz-portrait .bp-hud {display:grid;grid-template-columns:1fr 1fr 11cqw;align-items:center;gap:2cqw}
-#blitz-portrait .bp-meter {text-align:center}
-#blitz-portrait .bp-meter i {display:block;height:1.6cqw;border-radius:5px;background:linear-gradient(90deg,#78d2fd 37%,#ffffff22 37%)}
+#blitz-portrait .bp-powericons .bp-disc {width:18cqw;margin:0 auto;font-size:6cqw}
+#blitz-portrait .bp-powericons .bp-power-next {flex:0 0 7cqw;font-size:9cqw}
+#blitz-portrait .bp-screen .bp-back {align-self:flex-start;display:grid;place-items:center;flex:none;width:11cqw;aspect-ratio:1;padding:0;border:1px solid #ffffff50;border-radius:2px;background:#100d1caa;font-size:7cqw;line-height:1}
+#blitz-portrait .bp-screen.ready {justify-content:center}
+#blitz-portrait .bp-screen.ready .bp-grid {grid-template-columns:1fr;gap:2cqw}
+#blitz-portrait .bp-screen.ready .bp-disc {width:22cqw;margin:0 auto 1cqw;font-size:8cqw}
+#blitz-portrait .bp-tip {margin:0 3cqw 5cqw;text-align:center;line-height:1.4}
+#blitz-portrait .ready .bp-bottom {margin-top:6cqw}
+#blitz-portrait .bp-gameplay {position:absolute;inset:14cqw 2cqw 9cqw;display:flex;flex-direction:column}
+#blitz-portrait .bp-hud {position:relative;display:grid;justify-items:center;gap:1.5cqw;z-index:1}
+#blitz-portrait .bp-score {font-size:7cqw;text-shadow:0 2px 3px #000}
+#blitz-portrait .bp-screen .bp-pause-button {position:absolute;left:2cqw;top:0;min-height:9cqw;width:9cqw;padding:0;border:0;background:transparent;font-size:7cqw}
+#blitz-portrait .bp-stars {position:absolute;right:1cqw;top:1cqw;font-size:3cqw;color:#ffe596;writing-mode:vertical-rl;letter-spacing:1cqw}
+#blitz-portrait .bp-meter {display:grid;justify-items:center;gap:1cqw;width:43cqw;font-style:italic;font-weight:900}
+#blitz-portrait .bp-meter i {display:block;width:100%;height:3cqw;border:1px solid #caeaff;background:linear-gradient(90deg,#78d2fd 37%,#182440 37%);box-shadow:0 0 6px #4daaff}
+#blitz-portrait .bp-wheel {position:absolute;left:1cqw;top:44%;width:19cqw;aspect-ratio:1;border:2px solid #c4d9ed;border-radius:50%;background:conic-gradient(#9ee4ff 0deg 70deg,#35344c 70deg 180deg,#6b5b90 180deg 270deg,#35344c 270deg);box-shadow:0 0 0 1cqw #121021,0 0 9px #8bcfff;display:grid;place-items:center}
+#blitz-portrait .bp-wheel::before {content:"";position:absolute;inset:3.7cqw;border-radius:50%;background:#121021;border:1px solid #c4d9ed}
+#blitz-portrait .bp-wheel span {position:relative;font-size:5cqw;font-weight:bold}
+#blitz-portrait .bp-progress {display:grid;justify-items:center;gap:1cqw;font-size:3cqw}
+#blitz-portrait .bp-progress i {width:50%;height:1cqw;background:linear-gradient(90deg,#eee 3%,#ffffff40 3%)}
 #blitz-portrait .bp-road {position:relative;flex:1;min-height:0}
 #blitz-portrait .bp-road svg {width:100%;height:100%;display:block}
-#blitz-portrait .bp-lanes {display:grid;grid-template-columns:repeat(5,1fr);gap:1cqw;text-align:center}
-#blitz-portrait .bp-lanes span {padding:1cqw 0;background:#0d0c16;border-top:2px solid var(--lane);font-size:3.4cqw}
-#blitz-portrait .bp-lanes .active {background:#154228}
-#blitz-portrait .bp-controls {display:grid;grid-template-columns:repeat(6,1fr);gap:2cqw}
-#blitz-portrait .bp-controls button {grid-column:span 2;background:#24223b;min-height:12cqw;font-size:3.5cqw}
-#blitz-portrait .bp-controls .bp-hit {grid-column:span 3;min-height:17cqw;background:#31304b;font-size:4.4cqw}
-#blitz-portrait .bp-controls .bp-hit:active {background:#c8f0ff;color:#151b2c}
 #blitz-portrait .bp-pause {position:absolute;inset:0;display:grid;align-items:center;padding:5cqw;background:#030411a0;z-index:2}
 #blitz-portrait .bp-pause .bp-panel {border:3px double #77e3ff}
 </style>
@@ -99,6 +108,7 @@ body { margin:0; }
   const list = (items, cls = '') => '<div class="bp-list ' + cls + '">' + items.join('') + '</div>';
   const head = (name, cls = '') => '<div class="bp-head ' + cls + '">' + name + '</div>';
   const bottom = (...items) => '<div class="bp-bottom">' + row(...items) + '</div>';
+  const back = to => '<button type="button" class="bp-back" data-go="' + to + '" aria-label="Back">←</button>';
   const logo = '<div class="bp-logo" role="img" aria-label="Rock Band Blitz Ultimate"></div>';
   const tabs = current => '<nav class="bp-tabs" style="--bp-neon:' + ['#55b8ff','#ffaf45','#ff4035'][current] + '" aria-label="Song hub">' + ['Messages','Rhythmverse','Your Songs'].map((item,i) => '<button type="button" data-go="' + (i+3) + '"' + (i === current ? ' aria-current="page"' : '') + '>' + item + '</button>').join('') + '</nav>';
   const album = '<div class="bp-album" role="img" aria-label="Stunt album cover"></div>';
@@ -106,7 +116,6 @@ body { margin:0; }
   const disc = text => '<span class="bp-disc">' + text + '</span>';
   const song = (name, active) => button('<span>' + name + '</span><span>★★★★★</span>', 'song' + (active ? ' hot' : ''));
   const colors = ['#40ec79','#ff5b64','#ffd350','#54c3ff','#ff9c40'];
-  const laneNames = ['Drums','Bass','Guitar','Keys','Vocals'];
   let activeLane = 0;
   function road() {
     const at = (i,y) => 184 + ((i - 2.5) * 163 / 2.5) * (.25 + .75 * (y-25)/330);
@@ -120,25 +129,25 @@ body { margin:0; }
     }).join('');
     return '<div class="bp-road"><svg viewBox="0 0 368 370" preserveAspectRatio="none" role="img" aria-label="Five instrument tracks with a shared hit line"><path d="M 0 130 L 0 60 28 45 28 113 49 110 49 79 73 85 73 117 99 109 99 83 120 77 120 117 140 104 140 83 162 73 162 124 202 123 202 67 227 75 227 104 258 100 258 64 281 56 281 110 308 116 308 48 338 58 338 93 368 104 368 360 0 360 Z" fill="#181630" stroke="#413768" stroke-width="2"/>' + lanes + '<path d="M ' + at(0,345) + ' 345 H ' + at(5,345) + '" stroke="#ffffff45" stroke-width="2"/><path d="M ' + at(activeLane,345) + ' 345 H ' + at(activeLane+1,345) + '" stroke="#fff0ac" stroke-width="5"/></svg></div>';
   }
-  const hud = () => '<div class="bp-hud"><b>0<br><small>☆ &nbsp;0:04 / 2:52</small></b><div class="bp-meter"><small>BLITZ</small><i></i></div>' + button('Ⅱ', '', 9).replace('class=""','class="" aria-label="Pause"') + '</div>';
-  const controls = () => '<div class="bp-lanes">' + laneNames.map((name,i) => '<span style="--lane:' + colors[i] + '" class="' + (i === activeLane ? 'active' : '') + '">' + name + '<br>1×</span>').join('') + '</div><div class="bp-controls"><button type="button" data-lane="-1">‹ Track</button><button type="button" aria-label="Overdrive, charging">Overdrive</button><button type="button" data-lane="1">Track ›</button>' + button('Left note','bp-hit') + button('Right note','bp-hit') + '</div>';
+  const hud = () => '<div class="bp-hud"><button type="button" class="bp-pause-button" data-go="9" aria-label="Pause">Ⅱ</button><b class="bp-score">0</b><div class="bp-meter"><i role="meter" aria-label="Blitz" aria-valuemin="0" aria-valuemax="100" aria-valuenow="37"></i><small>BLITZ</small></div><span class="bp-stars" aria-label="0 of 5 stars">☆☆☆☆☆</span></div>';
+  const gameplay = () => '<div class="bp-gameplay">' + hud() + road() + '<div class="bp-wheel" role="img" aria-label="Track level wheel, multiplier 1"><span>1×</span></div><div class="bp-progress"><small>0:04 / 2:52</small><i></i></div></div>';
   const pause = () => '<div class="bp-pause"><div class="bp-panel"><h3>GAME PAUSED</h3>' + list([button('Resume Game','hot',8), button('Help &amp; Options','',2),button('Achievements'),button('Restart'),button('Quit Song'),button('Main Menu','',1),button('Exit Game')]) + '</div></div>';
   const scenes = [
     () => logo + button('TAP TO START','hot bp-start',1),
     () => logo + list([button('PLAY','hot',5),button('PLAY CURRENT SONG','',6),button('RHYTHMVERSE','',4),button('HELP &amp; OPTIONS','',2),button('EXIT GAME')]) + '<div class="bp-mini bp-bottom"><small>Death on Two Legs…<br>Queen</small>' + button('‹‹') + button('Ⅱ') + button('››') + '</div>',
-    () => head('HELP &amp; OPTIONS','bulbs') + list(['Controls','Calibration','General','Audio/Video','Gameplay','How to Play'].map((name,i) => button(name,i === 0 ? 'hot' : '')), 'bp-options') + '<div class="bp-detail"><small>Choose the devices and the controller mappings that play the game.</small></div>' + bottom(button('‹ Back','',1)),
-    () => tabs(0) + list([button('2026-11-06 Welcome','hot')], 'left') + '<article class="bp-panel"><strong>Welcome to version 0.1.0 :)</strong><p>This is the very first version of the Rock Band Blitz project. Play as much as you can, enjoy, and let me know about any bugs on GitHub!</p></article>' + bottom(button('‹ Back','',1)),
-    () => tabs(1) + list([button('Recently Added','hot'),button('Search')], 'left') + '<div class="bp-panel bp-center" style="margin:6cqw 13cqw;border-color:#f8a43e;box-shadow:0 0 8px #b95d1b"><b>ROCK BAND<br>BLITZ</b></div>' + bottom(button('‹ Back','',1),button('Filters')),
-    () => tabs(2) + row(button('Sort · Artist'),button('Search')) + list([button('Random Song'),'<span class="bp-group">BARENAKED LADIES</span>',song('One Week',true),'<span class="bp-group">FOO FIGHTERS</span>',song('These Days',false),'<span class="bp-group">QUEEN</span>',song('Death on Two Legs (Dedicated to…)',false)],'left') + '<div class="bp-bottom">' + card('Rock · 1998 &nbsp; ●●●●○') + row(button('‹ Back','',1),button('Shortcuts'),button('Select','hot',6)) + '</div>',
-    () => head('SELECT POWER-UPS') + card('Track difficulty &nbsp; ●●●○○') + '<div class="bp-grid">' + button(disc('') + 'Overdrive','hot') + button(disc('') + 'Note') + button(disc('') + 'Track') + '</div><div class="bp-panel"><div class="bp-row bp-powericons">' + ['','2×','◉','◎','✦','›'].map(icon => button(disc(icon))).join('') + '</div><strong>NO POWER-UP SELECTED</strong><small>Hit glowing white notes to build energy, then tap Overdrive to deploy.</small></div>' + bottom(button('‹ Back','',5),button('Play Song','hot',7)),
+    () => back(1) + head('HELP &amp; OPTIONS','bulbs') + list(['Controls','Calibration','General','Audio/Video','Gameplay','How to Play'].map((name,i) => button(name,i === 0 ? 'hot' : '')), 'bp-options') + '<div class="bp-detail"><small>Choose the devices and the controller mappings that play the game.</small></div>',
+    () => back(1) + tabs(0) + list([button('2026-11-06 Welcome','hot')], 'left') + '<article class="bp-panel"><strong>Welcome to version 0.1.0 :)</strong><p>This is the very first version of the Rock Band Blitz project. Play as much as you can, enjoy, and let me know about any bugs on GitHub!</p></article>',
+    () => back(1) + tabs(1) + list([button('Recently Added','hot'),button('Search')], 'left') + '<div class="bp-panel bp-center" style="margin:6cqw 13cqw;border-color:#f8a43e;box-shadow:0 0 8px #b95d1b"><b>ROCK BAND<br>BLITZ</b></div>' + bottom(button('Filters')),
+    () => back(1) + tabs(2) + row(button('Sort · Artist')) + list([button('Random Song'),'<span class="bp-group">BARENAKED LADIES</span>',song('One Week',true),'<span class="bp-group">FOO FIGHTERS</span>',song('These Days',false),'<span class="bp-group">QUEEN</span>',song('Death on Two Legs (Dedicated to…)',false)],'left') + '<div class="bp-bottom">' + card('Rock · 1998 &nbsp; ●●●●○') + row(button('Filters'),button('Search'),button('Select','hot',6)) + '</div>',
+    () => back(5) + head('SELECT POWER-UPS') + card('Track difficulty &nbsp; ●●●○○') + '<div class="bp-grid">' + button(disc('') + 'Overdrive','hot') + button(disc('') + 'Note') + button(disc('') + 'Track') + '</div><div class="bp-panel"><div class="bp-row bp-powericons">' + ['','2×','◉'].map(icon => button(disc(icon))).join('') + '<button type="button" class="bp-power-next" aria-label="More power-ups">&gt;</button></div><strong>NO POWER-UP SELECTED</strong><small>Hit glowing white notes to build energy, then tap Overdrive to deploy.</small></div>' + bottom(button('Play Song','hot',7)),
     () => '<p class="bp-tip">The Recommended screen shows both songs you own and songs you SHOULD own.</p><div class="bp-grid"><div>' + disc('2×') + '<small>Point Doubler</small></div><div>' + disc('') + '<small>No Power-up<br>selected</small></div><div>' + disc('') + '<small>No Power-up<br>selected</small></div></div>' + bottom(button('Begin','hot',8)),
-    () => hud() + road() + controls(),
-    () => hud() + road() + controls() + pause()
+    () => gameplay(),
+    () => gameplay() + pause()
   ];
   picker.innerHTML = names.map((name,i) => '<option value="' + i + '">' + String(i+1).padStart(2,'0') + ' · ' + name + '</option>').join('');
   function show(index) {
     picker.value = index;
-    screen.className = 'bp-screen ' + (['bp-title','bp-main','teal','','','','','teal','playfield','playfield'][index]);
+    screen.className = 'bp-screen ' + (['bp-title','bp-main','teal','','','','','teal ready','playfield','playfield'][index]);
     screen.innerHTML = scenes[index]();
     prev.disabled = index === 0;
     next.disabled = index === names.length - 1;
@@ -148,12 +157,7 @@ body { margin:0; }
   root.querySelectorAll('[data-step]').forEach(control => control.addEventListener('click', () => show(Number(picker.value) + Number(control.dataset.step))));
   screen.addEventListener('click', event => {
     const go = event.target.closest('[data-go]');
-    const lane = event.target.closest('[data-lane]');
     if (go) show(Number(go.dataset.go));
-    if (lane && picker.value === '8') {
-      activeLane = Math.max(0, Math.min(4, activeLane + Number(lane.dataset.lane)));
-      show(8);
-    }
   });
   show(0);
 })();

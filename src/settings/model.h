@@ -56,6 +56,10 @@ enum class SettingId : uint16_t {
   kAspectRatio = 26,
   kRenderScale = 27,
   kOrientation = 28,
+  kInterfaceResolution = 29,
+  kGameplayResolution = 30,
+  kInterfaceRenderScale = 31,
+  kGameplayRenderScale = 32,
   // Interface
   kLetterbox = 40,
   kHideOfflinePrompts = 41,

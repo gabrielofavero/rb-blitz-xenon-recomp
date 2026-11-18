@@ -560,6 +560,8 @@ ValidationResult Service::StageRestore(uint64_t txn, RestoreProfile profile) {
         {SettingId::kOrientation, token("landscape")},
         {SettingId::kAspectRatio, token("16:9")},
         {SettingId::kRenderScale, token("1x")},
+        {SettingId::kInterfaceResolution, token("1280x720")},
+        {SettingId::kGameplayResolution, token("1280x720")},
         {SettingId::kVsync, boolean(true)},
         {SettingId::kAntiAliasing, token("native")},
         {SettingId::kFiltering, token("native")},
@@ -590,7 +592,8 @@ ValidationResult Service::StageRestore(uint64_t txn, RestoreProfile profile) {
       if (!valid.ok) {
         // A backend may not support retail AA/filtering. Falling back to its recommended
         // default is closer than retaining a previous custom setting or refusing the profile.
-        if (id == SettingId::kAntiAliasing || id == SettingId::kFiltering) continue;
+        if (id == SettingId::kAntiAliasing || id == SettingId::kFiltering ||
+            id == SettingId::kInterfaceResolution || id == SettingId::kGameplayResolution) continue;
         return valid;
       }
       if (!ValueEquals(RequestedValue(id), value)) defaults[id] = value;

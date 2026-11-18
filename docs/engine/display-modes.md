@@ -1,5 +1,25 @@
 # Display modes and capture recovery
 
+## Editable window mode and resizing (2026-11-18)
+
+Render profiles keep the native window size independent from render detail.
+Startup fits the native display into the desktop; changing profiles does not
+resize an existing window. The active frontbuffer aspect controls fitting, so
+720p in an ultrawide window has side bars. See the
+[live display correction](../plans/finished/2026-11-18-live-display-profile-fixes.md).
+
+[static] Startup fullscreen configuration selects the initial mode. It no longer
+makes Window Mode read External: the existing guest Keep/Revert preview takes
+runtime ownership, except when the SDK explicitly freezes or locks the settings.
+The boot replaces the old fixed-window policy with resizing, including repair
+of an older saved `window_resizable=false`; explicit environment/CLI controls
+retain priority. Native host attachment receives that resizable flag.
+
+Resolution profiles also update render targets and presentation aspect at guest
+frame boundaries. See [the current profile route](../settings/graphics.md#interface-and-gameplay-profiles-2026-11-18).
+Native resize and mode-preview visual acceptance remain unverified.
+
+
 Investigation, 2026-10-25, following a report of lasting performance loss after
 opening Windows screen capture in Borderless mode.
 

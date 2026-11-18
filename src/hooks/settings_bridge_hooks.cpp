@@ -37,6 +37,7 @@
 // cached flags.
 
 #include "settings/runtime_values.h"
+#include "settings/resolution_profiles.h"
 #include "hooks/settings_bridge.h"
 #include "ui/notifications.h"
 #include "graphics/preparation_loading.h"
@@ -759,6 +760,11 @@ void ApplyHotRows(bool force_restart) {
       ::rb_blitz::settings::ApplyHotPlan(plan, ::rb_blitz::settings::RuntimeHotApplier());
   std::vector<::rb_blitz::settings::HotApplyOutcome> completed;
   for (auto& outcome : outcomes) {
+    if (boot && ::rb_blitz::settings::IsResolutionProfile(outcome.id) &&
+        outcome.status == ::rb_blitz::settings::HotApplyStatus::kApplied) {
+      boot->NoteResolutionProfileQueued(outcome.id, generation, plan.live.at(outcome.id));
+      continue;
+    }
     if (outcome.id == ::rb_blitz::settings::SettingId::kButtonScheme &&
         outcome.status == ::rb_blitz::settings::HotApplyStatus::kApplied) {
       const uint64_t ticket = ::rb_blitz::settings::RuntimeControllerSchemeTicket();

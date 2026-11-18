@@ -3,6 +3,14 @@
 
 #include <atomic>
 #include <cstring>
+#include <array>
+#include <mutex>
+#include "settings/resolution_profiles.h"
+#include "settings/render_profile_resources.h"
+#include "settings/window_policy.h"
+#include "settings/boot.h"
+#include "input/native_menu.h"
+#include <rex/ppc/call.h>
 
 #include "platform/guest_memory.h"
 
@@ -24,7 +32,39 @@ constexpr uint32_t kLayoutAspectHi = 0x8201E4D0;
 // 9/16 as big-endian float bits: what the two fields above hold on the supported retail image, and
 // therefore the shape guard that keeps this write off any other image.
 constexpr uint32_t kAspect16By9Inverse = 0x3F100000;
+std::mutex g_profiles_mutex;
+rb_blitz::settings::DisplayMode g_native;
+int g_profile_scale = 0;
+bool g_mobile_profiles = false;
+bool g_profile_first_frame = true;
+std::map<rb_blitz::settings::SettingId, rb_blitz::settings::Value> g_profiles;
 }  // namespace
+
+void rb_blitz::settings::ConfigureResolutionProfiles(DisplayMode native, int draw_scale, bool mobile,
+    const std::map<SettingId, Value>& values) {
+  std::lock_guard lock(g_profiles_mutex);
+  g_native = native.width > 0 && native.height > 0 ? native : DisplayMode{1280,720};
+  g_profile_scale = draw_scale;
+  g_mobile_profiles = mobile;
+  g_profile_first_frame = true;
+  g_profiles = values;
+}
+
+bool rb_blitz::settings::QueueResolutionProfile(SettingId id, const Value& value, std::string* error) {
+  std::lock_guard lock(g_profiles_mutex);
+  const bool scale = id == SettingId::kInterfaceRenderScale || id == SettingId::kGameplayRenderScale;
+  const auto pixels = scale ? ScaledProfileResolution(g_native, value.integer)
+                            : ProfileResolution(value.text, g_native);
+  if (!IsResolutionProfile(id) || !g_profile_scale ||
+      (scale ? value.kind != ValueKind::kInt || value.integer < 5 || value.integer > 10
+             : value.kind != ValueKind::kEnum) ||
+      !ProfileGuestFrame(pixels, g_profile_scale).supported) {
+    if (error) *error = "the resolution profile cannot be rendered by this device";
+    return false;
+  }
+  g_profiles[id] = value;
+  return true;
+}
 
 void rb_blitz::settings::SetBootRenderFrame(uint32_t width, uint32_t height) {
   // A zero height would ask the title for a degenerate frame; keep the measured 720 instead.
@@ -104,12 +144,11 @@ void StoreGuestBe32(uint8_t* p, uint32_t value) {
 void rb_blitz::settings::WriteGuestLayoutAspect(uint8_t* base) {
   const uint32_t width = g_render_width.load(std::memory_order_relaxed);
   const uint32_t height = g_render_height.load(std::memory_order_relaxed);
-  // No forced width means the title chose a 16:9 (or its own 4:3) frame, which its layout already
-  // matches: nothing to do, and no image write at all on an ordinary boot.
-  if (base == nullptr || width == 0 || height == 0) {
+  // Returning from a custom frame to 16:9 must restore the original layout constants.
+  if (base == nullptr || height == 0) {
     return;
   }
-  const float inverse_aspect = float(height) / float(width);
+  const float inverse_aspect = width ? float(height) / float(width) : 9.0f / 16.0f;
   const uint32_t bits = [&] {
     uint32_t value = 0;
     std::memcpy(&value, &inverse_aspect, sizeof(value));
@@ -132,7 +171,7 @@ void rb_blitz::settings::WriteGuestLayoutAspect(uint8_t* base) {
     // Shape guard: these addresses are only meaningful on the image they were measured on. If the
     // field does not hold its measured value, the image is not that image, and writing a float
     // into whatever is there would be worse than leaving the layout alone.
-    if (before != guard) {
+    if (before != guard && before != written) {
       REXLOG_WARN("render: 0x{:08X} holds {:#010X}, not the measured {:#010X}; {} left alone "
                   "(unsupported image?)",
                   address, before, guard, what);
@@ -156,4 +195,143 @@ void rb_blitz::settings::WriteGuestLayoutAspect(uint8_t* base) {
   if (done == 2) {
     written = bits;
   }
+}
+
+REX_EXTERN(sub_823F1318);  // X360 render-target/depth pair allocation
+REX_EXTERN(sub_82508428); // D3D texture allocation
+REX_EXTERN(sub_8250EC88); // D3DResource::Release, including deferred GPU destruction
+REX_EXTERN(sub_82508270); // texture LockRect
+REX_EXTERN(sub_82506828); // texture UnlockRect
+REX_EXTERN(__imp__sub_823F3C40); // renderer BeginDrawing
+
+void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* base, uint32_t renderer) {
+  DisplayMode pixels;
+  int scale;
+  bool first_frame;
+  SettingId active;
+  Value selected;
+  const bool game = input::GameScreenActive();
+  {
+    std::lock_guard lock(g_profiles_mutex);
+    scale = g_profile_scale;
+    first_frame = g_profile_first_frame;
+    if (!scale || g_profiles.empty()) return;
+    active = g_mobile_profiles ? (game ? SettingId::kGameplayRenderScale : SettingId::kInterfaceRenderScale)
+                               : (game ? SettingId::kGameplayResolution : SettingId::kInterfaceResolution);
+    selected = g_profiles.at(active);
+    pixels = g_mobile_profiles
+        ? ScaledProfileResolution(g_native, g_profiles.at(game ? SettingId::kGameplayRenderScale
+                                                             : SettingId::kInterfaceRenderScale).integer)
+        : ProfileResolution(g_profiles.at(game ? SettingId::kGameplayResolution
+                                              : SettingId::kInterfaceResolution).text, g_native);
+  }
+  const auto plan = ProfileGuestFrame(pixels, scale);
+  const auto acknowledge = [&](bool applied, const std::string& error = {}) {
+    if (auto* runtime = boot::SettingsBoot::Current())
+      runtime->AcknowledgeResolutionProfile(active, selected, applied, error);
+  };
+  if (!base || !renderer || !plan.supported) return;
+  const auto read = [&](uint32_t offset) { return LoadGuestBe32(base + renderer + offset); };
+  const uint32_t w = plan.guest_size.width, h = plan.guest_size.height;
+  static DisplayMode failed;
+  if (!first_frame && read(64) == w && read(68) == h) { failed = {}; acknowledge(true); return; }
+  if (failed.width == int(w) && failed.height == int(h)) return;
+  if (!read(452) || !read(800) || !read(808)) return;
+
+  // Build a complete replacement before publishing any pointer or size. The
+  // guest allocator owns EDRAM layout and resource lifetime; the GPU multiplier
+  // and its texture caches stay intact throughout the transition.
+  PPCContext ctx = caller;
+  rex::ppc::OpenCallFrame(ctx, base, 768);
+  const uint32_t scratch = ctx.r1.u32 + 128;
+  std::memset(base + scratch, 0, 384);
+  constexpr std::array<uint32_t, 9> fields{800,808,804,812,816,820,752,756,760};
+  std::array<uint32_t, 9> old{}, fresh{};
+  for (size_t i = 0; i < fields.size(); ++i) old[i] = read(fields[i]);
+  const uint32_t flags = read(796);
+  const bool tiled = !(flags & 1), vertical = (flags & 2) != 0;
+  const uint32_t tile_w = tiled && !vertical ? ProfileTileExtent(w) : w;
+  const uint32_t tile_h = tiled && vertical ? ProfileTileExtent(h) : h;
+  const auto pair = [&](int index, uint32_t samples, uint32_t width, uint32_t height) {
+    ctx.r3.u32 = width; ctx.r4.u32 = height; ctx.r5.u32 = samples;
+    ctx.r6.u32 = scratch + 64; ctx.r7.u32 = scratch + 68;
+    ctx.r8.u32 = scratch + index * 4; ctx.r9.u32 = scratch + (index + 1) * 4;
+    sub_823F1318(ctx, base);
+  };
+  pair(0, flags & 1 ? 1 : 0, w, h);
+  pair(2, 1, tile_w, tile_h);
+  const auto texture = [&](int index, uint32_t format) {
+    ctx.r3.u32 = w; ctx.r4.u32 = h; ctx.r5.u32 = 1; ctx.r6.u32 = 1;
+    ctx.r7.u32 = 0; ctx.r8.u32 = format; ctx.r9.u32 = 0; ctx.r10.u32 = 3;
+    StoreGuestBe32(base + ctx.r1.u32 + 88, scratch + index * 4);
+    sub_82508428(ctx, base);
+    StoreGuestBe32(base + scratch + index * 4, ctx.r3.u32);
+  };
+  texture(4, 0x18280186); texture(5, 0x18280186);
+  texture(6, 0x18280106); texture(7, 0x18280106); texture(8, 0x1A220197);
+  for (size_t i = 0; i < fresh.size(); ++i) fresh[i] = LoadGuestBe32(base + scratch + i * 4);
+  const auto release = [&](const auto& resources) {
+    for (auto resource : resources) if (resource) { ctx.r3.u32 = resource; sub_8250EC88(ctx, base); }
+  };
+  if (std::any_of(fresh.begin(), fresh.end(), [](auto p) { return p == 0; })) {
+    release(fresh);
+    failed = {int(w), int(h)};
+    acknowledge(false, "render target allocation failed; the previous frame is retained");
+    REXLOG_WARN("render: {}x{} profile allocation refused; keeping the previous frame", w, h);
+    return;
+  }
+  const auto lock_texture = [&](uint32_t resource) {
+    std::memset(base + scratch + 128, 0, 8);
+    ctx.r3.u32 = resource; ctx.r4.u32 = 0; ctx.r5.u32 = scratch + 128;
+    ctx.r6.u32 = 0; ctx.r7.u32 = 0;
+    sub_82508270(ctx, base);
+    return ProfileTextureLock{LoadGuestBe32(base + scratch + 128),
+                              LoadGuestBe32(base + scratch + 132)};
+  };
+  const auto clear_texture = [&](uint32_t data, size_t bytes) {
+    std::memset(base + data, 0, bytes);
+  };
+  const auto unlock_texture = [&](uint32_t resource) {
+    ctx.r3.u32 = resource; ctx.r4.u32 = 0; sub_82506828(ctx, base);
+  };
+  if (!InitializeProfileResolveTextures({fresh[6], fresh[7]}, w, h,
+                                       lock_texture, clear_texture, unlock_texture)) {
+    release(fresh);
+    failed = {int(w), int(h)};
+    acknowledge(false, "render texture initialization failed; the previous frame is retained");
+    REXLOG_WARN("render: {}x{} texture initialization refused; keeping the previous frame", w, h);
+    return;
+  }
+  const auto put = [&](uint32_t offset, uint32_t value) { StoreGuestBe32(base + renderer + offset, value); };
+  for (size_t i = 0; i < fields.size(); ++i) put(fields[i], fresh[i]);
+  put(64, w); put(68, h); put(468, w); put(472, h); put(572, w); put(576, h);
+  put(840, LoadGuestBe32(base + scratch + 64)); put(844, LoadGuestBe32(base + scratch + 68));
+  // The full-resolution path tiles two rectangles across the same frame.
+  if (tiled) {
+    put(848, 2);
+    for (uint32_t i = 0; i < 2; ++i) {
+      put(852 + i * 16, vertical ? 0 : i * tile_w);
+      put(856 + i * 16, vertical ? i * tile_h : 0);
+      put(860 + i * 16, vertical || i == 1 ? w : tile_w);
+      put(864 + i * 16, !vertical || i == 1 ? h : tile_h);
+    }
+  }
+  SetBootRenderFrame(w, h);
+  if (BootPortraitWidth()) {
+    const auto crop = PortraitCropSize({int(w), int(h)});
+    SetBootPortraitFrame(crop.width, crop.height);
+  }
+  WriteGuestLayoutAspect(base);
+  release(old);
+  { std::lock_guard lock(g_profiles_mutex); g_profile_first_frame = false; }
+  failed = {};
+  acknowledge(true);
+  caller.fpscr = ctx.fpscr;
+  REXLOG_INFO("render: {} profile {}x{} -> guest {}x{} at {}x", game ? "gameplay" : "interface",
+              pixels.width, pixels.height, w, h, scale);
+}
+
+REX_HOOK_RAW(sub_823F3C40) {
+  rb_blitz::settings::UpdateResolutionProfile(ctx, base, ctx.r3.u32);
+  __imp__sub_823F3C40(ctx, base);
 }

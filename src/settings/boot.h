@@ -166,6 +166,9 @@ class SettingsBoot {
   void AcknowledgeSongSelectionRefresh(uint64_t revision);
   void NoteControllerLayoutQueued(uint64_t ticket, uint64_t generation, const Value& value);
   void AcknowledgeControllerLayout(uint64_t ticket, const std::string& scheme);
+  void NoteResolutionProfileQueued(SettingId id, uint64_t generation, const Value& value);
+  void AcknowledgeResolutionProfile(SettingId id, const Value& value, bool applied,
+                                    const std::string& error = {});
   // A successful live write advances the running baseline. A failed write leaves it unchanged,
   // including when the requested value happens to equal the original boot value.
   void NoteAppliedRows(const std::map<SettingId, Value>& requested,
@@ -214,6 +217,7 @@ class SettingsBoot {
   std::vector<Applied> deferred_writes_;
   RenderPathLimits render_limits_;
   GuestScreenPlan screen_plan_;
+  int profile_draw_scale_ = 0;
   bool probe_render_active_ = false;
   GraphicsBootState graphics_boot_;
   std::function<bool()> presented_probe_;
@@ -233,6 +237,7 @@ class SettingsBoot {
   uint64_t controller_layout_ticket_ = 0;
   uint64_t controller_layout_generation_ = 0;
   Value controller_layout_value_;
+  std::map<SettingId, std::pair<uint64_t, Value>> resolution_profiles_queued_;
   unsigned application_diagnostics_logged_ = 0;
   // Rows a live apply pass could not apply this session (see `NoteRestartRows`).
   std::vector<SettingId> restart_rows_noted_;

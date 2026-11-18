@@ -644,6 +644,10 @@ void ApplyDefaultTitle(PanelSpec* panel) {
       {"settings_restore_defaults_panel", "RESTORE SETTINGS"},
       {"settings_menu_music_panel", "BACKGROUND MUSIC"},
       {"settings_display_panel", "DISPLAY"},
+      {"settings_resolution_panel", "RESOLUTION"},
+      {"settings_scale_panel", "RENDER SCALE"},
+      {"settings_scale_interface_panel", "INTERFACE RENDER SCALE"},
+      {"settings_scale_gameplay_panel", "GAMEPLAY RENDER SCALE"},
       {"settings_graphics_panel", "GRAPHICS"},
       {"settings_aa_panel", "ANTI-ALIASING"},
       {"settings_gameplay_panel", "GAMEPLAY"},
@@ -1066,11 +1070,10 @@ std::vector<PanelSpec> AllPanels() {
                                         "Rock Band Blitz Demo", "Start the Rock Band Blitz demo."),
                           }});
 
-  // Extra Features owns store, menu music, and settings descriptions.
+  // Extra Features owns store and menu music.
   out.push_back(PanelSpec{"settings_dlc_panel", "settings_dlc_screen", "settings_general_screen", MenuPanels(), {
       SubmenuRow("settings_rhythmverse_menu", "settings_rhythmverse_screen", "RhythmVerse", "Browse store settings and the Filters page."),
-      SubmenuRow("settings_menu_music", "settings_menu_music_screen", "Background Music", "Choose the music source, player, navigation, and song shortcut."),
-      SubmenuRow("settings_labels_menu", "settings_labels_screen", "Settings Labels", "Choose whether settings descriptions are shown and how large they appear.")
+      SubmenuRow("settings_menu_music", "settings_menu_music_screen", "Background Music", "Choose the music source, player, navigation, and song shortcut.")
   }});
 
   // The filter remains reachable with the master off. Both contexts use this same page. P9-11's
@@ -1122,14 +1125,18 @@ std::vector<PanelSpec> AllPanels() {
       SubmenuRow("settings_video_menu", "settings_video_screen", "Video", "Display and graphics settings.")
   }});
   out.push_back(PanelSpec{"settings_video_panel", "settings_video_screen", "settings_av_screen", MenuPanels(), {
-      SubmenuRow("settings_display_menu", "settings_display_screen", "Display", "Window mode, orientation, aspect ratio, render scale, and V-Sync."),
+      SubmenuRow("settings_display_menu", "settings_display_screen", "Display", "Resolution, window mode, orientation, and V-Sync."),
       SubmenuRow("settings_graphics_menu", "settings_graphics_screen", "Graphics", "Anti-aliasing, texture filtering, depth of field, and renderer.")
   }});
 
-  // 3a-i. Display: aspect and rendering density are independent; the page stays below six rows.
+  // Display keeps one profile entry followed by the window and presentation controls.
   out.push_back(PanelSpec{"settings_display_panel", "settings_display_screen",
                           "settings_video_screen", MenuPanels(),
                           {
+                              SubmenuRow("settings_resolution_menu", "settings_resolution_screen", "Resolution",
+                                         "Choose separate interface and gameplay resolutions."),
+                              SubmenuRow("settings_scale_menu", "settings_scale_screen", "Render Scale",
+                                         "Choose separate interface and gameplay rendering scales."),
                               SelectRow("settings_display", "graphics.display", "Window Mode",
                                         "Run the game windowed, borderless, or full screen.",
                                         Choices({"windowed", "Windowed", "borderless",
@@ -1137,18 +1144,32 @@ std::vector<PanelSpec> AllPanels() {
                               SelectRow("settings_orientation", "graphics.orientation", "Orientation",
                                         "Portrait arranges the menus, HUD and gameplay. Restart to apply.",
                                         Choices({"landscape", "Landscape", "portrait", "Portrait"})),
-                              SelectRow("settings_aspect_ratio", "graphics.aspect_ratio", "Aspect Ratio",
-                                        "Auto follows your display shape. Restart to apply.",
-                                        Choices({"auto", "Auto", "16:9", "16:9", "16:10", "16:10",
-                                                 "4:3", "4:3", "21:9", "21:9", "32:9", "32:9"})),
-                              SelectRow("settings_render_scale", "graphics.render_scale", "Render Scale",
-                                        "More detail costs speed. Restart to apply.",
-                                        Choices({"auto", "Auto", "1x", "1x", "2x", "2x", "3x", "3x"})),
                               BoolRow("settings_vsync", "graphics.vsync", "V-Sync",
                                       "Match the frame rate to your display to remove screen tearing."),
                               BoolRow("settings_overscan", "guest.overscan", "Overscan",
                                       "Expand the picture so it fills the screen edge to edge."),
                           }});
+
+  out.push_back(PanelSpec{"settings_resolution_panel", "settings_resolution_screen",
+      "settings_display_screen", MenuPanels(), {
+      SelectRow("settings_interface_resolution", "graphics.interface_resolution", "Interface",
+                "Set menu rendering detail independently from gameplay.", Choices({"native", "Current"})),
+      SelectRow("settings_gameplay_resolution", "graphics.gameplay_resolution", "Gameplay",
+                "Lower gameplay resolution to improve performance.", Choices({"native", "Current"}))}});
+  out.push_back(PanelSpec{"settings_scale_panel", "settings_scale_screen",
+      "settings_display_screen", MenuPanels(), {
+      SubmenuRow("settings_interface_scale", "settings_scale_interface_screen", "Interface",
+                 "Set menu rendering detail independently from gameplay."),
+      SubmenuRow("settings_gameplay_scale", "settings_scale_gameplay_screen", "Gameplay",
+                 "Lower gameplay resolution to improve performance.")}});
+  for (const auto& scope : {std::string("interface"), std::string("gameplay")}) {
+    out.push_back(PanelSpec{"settings_scale_" + scope + "_panel", "settings_scale_" + scope + "_screen",
+        "settings_scale_screen", MenuPanels(), {
+        SelectRow(("settings_scale_" + scope).c_str(), ("graphics." + scope + "_render_scale").c_str(), "Scale",
+                  "Render from half to full screen resolution in steps of 0.1.",
+                  Choices({"5", "0.5", "6", "0.6", "7", "0.7", "8", "0.8", "9", "0.9", "10", "1.0"}), false, "i:")},
+        "../av_options/settings_scale.milo"});
+  }
 
   // 3a-ii. Graphics: the render-path rows, with Depth of Field moved here from Gameplay and drawn
   // in the positive sense (`Depth of Field: On`), because that is what the provider variable
@@ -1268,16 +1289,17 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_interface_panel", "settings_interface_screen", "settings_general_screen", MenuPanels(), {
       SubmenuRow("settings_main_menu", "settings_main_menu_screen", "Main Menu", "Choose which main-menu entries are visible."),
       SubmenuRow("settings_music_library_store", "settings_music_library_store_screen", "Library Display", "Library tabs and currency balances."),
+      SubmenuRow("settings_labels_menu", "settings_labels_screen", "Settings Labels", "Choose whether settings descriptions are shown and how large they appear."),
       BoolRow("settings_offline", "interface.hide_offline_prompts", "Skip Offline Prompts", "Skip the connection prompts and go straight to the menu in offline mode.")
   }});
 
   out.push_back(PanelSpec{"settings_labels_panel", "settings_labels_screen",
-                          "settings_dlc_screen", MenuPanels(), {
+                          "settings_interface_screen", MenuPanels(), {
       BoolRow("settings_labels", "interface.settings_labels", "Enabled",
               "Show a description of the selected setting."),
       SelectRow("settings_label_size", "interface.settings_label_size", "Size",
-                "Choose Normal, Big, or Biggest text. Applies immediately.",
-                Choices({"normal", "Normal", "big", "Big", "biggest", "Biggest"}))
+                "Choose Small, Normal, or Big text. Applies immediately.",
+                Choices({"normal", "Small", "big", "Normal", "biggest", "Big"}))
   }});
 
   out.push_back(PanelSpec{"settings_music_library_store_panel", "settings_music_library_store_screen",
@@ -1586,7 +1608,8 @@ std::vector<PanelSpec> InSongPanels() {
     } else if (panel.back.rfind("settings_", 0) == 0) {
       panel.back = PauseScreen(panel.back);
     }
-    panel.scene = panel.message.empty()
+    panel.scene = panel.scene == "../av_options/settings_scale.milo"
+        ? "../av_options/settings_scale_pause.milo" : panel.message.empty()
         ? kPauseSceneName
         : "../pause/settings_confirmation_pause.milo";
     panel.panels = PausePanels();
@@ -2245,9 +2268,42 @@ Node MoveMember(const PanelSpec& panel, const char* name, const bool forward) {
   return Arr({Sym(name), Cmd({Sym("if"), Cmd({Sym("!"), Var("rbbz_settings_editing")}), std::move(body)})});
 }
 
+Node ScalePanelDefinition(const PanelSpec& panel) {
+  const auto& row = panel.rows.front();
+  constexpr auto slider = "sound_effects_slider.sld";
+  Node unhandled = Node::Int(0); unhandled.tag = 0x06;
+  std::vector<Node> enter{Sym("enter"),
+      Cmd({Sym("shell_sfx"), Sym("set_interceptor"), Var("this")}),
+      Cmd({Sym("checkbox.lst"), Sym("set_showing"), Sym("FALSE")}),
+      Cmd({Sym("track_sound_slider.sld"), Sym("set_showing"), Sym("FALSE")}),
+      Cmd({Sym(slider), Sym("set_num_steps"), Node::Int(6)}),
+      Cmd({Sym(slider), Sym("set_current"), Node::Int(5)}),
+      Cmd({Sym(slider), Sym("set_showing"), Sym("TRUE")}),
+      Cmd({Sym("header.lbl"), Sym("set"), Sym("text_token"), Sym(panel.title_key)}),
+      Cmd({Var("this"), Sym("set_focus"), Sym(slider)}), HelpWrite(row.symbol)};
+  for (int i = 5; i <= 10; ++i)
+    enter.push_back(Cmd({Sym("if"), Cmd({Sym("file_exists"),
+        Str(Path("snapshot", row.setting, "i:" + std::to_string(i)))}),
+        Cmd({Sym(slider), Sym("set_current"), Node::Int(i - 5)})}));
+  std::vector<Node> save{Sym("switch"), Cmd({Sym(slider), Sym("current")})};
+  for (int i = 0; i < 6; ++i)
+    save.push_back(Arr({Node::Int(i), ChangeSetting(row.setting, "i:" + std::to_string(i + 5),
+                                                 g_emitting_pause, Leave())}));
+  return Cmd({Sym("new"), Sym("UIPanel"), Sym(panel.name), Arr({Sym("file"), Str(panel.scene)}),
+      Arr({Sym("focus"), Sym(slider)}), GetFocusMember(), Arr(std::move(enter)),
+      Arr({Sym("exit"), HelpWrite("")}),
+      Arr({Sym("BUTTON_DOWN_MSG"), Cmd({Sym("switch"), Var("action"),
+          Arr({Sym("kAction_Confirm"), Cmd(save)}), Arr({Sym("kAction_Start"), Cmd(save)}),
+          Arr({Sym("kAction_Cancel"), Leave()}), Arr({Sym("kAction_ViewModify"), Leave()}),
+          unhandled})})});
+}
+
 Node PanelDefinition(const PanelSpec& panel) {
   g_emitting_pause = panel.scene == kPauseSceneName ||
-                     panel.scene == "../pause/settings_confirmation_pause.milo";
+                     panel.scene == "../pause/settings_confirmation_pause.milo" ||
+                     panel.scene == "../av_options/settings_scale_pause.milo";
+  if (!panel.rows.empty() && (panel.scene == "../av_options/settings_scale.milo" ||
+      panel.scene == "../av_options/settings_scale_pause.milo")) return ScalePanelDefinition(panel);
   Node enter = EnterExit();
   if (!panel.message.empty())
     enter.kids.push_back(Cmd({Sym("pause.lbl"), Sym("set_token_fmt"), Sym(panel.message)}));
@@ -3771,6 +3827,8 @@ std::vector<std::pair<std::string, std::string>> Labels() {
     out.emplace_back(key, text);
   };
   for (const PanelSpec& panel : AllPanels()) {
+    // The native wheel draws dots and a title, with no per-value text rows.
+    if (panel.scene == "../av_options/settings_scale.milo") continue;
     for (const Row& row : panel.rows) {
       if (row.label.empty()) {
         continue;

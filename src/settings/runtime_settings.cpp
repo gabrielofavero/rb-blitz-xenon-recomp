@@ -336,10 +336,10 @@ rex::Setting<std::string> rb_blitz::settings::title::dlc_library_content_type{
 
 rex::Setting<uint32_t> rb_blitz::settings::title::dlc_scan_threads{
     &rb_blitz::settings::TitleSettingOwner("blitz.runtime"), "dlc_scan_threads",
-1,
+0,
     "Threads used to read a DLC library's package headers: 1 (the "
-                      "default) reads them on the calling thread; 0 uses the machine's "
-                      "core count, capped at 8; any other value is that many workers. "
+                      "single-thread mode) reads them on the calling thread; 0 uses the machine's "
+                      "core count, capped at 32; any other value is that many workers. "
                       "The scan's result is identical at any thread count.",
     rex::kRestart};
 
@@ -534,7 +534,7 @@ false,
 
 rex::Setting<std::string> rb_blitz::settings::title::song_load_guard{
     &rb_blitz::settings::TitleSettingOwner("blitz.runtime"), "song_load_guard",
-"off",
+"60s",
     "Restart to the main menu when a song load exceeds this deadline; applies to the next load.",
     rex::Allowed{"off", "30s", "60s"}};
 
@@ -738,13 +738,13 @@ rex::Setting<bool> rb_blitz::settings::title::settings_help_overlay{
 true,
     "Show a short description of the highlighted row at the bottom of the screen "
                     "while a settings menu is open (Help & Options and the retail pages it "
-                    "opens). The same switch as Game -> Extra Features -> Settings Labels, applied live. "
+                    "opens). The same switch as Game -> Menus & Prompts -> Settings Labels, applied live. "
                     "Faithful: off draws nothing at all."};
 
 rex::Setting<std::string> rb_blitz::settings::title::settings_help_size{
     &rb_blitz::settings::TitleSettingOwner("blitz.settings"), "settings_help_size",
-"normal",
-    "Settings description size: normal, big, or biggest. Applied live."};
+"big",
+    "Settings description size: normal (Small), big (Normal), or biggest (Big). Applied live."};
 
 
 rex::Setting<bool> rb_blitz::settings::title::window_resizable{

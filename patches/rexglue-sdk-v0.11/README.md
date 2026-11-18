@@ -1,6 +1,6 @@
 # ReXGlue v0.11.0 production stack and migration ledger
 
-Status: registered production stack, 2026-11-18. **65 SDK patches** apply to exact
+Status: registered production stack, 2026-11-18. **66 SDK patches** apply to exact
 upstream v0.11.0 commit `a3e1d82678ca20d68d4837a8e9ee4652ff073745`.
 The production gitlink and title integration now use this release and patch set.
 The fresh Windows AMD64 production source-SDK release build passes.
@@ -26,7 +26,23 @@ no production behavior or runtime timeout.
 0093 separately orders write publication after queued ring setup and retires the
 previous pointer while preserving nonblocking memory-wait callers; 0018 retains
 malformed-packet recovery.
+0094 adds optional live frontbuffer aspect selection, separate from viewport
+instrumentation (0015) and native window/display modes (0016). It preserves the
+startup video-mode default and all existing interfaces. The setting is shared
+by D3D12 on Windows and Vulkan on Windows, Linux, macOS and iOS (including
+MoltenVK), independent of host architecture. Windows AMD64 compilation and
+full-stack replay are checked locally; native Linux/macOS/iOS/Android and
+Vulkan/MoltenVK runtime transitions remain unverified.
 No removed SDK API shim or second runtime is introduced.
+
+### Live frontbuffer aspect (2026-11-18)
+
+[0094-live-frontbuffer-aspect.patch](0094-live-frontbuffer-aspect.patch) adds
+`gpu.xenos.present_source_aspect`, default false. When enabled, both swap paths
+publish the current frontbuffer aspect to the presenter. Other titles retain
+the startup video-mode aspect. No backend scale setting, platform dependency
+or existing patch is superseded. Full replay: 66 patches, zero files needing
+updates (`out/display-settings-sdk-audit.log`). Visual transitions are unverified.
 
 The ignored validation prototype is `out/rexglue-migration/worktree/`; its title
 integration is now promoted. `src/` paths below describe the title or, for SDK

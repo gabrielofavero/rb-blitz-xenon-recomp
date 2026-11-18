@@ -350,7 +350,7 @@ inline uint32_t DefaultDlcScanThreads() {
   if (hardware <= 1) {
     return 1;
   }
-  return std::min(hardware, 8u);
+  return std::min(hardware, 32u);
 }
 
 namespace detail {

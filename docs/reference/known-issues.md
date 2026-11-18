@@ -21,6 +21,15 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
+**Display profile acceptance (2026-11-18):** the first owner run exposed a void
+texture-lock status error and missing deferred SDK setting ownership. The
+[live corrections](../plans/finished/2026-11-18-live-display-profile-fixes.md)
+address those paths; acceptance of the rebuilt game remains unverified. Live resource
+transitions and visual/touch acceptance remain owner checks. The fixed backend
+multiplier can round requested dimensions by a few host pixels. Exact arbitrary
+pixel dimensions and cross-platform runtime behavior are unproven. See the
+[profile implementation](../settings/graphics.md#interface-and-gameplay-profiles-2026-11-18).
+
 **iOS bring-up (2026-11-16):** the [CLI IPA builder](../../installer/ios/README.md)
 retains the private bundled-assets route and adds a separate asset-free importer
 IPA. Its native Files picker and optional local/GitHub Ultimate setup reuse

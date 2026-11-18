@@ -1,5 +1,30 @@
 # In-game settings — status, evidence and remaining work
 
+## Display profiles and defaults (2026-11-18)
+
+The first owner run found profile allocation refusals and AA misclassified as
+External. The [live display correction](../plans/finished/2026-11-18-live-display-profile-fixes.md)
+fixes the void lock ABI and deferred startup ownership. Live visual acceptance
+remains unverified after those corrections.
+
+[static] Desktop Resolution and mobile Render Scale now have separate Interface
+and Gameplay preferences. The guest frame boundary owns resource replacement;
+the new optional SDK frontbuffer-aspect setting keeps both swap backends in
+agreement. See [graphics](graphics.md#interface-and-gameplay-profiles-2026-11-18)
+for rounding and unverified runtime limits, and
+[the delivery record](../plans/finished/2026-11-18-display-profiles-and-settings.md).
+
+Startup defaults are the supported DLC processor maximum (up to 32) and a 60s
+song-load deadline. Existing explicit preferences remain saved. Settings Labels
+is under Game -> Menus & Prompts. Its visible sizes are Small / Normal / Big;
+Normal is the new default. Stored `normal` / `big` / `biggest` tokens retain their
+previous font sizes, so saved manual choices do not change shape.
+
+The native audio sliders and mobile scale wheels accept pointer positions and
+mouse scrolling through the guest input path. Controller behavior is retained.
+Visual and touch acceptance remain owner checks.
+
+
 This is the single living record of where the in-game settings work stands: what ships today, the
 owner punch list that landed on 2026-10-13, every open item by package, the 2026-10-12 black-startup
 investigation, and the handover that preceded it. It consolidates three documents written in
@@ -11,7 +36,7 @@ Part 1 wherever they disagree.
 [tree] The owner-approved root is Game / Calibration / Controls / Audio / Video /
 How to Play / Credits. Game separates startup, unlocks, gameplay, menus/prompts,
 extra features, and restore profiles. Show Achievements uses positive On/Off;
-Exit Game visibility is editable everywhere; Settings Labels is an Extra Feature.
+Exit Game visibility is editable everywhere; Settings Labels is under Menus & Prompts.
 Native Audio retains its three controls. See [the current tree and profiles](menu.md#current-organization-2026-11-17)
 and the validation record below.
 

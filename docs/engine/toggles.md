@@ -61,7 +61,7 @@ See [Load Guard part 4](../plans/finished/2026-10-13-load-guard.md),
 [song_load_monitor.cpp](../../src/platform/song_load_monitor.cpp).
 
 **Load Guard** (General → Launch) adds the separate
-`general.load_guard` / `song_load_guard` enum: **Off / 30s / 60s**, default Off.
+`general.load_guard` / `song_load_guard` enum: **Off / 30s / 60s**, default 60s.
 A successful settings commit applies to the next song attempt without restarting.
 At expiry the external monitor ends the unfinished process, waits for exit and
 fast-boots to the main menu with a timeout-specific native dialog. Completion,
@@ -94,6 +94,8 @@ R6 uses `mouse_ui_nav`, outside the `[enhancements]` table; the old `enhancement
 
 The other cvars live in [src/enhancements.cpp](../../src/enhancements.cpp); the names are asserted by the
 boot log, not by this page.
+
+`gpu.xenos.present_source_aspect` defaults off in the SDK. Resolution profiles enable it to follow the live frontbuffer aspect in D3D12 and Vulkan; see `src/hooks/render_settings.cpp` and SDK patch 0094.
 
 ## How to set one
 

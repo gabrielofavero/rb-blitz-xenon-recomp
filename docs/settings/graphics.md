@@ -1,5 +1,47 @@
 # In-game settings — resolution and graphics (P2, P4, ultrawide)
 
+## Interface and gameplay profiles (2026-11-18)
+
+The first owner run exposed a void texture-lock call being read as an HRESULT:
+valid high-bit guest pointers were rejected, so the old frame remained active.
+The [live correction record](../plans/finished/2026-11-18-live-display-profile-fixes.md)
+records the typed output fix, deferred setting replay, and validation limits.
+Native windows are fitted from the display rather than the render profile;
+context changes keep the current window and fit each active aspect with bars.
+
+[static] The visible desktop controls are Resolution -> Interface / Gameplay.
+Each defaults to `native`, resolving the current monitor on each boot. The other
+choices are 16:9 sizes that fit that monitor, including its fitted 16:9 equivalent
+and presets down to 1280x720. Manual choices persist independently. Mobile hides
+Resolution and offers Render Scale -> Interface / Gameplay, each a guest audio
+wheel with six positions from 0.5 through 1.0; both default to 1.0.
+
+`src/settings/resolution_profiles.h` owns offers and guest-frame arithmetic.
+The SDK multiplier remains fixed for the boot. `src/hooks/render_settings.cpp`
+replaces guest color/depth targets and resolve textures at BeginDrawing
+(`sub_823F3C40`) when the selected context needs a different frame. It publishes
+all replacements together, releases resources through the guest D3D lifetime
+route, and retains the previous frame on allocation failure. Interface menus
+and live gameplay select separate profiles. The application ledger acknowledges
+an edit only after its active frame accepts it; inactive contexts stay queued.
+Recovery seeds conservative effective profiles in both contexts while retaining
+the saved requests. The profile renderer remains active for subsequent edits.
+
+Tile boundaries use 32-pixel alignment separately from the visible frame width.
+Dimensions are rounded to the nearest guest pixel when they are not divisible
+by the fixed backend multiplier. Thus a requested dimension can differ by a few
+host pixels; exact arbitrary-pixel rendering remains unproven. The new profile
+path permits guest heights below the legacy 540-pixel floor. Native visual,
+long-session, allocation-failure and unusual-aspect acceptance are unverified;
+the older measured gates below continue to describe the legacy planner.
+
+SDK patch 0094 optionally derives presentation aspect from the current frontbuffer
+in D3D12 and Vulkan. It defaults off; this title enables it for profiles. The
+mouse mapper reads the same live frame aspect. Portrait visible-region settings
+refresh when profile dimensions change. Windows AMD64 is the available build;
+native Linux, macOS, iOS, Android and MoltenVK transitions remain unverified.
+
+
 This file consolidates three records about the picture. Part 1 (P2) asks **what the title can actually render** — it is resolution-blind, offers two heights (720 and 540), and exact 1920x1080 is reached by pairing its 540 mode with the SDK's 2x draw scale (measured) or by changing one guest constant. Part 2 (P4) asks **what the graphics policy is** — which backends, resolutions, AA and filtering steps may be published, how a request is corrected without lying to the user, and what first run and failed-boot recovery do. Part 3 (ultrawide) asks **what non-16:9 costs** — three facts must change together (the frame, the layout space, the presenter), the HUD is still open, and a planner window bounds which sizes are offered at all. Evidence labels: **measured** = executed and read out of a log/capture; **source** = read from the repository; **static** = read from the recompiled guest, not observed to execute.
 
 For shader preparation, startup reuse, failure recovery and measured limits,

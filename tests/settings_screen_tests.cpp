@@ -72,8 +72,9 @@ using namespace rb_blitz::test;
 
 using dtb::Node;
 
-constexpr size_t kExpectedPagesPerContext = 70;
+constexpr size_t kExpectedPagesPerContext = 74;
 constexpr size_t kExpectedPages = 2 * kExpectedPagesPerContext;
+constexpr size_t kExpectedListPages = kExpectedPages - 4;  // two native wheels per context
 
 bool SuppressesSettingsCaption(const std::string_view name) {
   return name.starts_with("settings_restart") ||
@@ -536,12 +537,15 @@ void TestListOwnership() {
     if (std::find(words.begin(), words.end(), "UIPanel") == words.end()) {
       continue;  // a screen, not a panel
     }
-    CHECK_TRUE(HasText(root, kListName));
+    const bool scale = HasText(root, "../av_options/settings_scale.milo") ||
+                       HasText(root, "../av_options/settings_scale_pause.milo");
+    CHECK_TRUE(HasText(root, scale ? "sound_effects_slider.sld" : kListName));
     CHECK_FALSE(HasText(root, "options_menu.milo"));
     const bool pause = HasText(root, kPauseSceneName) ||
-                       HasText(root, "../pause/settings_confirmation_pause.milo");
+                       HasText(root, "../pause/settings_confirmation_pause.milo") ||
+                       HasText(root, "../av_options/settings_scale_pause.milo");
     CHECK_TRUE(pause || HasText(root, kSceneName) ||
-               HasText(root, "../pause/settings_confirmation.milo"));
+               HasText(root, "../pause/settings_confirmation.milo") || scale);
     (pause ? in_song : main_menu) += 1;
   }
   CHECK_EQ(main_menu, kExpectedPagesPerContext);
@@ -1533,7 +1537,7 @@ void TestEveryFillPlacesTheSelection() {
       }
     }
   }
-  CHECK_EQ(fills, kExpectedPages);                   // every panel, in both contexts
+  CHECK_EQ(fills, kExpectedListPages);                   // every panel, in both contexts
   CHECK_EQ(placements, fills + moving);  // fills place it; the arrows are the only other movers
 
   // Every placement is on our own list, with an integer index.
@@ -1727,7 +1731,7 @@ void TestButtonTableIsOneSwitch() {
     for (const std::string& word : Words(*switches.front())) {
       if (word == "select_row") ++selects;
     }
-    CHECK_TRUE(selects >= 2);  // Confirm and Start both call it
+    CHECK_TRUE(selects >= 2 || HasText(root, "sound_effects_slider.sld"));  // Confirm and Start both call it
   }
   CHECK_EQ(tables, kExpectedPages);  // every panel, in both contexts
 
@@ -1789,7 +1793,7 @@ void TestButtonTableIsOneSwitch() {
         static_cast<size_t>(in_ultimate);
     CHECK_EQ(extra, HasWord(root, "kAction_Left") ? 2u : 0u);  // the two arrow tables, or none
   }
-  CHECK_EQ(row_tables, kExpectedPages);  // one row table per panel, in both contexts
+  CHECK_EQ(row_tables, kExpectedListPages);  // one row table per panel, in both contexts
 }
 
 void TestSelectAdvancesAndWraps() {
@@ -1953,7 +1957,7 @@ void TestRestartPromptOnlyOnLeave() {
   // P9-11 retired the ten authored search-key pages (one root, the letters index, five character
   // groups, two number groups and More Keys) in both contexts: the store's Search row opens the
   // title's own keyboard now. 142 - 2 * 10.
-  CHECK_EQ(panels, kExpectedPages);
+  CHECK_EQ(panels, kExpectedListPages);
   CHECK_EQ(root_cancels, 2);
   CHECK_EQ(other_cancels, panels - root_cancels);
 }
@@ -3084,7 +3088,7 @@ void TestHelpEventsInTheDefinition() {
       }
     }
   }
-  CHECK_EQ(panels, kExpectedPages);        // every page, in both contexts
+  CHECK_EQ(panels, kExpectedListPages);    // every list page, in both contexts
   CHECK_EQ(enters, panels);    // every page tells the overlay where the highlight starts
   CHECK_TRUE(moves > 100);     // the unclamped direction cases, across the surface
   CHECK_EQ(scrolls, expected_scrolls);
@@ -3312,7 +3316,7 @@ void TestHudShapeAndVisibilityLabels() {
 void TestShowHeadersRow() {
   BeginCase("independent Messages / Recommendations rows fit and retain both context Back targets");
   CHECK_TRUE(PanelRowSymbols("settings_interface_panel") ==
-      std::vector<std::string>({"settings_main_menu", "settings_music_library_store", "settings_offline"}));
+      std::vector<std::string>({"settings_main_menu", "settings_music_library_store", "settings_labels_menu", "settings_offline"}));
   CHECK_TRUE(PageRows(PausePanel("settings_interface_panel")) == PageRows("settings_interface_panel"));
   CHECK_TRUE(PanelRowSymbols("settings_prompts_labels_panel").empty());
   CHECK_TRUE(PanelRowSymbols("settings_music_library_store_panel") ==
@@ -3383,7 +3387,7 @@ void TestFeatureTreeAndRestoreProfiles() {
     CHECK_TRUE(PanelRowSymbols(panel("settings_achievements_panel")) == std::vector<std::string>({
         "settings_unlock_all", "settings_unlock_online", "settings_hide_achievements", "settings_mm_achievements"}));
     CHECK_TRUE(PanelRowSymbols(panel("settings_dlc_panel")) == std::vector<std::string>({
-        "settings_rhythmverse_menu", "settings_menu_music", "settings_labels_menu"}));
+        "settings_rhythmverse_menu", "settings_menu_music"}));
     CHECK_TRUE(PanelRowSymbols(panel("settings_av_panel")) == std::vector<std::string>({"settings_audio", "settings_video_menu"}));
     CHECK_TRUE(PanelRowSymbols(panel("settings_video_panel")) == std::vector<std::string>({"settings_display_menu", "settings_graphics_menu"}));
     CHECK_TRUE(PanelRowSymbols(panel("settings_restore_defaults_panel")) == std::vector<std::string>({"settings_restore_recommended", "settings_restore_vanilla"}));
@@ -3466,7 +3470,7 @@ void TestLoadGuardSurface() {
 void TestMusicNavigationSurface() {
   BeginCase("music navigation: live bindings, Add/Replace/Reset pages and both back targets");
   ConfigureMenu({});
-  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 3u);
+  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 4u);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
   const std::vector<std::string> actions{"settings_bind_music_next", "settings_bind_music_previous", "settings_bind_music_pause"};
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
@@ -3517,7 +3521,7 @@ void TestMusicNavigationSurface() {
   // Off must keep the identical tree, including the command page in both contexts.
   CHECK_EQ(PanelNames().size(), kExpectedPages);
   CHECK_EQ(PanelRowSymbols("settings_interface_mapping_panel").size(), 6u);
-  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 3u);
+  CHECK_EQ(PanelRowSymbols("settings_interface_panel").size(), 4u);
   CHECK_TRUE(PanelRowSymbols("settings_interface_music_play_panel") == actions);
   CHECK_TRUE(PageRows(PausePanel("settings_interface_music_play_panel")) == actions);
   const auto before = dtb::Compile(roots);
@@ -3632,52 +3636,36 @@ void TestAchievementActionWording() {
   }
 }
 
-void TestAspectAndRenderScaleRows() {
-  BeginCase("aspect ratio and render scale are separate authored Display selectors");
-  ConfigureMenu({});
-  for (const auto* panel : {"settings_display_panel", "settings_display_pause_panel"}) {
-    const auto rows = PanelRowSymbols(panel);
-    CHECK_EQ(rows.size(), 6u);
-    CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_orientation") != rows.end());
-    CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_aspect_ratio") != rows.end());
-    CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_render_scale") != rows.end());
-    CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_resolution") == rows.end());
+void TestResolutionProfileRows() {
+  BeginCase("desktop Resolution and mobile Render Scale have independent context controls");
+  for (const bool mobile : {false, true}) {
+    MenuConfiguration configuration;
+    for (const auto* scope : {"interface", "gameplay"}) {
+      configuration.hidden.insert(std::string("graphics.") + scope +
+                                  (mobile ? "_resolution" : "_render_scale"));
+      configuration.choices[std::string("graphics.") + scope + "_resolution"] =
+          {{"native", "2560x1080"}, {"1920x1080", "1920x1080"}, {"1280x720", "1280x720"}};
+    }
+    ConfigureMenu(configuration);
+    const auto rows = PanelRowSymbols("settings_display_panel");
+    CHECK_TRUE(rows.front() == (mobile ? "settings_scale_menu" : "settings_resolution_menu"));
+    CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_aspect_ratio") == rows.end());
+    CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_render_scale") == rows.end());
+    const auto paths = RequestPaths();
+    for (const auto* scope : {"interface", "gameplay"}) {
+      const auto setting = std::string("graphics.") + scope + (mobile ? "_render_scale/i:" : "_resolution/t:");
+      const auto path = std::string("rbbz-settings/set/") + setting + (mobile ? "5" : "1280x720");
+      CHECK_TRUE(std::find(paths.begin(), paths.end(), path) != paths.end());
+    }
+    if (mobile) {
+      for (const auto& root : DefinitionRoots()) {
+        if (root.kids.size() < 3 || root.kids[2].text != "settings_scale_interface_panel") continue;
+        CHECK_TRUE(HasText(root, "sound_effects_slider.sld"));
+        CHECK_TRUE(HasText(root, "set_num_steps"));
+        CHECK_FALSE(HasText(root, "options.lst"));
+      }
+    }
   }
-  const auto paths = RequestPaths();
-  for (const auto* ratio : {"auto", "16:9", "16:10", "4:3", "21:9", "32:9"}) {
-    const std::string set = std::string("rbbz-settings/set/graphics.aspect_ratio/t:") + ratio;
-    CHECK_TRUE(std::find(paths.begin(), paths.end(), set) != paths.end());
-  }
-  for (const auto* orientation : {"landscape", "portrait"}) {
-    const std::string set = std::string("rbbz-settings/set/graphics.orientation/t:") + orientation;
-    CHECK_TRUE(std::find(paths.begin(), paths.end(), set) != paths.end());
-  }
-  for (const auto* scale : {"auto", "1x", "2x", "3x"}) {
-    const std::string set = std::string("rbbz-settings/set/graphics.render_scale/t:") + scale;
-    CHECK_TRUE(std::find(paths.begin(), paths.end(), set) != paths.end());
-  }
-  for (const auto& path : paths) CHECK_FALSE(path.find("graphics.resolution/") != std::string::npos);
-  for (const auto& [symbol, label] : Labels()) {
-    if (symbol.starts_with("settings_aspect_ratio_") || symbol.starts_with("settings_render_scale_"))
-      CHECK_TRUE(label.size() <= 28);
-  }
-  for (const auto* symbol : {"settings_orientation", "settings_aspect_ratio", "settings_render_scale"}) {
-    const auto caption = HelpTextFor(symbol);
-    CHECK_TRUE(caption.size() <= 96);
-    CHECK_TRUE(caption.find("Restart to apply.") != std::string::npos);
-  }
-
-  BeginCase("render scale uses only choices offered by the active backend");
-  MenuConfiguration bounded;
-  bounded.choices["graphics.render_scale"] = {{"auto", "Auto"}, {"1x", "1x"}};
-  ConfigureMenu(bounded);
-  const auto bounded_paths = RequestPaths();
-  CHECK_TRUE(std::find(bounded_paths.begin(), bounded_paths.end(),
-      "rbbz-settings/set/graphics.render_scale/t:1x") != bounded_paths.end());
-  CHECK_TRUE(std::find(bounded_paths.begin(), bounded_paths.end(),
-      "rbbz-settings/set/graphics.render_scale/t:2x") == bounded_paths.end());
-  CHECK_TRUE(std::find(bounded_paths.begin(), bounded_paths.end(),
-      "rbbz-settings/set/graphics.render_scale/t:3x") == bounded_paths.end());
   ConfigureMenu({});
 }
 
@@ -3812,7 +3800,9 @@ void TestHiddenDisplayGroup() {
   BeginCase("hidden device display rows remove the empty Display and Advanced routes");
   MenuConfiguration configuration;
   configuration.hidden = {"graphics.orientation", "graphics.display", "graphics.aspect_ratio", "graphics.render_scale",
-                           "graphics.vsync", "graphics.renderer", "guest.overscan"};
+                           "graphics.vsync", "graphics.renderer", "guest.overscan",
+                           "graphics.interface_resolution", "graphics.gameplay_resolution",
+                           "graphics.interface_render_scale", "graphics.gameplay_render_scale"};
   ConfigureMenu(configuration);
   CHECK_TRUE(PageRows("settings_av_panel") ==
              std::vector<std::string>({"settings_audio", "settings_video_menu"}));
@@ -4164,7 +4154,7 @@ void TestRhythmVerseRows() {
 
   // P9-3: the store submenu leads the five-row page in both contexts.
   const std::vector<std::string> expected_dlc = {
-      "settings_rhythmverse_menu", "settings_menu_music", "settings_labels_menu"};
+      "settings_rhythmverse_menu", "settings_menu_music"};
   const std::vector<std::string> expected_store = {
       "settings_rhythmverse", "settings_mm_rhythmverse", "settings_rhythmverse_filter"};
   CHECK_TRUE(PanelRowSymbols("settings_dlc_panel") == expected_dlc);
@@ -4822,7 +4812,7 @@ int main(int argc, char** argv) {
   TestHideMobileExit();
   TestRendererRowVisibility();
   TestHiddenDisplayGroup();
-  TestAspectAndRenderScaleRows();
+  TestResolutionProfileRows();
   TestScreenBindingRows();
   TestLiveBindingText();
   TestInterfaceMappingTreeAfterP3();

@@ -47,6 +47,7 @@ constexpr std::pair<std::string_view, std::string_view> kSdkBindings[] = {
     {"draw_visible_depth_info", "gpu.xenos.draw_visible_depth_info"},
     {"draw_visible_region_probe", "gpu.xenos.draw_visible_region_probe"},
     {"present_letterbox", "gpu.xenos.present_letterbox"},
+    {"present_source_aspect", "gpu.xenos.present_source_aspect"},
     {"present_safe_area_x", "gpu.xenos.present_safe_area_x"},
     {"present_safe_area_y", "gpu.xenos.present_safe_area_y"},
     {"present_allow_overscan_cutoff", "gpu.xenos.present_allow_overscan_cutoff"},

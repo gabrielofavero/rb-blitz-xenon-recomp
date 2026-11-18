@@ -501,6 +501,26 @@ void TestMotionDeployMigration() {
 }  // namespace
 
 int main() {
+  {
+    BeginCase("interface and gameplay preferences survive independent saves");
+    Scratch scratch;
+    const auto file = scratch.base / "settings.toml";
+    WriteFile(file, "schema_version = 1\n[graphics]\ninterface_resolution = 'native'\ngameplay_resolution = '1280x720'\ninterface_render_scale = 10\ngameplay_render_scale = 5\n");
+    const auto loaded = LoadSettingsDocument(file);
+    CHECK_STR_EQ(loaded.document.values.at(SettingId::kInterfaceResolution).text, "native");
+    CHECK_STR_EQ(loaded.document.values.at(SettingId::kGameplayResolution).text, "1280x720");
+    CHECK_EQ(loaded.document.values.at(SettingId::kInterfaceRenderScale).integer, 10);
+    CHECK_EQ(loaded.document.values.at(SettingId::kGameplayRenderScale).integer, 5);
+    SaveRequest request;
+    request.base = loaded.document.values;
+    Value value; value.kind = ValueKind::kInt; value.integer = 8;
+    request.changed[SettingId::kGameplayRenderScale] = value;
+    CHECK_TRUE(SaveSettingsDocument(file, request).status == CommitStatus::kSaved);
+    const auto restored = LoadSettingsDocument(file);
+    CHECK_EQ(restored.document.values.at(SettingId::kInterfaceRenderScale).integer, 10);
+    CHECK_EQ(restored.document.values.at(SettingId::kGameplayRenderScale).integer, 8);
+    CHECK_STR_EQ(restored.document.values.at(SettingId::kGameplayResolution).text, "1280x720");
+  }
   TestDocumentKeepsEverythingElse();
   TestDocumentReadsArrays();
   TestLoadDocument();

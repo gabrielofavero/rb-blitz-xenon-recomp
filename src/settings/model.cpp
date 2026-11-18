@@ -84,6 +84,14 @@ std::string_view SettingIdToken(SettingId id) {
       return "startup";
     case SettingId::kOrientation:
       return "orientation";
+    case SettingId::kInterfaceResolution:
+      return "interface_resolution";
+    case SettingId::kGameplayResolution:
+      return "gameplay_resolution";
+    case SettingId::kInterfaceRenderScale:
+      return "interface_render_scale";
+    case SettingId::kGameplayRenderScale:
+      return "gameplay_render_scale";
     case SettingId::kAspectRatio:
       return "aspect_ratio";
     case SettingId::kRenderScale:

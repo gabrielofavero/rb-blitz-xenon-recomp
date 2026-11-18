@@ -19,6 +19,8 @@
 #include "assets/texture_override.h"
 #include "loading/load_policy.h"
 #include "store/store_settings.h"
+#include "hooks/render_settings.h"
+#include "settings/resolution_profiles.h"
 
 namespace rb_blitz::settings {
 namespace {
@@ -173,6 +175,7 @@ class CvarHotApplier : public HotApplier {
   }
 
   bool Knows(SettingId id) const override {
+    if (IsResolutionProfile(id)) return true;
     if (id == SettingId::kButtonScheme) return true;
     if (FindStoreRow(id) != nullptr) {
       return true;
@@ -186,6 +189,7 @@ class CvarHotApplier : public HotApplier {
   }
 
   bool Apply(SettingId id, const Value& value, std::string* error) override {
+    if (IsResolutionProfile(id)) return QueueResolutionProfile(id, value, error);
     if (id == SettingId::kButtonScheme) {
       uint64_t ticket = 0;
       if (value.kind != ValueKind::kEnum ||

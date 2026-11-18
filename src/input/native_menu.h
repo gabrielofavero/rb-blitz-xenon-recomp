@@ -77,6 +77,18 @@ struct MenuBounds {
   }
 };
 
+// The six-position audio resource is shared by the two volume controls and
+// mobile resolution profiles. Points are in the guest's presentation space.
+inline int SliderStepAt(MenuPoint point, const MenuBounds& bounds, int intervals = 5) {
+  if (!bounds.Contains(point) || intervals <= 0 || bounds.right <= bounds.left) return -1;
+  return std::clamp(int(std::floor((point.x - bounds.left) /
+                                 (bounds.right - bounds.left) * intervals + .500001f)), 0, intervals);
+}
+
+inline bool IsSettingsWheel(std::string_view focus) {
+  return focus == "sound_effects_slider.sld" || focus == "track_sound_slider.sld";
+}
+
 // Native joypad action IDs from InlineHelp's action_chars table. These are
 // destination buttons, so rebinding the displayed source does not change them.
 inline uint16_t MenuHintButton(uint32_t action) {

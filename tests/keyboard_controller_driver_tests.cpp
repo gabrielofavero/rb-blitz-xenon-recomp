@@ -22,6 +22,8 @@ class InputApp final : public rex::app::App {
     REX_TRY_VOID(root.Set(std::filesystem::current_path()));
     REX_TRY_VOID(GetUI().GetSettings().driver.SetText(rex::SettingLayer::kTitle, "none"));
     REX_TRY_VOID(GetInput().GetSettings().drivers.SetText(rex::SettingLayer::kTitle, "sdl3"));
+    // Keep the virtual regression pad on user 0 even when real pads are connected.
+    REX_TRY_VOID(GetInput().GetSettings().shared_pads.SetText(rex::SettingLayer::kTitle, "true"));
     REX_TRY_VOID(GetAudio().GetSettings().driver.SetText(rex::SettingLayer::kTitle, "none"));
     REX_TRY_VOID(GetGraphics().GetSettings().driver.SetText(rex::SettingLayer::kTitle, "none"));
     return registry.SetText(rex::SettingLayer::kTitle, "log.file", "false");

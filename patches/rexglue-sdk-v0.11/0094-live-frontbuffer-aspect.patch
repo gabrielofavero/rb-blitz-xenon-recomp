@@ -1,0 +1,42 @@
+# Live source aspect for titles that rebuild framebuffer dimensions.
+# Shared D3D12/Vulkan behavior; disabled by default.
+diff --git a/src/gpu/xenos/xenos_settings.h b/src/gpu/xenos/xenos_settings.h
+--- a/src/gpu/xenos/xenos_settings.h
++++ b/src/gpu/xenos/xenos_settings.h
+@@ -20,6 +20,8 @@
+ /** The gpu.xenos settings. The Xenos graphics driver derives from it. */
+ class XenosSettings : public SettingOwner {
+  public:
++  REX_SETTING(bool, present_source_aspect, false,
++              "Use the current frontbuffer aspect instead of the startup video mode");
+   REX_SETTING(bool, present_letterbox, true, "Keep the title's aspect ratio when presenting");
+   REX_SETTING(i32, present_safe_area_x, 90, "Horizontal title safe area percent", Range{1, 100});
+   REX_SETTING(i32, present_safe_area_y, 90, "Vertical title safe area percent", Range{1, 100});
+diff --git a/src/gpu/xenos/d3d12/command_processor.cpp b/src/gpu/xenos/d3d12/command_processor.cpp
+--- a/src/gpu/xenos/d3d12/command_processor.cpp
++++ b/src/gpu/xenos/d3d12/command_processor.cpp
+@@ -1964,6 +1964,10 @@
+   const VideoMode video_mode = title_info_.video_mode;
+   u32 display_width = std::max(static_cast<u32>(1), video_mode.width);
+   u32 display_height = std::max(static_cast<u32>(1), video_mode.height);
++  if (GetXenosSettings().present_source_aspect.Get()) {
++    display_width = std::max(u32{1}, frontbuffer_width);
++    display_height = std::max(u32{1}, frontbuffer_height);
++  }
+ 
+   if (rex::log::core.IsEnabled(rex::log::Level::kDebug)) {
+     static u32 swap_logged[10] = {};
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -2357,6 +2357,10 @@
+   const VideoMode video_mode = title_info_.video_mode;
+   u32 display_width = std::max(static_cast<u32>(1), video_mode.width);
+   u32 display_height = std::max(static_cast<u32>(1), video_mode.height);
++  if (GetXenosSettings().present_source_aspect.Get()) {
++    display_width = std::max(u32{1}, frontbuffer_width);
++    display_height = std::max(u32{1}, frontbuffer_height);
++  }
+ 
+   presenter->RefreshGuestOutput(
+       guest_output_width, guest_output_height, display_width, display_height,

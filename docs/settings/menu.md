@@ -43,14 +43,14 @@ same tree in main-menu and in-song contexts.
 | Player Feedback | Note Streak; Input Viewer |
 | Tracks & Gems | Precision Mode; Disable Random Track Wiggles; Gems |
 | Scenery | Disable Plots; Force Plot; Force Skybox |
-| Menus & Prompts | Main Menu; Library Display; Skip Offline Prompts |
+| Menus & Prompts | Main Menu; Library Display; Settings Labels; Skip Offline Prompts |
 | Main Menu | Refresh Songs; Download Content; Leaderboards; Exit Game; Unlock Full Game |
 | Library Display | Messages; Recommendations; Coins & Blitz Cred |
-| Extra Features | RhythmVerse; Background Music; Settings Labels |
+| Extra Features | RhythmVerse; Background Music |
 | RhythmVerse | Store Access; Main Menu Shortcut; Filters |
 | Filters | Guitar; Bass; Drums; Vocals; Keys |
 | Background Music | Music Source (Default / Library); Music Player; Menu Music Navigation; Play Current Song |
-| Settings Labels | Enabled (On / Off); Size (Normal / Big / Biggest) |
+| Settings Labels | Enabled (On / Off); Size (Small / Normal / Big), default Normal |
 | Restore Settings | Recommended Settings; Vanilla Settings |
 | Calibration | Native calibration wizard and manual audio/video offset flow |
 | Controls | Layout; Controller Presets; Menu Bindings; Gameplay Bindings; Touch (mobile) |
@@ -68,7 +68,7 @@ same tree in main-menu and in-song contexts.
 | Audio / Video | Audio; Video |
 | Audio | Active Track Boost; Sound Effects Volume; Bass Boost |
 | Video | Display; Graphics |
-| Display | Window Mode; Orientation; Aspect Ratio; Render Scale; V-Sync; Overscan |
+| Display | Resolution (desktop) / Render Scale (mobile); Window Mode; Orientation; V-Sync; Overscan |
 | Graphics | Anti-Aliasing; Anisotropic Filtering; Depth of Field (Ultimate); Renderer (Windows with multiple backends) |
 | Anti-Aliasing | None; Native (2x); FXAA; FXAA Extreme, subject to backend capabilities |
 | How to Play | Basic Tutorial; Advanced Tutorial |

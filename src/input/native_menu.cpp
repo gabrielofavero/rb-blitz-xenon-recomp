@@ -63,6 +63,7 @@ REX_EXTERN(__imp__sub_824BC668); // UILabel::DrawShowing (label +260)
 REX_EXTERN(sub_824BA9F8);       // UILabel::LabelStyle
 REX_EXTERN(sub_824BC7D0);       // UILabel::SetText
 REX_EXTERN(__imp__sub_824BC7D0);
+REX_EXTERN(__imp__sub_824DC2F0); // UISlider drawable traversal
 REX_EXTERN(__imp__sub_8229FD60); // RndText: cumulative UTF-16 advances during normal layout
 
 namespace rb_blitz::input {
@@ -136,6 +137,11 @@ thread_local MouseHighlight mouse_highlight;
 // the rows, so the row that comes to rest under the pointer is caught once the burst has drained
 // and the drawn frame shows the new view.
 thread_local MouseScrollFollow scroll_follow;
+struct SliderGeometry {
+  uint32_t focus = 0, frame = 0;
+  MenuBounds bounds;
+};
+thread_local SliderGeometry slider_geometry;
 thread_local MenuRailDrag rail_drag;
 
 // The gutter the window thread may arm a drag in: published per draw so input that
@@ -494,6 +500,31 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
                   current_screen_name, event->point.x, event->point.y, hint_targets.size(),
                   hint_targets.empty() ? 0 : hint_targets.back().frame, frame_number);
   }
+  // Sliders are UIComponents, with no UIListState to select or scroll. Route
+  // through their own directional handlers so their animation and value agree.
+  const auto focus_name = ObjectName(base, ObjectBase(base, current_focus));
+  if (IsSettingsWheel(focus_name)) {
+    if (event->action == MouseAction::kUp) event->action = MouseAction::kRight;
+    else if (event->action == MouseAction::kDown) event->action = MouseAction::kLeft;
+    else if (event->action == MouseAction::kAccept) {
+      // The guest's audio scene places the endpoints at these normalized
+      // coordinates; MenuPointer accounts for window size, crop and overscan.
+      const auto bounds = slider_geometry.focus == current_focus && slider_geometry.frame + 1 == frame_number
+          ? slider_geometry.bounds : MenuBounds{.284f, .86f, .716f, .97f};
+      const int step = SliderStepAt(event->point, bounds);
+      if (step < 0) return;
+      std::lock_guard lock(mutex);
+      // Clamp at the lower stop before advancing. Each pulse is acknowledged
+      // by the existing pad queue, including a release between equal directions.
+      for (int i = 0; i < 5; ++i) queue.Push(MouseAction::kLeft);
+      for (int i = 0; i < step; ++i) queue.Push(MouseAction::kRight);
+      return;
+    }
+    if (event->action == MouseAction::kMove) return;
+    std::lock_guard lock(mutex);
+    if (queue.enabled()) queue.Pulse(event->action);
+    return;
+  }
   // Header clicks precede the focused list's hit test and never become A.
   // Only a label actually drawn in the last frame can receive the click.
   if (!current_input_scope && event->action == MouseAction::kAccept &&
@@ -698,6 +729,17 @@ uint32_t SceneMesh(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* nam
   if (it == mesh_objects.end() || ObjectBase(base, it->second) != object ||
       ObjectName(base, object) != name) return 0;
   return it->second;
+}
+
+void CaptureSlider(PPCContext& ctx, uint8_t* base, uint32_t slider) {
+  if (slider != current_focus || !IsSettingsWheel(ObjectName(base, ObjectBase(base, slider)))) return;
+  const auto resource = U32(base, slider + 92);
+  if (!resource) return;
+  const auto mesh = SceneMesh(ctx, base, resource, "slider.mesh");
+  if (!mesh) return;
+  const auto bounds = ProjectMesh(ctx, base, mesh);
+  if (!bounds || bounds->right <= bounds->left || bounds->bottom <= bounds->top) return;
+  slider_geometry = {slider, frame_number, *bounds};
 }
 
 void CaptureLanePowerup(PPCContext& ctx, uint8_t* base, uint32_t dir) {
@@ -1128,6 +1170,11 @@ REX_HOOK_RAW(sub_824B2958) {
                                      rb_blitz::input::FocusedListDrawn(),
                                      rb_blitz::input::MenuAvailable()});
   trace_poll.Success();
+}
+REX_HOOK_RAW(sub_824DC2F0) {
+  const auto slider = ctx.r3.u32 - 204;
+  __imp__sub_824DC2F0(ctx, base);
+  rb_blitz::input::CaptureSlider(ctx, base, slider);
 }
 REX_HOOK_RAW(sub_824E5020) {
   rb_blitz::input::DrawList(ctx, base);
