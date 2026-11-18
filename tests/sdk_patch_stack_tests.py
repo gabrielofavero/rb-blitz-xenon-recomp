@@ -1,6 +1,7 @@
 """Exercise production SDK appliers against disposable, game-data-free gitlinks."""
 from pathlib import Path
 import difflib
+import json
 import shutil
 import subprocess
 import sys
@@ -90,6 +91,37 @@ class StackCases:
         self.assertEqual((self.sdk / "new.txt").read_bytes(), b"new final\n")
         self.assert_success(self.run_applier(check=True))
         self.assert_success(self.run_applier())
+
+    def test_revision_stack_uses_the_reviewable_gitlink_before_parent_commit(self):
+        old_pin = self.git(self.sdk, "rev-parse", "HEAD").stdout.strip()
+        self.git(self.sdk, "-c", "user.name=Fixture", "-c",
+                 "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "next SDK")
+        new_pin = self.git(self.sdk, "rev-parse", "HEAD").stdout.strip()
+        alternative = self.root / "patches/rexglue-sdk-next"
+        alternative.mkdir()
+        (alternative / "0001.patch").write_text(
+            self.diff("b.txt", "original b\n", "new SDK behavior\n"), newline="\n")
+        registry = self.root / "patches/sdk-stacks.json"
+        registry.write_text(json.dumps({"rexglue-sdk": {
+            old_pin: "rexglue-sdk", new_pin: "rexglue-sdk-next"}}))
+        self.git(self.root, "update-index", "--cacheinfo", "160000", new_pin, "rexglue-sdk")
+        self.assertIn(old_pin, self.git(self.root, "ls-tree", "HEAD", "rexglue-sdk").stdout)
+        self.assert_success(self.run_applier())
+        self.assertEqual((self.sdk / "a.txt").read_bytes(), b"original a\n")
+        self.assertEqual((self.sdk / "b.txt").read_bytes(), b"new SDK behavior\n")
+        self.assertFalse((self.sdk / "new.txt").exists())
+        self.assert_success(self.run_applier(check=True))
+
+        registry.write_text(json.dumps({"rexglue-sdk": {old_pin: "rexglue-sdk"}}))
+        result = self.run_applier()
+        self.assert_failure(result)
+        self.assertIn("No SDK patch stack is registered", result.stdout + result.stderr)
+        self.assertEqual((self.sdk / "b.txt").read_bytes(), b"new SDK behavior\n")
+        registry.write_text(json.dumps({"rexglue-sdk": {new_pin: "../outside"}}))
+        result = self.run_applier()
+        self.assert_failure(result)
+        self.assertIn("Invalid SDK patch stack directory", result.stdout + result.stderr)
+        self.assertEqual((self.sdk / "b.txt").read_bytes(), b"new SDK behavior\n")
 
     def test_conflicting_edit_prevents_all_writes(self):
         self.write("b.txt", b"local b\n")

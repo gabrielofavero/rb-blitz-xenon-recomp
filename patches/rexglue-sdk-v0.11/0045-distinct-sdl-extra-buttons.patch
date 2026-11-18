@@ -1,0 +1,267 @@
+diff --git a/include/rex/hid/title_input.h b/include/rex/hid/title_input.h
+--- a/include/rex/hid/title_input.h
++++ b/include/rex/hid/title_input.h
+@@ -6,6 +6,13 @@
+ #include <rex/utility.h>
+ 
+ namespace rex::hid {
++
++/** Distinct physical controls outside the Xbox pad layout. Bit order is misc1, misc2,
++ * touchpad, left paddle 1/2, right paddle 1/2. */
++struct ExtraButtonState {
++  u8 available = 0;
++  u8 held = 0;
++};
+ 
+ /** Optional title input transformations, owned by the HID module. */
+ REX_DECLARE_INTERFACE(ITitleInput, 1)
+@@ -24,6 +31,7 @@
+   [[nodiscard]] virtual Result<PadState> GetPhysicalState(bool for_host_ui = false) = 0;
+   /** Whether a host modal currently suppresses guest pad input. Any thread. */
+   virtual bool IsUIBlocked() const = 0;
++  [[nodiscard]] virtual ExtraButtonState GetPhysicalExtraButtons(bool for_host_ui = false) = 0;
+ };
+ 
+ }  // namespace rex::hid
+diff --git a/include/rex/hid/input_driver.h b/include/rex/hid/input_driver.h
+--- a/include/rex/hid/input_driver.h
++++ b/include/rex/hid/input_driver.h
+@@ -15,6 +15,7 @@
+ 
+ #include <rex/driver.h>
+ #include <rex/hid/pad.h>
++#include <rex/hid/title_input.h>
+ #include <rex/memory/host.h>
+ #include <rex/result.h>
+ #include <rex/types.h>
+@@ -28,6 +29,12 @@
+  * A source of pads that reports devices and their raw state, with the guide button and no deadzone
+  * or masking. InputSystem makes one call at a time, from any thread.
+  */
++class IExtraButtons {
++ public:
++  virtual ~IExtraButtons() = default;
++  [[nodiscard]] virtual Result<ExtraButtonState> GetExtraButtonState(PadDeviceID id) = 0;
++};
++
+ class IInputDriver : public IDriver {
+  public:
+   /** Returns a counter that changes whenever a pad connects or disconnects. */
+diff --git a/src/hid/input_system.h b/src/hid/input_system.h
+--- a/src/hid/input_system.h
++++ b/src/hid/input_system.h
+@@ -43,6 +43,7 @@
+       MoveOnlyFunction<void(u32 user, bool connected)> fn) override;
+   [[nodiscard]] ScopeGuard SetStateFilter(MoveOnlyFunction<void(u32, PadState&)> fn) override;
+   [[nodiscard]] Result<PadState> GetPhysicalState(bool for_host_ui = false) override;
++  ExtraButtonState GetPhysicalExtraButtons(bool for_host_ui = false) override;
+   bool IsUIBlocked() const override;
+   void AcquireUIBlock() override;
+   void ReleaseUIBlock() override;
+diff --git a/src/hid/input_system.cpp b/src/hid/input_system.cpp
+--- a/src/hid/input_system.cpp
++++ b/src/hid/input_system.cpp
+@@ -574,6 +574,37 @@
+       if (result && !for_host_ui &&
+           (!state.focused.load(std::memory_order_relaxed) || state.ui_blocks.load() > 0)) {
+         *result = {};
++      }
++    }
++  }
++  state.Fire(events);
++  return result;
++}
++
++ExtraButtonState InputSystem::GetPhysicalExtraButtons(bool for_host_ui) {
++  State& state = *state_;
++  std::vector<ConnectionEvent> events;
++  ExtraButtonState result;
++  {
++    std::lock_guard lock(state.mutex);
++    if (state.started) {
++      state.RefreshDevicesLocked(events);
++      std::vector<PadDevice> devices;
++      for (u32 source = 0; source < state.keyboard_mouse_source; ++source) {
++        auto* extras = dynamic_cast<IExtraButtons*>(state.sources[source]);
++        if (!extras) continue;
++        devices.clear();
++        state.sources[source]->EnumerateDevices(devices);
++        for (const PadDevice& device : devices) {
++          auto reading = extras->GetExtraButtonState(device.id);
++          if (!reading) continue;
++          result.available |= reading->available;
++          result.held |= reading->held & reading->available;
++        }
++      }
++      if (!for_host_ui &&
++          (!state.focused.load(std::memory_order_relaxed) || state.ui_blocks.load() > 0)) {
++        result.held = 0;
+       }
+     }
+   }
+diff --git a/src/hid/sdl3/sdl3_input_driver.h b/src/hid/sdl3/sdl3_input_driver.h
+--- a/src/hid/sdl3/sdl3_input_driver.h
++++ b/src/hid/sdl3/sdl3_input_driver.h
+@@ -29,7 +29,7 @@
+  * Pads through the SDL3 gamepad API. On Windows PadIdentity::xinput_slot is SDL's player index,
+  * which SDL sets to the XInput slot for XInput pads.
+  */
+-class SDL3InputDriver final : public IInputDriver, public SettingOwner {
++class SDL3InputDriver final : public IInputDriver, public IExtraButtons, public SettingOwner {
+  public:
+   REX_SETTING(std::filesystem::path, mappings_file, "{app.root}/gamecontrollerdb.txt",
+               "SDL gamepad mappings file", kStartupOnly);
+@@ -43,6 +43,7 @@
+   u64 GetDeviceRevision() const override;
+   void EnumerateDevices(std::vector<PadDevice>& out) override;
+   [[nodiscard]] Result<PadState> GetDeviceState(PadDeviceID id) override;
++  [[nodiscard]] Result<ExtraButtonState> GetExtraButtonState(PadDeviceID id) override;
+   [[nodiscard]] Result<PadCapabilities> GetDeviceCapabilities(PadDeviceID id) override;
+   [[nodiscard]] Result<void> SetDeviceVibration(PadDeviceID id,
+                                                 const PadVibration& vibration) override;
+diff --git a/src/hid/sdl3/sdl3_input_driver.cpp b/src/hid/sdl3/sdl3_input_driver.cpp
+--- a/src/hid/sdl3/sdl3_input_driver.cpp
++++ b/src/hid/sdl3/sdl3_input_driver.cpp
+@@ -161,6 +161,7 @@
+     SDL_Gamepad* sdl = nullptr;
+     PadDeviceID id = kInvalidPadDeviceID;
+     PadState state;
++    u8 extra_buttons = 0;
+     i32 xinput_slot = -1;
+   };
+ 
+@@ -352,20 +353,32 @@
+       kPadDPadDown,
+       kPadDPadLeft,
+       kPadDPadRight,
+-      kPadGuide,
+-      kPadY,
+-      kPadB,
+-      kPadX,
+-      kPadA,
+-      kPadGuide,
++      0, 0, 0, 0, 0, 0,
+   };
+   static_assert(SDL_GAMEPAD_BUTTON_SOUTH == 0);
+   static_assert(SDL_GAMEPAD_BUTTON_DPAD_RIGHT == 14);
+ 
+   Controller* controller = FindByInstance(event.gbutton.which);
+-  if (!controller || event.gbutton.button >= kButtonLookup.size()) {
+-    return;
+-  }
++  if (!controller) {
++    return;
++  }
++  u8 extra = 0;
++  switch (event.gbutton.button) {
++    case SDL_GAMEPAD_BUTTON_MISC1: extra = 1u << 0; break;
++    case SDL_GAMEPAD_BUTTON_MISC2: extra = 1u << 1; break;
++    case SDL_GAMEPAD_BUTTON_TOUCHPAD: extra = 1u << 2; break;
++    case SDL_GAMEPAD_BUTTON_LEFT_PADDLE1: extra = 1u << 3; break;
++    case SDL_GAMEPAD_BUTTON_LEFT_PADDLE2: extra = 1u << 4; break;
++    case SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1: extra = 1u << 5; break;
++    case SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2: extra = 1u << 6; break;
++    default: break;
++  }
++  if (extra) {
++    if (event.gbutton.down) controller->extra_buttons |= extra;
++    else controller->extra_buttons &= ~extra;
++    return;
++  }
++  if (event.gbutton.button >= kButtonLookup.size()) return;
+   const u16 bit = kButtonLookup[event.gbutton.button];
+   if (event.gbutton.down) {
+     controller->state.buttons = static_cast<u16>(controller->state.buttons | bit);
+@@ -540,6 +553,24 @@
+   return controller->state;
+ }
+ 
++Result<ExtraButtonState> SDL3InputDriver::GetExtraButtonState(PadDeviceID id) {
++  if (!state_ || !state_->gamepad_up) return std::unexpected(NotConnected());
++  state_->QueuePump(state_);
++  auto guard = state_->DrainAndLock();
++  const State::Controller* controller = state_->FindByID(id);
++  if (!controller) return std::unexpected(NotConnected());
++  static constexpr std::array buttons = {
++      SDL_GAMEPAD_BUTTON_MISC1, SDL_GAMEPAD_BUTTON_MISC2, SDL_GAMEPAD_BUTTON_TOUCHPAD,
++      SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, SDL_GAMEPAD_BUTTON_LEFT_PADDLE2,
++      SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2};
++  ExtraButtonState result;
++  for (u8 i = 0; i < buttons.size(); ++i) {
++    if (SDL_GamepadHasButton(controller->sdl, buttons[i])) result.available |= u8(1u << i);
++  }
++  result.held = controller->extra_buttons & result.available;
++  return result;
++}
++
+ Result<PadCapabilities> SDL3InputDriver::GetDeviceCapabilities(PadDeviceID id) {
+   if (!state_ || !state_->gamepad_up) {
+     return std::unexpected(NotConnected());
+diff --git a/tests/unit/hid/sdl3_input_test.cpp b/tests/unit/hid/sdl3_input_test.cpp
+--- a/tests/unit/hid/sdl3_input_test.cpp
++++ b/tests/unit/hid/sdl3_input_test.cpp
+@@ -11,6 +11,9 @@
+ #include "rex_test.h"
+ 
+ #include <vector>
++#include <algorithm>
++#include <array>
++#include <SDL3/SDL.h>
+ 
+ #include <rex/driver.h>
+ #include <rex/driver_context.h>
+@@ -103,3 +106,54 @@
+ 
+   driver->Shutdown();
+ }
++
++REX_TEST_CASE_METHOD(Fixture, "SDL extras retain distinct identities and availability",
++                     "[hid][sdl3][title_input]") {
++  auto driver = Create();
++  REQUIRE(driver);
++  auto* extras = dynamic_cast<rex::hid::IExtraButtons*>(driver.get());
++  REQUIRE(extras);
++  TrackingContext context;
++  REQUIRE(driver->Initialize(context));
++  auto shutdown = rex::ScopeGuard([&] { driver->Shutdown(); context.RunPosted(); });
++  SDL_VirtualJoystickDesc desc;
++  SDL_INIT_INTERFACE(&desc);
++  desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
++  desc.name = "Distinct extras fixture";
++  desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
++  const std::array buttons = {
++      SDL_GAMEPAD_BUTTON_MISC1, SDL_GAMEPAD_BUTTON_MISC2, SDL_GAMEPAD_BUTTON_TOUCHPAD,
++      SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, SDL_GAMEPAD_BUTTON_LEFT_PADDLE2,
++      SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2};
++  desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
++  const auto instance = SDL_AttachVirtualJoystick(&desc);
++  REQUIRE(instance != 0);
++  auto detach = rex::ScopeGuard([&] { SDL_DetachVirtualJoystick(instance); });
++  auto* joystick = SDL_OpenJoystick(instance);
++  REQUIRE(joystick);
++  auto close = rex::ScopeGuard([&] { SDL_CloseJoystick(joystick); });
++  SDL_UpdateJoysticks();
++  SDL_PumpEvents();
++  context.RunPosted();
++  std::vector<rex::hid::PadDevice> devices;
++  driver->EnumerateDevices(devices);
++  auto found = std::ranges::find(devices, "Distinct extras fixture", &rex::hid::PadDevice::name);
++  REQUIRE(found != devices.end());
++  const auto id = found->id;
++  REQUIRE(extras->GetExtraButtonState(id));
++  CHECK(extras->GetExtraButtonState(id)->available == 0x7F);
++  for (u8 i = 0; i < buttons.size(); ++i) {
++    REQUIRE(SDL_SetJoystickVirtualButton(joystick, buttons[i], true));
++    SDL_UpdateJoysticks();
++    SDL_PumpEvents();
++    const auto reading = extras->GetExtraButtonState(id);
++    REQUIRE(reading);
++    CHECK(reading->held == (1u << i));
++    REQUIRE(driver->GetDeviceState(id));
++    CHECK(driver->GetDeviceState(id)->buttons == 0);
++    REQUIRE(SDL_SetJoystickVirtualButton(joystick, buttons[i], false));
++    SDL_UpdateJoysticks();
++    SDL_PumpEvents();
++    CHECK(extras->GetExtraButtonState(id)->held == 0);
++  }
++}

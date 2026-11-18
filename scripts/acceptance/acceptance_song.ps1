@@ -9,7 +9,7 @@
 #     so "the song list is up" is read off the screen rather than assumed;
 #   * the song's start and end come from the guest's own audio envelope,
 #     XMPSetPlaybackController(0,1) -> (0,0), the one marker the title emits for
-#     "a song is playing" — taken in pairs and filtered by length, because the
+#     "a song is playing" â€” taken in pairs and filtered by length, because the
 #     song list previews the rows it scrolls past through that same controller;
 #   * the results screen has to name the expected song, so a pass really is
 #     evidence that *that* song was played and not an arbitrary row;
@@ -18,10 +18,11 @@
 #     bracket the song's stream and a pause leaves them alone, so the pause menu
 #     (Windows OCR reads "GAME PAUSED") has to appear mid-song and leave the
 #     screen again on the same key, and the song still has to reach its own stop
-#     marker and its results screen afterwards — a run that only dismissed the
+#     marker and its results screen afterwards â€” a run that only dismissed the
 #     menu would never get there;
-#   * the run fails if the log contains a [FATAL], if the window dies early, or
-#     if the log never prints the title's own "Title terminated" marker.
+#   * the run fails on a legacy [FATAL]/[critical] or a current critical-level
+#     record, if the window dies early, or if neither supported clean-shutdown
+#     marker ("Title terminated" / "Title shutdown completed") appears.
 #
 # Vanilla by default: the acceptance criterion covers the vanilla content
 # variant, so --ultimate_mode=0 is passed even when a Rock Band Blitz Ultimate
@@ -42,11 +43,11 @@ param(
     [string]$OutDir = "out/m5-acceptance",
     [string]$GameRoot,
     # DLC sources, passed through to the game. Empty means the default
-    # <GameRoot>/dlc (docs/guides/dlc.md §2) and no library. A flat library adds its songs
+    # <GameRoot>/dlc (docs/guides/dlc.md Â§2) and no library. A flat library adds its songs
     # to the same artist-sorted list, so -Song counts them too.
     [string]$DlcRoot,
     [string]$DlcLibrary = "",
-    # Present the library under this 8-hex-digit content type (docs/guides/dlc.md §2.1);
+    # Present the library under this 8-hex-digit content type (docs/guides/dlc.md Â§2.1);
     # empty keeps each package's own.
     [string]$DlcLibraryContentType = "",
     # 1-based row in the artist-sorted song list. Row 1 is the "Random Song"
@@ -65,6 +66,9 @@ param(
     # acceptance_dlc.ps1 does, e.g.
     #   -Extra "--enhancements_dlc_uncap_enumeration=true"
     [string]$Extra = "",
+    # Physical key used for the menu's A/select action. General Mapping's default
+    # uses key_enter; a legacy MnK-only profile may use a (Space).
+    [string]$SelectKey = "a",
     # Play the song a second time from the results screen, in the same process.
     [switch]$Replay,
     # Take a pause during the song and release it, asserting both from the
@@ -99,7 +103,7 @@ $stopMarker = "XMPSetPlaybackController\(00000000, 00000000\)"
 # ---------------------------------------------------------------- helpers ---
 
 # Every helper that touches a .ps1 file has to go through a child PowerShell:
-# this machine's execution policy is Restricted (docs/guides/build-and-run.md §0).
+# this machine's execution policy is Restricted (docs/guides/build-and-run.md Â§0).
 # The runtime resolves a *relative* DLC path against game_data_root (src/hooks/dlc.cpp), while this
 # script validates - and uses - it from its own directory, so a relative one would pass here and be
 # refused by the runtime with `ignoring <game>\<path> (cannot be read)`. Everything handed to the
@@ -144,15 +148,26 @@ function Get-LogMatchCount([string]$Path, [string]$Pattern) {
     return $n
 }
 
-# Every timestamp matching $Pattern, in order. A run writes one pair of playback
-# markers per song, so an envelope has to be taken by position rather than by
-# "does the marker exist".
+# Every timestamp matching $Pattern, in order, from either the bracketed baseline
+# log or the current timestamp/level/category/thread format. Matches stay on one
+# record; playback envelopes use their position and complete date, including midnight.
 function Get-LogMarkerTimes([string]$Text, [string]$Pattern) {
     $times = New-Object System.Collections.ArrayList
-    foreach ($m in [regex]::Matches($Text, "\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\].*?$Pattern")) {
-        $times.Add([datetime]::ParseExact($m.Groups[1].Value, "yyyy-MM-dd HH:mm:ss.fff", $null)) | Out-Null
+    $stamp = "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}"
+    $prefix = "(?:\[(?<time>$stamp)\]|(?<time>$stamp)[ \t]+[TVDIWEC-][ \t]+\S+[ \t]+t\d+[ \t]+)"
+    foreach ($m in [regex]::Matches($Text, "(?m)^$prefix[^\r\n]*?$Pattern")) {
+        $times.Add([datetime]::ParseExact($m.Groups["time"].Value,
+            "yyyy-MM-dd HH:mm:ss.fff", [Globalization.CultureInfo]::InvariantCulture)) | Out-Null
     }
     return $times.ToArray()
+}
+
+function Test-LogFatal([string]$Text) {
+    # The current SDK's %Q formatter maps critical to C. Require the record
+    # prefix, so a C or the word critical inside an ordinary message is harmless.
+    $stamp = "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}"
+    return [regex]::IsMatch($Text,
+        "(?im)\[(?:FATAL|critical)\]|^$stamp[ \t]+C[ \t]+\S+[ \t]+t\d+(?:[ \t]|$)")
 }
 
 # Take a pause during the song and release it, deciding both from the screen.
@@ -161,8 +176,8 @@ function Get-LogMarkerTimes([string]$Text, [string]$Pattern) {
 # controller the song's envelope is read from (measured: the only
 # XMPSetPlaybackController lines in a paused run are the pair that brackets the
 # the whole song), so the pause menu is the evidence there is. Escape opens it and Escape
-# releases it (the Mouse & Keyboard Pause default since P2/D12) — the menu opens on "Resume
-# Game" — and the release is the text leaving the screen again, which gameplay (unreadable by
+# releases it (the Mouse & Keyboard Pause default since P2/D12) â€” the menu opens on "Resume
+# Game" â€” and the release is the text leaving the screen again, which gameplay (unreadable by
 # OCR) satisfies and a still-open menu does not. Taking the pause mid-song and releasing it
 # before the song's own stop marker is what makes it a pause *during* the song;
 # the caller checks that ordering against the envelope it was waiting for.
@@ -261,9 +276,9 @@ function Get-ScreenText([string]$Shot) {
     return ($text -join " ").ToUpperInvariant()
 }
 
-# The window does not exist for the first ~30 s of a run, and both the capture
-# and the OCR need it to be there, so every poll re-takes the shot.
-function Wait-ForScreen([string]$Shot, [string]$Needle, [int]$TimeoutSec, [string]$Label) {
+# Window creation and guest readiness are separate. Capture/OCR require the
+# window, and every poll re-takes the shot while cold-cache guest startup proceeds.
+function Wait-ForScreen([string]$Shot, [string]$Needle, [int]$TimeoutSec, [string]$Label, [string]$Alternative = "") {
     $deadline = (Get-Date).AddSeconds($TimeoutSec)
     $last = ""
     while ((Get-Date) -lt $deadline) {
@@ -274,7 +289,8 @@ function Wait-ForScreen([string]$Shot, [string]$Needle, [int]$TimeoutSec, [strin
             Start-Sleep -Seconds 3
             continue
         }
-        if ($Needle -eq "" -or $last.Contains($Needle.ToUpperInvariant())) { return $last }
+        if ($Needle -eq "" -or $last.Contains($Needle.ToUpperInvariant()) -or
+            ($Alternative -and $last.Contains($Alternative.ToUpperInvariant()))) { return $last }
         Start-Sleep -Seconds 3
     }
     Write-Host "  !! timed out after ${TimeoutSec}s waiting for '$Needle' ($Label); last screen text: $last"
@@ -295,6 +311,9 @@ function Wait-ForWindow($Proc, [int]$TimeoutSec) {
 }
 
 function Invoke-Actions([string[]]$Actions) {
+    $Actions = @($Actions | ForEach-Object {
+        if ($_ -eq "key:a") { "key:$SelectKey" } else { $_ }
+    })
     Invoke-ChildScript "drive_ui.ps1" @{ Actions = ($Actions -join ","); BuildDir = $BuildDir; OutDir = $OutDir } | Out-Null
 }
 
@@ -331,7 +350,7 @@ function Save-Shot([string]$Name) {
 # in this list, so it has to be lstick_up/lstick_down. Each tap moves exactly one
 # row and the list clamps at both ends rather than wrapping (all verified live),
 # so walking up past the first row lands on a known row whatever the list
-# remembered — which is what makes a replay pick the same song as the first pass.
+# remembered â€” which is what makes a replay pick the same song as the first pass.
 function Select-Song([int]$Index, [string]$Tag) {
     $actions = @("key:lstick_up", "key:lstick_up", "key:lstick_up", "key:lstick_up", "key:lstick_up", "key:lstick_up")
     for ($i = 1; $i -lt $Index; $i++) { $actions += "key:lstick_down" }
@@ -344,6 +363,16 @@ function Select-Song([int]$Index, [string]$Tag) {
 }
 
 function Start-OneSong([string]$Tag, [System.Collections.ArrayList]$Notes) {
+    if ($UltimateMode -ne "0") {
+        $loadout = Wait-ForScreen (Shot "$Tag-powerups.png") "SELECT POWER" $ScreenTimeoutSec "${Tag}: Ultimate loadout" "BEGIN"
+        if ($loadout.Contains("SELECT POWER")) {
+            Invoke-Actions @("key:lstick_right", "key:lstick_right", "key:lstick_right")
+            $ready = Wait-ForScreen (Shot "$Tag-play-song.png") "PLAY SONG" 30 "${Tag}: Ultimate play selection"
+            if (-not $ready.Contains("PLAY SONG")) { throw "Ultimate PLAY SONG selection not recognised" }
+            Invoke-Actions @("key:a")
+            $Notes.Add("confirmed Ultimate power-up loadout and selected PLAY SONG") | Out-Null
+        }
+    }
     $text = Wait-ForScreen (Shot "$Tag-loaded.png") "BEGIN" $ScreenTimeoutSec "${Tag}: song load / 'PRESS A BEGIN'"
     # The pre-song screen is a one-off how-to-play card; it appears whenever the
     # song is entered from the list, so every run has to clear it.
@@ -378,13 +407,10 @@ function Invoke-Run([int]$Run) {
     # written; a 5 MB log cap, which the debug chatter below fills twice inside
     # one four-minute song, costing the harness the pair across a rotation.
     #
-    # The level has to be the global one: per-category levels exist only in the
-    # toml ([log.levels]), and the marker is a `[debug] [krnl]` line. The author's
-    # own profile pairs `log_level = "debug"` with `apu = "off"` - the APU debug
-    # chatter is ~40 KB/s, exactly what buries the marker - and there is no
-    # command-line equivalent, so the cap below is what keeps a run's log in one
-    # file instead. `log_flush_interval` is what makes the file readable while the
-    # guest is still running; with the default (0) it is flushed at shutdown.
+    # Global debug enables the playback markers in both supported log formats.
+    # The large cap keeps APU/debug chatter from rotating the start marker away
+    # before its matching stop; the flush interval makes the live file readable.
+    # The final clean-shutdown check runs only after the process has exited.
     # The DLC sources are passed only when named, so a run that is not about DLC
     # keeps the default root and the pre-library behaviour. Paths are quoted: a
     # library folder usually has a space in it ("My Songs").
@@ -403,8 +429,8 @@ function Invoke-Run([int]$Run) {
     $p = Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList $launchArgs
 
     try {
-        # 1. Title screen. Boot is 25-40s; the OCR wait is what makes a slow boot
-        #    a longer wait rather than a false failure.
+        # 1. Wait separately for the native window and the guest title screen.
+        #    Cold-cache compilation may exceed the baseline's measured 25-40s.
         if (-not (Wait-ForWindow $p $BootTimeoutSec)) { $notes.Add("no game window appeared") | Out-Null }
         $title = Wait-ForScreen (Shot "$tag-title.png") "TO START" $BootTimeoutSec "${tag}: title screen"
         if (-not $title.Contains("TO START")) { $notes.Add("title screen not recognised") | Out-Null }
@@ -539,14 +565,18 @@ function Invoke-Run([int]$Run) {
             $notes.Add("process exited on its own (exit code $($p.ExitCode))") | Out-Null
         }
 
-        # ... and then the log: faults, the exact song envelope, and the
-        # title's own shutdown marker, which only a graceful close prints.
+        # ... and then the flushed log: faults, the exact song envelope, and
+        # the baseline/current title shutdown marker. Process exit alone is insufficient.
         $log = Get-NewestLog
         $text = Get-LogText $log
-        $r.Fatal = [bool]($text | Select-String -Pattern "\[FATAL\]" -Quiet)
-        if ($r.Fatal) { $notes.Add("log contains [FATAL]") | Out-Null }
+        $r.Fatal = Test-LogFatal $text
+        if ($r.Fatal) { $notes.Add("log contains a fatal/critical record") | Out-Null }
         if ($text -match "MODIFIED") { $notes.Add("boot warns the game data is MODIFIED") | Out-Null }
-        if (-not ($text | Select-String -Pattern "Title terminated" -Quiet)) {
+        if ($p.HasExited -and $p.ExitCode -ne 0) {
+            $r.Clean = $false
+            $notes.Add("nonzero exit code $($p.ExitCode)") | Out-Null
+        }
+        if (-not ($text | Select-String -Pattern "Title terminated|Title shutdown completed" -Quiet)) {
             $r.Clean = $false
             $notes.Add("no clean-shutdown marker in the log") | Out-Null
         }
@@ -562,6 +592,15 @@ function Invoke-Run([int]$Run) {
         }
     } finally {
         if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+        # Keep failure evidence too: a UI helper can throw before normal result collection.
+        try {
+            $retainedLog = Get-NewestLog
+            if ($retainedLog) {
+                Copy-Item -LiteralPath $retainedLog -Destination (Join-Path $capDir "$tag.log") -Force
+            }
+        } catch {
+            Write-Warning "Could not retain this run's log: $_"
+        }
     }
 
     $r.Notes = ($notes -join "; ")

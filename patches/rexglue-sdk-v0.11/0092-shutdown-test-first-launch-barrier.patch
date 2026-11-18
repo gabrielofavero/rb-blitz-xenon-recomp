@@ -1,0 +1,65 @@
+diff --git a/tests/unit/kernel/shutdown_test.cpp b/tests/unit/kernel/shutdown_test.cpp
+--- a/tests/unit/kernel/shutdown_test.cpp
++++ b/tests/unit/kernel/shutdown_test.cpp
+@@ -9,6 +9,7 @@
+  */
+ 
+ #include "rex_test.h"
++#include <catch2/generators/catch_generators.hpp>
+ 
+ #include <array>
+ #include <string>
+@@ -490,16 +491,20 @@
+ }
+ 
+ REX_TEST_CASE("TerminateTitle stops every thread launched while it runs", "[kernel][shutdown]") {
++  const auto launch_delay = GENERATE(0ms, 60ms);
+   struct Launched {
+     std::mutex mutex;
+     std::vector<u32> handles;
++    std::condition_variable changed;
++    bool continue_launching = false;
+   };
+   KernelFixture fixture;
+   auto spawner = std::make_shared<std::atomic<u32>>(0);
+   auto launched = std::make_shared<Launched>();
+-  fixture.RunOnGuestThread([spawner, launched](Caller& c) {
++  fixture.RunOnGuestThread([spawner, launched, launch_delay](Caller& c) {
+     const u32 event = CreateGuestEvent(c);
+-    spawner->store(c.Spawn([event, launched](Caller& t) {
++    spawner->store(c.Spawn([event, launched, launch_delay](Caller& t) {
++      std::this_thread::sleep_for(launch_delay);
+       const u32 handle_ptr = t.Alloc(4);
+       for (u32 i = 0; i < 2000; ++i) {
+         const u32 body =
+@@ -507,13 +512,27 @@
+         const u32 status = t.Kernel("ExCreateThread",
+                                     {handle_ptr, 0x10000, 0, 0, Caller::start_thunk, body, i % 2});
+         if (status == 0) {
+-          std::lock_guard lock(launched->mutex);
++          std::unique_lock lock(launched->mutex);
+           launched->handles.push_back(t.Load32(handle_ptr));
++          if (i == 0) {
++            launched->changed.notify_all();
++            // Keep the creator live with pending attempts until the host starts termination.
++            launched->changed.wait_for(lock, 2s, [&] { return launched->continue_launching; });
++          }
+         }
+       }
+     }));
+-    std::this_thread::sleep_for(20ms);
+-  });
++  });
++  bool first_launched = false;
++  {
++    std::unique_lock lock(launched->mutex);
++    // Scheduling delay is outside the termination budget; observe a real child first.
++    first_launched = launched->changed.wait_for(lock, 2s,
++                                              [&] { return !launched->handles.empty(); });
++    launched->continue_launching = true;
++  }
++  launched->changed.notify_all();
++  REQUIRE(first_launched);
+   const auto start = std::chrono::steady_clock::now();
+   StateOf(fixture.GetRuntime()).TerminateTitle();
+   CHECK(MillisSince(start) < 1000);

@@ -1,0 +1,268 @@
+diff --git a/src/gpu/xenos/d3d12/command_processor.h b/src/gpu/xenos/d3d12/command_processor.h
+--- a/src/gpu/xenos/d3d12/command_processor.h
++++ b/src/gpu/xenos/d3d12/command_processor.h
+@@ -46,6 +46,9 @@
+ namespace rex::gpu::d3d12 {
+ 
+ class D3D12CommandProcessor : public CommandProcessor {
++ private:
++  draw_state::VisibleRegion visible_region_;
++
+  public:
+   explicit D3D12CommandProcessor(D3D12XenosGraphicsDriver* graphics_system, const TitleInfo& info,
+                                  IPhysicalMemory& memory, IPhysicalWriteWatch& watch,
+diff --git a/src/gpu/xenos/d3d12/command_processor.cpp b/src/gpu/xenos/d3d12/command_processor.cpp
+--- a/src/gpu/xenos/d3d12/command_processor.cpp
++++ b/src/gpu/xenos/d3d12/command_processor.cpp
+@@ -1830,6 +1830,7 @@
+ 
+ void D3D12CommandProcessor::IssueSwap([[maybe_unused]] u32 frontbuffer_ptr, u32 frontbuffer_width,
+                                       u32 frontbuffer_height) {
++  visible_region_ = draw_state::ReadVisibleRegion(GetXenosSettings());
+   REX_PROFILE_SCOPE("gpu");
+   vertex_buffers_in_sync_[0] = 0;
+   vertex_buffers_in_sync_[1] = 0;
+@@ -2366,6 +2367,8 @@
+ 
+   draw_state::Scissor scissor;
+   draw_state::GetScissor(regs, scissor);
++  draw_state::ApplyVisibleRegion(regs, visible_region_,
++      memexport_used || active_occlusion_query_.valid || (normalized_color_mask & 0xFFF0), scissor);
+   scissor.offset[0] *= draw_resolution_scale_x;
+   scissor.offset[1] *= draw_resolution_scale_y;
+   scissor.extent[0] *= draw_resolution_scale_x;
+diff --git a/src/gpu/xenos/vulkan/command_processor.h b/src/gpu/xenos/vulkan/command_processor.h
+--- a/src/gpu/xenos/vulkan/command_processor.h
++++ b/src/gpu/xenos/vulkan/command_processor.h
+@@ -49,6 +49,9 @@
+ namespace rex::gpu::vulkan {
+ 
+ class VulkanCommandProcessor : public CommandProcessor {
++ private:
++  draw_state::VisibleRegion visible_region_;
++
+  public:
+   enum class SingleTransientDescriptorLayout : u8 {
+     kStorageBufferCompute,
+@@ -490,7 +493,7 @@
+   void DestroySwapFXAASourceImage();
+ 
+   void UpdateDynamicState(const draw_state::HostViewport& viewport_info, bool primitive_polygonal,
+-                          xenos::reg::RB_DEPTHCONTROL normalized_depth_control);
++                          xenos::reg::RB_DEPTHCONTROL normalized_depth_control, bool side_effects);
+   /**
+    * Updates the system constants. W0 division follows PA_CL_VTE_CNTL. Bit 8 VTX_XY_FMT true
+    * means incoming XY are already multiplied by 1/W0, false means multiply. Bit 9 VTX_Z_FMT is
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -2200,6 +2200,7 @@
+ 
+ void VulkanCommandProcessor::IssueSwap([[maybe_unused]] u32 frontbuffer_ptr, u32 frontbuffer_width,
+                                        u32 frontbuffer_height) {
++  visible_region_ = draw_state::ReadVisibleRegion(GetXenosSettings());
+   REX_PROFILE_SCOPE("gpu");
+   vertex_buffers_in_sync_[0] = 0;
+   vertex_buffers_in_sync_[1] = 0;
+@@ -3759,7 +3760,8 @@
+       host_render_targets_used && render_target_cache_->IsDepthFloat24ConvertedInPixelShader(),
+       host_render_targets_used, pixel_shader && pixel_shader->IsDepthWritten(), viewport_info);
+ 
+-  UpdateDynamicState(viewport_info, primitive_polygonal, normalized_depth_control);
++  UpdateDynamicState(viewport_info, primitive_polygonal, normalized_depth_control,
++      memexport_writes_possible || active_occlusion_query_.valid || (normalized_color_mask & 0xFFF0));
+ 
+   auto vgt_draw_initiator = regs.Get<xenos::reg::VGT_DRAW_INITIATOR>();
+ 
+@@ -5405,7 +5407,7 @@
+ 
+ void VulkanCommandProcessor::UpdateDynamicState(
+     const draw_state::HostViewport& viewport_info, bool primitive_polygonal,
+-    xenos::reg::RB_DEPTHCONTROL normalized_depth_control) {
++    xenos::reg::RB_DEPTHCONTROL normalized_depth_control, bool side_effects) {
+ #if REXGPU_FINE_GRAINED_DRAW_SCOPES
+   REX_PROFILE_SCOPE("gpu");
+ #endif  // REXGPU_FINE_GRAINED_DRAW_SCOPES
+@@ -5435,6 +5437,7 @@
+ 
+   draw_state::Scissor scissor;
+   draw_state::GetScissor(regs, scissor);
++  draw_state::ApplyVisibleRegion(regs, visible_region_, side_effects, scissor);
+   scissor.offset[0] *= draw_resolution_scale_x;
+   scissor.offset[1] *= draw_resolution_scale_y;
+   scissor.extent[0] *= draw_resolution_scale_x;
+diff --git a/src/gpu/xenos/draw_state.h b/src/gpu/xenos/draw_state.h
+--- a/src/gpu/xenos/draw_state.h
++++ b/src/gpu/xenos/draw_state.h
+@@ -20,6 +20,7 @@
+ #include <vector>
+ 
+ #include <rex/platform.h>
++#include <rex/xenos/visible_region.h>
+ #include <rex/types.h>
+ #include <rex/assert.h>
+ #include "gpu/xenos/xenos_export.h"
+@@ -226,6 +227,9 @@
+  * @param scissor_out Receives the scissor.
+  * @param clamp_to_surface_pitch True to clamp the horizontal scissor to the surface pitch.
+  */
++REX_GPU_XENOS_API VisibleRegion ReadVisibleRegion(const XenosSettings& settings);
++REX_GPU_XENOS_API bool ApplyVisibleRegion(const xenos::RegisterFile& regs, const VisibleRegion& region,
++                        bool side_effects, Scissor& scissor);
+ REX_GPU_XENOS_API void GetScissor(const xenos::RegisterFile& regs, Scissor& scissor_out,
+                                   bool clamp_to_surface_pitch = true);
+ 
+diff --git a/src/gpu/xenos/draw_state.cpp b/src/gpu/xenos/draw_state.cpp
+--- a/src/gpu/xenos/draw_state.cpp
++++ b/src/gpu/xenos/draw_state.cpp
+@@ -284,6 +284,64 @@
+     viewport_info_out.ndc_scale[i] = ndc_scale[i];
+     viewport_info_out.ndc_offset[i] = ndc_offset[i];
+   }
++}
++
++VisibleRegion ReadVisibleRegion(const XenosSettings& settings) {
++  VisibleRegion region;
++  region.enabled = settings.draw_visible_region.Get();
++  if (!region.enabled) return region;
++  region.source_width = settings.draw_visible_source_width.Get();
++  region.source_height = settings.draw_visible_source_height.Get();
++  region.visible_width = settings.draw_visible_width.Get();
++  region.guard_pixels = settings.draw_visible_guard.Get();
++  region.color_info = settings.draw_visible_color_info.Get();
++  region.depth_info = settings.draw_visible_depth_info.Get();
++  region.probe = settings.draw_visible_region_probe.Get();
++  return region;
++}
++
++bool ApplyVisibleRegion(const xenos::RegisterFile& regs, const VisibleRegion& region,
++                         bool side_effects, Scissor& scissor) {
++  if (!region.enabled || side_effects) return false;
++  VisibleRegionPass pass;
++  pass.color_info = regs.Get<xenos::reg::RB_COLOR_INFO>().value;
++  pass.depth_info = regs.Get<xenos::reg::RB_DEPTH_INFO>().value;
++  pass.pitch = regs.Get<xenos::reg::RB_SURFACE_INFO>().surface_pitch;
++  const auto vte = regs.Get<xenos::reg::PA_CL_VTE_CNTL>();
++  pass.screen_space = !vte.vport_x_scale_ena || !vte.vport_y_scale_ena ||
++                      !vte.vport_x_offset_ena || !vte.vport_y_offset_ena;
++  if (!pass.screen_space) {
++    const double half_width = std::abs(double(regs.Get<float>(xenos::Register::PA_CL_VPORT_XSCALE)));
++    const double half_height = std::abs(double(regs.Get<float>(xenos::Register::PA_CL_VPORT_YSCALE)));
++    pass.width = half_width * 2;
++    pass.height = half_height * 2;
++    pass.left = double(regs.Get<float>(xenos::Register::PA_CL_VPORT_XOFFSET)) - half_width;
++    pass.top = double(regs.Get<float>(xenos::Register::PA_CL_VPORT_YOFFSET)) - half_height;
++    if (regs.Get<xenos::reg::PA_SU_SC_MODE_CNTL>().vtx_window_offset_enable) {
++      const auto window = regs.Get<xenos::reg::PA_SC_WINDOW_OFFSET>();
++      pass.left += window.window_x_offset;
++      pass.top += window.window_y_offset;
++    }
++  }
++  VisibleRegionRect rect{scissor.offset[0], scissor.offset[1], scissor.extent[0], scissor.extent[1]};
++  if (!ClipToVisibleRegion(region, pass, rect)) return false;
++  static thread_local uint64_t clipped_draws = 0, pixels_before = 0, pixels_after = 0;
++  const bool probe = region.probe;
++  if (probe) {
++    ++clipped_draws;
++    pixels_before += uint64_t(scissor.extent[0]) * scissor.extent[1];
++    pixels_after += uint64_t(rect.width) * rect.height;
++    if (clipped_draws <= 8 || !(clipped_draws % 16384)) {
++      REXGPU_INFO("visible_region: draws={} scissor_pixels_before={} after={} original={}x{}+{},{} clipped={}x{}+{},{} viewport={}x{}+{},{}",
++          clipped_draws, pixels_before, pixels_after, scissor.extent[0], scissor.extent[1],
++          scissor.offset[0], scissor.offset[1], rect.width, rect.height, rect.x, rect.y,
++          pass.width, pass.height, pass.left, pass.top);
++    }
++  }
++
++  scissor.offset[0] = rect.x;
++  scissor.extent[0] = rect.width;
++  return true;
+ }
+ 
+ void GetScissor(const xenos::RegisterFile& regs, Scissor& scissor_out,
+diff --git a/src/gpu/xenos/xenos_settings.h b/src/gpu/xenos/xenos_settings.h
+--- a/src/gpu/xenos/xenos_settings.h
++++ b/src/gpu/xenos/xenos_settings.h
+@@ -97,6 +97,15 @@
+               "Resolve from host render targets to shared memory when possible");
+   REX_SETTING(bool, texture_3d_to_2d, true, "Sample 3D textures as 2D textures");
+ 
++  REX_SETTING(bool, draw_visible_region, false, "Clip identified main-frame draws to the visible region");
++  REX_SETTING(u32, draw_visible_source_width, 0, "Unscaled main-frame width", Range{0u, 8192u});
++  REX_SETTING(u32, draw_visible_source_height, 0, "Unscaled main-frame height", Range{0u, 8192u});
++  REX_SETTING(u32, draw_visible_width, 0, "Visible central main-frame width", Range{0u, 8192u});
++  REX_SETTING(u32, draw_visible_guard, 32, "Source pixel filtering apron", Range{0u, 256u});
++  REX_SETTING(u32, draw_visible_color_info, UINT32_MAX, "Identified main RB_COLOR_INFO value");
++  REX_SETTING(u32, draw_visible_depth_info, UINT32_MAX, "Identified main RB_DEPTH_INFO value");
++  REX_SETTING(bool, draw_visible_region_probe, false, "Log bounded visible-region scissor savings");
++
+  protected:
+   XenosSettings() : SettingOwner("gpu.xenos") {}
+ };
+diff --git a/include/rex/xenos/visible_region.h b/include/rex/xenos/visible_region.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/xenos/visible_region.h
+@@ -0,0 +1,62 @@
++// Copyright 2026. Released under the BSD license - see LICENSE for details.
++#pragma once
++#include <algorithm>
++#include <cmath>
++#include <cstdint>
++
++namespace rex::gpu::draw_state {
++// A title opts in for one identified main color/depth pair. Auxiliary targets,
++// resolves, memory exports and visibility queries must retain their full work.
++struct VisibleRegion {
++  bool enabled = false;
++  uint32_t source_width = 0, source_height = 0, visible_width = 0;
++  uint32_t guard_pixels = 32;
++  uint32_t color_info = UINT32_MAX, depth_info = UINT32_MAX;
++  bool probe = false;
++};
++struct VisibleRegionPass {
++  uint32_t color_info = 0, depth_info = 0, pitch = 0;
++  double width = 0, height = 0, left = 0, top = 0;
++  bool screen_space = false, side_effects = false;
++};
++struct VisibleRegionRect {
++  uint32_t x = 0, y = 0, width = 0, height = 0;
++};
++inline bool ClipToVisibleRegion(const VisibleRegion& region, const VisibleRegionPass& pass,
++                                VisibleRegionRect& rect) {
++  if (!region.enabled || !region.source_width || !region.source_height ||
++      !region.visible_width || region.visible_width >= region.source_width ||
++      region.source_width > 8192 || region.source_height > 8192 || pass.side_effects ||
++      pass.color_info != region.color_info || pass.depth_info != region.depth_info ||
++      rect.width < 64 || rect.height < 64) return false;
++  double origin = pass.left;
++  if (pass.screen_space) {
++    // Full-size screen-space composition only. Small clears, downsampling,
++    // shadow maps and scratch surfaces are not main-frame draws.
++    if (pass.pitch != region.source_width || rect.x != 0 || rect.y != 0 ||
++        rect.width != region.source_width || rect.height != region.source_height) return false;
++    origin = 0;
++  } else if (!std::isfinite(pass.width) || !std::isfinite(pass.height) ||
++             !std::isfinite(pass.left) || !std::isfinite(pass.top) ||
++             std::abs(pass.width - region.source_width) > .01 ||
++             std::abs(pass.height - region.source_height) > .01 ||
++             std::abs(pass.top) > .01 ||
++             origin > .01 || origin < -double(region.source_width) ||
++             !pass.pitch || pass.pitch > region.source_width) {
++    return false;
++  }
++  // Map the same full-frame crop into each tile's local coordinates. Round
++  // outward and preserve a source-pixel apron for filtering across the edge.
++  const double half_hidden = (region.source_width - region.visible_width) * .5;
++  const int64_t crop_left = int64_t(std::floor(origin + half_hidden - region.guard_pixels));
++  const int64_t crop_right = int64_t(std::ceil(origin + region.source_width - half_hidden +
++                                             region.guard_pixels));
++  const uint32_t old_x = rect.x, old_width = rect.width;
++  const int64_t left = std::max<int64_t>(rect.x, std::max<int64_t>(0, crop_left));
++  const int64_t right = std::min<int64_t>(uint64_t(rect.x) + rect.width,
++                                         std::max<int64_t>(0, crop_right));
++  rect.x = uint32_t(std::min<int64_t>(left, uint64_t(old_x) + old_width));
++  rect.width = uint32_t(std::max<int64_t>(0, right - rect.x));
++  return rect.x != old_x || rect.width != old_width;
++}
++}  // namespace rex::gpu::draw_state

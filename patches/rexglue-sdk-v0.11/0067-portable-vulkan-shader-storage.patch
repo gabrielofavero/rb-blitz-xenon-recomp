@@ -1,0 +1,150 @@
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.h b/src/gpu/xenos/vulkan/pipeline_cache.h
+--- a/src/gpu/xenos/vulkan/pipeline_cache.h
++++ b/src/gpu/xenos/vulkan/pipeline_cache.h
+@@ -243,6 +243,10 @@
+   });
+   static_assert(std::is_trivially_copyable_v<PipelineStoredDescription> &&
+                 std::has_unique_object_representations_v<PipelineStoredDescription>);
++
++  static_assert(sizeof(PipelineDescription) == 60);
++  static_assert(offsetof(PipelineDescription, render_targets) == 44);
++  static_assert(sizeof(PipelineStoredDescription) == 68);
+ 
+   struct Pipeline {
+     std::atomic<VkPipeline> pipeline{VK_NULL_HANDLE};
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.cpp b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+--- a/src/gpu/xenos/vulkan/pipeline_cache.cpp
++++ b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+@@ -266,7 +266,8 @@
+                           edram_fragment_shader_interlock ? 1u : 0u);
+   OpenNativeCache(shader_storage_root / "local", title_id, edram_fragment_shader_interlock);
+   std::vector<PipelineStoredDescription>& pipeline_stored_descriptions = preparation_descriptions_;
+   std::set<std::pair<u64, u64>> shader_translations_needed;
++  size_t pipeline_storage_valid_record_count = 0;
+   auto pipeline_storage_file_path =
+       shader_storage_shareable_root /
+       std::format("{:08X}.{}.vk.xpso", title_id, edram_fragment_shader_interlock ? "fsi" : "fbo");
+@@ -335,6 +336,7 @@
+               pipeline_stored_description.description.pixel_shader_modification);
+         }
+       }
++      pipeline_storage_valid_record_count = pipeline_storage_read_count;
+       pipeline_stored_descriptions.resize(pipeline_storage_kept_count);
+       if (pipeline_storage_skipped_unsupported_count || pipeline_storage_skipped_corrupted_count) {
+         REXGPU_INFO(
+@@ -416,8 +418,8 @@
+   platform::ResetStorageFile(
+       storage_.pipeline_file, storage_.pipeline_file_path,
+       static_cast<u64>(sizeof(pipeline_storage_file_header) +
+-                       sizeof(PipelineStoredDescription) * pipeline_stored_descriptions.size()));
+-  if (pipeline_stored_descriptions.empty()) {
++                       sizeof(PipelineStoredDescription) * pipeline_storage_valid_record_count));
++  if (!pipeline_storage_valid_record_count) {
+     platform::ResetStorageFile(storage_.pipeline_file, storage_.pipeline_file_path, 0);
+     pipeline_storage_file_header.magic = pipeline_storage_magic;
+     pipeline_storage_file_header.magic_api = pipeline_storage_magic_api;
+diff --git a/tests/unit/gpu/vulkan_preparation_test.cpp b/tests/unit/gpu/vulkan_preparation_test.cpp
+--- a/tests/unit/gpu/vulkan_preparation_test.cpp
++++ b/tests/unit/gpu/vulkan_preparation_test.cpp
+@@ -178,3 +178,79 @@
+   driver->DetachTitle();
+   CHECK(driver->AsXenos()->SetShaderStorageDeferred(false));
+ }
++
++#include <array>
++#include <cstring>
++#include <fstream>
++#include <iterator>
++#include <xxhash.h>
++#include "gpu/xenos/vulkan/render_target_cache.h"
++
++REX_TEST_CASE_METHOD(Fixture, "Native Vulkan storage preserves unsupported records before a corrupt tail",
++                     "[gpu][portable_recipes_native]") {
++  const auto enabled = rex::platform::GetEnvironmentValue("REX_RUN_NATIVE_GPU_TESTS");
++  if (!enabled || *enabled != "1") SKIP("Requires native GPU opt-in");
++  const auto* backend = "vulkan";
++  rex::test::FakeDriverContext context;
++  AppInfo info;
++  info.needs.graphics_family=rex::GraphicsFamily::kXenos;
++  rex::ModuleGroup group;
++  group.Serve(static_cast<rex::IDriverContext&>(context),rex::IDriverContext::kInterface);
++  group.Serve(static_cast<rex::IAppInfo&>(info),rex::IAppInfo::kInterface);
++  REQUIRE(group.Load("rexgpu"));
++  REQUIRE(group.Load(std::string("rexgpu-xenos-")+backend));
++  REQUIRE(group.Connect());
++  const rex::DriverRegistration* registration=nullptr;
++  for(const auto* candidate:rex::test::GetRegistrations(group,rex::DriverType::kGraphics))
++    if(candidate->name==backend) registration=candidate;
++  REQUIRE(registration);
++  rex::test::FakeTitleContext title(rex::test::GetTestMemory());
++  rex::test::TempFolder folder("rex_vulkan_preparation_");
++  REQUIRE(REX_SETTINGS().SetText(rex::SettingLayer::kTitle,
++                                  "gpu.vulkan.render_target_path", "fbo"));
++  const auto directory = folder.path / "shaders/shareable";
++  std::filesystem::create_directories(directory);
++  const auto path = directory / "5841122D.fbo.vk.xpso";
++  // Golden portable schema: 12-byte header, 8-byte hash and 60-byte description.
++  // Triangle fan is a valid recipe that this backend cannot currently compile.
++  std::vector<rex::u8> valid(80, 0);
++  valid[0] = 'X'; valid[1] = 'E'; valid[2] = 'P'; valid[3] = 'S';
++  valid[8] = 0x20; valid[9] = 0x26; valid[10] = 0x02; valid[11] = 0x28;
++  constexpr size_t flags = 32 + sizeof(rex::gpu::vulkan::VulkanRenderTargetCache::RenderPassKey);
++  static_assert(flags == 36);
++  valid[20 + flags] = 5u << 2;
++  const auto hash = XXH3_64bits(valid.data() + 20, 60);
++  std::memcpy(valid.data() + 12, &hash, sizeof(hash));
++  auto file = valid;
++  file.resize(file.size() + 68 + 3, 0);  // Invalid hash record and a partial trailing record.
++  {
++    std::ofstream stream(path, std::ios::binary);
++    stream.write(reinterpret_cast<const char*>(file.data()), file.size());
++    REQUIRE(stream.good());
++  }
++  auto owner = registration->create();
++  REQUIRE(owner);
++  auto* driver = static_cast<rex::gpu::IGraphicsDriver*>(owner.get());
++  rex::ScopeGuard cleanup([&] { driver->Shutdown(); group.Disconnect(); });
++  REQUIRE(driver->Initialize(context));
++  auto* xenos = driver->AsXenos();
++  REQUIRE(xenos);
++  REQUIRE(xenos->SetShaderStorageDeferred(true));
++  REQUIRE(REX_PATHS().cache_root.SetText(rex::SettingLayer::kTitle, folder.path.string()));
++  REQUIRE(driver->AttachTitle(rex::TitleInfo{}, title, title, title));
++  for (rex::u64 generation : {1u, 2u}) {
++    REQUIRE(xenos->BeginShaderStoragePreparation(folder.path, 0x5841122D, generation));
++    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
++    while (xenos->QueryShaderStoragePreparation().active && std::chrono::steady_clock::now() < deadline)
++      std::this_thread::sleep_for(std::chrono::milliseconds(1));
++    const auto progress = xenos->QueryShaderStoragePreparation();
++    REQUIRE_FALSE(progress.active);
++    CHECK(progress.entries.required == 0);
++    CHECK_FALSE(progress.ready());
++    CHECK(std::filesystem::file_size(path) == valid.size());
++    std::ifstream stream(path, std::ios::binary);
++    const std::vector<rex::u8> retained((std::istreambuf_iterator<char>(stream)), {});
++    CHECK(retained == valid);
++  }
++  driver->DetachTitle();
++}
+diff --git a/tests/unit/gpu/native_graphics_properties.cmake b/tests/unit/gpu/native_graphics_properties.cmake
+--- a/tests/unit/gpu/native_graphics_properties.cmake
++++ b/tests/unit/gpu/native_graphics_properties.cmake
+@@ -1,6 +1,7 @@
+ # Device-wide compilation and memory budgets are shared across native fixtures.
+ foreach(native_test IN ITEMS
+     "unit.Native graphics preparation reopens empty storage without claiming coverage"
++    "unit.Native Vulkan storage preserves unsupported records before a corrupt tail"
+     "unit.Native graphics preparation reopens a validated nonempty cache"
+     "unit.Native texture conversion reads GPU contents in every component mode")
+   if(native_test IN_LIST unit_tests_TESTS)
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -459,6 +459,7 @@
+ )
+ if (TARGET rexgpu-xenos-vulkan)
+   target_sources(unit_tests PRIVATE gpu/vulkan_preparation_test.cpp)
++  target_link_libraries(unit_tests PRIVATE rex-vma)
+ endif ()
+ if (TARGET rexgpu-xenos-d3d12)
+   set_source_files_properties(gpu/vulkan_preparation_test.cpp PROPERTIES

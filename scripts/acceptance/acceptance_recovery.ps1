@@ -1,26 +1,7 @@
-# Controls recovery acceptance (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md
-# §14.4/§17.2, P8a).
-#
-# A saved profile can leave the menu with no usable input at all: both host gates off and no pad
-# connected. Ordinary input is inert then, so the row that would fix it cannot be reached - which
-# is the recovery surface the external app provided until P8 retires it. This arm boots exactly
-# that state and proves the in-game path:
-#
-#   * the profile stores keyboard_support = false and mouse_ui_nav = false, and the boot runs with
-#     `--input_backend=none`, so there is no pad driver at all;
-#   * the caption draws the "hold F10" sentence - with Settings Labels OFF, which is the rule for a
-#     navigation problem (the plain row captions stay hidden);
-#   * one 2-second hold of F10 reopens the keyboard through the Controls store, logs the need and
-#     the outcome, and writes exactly one switch: the profile no longer carries
-#     keyboard_support = false (true is the compiled default, so the row is erased) while
-#     mouse_ui_nav = false is untouched;
-#   * a menu key works afterwards. It cannot be the legacy MnK emulation - that driver is not
-#     installed on a boot whose keyboard gate was closed - so this is General Mapping's own key
-#     defaults reaching the guest through the synthetic host device the reopened gate brings back.
-#
-# Usage:  pwsh -File scripts\acceptance\acceptance_recovery.ps1 [-Label p8a-recovery]
-# Writes out/gameplay-mapping/in-game/<Label>/ (log, argv, profile before/after, OCR text) and
-# <Label>-shots/*.png, prints a per-step verdict, and exits non-zero unless every step behaved.
+# Legacy input-profile compatibility acceptance.
+# Current host keyboard and mouse input remain available independently of the
+# retired profile gates. Verify that a profile with both old switches disabled
+# still reaches the guest menu without a physical input driver or F10 recovery.
 param(
     [string]$Label = 'p8a-recovery',
     [string]$BuildDir = 'out/build/win-amd64-release',
@@ -49,8 +30,7 @@ if (Get-Process rb_blitz -ErrorAction SilentlyContinue) { throw 'Close the runni
 if (Test-Path -LiteralPath $outDir) { throw "Use a fresh -Label: $outDir exists (this harness never overwrites evidence)." }
 New-Item -ItemType Directory -Force -Path $outDir, $scratch, $empty | Out-Null
 
-# The unusable profile: both host gates off, nothing else. The boot finds it through
-# --launcher_profile, applies it at config rank, and no device enumerates.
+# A legacy profile with both retired host switches disabled and no external pad driver.
 @"
 schema_version = 1
 
@@ -79,6 +59,12 @@ $script:steps = 0
 
 function Drive {
     param([string[]]$Actions)
+    # These fixtures use the compiled keyboard defaults, independent of legacy MnK pad keys.
+    $Actions = @($Actions | ForEach-Object {
+        if ($_ -eq 'key:a') { 'key:key_enter' }
+        elseif ($_ -eq 'key:b') { 'key:esc' }
+        else { $_ }
+    })
     & (Join-Path $root 'scripts\diagnostics\drive_ui.ps1') -Actions $Actions -OutDir $shots | Out-Null
 }
 
@@ -152,7 +138,7 @@ try {
     if (-not $booted) { throw 'the boot never presented a menu frame' }
     Copy-Item -LiteralPath $profilePath -Destination (Join-Path $outDir 'profile-00-boot.toml')
 
-    # The guest's own title screen, read by OCR (a boot with no usable input never leaves it).
+    # Read the guest title before testing compiled keyboard navigation.
     $title = ''
     $deadline = (Get-Date).AddSeconds($TitleTimeoutSec)
     while ((Get-Date) -lt $deadline -and -not ($title -match '(?i)TO START|PRESS')) {
@@ -164,34 +150,12 @@ try {
     $title | Set-Content (Join-Path $outDir 'ocr-00-title.txt')
     Assert-True ($title -match '(?i)TO START|PRESS') '00-title' "the guest title was read: '$($title.Trim())'"
 
-    # What the boot says about the state: the announcement, and the gates it read.
-    Wait-LogPattern 'input recovery: no usable input' 60 '01-need' | Out-Null
-    Wait-LogPattern 'gameplay mapping: keyboard_support=off \(config\) mouse_ui_nav=off \(config\)' 30 '01-gates' | Out-Null
-    Assert-Profile 'keyboard_support = false' $true '01-boot-profile' ''
+    Assert-Profile 'keyboard_support = false' $true '01-legacy-keyboard' ''
+    Assert-Profile 'mouse_ui_nav = false' $true '01-legacy-mouse' ''
+    $profileBefore = [IO.File]::ReadAllBytes($profilePath)
 
-    # The notice, drawn although Settings Labels is off. The assertion is on the sentence's own
-    # words rather than on "F10": the OCR reads the caption's typeface as "Holé 10" here, and a
-    # harness that fails on a glyph substitute would report a product defect that is not one.
-    Drive @('wait:2', 'shot:02-notice.png')
-    $notice = Get-ShotText (Join-Path $root "$shots\02-notice.png")
-    $notice | Set-Content (Join-Path $outDir 'ocr-02-notice.txt')
-    Assert-True ($notice -match '(?i)no input is available') '02-notice' "the caption reads the recovery sentence: '$($notice.Trim())'"
-
-    # One 2-second hold reopens the keyboard. The harness holds 2.6 s so the release is its own
-    # event and the confirmation is read with the key already up.
-    Drive @('hold:key_f10:2.6', 'wait:2', 'shot:03-recovered.png')
-    Wait-LogPattern 'input recovery: F10 held for 2000 ms with no usable input' 30 '03-reopened' | Out-Null
-    Assert-Profile 'keyboard_support = false' $false '03-profile' 'profile-03-after-recovery.toml'
-    Assert-Profile 'mouse_ui_nav = false' $true '03-mouse-untouched' ''
-    $confirm = Get-ShotText (Join-Path $root "$shots\03-recovered.png")
-    $confirm | Set-Content (Join-Path $outDir 'ocr-03-recovered.txt')
-    # "switches" appears only in the confirmation, never in the need sentence, and the OCR keeps
-    # it intact ("Keyboard $upport is bac140n." is the substituted part).
-    Assert-True ($confirm -match '(?i)switch') '03-confirm' "the caption confirms the reopen: '$($confirm.Trim())'"
-
-    # A menu key now reaches the guest. It is General Mapping's own Enter -> A, because the legacy
-    # MnK driver was never installed on this boot: the reopened gate brings the synthetic host
-    # device back, the state filter runs, and the key path does the rest.
+    # No recovery gesture is needed: compiled keyboard navigation stays usable
+    # even when an older profile carries disabled device switches.
     Drive @('key:key_enter', 'wait:6', 'shot:04-menu.png')
     $menu = Wait-LogPattern 'content_pipeline: usable menu' $MenuTimeoutSec '04-menu-key'
     if (-not $menu) {
@@ -199,6 +163,10 @@ try {
         $screen = Select-String -Path $log -Pattern 'native_mouse: screen=(?!splash_screen)\S+' -ErrorAction SilentlyContinue
         Assert-True ($null -ne $screen) '04-menu-key-fallback' 'the guest left the title screen after the key'
     }
+    $profileAfter = [IO.File]::ReadAllBytes($profilePath)
+    Assert-True ([Convert]::ToBase64String($profileBefore) -eq [Convert]::ToBase64String($profileAfter)) '04-profile' 'navigation leaves the legacy profile bytes unchanged'
+    $runtimeLog = Get-Content $log -Raw
+    Assert-True ($runtimeLog -notmatch 'input recovery: no usable input|input recovery: F10 held') '04-no-lockout' 'no unusable-input recovery was needed'
     Assert-True (-not $process.HasExited) '05-alive' 'the game is still running'
     Drive @('shot:05-after.png')
 } catch {

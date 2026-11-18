@@ -1,0 +1,965 @@
+diff --git a/include/rex/gpu/graphics_presentation.h b/include/rex/gpu/graphics_presentation.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/gpu/graphics_presentation.h
+@@ -0,0 +1,30 @@
++#pragma once
++
++#include <cstddef>
++#include <vector>
++#include <rex/module.h>
++#include <rex/types.h>
++
++namespace rex::gpu {
++/** Owned RGBX bytes of the guest output, before host scaling and overlays. */
++struct CaptureImage {
++  u32 width = 0;
++  u32 height = 0;
++  size_t stride = 0;
++  std::vector<u8> data;
++};
++
++struct PresentationState {
++  u64 guest_output_refresh = 0; /**< Active images published to the output mailbox. */
++  u64 successful_ui_present = 0; /**< Images presented from the UI paint path. */
++};
++
++/** Optional output observation, available while the graphics module is connected.
++ * Calls never expose a backend object. Capture waits for GPU completion and may fail when
++ * output is absent, unavailable or lost; callers must not use it as a per-frame pacing signal.
++ */
++REX_DECLARE_INTERFACE(IGraphicsPresentation, 1)
++  [[nodiscard]] virtual PresentationState GetPresentationState() const = 0;
++  [[nodiscard]] virtual bool CaptureGuestOutput(CaptureImage& image) = 0;
++};
++}  // namespace rex::gpu
+diff --git a/include/rex/gpu/graphics_driver.h b/include/rex/gpu/graphics_driver.h
+--- a/include/rex/gpu/graphics_driver.h
++++ b/include/rex/gpu/graphics_driver.h
+@@ -11,6 +11,7 @@
+ #pragma once
+ 
+ #include <rex/driver.h>
++#include <rex/gpu/graphics_presentation.h>
+ #include <rex/platform/native_window.h>
+ #include <rex/overlay_renderer.h>
+ #include <rex/guest.h>
+@@ -42,6 +43,9 @@
+    * @return The Xenos driver, or nullptr for a native driver.
+    */
+   virtual IXenosGraphicsDriver* AsXenos() { return nullptr; }
++
++  virtual PresentationState GetPresentationState() const { return {}; }
++  virtual bool CaptureGuestOutput(CaptureImage& image) { image = {}; return false; }
+ 
+   /**
+    * Gives the driver the window to present to. Called after Initialize and before the first
+diff --git a/src/gpu/graphics_system.h b/src/gpu/graphics_system.h
+--- a/src/gpu/graphics_system.h
++++ b/src/gpu/graphics_system.h
+@@ -32,7 +32,7 @@
+ 
+ /** Runs the graphics driver and routes the Vd calls. The app starts and stops it. */
+ class GraphicsSystem final : public rex::gpu::IGraphicsSystem, public IGraphicsControl,
+-                             public IGraphicsPreparation, public ITextureOverrides {
++                             public IGraphicsPreparation, public IGraphicsPresentation, public ITextureOverrides {
+  public:
+   GraphicsSystem();
+   ~GraphicsSystem() override;
+@@ -47,6 +47,8 @@
+                                      u64 configuration = 0) override;
+   void RequestCancelShaderStoragePreparation() override;
+   GraphicsPreparationProgress QueryShaderStoragePreparation() const override;
++  PresentationState GetPresentationState() const override;
++  bool CaptureGuestOutput(CaptureImage& image) override;
+   void ReportFrame() override;
+   rex::gpu::FrameStats GetFrameStats() const override;
+ 
+diff --git a/src/gpu/graphics_system.cpp b/src/gpu/graphics_system.cpp
+--- a/src/gpu/graphics_system.cpp
++++ b/src/gpu/graphics_system.cpp
+@@ -76,6 +76,15 @@
+ GraphicsPreparationProgress GraphicsSystem::QueryShaderStoragePreparation() const {
+   return state_->xenos ? state_->xenos->QueryShaderStoragePreparation()
+                        : GraphicsPreparationProgress{};
++}
++
++PresentationState GraphicsSystem::GetPresentationState() const {
++  return state_->driver ? state_->driver->GetPresentationState() : PresentationState{};
++}
++
++bool GraphicsSystem::CaptureGuestOutput(CaptureImage& image) {
++  image = {};
++  return state_->driver && state_->driver->CaptureGuestOutput(image);
+ }
+ 
+ void GraphicsSystem::ReportFrame() {
+diff --git a/src/gpu/graphics_module.cpp b/src/gpu/graphics_module.cpp
+--- a/src/gpu/graphics_module.cpp
++++ b/src/gpu/graphics_module.cpp
+@@ -108,7 +108,7 @@
+ }
+ 
+ IInterface* GraphicsModule::QueryInterface(std::string_view name, u32 version) {
+-  return FindModuleInterface<rex::gpu::IGraphicsSystem, IGraphicsControl, IGraphicsPreparation, ITextureOverrides>(GetOrCreateSystem(), name,
++  return FindModuleInterface<rex::gpu::IGraphicsSystem, IGraphicsControl, IGraphicsPreparation, IGraphicsPresentation, ITextureOverrides>(GetOrCreateSystem(), name,
+                                                                           version);
+ }
+ 
+diff --git a/src/gpu/graphics_module.h b/src/gpu/graphics_module.h
+--- a/src/gpu/graphics_module.h
++++ b/src/gpu/graphics_module.h
+@@ -35,6 +35,7 @@
+ class GraphicsModule final : public IModule {
+  public:
+   REX_MODULE_SERVES(::rex::gpu::IGraphicsSystem, ::rex::gpu::IGraphicsControl,
++                    ::rex::gpu::IGraphicsPreparation, ::rex::gpu::IGraphicsPresentation,
+                     ::rex::gpu::ITextureOverrides)
+ 
+   std::string_view GetName() const override { return "rexgpu"; }
+diff --git a/src/gpu/xenos/xenos_graphics_driver_base.h b/src/gpu/xenos/xenos_graphics_driver_base.h
+--- a/src/gpu/xenos/xenos_graphics_driver_base.h
++++ b/src/gpu/xenos/xenos_graphics_driver_base.h
+@@ -93,6 +93,8 @@
+   void ResizeSurface(u32 width, u32 height) override;
+   [[nodiscard]] bool BeginPresent() override;
+   void EndPresent() override;
++  PresentationState GetPresentationState() const override;
++  bool CaptureGuestOutput(CaptureImage& image) override;
+   void RenderOverlays(ImDrawData& draw_data) override;
+   void InitializeRingBuffer(u32 address, u32 size_log2) override;
+   void EnableReadPointerWriteBack(u32 address, u32 block_size_log2) override;
+diff --git a/src/gpu/xenos/xenos_graphics_driver_base.cpp b/src/gpu/xenos/xenos_graphics_driver_base.cpp
+--- a/src/gpu/xenos/xenos_graphics_driver_base.cpp
++++ b/src/gpu/xenos/xenos_graphics_driver_base.cpp
+@@ -111,6 +111,17 @@
+   if (presentation_) {
+     presentation_->Present();
+   }
++}
++
++PresentationState XenosGraphicsDriverBase::GetPresentationState() const {
++  auto* presenter = GetHostPresenter();
++  return presenter ? presenter->GetPresentationState() : PresentationState{};
++}
++
++bool XenosGraphicsDriverBase::CaptureGuestOutput(CaptureImage& image) {
++  image = {};
++  auto* presenter = GetHostPresenter();
++  return presenter && presenter->CaptureGuestOutput(image);
+ }
+ 
+ bool XenosGraphicsDriverBase::IsVSyncEnabled() const {
+diff --git a/src/gpu/xenos/host/presenter.h b/src/gpu/xenos/host/presenter.h
+--- a/src/gpu/xenos/host/presenter.h
++++ b/src/gpu/xenos/host/presenter.h
+@@ -28,6 +28,8 @@
+ #include <vector>
+ 
+ #include <rex/assert.h>
++#include <rex/gpu/graphics_presentation.h>
++#include <bit>
+ #include <rex/math.h>
+ #include <rex/platform.h>
+ #include <rex/types.h>
+@@ -119,6 +121,12 @@
+ 
+   virtual ~Presenter();
+ 
++  PresentationState GetPresentationState() const {
++    return {guest_output_refresh_sequence_.load(std::memory_order_acquire),
++            successful_ui_present_sequence_.load(std::memory_order_acquire)};
++  }
++  virtual bool CaptureGuestOutput(CaptureImage& image) { image = {}; return false; }
++
+   bool Attach(gpu::IPresentationHost* host, gpu::Surface* surface) override {
+     SetWindowSurfaceFromUIThread(host, surface);
+     return surface_ != nullptr;
+@@ -179,6 +187,22 @@
+    * @param force_paint True to paint even when no paint was requested.
+    */
+   void PaintFromUIThread(bool force_paint = false);
++
++  static uint32_t Packed10bpcRGBTo8bpcBytes(uint32_t rgb10) {
++    // Conversion almost according to the Direct3D 10+ rules (unorm > float >
++    // unorm), but with one multiplication rather than separate division and
++    // multiplication - the results are the same for unorm10 to unorm8.
++    if constexpr (std::endian::native == std::endian::big) {
++      return (uint32_t(float(rgb10 & 0x3FF) * (255.0f / 1023.0f) + 0.5f) << 24) |
++             (uint32_t(float((rgb10 >> 10) & 0x3FF) * (255.0f / 1023.0f) + 0.5f) << 16) |
++             (uint32_t(float((rgb10 >> 20) & 0x3FF) * (255.0f / 1023.0f) + 0.5f) << 8) |
++             uint32_t(0xFF);
++    }
++    return uint32_t(float(rgb10 & 0x3FF) * (255.0f / 1023.0f) + 0.5f) |
++           (uint32_t(float((rgb10 >> 10) & 0x3FF) * (255.0f / 1023.0f) + 0.5f) << 8) |
++           (uint32_t(float((rgb10 >> 20) & 0x3FF) * (255.0f / 1023.0f) + 0.5f) << 16) |
++           (uint32_t(0xFF) << 24);
++  }
+ 
+   enum class PaintResult : u8 {
+     kPresented,
+@@ -556,6 +580,8 @@
+    * a repaint request.
+    */
+   std::atomic<bool> ui_thread_paint_requested_{false};
++  std::atomic<u64> guest_output_refresh_sequence_{0};
++  std::atomic<u64> successful_ui_present_sequence_{0};
+ 
+   /** Spaces overlay only paints and wakes the UI thread when a guest frame is published. */
+   OverlayPaintPacer overlay_paint_pacer_;
+diff --git a/src/gpu/xenos/host/presenter.cpp b/src/gpu/xenos/host/presenter.cpp
+--- a/src/gpu/xenos/host/presenter.cpp
++++ b/src/gpu/xenos/host/presenter.cpp
+@@ -180,6 +180,8 @@
+       WaitForUITickFromUIThread();
+ 
+       paint_result = PaintAndPresent(draw_ui);
++      if (paint_result == PaintResult::kPresented || paint_result == PaintResult::kPresentedSuboptimal)
++        successful_ui_present_sequence_.fetch_add(1, std::memory_order_release);
+       if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated) {
+         request_repaint_immediately = true;
+       }
+@@ -259,6 +261,7 @@
+     guest_output_mailbox_writable_ = (3 - last_acquired - guest_output_mailbox_writable_) % 3;
+   }
+ 
++  if (is_active) guest_output_refresh_sequence_.fetch_add(1, std::memory_order_release);
+   overlay_paint_pacer_.SignalGuestOutput();
+   PaintResult paint_result = PaintResult::kNotPresented;
+   {
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_presenter.h b/src/gpu/xenos/host/d3d12/d3d12_presenter.h
+--- a/src/gpu/xenos/host/d3d12/d3d12_presenter.h
++++ b/src/gpu/xenos/host/d3d12/d3d12_presenter.h
+@@ -52,6 +52,8 @@
+   explicit D3D12Presenter(Key, HostGPULossCallback host_gpu_loss_callback,
+                           const XenosGraphicsDriverBase& driver, const D3D12Provider& provider)
+       : Presenter(std::move(host_gpu_loss_callback), driver), provider_(provider) {}
++
++  bool CaptureGuestOutput(CaptureImage& image) override;
+ 
+   static constexpr DXGI_FORMAT kGuestOutputFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
+   static constexpr D3D12_RESOURCE_STATES kGuestOutputInternalState =
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp b/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
+--- a/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
++++ b/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
+@@ -34,6 +34,138 @@
+ #include "gpu/xenos/host/shaders/bytecode/d3d12_5_1/guest_output_bilinear_ps.h"
+ #include "gpu/xenos/host/shaders/bytecode/d3d12_5_1/guest_output_triangle_strip_rect_vs.h"
+ }  // namespace shaders
++
++bool D3D12Presenter::CaptureGuestOutput(CaptureImage& image_out) {
++  Microsoft::WRL::ComPtr<ID3D12Resource> guest_output_resource;
++  {
++    uint32_t guest_output_mailbox_index;
++    std::unique_lock<std::mutex> guest_output_consumer_lock(
++        ConsumeGuestOutput(guest_output_mailbox_index, nullptr, nullptr));
++    if (guest_output_mailbox_index != UINT32_MAX) {
++      guest_output_resource = guest_output_resources_[guest_output_mailbox_index].second;
++    }
++    // Incremented the reference count of the guest output resource - safe to
++    // leave the consumer critical section now.
++  }
++  if (!guest_output_resource) {
++    return false;
++  }
++
++  ID3D12Device* device = provider_.GetDevice();
++
++  D3D12_RESOURCE_DESC texture_desc = guest_output_resource->GetDesc();
++  D3D12_TEXTURE_COPY_LOCATION copy_dest;
++  UINT64 copy_dest_size;
++  device->GetCopyableFootprints(&texture_desc, 0, 1, 0, &copy_dest.PlacedFootprint, nullptr,
++                                nullptr, &copy_dest_size);
++
++  D3D12_RESOURCE_DESC buffer_desc;
++  objects::FillBufferResourceDesc(buffer_desc, copy_dest_size, D3D12_RESOURCE_FLAG_NONE);
++  Microsoft::WRL::ComPtr<ID3D12Resource> buffer;
++  // Create zeroed not to leak data in the row padding.
++  if (FAILED(device->CreateCommittedResource(&objects::kHeapPropertiesReadback, D3D12_HEAP_FLAG_NONE,
++                                             &buffer_desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
++                                             IID_PPV_ARGS(&buffer)))) {
++    REXLOG_ERROR("D3D12Presenter: Failed to create the guest output capture buffer");
++    return false;
++  }
++
++  {
++    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> command_allocator;
++    if (FAILED(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
++                                              IID_PPV_ARGS(&command_allocator)))) {
++      REXLOG_ERROR(
++          "D3D12Presenter: Failed to create the guest output capturing command "
++          "allocator");
++      return false;
++    }
++    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> command_list;
++    if (FAILED(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, command_allocator.Get(),
++                                         nullptr, IID_PPV_ARGS(&command_list)))) {
++      REXLOG_ERROR(
++          "D3D12Presenter: Failed to create the guest output capturing command "
++          "list");
++      return false;
++    }
++
++    D3D12_RESOURCE_BARRIER barrier;
++    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
++    barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
++    barrier.Transition.pResource = guest_output_resource.Get();
++    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
++    barrier.Transition.StateBefore = kGuestOutputInternalState;
++    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
++    if constexpr (kGuestOutputInternalState != D3D12_RESOURCE_STATE_COPY_SOURCE) {
++      command_list->ResourceBarrier(1, &barrier);
++    }
++    copy_dest.pResource = buffer.Get();
++    copy_dest.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
++    D3D12_TEXTURE_COPY_LOCATION copy_source;
++    copy_source.pResource = guest_output_resource.Get();
++    copy_source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
++    copy_source.SubresourceIndex = 0;
++    command_list->CopyTextureRegion(&copy_dest, 0, 0, 0, &copy_source, nullptr);
++    if constexpr (kGuestOutputInternalState != D3D12_RESOURCE_STATE_COPY_SOURCE) {
++      std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
++      command_list->ResourceBarrier(1, &barrier);
++    }
++    if (FAILED(command_list->Close())) {
++      REXLOG_ERROR(
++          "D3D12Presenter: Failed to close the guest output capturing command "
++          "list");
++      return false;
++    }
++
++    ID3D12CommandQueue* direct_queue = provider_.GetDirectQueue();
++
++    // Make sure that if any work is submitted, any `return` will cause an await
++    // before releasing the command allocator / list and the resource the RAII
++    // way in the destruction of the submission tracker - so create after the
++    // objects referenced in the submission - but don't submit anything if
++    // failed to initialize the fence.
++    D3D12SubmissionTracker submission_tracker;
++    if (!submission_tracker.Initialize(device, direct_queue)) {
++      return false;
++    }
++    ID3D12CommandList* execute_command_list = command_list.Get();
++    direct_queue->ExecuteCommandLists(1, &execute_command_list);
++    if (!submission_tracker.NextSubmission()) {
++      REXLOG_ERROR("D3D12Presenter: Failed to signal the guest output capturing fence");
++      return false;
++    }
++    if (!submission_tracker.AwaitAllSubmissionsCompletion()) {
++      REXLOG_ERROR("D3D12Presenter: Failed to await the guest output capturing fence");
++      return false;
++    }
++  }
++
++  D3D12_RANGE read_range;
++  read_range.Begin = copy_dest.PlacedFootprint.Offset;
++  read_range.End = copy_dest_size;
++  void* mapping;
++  if (FAILED(buffer->Map(0, &read_range, &mapping))) {
++    REXLOG_ERROR("D3D12Presenter: Failed to map the guest output capture buffer");
++    return false;
++  }
++  image_out.width = uint32_t(texture_desc.Width);
++  image_out.height = uint32_t(texture_desc.Height);
++  image_out.stride = sizeof(uint32_t) * image_out.width;
++  image_out.data.resize(image_out.stride * image_out.height);
++  uint32_t* image_out_pixels = reinterpret_cast<uint32_t*>(image_out.data.data());
++  for (uint32_t y = 0; y < image_out.height; ++y) {
++    uint32_t* dest_row = &image_out_pixels[size_t(image_out.width) * y];
++    const uint32_t* source_row = reinterpret_cast<const uint32_t*>(
++        reinterpret_cast<const uint8_t*>(mapping) + copy_dest.PlacedFootprint.Offset +
++        size_t(copy_dest.PlacedFootprint.Footprint.RowPitch) * y);
++    for (uint32_t x = 0; x < image_out.width; ++x) {
++      dest_row[x] = Packed10bpcRGBTo8bpcBytes(source_row[x]);
++    }
++  }
++  // Unmapping will be done implicitly when the resource goes out of scope and
++  // gets destroyed.
++  return true;
++}
++
+ 
+ D3D12Presenter::~D3D12Presenter() {
+   paint_context_.AwaitSwapChainUsageCompletion();
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_presenter.h b/src/gpu/xenos/host/vulkan/vulkan_presenter.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_presenter.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_presenter.h
+@@ -80,6 +80,8 @@
+   }
+ 
+   /** Maximum number of guest output image versions alive at once. */
++  bool CaptureGuestOutput(CaptureImage& image) override;
++
+   static constexpr size_t kMaxActiveGuestOutputImageVersions = kGuestOutputMailboxSize;
+ 
+   static constexpr VkFormat kGuestOutputFormat = VK_FORMAT_A2B10G10R10_UNORM_PACK32;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+@@ -110,6 +110,221 @@
+ 
+   return true;
+ }
++
++bool VulkanPresenter::CaptureGuestOutput(CaptureImage& image_out) {
++  std::shared_ptr<GuestOutputImage> guest_output_image;
++  {
++    uint32_t guest_output_mailbox_index;
++    std::unique_lock<std::mutex> guest_output_consumer_lock(
++        ConsumeGuestOutput(guest_output_mailbox_index, nullptr, nullptr));
++    if (guest_output_mailbox_index != UINT32_MAX) {
++      REX_ASSERT(guest_output_images_[guest_output_mailbox_index].ever_successfully_refreshed);
++      guest_output_image = guest_output_images_[guest_output_mailbox_index].image;
++    }
++    // Incremented the reference count of the guest output image - safe to leave
++    // the consumer critical section now.
++  }
++  if (!guest_output_image) {
++    return false;
++  }
++
++  VkExtent2D image_extent = guest_output_image->GetExtent();
++  size_t pixel_count = size_t(image_extent.width) * image_extent.height;
++  VkDeviceSize buffer_size = VkDeviceSize(sizeof(uint32_t) * pixel_count);
++  VkBuffer buffer;
++  VkDeviceMemory buffer_memory;
++  if (!CreateDedicatedAllocationBuffer(
++          vulkan_device_, buffer_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
++          objects::MemoryPurpose::kReadback, buffer, buffer_memory)) {
++    REXLOG_ERROR("VulkanPresenter: Failed to create the guest output capture buffer");
++    return false;
++  }
++
++  const VulkanDevice::Functions& dfn = vulkan_device_->GetFunctions();
++  const VkDevice device = vulkan_device_->GetDevice();
++
++  {
++    VkCommandPoolCreateInfo command_pool_create_info;
++    command_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
++    command_pool_create_info.pNext = nullptr;
++    command_pool_create_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
++    command_pool_create_info.queueFamilyIndex = vulkan_device_->GetQueueFamilyGraphicsCompute();
++    VkCommandPool command_pool;
++    if (dfn.vkCreateCommandPool(device, &command_pool_create_info, nullptr, &command_pool) !=
++        VK_SUCCESS) {
++      REXLOG_ERROR(
++          "VulkanPresenter: Failed to create the guest output capturing "
++          "command pool");
++      dfn.vkDestroyBuffer(device, buffer, nullptr);
++      dfn.vkFreeMemory(device, buffer_memory, nullptr);
++      return false;
++    }
++
++    VkCommandBufferAllocateInfo command_buffer_allocate_info;
++    command_buffer_allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
++    command_buffer_allocate_info.pNext = nullptr;
++    command_buffer_allocate_info.commandPool = command_pool;
++    command_buffer_allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
++    command_buffer_allocate_info.commandBufferCount = 1;
++    VkCommandBuffer command_buffer;
++    if (dfn.vkAllocateCommandBuffers(device, &command_buffer_allocate_info, &command_buffer) !=
++        VK_SUCCESS) {
++      REXLOG_ERROR(
++          "VulkanPresenter: Failed to allocate the guest output capturing "
++          "command buffer");
++      dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++      dfn.vkDestroyBuffer(device, buffer, nullptr);
++      dfn.vkFreeMemory(device, buffer_memory, nullptr);
++      return false;
++    }
++
++    VkCommandBufferBeginInfo command_buffer_begin_info;
++    command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
++    command_buffer_begin_info.pNext = nullptr;
++    command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++    command_buffer_begin_info.pInheritanceInfo = nullptr;
++    if (dfn.vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info) != VK_SUCCESS) {
++      REXLOG_ERROR(
++          "VulkanPresenter: Failed to begin recording the guest output "
++          "capturing command buffer");
++      dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++      dfn.vkDestroyBuffer(device, buffer, nullptr);
++      dfn.vkFreeMemory(device, buffer_memory, nullptr);
++      return false;
++    }
++
++    VkImageMemoryBarrier image_memory_barrier;
++    image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
++    image_memory_barrier.pNext = nullptr;
++    image_memory_barrier.srcAccessMask = kGuestOutputInternalAccessMask;
++    image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
++    image_memory_barrier.oldLayout = kGuestOutputInternalLayout;
++    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
++    image_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    image_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    image_memory_barrier.image = guest_output_image->GetImage();
++    image_memory_barrier.subresourceRange = objects::BuildSubresourceRange();
++    dfn.vkCmdPipelineBarrier(command_buffer, kGuestOutputInternalStageMask,
++                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
++                             &image_memory_barrier);
++
++    VkBufferImageCopy buffer_image_copy = {};
++    buffer_image_copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
++    buffer_image_copy.imageSubresource.layerCount = 1;
++    buffer_image_copy.imageExtent.width = image_extent.width;
++    buffer_image_copy.imageExtent.height = image_extent.height;
++    buffer_image_copy.imageExtent.depth = 1;
++    dfn.vkCmdCopyImageToBuffer(command_buffer, guest_output_image->GetImage(),
++                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &buffer_image_copy);
++
++    // A fence doesn't guarantee host visibility and availability.
++    VkBufferMemoryBarrier buffer_memory_barrier;
++    buffer_memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
++    buffer_memory_barrier.pNext = nullptr;
++    buffer_memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++    buffer_memory_barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
++    buffer_memory_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    buffer_memory_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    buffer_memory_barrier.buffer = buffer;
++    buffer_memory_barrier.offset = 0;
++    buffer_memory_barrier.size = VK_WHOLE_SIZE;
++    std::swap(image_memory_barrier.srcAccessMask, image_memory_barrier.dstAccessMask);
++    std::swap(image_memory_barrier.oldLayout, image_memory_barrier.newLayout);
++    dfn.vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
++                             VK_PIPELINE_STAGE_HOST_BIT | kGuestOutputInternalStageMask, 0, 0,
++                             nullptr, 1, &buffer_memory_barrier, 1, &image_memory_barrier);
++
++    if (dfn.vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {
++      REXLOG_ERROR(
++          "VulkanPresenter: Failed to end recording the guest output capturing "
++          "command buffer");
++      dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++      dfn.vkDestroyBuffer(device, buffer, nullptr);
++      dfn.vkFreeMemory(device, buffer_memory, nullptr);
++      return false;
++    }
++
++    VkSubmitInfo submit_info = {};
++    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
++    submit_info.commandBufferCount = 1;
++    submit_info.pCommandBuffers = &command_buffer;
++    VulkanSubmissionTracker submission_tracker(vulkan_device_);
++    {
++      VulkanSubmissionTracker::FenceAcquisition fence_acqusition(
++          submission_tracker.AcquireFenceToAdvanceSubmission());
++      if (!fence_acqusition.GetFence()) {
++        REXLOG_ERROR(
++            "VulkanPresenter: Failed to acquire a fence for guest output "
++            "capturing");
++        fence_acqusition.SubmissionFailedOrDiscarded();
++        dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++        dfn.vkDestroyBuffer(device, buffer, nullptr);
++        dfn.vkFreeMemory(device, buffer_memory, nullptr);
++        return false;
++      }
++      VkResult submit_result;
++      {
++        const VulkanDevice::Queue::Acquisition queue_acquisition =
++            vulkan_device_->AcquireQueue(vulkan_device_->GetQueueFamilyGraphicsCompute(), 0);
++        submit_result =
++            dfn.vkQueueSubmit(queue_acquisition.GetQueue(), 1, &submit_info, fence_acqusition.GetFence());
++      }
++      if (submit_result != VK_SUCCESS) {
++        REXLOG_ERROR(
++            "VulkanPresenter: Failed to submit the guest output capturing "
++            "command buffer");
++        fence_acqusition.SubmissionFailedOrDiscarded();
++        dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++        dfn.vkDestroyBuffer(device, buffer, nullptr);
++        dfn.vkFreeMemory(device, buffer_memory, nullptr);
++        return false;
++      }
++    }
++    if (!submission_tracker.AwaitAllSubmissionsCompletion()) {
++      REXLOG_ERROR("VulkanPresenter: Failed to await the guest output capturing fence");
++      dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++      dfn.vkDestroyBuffer(device, buffer, nullptr);
++      dfn.vkFreeMemory(device, buffer_memory, nullptr);
++      return false;
++    }
++
++    dfn.vkDestroyCommandPool(device, command_pool, nullptr);
++  }
++
++  // Don't need the buffer anymore, just its memory.
++  dfn.vkDestroyBuffer(device, buffer, nullptr);
++
++  void* mapping;
++  if (dfn.vkMapMemory(device, buffer_memory, 0, VK_WHOLE_SIZE, 0, &mapping) != VK_SUCCESS) {
++    REXLOG_ERROR("VulkanPresenter: Failed to map the guest output capture memory");
++    dfn.vkFreeMemory(device, buffer_memory, nullptr);
++    return false;
++  }
++
++  VkMappedMemoryRange invalidate{};
++  invalidate.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
++  invalidate.memory = buffer_memory;
++  invalidate.size = VK_WHOLE_SIZE;
++  if (dfn.vkInvalidateMappedMemoryRanges(device, 1, &invalidate) != VK_SUCCESS) {
++    dfn.vkFreeMemory(device, buffer_memory, nullptr);
++    return false;
++  }
++
++  image_out.width = image_extent.width;
++  image_out.height = image_extent.height;
++  image_out.stride = sizeof(uint32_t) * image_extent.width;
++  image_out.data.resize(size_t(buffer_size));
++  uint32_t* image_out_pixels = reinterpret_cast<uint32_t*>(image_out.data.data());
++  for (size_t i = 0; i < pixel_count; ++i) {
++    image_out_pixels[i] = Packed10bpcRGBTo8bpcBytes(reinterpret_cast<const uint32_t*>(mapping)[i]);
++  }
++
++  // Unmapping will be done by freeing.
++  dfn.vkFreeMemory(device, buffer_memory, nullptr);
++
++  return true;
++}
++
+ 
+ VulkanPresenter::~VulkanPresenter() {
+   paint_context_.DestroySwapchainAndVulkanSurface();
+diff --git a/include/rex/ui/startup_paint.h b/include/rex/ui/startup_paint.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/ui/startup_paint.h
+@@ -0,0 +1,12 @@
++#pragma once
++#include <rex/module.h>
++
++namespace rex::ui {
++/** Services only the framework overlay frame requests during synchronous startup.
++ * Normal posted tasks, input and application lifecycle callbacks remain queued for RunFrame.
++ */
++REX_DECLARE_INTERFACE(IStartupPaint, 1)
++  /** UI thread only. Returns false before start, after stop or during recursive pumping. */
++  [[nodiscard]] virtual bool PumpStartupPaint() = 0;
++};
++}  // namespace rex::ui
+diff --git a/src/ui/ui_system.h b/src/ui/ui_system.h
+--- a/src/ui/ui_system.h
++++ b/src/ui/ui_system.h
+@@ -15,6 +15,7 @@
+ 
+ #include <rex/ui/ui_system.h>
+ #include <rex/ui/achievement_notifications.h>
++#include <rex/ui/startup_paint.h>
+ 
+ #include <rex/logging/log_category.h>
+ #include <rex/ui_thread.h>
+@@ -48,7 +49,7 @@
+ namespace rex::ui {
+ 
+ /** Owns the window, the frame loop and the overlays. The app starts and stops it. */
+-class UISystem final : public rex::ui::IUISystem, public IUIControl, public IAchievementNotifications, public IUIThread {
++class UISystem final : public rex::ui::IUISystem, public IUIControl, public IAchievementNotifications, public IUIThread, public IStartupPaint {
+  public:
+   UISystem();
+   ~UISystem() override;
+@@ -95,6 +96,7 @@
+   void SetCloseHandler(MoveOnlyFunction<void()> handler) override;
+   void SetResizeHandler(MoveOnlyFunction<void(u32, u32)> handler) override;
+   bool ServePosts(std::chrono::milliseconds timeout) override;
++  bool PumpStartupPaint() override;
+ 
+   /**
+    * Starts the system on the calling thread, which becomes the UI thread. Without an input system
+@@ -118,6 +120,7 @@
+   bool RunFrame(u32 timeout_ms) override;
+ 
+  private:
++  bool RunSynchronousImpl(MoveOnlyFunction<void()> fn, bool frame_request);
+   rex::ui::UISettings settings_;
+   struct State;
+   std::unique_ptr<State> state_;
+diff --git a/src/ui/ui_module.h b/src/ui/ui_module.h
+--- a/src/ui/ui_module.h
++++ b/src/ui/ui_module.h
+@@ -29,7 +29,7 @@
+ /** Serves the UI system and its control interface, and selects the drivers at Init. */
+ class UIModule final : public IModule {
+  public:
+-  REX_MODULE_SERVES(::rex::ui::IUISystem, ::rex::ui::IUIControl, ::rex::ui::IAchievementNotifications)
++  REX_MODULE_SERVES(::rex::ui::IUISystem, ::rex::ui::IUIControl, ::rex::ui::IAchievementNotifications, ::rex::ui::IStartupPaint)
+ 
+   std::string_view GetName() const override { return "rexui"; }
+   std::span<const InterfaceType> GetRequiredInterfaces() const override;
+diff --git a/src/ui/ui_module.cpp b/src/ui/ui_module.cpp
+--- a/src/ui/ui_module.cpp
++++ b/src/ui/ui_module.cpp
+@@ -111,7 +111,7 @@
+ }
+ 
+ IInterface* UIModule::QueryInterface(std::string_view name, u32 version) {
+-  return FindModuleInterface<rex::ui::IUISystem, IUIControl, IAchievementNotifications, IUIThread>(GetOrCreateSystem(), name,
++  return FindModuleInterface<rex::ui::IUISystem, IUIControl, IAchievementNotifications, IUIThread, IStartupPaint>(GetOrCreateSystem(), name,
+                                                                         version);
+ }
+ 
+diff --git a/src/ui/ui_state.h b/src/ui/ui_state.h
+--- a/src/ui/ui_state.h
++++ b/src/ui/ui_state.h
+@@ -85,7 +85,14 @@
+ 
+   std::mutex post_mutex;
+   std::condition_variable post_wake;
+-  std::deque<MoveOnlyFunction<void()>> posts;
++  struct PostedTask {
++    MoveOnlyFunction<void()> fn;
++    bool frame_request;
++    PostedTask(MoveOnlyFunction<void()> task, bool frame = false)
++        : fn(std::move(task)), frame_request(frame) {}
++  };
++  std::deque<PostedTask> posts;
++  bool startup_paint_pumping = false;
+   u32 sync_calls = 0;
+   std::condition_variable sync_idle;
+ 
+@@ -129,7 +136,7 @@
+   std::vector<ScopeGuard> watches;
+ 
+   bool IsUIThread() const { return std::this_thread::get_id() == ui_thread; }
+-  void ExecutePosts();
++  void ExecutePosts(bool frame_requests_only = false);
+   void WakeLoop();
+ 
+   void OpenWindow();
+diff --git a/src/ui/ui_system.cpp b/src/ui/ui_system.cpp
+--- a/src/ui/ui_system.cpp
++++ b/src/ui/ui_system.cpp
+@@ -103,7 +103,7 @@
+   }
+ }
+ 
+-void UISystem::State::ExecutePosts() {
++void UISystem::State::ExecutePosts(bool frame_requests_only) {
+   for (;;) {
+     MoveOnlyFunction<void()> fn;
+     {
+@@ -111,8 +111,13 @@
+       if (posts.empty()) {
+         return;
+       }
+-      fn = std::move(posts.front());
+-      posts.pop_front();
++      auto next = posts.begin();
++      if (frame_requests_only) {
++        next = std::ranges::find_if(posts, [](const auto& post) { return post.frame_request; });
++        if (next == posts.end()) return;
++      }
++      fn = std::move(next->fn);
++      posts.erase(next);
+     }
+     try {
+       fn();
+@@ -126,7 +131,7 @@
+   {
+     std::lock_guard lock(state_->post_mutex);
+     if (!state_->stopped) {
+-      state_->posts.push_back(std::move(fn));
++      state_->posts.emplace_back(std::move(fn));
+       fn = nullptr;
+     }
+   }
+@@ -141,6 +146,10 @@
+ }
+ 
+ bool UISystem::RunSynchronous(MoveOnlyFunction<void()> fn) {
++  return RunSynchronousImpl(std::move(fn), false);
++}
++
++bool UISystem::RunSynchronousImpl(MoveOnlyFunction<void()> fn, bool frame_request) {
+   State& s = *state_;
+   if (s.stopped.load()) {
+     return false;
+@@ -163,7 +172,7 @@
+       return false;
+     }
+     ++s.sync_calls;
+-    s.posts.push_back([shared] {
++    s.posts.emplace_back([shared] {
+       const auto finish = [&shared] {
+         {
+           std::lock_guard lock(shared->mutex);
+@@ -178,7 +187,7 @@
+         throw;
+       }
+       finish();
+-    });
++    }, frame_request);
+   }
+   s.WakeLoop();
+   {
+@@ -190,6 +199,16 @@
+     --s.sync_calls;
+   }
+   s.sync_idle.notify_all();
++  return true;
++}
++
++bool UISystem::PumpStartupPaint() {
++  State& s = *state_;
++  if (!s.IsUIThread() || !s.started.load() || s.stopped.load() || s.stopping.load() ||
++      s.startup_paint_pumping) return false;
++  s.startup_paint_pumping = true;
++  ScopeGuard finish([&] { s.startup_paint_pumping = false; });
++  s.ExecutePosts(true);
+   return true;
+ }
+ 
+@@ -485,7 +504,7 @@
+   }
+   std::lock_guard frame(s.frame_mutex);
+   ImDrawData* data = nullptr;
+-  (void)RunSynchronous([&s, &data] {
++  (void)RunSynchronousImpl([&s, &data] {
+     if (!s.imgui) {
+       return;
+     }
+@@ -496,7 +515,7 @@
+     }
+     s.imgui->SetDisplay(s.window_width, s.window_height, s.content_scale);
+     data = s.imgui->BuildFrame();
+-  });
++  }, true);
+   if (data) {
+     renderer.RenderOverlays(*data);
+   }
+diff --git a/tests/unit/ui/startup_paint_test.cpp b/tests/unit/ui/startup_paint_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/ui/startup_paint_test.cpp
+@@ -0,0 +1,65 @@
++#include "rex_test.h"
++#include "ui_harness.h"
++#include <rex/ui/startup_paint.h>
++#include <rex/ui/ui_system.h>
++#include <rex/overlay_renderer.h>
++#include <atomic>
++#include <chrono>
++#include <thread>
++#include <imgui.h>
++
++namespace {
++class StartupDialog final : public rex::ui::DialogBase {
++ public:
++  std::atomic<int> draws{0};
++  bool Draw(ImGuiIO&) override { ++draws; return true; }
++};
++class StartupRenderer final : public rex::IOverlayRenderer {
++ public:
++  std::atomic<int> frames{0};
++  void RenderOverlays(ImDrawData& data) override {
++    for(auto* texture : *data.Textures) {
++      if(texture->Status==ImTextureStatus_WantDestroy)texture->SetStatus(ImTextureStatus_Destroyed);
++      else if(texture->Status!=ImTextureStatus_OK) {
++        texture->SetTexID(static_cast<ImTextureID>(1));
++        texture->SetStatus(ImTextureStatus_OK);
++      }
++    }
++    ++frames;
++  }
++};
++}
++
++REX_TEST_CASE("Startup paint services overlay frames without dispatching application tasks",
++              "[ui][startup_paint]") {
++  rex::test_ui::UIApp app;
++  REQUIRE(app.Start());
++  auto& ui=app.GetUI();
++  auto* startup=REX_INTERFACE(rex::ui::IStartupPaint);
++  REQUIRE(startup);
++  StartupDialog dialog;
++  auto registered=ui.AddDialog(dialog);
++  StartupRenderer renderer;
++  std::atomic<bool> ordinary{false},synchronous{false},done{false};
++  ui.PostTask([&] { ordinary=true; });
++  std::thread ordinary_caller([&] { (void)ui.RunSynchronous([&] { synchronous=true; }); });
++  std::thread presenter([&] { ui.DrawOverlays(renderer);done=true; });
++  const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
++  while(!done && std::chrono::steady_clock::now()<deadline) {
++    CHECK(startup->PumpStartupPaint());
++    std::this_thread::sleep_for(std::chrono::milliseconds(1));
++  }
++  CHECK(done.load());
++  CHECK(renderer.frames.load()==1);
++  CHECK(dialog.draws.load()==1);
++  CHECK_FALSE(ordinary.load());
++  CHECK_FALSE(synchronous.load());
++  app.Pump();
++  ordinary_caller.join();
++  presenter.join();
++  CHECK(ordinary.load());
++  CHECK(synchronous.load());
++  registered.Reset();
++  app.Shutdown();
++  CHECK(REX_INTERFACE(rex::ui::IStartupPaint)==nullptr);
++}
+diff --git a/tests/unit/gpu/graphics_system_test.cpp b/tests/unit/gpu/graphics_system_test.cpp
+--- a/tests/unit/gpu/graphics_system_test.cpp
++++ b/tests/unit/gpu/graphics_system_test.cpp
+@@ -28,6 +28,7 @@
+ #include <rex/gpu/graphics_driver.h>
+ #include <rex/gpu/xenos_graphics_driver.h>
+ #include <rex/gpu/graphics_system.h>
++#include <rex/gpu/graphics_presentation.h>
+ #include "gpu/graphics_control.h"
+ #include <rex/logging/logger.h>
+ #include <rex/ppc/mmio.h>
+@@ -118,6 +119,12 @@
+   std::string_view GetName() const override { return "fake"; }
+   rex::Result<void> Initialize(rex::IDriverContext&) override { return {}; }
+   void Shutdown() override {}
++  rex::gpu::PresentationState GetPresentationState() const override { return {7, 11}; }
++  bool CaptureGuestOutput(rex::gpu::CaptureImage& image) override {
++    image = {1, 1, 4, {1, 2, 3, 255}};
++    return true;
++  }
++
+ 
+   rex::gpu::FrameStatus WaitForFrame(rex::u32) override {
+     std::this_thread::sleep_for(1ms);
+@@ -506,3 +513,33 @@
+   CHECK(service->QueryShaderStoragePreparation().phase == rex::gpu::GraphicsPreparationPhase::kIdle);
+   app.Shutdown();
+ }
++
++REX_TEST_CASE("Graphics observation follows the current driver and clears unavailable captures",
++              "[gpu][presentation_observation]") {
++  CHECK(REX_INTERFACE(rex::gpu::IGraphicsPresentation) == nullptr);
++  {
++    GraphicsApp app("fake");
++    REQUIRE(app.StartApp());
++    auto* presentation = REX_INTERFACE(rex::gpu::IGraphicsPresentation);
++    REQUIRE(presentation);
++    CHECK(presentation->GetPresentationState().guest_output_refresh == 7);
++    CHECK(presentation->GetPresentationState().successful_ui_present == 11);
++    rex::gpu::CaptureImage image;
++    REQUIRE(presentation->CaptureGuestOutput(image));
++    CHECK(image.data == std::vector<rex::u8>{1, 2, 3, 255});
++    app.Shutdown();
++  }
++  CHECK(REX_INTERFACE(rex::gpu::IGraphicsPresentation) == nullptr);
++  {
++    GraphicsApp app("none", false, {}, rex::GraphicsFamily::kNone);
++    REQUIRE(app.StartApp());
++    auto* presentation = REX_INTERFACE(rex::gpu::IGraphicsPresentation);
++    REQUIRE(presentation);
++    CHECK(presentation->GetPresentationState().guest_output_refresh == 0);
++    rex::gpu::CaptureImage image{1, 1, 4, {9, 9, 9, 255}};
++    CHECK_FALSE(presentation->CaptureGuestOutput(image));
++    CHECK(image.width == 0);
++    CHECK(image.data.empty());
++    app.Shutdown();
++  }
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -229,6 +230,7 @@
+   ui/keyboard_prompt_test.cpp
+   ui/achievement_notifications_test.cpp
+   ui/image_texture_test.cpp
++  ui/startup_paint_test.cpp
+   ui/ui_system_test.cpp
+   codegen/barrier_test.cpp
+   codegen/codegen_writer_test.cpp

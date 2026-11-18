@@ -1,8 +1,8 @@
 # In-song Controls acceptance (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md
-# §14.1/§16.5, P8a).
+# ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§14.1/ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§16.5, P8a).
 #
 # P7 built the in-song twins of the whole Controls tree and re-pointed retail's own `pause_controls`
-# case at them, but no boot ever opened the page from a paused song (plan §16.5). This arm closes
+# case at them, but no boot ever opened the page from a paused song (plan ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§16.5). This arm closes
 # that residual:
 #
 #   pause -> HELP & OPTIONS (retail's `pause_options` row) -> our in-song root -> Controls ->
@@ -56,7 +56,7 @@ $exeArgs = @("--game_data_root=$game", '--mnk_mode=1', '--fullscreen=false',
              "--user_data_root=$scratch", "--launcher_profile=$profilePath",
              "--dlc_library=$empty", "--dlc_root=$empty",
              '--enhancements_dlc_uncap_enumeration=true',
-             "--log_file=$log", '--mouse_native_trace=true')
+             "--log_file=$log", '--mouse_native_trace=true', '--log_flush_interval=1')
 $exeArgs | Set-Content (Join-Path $outDir 'argv.txt')
 New-Item -ItemType Directory -Force -Path (Join-Path $root $shots) | Out-Null
 
@@ -65,6 +65,12 @@ $script:steps = 0
 
 function Drive {
     param([string[]]$Actions)
+    # These fixtures use the compiled keyboard defaults, independent of legacy MnK pad keys.
+    $Actions = @($Actions | ForEach-Object {
+        if ($_ -eq 'key:a') { 'key:key_enter' }
+        elseif ($_ -eq 'key:b') { 'key:esc' }
+        else { $_ }
+    })
     & (Join-Path $root 'scripts\diagnostics\drive_ui.ps1') -Actions $Actions -OutDir $shots | Out-Null
 }
 
@@ -121,13 +127,41 @@ function ClickRow {
     # inside it settles for less than $StepSeconds.
     $settle = if ($Wait -ge 0) { $Wait } else { $StepSeconds }
     Write-Host ("  {0}: row {1} at {2},{3}" -f $Tag, $Index, $x, $y)
+    $script:stepScreenEvents = @(Select-String -LiteralPath $log -Pattern 'native_mouse: screen=').Count
     Drive @("mouse:$x`:$y", 'wait:1', "shot:$Tag-hover.png", 'click:left', "wait:$settle", "shot:$Tag.png")
 }
 
 function Assert-Screen {
     param([string]$Expected, [string]$Tag)
     $script:steps += 1
+    # Log writes are asynchronous. Validate short-lived entry after the capture
+    # action so waiting for disk cannot consume its three-second input window.
+    if ($script:pendingListening) {
+        $pending = $script:pendingListening
+        $pattern = 'native_mouse: screen=' + [regex]::Escape($pending.Screen) + ' .*available=true'
+        $seen = $false
+        for ($poll = 0; $poll -lt 15; $poll++) {
+            $recent = @(Select-String -LiteralPath $log -Pattern 'native_mouse: screen=' |
+                Select-Object -Skip $pending.Boundary | ForEach-Object { $_.Line })
+            if (@($recent -match $pattern).Count -gt 0) { $seen = $true; break }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $seen) { $script:failures += "$($pending.Tag): listening dialog entry was not recorded during this step" }
+        else { Write-Host "  $($pending.Tag): bounded listening dialog entry confirmed" }
+        $script:pendingListening = $null
+    }
     $actual = Get-Screen
+    if ($Expected -notmatch '^settings_listen') {
+        for ($poll = 0; $poll -lt 15 -and $actual -ne $Expected; $poll++) {
+            Start-Sleep -Milliseconds 100
+            $actual = Get-Screen
+        }
+    }
+    if ($actual -ne $Expected -and $Expected -match '^settings_listen') {
+        $script:pendingListening = @{Screen=$Expected; Tag=$Tag; Boundary=$script:stepScreenEvents}
+        Write-Host "  ${Tag}: listening entry queued for validation after input/countdown"
+        return $true
+    }
     if ($actual -ne $Expected) {
         $script:failures += "${Tag}: expected screen '$Expected', the log says '$actual'"
         Write-Host ("  !! {0}: expected {1}, got {2}" -f $Tag, $Expected, $actual)
@@ -137,13 +171,27 @@ function Assert-Screen {
     return $true
 }
 
+function Test-LogFatal([string]$Text) {
+    # The current SDK's %Q formatter maps critical to C. Require the record
+    # prefix, so a C or the word critical inside an ordinary message is harmless.
+    $stamp = "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}"
+    return [regex]::IsMatch($Text,
+        "(?im)\[(?:FATAL|critical)\]|^$stamp[ \t]+C[ \t]+\S+[ \t]+t\d+(?:[ \t]|$)")
+}
+
+function Test-LogFault([string]$Text) {
+    return (Test-LogFatal $Text) -or
+        [regex]::IsMatch($Text, '(?i)access violation|Unhandled guest')
+}
+
 function Assert-NoFault {
     param([string]$Tag)
     $script:steps += 1
-    $fault = Select-String -Path $log -Pattern 'access violation|Unhandled guest' -ErrorAction SilentlyContinue
+    $fault = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue |
+        Where-Object { Test-LogFault $_ })
     if ($fault) {
-        $script:failures += "${Tag}: the guest faulted: $($fault[-1].Line)"
-        Write-Host ("  !! {0}: the guest faulted: {1}" -f $Tag, $fault[-1].Line)
+        $script:failures += "${Tag}: the guest faulted: $($fault[-1])"
+        Write-Host ("  !! {0}: the guest faulted: {1}" -f $Tag, $fault[-1])
     } else {
         Write-Host ("  {0}: no guest fault" -f $Tag)
     }
@@ -206,16 +254,16 @@ try {
     Assert-Screen 'settings_pause_screen' '06-pause-root' | Out-Null
 
     # The in-song root's rows, in the merged root's current order (screenshot 06-pause-root.png):
-    # How to Play (0), Calibration (1), General (2), Controls (3), Audio/Video (4).
-    ClickRow 3 '07-controls'
+    # Game (0), Calibration (1), Controls (2), Audio/Video (3), How to Play (4), Credits (5).
+    ClickRow 2 '07-controls'
     Assert-Screen 'settings_controls_pause_screen' '07-controls' | Out-Null
 
-    ClickRow 0 '08-input-types'
-    Assert-Screen 'settings_input_types_pause_screen' '08-input-types' | Out-Null
+    ClickRow 0 '08-layout'
+    Assert-Screen 'settings_controller_layout_pause_screen' '08-layout' | Out-Null
     Drive @('key:b', "wait:$StepSeconds", 'shot:09-back-controls.png')
     Assert-Screen 'settings_controls_pause_screen' '09-back-controls' | Out-Null
 
-    ClickRow 1 '10-interface-mapping'
+    ClickRow 2 '10-interface-mapping'
     Assert-Screen 'settings_interface_mapping_pause_screen' '10-interface-mapping' | Out-Null
     # P3: Navigation (0), Confirm (1), Go Back (2), Music Library Options (3), Reset All (4).
     ClickRow 1 '11-confirm-row'

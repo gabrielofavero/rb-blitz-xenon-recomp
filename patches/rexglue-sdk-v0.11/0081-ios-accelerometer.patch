@@ -1,0 +1,17 @@
+diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
+--- a/thirdparty/CMakeLists.txt
++++ b/thirdparty/CMakeLists.txt
+@@ -235,7 +235,12 @@
+ endif ()
+ set(SDL_RENDER OFF)
+ set(SDL_HAPTIC OFF)
+-set(SDL_SENSOR OFF)
++if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++  # Touch controls use accelerometer samples for deliberate shakes.
++  set(SDL_SENSOR ON)
++else ()
++  set(SDL_SENSOR OFF)
++endif ()
+ set(SDL_POWER OFF)
+ set(SDL_FILESYSTEM OFF)
+ set(SDL_LOCALE ON)

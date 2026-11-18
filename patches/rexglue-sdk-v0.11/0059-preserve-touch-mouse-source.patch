@@ -1,0 +1,45 @@
+diff --git a/include/rex/input_keys.h b/include/rex/input_keys.h
+--- a/include/rex/input_keys.h
++++ b/include/rex/input_keys.h
+@@ -455,6 +455,8 @@
+   u32 width = 0;
+   /** Window height of Resize in physical pixels. */
+   u32 height = 0;
++  /** True for mouse events synthesized from a touch contact. */
++  bool is_touch = false;
+   /** True once a receiver consumed the event, so later receivers skip it. */
+   bool handled = false;
+ };
+diff --git a/src/ui/sdl3/sdl3_ui_driver.cpp b/src/ui/sdl3/sdl3_ui_driver.cpp
+--- a/src/ui/sdl3/sdl3_ui_driver.cpp
++++ b/src/ui/sdl3/sdl3_ui_driver.cpp
+@@ -321,7 +321,8 @@
+                      .x = std::trunc(x),
+                      .y = std::trunc(y),
+                      .dx = dx,
+-                     .dy = dy};
++                     .dy = dy,
++                     .is_touch = event.motion.which == SDL_TOUCH_MOUSEID};
+         Deliver(e);
+         break;
+       }
+@@ -332,7 +333,8 @@
+                                  : InputEvent::Type::kButtonUp,
+                      .button = TranslateButton(event.button.button),
+                      .x = std::trunc(event.button.x * density),
+-                     .y = std::trunc(event.button.y * density)};
++                     .y = std::trunc(event.button.y * density),
++                     .is_touch = event.button.which == SDL_TOUCH_MOUSEID};
+         Deliver(e);
+         break;
+       }
+@@ -341,7 +343,8 @@
+                      .x = std::trunc(event.wheel.mouse_x * density),
+                      .y = std::trunc(event.wheel.mouse_y * density),
+                      .scroll_x = ToDetents(event.wheel.x),
+-                     .scroll_y = ToDetents(event.wheel.y)};
++                     .scroll_y = ToDetents(event.wheel.y),
++                     .is_touch = event.wheel.which == SDL_TOUCH_MOUSEID};
+         Deliver(e);
+         break;
+       }

@@ -1,0 +1,293 @@
+diff --git a/src/gpu/xenos/vulkan/texture_descriptor_cache.h b/src/gpu/xenos/vulkan/texture_descriptor_cache.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/vulkan/texture_descriptor_cache.h
+@@ -0,0 +1,94 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++
++#include <cstddef>
++#include <functional>
++#include <span>
++#include <unordered_map>
++#include <vector>
++#include <vulkan/vulkan.h>
++
++namespace rex::gpu::vulkan {
++
++// Immutable descriptor sets borrowed from the existing transient allocator.
++// Clear before a new submission/frame or pool reset. Resource retirement and
++// set recycling remain the allocator's responsibility. Lookups allocate nothing.
++class TextureDescriptorCache {
++ public:
++  struct View {
++    VkDescriptorSetLayout layout;
++    std::span<const VkDescriptorImageInfo> textures;
++    std::span<const VkDescriptorImageInfo> samplers;
++  };
++
++  explicit TextureDescriptorCache(size_t capacity = 1024) : capacity_(capacity) {}
++
++  VkDescriptorSet Find(View view) const {
++    auto it = sets_.find(view);
++    return it == sets_.end() ? VK_NULL_HANDLE : it->second;
++  }
++
++  void Insert(View view, VkDescriptorSet set) {
++    if (set == VK_NULL_HANDLE || sets_.size() >= capacity_) return;
++    sets_.try_emplace(Key{view.layout,
++        {view.textures.begin(), view.textures.end()},
++        {view.samplers.begin(), view.samplers.end()}}, set);
++  }
++
++  void Clear() { sets_.clear(); }
++  size_t size() const { return sets_.size(); }
++
++ private:
++  struct Key {
++    VkDescriptorSetLayout layout;
++    std::vector<VkDescriptorImageInfo> textures;
++    std::vector<VkDescriptorImageInfo> samplers;
++    View view() const { return {layout, textures, samplers}; }
++  };
++
++  struct Hasher {
++    using is_transparent = void;
++    size_t operator()(const Key& key) const { return (*this)(key.view()); }
++    size_t operator()(View view) const {
++      size_t hash = std::hash<VkDescriptorSetLayout>{}(view.layout);
++      auto add = [&](size_t value) {
++        hash ^= value + size_t(0x9e3779b9) + (hash << 6) + (hash >> 2);
++      };
++      add(view.textures.size());
++      add(view.samplers.size());
++      // Ignore fields unused by each descriptor type and all struct padding.
++      for (const auto& texture : view.textures) {
++        add(std::hash<VkImageView>{}(texture.imageView));
++        add(size_t(texture.imageLayout));
++      }
++      for (const auto& sampler : view.samplers) {
++        add(std::hash<VkSampler>{}(sampler.sampler));
++      }
++      return hash;
++    }
++  };
++
++  struct Equal {
++    using is_transparent = void;
++    bool operator()(const Key& a, const Key& b) const { return (*this)(a.view(), b.view()); }
++    bool operator()(const Key& a, View b) const { return (*this)(a.view(), b); }
++    bool operator()(View a, const Key& b) const { return (*this)(a, b.view()); }
++    bool operator()(View a, View b) const {
++      if (a.layout != b.layout || a.textures.size() != b.textures.size() ||
++          a.samplers.size() != b.samplers.size()) return false;
++      for (size_t i = 0; i < a.textures.size(); ++i) {
++        if (a.textures[i].imageView != b.textures[i].imageView ||
++            a.textures[i].imageLayout != b.textures[i].imageLayout) return false;
++      }
++      for (size_t i = 0; i < a.samplers.size(); ++i) {
++        if (a.samplers[i].sampler != b.samplers[i].sampler) return false;
++      }
++      return true;
++    }
++  };
++
++  size_t capacity_;
++  std::unordered_map<Key, VkDescriptorSet, Hasher, Equal> sets_;
++};
++
++}  // namespace rex::gpu::vulkan
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_settings.h b/src/gpu/xenos/host/vulkan/vulkan_settings.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_settings.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_settings.h
+@@ -34,6 +34,8 @@
+               "placeholder pipelines to avoid visible flashing");
+   REX_SETTING(bool, submit_on_primary_buffer_end, true,
+               "Submit command buffer when PM4 primary buffer ends");
++  REX_SETTING(bool, texture_descriptor_cache, true,
++              "Reuse identical texture/sampler descriptor sets within a submission");
+   REX_SETTING(bool, dynamic_rendering, true,
+               "Use VK_KHR_dynamic_rendering when the device supports it, render passes otherwise");
+   REX_SETTING(i32, pipeline_creation_threads, -1,
+diff --git a/src/base/settings/aliases.cpp b/src/base/settings/aliases.cpp
+--- a/src/base/settings/aliases.cpp
++++ b/src/base/settings/aliases.cpp
+@@ -134,6 +134,8 @@
+     {"xenos.vulkan_readback_memexport", "gpu.vulkan.readback_memexport"},
+     {"xenos.vulkan_async_skip_incomplete_frames", "gpu.vulkan.async_skip_incomplete_frames"},
+     {"xenos.vulkan_submit_on_primary_buffer_end", "gpu.vulkan.submit_on_primary_buffer_end"},
++    {"vulkan_texture_descriptor_cache", "gpu.vulkan.texture_descriptor_cache"},
++    {"xenos.vulkan_texture_descriptor_cache", "gpu.vulkan.texture_descriptor_cache"},
+     {"xenos.vulkan_dynamic_rendering", "gpu.vulkan.dynamic_rendering"},
+     {"xenos.vulkan_pipeline_creation_threads", "gpu.vulkan.pipeline_creation_threads"},
+     {"xenos.vulkan_tessellation_wireframe", "gpu.vulkan.tessellation_wireframe"},
+diff --git a/src/gpu/xenos/vulkan/command_processor.h b/src/gpu/xenos/vulkan/command_processor.h
+--- a/src/gpu/xenos/vulkan/command_processor.h
++++ b/src/gpu/xenos/vulkan/command_processor.h
+@@ -38,6 +38,7 @@
+ #include "gpu/xenos/vulkan/shader.h"
+ #include "gpu/xenos/vulkan/shared_memory.h"
+ #include "gpu/xenos/vulkan/texture_cache.h"
++#include "gpu/xenos/vulkan/texture_descriptor_cache.h"
+ #include <rex/xenos/state.h>
+ #include <rex/hash.h>
+ #include "gpu/xenos/host/vulkan/linked_type_descriptor_set_allocator.h"
+@@ -510,13 +511,15 @@
+    * samplers.
+    *
+    * @param descriptor_set_writes_out Receives the writes.
+-   * @return The number of writes, or 0 on allocation failure or when no bindings were requested.
+-   */
+-  u32 WriteTransientTextureBindings(bool is_vertex, u32 texture_count, u32 sampler_count,
++   * @return The set, or null on allocation failure or when no bindings were requested.
++   *         A cache hit emits no descriptor writes but still returns a set to bind.
++   */
++  VkDescriptorSet WriteTransientTextureBindings(bool is_vertex, u32 texture_count, u32 sampler_count,
+                                     VkDescriptorSetLayout descriptor_set_layout,
+                                     const VkDescriptorImageInfo* texture_image_info,
+                                     const VkDescriptorImageInfo* sampler_image_info,
+-                                    VkWriteDescriptorSet* descriptor_set_writes_out);
++                                    VkWriteDescriptorSet* descriptor_set_writes_out,
++                                    u32& descriptor_set_write_count);
+ 
+   bool device_lost_ = false;
+ 
+@@ -594,6 +597,7 @@
+   std::vector<VkDescriptorSet> constants_transient_descriptors_free_;
+ 
+   gpu::vulkan::LinkedTypeDescriptorSetAllocator transient_descriptor_allocator_textures_;
++  TextureDescriptorCache texture_descriptor_cache_;
+   std::deque<UsedTextureTransientDescriptorSet> texture_transient_descriptor_sets_used_;
+   std::unordered_map<TextureDescriptorSetLayoutKey, std::vector<VkDescriptorSet>,
+                      TextureDescriptorSetLayoutKey::Hasher>
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -4832,6 +4832,7 @@
+ 
+     // The deferred command buffer submits to the real one at the end, after async pipelines finish.
+     deferred_command_buffer_.Reset();
++    texture_descriptor_cache_.Clear();
+ 
+     dynamic_viewport_update_needed_ = true;
+     dynamic_scissor_update_needed_ = true;
+@@ -4859,6 +4860,7 @@
+ 
+   if (is_opening_frame) {
+     frame_open_ = true;
++    texture_descriptor_cache_.Clear();
+     frame_used_async_placeholder_pipeline_ = false;
+ 
+     std::memset(current_float_constant_map_vertex_, 0, sizeof(current_float_constant_map_vertex_));
+@@ -5167,6 +5169,7 @@
+ }
+ 
+ void VulkanCommandProcessor::ClearTransientDescriptorPools() {
++  texture_descriptor_cache_.Clear();
+   texture_transient_descriptor_sets_free_.clear();
+   texture_transient_descriptor_sets_used_.clear();
+   transient_descriptor_allocator_textures_.Reset();
+@@ -6257,34 +6260,36 @@
+   if (write_vertex_textures) {
+     VkWriteDescriptorSet* write_textures =
+         write_descriptor_sets.data() + write_descriptor_set_count;
+-    u32 texture_descriptor_set_write_count = WriteTransientTextureBindings(
++    u32 texture_descriptor_set_write_count;
++    VkDescriptorSet texture_set = WriteTransientTextureBindings(
+         true, texture_count_vertex, sampler_count_vertex,
+         current_guest_graphics_pipeline_layout_->GetDescriptorSetLayoutTexturesVertexRef(),
+         descriptor_write_image_info_.data() + vertex_texture_image_info_offset,
+-        descriptor_write_image_info_.data() + vertex_sampler_image_info_offset, write_textures);
+-    if (!texture_descriptor_set_write_count) {
++        descriptor_write_image_info_.data() + vertex_sampler_image_info_offset, write_textures, texture_descriptor_set_write_count);
++    if (texture_set == VK_NULL_HANDLE) {
+       return false;
+     }
+     write_descriptor_set_count += texture_descriptor_set_write_count;
+     write_descriptor_set_bits |= UINT32_C(1) << SPIRVShaderTranslator::kDescriptorSetTexturesVertex;
+     current_graphics_descriptor_sets_[SPIRVShaderTranslator::kDescriptorSetTexturesVertex] =
+-        write_textures[0].dstSet;
++        texture_set;
+   }
+   if (write_pixel_textures) {
+     VkWriteDescriptorSet* write_textures =
+         write_descriptor_sets.data() + write_descriptor_set_count;
+-    u32 texture_descriptor_set_write_count = WriteTransientTextureBindings(
++    u32 texture_descriptor_set_write_count;
++    VkDescriptorSet texture_set = WriteTransientTextureBindings(
+         false, texture_count_pixel, sampler_count_pixel,
+         current_guest_graphics_pipeline_layout_->GetDescriptorSetLayoutTexturesPixelRef(),
+         descriptor_write_image_info_.data() + pixel_texture_image_info_offset,
+-        descriptor_write_image_info_.data() + pixel_sampler_image_info_offset, write_textures);
+-    if (!texture_descriptor_set_write_count) {
++        descriptor_write_image_info_.data() + pixel_sampler_image_info_offset, write_textures, texture_descriptor_set_write_count);
++    if (texture_set == VK_NULL_HANDLE) {
+       return false;
+     }
+     write_descriptor_set_count += texture_descriptor_set_write_count;
+     write_descriptor_set_bits |= UINT32_C(1) << SPIRVShaderTranslator::kDescriptorSetTexturesPixel;
+     current_graphics_descriptor_sets_[SPIRVShaderTranslator::kDescriptorSetTexturesPixel] =
+-        write_textures[0].dstSet;
++        texture_set;
+   }
+   if (write_descriptor_set_count) {
+     dfn.vkUpdateDescriptorSets(device, write_descriptor_set_count, write_descriptor_sets.data(), 0,
+@@ -6321,19 +6326,27 @@
+   return true;
+ }
+ 
+-u32 VulkanCommandProcessor::WriteTransientTextureBindings(
++VkDescriptorSet VulkanCommandProcessor::WriteTransientTextureBindings(
+     bool is_vertex, u32 texture_count, u32 sampler_count,
+     VkDescriptorSetLayout descriptor_set_layout, const VkDescriptorImageInfo* texture_image_info,
+     const VkDescriptorImageInfo* sampler_image_info,
+-    VkWriteDescriptorSet* descriptor_set_writes_out) {
++    VkWriteDescriptorSet* descriptor_set_writes_out, u32& descriptor_set_write_count) {
+   REX_ASSERT(frame_open_);
++  descriptor_set_write_count = 0;
+   if (!texture_count && !sampler_count) {
+-    return 0;
++    return VK_NULL_HANDLE;
++  }
++  const TextureDescriptorCache::View cache_key = {descriptor_set_layout,
++      {texture_image_info, texture_count}, {sampler_image_info, sampler_count}};
++  const bool cache_enabled = GetVulkanSettings().texture_descriptor_cache.Get();
++  if (cache_enabled) {
++    VkDescriptorSet cached = texture_descriptor_cache_.Find(cache_key);
++    if (cached != VK_NULL_HANDLE) return cached;
+   }
+   TextureDescriptorSetLayoutKey texture_descriptor_set_layout_key;
+   texture_descriptor_set_layout_key.texture_count = texture_count;
+   texture_descriptor_set_layout_key.sampler_count = sampler_count;
+-  texture_descriptor_set_layout_key.is_vertex = static_cast<u32>(is_vertex);
++  texture_descriptor_set_layout_key.is_vertex = u32(is_vertex);
+   VkDescriptorSet texture_descriptor_set;
+   auto textures_free_it =
+       texture_transient_descriptor_sets_free_.find(texture_descriptor_set_layout_key);
+@@ -6360,7 +6373,7 @@
+     texture_descriptor_set = transient_descriptor_allocator_textures_.Allocate(
+         descriptor_set_layout, texture_descriptor_counts.data(), texture_descriptor_counts_count);
+     if (texture_descriptor_set == VK_NULL_HANDLE) {
+-      return 0;
++      return VK_NULL_HANDLE;
+     }
+   }
+   UsedTextureTransientDescriptorSet& used_texture_descriptor_set =
+@@ -6368,7 +6381,6 @@
+   used_texture_descriptor_set.frame = frame_current_;
+   used_texture_descriptor_set.layout = texture_descriptor_set_layout_key;
+   used_texture_descriptor_set.set = texture_descriptor_set;
+-  u32 descriptor_set_write_count = 0;
+   if (texture_count) {
+     VkWriteDescriptorSet& descriptor_set_write =
+         descriptor_set_writes_out[descriptor_set_write_count++];
+@@ -6398,7 +6410,8 @@
+     descriptor_set_write.pTexelBufferView = nullptr;
+   }
+   REX_ASSERT(descriptor_set_write_count != 0);
+-  return descriptor_set_write_count;
++  if (cache_enabled) texture_descriptor_cache_.Insert(cache_key, texture_descriptor_set);
++  return texture_descriptor_set;
+ }
+ 
+ }  // namespace rex::gpu::vulkan

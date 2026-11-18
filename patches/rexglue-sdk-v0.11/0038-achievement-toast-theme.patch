@@ -1,0 +1,370 @@
+diff --git a/include/rex/ui/style.h b/include/rex/ui/style.h
+--- a/include/rex/ui/style.h
++++ b/include/rex/ui/style.h
+@@ -301,6 +301,8 @@
+ };
+ 
+ struct AchievementsStyle {
++  /** Route the existing achievements action to an application browser. UI thread. */
++  std::function<void()> toggle_override;
+   Color unlocked_title = Color::FromRGBA(0.45f, 1.00f, 0.55f, 1.00f);
+   Color unlocked_desc = Color::FromRGBA(0.70f, 0.85f, 0.72f, 1.00f);
+   Color locked_title = Color::FromRGBA(0.78f, 0.80f, 0.84f, 1.00f);
+@@ -319,6 +321,15 @@
+ 
+ /** Achievement toast colors, drawn at full opacity under the fade envelope. */
+ struct ToastStyle {
++  // Fonts belong to IUISystem::GetFonts and are configured on the UI thread.
++  bool themed = false;
++  ImFont* font = nullptr;
++  ImFont* heading_font = nullptr;
++  ImVec4 background{0.10f, 0.10f, 0.12f, 1.00f};
++  ImVec4 border{0.40f, 0.40f, 0.45f, 1.00f};
++  ImVec4 border_highlight{1.00f, 0.75f, 0.75f, 1.00f};
++  ImVec4 muted_text{0.75f, 0.75f, 0.80f, 1.00f};
++
+   /** Achievement name. */
+   Color text = colors::kWhite;
+   /** Heading line. */
+diff --git a/include/rex/ui/achievement_notifications.h b/include/rex/ui/achievement_notifications.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/ui/achievement_notifications.h
+@@ -0,0 +1,21 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++
++#include <rex/module.h>
++#include <rex/title.h>
++
++namespace rex::ui {
++
++/** Optional control of the existing achievement notification UI. These calls
++ * never change the achievement manager's unlock or persistence behavior.
++ */
++REX_DECLARE_INTERFACE(IAchievementNotifications, 1)
++  /** Enable or suppress notifications. Enabled by default. Any thread. */
++  virtual void SetEnabled(bool enabled) = 0;
++  /** Queue an existing achievement as a preview, without unlocking it. Returns
++   * false while disabled, headless, or without an attached title. Any thread.
++   */
++  virtual bool Preview(const Achievement& achievement) = 0;
++};
++
++}  // namespace rex::ui
+diff --git a/src/ui/ui_system.h b/src/ui/ui_system.h
+--- a/src/ui/ui_system.h
++++ b/src/ui/ui_system.h
+@@ -14,6 +14,7 @@
+ #include <memory>
+ 
+ #include <rex/ui/ui_system.h>
++#include <rex/ui/achievement_notifications.h>
+ 
+ #include <rex/logging/log_category.h>
+ #include <rex/ui_thread.h>
+@@ -47,7 +48,7 @@
+ namespace rex::ui {
+ 
+ /** Owns the window, the frame loop and the overlays. The app starts and stops it. */
+-class UISystem final : public rex::ui::IUISystem, public IUIControl, public IUIThread {
++class UISystem final : public rex::ui::IUISystem, public IUIControl, public IAchievementNotifications, public IUIThread {
+  public:
+   UISystem();
+   ~UISystem() override;
+@@ -88,6 +89,8 @@
+   [[nodiscard]] Result<void> AttachTitle(const TitleInfo& info,
+                                          IAchievementRegistry& achievements) override;
+   void DetachTitle() override;
++  void SetEnabled(bool enabled) override;
++  bool Preview(const Achievement& achievement) override;
+   void EndFrameLoop() override;
+   void SetCloseHandler(MoveOnlyFunction<void()> handler) override;
+   void SetResizeHandler(MoveOnlyFunction<void(u32, u32)> handler) override;
+diff --git a/src/ui/ui_state.h b/src/ui/ui_state.h
+--- a/src/ui/ui_state.h
++++ b/src/ui/ui_state.h
+@@ -114,6 +114,7 @@
+   TitleInfo title_info;
+   IAchievementRegistry* achievements = nullptr;
+   u32 prompt_count = 0;
++  std::atomic<bool> achievement_notifications_enabled{true};
+   std::mutex toast_mutex;
+   std::unique_ptr<ui::AchievementToastDialog> toast;
+   ScopeGuard toast_listener;
+diff --git a/src/ui/ui_event.cpp b/src/ui/ui_event.cpp
+--- a/src/ui/ui_event.cpp
++++ b/src/ui/ui_event.cpp
+@@ -291,8 +291,32 @@
+   });
+ }
+ 
++void UISystem::SetEnabled(bool enabled) {
++  State& s = *state_;
++  s.achievement_notifications_enabled.store(enabled);
++  (void)RunSynchronous([&s] {
++    if (s.achievement_notifications_enabled.load()) s.CreateToast();
++    else s.ReleaseToast();
++  });
++}
++
++bool UISystem::Preview(const Achievement& achievement) {
++  State& s = *state_;
++  bool queued = false;
++  const bool ran = RunSynchronous([&] {
++    if (!s.achievement_notifications_enabled.load() || !s.achievements || !s.imgui) return;
++    s.CreateToast();
++    std::lock_guard lock(s.toast_mutex);
++    if (s.toast && s.achievement_notifications_enabled.load()) {
++      s.toast->Push(achievement);
++      queued = true;
++    }
++  });
++  return ran && queued;
++}
++
+ void UISystem::State::CreateToast() {
+-  if (!achievements || !imgui || !overlay_context) {
++  if (!achievement_notifications_enabled.load() || !achievements || !imgui || !overlay_context) {
+     return;
+   }
+   std::lock_guard lock(toast_mutex);
+@@ -303,7 +327,7 @@
+   imgui->AddDialog(*toast);
+   toast_listener = achievements->OnAchievementUnlocked([this](const Achievement& achievement) {
+     std::lock_guard callback_lock(toast_mutex);
+-    if (toast) {
++    if (toast && achievement_notifications_enabled.load()) {
+       toast->Push(achievement);
+     }
+   });
+diff --git a/src/ui/ui_module.h b/src/ui/ui_module.h
+--- a/src/ui/ui_module.h
++++ b/src/ui/ui_module.h
+@@ -29,7 +29,7 @@
+ /** Serves the UI system and its control interface, and selects the drivers at Init. */
+ class UIModule final : public IModule {
+  public:
+-  REX_MODULE_SERVES(::rex::ui::IUISystem, ::rex::ui::IUIControl)
++  REX_MODULE_SERVES(::rex::ui::IUISystem, ::rex::ui::IUIControl, ::rex::ui::IAchievementNotifications)
+ 
+   std::string_view GetName() const override { return "rexui"; }
+   std::span<const InterfaceType> GetRequiredInterfaces() const override;
+diff --git a/src/ui/ui_module.cpp b/src/ui/ui_module.cpp
+--- a/src/ui/ui_module.cpp
++++ b/src/ui/ui_module.cpp
+@@ -111,7 +111,7 @@
+ }
+ 
+ IInterface* UIModule::QueryInterface(std::string_view name, u32 version) {
+-  return FindModuleInterface<rex::ui::IUISystem, IUIControl, IUIThread>(GetOrCreateSystem(), name,
++  return FindModuleInterface<rex::ui::IUISystem, IUIControl, IAchievementNotifications, IUIThread>(GetOrCreateSystem(), name,
+                                                                         version);
+ }
+ 
+diff --git a/src/ui/overlay/achievement_overlay.h b/src/ui/overlay/achievement_overlay.h
+--- a/src/ui/overlay/achievement_overlay.h
++++ b/src/ui/overlay/achievement_overlay.h
+@@ -27,6 +27,7 @@
+   ~AchievementsOverlayDialog() override;
+ 
+   bool Draw(ImGuiIO& io) override;
++  bool OnToggle() override;
+ 
+  private:
+   ImTextureData* GetIcon(const Achievement& achievement);
+diff --git a/src/ui/overlay/achievement_overlay.cpp b/src/ui/overlay/achievement_overlay.cpp
+--- a/src/ui/overlay/achievement_overlay.cpp
++++ b/src/ui/overlay/achievement_overlay.cpp
+@@ -14,6 +14,13 @@
+ 
+ ImTextureData* AchievementsOverlayDialog::GetIcon(const Achievement& achievement) {
+   return icon_cache_ ? icon_cache_->GetIcon(achievement) : nullptr;
++}
++
++bool AchievementsOverlayDialog::OnToggle() {
++  const auto& action = context_.base.ui.GetStyle().achievements.toggle_override;
++  if (!action) return false;
++  action();
++  return true;
+ }
+ 
+ bool AchievementsOverlayDialog::Draw(ImGuiIO& io) {
+diff --git a/src/ui/overlay/achievement_toast.cpp b/src/ui/overlay/achievement_toast.cpp
+--- a/src/ui/overlay/achievement_toast.cpp
++++ b/src/ui/overlay/achievement_toast.cpp
+@@ -2,6 +2,7 @@
+ #include <imgui.h>
+ 
+ #include <algorithm>
++#include <string>
+ 
+ #include <rex/ui/style.h>
+ 
+@@ -70,6 +71,82 @@
+                            ImGuiWindowFlags_NoInputs;
+   auto faded = [alpha](Color c) { return ToImVec4(c.WithAlpha(c.a * alpha)); };
+ 
++  if (s.themed) {
++    // Retain the existing 320 x 70 footprint and bottom-right placement. Draw
++    // inside it so decorative rails never enlarge the notification or take input.
++    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, metrics.toast_rounding);
++    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
++    ImGui::PushStyleColor(ImGuiCol_WindowBg, s.background);
++    if (ImGui::Begin("##ach_toast", nullptr, flags)) {
++      const ImVec2 pos = ImGui::GetWindowPos();
++      const ImVec2 size = ImGui::GetWindowSize();
++      auto* draw = ImGui::GetWindowDrawList();
++      draw->PushClipRect(pos, ImVec2(pos.x + size.x, pos.y + size.y));
++      for (int rail = 0; rail < 3; ++rail) {
++        const float inset = 2.0f + 3.0f * rail;
++        const ImVec2 lo(pos.x + inset, pos.y + inset);
++        const ImVec2 hi(pos.x + size.x - inset, pos.y + size.y - inset);
++        const auto stroke = [&](ImVec4 color, float opacity, float thickness) {
++          color.w *= opacity;
++          draw->AddRect(lo, hi, ImGui::GetColorU32(faded(FromImVec4(color))),
++                        std::max(1.0f, metrics.toast_rounding - rail * 2.0f), 0, thickness);
++        };
++        stroke(s.border, 0.12f, 5.0f);
++        stroke(s.border, 0.22f, 3.0f);
++        stroke(s.border, 0.70f, 1.8f);
++        stroke(s.border_highlight, 1.0f, 0.7f);
++      }
++
++      float text_x = pos.x + 14.0f;
++      if (auto* icon = icon_cache_.GetIcon(toast.achievement)) {
++        const float icon_size = std::min(metrics.icon_size, 44.0f);
++        const float icon_y = pos.y + (size.y - icon_size) * 0.5f;
++        draw->AddImage(ImTextureRef(icon), ImVec2(text_x, icon_y),
++                       ImVec2(text_x + icon_size, icon_y + icon_size),
++                       ImVec2(0, 0), ImVec2(1, 1),
++                       ImGui::GetColorU32(ImVec4(1, 1, 1, alpha)));
++        text_x += icon_size + 10.0f;
++      }
++      const float right = pos.x + size.x - 14.0f;
++      // Reserve gamerscore on the heading row, leaving a full row for the name.
++      // Both fonts reuse the atlas baked before renderer upload.
++      ImGui::PushFont(s.heading_font ? s.heading_font : s.font, 15.0f);
++      const std::string score = std::to_string(toast.achievement.gamerscore) + "G";
++      const float score_width = ImGui::CalcTextSize(score.c_str()).x;
++      draw->AddText(ImVec2(right - score_width, pos.y + 16.0f),
++                    ImGui::GetColorU32(faded(FromImVec4(s.muted_text))), score.c_str());
++      const ImVec4 heading_clip(text_x, pos.y, right - score_width - 8.0f,
++                                pos.y + size.y);
++      draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
++                    ImVec2(text_x, pos.y + 16.0f), ImGui::GetColorU32(faded(s.title)),
++                    "Achievement Unlocked", nullptr, 0.0f, &heading_clip);
++      ImGui::PopFont();
++
++      ImGui::PushFont(s.font, 18.0f);
++      std::string label = toast.achievement.label;
++      if (ImGui::CalcTextSize(label.c_str()).x > right - text_x) {
++        // Trim whole UTF-8 codepoints, keeping long names within the same panel.
++        do {
++          size_t end = label.size() - 1;
++          while (end > 0 && (static_cast<unsigned char>(label[end]) & 0xC0) == 0x80)
++            --end;
++          label.resize(end);
++        } while (!label.empty() &&
++                 ImGui::CalcTextSize((label + "...").c_str()).x > right - text_x);
++        label += "...";
++      }
++      draw->AddText(ImVec2(text_x, pos.y + 35.0f),
++                    ImGui::GetColorU32(faded(s.text)), label.c_str());
++      ImGui::PopFont();
++      draw->PopClipRect();
++    }
++    ImGui::End();
++    ImGui::PopStyleColor();
++    ImGui::PopStyleVar(2);
++    return true;
++  }
++
++
+   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, metrics.toast_rounding);
+   ImGui::PushStyleColor(ImGuiCol_Text, faded(s.text));
+   if (ImGui::Begin("##ach_toast", nullptr, flags)) {
+diff --git a/tests/unit/ui/achievement_notifications_test.cpp b/tests/unit/ui/achievement_notifications_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/ui/achievement_notifications_test.cpp
+@@ -0,0 +1,68 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#include "rex_test.h"
++#include "ui_harness.h"
++#include <rex/ui/achievement_notifications.h>
++#include <rex/ui/style.h>
++
++namespace {
++rex::Achievement ExampleAchievement() {
++  rex::Achievement value;
++  value.label = "Achievement preview";
++  return value;
++}
++class Achievements final : public rex::IAchievementRegistry {
++ public:
++  std::vector<rex::Achievement> GetAchievements() override { return {}; }
++  rex::Result<std::vector<std::byte>> GetAchievementIcon(rex::u32) override {
++    return rex::Err<std::vector<std::byte>>(rex::ErrorCategory::kNotFound, "no icon");
++  }
++  rex::ScopeGuard OnAchievementUnlocked(rex::MoveOnlyFunction<void(const rex::Achievement&)> fn) override {
++    listener = std::move(fn);
++    return rex::ScopeGuard([this] { listener = {}; });
++  }
++  void Unlock() { ++saved; if (listener) listener(ExampleAchievement()); }
++  int saved = 0;
++  rex::MoveOnlyFunction<void(const rex::Achievement&)> listener;
++};
++}
++
++REX_TEST_CASE("achievement notifications suppress only presentation and preview never unlocks", "[ui][achievements]") {
++  Achievements source;
++  rex::test_ui::UIApp app;
++  REQUIRE(app.Start());
++  auto* notifications = REX_INTERFACE(rex::ui::IAchievementNotifications);
++  REQUIRE(notifications);
++  CHECK_FALSE(notifications->Preview(ExampleAchievement()));
++  REQUIRE(app.GetUIControl()->AttachTitle({}, source));
++  CHECK(static_cast<bool>(source.listener));
++  CHECK(notifications->Preview(ExampleAchievement()));
++  CHECK(source.saved == 0);
++  notifications->SetEnabled(false);
++  CHECK_FALSE(source.listener);
++  CHECK_FALSE(notifications->Preview(ExampleAchievement()));
++  source.Unlock();
++  CHECK(source.saved == 1);
++  notifications->SetEnabled(true);
++  CHECK(static_cast<bool>(source.listener));
++  app.GetUIControl()->DetachTitle();
++  CHECK_FALSE(source.listener);
++  CHECK_FALSE(notifications->Preview(ExampleAchievement()));
++  app.Shutdown();
++}
++
++REX_TEST_CASE("existing achievements action can toggle the persistent application browser", "[ui][achievements]") {
++  rex::test_ui::UIApp app;
++  REQUIRE(app.Start());
++  auto& ui = app.GetUI();
++  CHECK_FALSE(ui.GetStyle().achievements.toggle_override);
++  int toggles = 0;
++  ui.GetStyle().achievements.toggle_override = [&] { ++toggles; };
++  ui.ToggleOverlay("achievements");
++  ui.ToggleOverlay("achievements");
++  CHECK(toggles == 2);
++  CHECK_FALSE(ui.IsAnyOverlayVisible());
++  ui.GetStyle().achievements.toggle_override = {};
++  ui.ToggleOverlay("achievements");
++  CHECK(ui.IsAnyOverlayVisible());
++  app.Shutdown();
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -225,6 +225,7 @@
+   ui/ui_event_test.cpp
+   ui/sdl3_ui_test.cpp
+   ui/keyboard_prompt_test.cpp
++  ui/achievement_notifications_test.cpp
+   ui/ui_system_test.cpp
+   codegen/barrier_test.cpp
+   codegen/codegen_writer_test.cpp

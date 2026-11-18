@@ -1,0 +1,72 @@
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+@@ -1260,6 +1260,9 @@
+     // Holding the reference makes leaving the consumer critical section safe.
+   }
+ 
++#if REX_PLATFORM_IOS
++  bool ios_trace_paint = false;
++#endif
+   if (guest_output_image) {
+     VkExtent2D max_framebuffer_extent =
+         objects::GetMax2DFramebufferExtent(vulkan_device_->GetProperties());
+@@ -1267,6 +1270,20 @@
+         guest_output_properties, paint_context_.swapchain_extent.width,
+         paint_context_.swapchain_extent.height, max_framebuffer_extent.width,
+         max_framebuffer_extent.height, guest_output_paint_config);
++#if REX_PLATFORM_IOS
++    const u64 guest_paint = ++ios_guest_paints_;
++    ios_trace_paint = guest_paint <= 3 || guest_paint == 60 || guest_paint == 300;
++    if (ios_trace_paint) {
++      REXUI_INFO("ios_present: frame={} guest={}x{} image={}x{} aspect={}:{} "
++                 "swapchain={}x{} output={},{} effect={} ui_thread={}", guest_paint,
++                 guest_output_properties.frontbuffer_width, guest_output_properties.frontbuffer_height,
++                 guest_output_image->GetExtent().width, guest_output_image->GetExtent().height,
++                 guest_output_properties.display_aspect_ratio_x, guest_output_properties.display_aspect_ratio_y,
++                 paint_context_.swapchain_extent.width, paint_context_.swapchain_extent.height,
++                 guest_output_flow.output_x, guest_output_flow.output_y,
++                 guest_output_flow.has_effect, execute_ui_drawers);
++    }
++#endif
+     if (guest_output_flow.has_effect) {
+       size_t guest_output_image_paint_ref_index = SIZE_MAX;
+       size_t guest_output_image_paint_ref_new_index = SIZE_MAX;
+@@ -1444,6 +1461,15 @@
+         }
+ 
+         dfn.vkCmdDraw(draw_command_buffer, 4, 1, 0, 0);
++#if REX_PLATFORM_IOS
++        if (ios_trace_paint)
++          REXUI_INFO("ios_present: draw effect={} rect={},{} {}x{} viewport={}x{} ndc={},{},{}x{}",
++                     unsigned(guest_output_flow.effect), effect_rect_x, effect_rect_y,
++                     effect_rect_size.first, effect_rect_size.second,
++                     guest_output_viewport.width, guest_output_viewport.height,
++                     effect_rect_constants.x, effect_rect_constants.y,
++                     effect_rect_constants.width, effect_rect_constants.height);
++#endif
+ 
+         if (swapchain_image_clear_needed && guest_output_flow.letterbox_clear_rectangle_count) {
+           VkClearRect letterbox_clear_vulkan_rectangles[GuestOutputPaintFlow::kMaxClearRectangles];
+@@ -1588,5 +1614,8 @@
+     trace_present.Success(present_result == VK_SUCCESS || present_result == VK_SUBOPTIMAL_KHR);
+   }
++#if REX_PLATFORM_IOS
++  if (ios_trace_paint) REXUI_INFO("ios_present: vkQueuePresentKHR={}", int(present_result));
++#endif
+   switch (present_result) {
+     case VK_SUCCESS:
+       return PaintResult::kPresented;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_presenter.h b/src/gpu/xenos/host/vulkan/vulkan_presenter.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_presenter.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_presenter.h
+@@ -437,6 +437,9 @@
+ 
+   /** Touched only by painting, surface connect and disconnect, and presenter init and shutdown. */
+   PaintContext paint_context_;
++#if REX_PLATFORM_IOS
++  u64 ios_guest_paints_ = 0;
++#endif
+ };
+ 
+ }  // namespace vulkan

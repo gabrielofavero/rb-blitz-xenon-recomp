@@ -1,38 +1,38 @@
-# Engine diagnostics — the probe and the UI-state observer
+# Engine diagnostics â€” the probe and the UI-state observer
 
-Two runtime instruments. **The probe** reports *in what order the guest reached the points I care about, and with what arguments* — no debugger, no instruction trace, no reading guest memory. **The UI-state observer** reports *what changed* when the game is driven to a named screen — from a capture, and it refuses the answers that have already lied to this project. Both sit behind [plans/customization-plan.md](../plans/finished/2026-10-03-customization-plan.md): the probe is P2 (verification: "the instrument works on a real path"); the observer is P3, contract 3, and the thing E1's baseline set is made with. The observer joins scripts that already existed; the probe is the other half, for the guest's internals.
+Two runtime instruments. **The probe** reports *in what order the guest reached the points I care about, and with what arguments* â€” no debugger, no instruction trace, no reading guest memory. **The UI-state observer** reports *what changed* when the game is driven to a named screen â€” from a capture, and it refuses the answers that have already lied to this project. Both sit behind [plans/customization-plan.md](../plans/finished/2026-10-03-customization-plan.md): the probe is P2 (verification: "the instrument works on a real path"); the observer is P3, contract 3, and the thing E1's baseline set is made with. The observer joins scripts that already existed; the probe is the other half, for the guest's internals.
 
 ## At a glance
 
 - **Slow boot log.** The normal `logs/rb_blitz_*.log` now records `boot_timing` host setup stages, `controller_schemes` discovery and per-package durations, and any PNG decode taking at least 500 ms. From guest launch until the usable menu, `boot_heartbeat` records the last observed phase every 15 s and the process CPU time consumed since the previous heartbeat. A long wall interval with little CPU suggests a wait or scheduling delay; high CPU points toward active work. The heartbeat stays quiet while the title waits for the player's Start press.
 - **Probe.** A bounded ring of `probe_trace_capacity` events (256 default), newest-window only, written by one-line points inside hooks.
-- **Probe — run.** `--probe_trace=1 --probe_trace_path=<file>`; a new point is one `REX_HOOK_RAW` containing `RBBLITZ_PROBE(0xADDR, "subsystem.thing")`.
-- **Probe — output.** The trace file (rewritten wholesale ~twice a second, oldest first) and the live ImGui overlay (`probe_overlay`).
-- **Probe — limits.** A point exists only where a hook does; the presenter's paint rectangle is not exposed by the SDK; not a profiler; never touches guest memory.
-- **Render-size probe (2026-11-10).** Set `RBBLITZ_PROBE_RENDER_SIZE=WxH` for one windowed launch to request an exact virtual render size on a smaller display. Boot uses the diagnostic planner, fits the window to the desktop, logs `diagnostic render probe`, and leaves menu choices and the saved resolution alone. This can exercise candidates that production Auto currently gates, including 3840×1600 and 7680×2160. The environment variable must be set before launching `rb_blitz.exe`; remove it for a normal launch. Captures and logs from the local run are under `out/_swap/resolution-probe-2026-11-10/`.
+- **Probe â€” run.** `--probe_trace=1 --probe_trace_path=<file>`; a new point is one `REX_HOOK_RAW` containing `RBBLITZ_PROBE(0xADDR, "subsystem.thing")`.
+- **Probe â€” output.** The trace file (rewritten wholesale ~twice a second, oldest first) and the live ImGui overlay (`probe_overlay`).
+- **Probe â€” limits.** A point exists only where a hook does; the presenter's paint rectangle is not exposed by the SDK; not a profiler; never touches guest memory.
+- **Render-size probe (2026-11-10).** Set `RBBLITZ_PROBE_RENDER_SIZE=WxH` for one windowed launch to request an exact virtual render size on a smaller display. Boot uses the diagnostic planner, fits the window to the desktop, logs `diagnostic render probe`, and leaves menu choices and the saved resolution alone. This can exercise candidates that production Auto currently gates, including 3840Ã—1600 and 7680Ã—2160. The environment variable must be set before launching `rb_blitz.exe`; remove it for a normal launch. Captures and logs from the local run are under `out/_swap/resolution-probe-2026-11-10/`.
 - **Offscreen pad probe (2026-11-10).** Set `RBBLITZ_PROBE_PAD_FILE` to an absolute text-file path before launch. Write a new serial number and a hexadecimal XInput button mask on one line (for example `12 0x1000` for A); each new serial generates one 180 ms press. The path is read only while this environment variable is set, and the delivered button mask is logged. This was used for the 4:3 captures when the test desktop had no foreground window.
 - **Observer.** `scripts/diagnostics/observe_ui.ps1` over five existing scripts, with **one table** of state names, routes and needles in `scripts/diagnostics/ui_states.ps1`; run `-ListStates`, or `-State <name> [-Ocr] [-BaselineDir <dir>] [-Compare <dir>]` (here with `powershell -NoProfile -ExecutionPolicy Bypass -File ...`).
-- **Observer — output.** One JSON report on stdout and a PNG capture; a set goes to `out/observations/baseline/<build>/` (PNG + JSON per state, plus `summary.json`).
-- **Observer — limits.** A pixel diff is evidence only against a same-build baseline; animated screens have no settled frame (OCR controls, the diff corroborates); `-MaxDiffPercent` (default **1.0**) covers settled states only.
-- **Store probe.** `--store_trace=1` logs the store paths the guest asks the game root for (`src/store/store_probe.cpp`), and `--store_local_server_root=<dir>` points the retail store's netcache at a local server for one boot; `scripts/diagnostics/probe_store.ps1` drives and captures the whole measurement (§ Part 1, "The store probe").
-- **Store failure probe.** `--store_api_base=http://127.0.0.1:<port>` moves the list/search requests to a loopback stub (`scripts/diagnostics/store_stub_api.py`), which refuses every request while a flag file exists and serves a captured list page once it is gone. `scripts/diagnostics/probe_store_failure.ps1` runs the whole measurement in one boot: press → the retail connection popup and a press-asked walk, press again → the same, lift the flag → the next press opens the store (RhythmVerse plan P9-10). Plain http is accepted **only** for a loopback host; the transport's rule and `SetApiBaseOverride` share `IsLoopbackHost`.
+- **Observer â€” output.** One JSON report on stdout and a PNG capture; a set goes to `out/observations/baseline/<build>/` (PNG + JSON per state, plus `summary.json`).
+- **Observer â€” limits.** A pixel diff is evidence only against a same-build baseline; animated screens have no settled frame (OCR controls, the diff corroborates); `-MaxDiffPercent` (default **1.0**) covers settled states only.
+- **Store probe.** `--store_trace=1` logs the store paths the guest asks the game root for (`src/store/store_probe.cpp`), and `--store_local_server_root=<dir>` points the retail store's netcache at a local server for one boot; `scripts/diagnostics/probe_store.ps1` drives and captures the whole measurement (Â§ Part 1, "The store probe").
+- **Store failure probe.** `--store_api_base=http://127.0.0.1:<port>` moves the list/search requests to a loopback stub (`scripts/diagnostics/store_stub_api.py`), which refuses every request while a flag file exists and serves a captured list page once it is gone. `scripts/diagnostics/probe_store_failure.ps1` runs the whole measurement in one boot: press â†’ the retail connection popup and a press-asked walk, press again â†’ the same, lift the flag â†’ the next press opens the store (RhythmVerse plan P9-10). Plain http is accepted **only** for a loopback host; the transport's rule and `SetApiBaseOverride` share `IsLoopbackHost`.
 - **Messages feed probe.** `--messages_api_url=http://127.0.0.1:<port>/feed.json` replaces the fixed GitHub Pages URL for one boot. The override is host-only and accepts only that exact path on a loopback host; the production URL remains `https://gabrielofavero.github.io/rb-blitz-xenon-recomp/feed.json`. The `messages:` log lines identify `cached`, `bundled`, or `fetched` source, fetch failures, cache-write failures, guest list builds, and the numeric version comparison. `--messages_browser_opener_path=<absolute exe>` sends the fixed Releases URL to a diagnostic executable instead of the default browser. `scripts/acceptance/acceptance_messages.ps1` prepares isolated feed fixtures, launch commands and an owner-run UI checklist; it does not launch the game.
-- **Cost.** A capture run measured **46 s**; a compare run **154 s**, mostly `frame_diff.ps1`'s per-pixel PowerShell loop — a research tool, not a `ctest` target. A `probe_store` boot measured **~2 min** end to end (title, menu, store, return, log census) on this machine.
+- **Cost.** A capture run measured **46 s**; a compare run **154 s**, mostly `frame_diff.ps1`'s per-pixel PowerShell loop â€” a research tool, not a `ctest` target. A `probe_store` boot measured **~2 min** end to end (title, menu, store, return, log census) on this machine.
 
 ## Sources
 
 | Part | Original document | Status |
 | --- | --- | --- |
-| Part 1 — The probe | `docs/engine/diagnostics.md (part 1, the probe)` | Merged into this document (Part 1) |
-| Part 2 — Observing a UI state | `docs/engine/diagnostics.md (part 2, the observer)` | Merged into this document (Part 2) |
+| Part 1 â€” The probe | `docs/engine/diagnostics.md (part 1, the probe)` | Merged into this document (Part 1) |
+| Part 2 â€” Observing a UI state | `docs/engine/diagnostics.md (part 2, the observer)` | Merged into this document (Part 2) |
 
-## Part 1 — The probe (was `docs/engine/probe.md`)
+## Part 1 â€” The probe (was `docs/engine/probe.md`)
 
 Code: [src/diag/probe.h](../../src/diag/probe.h) (interface), [probe.cpp](../../src/diag/probe.cpp) (cvars, the ring, recording), [probe_overlay.cpp](../../src/diag/probe_overlay.cpp) (the panel), [probe_trace.h](../../src/diag/probe_trace.h) (the ring, SDK-free, unit-tested by `tests/probe_trace_tests.cpp`), [probe_points.cpp](../../src/diag/probe_points.cpp) (the points that exist today).
 
 ### The three things it is
 
-1. **A ring of events.** `probe_trace_capacity` events (256 by default) in a bounded, thread-safe buffer; the oldest are overwritten and counted as dropped, so it always holds the *newest* window — what a screen transition needs.
+1. **A ring of events.** `probe_trace_capacity` events (256 by default) in a bounded, thread-safe buffer; the oldest are overwritten and counted as dropped, so it always holds the *newest* window â€” what a screen transition needs.
 2. **A point.** One line inside a hook:
 
    ```cpp
@@ -61,7 +61,7 @@ All four go in the same `<exe name>.toml` as the other settings (see [build-and-
   --probe_trace=1 --probe_trace_capacity=8192 --probe_trace_path=probe-trace.log
 ```
 
-The file is rewritten wholesale, so **the header line is the state of the run**, not of the file: `# probe trace: 1810 event(s) held, 0 dropped, 1810 recorded since the last clear` says the ring never wrapped; a non-zero `dropped` means you are reading only the tail — raise the capacity, or narrow the trace. A line is `<seq> <seconds> <thread> <address> <entry|mark> "<tag>" lr=<caller> r3..r10`:
+The file is rewritten wholesale, so **the header line is the state of the run**, not of the file: `# probe trace: 1810 event(s) held, 0 dropped, 1810 recorded since the last clear` says the ring never wrapped; a non-zero `dropped` means you are reading only the tail â€” raise the capacity, or narrow the trace. A line is `<seq> <seconds> <thread> <address> <entry|mark> "<tag>" lr=<caller> r3..r10`:
 
 ```text
 #000002 +    0.000s tF8000028 0x823DE0C0 entry "mogg.hv_decrypt" lr=0x82768E08 r3=... r10=...
@@ -71,12 +71,12 @@ The overlay adds the guest's **requested** video mode (`resolution` preset, refr
 
 #### Two standing limits the panel states rather than hides
 
-- **The presenter's own paint rectangle is not exposed by the SDK** — `rex::ui::Presenter` has no public accessor for it, so the overlay prints `(not exposed by the SDK)` instead of a plausible number: a probe that reports a guess is worse than one that reports nothing. A later change can add an SDK patch that exposes it, or read the value the mouse driver already measures.
+- **The presenter's own paint rectangle is not exposed by the SDK** â€” `rex::ui::Presenter` has no public accessor for it, so the overlay prints `(not exposed by the SDK)` instead of a plausible number: a probe that reports a guess is worse than one that reports nothing. A later change can add an SDK patch that exposes it, or read the value the mouse driver already measures.
 - **A point only exists where a hook does.** Nothing is auto-discovered: `probe_points.cpp` places the points, and a new one is one line.
 
 ### What is wired today, and why only that
 
-[probe_points.cpp](../../src/diag/probe_points.cpp) carries the four named functions of the MOGG path — the only guest path this project has proved end to end. A real trace, vanilla (`--ultimate_mode=0`; the Ultimate run gives the same order and census, and per-event times vary by tens of ms run to run — the order and the counts are the evidence):
+[probe_points.cpp](../../src/diag/probe_points.cpp) carries the four named functions of the MOGG path â€” the only guest path this project has proved end to end. A real trace, vanilla (`--ultimate_mode=0`; the Ultimate run gives the same order and census, and per-event times vary by tens of ms run to run â€” the order and the counts are the evidence):
 
 ```text
 #000001 +    0.000s tF8000028 0x82768C88 entry "mogg.header"
@@ -85,15 +85,15 @@ The overlay adds the guest's **requested** video mode (`resolution` preset, refr
 #000004 +    0.056s tF8000028 0x82768AD0 entry "mogg.setup_cypher"  lr=0x82768E48
 ```
 
-Three facts fall straight out of it, none guessed: `lr=0x82768E08` on `hv_decrypt` is inside `CheckHmxHeader`'s body (`0x82768C88`) — [symbols.md](../reference/symbols.md)'s "only caller" claim measured rather than read; `lr=0x823DE0E4` on the first `enc_method` is inside `HvDecrypt` (`0x823DE0C0` + 0x24) — the key is selected by the function that installs it; and the census (1,806 `header` entries against 1 `hv_decrypt` and 1 `setup_cypher`) corrected the rate [symbols.md](../reference/symbols.md) recorded for `CheckHmxHeader` (see its MOGG row).
+Three facts fall straight out of it, none guessed: `lr=0x82768E08` on `hv_decrypt` is inside `CheckHmxHeader`'s body (`0x82768C88`) â€” [symbols.md](../reference/symbols.md)'s "only caller" claim measured rather than read; `lr=0x823DE0E4` on the first `enc_method` is inside `HvDecrypt` (`0x823DE0C0` + 0x24) â€” the key is selected by the function that installs it; and the census (1,806 `header` entries against 1 `hv_decrypt` and 1 `setup_cypher`) corrected the rate [symbols.md](../reference/symbols.md) recorded for `CheckHmxHeader` (see its MOGG row).
 
-**The menu path is deliberately not wired yet** — a point needs an already-identified function, and the main menu's have no names; finding them is S2's work in [plans/customization-plan.md](../plans/finished/2026-10-03-customization-plan.md), and the probe is what it does it with. So P2's verification is "the instrument works on a real path", not "the title → main menu trace exists" — that trace is S2's output.
+**The menu path is deliberately not wired yet** â€” a point needs an already-identified function, and the main menu's have no names; finding them is S2's work in [plans/customization-plan.md](../plans/finished/2026-10-03-customization-plan.md), and the probe is what it does it with. So P2's verification is "the instrument works on a real path", not "the title â†’ main menu trace exists" â€” that trace is S2's output.
 
 ### The gameplay-seam probe (P0, 2026-10-18)
 
 [gameplay_probe.cpp](../../src/diag/gameplay_probe.cpp) is a separate, narrow instrument for the
-controller-to-action seam of [plans/finished/2026-10-17-gameplay-input-mapping-plan.md](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) §10. It hooks the guest controller
-factory, `ButtonDown`/`ButtonUp`, the button→action lookup, the action dispatch and release, the
+controller-to-action seam of [plans/finished/2026-10-17-gameplay-input-mapping-plan.md](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) Â§10. It hooks the guest controller
+factory, `ButtonDown`/`ButtonUp`, the buttonâ†’action lookup, the action dispatch and release, the
 per-frame `JoypadController` update, and `Game::update_controls`; it logs each in the release
 `core` log instead of the trace ring. The cvars are registered here because they are not
 enhancement toggles, and each also accepts the `REX_<UPPERCASE>` environment override:
@@ -101,18 +101,18 @@ enhancement toggles, and each also accepts the `REX_<UPPERCASE>` environment ove
 | Cvar | Default | What it does |
 | --- | --- | --- |
 | `probe_gameplay` | off | Enables the logs: controller creation/destruction, the lookup result per button, down/up, and every entry into the action dispatch/release with its action and arg. |
-| `probe_gameplay_bypass` | off | Makes the button→action lookup return 0, so the native pad produces no dispatch. The direct actions still run. |
+| `probe_gameplay_bypass` | off | Makes the buttonâ†’action lookup return 0, so the native pad produces no dispatch. The direct actions still run. |
 | `probe_gameplay_inject` | off | Runs a timed direct-action sequence from the per-frame controller update: Lane0, TrackUp and TrackDown (gated), Lane1, UsePowerUp, with lane/power-up releases. **It dispatches real actions into the live song**, so it is a P0/P3 arm, never a menu-time diagnostic. |
 | `probe_gameplay_inject_track` | off | Adds the TrackUp/TrackDown pair to the sequence. Kept separate because a direct track action starts the controller's own held-action repeat, which runs until the same action is released (`sub_824367E0` clears the slot). |
-| `probe_gameplay_block_dispatch` | off | Suppresses **every** native entry into the action boundary while the song controller exists — press, release, the symbol message producer, the keyboard controller and the held-action repeat — so one run can show all four producers blocked. Direct probe actions still dispatch. |
+| `probe_gameplay_block_dispatch` | off | Suppresses **every** native entry into the action boundary while the song controller exists â€” press, release, the symbol message producer, the keyboard controller and the held-action repeat â€” so one run can show all four producers blocked. Direct probe actions still dispatch. |
 | `probe_gameplay_challenge` | off | Drives the two dormant producers (`sub_82436A28`'s symbol message and `sub_82442B30`'s keyboard controller) from guest-stack fixtures the probe builds, rather than from a fabricated return address. Pair with `block_dispatch` for the before/after pair. |
-| `probe_gameplay_sources` | off | Logs raw SDL keyboard/mouse state beside the pad (G/H = notes, N/M = tracks, mouse buttons = notes) and dispatches on its edges. The arm that measures source provenance; it has **not** been run yet (plan §10.5, O5). |
+| `probe_gameplay_sources` | off | Logs raw SDL keyboard/mouse state beside the pad (G/H = notes, N/M = tracks, mouse buttons = notes) and dispatches on its edges. The arm that measures source provenance; it has **not** been run yet (plan Â§10.5, O5). |
 | `probe_gameplay_inject_spam` | off | Replaces the fixed sequence with an alternating Lane0/Lane1 press-release loop starting 8 s into the song, for the judgement proof (the HUD score rises) rather than a handler-only check. |
 
 The matching harness is `scripts/diagnostics/probe_gameplay.ps1`: it boots the release build with `--mnk_mode=1`,
 waits for the guest's own title by OCR before sending any key, drives the menu to a song, presses
 native pad controls and/or runs an injection arm, and keeps the combined log and shots. Every menu
-tap carries its own `wait:1` — the guest drops a run of taps with no wait between them — and the
+tap carries its own `wait:1` â€” the guest drops a run of taps with no wait between them â€” and the
 window is never started hidden, because a hidden window cannot be captured or driven. The scratch
 driver `out/_swap/p0/run.ps1` carries the later switches that have not been folded back.
 
@@ -172,8 +172,10 @@ The fixed input set is `game.log`, `game.1.log`, `previous.log`,
 their logs, keeping the launched build and toolchain available after the boot
 lines rotate away. The collector copies these files verbatim and records
 their SHA-256 digests, source paths, missing/oversized files and any incomplete
-snapshot in `manifest.json`. It also records hashes of the executable, runtime,
-GPU plugin and preparation catalogue at collection time. Those hashes are not
+snapshot in `manifest.json`. It also records collection-time hashes of the executable, preparation catalogue
+and explicitly allowlisted Windows SDK modules and drivers. Both the monolithic
+runtime and modular SDK layouts are recognized. Binary contents are not copied
+into the ZIP. Hashes use .NET streams and do not require the Get-FileHash cmdlet. Those hashes are not
 proof that the same files were loaded before a subsequent update. The manifest
 also includes a collection-time OS, processor-count and video-driver snapshot;
 an unavailable video query is reported explicitly. Each evidence
@@ -211,13 +213,13 @@ still reports seven pre-existing broken links outside the edited study.
 
 Since shader-cache P1 (2026-10-24) a storage preload also logs its own result whether
 or not the trace switch is on. Since P4 the line names the terminal phase and carries
-the cancelled count (there is no single creation duration any more — progress is taken
+the cancelled count (there is no single creation duration any more â€” progress is taken
 from the controller): `Shader storage preload succeeded: N required, M succeeded
 (K already present), F failed, X missing, C cancelled, D duplicate request(s)` (the
 Vulkan backend prefixes the same counts with `Vulkan`), and
-`Shader storage preload is not ready (cancelled|incomplete): …` when required work did
-not produce every pipeline. `succeeded` counts real pipelines only — a Vulkan
-placeholder retained after a failed real creation is reported as failed — and a
+`Shader storage preload is not ready (cancelled|incomplete): â€¦` when required work did
+not produce every pipeline. `succeeded` counts real pipelines only â€” a Vulkan
+placeholder retained after a failed real creation is reported as failed â€” and a
 preload with zero required entries is empty, not covered (its line says so). The states
 and the blocking barrier live in
 [pipeline_preload.h](../../rexglue-sdk/include/rex/graphics/pipeline_preload.h)
@@ -228,7 +230,7 @@ before it. `shader_storage_async_preparation` (default `false`) makes the launch
 preparation generation after the guest resumes rather than blocking the launch; the command
 processor then services it in bounded slices between packets (and while the ring is idle), so the
 loading UI keeps polling and presenting. The generation reports itself through
-`GraphicsSystem::QueryShaderStoragePreparation()` — phase (`importing`, `translating`, `creating`,
+`GraphicsSystem::QueryShaderStoragePreparation()` â€” phase (`importing`, `translating`, `creating`,
 `finalizing`, then `succeeded` / `incomplete` / `cancelled` / `failed`), explicit required /
 succeeded / failed / missing / cancelled counts, the renderer and its rendering path, and the
 elapsed time and slice count. A generation with no catalogue is `incomplete`, never `ready`;
@@ -247,9 +249,9 @@ boot's driver work did not drop:
 
 ```text
 Native pipeline cache: adapter 10DE:13C2 subsystem 1111 revision A1 driver 32.0.15.7602
-Native pipeline cache: adapter 10DE:13C2 driver 0x…, 123456 byte(s) restored
-D3D12 rejected a stored cached-PSO blob (hr=0x…); creating the pipeline without it and replacing the entry
-Native pipeline cache: 132 cached PSO blob(s) written (d3d12 native pipeline cache: 132 reused, …)
+Native pipeline cache: adapter 10DE:13C2 driver 0xâ€¦, 123456 byte(s) restored
+D3D12 rejected a stored cached-PSO blob (hr=0xâ€¦); creating the pipeline without it and replacing the entry
+Native pipeline cache: 132 cached PSO blob(s) written (d3d12 native pipeline cache: 132 reused, â€¦)
 Native pipeline cache: serialization deferred at shader storage shutdown, pipelines are still being created
 ```
 
@@ -284,8 +286,8 @@ in use. The Vulkan backend means something different by "restored": one serializ
 ### The store probe (P2, 2026-10-20)
 
 [store_probe.cpp](../../src/store/store_probe.cpp) is the RhythmVerse store plan's data-layer
-instrument (§5/P2). It answers a narrower question than the trace ring: **which store paths does the
-guest ask the game root for, and does the read succeed** — the offer/metadata names are otherwise
+instrument (Â§5/P2). It answers a narrower question than the trace ring: **which store paths does the
+guest ask the game root for, and does the read succeed** â€” the offer/metadata names are otherwise
 the guest's own strings, and no log line names them.
 
 | Cvar | Default | What it does |
@@ -296,8 +298,8 @@ the guest's own strings, and no log line names them.
 | `store_serve_dir` | "" | RhythmVerse plan P3's data lane: a host directory whose files answer the store's own `dlc_store/**` netcache requests (a file named exactly like the requested path, e.g. `dlc_store/europe/dlc_top_xbox_eng.dta`). Empty uses the built-in records. A `.dta` record is **text** - the insert parses that type with the engine's own text reader - and is inserted into the manager's loaded-file container. Requires a restart. |
 | `store_fetch_deliver` | **on** | P3's delivery half: leaving the file cache's readiness word (`manager + 44`) set after a served record makes retail's **own** request body take its "already loaded" branch and send the `file_req_complete` message (`sub_8235A0F8`) itself - one delivery per request, every layout below it the engine's. Off, the word stays as the boot found it and the body takes its fetch branch, exactly as retail does offline. On by default since 2026-10-21: the store has nothing to show without it, and only records this module serves are affected (serving itself is gated on the RhythmVerse master switch), so a stock boot is untouched. Measured on: the store draws the served front menu's rows (RECENT, SEARCH), a row press asks for `dlc_store/<region>/<locale>/<name>/`, the served page opens the retail browser with all 24 titles drawn and the details panel reading the offer's own artist and genre, and A opens the details screen (`out/_swap/store-probe/20261021-190304`). Requires a restart. |
 | `store_catalogue_off` | off | Turns the store catalogue fetch off: a menu page is then served **empty** (the shape the retail DTA handles by refreshing the menu), which is the control leg for "is this page the catalogue's or the writer's?". Off means the catalogue runs. Requires a restart. |
-| `store_api_base` | "" | The **failure measurement's** instrument (RhythmVerse plan P9-10): an absolute `http(s)://host[:port]` origin with **no path** that the list and search requests are built against, so a boot can be pointed at an origin that cannot answer without touching the machine's network. Empty keeps `https://rhythmverse.co`. It moves **only** list/search - the download and artwork resolution stay same-site with `rhythmverse.co` (the §3.1 policy), so a diagnostic boot cannot be talked into fetching a package from elsewhere. A value that is not a bare origin is refused at install and reported (`store_api_base '…' is not an absolute http(s) origin`); `http://` is accepted **only for a loopback host** (`127.0.0.1`, `::1`, `localhost` - `IsLoopbackHost`), which is the one plain-http exception the transport makes (`store_http.cpp`; the package transfer in `store_transfer_winhttp.cpp` stays HTTPS-only). `scripts/diagnostics/store_stub_api.py` is the stand-in it is meant to point at: it answers `503` while a flag file exists and a captured list page otherwise, so one boot can measure a failed press, its popup, and the later success (`scripts/diagnostics/probe_store_failure.ps1` drives all three). Requires a restart. |
-| `store_catalogue_ttl_seconds` | 300 | How long the fetched catalogue stays fresh before a new store visit refetches it (Recently Added's own freshness, separate from the page cache below). The list is **warmed once per boot**, before the guest thread starts (P9-10, `store_catalogue: fetching … (the boot asked)`), so a store visit normally finds it fresh and the TTL is what decides when a later visit re-fetches; a press inside a **cold** fetch's first ~3 s is answered with the empty page (the DTA refreshes the menu), which is why the prewarm exists. A failed page backs off for a wait derived from the answer (P7): `Retry-After` honoured within 5..600 s, a 5xx 60 s, a transport failure 10 s, a `200` whose body could not be read 60 s and any other status 120 s. The fetch runs on its own thread, so a store visit never blocks the guest. Requires a restart. |
+| `store_api_base` | "" | The **failure measurement's** instrument (RhythmVerse plan P9-10): an absolute `http(s)://host[:port]` origin with **no path** that the list and search requests are built against, so a boot can be pointed at an origin that cannot answer without touching the machine's network. Empty keeps `https://rhythmverse.co`. It moves **only** list/search - the download and artwork resolution stay same-site with `rhythmverse.co` (the Â§3.1 policy), so a diagnostic boot cannot be talked into fetching a package from elsewhere. A value that is not a bare origin is refused at install and reported (`store_api_base 'â€¦' is not an absolute http(s) origin`); `http://` is accepted **only for a loopback host** (`127.0.0.1`, `::1`, `localhost` - `IsLoopbackHost`), which is the one plain-http exception the transport makes (`store_http.cpp`; the package transfer in `store_transfer_winhttp.cpp` stays HTTPS-only). `scripts/diagnostics/store_stub_api.py` is the stand-in it is meant to point at: it answers `503` while a flag file exists and a captured list page otherwise, so one boot can measure a failed press, its popup, and the later success (`scripts/diagnostics/probe_store_failure.ps1` drives all three). Requires a restart. |
+| `store_catalogue_ttl_seconds` | 300 | How long the fetched catalogue stays fresh before a new store visit refetches it (Recently Added's own freshness, separate from the page cache below). The list is **warmed once per boot**, before the guest thread starts (P9-10, `store_catalogue: fetching â€¦ (the boot asked)`), so a store visit normally finds it fresh and the TTL is what decides when a later visit re-fetches; a press inside a **cold** fetch's first ~3 s is answered with the empty page (the DTA refreshes the menu), which is why the prewarm exists. A failed page backs off for a wait derived from the answer (P7): `Retry-After` honoured within 5..600 s, a 5xx 60 s, a transport failure 10 s, a `200` whose body could not be read 60 s and any other status 120 s. The fetch runs on its own thread, so a store visit never blocks the guest. Requires a restart. |
 | `store_catalogue_pages` | 4 | How many API pages one store action accumulates into the browser's single list (clamped 1..20). Retail has no paging - `song_select`'s PageUp/PageDown are screen transitions - so an offer past the first API page can only be reached by asking for those pages. The walk is **chunked on the server's own cursor** (P7): the offers are published after each page, a page the instrument/eligibility filter emptied is **not** treated as the last one, and the budget is the only bound on a catalogue that never says "done". A later page that fails keeps the pages already read and holds the next visit off for its backoff. Measured 2026-10-22: `page 1..4 -> 24,25,25,25 eligible offers (99 total)`, and row 70 of the served list was an API **page 4** offer. Requires a restart. |
 | `store_page_cache_ttl_seconds` | 300 | RhythmVerse plan **P7's in-memory page cache**: how long one fetched API page (25 records) is reused before the site is asked again; **0 switches the cache off**, so every visit asks the site. The key is the endpoint **and the form body**, so the query text, the page number, the page size and the instrument filter each identity a page - a settings commit cannot read a page fetched for the filter it replaced. Single flight spans Recently Added and Search: an identical page that is already being fetched is never requested twice. The cache holds at most 64 pages and evicts the oldest. There is no disk cache (the plan marks `<user_data_root>/store/cache/` optional; it stays unbuilt). Requires a restart. |
 | `store_search_pages` | 4 | How many API pages **one search** may read (clamped 1..20; the site's page size is 25 records) - P7's per-action budget for the search half of `store_catalogue_pages`. The walk continues past a page the eligibility/instrument filter emptied and stops on the server's cursor, the budget, or a newer submit/edit/cancel/settings commit (the cancellation the worker checks between pages). 1 is the pre-P7 behaviour. Requires a restart. |
@@ -321,7 +323,7 @@ far, and a failed fetch carries the server's own reason. Since the boot warms th
 2026-10-22) the loading line is normally not drawn on entry: no fetch is running when the store
 opens, and the press gets the offers (measured: the front menu served at 19:53:34, the Recent page
 75,229 bytes at 19:53:55, `out/_swap/p910-recent2/20261022-195200`). It reappears while a fetch
-runs — after a failure whose backoff expired, or inside a cold fetch's first seconds. Measured on
+runs â€” after a failure whose backoff expired, or inside a cold fetch's first seconds. Measured on
 screen 2026-10-22
 (`out/_swap/store-probe/20261022-140259`: the credit line is drawn under the store menu's RECENT /
 SEARCH rows). All of it is drawn only within
@@ -331,7 +333,7 @@ state a player cannot explain from the screen.
 
 **The store's fault logger and its map.** `store_trace` also installs the first-chance handler that
 turns a guest null read into a line
-(`store-probe: fault read of 0x… at rip 0x…, frames: …`, then the SDK's own report). The frames are
+(`store-probe: fault read of 0xâ€¦ at rip 0xâ€¦, frames: â€¦`, then the SDK's own report). The frames are
 **host** addresses, so they are only names when the link map comes from the same link as the binary
 that booted - a map one build old named nothing real and cost this plan a diagnosis
 (measured 2026-10-22). A measurement build asks for the map explicitly:
@@ -339,41 +341,41 @@ that booted - a map one build old named nothing real and cost this plan a diagno
 ```powershell
 cmake --preset win-amd64-release -DRBBLITZ_LINK_MAP=ON
 cmake --build --preset win-amd64-release --target rb_blitz
-python out/_swap/fault_lookup.py --base <the module base the boot logged> <frames…>
+python out/_swap/fault_lookup.py --base <the module base the boot logged> <framesâ€¦>
 ```
 
 The option adds `-Xlinker /MAP` to the game target only (`CMakeLists.txt`), so the tool targets are
 untouched; it is off by default and a normal build carries no map. The store's own art path has two
-extra trace lines for the same class of question: `store-probe: art request manager=… client=…
-path='…'` (every request for a store texture, served or not) and the completion's `wrapper=…[…]`
+extra trace lines for the same class of question: `store-probe: art request manager=â€¦ client=â€¦
+path='â€¦'` (every request for a store texture, served or not) and the completion's `wrapper=â€¦[â€¦]`
 words (the file object whose bytes the decode reads).
 
 **What a silent probe does *not* prove (measured 2026-10-20).** Records read from an `.ark` are
 never seen: the guest mounts the ark part and reads records out of it **by offset**, so no path is
-resolved for them at all. A trace-level boot of this title is 30 `NtCreateFile` lines in total — the
-two ark headers + parts and a handful of special files — and no `ui/store/**` or `dlc_store/**` path
+resolved for them at all. A trace-level boot of this title is 30 `NtCreateFile` lines in total â€” the
+two ark headers + parts and a handful of special files â€” and no `ui/store/**` or `dlc_store/**` path
 ever appears; the store's own UI records are in that invisible class. The probe is therefore
 right about *loose files a served store needs* and must not be read as "the guest asked for nothing":
 for that question the noisy export log is the instrument below.
 
-`scripts/diagnostics/probe_store.ps1` drives the whole measurement in one boot: title → main menu → a chosen row
-→ the store → optionally its first menu row, keeping a screenshot and OCR of the menu, the *selected*
+`scripts/diagnostics/probe_store.ps1` drives the whole measurement in one boot: title â†’ main menu â†’ a chosen row
+â†’ the store â†’ optionally its first menu row, keeping a screenshot and OCR of the menu, the *selected*
 row, the store and the return, plus the store-probe census and the run's log
 (`out/_swap/store-probe/<stamp>/`). `-MenuOnly` stops at the menu, `-LocalRoot ""` is the control
 leg (retail server), and `-StoreRow` is a parameter because the menu's rows depend on three settings
-— run `-MenuOnly` first and read `menu.txt`. `-PageRow`/`-OfferRow` walk one level deeper each (a
+â€” run `-MenuOnly` first and read `menu.txt`. `-PageRow`/`-OfferRow` walk one level deeper each (a
 menu page, then a details page), and **`-InfoRow` presses a button on that details page** and waits
-`-DownloadWaitSec` (default 40) before the last capture — that is the P5 route: `-StoreRow 3 -PageRow
+`-DownloadWaitSec` (default 40) before the last capture â€” that is the P5 route: `-StoreRow 3 -PageRow
 0 -OfferRow 0 -InfoRow 0` is Recent's first offer's Download row. The report's
 `--- download / refresh lines ---` section carries `store_download:`/`store_install:`/`dlc:`
 lines, which is where a started, installed and refreshed transfer shows up. Since 2026-10-22 the
-install line names the job it finished — `store_download: job <job> installed '<Artist - Title>'
-<path> (<N> bytes, title <id>)` — which is what lets a later boot say *which* song it must find
+install line names the job it finished â€” `store_download: job <job> installed '<Artist - Title>'
+<path> (<N> bytes, title <id>)` â€” which is what lets a later boot say *which* song it must find
 on the title's list (the receipt stays a transfer history with no name in it, by design).
 
 **The search route, end to end (P9-11, 2026-10-23).** `scripts/diagnostics/probe_search.ps1 -Query bush
--SearchMenuRow 1 -StoreRow 3` walks the shipped path: main menu → **RhythmVerse** → the store's
-front menu → its **Search** row (RECENT is 0, SEARCH 1) → the **title's own keyboard**
+-SearchMenuRow 1 -StoreRow 3` walks the shipped path: main menu â†’ **RhythmVerse** â†’ the store's
+front menu â†’ its **Search** row (RECENT is 0, SEARCH 1) â†’ the **title's own keyboard**
 (`virtual_keyboard show_keyboard`, the object the Ultimate payload's song search drives; retail's
 does not). On a seeded boot (`-Query` fills the field) the same press submits instead of drawing
 the keyboard, because the screen asks the `rbbz-store/search/seed` bit, so one press exercises the
@@ -386,11 +388,11 @@ captures what it opened without submitting (`-SearchMenuRow 0` is Recently Added
 `show_keyboard` and `clear_callback`; `.?AVVirtualKeyboardResultMsg@@`'s symbol table carries `ok`
 and `text`, which are the two values the DTA handler binds. The boot init `sub_823631C0` names the
 class's single instance `virtual_keyboard` in the object directory, so the call is
-`{virtual_keyboard show_keyboard $user 100 (localize <title>) (localize <desc>) "" $this}` — with a
+`{virtual_keyboard show_keyboard $user 100 (localize <title>) (localize <desc>) "" $this}` â€” with a
 **User object** in the first slot, because the native show (`sub_8237B008`) reads the player's name
 from it (the bare symbol `user` was a null read, measured in game: `read of guest 0x00000000` right
-after the press). The result arrives as `(virtual_keyboard_result_msg ($ok $text) …)` on whatever
-object `$this` was — the lowercase spelling `sub_8237A878` interns, which `macros.dtb`'s
+after the press). The result arrives as `(virtual_keyboard_result_msg ($ok $text) â€¦)` on whatever
+object `$this` was â€” the lowercase spelling `sub_8237A878` interns, which `macros.dtb`'s
 `VIRTUAL_KEYBOARD_RESULT_MSG` expands to. The
 payload writes both methods onto `store_menu_screen` (`store::AddSearchKeyboard`), so the message's
 receiver is the screen that opened it: `{sprintf "rbbz-store/search/text/%s" $text}` carries the
@@ -450,7 +452,7 @@ property, because a `do` around them loses everything after the screen change (m
 on the row). The sentinel is the row's, so the press logs the same
 `dlc: refresh asked for ("songcache:/rbbz_dlc_refresh"), re-scanning the DLC libraries` (the line
 names the refresh, not one entry) and then `dlc: the song refresh entry asked for a refresh; scanning
-… library root(s) on a worker thread`, and the press publishes the fresh list before the discovery
+â€¦ library root(s) on a worker thread`, and the press publishes the fresh list before the discovery
 pass enumerates (`dlc::WaitForRefreshToLand`, bounded at 15 s). A cancelled or failed job carries
 neither the caption nor the action: `installed` is set only by `finish_installed`. The popup calls
 no host drawing at all - it is the guest's own labels. `rb_blitz_store_payload_tests store-edit
@@ -482,9 +484,9 @@ request in the log at all and the main menu's refresh row still dispatches its s
 own profile directories and an **empty
 scratch DLC root**, so it never reads or writes the player's library, and it exits non-zero unless
 every step behaved; `-Reuse` runs the legs in separate invocations on the fixtures the first one
-wrote. Rows are clicked at the bounds the host logs (`native_mouse: row=<n> bounds=…`) because which
+wrote. Rows are clicked at the bounds the host logs (`native_mouse: row=<n> bounds=â€¦`) because which
 index carries a row depends on the boot's settings, and the screen a click lands on
-(`native_mouse: screen=` / `help_observer: screen '…'`) is the oracle, never an OCR guess.
+(`native_mouse: screen=` / `help_observer: screen 'â€¦'`) is the oracle, never an OCR guess.
 
 **Its boot route is press, hover, look (`Enter-MainMenu`).** One OCR finds the title, and after that
 the only instruments are host lines: a hover at the list makes the native capture log the row table,
@@ -498,7 +500,7 @@ with the machine to itself. That is also why the harness logs `--log_level=info`
 APU/GPU chatter (4.7 MB in four minutes), and every line it asserts on is an info line.
 
 **Measured shape, 2026-10-22** (`out/store-acceptance/p8-store/`): `Enable` passes every step
-(`RHYTHMVERSE: OFF` → press → `rhythmverse = true` in the profile → `RHYTHMVERSE: ON`), `Control`
+(`RHYTHMVERSE: OFF` â†’ press â†’ `rhythmverse = true` in the profile â†’ `RHYTHMVERSE: ON`), `Control`
 passes 13 of 13 (no store row on the menu, six absence checks at 0 matches, the refresh row's
 sentinel present), the store row opens the retail store (`native_mouse: screen=store_menu_screen`) -
 and the `Store` leg then finds the guest no longer logging on this machine. *(Superseded the same
@@ -510,48 +512,48 @@ every label check folds the whitespace out.
 
 **The closed-out run, 2026-10-22** (`out/store-acceptance/p8-final/`): **69 steps, 0 failures** over
 all four legs on one build. `Enable` reads the switch off, presses it, finds `rhythmverse = true` in
-the profile and reads it on (the master was off by default then; the owner pass of plan §9/P9-1
+the profile and reads it on (the master was off by default then; the owner pass of plan Â§9/P9-1
 flipped that default and made the Enable leg assert it instead of pressing the row); `Store` draws
 `RHYTHMVERSE` + `RECENT SEARCH` + the credit line, lists
 `99 offer(s)`, opens the browser on them, answers a search (`15 MATCHES FOR "BUSH"`) and lists the
 result, opens the details page's `DOWNLOAD`, installs `rv_436f1b68360f1ad9be533437be169410.con`
 (4,927,488 bytes, one container in the flat root, empty staging, receipt `pending`, refresh logged)
 with no points/Buy Now chrome anywhere; *(the name is the 2026-10-20/22 rule; the store names an
-install `Artist - Song` since 2026-10-23 - `docs/guides/dlc.md` §2.2)* `Install` finds the title on
+install `Artist - Song` since 2026-10-23 - `docs/guides/dlc.md` Â§2.2)* `Install` finds the title on
 the next boot's own song list
-(`YOUR SONGS … BUSH THE PEOPLE THAT WE LOVE` after `dlc: 1 saved-game library package(s) presented
+(`YOUR SONGS â€¦ BUSH THE PEOPLE THAT WE LOVE` after `dlc: 1 saved-game library package(s) presented
 as content type 00000002`); `Control` makes no store request at all and still dispatches the refresh
-row. The assertions that changed to get there are listed in the plan's §5/P8 close-out record - the
+row. The assertions that changed to get there are listed in the plan's Â§5/P8 close-out record - the
 row-label and heading needles, the credit line read after the first page lands, the shipping
 `store_fetch: served '<path>'` line instead of the trace-only per-page count, and the retried Play
 press in the `Install` leg.
 
 **Naming the exports a screen calls.** `-LogLevel trace -Noisy` (that is `--log_noisy=1`) turns on
-the SDK's kernel-import logging, which prints one line per export call (`[NtCreateFile] path=…`,
-`[XamInputGetState] …`, `[Xe…]`) with the guest path or arguments. It is how P2 found that the
-store's request is followed by no file, content or socket call at all (plan §5/P2 record) — a
+the SDK's kernel-import logging, which prints one line per export call (`[NtCreateFile] path=â€¦`,
+`[XamInputGetState] â€¦`, `[Xeâ€¦]`) with the guest path or arguments. It is how P2 found that the
+store's request is followed by no file, content or socket call at all (plan Â§5/P2 record) â€” a
 question the path probe could not answer. Two cautions: the log grows to ~50 MB per boot, and the
 per-frame input/swap lines dominate, so census them by export name before reading order.
 
 **Naming a guest fault (2026-10-21).** The SDK reports an unhandled guest access violation as one
-line - `read of guest 0x00000000 (host 0x100000000) on thread 0x…` - and nothing else, which is not
+line - `read of guest 0x00000000 (host 0x100000000) on thread 0xâ€¦` - and nothing else, which is not
 enough to find the code. While `store_trace` is on, [store_probe.cpp](../../src/store/store_probe.cpp)
 installs a **first-chance vectored exception handler** that logs the faulting `rip`, the translated
 guest address and the first 24 host frames, together with the module base:
 
 ```
-store-probe: fault read of 0x00000000 at rip 0x7ff605bf70dd, frames: 0x7ff8c3aa7faa …
+store-probe: fault read of 0x00000000 at rip 0x7ff605bf70dd, frames: 0x7ff8c3aa7faa â€¦
 store-probe: fault logger installed; module base 0x7ff6058f0000; guest window [0x100000000, 0x200000000)
 ```
 
 The handler only observes: it returns `EXCEPTION_CONTINUE_SEARCH`, so the SDK's own decision is
-unchanged. Resolve the frames with `python scripts/diagnostics/map_lookup.py --base <module base> <frames…>`, which
+unchanged. Resolve the frames with `python scripts/diagnostics/map_lookup.py --base <module base> <framesâ€¦>`, which
 rebases them onto `rb_blitz.map` (the build writes it beside the executable; the binary itself has no
-symbols) and prints the generated function that contains each one — `--keep all` widens it to the C++
+symbols) and prints the generated function that contains each one â€” `--keep all` widens it to the C++
 symbols, and the unwind funclets next to every generated function are always skipped. Two things it
 taught, worth knowing before reading a stack: the addresses are **host** addresses (a guest zero read
 is `virtual_membase + 0`), and a new thread's stack probe writes its guard page, which is an access
-violation the filter has to drop — the near-null addresses are the guest's.
+violation the filter has to drop â€” the near-null addresses are the guest's.
 
 The same script also takes a bare map address (no `--base`), which is what an address read straight
 out of `rb_blitz.map` needs.
@@ -564,7 +566,7 @@ authoring an offer record (`src/store/store_metadata.cpp`): the walk compares ev
 against the **first element of a pair**, so a multi-component path like `(rank <part>)` cannot index
 a five-part map (the missing answer is dereferenced), and an **absent** key is as fatal as a wrong
 one because the same tail reads the answer unconditionally. The fix - single-component
-`rank_<part>` keys plus a payload unroll of the panel's loop - is in the plan's §5/P3 exit record.
+`rank_<part>` keys plus a payload unroll of the panel's loop - is in the plan's Â§5/P3 exit record.
 
 **The store's native chain (P3 step 0, 2026-10-20).** [store_probe.cpp](../../src/store/store_probe.cpp)
 now also hooks two guest functions, both pass-throughs that only report (and, for the gate, force a
@@ -572,12 +574,12 @@ value) while `store_trace` is on:
 
 | Function | What it proves |
 | --- | --- |
-| `sub_8274FB60` | the panel's request builder — formats the metadata path and hands it to the file cache. A `store-probe: request '<path>' (input '<provider>', flag …)` line is the request list P2 could not observe from the file side. |
+| `sub_8274FB60` | the panel's request builder â€” formats the metadata path and hands it to the file cache. A `store-probe: request '<path>' (input '<provider>', flag â€¦)` line is the request list P2 could not observe from the file side. |
 | `sub_82753010` | `request_index_if_needed`'s body: reports `this+52`, `this+56` and the state word at `0x82853D20+44`, then forces that word to 2 through the heap's protect API (the image's data section is read-only; a plain store does nothing). |
 | `sub_8235A240` | the file-cache entry the builder hands the path to: `store-probe: cache request '<path>' (manager <ptr>)`. It separates "the panel asked" from "the cache looked". |
 
 **Correction (2026-10-20, supersedes the first P3 step-0 run):** that run reported the state word
-at `0x828A3D20+44` and forced it there, and no request followed. The address was decoded wrong —
+at `0x828A3D20+44` and forced it there, and no request followed. The address was decoded wrong â€”
 `lis r11,-32123` is `0x8285` (65536 - 32123 = 33413 = `0x8285`), so the word is at `0x82853D4C`.
 With the corrected address a boot (`rb_blitz_055.log`, 17:10:11-17:11:04; the store entry was
 driven by the P4 search diagnostic's `enter` statements, but the request itself is the retail
@@ -590,16 +592,16 @@ store-probe: request 'dlc_store/europe/dlc_top_xbox_eng.dta' (input '/dlc_top_xb
 ```
 
 Two facts follow: the measured substitutions are **region `europe`, platform `xbox`, locale
-`eng`** (not the plan's earlier `xbox`/`en` guess), and the request reaches `sub_8235A240` — the
+`eng`** (not the plan's earlier `xbox`/`en` guess), and the request reaches `sub_8235A240` â€” the
 single fetch entry P2's decision A narrowed to. What is still missing is the file open: the same
 boot carries no `store-probe: open`/`resolve` line for that path, so the cache did not read a
 local file in that run.
 
-**Proving a generated DTA record is the one the guest runs** — a path probe cannot, because records
+**Proving a generated DTA record is the one the guest runs** â€” a path probe cannot, because records
 come out of the ark by offset. The method that worked: make the edit do something visible. The
 payload's `store_menu_screen.enter` gained `{store_panel on_init_commerce_success}`; swapping it for
 `{ui goto_screen splash_screen}` for one boot made entering the store jump to splash, which proved
-the record executes. `{notify "…"}` is *not* a usable marker (no log line, probably a ship-build
+the record executes. `{notify "â€¦"}` is *not* a usable marker (no log line, probably a ship-build
 no-op).
 
 The metadata writer's half of the measurement is `rb_blitz_store_payload_tests dump-menu <dtb>` and
@@ -608,7 +610,7 @@ The metadata writer's half of the measurement is `rb_blitz_store_payload_tests d
 will load and the locale keys it will look up. That is how "the row was authored" was told apart from
 "the row is in the record the guest reads" on 2026-10-20.
 
-## Part 2 — Observing a UI state (was `docs/engine/observing.md`)
+## Part 2 â€” Observing a UI state (was `docs/engine/observing.md`)
 
 ```powershell
 .\scripts\diagnostics\observe_ui.ps1 -ListStates
@@ -629,13 +631,13 @@ It joins scripts that already existed (Part 1 is the *other* half of the instrum
 
 | State | Needle (the text that proves it) | Route |
 | --- | --- | --- |
-| `boot` | — | the window, before the splash finishes |
+| `boot` | â€” | the window, before the splash finishes |
 | `title` | `TO START` | wait for the title screen |
-| `offline-prompt` | `ROCK CENTRAL` | title → the accept that starts a game → the failed-connect dialog |
-| `main-menu` | `DOWNLOAD CONTENT` | title → the accept that starts a game → menu |
+| `offline-prompt` | `ROCK CENTRAL` | title â†’ the accept that starts a game â†’ the failed-connect dialog |
+| `main-menu` | `DOWNLOAD CONTENT` | title â†’ the accept that starts a game â†’ menu |
 | `song-list` | `YOUR SONGS` | menu, A on row 0 (PLAY) |
-| `in-song` | — | …and A on the list's first row (Random Song) |
-| `pause` | — | …and START |
+| `in-song` | â€” | â€¦and A on the list's first row (Random Song) |
+| `pause` | â€” | â€¦and START |
 | `help-options` | `HOW TO PLAY` | menu row 3 |
 | `controls` | `CONTROLLER` | HELP & OPTIONS, one row down |
 | `calibration` | `CALIBRATION WIZARD` | HELP & OPTIONS, two rows down |
@@ -645,37 +647,37 @@ It joins scripts that already existed (Part 1 is the *other* half of the instrum
 | `download` | `ESTORE` | menu row 4 |
 | `exit-confirm` | `WANT TO EXIT` | menu row 5 |
 
-The needles are the strings those screens actually draw (OCR, this build); the routes are the ones [acceptance_screens.ps1](../../scripts/acceptance/acceptance_screens.ps1) already walks — safe because **a list clamps at both ends** (eight taps up is the first row, whatever the highlight was) and **a list resets its highlight to the first row whenever it is entered**.
+The needles are the strings those screens actually draw (OCR, this build); the routes are the ones [acceptance_screens.ps1](../../scripts/acceptance/acceptance_screens.ps1) already walks â€” safe because **a list clamps at both ends** (eight taps up is the first row, whatever the highlight was) and **a list resets its highlight to the first row whenever it is entered**.
 
-**How many accepts reach the menu is a setting, not a fact.** R3 ([main-menu.md](main-menu.md) §7) makes the title's failed connect become offline mode on its own: one accept reaches the menu by default, three when the dialogs are driven, and one too many accepts whatever row the menu's own accept opens. `-SkipOfflinePrompts 0` drives the dialogs (passes `--enhancements_skip_offline_dialog=false`; the routes are built for it), the only way to reach `offline-prompt`. [scripts/diagnostics/ui_states.ps1](../../scripts/diagnostics/ui_states.ps1) reads that from `RBBLITZ_SKIP_OFFLINE_PROMPTS` because it builds the routes when dot-sourced; the three-accept acceptance scripts pin the flag for the same reason.
+**How many accepts reach the menu is a setting, not a fact.** R3 ([main-menu.md](main-menu.md) Â§7) makes the title's failed connect become offline mode on its own: one accept reaches the menu by default, three when the dialogs are driven, and one too many accepts whatever row the menu's own accept opens. `-SkipOfflinePrompts 0` drives the dialogs (passes `--enhancements_skip_offline_dialog=false`; the routes are built for it), the only way to reach `offline-prompt`. [scripts/diagnostics/ui_states.ps1](../../scripts/diagnostics/ui_states.ps1) reads that from `RBBLITZ_SKIP_OFFLINE_PROMPTS` because it builds the routes when dot-sourced; the three-accept acceptance scripts pin the flag for the same reason.
 
-A state may carry a **`Crop`**, because some screens only give up their text in a band: the stylised How to Play title is lost by full-frame OCR of 3840×2160 (past what Windows OCR upscales — `-GrayscaleScale 3` refused, scale 2 misses the heading), so `help-options` OCRs `150,100,2700,500`. **A crop is in the captured frame's pixels, so it follows the capture size**; the report carries `capture_size` and `ocr.crop`, so a misaligned crop is visible rather than silently wrong.
+A state may carry a **`Crop`**, because some screens only give up their text in a band: the stylised How to Play title is lost by full-frame OCR of 3840Ã—2160 (past what Windows OCR upscales â€” `-GrayscaleScale 3` refused, scale 2 misses the heading), so `help-options` OCRs `150,100,2700,500`. **A crop is in the captured frame's pixels, so it follows the capture size**; the report carries `capture_size` and `ocr.crop`, so a misaligned crop is visible rather than silently wrong.
 
-`in-song` and `pause` have no needle yet — nobody has pinned down what they draw — so they report an unknown expectation rather than a string that could pass for the wrong reason. **`in-song` starts a song**, which the title may write to the save when it ends; the harness closes the window mid-song.
+`in-song` and `pause` have no needle yet â€” nobody has pinned down what they draw â€” so they report an unknown expectation rather than a string that could pass for the wrong reason. **`in-song` starts a song**, which the title may write to the save when it ends; the harness closes the window mid-song.
 
 ### The report
 
-One JSON object on stdout; exit code 0 when the state was reached and its expectation held. It carries `state`/`note`; `binary_sha256` (the build — the identity a baseline has to match); `ultimate_mode` (`0` unless `-UltimateMode 1`; an installed payload must not change a screen); `launched` (started vs `-ReuseRunning`); the `route` it drove, so a run can be repeated by hand; `capture`/`capture_size` (a capture at one size cannot be diffed against another); `settle_seconds`; the `ocr.*` block (`ran`, `needle`, `crop`, `matched`, `text` — `ocr.text` is the *crop's* text when the state carries one); the `diff` block (`diff.scale` the downscale factor); and `passed` (`ocr.matched` **and** the diff where the diff may decide).
+One JSON object on stdout; exit code 0 when the state was reached and its expectation held. It carries `state`/`note`; `binary_sha256` (the build â€” the identity a baseline has to match); `ultimate_mode` (`0` unless `-UltimateMode 1`; an installed payload must not change a screen); `launched` (started vs `-ReuseRunning`); the `route` it drove, so a run can be repeated by hand; `capture`/`capture_size` (a capture at one size cannot be diffed against another); `settle_seconds`; the `ocr.*` block (`ran`, `needle`, `crop`, `matched`, `text` â€” `ocr.text` is the *crop's* text when the state carries one); the `diff` block (`diff.scale` the downscale factor); and `passed` (`ocr.matched` **and** the diff where the diff may decide).
 
-`diff.status` is **`not-requested`** (no `-Compare`), **`no-baseline`** (`-Compare` named a directory with no `<state>.png` — **not a failure and does not fail the run**: a measurement with nothing to measure against is not a pass), or **`compared`** (`percent`, `scale`, `baseline_scale`, `same_scale`, `max_percent`, `threshold_from`, `same_build`, `settled`, `gates_pass`, `pass`, and the raw `frame_diff` line). `gates_pass` decides the run: false on a state with no settled frame and on a baseline whose floor was measured at another scale; `percent` is then corroboration only.
+`diff.status` is **`not-requested`** (no `-Compare`), **`no-baseline`** (`-Compare` named a directory with no `<state>.png` â€” **not a failure and does not fail the run**: a measurement with nothing to measure against is not a pass), or **`compared`** (`percent`, `scale`, `baseline_scale`, `same_scale`, `max_percent`, `threshold_from`, `same_build`, `settled`, `gates_pass`, `pass`, and the raw `frame_diff` line). `gates_pass` decides the run: false on a state with no settled frame and on a baseline whose floor was measured at another scale; `percent` is then corroboration only.
 
 #### The floor is scale-dependent
 
-`-CompareScale N` downscales both frames by `N` before diffing, and the factor is recorded in the report (`diff.scale`) and the baseline's metadata — **a floor is never compared across scales.** The older floor numbers (**3.5–5.9 %** just-entered, **~0.14 %** settled) were measured on ~1 Mpx captures, while a capture here is **3840×2160 = 8.3 Mpx**, so the same pixel movement is a different percentage; and [frame_diff.ps1](../../scripts/diagnostics/frame_diff.ps1) walks every pixel in PowerShell, so cost is the frame's area — tens of seconds at `-CompareScale 4`.
+`-CompareScale N` downscales both frames by `N` before diffing, and the factor is recorded in the report (`diff.scale`) and the baseline's metadata â€” **a floor is never compared across scales.** The older floor numbers (**3.5â€“5.9 %** just-entered, **~0.14 %** settled) were measured on ~1 Mpx captures, while a capture here is **3840Ã—2160 = 8.3 Mpx**, so the same pixel movement is a different percentage; and [frame_diff.ps1](../../scripts/diagnostics/frame_diff.ps1) walks every pixel in PowerShell, so cost is the frame's area â€” tens of seconds at `-CompareScale 4`.
 
-**A capture is 288 dpi, and `frame_diff.ps1` used to ignore that**: `DrawImageUnscaled` into a 96-dpi scratch bitmap draws at *physical* size, so a third-scale copy landed top-left and the rest compared empty — 3840×2160 diffed as 1280×720, **17.768 %** reported as **1.894 %** (bbox `0,0 - 1279,718`). Fixed 2026-10-04 by matching the scratch resolution; **the floor table is unaffected** (measured at `-CompareScale 4`, where both frames are redrawn into 96-dpi copies). Any *earlier* game-capture percentage was under-reported the same way.
+**A capture is 288 dpi, and `frame_diff.ps1` used to ignore that**: `DrawImageUnscaled` into a 96-dpi scratch bitmap draws at *physical* size, so a third-scale copy landed top-left and the rest compared empty â€” 3840Ã—2160 diffed as 1280Ã—720, **17.768 %** reported as **1.894 %** (bbox `0,0 - 1279,718`). Fixed 2026-10-04 by matching the scratch resolution; **the floor table is unaffected** (measured at `-CompareScale 4`, where both frames are redrawn into 96-dpi copies). Any *earlier* game-capture percentage was under-reported the same way.
 
 [observe_baseline.ps1](../../scripts/diagnostics/observe_baseline.ps1) produces a whole baseline set at one scale: two passes per state (capture, then compare), the second pass's `percent` **being** that state's same-build floor. It writes `out/observations/baseline/<build>/` (`<build>` = the executable's SHA-256, first 12 digits) with a PNG + JSON per state and `summary.json`; `-Resume` reuses an existing capture instead of booting again (the run is a long sequence of boots and does get interrupted); and it records the scale and warns on a mismatch, because a floor does not transfer between scales.
 
 #### What the floor actually is, measured
 
-`observe_baseline.ps1 -Resume -CompareScale 4` on build `caa1e18c3c6c` (2026-10-04), one same-build pair per state. `noise` is the whole-frame percentage; `screen` is what OCR read — the column that says whether the number means anything:
+`observe_baseline.ps1 -Resume -CompareScale 4` on build `caa1e18c3c6c` (2026-10-04), one same-build pair per state. `noise` is the whole-frame percentage; `screen` is what OCR read â€” the column that says whether the number means anything:
 
 | State | noise | OCR of the capture | Verdict |
 | --- | --- | --- | --- |
 | `help-options` | **0 %** | `HOW TO PLAY` | reproduced exactly |
 | `exit-confirm` | **0 %** | `WANT TO EXIT` | reproduced exactly |
-| `song-list` | 0.473 % | the entry tutorial, not the list | reproduced — but not the state it names |
+| `song-list` | 0.473 % | the entry tutorial, not the list | reproduced â€” but not the state it names |
 | `controls` | 5 % | `CONTROLLER` | same screen; its top three tenths differ, the rest is pixel-identical |
 | `calibration` | 5 % | `CALIBRATION WIZARD` | same screen, same shape |
 | `leaderboards` | 10.535 % | `CAREER LEADERBOARD` | same screen, its aurora band |
@@ -683,10 +685,10 @@ One JSON object on stdout; exit code 0 when the state was reached and its expect
 | `title` | 18.28 % | `TO START` | same screen, aurora phase; four other same-build pairs read 0.046 %, 1.978 %, 10.74 % and 1.894 % |
 | `main-menu` | 17.71 % | the menu's own rows | same screen, aurora phase |
 | `pause` | 56.031 % | `GAME PAUSED` | same menu over a live scene |
-| `audio-video` | 13.1 % | the help index | **route miss** — a row short |
-| `credits` | 75.384 % | the Audio/Video page | **route miss** — a row short, and the page scrolls |
+| `audio-video` | 13.1 % | the help index | **route miss** â€” a row short |
+| `credits` | 75.384 % | the Audio/Video page | **route miss** â€” a row short, and the page scrolls |
 | `in-song` | 72.777 % | unreadable | a different song: the route accepts *Random Song* |
-| `boot` | 84.972 % | — | **not a screen** — one capture was black (mean luminance 4.4 against 75.2) |
+| `boot` | 84.972 % | â€” | **not a screen** â€” one capture was black (mean luminance 4.4 against 75.2) |
 
 Only two of the fourteen reproduce exactly and three more sit under the 1 % default; the rest do not, each for a different reason. `audio-video` and `credits` say the important thing: **a same-build `percent` cannot tell a change of screen from a change of pixels**, so gating on it reports a route miss as a visual regression and vice versa.
 
@@ -694,24 +696,40 @@ Only two of the fourteen reproduce exactly and three more sit under the 1 % defa
 
 Both come from things this project has already been wrong about ([known-issues.md](../reference/known-issues.md) B-015).
 
-**A pixel diff is only evidence against a same-build baseline.** Two runs of the *same* build differ by **3.5–5.9 %** just after a screen is entered and **~0.14 %** settled, so a 3 % diff is a normal unsettled screen, not a changed one — which is how a round of "proven" texture swaps turned out to be nothing. So the harness needs `-BaselineDir` to compare against, reports `same_build` from the baseline's metadata, and compares the **settled** frame (hence `settle_seconds`), not the one the last key produced.
+**A pixel diff is only evidence against a same-build baseline.** Two runs of the *same* build differ by **3.5â€“5.9 %** just after a screen is entered and **~0.14 %** settled, so a 3 % diff is a normal unsettled screen, not a changed one â€” which is how a round of "proven" texture swaps turned out to be nothing. So the harness needs `-BaselineDir` to compare against, reports `same_build` from the baseline's metadata, and compares the **settled** frame (hence `settle_seconds`), not the one the last key produced.
 
-**And on an animated screen there is no settled frame at all**, measured five times on the title: **0.046 %**, **1.978 %**, **18.28 %**, **10.74 %**, **1.894 %**, the last three with captures OCR'd as `TO START` — the same screen. The first two suggested a 2.5 % ceiling; the third and fourth are what that ceiling cost — a same-build run reported as a failure. The aurora is an animation, what differs is the phase distance between runs, and no settle time removes it. So the state gets no ceiling: it carries **`Settled = $false`** in [ui_states.ps1](../../scripts/diagnostics/ui_states.ps1), its diff is reported, and **OCR is the control while the diff is corroboration**.
+**And on an animated screen there is no settled frame at all**, measured five times on the title: **0.046 %**, **1.978 %**, **18.28 %**, **10.74 %**, **1.894 %**, the last three with captures OCR'd as `TO START` â€” the same screen. The first two suggested a 2.5 % ceiling; the third and fourth are what that ceiling cost â€” a same-build run reported as a failure. The aurora is an animation, what differs is the phase distance between runs, and no settle time removes it. So the state gets no ceiling: it carries **`Settled = $false`** in [ui_states.ps1](../../scripts/diagnostics/ui_states.ps1), its diff is reported, and **OCR is the control while the diff is corroboration**.
 
-**A run gates on the diff only where it can be believed** — a settled frame against a baseline at the same `-CompareScale`; anything else is `Settled = $false` and gates on its needle (`diff.settled`, `diff.gates_pass`). `-MaxDiffPercent` (default **1.0**) and a per-state `MaxDiff` cover settled states only; raise either deliberately, not to make a test pass.
+**A run gates on the diff only where it can be believed** â€” a settled frame against a baseline at the same `-CompareScale`; anything else is `Settled = $false` and gates on its needle (`diff.settled`, `diff.gates_pass`). `-MaxDiffPercent` (default **1.0**) and a per-state `MaxDiff` cover settled states only; raise either deliberately, not to make a test pass.
 
 ### Adding a state
 
-1. Add an entry to [scripts/diagnostics/ui_states.ps1](../../scripts/diagnostics/ui_states.ps1) with `Route` (an action list in [drive_ui.ps1](../../scripts/diagnostics/drive_ui.ps1)'s grammar), `Needle`, `Settle`, `Note` and — only if the text needs it — `Crop`. Add the name to `$script:UiStateOrder` too.
-2. Run it once with `-Ocr` and no baseline: the report's `ocr.text` is what the screen says. Put the shortest unambiguous fragment of that text in `Needle` — not a whole sentence, which OCR noise will break (measured: the title reads `BLITZ PRESS@TO START`, so the needle is `TO START`). If the needle does not appear, the text is not there to be read: try a `Crop` of the band it is drawn in before weakening the needle to something the full frame does read.
-3. If the state animates, raise `Settle` and then **measure two same-build pairs**. If they disagree — and on this build they do, by 10–18 % on the aurora screens — the state has no settled frame: mark it `Settled = $false` and drop any `MaxDiff`. Do not widen `MaxDiff` to cover the spread; at 15 % it is no longer a threshold.
+1. Add an entry to [scripts/diagnostics/ui_states.ps1](../../scripts/diagnostics/ui_states.ps1) with `Route` (an action list in [drive_ui.ps1](../../scripts/diagnostics/drive_ui.ps1)'s grammar), `Needle`, `Settle`, `Note` and â€” only if the text needs it â€” `Crop`. Add the name to `$script:UiStateOrder` too.
+2. Run it once with `-Ocr` and no baseline: the report's `ocr.text` is what the screen says. Put the shortest unambiguous fragment of that text in `Needle` â€” not a whole sentence, which OCR noise will break (measured: the title reads `BLITZ PRESS@TO START`, so the needle is `TO START`). If the needle does not appear, the text is not there to be read: try a `Crop` of the band it is drawn in before weakening the needle to something the full frame does read.
+3. If the state animates, raise `Settle` and then **measure two same-build pairs**. If they disagree â€” and on this build they do, by 10â€“18 % on the aurora screens â€” the state has no settled frame: mark it `Settled = $false` and drop any `MaxDiff`. Do not widen `MaxDiff` to cover the spread; at 15 % it is no longer a threshold.
 4. Record the baseline with `-BaselineDir` only once the state reads the same way twice, and check that both readings are of the right screen: a `percent` is not evidence that the route arrived where the state's name says it did.
 
 ### Open, and left open on purpose
 
-- **The How to Play screen's first row is not what its description implies.** Entering HELP & OPTIONS and accepting nothing captures a screen titled `How to PLAY` with rows `BASIC TUTORIAL` and `ADVANCED TUTORIAL`; one row down is `CONTROLLER`, which is how [acceptance_screens.ps1](../../scripts/acceptance/acceptance_screens.ps1)'s table reaches Controls. So row 0 is a tutorial entry, and that document's "a submenu titled How to Play over four pages" describes rows 1–4 and misses row 0. Not resolved here — it belongs to S2's flow map; the harness only reports what it saw.
+- **The How to Play screen's first row is not what its description implies.** Entering HELP & OPTIONS and accepting nothing captures a screen titled `How to PLAY` with rows `BASIC TUTORIAL` and `ADVANCED TUTORIAL`; one row down is `CONTROLLER`, which is how [acceptance_screens.ps1](../../scripts/acceptance/acceptance_screens.ps1)'s table reaches Controls. So row 0 is a tutorial entry, and that document's "a submenu titled How to Play over four pages" describes rows 1â€“4 and misses row 0. Not resolved here â€” it belongs to S2's flow map; the harness only reports what it saw.
 - **`in-song` and `pause` have no needle.** Nothing has pinned down what they draw, so they report an unknown expectation rather than a string that could pass for the wrong reason. `pause` read `GAME PAUSED` in the baseline run (a candidate); `in-song` cannot have a stable one until the route stops accepting *Random Song*.
-- **The menu chain's routes are not deterministic, and nothing waits for a screen to appear.** The route language is taps and `wait:N` ([drive_ui.ps1](../../scripts/diagnostics/drive_ui.ps1)); a dialog slower than its `wait` leaves the next tap on the dialog, and the run captures whatever that produced. Measured: `main-menu` captured the "Proceed in Offline Mode?" dialog, `audio-video` the help index, `credits` the Audio/Video page — two of the three had a needle that did not read (the harness noticing), but `song-list` is the counter-example: both readings were the one-time entry tutorial, so it agreed with itself about the wrong screen. Until a route can wait on a needle, a menu-chain `percent` is not a measurement of the screen it names. **R3 removed two of the three dialogs** (see "The states"), so a route is two `wait`s shorter and the baseline above is now the `-SkipOfflinePrompts 0` case on purpose; the remaining wait — the failed connect, seconds long and of no fixed length — is what the route still cannot see.
+- **The menu chain's routes are not deterministic, and nothing waits for a screen to appear.** The route language is taps and `wait:N` ([drive_ui.ps1](../../scripts/diagnostics/drive_ui.ps1)); a dialog slower than its `wait` leaves the next tap on the dialog, and the run captures whatever that produced. Measured: `main-menu` captured the "Proceed in Offline Mode?" dialog, `audio-video` the help index, `credits` the Audio/Video page â€” two of the three had a needle that did not read (the harness noticing), but `song-list` is the counter-example: both readings were the one-time entry tutorial, so it agreed with itself about the wrong screen. Until a route can wait on a needle, a menu-chain `percent` is not a measurement of the screen it names. **R3 removed two of the three dialogs** (see "The states"), so a route is two `wait`s shorter and the baseline above is now the `-SkipOfflinePrompts 0` case on purpose; the remaining wait â€” the failed connect, seconds long and of no fixed length â€” is what the route still cannot see.
 - **The harness can change what the next run sees.** `in-song` starts a song and the guest writes its save; the entry tutorial `song-list` captured is the kind of thing a save decides. A baseline set is only comparable to another from the same save state, and nothing records that yet.
-- **`-Resume` compares across sessions.** It reuses a capture because the run is a long sequence of boots; the run behind the floor measurement reused a morning capture and compared it against an evening one 11 h later. The build matched, so the comparison is legitimate — but `same_build` is all it checks; nothing about the desktop, the save or the machine's load is.
-- **The cost is in `frame_diff`.** A capture run measured **46 s** end to end; a compare run **154 s**, most of it that script's per-pixel PowerShell loop over a 3840×2160 frame. The harness is a research tool, not a `ctest` target, and this is why.
+- **`-Resume` compares across sessions.** It reuses a capture because the run is a long sequence of boots; the run behind the floor measurement reused a morning capture and compared it against an evening one 11 h later. The build matched, so the comparison is legitimate â€” but `same_build` is all it checks; nothing about the desktop, the save or the machine's load is.
+- **The cost is in `frame_diff`.** A capture run measured **46 s** end to end; a compare run **154 s**, most of it that script's per-pixel PowerShell loop over a 3840Ã—2160 frame. The harness is a research tool, not a `ctest` target, and this is why.
+
+## Legacy startup switches with ReXGlue v0.11
+
+Title startup accepts the historical `--no_<boolean>` spelling and translates
+it to the SDK's `--no-<boolean>` form without changing option order. Existing
+diagnostic launchers may still pass `--log_noisy`; the registry reports that
+this removed gate is ignored. Use `log.level` and `log.categories` to select
+trace verbosity. Trace-level kernel import records now spell NtCreateFile,
+NtReadFile, NtWriteFile and NtClose without the old square brackets; the
+persistence acceptance parser accepts both formats and retains raw evidence.
+
+[measured] The real-registry compatibility checks pass in
+`out/rexglue-migration/title-legacy-cli-registry-tests-r1.log`. The parser probe
+under the same evidence root verifies exact read/write bytes, handle ownership
+and exclusion after close. Native validation is Windows AMD64; other native
+platforms remain unverified.

@@ -1,0 +1,428 @@
+diff --git a/src/gpu/xenos/command_processor.cpp b/src/gpu/xenos/command_processor.cpp
+--- a/src/gpu/xenos/command_processor.cpp
++++ b/src/gpu/xenos/command_processor.cpp
+@@ -322,6 +322,9 @@
+     if (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index) {
+       REX_PROFILE_SCOPE_TEXT("gpu", "rex::gpu::CommandProcessor::Stall");
+       PrepareForWait();
++      {
++        rex::diagnostics::compile_trace::Scope trace_idle(
++            rex::diagnostics::compile_trace::Event::kGpuIdle, "gpu.command_ring_empty", 0, 0);
+       do {
+         const int wait_time_ms = 5;
+         rex::platform::Wait(write_ptr_index_event_.get(), true,
+@@ -330,6 +333,8 @@
+         write_ptr_index = write_ptr_index_.load();
+       } while (worker_running_ && !HasPendingFns() &&
+                (write_ptr_index == 0xBAADF00D || read_ptr_index_ == write_ptr_index));
++      trace_idle.Success();
++      }
+       ReturnFromWait();
+       if (!worker_running_ || HasPendingFns()) {
+         continue;
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp b/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
+--- a/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
++++ b/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
+@@ -668,8 +668,14 @@
+     present_flags =
+         DXGI_PRESENT_RESTART | (present_sync.allow_tearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
+   }
+-  HRESULT present_result =
+-      paint_context_.swap_chain->Present(present_sync.sync_interval, present_flags);
++  HRESULT present_result;
++  {
++    rex::diagnostics::compile_trace::Scope trace_present(
++        rex::diagnostics::compile_trace::Event::kPresent, "d3d12.dxgi_present", 0, 0);
++
++    present_result = paint_context_.swap_chain->Present(present_sync.sync_interval, present_flags);
++    trace_present.Success(SUCCEEDED(present_result));
++  }
+   // Present may enqueue work internally even when it fails.
+   paint_context_.present_submission_tracker.NextSubmission();
+   if (present_result == DXGI_STATUS_MODE_CHANGED)
+diff --git a/src/gpu/xenos/host/presenter.cpp b/src/gpu/xenos/host/presenter.cpp
+--- a/src/gpu/xenos/host/presenter.cpp
++++ b/src/gpu/xenos/host/presenter.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/diagnostics/compile_trace.h>
+ #include <algorithm>
+ #include <atomic>
+ #include <cctype>
+@@ -776,7 +777,12 @@
+     surface_paint_connection_state_ = SurfacePaintConnectionState::kConnectedOutdated;
+     return PaintResult::kNotPresentedConnectionOutdated;
+   }
++  rex::diagnostics::compile_trace::Scope trace_present(
++      rex::diagnostics::compile_trace::Event::kPresent, "presenter.paint_and_present", 0, execute_ui_drawers);
++
+   PaintResult result = DriverPaintAndPresent(execute_ui_drawers);
++  trace_present.Success(result == PaintResult::kPresented ||
++                        result == PaintResult::kPresentedSuboptimal);
+   switch (result) {
+     case PaintResult::kPresented:
+       surface_paint_connection_was_optimal_at_successful_paint_ = true;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+@@ -1586,7 +1586,10 @@
+   {
+     const VulkanDevice::Queue::Acquisition queue_acquisition =
+         vulkan_device_->AcquireQueue(paint_context_.present_queue_family, 0);
++    rex::diagnostics::compile_trace::Scope trace_present(
++        rex::diagnostics::compile_trace::Event::kPresent, "vulkan.queue_present");
+     present_result = dfn.vkQueuePresentKHR(queue_acquisition.GetQueue(), &present_info);
++    trace_present.Success(present_result == VK_SUCCESS || present_result == VK_SUBOPTIMAL_KHR);
+   }
+   switch (present_result) {
+     case VK_SUCCESS:
+diff --git a/src/kernel/object/file_object.cpp b/src/kernel/object/file_object.cpp
+--- a/src/kernel/object/file_object.cpp
++++ b/src/kernel/object/file_object.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/diagnostics/compile_trace.h>
+ #include <rex/filesystem/directory.h>
+ #include <rex/filesystem/file_stat.h>
+ #include <rex/filesystem/file.h>
+@@ -195,13 +196,23 @@
+ X_STATUS FileObject::Read(TitleRuntime& runtime, u32 buffer_address, u32 buffer_length,
+                           u64 byte_offset, u32* out_bytes_read, u32 apc_context,
+                           bool notify_completion) {
+-  std::lock_guard<std::mutex> lock(file_lock);
+-  return ReadInternal(runtime, buffer_address, buffer_length, byte_offset, out_bytes_read,
+-                      apc_context, notify_completion);
++  const std::string trace_path = rex::diagnostics::compile_trace::Enabled()
++      ? file->GetInfo().absolute_path : std::string{};
++  rex::diagnostics::compile_trace::Scope trace_read(
++      rex::diagnostics::compile_trace::Event::kFileRead, trace_path.c_str(), byte_offset, buffer_length);
++  std::lock_guard<std::mutex> lock(file_lock);
++  const auto result = ReadInternal(runtime, buffer_address, buffer_length, byte_offset, out_bytes_read,
++                                   apc_context, notify_completion);
++  trace_read.Success(XSUCCEEDED(result));
++  return result;
+ }
+ 
+ X_STATUS FileObject::ReadScatter(TitleRuntime& runtime, u32 segments_address, u32 length,
+                                  u64 byte_offset, u32* out_bytes_read, u32 apc_context) {
++  const std::string trace_path = rex::diagnostics::compile_trace::Enabled()
++      ? file->GetInfo().absolute_path : std::string{};
++  rex::diagnostics::compile_trace::Scope trace_read(
++      rex::diagnostics::compile_trace::Event::kFileRead, trace_path.c_str(), byte_offset, length);
+   std::lock_guard<std::mutex> lock(file_lock);
+   X_STATUS result = X_STATUS_SUCCESS;
+ 
+@@ -249,6 +260,7 @@
+ 
+   async_event->Set();
+ 
++  trace_read.Success(XSUCCEEDED(result));
+   return result;
+ }
+ 
+diff --git a/tests/unit/kernel/io_trace_test.cpp b/tests/unit/kernel/io_trace_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/kernel/io_trace_test.cpp
+@@ -0,0 +1,129 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#include "rex_test.h"
++#include "kernel_fixture.h"
++#include <algorithm>
++#include <chrono>
++#include <fstream>
++#include <thread>
++#include <rex/diagnostics/compile_trace.h>
++#include <rex/filesystem/file.h>
++#include <rex/filesystem/file_system.h>
++#include <rex/filesystem/mount.h>
++#include <rex/kernel/object/file_object.h>
++#include <rex/kernel/object/object_table.h>
++#include <rex/settings_registry.h>
++#include "kernel/title_state.h"
++
++namespace {
++namespace fs = rex::filesystem;
++namespace trace = rex::diagnostics::compile_trace;
++using rex::test::Caller;
++
++struct ReadControl { bool slow = true, fail = false; u32 info_calls = 0; };
++
++class DelayedFile final : public fs::IFile {
++ public:
++  DelayedFile(std::unique_ptr<fs::IFile> inner, ReadControl& control)
++      : inner_(std::move(inner)), control_(control) {}
++  fs::FileStat GetInfo() const override { ++control_.info_calls; return inner_->GetInfo(); }
++  void Refresh() override { inner_->Refresh(); }
++  fs::Access GetAccess() const override { return inner_->GetAccess(); }
++  fs::VolumeStat GetVolume() const override { return inner_->GetVolume(); }
++  rex::Result<size_t> Read(std::span<u8> bytes, u64 offset) override {
++    if (control_.slow) std::this_thread::sleep_for(std::chrono::milliseconds(65));
++    if (control_.fail) return rex::Err<size_t>(rex::ErrorCategory::kIO, "injected read failure");
++    return inner_->Read(bytes, offset);
++  }
++  rex::Result<size_t> Write(std::span<const u8> bytes, u64 offset) override {
++    return inner_->Write(bytes, offset);
++  }
++  rex::Result<void> SetLength(u64 n) override { return inner_->SetLength(n); }
++  rex::Result<void> Flush() override { return inner_->Flush(); }
++  rex::Result<void> SetAttributes(fs::FileAttributes a) override { return inner_->SetAttributes(a); }
++  rex::Result<void> SetTimes(const fs::FileTimes& t) override { return inner_->SetTimes(t); }
++  void SetDeleteOnClose(bool value) override { inner_->SetDeleteOnClose(value); }
++  rex::Result<std::unique_ptr<fs::IDirectory>> List(std::string_view p) override {
++    return inner_->List(p);
++  }
++  rex::Result<std::span<const u8>> View() override { return inner_->View(); }
++ private:
++  std::unique_ptr<fs::IFile> inner_;
++  ReadControl& control_;
++};
++}
++
++REX_TEST_CASE("Kernel read producers retain slow success, failure and scatter attribution",
++              "[kernel][files][diagnostics]") {
++  for (const bool enabled : {false, true}) {
++    INFO("startup trace enabled: " << enabled);
++    rex::test::KernelFixture fixture([](const std::filesystem::path& root) {
++      std::filesystem::create_directories(root / "scratch");
++      std::ofstream(root / "scratch/sample.bin", std::ios::binary) << std::string(32, 'x');
++    }, {}, {}, {}, [enabled](rex::SettingsRegistry& settings) -> rex::Result<void> {
++      // Register the lazy public owner before applying this generation's startup value.
++      (void)trace::Enabled();
++      return settings.SetText(rex::SettingLayer::kTitle,
++                              "diagnostics.shader_compile_trace", enabled ? "true" : "false");
++    });
++    REQUIRE(trace::Enabled() == enabled);
++    auto* file_system = StateOf(fixture.GetRuntime()).GetFileSystem();
++    REQUIRE(file_system);
++    REQUIRE(file_system->Mount({"\\Device\\Scratch", fs::ProviderType::kHostDirectory,
++                                fixture.GetRoot() / "scratch", fs::MountFlags::kWritable, {}}));
++    REQUIRE(file_system->Link("scratch:", "\\Device\\Scratch"));
++    const auto previous_phase = trace::CurrentPhase();
++    rex::ScopeGuard restore([&] {
++      trace::SetPhase(previous_phase, "read test complete");
++    });
++    trace::SetPhase(trace::Phase::kPaused, "read producer test");
++    fixture.RunOnGuestThread([enabled](Caller& c) {
++      const auto handle_out = c.Alloc(4), iosb = c.Alloc(8), buffer = c.Alloc(4096);
++      REQUIRE(c.Kernel("NtCreateFile", {handle_out, 0xC0100000,
++          c.AllocAttributes("scratch:\\sample.bin"), iosb, 0, 0, 3, 1, 0x20}) == 0);
++      const u32 handle = c.Load32(handle_out);
++      auto file = c.GetRuntime().GetObjectTable().Get<rex::kernel::FileObject>(handle);
++      REQUIRE(file);
++      ReadControl control;
++      file->file = std::make_unique<DelayedFile>(std::move(file->file), control);
++      const u32 offset = c.AllocQuad(1);
++      const auto initial = trace::ReadCounter(trace::Phase::kPaused, trace::Event::kFileRead);
++      const auto info_before = control.info_calls;
++      CHECK(c.Kernel("NtReadFile", {handle, 0, 0, 0, iosb, buffer, 8, offset}) == 0);
++      CHECK(c.Load32(iosb + 4) == 8);
++      control.fail = true;
++      CHECK(c.Kernel("NtReadFile", {handle, 0, 0, 0, iosb, buffer, 8, offset}) != 0);
++      control.fail = false;
++      const u32 segments = c.Alloc(8);
++      c.Store32(segments, buffer);
++      CHECK(c.Kernel("NtReadFileScatter", {handle, 0, 0, 0, iosb, segments, 8, offset}) == 0);
++      const auto actual = trace::ReadCounter(trace::Phase::kPaused, trace::Event::kFileRead);
++      if (enabled) {
++        CHECK(actual.count == initial.count + 3);
++        CHECK(actual.failed == initial.failed + 1);
++        CHECK(actual.ge50 == initial.ge50 + 3);
++        CHECK(control.info_calls == info_before + 3);
++        REQUIRE(REX_SETTINGS().SetText("diagnostics.shader_compile_trace", "false"));
++        const auto setting = REX_SETTINGS().Find("diagnostics.shader_compile_trace");
++        REQUIRE(setting);
++        CHECK((*setting)->GetConstraints().life == rex::SettingLife::kRestart);
++        CHECK((*setting)->GetText() == "false");
++        CHECK((*setting)->IsRestartPending());
++        const auto pending = REX_SETTINGS().GetRestartPending();
++        CHECK(std::find(pending.begin(), pending.end(), "diagnostics.shader_compile_trace") !=
++              pending.end());
++        CHECK(trace::Enabled());
++        CHECK(c.Kernel("NtReadFile", {handle, 0, 0, 0, iosb, buffer, 8, offset}) == 0);
++        CHECK(control.info_calls == info_before + 4);
++        CHECK(trace::ReadCounter(trace::Phase::kPaused, trace::Event::kFileRead).count ==
++              actual.count + 1);
++      } else {
++        CHECK(control.info_calls == info_before);
++        CHECK(actual.count == initial.count);
++        CHECK(actual.failed == initial.failed);
++        CHECK(actual.ge50 == initial.ge50);
++      }
++      CHECK(c.Kernel("NtClose", {handle}) == 0);
++      file = {};
++    });
++  }
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -80,6 +80,7 @@
+   kernel/shutdown_test.cpp
+   kernel/threads_test.cpp
+   kernel/files_test.cpp
++  kernel/io_trace_test.cpp
+   kernel/memory_test.cpp
+   kernel/net_test.cpp
+   kernel/crypt_bignum_test.cpp
+diff --git a/tests/unit/kernel/kernel_fixture.h b/tests/unit/kernel/kernel_fixture.h
+--- a/tests/unit/kernel/kernel_fixture.h
++++ b/tests/unit/kernel/kernel_fixture.h
+@@ -23,9 +23,11 @@
+ #include <rex/kernel/export.h>
+ #include <rex/ppc/context.h>
+ #include <rex/types.h>
++#include <rex/result.h>
+ 
+ namespace rex {
+ class IModule;
++class SettingsRegistry;
+ namespace apu {
+ class IAudioSystem;
+ }  // namespace apu
+@@ -126,6 +128,8 @@
+ /** Owns a tool mode TitleRuntime and runs test bodies on real guest threads. */
+ class KernelFixture {
+  public:
++  using Configure = std::function<Result<void>(SettingsRegistry&)>;
++
+   /**
+    * Creates the fixture and runs the TitleRuntime on a game root.
+    *
+@@ -133,10 +137,11 @@
+    * @param providers Extra driver providers the app registers.
+    * @param audio_driver The audio driver to select, or empty for none.
+    * @param ui_driver The UI driver to select, or empty for none.
++   * @param configure Runs in OnConfigure before startup/restart values freeze.
+    */
+   explicit KernelFixture(const std::function<void(const std::filesystem::path&)>& populate = {},
+                          std::vector<IModule*> providers = {}, std::string audio_driver = {},
+-                         std::string ui_driver = {});
++                         std::string ui_driver = {}, Configure configure = {});
+   ~KernelFixture();
+ 
+   rex::kernel::TitleRuntime& GetRuntime();
+diff --git a/tests/unit/kernel/kernel_fixture.cpp b/tests/unit/kernel/kernel_fixture.cpp
+--- a/tests/unit/kernel/kernel_fixture.cpp
++++ b/tests/unit/kernel/kernel_fixture.cpp
+@@ -110,11 +110,13 @@
+ class FixtureApp final : public rex::test::ObjectApp<codegen::ToolApp> {
+  public:
+   FixtureApp(std::string_view app_name, std::filesystem::path app_root,
+-             std::vector<IModule*> providers, std::string audio_driver, std::string ui_driver)
++             std::vector<IModule*> providers, std::string audio_driver, std::string ui_driver,
++       KernelFixture::Configure configure)
+       : ObjectApp(app_name, std::move(app_root)),
+         providers_(std::move(providers)),
+         audio_driver_(std::move(audio_driver)),
+-        ui_driver_(std::move(ui_driver)) {}
++        ui_driver_(std::move(ui_driver)),
++        configure_(std::move(configure)) {}
+ 
+   bool Pump() { return RunFrame(); }
+ 
+@@ -128,6 +130,7 @@
+ 
+   Result<void> OnConfigure(SettingsRegistry& settings) override {
+     REX_TRY_VOID(ToolApp::OnConfigure(settings));
++    if (configure_) REX_TRY_VOID(configure_(settings));
+     if (!audio_driver_.empty()) {
+       REX_TRY_VOID(GetAudio().GetSettings().driver.SetText(SettingLayer::kTitle, audio_driver_));
+     }
+@@ -141,6 +144,7 @@
+   std::vector<IModule*> providers_;
+   std::string audio_driver_;
+   std::string ui_driver_;
++  KernelFixture::Configure configure_;
+ };
+ 
+ u32 Caller::Call(kernel::ExportModule module, std::string_view name,
+@@ -264,9 +268,10 @@
+   };
+ 
+   Impl(const std::function<void(const std::filesystem::path&)>& populate,
+-       std::vector<IModule*> providers, std::string audio_driver, std::string ui_driver)
++       std::vector<IModule*> providers, std::string audio_driver, std::string ui_driver,
++       KernelFixture::Configure configure)
+       : app("kernel_fixture", app_root.path, std::move(providers), std::move(audio_driver),
+-            std::move(ui_driver)),
++            std::move(ui_driver), std::move(configure)),
+         tool((ReleaseTestMemory(), BuildTool(app, root.path, populate))) {}
+ 
+   ThreadDrain drain;
+@@ -278,9 +283,9 @@
+ 
+ KernelFixture::KernelFixture(const std::function<void(const std::filesystem::path&)>& populate,
+                              std::vector<IModule*> providers, std::string audio_driver,
+-                             std::string ui_driver)
++                             std::string ui_driver, Configure configure)
+     : impl_(std::make_unique<Impl>(populate, std::move(providers), std::move(audio_driver),
+-                                   std::move(ui_driver))) {
++                                   std::move(ui_driver), std::move(configure))) {
+   auto* dispatcher = &kernel::GetFunctionDispatcher(GetRuntime());
+   REQUIRE(dispatcher->InitializeFunctionTable(kCodeBase, kCodeSize, kCodeBase, kImageSize,
+                                               /*is_entrypoint=*/true));
+diff --git a/tests/unit/gpu/frame_trace_test.cpp b/tests/unit/gpu/frame_trace_test.cpp
+--- a/tests/unit/gpu/frame_trace_test.cpp
++++ b/tests/unit/gpu/frame_trace_test.cpp
+@@ -8,6 +8,7 @@
+ #include "fake_driver_context.h"
+ #include "fake_title_context.h"
+ #include "gpu/xenos/null/null_xenos_graphics_driver.h"
++#include "gpu/xenos/command_processor.h"
+ #include "test_memory.h"
+ 
+ REX_TEST_CASE("Command processor produces frame cadence and empty-ring attribution",
+@@ -15,6 +16,8 @@
+   namespace trace = rex::diagnostics::compile_trace;
+   rex::test::ReleaseTestMemory();
+   rex::ScopeGuard release([] { rex::test::ReleaseTestMemory(); });
++  // Bare CTest execution has no App to register this lazy owner first.
++  (void)trace::Enabled();
+   REQUIRE(REX_SETTINGS().SetText("diagnostics.shader_compile_trace", "true"));
+   const auto previous_phase = trace::CurrentPhase();
+   rex::ScopeGuard restore([&] {
+@@ -27,10 +30,14 @@
+   rex::test::FakeDriverContext context;
+   rex::gpu::null::NullXenosGraphicsDriver driver;
+   REQUIRE(driver.Initialize(context));
+-  REQUIRE(driver.AttachTitle(rex::TitleInfo{}, title, title, title));
++  // Vblank queues a counter task on this same worker. At 60 Hz it closes every
++  // idle span before the 50 ms diagnostic threshold; use a one-second cadence
++  // so the empty-ring producer can be observed independently of interrupts.
++  rex::TitleInfo info;
++  info.video_mode.refresh_rate = 1.0f;
++  REQUIRE(driver.AttachTitle(info, title, title, title));
+   const auto initial_frames = trace::ReadCounter(trace::Phase::kPaused, trace::Event::kGpuFrame);
+   const auto initial_idle = trace::ReadCounter(trace::Phase::kPaused, trace::Event::kGpuIdle);
+-  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+   const u32 block = memory.SystemHeapAlloc(0x2000, 0x1000, rex::kernel::kSystemHeapPhysical);
+   REQUIRE(block);
+   const u32 ring = memory.GetPhysicalAddress(block), writeback = ring + 0x1000;
+@@ -42,6 +49,22 @@
+     *memory.TranslatePhysical<be_u32*>(ring + i * 4) = packets[i];
+   driver.InitializeRingBuffer(ring, 9);
+   driver.EnableReadPointerWriteBack(writeback, 6);
++  auto* processor = driver.GetCommandProcessor();
++  REQUIRE(processor);
++  // Attachment and ring setup queue worker tasks. A host sleep alone can finish
++  // before a loaded host schedules that worker, so acknowledge its queue first.
++  processor->CallInThreadAndWait([] {});
++  const auto idle_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
++  while (trace::ReadCounter(trace::Phase::kPaused, trace::Event::kGpuIdle).count ==
++             initial_idle.count && std::chrono::steady_clock::now() < idle_deadline) {
++    std::this_thread::sleep_for(std::chrono::milliseconds(80));
++    // Closing a real empty-ring wait publishes its Scope. Retry until the
++    // producer records the long span, rather than assuming a sleep proved idle.
++    processor->CallInThreadAndWait([] {});
++  }
++  const auto observed_idle = trace::ReadCounter(trace::Phase::kPaused, trace::Event::kGpuIdle);
++  CHECK(observed_idle.count >= initial_idle.count + 1);
++  CHECK(observed_idle.max_us >= 50000);
+   driver.WriteRegister(0x01C5, std::size(packets));
+   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+   while (memory.TranslatePhysical<const be_u32*>(writeback)->Load(std::memory_order_acquire) !=

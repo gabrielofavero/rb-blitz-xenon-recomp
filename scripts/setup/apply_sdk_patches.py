@@ -7,11 +7,30 @@ files or files matching that final replay may be replaced; preserve other edits.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def select_patch_directory(repo: Path, sdk_dir: str, patch_root: str, pinned: str) -> Path:
+    """Select an exact revision's stack while retaining explicit fixture roots."""
+    root = (repo / patch_root).resolve()
+    registry = root / "sdk-stacks.json"
+    if not registry.is_file():
+        return root / sdk_dir
+    stacks = json.loads(registry.read_text(encoding="utf-8"))
+    if sdk_dir not in stacks:
+        return root / sdk_dir
+    relative = stacks[sdk_dir].get(pinned)
+    if not isinstance(relative, str) or not relative:
+        raise SystemExit(f"No SDK patch stack is registered for {sdk_dir} at {pinned}")
+    selected = (root / relative).resolve()
+    if not selected.is_relative_to(root) or not any(selected.glob("*.patch")):
+        raise SystemExit(f"Invalid SDK patch stack directory: {relative}")
+    return selected
 
 
 def git(directory: Path, *arguments: str, check: bool = True) -> bytes:
@@ -132,11 +151,13 @@ def main() -> None:
     sdk = args.repo_root / args.sdk_dir
     # Resolve nested gitlinks from their immediate repository rather than
     # accidentally finding an enclosing HEAD for an uninitialized dependency.
-    entry = git(args.repo_root, "ls-tree", "HEAD", "--", args.sdk_dir).decode().split()
-    if len(entry) < 3 or entry[0] != "160000":
+    entries = git(args.repo_root, "ls-files", "--stage", "-z", "--", args.sdk_dir).decode().split("\0")
+    entries = [entry.split("\t", 1)[0].split() for entry in entries if entry]
+    if len(entries) != 1 or entries[0][0] != "160000" or entries[0][2] != "0":
         raise SystemExit(f"No pinned SDK gitlink found for {args.sdk_dir}")
-    apply_patch_set(sdk, args.repo_root / args.patch_root / args.sdk_dir,
-                    entry[2], args.check, args.windows_compatible)
+    pinned = entries[0][1]
+    directory = select_patch_directory(args.repo_root, args.sdk_dir, args.patch_root, pinned)
+    apply_patch_set(sdk, directory, pinned, args.check, args.windows_compatible)
 
 
 if __name__ == "__main__":

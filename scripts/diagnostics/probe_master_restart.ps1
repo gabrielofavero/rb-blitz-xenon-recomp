@@ -1,31 +1,9 @@
-# P9-2 of docs/plans/finished/2026-10-13-rhythmverse-store-plan.md: the master switch's
-# restart rule, measured in two boots.
-#
-# The owner pass (2026-10-22) made `general.rhythmverse` **restart**-scoped, because the switch owns
-# what the boot drew as well as what the store's workers read: the main-menu *RhythmVerse*
-# row is compiled into the record the payload generates and the store's heading is a locale entry
-# that payload replaces. The five instrument leaves stay `hot`.
-#
-# Boot 1 (session) walks Help & Options with the mouse-on-row-bounds route the acceptance harness
-# measured (a click's screen is the oracle):
-#
-#   * Downloadable Content -> RhythmVerse Song Filter -> Guitar flipped Off: the leaf is applied
-#     live (`hot_apply: general.rhythmverse_guitar = false`), and leaving Help & Options draws **no**
-#     restart prompt.
-#   * Re-enter, flip the **master** Off, leave again: the restart confirmation appears exactly once
-#     (`settings_restart_screen`), the log carries **no** `hot_apply: general.rhythmverse` line, and
-#     no catalogue request is made by the commit (the boot's own prewarm count does not move).
-#   * `Close` finishes the leave on the pre-change value: the main menu still draws the store row.
-#   * The profile carries both committed values (`rhythmverse = false`, `rhythmverse_guitar =
-#     false`), which is what the next boot acts on.
-#
-# Boot 2 (next boot, the same profile) is the value acting: no store row on the main menu, and no
-# `store_catalogue` / `store_fetch` / `store_library` / `store_download` / `store_search` request -
-# the switch's silence, reached through the UI instead of a hand-written settings file.
-#
-# Usage (this machine's execution policy is Restricted):
-#   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\diagnostics\probe_master_restart.ps1
-#   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\diagnostics\probe_master_restart.ps1 -SessionOnly
+# Verify restart-scoped Store Access and immediate instrument filters in two boots.
+# The linked-settings confirmation commits Store Access together with its menu
+# shortcut visibility. The shortcut hides immediately; the store capability is
+# deferred until restart. Ignore and Continue leaves the session running without
+# applying that capability live. The next boot must start with Store Access
+# disabled, no shortcut, and no catalogue/index/download/search work.
 param(
     [string]$BuildDir = 'out/build/win-amd64-release',
     [string]$OutDir = 'out/_swap/master-restart',
@@ -121,6 +99,12 @@ function Invoke-ChildScript([string]$Script, [hashtable]$Named) {
 
 function Drive {
     param([string[]]$Actions)
+    # These fixtures use the compiled keyboard defaults, independent of legacy MnK pad keys.
+    $Actions = @($Actions | ForEach-Object {
+        if ($_ -eq 'key:a') { 'key:key_enter' }
+        elseif ($_ -eq 'key:b') { 'key:esc' }
+        else { $_ }
+    })
     & (Join-Path $PSScriptRoot 'drive_ui.ps1') -Actions $Actions -BuildDir $BuildDir -OutDir $shotsRel | Out-Null
 }
 
@@ -281,6 +265,11 @@ function Open-ScreenByRow {
         Write-Host "  !! ${Tag}: the main menu could not be reached before the row scan"
         return -1
     }
+    $rootRows = Select-String -Path $script:currentLog -Pattern 'native_mouse: row=(\d+) bounds=' -ErrorAction SilentlyContinue
+    if ($rootRows) {
+        $lastRootRow = [regex]::Match($rootRows[-1].Line, 'row=(\d+) bounds=')
+        if ($lastRootRow.Success) { $Hint = [Math]::Max(0, [int]$lastRootRow.Groups[1].Value - 1) }
+    }
     for ($attempt = 0; $attempt -lt 8; $attempt++) {
         $index = ($Hint + $attempt) % 8
         if (-not (Get-RowTable $index)) { continue }
@@ -370,15 +359,22 @@ function Stop-Boot($Proc) {
     Refresh-LogText
 }
 
-# Row indices, as the acceptance harness measured them on 2026-10-22: the merged root is How to
-# Play 0 / Calibration 1 / General 2, the General page is Target 0 / Interface 1 / Downloadable
-# Content 2, and the Downloadable Content page is Cache 0 / Refresh 1 / Scan Threads 2 /
-# RhythmVerse 3 / RhythmVerse Song Filter 4 / DLC Menu Music 5.
-$HelpOptionsRow = 1
-$HelpGeneralRow = 2
-$GeneralDlcRow = 2
-$RhythmVerseRow = 3
-$FilterRow = 4
+# Current hierarchy: Game -> Extra Features -> RhythmVerse -> Filters.
+# The Ultimate-only Gameplay row is omitted from the retail Game page.
+$HelpOptionsRow = 3
+$HelpGeneralRow = 0
+$GeneralDlcRow = if ($UltimateMode -eq '0') { 3 } else { 4 }
+$RhythmVerseRow = 0
+$FilterRow = 2
+
+function Open-RhythmVerse([string]$Tag) {
+    if (-not (ClickRow 0 $Tag) -or
+        -not (Wait-ForScreenName 'settings_rhythmverse_screen' 15 $Tag)) {
+        Add-Step "$Tag`: RhythmVerse opens" $false (Get-Screen)
+        return $false
+    }
+    return $true
+}
 
 # ------------------------------------------------------------ boot 1: session ---
 
@@ -403,8 +399,9 @@ function Invoke-SessionLeg {
         Add-Step 'session: Downloadable Content opens' $false (Get-Screen)
         return
     }
+    if (-not (Open-RhythmVerse 'rhythmverse-page')) { return }
     $before = Wait-ForScreen 'dlc-before.png' 'RHYTHMVERSE' $ScreenTimeoutSec 'dlc page'
-    Assert-Label $before @('RHYTHMVERSE', 'ON') 'session: the master reads On before anything is touched'
+    Assert-Label $before @('STORE ACCESS', 'ENABLED') 'session: the master reads On before anything is touched'
 
     if (-not (ClickRow $FilterRow 'filter') -or
         -not (Wait-ForScreenName 'settings_rhythmverse_filter_screen' 15 'filter page')) {
@@ -417,12 +414,12 @@ function Invoke-SessionLeg {
     $filterAfter = Get-ScreenText 'filter-after.png'
     Assert-Label $filterAfter @('GUITAR', 'OFF') 'session: Guitar flipped Off on the page'
 
-    # filter -> DLC -> General -> root -> leave. A leaf change must not ask for a restart.
-    Drive @('key:b', 'wait:2', 'key:b', 'wait:2', 'key:b', 'wait:2', 'key:b', 'wait:3')
+    # Filter -> RhythmVerse -> Extra Features -> Game -> root -> leave. A leaf change must not ask for a restart.
+    Drive @('key:b', 'wait:2', 'key:b', 'wait:2', 'key:b', 'wait:2', 'key:b', 'wait:2', 'key:b', 'wait:3')
     $leftAfterLeaf = Wait-ForScreenName 'splash_screen' 25 'leave after a leaf'
     Add-Step 'session: leaving after a filter leaf returns to the main menu' $leftAfterLeaf (Get-Screen)
         Add-Step 'session: a filter leaf asks for no restart' ((Get-LogMatches 'settings_restart_screen') -eq 0) "$((Get-LogMatches 'settings_restart_screen')) restart prompt line(s)"
-    Assert-Label (Get-ScreenText 'menu-after-leaf.png') @('CUST') 'session: the menu still carries the store row'
+    Assert-Label (Get-ScreenText 'menu-after-leaf.png') @('RHYTHMVERSE') 'session: the menu still carries the store row'
 
     # --- the master: restart-scoped, and the prompt is what says so -----------------------
     if ((Open-ScreenByRow 'settings_screen' $HelpOptionsRow 'help-options-2') -lt 0) {
@@ -437,33 +434,42 @@ function Invoke-SessionLeg {
     if (-not (Wait-ForScreenName 'settings_dlc_screen' 15 'dlc page 2')) {
         Add-Step 'session: Downloadable Content opens again' $false (Get-Screen); return
     }
+    if (-not (Open-RhythmVerse 'rhythmverse-page-2')) { return }
     $fetchesBefore = Get-LogMatches 'store_catalogue: fetching'
     ClickRow $RhythmVerseRow 'rhythmverse' | Out-Null
+    $linked = Wait-ForScreenName 'settings_linked_screen' 15 'linked settings confirmation'
+    Add-Step 'session: changing the master requires linked-settings confirmation' $linked (Get-Screen)
+    if (-not $linked) { return }
+    if (-not (ClickRow 1 'confirm-linked-settings') -or
+        -not (Wait-ForScreenName 'settings_rhythmverse_screen' 15 'confirmed master')) {
+        Add-Step 'session: the linked change returns to RhythmVerse' $false (Get-Screen)
+        return
+    }
     $dlcAfter = Get-ScreenText 'dlc-after.png'
-    Assert-Label $dlcAfter @('RHYTHMVERSE', 'OFF') 'session: the master flipped Off on the page'
+    Assert-Label $dlcAfter @('STORE ACCESS', 'DISABLED') 'session: the master flipped Off on the page'
 
-    Drive @('key:b', 'wait:2', 'key:b', 'wait:2', 'key:b', 'wait:2')
+    Drive @('key:b', 'wait:2', 'key:b', 'wait:2', 'key:b', 'wait:2', 'key:b', 'wait:2')
     $prompt = Wait-ForScreenName 'settings_restart_screen' 25 'restart prompt'
     Add-Step 'session: leaving after a master change draws the restart prompt' $prompt (Get-Screen)
-    # The prompt is logged once per entry as `native_mouse: screen=settings_restart_screen …
+    # The prompt is logged once per entry as `native_mouse: screen=settings_restart_screen Ã¢â‚¬Â¦
     # available=true`; the exit logs the same name with available=false, which is why the count is
     # of *entries*. Comparing the count after Close is what proves the leave drew it once.
     $promptEntries = Get-LogMatches 'native_mouse: screen=settings_restart_screen .*available=true'
     $promptText = Get-ScreenText 'prompt.png'
-    Assert-Label $promptText @('RESTART', 'CLOSE') 'session: the prompt offers Restart now and Close'
+    Assert-Label $promptText @('RESTART NOW', 'IGNORE AND CONTINUE') 'session: the prompt offers Restart now and Ignore and Continue'
 
-    # Close is the first row and the one selected on entry: it finishes the leave.
+    # Ignore and Continue is the selected first row; it finishes leaving settings.
     Drive @('key:a', 'wait:3')
     $closed = Wait-ForScreenName 'splash_screen' 25 'close'
-    Add-Step 'session: Close finishes the leave' $closed (Get-Screen)
-    Assert-Label (Get-ScreenText 'menu-after-close.png') @('CUST') 'session: the store row is still drawn - the session kept its pre-change value'
+    Add-Step 'session: Ignore and Continue finishes the leave' $closed (Get-Screen)
+    Add-Step 'session: linked shortcut visibility hides the menu row immediately' (-not (Test-Label (Get-ScreenText 'menu-after-close.png') @('RHYTHMVERSE'))) 'Store Access remains restart-scoped'
 
     # --- the host-side record ------------------------------------------------------------
     Refresh-LogText
-    Add-Step 'session: the master is never applied live' ((Get-LogMatches 'hot_apply: general\.rhythmverse =') -eq 0) "$((Get-LogMatches 'hot_apply: general\.rhythmverse =')) hot apply line(s)"
-    Add-Step 'session: the filter leaf is applied live' ((Get-LogMatches 'hot_apply: general\.rhythmverse_guitar =') -ge 1) "$((Get-LogMatches 'hot_apply: general\.rhythmverse_guitar =')) hot apply line(s)"
+    Add-Step 'session: the master is never applied live' ((Get-LogMatches '(?:hot_apply: general\.rhythmverse =|settings_apply: ack rhythmverse .*status=applied)') -eq 0) "$((Get-LogMatches '(?:hot_apply: general\.rhythmverse =|settings_apply: ack rhythmverse .*status=applied)')) apply observation(s)"
+    Add-Step 'session: the filter leaf is applied live' ((Get-LogMatches "settings_apply: ack rhythmverse_guitar .*status=applied .*running='false'") -ge 1) "$((Get-LogMatches "settings_apply: ack rhythmverse_guitar .*status=applied .*running='false'")) apply observation(s)"
     $promptEntriesEnd = Get-LogMatches 'native_mouse: screen=settings_restart_screen .*available=true'
-    Add-Step 'session: the prompt was entered once, and Close did not enter it again' (($promptEntries -eq 1) -and ($promptEntriesEnd -eq $promptEntries)) "$promptEntries entry at the prompt, $promptEntriesEnd at the end"
+    Add-Step 'session: the prompt was entered once, and Continue did not enter it again' (($promptEntries -eq 1) -and ($promptEntriesEnd -eq $promptEntries)) "$promptEntries entry at the prompt, $promptEntriesEnd at the end"
     $fetchesAfter = Get-LogMatches 'store_catalogue: fetching'
     Add-Step 'session: the master commit made no catalogue request' ($fetchesAfter -eq $fetchesBefore) "fetch lines before=$fetchesBefore after=$fetchesAfter"
     Add-Step 'session: the store was never opened' ((Get-LogMatches "store_fetch: served '") -eq 0) "$((Get-LogMatches "store_fetch: served '")) served record(s)"
@@ -483,7 +489,7 @@ function Invoke-NextBootLeg {
     try {
         if (-not (Enter-MainMenu $NextBootTimeoutSec)) { return }
         $menuText = Get-ScreenText 'menu-off.png'
-        Add-Step 'next boot: the main menu has no store row' (-not (Test-Label $menuText @('CUST'))) (($menuText -replace '\s+', ' ').Trim())
+        Add-Step 'next boot: the main menu has no store row' (-not (Test-Label $menuText @('RHYTHMVERSE'))) (($menuText -replace '\s+', ' ').Trim())
         Refresh-LogText
         Add-Step 'next boot: no catalogue request' ((Get-LogMatches 'store_catalogue: fetching') -eq 0) "$((Get-LogMatches 'store_catalogue: fetching')) fetch line(s)"
         Add-Step 'next boot: no served record' ((Get-LogMatches "store_fetch: served '") -eq 0) "$((Get-LogMatches "store_fetch: served '")) served record(s)"
@@ -497,9 +503,9 @@ function Invoke-NextBootLeg {
             ClickRow $HelpGeneralRow 'general' | Out-Null
             Wait-ForScreenName 'settings_general_screen' 15 'general' | Out-Null
             ClickRow $GeneralDlcRow 'dlc' | Out-Null
-            if (Wait-ForScreenName 'settings_dlc_screen' 15 'dlc page') {
+            if ((Wait-ForScreenName 'settings_dlc_screen' 15 'dlc page') -and (Open-RhythmVerse 'rhythmverse-next-boot')) {
                 $page = Wait-ForScreen 'dlc-off.png' 'RHYTHMVERSE' $ScreenTimeoutSec 'dlc page'
-                Assert-Label $page @('RHYTHMVERSE', 'OFF') 'next boot: the master reads the committed Off'
+                Assert-Label $page @('STORE ACCESS', 'DISABLED') 'next boot: the master reads the committed Off'
             } else {
                 Add-Step 'next boot: Downloadable Content opens' $false (Get-Screen)
             }

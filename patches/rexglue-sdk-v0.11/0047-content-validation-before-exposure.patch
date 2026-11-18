@@ -1,0 +1,524 @@
+diff --git a/include/rex/filesystem/mount_validation.h b/include/rex/filesystem/mount_validation.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/filesystem/mount_validation.h
+@@ -0,0 +1,37 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++
++#include <functional>
++#include <span>
++#include <vector>
++
++#include <rex/filesystem/file_stat.h>
++#include <rex/result.h>
++#include <rex/types.h>
++
++namespace rex::filesystem {
++
++/** One exact provider node. Duplicate names retain distinct indices and byte sources. */
++struct MountValidationNode {
++  FileStat info;
++  size_t parent = 0; /**< Root is index 0 and its own parent. */
++  std::vector<size_t> children;
++};
++
++/** Callback-only read access to a provider before it enters the guest mount table.
++ * The view, nodes and their indices must not be retained after the callback returns.
++ * Read uses node identity and never resolves a duplicate by its path.
++ */
++class IMountValidationView {
++ public:
++  virtual ~IMountValidationView() = default;
++  [[nodiscard]] virtual std::span<const MountValidationNode> GetNodes() const = 0;
++  [[nodiscard]] virtual Result<size_t> Read(size_t node, u64 offset, std::span<u8> buffer) const = 0;
++};
++
++/** Synchronous, read-only validation. A refusal leaves no guest mount or link.
++ * Callbacks must not reenter the mount table or retain the view.
++ */
++using MountValidator = std::function<Result<void>(const IMountValidationView&)>;
++
++}  // namespace rex::filesystem
+diff --git a/include/rex/xam/content_validation.h b/include/rex/xam/content_validation.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/xam/content_validation.h
+@@ -0,0 +1,21 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++
++#include <rex/filesystem/mount_validation.h>
++#include <rex/module.h>
++#include <rex/result.h>
++
++namespace rex::xam {
++
++/** Optional title-owned validation for primary and external content packages.
++ * A fresh title has no validator. Calls must be serialized with title attach/detach.
++ */
++REX_DECLARE_INTERFACE(IContentValidation, 1)
++  /** Replaces the callback for subsequent opens and creates; empty removes it.
++   * Validation reads the exact provider before any mount or guest link is published.
++   * An open in progress retains its callback snapshot. Returns kNotFound without a title.
++   */
++  [[nodiscard]] virtual Result<void> SetContentValidator(filesystem::MountValidator validator) = 0;
++};
++
++}  // namespace rex::xam
+diff --git a/tests/unit/filesystem/mount_validation_test.cpp b/tests/unit/filesystem/mount_validation_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/filesystem/mount_validation_test.cpp
+@@ -0,0 +1,87 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#include <array>
++#include <cstring>
++#include <fstream>
++#include <stdexcept>
++
++#include "rex_test.h"
++#include "fixture_dir.h"
++#include "filesystem/fixture.h"
++#include <rex/filesystem/mount_validation.h>
++#include <rex/string/text.h>
++
++using rex::filesystem::test::Fixture;
++using namespace rex::filesystem;
++
++REX_TEST_CASE_METHOD(Fixture,"Mount validation refuses before any provider is published","[filesystem][mount_validation]") {
++  test::WriteHost(GetTemp()/"folder"/"data.bin","abc");
++  int called=0;
++  auto validator=std::make_shared<const MountValidator>([&](const IMountValidationView& view)->rex::Result<void> {
++    ++called;
++    auto nodes=view.GetNodes(); REQUIRE(nodes.size()==3);
++    CHECK(nodes[0].parent==0);
++    CHECK(nodes[0].children.size()==1);
++    CHECK(nodes[1].parent==0);
++    CHECK(nodes[2].parent==1);
++    CHECK(nodes[2].info.name=="data.bin");
++    std::array<rex::u8,3> bytes{};
++    auto read=view.Read(2,0,bytes); REQUIRE(read); CHECK(*read==3);
++    CHECK(std::string(bytes.begin(),bytes.end())=="abc");
++    CHECK_FALSE(view.Read(nodes.size(),0,bytes));
++    CHECK_FALSE(view.Read(0,0,bytes));
++    return rex::Err(rex::ErrorCategory::kValidation,"refused contents");
++  });
++  MountEntry entry{"\\Device\\Validation",ProviderType::kHostDirectory,GetTemp(),MountFlags::kNone,{}};
++  entry.validator=validator;
++  auto denied=GetFileSystem().Mount(entry); REQUIRE_FALSE(denied);
++  CHECK(denied.error().category==rex::ErrorCategory::kValidation);
++  CHECK(called==1);
++  CHECK(GetFileSystem().GetMounts().empty());
++  CHECK_FALSE(GetFileSystem().Stat(entry.path));
++  entry.validator=std::make_shared<const MountValidator>([](const IMountValidationView&)->rex::Result<void>{return rex::Ok();});
++  REQUIRE(GetFileSystem().Mount(entry));
++  CHECK(GetFileSystem().GetMounts().size()==1);
++}
++
++REX_TEST_CASE_METHOD(Fixture,"Mount validation reads distinct duplicate container nodes by identity","[filesystem][mount_validation]") {
++  const auto source=GetTemp()/"duplicate.bin";
++  std::filesystem::copy_file(rex::test::GetFixtureFolder()/"stfs_con.bin",source);
++  std::string second;
++  SECTION("identical names") {second="songs.dta";}
++  SECTION("case variant names") {second="SONGS.DTA";}
++  {
++    std::fstream file(source,std::ios::binary|std::ios::in|std::ios::out); REQUIRE(file);
++    for(auto [offset,name]:{std::pair{std::streamoff{0xB040},std::string("songs.dta")},std::pair{std::streamoff{0xB080},second}}) {
++      std::array<char,40> record{}; std::memcpy(record.data(),name.data(),name.size());
++      file.seekp(offset);file.write(record.data(),record.size());
++      file.seekg(offset+40);char flags=0;file.read(&flags,1);
++      flags=char((static_cast<unsigned char>(flags)&0xC0)|name.size());
++      file.seekp(offset+40);file.write(&flags,1);
++    }
++  }
++  std::vector<std::string> content;
++  MountEntry entry{"\\Device\\Duplicate",ProviderType::kSTFS,source,MountFlags::kNone,{}};
++  entry.validator=std::make_shared<const MountValidator>([&](const IMountValidationView& view)->rex::Result<void>{
++    auto nodes=view.GetNodes();
++    for(size_t index=0;index<nodes.size();++index) {
++      if(!rex::string::utf8_equal_case(nodes[index].info.name,"songs.dta")) continue;
++      std::array<rex::u8,6> bytes{}; auto read=view.Read(index,0,bytes); REQUIRE(read); CHECK(*read==6);
++      content.emplace_back(bytes.begin(),bytes.end());
++    }
++    REQUIRE(content.size()==2);
++    CHECK(content[0]=="alpha\n");
++    CHECK(content[0]!=content[1]);
++    return rex::Err(rex::ErrorCategory::kValidation,"second duplicate is refused");
++  });
++  CHECK_FALSE(GetFileSystem().Mount(entry));
++  CHECK(GetFileSystem().GetMounts().empty());
++}
++
++REX_TEST_CASE_METHOD(Fixture,"Throwing mount validation leaves no mount or taken name","[filesystem][mount_validation]") {
++  MountEntry entry{"\\Device\\Throw",ProviderType::kHostDirectory,GetTemp(),MountFlags::kNone,{}};
++  entry.validator=std::make_shared<const MountValidator>([](const IMountValidationView&)->rex::Result<void>{throw std::runtime_error("invalid metadata");});
++  auto result=GetFileSystem().Mount(entry); REQUIRE_FALSE(result);
++  CHECK(result.error().category==rex::ErrorCategory::kValidation);
++  CHECK(GetFileSystem().GetMounts().empty());
++  entry.validator.reset(); REQUIRE(GetFileSystem().Mount(entry));
++}
+diff --git a/tests/unit/xam/content_validation_test.cpp b/tests/unit/xam/content_validation_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/xam/content_validation_test.cpp
+@@ -0,0 +1,49 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#include <array>
++#include <filesystem>
++#include <fstream>
++
++#include "rex_test.h"
++#include "fixture_dir.h"
++#include "kernel/kernel_fixture.h"
++#include <rex/filesystem/file_system.h>
++#include <rex/kernel/title_runtime.h>
++#include <rex/xam/content_manager.h>
++#include <rex/xam/content_sources.h>
++#include <rex/xam/content_validation.h>
++
++REX_TEST_CASE("Content validation gates primary structured and flat packages before guest exposure", "[xam][content_validation]") {
++  rex::test::KernelFixture fixture;
++  fixture.RunOnGuestThread([&](rex::test::Caller& c) {
++    auto* sources=REX_INTERFACE(rex::xam::IContentSources); REQUIRE(sources);
++    auto* validation=REX_INTERFACE(rex::xam::IContentValidation); REQUIRE(validation);
++    auto& manager=c.GetRuntime().GetContentManager(); auto& fs=c.GetRuntime().GetFileSystem();
++    const auto path=fixture.GetRoot()/"content.bin";
++    std::filesystem::copy_file(rex::test::GetFixtureFolder()/"stfs_con.bin",path);
++    auto installed=manager.InstallContent(path,{.require_running_title=false}); REQUIRE(installed);
++    const auto root=fixture.GetRoot()/"external";
++    const auto structured=root/"52455831"/"00000002"/"structured";
++    std::filesystem::create_directories(structured);
++    {std::ofstream file(structured/"metadata");file<<"bad";}
++    constexpr auto type=rex::kernel::XContentType::kMarketplaceContent;
++    REQUIRE(sources->ReplaceContentSources({root,{{path,"flat",0x52455831,type}}}));
++    int calls=0;
++    REQUIRE(validation->SetContentValidator([&](const rex::filesystem::IMountValidationView& view)->rex::Result<void>{
++      ++calls;CHECK_FALSE(view.GetNodes().empty());
++      return rex::Err(rex::ErrorCategory::kValidation,"metadata is refused");
++    }));
++    const size_t before=fs.GetMounts().size();
++    auto data=*installed;
++    for(auto name:{data.GetFileName(),std::string("structured"),std::string("flat")}) {
++      data.SetFileName(name);data.content_type=name==installed->GetFileName()?static_cast<rex::kernel::XContentType>(installed->content_type):type;
++      CHECK_FALSE(manager.OpenContent("rejected",0,data));
++      CHECK_FALSE(fs.FindLink("rejected:"));
++      CHECK(fs.GetMounts().size()==before);
++    }
++    CHECK(calls==3);
++    REQUIRE(validation->SetContentValidator({}));
++    data.SetFileName("flat"); REQUIRE(manager.OpenContent("accepted",0,data));
++    REQUIRE(fs.Stat("accepted:\\a.txt"));
++    REQUIRE(manager.CloseContent("accepted"));
++  });
++}
+diff --git a/include/rex/filesystem/mount.h b/include/rex/filesystem/mount.h
+--- a/include/rex/filesystem/mount.h
++++ b/include/rex/filesystem/mount.h
+@@ -11,10 +11,12 @@
+ #pragma once
+ 
+ #include <filesystem>
++#include <memory>
+ #include <string>
+ #include <vector>
+ 
+ #include <rex/bit.h>
++#include <rex/filesystem/mount_validation.h>
+ #include <rex/types.h>
+ 
+ namespace rex::filesystem {
+@@ -46,6 +48,7 @@
+   std::filesystem::path source; /**< Host folder or container file, empty for kNull. */
+   MountFlags flags = MountFlags::kNone;
+   std::vector<std::string> null_paths; /**< Paths the null provider answers. */
++  std::shared_ptr<const MountValidator> validator = {}; /**< Runs before this mount is published. */
+ };
+ 
+ }  // namespace rex::filesystem
+diff --git a/src/filesystem/file_system.cpp b/src/filesystem/file_system.cpp
+--- a/src/filesystem/file_system.cpp
++++ b/src/filesystem/file_system.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <algorithm>
+ #include <filesystem>
++#include <exception>
+ #include <format>
+ #include <system_error>
+ #include <utility>
+@@ -22,6 +23,43 @@
+ namespace rex::filesystem {
+ 
+ namespace {
++
++/** Owns no nodes: Mount keeps the provider alive throughout validation. */
++class MountValidationView final : public IMountValidationView {
++ public:
++  explicit MountValidationView(Provider& provider) : provider_(provider) {
++    Add(provider.GetRoot(), 0);
++    for (size_t index = 0; index < nodes_.size(); ++index) {
++      // Add may grow both vectors, so retain no reference to their elements.
++      for (const auto& child : nodes_[index]->GetChildren()) {
++        const size_t added = nodes_.size();
++        Add(*child, index);
++        records_[index].children.push_back(added);
++      }
++    }
++  }
++
++  std::span<const MountValidationNode> GetNodes() const override { return records_; }
++
++  Result<size_t> Read(size_t node, u64 offset, std::span<u8> buffer) const override {
++    if (node >= nodes_.size()) return Err<size_t>(BuildError(
++        FileSystemError::kInvalidPath, "validation node index is out of range"));
++    std::lock_guard lock(provider_.GetMutex());
++    if (nodes_[node]->IsDirectory()) return Err<size_t>(BuildError(
++        FileSystemError::kIsDirectory, "a validation directory cannot be read as bytes"));
++    REX_TRY(std::unique_ptr<NodeStream> stream, nodes_[node]->Open(Access::kReadAccess | Access::kReadData));
++    return stream->Read(buffer, offset);
++  }
++
++ private:
++  void Add(Node& node, size_t parent) {
++    nodes_.push_back(&node);
++    records_.push_back({node.GetInfo(), parent, {}});
++  }
++  Provider& provider_;
++  std::vector<Node*> nodes_;
++  std::vector<MountValidationNode> records_;
++};
+ 
+ constexpr std::string_view kGamePartition = "\\Device\\Harddisk0\\Partition1";
+ constexpr std::string_view kUpdatePartition = "\\Device\\Harddisk0\\PartitionUpdate";
+@@ -269,6 +307,16 @@
+         BuildError(FileSystemError::kMountExists, std::format("'{}' is mounted", entry.path)));
+   }
+   REX_TRY(std::unique_ptr<Provider> provider, CreateProvider(entry));
++  if (entry.validator && *entry.validator) {
++    try {
++      const MountValidationView view(*provider);
++      REX_TRY_VOID((*entry.validator)(view));
++    } catch (const std::exception& error) {
++      return Err(ErrorCategory::kValidation, std::format("mount validation failed: {}", error.what()));
++    } catch (...) {
++      return Err(ErrorCategory::kValidation, "mount validation failed with an unknown exception");
++    }
++  }
+   providers_.push_back(std::move(provider));
+   REXFS_DEBUG("mounted '{}' at '{}'", string::PathToUTF8(entry.source), entry.path);
+   return Ok();
+diff --git a/src/xam/xam_title_lifecycle.h b/src/xam/xam_title_lifecycle.h
+--- a/src/xam/xam_title_lifecycle.h
++++ b/src/xam/xam_title_lifecycle.h
+@@ -16,13 +16,14 @@
+ #include <rex/xam/user_identity.h>
+ #include <rex/xam/enumeration_info.h>
+ #include <rex/xam/content_sources.h>
++#include <rex/xam/content_validation.h>
+ 
+ namespace rex::xam {
+ 
+ class XAMState;
+ 
+ /** Creates and destroys the XAM state of a title. */
+-class XAMTitleLifecycle final : public IXAMTitleLifecycle, public IXAMTitleServices, public IXAMUserIdentity, public IContentEnumerationInfo, public IContentSources {
++class XAMTitleLifecycle final : public IXAMTitleLifecycle, public IXAMTitleServices, public IXAMUserIdentity, public IContentEnumerationInfo, public IContentSources, public IContentValidation {
+  public:
+   XAMTitleLifecycle();
+   ~XAMTitleLifecycle() override;
+@@ -40,6 +41,7 @@
+   [[nodiscard]] Result<u64> GetUserXUID() const override;
+   [[nodiscard]] Result<u64> GetAggregateItemCount(u32 handle) const override;
+   [[nodiscard]] Result<void> ReplaceContentSources(ContentSources sources) override;
++  [[nodiscard]] Result<void> SetContentValidator(filesystem::MountValidator validator) override;
+   [[nodiscard]] u32 GetTitleID() const override;
+   [[nodiscard]] std::unique_ptr<filesystem::IXDBFTitleData> GetTitleXDBF() const override;
+ 
+diff --git a/src/xam/xam_title_lifecycle.cpp b/src/xam/xam_title_lifecycle.cpp
+--- a/src/xam/xam_title_lifecycle.cpp
++++ b/src/xam/xam_title_lifecycle.cpp
+@@ -81,6 +81,12 @@
+   return state_->GetContentManager().ReplaceContentSources(std::move(sources));
+ }
+ 
++Result<void> XAMTitleLifecycle::SetContentValidator(filesystem::MountValidator validator) {
++  if (!state_) return Err(ErrorCategory::kNotFound, "no title content manager is attached");
++  state_->GetContentManager().SetContentValidator(std::move(validator));
++  return Ok();
++}
++
+ u32 XAMTitleLifecycle::GetTitleID() const {
+   return state_->GetTitleID();
+ }
+diff --git a/src/xam/xam_module.h b/src/xam/xam_module.h
+--- a/src/xam/xam_module.h
++++ b/src/xam/xam_module.h
+@@ -42,7 +42,7 @@
+ /** The XAM module. It serves the title events, the title managers and the language detection. */
+ class XAMModule final : public IModule {
+  public:
+-  REX_MODULE_SERVES(::rex::xam::IXAMTitleLifecycle, ::rex::xam::IXAMTitleServices, ::rex::xam::IXAMUserIdentity, ::rex::xam::IContentEnumerationInfo, ::rex::xam::IContentSources,
++  REX_MODULE_SERVES(::rex::xam::IXAMTitleLifecycle, ::rex::xam::IXAMTitleServices, ::rex::xam::IXAMUserIdentity, ::rex::xam::IContentEnumerationInfo, ::rex::xam::IContentSources, ::rex::xam::IContentValidation,
+                     ::rex::xam::IXAMLanguage, ::rex::xam::IXAMExports)
+ 
+   std::string_view GetName() const override;
+diff --git a/src/xam/xam_module.cpp b/src/xam/xam_module.cpp
+--- a/src/xam/xam_module.cpp
++++ b/src/xam/xam_module.cpp
+@@ -113,6 +113,9 @@
+   if (name == IContentSources::kInterface.name && version == IContentSources::kInterface.version) {
+     return static_cast<IContentSources*>(&events_);
+   }
++  if (name == IContentValidation::kInterface.name && version == IContentValidation::kInterface.version) {
++    return static_cast<IContentValidation*>(&events_);
++  }
+   if (name == IXAMLanguage::kInterface.name && version == IXAMLanguage::kInterface.version) {
+     return static_cast<IXAMLanguage*>(&language_);
+   }
+diff --git a/src/xam/content_manager.h b/src/xam/content_manager.h
+--- a/src/xam/content_manager.h
++++ b/src/xam/content_manager.h
+@@ -28,6 +28,7 @@
+ #include <rex/result.h>
+ #include <rex/xam/content_manager.h>
+ #include <rex/xam/content_sources.h>
++#include <rex/xam/content_validation.h>
+ #include <rex/xam/title_lifecycle.h>
+ #include "xam/xam_title.h"
+ #include <rex/kernel/types/status.h>
+@@ -61,7 +62,8 @@
+   ContentPackage(filesystem::IFileSystem& file_system, u32 device_index,
+                  const std::string_view root_name, const kernel::XCONTENT_AGGREGATE_DATA& data,
+                  const std::filesystem::path& package_path, bool read_only = false,
+-                 bool external = false);
++                 bool external = false,
++                 std::shared_ptr<const filesystem::MountValidator> validator = {});
+   ~ContentPackage();
+ 
+   void LoadPackageLicenseMask(const std::filesystem::path& header_path);
+@@ -133,6 +135,7 @@
+   u32 GetTitleID() const;
+   Result<u32> GetContentDeviceID(std::string_view root_name) const override;
+   [[nodiscard]] Result<void> ReplaceContentSources(ContentSources sources);
++  void SetContentValidator(filesystem::MountValidator validator);
+ 
+   /**
+    * Returns the XDBF data of the executable, which reports invalid when the executable has no XDBF
+@@ -194,6 +197,7 @@
+   std::filesystem::path root_path_;
+   rex::xam::UserProfile& user_profile_;
+   mutable std::mutex sources_mutex_;
++  std::shared_ptr<const filesystem::MountValidator> validator_;
+   std::shared_ptr<const ContentSources> sources_ = std::make_shared<const ContentSources>();
+ 
+   mutable rex::platform::RankedMutex mutex_{rex::platform::LockRank::kLeaf};
+diff --git a/src/xam/content_manager.cpp b/src/xam/content_manager.cpp
+--- a/src/xam/content_manager.cpp
++++ b/src/xam/content_manager.cpp
+@@ -51,7 +51,8 @@
+ ContentPackage::ContentPackage(filesystem::IFileSystem& file_system, u32 device_index,
+                                const std::string_view root_name,
+                                const kernel::XCONTENT_AGGREGATE_DATA& data,
+-                               const std::filesystem::path& package_path, bool read_only, bool external)
++                               const std::filesystem::path& package_path, bool read_only, bool external,
++                               std::shared_ptr<const filesystem::MountValidator> validator)
+     : file_system_(file_system), root_name_(root_name), package_path_(package_path), license_(0) {
+   device_path_ = std::format("\\Device\\Content\\{0}\\", device_index);
+   content_data_ = data;
+@@ -64,6 +65,7 @@
+   entry.path = device_path_;
+   entry.type = folder ? filesystem::ProviderType::kHostDirectory : filesystem::ProviderType::kSTFS;
+   entry.source = package_path;
++  entry.validator = std::move(validator);
+   entry.flags = folder && !read_only ? filesystem::MountFlags::kWritable
+                                     : filesystem::MountFlags::kNone;
+   if (auto mounted = fs->Mount(entry); !mounted) {
+@@ -174,6 +176,12 @@
+     sources_ = std::move(snapshot);
+   }
+   return Ok();
++}
++
++void ContentManager::SetContentValidator(filesystem::MountValidator validator) {
++  auto callback = validator ? std::make_shared<const filesystem::MountValidator>(std::move(validator)) : nullptr;
++  std::lock_guard lock(sources_mutex_);
++  validator_ = std::move(callback);
+ }
+ 
+ std::shared_ptr<const ContentSources> ContentManager::GetContentSources() const {
+@@ -306,8 +314,14 @@
+       package_path = *installed;
+     }
+   }
++  std::shared_ptr<const filesystem::MountValidator> validator;
++  {
++    std::lock_guard lock(sources_mutex_);
++    validator = validator_;
++  }
+   auto package = std::make_unique<ContentPackage>(title_.file_system, ++device_count_, root_name,
+-                                                  data, package_path, source.external, source.external);
++                                                  data, package_path, source.external, source.external,
++                                                  std::move(validator));
+   if (!package->IsMounted()) return nullptr;
+   if (auto info = InspectPackage(package_path)) {
+     package->SetPackageLicense(info->license_mask);
+diff --git a/tests/unit/kernel/title_runtime_test.cpp b/tests/unit/kernel/title_runtime_test.cpp
+--- a/tests/unit/kernel/title_runtime_test.cpp
++++ b/tests/unit/kernel/title_runtime_test.cpp
+@@ -19,6 +19,8 @@
+ #include <rex/filesystem/file_open.h>
+ #include <rex/kernel/title_runtime.h>
+ #include <rex/xam/user_identity.h>
++#include <rex/xam/content_sources.h>
++#include <rex/xam/content_validation.h>
+ #include <rex/kernel/title_paths.h>
+ #include <rex/kernel/runtime_settings.h>
+ #include <rex/kernel/kernel_settings.h>
+@@ -650,3 +652,27 @@
+   title.Unload();
+   CHECK_FALSE(identity->GetUserXUID());
+ }
++
++REX_TEST_CASE_METHOD(Title,"Content source services follow attach detach and reset on reload","[kernel][title][content_sources][content_validation]") {
++  auto* sources=REX_INTERFACE(rex::xam::IContentSources);REQUIRE(sources);
++  auto* validation=REX_INTERFACE(rex::xam::IContentValidation);REQUIRE(validation);
++  CHECK_FALSE(sources->ReplaceContentSources({}));
++  CHECK_FALSE(validation->SetContentValidator({}));
++  WriteImage();Start();rex::kernel::TitleRuntime title(MakeImage());REQUIRE(title.Load());
++  const auto package=folder.path/"external.bin";
++  std::ofstream(package)<<"not mounted during registration";
++  constexpr auto type=rex::kernel::XContentType::kMarketplaceContent;
++  REQUIRE(sources->ReplaceContentSources({{},{{package,"external",0x12345678,type}}}));
++  CHECK(title.GetContentManager().ListContent(1,0,type,0x12345678).size()==1);
++  REQUIRE(validation->SetContentValidator([](const rex::filesystem::IMountValidationView&)->rex::Result<void>{return rex::Err(rex::ErrorCategory::kValidation,"refused");}));
++  title.Unload();
++  CHECK_FALSE(sources->ReplaceContentSources({}));
++  CHECK_FALSE(validation->SetContentValidator({}));
++  REQUIRE(title.Load());
++  CHECK(title.GetContentManager().ListContent(1,0,type,0x12345678).empty());
++  // Creating primary content after reload succeeds only if the previous validator was retired.
++  rex::kernel::XCONTENT_AGGREGATE_DATA data{};data.device_id=1;data.title_id=0x12345678;data.content_type=type;data.xuid=0;data.SetFileName("fresh");
++  REQUIRE(title.GetContentManager().CreateContent("fresh",0,data));
++  REQUIRE(title.GetContentManager().CloseContent("fresh"));
++  title.Unload();
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -122,6 +122,7 @@
+   base/trim_test.cpp
+   base/xex_test.cpp
+   filesystem/mount_diagnostics_test.cpp
++  filesystem/mount_validation_test.cpp
+   filesystem/file_system_test.cpp
+   filesystem/filesystem_module_test.cpp
+   filesystem/host_file_test.cpp
+@@ -195,6 +196,7 @@
+   xam/achievement_manager_test.cpp
+   xam/content_sources_test.cpp
+   xam/content_enumeration_info_test.cpp
++  xam/content_validation_test.cpp
+   xam/content_package_test.cpp
+   kernel/xcontent_test.cpp
+   kernel/xdbf_test.cpp

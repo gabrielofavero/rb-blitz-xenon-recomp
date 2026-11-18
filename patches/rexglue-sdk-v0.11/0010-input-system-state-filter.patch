@@ -1,0 +1,119 @@
+diff --git a/include/rex/hid/title_input.h b/include/rex/hid/title_input.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/hid/title_input.h
+@@ -0,0 +1,20 @@
++#pragma once
++
++#include <rex/hid/pad.h>
++#include <rex/module.h>
++#include <rex/utility.h>
++
++namespace rex::hid {
++
++/** Optional title input transformations, owned by the HID module. */
++REX_DECLARE_INTERFACE(ITitleInput, 1)
++  /**
++   * Replaces the merged pad transformation before packet accounting and UI suppression.
++   * Calls are serialized with input polling. The callback may read physical pads through
++   * this interface. Its guard removes it and waits for a poll in progress; the guard must
++   * not outlive the input system. Replacing a callback retires the earlier guard.
++   */
++  [[nodiscard]] virtual ScopeGuard SetStateFilter(MoveOnlyFunction<void(u32, PadState&)> fn) = 0;
++};
++
++}  // namespace rex::hid
+diff --git a/src/hid/input_system.h b/src/hid/input_system.h
+--- a/src/hid/input_system.h
++++ b/src/hid/input_system.h
+@@ -14,6 +14,7 @@
+ #include <span>
+ 
+ #include <rex/hid/input_driver.h>
++#include <rex/hid/title_input.h>
+ #include <rex/hid/pad.h>
+ #include <rex/hid/input_system.h>
+ #include <rex/setting.h>
+@@ -26,7 +27,7 @@
+ namespace rex::hid {
+ 
+ /** Merges the pads of the selected drivers. The app starts and stops it. */
+-class InputSystem final : public rex::hid::IInputSystem {
++class InputSystem final : public rex::hid::IInputSystem, public rex::hid::ITitleInput {
+  public:
+   InputSystem();
+   ~InputSystem() override;
+@@ -40,6 +41,7 @@
+   [[nodiscard]] Result<rex::hid::PadInfo> GetPadInfo(u32 user) override;
+   [[nodiscard]] ScopeGuard OnConnectionChange(
+       MoveOnlyFunction<void(u32 user, bool connected)> fn) override;
++  [[nodiscard]] ScopeGuard SetStateFilter(MoveOnlyFunction<void(u32, PadState&)> fn) override;
+   void AcquireUIBlock() override;
+   void ReleaseUIBlock() override;
+   bool IsKeyDown(VirtualKey key) const override;
+diff --git a/src/hid/input_system.cpp b/src/hid/input_system.cpp
+--- a/src/hid/input_system.cpp
++++ b/src/hid/input_system.cpp
+@@ -56,7 +56,9 @@
+             std::make_unique<detail::KeyboardMousePad>(system.GetSettings(), bindings, focused)) {}
+ 
+   InputSystem& owner;
+-  std::mutex mutex;
++  std::recursive_mutex mutex;
++  MoveOnlyFunction<void(u32, PadState&)> state_filter;
++  u64 filter_serial = 0;
+   std::shared_ptr<ListenerList> listeners;
+ 
+   hid::BindingSet bindings;
+@@ -246,6 +248,9 @@
+     return std::unexpected(raw.error());
+   }
+   rex::hid::PadState state = *raw;
++  if (state_filter) {
++    state_filter(user, state);
++  }
+   if (ui_blocks.load() > 0) {
+     state = {};
+   } else if (consumed[user] != 0) {
+@@ -540,6 +545,17 @@
+   });
+ }
+ 
++ScopeGuard InputSystem::SetStateFilter(MoveOnlyFunction<void(u32, PadState&)> fn) {
++  State* state = state_.get();
++  std::lock_guard lock(state->mutex);
++  state->state_filter = std::move(fn);
++  const u64 serial = ++state->filter_serial;
++  return ScopeGuard([state, serial] {
++    std::lock_guard call(state->mutex);
++    if (state->filter_serial == serial) state->state_filter = {};
++  });
++}
++
+ void InputSystem::AcquireUIBlock() {
+   state_->ui_blocks.fetch_add(1);
+ }
+diff --git a/src/hid/input_module.h b/src/hid/input_module.h
+--- a/src/hid/input_module.h
++++ b/src/hid/input_module.h
+@@ -32,7 +32,7 @@
+  */
+ class InputModule final : public IModule {
+  public:
+-  REX_MODULE_SERVES(::rex::hid::IInputSystem)
++  REX_MODULE_SERVES(::rex::hid::IInputSystem, ::rex::hid::ITitleInput)
+ 
+   std::string_view GetName() const override { return "rexhid"; }
+   std::span<const InterfaceType> GetRequiredInterfaces() const override;
+diff --git a/src/hid/input_module.cpp b/src/hid/input_module.cpp
+--- a/src/hid/input_module.cpp
++++ b/src/hid/input_module.cpp
+@@ -98,7 +98,7 @@
+ }
+ 
+ IInterface* InputModule::QueryInterface(std::string_view name, u32 version) {
+-  return FindModuleInterface<rex::hid::IInputSystem>(GetOrCreateSystem(), name, version);
++  return FindModuleInterface<rex::hid::IInputSystem, rex::hid::ITitleInput>(GetOrCreateSystem(), name, version);
+ }
+ 
+ }  // namespace rex::hid

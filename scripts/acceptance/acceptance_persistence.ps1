@@ -77,6 +77,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+. (Join-Path $root 'scripts/diagnostics/file_hash.ps1')
 $work = Join-Path $root $BuildDir
 $exe = Join-Path $work "rb_blitz.exe"
 $logs = Join-Path $work "logs"
@@ -101,7 +102,7 @@ $expected = @($settingsRel, $songcacheRel, $settingsHeaderRel, $songcacheHeaderR
 # ------------------------------------------------------------------ helpers ---
 
 # Anything that runs another .ps1 goes through a child PowerShell: this machine's
-# execution policy is Restricted (docs/guides/build-and-run.md §0).
+# execution policy is Restricted (docs/guides/build-and-run.md Â§0).
 function Invoke-ChildScript([string]$Script, [hashtable]$Named) {
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot (Join-Path '..\diagnostics' $Script)))
     foreach ($k in $Named.Keys) { $argv += @("-$k", [string]$Named[$k]) }
@@ -127,9 +128,23 @@ function Read-LogLines([string]$Path) {
     return @()
 }
 
+function Test-LogFatal([string]$Text) {
+    # The current SDK's %Q formatter maps critical to C. Require the record
+    # prefix, so a C or the word critical inside an ordinary message is harmless.
+    $stamp = "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}"
+    return [regex]::IsMatch($Text,
+        "(?im)\[(?:FATAL|critical)\]|^$stamp[ \t]+C[ \t]+\S+[ \t]+t\d+(?:[ \t]|$)")
+}
+
+function Test-LogCleanShutdown([string]$Text) {
+    return [regex]::IsMatch($Text, "Title terminated|Title shutdown completed")
+}
+
 # Strip the log's timestamp/level/thread prefix so reported lines stay readable.
 function Show-Line([string]$Line) {
-    return ($Line -replace "^\[[^\]]+\] \[(\w+)\] \[[\w:]+\] \[t\d+\] *", "[`$1] ")
+    $legacy = $Line -replace "^\[[^\]]+\] \[(\w+)\] \[[\w:]+\] \[t\d+\] *", "[`$1] "
+    $stamp = "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}"
+    return ($legacy -replace "^$stamp[ \t]+([TVDIWEC-])[ \t]+\S+[ \t]+t\d+[ \t]+", "[`$1] ")
 }
 
 function Get-Relative([string]$Base, [string]$Path) {
@@ -148,7 +163,7 @@ function Get-Hashes([string]$Dir) {
     $map = @{}
     if (-not (Test-Path $Dir)) { return $map }
     foreach ($f in Get-ChildItem $Dir -Recurse -File -ErrorAction SilentlyContinue) {
-        $map[(Get-Relative $Dir $f.FullName)] = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash
+        $map[(Get-Relative $Dir $f.FullName)] = (Get-Sha256 $f.FullName)
     }
     return $map
 }
@@ -163,6 +178,12 @@ function Get-Sizes([string]$Dir) {
 }
 
 function Invoke-Actions([string[]]$Actions) {
+    # These fixtures use the compiled keyboard defaults, independent of legacy MnK pad keys.
+    $Actions = @($Actions | ForEach-Object {
+        if ($_ -eq 'key:a') { 'key:key_enter' }
+        elseif ($_ -eq 'key:b') { 'key:esc' }
+        else { $_ }
+    })
     Invoke-ChildScript "drive_ui.ps1" @{
         Actions = ($Actions -join ","); BuildDir = $BuildDir; OutDir = $OutDir
     } | Out-Null
@@ -199,7 +220,8 @@ function Start-RbBlitz {
     return Start-Process -FilePath $exe -WorkingDirectory $work -PassThru -ArgumentList `
         "--game_data_root=$GameRoot", "--ultimate_mode=$UltimateMode", `
         "--enhancements_skip_offline_dialog=false", `
-        "--user_data_root=$UserDataRoot", "--log_noisy=true", "--log_level=trace", `
+        "--user_data_root=$UserDataRoot", "--log_noisy=true", "--log_level=info", `
+        "--log.categories.kernel=trace", "--log.categories.filesystem=debug", `
         "--mnk_mode=1"
 }
 
@@ -223,15 +245,19 @@ function Reach-OfflineMenus($Proc, [string]$Tag, $Notes) {
         return $false
     }
     $shot = "$Tag-menu.png"
-    Invoke-Actions @("wait:3", "key:a", "wait:3", "key:a", "wait:3", "key:a", "wait:6", "shot:$shot")
-    $text = Get-ScreenText (Join-Path $capDir $shot)
-    if ($text.Contains("PLAY")) { return $true }
-    # The dialogs are not always up when the window appears; one more round is
-    # cheaper than failing a case over a slow boot.
-    Invoke-Actions @("key:a", "wait:4", "key:a", "wait:6", "shot:$shot")
-    $text = Get-ScreenText (Join-Path $capDir $shot)
-    if ($text.Contains("PLAY")) { return $true }
-    $Notes.Add("main menu not recognised ($text)") | Out-Null
+    $deadline = (Get-Date).AddSeconds($BootTimeoutSec)
+    $text = ''
+    while ((Get-Date) -lt $deadline) {
+        $Proc.Refresh()
+        if ($Proc.HasExited) { break }
+        Invoke-Actions @("shot:$shot")
+        $text = Get-ScreenText (Join-Path $capDir $shot)
+        if ($text.Contains('HELP') -and $text.Contains('PLAY')) { return $true }
+        if ($text -match 'TO START|PRESS|SIGN.IN|OFFLINE|CONNECT|CONTINUE') {
+            Invoke-Actions @('key:key_enter', 'wait:3')
+        } else { Start-Sleep -Seconds 2 }
+    }
+    $Notes.Add("main menu not recognised before the startup deadline ($text)") | Out-Null
     return $false
 }
 
@@ -246,6 +272,12 @@ function Reach-OfflineMenus($Proc, [string]$Tag, $Notes) {
 # Reads and writes are matched to the handle, so unrelated file traffic cannot be
 # mistaken for content traffic, and the scan stops at NtClose.
 function Get-ContentIO([string[]]$Lines, [string]$Name) {
+    # Preserve raw evidence; accept the current category logger's import names
+    # as well as the historical bracketed spelling in this parser view.
+    $Lines = @($Lines | ForEach-Object {
+        $_ -replace '(?<!\[)\b(NtCreateFile|NtReadFile|NtWriteFile|NtClose):?(?=\s)', '[$1]'
+    })
+
     $open = "\[NtCreateFile\] path=" + $Name + ":\\" + $Name +
             " access=(0x[0-9a-fA-F]+).* disp=(0x[0-9a-fA-F]+)"
     $result = New-Object System.Collections.ArrayList
@@ -362,18 +394,19 @@ function Invoke-Case {
     $log = Get-NewestLog
     $lines = Read-LogLines $log
     $row.LogLines = $lines.Count
-    $fatals = @($lines | Where-Object { $_ -match "\[FATAL\]" })
+    $fatals = @($lines | Where-Object { Test-LogFatal $_ })
     $row.Fatal = $fatals.Count -gt 0
-    if ($row.Fatal) { $notes.Add("log has [FATAL]: " + (Show-Line $fatals[0])) | Out-Null }
-    if (-not ($lines | Where-Object { $_ -match "Title terminated" })) {
+    if ($row.Fatal) { $notes.Add("log has a fatal/critical record: " + (Show-Line $fatals[0])) | Out-Null }
+    if (-not ($lines | Where-Object { Test-LogCleanShutdown $_ })) {
         $row.Clean = $false
         $notes.Add("no clean-shutdown marker in the log") | Out-Null
     }
-    if (-not ($lines | Where-Object { $_ -match "User data:\s+$([regex]::Escape($UserDataRoot))" })) {
+    $userRootPattern = "User data:\s+$([regex]::Escape($UserDataRoot))|dlc_sources:.*user_root='$([regex]::Escape($UserDataRoot.Replace('\', '/')))'"
+    if (-not ($lines | Where-Object { $_ -match $userRootPattern })) {
         $notes.Add("the log does not name $UserDataRoot as the user data root") | Out-Null
     }
     foreach ($n in @("globaloptions", "songcache")) {
-        if (-not ($lines | Where-Object { $_ -match "Registered symbolic link: $n`: => \\Device\\Content\\" })) {
+        if (-not ($lines | Where-Object { $_ -match "(?:Registered symbolic link: $n`: => |linked '$n`:' to ')\\Device\\Content\\" })) {
             $notes.Add("the $n`: content link was never mounted") | Out-Null
         }
     }
@@ -394,7 +427,7 @@ function Invoke-Case {
     } elseif ($row.SongcacheReadBytes -le 0) {
         $notes.Add("the title never read songcache back") | Out-Null
     }
-    $row.Writes = @($lines | Where-Object { $_ -match "\[NtWriteFile\]" }).Count
+    $row.Writes = @($lines | Where-Object { $_ -match "(?:\[NtWriteFile\]|NtWriteFile:)" }).Count
 
     # What the root holds now, and what this run changed in it.
     $after = Get-Hashes $UserDataRoot

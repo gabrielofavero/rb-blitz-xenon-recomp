@@ -1,0 +1,125 @@
+diff --git a/include/rex/app/app.h b/include/rex/app/app.h
+--- a/include/rex/app/app.h
++++ b/include/rex/app/app.h
+@@ -165,6 +165,14 @@
+    * @return Ok, or an error that fails Init.
+    */
+   [[nodiscard]] virtual Result<void> OnConfigure(SettingsRegistry& settings);
++
++  /**
++   * Init, after config, environment and command line values settle, before
++   * driver selection and initialization. Project settings may select native
++   * drivers and resolve derived path/window defaults here. Canonical explicit
++   * values must retain their layer precedence. A failed result stops startup.
++   */
++  [[nodiscard]] virtual Result<void> OnSettingsLoaded(SettingsRegistry& settings);
+ 
+   /**
+    * Returns the command line actions this program accepts, such as --version. The default has none.
+diff --git a/src/app/app.cpp b/src/app/app.cpp
+--- a/src/app/app.cpp
++++ b/src/app/app.cpp
+@@ -238,6 +238,10 @@
+ }
+ 
+ Result<void> App::OnConfigure(SettingsRegistry&) {
++  return Ok();
++}
++
++Result<void> App::OnSettingsLoaded(SettingsRegistry&) {
+   return Ok();
+ }
+ 
+@@ -402,6 +406,9 @@
+       }
+     }
+     settings_control.ApplyEnvironment();
++    if (auto settled = OnSettingsLoaded(settings); !settled) {
++      return failed("OnSettingsLoaded", settled.error());
++    }
+ 
+     logger_control.ApplySettled();
+     if (auto opened = logger_control.OpenFile(log_root.Get(), state.name); !opened) {
+diff --git a/tests/unit/app/app_test.cpp b/tests/unit/app/app_test.cpp
+--- a/tests/unit/app/app_test.cpp
++++ b/tests/unit/app/app_test.cpp
+@@ -966,3 +966,79 @@
+ }
+ 
+ }  // namespace system_modules_tests
++
++namespace {
++class SettledSettingsApp final : public LayerApp {
++ public:
++  SettledSettingsApp() { extra_providers.push_back(&provider); }
++  bool reject=false;
++  bool shutdown=false;
++  bool before_providers=false;
++  bool startup_edit=false;
++  rex::i32 settled_value=-1;
++  rex::SettingLayer settled_layer=rex::SettingLayer::kDefault;
++  InitProvider provider;
++ protected:
++  rex::Result<void> OnSettingsLoaded(rex::SettingsRegistry&) override {
++    settled_value=owner.depth.Get();
++    settled_layer=owner.depth.GetLayer();
++    before_providers=std::ranges::count(g_events,"provider:init")==0 && !GetUI().HasWindow();
++    startup_edit=bool(owner.startup.SetText(rex::SettingLayer::kTitle,"7"));
++    if (reject) return rex::Err<void>(rex::ErrorCategory::kConfig,"derived settings refused");
++    if (shutdown) RequestShutdown();
++    return rex::Ok();
++  }
++};
++}
++
++REX_TEST_CASE_METHOD(Fixture,"Settled settings preserve source order before native drivers initialize","[app][settled_settings]") {
++  rex::test::TempFolder folder("rex_settled_layers_");
++  const auto file=folder.path/"layers.toml";
++  std::ofstream(file,std::ios::binary)<<"[feedlayers]\ndepth = 2\n";
++  const std::string file_arg="--config_file="+file.string();
++  const auto run=[&](std::vector<std::string> args,rex::i32 expected,rex::SettingLayer layer) {
++    g_events.clear();
++    SettledSettingsApp app;
++    app.title_value=1;
++    REQUIRE(app.Init(Args(std::move(args))));
++    CHECK(app.settled_value==expected);
++    CHECK(app.settled_layer==layer);
++    CHECK(app.before_providers);
++    CHECK(app.startup_edit);
++    CHECK(app.owner.startup.Get()==7);
++    CHECK(app.depth_at_init==expected);
++    CHECK(app.startup_refused);
++    CHECK(std::ranges::count(g_events,"provider:init")==1);
++    CHECK(app.Shutdown()==0);
++  };
++  run({},1,rex::SettingLayer::kTitle);
++  run({file_arg},2,rex::SettingLayer::kFile);
++  const auto previous=rex::platform::GetEnvironmentValue("REX_FEEDLAYERS_DEPTH");
++  rex::ScopeGuard restore([&] {
++    if(previous) (void)rex::platform::SetEnvironmentValue("REX_FEEDLAYERS_DEPTH",*previous);
++    else (void)rex::platform::UnsetEnvironmentValue("REX_FEEDLAYERS_DEPTH");
++  });
++  REQUIRE(rex::platform::SetEnvironmentValue("REX_FEEDLAYERS_DEPTH","3"));
++  run({file_arg},3,rex::SettingLayer::kEnvironment);
++  run({file_arg,"--feedlayers.depth=4"},4,rex::SettingLayer::kCommandLine);
++}
++
++REX_TEST_CASE_METHOD(Fixture,"A rejected settled configuration starts no native driver","[app][settled_settings]") {
++  SettledSettingsApp app;
++  app.reject=true;
++  REQUIRE_FALSE(app.Init(Args()));
++  CHECK(app.before_providers);
++  CHECK(std::ranges::count(g_events,"provider:init")==0);
++  CHECK(std::ranges::count(g_events,"app:init")==0);
++  CHECK(app.Shutdown()==1);
++}
++
++REX_TEST_CASE_METHOD(Fixture,"A shutdown requested after settings settle ends startup before drivers","[app][settled_settings]") {
++  SettledSettingsApp app;
++  app.shutdown=true;
++  REQUIRE(app.Init(Args()));
++  CHECK(app.before_providers);
++  CHECK(std::ranges::count(g_events,"provider:init")==0);
++  CHECK(std::ranges::count(g_events,"app:init")==0);
++  CHECK(app.Shutdown()==0);
++}

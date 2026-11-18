@@ -1,0 +1,346 @@
+diff --git a/include/rex/ui/image_texture.h b/include/rex/ui/image_texture.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/ui/image_texture.h
+@@ -0,0 +1,34 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++
++#include <memory>
++#include <span>
++#include <imgui.h>
++#include <rex/platform.h>
++#include <rex/result.h>
++#include <rex/types.h>
++
++namespace rex::ui {
++namespace detail { struct ImageTextureState; }
++
++/** An RGBA image owned by the current UI context. All calls belong on its UI thread.
++ * Releasing an image requests GPU retirement; its pixels remain alive until the
++ * renderer acknowledges destruction or the UI context closes.
++ */
++class REX_API ImageTexture final {
++ public:
++  /** Creates an image of at most 512 by 512 pixels, or returns a validation error. */
++  [[nodiscard]] static Result<std::unique_ptr<ImageTexture>> Create(
++      u32 width, u32 height, std::span<const u8> rgba);
++  ~ImageTexture();
++  ImageTexture(const ImageTexture&) = delete;
++  ImageTexture& operator=(const ImageTexture&) = delete;
++
++  /** Returns an empty reference after the owning UI context closes. */
++  [[nodiscard]] ImTextureRef GetTexture() const;
++
++ private:
++  explicit ImageTexture(std::shared_ptr<detail::ImageTextureState> state);
++  std::shared_ptr<detail::ImageTextureState> state_;
++};
++}  // namespace rex::ui
+diff --git a/src/ui/image_texture.h b/src/ui/image_texture.h
+new file mode 100644
+--- /dev/null
++++ b/src/ui/image_texture.h
+@@ -0,0 +1,8 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++#include <rex/platform.h>
++namespace rex::ui::detail {
++// Current context only. The ImGui host calls these before each frame and shutdown.
++REX_API void CollectImageTextures();
++REX_API void ReleaseImageTextures();
++}  // namespace rex::ui::detail
+diff --git a/src/ui/image_texture.cpp b/src/ui/image_texture.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/ui/image_texture.cpp
+@@ -0,0 +1,87 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#include <rex/ui/image_texture.h>
++#include "ui/image_texture.h"
++
++#include <cstring>
++#include <map>
++#include <utility>
++#include <vector>
++#include <imgui_internal.h>
++
++namespace rex::ui {
++namespace detail {
++struct ImageTextureState {
++  ImGuiContext* context = nullptr;
++  ImTextureData texture;
++};
++
++// Each UI thread owns its contexts. The store retains released CPU descriptors
++// until their WantDestroy request has passed through the renderer.
++thread_local std::map<ImGuiContext*, std::vector<std::shared_ptr<ImageTextureState>>> stores;
++
++void CollectImageTextures() {
++  const auto found = stores.find(ImGui::GetCurrentContext());
++  if (found == stores.end()) return;
++  auto& images = found->second;
++  for (auto it = images.begin(); it != images.end();) {
++    auto& image = *it;
++    if (image.use_count() != 1) { ++it; continue; }
++    auto& texture = image->texture;
++    if (texture.Status == ImTextureStatus_Destroyed ||
++        (texture.Status == ImTextureStatus_WantCreate &&
++         texture.TexID == ImTextureID_Invalid)) {
++      ImGui::UnregisterUserTexture(&texture);
++      image->context = nullptr;
++      it = images.erase(it);
++      continue;
++    }
++    texture.WantDestroyNextFrame = true;
++    texture.SetStatus(ImTextureStatus_WantDestroy);
++    ++it;
++  }
++}
++
++void ReleaseImageTextures() {
++  const auto found = stores.find(ImGui::GetCurrentContext());
++  if (found == stores.end()) return;
++  for (auto& image : found->second) {
++    ImGui::UnregisterUserTexture(&image->texture);
++    image->context = nullptr;
++  }
++  stores.erase(found);
++}
++}  // namespace detail
++
++ImageTexture::ImageTexture(std::shared_ptr<detail::ImageTextureState> state)
++    : state_(std::move(state)) {}
++ImageTexture::~ImageTexture() = default;
++
++Result<std::unique_ptr<ImageTexture>> ImageTexture::Create(
++    u32 width, u32 height, std::span<const u8> rgba) {
++  auto* context = ImGui::GetCurrentContext();
++  if (!context) return Err<std::unique_ptr<ImageTexture>>(ErrorCategory::kRuntime, "no UI context");
++  if (!width || !height || width > 512 || height > 512 ||
++      rgba.size() != static_cast<size_t>(width) * height * 4) {
++    return Err<std::unique_ptr<ImageTexture>>(ErrorCategory::kValidation, "invalid RGBA image extent");
++  }
++  detail::CollectImageTextures();
++  auto& images = detail::stores[context];
++  // Dynamic ImGui textures replace the old immediate drawer's eight slots.
++  // Keep a bounded per-context allocation budget, including pending retirement.
++  if (images.size() >= 64) {
++    return Err<std::unique_ptr<ImageTexture>>(ErrorCategory::kRuntime, "UI image budget exhausted");
++  }
++  auto state = std::make_shared<detail::ImageTextureState>();
++  state->context = context;
++  state->texture.Create(ImTextureFormat_RGBA32, static_cast<int>(width), static_cast<int>(height));
++  std::memcpy(state->texture.GetPixels(), rgba.data(), rgba.size());
++  state->texture.UseColors = true;
++  ImGui::RegisterUserTexture(&state->texture);
++  images.push_back(state);
++  return std::unique_ptr<ImageTexture>(new ImageTexture(std::move(state)));
++}
++
++ImTextureRef ImageTexture::GetTexture() const {
++  return state_ && state_->context ? state_->texture.GetTexRef() : ImTextureRef{};
++}
++}  // namespace rex::ui
+diff --git a/src/ui/imgui_host.cpp b/src/ui/imgui_host.cpp
+--- a/src/ui/imgui_host.cpp
++++ b/src/ui/imgui_host.cpp
+@@ -28,6 +28,7 @@
+ #include <rex/utility.h>
+ 
+ #include "ui/imgui_host.h"
++#include "ui/image_texture.h"
+ 
+ #include <imgui.h>
+ 
+@@ -170,6 +171,8 @@
+   DestroyDialogs();
+   log::NoThrow(log::ui, [this] { SetTextInputActive(false); });
+   if (context_) {
++    ImGui::SetCurrentContext(context_);
++    detail::ReleaseImageTextures();
+     ImGui::DestroyContext(context_);
+     if (caller_context == context_) {
+       caller_context = nullptr;
+@@ -368,6 +371,7 @@
+   io.DisplaySize.x = static_cast<f32>(display_width_) / content_scale_;
+   io.DisplaySize.y = static_cast<f32>(display_height_) / content_scale_;
+ 
++  detail::CollectImageTextures();
+   ImGui::NewFrame();
+   capture_.Update(io);
+ 
+diff --git a/src/gpu/xenos/host/imgui_overlay.cpp b/src/gpu/xenos/host/imgui_overlay.cpp
+--- a/src/gpu/xenos/host/imgui_overlay.cpp
++++ b/src/gpu/xenos/host/imgui_overlay.cpp
+@@ -77,6 +77,12 @@
+     return;
+   }
+   for (ImTextureData* texture : *draw_data.Textures) {
++    // A renderer may be replaced while the UI context remains alive. Its live
++    // descriptors still hold the previous renderer's IDs; upload them here.
++    if (texture->Status == ImTextureStatus_OK && !textures_.contains(texture)) {
++      texture->SetTexID(ImTextureID_Invalid);
++      texture->SetStatus(ImTextureStatus_WantCreate);
++    }
+     switch (texture->Status) {
+       case ImTextureStatus_WantCreate:
+       case ImTextureStatus_WantUpdates:
+diff --git a/tests/unit/ui/image_texture_test.cpp b/tests/unit/ui/image_texture_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/ui/image_texture_test.cpp
+@@ -0,0 +1,71 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#include "rex_test.h"
++#include <array>
++#include <imgui_internal.h>
++#include <rex/ui/image_texture.h>
++#include "ui/image_texture.h"
++
++namespace {
++struct ImageContext {
++  ImGuiContext* previous = ImGui::GetCurrentContext();
++  ImGuiContext* context = ImGui::CreateContext();
++  ~ImageContext() {
++    ImGui::SetCurrentContext(context);
++    rex::ui::detail::ReleaseImageTextures();
++    ImGui::DestroyContext(context);
++    ImGui::SetCurrentContext(previous);
++  }
++};
++}
++
++REX_TEST_CASE("UI image extents and RGBA length are validated before registration", "[ui][image_texture]") {
++  ImageContext context;
++  std::array<rex::u8, 16> pixels{};
++  CHECK_FALSE(rex::ui::ImageTexture::Create(0, 2, pixels));
++  CHECK_FALSE(rex::ui::ImageTexture::Create(513, 1, pixels));
++  CHECK_FALSE(rex::ui::ImageTexture::Create(2, 3, pixels));
++  CHECK(ImGui::GetCurrentContext()->UserTextures.empty());
++  auto image = rex::ui::ImageTexture::Create(2, 2, pixels);
++  REQUIRE(image);
++  CHECK(ImGui::GetCurrentContext()->UserTextures.Size == 1);
++  CHECK((*image)->GetTexture()._TexData->Width == 2);
++  image->reset();
++  rex::ui::detail::CollectImageTextures();
++  CHECK(ImGui::GetCurrentContext()->UserTextures.empty());
++}
++
++REX_TEST_CASE("UI image release retains its descriptor until renderer retirement", "[ui][image_texture]") {
++  ImageContext context;
++  std::array<rex::u8, 16> pixels{1,2,3,4};
++  auto image = rex::ui::ImageTexture::Create(2, 2, pixels);
++  REQUIRE(image);
++  auto* descriptor = (*image)->GetTexture()._TexData;
++  REQUIRE(descriptor);
++  CHECK(static_cast<const rex::u8*>(descriptor->GetPixels())[0] == 1);
++  descriptor->SetTexID(123);
++  descriptor->SetStatus(ImTextureStatus_OK);
++  image->reset();
++  rex::ui::detail::CollectImageTextures();
++  CHECK(descriptor->WantDestroyNextFrame);
++  CHECK(descriptor->Status == ImTextureStatus_WantDestroy);
++  CHECK(ImGui::GetCurrentContext()->UserTextures.Size == 1);
++  descriptor->SetTexID(ImTextureID_Invalid);
++  descriptor->SetStatus(ImTextureStatus_Destroyed);
++  rex::ui::detail::CollectImageTextures();
++  CHECK(ImGui::GetCurrentContext()->UserTextures.empty());
++}
++
++REX_TEST_CASE("closing the UI context invalidates images retained by a consumer", "[ui][image_texture]") {
++  std::unique_ptr<rex::ui::ImageTexture> retained;
++  {
++    ImageContext context;
++    std::array<rex::u8, 4> pixels{};
++    auto image = rex::ui::ImageTexture::Create(1, 1, pixels);
++    REQUIRE(image);
++    retained = std::move(*image);
++    REQUIRE(retained->GetTexture()._TexData);
++    rex::ui::detail::ReleaseImageTextures();
++    CHECK(retained->GetTexture()._TexData == nullptr);
++  }
++  retained.reset();
++}
+diff --git a/tests/unit/gpu/imgui_overlay_test.cpp b/tests/unit/gpu/imgui_overlay_test.cpp
+--- a/tests/unit/gpu/imgui_overlay_test.cpp
++++ b/tests/unit/gpu/imgui_overlay_test.cpp
+@@ -180,3 +180,23 @@
+ 
+   CHECK(drawer.begins == 0);
+ }
++
++REX_TEST_CASE("a replacement overlay renderer recreates a live UI texture", "[gpu][imgui]") {
++  FakeDrawer drawer;
++  ImTextureData texture;
++  texture.Create(ImTextureFormat_RGBA32, 8, 8);
++  texture.SetStatus(ImTextureStatus_WantCreate);
++  Frame frame;
++  frame.textures.push_back(&texture);
++  {
++    rex::gpu::ImGuiOverlay first(drawer);
++    first.UpdateTextures(frame.data);
++    CHECK(texture.Status == ImTextureStatus_OK);
++    CHECK(drawer.create_attempts == 1);
++  }
++  rex::gpu::ImGuiOverlay second(drawer);
++  second.UpdateTextures(frame.data);
++  CHECK(texture.Status == ImTextureStatus_OK);
++  CHECK(drawer.create_attempts == 2);
++  CHECK(second.GetTextureCount() == 1);
++}
+diff --git a/src/ui/overlay/achievement_toast.cpp b/src/ui/overlay/achievement_toast.cpp
+--- a/src/ui/overlay/achievement_toast.cpp
++++ b/src/ui/overlay/achievement_toast.cpp
+@@ -103,7 +103,7 @@
+       if (auto* icon = icon_cache_.GetIcon(toast.achievement)) {
+         const float icon_size = std::min(metrics.icon_size, 44.0f);
+         const float icon_y = pos.y + (size.y - icon_size) * 0.5f;
+-        draw->AddImage(ImTextureRef(icon), ImVec2(text_x, icon_y),
++        draw->AddImage(icon->GetTexRef(), ImVec2(text_x, icon_y),
+                        ImVec2(text_x + icon_size, icon_y + icon_size),
+                        ImVec2(0, 0), ImVec2(1, 1),
+                        ImGui::GetColorU32(ImVec4(1, 1, 1, alpha)));
+@@ -154,7 +154,7 @@
+   if (ImGui::Begin("##ach_toast", nullptr, flags)) {
+     ImTextureData* icon = icon_cache_.GetIcon(toast.achievement);
+     if (icon) {
+-      ImGui::Image(ImTextureRef(icon), ImVec2(metrics.icon_size, metrics.icon_size));
++      ImGui::Image(icon->GetTexRef(), ImVec2(metrics.icon_size, metrics.icon_size));
+       ImGui::SameLine();
+     }
+ 
+diff --git a/src/ui/overlay/achievement_overlay.cpp b/src/ui/overlay/achievement_overlay.cpp
+--- a/src/ui/overlay/achievement_overlay.cpp
++++ b/src/ui/overlay/achievement_overlay.cpp
+@@ -93,7 +93,7 @@
+       ImTextureData* icon = GetIcon(a);
+       if (icon) {
+         const Color tint = is_unlocked ? style.unlocked_icon_tint : style.locked_icon_tint;
+-        ImGui::ImageWithBg(ImTextureRef(icon), ImVec2(metrics.icon_size, metrics.icon_size),
++        ImGui::ImageWithBg(icon->GetTexRef(), ImVec2(metrics.icon_size, metrics.icon_size),
+                            ImVec2(0, 0), ImVec2(1, 1), ToImVec4(colors::kTransparent),
+                            ToImVec4(tint));
+       } else {
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -226,6 +226,7 @@
+   ui/sdl3_ui_test.cpp
+   ui/keyboard_prompt_test.cpp
+   ui/achievement_notifications_test.cpp
++  ui/image_texture_test.cpp
+   ui/ui_system_test.cpp
+   codegen/barrier_test.cpp
+   codegen/codegen_writer_test.cpp
+diff --git a/src/base/CMakeLists.txt b/src/base/CMakeLists.txt
+--- a/src/base/CMakeLists.txt
++++ b/src/base/CMakeLists.txt
+@@ -18,6 +18,7 @@
+           init.cpp
+           input_source.cpp
+           host_alloc.cpp
++          ../ui/image_texture.cpp
+           key_chord.cpp
+           library_name.cpp
+           lock_order.cpp

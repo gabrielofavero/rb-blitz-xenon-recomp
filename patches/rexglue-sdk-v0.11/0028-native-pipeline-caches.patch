@@ -1,0 +1,1616 @@
+diff --git a/include/rex/gpu/native_pipeline_cache.h b/include/rex/gpu/native_pipeline_cache.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/gpu/native_pipeline_cache.h
+@@ -0,0 +1,567 @@
++/**
++ ******************************************************************************
++ * Xenia : Xbox 360 Emulator Research Project                                 *
++ ******************************************************************************
++ * Copyright 2022 Ben Vanik. All rights reserved.                             *
++ * Released under the BSD license - see LICENSE in the root for more details. *
++ *
++ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
++ *
++ ******************************************************************************
++ */
++
++#pragma once
++
++#include <algorithm>
++#include <chrono>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <filesystem>
++#include <fstream>
++#include <iterator>
++#include <mutex>
++#include <string>
++#include <unordered_map>
++#include <vector>
++
++#include <rex/gpu/graphics_preparation.h>
++#include <rex/hash.h>
++#include <rex/platform/file.h>
++#include <span>
++#include <limits>
++
++// Native (driver-specific) pipeline results, persisted beside the portable
++// shader and pipeline recipe stores.
++//
++// The portable stores (.xsh guest shader microcode, .xpso pipeline recipes) are
++// shareable: they describe what the title asked for, not how a particular driver
++// turned it into a pipeline. A driver's own cached state - an ID3D12PipelineState
++// cached blob, or a serialized VkPipelineCache - is the opposite: it is only
++// meaningful for the exact adapter, driver and translator build that produced
++// it, and a driver is allowed to reject it outright.
++//
++// This header therefore keeps three separate things apart, because confusing any
++// two of them turns a cache into a correctness bug:
++//   * identity - adapter, driver, renderer path, translator and schema versions.
++//     A file written under a different identity is not reused, it is replaced.
++//   * entry key - the portable description hash. It names one pipeline, so the
++//     same key can be looked up in different identities without colliding.
++//   * payload - opaque driver bytes. Never interpreted, only length- and
++//     hash-checked, so a truncated or corrupted file is refused rather than fed
++//     to the driver.
++//
++// Writing is deliberately narrow: entries are staged in memory while pipelines
++// are created (which may happen during a song) and only reach the disk on an
++// explicit Flush - a bounded set of atomic per-entry replaces. The launch path
++// flushes when a preparation generation finishes and when the storage shuts
++// down, so no session writes native data while the guest is playing.
++
++namespace rex::gpu {
++
++// Bumped when the container below - or the meaning of an entry key - changes.
++// Old entry files then fail validation once and are replaced.
++inline constexpr uint32_t kNativePipelineCacheFormatVersion = 2;
++
++// 'RBNP' in the file, written and read little-endian (host order on all
++// supported targets, and the file never leaves the machine that wrote it).
++inline constexpr uint32_t kNativePipelineCacheEntryMagic = 0x504E4252u;
++
++// What a stored native result depends on outside the pipeline description
++// itself. Two adapters with the same vendor/device/driver can still produce
++// different driver state, so the driver build is part of the identity, not a
++// field of the entry.
++struct NativeAdapterIdentity {
++  uint32_t vendor = 0;
++  uint32_t device = 0;
++  uint32_t subsystem = 0;
++  uint32_t revision = 0;
++  // High half of the D3D12 UMD / driver version, or Vulkan's
++  // VkPhysicalDeviceProperties::driverVersion.
++  uint32_t driver_version = 0;
++  // D3D12 UMD low half (unused by Vulkan, left zero).
++  uint64_t driver_version_low = 0;
++  // Vulkan's pipelineCacheUUID - the driver's own word on which cached state is
++  // compatible. Zero for D3D12.
++  uint8_t device_uuid[16] = {};
++  uint8_t driver_uuid[16] = {};
++
++  bool operator==(const NativeAdapterIdentity& other) const {
++    return vendor == other.vendor && device == other.device && subsystem == other.subsystem &&
++           revision == other.revision && driver_version == other.driver_version &&
++           driver_version_low == other.driver_version_low &&
++           std::equal(std::begin(device_uuid), std::end(device_uuid),
++                      std::begin(other.device_uuid)) &&
++           std::equal(std::begin(driver_uuid), std::end(driver_uuid), std::begin(other.driver_uuid));
++  }
++  bool operator!=(const NativeAdapterIdentity& other) const { return !(*this == other); }
++};
++
++// Everything a native result is valid for. Stored in every entry file, so a
++// stale directory - a driver update, another rendering path, a new translator -
++// is refused entry by entry instead of being trusted by directory name.
++struct NativePipelineCacheIdentity {
++  GraphicsPreparationBackend backend = GraphicsPreparationBackend::kUnknown;
++  uint32_t title_id = 0;
++  // Backend-specific rendering path (D3D12 rtv/rov, Vulkan fbo/fsi). A pipeline
++  // created for one path's shaders is not valid for the other.
++  uint32_t render_path = 0;
++  uint32_t format_version = kNativePipelineCacheFormatVersion;
++  // PipelineDescription::kVersion of the backend.
++  uint32_t pipeline_schema_version = 0;
++  // DxbcShaderTranslator::Modification::kVersion / the SPIR-V translator's
++  // equivalent: the bytecode the driver cached came from that translator build.
++  uint32_t translator_version = 0;
++  NativeAdapterIdentity adapter;
++  std::string source_build;
++
++  uint64_t Hash() const {
++    // Serialize fields explicitly: C++ padding is not a cache identity.
++    std::vector<uint8_t> bytes;
++    const auto append = [&bytes](uint64_t value) {
++      for (unsigned shift = 0; shift < 64; shift += 8) bytes.push_back(uint8_t(value >> shift));
++    };
++    append(uint32_t(backend)); append(title_id); append(render_path); append(format_version);
++    append(pipeline_schema_version); append(translator_version);
++    append(adapter.vendor); append(adapter.device); append(adapter.subsystem); append(adapter.revision);
++    append(adapter.driver_version); append(adapter.driver_version_low);
++    bytes.insert(bytes.end(), std::begin(adapter.device_uuid), std::end(adapter.device_uuid));
++    bytes.insert(bytes.end(), std::begin(adapter.driver_uuid), std::end(adapter.driver_uuid));
++    append(source_build.size()); bytes.insert(bytes.end(), source_build.begin(), source_build.end());
++    return HashXXH3(bytes);
++  }
++
++  bool SameAs(const NativePipelineCacheIdentity& other) const {
++    return format_version == other.format_version && backend == other.backend &&
++           title_id == other.title_id && render_path == other.render_path &&
++           pipeline_schema_version == other.pipeline_schema_version &&
++           translator_version == other.translator_version && adapter == other.adapter &&
++           source_build == other.source_build;
++  }
++};
++
++// One entry file: this header followed by `payload_size` opaque bytes.
++struct NativePipelineCacheEntryHeader {
++  uint32_t magic = kNativePipelineCacheEntryMagic;
++  uint16_t format_version = uint16_t(kNativePipelineCacheFormatVersion);
++  uint16_t reserved = 0;
++  uint64_t identity_hash = 0;
++  uint64_t key = 0;
++  uint64_t payload_hash = 0;
++  uint32_t payload_size = 0;
++  uint32_t reserved2 = 0;
++};
++
++static_assert(sizeof(NativePipelineCacheEntryHeader) == 40);
++
++// A bounded, thread-safe store of native results for one identity.
++//
++// The store is configured once, before any creation thread uses it, and is then
++// read from any thread (`Load`). Staging may also happen from creation workers;
++// `Flush` is the owner's call and is the only writer of entry files.
++class NativePipelineCacheStore {
++ public:
++  // A single driver blob larger than this is not persisted: D3D12 cached blobs
++  // and a whole Vulkan pipeline cache are in the kilobytes-to-low-megabytes
++  // range, so this is a corruption guard rather than a policy.
++  static constexpr size_t kMaxEntryBytes = 64u * 1024u * 1024u;
++  // Upper bounds on what one session may stage between flushes, and on the
++  // directory the store will keep growing. Together they keep a cache from
++  // becoming an unbounded write or a disk filler.
++  static constexpr size_t kMaxPendingBytes = 128u * 1024u * 1024u;
++  static constexpr size_t kMaxPendingEntries = 8192;
++  static constexpr size_t kMaxDirectoryBytes = 1024u * 1024u * 1024u;
++  static constexpr size_t kMaxDirectoryEntries = 32768;
++
++  struct Counters {
++    uint64_t loaded = 0;
++    uint64_t missing = 0;
++    uint64_t rejected = 0;
++    uint64_t staged = 0;
++    uint64_t written = 0;
++    uint64_t forgotten = 0;
++    uint64_t refused = 0;
++    uint64_t write_failures = 0;
++    uint64_t bytes_read = 0;
++    uint64_t bytes_written = 0;
++    uint64_t pending_entries = 0;
++    uint64_t pending_bytes = 0;
++    uint64_t directory_entries = 0;
++    uint64_t directory_bytes = 0;
++  };
++
++  NativePipelineCacheStore() = default;
++  NativePipelineCacheStore(const NativePipelineCacheStore&) = delete;
++  NativePipelineCacheStore& operator=(const NativePipelineCacheStore&) = delete;
++
++  // Prepares `directory` for this identity and measures what is already there.
++  // Returns false when the directory cannot be created or the identity is not
++  // usable; the store then stays disabled and every operation is a no-op.
++  bool Configure(const std::filesystem::path& directory,
++                 const NativePipelineCacheIdentity& identity) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    ++generation_;
++    enabled_ = false;
++    pending_.clear();
++    counters_ = Counters();
++    if (directory.empty() || identity.source_build.empty()) {
++      enabled_ = false;
++      return false;
++    }
++    std::error_code error;
++    std::filesystem::create_directories(directory, error);
++    if (!std::filesystem::is_directory(directory, error)) {
++      enabled_ = false;
++      return false;
++    }
++    directory_ = directory;
++    identity_ = identity;
++    identity_hash_ = identity.Hash();
++    enabled_ = true;
++    pending_.clear();
++    counters_ = Counters();
++    // A one-shot walk, bounded, so a directory left behind by another machine's
++    // driver cannot make the store start over its size limit.
++    size_t inspected = 0;
++    std::error_code iterate_error;
++    for (std::filesystem::directory_iterator it(directory, iterate_error), end;
++         !iterate_error && it != end; it.increment(iterate_error)) {
++      if (inspected++ >= kMaxDirectoryEntries * 2) {
++        enabled_ = false;
++        return false;
++      }
++      std::error_code entry_error;
++      if (!it->is_regular_file(entry_error) || entry_error) {
++        continue;
++      }
++      std::error_code size_error;
++      const std::uintmax_t size = it->file_size(size_error);
++      if (size_error) {
++        continue;
++      }
++      ++counters_.directory_entries;
++      if (size > std::numeric_limits<uint64_t>::max() - counters_.directory_bytes) {
++        enabled_ = false; return false;
++      }
++      counters_.directory_bytes += uint64_t(size);
++    }
++    if (iterate_error) { enabled_ = false; return false; }
++    return true;
++  }
++
++  void Reset() {
++    std::lock_guard<std::mutex> lock(mutex_);
++    ++generation_;
++    enabled_ = false;
++    directory_.clear();
++    identity_ = NativePipelineCacheIdentity();
++    identity_hash_ = 0;
++    pending_.clear();
++    counters_ = Counters();
++  }
++
++  bool enabled() const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return enabled_;
++  }
++
++  NativePipelineCacheIdentity identity() const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return identity_;
++  }
++
++  std::filesystem::path directory() const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return directory_;
++  }
++
++  // Reads `key`'s entry. Returns false when there is no usable entry - missing,
++  // corrupted, of another identity, or oversized. A rejected file is left in
++  // place for Forget(); it is never handed to a driver.
++  bool Load(uint64_t key, std::vector<uint8_t>& data_out) {
++    std::filesystem::path path;
++    uint64_t identity_hash, generation;
++    {
++      std::lock_guard<std::mutex> lock(mutex_);
++      if (!enabled_) {
++        return false;
++      }
++      path = EntryPath(key);
++      identity_hash = identity_hash_;
++      generation = generation_;
++    }
++    // The read happens outside the lock: a creation worker reading an entry must
++    // not block the owner thread's staging or another worker's read. Entry files
++    // are only ever replaced atomically, so a concurrent replace yields either
++    // the old or the new complete file.
++    std::vector<uint8_t> file_data;
++    if (!ReadWholeFile(path, kMaxEntryBytes + sizeof(NativePipelineCacheEntryHeader),
++                       file_data)) {
++      std::lock_guard<std::mutex> lock(mutex_);
++      if (enabled_ && generation == generation_) {
++        ++counters_.missing;
++      }
++      return false;
++    }
++    std::vector<uint8_t> payload;
++    if (!DecodeEntry(file_data, identity_hash, key, payload)) {
++      std::lock_guard<std::mutex> lock(mutex_);
++      if (enabled_ && generation == generation_) {
++        ++counters_.rejected;
++      }
++      return false;
++    }
++    {
++      std::lock_guard<std::mutex> lock(mutex_);
++      if (enabled_ && generation == generation_) {
++        data_out = std::move(payload);
++        ++counters_.loaded;
++        counters_.bytes_read += data_out.size();
++      } else {
++        return false;
++      }
++    }
++    return true;
++  }
++
++  // Remembers the bytes for `key` to be written by the next Flush(). Bounded by
++  // kMaxPendingBytes/kMaxPendingEntries; a refusal is counted, never silently
++  // dropped in a way that could grow without limit.
++  bool Stage(uint64_t key, const void* data, size_t size) {
++    if (!data || !size || size > kMaxEntryBytes) {
++      std::lock_guard<std::mutex> lock(mutex_);
++      if (enabled_) {
++        ++counters_.refused;
++      }
++      return false;
++    }
++    std::lock_guard<std::mutex> lock(mutex_);
++    if (!enabled_) {
++      return false;
++    }
++    auto existing = pending_.find(key);
++    const size_t existing_size = existing != pending_.end() ? existing->second.size() : 0;
++    if (counters_.pending_entries - (existing != pending_.end() ? 1 : 0) >= kMaxPendingEntries ||
++        counters_.pending_bytes - existing_size + size > kMaxPendingBytes) {
++      ++counters_.refused;
++      return false;
++    }
++    std::vector<uint8_t> bytes(static_cast<const uint8_t*>(data),
++                               static_cast<const uint8_t*>(data) + size);
++    if (existing == pending_.end()) {
++      pending_.emplace(key, std::move(bytes));
++      ++counters_.pending_entries;
++    } else {
++      existing->second = std::move(bytes);
++    }
++    counters_.pending_bytes = counters_.pending_bytes - existing_size + size;
++    ++counters_.staged;
++    return true;
++  }
++
++  // Writes every staged entry, atomically replacing its file. Returns how many
++  // were written. Staging during the flush is not lost: it stays pending.
++  size_t Flush() {
++    std::unordered_map<uint64_t, std::vector<uint8_t>> pending;
++    uint64_t identity_hash, generation;
++    {
++      std::lock_guard<std::mutex> lock(mutex_);
++      if (!enabled_ || pending_.empty()) {
++        return 0;
++      }
++      pending.swap(pending_);
++      identity_hash = identity_hash_;
++      generation = generation_;
++      counters_.pending_entries = 0;
++      counters_.pending_bytes = 0;
++    }
++    size_t written = 0;
++    for (auto& entry : pending) {
++      NativePipelineCacheEntryHeader header;
++      header.identity_hash = identity_hash;
++      header.key = entry.first;
++      header.payload_size = uint32_t(entry.second.size());
++      header.payload_hash = HashXXH3(entry.second);
++      std::vector<uint8_t> file_data(sizeof(header) + entry.second.size());
++      std::memcpy(file_data.data(), &header, sizeof(header));
++      if (!entry.second.empty()) {
++        std::memcpy(file_data.data() + sizeof(header), entry.second.data(), entry.second.size());
++      }
++      std::lock_guard<std::mutex> lock(mutex_);
++      if (!enabled_ || generation != generation_) {
++        continue;
++      }
++      const std::filesystem::path path = EntryPath(entry.first);
++      std::error_code size_error;
++      const std::uintmax_t previous_size = std::filesystem::file_size(path, size_error);
++      const bool replacing = !size_error;
++      const uint64_t base_bytes = counters_.directory_bytes -
++          std::min<uint64_t>(counters_.directory_bytes, replacing ? uint64_t(previous_size) : 0);
++      if (base_bytes > kMaxDirectoryBytes || file_data.size() > kMaxDirectoryBytes - base_bytes ||
++          (!replacing && counters_.directory_entries + 1 > kMaxDirectoryEntries)) {
++        ++counters_.refused;
++        continue;
++      }
++      if (WriteFileAtomic(path, file_data)) {
++        ++counters_.written;
++        counters_.bytes_written += file_data.size();
++        if (replacing) {
++          counters_.directory_bytes =
++              counters_.directory_bytes > uint64_t(previous_size)
++                  ? counters_.directory_bytes - uint64_t(previous_size) + file_data.size()
++                  : file_data.size();
++        } else {
++          ++counters_.directory_entries;
++          counters_.directory_bytes += file_data.size();
++        }
++        ++written;
++      } else {
++        ++counters_.write_failures;
++      }
++    }
++    return written;
++  }
++
++  // Deletes the stored entry. Called when a driver rejects the blob, so the next
++  // creation does not feed the same bytes back to it.
++  bool Forget(uint64_t key) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    if (!enabled_) return false;
++    if (auto it = pending_.find(key); it != pending_.end()) {
++      counters_.pending_bytes -= it->second.size(); --counters_.pending_entries; pending_.erase(it);
++    }
++    const auto path = EntryPath(key);
++    std::error_code size_error, error;
++    const auto removed_size = std::filesystem::file_size(path, size_error);
++    if (!std::filesystem::remove(path, error)) return false;
++    ++counters_.forgotten;
++    if (!size_error) {
++      if (counters_.directory_entries) --counters_.directory_entries;
++      counters_.directory_bytes -= std::min<uint64_t>(counters_.directory_bytes, removed_size);
++    }
++    return true;
++  }
++
++  bool Has(uint64_t key) const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    if (!enabled_) return false;
++    std::error_code error;
++    return std::filesystem::is_regular_file(EntryPath(key), error);
++  }
++
++  Counters counters() const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return counters_;
++  }
++
++  // One line for a boot log: what was reused, what was written, and where.
++  std::string Summary() const {
++    std::lock_guard<std::mutex> lock(mutex_);
++    if (!enabled_) {
++      return "native pipeline cache disabled";
++    }
++    return std::string(GraphicsPreparationBackendName(identity_.backend)) + " native pipeline " +
++           "cache: " + std::to_string(counters_.loaded) + " reused, " +
++           std::to_string(counters_.missing) + " absent, " +
++           std::to_string(counters_.rejected) + " rejected, " +
++           std::to_string(counters_.written) + " written, " +
++           std::to_string(counters_.refused) + " refused, " +
++           std::to_string(counters_.write_failures) + " write failure(s), " +
++           std::to_string(counters_.bytes_written) + " byte(s) written, " +
++           std::to_string(counters_.directory_entries) + " entry file(s) / " +
++           std::to_string(counters_.directory_bytes) + " byte(s) on disk";
++  }
++
++  // Validates one entry file. Exposed for tests: a driver blob is opaque, so the
++  // only thing that can be checked is that this is a complete entry for the
++  // identity and key it claims.
++  static bool DecodeEntry(const std::vector<uint8_t>& file_data, uint64_t identity_hash,
++                          uint64_t key, std::vector<uint8_t>& payload_out) {
++    if (file_data.size() < sizeof(NativePipelineCacheEntryHeader)) {
++      return false;
++    }
++    NativePipelineCacheEntryHeader header;
++    std::memcpy(&header, file_data.data(), sizeof(header));
++    if (header.magic != kNativePipelineCacheEntryMagic ||
++        header.format_version != uint16_t(kNativePipelineCacheFormatVersion) ||
++        header.identity_hash != identity_hash || header.key != key ||
++        header.reserved || header.reserved2 || !header.payload_size || header.payload_size > kMaxEntryBytes ||
++        uint64_t(header.payload_size) + sizeof(header) != uint64_t(file_data.size())) {
++      return false;
++    }
++    const uint8_t* payload = file_data.data() + sizeof(header);
++    if (header.payload_size &&
++        HashXXH3(std::span<const u8>(payload, header.payload_size)) != header.payload_hash) {
++      return false;
++    }
++    payload_out.assign(payload, payload + header.payload_size);
++    return true;
++  }
++
++  // The format a caller has to produce to be reused. Exposed for tests.
++  static std::vector<uint8_t> EncodeEntry(uint64_t identity_hash, uint64_t key, const void* data,
++                                          size_t size) {
++    if (!data || !size || size > kMaxEntryBytes) return {};
++    NativePipelineCacheEntryHeader header;
++    header.identity_hash = identity_hash;
++    header.key = key;
++    header.payload_size = uint32_t(size);
++    header.payload_hash = size ? HashXXH3(std::span<const u8>(static_cast<const u8*>(data), size)) : 0;
++    std::vector<uint8_t> file_data(sizeof(header) + size);
++    std::memcpy(file_data.data(), &header, sizeof(header));
++    if (size) {
++      std::memcpy(file_data.data() + sizeof(header), data, size);
++    }
++    return file_data;
++  }
++
++ private:
++  std::filesystem::path EntryPath(uint64_t key) const {
++    return directory_ / (FormatKey(key) + ".pso");
++  }
++
++  static std::string FormatKey(uint64_t key) {
++    static const char kHex[] = "0123456789ABCDEF";
++    std::string text(16, '0');
++    for (size_t i = 0; i < 16; ++i) {
++      text[15 - i] = kHex[(key >> (i * 4)) & 0xF];
++    }
++    return text;
++  }
++
++  static bool ReadWholeFile(const std::filesystem::path& path, size_t max_size,
++                            std::vector<uint8_t>& data_out) {
++    std::error_code error;
++    const std::uintmax_t size = std::filesystem::file_size(path, error);
++    if (error || size == 0 || size > max_size) {
++      return false;
++    }
++    std::ifstream stream(path, std::ios::binary);
++    if (!stream) {
++      return false;
++    }
++    data_out.resize(size_t(size));
++    stream.read(reinterpret_cast<char*>(data_out.data()), std::streamsize(size));
++    if (!stream) {
++      data_out.clear();
++      return false;
++    }
++    return true;
++  }
++
++  static bool WriteFileAtomic(const std::filesystem::path& path,
++                              const std::vector<uint8_t>& data) {
++    return bool(platform::WriteHostFile(path, std::span<const u8>(data)));
++  }
++
++  mutable std::mutex mutex_;
++  bool enabled_ = false;
++  uint64_t generation_ = 0;
++  std::filesystem::path directory_;
++  NativePipelineCacheIdentity identity_;
++  uint64_t identity_hash_ = 0;
++  std::unordered_map<uint64_t, std::vector<uint8_t>> pending_;
++  Counters counters_;
++};
++
++}  // namespace rex::gpu
+diff --git a/src/gpu/xenos/CMakeLists.txt b/src/gpu/xenos/CMakeLists.txt
+--- a/src/gpu/xenos/CMakeLists.txt
++++ b/src/gpu/xenos/CMakeLists.txt
+@@ -1,3 +1,21 @@
++# Driver blobs depend on translator and renderer source, including local SDK patches.
++file(GLOB_RECURSE _native_cache_inputs CONFIGURE_DEPENDS
++     "${REXGLUE_ROOT}/src/gpu/*.cpp" "${REXGLUE_ROOT}/src/gpu/*.h"
++     "${REXGLUE_ROOT}/include/rex/gpu/*.h" "${REXGLUE_ROOT}/include/rex/xenos/*.h"
++     "${REXGLUE_ROOT}/src/gpu/CMakeLists.txt")
++list(APPEND _native_cache_inputs "${REXGLUE_ROOT}/CMakeLists.txt")
++list(SORT _native_cache_inputs)
++set(_native_cache_source_identity "rex-native-cache-v2;${CMAKE_CXX_FLAGS};${CMAKE_CXX_FLAGS_DEBUG};${CMAKE_CXX_FLAGS_RELEASE};${CMAKE_CXX_FLAGS_RELWITHDEBINFO};${CMAKE_CXX_FLAGS_MINSIZEREL};")
++foreach(_native_input IN LISTS _native_cache_inputs)
++  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_native_input}")
++  file(SHA256 "${_native_input}" _native_input_hash)
++  file(RELATIVE_PATH _native_input_relative "${REXGLUE_ROOT}" "${_native_input}")
++  string(APPEND _native_cache_source_identity "${_native_input_relative}:${_native_input_hash};")
++endforeach()
++string(SHA256 _native_cache_source_hash "${_native_cache_source_identity}")
++file(GENERATE OUTPUT "${PROJECT_BINARY_DIR}/include/rex/gpu/native_cache_build.h"
++  CONTENT "#pragma once\n#define REX_NATIVE_CACHE_SOURCE_BUILD \"${_native_cache_source_hash}:${CMAKE_CXX_COMPILER_ID}:${CMAKE_CXX_COMPILER_VERSION}:${CMAKE_SYSTEM_NAME}:${CMAKE_SYSTEM_PROCESSOR}\"\n")
++
+ # rexgpu-xenos-base, the shared Xenos code, and the null, Vulkan and D3D12 driver modules
+ 
+ set(REXGPU_XENOS_BASE_SOURCES
+diff --git a/src/gpu/xenos/d3d12/native_pipeline_cache_fallback.h b/src/gpu/xenos/d3d12/native_pipeline_cache_fallback.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/d3d12/native_pipeline_cache_fallback.h
+@@ -0,0 +1,19 @@
++#pragma once
++#include <d3d12.h>
++#include <utility>
++
++namespace rex::gpu::d3d12 {
++/** A rejected driver blob must not reject the portable pipeline recipe. */
++template <typename Create, typename Rejected>
++HRESULT CreateWithCachedPSOFallback(D3D12_CACHED_PIPELINE_STATE& cached, bool& loaded,
++                                    Create&& create, Rejected&& rejected) {
++  HRESULT result = create();
++  if (FAILED(result) && loaded) {
++    std::forward<Rejected>(rejected)(result);
++    cached = {};
++    loaded = false;
++    result = create();
++  }
++  return result;
++}
++}  // namespace rex::gpu::d3d12
+diff --git a/src/gpu/xenos/d3d12/pipeline_cache.cpp b/src/gpu/xenos/d3d12/pipeline_cache.cpp
+--- a/src/gpu/xenos/d3d12/pipeline_cache.cpp
++++ b/src/gpu/xenos/d3d12/pipeline_cache.cpp
+@@ -10,6 +10,8 @@
+  */
+ 
+ #include <rex/diagnostics/compile_trace.h>
++#include <rex/gpu/native_cache_build.h>
++#include <rex/version.h>
+ #include "thirdparty/dxbc/DXBCChecksum.h"
+ 
+ #ifndef XXH_INLINE_ALL
+@@ -36,6 +38,7 @@
+ #include <rex/platform/perf.h>
+ #include "gpu/xenos/d3d12/command_processor.h"
+ #include "gpu/xenos/d3d12/pipeline_cache.h"
++#include "gpu/xenos/d3d12/native_pipeline_cache_fallback.h"
+ #include "gpu/xenos/d3d12/render_target_cache.h"
+ #include "gpu/xenos/format/dxbc.h"
+ #include "gpu/xenos/pipeline_priority.h"
+@@ -75,6 +78,55 @@
+ #include "../shaders/bytecode/d3d12_5_1/tessellation_indexed_vs.h"
+ }  // namespace shaders
+ 
++namespace {
++
++// The adapter and driver build a cached PSO blob belongs to. A Direct3D 12
++// cached blob is only meaningful for the driver that produced it, so this is
++// part of the cache identity rather than a property of one entry - and the
++// desc-based vendor lookup alone is not enough, because two driver builds on the
++// same adapter produce incompatible blobs.
++void FillNativeAdapterIdentity(const gpu::d3d12::D3D12Provider& provider,
++                               NativeAdapterIdentity& adapter_out) {
++  adapter_out = NativeAdapterIdentity();
++  adapter_out.vendor = uint32_t(provider.GetAdapterVendorID());
++  ID3D12Device* device = provider.GetDevice();
++  IDXGIFactory2* factory = provider.GetDXGIFactory();
++  if (!device || !factory) {
++    return;
++  }
++  Microsoft::WRL::ComPtr<IDXGIFactory4> factory_4;
++  if (FAILED(factory->QueryInterface(IID_PPV_ARGS(&factory_4))) || !factory_4) {
++    return;
++  }
++  Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
++  if (FAILED(factory_4->EnumAdapterByLuid(device->GetAdapterLuid(), IID_PPV_ARGS(&adapter))) ||
++      !adapter) {
++    return;
++  }
++  DXGI_ADAPTER_DESC1 adapter_description;
++  std::memset(&adapter_description, 0, sizeof(adapter_description));
++  if (SUCCEEDED(adapter->GetDesc1(&adapter_description))) {
++    adapter_out.vendor = adapter_description.VendorId;
++    adapter_out.device = adapter_description.DeviceId;
++    adapter_out.subsystem = adapter_description.SubSysId;
++    adapter_out.revision = adapter_description.Revision;
++  }
++  // The UMD version is what makes a cached blob incompatible after a driver
++  // update; the WDDM version CheckInterfaceSupport also accepts is irrelevant
++  // here. Not every driver implements it, so zero means "unknown" and the blob
++  // is still guarded by the driver's own validation and the retry in
++  // CreateD3D12Pipeline.
++  LARGE_INTEGER umd_version;
++  umd_version.QuadPart = 0;
++  if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umd_version))) {
++    adapter_out.driver_version = uint32_t(uint64_t(umd_version.QuadPart) >> 32);
++    adapter_out.driver_version_low = uint64_t(uint32_t(umd_version.QuadPart));
++  }
++}
++
++}  // namespace
++
++
+ DXBCOptions PipelineCache::GetDXBCOptions() const {
+   const D3D12Settings& settings = command_processor_.GetD3D12Settings();
+   DXBCOptions options;
+@@ -260,6 +312,30 @@
+   }
+ }
+ 
++void PipelineCache::OpenNativeCache(const std::filesystem::path& root, u32 title_id,
++                                    bool edram_rov_used) {
++  native_cache_.Reset();
++  if (!command_processor_.GetXenosSettings().native_pipeline_cache.Get()) return;
++  NativePipelineCacheIdentity identity;
++  identity.backend = GraphicsPreparationBackend::kD3D12;
++  identity.title_id = title_id;
++  identity.render_path = edram_rov_used ? 1u : 0u;
++  identity.pipeline_schema_version = PipelineDescription::kVersion;
++  identity.translator_version = DXBCShaderTranslator::Modification::kVersion;
++  identity.source_build = REX_NATIVE_CACHE_SOURCE_BUILD ":" REXGLUE_BUILD_IDENTITY ":" REXGLUE_BUILD_CONFIG;
++  FillNativeAdapterIdentity(command_processor_.GetD3D12Provider(), identity.adapter);
++  if (!native_cache_.Configure(root / std::format("{:08X}.{}.d3d12", title_id,
++                                                 edram_rov_used ? "rov" : "rtv"), identity)) {
++    REXGPU_WARN("Native D3D12 pipeline cache unavailable; creating pipelines normally");
++  }
++}
++
++void PipelineCache::FlushNativeCache(const char* reason) {
++  if (!native_cache_.enabled()) return;
++  const auto written = native_cache_.Flush();
++  REXGPU_INFO("Native pipeline cache {}: {} blobs written; {}", reason, written, native_cache_.Summary());
++}
++
+ bool PipelineCache::OpenShaderStorage(const std::filesystem::path& cache_root,u32 title_id) {
+   auto& preparation=command_processor_.GetPreparation();
+   shader_storage_preload_result_={};
+@@ -299,6 +375,7 @@
+ 
+   preparation_edram_rov_used_ = edram_rov_used;
+   preparation.SetRenderer(GraphicsPreparationBackend::kD3D12, edram_rov_used ? 1u : 0u);
++  OpenNativeCache(shader_storage_root / "local", title_id, edram_rov_used);
+   std::vector<PipelineStoredDescription>& pipeline_stored_descriptions = preparation_descriptions_;
+   std::set<std::pair<u64, u64>>& shader_translations_needed = preparation_shader_translations_needed_;
+   auto pipeline_storage_file_path =
+@@ -945,6 +1022,7 @@
+   // Nothing may still be creating: joining the workers here is what makes the
+   // counts final.
+   ShutdownPreparationWorkers();
++  FlushNativeCache("after preparation");
+ 
+ 
+ 
+@@ -996,6 +1074,8 @@
+     preparation_next_description_=0;
+   }
+   storage_.Shutdown();
++  FlushNativeCache("at shader storage shutdown");
++  native_cache_.Reset();
+ }
+ 
+ void PipelineCache::EndSubmission() {
+@@ -3021,11 +3101,27 @@
+   }
+ 
+   ID3D12Device* device = command_processor_.GetD3D12Provider().GetDevice();
+-  ID3D12PipelineState* state;
+-  if (FAILED(rex::diagnostics::compile_trace::Call(rex::diagnostics::compile_trace::Event::kGuestPipeline,
+-        "src/gpu/xenos/d3d12/pipeline_cache.cpp:2689", XXH3_64bits(&description, sizeof(description)), [&] {
++  const u64 native_cache_key = XXH3_64bits(&description, sizeof(description));
++  std::vector<u8> native_cached_blob;
++  bool native_blob_loaded = native_cache_.Load(native_cache_key, native_cached_blob);
++  if (native_blob_loaded) {
++    state_desc.CachedPSO = {native_cached_blob.data(), native_cached_blob.size()};
++  }
++  ID3D12PipelineState* state = nullptr;
++  const auto create = [&] {
++    return rex::diagnostics::compile_trace::Call(
++        rex::diagnostics::compile_trace::Event::kGuestPipeline,
++        "src/gpu/xenos/d3d12/pipeline_cache.cpp", native_cache_key, [&] {
+           return device->CreateGraphicsPipelineState(&state_desc, IID_PPV_ARGS(&state));
+-        }))) {
++        });
++  };
++  HRESULT result = CreateWithCachedPSOFallback(state_desc.CachedPSO, native_blob_loaded, create,
++      [&](HRESULT rejected) {
++        REXGPU_INFO("D3D12 rejected cached PSO 0x{:016X} (0x{:08X}); retrying ordinary creation",
++                    native_cache_key, u32(rejected));
++        native_cache_.Forget(native_cache_key);
++      });
++  if (FAILED(result)) {
+     if (runtime_description.pixel_shader != nullptr) {
+       REXGPU_ERROR("Failed to create graphics pipeline with VS {:016X}, PS {:016X}",
+                    runtime_description.vertex_shader->GetShader().GetUcodeDataHash(),
+@@ -3046,6 +3142,13 @@
+         "VS {:016X}", runtime_description.vertex_shader->GetShader().GetUcodeDataHash()));
+   }
+   state->SetName(reinterpret_cast<LPCWSTR>(name.c_str()));
++  if (native_cache_.enabled() && !native_blob_loaded) {
++    ID3DBlob* blob = nullptr;
++    if (SUCCEEDED(state->GetCachedBlob(&blob)) && blob) {
++      native_cache_.Stage(native_cache_key, blob->GetBufferPointer(), blob->GetBufferSize());
++      blob->Release();
++    }
++  }
+   return state;
+ }
+ 
+diff --git a/src/gpu/xenos/d3d12/pipeline_cache.h b/src/gpu/xenos/d3d12/pipeline_cache.h
+--- a/src/gpu/xenos/d3d12/pipeline_cache.h
++++ b/src/gpu/xenos/d3d12/pipeline_cache.h
+@@ -10,6 +10,7 @@
+  */
+ 
+ #pragma once
++#include <rex/gpu/native_pipeline_cache.h>
+ 
+ #include "gpu/xenos/preparation_shader_access.h"
+ #include <atomic>
+@@ -119,6 +120,9 @@
+   }
+ 
+  private:
++  void OpenNativeCache(const std::filesystem::path& root, u32 title_id, bool edram_rov_used);
++  void FlushNativeCache(const char* reason);
++  NativePipelineCacheStore native_cache_;
+   REX_PACKED_STRUCT(ShaderStoredHeader, {
+     u64 ucode_data_hash;
+ 
+diff --git a/src/gpu/xenos/host/vulkan/functions/device_1_0.inc b/src/gpu/xenos/host/vulkan/functions/device_1_0.inc
+--- a/src/gpu/xenos/host/vulkan/functions/device_1_0.inc
++++ b/src/gpu/xenos/host/vulkan/functions/device_1_0.inc
+@@ -52,6 +52,7 @@
+ REX_VK_FUNCTION(vkCreateGraphicsPipelines)
+ REX_VK_FUNCTION(vkCreateImage)
+ REX_VK_FUNCTION(vkCreateImageView)
++REX_VK_FUNCTION(vkCreatePipelineCache)
+ REX_VK_FUNCTION(vkCreatePipelineLayout)
+ REX_VK_FUNCTION(vkCreateQueryPool)
+ REX_VK_FUNCTION(vkCreateRenderPass)
+@@ -68,6 +69,7 @@
+ REX_VK_FUNCTION(vkDestroyImage)
+ REX_VK_FUNCTION(vkDestroyImageView)
+ REX_VK_FUNCTION(vkDestroyPipeline)
++REX_VK_FUNCTION(vkDestroyPipelineCache)
+ REX_VK_FUNCTION(vkDestroyPipelineLayout)
+ REX_VK_FUNCTION(vkDestroyQueryPool)
+ REX_VK_FUNCTION(vkDestroyRenderPass)
+@@ -91,3 +93,6 @@
+ REX_VK_FUNCTION(vkUnmapMemory)
+ REX_VK_FUNCTION(vkUpdateDescriptorSets)
+ REX_VK_FUNCTION(vkWaitForFences)
++
++REX_VK_FUNCTION(vkGetPipelineCacheData)
++REX_VK_FUNCTION(vkMergePipelineCaches)
+diff --git a/src/gpu/xenos/host/vulkan/native_pipeline_cache_access.h b/src/gpu/xenos/host/vulkan/native_pipeline_cache_access.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/host/vulkan/native_pipeline_cache_access.h
+@@ -0,0 +1,24 @@
++#pragma once
++#include <mutex>
++#include <shared_mutex>
++#include <utility>
++#include "gpu/xenos/host/vulkan/api.h"
++
++namespace rex::gpu::vulkan {
++/** Keeps cache creation users alive until serialization or destruction acquires exclusive access. */
++class NativePipelineCacheAccess {
++ public:
++  template <typename Callback> decltype(auto) Use(Callback&& callback) const {
++    std::shared_lock lock(mutex_);
++    return std::forward<Callback>(callback)(cache_);
++  }
++  template <typename Callback> decltype(auto) Exclusive(Callback&& callback) const {
++    std::unique_lock lock(mutex_);
++    return std::forward<Callback>(callback)(cache_);
++  }
++ private:
++  mutable std::shared_mutex mutex_;
++  mutable VkPipelineCache cache_ = VK_NULL_HANDLE;
++};
++}  // namespace rex::gpu::vulkan
++
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.cpp b/src/gpu/xenos/host/vulkan/vulkan_device.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_device.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_device.cpp
+@@ -453,6 +453,16 @@
+   device->properties_.driverVersion = properties.driverVersion;
+   device->properties_.vendorID = properties.vendorID;
+   device->properties_.deviceID = properties.deviceID;
++  std::memcpy(device->properties_.pipelineCacheUUID, properties.pipelineCacheUUID, VK_UUID_SIZE);
++  if (properties.apiVersion >= VK_API_VERSION_1_1 && ifn.vkGetPhysicalDeviceProperties2) {
++    VkPhysicalDeviceIDProperties ids = {};
++    ids.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
++    VkPhysicalDeviceProperties2 id_properties = {};
++    id_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
++    id_properties.pNext = &ids;
++    ifn.vkGetPhysicalDeviceProperties2(physical_device, &id_properties);
++    std::memcpy(device->properties_.driverUUID, ids.driverUUID, VK_UUID_SIZE);
++  }
+   rex::string::CopyTruncating(device->properties_.deviceName, properties.deviceName,
+                               sizeof(device->properties_.deviceName));
+ 
+@@ -771,6 +781,10 @@
+ 
+ VulkanDevice::~VulkanDevice() {
+   if (device_) {
++    WithNativePipelineCacheExclusive([&](VkPipelineCache& cache) {
++      if (cache) functions_.vkDestroyPipelineCache(device_, cache, nullptr);
++      cache = VK_NULL_HANDLE;
++    });
+     vulkan_instance_->GetFunctions().vkDestroyDevice(device_, nullptr);
+   }
+ }
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.h b/src/gpu/xenos/host/vulkan/vulkan_device.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_device.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_device.h
+@@ -12,6 +12,7 @@
+ #pragma once
+ 
+ #include <bit>
++#include "gpu/xenos/host/vulkan/native_pipeline_cache_access.h"
+ #include <memory>
+ #include <mutex>
+ #include <vector>
+@@ -61,6 +62,8 @@
+     u32 vendorID = 0;
+     u32 deviceID = 0;
+     char deviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = {};
++    u8 pipelineCacheUUID[VK_UUID_SIZE] = {};
++    u8 driverUUID[VK_UUID_SIZE] = {};
+ 
+     u32 maxImageDimension2D = 4096;
+     u32 maxImageDimension3D = 256;
+@@ -238,6 +241,23 @@
+ 
+   const Functions& GetFunctions() const { return functions_; }
+ 
++  VkResult CreateGraphicsPipelines(u32 count, const VkGraphicsPipelineCreateInfo* infos,
++                                  const VkAllocationCallbacks* allocator, VkPipeline* pipelines) const {
++    return native_pipeline_cache_.Use([&](VkPipelineCache cache) {
++      return functions_.vkCreateGraphicsPipelines(device_, cache, count, infos, allocator, pipelines);
++    });
++  }
++  VkResult CreateComputePipelines(u32 count, const VkComputePipelineCreateInfo* infos,
++                                 const VkAllocationCallbacks* allocator, VkPipeline* pipelines) const {
++    return native_pipeline_cache_.Use([&](VkPipelineCache cache) {
++      return functions_.vkCreateComputePipelines(device_, cache, count, infos, allocator, pipelines);
++    });
++  }
++  /** The callback may inspect, replace or destroy the cache; it must not retain its handle. */
++  template <typename Callback> decltype(auto) WithNativePipelineCacheExclusive(Callback&& callback) const {
++    return native_pipeline_cache_.Exclusive(std::forward<Callback>(callback));
++  }
++
+   template <typename Object>
+   void SetObjectName(const VkObjectType object_type, const Object object_handle,
+                      const char* const object_name) const {
+@@ -321,6 +341,7 @@
+   VkDevice device_ = nullptr;
+ 
+   Functions functions_;
++  NativePipelineCacheAccess native_pipeline_cache_;
+ 
+   std::vector<QueueFamily> queue_families_;
+   u32 queue_family_graphics_compute_ = UINT32_MAX;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_immediate_drawer.cpp b/src/gpu/xenos/host/vulkan/vulkan_immediate_drawer.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_immediate_drawer.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_immediate_drawer.cpp
+@@ -626,7 +626,7 @@
+   pipeline_create_info.basePipelineIndex = -1;
+   if (rex::diagnostics::compile_trace::Call(rex::diagnostics::compile_trace::Event::kHelperGraphics,
+         "src/gpu/xenos/host/vulkan/vulkan_immediate_drawer.cpp:626", 0, [&] {
+-          return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
++          return vulkan_device_->CreateGraphicsPipelines(1, &pipeline_create_info, nullptr,
+                                     &pipeline_triangle_);
+         }) != VK_SUCCESS) {
+     REXUI_ERROR("VulkanImmediateDrawer: Failed to create the triangle list pipeline");
+@@ -642,8 +642,7 @@
+   pipeline_create_info.basePipelineHandle = pipeline_triangle_;
+   VkResult pipeline_line_create_result = rex::diagnostics::compile_trace::Call(rex::diagnostics::compile_trace::Event::kHelperGraphics,
+         "src/gpu/xenos/host/vulkan/vulkan_immediate_drawer.cpp:639", 0, [&] {
+-          return dfn.vkCreateGraphicsPipelines(
+-      device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr, &pipeline_line_);
++          return vulkan_device_->CreateGraphicsPipelines(1, &pipeline_create_info, nullptr, &pipeline_line_);
+         });
+   dfn.vkDestroyShaderModule(device, stages[1].module, nullptr);
+   dfn.vkDestroyShaderModule(device, stages[0].module, nullptr);
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_objects.cpp b/src/gpu/xenos/host/vulkan/vulkan_objects.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_objects.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_objects.cpp
+@@ -200,8 +200,7 @@
+         "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
+         trace_key,
+         [&] {
+-          return vulkan_device->GetFunctions().vkCreateComputePipelines(
+-          vulkan_device->GetDevice(), VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
++          return vulkan_device->CreateComputePipelines(1, &pipeline_create_info, nullptr,
+           &pipeline);
+         }) != VK_SUCCESS) {
+     return VK_NULL_HANDLE;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+@@ -1638,8 +1638,6 @@
+   pipeline_create_info.basePipelineHandle = VK_NULL_HANDLE;
+   pipeline_create_info.basePipelineIndex = -1;
+ 
+-  const VulkanDevice::Functions& dfn = vulkan_device_->GetFunctions();
+-  const VkDevice device = vulkan_device_->GetDevice();
+ 
+   VkPipeline pipeline;
+   if (rex::diagnostics::compile_trace::Call(rex::diagnostics::compile_trace::Event::kHelperGraphics,
+@@ -1648,7 +1646,7 @@
+               rex::diagnostics::compile_trace::HelperKind::kPresenter,
+               u64(size_t(effect))),
+         [&] {
+-          return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
++          return vulkan_device_->CreateGraphicsPipelines(1, &pipeline_create_info, nullptr,
+                                     &pipeline);
+         }) != VK_SUCCESS) {
+     REXUI_FAIL(VK_NULL_HANDLE,
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -1597,8 +1597,7 @@
+         rex::diagnostics::compile_trace::HelperKey(rex::diagnostics::compile_trace::HelperKind::kSwapChain,
+                                                 u64(i)),
+         [&] {
+-          return dfn.vkCreateGraphicsPipelines(
+-        device, VK_NULL_HANDLE, 1, &swap_apply_gamma_pipeline_create_info, nullptr,
++          return vulkan_device->CreateGraphicsPipelines(1, &swap_apply_gamma_pipeline_create_info, nullptr,
+         swap_apply_gamma_pipelines[i]);
+         });
+   }
+@@ -1623,7 +1622,7 @@
+         rex::diagnostics::compile_trace::HelperKey(
+                   rex::diagnostics::compile_trace::HelperKind::kSwapChain, 0x100 | variant),
+         [&] {
+-          return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
++          return vulkan_device->CreateGraphicsPipelines(1,
+                                         &swap_apply_gamma_pipeline_create_info, nullptr,
+                                         &pipeline_out);
+         }) != VK_SUCCESS) {
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.cpp b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+--- a/src/gpu/xenos/vulkan/pipeline_cache.cpp
++++ b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+@@ -10,6 +10,8 @@
+  */
+ 
+ #include <rex/diagnostics/compile_trace.h>
++#include <rex/gpu/native_cache_build.h>
++#include <rex/version.h>
+ #include <algorithm>
+ #include "gpu/xenos/preparation_budget.h"
+ 
+@@ -230,6 +232,136 @@
+   }
+ }
+ 
++namespace {
++NativeAdapterIdentity GetNativeAdapterIdentity(const gpu::vulkan::VulkanDevice& device) {
++  NativeAdapterIdentity identity;
++  const auto& properties = device.GetProperties();
++  identity.vendor = properties.vendorID;
++  identity.device = properties.deviceID;
++  identity.driver_version = properties.driverVersion;
++  std::memcpy(identity.device_uuid, properties.pipelineCacheUUID, VK_UUID_SIZE);
++  std::memcpy(identity.driver_uuid, properties.driverUUID, VK_UUID_SIZE);
++  return identity;
++}
++
++bool ValidateVulkanCacheData(const std::vector<u8>& data, const NativeAdapterIdentity& adapter) {
++  if (data.size() < sizeof(VkPipelineCacheHeaderVersionOne)) return false;
++  VkPipelineCacheHeaderVersionOne header;
++  std::memcpy(&header, data.data(), sizeof(header));
++  return header.headerVersion == VK_PIPELINE_CACHE_HEADER_VERSION_ONE &&
++         header.headerSize == sizeof(header) && header.vendorID == adapter.vendor &&
++         header.deviceID == adapter.device &&
++         std::memcmp(header.pipelineCacheUUID, adapter.device_uuid, VK_UUID_SIZE) == 0;
++}
++
++VkPipelineCacheCreateInfo NativeCacheCreateInfo(const std::vector<u8>& bytes) {
++  VkPipelineCacheCreateInfo info = {};
++  info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
++  info.initialDataSize = bytes.size();
++  info.pInitialData = bytes.empty() ? nullptr : bytes.data();
++  return info;
++}
++}  // namespace
++
++void VulkanPipelineCache::OpenNativeCache(const std::filesystem::path& root, u32 title_id,
++                                          bool interlock) {
++  CloseNativeCache();
++  if (!command_processor_.GetXenosSettings().native_pipeline_cache.Get()) return;
++  const auto* device = command_processor_.GetVulkanDevice();
++  if (!device) return;
++  NativePipelineCacheIdentity identity;
++  identity.backend = GraphicsPreparationBackend::kVulkan;
++  identity.title_id = title_id;
++  identity.render_path = interlock ? 1u : 0u;
++  identity.pipeline_schema_version = PipelineDescription::kVersion;
++  identity.translator_version = SPIRVShaderTranslator::Modification::kVersion;
++  identity.source_build = REX_NATIVE_CACHE_SOURCE_BUILD ":" REXGLUE_BUILD_IDENTITY ":" REXGLUE_BUILD_CONFIG;
++  identity.adapter = GetNativeAdapterIdentity(*device);
++  if (!native_store_.Configure(root / std::format("{:08X}.{}.vk", title_id,
++                                                 interlock ? "fsi" : "fbo"), identity)) return;
++  std::vector<u8> stored;
++  bool loaded = native_store_.Load(kNativeCacheEntryKey, stored) &&
++                ValidateVulkanCacheData(stored, identity.adapter);
++  if (!loaded) {
++    native_store_.Forget(kNativeCacheEntryKey);
++    stored.clear();
++  }
++  const auto& dfn = device->GetFunctions();
++  const auto native_device = device->GetDevice();
++  const auto result = device->WithNativePipelineCacheExclusive([&](VkPipelineCache& cache) {
++    auto info = NativeCacheCreateInfo(stored);
++    VkResult created = dfn.vkCreatePipelineCache(native_device, &info, nullptr, &cache);
++    if (created != VK_SUCCESS && loaded) {
++      REXGPU_WARN("Vulkan rejected stored pipeline cache ({}); retrying an empty cache", i32(created));
++      loaded = false;
++      stored.clear();
++      info = NativeCacheCreateInfo(stored);
++      created = dfn.vkCreatePipelineCache(native_device, &info, nullptr, &cache);
++    }
++    if (created != VK_SUCCESS) cache = VK_NULL_HANDLE;
++    return created;
++  });
++  if (!loaded) native_store_.Forget(kNativeCacheEntryKey);
++  if (result != VK_SUCCESS) {
++    REXGPU_WARN("Vulkan pipeline cache unavailable ({}); creating pipelines normally", i32(result));
++    native_store_.Reset();
++    return;
++  }
++  native_loaded_data_ = std::move(stored);
++}
++
++void VulkanPipelineCache::SaveNativeCache(const char* reason, bool close) {
++  const auto* device = command_processor_.GetVulkanDevice();
++  if (!device) return;
++  const auto& dfn = device->GetFunctions();
++  const auto native_device = device->GetDevice();
++  const auto identity = native_store_.identity();
++  std::vector<u8> on_disk, data;
++  const bool merge = native_store_.Load(kNativeCacheEntryKey, on_disk) &&
++      on_disk != native_loaded_data_ && ValidateVulkanCacheData(on_disk, identity.adapter);
++  // Host I/O happens outside the exclusive section. Every helper/guest creation
++  // holds shared access through the complete driver call, including on UI threads.
++  device->WithNativePipelineCacheExclusive([&](VkPipelineCache& cache) {
++    if (!cache) return;
++    auto destroy = ScopeGuard([&] {
++      if (close) { dfn.vkDestroyPipelineCache(native_device, cache, nullptr); cache = VK_NULL_HANDLE; }
++    });
++    if (!native_store_.enabled()) return;
++    if (merge) {
++      const auto info = NativeCacheCreateInfo(on_disk);
++      VkPipelineCache source = VK_NULL_HANDLE;
++      if (dfn.vkCreatePipelineCache(native_device, &info, nullptr, &source) == VK_SUCCESS) {
++        dfn.vkMergePipelineCaches(native_device, cache, 1, &source);
++        dfn.vkDestroyPipelineCache(native_device, source, nullptr);
++      }
++    }
++    for (unsigned attempt = 0; attempt < 3; ++attempt) {
++      size_t size = 0;
++      auto result = dfn.vkGetPipelineCacheData(native_device, cache, &size, nullptr);
++      if (result != VK_SUCCESS || !size || size > NativePipelineCacheStore::kMaxEntryBytes) return;
++      data.resize(size);
++      result = dfn.vkGetPipelineCacheData(native_device, cache, &size, data.data());
++      if (result == VK_INCOMPLETE) continue;
++      if (result != VK_SUCCESS || size > data.size()) { data.clear(); return; }
++      data.resize(size);
++      return;
++    }
++    data.clear();
++  });
++  if (ValidateVulkanCacheData(data, identity.adapter) &&
++      native_store_.Stage(kNativeCacheEntryKey, data.data(), data.size())) {
++    native_loaded_data_ = std::move(data);
++  }
++  const auto written = native_store_.Flush();
++  if (written) REXGPU_INFO("Native pipeline cache {}: {}", reason, native_store_.Summary());
++}
++
++void VulkanPipelineCache::CloseNativeCache() {
++  SaveNativeCache("at shader storage shutdown", true);
++  native_loaded_data_.clear();
++  native_store_.Reset();
++}
++
+ bool VulkanPipelineCache::OpenShaderStorage(const std::filesystem::path& cache_root,
+                                             u32 title_id) {
+   auto& preparation = command_processor_.GetPreparation();
+@@ -264,6 +396,7 @@
+ 
+   preparation.SetRenderer(GraphicsPreparationBackend::kVulkan,
+                           edram_fragment_shader_interlock ? 1u : 0u);
++  OpenNativeCache(shader_storage_root / "local", title_id, edram_fragment_shader_interlock);
+   std::vector<PipelineStoredDescription>& pipeline_stored_descriptions = preparation_descriptions_;
+   std::set<std::pair<u64, u64>> shader_translations_needed;
+   auto pipeline_storage_file_path =
+@@ -751,6 +884,7 @@
+ 
+   // Publish every worker completion before making the generation ready.
+   PublishCompletedPipelines();
++  SaveNativeCache("after preparation");
+ 
+   // Start the storage writing thread; it owns the streams for the rest of the
+   // run and must exist before any shader or pipeline is written.
+@@ -804,6 +938,7 @@
+   }
+   PublishCompletedPipelines();
+   storage_.Shutdown();
++  CloseNativeCache();
+ }
+ 
+ void VulkanPipelineCache::EndSubmission() {
+@@ -3391,12 +3526,10 @@
+   pipeline_create_info.basePipelineHandle = VK_NULL_HANDLE;
+   pipeline_create_info.basePipelineIndex = -1;
+ 
+-  const gpu::vulkan::VulkanDevice::Functions& dfn = vulkan_device->GetFunctions();
+-  const VkDevice device = vulkan_device->GetDevice();
+   VkPipeline pipeline;
+   VkResult create_result = rex::diagnostics::compile_trace::Call(creating_placeholder ? rex::diagnostics::compile_trace::Event::kPlaceholder : rex::diagnostics::compile_trace::Event::kGuestPipeline,
+         "src/gpu/xenos/vulkan/pipeline_cache.cpp:3082", XXH3_64bits(&description, sizeof(description)), [&] {
+-          return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
++          return vulkan_device->CreateGraphicsPipelines(1,
+                                                          &pipeline_create_info, nullptr, &pipeline);
+         });
+   if (create_result != VK_SUCCESS) {
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.h b/src/gpu/xenos/vulkan/pipeline_cache.h
+--- a/src/gpu/xenos/vulkan/pipeline_cache.h
++++ b/src/gpu/xenos/vulkan/pipeline_cache.h
+@@ -10,6 +10,7 @@
+  */
+ 
+ #pragma once
++#include <rex/gpu/native_pipeline_cache.h>
+ 
+ #ifndef XXH_INLINE_ALL
+ #define XXH_INLINE_ALL
+@@ -110,6 +111,12 @@
+                                     bool* is_placeholder_out = nullptr) const;
+ 
+  private:
++  void OpenNativeCache(const std::filesystem::path& root, u32 title_id, bool interlock);
++  void SaveNativeCache(const char* reason, bool close = false);
++  void CloseNativeCache();
++  NativePipelineCacheStore native_store_;
++  std::vector<u8> native_loaded_data_;
++  static constexpr u64 kNativeCacheEntryKey = 0x564B504950454C49ull;
+   REX_PACKED_STRUCT(ShaderStoredHeader, {
+     u64 ucode_data_hash;
+ 
+diff --git a/src/gpu/xenos/vulkan/render_target_cache.cpp b/src/gpu/xenos/vulkan/render_target_cache.cpp
+--- a/src/gpu/xenos/vulkan/render_target_cache.cpp
++++ b/src/gpu/xenos/vulkan/render_target_cache.cpp
+@@ -4141,7 +4141,7 @@
+               rex::diagnostics::compile_trace::HelperKind::kTransfer,
+               (u64(key.render_pass_key.key) << 32) | u64(key.shader_key.key)),
+         [&] {
+-          return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
++          return vulkan_device->CreateGraphicsPipelines(1, &pipeline_create_info, nullptr,
+                                     &pipelines[0]);
+         }) != VK_SUCCESS) {
+     REXGPU_ERROR(
+@@ -4169,7 +4169,7 @@
+                   rex::diagnostics::compile_trace::HelperKind::kTransfer,
+                   (u64(key.render_pass_key.key) << 32) | u64(key.shader_key.key)),
+         [&] {
+-          return dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipeline_create_info, nullptr,
++          return vulkan_device->CreateGraphicsPipelines(1, &pipeline_create_info, nullptr,
+                                         &pipelines[i]);
+         },
+         u64(i)) != VK_SUCCESS) {
+diff --git a/src/gpu/xenos/xenos_settings.h b/src/gpu/xenos/xenos_settings.h
+--- a/src/gpu/xenos/xenos_settings.h
++++ b/src/gpu/xenos/xenos_settings.h
+@@ -37,6 +37,8 @@
+   REX_SETTING(std::string, dump_shaders, "", "Path to dump shaders to");
+   REX_SETTING(std::string, swap_post_effect, "none", "Swap post effect",
+               Allowed("none", "fxaa", "fxaa_extreme"), kRestart);
++  REX_SETTING(bool, native_pipeline_cache, true,
++              "Persist driver pipeline data for this adapter and SDK build", kRestart);
+   REX_SETTING(bool, store_shaders, true,
+               "Keep compiled shaders on disk and load them on later runs to avoid stutter");
+   REX_SETTING(bool, mrt_edram_used_range_clamp_to_min, true,
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -21,6 +21,10 @@
+   base/mapped_memory_test.cpp
+   base/file_mapping_test.cpp
+   base/bit_cast_copy_test.cpp
++  gpu/native_pipeline_cache_store_test.cpp
++  gpu/native_pipeline_cache_access_test.cpp
++  gpu/native_pipeline_cache_d3d12_test.cpp
++  gpu/native_pipeline_cache_vulkan_test.cpp
+   gpu/null_command_processor_test.cpp
+   gpu/fence_endianness_test.cpp
+   gpu/graphics_system_test.cpp
+@@ -641,6 +645,8 @@
+   TIMEOUT
+   60
+ )
++set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
++  "${CMAKE_CURRENT_SOURCE_DIR}/gpu/native_pipeline_cache_properties.cmake")
+ catch_discover_tests(
+   cross_module_tests
+   DISCOVERY_MODE
+diff --git a/tests/unit/gpu/native_pipeline_cache_access_test.cpp b/tests/unit/gpu/native_pipeline_cache_access_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/native_pipeline_cache_access_test.cpp
+@@ -0,0 +1,51 @@
++#include "rex_test.h"
++#include "gpu/xenos/host/vulkan/native_pipeline_cache_access.h"
++#include <atomic>
++#include <chrono>
++#include <future>
++#include <thread>
++
++using rex::gpu::vulkan::NativePipelineCacheAccess;
++using namespace std::chrono_literals;
++
++REX_TEST_CASE("Native pipeline cache destruction waits for all creation users", "[gpu][native_pipeline_cache]") {
++  NativePipelineCacheAccess access;
++  std::atomic<bool> null_cache{false};
++  std::promise<void> entered, release;
++  auto released = release.get_future().share();
++  auto creation = std::async(std::launch::async, [&] {
++    access.Use([&](VkPipelineCache cache) {
++      null_cache = cache == VK_NULL_HANDLE;
++      entered.set_value();
++      released.wait();
++    });
++  });
++  entered.get_future().wait();
++  std::promise<void> waiting;
++  std::atomic<bool> exclusive{false};
++  auto destroy = std::async(std::launch::async, [&] {
++    waiting.set_value();
++    access.Exclusive([&](VkPipelineCache& cache) { exclusive = true; cache = VK_NULL_HANDLE; });
++  });
++  waiting.get_future().wait();
++  const auto state = destroy.wait_for(20ms);
++  release.set_value();
++  creation.get(); destroy.get();
++  CHECK(null_cache.load());
++  CHECK(state == std::future_status::timeout);
++  CHECK(exclusive.load());
++}
++
++REX_TEST_CASE("Independent devices never share a native pipeline cache lock", "[gpu][native_pipeline_cache]") {
++  NativePipelineCacheAccess first, second;
++  std::promise<void> entered, release;
++  auto released = release.get_future().share();
++  auto creation = std::async(std::launch::async, [&] {
++    first.Use([&](VkPipelineCache) { entered.set_value(); released.wait(); });
++  });
++  entered.get_future().wait();
++  auto other = std::async(std::launch::async, [&] { second.Exclusive([](VkPipelineCache& cache) { cache = VK_NULL_HANDLE; }); });
++  const auto state = other.wait_for(5s);
++  release.set_value(); creation.get(); other.get();
++  CHECK(state == std::future_status::ready);
++}
+diff --git a/tests/unit/gpu/native_pipeline_cache_d3d12_test.cpp b/tests/unit/gpu/native_pipeline_cache_d3d12_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/native_pipeline_cache_d3d12_test.cpp
+@@ -0,0 +1,67 @@
++#include "rex_test.h"
++#if defined(_WIN32)
++#include <rex/platform/process.h>
++#include <d3d12.h>
++#include <wrl/client.h>
++#include <vector>
++#include "gpu/xenos/d3d12/native_pipeline_cache_fallback.h"
++namespace {
++#include "gpu/xenos/shaders/bytecode/d3d12_5_1/fullscreen_cw_vs.h"
++}
++
++REX_TEST_CASE("Native D3D12 cached PSO round trip and rejection preserve ordinary creation", "[gpu][native_pipeline_cache][native_d3d12]") {
++  const auto enabled = rex::platform::GetEnvironmentValue("REX_RUN_NATIVE_GPU_TESTS");
++  if (!enabled || *enabled != "1") SKIP("Set REX_RUN_NATIVE_GPU_TESTS=1 on a D3D12 host");
++  using Microsoft::WRL::ComPtr;
++  ComPtr<ID3D12Device> device;
++  if (FAILED(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device))))
++    SKIP("No D3D12 device available");
++  D3D12_ROOT_SIGNATURE_DESC root_desc = {};
++  ComPtr<ID3DBlob> serialized, errors;
++  REQUIRE(SUCCEEDED(D3D12SerializeRootSignature(&root_desc, D3D_ROOT_SIGNATURE_VERSION_1,
++                                               &serialized, &errors)));
++  ComPtr<ID3D12RootSignature> root;
++  REQUIRE(SUCCEEDED(device->CreateRootSignature(0, serialized->GetBufferPointer(),
++                                               serialized->GetBufferSize(), IID_PPV_ARGS(&root))));
++  D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
++  desc.pRootSignature = root.Get();
++  desc.VS = {kFullscreenCWVS, sizeof(kFullscreenCWVS)};
++  desc.SampleMask = UINT_MAX;
++  desc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
++  desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
++  desc.RasterizerState.DepthClipEnable = TRUE;
++  auto& blend = desc.BlendState.RenderTarget[0];
++  blend.SrcBlend = blend.SrcBlendAlpha = D3D12_BLEND_ONE;
++  blend.DestBlend = blend.DestBlendAlpha = D3D12_BLEND_ZERO;
++  blend.BlendOp = blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
++  blend.LogicOp = D3D12_LOGIC_OP_NOOP;
++  desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
++  for (auto* face : {&desc.DepthStencilState.FrontFace, &desc.DepthStencilState.BackFace}) {
++    face->StencilFailOp = face->StencilDepthFailOp = face->StencilPassOp = D3D12_STENCIL_OP_KEEP;
++    face->StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
++  }
++  desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
++  desc.SampleDesc.Count = 1;
++  ComPtr<ID3D12PipelineState> first;
++  REQUIRE(SUCCEEDED(device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&first))));
++  ComPtr<ID3DBlob> native;
++  REQUIRE(SUCCEEDED(first->GetCachedBlob(&native)));
++  REQUIRE(native->GetBufferSize() > 0);
++  desc.CachedPSO = {native->GetBufferPointer(), native->GetBufferSize()};
++  bool loaded = true;
++  unsigned attempts = 0, rejected = 0;
++  ComPtr<ID3D12PipelineState> warm;
++  auto create = [&] { ++attempts; return device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&warm)); };
++  REQUIRE(SUCCEEDED(rex::gpu::d3d12::CreateWithCachedPSOFallback(desc.CachedPSO, loaded,
++      create, [&](HRESULT) { ++rejected; })));
++  CHECK(loaded); CHECK(attempts == 1); CHECK(rejected == 0);
++  warm.Reset();
++  std::vector<unsigned char> invalid(64, 0xFF);
++  desc.CachedPSO = {invalid.data(), invalid.size()};
++  loaded = true; attempts = rejected = 0;
++  REQUIRE(SUCCEEDED(rex::gpu::d3d12::CreateWithCachedPSOFallback(desc.CachedPSO, loaded,
++      create, [&](HRESULT) { ++rejected; })));
++  CHECK_FALSE(loaded); CHECK(attempts == 2); CHECK(rejected == 1); CHECK(warm != nullptr);
++  CHECK(desc.CachedPSO.pCachedBlob == nullptr);
++}
++#endif
+diff --git a/tests/unit/gpu/native_pipeline_cache_properties.cmake b/tests/unit/gpu/native_pipeline_cache_properties.cmake
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/native_pipeline_cache_properties.cmake
+@@ -0,0 +1,9 @@
++# Native driver compilation shares the host's adapter and memory budgets.
++foreach(native_test IN ITEMS
++    "unit.Native D3D12 cached PSO round trip and rejection preserve ordinary creation"
++    "unit.Native Vulkan compute cache survives file persistence and driver reload")
++  if(native_test IN_LIST unit_tests_TESTS)
++    set_tests_properties("${native_test}" PROPERTIES
++      RESOURCE_LOCK rex_native_graphics TIMEOUT 180)
++  endif()
++endforeach()
+diff --git a/tests/unit/gpu/native_pipeline_cache_store_test.cpp b/tests/unit/gpu/native_pipeline_cache_store_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/native_pipeline_cache_store_test.cpp
+@@ -0,0 +1,47 @@
++#include "rex_test.h"
++#include "temp_folder.h"
++#include <rex/gpu/native_pipeline_cache.h>
++#include <cstring>
++
++using namespace rex::gpu;
++
++REX_TEST_CASE("Native pipeline identities include patched source and driver UUID", "[gpu][native_pipeline_cache]") {
++  NativePipelineCacheIdentity first;
++  first.backend = GraphicsPreparationBackend::kVulkan;
++  first.source_build = "source-a:compiler:platform:Release";
++  auto other = first;
++  other.source_build = "source-b:compiler:platform:Release";
++  CHECK_FALSE(first.SameAs(other)); CHECK(first.Hash() != other.Hash());
++  other = first; other.adapter.driver_uuid[5] = 1;
++  CHECK_FALSE(first.SameAs(other)); CHECK(first.Hash() != other.Hash());
++  other = first; other.adapter.device_uuid[5] = 1;
++  CHECK(first.Hash() != other.Hash());
++}
++
++REX_TEST_CASE("Native pipeline entries reject reserved fields and empty opaque data", "[gpu][native_pipeline_cache]") {
++  const std::vector<rex::u8> payload{1,2,3,4};
++  auto bytes = NativePipelineCacheStore::EncodeEntry(42, 7, payload.data(), payload.size());
++  std::vector<rex::u8> decoded;
++  REQUIRE(NativePipelineCacheStore::DecodeEntry(bytes, 42, 7, decoded));
++  NativePipelineCacheEntryHeader header;
++  std::memcpy(&header, bytes.data(), sizeof(header));
++  header.reserved2 = 1; std::memcpy(bytes.data(), &header, sizeof(header));
++  CHECK_FALSE(NativePipelineCacheStore::DecodeEntry(bytes, 42, 7, decoded));
++  CHECK(NativePipelineCacheStore::EncodeEntry(42, 7, nullptr, 0).empty());
++}
++
++REX_TEST_CASE("Native pipeline entries replace atomically and refuse stale source builds", "[gpu][native_pipeline_cache]") {
++  rex::test::TempFolder folder("rex_native_cache_");
++  NativePipelineCacheIdentity identity; identity.source_build = "patched-sdk-a";
++  NativePipelineCacheStore store;
++  REQUIRE(store.Configure(folder.path, identity));
++  const std::vector<rex::u8> first{1,2,3}, second{4,5,6,7};
++  REQUIRE(store.Stage(1, first.data(), first.size())); REQUIRE(store.Flush() == 1);
++  REQUIRE(store.Stage(1, second.data(), second.size())); REQUIRE(store.Flush() == 1);
++  std::vector<rex::u8> loaded; REQUIRE(store.Load(1, loaded)); CHECK(loaded == second);
++  identity.source_build = "patched-sdk-b";
++  REQUIRE(store.Configure(folder.path, identity)); CHECK_FALSE(store.Load(1, loaded));
++  REQUIRE(store.Stage(2, first.data(), first.size()));
++  store.Reset(); CHECK(store.Flush() == 0); CHECK_FALSE(store.Has(2));
++  identity.source_build.clear(); CHECK_FALSE(store.Configure(folder.path, identity));
++}
+diff --git a/tests/unit/gpu/native_pipeline_cache_vulkan_test.cpp b/tests/unit/gpu/native_pipeline_cache_vulkan_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/native_pipeline_cache_vulkan_test.cpp
+@@ -0,0 +1,114 @@
++#include "rex_test.h"
++#if defined(_WIN32)
++#include "temp_folder.h"
++#include "gpu/xenos/host/vulkan/native_pipeline_cache_access.h"
++#include <rex/gpu/native_pipeline_cache.h>
++#include <rex/platform/process.h>
++#include <rex/utility.h>
++#include <array>
++#include <vector>
++
++REX_TEST_CASE("Native Vulkan compute cache survives file persistence and driver reload", "[gpu][native_pipeline_cache][native_vulkan]") {
++  const auto enabled = rex::platform::GetEnvironmentValue("REX_RUN_NATIVE_GPU_TESTS");
++  if (!enabled || *enabled != "1") SKIP("Set REX_RUN_NATIVE_GPU_TESTS=1 on a Vulkan host");
++  HMODULE loader = LoadLibraryW(L"vulkan-1.dll"); REQUIRE(loader != nullptr);
++  auto unload = rex::ScopeGuard([&] { FreeLibrary(loader); });
++  const auto get = reinterpret_cast<PFN_vkGetInstanceProcAddr>(GetProcAddress(loader, "vkGetInstanceProcAddr"));
++  REQUIRE(get != nullptr);
++  const auto create_instance = reinterpret_cast<PFN_vkCreateInstance>(get(nullptr, "vkCreateInstance"));
++  REQUIRE(create_instance != nullptr);
++  VkInstanceCreateInfo instance_info = {}; instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
++  VkInstance instance = VK_NULL_HANDLE;
++  REQUIRE(create_instance(&instance_info, nullptr, &instance) == VK_SUCCESS);
++#define LOAD(name) const auto name = reinterpret_cast<PFN_##name>(get(instance, #name)); REQUIRE(name != nullptr)
++  LOAD(vkDestroyInstance);
++  auto close_instance = rex::ScopeGuard([&] { vkDestroyInstance(instance, nullptr); });
++  LOAD(vkEnumeratePhysicalDevices); LOAD(vkGetPhysicalDeviceProperties);
++  LOAD(vkGetPhysicalDeviceQueueFamilyProperties); LOAD(vkCreateDevice); LOAD(vkDestroyDevice);
++  LOAD(vkCreatePipelineCache); LOAD(vkDestroyPipelineCache); LOAD(vkGetPipelineCacheData);
++  LOAD(vkMergePipelineCaches); LOAD(vkCreateShaderModule); LOAD(vkDestroyShaderModule);
++  LOAD(vkCreatePipelineLayout); LOAD(vkDestroyPipelineLayout); LOAD(vkCreateComputePipelines); LOAD(vkDestroyPipeline);
++#undef LOAD
++  uint32_t count = 0; REQUIRE(vkEnumeratePhysicalDevices(instance, &count, nullptr) == VK_SUCCESS);
++  REQUIRE(count > 0); std::vector<VkPhysicalDevice> physical(count);
++  REQUIRE(vkEnumeratePhysicalDevices(instance, &count, physical.data()) == VK_SUCCESS);
++  VkDevice device = VK_NULL_HANDLE; VkPhysicalDevice selected = VK_NULL_HANDLE;
++  for (auto gpu : physical) {
++    uint32_t family_count = 0; vkGetPhysicalDeviceQueueFamilyProperties(gpu, &family_count, nullptr);
++    std::vector<VkQueueFamilyProperties> families(family_count);
++    vkGetPhysicalDeviceQueueFamilyProperties(gpu, &family_count, families.data());
++    for (uint32_t family = 0; family < family_count; ++family) {
++      if (!(families[family].queueFlags & VK_QUEUE_COMPUTE_BIT)) continue;
++      const float priority = 1;
++      VkDeviceQueueCreateInfo queue = {}; queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
++      queue.queueFamilyIndex = family; queue.queueCount = 1; queue.pQueuePriorities = &priority;
++      VkDeviceCreateInfo info = {}; info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
++      info.queueCreateInfoCount = 1; info.pQueueCreateInfos = &queue;
++      if (vkCreateDevice(gpu, &info, nullptr, &device) == VK_SUCCESS) { selected = gpu; break; }
++    }
++    if (device) break;
++  }
++  REQUIRE(device != VK_NULL_HANDLE);
++  auto close_device = rex::ScopeGuard([&] { vkDestroyDevice(device, nullptr); });
++  // Minimal SPIR-V compute entry point with no resources, generated from an empty main.
++  static constexpr uint32_t code[] = {
++    0x07230203,0x00010000,0,6,0, 0x00020011,1, 0x0003000e,0,1,
++    0x0005000f,5,4,0x6e69616d,0, 0x00060010,4,17,1,1,1,
++    0x00020013,1, 0x00030021,2,1, 0x00050036,1,4,0,2,
++    0x000200f8,5, 0x000100fd, 0x00010038};
++  VkShaderModuleCreateInfo shader_info = {}; shader_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
++  shader_info.codeSize = sizeof(code); shader_info.pCode = code;
++  VkShaderModule shader = VK_NULL_HANDLE;
++  REQUIRE(vkCreateShaderModule(device, &shader_info, nullptr, &shader) == VK_SUCCESS);
++  auto close_shader = rex::ScopeGuard([&] { vkDestroyShaderModule(device, shader, nullptr); });
++  VkPipelineLayoutCreateInfo layout_info = {}; layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
++  VkPipelineLayout layout = VK_NULL_HANDLE;
++  REQUIRE(vkCreatePipelineLayout(device, &layout_info, nullptr, &layout) == VK_SUCCESS);
++  auto close_layout = rex::ScopeGuard([&] { vkDestroyPipelineLayout(device, layout, nullptr); });
++  rex::gpu::vulkan::NativePipelineCacheAccess access;
++  auto close_cache = rex::ScopeGuard([&] { access.Exclusive([&](VkPipelineCache& cache) {
++    if (cache) vkDestroyPipelineCache(device, cache, nullptr); cache = VK_NULL_HANDLE;
++  }); });
++  VkPipelineCacheCreateInfo cache_info = {}; cache_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
++  REQUIRE(access.Exclusive([&](VkPipelineCache& cache) {
++    return vkCreatePipelineCache(device, &cache_info, nullptr, &cache);
++  }) == VK_SUCCESS);
++  VkComputePipelineCreateInfo pipeline_info = {}; pipeline_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
++  pipeline_info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
++  pipeline_info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT; pipeline_info.stage.module = shader;
++  pipeline_info.stage.pName = "main"; pipeline_info.layout = layout;
++  for (unsigned run = 0; run < 2; ++run) {
++    VkPipeline pipeline = VK_NULL_HANDLE;
++    REQUIRE(access.Use([&](VkPipelineCache cache) {
++      return vkCreateComputePipelines(device, cache, 1, &pipeline_info, nullptr, &pipeline);
++    }) == VK_SUCCESS);
++    vkDestroyPipeline(device, pipeline, nullptr);
++    if (run) break;
++    std::vector<rex::u8> bytes;
++    access.Exclusive([&](VkPipelineCache& cache) {
++      size_t size = 0; REQUIRE(vkGetPipelineCacheData(device, cache, &size, nullptr) == VK_SUCCESS);
++      REQUIRE(size <= rex::gpu::NativePipelineCacheStore::kMaxEntryBytes);
++      bytes.resize(size); REQUIRE(vkGetPipelineCacheData(device, cache, &size, bytes.data()) == VK_SUCCESS);
++      bytes.resize(size); vkDestroyPipelineCache(device, cache, nullptr); cache = VK_NULL_HANDLE;
++    });
++    REQUIRE(bytes.size() >= sizeof(VkPipelineCacheHeaderVersionOne));
++    rex::gpu::NativePipelineCacheIdentity identity; identity.source_build = "native-vulkan-test";
++    identity.backend = rex::gpu::GraphicsPreparationBackend::kVulkan;
++    VkPhysicalDeviceProperties properties; vkGetPhysicalDeviceProperties(selected, &properties);
++    identity.adapter.vendor = properties.vendorID; identity.adapter.device = properties.deviceID;
++    identity.adapter.driver_version = properties.driverVersion;
++    std::memcpy(identity.adapter.device_uuid, properties.pipelineCacheUUID, VK_UUID_SIZE);
++    rex::test::TempFolder folder("rex_native_vulkan_"); rex::gpu::NativePipelineCacheStore store;
++    REQUIRE(store.Configure(folder.path, identity)); REQUIRE(store.Stage(1, bytes.data(), bytes.size()));
++    REQUIRE(store.Flush() == 1); std::vector<rex::u8> loaded; REQUIRE(store.Load(1, loaded)); CHECK(bytes == loaded);
++    cache_info.initialDataSize = loaded.size(); cache_info.pInitialData = loaded.data();
++    REQUIRE(access.Exclusive([&](VkPipelineCache& cache) {
++      REQUIRE(vkCreatePipelineCache(device, &cache_info, nullptr, &cache) == VK_SUCCESS);
++      VkPipelineCache merge = VK_NULL_HANDLE;
++      REQUIRE(vkCreatePipelineCache(device, &cache_info, nullptr, &merge) == VK_SUCCESS);
++      const auto result = vkMergePipelineCaches(device, cache, 1, &merge);
++      vkDestroyPipelineCache(device, merge, nullptr); return result;
++    }) == VK_SUCCESS);
++  }
++}
++#endif

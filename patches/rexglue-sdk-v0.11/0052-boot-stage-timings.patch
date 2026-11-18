@@ -1,0 +1,58 @@
+diff --git a/src/hid/sdl3/sdl3_input_driver.cpp b/src/hid/sdl3/sdl3_input_driver.cpp
+--- a/src/hid/sdl3/sdl3_input_driver.cpp
++++ b/src/hid/sdl3/sdl3_input_driver.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <chrono>
+ #include "hid/sdl3/sdl3_input_driver.h"
+ 
+ #include <algorithm>
+@@ -435,6 +436,7 @@
+         if (!state->running) {
+           return;
+         }
++        const auto input_started = std::chrono::steady_clock::now();
+         SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+         if (!SDL_InitSubSystem(SDL_INIT_EVENTS)) {
+           REXHID_ERROR("SDL: failed to init events subsystem: {}", SDL_GetError());
+@@ -449,6 +451,9 @@
+           return;
+         }
+         state->gamepad_up = true;
++        REXHID_INFO("SDL gamepad subsystem initialized in {:.1f} ms",
++                    std::chrono::duration<double, std::milli>(
++                        std::chrono::steady_clock::now() - input_started).count());
+         ++state->revision;
+ 
+         if (!mappings.empty()) {
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -1,3 +1,4 @@
++#include <chrono>
+ #include <atomic>
+ #include <bit>
+ #include <format>
+@@ -337,6 +338,7 @@
+   }
+ 
+   if (image_info.func_mappings) {
++    const auto registration_started = std::chrono::steady_clock::now();
+     int count = 0;
+     int duplicates = 0;
+     int rejected = 0;
+@@ -356,8 +358,10 @@
+         ++count;
+       }
+     }
+-    REXSYS_DEBUG("Registered {} recompiled functions ({} duplicates, {} rejected)", count,
+-                 duplicates, rejected);
++    REXSYS_INFO("Registered {} recompiled functions in {:.1f} ms ({} duplicates, {} rejected)",
++                count, std::chrono::duration<double, std::milli>(
++                    std::chrono::steady_clock::now() - registration_started).count(),
++                duplicates, rejected);
+     if (rejected > 0) {
+       Shutdown();
+       return Err(SetupError(X_STATUS_UNSUCCESSFUL,

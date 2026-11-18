@@ -1,0 +1,31 @@
+diff --git a/resources/templates/codegen/register_cpp.inja b/resources/templates/codegen/register_cpp.inja
+--- a/resources/templates/codegen/register_cpp.inja
++++ b/resources/templates/codegen/register_cpp.inja
+@@ -22,8 +22,12 @@
+ {% else %}
+ void {{ project }}_RegisterFunctions(rex::kernel::IFunctionRegistrar* registrar) {
+ {% endif %}
+-{% for fn in functions %}{% if not fn.below_code_base or fn.is_import %}  registrar->SetFunction({{ fn.address }}, {{ fn.name }});
+-{% endif %}{% endfor %}}
++  // Reuse the generated table's address filter and registration order.
++  for (const PPCFuncMapping* entry = kPPCImageConfig.func_mappings;
++       entry->address != 0; ++entry) {
++    registrar->SetFunction(static_cast<uint32_t>(entry->address), entry->host);
++  }
++}
+ 
+ {% if is_dll %}
+ // The runtime uses this baked layout for the dispatch table. It must match the
+diff --git a/tests/unit/codegen/project_recompiler_test.cpp b/tests/unit/codegen/project_recompiler_test.cpp
+--- a/tests/unit/codegen/project_recompiler_test.cpp
++++ b/tests/unit/codegen/project_recompiler_test.cpp
+@@ -229,7 +229,8 @@
+   const std::string registration = ReadTree(folder.path / "generated" / "entry");
+   CHECK(registration.find("DEFINE_REX_FUNC(sub_82001100)") != std::string::npos);
+   CHECK(registration.find("ModuleImport target{\"liba\", 7}") != std::string::npos);
+-  CHECK(registration.find("SetFunction(0x82001100, sub_82001100)") != std::string::npos);
++  CHECK(registration.find("{ 0x82001100, sub_82001100 }") != std::string::npos);
++  CHECK(registration.find("kPPCImageConfig.func_mappings") != std::string::npos);
+   CHECK(registration.find("DEFINE_REX_FUNC(sub_82001110)") == std::string::npos);
+   CHECK(registration.find("ModuleImport target{\"xboxkrnl\"") == std::string::npos);
+ }

@@ -1,0 +1,201 @@
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKImage.h b/MoltenVK/MoltenVK/GPUObjects/MVKImage.h
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKImage.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKImage.h
+@@ -22,6 +22,7 @@
+ #include "MVKCommandResourceFactory.h"
+ #include "MVKSync.h"
+ #include "MVKSmallVector.h"
++#include "MVKRetainedObject.h"
+ #include <MoltenVKShaderConverter/SPIRVToMSLConverter.h>
+ #include <unordered_map>
+ #include <mutex>
+@@ -498,7 +499,8 @@
+ protected:
+ 	friend MVKSwapchain;
+ 
+-	id<CAMetalDrawable> getCAMetalDrawable();
++	// Returns +1 ownership; the caller must release it.
++	id<CAMetalDrawable> getRetainedCAMetalDrawable();
+ 	void addPresentedHandler(id<CAMetalDrawable> mtlDrawable, MVKImagePresentInfo presentInfo, MVKSwapchainSignaler signaler);
+ 	void releaseMetalDrawable();
+ 	MVKSwapchainImageAvailability getAvailability();
+@@ -506,7 +508,7 @@
+ 	VkResult acquireAndSignalWhenAvailable(MVKSemaphore* semaphore, MVKFence* fence);
+ 	MVKSwapchainSignaler getPresentationSignaler();
+ 
+-	id<CAMetalDrawable> _mtlDrawable = nil;
++	MVKRetainedObject<id<CAMetalDrawable>> _mtlDrawable;
+ 	id<MTLTexture> _mtlTextureHeadless = nil;
+ 	MVKSwapchainImageAvailability _availability;
+ 	MVKSmallVector<MVKSwapchainSignaler, 1> _availabilitySignalers;
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+@@ -1577,47 +1577,60 @@
+ // Calling nextDrawable may result in a nil drawable, or a drawable with no pixel format.
+ // Attempt several times to retrieve a good drawable, and set an error to trigger the
+ // swapchain to be re-established if one cannot be retrieved.
+-id<CAMetalDrawable> MVKPresentableSwapchainImage::getCAMetalDrawable() {
+-
+-	if (_mtlTextureHeadless) { return nil; }	// If headless, there is no drawable.
+-
+-	if ( !_mtlDrawable ) {
++id<CAMetalDrawable> MVKPresentableSwapchainImage::getRetainedCAMetalDrawable() {
++	if (_mtlTextureHeadless) { return nil; }
++	if (id<CAMetalDrawable> drawable = _mtlDrawable.getRetained()) { return drawable; }
++
++	// nextDrawable can block until a completion callback releases another drawable.
++	// Never hold the ownership lock across this call.
++	id<CAMetalDrawable> candidate = nil;
++	bool hasInvalidFormat = false;
++	uint32_t attemptCnt = _swapchain->getImageCount();
++	for (uint32_t attemptIdx = 0; !candidate && attemptIdx < attemptCnt; attemptIdx++) {
+ 		@autoreleasepool {
+-			bool hasInvalidFormat = false;
+-			uint32_t attemptCnt = _swapchain->getImageCount();	// Attempt a resonable number of times
+-			for (uint32_t attemptIdx = 0; !_mtlDrawable && attemptIdx < attemptCnt; attemptIdx++) {
+-				uint64_t startTime = getPerformanceTimestamp();
+-				_mtlDrawable = [_swapchain->getCAMetalLayer().nextDrawable retain];	// retained
+-				addPerformanceInterval(getPerformanceStats().queue.retrieveCAMetalDrawable, startTime);
+-				hasInvalidFormat = _mtlDrawable && !_mtlDrawable.texture.pixelFormat;
+-				if (hasInvalidFormat) { releaseMetalDrawable(); }
+-			}
+-			if (hasInvalidFormat) {
+-				setConfigurationResult(reportError(VK_ERROR_OUT_OF_DATE_KHR, "CAMetalDrawable with valid format could not be acquired after %d attempts.", attemptCnt));
+-			} else if ( !_mtlDrawable ) {
+-				setConfigurationResult(reportError(VK_ERROR_OUT_OF_POOL_MEMORY, "CAMetalDrawable could not be acquired after %d attempts.", attemptCnt));
+-			}
+-		}
+-	}
+-	return _mtlDrawable;
+-}
+-
+-// If not headless, retrieve the MTLTexture directly from the CAMetalDrawable.
++			uint64_t startTime = getPerformanceTimestamp();
++			candidate = [_swapchain->getCAMetalLayer().nextDrawable retain];
++			addPerformanceInterval(getPerformanceStats().queue.retrieveCAMetalDrawable, startTime);
++			hasInvalidFormat = candidate && !candidate.texture.pixelFormat;
++			if (hasInvalidFormat) { [candidate release]; candidate = nil; }
++		}
++	}
++	if (!candidate) {
++		if (hasInvalidFormat) {
++			setConfigurationResult(reportError(VK_ERROR_OUT_OF_DATE_KHR, "CAMetalDrawable with valid format could not be acquired after %d attempts.", attemptCnt));
++		} else {
++			setConfigurationResult(reportError(VK_ERROR_OUT_OF_POOL_MEMORY, "CAMetalDrawable could not be acquired after %d attempts.", attemptCnt));
++		}
++		return nil;
++	}
++	id<CAMetalDrawable> drawable = _mtlDrawable.publishIfEmptyAndGetRetained(candidate);
++	[candidate release];
++	return drawable;
++}
++
++// Keep the texture alive through the caller's autorelease pool, even if the
++// shared drawable is retired concurrently.
+ id<MTLTexture> MVKPresentableSwapchainImage::getMTLTexture(uint8_t planeIndex) {
+-	return _mtlTextureHeadless ? _mtlTextureHeadless : getCAMetalDrawable().texture;
++	if (_mtlTextureHeadless) { return _mtlTextureHeadless; }
++	id<CAMetalDrawable> drawable = getRetainedCAMetalDrawable();
++	id<MTLTexture> texture = [drawable.texture retain];
++	[drawable release];
++	return [texture autorelease];
+ }
+ 
+ // Present the drawable and make myself available only once the command buffer has completed.
+ // Pass MVKImagePresentInfo by value because it may not exist when the callback runs.
+ VkResult MVKPresentableSwapchainImage::presentCAMetalDrawable(id<MTLCommandBuffer> mtlCmdBuff,
+ 															  MVKImagePresentInfo presentInfo) {
+-	_swapchain->renderWatermark(getMTLTexture(0), mtlCmdBuff);
++	// Own this exact drawable before copying any blocks that capture it.
++	id<CAMetalDrawable> mtlDrwbl = getRetainedCAMetalDrawable();
++	_swapchain->renderWatermark(_mtlTextureHeadless ? _mtlTextureHeadless : mtlDrwbl.texture, mtlCmdBuff);
+ 
+ 	// According to Apple, it is more performant to call MTLDrawable present from within a
+ 	// MTLCommandBuffer scheduled-handler than it is to call MTLCommandBuffer presentDrawable:.
+ 	// But get current drawable now, intead of in handler, because a new drawable might be acquired by then.
+ 	// Attach present handler before presenting to avoid race condition.
+-	id<CAMetalDrawable> mtlDrwbl = getCAMetalDrawable();
++	retain(); // Keep this image alive until the completion callback finishes.
+ 	MVKSwapchainSignaler signaler = getPresentationSignaler();
+ 	[mtlCmdBuff addScheduledHandler: ^(id<MTLCommandBuffer> mcb) {
+ 
+@@ -1641,16 +1654,17 @@
+ 	// Signal the fence and notify the swapchain that the present has completed
+ 	// from this callback, because the last one or two presentation completion
+ 	// callbacks can occasionally stall.
+-	retain();
+-	[mtlDrwbl retain];
+ 	auto* fence = presentInfo.fence;
+ 	if (fence) { fence->retain(); }
+ 	[mtlCmdBuff addCompletedHandler: ^(id<MTLCommandBuffer> mcb) {
+ 		signal(fence);
+ 		if (fence) { fence->release(); }
+ 		[mtlDrwbl release];
+-		release();
+-		if (_swapchain) { _swapchain->notifyPresentComplete(presentInfo); }
++		{
++			lock_guard<mutex> lock(_detachmentLock);
++			if (_swapchain) { _swapchain->notifyPresentComplete(presentInfo); }
++		}
++		release(); // Must be the final access to this image.
+ 	}];
+ 
+ 	signal(signaler.semaphore, signaler.semaphoreSignalToken, mtlCmdBuff);
+@@ -1732,8 +1746,7 @@
+ 
+ // Releases the CAMetalDrawable underlying this image.
+ void MVKPresentableSwapchainImage::releaseMetalDrawable() {
+-    [_mtlDrawable release];
+-	_mtlDrawable = nil;
++	_mtlDrawable.clear();
+ }
+ 
+ // Signal, untrack, and release any signalers that are tracking.
+diff --git a/MoltenVK/MoltenVK/Utility/MVKRetainedObject.h b/MoltenVK/MoltenVK/Utility/MVKRetainedObject.h
+new file mode 100644
+--- /dev/null
++++ b/MoltenVK/MoltenVK/Utility/MVKRetainedObject.h
+@@ -0,0 +1,42 @@
++/* Copyright 2026. Licensed under the Apache License, Version 2.0. */
++#pragma once
++
++#include <mutex>
++
++// An Objective-C object shared with asynchronous completion callbacks. Readers
++// acquire their own ownership before a concurrent clear can release the object.
++// Release outside the lock: destruction may itself run completion callbacks.
++template<class T> class MVKRetainedObject {
++public:
++    MVKRetainedObject() = default;
++    MVKRetainedObject(const MVKRetainedObject&) = delete;
++    MVKRetainedObject& operator=(const MVKRetainedObject&) = delete;
++    ~MVKRetainedObject() { clear(); }
++
++    T getRetained() {
++        std::lock_guard<std::mutex> lock(_lock);
++        return [_object retain];
++    }
++
++    // Candidate is borrowed. Its potentially blocking creation happens before
++    // entering this method, so a drawable wait cannot block retirement callbacks.
++    T publishIfEmptyAndGetRetained(T candidate) {
++        std::lock_guard<std::mutex> lock(_lock);
++        if (!_object) { _object = [candidate retain]; }
++        return [_object retain];
++    }
++
++    void clear() {
++        T previous;
++        {
++            std::lock_guard<std::mutex> lock(_lock);
++            previous = _object;
++            _object = nil;
++        }
++        [previous release];
++    }
++
++private:
++    std::mutex _lock;
++    T _object = nil;
++};

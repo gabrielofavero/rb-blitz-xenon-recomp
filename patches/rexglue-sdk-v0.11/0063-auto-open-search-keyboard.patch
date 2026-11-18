@@ -1,0 +1,13 @@
+diff --git a/src/ui/prompt.cpp b/src/ui/prompt.cpp
+--- a/src/ui/prompt.cpp
++++ b/src/ui/prompt.cpp
+@@ -208,7 +208,8 @@
+       if (pending_keyboard_request_ && theme.request_keyboard && !action.cancel) {
+         keyboard_requested_ |= theme.request_keyboard();
+       }
+-      pending_keyboard_request_ = action.show_keyboard;
++      // Defer the initial OS keyboard request until the input gains focus.
++      pending_keyboard_request_ = first_draw || action.show_keyboard;
+       bool confirmed = entered || ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+                        ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+       const bool mouse_released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);

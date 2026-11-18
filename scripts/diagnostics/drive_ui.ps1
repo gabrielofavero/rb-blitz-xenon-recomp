@@ -25,7 +25,8 @@
 param(
     [Parameter(Mandatory = $true)][string[]]$Actions,
     [string]$BuildDir = "out/build/win-amd64-release",
-    [string]$OutDir = "out/drive-ui"
+    [string]$OutDir = "out/drive-ui",
+    [int]$ProcessId = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,7 +47,8 @@ public class RbDriveWin32 {
             uint owner; GetWindowThreadProcessId(h, out owner);
             if (owner == pid) {
                 var name = new System.Text.StringBuilder(128); GetClassName(h, name, 128);
-                if (name.ToString() == "SDL_app") { found = h; return false; }
+                if ((name.ToString() == "SDL_app" || name.ToString() == "RbBlitzPersistentWindow") &&
+                    IsWindowVisible(h)) { found = h; return false; }
             }
             return true;
         }, IntPtr.Zero);
@@ -55,6 +57,7 @@ public class RbDriveWin32 {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
@@ -146,7 +149,7 @@ $vkMap = @{
     # Spare letters, for runs that rebind a control to a plain key (a D-pad
     # direction's default bind is Shift+arrow, which a single vk cannot send).
     # J/K/D/S are the Keyboard + Mouse gameplay table's own defaults
-    # (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md §11), so
+    # (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md Â§11), so
     # the P2 source-trace arm can press actions the table binds.
     "key_g"        = 0x47   # G
     "key_h"        = 0x48   # H
@@ -158,7 +161,7 @@ $vkMap = @{
     "key_k"        = 0x4B   # K  (Move Lane Right)
     "key_d"        = 0x44   # D  (Move Lane Left; General Mapping's D-pad right)
     "key_s"        = 0x53   # S  (Second Note; General Mapping's D-pad down)
-    "key_f10"      = 0x79   # F10 (the Controls recovery key, plan §17.2)
+    "key_f10"      = 0x79   # F10 (the Controls recovery key, plan Â§17.2)
 }
 $scMap = @{
     0x20 = 0x39; 0x08 = 0x0E; 0x4C = 0x26; 0x50 = 0x19; 0x0D = 0x1C; 0x09 = 0x0F;
@@ -170,12 +173,19 @@ $scMap = @{
 }
 
 function Get-GameWindow {
-    $proc = Get-Process rb_blitz -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $proc) { throw "rb_blitz is not running" }
-    # Windows may identify an IME/input-indicator overlay as MainWindowHandle.
-    $h = [RbDriveWin32]::GameWindow($proc.Id)
-    if ($h -eq [IntPtr]::Zero) { throw "rb_blitz has no main window" }
-    return $h
+    $candidates = if ($ProcessId -gt 0) {
+        @(Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
+    } else {
+        @(Get-Process rb_blitz -ErrorAction SilentlyContinue)
+    }
+    if (-not $candidates) { throw "rb_blitz is not running" }
+    # The host owns the visible top-level window; the embedded guest may be
+    # enumerated first. Match the actual SDL/host class instead of an IME window.
+    foreach ($candidate in $candidates) {
+        $h = [RbDriveWin32]::GameWindow($candidate.Id)
+        if ($h -ne [IntPtr]::Zero) { return $h }
+    }
+    throw "rb_blitz has no visible main window"
 }
 
 function Focus-GameWindow {
@@ -237,7 +247,7 @@ foreach ($action in $Actions) {
         }
         "shot" {
             $file = Join-Path $capDir $parts[1]
-            & (Join-Path $PSScriptRoot "capture_window.ps1") -OutFile $file | Out-Null
+            & (Join-Path $PSScriptRoot "capture_window.ps1") -OutFile $file -ProcessId $ProcessId | Out-Null
             Write-Host "shot -> $file"
         }
         "key" {

@@ -1,0 +1,829 @@
+diff --git a/include/rex/ui/application_activity.h b/include/rex/ui/application_activity.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/ui/application_activity.h
+@@ -0,0 +1,16 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++#include <rex/module.h>
++#include <rex/result.h>
++
++namespace rex::ui {
++REX_DECLARE_INTERFACE(IApplicationActivity, 1)
++  /** Synchronous lifecycle transition on the UI thread. On suspend, guest audio
++   * callbacks finish before clock pause and GPU drain. Failed resume keeps the
++   * application inactive. Wrong-thread calls return an error without waiting.
++   */
++  [[nodiscard]] virtual Result<void> SetActive(bool active) = 0;
++  /** Release paused clock/audio and queue waiters before shutdown joins. UI thread. */
++  virtual void ResumeForShutdown() = 0;
++};
++}  // namespace rex::ui
+diff --git a/include/rex/apu/audio_activity.h b/include/rex/apu/audio_activity.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/apu/audio_activity.h
+@@ -0,0 +1,13 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++#include <rex/module.h>
++#include <rex/result.h>
++
++namespace rex::apu {
++REX_DECLARE_INTERFACE(IAudioActivity, 1)
++  /** Any thread. Inactive returns after in-flight guest mix callbacks finish;
++   * later device callbacks produce silence without consuming guest frames.
++   */
++  virtual void SetActive(bool active) = 0;
++};
++}  // namespace rex::apu
+diff --git a/include/rex/gpu/graphics_activity.h b/include/rex/gpu/graphics_activity.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/gpu/graphics_activity.h
+@@ -0,0 +1,15 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++#include <rex/module.h>
++#include <rex/result.h>
++
++namespace rex::gpu {
++REX_DECLARE_INTERFACE(IGraphicsActivity, 1)
++  /** UI thread. Suspend stops new queue calls and waits for GPU completion.
++   * Failed drain or resume returns an error and keeps new submissions blocked.
++   */
++  [[nodiscard]] virtual Result<void> SetActive(bool active) = 0;
++  /** Release blocked host queue callers before shutdown joins. */
++  virtual void ResumeForShutdown() = 0;
++};
++}  // namespace rex::gpu
+diff --git a/include/rex/gpu/queue_lifecycle.h b/include/rex/gpu/queue_lifecycle.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/gpu/queue_lifecycle.h
+@@ -0,0 +1,88 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++#include <chrono>
++#include <condition_variable>
++#include <functional>
++#include <mutex>
++#include <utility>
++
++namespace rex::gpu {
++/** Stops new host queue operations before draining GPU work. */
++class QueueLifecycle {
++ public:
++  using Pump = bool (*)();
++  class Permit {
++   public:
++    explicit Permit(QueueLifecycle* owner) : owner_(owner) {
++      if (!owner_) return;
++      std::unique_lock lock(owner_->mutex_);
++      while (!owner_->active_ && !owner_->stopping_) {
++        lock.unlock();
++        const bool pumped = owner_->pump_ && owner_->pump_();
++        lock.lock();
++        if (!owner_->active_ && !owner_->stopping_) {
++          if (pumped) owner_->changed_.wait_for(lock, std::chrono::milliseconds(2));
++          else owner_->changed_.wait(lock, [&] { return owner_->active_ || owner_->stopping_; });
++        }
++      }
++      ++owner_->users_;
++    }
++    Permit(const Permit&) = delete;
++    Permit& operator=(const Permit&) = delete;
++    Permit(Permit&& other) noexcept : owner_(std::exchange(other.owner_, nullptr)) {}
++    ~Permit() {
++      if (!owner_) return;
++      std::lock_guard lock(owner_->mutex_);
++      if (--owner_->users_ == 0) owner_->changed_.notify_all();
++    }
++   private:
++    QueueLifecycle* owner_;
++  };
++  explicit QueueLifecycle(Pump pump = nullptr) : pump_(pump) {}
++  bool SetActive(bool active, const std::function<bool()>& drain) {
++    std::unique_lock lock(mutex_);
++    changed_.wait(lock, [&] { return !draining_; });
++    if (stopping_) return false;
++    if (active_ == active) return !failed_;
++    if (active) {
++      if (failed_) return false;
++      active_ = true;
++      lock.unlock();
++      changed_.notify_all();
++      return true;
++    }
++    active_ = false;
++    draining_ = true;
++    changed_.wait(lock, [&] { return users_ == 0; });
++    // Vulkan completion may run host callbacks. Never hold the gate mutex here.
++    lock.unlock();
++    const bool drained = drain();
++    lock.lock();
++    failed_ = !drained;
++    draining_ = false;
++    lock.unlock();
++    changed_.notify_all();
++    return drained;
++  }
++  void ResumeForShutdown() {
++    {
++      std::lock_guard lock(mutex_);
++      stopping_ = true;
++    }
++    changed_.notify_all();
++  }
++  bool IsActive() const {
++    std::lock_guard lock(mutex_);
++    return active_ && !failed_ && !stopping_;
++  }
++ private:
++  mutable std::mutex mutex_;
++  std::condition_variable changed_;
++  bool active_ = true;
++  bool draining_ = false;
++  bool failed_ = false;
++  bool stopping_ = false;
++  unsigned users_ = 0;
++  Pump pump_;
++};
++}  // namespace rex::gpu
+diff --git a/include/rex/chrono.h b/include/rex/chrono.h
+--- a/include/rex/chrono.h
++++ b/include/rex/chrono.h
+@@ -88,6 +88,9 @@
+ 
+   /** Advances and reads the guest tick count, with frequency adjustment and scaling applied. */
+   static u64 QueryGuestTickCount();
++
++  /** Freeze guest elapsed time across application suspension. Host time stays live. */
++  static void SetGuestPaused(bool paused);
+ 
+   /**
+    * @return The guest system time as a scaled FILETIME. It equals host system time when
+diff --git a/src/base/clock.cpp b/src/base/clock.cpp
+--- a/src/base/clock.cpp
++++ b/src/base/clock.cpp
+@@ -50,6 +50,7 @@
+ u64 g_last_guest_tick_count = 0;
+ constinit u64 g_last_host_tick_count = 0;
+ std::mutex g_tick_mutex;
++bool g_guest_paused = false;
+ 
+ u64 GuestSystemTimeBaseLocked() {
+   if (g_guest_system_time_base == 0) {
+@@ -87,9 +88,10 @@
+   }
+   const u64 host_tick_delta =
+       host_tick_count > g_last_host_tick_count ? host_tick_count - g_last_host_tick_count : 0;
+-  g_last_host_tick_count = host_tick_count;
+-  g_last_guest_tick_count +=
+-      mul_div(host_tick_delta, g_guest_tick_ratio.first, g_guest_tick_ratio.second);
++  g_last_host_tick_count = std::max(g_last_host_tick_count, host_tick_count);
++  if (!g_guest_paused)
++    g_last_guest_tick_count +=
++        mul_div(host_tick_delta, g_guest_tick_ratio.first, g_guest_tick_ratio.second);
+   return lock;
+ }
+ 
+@@ -111,6 +113,17 @@
+   return GuestSystemTimeOffsetLocked();
+ }
+ }  // namespace
++
++void Clock::SetGuestPaused(bool paused) {
++  std::lock_guard lock(g_tick_mutex);
++  const u64 now = GetHostTickCount();
++  if (g_last_host_tick_count == 0) g_last_host_tick_count = now;
++  const u64 delta = now > g_last_host_tick_count ? now - g_last_host_tick_count : 0;
++  if (!g_guest_paused)
++    g_last_guest_tick_count += mul_div(delta, g_guest_tick_ratio.first, g_guest_tick_ratio.second);
++  g_last_host_tick_count = std::max(g_last_host_tick_count, now);
++  g_guest_paused = paused;
++}
+ 
+ f64 Clock::GetGuestTimeScalar() {
+   std::lock_guard<std::mutex> lock(g_tick_mutex);
+diff --git a/src/apu/audio_system.h b/src/apu/audio_system.h
+--- a/src/apu/audio_system.h
++++ b/src/apu/audio_system.h
+@@ -14,6 +14,7 @@
+ 
+ #include <rex/apu/audio_driver.h>
+ #include <rex/apu/audio_system.h>
++#include <rex/apu/audio_activity.h>
+ 
+ #include <rex/logging/log_category.h>
+ 
+@@ -22,7 +23,7 @@
+ namespace rex::apu {
+ 
+ /** Mixes the open streams and feeds the device. The app starts and stops it. */
+-class AudioSystem final : public rex::apu::IAudioSystem {
++class AudioSystem final : public rex::apu::IAudioSystem, public IAudioActivity {
+  public:
+   AudioSystem();
+   ~AudioSystem() override;
+@@ -36,6 +37,7 @@
+   u32 GetOutputChannels() const override;
+   rex::apu::AudioStats GetStats() const override;
+   void SetFocused(bool focused) override;
++  void SetActive(bool active) override;
+ 
+   /**
+    * Starts the mix thread.
+diff --git a/src/apu/audio_system.cpp b/src/apu/audio_system.cpp
+--- a/src/apu/audio_system.cpp
++++ b/src/apu/audio_system.cpp
+@@ -70,6 +70,7 @@
+   std::atomic<u32> latency_us{0};
+ 
+   std::mutex mix_mutex;
++  bool active = true;
+   std::array<f32, rex::apu::kAudioFrameSamples> planar{};
+   std::array<f32, rex::apu::kAudioFrameSamples> out{};
+   u32 out_samples = 0;
+@@ -94,6 +95,12 @@
+ 
+ AudioSystem::~AudioSystem() {
+   Stop();
++}
++
++void AudioSystem::SetActive(bool active) {
++  std::lock_guard lock(state_->mix_mutex);
++  state_->active = active;
++  if (active) state_->out_pos = state_->out_samples;
+ }
+ 
+ void AudioSystem::SetFocused(bool focused) {
+@@ -296,6 +303,10 @@
+     return rex::apu::AudioFill([this](std::span<f32> samples, u32 channels) {
+       State& s = *state_;
+       std::lock_guard lock(s.mix_mutex);
++      if (!s.active) {
++        std::fill(samples.begin(), samples.end(), 0.0f);
++        return;
++      }
+       s.pad = false;
+       size_t done = 0;
+       while (done < samples.size()) {
+@@ -347,7 +358,7 @@
+         }
+         {
+           std::lock_guard lock(s.mix_mutex);
+-          s.mix_period(s.channels.load());
++          if (s.active) s.mix_period(s.channels.load());
+         }
+         if (s.driver) {
+           if (s.reopen_wait > 0) {
+diff --git a/src/apu/audio_module.h b/src/apu/audio_module.h
+--- a/src/apu/audio_module.h
++++ b/src/apu/audio_module.h
+@@ -29,7 +29,7 @@
+ /** Serves the audio system, selects its drivers at Init and stops them at Shutdown. */
+ class AudioModule final : public IModule {
+  public:
+-  REX_MODULE_SERVES(::rex::apu::IAudioSystem)
++  REX_MODULE_SERVES(::rex::apu::IAudioSystem, ::rex::apu::IAudioActivity)
+ 
+   std::string_view GetName() const override { return "rexapu"; }
+   std::span<const InterfaceType> GetRequiredInterfaces() const override;
+diff --git a/src/apu/audio_module.cpp b/src/apu/audio_module.cpp
+--- a/src/apu/audio_module.cpp
++++ b/src/apu/audio_module.cpp
+@@ -78,7 +78,7 @@
+ }
+ 
+ IInterface* AudioModule::QueryInterface(std::string_view name, u32 version) {
+-  return FindModuleInterface<rex::apu::IAudioSystem>(GetOrCreateSystem(), name, version);
++  return FindModuleInterface<rex::apu::IAudioSystem, IAudioActivity>(GetOrCreateSystem(), name, version);
+ }
+ 
+ }  // namespace rex::apu
+diff --git a/include/rex/gpu/graphics_driver.h b/include/rex/gpu/graphics_driver.h
+--- a/include/rex/gpu/graphics_driver.h
++++ b/include/rex/gpu/graphics_driver.h
+@@ -44,6 +44,9 @@
+    */
+   virtual IXenosGraphicsDriver* AsXenos() { return nullptr; }
+ 
++  /** Optional application suspension; unused drivers keep their existing behavior. */
++  virtual Result<void> SetApplicationActive(bool active) { (void)active; return {}; }
++  virtual void ResumeApplicationForShutdown() {}
+   virtual PresentationState GetPresentationState() const { return {}; }
+   virtual bool CaptureGuestOutput(CaptureImage& image) { image = {}; return false; }
+ 
+diff --git a/src/gpu/graphics_system.h b/src/gpu/graphics_system.h
+--- a/src/gpu/graphics_system.h
++++ b/src/gpu/graphics_system.h
+@@ -17,6 +17,7 @@
+ #include <rex/overlay_renderer.h>
+ #include <rex/gpu/graphics_driver.h>
+ #include <rex/gpu/graphics_system.h>
++#include <rex/gpu/graphics_activity.h>
+ #include <rex/gpu/graphics_preparation_service.h>
+ #include <rex/gpu/texture_override.h>
+ #include <rex/utility.h>
+@@ -32,7 +33,7 @@
+ 
+ /** Runs the graphics driver and routes the Vd calls. The app starts and stops it. */
+ class GraphicsSystem final : public rex::gpu::IGraphicsSystem, public IGraphicsControl,
+-                             public IGraphicsPreparation, public IGraphicsPresentation, public ITextureOverrides {
++                             public IGraphicsPreparation, public IGraphicsPresentation, public ITextureOverrides, public IGraphicsActivity {
+  public:
+   GraphicsSystem();
+   ~GraphicsSystem() override;
+@@ -42,6 +43,8 @@
+   std::string GetDriverName() const override;
+   Result<ScopeGuard> RegisterProvider(std::shared_ptr<ITextureOverrideProvider> provider) override;
+   void Invalidate() override;
++  Result<void> SetActive(bool active) override;
++  void ResumeForShutdown() override;
+   bool SetShaderStorageDeferred(bool deferred) override;
+   bool BeginShaderStoragePreparation(const std::filesystem::path& root, u32 title_id,
+                                      u64 configuration = 0) override;
+diff --git a/src/gpu/graphics_system.cpp b/src/gpu/graphics_system.cpp
+--- a/src/gpu/graphics_system.cpp
++++ b/src/gpu/graphics_system.cpp
+@@ -191,7 +191,16 @@
+   return {};
+ }
+ 
++Result<void> GraphicsSystem::SetActive(bool active) {
++  return state_->driver ? state_->driver->SetApplicationActive(active) : Ok();
++}
++
++void GraphicsSystem::ResumeForShutdown() {
++  if (state_->driver) state_->driver->ResumeApplicationForShutdown();
++}
++
+ void GraphicsSystem::Stop() {
++  ResumeForShutdown();
+   State& state = *state_;
+   if (state.present_thread.joinable()) {
+     state.present_thread.request_stop();
+diff --git a/src/gpu/graphics_module.h b/src/gpu/graphics_module.h
+--- a/src/gpu/graphics_module.h
++++ b/src/gpu/graphics_module.h
+@@ -36,7 +36,7 @@
+  public:
+   REX_MODULE_SERVES(::rex::gpu::IGraphicsSystem, ::rex::gpu::IGraphicsControl,
+                     ::rex::gpu::IGraphicsPreparation, ::rex::gpu::IGraphicsPresentation,
+-                    ::rex::gpu::ITextureOverrides)
++                    ::rex::gpu::ITextureOverrides, ::rex::gpu::IGraphicsActivity)
+ 
+   std::string_view GetName() const override { return "rexgpu"; }
+   std::span<const InterfaceType> GetRequiredInterfaces() const override;
+diff --git a/src/gpu/graphics_module.cpp b/src/gpu/graphics_module.cpp
+--- a/src/gpu/graphics_module.cpp
++++ b/src/gpu/graphics_module.cpp
+@@ -108,7 +108,7 @@
+ }
+ 
+ IInterface* GraphicsModule::QueryInterface(std::string_view name, u32 version) {
+-  return FindModuleInterface<rex::gpu::IGraphicsSystem, IGraphicsControl, IGraphicsPreparation, IGraphicsPresentation, ITextureOverrides>(GetOrCreateSystem(), name,
++  return FindModuleInterface<rex::gpu::IGraphicsSystem, IGraphicsControl, IGraphicsPreparation, IGraphicsPresentation, ITextureOverrides, IGraphicsActivity>(GetOrCreateSystem(), name,
+                                                                           version);
+ }
+ 
+diff --git a/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.h b/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.h
+--- a/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.h
++++ b/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.h
+@@ -27,6 +27,8 @@
+ 
+   [[nodiscard]] Result<void> Initialize(IDriverContext& context) override;
+   void Shutdown() override;
++  Result<void> SetApplicationActive(bool active) override;
++  void ResumeApplicationForShutdown() override;
+ 
+   const VulkanSettings& GetVulkanSettings() const { return vulkan_settings_; }
+ 
+diff --git a/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.cpp b/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.cpp
+--- a/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.cpp
++++ b/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.cpp
+@@ -49,6 +49,15 @@
+   }
+ }
+ 
++Result<void> VulkanXenosGraphicsDriver::SetApplicationActive(bool active) {
++  if (!provider_) return Ok();
++  return static_cast<VulkanProvider*>(provider_.get())->GetVulkanDevice()->SetApplicationActive(active);
++}
++
++void VulkanXenosGraphicsDriver::ResumeApplicationForShutdown() {
++  if (provider_) static_cast<VulkanProvider*>(provider_.get())->GetVulkanDevice()->ResumeForShutdown();
++}
++
+ void VulkanXenosGraphicsDriver::CreateProvider(bool with_presentation) {
+   provider_ = rex::gpu::vulkan::VulkanProvider::Create(
+       true, with_presentation, vulkan_settings_.device.Get(), vulkan_settings_);
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.h b/src/gpu/xenos/host/vulkan/vulkan_device.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_device.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_device.h
+@@ -20,6 +20,8 @@
+ #include "gpu/xenos/host/vulkan/vulkan_instance.h"
+ #include "gpu/xenos/host/vulkan/vulkan_settings.h"
+ #include <rex/types.h>
++#include <rex/gpu/queue_lifecycle.h>
++#include <rex/result.h>
+ #include <rex/utility.h>
+ 
+ namespace rex {
+@@ -240,6 +242,8 @@
+   };
+ 
+   const Functions& GetFunctions() const { return functions_; }
++  Result<void> SetApplicationActive(bool active);
++  void ResumeForShutdown();
+ 
+   VkResult CreateGraphicsPipelines(u32 count, const VkGraphicsPipelineCreateInfo* infos,
+                                   const VkAllocationCallbacks* allocator, VkPipeline* pipelines) const {
+@@ -279,15 +283,19 @@
+     std::recursive_mutex mutex;
+     VkQueue queue = nullptr;
+ 
+-    explicit Queue(const VkQueue queue) : queue(queue) {}
++    QueueLifecycle* lifecycle = nullptr;
++    explicit Queue(const VkQueue queue, QueueLifecycle* lifecycle_gate = nullptr)
++        : queue(queue), lifecycle(lifecycle_gate) {}
+ 
+     class Acquisition {
+      public:
+-      explicit Acquisition(Queue& queue) : lock_(queue.mutex), queue_(queue.queue) {}
++      explicit Acquisition(Queue& queue)
++          : permit_(queue.lifecycle), lock_(queue.mutex), queue_(queue.queue) {}
+ 
+       VkQueue GetQueue() const { return queue_; }
+ 
+      private:
++      QueueLifecycle::Permit permit_;
+       std::unique_lock<std::recursive_mutex> lock_;
+       VkQueue queue_;
+     };
+@@ -339,6 +347,7 @@
+   Extensions extensions_;
+ 
+   VkDevice device_ = nullptr;
++  QueueLifecycle queue_lifecycle_;
+ 
+   Functions functions_;
+   NativePipelineCacheAccess native_pipeline_cache_;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.cpp b/src/gpu/xenos/host/vulkan/vulkan_device.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_device.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_device.cpp
+@@ -18,6 +18,9 @@
+ #include <rex/assert.h>
+ #include <rex/logging/log_category.h>
+ #include <rex/platform.h>
++#if REX_PLATFORM_IOS
++#include <SDL3/SDL.h>
++#endif
+ #include <rex/string/text.h>
+ #include "gpu/xenos/host/vulkan/vulkan_device.h"
+ #include "gpu/xenos/host/vulkan/vulkan_objects.h"
+@@ -751,7 +754,12 @@
+       VkQueue queue;
+       dfn.vkGetDeviceQueue(device->device_, static_cast<u32>(queue_family_index),
+                            static_cast<u32>(queue_index), &queue);
+-      queue_family.queues[queue_index] = std::make_unique<Queue>(queue);
++#if REX_PLATFORM_IOS
++      QueueLifecycle* lifecycle = &device->queue_lifecycle_;
++#else
++      QueueLifecycle* lifecycle = nullptr;
++#endif
++      queue_family.queues[queue_index] = std::make_unique<Queue>(queue, lifecycle);
+     }
+   }
+ 
+@@ -779,6 +787,25 @@
+   return device;
+ }
+ 
++Result<void> VulkanDevice::SetApplicationActive(bool active) {
++#if REX_PLATFORM_IOS
++  if (!queue_lifecycle_.SetActive(active, [this] {
++        const VkResult result = functions_.vkDeviceWaitIdle(device_);
++        REXUI_INFO("ios_lifecycle: GPU queues drained, result={}", int(result));
++        return result == VK_SUCCESS;
++      })) return Err(ErrorCategory::kPlatform, "Vulkan application transition failed");
++#else
++  (void)active;
++#endif
++  return Ok();
++}
++
++void VulkanDevice::ResumeForShutdown() {
++#if REX_PLATFORM_IOS
++  queue_lifecycle_.ResumeForShutdown();
++#endif
++}
++
+ VulkanDevice::~VulkanDevice() {
+   if (device_) {
+     WithNativePipelineCacheExclusive([&](VkPipelineCache& cache) {
+@@ -791,7 +818,18 @@
+ 
+ VulkanDevice::VulkanDevice(Key, const VulkanInstance* const vulkan_instance,
+                            const VkPhysicalDevice physical_device)
+-    : vulkan_instance_(vulkan_instance), physical_device_(physical_device) {
++    : vulkan_instance_(vulkan_instance), physical_device_(physical_device),
++      queue_lifecycle_(
++#if REX_PLATFORM_IOS
++          []() -> bool {
++            if (!SDL_IsMainThread()) return false;
++            SDL_PumpEvents();
++            return true;
++          }
++#else
++          nullptr
++#endif
++      ) {
+   REX_ASSERT(vulkan_instance != nullptr);
+   REX_ASSERT(physical_device != nullptr);
+ }
+diff --git a/src/gpu/xenos/host/vulkan/functions/device_1_0.inc b/src/gpu/xenos/host/vulkan/functions/device_1_0.inc
+--- a/src/gpu/xenos/host/vulkan/functions/device_1_0.inc
++++ b/src/gpu/xenos/host/vulkan/functions/device_1_0.inc
+@@ -90,6 +90,7 @@
+ REX_VK_FUNCTION(vkResetFences)
+ REX_VK_FUNCTION(vkQueueBindSparse)
+ REX_VK_FUNCTION(vkQueueSubmit)
++REX_VK_FUNCTION(vkDeviceWaitIdle)
+ REX_VK_FUNCTION(vkUnmapMemory)
+ REX_VK_FUNCTION(vkUpdateDescriptorSets)
+ REX_VK_FUNCTION(vkWaitForFences)
+diff --git a/src/ui/ui_system.h b/src/ui/ui_system.h
+--- a/src/ui/ui_system.h
++++ b/src/ui/ui_system.h
+@@ -14,6 +14,9 @@
+ #include <memory>
+ 
+ #include <rex/ui/ui_system.h>
++#include <rex/ui/application_activity.h>
++#include <rex/apu/audio_activity.h>
++#include <rex/gpu/graphics_activity.h>
+ #include <rex/ui/achievement_notifications.h>
+ #include <rex/ui/startup_paint.h>
+ 
+@@ -49,7 +52,7 @@
+ namespace rex::ui {
+ 
+ /** Owns the window, the frame loop and the overlays. The app starts and stops it. */
+-class UISystem final : public rex::ui::IUISystem, public IUIControl, public IAchievementNotifications, public IUIThread, public IStartupPaint {
++class UISystem final : public rex::ui::IUISystem, public IUIControl, public IApplicationActivity, public IAchievementNotifications, public IUIThread, public IStartupPaint {
+  public:
+   UISystem();
+   ~UISystem() override;
+@@ -91,6 +94,9 @@
+                                          IAchievementRegistry& achievements) override;
+   void DetachTitle() override;
+   void SetEnabled(bool enabled) override;
++  Result<void> SetActive(bool active) override;
++  void ResumeForShutdown() override;
++  void SetActivityServices(apu::IAudioActivity* audio, gpu::IGraphicsActivity* graphics);
+   bool Preview(const Achievement& achievement) override;
+   void EndFrameLoop() override;
+   void SetCloseHandler(MoveOnlyFunction<void()> handler) override;
+diff --git a/src/ui/ui_state.h b/src/ui/ui_state.h
+--- a/src/ui/ui_state.h
++++ b/src/ui/ui_state.h
+@@ -70,6 +70,9 @@
+   rex::hid::IInputSystem* input = nullptr;
+   rex::apu::IAudioSystem* audio = nullptr;
+   rex::gpu::IGraphicsSystem* graphics = nullptr;
++  apu::IAudioActivity* audio_activity = nullptr;
++  gpu::IGraphicsActivity* graphics_activity = nullptr;
++  bool application_active = true;
+   MoveOnlyFunction<void(u32, u32)> resize_handler;
+   std::thread::id ui_thread;
+ 
+diff --git a/src/ui/ui_event.cpp b/src/ui/ui_event.cpp
+--- a/src/ui/ui_event.cpp
++++ b/src/ui/ui_event.cpp
+@@ -10,6 +10,7 @@
+ #include "ui/ui_system.h"
+ 
+ #include "ui/ui_state.h"
++#include <rex/chrono.h>
+ 
+ namespace rex::ui {
+ 
+@@ -291,6 +292,40 @@
+   });
+ }
+ 
++void UISystem::SetActivityServices(apu::IAudioActivity* audio, gpu::IGraphicsActivity* graphics) {
++  state_->audio_activity = audio;
++  state_->graphics_activity = graphics;
++}
++
++Result<void> UISystem::SetActive(bool active) {
++  State& s = *state_;
++  if (!s.IsUIThread()) return Err(ErrorCategory::kRuntime, "application activity requires the UI thread");
++  if (s.stopping.load() || s.stopped.load())
++    return Err(ErrorCategory::kRuntime, "application activity is stopping");
++  if (s.application_active == active) return Ok();
++  if (!active) {
++    if (s.audio_activity) s.audio_activity->SetActive(false);
++    Clock::SetGuestPaused(true);
++    s.application_active = false;
++    if (s.graphics_activity) REX_TRY_VOID(s.graphics_activity->SetActive(false));
++  } else {
++    if (s.graphics_activity) REX_TRY_VOID(s.graphics_activity->SetActive(true));
++    Clock::SetGuestPaused(false);
++    if (s.audio_activity) s.audio_activity->SetActive(true);
++    s.application_active = true;
++    s.WakeLoop();
++  }
++  return Ok();
++}
++
++void UISystem::ResumeForShutdown() {
++  State& s = *state_;
++  if (s.graphics_activity) s.graphics_activity->ResumeForShutdown();
++  Clock::SetGuestPaused(false);
++  if (s.audio_activity) s.audio_activity->SetActive(true);
++  s.application_active = true;
++}
++
+ void UISystem::SetEnabled(bool enabled) {
+   State& s = *state_;
+   s.achievement_notifications_enabled.store(enabled);
+diff --git a/src/ui/ui_system.cpp b/src/ui/ui_system.cpp
+--- a/src/ui/ui_system.cpp
++++ b/src/ui/ui_system.cpp
+@@ -414,6 +414,7 @@
+   if (!s.started.load()) {
+     return;
+   }
++  ResumeForShutdown();
+   s.stopping = true;
+   s.DestroyPrompts();
+ }
+@@ -439,6 +440,8 @@
+   s.input = nullptr;
+   s.audio = nullptr;
+   s.graphics = nullptr;
++  s.audio_activity = nullptr;
++  s.graphics_activity = nullptr;
+   s.headless = true;
+   s.started = false;
+ }
+diff --git a/src/ui/ui_module.h b/src/ui/ui_module.h
+--- a/src/ui/ui_module.h
++++ b/src/ui/ui_module.h
+@@ -29,7 +29,7 @@
+ /** Serves the UI system and its control interface, and selects the drivers at Init. */
+ class UIModule final : public IModule {
+  public:
+-  REX_MODULE_SERVES(::rex::ui::IUISystem, ::rex::ui::IUIControl, ::rex::ui::IAchievementNotifications, ::rex::ui::IStartupPaint)
++  REX_MODULE_SERVES(::rex::ui::IUISystem, ::rex::ui::IUIControl, ::rex::ui::IApplicationActivity, ::rex::ui::IAchievementNotifications, ::rex::ui::IStartupPaint)
+ 
+   std::string_view GetName() const override { return "rexui"; }
+   std::span<const InterfaceType> GetRequiredInterfaces() const override;
+diff --git a/src/ui/ui_module.cpp b/src/ui/ui_module.cpp
+--- a/src/ui/ui_module.cpp
++++ b/src/ui/ui_module.cpp
+@@ -86,6 +86,7 @@
+       REXUI_WARN("window title: {}", set.error().message);
+     }
+   }
++  system_->SetActivityServices(factory_->Get<apu::IAudioActivity>(), factory_->Get<gpu::IGraphicsActivity>());
+   if (auto started = system_->Start(driver, input, *audio, *graphics, *settings_, *logger_);
+       !started) {
+     Shutdown();
+@@ -111,7 +112,7 @@
+ }
+ 
+ IInterface* UIModule::QueryInterface(std::string_view name, u32 version) {
+-  return FindModuleInterface<rex::ui::IUISystem, IUIControl, IAchievementNotifications, IUIThread, IStartupPaint>(GetOrCreateSystem(), name,
++  return FindModuleInterface<rex::ui::IUISystem, IUIControl, IApplicationActivity, IAchievementNotifications, IUIThread, IStartupPaint>(GetOrCreateSystem(), name,
+                                                                         version);
+ }
+ 
+diff --git a/src/gpu/xenos/CMakeLists.txt b/src/gpu/xenos/CMakeLists.txt
+--- a/src/gpu/xenos/CMakeLists.txt
++++ b/src/gpu/xenos/CMakeLists.txt
+@@ -243,3 +243,7 @@
+     )
+   endif ()
+ endif ()
++
++if (CMAKE_SYSTEM_NAME STREQUAL "iOS" AND TARGET rexgpu-xenos-vulkan)
++  target_link_libraries(rexgpu-xenos-vulkan PRIVATE SDL3::SDL3)
++endif ()
+diff --git a/tests/unit/ui/application_activity_test.cpp b/tests/unit/ui/application_activity_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/ui/application_activity_test.cpp
+@@ -0,0 +1,97 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#include "rex_test.h"
++#include "ui_harness.h"
++#include <rex/ui/application_activity.h>
++#include <rex/apu/audio_system.h>
++#include <rex/chrono.h>
++#include <rex/gpu/queue_lifecycle.h>
++#include <rex/math.h>
++#include <array>
++#include <atomic>
++#include <chrono>
++#include <future>
++#include <memory>
++#include <thread>
++using namespace std::chrono_literals;
++
++REX_TEST_CASE("application activity freezes guest time and audio callbacks until resume", "[ui][application_activity]") {
++  std::atomic<unsigned> played{0};
++  rex::test_ui::UIApp app;
++  REQUIRE(app.Start());
++  auto* activity = REX_INTERFACE(rex::ui::IApplicationActivity);
++  auto* audio = REX_INTERFACE(rex::apu::IAudioSystem);
++  REQUIRE(activity);
++  REQUIRE(audio);
++  REQUIRE(activity->SetActive(false));
++  const auto stream = audio->OpenStream([&] { ++played; });
++  REQUIRE(stream);
++  std::array<rex::f32, rex::apu::kAudioFrameSamples> frame{};
++  REQUIRE(audio->Submit(*stream, frame));
++  const auto frozen = rex::Clock::QueryGuestTickCount();
++  const auto host = rex::Clock::GetHostTickCount();
++  std::this_thread::sleep_for(30ms);
++  CHECK(rex::Clock::QueryGuestTickCount() == frozen);
++  CHECK(rex::Clock::GetHostTickCount() > host);
++  CHECK(played == 0);
++  CHECK(audio->GetStats().queued_frames == 1);
++  REQUIRE(activity->SetActive(false));
++  CHECK(rex::Clock::QueryGuestTickCount() == frozen);
++  std::atomic<bool> rejected{false};
++  std::thread other([&] { rejected = !activity->SetActive(true); });
++  other.join();
++  CHECK(rejected.load());
++  CHECK(rex::Clock::QueryGuestTickCount() == frozen);
++  const auto before_resume = rex::Clock::GetHostTickCount();
++  REQUIRE(activity->SetActive(true));
++  const auto resumed = rex::Clock::QueryGuestTickCount();
++  const auto after_resume = rex::Clock::GetHostTickCount();
++  CHECK(resumed >= frozen);
++  const auto allowed = rex::mul_div(after_resume - before_resume,
++      rex::Clock::GetGuestTickFrequency(), rex::Clock::GetHostTickFrequency()) +
++      rex::Clock::GetGuestTickFrequency() / 100;
++  CHECK(resumed - frozen <= allowed);
++  const auto deadline = std::chrono::steady_clock::now() + 3s;
++  while (played == 0 && std::chrono::steady_clock::now() < deadline)
++    std::this_thread::sleep_for(2ms);
++  CHECK(played == 1);
++  audio->CloseStream(*stream);
++  REQUIRE(activity->SetActive(false));
++  app.GetUIControl()->BeginStop();
++  CHECK_FALSE(activity->SetActive(false));
++  const auto shutdown_tick = rex::Clock::QueryGuestTickCount();
++  std::this_thread::sleep_for(2ms);
++  CHECK(rex::Clock::QueryGuestTickCount() > shutdown_tick);
++  app.Shutdown(); // Shutdown keeps the clock running while joining title workers.
++  CHECK(REX_INTERFACE(rex::ui::IApplicationActivity) == nullptr);
++}
++
++REX_TEST_CASE("queue suspension drains outside its lock and shutdown releases failed transitions", "[gpu][queue_lifecycle]") {
++  rex::gpu::QueueLifecycle gate;
++  auto operation = std::make_unique<rex::gpu::QueueLifecycle::Permit>(&gate);
++  std::atomic<unsigned> drains{0};
++  std::atomic<bool> drain_saw_inactive{false};
++  std::promise<void> started;
++  auto suspend = std::async(std::launch::async, [&] {
++    started.set_value();
++    return gate.SetActive(false, [&] { drain_saw_inactive = !gate.IsActive(); ++drains; return true; });
++  });
++  started.get_future().wait();
++  CHECK(suspend.wait_for(20ms) == std::future_status::timeout);
++  CHECK(drains == 0);
++  operation.reset();
++  CHECK(suspend.wait_for(1s) == std::future_status::ready);
++  CHECK(suspend.get());
++  CHECK(drain_saw_inactive.load());
++  CHECK(drains == 1);
++  CHECK(gate.SetActive(false, [&] { ++drains; return true; }));
++  CHECK(drains == 1);
++  CHECK(gate.SetActive(true, [] { return true; }));
++  CHECK_FALSE(gate.SetActive(false, [] { return false; }));
++  CHECK_FALSE(gate.SetActive(true, [] { return true; }));
++  auto blocked = std::async(std::launch::async, [&] { rex::gpu::QueueLifecycle::Permit permit(&gate); });
++  CHECK(blocked.wait_for(20ms) == std::future_status::timeout);
++  gate.ResumeForShutdown();
++  CHECK(blocked.wait_for(1s) == std::future_status::ready);
++  blocked.get();
++  CHECK_FALSE(gate.IsActive());
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -238,6 +238,7 @@
+   ui/sdl3_ui_test.cpp
+   ui/keyboard_prompt_test.cpp
+   ui/achievement_notifications_test.cpp
++  ui/application_activity_test.cpp
+   ui/image_texture_test.cpp
+   ui/startup_paint_test.cpp
+   ui/native_window_host_test.cpp

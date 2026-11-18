@@ -1,0 +1,407 @@
+diff --git a/src/codegen/function_node.h b/src/codegen/function_node.h
+--- a/src/codegen/function_node.h
++++ b/src/codegen/function_node.h
+@@ -158,6 +158,9 @@
+   void AddJumpTable(JumpTable jt);
+   void AddUnresolvedJump(u32 site, u32 target, bool is_call, bool conditional);
+ 
++  /** Rewinds edges before a removed target is destroyed, allowing later resolution. */
++  size_t RewindEdgesTo(const FunctionNode* target, u32 target_base);
++
+   bool TryResolveAgainst(FunctionNode* new_function);
+   bool TryResolveAgainstImport(u32 import_addr, const std::string& import_name);
+   bool TryResolveAsInternalLabel(u32 target);
+diff --git a/src/codegen/function_graph.cpp b/src/codegen/function_graph.cpp
+--- a/src/codegen/function_graph.cpp
++++ b/src/codegen/function_graph.cpp
+@@ -168,6 +168,22 @@
+   unresolved_jumps_.erase(it, unresolved_jumps_.end());
+ }
+ 
++size_t FunctionNode::RewindEdgesTo(const FunctionNode* target, u32 target_base) {
++  size_t rewound = 0;
++  const auto rewind = [&](std::vector<CallEdge>& edges, bool is_call) {
++    std::erase_if(edges, [&](const CallEdge& edge) {
++      if (edge.target.AsFunction() != target)
++        return false;
++      AddUnresolvedJump(edge.site, target_base, is_call, false);
++      ++rewound;
++      return true;
++    });
++  };
++  rewind(calls_, true);
++  rewind(tail_calls_, false);
++  return rewound;
++}
++
+ bool FunctionNode::TryResolveAgainst(FunctionNode* new_function) {
+   if (IsSealed())
+     return false;
+@@ -181,7 +197,10 @@
+       REXCG_TRACE("FunctionNode 0x{:08X}: resolved jump 0x{:08X} -> 0x{:08X} as external to {}",
+                   base_, it->site, it->target, new_function->GetName());
+ 
+-      AddTailCall(it->site, CallTarget::MakeFunction(new_function));
++      if (it->is_call)
++        AddCall(it->site, CallTarget::MakeFunction(new_function));
++      else
++        AddTailCall(it->site, CallTarget::MakeFunction(new_function));
+ 
+       it = unresolved_jumps_.erase(it);
+       any_resolved = true;
+@@ -204,7 +223,10 @@
+       REXCG_TRACE("FunctionNode 0x{:08X}: resolved jump 0x{:08X} -> 0x{:08X} as import {}", base_,
+                   it->site, it->target, import_name);
+ 
+-      AddTailCall(it->site, CallTarget::MakeImport(import_addr, import_name));
++      if (it->is_call)
++        AddCall(it->site, CallTarget::MakeImport(import_addr, import_name));
++      else
++        AddTailCall(it->site, CallTarget::MakeImport(import_addr, import_name));
+ 
+       it = unresolved_jumps_.erase(it);
+       any_resolved = true;
+@@ -1048,6 +1070,11 @@
+     return false;
+   }
+   REXCG_TRACE("FunctionGraph: removing absorbed function 0x{:08X}", entry_point);
++  const FunctionNode* removed = it->second.get();
++  for (auto& [address, node] : tables_->functions) {
++    if (node.get() != removed)
++      node->RewindEdgesTo(removed, entry_point);
++  }
+   tables_->functions_by_base.erase(entry_point);
+   tables_->functions.erase(it);
+   tables_->no_return.reset();
+diff --git a/src/codegen/manifest.cpp b/src/codegen/manifest.cpp
+--- a/src/codegen/manifest.cpp
++++ b/src/codegen/manifest.cpp
+@@ -235,6 +235,9 @@
+     }
+   }
+ 
++  if (stamp_idx && lines[*stamp_idx] == stamp_line)
++    return true;
++
+   if (stamp_idx) {
+     lines[*stamp_idx] = stamp_line;
+   } else if (project_header_idx) {
+diff --git a/src/codegen/output_stamp.cpp b/src/codegen/output_stamp.cpp
+--- a/src/codegen/output_stamp.cpp
++++ b/src/codegen/output_stamp.cpp
+@@ -1,5 +1,6 @@
+ #include "output_stamp.h"
+ 
++#include <algorithm>
+ #include <fstream>
+ 
+ #include <format>
+@@ -14,6 +15,20 @@
+ namespace rex::codegen {
+ 
+ constexpr int kStampVersion = 1;
++// Invalidate unchanged inputs when downstream codegen behavior changes.
++constexpr int kCodegenBehaviourVersion = 4;
++
++namespace {
++std::filesystem::path InputSortKey(const std::filesystem::path& path) {
++  std::error_code ec;
++  auto canonical = std::filesystem::weakly_canonical(path, ec);
++  if (!ec && !canonical.empty())
++    return canonical;
++  ec.clear();
++  auto absolute = std::filesystem::absolute(path, ec);
++  return !ec && !absolute.empty() ? absolute : path.lexically_normal();
++}
++}  // namespace
+ 
+ std::optional<OutputStamp> OutputStamp::Load(const std::filesystem::path& path) {
+   std::ifstream in(path, std::ios::binary);
+@@ -61,13 +76,24 @@
+   accumulator += sdk_version;
+   accumulator += '\n';
+ 
++  accumulator += std::format("codegen={}\n", kCodegenBehaviourVersion);
+   for (const auto& flag : flag_values) {
+     accumulator += "flag=";
+     accumulator += flag;
+     accumulator += '\n';
+   }
+ 
+-  for (const auto& path : input_files) {
++  std::vector<std::pair<std::filesystem::path, std::filesystem::path>> ordered;
++  for (const auto& path : input_files)
++    ordered.emplace_back(InputSortKey(path), path);
++  std::sort(ordered.begin(), ordered.end(), [](const auto& lhs, const auto& rhs) {
++    return lhs.first.generic_string() < rhs.first.generic_string();
++  });
++  ordered.erase(std::unique(ordered.begin(), ordered.end(), [](const auto& lhs, const auto& rhs) {
++    return lhs.first.generic_string() == rhs.first.generic_string();
++  }), ordered.end());
++  for (const auto& entry : ordered) {
++    const auto& path = entry.second;
+     // Hash content, not mtime, so the stamp survives a checkout, a copy or a touch.
+     std::error_code ec;
+     std::string digest = "<missing>";
+diff --git a/tests/unit/codegen/gap_fill_test.cpp b/tests/unit/codegen/gap_fill_test.cpp
+--- a/tests/unit/codegen/gap_fill_test.cpp
++++ b/tests/unit/codegen/gap_fill_test.cpp
+@@ -9,6 +9,7 @@
+  */
+ 
+ #include "code_image.h"
++#include "codegen/function_graph.h"
+ #include "rex_test.h"
+ #include "temp_folder.h"
+ #include "base/xex_builder.h"
+@@ -332,3 +333,39 @@
+   for (u32 index = 3; index < 9; ++index)
+     CHECK_FALSE(HasFunction(tree, index));
+ }
++
++REX_TEST_CASE("Removed graph targets release and rebind incoming edges", "[codegen][migration]") {
++  using namespace rex::codegen;
++  FunctionGraph graph;
++  auto* caller = graph.AddFunction(0x1000, 16, FunctionAuthority::kConfig);
++  auto* target = graph.AddFunction(0x2000, 4, FunctionAuthority::kGapFill);
++  auto* unrelated = graph.AddFunction(0x3000, 4, FunctionAuthority::kConfig);
++  graph.AddCallToFunction(0x1000, 0x1000, CallTarget::MakeFunction(target));
++  graph.AddTailCallToFunction(0x1000, 0x1004, CallTarget::MakeFunction(target));
++  graph.AddCallToFunction(0x1000, 0x1008, CallTarget::MakeFunction(unrelated));
++  REQUIRE(graph.RemoveFunction(0x2000));
++  REQUIRE(caller->GetCalls().size() == 1);
++  CHECK(caller->GetCalls()[0].target.AsFunction() == unrelated);
++  CHECK(caller->GetTailCalls().empty());
++  REQUIRE(caller->GetUnresolvedJumps().size() == 2);
++  auto* replacement = graph.AddFunction(0x2000, 8, FunctionAuthority::kConfig);
++  CHECK(caller->GetUnresolvedJumps().empty());
++  REQUIRE(caller->GetCalls().size() == 2);
++  REQUIRE(caller->GetTailCalls().size() == 1);
++  CHECK(caller->GetCalls()[1].target.AsFunction() == replacement);
++  CHECK(caller->GetTailCalls()[0].target.AsFunction() == replacement);
++}
++
++REX_TEST_CASE("Late function registration preserves call and tail-call kinds", "[codegen][migration]") {
++  using namespace rex::codegen;
++  FunctionGraph graph;
++  auto* caller = graph.AddFunction(0x1000, 8, FunctionAuthority::kConfig);
++  graph.AddUnresolvedJumpToFunction(0x1000, 0x1000, 0x2000, true, false);
++  graph.AddUnresolvedJumpToFunction(0x1000, 0x1004, 0x2000, false, false);
++  graph.AddFunction(0x2000, 4, FunctionAuthority::kConfig);
++  CHECK(caller->GetUnresolvedJumps().empty());
++  REQUIRE(caller->GetCalls().size() == 1);
++  REQUIRE(caller->GetTailCalls().size() == 1);
++  CHECK(caller->GetCalls()[0].site == 0x1000);
++  CHECK(caller->GetTailCalls()[0].site == 0x1004);
++}
+diff --git a/tests/unit/codegen/output_stamp_test.cpp b/tests/unit/codegen/output_stamp_test.cpp
+--- a/tests/unit/codegen/output_stamp_test.cpp
++++ b/tests/unit/codegen/output_stamp_test.cpp
+@@ -232,3 +232,16 @@
+   CHECK(content.find("has\\ space.toml") != std::string::npos);
+   CHECK(content.find("hash\\#.toml") != std::string::npos);
+ }
++
++REX_TEST_CASE("Input fingerprints ignore ordering duplicate paths and spelling", "[codegen][migration]") {
++  Scratch scratch("canonical");
++  auto first = scratch.WriteFile("first.bin", "one");
++  auto second = scratch.WriteFile("second.bin", "two");
++  std::vector<fs::path> original{first, second};
++  std::vector<fs::path> reordered{second, first};
++  std::vector<fs::path> duplicates{second, scratch.root / "." / "first.bin", first};
++  std::vector<std::string> flags;
++  auto expected = ComputeInputFingerprint(original, "migration", flags);
++  CHECK(ComputeInputFingerprint(reordered, "migration", flags) == expected);
++  CHECK(ComputeInputFingerprint(duplicates, "migration", flags) == expected);
++}
+diff --git a/tests/unit/codegen/manifest_test.cpp b/tests/unit/codegen/manifest_test.cpp
+--- a/tests/unit/codegen/manifest_test.cpp
++++ b/tests/unit/codegen/manifest_test.cpp
+@@ -286,3 +286,14 @@
+   CHECK(manifest->entrypoint.recompiler.load_warnings.empty());
+   CHECK(manifest->modules[0].recompiler.load_warnings.empty());
+ }
++
++REX_TEST_CASE("An unchanged SDK stamp preserves the manifest timestamp", "[codegen][migration]") {
++  rex::test::TempFolder folder("rexglue_manifest_stamp_");
++  auto path = folder.path / "demo_manifest.toml";
++  std::ofstream(path) << "[project]\nname = \"demo\"\nsdk_version = \"0.11.0\"\n";
++  const auto old = fs::file_time_type::clock::now() - std::chrono::hours(24);
++  fs::last_write_time(path, old);
++  const auto previous = fs::last_write_time(path);
++  REQUIRE(rex::codegen::ManifestConfig::WriteSDKVersionStamp(path, "0.11.0"));
++  CHECK(fs::last_write_time(path) == previous);
++}
+diff --git a/cmake/rexglue_codegen.cmake b/cmake/rexglue_codegen.cmake
+--- a/cmake/rexglue_codegen.cmake
++++ b/cmake/rexglue_codegen.cmake
+@@ -15,13 +15,23 @@
+   )
+   set(stamp "${ARG_OUTPUT_DIR}/codegen.build.stamp")
+   set(source_list "${ARG_OUTPUT_DIR}/sources.cmake")
++  # A missing configure dependency is omitted from the generated build system. Watch a
++  # separate existing marker, never an empty sources.cmake that could look like valid output.
++  set(configure_stamp "${ARG_OUTPUT_DIR}/codegen.configure.stamp")
++  file(MAKE_DIRECTORY "${ARG_OUTPUT_DIR}")
++  if (NOT EXISTS "${configure_stamp}")
++    file(WRITE "${configure_stamp}" "Codegen metadata dependency.\n")
++  endif ()
+   set(size_option "")
+   if (ARG_MAX_FILE_SIZE)
+     set(size_option "--max_file_size_bytes=${ARG_MAX_FILE_SIZE}")
+   endif ()
+   add_custom_command(
+-    OUTPUT "${stamp}" "${source_list}" ${ARG_SOURCES}
++    OUTPUT "${stamp}" "${source_list}" "${configure_stamp}" ${ARG_SOURCES}
+     COMMAND ${ARG_TOOL} codegen "${ARG_MANIFEST}" ${size_option}
++    # Only a scheduled codegen run touches the marker. Ninja completes this producer
++    # before checking whether its build files need regeneration, including a first build.
++    COMMAND ${CMAKE_COMMAND} -E touch "${configure_stamp}"
+     DEPFILE "${ARG_OUTPUT_DIR}/codegen.d"
+     WORKING_DIRECTORY "${ARG_WORKING_DIRECTORY}"
+     COMMENT "Generating recompiled code for ${target_name}"
+@@ -35,6 +45,6 @@
+   set_property(
+     DIRECTORY
+     APPEND
+-    PROPERTY CMAKE_CONFIGURE_DEPENDS "${source_list}"
++    PROPERTY CMAKE_CONFIGURE_DEPENDS "${source_list}" "${configure_stamp}"
+   )
+ endfunction ()
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -61,3 +61,15 @@
+ if (REXGLUE_BUILD_PPC_TESTS)
+   add_subdirectory(ppc)
+ endif ()
++
++# Exercise a clean native consumer without requiring an installed SDK or game data.
++if (NOT CMAKE_CROSSCOMPILING AND CMAKE_GENERATOR STREQUAL "Ninja")
++  add_test(NAME codegen_first_build
++           COMMAND ${CMAKE_COMMAND}
++             "-DREXGLUE_HELPER=${PROJECT_SOURCE_DIR}/cmake/rexglue_codegen.cmake"
++             "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/codegen_first_build"
++             "-DCXX_COMPILER=${CMAKE_CXX_COMPILER}"
++             "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
++             -P "${CMAKE_CURRENT_SOURCE_DIR}/codegen_first_build.cmake")
++  set_tests_properties(codegen_first_build PROPERTIES TIMEOUT 180 LABELS codegen)
++endif ()
+diff --git a/tests/codegen_first_build.cmake b/tests/codegen_first_build.cmake
+new file mode 100644
+--- /dev/null
++++ b/tests/codegen_first_build.cmake
+@@ -0,0 +1,113 @@
++# Native Ninja regression for codegen metadata production and CMake regeneration ordering.
++cmake_minimum_required(VERSION 3.25)
++foreach(required REXGLUE_HELPER TEST_ROOT CXX_COMPILER MAKE_PROGRAM)
++  if(NOT DEFINED ${required})
++    message(FATAL_ERROR "Missing ${required}")
++  endif()
++  file(TO_CMAKE_PATH "${${required}}" ${required})
++endforeach()
++string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef unique)
++set(source "${TEST_ROOT}/${unique}/source")
++set(build "${TEST_ROOT}/${unique}/build")
++file(MAKE_DIRECTORY "${source}")
++set(project_text [=[
++cmake_minimum_required(VERSION 3.25)
++project(codegen_first_build LANGUAGES CXX)
++include("@REXGLUE_HELPER@")
++set(output "${CMAKE_CURRENT_SOURCE_DIR}/generated")
++if(EXISTS "${output}/sources.cmake")
++  include("${output}/sources.cmake")
++  if(GENERATED_SOURCES)
++    add_library(guest OBJECT ${GENERATED_SOURCES})
++  endif()
++endif()
++rexglue_add_codegen(generate_guest
++  MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/input.toml"
++  OUTPUT_DIR "${output}"
++  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
++  TOOL "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/producer.cmake"
++  SOURCES ${GENERATED_SOURCES})
++add_executable(example main.cpp)
++if(TARGET guest)
++  add_dependencies(guest generate_guest)
++  target_link_libraries(example PRIVATE guest)
++endif()
++add_dependencies(example generate_guest)
++]=])
++string(CONFIGURE "${project_text}" project_text @ONLY)
++file(WRITE "${source}/CMakeLists.txt" "${project_text}")
++file(WRITE "${source}/main.cpp" "#include <cstdio>\nint guest_value();\nint main() { std::printf(\"%d\\n\", guest_value()); return 0; }\n")
++# A small producer keeps this scheduling regression independent of target SDK installation.
++# It uses the same output/depfile contract; real PPC translation is tested separately.
++file(WRITE "${source}/producer.cmake" [=[
++cmake_minimum_required(VERSION 3.25)
++set(manifest "${CMAKE_ARGV4}")
++get_filename_component(root "${manifest}" DIRECTORY)
++set(output "${root}/generated")
++file(READ "${manifest}" input)
++string(REGEX MATCH "value=([0-9]+)" matched "${input}")
++if(NOT matched)
++  message(FATAL_ERROR "Invalid producer input")
++endif()
++set(value "${CMAKE_MATCH_1}")
++file(MAKE_DIRECTORY "${output}")
++file(WRITE "${output}/guest.cpp" "int guest_value() { return ${value}; }\n")
++file(WRITE "${output}/sources.cmake" "set(GENERATED_SOURCES \"${output}/guest.cpp\")\n")
++file(WRITE "${output}/codegen.build.stamp" "${input}")
++file(APPEND "${root}/invocations.txt" "run\n")
++foreach(variable manifest output)
++  string(REPLACE "$" "$$" ${variable} "${${variable}}")
++  string(REPLACE "#" "\\#" ${variable} "${${variable}}")
++  string(REPLACE " " "\\ " ${variable} "${${variable}}")
++endforeach()
++file(WRITE "${root}/generated/codegen.d" "${output}/codegen.build.stamp: ${manifest}\n")
++]=])
++file(WRITE "${source}/input.toml" "value=42\n")
++function(run name)
++  execute_process(COMMAND ${ARGN} RESULT_VARIABLE result OUTPUT_VARIABLE output
++                  ERROR_VARIABLE error TIMEOUT 90)
++  file(WRITE "${TEST_ROOT}/${unique}/${name}.log" "${output}${error}")
++  if(NOT result EQUAL 0)
++    message(FATAL_ERROR "${name} failed (${result}) in ${build}:\n${output}${error}")
++  endif()
++  set(last_output "${output}${error}" PARENT_SCOPE)
++endfunction()
++function(check_run expected)
++  set(executable "${build}/example")
++  if(WIN32)
++    string(APPEND executable ".exe")
++  endif()
++  run("run-${expected}" "${executable}")
++  string(STRIP "${last_output}" actual)
++  if(NOT actual STREQUAL "${expected}")
++    message(FATAL_ERROR "Generated function returned ${actual}, expected ${expected}")
++  endif()
++endfunction()
++run(configure "${CMAKE_COMMAND}" -S "${source}" -B "${build}" -G Ninja
++    "-DCMAKE_CXX_COMPILER=${CXX_COMPILER}" "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}")
++run(first-build "${CMAKE_COMMAND}" --build "${build}" --parallel 1)
++if(NOT last_output MATCHES "Re-running CMake")
++  message(FATAL_ERROR "Initial producer did not regenerate the build files")
++endif()
++check_run(42)
++file(SHA256 "${source}/invocations.txt" initial_runs)
++run(second-build "${CMAKE_COMMAND}" --build "${build}" --parallel 1)
++file(SHA256 "${source}/invocations.txt" second_runs)
++if(NOT last_output MATCHES "no work to do" OR NOT initial_runs STREQUAL second_runs)
++  message(FATAL_ERROR "Unchanged second build was not a no-op")
++endif()
++file(WRITE "${source}/input.toml" "value=43\n")
++run(changed-input "${CMAKE_COMMAND}" --build "${build}" --parallel 1)
++check_run(43)
++file(REMOVE "${source}/generated/sources.cmake")
++run(deleted-list "${CMAKE_COMMAND}" --build "${build}" --parallel 1)
++check_run(43)
++file(REMOVE "${source}/generated/sources.cmake")
++run(reconfigure-missing-list "${CMAKE_COMMAND}" -S "${source}" -B "${build}")
++run(rebuild-missing-list "${CMAKE_COMMAND}" --build "${build}" --parallel 1)
++check_run(43)
++run(final-noop "${CMAKE_COMMAND}" --build "${build}" --parallel 1)
++if(NOT last_output MATCHES "no work to do")
++  message(FATAL_ERROR "Metadata repair caused a regeneration loop")
++endif()
++message(STATUS "Codegen first build, no-op, input invalidation and metadata repair passed: ${build}")

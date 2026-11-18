@@ -1,0 +1,350 @@
+diff --git a/src/gpu/xenos/command_processor.h b/src/gpu/xenos/command_processor.h
+--- a/src/gpu/xenos/command_processor.h
++++ b/src/gpu/xenos/command_processor.h
+@@ -12,6 +12,7 @@
+ #pragma once
+ 
+ #include <atomic>
++#include <chrono>
+ #include <bit>
+ #include <cstring>
+ #include <memory>
+@@ -267,7 +268,7 @@
+ 
+   u32 ExecutePrimaryBuffer(u32 start_index, u32 end_index);
+   virtual void OnPrimaryBufferEnd() {}
+-  void ExecuteIndirectBuffer(u32 ptr, u32 length);
++  bool ExecuteIndirectBuffer(u32 ptr, u32 length);
+   bool ExecutePacket(memory::RingBuffer* reader);
+   bool ExecutePacketType0(memory::RingBuffer* reader, u32 packet);
+   bool ExecutePacketType1(memory::RingBuffer* reader, u32 packet);
+@@ -392,6 +393,17 @@
+   u32 read_ptr_update_freq_ = 0;
+   u32 read_ptr_writeback_ptr_ = 0;
+ 
++  // Incomplete packets retry the same read pointer while the guest publishes data.
++  // A full second without write-pointer progress permits bounded resynchronization.
++  static constexpr auto kIncompletePacketStall = std::chrono::seconds(1);
++  static constexpr u32 kMaxResyncPerBoot = 8;
++  u32 incomplete_packet_retries_ = 0;
++  u32 incomplete_packet_offset_ = ~u32{0};
++  u32 incomplete_packet_write_index_ = ~u32{0};
++  std::chrono::steady_clock::time_point incomplete_packet_since_{};
++  u32 resync_bad_packets_ = 0;
++  bool last_packet_incomplete_ = false;
++
+   std::unique_ptr<rex::platform::Event> write_ptr_index_event_;
+   std::atomic<u32> write_ptr_index_;
+ 
+diff --git a/src/gpu/xenos/command_processor.cpp b/src/gpu/xenos/command_processor.cpp
+--- a/src/gpu/xenos/command_processor.cpp
++++ b/src/gpu/xenos/command_processor.cpp
+@@ -593,36 +593,102 @@
+   memory::RingBuffer reader(primary_buffer, primary_buffer_size_);
+   reader.SetReadOffset(read_index * sizeof(u32));
+   reader.SetWriteOffset(write_index * sizeof(u32));
+-  do {
+-    if (!ExecutePacket(&reader)) {
+-      REXGPU_ERROR("primary ring buffer failed to execute a packet");
+-      REX_ASSERT_ALWAYS();
+-      break;
+-    }
+-  } while (reader.GetReadCount());
++  while (reader.GetReadCount()) {
++    const u32 packet_start = reader.GetReadOffset();
++    if (ExecutePacket(&reader)) {
++      incomplete_packet_retries_ = 0;
++      incomplete_packet_offset_ = ~u32{0};
++      continue;
++    }
++
++    // Two different failures look the same from here:
++    //  * a packet whose payload does not fit in the bytes the guest has
++    //    published - the length checks fail before anything is consumed, and
++    //    last_packet_incomplete_ is set. The write pointer is a separate store,
++    //    so it can be visible before the packet it points at is complete; such a
++    //    packet is incomplete, not corrupt;
++    //  * a handler that failed after consuming payload - the packet really is
++    //    malformed.
++    // Only the first is worth retrying: returning without advancing the read
++    // pointer makes the worker reload the write pointer and call back in, and
++    // the same packet executes normally once the rest of the payload lands.
++    //
++    // Discarding the rest of the ring here (the behaviour this replaces) is what
++    // froze this title's picture for good: the frame's swap packet was thrown
++    // away with it, nothing was presented again, and the guest kept running
++    // behind a dead picture (docs/reference/known-issues.md, 2026-10-18).
++    if (last_packet_incomplete_) {
++      const auto now = std::chrono::steady_clock::now();
++      if (incomplete_packet_offset_ != packet_start ||
++          incomplete_packet_write_index_ != write_index) {
++        incomplete_packet_offset_ = packet_start;
++        incomplete_packet_write_index_ = write_index;
++        incomplete_packet_since_ = now;
++        incomplete_packet_retries_ = 0;
++      }
++      if (now - incomplete_packet_since_ < kIncompletePacketStall) {
++        ++incomplete_packet_retries_;
++        if (incomplete_packet_retries_ == 1 || incomplete_packet_retries_ % 100 == 0) {
++          REXGPU_WARN(
++              "**** PRIMARY RINGBUFFER: packet at {:08X} is incomplete "
++              "({} byte(s) published); waiting for guest write (retry {})",
++              packet_start, reader.GetReadCount(), incomplete_packet_retries_);
++        }
++        reader.SetReadOffset(packet_start);
++        rex::platform::Wait(write_ptr_index_event_.get(), true, std::chrono::milliseconds(1));
++        return packet_start / sizeof(u32);
++      }
++      REXGPU_ERROR("**** PRIMARY RINGBUFFER: packet at {:08X} stalled for 1 second "
++                   "({} byte(s) published); resynchronising",
++                   packet_start, reader.GetReadCount());
++    }
++
++    // Still incomplete after every retry, or malformed outright: resynchronise.
++    // A failed indirect call already consumed its two argument words. Resume
++    // after those words, not inside them as if they were packet headers. For a
++    // direct length-check failure, only the header was consumed. Bounded, so a
++    // permanently garbage ring cannot spin here for ever.
++    // Offsets wrap. Keep payload already consumed by a failed indirect call;
++    // comparing wrapped offsets numerically could rewind into its arguments.
++    if (reader.GetReadOffset() == packet_start) reader.AdvanceRead(sizeof(u32));
++    incomplete_packet_retries_ = 0;
++    incomplete_packet_offset_ = ~u32{0};
++    if (++resync_bad_packets_ > kMaxResyncPerBoot) {
++      REXGPU_ERROR("**** PRIMARY RINGBUFFER: packet at {:08X} still failing after {} resync(s); "
++                   "dropping the rest of the ring",
++                   packet_start, kMaxResyncPerBoot);
++      break;
++    }
++    REXGPU_ERROR("**** PRIMARY RINGBUFFER: resynchronising past a bad packet at {:08X} "
++                 "(resync {} of {})",
++                 packet_start, resync_bad_packets_, kMaxResyncPerBoot);
++  }
+ 
+   OnPrimaryBufferEnd();
+ 
+   return write_index;
+ }
+ 
+-void CommandProcessor::ExecuteIndirectBuffer(u32 ptr, u32 count) {
++bool CommandProcessor::ExecuteIndirectBuffer(u32 ptr, u32 count) {
+   REX_PROFILE_SCOPE("gpu");
++  if (!count) return true;
+ 
+   u8* indirect_buffer = GetPhysicalForWrite(physical_memory_, ptr, count * sizeof(u32));
+   if (!indirect_buffer) {
+     REXGPU_ERROR("indirect buffer is outside physical memory");
+-    return;
++    return false;
+   }
+   memory::RingBuffer reader(indirect_buffer, count * sizeof(u32));
+   reader.SetWriteOffset(count * sizeof(u32));
+   do {
++    const u32 packet_start = reader.GetReadOffset();
+     if (!ExecutePacket(&reader)) {
+-      REXGPU_ERROR("indirect buffer failed to execute a packet");
+-      REX_ASSERT_ALWAYS();
+-      break;
++      REXGPU_ERROR("INDIRECT RINGBUFFER: failed packet at {:08X} (ptr {:08X}, {} dwords)",
++                   packet_start, ptr, count);
++      return false;
+     }
+   } while (reader.GetReadCount());
++  return true;
+ }
+ 
+ void CommandProcessor::ExecutePacket(u32 ptr, u32 count) {
+@@ -643,6 +709,7 @@
+ }
+ 
+ bool CommandProcessor::ExecutePacket(memory::RingBuffer* reader) {
++  last_packet_incomplete_ = false;
+   const u32 packet = reader->ReadAndSwap<u32>();
+   const u32 packet_type = packet >> 30;
+   if (packet == 0) {
+@@ -671,8 +738,10 @@
+ bool CommandProcessor::ExecutePacketType0(memory::RingBuffer* reader, u32 packet) {
+   u32 count = ((packet >> 16) & 0x3FFF) + 1;
+   if (reader->GetReadCount() < count * sizeof(u32)) {
+-    REXGPU_FAIL(false, "ExecutePacketType0 overflow (read count {:08X}, packet count {:08X})",
++    REXGPU_ERROR("ExecutePacketType0 overflow (read count {:08X}, packet count {:08X})",
+                 reader->GetReadCount(), count * sizeof(u32));
++    last_packet_incomplete_ = true;
++    return false;
+   }
+ 
+   u32 base_index = (packet & 0x7FFF);
+@@ -687,6 +756,11 @@
+ }
+ 
+ bool CommandProcessor::ExecutePacketType1(memory::RingBuffer* reader, u32 packet) {
++  if (reader->GetReadCount() < 2 * sizeof(u32)) {
++    REXGPU_ERROR("ExecutePacketType1 overflow (read count {:08X})", reader->GetReadCount());
++    last_packet_incomplete_ = true;
++    return false;
++  }
+   u32 reg_index_1 = packet & 0x7FF;
+   u32 reg_index_2 = (packet >> 11) & 0x7FF;
+   u32 reg_data_1 = reader->ReadAndSwap<u32>();
+@@ -707,8 +781,10 @@
+   auto data_start_offset = reader->GetReadOffset();
+ 
+   if (reader->GetReadCount() < count * sizeof(u32)) {
+-    REXGPU_FAIL(false, "ExecutePacketType3 overflow (read count {:08X}, packet count {:08X})",
++    REXGPU_ERROR("ExecutePacketType3 overflow (read count {:08X}, packet count {:08X})",
+                 reader->GetReadCount(), count * sizeof(u32));
++    last_packet_incomplete_ = true;
++    return false;
+   }
+ 
+   if (packet & 1) {
+@@ -932,8 +1008,7 @@
+   u32 list_length = reader->ReadAndSwap<u32>();
+   REX_ASSERT((list_length & ~0xFFFFF) == 0);
+   list_length &= 0xFFFFF;
+-  ExecuteIndirectBuffer(GPUToCPU(list_ptr), list_length);
+-  return true;
++  return ExecuteIndirectBuffer(GPUToCPU(list_ptr), list_length);
+ }
+ 
+ bool CommandProcessor::ExecutePacketType3_WAIT_REG_MEM(memory::RingBuffer* reader,
+diff --git a/tests/unit/gpu/packet_recovery_test.cpp b/tests/unit/gpu/packet_recovery_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/packet_recovery_test.cpp
+@@ -0,0 +1,124 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#include "rex_test.h"
++#include <catch2/generators/catch_generators.hpp>
++#include <chrono>
++#include <thread>
++#include <vector>
++#include <rex/xenos/packet.h>
++#include "fake_driver_context.h"
++#include "fake_title_context.h"
++#include "gpu/xenos/null/null_xenos_graphics_driver.h"
++#include "test_memory.h"
++
++namespace {
++struct Fixture {
++  Fixture() { rex::test::ReleaseTestMemory(); }
++  ~Fixture() { rex::test::ReleaseTestMemory(); }
++};
++void Put(rex::kernel::GuestAddressSpace& memory, rex::u32 physical, rex::u32 value) {
++  memory.TranslatePhysical<be_u32*>(physical)->Store(value,std::memory_order_release);
++}
++rex::u32 Get(rex::kernel::GuestAddressSpace& memory, rex::u32 physical) {
++  return memory.TranslatePhysical<const be_u32*>(physical)->Load(std::memory_order_acquire);
++}
++template<class Done> bool WaitFor(Done done) {
++  const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
++  while(!done() && std::chrono::steady_clock::now()<deadline)
++    std::this_thread::sleep_for(std::chrono::milliseconds(1));
++  return done();
++}
++}
++
++REX_TEST_CASE_METHOD(Fixture,"Partial primary packets retry without dropping following work", "[gpu][packet_recovery]") {
++  const auto type=GENERATE(0,1,3);
++  auto& memory=rex::test::GetTestMemory();
++  rex::test::FakeTitleContext title(memory);
++  rex::test::FakeDriverContext context;
++  rex::gpu::null::NullXenosGraphicsDriver driver;
++  REQUIRE(driver.Initialize(context));
++  REQUIRE(driver.AttachTitle(rex::TitleInfo{},title,title,title));
++  const auto block=memory.SystemHeapAlloc(0x2000,0x1000,rex::kernel::kSystemHeapPhysical);
++  const auto base=memory.GetPhysicalAddress(block);
++  const auto writeback=base+0x1000, target=base+0x1100;
++  std::vector<rex::u32> words;
++  if(type==0) words={rex::xenos::BuildPacketType0(0x100,1),0};
++  if(type==1) words={0x40000000u | 0x100u | (0x101u<<11),0,0};
++  if(type==3) words={rex::xenos::BuildPacketType3(rex::xenos::PM4_NOP,1),0};
++  words.insert(words.end(),{rex::xenos::BuildPacketType3(rex::xenos::PM4_MEM_WRITE,2),target|2u,0xCAFEF00Du});
++  Put(memory,base,words[0]);
++  Put(memory,writeback,0xFFFFFFFFu);
++  driver.InitializeRingBuffer(base,9);
++  driver.EnableReadPointerWriteBack(writeback,6);
++  driver.WriteRegister(0x01C5,1);
++  const bool retried=WaitFor([&]{return Get(memory,writeback)==0;});
++  CHECK(retried);
++  CHECK(Get(memory,target)==0);
++  for(rex::u32 i=1;i<words.size();++i) Put(memory,base+i*4,words[i]);
++  driver.WriteRegister(0x01C5,static_cast<rex::u32>(words.size()));
++  CHECK(WaitFor([&]{return Get(memory,writeback)==words.size();}));
++  CHECK(Get(memory,target)==0xCAFEF00Du);
++  driver.DetachTitle();
++  driver.Shutdown();
++}
++
++REX_TEST_CASE_METHOD(Fixture,"Indirect incomplete packets propagate retry to the primary ring", "[gpu][packet_recovery]") {
++  auto& memory=rex::test::GetTestMemory();
++  rex::test::FakeTitleContext title(memory);
++  rex::test::FakeDriverContext context;
++  rex::gpu::null::NullXenosGraphicsDriver driver;
++  REQUIRE(driver.Initialize(context));
++  REQUIRE(driver.AttachTitle(rex::TitleInfo{},title,title,title));
++  const auto block=memory.SystemHeapAlloc(0x2000,0x1000,rex::kernel::kSystemHeapPhysical);
++  const auto base=memory.GetPhysicalAddress(block);
++  const auto writeback=base+0x1000, target=base+0x1100, indirect=base+0x1200;
++  const rex::u32 words[]={rex::xenos::BuildPacketType3(rex::xenos::PM4_INDIRECT_BUFFER,2),indirect,1,
++      rex::xenos::BuildPacketType3(rex::xenos::PM4_MEM_WRITE,2),(target+4)|2u,0x12345678u};
++  for(rex::u32 i=0;i<std::size(words);++i) Put(memory,base+i*4,words[i]);
++  Put(memory,indirect,rex::xenos::BuildPacketType3(rex::xenos::PM4_MEM_WRITE,2));
++  Put(memory,writeback,0xFFFFFFFFu);
++  driver.InitializeRingBuffer(base,9);
++  driver.EnableReadPointerWriteBack(writeback,6);
++  driver.WriteRegister(0x01C5,6);
++  CHECK(WaitFor([&]{return Get(memory,writeback)==0;}));
++  CHECK(Get(memory,target+4)==0);
++  Put(memory,indirect+4,target|2u);
++  Put(memory,indirect+8,0xCAFEF00Du);
++  Put(memory,base+8,3);
++  driver.WriteRegister(0x01C5,6);
++  CHECK(WaitFor([&]{return Get(memory,writeback)==6;}));
++  CHECK(Get(memory,target)==0xCAFEF00Du);
++  CHECK(Get(memory,target+4)==0x12345678u);
++  driver.DetachTitle();
++  driver.Shutdown();
++}
++
++REX_TEST_CASE_METHOD(Fixture,"Stalled indirect recovery preserves consumed arguments across ring wrap", "[gpu][packet_recovery]") {
++  auto& memory=rex::test::GetTestMemory();
++  rex::test::FakeTitleContext title(memory);
++  rex::test::FakeDriverContext context;
++  rex::gpu::null::NullXenosGraphicsDriver driver;
++  REQUIRE(driver.Initialize(context));
++  REQUIRE(driver.AttachTitle(rex::TitleInfo{},title,title,title));
++  const auto block=memory.SystemHeapAlloc(0x2000,0x1000,rex::kernel::kSystemHeapPhysical);
++  const auto base=memory.GetPhysicalAddress(block);
++  const auto writeback=base+0x1000,target=base+0x1100,indirect=base+0x1200;
++  Put(memory,base,rex::xenos::BuildPacketType3(rex::xenos::PM4_NOP,1021));
++  driver.InitializeRingBuffer(base,9);
++  driver.EnableReadPointerWriteBack(writeback,6);
++  driver.WriteRegister(0x01C5,1022);
++  CHECK(WaitFor([&]{return Get(memory,writeback)==1022;}));
++  Put(memory,base+1022*4,rex::xenos::BuildPacketType3(rex::xenos::PM4_INDIRECT_BUFFER,2));
++  Put(memory,base+1023*4,indirect);
++  Put(memory,base,1);
++  Put(memory,indirect,rex::xenos::BuildPacketType3(rex::xenos::PM4_NOP,2));
++  Put(memory,base+4,rex::xenos::BuildPacketType3(rex::xenos::PM4_MEM_WRITE,2));
++  Put(memory,base+8,target|2u);
++  Put(memory,base+12,0xCAFEF00Du);
++  const auto started=std::chrono::steady_clock::now();
++  driver.WriteRegister(0x01C5,4);
++  CHECK(WaitFor([&]{return Get(memory,writeback)==4;}));
++  CHECK(std::chrono::steady_clock::now()-started>=std::chrono::seconds(1));
++  CHECK(Get(memory,target)==0xCAFEF00Du);
++  driver.DetachTitle();
++  driver.Shutdown();
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -25,6 +25,7 @@
+   gpu/fence_endianness_test.cpp
+   gpu/graphics_system_test.cpp
+   gpu/packet_header_test.cpp
++  gpu/packet_recovery_test.cpp
+   gpu/texture_info_test.cpp
+   gpu/texture_layout_test.cpp
+   gpu/primitive_processor_simd_test.cpp

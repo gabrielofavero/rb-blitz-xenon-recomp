@@ -1,0 +1,156 @@
+diff --git a/src/gpu/xenos/d3d12/command_processor.cpp b/src/gpu/xenos/d3d12/command_processor.cpp
+--- a/src/gpu/xenos/d3d12/command_processor.cpp
++++ b/src/gpu/xenos/d3d12/command_processor.cpp
+@@ -769,6 +769,30 @@
+     ff_viewport_ = viewport;
+     deferred_command_list_.D3DRSSetViewport(ff_viewport_);
+     ff_viewport_update_needed_ = false;
++    if (rex::log::core.IsEnabled(rex::log::Level::kDebug)) {
++      static float vp_seen[64][4];
++      static int vp_seen_count = 0;
++      const float vp_now[4] = {ff_viewport_.TopLeftX, ff_viewport_.TopLeftY, ff_viewport_.Width,
++                               ff_viewport_.Height};
++      bool vp_new = true;
++      for (int i = 0; i < vp_seen_count; ++i) {
++        if (vp_seen[i][0] == vp_now[0] && vp_seen[i][1] == vp_now[1] &&
++            vp_seen[i][2] == vp_now[2] && vp_seen[i][3] == vp_now[3]) {
++          vp_new = false;
++          break;
++        }
++      }
++      if (vp_new && vp_seen_count < 64) {
++        for (int k = 0; k < 4; ++k) {
++          vp_seen[vp_seen_count][k] = vp_now[k];
++        }
++        ++vp_seen_count;
++        REXLOG_DEBUG("viewport d3d12: x={} y={} w={} h={} draw_scale={}x{}", vp_now[0], vp_now[1],
++                     vp_now[2], vp_now[3],
++                     texture_cache_ != nullptr ? texture_cache_->GetDrawResolutionScaleX() : 0,
++                     texture_cache_ != nullptr ? texture_cache_->GetDrawResolutionScaleY() : 0);
++      }
++    }
+   }
+ }
+ 
+@@ -781,6 +805,28 @@
+     ff_scissor_ = scissor_rect;
+     deferred_command_list_.D3DRSSetScissorRect(ff_scissor_);
+     ff_scissor_update_needed_ = false;
++    if (rex::log::core.IsEnabled(rex::log::Level::kDebug)) {
++      static i32 sc_seen[64][4];
++      static int sc_seen_count = 0;
++      const i32 sc_now[4] = {i32(ff_scissor_.left), i32(ff_scissor_.top),
++                                 i32(ff_scissor_.right), i32(ff_scissor_.bottom)};
++      bool sc_new = true;
++      for (int i = 0; i < sc_seen_count; ++i) {
++        if (sc_seen[i][0] == sc_now[0] && sc_seen[i][1] == sc_now[1] &&
++            sc_seen[i][2] == sc_now[2] && sc_seen[i][3] == sc_now[3]) {
++          sc_new = false;
++          break;
++        }
++      }
++      if (sc_new && sc_seen_count < 64) {
++        for (int k = 0; k < 4; ++k) {
++          sc_seen[sc_seen_count][k] = sc_now[k];
++        }
++        ++sc_seen_count;
++        REXLOG_DEBUG("scissor d3d12: l={} t={} r={} b={}", sc_now[0], sc_now[1], sc_now[2],
++                     sc_now[3]);
++      }
++    }
+   }
+ }
+ 
+@@ -1917,6 +1963,30 @@
+   u32 display_width = std::max(static_cast<u32>(1), video_mode.width);
+   u32 display_height = std::max(static_cast<u32>(1), video_mode.height);
+ 
++  if (rex::log::core.IsEnabled(rex::log::Level::kDebug)) {
++    static u32 swap_logged[10] = {};
++    const u32 swap_now[10] = {guest_output_width, guest_output_height, frontbuffer_width,
++                                   frontbuffer_height, frontbuffer_width_unscaled,
++                                   frontbuffer_height_unscaled, source_width_scaled,
++                                   source_height_scaled, display_width, display_height};
++    bool swap_changed = false;
++    for (int i = 0; i < 10; ++i) {
++      if (swap_now[i] != swap_logged[i]) {
++        swap_logged[i] = swap_now[i];
++        swap_changed = true;
++      }
++    }
++    if (swap_changed) {
++      REXLOG_DEBUG(
++          "swapdims d3d12: guest_output={}x{} packet={}x{} packet_unscaled={}x{} "
++          "resolve_dest_scaled={}x{} display={}x{} draw_scale={}x{} source_is_scaled={}",
++          swap_now[0], swap_now[1], swap_now[2], swap_now[3], swap_now[4], swap_now[5],
++          swap_now[6], swap_now[7], swap_now[8], swap_now[9],
++          texture_cache_->GetDrawResolutionScaleX(), texture_cache_->GetDrawResolutionScaleY(),
++          swap_source_scaled);
++    }
++  }
++
+   presenter->RefreshGuestOutput(
+       guest_output_width, guest_output_height, display_width, display_height,
+       [this, &swap_texture_srv_desc, frontbuffer_format, swap_texture_resource, guest_output_width,
+diff --git a/src/gpu/xenos/d3d12/render_target_cache.cpp b/src/gpu/xenos/d3d12/render_target_cache.cpp
+--- a/src/gpu/xenos/d3d12/render_target_cache.cpp
++++ b/src/gpu/xenos/d3d12/render_target_cache.cpp
+@@ -1480,6 +1480,25 @@
+   if (resource_desc.Format == DXGI_FORMAT_UNKNOWN) {
+     REXGPU_FAIL(nullptr, "D3D12RenderTargetCache: Unknown {} render target format {}",
+                 key.is_depth ? "depth" : "color", static_cast<u32>(key.resource_format));
++  }
++  if (rex::log::core.IsEnabled(rex::log::Level::kDebug)) {
++    static u32 rt_logged[4] = {};
++    const u32 rt_now[4] = {u32(resource_desc.Width), u32(resource_desc.Height),
++                                u32(resource_desc.Format), u32(key.msaa_samples)};
++    bool rt_changed = false;
++    for (int i = 0; i < 4; ++i) {
++      if (rt_now[i] != rt_logged[i]) {
++        rt_logged[i] = rt_now[i];
++        rt_changed = true;
++      }
++    }
++    if (rt_changed) {
++      REXLOG_DEBUG(
++          "rtdims d3d12: host_extent={}x{} pitch_tiles_at_32bpp={} msaa_samples={} depth={} "
++          "fmt={} draw_scale={}x{}",
++          rt_now[0], rt_now[1], u32(key.pitch_tiles_at_32bpp), rt_now[3],
++          int(key.is_depth), rt_now[2], GetDrawResolutionScaleX(), GetDrawResolutionScaleY());
++    }
+   }
+   if (key.msaa_samples == xenos::MSAASamples::k2X && !IsMSAA2xSupported()) {
+     resource_desc.SampleDesc.Count = 4;
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -2331,6 +2331,29 @@
+       frontbuffer_height_unscaled, guest_output_width, guest_output_height,
+       static_cast<u32>(frontbuffer_format));
+ 
++  if (rex::log::core.IsEnabled(rex::log::Level::kDebug)) {
++    static u32 swap_logged[10] = {};
++    const u32 swap_now[10] = {guest_output_width, guest_output_height, frontbuffer_width,
++                                   frontbuffer_height, frontbuffer_width_unscaled,
++                                   frontbuffer_height_unscaled, frontbuffer_width_scaled,
++                                   frontbuffer_height_scaled, 0, 0};
++    bool swap_changed = false;
++    for (int i = 0; i < 10; ++i) {
++      if (swap_now[i] != swap_logged[i]) {
++        swap_logged[i] = swap_now[i];
++        swap_changed = true;
++      }
++    }
++    if (swap_changed) {
++      REXLOG_DEBUG(
++          "swapdims vulkan: guest_output={}x{} packet={}x{} packet_unscaled={}x{} "
++          "resolve_dest_scaled={}x{} draw_scale={}x{} source_is_scaled={}",
++          swap_now[0], swap_now[1], swap_now[2], swap_now[3], swap_now[4], swap_now[5],
++          swap_now[6], swap_now[7], texture_cache_->GetDrawResolutionScaleX(),
++          texture_cache_->GetDrawResolutionScaleY(), swap_source_scaled);
++    }
++  }
++
+   const VideoMode video_mode = title_info_.video_mode;
+   u32 display_width = std::max(static_cast<u32>(1), video_mode.width);
+   u32 display_height = std::max(static_cast<u32>(1), video_mode.height);

@@ -1,0 +1,285 @@
+diff --git a/include/rex/ui/native_window_host.h b/include/rex/ui/native_window_host.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/ui/native_window_host.h
+@@ -0,0 +1,37 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++
++#include <functional>
++#include <memory>
++#include <optional>
++#include <string_view>
++#include <rex/platform.h>
++#include <rex/types.h>
++#include <rex/utility.h>
++
++namespace rex::ui {
++
++enum class NativeHostDisplayMode : u8 { kWindowed = 0, kBorderless = 1, kFullscreen = 2 };
++
++/** Optional embedding of a rendering child inside an application-owned native window.
++ * Hooks run on the UI thread. The Windows SDL provider captures the registered
++ * host before attaching and showing its rendering child. Other platforms retain their own
++ * window lifecycle.
++ */
++class INativeWindowHost {
++ public:
++  virtual ~INativeWindowHost() = default;
++  virtual bool Attach(void* native_child, std::function<void(bool)> focus_changed) = 0;
++  virtual bool SetDisplayMode(NativeHostDisplayMode mode) = 0;
++  virtual void SetTitle(std::string_view title) = 0;
++  /** The last mode acknowledged by the native window, empty when unavailable. */
++  virtual std::optional<NativeHostDisplayMode> GetDisplayMode() const { return std::nullopt; }
++};
++
++/** Register before the UI provider opens its window. Destroying the guard removes
++ * only this registration; an existing window retains shared ownership of its host.
++ */
++[[nodiscard]] REX_API ScopeGuard RegisterNativeWindowHost(std::shared_ptr<INativeWindowHost> host);
++[[nodiscard]] REX_API std::shared_ptr<INativeWindowHost> GetNativeWindowHost();
++
++}  // namespace rex::ui
+diff --git a/src/base/native_window_host.cpp b/src/base/native_window_host.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/base/native_window_host.cpp
+@@ -0,0 +1,42 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#include <rex/ui/native_window_host.h>
++#include <mutex>
++#include <utility>
++
++namespace rex::ui {
++namespace {
++struct Registration {
++  std::mutex mutex;
++  std::shared_ptr<INativeWindowHost> host;
++  u64 token = 0;
++};
++Registration& State() { static Registration value; return value; }
++}
++
++ScopeGuard RegisterNativeWindowHost(std::shared_ptr<INativeWindowHost> host) {
++  auto& state = State();
++  u64 token;
++  std::shared_ptr<INativeWindowHost> retired;
++  {
++    std::lock_guard lock(state.mutex);
++    retired = std::move(state.host);
++    state.host = std::move(host);
++    token = ++state.token;
++  }
++  return ScopeGuard([token] {
++    auto& current = State();
++    std::shared_ptr<INativeWindowHost> retired_host;
++    {
++      std::lock_guard lock(current.mutex);
++      if (current.token != token) return;
++      retired_host = std::move(current.host);
++    }
++  });
++}
++
++std::shared_ptr<INativeWindowHost> GetNativeWindowHost() {
++  auto& state = State();
++  std::lock_guard lock(state.mutex);
++  return state.host;
++}
++}  // namespace rex::ui
+diff --git a/src/base/CMakeLists.txt b/src/base/CMakeLists.txt
+--- a/src/base/CMakeLists.txt
++++ b/src/base/CMakeLists.txt
+@@ -26,6 +26,7 @@
+           log_sink.cpp
+           logger.cpp
+           module_group.cpp
++          native_window_host.cpp
+           path.cpp
+           path_settings.cpp
+           process_control.cpp
+diff --git a/src/ui/sdl3/sdl3_ui_driver.cpp b/src/ui/sdl3/sdl3_ui_driver.cpp
+--- a/src/ui/sdl3/sdl3_ui_driver.cpp
++++ b/src/ui/sdl3/sdl3_ui_driver.cpp
+@@ -17,6 +17,7 @@
+ #include <rex/ui/ui_driver.h>
+ #include <rex/ui/dialog.h>
+ #include <rex/ui/window.h>
++#include <rex/ui/native_window_host.h>
+ #include <rex/ui/ui_event.h>
+ #include <rex/platform.h>
+ #include <rex/settings_registry.h>
+@@ -29,6 +30,12 @@
+ #if REX_PLATFORM_MAC
+ #include <CoreFoundation/CoreFoundation.h>
+ #include <SDL3/SDL_metal.h>
++#endif
++
++#if REX_PLATFORM_WIN32
++// The SDK pins SDL and exports this private entry point only in its Windows
++// shared build. A rendering child has a different foreground root HWND.
++extern "C" __declspec(dllimport) bool SDL_SetKeyboardFocus(SDL_Window* window);
+ #endif
+ 
+ namespace rex::ui::sdl3 {
+@@ -134,6 +141,10 @@
+   bool video_started = false;
+   SDL_Window* window = nullptr;
+   SDL_WindowID window_id = 0;
++#if REX_PLATFORM_WIN32
++  std::shared_ptr<INativeWindowHost> native_host;
++  std::shared_ptr<int> native_host_window;
++#endif
+   u32 wakeup_event = 0;
+   bool event_watch = false;
+   bool fullscreen = false;
+@@ -509,6 +520,35 @@
+   s.monitor = config.monitor;
+   SetLimits(config.min_width, config.min_height, config.aspect_ratio);
+   s.CenterOnMonitor();
++#if REX_PLATFORM_WIN32
++  s.native_host = GetNativeWindowHost();
++  if (s.native_host) {
++    auto native = GetNativeWindow();
++    if (!native || native->type != NativeWindow::Type::kWin32 || !native->window) {
++      CloseUIWindow();
++      return Err(ErrorCategory::kPlatform, "native host requires a Windows rendering child");
++    }
++    SDL_Window* child = s.window;
++    s.native_host_window = std::make_shared<int>(0);
++    const std::weak_ptr<int> lifetime = s.native_host_window;
++    if (!s.native_host->Attach(native->window, [&s, child, lifetime](bool focused) {
++          if (lifetime.expired() || s.window != child) return;
++          if (focused || SDL_GetKeyboardFocus() == child)
++            SDL_SetKeyboardFocus(focused ? child : nullptr);
++          s.has_focus = focused;
++        })) {
++      CloseUIWindow();
++      return Err(ErrorCategory::kPlatform, "native host refused the rendering child");
++    }
++    const auto mode = !s.fullscreen ? NativeHostDisplayMode::kWindowed :
++        s.exclusive ? NativeHostDisplayMode::kFullscreen : NativeHostDisplayMode::kBorderless;
++    if (!s.native_host->SetDisplayMode(mode)) {
++      CloseUIWindow();
++      return Err(ErrorCategory::kPlatform, "native host refused the display mode");
++    }
++    s.native_host->SetTitle(config.title);
++  } else
++#endif
+   if (s.fullscreen) {
+     s.ApplyFullscreenMode();
+     SDL_SetWindowFullscreen(s.window, true);
+@@ -537,6 +577,10 @@
+     s.window_id = 0;
+     s.has_focus = false;
+   }
++#if REX_PLATFORM_WIN32
++  s.native_host_window.reset();
++  s.native_host.reset();
++#endif
+   s.relative = false;
+   s.pointer_mode = PointerMode::kFree;
+ }
+@@ -545,6 +589,9 @@
+   State& s = *state_;
+   if (s.window) {
+     SDL_SetWindowTitle(s.window, std::string(title).c_str());
++#if REX_PLATFORM_WIN32
++    if (s.native_host) s.native_host->SetTitle(title);
++#endif
+   }
+ }
+ 
+@@ -573,6 +620,22 @@
+   if (!s.window) {
+     return;
+   }
++#if REX_PLATFORM_WIN32
++  if (s.native_host) {
++    const auto mode = !fullscreen ? NativeHostDisplayMode::kWindowed :
++        exclusive ? NativeHostDisplayMode::kFullscreen : NativeHostDisplayMode::kBorderless;
++    if (!s.native_host->SetDisplayMode(mode)) {
++      REXUI_WARN("Native host refused display mode {}", static_cast<u32>(mode));
++      return;
++    }
++    s.fullscreen = fullscreen;
++    s.exclusive = exclusive;
++    s.mode_width = static_cast<i32>(mode_width);
++    s.mode_height = static_cast<i32>(mode_height);
++    s.monitor = monitor;
++    return;
++  }
++#endif
+   const bool monitor_changed = monitor != s.monitor;
+   s.fullscreen = fullscreen;
+   s.exclusive = exclusive;
+diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
+--- a/thirdparty/CMakeLists.txt
++++ b/thirdparty/CMakeLists.txt
+@@ -268,6 +268,12 @@
+ endif ()
+ 
+ add_subdirectory(sdl3)
++# The Windows embedding hook repairs SDL keyboard focus for a rendering child.
++# Keep its private symbol inside the SDK-pinned SDL build, without exposing it
++# to titles or changing the SDL source/submodule revision.
++if (WIN32 AND TARGET SDL3-shared)
++  target_link_options(SDL3-shared PRIVATE "LINKER:/EXPORT:SDL_SetKeyboardFocus")
++endif ()
+ foreach (sdl_target SDL3-static SDL3-shared SDL3_test SDL_uclibc)
+   if (TARGET ${sdl_target})
+     target_compile_options(${sdl_target} PRIVATE -w)
+diff --git a/tests/unit/ui/native_window_host_test.cpp b/tests/unit/ui/native_window_host_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/ui/native_window_host_test.cpp
+@@ -0,0 +1,38 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#include "rex_test.h"
++#include <rex/ui/native_window_host.h>
++
++namespace {
++class NativeHost final : public rex::ui::INativeWindowHost {
++ public:
++  bool Attach(void*, std::function<void(bool)>) override { return true; }
++  bool SetDisplayMode(rex::ui::NativeHostDisplayMode) override { return true; }
++  void SetTitle(std::string_view) override {}
++};
++}
++
++REX_TEST_CASE("native window registration is optional and stale guards cannot clear a new host", "[ui][native_host]") {
++  CHECK_FALSE(rex::ui::GetNativeWindowHost());
++  auto first = std::make_shared<NativeHost>();
++  auto first_guard = rex::ui::RegisterNativeWindowHost(first);
++  CHECK(rex::ui::GetNativeWindowHost() == first);
++  auto second = std::make_shared<NativeHost>();
++  auto second_guard = rex::ui::RegisterNativeWindowHost(second);
++  first_guard = {};
++  CHECK(rex::ui::GetNativeWindowHost() == second);
++  second_guard = {};
++  CHECK_FALSE(rex::ui::GetNativeWindowHost());
++}
++
++REX_TEST_CASE("a rendering window may retain its native host after registration ends", "[ui][native_host]") {
++  auto host = std::make_shared<NativeHost>();
++  std::weak_ptr<NativeHost> weak = host;
++  auto guard = rex::ui::RegisterNativeWindowHost(host);
++  auto captured = rex::ui::GetNativeWindowHost();
++  host.reset();
++  guard = {};
++  CHECK_FALSE(rex::ui::GetNativeWindowHost());
++  CHECK_FALSE(weak.expired());
++  captured.reset();
++  CHECK(weak.expired());
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -235,6 +235,7 @@
+   ui/achievement_notifications_test.cpp
+   ui/image_texture_test.cpp
+   ui/startup_paint_test.cpp
++  ui/native_window_host_test.cpp
+   ui/ui_system_test.cpp
+   codegen/barrier_test.cpp
+   codegen/codegen_writer_test.cpp

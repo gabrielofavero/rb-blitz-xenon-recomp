@@ -1,0 +1,48 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_io.cpp b/src/kernel/xboxkrnl/xboxkrnl_io.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_io.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_io.cpp
+@@ -283,6 +283,12 @@
+ u32 NtReadFileScatter_entry(u32 file_handle, u32 event_handle, MappedVoid apc_routine_ptr,
+                             MappedVoid apc_context, GuestPtrT<X_IO_STATUS_BLOCK> io_status_block,
+                             MappedU32 segment_array, u32 length, MappedU64 byte_offset_ptr) {
++  REXKRNL_TRACE(
++      "NtReadFileScatter: handle={:#x} event={:#x} apc={:#x} apc_ctx={:#x} iosb={:#x} "
++      "segments={:#x} len={:#x} offset={}",
++      file_handle, event_handle, apc_routine_ptr.GetGuestAddress(), apc_context.GetGuestAddress(),
++      io_status_block.GetGuestAddress(), segment_array.GetGuestAddress(), length,
++      byte_offset_ptr ? static_cast<i64>(static_cast<u64>(*byte_offset_ptr)) : -1);
+   X_STATUS result = X_STATUS_SUCCESS;
+ 
+   bool signal_event = false;
+@@ -320,12 +326,21 @@
+     ev->Set();
+   }
+ 
++  REXKRNL_TRACE("NtReadFileScatter -> {:#x} (iosb_status={:#x}, iosb_info={})", result,
++                io_status_block ? static_cast<u32>(io_status_block->status) : 0xDEAD,
++                io_status_block ? static_cast<u32>(io_status_block->information) : 0);
+   return result;
+ }
+ 
+ u32 NtWriteFile_entry(u32 file_handle, u32 event_handle, u32 apc_routine, MappedVoid apc_context,
+                       GuestPtrT<X_IO_STATUS_BLOCK> io_status_block, MappedVoid buffer,
+                       u32 buffer_length, MappedU64 byte_offset_ptr) {
++  REXKRNL_TRACE(
++      "NtWriteFile: handle={:#x} event={:#x} apc={:#x} apc_ctx={:#x} iosb={:#x} buf={:#x} "
++      "len={:#x} offset={}",
++      file_handle, event_handle, apc_routine, apc_context.GetGuestAddress(),
++      io_status_block.GetGuestAddress(), buffer.GetGuestAddress(), buffer_length,
++      byte_offset_ptr ? static_cast<i64>(static_cast<u64>(*byte_offset_ptr)) : -1);
+   X_STATUS result = X_STATUS_SUCCESS;
+ 
+   bool signal_event = false;
+@@ -363,6 +378,9 @@
+     ev->Set();
+   }
+ 
++  REXKRNL_TRACE("NtWriteFile -> {:#x} (iosb_status={:#x}, iosb_info={})", result,
++                io_status_block ? static_cast<u32>(io_status_block->status) : 0xDEAD,
++                io_status_block ? static_cast<u32>(io_status_block->information) : 0);
+   return result;
+ }
+ 

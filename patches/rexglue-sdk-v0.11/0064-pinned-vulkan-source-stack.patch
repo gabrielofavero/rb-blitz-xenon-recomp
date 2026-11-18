@@ -1,0 +1,877 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -54,6 +54,8 @@
+ option(REXGLUE_ENABLE_TRACY "Enable Tracy profiler integration" ON)
+ option(REXGLUE_ENABLE_PERF_COUNTERS "Enable lightweight perf counter registry and overlay" ON)
+ option(REXGLUE_VERIFY_HEADERS "Create the CMake targets that compile each public header alone" OFF)
++
++option(REXGLUE_GPU_VULKAN "Build the Vulkan graphics provider" ON)
+ 
+ if (WIN32)
+   set(REXGLUE_GPU_D3D12 ON)
+@@ -330,7 +332,7 @@
+ message(STATUS "  Configurations: ${CMAKE_CONFIGURATION_TYPES}")
+ message(STATUS "  Output Dir: ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+ message(STATUS "  C++ Standard: C++${CMAKE_CXX_STANDARD}")
+-message(STATUS "  GPU: D3D12=${REXGLUE_GPU_D3D12} Vulkan=ON")
++message(STATUS "  GPU: D3D12=${REXGLUE_GPU_D3D12} Vulkan=${REXGLUE_GPU_VULKAN}")
+ message(STATUS "  Tracy: ${REXGLUE_ENABLE_TRACY}")
+ message(STATUS "  Perf Counters: ${REXGLUE_ENABLE_PERF_COUNTERS}")
+ message(STATUS "===========================================")
+diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
+--- a/thirdparty/CMakeLists.txt
++++ b/thirdparty/CMakeLists.txt
+@@ -182,29 +182,7 @@
+ # Vulkan dependencies (only when Vulkan backend is enabled)
+ #=============================================================================
+ 
+-# Vulkan headers, VMA, the loader and MoltenVK all come from the Vulkan SDK. The loader and
+-# MoltenVK stay runtime loaded; no Vulkan implementation is linked into rexglue itself.
+-set(REXGLUE_VULKAN_MIN_VERSION 1.4.313)
+-if (UNIX
+-    AND NOT APPLE
+-    AND IS_ARM64
+-)
+-  set(REXGLUE_VULKAN_MIN_VERSION 1.3.275)
+-endif ()
+-set(REXGLUE_VULKAN_COMPONENTS "")
+-if (APPLE)
+-  set(REXGLUE_VULKAN_COMPONENTS COMPONENTS MoltenVK)
+-endif ()
+-find_package(Vulkan ${REXGLUE_VULKAN_MIN_VERSION} REQUIRED ${REXGLUE_VULKAN_COMPONENTS} GLOBAL)
+-
+-# VMA - header-only, from the Vulkan SDK and private to the Vulkan backend
+-find_path(
+-  REXGLUE_VMA_INCLUDE_DIR vk_mem_alloc.h
+-  HINTS "${Vulkan_INCLUDE_DIR}"
+-  PATH_SUFFIXES vma REQUIRED
+-)
+-add_library(rex-vma INTERFACE)
+-target_include_directories(rex-vma SYSTEM INTERFACE $<BUILD_INTERFACE:${REXGLUE_VMA_INCLUDE_DIR}>)
++include(${REXGLUE_ROOT}/cmake/rexglue_vulkan_dependencies.cmake)
+ 
+ #=============================================================================
+ # SDL3 - Cross-platform media layer
+@@ -222,13 +200,13 @@
+ if (APPLE)
+   # macOS uses SDL for windowing + Metal/Vulkan surface creation.
+   set(SDL_METAL ON)
+-  set(SDL_VULKAN ON)
++  set(SDL_VULKAN ${REXGLUE_GPU_VULKAN})
+ else ()
+   set(SDL_METAL OFF)
+   # Linux picks X11 or Wayland at runtime, so the surface has to come from
+   # whichever driver SDL chose. Windows presenters go straight from the HWND.
+   if (UNIX)
+-    set(SDL_VULKAN ON)
++    set(SDL_VULKAN ${REXGLUE_GPU_VULKAN})
+   else ()
+     set(SDL_VULKAN OFF)
+   endif ()
+diff --git a/src/gpu/xenos/CMakeLists.txt b/src/gpu/xenos/CMakeLists.txt
+--- a/src/gpu/xenos/CMakeLists.txt
++++ b/src/gpu/xenos/CMakeLists.txt
+@@ -194,26 +194,29 @@
+ target_compile_definitions(rexgpu-xenos-null PRIVATE REX_GPU_XENOS_STATIC)
+ target_link_libraries(rexgpu-xenos-null PRIVATE rexgpu-xenos-base)
+ 
+-rexgpu_xenos_library(
+-  rexgpu-xenos-vulkan gpu-xenos-vulkan "ReXGlue Xenos GPU emulation on Vulkan"
+-  ${REXGPU_XENOS_VULKAN_ALL}
+-)
+-target_compile_definitions(rexgpu-xenos-vulkan PRIVATE REX_GPU_XENOS_STATIC)
+-target_link_libraries(
+-  rexgpu-xenos-vulkan
+-  PRIVATE rexgpu-xenos-base
+-          rexgpu
+-          renderdoc
+-          xxHash::xxhash
+-          glslang::SPIRV
+-          glslang
+-          MachineIndependent
+-          GenericCodeGen
+-          OSDependent
+-          OGLCompiler
+-          rex-vma
+-          Vulkan::Headers
+-)
++if (REXGLUE_GPU_VULKAN)
++  rexgpu_xenos_library(
++    rexgpu-xenos-vulkan gpu-xenos-vulkan "ReXGlue Xenos GPU emulation on Vulkan"
++    ${REXGPU_XENOS_VULKAN_ALL}
++  )
++  target_compile_definitions(rexgpu-xenos-vulkan PRIVATE REX_GPU_XENOS_STATIC)
++  target_link_libraries(
++    rexgpu-xenos-vulkan
++    PRIVATE rexgpu-xenos-base
++            rexgpu
++            renderdoc
++            xxHash::xxhash
++            glslang::SPIRV
++            glslang
++            MachineIndependent
++            GenericCodeGen
++            OSDependent
++            OGLCompiler
++            rex-vma
++            Vulkan::Headers
++  )
++
++endif ()
+ 
+ if (REXGLUE_GPU_D3D12)
+   rexgpu_xenos_library(
+diff --git a/cmake/rexglue_export_targets.cmake b/cmake/rexglue_export_targets.cmake
+--- a/cmake/rexglue_export_targets.cmake
++++ b/cmake/rexglue_export_targets.cmake
+@@ -29,8 +29,10 @@
+     rexapu-sdl3
+     rexhid-sdl3
+     rexgpu-xenos-null
+-    rexgpu-xenos-vulkan
+ )
++if (REXGLUE_GPU_VULKAN)
++  list(APPEND REXGLUE_MODULE_TARGETS rexgpu-xenos-vulkan)
++endif ()
+ if (WIN32)
+   list(APPEND REXGLUE_MODULE_TARGETS rexhid-xinput)
+ endif ()
+diff --git a/cmake/rexglue_install.cmake b/cmake/rexglue_install.cmake
+--- a/cmake/rexglue_install.cmake
++++ b/cmake/rexglue_install.cmake
+@@ -127,24 +127,15 @@
+               thirdparty/imgui/imstb_truetype.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+ )
+ 
+-if (APPLE)
+-  install(
+-    FILES "$<TARGET_FILE:Vulkan::Vulkan>"
+-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+-    CONFIGURATIONS Release
+-    RENAME libvulkan.1.dylib
+-  )
+-  install(
+-    FILES "$<TARGET_FILE:Vulkan::MoltenVK>"
+-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+-    CONFIGURATIONS Release
+-    RENAME libMoltenVK.dylib
+-  )
+-  install(
+-    FILES cmake/MoltenVK_icd.json
+-    DESTINATION ${CMAKE_INSTALL_DATADIR}/vulkan/icd.d
+-    CONFIGURATIONS Release
+-  )
++# The pinned desktop loader and headers install their own CMake packages.
++# iOS loads MoltenVK directly and carries neither the loader nor an ICD manifest.
++if (APPLE AND REXGLUE_GPU_VULKAN)
++  install(FILES "$<TARGET_FILE:Vulkan::MoltenVK>"
++          DESTINATION ${CMAKE_INSTALL_LIBDIR} RENAME libMoltenVK.dylib)
++  if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    install(FILES cmake/MoltenVK_icd.json
++            DESTINATION ${CMAKE_INSTALL_DATADIR}/vulkan/icd.d)
++  endif ()
+ endif ()
+ 
+ # Generate and install package config files
+diff --git a/cmake/rexglueConfig.cmake.in b/cmake/rexglueConfig.cmake.in
+--- a/cmake/rexglueConfig.cmake.in
++++ b/cmake/rexglueConfig.cmake.in
+@@ -1,6 +1,8 @@
+ @PACKAGE_INIT@
+ 
+ set(REXGLUE_VERSION_STRING "@REXGLUE_FULL_VERSION@")
++set(REXGLUE_GPU_VULKAN "@REXGLUE_GPU_VULKAN@")
++set(REXGLUE_GPU_D3D12 "@REXGLUE_GPU_D3D12@")
+ 
+ # What the package was built with.
+ # REXGLUE_STDLIB and REXGLUE_LIBSTDCXX_RELEASE are set on Linux only.
+@@ -44,21 +46,29 @@
+   include("${_rexglue_module_file}")
+ endforeach ()
+ 
+-if (APPLE)
+-  if (NOT TARGET rex::vulkan-loader)
+-    add_library(rex::vulkan-loader SHARED IMPORTED)
+-    set_target_properties(
+-      rex::vulkan-loader
+-      PROPERTIES IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/libvulkan.1.dylib"
+-    )
++if (REXGLUE_GPU_VULKAN)
++  find_dependency(VulkanHeaders 1.4.357 EXACT CONFIG GLOBAL)
++  if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    find_dependency(VulkanLoader 1.4.357 EXACT CONFIG GLOBAL)
++    if (NOT TARGET Vulkan::Vulkan)
++      add_library(Vulkan::Vulkan ALIAS Vulkan::Loader)
++    endif ()
++    if (NOT TARGET rex::vulkan-loader)
++      add_library(rex::vulkan-loader ALIAS Vulkan::Loader)
++    endif ()
+   endif ()
+-
+-  if (NOT TARGET rex::moltenvk)
+-    add_library(rex::moltenvk SHARED IMPORTED)
+-    set_target_properties(
+-      rex::moltenvk PROPERTIES IMPORTED_LOCATION
+-                               "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/libMoltenVK.dylib"
+-    )
++  if (APPLE)
++    if (NOT TARGET rex::moltenvk)
++      add_library(rex::moltenvk SHARED IMPORTED GLOBAL)
++      set_target_properties(rex::moltenvk PROPERTIES IMPORTED_LOCATION
++          "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/libMoltenVK.dylib")
++    endif ()
++    if (NOT TARGET Vulkan::MoltenVK)
++      add_library(Vulkan::MoltenVK ALIAS rex::moltenvk)
++    endif ()
++    if (NOT TARGET Vulkan::Vulkan)
++      add_library(Vulkan::Vulkan ALIAS rex::moltenvk)
++    endif ()
+   endif ()
+ endif ()
+ 
+diff --git a/cmake/rexglue_target.cmake b/cmake/rexglue_target.cmake
+--- a/cmake/rexglue_target.cmake
++++ b/cmake/rexglue_target.cmake
+@@ -504,8 +504,24 @@
+     _rexglue_stage_sdl(stage_commands ${target_name})
+   endif ()
+ 
+-  if (APPLE)
+-    _rexglue_stage_macos_vulkan_runtime(stage_commands ${target_name})
++  if ((TARGET rexgpu-xenos-vulkan OR TARGET rex::gpu-xenos-vulkan)
++      AND NOT "rexgpu-xenos-vulkan" IN_LIST excluded)
++    if (APPLE)
++      _rexglue_stage_macos_vulkan_runtime(stage_commands ${target_name})
++    elseif (TARGET Vulkan::Vulkan)
++      if (UNIX)
++        _rexglue_add_runtime_file(${target_name} "$<TARGET_SONAME_FILE_NAME:Vulkan::Vulkan>")
++        list(APPEND stage_commands COMMAND ${CMAKE_COMMAND} -E copy_if_different
++             "$<TARGET_FILE:Vulkan::Vulkan>"
++             "$<TARGET_FILE_DIR:${target_name}>/$<TARGET_SONAME_FILE_NAME:Vulkan::Vulkan>")
++        set_property(TARGET ${target_name} APPEND PROPERTY LINK_DEPENDS
++                     "$<TARGET_FILE:Vulkan::Vulkan>")
++      else ()
++        _rexglue_stage_library(stage_commands ${target_name} Vulkan::Vulkan)
++      endif ()
++    else ()
++      message(FATAL_ERROR "rexglue: the Vulkan provider requires its pinned runtime loader")
++    endif ()
+   endif ()
+ 
+   _rexglue_get_runtime_libs(dll_excludes)
+diff --git a/cmake/rexglue_vulkan_stack.json b/cmake/rexglue_vulkan_stack.json
+new file mode 100644
+--- /dev/null
++++ b/cmake/rexglue_vulkan_stack.json
+@@ -0,0 +1,23 @@
++{
++  "sdk_version": "1.4.357.0",
++  "dependencies": {
++    "vulkan-headers": {
++      "repository": "https://github.com/KhronosGroup/Vulkan-Headers.git",
++      "commit": "e3b1eec08173d6b825cd3ac88c885a63b621504a"
++    },
++    "vulkan-loader": {
++      "repository": "https://github.com/KhronosGroup/Vulkan-Loader.git",
++      "commit": "5f157b62e333c63260d05d81bf66faa216ab0fb8"
++    },
++    "vulkan-memory-allocator": {
++      "repository": "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git",
++      "commit": "1d8f600fd424278486eade7ed3e877c99f0846b1"
++    },
++    "moltenvk": {
++      "repository": "https://github.com/KhronosGroup/MoltenVK.git",
++      "commit": "db445ff2042d9ce348c439ad8451112f354b8d2a",
++      "patch": "cmake/patches/moltenvk/0001-retain-presentation-drawable.patch",
++      "patch_sha256": "46b6637d99c4fe3eea73c3660cbc07cebc4bad4edb5fc60993ed27d58e48a886"
++    }
++  }
++}
+diff --git a/cmake/rexglue_vulkan_dependencies.cmake b/cmake/rexglue_vulkan_dependencies.cmake
+new file mode 100644
+--- /dev/null
++++ b/cmake/rexglue_vulkan_dependencies.cmake
+@@ -0,0 +1,131 @@
++# Pinned source dependencies. Runtime implementations remain dynamically loaded.
++include_guard(GLOBAL)
++if (NOT REXGLUE_GPU_VULKAN)
++  return()
++endif()
++
++set(REXGLUE_VULKAN_SOURCE_ROOT "${CMAKE_BINARY_DIR}/_deps/rex-vulkan" CACHE PATH
++    "Exact Vulkan source checkouts used by the SDK")
++set(REXGLUE_VULKAN_MIRROR_ROOT "" CACHE PATH "Optional local mirrors of the Vulkan source repositories")
++set(REXGLUE_MOLTENVK_CANONICAL_PATCH "" CACHE FILEPATH
++    "Canonical MoltenVK patch to compare with the bundled source-build input")
++option(REXGLUE_FETCH_VULKAN_DEPS "Acquire missing pinned Vulkan source checkouts" ON)
++
++find_package(Python3 COMPONENTS Interpreter REQUIRED)
++set(_vulkan_dependencies vulkan-headers vulkan-memory-allocator)
++if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
++  list(APPEND _vulkan_dependencies vulkan-loader)
++endif()
++if (APPLE)
++  list(APPEND _vulkan_dependencies moltenvk)
++endif()
++set(_vulkan_prepare_args --source-root "${REXGLUE_VULKAN_SOURCE_ROOT}" --only ${_vulkan_dependencies})
++if (NOT REXGLUE_FETCH_VULKAN_DEPS)
++  list(APPEND _vulkan_prepare_args --check)
++endif()
++if (REXGLUE_VULKAN_MIRROR_ROOT)
++  list(APPEND _vulkan_prepare_args --mirror-root "${REXGLUE_VULKAN_MIRROR_ROOT}")
++endif()
++if (REXGLUE_MOLTENVK_CANONICAL_PATCH)
++  list(APPEND _vulkan_prepare_args --canonical-moltenvk-patch "${REXGLUE_MOLTENVK_CANONICAL_PATCH}")
++endif()
++execute_process(COMMAND "${Python3_EXECUTABLE}" "${REXGLUE_ROOT}/scripts/prepare_vulkan_stack.py"
++                ${_vulkan_prepare_args} RESULT_VARIABLE _vulkan_prepare_result
++                OUTPUT_VARIABLE _vulkan_prepare_output ERROR_VARIABLE _vulkan_prepare_error)
++if (NOT _vulkan_prepare_result EQUAL 0)
++  message(FATAL_ERROR "Pinned Vulkan dependencies are unavailable:\n${_vulkan_prepare_output}${_vulkan_prepare_error}")
++endif()
++message(STATUS "${_vulkan_prepare_output}")
++
++set(VULKAN_HEADERS_ENABLE_TESTS OFF)
++set(VULKAN_HEADERS_ENABLE_INSTALL ON)
++set(VULKAN_HEADERS_ENABLE_MODULE OFF)
++add_subdirectory("${REXGLUE_VULKAN_SOURCE_ROOT}/vulkan-headers" "${CMAKE_CURRENT_BINARY_DIR}/vulkan-headers")
++set(VMA_ENABLE_INSTALL ON)
++set(VMA_BUILD_DOCUMENTATION OFF)
++set(VMA_BUILD_SAMPLES OFF)
++add_subdirectory("${REXGLUE_VULKAN_SOURCE_ROOT}/vulkan-memory-allocator"
++                 "${CMAKE_CURRENT_BINARY_DIR}/vulkan-memory-allocator")
++set_property(TARGET VulkanMemoryAllocator PROPERTY SYSTEM TRUE)
++add_library(rex-vma INTERFACE)
++target_link_libraries(rex-vma INTERFACE GPUOpen::VulkanMemoryAllocator)
++
++if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
++  set(BUILD_TESTS OFF)
++  set(BUILD_WERROR OFF)
++  set(UPDATE_DEPS OFF)
++  set(LOADER_CODEGEN OFF)
++  set(VulkanHeaders_VERSION "1.4.357")
++  if (WIN32)
++    # GNU-style clang still targets the MSVC ABI. Its loader trampolines require
++    # Microsoft's assembler rather than the GNU assembly route.
++    set(USE_GAS OFF)
++    set(USE_MASM ON)
++    if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|ARM64|aarch64)$")
++      if (CMAKE_VERSION VERSION_LESS 3.26)
++        message(FATAL_ERROR "The Windows ARM64 Vulkan loader requires CMake 3.26 or newer")
++      endif()
++      enable_language(ASM_MARMASM)
++    else()
++      if (NOT CMAKE_ASM_MASM_COMPILER)
++        find_program(_vulkan_masm NAMES ml64)
++        if (NOT _vulkan_masm)
++          find_program(_vulkan_vswhere NAMES vswhere.exe
++                       HINTS "$ENV{ProgramFiles\(x86\)}/Microsoft Visual Studio/Installer")
++          if (_vulkan_vswhere)
++            execute_process(COMMAND "${_vulkan_vswhere}" -latest -products *
++                            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
++                            -property installationPath OUTPUT_VARIABLE _vulkan_vsroot
++                            OUTPUT_STRIP_TRAILING_WHITESPACE)
++            file(GLOB _vulkan_masm_candidates
++                 "${_vulkan_vsroot}/VC/Tools/MSVC/*/bin/Hostx64/x64/ml64.exe"
++                 "${_vulkan_vsroot}/VC/Tools/MSVC/*/bin/Hostarm64/x64/ml64.exe")
++            list(SORT _vulkan_masm_candidates COMPARE NATURAL ORDER DESCENDING)
++            if (_vulkan_masm_candidates)
++              list(GET _vulkan_masm_candidates 0 _vulkan_masm)
++            endif()
++          endif()
++        endif()
++        if (NOT _vulkan_masm)
++          message(FATAL_ERROR "The Windows Vulkan loader needs ml64; set CMAKE_ASM_MASM_COMPILER")
++        endif()
++        set(CMAKE_ASM_MASM_COMPILER "${_vulkan_masm}" CACHE FILEPATH "Vulkan loader assembler")
++      endif()
++      enable_language(ASM_MASM)
++    endif()
++  endif()
++  block()
++    # The source header target above defines this loader's complete SDK input.
++    set(CMAKE_DISABLE_FIND_PACKAGE_VulkanHeaders TRUE)
++    add_subdirectory("${REXGLUE_VULKAN_SOURCE_ROOT}/vulkan-loader" "${CMAKE_CURRENT_BINARY_DIR}/vulkan-loader")
++  endblock()
++  if (WIN32 AND NOT TARGET loader_asm_gen_files)
++    message(FATAL_ERROR "The pinned Windows Vulkan loader could not build its assembly trampolines")
++  endif()
++  if (NOT TARGET Vulkan::Vulkan)
++    add_library(Vulkan::Vulkan ALIAS vulkan)
++  endif()
++endif()
++
++if (APPLE)
++  set(REXGLUE_MOLTENVK_SOURCE_DIR "${REXGLUE_VULKAN_SOURCE_ROOT}/moltenvk"
++      CACHE INTERNAL "Prepared exact MoltenVK source checkout" FORCE)
++  if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    find_library(REXGLUE_UIKIT_LIBRARY UIKit REQUIRED)
++    set(APPKIT_LIBRARY "${REXGLUE_UIKIT_LIBRARY}")
++    set(IOKIT_LIBRARY "${REXGLUE_UIKIT_LIBRARY}")
++  endif()
++  set(MVK_BUILD_SHADER_CONVERTER_TOOL OFF)
++  set(MVK_EXCLUDE_SPIRV_TOOLS ON)
++  add_subdirectory("${REXGLUE_VULKAN_SOURCE_ROOT}/moltenvk" "${CMAKE_CURRENT_BINARY_DIR}/moltenvk")
++  if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    find_library(REXGLUE_COREGRAPHICS_LIBRARY CoreGraphics REQUIRED)
++    target_link_libraries(MoltenVK PRIVATE "${REXGLUE_COREGRAPHICS_LIBRARY}")
++  endif()
++  if (NOT TARGET Vulkan::MoltenVK)
++    add_library(Vulkan::MoltenVK ALIAS MoltenVK)
++  endif()
++  if (NOT TARGET Vulkan::Vulkan)
++    add_library(Vulkan::Vulkan ALIAS MoltenVK)
++  endif()
++endif()
+diff --git a/cmake/patches/moltenvk/0001-retain-presentation-drawable.patch b/cmake/patches/moltenvk/0001-retain-presentation-drawable.patch
+new file mode 100644
+--- /dev/null
++++ b/cmake/patches/moltenvk/0001-retain-presentation-drawable.patch
+@@ -0,0 +1,201 @@
++diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKImage.h b/MoltenVK/MoltenVK/GPUObjects/MVKImage.h
++--- a/MoltenVK/MoltenVK/GPUObjects/MVKImage.h
+++++ b/MoltenVK/MoltenVK/GPUObjects/MVKImage.h
++@@ -22,6 +22,7 @@
++ #include "MVKCommandResourceFactory.h"
++ #include "MVKSync.h"
++ #include "MVKSmallVector.h"
+++#include "MVKRetainedObject.h"
++ #include <MoltenVKShaderConverter/SPIRVToMSLConverter.h>
++ #include <unordered_map>
++ #include <mutex>
++@@ -498,7 +499,8 @@
++ protected:
++ 	friend MVKSwapchain;
++ 
++-	id<CAMetalDrawable> getCAMetalDrawable();
+++	// Returns +1 ownership; the caller must release it.
+++	id<CAMetalDrawable> getRetainedCAMetalDrawable();
++ 	void addPresentedHandler(id<CAMetalDrawable> mtlDrawable, MVKImagePresentInfo presentInfo, MVKSwapchainSignaler signaler);
++ 	void releaseMetalDrawable();
++ 	MVKSwapchainImageAvailability getAvailability();
++@@ -506,7 +508,7 @@
++ 	VkResult acquireAndSignalWhenAvailable(MVKSemaphore* semaphore, MVKFence* fence);
++ 	MVKSwapchainSignaler getPresentationSignaler();
++ 
++-	id<CAMetalDrawable> _mtlDrawable = nil;
+++	MVKRetainedObject<id<CAMetalDrawable>> _mtlDrawable;
++ 	id<MTLTexture> _mtlTextureHeadless = nil;
++ 	MVKSwapchainImageAvailability _availability;
++ 	MVKSmallVector<MVKSwapchainSignaler, 1> _availabilitySignalers;
++diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
++--- a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+++++ b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
++@@ -1577,47 +1577,60 @@
++ // Calling nextDrawable may result in a nil drawable, or a drawable with no pixel format.
++ // Attempt several times to retrieve a good drawable, and set an error to trigger the
++ // swapchain to be re-established if one cannot be retrieved.
++-id<CAMetalDrawable> MVKPresentableSwapchainImage::getCAMetalDrawable() {
++-
++-	if (_mtlTextureHeadless) { return nil; }	// If headless, there is no drawable.
++-
++-	if ( !_mtlDrawable ) {
+++id<CAMetalDrawable> MVKPresentableSwapchainImage::getRetainedCAMetalDrawable() {
+++	if (_mtlTextureHeadless) { return nil; }
+++	if (id<CAMetalDrawable> drawable = _mtlDrawable.getRetained()) { return drawable; }
+++
+++	// nextDrawable can block until a completion callback releases another drawable.
+++	// Never hold the ownership lock across this call.
+++	id<CAMetalDrawable> candidate = nil;
+++	bool hasInvalidFormat = false;
+++	uint32_t attemptCnt = _swapchain->getImageCount();
+++	for (uint32_t attemptIdx = 0; !candidate && attemptIdx < attemptCnt; attemptIdx++) {
++ 		@autoreleasepool {
++-			bool hasInvalidFormat = false;
++-			uint32_t attemptCnt = _swapchain->getImageCount();	// Attempt a resonable number of times
++-			for (uint32_t attemptIdx = 0; !_mtlDrawable && attemptIdx < attemptCnt; attemptIdx++) {
++-				uint64_t startTime = getPerformanceTimestamp();
++-				_mtlDrawable = [_swapchain->getCAMetalLayer().nextDrawable retain];	// retained
++-				addPerformanceInterval(getPerformanceStats().queue.retrieveCAMetalDrawable, startTime);
++-				hasInvalidFormat = _mtlDrawable && !_mtlDrawable.texture.pixelFormat;
++-				if (hasInvalidFormat) { releaseMetalDrawable(); }
++-			}
++-			if (hasInvalidFormat) {
++-				setConfigurationResult(reportError(VK_ERROR_OUT_OF_DATE_KHR, "CAMetalDrawable with valid format could not be acquired after %d attempts.", attemptCnt));
++-			} else if ( !_mtlDrawable ) {
++-				setConfigurationResult(reportError(VK_ERROR_OUT_OF_POOL_MEMORY, "CAMetalDrawable could not be acquired after %d attempts.", attemptCnt));
++-			}
++-		}
++-	}
++-	return _mtlDrawable;
++-}
++-
++-// If not headless, retrieve the MTLTexture directly from the CAMetalDrawable.
+++			uint64_t startTime = getPerformanceTimestamp();
+++			candidate = [_swapchain->getCAMetalLayer().nextDrawable retain];
+++			addPerformanceInterval(getPerformanceStats().queue.retrieveCAMetalDrawable, startTime);
+++			hasInvalidFormat = candidate && !candidate.texture.pixelFormat;
+++			if (hasInvalidFormat) { [candidate release]; candidate = nil; }
+++		}
+++	}
+++	if (!candidate) {
+++		if (hasInvalidFormat) {
+++			setConfigurationResult(reportError(VK_ERROR_OUT_OF_DATE_KHR, "CAMetalDrawable with valid format could not be acquired after %d attempts.", attemptCnt));
+++		} else {
+++			setConfigurationResult(reportError(VK_ERROR_OUT_OF_POOL_MEMORY, "CAMetalDrawable could not be acquired after %d attempts.", attemptCnt));
+++		}
+++		return nil;
+++	}
+++	id<CAMetalDrawable> drawable = _mtlDrawable.publishIfEmptyAndGetRetained(candidate);
+++	[candidate release];
+++	return drawable;
+++}
+++
+++// Keep the texture alive through the caller's autorelease pool, even if the
+++// shared drawable is retired concurrently.
++ id<MTLTexture> MVKPresentableSwapchainImage::getMTLTexture(uint8_t planeIndex) {
++-	return _mtlTextureHeadless ? _mtlTextureHeadless : getCAMetalDrawable().texture;
+++	if (_mtlTextureHeadless) { return _mtlTextureHeadless; }
+++	id<CAMetalDrawable> drawable = getRetainedCAMetalDrawable();
+++	id<MTLTexture> texture = [drawable.texture retain];
+++	[drawable release];
+++	return [texture autorelease];
++ }
++ 
++ // Present the drawable and make myself available only once the command buffer has completed.
++ // Pass MVKImagePresentInfo by value because it may not exist when the callback runs.
++ VkResult MVKPresentableSwapchainImage::presentCAMetalDrawable(id<MTLCommandBuffer> mtlCmdBuff,
++ 															  MVKImagePresentInfo presentInfo) {
++-	_swapchain->renderWatermark(getMTLTexture(0), mtlCmdBuff);
+++	// Own this exact drawable before copying any blocks that capture it.
+++	id<CAMetalDrawable> mtlDrwbl = getRetainedCAMetalDrawable();
+++	_swapchain->renderWatermark(_mtlTextureHeadless ? _mtlTextureHeadless : mtlDrwbl.texture, mtlCmdBuff);
++ 
++ 	// According to Apple, it is more performant to call MTLDrawable present from within a
++ 	// MTLCommandBuffer scheduled-handler than it is to call MTLCommandBuffer presentDrawable:.
++ 	// But get current drawable now, intead of in handler, because a new drawable might be acquired by then.
++ 	// Attach present handler before presenting to avoid race condition.
++-	id<CAMetalDrawable> mtlDrwbl = getCAMetalDrawable();
+++	retain(); // Keep this image alive until the completion callback finishes.
++ 	MVKSwapchainSignaler signaler = getPresentationSignaler();
++ 	[mtlCmdBuff addScheduledHandler: ^(id<MTLCommandBuffer> mcb) {
++ 
++@@ -1641,16 +1654,17 @@
++ 	// Signal the fence and notify the swapchain that the present has completed
++ 	// from this callback, because the last one or two presentation completion
++ 	// callbacks can occasionally stall.
++-	retain();
++-	[mtlDrwbl retain];
++ 	auto* fence = presentInfo.fence;
++ 	if (fence) { fence->retain(); }
++ 	[mtlCmdBuff addCompletedHandler: ^(id<MTLCommandBuffer> mcb) {
++ 		signal(fence);
++ 		if (fence) { fence->release(); }
++ 		[mtlDrwbl release];
++-		release();
++-		if (_swapchain) { _swapchain->notifyPresentComplete(presentInfo); }
+++		{
+++			lock_guard<mutex> lock(_detachmentLock);
+++			if (_swapchain) { _swapchain->notifyPresentComplete(presentInfo); }
+++		}
+++		release(); // Must be the final access to this image.
++ 	}];
++ 
++ 	signal(signaler.semaphore, signaler.semaphoreSignalToken, mtlCmdBuff);
++@@ -1732,8 +1746,7 @@
++ 
++ // Releases the CAMetalDrawable underlying this image.
++ void MVKPresentableSwapchainImage::releaseMetalDrawable() {
++-    [_mtlDrawable release];
++-	_mtlDrawable = nil;
+++	_mtlDrawable.clear();
++ }
++ 
++ // Signal, untrack, and release any signalers that are tracking.
++diff --git a/MoltenVK/MoltenVK/Utility/MVKRetainedObject.h b/MoltenVK/MoltenVK/Utility/MVKRetainedObject.h
++new file mode 100644
++--- /dev/null
+++++ b/MoltenVK/MoltenVK/Utility/MVKRetainedObject.h
++@@ -0,0 +1,42 @@
+++/* Copyright 2026. Licensed under the Apache License, Version 2.0. */
+++#pragma once
+++
+++#include <mutex>
+++
+++// An Objective-C object shared with asynchronous completion callbacks. Readers
+++// acquire their own ownership before a concurrent clear can release the object.
+++// Release outside the lock: destruction may itself run completion callbacks.
+++template<class T> class MVKRetainedObject {
+++public:
+++    MVKRetainedObject() = default;
+++    MVKRetainedObject(const MVKRetainedObject&) = delete;
+++    MVKRetainedObject& operator=(const MVKRetainedObject&) = delete;
+++    ~MVKRetainedObject() { clear(); }
+++
+++    T getRetained() {
+++        std::lock_guard<std::mutex> lock(_lock);
+++        return [_object retain];
+++    }
+++
+++    // Candidate is borrowed. Its potentially blocking creation happens before
+++    // entering this method, so a drawable wait cannot block retirement callbacks.
+++    T publishIfEmptyAndGetRetained(T candidate) {
+++        std::lock_guard<std::mutex> lock(_lock);
+++        if (!_object) { _object = [candidate retain]; }
+++        return [_object retain];
+++    }
+++
+++    void clear() {
+++        T previous;
+++        {
+++            std::lock_guard<std::mutex> lock(_lock);
+++            previous = _object;
+++            _object = nil;
+++        }
+++        [previous release];
+++    }
+++
+++private:
+++    std::mutex _lock;
+++    T _object = nil;
+++};
+diff --git a/scripts/prepare_vulkan_stack.py b/scripts/prepare_vulkan_stack.py
+new file mode 100644
+--- /dev/null
++++ b/scripts/prepare_vulkan_stack.py
+@@ -0,0 +1,146 @@
++#!/usr/bin/env python3
++"""Prepare exact Vulkan source revisions and audit their bounded local patch set."""
++from __future__ import annotations
++import argparse
++import hashlib
++import json
++import os
++from pathlib import Path
++import subprocess
++import tempfile
++
++SDK_ROOT = Path(__file__).resolve().parents[1]
++MANIFEST = SDK_ROOT / "cmake/rexglue_vulkan_stack.json"
++
++
++def git(root: Path, *args: str, check: bool = True) -> bytes:
++    result = subprocess.run(["git", "-C", str(root), *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
++    if check and result.returncode:
++        raise RuntimeError(result.stderr.decode(errors="replace").strip())
++    return result.stdout
++
++
++def comparable(data: bytes | None) -> bytes | None:
++    return data.replace(b"\r\n", b"\n") if os.name == "nt" and data is not None else data
++
++
++def patched_files(source: Path, patch: Path) -> dict[str, bytes]:
++    paths = set()
++    for line in patch.read_text().splitlines():
++        if line.startswith("+++ b/") or line.startswith("--- a/"):
++            name = line[6:]
++            if Path(name).is_absolute() or Path(name).drive or ".." in Path(name).parts:
++                raise RuntimeError(f"Unsafe dependency patch path: {name}")
++            paths.add(name)
++    with tempfile.TemporaryDirectory(prefix="rex-vulkan-patch-") as temporary:
++        replay = Path(temporary)
++        git(replay, "init", "-q")
++        git(replay, "config", "core.autocrlf", "false")
++        for name in paths:
++            data = git(source, "show", "HEAD:" + name, check=False)
++            if data:
++                dest = replay / name
++                dest.parent.mkdir(parents=True, exist_ok=True)
++                dest.write_bytes(data)
++        git(replay, "apply", "--whitespace=nowarn", str(patch.resolve()))
++        return {name: (replay / name).read_bytes() for name in paths}
++
++
++def audit(source: Path, spec: dict, check_only: bool) -> int:
++    actual = git(source, "rev-parse", "HEAD").decode().strip()
++    if actual != spec["commit"]:
++        raise RuntimeError(f"{source} is at {actual}, expected {spec['commit']}; refusing to replace its checkout")
++    expected = {}
++    if "patch" in spec:
++        patch = SDK_ROOT / spec["patch"]
++        if hashlib.sha256(patch.read_bytes()).hexdigest() != spec["patch_sha256"]:
++            raise RuntimeError(f"Bundled dependency patch hash mismatch: {patch}")
++        expected = patched_files(source, patch)
++    changed = git(source, "diff", "HEAD", "--name-only", "-z").decode().split("\0")
++    untracked = git(source, "ls-files", "--others", "--exclude-standard", "-z").decode().split("\0")
++    unexpected = sorted(name for name in set(changed + untracked) if name and name not in expected)
++    if unexpected:
++        raise RuntimeError(f"{source} has unrelated local edits: {unexpected}")
++    writes = []
++    for name, final in expected.items():
++        dest = source / name
++        if dest.is_symlink() or (dest.exists() and not dest.is_file()):
++            raise RuntimeError(f"Refusing dependency patch replacement: {dest}")
++        current = dest.read_bytes() if dest.exists() else None
++        original = git(source, "show", "HEAD:" + name, check=False) or None
++        if comparable(current) not in (comparable(original), comparable(final)):
++            raise RuntimeError(f"Dependency has local edits outside its exact patch replay: {dest}")
++        if comparable(current) != comparable(final):
++            writes.append((dest, final))
++    if check_only and writes:
++        raise RuntimeError(f"{source} needs {len(writes)} dependency patch updates")
++    for dest, data in writes:
++        dest.parent.mkdir(parents=True, exist_ok=True)
++        dest.write_bytes(data)
++    return len(writes)
++
++
++def prepare(source: Path, spec: dict, mirror: Path | None, check_only: bool, offline: bool) -> None:
++    if not (source / ".git").exists():
++        if check_only:
++            raise RuntimeError(f"Pinned dependency is missing: {source}")
++        if source.exists():
++            raise RuntimeError(f"Dependency directory exists without Git metadata: {source}")
++        source.parent.mkdir(parents=True, exist_ok=True)
++        origin = str(mirror.resolve()) if mirror and (mirror / ".git").exists() else spec["repository"]
++        if offline and origin == spec["repository"]:
++            raise RuntimeError(f"Offline dependency preparation needs a local mirror: {source.name}")
++        # A failed acquisition must not leave a half-prepared dependency at its
++        # public path. Rename the verified checkout only after all inputs pass.
++        with tempfile.TemporaryDirectory(prefix=".rex-vulkan-", dir=source.parent) as temporary:
++            checkout = Path(temporary) / source.name
++            subprocess.run(["git", "-c", "core.autocrlf=false", "clone", "--no-hardlinks", "--no-checkout", origin, str(checkout)], check=True)
++            git(checkout, "config", "core.autocrlf", "false")
++            git(checkout, "remote", "set-url", "origin", spec["repository"])
++            found = subprocess.run(["git", "-C", str(checkout), "cat-file", "-e", spec["commit"] + "^{commit}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
++            if found.returncode:
++                if offline:
++                    raise RuntimeError(f"Local mirror lacks pinned commit for {source.name}: {spec['commit']}")
++                git(checkout, "fetch", "--depth=1", "origin", spec["commit"])
++            git(checkout, "checkout", "--detach", spec["commit"])
++            audit(checkout, spec, False)
++            checkout.rename(source)
++    changed = audit(source, spec, check_only)
++    print(f"{source.name}: {spec['commit']} verified, {changed} patch updates")
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--source-root", type=Path, required=True)
++    parser.add_argument("--only", nargs="+", choices=["vulkan-headers", "vulkan-loader", "vulkan-memory-allocator", "moltenvk"])
++    parser.add_argument("--mirror-root", type=Path)
++    parser.add_argument("--mirror", action="append", default=[], metavar="NAME=PATH")
++    parser.add_argument("--canonical-moltenvk-patch", type=Path)
++    parser.add_argument("--check", action="store_true")
++    parser.add_argument("--offline", action="store_true")
++    args = parser.parse_args()
++    manifest = json.loads(MANIFEST.read_text())
++    mirrors = {}
++    for entry in args.mirror:
++        name, separator, value = entry.partition("=")
++        if not separator or name not in manifest["dependencies"]:
++            parser.error("--mirror expects a known dependency NAME=PATH")
++        mirrors[name] = Path(value)
++    if args.canonical_moltenvk_patch:
++        canonical = args.canonical_moltenvk_patch.read_bytes()
++        spec = manifest["dependencies"]["moltenvk"]
++        if hashlib.sha256(canonical).hexdigest() != spec["patch_sha256"]:
++            raise RuntimeError("Canonical MoltenVK patch differs from its bundled source-build input")
++    for name in args.only or manifest["dependencies"]:
++        mirror = mirrors.get(name)
++        if mirror is None and args.mirror_root:
++            mirror = args.mirror_root / name
++        prepare(args.source_root.resolve() / name, manifest["dependencies"][name], mirror, args.check, args.offline)
++    return 0
++
++
++if __name__ == "__main__":
++    try:
++        raise SystemExit(main())
++    except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
++        raise SystemExit(str(error))
+diff --git a/tests/scripts/test_prepare_vulkan_stack.py b/tests/scripts/test_prepare_vulkan_stack.py
+new file mode 100644
+--- /dev/null
++++ b/tests/scripts/test_prepare_vulkan_stack.py
+@@ -0,0 +1,89 @@
++"""Offline regressions for dependency publication and exact patch auditing."""
++import contextlib
++import hashlib
++import importlib.util
++import io
++from pathlib import Path
++import tempfile
++import unittest
++
++SPEC = importlib.util.spec_from_file_location(
++    "prepare_vulkan_stack", Path(__file__).resolve().parents[2] / "scripts/prepare_vulkan_stack.py")
++ENGINE = importlib.util.module_from_spec(SPEC)
++SPEC.loader.exec_module(ENGINE)
++
++
++class PinnedDependencyTests(unittest.TestCase):
++    def setUp(self):
++        self.temporary = tempfile.TemporaryDirectory(prefix="rex-vulkan-test-")
++        self.addCleanup(self.temporary.cleanup)
++        self.root = Path(self.temporary.name)
++        self.mirror = self.root / "mirror"
++        self.mirror.mkdir()
++        ENGINE.git(self.mirror, "init", "-q")
++        ENGINE.git(self.mirror, "config", "core.autocrlf", "false")
++        (self.mirror / "value.txt").write_text("original\n")
++        ENGINE.git(self.mirror, "add", ".")
++        ENGINE.git(self.mirror, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
++                   "commit", "-qm", "fixture")
++        self.pin = ENGINE.git(self.mirror, "rev-parse", "HEAD").decode().strip()
++        self.spec = {"commit": self.pin, "repository": "https://invalid.example/dependency.git"}
++        self.source = self.root / "sources/dependency"
++
++    def prepare(self):
++        with contextlib.redirect_stdout(io.StringIO()):
++            ENGINE.prepare(self.source, self.spec, self.mirror, False, True)
++
++    def test_checkout_is_exact_and_idempotent(self):
++        self.prepare()
++        self.assertEqual(ENGINE.git(self.source, "rev-parse", "HEAD").decode().strip(), self.pin)
++        self.assertEqual(ENGINE.audit(self.source, self.spec, True), 0)
++        self.prepare()
++        self.assertEqual((self.source / "value.txt").read_text(), "original\n")
++
++    def test_pin_drift_and_local_edits_are_preserved(self):
++        self.prepare()
++        (self.source / "value.txt").write_text("local\n")
++        with self.assertRaisesRegex(RuntimeError, "unrelated local edits"):
++            ENGINE.audit(self.source, self.spec, False)
++        self.assertEqual((self.source / "value.txt").read_text(), "local\n")
++        with self.assertRaisesRegex(RuntimeError, "refusing to replace"):
++            ENGINE.audit(self.source, dict(self.spec, commit="0" * 40), False)
++
++    def test_failed_acquisition_does_not_publish_partial_checkout(self):
++        self.spec["commit"] = "0" * 40
++        with self.assertRaisesRegex(RuntimeError, "lacks pinned commit"):
++            self.prepare()
++        self.assertFalse(self.source.exists())
++        self.assertEqual(list(self.source.parent.iterdir()), [])
++
++    def test_existing_nonrepository_is_preserved(self):
++        self.source.mkdir(parents=True)
++        (self.source / "local.txt").write_text("keep")
++        with self.assertRaisesRegex(RuntimeError, "without Git metadata"):
++            self.prepare()
++        self.assertEqual((self.source / "local.txt").read_text(), "keep")
++
++    def test_patch_replay_is_exact_and_rejects_unowned_edits(self):
++        patch = self.root / "exact.patch"
++        patch.write_text("diff --git a/value.txt b/value.txt\n--- a/value.txt\n+++ b/value.txt\n"
++                         "@@ -1 +1 @@\n-original\n+patched\n")
++        self.spec.update(patch=str(patch), patch_sha256=hashlib.sha256(patch.read_bytes()).hexdigest())
++        self.prepare()
++        self.assertEqual((self.source / "value.txt").read_text(), "patched\n")
++        self.assertEqual(ENGINE.audit(self.source, self.spec, True), 0)
++        (self.source / "value.txt").write_text("original\n")
++        with self.assertRaisesRegex(RuntimeError, "needs 1 dependency patch updates"):
++            ENGINE.audit(self.source, self.spec, True)
++        self.assertEqual(ENGINE.audit(self.source, self.spec, False), 1)
++        (self.source / "value.txt").write_text("local\n")
++        with self.assertRaisesRegex(RuntimeError, "outside its exact patch replay"):
++            ENGINE.audit(self.source, self.spec, False)
++        self.assertEqual((self.source / "value.txt").read_text(), "local\n")
++        patch.write_text(patch.read_text() + "\n")
++        with self.assertRaisesRegex(RuntimeError, "hash mismatch"):
++            ENGINE.audit(self.source, self.spec, False)
++
++
++if __name__ == "__main__":
++    unittest.main()

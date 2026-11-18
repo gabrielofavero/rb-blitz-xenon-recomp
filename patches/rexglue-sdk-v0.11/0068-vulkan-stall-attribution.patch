@@ -1,0 +1,93 @@
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+@@ -1159,8 +1159,12 @@
+   u64 current_paint_submission_index = paint_context_.submission_tracker.GetCurrentSubmission();
+   u64 paint_submission_count = static_cast<u64>(paint_context_.submissions.size());
+   if (current_paint_submission_index >= paint_submission_count) {
++    rex::diagnostics::compile_trace::Scope trace_wait(
++        rex::diagnostics::compile_trace::Event::kGpuOperation, "vulkan.paint_fence_wait", 0, 0);
++
+     paint_context_.submission_tracker.AwaitSubmissionCompletion(current_paint_submission_index -
+                                                                 paint_submission_count);
++    trace_wait.Success();
+   }
+   const PaintContext::Submission& paint_submission =
+       *paint_context_.submissions[current_paint_submission_index % paint_submission_count];
+@@ -1190,9 +1194,15 @@
+ 
+   VkSemaphore acquire_semaphore = paint_submission.GetAcquireSemaphore();
+   u32 swapchain_image_index;
+-  VkResult acquire_result =
+-      dfn.vkAcquireNextImageKHR(device, paint_context_.swapchain, UINT64_MAX, acquire_semaphore,
+-                                VK_NULL_HANDLE, &swapchain_image_index);
++  VkResult acquire_result;
++  {
++    rex::diagnostics::compile_trace::Scope trace_acquire(
++        rex::diagnostics::compile_trace::Event::kPresent, "vulkan.acquire_image", 0, 0);
++
++    acquire_result = dfn.vkAcquireNextImageKHR(device, paint_context_.swapchain, UINT64_MAX,
++        acquire_semaphore, VK_NULL_HANDLE, &swapchain_image_index);
++    trace_acquire.Success(acquire_result == VK_SUCCESS || acquire_result == VK_SUBOPTIMAL_KHR);
++  }
+   switch (acquire_result) {
+     case VK_SUCCESS:
+     case VK_SUBOPTIMAL_KHR:
+@@ -1548,10 +1558,14 @@
+     }
+     VkResult submit_result;
+     {
++      rex::diagnostics::compile_trace::Scope trace_submit(
++          rex::diagnostics::compile_trace::Event::kGpuOperation, "vulkan.paint_submit", 0, 0);
++
+       const VulkanDevice::Queue::Acquisition queue_acquisition =
+           vulkan_device_->AcquireQueue(vulkan_device_->GetQueueFamilyGraphicsCompute(), 0);
+       submit_result = dfn.vkQueueSubmit(queue_acquisition.GetQueue(), 1, &submit_info,
+                                         fence_acquisition.GetFence());
++      trace_submit.Success(submit_result == VK_SUCCESS);
+       if (ui_fence_acquisition.GetFence() != VK_NULL_HANDLE && submit_result == VK_SUCCESS) {
+         if (dfn.vkQueueSubmit(queue_acquisition.GetQueue(), 0, nullptr,
+                               ui_fence_acquisition.GetFence()) != VK_SUCCESS) {
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -4771,9 +4771,12 @@
+   size_t fences_total = submissions_in_flight_fences_.size();
+   size_t fences_awaited = 0;
+   if (await_submission > submission_completed_) {
++    rex::diagnostics::compile_trace::Scope trace_wait(
++        rex::diagnostics::compile_trace::Event::kGpuOperation, "vulkan.submission_fence_wait", 0, 0);
+     VkResult wait_result =
+         dfn.vkWaitForFences(device, static_cast<u32>(await_submission - submission_completed_),
+                             submissions_in_flight_fences_.data(), VK_TRUE, UINT64_MAX);
++    trace_wait.Success(wait_result == VK_SUCCESS);
+     if (wait_result == VK_SUCCESS) {
+       fences_awaited += await_submission - submission_completed_;
+     } else {
+@@ -5163,7 +5166,12 @@
+     if (dfn.vkBeginCommandBuffer(command_buffer.buffer, &command_buffer_begin_info) != VK_SUCCESS) {
+       REXGPU_FAIL(false, "Failed to begin a Vulkan command buffer");
+     }
+-    deferred_command_buffer_.Execute(command_buffer.buffer);
++    {
++      rex::diagnostics::compile_trace::Scope trace_replay(
++          rex::diagnostics::compile_trace::Event::kGpuOperation, "vulkan.command_replay", 0, 0);
++      deferred_command_buffer_.Execute(command_buffer.buffer);
++      trace_replay.Success();
++    }
+     if (dfn.vkEndCommandBuffer(command_buffer.buffer) != VK_SUCCESS) {
+       REXGPU_FAIL(false, "Failed to end a Vulkan command buffer");
+     }
+@@ -5191,9 +5199,12 @@
+     }
+     VkResult submit_result;
+     {
++      rex::diagnostics::compile_trace::Scope trace_submit(
++          rex::diagnostics::compile_trace::Event::kGpuOperation, "vulkan.guest_submit");
+       gpu::vulkan::VulkanDevice::Queue::Acquisition queue_acquisition =
+           vulkan_device->AcquireQueue(vulkan_device->GetQueueFamilyGraphicsCompute(), 0);
+       submit_result = dfn.vkQueueSubmit(queue_acquisition.GetQueue(), 1, &submit_info, fence);
++      trace_submit.Success(submit_result == VK_SUCCESS);
+     }
+     if (submit_result != VK_SUCCESS) {
+       REXGPU_ERROR("Failed to submit a Vulkan command buffer");

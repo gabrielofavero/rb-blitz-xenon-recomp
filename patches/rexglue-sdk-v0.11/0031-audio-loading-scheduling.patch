@@ -1,0 +1,105 @@
+diff --git a/src/gpu/xenos/preparation_budget.h b/src/gpu/xenos/preparation_budget.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/preparation_budget.h
+@@ -0,0 +1,11 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Background preparation leaves CPU time for audio and the guest/UI.
++#pragma once
++#include <algorithm>
++#include <cstddef>
++namespace rex::gpu {
++inline size_t PreparationWorkerCount(size_t work, size_t processors) {
++  const size_t available = processors > 2 ? processors - 2 : 1;
++  return std::min(work, std::min(size_t(4), available));
++}
++}
+diff --git a/tests/unit/gpu/preparation_budget_test.cpp b/tests/unit/gpu/preparation_budget_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/preparation_budget_test.cpp
+@@ -0,0 +1,15 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#include "rex_test.h"
++#include "gpu/xenos/preparation_budget.h"
++
++REX_TEST_CASE("Preparation pools leave CPU headroom and respect small workloads", "[gpu][preparation]") {
++  using rex::gpu::PreparationWorkerCount;
++  CHECK(PreparationWorkerCount(0,64)==0);
++  CHECK(PreparationWorkerCount(1,64)==1);
++  CHECK(PreparationWorkerCount(100,1)==1);
++  CHECK(PreparationWorkerCount(100,2)==1);
++  CHECK(PreparationWorkerCount(100,3)==1);
++  CHECK(PreparationWorkerCount(100,4)==2);
++  CHECK(PreparationWorkerCount(100,6)==4);
++  CHECK(PreparationWorkerCount(100,64)==4);
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -29,2 +29,3 @@
+   gpu/preparation_dispatch_test.cpp
++  gpu/preparation_budget_test.cpp
+   gpu/packet_header_test.cpp
+diff --git a/src/kernel/apu.cpp b/src/kernel/apu.cpp
+--- a/src/kernel/apu.cpp
++++ b/src/kernel/apu.cpp
+@@ -1,2 +1,3 @@
++#include <rex/platform/thread.h>
+ #include "kernel/apu.h"
+ 
+@@ -70,4 +71,6 @@
+ 
+ void APU::WorkerMain() {
++  // Audio deadlines take precedence over loading and preparation throughput.
++  platform::SetCurrentThreadPriority(platform::ThreadPriority::kHighest);
+   while (worker_running_) {
+     auto result = platform::WaitAny(wait_handles_.data(), wait_handles_.size(), true,
+diff --git a/src/kernel/xma/decoder.cpp b/src/kernel/xma/decoder.cpp
+--- a/src/kernel/xma/decoder.cpp
++++ b/src/kernel/xma/decoder.cpp
+@@ -10,4 +10,5 @@
+  */
+ 
++#include <rex/platform/thread.h>
+ #include <bit>
+ 
+@@ -101,4 +102,6 @@
+ 
+ void XMADecoder::WorkerThreadMain(const std::stop_token& stop) {
++  // Audio deadlines take precedence over loading and preparation throughput.
++  platform::SetCurrentThreadPriority(platform::ThreadPriority::kHighest);
+   while (!stop.stop_requested()) {
+     bool did_work = false;
+diff --git a/tests/unit/kernel/apu_test.cpp b/tests/unit/kernel/apu_test.cpp
+--- a/tests/unit/kernel/apu_test.cpp
++++ b/tests/unit/kernel/apu_test.cpp
+@@ -11,4 +11,7 @@
+ 
+ #include "rex_test.h"
++#if REX_PLATFORM_WIN32
++#include <windows.h>
++#endif
+ 
+ #include <array>
+@@ -225,6 +228,12 @@
+ std::atomic<rex::u32> g_callback_event{0};
+ std::atomic<bool> g_in_callback{false};
++#if REX_PLATFORM_WIN32
++std::atomic<int> g_audio_worker_priority{0};
++#endif
+ 
+ void WaitingClientCallback(PPCContext& ctx, rex::u8* base) {
++#if REX_PLATFORM_WIN32
++  g_audio_worker_priority = GetThreadPriority(GetCurrentThread());
++#endif
+   g_in_callback.store(true);
+   rex::test::Caller caller(ctx, base, *rex::kernel::ThreadState::Get()->GetRuntime());
+@@ -257,4 +266,7 @@
+   }
+   REQUIRE(g_in_callback.load());
++#if REX_PLATFORM_WIN32
++  CHECK(g_audio_worker_priority.load() == THREAD_PRIORITY_HIGHEST);
++#endif
+   const auto start = std::chrono::steady_clock::now();
+   apu.Shutdown();

@@ -1,0 +1,1173 @@
+diff --git a/src/gpu/xenos/d3d12/texture_cache.cpp b/src/gpu/xenos/d3d12/texture_cache.cpp
+--- a/src/gpu/xenos/d3d12/texture_cache.cpp
++++ b/src/gpu/xenos/d3d12/texture_cache.cpp
+@@ -16,4 +16,5 @@
+ #include <cstring>
+ #include <memory>
++#include <unordered_set>
+ #include <utility>
+ 
+@@ -23,4 +24,5 @@
+ #include "gpu/xenos/d3d12/shared_memory.h"
+ #include "gpu/xenos/d3d12/texture_cache.h"
++#include "gpu/xenos/pipeline/texture/conversion.h"
+ #include <rex/xenos/texture.h>
+ #include <rex/xenos/fetch.h>
+@@ -79,4 +81,9 @@
+ }  // namespace shaders
+ 
++namespace {
++
++
++}  // namespace
++
+ const D3D12TextureCache::HostFormat D3D12TextureCache::kHostFormats[64] = {
+     // k_1_REVERSE
+@@ -215,15 +222,26 @@
+      kLoadShaderIndexUnknown, xenos::REXGPU_SWIZZLE_RGBA},
+     // k_32
+-    {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
+-     kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
++    // The non-floating-point 32-bit-per-component formats (0.32 fixed-point
++    // and so on) can't be represented by a samplable host texture format
++    // directly - there's no normalized 32-bit-per-component DXGI format, and
++    // integer formats can only be read with Load, not Sample - so the texture
++    // cache converts the components of the guest data to floating-point in a
++    // staging buffer (see ConvertNonFloatGuestRange), and, since the conversion
++    // doesn't change the layout, loads the host texture from it using the
++    // regular load shaders. The sign and the num_format bits are applied to the
++    // data during the conversion, so the signed and the unsigned variants have
++    // different contents, even though the same host format is used for both
++    // (see IsSignedVersionSeparateForFormat).
++    {DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, kLoadShaderIndex32bpb, DXGI_FORMAT_R32_FLOAT,
++     kLoadShaderIndex32bpb, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+      xenos::REXGPU_SWIZZLE_RRRR},
+     // k_32_32
+-    {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
+-     kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+-     xenos::REXGPU_SWIZZLE_RGGG},
++    {DXGI_FORMAT_R32G32_FLOAT, DXGI_FORMAT_R32G32_FLOAT, kLoadShaderIndex64bpb,
++     DXGI_FORMAT_R32G32_FLOAT, kLoadShaderIndex64bpb, false, DXGI_FORMAT_UNKNOWN,
++     kLoadShaderIndexUnknown, xenos::REXGPU_SWIZZLE_RGGG},
+     // k_32_32_32_32
+-    {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
+-     kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+-     xenos::REXGPU_SWIZZLE_RGBA},
++    {DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT, kLoadShaderIndex128bpb,
++     DXGI_FORMAT_R32G32B32A32_FLOAT, kLoadShaderIndex128bpb, false, DXGI_FORMAT_UNKNOWN,
++     kLoadShaderIndexUnknown, xenos::REXGPU_SWIZZLE_RGBA},
+     // k_32_FLOAT
+     {DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_FLOAT, kLoadShaderIndex32bpb, DXGI_FORMAT_R32_FLOAT,
+@@ -370,5 +388,11 @@
+   ID3D12Device* device = provider.GetDevice();
+ 
++  // Pool for the staging buffers with the guest data converted to
++  // floating-point (the pages of which grow for a request that doesn't fit
++  // one - see the k_32 comment in kHostFormats).
++  conversion_staging_pool_ = std::make_unique<gpu::d3d12::D3D12UploadBufferPool>(provider);
++
+   if (IsDrawResolutionScaled()) {
++    // Buffers not used yet - no need aliasing barriers to change ownership of
+     // No aliasing barriers are needed for ownership changes while the buffers are unused.
+     std::memset(scaled_resolve_1gb_buffer_indices_, UINT8_MAX,
+@@ -606,4 +630,6 @@
+ 
+ void D3D12TextureCache::ClearCache() {
++  conversion_staging_pool_->ClearCache();
++
+   TextureCache::ClearCache();
+ 
+@@ -612,4 +638,9 @@
+   srv_descriptor_cache_allocated_ = 0;
+   srv_descriptor_cache_.clear();
++}
++
++void D3D12TextureCache::CompletedSubmissionUpdated(u64 completed_submission_index) {
++  TextureCache::CompletedSubmissionUpdated(completed_submission_index);
++  conversion_staging_pool_->Reclaim(completed_submission_index);
+ }
+ 
+@@ -1378,4 +1409,6 @@
+ 
+ bool D3D12TextureCache::IsSignedVersionSeparateForFormat(TextureKey key) const {
++  if (texture_conversion::IsNonFloat32bpcFormat(key.format)) return true;
++
+   const HostFormat& host_format = kHostFormats[static_cast<u32>(key.format)];
+   return host_format.load_shader_signed != kLoadShaderIndexUnknown &&
+@@ -1384,4 +1417,6 @@
+ 
+ bool D3D12TextureCache::IsScaledResolveSupportedForFormat(TextureKey key) const {
++  if (texture_conversion::IsNonFloat32bpcFormat(key.format)) return false;
++
+   LoadShaderIndex load_shader = GetLoadShaderIndex(key);
+   return load_shader != kLoadShaderIndexUnknown && load_pipelines_scaled_[load_shader] != nullptr;
+@@ -1586,9 +1621,89 @@
+   }
+ 
++  // 32-bit-per-component guest formats that aren't floating-point (fixed-point
++  // ones and integers) can't be converted by the hardware while sampling since
++  // no samplable host format with normalization and 32 bits per component
++  // exists (see the k_32 comment in kHostFormats) - so the data is converted
++  // to floating-point in a staging buffer, according to the num_format bit of
++  // the fetch constant (which tells whether the components are fractions or
++  // integers). As the conversion preserves the layout, the shared memory load
++  // constants can still be used for it, with the difference that the source of
++  // the load shaders is the staging buffer, and the guest offset is relative to
++  // the beginning of the guest data in that buffer rather than to the shared
++  // memory.
++  bool convert_non_float = !texture_resolution_scaled && texture_conversion::IsNonFloat32bpcFormat(texture_key.format);
++  u32 staging_size = 0;
++  u32 mips_staging_offset = 0;
++  ID3D12Resource* staging_buffer = nullptr;
++  size_t staging_buffer_offset = 0;
++  if (convert_non_float) {
++    u32 guest_base_size = d3d12_texture.GetGuestBaseSize();
++    u32 guest_mips_size = d3d12_texture.GetGuestMipsSize();
++    mips_staging_offset = u32(rex::RoundUpPow2(UINT64(guest_base_size), UINT64(256)));
++    staging_size = mips_staging_offset + guest_mips_size;
++    // The pool increases the size of its pages for a request that doesn't fit
++    // one, since the base and the mips have to be contiguous for the load
++    // shaders.
++    u8* staging_mapping =
++        conversion_staging_pool_->Request(command_processor_.GetCurrentSubmission(), staging_size,
++                                          256, &staging_buffer, &staging_buffer_offset, nullptr);
++    if (staging_mapping == nullptr) {
++      REXGPU_ERROR(
++          "Failed to convert a guest texture ({}x{}x{}, {} levels, {}) with the non-floating-point "
++          "to floating-point conversion because a staging buffer with {} bytes couldn't be "
++          "allocated",
++          width, height, depth_or_array_size, texture_key.mip_max_level + 1,
++          guest_format_info->name, staging_size);
++      command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
++      return false;
++    }
++    // The base and the mips are separate regions in the guest memory (and the
++    // layout of each of them, including tiling and packed mips, is preserved by
++    // the conversion), so only the beginnings of the regions that are being
++    // loaded need to be known.
++    D3D12SharedMemory& d3d12_shared_memory = static_cast<D3D12SharedMemory&>(GetSharedMemory());
++    bool is_signed = texture_key.signed_separate != 0;
++    bool is_integer = texture_key.num_format != 0;
++    if (is_integer &&
++        !(integer_conversion_reported_ & (UINT64_C(1) << u32(texture_key.format)))) {
++      // The integer number format is converted according to the rules of the
++      // other number-format consumers of this data on the console rather than
++      // according to an observation of a title using it, so report it once per
++      // format to make a run that depends on it identifiable.
++      integer_conversion_reported_ |= UINT64_C(1) << u32(texture_key.format);
++      REXGPU_WARN(
++          "Sampling guest texture format {} as {} integer data (num_format 1) - the components "
++          "are given to the shaders without normalization",
++          guest_format_info->name, is_signed ? "signed" : "unsigned");
++    }
++    if (level_first == 0) {
++      const auto data = d3d12_shared_memory.GetReadOnlyPhysicalSpan(
++          {u32(texture_key.base_page) << 12, guest_base_size});
++      if (!data) {
++        command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
++        return false;
++      }
++      texture_conversion::ConvertNonFloatGuestRange(reinterpret_cast<const u8*>(data->data()),
++          staging_mapping, guest_base_size, texture_key.endianness, is_signed, is_integer);
++    }
++    if (level_last != 0) {
++      const auto data = d3d12_shared_memory.GetReadOnlyPhysicalSpan(
++          {u32(texture_key.mip_page) << 12, guest_mips_size});
++      if (!data) {
++        command_processor_.ReleaseScratchGPUBuffer(copy_buffer, copy_buffer_state);
++        return false;
++      }
++      texture_conversion::ConvertNonFloatGuestRange(reinterpret_cast<const u8*>(data->data()),
++          staging_mapping + mips_staging_offset, guest_mips_size, texture_key.endianness, is_signed, is_integer);
++    }
++  }
++
+   u32 descriptor_count = 1;
+   if (texture_resolution_scaled) {
++    // Source - base and mips, one or both.
+     descriptor_count += (level_first == 0 && level_last != 0) ? 2 : 1;
+   } else {
+-    if (!bindless_resources_used_) {
++    // Source - shared memory, or the conversion staging buffer.
++    if (!bindless_resources_used_ || convert_non_float) {
+       ++descriptor_count;
+     }
+@@ -1612,16 +1727,31 @@
+   command_list.D3DSetComputeRootDescriptorTable(2, descriptor_dest.second);
+   // Scaled sources depend on the current buffer, so their descriptors are set later in the loop.
++  // depend on the buffer being current, so they will be set later - for mips,
++  // after loading the base is done).
+   if (!texture_resolution_scaled) {
+-    D3D12SharedMemory& d3d12_shared_memory = static_cast<D3D12SharedMemory&>(GetSharedMemory());
+-    d3d12_shared_memory.UseForReading();
+     gpu::d3d12::objects::DescriptorCPUGPUHandlePair descriptor_unscaled_source;
+-    if (bindless_resources_used_) {
+-      descriptor_unscaled_source = command_processor_.GetSharedMemoryUintPow2BindlessSRVHandlePair(
+-          load_shader_info.source_bpe_log2);
+-    } else {
++    if (convert_non_float) {
++      // The source is the staging buffer with the converted data, rather than
++      // the shared memory.
+       REX_ASSERT(descriptor_write_index < descriptor_count);
+       descriptor_unscaled_source = descriptors_allocated[descriptor_write_index++];
+-      d3d12_shared_memory.WriteUintPow2SRVDescriptor(descriptor_unscaled_source.first,
+-                                                     load_shader_info.source_bpe_log2);
++      gpu::d3d12::objects::CreateBufferTypedSRV(
++          device, descriptor_unscaled_source.first, staging_buffer,
++          gpu::d3d12::objects::GetUintPow2DXGIFormat(load_shader_info.source_bpe_log2),
++          u32(staging_size) >> load_shader_info.source_bpe_log2,
++          u32(staging_buffer_offset) >> load_shader_info.source_bpe_log2);
++    } else {
++      D3D12SharedMemory& d3d12_shared_memory = static_cast<D3D12SharedMemory&>(GetSharedMemory());
++      d3d12_shared_memory.UseForReading();
++      if (bindless_resources_used_) {
++        descriptor_unscaled_source =
++            command_processor_.GetSharedMemoryUintPow2BindlessSRVHandlePair(
++                load_shader_info.source_bpe_log2);
++      } else {
++        REX_ASSERT(descriptor_write_index < descriptor_count);
++        descriptor_unscaled_source = descriptors_allocated[descriptor_write_index++];
++        d3d12_shared_memory.WriteUintPow2SRVDescriptor(descriptor_unscaled_source.first,
++                                                       load_shader_info.source_bpe_log2);
++      }
+     }
+     command_list.D3DSetComputeRootDescriptorTable(1, descriptor_unscaled_source.second);
+@@ -1668,5 +1798,12 @@
+     if (texture_resolution_scaled) {
+       // The offset is applied in the buffer, as some hardware cannot address over 512 MB as R32.
++      // directly addresses as R32 on some hardware (above
++      // 2^D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP).
+       load_constants.guest_offset = 0;
++    } else if (convert_non_float) {
++      // The data was converted to a staging buffer that starts with the base
++      // (the guest addresses can't be used for it since it's not the shared
++      // memory).
++      load_constants.guest_offset = is_base ? 0 : mips_staging_offset;
+     } else {
+       load_constants.guest_offset = guest_address;
+diff --git a/src/gpu/xenos/d3d12/texture_cache.h b/src/gpu/xenos/d3d12/texture_cache.h
+--- a/src/gpu/xenos/d3d12/texture_cache.h
++++ b/src/gpu/xenos/d3d12/texture_cache.h
+@@ -92,4 +92,6 @@
+   void ClearCache() override;
+ 
++  void CompletedSubmissionUpdated(u64 completed_submission_index) override;
++
+   void BeginSubmission(u64 new_submission_index) override;
+   void BeginFrame() override;
+@@ -453,4 +455,13 @@
+   D3D12CommandProcessor& command_processor_;
+   bool bindless_resources_used_;
++
++  // Upload pool for the staging buffers containing guest texture data converted
++  // to floating-point (see ConvertNonFloatGuestRange) - a texture and its mips
++  // have to be contiguous for the load shaders, so the pool may allocate pages
++  // larger than its default page size for them.
++  std::unique_ptr<gpu::d3d12::D3D12UploadBufferPool> conversion_staging_pool_;
++  // Texture formats for which the integer num_format has been reported (see the
++  // REXGPU_WARN in LoadHostTextureDataFromResidentMemory).
++  u64 integer_conversion_reported_ = 0;
+ 
+   Microsoft::WRL::ComPtr<ID3D12RootSignature> load_root_signature_;
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_upload_buffer_pool.cpp b/src/gpu/xenos/host/d3d12/d3d12_upload_buffer_pool.cpp
+--- a/src/gpu/xenos/host/d3d12/d3d12_upload_buffer_pool.cpp
++++ b/src/gpu/xenos/host/d3d12/d3d12_upload_buffer_pool.cpp
+@@ -23,6 +23,15 @@
+ 
+ u8* D3D12UploadBufferPool::Request(u64 submission_index, size_t size, size_t alignment,
+-                                   ID3D12Resource** buffer_out, size_t* offset_out,
+-                                   D3D12_GPU_VIRTUAL_ADDRESS* gpu_address_out) {
++                                        ID3D12Resource** buffer_out, size_t* offset_out,
++                                        D3D12_GPU_VIRTUAL_ADDRESS* gpu_address_out) {
++  if (size > page_size_) {
++    // The callers of Request need their data to be contiguous, so make the
++    // request fit a single page by increasing the page size, as the pages that
++    // have already been allocated keep the size they were created with (so this
++    // doesn't affect the ones that may still be in use). For example, the
++    // texture cache stages converted guest texture data, the size of which
++    // depends on the size of the texture.
++    page_size_ = rex::RoundUpPow2(size, size_t(D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT));
++  }
+   size_t offset;
+   const D3D12Page* page = static_cast<const D3D12Page*>(
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_upload_buffer_pool.h b/src/gpu/xenos/host/d3d12/d3d12_upload_buffer_pool.h
+--- a/src/gpu/xenos/host/d3d12/d3d12_upload_buffer_pool.h
++++ b/src/gpu/xenos/host/d3d12/d3d12_upload_buffer_pool.h
+@@ -19,9 +19,13 @@
+ class D3D12UploadBufferPool : public GraphicsUploadBufferPool {
+  public:
+-  /** Creates the pool with the page size aligned to D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT. */
+   D3D12UploadBufferPool(const D3D12Provider& provider, size_t page_size = kDefaultPageSize);
+ 
+-  u8* Request(u64 submission_index, size_t size, size_t alignment, ID3D12Resource** buffer_out,
+-              size_t* offset_out, D3D12_GPU_VIRTUAL_ADDRESS* gpu_address_out);
++  // Request to write data in a single piece, creating a new page if the current
++  // one doesn't have enough free space - and a larger one if the request doesn't
++  // fit a page of the current size, since the whole request is placed in a
++  // single page (the callers need their data to be contiguous).
++  u8* Request(u64 submission_index, size_t size, size_t alignment,
++                   ID3D12Resource** buffer_out, size_t* offset_out,
++                   D3D12_GPU_VIRTUAL_ADDRESS* gpu_address_out);
+   u8* RequestPartial(u64 submission_index, size_t size, size_t alignment,
+                      ID3D12Resource** buffer_out, size_t* offset_out, size_t* size_out,
+diff --git a/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp b/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp
+--- a/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp
++++ b/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp
+@@ -77,5 +77,5 @@
+   REX_ASSERT(!submitted_last_ || submission_index >= submitted_last_->last_submission_index);
+   size_t current_page_used_aligned = rex::RoundUpPow2(current_page_used_, alignment);
+-  if (current_page_used_aligned + size > page_size_ || !writable_first_) {
++  if (!writable_first_ || current_page_used_aligned + size > writable_first_->size) {
+     if (writable_first_) {
+       FlushWrites();
+@@ -100,4 +100,5 @@
+       writable_first_->last_submission_index = submission_index;
+       writable_first_->next = nullptr;
++      writable_first_->size = page_size_;
+       writable_last_ = writable_first_;
+     }
+@@ -117,8 +118,9 @@
+   REX_ASSERT(rex::is_pow2(alignment));
+   size = rex::RoundUpPow2(size, alignment);
+-  size = std::min(size, page_size_);
++  const size_t target_page_size = writable_first_ ? writable_first_->size : page_size_;
++  size = std::min(size, target_page_size);
+   size_t current_page_used_aligned = rex::RoundUpPow2(current_page_used_, alignment);
+-  if (current_page_used_aligned + alignment <= page_size_) {
+-    size = std::min(size, (page_size_ - current_page_used_aligned) & ~(alignment - 1));
++  if (current_page_used_aligned + alignment <= target_page_size) {
++    size = std::min(size, (target_page_size - current_page_used_aligned) & ~(alignment - 1));
+   }
+   Page* page = Request(submission_index, size, alignment, offset_out);
+diff --git a/src/gpu/xenos/host/graphics_upload_buffer_pool.h b/src/gpu/xenos/host/graphics_upload_buffer_pool.h
+--- a/src/gpu/xenos/host/graphics_upload_buffer_pool.h
++++ b/src/gpu/xenos/host/graphics_upload_buffer_pool.h
+@@ -47,4 +47,5 @@
+     u64 last_submission_index;
+     Page* next;
++    size_t size; /**< Capacity allocated for this page, retained when the pool grows. */
+   };
+ 
+@@ -81,5 +82,14 @@
+ 
+   /** May grow on creation or first allocation when the real allocation exceeds the page size. */
++  // May be increased by the implementation on creation or on first allocation
++  // to avoid wasting space if the real allocation turns out to be bigger than
++  // the specified page size, and by an implementation of Request that can serve
++  // a request larger than a page by allocating a larger page for it (a single
++  // request is always placed in a single page). Only the pages created after
++  // the increase have the new size - the existing ones keep the size recorded
++  // in Page::size_.
+   size_t page_size_;
++
++  // A list of buffers with free space, with the first buffer being the one
+ 
+   Page* writable_first_ = nullptr;
+diff --git a/src/gpu/xenos/pipeline/texture/cache.cpp b/src/gpu/xenos/pipeline/texture/cache.cpp
+--- a/src/gpu/xenos/pipeline/texture/cache.cpp
++++ b/src/gpu/xenos/pipeline/texture/cache.cpp
+@@ -760,4 +760,5 @@
+   key_out.format = format;
+   key_out.endianness = fetch.endianness;
++  key_out.num_format = fetch.num_format;
+ 
+   key_out.is_valid = 1;
+diff --git a/src/gpu/xenos/pipeline/texture/cache.h b/src/gpu/xenos/pipeline/texture/cache.h
+--- a/src/gpu/xenos/pipeline/texture/cache.h
++++ b/src/gpu/xenos/pipeline/texture/cache.h
+@@ -148,6 +148,7 @@
+ 
+     u32 scaled_resolve : 1;
++    u32 num_format : 1;
+     u32 is_valid : 1;
+-    u32 padding : 30;
++    u32 padding : 29;
+ 
+     TextureKey() { Invalidate(); }
+diff --git a/src/gpu/xenos/pipeline/texture/conversion.h b/src/gpu/xenos/pipeline/texture/conversion.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/pipeline/texture/conversion.h
+@@ -0,0 +1,60 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++#include <cstring>
++#include <rex/bit.h>
++#include <rex/types.h>
++#include <rex/xenos/texture.h>
++#include <rex/xenos/format.h>
++namespace rex::gpu::texture_conversion {
++// Whether the guest format stores 32-bit-per-component data that isn't
++// floating-point, so it needs to be converted for a host texture (see the k_32
++// comment in host_formats_). The num_format bit of the fetch constant tells
++// whether such data is a fraction or an integer.
++inline bool IsNonFloat32bpcFormat(xenos::TextureFormat format) {
++  return format == xenos::TextureFormat::k_32 || format == xenos::TextureFormat::k_32_32 ||
++         format == xenos::TextureFormat::k_32_32_32_32;
++}
++
++// Converts the 32-bit components of a big-endian guest texture region to the
++// floating-point values a shader sampling it on the console would receive (used
++// for the guest formats that aren't floating-point, such as 0.32 fixed-point and
++// 32-bit integer ones), using the same math as the vertex fetch and the memory
++// export for such formats. The conversion is done in-place for each component
++// without any assumptions about the layout (tiling, mip packing and so on), as it
++// doesn't change it - so the load shaders can still be used to load the converted
++// data.
++inline void ConvertNonFloatGuestRange(const u8* source, u8* destination, u32 size_bytes,
++                               xenos::Endian endianness, bool is_signed, bool is_integer) {
++  std::memcpy(destination, source, size_bytes);
++  u32 component_count = size_bytes >> 2;
++  u32* destination_components = reinterpret_cast<u32*>(destination);
++  for (u32 i = 0; i < component_count; ++i) {
++    // Store the floating-point bits in the byte order of the guest data, since
++    // the load shaders apply the endianness conversion from the load constant
++    // to what they read.
++    u32 guest_value = xenos::GPUSwap(destination_components[i], endianness);
++    float converted_value;
++    if (is_integer) {
++      // Integer - the value reaches the shaders as it is, not scaled to the
++      // normalized range, just like in the is_integer mode of the vertex fetch
++      // and the unsigned integer and the signed integer surface number formats
++      // of the memory export, so the game applies any scaling it needs itself.
++      converted_value = is_signed ? float(i32(guest_value)) : float(guest_value);
++    } else if (is_signed) {
++      // Signed repeating fraction (the only mode supported for textures,
++      // kZeroClampMinusOne) - 1 / (2^31 - 1), with the most negative value
++      // rounded to -1 as float32, so no clamping is needed.
++      converted_value = float(i32(guest_value)) * (1.0f / 2147483647.0f);
++    } else {
++      // Unsigned repeating fraction - 1 / (2^32 - 1).
++      converted_value = float(guest_value) * (1.0f / 4294967295.0f);
++    }
++    u32 converted_value_bits;
++    std::memcpy(&converted_value_bits, &converted_value, sizeof(converted_value_bits));
++    destination_components[i] = xenos::GPUSwap(converted_value_bits, endianness);
++  }
++}
++
++
++
++}
+diff --git a/src/gpu/xenos/vulkan/texture_cache.cpp b/src/gpu/xenos/vulkan/texture_cache.cpp
+--- a/src/gpu/xenos/vulkan/texture_cache.cpp
++++ b/src/gpu/xenos/vulkan/texture_cache.cpp
+@@ -25,4 +25,6 @@
+ #include "gpu/xenos/vulkan/deferred_command_buffer.h"
+ #include "gpu/xenos/vulkan/texture_cache.h"
++#include "gpu/xenos/vulkan/texture_conversion_shader.h"
++#include "gpu/xenos/pipeline/texture/conversion.h"
+ #include <rex/math.h>
+ #include "gpu/xenos/host/vulkan/vulkan_mem_alloc.h"
+@@ -239,9 +241,14 @@
+      true},
+     // k_32
+-    {{kLoadShaderIndexUnknown}, {kLoadShaderIndexUnknown}, xenos::REXGPU_SWIZZLE_RRRR},
++    // Fixed-point/integer components are converted on upload, preserving the guest layout.
++    // Signed and unsigned conversions have different contents, so they use separate images.
++    {{kLoadShaderIndex32bpb, VK_FORMAT_R32_SFLOAT},
++     {kLoadShaderIndex32bpb, VK_FORMAT_R32_SFLOAT}, xenos::REXGPU_SWIZZLE_RRRR},
+     // k_32_32
+-    {{kLoadShaderIndexUnknown}, {kLoadShaderIndexUnknown}, xenos::REXGPU_SWIZZLE_RGGG},
++    {{kLoadShaderIndex64bpb, VK_FORMAT_R32G32_SFLOAT},
++     {kLoadShaderIndex64bpb, VK_FORMAT_R32G32_SFLOAT}, xenos::REXGPU_SWIZZLE_RGGG},
+     // k_32_32_32_32
+-    {{kLoadShaderIndexUnknown}, {kLoadShaderIndexUnknown}, xenos::REXGPU_SWIZZLE_RGBA},
++    {{kLoadShaderIndex128bpb, VK_FORMAT_R32G32B32A32_SFLOAT},
++     {kLoadShaderIndex128bpb, VK_FORMAT_R32G32B32A32_SFLOAT}, xenos::REXGPU_SWIZZLE_RGBA},
+     // k_32_FLOAT
+     {{kLoadShaderIndex32bpb, VK_FORMAT_R32_SFLOAT},
+@@ -426,4 +433,7 @@
+     }
+   }
++  if (conversion_pipeline_ != VK_NULL_HANDLE) {
++    dfn.vkDestroyPipeline(device, conversion_pipeline_, nullptr);
++  }
+   if (load_pipeline_layout_ != VK_NULL_HANDLE) {
+     dfn.vkDestroyPipelineLayout(device, load_pipeline_layout_, nullptr);
+@@ -434,6 +444,18 @@
+ 
+   if (vma_allocator_ != VK_NULL_HANDLE) {
++    for (const auto& staging : conversion_buffers_) {
++      vmaDestroyBuffer(vma_allocator_, staging.buffer, staging.allocation);
++    }
+     vmaDestroyAllocator(vma_allocator_);
+   }
++}
++
++void VulkanTextureCache::ClearCache() {
++  TextureCache::ClearCache();
++  // The command processor waits for pending submissions before clearing caches.
++  for (const auto& staging : conversion_buffers_) {
++    vmaDestroyBuffer(vma_allocator_, staging.buffer, staging.allocation);
++  }
++  conversion_buffers_.clear();
+ }
+ 
+@@ -986,4 +1008,8 @@
+ 
+ bool VulkanTextureCache::IsScaledResolveSupportedForFormat(TextureKey key) const {
++  // Scaled GPU resolves have not passed through the CPU component conversion.
++  if (texture_conversion::IsNonFloat32bpcFormat(key.format)) {
++    return false;
++  }
+   if (!IsDrawResolutionScaled()) {
+     return false;
+@@ -1134,4 +1160,89 @@
+   }
+   return AllocateScaledResolveBuffer(start_scaled, length_scaled);
++}
++
++bool VulkanTextureCache::ConvertTextureRange(u32 guest_address, u32 size, TextureKey key,
++                                            VkDescriptorBufferInfo& source) {
++  // Match the word-mover shader's vector loads, including padding at the end of a range.
++  const VkDeviceSize range = rex::RoundUpPow2(VkDeviceSize(size), VkDeviceSize(16));
++  if (!range || range > SharedMemory::kBufferSize - u64(guest_address) ||
++      range > command_processor_.GetVulkanDevice()->GetProperties().maxStorageBufferRange) {
++    return false;
++  }
++  ConversionBuffer* staging = nullptr;
++  for (auto& candidate : conversion_buffers_) {
++    if (candidate.submission <= command_processor_.GetCompletedSubmission() &&
++        candidate.size >= range) {
++      staging = &candidate;
++      break;
++    }
++  }
++  if (!staging) {
++    VkBufferCreateInfo buffer_info = {};
++    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
++    buffer_info.size = range;
++    buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
++    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++    VmaAllocationCreateInfo allocation_info = {};
++    allocation_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
++    ConversionBuffer created = {};
++    if (vmaCreateBuffer(vma_allocator_, &buffer_info, &allocation_info, &created.buffer,
++                        &created.allocation, nullptr) != VK_SUCCESS) {
++      REXGPU_ERROR("VulkanTextureCache: Failed to allocate {} bytes for texture conversion", range);
++      return false;
++    }
++    created.size = range;
++    conversion_buffers_.push_back(created);
++    staging = &conversion_buffers_.back();
++  }
++  staging->submission = command_processor_.GetCurrentSubmission();
++  auto& gpu_memory = static_cast<VulkanSharedMemory&>(GetSharedMemory());
++  const auto* vulkan_device = command_processor_.GetVulkanDevice();
++  VkDescriptorSet sets[2];
++  VkDescriptorBufferInfo buffers[2] = {
++      {staging->buffer, 0, range}, {gpu_memory.GetBuffer(), guest_address, range}};
++  VkWriteDescriptorSet writes[2] = {};
++  for (u32 i = 0; i < 2; ++i) {
++    sets[i] = command_processor_.AllocateSingleTransientDescriptor(
++        VulkanCommandProcessor::SingleTransientDescriptorLayout::kStorageBufferCompute);
++    if (sets[i] == VK_NULL_HANDLE) return false;
++    writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
++    writes[i].dstSet = sets[i];
++    writes[i].descriptorCount = 1;
++    writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
++    writes[i].pBufferInfo = &buffers[i];
++  }
++  vulkan_device->GetFunctions().vkUpdateDescriptorSets(vulkan_device->GetDevice(), 2, writes, 0, nullptr);
++  gpu_memory.Use(VulkanSharedMemory::Usage::kRead);
++  command_processor_.SubmitBarriers(true);
++  command_processor_.BindExternalComputePipeline(conversion_pipeline_);
++  auto& commands = command_processor_.GetDeferredCommandBuffer();
++  commands.CmdVkBindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, load_pipeline_layout_,
++                                  0, 2, sets, 0, nullptr);
++  // Convert padding too: the word-mover load shaders read complete vectors.
++  u32 word_count = u32(range / sizeof(u32));
++  u32 group_count = (word_count + 63) / 64;
++  // Vulkan guarantees at least 65535 groups per dimension. Even a full 512 MiB
++  // shared-memory range needs only 33 rows with 64 words per group.
++  u32 groups_per_row = std::min(group_count, UINT32_C(65535));
++  const u32 constants[] = {word_count, u32(key.endianness),
++      u32(key.signed_separate), u32(key.num_format), groups_per_row};
++  commands.CmdVkPushConstants(load_pipeline_layout_, VK_SHADER_STAGE_COMPUTE_BIT,
++                              0, sizeof(constants), constants);
++  commands.CmdVkDispatch(groups_per_row, (group_count + groups_per_row - 1) / groups_per_row, 1);
++  command_processor_.PushBufferMemoryBarrier(staging->buffer, 0, range,
++      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
++      VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
++  const u8 report_bit = u8(1 << (u32(key.signed_separate) |
++                                         (u32(key.num_format) << 1)));
++  auto& reported = conversion_reported_[u32(key.format)];
++  if (!(reported & report_bit)) {
++    reported |= report_bit;
++    REXGPU_INFO("VulkanTextureCache: GPU converting {} {} {} components to float32",
++                FormatInfo::Get(key.format)->name, key.signed_separate ? "signed" : "unsigned",
++                key.num_format ? "integer" : "fixed-point");
++  }
++  source = {staging->buffer, 0, range};
++  return true;
+ }
+ 
+@@ -1341,4 +1452,9 @@
+     write_descriptor_set_source_base_buffer_info.offset = source_base_start;
+     write_descriptor_set_source_base_buffer_info.range = source_base_range;
++    if (texture_conversion::IsNonFloat32bpcFormat(texture_key.format) &&
++        !ConvertTextureRange(source_base_start_unscaled, vulkan_texture.GetGuestBaseSize(),
++                             texture_key, write_descriptor_set_source_base_buffer_info)) {
++      return false;
++    }
+     VkWriteDescriptorSet& write_descriptor_set_source_base =
+         write_descriptor_sets[write_descriptor_set_count++];
+@@ -1381,4 +1497,9 @@
+     write_descriptor_set_source_mips_buffer_info.offset = source_mips_start;
+     write_descriptor_set_source_mips_buffer_info.range = source_mips_range;
++    if (texture_conversion::IsNonFloat32bpcFormat(texture_key.format) &&
++        !ConvertTextureRange(source_mips_start_unscaled, vulkan_texture.GetGuestMipsSize(),
++                             texture_key, write_descriptor_set_source_mips_buffer_info)) {
++      return false;
++    }
+     VkWriteDescriptorSet& write_descriptor_set_source_mips =
+         write_descriptor_sets[write_descriptor_set_count++];
+@@ -2605,4 +2726,19 @@
+                                  &load_pipeline_layout_)) {
+     REXGPU_FAIL(false, "VulkanTextureCache: Failed to create the texture load pipeline layout");
++  }
++
++  // Compile once at device initialization, never on a texture load during gameplay.
++  std::vector<u32> conversion_spirv;
++  std::string conversion_error;
++  if (!command_processor_.CompileGLSLToSPIRV(VK_SHADER_STAGE_COMPUTE_BIT,
++          kTextureConversionShader, conversion_spirv, conversion_error)) {
++    REXGPU_ERROR("VulkanTextureCache: Failed to compile GPU conversion: {}", conversion_error);
++    return false;
++  }
++  conversion_pipeline_ = gpu::vulkan::objects::CreateComputePipeline(vulkan_device,
++      load_pipeline_layout_, conversion_spirv.data(), conversion_spirv.size() * sizeof(u32));
++  if (conversion_pipeline_ == VK_NULL_HANDLE) {
++    REXGPU_ERROR("VulkanTextureCache: Failed to create GPU conversion pipeline");
++    return false;
+   }
+ 
+diff --git a/src/gpu/xenos/vulkan/texture_cache.h b/src/gpu/xenos/vulkan/texture_cache.h
+--- a/src/gpu/xenos/vulkan/texture_cache.h
++++ b/src/gpu/xenos/vulkan/texture_cache.h
+@@ -78,4 +78,6 @@
+ 
+   ~VulkanTextureCache();
++
++  void ClearCache() override;
+ 
+   void BeginSubmission(u64 new_submission_index) override;
+@@ -347,4 +349,17 @@
+   HostFormatPair host_formats_[64];
+ 
++  // Converted guest data must stay alive until its texture-load submission completes.
++  struct ConversionBuffer {
++    VkBuffer buffer;
++    VmaAllocation allocation;
++    VkDeviceSize size;
++    u64 submission;
++  };
++  std::vector<ConversionBuffer> conversion_buffers_;
++  u8 conversion_reported_[64] = {};
++  VkPipeline conversion_pipeline_ = VK_NULL_HANDLE;
++  bool ConvertTextureRange(u32 guest_address, u32 size, TextureKey key,
++                           VkDescriptorBufferInfo& source);
++
+   VkPipelineLayout load_pipeline_layout_ = VK_NULL_HANDLE;
+   std::array<VkPipeline, kLoadShaderCount> load_pipelines_{};
+diff --git a/src/gpu/xenos/vulkan/texture_conversion_shader.h b/src/gpu/xenos/vulkan/texture_conversion_shader.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/vulkan/texture_conversion_shader.h
+@@ -0,0 +1,43 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++
++namespace rex::gpu::vulkan {
++
++// Preserve tiling, mip packing and endianness for the existing texture-load shaders.
++// Read current GPU memory, including resolves, without a CPU mirror or round trip.
++inline constexpr char kTextureConversionShader[] = R"glsl(#version 450
++layout(local_size_x = 64) in;
++layout(set = 0, binding = 0, std430) writeonly buffer Destination { uint dest[]; };
++layout(set = 1, binding = 0, std430) readonly buffer Source { uint src[]; };
++layout(push_constant) uniform Constants {
++  uint word_count;
++  uint endianness;
++  uint is_signed;
++  uint is_integer;
++  uint groups_per_row;
++} c;
++
++uint swap_guest(uint value) {
++  if (c.endianness == 1u || c.endianness == 2u) {
++    value = ((value & 0x00ff00ffu) << 8u) | ((value >> 8u) & 0x00ff00ffu);
++  }
++  if (c.endianness == 2u || c.endianness == 3u) {
++    value = (value << 16u) | (value >> 16u);
++  }
++  return value;
++}
++
++void main() {
++  uint i = (gl_WorkGroupID.y * c.groups_per_row + gl_WorkGroupID.x) * 64u
++      + gl_LocalInvocationID.x;
++  if (i >= c.word_count) return;
++  uint value = swap_guest(src[i]);
++  float converted = c.is_signed != 0u ? float(int(value)) : float(value);
++  if (c.is_integer == 0u) {
++    converted *= c.is_signed != 0u ? (1.0 / 2147483647.0) : (1.0 / 4294967295.0);
++  }
++  dest[i] = swap_guest(floatBitsToUint(converted));
++}
++)glsl";
++
++}  // namespace rex::gpu::vulkan
+diff --git a/src/gpu/xenos/vulkan/texture_cache.cpp b/src/gpu/xenos/vulkan/texture_cache.cpp
+--- a/src/gpu/xenos/vulkan/texture_cache.cpp
++++ b/src/gpu/xenos/vulkan/texture_cache.cpp
+@@ -1242,3 +1242,3 @@
+     REXGPU_INFO("VulkanTextureCache: GPU converting {} {} {} components to float32",
+-                FormatInfo::Get(key.format)->name, key.signed_separate ? "signed" : "unsigned",
++                xenos::FormatInfo::Get(key.format)->name, key.signed_separate ? "signed" : "unsigned",
+                 key.num_format ? "integer" : "fixed-point");
+diff --git a/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp b/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp
+--- a/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp
++++ b/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp
+@@ -93,2 +93,10 @@
+     }
++    // Completed pages reclaimed after a pool growth may still be too small.
++    // No submission owns these unused writable pages, so retire them here.
++    while (writable_first_ && writable_first_->size < size) {
++      Page* undersized = writable_first_;
++      writable_first_ = undersized->next;
++      delete undersized;
++    }
++    if (!writable_first_) writable_last_ = nullptr;
+     if (!writable_first_) {
+diff --git a/tests/unit/gpu/texture_conversion_test.cpp b/tests/unit/gpu/texture_conversion_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/texture_conversion_test.cpp
+@@ -0,0 +1,94 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include "rex_test.h"
++#include "gpu/xenos/host/graphics_upload_buffer_pool.h"
++#define CHECK_EQ(actual, expected) CHECK((actual) == (expected))
++
++#include <array>
++#include <cstring>
++#include "gpu/xenos/pipeline/texture/conversion.h"
++
++namespace {
++
++using rex::gpu::texture_conversion::ConvertNonFloatGuestRange;
++using rex::gpu::texture_conversion::IsNonFloat32bpcFormat;
++using rex::xenos::Endian;
++using rex::xenos::GPUSwap;
++using rex::xenos::TextureFormat;
++
++void TestComponents(Endian endian, bool signed_data, bool integer) {
++  const std::array<uint32_t, 5> words = {0, 1, 0x7fffffff, 0x80000000, 0xffffffff};
++  std::array<uint32_t, 5> source;
++  std::array<uint32_t, 7> destination;
++  destination.fill(0xdeadbeef);
++  for (size_t i = 0; i < words.size(); ++i) source[i] = GPUSwap(words[i], endian);
++  ConvertNonFloatGuestRange(reinterpret_cast<const uint8_t*>(source.data()),
++      reinterpret_cast<uint8_t*>(destination.data() + 1), sizeof(source),
++      endian, signed_data, integer);
++  CHECK_EQ(destination.front(), 0xdeadbeef);
++  CHECK_EQ(destination.back(), 0xdeadbeef);
++  // Explicit float32 boundary values: UNORM/SNORM endpoints and rounded 32-bit integers.
++  const std::array<float, 5> expected = integer
++      ? (signed_data ? std::array<float, 5>{0, 1, 2147483648.0f, -2147483648.0f, -1}
++                     : std::array<float, 5>{0, 1, 2147483648.0f, 2147483648.0f, 4294967296.0f})
++      : (signed_data ? std::array<float, 5>{0, 0x1p-31f, 1, -1, -0x1p-31f}
++                     : std::array<float, 5>{0, 0x1p-32f, 0.5f, 0.5f, 1});
++  for (size_t i = 0; i < words.size(); ++i) {
++    const uint32_t bits = GPUSwap(destination[i + 1], endian);
++    float value;
++    std::memcpy(&value, &bits, sizeof(value));
++    CHECK(value == expected[i]);
++    CHECK_EQ(source[i], GPUSwap(words[i], endian));
++  }
++}
++
++void TestOpaqueAlpha() {
++  const std::array<uint32_t, 4> source = {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff};
++  std::array<uint32_t, 4> converted = {};
++  ConvertNonFloatGuestRange(reinterpret_cast<const uint8_t*>(source.data()),
++      reinterpret_cast<uint8_t*>(converted.data()), sizeof(source), Endian::k8in32, false, false);
++  for (const auto component : converted) CHECK_EQ(GPUSwap(component, Endian::k8in32), 0x3f800000);
++}
++}  // namespace
++
++REX_TEST_CASE("Texture conversion preserves component modes and byte orders", "[gpu][texture_conversion]") {
++  CHECK(IsNonFloat32bpcFormat(TextureFormat::k_32));
++  CHECK(IsNonFloat32bpcFormat(TextureFormat::k_32_32));
++  CHECK(IsNonFloat32bpcFormat(TextureFormat::k_32_32_32_32));
++  CHECK_FALSE(IsNonFloat32bpcFormat(TextureFormat::k_32_32_32_32_FLOAT));
++  CHECK_FALSE(IsNonFloat32bpcFormat(TextureFormat::k_8_8_8_8));
++  for (const auto endian : {Endian::kNone, Endian::k8in16, Endian::k8in32, Endian::k16in32}) {
++    for (const bool signed_data : {false, true}) {
++      for (const bool integer : {false, true}) TestComponents(endian, signed_data, integer);
++    }
++  }
++  TestOpaqueAlpha();
++
++}
++
++namespace {
++class UploadPool final : public rex::gpu::GraphicsUploadBufferPool {
++ public:
++  UploadPool() : GraphicsUploadBufferPool(64) {}
++  void Grow(size_t capacity) { page_size_ = capacity; }
++  size_t Allocate(rex::u64 submission, size_t bytes) {
++    size_t offset = 0;
++    auto* page = Request(submission, bytes, 16, offset);
++    REQUIRE(page);
++    REQUIRE(offset + bytes <= page->size);
++    return page->size;
++  }
++ protected:
++  std::unique_ptr<Page> CreatePageImplementation() override { return std::make_unique<Page>(); }
++};
++}
++
++REX_TEST_CASE("A growing upload pool never places a texture in a reclaimed smaller page", "[gpu][texture_conversion]") {
++  UploadPool pool;
++  CHECK(pool.Allocate(1,64)==64);
++  pool.Grow(128);
++  CHECK(pool.Allocate(2,128)==128);
++  pool.Reclaim(1);
++  CHECK(pool.Allocate(3,128)==128);
++  pool.Reclaim(3);
++  CHECK(pool.Allocate(4,128)==128);
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -653 +653,4 @@
+ )
++
++# Actual conversion implementation and upload-pool retirement regressions.
++target_sources(unit_tests PRIVATE gpu/texture_conversion_test.cpp)
+diff --git a/src/gpu/xenos/d3d12/shared_memory.h b/src/gpu/xenos/d3d12/shared_memory.h
+--- a/src/gpu/xenos/d3d12/shared_memory.h
++++ b/src/gpu/xenos/d3d12/shared_memory.h
+@@ -38,4 +38,10 @@
+   ID3D12Resource* GetBuffer() const { return buffer_; }
+   D3D12_GPU_VIRTUAL_ADDRESS GetGPUAddress() const { return buffer_gpu_address_; }
++
++  /** Checked CPU source for fixed-point texture upload conversion. */
++  auto GetReadOnlyPhysicalSpan(PhysicalRange range) const {
++    return GetMemory().GetReadOnlyPhysicalSpan(range);
++  }
++
+ 
+   void CompletedSubmissionUpdated();
+diff --git a/tests/unit/gpu/texture_conversion_native_test.cpp b/tests/unit/gpu/texture_conversion_native_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/texture_conversion_native_test.cpp
+@@ -0,0 +1,290 @@
++// SPDX-License-Identifier: GPL-2.0-only
++// Headless GPU validation of the production GLSL; no game or window is opened.
++#define VK_NO_PROTOTYPES
++#include <windows.h>
++#include "rex_test.h"
++#include <rex/platform/process.h>
++#include <vulkan/vulkan.h>
++#include <SPIRV/GlslangToSpv.h>
++#include <glslang/Public/ShaderLang.h>
++#include <StandAlone/ResourceLimits.h>
++#include "gpu/xenos/vulkan/texture_conversion_shader.h"
++
++#include <algorithm>
++#include <array>
++#include <bit>
++#include <cstdint>
++#include <cstdio>
++#include <stdexcept>
++#include <vector>
++
++#define VK_FUNCTIONS(X) \
++  X(vkCreateInstance) X(vkDestroyInstance) X(vkEnumeratePhysicalDevices) \
++  X(vkGetPhysicalDeviceQueueFamilyProperties) X(vkGetPhysicalDeviceMemoryProperties) \
++  X(vkGetPhysicalDeviceProperties) X(vkCreateDevice) X(vkDestroyDevice) X(vkGetDeviceQueue) \
++  X(vkCreateBuffer) X(vkDestroyBuffer) X(vkGetBufferMemoryRequirements) \
++  X(vkAllocateMemory) X(vkFreeMemory) X(vkBindBufferMemory) X(vkMapMemory) X(vkUnmapMemory) \
++  X(vkCreateDescriptorSetLayout) X(vkDestroyDescriptorSetLayout) \
++  X(vkCreatePipelineLayout) X(vkDestroyPipelineLayout) X(vkCreateShaderModule) \
++  X(vkDestroyShaderModule) X(vkCreateComputePipelines) X(vkDestroyPipeline) \
++  X(vkCreateDescriptorPool) X(vkDestroyDescriptorPool) X(vkAllocateDescriptorSets) \
++  X(vkUpdateDescriptorSets) X(vkCreateCommandPool) X(vkDestroyCommandPool) \
++  X(vkAllocateCommandBuffers) X(vkBeginCommandBuffer) X(vkEndCommandBuffer) \
++  X(vkResetCommandBuffer) X(vkCmdBindPipeline) X(vkCmdBindDescriptorSets) \
++  X(vkCmdPushConstants) X(vkCmdDispatch) X(vkCmdPipelineBarrier) X(vkCmdFillBuffer) \
++  X(vkQueueSubmit) X(vkQueueWaitIdle)
++#define DECLARE(name) PFN_##name name = nullptr;
++VK_FUNCTIONS(DECLARE)
++#undef DECLARE
++
++void Require(bool ok, const char* message) {
++  if (!ok) throw std::runtime_error(message);
++}
++void Check(VkResult result) { Require(result == VK_SUCCESS, "Vulkan operation failed"); }
++
++uint32_t Swap(uint32_t value, uint32_t endian) {
++  // Independent byte-order oracle for the four guest encodings.
++  auto b = std::bit_cast<std::array<uint8_t, 4>>(value);
++  if (endian == 1 || endian == 2) { std::swap(b[0], b[1]); std::swap(b[2], b[3]); }
++  if (endian == 2 || endian == 3) { std::swap(b[0], b[2]); std::swap(b[1], b[3]); }
++  return std::bit_cast<uint32_t>(b);
++}
++
++struct Gpu {
++  HMODULE loader = nullptr;
++  VkInstance instance = VK_NULL_HANDLE;
++  VkDevice device = VK_NULL_HANDLE;
++  VkQueue queue = VK_NULL_HANDLE;
++  VkBuffer buffers[2] = {};
++  VkDeviceMemory memory[2] = {};
++  uint32_t* mapped[2] = {};
++  VkDescriptorSetLayout set_layout = VK_NULL_HANDLE;
++  VkPipelineLayout layout = VK_NULL_HANDLE;
++  VkShaderModule shader = VK_NULL_HANDLE;
++  VkPipeline pipeline = VK_NULL_HANDLE;
++  VkDescriptorPool pool = VK_NULL_HANDLE;
++  VkCommandPool command_pool = VK_NULL_HANDLE;
++
++  ~Gpu() {
++    if (device) {
++      if (queue) vkQueueWaitIdle(queue);
++      if (command_pool) vkDestroyCommandPool(device, command_pool, nullptr);
++      if (pool) vkDestroyDescriptorPool(device, pool, nullptr);
++      if (pipeline) vkDestroyPipeline(device, pipeline, nullptr);
++      if (shader) vkDestroyShaderModule(device, shader, nullptr);
++      if (layout) vkDestroyPipelineLayout(device, layout, nullptr);
++      if (set_layout) vkDestroyDescriptorSetLayout(device, set_layout, nullptr);
++      for (unsigned i = 0; i < 2; ++i) {
++        if (mapped[i]) vkUnmapMemory(device, memory[i]);
++        if (buffers[i]) vkDestroyBuffer(device, buffers[i], nullptr);
++        if (memory[i]) vkFreeMemory(device, memory[i], nullptr);
++      }
++      vkDestroyDevice(device, nullptr);
++    }
++    if (instance) vkDestroyInstance(instance, nullptr);
++    if (loader) FreeLibrary(loader);
++  }
++
++  bool Open() {
++    loader = LoadLibraryW(L"vulkan-1.dll");
++    if (!loader) return false;
++    auto get = reinterpret_cast<PFN_vkGetInstanceProcAddr>(GetProcAddress(loader, "vkGetInstanceProcAddr"));
++    Require(get != nullptr, "missing Vulkan entry point");
++    vkCreateInstance = reinterpret_cast<PFN_vkCreateInstance>(get(nullptr, "vkCreateInstance"));
++    VkInstanceCreateInfo create{}; create.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
++    if (vkCreateInstance(&create, nullptr, &instance) != VK_SUCCESS) return false;
++#define LOAD(name) name = reinterpret_cast<PFN_##name>(get(instance, #name)); Require(name != nullptr, #name);
++    VK_FUNCTIONS(LOAD)
++#undef LOAD
++    uint32_t count = 0;
++    Check(vkEnumeratePhysicalDevices(instance, &count, nullptr));
++    if (!count) return false;
++    std::vector<VkPhysicalDevice> devices(count);
++    Check(vkEnumeratePhysicalDevices(instance, &count, devices.data()));
++    for (VkPhysicalDevice physical : devices) {
++      uint32_t family_count = 0;
++      vkGetPhysicalDeviceQueueFamilyProperties(physical, &family_count, nullptr);
++      std::vector<VkQueueFamilyProperties> families(family_count);
++      vkGetPhysicalDeviceQueueFamilyProperties(physical, &family_count, families.data());
++      for (uint32_t family = 0; family < family_count; ++family) {
++        if (!(families[family].queueFlags & VK_QUEUE_COMPUTE_BIT)) continue;
++        float priority = 1;
++        VkDeviceQueueCreateInfo q{}; q.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
++        q.queueFamilyIndex = family; q.queueCount = 1; q.pQueuePriorities = &priority;
++        VkDeviceCreateInfo d{}; d.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
++        d.queueCreateInfoCount = 1; d.pQueueCreateInfos = &q;
++        if (vkCreateDevice(physical, &d, nullptr, &device) != VK_SUCCESS) continue;
++        vkGetDeviceQueue(device, family, 0, &queue);
++        VkPhysicalDeviceProperties properties;
++        vkGetPhysicalDeviceProperties(physical, &properties);
++        std::printf("Headless compute device: %s\n", properties.deviceName);
++        VkCommandPoolCreateInfo p{}; p.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
++        p.queueFamilyIndex = family; p.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
++        Check(vkCreateCommandPool(device, &p, nullptr, &command_pool));
++        VkPhysicalDeviceMemoryProperties types;
++        vkGetPhysicalDeviceMemoryProperties(physical, &types);
++        for (uint32_t i = 0; i < 2; ++i) {
++          VkBufferCreateInfo b{}; b.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
++          b.size = kBytes; b.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
++          Check(vkCreateBuffer(device, &b, nullptr, &buffers[i]));
++          VkMemoryRequirements requirements;
++          vkGetBufferMemoryRequirements(device, buffers[i], &requirements);
++          uint32_t type = 0;
++          for (; type < types.memoryTypeCount; ++type) {
++            constexpr auto flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
++            if ((requirements.memoryTypeBits & (1u << type)) &&
++                (types.memoryTypes[type].propertyFlags & flags) == flags) break;
++          }
++          Require(type < types.memoryTypeCount, "no coherent host memory for headless test");
++          VkMemoryAllocateInfo a{}; a.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
++          a.allocationSize = requirements.size; a.memoryTypeIndex = type;
++          Check(vkAllocateMemory(device, &a, nullptr, &memory[i]));
++          Check(vkBindBufferMemory(device, buffers[i], memory[i], 0));
++          Check(vkMapMemory(device, memory[i], 0, VK_WHOLE_SIZE, 0, reinterpret_cast<void**>(&mapped[i])));
++        }
++        return true;
++      }
++    }
++    return false;
++  }
++
++  static constexpr uint32_t kWords = 131076;  // larger than the measured highway textures + guard
++  static constexpr VkDeviceSize kBytes = kWords * sizeof(uint32_t);
++};
++
++REX_TEST_CASE("Native texture conversion reads GPU contents in every component mode", "[gpu][texture_conversion_native]") {
++  const auto enabled=rex::platform::GetEnvironmentValue("REX_RUN_NATIVE_GPU_TESTS");
++  if(!enabled || *enabled!="1") SKIP("Set REX_RUN_NATIVE_GPU_TESTS=1 on a Vulkan host");
++  try {
++    // Compile the exact source used by the runtime before checking GPU availability.
++    glslang::InitializeProcess();
++    glslang::TShader shader(EShLangCompute);
++    const char* source = rex::gpu::vulkan::kTextureConversionShader;
++    shader.setStrings(&source, 1);
++    shader.setEnvInput(glslang::EShSourceGlsl, EShLangCompute, glslang::EShClientVulkan, 450);
++    shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_0);
++    shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_0);
++    auto messages = EShMessages(EShMsgSpvRules | EShMsgVulkanRules);
++    if (!shader.parse(&glslang::DefaultTBuiltInResource, 450, false, messages)) {
++      std::fprintf(stderr, "%s\n", shader.getInfoLog());
++      throw std::runtime_error("production shader failed to compile");
++    }
++    glslang::TProgram program;
++    program.addShader(&shader);
++    Require(program.link(messages), "shader link failed");
++    std::vector<uint32_t> spirv;
++    glslang::SpvOptions options{};
++    options.disableOptimizer = true;
++    glslang::GlslangToSpv(*program.getIntermediate(EShLangCompute), spirv, &options);
++    Gpu gpu;
++    REQUIRE(gpu.Open());
++    VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
++    VkDescriptorSetLayoutCreateInfo set{}; set.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
++    set.bindingCount = 1; set.pBindings = &binding;
++    Check(vkCreateDescriptorSetLayout(gpu.device, &set, nullptr, &gpu.set_layout));
++    VkDescriptorSetLayout layouts[] = {gpu.set_layout, gpu.set_layout};
++    VkPushConstantRange push{VK_SHADER_STAGE_COMPUTE_BIT, 0, 20};
++    VkPipelineLayoutCreateInfo layout{}; layout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
++    layout.setLayoutCount = 2; layout.pSetLayouts = layouts;
++    layout.pushConstantRangeCount = 1; layout.pPushConstantRanges = &push;
++    Check(vkCreatePipelineLayout(gpu.device, &layout, nullptr, &gpu.layout));
++    VkShaderModuleCreateInfo module{}; module.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
++    module.codeSize = spirv.size() * 4; module.pCode = spirv.data();
++    Check(vkCreateShaderModule(gpu.device, &module, nullptr, &gpu.shader));
++    VkComputePipelineCreateInfo pipeline{}; pipeline.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
++    pipeline.stage = {}; pipeline.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
++    pipeline.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
++    pipeline.stage.module = gpu.shader; pipeline.stage.pName = "main"; pipeline.layout = gpu.layout;
++    Check(vkCreateComputePipelines(gpu.device, VK_NULL_HANDLE, 1, &pipeline, nullptr, &gpu.pipeline));
++    VkDescriptorPoolSize pool_size{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2};
++    VkDescriptorPoolCreateInfo pool{}; pool.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
++    pool.maxSets = 2; pool.poolSizeCount = 1; pool.pPoolSizes = &pool_size;
++    Check(vkCreateDescriptorPool(gpu.device, &pool, nullptr, &gpu.pool));
++    VkDescriptorSetAllocateInfo allocate{}; allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
++    allocate.descriptorPool = gpu.pool; allocate.descriptorSetCount = 2; allocate.pSetLayouts = layouts;
++    VkDescriptorSet sets[2];
++    Check(vkAllocateDescriptorSets(gpu.device, &allocate, sets));
++    VkDescriptorBufferInfo buffers[] = {{gpu.buffers[0], 0, Gpu::kBytes}, {gpu.buffers[1], 0, Gpu::kBytes}};
++    VkWriteDescriptorSet writes[2]{};
++    for (unsigned i = 0; i < 2; ++i) {
++      writes[i] = {}; writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
++      writes[i].dstSet = sets[i]; writes[i].descriptorCount = 1;
++      writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; writes[i].pBufferInfo = &buffers[i];
++    }
++    vkUpdateDescriptorSets(gpu.device, 2, writes, 0, nullptr);
++    VkCommandBufferAllocateInfo commands{}; commands.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
++    commands.commandPool = gpu.command_pool; commands.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
++    commands.commandBufferCount = 1;
++    VkCommandBuffer cmd;
++    Check(vkAllocateCommandBuffers(gpu.device, &commands, &cmd));
++    uint64_t checks = 0;
++    constexpr uint32_t edge[] = {0, 1, 0x7fffffff, 0x80000000, 0xffffffff, 0x12345678, 0x80808080};
++    for (uint32_t endian = 0; endian < 4; ++endian) {
++      for (uint32_t sign = 0; sign < 2; ++sign) {
++        for (uint32_t integer = 0; integer < 2; ++integer) {
++          for (uint32_t count : {1u, 4u, 63u, 64u, 65u, 131072u}) {
++            std::vector<uint32_t> expected(count);
++            uint32_t random = 0x12345678;
++            for (uint32_t i = 0; i < Gpu::kWords; ++i) {
++              random = random * 1664525u + 1013904223u;
++              uint32_t value = i < std::size(edge) ? edge[i] : random;
++              gpu.mapped[1][i] = Swap(value, endian);
++              if (i < count) {
++                float result = sign ? float(std::bit_cast<int32_t>(value)) : float(value);
++                if (!integer) result *= sign ? (1.0f / 2147483647.0f) : (1.0f / 4294967295.0f);
++                expected[i] = Swap(std::bit_cast<uint32_t>(result), endian);
++              }
++            }
++            Check(vkResetCommandBuffer(cmd, 0));
++            VkCommandBufferBeginInfo begin{}; begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
++            Check(vkBeginCommandBuffer(cmd, &begin));
++            // A GPU write, deliberately absent from the CPU reference, proves the
++            // conversion reads GPU contents rather than a stale CPU mirror.
++            vkCmdFillBuffer(cmd, gpu.buffers[1], 0, 4, Swap(0x40000000, endian));
++            float first = integer ? 1073741824.0f : (sign ? 0.5f : 0.25f);
++            expected[0] = Swap(std::bit_cast<uint32_t>(first), endian);
++            vkCmdFillBuffer(cmd, gpu.buffers[0], 0, Gpu::kBytes, 0xdeadbeef);
++            VkMemoryBarrier before{}; before.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
++            before.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT;
++            before.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
++            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT,
++                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &before, 0, nullptr, 0, nullptr);
++            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gpu.pipeline);
++            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gpu.layout, 0, 2, sets, 0, nullptr);
++            uint32_t groups = (count + 63) / 64;
++            // Force multi-row dispatch even on small fixtures.
++            uint32_t row = std::min(groups, 7u);
++            uint32_t constants[] = {count, endian, sign, integer, row};
++            vkCmdPushConstants(cmd, gpu.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), constants);
++            vkCmdDispatch(cmd, row, (groups + row - 1) / row, 1);
++            VkMemoryBarrier after{}; after.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
++            after.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
++            after.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
++            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
++                0, 1, &after, 0, nullptr, 0, nullptr);
++            Check(vkEndCommandBuffer(cmd));
++            VkSubmitInfo submit{}; submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
++            submit.commandBufferCount = 1; submit.pCommandBuffers = &cmd;
++            Check(vkQueueSubmit(gpu.queue, 1, &submit, VK_NULL_HANDLE));
++            Check(vkQueueWaitIdle(gpu.queue));
++            for (uint32_t i = 0; i < count; ++i) {
++              if (gpu.mapped[0][i] != expected[i]) {
++                std::fprintf(stderr, "Mismatch endian=%u sign=%u integer=%u count=%u i=%u: %08x != %08x\n",
++                    endian, sign, integer, count, i, gpu.mapped[0][i], expected[i]);
++                throw std::runtime_error("GPU conversion mismatch");
++              }
++              ++checks;
++            }
++            Require(gpu.mapped[0][count] == 0xdeadbeef, "tail invocation wrote past the range");
++          }
++        }
++      }
++    }
++    std::printf("PASS: %llu GPU words, all endian/signed/integer modes, tails, multi-row and GPU writes\n",
++                static_cast<unsigned long long>(checks));
++    CHECK(checks > 2000000);
++  } catch (const std::exception& e) {
++    std::fprintf(stderr, "%s\n", e.what());
++    FAIL(e.what());
++  }
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -656 +656,10 @@
+ target_sources(unit_tests PRIVATE gpu/texture_conversion_test.cpp)
++
++# Windows native GLSL checks use the production shader and the external Vulkan headers.
++if(WIN32 AND TARGET rexgpu-xenos-vulkan)
++  target_sources(unit_tests PRIVATE gpu/texture_conversion_native_test.cpp
++    ${PROJECT_SOURCE_DIR}/thirdparty/glslang/StandAlone/ResourceLimits.cpp)
++  target_include_directories(unit_tests SYSTEM PRIVATE
++    ${PROJECT_SOURCE_DIR}/thirdparty/glslang ${Vulkan_INCLUDE_DIR})
++  target_link_libraries(unit_tests PRIVATE glslang::SPIRV glslang)
++endif()

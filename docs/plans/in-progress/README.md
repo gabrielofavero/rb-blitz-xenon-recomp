@@ -4,6 +4,11 @@ Plans that are actively being worked. A plan moves here from [`../todo/`](../tod
 and leaves for [`../finished/`](../finished/) when it is delivered — one `git mv`, keeping its
 `YYYY-MM-DD-` prefix.
 
+The [ReXGlue v0.11.0 migration](2026-11-17-rexglue-v0.11-migration-plan.md) started
+on 2026-11-17. The current-pin Windows Release build and strict 71-patch/nested
+replay pass. The isolated release SDK and codegen checkpoint are being validated;
+the production pin remains unchanged. Native platform and performance gates remain open.
+
 The [framerate expansion plan](../todo/2026-10-25-framerate-expansion-plan.md) had a
 diagnostic pass on 2026-11-10 and returned to `todo/`. No higher rate is validated
 or offered in settings.

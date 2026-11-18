@@ -5,6 +5,8 @@ param(
     # Which window to capture. The game is the default; Controller Settings' A1 run
     # captures rb_blitz_controller_settings the same way.
     [string]$ProcessName = "rb_blitz",
+    # Select a particular host when more than one game instance is running.
+    [int]$ProcessId = 0,
     # Capture the client area - the pixels the process itself drew - instead of the
     # window rect, which also holds the frame and the title bar. The offset the
     # chrome adds is the display's content scale times the frame's own metrics, so a
@@ -29,7 +31,8 @@ public class Win32 {
             uint owner; GetWindowThreadProcessId(h, out owner);
             if (owner == pid) {
                 var name = new System.Text.StringBuilder(128); GetClassName(h, name, 128);
-                if (name.ToString() == "SDL_app") { found = h; return false; }
+                if ((name.ToString() == "SDL_app" || name.ToString() == "RbBlitzPersistentWindow") &&
+                    IsWindowVisible(h)) { found = h; return false; }
             }
             return true;
         }, IntPtr.Zero);
@@ -38,6 +41,7 @@ public class Win32 {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
@@ -57,12 +61,25 @@ public class Win32 {
 # window is measured; the process is per-invocation, so nothing else is affected.
 try { [Win32]::SetProcessDpiAwareness(2) | Out-Null } catch { [Win32]::SetProcessDPIAware() | Out-Null }
 
-$proc = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $proc) { Write-Error "$ProcessName not running"; exit 1 }
+$candidates = if ($ProcessId -gt 0) {
+    @(Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)
+} else {
+    @(Get-Process -Name $ProcessName -ErrorAction SilentlyContinue)
+}
+if (-not $candidates) { Write-Error "$ProcessName not running"; exit 1 }
 
-$h = [Win32]::GameWindow($proc.Id)
-if ($h -eq [IntPtr]::Zero) { $h = $proc.MainWindowHandle }
-if ($h -eq [IntPtr]::Zero) { Write-Error "no main window"; exit 1 }
+# The native window host and embedded guest share the executable name. The guest
+# may appear first and have no top-level window, so select a visible owner.
+$h = [IntPtr]::Zero
+foreach ($candidate in $candidates) {
+    $window = [Win32]::GameWindow($candidate.Id)
+    if ($window -eq [IntPtr]::Zero) { $window = $candidate.MainWindowHandle }
+    if ($window -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible($window)) {
+        $h = $window
+        break
+    }
+}
+if ($h -eq [IntPtr]::Zero) { Write-Error "no visible main window"; exit 1 }
 
 [Win32]::ShowWindow($h, 9) | Out-Null      # SW_RESTORE
 # Bring the game window to the foreground and wait until it actually is.

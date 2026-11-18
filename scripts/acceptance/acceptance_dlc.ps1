@@ -1,10 +1,10 @@
 # DLC acceptance: downloaded content is mounted and its songs appear in the
 # game's own song-selection screen.
 #
-# docs/guides/dlc.md §5 left this open: the layout and the patch set are pinned host-side
+# docs/guides/dlc.md Â§5 left this open: the layout and the patch set are pinned host-side
 # (tests/dlc_layout_tests.cpp, patches/rexglue-sdk/0006-...), but "the guest's own
 # song list is the only thing that proves the enumeration and the mount". This is
-# that proof, and it runs the two halves docs/guides/dlc.md §5 names:
+# that proof, and it runs the two halves docs/guides/dlc.md Â§5 names:
 #
 #   * `dlc: N package(s) for title(s) ... (read-only, mounted in place)` - the host
 #     hook found and registered the packages; a flat library reports the same shape
@@ -21,7 +21,7 @@
 # caches its song list into `songcache` and a reused root could serve a cached DLC
 # song to the control leg.
 #
-# -DlcLibrary adds the flat library half of docs/guides/dlc.md §2.1 to the positive leg
+# -DlcLibrary adds the flat library half of docs/guides/dlc.md Â§2.1 to the positive leg
 # (`--dlc_library`), with the control leg pointed at a library path that does not
 # exist as well, so the same two legs prove either source.
 #
@@ -45,11 +45,11 @@ param(
     [string]$OutDir = "out/m7-dlc",
     [string]$GameRoot,
     # Root of the <title_id>/<content_type>/<package> layout. Empty means the
-    # default, <GameRoot>/dlc (docs/guides/dlc.md §2).
+    # default, <GameRoot>/dlc (docs/guides/dlc.md Â§2).
     [string]$DlcRoot,
     # A ';'-separated flat DLC library: folders of STFS packages in any arrangement,
     # each mounted under the title id and content type its own header names
-    # (docs/guides/dlc.md §2.1). Empty means no library, which is the pre-library behaviour.
+    # (docs/guides/dlc.md Â§2.1). Empty means no library, which is the pre-library behaviour.
     [string]$DlcLibrary = "",
     # One or more song titles, comma-separated, that only the DLC package carries.
     [string]$ExpectedSong = "KIDS IN THE STREET",
@@ -125,6 +125,14 @@ function Get-LogText([string]$Path) {
     return ""
 }
 
+function Test-LogFatal([string]$Text) {
+    # The current SDK's %Q formatter maps critical to C. Require the record
+    # prefix, so a C or the word critical inside an ordinary message is harmless.
+    $stamp = "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}"
+    return [regex]::IsMatch($Text,
+        "(?im)\[(?:FATAL|critical)\]|^$stamp[ \t]+C[ \t]+\S+[ \t]+t\d+(?:[ \t]|$)")
+}
+
 function Save-Shot([string]$Name) {
     $path = Join-Path $capDir $Name
     for ($i = 1; $i -le 3; $i++) {
@@ -164,7 +172,28 @@ function Wait-ForWindow($Proc, [int]$TimeoutSec) {
 }
 
 function Invoke-Actions([string[]]$Actions) {
+    # These fixtures use the compiled keyboard defaults, independent of legacy MnK pad keys.
+    $Actions = @($Actions | ForEach-Object {
+        if ($_ -eq 'key:a') { 'key:key_enter' }
+        elseif ($_ -eq 'key:b') { 'key:esc' }
+        else { $_ }
+    })
     Invoke-ChildScript "drive_ui.ps1" @{ Actions = ($Actions -join ","); BuildDir = $BuildDir; OutDir = $OutDir } | Out-Null
+}
+
+function Get-DlcPackageCount([string]$Text) {
+    $structured = 0
+    $library = 0
+    foreach ($m in [regex]::Matches($Text, 'dlc_sources:.*structured=(?:true|false) packages=(\d+)')) {
+        $structured = [Math]::Max($structured, [int]$m.Groups[1].Value)
+    }
+    foreach ($m in [regex]::Matches($Text, 'dlc: (\d+) package\(s\) for title\(s\)')) {
+        $structured = [Math]::Max($structured, [int]$m.Groups[1].Value)
+    }
+    foreach ($m in [regex]::Matches($Text, 'dlc: (\d+) package\(s\),')) {
+        $library = [Math]::Max($library, [int]$m.Groups[1].Value)
+    }
+    return $structured + $library
 }
 
 # ------------------------------------------------------------------- legs ---
@@ -243,13 +272,11 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [string]$DlcLibraryPath
 
     $log = Get-NewestLog
     $logText = Get-LogText $log
-    $row.Fatal = [bool]($logText | Select-String -Pattern "\[FATAL\]" -Quiet)
-    if ($row.Fatal) { $notes.Add("the log contains [FATAL]") | Out-Null }
-    # Both the structured root and a library report `dlc: N package(s) ...`, so the
-    # leg's count is the sum of what either source registered.
-    foreach ($p in [regex]::Matches($logText, "dlc: (\d+) package\(s\)")) {
-        $row.Packages += [int]$p.Groups[1].Value
-    }
+    $row.Fatal = Test-LogFatal $logText
+    if ($row.Fatal) { $notes.Add("the log contains a fatal/critical record") | Out-Null }
+    # Current structured snapshots and legacy summaries describe the same
+    # source. Count it once, then add the separate flat-library source.
+    $row.Packages = Get-DlcPackageCount $logText
     foreach ($a in [regex]::Matches($logText, "XamContentAggregateCreateEnumerator: added (\d+) items")) {
         $n = [int]$a.Groups[1].Value
         if ($n -gt $row.AggregateItems) { $row.AggregateItems = $n }
@@ -269,7 +296,7 @@ function Invoke-Leg([string]$Name, [string]$DlcRootPath, [string]$DlcLibraryPath
 
 # ------------------------------------------------------------------- main ---
 
-# The positive leg expects the packages docs/guides/dlc.md §2 describes. The count is not
+# The positive leg expects the packages docs/guides/dlc.md Â§2 describes. The count is not
 # hard-coded: it is whatever the hook reports, as long as it is at least one, and
 # the guest's enumerator agrees it got something.
 $dlc = Invoke-Leg "dlc" $DlcRoot $DlcLibrary 1 1 2147483647
@@ -279,7 +306,7 @@ $dlcPass = $dlc.SongList -and $dlc.DlcSong -and ($dlc.Packages -ge 1) -and
 $controlPass = $true
 $control = $null
 if (-not $SkipControl) {
-    # Paths that do not exist: the hook refuses both sources (docs/guides/dlc.md §3) and
+    # Paths that do not exist: the hook refuses both sources (docs/guides/dlc.md Â§3) and
     # the guest's enumerator must come back empty, with the DLC song not on the list.
     # A library only joins the control leg when the positive leg had one, so a run
     # without -DlcLibrary keeps the original control shape.

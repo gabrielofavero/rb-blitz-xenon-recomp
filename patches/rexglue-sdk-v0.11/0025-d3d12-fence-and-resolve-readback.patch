@@ -1,0 +1,487 @@
+diff --git a/src/gpu/xenos/d3d12/fence_sync.h b/src/gpu/xenos/d3d12/fence_sync.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/d3d12/fence_sync.h
+@@ -0,0 +1,34 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++
++#include <cstdint>
++#include <utility>
++#include <winerror.h>
++
++namespace rex::gpu::d3d12 {
++
++// HRESULT success is nonnegative, and S_OK is zero. Never combine HRESULTs
++// with boolean && inside SUCCEEDED: that can skip arming the event yet wait.
++template <typename Arm, typename Wait>
++HRESULT ArmAndWaitForFence(Arm&& arm, Wait&& wait) {
++  const HRESULT armed = std::forward<Arm>(arm)();
++  return FAILED(armed) ? armed : std::forward<Wait>(wait)();
++}
++
++template <typename Signal, typename Arm, typename Wait>
++HRESULT SignalAndWaitForFence(Signal&& signal, Arm&& arm, Wait&& wait) {
++  const HRESULT signaled = std::forward<Signal>(signal)();
++  return FAILED(signaled) ? signaled : ArmAndWaitForFence(
++      std::forward<Arm>(arm), std::forward<Wait>(wait));
++}
++
++// Allocation/mapping proves neither that data was written nor GPU completion.
++// UINT64_MAX is D3D12's device-removal sentinel, not a completed submission.
++inline bool ReadbackCopyReady(uint64_t written_submission, uint64_t completed_submission,
++                              uint32_t written_size, uint32_t required_size) {
++  return written_submission != 0 && completed_submission != UINT64_MAX &&
++      written_submission <= completed_submission && required_size != 0 &&
++      required_size <= written_size;
++}
++
++}  // namespace rex::gpu::d3d12
+diff --git a/src/gpu/xenos/d3d12/command_processor.h b/src/gpu/xenos/d3d12/command_processor.h
+--- a/src/gpu/xenos/d3d12/command_processor.h
++++ b/src/gpu/xenos/d3d12/command_processor.h
+@@ -320,6 +320,8 @@
+    * submission_current_ to wait for all queue operations.
+    */
+   void CheckSubmissionFence(u64 await_submission);
++  HRESULT WaitForFenceEvent(ID3D12Fence* fence, u64 value, const char* scope);
++  void HandleFenceFailure(HRESULT result, const char* scope);
+   /**
+    * Begins a submission, promoting an open non frame submission to a frame when is_guest_command
+    * is true. Submission boundaries are implicit full UAV and aliasing barriers and cause common
+@@ -342,7 +344,9 @@
+   bool CanEndSubmissionImmediately() const;
+   bool AwaitAllQueueOperationsCompletion() {
+     CheckSubmissionFence(submission_current_);
+-    return submission_completed_ + 1 >= submission_current_;
++    return !device_removed_ && !submission_open_ &&
++           !queue_operations_done_since_submission_signal_ &&
++           submission_completed_ + 1 >= submission_current_;
+   }
+   void LogDeviceRemovalDiagnostics(ID3D12Device* device, HRESULT reason);
+ 
+@@ -398,7 +402,8 @@
+     u32 current_index = 0;
+     u64 last_used_frame = 0;
+   };
+-  void EvictOldReadbackBuffers(std::unordered_map<u64, ReadbackBuffer>& buffer_map) const;
++  void ReleaseReadbackSlot(ReadbackBuffer& readback, u32 index);
++  void EvictOldReadbackBuffers(std::unordered_map<u64, ReadbackBuffer>& buffer_map);
+ 
+   bool InitializeOcclusionQueryResources();
+   void ShutdownOcclusionQueryResources();
+diff --git a/src/gpu/xenos/d3d12/command_processor.cpp b/src/gpu/xenos/d3d12/command_processor.cpp
+--- a/src/gpu/xenos/d3d12/command_processor.cpp
++++ b/src/gpu/xenos/d3d12/command_processor.cpp
+@@ -22,6 +22,7 @@
+ #include <rex/assert.h>
+ #include <rex/platform/perf.h>
+ #include "gpu/xenos/d3d12/command_processor.h"
++#include "gpu/xenos/d3d12/fence_sync.h"
+ #include "gpu/xenos/physical_memory.h"
+ #include "gpu/xenos/d3d12/d3d12_xenos_graphics_driver.h"
+ #include "gpu/xenos/d3d12/shader.h"
+@@ -2791,13 +2792,7 @@
+             &buffer_desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&buffer)))) {
+       REXGPU_FAIL(true, "Failed to create a {} MB readback buffer", size >> 20);
+     }
+-    if (rb.buffers[write_index]) {
+-      if (rb.mapped_data[write_index]) {
+-        rb.buffers[write_index]->Unmap(0, nullptr);
+-        rb.mapped_data[write_index] = nullptr;
+-      }
+-      rb.buffers[write_index]->Release();
+-    }
++    ReleaseReadbackSlot(rb, write_index);
+     rb.buffers[write_index] = buffer;
+     rb.sizes[write_index] = size;
+     D3D12_RANGE read_range = {0, size};
+@@ -2942,12 +2937,17 @@
+                                                written_address, written_length);
+   }
+ 
++  rb.submission_written[write_index] = submission_current_;
++  rb.written_size[write_index] = written_length;
++
+   ReadbackResolveMode readback_mode =
+       GetReadbackResolveMode(GetD3D12Settings().readback_resolve.Get());
+   bool use_delayed_sync =
+       readback_mode == ReadbackResolveMode::kFast || readback_mode == ReadbackResolveMode::kSome;
+   u32 read_index = write_index;
+   if (use_delayed_sync) {
++    CheckSubmissionFence(0);
++    if (device_removed_) return false;
+     read_index = 1 - write_index;
+   } else if (!AwaitAllQueueOperationsCompletion()) {
+     return true;
+@@ -2955,7 +2955,9 @@
+ 
+   bool is_cache_miss = false;
+   if (use_delayed_sync && (!rb.buffers[read_index] || written_length > rb.sizes[read_index] ||
+-                           !rb.mapped_data[read_index])) {
++                           !rb.mapped_data[read_index] ||
++                           !ReadbackCopyReady(rb.submission_written[read_index],
++                               submission_completed_, rb.written_size[read_index], written_length))) {
+     is_cache_miss = true;
+     read_index = write_index;
+     if (!AwaitAllQueueOperationsCompletion()) {
+@@ -2965,7 +2967,8 @@
+ 
+   bool should_copy = (readback_mode == ReadbackResolveMode::kSome) ? is_cache_miss : true;
+   if (should_copy && rb.buffers[read_index] && written_length <= rb.sizes[read_index] &&
+-      rb.mapped_data[read_index]) {
++      rb.mapped_data[read_index] && ReadbackCopyReady(rb.submission_written[read_index],
++          submission_completed_, rb.written_size[read_index], written_length)) {
+     u8* destination = GetPhysicalForWrite(physical_memory_, written_address, written_length);
+     if (destination) {
+       std::memcpy(destination, static_cast<u8*>(rb.mapped_data[read_index]), written_length);
+@@ -2976,41 +2979,96 @@
+   return true;
+ }
+ 
++HRESULT D3D12CommandProcessor::WaitForFenceEvent(
++    ID3D12Fence* fence, u64 value, const char* scope) {
++  const ULONGLONG begin = GetTickCount64();
++  ULONGLONG next_report_ms = 1000;
++  while (true) {
++    // A timed poll also detects device removal and stale/shared event signals;
++    // a failed/removed device must not leave the command processor in INFINITE.
++    const DWORD waited = WaitForSingleObject(fence_completion_event_, 100);
++    if (waited == WAIT_FAILED) return HRESULT_FROM_WIN32(GetLastError());
++    const HRESULT removed = GetD3D12Provider().GetDevice()->GetDeviceRemovedReason();
++    if (FAILED(removed)) return removed;
++    const u64 completed = fence->GetCompletedValue();
++    if (completed == UINT64_MAX) return DXGI_ERROR_DEVICE_REMOVED;
++    if (completed >= value) return S_OK;
++    const ULONGLONG elapsed = GetTickCount64() - begin;
++    if (elapsed >= next_report_ms) {
++      REXGPU_WARN("D3D12 fence wait: scope={} target={} completed={} elapsed_ms={}",
++                  scope, value, completed, elapsed);
++      next_report_ms = elapsed + 5000;
++    }
++  }
++}
++
++void D3D12CommandProcessor::HandleFenceFailure(HRESULT result, const char* scope) {
++  device_removed_ = true;
++  REXGPU_ERROR("D3D12 fence synchronization failed: scope={} HRESULT={:08X}", scope,
++               u32(result));
++  ID3D12Device* device = GetD3D12Provider().GetDevice();
++  const HRESULT removed = device->GetDeviceRemovedReason();
++  if (FAILED(removed)) LogDeviceRemovalDiagnostics(device, removed);
++  if (graphics_system_) graphics_system_->OnHostGPULossFromAnyThread(true);
++}
++
+ void D3D12CommandProcessor::CheckSubmissionFence(u64 await_submission) {
++  if (device_removed_) return;
+   if (await_submission >= submission_current_) {
+     if (submission_open_) {
+-      EndSubmission(false);
+-    }
+-    // Queue operations done outside a submission, or after a failed end, must be awaited here.
++      if (!EndSubmission(false)) return;
++    }
++    // Ending an open submission should result in queue operations done directly
++    // (like UpdateTileMappings) to be tracked within the scope of that
++    // submission, but just in case of a failure, or queue operations being done
++    // outside of a submission, await explicitly.
+     if (queue_operations_done_since_submission_signal_) {
+       UINT64 fence_value = ++queue_operations_since_submission_fence_last_;
+       ID3D12CommandQueue* direct_queue = GetD3D12Provider().GetDirectQueue();
+-      if (SUCCEEDED(direct_queue->Signal(queue_operations_since_submission_fence_, fence_value) &&
+-                    SUCCEEDED(queue_operations_since_submission_fence_->SetEventOnCompletion(
+-                        fence_value, fence_completion_event_)))) {
+-        REX_PERF_INC("command_buffer_stalls");
+-        WaitForSingleObject(fence_completion_event_, INFINITE);
+-        queue_operations_done_since_submission_signal_ = false;
+-      } else {
+-        REXGPU_ERROR(
+-            "Failed to await a queue operation completion outside a submission "
+-            "Direct3D 12 fence");
+-      }
+-    }
+-    // A submission is not ended if not started or if ending failed, so clamp the index.
++      const HRESULT waited = SignalAndWaitForFence(
++          [&] { return direct_queue->Signal(queue_operations_since_submission_fence_, fence_value); },
++          [&] { return queue_operations_since_submission_fence_->SetEventOnCompletion(
++              fence_value, fence_completion_event_); },
++          [&] {
++            REX_PERF_INC("command_buffer_stalls");
++            return WaitForFenceEvent(queue_operations_since_submission_fence_, fence_value,
++                                    "out-of-submission");
++          });
++      if (FAILED(waited)) {
++        HandleFenceFailure(waited, "out-of-submission");
++        return;
++      }
++      queue_operations_done_since_submission_signal_ = false;
++    }
++    // A submission won't be ended if it hasn't been started, or if ending
++    // has failed - clamp the index.
+     await_submission = submission_current_ - 1;
+   }
+ 
+   u64 submission_completed_before = submission_completed_;
+-  submission_completed_ = submission_fence_->GetCompletedValue();
+-  if (submission_completed_ < await_submission) {
+-    if (SUCCEEDED(
+-            submission_fence_->SetEventOnCompletion(await_submission, fence_completion_event_))) {
+-      REX_PERF_INC("command_buffer_stalls");
+-      WaitForSingleObject(fence_completion_event_, INFINITE);
+-      submission_completed_ = submission_fence_->GetCompletedValue();
+-    }
+-  }
++  u64 completed = submission_fence_->GetCompletedValue();
++  if (completed == UINT64_MAX) {
++    HandleFenceFailure(DXGI_ERROR_DEVICE_REMOVED, "submission status");
++    return;
++  }
++  if (completed < await_submission) {
++    const HRESULT waited = ArmAndWaitForFence(
++        [&] { return submission_fence_->SetEventOnCompletion(await_submission, fence_completion_event_); },
++        [&] {
++          REX_PERF_INC("command_buffer_stalls");
++          return WaitForFenceEvent(submission_fence_, await_submission, "submission");
++        });
++    if (FAILED(waited)) {
++      HandleFenceFailure(waited, "submission");
++      return;
++    }
++    completed = submission_fence_->GetCompletedValue();
++  }
++  if (completed == UINT64_MAX) {
++    HandleFenceFailure(DXGI_ERROR_DEVICE_REMOVED, "submission completion");
++    return;
++  }
++  submission_completed_ = completed;
+   if (submission_completed_ < await_submission) {
+     REXGPU_ERROR("Failed to await a submission completion Direct3D 12 fence");
+   }
+@@ -3141,8 +3199,10 @@
+     return false;
+   }
+ 
+-  CheckSubmissionFence(is_opening_frame ? closed_frame_submissions_[frame_current_ % kQueueFrames]
+-                                        : 0);
++  const u64 await_submission =
++      is_opening_frame ? closed_frame_submissions_[frame_current_ % kQueueFrames] : 0;
++  CheckSubmissionFence(await_submission);
++  if (device_removed_ || submission_completed_ < await_submission) return false;
+   if (is_opening_frame) {
+     frame_completed_ = std::max(frame_current_, static_cast<u64>(kQueueFrames)) - kQueueFrames;
+     for (u64 frame = frame_completed_ + 1; frame < frame_current_; ++frame) {
+@@ -3286,7 +3346,12 @@
+       command_allocator_writable_last_ = nullptr;
+     }
+ 
+-    direct_queue->Signal(submission_fence_, submission_current_++);
++    const HRESULT signaled = direct_queue->Signal(submission_fence_, submission_current_);
++    if (FAILED(signaled)) {
++      HandleFenceFailure(signaled, "submission signal");
++      return false;
++    }
++    ++submission_current_;
+ 
+     submission_open_ = false;
+ 
+@@ -4482,8 +4547,24 @@
+   return true;
+ }
+ 
++void D3D12CommandProcessor::ReleaseReadbackSlot(ReadbackBuffer& readback, u32 index) {
++  if (readback.buffers[index]) {
++    if (readback.mapped_data[index]) readback.buffers[index]->Unmap(0, nullptr);
++    if (readback.submission_written[index] > submission_completed_) {
++      resources_for_deletion_.emplace_back(readback.submission_written[index], readback.buffers[index]);
++    } else {
++      readback.buffers[index]->Release();
++    }
++  }
++  readback.buffers[index] = nullptr;
++  readback.mapped_data[index] = nullptr;
++  readback.sizes[index] = 0;
++  readback.submission_written[index] = 0;
++  readback.written_size[index] = 0;
++}
++
+ void D3D12CommandProcessor::EvictOldReadbackBuffers(
+-    std::unordered_map<u64, ReadbackBuffer>& buffer_map) const {
++    std::unordered_map<u64, ReadbackBuffer>& buffer_map) {
+   if (buffer_map.empty()) {
+     return;
+   }
+@@ -4499,17 +4580,7 @@
+       continue;
+     }
+     for (u32 i = 0; i < 2; ++i) {
+-      if (readback.buffers[i]) {
+-        if (readback.mapped_data[i]) {
+-          readback.buffers[i]->Unmap(0, nullptr);
+-        }
+-        readback.buffers[i]->Release();
+-      }
+-      readback.buffers[i] = nullptr;
+-      readback.mapped_data[i] = nullptr;
+-      readback.sizes[i] = 0;
+-      readback.submission_written[i] = 0;
+-      readback.written_size[i] = 0;
++      ReleaseReadbackSlot(readback, i);
+     }
+     it = buffer_map.erase(it);
+   }
+diff --git a/tests/unit/gpu/d3d12_fence_sync_test.cpp b/tests/unit/gpu/d3d12_fence_sync_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/d3d12_fence_sync_test.cpp
+@@ -0,0 +1,138 @@
++// SPDX-License-Identifier: GPL-2.0-only
++// Fence sequencing regression and headless GPU readback. No game/UI is opened.
++#include <windows.h>
++#include <d3d12.h>
++#include <wrl/client.h>
++#include "gpu/xenos/d3d12/fence_sync.h"
++#include "rex_test.h"
++#include <cstring>
++#define CHECK_EQ(actual, expected) CHECK((actual) == (expected))
++#include <array>
++#include <vector>
++
++using namespace rex::gpu::d3d12;
++using Microsoft::WRL::ComPtr;
++
++void TestSequence() {
++  INFO("S_OK must signal, arm, then wait; a successful zero HRESULT is not false");
++  for (HRESULT success : {S_OK, S_FALSE}) {
++    std::vector<int> order;
++    bool armed = false;
++    const HRESULT result = SignalAndWaitForFence(
++        [&] { order.push_back(1); return success; },
++        [&] { order.push_back(2); armed = true; return S_OK; },
++        [&] { order.push_back(3); CHECK(armed); return S_OK; });
++    CHECK_EQ(result, S_OK);
++    CHECK(order == std::vector<int>({1, 2, 3}));
++  }
++  INFO("signal/arming failures never enter a wait and preserve the HRESULT");
++  uint32_t arms = 0, waits = 0;
++  auto arm = [&] { ++arms; return S_OK; };
++  auto wait = [&] { ++waits; return S_OK; };
++  CHECK_EQ(SignalAndWaitForFence([] { return E_FAIL; }, arm, wait), E_FAIL);
++  CHECK_EQ(arms, 0u);
++  CHECK_EQ(waits, 0u);
++  CHECK_EQ(SignalAndWaitForFence([] { return S_OK; }, [] { return E_OUTOFMEMORY; }, wait),
++           E_OUTOFMEMORY);
++  CHECK_EQ(waits, 0u);
++  CHECK_EQ(ArmAndWaitForFence([] { return E_FAIL; }, wait), E_FAIL);
++  CHECK_EQ(waits, 0u);
++  CHECK_EQ(ArmAndWaitForFence(arm, [] { return HRESULT_FROM_WIN32(WAIT_TIMEOUT); }),
++           HRESULT_FROM_WIN32(WAIT_TIMEOUT));
++}
++
++void TestReadiness() {
++  INFO("mapped/allocated readback slots require a completed write of sufficient size");
++  CHECK_FALSE(ReadbackCopyReady(0, 100, 1024, 1024));
++  CHECK_FALSE(ReadbackCopyReady(6, 5, 1024, 1024));
++  CHECK_FALSE(ReadbackCopyReady(6, 6, 512, 1024));
++  CHECK_FALSE(ReadbackCopyReady(6, UINT64_MAX, 1024, 1024));
++  CHECK_FALSE(ReadbackCopyReady(6, 6, 1024, 0));
++  CHECK(ReadbackCopyReady(6, 6, 1024, 1024));
++  CHECK(ReadbackCopyReady(6, 7, 1024, 512));
++}
++
++bool TestGpu() {
++  INFO("headless D3D12 queue signal/event and GPU readback");
++  ComPtr<ID3D12Device> device;
++  if (FAILED(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)))) {
++    std::puts("SKIP: no usable D3D12 device for headless validation");
++    return false;
++  }
++  auto ok = [](HRESULT result) { CHECK(SUCCEEDED(result)); return SUCCEEDED(result); };
++  ComPtr<ID3D12CommandQueue> queue;
++  D3D12_COMMAND_QUEUE_DESC queue_desc{};
++  queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
++  if (!ok(device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&queue)))) return true;
++  ComPtr<ID3D12Fence> fence, gate;
++  if (!ok(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))) ||
++      !ok(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gate)))) return true;
++  ComPtr<ID3D12CommandAllocator> allocator;
++  ComPtr<ID3D12GraphicsCommandList> commands;
++  if (!ok(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator))) ||
++      !ok(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr,
++                                    IID_PPV_ARGS(&commands)))) return true;
++  constexpr uint32_t bytes = 1024;
++  D3D12_RESOURCE_DESC buffer{};
++  buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
++  buffer.Width = bytes; buffer.Height = 1; buffer.DepthOrArraySize = 1;
++  buffer.MipLevels = 1; buffer.SampleDesc.Count = 1; buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
++  D3D12_HEAP_PROPERTIES heap{};
++  heap.Type = D3D12_HEAP_TYPE_UPLOAD; heap.CreationNodeMask = 1; heap.VisibleNodeMask = 1;
++  ComPtr<ID3D12Resource> upload, readback;
++  if (!ok(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
++      D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload)))) return true;
++  heap.Type = D3D12_HEAP_TYPE_READBACK;
++  if (!ok(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
++      D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback)))) return true;
++  std::array<uint32_t, bytes / sizeof(uint32_t)> expected{};
++  for (uint32_t i = 0; i < expected.size(); ++i) expected[i] = 0xa5a50000u ^ (i * 7919);
++  void* data = nullptr;
++  D3D12_RANGE no_reads{0, 0};
++  if (!ok(upload->Map(0, &no_reads, &data))) return true;
++  std::memcpy(data, expected.data(), bytes);
++  upload->Unmap(0, nullptr);
++  commands->CopyBufferRegion(readback.Get(), 0, upload.Get(), 0, bytes);
++  if (!ok(commands->Close())) return true;
++  HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
++  CHECK(event != nullptr);
++  if (!event) return true;
++  // Delay actual GPU completion deterministically, rather than assume the GPU
++  // will be slower than this test's CPU thread.
++  if (!ok(queue->Wait(gate.Get(), 1))) { CloseHandle(event); return true; }
++  ID3D12CommandList* lists[] = {commands.Get()};
++  queue->ExecuteCommandLists(1, lists);
++  const HRESULT queued = queue->Signal(fence.Get(), 1);
++  ok(queued);
++  CHECK_FALSE(ReadbackCopyReady(1, fence->GetCompletedValue(), bytes, bytes));
++  ok(gate->Signal(1));
++  bool armed = false;
++  const HRESULT waited = SignalAndWaitForFence(
++      [&] { return queue->Signal(fence.Get(), 2); },
++      [&] { armed = true; return fence->SetEventOnCompletion(2, event); },
++      [&] {
++        CHECK(armed);
++        const DWORD result = WaitForSingleObject(event, 5000);
++        return result == WAIT_OBJECT_0 ? S_OK : HRESULT_FROM_WIN32(
++            result == WAIT_FAILED ? GetLastError() : WAIT_TIMEOUT);
++      });
++  CloseHandle(event);
++  if (!ok(waited)) return true;
++  CHECK(ReadbackCopyReady(1, fence->GetCompletedValue(), bytes, bytes));
++  D3D12_RANGE reads{0, bytes};
++  if (!ok(readback->Map(0, &reads, &data))) return true;
++  CHECK(std::memcmp(data, expected.data(), bytes) == 0);
++  D3D12_RANGE no_writes{0, 0};
++  readback->Unmap(0, &no_writes);
++  return true;
++}
++
++REX_TEST_CASE("D3D12 fence calls preserve ordering and every failure", "[gpu][d3d12_fence]") {
++  TestSequence();
++}
++REX_TEST_CASE("D3D12 readback requires a completed write of sufficient size", "[gpu][d3d12_fence]") {
++  TestReadiness();
++}
++REX_TEST_CASE("D3D12 headless readback waits for GPU completion", "[gpu][d3d12_fence]") {
++  if (!TestGpu()) SKIP("No usable D3D12 device");
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -317,7 +317,8 @@
+                      REX_BUILDING_UI REX_BUILDING_APU
+ )
+ if (WIN32)
+-  target_link_libraries(unit_tests PRIVATE ws2_32 winmm)
++  target_sources(unit_tests PRIVATE gpu/d3d12_fence_sync_test.cpp)
++  target_link_libraries(unit_tests PRIVATE ws2_32 winmm d3d12)
+ endif ()
+ if (APPLE)
+   target_link_libraries(unit_tests PRIVATE "-framework CoreFoundation")

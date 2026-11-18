@@ -1,0 +1,293 @@
+diff --git a/include/rex/gpu/graphics_preparation_service.h b/include/rex/gpu/graphics_preparation_service.h
+--- a/include/rex/gpu/graphics_preparation_service.h
++++ b/include/rex/gpu/graphics_preparation_service.h
+@@ -14,4 +14,8 @@
+  */
+ REX_DECLARE_INTERFACE(IGraphicsPreparation, 1)
++  /** Set before title attachment. Defers automatic import to an explicit Begin call.
++   * Returns false if the driver cannot change policy or a title is attached.
++   */
++  virtual bool SetShaderStorageDeferred(bool deferred) = 0;
+   virtual bool BeginShaderStoragePreparation(const std::filesystem::path& root,
+                                              u32 title_id, u64 configuration = 0) = 0;
+diff --git a/include/rex/gpu/xenos_graphics_driver.h b/include/rex/gpu/xenos_graphics_driver.h
+--- a/include/rex/gpu/xenos_graphics_driver.h
++++ b/include/rex/gpu/xenos_graphics_driver.h
+@@ -41,4 +41,5 @@
+ 
+   /** Preparation is optional for a driver without persistent pipeline storage. */
++  virtual bool SetShaderStorageDeferred(bool) { return false; }
+   virtual bool BeginShaderStoragePreparation(const std::filesystem::path&, u32, u64) {
+     return false;
+diff --git a/src/gpu/xenos/xenos_graphics_driver_base.h b/src/gpu/xenos/xenos_graphics_driver_base.h
+--- a/src/gpu/xenos/xenos_graphics_driver_base.h
++++ b/src/gpu/xenos/xenos_graphics_driver_base.h
+@@ -76,4 +76,5 @@
+   void DetachTitle() override;
+ 
++  bool SetShaderStorageDeferred(bool deferred) override;
+   bool BeginShaderStoragePreparation(const std::filesystem::path& root, u32 title_id,
+                                      u64 configuration) override;
+@@ -188,4 +189,5 @@
+   std::atomic_flag host_gpu_loss_reported_;
+   bool shader_storage_opened_ = false;
++  bool shader_storage_deferred_ = false;
+   std::mutex frame_mutex_;
+   std::condition_variable frame_signal_;
+diff --git a/src/gpu/xenos/xenos_graphics_driver_base.cpp b/src/gpu/xenos/xenos_graphics_driver_base.cpp
+--- a/src/gpu/xenos/xenos_graphics_driver_base.cpp
++++ b/src/gpu/xenos/xenos_graphics_driver_base.cpp
+@@ -186,9 +186,16 @@
+   vsync_worker_thread_ = std::move(*thread);
+ 
+-  if (const std::filesystem::path cache_root = REX_PATHS().cache_root.Get(); !cache_root.empty()) {
++  if (const std::filesystem::path cache_root = REX_PATHS().cache_root.Get();
++      !shader_storage_deferred_ && !cache_root.empty()) {
+     REX_TRY_VOID(InitializeShaderStorage(cache_root, title_info_.title_id, false));
+   }
+ 
+   return Ok();
++}
++
++bool XenosGraphicsDriverBase::SetShaderStorageDeferred(bool deferred) {
++  if (command_processor_) return false;
++  shader_storage_deferred_ = deferred;
++  return true;
+ }
+ 
+diff --git a/src/gpu/graphics_system.h b/src/gpu/graphics_system.h
+--- a/src/gpu/graphics_system.h
++++ b/src/gpu/graphics_system.h
+@@ -39,4 +39,5 @@
+   bool HasDriver() const override;
+   std::string GetDriverName() const override;
++  bool SetShaderStorageDeferred(bool deferred) override;
+   bool BeginShaderStoragePreparation(const std::filesystem::path& root, u32 title_id,
+                                      u64 configuration = 0) override;
+@@ -79,4 +80,5 @@
+  private:
+   rex::gpu::GraphicsSettings settings_;
++  bool shader_storage_deferred_ = false;
+   struct State;
+   std::unique_ptr<State> state_;
+diff --git a/src/gpu/graphics_system.cpp b/src/gpu/graphics_system.cpp
+--- a/src/gpu/graphics_system.cpp
++++ b/src/gpu/graphics_system.cpp
+@@ -45,4 +45,11 @@
+ bool GraphicsSystem::HasXenos() const {
+   return state_->xenos != nullptr;
++}
++
++bool GraphicsSystem::SetShaderStorageDeferred(bool deferred) {
++  if (state_->driver &&
++      (!state_->xenos || !state_->xenos->SetShaderStorageDeferred(deferred))) return false;
++  shader_storage_deferred_ = deferred;
++  return true;
+ }
+ 
+@@ -150,4 +157,10 @@
+   }
+   state.xenos = graphics_driver->AsXenos();
++  if (shader_storage_deferred_ &&
++      (!state.xenos || !state.xenos->SetShaderStorageDeferred(true))) {
++    state.driver = nullptr;
++    state.xenos = nullptr;
++    return Err(ErrorCategory::kConfig, "the graphics driver cannot defer shader storage");
++  }
+   state.present_finished = false;
+   state.present_thread = std::jthread([&state](const std::stop_token& stop) {
+diff --git a/tests/unit/gpu/vulkan_preparation_test.cpp b/tests/unit/gpu/vulkan_preparation_test.cpp
+--- a/tests/unit/gpu/vulkan_preparation_test.cpp
++++ b/tests/unit/gpu/vulkan_preparation_test.cpp
+@@ -8,4 +8,5 @@
+ #include <thread>
+ #include <rex/app_info.h>
++#include <rex/path_settings.h>
+ #include <rex/driver_registration.h>
+ #include <rex/diagnostics/compile_trace.h>
+@@ -71,5 +72,10 @@
+   const auto trace_phase=trace::CurrentPhase();
+   const auto compute_before=trace::ReadCounter(trace_phase,trace::Event::kHelperCompute).count;
++  REQUIRE(REX_PATHS().cache_root.SetText(rex::SettingLayer::kTitle, folder.path.string()));
++  REQUIRE(driver->AsXenos()->SetShaderStorageDeferred(true));
+   REQUIRE(driver->AttachTitle(rex::TitleInfo{},title,title,title));
++  CHECK_FALSE(driver->AsXenos()->SetShaderStorageDeferred(false));
++  CHECK(driver->AsXenos()->QueryShaderStoragePreparation().phase ==
++        rex::gpu::GraphicsPreparationPhase::kIdle);
+   auto* processor=xenos->GetCommandProcessor();
+   REQUIRE(processor);
+@@ -93,3 +99,8 @@
+     CHECK(trace::ReadCounter(trace_phase,trace::Event::kHelperCompute).count>compute_before);
+   driver->DetachTitle();
++  REQUIRE(driver->AttachTitle(rex::TitleInfo{},title,title,title));
++  CHECK(driver->AsXenos()->QueryShaderStoragePreparation().phase ==
++        rex::gpu::GraphicsPreparationPhase::kIdle);
++  driver->DetachTitle();
++  CHECK(driver->AsXenos()->SetShaderStorageDeferred(false));
+ }
+diff --git a/include/rex/app/title_app.h b/include/rex/app/title_app.h
+--- a/include/rex/app/title_app.h
++++ b/include/rex/app/title_app.h
+@@ -72,4 +72,11 @@
+   [[nodiscard]] virtual Result<void> OnTitleLaunch(rex::kernel::TitleRuntime& title);
+ 
++  /**
++   * Runs on the UI thread before a loaded title is unmapped, including restart
++   * and failed launch. Stop title-owned background readers here. The runtime
++   * services and guest mapping remain valid during the hook.
++   */
++  virtual void OnTitleStopping(rex::kernel::TitleRuntime& title);
++
+   /** The title exited on its own. The default asks the player to restart or exit. */
+   virtual void OnTitleExit(rex::kernel::TitleExitReason reason);
+@@ -97,4 +104,6 @@
+ 
+  private:
++  void StopTitle();
++
+   struct State;
+   std::unique_ptr<State> state_;
+diff --git a/src/app/title_app.cpp b/src/app/title_app.cpp
+--- a/src/app/title_app.cpp
++++ b/src/app/title_app.cpp
+@@ -75,4 +75,5 @@
+   bool unloading = false;
+   bool stopped = false;
++  bool stopping_title = false;
+ };
+ 
+@@ -129,15 +130,18 @@
+       return failure(loaded.error().message);
+     }
++    bool launch_succeeded = false;
++    ScopeGuard close_failed_launch([&] { if (!launch_succeeded) StopTitle(); });
+     state_->exit_guard = title.OnTitleExit([this](rex::kernel::TitleExitReason reason) {
+       GetUI().PostTask([this, reason] { OnTitleExit(reason); });
+     });
+     if (auto hooked = OnTitleLaunch(title); !hooked) {
+-      title.Unload();
++      StopTitle();
+       return Fail("OnTitleLaunch", hooked.error());
+     }
+     if (auto started = title.Launch(); !started) {
+-      title.Unload();
++      StopTitle();
+       return failure(started.error().message);
+     }
++    launch_succeeded = true;
+     return Ok();
+   }();
+@@ -146,9 +150,21 @@
+ }
+ 
++void TitleApp::StopTitle() {
++  if (state_->stopping_title) return;
++  state_->stopping_title = true;
++  ScopeGuard finish([this] {
++    state_->runtime.Unload();
++    state_->stopping_title = false;
++  });
++  if (state_->runtime.IsLoaded()) OnTitleStopping(state_->runtime);
++}
++
++void TitleApp::OnTitleStopping(rex::kernel::TitleRuntime&) {}
++
+ void TitleApp::UnloadTitle() {
+   state_->unloading = true;
+   SetPhase(AppPhase::kTitleStop);
+   GetUI().CancelPrompts();
+-  state_->runtime.Unload();
++  StopTitle();
+   SetPhase(AppPhase::kRunning);
+   state_->unloading = false;
+@@ -213,5 +229,5 @@
+     ui->CancelPrompts();
+   }
+-  state_->runtime.Unload();
++  StopTitle();
+ }
+ 
+diff --git a/tests/unit/ui/title_app_test.cpp b/tests/unit/ui/title_app_test.cpp
+--- a/tests/unit/ui/title_app_test.cpp
++++ b/tests/unit/ui/title_app_test.cpp
+@@ -24,4 +24,5 @@
+ #include <span>
+ #include <string>
++#include <stdexcept>
+ #include <thread>
+ #include <vector>
+@@ -564,2 +565,74 @@
+   CHECK(g_startup_boxes == 1);
+ }
++
++namespace {
++class StopAwareApp final : public FooApp {
++ public:
++  StopAwareApp() : FooApp(false,rex::test::MakeTitleImage(rex::test::kDelayingEntry)) {}
++  int stops=0;
++  bool loaded_during_stop=true;
++  bool refuse_launch=false;
++  bool throw_launch=false;
++ protected:
++  rex::Result<void> OnTitleLaunch(rex::kernel::TitleRuntime&) override {
++    if(throw_launch) throw std::runtime_error("launch reader failed");
++    if(refuse_launch) return rex::Err(rex::ErrorCategory::kRuntime,"required loading payload unavailable");
++    return rex::Ok();
++  }
++  void OnTitleStopping(rex::kernel::TitleRuntime& title) override {
++    ++stops;
++    loaded_during_stop=loaded_during_stop && title.IsLoaded() && title.GetTitleID()!=0;
++  }
++};
++}
++
++REX_TEST_CASE("Title readers stop before unmapping on unload restart and shutdown", "[ui][title_app]") {
++  rex::test::TempFolder folder("rex_stopping_title_");
++  rex::test::WriteTitle(folder.path);
++  StopAwareApp app;
++  app.game_root=folder.path;
++  REQUIRE(Open(app));
++  REQUIRE(app.LaunchTitle());
++  app.UnloadTitle();
++  CHECK(app.stops==1);
++  CHECK(app.loaded_during_stop);
++  CHECK_FALSE(app.GetTitleRuntime().IsLoaded());
++  app.UnloadTitle();
++  CHECK(app.stops==1);
++  REQUIRE(app.LaunchTitle());
++  REQUIRE(app.Shutdown()==0);
++  CHECK(app.stops==2);
++  CHECK(app.loaded_during_stop);
++}
++
++REX_TEST_CASE("A refused title launch stops its readers before the required-payload failure", "[ui][title_app]") {
++  rex::test::g_entry.Reset();
++  rex::test::TempFolder folder("rex_refused_title_");
++  rex::test::WriteTitle(folder.path);
++  StopAwareApp app;
++  app.game_root=folder.path;
++  app.refuse_launch=true;
++  REQUIRE(Open(app));
++  REQUIRE_FALSE(app.LaunchTitle());
++  CHECK(app.stops==1);
++  CHECK(app.loaded_during_stop);
++  CHECK_FALSE(app.GetTitleRuntime().IsLoaded());
++  CHECK(rex::test::g_entry.entered==0);
++  CHECK(app.Shutdown()==1);
++  CHECK(app.stops==1);
++}
++
++REX_TEST_CASE("An exception in title launch stops readers and releases guest memory", "[ui][title_app]") {
++  rex::test::TempFolder folder("rex_throwing_title_");
++  rex::test::WriteTitle(folder.path);
++  StopAwareApp app;
++  app.game_root=folder.path;
++  app.throw_launch=true;
++  REQUIRE(Open(app));
++  CHECK_THROWS_AS(app.LaunchTitle(),std::runtime_error);
++  CHECK(app.stops==1);
++  CHECK(app.loaded_during_stop);
++  CHECK_FALSE(app.GetTitleRuntime().IsLoaded());
++  CHECK(app.Shutdown()==0);
++  CHECK(app.stops==1);
++}

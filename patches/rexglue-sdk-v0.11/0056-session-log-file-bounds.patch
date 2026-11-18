@@ -1,0 +1,198 @@
+diff --git a/include/rex/logging/logger.h b/include/rex/logging/logger.h
+--- a/include/rex/logging/logger.h
++++ b/include/rex/logging/logger.h
+@@ -226,6 +226,10 @@
+   REX_SETTING(bool, debugger, true, "Write to an attached debugger", kStartupOnly);
+   REX_SETTING(bool, file, true, "Write a log file under app.log_root", kStartupOnly);
+   REX_SETTING(std::string, file_name, "", "File name, the app name when empty", kStartupOnly);
++  REX_SETTING(u64, max_file_size_bytes, 0,
++              "Bytes per log file before rotation, 0 disables rotation", kStartupOnly);
++  REX_SETTING(u32, max_files, 20, "Rotated log files kept beside the active file",
++              Range{0, 200000}, kStartupOnly);
+   REX_SETTING(i64, folder_budget, 0, "Bytes of old log files kept, 0 keeps all",
+               Range{0, 9007199254740992.0}, kStartupOnly);
+   REX_SETTING(std::string, pattern, "%^%Y-%m-%d %H:%M:%S.%e %Q %-10n %j %v%$",
+diff --git a/src/base/logger.cpp b/src/base/logger.cpp
+--- a/src/base/logger.cpp
++++ b/src/base/logger.cpp
+@@ -16,6 +16,8 @@
+ #include <spdlog/pattern_formatter.h>
+ #include <spdlog/sinks/base_sink.h>
+ #include <spdlog/sinks/basic_file_sink.h>
++#include <spdlog/sinks/rotating_file_sink.h>
++#include <limits>
+ #include <spdlog/sinks/stdout_color_sinks.h>
+ #include <spdlog/spdlog.h>
+ 
+@@ -708,6 +710,10 @@
+     config.path = named;
+   }
+   config.folder_budget = static_cast<u64>(owner.folder_budget.Get());
++  const u64 max_file_bytes = owner.max_file_size_bytes.Get();
++  if (max_file_bytes > std::numeric_limits<size_t>::max()) {
++    return Err(ErrorCategory::kValidation, "log.max_file_size_bytes exceeds the host file size range");
++  }
+   const std::chrono::seconds interval(owner.flush_interval.Get());
+ 
+   std::string file_error;
+@@ -717,7 +723,19 @@
+     SetCrashFile({});
+     if (const auto path = log::ResolveLogFile(config); !path.empty()) {
+       try {
+-        auto opened = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path.native(), false);
++        std::shared_ptr<spdlog::sinks::sink> opened;
++        if (max_file_bytes != 0) {
++          spdlog::file_event_handlers events;
++          // A rotating sink replaces the file inode. Crash writes must follow the active file.
++          events.after_open = [this, path](const spdlog::filename_t&, std::FILE*) {
++            SetCrashFile(path);
++          };
++          opened = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
++              path.native(), static_cast<size_t>(max_file_bytes), owner.max_files.Get(), false,
++              events);
++        } else {
++          opened = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path.native(), false);
++        }
+         opened->set_formatter(log::MakeFormatter(pattern));
+         file = std::move(opened);
+         SetCrashFile(path);
+diff --git a/tests/unit/base/logger_test.cpp b/tests/unit/base/logger_test.cpp
+--- a/tests/unit/base/logger_test.cpp
++++ b/tests/unit/base/logger_test.cpp
+@@ -28,6 +28,7 @@
+ #include <rex/logging/logger.h>
+ 
+ #include "base/app_harness.h"
++#include "crash_child_runner.h"
+ 
+ REXLOG_CATEGORY(logtest, "Logger test category")
+ REXLOG_TABLE(kLogTestTable, logtest)
+@@ -366,3 +367,76 @@
+   CHECK(found);
+   app.Finish();
+ }
++
++REX_TEST_CASE("Session log rotation appends metadata and bounds file bytes and backups", "[base][logger][session_logging]") {
++  ResetLogger();
++  rex::test::TempFolder folder("rex_log_rotation_");
++  const auto named=folder.path/"game.log";
++  {std::ofstream file(named);file<<"session metadata\n";}
++  HarnessApp app;
++  REQUIRE(app.Start({"--log.file_name="+named.string(),"--log.max_file_size_bytes=1024",
++                     "--log.max_files=1","--log.pattern=%v","--log.console=false","--log.debugger=false"}));
++  REX_LOGGER().Flush();
++  CHECK(ReadFile(named).find("session metadata")!=std::string::npos);
++  for(int line=0;line<80;++line) REXLOG_INFO("{} {}",line,std::string(180,'x'));
++  REXLOG_INFO("final session marker");
++  REX_LOGGER().Flush();
++  CHECK(ReadFile(named).find("final session marker")!=std::string::npos);
++  CHECK(std::filesystem::exists(folder.path/"game.1.log"));
++  CHECK_FALSE(std::filesystem::exists(folder.path/"game.2.log"));
++  CHECK(std::filesystem::file_size(named)<=1024);
++  CHECK(std::filesystem::file_size(folder.path/"game.1.log")<=1024);
++  app.Finish();
++}
++
++REX_TEST_CASE("A zero backup count bounds only the active log", "[base][logger][session_logging]") {
++  ResetLogger();
++  rex::test::TempFolder folder("rex_log_no_backups_");
++  const auto named=folder.path/"game.log";
++  HarnessApp app;
++  REQUIRE(app.Start({"--log.file_name="+named.string(),"--log.max_file_size_bytes=512",
++                     "--log.max_files=0","--log.pattern=%v","--log.console=false","--log.debugger=false"}));
++  for(int line=0;line<20;++line) REXLOG_INFO("{} {}",line,std::string(150,'x'));
++  REX_LOGGER().Flush();
++  CHECK(std::filesystem::file_size(named)<=512);
++  CHECK_FALSE(std::filesystem::exists(folder.path/"game.1.log"));
++  CHECK_FALSE(REX_SETTINGS().SetText("log.max_files","200001"));
++  app.Finish();
++}
++
++REX_TEST_CASE("A log folder budget prunes complete rotated run groups", "[base][logger][session_logging]") {
++  ResetLogger();
++  rex::test::TempFolder folder("rex_log_run_budget_");
++  {
++    HarnessApp first(folder.path);
++    REQUIRE(first.Start({"--log.max_file_size_bytes=512","--log.max_files=1",
++                         "--log.pattern=%v","--log.console=false","--log.debugger=false"}));
++    for(int line=0;line<20;++line) REXLOG_INFO("{} {}",line,std::string(150,'x'));
++    first.Finish();
++  }
++  CHECK(std::filesystem::exists(folder.path/"logs"/"harness_001.log"));
++  CHECK(std::filesystem::exists(folder.path/"logs"/"harness_001.1.log"));
++  {
++    HarnessApp second(folder.path);
++    REQUIRE(second.Start({"--log.folder_budget=1","--log.console=false","--log.debugger=false"}));
++    second.Finish();
++  }
++  CHECK_FALSE(std::filesystem::exists(folder.path/"logs"/"harness_001.log"));
++  CHECK_FALSE(std::filesystem::exists(folder.path/"logs"/"harness_001.1.log"));
++  CHECK(std::filesystem::exists(folder.path/"logs"/"harness_002.log"));
++}
++
++#if !defined(_WIN32)
++REX_TEST_CASE("Crash reports follow the active file after rotation", "[base][logger][session_logging][crash_report]") {
++  const auto result = rex::test::RunChild("log-rotation");
++  CHECK(result.status != 0);
++  REQUIRE(result.Has("rotation log folder: "));
++  const auto first = result.output.find("rotation log folder: ") + std::string_view("rotation log folder: ").size();
++  const auto last = result.output.find('\n', first);
++  REQUIRE(last != std::string::npos);
++  const std::filesystem::path folder(result.output.substr(first, last - first));
++  auto cleanup = rex::ScopeGuard([&] { std::error_code ec; std::filesystem::remove_all(folder, ec); });
++  CHECK(ReadFile(folder / "game.log").find("end of crash report") != std::string::npos);
++  CHECK(ReadFile(folder / "game.1.log").find("end of crash report") == std::string::npos);
++}
++#endif
+diff --git a/tests/unit/crash_child.cpp b/tests/unit/crash_child.cpp
+--- a/tests/unit/crash_child.cpp
++++ b/tests/unit/crash_child.cpp
+@@ -26,6 +26,7 @@
+ #include <span>
+ #include <utility>
+ 
++#include <rex/app/app.h>
+ #include <rex/logging/logger.h>
+ #include <rex/logging/log_category.h>
+ #include <rex/memory/virtual_memory.h>
+@@ -281,7 +282,27 @@
+ }
+ 
+ int Run(std::string_view mode) {
+-  if (mode == "null-write") {
++  if (mode == "log-rotation") {
++    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
++    const auto folder = std::filesystem::temp_directory_path() /
++                        ("rex-log-crash-rotation-" + std::to_string(stamp));
++    std::filesystem::create_directories(folder);
++    rex::app::App app("rex-crash-child");
++    const std::vector<std::string> args{
++        "--app.root=" + folder.string(), "--log.file_name=" + (folder / "game.log").string(),
++        "--log.max_file_size_bytes=512", "--log.max_files=1", "--log.pattern=%v",
++        "--log.console=false", "--log.debugger=false", "--ui.driver=none",
++        "--hid.drivers=none", "--apu.driver=none", "--gpu.driver=none"};
++    if (!app.Init(rex::CLIArgList::Parse(args))) return 2;
++    for (int line = 0; line < 20; ++line) {
++      REX_LOGGER().Emit({.level = rex::log::Level::kInfo, .category = "core",
++                         .text = std::string(150, 'x'), .time = std::chrono::system_clock::now()});
++    }
++    REX_LOGGER().Flush();
++    std::printf("rotation log folder: %s\n", folder.string().c_str());
++    std::fflush(stdout);
++    std::abort();
++  } else if (mode == "null-write") {
+     WriteNull();
+   } else if (mode == "abort") {
+     std::abort();
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -423,7 +423,7 @@
+     crash_child_recompiled_code.cpp PROPERTIES COMPILE_OPTIONS -fasynchronous-unwind-tables
+   )
+ endif ()
+-target_link_libraries(rex-crash-test PRIVATE rexkernel)
++target_link_libraries(rex-crash-test PRIVATE rexkernel rexapp)
+ set_target_properties(
+   rex-crash-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY $<TARGET_FILE_DIR:rexkernel>
+ )

@@ -1,0 +1,337 @@
+diff --git a/src/apu/audio_system.cpp b/src/apu/audio_system.cpp
+--- a/src/apu/audio_system.cpp
++++ b/src/apu/audio_system.cpp
+@@ -5,7 +5,6 @@
+ #include <atomic>
+ #include <chrono>
+ #include <condition_variable>
+-#include <deque>
+ #include <mutex>
+ #include <thread>
+ 
+@@ -34,7 +33,11 @@
+ struct Slot {
+   bool open = false;
+   u32 generation = 0;
+-  std::deque<QueuedFrame> queue;
++  // The setting permits 4..64 frames. Own the maximum for the stream lifetime.
++  std::array<QueuedFrame, 64> queue;
++  u32 head = 0;
++  u32 count = 0;
++  bool has_submitted = false;
+   MoveOnlyFunction<void()> on_frame_played;
+ };
+ 
+@@ -52,6 +55,10 @@
+   mutable std::mutex mutex;
+   std::array<Slot, kMaxStreams> slots;
+   u32 next_generation = 1;
++  u64 submitted_frames = 0;
++  u64 starved_frames = 0;
++  u64 reported_starved_frames = 0;
++  Clock::time_point next_report{};
+ 
+   std::thread thread;
+   std::mutex wake_mutex;
+@@ -102,7 +109,9 @@
+     }
+     slot.open = true;
+     slot.generation = state_->next_generation++;
+-    slot.queue.clear();
++    slot.head = 0;
++    slot.count = 0;
++    slot.has_submitted = false;
+     slot.on_frame_played = std::move(on_frame_played);
+     return rex::apu::AudioStreamID(i + 1);
+   }
+@@ -117,7 +126,9 @@
+   std::lock_guard lock(state_->mutex);
+   Slot& slot = state_->slots[index - 1];
+   slot.open = false;
+-  slot.queue.clear();
++  slot.head = 0;
++  slot.count = 0;
++  slot.has_submitted = false;
+   slot.on_frame_played = nullptr;
+ }
+ 
+@@ -126,18 +137,34 @@
+   if (index == 0 || index > kMaxStreams) {
+     return Err(ErrorCategory::kNotFound, "unknown audio stream");
+   }
+-  std::lock_guard lock(state_->mutex);
+-  Slot& slot = state_->slots[index - 1];
+-  if (!slot.open) {
+-    return Err(ErrorCategory::kNotFound, "unknown audio stream");
+-  }
+-  if (slot.queue.size() >= settings_.max_queued_frames.Get()) {
+-    return Err(ErrorCategory::kRuntime, "audio stream queue is full");
+-  }
+-  QueuedFrame queued;
+-  std::ranges::copy(frame, queued.samples.begin());
+-  queued.submitted = Clock::now();
+-  slot.queue.push_back(queued);
++  u64 report_starved = 0;
++  {
++    std::lock_guard lock(state_->mutex);
++    Slot& slot = state_->slots[index - 1];
++    if (!slot.open) {
++      return Err(ErrorCategory::kNotFound, "unknown audio stream");
++    }
++    if (slot.count >= settings_.max_queued_frames.Get() || slot.count == slot.queue.size()) {
++      return Err(ErrorCategory::kRuntime, "audio stream queue is full");
++    }
++    QueuedFrame& queued = slot.queue[(slot.head + slot.count) % slot.queue.size()];
++    std::ranges::copy(frame, queued.samples.begin());
++    queued.submitted = Clock::now();
++    ++slot.count;
++    slot.has_submitted = true;
++    ++state_->submitted_frames;
++    // Capture diagnostics under the lock, but report from the producer after releasing it.
++    if (state_->starved_frames != state_->reported_starved_frames &&
++        queued.submitted >= state_->next_report) {
++      report_starved = state_->starved_frames;
++      state_->reported_starved_frames = report_starved;
++      state_->next_report = queued.submitted + std::chrono::seconds(5);
++    }
++  }
++  if (report_starved) {
++    REXAPU_WARN("Audio starvation: {} missing frame(s) ({:.1f} ms)", report_starved,
++                report_starved * (1000.0 * kAudioChannelSamples / kAudioSampleRate));
++  }
+   return Ok();
+ }
+ 
+@@ -154,7 +181,7 @@
+         continue;
+       }
+       ++stats.open_streams;
+-      stats.queued_frames += static_cast<u32>(slot.queue.size());
++      stats.queued_frames += slot.count;
+     }
+   }
+   stats.underruns = state_->underruns.load();
+@@ -191,13 +218,17 @@
+           continue;
+         }
+         generations[i] = slot.generation;
+-        if (slot.queue.empty()) {
++        if (slot.count == 0) {
+           s.underruns.fetch_add(1);
++          if (slot.has_submitted) {
++            ++s.starved_frames;
++          }
+           s.pad = true;
+           continue;
+         }
+-        taken[i] = slot.queue.front();
+-        slot.queue.pop_front();
++        taken[i] = slot.queue[slot.head];
++        slot.head = (slot.head + 1) % slot.queue.size();
++        --slot.count;
+         have[i] = true;
+         s.latency_sum_us += static_cast<u64>(
+             std::chrono::duration_cast<std::chrono::microseconds>(now - taken[i].submitted)
+@@ -361,6 +392,14 @@
+   state_->thread.join();
+   state_->driver = nullptr;
+   state_->channels = 2;
++  u64 submitted;
++  u64 starved;
++  {
++    std::lock_guard lock(state_->mutex);
++    submitted = state_->submitted_frames;
++    starved = state_->starved_frames;
++  }
++  REXAPU_INFO("Audio queue totals: {} submitted, {} starved frame(s)", submitted, starved);
+ }
+ 
+ }  // namespace rex::apu
+diff --git a/src/apu/sdl3/sdl3_audio_driver.h b/src/apu/sdl3/sdl3_audio_driver.h
+--- a/src/apu/sdl3/sdl3_audio_driver.h
++++ b/src/apu/sdl3/sdl3_audio_driver.h
+@@ -12,7 +12,7 @@
+ #pragma once
+ 
+ #include <array>
+-#include <vector>
++#include <chrono>
+ 
+ #include <rex/apu/audio_driver.h>
+ #include <rex/driver_context.h>
+@@ -42,7 +42,9 @@
+   SDL_AudioStream* stream_ = nullptr;
+   u32 channels_ = 0;
+   AudioFill fill_;
+-  std::vector<f32> scratch_;
++  std::array<f32, kAudioFrameSamples> scratch_;
++  std::chrono::steady_clock::time_point last_callback_{};
++  u64 max_callback_gap_us_ = 0;
+ };
+ 
+ /** The module that registers the SDL3 audio driver under the name "sdl3". */
+diff --git a/src/apu/sdl3/sdl3_audio_driver.cpp b/src/apu/sdl3/sdl3_audio_driver.cpp
+--- a/src/apu/sdl3/sdl3_audio_driver.cpp
++++ b/src/apu/sdl3/sdl3_audio_driver.cpp
+@@ -101,7 +101,11 @@
+   if (stream_) {
+     SDL_DestroyAudioStream(stream_);
+     stream_ = nullptr;
++    // DestroyAudioStream waits for callbacks; these counters are now quiescent.
++    REXAPU_INFO("Audio device largest callback gap {:.1f} ms", max_callback_gap_us_ / 1000.0);
+   }
++  last_callback_ = {};
++  max_callback_gap_us_ = 0;
+   channels_ = 0;
+   fill_ = nullptr;
+ }
+@@ -111,14 +115,26 @@
+ }
+ 
+ void SDL3AudioDriver::Pull(SDL_AudioStream* stream, int additional_amount) {
+-  const u32 samples = static_cast<u32>(std::max(additional_amount, 0)) / sizeof(f32);
+-  const u32 count = samples - samples % channels_;
+-  if (count == 0 || !fill_) {
++  if (!stream || !fill_ || channels_ == 0 || additional_amount <= 0) {
+     return;
+   }
+-  scratch_.resize(count);
+-  fill_(std::span<f32>(scratch_.data(), count), channels_);
+-  SDL_PutAudioStreamData(stream, scratch_.data(), static_cast<int>(count * sizeof(f32)));
++  const auto now = std::chrono::steady_clock::now();
++  if (last_callback_ != std::chrono::steady_clock::time_point{}) {
++    const auto gap = std::chrono::duration_cast<std::chrono::microseconds>(now - last_callback_);
++    max_callback_gap_us_ = std::max(max_callback_gap_us_, static_cast<u64>(gap.count()));
++  }
++  last_callback_ = now;
++  const u32 samples = static_cast<u32>(additional_amount) / sizeof(f32);
++  u32 remaining = samples - samples % channels_;
++  const u32 capacity = static_cast<u32>(scratch_.size()) - scratch_.size() % channels_;
++  while (remaining) {
++    const u32 count = std::min(remaining, capacity);
++    fill_(std::span<f32>(scratch_.data(), count), channels_);
++    if (!SDL_PutAudioStreamData(stream, scratch_.data(), static_cast<int>(count * sizeof(f32)))) {
++      break;
++    }
++    remaining -= count;
++  }
+ }
+ 
+ std::string_view SDL3AudioProvider::GetName() const {
+diff --git a/tests/unit/apu/sdl3_audio_test.cpp b/tests/unit/apu/sdl3_audio_test.cpp
+--- a/tests/unit/apu/sdl3_audio_test.cpp
++++ b/tests/unit/apu/sdl3_audio_test.cpp
+@@ -60,7 +60,8 @@
+   std::atomic<int> pulls{0};
+   std::atomic<bool> aligned{true};
+   auto channels = driver->OpenDevice(6, [&](std::span<rex::f32> samples, rex::u32 count) {
+-    if (samples.empty() || samples.size() % count != 0) {
++    if (samples.empty() || samples.size() % count != 0 ||
++        samples.size() > rex::apu::kAudioFrameSamples) {
+       aligned = false;
+     }
+     std::ranges::fill(samples, 0.0f);
+diff --git a/tests/unit/apu/audio_system_test.cpp b/tests/unit/apu/audio_system_test.cpp
+--- a/tests/unit/apu/audio_system_test.cpp
++++ b/tests/unit/apu/audio_system_test.cpp
+@@ -10,6 +10,8 @@
+ 
+ #include "rex_test.h"
+ #include "object_app.h"
++
++#include <catch2/generators/catch_generators.hpp>
+ 
+ #include <algorithm>
+ #include <array>
+@@ -49,6 +51,8 @@
+   std::atomic<rex::u32> opens{0};
+   std::atomic<rex::u32> closes{0};
+   rex::test::PullDevice pull;
++  bool manual = false;
++  rex::apu::AudioFill manual_fill;
+   std::mutex mutex;
+   std::vector<Block> blocks;
+ 
+@@ -58,6 +62,8 @@
+     opens = 0;
+     closes = 0;
+     pull.Close();
++    manual_fill = nullptr;
++    manual = false;
+     pull.SetPaused(false);
+     pull.SetRequest(kPeriodFrames);
+     std::lock_guard lock(mutex);
+@@ -88,6 +94,10 @@
+       return rex::Err<rex::u32>(rex::ErrorCategory::kPlatform, "no device");
+     }
+     const rex::u32 channels = g_device.stereo_only ? 2u : wanted;
++    if (g_device.manual) {
++      g_device.manual_fill = std::move(fill);
++      return channels;
++    }
+     g_device.pull.Open(std::move(fill), channels, [](std::span<const rex::f32> samples) {
+       std::lock_guard lock(g_device.mutex);
+       g_device.blocks.emplace_back(samples.begin(), samples.end());
+@@ -97,6 +107,7 @@
+   void CloseDevice() override {
+     ++g_device.closes;
+     g_device.pull.Close();
++    g_device.manual_fill = nullptr;
+   }
+   bool IsDeviceLost() const override { return g_device.lost; }
+ };
+@@ -666,3 +677,54 @@
+     CHECK_FALSE(REX_SETTINGS().Find("apu.gain").value()->IsFrozen());
+   });
+ }
++
++REX_TEST_CASE("PCM handoff preserves capacity and FIFO through wrap and partial pulls", "[apu]") {
++  const auto capacity = GENERATE(4u, 8u, 64u);
++  g_device.Reset();
++  g_device.manual = true;
++  AudioApp app({{"apu.driver", "fake"}, {"apu.max_queued_frames", std::to_string(capacity)}});
++  REQUIRE(app.Start());
++  auto& audio = app.GetAudio();
++  unsigned played = 0;
++  auto stream = audio.OpenStream([&] { ++played; });
++  REQUIRE(stream);
++  std::array<rex::f32, rex::apu::kAudioFrameSamples> output;
++  // Initial silence must not credit a frame; later submissions must remain audible.
++  g_device.manual_fill(output, 6);
++  CHECK(played == 0);
++  CHECK(std::ranges::all_of(output, [](auto value) { return value == 0; }));
++  const unsigned rounds = 65 / capacity + 2;
++  unsigned serial = 0;
++  for (unsigned round = 0; round < rounds; ++round) {
++    for (unsigned i = 0; i < capacity; ++i) {
++      REQUIRE(audio.Submit(*stream, Constant((serial + i + 1) * 0.0001f)));
++    }
++    CHECK(audio.GetStats().queued_frames == capacity);
++    CHECK_FALSE(audio.Submit(*stream, Constant(1.0f)));
++    for (unsigned i = 0; i < capacity; ++i) {
++      auto samples = std::span(output);
++      g_device.manual_fill(samples.first(17 * 6), 6);
++      CHECK(played == serial + 1);
++      CHECK(audio.GetStats().queued_frames == capacity - i - 1);
++      g_device.manual_fill(samples.subspan(17 * 6), 6);
++      const auto expected = (++serial) * 0.0001f;
++      for (auto sample : output) {
++        REQUIRE(Near(sample, expected, 1e-6f));
++      }
++    }
++  }
++  REQUIRE(audio.Submit(*stream, Constant(0.5f)));
++  audio.CloseStream(*stream);
++  CHECK_FALSE(audio.Submit(*stream, Constant(0.5f)));
++  g_device.manual_fill(output, 6);
++  CHECK(played == serial);
++  auto reopened = audio.OpenStream([&] { ++played; });
++  REQUIRE(reopened);
++  CHECK(audio.GetStats().queued_frames == 0);
++  REQUIRE(audio.Submit(*reopened, Constant(0.25f)));
++  g_device.manual_fill(output, 6);
++  CHECK(played == serial + 1);
++  CHECK(Near(output.back(), 0.25f, 1e-6f));
++  audio.CloseStream(*reopened);
++  app.Finish();
++}

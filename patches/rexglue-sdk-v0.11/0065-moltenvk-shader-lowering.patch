@@ -1,0 +1,175 @@
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_builder.cpp b/src/gpu/xenos/pipeline/shader/spirv_builder.cpp
+--- a/src/gpu/xenos/pipeline/shader/spirv_builder.cpp
++++ b/src/gpu/xenos/pipeline/shader/spirv_builder.cpp
+@@ -13,6 +13,7 @@
+ #include <utility>
+ #include <vector>
+ 
++#include <SPIRV/GLSL.std.450.h>
+ #include <rex/assert.h>
+ #include "gpu/xenos/pipeline/shader/spirv_builder.h"
+ 
+@@ -48,6 +49,32 @@
+ 
+ spv::Id SPIRVBuilder::CreateNoContractionBinOp(spv::Op op_code, spv::Id type_id, spv::Id operand1,
+                                                spv::Id operand2) {
++  if (no_contraction_fma_ext_inst_ != spv::NoResult &&
++      (op_code == spv::OpFAdd || op_code == spv::OpFSub || op_code == spv::OpFMul ||
++       op_code == spv::OpVectorTimesScalar)) {
++    auto splat = [this, type_id](spv::Id scalar) {
++      return isVectorType(type_id) ? smearScalar(spv::NoPrecision, scalar, type_id) : scalar;
++    };
++    spv::Id a, b, c;
++    if (op_code == spv::OpFAdd) {
++      a = splat(makeFloatConstant(1.0f));
++      b = operand1;
++      c = operand2;
++    } else if (op_code == spv::OpFSub) {
++      a = splat(makeFloatConstant(-1.0f));
++      b = operand2;
++      c = operand1;
++    } else {
++      a = operand1;
++      b = op_code == spv::OpVectorTimesScalar ? splat(operand2) : operand2;
++      // -0 preserves the sign of a zero product, including -0 * positive.
++      c = splat(makeFloatConstant(-0.0f));
++    }
++    spv::Id result =
++        CreateTriBuiltinCall(type_id, no_contraction_fma_ext_inst_, GLSLstd450Fma, a, b, c);
++    addDecoration(result, spv::DecorationNoContraction);
++    return result;
++  }
+   spv::Id result = createBinOp(op_code, type_id, operand1, operand2);
+   addDecoration(result, spv::DecorationNoContraction);
+   return result;
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_builder.h b/src/gpu/xenos/pipeline/shader/spirv_builder.h
+--- a/src/gpu/xenos/pipeline/shader/spirv_builder.h
++++ b/src/gpu/xenos/pipeline/shader/spirv_builder.h
+@@ -31,6 +31,9 @@
+       : spv::Builder(spv_version, user_number, build_logger) {}
+ 
+   using spv::Builder::createSelectionMerge;
++  // MoltenVK helper lanes need explicit Fma instead of outlined precise arithmetic.
++  void SetNoContractionFma(spv::Id glsl_ext_inst) { no_contraction_fma_ext_inst_ = glsl_ext_inst; }
++
+ 
+   spv::Id CreateQuadOp(spv::Op op_code, spv::Id type_id, spv::Id operand1, spv::Id operand2,
+                        spv::Id operand3, spv::Id operand4);
+@@ -133,6 +136,8 @@
+ 
+     Branch current_branch_ = Branch::kSelection;
+   };
++ private:
++  spv::Id no_contraction_fma_ext_inst_ = spv::NoResult;
+ };
+ 
+ }  // namespace rex::gpu
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator.cpp b/src/gpu/xenos/pipeline/shader/spirv_translator.cpp
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator.cpp
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator.cpp
+@@ -62,6 +62,7 @@
+           vulkan_device->GetProperties().fragmentShaderSampleInterlock),
+       demote_to_helper_invocation(vulkan_device->GetProperties().shaderDemoteToHelperInvocation),
+       sample_rate_shading(vulkan_device->GetProperties().sampleRateShading) {
++  moltenvk_no_contraction_fma = vulkan_device->GetProperties().driverID == VK_DRIVER_ID_MOLTENVK;
+   const u32 vulkan_api_version = vulkan_device->GetProperties().apiVersion;
+   if (vulkan_api_version >= VK_MAKE_API_VERSION(0, 1, 2, 0)) {
+     spirv_version = spv::Spv_1_5;
+@@ -181,6 +182,9 @@
+     }
+   }
+   ext_inst_glsl_std_450_ = builder_->import("GLSL.std.450");
++  if (features_.moltenvk_no_contraction_fma) {
++    builder_->SetNoContractionFma(ext_inst_glsl_std_450_);
++  }
+   builder_->setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
+   builder_->setSource(spv::SourceLanguageUnknown, 0);
+ 
+diff --git a/src/gpu/xenos/pipeline/shader/spirv_translator.h b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+--- a/src/gpu/xenos/pipeline/shader/spirv_translator.h
++++ b/src/gpu/xenos/pipeline/shader/spirv_translator.h
+@@ -32,7 +32,7 @@
+  public:
+   union Modification {
+     /** Pipeline storage version, incremented when the layout changes incompatibly. */
+-    static constexpr u32 kVersion = 12;
++    static constexpr u32 kVersion = 14;
+ 
+     // NOLINTNEXTLINE(performance-enum-size): packed key bit field, MSVC packs per type
+     enum class DepthStencilMode : u32 {
+@@ -353,6 +353,7 @@
+ 
+     bool demote_to_helper_invocation;
+     bool sample_rate_shading;
++    bool moltenvk_no_contraction_fma = false;
+   };
+ 
+   SPIRVShaderTranslator(const Features& features, bool native_2x_msaa_with_attachments,
+diff --git a/tests/unit/gpu/tessellation_glsl_test.cpp b/tests/unit/gpu/tessellation_glsl_test.cpp
+--- a/tests/unit/gpu/tessellation_glsl_test.cpp
++++ b/tests/unit/gpu/tessellation_glsl_test.cpp
+@@ -42,3 +42,52 @@
+                                          rex::xenos::TessellationMode::kAdaptive, 3, 3)
+             .find(block) != std::string::npos);
+ }
++
++// Check the production builder's MoltenVK-only precise arithmetic route.
++#include <SPIRV/GLSL.std.450.h>
++
++REX_TEST_CASE("MoltenVK precise arithmetic uses explicit Fma and preserves the desktop route",
++              "[gpu][moltenvk_lowering]") {
++  for (bool workaround : {false, true}) {
++    rex::gpu::SPIRVBuilder builder(spv::Spv_1_0, 0, nullptr);
++    builder.addCapability(spv::CapabilityShader);
++    builder.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
++    const auto glsl = builder.import("GLSL.std.450");
++    if (workaround) builder.SetNoContractionFma(glsl);
++    const auto scalar = builder.makeFloatType(32);
++    const auto vector = builder.makeVectorType(scalar, 2);
++    const auto one = builder.makeFloatConstant(1.0f);
++    const auto pair = builder.makeCompositeConstant(vector, {one, one});
++    spv::Block* entry = nullptr;
++    const auto function = builder.makeFunctionEntry(spv::NoPrecision, builder.makeVoidType(),
++                                                     "main", {}, {}, &entry);
++    builder.addEntryPoint(spv::ExecutionModelVertex, function, "main");
++    for (auto op : {spv::OpFAdd, spv::OpFSub, spv::OpFMul})
++      builder.CreateNoContractionBinOp(op, scalar, one, one);
++    builder.CreateNoContractionBinOp(spv::OpVectorTimesScalar, vector, pair, one);
++    builder.makeReturn(false);
++    builder.leaveFunction();
++    std::vector<unsigned int> words;
++    builder.dump(words);
++    unsigned fma = 0, arithmetic = 0, precise = 0;
++    bool negative_zero = false;
++    for (size_t i = 5; i < words.size();) {
++      const auto length = words[i] >> 16;
++      const auto op = static_cast<spv::Op>(words[i] & 0xffff);
++      REQUIRE(length > 0);
++      REQUIRE(i + length <= words.size());
++      if (op == spv::OpExtInst && length >= 5 && words[i+4] == GLSLstd450Fma) ++fma;
++      if (op == spv::OpFAdd || op == spv::OpFSub || op == spv::OpFMul ||
++          op == spv::OpVectorTimesScalar) ++arithmetic;
++      if (op == spv::OpDecorate && length >= 3 && words[i+2] == spv::DecorationNoContraction)
++        ++precise;
++      if (op == spv::OpConstant && length == 4 && words[i+3] == 0x80000000u)
++        negative_zero = true;
++      i += length;
++    }
++    CHECK(fma == (workaround ? 4u : 0u));
++    CHECK(arithmetic == (workaround ? 0u : 4u));
++    CHECK(precise == 4);
++    if (workaround) CHECK(negative_zero);
++  }
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -681,3 +681,8 @@
+ # Run after Catch's discovery includes have registered the native cases.
+ set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+   "${CMAKE_CURRENT_BINARY_DIR}/native_graphics_properties.cmake")
++
++if (TARGET rexgpu-xenos-vulkan)
++  target_sources(unit_tests PRIVATE ${PROJECT_SOURCE_DIR}/src/gpu/xenos/pipeline/shader/spirv_builder.cpp)
++  target_link_libraries(unit_tests PRIVATE SPIRV)
++endif ()

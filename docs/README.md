@@ -140,7 +140,7 @@ IPA build; the original bundled-assets route remains available.
 
 | Document | Status |
 | --- | --- |
-| [`plans/todo/2026-11-17-rexglue-v0.11-migration-plan.md`](plans/todo/2026-11-17-rexglue-v0.11-migration-plan.md) | Planning only: direct migration to ReXGlue v0.11.0, complete patch disposition inventory, native platform and package validation, and measured performance/default selection. |
+| [`plans/todo/2026-11-17-rexglue-v0.11-migration-plan.md`](plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md) | In progress: isolated ReXGlue v0.11.0 migration, baseline build/replay, codegen porting, complete patch dispositions, native platform/package validation and measured performance gates. |
 | [`plans/todo/2026-11-17-custom-loading-texts-plan.md`](plans/todo/2026-11-17-custom-loading-texts-plan.md) | Planning only: loading-message inventory and selective JSON replacements with inline action images and live controller/keyboard/mouse/touch variants. |
 | [`plans/finished/2026-11-15-rexglue-patch-refactoring-plan.md`](plans/finished/2026-11-15-rexglue-patch-refactoring-plan.md) | Delivered 2026-11-17: 87 to 71 SDK patches, confirmed unused-code retirement, seven byte-equivalent consolidation families, shared replay engine and push/PR CI. Release build and 31 affected suites pass; native platform/UI gates remain unverified. |
 | [`plans/finished/2026-11-15-desktop-render-settings-plan.md`](plans/finished/2026-11-15-desktop-render-settings-plan.md) | Delivered 2026-11-15: separate Aspect Ratio and Render Scale, legacy migration, bounded automatic recommendation and aspect-correct native-scale M1 gameplay. Release build, nine tests and SDK replay pass; authored settings save/restart remains unverified after the owner stopped launches. |

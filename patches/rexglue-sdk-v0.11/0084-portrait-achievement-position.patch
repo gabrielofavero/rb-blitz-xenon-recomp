@@ -1,0 +1,26 @@
+diff --git a/src/ui/overlay/achievement_toast.cpp b/src/ui/overlay/achievement_toast.cpp
+--- a/src/ui/overlay/achievement_toast.cpp
++++ b/src/ui/overlay/achievement_toast.cpp
+@@ -59,9 +59,11 @@
+   const Metrics& metrics = style.metrics;
+   const ToastStyle& s = style.toast;
+   const f32 pad = metrics.toast_padding;
+-  const f32 w = metrics.toast_width;
++  const f32 w = std::max(1.0f, std::min(metrics.toast_width, io.DisplaySize.x - pad * 2));
++  const f32 x = io.DisplaySize.x < io.DisplaySize.y ? (io.DisplaySize.x - w) * 0.5f
++                                                                : io.DisplaySize.x - w - pad;
+   ImGui::SetNextWindowPos(
+-      ImVec2(io.DisplaySize.x - w - pad, io.DisplaySize.y - metrics.toast_stack_height - pad),
++      ImVec2(x, io.DisplaySize.y - metrics.toast_stack_height - pad),
+       ImGuiCond_Always);
+   ImGui::SetNextWindowSize(ImVec2(w, metrics.toast_height), ImGuiCond_Always);
+   ImGui::SetNextWindowBgAlpha(metrics.window_alpha.toast * alpha);
+@@ -72,7 +74,7 @@
+   auto faded = [alpha](Color c) { return ToImVec4(c.WithAlpha(c.a * alpha)); };
+ 
+   if (s.themed) {
+-    // Retain the existing 320 x 70 footprint and bottom-right placement. Draw
++    // Keep the bounded footprint, centered at the bottom on portrait surfaces. Draw
+     // inside it so decorative rails never enlarge the notification or take input.
+     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, metrics.toast_rounding);
+     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);

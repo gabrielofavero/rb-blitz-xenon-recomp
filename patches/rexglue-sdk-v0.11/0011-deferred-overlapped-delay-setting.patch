@@ -1,0 +1,236 @@
+diff --git a/include/rex/kernel/kernel_settings.h b/include/rex/kernel/kernel_settings.h
+--- a/include/rex/kernel/kernel_settings.h
++++ b/include/rex/kernel/kernel_settings.h
+@@ -23,6 +23,8 @@
+   REX_SETTING(bool, headless, false, "System dialogs answer at once without showing");
+   REX_SETTING(u32, user_language, 1, "XLanguage ID, 0 follows the host language", kUntilLaunch);
+   REX_SETTING(u32, user_country, 103, "Console country code", kUntilLaunch);
++  REX_SETTING(u32, deferred_overlapped_delay_ms, 100,
++              "Emulated delay before deferred overlapped completion, in milliseconds");
+   REX_SETTING(u32, license_mask, 0, "Content license mask", kUntilLaunch);
+   REX_SETTING(std::string, command_line, "", "Arguments the title sees after default.xex",
+               kUntilLaunch);
+diff --git a/src/kernel/dispatcher.cpp b/src/kernel/dispatcher.cpp
+--- a/src/kernel/dispatcher.cpp
++++ b/src/kernel/dispatcher.cpp
+@@ -28,6 +28,7 @@
+ #include <rex/platform/thread.h>
+ #include <rex/platform/timer.h>
+ #include <rex/kernel/title_runtime.h>
++#include <rex/kernel/kernel_settings.h>
+ #include <rex/kernel/types/status.h>
+ #include <rex/kernel/function_dispatcher.h>
+ #include <rex/kernel/object/object_table.h>
+@@ -45,7 +46,6 @@
+ 
+ namespace {
+ 
+-constexpr u32 kDeferredOverlappedDelayMillis = 100;
+ constexpr u32 kDPCStackSize = 64 * 1024;
+ constexpr u32 kDPCStackTopReserve = 0x100;
+ constexpr u32 kDPCListEntryOffset = 4;
+@@ -152,9 +152,11 @@
+     if (pre) {
+       pre();
+     }
+-    REXSYS_DEBUG("Deferred overlapped {:08X}: sleeping {}ms", overlapped,
+-                 kDeferredOverlappedDelayMillis);
+-    rex::platform::SleepFor(std::chrono::milliseconds(kDeferredOverlappedDelayMillis));
++    const u32 delay = StateOf(runtime_).GetKernelSettings().deferred_overlapped_delay_ms.Get();
++    if (delay != 0) {
++      REXSYS_DEBUG("Deferred overlapped {:08X}: sleeping {}ms", overlapped, delay);
++      rex::platform::SleepFor(std::chrono::milliseconds(delay));
++    }
+     REXSYS_DEBUG("Deferred overlapped {:08X}: running completion", overlapped);
+     const CompletionOptions options = work();
+     REXSYS_DEBUG("Deferred overlapped {:08X}: completing with result {:08X}", overlapped,
+diff --git a/tests/unit/kernel/deferred_latency_test.cpp b/tests/unit/kernel/deferred_latency_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/kernel/deferred_latency_test.cpp
+@@ -0,0 +1,40 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#include <chrono>
++#include <future>
++#include <thread>
++#include <vector>
++
++#include "rex_test.h"
++#include "kernel/kernel_fixture.h"
++#include "kernel/title_state.h"
++#include <rex/kernel/title_runtime.h>
++#include <rex/kernel/thread_registry.h>
++#include <rex/settings_registry.h>
++
++REX_TEST_CASE("Deferred latency is typed and completion keeps dispatch ordering at zero", "[kernel][overlapped][deferred_latency]") {
++  rex::test::KernelFixture fixture;
++  fixture.RunOnGuestThread([&](rex::test::Caller& c) {
++    auto* settings=REX_INTERFACE(rex::ISettingsRegistry);REQUIRE(settings);
++    auto found=settings->Find("kernel.deferred_overlapped_delay_ms");REQUIRE(found);
++    CHECK((*found)->GetDefaultText()=="100");
++    auto* value=static_cast<rex::Setting<rex::u32>*>(*found);
++    const auto original=value->Get();
++    CHECK_FALSE(settings->SetText("kernel.deferred_overlapped_delay_ms","-1"));
++    for(const auto* delay:{"0","1"}) {
++      REQUIRE(settings->SetText("kernel.deferred_overlapped_delay_ms",delay));
++      std::vector<int> order;
++      const auto caller=std::this_thread::get_id();
++      std::thread::id worker;
++      std::promise<void> finished;auto ready=finished.get_future();
++      const auto overlapped=c.Alloc(64);
++      rex::kernel::StateOf(c.GetRuntime()).GetOverlappedDispatcher().CompleteDeferred(
++          overlapped,[&]{order.push_back(2);},{.result=0},
++          [&]{worker=std::this_thread::get_id();order.push_back(1);},
++          [&]{order.push_back(3);finished.set_value();});
++      REQUIRE(ready.wait_for(std::chrono::seconds(5))==std::future_status::ready);
++      ready.get();CHECK(order==std::vector<int>{1,2,3});CHECK(worker!=caller);
++      CHECK(c.Load32(overlapped)==0);
++    }
++    REQUIRE(settings->SetText("kernel.deferred_overlapped_delay_ms",std::to_string(original)));
++  });
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -96,6 +96,7 @@
+   kernel/tls_test.cpp
+   kernel/fiber_test.cpp
+   kernel/workspace_test.cpp
++  kernel/deferred_latency_test.cpp
+   kernel/overlapped_test.cpp
+   base/assert_test.cpp
+   base/container_test.cpp
+diff --git a/tests/unit/kernel/overlapped_test.cpp b/tests/unit/kernel/overlapped_test.cpp
+--- a/tests/unit/kernel/overlapped_test.cpp
++++ b/tests/unit/kernel/overlapped_test.cpp
+@@ -14,6 +14,8 @@
+ #include <atomic>
+ #include <chrono>
+ #include <cstddef>
++#include <memory>
++#include <rex/utility.h>
+ #include <thread>
+ 
+ #include <rex/kernel/title_runtime.h>
+@@ -44,16 +46,27 @@
+ namespace {
+ 
+ template <typename Ready>
+-void SpinUntil(Ready ready) {
++bool SpinUntil(Ready ready, std::chrono::steady_clock::time_point deadline) {
+   constexpr u32 kSpins = 256;
+   u32 spins = 0;
+   while (!ready()) {
+     if (++spins == kSpins) {
+       spins = 0;
++      if (std::chrono::steady_clock::now() >= deadline) {
++        return false;
++      }
+       std::this_thread::yield();
+     }
+   }
++  return true;
+ }
++
++struct CompletionRace {
++  std::atomic<u32> go{0};
++  std::atomic<u32> completed{0};
++  std::atomic<bool> stop{false};
++  std::atomic<bool> exited{false};
++};
+ 
+ }  // namespace
+ 
+@@ -107,44 +120,68 @@
+     const u32 poll = c.AllocQuad(0);
+     c.Store32(overlapped + offsetof(XOVERLAPPED, event), event);
+ 
+-    std::atomic<u32> go{0};
+-    std::atomic<u32> completed{0};
+-    const u32 completer = c.Spawn([&](Caller& s) {
++    // The spawned body can outlive the caller when a fixture deadline fails.
++    // Keep the handshake alive independently and wake/stop/join on every local exit.
++    auto state = std::make_shared<CompletionRace>();
++    const u32 completer = c.Spawn([state, overlapped](Caller& s) {
++      rex::ScopeGuard mark_exited([state] { state->exited.store(true, std::memory_order_release); });
+       u32 seen = 0;
+       for (;;) {
+-        SpinUntil([&] { return go.load(std::memory_order_acquire) != seen; });
+-        const u32 round = go.load(std::memory_order_acquire);
+-        if (round == kQuit) {
++        auto round = state->go.load(std::memory_order_acquire);
++        while (round == seen && !state->stop.load(std::memory_order_acquire)) {
++          // Avoid competing with the observer and driver/compiler workers while idle.
++          state->go.wait(seen, std::memory_order_acquire);
++          round = state->go.load(std::memory_order_acquire);
++        }
++        if (state->stop.load(std::memory_order_acquire) || round == kQuit) {
+           return;
+         }
+         seen = round;
+         s.XAM("XMsgCompleteIORequest", {overlapped, 0, 0, 8});
+-        completed.store(round, std::memory_order_release);
++        state->completed.store(round, std::memory_order_release);
+       }
+     });
+ 
+     u32 wrong = 0;
+     u32 unset = 0;
+-    for (u32 round = 1; round <= kRounds; ++round) {
+-      c.Store32(overlapped + offsetof(XOVERLAPPED, result), rex::kernel::X_ERROR_IO_PENDING);
+-      c.Kernel("NtClearEvent", {event});
+-      go.store(round, std::memory_order_release);
+-      SpinUntil([&] {
+-        return c.LoadAcquire32(overlapped + offsetof(XOVERLAPPED, result)) !=
+-               rex::kernel::X_ERROR_IO_PENDING;
++    u32 checked_rounds = 0;
++    {
++      rex::ScopeGuard stop_and_join([&] {
++        state->stop.store(true, std::memory_order_release);
++        state->go.store(kQuit, std::memory_order_release);
++        state->go.notify_all();
++        Join(c, completer);
+       });
+-      if (c.XAM("XamGetOverlappedResult", {overlapped, length, 0}) != 0) {
+-        ++wrong;
+-      }
+-      if (c.Kernel("NtWaitForSingleObjectEx", {event, 1, 0, poll}) != 0) {
+-        ++unset;
+-      }
+-      while (completed.load(std::memory_order_acquire) != round) {
+-        std::this_thread::yield();
++      // Leave five seconds for Join before KernelFixture's 20-second body limit.
++      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(12);
++      for (u32 round = 1; round <= kRounds; ++round) {
++        c.Store32(overlapped + offsetof(XOVERLAPPED, result), rex::kernel::X_ERROR_IO_PENDING);
++        c.Kernel("NtClearEvent", {event});
++        state->go.store(round, std::memory_order_release);
++        state->go.notify_one();
++        if (!SpinUntil([&] {
++              return c.LoadAcquire32(overlapped + offsetof(XOVERLAPPED, result)) !=
++                     rex::kernel::X_ERROR_IO_PENDING;
++            }, deadline)) {
++          break;
++        }
++        if (c.XAM("XamGetOverlappedResult", {overlapped, length, 0}) != 0) {
++          ++wrong;
++        }
++        if (c.Kernel("NtWaitForSingleObjectEx", {event, 1, 0, poll}) != 0) {
++          ++unset;
++        }
++        if (!SpinUntil([&] {
++              return state->completed.load(std::memory_order_acquire) == round;
++            }, deadline)) {
++          break;
++        }
++        ++checked_rounds;
+       }
+     }
+-    go.store(kQuit, std::memory_order_release);
+-    Join(c, completer);
++    INFO("completed overlap/event publication rounds: " << checked_rounds);
++    CHECK(checked_rounds == kRounds);
++    CHECK(state->exited.load(std::memory_order_acquire));
+     CHECK(wrong == 0);
+     CHECK(unset == 0);
+   });

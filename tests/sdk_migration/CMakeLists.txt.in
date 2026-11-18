@@ -1,0 +1,19 @@
+rexglue_project(rb_blitz OUTPUT_DIR generated/default)
+set(registration_source "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/rb_blitz_register.cpp")
+set_source_files_properties("${registration_source}" PROPERTIES GENERATED TRUE)
+
+foreach(probe registration_probe registration_empty_probe)
+    add_executable(${probe}
+        "@RBBLITZ_REPOSITORY_ROOT@/tests/sdk_migration_registration_probe.cpp"
+        "${registration_source}")
+    rexglue_setup_host_library(${probe})
+    rexglue_apply_recomp_settings(${probe}
+        "${CMAKE_CURRENT_SOURCE_DIR}/generated/default/rb_blitz_pch.h")
+    rexglue_configure_target(${probe})
+    if(WIN32)
+        add_test(NAME ${probe} COMMAND "${RBBLITZ_WINDOWS_TEST_RUNNER}" $<TARGET_FILE:${probe}>)
+    else()
+        add_test(NAME ${probe} COMMAND $<TARGET_FILE:${probe}>)
+    endif()
+endforeach()
+target_compile_definitions(registration_empty_probe PRIVATE EMPTY_MAPPING)

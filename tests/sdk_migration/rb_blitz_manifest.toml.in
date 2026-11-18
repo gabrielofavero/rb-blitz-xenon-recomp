@@ -1,0 +1,11 @@
+[project]
+name = "rb_blitz"
+sdk_version = "0.11.0"
+game_root = "@RBBLITZ_MIGRATION_GAME_ROOT@"
+
+[entrypoint]
+file_path = "@RBBLITZ_MIGRATION_XEX@"
+out_directory_path = "generated/default"
+includes = ["@RBBLITZ_REPOSITORY_ROOT@/config/functions.toml"]
+longjmp_address = 0x82772510
+setjmp_address = 0x82772940

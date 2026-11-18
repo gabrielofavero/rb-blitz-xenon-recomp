@@ -1,0 +1,101 @@
+diff --git a/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp b/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
+--- a/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
++++ b/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp
+@@ -19,6 +19,7 @@
+ #include <rex/logging/log_category.h>
+ #include <rex/math.h>
+ #include "gpu/xenos/host/d3d12/d3d12_presenter.h"
++#include "gpu/xenos/host/d3d12/present_result.h"
+ #include "gpu/xenos/host/d3d12/d3d12_provider.h"
+ #include "gpu/xenos/host/d3d12/d3d12_objects.h"
+ #include <rex/utility.h>
+@@ -539,14 +540,9 @@
+       paint_context_.swap_chain->Present(present_sync.sync_interval, present_flags);
+   // Present may enqueue work internally even when it fails.
+   paint_context_.present_submission_tracker.NextSubmission();
+-  switch (present_result) {
+-    case DXGI_ERROR_DEVICE_REMOVED:
+-      return PaintResult::kGPULostExternally;
+-    case DXGI_ERROR_DEVICE_RESET:
+-      return PaintResult::kGPULostResponsible;
+-    default:
+-      return SUCCEEDED(present_result) ? PaintResult::kPresented : PaintResult::kNotPresented;
+-  }
++  if (present_result == DXGI_STATUS_MODE_CHANGED)
++    REXUI_INFO("D3D12Presenter: Display mode changed; refreshing swap chain");
++  return detail::ClassifyPresentResult<PaintResult>(present_result);
+ }
+ 
+ bool D3D12Presenter::InitializeSurfaceIndependent() {
+diff --git a/src/gpu/xenos/host/d3d12/present_result.h b/src/gpu/xenos/host/d3d12/present_result.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/host/d3d12/present_result.h
+@@ -0,0 +1,21 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++
++#include <dxgi.h>
++
++namespace rex::gpu::d3d12::detail {
++
++// A non-failing DXGI status may still mean no image reached the display. Keep
++// mode transitions out of the successful-presentation acknowledgement count.
++template <typename PaintResult>
++constexpr PaintResult ClassifyPresentResult(HRESULT result) {
++  switch (result) {
++    case DXGI_STATUS_MODE_CHANGED: return PaintResult::kNotPresentedConnectionOutdated;
++    case DXGI_STATUS_MODE_CHANGE_IN_PROGRESS: return PaintResult::kNotPresented;
++    case DXGI_ERROR_DEVICE_REMOVED: return PaintResult::kGPULostExternally;
++    case DXGI_ERROR_DEVICE_RESET: return PaintResult::kGPULostResponsible;
++    default: return SUCCEEDED(result) ? PaintResult::kPresented : PaintResult::kNotPresented;
++  }
++}
++
++}  // namespace rex::gpu::d3d12::detail
+diff --git a/tests/unit/gpu/d3d12_present_result_test.cpp b/tests/unit/gpu/d3d12_present_result_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/d3d12_present_result_test.cpp
+@@ -0,0 +1,30 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#if defined(_WIN32)
++#include "gpu/xenos/host/d3d12/present_result.h"
++#include "rex_test.h"
++
++namespace {
++enum class Outcome {
++  kPresented, kNotPresented, kNotPresentedConnectionOutdated,
++  kGPULostExternally, kGPULostResponsible
++};
++using rex::gpu::d3d12::detail::ClassifyPresentResult;
++REX_TEST_CASE("DXGI mode statuses never acknowledge a successful UI presentation",
++              "[gpu][d3d12_present_result]") {
++  // Both status codes satisfy SUCCEEDED, which cannot classify presentation.
++  CHECK(SUCCEEDED(DXGI_STATUS_MODE_CHANGED));
++  CHECK(SUCCEEDED(DXGI_STATUS_MODE_CHANGE_IN_PROGRESS));
++  CHECK(ClassifyPresentResult<Outcome>(DXGI_STATUS_MODE_CHANGED) ==
++        Outcome::kNotPresentedConnectionOutdated);
++  CHECK(ClassifyPresentResult<Outcome>(DXGI_STATUS_MODE_CHANGE_IN_PROGRESS) ==
++        Outcome::kNotPresented);
++}
++REX_TEST_CASE("DXGI success, ordinary failure and device loss keep their existing classification",
++              "[gpu][d3d12_present_result]") {
++  CHECK(ClassifyPresentResult<Outcome>(S_OK) == Outcome::kPresented);
++  CHECK(ClassifyPresentResult<Outcome>(E_FAIL) == Outcome::kNotPresented);
++  CHECK(ClassifyPresentResult<Outcome>(DXGI_ERROR_DEVICE_REMOVED) == Outcome::kGPULostExternally);
++  CHECK(ClassifyPresentResult<Outcome>(DXGI_ERROR_DEVICE_RESET) == Outcome::kGPULostResponsible);
++}
++}  // namespace
++#endif
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -35,6 +35,7 @@
+   gpu/draw_state_test.cpp
+   gpu/dxbc_operand_test.cpp
+   gpu/present_policy_test.cpp
++  gpu/d3d12_present_result_test.cpp
+   gpu/vblank_pacing_test.cpp
+   gpu/shader_interpreter_test.cpp
+   gpu/shader_translation_test.cpp

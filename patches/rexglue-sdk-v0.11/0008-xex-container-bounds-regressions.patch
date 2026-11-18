@@ -1,0 +1,67 @@
+diff --git a/tests/unit/base/xex_test.cpp b/tests/unit/base/xex_test.cpp
+--- a/tests/unit/base/xex_test.cpp
++++ b/tests/unit/base/xex_test.cpp
+@@ -243,4 +243,63 @@
+   CHECK_FALSE(filesystem::ParsePE(image));
+ }
+ 
++
++REX_TEST_CASE("XEX rejects truncated signatures and overflowing container extents",
++              "[base][xex][container_bounds]") {
++  XEXSpec spec;
++  spec.image = TestImage(0x1000);
++  const auto valid = BuildXEX(spec);
++  REQUIRE(XEXImage::Parse(valid));
++  for (size_t size = 0; size < 0x18; ++size) {
++    CHECK_FALSE(XEXImage::Parse(std::span(valid).first(size)));
++  }
++  for (const u32 size : {0u, 0x17u, static_cast<u32>(valid.size() + 1), 0xFFFFFFFFu}) {
++    auto file = valid;
++    test::PutBE32(file, 8, size);
++    CHECK_FALSE(XEXImage::Parse(file));
++  }
++  for (const size_t offset : {size_t{0x10}, size_t{0x14}}) {
++    auto file = valid;
++    test::PutBE32(file, offset, 0xFFFFFFFFu);
++    CHECK_FALSE(XEXImage::Parse(file));
++  }
++  auto pages = valid;
++  const u32 security = GetBE32(pages, 0x10);
++  test::PutBE32(pages, security + 0x180, 0xFFFFFFFFu);
++  CHECK_FALSE(XEXImage::Parse(pages));
++}
++
++REX_TEST_CASE("XEX basic decoding bounds both compressed data and zero fill",
++              "[base][xex][container_bounds]") {
++  XEXSpec spec;
++  spec.image = TestImage(0x1000);
++  spec.compression = kernel::kXEXCompressionBasic;
++  const auto valid = BuildXEX(spec);
++  auto parsed = XEXImage::Parse(valid);
++  REQUIRE(parsed);
++  const auto* format = parsed->GetOptHeader<kernel::XEXOptFileFormatInfo>(
++      kernel::kXEXHeaderFileFormatInfo);
++  REQUIRE(format);
++  const size_t offset = reinterpret_cast<const u8*>(format) - parsed->GetHeaderBytes().data();
++  CHECK(DecodeAll(valid, *parsed) == spec.image);
++  auto truncated = valid;
++  truncated.pop_back();
++  auto image = XEXImage::Parse(truncated);
++  REQUIRE(image);
++  std::vector<u8> output(image->GetImageSize(), 0xCC);
++  CHECK_FALSE(image->Decode(truncated, output));
++  for (const size_t field : {offset + 8, offset + 12}) {
++    auto file = valid;
++    test::PutBE32(file, field, 0xFFFFFFFFu);
++    auto malformed = XEXImage::Parse(file);
++    REQUIRE(malformed);
++    CHECK_FALSE(malformed->Decode(file, output));
++  }
++  auto missing = valid;
++  MoveOptHeader(missing, kernel::kXEXHeaderFileFormatInfo, GetBE32(missing, 8) - 4);
++  auto malformed = XEXImage::Parse(missing);
++  REQUIRE(malformed);
++  CHECK_FALSE(malformed->Decode(missing, output));
++}
++
+ }  // namespace rex

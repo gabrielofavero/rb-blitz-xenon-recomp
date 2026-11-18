@@ -1,0 +1,125 @@
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -288,6 +288,8 @@
+     if (auto status = graphics_->AttachTitle(GetTitleInfo(), *title_context_, *title_context_,
+                                              *title_context_);
+         !status) {
++      // A failed attach may already own command threads and memory-watch registrations.
++      graphics_->DetachTitle();
+       graphics_ = nullptr;
+       return fail(X_STATUS_UNSUCCESSFUL,
+                   std::format("graphics attach failed, {}", status.error().message));
+diff --git a/tests/unit/kernel/title_launch_test.cpp b/tests/unit/kernel/title_launch_test.cpp
+--- a/tests/unit/kernel/title_launch_test.cpp
++++ b/tests/unit/kernel/title_launch_test.cpp
+@@ -42,6 +42,9 @@
+ #include "kernel/title_fakes.h"
+ #include "kernel/title_image.h"
+ #include "kernel/title_state.h"
++#include "gpu/graphics_control.h"
++#include "gpu/xenos/null/null_xenos_graphics_driver.h"
++#include "gpu/fake_driver_context.h"
+ #include "temp_folder.h"
+ #include "test_memory.h"
+ #include "ui/ui_harness.h"
+@@ -290,3 +293,99 @@
+   REQUIRE(app.Start());
+   CHECK(app.Finish() == 0);
+ }
++
++namespace {
++
++// Uses the real null command processor and kernel title context. Only the second host-thread
++// creation is rejected, after the command processor already owns a live title-context guard.
++class VSyncFailureControl final : public rex::gpu::IGraphicsControl,
++                                  private rex::IGuestInterrupts {
++ public:
++  ~VSyncFailureControl() override { driver.Shutdown(); }
++  rex::Result<void> Initialize() { return driver.Initialize(context); }
++  rex::Result<void> AttachTitle(const rex::TitleInfo& info, rex::IPhysicalMemory& memory,
++                               rex::IPhysicalWriteWatch& watch,
++                               rex::IGuestInterrupts& interrupts) override {
++    interrupts_ = &interrupts;
++    return driver.AttachTitle(info, memory, watch, *this);
++  }
++  void DetachTitle() override {
++    ++detach_calls;
++    driver.DetachTitle();
++    interrupts_ = nullptr;
++  }
++  void InitializeRingBuffer(rex::u32 address, rex::u32 size_log2) override {
++    driver.InitializeRingBuffer(address, size_log2);
++  }
++  void EnableReadPointerWriteBack(rex::u32 address, rex::u32 size_log2) override {
++    driver.EnableReadPointerWriteBack(address, size_log2);
++  }
++  rex::u32 ReadRegister(rex::u32 index) override { return driver.ReadRegister(index); }
++  void WriteRegister(rex::u32 index, rex::u32 value) override { driver.WriteRegister(index, value); }
++  void OnSurfaceResized(rex::u32 width, rex::u32 height) override { driver.ResizeSurface(width, height); }
++  void SetUIPump(rex::MoveOnlyFunction<bool(std::chrono::milliseconds)>) override {}
++
++  rex::gpu::null::NullXenosGraphicsDriver driver;
++  rex::test::FakeDriverContext context;
++  unsigned detach_calls = 0;
++  unsigned command_starts = 0;
++  unsigned rejected_vsync_starts = 0;
++
++ private:
++  rex::Result<void> RaiseGraphicsInterrupt(rex::u32 source, rex::u32 cpu) override {
++    return interrupts_->RaiseGraphicsInterrupt(source, cpu);
++  }
++  rex::Result<rex::ScopeGuard> StartHostThread(
++      std::string_view name, rex::MoveOnlyFunction<void(std::stop_token)> fn) override {
++    if (name == "GPU VSync") {
++      ++rejected_vsync_starts;
++      return rex::Err<rex::ScopeGuard>(rex::ErrorCategory::kRuntime,
++                                       "forced GPU VSync thread start failure");
++    }
++    auto result = interrupts_->StartHostThread(name, std::move(fn));
++    if (result && name == "GPU Commands") ++command_starts;
++    return result;
++  }
++  rex::IGuestInterrupts* interrupts_ = nullptr;
++};
++
++}  // namespace
++
++REX_TEST_CASE_METHOD(Fixture, "failed graphics attach releases command threads before title teardown",
++                     "[kernel][title][failure]") {
++  LaunchApp app;
++  app.body = [](LaunchApp&) {
++    VSyncFailureControl graphics;
++    REQUIRE(graphics.Initialize());
++    rex::kernel::TitleRuntime title(rex::test::MakeTitleImage(rex::test::kReturningEntry));
++    REQUIRE(title.Load());
++    // A regression must fail the isolated test process instead of keeping a dangling test stack
++    // alive or silently extending the title-context lifetime wait.
++    std::jthread watchdog([](const std::stop_token& stop) {
++      std::mutex mutex;
++      std::condition_variable_any wake;
++      std::unique_lock lock(mutex);
++      if (!wake.wait_for(lock, stop, 5s, [] { return false; }) && !stop.stop_requested()) {
++        std::fputs("failed graphics attach did not roll back within five seconds\n", stderr);
++        std::abort();
++      }
++    });
++    const auto began = std::chrono::steady_clock::now();
++    const auto attached = StateOf(title).AttachSystems(
++        &graphics, nullptr, nullptr, nullptr, nullptr, rex::VideoMode{});
++    CHECK_FALSE(attached);
++    if (!attached) CHECK(attached.error().message.contains("forced GPU VSync"));
++    CHECK(graphics.command_starts == 1);
++    CHECK(graphics.rejected_vsync_starts == 1);
++    CHECK(graphics.detach_calls == 1);
++    CHECK(graphics.driver.GetCommandProcessor() == nullptr);
++    CHECK_FALSE(title.IsLoaded());
++    CHECK_FALSE(title.IsRunning());
++    title.Unload();
++    CHECK(graphics.detach_calls == 1);
++    CHECK(std::chrono::steady_clock::now() - began < 5s);
++    watchdog.request_stop();
++  };
++  REQUIRE(app.Start());
++  CHECK(app.Finish() == 0);
++}

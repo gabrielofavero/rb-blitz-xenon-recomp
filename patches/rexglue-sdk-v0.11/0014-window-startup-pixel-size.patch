@@ -1,0 +1,134 @@
+diff --git a/include/rex/ui/window.h b/include/rex/ui/window.h
+--- a/include/rex/ui/window.h
++++ b/include/rex/ui/window.h
+@@ -66,6 +66,7 @@
+ 
+ struct WindowConfig {
+   std::string title;
++  /** Startup client size in backing pixels; the provider converts to native window units. */
+   u32 width = 1280;
+   u32 height = 720;
+   u32 min_width = 0;
+diff --git a/src/ui/sdl3/sdl3_ui_driver.cpp b/src/ui/sdl3/sdl3_ui_driver.cpp
+--- a/src/ui/sdl3/sdl3_ui_driver.cpp
++++ b/src/ui/sdl3/sdl3_ui_driver.cpp
+@@ -25,6 +25,7 @@
+ #include "ui/sdl3/sdl_helper.h"
+ #include "ui/sdl3/sdl_virtual_key.h"
+ #include "ui/sdl3/video_scope.h"
++#include "ui/sdl3/window_size.h"
+ 
+ #if REX_PLATFORM_MAC
+ #include <CoreFoundation/CoreFoundation.h>
+@@ -34,6 +35,20 @@
+ namespace rex::ui::sdl3 {
+ 
+ namespace {
++
++#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
++float PendingWindowPixelDensity(i32 monitor) {
++  SDL_DisplayID display = SDL_GetPrimaryDisplay();
++  if (monitor > 0) {
++    int count = 0;
++    SDL_DisplayID* displays = SDL_GetDisplays(&count);
++    if (displays && monitor <= count) display = displays[monitor - 1];
++    SDL_free(displays);
++  }
++  const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(display);
++  return mode ? mode->pixel_density : 1.0f;
++}
++#endif
+ 
+ std::unique_ptr<IDriver> CreateDriver() {
+   return std::make_unique<SDL3UIDriver>();
+@@ -486,13 +501,14 @@
+     flags |= SDL_WINDOW_VULKAN;
+   }
+ #endif
+-#if REX_PLATFORM_MAC
+-  const int width = static_cast<int>(config.width);
+-  const int height = static_cast<int>(config.height);
++#if REX_PLATFORM_MAC && !REX_PLATFORM_IOS
++  const auto size = detail::ResolveWindowCoordinates(config.width, config.height, true,
++                                                     PendingWindowPixelDensity(config.monitor));
+ #else
+-  const int width = static_cast<int>(config.width);
+-  const int height = static_cast<int>(config.height);
+-#endif
++  const auto size = detail::ResolveWindowCoordinates(config.width, config.height, false, 1.0f);
++#endif
++  const int width = size.width;
++  const int height = size.height;
+   s.window = SDL_CreateWindow(config.title.c_str(), width, height, flags);
+   if (!s.window) {
+     return Err(ErrorCategory::kPlatform,
+diff --git a/src/ui/sdl3/window_size.h b/src/ui/sdl3/window_size.h
+new file mode 100644
+--- /dev/null
++++ b/src/ui/sdl3/window_size.h
+@@ -0,0 +1,20 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++#include <algorithm>
++#include <cmath>
++#include <limits>
++#include <rex/types.h>
++namespace rex::ui::detail {
++struct WindowCoordinates { int width; int height; };
++// WindowConfig uses backing pixels. Only Cocoa's desktop API consumes points.
++inline WindowCoordinates ResolveWindowCoordinates(u32 width, u32 height,
++                                                   bool uses_points, float pixel_density) {
++  const double scale = uses_points && std::isfinite(pixel_density) && pixel_density > 0
++      ? static_cast<double>(pixel_density) : 1.0;
++  const auto dimension = [scale](u32 pixels) {
++    return static_cast<int>(std::llround(std::clamp(static_cast<double>(pixels) / scale,
++        1.0, static_cast<double>((std::numeric_limits<int>::max)()))));
++  };
++  return {dimension(width), dimension(height)};
++}
++}  // namespace rex::ui::detail
+diff --git a/tests/unit/ui/window_size_test.cpp b/tests/unit/ui/window_size_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/ui/window_size_test.cpp
+@@ -0,0 +1,29 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#include "rex_test.h"
++#include <rex/ui/window.h>
++#include "ui/resolution_preset.h"
++#include "ui/sdl3/window_size.h"
++#include <limits>
++REX_TEST_CASE("startup resolutions and raw client sizes keep backing pixel intent", "[ui][window_size]") {
++  for (auto preset : {"1080p", "1920x1080", "4k"}) {
++    rex::i32 width = 0, height = 0;
++    REQUIRE(rex::ui::TryParseResolutionPreset(preset, width, height));
++    rex::ui::WindowConfig config;
++    config.width = static_cast<rex::u32>(width);
++    config.height = static_cast<rex::u32>(height);
++    for (float density : {1.0f, 2.0f, 3.0f}) {
++      const auto cocoa = rex::ui::detail::ResolveWindowCoordinates(config.width, config.height, true, density);
++      CHECK(cocoa.width * density == width);
++      CHECK(cocoa.height * density == height);
++      const auto windows = rex::ui::detail::ResolveWindowCoordinates(config.width, config.height, false, density);
++      CHECK(windows.width == width);
++      CHECK(windows.height == height);
++    }
++  }
++  const auto fitted = rex::ui::detail::ResolveWindowCoordinates(2373, 1001, true, 2.0f);
++  CHECK(fitted.width == 1187);
++  CHECK(fitted.height == 501);
++  CHECK(rex::ui::detail::ResolveWindowCoordinates(1280, 720, true, 0).width == 1280);
++  CHECK(rex::ui::detail::ResolveWindowCoordinates(1280, 720, true,
++      std::numeric_limits<float>::quiet_NaN()).width == 1280);
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -202,6 +202,7 @@
+   kernel/xma_decoder_test.cpp
+   kernel/title_context_test.cpp
+   kernel/recompiled_module_test.cpp
++  ui/window_size_test.cpp
+   ui/bind_test.cpp
+   ui/console_model_test.cpp
+   ui/imgui_dialog_test.cpp

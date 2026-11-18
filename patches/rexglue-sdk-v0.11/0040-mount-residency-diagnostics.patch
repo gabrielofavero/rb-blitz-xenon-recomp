@@ -1,0 +1,137 @@
+diff --git a/include/rex/filesystem/mount_diagnostics.h b/include/rex/filesystem/mount_diagnostics.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/filesystem/mount_diagnostics.h
+@@ -0,0 +1,20 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++
++#include <string_view>
++#include <rex/filesystem/file_system.h>
++#include <rex/module.h>
++#include <rex/result.h>
++
++namespace rex::filesystem {
++
++/** Optional residency accounting for SDK file systems. */
++REX_DECLARE_INTERFACE(IMountDiagnostics, 1)
++  /** Returns live file and directory-walk references on the mount covering path.
++   * An owner must prevent new opens before using zero to retire a mount.
++   * Returns kNoMount for an absent path, kUnsupported for another filesystem implementation.
++   */
++  [[nodiscard]] virtual Result<u32> GetOpenCount(IFileSystem& file_system, std::string_view path) const = 0;
++};
++
++}  // namespace rex::filesystem
+diff --git a/src/filesystem/file_system.h b/src/filesystem/file_system.h
+--- a/src/filesystem/file_system.h
++++ b/src/filesystem/file_system.h
+@@ -55,6 +55,9 @@
+                                     IFile* root = nullptr) override;
+   [[nodiscard]] Result<VolumeStat> GetVolume(std::string_view path) override;
+ 
++  /** Residency accounting, available through the optional module service. */
++  [[nodiscard]] Result<u32> GetMountOpenCount(std::string_view path) const;
++
+  private:
+   [[nodiscard]] Result<void> Move(Node& node, std::string_view to, bool replace_existing,
+                                   Node* root);
+diff --git a/src/filesystem/file_system.cpp b/src/filesystem/file_system.cpp
+--- a/src/filesystem/file_system.cpp
++++ b/src/filesystem/file_system.cpp
+@@ -272,6 +272,13 @@
+   providers_.push_back(std::move(provider));
+   REXFS_DEBUG("mounted '{}' at '{}'", string::PathToUTF8(entry.source), entry.path);
+   return Ok();
++}
++
++Result<u32> FileSystem::GetMountOpenCount(std::string_view path) const {
++  std::lock_guard lock(mutex_);
++  REX_TRY(Resolved resolved, ResolveMount(path, false));
++  std::lock_guard provider_lock(resolved.provider->GetMutex());
++  return resolved.provider->GetRoot().GetOpenCount();
+ }
+ 
+ Result<void> FileSystem::Unmount(std::string_view path) {
+diff --git a/src/filesystem/filesystem_module.h b/src/filesystem/filesystem_module.h
+--- a/src/filesystem/filesystem_module.h
++++ b/src/filesystem/filesystem_module.h
+@@ -6,6 +6,7 @@
+ 
+ #include <rex/filesystem/file_system.h>
+ #include <rex/filesystem/file_system_factory.h>
++#include <rex/filesystem/mount_diagnostics.h>
+ #include <rex/logging/log_category.h>
+ #include <rex/logging/logger.h>
+ #include <rex/memory/host.h>
+@@ -21,9 +22,9 @@
+ 
+ namespace rex::filesystem {
+ 
+-class FileSystemModule final : public IModule, public IFileSystemFactory {
++class FileSystemModule final : public IModule, public IFileSystemFactory, public IMountDiagnostics {
+  public:
+-  REX_MODULE_SERVES(::rex::filesystem::IFileSystemFactory)
++  REX_MODULE_SERVES(::rex::filesystem::IFileSystemFactory, ::rex::filesystem::IMountDiagnostics)
+ 
+   std::string_view GetName() const override { return "rexfilesystem"; }
+ 
+@@ -48,7 +49,14 @@
+   void Shutdown() override {}
+ 
+   IInterface* QueryInterface(std::string_view name, u32 version) override {
+-    return FindModuleInterface<IFileSystemFactory>(*this, name, version);
++    return FindModuleInterface<IFileSystemFactory, IMountDiagnostics>(*this, name, version);
++  }
++
++  Result<u32> GetOpenCount(IFileSystem& file_system, std::string_view path) const override {
++    auto* owned = dynamic_cast<FileSystem*>(&file_system);
++    if (!owned) return Err<u32>(BuildError(FileSystemError::kUnsupported,
++                                         "mount accounting requires an SDK filesystem"));
++    return owned->GetMountOpenCount(path);
+   }
+ 
+   std::unique_ptr<IFileSystem> Create() override { return std::make_unique<FileSystem>(); }
+diff --git a/tests/unit/filesystem/mount_diagnostics_test.cpp b/tests/unit/filesystem/mount_diagnostics_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/filesystem/mount_diagnostics_test.cpp
+@@ -0,0 +1,27 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#include "rex_test.h"
++#include "base/module_group.h"
++#include "fixture_dir.h"
++#include <rex/filesystem/file_system_factory.h>
++#include <rex/filesystem/mount_diagnostics.h>
++
++REX_TEST_CASE("Mount residency counts files relative opens and directory walks", "[filesystem][mount_diagnostics]") {
++  rex::ModuleGroup group; REQUIRE(group.Load("rexfilesystem")); REQUIRE(group.Connect());
++  auto* factory=group.Get<rex::filesystem::IFileSystemFactory>(); REQUIRE(factory);
++  auto* diagnostics=group.Get<rex::filesystem::IMountDiagnostics>(); REQUIRE(diagnostics);
++  auto fs=factory->Create(); REQUIRE(fs);
++  REQUIRE(fs->Mount({.path="\\Device\\Count",.type=rex::filesystem::ProviderType::kSTFS,.source=rex::test::GetFixtureFolder()/"stfs_con.bin",.null_paths={}}));
++  REQUIRE(fs->Link("count:","\\Device\\Count"));
++  REQUIRE(diagnostics->GetOpenCount(*fs,"count:")); CHECK(*diagnostics->GetOpenCount(*fs,"count:")==0);
++  auto root=fs->Open("count:",{}); REQUIRE(root);
++  CHECK(*diagnostics->GetOpenCount(*fs,"COUNT:")==1);
++  auto file=fs->OpenRelative(*root->file,"a.txt",{}); REQUIRE(file);
++  CHECK(*diagnostics->GetOpenCount(*fs,"count:\\a.txt")==2);
++  auto walk=root->file->List(""); REQUIRE(walk);
++  CHECK(*diagnostics->GetOpenCount(*fs,"count:")==3);
++  root->file.reset();CHECK(*diagnostics->GetOpenCount(*fs,"count:")==2);
++  file->file.reset();CHECK(*diagnostics->GetOpenCount(*fs,"count:")==1);
++  walk->reset();CHECK(*diagnostics->GetOpenCount(*fs,"count:")==0);
++  REQUIRE(fs->Unmount("\\Device\\Count"));
++  CHECK_FALSE(diagnostics->GetOpenCount(*fs,"count:"));
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -121,6 +121,7 @@
+   base/utf8_test.cpp
+   base/trim_test.cpp
+   base/xex_test.cpp
++  filesystem/mount_diagnostics_test.cpp
+   filesystem/file_system_test.cpp
+   filesystem/filesystem_module_test.cpp
+   filesystem/host_file_test.cpp

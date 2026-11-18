@@ -1,0 +1,381 @@
+diff --git a/src/gpu/xenos/pipeline_completion_queue.h b/src/gpu/xenos/pipeline_completion_queue.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/pipeline_completion_queue.h
+@@ -0,0 +1,30 @@
++// SPDX-License-Identifier: BSD-3-Clause
++// Worker-to-command-processor handoff. Driver calls run before Push, outside
++// the mutex. Taking a batch never waits for unfinished compilation.
++#pragma once
++
++#include <mutex>
++#include <utility>
++#include <vector>
++
++namespace rex::gpu {
++template <typename T>
++class PipelineCompletionQueue {
++ public:
++  void Push(T completion) {
++    std::lock_guard lock(mutex_);
++    completions_.push_back(std::move(completion));
++  }
++
++  std::vector<T> Take() {
++    std::vector<T> completions;
++    std::lock_guard lock(mutex_);
++    completions.swap(completions_);
++    return completions;
++  }
++
++ private:
++  std::mutex mutex_;
++  std::vector<T> completions_;
++};
++}  // namespace rex::gpu
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.h b/src/gpu/xenos/vulkan/pipeline_cache.h
+--- a/src/gpu/xenos/vulkan/pipeline_cache.h
++++ b/src/gpu/xenos/vulkan/pipeline_cache.h
+@@ -14,6 +14,7 @@
+ #ifndef XXH_INLINE_ALL
+ #define XXH_INLINE_ALL
+ #endif
++#include "gpu/xenos/pipeline_completion_queue.h"
+ #include <xxhash.h>
+ 
+ #include <atomic>
+@@ -373,9 +374,11 @@
+    * @return True on success.
+    */
+   bool CreatePipeline(const PipelineCreationArguments& creation_arguments,
+-                      VkShaderModule fragment_shader_override = VK_NULL_HANDLE);
++                      VkShaderModule fragment_shader_override = VK_NULL_HANDLE,
++                      bool defer_publication = false);
+   void CreationThread(size_t thread_index);
+   void CreateQueuedPipelinesOnProcessorThread();
++  void PublishCompletedPipelines();
+   void ProcessDeferredPipelineDestructions(bool force_all);
+ 
+   PipelinePreloadResult shader_storage_preload_result_;
+@@ -472,6 +475,13 @@
+   bool creation_completion_set_event_ = false;
+   size_t creation_threads_shutdown_from_ = SIZE_MAX;
+   std::vector<std::unique_ptr<rex::platform::Thread>> creation_threads_;
++
++  struct CompletedPipeline {
++    Pipeline* target;
++    VkPipeline pipeline;
++    const IPipelineLayoutProvider* layout;
++  };
++  PipelineCompletionQueue<CompletedPipeline> completed_pipelines_;
+ };
+ 
+ }  // namespace rex::gpu::vulkan
+diff --git a/src/gpu/xenos/d3d12/command_processor.cpp b/src/gpu/xenos/d3d12/command_processor.cpp
+--- a/src/gpu/xenos/d3d12/command_processor.cpp
++++ b/src/gpu/xenos/d3d12/command_processor.cpp
+@@ -3402,7 +3402,8 @@
+ }
+ 
+ bool D3D12CommandProcessor::CanEndSubmissionImmediately() const {
+-  return !submission_open_ || !pipeline_cache_->IsCreatingPipelines();
++  return !submission_open_ || GetXenosSettings().async_shader_compilation.Get() ||
++         !pipeline_cache_->IsCreatingPipelines();
+ }
+ 
+ void D3D12CommandProcessor::ClearCommandAllocatorCache() {
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -4857,7 +4857,9 @@
+ }
+ 
+ bool VulkanCommandProcessor::CanEndSubmissionImmediately() const {
+-  return !submission_open_ || (!scratch_buffer_used_ && !pipeline_cache_->IsCreatingPipelines());
++  return !submission_open_ ||
++         (!scratch_buffer_used_ && (GetXenosSettings().async_shader_compilation.Get() ||
++                                   !pipeline_cache_->IsCreatingPipelines()));
+ }
+ 
+ bool VulkanCommandProcessor::BeginSubmission(bool is_guest_command) {
+diff --git a/src/gpu/xenos/d3d12/pipeline_cache.cpp b/src/gpu/xenos/d3d12/pipeline_cache.cpp
+--- a/src/gpu/xenos/d3d12/pipeline_cache.cpp
++++ b/src/gpu/xenos/d3d12/pipeline_cache.cpp
+@@ -691,6 +691,11 @@
+     storage_.pipeline_file_flush_needed = false;
+   }
+   if (!creation_threads_.empty()) {
++    if (command_processor_.GetXenosSettings().async_shader_compilation.Get()) {
++      // Deferred execution skips null PSOs; a driver call cannot be time-bounded.
++      creation_request_cond_.notify_all();
++      return;
++    }
+     {
+       rex::diagnostics::compile_trace::Scope trace_drain(rex::diagnostics::compile_trace::Event::kCompileDrain,
+           "src/gpu/xenos/d3d12/pipeline_cache.cpp");
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_settings.h b/src/gpu/xenos/host/vulkan/vulkan_settings.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_settings.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_settings.h
+@@ -29,7 +29,7 @@
+   REX_SETTING(bool, readback_resolve, false, "Read render to texture results on the CPU");
+   REX_SETTING(bool, readback_memexport, false,
+               "Read data written by memory export in shaders on the CPU");
+-  REX_SETTING(bool, async_skip_incomplete_frames, true,
++  REX_SETTING(bool, async_skip_incomplete_frames, false,
+               "When async shader compilation is enabled, skip presenting frames that used "
+               "placeholder pipelines to avoid visible flashing");
+   REX_SETTING(bool, submit_on_primary_buffer_end, true,
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.cpp b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+--- a/src/gpu/xenos/vulkan/pipeline_cache.cpp
++++ b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+@@ -828,8 +828,9 @@
+       std::lock_guard<std::mutex> lock(creation_request_lock_);
+       startup_loading = startup_loading_;
+     }
+-    if (startup_loading) {
+-      creation_request_cond_.notify_one();
++    if (startup_loading || command_processor_.GetXenosSettings().async_shader_compilation.Get()) {
++      // Runtime draws can skip unready pipelines; keep unbounded creation on workers.
++      creation_request_cond_.notify_all();
+     } else {
+       {
+       rex::diagnostics::compile_trace::Scope trace_drain(rex::diagnostics::compile_trace::Event::kCompileDrain,
+@@ -857,6 +858,8 @@
+     }
+   }
+ 
++  // Handle and layout publication happens together on their only reader's thread.
++  PublishCompletedPipelines();
+   ProcessDeferredPipelineDestructions(false);
+ }
+ 
+@@ -891,6 +894,8 @@
+   const gpu::vulkan::VulkanDevice::Functions& dfn = vulkan_device->GetFunctions();
+   const VkDevice device = vulkan_device->GetDevice();
+ 
++  // Workers have joined. Account for every handle, even one never used by a draw.
++  PublishCompletedPipelines();
+   ProcessDeferredPipelineDestructions(true);
+ 
+   last_pipeline_ = nullptr;
+@@ -2933,7 +2938,7 @@
+ }
+ 
+ bool VulkanPipelineCache::CreatePipeline(const PipelineCreationArguments& creation_arguments,
+-                                         VkShaderModule fragment_shader_override) {
++                                         VkShaderModule fragment_shader_override, bool defer_publication) {
+   VkPipeline existing_pipeline =
+       creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
+   bool is_placeholder =
+@@ -3416,6 +3421,13 @@
+         creation_arguments.tessellation_patch_control_points, description.render_pass_key.key,
+         static_cast<u32>(use_dynamic_rendering));
+   }
++  if (defer_publication) {
++    REX_ASSERT(!creating_placeholder);
++    // Workers never inspect submission counters or replace the recorded handle/layout pair.
++    completed_pipelines_.Push(
++        {&creation_arguments.pipeline->second, pipeline, creation_arguments.pipeline_layout});
++    return true;
++  }
+   bool was_placeholder =
+       creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+   VkPipeline old_pipeline =
+@@ -3458,6 +3470,40 @@
+       ++creation_threads_busy_;
+     }
+ 
++    bool created = CreatePipeline(creation_arguments, VK_NULL_HANDLE, true);
++    if (!created) {
++      creation_arguments.pipeline->second.real_pipeline_failed.store(true, std::memory_order_release);
++      bool has_placeholder =
++          creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
++      VkPipeline pipeline =
++          creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
++      if (has_placeholder && pipeline != VK_NULL_HANDLE) {
++        creation_arguments.pipeline->second.is_placeholder.store(false, std::memory_order_release);
++      } else {
++        creation_arguments.pipeline->second.pipeline.store(VK_NULL_HANDLE,
++                                                           std::memory_order_release);
++      }
++    }
++
++    {
++      std::lock_guard<std::mutex> lock(creation_request_lock_);
++      --creation_threads_busy_;
++    }
++  }
++}
++
++void VulkanPipelineCache::CreateQueuedPipelinesOnProcessorThread() {
++  REX_ASSERT(!creation_threads_.empty());
++  while (true) {
++    PipelineCreationArguments creation_arguments;
++    {
++      std::lock_guard<std::mutex> lock(creation_request_lock_);
++      if (creation_queue_.empty()) {
++        break;
++      }
++      creation_arguments = creation_queue_.top();
++      creation_queue_.pop();
++    }
+     bool created = CreatePipeline(creation_arguments);
+     if (!created) {
+       creation_arguments.pipeline->second.real_pipeline_failed.store(true, std::memory_order_release);
+@@ -3472,39 +3518,19 @@
+                                                            std::memory_order_release);
+       }
+     }
+-
+-    {
+-      std::lock_guard<std::mutex> lock(creation_request_lock_);
+-      --creation_threads_busy_;
+-    }
+-  }
+-}
+-
+-void VulkanPipelineCache::CreateQueuedPipelinesOnProcessorThread() {
+-  REX_ASSERT(!creation_threads_.empty());
+-  while (true) {
+-    PipelineCreationArguments creation_arguments;
+-    {
+-      std::lock_guard<std::mutex> lock(creation_request_lock_);
+-      if (creation_queue_.empty()) {
+-        break;
+-      }
+-      creation_arguments = creation_queue_.top();
+-      creation_queue_.pop();
+-    }
+-    bool created = CreatePipeline(creation_arguments);
+-    if (!created) {
+-      creation_arguments.pipeline->second.real_pipeline_failed.store(true, std::memory_order_release);
+-      bool has_placeholder =
+-          creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+-      VkPipeline pipeline =
+-          creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
+-      if (has_placeholder && pipeline != VK_NULL_HANDLE) {
+-        creation_arguments.pipeline->second.is_placeholder.store(false, std::memory_order_release);
+-      } else {
+-        creation_arguments.pipeline->second.pipeline.store(VK_NULL_HANDLE,
+-                                                           std::memory_order_release);
+-      }
++  }
++}
++
++void VulkanPipelineCache::PublishCompletedPipelines() {
++  for (const auto& completion : completed_pipelines_.Take()) {
++    VkPipeline old_pipeline =
++        completion.target->pipeline.exchange(completion.pipeline, std::memory_order_acq_rel);
++    completion.target->pipeline_layout.store(completion.layout, std::memory_order_release);
++    completion.target->is_placeholder.store(false, std::memory_order_release);
++    completion.target->real_pipeline_failed.store(false, std::memory_order_release);
++    if (old_pipeline != VK_NULL_HANDLE) {
++      std::lock_guard<std::mutex> lock(deferred_destroy_lock_);
++      deferred_destroy_pipelines_.emplace_back(command_processor_.GetCurrentSubmission(), old_pipeline);
+     }
+   }
+ }
+diff --git a/tests/unit/gpu/pipeline_completion_queue_test.cpp b/tests/unit/gpu/pipeline_completion_queue_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/pipeline_completion_queue_test.cpp
+@@ -0,0 +1,88 @@
++// SPDX-License-Identifier: GPL-2.0-only
++// Exercise the actual worker handoff without a GPU or game navigation.
++#include "gpu/xenos/pipeline_completion_queue.h"
++
++#include <algorithm>
++#include <chrono>
++#include <future>
++#include <thread>
++#include <vector>
++
++#include "rex_test.h"
++
++using rex::gpu::PipelineCompletionQueue;
++using namespace std::chrono_literals;
++
++namespace {
++REX_TEST_CASE("taking completions does not wait for an unfinished driver call", "[gpu][pipeline_completion]") {
++  PipelineCompletionQueue<int> queue;
++  std::promise<void> started, release;
++  auto gate = release.get_future();
++  std::thread worker([&] {
++    started.set_value();
++    gate.wait();  // A driver compile that cannot be interrupted or time-bounded.
++    queue.Push(42);
++  });
++  started.get_future().wait();
++  auto submission = std::async(std::launch::async, [&] { return queue.Take(); });
++  // Release the simulated driver even on failure, so a regression cannot hang
++  // the test process. The deadline is a deadlock guard, not a timing benchmark.
++  bool returned_before_driver = submission.wait_for(2s) == std::future_status::ready;
++  CHECK(returned_before_driver);
++  if (returned_before_driver) CHECK(submission.get().empty());
++  release.set_value();
++  worker.join();
++  if (!returned_before_driver) submission.get();
++  const auto completed = queue.Take();
++  if (returned_before_driver) {
++    CHECK((completed.size()) == (1));
++    if (!completed.empty()) CHECK((completed.front()) == (42));
++  }
++  CHECK(queue.Take().empty());
++}
++
++REX_TEST_CASE("a slow worker does not hold back another worker's completion", "[gpu][pipeline_completion]") {
++  PipelineCompletionQueue<int> queue;
++  std::promise<void> release;
++  auto gate = release.get_future();
++  std::thread slow([&] { gate.wait(); queue.Push(1); });
++  std::thread fast([&] { queue.Push(2); });
++  fast.join();
++  auto first = queue.Take();
++  CHECK((first.size()) == (1));
++  if (!first.empty()) CHECK((first.front()) == (2));
++  // Taken batches remain owned by the consumer after later worker pushes.
++  release.set_value();
++  slow.join();
++  auto second = queue.Take();
++  CHECK((second.size()) == (1));
++  if (!second.empty()) CHECK((second.front()) == (1));
++  if (!first.empty()) CHECK((first.front()) == (2));
++  CHECK(queue.Take().empty());
++}
++
++REX_TEST_CASE("concurrent workers and submission drains lose no completed handles", "[gpu][pipeline_completion]") {
++  PipelineCompletionQueue<int> queue;
++  constexpr int kWorkers = 4, kPerWorker = 1000;
++  std::vector<std::thread> workers;
++  for (int w = 0; w < kWorkers; ++w) {
++    workers.emplace_back([&, w] {
++      for (int i = 0; i < kPerWorker; ++i) queue.Push(w * kPerWorker + i);
++    });
++  }
++  std::vector<int> all;
++  // Interleave consumer drains with worker pushes without waiting for them.
++  for (int i = 0; i < 100; ++i) {
++    auto batch = queue.Take();
++    all.insert(all.end(), batch.begin(), batch.end());
++    std::this_thread::yield();
++  }
++  for (auto& worker : workers) worker.join();
++  auto last = queue.Take();  // Shutdown drains after joining the workers.
++  all.insert(all.end(), last.begin(), last.end());
++  std::sort(all.begin(), all.end());
++  CHECK((all.size()) == (kWorkers * kPerWorker));
++  for (size_t i = 0; i < all.size(); ++i) CHECK((all[i]) == (i));
++  CHECK(queue.Take().empty());
++}
++}  // namespace
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -41,6 +41,7 @@
+   gpu/present_policy_test.cpp
+   gpu/d3d12_present_result_test.cpp
+   gpu/descriptor_binding_test.cpp
++  gpu/pipeline_completion_queue_test.cpp
+   gpu/vblank_pacing_test.cpp
+   gpu/shader_interpreter_test.cpp
+   gpu/frame_trace_test.cpp

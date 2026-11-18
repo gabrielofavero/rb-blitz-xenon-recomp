@@ -1,0 +1,279 @@
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.cpp b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+--- a/src/gpu/xenos/vulkan/pipeline_cache.cpp
++++ b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+@@ -48,6 +48,7 @@
+ #include <rex/xenos/register.h>
+ #include "gpu/xenos/vulkan/command_processor.h"
+ #include "gpu/xenos/vulkan/pipeline_cache.h"
++#include "gpu/xenos/vulkan/async_pipeline_state.h"
+ #include "gpu/xenos/vulkan/shader.h"
+ #include "gpu/xenos/vulkan/tessellation_glsl.h"
+ #include <rex/xenos/format.h>
+@@ -1308,9 +1309,12 @@
+     }
+   }
+ 
++  // MoltenVK demand compilation queues the real pipeline without creating a placeholder PSO.
++  const bool use_null_placeholder =
++      command_processor_.GetVulkanDevice()->GetProperties().driverID == VK_DRIVER_ID_MOLTENVK;
+   bool use_async = command_processor_.GetXenosSettings().async_shader_compilation.Get() &&
+                    !creation_threads_.empty() && pixel_shader &&
+-                   placeholder_pixel_shader_ != VK_NULL_HANDLE;
++                   (use_null_placeholder || placeholder_pixel_shader_ != VK_NULL_HANDLE);
+   u8 async_priority = pipeline_priority::kPriorityLowest;
+   if (use_async) {
+     u32 bound_rts = pipeline_priority::GetBoundRTMaskFromNormalizedColorMask(normalized_color_mask);
+@@ -1325,10 +1329,27 @@
+   auto it = pipelines_.find(description);
+   if (it != pipelines_.end()) {
+     VkPipeline found_pipeline = it->second.pipeline.load(std::memory_order_acquire);
+-    if (found_pipeline == VK_NULL_HANDLE) {
++    const auto missing_action = detail::GetMissingPipelineAction(
++        it->second.is_placeholder.load(std::memory_order_acquire), use_async,
++        use_null_placeholder);
++    if (found_pipeline == VK_NULL_HANDLE &&
++        missing_action != detail::MissingPipelineAction::kPending) {
+       PipelineCreationArguments creation_arguments;
+-      if (!TryGetPipelineCreationArgumentsForDescription(description, &*it, creation_arguments) ||
+-          !CreatePipeline(creation_arguments)) {
++      if (!TryGetPipelineCreationArgumentsForDescription(description, &*it, creation_arguments)) {
++        return false;
++      }
++      if (missing_action == detail::MissingPipelineAction::kQueue) {
++        // Entries left unready by a cancelled preload must follow the same
++        // demand-compilation path as entirely new entries, without a GPU-thread
++        // driver call. is_placeholder also prevents duplicate queued requests.
++        it->second.is_placeholder.store(true, std::memory_order_release);
++        creation_arguments.priority = async_priority;
++        {
++          std::lock_guard<std::mutex> lock(creation_request_lock_);
++          creation_queue_.push(creation_arguments);
++        }
++        creation_request_cond_.notify_one();
++      } else if (!CreatePipeline(creation_arguments)) {
+         return false;
+       }
+       found_pipeline = it->second.pipeline.load(std::memory_order_acquire);
+@@ -1341,7 +1362,8 @@
+     if (pipeline_handle_out) {
+       *pipeline_handle_out = &it->second;
+     }
+-    return pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr;
++    return it->second.is_placeholder.load(std::memory_order_acquire) ||
++           (pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr);
+   }
+ 
+   auto& pipeline = *pipelines_.emplace(description, Pipeline()).first;
+@@ -1353,7 +1375,16 @@
+   }
+ 
+   bool queued_async_creation = false;
+-  if (use_async) {
++  if (use_async && use_null_placeholder) {
++    pipeline.second.is_placeholder.store(true, std::memory_order_release);
++    creation_arguments_real.priority = async_priority;
++    {
++      std::lock_guard<std::mutex> lock(creation_request_lock_);
++      creation_queue_.push(creation_arguments_real);
++    }
++    creation_request_cond_.notify_one();
++    queued_async_creation = true;
++  } else if (use_async) {
+     creation_arguments_real.priority = async_priority;
+     PipelineCreationArguments creation_arguments_placeholder;
+     if (TryGetPipelineCreationArgumentsForDescription(description, &pipeline,
+@@ -1398,7 +1429,8 @@
+   if (pipeline_handle_out) {
+     *pipeline_handle_out = &pipeline.second;
+   }
+-  return pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr;
++  return queued_async_creation ||
++         (pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr);
+ }
+ 
+ bool VulkanPipelineCache::IsCreatingPipelines() const {
+@@ -3607,17 +3639,7 @@
+ 
+     bool created = CreatePipeline(creation_arguments, VK_NULL_HANDLE, true);
+     if (!created) {
+-      creation_arguments.pipeline->second.real_pipeline_failed.store(true, std::memory_order_release);
+-      bool has_placeholder =
+-          creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+-      VkPipeline pipeline =
+-          creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
+-      if (has_placeholder && pipeline != VK_NULL_HANDLE) {
+-        creation_arguments.pipeline->second.is_placeholder.store(false, std::memory_order_release);
+-      } else {
+-        creation_arguments.pipeline->second.pipeline.store(VK_NULL_HANDLE,
+-                                                           std::memory_order_release);
+-      }
++      detail::FailAsyncPipelineCreation(creation_arguments.pipeline->second);
+     }
+ 
+     {
+@@ -3641,17 +3663,7 @@
+     }
+     bool created = CreatePipeline(creation_arguments);
+     if (!created) {
+-      creation_arguments.pipeline->second.real_pipeline_failed.store(true, std::memory_order_release);
+-      bool has_placeholder =
+-          creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+-      VkPipeline pipeline =
+-          creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
+-      if (has_placeholder && pipeline != VK_NULL_HANDLE) {
+-        creation_arguments.pipeline->second.is_placeholder.store(false, std::memory_order_release);
+-      } else {
+-        creation_arguments.pipeline->second.pipeline.store(VK_NULL_HANDLE,
+-                                                           std::memory_order_release);
+-      }
++      detail::FailAsyncPipelineCreation(creation_arguments.pipeline->second);
+     }
+   }
+ }
+diff --git a/src/gpu/xenos/vulkan/async_pipeline_state.h b/src/gpu/xenos/vulkan/async_pipeline_state.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/vulkan/async_pipeline_state.h
+@@ -0,0 +1,34 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++
++#include <atomic>
++
++namespace rex::gpu::vulkan::detail {
++
++enum class MissingPipelineAction { kPending, kQueue, kCreate };
++
++// A setting change cannot cancel a driver call or enqueue its target twice.
++constexpr MissingPipelineAction GetMissingPipelineAction(bool pending, bool async_enabled,
++                                                         bool null_placeholder) {
++  if (pending) return MissingPipelineAction::kPending;
++  return async_enabled && null_placeholder ? MissingPipelineAction::kQueue
++                                          : MissingPipelineAction::kCreate;
++}
++
++constexpr bool ShouldSkipPendingPipeline(bool pending, bool async_enabled, bool missing) {
++  return pending && (async_enabled || missing);
++}
++
++// Failure retires the pending marker after publishing the missing handle. The
++// demand path can then retry, while an existing placeholder remains usable.
++template <typename Pipeline>
++void FailAsyncPipelineCreation(Pipeline& target) {
++  target.real_pipeline_failed.store(true, std::memory_order_release);
++  const bool placeholder = target.is_placeholder.load(std::memory_order_acquire);
++  const auto handle = target.pipeline.load(std::memory_order_acquire);
++  if (!placeholder || handle == decltype(handle){})
++    target.pipeline.store(decltype(handle){}, std::memory_order_release);
++  target.is_placeholder.store(false, std::memory_order_release);
++}
++
++}  // namespace rex::gpu::vulkan::detail
+diff --git a/tests/unit/gpu/async_pipeline_state_test.cpp b/tests/unit/gpu/async_pipeline_state_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/async_pipeline_state_test.cpp
+@@ -0,0 +1,71 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#include "gpu/xenos/vulkan/async_pipeline_state.h"
++#include "rex_test.h"
++
++#include <atomic>
++#include <cstdint>
++#include <future>
++#include <thread>
++
++namespace {
++using namespace rex::gpu::vulkan::detail;
++struct Pipeline {
++  std::atomic<uint64_t> pipeline{0};
++  std::atomic<bool> is_placeholder{true};
++  std::atomic<bool> real_pipeline_failed{false};
++};
++
++REX_TEST_CASE("null pending pipeline failure permits the next demand to retry",
++              "[gpu][async_pipeline_state]") {
++  Pipeline pipeline;
++  CHECK(GetMissingPipelineAction(true, true, true) == MissingPipelineAction::kPending);
++  FailAsyncPipelineCreation(pipeline);
++  CHECK(pipeline.pipeline.load() == 0);
++  CHECK_FALSE(pipeline.is_placeholder.load());
++  CHECK(pipeline.real_pipeline_failed.load());
++  CHECK(GetMissingPipelineAction(pipeline.is_placeholder.load(), true, true) ==
++        MissingPipelineAction::kQueue);
++  CHECK(GetMissingPipelineAction(pipeline.is_placeholder.load(), false, true) ==
++        MissingPipelineAction::kCreate);
++}
++
++REX_TEST_CASE("failed replacement preserves a usable placeholder but ends pending state",
++              "[gpu][async_pipeline_state]") {
++  Pipeline pipeline;
++  pipeline.pipeline = 42;
++  FailAsyncPipelineCreation(pipeline);
++  CHECK(pipeline.pipeline.load() == 42);
++  CHECK_FALSE(pipeline.is_placeholder.load());
++  CHECK(pipeline.real_pipeline_failed.load());
++}
++
++REX_TEST_CASE("disabling asynchronous compilation cannot duplicate an active driver call",
++              "[gpu][async_pipeline_state]") {
++  Pipeline pipeline;
++  std::promise<void> started, release;
++  auto gate = release.get_future();
++  std::thread worker([&] {
++    started.set_value();
++    gate.wait();
++    FailAsyncPipelineCreation(pipeline);
++  });
++  started.get_future().wait();
++  const auto pending = pipeline.is_placeholder.load(std::memory_order_acquire);
++  CHECK(GetMissingPipelineAction(pending, true, true) == MissingPipelineAction::kPending);
++  CHECK(GetMissingPipelineAction(pending, false, true) == MissingPipelineAction::kPending);
++  CHECK(ShouldSkipPendingPipeline(pending, false, true));
++  // An existing non-null placeholder keeps the established synchronous fallback.
++  CHECK_FALSE(ShouldSkipPendingPipeline(pending, false, false));
++  release.set_value();
++  worker.join();
++  CHECK_FALSE(pipeline.is_placeholder.load(std::memory_order_acquire));
++  CHECK_FALSE(ShouldSkipPendingPipeline(false, false, true));
++}
++
++REX_TEST_CASE("cancelled preload entries follow the current demand setting",
++              "[gpu][async_pipeline_state]") {
++  CHECK(GetMissingPipelineAction(false, true, true) == MissingPipelineAction::kQueue);
++  CHECK(GetMissingPipelineAction(false, false, true) == MissingPipelineAction::kCreate);
++  CHECK(GetMissingPipelineAction(false, true, false) == MissingPipelineAction::kCreate);
++}
++}  // namespace
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -41,6 +41,7 @@
+ #include "gpu/xenos/vulkan/descriptor_binding_state.h"
+ #include "gpu/xenos/physical_memory.h"
+ #include "gpu/xenos/vulkan/pipeline_cache.h"
++#include "gpu/xenos/vulkan/async_pipeline_state.h"
+ #include "gpu/xenos/vulkan/render_target_cache.h"
+ #include "gpu/xenos/vulkan/shader.h"
+ #include "gpu/xenos/vulkan/shared_memory.h"
+@@ -3728,7 +3729,8 @@
+   // Reload the handle state to see async hot swaps completed since configuration.
+   pipeline_cache_->GetPipelineAndLayoutByHandle(pipeline_handle, pipeline, pipeline_layout_provider,
+                                                 &pipeline_is_placeholder);
+-  if (GetXenosSettings().async_shader_compilation.Get() && pipeline_is_placeholder) {
++  if (detail::ShouldSkipPendingPipeline(pipeline_is_placeholder,
++          GetXenosSettings().async_shader_compilation.Get(), pipeline == VK_NULL_HANDLE)) {
+     frame_used_async_placeholder_pipeline_ = true;
+     return true;
+   }
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -89,6 +89,7 @@
+   kernel/crypt_hash_test.cpp
+   kernel/crypt_md5_test.cpp
+   kernel/crypt_parve_test.cpp
++  gpu/async_pipeline_state_test.cpp
+   kernel/crypt_pkcs_test.cpp
+   kernel/crypt_rsa_test.cpp
+   kernel/crypt_sig_test.cpp

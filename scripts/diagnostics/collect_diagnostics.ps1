@@ -107,14 +107,26 @@ try {
             } finally { $source.Dispose() }
         }
         if ($report.files.Count -eq 0) { throw 'No recognized diagnostic files were found.' }
-        foreach ($name in @('rb_blitz.exe', 'rexruntime.dll', 'rexgpu-xenos.dll', 'graphics-preparation.json')) {
+        # Keep an explicit allowlist: record build identities without adding binary bytes to the ZIP.
+        $buildNames = @('rb_blitz.exe', 'rexruntime.dll', 'rexgpu-xenos.dll', 'graphics-preparation.json',
+                        'rexbase.dll', 'rexapp.dll', 'rexkernel.dll', 'rexppc.dll', 'rexfilesystem.dll',
+                        'rexapu.dll', 'rexapu-sdl3.dll', 'rexhid.dll', 'rexhid-sdl3.dll', 'rexhid-xinput.dll',
+                        'rexui.dll', 'rexui-sdl3.dll', 'rexgpu.dll', 'rexgpu-xenos-d3d12.dll',
+                        'rexgpu-xenos-vulkan.dll', 'rexgpu-xenos-null.dll', 'rexxam.dll', 'rexxbdm.dll',
+                        'SDL3.dll', 'dxcompiler.dll', 'dxil.dll', 'TracyClient.dll')
+        foreach ($name in $buildNames) {
             $path = Join-Path $GameDirectory $name
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
-            $item = Get-Item -LiteralPath $path
-            $report.build_files_at_collection += @{
-                name = $name; bytes = $item.Length
-                sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-            }
+            $source = [IO.File]::OpenRead($path)
+            $hash = [Security.Cryptography.SHA256]::Create()
+            try {
+                $length = $source.Length
+                $digest = $hash.ComputeHash($source)
+                $report.build_files_at_collection += @{
+                    name = $name; bytes = $length
+                    sha256 = ([BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant()
+                }
+            } finally { $source.Dispose(); $hash.Dispose() }
         }
         $manifest = $zip.CreateEntry('manifest.json').Open()
         try {

@@ -1,0 +1,192 @@
+diff --git a/include/rex/kernel/title_runtime.h b/include/rex/kernel/title_runtime.h
+--- a/include/rex/kernel/title_runtime.h
++++ b/include/rex/kernel/title_runtime.h
+@@ -171,6 +171,10 @@
+ 
+   kernel::ISystemHeap& GetGuestHeap();
+ 
++  /**
++   * Stable workspace interface for this runtime, including image changes and reloads. Allocations
++   * require a loaded title; unloading or replacing the image workspace invalidates its blocks.
++   */
+   kernel::ITitleWorkspace& GetGuestWorkspace();
+ 
+   /** Returns the host base of the title guest memory. It is valid from Load until Unload. */
+diff --git a/src/kernel/title_state.h b/src/kernel/title_state.h
+--- a/src/kernel/title_state.h
++++ b/src/kernel/title_state.h
+@@ -42,6 +42,7 @@
+ #include <rex/filesystem/xdbf.h>
+ #include <rex/kernel/guest_memory.h>
+ #include <rex/kernel/title_runtime.h>
++#include <rex/kernel/guest_allocator.h>
+ #include <rex/kernel/kernel_settings.h>
+ #include <rex/kernel/title_exit.h>
+ #include <rex/kernel/title_debug_output.h>
+@@ -107,7 +108,8 @@
+  * public TitleRuntime forwards its calls here. The subsystem getters are valid between Load and
+  * Unload.
+  */
+-class TitleState : public ITitleExit, public ITitleDebugOutput, public rex::NonCopyable {
++class TitleState : public ITitleExit, public ITitleDebugOutput, public ITitleWorkspace,
++                   public rex::NonCopyable {
+  public:
+   /**
+    * Creates an unloaded state for a title image.
+@@ -290,6 +292,10 @@
+   kernel::IThreadRegistry& GetThreadRegistry();
+ 
+   kernel::WorkspaceHeap& GetWorkspace();
++
++  /** Stable workspace interface, forwarding to the heap selected for the current image. */
++  [[nodiscard]] Result<u32> Allocate(u32 size, bool zero) override;
++  void Free(u32 address) override;
+ 
+   kernel::IModuleRegistry& GetModuleRegistry();
+ 
+diff --git a/src/kernel/title_state.cpp b/src/kernel/title_state.cpp
+--- a/src/kernel/title_state.cpp
++++ b/src/kernel/title_state.cpp
+@@ -529,6 +529,19 @@
+   return *workspace_;
+ }
+ 
++Result<u32> TitleState::Allocate(u32 size, bool zero) {
++  if (!workspace_) {
++    return Err<u32>(ErrorCategory::kNotFound, "no title workspace is loaded");
++  }
++  return workspace_->Allocate(size, zero);
++}
++
++void TitleState::Free(u32 address) {
++  if (workspace_) {
++    workspace_->Free(address);
++  }
++}
++
+ IModuleRegistry& TitleState::GetModuleRegistry() {
+   return *module_registry_;
+ }
+@@ -796,7 +809,7 @@
+           .exit = *this,
+           .debug = *this,
+           .heap = *memory_,
+-          .workspace = *workspace_,
++          .workspace = *this,
+           .file_system = *file_system_,
+           .file_system_factory = *GetKernelServices()->file_system,
+           .membase = memory_->GetMembase(),
+diff --git a/src/kernel/title_runtime.cpp b/src/kernel/title_runtime.cpp
+--- a/src/kernel/title_runtime.cpp
++++ b/src/kernel/title_runtime.cpp
+@@ -130,7 +130,7 @@
+ }
+ 
+ kernel::ITitleWorkspace& TitleRuntime::GetGuestWorkspace() {
+-  return state_->GetWorkspace();
++  return *state_;
+ }
+ 
+ kernel::ISystemHeap& TitleRuntime::GetGuestHeap() {
+diff --git a/tests/unit/kernel/module_object_test.cpp b/tests/unit/kernel/module_object_test.cpp
+--- a/tests/unit/kernel/module_object_test.cpp
++++ b/tests/unit/kernel/module_object_test.cpp
+@@ -9,6 +9,7 @@
+  */
+ 
+ #include "rex_test.h"
++#include <catch2/generators/catch_generators.hpp>
+ 
+ #include <cstring>
+ #include <filesystem>
+@@ -438,3 +439,90 @@
+   CHECK(expected != rex::kernel::WorkspaceHeap::ResolveSize(0));
+   CHECK(StateOf(fixture.GetRuntime()).GetWorkspace().GetSize() == expected);
+ }
++
++REX_TEST_CASE("XAM and public workspace bindings follow a nondefault XEX workspace",
++              "[kernel][xex][workspace]") {
++  const u32 header_size = GENERATE(0u, 0x10000u, 0x280000u);
++  auto spec = ExecutableSpec();
++  spec.workspace_size = header_size;
++  rex::test::KernelFixture fixture(
++      [&](const std::filesystem::path& root) { WriteExecutable(root, spec); });
++  auto& runtime = fixture.GetRuntime();
++  auto& binding = runtime.GetGuestWorkspace();
++  LoadExecutable(fixture);
++  // XAM attaches before the XEX selects its workspace. Both references must survive that change.
++  REQUIRE(&binding == &runtime.GetGuestWorkspace());
++  CHECK(StateOf(runtime).GetWorkspace().GetSize() ==
++        rex::kernel::WorkspaceHeap::ResolveSize(header_size));
++  fixture.RunOnGuestThread([&](rex::test::Caller& c) {
++    auto& heap = StateOf(runtime).GetWorkspace();
++    const u32 before = heap.GetAllocated();
++    const u32 out = c.Alloc(4);
++    REQUIRE(c.XAM("XamAlloc", {0x10000000, 0x30, out}) == 0);
++    const u32 guest_block = c.Load32(out);
++    REQUIRE(guest_block != 0);
++    CHECK(c.Load32(guest_block) == 0);
++    CHECK(heap.GetAllocated() == before + 0x30);
++    c.Store32(guest_block, 0x13579BDF);
++    c.XAM("XamFree", {guest_block});
++    CHECK(heap.GetAllocated() == before);
++
++    auto host_block = binding.Allocate(0x40, true);
++    REQUIRE(host_block);
++    CHECK(c.Load32(*host_block) == 0);
++    CHECK(heap.GetAllocated() == before + 0x40);
++    // Cross the interface boundary in both directions: each frees the other's allocation.
++    c.XAM("XamFree", {*host_block});
++    REQUIRE(c.XAM("XamAlloc", {0, 0x30, out}) == 0);
++    binding.Free(c.Load32(out));
++    CHECK(heap.GetAllocated() == before);
++
++    if (header_size == 0x280000) {
++      // The actual title header exceeds the initial 384 KiB workspace.
++      REQUIRE(c.XAM("XamAllocEx", {0, 0x10000000, 0x80000, out}) == 0);
++      CHECK(heap.GetAllocated() == before + 0x80000);
++      binding.Free(c.Load32(out));
++      CHECK(heap.GetAllocated() == before);
++    }
++
++    REQUIRE(c.XAM("XamContentCreateDeviceEnumerator", {1, 0, 2, 0, out}) == 0);
++    CHECK(c.Kernel("NtClose", {c.Load32(out)}) == 0);
++    CHECK(heap.GetAllocated() == before);
++  });
++}
++
++REX_TEST_CASE("the public workspace binding survives unload and reload with a resized image",
++              "[kernel][xex][workspace]") {
++  auto spec = ExecutableSpec();
++  spec.workspace_size = 0x280000;
++  rex::test::KernelFixture fixture(
++      [&](const std::filesystem::path& root) { WriteExecutable(root, spec); });
++  auto& runtime = fixture.GetRuntime();
++  auto& binding = runtime.GetGuestWorkspace();
++  const auto fixture_entry = runtime.FindFunction(rex::test::Caller::start_thunk);
++  REQUIRE(fixture_entry);
++  LoadExecutable(fixture);
++  REQUIRE(&binding == &runtime.GetGuestWorkspace());
++  auto first = binding.Allocate(0x30, true);
++  REQUIRE(first);
++  binding.Free(*first);
++  runtime.Unload();
++  CHECK_FALSE(binding.Allocate(0x30, true));
++  REQUIRE(runtime.Load());
++  // The fixture's guest callback table belonged to the unloaded address space. Register its
++  // persistent host entry in this generation before asking the fixture to run another thread.
++  auto& dispatcher = *StateOf(runtime).GetFunctionDispatcher();
++  REQUIRE(dispatcher.InitializeFunctionTable(0x8E000000, 0x1000, 0x8E000000, 0x100000,
++                                              /*is_entrypoint=*/true));
++  rex::test::Caller::start_thunk = dispatcher.AllocateThunk(*fixture_entry, 0);
++  REQUIRE(rex::test::Caller::start_thunk != 0);
++  LoadExecutable(fixture);
++  REQUIRE(&binding == &runtime.GetGuestWorkspace());
++  fixture.RunOnGuestThread([&](rex::test::Caller& c) {
++    const u32 out = c.Alloc(4);
++    REQUIRE(c.XAM("XamAlloc", {0x10000000, 0x30, out}) == 0);
++    CHECK(c.Load32(c.Load32(out)) == 0);
++    binding.Free(c.Load32(out));
++    CHECK(StateOf(runtime).GetWorkspace().GetAllocated() == 0);
++  });
++}

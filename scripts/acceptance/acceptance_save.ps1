@@ -52,6 +52,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+. (Join-Path $root 'scripts/diagnostics/file_hash.ps1')
 # -BuildDir may be absolute (an installed folder outside the repo) or relative to
 # the repository root; Join-Path does not resolve an absolute child, so test first.
 $work = if ([System.IO.Path]::IsPathRooted($BuildDir)) { $BuildDir } else { Join-Path $root $BuildDir }
@@ -77,7 +78,7 @@ $changed = -5 * $Steps
 # ---------------------------------------------------------------- helpers ---
 
 # Anything that runs another .ps1 goes through a child PowerShell: this machine's
-# execution policy is Restricted (docs/guides/build-and-run.md §0).
+# execution policy is Restricted (docs/guides/build-and-run.md Ã‚Â§0).
 function Invoke-ChildScript([string]$Script, [hashtable]$Named) {
     $argv = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot (Join-Path '..\diagnostics' $Script)))
     foreach ($k in $Named.Keys) { $argv += @("-$k", [string]$Named[$k]) }
@@ -99,6 +100,14 @@ function Get-LogText([string]$Path) {
         try { return (Get-Content -LiteralPath $Path -Raw) } catch { Start-Sleep -Milliseconds 200 }
     }
     return ""
+}
+
+function Test-LogFatal([string]$Text) {
+    # The current SDK's %Q formatter maps critical to C. Require the record
+    # prefix, so a C or the word critical inside an ordinary message is harmless.
+    $stamp = "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}"
+    return [regex]::IsMatch($Text,
+        "(?im)\[(?:FATAL|critical)\]|^$stamp[ \t]+C[ \t]+\S+[ \t]+t\d+(?:[ \t]|$)")
 }
 
 function Save-Shot([string]$Name) {
@@ -140,6 +149,17 @@ function Wait-ForWindow($Proc, [int]$TimeoutSec) {
 }
 
 function Invoke-Actions([string[]]$Actions) {
+    # These fixtures use the compiled keyboard defaults, independent of legacy MnK pad keys.
+    $Actions = @($Actions | ForEach-Object {
+        if ($_ -eq 'key:a') { 'key:key_enter' }
+        elseif ($_ -eq 'key:b') { 'key:esc' }
+        elseif ($_ -eq 'key:lstick_up') { 'key:up' }
+        elseif ($_ -eq 'key:lstick_down') { 'key:down' }
+        elseif ($_ -eq 'key:lstick_left') { 'key:left' }
+        elseif ($_ -eq 'key:lstick_right') { 'key:right' }
+
+        else { $_ }
+    })
     Invoke-ChildScript "drive_ui.ps1" @{ Actions = ($Actions -join ","); BuildDir = $BuildDir; OutDir = $OutDir } | Out-Null
 }
 
@@ -153,7 +173,7 @@ function Reset-Highlight {
 
 function Get-SettingHash {
     if (-not (Test-Path $settingsFile)) { return "" }
-    return (Get-FileHash -LiteralPath $settingsFile -Algorithm SHA256).Hash
+    return (Get-Sha256 $settingsFile)
 }
 
 # "CURRENT OFFSET: -10 MS" (calibration page) or "AUDIO OFFSET: -10 MS" (the
@@ -174,8 +194,16 @@ function Get-Offset([string]$Text) {
 # Boot -> three dialogs (sign-in, offline prompt, title) -> main menu.
 function Start-ToMenu($Proc, [string]$Tag) {
     if (-not (Wait-ForWindow $Proc $BootTimeoutSec)) { throw "$Tag : no game window appeared" }
-    Start-Sleep -Seconds 20
-    Invoke-Actions @("key:a", "wait:6", "key:a", "wait:6", "key:a", "wait:8")
+    $deadline = (Get-Date).AddSeconds($BootTimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        if ($Proc.HasExited) { throw "$Tag : game exited before the menu" }
+        $text = Get-ScreenText (Save-Shot "$Tag-boot.png")
+        if ($text.Contains('HELP') -and $text.Contains('PLAY')) { return }
+        if ($text -match 'TO START|PRESS|SIGN.IN|OFFLINE|CONNECT|CONTINUE') {
+            Invoke-Actions @('key:key_enter', 'wait:3')
+        } else { Start-Sleep -Seconds 2 }
+    }
+    throw "$Tag : main menu was not observed before the boot deadline"
 }
 
 # main menu -> HELP & OPTIONS -> Calibration -> Calibrate Manually.
@@ -183,7 +211,7 @@ function Open-ManualCalibration([string]$Tag) {
     Reset-Highlight
     Invoke-Actions @("key:lstick_down", "key:lstick_down", "key:lstick_down", "wait:1", "key:a", "wait:6")
     Reset-Highlight
-    Invoke-Actions @("key:lstick_down", "key:lstick_down", "wait:1", "key:a", "wait:6")
+    Invoke-Actions @("key:lstick_down", "wait:1", "key:a", "wait:6")
     Reset-Highlight
     Invoke-Actions @("key:lstick_down", "wait:1", "key:a", "wait:6")
     $shot = Save-Shot "$Tag-manual.png"
@@ -229,7 +257,7 @@ function Invoke-Leg([string]$Name, [scriptblock]$Body) {
     # without re-running.
     $log = Get-NewestLog
     $text = Get-LogText $log
-    $row.Fatal = [bool]($text | Select-String -Pattern "\[FATAL\]" -Quiet)
+    $row.Fatal = Test-LogFatal $text
     if ($log) { Copy-Item $log (Join-Path $capDir "$Name.log") -Force }
     $row.CommitWrite = [bool]($text | Select-String -Pattern "path=globaloptions:\\globaloptions.*disp=0x5" -Quiet)
     $row.Notes = ($notes -join "; ")

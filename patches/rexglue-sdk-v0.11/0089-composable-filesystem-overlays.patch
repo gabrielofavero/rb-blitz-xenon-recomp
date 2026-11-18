@@ -1,0 +1,699 @@
+diff --git a/include/rex/filesystem/mount.h b/include/rex/filesystem/mount.h
+--- a/include/rex/filesystem/mount.h
++++ b/include/rex/filesystem/mount.h
+@@ -16,7 +16,9 @@
+ #include <vector>
+ 
+ #include <rex/bit.h>
++#include <rex/filesystem/file_open.h>
+ #include <rex/filesystem/mount_validation.h>
++#include <rex/filesystem/file_system_error.h>
+ #include <rex/types.h>
+ 
+ namespace rex::filesystem {
+@@ -35,11 +37,25 @@
+   kSTFS,      /**< An STFS or SVOD package file, detected from the header. */
+   kDiscImage, /**< A GDFX disc image. */
+   kNull,      /**< Answers a fixed list of paths with empty files. */
++  kOverlay,   /**< A read-only host source merged over an existing mount. */
+ };
+ 
+ enum class MountFlags : u8 {
+   kNone = 0,     /**< Read only. */
+   kWritable = 1, /**< Writes, creation and deletion are allowed. */
++};
++
++/** Immutable composition policy, copied when mounted. Paths use guest case and separators.
++ * Exclusions remove only source records. Redirects replace root-level records on both sides.
++ * The base is captured at mount time and remains alive after its mount name is removed.
++ */
++struct OverlayMountOptions {
++  std::string base_path;
++  std::vector<std::string> excluded_source_paths;
++  std::filesystem::path redirect_root;
++  std::vector<std::string> redirected_paths;
++  /** Optional synchronous diagnostics. Must not throw or reenter the mount table. */
++  void (*observe)(std::string_view path, bool open, Access access, FileSystemError error) = nullptr;
+ };
+ 
+ struct MountEntry {
+@@ -48,6 +64,7 @@
+   std::filesystem::path source; /**< Host folder or container file, empty for kNull. */
+   MountFlags flags = MountFlags::kNone;
+   std::vector<std::string> null_paths; /**< Paths the null provider answers. */
++  std::shared_ptr<const OverlayMountOptions> overlay = {}; /**< Required for kOverlay. */
+   std::shared_ptr<const MountValidator> validator = {}; /**< Runs before this mount is published. */
+ };
+ 
+diff --git a/src/filesystem/node.h b/src/filesystem/node.h
+--- a/src/filesystem/node.h
++++ b/src/filesystem/node.h
+@@ -110,7 +110,7 @@
+   }
+ 
+   /** Reports whether the mount of the node refuses writes. */
+-  [[nodiscard]] bool IsReadOnly() const;
++  [[nodiscard]] virtual bool IsReadOnly() const;
+ 
+   /** Sets or withdraws a delete on close request. */
+   void SetDeleteOnClose(bool delete_on_close);
+diff --git a/src/filesystem/CMakeLists.txt b/src/filesystem/CMakeLists.txt
+--- a/src/filesystem/CMakeLists.txt
++++ b/src/filesystem/CMakeLists.txt
+@@ -9,6 +9,7 @@
+   node.cpp
+   node_file.cpp
+   null_provider.cpp
++  overlay_provider.cpp
+   provider.cpp
+   stfs.cpp
+   svod.cpp
+diff --git a/src/filesystem/provider.cpp b/src/filesystem/provider.cpp
+--- a/src/filesystem/provider.cpp
++++ b/src/filesystem/provider.cpp
+@@ -39,6 +39,8 @@
+     case ProviderType::kSTFS:
+     case ProviderType::kDiscImage:
+       return ContainerProvider::Create(entry);
++    case ProviderType::kOverlay:
++      break;  // Composition requires FileSystem to capture the existing base.
+     case ProviderType::kNull:
+       return NullProvider::Create(entry);
+   }
+diff --git a/src/filesystem/file_system.cpp b/src/filesystem/file_system.cpp
+--- a/src/filesystem/file_system.cpp
++++ b/src/filesystem/file_system.cpp
+@@ -19,6 +19,7 @@
+ #include <rex/string/path.h>
+ 
+ #include "filesystem/node_file.h"
++#include "filesystem/overlay_provider.h"
+ 
+ namespace rex::filesystem {
+ 
+@@ -241,7 +242,13 @@
+ 
+   const bool wants_write =
+       HasFlags(access, Access::kWriteData) || HasFlags(access, Access::kAppendData);
+-  if (wants_write && ((parent && parent->IsReadOnly()) || (node && node->IsReadOnly()))) {
++  const bool read_only = (parent && parent->IsReadOnly()) || (node && node->IsReadOnly());
++  if (read_only && options.disposition != Disposition::kOpen &&
++      options.disposition != Disposition::kOpenIf) {
++    return Err<Opened>(BuildError(FileSystemError::kAccessDenied,
++                                 "a read-only record cannot be replaced"));
++  }
++  if (wants_write && read_only) {
+     REXFS_WARN("'{}' is read only, opening it for read", path);
+     access = Access::kReadAccess | Access::kReadData;
+   }
+@@ -306,7 +313,14 @@
+     return Err(
+         BuildError(FileSystemError::kMountExists, std::format("'{}' is mounted", entry.path)));
+   }
+-  REX_TRY(std::unique_ptr<Provider> provider, CreateProvider(entry));
++  Result<std::unique_ptr<Provider>> created = [&]() -> Result<std::unique_ptr<Provider>> {
++    if (entry.type != ProviderType::kOverlay) return CreateProvider(entry);
++    if (!entry.overlay) return Err<std::unique_ptr<Provider>>(
++        BuildError(FileSystemError::kInvalidPath, "overlay requires a base policy"));
++    REX_TRY(Resolved base, ResolveMount(entry.overlay->base_path));
++    return OverlayProvider::Create(entry, base.provider->shared_from_this(), base.relative);
++  }();
++  REX_TRY(std::unique_ptr<Provider> provider, std::move(created));
+   if (entry.validator && *entry.validator) {
+     try {
+       const MountValidationView view(*provider);
+diff --git a/src/filesystem/overlay_provider.h b/src/filesystem/overlay_provider.h
+new file mode 100644
+--- /dev/null
++++ b/src/filesystem/overlay_provider.h
+@@ -0,0 +1,38 @@
++#pragma once
++
++#include "filesystem/provider.h"
++
++namespace rex::filesystem {
++
++/** Captures an existing provider and composes a read-only host tree over it.
++ * Provider references form an immutable DAG; calls only descend towards older providers.
++ */
++class OverlayProvider final : public Provider {
++ public:
++  static Result<std::unique_ptr<Provider>> Create(
++      const MountEntry& entry, std::shared_ptr<Provider> base, std::string base_path);
++  ~OverlayProvider() override;
++  VolumeStat GetVolume() const override;
++  Node* Resolve(std::string_view path) override;
++
++  void Observe(std::string_view path, bool open, Access access, FileSystemError error) const;
++  Node* Base(std::string_view path) const;
++  Node* Source(std::string_view path) const;
++  Node* Redirect(std::string_view path) const;
++  Node* Backing(std::string_view path) const;
++  bool IsRedirected(std::string_view path) const;
++  bool HasRedirects() const { return redirect_ && !options_.redirected_paths.empty(); }
++  std::vector<std::unique_lock<std::recursive_mutex>> LockBackings() const;
++  Node* WriteParent(std::string_view path, std::string_view child) const;
++
++ private:
++  OverlayProvider(MountEntry entry, std::shared_ptr<Provider> base, std::string base_path);
++  std::shared_ptr<Provider> base_;
++  std::shared_ptr<Provider> source_;
++  std::shared_ptr<Provider> redirect_;
++  std::string base_path_;
++  OverlayMountOptions options_;
++  Node* anchor_ = nullptr;
++};
++
++}  // namespace rex::filesystem
+diff --git a/src/filesystem/overlay_provider.cpp b/src/filesystem/overlay_provider.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/filesystem/overlay_provider.cpp
+@@ -0,0 +1,326 @@
++#include "filesystem/overlay_provider.h"
++
++#include <algorithm>
++#include <map>
++#include <mutex>
++
++#include <rex/filesystem/file_system_error.h>
++#include <rex/string/path.h>
++#include <rex/string/text.h>
++
++#include "filesystem/host_provider.h"
++#include "filesystem/node_file.h"
++
++namespace rex::filesystem {
++namespace {
++
++std::string Normalize(std::string_view path) {
++  const auto canonical = string::utf8_canonicalize_guest_path(path);
++  const auto parts = string::utf8_split_path(canonical);
++  std::string result;
++  for (auto part : parts) result = string::utf8_join_guest_paths(result, part);
++  return result;
++}
++
++Error Denied() { return BuildError(FileSystemError::kAccessDenied, "overlay backing refuses changes"); }
++
++// NodeFile pins both the backing node and its provider until the last stream closes.
++class OverlayStream final : public NodeStream {
++ public:
++  explicit OverlayStream(std::unique_ptr<IFile> file) : file_(std::move(file)) {}
++  Result<size_t> Read(std::span<u8> b, u64 o) override { return file_->Read(b, o); }
++  Result<size_t> Write(std::span<const u8> b, u64 o) override { return file_->Write(b, o); }
++  Result<void> SetLength(u64 n) override { return file_->SetLength(n); }
++  Result<void> Flush() override { return file_->Flush(); }
++  Result<std::span<const u8>> View() override { return file_->View(); }
++ private:
++  std::unique_ptr<IFile> file_;
++};
++
++class OverlayNode final : public Node {
++ public:
++  OverlayNode(OverlayProvider& provider, Node* parent, std::string path)
++      : Node(provider, parent, std::move(path)), overlay_(provider) {
++    Refresh();
++  }
++
++  bool IsReadOnly() const override {
++    std::lock_guard tree_lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    if (!GetParent() && overlay_.HasRedirects()) return false;
++    auto* backing = overlay_.Backing(GetPath());
++    return !backing || backing->IsReadOnly();
++  }
++
++  void Refresh() override {
++    std::lock_guard lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    if (auto* backing = overlay_.Backing(GetPath())) {
++      backing->Refresh();
++      auto next = backing->GetInfo();
++      next.path = info_.path;
++      next.absolute_path = info_.absolute_path;
++      next.name = info_.name;
++      info_ = std::move(next);
++    }
++  }
++
++  void Populate() {
++    std::lock_guard tree_lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    if (!IsDirectory()) return;
++    std::map<std::string, std::string> names;
++    auto collect = [&](Node* node) {
++      if (!node || !node->IsDirectory()) return;
++      std::lock_guard lock(node->GetProvider().GetMutex());
++      for (const auto& child : node->GetChildren()) {
++        names[string::utf8_lower_ascii(child->GetName())] = child->GetName();
++      }
++    };
++    collect(overlay_.Base(GetPath()));
++    collect(overlay_.Source(GetPath()));
++    if (GetPath().empty()) {
++      for (const auto& name : overlay_.GetEntry().overlay->redirected_paths) {
++        if (auto* redirected = overlay_.Redirect(name))
++          names[string::utf8_lower_ascii(redirected->GetName())] = redirected->GetName();
++      }
++    }
++    for (const auto& [folded, name] : names) {
++      const auto path = string::utf8_join_guest_paths(GetPath(), name);
++      if (!overlay_.Backing(path)) continue;
++      auto child = std::make_unique<OverlayNode>(overlay_, this, path);
++      child->Populate();
++      AddChild(std::move(child));
++    }
++  }
++
++  bool HasChildVanished(const Node& child) const override {
++    std::lock_guard tree_lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    return !overlay_.Backing(child.GetPath());
++  }
++
++  Result<std::unique_ptr<NodeStream>> Open(Access access) override {
++    std::lock_guard tree_lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    auto* backing = overlay_.Backing(GetPath());
++    if (!backing) return Err<std::unique_ptr<NodeStream>>(
++        BuildError(FileSystemError::kNotFound, "overlay backing no longer exists"));
++    std::lock_guard lock(backing->GetProvider().GetMutex());
++    auto opened = backing->Open(access);
++    overlay_.Observe(GetPath(), true, access,
++                     opened ? FileSystemError::kNone : CodeOf(opened.error()));
++    if (!opened) return Err<std::unique_ptr<NodeStream>>(opened.error());
++    auto stream = std::move(*opened);
++    return std::unique_ptr<NodeStream>(std::make_unique<OverlayStream>(
++        std::make_unique<NodeFile>(*backing, access, std::move(stream))));
++  }
++
++  Result<void> Truncate() override {
++    std::lock_guard tree_lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    auto* backing = overlay_.Backing(GetPath());
++    if (!backing || backing->IsReadOnly()) return Err(Denied());
++    return backing->Truncate();
++  }
++  Result<void> SetAttributes(FileAttributes attributes) override {
++    std::lock_guard tree_lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    auto* backing = overlay_.Backing(GetPath());
++    if (!backing || backing->IsReadOnly()) return Err(Denied());
++    REX_TRY_VOID(backing->SetAttributes(attributes));
++    Refresh();
++    return Ok();
++  }
++  Result<void> SetTimes(const FileTimes& times) override {
++    std::lock_guard tree_lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    auto* backing = overlay_.Backing(GetPath());
++    if (!backing || backing->IsReadOnly()) return Err(Denied());
++    REX_TRY_VOID(backing->SetTimes(times));
++    Refresh();
++    return Ok();
++  }
++
++ protected:
++  Result<std::unique_ptr<Node>> CreateChildBacking(
++      std::string_view name, FileAttributes attributes) override {
++    std::lock_guard tree_lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    auto* parent = overlay_.WriteParent(GetPath(), name);
++    if (!parent || parent->IsReadOnly()) return Err<std::unique_ptr<Node>>(Denied());
++    REX_TRY(Node* created, parent->CreateChild(name, attributes));
++    (void)created;
++    return std::unique_ptr<Node>(std::make_unique<OverlayNode>(
++        overlay_, this, string::utf8_join_guest_paths(GetPath(), name)));
++  }
++  Result<void> DeleteChildBacking(Node& child) override {
++    std::lock_guard tree_lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    // Deleting a base record never removes its read-only source copy.
++    auto* backing = overlay_.IsRedirected(child.GetPath()) ?
++        overlay_.Redirect(child.GetPath()) : overlay_.Base(child.GetPath());
++    if (!backing || backing->IsReadOnly()) return Err(Denied());
++    return backing->Delete();
++  }
++  Result<void> MoveBacking(Node& parent, std::string_view name, bool replace) override {
++    std::lock_guard tree_lock(overlay_.GetMutex());
++    auto backing_locks = overlay_.LockBackings();
++    // Root redirects cannot be renamed into an ordinary base record or conversely.
++    const auto destination = string::utf8_join_guest_paths(parent.GetPath(), name);
++    if (overlay_.IsRedirected(GetPath()) != overlay_.IsRedirected(destination)) return Err(Denied());
++    auto* backing = overlay_.IsRedirected(GetPath()) ?
++        overlay_.Redirect(GetPath()) : overlay_.Base(GetPath());
++    auto* target = overlay_.WriteParent(parent.GetPath(), name);
++    if (!backing || !target || backing->IsReadOnly() || target->IsReadOnly()) return Err(Denied());
++    return backing->MoveTo(*target, name, replace);
++  }
++
++ private:
++  OverlayProvider& overlay_;
++};
++
++}  // namespace
++
++OverlayProvider::OverlayProvider(MountEntry entry, std::shared_ptr<Provider> base, std::string base_path)
++    : Provider(std::move(entry)), base_(std::move(base)), base_path_(Normalize(base_path)),
++      options_(*GetEntry().overlay) {}
++
++OverlayProvider::~OverlayProvider() {
++  if (anchor_) anchor_->ReleaseOpen();
++}
++
++Result<std::unique_ptr<Provider>> OverlayProvider::Create(
++    const MountEntry& entry, std::shared_ptr<Provider> base, std::string base_path) {
++  if (!entry.overlay) return Err<std::unique_ptr<Provider>>(
++      BuildError(FileSystemError::kInvalidPath, "overlay requires a policy"));
++  // Do not retain a caller-mutable alias of the mount policy.
++  MountEntry owned = entry;
++  owned.overlay = std::make_shared<const OverlayMountOptions>(*entry.overlay);
++  auto overlay = std::unique_ptr<OverlayProvider>(
++      new OverlayProvider(std::move(owned), std::move(base), std::move(base_path)));
++  for (const auto& name : overlay->options_.redirected_paths) {
++    auto parts = string::utf8_split_path(name);
++    if (parts.size() != 1 || parts.front() == "." || parts.front() == ".." ||
++        name.find_first_of("\\/:") != std::string::npos) return Err<std::unique_ptr<Provider>>(
++        BuildError(FileSystemError::kInvalidPath, "overlay redirects must name root records"));
++  }
++  auto backing_locks = overlay->LockBackings();
++  for (const auto& excluded : overlay->options_.excluded_source_paths) {
++    const auto parts = string::utf8_split_path(excluded);
++    if (parts.empty() || excluded.find(':') != std::string::npos ||
++        std::ranges::any_of(parts, [](auto part) { return part == "." || part == ".."; }))
++      return Err<std::unique_ptr<Provider>>(
++          BuildError(FileSystemError::kInvalidPath, "invalid overlay source exclusion"));
++  }
++  overlay->anchor_ = overlay->Base("");
++  if (!overlay->anchor_ || !overlay->anchor_->IsDirectory()) {
++    overlay->anchor_ = nullptr;
++    return Err<std::unique_ptr<Provider>>(
++        BuildError(FileSystemError::kNotDirectory, "overlay base is not a directory"));
++  }
++  overlay->anchor_->AddOpen();
++  if (!entry.source.empty()) {
++    std::error_code ec;
++    if (!std::filesystem::is_directory(entry.source, ec)) return Err<std::unique_ptr<Provider>>(
++        BuildError(FileSystemError::kNotDirectory, "overlay source is not a directory"));
++    REX_TRY(std::unique_ptr<Provider> source, HostProvider::Create(
++        {entry.path, ProviderType::kHostDirectory, entry.source, MountFlags::kNone, {}}));
++    overlay->source_ = std::move(source);
++  }
++  if (!overlay->options_.redirected_paths.empty()) {
++    if (overlay->options_.redirect_root.empty()) return Err<std::unique_ptr<Provider>>(
++        BuildError(FileSystemError::kInvalidPath, "overlay redirect root is empty"));
++    REX_TRY(std::unique_ptr<Provider> redirect, HostProvider::Create(
++        {entry.path, ProviderType::kHostDirectory, overlay->options_.redirect_root,
++         MountFlags::kWritable, {}}));
++    if (!redirect->GetRoot().IsDirectory()) return Err<std::unique_ptr<Provider>>(BuildError(FileSystemError::kNotDirectory, "overlay redirect root is not a directory"));
++    overlay->redirect_ = std::move(redirect);
++  }
++  auto root = std::make_unique<OverlayNode>(*overlay, nullptr, "");
++  root->Populate();
++  overlay->root_ = std::move(root);
++  return std::unique_ptr<Provider>(std::move(overlay));
++}
++
++void OverlayProvider::Observe(std::string_view path, bool open, Access access, FileSystemError error) const {
++  if (options_.observe) options_.observe(path, open, access, error);
++}
++VolumeStat OverlayProvider::GetVolume() const { return base_->GetVolume(); }
++std::vector<std::unique_lock<std::recursive_mutex>> OverlayProvider::LockBackings() const {
++  std::vector<std::unique_lock<std::recursive_mutex>> locks;
++  locks.emplace_back(base_->GetMutex());
++  if (source_) locks.emplace_back(source_->GetMutex());
++  if (redirect_) locks.emplace_back(redirect_->GetMutex());
++  return locks;
++}
++Node* OverlayProvider::Base(std::string_view path) const {
++  std::lock_guard lock(base_->GetMutex());
++  return base_->Resolve(string::utf8_join_guest_paths(base_path_, path));
++}
++Node* OverlayProvider::Source(std::string_view path) const {
++  if (!source_) return nullptr;
++  const auto normalized = Normalize(path);
++  for (const auto& excluded : options_.excluded_source_paths) {
++    const auto prefix = Normalize(excluded);
++    if (string::utf8_equal_case(normalized, prefix) ||
++        (normalized.size() > prefix.size() && normalized[prefix.size()] == '\\' &&
++         string::utf8_starts_with_case(normalized, prefix))) return nullptr;
++  }
++  std::lock_guard lock(source_->GetMutex());
++  return source_->Resolve(normalized);
++}
++bool OverlayProvider::IsRedirected(std::string_view path) const {
++  const auto normalized = Normalize(path);
++  return std::ranges::any_of(options_.redirected_paths, [&](const auto& name) {
++    return string::utf8_equal_case(normalized, Normalize(name));
++  });
++}
++Node* OverlayProvider::Redirect(std::string_view path) const {
++  if (!redirect_ || !IsRedirected(path)) return nullptr;
++  std::lock_guard lock(redirect_->GetMutex());
++  return redirect_->Resolve(Normalize(path));
++}
++Node* OverlayProvider::Backing(std::string_view path) const {
++  if (IsRedirected(path)) return Redirect(path);
++  auto* base = Base(path);
++  auto* source = Source(path);
++  if (source && (!base || !source->IsDirectory() || !base->IsDirectory())) return source;
++  return base ? base : source;
++}
++Node* OverlayProvider::WriteParent(std::string_view path, std::string_view child) const {
++  if (path.empty() && IsRedirected(child)) return redirect_ ? &redirect_->GetRoot() : nullptr;
++  auto* base = Base(path);
++  return base && base->IsDirectory() ? base : nullptr;
++}
++Node* OverlayProvider::Resolve(std::string_view path) {
++  std::lock_guard lock(GetMutex());
++  // Report the final resolution once, including a failed walk, without exposing private nodes.
++  Node* resolved = nullptr;
++  ScopeGuard report([&] { Observe(path, false, Access::kNone,
++      resolved ? FileSystemError::kNone : FileSystemError::kNotFound); });
++  auto backing_locks = LockBackings();
++  Node* parent = root_.get();
++  for (auto part : string::utf8_split_path(path)) {
++    if (!parent->IsDirectory()) return nullptr;
++    const auto joined = string::utf8_join_guest_paths(parent->GetPath(), part);
++    auto* backing = Backing(joined);
++    auto* child = parent->GetChild(part);
++    if (!backing) {
++      if (child) parent->RemoveChild(*child);
++      return nullptr;
++    }
++    if (!child) {
++      auto next = std::make_unique<OverlayNode>(*this, parent, joined);
++      next->Populate();
++      child = parent->AddChild(std::move(next));
++    }
++    if (!parent->IsDirectory()) return nullptr;
++    child->Refresh();
++    parent = child;
++  }
++  resolved = parent;
++  return parent;
++}
++
++}  // namespace rex::filesystem
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -130,6 +130,7 @@
+   filesystem/host_file_test.cpp
+   filesystem/open_node_test.cpp
+   filesystem/overwrite_test.cpp
++  filesystem/overlay_test.cpp
+   filesystem/providers_test.cpp
+   filesystem/rename_test.cpp
+   filesystem/wildcard_test.cpp
+diff --git a/tests/unit/filesystem/overlay_test.cpp b/tests/unit/filesystem/overlay_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/filesystem/overlay_test.cpp
+@@ -0,0 +1,185 @@
++#include <array>
++#include <algorithm>
++#include <thread>
++
++#include "rex_test.h"
++#include "filesystem/fixture.h"
++
++namespace {
++using namespace rex::filesystem;
++using test::Fixture;
++using test::ReadText;
++using test::WriteHost;
++
++std::shared_ptr<OverlayMountOptions> Policy(std::string base = "\\Base") {
++  auto result = std::make_shared<OverlayMountOptions>();
++  result->base_path = std::move(base);
++  return result;
++}
++
++void MountOverlay(Fixture& fixture, std::string path, const std::filesystem::path& source,
++                  std::shared_ptr<OverlayMountOptions> options) {
++  REQUIRE(fixture.GetFileSystem().Mount({std::move(path), ProviderType::kOverlay, source,
++      MountFlags::kNone, {}, std::move(options)}));
++}
++
++std::vector<std::string> Names(IFileSystem& fs, std::string_view path) {
++  auto listing = fs.List(path, "");
++  REQUIRE(listing);
++  std::vector<std::string> result;
++  while (auto entry = (*listing)->Next()) result.push_back(entry->name);
++  std::ranges::sort(result);
++  return result;
++}
++}
++
++REX_TEST_CASE_METHOD(Fixture, "Overlay merges relative opens and excludes only source records",
++                     "[filesystem][overlay]") {
++  WriteHost(GetTemp()/"base/gen/Main.hdr", "base header");
++  WriteHost(GetTemp()/"base/gen/base.ark", "base data");
++  WriteHost(GetTemp()/"base/default.xex", "base executable");
++  WriteHost(GetTemp()/"source/gen/main.HDR", "payload header");
++  WriteHost(GetTemp()/"source/gen/patch.ark", "payload data");
++  WriteHost(GetTemp()/"source/default.xex", "payload executable");
++  WriteHost(GetTemp()/"source/hidden/sub/file", "hidden");
++  WriteHost(GetTemp()/"base/hidden/visible", "fallback");
++  REQUIRE(GetFileSystem().Mount({"\\Base",ProviderType::kHostDirectory,GetTemp()/"base",MountFlags::kNone,{}}));
++  auto policy=Policy();
++  policy->excluded_source_paths={"DEFAULT.XEX", "HIDDEN"};
++  MountOverlay(*this,"\\Union",GetTemp()/"source",policy);
++  // Mutation of the caller's policy cannot change the mounted view.
++  policy->excluded_source_paths.clear();
++  CHECK(ReadText(*Open("\\Union\\default.xex").file)=="base executable");
++  CHECK(ReadText(*Open("\\Union\\gen\\MAIN.hdr").file)=="payload header");
++  CHECK(Names(GetFileSystem(),"\\Union\\gen")==
++      std::vector<std::string>{"base.ark","main.HDR","patch.ark"});
++  CHECK_FALSE(GetFileSystem().Stat("\\Union\\hidden\\sub\\file"));
++  CHECK(ReadText(*Open("\\Union\\hidden\\visible").file)=="fallback");
++  auto dir=Open("\\Union\\gen");
++  auto base=GetFileSystem().OpenRelative(*dir.file,"BASE.ark",{});
++  REQUIRE(base);
++  CHECK(ReadText(*base->file)=="base data");
++  auto source=GetFileSystem().OpenRelative(*dir.file,"PATCH.ark",{});
++  REQUIRE(source);
++  CHECK(ReadText(*source->file)=="payload data");
++  CHECK(source->file->GetInfo().absolute_path=="\\Union\\gen\\patch.ark");
++}
++
++REX_TEST_CASE_METHOD(Fixture, "Overlay root redirects create player files on a read only base",
++                     "[filesystem][overlay]") {
++  WriteHost(GetTemp()/"base/settings.bin", "base settings");
++  WriteHost(GetTemp()/"source/settings.bin", "payload settings");
++  WriteHost(GetTemp()/"base/sub/settings.bin", "nested settings");
++  REQUIRE(GetFileSystem().Mount({"\\Base",ProviderType::kHostDirectory,GetTemp()/"base",MountFlags::kNone,{}}));
++  auto policy=Policy();
++  policy->redirect_root=GetTemp()/"player";
++  policy->redirected_paths={"settings.bin"};
++  MountOverlay(*this,"\\Union",GetTemp()/"source",policy);
++  CHECK_FALSE(GetFileSystem().Stat("\\Union\\settings.bin"));
++  CHECK(ReadText(*Open("\\Union\\sub\\settings.bin").file)=="nested settings");
++  auto saved=Open("\\Union\\SETTINGS.bin",{.disposition=Disposition::kCreate,
++      .access=Access::kAllAccess});
++  const std::array<rex::u8,4> data{'s','a','v','e'};
++  REQUIRE(saved.file->Write(data,0));
++  REQUIRE(saved.file->Flush());
++  saved.file->Refresh();
++  CHECK(saved.file->GetInfo().size==4);
++  saved.file.reset();
++  CHECK(ReadText(*Open("\\Union\\settings.BIN").file)=="save");
++  auto denied=GetFileSystem().Open("\\Union\\ordinary.bin",{
++      .disposition=Disposition::kCreate,.access=Access::kWriteAccess});
++  REQUIRE_FALSE(denied);
++  CHECK(CodeOf(denied.error())==FileSystemError::kAccessDenied);
++  CHECK_FALSE(std::filesystem::exists(GetTemp()/"base/ordinary.bin"));
++  auto replaced=Open("\\Union\\settings.bin",{
++      .disposition=Disposition::kOverwrite,.access=Access::kWriteAccess});
++  replaced.file->Refresh();
++  CHECK(replaced.file->GetInfo().size==0);
++  CHECK(ReadText(*Open("\\Base\\settings.bin").file)=="base settings");
++}
++
++REX_TEST_CASE_METHOD(Fixture, "Overlay refuses payload mutation while allowing base creation",
++                     "[filesystem][overlay]") {
++  WriteHost(GetTemp()/"base/shared.bin", "base");
++  WriteHost(GetTemp()/"source/shared.bin", "payload");
++  WriteHost(GetTemp()/"base/gen/base.bin", "base data");
++  WriteHost(GetTemp()/"source/gen/extra.bin", "payload data");
++  REQUIRE(GetFileSystem().Mount({"\\Base",ProviderType::kHostDirectory,GetTemp()/"base",
++      MountFlags::kWritable,{}}));
++  MountOverlay(*this,"\\Union",GetTemp()/"source",Policy());
++  auto read=Open("\\Union\\shared.bin",{.access=Access::kAllAccess});
++  CHECK_FALSE(rex::HasFlags(read.file->GetAccess(),Access::kWriteData));
++  const std::array<rex::u8,1> data{'!'};
++  CHECK_FALSE(read.file->Write(data,0));
++  CHECK_FALSE(read.file->SetLength(0));
++  read.file.reset();
++  for (auto disposition : {Disposition::kOverwrite,Disposition::kOverwriteIf,Disposition::kSupersede}) {
++    auto changed=GetFileSystem().Open("\\Union\\shared.bin",{
++        .disposition=disposition,.access=Access::kAllAccess});
++    REQUIRE_FALSE(changed);
++    CHECK(CodeOf(changed.error())==FileSystemError::kAccessDenied);
++  }
++  CHECK(ReadText(*Open("\\Base\\shared.bin").file)=="base");
++  CHECK(ReadText(*Open("\\Union\\shared.bin").file)=="payload");
++  auto created=Open("\\Union\\gen\\new.bin",{.disposition=Disposition::kCreate,
++      .access=Access::kAllAccess});
++  REQUIRE(created.file->Write(data,0));
++  created.file.reset();
++  CHECK(std::filesystem::exists(GetTemp()/"base/gen/new.bin"));
++  CHECK_FALSE(std::filesystem::exists(GetTemp()/"source/gen/new.bin"));
++  REQUIRE(GetFileSystem().Rename("\\Union\\gen\\new.bin","\\Union\\gen\\renamed.bin",false));
++  CHECK(ReadText(*Open("\\Union\\gen\\renamed.bin").file)=="!");
++  REQUIRE(GetFileSystem().Remove("\\Union\\gen\\renamed.bin"));
++  CHECK_FALSE(GetFileSystem().Stat("\\Union\\gen\\renamed.bin"));
++}
++
++REX_TEST_CASE_METHOD(Fixture, "Nested overlays pin their base across unmount replacement and clear",
++                     "[filesystem][overlay]") {
++  WriteHost(GetTemp()/"base/dir/base.bin", "old base");
++  WriteHost(GetTemp()/"source/dir/source.bin", "source");
++  WriteHost(GetTemp()/"generated/dir/generated.bin", "generated");
++  WriteHost(GetTemp()/"replacement/dir/base.bin", "replacement");
++  REQUIRE(GetFileSystem().Mount({"\\Base",ProviderType::kHostDirectory,GetTemp()/"base",MountFlags::kNone,{}}));
++  MountOverlay(*this,"\\First",GetTemp()/"source",Policy());
++  MountOverlay(*this,"\\Last",GetTemp()/"generated",Policy("\\First"));
++  auto root=Open("\\Last\\dir");
++  auto held=Open("\\Last\\dir\\base.bin");
++  auto listing=root.file->List("");
++  REQUIRE(listing);
++  REQUIRE(GetFileSystem().Unmount("\\First"));
++  REQUIRE(GetFileSystem().Unmount("\\Base"));
++  REQUIRE(GetFileSystem().Mount({"\\Base",ProviderType::kHostDirectory,GetTemp()/"replacement",MountFlags::kNone,{}}));
++  CHECK(ReadText(*Open("\\Base\\dir\\base.bin").file)=="replacement");
++  CHECK(ReadText(*held.file)=="old base");
++  CHECK(Names(GetFileSystem(),"\\Last\\dir")==
++      std::vector<std::string>{"base.bin","generated.bin","source.bin"});
++  GetFileSystem().Clear();
++  std::thread reader([&] { CHECK(ReadText(*held.file)=="old base"); });
++  reader.join();
++  auto source=GetFileSystem().OpenRelative(*root.file,"source.bin",{});
++  REQUIRE(source);
++  CHECK(ReadText(*source->file)=="source");
++  auto generated=GetFileSystem().OpenRelative(*root.file,"generated.bin",{});
++  REQUIRE(generated);
++  CHECK(ReadText(*generated->file)=="generated");
++  std::vector<std::string> names;
++  while(auto entry=(*listing)->Next())names.push_back(entry->name);
++  std::ranges::sort(names);
++  CHECK(names==std::vector<std::string>{"base.bin","generated.bin","source.bin"});
++}
++
++REX_TEST_CASE_METHOD(Fixture, "Overlay validates policies before mounting a view",
++                     "[filesystem][overlay]") {
++  WriteHost(GetTemp()/"base/exists", "base");
++  REQUIRE(GetFileSystem().Mount({"\\Base",ProviderType::kHostDirectory,GetTemp()/"base",MountFlags::kNone,{}}));
++  CHECK_FALSE(GetFileSystem().Mount({"\\MissingPolicy",ProviderType::kOverlay,{},MountFlags::kNone,{}}));
++  auto invalid=Policy();
++  invalid->redirect_root=GetTemp()/"player";
++  for(const auto& name : {"nested/file","..","bad:name"}) {
++    invalid->redirected_paths={name};
++    CHECK_FALSE(GetFileSystem().Mount({"\\Invalid",ProviderType::kOverlay,{},MountFlags::kNone,{},invalid}));
++  }
++  CHECK_FALSE(GetFileSystem().Mount({"\\UnknownBase",ProviderType::kOverlay,{},MountFlags::kNone,{},Policy("\\Absent")}));
++  MountOverlay(*this,"\\EmptySource",{},Policy());
++  CHECK(ReadText(*Open("\\EmptySource\\exists").file)=="base");
++}

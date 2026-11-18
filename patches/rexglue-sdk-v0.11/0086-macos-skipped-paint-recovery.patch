@@ -1,0 +1,169 @@
+diff --git a/src/gpu/xenos/host/presenter.cpp b/src/gpu/xenos/host/presenter.cpp
+--- a/src/gpu/xenos/host/presenter.cpp
++++ b/src/gpu/xenos/host/presenter.cpp
+@@ -168,7 +168,9 @@
+         IsPaintConnectionVsyncStale(surface_paint_connection_vsync_, driver_.IsVSyncEnabled())) {
+       surface_paint_connection_state_ = SurfacePaintConnectionState::kConnectedOutdated;
+     }
+-    if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated) {
++    if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedOutdated ||
++        (force_paint && surface_paint_connection_state_ ==
++                            SurfacePaintConnectionState::kUnconnectedRetryAtStateChange)) {
+       UpdateSurfacePaintConnectionFromUIThread(nullptr, false);
+     }
+     if (surface_paint_connection_state_ == SurfacePaintConnectionState::kConnectedPaintable) {
+@@ -674,7 +676,7 @@
+           surface_paint_connection_has_implicit_vsync_ = is_vsync_implicit;
+           surface_width_in_paint_connection_ = surface_width;
+           surface_height_in_paint_connection_ = surface_height;
+-          if (!is_reconnect) {
++          if (!is_reconnect && repaint_needed_out) {
+             *repaint_needed_out = true;
+           }
+           break;
+diff --git a/include/rex/gpu/graphics_activity.h b/include/rex/gpu/graphics_activity.h
+--- a/include/rex/gpu/graphics_activity.h
++++ b/include/rex/gpu/graphics_activity.h
+@@ -11,5 +11,7 @@
+   [[nodiscard]] virtual Result<void> SetActive(bool active) = 0;
+   /** Release blocked host queue callers before shutdown joins. */
+   virtual void ResumeForShutdown() = 0;
++  /** UI thread: drawable visibility. The present thread skips unavailable surfaces. */
++  virtual void SetSurfaceVisible(bool visible) = 0;
+ };
+ }  // namespace rex::gpu
+diff --git a/src/gpu/graphics_system.h b/src/gpu/graphics_system.h
+--- a/src/gpu/graphics_system.h
++++ b/src/gpu/graphics_system.h
+@@ -45,6 +45,7 @@
+   void Invalidate() override;
+   Result<void> SetActive(bool active) override;
+   void ResumeForShutdown() override;
++  void SetSurfaceVisible(bool visible) override;
+   bool SetShaderStorageDeferred(bool deferred) override;
+   bool BeginShaderStoragePreparation(const std::filesystem::path& root, u32 title_id,
+                                      u64 configuration = 0) override;
+diff --git a/src/gpu/graphics_state.h b/src/gpu/graphics_state.h
+--- a/src/gpu/graphics_state.h
++++ b/src/gpu/graphics_state.h
+@@ -49,6 +49,7 @@
+   rex::gpu::IXenosGraphicsDriver* xenos = nullptr;
+   std::jthread present_thread;
+   std::atomic<bool> present_finished{false};
++  std::atomic<bool> surface_visible{true};
+ 
+   mutable std::mutex stats_mutex;
+   std::deque<std::chrono::steady_clock::time_point> frame_times;
+diff --git a/src/gpu/graphics_system.cpp b/src/gpu/graphics_system.cpp
+--- a/src/gpu/graphics_system.cpp
++++ b/src/gpu/graphics_system.cpp
+@@ -195,6 +195,10 @@
+   return state_->driver ? state_->driver->SetApplicationActive(active) : Ok();
+ }
+ 
++void GraphicsSystem::SetSurfaceVisible(bool visible) {
++  state_->surface_visible.store(visible, std::memory_order_release);
++}
++
+ void GraphicsSystem::ResumeForShutdown() {
+   if (state_->driver) state_->driver->ResumeApplicationForShutdown();
+ }
+diff --git a/src/gpu/present_thread.cpp b/src/gpu/present_thread.cpp
+--- a/src/gpu/present_thread.cpp
++++ b/src/gpu/present_thread.cpp
+@@ -57,7 +57,7 @@
+       driver->ResizeSurface(new_width, new_height);
+     }
+ 
+-    if (!driver->BeginPresent()) {
++    if (!surface_visible.load(std::memory_order_acquire) || !driver->BeginPresent()) {
+       SleepUntil(std::chrono::steady_clock::now() + kSkipDelay, stop);
+       continue;
+     }
+diff --git a/include/rex/ui/ui_driver.h b/include/rex/ui/ui_driver.h
+--- a/include/rex/ui/ui_driver.h
++++ b/include/rex/ui/ui_driver.h
+@@ -99,6 +99,8 @@
+   virtual ui::WindowSize GetWindowSize() const = 0;
+ 
+   virtual bool HasFocus() const = 0;
++  /** UI-thread query; false while a platform drawable is hidden or occluded. */
++  virtual bool IsDrawableAvailable() const { return true; }
+ 
+   /** Starts or stops text input, which turns on an on screen keyboard where the host has one. */
+   virtual void SetTextInputActive(bool active) = 0;
+diff --git a/include/rex/ui/ui_event.h b/include/rex/ui/ui_event.h
+--- a/include/rex/ui/ui_event.h
++++ b/include/rex/ui/ui_event.h
+@@ -35,6 +35,7 @@
+     kClose,         /**< The user asked to close the window. No data. */
+     kFocus,         /**< The window gained or lost focus. UISetupEvent. */
+     kTouch,         /**< A touch point changed. TouchEvent. */
++    kVisibility,    /**< Platform drawable availability changed. No data. */
+   };
+ 
+   explicit UIEvent(Type type) : type_(type) {}
+diff --git a/src/ui/sdl3/sdl3_ui_driver.h b/src/ui/sdl3/sdl3_ui_driver.h
+--- a/src/ui/sdl3/sdl3_ui_driver.h
++++ b/src/ui/sdl3/sdl3_ui_driver.h
+@@ -52,6 +52,7 @@
+   f32 GetContentScale() const override;
+   WindowSize GetWindowSize() const override;
+   bool HasFocus() const override;
++  bool IsDrawableAvailable() const override;
+   void SetTextInputActive(bool active) override;
+   [[nodiscard]] Result<NativeWindow> GetNativeWindow() const override;
+   bool WaitEvents(IUIEventListener& listener, u32 timeout_ms) override;
+diff --git a/src/ui/sdl3/sdl3_ui_driver.cpp b/src/ui/sdl3/sdl3_ui_driver.cpp
+--- a/src/ui/sdl3/sdl3_ui_driver.cpp
++++ b/src/ui/sdl3/sdl3_ui_driver.cpp
+@@ -237,6 +237,22 @@
+   }
+ 
+   void HandleWindowEvent(const SDL_Event& event) {
++#if REX_PLATFORM_MAC
++    switch (event.type) {
++      case SDL_EVENT_WINDOW_HIDDEN:
++      case SDL_EVENT_WINDOW_SHOWN:
++      case SDL_EVENT_WINDOW_EXPOSED:
++      case SDL_EVENT_WINDOW_MINIMIZED:
++      case SDL_EVENT_WINDOW_RESTORED:
++      case SDL_EVENT_WINDOW_OCCLUDED:
++      case SDL_EVENT_WINDOW_FOCUS_GAINED: {
++        UIEvent visibility(UIEvent::Type::kVisibility);
++        Deliver(visibility);
++        break;
++      }
++      default: break;
++    }
++#endif
+     switch (event.type) {
+       case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
+         UISetupEvent e(UIEvent::Type::kResize);
+@@ -734,6 +750,11 @@
+   return {static_cast<u32>(std::max(width, 0)), static_cast<u32>(std::max(height, 0))};
+ }
+ 
++bool SDL3UIDriver::IsDrawableAvailable() const {
++  return state_->window && !(SDL_GetWindowFlags(state_->window) &
++      (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED));
++}
++
+ bool SDL3UIDriver::HasFocus() const {
+   return state_->has_focus;
+ }
+diff --git a/src/ui/ui_event.cpp b/src/ui/ui_event.cpp
+--- a/src/ui/ui_event.cpp
++++ b/src/ui/ui_event.cpp
+@@ -209,6 +209,11 @@
+       RefreshCapture();
+       break;
+     }
++    case Type::kVisibility:
++#if REX_PLATFORM_MAC
++      if (graphics_activity) graphics_activity->SetSurfaceVisible(driver->IsDrawableAvailable());
++#endif
++      break;
+     case Type::kClose:
+       RequestClose();
+       break;

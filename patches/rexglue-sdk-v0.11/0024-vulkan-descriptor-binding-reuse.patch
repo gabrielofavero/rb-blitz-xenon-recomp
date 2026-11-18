@@ -1,0 +1,262 @@
+diff --git a/src/gpu/xenos/vulkan/descriptor_binding_state.h b/src/gpu/xenos/vulkan/descriptor_binding_state.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/vulkan/descriptor_binding_state.h
+@@ -0,0 +1,29 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++
++#include <algorithm>
++#include <cstdint>
++#include <span>
++#include <vulkan/vulkan.h>
++
++namespace rex::gpu::vulkan {
++
++// Pipeline layouts are compatible for set N only when sets 0 through N match.
++inline constexpr uint32_t DescriptorSetPrefixMask(uint32_t count) {
++  return count >= 32 ? UINT32_MAX : (UINT32_C(1) << count) - 1;
++}
++
++// A descriptor that was already bound remains bound when its immutable set
++// handle is unchanged. Never resurrect a binding invalidated by a new command
++// buffer, external renderer or incompatible pipeline layout.
++inline uint32_t RetainDescriptorSetBindings(uint32_t bound, uint32_t valid,
++    std::span<const VkDescriptorSet> previous, std::span<const VkDescriptorSet> current) {
++  const uint32_t count = uint32_t(std::min({previous.size(), current.size(), size_t(32)}));
++  bound &= valid & DescriptorSetPrefixMask(count);
++  for (uint32_t i = 0; i < count; ++i) {
++    if (previous[i] != current[i]) bound &= ~(UINT32_C(1) << i);
++  }
++  return bound;
++}
++
++}  // namespace rex::gpu::vulkan
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -37,6 +37,7 @@
+ #include <rex/title.h>
+ #include <rex/xenos/register.h>
+ #include "gpu/xenos/vulkan/command_processor.h"
++#include "gpu/xenos/vulkan/descriptor_binding_state.h"
+ #include "gpu/xenos/physical_memory.h"
+ #include "gpu/xenos/vulkan/pipeline_cache.h"
+ #include "gpu/xenos/vulkan/render_target_cache.h"
+@@ -3670,7 +3671,7 @@
+                      static_cast<u32>(SPIRVShaderTranslator::kDescriptorSetTexturesPixel));
+       }
+       current_graphics_descriptor_sets_bound_up_to_date_ &=
+-          (UINT32_C(1) << descriptor_sets_kept) - 1;
++          DescriptorSetPrefixMask(descriptor_sets_kept);
+     } else {
+       // With no previous pipeline layout all bindings are indeterminate.
+       current_graphics_descriptor_sets_bound_up_to_date_ = 0;
+@@ -4694,7 +4695,7 @@
+   // Checked in order because submissions may execute out of order but are serialized here.
+   while (fences_awaited < fences_total) {
+     VkResult fence_status =
+-        dfn.vkWaitForFences(device, 1, &submissions_in_flight_fences_[fences_awaited], VK_TRUE, 0);
++        dfn.vkGetFenceStatus(device, submissions_in_flight_fences_[fences_awaited]);
+     if (fence_status != VK_SUCCESS) {
+       if (fence_status == VK_ERROR_DEVICE_LOST) {
+         device_lost_ = true;
+@@ -5979,6 +5980,9 @@
+ #endif  // REXGPU_FINE_GRAINED_DRAW_SCOPES
+ 
+   const xenos::RegisterFile& regs = *register_file_;
++  std::array<VkDescriptorSet, SPIRVShaderTranslator::kDescriptorSetCount> previous_descriptor_sets;
++  std::copy(std::begin(current_graphics_descriptor_sets_),
++            std::end(current_graphics_descriptor_sets_), previous_descriptor_sets.begin());
+ 
+   const gpu::vulkan::VulkanDevice* const vulkan_device = GetVulkanDevice();
+   const gpu::vulkan::VulkanDevice::Functions& dfn = vulkan_device->GetFunctions();
+@@ -6160,8 +6164,8 @@
+       ~((UINT32_C(1) << SPIRVShaderTranslator::kDescriptorSetTexturesVertex) |
+         (UINT32_C(1) << SPIRVShaderTranslator::kDescriptorSetTexturesPixel));
+ 
+-  current_graphics_descriptor_sets_bound_up_to_date_ &=
+-      current_graphics_descriptor_set_values_up_to_date_;
++  // Dirty values may resolve to an immutable descriptor set that is already bound.
++  // Retain bindings only after the descriptor-cache lookups below.
+ 
+   bool write_vertex_textures =
+       (texture_count_vertex || sampler_count_vertex) &&
+@@ -6298,6 +6302,11 @@
+   // Mark valid only when all descriptor sets are allocated and written.
+   current_graphics_descriptor_set_values_up_to_date_ |= write_descriptor_set_bits;
+ 
++  current_graphics_descriptor_sets_bound_up_to_date_ = RetainDescriptorSetBindings(
++      current_graphics_descriptor_sets_bound_up_to_date_,
++      current_graphics_descriptor_set_values_up_to_date_, previous_descriptor_sets,
++      current_graphics_descriptor_sets_);
++
+   u32 descriptor_sets_needed = (UINT32_C(1) << SPIRVShaderTranslator::kDescriptorSetCount) - 1;
+   if (!texture_count_vertex && !sampler_count_vertex) {
+     descriptor_sets_needed &= ~(UINT32_C(1) << SPIRVShaderTranslator::kDescriptorSetTexturesVertex);
+diff --git a/tests/unit/gpu/descriptor_binding_test.cpp b/tests/unit/gpu/descriptor_binding_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/gpu/descriptor_binding_test.cpp
+@@ -0,0 +1,150 @@
++// SPDX-License-Identifier: GPL-2.0-only
++// Tests the actual cache/key used by the Vulkan command processor; no GPU or UI.
++#include "rex_test.h"
++#include <catch2/catch_message.hpp>
++#include "gpu/xenos/vulkan/texture_descriptor_cache.h"
++#include "gpu/xenos/vulkan/descriptor_binding_state.h"
++#include <array>
++#include <type_traits>
++
++using rex::gpu::vulkan::TextureDescriptorCache;
++using rex::gpu::vulkan::DescriptorSetPrefixMask;
++using rex::gpu::vulkan::RetainDescriptorSetBindings;
++
++namespace {
++template <typename T> T Handle(uintptr_t id) {
++  if constexpr (std::is_pointer_v<T>) return reinterpret_cast<T>(id);
++  else return static_cast<T>(id);
++}
++
++}  // namespace
++
++REX_TEST_CASE("Vulkan descriptor identity and binding retention", "[gpu][vulkan]") {
++  INFO("descriptor identity includes layout, image views/order/layouts and samplers");
++  TextureDescriptorCache cache;
++  std::array<VkDescriptorImageInfo, 2> textures{};
++  textures[0].imageView = Handle<VkImageView>(10);
++  textures[1].imageView = Handle<VkImageView>(11);
++  for (auto& texture : textures) texture.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
++  std::array<VkDescriptorImageInfo, 1> samplers{};
++  samplers[0].sampler = Handle<VkSampler>(20);
++  auto layout = Handle<VkDescriptorSetLayout>(30);
++  auto set = Handle<VkDescriptorSet>(40);
++  TextureDescriptorCache::View view{layout, textures, samplers};
++  CHECK(cache.Find(view) == VK_NULL_HANDLE);
++  cache.Insert(view, set);
++  CHECK(cache.Find(view) == set);
++  CHECK((cache.size()) == (1u));
++  CHECK(cache.Find({Handle<VkDescriptorSetLayout>(31), textures, samplers}) == VK_NULL_HANDLE);
++  std::swap(textures[0], textures[1]);
++  CHECK(cache.Find(view) == VK_NULL_HANDLE);
++  std::swap(textures[0], textures[1]);
++  textures[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
++  CHECK(cache.Find(view) == VK_NULL_HANDLE);
++  textures[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
++  auto old_view = textures[0].imageView;
++  textures[0].imageView = Handle<VkImageView>(12);  // different signed/swizzled view
++  CHECK(cache.Find(view) == VK_NULL_HANDLE);
++  textures[0].imageView = old_view;
++  samplers[0].sampler = Handle<VkSampler>(21);
++  CHECK(cache.Find(view) == VK_NULL_HANDLE);
++  samplers[0].sampler = Handle<VkSampler>(20);
++  CHECK(cache.Find({layout, {textures.data(), 1}, samplers}) == VK_NULL_HANDLE);
++  CHECK(cache.Find({layout, textures, {}}) == VK_NULL_HANDLE);
++
++  INFO("unused fields do not split identity; inserted keys own their contents");
++  textures[0].sampler = Handle<VkSampler>(999);
++  samplers[0].imageView = Handle<VkImageView>(999);
++  samplers[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
++  CHECK(cache.Find(view) == set);
++  cache.Insert(view, Handle<VkDescriptorSet>(41));
++  CHECK(cache.Find(view) == set);  // sets remain immutable
++  textures[0].imageView = Handle<VkImageView>(100);
++  CHECK(cache.Find(view) == VK_NULL_HANDLE);
++  textures[0].imageView = old_view;
++  CHECK(cache.Find(view) == set);
++
++  INFO("clear expires every descriptor before submission/frame/pool reuse");
++  cache.Clear();
++  CHECK((cache.size()) == (0u));
++  CHECK(cache.Find(view) == VK_NULL_HANDLE);
++  cache.Insert(view, Handle<VkDescriptorSet>(42));
++  CHECK(cache.Find(view) == Handle<VkDescriptorSet>(42));
++
++  INFO("cache is bounded and a full cache retains valid hits");
++  TextureDescriptorCache bounded(1);
++  bounded.Insert(view, set);
++  textures[0].imageView = Handle<VkImageView>(101);
++  bounded.Insert(view, Handle<VkDescriptorSet>(43));
++  CHECK(bounded.Find(view) == VK_NULL_HANDLE);
++  CHECK((bounded.size()) == (1u));
++  textures[0].imageView = old_view;
++  CHECK(bounded.Find(view) == set);
++  TextureDescriptorCache empty(0);
++  empty.Insert(view, set);
++  CHECK((empty.size()) == (0u));
++  cache.Clear();
++  cache.Insert(view, VK_NULL_HANDLE);
++  CHECK((cache.size()) == (0u));
++
++  INFO("alternating bindings avoid repeated allocations and writes within a submission");
++  uint32_t misses = 0, hits = 0;
++  for (uint32_t draw = 0; draw < 10000; ++draw) {
++    samplers[0].sampler = Handle<VkSampler>(20 + draw % 2);
++    auto found = cache.Find(view);
++    if (found == VK_NULL_HANDLE) {
++      ++misses;
++      found = Handle<VkDescriptorSet>(1000 + misses);
++      cache.Insert(view, found);
++    } else {
++      ++hits;
++    }
++    CHECK(found == Handle<VkDescriptorSet>(1001 + draw % 2));
++  }
++  CHECK((misses) == (2u));
++  CHECK((hits) == (9998u));
++  cache.Clear();
++  CHECK(cache.Find(view) == VK_NULL_HANDLE);
++  INFO("retain only unchanged, valid sets that were already bound");
++  std::array<VkDescriptorSet, 4> previous{}, current{};
++  for (uint32_t i = 0; i < previous.size(); ++i) previous[i] = Handle<VkDescriptorSet>(100 + i);
++  for (uint32_t changed = 0; changed < 16; ++changed) {
++    current = previous;
++    for (uint32_t i = 0; i < current.size(); ++i) {
++      if (changed & (1u << i)) current[i] = Handle<VkDescriptorSet>(200 + i);
++    }
++    for (uint32_t bound = 0; bound < 16; ++bound) {
++      for (uint32_t valid = 0; valid < 16; ++valid) {
++        CHECK((RetainDescriptorSetBindings(bound, valid, previous, current)) == (bound & valid & ~changed));
++      }
++    }
++  }
++
++  INFO("incompatible layout prefixes and external rendering require rebinding");
++  current = previous;
++  CHECK((DescriptorSetPrefixMask(0)) == (0u));
++  CHECK((DescriptorSetPrefixMask(32)) == (UINT32_MAX));
++  CHECK((DescriptorSetPrefixMask(33)) == (UINT32_MAX));
++  // Vertex layout changes at set 2: the pixel set at 3 must be rebound even
++  // when its own set handle/layout happens to match the previous draw.
++  CHECK((RetainDescriptorSetBindings(15 & DescriptorSetPrefixMask(2), 15,
++                                      previous, current)) == (3u));
++  CHECK((RetainDescriptorSetBindings(15 & DescriptorSetPrefixMask(3), 15,
++                                      previous, current)) == (7u));
++  CHECK((RetainDescriptorSetBindings(0, 15, previous, current)) == (0u));
++  CHECK((RetainDescriptorSetBindings(15, 15, {}, {})) == (0u));
++
++  INFO("identical consecutive draws need only the first descriptor bind");
++  uint32_t bound = 0, bind_batches = 0;
++  for (uint32_t draw = 0; draw < 10000; ++draw) {
++    bound = RetainDescriptorSetBindings(bound, 15, previous, current);
++    if ((15 & ~bound) != 0) ++bind_batches;
++    bound |= 15;
++  }
++  CHECK((bind_batches) == (1u));
++  // A fresh command buffer must bind again, regardless of cache contents.
++  bound = RetainDescriptorSetBindings(0, 15, previous, current);
++  CHECK((bound) == (0u));
++
++
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -35,6 +35,7 @@
+   gpu/dxbc_operand_test.cpp
+   gpu/present_policy_test.cpp
+   gpu/d3d12_present_result_test.cpp
++  gpu/descriptor_binding_test.cpp
+   gpu/vblank_pacing_test.cpp
+   gpu/shader_interpreter_test.cpp
+   gpu/frame_trace_test.cpp

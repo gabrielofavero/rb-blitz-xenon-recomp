@@ -1,0 +1,230 @@
+diff --git a/include/rex/hid/title_input.h b/include/rex/hid/title_input.h
+--- a/include/rex/hid/title_input.h
++++ b/include/rex/hid/title_input.h
+@@ -2,6 +2,7 @@
+ 
+ #include <rex/hid/pad.h>
+ #include <rex/module.h>
++#include <rex/result.h>
+ #include <rex/utility.h>
+ 
+ namespace rex::hid {
+@@ -15,6 +16,14 @@
+    * not outlive the input system. Replacing a callback retires the earlier guard.
+    */
+   [[nodiscard]] virtual ScopeGuard SetStateFilter(MoveOnlyFunction<void(u32, PadState&)> fn) = 0;
++  /**
++   * Merges physical pads only, deduplicated in driver priority order, before deadzones and
++   * title transformations. No pad returns kNotFound. Host UI reads bypass UI suppression;
++   * ordinary reads are neutral while unfocused or blocked. Any thread.
++   */
++  [[nodiscard]] virtual Result<PadState> GetPhysicalState(bool for_host_ui = false) = 0;
++  /** Whether a host modal currently suppresses guest pad input. Any thread. */
++  virtual bool IsUIBlocked() const = 0;
+ };
+ 
+ }  // namespace rex::hid
+diff --git a/src/hid/input_system.h b/src/hid/input_system.h
+--- a/src/hid/input_system.h
++++ b/src/hid/input_system.h
+@@ -42,6 +42,8 @@
+   [[nodiscard]] ScopeGuard OnConnectionChange(
+       MoveOnlyFunction<void(u32 user, bool connected)> fn) override;
+   [[nodiscard]] ScopeGuard SetStateFilter(MoveOnlyFunction<void(u32, PadState&)> fn) override;
++  [[nodiscard]] Result<PadState> GetPhysicalState(bool for_host_ui = false) override;
++  bool IsUIBlocked() const override;
+   void AcquireUIBlock() override;
+   void ReleaseUIBlock() override;
+   bool IsKeyDown(VirtualKey key) const override;
+diff --git a/src/hid/input_system.cpp b/src/hid/input_system.cpp
+--- a/src/hid/input_system.cpp
++++ b/src/hid/input_system.cpp
+@@ -554,6 +554,35 @@
+     std::lock_guard call(state->mutex);
+     if (state->filter_serial == serial) state->state_filter = {};
+   });
++}
++
++Result<PadState> InputSystem::GetPhysicalState(bool for_host_ui) {
++  State& state = *state_;
++  std::vector<ConnectionEvent> events;
++  Result<PadState> result = std::unexpected(NotFound("no physical pad is connected"));
++  {
++    std::lock_guard lock(state.mutex);
++    if (state.started) {
++      state.RefreshDevicesLocked(events);
++      for (const detail::Device& device : state.devices) {
++        if (device.synthetic) continue;
++        auto raw = state.sources[device.key.source]->GetDeviceState(device.key.id);
++        if (!raw) continue;
++        if (result) detail::MergeInto(*result, *raw);
++        else result = *raw;
++      }
++      if (result && !for_host_ui &&
++          (!state.focused.load(std::memory_order_relaxed) || state.ui_blocks.load() > 0)) {
++        *result = {};
++      }
++    }
++  }
++  state.Fire(events);
++  return result;
++}
++
++bool InputSystem::IsUIBlocked() const {
++  return state_->ui_blocks.load() > 0;
+ }
+ 
+ void InputSystem::AcquireUIBlock() {
+diff --git a/src/ui/ui_event.cpp b/src/ui/ui_event.cpp
+--- a/src/ui/ui_event.cpp
++++ b/src/ui/ui_event.cpp
+@@ -134,7 +134,7 @@
+       }
+       break;
+     case Type::kButtonDown:
+-      if (event.button != MouseButton::kNone && !IsOverlayCapturingInput(false)) {
++      if (!event.handled && event.button != MouseButton::kNone && !IsOverlayCapturingInput(false)) {
+         input->OnInputEvent(event);
+       }
+       RefreshCapture();
+@@ -147,12 +147,12 @@
+       break;
+     case Type::kMotion:
+       RefreshCapture();
+-      if (!IsOverlayCapturingInput(false)) {
++      if (!event.handled && !IsOverlayCapturingInput(false)) {
+         input->OnInputEvent(event);
+       }
+       break;
+     case Type::kWheel:
+-      if (!IsOverlayCapturingInput(false)) {
++      if (!event.handled && !IsOverlayCapturingInput(false)) {
+         input->OnInputEvent(event);
+       }
+       break;
+diff --git a/tests/unit/hid/title_input_test.cpp b/tests/unit/hid/title_input_test.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/unit/hid/title_input_test.cpp
+@@ -0,0 +1,110 @@
++#include "rex_test.h"
++#include "input_harness.h"
++#include "../ui/ui_harness.h"
++#include <rex/hid/title_input.h>
++
++using namespace rex::test_input;
++
++REX_TEST_CASE("title input filter owns final packets and respects UI blocks", "[hid][title_input]") {
++  Run("fake_a", [](rex::hid::IInputSystem& input) {
++    auto* title = dynamic_cast<rex::hid::ITitleInput*>(&input);
++    REQUIRE(title);
++    g_fake[0].devices = {MakePad(1, 0)};
++    g_fake[0].states[1] = Buttons(rex::hid::kPadA);
++    const auto before = input.GetState(0);
++    REQUIRE(before);
++    auto first = title->SetStateFilter([](u32, rex::hid::PadState& state) {
++      state.buttons = rex::hid::kPadB;
++    });
++    auto changed = input.GetState(0);
++    REQUIRE(changed);
++    CHECK(changed->state.buttons == rex::hid::kPadB);
++    CHECK(changed->packet != before->packet);
++    CHECK(input.GetState(0)->packet == changed->packet);
++    auto second = title->SetStateFilter([](u32, rex::hid::PadState& state) {
++      state.buttons = rex::hid::kPadX;
++    });
++    first = {};
++    CHECK(input.GetState(0)->state.buttons == rex::hid::kPadX);
++    input.AcquireUIBlock();
++    CHECK(input.GetState(0)->state.buttons == 0);
++    input.ReleaseUIBlock();
++    second = {};
++    g_fake[0].states[1] = Buttons(0);
++    CHECK(input.GetState(0)->state.buttons == 0);
++    g_fake[0].states[1] = Buttons(rex::hid::kPadA);
++    CHECK(input.GetState(0)->state.buttons == rex::hid::kPadA);
++  });
++}
++
++REX_TEST_CASE("title physical sampling bypasses synthesis remaps and modal capture only for UI",
++              "[hid][title_input]") {
++  Run("fake_a,fake_b", [](rex::hid::IInputSystem& input) {
++    auto* title = dynamic_cast<rex::hid::ITitleInput*>(&input);
++    REQUIRE(title);
++    CHECK_FALSE(title->GetPhysicalState());
++    CHECK(input.GetState(0));
++    g_fake[0].devices = {MakePad(1, 0)};
++    g_fake[0].states[1] = Buttons(rex::hid::kPadA);
++    ++g_fake[0].revision;
++    g_fake[1].devices = {MakePad(7, 0)};
++    g_fake[1].states[7] = Buttons(rex::hid::kPadB);
++    ++g_fake[1].revision;
++    auto filter = title->SetStateFilter([title](u32, rex::hid::PadState& state) {
++      auto physical = title->GetPhysicalState();
++      REQUIRE(physical);
++      CHECK(physical->buttons == rex::hid::kPadA);
++      state.buttons = rex::hid::kPadX;
++    });
++    CHECK(input.GetState(0)->state.buttons == rex::hid::kPadX);
++    filter = {};
++    input.AcquireUIBlock();
++    CHECK(title->GetPhysicalState()->buttons == 0);
++    CHECK(title->GetPhysicalState(true)->buttons == rex::hid::kPadA);
++    input.ReleaseUIBlock();
++    rex::InputEvent lost;
++    lost.type = rex::InputEvent::Type::kFocusLost;
++    input.OnInputEvent(lost);
++    CHECK(title->GetPhysicalState()->buttons == 0);
++    CHECK(title->GetPhysicalState(true)->buttons == rex::hid::kPadA);
++    CHECK_FALSE(title->IsUIBlocked());
++  });
++}
++
++namespace {
++class ConsumingPointer final : public rex::ui::IUIEventListener {
++ public:
++  bool consume = true;
++  void OnUIEvent(const rex::ui::UIEvent&) override {}
++  void OnInputEvent(rex::InputEvent& event) override { event.handled = consume; }
++};
++}
++
++REX_TEST_CASE("consumed host pointer input does not reach HID and releases still clear held input",
++              "[hid][title_input][ui]") {
++  rex::test_ui::UIApp app;
++  REQUIRE(app.Start());
++  auto& input = app.GetInput();
++  ConsumingPointer listener;
++  auto subscription = app.GetUI().AddEventListener(listener);
++  rex::test_ui::DeliverMouseButton(rex::InputEvent::Type::kButtonDown, rex::MouseButton::kLeft);
++  rex::test_ui::DeliverWheel(1);
++  rex::test_ui::Deliver([](rex::ui::IUIEventListener& sink) {
++    rex::InputEvent event{.type = rex::InputEvent::Type::kMotion, .x = 51, .y = 73};
++    sink.OnInputEvent(event);
++  });
++  app.Pump();
++  CHECK_FALSE(input.IsButtonDown(rex::MouseButton::kLeft));
++  CHECK(input.TakeWheel() == 0);
++  CHECK_FALSE(input.GetPointer().has_position);
++  listener.consume = false;
++  rex::test_ui::DeliverMouseButton(rex::InputEvent::Type::kButtonDown, rex::MouseButton::kLeft);
++  app.Pump();
++  CHECK(input.IsButtonDown(rex::MouseButton::kLeft));
++  listener.consume = true;
++  rex::test_ui::DeliverMouseButton(rex::InputEvent::Type::kButtonUp, rex::MouseButton::kLeft);
++  app.Pump();
++  CHECK_FALSE(input.IsButtonDown(rex::MouseButton::kLeft));
++  subscription.Reset();
++  app.Shutdown();
++}
+diff --git a/tests/unit/CMakeLists.txt b/tests/unit/CMakeLists.txt
+--- a/tests/unit/CMakeLists.txt
++++ b/tests/unit/CMakeLists.txt
+@@ -7,6 +7,7 @@
+   hid/xam_input_error_test.cpp
+   apu/audio_system_test.cpp
+   apu/sdl3_audio_test.cpp
++  hid/title_input_test.cpp
+   hid/input_system_test.cpp
+   hid/sdl3_input_test.cpp
+   hid/bindings_test.cpp

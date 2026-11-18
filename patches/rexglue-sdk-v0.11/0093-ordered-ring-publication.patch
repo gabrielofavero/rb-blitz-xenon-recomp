@@ -1,0 +1,142 @@
+diff --git a/src/gpu/xenos/command_processor.cpp b/src/gpu/xenos/command_processor.cpp
+--- a/src/gpu/xenos/command_processor.cpp
++++ b/src/gpu/xenos/command_processor.cpp
+@@ -264,7 +264,7 @@
+ }
+ 
+ void CommandProcessor::CallInThreadNoWait(rex::MoveOnlyFunction<void()> fn) {
+-  if (!worker_running_ || IsWorkerThread()) {
++  if (!worker_running_) {
+     fn();
+     return;
+   }
+@@ -361,7 +361,13 @@
+ 
+ void CommandProcessor::InitializeRingBuffer(u32 ptr, u32 size_log2) {
+   CallInThreadNoWait([this, ptr, size_log2]() {
++    // A new ring starts unpublished. Submit its write pointer through the same
++    // queue so a guest cannot publish new offsets before this reset is applied.
+     read_ptr_index_ = 0;
++    write_ptr_index_.store(0);
++    incomplete_packet_retries_ = 0;
++    incomplete_packet_offset_ = ~u32{0};
++    incomplete_packet_write_index_ = ~u32{0};
+     primary_buffer_ptr_ = ptr;
+     primary_buffer_size_ = static_cast<u32>(1) << (size_log2 + 3);
+   });
+@@ -375,8 +381,9 @@
+ }
+ 
+ void CommandProcessor::UpdateWritePointer(u32 value) {
+-  write_ptr_index_ = value;
+-  write_ptr_index_event_->Set();
++  // Keep guest publication ordered after ring and writeback setup without
++  // waiting for a worker that may need the guest to complete a memory wait.
++  CallInThreadNoWait([this, value]() { write_ptr_index_ = value; });
+ }
+ 
+ u32 CommandProcessor::ReadRegisterValue(u32 index) const {
+diff --git a/tests/unit/gpu/packet_recovery_test.cpp b/tests/unit/gpu/packet_recovery_test.cpp
+--- a/tests/unit/gpu/packet_recovery_test.cpp
++++ b/tests/unit/gpu/packet_recovery_test.cpp
+@@ -3,6 +3,8 @@
+ #include <catch2/generators/catch_generators.hpp>
+ #include <chrono>
+ #include <thread>
++#include <future>
++#include "gpu/xenos/command_processor.h"
+ #include <vector>
+ #include <rex/xenos/packet.h>
+ #include "fake_driver_context.h"
+@@ -122,3 +124,91 @@
+   driver.DetachTitle();
+   driver.Shutdown();
+ }
++
++REX_TEST_CASE_METHOD(Fixture,"Queued ring publication survives initialization without blocking", "[gpu][packet_recovery][ring_reconfiguration]") {
++  auto& memory=rex::test::GetTestMemory();
++  rex::test::FakeTitleContext title(memory);
++  rex::test::FakeDriverContext context;
++  rex::gpu::null::NullXenosGraphicsDriver driver;
++  REQUIRE(driver.Initialize(context));
++  REQUIRE(driver.AttachTitle(rex::TitleInfo{},title,title,title));
++  const auto block=memory.SystemHeapAlloc(0x2000,0x1000,rex::kernel::kSystemHeapPhysical);
++  const auto base=memory.GetPhysicalAddress(block),target=base+0x1100;
++  Put(memory,base,rex::xenos::BuildPacketType3(rex::xenos::PM4_MEM_WRITE,2));
++  Put(memory,base+4,target|2u);Put(memory,base+8,0xCAFEF00Du);
++  auto* processor=driver.GetCommandProcessor();
++  std::promise<void> entered,release;
++  auto started=entered.get_future();
++  auto released=release.get_future();
++  processor->CallInThread([&]{entered.set_value();released.wait();});
++  const bool blocked=started.wait_for(std::chrono::seconds(5))==std::future_status::ready;
++  if (!blocked) {
++    release.set_value();
++    driver.DetachTitle();driver.Shutdown();
++    FAIL("Processor did not reach the controlled queue barrier");
++  }
++  auto publish=std::async(std::launch::async,[&]{driver.InitializeRingBuffer(base,9);driver.WriteRegister(0x01C5,3);});
++  const auto early=publish.wait_for(std::chrono::milliseconds(100));
++  release.set_value();publish.get();
++  CHECK(early==std::future_status::ready);
++  CHECK(WaitFor([&]{return Get(memory,target)==0xCAFEF00Du;}));
++  driver.DetachTitle();driver.Shutdown();
++}
++
++REX_TEST_CASE_METHOD(Fixture,"Ring reconfiguration retires the previous write pointer", "[gpu][packet_recovery][ring_reconfiguration]") {
++  auto& memory=rex::test::GetTestMemory();
++  rex::test::FakeTitleContext title(memory);
++  rex::test::FakeDriverContext context;
++  rex::gpu::null::NullXenosGraphicsDriver driver;
++  REQUIRE(driver.Initialize(context));
++  REQUIRE(driver.AttachTitle(rex::TitleInfo{},title,title,title));
++  const auto block=memory.SystemHeapAlloc(0x4000,0x1000,rex::kernel::kSystemHeapPhysical);
++  const auto base=memory.GetPhysicalAddress(block);
++  const auto writeback=base+0x2000,target=base+0x2100,next=base+0x1000;
++  Put(memory,base,rex::xenos::BuildPacketType3(rex::xenos::PM4_MEM_WRITE,2));
++  Put(memory,base+4,target|2u);Put(memory,base+8,0x11111111u);
++  driver.InitializeRingBuffer(base,9);driver.EnableReadPointerWriteBack(writeback,6);
++  driver.WriteRegister(0x01C5,3);
++  CHECK(WaitFor([&]{return Get(memory,writeback)==3;}));
++  CHECK(Get(memory,target)==0x11111111u);
++  Put(memory,target,0);
++  Put(memory,next,rex::xenos::BuildPacketType3(rex::xenos::PM4_MEM_WRITE,2));
++  Put(memory,next+4,target|2u);Put(memory,next+8,0x22222222u);
++  driver.InitializeRingBuffer(next,9);
++  driver.GetCommandProcessor()->CallInThreadAndWait([]{});
++  std::this_thread::sleep_for(std::chrono::milliseconds(60));
++  CHECK(Get(memory,target)==0);
++  driver.WriteRegister(0x01C5,3);
++  CHECK(WaitFor([&]{return Get(memory,target)==0x22222222u;}));
++  driver.DetachTitle();driver.Shutdown();
++}
++
++REX_TEST_CASE_METHOD(Fixture,"Worker publication follows already queued ring initialization", "[gpu][packet_recovery][ring_reconfiguration]") {
++  auto& memory=rex::test::GetTestMemory();
++  rex::test::FakeTitleContext title(memory);
++  rex::test::FakeDriverContext context;
++  rex::gpu::null::NullXenosGraphicsDriver driver;
++  REQUIRE(driver.Initialize(context));
++  REQUIRE(driver.AttachTitle(rex::TitleInfo{},title,title,title));
++  const auto block=memory.SystemHeapAlloc(0x2000,0x1000,rex::kernel::kSystemHeapPhysical);
++  const auto base=memory.GetPhysicalAddress(block),target=base+0x1100;
++  Put(memory,base,rex::xenos::BuildPacketType3(rex::xenos::PM4_MEM_WRITE,2));
++  Put(memory,base+4,target|2u);Put(memory,base+8,0xCAFEF00Du);
++  auto* processor=driver.GetCommandProcessor();
++  std::promise<void> entered,release;
++  auto started=entered.get_future();auto released=release.get_future();
++  processor->CallInThread([&]{
++    entered.set_value();released.wait();
++    // A guest interrupt can publish on this worker while older setup is queued.
++    processor->UpdateWritePointer(3);
++  });
++  const bool blocked=started.wait_for(std::chrono::seconds(5))==std::future_status::ready;
++  if (!blocked) {
++    release.set_value();driver.DetachTitle();driver.Shutdown();
++    FAIL("Processor did not reach the controlled queue barrier");
++  }
++  driver.InitializeRingBuffer(base,9);
++  release.set_value();
++  CHECK(WaitFor([&]{return Get(memory,target)==0xCAFEF00Du;}));
++  driver.DetachTitle();driver.Shutdown();
++}

@@ -37,6 +37,9 @@ class CollectionTests(unittest.TestCase):
         (self.source / 'player-save.bin').write_bytes(b'private fixture')
         binary = b'MZ fixture, hash only'
         (self.root / 'rb_blitz.exe').write_bytes(binary)
+        module = b'MZ module fixture, hash only'
+        for name in ('rexkernel.dll', 'rexapu-sdl3.dll', 'unrelated.dll'):
+            (self.root / name).write_bytes(module)
         result = self.collect()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         with zipfile.ZipFile(self.output) as archive:
@@ -51,6 +54,11 @@ class CollectionTests(unittest.TestCase):
             self.assertEqual(manifest['user_note'], 'Bounce Man, first play')
             self.assertEqual(manifest['build_files_at_collection'][0]['sha256'],
                              hashlib.sha256(binary).hexdigest())
+            identities = {r['name']: r for r in manifest['build_files_at_collection']}
+            self.assertEqual(set(identities), {'rb_blitz.exe', 'rexkernel.dll', 'rexapu-sdl3.dll'})
+            for name in ('rexkernel.dll', 'rexapu-sdl3.dll'):
+                self.assertEqual(identities[name]['sha256'], hashlib.sha256(module).hexdigest())
+                self.assertEqual(identities[name]['bytes'], len(module))
             self.assertIn('previous.log', manifest['missing'])
 
     def test_existing_archive_is_preserved(self):

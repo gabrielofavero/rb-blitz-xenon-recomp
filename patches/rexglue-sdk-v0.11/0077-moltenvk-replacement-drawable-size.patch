@@ -1,0 +1,71 @@
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp
+@@ -33,6 +33,7 @@
+ #endif
+ #if REX_PLATFORM_MAC
+ #include <rex/utility.h>
++#include "gpu/xenos/host/metal_surface.h"
+ #endif
+ 
+ #include "gpu/xenos/host/present_policy.h"
+@@ -584,6 +585,12 @@
+     }
+   }
+ 
++#if REX_PLATFORM_MAC
++  // MoltenVK may retire the old drawable at 1x1 after creating its replacement.
++  RestoreMetalDrawableSize(static_cast<const gpu::NativeSurface&>(new_surface).GetLayer(),
++                          paint_context_.swapchain_extent.width,
++                          paint_context_.swapchain_extent.height);
++#endif
+   // On failure from here, call paint_context_.DestroySwapchainAndVulkanSurface before returning.
+   if (paint_context_.swapchain_render_pass_format != new_swapchain_format) {
+     objects::DestroyAndNullHandle(dfn.vkDestroyRenderPass, device,
+diff --git a/src/gpu/xenos/host/metal_surface.h b/src/gpu/xenos/host/metal_surface.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/host/metal_surface.h
+@@ -0,0 +1,7 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#pragma once
++#include <rex/types.h>
++namespace rex::gpu {
++/** Restore the committed extent after replacement swapchain retirement. Apple only. */
++bool RestoreMetalDrawableSize(void* layer, u32 width, u32 height);
++}
+diff --git a/src/gpu/xenos/host/metal_surface.mm b/src/gpu/xenos/host/metal_surface.mm
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/host/metal_surface.mm
+@@ -0,0 +1,16 @@
++// Copyright 2026. Released under the BSD license - see LICENSE.
++#include "gpu/xenos/host/metal_surface.h"
++#include <rex/logging/log_category.h>
++#import <QuartzCore/CAMetalLayer.h>
++namespace rex::gpu {
++bool RestoreMetalDrawableSize(void* layer, u32 width, u32 height) {
++  if (!layer || !width || !height) return false;
++  CAMetalLayer* metal_layer = (__bridge CAMetalLayer*)layer;
++  const CGSize before = metal_layer.drawableSize;
++  if (before.width == width && before.height == height) return false;
++  metal_layer.drawableSize = CGSizeMake(width, height);
++  REXUI_INFO("Metal surface: restored drawable {}x{} -> {}x{} after swapchain replacement",
++              double(before.width), double(before.height), width, height);
++  return true;
++}
++}
+diff --git a/src/gpu/xenos/CMakeLists.txt b/src/gpu/xenos/CMakeLists.txt
+--- a/src/gpu/xenos/CMakeLists.txt
++++ b/src/gpu/xenos/CMakeLists.txt
+@@ -200,6 +200,10 @@
+     ${REXGPU_XENOS_VULKAN_ALL}
+   )
+   target_compile_definitions(rexgpu-xenos-vulkan PRIVATE REX_GPU_XENOS_STATIC)
++  if (APPLE AND TARGET rexgpu-xenos-vulkan)
++    target_sources(rexgpu-xenos-vulkan PRIVATE host/metal_surface.mm)
++    target_link_libraries(rexgpu-xenos-vulkan PRIVATE "-framework QuartzCore")
++  endif ()
+   target_link_libraries(
+     rexgpu-xenos-vulkan
+     PRIVATE rexgpu-xenos-base
