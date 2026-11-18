@@ -2,6 +2,12 @@
 
 ## Display profiles and defaults (2026-11-18)
 
+The [performance and aspect-tier update](../plans/finished/2026-11-18-live-profile-performance-and-aspect-tiers.md)
+adds lower native-aspect choices beside 16:9 and addresses target lifetime and
+cache retention during live changes. The latest owner log records approximately
+3 FPS after returning to native; recovery of runtime performance remains an
+explicit acceptance check.
+
 The first owner run found profile allocation refusals and AA misclassified as
 External. The [live display correction](../plans/finished/2026-11-18-live-display-profile-fixes.md)
 fixes the void lock ABI and deferred startup ownership. Live visual acceptance

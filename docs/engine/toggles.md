@@ -96,6 +96,8 @@ The other cvars live in [src/enhancements.cpp](../../src/enhancements.cpp); the 
 boot log, not by this page.
 
 `gpu.xenos.present_source_aspect` defaults off in the SDK. Resolution profiles enable it to follow the live frontbuffer aspect in D3D12 and Vulkan; see `src/hooks/render_settings.cpp` and SDK patch 0094.
+`gpu.xenos.clear_caches_on_present_resize` also defaults off. Live profiles enable it to prune unused GPU resources after a size change, using GPU-idle frame-end cleanup; owned EDRAM and compiled pipelines are retained (SDK patch 0095).
+
 
 ## How to set one
 

@@ -1289,6 +1289,9 @@ if(BUILD_TESTING)
     )
     target_include_directories(rb_blitz_native_mouse_tests PRIVATE src)
     add_test(NAME native_mouse COMMAND rb_blitz_native_mouse_tests)
+    add_executable(rb_blitz_present_resize_tests tests/present_resize_tests.cpp)
+    target_include_directories(rb_blitz_present_resize_tests PRIVATE tests "${REXSDK_DIR}/src")
+    add_test(NAME present_resize COMMAND rb_blitz_present_resize_tests)
 
     add_executable(rb_blitz_probe_trace_tests
         tests/probe_trace_tests.cpp

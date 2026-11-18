@@ -21,7 +21,13 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
-**Display profile acceptance (2026-11-18):** the first owner run exposed a void
+**Display profile acceptance (2026-11-18):** the next owner run confirms live
+changes but reports sustained GPU fence stalls, including after restoring native.
+The [performance correction](../plans/finished/2026-11-18-live-profile-performance-and-aspect-tiers.md)
+addresses stale target bindings and obsolete GPU-cache retention; performance
+acceptance of the rebuilt game remains unverified.
+
+Earlier findings: the first owner run exposed a void
 texture-lock status error and missing deferred SDK setting ownership. The
 [live corrections](../plans/finished/2026-11-18-live-display-profile-fixes.md)
 address those paths; acceptance of the rebuilt game remains unverified. Live resource

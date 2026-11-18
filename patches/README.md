@@ -14,9 +14,9 @@ checkout.
 ## Registered production v0.11.0 stack (2026-11-18)
 
 The [v0.11.0 stack and complete disposition ledger](rexglue-sdk-v0.11/README.md)
-contains the **66 registered production SDK patches** for exact release commit
+contains the **67 registered production SDK patches** for exact release commit
 `a3e1d82678ca20d68d4837a8e9ee4652ff073745`. It accounts for **all 71 original
-SDK patch IDs, the retained nested MoltenVK patch and new 0089/0090/0091/0092/0093/0094**:
+SDK patch IDs, the retained nested MoltenVK patch and new 0089/0090/0091/0092/0093/0094/0095**:
 sixty original IDs retain v0.11 files; eleven use upstream/title replacements
 or fold into an owning patch. The title integration and SDK pin are adopted;
 the fresh Windows AMD64 production source-SDK release build passes.

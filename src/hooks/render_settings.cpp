@@ -202,6 +202,7 @@ REX_EXTERN(sub_82508428); // D3D texture allocation
 REX_EXTERN(sub_8250EC88); // D3DResource::Release, including deferred GPU destruction
 REX_EXTERN(sub_82508270); // texture LockRect
 REX_EXTERN(sub_82506828); // texture UnlockRect
+REX_EXTERN(sub_823E9CE0); // bind the current color/depth pair and invalidate the material cache
 REX_EXTERN(__imp__sub_823F3C40); // renderer BeginDrawing
 
 void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* base, uint32_t renderer) {
@@ -233,14 +234,27 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
   if (!base || !renderer || !plan.supported) return;
   const auto read = [&](uint32_t offset) { return LoadGuestBe32(base + renderer + offset); };
   const uint32_t w = plan.guest_size.width, h = plan.guest_size.height;
+  const uint32_t flags = read(796);
+  const bool tiled = !(flags & 1), vertical = (flags & 2) != 0;
+  const uint32_t tile_w = tiled && !vertical ? ProfileTileExtent(w) : w;
+  const uint32_t tile_h = tiled && vertical ? ProfileTileExtent(h) : h;
   static DisplayMode failed;
-  if (!first_frame && read(64) == w && read(68) == h) { failed = {}; acknowledge(true); return; }
+  const bool initial_tiles_match = !tiled || (read(848) == 2 &&
+      read(852) == 0 && read(856) == 0 && read(860) == tile_w && read(864) == tile_h &&
+      read(868) == (vertical ? 0 : tile_w) && read(872) == (vertical ? tile_h : 0) &&
+      read(876) == w && read(880) == h);
+  if (read(64) == w && read(68) == h && (!first_frame || initial_tiles_match)) {
+    { std::lock_guard lock(g_profiles_mutex); g_profile_first_frame = false; }
+    failed = {};
+    acknowledge(true);
+    return;
+  }
   if (failed.width == int(w) && failed.height == int(h)) return;
   if (!read(452) || !read(800) || !read(808)) return;
 
   // Build a complete replacement before publishing any pointer or size. The
-  // guest allocator owns EDRAM layout and resource lifetime; the GPU multiplier
-  // and its texture caches stay intact throughout the transition.
+  // guest allocator owns EDRAM layout and resource lifetime. The multiplier
+  // stays fixed; obsolete backend caches are pruned after the GPU frame ends.
   PPCContext ctx = caller;
   rex::ppc::OpenCallFrame(ctx, base, 768);
   const uint32_t scratch = ctx.r1.u32 + 128;
@@ -248,10 +262,6 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
   constexpr std::array<uint32_t, 9> fields{800,808,804,812,816,820,752,756,760};
   std::array<uint32_t, 9> old{}, fresh{};
   for (size_t i = 0; i < fields.size(); ++i) old[i] = read(fields[i]);
-  const uint32_t flags = read(796);
-  const bool tiled = !(flags & 1), vertical = (flags & 2) != 0;
-  const uint32_t tile_w = tiled && !vertical ? ProfileTileExtent(w) : w;
-  const uint32_t tile_h = tiled && vertical ? ProfileTileExtent(h) : h;
   const auto pair = [&](int index, uint32_t samples, uint32_t width, uint32_t height) {
     ctx.r3.u32 = width; ctx.r4.u32 = height; ctx.r5.u32 = samples;
     ctx.r6.u32 = scratch + 64; ctx.r7.u32 = scratch + 68;
@@ -322,6 +332,10 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
     SetBootPortraitFrame(crop.width, crop.height);
   }
   WriteGuestLayoutAspect(base);
+  // Xbox target bindings store raw surface pointers, without AddRef. Replace
+  // those bindings and invalidate the material cache before releasing them.
+  ctx.r3.u32 = renderer;
+  sub_823E9CE0(ctx, base);
   release(old);
   { std::lock_guard lock(g_profiles_mutex); g_profile_first_frame = false; }
   failed = {};

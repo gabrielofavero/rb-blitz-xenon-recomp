@@ -56,9 +56,12 @@ class RegistryApp final : public rex::app::App {
     REX_TRY_VOID(registry.SetText(SettingLayer::kTitle,"native_pipeline_cache","false"));
     REX_TRY_VOID(registry.SetText(SettingLayer::kTitle,"vulkan_shared_memory_upload_batching","false"));
     BeginCase("Graphics preferences queue before the Xenos owner registers");
+    CHECK_FALSE(xenos.present_source_aspect.Get());
+    CHECK_FALSE(xenos.clear_caches_on_present_resize.Get());
     for (const auto& [name, value] : std::initializer_list<std::pair<const char*, const char*>>{
          {"native_2x_msaa", "false"}, {"swap_post_effect", "fxaa"},
-         {"gpu.xenos.present_source_aspect", "true"}}) {
+         {"gpu.xenos.present_source_aspect", "true"},
+         {"gpu.xenos.clear_caches_on_present_resize", "true"}}) {
       CHECK_FALSE(InspectRuntimeSetting(name).registered);
       CHECK_TRUE(WriteRuntimeSetting(name, value, SettingLayer::kTitle).state ==
                  RuntimeSettingWrite::kDeferred);
@@ -67,7 +70,8 @@ class RegistryApp final : public rex::app::App {
     BeginCase("Queued graphics preferences become active before startup freezes");
     for (const auto& [name, value] : std::initializer_list<std::pair<const char*, const char*>>{
          {"native_2x_msaa", "false"}, {"swap_post_effect", "fxaa"},
-         {"gpu.xenos.present_source_aspect", "true"}}) {
+         {"gpu.xenos.present_source_aspect", "true"},
+         {"gpu.xenos.clear_caches_on_present_resize", "true"}}) {
       const auto actual = InspectRuntimeSetting(name);
       CHECK_TRUE(actual.registered);
       CHECK_TRUE(actual.active_value == value);

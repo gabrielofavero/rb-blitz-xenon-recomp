@@ -1,6 +1,6 @@
 # ReXGlue v0.11.0 production stack and migration ledger
 
-Status: registered production stack, 2026-11-18. **66 SDK patches** apply to exact
+Status: registered production stack, 2026-11-18. **67 SDK patches** apply to exact
 upstream v0.11.0 commit `a3e1d82678ca20d68d4837a8e9ee4652ff073745`.
 The production gitlink and title integration now use this release and patch set.
 The fresh Windows AMD64 production source-SDK release build passes.
@@ -12,7 +12,7 @@ is retained for rollback. The
 owns current delivery gates and validation.
 
 The ledger covers all **71 original SDK patch IDs**, the retained nested
-MoltenVK patch, and new responsibilities **0089**, **0090**, **0091**, **0092** and **0093**. Sixty original IDs have candidate
+MoltenVK patch, and new responsibilities **0089**, **0090**, **0091**, **0092**, **0093**, **0094** and **0095**. Sixty original IDs have candidate
 files; eleven use an upstream/title replacement or fold into an owning candidate.
 Original IDs retain their responsibility even when filenames or implementation
 layers change. Corrections are folded into the owning candidate; 0089 is separate
@@ -34,6 +34,27 @@ MoltenVK), independent of host architecture. Windows AMD64 compilation and
 full-stack replay are checked locally; native Linux/macOS/iOS/Android and
 Vulkan/MoltenVK runtime transitions remain unverified.
 No removed SDK API shim or second runtime is introduced.
+
+### Live frontbuffer cache lifecycle (2026-11-18)
+
+[0095-present-resize-cache-lifecycle.patch](0095-present-resize-cache-lifecycle.patch)
+adds `gpu.xenos.clear_caches_on_present_resize`, default false. This is a distinct
+resource-lifetime responsibility from 0094's presentation aspect: the command
+processor observes dimension changes and queues existing backend cache cleanup
+once per valid transition. First/stable/invalid frames do not request cleanup.
+Cleanup waits for GPU completion at frame end. Existing ownership checks retain
+EDRAM data still owned by a target; compiled pipelines remain cached. No SDK API,
+old patch, dependency, GPU scale default or other title behavior is removed.
+
+The setting is shared by Windows D3D12 and Vulkan on Windows, Linux, macOS, iOS
+and Android, including MoltenVK where applicable, independent of architecture.
+Only Windows AMD64 compilation and SDK-free tracker tests are available locally;
+native cross-platform transitions and recovery of runtime performance remain
+unverified. The title enables this only for its live resolution profiles.
+Windows AMD64 release compilation and 15 focused title tests pass. Full replay
+passes all 67 patches with zero files needing updates
+(`out/live-profile-performance-sdk-audit.log`). Build/replay evidence is recorded in the
+[performance delivery record](../../docs/plans/finished/2026-11-18-live-profile-performance-and-aspect-tiers.md).
 
 ### Live frontbuffer aspect (2026-11-18)
 

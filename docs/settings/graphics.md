@@ -2,6 +2,11 @@
 
 ## Interface and gameplay profiles (2026-11-18)
 
+The next owner run found sustained GPU fence stalls after several live changes.
+The [performance and aspect-tier record](../plans/finished/2026-11-18-live-profile-performance-and-aspect-tiers.md)
+tracks raw device-binding lifetime and obsolete GPU-cache retention corrections.
+Post-correction performance remains unverified until a game run.
+
 The first owner run exposed a void texture-lock call being read as an HRESULT:
 valid high-bit guest pointers were rejected, so the old frame remained active.
 The [live correction record](../plans/finished/2026-11-18-live-display-profile-fixes.md)
@@ -11,8 +16,9 @@ context changes keep the current window and fit each active aspect with bars.
 
 [static] The visible desktop controls are Resolution -> Interface / Gameplay.
 Each defaults to `native`, resolving the current monitor on each boot. The other
-choices are 16:9 sizes that fit that monitor, including its fitted 16:9 equivalent
-and presets down to 1280x720. Manual choices persist independently. Mobile hides
+choices include its fitted 16:9 equivalent, standard 16:9 sizes, and lower sizes
+that retain the native aspect, down to 720 pixels high. Manual choices persist
+independently. For example, 3440x1440 includes both 1720x720 and 1280x720. Mobile hides
 Resolution and offers Render Scale -> Interface / Gameplay, each a guest audio
 wheel with six positions from 0.5 through 1.0; both default to 1.0.
 

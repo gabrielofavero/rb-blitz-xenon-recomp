@@ -1243,6 +1243,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
       ConfigureResolutionProfiles(capability_snapshot_.primary_display_size, screen_plan_.draw_scale,
           schema::IsMobile(schema::CurrentReleaseSettings().platform), profiles);
       WriteRuntimeSetting("gpu.xenos.present_source_aspect", "true", rex::SettingLayer::kTitle);
+      WriteRuntimeSetting("gpu.xenos.clear_caches_on_present_resize", "true", rex::SettingLayer::kTitle);
     }
     // Both halves of the guest size, because the title derives its width from its height and
     // the aspect the user picked is not one the title can compute (src/hooks/render_settings.h).

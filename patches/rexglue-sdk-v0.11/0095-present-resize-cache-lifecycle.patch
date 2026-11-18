@@ -1,0 +1,142 @@
+# Bound unused GPU caches after opt-in live frontbuffer resize.
+# Shared D3D12/Vulkan lifecycle; disabled by default; owned EDRAM and pipelines retained.
+diff --git a/src/gpu/xenos/command_processor.h b/src/gpu/xenos/command_processor.h
+--- a/src/gpu/xenos/command_processor.h
++++ b/src/gpu/xenos/command_processor.h
+@@ -41,6 +41,7 @@
+ #include <rex/platform/sync.h>
+ #include "gpu/xenos/host/presenter.h"
+ #include "gpu/xenos/xenos_export.h"
++#include "gpu/xenos/present_resize.h"
+ 
+ namespace rex::gpu {
+ 
+@@ -165,6 +166,8 @@
+   void ExecutePacket(u32 ptr, u32 count);
+ 
+  protected:
++  void CheckPresentResize(u32 width, u32 height);
++
+   /** Value in an occlusion query result that marks it finished. */
+   static constexpr u32 kQueryFinished = std::byteswap(0xFFFFFEEDu);
+ 
+@@ -441,6 +444,8 @@
+   SwapPostEffect swap_post_effect_desired_ = SwapPostEffect::kNone;
+   SwapPostEffect swap_post_effect_actual_ = SwapPostEffect::kNone;
+ 
++  PresentResizeTracker present_resize_tracker_;
++
+   const Setting<bool>* driver_readback_memexport_ = nullptr;
+ 
+  private:
+diff --git a/src/gpu/xenos/command_processor.cpp b/src/gpu/xenos/command_processor.cpp
+--- a/src/gpu/xenos/command_processor.cpp
++++ b/src/gpu/xenos/command_processor.cpp
+@@ -272,6 +272,20 @@
+ }
+ 
+ void CommandProcessor::ClearCaches() {}
++
++void CommandProcessor::CheckPresentResize(u32 width, u32 height) {
++  const u32 previous_width = present_resize_tracker_.width();
++  const u32 previous_height = present_resize_tracker_.height();
++  if (!present_resize_tracker_.Observe(
++          width, height, GetXenosSettings().clear_caches_on_present_resize.Get())) {
++    return;
++  }
++  // Backend cleanup waits for GPU completion at frame end and preserves owned
++  // EDRAM targets and compiled pipelines.
++  ClearCaches();
++  REXGPU_INFO("Frontbuffer resized {}x{} -> {}x{}; GPU cache cleanup queued",
++              previous_width, previous_height, width, height);
++}
+ 
+ void CommandProcessor::InvalidateGPUMemory() {}
+ 
+diff --git a/src/gpu/xenos/xenos_settings.h b/src/gpu/xenos/xenos_settings.h
+--- a/src/gpu/xenos/xenos_settings.h
++++ b/src/gpu/xenos/xenos_settings.h
+@@ -22,6 +22,8 @@
+  public:
+   REX_SETTING(bool, present_source_aspect, false,
+               "Use the current frontbuffer aspect instead of the startup video mode");
++  REX_SETTING(bool, clear_caches_on_present_resize, false,
++              "Prune unused GPU caches at frame end when frontbuffer dimensions change");
+   REX_SETTING(bool, present_letterbox, true, "Keep the title's aspect ratio when presenting");
+   REX_SETTING(i32, present_safe_area_x, 90, "Horizontal title safe area percent", Range{1, 100});
+   REX_SETTING(i32, present_safe_area_y, 90, "Vertical title safe area percent", Range{1, 100});
+diff --git a/src/gpu/xenos/d3d12/command_processor.cpp b/src/gpu/xenos/d3d12/command_processor.cpp
+--- a/src/gpu/xenos/d3d12/command_processor.cpp
++++ b/src/gpu/xenos/d3d12/command_processor.cpp
+@@ -1876,6 +1876,7 @@
+ 
+ void D3D12CommandProcessor::IssueSwap([[maybe_unused]] u32 frontbuffer_ptr, u32 frontbuffer_width,
+                                       u32 frontbuffer_height) {
++  CheckPresentResize(frontbuffer_width, frontbuffer_height);
+   visible_region_ = draw_state::ReadVisibleRegion(GetXenosSettings());
+   REX_PROFILE_SCOPE("gpu");
+   vertex_buffers_in_sync_[0] = 0;
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -2200,6 +2200,7 @@
+ 
+ void VulkanCommandProcessor::IssueSwap([[maybe_unused]] u32 frontbuffer_ptr, u32 frontbuffer_width,
+                                        u32 frontbuffer_height) {
++  CheckPresentResize(frontbuffer_width, frontbuffer_height);
+   visible_region_ = draw_state::ReadVisibleRegion(GetXenosSettings());
+   REX_PROFILE_SCOPE("gpu");
+   vertex_buffers_in_sync_[0] = 0;
+diff --git a/src/gpu/xenos/pipeline/render_target/cache.cpp b/src/gpu/xenos/pipeline/render_target/cache.cpp
+--- a/src/gpu/xenos/pipeline/render_target/cache.cpp
++++ b/src/gpu/xenos/pipeline/render_target/cache.cpp
+@@ -305,6 +305,7 @@
+ }
+ 
+ void RenderTargetCache::ClearCache() {
++  const size_t previous_count = render_targets_.size();
+   if (!render_targets_.empty()) {
+     std::unordered_set<RenderTargetKey, RenderTargetKey::Hasher> used_render_targets;
+     for (const auto& ownership_range_pair : ownership_ranges_) {
+@@ -333,6 +334,8 @@
+       }
+     }
+   }
++  REXGPU_INFO("Render target cache cleanup: {} -> {} targets; owned EDRAM targets preserved",
++              previous_count, render_targets_.size());
+ }
+ 
+ void RenderTargetCache::BeginFrame() {
+diff --git a/src/gpu/xenos/present_resize.h b/src/gpu/xenos/present_resize.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/present_resize.h
+@@ -0,0 +1,28 @@
++// Copyright (c) 2026 ReXGlue contributors.
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++
++#include <cstdint>
++
++namespace rex::gpu {
++
++// Owned by one command processor and observed only on its worker thread.
++class PresentResizeTracker {
++ public:
++  bool Observe(uint32_t width, uint32_t height, bool cleanup_enabled) {
++    if (!width || !height) return false;
++    const bool changed = width_ && height_ && (width != width_ || height != height_);
++    width_ = width;
++    height_ = height;
++    return cleanup_enabled && changed;
++  }
++
++  uint32_t width() const { return width_; }
++  uint32_t height() const { return height_; }
++
++ private:
++  uint32_t width_ = 0;
++  uint32_t height_ = 0;
++};
++
++}  // namespace rex::gpu
