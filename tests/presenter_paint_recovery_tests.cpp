@@ -1,112 +1,99 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Exercise the real presenter/window state machines without an OS window or GPU.
+// Exercise the real presenter state machine without an OS window or GPU.
 #include "check.h"
-#include <rex/ui/presenter.h>
-#include <rex/ui/window.h>
-#include <rex/ui/windowed_app_context.h>
+#include "gpu/xenos/host/presenter.h"
+#include "gpu/xenos/xenos_graphics_driver_base.h"
+#include "gpu/xenos/command_processor.h"
 
 namespace {
-using namespace rex::ui;
-class Context final : public WindowedAppContext {
-  void NotifyUILoopOfPendingFunctions() override {}
-  void PlatformQuitFromUIThread() override {}
+using namespace rex::gpu;
+class TestDriver final : public XenosGraphicsDriverBase {
+ public:
+  std::string_view GetName() const override { return "test"; }
+ private:
+  void CreateProvider(bool) override {}
+  std::unique_ptr<CommandProcessor> CreateCommandProcessor() override { return {}; }
 };
 class TestSurface final : public Surface {
  public:
   bool available = true;
-  TypeIndex GetType() const override { return kTypeIndex_CAMetalLayer; }
+  TypeIndex GetType() const override { return kTypeIndexCAMetalLayer; }
  private:
-  bool GetSizeImpl(uint32_t& width, uint32_t& height) const override {
+  bool ReadSize(rex::u32& width, rex::u32& height) const override {
     width = 405; height = 720; return available;
   }
 };
-class TestWindow final : public Window {
+class Host final : public IPresentationHost {
  public:
-  explicit TestWindow(Context& context) : Window(context, "test", 405, 720) {}
-  ~TestWindow() override { EnterDestructor(); }
   int requests = 0;
-  TestSurface* surface = nullptr;
-  void Paint() { OnPaint(true); }
-  void Focus(bool focused) {
-    WindowDestructionReceiver receiver(this);
-    OnFocusUpdate(focused, receiver);
-  }
- private:
-  bool OpenImpl() override { return true; }
-  void RequestCloseImpl() override {
-    WindowDestructionReceiver receiver(this);
-    OnBeforeClose(receiver); OnAfterClose();
-  }
-  std::unique_ptr<Surface> CreateSurfaceImpl(Surface::TypeFlags) override {
-    auto result = std::make_unique<TestSurface>(); surface = result.get(); return result;
-  }
-  void RequestPaintImpl() override { ++requests; }
+  void RequestPaint() override { ++requests; }
+  void OnPresenterDetached() override {}
 };
 class TestPresenter final : public Presenter {
  public:
-  TestPresenter() : Presenter({}) {}
+  explicit TestPresenter(const TestDriver& driver) : Presenter({}, driver) {
+    InitializeCommonSurfaceIndependent();
+  }
   int connections = 0, paints = 0;
-  Surface::TypeFlags GetSupportedSurfaceTypes() const override { return Surface::kTypeFlag_CAMetalLayer; }
-  bool CaptureGuestOutput(RawImage&) override { return false; }
+  Surface::TypeFlags GetSupportedSurfaceTypes() const override { return Surface::kTypeFlagCAMetalLayer; }
  private:
   SurfacePaintConnectResult ConnectOrReconnectPaintingToSurfaceFromUIThread(
-      Surface&, uint32_t, uint32_t, bool was_paintable, bool& vsync) override {
+      Surface&, rex::u32, rex::u32, bool was_paintable, bool& vsync) override {
     vsync = false;
     if (was_paintable) return SurfacePaintConnectResult::kSuccessUnchanged;
     ++connections; return SurfacePaintConnectResult::kSuccess;
   }
-  void DisconnectPaintingFromSurfaceFromUIThreadImpl() override {}
-  bool RefreshGuestOutputImpl(uint32_t, uint32_t, uint32_t,
-      std::function<bool(GuestOutputRefreshContext&)>, bool&) override { return true; }
-  PaintResult PaintAndPresentImpl(bool) override { ++paints; return PaintResult::kPresented; }
+  void DriverDisconnectPaintingFromSurface() override {}
+  bool DriverRefreshGuestOutput(rex::u32, rex::u32, rex::u32,
+      rex::MoveOnlyFunction<bool(GuestOutputRefreshContext&)>, bool&) override { return true; }
+  PaintResult DriverPaintAndPresent(bool) override { ++paints; return PaintResult::kPresented; }
 };
-class Drawer final : public UIDrawer {
-  void Draw(UIDrawContext&) override {}
+class Layer final : public IOverlayLayer {
+  void Draw(OverlayDrawContext&) override {}
 };
 }
 
 int main() {
   using namespace rb_blitz::test;
-  Context context;
-  TestPresenter presenter;
-  TestWindow window(context);
-  Drawer drawer;
-  CHECK_TRUE(window.Open());
-  window.SetPresenter(&presenter);
-  presenter.AddUIDrawerFromUIThread(&drawer, 0);
-  window.Paint();
+  TestDriver driver;
+  TestPresenter presenter(driver);
+  TestSurface surface;
+  Host host;
+  Layer layer;
+  CHECK_TRUE(presenter.Attach(&host, &surface));
+  presenter.AddOverlayLayer(&layer, 0);
+  presenter.Paint(true);
   const auto refresh = [&] { CHECK_TRUE(presenter.RefreshGuestOutput(1, 1, 1, 1, {})); };
 
-  BeginCase("skipped occluded paint permits a later guest frame to queue another event");
-  int requests = window.requests;
+  BeginCase("continuous forced paint resumes after skipped occluded frames");
+  const int requests = host.requests;
   refresh();
-  CHECK_EQ(window.requests, requests + 1);
+  CHECK_EQ(host.requests, requests + 1);
   refresh();
-  CHECK_EQ(window.requests, requests + 1); // coalesce while the event is still queued
-  presenter.OnPaintSkippedFromUIThread();
+  CHECK_EQ(host.requests, requests + 1);
+  const int before_paint = presenter.paints;
+  // The present loop skips unavailable drawables, then forces a paint when visible.
+  presenter.Paint(true);
+  CHECK_EQ(presenter.paints, before_paint + 1);
   refresh();
-  CHECK_EQ(window.requests, requests + 2);
-  window.Paint();
+  CHECK_EQ(host.requests, requests + 2);
+  presenter.Paint(true);
 
-  BeginCase("same-size Mac focus gains repaint without replacing the swapchain");
-  requests = window.requests;
+  BeginCase("same-size Apple surfaces keep their presentation connection");
   const int connections = presenter.connections;
-  window.Focus(true);
-  CHECK_TRUE(window.requests > requests);
-  requests = window.requests;
-  window.Focus(true); // repeated gain also wakes a consumed paint
-  CHECK_TRUE(window.requests > requests);
+  presenter.OnSurfaceResize();
+  presenter.Paint(true);
   CHECK_EQ(presenter.connections, connections);
 
-  BeginCase("expose retries a surface that was unavailable without requiring a resize");
-  window.surface->available = false;
-  presenter.OnSurfaceResizeFromUIThread();
-  window.surface->available = true;
+  BeginCase("expose retries an unavailable surface without a size change");
+  surface.available = false;
+  presenter.OnSurfaceResize();
+  surface.available = true;
   const int paints = presenter.paints;
-  window.Paint();
+  presenter.Paint(true);
   CHECK_EQ(presenter.connections, connections + 1);
   CHECK_EQ(presenter.paints, paints + 1);
-  presenter.RemoveUIDrawerFromUIThread(&drawer);
-  window.SetPresenter(nullptr);
+  presenter.RemoveOverlayLayer(&layer);
+  presenter.Attach(nullptr, nullptr);
   return Finish();
 }

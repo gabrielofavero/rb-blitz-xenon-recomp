@@ -20,6 +20,16 @@
 
 namespace rb_blitz::local_save {
 
+// Preserve the same per-user title directory across runtime API migrations.
+inline std::filesystem::path SavePath(const std::filesystem::path& user_root,
+                                      uint64_t xuid,uint32_t title_id) {
+  constexpr char digits[]="0123456789ABCDEF";
+  std::string user(16,'0'),title(8,'0');
+  for (int i=15;i>=0;--i) { user[i]=digits[xuid&15]; xuid>>=4; }
+  for (int i=7;i>=0;--i) { title[i]=digits[title_id&15]; title_id>>=4; }
+  return user_root/user/title/"local_save.bin";
+}
+
 using Bytes = std::vector<uint8_t>;
 constexpr size_t kMaxPayload = 2 * 1024 * 1024;
 

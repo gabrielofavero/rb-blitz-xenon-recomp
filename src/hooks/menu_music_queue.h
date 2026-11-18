@@ -19,7 +19,7 @@ namespace rb_blitz::shell_music {
 template <typename T>
 class MenuMusicQueue {
  public:
-  ~MenuMusicQueue() { Stop(); }
+  ~MenuMusicQueue() { Join(); }
 
   void Start(std::function<std::optional<T>(size_t)> prepare) {
     std::lock_guard lock(mutex_);
@@ -90,6 +90,15 @@ class MenuMusicQueue {
     std::lock_guard lock(mutex_);
     stopped_ = true;
     wake_.notify_all();
+  }
+
+  // Lifecycle operations run from the host owner after it stopped guest publication.
+  void Join() { Stop(); if (worker_.joinable()) worker_.join(); }
+  void Reset() {
+    Join();
+    std::lock_guard lock(mutex_);
+    ready_.clear(); requests_.clear(); outstanding_.clear();
+    started_ = stopped_ = paused_ = false;
   }
 
  private:

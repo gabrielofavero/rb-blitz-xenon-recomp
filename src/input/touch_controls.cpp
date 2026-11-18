@@ -1,25 +1,23 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "input/touch_controls.h"
-#include <rex/ui/imgui_dialog.h>
-#include <rex/cvar.h>
+#include <rex/ui/ui_system.h>
+#include "settings/runtime_settings.h"
 
-REXCVAR_DEFINE_STRING(touch_lane_swipe, "inverted", "Input", "Lane swipe direction: inverted or normal.");
-REXCVAR_DEFINE_BOOL(touch_buttons, true, "Input", "Show the pause button while touch is the active input.");
-REXCVAR_DEFINE_STRING(touch_motion_deploy, "tilt", "Input", "Power-up motion: tilt, shake, or none.");
 
-REXCVAR_DEFINE_BOOL(touch_preview, false, "Diagnostics", "Preview the iOS guest controls on desktop, including a ready power-up.");
+
+
+
+
 namespace rb_blitz::input::touch {
-bool PreviewEnabled() { return REXCVAR_GET(touch_preview); }
+bool PreviewEnabled() { return rb_blitz::settings::title::touch_preview.Get(); }
 }
 
 #include <atomic>
 #include <mutex>
 #include <SDL3/SDL.h>
 #include <imgui.h>
-#include <rex/logging.h>
-#include <rex/kernel/xam/module.h>
-#include <rex/ui/flags.h>
-#include <rex/ui/window.h>
+#include <rex/logging/log_category.h>
+#include "input/title_input.h"
 #include "input/last_device.h"
 #include "input/input_capture.h"
 #include "input/native_menu.h"
@@ -43,20 +41,20 @@ std::atomic<bool> g_powerup_ready{false};
 Layout g_layout;
 bool Available() {
   return g_foreground && GameScreenActive() && HostInputFocused() &&
-         !rex::kernel::xam::xeXamIsUIActive() && !ui::achievements::Active() && !capture::Armed();
+         !SystemUIActive() && !ui::achievements::Active() && !capture::Armed();
 }
 void UpdateGestures(bool active) {
   g_gestures.SetActive(active);
-  g_gestures.SetInvertedLaneSwipe(REXCVAR_GET(touch_lane_swipe) != "normal");
+  g_gestures.SetInvertedLaneSwipe(rb_blitz::settings::title::touch_lane_swipe.Get() != "normal");
   g_gestures.SetPowerupAvailable(active && g_powerup_ready);
   const auto now = SDL_GetTicksNS();
   const auto rect = g_lane_timestamp && now - g_lane_timestamp < 100'000'000
       ? g_lane_powerup : Rect{};
   const auto to_window = [&](float x, float y) {
     return MenuPointToWindow({x, y}, int(g_layout.width), int(g_layout.height),
-        REXCVAR_GET(video_mode_width), REXCVAR_GET(video_mode_height),
-        REXCVAR_GET(present_letterbox), REXCVAR_GET(present_allow_overscan_cutoff),
-        REXCVAR_GET(present_safe_area_x), REXCVAR_GET(present_safe_area_y));
+        rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_width"), rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_height"),
+        rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_letterbox"), rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_allow_overscan_cutoff"),
+        rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_x"), rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_y"));
   };
   const auto first = to_window(rect.x, rect.y);
   const auto last = to_window(rect.x + rect.width, rect.y + rect.height);
@@ -68,10 +66,9 @@ PointerResult ObserveLanePointer(const FingerEvent& event) {
   if (result.deploy) g_gestures.DeployPowerup();
   return result;
 }
-class Controls final : public rex::ui::ImGuiDialog {
+class Controls final : public rex::ui::DialogBase {
  public:
-  Controls(rex::ui::ImGuiDrawer* drawer, std::function<rex::ui::Window*()> window)
-      : ImGuiDialog(drawer), window_(std::move(window)) {
+  explicit Controls(rex::ui::IUISystem& ui) : ui_(ui) {
     if (!SDL_AddEventWatch(Watch, this))
       REXLOG_ERROR("touch_controls: could not register touch events: {}", SDL_GetError());
     // Motion sensors are needed by mobile play and the explicit desktop preview.
@@ -108,7 +105,7 @@ class Controls final : public rex::ui::ImGuiDialog {
       g_foreground = true;
     }
     if (event->type == SDL_EVENT_SENSOR_UPDATE && event->sensor.which == self.sensor_id_) {
-      const auto mode = ParseMotionMode(REXCVAR_GET(touch_motion_deploy));
+      const auto mode = ParseMotionMode(rb_blitz::settings::title::touch_motion_deploy.Get());
       const bool active = Available() && TouchInputActive() && mode != MotionMode::kNone;
       std::lock_guard lock(g_mutex);
       if (!active || !g_powerup_ready) { g_motion.Reset(); return true; }
@@ -150,12 +147,9 @@ class Controls final : public rex::ui::ImGuiDialog {
     if (phase == Phase::kDown && g_foreground && HostInputFocused()) last_device::Touch();
     return true;
   }
-  void OnDraw(ImGuiIO&) override {
-    auto* window = window_();
-    int count = 0;
-    SDL_Window** windows = SDL_GetWindows(&count);
-    SDL_Window* sdl_window = windows && count == 1 ? windows[0] : nullptr;
-    SDL_free(windows);
+  bool Draw(ImGuiIO&) override {
+    auto native = ui_.GetNativeWindow();
+    auto* sdl_window = native ? static_cast<SDL_Window*>(native->sdl) : nullptr;
     int width = 0, height = 0;
     SDL_Rect safe{};
     if (sdl_window) {
@@ -165,7 +159,7 @@ class Controls final : public rex::ui::ImGuiDialog {
     window_id_ = sdl_window ? SDL_GetWindowID(sdl_window) : 0;
     const Layout layout = MakeLayout(float(width), float(height),
         {float(safe.x), float(safe.y), float(safe.w), float(safe.h)});
-    const bool active = window && window->HasFocus() && Available() && window_id_;
+    const bool active = ui_.IsFocused() && Available() && window_id_;
     {
       std::lock_guard lock(g_mutex);
       if (g_layout != layout) g_powerup_target.Cancel();
@@ -174,12 +168,13 @@ class Controls final : public rex::ui::ImGuiDialog {
       if (!ButtonsEnabled()) hit_layout.pause = {};
       g_gestures.SetLayout(hit_layout);
       UpdateGestures(active);
-      if (!active || !TouchInputActive() || ParseMotionMode(REXCVAR_GET(touch_motion_deploy)) == MotionMode::kNone)
+      if (!active || !TouchInputActive() || ParseMotionMode(rb_blitz::settings::title::touch_motion_deploy.Get()) == MotionMode::kNone)
         g_motion.Reset();
     }
     g_visible = active && layout.pause.width > 0;
+    return true;
   }
-  std::function<rex::ui::Window*()> window_;
+  rex::ui::IUISystem& ui_;
   std::atomic<SDL_WindowID> window_id_{0};
   SDL_Sensor* sensor_ = nullptr;
   SDL_SensorID sensor_id_ = 0;
@@ -210,7 +205,7 @@ bool TouchInputActive() {
   return PreviewEnabled();
 #endif
 }
-bool ButtonsEnabled() { return REXCVAR_GET(touch_buttons); }
+bool ButtonsEnabled() { return rb_blitz::settings::title::touch_buttons.Get(); }
 void PublishPowerupReady(bool ready) {
   static std::atomic<bool> observed{false};
   const bool changed = g_powerup_ready.exchange(ready) != ready;
@@ -235,9 +230,9 @@ bool ConsumeLanePointer(Phase phase, float x, float y) {
   std::lock_guard lock(g_mutex);
   UpdateGestures(active);
   const auto point = MenuPointToWindow({x, y}, int(g_layout.width), int(g_layout.height),
-      REXCVAR_GET(video_mode_width), REXCVAR_GET(video_mode_height),
-      REXCVAR_GET(present_letterbox), REXCVAR_GET(present_allow_overscan_cutoff),
-      REXCVAR_GET(present_safe_area_x), REXCVAR_GET(present_safe_area_y));
+      rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_width"), rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_height"),
+      rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_letterbox"), rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_allow_overscan_cutoff"),
+      rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_x"), rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_y"));
   return ObserveLanePointer({UINT64_MAX, 0, phase, point.x, point.y}).consumed;
 }
 bool ControlsVisible() { return g_visible && g_foreground && TouchInputActive() && ButtonsEnabled(); }
@@ -249,8 +244,7 @@ bool ConsumeMouse(bool is_touch, Phase phase, bool gameplay) {
   std::lock_guard lock(g_mutex);
   return g_mouse_gate.Consume(is_touch, phase, gameplay && TouchInputActive());
 }
-std::unique_ptr<rex::ui::ImGuiDialog> CreateControls(
-    rex::ui::ImGuiDrawer* drawer, std::function<rex::ui::Window*()> window) {
-  return std::make_unique<Controls>(drawer, std::move(window));
+std::unique_ptr<rex::ui::IDialog> CreateControls(rex::ui::IUISystem& ui) {
+  return std::make_unique<Controls>(ui);
 }
 }

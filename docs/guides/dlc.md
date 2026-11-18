@@ -1,5 +1,7 @@
 # DLC
 
+The v0.11 title registers a fresh per-title snapshot through public [IContentSources](../../rexglue-sdk/include/rex/xam/content_sources.h). External structured roots and flat entries remain read-only. [Content validation](../../rexglue-sdk/include/rex/xam/content_validation.h) checks every metadata node before exposure, including duplicate and case-variant names. Private XAM links below explain guest behavior; the title opens isolated package views through the public [filesystem factory](../../rexglue-sdk/include/rex/filesystem/file_system_factory.h), without Device/Entry APIs.
+
 Where downloadable content goes, and what the guest does with it.
 
 **Current behavior (2026-10-28):** every boot scans the flat DLC library using
@@ -13,7 +15,7 @@ Blitz does not read a DLC directory of its own: it enumerates content through th
 emulated Xbox content APIs and opens what it found, and the SDK's content manager
 serves both halves. A package therefore has to sit where that manager looks, and the
 rules below are
-[rexglue-sdk/src/system/xam/content_manager.cpp](../../rexglue-sdk/src/system/xam/content_manager.cpp).
+[rexglue-sdk/src/system/xam/content_manager.cpp](../../rexglue-sdk/src/xam/content_manager.cpp).
 The directory described in §2 is registered by [src/hooks/dlc.cpp](../../src/hooks/dlc.cpp),
 and its shape is pinned by [tests/dlc_layout_tests.cpp](../../tests/dlc_layout_tests.cpp).
 
@@ -25,7 +27,7 @@ and its shape is pinned by [tests/dlc_layout_tests.cpp](../../tests/dlc_layout_t
   `XamContentCreateEnumerator` and not the aggregate form, which is why RB3DX has to
   force-import it so it stays linked — [rb3-references.md](../reference/rb3-references.md) §4. The
   SDK's
-  [xam_content_aggregate.cpp](../../rexglue-sdk/src/kernel/xam/xam_content_aggregate.cpp)
+  [xam_content_aggregate.cpp](../../rexglue-sdk/src/xam/xam_content_aggregate.cpp)
   answers with one item per package, for the running title **and for the XEX's
   alternate title ids**: optional header `0x000407FF` of this dump reads
   `45410829, 45410869, 45410914`, i.e. the earlier Rock Band titles and **RB3**. RB3
@@ -90,7 +92,7 @@ is what the runtime above reads as a library. The rule lives in the game's path 
   `XContentMetadata::execution_info.title_id` and
   `XContentMetadata::content_type` — and placed under them, so nothing on disk is
   renamed, moved, linked or copied. The format's own spellings of both fields are in
-  [stfs_xbox.h](../../rexglue-sdk/include/rex/filesystem/devices/stfs_xbox.h), and
+  [stfs_xbox.h](../../rexglue-sdk/include/rex/filesystem/stfs.h), and
   `src/fs/dlc_library.h` reads the same offsets. The title id is used as it is; the
   content type is adapted, which the paragraphs below are about.
 - The folder is walked **recursively**: nesting is fine, and directory symlinks are
@@ -132,10 +134,7 @@ same value `XamContentGetLicenseMask` answers with, `1` by default — when the
 container carries nothing. A container that does carry entries keeps them, and an
 explicit `--license_mask=0` (the trial path) is returned unchanged.
 
-`ContentManager::set_extra_content_root()` resolves §2 by building a path from the
-title id and content type; a library item has no such path, so it is handed to
-`ContentManager::set_extra_content_library()` instead, and both the enumerator and
-the open path consult the same list. The host half — the recursive walk, the header
+`IContentSources::ReplaceContentSources()` publishes the structured root and flat library items in one immutable snapshot. The SDK resolves §2 by title id and content type; flat items retain independent host paths. Enumeration and opening consult the same snapshot, and already open packages retain their backing. The host half — the recursive walk, the header
 read and the name — is [src/fs/dlc_library.h](../../src/fs/dlc_library.h), pinned by
 [tests/dlc_library_tests.cpp](../../tests/dlc_library_tests.cpp). A cold library's
 headers are read on a pool, because that read is the whole cost of a scan; the walk and
@@ -483,11 +482,7 @@ Build and host-test validation do not establish runtime UI smoothness; both
 refresh entry points still need an in-game check on a large library.
 
 **Where the refreshed list lands, and why not on the worker.** The result is handed to the
-content manager from a *guest* thread, because ContentManager's
-`extra_content_library_` is a plain `std::vector` with **no lock of its own**: a worker
-writing it while the guest lists or resolves content would be a data race, and
-`Configure()` writes it from a guest thread at boot for exactly that reason. During discovery,
-the native state poll publishes the list before enumeration.
+public content-source service from a *guest* thread after the worker finishes. The worker owns scan output only; the guest poll replaces the SDK snapshot before enumeration. The service protects concurrent listing/opening, while attach/detach remains serialized with publication. The removed implementation used an unlocked `extra_content_library_` vector; that historical restriction no longer describes SDK ownership.
 The menu also publishes through its own per-frame music poll
 ([src/hooks/shell_music.cpp](../../src/hooks/shell_music.cpp), `ShellMusic::Poll` — the hook
 R9 already installs), which runs every frame the menu is up **with R9 on or off**, because

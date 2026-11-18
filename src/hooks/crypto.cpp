@@ -124,17 +124,19 @@
 
 #include "crypto_keytable.h"
 
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xmemory.h>
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/heap.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <string>
 
-// Real AES entry points exported by rexruntime (rex::kernel::xboxkrnl).
+// Public AES entry points in rex::kernel::xboxkrnl.
 // Declared through the SDK macro so the parameter types match the runtime's
 // definitions exactly.
 REX_EXTERN(__imp__XeCryptAesKey);
@@ -191,14 +193,25 @@ bool EnsureGuestBuffers(uint8_t* base) {
   if (g_aes_state != 0) {
     return true;
   }
-  auto* memory = rex::system::kernel_memory();
+  auto* runtime = REX_RUNTIME();
+  auto* memory = runtime ? &runtime->GetGuestHeap() : nullptr;
   if (memory == nullptr) {
     REXLOG_WARN("guest XeKeys: kernel memory not available yet, ignoring the call");
     return false;
   }
-  g_aes_state = memory->SystemHeapAlloc(kKeySlots * kAesStateSize, 16);
-  g_key_table = memory->SystemHeapAlloc(kKeySlots * kKeySize, 16);
-  g_feed = memory->SystemHeapAlloc(kFeedSize, 16);
+  const auto aes_state = memory->SystemHeapAlloc(kKeySlots * kAesStateSize, 16);
+  const auto key_table = memory->SystemHeapAlloc(kKeySlots * kKeySize, 16);
+  const auto feed = memory->SystemHeapAlloc(kFeedSize, 16);
+  if (!aes_state || !key_table || !feed) {
+    if (aes_state) memory->SystemHeapFree(aes_state);
+    if (key_table) memory->SystemHeapFree(key_table);
+    if (feed) memory->SystemHeapFree(feed);
+    REXLOG_ERROR("guest XeKeys: could not allocate AES scratch buffers");
+    return false;
+  }
+  g_aes_state = aes_state;
+  g_key_table = key_table;
+  g_feed = feed;
 
   std::memset(GuestToHost(base, g_aes_state), 0, kKeySlots * kAesStateSize);
   std::memcpy(GuestToHost(base, g_key_table), kPlaintextKeyTable, kKeysetTableSize);
@@ -403,3 +416,13 @@ extern "C" REX_FUNC(__imp__XeKeysAesCbc) {
 
   ctx.r3.u64 = 0;
 }
+
+namespace rb_blitz::crypto {
+// Called after load, before any guest thread can use this title's scratch addresses.
+void ResetGuestCryptoState() {
+  g_aes_state = g_key_table = g_feed = g_last_keyed_slot = g_calls = 0;
+  g_has_keyed_slot = g_warned_lookup = g_warned_fallback = g_header_logged = false;
+  std::fill(std::begin(g_slot_keyed), std::end(g_slot_keyed), false);
+  std::fill(std::begin(g_warned_unkeyed), std::end(g_warned_unkeyed), false);
+}
+}  // namespace rb_blitz::crypto

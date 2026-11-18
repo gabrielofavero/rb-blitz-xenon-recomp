@@ -222,6 +222,36 @@ int main(int argc, char** argv) {
     std::filesystem::remove(store);
   }
 
+  BeginCase("backend changes retag compatible shader records without losing learned data");
+  {
+    PreparationInputs input;
+    input.catalogue=551; input.content=552; input.executable=553;
+    const auto seed=[&](uint32_t version,int& reads) {
+      return SeedPreparation(j.dump(),root,[&](const std::string&) {
+        ++reads; return code;
+      },{},[] { return false; },input,0,nullptr,version);
+    };
+    int reads=0;
+    seed(kD3D12ShaderStorageVersion,reads);
+    const auto original=Read(xsh);
+    reads=0;
+    const auto converted=seed(kVulkanShaderStorageVersion,reads);
+    const auto vk=Read(xsh);
+    CHECK_FALSE(converted.extraction_reused);
+    CHECK_EQ(reads,0);
+    CHECK_EQ(vk.size(),original.size());
+    CHECK_TRUE(std::equal(original.begin()+8,original.end(),vk.begin()+8));
+    CHECK_EQ(vk[4],0x20); CHECK_EQ(vk[5],0x26);
+    CHECK_EQ(vk[6],0x10); CHECK_EQ(vk[7],0x17);
+    CHECK_TRUE(seed(kVulkanShaderStorageVersion,reads).extraction_reused);
+    CHECK_TRUE(Read(xsh)==vk);
+    seed(kD3D12ShaderStorageVersion,reads);
+    CHECK_TRUE(Read(xsh)==original);
+    CHECK_EQ(reads,0);
+    bool refused=false;
+    try { seed(0x12345678,reads); } catch(const std::exception&) { refused=true; }
+    CHECK_TRUE(refused); CHECK_TRUE(Read(xsh)==original);
+  }
   std::filesystem::remove(xsh);
   return Finish();
 }

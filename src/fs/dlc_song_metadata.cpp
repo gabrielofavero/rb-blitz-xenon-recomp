@@ -10,58 +10,57 @@
 #include <system_error>
 #include <vector>
 
-#include <rex/filesystem/devices/host_path_device.h>
-#include <rex/filesystem/devices/stfs_container_device.h>
-#include <rex/filesystem/entry.h>
-#include <rex/filesystem/file.h>
-#include <rex/logging.h>
+#include <rex/filesystem/file_system_factory.h>
+#include <rex/logging/log_category.h>
+#include <rex/string/path.h>
+#include <rex/string/text.h>
 
 namespace rb_blitz::fs {
 
-std::unique_ptr<rex::filesystem::Device> MountPackage(const std::string& mount_path,
-                                                      const std::filesystem::path& package,
-                                                      std::error_code& ec) {
-  if (std::filesystem::is_directory(package, ec)) {
-    auto device =
-        std::make_unique<rex::filesystem::HostPathDevice>(mount_path, package, /*read_only=*/true);
-    if (!device->Initialize()) {
-      return nullptr;
-    }
-    return device;
+std::string PackageView::Path(std::string_view relative) const {
+  return rex::string::utf8_join_guest_paths(mount_.path, relative);
+}
+
+std::unique_ptr<PackageView> MountPackage(const std::string& mount_path,
+                                         const std::filesystem::path& package,
+                                         std::error_code& ec) {
+  ec.clear();
+  auto* factory = REX_INTERFACE(rex::filesystem::IFileSystemFactory);
+  if (!factory) { ec = std::make_error_code(std::errc::not_supported); return {}; }
+  auto files = factory->Create();
+  if (!files) { ec = std::make_error_code(std::errc::not_enough_memory); return {}; }
+  rex::filesystem::MountEntry mount;
+  mount.path = mount_path;
+  mount.type = std::filesystem::is_directory(package, ec)
+      ? rex::filesystem::ProviderType::kHostDirectory : rex::filesystem::ProviderType::kSTFS;
+  if (ec) return {};
+  mount.source = package;
+  auto nodes = std::make_shared<std::vector<rex::filesystem::MountValidationNode>>();
+  mount.validator = std::make_shared<const rex::filesystem::MountValidator>(
+      [nodes](const rex::filesystem::IMountValidationView& view) -> rex::Result<void> {
+        std::string reason;
+        if (!IsSafeSongContent(view, &reason))
+          return rex::Err(rex::ErrorCategory::kValidation, std::move(reason));
+        const auto records = view.GetNodes();
+        nodes->assign(records.begin(), records.end());
+        return rex::Ok();
+      });
+  if (auto mounted = files->Mount(mount); !mounted) {
+    ec = std::make_error_code(std::errc::invalid_argument);
+    REXLOG_WARN("dlc_song_metadata: cannot mount {}: {}", package.string(), mounted.error().message);
+    return {};
   }
-  auto device = std::make_unique<rex::filesystem::StfsContainerDevice>(mount_path, package);
-  if (!device->Initialize()) {
-    return nullptr;
-  }
-  return device;
+  // The publication callback retains only validation policy, not this discovery snapshot.
+  mount.validator = std::make_shared<const rex::filesystem::MountValidator>(
+      [](const rex::filesystem::IMountValidationView& view) -> rex::Result<void> {
+        std::string reason;
+        return IsSafeSongContent(view, &reason) ? rex::Ok()
+            : rex::Err(rex::ErrorCategory::kValidation, std::move(reason));
+      });
+  return std::make_unique<PackageView>(std::move(files), std::move(mount), std::move(nodes));
 }
 
 namespace {
-
-// Case-insensitive child lookup on the entry tree. `Entry::ResolvePath` is the obvious call and it
-// answered null for a package that carries `songs/songs.dta` (measured 2026-10-21, boot
-// `out/_swap/store-probe/20261021-220911`: the device mounted, the read took 0 ms and declared no
-// song), so the walk is explicit and names the level it could not find instead of failing silently.
-rex::filesystem::Entry* FindChild(rex::filesystem::Entry* parent, std::string_view name) {
-  if (parent == nullptr) {
-    return nullptr;
-  }
-  const auto same = [](std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-      const char ca = a[i] >= 'A' && a[i] <= 'Z' ? static_cast<char>(a[i] - 'A' + 'a') : a[i];
-      const char cb = b[i] >= 'A' && b[i] <= 'Z' ? static_cast<char>(b[i] - 'A' + 'a') : b[i];
-      if (ca != cb) return false;
-    }
-    return true;
-  };
-  for (const auto& child : parent->children()) {
-    if (child != nullptr && same(child->name(), name)) {
-      return child.get();
-    }
-  }
-  return nullptr;
-}
 
 // The three spellings a package may carry its song metadata under, as child paths.
 constexpr std::string_view kMetadataPaths[][2] = {
@@ -69,88 +68,58 @@ constexpr std::string_view kMetadataPaths[][2] = {
 
 }  // namespace
 
-bool IsSafeSongContent(rex::filesystem::Device& device, std::string* reason) {
+bool IsSafeSongContent(const rex::filesystem::IMountValidationView& view, std::string* reason) {
   if (reason) reason->clear();
-  auto* root = device.ResolvePath("");
-  if (!root) {
-    if (reason) *reason = "package root cannot be read";
+  const auto nodes = view.GetNodes();
+  if (nodes.empty() || nodes.size() > 100000) {
+    if (reason) *reason = nodes.empty() ? "package root cannot be read" : "too many package entries";
     return false;
   }
-  // Walk the complete entry tree, including duplicate/case-variant names. The
-  // guest may resolve a different duplicate than a first-match lookup would.
-  std::vector<rex::filesystem::Entry*> pending{root};
-  size_t visited = 0;
-  while (!pending.empty()) {
-    auto* entry = pending.back();
-    pending.pop_back();
-    if (++visited > 100000) {
-      if (reason) *reason = "too many package entries";
-      return false;
-    }
-    for (const auto& child : entry->children()) pending.push_back(child.get());
-    std::string name = entry->name();
-    for (char& c : name) if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
+  for (size_t index = 0; index < nodes.size(); ++index) {
+    const auto& info = nodes[index].info;
+    const auto name = rex::string::utf8_lower_ascii(info.name);
     if (name != "songs.dta" && name != "songs.dtb") continue;
-    if (entry->attributes() & rex::filesystem::kFileAttributeDirectory) continue;
+    if (rex::HasFlags(info.attributes, rex::filesystem::FileAttributes::kDirectory)) continue;
     const auto reject = [&](std::string_view detail) {
-      if (reason) *reason = entry->path() + ": " + std::string(detail);
+      if (reason) *reason = info.path + ": " + std::string(detail);
       return false;
     };
-    if (entry->size() == 0 || entry->size() > 2 * 1024 * 1024)
-      return reject("empty or oversized metadata");
-    rex::filesystem::File* file = nullptr;
-    if (entry->Open(rex::filesystem::FileAccess::kGenericRead, &file) != 0 || !file)
-      return reject("cannot open metadata");
-    std::vector<uint8_t> bytes(static_cast<size_t>(entry->size()));
-    size_t read = 0;
-    const auto status = file->ReadSync(bytes, 0, &read);
-    file->Destroy();
-    if (status != 0 || read != bytes.size()) return reject("cannot read metadata completely");
+    if (!info.size || info.size > 2 * 1024 * 1024) return reject("empty or oversized metadata");
+    std::vector<uint8_t> bytes(static_cast<size_t>(info.size));
+    const auto read = view.Read(index, 0, bytes);
+    if (!read || *read != bytes.size()) return reject("cannot read metadata completely");
     std::string error;
-    if (!shell_music::IsStaticSongMetadata(bytes, name == "songs.dtb", &error))
-      return reject(error);
+    if (!shell_music::IsStaticSongMetadata(bytes, name == "songs.dtb", &error)) return reject(error);
   }
   return true;
 }
 
-std::vector<shell_music::SongMetadata> ReadDeviceSongMetadata(rex::filesystem::Device& device) {
-  auto* root = device.ResolvePath("");
+std::vector<shell_music::SongMetadata> ReadDeviceSongMetadata(PackageView& package) {
   std::string skipped;
   for (const auto& path : kMetadataPaths) {
-    auto* dir = FindChild(root, path[0]);
-    rex::filesystem::Entry* entry = nullptr;
-    if (dir != nullptr) {
-      // `gen\songs.dtb` is two levels; `songs.dta` is one.
-      const std::string_view tail = path[1];
-      const std::size_t slash = tail.find('\\');
-      entry = slash == std::string_view::npos
-                  ? FindChild(dir, tail)
-                  : FindChild(FindChild(dir, tail.substr(0, slash)), tail.substr(slash + 1));
-    }
-    if (entry == nullptr) {
+    const auto guest_path = package.Path(std::string(path[0]) + "\\" + std::string(path[1]));
+    auto entry = package.Files().Stat(guest_path);
+    if (!entry || rex::HasFlags(entry->attributes, rex::filesystem::FileAttributes::kDirectory)) {
       if (!skipped.empty()) skipped += "; ";
       skipped += std::string(path[0]) + "\\" + std::string(path[1]) + " is not in the package";
       continue;
     }
     // The bound keeps a mis-sized entry (an STFS entry whose length field came back garbage) from
     // becoming an 80 MiB allocation - a real `songs.dta` for one package is a few kilobytes.
-    if (entry->size() == 0 || entry->size() > 2 * 1024 * 1024) {
+    if (entry->size == 0 || entry->size > 2 * 1024 * 1024) {
       REXLOG_WARN("dlc_song_metadata: {}\\{} is present but {} byte(s); skipped", path[0], path[1],
-                  entry->size());
+                  entry->size);
       continue;
     }
-    rex::filesystem::File* file = nullptr;
-    if (entry->Open(rex::filesystem::FileAccess::kGenericRead, &file) != 0 || !file) {
-      REXLOG_WARN("dlc_song_metadata: {}\\{} could not be opened", path[0], path[1]);
+    auto opened = package.Files().Open(guest_path, {});
+    if (!opened) {
+      REXLOG_WARN("dlc_song_metadata: {} could not be opened", guest_path);
       continue;
     }
-    std::vector<uint8_t> bytes(static_cast<size_t>(entry->size()));
-    size_t read = 0;
-    const auto status = file->ReadSync(bytes, 0, &read);
-    file->Destroy();
-    if (status != 0 || read != bytes.size()) {
-      REXLOG_WARN("dlc_song_metadata: {}\\{} read {} of {} byte(s) (status {})", path[0], path[1],
-                  read, bytes.size(), status);
+    std::vector<uint8_t> bytes(static_cast<size_t>(entry->size));
+    const auto read = opened->file->Read(bytes, 0);
+    if (!read || *read != bytes.size()) {
+      REXLOG_WARN("dlc_song_metadata: {} could not be read completely", guest_path);
       continue;
     }
     std::string error;

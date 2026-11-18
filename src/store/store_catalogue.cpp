@@ -16,8 +16,8 @@
 #include <utility>
 #include <vector>
 
-#include <rex/cvar.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
 
 #include "store/album_art_service.h"
 #include "store/rhythmverse_client.h"
@@ -29,44 +29,15 @@
 #include "store/store_serve.h"
 #include "store/store_settings.h"
 
-REXCVAR_DEFINE_INT32(store_catalogue_ttl_seconds, 300, "Diagnostics",
-                     "How long the fetched RhythmVerse catalogue stays fresh (RhythmVerse plan "
-                     "P7's cache, the Recent list's own freshness): a store visit inside this "
-                     "window re-uses the list instead of fetching it again. Pages are cached "
-                     "separately, see store_page_cache_ttl_seconds")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_INT32(store_catalogue_pages, 4, "Diagnostics",
-                     "How many API pages one store action accumulates (25 records each, the site's "
-                     "own page size; clamped 1..20). Recent fills the retail browser's single list "
-                     "from this many pages - retail has no paging of its own - and the value is "
-                     "also the per-action budget the search is given (store_search_pages). The cap "
-                     "keeps a boot's traffic bounded; the walk continues past a page the "
-                     "instrument filter emptied, because the server's cursor, not the visible "
-                     "offer count, decides where the list ends")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_INT32(store_page_cache_ttl_seconds, 300, "Diagnostics",
-                     "How long one fetched RhythmVerse API page stays in the in-memory page cache "
-                     "(RhythmVerse plan P7's ~5 min; 0 turns the cache off, so every visit asks the "
-                     "site again). The key is the request body, so the query text, the page number "
-                     "and the instrument filter each identity a page; single flight spans Recent "
-                     "and Search, so the same page is never requested twice at once")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(store_catalogue_off, false, "Diagnostics",
-                    "Never fetch the RhythmVerse catalogue (the store then answers every menu with "
-                    "an empty page); off is the ordinary boot")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_STRING(store_api_base, "", "Diagnostics",
-                      "Point the list and search requests at another API origin - an absolute "
-                      "http(s)://host[:port] with no path (RhythmVerse plan P9-10's failure "
-                      "measurement: an origin that refuses makes the press draw the popup and ask "
-                      "for a fresh walk, and a local stub can be flipped to serving inside the "
-                      "same boot); empty keeps https://rhythmverse.co. The download and artwork "
-                      "resolution stay same-site and do not follow it")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
+
+
+
 
 namespace rb_blitz::store {
 namespace {
@@ -251,7 +222,7 @@ void RunOne() {
   if (!settings->enabled) {
     // The master went off between the request and the fetch: publish nothing and stay idle, so a
     // later boot/commit with the switch on fetches fresh. A list the old filter produced is not
-    // this boot's answer any more (plan §1.6: off cancels outstanding work).
+    // this boot's answer any more (plan Ã‚Â§1.6: off cancels outstanding work).
     {
       const std::lock_guard<std::mutex> lock(g_mutex);
       g_state = State::kIdle;
@@ -437,7 +408,7 @@ void RequestRefresh(std::string_view why, bool ignore_backoff) {
   }
   const SettingsSnapshot settings = Settings();
   if (!settings->enabled) {
-    // Master off: the store must make no network request at all (plan §1.6).
+    // Master off: the store must make no network request at all (plan Ã‚Â§1.6).
     return;
   }
   std::size_t offers_now = 0;
@@ -481,20 +452,20 @@ void RequestRefresh(std::string_view why, bool ignore_backoff) {
 }  // namespace
 
 void InstallStoreCatalogue() {
-  g_fetch_enabled = !REXCVAR_GET(store_catalogue_off);
-  const std::int32_t ttl = REXCVAR_GET(store_catalogue_ttl_seconds);
+  g_fetch_enabled = !rb_blitz::settings::title::store_catalogue_off.Get();
+  const std::int32_t ttl = rb_blitz::settings::title::store_catalogue_ttl_seconds.Get();
   g_ttl = std::chrono::seconds(ttl > 0 ? ttl : 0);
-  const std::int32_t pages = REXCVAR_GET(store_catalogue_pages);
+  const std::int32_t pages = rb_blitz::settings::title::store_catalogue_pages.Get();
   g_pages = pages < 1 ? 1 : (pages > 20 ? 20 : pages);
   // P7's page cache. Its TTL is this boot's, and the search worker reads the same instance, so the
   // two actions share both the pages and the single-flight marks.
-  const std::int32_t page_ttl = REXCVAR_GET(store_page_cache_ttl_seconds);
+  const std::int32_t page_ttl = rb_blitz::settings::title::store_page_cache_ttl_seconds.Get();
   SetSharedPageCacheTtl(std::chrono::seconds(page_ttl > 0 ? page_ttl : 0));
   SetCatalogueFetchEnabled(g_fetch_enabled);
   // P9-10's failure instrument: a boot can move the API origin, so the press's failed branch is
   // measurable without touching the machine's network. A refused value is reported rather than
   // silently ignored, because the boot that expected to fail would otherwise quietly succeed.
-  const std::string api_base = REXCVAR_GET(store_api_base);
+  const std::string api_base = rb_blitz::settings::title::store_api_base.Get();
   if (api_base.empty()) {
     SetApiBaseOverride("");
   } else if (SetApiBaseOverride(api_base)) {

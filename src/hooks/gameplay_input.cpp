@@ -5,7 +5,7 @@
 // into the title's own validated boundary
 // (docs/plans/finished/2026-10-17-gameplay-input-mapping-plan.md, D4/D5).
 //
-// The seam table (P0, plan §10.2):
+// The seam table (P0, plan Â§10.2):
 //
 //   sub_82435EB0  NewController            -> this is the song's controller; adopt it
 //   sub_82443C20  controller destructor    -> forget it (a song end leaves nothing armed)
@@ -16,12 +16,12 @@
 // Why the boundary rather than the button->action lookup: P0 measured four producers into it
 // (ButtonDown/ButtonUp, a keyboard ButtonDown, explicit `send_down_action`/`send_up_action`
 // messages and the controller's own held-action repeat), and only one of them goes through the
-// lookup (plan §10.3 "Bypass"). Suppressing the boundary covers all four, including the repeat,
+// lookup (plan Â§10.3 "Bypass"). Suppressing the boundary covers all four, including the repeat,
 // with one decision - and the direct calls use `__imp__sub_824364B0`, the unhooked function, so
 // the suppressor can never eat the actions it is dispatching.
 //
 // Why the pad state is touched at all: Start is not a `kBMAction` (P0 measured it resolving to
-// `None` while still pausing - plan §10.4 O10), so the direct Pause travels as a Start bit in the
+// `None` while still pausing - plan Â§10.4 O10), so the direct Pause travels as a Start bit in the
 // pad state the filter delivers (input::GameplayPadOverlay). Everything else the Controller table
 // owns is *removed* from that state while the table is active, so the bypassed preset cannot read
 // it either.
@@ -29,6 +29,7 @@
 // The probe's P0 experiments live in src/diag/gameplay_probe.cpp and are called from these
 // hooks, because one guest address can only have one definition (see gameplay_probe.h).
 
+#include "settings/runtime_values.h"
 #include "hooks/gameplay_input.h"
 
 #include <array>
@@ -40,11 +41,12 @@
 #include <utility>
 #include <vector>
 
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
 #include <rex/ppc/context.h>
-#include <rex/system/xmemory.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 #include "diag/gameplay_probe.h"
 #include "diag/shader_trace.h"
@@ -66,9 +68,9 @@ namespace detail {
 namespace gameplay = rb_blitz::profile::gameplay_remap;
 using Action = gameplay::Action;
 
-// The guest's own `kBMAction` values (assets/game/360/config/gen/macros.dtb, plan §10.1). The
+// The guest's own `kBMAction` values (assets/game/360/config/gen/macros.dtb, plan Â§10.1). The
 // three the plan lists as unreachable from any shipped preset (`Lane2`, `Swing`,
-// `AwardJackpot`) are deliberately absent: P0 gave them an inert decision (§10.4 O7).
+// `AwardJackpot`) are deliberately absent: P0 gave them an inert decision (Â§10.4 O7).
 constexpr int32_t kBmActionLane0 = 1;
 constexpr int32_t kBmActionLane1 = 2;
 constexpr int32_t kBmActionTrackUp = 4;
@@ -139,7 +141,7 @@ Dispatcher& State() {
   return dispatcher;
 }
 
-bool TraceOn() { return rex::cvar::GetFlagByName("input_source_trace") == "true"; }
+bool TraceOn() { return rb_blitz::settings::InspectRuntimeSetting("input_source_trace").active_value == "true"; }
 
 uint32_t LoadBe32(uint8_t* base, uint32_t guest_address) {
   const uint8_t* p = rex::memory::GuestPtr<uint8_t*>(base, guest_address);
@@ -160,7 +162,7 @@ bool ControllerReceivesInput(uint8_t* base, uint32_t controller) {
   return LoadBe8(base, controller + 52) != 0;
 }
 
-// `sub_824364B0(controller, action, arg)` - the title's validated press path (P0 §10.2). The
+// `sub_824364B0(controller, action, arg)` - the title's validated press path (P0 Â§10.2). The
 // side call copies the hook's context so this thread's registers survive, and takes its own
 // linkage area below the intercepted frame.
 void CallPress(PPCContext& ctx, uint8_t* base, uint32_t controller, int32_t action) {
@@ -195,7 +197,7 @@ bool TouchHeld(Action action) {
 
 // `sub_824367E0(controller, action)` - the release path. For the two track actions it is also
 // what clears the controller's held-action slot, so a held binding stops repeating when it is
-// released (P0 §10.5 item 3).
+// released (P0 Â§10.5 item 3).
 void CallRelease(PPCContext& ctx, uint8_t* base, uint32_t controller, int32_t action) {
   PPCContext call = ctx;
   call.r1.u32 -= 256;

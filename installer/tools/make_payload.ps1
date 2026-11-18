@@ -4,7 +4,7 @@ Snapshots the recompiled build into installer/out/payload, with a manifest.
 
 .DESCRIPTION
 The installer places exactly the files of the recompiled build that the game
-needs to run: the game's executable, the two runtime DLLs the
+needs to run: the game's executable, the configured SDK module DLLs the
 game loads, the Microsoft Visual C++ runtime DLLs the binaries import, and the
 reviewable locator/recipe catalogue also embedded in rb_blitz.exe. The native
 extractor uses the owner's installed assets; no Python or shader/native cache
@@ -188,13 +188,25 @@ $wanted = [ordered]@{
     'graphics-preparation.json' = $SourceDir
     'collect_diagnostics.ps1' = $SourceDir
     'Collect Diagnostics.cmd' = $SourceDir
-    'rexruntime.dll'           = $SourceDir
-    'rexgpu-xenos.dll'         = $SourceDir
     'msvcp140.dll'             = $CrtDir
     'msvcp140_atomic_wait.dll' = $CrtDir
     'vcruntime140.dll'         = $CrtDir
     'vcruntime140_1.dll'       = $CrtDir
     'assets/messages/feed.json' = $repoRoot
+}
+
+foreach ($runtimeFile in (Get-PayloadRuntimeFiles -BuildDir $SourceDir)) {
+    $wanted[$runtimeFile] = $SourceDir
+}
+
+foreach ($license in (Get-PayloadLicenseFiles -BuildDir $SourceDir -RepoRoot $repoRoot)) {
+    $wanted[$license.Name] = $license.Source
+}
+
+function Get-WantedSource {
+    param($Entry)
+    if (Test-Path -LiteralPath $Entry.Value -PathType Leaf) { return $Entry.Value }
+    return Join-Path $Entry.Value $Entry.Key
 }
 
 # Local message images are copied beside the feed, even though the current
@@ -221,9 +233,14 @@ foreach ($iconFile in (Get-ChildItem -LiteralPath $messagesAssets -File)) {
 # 2026-10-14 (measured: a -VulkanLoaderDir holding a 22-byte vulkan-1.dll still shipped
 # System32's 1,452,408-byte copy).
 $vulkanLoaderSource = ''
+$vulkanLoaderOrigin = ''
 if ($payloadBackends -contains 'vulkan') {
     $vulkanLoaderSource = Get-VulkanLoaderDir -Explicit $VulkanLoaderDir
+    if (-not $VulkanLoaderDir -and (Test-Path -LiteralPath (Join-Path $SourceDir 'vulkan-1.dll'))) {
+        $vulkanLoaderSource = $SourceDir
+    }
     if ($vulkanLoaderSource) {
+        $vulkanLoaderOrigin = if ($VulkanLoaderDir) { 'override' } elseif ($vulkanLoaderSource -eq $SourceDir) { 'staged' } else { 'external' }
         $wanted['vulkan-1.dll'] = $vulkanLoaderSource
     } elseif (-not $AllowMissingVulkanLoader) {
         throw ("the build offers Vulkan ($SourceDir was configured with REXGLUE_USE_VULKAN=ON), but no " +
@@ -238,7 +255,7 @@ if ($payloadBackends -contains 'vulkan') {
 
 $missing = @()
 foreach ($entry in $wanted.GetEnumerator()) {
-    $path = Join-Path $entry.Value $entry.Key
+    $path = Get-WantedSource $entry
     if (-not (Test-Path -LiteralPath $path)) { $missing += $path }
 }
 if ($missing.Count -gt 0) {
@@ -256,7 +273,7 @@ New-Item -ItemType Directory -Force -Path $PayloadDir | Out-Null
 
 $entries = @()
 foreach ($entry in $wanted.GetEnumerator()) {
-    $source = Join-Path $entry.Value $entry.Key
+    $source = Get-WantedSource $entry
     $destination = Join-Path $PayloadDir $entry.Key
     $destinationParent = Split-Path -Parent $destination
     New-Item -ItemType Directory -Force -Path $destinationParent | Out-Null
@@ -322,6 +339,7 @@ $manifest.Add('')
 $manifest.Add('[payload]')
 $manifest.Add("backends = `"$($payloadBackends -join ',')`"")
 $manifest.Add("commit = `"$Commit`"")
+$manifest.Add("vulkan_loader_origin = `"$vulkanLoaderOrigin`"")
 $manifest.Add('')
 $manifest.Add('[graphics_preparation]')
 $manifest.Add('schema = 1')

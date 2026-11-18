@@ -1,6 +1,6 @@
 #include "graphics/shader_coverage.h"
 #include "generated/preparation_catalogue.h"
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 
 namespace rb_blitz::graphics {
 bool IsDevelopmentBuild(const std::filesystem::path& executable) {

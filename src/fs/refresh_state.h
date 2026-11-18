@@ -34,6 +34,9 @@ namespace rb_blitz::fs {
 
 class RefreshState {
  public:
+  // Called only after the previous refresh worker has joined and guest execution ended.
+  void Reset() { running_ = false; pending_ = false; }
+
   // Claims the right to run a refresh. False when one is already running, which is the
   // caller's signal to ignore the ask (and say so once) rather than queue a second scan.
   bool Begin() {

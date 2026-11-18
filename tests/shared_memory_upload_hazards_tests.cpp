@@ -3,13 +3,13 @@
 #include <array>
 #include <cstdint>
 #include <random>
-#include <rex/graphics/vulkan/shared_memory_upload_hazards.h>
+#include <rex/gpu/shared_memory_upload_hazards.h>
 #include <algorithm>
 #include <vector>
 
 int main() {
   using namespace rb_blitz::test;
-  using rex::graphics::vulkan::SharedMemoryUploadHazards;
+  using rex::gpu::vulkan::SharedMemoryUploadHazards;
   SharedMemoryUploadHazards hazards;
   constexpr uint32_t page = SharedMemoryUploadHazards::kPageSize;
 

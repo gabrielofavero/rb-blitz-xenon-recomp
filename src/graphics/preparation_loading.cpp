@@ -6,6 +6,7 @@
 #include "graphics/preparation_loading.h"
 #include "graphics/preparation_assets.h"
 #include "graphics/preparation_archive.h"
+#include "graphics/preparation_settings.h"
 #include "generated/fingerprint_expected.h"
 #include "generated/preparation_catalogue.h"
 #include "hooks/ultimate.h"
@@ -20,18 +21,30 @@
 #include <mutex>
 #include <thread>
 #include <stdexcept>
-#include <rex/cvar.h>
-#include <rex/runtime.h>
-#include <rex/logging.h>
-#include <rex/filesystem.h>
+#include "settings/runtime_settings.h"
+#include "settings/runtime_values.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/path_settings.h>
+#include <rex/gpu/graphics_preparation_service.h>
+#include <rex/gpu/graphics_system.h>
+#include <rex/memory/endian.h>
+#include <rex/string/text.h>
+#include <rex/logging/log_category.h>
+#include <rex/filesystem/file_system.h>
 #include <rex/filesystem/file.h>
-#include <rex/system/interfaces/graphics.h>
-#include <rex/system/xmemory.h>
 #include <xxhash.h>
 
 namespace rb_blitz::graphics {
 namespace {
-rex::Runtime* runtime = nullptr; // installed before guest launch, retired at close
+rex::kernel::TitleRuntime* runtime = nullptr; // installed before guest launch, retired at close
+std::filesystem::path cache_root;
+uint32_t shader_storage_version = kD3D12ShaderStorageVersion;
+
+rex::gpu::IGraphicsPreparation* PreparationService() {
+  return REX_INTERFACE(rex::gpu::IGraphicsPreparation);
+}
+
 std::jthread extraction;
 std::mutex extraction_mutex; // guards the join, never held by the worker while ending
 std::mutex result_mutex;     // guards inputs/seed_report between the worker and the UI
@@ -50,74 +63,31 @@ bool persisted = true;      // the last seed wrote its ledger
 bool cache_writable = true; // pre-flight probe of the cache root
 GraphicsFailure failure_reason = GraphicsFailure::kNone;
 uint64_t settings_fingerprint = 0;
-rex::graphics::GraphicsPreparationProgress progress;
+rex::gpu::GraphicsPreparationProgress progress;
 
 Bytes Read(const std::string& path, uint64_t offset = 0, size_t size = 0) {
-  auto* entry = runtime->file_system()->ResolvePath("game:\\" + path);
-  if (!entry || offset > entry->size()) throw std::runtime_error("missing installed shader archive");
-  if (!size) size = size_t(entry->size());
-  if (size > 32*1024*1024 || size > entry->size()-offset) throw std::runtime_error("invalid shader archive extent");
-  rex::filesystem::File* file = nullptr;
-  if (entry->Open(rex::filesystem::FileAccess::kGenericRead,&file) != 0 || !file)
-    throw std::runtime_error("cannot open shader archive");
+  rex::filesystem::OpenOptions options;
+  options.require_file = true;
+  auto opened = runtime->GetFileSystem().Open("game:\\" + path, options);
+  if (!opened) throw std::runtime_error("cannot open installed shader archive");
+  auto& file = *opened->file;
+  const auto length = file.GetInfo().size;
+  if (offset > length) throw std::runtime_error("invalid shader archive offset");
+  if (!size) size = size_t(length - offset);
+  if (size > 32*1024*1024 || size > length-offset)
+    throw std::runtime_error("invalid shader archive extent");
   Bytes bytes(size);
-  size_t got = 0;
-  const auto status = file->ReadSync(bytes,offset,&got);
-  file->Destroy();
-  if (status || got != size) throw std::runtime_error("cannot read shader archive");
+  const auto got = file.Read(bytes, offset);
+  if (!got || *got != size) throw std::runtime_error("cannot read shader archive");
   return bytes;
 }
 
-constexpr const char* kSettingNames[] = {
-    // Which backend and which of its rendering paths is built: the declared
-    // recipe stores are per path, and a path selects different shaders.
-    "gpu_backend",
-    "render_target_path_d3d12",
-    "render_target_path_vulkan",
-    // Pipeline descriptions embed resolution scaling, MSAA and render-target
-    // formats, so each of these changes the normalized recipes.
-    "draw_resolution_scale_x",
-    "draw_resolution_scale_y",
-    "draw_resolution_scaled_texture_offsets",
-    "native_2x_msaa",
-    "gamma_render_target_as_unorm16",
-    "snorm16_render_target_full_range",
-    "depth_float24_convert_in_pixel_shader",
-    "gpu_allow_invalid_fetch_constants",
-    "d3d12_bindless",
-    "vulkan_dynamic_rendering",
-    // Readback/dump/resolve modes create different helper pipelines.
-    "readback_resolve",
-    "d3d12_readback_resolve",
-    "vulkan_readback_resolve",
-    "readback_memexport",
-    "d3d12_readback_memexport",
-    "vulkan_readback_memexport",
-    "readback_resolve_half_pixel_offset",
-    "resolve_resolution_scale_fill_half_pixel_offset",
-    "present_render_pass_clear",
-    // Swap-chain effects add compute pipelines of their own.
-    "swap_post_effect",
-    // These change the translated shader itself.
-    "vulkan_force_convert_quad_lists_to_triangle_lists",
-    "vulkan_force_expand_point_sprites_in_vs",
-    // Included so the ledger's record explains which native layer was in play;
-    // it changes reuse, not the pipeline descriptions.
-    "native_pipeline_cache",
-};
-
-// Everything a prepared result depends on outside the installed content. Bias
-// towards inclusion: an entry that did not need to be here costs one extra
-// preparation, an omitted one would let stale readiness survive a change.
+// The canonical registry includes the concrete backend's translator and feature
+// settings. Length-prefixed fields keep arbitrary string values unambiguous.
 uint64_t PipelineSettingFingerprint() {
-  std::string fingerprint;
-  for (const auto* name : kSettingNames) {
-    fingerprint.append(name);
-    fingerprint.push_back('=');
-    fingerprint.append(rex::cvar::GetFlagByName(name));
-    fingerprint.push_back(';');
-  }
-  return XXH3_64bits(fingerprint.data(), fingerprint.size());
+  const auto* graphics = REX_INTERFACE(rex::gpu::IGraphicsSystem);
+  const auto identity = PreparationSettingsIdentity(graphics ? graphics->GetDriverName() : "none");
+  return XXH3_64bits(identity.data(), identity.size());
 }
 
 // The boot gate (rb_blitz_app.h) already hashed game/default.xex against this
@@ -146,7 +116,7 @@ uint64_t CurrentConfiguration() {
   put(copy.executable);
   put(copy.d3d12_version);
   put(copy.vulkan_version);
-  put(settings_fingerprint);
+  put(PipelineSettingFingerprint());
   put(content_epoch.load());
   return XXH3_64bits(identity.data(), identity.size());
 }
@@ -178,7 +148,7 @@ void StartExtraction() {
       using settings::ultimate_adapter::ArkIndex;
       std::vector<ArkIndex> indexes;
       for (const auto* path : {"gen/patch_xbox.hdr", "gen/main_xbox.hdr"}) {
-        if (!runtime->file_system()->ResolvePath(std::string("game:\\")+path)) continue;
+        if (!runtime->GetFileSystem().Stat(std::string("game:\\")+path)) continue;
         auto bytes = Read(path);
         ArkIndex index;
         std::string why;
@@ -204,7 +174,7 @@ void StartExtraction() {
         content_identity.push_back('=');
         content_identity.append(error ? std::string("absent") : std::to_string(size));
       };
-      const auto root = runtime->game_data_root();
+      const auto root = runtime->GetTitlePaths().game_root.Get();
       append_file(root / "gen" / "main_xbox.hdr");
       append_file(root / (mode == "ultimate" ? "ultimate/gen/patch_xbox.hdr"
                                              : "gen/patch_xbox.hdr"));
@@ -234,12 +204,12 @@ void StartExtraction() {
       };
       // The supported executable's image is already validated and mapped by the
       // project's boot fingerprint gate. Source recipes use offsets from 0x82000000.
-      const auto* image = runtime->memory()->virtual_membase()+0x82000000u;
+      const auto* image = runtime->GetMembase().TranslateVirtual<const uint8_t*>(0x82000000u);
       std::string persistence_error;
-      SeedReport report = SeedPreparation(kPreparationCatalogue,runtime->cache_root(),reader,
+      SeedReport report = SeedPreparation(kPreparationCatalogue,cache_root,reader,
                                           std::span<const uint8_t>(image,0x900000),
                                           [&] { return stop.stop_requested(); },computed,
-                                          content_epoch.load(),&persistence_error);
+                                          content_epoch.load(),&persistence_error,shader_storage_version);
       {
         std::lock_guard result_lock(result_mutex);
         inputs = computed;
@@ -276,10 +246,10 @@ void Cancel() {
     // Keep the cancelled attempt as evidence: P8 distinguishes "the player left"
     // from "preparation failed", and a later success must not erase that this
     // attempt was interrupted.
-    if (auto* gpu = runtime->graphics_system()) progress = gpu->QueryShaderStoragePreparation();
+    if (auto* gpu = PreparationService()) progress = gpu->QueryShaderStoragePreparation();
     RecordAttempt(true);
     REXLOG_INFO("graphics_loading: attempt {} cancelled; generation {} retires and the next attempt prepares again",attempt,generation);
-    runtime->graphics_system()->CancelShaderStoragePreparation();
+    if (auto* gpu = PreparationService()) gpu->RequestCancelShaderStoragePreparation();
   }
   generation = 0;
 }
@@ -287,12 +257,12 @@ void RecordAttempt(bool cancelled) {
   if (recorded || !runtime || !generation) return;
   recorded = true;
   PreparationLedger ledger;
-  ledger.Load(runtime->cache_root());
+  ledger.Load(cache_root);
   ledger.content_epoch = content_epoch.load();
   ledger.last_attempt.attempt = attempt;
   ledger.last_attempt.configuration = progress.key.configuration;
   ledger.last_attempt.phase =
-      int32_t(cancelled ? rex::graphics::GraphicsPreparationPhase::kCancelled : progress.phase);
+      int32_t(cancelled ? rex::gpu::GraphicsPreparationPhase::kCancelled : progress.phase);
   ledger.last_attempt.complete = !cancelled && progress.ready();
   ledger.last_attempt.ignored = ignored;
   ledger.last_attempt.required = progress.entries.required;
@@ -303,7 +273,7 @@ void RecordAttempt(bool cancelled) {
                                             : progress.entries.cancelled;
   ledger.last_attempt.elapsed_milliseconds = progress.elapsed_milliseconds;
   std::string why;
-  if (!ledger.Save(runtime->cache_root(),&why))
+  if (!ledger.Save(cache_root,&why))
     REXLOG_WARN("graphics_loading: attempt {} could not record its result ({}); a later launch will prepare again",attempt,why);
 }
 // One place sets `failed`, so one place names the reason in the log (P8 reads it
@@ -318,22 +288,46 @@ void FailAttempt(GraphicsFailure reason) {
 }
 }  // namespace
 
-void ConfigureLoading(rex::Runtime* value) {
+void ConfigureLoading(rex::kernel::TitleRuntime* value) {
+  // The stopping hook joined extraction before the previous mapping was freed.
+  // Reset owner-thread state before another title can start guest polling.
+  CloseLoading();
   runtime = value;
-  // A boot's settings are fixed, so their fingerprint is computed once; the
-  // content half is only known after the installed indexes are read (P7).
+  closing.store(false);
+  extraction_state.store(0);
+  content_epoch.store(0);
+  seeded = content_ready = pending = released = failed = recorded = ignored = false;
+  attempt = generation = retries = 0;
+  progress = {};
+  failure_reason = GraphicsFailure::kNone;
+  {
+    std::lock_guard lock(result_mutex);
+    inputs = {};
+    inputs_known = false;
+    seed_report = {};
+    persisted = true;
+  }
+  cache_root = REX_PATHS().cache_root.Get();
+  const auto* graphics = REX_INTERFACE(rex::gpu::IGraphicsSystem);
+  shader_storage_version = graphics && graphics->GetDriverName() == "vulkan"
+      ? kVulkanShaderStorageVersion : kD3D12ShaderStorageVersion;
+  // Log the initial active inputs. Generation comparisons read them again so
+  // live graphics edits retire readiness while pending restart edits stay inert.
   settings_fingerprint = PipelineSettingFingerprint();
-  cache_writable = ProbeWritable(value->cache_root());
+  cache_writable = ProbeWritable(cache_root);
   if (!cache_writable)
-    REXLOG_WARN("graphics_loading: the cache root {} is not writable; graphics can still be prepared for this session, but a later launch will have to prepare again",rex::path_to_utf8(value->cache_root()));
+    REXLOG_WARN("graphics_loading: the cache root {} is not writable; graphics can still be prepared for this session, but a later launch will have to prepare again",rex::string::PathToUTF8(cache_root));
   REXLOG_INFO("graphics_loading: post-A native loading gate configured settings={:016X} ({} pipeline-affecting setting(s), cache writable={})",
-              settings_fingerprint,std::size(kSettingNames),cache_writable);
+              settings_fingerprint,REX_SETTINGS().Enumerate("gpu").size(),cache_writable);
 }
 void BeginLoadingAttempt() {
   rb_blitz::shell_music::StartQueuedPool();
   // Reuse only a live ready generation that was prepared for this exact
   // configuration, never a disk-file existence test.
-  if (runtime && generation) progress = runtime->graphics_system()->QueryShaderStoragePreparation();
+  if (runtime && generation) {
+    if (auto* gpu = PreparationService()) progress = gpu->QueryShaderStoragePreparation();
+    else progress = {};
+  }
   const bool ready = generation && progress.generation == generation && progress.ready();
   if (!ready && !ignored) Cancel();
   content_ready = pending = released = failed = recorded = false;
@@ -358,7 +352,7 @@ void ObserveContentLoading(uint8_t* base, uint32_t panel) {
 void PollLoading() {
   rb_blitz::shell_music::PublishQueuedPool(true);
   if (closing.load() || !runtime || !content_ready || failed || ignored) return;
-  auto* gpu = runtime->graphics_system();
+  auto* gpu = PreparationService();
   if (!gpu) { FailAttempt(GraphicsFailure::kPreparation); return; }
   if (!generation) {
     // A cancelled generation must retire before opening its storage again.
@@ -373,7 +367,7 @@ void PollLoading() {
     if (state != 2 && !seeded) return;
     seeded = true;
     const uint64_t configuration = CurrentConfiguration();
-    if (!gpu->BeginShaderStoragePreparation(runtime->cache_root(),0x5841122D,configuration)) {
+    if (!gpu->BeginShaderStoragePreparation(cache_root,0x5841122D,configuration)) {
       REXLOG_ERROR("graphics_loading: renderer refused preparation; the menu remains gated");
       FailAttempt(cache_writable ? GraphicsFailure::kPreparation : GraphicsFailure::kCacheNotWritable);
       return;
@@ -388,14 +382,14 @@ void PollLoading() {
     // a setting committed at the gate). Retire it and prepare again with the new
     // key - the valid layers are reused, so only the affected work repeats.
     REXLOG_INFO("graphics_loading: attempt {} configuration changed mid-preparation; retiring generation {} for a fresh one",attempt,generation);
-    gpu->CancelShaderStoragePreparation();
+    gpu->RequestCancelShaderStoragePreparation();
     generation = 0;
     return;
   }
   if (progress.generation != generation || (progress.finished && !progress.ready())) {
     if (!failed) {
       REXLOG_ERROR("graphics_loading: generation {} {} required={} succeeded={} failed={} missing={}",
-          generation,rex::graphics::GraphicsPreparationPhaseName(progress.phase),progress.entries.required,
+          generation,rex::gpu::GraphicsPreparationPhaseName(progress.phase),progress.entries.required,
           progress.entries.succeeded,progress.entries.failed,progress.entries.missing);
       FailAttempt(cache_writable ? GraphicsFailure::kPreparation : GraphicsFailure::kCacheNotWritable);
       RecordAttempt(false);
@@ -408,6 +402,7 @@ bool LoadingQuery(std::string_view path, uint32_t* answer) {
   constexpr std::string_view prefix = "rbbz-graphics/";
   if (!path.starts_with(prefix)) return false;
   *answer = 0;
+  if (closing.load()) return true;
   path.remove_prefix(prefix.size());
   if (path == "cancel") {
     if (!released) Cancel();
@@ -422,7 +417,7 @@ bool LoadingQuery(std::string_view path, uint32_t* answer) {
       if (extraction_state.load() == 2) seeded = true;
       if (!seeded) extraction_state.store(0);
       if (runtime && generation && !progress.finished)
-        runtime->graphics_system()->CancelShaderStoragePreparation();
+        if (auto* gpu = PreparationService()) gpu->RequestCancelShaderStoragePreparation();
       generation = 0;
       failed = false;
       recorded = false;
@@ -445,15 +440,16 @@ bool LoadingQuery(std::string_view path, uint32_t* answer) {
       ignored = true;
       released = true;
       pending = false;
-      auto* gpu = runtime ? runtime->graphics_system() : nullptr;
+      auto* gpu = runtime ? PreparationService() : nullptr;
       if (gpu && generation) {
         progress = gpu->QueryShaderStoragePreparation();
         RecordAttempt(true);
-        gpu->CancelShaderStoragePreparation();
+        gpu->RequestCancelShaderStoragePreparation();
       } else if (gpu) {
         // No preparation generation opened storage yet. Preserve ordinary
         // shader learning/caching without certifying graphics readiness.
-        gpu->InitializeShaderStorage(runtime->cache_root(), 0x5841122D, false);
+        const bool started = gpu->BeginShaderStoragePreparation(cache_root, 0x5841122D, CurrentConfiguration());
+        REXLOG_INFO("graphics_loading: shader storage requested after skip (started={})", started);
       }
       *answer = 1;
       REXLOG_WARN("graphics_loading: attempt {} skipped; continuing to the main menu with normal demand compilation/caching, readiness not certified", attempt);
@@ -463,9 +459,9 @@ bool LoadingQuery(std::string_view path, uint32_t* answer) {
       // A failed generation is terminal. If local extraction failed before the
       // renderer opened storage, open the existing learned records asynchronously
       // so ordinary demand-created pipelines continue to be captured.
-      auto* gpu = runtime ? runtime->graphics_system() : nullptr;
+      auto* gpu = runtime ? PreparationService() : nullptr;
       if (gpu && !generation && !gpu->QueryShaderStoragePreparation().active) {
-        const bool started = gpu->BeginShaderStoragePreparation(runtime->cache_root(),0x5841122D,CurrentConfiguration());
+        const bool started = gpu->BeginShaderStoragePreparation(cache_root,0x5841122D,CurrentConfiguration());
         REXLOG_INFO("graphics_loading: legacy shader storage requested after extraction failure (started={})",started);
       }
       ignored = true;
@@ -491,7 +487,7 @@ bool LoadingQuery(std::string_view path, uint32_t* answer) {
     } else if (path == "failed") *answer = failed;
     else if (path == "failed_data") *answer = failed && failure_reason == GraphicsFailure::kShaderData;
     else if (path == "failed_cache") *answer = failed && failure_reason == GraphicsFailure::kCacheNotWritable;
-    else if (path == "checking") *answer = !generation || progress.phase == rex::graphics::GraphicsPreparationPhase::kImporting;
+    else if (path == "checking") *answer = !generation || progress.phase == rex::gpu::GraphicsPreparationPhase::kImporting;
     else if (path == "current") *answer = uint32_t(progress.completed_entries());
     else if (path == "total") *answer = generation && progress.has_catalogue ? uint32_t(progress.required_entries()) : uint32_t(-1);
   }
@@ -503,7 +499,7 @@ void CloseLoading() {
   closing.store(true);
   std::lock_guard lock(extraction_mutex);
   if (extraction.joinable()) { extraction.request_stop(); extraction.join(); }
-  if (runtime && runtime->graphics_system()) runtime->graphics_system()->CancelShaderStoragePreparation();
+  if (runtime && PreparationService()) PreparationService()->RequestCancelShaderStoragePreparation();
 }
 void NoteContentChanged(std::string_view why) {
   const uint64_t epoch = content_epoch.fetch_add(1) + 1;

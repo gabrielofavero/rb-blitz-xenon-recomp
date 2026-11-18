@@ -1,5 +1,7 @@
 # Framerate expansion: feasibility and implementation plan
 
+The baseline observations below link to the exact pre-migration SDK commit. In v0.11, public `UISettings.video_mode_refresh_rate` owns guest refresh; private `src/gpu/xenos/xenos_graphics_driver_base.cpp` schedules vblanks and `src/gpu/xenos/host/d3d12/d3d12_presenter.cpp` presents frames. Recheck timing assumptions against those owners before implementation.
+
 **Status: to do (paused 2026-11-10 after P0/P1 diagnostic work). No higher rate is validated.**
 This analysis uses the current source, the recorded 2026-09-20 pacing experiment,
 and public RB3 sources inspected on 2026-10-25. Higher-rate gameplay, scoring and
@@ -35,13 +37,13 @@ is an implementation limit of that setting, not a physics or gameplay guarantee.
 **[tree]** There is a boolean V-Sync row, default **true**, and no separate FPS
 limit row: [schema.cpp](../../../src/settings/schema.cpp), `kVsync`.
 The SDK defaults `video_mode_refresh_rate` to **60.0 Hz**
-([window.cpp](../../../rexglue-sdk/src/ui/window.cpp));
+([window.cpp](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/ui/window.cpp));
 `GetConfiguredVideoModeRefreshRate` clamps an explicit request to **24..240 Hz**
 ([xboxkrnl_video.cpp](../../../rexglue-sdk/src/kernel/xboxkrnl/xboxkrnl_video.cpp)).
 This is a guest video mode, not an automatic copy of the monitor's refresh rate.
 
 **[tree]** The vblank worker in
-[graphics_system.cpp](../../../rexglue-sdk/src/graphics/graphics_system.cpp),
+[graphics_system.cpp](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/graphics/graphics_system.cpp),
 `GraphicsSystem::SetupGuestGpu`, reads the guest refresh once at worker startup. With
 V-Sync on it signals at that rate; with V-Sync off it uses a **1 ms / nominal
 1000 Hz interrupt interval**. `MarkVblank` advances the GPU counter and dispatches
@@ -49,7 +51,7 @@ the guest interrupt. That 1000 Hz interval is not 1000 rendered FPS. The worker
 re-reads `vsync` live, but does not re-read the configured refresh rate.
 
 The D3D12 presenter calls `Present(0, ...)` and may drop obsolete queued frames
-([d3d12_presenter.cpp](../../../rexglue-sdk/src/ui/d3d12/d3d12_presenter.cpp)).
+([d3d12_presenter.cpp](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/ui/d3d12/d3d12_presenter.cpp)).
 Consequently, this product's V-Sync control currently affects guest pacing; its
 name does not establish conventional monitor-synchronized presentation.
 

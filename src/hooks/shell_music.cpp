@@ -13,6 +13,7 @@
 // Guest ABI and runtime evidence: docs/engine/main-menu.md, part 2, 2026-10-15 correction.
 // With DLC Menu Songs off, the independent navigator can use the three title tracks.
 
+#include <format>
 #include "hooks/shell_music.h"
 
 #include "hooks/menu_music_pool.h"
@@ -25,7 +26,6 @@
 #include "hooks/menu_music_now_playing.h"
 #include "input/native_menu.h"
 #include "input/input_capture.h"
-#include <rex/kernel/xam/module.h>
 #include "hooks/menu_audio_policy.h"
 
 #include <algorithm>
@@ -47,19 +47,22 @@
 #include <system_error>
 #include <vector>
 
-#include <fmt/format.h>
 
-#include <rex/cvar.h>
-#include <rex/filesystem/device.h>
-#include <rex/filesystem/entry.h>
+#include "settings/runtime_settings.h"
 #include <rex/filesystem/file.h>
-#include <rex/filesystem/devices/host_path_device.h>
-#include <rex/filesystem/devices/stfs_container_device.h>
-#include <rex/filesystem/vfs.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/runtime.h>
-#include <rex/system/xmemory.h>
+#include <rex/filesystem/file_system.h>
+#include <rex/filesystem/mount_diagnostics.h>
+#include <rex/kernel/heap.h>
+#include <rex/path_settings.h>
+#include <rex/ppc/call.h>
+#include <rex/string/path.h>
+#include <rex/string/text.h>
+#include "input/title_input.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 #include <rex/types.h>
 
 #include "hooks/dlc.h"
@@ -77,15 +80,13 @@
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table. Both are read here: the
 // first is the carrier of the in-game "DLC Menu Songs" row (the boot writes the row into it at the
 // config rank), and the second is the retired pool-size row, read only to say it is ignored.
-REXCVAR_DECLARE(bool, enhancements_menu_dlc_songs);
-REXCVAR_DECLARE(bool, enhancements_background_music_nav);
-REXCVAR_DECLARE(bool, enhancements_music_player);
-REXCVAR_DEFINE_STRING(background_music_nav_probe, "", "Diagnostics",
-    "One main-menu command after background_music_nav_probe_delay seconds: next, previous, play_pause.");
-REXCVAR_DEFINE_INT32(background_music_nav_probe_delay, 5, "Diagnostics", "Seconds before the one-shot music navigator probe.");
-REXCVAR_DEFINE_BOOL(background_music_nav_pause_trial, false, "Diagnostics",
-    "Legacy pause-trial flag: log paused sample progress each second. Native pause no longer requires this flag.");
-REXCVAR_DECLARE(int32_t, enhancements_menu_dlc_song_count);
+
+
+
+
+
+
+
 
 REX_EXTERN(__imp__sub_82757F50);
 REX_EXTERN(__imp__sub_827586D8);
@@ -150,6 +151,7 @@ LONG CALLBACK LogMusicFault(EXCEPTION_POINTERS* info) {
 void CallMusicGuest(void (*function)(PPCContext&, uint8_t*), PPCContext& ctx,
                     uint8_t* base, const char* stage) {
   const MusicFaultScope scope(ctx, base, stage);
+  rex::ppc::OpenCallFrame(ctx, base, 0x100);
   function(ctx, base);
 }
 
@@ -299,49 +301,36 @@ constexpr size_t kMoggSize = 5;  // ".mogg"
 // shapes a package uses are covered: the usual `songs/<song>/<song>.mogg`, and a `.mogg`
 // sitting directly in `\songs`. The depth is bounded so a malformed tree cannot recurse
 // forever.
-void CollectSongStreams(rex::filesystem::Entry* node, const std::string& path, size_t depth,
+void CollectSongStreams(const rb_blitz::fs::PackageView& package, size_t index, size_t depth,
                         std::vector<std::string>& out) {
-  if (node == nullptr || depth > 4) {
-    return;
-  }
-  for (const std::unique_ptr<rex::filesystem::Entry>& child : node->children()) {
-    if (child == nullptr || child->name().empty()) {
-      continue;
-    }
-    const std::string child_path = path + "\\" + child->name();
-    if ((child->attributes() & rex::filesystem::kFileAttributeDirectory) != 0) {
-      CollectSongStreams(child.get(), child_path, depth + 1, out);
-      continue;
-    }
-    const std::string& name = child->name();
-    if (name.size() > kMoggSize &&
-        name.compare(name.size() - kMoggSize, kMoggSize, ".mogg") == 0) {
-      out.push_back(child_path.substr(0, child_path.size() - kMoggSize));
+  const auto nodes = package.Nodes();
+  if (index >= nodes.size() || depth > 4) return;
+  for (const auto child : nodes[index].children) {
+    const auto& info = nodes[child].info;
+    if (rex::HasFlags(info.attributes, rex::filesystem::FileAttributes::kDirectory)) {
+      CollectSongStreams(package, child, depth + 1, out);
+    } else if (info.name.size() > kMoggSize && info.name.ends_with(".mogg")) {
+      const auto path = "\\" + info.path;
+      out.push_back(path.substr(0, path.size() - kMoggSize));
     }
   }
 }
 
-// Every song a package holds. A downloaded song is usually one package with one song, but a
-// merged pack is one container holding a whole disc's worth of them (the retail packs:
-// `songs/<song>/<song>.mogg` for each song, dozens to a package), so taking only the first -
-// which this used to do - pinned the menu to whichever song sorted first, every boot. An
-// art-only package (a stub whose whole table is an icon and an asset blob) yields nothing and
-// is skipped rather than guessed at.
-std::vector<std::string> FindSongStreams(rex::filesystem::Device& device) {
+std::vector<std::string> FindSongStreams(const rb_blitz::fs::PackageView& package) {
   std::vector<std::string> streams;
-  rex::filesystem::Entry* songs = device.ResolvePath("\\songs");
-  if (songs == nullptr) {
-    songs = device.ResolvePath("songs");
+  const auto nodes = package.Nodes();
+  if (nodes.empty()) return streams;
+  for (const auto index : nodes[0].children) {
+    if (rex::string::utf8_equal_case(nodes[index].info.name, "songs")) {
+      CollectSongStreams(package, index, 0, streams);
+      break;
+    }
   }
-  if (songs == nullptr) {
-    return streams;
-  }
-  CollectSongStreams(songs, "\\songs", 0, streams);
   return streams;
 }
 
-std::vector<rb_blitz::shell_music::SongMetadata> FindSongMetadata(rex::filesystem::Device& device) {
-  return rb_blitz::fs::ReadDeviceSongMetadata(device);
+std::vector<rb_blitz::shell_music::SongMetadata> FindSongMetadata(rb_blitz::fs::PackageView& package) {
+  return rb_blitz::fs::ReadDeviceSongMetadata(package);
 }
 
 // The package as a read-only guest device: an STFS container mounted where it lies, or
@@ -352,7 +341,7 @@ using rb_blitz::fs::MountPackage;
 
 struct PreparedPackage {
   size_t index = 0;
-  std::unique_ptr<rex::filesystem::Device> device;
+  std::unique_ptr<rb_blitz::fs::PackageView> device;
   std::vector<PoolEntry> songs;
   std::shared_ptr<std::vector<rb_blitz::shell_music::catalog::Package>> catalog;
   bool catalog_complete = false;
@@ -360,10 +349,20 @@ struct PreparedPackage {
 };
 
 rb_blitz::shell_music::MenuMusicQueue<PreparedPackage> g_queue;
-rex::filesystem::VirtualFileSystem* g_file_system = nullptr;
+rex::filesystem::IFileSystem* g_file_system = nullptr;
+rex::filesystem::IMountDiagnostics* g_mount_diagnostics = nullptr;
+struct MountedPackage {
+  std::string path;
+  size_t open_file_count() const {
+    if (!g_file_system || !g_mount_diagnostics) return std::numeric_limits<size_t>::max();
+    const auto count = g_mount_diagnostics->GetOpenCount(*g_file_system, path);
+    return count ? *count : std::numeric_limits<size_t>::max();
+  }
+};
+std::map<size_t, std::unique_ptr<MountedPackage>> g_mounts;
 std::vector<std::filesystem::path> g_packages;  // catalog aliases use this boot's stable indices
 size_t g_next_package = 0;
-rb_blitz::shell_music::MusicMountCache<rex::filesystem::Device> g_cache;
+rb_blitz::shell_music::MusicMountCache<MountedPackage> g_cache;
 std::optional<PreparedPackage> g_ready_package;
 bool g_queue_started = false;
 std::atomic<bool> g_closing{false};
@@ -484,7 +483,7 @@ std::string SourcePath(const PoolEntry& source) {
 }
 
 struct ArchiveSlice {
-  rex::filesystem::Entry* part = nullptr;
+  std::string part;
   uint64_t offset = 0;
   size_t size = 0;
 };
@@ -496,39 +495,36 @@ ArchiveSlice FindBaseRecord(std::string_view path) {
   for (size_t i = 0; i < g_base_archive.parts.size(); ++i) {
     const auto part_size = g_base_archive.part_sizes[i];
     if (offset >= part_size) { offset -= part_size; continue; }
-    auto* part = g_file_system->ResolvePath("game:\\" + g_base_archive.parts[i]);
-    if (!part || offset > part->size() || record->size > part_size - offset ||
-        record->size > part->size() - offset) return {};
-    return {part, offset, size_t(record->size)};
+    const auto path = "game:\\" + g_base_archive.parts[i];
+    auto part = g_file_system->Stat(path);
+    if (!part || offset > part->size || record->size > part_size - offset ||
+        record->size > part->size - offset) return {};
+    return {path, offset, size_t(record->size)};
   }
   return {};
 }
 
 bool ReadBaseRecord(std::string_view path, std::vector<uint8_t>* bytes) {
   const auto slice = FindBaseRecord(path);
-  if (!slice.part || slice.size > 2 * 1024 * 1024) return false;
-  rex::filesystem::File* file = nullptr;
-  if (slice.part->Open(rex::filesystem::FileAccess::kGenericRead, &file) != 0 || !file) return false;
+  if (slice.part.empty() || slice.size > 2 * 1024 * 1024) return false;
+  auto file = g_file_system->Open(slice.part, {});
+  if (!file) return false;
   bytes->resize(slice.size);
-  size_t read = 0;
-  const auto status = file->ReadSync(*bytes, slice.offset, &read);
-  file->Destroy();
-  return status == 0 && read == slice.size;
+  auto read = file->file->Read(*bytes, slice.offset);
+  return read && *read == slice.size;
 }
 
 // Called before guest launch, after the base game is mounted. Catalog only
 // metadata-declared streams present in the archive, excluding the two lessons.
 void DiscoverBaseSongs() {
-  auto* header = g_file_system->ResolvePath("game:\\gen\\main_xbox.hdr");
-  if (!header || !header->size() || header->size() > 2 * 1024 * 1024) return;
-  rex::filesystem::File* file = nullptr;
-  if (header->Open(rex::filesystem::FileAccess::kGenericRead, &file) != 0 || !file) return;
-  std::vector<uint8_t> bytes(header->size());
-  size_t read = 0;
-  const auto status = file->ReadSync(bytes, 0, &read);
-  file->Destroy();
+  auto header = g_file_system->Stat("game:\\gen\\main_xbox.hdr");
+  if (!header || !header->size || header->size > 2 * 1024 * 1024) return;
+  auto file = g_file_system->Open("game:\\gen\\main_xbox.hdr", {});
+  if (!file) return;
+  std::vector<uint8_t> bytes(static_cast<size_t>(header->size));
+  const auto read = file->file->Read(bytes, 0);
   std::string error;
-  if (status != 0 || read != bytes.size() ||
+  if (!read || *read != bytes.size() ||
       !rb_blitz::settings::ultimate_adapter::ReadArkIndex(
           bytes.data(), bytes.size(), &g_base_archive, &error)) {
     REXLOG_WARN("shell_music: cannot read base-game song archive: {}", error);
@@ -538,13 +534,13 @@ void DiscoverBaseSongs() {
   const auto metadata = rb_blitz::shell_music::ReadSongMetadata(bytes, true, &error);
   std::vector<std::string> artwork;
   for (const auto& record : g_base_archive.entries)
-    if (record.path.ends_with(".png_xbox") && FindBaseRecord(record.path).part)
+    if (record.path.ends_with(".png_xbox") && !FindBaseRecord(record.path).part.empty())
       artwork.push_back(record.path);
   std::vector<PoolEntry> songs;
   for (const auto& song : metadata) {
     if (song.key == "tutorialsong" || song.key == "tutorialsong3") continue;
     const auto stream = rb_blitz::shell_music::StreamIdentity(song.stream);
-    if (stream.size() + 1 > kBufferBytes || !FindBaseRecord(stream + ".mogg").part) continue;
+    if (stream.size() + 1 > kBufferBytes || FindBaseRecord(stream + ".mogg").part.empty()) continue;
     PoolEntry entry{"", stream, song.key, song.title, song.artist};
     entry.artwork_locator = rb_blitz::ui::music::ResolveArtwork(stream, artwork);
     songs.push_back(std::move(entry));
@@ -555,18 +551,19 @@ void DiscoverBaseSongs() {
 
 
 std::string MountPath(size_t index) {
-  return fmt::format("\\Device\\BlitzMenuMusic\\{}\\", index);
+  return std::format("\\Device\\BlitzMenuMusic\\{}\\", index);
 }
 
-void CollectArtwork(rex::filesystem::Entry* node, const std::string& path, size_t depth,
+void CollectArtwork(const rb_blitz::fs::PackageView& package, size_t index, size_t depth,
                     std::vector<std::string>& out) {
-  if (!node || depth > 6) return;
-  for (const auto& child : node->children()) {
-    const auto next = path + "\\" + child->name();
-    if (child->attributes() & rex::filesystem::kFileAttributeDirectory)
-      CollectArtwork(child.get(), next, depth+1, out);
-    else if (rb_blitz::shell_music::StreamIdentity(next).ends_with(".png_xbox"))
-      out.push_back(next);
+  const auto nodes = package.Nodes();
+  if (index >= nodes.size() || depth > 6) return;
+  for (const auto child : nodes[index].children) {
+    const auto& info = nodes[child].info;
+    if (rex::HasFlags(info.attributes, rex::filesystem::FileAttributes::kDirectory))
+      CollectArtwork(package, child, depth + 1, out);
+    else if (rb_blitz::shell_music::StreamIdentity(info.path).ends_with(".png_xbox"))
+      out.push_back("\\" + info.path);
   }
 }
 
@@ -586,9 +583,9 @@ std::optional<PreparedPackage> PreparePackage(const std::filesystem::path& packa
     auto streams = FindSongStreams(*prepared.device);
     const auto metadata = streams.empty() ? std::vector<rb_blitz::shell_music::SongMetadata>{}
                                          : FindSongMetadata(*prepared.device);
-    const std::string alias = fmt::format("menumusic{}", index);
+    const std::string alias = std::format("menumusic{}", index);
     std::vector<std::string> artwork;
-    if (g_navigation_enabled) CollectArtwork(prepared.device->ResolvePath(""), "", 0, artwork);
+    if (g_navigation_enabled) CollectArtwork(*prepared.device, 0, 0, artwork);
     for (auto& stream : streams) {
       if (alias.size() + stream.size() + 2 > kBufferBytes) continue;
       auto key = rb_blitz::shell_music::SongKeyForStream(metadata, stream);
@@ -629,8 +626,10 @@ void RetireColdLocked() {
   const auto retired = g_cache.RetireCold(WarmPackagesLocked(), [](size_t package) {
     // Neither the active stream, its pending replacement nor a captured press
     // can refer to this source. Open native Files defer its destruction further.
-    g_file_system->UnregisterSymbolicLink(fmt::format("menumusic{}:", package));
-    return g_file_system->UnregisterDevice(MountPath(package));
+    (void)g_file_system->Unlink(std::format("menumusic{}:", package));
+    if (!g_file_system->Unmount(MountPath(package))) return false;
+    g_mounts.erase(package);
+    return true;
   });
   if (retired) REXLOG_INFO("shell_music: retired {} cold package(s); {} resident, {} catalog songs",
                            retired, g_cache.Size(), g_session.Sources().size());
@@ -648,7 +647,7 @@ bool PublishPackage(PreparedPackage& prepared) {
     for (size_t i = 0; i < g_catalog_pending->size(); ++i) {
       if (!(*g_catalog_pending)[i].identity) continue;
       auto songs = (*g_catalog_pending)[i].songs;
-      for (auto& song : songs) song.alias = fmt::format("menumusic{}", i);
+      for (auto& song : songs) song.alias = std::format("menumusic{}", i);
       g_session.Discover(i, std::move(songs));
       ++cached;
     }
@@ -667,7 +666,7 @@ bool PublishPackage(PreparedPackage& prepared) {
     if (!prepared.catalog_complete) return true; // another bounded batch follows on menu polls
     for (size_t i = 0; i < prepared.catalog->size(); ++i) {
       auto songs = (*prepared.catalog)[i].songs;
-      for (auto& song : songs) song.alias = fmt::format("menumusic{}", i);
+      for (auto& song : songs) song.alias = std::format("menumusic{}", i);
       g_session.Discover(i, std::move(songs));
     }
     g_next_package = g_packages.size();
@@ -712,17 +711,23 @@ bool PublishPackage(PreparedPackage& prepared) {
   RetireColdLocked();
   if (g_cache.Full()) return false;
   const auto mount_path = MountPath(prepared.index);
-  auto* device = prepared.device.get();
-  if (!g_file_system->RegisterDevice(std::move(prepared.device))) {
+  if (!g_file_system->Mount(prepared.device->Mount())) {
     g_session.BlockPackage(prepared.index);
     return true;
   }
-  if (!g_file_system->RegisterSymbolicLink(fmt::format("menumusic{}:", prepared.index), mount_path)) {
-    g_file_system->UnregisterDevice(mount_path);
+  if (!g_file_system->Link(std::format("menumusic{}:", prepared.index), mount_path)) {
+    (void)g_file_system->Unmount(mount_path);
     g_session.BlockPackage(prepared.index);
     return true;
   }
-  g_cache.Insert(prepared.index, device);
+  auto resident = std::make_unique<MountedPackage>(mount_path);
+  if (!g_cache.Insert(prepared.index, resident.get())) {
+    (void)g_file_system->Unlink(std::format("menumusic{}:", prepared.index));
+    (void)g_file_system->Unmount(mount_path);
+    return false;
+  }
+  g_mounts.emplace(prepared.index, std::move(resident));
+  prepared.device.reset();
   REXLOG_INFO("shell_music: package {} ready; {} resident, {} catalog songs, {} playlist entries",
               prepared.index, g_cache.Size(), g_session.Sources().size(), g_session.Playlist().size());
   return true;
@@ -832,15 +837,13 @@ void RetireStreamOnGuest(uint8_t* base, PPCContext& parent, uint32_t music) {
   }
   {
     PPCContext destroy(parent);
-    destroy.r1.u32 -= 0x100;
     destroy.r3.u32 = old_stream;
     destroy.r4.u32 = 1;
     const uint32_t destructor = LoadBe32(base, LoadBe32(base, old_stream));
-    CallMusicGuest(rex::runtime::ResolveIndirectFunction(destructor), destroy, base, "retire");
+    CallMusicGuest(rex::ppc::ResolveFunction(destructor), destroy, base, "retire");
   }
   std::memset(rex::memory::GuestPtr<uint8_t*>(base, music + kStreamOffset), 0, 4);
   PPCContext stop(parent);
-  stop.r1.u32 -= 0x100;
   stop.r3.u32 = music;
   CallMusicGuest(__imp__sub_827583F8, stop, base, "stop streams");
 }
@@ -863,16 +866,17 @@ void LoadOnGuest(uint8_t* base, PPCContext& parent, uint32_t music, uint32_t buf
   RetireStreamOnGuest(base, parent, music);
   std::memcpy(rex::memory::GuestPtr<uint8_t*>(base, buffer), path.c_str(), path.size() + 1);
   PPCContext call(parent);
-  call.r1.u32 -= 0x100;              // a scratch frame on the guest's own stack
   call.r3.u32 = music;               // this
   call.r4.u32 = buffer;              // filename
   call.f1.f64 = g_gain;              // volume, the one the panel passed
   call.r6.u64 = g_scale_pan;         // preserve the panel's pan scaling
   call.r7.u64 = loop ? 1 : 0;        // the panel's own loop flag (Load stores it at +48)
+  // A cold library may have skipped the initial substitution while its mount
+  // was pending. Every deferred library Load must select file streaming too.
+  if (!loop) *rex::memory::GuestPtr<uint8_t*>(base, music + 60) = 0;
   CallMusicGuest(__imp__sub_82757F50, call, base, "load");
   *rex::memory::GuestPtr<uint8_t*>(base, music + 48) = loop ? 1 : 0;  // same field, read back
   PPCContext start(parent);
-  start.r1.u32 -= 0x100;
   start.r3.u32 = music;
   CallMusicGuest(__imp__sub_82758B98, start, base, "start");
   {
@@ -933,7 +937,7 @@ void StartNextTrack(uint8_t* base, PPCContext& parent, uint32_t music) {
   REXLOG_INFO("shell_music: playing \"{}.mogg\" next (R9), handed over "
               "{} ms after the seam{}",
               path, MillisecondsSince(g_seam_at),
-              new_pass ? fmt::format(", opening a new pass over the {} song(s) of the pool",
+              new_pass ? std::format(", opening a new pass over the {} song(s) of the pool",
                                      g_session.Sources().size())
                        : std::string());
   LoadOnGuest(base, parent, music, buffer, path, /*loop=*/false);
@@ -976,7 +980,7 @@ void PublishNavigator(uint8_t* base, uint32_t music) {
   const bool source = music && (g_watch || g_watch_title) && !g_closing;
   const bool available = source &&
       rb_blitz::input::HostInputFocused() &&
-      !rb_blitz::input::capture::Armed() && !rex::kernel::xam::xeXamIsUIActive() &&
+      !rb_blitz::input::capture::Armed() && !rb_blitz::input::SystemUIActive() &&
       !rb_blitz::graphics::GraphicsLoadingPending();
   if (source) {
     const auto stream = LoadBe32(base, music + kStreamOffset);
@@ -997,7 +1001,7 @@ void PublishNavigator(uint8_t* base, uint32_t music) {
       if (update.track.title.empty()) update.track.title = update.track.key;
     } else if (g_title_index >= 0) {
       update.track = {MusicSource::kTitle, size_t(g_title_index), kTitleTracks[g_title_index],
-                     fmt::format("Menu Track {}", g_title_index + 1), "Unknown artist", {}};
+                     std::format("Menu Track {}", g_title_index + 1), "Unknown artist", {}};
     }
   }
   NowPlaying().Publish(g_nav_epoch, std::move(update), available);
@@ -1023,7 +1027,7 @@ void ApplyNavigatorCommand(uint8_t* base, PPCContext& ctx, uint32_t music) {
   }
   if (!g_navigation_enabled || music != g_music || !(g_watch || g_watch_title)) return;
   const bool blocked = !rb_blitz::input::HostInputFocused() ||
-                       rb_blitz::input::capture::Armed() || rex::kernel::xam::xeXamIsUIActive() ||
+                       rb_blitz::input::capture::Armed() || rb_blitz::input::SystemUIActive() ||
                        rb_blitz::graphics::GraphicsLoadingPending();
   if (blocked) {
     FinishNavigator(nav::CompletionStatus::kCancelled, "input/loading owner changed");
@@ -1052,15 +1056,14 @@ void ApplyNavigatorCommand(uint8_t* base, PPCContext& ctx, uint32_t music) {
         return;
       }
       PPCContext call(ctx);
-      call.r1.u32 -= 0x100;
       call.r3.u32 = stream;
       const auto position = LoadBe32(base, stream + kPositionOffset);
       if (resume) {
         g_nav_age.Hold(stream, position);
-        __imp__sub_823E4808(call, base);
+        CallMusicGuest(__imp__sub_823E4808, call, base, "resume");
         if (LoadBe32(base, stream + 20) == 3) g_nav_paused_stream = 0;
       } else {
-        sub_823E3FD8(call, base);
+        CallMusicGuest(sub_823E3FD8, call, base, "pause");
         if (LoadBe32(base, stream + 20) == 5) g_nav_paused_stream = stream;
         g_nav_pause_position = LoadBe32(base, stream + kPositionOffset);
         g_nav_pause_log_at = std::chrono::steady_clock::now();
@@ -1286,7 +1289,7 @@ bool SubstituteFilename(uint8_t* base, PPCContext& ctx) {
 namespace rb_blitz::shell_music {
 
 void PrepareBootCatalog(const std::filesystem::path& cache_path) {
-  if (!REXCVAR_GET(enhancements_menu_dlc_songs) || g_boot_catalog_job) return;
+  if (!rb_blitz::settings::title::enhancements_menu_dlc_songs.Get() || g_boot_catalog_job) return;
   std::error_code ec;
   if (!std::filesystem::is_regular_file(cache_path, ec) || ec) return;
   g_boot_catalog_job.emplace(BootCatalogJob{
@@ -1301,42 +1304,60 @@ ui::music::ArtRead ReadArtwork(const ui::music::ArtTag& tag, std::vector<uint8_t
   if (!bytes || !snapshot.available || tag.epoch != snapshot.epoch ||
       tag.song != snapshot.playback.track.song || tag.key != snapshot.playback.track.artwork_key)
     return ArtRead::kMissing;
-  rex::filesystem::File* file = nullptr;
+  std::unique_ptr<rex::filesystem::IFile> file;
   size_t size = 0;
   uint64_t offset = 0;
   {
     std::lock_guard lock(g_mutex);
-    if (g_closing || !g_navigation_enabled || tag.song >= g_session.Sources().size())
+    if (g_closing || !g_navigation_enabled || !g_file_system || tag.song >= g_session.Sources().size())
       return ArtRead::kMissing;
     const auto& source = g_session.Sources()[tag.song];
     if (source.artwork_locator != tag.key) return ArtRead::kMissing;
-    rex::filesystem::Entry* entry = nullptr;
+    std::string path;
     if (g_session.Package(tag.song) == kBasePackage) {
       const auto slice = FindBaseRecord(source.artwork_locator);
-      entry = slice.part;
-      size = slice.size;
-      offset = slice.offset;
+      path = slice.part; size = slice.size; offset = slice.offset;
     } else {
-      auto* device = g_cache.Get(g_session.Package(tag.song));
-      if (!device) return ArtRead::kDeferred;  // playback remounts; art adds no residency
-      entry = device->ResolvePath(source.artwork_locator);
-      if (entry) size = entry->size();
+      auto* resident = g_cache.Get(g_session.Package(tag.song));
+      if (!resident) return ArtRead::kDeferred;
+      path = rex::string::utf8_join_guest_paths(resident->path, source.artwork_locator);
+      const auto entry = g_file_system->Stat(path);
+      if (entry) size = static_cast<size_t>(entry->size);
     }
-    if (!entry || !size || size > 2*1024*1024) return ArtRead::kMissing;
-    if (entry->Open(rex::filesystem::FileAccess::kGenericRead, &file) != 0 || !file)
-      return ArtRead::kMissing;
+    if (path.empty() || !size || size > 2*1024*1024) return ArtRead::kMissing;
+    auto opened = g_file_system->Open(path, {});
+    if (!opened) return ArtRead::kMissing;
+    file = std::move(opened->file);
   }
-  // File's accounting pins the device across retirement without holding g_mutex
-  // over disk I/O. Destroy the lease before returning bytes to the decoder.
-  const auto destroy = [](rex::filesystem::File* value) { value->Destroy(); };
-  std::unique_ptr<rex::filesystem::File, decltype(destroy)> lease(file, destroy);
+  // The SDK file pins its provider and its accounting prevents cold retirement during I/O.
   bytes->resize(size);
-  size_t read = 0;
-  return file->ReadSync(*bytes, offset, &read) == 0 && read == size
-      ? ArtRead::kReady : ArtRead::kMissing;
+  const auto read = file->Read(*bytes, offset);
+  return read && *read == size ? ArtRead::kReady : ArtRead::kMissing;
 }
 
-void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
+void Configure(rex::kernel::TitleRuntime* runtime, const std::filesystem::path& game_data_root) {
+  DrainQueuedPool();
+  g_queue.Reset();
+  g_queue_started = false;
+  g_ready_package.reset();
+  g_catalog_pending.reset();
+  g_cache = {};
+  g_mounts.clear();
+  g_session = {};
+  g_base_archive = {};
+  g_packages.clear();
+  g_buffers.clear();
+  g_buffer_next = 0;
+  g_music = 0;
+  g_watch = g_watch_title = false;
+  g_nav_request.reset();
+  g_nav_target = rb_blitz::shell_music::kNoIndex;
+  g_nav_started = false;
+  g_nav_age = {};
+  g_playback.Stop();
+  g_file_system = nullptr;
+  g_mount_diagnostics = REX_INTERFACE(rex::filesystem::IMountDiagnostics);
+  g_closing = false;
   (void)game_data_root;
   REXLOG_INFO("shell_music: rolling session: async startup package, {} upcoming and {} recent "
               "songs warm, at most {} resident packages",
@@ -1344,7 +1365,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
               rb_blitz::shell_music::MusicSession::kBehind,
               rb_blitz::shell_music::MusicSession::kResidentLimit);
   const std::string legacy_note = rb_blitz::settings::menu_compat::LegacyPoolCountNote(
-      REXCVAR_GET(enhancements_menu_dlc_song_count));
+      rb_blitz::settings::title::enhancements_menu_dlc_song_count.Get());
   if (!legacy_note.empty()) {
     REXLOG_WARN("shell_music: {}", legacy_note);
   }
@@ -1357,10 +1378,10 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // since 2026-10-13, so reviving the row changes no existing boot.
   //
   // The read happens once, on this host thread; no guest thread ever touches the cvar registry.
-  g_navigation_enabled = REXCVAR_GET(enhancements_menu_dlc_songs) &&
-      (REXCVAR_GET(enhancements_background_music_nav) || REXCVAR_GET(enhancements_music_player));
-  g_music_fault_base.store(g_navigation_enabled && runtime && runtime->memory()
-      ? reinterpret_cast<uintptr_t>(runtime->memory()->virtual_membase()) : 0,
+  g_navigation_enabled = rb_blitz::settings::title::enhancements_menu_dlc_songs.Get() &&
+      (rb_blitz::settings::title::enhancements_background_music_nav.Get() || rb_blitz::settings::title::enhancements_music_player.Get());
+  g_music_fault_base.store(g_navigation_enabled && runtime && runtime->IsLoaded()
+      ? reinterpret_cast<uintptr_t>(runtime->GetMembase().GetBase()) : 0,
       std::memory_order_relaxed);
 #if defined(_WIN32)
   if (g_music_fault_base.load(std::memory_order_relaxed)) {
@@ -1368,20 +1389,20 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     REXLOG_INFO("music_nav: native fault trace {}", handler ? "installed" : "unavailable");
   }
 #endif
-  g_nav_pause_trace = REXCVAR_GET(background_music_nav_pause_trial);
+  g_nav_pause_trace = rb_blitz::settings::title::background_music_nav_pause_trial.Get();
   g_nav_paused_stream = 0;
   g_nav_epoch = rb_blitz::shell_music::NowPlaying().Reset();
-  g_nav_probe = REXCVAR_GET(background_music_nav_probe);
-  g_nav_probe_delay = REXCVAR_GET(background_music_nav_probe_delay);
-  if ((g_navigation_enabled || REXCVAR_GET(enhancements_menu_dlc_songs)) && runtime && runtime->memory()) {
+  g_nav_probe = rb_blitz::settings::title::background_music_nav_probe.Get();
+  g_nav_probe_delay = rb_blitz::settings::title::background_music_nav_probe_delay.Get();
+  if ((g_navigation_enabled || rb_blitz::settings::title::enhancements_menu_dlc_songs.Get()) && runtime && runtime->IsLoaded()) {
     for (size_t i = g_buffers.size(); i < kBufferCount; ++i) {
-      const auto address = runtime->memory()->SystemHeapAlloc(static_cast<uint32_t>(kBufferBytes), 0x20);
+      const auto address = runtime->GetGuestHeap().SystemHeapAlloc(static_cast<uint32_t>(kBufferBytes), 0x20);
       if (!address) break;
       g_buffers.push_back(address);
     }
   }
   if (g_buffers.empty()) g_navigation_enabled = false;
-  g_menu_music_enabled = REXCVAR_GET(enhancements_menu_dlc_songs);
+  g_menu_music_enabled = rb_blitz::settings::title::enhancements_menu_dlc_songs.Get();
   // The index only means something for this boot's pool, and this is the one place the pool is
   // built: a fresh boot has no current track until the panel picks one.
   g_current_index = -1;
@@ -1397,7 +1418,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   g_enabled = g_menu_music_enabled;
   REXLOG_INFO("shell_music: library background music is {} (enhancements_menu_dlc_songs = {}); {}",
               g_menu_music_enabled ? "on" : "off",
-              REXCVAR_GET(enhancements_menu_dlc_songs) ? "true" : "false",
+              rb_blitz::settings::title::enhancements_menu_dlc_songs.Get() ? "true" : "false",
               g_menu_music_enabled ? "building the base-game and DLC pool" : "the menu keeps the title's tracks");
   if (!g_menu_music_enabled) {
     // R9 mounts nothing. The independent navigator may still capture and move
@@ -1409,13 +1430,12 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     g_enabled = false;
     return;
   }
-  rex::filesystem::VirtualFileSystem* file_system = runtime->file_system();
-  rex::memory::Memory* memory = runtime->memory();
-  if (file_system == nullptr || memory == nullptr) {
-    REXLOG_WARN("shell_music: R9 is on but the file system or memory is not up yet");
+  if (!runtime->IsLoaded() || !g_mount_diagnostics) {
+    REXLOG_WARN("shell_music: the loaded title or mount accounting is unavailable");
     g_enabled = false;
     return;
   }
+  auto* file_system = &runtime->GetFileSystem();
 
   // The DLC identity scan can still be reading cold headers here. Its early directory
   // walk supplies stable path candidates immediately, while the content manager waits
@@ -1429,7 +1449,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   g_packages = packages;
   // Metadata is cheap to reuse, whereas opening every container competes with
   // startup reads. A complete catalog also gives merged-pack songs equal odds.
-  g_catalog_path = runtime->cache_root() / "menu_music_catalog.cache";
+  g_catalog_path = REX_PATHS().cache_root.Get() / "menu_music_catalog.cache";
   auto saved_catalog = TryLoadBootCatalog(g_catalog_path, g_packages);
   // No current packages means no saved DLC records can affect this boot's pool.
   g_catalog_preload_pending = !saved_catalog && !g_packages.empty();
@@ -1446,7 +1466,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   for (size_t i = 0; i < catalog->size(); ++i) {
     if (!(*catalog)[i].identity) continue;
     auto songs = (*catalog)[i].songs;
-    for (auto& song : songs) song.alias = fmt::format("menumusic{}", i);
+    for (auto& song : songs) song.alias = std::format("menumusic{}", i);
     g_session.Discover(i, std::move(songs));
     ++cached;
   }
@@ -1568,6 +1588,14 @@ void CloseQueuedPool() {
   g_queue.Stop();
 }
 
+void DrainQueuedPool() {
+  CloseQueuedPool();
+  g_queue.Join();
+  std::lock_guard lock(g_mutex);
+  g_ready_package.reset();
+  g_catalog_pending.reset();
+}
+
 std::string SelectedSongKey() {
   std::lock_guard lock(g_mutex);
   const int index = g_play_selection.Query(NowMs());
@@ -1603,7 +1631,7 @@ bool AnswerPlayQuery(const std::string_view path, bool* answer) {
     const auto command = path == "rbbz-play/next" ? nav::Command::kNext :
                          path == "rbbz-play/previous" ? nav::Command::kPrevious : nav::Command::kPlayPause;
     const bool allowed = g_navigation_enabled && !rb_blitz::input::capture::Armed() &&
-                         !rex::kernel::xam::xeXamIsUIActive();
+                         !rb_blitz::input::SystemUIActive();
     const auto result = allowed ? nav::Post(command, nav::Producer::kControlsPage) : nav::PostResult{};
     if (answer) *answer = result.status == nav::PostStatus::kAccepted;
     return true;
@@ -1711,10 +1739,12 @@ extern "C" REX_FUNC(sub_82758490) {
 extern "C" REX_FUNC(sub_82758B98) {
   const auto music = ctx.r3.u32;
   if (g_menu_music_enabled && g_waiting_for_pool && music == g_music) return;
+  const auto previous_stream = LoadBe32(base, music + kStreamOffset);
   if (music == g_music) g_nav_paused_stream = 0;
   const bool was_setting_up = g_setting_up_music;
   g_setting_up_music = true;
   __imp__sub_82758B98(ctx, base);
+  const bool replaced_stream = LoadBe32(base, music + kStreamOffset) != previous_stream;
   {
     std::lock_guard lock(g_mutex);
     if (music == g_music) {
@@ -1722,8 +1752,9 @@ extern "C" REX_FUNC(sub_82758B98) {
         g_stream_song = size_t(g_pending_index);
         // The panel can stage Load long before it calls Start. Charging that
         // interval to decoding falsely rejects the boot song on a slow boot.
-        // Repeated Start calls on the same playing stream must not reset it.
-        if (!g_playback.active()) {
+        // Start rebuilds a stream that is still loading. Rebind that native
+        // replacement; repeated Start on the same playing stream retains progress.
+        if (!g_playback.active() || replaced_stream) {
           REXLOG_INFO("shell_music: native Start {} ms after Load for '{}' (stream {:08X})",
                       MillisecondsSince(g_track_started_at), g_playing_name,
                       LoadBe32(base, music + kStreamOffset));
@@ -1733,7 +1764,7 @@ extern "C" REX_FUNC(sub_82758B98) {
       }
       else if (g_watch_title) {
         g_stream_song = rb_blitz::shell_music::kNoIndex;
-        if (!g_playback.active()) g_playback.Begin(NowMs());
+        if (!g_playback.active() || replaced_stream) g_playback.Begin(NowMs());
       }
     }
   }

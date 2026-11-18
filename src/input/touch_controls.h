@@ -3,7 +3,7 @@
 #include <functional>
 #include <memory>
 #include "input/touch_gestures.h"
-namespace rex::ui { class ImGuiDialog; class ImGuiDrawer; class Window; }
+namespace rex::ui { class IDialog; class IUISystem; }
 
 namespace rb_blitz::input::touch {
 bool PreviewEnabled();
@@ -24,6 +24,5 @@ void PublishPowerupReady(bool ready);
 bool PowerupReady();
 // Normalized guest bounds from the native lane icon's current draw.
 void PublishLanePowerup(Rect rect);
-std::unique_ptr<rex::ui::ImGuiDialog> CreateControls(
-    rex::ui::ImGuiDrawer* drawer, std::function<rex::ui::Window*()> window);
+std::unique_ptr<rex::ui::IDialog> CreateControls(rex::ui::IUISystem& ui);
 }  // namespace rb_blitz::input::touch

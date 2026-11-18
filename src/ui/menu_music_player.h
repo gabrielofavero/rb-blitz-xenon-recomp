@@ -5,12 +5,11 @@
 #include "ui/menu_music_player_policy.h"
 struct ImGuiIO;
 namespace rex::ui {
-class ImGuiDialog;
-class ImGuiDrawer;
+class IDialog;
+class IUISystem;
 }  // namespace rex::ui
 namespace rb_blitz::ui::music {
-std::unique_ptr<rex::ui::ImGuiDialog> CreatePlayer(
-    rex::ui::ImGuiDrawer* drawer);
+std::unique_ptr<rex::ui::IDialog> CreatePlayer(rex::ui::IUISystem& ui);
 // Called in MouseCursor before its raw/pulse/hover routing. Coordinates are
 // physical window pixels, converted using the latest drawn logical viewport.
 bool RoutePlayerPointer(PointerEvent event, float x, float y, int physical_w,

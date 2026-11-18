@@ -1,5 +1,7 @@
 # Controller scheme v2 format
 
+The v0.11 host consumes public HID services; the SDL3 driver link below is a private SDK implementation reference.
+
 Each non-template art folder has a `scheme.toml`. The runtime and validator accept
 these manifests alongside version 1 user packages. The build stages the
 authored controller folders and the internal keyboard art. Each layout's
@@ -111,7 +113,7 @@ The new `sdl:button:*` values name normalized SDL gamepad buttons that the XInpu
 guest packet cannot represent independently: `misc1`, `misc2`, `touchpad`, and the four
 `left_paddle1`, `left_paddle2`, `right_paddle1`, `right_paddle2` buttons. The
 sampler captures them before any XInput projection. The
-[SDK SDL driver](../../rexglue-sdk/src/input/sdl/sdl_input_driver.cpp)
+[SDK SDL driver](../../rexglue-sdk/src/hid/sdl3/sdl3_input_driver.cpp)
 keeps them separate from guest XInput bits, while the binding parser, capture UI,
 persistence, and icon resolver accept the distinct source names.
 SDL's [button enum](https://wiki.libsdl.org/SDL3/SDL_GamepadButton) establishes

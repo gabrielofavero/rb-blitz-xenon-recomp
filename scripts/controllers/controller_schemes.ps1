@@ -3,11 +3,14 @@ param(
     [switch]$Validate,
     [switch]$Pack,
     [string]$Scheme,
-    [string]$Destination
+    [string]$Destination,
+    [string]$ToolPath
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-$tool = Join-Path $repo 'out/build/win-amd64-release/rb_blitz_controller_schemes.exe'
+$tool = if ($ToolPath) { $ToolPath } else {
+    Join-Path $repo 'out/build/win-amd64-release/rb_blitz_controller_schemes.exe'
+}
 if (-not (Test-Path -LiteralPath $tool)) {
     throw "Build rb_blitz_controller_schemes first: $tool"
 }

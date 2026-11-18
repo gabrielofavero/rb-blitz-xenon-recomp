@@ -120,7 +120,7 @@ driver `out/_swap/p0/run.ps1` carries the later switches that have not been fold
 
 `shader_compile_trace` is the instrument behind [shader-cache.md](shader-cache.md) part 1
 and SDK patch 0020. It is a runtime-owned counter set (one monotonic clock shared by
-`rexruntime.dll` and the GPU plugin), not the probe ring: it times shader translation,
+the modular base/GPU runtime), not the probe ring: it times shader translation,
 guest PSO creation, Vulkan placeholders, render-target helper graphics/compute creation,
 compile-queue drains and completion waits, and pairs them with the guest/GPU frame
 intervals carried by patch 0019's swap observations.
@@ -222,7 +222,7 @@ not produce every pipeline. `succeeded` counts real pipelines only â€” a Vu
 placeholder retained after a failed real creation is reported as failed â€” and a
 preload with zero required entries is empty, not covered (its line says so). The states
 and the blocking barrier live in
-[pipeline_preload.h](../../rexglue-sdk/include/rex/graphics/pipeline_preload.h)
+[pipeline_preload.h](../../rexglue-sdk/include/rex/gpu/pipeline_preload.h)
 (SDK patch 0021).
 
 Since shader-cache P4 (2026-10-24) the preload can also run **beside** the guest instead of
@@ -230,13 +230,13 @@ before it. `shader_storage_async_preparation` (default `false`) makes the launch
 preparation generation after the guest resumes rather than blocking the launch; the command
 processor then services it in bounded slices between packets (and while the ring is idle), so the
 loading UI keeps polling and presenting. The generation reports itself through
-`GraphicsSystem::QueryShaderStoragePreparation()` â€” phase (`importing`, `translating`, `creating`,
+the public `IGraphicsPreparation::QueryShaderStoragePreparation()` service â€” phase (`importing`, `translating`, `creating`,
 `finalizing`, then `succeeded` / `incomplete` / `cancelled` / `failed`), explicit required /
 succeeded / failed / missing / cancelled counts, the renderer and its rendering path, and the
 elapsed time and slice count. A generation with no catalogue is `incomplete`, never `ready`;
-`CancelShaderStoragePreparation()` stops enqueuing, cancels entries whose creation has not started
+`RequestCancelShaderStoragePreparation()` stops enqueuing, cancels entries whose creation has not started
 and keeps the pipelines that were already in flight. The lifecycle lives in
-[graphics_preparation.h](../../rexglue-sdk/include/rex/graphics/graphics_preparation.h)
+[graphics_preparation.h](../../rexglue-sdk/include/rex/gpu/graphics_preparation.h)
 (SDK patch 0027).
 
 | Cvar | Default | What it does |

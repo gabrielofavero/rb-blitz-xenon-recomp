@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("macos_package", ROOT / "installer/macos/package.py")
@@ -41,10 +42,12 @@ class MetadataTests(unittest.TestCase):
             folder.mkdir(parents=True)
             (folder / "scheme.toml").write_text("")
             validator = root / "validator"
-            validator.write_text("#!/bin/sh\nprintf 'scheme.toml\\n../outside.png\\n'\n")
-            validator.chmod(0o755)
-            with self.assertRaisesRegex(ValueError, "unsafe"):
-                package.controller_entries(root, validator, "assets/controller")
+            result = subprocess.CompletedProcess([], 0, "scheme.toml\n../outside.png\n", "")
+            with unittest.mock.patch.object(subprocess, "run", return_value=result) as invoke:
+                with self.assertRaisesRegex(ValueError, "unsafe"):
+                    package.controller_entries(root, validator, "assets/controller")
+                invoke.assert_called_once_with([str(validator), "--list-declared", str(folder)],
+                                               check=True, capture_output=True, text=True)
 
     def test_preparation_requires_exact_embedded_catalogue(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -85,18 +88,18 @@ class NativePackagingTests(unittest.TestCase):
         cls.build.mkdir()
         source = cls.build / "empty.c"
         source.write_text("int main(void) { return 0; }\n")
-        for name in ("librexruntime.dylib", "librexgpu-xenos.dylib", "libTracyClient.dylib",
+        for name in (*(package.target_filename(name, "macos") for name in package.runtime_targets(cls.build, "macos")),
                      "libvulkan.1.dylib", "libMoltenVK.dylib"):
             subprocess.run(["xcrun", "clang", "-dynamiclib", str(source), "-o", str(cls.build / name),
-                            "-mmacosx-version-min=13.0",
+                            "-mmacosx-version-min=13.3",
                             "-Wl,-headerpad_max_install_names", "-Wl,-install_name," + str(cls.build / name)],
                            check=True, capture_output=True)
         for name in ("rb_blitz", "rb_blitz_macos_launcher"):
             subprocess.run(["xcrun", "clang", str(source), "-o", str(cls.build / name),
-                            "-mmacosx-version-min=13.0",
+                            "-mmacosx-version-min=13.3",
                             "-Wl,-headerpad_max_install_names", "-Wl,-rpath," + str(cls.build),
                             "-Wl,-rpath,@loader_path",
-                            str(cls.build / "librexruntime.dylib")], check=True, capture_output=True)
+                            str(cls.build / "librexbase.dylib")], check=True, capture_output=True)
 
     @classmethod
     def tearDownClass(cls):
@@ -119,7 +122,13 @@ class NativePackagingTests(unittest.TestCase):
                 destination = self.macos / source.name
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
-            entries.append({"to": destination.relative_to(self.stage).as_posix()})
+            entry = {"to": destination.relative_to(self.stage).as_posix()}
+            targets = {package.target_filename(name, "macos"): name
+                       for name in package.runtime_targets(self.build, "macos")}
+            if source.name in targets: entry["fromTarget"] = targets[source.name]
+            elif source.name.startswith("rb_blitz"): entry["fromTarget"] = source.name
+            else: entry["fromSdkStage"] = "vulkan/lib/" + source.name
+            entries.append(entry)
         info = self.app / "Contents/Info.plist"
         info.write_text((ROOT / "installer/macos/Info.plist.in").read_text().replace("@RBBLITZ_GAME_VERSION@", "0.1.0"))
         entries.append({"to": info.relative_to(self.stage).as_posix()})
@@ -144,7 +153,7 @@ class NativePackagingTests(unittest.TestCase):
                     "--identifier", self.config["packageId"], "--version", "0.1.0", str(output))
         package.compare_expanded_pkg(output, self.stage, Path(self.temporary_stage.name), self.config, "0.1.0")
         commands = package.load_commands(self.macos / "rb_blitz")
-        self.assertIn(("LC_LOAD_DYLIB", "@rpath/librexruntime.dylib"), commands)
+        self.assertIn(("LC_LOAD_DYLIB", "@rpath/librexbase.dylib"), commands)
         self.assertFalse(any(str(self.build) in value for _, value in commands))
 
     def test_audit_rejects_unresolved_real_rpath(self):

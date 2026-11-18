@@ -32,21 +32,21 @@ compiler_family = "Clang"
 # refuses a different commit at clone time; this copy is what puts the pin in the
 # same report as the compiler and the rest. `version` is what the SDK reports for
 # itself and depends on whether its tags were fetched, so it is informational.
-version = "0.10.0.0-dev.unknown"
-commit = "c94f5ebdcb3c9d1a460ca48e04f9758448f8d518"
+version = "0.11.0"
+commit = "a3e1d82678ca20d68d4837a8e9ee4652ff073745"
 
 [clang]
 # `minimum` is the floor the code needs, not the version the recorded run was
-# made with: the pinned SDK's own CMakeLists refuses anything below Clang 18
-# ("ReXGlue requires Clang 18 or newer"), so any Clang the SDK accepts builds
+# made with: the pinned SDK's own CMakeLists refuses anything below Clang 20
+# ("ReXGlue requires Clang 20 or newer"), so any Clang the SDK accepts builds
 # this project. `version` is what the acceptance run behind this record used;
 # anything newer is reported as `different` and still builds.
-version = "23.1.1"
-minimum = "18"
+version = "20.1.8"
+minimum = "20"
 
 [cmake]
 # The floor is the project's own `cmake_minimum_required`.
-version = "4.4.3"
+version = "4.4.0"
 minimum = "3.25"
 
 [ninja]

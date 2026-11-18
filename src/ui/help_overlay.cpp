@@ -31,11 +31,9 @@
 #include <vector>
 
 #include <imgui.h>
-#include <rex/cvar.h>
-#include <rex/logging.h>
-#include <rex/ui/flags.h>
-#include <rex/ui/imgui_dialog.h>
-#include <rex/ui/imgui_drawer.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
+#include <rex/ui/ui_system.h>
 
 #include "hooks/settings_bridge.h"
 #include "input/input_capture.h"
@@ -52,14 +50,9 @@
 // Only live text-entry feedback belongs in the caption strip. Outcomes use notifications.
 namespace store_ns = rb_blitz::store;
 
-REXCVAR_DEFINE_BOOL(settings_help_overlay, true, "Settings",
-                    "Show a short description of the highlighted row at the bottom of the screen "
-                    "while a settings menu is open (Help & Options and the retail pages it "
-                    "opens). The same switch as Game -> Extra Features -> Settings Labels, applied live. "
-                    "Faithful: off draws nothing at all.");
 
-REXCVAR_DEFINE_STRING(settings_help_size, "normal", "Settings",
-                      "Settings description size: normal, big, or biggest. Applied live.");
+
+
 
 namespace rb_blitz::ui::help {
 namespace {
@@ -108,17 +101,17 @@ class CaptionSink final : public settings::bridge::HelpSink {
 };
 CaptionSink g_sink;
 
-class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
+class HelpOverlayDialog final : public rex::ui::DialogBase {
  public:
-  explicit HelpOverlayDialog(rex::ui::ImGuiDrawer* drawer) : rex::ui::ImGuiDialog(drawer) {}
+  HelpOverlayDialog() = default;
   ~HelpOverlayDialog() override {
     if (settings::bridge::GetHelpSink() == &g_sink) {
       settings::bridge::SetHelpSink(nullptr);
     }
   }
 
-  void OnDraw(ImGuiIO& io) override {
-    // P8 (plan §14.4/§17.2): the recovery path's observation point. This draw runs every frame,
+  bool Draw(ImGuiIO& io) override {
+    // P8 (plan Ã‚Â§14.4/Ã‚Â§17.2): the recovery path's observation point. This draw runs every frame,
     // whether or not a device is connected - the guest's state filter does not run while nothing
     // enumerates, which is exactly the state a recovery exists for.
     input::TickInputRecovery();
@@ -144,15 +137,15 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     // live - the probe overlay's rule, and what makes Game -> Extra Features -> Settings Labels a `hot` row.
     if (text.empty() ||
         (!capturing && !searching &&
-         !REXCVAR_GET(settings_help_overlay))) {
-      return;
+         !rb_blitz::settings::title::settings_help_overlay.Get())) {
+      return true;
     }
 
     // Status messages keep their original size; the preference controls settings
     // descriptions. Every source uses the same bounded strip above the footer.
     const bool status = capturing || searching;
     const auto layout = LayoutCaption(io.DisplaySize.x, io.DisplaySize.y,
-                                     status ? "normal" : REXCVAR_GET(settings_help_size));
+                                     status ? "normal" : rb_blitz::settings::title::settings_help_size.Get());
     const float size = layout.font_size;
     ImGui::PushFont(g_caption_font, size);
     ImFont* font = ImGui::GetFont();
@@ -194,7 +187,7 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     });
     if (text.empty()) {
       ImGui::PopFont();
-      return;
+      return true;
     }
     const auto lines = wrap(text);
     const auto bounds = measure(text);
@@ -230,7 +223,8 @@ class HelpOverlayDialog final : public rex::ui::ImGuiDialog {
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(4);
     ImGui::PopFont();
-  }
+    return true;
+}
 };
 
 }  // namespace
@@ -297,9 +291,9 @@ void PublishSymbol(const std::string_view symbol) {
   PublishText(TextForSymbol(symbol));
 }
 
-std::unique_ptr<rex::ui::ImGuiDialog> CreateOverlay(rex::ui::ImGuiDrawer* drawer) {
+std::unique_ptr<rex::ui::IDialog> CreateOverlay() {
   settings::bridge::SetHelpSink(&g_sink);
-  return std::make_unique<HelpOverlayDialog>(drawer);
+  return std::make_unique<HelpOverlayDialog>();
 }
 
 }  // namespace rb_blitz::ui::help

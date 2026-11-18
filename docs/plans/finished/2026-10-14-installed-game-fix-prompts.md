@@ -229,7 +229,7 @@ Preliminary findings:
   `SetBootRenderFrame` at `boot.cpp:661` configures guest frame dimensions. Neither of these
   operations sets startup window dimensions. [render_settings.cpp](../../../src/hooks/render_settings.cpp):30
   writes the guest-frame override, not the SDL window.
-- `[tree]` [window_sdl.cpp](../../../rexglue-sdk/src/ui/window_sdl.cpp):72–107 resolves window
+- `[tree]` [window_sdl.cpp](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/ui/window_sdl.cpp):72–107 resolves window
   dimensions from window overrides, video-mode values or a resolution preset. `OpenImpl` creates
   the window with `SDL_WINDOW_RESIZABLE`. Patches 0014 and 0016 own prior sizing/borderless work.
 - `[hypothesis]` A correct ultrawide guest frame can therefore coexist with a default 16:9 window
@@ -492,7 +492,7 @@ Preliminary findings:
   `settings_help_overlay` cvar, default true. `OnDraw` uses a black background alpha of **0.72**,
   a bottom margin of **6%** (minimum 24), and a width of **72%** (minimum 320). It does not select
   a caption-specific font or font size.
-- `[tree]` [imgui_drawer.cpp](../../../rexglue-sdk/src/ui/imgui_drawer.cpp):171 installs the
+- `[tree]` [imgui_drawer.cpp](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/ui/imgui_drawer.cpp):171 installs the
   small ProggyTiny font at 10 px and offers a font setup callback. The separate Controller
   Settings app has a host-font loading pattern in `controller-settings/main.cpp:652`; its
   font atlas/context is not automatically shared with the game overlay.

@@ -1074,7 +1074,7 @@ static void TestPayloadAndFinalize() {
   };
   const Entry entries[] = {{kRuntimeExeName, "not really the runtime"},
                            {"rb_blitz.toml", "[backend]\n"},
-                           {"rexruntime.dll", "not really a dll"}};
+                           {"rexbase.dll", "not really a dll"}};
 
   std::vector<std::string> manifest;
   manifest.push_back("schema_version = 1");
@@ -1127,7 +1127,7 @@ static void TestPayloadAndFinalize() {
   CHECK_EQ(payload.executables.size(), 1u);
   CHECK_STR_EQ(payload.executables[0], kRuntimeExeName);
   CHECK_TRUE(FileExists(app / kRuntimeExeName));
-  CHECK_TRUE(FileExists(app / "rexruntime.dll"));
+  CHECK_TRUE(FileExists(app / "rexbase.dll"));
   CHECK_TRUE(FileExists(app / kPayloadManifestName));
   CHECK_TRUE(FileExists(app / "rb_blitz.toml"));
   CHECK_FALSE(DirectoryExists(StagingRoot(app)));
@@ -1165,11 +1165,11 @@ static void TestPayloadAndFinalize() {
 
   // Verification is manifest-driven: a folder that lost a file the manifest names must fail
   // and name the file rather than install "successfully" into that state.
-  fs::remove(app / "rexruntime.dll");
+  fs::remove(app / "rexbase.dll");
   CHECK_FALSE(VerifyPayload(app, embedded, &verify, &error));
   CHECK_CONTAINS(error, "does not match");
-  CHECK_CONTAINS(error, "rexruntime.dll");
-  WriteText(app / "rexruntime.dll", entries[2].text);
+  CHECK_CONTAINS(error, "rexbase.dll");
+  WriteText(app / "rexbase.dll", entries[2].text);
   CHECK_TRUE(VerifyPayload(app, embedded, &verify, &error));
 
   BeginCase("a payload zip installs the same way a folder does");
@@ -1196,7 +1196,7 @@ static void TestPayloadAndFinalize() {
   CHECK_EQ(from_zip.bytes, total);
   CHECK_CONTAINS(from_zip.source, "archive");
   CHECK_TRUE(FileExists(zip_app / kRuntimeExeName));
-  CHECK_TRUE(FileExists(zip_app / "rexruntime.dll"));
+  CHECK_TRUE(FileExists(zip_app / "rexbase.dll"));
   CHECK_TRUE(FileExists(zip_app / kPayloadManifestName));
   CHECK_FALSE(DirectoryExists(StagingRoot(zip_app)));
 
@@ -1309,7 +1309,7 @@ static void TestPayloadAndFinalize() {
   // The manifest is the only record of a downloaded payload, so the payload
   // files go too and are not left behind for the uninstaller to find.
   CHECK_FALSE(FileExists(app / kRuntimeExeName));
-  CHECK_FALSE(FileExists(app / "rexruntime.dll"));
+  CHECK_FALSE(FileExists(app / "rexbase.dll"));
   CHECK_FALSE(removed.empty());
 
   BeginCase("uninstall cleanup can keep the game data");
@@ -1661,7 +1661,7 @@ static void TestLocations() {
 
   const std::string written = ReadFileOrEmpty(install / "paths.toml");
   CHECK_CONTAINS(written, "schema_version = 1");
-  // A TOML *literal* string, so a Windows path needs no escaping (parent plan §4.1).
+  // A TOML *literal* string, so a Windows path needs no escaping (parent plan Â§4.1).
   CHECK_CONTAINS(written, "dlc_root = '" + Utf8(dlc_chosen) + "'");
   CHECK_CONTAINS(written, "user_data_root = '" + Utf8(save_chosen) + "'");
   CHECK_FALSE(written.find("\\\\") != std::string::npos);
@@ -1907,9 +1907,9 @@ static void TestLocations() {
 
   BeginCase("a folder with spaces and non-ASCII letters is stored and read back");
 
-  const fs::path unicode_dlc = FreshDir("unicode/DLC — músicas");
+  const fs::path unicode_dlc = FreshDir("unicode/DLC â€” mÃºsicas");
   const fs::path unicode_saves = scratch / "unicode/Saves do Gabriel";
-  WriteText(unicode_dlc / "uma música.pkg", "x");
+  WriteText(unicode_dlc / "uma mÃºsica.pkg", "x");
   text = ValidateSummary(app, summary, PathChoice{true, Utf8(unicode_dlc)},
                          PathChoice{true, Utf8(unicode_saves)}, &code);
   CHECK_EQ(code, kSuccessExitCode);
@@ -1937,7 +1937,7 @@ static void TestLocations() {
   EnsureDirectory(appdata / "rb_blitz", nullptr);
 
   // The `[settings]` table first, the older `[launch]` values as the fallback - the
-  // same order the game's own migration imports them in (P3 §4.3).
+  // same order the game's own migration imports them in (P3 Â§4.3).
   WriteText(appdata / "rb_blitz" / "launcher.toml",
             "schema_version = 1\n\n[launch]\ngame_dir = \"C:\\\\Games\"\n"
             "user_data_dir = \"D:\\\\Old Saves\"\ndlc_dir = \"D:\\\\Old DLC\"\n\n"
@@ -1976,7 +1976,7 @@ static void TestLocations() {
   CHECK_STR_EQ(legacy.save_dir, "F:\\Moved Saves");
 
   // An install that runs elevated passes no user folder, so nothing is read: an
-  // administrator's own profile is not the player's (parent plan §9.1).
+  // administrator's own profile is not the player's (parent plan Â§9.1).
   legacy = ReadLegacyPaths(old_install, fs::path());
   CHECK_FALSE(legacy.has_file);
   CHECK_TRUE(legacy.profile.empty());

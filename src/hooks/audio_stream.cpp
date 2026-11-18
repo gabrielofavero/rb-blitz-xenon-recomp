@@ -7,18 +7,11 @@
 #include "hooks/audio_stream_policy.h"
 
 #include <chrono>
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/memory/utils.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/memory/endian.h>
 
-REXCVAR_DEFINE_BOOL(audio_stream_catchup,
-#if defined(__APPLE__)
-                    true,
-#else
-                    false,
-#endif
-                    "Audio", "Catch up stream buffering after long render frames")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 REX_EXTERN(__imp__sub_827E08F8);  // ogg_sync_buffer
 REX_EXTERN(__imp__sub_82384C88);  // ArkFile::ReadAsync
@@ -35,7 +28,7 @@ uint32_t Load(uint8_t* base, uint32_t address) {
 
 REX_HOOK_RAW(sub_827E08F8) {
   bool larger = false;
-  if (REXCVAR_GET(audio_stream_catchup) && uint32_t(ctx.lr) == kReadBufferCaller &&
+  if (rb_blitz::settings::title::audio_stream_catchup.Get() && uint32_t(ctx.lr) == kReadBufferCaller &&
       ctx.r4.u32 == kBlockBytes) {
     // At this verified call site r31 is the VorbisReader, whose +48 owns
     // the file. Other file classes keep their existing read size.
@@ -49,7 +42,7 @@ REX_HOOK_RAW(sub_827E08F8) {
 }
 
 REX_HOOK_RAW(sub_82384C88) {
-  if (REXCVAR_GET(audio_stream_catchup)) {
+  if (rb_blitz::settings::title::audio_stream_catchup.Get()) {
     const uint32_t bytes = pending_read.Consume(uint32_t(ctx.lr), ctx.r4.u32, ctx.r5.u32);
     if (bytes != ctx.r5.u32) ctx.r5.u64 = bytes;
   }
@@ -59,7 +52,7 @@ REX_HOOK_RAW(sub_82384C88) {
 REX_HOOK_RAW(sub_823E61E0) {
   const uint32_t stream = ctx.r3.u32;
   __imp__sub_823E61E0(ctx, base);
-  if (!REXCVAR_GET(audio_stream_catchup) || Load(base, stream + 20) != 3 ||
+  if (!rb_blitz::settings::title::audio_stream_catchup.Get() || Load(base, stream + 20) != 3 ||
       Load(base, stream + 32) == Load(base, stream + 36))
     return;
   const uint32_t channel = Load(base, Load(base, stream + 32));
@@ -76,7 +69,7 @@ REX_HOOK_RAW(sub_823E61E0) {
     PPCContext call = ctx;
     call.r3.u64 = stream;
     __imp__sub_823E61E0(call, base);
-    ctx.fpscr.restoreGuestBits(saved_fp);
+    ctx.fpscr.RestoreGuestBits(saved_fp);
     if (samples == Load(base, stream + 160) && written == Load(base, channel + 32796)) break;
     if (std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(4)) break;
   }
@@ -85,7 +78,7 @@ REX_HOOK_RAW(sub_823E61E0) {
 REX_HOOK_RAW(sub_823E9828) {
   const uint32_t receiver = ctx.r3.u32;
   __imp__sub_823E9828(ctx, base);
-  if (!REXCVAR_GET(audio_stream_catchup) || Load(base, receiver + 32784) != 2) return;
+  if (!rb_blitz::settings::title::audio_stream_catchup.Get() || Load(base, receiver + 32784) != 2) return;
   const uint32_t blocks = Load(base, receiver + 8);
   const uint32_t saved_fp = ctx.fpscr.csr;
   for (uint32_t retry = 0; retry < blocks; ++retry) {
@@ -97,7 +90,7 @@ REX_HOOK_RAW(sub_823E9828) {
     PPCContext call = ctx;
     call.r3.u64 = receiver;
     __imp__sub_823E9828(call, base);
-    ctx.fpscr.restoreGuestBits(saved_fp);
+    ctx.fpscr.RestoreGuestBits(saved_fp);
     if (written == Load(base, receiver + 32796) && queued == Load(base, receiver + 32780)) break;
   }
 }

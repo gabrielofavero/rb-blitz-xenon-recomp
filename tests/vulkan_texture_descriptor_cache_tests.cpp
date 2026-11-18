@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Tests the actual cache/key used by the Vulkan command processor; no GPU or UI.
 #include "check.h"
-#include <rex/graphics/vulkan/texture_descriptor_cache.h>
-#include <rex/graphics/vulkan/descriptor_binding_state.h>
+#include <gpu/xenos/vulkan/texture_descriptor_cache.h>
+#include <gpu/xenos/vulkan/descriptor_binding_state.h>
 #include <array>
 #include <type_traits>
 
 using namespace rb_blitz::test;
-using rex::graphics::vulkan::TextureDescriptorCache;
-using rex::graphics::vulkan::DescriptorSetPrefixMask;
-using rex::graphics::vulkan::RetainDescriptorSetBindings;
+using rex::gpu::vulkan::TextureDescriptorCache;
+using rex::gpu::vulkan::DescriptorSetPrefixMask;
+using rex::gpu::vulkan::RetainDescriptorSetBindings;
 
 template <typename T> T Handle(uintptr_t id) {
   if constexpr (std::is_pointer_v<T>) return reinterpret_cast<T>(id);

@@ -1480,3 +1480,30 @@ of obsolete IDs; the player uploads again from owned pixels. The bridge patch ca
 textures at 512×512, while this player retains one at 256×256. Static backend inspection, builds,
 SDK patch replay and host artwork/click tests cover implementation; real GPU rendering, device
 reset and lifecycle soak still await the owner’s test.
+
+### Cold library handoff (2026-11-18)
+
+A pending cold mount can postpone the initial filename substitution. The later
+`LoadOnGuest` handoff must still clear ShellMusic's play-from-memory byte at +60
+before native Load/Start, selecting the file stream used by immediate library
+substitution. Otherwise native Start can parse an unfilled preload buffer as a
+MOGG header and corrupt the guest allocator. This behavior is shared by both
+Windows graphics backends and does not alter package parsing or SDK ownership.
+
+The production-handoff fixture initializes the retail preload mode and requires
+file mode at the deferred native Load boundary: one of 726 assertions fails
+before the correction and all 726 pass afterward. Evidence is retained under
+`out/rexglue-migration/menu-music-deferred-mode-regression-{red,green}-r1.log`.
+The old-SDK baseline reproduces the original guest fault; the corrected candidate
+reaches the DLC song list without that fault. This establishes the handoff
+correction, not complete menu-music or cross-platform acceptance.
+
+Native Start can also rebuild a still-loading stream before its first audible
+sample. The Start hook compares its stream pointer before and after the native
+call and rearms the watchdog when that call installs a replacement. Repeated
+Start on an unchanged playing stream retains its observed progress. Unexpected
+replacement outside this handoff remains a failure. The production-poll fixture
+reproduces immediate quarantine before the correction (seven expected failed
+assertions in `menu-music-native-start-red2-test.log`); all 748 assertions pass in
+`menu-music-native-start-green-test.log`. These are host fixture results; fresh
+native content/backend repetitions remain separately required.

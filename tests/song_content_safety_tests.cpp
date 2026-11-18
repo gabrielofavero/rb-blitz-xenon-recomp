@@ -4,18 +4,19 @@
 
 #include <chrono>
 #include <fstream>
-#include <rex/filesystem/devices/host_path_device.h>
+#include "sdk_file_test_app.h"
+#include <rex/filesystem/file_system_factory.h>
 
 int main(int argc, char** argv) {
+  FileServiceApp app;
+  CHECK_TRUE(app.Init(rex::CLIArgList::Parse(std::span<const std::string>{})).has_value());
+  auto* factory=REX_INTERFACE(rex::filesystem::IFileSystemFactory);
+  CHECK_TRUE(factory); if(!factory)return rb_blitz::test::Finish();
   if (argc == 2) {
     std::error_code ec;
-    auto device = rb_blitz::fs::MountPackage("\\Device\\SongSafetyProbe", argv[1], ec);
-    if (!device) return 2;
-    std::string reason;
-    const bool safe = rb_blitz::fs::IsSafeSongContent(*device, &reason);
-    std::printf("song content: %s%s%s\n", safe ? "static" : "refused",
-                reason.empty() ? "" : ": ", reason.c_str());
-    return safe ? 0 : 1;
+    const auto package=rb_blitz::fs::MountPackage("\\Device\\SongSafetyProbe",argv[1],ec);
+    std::printf("song content: %s\n",package ? "static" : "refused or unreadable");
+    return package ? 0 : 1;
   }
   using namespace rb_blitz::test;
   const auto root = std::filesystem::temp_directory_path() /
@@ -23,10 +24,17 @@ int main(int argc, char** argv) {
        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
   std::filesystem::create_directories(root);
   const auto inspect = [&] {
-    rex::filesystem::HostPathDevice device("\\Device\\SongSafetyTest", root, true);
-    CHECK_TRUE(device.Initialize());
+    auto files=factory->Create();
+    rex::filesystem::MountEntry entry{"\\Device\\SongSafetyTest",rex::filesystem::ProviderType::kHostDirectory,root};
     std::string reason;
-    return rb_blitz::fs::IsSafeSongContent(device, &reason);
+    entry.validator=std::make_shared<const rex::filesystem::MountValidator>(
+        [&](const rex::filesystem::IMountValidationView& view)->rex::Result<void>{
+          return rb_blitz::fs::IsSafeSongContent(view,&reason) ? rex::Ok()
+              : rex::Err(rex::ErrorCategory::kValidation,reason);
+        });
+    auto mounted=files->Mount(entry);
+    if(!mounted) CHECK_TRUE(files->GetMounts().empty());
+    return mounted.has_value();
   };
 
   BeginCase("a content package without song metadata remains mountable");

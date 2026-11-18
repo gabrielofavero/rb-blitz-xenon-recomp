@@ -472,18 +472,24 @@ if ($scanTargets.Count -eq 0) {
     # constant the emulated console uses to read the user's own dump, which is public in
     # every Xenia-derived runtime (docs/reference/rb3-references.md section 9) - and
     # decrypt_xex.py reads it from there instead of carrying a second one.
-    $sdkKeyFile = Join-Path $repoRoot "rexglue-sdk/src/system/xex_module.cpp"
-    if (Test-Path $sdkKeyFile) {
-        $keyCount = @(Select-String -Path $sdkKeyFile -Pattern "xe_xex2_retail_key" -AllMatches).Count
-        $rows.Add("key material: rexglue-sdk/src/system/xex_module.cpp defines xe_xex2_retail_key ($keyCount line(s)) - the console's own constant, not this project's secret")
+    $sdkKeyRelative = 'rexglue-sdk/src/filesystem/xex.cpp'
+    $keyPattern = 'constexpr\s+std::array\s*<\s*Key\s*,\s*4\s*>\s+kMasterKeys\s*='
+    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot $sdkKeyRelative))) {
+        $sdkKeyRelative = 'rexglue-sdk/src/system/xex_module.cpp'
+        $keyPattern = 'xe_xex2_retail_key\s*(?:\[\s*(?:16)?\s*\])?\s*='
+    }
+    $sdkKeyFile = Join-Path $repoRoot $sdkKeyRelative
+    if (Test-Path -LiteralPath $sdkKeyFile) {
+        $keyCount = @(Select-String -LiteralPath $sdkKeyFile -Pattern $keyPattern).Count
+        $rows.Add("key material: $sdkKeyRelative contains $keyCount supported runtime key initializer declaration(s); key bytes are not included in this report")
     } else {
-        $rows.Add("key material: rexglue-sdk/src/system/xex_module.cpp is not present, so the SDK's copy could not be located")
+        $rows.Add('key material: no supported SDK XEX source path is present')
     }
     $decrypt = Join-Path $repoRoot "scripts/xex/decrypt_xex.py"
     if (Test-Path $decrypt) {
         $literal = [regex]::Match((Get-Content -LiteralPath $decrypt -Raw), '"([0-9a-fA-F]{32,})"')
         if ($literal.Success) {
-            $problems.Add("scripts/xex/decrypt_xex.py carries a literal key: $($literal.Groups[1].Value.Substring(0, 16))...")
+            $problems.Add('scripts/xex/decrypt_xex.py carries a literal key candidate; remove the duplicate source material')
         } else {
             $rows.Add("key material: scripts/xex/decrypt_xex.py carries no literal key, it reads the SDK's copy")
         }

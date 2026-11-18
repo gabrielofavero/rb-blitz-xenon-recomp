@@ -1,30 +1,29 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Exercises the actual shared runtime instrument, without a GPU or guest/UI.
 #include "check.h"
-#include <rex/cvar.h>
-#include <rex/graphics/compile_trace.h>
-#include <rex/logging.h>
-#include <spdlog/sinks/ostream_sink.h>
-#include <sstream>
+#include <rex/settings_registry.h>
+#include <rex/logging/logger.h>
+#include <rex/diagnostics/compile_trace.h>
+#include <rex/logging/log_category.h>
 #include <string_view>
 #include <thread>
 #include <vector>
 
-namespace t = rex::graphics::compile_trace;
+namespace t = rex::diagnostics::compile_trace;
 int main(int argc, char **argv) {
-  std::ostringstream captured;
-  rex::LogConfig logging;
-  logging.extra_sinks.push_back(std::make_shared<spdlog::sinks::ostream_sink_mt>(captured));
-  rex::InitLogging(logging);
+  rex::log::LogCaptureSink captured;
+  auto capture = REX_LOGGER().AddSink(captured);
+  (void)t::Enabled();
   const bool use_default = argc <= 1;
   const bool enabled = use_default || std::string_view(argv[1]) == "enabled";
   if (use_default) {
-    CHECK_TRUE(rex::cvar::GetFlagByName("shader_compile_trace") == "true");
-    CHECK_TRUE(rex::cvar::GetFlagSource("shader_compile_trace") ==
-               rex::cvar::Source::kDefault);
+    const auto setting = REX_SETTINGS().Find("diagnostics.shader_compile_trace");
+    CHECK_TRUE(setting.has_value());
+    CHECK_TRUE((*setting)->GetText() == "true");
+    CHECK_TRUE((*setting)->GetLayer() == rex::SettingLayer::kDefault);
   } else {
-    CHECK_TRUE(rex::cvar::SetFlagByName("shader_compile_trace",
-                                        enabled ? "true" : "false"));
+    CHECK_TRUE(REX_SETTINGS().SetText("diagnostics.shader_compile_trace",
+                                      enabled ? "true" : "false").has_value());
   }
   CHECK_EQ(t::Enabled(), enabled);
   t::SetPhase(t::Phase::kPostALoading, "test");
@@ -97,11 +96,14 @@ int main(int argc, char **argv) {
   CHECK_EQ(next_song.suppressed, 0);
   t::Record(t::Event::kFileRead, t::Phase::kActiveSong, "songs\\Bounce \"Man\"\n.mogg",
             0, 10, 50010, true);
-  rex::FlushLogging();
-  const auto output = captured.str();
+  REX_LOGGER().Flush();
+  std::vector<rex::log::CapturedMessage> messages;
+  captured.CopySince(0, messages);
+  std::string output;
+  for (const auto& message : messages) output += message.text + "\n";
   CHECK_EQ(output.find("site=\"songs\\\\Bounce \\\"Man\\\"\\u000a.mogg\"") != std::string::npos,
            enabled);
   CHECK_EQ(output.find("site=\"next_song\"") != std::string::npos, enabled);
-  rex::ShutdownLogging();
+  capture.Reset();
   return rb_blitz::test::Finish();
 }

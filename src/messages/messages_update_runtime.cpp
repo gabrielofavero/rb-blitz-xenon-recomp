@@ -18,16 +18,13 @@ extern char** environ;
 #include <thread>
 #include <utility>
 
-#include <rex/cvar.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
 
 #include "messages/messages_service.h"
 #include "ui/notifications.h"
 
-REXCVAR_DEFINE_STRING(messages_browser_opener_path, "", "Diagnostics",
-                      "Host-only absolute path to a browser stand-in executable for Messages "
-                      "acceptance runs. It receives the fixed Releases URL as its sole argument.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 namespace rb_blitz::messages {
 namespace {
@@ -99,7 +96,7 @@ bool OpenBrowser(const std::string& diagnostic_path, std::string_view url) {
 
 void InstallUpdateAction(UpdateAction::Close close) {
   if (g_action) return;
-  const std::string diagnostic_path = REXCVAR_GET(messages_browser_opener_path);
+  const std::string diagnostic_path = rb_blitz::settings::title::messages_browser_opener_path.Get();
   if (!diagnostic_path.empty())
     REXLOG_INFO("messages: diagnostic browser opener configured");
   g_action = std::make_unique<UpdateAction>(

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "settings/runtime_values.h"
 #include "hooks/settings_payload.h"
 
 #include <chrono>
@@ -8,11 +9,13 @@
 #include <set>
 #include <span>
 #include <utility>
-#include <rex/cvar.h>
-#include <rex/runtime.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/kernel/title_runtime.h>
+#include <rex/logging/log_category.h>
 #include <rex/filesystem/file.h>
-#include <rex/system/xmemory.h>
+#include <rex/path_settings.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 #include "fs/payload_overlay.h"
 #include "hooks/menu_filter.h"
@@ -41,26 +44,31 @@ void PumpStartupWindow(const std::function<void()>& pump) {
   if (pump) pump();
 }
 
-bool Read(rex::filesystem::VirtualFileSystem* vfs, const std::string& path,
+bool Read(rex::filesystem::IFileSystem* vfs, const std::string& path,
           uint64_t offset, size_t length, Bytes* bytes, std::string* error) {
-  auto* entry = vfs->ResolvePath("game:\\" + path);
-  auto fail = [&] {
-    if (error) *error = "cannot read " + path;
+  auto opened=vfs->Open("game:\\"+path,{});
+  auto fail=[&](std::string reason) {
+    if(error)*error="cannot read "+path+": "+reason;
     return false;
   };
-  if (!entry || offset > entry->size()) return fail();
-  if (length == 0) length = entry->size();
-  if (length > entry->size() - offset || length > 32 * 1024 * 1024) return fail();
-  rex::filesystem::File* file = nullptr;
-  if (entry->Open(rex::filesystem::FileAccess::kGenericRead, &file) != 0 || !file) return fail();
+  if(!opened)return fail(opened.error().message);
+  auto& file=*opened->file;
+  file.Refresh();
+  const auto size=file.GetInfo().size;
+  if(offset>size)return fail("offset exceeds file size");
+  if(length==0) {
+    if(size-offset>32*1024*1024)return fail("file exceeds archive read limit");
+    length=static_cast<size_t>(size-offset);
+  }
+  if(length>size-offset || length>32*1024*1024)return fail("record exceeds archive bounds");
   bytes->resize(length);
-  size_t got = 0;
-  const auto status = file->ReadSync(*bytes, offset, &got);
-  file->Destroy();
-  return status == 0 && got == length ? true : fail();
+  if(length==0)return true;
+  auto read=file.Read(*bytes,offset);
+  return read && *read==length ? true : fail(read ? "short read" : read.error().message);
+
 }
 
-bool ReadRecord(rex::filesystem::VirtualFileSystem* vfs, const ArkIndex& index,
+bool ReadRecord(rex::filesystem::IFileSystem* vfs, const ArkIndex& index,
                 const std::string& path, Bytes* bytes, std::string* error) {
   const auto* entry = index.Find(path);
   if (!entry || entry->compressed()) {
@@ -120,7 +128,7 @@ void CollectLocale(const ui::dtb::Node& node, std::map<std::string, std::string>
 
 }
 
-bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
+bool InstallMenuPayload(rex::kernel::TitleRuntime* runtime, bool settings_restart_boot,
                         const std::function<void()>& pump_startup_window) {
   ultimate_runtime::SetSongEntryRouteReady(false);
   ultimate_runtime::SetSelectionRouteReady(false);
@@ -135,7 +143,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
     PumpStartupWindow(pump_startup_window);
     last_paint = std::chrono::steady_clock::now();
   };
-  auto* vfs = runtime->file_system();
+  auto* vfs = &runtime->GetFileSystem();
   ArkIndex main, patch;
   Bytes bytes;
   std::string error;
@@ -145,7 +153,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
   };
   if (!Read(vfs, "gen/main_xbox.hdr", 0, 0, &bytes, &error) ||
       !ultimate_adapter::ReadArkIndex(bytes.data(), bytes.size(), &main, &error)) return fail();
-  if (vfs->ResolvePath("game:\\gen\\patch_xbox.hdr")) {
+  if (vfs->Stat("game:\\gen\\patch_xbox.hdr")) {
     if (!Read(vfs, "gen/patch_xbox.hdr", 0, 0, &bytes, &error) ||
         !ultimate_adapter::ReadArkIndex(bytes.data(), bytes.size(), &patch, &error)) return fail();
   }
@@ -181,7 +189,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
   // is hidden by menu_filter, so the locale does not repaint it either - the label and the row it
   // belongs to are decided by the same answer.
   const bool refresh_row_on =
-      rex::cvar::GetFlagByName("enhancements_refresh_music_library") == "true";
+      rb_blitz::settings::InspectRuntimeSetting("enhancements_refresh_music_library").active_value == "true";
   menu_labels["splash_dlc"] = menu_options::kDlcRowRefreshLabel;
   // The restored Download Content row (owner request, 2026-10-20). Its visibility setting is a
   // normal row (`interface.hide_download_content`, true means hidden), and the row that backs it is
@@ -261,7 +269,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
   if (auto* boot = boot::SettingsBoot::Current(); boot && boot->service()) {
     ui::screen::MenuConfiguration configuration;
     configuration.controller_layout_enabled =
-        rex::cvar::GetFlagByName("enhancements_icon_schemes") == "true";
+        rb_blitz::settings::InspectRuntimeSetting("enhancements_icon_schemes").active_value == "true";
     const auto& provider = ultimate::Provider();
     for (const auto& descriptor : boot->service()->descriptors()) {
       const std::string token = std::string(CategoryToken(descriptor.category)) + "." +
@@ -369,7 +377,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
         boot->service()->EffectiveValue(SettingId::kShowRecommendations).boolean;
     configuration.show_currency =
         boot->service()->EffectiveValue(SettingId::kShowCurrency).boolean;
-    // P2's data-layer spike (RhythmVerse plan §5/P2): empty is the ordinary boot.
+    // P2's data-layer spike (RhythmVerse plan Â§5/P2): empty is the ordinary boot.
     configuration.store_local_server_root = std::string(store::LocalServerRoot());
     if (!configuration.store_local_server_root.empty()) {
       REXLOG_INFO("settings_menu: the P2 store probe points netcache at the local server '{}'",
@@ -411,7 +419,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
   // startup preference. The handoff already auto-starts the local user and
   // skips offline prompts; use the same reason for the logo and first screen.
   const bool skip_startup_logos = settings_restart_boot ||
-      rex::cvar::GetFlagByName("startup_mode") == "fast";
+      rb_blitz::settings::InspectRuntimeSetting("startup_mode").active_value == "fast";
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), refresh_row_on, &build_notes, menu_filter::HiddenRows(),
                         skip_startup_logos, &refresh_routes, maybe_pump,
@@ -513,7 +521,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
   // Only generated records live in the cache root, and when a payload is installed the part also
   // carries a byte-for-byte copy of the mounted part those records were appended to. Installed game
   // and provider files on disk stay read-only either way: nothing here is ever written back.
-  const auto root = runtime->cache_root() / "settings-menu" /
+  const auto root = REX_PATHS().cache_root.Get() / "settings-menu" /
                     std::to_string(platform::ThisProcessId());
   if (!WriteEphemeralBytes(root / part_path, part, pump_startup_window, &error) ||
       !WriteEphemeralBytes(root / "gen/patch_xbox.hdr", header, pump_startup_window,
@@ -521,16 +529,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
   const auto archive_written = std::chrono::steady_clock::now();
   PumpStartupWindow(pump_startup_window);
   constexpr std::string_view mount = "\\Device\\BlitzSettingsMenu";
-  auto* base = vfs->ResolvePath("game:\\");
-  auto overlay = std::make_unique<fs::PayloadOverlayDevice>(mount, root, base);
-  if (!base || !overlay->Initialize() || !vfs->RegisterDevice(std::move(overlay))) {
-    error = "cannot mount generated UI records";
-    return fail();
-  }
-  for (std::string_view alias : {"game:", "d:"}) {
-    vfs->UnregisterSymbolicLink(alias);
-    if (!vfs->RegisterSymbolicLink(alias, mount)) { error = "cannot route UI archive"; return fail(); }
-  }
+  if(!fs::MountPayloadOverlay(*vfs,mount,root,"game:",{}, {}, {}, &error))return fail();
   ultimate::EnableSettingsArchive(runtime);
   ultimate_runtime::SetSongEntryRouteReady(song_entry_patched);
   ultimate_runtime::SetSelectionRouteReady(song_selection_patched);
@@ -547,7 +546,7 @@ bool InstallMenuPayload(rex::Runtime* runtime, bool settings_restart_boot,
     uint8_t before[20], after[20];
     menu_options::Sha1Digest(original->second.data(), original->second.size(), before);
     menu_options::Sha1Digest(replacement.data(), replacement.size(), after);
-    menu_filter::RetargetRecord(runtime->memory()->virtual_membase(), before, after,
+    menu_filter::RetargetRecord(runtime->GetMembase().GetBase(), before, after,
                                 maybe_pump);
     maybe_pump();
   }

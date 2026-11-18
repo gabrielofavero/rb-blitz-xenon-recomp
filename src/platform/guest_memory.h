@@ -3,7 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <rex/memory/utils.h>
+#include <rex/memory/virtual_memory.h>
 
 namespace rb_blitz::platform {
 
@@ -19,7 +19,7 @@ inline bool GuestRangeReadable(const void* pointer, size_t bytes) {
 // not currently apply the alignment promised by its public header.
 inline bool WriteProtectedGuestBe32(uint8_t* pointer, uint32_t value) {
   if (!GuestRangeReadable(pointer, sizeof(value))) return false;
-  const size_t page_size = rex::memory::page_size();
+  const size_t page_size = rex::memory::GetPageSize();
   const uintptr_t address = reinterpret_cast<uintptr_t>(pointer);
   const uintptr_t start = address - address % page_size;
   const uintptr_t end = ((address + sizeof(value) + page_size - 1) / page_size) * page_size;

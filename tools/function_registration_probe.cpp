@@ -5,7 +5,9 @@
 #include <vector>
 
 #include <rex/ppc/context.h>
-#include <rex/runtime.h>
+#include <rex/kernel/function_dispatcher.h>
+#include <rex/kernel/guest_memory.h>
+#include <rex/ppc/image.h>
 
 namespace {
 void Stub(PPCContext&, uint8_t*) {}
@@ -24,20 +26,22 @@ int main() {
   }
   mappings.push_back({0, nullptr});
 
-  rex::PPCImageInfo image{};
-  image.code_base = code_base;
-  image.code_size = code_size;
-  image.image_base = image_base;
-  image.image_size = image_size;
-  image.func_mappings = mappings.data();
-  rex::RuntimeConfig config{};
-  config.tool_mode = true;
-  rex::Runtime runtime({});
+  rex::kernel::GuestAddressSpace memory;
+  if (!memory.Initialize()) return 1;
+  rex::kernel::FunctionDispatcher dispatcher(&memory);
   const auto start = std::chrono::steady_clock::now();
-  const auto status = runtime.Setup(image, std::move(config));
+  if (!dispatcher.InitializeFunctionTable(code_base, code_size, image_base, image_size, true))
+    return 2;
+  for (const auto& mapping : mappings) {
+    if (!mapping.address) break;
+    if (!dispatcher.SetFunction(mapping.address, mapping.host)) return 3;
+  }
   const auto ms = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - start).count();
-  std::printf("registration probe: status=%08X mappings=%zu setup_ms=%.1f\n",
-              status, count, ms);
-  return status == 0 ? 0 : 1;
+  for (const auto& mapping : mappings) {
+    if (!mapping.address) break;
+    if (dispatcher.GetFunction(mapping.address) != mapping.host) return 4;
+  }
+  std::printf("registration probe: mappings=%zu registration_ms=%.1f\n", count, ms);
+  return 0;
 }

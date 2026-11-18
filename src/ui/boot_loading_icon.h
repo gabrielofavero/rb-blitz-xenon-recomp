@@ -7,7 +7,8 @@
 #include <vector>
 
 #include <imgui.h>
-#include <rex/ui/imgui_dialog.h>
+#include <rex/ui/ui_system.h>
+#include <rex/ui/image_texture.h>
 
 #include "ui/boot_loading_art.h"
 
@@ -15,10 +16,9 @@ namespace rb_blitz::ui {
 
 // Displays the game's autosave spinner only until the first guest image is
 // published. Its pixels come from the installed game archive at runtime.
-class BootLoadingIcon final : public rex::ui::ImGuiDialog {
+class BootLoadingIcon final : public rex::ui::DialogBase {
  public:
-  BootLoadingIcon(rex::ui::ImGuiDrawer* drawer,
-                  std::function<uint64_t()> guest_output_sequence,
+  BootLoadingIcon(std::function<uint64_t()> guest_output_sequence,
                   std::function<bool()> native_panel_ready,
                   std::function<bool()> native_splash_ready,
                   std::function<bool()> native_logo_load_started);
@@ -38,7 +38,7 @@ class BootLoadingIcon final : public rex::ui::ImGuiDialog {
   static_assert(kAtlasSize <= 512 && kAtlasCount <= 8,
                 "boot spinner atlases must fit the SDK image texture limits");
 
-  void OnDraw(ImGuiIO& io) override;
+  bool Draw(ImGuiIO& io) override;
   void ReleaseTextures();
 
   std::function<uint64_t()> guest_output_sequence_;
@@ -46,8 +46,7 @@ class BootLoadingIcon final : public rex::ui::ImGuiDialog {
   std::function<bool()> native_splash_ready_;
   std::function<bool()> native_logo_load_started_;
   std::array<std::vector<uint8_t>, kAtlasCount> atlases_rgba_;
-  std::array<ImTextureID, kAtlasCount> textures_{};
-  uint64_t texture_generation_ = 0;
+  std::array<std::unique_ptr<rex::ui::ImageTexture>, kAtlasCount> textures_{};
   std::chrono::steady_clock::time_point animation_started_ =
       std::chrono::steady_clock::now();
   bool finished_ = false;

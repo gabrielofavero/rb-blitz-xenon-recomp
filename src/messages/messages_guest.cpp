@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include <rex/hook.h>
-#include <rex/logging.h>
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
 #include <rex/memory.h>
 
 #include "messages/messages_guest_model.h"

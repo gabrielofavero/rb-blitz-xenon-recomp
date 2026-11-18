@@ -1,16 +1,16 @@
-# macOS x86-64 bootstrap record for Prompt 0, not native acceptance evidence.
+# macOS x86-64 bootstrap record, not native acceptance evidence.
 # Freeze measured versions and Xcode/SDK deployment inputs on an Intel Mac.
 schema_version = 1
 target = "mac-amd64"
 compiler_family = "AppleClang"
 
 [sdk]
-commit = "c94f5ebdcb3c9d1a460ca48e04f9758448f8d518"
+commit = "a3e1d82678ca20d68d4837a8e9ee4652ff073745"
 
 [clang]
-# The SDK requires AppleClang >= 16 (Xcode 16+) or LLVM Clang >= 18.
-version = "16.0.0"
-minimum = "16"
+# The SDK requires AppleClang >= 17 or LLVM Clang >= 20.
+version = "17.0.0"
+minimum = "17"
 
 [cmake]
 version = "3.25.0"

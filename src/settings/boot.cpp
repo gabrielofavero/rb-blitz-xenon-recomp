@@ -33,9 +33,12 @@
 #include <windows.h>
 #endif
 
-#include <rex/cvar.h>
-#include <rex/filesystem.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/platform/file.h>
+#include <rex/platform.h>
+#include "settings/runtime_values.h"
+#include "settings/graphics_settings.h"
+#include <rex/logging/log_category.h>
 #include <rex/platform/dynlib.h>
 
 #include "hooks/settings_bridge_hooks.h"
@@ -51,9 +54,7 @@
 #include "store/store_settings.h"
 #include "settings/window_policy.h"
 
-REXCVAR_DEFINE_BOOL(settings_safe_graphics, false, "Settings",
-                    "Start with safe graphics without deleting saved preferences.")
-    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 
 namespace rb_blitz::settings::boot {
 namespace {
@@ -114,15 +115,36 @@ constexpr char kFallbackBackend[] = "vulkan";
 // run Vulkan" are different facts: with no loader, a Vulkan boot builds a Vulkan system and only
 // fails inside presentation setup, where there is nothing left to fall back to.
 bool VulkanLoaderIsUsable() {
+#if defined(_WIN32)
+  constexpr const char* kVulkanLoader="vulkan-1.dll";
+#elif defined(__APPLE__)
+  constexpr const char* kVulkanLoader="libvulkan.1.dylib";
+#else
+  constexpr const char* kVulkanLoader="libvulkan.so.1";
+#endif
   rex::platform::DynamicLibrary loader;
 #if defined(RB_BLITZ_IOS)
-  const auto framework = rex::filesystem::GetExecutableFolder() /
+  const auto framework = rex::platform::GetExecutableFolder() /
       "Frameworks" / "MoltenVK.framework" / "MoltenVK";
   if (!loader.Load(framework)) return false;
 #else
-  if (!loader.Load(rex::platform::lib_names::kVulkanLoader)) return false;
+  if (!loader.Load(kVulkanLoader)) return false;
 #endif
   return loader.GetRawSymbol("vkGetInstanceProcAddr") != nullptr;
+}
+
+// Called on the SDK's configuration/UI owner thread. Validate both settings
+// before writing either; a pending restart edit is not an active draw scale.
+bool WriteUniformScale(int32_t value, rex::SettingLayer layer) {
+  const auto text=std::to_string(value);
+  for (const auto* name : {"gpu.resolution_scale_x","gpu.resolution_scale_y"}) {
+    auto setting=REX_SETTINGS().Find(name);
+    if (!setting || (*setting)->IsFrozen() || (*setting)->GetLayer()>layer || !(*setting)->Check(text))
+      return false;
+  }
+  for (const auto* name : {"gpu.resolution_scale_x","gpu.resolution_scale_y"})
+    if (!WriteRuntimeSetting(name,text,layer).accepted()) return false;
+  return UniformResolutionScale()==value;
 }
 
 std::string BoolText(const bool value) { return value ? "true" : "false"; }
@@ -280,16 +302,16 @@ std::string ListText(const std::vector<std::string>& list) {
   return out;
 }
 
-// The sources that outrank a config-rank write (§4.2: config < environment < command line).
-bool HigherRank(const rex::cvar::Source source) {
-  return source == rex::cvar::Source::kEnvironment || source == rex::cvar::Source::kCommandLine;
+// The sources that outrank a config-rank write (ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4.2: config < environment < command line).
+bool HigherRank(const rex::SettingLayer source) {
+  return source == rex::SettingLayer::kEnvironment || source == rex::SettingLayer::kCommandLine;
 }
 
-Source OverrideSourceFor(const rex::cvar::Source source) {
+Source OverrideSourceFor(const rex::SettingLayer source) {
   switch (source) {
-    case rex::cvar::Source::kEnvironment:
+    case rex::SettingLayer::kEnvironment:
       return Source::kEnvironment;
-    case rex::cvar::Source::kCommandLine:
+    case rex::SettingLayer::kCommandLine:
       return Source::kCommandLine;
     default:
       // A later writer at the *same* rank: the game's own rb_blitz.toml, which the SDK loads right
@@ -364,7 +386,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
   // --- identity, the path file and the legacy profile ---------------------------------------
   profile::ProfilePathInputs inputs = profile::ProfilePathInputsFromEnvironment(executable_dir);
   // The cvar is `launcher_profile` because the flag is `--launcher_profile` (src/profile/profile_apply.cpp).
-  inputs.command_line_value = rex::cvar::GetFlagByName("launcher_profile");
+  inputs.command_line_value = InspectRuntimeSetting("launcher_profile").active_value;
   paths_.settings_file = ResolveSettingsFile(inputs);
   paths_.paths_file = ResolvePathFile(executable_dir);
   paths_.legacy_profile = profile::ResolveProfilePath(inputs);
@@ -376,7 +398,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
 
   std::string why;
   std::optional<profile::Profile> legacy = profile::ReadProfile(&why);
-  // A profile that is there but unreadable is reported and *not* imported from (contracts §4.3): the
+  // A profile that is there but unreadable is reported and *not* imported from (contracts ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4.3): the
   // person is told by Controller Settings, and the game keeps the compiled defaults rather than a
   // half-imported profile.
   const bool legacy_usable = why.empty();
@@ -439,7 +461,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     // by the app (`active_renderer_`) and is P4's device-probe item, not this table's.
     probe.active = token == kFallbackBackend;
     // Empty: the title's native MSAA sample semantics have not been verified on this device, and an
-    // unproved label must not ship (§7.1), so `native` is simply not offered.
+    // unproved label must not ship (ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§7.1), so `native` is simply not offered.
     probe.native_aa_label.clear();
     probe.filtering_ceiling = kShippedFilteringCeiling;
     if (token == "vulkan") {
@@ -448,7 +470,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
       probe.usable = loader;
       probe.note = loader ? "not probed: a backend this project ships and has run"
                           : "the Vulkan loader (" +
-                                std::string(rex::platform::lib_names::kVulkanLoader) +
+                                std::string("Vulkan loader") +
                                 ") is not present here";
     } else {
       probe.note = "not probed: a backend this project ships and has run";
@@ -568,7 +590,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
                                  {SettingId::kResolution, fallback.resolution},
                                  {SettingId::kAntiAliasing, fallback.anti_aliasing},
                                  {SettingId::kFiltering, fallback.filtering}};
-    const bool forced_safe = REXCVAR_GET(settings_safe_graphics);
+    const bool forced_safe = rb_blitz::settings::title::settings_safe_graphics.Get();
     auto safe_values = safe;
     Value safe_aspect; safe_aspect.kind = ValueKind::kEnum; safe_aspect.text = "16:9";
     Value safe_scale; safe_scale.kind = ValueKind::kEnum; safe_scale.text = "1x";
@@ -631,7 +653,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
 
   // --- the path roots -----------------------------------------------------------------------
   // paths.toml is the installer's file and the user may hand-edit it; its values replace the legacy
-  // profile's path fields (§9.1) and are written at the config rank so the game's own rb_blitz.toml
+  // profile's path fields (ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§9.1) and are written at the config rank so the game's own rb_blitz.toml
   // still outranks them. An explicit environment/CLI value outranks both and is left alone.
   PathRoots roots;
   if (!path_file_.paths.dlc_root.empty()) {
@@ -677,7 +699,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     // The renderer first (OnPreSetup reads it when it loads the plugin), then the rows the mod's own
     // hooks read when they configure, then the graphics rows whose cvars belong to the *GPU plugin*:
     // `vsync`, `native_2x_msaa`, `swap_post_effect` and `anisotropic_override` are defined in
-    // rexgpu-xenos.dll and do not exist until it is loaded, so those writes are collected here and
+    // the Xenos backend module and do not exist until it is loaded, so those writes are collected here and
     // made in AfterLoadXexImage - where the fact that they could not be written at the config rank
     // is reported rather than swallowed.
     for (const SettingId id :
@@ -755,7 +777,8 @@ void SettingsBoot::ApplyRow(const SettingId id, const bool defer_unregistered) {
     case SettingId::kResolution: {
       screen_plan_ = PlanGuestScreen(render_limits_, {value.width, value.height});
       if (screen_plan_.supported) {
-        ApplyCvars({{"resolution_scale", std::to_string(screen_plan_.draw_scale)}}, id,
+        ApplyCvars({{"gpu.resolution_scale_x", std::to_string(screen_plan_.draw_scale)},
+                    {"gpu.resolution_scale_y", std::to_string(screen_plan_.draw_scale)}}, id,
                    defer_unregistered);
       }
       return;
@@ -822,9 +845,8 @@ void SettingsBoot::ApplyCvars(const std::vector<CvarAssignment>& assignments, co
 }
 
 bool SettingsBoot::WriteCvar(const std::string& name, const std::string& value, const SettingId id) {
-  if (!rex::cvar::SetFlagFromConfig(name, value)) {
-    return false;
-  }
+  const auto result=WriteRuntimeSetting(name,value,rex::SettingLayer::kTitle);
+  if (!result.accepted() || result.state==RuntimeSettingWrite::kDeferred) return false;
   if (id != SettingId::kUnknown) {
     applied_.push_back(Applied{id, name, value, false});
   }
@@ -843,20 +865,20 @@ bool SettingsBoot::WriteWindowCvar(const std::string& name, const std::string& v
   // same rank, so a plain config write would beat the file a developer put the value in. A cvar
   // somebody else already named - the file, the environment or the command line - is therefore left
   // completely alone: the window policy is a default for a boot nobody configured, not an override
-  // (contracts §4.2).
-  if (rex::cvar::GetFlagSource(name) != rex::cvar::Source::kDefault) {
+  // (contracts ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4.2).
+  if (InspectRuntimeSetting(name).staged_source != rex::SettingLayer::kDefault) {
     REXLOG_INFO("settings_boot: '{}' is explicitly configured ('{}'); the window policy left it "
-                "alone", name, rex::cvar::GetFlagByName(name));
+                "alone", name, InspectRuntimeSetting(name).active_value);
     return false;
   }
-  if (!rex::cvar::SetFlagFromConfig(name, value)) {
+  if (!WriteRuntimeSetting(name, value, rex::SettingLayer::kTitle).accepted()) {
     REXLOG_WARN("settings_boot: the registry does not know '{}'; the window policy could not set "
                 "it", name);
     return false;
   }
   // `SetFlagFromConfig` reports success for a skipped write as well as an applied one, so the value
   // is read back - the same rule FinishInit applies to the stored rows.
-  if (const std::string actual = rex::cvar::GetFlagByName(name); actual != value) {
+  if (const std::string actual = InspectRuntimeSetting(name).active_value; actual != value) {
     REXLOG_WARN("settings_boot: '{}' = '{}' did not stand (the effective value is '{}')", name,
                 value, actual);
     return false;
@@ -909,9 +931,9 @@ void SettingsBoot::ApplyWindowPolicy() {
                     int32_t(BootPortraitHeight()) * screen_plan_.draw_scale} : source;
 
   // The presenter derives the shape of its output region from the *video mode* aspect, not from the
-  // frame's (docs/settings/graphics.md part 1 §3), so a size the title would not have chosen has to
+  // frame's (docs/settings/graphics.md part 1 ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§3), so a size the title would not have chosen has to
   // be reported there or the correct frame is squashed into a 16:9-shaped region. The title itself
-  // never reads the video mode (part 1 §4); the presenter and the startup window's own default size
+  // never reads the video mode (part 1 ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4); the presenter and the startup window's own default size
   // are what do.
   DisplayMode presentation = source;
 #if defined(RB_BLITZ_IOS)
@@ -934,21 +956,12 @@ void SettingsBoot::ApplyWindowPolicy() {
   WriteWindowCvar("video_mode_width", std::to_string(presentation.width));
   WriteWindowCvar("video_mode_height", std::to_string(presentation.height));
 
-  // The window itself: the same size, unless the decorated window would not fit the display's
-  // usable area (a render size equal to the display mode never does). `window_width`/`window_height`
-  // are *logical* pixels and outrank the video mode in the SDK's own resolution order, so they are
-  // written only when the fit really shrinks the window: a boot that fits keeps the exact size the
-  // video mode gives it, with no unit round trip at all.
+  // Fit the backing-pixel client into the usable desktop. The SDK converts once
+  // to native window units. Explicit window settings retain their rank.
   const long monitor_index =
-      std::strtol(rex::cvar::GetFlagByName("monitor").c_str(), nullptr, 10);
+      std::strtol(InspectRuntimeSetting("monitor").active_value.c_str(), nullptr, 10);
   const DesktopMetrics desktop = ProbeDesktop(static_cast<int32_t>(monitor_index));
   const ClientFit fit = FitClientToDesktop(render, desktop);
-  bool needs_logical_size = false;
-#if defined(__APPLE__) && !defined(RB_BLITZ_IOS)
-  // Cocoa's video-mode fallback is interpreted as points, while render sizes
-  // are backing pixels. Convert even when the physical client already fits.
-  needs_logical_size = desktop.available && desktop.scale_percent != 100;
-#endif
   const double aspect = double(render.width) / double(render.height);
   if (!desktop.available) {
     if (portrait) {
@@ -957,20 +970,20 @@ void SettingsBoot::ApplyWindowPolicy() {
     }
     REXLOG_INFO("settings_boot: window {}x{} (aspect {:.4f}); no usable desktop measurement, so it "
                 "is created at the render size", render.width, render.height, aspect);
-  } else if (!fit.shrunk && !needs_logical_size && !portrait) {
+  } else if (!fit.shrunk && !portrait) {
     // The video mode already gives exactly this size, so nothing is written. If somebody named the
     // window's size instead, it is theirs and the line says so rather than implying this policy
     // chose it.
     const bool window_named =
-        rex::cvar::GetFlagSource("window_width") != rex::cvar::Source::kDefault ||
-        rex::cvar::GetFlagSource("window_height") != rex::cvar::Source::kDefault;
+        InspectRuntimeSetting("window_width").staged_source != rex::SettingLayer::kDefault ||
+        InspectRuntimeSetting("window_height").staged_source != rex::SettingLayer::kDefault;
     REXLOG_INFO("settings_boot: window {}x{} (aspect {:.4f}) fits the usable desktop {}x{} with "
                 "{}+{} px of decorations{}",
                 render.width, render.height, aspect, desktop.work_area.width,
                 desktop.work_area.height, desktop.frame_extent.width, desktop.frame_extent.height,
                 window_named ? "; the window size is explicitly configured" : "");
   } else {
-    const DisplayMode logical = PhysicalToLogical(fit.client, desktop.scale_percent);
+    const DisplayMode logical = fit.client;
     // Both halves, attempted even if the first is refused: the two are one size, and a half-applied
     // pair would be worse than either outcome. The line below reports what happened, not what was
     // wanted - a boot whose window size is explicitly configured keeps its own size and says so.
@@ -978,7 +991,7 @@ void SettingsBoot::ApplyWindowPolicy() {
     const bool wrote_height = WriteWindowCvar("window_height", std::to_string(logical.height));
     if (wrote_width && wrote_height) {
       REXLOG_INFO(
-          "settings_boot: window {}x{} -> client {}x{} physical ({}x{} logical at {}%), aspect "
+          "settings_boot: window {}x{} -> client {}x{} physical ({}x{} window coordinates at {}%), aspect "
           "{:.4f} kept, inside the usable desktop {}x{} minus {}x{} of decorations",
           render.width, render.height, fit.client.width, fit.client.height, logical.width,
           logical.height, desktop.scale_percent, aspect, desktop.work_area.width,
@@ -1005,7 +1018,7 @@ void SettingsBoot::ApplyWindowPolicy() {
 }
 
 bool SettingsBoot::ExplicitlyOwned(const std::string& name, const SettingId id) {
-  const rex::cvar::Source source = rex::cvar::GetFlagSource(name);
+  const rex::SettingLayer source = InspectRuntimeSetting(name).staged_source;
   if (!HigherRank(source)) {
     return false;
   }
@@ -1014,7 +1027,7 @@ bool SettingsBoot::ExplicitlyOwned(const std::string& name, const SettingId id) 
     const Descriptor* descriptor = service_->DescriptorFor(id);
     Value parsed;
     if (descriptor != nullptr &&
-        schema::ParseTokenToValue(*descriptor, rex::cvar::GetFlagByName(name), &parsed)) {
+        schema::ParseTokenToValue(*descriptor, InspectRuntimeSetting(name).active_value, &parsed)) {
       override_values_[id] = parsed;
     }
   }
@@ -1084,8 +1097,8 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
   // Plugin flags now contain the developer config, environment and CLI values replayed at
   // registration. Even a config-rank value here outranks our earlier stored preference.
   for (const Applied& deferred : deferred_writes_) {
-    const auto source = rex::cvar::GetFlagSource(deferred.cvar);
-    if (source != rex::cvar::Source::kDefault) {
+    const auto source = InspectRuntimeSetting(deferred.cvar).staged_source;
+    if (source > rex::SettingLayer::kTitle) {
       overrides_[deferred.id] = OverrideSourceFor(source);
     }
   }
@@ -1103,11 +1116,11 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     }
   }
   deferred_writes_.clear();
-  if (REXCVAR_GET(settings_safe_graphics)) {
+  if (rb_blitz::settings::title::settings_safe_graphics.Get()) {
     for (const auto& [name, value] : std::map<std::string, std::string>{
-        {"resolution_scale", "1"}, {"native_2x_msaa", "false"},
+        {"gpu.resolution_scale_x", "1"}, {"gpu.resolution_scale_y", "1"}, {"native_2x_msaa", "false"},
         {"swap_post_effect", "none"}, {"anisotropic_override", "-1"}})
-      rex::cvar::SetFlagByName(name, value);
+      WriteRuntimeSetting(name, value, rex::SettingLayer::kRuntime);
 #if defined(RB_BLITZ_IOS)
     screen_plan_ = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size, "auto", 1);
 #else
@@ -1134,7 +1147,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
   // and does not change the settings service, visible choices or saved profile.
   if (const char* raw = std::getenv("RBBLITZ_PROBE_RENDER_SIZE"); raw != nullptr && *raw != '\0') {
     DisplayMode requested;
-    if (REXCVAR_GET(settings_safe_graphics) || overrides_.contains(SettingId::kResolution)) {
+    if (rb_blitz::settings::title::settings_safe_graphics.Get() || overrides_.contains(SettingId::kResolution)) {
       REXLOG_WARN("settings_boot: render probe '{}' skipped: safe graphics or an explicit "
                   "resolution-scale override is active", raw);
     } else if (!ParseDisplayModeToken(std::string_view(raw), &requested)) {
@@ -1143,10 +1156,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
                !probe.supported) {
       REXLOG_WARN("settings_boot: render probe {} skipped: outside the diagnostic planner's "
                   "bounds", raw);
-    } else if (!rex::cvar::SetFlagByName("resolution_scale",
-                                          std::to_string(probe.draw_scale)) ||
-               rex::cvar::GetFlagByName("resolution_scale") !=
-                   std::to_string(probe.draw_scale)) {
+    } else if (!WriteUniformScale(probe.draw_scale, rex::SettingLayer::kRuntime)) {
       REXLOG_WARN("settings_boot: render probe {} skipped: draw scale could not be applied", raw);
     } else {
       screen_plan_ = probe;
@@ -1160,7 +1170,8 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     // An explicit draw scale changes pixel density, not the selected aspect.
     // Keep guest geometry and presentation in agreement even for diagnostic flags.
     int64_t scale = 1;
-    toml::ParseBareInt(rex::cvar::GetFlagByName("resolution_scale"), &scale);
+    if (const auto uniform=UniformResolutionScale()) scale=*uniform;
+    else REXLOG_WARN("settings_boot: unequal draw scale axes cannot be represented as one render scale");
     screen_plan_.draw_scale = static_cast<int32_t>(std::clamp<int64_t>(scale, 1, 7));
     overrides_[SettingId::kRenderScale] = overrides_.at(SettingId::kResolution);
     Value value; value.kind = ValueKind::kEnum;
@@ -1208,8 +1219,8 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
   // black on Vulkan). Keep startup draws synchronous, then restore the user's
   // setting at the first usable menu. Four owner-tested routes rendered without
   // the blank interval with this cvar disabled.
-  if (rex::cvar::GetFlagByName("async_shader_compilation") == "true") {
-    if (rex::cvar::SetFlagByName("async_shader_compilation", "false")) {
+  if (InspectRuntimeSetting("async_shader_compilation").active_value == "true") {
+    if (WriteRuntimeSetting("async_shader_compilation", "false", rex::SettingLayer::kRuntime).accepted()) {
       restore_async_shader_compilation_ = true;
       REXLOG_INFO("settings_boot: shader compilation is synchronous during startup");
     } else {
@@ -1220,7 +1231,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
 
 void SettingsBoot::RestoreAsyncShaderCompilation() {
   if (!restore_async_shader_compilation_) return;
-  if (!rex::cvar::SetFlagByName("async_shader_compilation", "true")) {
+  if (!WriteRuntimeSetting("async_shader_compilation", "true", rex::SettingLayer::kRuntime).accepted()) {
     REXLOG_WARN("settings_boot: could not restore asynchronous shader compilation");
     return;
   }
@@ -1330,19 +1341,19 @@ void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
 
 void SettingsBoot::FinishInit() {
   // Read back what this module wrote. `SetFlagFromConfig` returning true does not prove the value
-  // won (contracts §4.2): it can mean a higher-priority value was left in place, and a *later* write
+  // won (contracts ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§4.2): it can mean a higher-priority value was left in place, and a *later* write
   // at the same rank - the game's own rb_blitz.toml - beats this one. A row the player cannot change
   // has to say so instead of saving a value that never takes effect.
   if (!service_) return;
   size_t verified = 0;
   for (Applied& row : applied_) {
-    const std::string actual = rex::cvar::GetFlagByName(row.cvar);
+    const std::string actual = InspectRuntimeSetting(row.cvar).active_value;
     row.verified = actual == row.expected;
     if (row.verified) {
       ++verified;
       continue;
     }
-    overrides_[row.id] = OverrideSourceFor(rex::cvar::GetFlagSource(row.cvar));
+    overrides_[row.id] = OverrideSourceFor(InspectRuntimeSetting(row.cvar).staged_source);
     const Descriptor* descriptor = service_ ? service_->DescriptorFor(row.id) : nullptr;
     Value parsed;
     if (descriptor != nullptr && schema::ParseTokenToValue(*descriptor, actual, &parsed)) {
@@ -1359,15 +1370,15 @@ void SettingsBoot::FinishInit() {
     std::vector<std::string> names;
     if (id == SettingId::kTarget) names = {"ultimate_mode", "license_mask"};
     else if (id == SettingId::kResolution || id == SettingId::kRenderScale)
-      names = {"resolution_scale"};
+      names = {"gpu.resolution_scale_x", "gpu.resolution_scale_y"};
     else if (id == SettingId::kAntiAliasing) names = {"native_2x_msaa", "swap_post_effect"};
     else if (id == SettingId::kFiltering) names = {"anisotropic_override"};
-    else if (id == SettingId::kDisplay) names = {"fullscreen", "borderless"};
+    else if (id == SettingId::kDisplay) names = {"ui.fullscreen", "ui.fullscreen_exclusive"};
     else if (!CvarForSetting(id).empty()) names.emplace_back(CvarForSetting(id));
     for (const auto& name : names) {
-      const auto source = rex::cvar::GetFlagSource(name);
-      if (source == rex::cvar::Source::kDefault) continue;
-      const auto actual = rex::cvar::GetFlagByName(name);
+      const auto source = InspectRuntimeSetting(name).staged_source;
+      if (source == rex::SettingLayer::kDefault) continue;
+      const auto actual = InspectRuntimeSetting(name).active_value;
       const bool ours = !HigherRank(source) && std::any_of(applied_.begin(), applied_.end(),
           [&](const Applied& row) { return row.cvar == name && row.expected == actual; });
       if (!ours) {
@@ -1378,13 +1389,24 @@ void SettingsBoot::FinishInit() {
     }
     if (!overrides_.contains(id) || names.empty()) continue;
     Value value = service_->EffectiveValue(id);
-    const auto flag = [](const char* name) { return rex::cvar::GetFlagByName(name); };
+    const auto flag = [](const char* name) { return InspectRuntimeSetting(name).active_value; };
     if (id == SettingId::kTarget) {
       value.text = flag("ultimate_mode") == "1" ? "ultimate" :
           flag("license_mask") == "0" ? "demo" : "common";
     } else if (id == SettingId::kResolution || id == SettingId::kRenderScale) {
       int64_t scale = 1;
-      toml::ParseBareInt(flag("resolution_scale"), &scale);
+      if (const auto uniform=UniformResolutionScale()) scale=*uniform;
+      else {
+        const auto x=ReadSdkSetting<rex::i32>("gpu.resolution_scale_x");
+        const auto y=ReadSdkSetting<rex::i32>("gpu.resolution_scale_y");
+        if (id==SettingId::kRenderScale) value.text=std::to_string(x)+"x"+std::to_string(y);
+        else {
+          value.width=(screen_plan_.supported ? screen_plan_.guest_size.width : 1280)*x;
+          value.height=(screen_plan_.supported ? screen_plan_.guest_size.height : 720)*y;
+        }
+        override_values_[id]=value;
+        continue;
+      }
       scale = std::clamp<int64_t>(scale, 1, 7);
       if (id == SettingId::kRenderScale) {
         value.text = std::to_string(scale) + "x";
@@ -1405,12 +1427,10 @@ void SettingsBoot::FinishInit() {
     } else if (id == SettingId::kDisplay) {
       // Decode the pair back into one token: fullscreen wins when it is set, else borderless, else
       // the plain window.
-      value.text = flag("fullscreen") == "true"    ? "fullscreen"
-                   : flag("borderless") == "true" ? "borderless"
-                                                  : "windowed";
+      value.text = ActiveDisplayMode();
     } else if (value.kind == ValueKind::kList) {
       value.list.clear();
-      const std::string csv = rex::cvar::GetFlagByName(names.front());
+      const std::string csv = InspectRuntimeSetting(names.front()).active_value;
       for (size_t start = 0; start < csv.size();) {
         const size_t end = csv.find(',', start);
         value.list.push_back(csv.substr(start, end == std::string::npos ? end : end - start));
@@ -1418,12 +1438,12 @@ void SettingsBoot::FinishInit() {
         start = end + 1;
       }
     } else {
-      schema::ParseTokenToValue(descriptor, rex::cvar::GetFlagByName(names.front()), &value);
+      schema::ParseTokenToValue(descriptor, InspectRuntimeSetting(names.front()).active_value, &value);
     }
     override_values_[id] = std::move(value);
   }
   service_->SetOverrides(override_values_, overrides_);
-  if (REXCVAR_GET(settings_safe_graphics)) {
+  if (rb_blitz::settings::title::settings_safe_graphics.Get()) {
     for (const auto id : {SettingId::kResolution, SettingId::kRenderScale, SettingId::kRenderer,
                           SettingId::kAntiAliasing, SettingId::kFiltering}) {
       overrides_.erase(id);

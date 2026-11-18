@@ -7,7 +7,7 @@
 // Only the heading lookup needs a fallback: put unranked songs under the first
 // difficulty heading. Keep the original numeric ranks and sorting order, and
 // preserve the retail lookup for every normal tier (1 through 7).
-#include <rex/hook.h>
+#include <rex/ppc/hook.h>
 
 REX_EXTERN(__imp__sub_821D0F30);
 

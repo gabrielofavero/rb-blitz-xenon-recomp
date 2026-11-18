@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Host tests for rexglue-sdk/include/rex/graphics/pipeline_preload.h - the
+// Host tests for rexglue-sdk/include/rex/gpu/pipeline_preload.h - the
 // accounting and the completion barrier both pipeline caches use for a shader
 // storage preload (docs/plans/finished/2026-10-10-shader-cache-plan.md, P1).
 //
@@ -25,13 +25,13 @@
 
 #include "check.h"
 
-#include <rex/graphics/pipeline_preload.h>
+#include <rex/gpu/pipeline_preload.h>
 
 namespace {
 
 using namespace rb_blitz::test;
-using rex::graphics::PipelinePreloadTracker;
-using rex::graphics::PreloadCreationThreadCount;
+using rex::gpu::PipelinePreloadTracker;
+using rex::gpu::PreloadCreationThreadCount;
 
 using Clock = std::chrono::steady_clock;
 

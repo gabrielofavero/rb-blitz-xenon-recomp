@@ -11,30 +11,25 @@
 #include <string>
 #include <utility>
 
-#include <rex/cvar.h>
-#include <rex/filesystem.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/platform/file.h>
+#include "settings/runtime_values.h"
+#include <rex/logging/log_category.h>
 
 #include "profile/profile_path.h"
 #include "settings/cvars.h"
 
 // The cvar keeps its name: `--launcher_profile=<path>` is the flag the game and every harness
 // spell, and the SDK maps a flag to a cvar of the same name.
-REXCVAR_DEFINE_STRING(launcher_profile, "", "Runtime",
-                      "Path to the settings profile, when Controller Settings started this "
-                      "process; empty resolves the file it would write itself");
 
-// §8's narrowing, now the default (P11b cutover, owner decision 2026-10-13): the game keeps its
+
+// Ã‚Â§8's narrowing, now the default (P11b cutover, owner decision 2026-10-13): the game keeps its
 // own settings file, its Help & Options edits it, and the profile's other `[settings]`
 // rows are inert preservation data. The two facts that used to hold this back are gone - the
 // store exists (P11a) and the installer/paths.toml own the DLC and save locations (P7) - so a
 // profile row other than the controller rows and the host-only host rows is no longer applied.
 // A build that needs the old behaviour can set this off again from the command line.
-REXCVAR_DEFINE_BOOL(profile_controller_rows_only, true, "Compatibility",
-                    "Apply only the controller rows (mouse_ui_nav, input_backend, "
-                    "keyboard_support) and the host-only host rows (monitor, "
-                    "safe areas, dither, overscan cutoff, audio) from the profile; every other "
-                    "row is preserved in the file and not applied");
+
 
 namespace rb_blitz::profile {
 
@@ -58,8 +53,8 @@ std::optional<Profile> ReadProfile(std::string* why) {
 
 std::filesystem::path CurrentProfilePath() {
   ProfilePathInputs inputs = ProfilePathInputsFromEnvironment(
-      rex::filesystem::GetExecutableFolder());
-  inputs.command_line_value = REXCVAR_GET(launcher_profile);
+      rex::platform::GetExecutableFolder());
+  inputs.command_line_value = rb_blitz::settings::title::launcher_profile.Get();
   return ResolveProfilePath(inputs);
 }
 
@@ -72,11 +67,11 @@ ProfileApplyReport ApplyProfileSettings() {
   report.found = true;
   report.rows = profile->settings.size();
 
-  // §8: once the game keeps its own settings file, the profile is a source of controller
+  // Ã‚Â§8: once the game keeps its own settings file, the profile is a source of controller
   // state and of the host rows no in-game surface can edit, and nothing else. The rows that are
   // left out are not dropped from the file - Controller Settings still writes them, and a person's hand
   // edits stay - they simply stop being applied.
-  const bool narrowed = REXCVAR_GET(profile_controller_rows_only);
+  const bool narrowed = rb_blitz::settings::title::profile_controller_rows_only.Get();
   const std::vector<ProfileSetting> rows =
       narrowed ? settings::ProfileRowsTheGameApplies(profile->settings) : profile->settings;
   if (narrowed) {
@@ -84,7 +79,7 @@ ProfileApplyReport ApplyProfileSettings() {
   }
 
   for (const ProfileSetting& setting : rows) {
-    if (rex::cvar::SetFlagFromConfig(setting.key, setting.value)) {
+    if (settings::WriteRuntimeSetting(setting.key, setting.value, rex::SettingLayer::kTitle).accepted()) {
       ++report.applied;
     } else {
       // The row is either a cvar this build does not have (a profile from a newer Controller Settings, or a

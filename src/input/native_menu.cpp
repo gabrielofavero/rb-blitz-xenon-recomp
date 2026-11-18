@@ -11,10 +11,14 @@
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
 #include "input/touch_controls.h"
 #endif
-#include <rex/hook.h>
-#include <rex/cvar.h>
-#include <rex/graphics/compile_trace.h>
-#include <rex/kernel/xam/module.h>
+#include <rex/ppc/hook.h>
+#include <rex/ppc/call.h>
+#include <rex/utility.h>
+#include <rex/memory/endian.h>
+#include "input/touch_controls.h"
+#include "settings/runtime_settings.h"
+#include <rex/diagnostics/compile_trace.h>
+#include "input/title_input.h"
 #include "hooks/help_observer.h"
 #include "hooks/menu_filter.h"
 #include "hooks/action_hint_probe.h"
@@ -35,8 +39,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
-REXCVAR_DECLARE(bool, mouse_ui_nav);
-REXCVAR_DEFINE_BOOL(mouse_native_trace, false, "Diagnostics", "Trace native menu geometry and selection");
+
+
 
 REX_EXTERN(__imp__sub_824B2958); // UIManager::Poll
 REX_EXTERN(__imp__sub_824E5020); // UIListDir::Draw
@@ -144,17 +148,21 @@ void PublishRail(const MenuRail& rail) { std::lock_guard lock(rail_mutex); menu_
 // All side calls use isolated registers and reserve space below the guest frame.
 // Output buffers are above that call's linkage area and survive nested guest calls.
 struct GuestCall {
-  rex::CallFrame frame;
+  PPCContext ctx;
+  PPCContext& parent;
   uint32_t scratch;
-  explicit GuestCall(PPCContext& ctx) : frame(ctx) {
-    frame.ctx.r1.u32 -= 256;
-    scratch = frame.ctx.r1.u32 + 128;
+  explicit GuestCall(PPCContext& caller, uint8_t* base, uint32_t bytes = 256)
+      : ctx(caller), parent(caller) {
+    rex::ppc::OpenCallFrame(ctx, base, bytes);
+    scratch = ctx.r1.u32 + 128;
   }
+  ~GuestCall() { parent.fpscr = ctx.fpscr; }
 };
+
 uint32_t Focus(PPCContext& ctx, uint8_t* base, uint32_t manager) {
-  GuestCall call(ctx); call.frame.ctx.r3.u32 = manager;
-  sub_824B1980(call.frame, base);
-  return call.frame.ctx.r3.u32;
+  GuestCall call(ctx, base); call.ctx.r3.u32 = manager;
+  sub_824B1980(call.ctx, base);
+  return call.ctx.r3.u32;
 }
 struct RailMap {
   bool known = false;
@@ -166,14 +174,14 @@ thread_local RailMap rail_map;
 // count, using the list's own virtual dispatch. Providers and their contents can change
 // without changing the focused component (search results, sorting, store refreshes).
 bool EnsureRailMap(PPCContext& ctx, uint8_t* base, uint32_t list) {
-  GuestCall call(ctx);
-  call.frame.ctx.r3.u32 = list;
-  sub_824C0C08(call.frame, base);
-  const int rows = call.frame.ctx.r3.s32, display = int(U32(base, list + 180));
+  GuestCall call(ctx, base);
+  call.ctx.r3.u32 = list;
+  sub_824C0C08(call.ctx, base);
+  const int rows = call.ctx.r3.s32, display = int(U32(base, list + 180));
   if (rows <= 0 || display <= 0) { rail_map = {}; return false; }
   const bool changed = !rail_map.known || rail_map.list != list || rail_map.max_first != std::max(0, rows - display);
   rail_map = {true, list, std::max(0, rows - display)};
-  if (changed && REXCVAR_GET(mouse_native_trace))
+  if (changed && rb_blitz::settings::title::mouse_native_trace.Get())
     REXLOG_INFO("native_mouse: scroll rail rows={} numDisplay={} maxFirst={}", rows, display, rail_map.max_first);
   return true;
 }
@@ -222,7 +230,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     // held state across. The gameplay holds are dropped without an edge on the next poll, so a
     // press or release from the old context can never arrive late in the new one.
     InvalidateGameplayInput();
-    if (REXCVAR_GET(mouse_native_trace))
+    if (rb_blitz::settings::title::mouse_native_trace.Get())
       REXLOG_INFO("native_mouse: screen={} panel={} scene={} focus={:08X} available={}",
                   name, panel_name, current_panel_scene, focus, allowed);
   }
@@ -238,15 +246,15 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   portrait_splash_active = ui::PortraitSplashScreen(name, panel_name, current_panel_scene);
   current_panel_name = panel_name;
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled() &&
-                !rex::kernel::xam::xeXamIsUIActive() && !ui::achievements::Active(), panel);
+                !SystemUIActive() && !ui::achievements::Active(), panel);
 }
 // UIListState::Selected - the list's live selection - read with isolated registers like
 // every other side call (the same read the hit test's ordering uses).
 int SelectedRow(PPCContext& ctx, uint8_t* base, uint32_t list) {
-  GuestCall call(ctx);
-  call.frame.ctx.r3.u32 = list + 176;
-  sub_824E3008(call.frame.ctx, base);
-  return call.frame.ctx.r3.s32;
+  GuestCall call(ctx, base);
+  call.ctx.r3.u32 = list + 176;
+  sub_824E3008(call.ctx, base);
+  return call.ctx.r3.s32;
 }
 // Returns whether the point named a row of the focused list. When it did not, the mouse's
 // own hover ends: a click that does not land on an element cannot press anything, and the
@@ -259,10 +267,10 @@ bool Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   if (!geometry.list || geometry.frame + 1 != frame_number ||
       current_focus != geometry.list) return false;
   const int row = HitMenuRow(point, geometry.bounds, geometry.rows);
-  if (REXCVAR_GET(mouse_native_trace)) REXLOG_INFO("native_mouse: hit={},{} row={} bounds={},{},{},{}", point.x, point.y, row, geometry.bounds.left, geometry.bounds.top, geometry.bounds.right, geometry.bounds.bottom);
+  if (rb_blitz::settings::title::mouse_native_trace.Get()) REXLOG_INFO("native_mouse: hit={},{} row={} bounds={},{},{},{}", point.x, point.y, row, geometry.bounds.left, geometry.bounds.top, geometry.bounds.right, geometry.bounds.bottom);
   if (row < 0) {
     const auto left = mouse_highlight.PointerLeft(geometry.list, SelectedRow(ctx, base, geometry.list));
-    if (left != MouseHighlight::Leave::kIgnored && REXCVAR_GET(mouse_native_trace))
+    if (left != MouseHighlight::Leave::kIgnored && rb_blitz::settings::title::mouse_native_trace.Get())
       REXLOG_INFO("native_mouse: unhover list={:08X} highlight={}", geometry.list,
                   left == MouseHighlight::Leave::kLifted ? "off" : "kept");
     return false;
@@ -271,8 +279,8 @@ bool Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   const int selected = SelectedRow(ctx, base, geometry.list);
   if (selected == row) return true;
   const int direction = row > selected ? 1 : -1;
-  GuestCall call(ctx);
-  auto& c = call.frame.ctx;
+  GuestCall call(ctx, base);
+  auto& c = call.ctx;
   c.r3.u32 = geometry.list; c.r4.s32 = row; c.r5.u32 = U32(base, geometry.list + 224);
   sub_824C1938(c, base);
   // Refresh providers and send the engine's scroll-complete notification, without
@@ -282,7 +290,7 @@ bool Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   sub_824C1DE8(c, base);
   c.r3.u32 = geometry.list + 84; c.r4.u32 = geometry.list + 176;
   sub_824C1F08(c, base);
-  if (REXCVAR_GET(mouse_native_trace)) REXLOG_INFO("native_mouse: selected row={} list={:08X}", row, geometry.list);
+  if (rb_blitz::settings::title::mouse_native_trace.Get()) REXLOG_INFO("native_mouse: selected row={} list={:08X}", row, geometry.list);
   return true;
 }
 // Move only the viewport, keep the guest's selection row, then notify the providers the
@@ -298,20 +306,20 @@ bool ScrollListTo(PPCContext& ctx, uint8_t* base, uint32_t list, int first, Menu
   const uint32_t current = U32(base, list + 224);
   if (uint32_t(first) == current) return false;
   const auto left = mouse_highlight.PointerLeft(list, row);
-  if (left != MouseHighlight::Leave::kIgnored && REXCVAR_GET(mouse_native_trace))
+  if (left != MouseHighlight::Leave::kIgnored && rb_blitz::settings::title::mouse_native_trace.Get())
     REXLOG_INFO("native_mouse: unhover list={:08X} highlight={} (scroll)", list,
                 left == MouseHighlight::Leave::kLifted ? "off" : "kept");
   scroll_follow.Arm(pointer);
   const int direction = first > int(current) ? 1 : -1;
-  GuestCall call(ctx);
-  auto& c = call.frame.ctx;
+  GuestCall call(ctx, base);
+  auto& c = call.ctx;
   c.r3.u32 = list; c.r4.s32 = row; c.r5.u32 = uint32_t(first);
   sub_824C1938(c, base);
   c.r3.u32 = list + 84; c.r4.u32 = list + 176; c.r5.s32 = direction; c.r6.u32 = 0;
   sub_824C1DE8(c, base);
   c.r3.u32 = list + 84; c.r4.u32 = list + 176;
   sub_824C1F08(c, base);
-  if (REXCVAR_GET(mouse_native_trace))
+  if (rb_blitz::settings::title::mouse_native_trace.Get())
     REXLOG_INFO("native_mouse: scrollbar first={} target={} row={} dir={}", current, first, row, direction);
   return true;
 }
@@ -346,11 +354,11 @@ bool MouseMenuAvailable() {
 }
 void MouseMenuFocus(bool focused) {
   std::lock_guard lock(mutex);
-  if (focused != window_focused && REXCVAR_GET(mouse_native_trace))
+  if (focused != window_focused && rb_blitz::settings::title::mouse_native_trace.Get())
     REXLOG_INFO("native_mouse: window focus={} queue={}", focused, focused && menu_available && MouseSupportEnabled());
   window_focused = focused;
   queue.Context(current_screen, current_focus, focused && menu_available && MouseSupportEnabled() &&
-                !rex::kernel::xam::xeXamIsUIActive() && !ui::achievements::Active(), current_panel);
+                !SystemUIActive() && !ui::achievements::Active(), current_panel);
   // P2 (plan D5): losing the window drops every gameplay hold. The physical layer already
   // reports nothing while unfocused; this makes the *edge* disappear too, so a key released
   // behind another window cannot be delivered as one the guest acted on.
@@ -456,7 +464,7 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       U32(base, current_focus + 224) == U32(base, current_focus + 228)) {
     if (auto point = scroll_follow.Take()) {
       if (enabled) {
-        if (REXCVAR_GET(mouse_native_trace))
+        if (rb_blitz::settings::title::mouse_native_trace.Get())
           REXLOG_INFO("native_mouse: scroll follow point={},{}", point->x, point->y);
         Select(ctx, base, *point);
       }
@@ -499,7 +507,7 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       if (i != LibraryHeaderForScreen(current_screen_name)) {
         clicked_header = i;
         header_click_frame = frame_number;
-        if (REXCVAR_GET(mouse_native_trace))
+        if (rb_blitz::settings::title::mouse_native_trace.Get())
           REXLOG_INFO("native_mouse: header click screen={} panel={} target={}",
                       current_screen_name, current_panel_name, i);
       }
@@ -543,7 +551,7 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
                                           int(U32(base, current_focus + 228)), rail_map.max_first);
         if (rail_drag.active) ScrollListTo(ctx, base, current_focus, target, event->point);
       }
-      if (REXCVAR_GET(mouse_native_trace))
+      if (rb_blitz::settings::title::mouse_native_trace.Get())
         REXLOG_INFO("native_mouse: gutter press y={:.3f} armed={}", event->point.y, rail_drag.active);
     } else {
       // Apply the release position too: a fast drag may finish between guest frames.
@@ -654,7 +662,7 @@ std::optional<MenuBounds> ProjectMesh(PPCContext& ctx, uint8_t* base, uint32_t m
     if (it == mesh_boxes.end() || it->second.resource != U32(base, owner + 412)) return {};
     box = it->second;
   }
-  GuestCall call(ctx); auto& c = call.frame.ctx;
+  GuestCall call(ctx, base); auto& c = call.ctx;
   // These sibling meshes may be queried before their own draw updates the world
   // transform. Resolve parent transforms before projecting their bounds.
   if (base[mesh + 253]) {
@@ -679,9 +687,9 @@ std::optional<MenuBounds> ProjectMesh(PPCContext& ctx, uint8_t* base, uint32_t m
 }
 
 uint32_t SceneMesh(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* name) {
-  GuestCall call(ctx);
+  GuestCall call(ctx, base);
   std::memcpy(base + call.scratch, name, std::strlen(name) + 1);
-  auto& c = call.frame.ctx;
+  auto& c = call.ctx;
   c.r3.u32 = dir; c.r4.u32 = call.scratch; c.r5.u32 = 0; c.r6.u32 = 0;
   sub_82402DE8(c, base);
   const auto object = c.r3.u32;
@@ -787,7 +795,7 @@ void CaptureLabel(PPCContext& ctx, uint8_t* base) {
   const float x = F32(base, label + 144), z = F32(base, label + 148);
   const float width = F32(base, label + 152), height = F32(base, label + 156);
   if (!(width > 0) || height == 0) return;
-  GuestCall call(ctx); auto& c = call.frame.ctx;
+  GuestCall call(ctx, base); auto& c = call.ctx;
   const auto local = call.scratch, world = local + 16, projected = local + 32;
   MenuBounds bounds{1e10f, 1e10f, -1e10f, -1e10f};
   for (unsigned corner = 0; corner < 4; ++corner) {
@@ -812,7 +820,7 @@ std::optional<MenuBounds> ProjectLabel(PPCContext& ctx, uint8_t* base, uint32_t 
   const float x = F32(base, label + 144), z = F32(base, label + 148);
   const float width = F32(base, label + 152), height = F32(base, label + 156);
   if (!(width > 0) || height == 0) return {};
-  GuestCall call(ctx); auto& c = call.frame.ctx;
+  GuestCall call(ctx, base); auto& c = call.ctx;
   c.r3.u32 = label; c.r4.u32 = 0;
   sub_824BA9F8(c, base);
   // DrawShowing skips fully transparent label styles; those are not hit targets.
@@ -944,16 +952,16 @@ void UpdateCalibrationSideLabel(PPCContext& ctx, uint8_t* base, uint32_t label) 
     previous_generation = screen_generation;
   }
   if (!updated.insert(label).second) return;
-  GuestCall call(ctx);
+  GuestCall call(ctx, base);
   const auto chars = call.scratch;
   constexpr uint32_t code = rb_blitz::ui::input_font::GlyphCode(1);
   base[chars] = uint8_t(0xC0 | (code >> 6));
   base[chars + 1] = uint8_t(0x80 | (code & 0x3F));
   base[chars + 2] = 0;
-  call.frame.ctx.r3.u32 = label;
-  call.frame.ctx.r4.u32 = chars;
-  call.frame.ctx.r5.u32 = 0;
-  sub_824BC7D0(call.frame, base);
+  call.ctx.r3.u32 = label;
+  call.ctx.r4.u32 = chars;
+  call.ctx.r5.u32 = 0;
+  sub_824BC7D0(call.ctx, base);
 }
 void UpdateStartPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
   // UILabel keeps its locale Symbol at +164 and its RndText UTF-8 string
@@ -973,14 +981,13 @@ void UpdateStartPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
   auto& prompt = prompts[size_t(found - kStartPromptTokens.begin())];
   const auto desired = prompt.Update(actual, last_device::Current().using_touch);
   if (desired == actual || desired.size() >= 256) return;
-  rex::CallFrame call(ctx);
-  call.ctx.r1.u32 -= 512;
+  GuestCall call(ctx, base, 512);
   const uint32_t chars = call.ctx.r1.u32 + 128;
   std::memcpy(base + chars, desired.c_str(), desired.size() + 1);
   call.ctx.r3.u32 = label;
   call.ctx.r4.u32 = chars;
   call.ctx.r5.u32 = 0;
-  __imp__sub_824BC7D0(call, base);
+  __imp__sub_824BC7D0(call.ctx, base);
 }
 // Defined after DrawList; declared here because the draw is what discovers a new list.
 void DrawList(PPCContext& ctx, uint8_t* base) {
@@ -1019,7 +1026,7 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   // did not make ends the lift instead, so a controller's own highlight is never hidden.
   if (mouse_highlight.lifted_list == list) {
     if (!mouse_highlight.Lifted(list, SelectedRow(ctx, base, list))) {
-      if (REXCVAR_GET(mouse_native_trace))
+      if (rb_blitz::settings::title::mouse_native_trace.Get())
         REXLOG_INFO("native_mouse: highlight back list={:08X}", list);
     } else {
       // The element the engine marked highlighted drops to active (+24: 1 -> 0), and the
@@ -1064,12 +1071,27 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
     }
   }
   result.bounds = {1e10f, 1e10f, -1e10f, -1e10f};
+  // Entrance animations and window resizing can move rows after their first
+  // draw. Publish a complete changed table so diagnostic consumers see the
+  // same current bounds as the live hit test.
+  const bool trace_geometry = rb_blitz::settings::title::mouse_native_trace.Get() &&
+      (geometry.list != list || geometry.rows.size() != result.rows.size() ||
+       !std::equal(result.rows.begin(), result.rows.end(), geometry.rows.begin(),
+           [](const MenuRow& a, const MenuRow& b) {
+             if (a.index != b.index || a.enabled != b.enabled || !a.bounds || !b.bounds)
+               return false;
+             constexpr float epsilon = .0001f;
+             return std::abs(a.bounds->left - b.bounds->left) < epsilon &&
+                    std::abs(a.bounds->top - b.bounds->top) < epsilon &&
+                    std::abs(a.bounds->right - b.bounds->right) < epsilon &&
+                    std::abs(a.bounds->bottom - b.bounds->bottom) < epsilon;
+           }));
   for (auto& row : result.rows) {
     const auto& b = *row.bounds;
     row.center = {(b.left + b.right) * .5f, (b.top + b.bottom) * .5f};
     result.bounds.left = std::min(result.bounds.left, b.left); result.bounds.right = std::max(result.bounds.right, b.right);
     result.bounds.top = std::min(result.bounds.top, b.top); result.bounds.bottom = std::max(result.bounds.bottom, b.bottom);
-    if (REXCVAR_GET(mouse_native_trace) && geometry.list != list)
+    if (trace_geometry)
       REXLOG_INFO("native_mouse: row={} bounds={},{},{},{} enabled={}", row.index, b.left,b.top,b.right,b.bottom,row.enabled);
   }
   if (result.rows.size() > 1) {
@@ -1089,8 +1111,8 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
 } // namespace rb_blitz::input
 
 REX_HOOK_RAW(sub_824B2958) {
-  rex::graphics::compile_trace::Scope trace_poll(
-      rex::graphics::compile_trace::Event::kGuestWork, "guest.ui_poll", 0x824B2958);
+  rex::diagnostics::compile_trace::Scope trace_poll(
+      rex::diagnostics::compile_trace::Event::kGuestWork, "guest.ui_poll", 0x824B2958);
   const auto manager = ctx.r3.u32;
   rb_blitz::input::PollMouse(ctx, base, manager);
   __imp__sub_824B2958(ctx, base);

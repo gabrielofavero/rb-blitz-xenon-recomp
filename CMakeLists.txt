@@ -1,6 +1,6 @@
 # rb_blitz - ReXGlue Recompiled Project
 #
-# SDK boilerplate lives in generated/rexglue.cmake.
+# SDK source integration and code generation use the release CMake API.
 
 cmake_minimum_required(VERSION 3.25)
 project(rb_blitz LANGUAGES CXX)
@@ -44,8 +44,8 @@ endif()
 # (docs/guides/distributable.md). Mapping the source and build trees to relative names
 # keeps the file name useful in a log and drops the developer's disk out of it.
 #
-# It has to be set before generated/rexglue.cmake, which add_subdirectory()s the
-# SDK: a directory property is inherited by subdirectories added after it, so the
+# It has to be set before the direct SDK add_subdirectory() call:
+# a directory property is inherited by subdirectories added after it, so the
 # SDK's own libraries get the mapping too. MSVC is not covered (it needs /pathmap
 # and /d1trimfile, and nothing builds the game with it here);
 # scripts/setup/audit_distributable.ps1 is what refuses a payload that leaks anyway.
@@ -55,71 +55,77 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
 endif()
 
 # Include Vulkan in dev and shipping builds, including configurations made without a preset.
-# The SDK's Windows default is D3D12-only.
+# The SDK and project default to both available desktop graphics backends.
 option(REXGLUE_USE_VULKAN "Enable Vulkan graphics backend" ON)
+set(REXGLUE_GPU_VULKAN "${REXGLUE_USE_VULKAN}")
+set(REXGLUE_VULKAN_SOURCE_ROOT "${CMAKE_BINARY_DIR}/_deps/rex-vulkan"
+    CACHE PATH "Prepared pinned Vulkan dependency sources")
+set(REXGLUE_MOLTENVK_CANONICAL_PATCH
+    "${CMAKE_CURRENT_SOURCE_DIR}/patches/rexglue-sdk-v0.11/thirdparty/moltenvk/0001-retain-presentation-drawable.patch")
 
 # The SDK's thirdparty configuration forces BUILD_TESTING=OFF for its dependencies.
 # Preserve an explicit parent request so our host diagnostics/tests can still build.
 if(DEFINED BUILD_TESTING)
     set(RBBLITZ_REQUESTED_BUILD_TESTING "${BUILD_TESTING}")
 endif()
-include(generated/rexglue.cmake)
+set(REXSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rexglue-sdk" CACHE PATH "Patched SDK source checkout")
+if(NOT EXISTS "${REXSDK_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "Initialize the pinned SDK and apply the repository patches first")
+endif()
+# SDK install-relative paths require an absolute prefix. glslang's Windows
+# default must not replace the project's prefix during a later regeneration.
+if(NOT IS_ABSOLUTE "${CMAKE_INSTALL_PREFIX}")
+    get_filename_component(_rbblitz_install_prefix "${CMAKE_INSTALL_PREFIX}" ABSOLUTE
+        BASE_DIR "${CMAKE_BINARY_DIR}")
+    set(CMAKE_INSTALL_PREFIX "${_rbblitz_install_prefix}" CACHE PATH "Install path prefix" FORCE)
+    unset(_rbblitz_install_prefix)
+endif()
+set(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT FALSE)
+
+option(RBBLITZ_USE_INSTALLED_SDK "Use the installed patched SDK instead of building its sources" OFF)
+if(RBBLITZ_USE_INSTALLED_SDK)
+    find_package(rexglue 0.11.0 EXACT REQUIRED CONFIG)
+    # Offline catalogue tools use the SDK's exact source-pinned hash algorithm.
+    if(NOT TARGET xxHash::xxhash)
+        block()
+            set(XXHASH_BUILD_XXHSUM OFF)
+            set(BUILD_SHARED_LIBS OFF)
+            add_subdirectory("${REXSDK_DIR}/thirdparty/xxHash/cmake_unofficial"
+                host-test-deps/xxhash EXCLUDE_FROM_ALL)
+        endblock()
+    endif()
+    if(BUILD_TESTING AND REXGLUE_USE_VULKAN)
+        if(NOT TARGET Vulkan::Headers)
+            find_package(VulkanHeaders 1.4.357 EXACT REQUIRED CONFIG GLOBAL)
+        endif()
+        if(NOT TARGET glslang::SPIRV)
+            block()
+                set(ENABLE_GLSLANG_BINARIES OFF)
+                set(ENABLE_SPVREMAPPER OFF)
+                set(ENABLE_HLSL OFF)
+                set(ENABLE_OPT OFF)
+                set(BUILD_TESTING OFF)
+                set(SKIP_GLSLANG_INSTALL ON)
+                set(ENABLE_RTTI ON)
+                set(CMAKE_POLICY_VERSION_MINIMUM 3.10)
+                add_subdirectory("${REXSDK_DIR}/thirdparty/glslang"
+                    host-test-deps/glslang EXCLUDE_FROM_ALL)
+            endblock()
+            if(NOT TARGET glslang::SPIRV)
+                add_library(glslang::SPIRV ALIAS SPIRV)
+            endif()
+        endif()
+    endif()
+else()
+    add_subdirectory("${REXSDK_DIR}" rexglue-sdk)
+endif()
+rexglue_project(rb_blitz OUTPUT_DIR generated/default)
 if(DEFINED RBBLITZ_REQUESTED_BUILD_TESTING)
     set(BUILD_TESTING "${RBBLITZ_REQUESTED_BUILD_TESTING}" CACHE BOOL "Build host tests" FORCE)
 endif()
 
-# A clean checkout has no generated/default/sources.cmake yet, because codegen is
-# a build step, and the file above includes it only when it is already there. The
-# build system of that first build therefore knows nothing about the recompiled
-# code: rb_blitz.exe is linked from the hand-written sources alone and fails with
-# a wall of undefined symbols (`_sub_...`, `PPCImageConfig`), which says nothing
-# about the actual cause.
-#
-# Codegen output cannot be picked up inside the same build - Ninja only reloads
-# the build system between invocations, and naming the generated file as a
-# CMAKE_CONFIGURE_DEPENDS dependency does not change that (measured: the property
-# is accepted and ignored for a file a custom command produces). So the configure
-# has to run again, and the only thing worth engineering here is that the person
-# meets that requirement instead of the linker error. The check below is added
-# only to a configuration that predates the generated sources, and it runs right
-# after codegen has produced them.
-if(NOT REXGLUE_ENTRYPOINT_GENERATED_SOURCES)
-    set(RBBLITZ_CODEGEN_CHECK "${CMAKE_CURRENT_BINARY_DIR}/rb_blitz_codegen_check.cmake")
-    file(WRITE "${RBBLITZ_CODEGEN_CHECK}" [=[
-if(EXISTS "${RBBLITZ_SOURCES_FILE}")
-    message(FATAL_ERROR
-        "Recompiled code has just been generated, but this build system was "
-        "configured before it existed, so rb_blitz.exe cannot be linked in this "
-        "build.\n"
-        "Re-run the configure step, then build again. The second build is "
-        "incremental and produces the executable:\n"
-        "  cmake --preset ${RBBLITZ_PRESET}\n"
-        "  cmake --build --preset ${RBBLITZ_PRESET}\n")
-endif()
-]=])
-    string(TOLOWER "${CMAKE_BUILD_TYPE}" rbblitz_build_type)
-    if(WIN32)
-        set(rbblitz_codegen_preset "win-amd64-${rbblitz_build_type}")
-    elseif(RBBLITZ_IOS)
-        set(rbblitz_codegen_preset "ios-arm64-${rbblitz_build_type}")
-    elseif(APPLE)
-        if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-            set(rbblitz_codegen_preset "mac-arm64-${rbblitz_build_type}")
-        else()
-            set(rbblitz_codegen_preset "mac-amd64-${rbblitz_build_type}")
-        endif()
-    else()
-        set(rbblitz_codegen_preset "linux-amd64-${rbblitz_build_type}")
-    endif()
-    add_custom_command(TARGET rb_blitz_codegen POST_BUILD
-        COMMAND ${CMAKE_COMMAND}
-                "-DRBBLITZ_SOURCES_FILE=${CMAKE_CURRENT_SOURCE_DIR}/generated/default/sources.cmake"
-                "-DRBBLITZ_PRESET=${rbblitz_codegen_preset}"
-                -P "${RBBLITZ_CODEGEN_CHECK}"
-        COMMENT "Checking that this build system knows about the generated code"
-        VERBATIM
-    )
-endif()
+# The SDK tracks sources.cmake as a configure dependency, including on the first
+# generation, and reloads the source list before compiling the generated code.
 
 # Sources
 set(RBBLITZ_SOURCES
@@ -219,6 +225,10 @@ set(RBBLITZ_SOURCES
     # the path file and the migration (P3), the capability/policy pair (P4), the service-backed
     # guest sink and the boot wiring itself. All SDK-free except src/settings/boot.cpp, which is the
     # game's half (it reads and writes cvars).
+    src/settings/graphics_settings.cpp
+    src/settings/runtime_settings.cpp
+    src/settings/runtime_values.cpp
+    src/settings/legacy_logging.cpp
     src/settings/store.cpp
     src/settings/paths.cpp
     src/settings/migration.cpp
@@ -234,15 +244,15 @@ set(RBBLITZ_SOURCES
     # are expressed in). SDK-free; the boot is the caller and the probe is Win32, like ProbeDisplay.
     src/settings/window_policy.cpp
     src/settings/display_runtime.cpp
-    # P9's two additions: the application-strategy seam (§5.5 - which committed rows apply to the
-    # running game and which wait for the restart prompt) and the restart coordinator (§8 - the
+    # Application strategy selects which committed settings apply to the
+    # running game or await restart; the restart coordinator owns the
     # exactly-once request, the rebuilt command line and the bootstrap's verified-identity wait).
-    # SDK-free. The seam reads the §5.5 table out of the schema, so the model and the schema come
+    # SDK-free. The strategy reads the schema's apply-policy table, so model and schema come
     # with it; the restart coordinator's caller is the boot wiring, which is the coordinator's.
     src/settings/model.cpp
     src/settings/schema.cpp
     src/settings/hot_apply.cpp
-    # P10's menu-compatibility rules (the hide matrix §3.5 states in words, the fixed 50-song
+    # Menu compatibility owns the visibility matrix, fixed 50-song
     # pool, the rename's scope). SDK-free, and read by the menu hooks the mod already owns.
     src/settings/menu_compat.cpp
     src/platform/game_restart.cpp
@@ -301,7 +311,7 @@ set(RBBLITZ_SOURCES
     # SDK-free, so their suites walk them without a boot or a socket.
     src/store/store_page_cache.cpp
     src/store/store_catalogue_status.cpp
-    # P3's Downloaded mark (plan §3.2): the SDK-free (artist, title) index, the builder that reads
+    # The Downloaded mark uses an SDK-free (artist, title) index and a builder that reads
     # every loaded package's songs.dta, and the shared package reader the menu-music pool also uses.
     src/store/store_library_index.cpp
     src/store/store_library.cpp
@@ -329,7 +339,7 @@ if(WIN32)
     # WinHTTP lives behind one file so the policy stays testable without a network. Windows Imaging
     # Component decodes the cover the API serves (src/store/album_art_service.cpp is the only file
     # that uses it), which is why `windowscodecs`/`ole32` are linked below.
-    list(APPEND RBBLITZ_SOURCES src/store/store_http.cpp src/store/store_transfer_winhttp.cpp
+    list(APPEND RBBLITZ_SOURCES src/platform/image_decode_wic.cpp src/store/store_http.cpp src/store/store_transfer_winhttp.cpp
          src/store/store_search_service.cpp src/store/store_catalogue.cpp
          src/store/album_art_service.cpp)
     list(APPEND RBBLITZ_SOURCES src/messages/messages_runtime.cpp
@@ -367,12 +377,11 @@ else()
     add_executable(rb_blitz ${RBBLITZ_SOURCES})
 endif()
 
-# rexglue_configure_target() compiles rexglue-sdk/src/ui/rex_app.cpp (and
-# windowed_app_main_sdl.cpp) into this host executable. rex_app.cpp includes
-# <imgui.h>, but rexruntime links imgui PRIVATE, so the vendored imgui include
-# directory is not propagated through rex::runtime. Expose it to the host
-# target only (headers), keeping imgui objects in rexruntime.dll where they
-# already live. See docs/history/bringup-log.md B-004.
+target_include_directories(rb_blitz SYSTEM PRIVATE "${REXSDK_DIR}/thirdparty/tomlplusplus/include")
+
+# Application dialogs consume ImGui headers through the SDK's public UI contract.
+# Source builds expose the matching vendored headers; installed builds retain
+# the same header version from the checked SDK source tree.
 if(TARGET imgui)
     target_include_directories(rb_blitz PRIVATE
         $<TARGET_PROPERTY:imgui,INTERFACE_INCLUDE_DIRECTORIES>)
@@ -381,20 +390,13 @@ else()
         "${REXSDK_DIR}/thirdparty/imgui")
 endif()
 
-rexglue_setup_target(rb_blitz GPU_PLUGINS xenos)
+rexglue_setup_target(rb_blitz)
 
 
-# The SDK stages runtime-loaded plugins only in the executable's POST_BUILD
-# step. A renderer-only rebuild need not relink the executable, leaving an old
-# DLL beside it. Make staging a dependency of every game build as well.
-add_custom_target(rb_blitz_stage_gpu
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:rb_blitz>"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "$<TARGET_FILE:rex::gpu-xenos>" "$<TARGET_FILE_DIR:rb_blitz>"
-    DEPENDS rex::gpu-xenos
-    COMMENT "Staging the current GPU plugin beside rb_blitz"
-    VERBATIM)
-add_dependencies(rb_blitz rb_blitz_stage_gpu)
+# The SDK tracks provider and SDL outputs as link dependencies, so a changed
+# runtime module relinks the host and restages the current files.
+rexglue_get_runtime_files(rb_blitz RBBLITZ_RUNTIME_FILES)
+
 if(APPLE)
     target_sources(rb_blitz PRIVATE src/ui/apple_font.cpp)
     target_link_libraries(rb_blitz PRIVATE "-framework CoreText" "-framework CoreFoundation")
@@ -424,7 +426,7 @@ if(WIN32)
     target_link_libraries(rb_blitz_load_monitor PRIVATE shell32)
     add_dependencies(rb_blitz rb_blitz_load_monitor)
     add_executable(rb_blitz_function_registration_probe tools/function_registration_probe.cpp)
-    target_link_libraries(rb_blitz_function_registration_probe PRIVATE rex::runtime)
+    target_link_libraries(rb_blitz_function_registration_probe PRIVATE rex::sdk)
 endif()
 
 # P0 of the RhythmVerse store plan: its JSON dependency is the copy the SDK tree already vendors
@@ -488,7 +490,7 @@ file(RELATIVE_PATH RBBLITZ_DEVELOPMENT_JOURNAL "${CMAKE_CURRENT_BINARY_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/out/shader-coverage/discoveries.jsonl")
 set_source_files_properties(src/graphics/development_coverage.cpp PROPERTIES COMPILE_DEFINITIONS
     "RBBLITZ_DEVELOPMENT_DIRECTORY_HASH=\"${RBBLITZ_DEVELOPMENT_DIRECTORY_HASH}\";RBBLITZ_DEVELOPMENT_JOURNAL=\"${RBBLITZ_DEVELOPMENT_JOURNAL}\"")
-target_link_libraries(rb_blitz PRIVATE xxhash)
+target_link_libraries(rb_blitz PRIVATE xxhash SDL3::SDL3)
 if(WIN32)
     target_link_libraries(rb_blitz PRIVATE winhttp windowscodecs ole32 runtimeobject dbghelp shell32 user32 gdi32)
 elseif(NOT RBBLITZ_IOS)
@@ -524,6 +526,28 @@ elseif(APPLE AND NOT RBBLITZ_IOS)
     set_target_properties(rb_blitz PROPERTIES
         BUILD_RPATH "@executable_path;@loader_path"
         INSTALL_RPATH "@executable_path;@loader_path")
+endif()
+
+# Runtime input artwork is required even when host tests are disabled.
+# The packer validates source images and stages the internal keyboard layout
+# beside the selectable controller packages.
+if(WIN32)
+    add_executable(rb_blitz_controller_schemes
+        tools/controller_schemes_main.cpp
+        src/controller_schemes/schemes.cpp
+        src/controller_schemes/png_wic.cpp
+        src/assets/texture_codec.cpp)
+    target_include_directories(rb_blitz_controller_schemes PRIVATE src)
+    target_link_libraries(rb_blitz_controller_schemes PRIVATE windowscodecs ole32)
+    add_custom_target(rb_blitz_controller_art
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/controllers/controller_schemes.ps1
+            -ToolPath $<TARGET_FILE:rb_blitz_controller_schemes>
+            -Validate -Pack -Destination
+            $<TARGET_FILE_DIR:rb_blitz>/assets/controller/schemes
+        DEPENDS rb_blitz_controller_schemes
+        VERBATIM)
+    add_dependencies(rb_blitz rb_blitz_controller_art)
 endif()
 
 # Native packagers use the same parser and image validation as the game.
@@ -562,10 +586,10 @@ endif()
 # offer a backend the plugin does not have, and it never hides one it does. The boot reads this in
 # src/settings/boot.cpp (every backend gets a capability probe of its own).
 set(RBBLITZ_BACKENDS "")
-if(REXGLUE_USE_D3D12)
+if(TARGET rex::gpu-xenos-d3d12)
     list(APPEND RBBLITZ_BACKENDS d3d12)
 endif()
-if(REXGLUE_USE_VULKAN)
+if(TARGET rex::gpu-xenos-vulkan)
     list(APPEND RBBLITZ_BACKENDS vulkan)
 endif()
 string(REPLACE ";" "," RBBLITZ_BACKENDS_ARG "${RBBLITZ_BACKENDS}")
@@ -609,7 +633,7 @@ target_include_directories(rb_blitz_fingerprint PRIVATE src)
 endif()
 
 # The header is generated, so it is built rather than committed; it lands in
-# generated/, which is ignored apart from generated/rexglue.cmake.
+# generated/, whose reproducible outputs are all ignored.
 add_custom_command(
     OUTPUT "${RBBLITZ_EXPECTED_HEADER}"
     COMMAND $<TARGET_FILE:rb_blitz_fingerprint>
@@ -755,12 +779,12 @@ include(CTest)
 # P2's offline local-asset resolver hashes guest bytes with the same SDK XXH3
 # implementation as both graphics backends. It never launches the guest.
 add_executable(rb_blitz_shader_microcode_hash tools/shader_microcode_hash.cpp)
-target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxhash)
+target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxHash::xxhash)
 
 if(BUILD_TESTING)
     add_executable(rb_blitz_ios_lifecycle_tests tests/ios_lifecycle_tests.cpp)
     target_include_directories(rb_blitz_ios_lifecycle_tests PRIVATE src tests)
-    target_link_libraries(rb_blitz_ios_lifecycle_tests PRIVATE rex::core)
+    target_link_libraries(rb_blitz_ios_lifecycle_tests PRIVATE rex::base)
     add_test(NAME ios_lifecycle COMMAND rb_blitz_ios_lifecycle_tests)
     set_tests_properties(ios_lifecycle PROPERTIES TIMEOUT 10)
 
@@ -771,43 +795,51 @@ if(BUILD_TESTING)
     if(APPLE)
         add_executable(rb_blitz_posix_exception_forwarding_tests tests/posix_exception_forwarding_tests.cpp)
         target_include_directories(rb_blitz_posix_exception_forwarding_tests PRIVATE tests)
-        target_link_libraries(rb_blitz_posix_exception_forwarding_tests PRIVATE rex::core)
+        target_link_libraries(rb_blitz_posix_exception_forwarding_tests PRIVATE rex::base)
         add_test(NAME posix_exception_forwarding COMMAND rb_blitz_posix_exception_forwarding_tests)
         set_tests_properties(posix_exception_forwarding PROPERTIES TIMEOUT 20)
 
-        add_executable(rb_blitz_metal_surface_tests tests/metal_surface_tests.mm)
-        target_include_directories(rb_blitz_metal_surface_tests PRIVATE tests)
-        target_link_libraries(rb_blitz_metal_surface_tests PRIVATE rex::runtime "-framework QuartzCore")
+        add_executable(rb_blitz_metal_surface_tests tests/metal_surface_tests.mm
+            "${REXSDK_DIR}/src/gpu/xenos/host/metal_surface.mm")
+        target_include_directories(rb_blitz_metal_surface_tests PRIVATE tests "${REXSDK_DIR}/src")
+        target_link_libraries(rb_blitz_metal_surface_tests PRIVATE rex::sdk "-framework QuartzCore")
         add_test(NAME metal_surface COMMAND rb_blitz_metal_surface_tests)
-        add_executable(rb_blitz_presenter_paint_recovery_tests tests/presenter_paint_recovery_tests.cpp)
-        target_include_directories(rb_blitz_presenter_paint_recovery_tests PRIVATE tests)
-        target_link_libraries(rb_blitz_presenter_paint_recovery_tests PRIVATE rex::runtime)
-        add_test(NAME presenter_paint_recovery COMMAND rb_blitz_presenter_paint_recovery_tests)
+        if(TARGET rexgpu-xenos-base)
+            add_executable(rb_blitz_presenter_paint_recovery_tests tests/presenter_paint_recovery_tests.cpp)
+            target_include_directories(rb_blitz_presenter_paint_recovery_tests PRIVATE tests "${REXSDK_DIR}/src")
+            target_compile_definitions(rb_blitz_presenter_paint_recovery_tests PRIVATE REX_GPU_XENOS_STATIC)
+            target_link_libraries(rb_blitz_presenter_paint_recovery_tests PRIVATE rex::sdk rexgpu-xenos-base)
+            add_test(NAME presenter_paint_recovery COMMAND rb_blitz_presenter_paint_recovery_tests)
+        else()
+            add_test(NAME presenter_paint_recovery COMMAND ${CMAKE_COMMAND} -E echo
+                "Requires source SDK build: private presenter regression")
+            set_tests_properties(presenter_paint_recovery PROPERTIES SKIP_REGULAR_EXPRESSION "Requires source SDK build")
+        endif()
         if(REXGLUE_USE_VULKAN)
             add_executable(rb_blitz_moltenvk_drawable_lifetime_tests tests/moltenvk_drawable_lifetime_tests.mm)
             target_include_directories(rb_blitz_moltenvk_drawable_lifetime_tests PRIVATE tests
-                "${REXSDK_DIR}/thirdparty/moltenvk/MoltenVK/MoltenVK/Utility")
+                "${REXGLUE_VULKAN_SOURCE_ROOT}/moltenvk/MoltenVK/MoltenVK/Utility")
             target_link_libraries(rb_blitz_moltenvk_drawable_lifetime_tests PRIVATE "-framework Foundation")
             add_test(NAME moltenvk_drawable_lifetime COMMAND rb_blitz_moltenvk_drawable_lifetime_tests)
             set_tests_properties(moltenvk_drawable_lifetime PROPERTIES TIMEOUT 20)
 
             add_executable(rb_blitz_moltenvk_queue_policy_tests
                 tests/moltenvk_queue_policy_tests.cpp
-                "${REXSDK_DIR}/src/ui/vulkan/vulkan_moltenvk.cpp")
+                "${REXSDK_DIR}/src/gpu/xenos/host/vulkan/vulkan_moltenvk.cpp")
             target_include_directories(rb_blitz_moltenvk_queue_policy_tests PRIVATE
-                "${REXSDK_DIR}/src/ui/vulkan")
-            target_link_libraries(rb_blitz_moltenvk_queue_policy_tests PRIVATE rex::core)
+                "${REXSDK_DIR}/src/gpu/xenos/host/vulkan")
+            target_link_libraries(rb_blitz_moltenvk_queue_policy_tests PRIVATE rex::base)
             add_test(NAME moltenvk_queue_policy COMMAND rb_blitz_moltenvk_queue_policy_tests)
 
             add_executable(rb_blitz_vulkan_fragment_gradient_tests
                 tests/vulkan_fragment_gradient_tests.cpp
-                "${REXSDK_DIR}/src/graphics/pipeline/shader/spirv_builder.cpp"
+                "${REXSDK_DIR}/src/gpu/xenos/pipeline/shader/spirv_builder.cpp"
                 "${REXSDK_DIR}/thirdparty/glslang/StandAlone/ResourceLimits.cpp")
             target_include_directories(rb_blitz_vulkan_fragment_gradient_tests PRIVATE
-                "${REXSDK_DIR}/include" "${REXSDK_DIR}/thirdparty/glslang")
+                "${REXSDK_DIR}/include" "${REXSDK_DIR}/src" "${REXSDK_DIR}/thirdparty/glslang")
             target_link_libraries(rb_blitz_vulkan_fragment_gradient_tests PRIVATE
-                rex::runtime Vulkan::Loader Vulkan::Headers glslang::SPIRV glslang)
-            _rexglue_stage_macos_vulkan_runtime(rb_blitz_vulkan_fragment_gradient_tests)
+                rex::sdk Vulkan::Vulkan Vulkan::Headers glslang::SPIRV glslang)
+            rexglue_configure_target(rb_blitz_vulkan_fragment_gradient_tests)
             add_test(NAME vulkan_fragment_gradient COMMAND rb_blitz_vulkan_fragment_gradient_tests)
             add_test(NAME vulkan_fragment_gradient_async COMMAND rb_blitz_vulkan_fragment_gradient_tests)
             set_tests_properties(vulkan_fragment_gradient PROPERTIES SKIP_RETURN_CODE 77
@@ -817,15 +849,8 @@ if(BUILD_TESTING)
         endif()
         add_executable(rb_blitz_guest_memory_tests tests/guest_memory_tests.cpp)
         target_include_directories(rb_blitz_guest_memory_tests PRIVATE src)
-        target_link_libraries(rb_blitz_guest_memory_tests PRIVATE rex::runtime)
+        target_link_libraries(rb_blitz_guest_memory_tests PRIVATE rex::sdk)
         add_test(NAME guest_memory COMMAND rb_blitz_guest_memory_tests)
-        add_executable(rb_blitz_runtime_symbol_tests tests/runtime_symbol_tests.cpp
-            src/platform/runtime_symbol.cpp)
-        target_include_directories(rb_blitz_runtime_symbol_tests PRIVATE src)
-        target_link_libraries(rb_blitz_runtime_symbol_tests PRIVATE rex::runtime)
-        set_target_properties(rb_blitz_runtime_symbol_tests PROPERTIES
-            ENABLE_EXPORTS ON BUILD_RPATH "@executable_path;$<TARGET_FILE_DIR:rexruntime>")
-        add_test(NAME runtime_symbol COMMAND rb_blitz_runtime_symbol_tests)
         add_executable(rb_blitz_crash_diagnostics_posix_tests
             tests/crash_diagnostics_posix_tests.cpp src/platform/crash_diagnostics.cpp)
         target_include_directories(rb_blitz_crash_diagnostics_posix_tests PRIVATE src)
@@ -863,7 +888,23 @@ if(BUILD_TESTING)
         # Set the inherited Windows error mode before a payload test starts, so even
         # faults during startup end in CTest's log instead of opening a desktop dialog.
         add_executable(rb_blitz_windows_test_runner tests/windows_test_runner.cpp)
+        add_executable(rb_blitz_image_decode_tests tests/image_decode_wic_tests.cpp
+            src/platform/image_decode_wic.cpp)
+        target_include_directories(rb_blitz_image_decode_tests PRIVATE src tests)
+        target_compile_definitions(rb_blitz_image_decode_tests PRIVATE NOMINMAX)
+        target_link_libraries(rb_blitz_image_decode_tests PRIVATE windowscodecs ole32)
+        add_test(NAME image_decode COMMAND rb_blitz_windows_test_runner
+            $<TARGET_FILE:rb_blitz_image_decode_tests>)
     endif()
+    include(tests/preparation_settings_registry.cmake)
+    add_executable(rb_blitz_runtime_symbol_tests tests/runtime_symbol_tests.cpp
+        src/platform/runtime_symbol.cpp)
+    target_include_directories(rb_blitz_runtime_symbol_tests PRIVATE src)
+    target_link_libraries(rb_blitz_runtime_symbol_tests PRIVATE rex::sdk ${CMAKE_DL_LIBS})
+    set_target_properties(rb_blitz_runtime_symbol_tests PROPERTIES ENABLE_EXPORTS ON)
+    rexglue_configure_target(rb_blitz_runtime_symbol_tests)
+    add_test(NAME runtime_symbol COMMAND rb_blitz_runtime_symbol_tests)
+
     function(add_payload_test name target)
         if(WIN32)
             add_test(NAME ${name} COMMAND rb_blitz_windows_test_runner $<TARGET_FILE:${target}>)
@@ -875,27 +916,18 @@ if(BUILD_TESTING)
     # booting the game, opening a window, or synthesizing controller input.
     add_executable(rb_blitz_keyboard_controller_tests tests/keyboard_controller_tests.cpp)
     target_include_directories(rb_blitz_keyboard_controller_tests PRIVATE "${REXSDK_DIR}/include")
-    target_link_libraries(rb_blitz_keyboard_controller_tests PRIVATE imgui)
+    target_link_libraries(rb_blitz_keyboard_controller_tests PRIVATE rex::base)
     add_test(NAME keyboard_controller COMMAND rb_blitz_keyboard_controller_tests)
     if(APPLE)
         add_executable(rb_blitz_apple_font_tests tests/apple_font_tests.cpp src/ui/apple_font.cpp)
         target_include_directories(rb_blitz_apple_font_tests PRIVATE src)
-        target_link_libraries(rb_blitz_apple_font_tests PRIVATE imgui "-framework CoreText" "-framework CoreFoundation")
+        target_link_libraries(rb_blitz_apple_font_tests PRIVATE rex::base "-framework CoreText" "-framework CoreFoundation")
         add_test(NAME apple_font COMMAND rb_blitz_apple_font_tests)
     endif()
-    # Compile the production driver into the test so its SDL registry and the
-    # virtual-pad fixture share one module (SDL is static in rexruntime.dll).
+    # Exercise the SDK's selected public input services with a virtual physical pad.
     add_executable(rb_blitz_keyboard_controller_driver_tests
-        tests/keyboard_controller_driver_tests.cpp
-        "${REXSDK_DIR}/src/input/sdl/sdl_input_driver.cpp")
-    target_compile_definitions(rb_blitz_keyboard_controller_driver_tests PRIVATE
-        hid_mappings_file=keyboard_test_hid_mappings_file)
-    target_link_libraries(rb_blitz_keyboard_controller_driver_tests PRIVATE rex::runtime)
-    if(WIN32)
-        add_custom_command(TARGET rb_blitz_keyboard_controller_driver_tests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_keyboard_controller_driver_tests>)
-    endif()
+        tests/keyboard_controller_driver_tests.cpp)
+    target_link_libraries(rb_blitz_keyboard_controller_driver_tests PRIVATE rex::sdk SDL3::SDL3)
     add_test(NAME keyboard_controller_driver COMMAND rb_blitz_keyboard_controller_driver_tests)
     add_test(NAME shader_asset_resolver
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_asset_resolver_tests.py"
@@ -930,9 +962,15 @@ if(BUILD_TESTING)
     if(WIN32)
         add_test(NAME diagnostic_collection
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/diagnostic_collection_tests.py")
+        add_test(NAME acceptance_song_log
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/acceptance_song_log_tests.py")
     endif()
     add_test(NAME shader_cache_trace_tools
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_cache_trace_tools_tests.py")
+    add_test(NAME matched_performance_tools
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/matched_performance_tools_tests.py")
+    add_test(NAME xex_key_source_tools
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/xex_key_source_tests.py")
     add_test(NAME shader_coverage_tools
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_coverage_tools_tests.py"
                 --hash-helper $<TARGET_FILE:rb_blitz_shader_microcode_hash>
@@ -945,30 +983,21 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_load_guard_tests PRIVATE src tests)
     add_test(NAME load_guard COMMAND rb_blitz_load_guard_tests)
 
-    add_executable(rb_blitz_load_trace_tests tests/load_trace_tests.cpp src/loading/load_trace.cpp)
+    add_executable(rb_blitz_load_trace_tests tests/load_trace_tests.cpp src/loading/load_trace.cpp
+        src/settings/runtime_settings.cpp)
     target_include_directories(rb_blitz_load_trace_tests PRIVATE src tests)
-    target_link_libraries(rb_blitz_load_trace_tests PRIVATE rex::runtime)
+    target_link_libraries(rb_blitz_load_trace_tests PRIVATE rex::sdk)
     add_test(NAME load_trace COMMAND rb_blitz_load_trace_tests)
 
     add_executable(rb_blitz_shader_compile_trace_tests tests/shader_compile_trace_tests.cpp)
-    target_link_libraries(rb_blitz_shader_compile_trace_tests PRIVATE rex::runtime)
-    if(WIN32)
-        add_custom_command(TARGET rb_blitz_shader_compile_trace_tests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_shader_compile_trace_tests>)
-    endif()
+    target_link_libraries(rb_blitz_shader_compile_trace_tests PRIVATE rex::sdk)
     add_test(NAME shader_compile_trace_default COMMAND rb_blitz_shader_compile_trace_tests)
     add_test(NAME shader_compile_trace_enabled COMMAND rb_blitz_shader_compile_trace_tests enabled)
     add_test(NAME shader_compile_trace_disabled COMMAND rb_blitz_shader_compile_trace_tests disabled)
 
     # Exercise the SDK's real unlock/save/reload path without launching the game.
     add_executable(rb_blitz_achievement_persistence_tests tests/achievement_persistence_tests.cpp)
-    target_link_libraries(rb_blitz_achievement_persistence_tests PRIVATE rex::runtime)
-    if(WIN32)
-        add_custom_command(TARGET rb_blitz_achievement_persistence_tests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_achievement_persistence_tests>)
-    endif()
+    target_link_libraries(rb_blitz_achievement_persistence_tests PRIVATE rex::sdk)
     add_test(NAME achievement_persistence COMMAND rb_blitz_achievement_persistence_tests)
 
     add_executable(rb_blitz_achievement_navigation_tests tests/achievement_navigation_tests.cpp)
@@ -979,7 +1008,7 @@ if(BUILD_TESTING)
     # both backends use (rexglue-sdk/include/rex/graphics/pipeline_preload.h).
     # Header-only, and exercised with real threads rather than a copied model.
     add_executable(rb_blitz_pipeline_preload_tests tests/pipeline_preload_tests.cpp)
-    target_link_libraries(rb_blitz_pipeline_preload_tests PRIVATE rex::core)
+    target_link_libraries(rb_blitz_pipeline_preload_tests PRIVATE rex::base)
     if(WIN32)
         target_link_libraries(rb_blitz_pipeline_preload_tests PRIVATE ws2_32)
     endif()
@@ -1017,13 +1046,14 @@ if(BUILD_TESTING)
     # graphics_preparation.h). Header-only, real threads and real waits, so the
     # ordering rules the plan states are pinned without a GPU or a boot.
     add_executable(rb_blitz_graphics_preparation_tests tests/graphics_preparation_tests.cpp)
-    target_link_libraries(rb_blitz_graphics_preparation_tests PRIVATE rex::core)
+    target_link_libraries(rb_blitz_graphics_preparation_tests PRIVATE rex::base)
     if(WIN32)
         target_link_libraries(rb_blitz_graphics_preparation_tests PRIVATE ws2_32)
     endif()
     add_test(NAME graphics_preparation COMMAND rb_blitz_graphics_preparation_tests)
     add_executable(rb_blitz_audio_stability_tests tests/audio_stability_tests.cpp)
-    target_include_directories(rb_blitz_audio_stability_tests PRIVATE src "${REXSDK_DIR}/include")
+    target_include_directories(rb_blitz_audio_stability_tests PRIVATE src "${REXSDK_DIR}/src")
+    target_link_libraries(rb_blitz_audio_stability_tests PRIVATE rex::sdk)
     add_test(NAME audio_stability COMMAND rb_blitz_audio_stability_tests)
     add_executable(rb_blitz_shared_memory_upload_hazards_tests
         tests/shared_memory_upload_hazards_tests.cpp)
@@ -1054,13 +1084,13 @@ if(BUILD_TESTING)
     # only; the cases use a real scratch directory, so atomic replacement, the
     # identity check and the bounds are pinned without a GPU or a boot.
     add_executable(rb_blitz_video_mode_intent_tests tests/video_mode_intent_tests.cpp)
-    target_link_libraries(rb_blitz_video_mode_intent_tests PRIVATE rex::core)
+    target_link_libraries(rb_blitz_video_mode_intent_tests PRIVATE rex::sdk)
     add_test(NAME video_mode_intent COMMAND rb_blitz_video_mode_intent_tests)
 
     add_executable(rb_blitz_native_pipeline_cache_tests tests/native_pipeline_cache_tests.cpp)
     target_include_directories(rb_blitz_native_pipeline_cache_tests PRIVATE
         "${REXSDK_DIR}/thirdparty/xxHash")
-    target_link_libraries(rb_blitz_native_pipeline_cache_tests PRIVATE rex::core)
+    target_link_libraries(rb_blitz_native_pipeline_cache_tests PRIVATE rex::base)
     if(WIN32)
         target_link_libraries(rb_blitz_native_pipeline_cache_tests PRIVATE ws2_32)
     endif()
@@ -1082,7 +1112,7 @@ if(BUILD_TESTING)
             tests/vulkan_texture_conversion_tests.cpp
             "${REXSDK_DIR}/thirdparty/glslang/StandAlone/ResourceLimits.cpp")
         target_include_directories(rb_blitz_vulkan_texture_conversion_tests PRIVATE
-            "${REXSDK_DIR}/include" "${REXSDK_DIR}/thirdparty/glslang")
+            "${REXSDK_DIR}/include" "${REXSDK_DIR}/src" "${REXSDK_DIR}/thirdparty/glslang")
         target_link_libraries(rb_blitz_vulkan_texture_conversion_tests PRIVATE
             Vulkan::Headers glslang::SPIRV glslang)
         add_test(NAME vulkan_texture_conversion COMMAND rb_blitz_vulkan_texture_conversion_tests)
@@ -1090,7 +1120,7 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME sdk_patch_stack
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdk_patch_stack_tests.py")
-    if(WIN32 AND REXGLUE_USE_D3D12)
+    if(WIN32 AND TARGET rex::gpu-xenos-d3d12)
         add_executable(rb_blitz_d3d12_fence_sync_tests tests/d3d12_fence_sync_tests.cpp)
         target_include_directories(rb_blitz_d3d12_fence_sync_tests PRIVATE "${REXSDK_DIR}/include")
         target_link_libraries(rb_blitz_d3d12_fence_sync_tests PRIVATE d3d12 dxgi)
@@ -1100,7 +1130,7 @@ if(BUILD_TESTING)
 
     # Exercise the component conversion shared by the patched D3D12 and Vulkan texture caches.
     add_executable(rb_blitz_texture_conversion_tests tests/texture_conversion_tests.cpp)
-    target_link_libraries(rb_blitz_texture_conversion_tests PRIVATE rex::core)
+    target_link_libraries(rb_blitz_texture_conversion_tests PRIVATE rex::base)
     if(WIN32)
         target_link_libraries(rb_blitz_texture_conversion_tests PRIVATE ws2_32)
     endif()
@@ -1135,6 +1165,7 @@ if(BUILD_TESTING)
         target_include_directories(rb_blitz_song_sort_tests PRIVATE
             "${CMAKE_CURRENT_BINARY_DIR}" $<TARGET_PROPERTY:rb_blitz,INCLUDE_DIRECTORIES>)
         target_compile_definitions(rb_blitz_song_sort_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        target_link_libraries(rb_blitz_song_sort_tests PRIVATE rex::sdk)
         add_test(NAME song_sort COMMAND rb_blitz_song_sort_tests)
 
         set(RBBLITZ_MIDI_TRACKS_FIXTURE "${CMAKE_CURRENT_BINARY_DIR}/midi_tracks_guest.inc")
@@ -1149,7 +1180,7 @@ if(BUILD_TESTING)
         target_include_directories(rb_blitz_midi_tracks_tests PRIVATE
             "${CMAKE_CURRENT_BINARY_DIR}" $<TARGET_PROPERTY:rb_blitz,INCLUDE_DIRECTORIES>)
         target_compile_definitions(rb_blitz_midi_tracks_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-        target_link_libraries(rb_blitz_midi_tracks_tests PRIVATE rex::runtime)
+        target_link_libraries(rb_blitz_midi_tracks_tests PRIVATE rex::sdk)
         add_test(NAME midi_tracks COMMAND rb_blitz_midi_tracks_tests)
 
         add_executable(rb_blitz_song_load_monitor_tests tests/song_load_monitor_tests.cpp
@@ -1176,7 +1207,7 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_payload_overlay_runtime_tests
         tests/payload_overlay_runtime_tests.cpp src/fs/payload_overlay.cpp)
     target_include_directories(rb_blitz_payload_overlay_runtime_tests PRIVATE src tests)
-    target_link_libraries(rb_blitz_payload_overlay_runtime_tests PRIVATE rex::runtime)
+    target_link_libraries(rb_blitz_payload_overlay_runtime_tests PRIVATE rex::sdk)
     add_payload_test(payload_overlay_runtime rb_blitz_payload_overlay_runtime_tests)
 
     # The HUD re-anchor rule (src/hooks/hud_layout.h). Header-only: the policy is arithmetic
@@ -1190,23 +1221,19 @@ if(BUILD_TESTING)
     if(WIN32 OR APPLE)
         # Exercise the production WorldXfm hook with isolated live-object fixtures.
         add_executable(rb_blitz_hud_layout_runtime_tests
-            tests/hud_layout_runtime_tests.cpp src/hooks/hud_layout_runtime.cpp)
+            tests/hud_layout_runtime_tests.cpp src/hooks/hud_layout_runtime.cpp
+            src/settings/runtime_settings.cpp)
         target_include_directories(rb_blitz_hud_layout_runtime_tests PRIVATE src)
-        target_link_libraries(rb_blitz_hud_layout_runtime_tests PRIVATE rex::runtime)
-        add_custom_command(TARGET rb_blitz_hud_layout_runtime_tests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_hud_layout_runtime_tests>)
+        target_link_libraries(rb_blitz_hud_layout_runtime_tests PRIVATE rex::sdk)
         add_test(NAME hud_layout_runtime COMMAND rb_blitz_hud_layout_runtime_tests)
         # The same isolated fixtures also exercise the iOS-only placement and
         # input-source gate on a native host, without navigating the game.
         add_executable(rb_blitz_touch_hud_runtime_tests
-            tests/hud_layout_runtime_tests.cpp src/hooks/hud_layout_runtime.cpp)
+            tests/hud_layout_runtime_tests.cpp src/hooks/hud_layout_runtime.cpp
+            src/settings/runtime_settings.cpp)
         target_compile_definitions(rb_blitz_touch_hud_runtime_tests PRIVATE RB_BLITZ_IOS=1)
         target_include_directories(rb_blitz_touch_hud_runtime_tests PRIVATE src tests)
-        target_link_libraries(rb_blitz_touch_hud_runtime_tests PRIVATE rex::runtime)
-        add_custom_command(TARGET rb_blitz_touch_hud_runtime_tests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_touch_hud_runtime_tests>)
+        target_link_libraries(rb_blitz_touch_hud_runtime_tests PRIVATE rex::sdk)
         add_test(NAME touch_hud_runtime COMMAND rb_blitz_touch_hud_runtime_tests)
     endif()
 
@@ -1224,6 +1251,9 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_display_mode_tests
         tests/display_mode_tests.cpp
         src/settings/display_runtime.cpp
+        src/settings/runtime_settings.cpp
+        src/settings/runtime_values.cpp
+        src/settings/graphics_settings.cpp
         src/settings/store.cpp
         src/settings/schema.cpp
         src/settings/model.cpp
@@ -1231,7 +1261,7 @@ if(BUILD_TESTING)
         src/profile/profile_path.cpp
     )
     target_include_directories(rb_blitz_display_mode_tests PRIVATE src)
-    target_link_libraries(rb_blitz_display_mode_tests PRIVATE rex::runtime)
+    target_link_libraries(rb_blitz_display_mode_tests PRIVATE rex::sdk SDL3::SDL3)
     add_test(NAME display_mode COMMAND rb_blitz_display_mode_tests)
 
     add_executable(rb_blitz_path_policy_tests
@@ -1301,10 +1331,7 @@ if(BUILD_TESTING)
         add_executable(rb_blitz_refresh_discovery_tests
             tests/refresh_discovery_tests.cpp src/hooks/dlc_refresh.cpp)
         target_include_directories(rb_blitz_refresh_discovery_tests PRIVATE src)
-        target_link_libraries(rb_blitz_refresh_discovery_tests PRIVATE rex::runtime)
-        add_custom_command(TARGET rb_blitz_refresh_discovery_tests POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:rexruntime> $<TARGET_FILE_DIR:rb_blitz_refresh_discovery_tests>)
+        target_link_libraries(rb_blitz_refresh_discovery_tests PRIVATE rex::sdk)
         add_test(NAME refresh_discovery COMMAND rb_blitz_refresh_discovery_tests)
     endif()
 
@@ -1343,7 +1370,7 @@ if(BUILD_TESTING)
         src/ui/dtb_author.cpp
         src/ui/menu_options.cpp
         src/hooks/settings_bridge.cpp
-        # P9-1 (RhythmVerse plan §9): the suite pins the store's master switch to the schema's own
+        # The suite pins the store's master switch to the schema's own
         # compiled default, so the schema table is linked rather than re-spelled here.
         src/settings/model.cpp
         src/settings/schema.cpp
@@ -1420,32 +1447,35 @@ if(BUILD_TESTING)
 
     add_executable(rb_blitz_menu_music_cache_tests tests/menu_music_cache_tests.cpp)
     target_include_directories(rb_blitz_menu_music_cache_tests PRIVATE src)
-    target_link_libraries(rb_blitz_menu_music_cache_tests PRIVATE rex::runtime)
+    target_link_libraries(rb_blitz_menu_music_cache_tests PRIVATE rex::sdk)
+    rexglue_configure_target(rb_blitz_menu_music_cache_tests)
     add_test(NAME menu_music_cache COMMAND rb_blitz_menu_music_cache_tests)
 
     add_executable(rb_blitz_song_content_safety_tests tests/song_content_safety_tests.cpp
         src/fs/dlc_song_metadata.cpp src/hooks/menu_music_metadata.cpp
         src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_song_content_safety_tests PRIVATE src)
-    target_link_libraries(rb_blitz_song_content_safety_tests PRIVATE rex::runtime)
+    target_link_libraries(rb_blitz_song_content_safety_tests PRIVATE rex::sdk)
+    rexglue_configure_target(rb_blitz_song_content_safety_tests)
     add_test(NAME song_content_safety COMMAND rb_blitz_song_content_safety_tests)
 
     add_executable(rb_blitz_menu_music_guest_tests tests/menu_music_guest_tests.cpp)
     target_include_directories(rb_blitz_menu_music_guest_tests PRIVATE src)
-    target_link_libraries(rb_blitz_menu_music_guest_tests PRIVATE rex::runtime)
+    target_link_libraries(rb_blitz_menu_music_guest_tests PRIVATE rex::sdk)
     add_test(NAME menu_music_guest COMMAND rb_blitz_menu_music_guest_tests)
 
     add_executable(rb_blitz_menu_music_runtime_tests tests/menu_music_runtime_tests.cpp
-        src/settings/ultimate_adapter.cpp
+        src/settings/ultimate_adapter.cpp src/settings/runtime_settings.cpp
         src/input/menu_music_nav.cpp src/hooks/menu_music_now_playing.cpp
         src/ui/menu_music_artwork.cpp src/assets/texture_codec.cpp
         src/hooks/menu_music_metadata.cpp src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_menu_music_runtime_tests PRIVATE src)
-    target_link_libraries(rb_blitz_menu_music_runtime_tests PRIVATE rex::runtime)
+    target_link_libraries(rb_blitz_menu_music_runtime_tests PRIVATE rex::sdk)
+    rexglue_configure_target(rb_blitz_menu_music_runtime_tests)
     add_test(NAME menu_music_runtime COMMAND rb_blitz_menu_music_runtime_tests)
     add_executable(rb_blitz_startup_splasher_tests tests/startup_splasher_tests.cpp)
     target_include_directories(rb_blitz_startup_splasher_tests PRIVATE src)
-    target_link_libraries(rb_blitz_startup_splasher_tests PRIVATE rex::runtime)
+    target_link_libraries(rb_blitz_startup_splasher_tests PRIVATE rex::sdk)
     add_test(NAME startup_splasher COMMAND rb_blitz_startup_splasher_tests)
     add_test(NAME menu_music_startup_blocked COMMAND rb_blitz_menu_music_runtime_tests --startup-blocked)
     add_test(NAME menu_music_startup_no_base COMMAND rb_blitz_menu_music_runtime_tests --startup-no-base)
@@ -1466,7 +1496,8 @@ if(BUILD_TESTING)
         src/ui/menu_music_artwork.cpp src/assets/texture_codec.cpp
         src/fs/dlc_song_metadata.cpp src/hooks/menu_music_metadata.cpp src/ui/dtb_author.cpp src/ui/menu_options.cpp)
     target_include_directories(rb_blitz_menu_music_artwork_probe PRIVATE src)
-    target_link_libraries(rb_blitz_menu_music_artwork_probe PRIVATE rex::runtime)
+    target_link_libraries(rb_blitz_menu_music_artwork_probe PRIVATE rex::sdk)
+    rexglue_configure_target(rb_blitz_menu_music_artwork_probe)
 
     # The menu filter's edit (src/ui/menu_options.cpp): the compiled DTA grammar, the
     # byte-neutral rewrite and the title's SHA-1, run against a synthetic fixture built
@@ -1493,9 +1524,9 @@ if(BUILD_TESTING)
              COMMAND rb_blitz_toolchain_tests --project-dir "${CMAKE_CURRENT_SOURCE_DIR}")
 
     # The controller profile: path resolution and the reader/writer the game's own input
-    # configuration uses (docs/settings/contracts.md §2). SDK-free, so it runs without booting
+    # configuration uses (docs/settings/contracts.md section 2). SDK-free, so it runs without booting
     # anything. The suite was P0.3's `controller_settings_profile` until the external settings
-    # executable retired (gameplay-mapping plan §19); the checks are unchanged.
+    # executable was retired; the contract checks are unchanged.
     add_executable(rb_blitz_profile_tests
         tests/profile_tests.cpp
         src/profile/profile.cpp
@@ -1575,7 +1606,7 @@ if(BUILD_TESTING)
     target_include_directories(rb_blitz_input_bindings_tests PRIVATE src)
     add_test(NAME input_bindings COMMAND rb_blitz_input_bindings_tests)
 
-    # P3 (docs/settings/contracts.md §5): the SDK-free settings store. The
+    # The SDK-free settings store (docs/settings/contracts.md section 5) includes the
     # comment-preserving TOML editor, the typed document, atomic replace, and the conflict
     # rule that never lets a second writer clobber a hand edit. No SDK, no boot.
     add_executable(rb_blitz_settings_store_tests
@@ -1684,7 +1715,7 @@ if(BUILD_TESTING)
     endif()
 
     # P9's application-strategy seam (src/settings/hot_apply.h). SDK-free: it links the schema
-    # (the §5.5 table), the model, the seam itself, and the provider adapter - the last one so the
+    # (the apply-policy table), model, strategy and provider adapter so the
     # test can assert the schema's strategy table and the provider's own row table agree instead of
     # drifting apart.
     add_executable(rb_blitz_settings_hot_apply_tests
@@ -1865,23 +1896,7 @@ if(BUILD_TESTING)
     add_test(NAME button_scheme_fingerprints
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/controllers/verify_controller_texture_fingerprints.py)
-    if(WIN32)
-        add_executable(rb_blitz_controller_schemes
-            tools/controller_schemes_main.cpp
-            src/controller_schemes/schemes.cpp
-            src/controller_schemes/png_wic.cpp
-            src/assets/texture_codec.cpp)
-        target_include_directories(rb_blitz_controller_schemes PRIVATE src)
-        target_link_libraries(rb_blitz_controller_schemes PRIVATE windowscodecs ole32)
-        add_custom_target(rb_blitz_controller_art
-            COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass -File
-                ${CMAKE_CURRENT_SOURCE_DIR}/scripts/controllers/controller_schemes.ps1
-                -Validate -Pack -Destination
-                $<TARGET_FILE_DIR:rb_blitz>/assets/controller/schemes
-            DEPENDS rb_blitz_controller_schemes
-            VERBATIM)
-        add_dependencies(rb_blitz rb_blitz_controller_art)
-    endif()
+
 
     # P3's Downloaded matcher (src/store/store_library.h): the field normalization and the
     # (artist, title) index. Hermetic and SDK-free - the package reader is the builder's half and
@@ -1978,3 +1993,27 @@ endif()
 # retired on 2026-10-19: every player setting it edited is an in-game Help & Options row, so the
 # player-facing executable is rb_blitz.exe; rb_blitz_load_monitor is a headless
 # companion that restarts a process which died during song loading.
+
+
+# Private implementation regressions compile the SDK source they exercise.
+# Application/runtime consumers continue to use the installed public interfaces.
+if(BUILD_TESTING)
+    get_property(RBBLITZ_HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    set(RBBLITZ_LAST_STAGED_TEST "")
+    foreach(RBBLITZ_TEST_TARGET IN LISTS RBBLITZ_HOST_TEST_TARGETS)
+        if(NOT RBBLITZ_TEST_TARGET MATCHES "^rb_blitz_.*_tests$")
+            continue()
+        endif()
+        target_include_directories(${RBBLITZ_TEST_TARGET} PRIVATE "${REXSDK_DIR}/src")
+        get_target_property(RBBLITZ_TEST_LINKS ${RBBLITZ_TEST_TARGET} LINK_LIBRARIES)
+        get_target_property(RBBLITZ_TEST_RUNTIME ${RBBLITZ_TEST_TARGET} REXGLUE_RUNTIME_FILES)
+        if(RBBLITZ_TEST_LINKS MATCHES "rex::" AND NOT RBBLITZ_TEST_RUNTIME)
+            rexglue_configure_target(${RBBLITZ_TEST_TARGET})
+            # Every test shares its binary directory; serialize DLL staging.
+            if(RBBLITZ_LAST_STAGED_TEST)
+                add_dependencies(${RBBLITZ_TEST_TARGET} ${RBBLITZ_LAST_STAGED_TEST})
+            endif()
+            set(RBBLITZ_LAST_STAGED_TEST ${RBBLITZ_TEST_TARGET})
+        endif()
+    endforeach()
+endif()

@@ -9,7 +9,7 @@
 #include <thread>
 #include <utility>
 
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN

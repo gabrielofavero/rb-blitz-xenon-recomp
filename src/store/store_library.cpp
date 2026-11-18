@@ -3,6 +3,7 @@
 //
 // See src/store/store_library.h.
 
+#include <format>
 #include "store/store_library.h"
 
 #include <algorithm>
@@ -18,9 +19,9 @@
 #include <utility>
 #include <vector>
 
-#include <fmt/format.h>
+#include <format>
 
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 
 #include "fs/dlc_song_metadata.h"
 #include "fs/dlc_layout.h"
@@ -93,9 +94,9 @@ std::shared_ptr<LoadedSongIndex> Build() {
   for (std::size_t i = 0; i < packages.size(); ++i) {
     // A fresh mount path per package: the device is destroyed at the end of the iteration, so
     // the path may be reused, but a unique one keeps a diagnostic readable.
-    const std::string mount_path = fmt::format("\\Device\\BlitzStoreLibrary\\{}\\", i);
+    const std::string mount_path = std::format("\\Device\\BlitzStoreLibrary\\{}\\", i);
     std::error_code ec;
-    std::unique_ptr<rex::filesystem::Device> device =
+    auto device =
         rb_blitz::fs::MountPackage(mount_path, packages[i], ec);
     if (device == nullptr) {
       ++failed;

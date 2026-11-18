@@ -4,6 +4,7 @@
 // P9's runtime applier. See src/hooks/hot_apply_runtime.h for the two constraints this file obeys;
 // this is their implementation.
 
+#include "settings/runtime_values.h"
 #include "hooks/hot_apply_runtime.h"
 
 #include <atomic>
@@ -11,8 +12,8 @@
 #include <map>
 #include <thread>
 
-#include <rex/cvar.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
 
 #include "settings/schema.h"
 #include "assets/texture_override.h"
@@ -51,7 +52,7 @@ constexpr HotRow kHotRows[] = {
 // write is therefore a host-side swap of an immutable value - no guest state, no cvar registry -
 // and the next catalogue request sees it.
 //
-// **The master is deliberately absent** (`restart` since 2026-10-22, plan §9/P9-2). The switch also
+// **The master is deliberately absent** (`restart` since 2026-10-22, plan Â§9/P9-2). The switch also
 // owns what the boot *drew* - the main-menu row and the store's heading - so the seam never applies
 // it; listing it here would be a second, quieter claim that it can.
 struct StoreRow {
@@ -114,7 +115,7 @@ bool CvarText(SettingId id, const Value& value, std::string* out) {
 
 // The write, performed on its own thread: this never runs on the guest thread.
 bool WriteCvar(const std::string& name, const std::string& text, std::string* error) {
-  const std::string before = rex::cvar::GetFlagByName(name);
+  const std::string before = rb_blitz::settings::InspectRuntimeSetting(name).active_value;
   if (before.empty()) {
     *error = "the cvar '" + name + "' is not defined in this build";
     return false;
@@ -123,13 +124,13 @@ bool WriteCvar(const std::string& name, const std::string& text, std::string* er
     REXLOG_INFO("hot_apply: '{}' is already {}; nothing to write", name, text);
     return true;
   }
-  if (!rex::cvar::SetFlagByName(name, text)) {
+  if (!rb_blitz::settings::WriteRuntimeSetting(name, text, rex::SettingLayer::kRuntime).accepted()) {
     *error = "the cvar '" + name + "' refused the value '" + text + "'";
     return false;
   }
   // Read it back: "the setter returned true" is not the evidence the seam promises, and a
   // lifecycle that quietly ignores the write must not be reported as applied.
-  const std::string after = rex::cvar::GetFlagByName(name);
+  const std::string after = rb_blitz::settings::InspectRuntimeSetting(name).active_value;
   if (after != text) {
     *error = "the cvar '" + name + "' still reads '" + after + "' after the write";
     return false;

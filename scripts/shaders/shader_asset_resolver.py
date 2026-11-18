@@ -166,7 +166,7 @@ def sdk_hashes(codes, helper):
 
 
 def parse_xsh(data, hasher):
-    if len(data) > MAX_ASSET or data[:8] != b"XESH\x20\x20\x12\x19":
+    if len(data) > MAX_ASSET or data[:8] not in (b"XESH\x20\x20\x12\x19", b"XESH\x20\x26\x10\x17"):
         raise ValueError("unsupported XSH magic/version/size")
     pos, records = 8, []
     while pos < len(data):

@@ -10,8 +10,7 @@
 #include <thread>
 
 namespace rex::ui {
-class Window;
-class WindowedAppContext;
+class IUISystem;
 }
 
 namespace rb_blitz::settings {
@@ -19,8 +18,13 @@ namespace rb_blitz::settings {
 // Applies the display token and its two cvars as one runtime operation. The
 // caller may be a guest thread; SDL and cvar work runs on the host UI thread.
 // A successful return confirms native window flags and the cvar readback.
-bool ApplyRuntimeDisplay(rex::ui::WindowedAppContext& context, rex::ui::Window& window,
+std::string RuntimeDisplayMode(rex::ui::IUISystem& context);
+bool ApplyRuntimeDisplay(rex::ui::IUISystem& context,
                          std::string_view token, std::string* error);
+
+// Changes only the native window for a diagnostic trial. No setting or file is written.
+bool ApplyTransientDisplay(rex::ui::IUISystem& context,
+                           std::string_view token, std::string* error);
 
 // The marker is written before a preview changes the native window. Boot must
 // read it before selecting Display, use previous as the safe choice, and clear
@@ -39,7 +43,7 @@ bool ClearUnconfirmedDisplayPreview(const std::filesystem::path& settings_file,
 class DisplayPreviewTransaction {
  public:
   using Persist = std::function<bool(std::string*)>;
-  DisplayPreviewTransaction(rex::ui::WindowedAppContext& context, rex::ui::Window& window,
+  DisplayPreviewTransaction(rex::ui::IUISystem& context,
                             std::filesystem::path settings_file,
                             std::chrono::steady_clock::duration timeout = std::chrono::seconds(15));
   ~DisplayPreviewTransaction();

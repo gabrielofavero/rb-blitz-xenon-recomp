@@ -9,6 +9,16 @@
 
 namespace rb_blitz::settings {
 namespace {
+// Settings settle before the SDK UI driver initializes SDL video. Acquire a
+// matching reference here so display density queries also work on a cold boot.
+class DisplayVideoScope {
+ public:
+  DisplayVideoScope() : acquired_(SDL_InitSubSystem(SDL_INIT_VIDEO)) {}
+  ~DisplayVideoScope() { if (acquired_) SDL_QuitSubSystem(SDL_INIT_VIDEO); }
+  explicit operator bool() const { return acquired_; }
+ private:
+  bool acquired_;
+};
 SDL_DisplayID DisplayForMonitor(int32_t index) {
   if (index <= 0) return SDL_GetPrimaryDisplay();
   int count = 0;
@@ -26,6 +36,8 @@ DisplayMode BackingSize(const SDL_DisplayMode& mode) {
 }  // namespace
 
 void ProbeMacDisplay(CapabilityInputs& inputs) {
+  DisplayVideoScope video;
+  if (!video) return;
   const SDL_DisplayID display = SDL_GetPrimaryDisplay();
   const SDL_DisplayMode* current = SDL_GetCurrentDisplayMode(display);
   if (!current) return;
@@ -44,6 +56,8 @@ void ProbeMacDisplay(CapabilityInputs& inputs) {
 
 DesktopMetrics ProbeMacDesktop(int32_t monitor_index) {
   DesktopMetrics desktop;
+  DisplayVideoScope video;
+  if (!video) return desktop;
   const SDL_DisplayID display = DisplayForMonitor(monitor_index);
   const SDL_DisplayMode* mode = display ? SDL_GetCurrentDisplayMode(display) : nullptr;
   SDL_Rect usable{};

@@ -19,23 +19,15 @@
 #include <vector>
 #include <imgui.h>
 #include <SDL3/SDL.h>
-#include <rex/cvar.h>
-#include <rex/input/input_driver.h>
-#include <rex/input/input_system.h>
-#include <rex/logging.h>
-#include <rex/ui/flags.h>
-#include <rex/ui/virtual_key.h>
-#include <rex/ui/window.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
 
-REXCVAR_DEFINE_BOOL(mouse_ui_nav, true, "Input",
-    "Legacy profile switch; mouse input is always enabled.");
+
 
 // Defined in src/input/native_menu.cpp; read here for the button-event trace only.
-REXCVAR_DECLARE(bool, mouse_native_trace);
+
 
 namespace rb_blitz::input {
-using rex::X_STATUS;
-using rex::X_RESULT;
 namespace {
 // The host's raw device state, written by the window thread only (the physical sampler reads it
 // from the guest input thread). SDL documents `SDL_GetMouseState` and `SDL_GetKeyboardFocus` as
@@ -88,7 +80,7 @@ void PushKeyEvent(const std::string_view name) {
 // and digits are the ASCII offset every platform agrees on; the rest is the punctuation and
 // navigation set the shipped tables use, plus the F-keys. Unknown keys latch nothing, which is
 // the honest answer rather than a guessed scancode.
-SDL_Keycode KeycodeForVirtualKey(rex::ui::VirtualKey key) {
+SDL_Keycode KeycodeForVirtualKey(rex::VirtualKey key) {
   const uint16_t vk = static_cast<uint16_t>(key);
   if (vk >= 'A' && vk <= 'Z') {
     return SDLK_A + (vk - 'A');
@@ -96,71 +88,71 @@ SDL_Keycode KeycodeForVirtualKey(rex::ui::VirtualKey key) {
   if (vk >= '0' && vk <= '9') {
     return SDLK_0 + (vk - '0');
   }
-  if (vk >= uint16_t(rex::ui::VirtualKey::kF1) &&
-      vk < uint16_t(rex::ui::VirtualKey::kF1) + 12) {
-    return SDLK_F1 + (vk - uint16_t(rex::ui::VirtualKey::kF1));
+  if (vk >= uint16_t(rex::VirtualKey::kF1) &&
+      vk < uint16_t(rex::VirtualKey::kF1) + 12) {
+    return SDLK_F1 + (vk - uint16_t(rex::VirtualKey::kF1));
   }
   switch (key) {
-    case rex::ui::VirtualKey::kMediaNextTrack: return SDLK_MEDIA_NEXT_TRACK;
-    case rex::ui::VirtualKey::kMediaPrevTrack: return SDLK_MEDIA_PREVIOUS_TRACK;
-    case rex::ui::VirtualKey::kMediaPlayPause: return SDLK_MEDIA_PLAY_PAUSE;
-    case rex::ui::VirtualKey::kSpace:
+    case rex::VirtualKey::kMediaNextTrack: return SDLK_MEDIA_NEXT_TRACK;
+    case rex::VirtualKey::kMediaPrevTrack: return SDLK_MEDIA_PREVIOUS_TRACK;
+    case rex::VirtualKey::kMediaPlayPause: return SDLK_MEDIA_PLAY_PAUSE;
+    case rex::VirtualKey::kSpace:
       return SDLK_SPACE;
-    case rex::ui::VirtualKey::kReturn:
+    case rex::VirtualKey::kReturn:
       return SDLK_RETURN;
-    case rex::ui::VirtualKey::kEscape:
+    case rex::VirtualKey::kEscape:
       return SDLK_ESCAPE;
-    case rex::ui::VirtualKey::kTab:
+    case rex::VirtualKey::kTab:
       return SDLK_TAB;
-    case rex::ui::VirtualKey::kBack:
+    case rex::VirtualKey::kBack:
       return SDLK_BACKSPACE;
-    case rex::ui::VirtualKey::kLeft:
+    case rex::VirtualKey::kLeft:
       return SDLK_LEFT;
-    case rex::ui::VirtualKey::kRight:
+    case rex::VirtualKey::kRight:
       return SDLK_RIGHT;
-    case rex::ui::VirtualKey::kUp:
+    case rex::VirtualKey::kUp:
       return SDLK_UP;
-    case rex::ui::VirtualKey::kDown:
+    case rex::VirtualKey::kDown:
       return SDLK_DOWN;
-    case rex::ui::VirtualKey::kHome:
+    case rex::VirtualKey::kHome:
       return SDLK_HOME;
-    case rex::ui::VirtualKey::kEnd:
+    case rex::VirtualKey::kEnd:
       return SDLK_END;
-    case rex::ui::VirtualKey::kPrior:
+    case rex::VirtualKey::kPrior:
       return SDLK_PAGEUP;
-    case rex::ui::VirtualKey::kNext:
+    case rex::VirtualKey::kNext:
       return SDLK_PAGEDOWN;
-    case rex::ui::VirtualKey::kInsert:
+    case rex::VirtualKey::kInsert:
       return SDLK_INSERT;
-    case rex::ui::VirtualKey::kDelete:
+    case rex::VirtualKey::kDelete:
       return SDLK_DELETE;
-    case rex::ui::VirtualKey::kShift:
+    case rex::VirtualKey::kShift:
       return SDLK_LSHIFT;
-    case rex::ui::VirtualKey::kControl:
+    case rex::VirtualKey::kControl:
       return SDLK_LCTRL;
-    case rex::ui::VirtualKey::kMenu:
+    case rex::VirtualKey::kMenu:
       return SDLK_LALT;
-    case rex::ui::VirtualKey::kOem1:
+    case rex::VirtualKey::kOem1:
       return SDLK_SEMICOLON;
-    case rex::ui::VirtualKey::kOemComma:
+    case rex::VirtualKey::kOemComma:
       return SDLK_COMMA;
-    case rex::ui::VirtualKey::kOemPeriod:
+    case rex::VirtualKey::kOemPeriod:
       return SDLK_PERIOD;
-    case rex::ui::VirtualKey::kOem2:
+    case rex::VirtualKey::kOem2:
       return SDLK_SLASH;
-    case rex::ui::VirtualKey::kOem3:
+    case rex::VirtualKey::kOem3:
       return SDLK_GRAVE;
-    case rex::ui::VirtualKey::kOem4:
+    case rex::VirtualKey::kOem4:
       return SDLK_LEFTBRACKET;
-    case rex::ui::VirtualKey::kOem5:
+    case rex::VirtualKey::kOem5:
       return SDLK_BACKSLASH;
-    case rex::ui::VirtualKey::kOem6:
+    case rex::VirtualKey::kOem6:
       return SDLK_RIGHTBRACKET;
-    case rex::ui::VirtualKey::kOem7:
+    case rex::VirtualKey::kOem7:
       return SDLK_APOSTROPHE;
-    case rex::ui::VirtualKey::kOemMinus:
+    case rex::VirtualKey::kOemMinus:
       return SDLK_MINUS;
-    case rex::ui::VirtualKey::kOemPlus:
+    case rex::VirtualKey::kOemPlus:
       return SDLK_EQUALS;
     default:
       break;
@@ -168,7 +160,7 @@ SDL_Keycode KeycodeForVirtualKey(rex::ui::VirtualKey key) {
   return SDLK_UNKNOWN;
 }
 
-void LatchKey(rex::ui::VirtualKey key, bool down) {
+void LatchKey(rex::VirtualKey key, bool down) {
   const SDL_Keycode keycode = KeycodeForVirtualKey(key);
   if (keycode == SDLK_UNKNOWN) {
     return;
@@ -196,98 +188,78 @@ void ClearKeys() {
     }
   }
 }
-uint32_t MouseMask(rex::ui::MouseEvent::Button button) {
+uint32_t MouseMask(rex::MouseButton button) {
   switch (button) {
-    case rex::ui::MouseEvent::Button::kLeft:
+    case rex::MouseButton::kLeft:
       return SDL_BUTTON_MASK(SDL_BUTTON_LEFT);
-    case rex::ui::MouseEvent::Button::kRight:
+    case rex::MouseButton::kRight:
       return SDL_BUTTON_MASK(SDL_BUTTON_RIGHT);
-    case rex::ui::MouseEvent::Button::kMiddle:
+    case rex::MouseButton::kMiddle:
       return SDL_BUTTON_MASK(SDL_BUTTON_MIDDLE);
-    case rex::ui::MouseEvent::Button::kX1:
+    case rex::MouseButton::kX1:
       return SDL_BUTTON_MASK(SDL_BUTTON_X1);
-    case rex::ui::MouseEvent::Button::kX2:
+    case rex::MouseButton::kX2:
       return SDL_BUTTON_MASK(SDL_BUTTON_X2);
-    case rex::ui::MouseEvent::Button::kNone:
-      break;
+    case rex::MouseButton::kNone: return 0;
   }
   return 0;
 }
-class MousePad final : public rex::input::InputDriver {
+class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventListener {
  public:
-  MousePad() : InputDriver(nullptr, 0) {}
-  static constexpr rex::input::DeviceId kDevice = static_cast<rex::input::DeviceId>(0x4D4F5553);
-  rex::X_STATUS Setup() override { return X_STATUS_SUCCESS; }
-  void EnumerateDevices(std::vector<rex::input::DeviceInfo>& out) override {
-    // P2 (plan D2): the synthetic connection follows *either* host gate, not just the mouse.
-    // A keyboard-only configuration with no pad must stay connected - the guest's GetState
-    // reports not-connected before the state filter runs when nothing enumerates - and a
-    // mouse-only one must too. The device contributes no pad state of its own; it exists for
-    // connectivity and for the menu pulses the filter merges after the user's remap. It is
-    // synthetic, so the SDK parks it past every physical ordinal and rumble ignores it.
-    if (!HostDeviceConnected({KeyboardSupportEnabled(), MouseSupportEnabled()})) return;
-    rex::input::DeviceInfo info;
-    info.id = kDevice; info.name = "Host input (native menus)"; info.synthetic = true;
-    out.push_back(info);
+  explicit MouseCursor(rex::ui::IUISystem& ui) : ui_(ui) {
+    listener_ = ui_.AddEventListener(*this);
+    g_window_focused = ui_.IsFocused();
+    last_device::Focus(g_window_focused);
+    MouseMenuFocus(g_window_focused);
   }
-  rex::X_RESULT GetDeviceState(rex::input::DeviceId id,
-                               rex::input::X_INPUT_STATE* out) override {
-    if (id != kDevice) return X_ERROR_DEVICE_NOT_CONNECTED;
-    auto pulse = MenuMousePadState();
-    if (pulse != last_) { ++packet_; last_ = pulse; }
-    if (out) {
-      *out = {};
-      out->packet_number = packet_;
-    }
-    return X_ERROR_SUCCESS;
-  }
-  rex::X_RESULT GetDeviceCapabilities(rex::input::DeviceId id, uint32_t,
-                                      rex::input::X_INPUT_CAPABILITIES* out) override {
-    if (id != kDevice) return X_ERROR_DEVICE_NOT_CONNECTED;
-    if (out) { *out = {}; out->type = 1; out->sub_type = 1;
-      out->gamepad.buttons = 0x3000; out->gamepad.thumb_lx = 32767; out->gamepad.thumb_ly = 32767; }
-    return X_ERROR_SUCCESS;
-  }
-  rex::X_RESULT SetDeviceVibration(rex::input::DeviceId id,
-                                   rex::input::X_INPUT_VIBRATION*) override {
-    return id == kDevice ? X_ERROR_SUCCESS : X_ERROR_DEVICE_NOT_CONNECTED;
-  }
-  rex::X_RESULT GetDeviceKeystroke(rex::input::DeviceId id, uint32_t,
-                                   rex::input::X_INPUT_KEYSTROKE*) override {
-    return id == kDevice ? X_ERROR_EMPTY : X_ERROR_DEVICE_NOT_CONNECTED;
-  }
- private:
-  uint16_t last_ = 0;
-  uint32_t packet_ = 1;
-};
-
-class MouseCursor final : public rex::ui::ImGuiDialog,
-                          public rex::ui::WindowInputListener,
-                          public rex::ui::WindowListener {
- public:
-  MouseCursor(rex::ui::ImGuiDrawer* drawer, std::function<rex::ui::Window*()> provider)
-      : ImGuiDialog(drawer), provider_(std::move(provider)) {}
   ~MouseCursor() override { Detach(); }
  private:
   void EndDrag(bool cancel = true) {
     if (!dragging_) return;
     dragging_ = false;
     if (cancel) QueueMenuScrollbar(MouseAction::kScrollbarUp, {NAN, NAN});
-    if (window_) window_->ReleaseMouse();
+    SDL_CaptureMouse(false);
   }
   void Detach() {
     EndLanePointer();
-    if (!window_) return;
     EndDrag();
     ui::music::CancelPlayerPointer();
-    window_->RemoveInputListener(this); window_->RemoveListener(this);
-    window_ = nullptr; g_mouse_buttons = 0; g_window_focused = false; ClearKeys();
+    listener_ = {}; g_mouse_buttons = 0; g_window_focused = false; ClearKeys();
     last_device::Focus(false);
     g_wheel_detents = 0;
     MouseMenuFocus(false);
   }
-  void OnClosing(rex::ui::UIEvent&) override { Detach(); }
-  void OnLostFocus(rex::ui::UISetupEvent&) override {
+  void OnUIEvent(const rex::ui::UIEvent& event) override {
+    // Listener guards wait for delivery; release the subscription after this callback returns.
+    if (event.GetType() == rex::ui::UIEvent::Type::kClosing) { OnLostFocus(); return; }
+    if (event.GetType() == rex::ui::UIEvent::Type::kFocus) {
+      if (auto* window = Window()) {
+        if (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) OnGotFocus(); else OnLostFocus();
+      }
+    }
+  }
+  void OnInputEvent(rex::InputEvent& event) override {
+    if (event.handled && event.type != rex::InputEvent::Type::kKeyUp &&
+        event.type != rex::InputEvent::Type::kButtonUp) return;
+    switch (event.type) {
+      case rex::InputEvent::Type::kKeyDown: LatchKey(event.key, true); break;
+      case rex::InputEvent::Type::kKeyUp: LatchKey(event.key, false); break;
+      case rex::InputEvent::Type::kMotion: OnMouseMove(event); break;
+      case rex::InputEvent::Type::kButtonDown: OnMouseDown(event); break;
+      case rex::InputEvent::Type::kButtonUp: OnMouseUp(event); break;
+      case rex::InputEvent::Type::kWheel: OnMouseWheel(event); break;
+      default: break;
+    }
+  }
+  SDL_Window* Window() const {
+    auto native = ui_.GetNativeWindow();
+    return native ? static_cast<SDL_Window*>(native->sdl) : nullptr;
+  }
+  int Width() const { int w = 0; if (auto* window = Window()) SDL_GetWindowSizeInPixels(window, &w, nullptr); return w; }
+  int Height() const { int h = 0; if (auto* window = Window()) SDL_GetWindowSizeInPixels(window, nullptr, &h); return h; }
+  float ToLogical() const { int logical = 0; if (auto* window = Window()) SDL_GetWindowSize(window, &logical, nullptr); const int physical = Width(); return physical ? float(logical) / physical : 1.0f; }
+
+  void OnLostFocus() {
     EndLanePointer();
     EndDrag();
     ui::music::CancelPlayerPointer();
@@ -300,30 +272,21 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     g_wheel_detents = 0;
     MouseMenuFocus(false);
   }
-  void OnGotFocus(rex::ui::UISetupEvent&) override {
+  void OnGotFocus() {
     g_window_focused = true; last_device::Focus(true); MouseMenuFocus(true);
   }
-  void OnKeyDown(rex::ui::KeyEvent& e) override { LatchKey(e.virtual_key(), true); }
-  void OnKeyUp(rex::ui::KeyEvent& e) override { LatchKey(e.virtual_key(), false); }
-  void OnDraw(ImGuiIO& io) override {
-    if (!window_) {
-      window_ = provider_();
-      if (!window_) return;
-      // Above the keyboard's mouse bindings (0), below the SDK dialogs.
-      window_->AddInputListener(this, 1); window_->AddListener(this);
-      g_window_focused = window_->HasFocus();
-      last_device::Focus(g_window_focused);
-      MouseMenuFocus(g_window_focused);
-    }
-    MouseMenuFocus(window_->HasFocus() && !io.WantCaptureMouse && !ui::music::PlayerPointerOver());
+  bool Draw(ImGuiIO& io) override {
+    if (!ui_.HasWindow()) return true;
+    MouseMenuFocus(ui_.IsFocused() && !io.WantCaptureMouse && !ui::music::PlayerPointerOver());
     if (lane_pointer_captured_ && (!touch::LanePowerupAvailable() || io.WantCaptureMouse)) EndLanePointer();
     if (!MouseMenuAvailable() || io.WantCaptureMouse ||
         (dragging_ && (CurrentScreen() != drag_screen_ || CurrentFocus() != drag_focus_))) EndDrag();
     // The focus facts are read on the main thread where SDL allows them, and per frame because
     // this listener attaches after the window exists (so the initial focus has no OnGotFocus).
-    const bool focused = window_->HasFocus();
-    if (focused != g_window_focused.load()) last_device::Focus(focused);
-    g_window_focused = focused;
+    const bool focused = ui_.IsFocused();
+    if (focused != g_window_focused.load()) {
+      if (focused) OnGotFocus(); else OnLostFocus();
+    }
     if (auto changed = last_device::Tick())
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
                   changed->family == last_device::Family::kController ? "controller" :
@@ -338,39 +301,35 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     const bool lane_target = !last_device::Current().using_touch && touch::LanePowerupAvailable();
     const bool visible = CursorVisible(MouseSupportEnabled(), MouseMenuAvailable(),
                                        io.WantCaptureMouse, ui::music::PlayerPointerOver(), lane_target);
-    const auto visibility = visible ? rex::ui::Window::CursorVisibility::kVisible
-                                    : rex::ui::Window::CursorVisibility::kHidden;
-    auto* window = window_;
-    window->app_context().CallInUIThread([window, visibility] {
-      window->SetCursorVisibility(visibility);
-      // SDL owns a process-wide cursor; keep it synchronized after startup too.
-      if (visibility == rex::ui::Window::CursorVisibility::kVisible) SDL_ShowCursor();
-      else SDL_HideCursor();
-    });
+    if (Window()) {
+      if (visible) SDL_ShowCursor(); else SDL_HideCursor();
+    }
+    return true;
   }
-  std::optional<MenuPoint> Point(const rex::ui::MouseEvent& e, bool clip = true) const {
-    if (!window_) return {};
-    auto p = MenuPointer(float(e.x()), float(e.y()),
-        window_->GetActualPhysicalWidth(), window_->GetActualPhysicalHeight(),
-        REXCVAR_GET(video_mode_width), REXCVAR_GET(video_mode_height),
-        REXCVAR_GET(present_letterbox), REXCVAR_GET(present_allow_overscan_cutoff),
-        REXCVAR_GET(present_safe_area_x), REXCVAR_GET(present_safe_area_y));
+
+  std::optional<MenuPoint> Point(const rex::InputEvent& e, bool clip = true) const {
+    if (!ui_.HasWindow()) return {};
+    auto p = MenuPointer(float(e.x), float(e.y),
+        Width(), Height(),
+        rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_width"), rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_height"),
+        rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_letterbox"), rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_allow_overscan_cutoff"),
+        rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_x"), rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_y"));
     if (!std::isfinite(p.x) || !std::isfinite(p.y) ||
         (clip && !MenuBounds{0, 0, 1, 1}.Contains(p))) return {};
     return p;
   }
-  void OnMouseMove(rex::ui::MouseEvent& e) override {
-    if (touch::ConsumeMouse(e.is_touch(), touch::Phase::kMove, GameScreenActive())) {
-      e.set_handled(true);
+  void OnMouseMove(rex::InputEvent& e) {
+    if (touch::ConsumeMouse(e.is_touch, touch::Phase::kMove, GameScreenActive())) {
+      e.handled = true;
       return;
     }
-    if (auto changed = e.is_touch() ? last_device::Touch() : last_device::MouseMove(e.x(), e.y()))
+    if (auto changed = e.is_touch ? last_device::Touch() : last_device::MouseMove(e.x, e.y))
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
-                  e.is_touch() ? "touch" : "mouse");
+                  e.is_touch ? "touch" : "mouse");
     if (PlayerEvent(ui::music::PointerEvent::kMove, e)) return;
     if (LaneEvent(touch::Phase::kMove, e)) return;
     if (!MouseSupportEnabled()) return;
-    const bool moved = e.x() != last_x_ || e.y() != last_y_;
+    const bool moved = e.x != last_x_ || e.y != last_y_;
     if (auto p = Point(e, !dragging_)) {
       if (dragging_) QueueMenuScrollbar(MouseAction::kScrollbarDrag, *p);
       else if (moved) QueueMenuMouse(MouseAction::kMove, *p);
@@ -381,70 +340,70 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
       const float miss = std::numeric_limits<float>::quiet_NaN();
       QueueMenuMouse(MouseAction::kMove, {miss, miss});
     }
-    last_x_ = e.x(); last_y_ = e.y();
-    e.set_handled(true);
+    last_x_ = e.x; last_y_ = e.y;
+    e.handled = true;
   }
-  void OnMouseDown(rex::ui::MouseEvent& e) override {
-    if (touch::ConsumeMouse(e.is_touch(), touch::Phase::kDown, GameScreenActive())) {
-      e.set_handled(true);
+  void OnMouseDown(rex::InputEvent& e) {
+    if (touch::ConsumeMouse(e.is_touch, touch::Phase::kDown, GameScreenActive())) {
+      e.handled = true;
       return;
     }
-    if (auto changed = e.is_touch() ? last_device::Touch() : last_device::MouseButton())
+    if (auto changed = e.is_touch ? last_device::Touch() : last_device::MouseButton())
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
-                  e.is_touch() ? "touch" : "mouse");
+                  e.is_touch ? "touch" : "mouse");
     if (PlayerEvent(ui::music::PointerEvent::kDown, e)) return;
     if (LaneEvent(touch::Phase::kDown, e)) return;
     // The raw mask is device state, so it is recorded whatever the gates say: the sampler applies
     // the gates, and a mouse button recorded while Mouse Support is off must not look "never
     // pressed" once it is turned on.
-    g_mouse_buttons.fetch_or(MouseMask(e.button()));
-    if (REXCVAR_GET(mouse_native_trace))
-      REXLOG_INFO("native_mouse: button={} down mask={:02X}", static_cast<int>(e.button()),
+    g_mouse_buttons.fetch_or(MouseMask(e.button));
+    if (rb_blitz::settings::title::mouse_native_trace.Get())
+      REXLOG_INFO("native_mouse: button={} down mask={:02X}", static_cast<int>(e.button),
                   g_mouse_buttons.load());
     if (!MouseSupportEnabled()) return;
     if (auto p = Point(e)) {
-      if (e.button() == rex::ui::MouseEvent::Button::kLeft) {
+      if (e.button == rex::MouseButton::kLeft) {
         // The gutter belongs to the scrollbar: a press there must not click the row,
         // and a miss just outside the strip must not press A either.
         if (MouseMenuRailHit(*p)) {
           EndDrag();
           dragging_ = true;
           drag_screen_ = CurrentScreen(); drag_focus_ = CurrentFocus();
-          window_->CaptureMouse();
+          SDL_CaptureMouse(true);
           QueueMenuScrollbar(MouseAction::kScrollbarDown, *p);
         } else if (!MouseMenuScrollZone(*p)) QueueMenuMouse(MouseAction::kAccept, *p);
       }
-      if (e.button() == rex::ui::MouseEvent::Button::kRight) QueueMenuMouse(MouseAction::kBack, *p);
+      if (e.button == rex::MouseButton::kRight) QueueMenuMouse(MouseAction::kBack, *p);
     }
-    e.set_handled(true);
+    e.handled = true;
   }
-  void OnMouseUp(rex::ui::MouseEvent& e) override {
-    if (touch::ConsumeMouse(e.is_touch(), touch::Phase::kUp, GameScreenActive())) {
-      e.set_handled(true);
+  void OnMouseUp(rex::InputEvent& e) {
+    if (touch::ConsumeMouse(e.is_touch, touch::Phase::kUp, GameScreenActive())) {
+      e.handled = true;
       return;
     }
-    g_mouse_buttons.fetch_and(~MouseMask(e.button()));
+    g_mouse_buttons.fetch_and(~MouseMask(e.button));
     if (PlayerEvent(ui::music::PointerEvent::kUp, e)) return;
     if (LaneEvent(touch::Phase::kUp, e)) return;
-    if (REXCVAR_GET(mouse_native_trace))
-      REXLOG_INFO("native_mouse: button={} up mask={:02X}", static_cast<int>(e.button()),
+    if (rb_blitz::settings::title::mouse_native_trace.Get())
+      REXLOG_INFO("native_mouse: button={} up mask={:02X}", static_cast<int>(e.button),
                   g_mouse_buttons.load());
-    if (dragging_ && e.button() == rex::ui::MouseEvent::Button::kLeft) {
+    if (dragging_ && e.button == rex::MouseButton::kLeft) {
       const float miss = std::numeric_limits<float>::quiet_NaN();
       QueueMenuScrollbar(MouseAction::kScrollbarUp, Point(e, false).value_or(MenuPoint{miss, miss}));
       EndDrag(false);
     }
     if (!MouseSupportEnabled()) return;
-    e.set_handled(true);
+    e.handled = true;
   }
-  void OnMouseWheel(rex::ui::MouseEvent& e) override {
-    if (auto changed = e.is_touch() ? last_device::Touch() : last_device::MouseWheel())
+  void OnMouseWheel(rex::InputEvent& e) {
+    if (auto changed = e.is_touch ? last_device::Touch() : last_device::MouseWheel())
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
-                  e.is_touch() ? "touch" : "mouse");
+                  e.is_touch ? "touch" : "mouse");
     if (PlayerEvent(ui::music::PointerEvent::kWheel, e)) return;
     // Device state first, gate second: the sampler applies the gates, and a capture binds a
     // detent while Mouse Support is off.
-    const float scroll = e.scroll_y();
+    const float scroll = e.scroll_y;
     if (scroll > 0.0f) {
       g_wheel_detents.fetch_add(1, std::memory_order_relaxed);
     } else if (scroll < 0.0f) {
@@ -453,54 +412,54 @@ class MouseCursor final : public rex::ui::ImGuiDialog,
     if (!MouseSupportEnabled()) return;
     // The point rides the detent: the guest re-catches the row that lands under it when the
     // scroll settles (MouseScrollFollow in native_menu.h).
-    if (auto p = Point(e)) QueueMenuWheel(e.scroll_y(), *p);
-    e.set_handled(true);
+    if (auto p = Point(e)) QueueMenuWheel(int(e.scroll_y * 120.0f), *p);
+    e.handled = true;
   }
   void EndLanePointer() {
     if (!lane_pointer_captured_) return;
     const float miss = std::numeric_limits<float>::quiet_NaN();
     touch::ConsumeLanePointer(touch::Phase::kCancel, miss, miss);
     lane_pointer_captured_ = false;
-    if (window_) window_->ReleaseMouse();
+    SDL_CaptureMouse(false);
   }
-  bool LaneEvent(touch::Phase phase, rex::ui::MouseEvent& e) {
-    if (e.is_touch() || (phase != touch::Phase::kMove &&
-        e.button() != rex::ui::MouseEvent::Button::kLeft)) return false;
-    if (GetIO().WantCaptureMouse) phase = touch::Phase::kCancel;
+  bool LaneEvent(touch::Phase phase, rex::InputEvent& e) {
+    if (e.is_touch || (phase != touch::Phase::kMove &&
+        e.button != rex::MouseButton::kLeft)) return false;
+    if (ui_.GetImGuiIO().WantCaptureMouse) phase = touch::Phase::kCancel;
     const float miss = std::numeric_limits<float>::quiet_NaN();
     const auto point = Point(e, false).value_or(MenuPoint{miss, miss});
     if (!touch::ConsumeLanePointer(phase, point.x, point.y)) return false;
-    if (phase == touch::Phase::kDown && window_) {
-      window_->CaptureMouse();
+    if (phase == touch::Phase::kDown && ui_.HasWindow()) {
+      SDL_CaptureMouse(true);
       lane_pointer_captured_ = true;
     } else if (phase == touch::Phase::kUp || phase == touch::Phase::kCancel) {
       lane_pointer_captured_ = false;
-      if (window_) window_->ReleaseMouse();
+      SDL_CaptureMouse(false);
     }
-    e.set_handled(true);
+    e.handled = true;
     return true;
   }
-  bool PlayerEvent(ui::music::PointerEvent type, rex::ui::MouseEvent& e) {
-    if (!window_) return false;
+  bool PlayerEvent(ui::music::PointerEvent type, rex::InputEvent& e) {
+    if (!ui_.HasWindow()) return false;
     // The SDK drawer observes these events first but does not mark mouse events
     // handled. This explicit route runs at priority 1, ahead of native queueing
     // and the keyboard/mouse emulation at priority 0. No WantCaptureMouse lag.
-    const int button=e.button()==rex::ui::MouseEvent::Button::kLeft?0:
-                     e.button()==rex::ui::MouseEvent::Button::kRight?1:2;
-    if (ui::music::RoutePlayerPointer(type,float(e.x()),float(e.y()),
-            window_->GetActualPhysicalWidth(),window_->GetActualPhysicalHeight(),
-            float(window_->GetMediumDpi())/float(window_->GetDpi()),button)) {
+    const int button=e.button==rex::MouseButton::kLeft?0:
+                     e.button==rex::MouseButton::kRight?1:2;
+    if (ui::music::RoutePlayerPointer(type,float(e.x),float(e.y),
+            Width(),Height(),
+            ToLogical(),button)) {
       EndDrag();
       MouseMenuFocus(false);
-      last_x_=e.x(); last_y_=e.y();
-      e.set_handled(true);
+      last_x_=e.x; last_y_=e.y;
+      e.handled = true;
       return true;
     }
-    MouseMenuFocus(window_->HasFocus() && !GetIO().WantCaptureMouse);
+    MouseMenuFocus(ui_.IsFocused() && !ui_.GetImGuiIO().WantCaptureMouse);
     return false;
   }
-  std::function<rex::ui::Window*()> provider_;
-  rex::ui::Window* window_ = nullptr;
+  rex::ui::IUISystem& ui_;
+  rex::ScopeGuard listener_;
   int last_x_ = -1, last_y_ = -1;
   bool dragging_ = false;
   bool lane_pointer_captured_ = false;
@@ -550,20 +509,7 @@ void HostKeyEventsSince(uint64_t* serial, std::vector<std::string>* names) {
   }
 }
 
-void InstallMouseUiNavigation(rex::RuntimeConfig& config) {
-  if (config.tool_mode) return;
-  auto backend = config.input_factory
-                     ? std::move(config.input_factory)
-                     : REX_INPUT_BACKEND(rb_blitz::input::CreateTitleInputSystem);
-  config.input_factory = [backend = std::move(backend)](bool tool_mode) {
-    auto system = backend(tool_mode);
-    if (system && !tool_mode)
-      static_cast<rex::input::InputSystem*>(system.get())->AddDriver(std::make_unique<MousePad>());
-    return system;
-  };
-}
-std::unique_ptr<rex::ui::ImGuiDialog> CreateMouseMenuCursor(
-    rex::ui::ImGuiDrawer* drawer, std::function<rex::ui::Window*()> window) {
-  return std::make_unique<MouseCursor>(drawer, std::move(window));
+std::unique_ptr<rex::ui::IDialog> CreateMouseMenuCursor(rex::ui::IUISystem& ui) {
+  return std::make_unique<MouseCursor>(ui);
 }
 }

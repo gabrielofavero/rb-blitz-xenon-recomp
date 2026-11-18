@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "platform/virtual_keyboard.h"
 
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX

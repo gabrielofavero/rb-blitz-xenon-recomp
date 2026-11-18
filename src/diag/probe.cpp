@@ -16,28 +16,16 @@
 #include <string>
 #include <utility>
 
-#include <rex/cvar.h>
-#include <rex/logging.h>
-#include <rex/thread.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
+#include <rex/platform/thread.h>
 
 #include "diag/probe_overlay.h"
 
-REXCVAR_DEFINE_BOOL(probe_overlay, false, "Diagnostics",
-                    "Draw the probe overlay: the guest's requested video mode, the window and "
-                    "present-path settings, and the newest probe trace events. Live - it is "
-                    "re-read every frame");
-REXCVAR_DEFINE_BOOL(probe_trace, false, "Diagnostics",
-                    "Record probe events (guest entry points placed with RBBLITZ_PROBE and "
-                    "breadcrumbs) into the ring buffer the overlay shows and DumpToLog writes");
-REXCVAR_DEFINE_INT32(probe_trace_capacity, 256, "Diagnostics",
-                     "How many probe events the ring buffer holds; the oldest are overwritten and "
-                     "counted as dropped. The floor is the probe's own policy - fewer than 16 "
-                     "events is not a trace - while the buffer itself accepts any non-zero size")
-    .range(16, int32_t(rb_blitz::diag::TraceBuffer::kMaxCapacity));
-REXCVAR_DEFINE_STRING(probe_trace_path, "", "Diagnostics",
-                      "When set and probe_trace is on, the newest events are rewritten to this "
-                      "file about twice a second, oldest first, so a script can read the trace "
-                      "after a run without a console. Empty writes nothing");
+
+
+
+
 
 namespace rb_blitz::diag {
 
@@ -69,7 +57,7 @@ TraceBuffer& Buffer() {
 std::atomic<int32_t> g_applied_capacity{0};
 
 void ApplyCapacity() {
-  const int32_t configured = REXCVAR_GET(probe_trace_capacity);
+  const int32_t configured = rb_blitz::settings::title::probe_trace_capacity.Get();
   if (g_applied_capacity.load(std::memory_order_relaxed) == configured) {
     return;
   }
@@ -80,7 +68,7 @@ void ApplyCapacity() {
 // The guest thread id when the calling host thread is running guest code, and
 // the host thread id otherwise - the same number the log's `[tNNNN]` prefix
 // carries, so a trace line and a log line from the same thread agree.
-uint32_t CurrentThreadId() { return rex::thread::current_thread_id(); }
+uint32_t CurrentThreadId() { return rex::platform::GetCallerThreadID(); }
 
 void Fill(const PPCContext& ctx, TraceEvent& event) {
   event.time_ms = ElapsedMs();
@@ -98,14 +86,14 @@ void Fill(const PPCContext& ctx, TraceEvent& event) {
 
 }  // namespace
 
-bool tracing_enabled() { return REXCVAR_GET(probe_trace); }
+bool tracing_enabled() { return rb_blitz::settings::title::probe_trace.Get(); }
 
-bool overlay_enabled() { return REXCVAR_GET(probe_overlay); }
+bool overlay_enabled() { return rb_blitz::settings::title::probe_overlay.Get(); }
 
 TraceBuffer& buffer() { return Buffer(); }
 
 void Emit(const PPCContext& ctx, uint32_t address, const char* tag) {
-  if (!REXCVAR_GET(probe_trace)) {
+  if (!rb_blitz::settings::title::probe_trace.Get()) {
     return;
   }
   ApplyCapacity();
@@ -118,7 +106,7 @@ void Emit(const PPCContext& ctx, uint32_t address, const char* tag) {
 }
 
 void EmitRegisters(const PPCContext& ctx, const char* tag) {
-  if (!REXCVAR_GET(probe_trace)) {
+  if (!rb_blitz::settings::title::probe_trace.Get()) {
     return;
   }
   ApplyCapacity();
@@ -131,7 +119,7 @@ void EmitRegisters(const PPCContext& ctx, const char* tag) {
 }
 
 void Mark(const char* tag) {
-  if (!REXCVAR_GET(probe_trace)) {
+  if (!rb_blitz::settings::title::probe_trace.Get()) {
     return;
   }
   ApplyCapacity();
@@ -149,8 +137,8 @@ void Tick() {
   static std::string last_path;
   static bool warned_write_failure = false;
 
-  const std::string path = REXCVAR_GET(probe_trace_path);
-  if (path.empty() || !REXCVAR_GET(probe_trace)) {
+  const std::string path = rb_blitz::settings::title::probe_trace_path.Get();
+  if (path.empty() || !rb_blitz::settings::title::probe_trace.Get()) {
     last_path.clear();
     return;
   }
@@ -193,9 +181,9 @@ void DumpToLog(const char* reason, size_t max_events) {
   }
 }
 
-std::unique_ptr<rex::ui::ImGuiDialog> CreateOverlayDialog(rex::ui::ImGuiDrawer* drawer,
+std::unique_ptr<rex::ui::IDialog> CreateOverlayDialog(
                                                           WindowStateProvider provider) {
-  return std::make_unique<ProbeOverlayDialog>(drawer, std::move(provider));
+  return std::make_unique<ProbeOverlayDialog>(std::move(provider));
 }
 
 }  // namespace rb_blitz::diag

@@ -2,7 +2,7 @@
 #pragma once
 #include <cstdint>
 #include <string_view>
-namespace rex { class Runtime; }
+namespace rex::kernel { class TitleRuntime; }
 namespace rb_blitz::graphics {
 // Why preparation failed, when it did. The authored failure row names the
 // reason; the three cases need different advice, which is why they are not one
@@ -19,7 +19,7 @@ enum class GraphicsFailure : uint32_t {
   kCacheNotWritable = 3,
 };
 
-void ConfigureLoading(rex::Runtime* runtime);
+void ConfigureLoading(rex::kernel::TitleRuntime* runtime);
 void BeginLoadingAttempt(); // guest/UI owner thread
 void ContentLoadingReady();
 void ObserveContentLoading(uint8_t* base, uint32_t panel);

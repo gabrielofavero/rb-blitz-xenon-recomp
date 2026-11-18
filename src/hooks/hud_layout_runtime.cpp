@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Apply the HUD edge rule while WorldXfm is resolving a live transform, before
-// its caller consumes the result. See docs/settings/graphics.md part 3 §9.2.7.
+// its caller consumes the result. See docs/settings/graphics.md part 3 Ã‚Â§9.2.7.
 #include "hooks/hud_layout_runtime.h"
 
 #include <algorithm>
@@ -15,10 +15,11 @@
 #include <windows.h>
 #endif
 
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 #include "hooks/hud_layout.h"
 #include "hooks/render_settings.h"
@@ -33,23 +34,12 @@ REX_EXTERN(__imp__sub_821F65C8); // RndDir::DrawShowing (RndDrawable view)
 REX_EXTERN(__imp__sub_82226CD8); // RndGroup child draw traversal (RndDrawable view)
 REX_EXTERN(__imp__sub_823FF258); // Hmx::Object::SetProperty(Symbol, DataNode)
 
-REXCVAR_DEFINE_BOOL(hud_reanchor, true, "Graphics",
-                    "Re-anchor the in-song HUD on non-16:9 frames during world-transform "
-                    "resolution, independently of HUD element visibility.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-REXCVAR_DEFINE_BOOL(hud_reanchor_apply, true, "Graphics",
-                    "Place the six measured HUD anchors; their children inherit the shift.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-REXCVAR_DEFINE_DOUBLE(hud_reanchor_hud_half_height, 240.0, "Graphics",
-                      "HUD scene half-height in authored units (240, measured 2026-10-17).")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-REXCVAR_DEFINE_BOOL(hud_reanchor_probe, false, "Diagnostics",
-                    "Log a bounded sample of HUD world-transform placements.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
+
+
 // Accept old configuration/command-line flags without restoring a heap sweep.
-REXCVAR_DEFINE_BOOL(hud_reanchor_scan, false, "Diagnostics",
-                    "Retired HUD heap-scan diagnostic; accepted for compatibility, no work.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 namespace {
 constexpr uint32_t kImageBegin = 0x82000000;
@@ -135,7 +125,7 @@ bool InHud(const uint8_t* base, uint32_t header) {
 struct Anchor {
   std::string_view name;
   uint32_t vtable;
-  int32_t transform_offset;  // from Hmx::Object, measured in §9.2.5
+  int32_t transform_offset;  // from Hmx::Object, measured in Ã‚Â§9.2.5
   int side;
   bool portrait_only = false;
 };
@@ -300,10 +290,10 @@ int InheritedSide(const uint8_t* base, uint32_t transformable) {
   return 0;
 }
 double ActiveDelta() {
-  if (!REXCVAR_GET(hud_reanchor) || !REXCVAR_GET(hud_reanchor_apply)) return 0.0;
+  if (!rb_blitz::settings::title::hud_reanchor.Get() || !rb_blitz::settings::title::hud_reanchor_apply.Get()) return 0.0;
   const double delta = rb_blitz::settings::HudShiftUnits(
       HudWidth(), HudHeight()) *
-      REXCVAR_GET(hud_reanchor_hud_half_height);
+      rb_blitz::settings::title::hud_reanchor_hud_half_height.Get();
   return std::isfinite(delta) ? delta : 0.0;
 }
 
@@ -374,9 +364,7 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
   static thread_local std::array<bool, kAnchors.size()> reported{};
   bool& seen = reported[size_t(&anchor - kAnchors.data())];
   const uint32_t before = seen ? 0 : U32(base, transformable + kWorldX);
-  rex::CallFrame call(ctx);
-  call.ctx.r3.u32 = transformable;
-  sub_821F13D0(call.ctx, base);
+  rex::ppc::Call<void>(ctx,base,sub_821F13D0,transformable);
   if (!previous) previous = &prepared[next_prepared++ % prepared.size()];
   previous->base = base;
   previous->transformable = transformable;
@@ -522,7 +510,7 @@ bool rb_blitz::hooks::HudReanchorWorld(uint8_t* base, uint32_t transformable) {
   uint32_t placed_bits;
   std::memcpy(&placed_bits, &placed, sizeof(placed_bits));
   rex::memory::store_and_swap<uint32_t>(base + transformable + kWorldX, placed_bits);
-  if (REXCVAR_GET(hud_reanchor_probe)) {
+  if (rb_blitz::settings::title::hud_reanchor_probe.Get()) {
     // Diagnostic counters affect logging only; placement keeps no instance state.
     static thread_local std::array<unsigned, kAnchors.size()> samples{};
     if (samples[size_t(anchor - kAnchors.data())]++ < 8) {
@@ -553,9 +541,7 @@ extern "C" REX_FUNC(sub_821F13D0) {
     }
   }
   if (changed) {
-    rex::CallFrame call(ctx);
-    call.ctx.r3.u32 = transformable;
-    sub_821F0300(call.ctx, base);
+    rex::ppc::Call<void>(ctx,base,sub_821F0300,transformable);
     base[transformable + 189] = 0;
   }
 }

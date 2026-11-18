@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#include <rex/hook.h>
-#include <rex/system/xmemory.h>
+#include <rex/ppc/hook.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 #include <atomic>
 
 #include "hooks/startup_splasher.h"

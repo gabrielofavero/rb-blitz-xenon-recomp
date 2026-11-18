@@ -16,11 +16,71 @@
 # Kept to Windows PowerShell 5.1: build.ps1 takes payload snapshots with powershell.exe.
 
 # The payload files whose bytes come out of the build tree itself. The rest of the snapshot -
-# the Visual C++ runtime DLLs and the Vulkan loader - comes from directories the build tree
-# does not own, so those are checked for presence rather than by content.
+# the Visual C++ runtime DLLs and an explicitly selected external Vulkan loader -
+# comes from outside the build tree. A staged source-built loader is checked by hash.
+function Get-PayloadRuntimeFiles {
+    param([string] $BuildDir = '')
+    $inventory = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../config/runtime-modules.json') -Raw | ConvertFrom-Json
+    $cache = @{}
+    if ($BuildDir -and (Test-Path -LiteralPath (Join-Path $BuildDir 'CMakeCache.txt'))) {
+        foreach ($line in Get-Content -LiteralPath (Join-Path $BuildDir 'CMakeCache.txt')) {
+            if ($line -match '^([^/#:=][^:=]*):[^=]*=(.*)$') { $cache[$Matches[1]] = $Matches[2] }
+        }
+    }
+    $names = @($inventory.core) + @($inventory.conditional.windows)
+    $options = @{
+        tracy = @('REXGLUE_ENABLE_TRACY')
+        vulkan = @('REXGLUE_USE_VULKAN', 'REXGLUE_GPU_VULKAN')
+        d3d12 = @('REXGLUE_USE_D3D12')
+    }
+    foreach ($feature in @('tracy', 'vulkan', 'd3d12')) {
+        $enabled = $true
+        foreach ($option in $options[$feature]) {
+            if ($cache.ContainsKey($option)) {
+                $enabled = $cache[$option] -notmatch '^(|0|OFF|NO|FALSE|N|IGNORE|NOTFOUND)$|.*-NOTFOUND$'
+                break
+            }
+        }
+        if ($enabled) { $names += @($inventory.conditional.$feature) }
+    }
+    return @($names | ForEach-Object { $_ + '.dll' })
+}
+
+
+function Get-PayloadLicenseFiles {
+    param([string] $BuildDir, [string] $RepoRoot)
+    $licenseConfig = Join-Path $PSScriptRoot '../config/runtime-licenses.json'
+    $inventory = Get-Content -LiteralPath $licenseConfig -Raw | ConvertFrom-Json
+    $vulkanRoot = Join-Path $BuildDir '_deps/rex-vulkan'
+    $cache = Join-Path $BuildDir 'CMakeCache.txt'
+    if (Test-Path -LiteralPath $cache) {
+        foreach ($line in Get-Content -LiteralPath $cache) {
+            if ($line -match '^REXGLUE_VULKAN_SOURCE_ROOT:[^=]*=(.*)$') { $vulkanRoot = $Matches[1] }
+        }
+    }
+    $runtime = @(Get-PayloadRuntimeFiles -BuildDir $BuildDir)
+    foreach ($entry in $inventory) {
+        if ($entry.platforms -notcontains 'windows') { continue }
+        $properties = @($entry.PSObject.Properties.Name)
+        if ($properties -contains 'when') {
+            if ($entry.when -eq 'vulkan' -and $runtime -notcontains 'rexgpu-xenos-vulkan.dll') { continue }
+            if ($entry.when -eq 'tracy' -and $runtime -notcontains 'TracyClient.dll') { continue }
+        }
+        if ($properties -contains 'fromVulkanSource') { $source = Join-Path $vulkanRoot $entry.fromVulkanSource }
+        else { $source = Join-Path $RepoRoot $entry.from }
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "missing runtime license: $source" }
+        if ((Get-Item -LiteralPath $source).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "linked runtime license: $source"
+        }
+        [pscustomobject]@{ Name = ('licenses/' + $entry.to); Source = $source }
+    }
+}
+
 function Get-PayloadTreeFiles {
-    return @('rb_blitz.exe', 'rb_blitz_load_monitor.exe', 'rexruntime.dll', 'rexgpu-xenos.dll',
-             'graphics-preparation.json', 'collect_diagnostics.ps1', 'Collect Diagnostics.cmd')
+    param([string] $BuildDir = '')
+    return @('rb_blitz.exe', 'rb_blitz_load_monitor.exe',
+             'graphics-preparation.json', 'collect_diagnostics.ps1', 'Collect Diagnostics.cmd') +
+             @(Get-PayloadRuntimeFiles -BuildDir $BuildDir)
 }
 
 # Authored repository files are not in SourceDir but still determine the bytes
@@ -54,6 +114,7 @@ function Read-PayloadManifest {
     $section = ''
     $backends = @()
     $commit = ''
+    $loaderOrigin = ''
     # Plain arrays, appended to: an `@()` array subexpression over a New-Object generic list
     # throws "Argument types do not match" on PowerShell 7.4 here, and the lists are tiny.
     $entries = @()
@@ -83,6 +144,8 @@ function Read-PayloadManifest {
                 $backends = @($value.Split(',') |
                     ForEach-Object { $_.Trim() } |
                     Where-Object { $_.Length -gt 0 })
+            } elseif ($key -eq 'vulkan_loader_origin') {
+                $loaderOrigin = $value
             } elseif ($key -eq 'commit') {
                 $commit = $value
             }
@@ -94,7 +157,7 @@ function Read-PayloadManifest {
     }
     if ($null -ne $entry) { $entries += $entry }
 
-    return [pscustomobject]@{ Backends = @($backends); Commit = $commit; Entries = @($entries) }
+    return [pscustomobject]@{ Backends = @($backends); Commit = $commit; LoaderOrigin = $loaderOrigin; Entries = @($entries) }
 }
 
 # The reasons an existing snapshot may NOT stand in for the given build tree, as a list of
@@ -152,10 +215,20 @@ function Test-PayloadSnapshotCurrent {
         if (-not $has_loader) {
             $reasons += 'the build tree offers Vulkan and the snapshot ships no vulkan-1.dll'
         }
+        if ($manifest.LoaderOrigin -eq 'staged') {
+            $loader = Join-Path $SourceDir 'vulkan-1.dll'
+            $entry = @($manifest.Entries | Where-Object { $_.Path -eq 'vulkan-1.dll' })
+            if (-not (Test-Path -LiteralPath $loader -PathType Leaf) -or $entry.Count -ne 1 -or
+                (Get-FileHash -LiteralPath $loader -Algorithm SHA256).Hash.ToLowerInvariant() -ne $entry[0].Sha256) {
+                $reasons += 'vulkan-1.dll is missing or differs from the source-built staged loader'
+            }
+        } elseif ($manifest.LoaderOrigin -notin @('override', 'external')) {
+            $reasons += 'the snapshot does not identify its Vulkan loader source'
+        }
     }
 
     # The files the tree owns, byte for byte.
-    $tree_files = Get-PayloadTreeFiles
+    $tree_files = Get-PayloadTreeFiles -BuildDir $SourceDir
     foreach ($entry in $manifest.Entries) {
         if ($tree_files -notcontains $entry.Path) { continue }
         $source = Join-Path $SourceDir $entry.Path
@@ -182,6 +255,13 @@ function Test-PayloadSnapshotCurrent {
     }
 
     if (-not $RepoRoot) { $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
+    foreach ($license in (Get-PayloadLicenseFiles -BuildDir $SourceDir -RepoRoot $RepoRoot)) {
+        $entry = @($manifest.Entries | Where-Object { $_.Path -eq $license.Name })
+        if ($entry.Count -ne 1 -or
+            (Get-FileHash -LiteralPath $license.Source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $entry[0].Sha256) {
+            $reasons += "$($license.Name) is missing or differs from the configured runtime source"
+        }
+    }
     foreach ($name in (Get-PayloadRepoFiles)) {
         $source = Join-Path $RepoRoot $name
         $entry = @($manifest.Entries | Where-Object { $_.Path -eq $name })

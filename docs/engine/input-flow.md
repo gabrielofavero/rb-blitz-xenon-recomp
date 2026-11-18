@@ -640,6 +640,11 @@ CTest targets pass in `out/build/win-amd64-debug` — the tree whose configure
 keeps tests on, because a Vulkan-enabled configure forces `BUILD_TESTING` off
 from the SDK's `thirdparty/CMakeLists.txt` and the release tree cannot run them.
 
+The v0.11.0 migration preserves the title's requested `BUILD_TESTING` value
+around dependency configuration. Current Vulkan release builds can register the
+title tests; the restriction above records the earlier SDK configuration.
+
+
 ### Live acceptance, 2026-10-16 — the library scrollbar behaves natively
 
 The owner asked for the music library's scroll to behave like a desktop
@@ -961,3 +966,27 @@ activity, or deliberate mouse motion out of touch mode. An idle connected pad
 does not change the source. Host tests cover launch defaults, source changes,
 all six locale forms, exact text restoration, and scene/text replacement;
 on-screen appearance remains a manual check.
+
+### Row-geometry diagnostics, 2026-11-18
+
+`mouse_native_trace` publishes a fresh complete row table when the focused list,
+row enablement or projected bounds change. Entrance animations and native window
+resizing can move rows after their first draw, so the first logged rectangle is
+not necessarily the settled rectangle. Live hit testing already uses each draw's
+current geometry; the diagnostic refresh keeps automation aligned with it. Bounds
+changes below 0.0001 in normalized coordinates do not trigger another table.
+The setting remains disabled for matched performance captures. The migration
+plan records the corresponding native UI evidence and retained failed attempts.
+
+## Current legacy-profile compatibility (2026-11-18)
+
+The historical gated-input and F10 recovery measurements above describe the
+earlier profile controls. Current KeyboardSupportEnabled and MouseSupportEnabled
+always enable raw host sources, so old disabled profile switches cannot create
+that lockout. The title does not require an external SDK input driver: keyboard
+events continue through its UI listener and title input filter. The maintained
+recovery acceptance fixture now verifies that such an old profile can reach the
+guest menu with Enter, no external pad driver and no recovery gesture, while
+leaving its profile bytes unchanged. Seven checks pass in
+`out/rexglue-migration/post-smoke-ui-final-r18/recovery/`; the historical F10
+route is not counted as exercised by that result.

@@ -9,9 +9,10 @@
 #include <unordered_set>
 #include <vector>
 
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 #include "hooks/action_hint_probe.h"
 #include "assets/texture_override.h"
@@ -181,9 +182,9 @@ REX_HOOK_RAW(sub_824D8FF0) {
           REXLOG_INFO("p10_trace: formatted label={:08X} action={} glyph={:02X}",
                       entry.label, entry.action, code);
       }
-      rex::CallFrame frame(ctx);
-      auto& call = frame.ctx;
-      call.r1.u32 -= 0x100;
+      PPCContext call=ctx;
+      rex::ScopeGuard restore_fpscr([&] { ctx.fpscr=call.fpscr; });
+      rex::ppc::OpenCallFrame(call,base,0x100);
       const uint32_t chars = call.r1.u32 + 0x80;
       if (code < 0x80) {
         base[chars] = uint8_t(code);
@@ -238,9 +239,7 @@ REX_HOOK_RAW(sub_824D85E8) {
         prior = widget_signature;
       }
       if (refresh) {
-        rex::CallFrame frame(ctx);
-        frame.ctx.r3.u32 = object;
-        sub_824D9330(frame.ctx, base);
+        rex::ppc::Call<void>(ctx,base,sub_824D9330,object);
       }
     }
   }

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include "settings/runtime_values.h"
 #include "diag/shader_trace.h"
 #include "diag/boot_heartbeat.h"
 #include "graphics/preparation_loading.h"
-#include <rex/cvar.h>
-#include <rex/graphics/compile_trace.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/diagnostics/compile_trace.h>
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/memory/endian.h>
 #include <atomic>
 #include <string>
 
@@ -14,7 +15,7 @@ REX_EXTERN(__imp__sub_822CB0D0); // ServerConnectPanel::start_connect_process
 REX_EXTERN(
     __imp__sub_822CA8E8); // set_state: +56, update_state message, then advance
 
-namespace trace = rex::graphics::compile_trace;
+namespace trace = rex::diagnostics::compile_trace;
 namespace rb_blitz::diag::shader_trace {
 namespace {
 bool menu_seen = false; // guest/UI thread only
@@ -58,7 +59,7 @@ void LogConfiguration() {
                            "enhancements_skip_offline_dialog",
                            "mouse_ui_nav"}) {
     REXLOG_INFO("shader_trace: config {}={}", name,
-                rex::cvar::GetFlagByName(name));
+                rb_blitz::settings::InspectRuntimeSetting(name).active_value);
   }
 }
 void ObserveScreen(std::string_view screen, std::string_view panel,

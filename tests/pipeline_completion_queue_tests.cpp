@@ -1,5 +1,5 @@
 // Exercise the actual worker handoff without a GPU or game navigation.
-#include <rex/graphics/pipeline_completion_queue.h>
+#include <gpu/xenos/pipeline_completion_queue.h>
 
 #include <algorithm>
 #include <chrono>
@@ -10,7 +10,7 @@
 #include "check.h"
 
 using namespace rb_blitz::test;
-using rex::graphics::PipelineCompletionQueue;
+using rex::gpu::PipelineCompletionQueue;
 using namespace std::chrono_literals;
 
 namespace {

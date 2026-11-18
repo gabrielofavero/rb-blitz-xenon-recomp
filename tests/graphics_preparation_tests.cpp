@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Host tests for rexglue-sdk/include/rex/graphics/graphics_preparation.h and the
+// Host tests for rexglue-sdk/include/rex/gpu/graphics_preparation.h and the
 // cancellation states added to pipeline_preload.h - the lifecycle both graphics
 // backends drive from P4 on (docs/plans/finished/2026-10-10-shader-cache-plan.md,
 // P4).
@@ -24,19 +24,19 @@
 
 #include "check.h"
 
-#include <rex/graphics/graphics_preparation.h>
-#include <rex/graphics/pipeline_preload.h>
+#include <rex/gpu/graphics_preparation.h>
+#include <rex/gpu/pipeline_preload.h>
 
 namespace {
 
 using namespace rb_blitz::test;
-using rex::graphics::GraphicsPreparationBackend;
-using rex::graphics::GraphicsPreparationController;
-using rex::graphics::GraphicsPreparationIsTerminal;
-using rex::graphics::GraphicsPreparationKey;
-using rex::graphics::GraphicsPreparationPhase;
-using rex::graphics::GraphicsPreparationPhaseName;
-using rex::graphics::PipelinePreloadTracker;
+using rex::gpu::GraphicsPreparationBackend;
+using rex::gpu::GraphicsPreparationController;
+using rex::gpu::GraphicsPreparationIsTerminal;
+using rex::gpu::GraphicsPreparationKey;
+using rex::gpu::GraphicsPreparationPhase;
+using rex::gpu::GraphicsPreparationPhaseName;
+using rex::gpu::PipelinePreloadTracker;
 
 using Clock = std::chrono::steady_clock;
 

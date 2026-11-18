@@ -22,31 +22,21 @@
 // claim no implementing prompt has made yet. A prompt that can apply a toggle
 // live relaxes its own lifecycle and says so in docs/engine/toggles.md.
 
+#include "settings/runtime_values.h"
 #include "enhancements.h"
 
 #include <array>
 
-#include <rex/cvar.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
 
 #include "ui/menu_options.h"
 
-REXCVAR_DEFINE_BOOL(enhancements_hide_achievements, false, "Enhancements",
-                    "Hide achievement unlock notifications. Achievements are still earned and saved.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_expand_resolution, false, "Enhancements",
-                    "R1 custom resolutions: expand the guest's own layout (menu background, HUD, "
-                    "3D, song selection, power-up menu) for a non-16:9 video mode instead of "
-                    "leaving it to the presenter's letterbox or safe-area path. Faithful: the "
-                    "guest's 16:9 layout is drawn as authored. Not implemented.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_ui_scale, false, "Enhancements",
-                    "R2 UI accessibility: scale guest text (and the main menu logo) through the "
-                    "game's own font/layout metrics. Faithful: the design's text and logo sizes. "
-                    "Not implemented.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
+
 
 // The second toggle whose default is on, because the question it removes has one
 // answer: Rock Central is gone, so a start that asks "cannot connect" and then
@@ -54,53 +44,25 @@ REXCVAR_DEFINE_BOOL(enhancements_ui_scale, false, "Enhancements",
 // already worked out. The edit is the title's own two transitions made to happen on
 // their own (src/ui/menu_options.cpp), so the offline mode the second one enters is
 // the same mode the player's second press enters.
-REXCVAR_DEFINE_BOOL(enhancements_skip_offline_dialog, true, "Enhancements",
-                    "R3 auto offline mode: take the failed-login and \"Proceed in Offline "
-                    "Mode?\" questions out of the panel a game start goes through, so the title "
-                    "shows the main menu in offline mode as soon as the start is pressed. "
-                    "Faithful: the title asks both questions and the player answers them, which "
-                    "is the same pair of transitions.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_icon_schemes, true, "Enhancements",
-                    "R4 Controller Layout: choose installed controller glyph and preset art "
-                    "in Help & Options. Faithful: the art the title ships.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_hide_menu_options, true, "Enhancements",
-                    "R5 hiding categories: remove named entries from the main menu's option list, "
-                    "in the list the guest navigates and not only in the drawing. Needs "
-                    "enhancements_hidden_menu_options to name them. Faithful: every shipped entry "
-                    "is present.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-#if defined(RB_BLITZ_IOS) || defined(__ANDROID__)
-REXCVAR_DEFINE_BOOL(hide_exit_game, true, "Enhancements", "Hide Exit Game on the main menu.")
-#else
-REXCVAR_DEFINE_BOOL(hide_exit_game, false, "Enhancements", "Hide Exit Game on the main menu.")
-#endif
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_STRING(enhancements_hidden_menu_options, rb_blitz::menu_options::kDefaultRows,
-                      "Enhancements",
-                      "R5 the main menu rows enhancements_hide_menu_options hides, comma "
-                      "separated. The compiled default is the legacy three-entry list: "
-                      "splash_leaderboard, splash_achievements, splash_dlc.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
+
+
+
 
 // The one toggle whose default is on, because its subject is the mod's own name:
 // the row only exists when the Ultimate payload is installed, and it only ever
 // reads "Mod Settings" there. A run without the payload has neither the file nor
 // the label, so the edit has nothing to do; Controller Settings hides the row in that
 // case too (controller-settings/config/settings.toml, `visible = "ultimate_installed"`).
-REXCVAR_DEFINE_BOOL(enhancements_rename_mod_settings, true, "Enhancements",
-                    "R10 rename the mod's settings row: draw the row the Ultimate mod adds as "
-                    "\"Ultimate Settings\", which is the name the mod itself uses. Faithful: the "
-                    "mod's own label, \"Mod Settings\".")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 // R6 uses the existing Controller Settings Input setting as its sole switch.
-REXCVAR_DECLARE(bool, mouse_ui_nav);
+
 
 // The refresh entry's own row (owner request, 2026-10-15): while R7 owns the main menu's
 // downloadable-content row, that row is also something a player may not want in the menu, and
@@ -108,28 +70,13 @@ REXCVAR_DECLARE(bool, mouse_ui_nav);
 // the in-game "Refresh Songs" row under Main Menu / Extra Items; with it off, the menu's row
 // is hidden while the boot still scans the library normally.
 // Off by default; players can enable the shortcut in Main Menu / Extra Items.
-REXCVAR_DEFINE_BOOL(enhancements_refresh_music_library, false, "Enhancements",
-                    "R7's refresh entry: show the main menu's Refresh Songs row, which re-scans "
-                    "the DLC folders and re-runs the discovery pass. Off by default. Off hides "
-                    "the row; the boot's own scan is unaffected.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_dlc_uncap_enumeration, true, "Enhancements",
-                    "Temporarily disable VSync while content loads, restoring the player's "
-                    "value when the usable main menu is current. On by default. Off keeps "
-                    "the player's pacing throughout.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(enhancements_force_controller_scheme, false, "Enhancements",
-                    "R8 force a predefined controller scheme on load. Needs "
-                    "enhancements_controller_scheme to name one. Faithful: the player's saved "
-                    "layout is used untouched. Not implemented.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_STRING(enhancements_controller_scheme, "", "Enhancements",
-                      "R8 the scheme enhancements_force_controller_scheme applies; empty means "
-                      "unnamed, and an unnamed scheme leaves the saved layout alone.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
+
+
 
 // R9, implemented. The title loops ONE of three of its own streamed tracks per menu visit
 // (the `shellmusic` block of config/synth.dtb, chosen at random and looped forever); with
@@ -143,43 +90,33 @@ REXCVAR_DEFINE_STRING(enhancements_controller_scheme, "", "Enhancements",
 // this cvar is the carrier for (`CvarForSetting`), applied by the boot at the config rank. Its
 // compiled default here must equal the row's (`true`): a row nobody has chosen is *not* written, so
 // on a fresh install what a boot reads is this cvar's own default.
-REXCVAR_DEFINE_BOOL(enhancements_menu_dlc_songs, true, "Enhancements",
-                    "R9 main-menu library songs: play bundled songs and installed DLC as background "
-                    "music. The in-game Background Music row is the control; this is the cvar it "
-                    "is written to, so an explicit flag or environment value still outranks it.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 // Input navigation and the visible player are independent preferences sharing one transport.
-REXCVAR_DEFINE_BOOL(enhancements_background_music_nav, true, "Enhancements",
-                    "Enable pad/key menu-music navigation. Music-player visibility is independent. "
-                    "Requires library background music.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-REXCVAR_DEFINE_BOOL(enhancements_music_player, true, "Enhancements",
-                    "Show the clickable music player at the bottom right of the main menu. "
-                    "Independent of pad/key navigation. Requires library background music.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_INT32(enhancements_menu_dlc_song_count, 3, "Enhancements",
-                     "R9's retired pool-size row: music uses a rolling session and a bounded "
-                     "mount cache, so this legacy value is ignored (a boot says so).")
-    .range(1, 64)
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
+
 
 namespace rb_blitz::enhancements {
 
 namespace {
 
-const char* SourceName(rex::cvar::Source source) {
+const char* SourceName(rex::SettingLayer source) {
   switch (source) {
-    case rex::cvar::Source::kDefault:
+    case rex::SettingLayer::kDefault:
       return "default";
-    case rex::cvar::Source::kConfig:
+    case rex::SettingLayer::kTitle:
+      return "title";
+    case rex::SettingLayer::kLock:
+      return "locked";
+    case rex::SettingLayer::kFile:
       return "config";
-    case rex::cvar::Source::kEnvironment:
+    case rex::SettingLayer::kEnvironment:
       return "environment";
-    case rex::cvar::Source::kCommandLine:
+    case rex::SettingLayer::kCommandLine:
       return "command line";
-    case rex::cvar::Source::kRuntime:
+    case rex::SettingLayer::kRuntime:
       return "runtime";
   }
   return "unknown";
@@ -196,29 +133,29 @@ struct ToggleRow {
 // from the rows: a larger explicit size silently adds a null entry and crashes at boot.
 constexpr auto kToggles = std::to_array<ToggleRow>({
     {"enhancements_hide_achievements", "hide achievement unlock notifications",
-     [] { return REXCVAR_GET(enhancements_hide_achievements); }},
+     [] { return rb_blitz::settings::title::enhancements_hide_achievements.Get(); }},
     {"enhancements_expand_resolution", "R1 custom resolutions",
-     [] { return REXCVAR_GET(enhancements_expand_resolution); }},
+     [] { return rb_blitz::settings::title::enhancements_expand_resolution.Get(); }},
     {"enhancements_ui_scale", "R2 UI accessibility",
-     [] { return REXCVAR_GET(enhancements_ui_scale); }},
+     [] { return rb_blitz::settings::title::enhancements_ui_scale.Get(); }},
     {"enhancements_skip_offline_dialog", "R3 skip the offline prompts",
-     [] { return REXCVAR_GET(enhancements_skip_offline_dialog); }},
+     [] { return rb_blitz::settings::title::enhancements_skip_offline_dialog.Get(); }},
     {"enhancements_icon_schemes", "R4 icon schemes",
-     [] { return REXCVAR_GET(enhancements_icon_schemes); }},
+     [] { return rb_blitz::settings::title::enhancements_icon_schemes.Get(); }},
     {"enhancements_hide_menu_options", "R5 hide menu options",
-     [] { return REXCVAR_GET(enhancements_hide_menu_options); }},
+     [] { return rb_blitz::settings::title::enhancements_hide_menu_options.Get(); }},
     {"mouse_ui_nav", "R6 native mouse",
-     [] { return REXCVAR_GET(mouse_ui_nav); }},
+     [] { return rb_blitz::settings::title::mouse_ui_nav.Get(); }},
     {"enhancements_refresh_music_library", "R7 refresh songs row (the in-game row)",
-     [] { return REXCVAR_GET(enhancements_refresh_music_library); }},
+     [] { return rb_blitz::settings::title::enhancements_refresh_music_library.Get(); }},
     {"enhancements_force_controller_scheme", "R8 force controller scheme",
-     [] { return REXCVAR_GET(enhancements_force_controller_scheme); }},
+     [] { return rb_blitz::settings::title::enhancements_force_controller_scheme.Get(); }},
     {"enhancements_menu_dlc_songs", "R9 main-menu library songs (the Background Music row)",
-     [] { return REXCVAR_GET(enhancements_menu_dlc_songs); }},
+     [] { return rb_blitz::settings::title::enhancements_menu_dlc_songs.Get(); }},
     {"enhancements_background_music_nav", "menu-music navigator (P2; native pause/resume)",
-     [] { return REXCVAR_GET(enhancements_background_music_nav); }},
+     [] { return rb_blitz::settings::title::enhancements_background_music_nav.Get(); }},
     {"enhancements_rename_mod_settings", "R10 rename the mod's settings row",
-     [] { return REXCVAR_GET(enhancements_rename_mod_settings); }},
+     [] { return rb_blitz::settings::title::enhancements_rename_mod_settings.Get(); }},
 });
 
 }  // namespace
@@ -230,16 +167,16 @@ void LogToggles() {
               kToggles.size());
   for (const ToggleRow& row : kToggles) {
     REXLOG_INFO("enhancements: {} = {} ({}) - {}", row.name, row.enabled() ? "on" : "off",
-                SourceName(rex::cvar::GetFlagSource(row.name)), row.feature);
+                SourceName(rb_blitz::settings::InspectRuntimeSetting(row.name).staged_source), row.feature);
   }
   REXLOG_INFO("enhancements: {} = \"{}\" (R8 scheme; empty means unnamed)",
-              "enhancements_controller_scheme", REXCVAR_GET(enhancements_controller_scheme));
+              "enhancements_controller_scheme", rb_blitz::settings::title::enhancements_controller_scheme.Get());
   REXLOG_INFO("enhancements: {} = \"{}\" (R5 rows; the three offline-dead entries by default)",
               "enhancements_hidden_menu_options",
-              REXCVAR_GET(enhancements_hidden_menu_options));
+              rb_blitz::settings::title::enhancements_hidden_menu_options.Get());
   REXLOG_INFO("enhancements: {} = {} (retired size; rolling music session ignores this value)",
               "enhancements_menu_dlc_song_count",
-              REXCVAR_GET(enhancements_menu_dlc_song_count));
+              rb_blitz::settings::title::enhancements_menu_dlc_song_count.Get());
 }
 
 }  // namespace rb_blitz::enhancements

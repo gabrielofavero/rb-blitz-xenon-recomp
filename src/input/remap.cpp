@@ -4,6 +4,7 @@
 // Implementation of the pad remap (src/input/remap.h). See src/profile/remap.h for what a
 // binding means; this file is only the device side of it.
 
+#include "settings/runtime_values.h"
 #include "input/remap.h"
 #include "ui/notifications.h"
 #include "ui/achievements_overlay.h"
@@ -37,10 +38,10 @@
 
 #include <SDL3/SDL.h>
 
-#include <rex/cvar.h>
-#include <rex/input/input_system.h>
-#include <rex/kernel/xam/module.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/hid/input_system.h>
+#include "input/title_input.h"
+#include <rex/logging/log_category.h>
 
 #include "profile/profile.h"
 #include "profile/gameplay_remap.h"
@@ -53,16 +54,13 @@
 // from here; the compiled defaults match the schema rows' own defaults. The two gameplay routing
 // switches that used to live here are retired (P2 of the interface/gameplay mapping restructure
 // plan, D3) - custom is inferred from each table, never from a profile switch.
-REXCVAR_DEFINE_BOOL(keyboard_support, true, "Input",
-                    "Legacy profile switch; keyboard input is always enabled.");
-REXCVAR_DECLARE(bool, enhancements_background_music_nav);
 
-// P2's live instrument (plan §6): one line per press/release the physical layer sees for a
+
+
+// P2's live instrument (plan Ã‚Â§6): one line per press/release the physical layer sees for a
 // gameplay table, naming the binding that caused it. Off by default; the acceptance arm runs with
 // it on so the sampler and the gates can be observed without a debugger.
-REXCVAR_DEFINE_BOOL(input_source_trace, false, "Diagnostics",
-                    "Trace the gameplay source sampler: table, action, edge and the binding that "
-                    "fired it.");
+
 
 namespace rb_blitz::input {
 namespace {
@@ -72,17 +70,21 @@ using rb_blitz::profile::remap::SourceKind;
 
 // The same word the enhancements' toggle log uses, so two boot lines cannot spell a source
 // differently.
-const char* CvarSourceName(const rex::cvar::Source source) {
+const char* CvarSourceName(const rex::SettingLayer source) {
   switch (source) {
-    case rex::cvar::Source::kDefault:
+    case rex::SettingLayer::kDefault:
       return "default";
-    case rex::cvar::Source::kConfig:
+    case rex::SettingLayer::kTitle:
+      return "title";
+    case rex::SettingLayer::kLock:
+      return "locked";
+    case rex::SettingLayer::kFile:
       return "config";
-    case rex::cvar::Source::kEnvironment:
+    case rex::SettingLayer::kEnvironment:
       return "environment";
-    case rex::cvar::Source::kCommandLine:
+    case rex::SettingLayer::kCommandLine:
       return "command line";
-    case rex::cvar::Source::kRuntime:
+    case rex::SettingLayer::kRuntime:
       return "runtime";
   }
   return "unknown";
@@ -101,12 +103,12 @@ PhysicalInput SamplePhysicalInput() {
   // guest's input thread. The native menu's own focus is a different fact (the pointer's
   // availability), so a menu overlay must not stop the keyboard from playing.
   input.window_focused = HostInputFocused();
-  rex::input::X_INPUT_STATE physical_pad{};
+  rex::hid::IInputSystem::PadReading physical_pad{};
   ExtraButtons extras;
   input.pad_connected = SamplePhysicalPad(&physical_pad, false, &extras);
   input.extra_available = extras.available;
   input.extra_held = extras.held;
-  const auto& pad = physical_pad.gamepad;
+  const auto& pad = physical_pad.state;
   input.pad = rb_blitz::profile::remap::PadState{pad.buttons, pad.left_trigger, pad.right_trigger,
                                                  pad.thumb_lx, pad.thumb_ly, pad.thumb_rx,
                                                  pad.thumb_ry};
@@ -429,44 +431,14 @@ GameplaySwitches ReadGameplaySwitches() {
   return switches;
 }
 
-void InstallPadRemap(rex::RuntimeConfig& config) {
-  // Tool mode has no window, no pad and no guest.
-  if (config.tool_mode) {
-    return;
-  }
-
-  // P7: the three binding tables come from the one published snapshot
-  // (src/input/effective_input.h). A poll copies the pointer once and uses that copy for its
-  // whole length, so a commit that lands between two polls is observed whole or not at all.
-  // The initial snapshot is published by the boot's Controls store before the input system is
-  // created; a tool or a test sees compiled defaults.
+rex::ScopeGuard InstallPadRemap(rex::hid::ITitleInput& input) {
   auto context = std::make_shared<RemapContext>();
-
-  std::function<std::unique_ptr<rex::system::IInputSystem>(bool)> backend;
-  if (config.input_factory) {
-    backend = std::move(config.input_factory);
-  } else {
-    // The title's own default system (src/input/title_input.h): the SDK's drivers with the MnK
-    // emulation behind the keyboard gate, and the physical drivers remembered for sampling.
-    backend = REX_INPUT_BACKEND(rb_blitz::input::CreateTitleInputSystem);
-  }
-
-  config.input_factory = [backend = std::move(backend), context = std::move(context)](
-                            bool tool_mode) {
-    std::unique_ptr<rex::system::IInputSystem> system = backend(tool_mode);
-    if (tool_mode || !system) {
-      return system;
-    }
-    // The same cast mouse_ui makes, and for the same reason: this is the one input system the
-    // SDK and this project ship, and the filter is the seam the SDK grew for exactly this.
-    static_cast<rex::input::InputSystem*>(system.get())
-        ->SetStateFilter([context](uint32_t user_index,
-                                             rex::input::X_INPUT_STATE& state) {
+  auto guard = input.SetStateFilter([context](uint32_t user_index, rex::hid::PadState& state) {
           namespace remap = rb_blitz::profile::remap;
           // P8: the Controls recovery path observes one host-wide key once per poll (plan
-          // §17.2). It is also observed by the settings overlay, because this filter does not
+          // Ã‚Â§17.2). It is also observed by the settings overlay, because this filter does not
           // run at all when no device enumerates - see remap.h.
-          const bool system_ui = rex::kernel::xam::xeXamIsUIActive() || ui::achievements::Active();
+          const bool system_ui = SystemUIActive() || ui::achievements::Active();
           if (IsGameplayUser(user_index) && !system_ui) {
             TickInputRecovery();
           }
@@ -489,7 +461,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // never disagree about what is held.
           const PhysicalInput physical = SamplePhysicalInput();
           static thread_local std::array<ModalInputGate, 4> modal_gates;
-          const auto& raw = state.gamepad;
+          const auto& raw = state;
           const bool held = HostAnyKeyDown() || physical.mouse_buttons ||
                             raw.buttons || raw.left_trigger > 30 || raw.right_trigger > 30 ||
                             std::abs(int(raw.thumb_lx)) > 8000 ||
@@ -555,7 +527,7 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           if (user_index == 0) {
             static thread_local menu_music_nav::BindingLatch music_latch;
             const auto snapshot = shell_music::NowPlaying().ReadSnapshot();
-            const bool active = REXCVAR_GET(enhancements_background_music_nav) &&
+            const bool active = rb_blitz::settings::title::enhancements_background_music_nav.Get() &&
                                 snapshot.available && MainMenuMusicInputAvailable() &&
                                 physical.window_focused && !capture_armed && !modal_blocked;
             if (auto press = music_latch.Update(config->music, physical.pad,
@@ -572,10 +544,10 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // confirm and search. Without a profile, preserve the SDK's legacy
           // menu path. Gameplay, a closed keyboard gate, or a music-owned key
           // also uses the physical pad only (src/input/source_gates.h).
-          const remap::PadState merged{state.gamepad.buttons,     state.gamepad.left_trigger,
-                                      state.gamepad.right_trigger, state.gamepad.thumb_lx,
-                                      state.gamepad.thumb_ly,      state.gamepad.thumb_rx,
-                                      state.gamepad.thumb_ry};
+          const remap::PadState merged{state.buttons,     state.left_trigger,
+                                      state.right_trigger, state.thumb_lx,
+                                      state.thumb_ly,      state.thumb_rx,
+                                      state.thumb_ry};
           const bool direct_routing = gameplay;
           const bool music_key_owned = std::any_of(music_consumed.begin(), music_consumed.end(),
               [](const Source& source) { return source.kind == SourceKind::kKey; });
@@ -602,11 +574,11 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
             // on this path either, rather than only on the paths that go through a profile.
             out = remap::WithoutProhibitedButtons(pad);
           }
-          state.gamepad.buttons = out.buttons;
+          state.buttons = out.buttons;
           // An unbound trigger keeps its analog travel: Apply copies the state it was handed
           // before it rewrites anything, so only a bound one is driven to an end.
-          state.gamepad.left_trigger = out.left_trigger;
-          state.gamepad.right_trigger = out.right_trigger;
+          state.left_trigger = out.left_trigger;
+          state.right_trigger = out.right_trigger;
           // The axes are the *other* half of the MnK gate, and forgetting them was a measured
           // leak (P3, 2026-10-18): the legacy emulation synthesizes stick travel from WASD as
           // well as buttons, and the title derives its own stick-direction buttons (kPad 16-23)
@@ -614,10 +586,10 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           // button bit was already being cleared. `Apply` copies the axes it was handed, so
           // writing them back is the identity when a profile-free boot uses the merged state,
           // and otherwise gives the guest the physical axes.
-          state.gamepad.thumb_lx = out.left_x;
-          state.gamepad.thumb_ly = out.left_y;
-          state.gamepad.thumb_rx = out.right_x;
-          state.gamepad.thumb_ry = out.right_y;
+          state.thumb_lx = out.left_x;
+          state.thumb_ly = out.left_y;
+          state.thumb_rx = out.right_x;
+          state.thumb_ry = out.right_y;
           // Fixed menu actions bypass user pad remaps. The synthetic driver keeps
           // a controller slot connected, but contributes no buttons before this filter.
           // Wheel detents travel as D-pad presses (1/2/4/8), not stick travel: the
@@ -627,23 +599,23 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           if (user_index == 0) {
             const auto mouse = SampleMenuMousePadState();
             if (!capture_armed) {
-              state.gamepad.buttons = uint16_t(state.gamepad.buttons) | mouse;
+              state.buttons = uint16_t(state.buttons) | mouse;
             }
             // P7: the host's own Back pulse (the listening dialog leaving itself). It follows the
             // same delivery as a player press and is never gated by Mouse Support.
-            state.gamepad.buttons = uint16_t(state.gamepad.buttons) | TakeHostPadPulse();
+            state.buttons = uint16_t(state.buttons) | TakeHostPadPulse();
           }
           // A capture owns raw input until it completes or is cancelled: the guest sees a neutral
           // pad and no gameplay action, so the press being bound cannot navigate, pause, or strike
-          // a note (plan §14.3).
+          // a note (plan Ã‚Â§14.3).
           if (capture_armed || modal_blocked) {
-            state.gamepad.buttons = 0;
-            state.gamepad.left_trigger = 0;
-            state.gamepad.right_trigger = 0;
-            state.gamepad.thumb_lx = 0;
-            state.gamepad.thumb_ly = 0;
-            state.gamepad.thumb_rx = 0;
-            state.gamepad.thumb_ry = 0;
+            state.buttons = 0;
+            state.left_trigger = 0;
+            state.right_trigger = 0;
+            state.thumb_lx = 0;
+            state.thumb_ly = 0;
+            state.thumb_rx = 0;
+            state.thumb_ry = 0;
           }
           // P3: the gameplay tables' source state, edges and pad overlay, for player one only.
           // Host keyboard and mouse actions belong to that slot; users 1..3 are not polled with
@@ -656,10 +628,10 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
           if (IsGameplayUser(user_index) && !capture_armed && !modal_blocked) {
             const uint16_t controller_buttons = ControllerOwnedButtons(config->controller);
             const gameplay_input::PadOverlay overlay = context->ObserveGameplay(
-                physical, gates, routing, gameplay, REXCVAR_GET(input_source_trace), *config,
+                physical, gates, routing, gameplay, rb_blitz::settings::title::input_source_trace.Get(), *config,
                 controller_buttons);
-            state.gamepad.buttons =
-                uint16_t((uint16_t(state.gamepad.buttons) & ~overlay.clear_buttons) |
+            state.buttons =
+                uint16_t((uint16_t(state.buttons) & ~overlay.clear_buttons) |
                          overlay.set_buttons);
           }
           // Offscreen UI acceptance on a desktop whose foreground window is unavailable.
@@ -692,21 +664,12 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
                 }
               }
               if (now < pulse_end)
-                state.gamepad.buttons = uint16_t(state.gamepad.buttons) | pulse_buttons;
+                state.buttons = uint16_t(state.buttons) | pulse_buttons;
             }
           }
-          // Publish the identity of the state actually delivered, after both
-          // remapping and native mouse input. Taking max(device packets) can
-          // leave this unchanged even though a mouse button changed.
-          if (user_index < context->packets.size()) {
-            const auto& pad = state.gamepad;
-            std::lock_guard lock(context->packet_mutex);
-            state.packet_number = context->packets[user_index].Observe(
-                {pad.buttons, pad.left_trigger, pad.right_trigger,
-                 pad.thumb_lx, pad.thumb_ly, pad.thumb_rx, pad.thumb_ry});
-          }
+          // The SDK accounts packets after this transformation and final UI suppression.
         });
-    // P1's evidence line (plan §6 P1): the effective device gates and their sources. The binding
+    // P1's evidence line (plan Ã‚Â§6 P1): the effective device gates and their sources. The binding
     // tables and the controller preset are logged by the Controls store when it is created (P7),
     // because the store is the one owner of the tables and this point runs before it.
     REXLOG_INFO("gameplay mapping: keyboard and mouse input always enabled");
@@ -722,13 +685,12 @@ void InstallPadRemap(rex::RuntimeConfig& config) {
     REXLOG_INFO(
         "input sources: pad=physical-drivers-only keyboard=SDL-state mouse=SDL-state "
         "(gameplay only) focus=required; MnK legacy={}; source trace={} ({})",
-        rex::cvar::GetFlagByName("mnk_mode") == "true"
+        rb_blitz::settings::InspectRuntimeSetting("mnk_mode").active_value == "true"
             ? "on (merged into the guest pad, never a `pad:` gameplay source)"
             : "off",
-        REXCVAR_GET(input_source_trace) ? "on" : "off",
-        CvarSourceName(rex::cvar::GetFlagSource("input_source_trace")));
-    return system;
-  };
+        rb_blitz::settings::title::input_source_trace.Get() ? "on" : "off",
+        CvarSourceName(rb_blitz::settings::InspectRuntimeSetting("input_source_trace").staged_source));
+    return guard;
 }
 
 }  // namespace rb_blitz::input

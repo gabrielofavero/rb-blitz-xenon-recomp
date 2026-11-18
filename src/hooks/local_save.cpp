@@ -12,16 +12,16 @@
 
 #include <chrono>
 #include <cstdio>
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/runtime.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/heap.h>
+#include <rex/path_settings.h>
+#include <rex/xam/user_identity.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
-REXCVAR_DEFINE_BOOL(local_save, true, "Compatibility",
-                    "Persist offline stars, scores and controller mapping locally, and "
-                    "autosave dirty audio/video settings. Off restores the retail offline "
-                    "behaviour, whose player save destination was Rock Central.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 REX_EXTERN(__imp__sub_821CA620);  // SaveData/ConsoleSaveData initialization
 REX_EXTERN(__imp__sub_821CA3D8);  // SaveData teardown (release + 0x44, then clear)
@@ -60,14 +60,14 @@ uint32_t Load32(uint8_t* base, uint32_t address) {
 struct GuestStream {
   PPCContext call;
   uint8_t* base;
-  rex::memory::Memory* memory;
+  rex::kernel::ISystemHeap* memory;
   uint32_t address;
   uint32_t payload = 0;
   bool reading;
   bool constructed = false;
 
   GuestStream(PPCContext& parent, uint8_t* guest_base, bool read)
-      : call(parent), base(guest_base), memory(rex::system::kernel_state()->memory()),
+      : call(parent), base(guest_base), memory(&REX_RUNTIME()->GetGuestHeap()),
         address(memory->SystemHeapAlloc(48)), reading(read) {
     call.r1.u32 -= 0x100;
   }
@@ -190,13 +190,25 @@ void Checkpoint(PPCContext& ctx, uint8_t* base) {
 
 }  // namespace
 
-void Configure(rex::Runtime* runtime) {
-  enabled = REXCVAR_GET(local_save);
-  if (!enabled) { REXLOG_INFO("local_save: disabled; retail offline persistence"); return; }
-  char xuid[17];
-  std::snprintf(xuid, sizeof(xuid), "%016llX",
-                static_cast<unsigned long long>(runtime->kernel_state()->user_profile()->xuid()));
-  save_path = runtime->user_data_root() / xuid / "5841122D" / "local_save.bin";
+void Configure(rex::kernel::TitleRuntime* runtime) {
+  enabled = false;
+  ready = dirty = false;
+  writable = true;
+  save_path.clear();
+  last_saved.clear();
+  retry_at = {};
+  if (!rb_blitz::settings::title::local_save.Get()) {
+    REXLOG_INFO("local_save: disabled; retail offline persistence");
+    return;
+  }
+  auto* identity=REX_INTERFACE(rex::xam::IXAMUserIdentity);
+  const auto xuid=identity ? identity->GetUserXUID() : rex::Err<rex::u64>(rex::ErrorCategory::kNotFound,"no user identity service");
+  if (!runtime || !runtime->IsLoaded() || !xuid) {
+    REXLOG_ERROR("local_save: no attached user identity; preserving existing progress files");
+    return;
+  }
+  save_path = SavePath(REX_PATHS().user_root.Get(),*xuid,0x5841122D);
+  enabled = true;
   REXLOG_INFO("local_save: offline progress at {}; native audio/video autosave enabled",
               save_path.string());
 }

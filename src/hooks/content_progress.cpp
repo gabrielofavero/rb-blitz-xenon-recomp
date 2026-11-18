@@ -11,6 +11,7 @@
 // over every batch of the attempt. The host stops pushing at the guest's own end-of-enumeration
 // call (`SetTotal`): the engine then resets the same bar for its mounting phase and refills it
 // with its own `Increment` calls (measured, out/_swap/dlc-native-bar/bar-2, 2026-10-15).
+#include "settings/runtime_values.h"
 #include "hooks/content_progress.h"
 #include "diag/boot_heartbeat.h"
 #include "settings/boot.h"
@@ -18,17 +19,21 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
-#include <thread>
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xenumerator.h>
-#include <rex/system/xfile.h>
-#include <rex/system/xmemory.h>
+#include <rex/ui/ui_system.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/object/object_table.h>
+#include <rex/kernel/object/file_object.h>
+#include <rex/filesystem/file.h>
+#include <rex/xam/enumeration_info.h>
+#include <rex/ppc/call.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 #include <rex/types.h>
 
-REXCVAR_DECLARE(bool, enhancements_dlc_uncap_enumeration);
+
 REX_EXTERN(__imp__sub_82759190);  // the engine's own push into the panel
 REX_EXTERN(__imp__sub_82759308);
 REX_EXTERN(__imp__sub_827593A8);
@@ -69,12 +74,7 @@ void StoreBe32(uint8_t* p, int32_t value) {
   p[3] = static_cast<uint8_t>(v);
 }
 
-// Writes the two properties the title's Flow reads (`current_content` / `total_content`) and
-// pushes them with the engine's own push. The push is a recompiled guest function, so it is
-// called the way the engine calls it - object in r3 - but on a *copy* of the context, so the
-// registers of the guest call this is nested inside survive. r1 is left alone: this runs on
-// the guest thread, inside its own call, and a callee allocating below the caller's r1 is
-// the ABI.
+// Update the authored Flow properties and call its push through an isolated ABI frame.
 void PushProgress(PPCContext& ctx, uint8_t* base, uint32_t current, uint32_t total) {
   const uint32_t object = g_object.load(std::memory_order_relaxed);
   if (object == 0) {
@@ -86,9 +86,7 @@ void PushProgress(PPCContext& ctx, uint8_t* base, uint32_t current, uint32_t tot
   }
   StoreBe32(memory + 8, static_cast<int32_t>(current));
   StoreBe32(memory + 12, static_cast<int32_t>(total));
-  PPCContext call = ctx;
-  call.r3.u64 = object;
-  __imp__sub_82759190(call, base);
+  rex::ppc::Call<void>(ctx, base, __imp__sub_82759190, object);
 }
 using ImportFunc = void (*)(PPCContext&, uint8_t*);
 ImportFunc ResolveImport(const char* symbol) {
@@ -100,26 +98,29 @@ void Forward(const char* symbol, PPCContext& ctx, uint8_t* base) {
   if (original) original(ctx, base);
   else { ctx.r3.u32 = 0x80004005; REXLOG_ERROR("content_pipeline: missing import {}", symbol); }
 }
-bool g_uncap_enabled = false;
+std::atomic<bool> g_uncap_enabled{false};
+std::atomic<bool> g_active{false};
+std::atomic<uint64_t> g_generation{0};
 
 // kIdle -> kFreeing -> kFreed -> kRestoring -> kIdle, claimed by the guest thread and completed
-// by the host thread that does the write. One transition at a time is the whole synchronisation,
+// by the UI task that performs the write. One transition at a time is the whole synchronisation,
 // and a request that finds the machine in any other state is simply not wanted.
 enum class Pacing { kIdle, kFreeing, kFreed, kRestoring };
 
 std::atomic<Pacing> g_pacing{Pacing::kIdle};
 std::mutex g_pacing_mutex;
+rex::ui::IUISystem* g_ui = nullptr;  // Cleared before the app releases its UI service.
 std::string g_player_vsync;  // what to put back, under g_pacing_mutex, while kFreed
 std::atomic<bool> g_restore_requested{false};
 void RequestFrameRateRestore(const char* why);
 
-// `vsync` is defined in rexruntime.dll's own GPU category, so it is read and written by name:
+// `vsync` is defined by the SDK GPU settings owner, so it is read and written by name:
 // REXCVAR_GET would need a storage symbol this module does not define.
 bool PacingIsFree(const std::string& value) { return value == "false" || value == "0"; }
 
-// Host thread: turn the frame rate down, remembering the player's own value.
+// UI thread: turn the frame rate down, remembering the player's own value.
 void FreeFrameRate() {
-  const std::string before = rex::cvar::GetFlagByName("vsync");
+  const std::string before = rb_blitz::settings::InspectRuntimeSetting("vsync").active_value;
   if (PacingIsFree(before)) {
     REXLOG_INFO("content_progress: the discovery is frame-paced and the frame rate is already "
                 "free (vsync = {}); the phase runs as it is",
@@ -127,7 +128,8 @@ void FreeFrameRate() {
     g_pacing.store(Pacing::kIdle);
     return;
   }
-  if (before.empty() || !rex::cvar::SetFlagByName("vsync", "false")) {
+  if (before.empty() || !rb_blitz::settings::WriteRuntimeSetting("vsync", "false", rex::SettingLayer::kRuntime).accepted() ||
+      !PacingIsFree(rb_blitz::settings::InspectRuntimeSetting("vsync").active_value)) {
     REXLOG_WARN("content_progress: could not free the frame rate for the discovery (vsync = "
                 "{}); the phase runs at the player's own frame rate",
                 before.empty() ? "unknown" : before);
@@ -145,46 +147,76 @@ void FreeFrameRate() {
               before);
 }
 
-// Host thread: put the player's value back.
+// UI thread: put the player's value back.
 void RestoreFrameRate() {
   std::string intended;
   {
     std::lock_guard<std::mutex> lock(g_pacing_mutex);
     intended = g_player_vsync;
   }
-  if (intended.empty() || !rex::cvar::SetFlagByName("vsync", intended)) {
+  if (intended.empty() || !rb_blitz::settings::WriteRuntimeSetting("vsync", intended, rex::SettingLayer::kRuntime).accepted() ||
+      rb_blitz::settings::InspectRuntimeSetting("vsync").active_value != intended) {
     REXLOG_WARN("content_progress: the frame rate could not be put back to vsync = {}; it stays "
                 "free for this run",
                 intended.empty() ? "unknown" : intended);
     g_pacing.store(Pacing::kIdle);
     return;
   }
+  {
+    std::lock_guard lock(g_pacing_mutex);
+    g_player_vsync.clear();
+  }
   g_pacing.store(Pacing::kIdle);
   REXLOG_INFO("content_progress: the frame rate is the player's own again (vsync = {})", intended);
+}
+
+// Queue setting writes on the owning UI thread. A closing or later launch retires
+// queued requests before they can touch settings from another content attempt.
+void SchedulePacing(bool free) {
+  std::lock_guard lock(g_pacing_mutex);
+  if (!g_active.load() || !g_ui) return;
+  const auto generation = g_generation.load();
+  g_ui->PostTask([generation, free] {
+    if (!g_active.load() || generation != g_generation.load()) return;
+    if (free) FreeFrameRate(); else RestoreFrameRate();
+  });
+}
+
+void ScheduleAsyncCompilationRestore() {
+  std::lock_guard lock(g_pacing_mutex);
+  if (!g_active.load() || !g_ui) return;
+  const auto generation = g_generation.load();
+  g_ui->PostTask([generation] {
+    if (!g_active.load() || generation != g_generation.load()) return;
+    if (auto* settings = rb_blitz::settings::boot::SettingsBoot::Current())
+      settings->RestoreAsyncShaderCompilation();
+  });
 }
 
 // The request side, always on the guest thread. Each is logged only when it is the one that won
 // the transition, so a boot says once why the frame rate moved and once why it went back.
 void RequestFrameRateFree(const char* why) {
+  if (!g_active.load()) return;
   Pacing idle = Pacing::kIdle;
   if (!g_pacing.compare_exchange_strong(idle, Pacing::kFreeing)) {
     return;
   }
   REXLOG_INFO("content_progress: {}; the host lets the frame rate run free for the discovery "
-              "(R7's frame pacing)",
+              "(temporary frame pacing)",
               why);
   g_restore_requested.store(false);
-  std::thread(FreeFrameRate).detach();
+  SchedulePacing(true);
 }
 
 void RequestFrameRateRestore(const char* why) {
+  if (!g_active.load()) return;
   g_restore_requested.store(true);
   Pacing freed = Pacing::kFreed;
   if (!g_pacing.compare_exchange_strong(freed, Pacing::kRestoring)) {
     return;
   }
   REXLOG_INFO("content_progress: {}; the frame rate goes back to the player's own", why);
-  std::thread(RestoreFrameRate).detach();
+  SchedulePacing(false);
 }
 
 
@@ -201,7 +233,7 @@ void BeginAttempt() { // g_mutex held
   g_guest_owns_panel = false;
   REXLOG_INFO("content_pipeline: attempt {} started", g_model.Get().attempt);
   REXLOG_INFO("dlc_load: begin attempt={} pacing={}", g_model.Get().attempt,
-              g_uncap_enabled);
+              g_uncap_enabled.load());
   if (g_uncap_enabled) RequestFrameRateFree("content discovery started");
 }
 
@@ -214,14 +246,14 @@ void WatchXmsg(PPCContext& ctx, uint8_t* base, const char* symbol, bool overlapp
     const uint32_t extra = Be32(base + data + 8);
     if (extra) {
       handle = Be32(base + extra + 4);
-      auto e = REX_KERNEL_STATE()->object_table()->LookupObject<rex::system::XEnumerator>(handle);
-      // The aggregate app creates exactly XStaticEnumerator<XCONTENT_AGGREGATE_DATA>.
-      if (e) total = static_cast<uint32_t>(
-          static_cast<rex::system::XStaticUntypedEnumerator*>(e.get())->item_count());
+      if (auto* info = REX_INTERFACE(rex::xam::IContentEnumerationInfo)) {
+        const auto count = info->GetAggregateItemCount(handle);
+        if (count && *count <= UINT32_MAX) total = static_cast<uint32_t>(*count);
+      }
     }
   }
   Forward(symbol, ctx, base);
-  if (!enumerate) return;
+  if (!enumerate || !g_active.load()) return;
   // This SDK dispatches the app synchronously even through the Async entry.
   // StartIORequestEx then returns IO_PENDING but stores the actual HRESULT in
   // XAM_OVERLAPPED.result (xam_msg.cpp / AppManager::DispatchMessageAsync).
@@ -252,14 +284,51 @@ void WatchXmsg(PPCContext& ctx, uint8_t* base, const char* symbol, bool overlapp
 } // namespace
 
 namespace rb_blitz::content_progress {
+void Close() {
+  rex::ui::IUISystem* ui;
+  {
+    std::lock_guard lock(g_pacing_mutex);
+    ui = g_ui;
+  }
+  if (ui && !ui->IsUIThread()) {
+    if (!ui->RunSynchronous([] { Close(); }))
+      REXLOG_WARN("content_progress: UI stopped before pacing cleanup could run");
+    return;
+  }
+  bool restore = false;
+  {
+    std::lock_guard lock(g_pacing_mutex);
+    g_active.store(false);
+    g_generation.fetch_add(1);
+    g_ui = nullptr;
+    restore = !g_player_vsync.empty();
+  }
+  if (restore) RestoreFrameRate();
+  g_pacing.store(Pacing::kIdle);
+  g_restore_requested.store(false);
+  g_uncap_enabled.store(false);
+  g_object.store(0);
+  std::lock_guard lock(g_mutex);
+  g_model = Model{};
+  g_pushed_percent = g_delivered_percent = -1;
+  g_guest_owns_panel = false;
+}
+
 void Configure() {
-  // The bar and pacing policy remain truthful for every content root.
-  g_uncap_enabled = REXCVAR_GET(enhancements_dlc_uncap_enumeration);
+  Close();
+  auto* ui = REX_INTERFACE(rex::ui::IUISystem);
+  {
+    std::lock_guard lock(g_pacing_mutex);
+    g_ui = ui;
+    g_generation.fetch_add(1);
+    g_active.store(true);
+  }
+  g_uncap_enabled.store(ui && rb_blitz::settings::title::enhancements_dlc_uncap_enumeration.Get());
   REXLOG_INFO("content_pipeline: the title's own discovery bar follows the actual aggregate "
-              "batches; pacing={}",
-              g_uncap_enabled);
+              "batches; pacing={}", g_uncap_enabled.load());
 }
 void Tick(PPCContext& ctx, uint8_t* base) {
+  if (!g_active.load()) return;
   uint32_t counted = 0, expected = 0;
   int percent = -1;
   {
@@ -283,6 +352,7 @@ void Tick(PPCContext& ctx, uint8_t* base) {
 }
 
 void ObserveScreen(std::string_view screen, std::string_view panel, bool available) {
+  if (!g_active.load()) return;
   std::lock_guard lock(g_mutex);
   const bool discovery = panel == "server_connect_panel";
   if (discovery && !g_model.Get().active()) BeginAttempt();
@@ -303,15 +373,22 @@ void ObserveScreen(std::string_view screen, std::string_view panel, bool availab
                 g_last_enum_us ? (NowMicros() - g_last_enum_us) / 1000.0 : 0.0,
                 p.successful, p.failures);
     RequestFrameRateRestore("the usable main menu is current with no transition pending");
-    if (auto* settings = rb_blitz::settings::boot::SettingsBoot::Current())
-      settings->RestoreAsyncShaderCompilation();
+    ScheduleAsyncCompilationRestore();
     rb_blitz::diag::boot_heartbeat::Finish("usable menu");
   }
 }
 IoObservation BeginIo(uint32_t handle, bool write) {
-  auto file = REX_KERNEL_STATE()->object_table()->LookupObject<rex::system::XFile>(handle);
+  if (!g_active.load()) return {};
+  auto* runtime = REX_RUNTIME();
+  if (!runtime || !runtime->IsLoaded()) return {};
+  auto file = runtime->GetObjectTable().Get<rex::kernel::FileObject>(handle);
   if (!file) return {};
-  const auto& name = file->name();
+  std::string name;
+  {
+    std::lock_guard lock(file->file_lock);
+    if (!file->file) return {};
+    name = file->file->GetInfo().name;
+  }
   int kind = name == "songcache" ? (write ? 3 : 2)
              : !write && (name == "songs.dta" || name == "songs.dtb") ? 1 : 0;
   if (!kind) return {};
@@ -349,7 +426,7 @@ extern "C" REX_FUNC(sub_82759308) {
 // 0x827593A8 (SetTotal): the engine announcing a phase's total. It also zeroes the current
 // count and pushes, so the Flow draws the bar from 0 again. This build calls it once, after the
 // enumeration: measured with a total of 0 (2026-10-10, docs/plans/finished/
-// 2026-10-10-song-cache-plan.md §9.4) and with 3546 - the enumeration's own count - on
+// 2026-10-10-song-cache-plan.md Ã‚Â§9.4) and with 3546 - the enumeration's own count - on
 // 2026-10-15. The Flow reads a non-positive total as "not enumerating ... -1", so only such an
 // announcement is rewritten to -1; a positive one runs as the title wrote it. The host never
 // re-pushes after it: the engine's own `Increment` calls refill the bar for the mounting phase.

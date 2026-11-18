@@ -3,22 +3,22 @@
 
 #include <array>
 #include <cstring>
-#include <rex/graphics/pipeline/texture/util.h>
+#include <gpu/xenos/pipeline/texture/conversion.h>
 
 namespace {
 using namespace rb_blitz::test;
-using rex::graphics::texture_util::ConvertNonFloatGuestRange;
-using rex::graphics::texture_util::IsNonFloat32bpcFormat;
-using rex::graphics::xenos::Endian;
-using rex::graphics::xenos::GpuSwap;
-using rex::graphics::xenos::TextureFormat;
+using rex::gpu::texture_conversion::ConvertNonFloatGuestRange;
+using rex::gpu::texture_conversion::IsNonFloat32bpcFormat;
+using rex::xenos::Endian;
+using rex::xenos::GPUSwap;
+using rex::xenos::TextureFormat;
 
 void TestComponents(Endian endian, bool signed_data, bool integer) {
   const std::array<uint32_t, 5> words = {0, 1, 0x7fffffff, 0x80000000, 0xffffffff};
   std::array<uint32_t, 5> source;
   std::array<uint32_t, 7> destination;
   destination.fill(0xdeadbeef);
-  for (size_t i = 0; i < words.size(); ++i) source[i] = GpuSwap(words[i], endian);
+  for (size_t i = 0; i < words.size(); ++i) source[i] = GPUSwap(words[i], endian);
   ConvertNonFloatGuestRange(reinterpret_cast<const uint8_t*>(source.data()),
       reinterpret_cast<uint8_t*>(destination.data() + 1), sizeof(source),
       endian, signed_data, integer);
@@ -31,11 +31,11 @@ void TestComponents(Endian endian, bool signed_data, bool integer) {
       : (signed_data ? std::array<float, 5>{0, 0x1p-31f, 1, -1, -0x1p-31f}
                      : std::array<float, 5>{0, 0x1p-32f, 0.5f, 0.5f, 1});
   for (size_t i = 0; i < words.size(); ++i) {
-    const uint32_t bits = GpuSwap(destination[i + 1], endian);
+    const uint32_t bits = GPUSwap(destination[i + 1], endian);
     float value;
     std::memcpy(&value, &bits, sizeof(value));
     CHECK_TRUE(value == expected[i]);
-    CHECK_EQ(source[i], GpuSwap(words[i], endian));
+    CHECK_EQ(source[i], GPUSwap(words[i], endian));
   }
 }
 
@@ -45,7 +45,7 @@ void TestOpaqueAlpha() {
   std::array<uint32_t, 4> converted = {};
   ConvertNonFloatGuestRange(reinterpret_cast<const uint8_t*>(source.data()),
       reinterpret_cast<uint8_t*>(converted.data()), sizeof(source), Endian::k8in32, false, false);
-  for (const auto component : converted) CHECK_EQ(GpuSwap(component, Endian::k8in32), 0x3f800000);
+  for (const auto component : converted) CHECK_EQ(GPUSwap(component, Endian::k8in32), 0x3f800000);
 }
 }  // namespace
 

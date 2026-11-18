@@ -6,7 +6,7 @@
 #include <SPIRV/GlslangToSpv.h>
 #include <glslang/Public/ShaderLang.h>
 #include <StandAlone/ResourceLimits.h>
-#include <rex/graphics/pipeline/shader/spirv_builder.h>
+#include "gpu/xenos/pipeline/shader/spirv_builder.h"
 
 #include <array>
 #include <cstdio>
@@ -22,11 +22,11 @@ void Require(bool condition, const char* message) {
 void Check(VkResult result) { Require(result == VK_SUCCESS, "Vulkan operation failed"); }
 
 std::vector<uint32_t> VertexShader(bool workaround) {
-  rex::graphics::SpirvBuilder b(spv::Spv_1_0, 0, nullptr);
+  rex::gpu::SPIRVBuilder b(spv::Spv_1_0, 0, nullptr);
   b.addCapability(spv::CapabilityShader);
   b.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
   auto glsl = b.import("GLSL.std.450");
-  if (workaround) b.setNoContractionFma(glsl);
+  if (workaround) b.SetNoContractionFma(glsl);
   auto scalar = b.makeFloatType(32), v2 = b.makeVectorType(scalar, 2);
   auto v4 = b.makeVectorType(scalar, 4), boolean = b.makeBoolType();
   auto index = b.createVariable(spv::NoPrecision, spv::StorageClassInput,
@@ -63,21 +63,21 @@ std::vector<uint32_t> VertexShader(bool workaround) {
       b.createCompositeExtract(point, scalar, 1), b.makeFloatConstant(0), b.makeFloatConstant(1)}),
       position);
   auto half = b.makeFloatConstant(.5f);
-  auto value = b.createNoContractionBinOp(spv::OpVectorTimesScalar, v2, point, half);
-  value = b.createNoContractionBinOp(spv::OpFAdd, v2, value,
+  auto value = b.CreateNoContractionBinOp(spv::OpVectorTimesScalar, v2, point, half);
+  value = b.CreateNoContractionBinOp(spv::OpFAdd, v2, value,
       b.makeCompositeConstant(v2, {half, half}));
   b.createStore(value, uv);
   auto inputs = b.createLoad(b.createAccessChain(spv::StorageClassPushConstant, constants,
       std::vector<spv::Id>{b.makeIntConstant(0)}), spv::NoPrecision);
   auto a = b.createCompositeExtract(inputs, scalar, 0);
   auto c = b.createCompositeExtract(inputs, scalar, 1);
-  auto product = b.createNoContractionBinOp(spv::OpFMul, scalar, a, a);
-  auto difference = b.createNoContractionBinOp(spv::OpFSub, scalar, product, c);
+  auto product = b.CreateNoContractionBinOp(spv::OpFMul, scalar, a, a);
+  auto difference = b.CreateNoContractionBinOp(spv::OpFSub, scalar, product, c);
   auto bad = b.createBinOp(spv::OpFUnordNotEqual, boolean, difference, b.makeFloatConstant(0));
   // Runtime -0 multiplied by +1 must retain its sign in the replacement Fma.
   auto zero = b.createCompositeExtract(inputs, scalar, 2);
   auto one = b.createCompositeExtract(inputs, scalar, 3);
-  auto zero_product = b.createNoContractionBinOp(spv::OpFMul, scalar, zero, one);
+  auto zero_product = b.CreateNoContractionBinOp(spv::OpFMul, scalar, zero, one);
   auto uint_type = b.makeUintType(32);
   auto wrong_sign = b.createBinOp(spv::OpINotEqual, boolean,
       b.createUnaryOp(spv::OpBitcast, uint_type, zero_product), b.makeUintConstant(0x80000000));
@@ -91,11 +91,11 @@ std::vector<uint32_t> VertexShader(bool workaround) {
 }
 
 std::vector<uint32_t> FragmentShader(bool workaround) {
-  rex::graphics::SpirvBuilder b(spv::Spv_1_0, 0, nullptr);
+  rex::gpu::SPIRVBuilder b(spv::Spv_1_0, 0, nullptr);
   b.addCapability(spv::CapabilityShader);
   b.setMemoryModel(spv::AddressingModelLogical, spv::MemoryModelGLSL450);
   auto glsl = b.import("GLSL.std.450");
-  if (workaround) b.setNoContractionFma(glsl);
+  if (workaround) b.SetNoContractionFma(glsl);
   auto scalar = b.makeFloatType(32), v2 = b.makeVectorType(scalar, 2);
   auto v4 = b.makeVectorType(scalar, 4), boolean = b.makeBoolType();
   auto b2 = b.makeVectorType(boolean, 2);
@@ -123,13 +123,13 @@ std::vector<uint32_t> FragmentShader(bool workaround) {
   };
   auto value = b.createLoad(input, spv::NoPrecision);
   // These operations precede derivatives in real guest texture instructions.
-  value = b.createNoContractionBinOp(spv::OpFAdd, v2, value, splat(.0002f, 2));
-  value = b.createNoContractionBinOp(spv::OpFSub, v2, value, splat(.0001f, 2));
-  value = b.createNoContractionBinOp(spv::OpFMul, v2, value, splat(1.f, 2));
-  value = b.createNoContractionBinOp(spv::OpVectorTimesScalar, v2, value, b.makeFloatConstant(1.f));
+  value = b.CreateNoContractionBinOp(spv::OpFAdd, v2, value, splat(.0002f, 2));
+  value = b.CreateNoContractionBinOp(spv::OpFSub, v2, value, splat(.0001f, 2));
+  value = b.CreateNoContractionBinOp(spv::OpFMul, v2, value, splat(1.f, 2));
+  value = b.CreateNoContractionBinOp(spv::OpVectorTimesScalar, v2, value, b.makeFloatConstant(1.f));
   auto bad_gradient = [&](spv::Op derivative) {
     auto d = b.createUnaryOp(derivative, v2, value);
-    auto magnitude = b.createUnaryBuiltinCall(v2, glsl, GLSLstd450FAbs, d);
+    auto magnitude = b.CreateUnaryBuiltinCall(v2, glsl, GLSLstd450FAbs, d);
     auto bad = b.createBinOp(spv::OpFOrdGreaterThan, b2, magnitude, splat(.005f, 2));
     return b.createUnaryOp(spv::OpAny, boolean, bad);
   };
@@ -144,9 +144,9 @@ std::vector<uint32_t> FragmentShader(bool workaround) {
       std::vector<spv::Id>{b.makeIntConstant(0)}), spv::NoPrecision);
   auto a = b.createCompositeExtract(values, scalar, 0);
   auto c = b.createCompositeExtract(values, scalar, 1);
-  auto product = b.createNoContractionBinOp(spv::OpFMul, scalar, a, a);
-  auto difference = b.createNoContractionBinOp(spv::OpFSub, scalar, product, c);
-  auto sum = b.createNoContractionBinOp(spv::OpFAdd, scalar, product,
+  auto product = b.CreateNoContractionBinOp(spv::OpFMul, scalar, a, a);
+  auto difference = b.CreateNoContractionBinOp(spv::OpFSub, scalar, product, c);
+  auto sum = b.CreateNoContractionBinOp(spv::OpFAdd, scalar, product,
       b.createUnaryOp(spv::OpFNegate, scalar, c));
   for (auto result : {difference, sum}) {
     auto wrong = b.createBinOp(spv::OpFUnordNotEqual, boolean, result, b.makeFloatConstant(0));

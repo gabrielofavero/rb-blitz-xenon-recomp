@@ -5,23 +5,24 @@
 #include "hooks/screenshots.h"
 #include "fs/screenshots.h"
 
-#include <rex/hook.h>
-#include <rex/runtime.h>
-#include <rex/system/interfaces/graphics.h>
-#include <rex/system/xmemory.h>
-#include <rex/ui/presenter.h>
+#include <rex/ppc/hook.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/gpu/graphics_presentation.h>
+#include <rex/path_settings.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 REX_EXTERN(__imp__sub_82205C88);
 
 namespace rb_blitz::screenshots {
 namespace {
-rex::Runtime* g_runtime = nullptr;
+rex::kernel::TitleRuntime* g_runtime = nullptr;
 std::filesystem::path g_directory;
 }  // namespace
 
-void Configure(rex::Runtime* runtime, const std::filesystem::path& shared_documents) {
+void Configure(rex::kernel::TitleRuntime* runtime, const std::filesystem::path& shared_documents) {
   g_runtime = runtime;
-  g_directory = PicturesDirectory(runtime->user_data_root(), shared_documents);
+  g_directory = PicturesDirectory(REX_PATHS().user_root.Get(), shared_documents);
   REXLOG_INFO("screenshots: results captures use 24-bit BMP in {}", g_directory.string());
 }
 
@@ -34,10 +35,9 @@ void Capture(PPCContext& ctx, uint8_t* base) {
     const char* text = rex::memory::GuestPtr<const char*>(base, ctx.r4.u32);
     if (text) for (size_t i = 0; i < 1024 && text[i]; ++i) prefix += text[i];
   }
-  auto* graphics = g_runtime->graphics_system();
-  auto* presenter = graphics ? graphics->presenter() : nullptr;
-  rex::ui::RawImage image;
-  if (!presenter || !presenter->CaptureGuestOutput(image)) {
+  auto* presentation = REX_INTERFACE(rex::gpu::IGraphicsPresentation);
+  rex::gpu::CaptureImage image;
+  if (!g_runtime->IsLoaded() || !presentation || !presentation->CaptureGuestOutput(image)) {
     REXLOG_ERROR("screenshots: could not capture the results image");
     return;
   }

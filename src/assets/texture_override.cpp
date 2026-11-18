@@ -2,6 +2,7 @@
 #include "assets/texture_override.h"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <chrono>
 #include <condition_variable>
@@ -17,8 +18,8 @@
 #include <utility>
 #include <vector>
 
-#include <rex/graphics/pipeline/texture/cache.h>
-#include <rex/logging.h>
+#include <rex/gpu/texture_override.h>
+#include <rex/logging/log_category.h>
 
 #include "assets/texture_codec.h"
 #include "assets/input_font_atlas.h"
@@ -146,7 +147,7 @@ struct FontResult {
   std::array<FontVariant, 3> variants;
 };
 
-class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
+class SchemeOverride final : public rex::gpu::ITextureOverrideProvider {
  public:
   explicit SchemeOverride(controller_schemes::Registry registry)
       : registry_(std::move(registry)) {
@@ -236,7 +237,8 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       }
     }
   }
-  void Poll() override {
+  bool Poll() override {
+    bool changed = false;
     std::string next;
     uint64_t next_ticket = 0;
     std::vector<input::icons::Icon> icons;
@@ -344,7 +346,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     if (scheme_changed || family_changed || hints_changed || fonts_ready || retail_ps_pads_ready ||
         refresh_font_after_buttons_) {
       refresh_font_after_buttons_ = false;
-      rex::graphics::InvalidateTextureOverrides();
+      changed = true;
     }
     {
       std::lock_guard lock(pending_mutex_);
@@ -356,11 +358,13 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
       }
       completion_.Complete(installed_font_revision_);
     }
+    return changed;
   }
-  bool GetOverride(const rex::graphics::TextureOverrideRequest& request,
-                   const uint8_t* guest_data,
-                   std::vector<std::vector<uint8_t>>* host_levels,
-                   bool* refresh_target) override {
+  bool GetOverride(const rex::gpu::TextureOverrideRequest& request,
+                   std::span<const uint8_t> guest_bytes,
+                   std::vector<std::vector<uint8_t>>& host_levels,
+                   bool& refresh_target) override {
+    const auto* guest_data = guest_bytes.data();
     const uint64_t hash = ContentHash(guest_data, request.guest_base_size);
     int calibration_slot = -1;
     if (request.width == 256 && request.height == 256 &&
@@ -435,12 +439,12 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     // The base-game texture must be a refresh candidate before any custom scheme is selected.
     // Otherwise a retail boot uploads it once and a later generation bump has nothing to evict.
     if (button || icons || pad_slot || font || private_font || calibration_slot >= 0)
-      *refresh_target = true;
+      refresh_target = true;
     const auto& variant = font_variants_[static_cast<size_t>(active_family_)];
     if (calibration_slot >= 0 && !variant.calibration[calibration_slot % 2].empty()) {
       const auto& levels = variant.calibration[calibration_slot % 2];
       if (request.mip_count > levels.size()) return false;
-      host_levels->assign(levels.begin(), levels.begin() + request.mip_count);
+      host_levels.assign(levels.begin(), levels.begin() + request.mip_count);
       return true;
     }
     if (button && original_buttons_.empty() &&
@@ -450,14 +454,14 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     }
     if (private_font) {
       if (request.mip_count > variant.private_font.size()) return false;
-      host_levels->assign(variant.private_font.begin(),
+      host_levels.assign(variant.private_font.begin(),
                           variant.private_font.begin() + request.mip_count);
       return true;
     }
     if (font) {
       const auto& chosen = variant.retail;
       if (request.mip_count > chosen.size()) return false;
-      host_levels->assign(chosen.begin(), chosen.begin() + request.mip_count);
+      host_levels.assign(chosen.begin(), chosen.begin() + request.mip_count);
       return true;
     }
     const auto* scheme = registry_.Find(selected_);
@@ -510,7 +514,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
         }
         if (!header.empty()) chosen = &header;
       }
-      host_levels->assign(chosen->begin(), chosen->begin() + request.mip_count);
+      host_levels.assign(chosen->begin(), chosen->begin() + request.mip_count);
       if (logged_.insert(hash).second)
         REXLOG_INFO("controller_schemes: overrode button sheet ({} mip level(s))",
                     request.mip_count);
@@ -520,7 +524,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     if (pad_slot) {
       auto it = pads_.find(hash);
       if (it == pads_.end() || request.mip_count > it->second.size()) return false;
-      host_levels->assign(it->second.begin(), it->second.begin() + request.mip_count);
+      host_levels.assign(it->second.begin(), it->second.begin() + request.mip_count);
       if (logged_.insert(hash).second)
         REXLOG_INFO("controller_schemes: overrode {} pad ({} mip level(s))", pad_slot,
                     request.mip_count);
@@ -528,7 +532,7 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
     }
     if (icons) {
       if (request.mip_count > icons_.size()) return false;
-      host_levels->assign(icons_.begin(), icons_.begin() + request.mip_count);
+      host_levels.assign(icons_.begin(), icons_.begin() + request.mip_count);
       if (logged_.insert(hash).second)
         REXLOG_INFO("controller_schemes: overrode extra icons ({} mip level(s))",
                     request.mip_count);
@@ -579,7 +583,23 @@ class SchemeOverride final : public rex::graphics::TextureOverrideProvider {
   std::jthread worker_;
 };
 
-SchemeOverride* g_scheme_provider = nullptr;
+std::atomic<std::shared_ptr<SchemeOverride>> g_scheme_provider;
+rex::gpu::ITextureOverrides* g_override_service = nullptr;
+rex::ScopeGuard g_override_registration;
+
+bool RegisterProvider(std::shared_ptr<rex::gpu::ITextureOverrideProvider> provider) {
+  if (!g_override_service) {
+    REXLOG_ERROR("texture_override: graphics override service is unavailable");
+    return false;
+  }
+  auto registered = g_override_service->RegisterProvider(std::move(provider));
+  if (!registered) {
+    REXLOG_ERROR("texture_override: provider registration failed: {}", registered.error().message);
+    return false;
+  }
+  g_override_registration = std::move(*registered);
+  return true;
+}
 
 std::vector<uint8_t> MakeMarkerLevel(uint32_t size, bool pad) {
   std::vector<uint8_t> rgba(std::size_t(size) * size * 4);
@@ -621,7 +641,7 @@ std::vector<std::vector<uint8_t>> MakeMarker(uint32_t size, bool pad) {
   return levels;
 }
 
-class P1TextureOverride final : public rex::graphics::TextureOverrideProvider {
+class P1TextureOverride final : public rex::gpu::ITextureOverrideProvider {
  public:
   P1TextureOverride(std::optional<uint64_t> button_hash,
                     std::optional<uint64_t> pad_hash, std::filesystem::path switch_file)
@@ -629,20 +649,21 @@ class P1TextureOverride final : public rex::graphics::TextureOverrideProvider {
         switch_file_(std::move(switch_file)),
         button_blocks_(MakeMarker(512, false)), pad_blocks_(MakeMarker(1024, true)) {}
 
-  void Poll() override {
-    if (switch_file_.empty()) return;
+  bool Poll() override {
+    if (switch_file_.empty()) return false;
     std::error_code error;
     const bool enabled = !std::filesystem::exists(switch_file_, error);
-    if (error || enabled == markers_enabled_) return;
+    if (error || enabled == markers_enabled_) return false;
     markers_enabled_ = enabled;
     REXLOG_INFO("texture_override: marker switch {}", enabled ? "on" : "off");
-    rex::graphics::InvalidateTextureOverrides();
+    return true;
   }
 
-  bool GetOverride(const rex::graphics::TextureOverrideRequest& request,
-                   const uint8_t* guest_data,
-                   std::vector<std::vector<uint8_t>>* host_levels,
-                   bool* refresh_target) override {
+  bool GetOverride(const rex::gpu::TextureOverrideRequest& request,
+                   std::span<const uint8_t> guest_bytes,
+                   std::vector<std::vector<uint8_t>>& host_levels,
+                   bool& refresh_target) override {
+    const auto* guest_data = guest_bytes.data();
     const uint64_t hash = ContentHash(guest_data, request.guest_base_size);
     const uint64_t trace_key = hash ^ (uint64_t(request.width) << 32);
     if (seen_.insert(trace_key).second) {
@@ -656,9 +677,9 @@ class P1TextureOverride final : public rex::graphics::TextureOverrideProvider {
         button_hash_ && hash == *button_hash_) marker = &button_blocks_;
     if (request.width == 1024 && request.height == 1024 &&
         pad_hash_ && hash == *pad_hash_) marker = &pad_blocks_;
-    *refresh_target = marker != nullptr;
+    refresh_target = marker != nullptr;
     if (!marker || !markers_enabled_ || request.mip_count > marker->size()) return false;
-    host_levels->assign(marker->begin(), marker->begin() + request.mip_count);
+    host_levels.assign(marker->begin(), marker->begin() + request.mip_count);
     REXLOG_INFO("texture_override: replaced {}x{} mips={} hash={:016X}",
                 request.width, request.height, request.mip_count, hash);
     return true;
@@ -676,16 +697,27 @@ class P1TextureOverride final : public rex::graphics::TextureOverrideProvider {
 
 }  // namespace
 
+void ConfigureTextureOverrides(rex::gpu::ITextureOverrides* service) {
+  if (g_override_service == service) return;
+  ResetTextureOverrides();
+  g_override_service = service;
+}
+
+void ResetTextureOverrides() {
+  g_override_registration = {};
+  g_scheme_provider.store(nullptr);
+  g_override_service = nullptr;
+}
+
 void InstallP1TextureOverride() {
   const char* trace = std::getenv("RB_BLITZ_P1_TRACE");
   const auto button = HashFromEnv("RB_BLITZ_P1_BUTTON_HASH");
   const auto pad = HashFromEnv("RB_BLITZ_P1_PAD_HASH");
   if ((!trace || std::string(trace) != "1") && !button && !pad) return;
   const char* switch_path = std::getenv("RB_BLITZ_P1_SWITCH_FILE");
-  static P1TextureOverride provider(button, pad,
-                                    switch_path ? std::filesystem::path(switch_path)
-                                                : std::filesystem::path());
-  rex::graphics::SetTextureOverrideProvider(&provider);
+  auto provider = std::make_shared<P1TextureOverride>(button, pad,
+      switch_path ? std::filesystem::path(switch_path) : std::filesystem::path());
+  if (!RegisterProvider(std::move(provider))) return;
   REXLOG_INFO("texture_override: P1 trace active (button={}, pad={}, switch={})",
               button.has_value(), pad.has_value(), switch_path ? switch_path : "none");
 }
@@ -719,14 +751,15 @@ void InstallControllerSchemes(const std::filesystem::path& install_root,
   for (const auto& [id, scheme] : registry.schemes)
     choices.push_back({id, scheme.name});
   settings::schema::SetControllerSchemes(std::move(choices));
-  static SchemeOverride provider(std::move(registry));
-  g_scheme_provider = &provider;
-  rex::graphics::SetTextureOverrideProvider(&provider);
+  auto provider = std::make_shared<SchemeOverride>(std::move(registry));
+  if (!RegisterProvider(provider)) return;
+  g_scheme_provider.store(std::move(provider));
   REXLOG_INFO("button_schemes: active retail (device controller)");
 }
 
 bool SelectControllerScheme(const std::string& id, uint64_t* ticket) {
-  if (!g_scheme_provider || !g_scheme_provider->Select(id, ticket)) return false;
+  const auto provider = g_scheme_provider.load();
+  if (!provider || !provider->Select(id, ticket)) return false;
   const auto before = input::last_device::Current();
   input::last_device::SelectScheme(id);
   if (before.scheme != id) {
@@ -738,24 +771,28 @@ bool SelectControllerScheme(const std::string& id, uint64_t* ticket) {
 }
 
 std::optional<ControllerSchemeProgress> LatestAppliedControllerScheme() {
-  return g_scheme_provider ? g_scheme_provider->LatestApplied() : std::nullopt;
+  const auto provider = g_scheme_provider.load();
+  return provider ? provider->LatestApplied() : std::nullopt;
 }
 
 void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons) {
-  if (g_scheme_provider) g_scheme_provider->PublishIcons(std::move(signature), std::move(icons));
+  if (const auto provider = g_scheme_provider.load())
+    provider->PublishIcons(std::move(signature), std::move(icons));
 }
 void PublishHintIcons(std::string signature,
                       std::array<std::vector<input::icons::Icon>, 3> variants,
                       std::array<input::icons::Icon, 3> calibration,
                       input::icons::Family active_family) {
-  if (g_scheme_provider) g_scheme_provider->PublishHints(std::move(signature),
+  if (const auto provider = g_scheme_provider.load())
+    provider->PublishHints(std::move(signature),
       std::move(variants), std::move(calibration), active_family);
 }
 bool InputIconsAvailable() {
-  return g_scheme_provider != nullptr && ui::input_font::PrivateBc3() != nullptr;
+  return g_scheme_provider.load() != nullptr && ui::input_font::PrivateBc3() != nullptr;
 }
 const controller_schemes::Registry* ControllerSchemeRegistry() {
-  return g_scheme_provider ? g_scheme_provider->Registry() : nullptr;
+  const auto provider = g_scheme_provider.load();
+  return provider ? provider->Registry() : nullptr;
 }
 
 }  // namespace rb_blitz::assets

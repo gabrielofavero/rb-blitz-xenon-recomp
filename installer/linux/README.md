@@ -42,3 +42,10 @@ pass the pinned nFPM archive to `package.py --nfpm-archive <archive>` to produce
 `RockBandBlitz-<version>-amd64-linux.deb` and
 `RockBandBlitz-<version>-amd64-linux.rpm`. Installed graphical launch, import, game boot, and a
 second launch still need native acceptance before either package is published.
+
+The stage inventory includes the current modular SDK, SDL providers, configured
+Vulkan/Tracy modules, and current license notices. `readelf` checks that SDK
+imports resolve to staged libraries. Native system-library/package dependencies,
+and package relocation still require the pending Linux inventory and release
+audit. The SDK stages its source-built Vulkan loader under its SONAME; the
+package requires and copies that same file when Vulkan is enabled.

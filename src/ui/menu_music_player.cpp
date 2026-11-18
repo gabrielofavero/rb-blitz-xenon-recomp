@@ -4,11 +4,11 @@
 #include <cfloat>
 
 #include <imgui.h>
-#include <rex/cvar.h>
-#include <rex/kernel/xam/module.h>
-#include <rex/logging.h>
-#include <rex/ui/imgui_dialog.h>
-#include <rex/ui/imgui_drawer.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
+#include <rex/ui/ui_system.h>
+#include <rex/ui/image_texture.h>
+#include <rex/ui/style.h>
 
 #include "graphics/preparation_loading.h"
 #include "hooks/shell_music.h"
@@ -20,7 +20,7 @@
 #include "ui/menu_music_artwork.h"
 #include "ui/menu_music_text.h"
 
-REXCVAR_DECLARE(bool, enhancements_music_player);
+
 namespace rb_blitz::ui::music {
 namespace {
 namespace nav = input::menu_music_nav;
@@ -34,10 +34,10 @@ ArtTag drawn_tag;
 float logical_w = 0, logical_h = 0;
 bool pointer_over = false, drawn_visible = false;
 bool Eligible(const NowPlayingSnapshot& s) {
-  return REXCVAR_GET(enhancements_music_player) && s.available &&
+  return rb_blitz::settings::title::enhancements_music_player.Get() && s.available &&
          s.playback.track.source != shell_music::MusicSource::kNone &&
          input::MainMenuMusicInputAvailable() && input::HostInputFocused() &&
-         !input::capture::Armed() && !rex::kernel::xam::xeXamIsUIActive() &&
+         !input::capture::Armed() && !input::SystemUIActive() &&
          !achievements::Active() &&
          !graphics::GraphicsLoadingPending();
 }
@@ -66,10 +66,10 @@ void Label(ImDrawList* draw, ImFont* font, float size, ImVec2 at, float width,
   }
   draw->AddText(font, size, at, color, fit.c_str());
 }
-class Player final : public rex::ui::ImGuiDialog {
+class Player final : public rex::ui::DialogBase {
  public:
-  explicit Player(rex::ui::ImGuiDrawer* drawer)
-      : ImGuiDialog(drawer), artwork_(shell_music::ReadArtwork) {}
+  explicit Player(rex::ui::IUISystem& ui)
+      : ui_(ui), artwork_(shell_music::ReadArtwork) {}
   ~Player() override {
     CancelPlayerPointer();
     Release();
@@ -77,12 +77,10 @@ class Player final : public rex::ui::ImGuiDialog {
 
  private:
   void Release() {
-    if (texture_)
-      imgui_drawer()->ReleaseImageTexture(texture_, texture_generation_);
-    texture_ = 0;
+    texture_.reset();
     texture_tag_ = {};
   }
-  void OnDraw(ImGuiIO& io) override {
+  bool Draw(ImGuiIO& io) override {
     const auto snapshot = NowPlaying().ReadSnapshot();
     const auto& track = snapshot.playback.track;
     const ArtTag tag{snapshot.epoch, track.song, track.artwork_key};
@@ -99,10 +97,9 @@ class Player final : public rex::ui::ImGuiDialog {
       pointer_over = false;
       artwork_.Request({});
       Release();
-      return;
+      return true;
     }
-    if (texture_generation_ != imgui_drawer()->image_texture_generation() ||
-        texture_tag_ != tag)
+    if (texture_tag_ != tag)
       Release();
     std::shared_ptr<const Cover> cover;
     if (!tag.key.empty())
@@ -112,15 +109,14 @@ class Player final : public rex::ui::ImGuiDialog {
     if (cover) {
       NowPlaying().PublishArtwork(tag.epoch, tag.song, tag.key, cover->state);
       if (cover->state == shell_music::ArtworkState::kReady && !texture_) {
-        texture_ = imgui_drawer()->CreateImageTexture(
-            cover->width, cover->height, cover->rgba.data());
-        texture_generation_ = imgui_drawer()->image_texture_generation();
+        if (auto image = rex::ui::ImageTexture::Create(cover->width, cover->height, cover->rgba))
+          texture_ = std::move(*image);
         texture_tag_ = tag;
       }
     }
     ImFont* font = help::CaptionFont();
     if (!font) font = ImGui::GetFont();
-    const auto& theme = imgui_drawer()->style().keyboard;
+    const auto& theme = ui_.GetStyle().keyboard;
     ImFont* title_font = theme.heading_font ? theme.heading_font : font;
     if (theme.font) font = theme.font;
     auto* draw = ImGui::GetForegroundDrawList();
@@ -129,7 +125,7 @@ class Player final : public rex::ui::ImGuiDialog {
                         layout.compact ? IM_COL32(16, 12, 30, 240) : IM_COL32(0, 0, 0, 190),
                         layout.compact ? 0 : 7 * s);
     if (!layout.compact && texture_)
-      draw->AddImage(texture_, TL(layout.cover), BR(layout.cover));
+      draw->AddImage(texture_->GetTexture(), TL(layout.cover), BR(layout.cover));
     else if (!layout.compact) {
       draw->AddRectFilled(TL(layout.cover), BR(layout.cover),
                           IM_COL32(20, 20, 20, 210), 3 * s);
@@ -191,16 +187,16 @@ class Player final : public rex::ui::ImGuiDialog {
       draw->AddCircleFilled(
           {layout.panel.right - 9 * s, layout.panel.top + 9 * s}, 3 * s,
           IM_COL32(200, 200, 200, 255));
-  }
+    return true;
+}
+  rex::ui::IUISystem& ui_;
   Artwork artwork_;
-  ImTextureID texture_ = 0;
-  uint64_t texture_generation_ = 0;
+  std::unique_ptr<rex::ui::ImageTexture> texture_;
   ArtTag texture_tag_;
 };
 }  // namespace
-std::unique_ptr<rex::ui::ImGuiDialog> CreatePlayer(
-    rex::ui::ImGuiDrawer* drawer) {
-  return std::make_unique<Player>(drawer);
+std::unique_ptr<rex::ui::IDialog> CreatePlayer(rex::ui::IUISystem& ui) {
+  return std::make_unique<Player>(ui);
 }
 void CancelPlayerPointer() {
   pointer.Cancel();

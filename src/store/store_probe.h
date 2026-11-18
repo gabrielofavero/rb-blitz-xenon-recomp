@@ -27,6 +27,7 @@ namespace rb_blitz::store {
 // thread, before the guest starts (the observer itself runs on guest threads and must not read
 // the cvar registry).
 void InstallPathProbe();
+void ClosePathProbe();
 
 // The same switch, for the hooks that cannot read the registry themselves.
 bool TraceEnabled();

@@ -26,16 +26,18 @@
 // the same reasoning). With `probe_trace` off the only cost is the call
 // indirection the project's hooks already carry everywhere.
 
+#include <format>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
 
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 #include "diag/probe.h"
 #include "diag/framerate_probe.h"
@@ -88,10 +90,7 @@ REX_HOOK_RAW(VorbisReader_CheckHmxHeader) {
 // and P4 replaces or deletes it when the render path lands.
 REX_EXTERN(__imp__sub_823F3698);
 
-REXCVAR_DEFINE_BOOL(probe_screen_1080p, false, "Diagnostics",
-                    "P2 spike: make the title take its own half-resolution (960x540) screen path "
-                    "before it computes its size, and report what it chose. Diagnostics only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 // The 540 height used to be reached by pressing the title's own half-resolution flag (bit 0 of +796),
 // which is the mode P2 measured and P11a shipped. That flag means more than "half resolution": with a
@@ -102,11 +101,7 @@ REXCVAR_DEFINE_BOOL(probe_screen_1080p, false, "Diagnostics",
 // Forcing the *height* alone - the RenderHeightHook at 0x823F382C sets r11 and the flag stays clear -
 // renders the same 2560x1080 frame with no blocks (measured the same day, `nosd.log`), so that is the
 // default now. The flag is still reachable for comparison.
-REXCVAR_DEFINE_BOOL(probe_halfres_flag, false, "Diagnostics",
-                    "Diagnostics: force the title's half-resolution flag when the guest height is "
-                    "540. Off (the default) forces only the height, which renders 1080p without the "
-                    "two corner blocks the flag's own SD path draws; on restores the P11a route.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 // 0x82078190 / 0x82078194 are an adjacent pair of aspect floats in the guest image's read-only
 // data: 4:3 and 16:9. The frame the title allocates is NOT the space it lays out in - a 1680x720
@@ -115,11 +110,7 @@ REXCVAR_DEFINE_BOOL(probe_halfres_flag, false, "Diagnostics",
 // cvar tests: write the widescreen slot to a non-16:9 aspect for one boot and see whether the
 // projection (and therefore the whole layout) follows it. Off by default; an instrument, not a
 // feature (docs/settings/graphics.md (part 3, custom resolutions)).
-REXCVAR_DEFINE_STRING(probe_aspect, "", "Diagnostics",
-                      "Diagnostics: decimal aspect ratio to write over the guest's 16:9 constant "
-                      "(0x82078194) before the title builds its screen, e.g. 2.3703704. Empty "
-                      "leaves the title's own constant alone.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 inline constexpr uint32_t kAspect16By9Address = 0x82078194;
 
@@ -129,10 +120,7 @@ inline constexpr uint32_t kAspect16By9Address = 0x82078194;
 // guest's real back-buffer size is found without a debugger.
 REX_EXTERN(__imp__sub_8251D580);
 
-REXCVAR_DEFINE_BOOL(probe_dump_guest_swap, false, "Diagnostics",
-                    "P2 spike: dump the guest present object and its Direct3D 9 pointer once, to "
-                    "locate the title's real back-buffer size. Diagnostics only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 // The layout-space hunt. A 1680x720 frame draws the title's UI 1.3125x wider than a 1280x720
 // frame with the same height, and the image contains exactly one `height*16/9` computation (the
@@ -143,18 +131,12 @@ REXCVAR_DEFINE_BOOL(probe_dump_guest_swap, false, "Diagnostics",
 // then write the real frame width over the 1280 on every presented frame - because a value that is
 // re-derived per frame would otherwise be overwritten before the screenshot is taken. Diagnostics
 // only: it writes to fields nobody has proved the meaning of.
-REXCVAR_DEFINE_BOOL(probe_screen_fields, false, "Diagnostics",
-                    "Diagnostics: find guest fields holding the 1280x720 layout size and overwrite "
-                    "the width with the frame width each frame. Diagnostics only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 // Restricts the poke above to the candidate addresses named here ("0x82078CC8,0x8210DBF8"), or to
 // all of them when empty. One address per arm is what turns "something in that list fixed it" into
 // "this field is the layout aspect".
-REXCVAR_DEFINE_STRING(probe_screen_fields_filter, "", "Diagnostics",
-                      "Diagnostics: comma-separated guest addresses the screen-field poke may "
-                      "write; empty means every candidate.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 namespace {
 
@@ -181,11 +163,11 @@ std::atomic<bool> g_swap_dumped{false};
 
 extern "C" REX_FUNC(sub_823F3698) {
   const uint32_t object = uint32_t(ctx.r3.u32);
-  const bool override_on = REXCVAR_GET(probe_screen_1080p);
+  const bool override_on = rb_blitz::settings::title::probe_screen_1080p.Get();
   // The layout-space experiment: the title lays its UI and its 3D world out in a 16:9-shaped
   // space even when the frame it allocates is wider, so the frame alone is a stretch. Writing the
   // engine's own aspect float says whether that float is the source.
-  const std::string aspect_text = REXCVAR_GET(probe_aspect);
+  const std::string aspect_text = rb_blitz::settings::title::probe_aspect.Get();
   if (!aspect_text.empty()) {
     const float aspect = std::strtof(aspect_text.c_str(), nullptr);
     uint8_t* constant = rex::memory::GuestPtr<uint8_t*>(base, kAspect16By9Address);
@@ -205,7 +187,7 @@ extern "C" REX_FUNC(sub_823F3698) {
     }
   }
   if (override_on || (rb_blitz::settings::BootRenderHeight() == 540 &&
-                      REXCVAR_GET(probe_halfres_flag))) {
+                      rb_blitz::settings::title::probe_halfres_flag.Get())) {
     // Bit 0 of +796 is the flag this very function reads (0x823F3804) to pick 540 instead
     // of 720; forcing it at entry makes the title take its own half-resolution path rather
     // than being poked after the fact, so anything that path re-creates is re-created.
@@ -301,17 +283,17 @@ void PokeLayoutFields(uint8_t* base) {
     }
     std::string list;
     for (const Site& site : sites) {
-      list += fmt::format(" {}(0x{:08X})", site.kind, site.address);
+      list += std::format(" {}(0x{:08X})", site.kind, site.address);
     }
     REXLOG_INFO("probe/layout: {} candidate field(s):{}", sites.size(), list);
   }
   if (width == 0 || sites.empty()) {
     return;
   }
-  std::string wanted = REXCVAR_GET(probe_screen_fields_filter);
+  std::string wanted = rb_blitz::settings::title::probe_screen_fields_filter.Get();
   for (const Site& site : sites) {
     if (!wanted.empty()) {
-      const std::string address = fmt::format("0x{:08X}", site.address);
+      const std::string address = std::format("0x{:08X}", site.address);
       if (wanted.find(address) == std::string::npos) {
         continue;
       }
@@ -325,8 +307,8 @@ void PokeLayoutFields(uint8_t* base) {
 }
 
 extern "C" REX_FUNC(sub_8251D580) {
-  const bool dump = REXCVAR_GET(probe_dump_guest_swap) && !g_swap_dumped.exchange(true);
-  const bool poke = REXCVAR_GET(probe_screen_fields);
+  const bool dump = rb_blitz::settings::title::probe_dump_guest_swap.Get() && !g_swap_dumped.exchange(true);
+  const bool poke = rb_blitz::settings::title::probe_screen_fields.Get();
   const uint32_t object = uint32_t(ctx.r3.u32);
   __imp__sub_8251D580(ctx, base);
   rb_blitz::diag::framerate_probe::CompleteGuestPresent();

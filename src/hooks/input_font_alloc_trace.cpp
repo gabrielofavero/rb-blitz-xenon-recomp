@@ -7,9 +7,10 @@
 #include <string_view>
 #include <utility>
 
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 REX_EXTERN(__imp__sub_8220CCA8);  // RndTex::Load
 REX_EXTERN(__imp__sub_821FC8A8);  // RndBitmap pixel allocation

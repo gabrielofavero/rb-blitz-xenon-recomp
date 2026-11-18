@@ -1,5 +1,7 @@
 # Shader cache
 
+The v0.11 title uses the public [IGraphicsPreparation service](../../rexglue-sdk/include/rex/gpu/graphics_preparation_service.h). Pipeline counters and preparation records are public GPU types; backend cache sources linked below are private SDK implementation references. Dated timings and delivery records retain their original build scope.
+
 One document for the shader-cache program: what the title compiles during loading and gameplay, how
 shader identities resolve from installed content, the pipeline recipe catalogue, the cancellable
 preparation lifecycle, the native driver pipeline caches, and the post-A guest loading gate that
@@ -790,8 +792,8 @@ deduplicated.
 ### Storage format, measured
 
 The runtime writes a 12-byte header and fixed-size records
-([D3D12](../../rexglue-sdk/src/graphics/d3d12/pipeline_cache.cpp),
-[Vulkan](../../rexglue-sdk/src/graphics/vulkan/pipeline_cache.cpp)):
+([D3D12](../../rexglue-sdk/src/gpu/xenos/d3d12/pipeline_cache.cpp),
+[Vulkan](../../rexglue-sdk/src/gpu/xenos/vulkan/pipeline_cache.cpp)):
 
 | Field | D3D12 | Vulkan |
 | --- | --- | --- |
@@ -1248,8 +1250,8 @@ that measurement).
 
 `rexglue-sdk/include/rex/graphics/native_pipeline_cache.h` (SDK patch
 `0028-native-pipeline-caches.patch`) is header-only and backend-agnostic, like
-[`pipeline_preload.h`](../../rexglue-sdk/include/rex/graphics/pipeline_preload.h) and
-[`graphics_preparation.h`](../../rexglue-sdk/include/rex/graphics/graphics_preparation.h). It keeps
+[`pipeline_preload.h`](../../rexglue-sdk/include/rex/gpu/pipeline_preload.h) and
+[`graphics_preparation.h`](../../rexglue-sdk/include/rex/gpu/graphics_preparation.h). It keeps
 three things apart, because confusing any two of them turns a cache into a correctness bug:
 
 | Part | What it is | Where it is used |

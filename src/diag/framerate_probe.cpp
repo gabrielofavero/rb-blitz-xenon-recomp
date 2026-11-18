@@ -6,21 +6,18 @@
 #include <cmath>
 #include <cstdint>
 
-#include <rex/cvar.h>
+#include "settings/runtime_settings.h"
 #if defined(RB_BLITZ_IOS)
 #include "platform/ios_runtime.h"
 #endif
-#include <rex/graphics/compile_trace.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
+#include <rex/diagnostics/compile_trace.h>
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
 
 REX_EXTERN(__imp__sub_82190218);
 REX_EXTERN(__imp__sub_82470248);
 
-REXCVAR_DEFINE_BOOL(probe_framerate, false, "Diagnostics",
-                    "Log bounded one-second counts of completed guest main-loop draws and "
-                    "guest present routine calls. Diagnostics only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 namespace rb_blitz::diag::framerate_probe {
 namespace {
@@ -41,13 +38,13 @@ bool g_started = false;
 }  // namespace
 
 void CompleteGuestPresent() {
-  if (REXCVAR_GET(probe_framerate)) {
+  if (rb_blitz::settings::title::probe_framerate.Get()) {
     g_guest_presents.fetch_add(1, std::memory_order_relaxed);
   }
 }
 
 void ObserveSongClock(double raw, double filtered) {
-  if (!REXCVAR_GET(probe_framerate) || !std::isfinite(raw) ||
+  if (!rb_blitz::settings::title::probe_framerate.Get() || !std::isfinite(raw) ||
       !std::isfinite(filtered)) return;
   g_song_clock_raw.store(raw, std::memory_order_relaxed);
   g_song_clock_filtered.store(filtered, std::memory_order_relaxed);
@@ -55,7 +52,7 @@ void ObserveSongClock(double raw, double filtered) {
 }
 
 void CompleteIteration() {
-  if (!REXCVAR_GET(probe_framerate)) return;
+  if (!rb_blitz::settings::title::probe_framerate.Get()) return;
   const auto now = Clock::now();
   ++g_draws;
   if (!g_started) {
@@ -89,8 +86,8 @@ REX_HOOK_RAW(sub_82190218) {
 #if defined(RB_BLITZ_IOS)
   rb_blitz::platform::WaitForIOSForeground();
 #endif
-  rex::graphics::compile_trace::Scope trace_draw(
-      rex::graphics::compile_trace::Event::kGuestWork, "guest.main_loop_draw", 0x82190218);
+  rex::diagnostics::compile_trace::Scope trace_draw(
+      rex::diagnostics::compile_trace::Event::kGuestWork, "guest.main_loop_draw", 0x82190218);
   __imp__sub_82190218(ctx, base);
   trace_draw.Success();
   rb_blitz::diag::framerate_probe::CompleteIteration();

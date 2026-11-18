@@ -14,7 +14,7 @@ int main() {
   const char* original = std::getenv(key);
   const std::optional<std::string> saved = original ? std::optional<std::string>(original) : std::nullopt;
   const auto configure = [] {
-    rex::ui::vulkan::ConfigureMacOSVulkanEnvironment({});
+    rex::gpu::vulkan::ConfigureMacOSVulkanEnvironment({});
   };
   const auto matches = [](const char* expected) {
     const char* value = std::getenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS");

@@ -66,7 +66,7 @@ sdk=$(xcrun --show-sdk-path)
 cmake -S installer/portable -B out/build/macos-import -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER="$clangxx" \
   -DCMAKE_OBJCXX_COMPILER="$clangxx" -DCMAKE_OSX_SYSROOT="$sdk" \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_OSX_ARCHITECTURES="$arch"
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 -DCMAKE_OSX_ARCHITECTURES="$arch"
 cmake --build out/build/macos-import --target rb_blitz_import
 if [ -n "$source_path" ]; then
   out/build/macos-import/rb_blitz_import --fingerprints config/game_fingerprints.toml \

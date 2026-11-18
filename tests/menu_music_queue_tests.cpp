@@ -84,5 +84,20 @@ int main() {
     CHECK_TRUE(Await(queue).has_value());
     CHECK_EQ(calls.load(), 2u);
   }
+  rb_blitz::test::BeginCase("a joined queue restarts without carrying requests or old callbacks");
+  {
+    MenuMusicQueue<int> queue;
+    std::atomic<bool> completed{false};
+    std::promise<void> entered, release;
+    auto released=release.get_future().share();
+    queue.Start([&](size_t)->std::optional<int>{entered.set_value();released.wait();completed=true;return 1;});
+    CHECK_TRUE(queue.Request(1));
+    CHECK_TRUE(entered.get_future().wait_for(5s)==std::future_status::ready);
+    queue.Stop();release.set_value();queue.Join();CHECK_TRUE(completed);
+    queue.Reset();queue.Start([](size_t value)->std::optional<int>{return int(value+10);});
+    CHECK_TRUE(queue.Request(2));
+    auto value=Await(queue);CHECK_TRUE(value.has_value());if(value)CHECK_EQ(*value,12);
+    queue.Join();
+  }
   return rb_blitz::test::Finish();
 }

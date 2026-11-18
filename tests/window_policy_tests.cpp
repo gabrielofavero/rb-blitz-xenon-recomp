@@ -128,7 +128,7 @@ int main() {
     CHECK_FALSE(degenerate.shrunk);
   }
 
-  BeginCase("physical -> logical is the conversion the SDK inverts");
+  BeginCase("backing pixels convert to point coordinates with bounded rounding");
   {
     // 100% is the identity: the common machine is untouched by the unit round trip.
     CHECK_EQ(PhysicalToLogical({2560, 1080}, 100).width, 2560);
@@ -143,7 +143,7 @@ int main() {
     CHECK_EQ(PhysicalToLogical({1920, 1080}, 0).width, 1920);
     // Never below one pixel.
     CHECK_EQ(PhysicalToLogical({1, 1}, 300).width, 1);
-    // The round trip the SDK performs (`logical * dpi / 96`, rounding up) lands within a pixel of
+    // The backing-pixel round trip for a point-based host (`logical * dpi / 96`, rounding up) lands within a pixel of
     // what was asked for at every scale the project supports: the fit is a clamp, and one pixel of
     // rounding must not push the window back out of the work area.
     for (const uint32_t scale : {100u, 125u, 150u, 175u, 200u, 300u}) {

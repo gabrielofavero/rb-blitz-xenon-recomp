@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
 #include "platform/ios_auto_pause.h"
-#include <rex/chrono/clock.h>
-#include <rex/ui/vulkan/queue_lifecycle.h>
+#include <rex/chrono.h>
+#include <rex/gpu/queue_lifecycle.h>
 #include <atomic>
 #include <chrono>
 #include <future>
@@ -10,13 +10,13 @@
 #include <thread>
 
 using namespace rb_blitz::test;
-using rex::ui::vulkan::QueueLifecycle;
+using rex::gpu::QueueLifecycle;
 using namespace std::chrono_literals;
 namespace {
 QueueLifecycle* pumped_gate;
 unsigned pumps = 0;
 bool PumpForeground() {
-  if (++pumps == 2) pumped_gate->SetActive(true, [] {});
+  if (++pumps == 2) pumped_gate->SetActive(true, [] { return true; });
   return true;
 }
 }
@@ -67,7 +67,7 @@ int main() {
   std::promise<void> starting_suspend;
   auto suspend = std::async(std::launch::async, [&] {
     starting_suspend.set_value();
-    gate.SetActive(false, [&] { ++drains; });
+    gate.SetActive(false, [&] { ++drains; return true; });
   });
   starting_suspend.get_future().wait();
   CHECK_TRUE(suspend.wait_for(20ms) == std::future_status::timeout);
@@ -78,7 +78,7 @@ int main() {
   CHECK_EQ(drains.load(), 1u);
 
   BeginCase("background operations wait and duplicate notifications do not drain twice");
-  gate.SetActive(false, [&] { ++drains; });
+  gate.SetActive(false, [&] { ++drains; return true; });
   CHECK_EQ(drains.load(), 1u);
   std::promise<void> attempting;
   auto submit = std::async(std::launch::async, [&] {
@@ -88,16 +88,16 @@ int main() {
   });
   attempting.get_future().wait();
   CHECK_TRUE(submit.wait_for(20ms) == std::future_status::timeout);
-  gate.SetActive(true, [&] { ++drains; });
+  gate.SetActive(true, [&] { ++drains; return true; });
   CHECK_TRUE(submit.wait_for(1s) == std::future_status::ready);
   CHECK_TRUE(submit.get());
   CHECK_EQ(drains.load(), 1u);
 
   BeginCase("repeated background/foreground cycles never strand a queue waiter");
   for (unsigned i = 0; i < 8; ++i) {
-    gate.SetActive(false, [&] { ++drains; });
+    gate.SetActive(false, [&] { ++drains; return true; });
     auto pending = std::async(std::launch::async, [&] { QueueLifecycle::Permit permit(&gate); });
-    gate.SetActive(true, [] {});
+    gate.SetActive(true, [] { return true; });
     CHECK_TRUE(pending.wait_for(1s) == std::future_status::ready);
     pending.get();
   }
@@ -106,29 +106,29 @@ int main() {
   BeginCase("an interrupted synchronous startup upload can pump foreground notification");
   QueueLifecycle startup_gate(PumpForeground);
   pumped_gate = &startup_gate;
-  startup_gate.SetActive(false, [] {});
+  startup_gate.SetActive(false, [] { return true; });
   { QueueLifecycle::Permit resumed(&startup_gate); }
   CHECK_EQ(pumps, 2u);
-  startup_gate.SetActive(false, [&] { ++drains; });
+  startup_gate.SetActive(false, [&] { ++drains; return true; });
   CHECK_EQ(drains.load(), 10u);
-  startup_gate.SetActive(true, [] {});
+  startup_gate.SetActive(true, [] { return true; });
 
   BeginCase("suspension freezes guest time while host time advances; resume excludes the gap");
-  using rex::chrono::Clock;
+  using rex::Clock;
   Clock::SetGuestPaused(false);
   Clock::SetGuestPaused(true);
   const auto frozen = Clock::QueryGuestTickCount();
-  const auto host = Clock::QueryHostTickCount();
+  const auto host = Clock::GetHostTickCount();
   std::this_thread::sleep_for(30ms);
   CHECK_EQ(Clock::QueryGuestTickCount(), frozen);
-  CHECK_TRUE(Clock::QueryHostTickCount() > host);
+  CHECK_TRUE(Clock::GetHostTickCount() > host);
   Clock::SetGuestPaused(true);  // Duplicate notification must preserve the same frozen instant.
   CHECK_EQ(Clock::QueryGuestTickCount(), frozen);
   CHECK_EQ(Clock::ScaleGuestDurationMillis(10), 10u);
   Clock::SetGuestPaused(false);
   const auto resumed = Clock::QueryGuestTickCount();
   CHECK_TRUE(resumed >= frozen);
-  CHECK_TRUE(resumed - frozen < Clock::guest_tick_frequency() / 50); // No 30ms jump.
+  CHECK_TRUE(resumed - frozen < Clock::GetGuestTickFrequency() / 50); // No 30ms jump.
   std::this_thread::sleep_for(5ms);
   CHECK_TRUE(Clock::QueryGuestTickCount() > resumed);
   return Finish();

@@ -1,44 +1,46 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// rb_blitz - ReXGlue Recompiled Project
-//
-// Reading a DLC package's song metadata, shared by the two features that need it: the R9 menu
-// music pool (which maps a `.mogg` stream to the song manager's own key) and the store's
-// Downloaded matcher (RhythmVerse store plan §3.2, which compares artist + title against the
-// songs the boot has loaded).
-//
-// The mount helpers used to live in src/hooks/shell_music.cpp; they are here because a second
-// caller needs exactly the same read, and two copies of "which paths may hold songs.dta" would
-// drift.
-//
-// SDK-using (devices and the guest file layer). The parsing half is
-// `shell_music::ReadSongMetadata`, which is SDK-free and tested on its own.
-
 #pragma once
 
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
 #include <system_error>
 #include <vector>
 
-#include <rex/filesystem/device.h>
-
+#include <rex/filesystem/file_system.h>
+#include <rex/filesystem/mount_validation.h>
 #include "hooks/menu_music_metadata.h"
 
 namespace rb_blitz::fs {
 
-// The package as a read-only device: an STFS container mounted where it lies, or an already
-// extracted package directory. Null when the SDK will not mount it.
-std::unique_ptr<rex::filesystem::Device> MountPackage(const std::string& mount_path,
-                                                      const std::filesystem::path& package,
-                                                      std::error_code& ec);
+/** A read-only package mounted in an isolated SDK filesystem. The descriptor can
+ * be mounted in the title filesystem after host discovery; publication validates
+ * that new provider independently before guest access.
+ */
+class PackageView {
+ public:
+  PackageView(std::unique_ptr<rex::filesystem::IFileSystem> files,
+              rex::filesystem::MountEntry mount,
+              std::shared_ptr<std::vector<rex::filesystem::MountValidationNode>> nodes)
+      : files_(std::move(files)), mount_(std::move(mount)), nodes_(std::move(nodes)) {}
+  rex::filesystem::IFileSystem& Files() const { return *files_; }
+  const rex::filesystem::MountEntry& Mount() const { return mount_; }
+  std::span<const rex::filesystem::MountValidationNode> Nodes() const { return *nodes_; }
+  std::string Path(std::string_view relative) const;
+ private:
+  std::unique_ptr<rex::filesystem::IFileSystem> files_;
+  rex::filesystem::MountEntry mount_;
+  std::shared_ptr<std::vector<rex::filesystem::MountValidationNode>> nodes_;
+};
 
-// The songs a mounted package's metadata declares (`\songs\songs.dta`, `\songs\songs.dtb`,
-// `\songs\gen\songs.dtb`, first that parses). Empty when the package carries none.
-std::vector<shell_music::SongMetadata> ReadDeviceSongMetadata(rex::filesystem::Device& device);
+std::unique_ptr<PackageView> MountPackage(const std::string& mount_path,
+                                         const std::filesystem::path& package,
+                                         std::error_code& ec);
 
-// Check every songs.dta/songs.dtb entry in a mounted package before the SDK
-// exposes that device to guest code. Missing song metadata is fine.
-bool IsSafeSongContent(rex::filesystem::Device& device, std::string* reason);
+std::vector<shell_music::SongMetadata> ReadDeviceSongMetadata(PackageView& package);
+
+/** Checks every exact metadata node, including duplicate and case-variant names. */
+bool IsSafeSongContent(const rex::filesystem::IMountValidationView& view, std::string* reason);
 
 }  // namespace rb_blitz::fs

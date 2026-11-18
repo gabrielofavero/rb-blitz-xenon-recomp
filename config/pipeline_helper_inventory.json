@@ -1,19 +1,19 @@
 {
   "schema": 1,
   "title_id": "5841122D",
-  "note": "P3 inventory of lazy and startup graphics/compute pipelines the renderer creates outside the guest .xpso recipe stores. Recipes are normalized descriptions plus their creation key and dependencies; no shader bytes. trace.site is the exact site string the P0 shader_compile_trace instrument logs, so this file stays checkable against the SDK sources. coverage=site_unique means the trace site identifies one creation per process; coverage=key_identified means one trace site creates several pipelines and each creation now logs the caller's key (trace.key_bits documents its layout, so a logged key can be read back into a recipe); coverage=site_repeated would mean the key is still not carried and remains a blocker.",
+  "note": "Inventory of lazy and startup graphics/compute pipelines the renderer creates outside the guest .xpso recipe stores. Recipes are normalized descriptions plus their creation key and dependencies; no shader bytes. trace.site is the exact site string the shader_compile_trace instrument logs, so this file stays checkable against the SDK sources. coverage=site_unique means the trace site identifies one creation per process; coverage=key_identified means one trace site creates several pipelines and each creation now logs the caller's key (trace.key_bits documents its layout, so a logged key can be read back into a recipe); coverage=site_repeated would mean the key is still not carried and remains a blocker.",
   "backends": {
     "d3d12": {
       "entries": [
         {
           "id": "d3d12.clear_rtv",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::Initialize",
           "when": "startup",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/graphics/d3d12/render_target_cache.cpp:847",
+            "site": "src/gpu/xenos/d3d12/render_target_cache.cpp:767",
             "identity": "key",
             "key_bits": "kind 7 (kClearRtv) << 56 | format index << 8 | sample index"
           },
@@ -34,12 +34,12 @@
         {
           "id": "d3d12.resolve_copy",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::Initialize",
           "when": "startup",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_objects.cpp:54",
             "identity": "key",
             "key_bits": "kind 1 (kResolveCopy) << 56 | ResolveCopyShaderIndex | 0x100 when draw-resolution scaled"
           },
@@ -59,12 +59,12 @@
         {
           "id": "d3d12.host_depth_store",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::Initialize",
           "when": "startup",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_objects.cpp:54",
             "identity": "key",
             "key_bits": "kind 2 (kHostDepthStore) << 56 | 0 = 1x, 1 = 2x, 2 = 4x"
           },
@@ -83,12 +83,12 @@
         {
           "id": "d3d12.rov_resolve_clear",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::Initialize",
           "when": "startup (ROV path only)",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_objects.cpp:54",
             "identity": "key",
             "key_bits": "kind 3 (kRovClear) << 56 | 0 = 32bpp, 1 = 64bpp, | 0x100 when draw-resolution scaled"
           },
@@ -107,12 +107,12 @@
         {
           "id": "d3d12.transfer",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::GetOrCreateTransferPipelines",
           "when": "lazy: first ownership transfer for a key",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/graphics/d3d12/render_target_cache.cpp:3773",
+            "site": "src/gpu/xenos/d3d12/render_target_cache.cpp:3266",
             "identity": "key",
             "key_bits": "kind 5 (kTransfer) << 56 | TransferShaderKey (low 32 bits)"
           },
@@ -136,12 +136,12 @@
         {
           "id": "d3d12.transfer_stencil_bit",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::GetOrCreateTransferPipelines",
           "when": "lazy: first stencil-bit transfer for a key",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/graphics/d3d12/render_target_cache.cpp:3734",
+            "site": "src/gpu/xenos/d3d12/render_target_cache.cpp:3226",
             "identity": "key",
             "key_bits": "kind 6 (kTransferStencilBit) << 56 | TransferShaderKey (low 32 bits); variant = stencil bit 0..7"
           },
@@ -166,12 +166,12 @@
         {
           "id": "d3d12.dump",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/d3d12/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/render_target_cache.cpp",
           "function": "D3D12RenderTargetCache::GetOrCreateDumpPipeline",
           "when": "lazy: first dump of a render-target key",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_objects.cpp:54",
             "identity": "key",
             "key_bits": "kind 4 (kDump) << 56 | DumpPipelineKey (low 32 bits)"
           },
@@ -193,12 +193,12 @@
         {
           "id": "d3d12.immediate_drawer_triangle",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/ui/d3d12/d3d12_immediate_drawer.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/host/d3d12/d3d12_immediate_drawer.cpp",
           "function": "D3D12ImmediateDrawer::Initialize",
           "when": "startup (first immediate drawer)",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/ui/d3d12/d3d12_immediate_drawer.cpp:159",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_immediate_drawer.cpp:152",
             "identity": "call_site"
           },
           "key": {
@@ -215,12 +215,12 @@
         {
           "id": "d3d12.immediate_drawer_line",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/ui/d3d12/d3d12_immediate_drawer.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/host/d3d12/d3d12_immediate_drawer.cpp",
           "function": "D3D12ImmediateDrawer::Initialize",
           "when": "startup (first immediate drawer)",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/ui/d3d12/d3d12_immediate_drawer.cpp:164",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_immediate_drawer.cpp:156",
             "identity": "call_site"
           },
           "key": {
@@ -235,39 +235,14 @@
           "coverage": "site_unique"
         },
         {
-          "id": "d3d12.presenter_intermediate",
-          "kind": "graphics",
-          "site": "rexglue-sdk/src/ui/d3d12/d3d12_presenter.cpp",
-          "function": "D3D12Presenter::InitializeGuestOutputPaint",
-          "when": "startup (presenter)",
-          "trace": {
-            "event": "helper_graphics",
-            "site": "src/ui/d3d12/d3d12_presenter.cpp:1418",
-            "identity": "key",
-            "key_bits": "kind 8 (kPresenter) << 56 | GuestOutputPaintEffect | 0x100"
-          },
-          "key": {
-            "fields": [
-              "GuestOutputPaintEffect"
-            ]
-          },
-          "dependencies": [
-            "guest output paint root signature",
-            "effect pixel shader",
-            "kGuestOutputIntermediateFormat"
-          ],
-          "variants": "one pipeline per supported paint effect that may be intermediate",
-          "coverage": "key_identified"
-        },
-        {
           "id": "d3d12.presenter_final",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/ui/d3d12/d3d12_presenter.cpp",
-          "function": "D3D12Presenter::InitializeGuestOutputPaint",
+          "site": "rexglue-sdk/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp",
+          "function": "D3D12Presenter::InitializeSurfaceIndependent",
           "when": "startup (presenter)",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/ui/d3d12/d3d12_presenter.cpp:1430",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_presenter.cpp:675",
             "identity": "key",
             "key_bits": "kind 8 (kPresenter) << 56 | GuestOutputPaintEffect"
           },
@@ -287,12 +262,12 @@
         {
           "id": "d3d12.compute_util",
           "kind": "compute",
-          "site": "rexglue-sdk/src/ui/d3d12/d3d12_util.cpp",
-          "function": "ui::d3d12::util::CreateComputePipeline",
+          "site": "rexglue-sdk/src/gpu/xenos/host/d3d12/d3d12_objects.cpp",
+          "function": "gpu::d3d12::objects::CreateComputePipeline",
           "when": "shared creation helper for every compute pipeline above",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_objects.cpp:54",
             "identity": "key",
             "key_bits": "kind 10 (kComputeUtil) << 56 | the caller's HelperKey; a creation logged with key=0 is a caller that has not been keyed yet"
           },
@@ -311,12 +286,12 @@
         {
           "id": "d3d12.texture_load",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/d3d12/texture_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/texture_cache.cpp",
           "function": "D3D12TextureCache::Initialize",
           "when": "startup, for every texture load shader the used formats need",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_objects.cpp:54",
             "identity": "key",
             "key_bits": "kind 12 (kTextureLoad) << 56 | kLoadShaderIndex"
           },
@@ -335,12 +310,12 @@
         {
           "id": "d3d12.texture_load_scaled",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/d3d12/texture_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/texture_cache.cpp",
           "function": "D3D12TextureCache::Initialize",
           "when": "startup when draw resolution is scaled",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_objects.cpp:54",
             "identity": "key",
             "key_bits": "kind 12 (kTextureLoad) << 56 | 0x100 | kLoadShaderIndex"
           },
@@ -360,18 +335,18 @@
         {
           "id": "d3d12.swap_gamma_compute",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/d3d12/command_processor.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/command_processor.cpp",
           "function": "D3D12CommandProcessor::SetupContext",
           "when": "startup",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_objects.cpp:54",
             "identity": "key",
             "key_bits": "kind 9 (kSwapChain) << 56 | 0x200..0x203 = table/PWL, plain and FXAA-luma"
           },
           "key": {
             "fields": [
-              "gamma shader variant (256-entry table | PWL, ±FXAA luma)"
+              "gamma shader variant (256-entry table | PWL, \u00c2\u00b1FXAA luma)"
             ]
           },
           "dependencies": [
@@ -384,12 +359,12 @@
         {
           "id": "d3d12.swap_fxaa",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/d3d12/command_processor.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/command_processor.cpp",
           "function": "D3D12CommandProcessor::SetupContext",
           "when": "startup when FXAA is enabled",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_objects.cpp:54",
             "identity": "key",
             "key_bits": "kind 9 (kSwapChain) << 56 | 0x400 = FXAA, 0x401 = FXAA extreme"
           },
@@ -408,12 +383,12 @@
         {
           "id": "d3d12.resolve_downscale",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/d3d12/command_processor.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/d3d12/command_processor.cpp",
           "function": "D3D12CommandProcessor::SetupContext",
           "when": "startup when the resolve-downscale root signature exists",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/d3d12/d3d12_util.cpp:54",
+            "site": "src/gpu/xenos/host/d3d12/d3d12_objects.cpp:54",
             "identity": "key",
             "key_bits": "kind 9 (kSwapChain) << 56 | 0x500"
           },
@@ -434,12 +409,12 @@
         {
           "id": "vulkan.transfer",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::GetTransferPipelines",
           "when": "lazy: first ownership transfer for a key",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/graphics/vulkan/render_target_cache.cpp:4509",
+            "site": "src/gpu/xenos/vulkan/render_target_cache.cpp:4117",
             "identity": "key",
             "key_bits": "kind 5 (kTransfer) << 56 | render_pass_key << 32 | shader_key"
           },
@@ -461,12 +436,12 @@
         {
           "id": "vulkan.transfer_masked_samples",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::GetTransferPipelines",
           "when": "lazy: masked-sample variants of a transfer pipeline",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/graphics/vulkan/render_target_cache.cpp:4531",
+            "site": "src/gpu/xenos/vulkan/render_target_cache.cpp:4138",
             "identity": "key",
             "key_bits": "kind 5 (kTransfer) << 56 | render_pass_key << 32 | shader_key; variant = sample index"
           },
@@ -486,12 +461,12 @@
         {
           "id": "vulkan.resolve_copy",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::Initialize",
           "when": "startup",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
             "key_bits": "kind 1 (kResolveCopy) << 56 | ResolveCopyShaderIndex | 0x100 when draw-resolution scaled"
           },
@@ -511,12 +486,12 @@
         {
           "id": "vulkan.texture_conversion",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/vulkan/texture_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/texture_cache.cpp",
           "function": "VulkanTextureCache::Initialize",
           "when": "startup",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
             "key_bits": "kind 11 (kTextureConversion) << 56 | 0 (one pipeline; format is a push constant)"
           },
@@ -536,12 +511,12 @@
         {
           "id": "vulkan.host_depth_store",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::Initialize",
           "when": "startup",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
             "key_bits": "kind 2 (kHostDepthStore) << 56 | 0 = 1x, 1 = 2x, 2 = 4x"
           },
@@ -560,12 +535,12 @@
         {
           "id": "vulkan.fsi_resolve_clear",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/render_target_cache.cpp",
           "function": "VulkanRenderTargetCache::Initialize",
           "when": "startup (FSI path only)",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
             "key_bits": "kind 3 (kRovClear) << 56 | 0 = 32bpp, 1 = 64bpp, | 0x100 when draw-resolution scaled"
           },
@@ -584,12 +559,12 @@
         {
           "id": "vulkan.dump",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/vulkan/render_target_cache.cpp",
-          "function": "VulkanRenderTargetCache::GetOrCreateDumpPipeline",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/render_target_cache.cpp",
+          "function": "VulkanRenderTargetCache::GetDumpPipeline",
           "when": "lazy: first dump of a render-target key",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
             "key_bits": "kind 4 (kDump) << 56 | DumpPipelineKey (low 32 bits)"
           },
@@ -611,12 +586,12 @@
         {
           "id": "vulkan.swap_gamma_graphics",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/graphics/vulkan/command_processor.cpp",
-          "function": "VulkanCommandProcessor::InitializeTraceSwapPipelines",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/command_processor.cpp",
+          "function": "VulkanCommandProcessor::SetupContext",
           "when": "startup (presenter)",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/graphics/vulkan/command_processor.cpp:1724",
+            "site": "src/gpu/xenos/vulkan/command_processor.cpp:1580",
             "identity": "key",
             "key_bits": "kind 9 (kSwapChain) << 56 | 0..3 = pixel shader variant"
           },
@@ -636,12 +611,12 @@
         {
           "id": "vulkan.swap_gamma_rb_swap",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/graphics/vulkan/command_processor.cpp",
-          "function": "VulkanCommandProcessor::InitializeTraceSwapPipelines",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/command_processor.cpp",
+          "function": "VulkanCommandProcessor::SetupContext",
           "when": "startup when imageViewFormatSwizzle is absent",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/graphics/vulkan/command_processor.cpp:1744",
+            "site": "src/gpu/xenos/vulkan/command_processor.cpp:1600",
             "identity": "key",
             "key_bits": "kind 9 (kSwapChain) << 56 | 0x100 | 0..1 = table/PWL red-blue fallback"
           },
@@ -660,14 +635,14 @@
         {
           "id": "vulkan.swap_gamma_compute",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/vulkan/command_processor.cpp",
-          "function": "VulkanCommandProcessor::InitializeTraceSwapCompute",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/command_processor.cpp",
+          "function": "VulkanCommandProcessor::SetupContext",
           "when": "startup when the graphics gamma path is unavailable",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
-            "key_bits": "kind 9 (kSwapChain) << 56 | 0x200..0x203 and 0x300..0x303 = table/PWL/±FXAA-luma, plain and red-blue fallback"
+            "key_bits": "kind 9 (kSwapChain) << 56 | 0x200..0x203 and 0x300..0x303 = table/PWL/\u00c2\u00b1FXAA-luma, plain and red-blue fallback"
           },
           "key": {
             "fields": [
@@ -685,12 +660,12 @@
         {
           "id": "vulkan.swap_fxaa",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/vulkan/command_processor.cpp",
-          "function": "VulkanCommandProcessor::InitializeTraceSwapCompute",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/command_processor.cpp",
+          "function": "VulkanCommandProcessor::SetupContext",
           "when": "startup when FXAA is enabled",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
             "key_bits": "kind 9 (kSwapChain) << 56 | 0x400 = FXAA, 0x401 = FXAA extreme"
           },
@@ -710,12 +685,12 @@
         {
           "id": "vulkan.immediate_drawer_triangle",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/ui/vulkan/vulkan_immediate_drawer.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/host/vulkan/vulkan_immediate_drawer.cpp",
           "function": "VulkanImmediateDrawer::Initialize",
           "when": "startup (first immediate drawer)",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/ui/vulkan/vulkan_immediate_drawer.cpp:675",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_immediate_drawer.cpp:626",
             "identity": "call_site"
           },
           "key": {
@@ -732,12 +707,12 @@
         {
           "id": "vulkan.immediate_drawer_line",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/ui/vulkan/vulkan_immediate_drawer.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/host/vulkan/vulkan_immediate_drawer.cpp",
           "function": "VulkanImmediateDrawer::Initialize",
           "when": "startup (first immediate drawer)",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/ui/vulkan/vulkan_immediate_drawer.cpp:690",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_immediate_drawer.cpp:639",
             "identity": "call_site"
           },
           "key": {
@@ -753,12 +728,12 @@
         {
           "id": "vulkan.presenter",
           "kind": "graphics",
-          "site": "rexglue-sdk/src/ui/vulkan/vulkan_presenter.cpp",
-          "function": "VulkanPresenter::GetGuestOutputPaintPipeline",
+          "site": "rexglue-sdk/src/gpu/xenos/host/vulkan/vulkan_presenter.cpp",
+          "function": "VulkanPresenter::CreateGuestOutputPaintPipeline",
           "when": "startup (presenter, per requested effect)",
           "trace": {
             "event": "helper_graphics",
-            "site": "src/ui/vulkan/vulkan_presenter.cpp:2653",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_presenter.cpp:1644",
             "identity": "key",
             "key_bits": "kind 8 (kPresenter) << 56 | GuestOutputPaintEffect | 0x100 when writing the intermediate target"
           },
@@ -778,12 +753,12 @@
         {
           "id": "vulkan.compute_util",
           "kind": "compute",
-          "site": "rexglue-sdk/src/ui/vulkan/vulkan_util.cpp",
-          "function": "ui::vulkan::util::CreateComputePipeline",
+          "site": "rexglue-sdk/src/gpu/xenos/host/vulkan/vulkan_objects.cpp",
+          "function": "gpu::vulkan::objects::CreateComputePipeline",
           "when": "shared creation helper for every compute pipeline above",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
             "key_bits": "kind 10 (kComputeUtil) << 56 | the caller's HelperKey; a creation logged with key=0 is a caller that has not been keyed yet"
           },
@@ -803,12 +778,12 @@
         {
           "id": "vulkan.texture_load",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/vulkan/texture_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/texture_cache.cpp",
           "function": "VulkanTextureCache::Initialize",
           "when": "startup, for every texture load shader the used formats need",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
             "key_bits": "kind 12 (kTextureLoad) << 56 | kLoadShaderIndex"
           },
@@ -827,12 +802,12 @@
         {
           "id": "vulkan.texture_load_scaled",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/vulkan/texture_cache.cpp",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/texture_cache.cpp",
           "function": "VulkanTextureCache::Initialize",
           "when": "startup when draw resolution is scaled",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
             "key_bits": "kind 12 (kTextureLoad) << 56 | 0x100 | kLoadShaderIndex"
           },
@@ -852,12 +827,12 @@
         {
           "id": "vulkan.resolve_downscale",
           "kind": "compute",
-          "site": "rexglue-sdk/src/graphics/vulkan/command_processor.cpp",
-          "function": "VulkanCommandProcessor::InitializeTraceSwapCompute",
+          "site": "rexglue-sdk/src/gpu/xenos/vulkan/command_processor.cpp",
+          "function": "VulkanCommandProcessor::SetupContext",
           "when": "startup when the resolve-downscale readback pipeline layout exists",
           "trace": {
             "event": "helper_compute",
-            "site": "src/ui/vulkan/vulkan_util.cpp:194",
+            "site": "src/gpu/xenos/host/vulkan/vulkan_objects.cpp:198",
             "identity": "key",
             "key_bits": "kind 9 (kSwapChain) << 56 | 0x500"
           },
@@ -873,5 +848,12 @@
         }
       ]
     }
-  }
+  },
+  "retired_entries": [
+    {
+      "id": "d3d12.presenter_intermediate",
+      "replacement": "d3d12.presenter_final",
+      "reason": "Upstream v0.11 presents supported bilinear effects directly to the swap chain; the intermediate presentation pass and its format no longer exist."
+    }
+  ]
 }

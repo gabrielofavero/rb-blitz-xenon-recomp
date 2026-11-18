@@ -9,9 +9,10 @@
 #include <cstdint>
 #include <string>
 
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 #include <rex/types.h>
 
 #include "hooks/settings_bridge.h"
@@ -62,10 +63,7 @@ std::string ObjectName(uint8_t* base, const uint32_t object) {
 // `sub_824E3008(r3 = list + 176)` - the selected logical row, or -1 when the list has none.
 // Isolated registers, exactly like the mouse navigation's side calls.
 int SelectedIndex(PPCContext& ctx, uint8_t* base, const uint32_t list) {
-  rex::CallFrame call(ctx);
-  call.ctx.r3.u32 = list + 176;
-  sub_824E3008(call.ctx, base);
-  return call.ctx.r3.s32;
+  return rex::ppc::Call<int32_t>(ctx,base,sub_824E3008,list+176);
 }
 
 }  // namespace

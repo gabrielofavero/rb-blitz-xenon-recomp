@@ -1,0 +1,265 @@
+[
+  {
+    "from": "rexglue-sdk/thirdparty/stb/stb_image.h",
+    "to": "stb_image.h",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/LICENSE",
+    "to": "LICENSE",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/libmspack/libmspack/COPYING.LIB",
+    "to": "thirdparty/libmspack/libmspack/COPYING.LIB",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/spdlog/LICENSE",
+    "to": "thirdparty/spdlog/LICENSE",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/xxHash/LICENSE",
+    "to": "thirdparty/xxHash/LICENSE",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/tomlplusplus/LICENSE",
+    "to": "thirdparty/tomlplusplus/LICENSE",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/imgui/LICENSE.txt",
+    "to": "thirdparty/imgui/LICENSE.txt",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/inja/LICENSE",
+    "to": "thirdparty/inja/LICENSE",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/inja/third_party/include/nlohmann/LICENSE.MIT",
+    "to": "thirdparty/inja/third_party/include/nlohmann/LICENSE.MIT",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/simde/COPYING",
+    "to": "thirdparty/simde/COPYING",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/sdl3/LICENSE.txt",
+    "to": "thirdparty/sdl3/LICENSE.txt",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/sdl3/src/hidapi/LICENSE.txt",
+    "to": "thirdparty/sdl3/src/hidapi/LICENSE.txt",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/tracy/LICENSE",
+    "when": "tracy",
+    "to": "thirdparty/tracy/LICENSE",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/FFmpeg/LICENSE.md",
+    "to": "thirdparty/FFmpeg/LICENSE.md",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.LGPLv2.1",
+    "to": "thirdparty/FFmpeg/COPYING.LGPLv2.1",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.LGPLv3",
+    "to": "thirdparty/FFmpeg/COPYING.LGPLv3",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.GPLv2",
+    "to": "thirdparty/FFmpeg/COPYING.GPLv2",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.GPLv3",
+    "to": "thirdparty/FFmpeg/COPYING.GPLv3",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/glslang/LICENSE.txt",
+    "to": "thirdparty/glslang/LICENSE.txt",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/excrypt/LICENSE",
+    "to": "thirdparty/excrypt/LICENSE",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/tlsf/tlsf.h",
+    "to": "thirdparty/tlsf/tlsf.h",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/thirdparty/cli11/LICENSE",
+    "to": "thirdparty/cli11/LICENSE",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "fromVulkanSource": "vulkan-headers/LICENSE.md",
+    "when": "vulkan",
+    "to": "vulkan-headers/LICENSE.md",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "fromVulkanSource": "vulkan-loader/LICENSE.txt",
+    "when": "vulkan",
+    "to": "vulkan-loader/LICENSE.txt",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "fromVulkanSource": "vulkan-memory-allocator/LICENSE.txt",
+    "when": "vulkan",
+    "to": "vulkan-memory-allocator/LICENSE.txt",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  },
+  {
+    "fromVulkanSource": "moltenvk/LICENSE",
+    "when": "vulkan",
+    "to": "moltenvk/LICENSE",
+    "platforms": [
+      "macos"
+    ]
+  },
+  {
+    "fromMoltenDependency": "cereal",
+    "when": "vulkan",
+    "to": "cereal/LICENSE",
+    "platforms": [
+      "macos"
+    ]
+  },
+  {
+    "fromMoltenDependency": "spirv-cross",
+    "when": "vulkan",
+    "to": "spirv-cross/LICENSE",
+    "platforms": [
+      "macos"
+    ]
+  },
+  {
+    "from": "rexglue-sdk/cmake/rexglue_vulkan_stack.json",
+    "when": "vulkan",
+    "to": "vulkan-stack.json",
+    "platforms": [
+      "windows",
+      "macos",
+      "linux"
+    ]
+  }
+]

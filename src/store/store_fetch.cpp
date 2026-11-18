@@ -14,10 +14,11 @@
 #include <string>
 #include <utility>
 
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 #include "store/store_catalogue.h"
 #include "store/store_catalogue_status.h"
@@ -28,35 +29,13 @@
 #include "store/store_probe.h"
 #include "store/store_settings.h"
 
-REXCVAR_DEFINE_STRING(store_serve_dir, "", "Diagnostics",
-                      "Serve the retail store's netcache records from this host directory (a file "
-                      "named exactly like the requested path, e.g. "
-                      "dlc_store/europe/dlc_top_xbox_eng.dta); empty uses the built-in records")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(store_fetch_deliver, true, "Diagnostics",
-                    "Deliver a served store record to the panel through the retail notification "
-                    "(the file cache's own `file_req_complete` call). On by default because the store "
-                    "has nothing to show otherwise: offline the cache's request body never notifies. "
-                    "Only a record this module actually serves is affected, and serving itself is "
-                    "gated on the RhythmVerse master switch, so a stock boot is untouched")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(store_offer_type_symbol, true, "Diagnostics",
-                    "Serve each offer's `type` as a DTA symbol (`(type song)`) instead of a string. "
-                    "The symbol form is what makes the retail provider answer the browser's row "
-                    "labels (measured 2026-10-21); the null read that used to follow the labels was "
-                    "the details panel's `(rank <part>)` path, now unrolled onto `rank_<part>` keys "
-                    "by the payload (store_payload.h). Off is the pre-P3 blank-row behaviour.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_STRING(store_front_menu_row, "no-count", "Diagnostics",
-                      "How a served front-menu row spells its count (store_metadata.h's "
-                      "FrontMenuRowForm): `no-count` marks the row with retail's own "
-                      "`random_song` fourth element, which is the only form whose count label is "
-                      "never fed a number; `count` is the pre-P9-5 `(path label TRUE)` that drew "
-                      "`1`, `false` and `zero` are the other spellings of the same count")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
+
+
 
 namespace rb_blitz::store {
 namespace {
@@ -181,14 +160,14 @@ void LogOnce(const std::string& path, const std::string& line) {
 }  // namespace
 
 void InstallStoreFetch() {
-  g_serve_dir = REXCVAR_GET(store_serve_dir);
-  g_deliver = REXCVAR_GET(store_fetch_deliver);
+  g_serve_dir = rb_blitz::settings::title::store_serve_dir.Get();
+  g_deliver = rb_blitz::settings::title::store_fetch_deliver.Get();
   // The offer record's `type` node kind (store_metadata.h): read here because the writers are
   // SDK-free and a guest thread must not touch the cvar registry.
-  SetOfferTypeSymbol(REXCVAR_GET(store_offer_type_symbol));
+  SetOfferTypeSymbol(rb_blitz::settings::title::store_offer_type_symbol.Get());
   // The front-menu row's count form, for the same reason (store_metadata.h's FrontMenuRowForm).
   FrontMenuRowForm form = FrontMenuRow();
-  const std::string row_form = REXCVAR_GET(store_front_menu_row);
+  const std::string row_form = rb_blitz::settings::title::store_front_menu_row.Get();
   if (ParseFrontMenuRowForm(row_form, &form)) {
     SetFrontMenuRowForm(form);
   } else {
@@ -201,7 +180,7 @@ void InstallStoreFetch() {
               g_serve_dir.empty() ? "the built-in records" : ("'" + g_serve_dir + "' first"),
               g_deliver ? "on" : "off");
   REXLOG_INFO("store_fetch: the offer `type` is served as a {}",
-              REXCVAR_GET(store_offer_type_symbol) ? "symbol" : "string (labels stay blank)");
+              rb_blitz::settings::title::store_offer_type_symbol.Get() ? "symbol" : "string (labels stay blank)");
   REXLOG_INFO("store_fetch: a front-menu row's count is served as '{}'",
               FrontMenuRowFormToken(FrontMenuRow()));
 }
@@ -214,7 +193,7 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
   if (!IsStoreRequestPath(path)) {
     return false;
   }
-  // Master off means no store work at all (plan §1.6); the row's gate already refuses entry, and a
+  // Master off means no store work at all (plan Ã‚Â§1.6); the row's gate already refuses entry, and a
   // stale screen left over from a commit must not be fed either.
   if (!Settings()->enabled) {
     LogOnce(path, "not serving '" + path + "': RhythmVerse is off");
@@ -236,7 +215,7 @@ bool ServeStoreRequest(PPCContext& ctx, uint8_t* base, uint32_t path_string) {
   // The Downloaded mark's index touches every package, so it is built while the player is still on
   // the front menu rather than when a page is asked for; it is a no-op while the published index
   // still describes the library. Until it lands a page carries no mark, which is "unknown", never
-  // a negative claim (plan §3.2).
+  // a negative claim (plan Ã‚Â§3.2).
   if (IsFrontMenuPath(path) || IsMenuRecordPath(path)) {
     RequestLibraryRefresh("the store asked for a page");
   }

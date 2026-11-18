@@ -9,7 +9,9 @@ whose exit code is the answer - and the one thing it found.
 This audit currently covers the Windows PE/Inno payload. The Linux ELF and macOS
 Mach-O/package manifests and their negative checks are defined in the
 [platform expansion plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md);
-the Apple Silicon development app/package passed its native audit on 2026-11-16.
+the earlier Apple Silicon development app/package passed its native audit on 2026-11-16.
+The migrated SDK requires macOS 13.3 and a modular runtime payload; that package
+layout still needs a fresh native audit.
 Linux and Intel packages and macOS installed-player release acceptance remain pending.
 
 The experimental [iOS CLI](../../installer/ios/README.md) deliberately creates a
@@ -37,8 +39,8 @@ signatures. It deliberately refuses `.deb`/`.rpm` generation until the native
 dependency inventory and full payload audit can be completed on Linux.
 The macOS source recipe in `installer/macos/package.py` similarly stages an
 explicit app tree, checks Mach-O architecture and linked paths, and defines a
-post-`pkgbuild` payload comparison. The real Apple Silicon app and expanded package
-now pass these checks: 1,229 files, seven arm64 Mach-O images, relative library
+post-`pkgbuild` payload comparison. The earlier Apple Silicon app and expanded package
+passed these checks on 2026-11-16: 1,229 files, seven arm64 Mach-O images, relative library
 resolution, macOS 13.0 binary minimum, signatures, content/path scans, and matched
 file hashes/modes. Resources use `Contents/Resources`, with code in
 `Contents/MacOS` and the SDK-supported Vulkan resource tree. Packaging inputs are
@@ -82,23 +84,11 @@ failed, 2 the audit could not measure what it needs (a missing `llvm-readobj`, o
 
 ## What the payload is
 
-The executable payload contains the recompiled build's runtime files: `rb_blitz.exe`, its headless
-`rb_blitz_load_monitor.exe` crash-restart companion, the two SDK DLLs the
-game loads (`rexruntime.dll`, `rexgpu-xenos.dll`) and the four Visual C++ runtime DLLs the
-executable imports, plus `payload-manifest.toml`, which records their sizes and digests so the
-helper can hash what it placed before it reports success. It also contains the validated
-`assets/messages/feed.json` as a read-only first-launch offline message source. The packer also copies
-local PNG/JPEG files in that folder when their names meet the feed's safe filename rule and each is at most
-1 MiB. The audit walks that subdirectory, checks each file against the manifest and checkout, and reruns
-the feed validator against the payload folder. The current inbox row hook can draw built-in materials only,
-so a feed referencing a local image is refused for publication; see
-[known-issues.md](../reference/known-issues.md). One player-facing executable is the payload
-since the external settings application retired on 2026-10-19 (gameplay-mapping plan §19);
-the list lives in one place,
-`$wanted` in [`installer/tools/make_payload.ps1`](../../installer/tools/make_payload.ps1),
-and the script re-derives the DLL imports from the binaries it copies, so a build that
-starts needing another DLL fails while the snapshot is made instead of on a user's
-machine. The audit reads that same list rather than keeping a second opinion about it.
+The executable payload includes `rb_blitz.exe`, its `rb_blitz_load_monitor.exe` companion, configured modular SDK libraries, SDL3/provider modules and backend runtime dependencies. The canonical [runtime module inventory](../../installer/config/runtime-modules.json) and [runtime license inventory](../../installer/config/runtime-licenses.json) are consumed by [runtime_inventory.py](../../installer/tools/runtime_inventory.py). Packagers and diagnostics use that contract rather than a fixed pair of SDK DLLs. Backend gates select required modules; platform import/SONAME/framework checks reject missing or undeclared dependencies. Linux includes the Vulkan loader SONAME link; iOS uses direct MoltenVK frameworks without a desktop loader/ICD.
+
+`payload-manifest.toml` records staged file sizes and digests. It includes the diagnostics collector and validated read-only `assets/messages/feed.json`; safe local PNG/JPEG feed images remain bounded to 1 MiB each. The inbox hook currently supports built-in materials, so local-image feeds remain refused for publication; see [known-issues.md](../reference/known-issues.md). Controller resources and VC++ runtime files follow the platform packager's explicit inventory. Private retail and mod assets remain excluded from desktop distributions.
+
+The former `rexruntime.dll` / `rexgpu-xenos.dll` payload and measured tables below describe pre-v0.11 builds. They remain baseline evidence, but cannot validate the migrated modular payload. Native Linux/macOS/iOS package and installed-player checks for the new stack remain unproven until run on those hosts.
 
 The game data is always the user's own, supplied as an STFS package or an extracted
 folder, and Rock Band Blitz Ultimate is downloaded from its own GitHub release while the
@@ -125,7 +115,7 @@ release or update.
 
 ## The one finding: `__FILE__`
 
-The first run of the audit failed `machine-paths`, and the failure is the reason the check
+The historical 2026-09-28 run of the audit failed `machine-paths`, and the failure is the reason the check
 exists. Every `REXLOG_*` and `REX_ASSERT` macro expands to a `__FILE__` literal, so each
 source file that logs anything contributes its own path to the binary's string table - and
 because the compiler is invoked with absolute paths, that path was the checkout's:
@@ -142,8 +132,7 @@ developer's disk (`D:/dev/…`) inside a product that is about to be handed to
 somebody else. It is not a credential and not game data; it is the third of the item's four
 questions, and it was a real answer: *yes, a machine-specific path reached the payload*.
 
-The fix is the compiler's own mapping, set before `generated/rexglue.cmake` so that the
-`add_subdirectory()` that pulls in the SDK inherits it - the SDK's own DLLs had the most
+The fix is the compiler's own mapping, set before the direct SDK `add_subdirectory()` call in the parent CMake file so that it inherits the directory property - the SDK's own DLLs had the most
 hits, and a fix that only covered our sources would have left them:
 
 ```cmake
@@ -188,13 +177,10 @@ reader does not have to re-derive the reasoning:
   is in the executable, and the docs treat it as the point: a log says which build it is
   ([toolchain.md](toolchain.md), [build-and-run.md](build-and-run.md) §4). It names no
   machine and no person.
-- **The console's XEX key is in `rexruntime.dll`.** The runtime has to read the user's own
-  dump, so the emulated console's key is in the SDK's source
-  (`rexglue-sdk/src/system/xex_module.cpp`, `xe_xex2_retail_key`) and therefore in the DLL
-  built from it. It is a public constant of every Xenia-derived runtime, it is not this
+- **The SDK contains the console's XEX key.** The runtime reads the user's own dump using the SDK initializer in `rexglue-sdk/src/filesystem/xex.cpp` (`kMasterKeys`). The prior runtime used `src/system/xex_module.cpp` and `xe_xex2_retail_key`. It is a public constant of every Xenia-derived runtime, it is not this
   project's secret, and there is exactly one copy: `scripts/xex/decrypt_xex.py` reads it from
   the SDK rather than carrying a second one ([rb3-references.md](../reference/rb3-references.md) §9).
-  What the audit checks is that **we** add no literal of our own.
+  The bounded source parser supports the exact v0.11 initializer and legacy baseline without duplicating key material. It prints no keys or session values; the audit reports source/declaration metadata only. What the audit checks is that **we** add no literal of our own.
 - **The project's own names.** `sub_821D0A18`-style labels, hook names and guest addresses
   appear throughout the repository's docs and source, which are public under GPL-2.0. What
   must not travel is a name from *somebody else's* dump of symbols, and the way to be sure

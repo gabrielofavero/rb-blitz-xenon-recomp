@@ -263,12 +263,23 @@ SeedReport SeedPreparation(const std::string& text, const std::filesystem::path&
                            const AssetReader& read, std::span<const uint8_t> image,
                            const std::function<bool()>& cancelled,
                            const PreparationInputs& inputs, uint64_t content_epoch,
-                           std::string* persistence_error) {
+                           std::string* persistence_error, uint32_t shader_storage_version) {
   const auto manifest = Json::parse(text);
   Require(manifest.at("schema") == 1 && manifest.at("title_id") == "5841122D", "unsupported preparation manifest");
   const auto root = cache / "shaders" / "shareable";
   std::filesystem::create_directories(root);
-  const Bytes shader_header = {'X','E','S','H',0x20,0x20,0x12,0x19};
+  Require(shader_storage_version == kD3D12ShaderStorageVersion ||
+          shader_storage_version == kVulkanShaderStorageVersion, "unsupported shader storage version");
+  const auto shader_header_for = [](uint32_t version) {
+    Bytes result{'X','E','S','H'};
+    const auto bytes = VersionBytes(version);
+    result.insert(result.end(),bytes.begin(),bytes.end());
+    return result;
+  };
+  const Bytes shader_header = shader_header_for(shader_storage_version);
+  const Bytes compatible_shader_header = shader_header_for(
+      shader_storage_version == kD3D12ShaderStorageVersion ? kVulkanShaderStorageVersion
+                                                        : kD3D12ShaderStorageVersion);
   PreparationLedger ledger;
   std::string ledger_reason;
   ledger.Load(cache,&ledger_reason);
@@ -282,8 +293,10 @@ SeedReport SeedPreparation(const std::string& text, const std::filesystem::path&
       ledger.extraction.ExtractionValid(inputs);
   const Bytes previous_shaders = ReadCache(xsh_file);
   if (!previous_shaders.empty()) {
-    const bool parsed = ParseShaders(previous_shaders,shader_header,&shaders);
-    const bool counted = parsed && shaders.size() == ledger.extraction.entries;
+    const bool current_format = ParseShaders(previous_shaders,shader_header,&shaders);
+    const bool parsed = current_format ||
+        ParseShaders(previous_shaders,compatible_shader_header,&shaders);
+    const bool counted = current_format && shaders.size() == ledger.extraction.entries;
     if (extraction_recorded && counted) report.extraction_reused = true;
     else { if (!parsed) shaders.clear(); ++report.repaired_layers; }
   } else if (extraction_recorded) {

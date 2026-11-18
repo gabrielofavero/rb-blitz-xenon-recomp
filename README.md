@@ -55,17 +55,19 @@ Pre-release builds are Windows only.
 
 You can build the project on Windows using PowerShell from the repository root. Use the `develop` branch for the latest features.
 
-You need LLVM/Clang, CMake 3.25+, Ninja, the Visual Studio Build Tools *with* the Windows SDK on `PATH`, and the dump at `game/default.xex`.
+Use the pinned v0.11 SDK, LLVM/Clang 20+, CMake 3.25+, Ninja, Python 3.10+, and Visual Studio C++ Build Tools with a Windows SDK. Keep the verified dump at `game/default.xex`. Exact versions and native platform limits are in [the toolchain guide](docs/guides/toolchain.md).
 
 ```powershell
-# once per checkout
+git submodule update --init --recursive
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\repair_flat_symlinks.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_patches.ps1
-
-# the first build compiles the SDK and stops once after codegen; run it again to link
-cmake --preset win-amd64-release
+python scripts/setup/prepare_vulkan_stack.py --source-root out/deps/rex-vulkan
+$vulkanSources = (Resolve-Path out/deps/rex-vulkan).Path
+cmake --preset win-amd64-release "-DREXGLUE_VULKAN_SOURCE_ROOT=$vulkanSources" -DREXGLUE_FETCH_VULKAN_DEPS=OFF
 cmake --build --preset win-amd64-release
 ```
+
+The patch applier selects the registered stack for the staged SDK gitlink. Dependency preparation verifies exact source pins and the canonical MoltenVK patch before configure. Code generation and source-list reload are automatic. See [build and run](docs/guides/build-and-run.md) for mirrors, offline checks, and a D3D12-only configuration.
 
 Build outputs go to `out\build\win-amd64-release\`; run `rb_blitz.exe` from that directory. Run host tests with `ctest --test-dir out\build\win-amd64-release --output-on-failure`. Use `installer\build.ps1` to build the installer from the current code.
 

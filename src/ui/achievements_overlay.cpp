@@ -6,13 +6,16 @@
 #include <atomic>
 #include <string>
 #include <vector>
+#include <fstream>
+#include <map>
+#include <rex/ui/style.h>
+#include <rex/ui/image_texture.h>
+#include "platform/image_decode.h"
 
 #include <imgui.h>
-#include <rex/hook.h>
-#include <rex/system/achievement_manager.h>
-#include <rex/ui/imgui_dialog.h>
-#include <rex/ui/immediate_drawer.h>
-#include <rex/ui/overlay/achievement_icon_cache.h>
+#include <rex/ppc/hook.h>
+#include <rex/xam/achievement_manager.h>
+#include <rex/ui/ui_system.h>
 
 #include "input/native_menu.h"
 #include "input/title_input.h"
@@ -31,27 +34,33 @@ uint32_t HeldCommands() {
   key(ImGuiKey_Home, kFirst); key(ImGuiKey_End, kLast);
   key(ImGuiKey_PageUp, kPageUp); key(ImGuiKey_PageDown, kPageDown);
   key(ImGuiKey_Escape, kBack); key(ImGuiKey_Backspace, kBack);
-  using namespace rex::input;
-  X_INPUT_STATE state{};
+  using namespace rex::hid;
+  IInputSystem::PadReading state{};
   if (input::SamplePhysicalPad(&state, true)) {
-    const auto& pad = state.gamepad;
-    if ((pad.buttons & X_INPUT_GAMEPAD_DPAD_LEFT) || pad.thumb_lx < -16000) held |= kLeft;
-    if ((pad.buttons & X_INPUT_GAMEPAD_DPAD_RIGHT) || pad.thumb_lx > 16000) held |= kRight;
-    if ((pad.buttons & X_INPUT_GAMEPAD_DPAD_UP) || pad.thumb_ly > 16000) held |= kUp;
-    if ((pad.buttons & X_INPUT_GAMEPAD_DPAD_DOWN) || pad.thumb_ly < -16000) held |= kDown;
-    if (pad.buttons & X_INPUT_GAMEPAD_B) held |= kBack;
+    const auto& pad = state.state;
+    if ((pad.buttons & kPadDPadLeft) || pad.thumb_lx < -16000) held |= kLeft;
+    if ((pad.buttons & kPadDPadRight) || pad.thumb_lx > 16000) held |= kRight;
+    if ((pad.buttons & kPadDPadUp) || pad.thumb_ly > 16000) held |= kUp;
+    if ((pad.buttons & kPadDPadDown) || pad.thumb_ly < -16000) held |= kDown;
+    if (pad.buttons & kPadB) held |= kBack;
   }
   return held;
 }
 
-class Browser final : public rex::ui::ImGuiDialog {
+class Browser final : public rex::ui::DialogBase {
  public:
-  Browser(rex::ui::ImGuiDrawer* drawer, rex::ui::ImmediateDrawer* immediate,
-          rex::Runtime* runtime, rex::system::AchievementManager* manager)
-      : ImGuiDialog(drawer), manager_(manager), icons_(immediate, runtime) {}
+  Browser(rex::ui::IUISystem& ui, std::function<rex::xam::IAchievementManager*()> manager)
+      : ui_(ui), manager_provider_(std::move(manager)) {}
+  bool WantsExclusiveInput() const override { return Active(); }
   ~Browser() override { active.store(false); }
 
-  void OnDraw(ImGuiIO& io) override {
+  bool Draw(ImGuiIO& io) override {
+    manager_ = manager_provider_ ? manager_provider_() : nullptr;
+    if (!manager_) {
+      active.store(false);
+      entries_.clear();
+      icons_.clear();
+    }
     if (!Active()) {
       // F7 can dismiss the persistent browser from outside its own draw. Retire
       // the popup as well, otherwise ImGui would keep an invisible modal open.
@@ -60,9 +69,9 @@ class Browser final : public rex::ui::ImGuiDialog {
         ImGui::EndPopup();
       }
       opened_ = false;
-      return;
+      return true;
     }
-    if (io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) return;
+    if (io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) return true;
     const bool appearing = !opened_;
     if (appearing) {
       entries_ = manager_->ListAchievements();
@@ -70,7 +79,7 @@ class Browser final : public rex::ui::ImGuiDialog {
       ImGui::OpenPopup("##blitz_achievements");
       opened_ = true;
     }
-    const auto& theme = imgui_drawer()->style().toast;
+    const auto& theme = ui_.GetStyle().toast;
     const float scale = std::min(io.DisplaySize.x / 1280.0f, io.DisplaySize.y / 720.0f);
     const float pad = 24 * scale;
     const ImVec2 size(std::min(1140 * scale, io.DisplaySize.x - 2 * pad),
@@ -84,7 +93,7 @@ class Browser final : public rex::ui::ImGuiDialog {
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(12 * scale, 12 * scale));
     ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 14 * scale);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(.025f, .015f, .02f, .97f));
-    ImGui::PushStyleColor(ImGuiCol_Text, theme.text);
+    ImGui::PushStyleColor(ImGuiCol_Text, rex::ui::ToImVec4(theme.text));
     ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(.025f, .015f, .02f, .97f));
     ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0, 0, 0, .55f));
     ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, theme.border);
@@ -151,7 +160,7 @@ class Browser final : public rex::ui::ImGuiDialog {
         ImFont* heading = ImGui::GetFont();
         ImGui::PopFont();
         ImFont* body = ImGui::GetFont();
-        const auto description = [&](const rex::system::AchievementInfo& entry) -> const std::string& {
+        const auto description = [&](const rex::Achievement& entry) -> const std::string& {
           return !manager_->IsUnlocked(entry.id) && !entry.unachieved_description.empty()
                      ? entry.unachieved_description : entry.description;
         };
@@ -184,8 +193,8 @@ class Browser final : public rex::ui::ImGuiDialog {
                 ? theme.border_highlight : ImVec4(.40f, .16f, .18f, .9f)), 5 * scale,
                 0, (selected ? 2 : 1) * scale);
             const ImVec2 image(card.x + inset, card.y + inset);
-            if (auto* texture = icons_.GetIcon(entry)) {
-              cards->AddImage(reinterpret_cast<ImTextureID>(texture), image,
+            if (auto* texture = GetIcon(entry)) {
+              cards->AddImage(texture->GetTexture(), image,
                   ImVec2(image.x + icon_size, image.y + icon_size), ImVec2(0, 0), ImVec2(1, 1),
                   ImGui::GetColorU32(unlocked ? ImVec4(1, 1, 1, 1) : ImVec4(.65f, .65f, .65f, 1)));
             } else {
@@ -196,7 +205,7 @@ class Browser final : public rex::ui::ImGuiDialog {
             const float title_height = heading->CalcTextSizeA(22 * scale, 1e9f,
                                         text_width, entry.label.c_str()).y;
             cards->AddText(heading, 22 * scale, ImVec2(text_x, image.y),
-                          ImGui::GetColorU32(theme.text), entry.label.c_str(), nullptr, text_width);
+                          ImGui::GetColorU32(rex::ui::ToImVec4(theme.text)), entry.label.c_str(), nullptr, text_width);
             const float status_y = image.y + title_height + 5 * scale;
             const std::string status = std::to_string(entry.gamerscore) + " G  |  " +
                                        (unlocked ? "Unlocked" : "Locked");
@@ -229,12 +238,39 @@ class Browser final : public rex::ui::ImGuiDialog {
     }
     ImGui::PopStyleColor(10);
     ImGui::PopStyleVar(5);
-  }
+    return true;
+}
 
  private:
-  rex::system::AchievementManager* manager_;
-  rex::ui::AchievementIconCache icons_;
-  std::vector<rex::system::AchievementInfo> entries_;
+  rex::ui::ImageTexture* GetIcon(const rex::Achievement& entry) {
+    if (entry.icon_path.empty()) return nullptr;
+    if (auto found = icons_.find(entry.icon_path); found != icons_.end()) return found->second.get();
+    std::unique_ptr<rex::ui::ImageTexture> image;
+    std::ifstream file(std::filesystem::path(std::u8string(entry.icon_path.begin(), entry.icon_path.end())), std::ios::binary | std::ios::ate);
+    if (file) {
+      const auto length = file.tellg();
+      if (length > 0 && length <= 4 * 1024 * 1024) {
+        std::vector<uint8_t> bytes(static_cast<size_t>(length));
+        file.seekg(0);
+        if (file.read(reinterpret_cast<char*>(bytes.data()), bytes.size())) {
+          std::vector<uint8_t> rgba;
+          uint32_t width = 0, height = 0;
+          std::string error;
+          if (platform::DecodeImageRgba(bytes.data(), bytes.size(), 512, &rgba, &width, &height, &error)) {
+            if (auto created = rex::ui::ImageTexture::Create(width, height, rgba)) image = std::move(*created);
+          }
+        }
+      }
+    }
+    auto* result = image.get();
+    icons_.emplace(entry.icon_path, std::move(image));
+    return result;
+  }
+  rex::ui::IUISystem& ui_;
+  std::function<rex::xam::IAchievementManager*()> manager_provider_;
+  rex::xam::IAchievementManager* manager_ = nullptr;
+  std::map<std::string, std::unique_ptr<rex::ui::ImageTexture>> icons_;
+  std::vector<rex::Achievement> entries_;
   Navigation navigation_;
   bool opened_ = false;
 };
@@ -244,10 +280,10 @@ void RequestOpen() { active.store(true); }
 void Toggle() { active.store(!active.load()); }
 bool Active() { return active.load(); }
 
-std::unique_ptr<rex::ui::ImGuiDialog> CreateOverlay(
-    rex::ui::ImGuiDrawer* drawer, rex::ui::ImmediateDrawer* immediate,
-    rex::Runtime* runtime, rex::system::AchievementManager* manager) {
-  return std::make_unique<Browser>(drawer, immediate, runtime, manager);
+std::unique_ptr<rex::ui::IDialog> CreateOverlay(
+    rex::ui::IUISystem& ui,
+    std::function<rex::xam::IAchievementManager*()> manager) {
+  return std::make_unique<Browser>(ui, std::move(manager));
 }
 }  // namespace rb_blitz::ui::achievements
 

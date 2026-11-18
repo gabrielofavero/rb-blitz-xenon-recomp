@@ -18,8 +18,8 @@
 #include <thread>
 #include <vector>
 
-#include <rex/cvar.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
 
 #include "assets/texture_codec.h"
 #include "store/album_art.h"
@@ -44,20 +44,9 @@
 #include <wincodec.h>
 #endif
 
-REXCVAR_DEFINE_BOOL(store_art_off, false, "Diagnostics",
-                    "Serve no album art: the offer records carry no `preview_art`, so the retail "
-                    "panel keeps its own placeholder art. Also stops the art worker from fetching "
-                    "cover images. On by default because the art is what P3's exit asks for")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_STRING(store_art_dump_dir, "", "Diagnostics",
-                      "The art worker's scratch directory. Every encoded cover is written there as "
-                      "`<key>.png_xbox`, and a file already present for a key is **served instead** "
-                      "of being fetched - so the exact bytes the panel receives can be decoded "
-                      "offline (`python scripts/assets/hmx_tex.py export <key>.png_xbox --out cover.png`), "
-                      "and a shipped `.png_xbox` copied in is a measurement of the serving path "
-                      "against a texture retail accepts. Empty does neither")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
 
 namespace rb_blitz::store {
 namespace {
@@ -407,11 +396,11 @@ void InstallAlbumArt() {
   // guest's own art request asks for a single key through the other seam (album_art.h).
   SetArtPrefetch([](const std::vector<Offer>& offers) { RequestAlbumArt(offers); });
   SetArtTextureRequest([](std::string_view key) { RequestAlbumArtTexture(key); });
-  const bool off = REXCVAR_GET(store_art_off);
+  const bool off = rb_blitz::settings::title::store_art_off.Get();
   SetAlbumArtEnabled(!off);
   {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_dump_dir = REXCVAR_GET(store_art_dump_dir);
+    g_dump_dir = rb_blitz::settings::title::store_art_dump_dir.Get();
   }
   if (off) {
     g_off = true;
@@ -436,7 +425,7 @@ void RequestAlbumArt(const std::vector<Offer>& offers) {
     const std::string key = ArtKeyFromPath(offer.preview_art);
     if (key.empty()) continue;
     const ResolvedUrl url = ResolveAlbumArtUrl(offer.art_url);
-    if (!url.ok) continue;  // the field is not a RhythmVerse album-art path (plan §3.1)
+    if (!url.ok) continue;  // the field is not a RhythmVerse album-art path (plan Ã‚Â§3.1)
     PublishArtUrl(key, url.url);
     if (TraceEnabled()) {
       // The pair, because a cover that does not match its row is otherwise indistinguishable from a

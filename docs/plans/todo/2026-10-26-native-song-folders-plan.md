@@ -1,5 +1,7 @@
 # Extra song formats as Blitz DLC — YARG spike and expansion plan
 
+The baseline SDK links below are exact historical references. A v0.11 implementation must extend public content-source/container interfaces and private XAM ownership; the removed Device/Entry APIs are not an integration route.
+
 **Status: research spike completed 2026-11-13; implementation remains planned.**
 This substantially replaces the 2026-10-26 PC-folder-only plan. The spike inspected
 YARG/YARG.Core source and this repository; it did not implement a reader, import
@@ -102,7 +104,7 @@ do not override current call sites.
 | Seam | Current implementation | Expansion work |
 | --- | --- | --- |
 | Discovery | [dlc_library.h](../../../src/fs/dlc_library.h) scans STFS identities; [dlc_layout.h](../../../src/fs/dlc_layout.h) admits directory packages in structured roots. | Add directory classification and source manifests; retain grouping/staging exclusions. Sources without Xbox headers need synthetic identities. |
-| Mounting | SDK [ContentPackage](../../../rexglue-sdk/src/system/xam/content_manager.cpp) chooses HostPathDevice for directories and STFS for files. [ExtraContentItem](../../../rexglue-sdk/include/rex/system/xam/content_manager.h) carries host path, guest name, title and content type. | Raw folders lack guest assets; SNG files currently go to STFS and fail. Add an explicit source/device factory or prepared-directory mount. Scanner-only changes are insufficient. |
+| Mounting | SDK [ContentPackage](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/system/xam/content_manager.cpp) chooses HostPathDevice for directories and STFS for files. [ExtraContentItem](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/include/rex/system/xam/content_manager.h) carries host path, guest name, title and content type. | Raw folders lack guest assets; SNG files currently go to STFS and fail. Add an explicit source/device factory or prepared-directory mount. Scanner-only changes are insufficient. |
 | Source protection | Content-manager mutation APIs avoid external paths. The metadata helper mounts directories read-only, but ContentPackage constructs its directory HostPathDevice with read_only=false. | Protect adapter file devices themselves against write/rename/delete, without changing legitimate save mounts. Content-API protection alone is insufficient. |
 | Metadata/validation | [MountPackage, IsSafeSongContent, ReadDeviceSongMetadata](../../../src/fs/dlc_song_metadata.cpp) assume STFS/host directories and static bounded DTA/DTB. | Route all consumers through the same adapter factory/view; preserve static metadata validation and reject executable DTA expressions/unsafe paths. |
 | Refresh | [dlc.cpp](../../../src/hooks/dlc.cpp) runs worker scans and publishes on the guest thread; [dlc_refresh.cpp](../../../src/hooks/dlc_refresh.cpp) waits before enumeration resumes. | Capture settings/roots, prepare immutable complete generations and publish once before snapshots. Cancel superseded work; retain mounted generations. |

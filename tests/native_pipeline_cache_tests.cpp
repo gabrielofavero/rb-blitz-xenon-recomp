@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // rb_blitz - ReXGlue Recompiled Project
 //
-// Host tests for rexglue-sdk/include/rex/graphics/native_pipeline_cache.h - the
-// driver-specific layer both pipeline caches persist beside the shareable
-// recipes (docs/plans/finished/2026-10-10-shader-cache-plan.md, P5).
+// Host tests for rexglue-sdk/include/rex/gpu/native_pipeline_cache.h - the
+// driver-specific layer both pipeline caches persist beside shareable recipes.
 //
 // The cases mirror what makes a native cache different from the portable stores,
 // and each one is a rule the backends rely on:
@@ -29,15 +28,15 @@
 
 #include "check.h"
 
-#include <rex/graphics/native_pipeline_cache.h>
+#include <rex/gpu/native_pipeline_cache.h>
 
 namespace {
 
 using namespace rb_blitz::test;
-using rex::graphics::GraphicsPreparationBackend;
-using rex::graphics::NativePipelineCacheEntryHeader;
-using rex::graphics::NativePipelineCacheIdentity;
-using rex::graphics::NativePipelineCacheStore;
+using rex::gpu::GraphicsPreparationBackend;
+using rex::gpu::NativePipelineCacheEntryHeader;
+using rex::gpu::NativePipelineCacheIdentity;
+using rex::gpu::NativePipelineCacheStore;
 
 std::filesystem::path MakeScratchDirectory(const char* label) {
   const uint64_t stamp = uint64_t(std::chrono::steady_clock::now().time_since_epoch().count());
@@ -53,6 +52,7 @@ std::filesystem::path MakeScratchDirectory(const char* label) {
 NativePipelineCacheIdentity MakeIdentity(GraphicsPreparationBackend backend, uint32_t title_id,
                                          uint32_t render_path) {
   NativePipelineCacheIdentity identity;
+  identity.source_build = "sdk-v11-native-cache-tests";
   identity.backend = backend;
   identity.title_id = title_id;
   identity.render_path = render_path;

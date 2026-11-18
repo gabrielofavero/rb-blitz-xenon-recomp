@@ -59,6 +59,7 @@ struct Request {
   int32_t mode = 0;
   uint64_t window = 0;
   RECT bounds{};
+  RECT client_bounds{};
   uint32_t resizable = 0;
   wchar_t title[256]{};
 };
@@ -214,9 +215,7 @@ struct Host {
       // changes the render surface while the persistent window keeps its size.
       if (!configured) {
         windowed = request.bounds;
-        RECT client{};
-        GetClientRect(incoming, &client);
-        RECT frame{0, 0, client.right, client.bottom};
+        RECT frame = request.client_bounds;
         AdjustWindowRectExForDpi(&frame, windowed_style, FALSE, 0, GetDpiForWindow(window));
         windowed.right = windowed.left + frame.right - frame.left;
         windowed.bottom = windowed.top + frame.bottom - frame.top;
@@ -399,6 +398,9 @@ bool Attach(void* native_window, bool resizable, std::function<void(bool)> focus
   request.operation = Operation::kAttach;
   request.window = reinterpret_cast<uint64_t>(client_window);
   GetWindowRect(client_window, &request.bounds);
+  // Reparenting removes the frame and changes GetClientRect. Preserve the
+  // drawable size before that transition so the host adds decorations once.
+  if (!GetClientRect(client_window, &request.client_bounds)) return false;
   const auto style = GetWindowLongPtrW(client_window, GWL_STYLE);
   request.resizable = resizable;
   SetWindowLongPtrW(client_window, GWL_STYLE,

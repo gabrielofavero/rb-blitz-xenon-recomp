@@ -15,7 +15,8 @@ does not make a universal binary.
 
 ## Build
 
-Use a native Mac with Xcode 16 or newer, CMake 3.25+, Ninja, Python 3.11+, and Git.
+Use a native Mac with Xcode 26 or newer (AppleClang 17+), CMake 3.25+, Ninja,
+Python 3.11+, and Git. The SDK and packaged app require macOS 13.3 or newer.
 Select an accepted Xcode with `DEVELOPER_DIR` if the system's Command Line Tools
 are older. Put CMake, Ninja, and Python on `PATH`. Supply the supported game dump
 under `game/` for code generation; it remains private and is never staged.
@@ -40,7 +41,7 @@ It initializes a missing SDK, applies the complete tracked patch set with
 `scripts/setup/apply_sdk_patches.py`, configures with the selected Xcode's
 compilers/SDK, handles the first codegen/reconfigure cycle, and builds the game,
 Cocoa importer, and controller asset validator. MoltenVK's fetched dependencies
-stay under `out/macos/dependencies`.
+stay under `out/macos/dependencies`; the Vulkan/loader/VMA/MoltenVK source pins are prepared under the configured `REXGLUE_VULKAN_SOURCE_ROOT`. Keep both source trees available for packaging their license notices.
 
 The app is staged at `out/macos/stage/<arch>/Rock Band Blitz.app`. Test installers
 are named `out/macos/packages/RockBandBlitz-<version>-<architecture>-macos.pkg`,
@@ -91,7 +92,7 @@ clean minimum-OS support remain unverified.
 ## Package contents and checks
 
 The reviewed manifest is `installer/config/platform-packaging.json`. It includes
-the launcher, game, ReXGlue runtime/GPU plugin, Tracy runtime, Vulkan loader,
+the launcher, game, all configured ReXGlue modules and SDL providers, optional Tracy runtime, Vulkan loader,
 MoltenVK and ICD, icon, Messages feed, fingerprint and graphics preparation
 records, and third-party notices. Controller packages are validated by the same
 C++ parser/image decoder as the game; only their declared files are copied,
@@ -140,7 +141,7 @@ and the running system volume are required. Canceling or failing setup causes
 Installer to report failure; committed data and the installed app remain available
 for retry. Rerunning the installer resumes setup. Setup does not start the game.
 The component allows up to one hour on macOS versions honoring script timeouts;
-macOS 13/14 retain Apple's ten-minute limit, so finish setup promptly there.
+macOS 13.3/14 retain Apple's ten-minute limit, so finish setup promptly there.
 
 Finder starts the same launcher. After completed installation, it verifies the
 import and launches directly, without repeating either choice. Updates reuse
@@ -199,3 +200,11 @@ The Ultimate addition passed four native importer CTest suites (including
 synthetic ZIP/folder, traversal, corrupt input and cancellation rollback checks)
 and a real pinned-release download into an isolated synthetic-base scratch tree
 on 2026-11-16. This was headless; the owner retains the first-launch UI check.
+
+The modular runtime inventory is `installer/config/runtime-modules.json`. Staging
+requires every configured module, including providers loaded at runtime, and
+checks their dependency closure. Vulkan and Tracy files follow the build cache.
+License notices use current SDK vendors and the prepared Vulkan source pins;
+missing or ambiguous nested MoltenVK license sources fail staging. The previous
+native dependency record predates this layout, so a current native macOS audit
+is required before packaging is certified.

@@ -363,11 +363,11 @@ class CatalogueTests(unittest.TestCase):
         self.assertTrue(two.exists())
 
     def test_sdk_storage_layout_pins(self):
-        sdk = ROOT / "rexglue-sdk" / "include" / "rex" / "graphics"
+        sdk = ROOT / "rexglue-sdk" / "src" / "gpu" / "xenos"
 
         def description_version(relative):
             text = (sdk / relative).read_text(encoding="utf-8")
-            match = re.search(r"REXPACKEDSTRUCT\(PipelineDescription, \{(.*?)\n  \}\);",
+            match = re.search(r"REX_PACKED_STRUCT\(PipelineDescription, \{(.*?)\n  \}\);",
                               text, re.S)
             self.assertIsNotNone(match, f"{relative}: PipelineDescription not found")
             version = re.search(r"kVersion = 0x([0-9A-Fa-f]+)", match.group(1))
@@ -421,8 +421,26 @@ class CatalogueTests(unittest.TestCase):
             self.assertIn(site, trace_source.read_text(encoding="utf-8"),
                           f"{entry['id']}: trace site '{site}' drifted out of the SDK source")
 
+    def test_removed_intermediate_presenter_has_explicit_lineage(self):
+        inventory = json.loads((ROOT / "config" / "pipeline_helper_inventory.json").read_text(
+            encoding="utf-8"))
+        entries = pc.load_helper_inventory(
+            ROOT / "config" / "pipeline_helper_inventory.json", "5841122D")
+        ids = {entry["id"] for entry in entries}
+        retired = inventory["retired_entries"]
+        self.assertEqual(len(retired), 1)
+        self.assertEqual(retired[0]["id"], "d3d12.presenter_intermediate")
+        self.assertNotIn(retired[0]["id"], ids)
+        self.assertIn(retired[0]["replacement"], ids)
+        self.assertTrue(retired[0]["reason"])
+        presenter = (ROOT / "rexglue-sdk/src/gpu/xenos/host/d3d12/d3d12_presenter.cpp").read_text(
+            encoding="utf-8")
+        self.assertNotIn("kGuestOutputIntermediateFormat", presenter)
+        self.assertNotIn("guest_output_paint_intermediate_pipelines_", presenter)
+        self.assertIn("device->CreateGraphicsPipelineState", presenter)
+
     def test_shipped_helper_keys_match_the_trace_enum(self):
-        header = (ROOT / "rexglue-sdk" / "include" / "rex" / "graphics" /
+        header = (ROOT / "rexglue-sdk" / "include" / "rex" / "diagnostics" /
                   "compile_trace.h").read_text(encoding="utf-8")
         kind_enum = {name: int(value)
                      for name, value in re.findall(r"(k\w+)\s*=\s*(\d+)\s*,", header)}

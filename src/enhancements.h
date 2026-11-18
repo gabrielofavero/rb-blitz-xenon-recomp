@@ -16,9 +16,9 @@
 
 #pragma once
 
-#include <rex/cvar.h>
+#include "settings/runtime_settings.h"
 
-REXCVAR_DECLARE(bool, enhancements_hide_achievements);
+
 
 namespace rb_blitz::enhancements {
 

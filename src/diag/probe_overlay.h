@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <functional>
 
-#include <rex/ui/imgui_dialog.h>
+#include <rex/ui/ui_system.h>
 
 namespace rb_blitz::diag {
 
@@ -33,12 +33,12 @@ struct WindowState {
 
 using WindowStateProvider = std::function<WindowState()>;
 
-class ProbeOverlayDialog final : public rex::ui::ImGuiDialog {
+class ProbeOverlayDialog final : public rex::ui::DialogBase {
  public:
-  ProbeOverlayDialog(rex::ui::ImGuiDrawer* imgui_drawer, WindowStateProvider provider);
+  explicit ProbeOverlayDialog(WindowStateProvider provider);
 
  protected:
-  void OnDraw(ImGuiIO& io) override;
+  bool Draw(ImGuiIO& io) override;
 
  private:
   WindowStateProvider provider_;

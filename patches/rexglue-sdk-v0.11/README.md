@@ -1,12 +1,15 @@
-# ReXGlue v0.11.0 migration candidate stack
+# ReXGlue v0.11.0 production stack and migration ledger
 
-Status: isolated implementation and disposition audit, 2026-11-18. **65 candidate
-SDK patches replay cleanly** against exact upstream v0.11.0 commit
-`a3e1d82678ca20d68d4837a8e9ee4652ff073745`; this is not production adoption.
-The production gitlink and [71-patch stack](../README.md) remain at
-`c94f5ebdcb3c9d1a460ca48e04f9758448f8d518`, with their nested MoltenVK patch
-unchanged. The [migration plan](../../docs/plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md)
-owns delivery gates and final validation.
+Status: registered production stack, 2026-11-18. **65 SDK patches** apply to exact
+upstream v0.11.0 commit `a3e1d82678ca20d68d4837a8e9ee4652ff073745`.
+The production gitlink and title integration now use this release and patch set.
+The fresh Windows AMD64 production source-SDK release build passes.
+Formal performance and native-platform/package gates remain open after adoption.
+The [historical 71-patch baseline](../README.md) at
+`c94f5ebdcb3c9d1a460ca48e04f9758448f8d518`, including its nested MoltenVK patch,
+is retained for rollback. The
+[migration plan](../../docs/plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md)
+owns current delivery gates and validation.
 
 The ledger covers all **71 original SDK patch IDs**, the retained nested
 MoltenVK patch, and new responsibilities **0089**, **0090**, **0091**, **0092** and **0093**. Sixty original IDs have candidate
@@ -25,15 +28,19 @@ previous pointer while preserving nonblocking memory-wait callers; 0018 retains
 malformed-packet recovery.
 No removed SDK API shim or second runtime is introduced.
 
-The ignored prototype is `out/rexglue-migration/worktree/`; `src/` paths below are
-relative to that title or, when describing SDK internals, its `rexglue-sdk/`.
-Candidate links identify the exact SDK implementation and regression source paths.
+The ignored validation prototype is `out/rexglue-migration/worktree/`; its title
+integration is now promoted. `src/` paths below describe the title or, for SDK
+internals, `rexglue-sdk/`. Historical candidate links identify the exact
+implementation and regression sources used for each recorded checkpoint.
 Shared scope means applicable Windows, Linux, macOS and iOS paths, with existing
 architecture/backend guards preserved. D3D12 is Windows-specific; Vulkan uses
 MoltenVK on supported Apple routes. Windows amd64 evidence does not establish
 Windows ARM64, native Linux, macOS, iOS, Retina or MoltenVK correctness.
 
-## Validation state (2026-11-18)
+## Validation checkpoints (2026-11-18)
+
+The table preserves chronological evidence, including superseded counts and gates.
+Later final-suite results appear below; current acceptance is tracked in the migration plan.
 
 | Evidence | Measured result and limits |
 | --- | --- |
@@ -154,7 +161,7 @@ as earlier checkpoints in E2/the migration plan.
 
 ## Vulkan source and runtime identity
 
-Candidate 0064 owns source dependency preparation, staging/install aliases and the
+Patch 0064 owns source dependency preparation, staging/install aliases and the
 nested patch audit. The versioned SDK manifest `cmake/rexglue_vulkan_stack.json`
 selects Vulkan SDK dependency version `1.4.357.0` and these exact source identities:
 
@@ -201,10 +208,11 @@ The checker uses the production replay engine, refuses the production SDK path
 and enforces the full release commit. Replay proves application/context and final
 source agreement; it does not certify game behavior or migration completeness.
 Regenerate dependent contexts chronologically and retain corrections in their
-owning ID. Production adoption still requires the migration plan's delivery gates.
+owning ID. Production adoption is complete as an integration step; the migration
+plan retains the unverified formal performance and native-platform/package gates.
 
 The maintained registration/trace/preparation fixture builds against an installed
-candidate SDK with Clang 20 or newer. Supply absolute paths for local inputs:
+v0.11 SDK with Clang 20 or newer. Supply absolute paths for local inputs:
 
 ```powershell
 cmake -S tests/sdk_migration -B out/sdk-migration-probe -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_PREFIX_PATH=<installed-sdk> -DRBBLITZ_MIGRATION_XEX=<default.xex> -DRBBLITZ_WINDOWS_TEST_RUNNER=<rb_blitz_windows_test_runner.exe>
@@ -230,5 +238,6 @@ executed tests out of 4,081 registrations with 12 skips and zero failures; the
 filesystem-link skip passes separately with native permissions. All 119 title
 tests pass. The preceding ordered revision passes Ultimate One Week on D3D12 and
 Vulkan, 185 seconds/results/clean exit each (`post-smoke-ui-final-r8/`). Final
-title window/artwork acceptance, matched performance and adoption remain open;
-see the migration plan for the current gate status.
+title window/artwork acceptance, matched performance and adoption were open at
+that checkpoint. Production now uses this registered stack; see the migration
+plan for subsequent acceptance and the still-open formal gates.

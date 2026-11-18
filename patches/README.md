@@ -1,7 +1,8 @@
 # Local patches for the pinned ReXGlue SDK
 
 `rexglue-sdk/` is a pinned submodule of the **upstream**
-`https://github.com/rexglue/rexglue-sdk.git` (pinned at `c94f5eb`). Local edits
+`https://github.com/rexglue/rexglue-sdk.git` (pinned at
+`a3e1d82678ca20d68d4837a8e9ee4652ff073745`, v0.11.0). Local edits
 must **not** be committed inside the submodule: the parent gitlink would then
 reference a commit that does not exist on the upstream remote, so a fresh
 checkout could not initialize the SDK (breaking the reproducibility
@@ -10,15 +11,21 @@ guarantee).
 Instead, SDK fixes are kept here as patch files and applied to the pinned
 checkout.
 
-## Isolated v0.11.0 migration (2026-11-18)
+## Registered production v0.11.0 stack (2026-11-18)
 
-The [v0.11.0 candidate stack and complete disposition ledger](rexglue-sdk-v0.11/README.md)
-contains **65 candidate SDK patches** for exact release commit
+The [v0.11.0 stack and complete disposition ledger](rexglue-sdk-v0.11/README.md)
+contains the **65 registered production SDK patches** for exact release commit
 `a3e1d82678ca20d68d4837a8e9ee4652ff073745`. It accounts for **all 71 original
 SDK patch IDs, the retained nested MoltenVK patch and new 0089/0090/0091/0092/0093**:
-sixty original IDs retain candidate files; eleven use upstream/title replacements
-or fold into an owning candidate. The production lineage below, its pin,
-71 patch files and nested source patch remain unchanged.
+sixty original IDs retain v0.11 files; eleven use upstream/title replacements
+or fold into an owning patch. The title integration and SDK pin are adopted;
+the fresh Windows AMD64 production source-SDK release build passes.
+Adoption does not close formal performance or native-platform/package gates.
+
+The original `c94f5ebdcb3c9d1a460ca48e04f9758448f8d518` pin, 71-patch stack
+under `rexglue-sdk/`, nested source patch and historical lineage below are retained
+for rollback. They are not the active v0.11 patch registration. Validation records
+below preserve their original checkpoints; the migration plan owns current gates.
 
 The 64-patch checkpoint validation on Windows amd64 passes:
 
@@ -94,12 +101,15 @@ non-Windows validation remain pending. The
 [migration plan](../docs/plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md)
 owns those delivery gates and native-platform proof gaps.
 
-## Current stack and lineage (2026-11-17)
+## Historical baseline stack and lineage (2026-11-17)
 
-There are **71 SDK patches and one nested MoltenVK patch**. The SDK pin remains
-`c94f5ebdcb3c9d1a460ca48e04f9758448f8d518`; MoltenVK remains at
-`db445ff2042d9ce348c439ad8451112f354b8d2a`. IDs have gaps deliberately; 0004's
-earlier trace work was already represented by 0019 before this refactor.
+This historical rollback baseline has **71 SDK patches and one nested MoltenVK
+patch** at SDK commit `c94f5ebdcb3c9d1a460ca48e04f9758448f8d518` and MoltenVK
+commit `db445ff2042d9ce348c439ad8451112f354b8d2a`. The following ledger and patch
+descriptions retain that baseline's dispositions and validation; current v0.11
+replacements are mapped in the [production ledger](rexglue-sdk-v0.11/README.md).
+IDs have gaps deliberately; 0004's earlier trace work was already represented
+by 0019 before this refactor.
 
 Seven families were consolidated: texture conversion, desktop display state,
 GPU packet recovery, preparation lifecycle, native driver caches, MoltenVK shader
@@ -274,7 +284,7 @@ The exact device failure still requires confirmation with the rebuilt IPA.
 
 Both patch scripts recursively replay nested dependency patch sets, check their
 upstream pins, and audit their contents before accounting for a dirty gitlink.
-The upstream SDK and MoltenVK pins remain unchanged.
+At this historical baseline checkpoint, the SDK and MoltenVK pins were unchanged.
 
 `0079-chainable-application-initialization.patch` exposes the existing app
 initialization coordinator to subclasses. The separate iOS importer completes
@@ -917,5 +927,6 @@ executed tests out of 4,081 registrations with 12 skips and zero failures; the
 filesystem-link skip passes separately with native permissions. All 119 title
 tests pass. The preceding ordered revision passes Ultimate One Week on D3D12 and
 Vulkan, 185 seconds/results/clean exit each (`post-smoke-ui-final-r8/`). Final
-title window/artwork acceptance, matched performance and adoption remain open;
-see the migration plan for the current gate status.
+title window/artwork acceptance, matched performance and adoption were open at
+that checkpoint. Production now uses the registered v0.11 stack; see the
+migration plan for subsequent acceptance and the still-open formal gates.

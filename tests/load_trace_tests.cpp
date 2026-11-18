@@ -3,15 +3,14 @@
 #include "check.h"
 #include "loading/load_trace.h"
 #include <array>
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/memory/endian.h>
 
 REX_EXTERN(sub_822C3428);
 REX_EXTERN(sub_822C3878);
 REX_EXTERN(sub_822C38F8);
 REX_EXTERN(sub_822C3F48);
-REXCVAR_DECLARE(bool, song_load_trace);
 
 namespace rb_blitz::loading {
 void BeginCrashRecoveryAttempt() {}
@@ -41,6 +40,7 @@ extern "C" REX_FUNC(__imp__sub_822C38F8) { Original(ctx, 2); }
 extern "C" REX_FUNC(__imp__sub_822C3F48) { Original(ctx, 3); }
 
 int main() {
+  CHECK_TRUE(rb_blitz::settings::RegisterTitleSettings(REX_SETTINGS()).has_value());
   using namespace rb_blitz::test;
   std::array<uint8_t, 512> memory{};
   rex::memory::store_and_swap<uint32_t>(memory.data() + 0x80 + 72, 3);
@@ -50,7 +50,7 @@ int main() {
   for (bool trace_on : {false, true}) {
     BeginCase(trace_on ? "trace forwards each original once and preserves results"
                        : "disabled observer forwards without touching guest memory");
-    CHECK_TRUE(rex::cvar::SetFlagByName("song_load_trace", trace_on ? "true" : "false"));
+    CHECK_TRUE(rb_blitz::settings::title::song_load_trace.Set(trace_on).has_value());
     rb_blitz::loading::ConfigureLoadTrace();
     for (unsigned index = 0; index < 4; ++index) {
       PPCContext ctx{};

@@ -13,6 +13,8 @@
 
 #include "input/input_icons.h"
 
+namespace rex::gpu { class ITextureOverrides; }
+
 namespace rb_blitz::assets {
 
 struct ControllerSchemeProgress {
@@ -53,6 +55,11 @@ class ControllerSchemeCompletion {
 // the button-sheet provider. The header labels themselves use buttons.milo.
 inline constexpr std::size_t kHeaderPreviousIcon = 0;
 inline constexpr std::size_t kHeaderNextIcon = 13;
+
+// Configure before installing providers. Reset unregisters the provider safely
+// while in-flight GPU callbacks retain their own shared ownership.
+void ConfigureTextureOverrides(rex::gpu::ITextureOverrides* service);
+void ResetTextureOverrides();
 
 // Internal P1 marker and fingerprint probe. No guest pixels or scene files are
 // read here. Disabled unless RB_BLITZ_P1_TRACE or a marker hash is set.

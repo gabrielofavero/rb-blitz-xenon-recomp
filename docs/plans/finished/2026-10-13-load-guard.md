@@ -162,13 +162,13 @@ its requirements cannot be met. No live scan/overwrite of locale memory is neede
 
 #### 2.5 The runtime does not provide transactional crash recovery
 
-The checked [Windows exception handler](../../../rexglue-sdk/src/core/exception_handler_win.cpp)
+The checked [Windows exception handler](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/core/exception_handler_win.cpp)
 passes access violations and illegal instructions through an ordered callback table. Other
 exception codes immediately continue the OS search. Returning true writes the supplied CPU
 context back and returns `EXCEPTION_CONTINUE_EXECUTION`. Unchanged context retries the same
 instruction; changing its instruction pointer does not repair engine state.
 
-[xmemory.cpp](../../../rexglue-sdk/src/system/xmemory.cpp) already uses faults for memory handling
+[xmemory.cpp](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/system/xmemory.cpp) already uses faults for memory handling
 and logs an unhandled guest access violation when it cannot service one. Legitimate SDK/MMIO
 fault handling must not be intercepted as a failed song. A callback that merely queues “go to
 menu” and returns false does not stop an unhandled fault from terminating the process either.

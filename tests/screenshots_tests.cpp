@@ -55,9 +55,19 @@ int main() {
   CHECK_FALSE(std::filesystem::exists(documents / "Imports"));
   std::ofstream(documents / "Imports") << "keep";
   std::filesystem::create_directories(root / "another-folder");
-  std::filesystem::create_directory_symlink(root / "another-folder", documents / "Import");
+  std::error_code symlink_error;
+  std::filesystem::create_directory_symlink(root / "another-folder", documents / "Import",
+                                          symlink_error);
+#ifdef _WIN32
+  const bool symlink_unavailable = symlink_error.value() == 1314;
+#else
+  const bool symlink_unavailable = false;
+#endif
+  CHECK_TRUE(!symlink_error || symlink_unavailable);
+  if (symlink_unavailable)
+    std::printf("[ SKIP ] directory symlink preservation needs Windows symlink privilege\n");
   rb_blitz::fs::PrepareIOSDocumentsFolders(documents);
-  CHECK_TRUE(std::filesystem::is_symlink(documents / "Import"));
+  if (!symlink_error) CHECK_TRUE(std::filesystem::is_symlink(documents / "Import"));
   CHECK_TRUE(Read(documents / "Imports") == std::vector<uint8_t>({'k','e','e','p'}));
 
   // Top row red, green, blue; bottom row white, black, yellow. Source padding

@@ -11,7 +11,7 @@
 // src/hooks/shell_music.cpp. It adds **no** `Nt*` definition, so the read/query hooks owned by
 // src/hooks/menu_filter.cpp and src/hooks/dlc_refresh.cpp keep their single strong definitions.
 //
-// Measured addresses and ABI (docs/settings/architecture.md (part 1, the bridge) §2, from the
+// Measured addresses and ABI (docs/settings/architecture.md (part 1, the bridge) Ã‚Â§2, from the
 // pinned retail image and the recompiled bodies):
 //
 //   0x8241DFB0  file_exists(path)     -> writes {bool, type 0} into the caller's 8-byte result
@@ -33,9 +33,10 @@
 // forward, so the no-op forwarded hook can be compared against the answering one in one boot.
 //
 // The cvar registry is read once, in Configure(), on a host thread: a guest thread must not touch
-// it (project rule, docs/plans/cancelled/2026-10-10-song-cache-plan.md §7). The hooks only read the
+// it (project rule, docs/plans/cancelled/2026-10-10-song-cache-plan.md Ã‚Â§7). The hooks only read the
 // cached flags.
 
+#include "settings/runtime_values.h"
 #include "hooks/settings_bridge.h"
 #include "ui/notifications.h"
 #include "graphics/preparation_loading.h"
@@ -58,10 +59,11 @@
 #include <thread>
 #include <vector>
 
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 #include <rex/types.h>
 
 #include "hooks/ultimate.h"
@@ -107,45 +109,15 @@ REX_EXTERN(__imp__sub_82457F50);  // size-class allocator (size, class)
 REX_EXTERN(__imp__sub_823FB260);  // DataArray(this, node_count), initial refcount 1
 REX_EXTERN(__imp__sub_8245C878);  // Symbol(out_slot, chars)
 
-REXCVAR_DEFINE_BOOL(
-    settings_bridge, true, "Settings",
-    "In-game settings channel: answer the guest's own file_exists/read_file/write_file "
-    "builtins when (and only when) the path is in the rbbz-settings/ namespace, "
-    "so the native Advanced Settings screen can read and write host settings. "
-    "Faithful: no content file is named in that namespace, so every call is "
-    "forwarded unchanged.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(settings_bridge_forward_only, false, "Settings",
-                    "Diagnostic for the settings channel: forward every call, including paths in "
-                    "our own namespace, so an answering hook can be compared against a pure "
-                    "no-op forward in one boot. Faithful: the channel answers and the guest gets "
-                    "its value.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(settings_bridge_provider_active, false, "Settings",
-                    "Diagnostic for P5b's merged Help & Options root: pre-commit "
-                    "`provider.active = true` in the in-memory store, so the provider gate query "
-                    "answers true and a boot shows the six-row root that an installed Ultimate "
-                    "provider produces, instead of the five-row base root. P6 replaces this with "
-                    "the adapter's real readiness, which is why it is a diagnostic and not a "
-                    "setting. Read at Configure() from `REX_SETTINGS_BRIDGE_PROVIDER_ACTIVE`, "
-                    "because the cvar registry is not finalised that early.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(settings_hot_apply_diagnostic, false, "Settings",
-                    "Diagnostic for P9's live apply: put a hot row through the real commit path "
-                    "once at boot (set + commit on the guest channel), so a boot log proves the "
-                    "row was applied to the running process rather than only saved. It writes "
-                    "the row's own cvar, so it changes this run - which is why it is a "
-                    "diagnostic and off by default. Read at Configure() from "
-                    "`REX_SETTINGS_HOT_APPLY_DIAGNOSTIC`.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(settings_ultimate_refresh_trial, false, "Settings",
-                    "Trial guarded Ultimate guest assignments after a durable settings commit. "
-                    "The setting remains restart-scoped until its consumer is verified.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
+
+
+
 
 
 namespace rb_blitz::settings::bridge {
@@ -447,7 +419,7 @@ bool QueryValue(const std::string_view path, bool* ours) {
 //   * **write through** - a commit that names provider rows is written into the provider's own
 //     file, which is what the provider's loader reads on the next boot. *This* boot does not
 //     change: the provider's DTA variables were read before the first frame, which is exactly why
-//     every provider row is a `restart` row (plan §5.5) and why nothing here claims otherwise.
+//     every provider row is a `restart` row (plan Ã‚Â§5.5) and why nothing here claims otherwise.
 //
 // Both run on a host thread (Configure) or on the guest thread the write hook already runs on, and
 // neither touches the cvar registry.
@@ -562,7 +534,7 @@ void SeedProvider() {
     }
     ++seeded;
   }
-  // The gate the merged root asks before it draws any provider row (plan §3): the adapter's real
+  // The gate the merged root asks before it draws any provider row (plan Ã‚Â§3): the adapter's real
   // readiness, plus the diagnostic.
   {
     Request gate;
@@ -633,7 +605,7 @@ void PersistProviderRows() {
 // P9: the live half of a commit
 // ------------------------------------------------------------------------------------------------
 // The commit above wrote the rows durably; this is what turns a *hot* one into a change the running
-// process already has. It is the only place in the project where the §5.5 strategy is acted on:
+// process already has. It is the only place in the project where the Ã‚Â§5.5 strategy is acted on:
 //
 //   * the store reports what the commit really changed (`last_commit_changes`), so a value written
 //     back unchanged is not applied again;
@@ -1098,6 +1070,15 @@ bool TakeRead(PPCContext& ctx, uint8_t* base) {
   if (path.starts_with(prefix)) {
     const std::string_view panel = std::string_view(path).substr(prefix.size());
     lines = ::rb_blitz::ui::screen::PanelBindingText(panel, *snapshot);
+    if (::rb_blitz::settings::title::mouse_native_trace.Get() && !lines.empty()) {
+      // Keep source names readable alongside the private font glyphs sent to the guest.
+      std::string sources;
+      for (const auto& line : lines) {
+        if (!sources.empty()) sources += " | ";
+        sources += line;
+      }
+      REXLOG_INFO("settings_bridge: binding sources {}: {}", panel, sources);
+    }
     if (!lines.empty() && ::rb_blitz::assets::InputIconsAvailable()) {
       auto view = ::rb_blitz::input::icons::CaptureActive(
           ::rb_blitz::assets::ControllerSchemeRegistry());
@@ -1135,9 +1116,9 @@ bool TakeRead(PPCContext& ctx, uint8_t* base) {
   // variable/list ownership then releases it, just as the original read_file does.
   size_t longest = 0;
   for (const auto& line : lines) longest = std::max(longest, line.size());
-  rex::CallFrame frame(ctx);
-  auto& call = frame.ctx;
-  call.r1.u32 -= static_cast<uint32_t>((longest + 1 + 0x100 + 15) & ~size_t{15});
+  PPCContext call=ctx;
+  rex::ScopeGuard restore_fpscr([&] { ctx.fpscr=call.fpscr; });
+  rex::ppc::OpenCallFrame(call,base,static_cast<uint32_t>((longest+1+0x100+15)&~size_t{15}));
   const uint32_t chars = call.r1.u32 + 0x80;
   call.r3.u32 = 16;
   call.r4.u32 = 16;
@@ -1235,9 +1216,9 @@ bool TakeWrite(PPCContext& ctx, uint8_t* base) {
 }
 
 void Configure() {
-  g_enabled = REXCVAR_GET(settings_bridge);
-  g_forward_only = REXCVAR_GET(settings_bridge_forward_only);
-  g_ultimate_refresh_trial = REXCVAR_GET(settings_ultimate_refresh_trial);
+  g_enabled = rb_blitz::settings::title::settings_bridge.Get();
+  g_forward_only = rb_blitz::settings::title::settings_bridge_forward_only.Get();
+  g_ultimate_refresh_trial = rb_blitz::settings::title::settings_ultimate_refresh_trial.Get();
   g_song_entry_receipt.Complete();
   g_selection_receipt.Complete();
 
@@ -1250,14 +1231,14 @@ void Configure() {
   // inferred from the tables.
   {
     const auto effective_bool = [](const char* name, const bool compiled_default) {
-      const std::string text = rex::cvar::GetFlagByName(name);
+      const std::string text = rb_blitz::settings::InspectRuntimeSetting(name).active_value;
       if (text.empty()) return compiled_default;
       return text != "false";
     };
     const auto locked = [](const char* name) {
-      const rex::cvar::Source source = rex::cvar::GetFlagSource(name);
-      return source == rex::cvar::Source::kCommandLine ||
-             source == rex::cvar::Source::kEnvironment;
+      const rex::SettingLayer source = rb_blitz::settings::InspectRuntimeSetting(name).staged_source;
+      return source == rex::SettingLayer::kCommandLine ||
+             source == rex::SettingLayer::kEnvironment;
     };
     ::rb_blitz::input::InputStoreOptions options;
     options.keyboard_support = effective_bool("keyboard_support", true);
@@ -1271,11 +1252,11 @@ void Configure() {
       // The project rule: a guest thread must not touch the cvar registry. This runs from the
       // settings write hook, so the write goes to a short-lived host thread and is read back.
       std::thread worker([&name, &text, &ok, &why] {
-        if (!rex::cvar::SetFlagByName(std::string(name), text)) {
+        if (!rb_blitz::settings::WriteRuntimeSetting(std::string(name), text, rex::SettingLayer::kRuntime).accepted()) {
           why = "the cvar refused the value";
           return;
         }
-        const std::string after = rex::cvar::GetFlagByName(std::string(name));
+        const std::string after = rb_blitz::settings::InspectRuntimeSetting(std::string(name)).active_value;
         if (after != text) {
           why = "the cvar still reads '" + after + "'";
           return;
@@ -1290,7 +1271,7 @@ void Configure() {
     };
     options.on_published = [] { ::rb_blitz::input::InvalidateGameplayInput(); };
     options.pad_connected = [] {
-      rex::input::X_INPUT_STATE state{};
+      rex::hid::IInputSystem::PadReading state{};
       return ::rb_blitz::input::SamplePhysicalPad(&state);
     };
 

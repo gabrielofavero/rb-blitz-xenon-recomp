@@ -519,7 +519,7 @@ void TestRealPinFile(const fs::path& project_dir) {
   if (clang != nullptr) {
     // The minimums the project already assumes: the floor the pinned SDK's own
     // CMakeLists enforces on Clang...
-    CHECK_STR_EQ(clang->minimum, "18");
+    CHECK_STR_EQ(clang->minimum, "20");
   }
   if (cmake != nullptr) {
     // ... and CMake's own cmake_minimum_required.
@@ -537,9 +537,10 @@ void TestRealPinFile(const fs::path& project_dir) {
   }
 
   for (const auto& [file, target, clang_minimum] :
-       {std::tuple{"toolchain-linux-amd64.toml", "linux-amd64", "18"},
-        std::tuple{"toolchain-mac-arm64.toml", "mac-arm64", "16"},
-        std::tuple{"toolchain-mac-amd64.toml", "mac-amd64", "16"}}) {
+       {std::tuple{"toolchain-linux-amd64.toml", "linux-amd64", "20"},
+        std::tuple{"toolchain-mac-arm64.toml", "mac-arm64", "17"},
+        std::tuple{"toolchain-mac-amd64.toml", "mac-amd64", "17"},
+        std::tuple{"toolchain-ios-arm64.toml", "ios-arm64", "17"}}) {
     Pin platform_pin;
     const fs::path platform_path = project_dir / "config" / file;
     CHECK_TRUE(rb_blitz::toolchain::LoadPin(platform_path, &platform_pin, &error));

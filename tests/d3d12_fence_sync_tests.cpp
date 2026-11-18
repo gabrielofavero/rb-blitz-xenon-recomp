@@ -5,13 +5,13 @@
 #include <windows.h>
 #include <d3d12.h>
 #include <wrl/client.h>
-#include <rex/graphics/d3d12/fence_sync.h>
+#include <gpu/xenos/d3d12/fence_sync.h>
 #include "check.h"
 #include <array>
 #include <vector>
 
 using namespace rb_blitz::test;
-using namespace rex::graphics::d3d12;
+using namespace rex::gpu::d3d12;
 using Microsoft::WRL::ComPtr;
 
 void TestSequence() {

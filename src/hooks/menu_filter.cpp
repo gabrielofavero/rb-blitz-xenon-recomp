@@ -19,16 +19,17 @@
 #include <string>
 #include <vector>
 
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 #include <rex/types.h>
 
 #include "hooks/content_progress.h"
 #include "platform/runtime_symbol.h"
 #include "platform/guest_memory.h"
-#include <rex/thread.h>
+#include <rex/platform/thread.h>
 #include "settings/menu_compat.h"
 #include "settings/boot.h"
 #include "ui/menu_options.h"
@@ -39,13 +40,13 @@
 
 // Defined by src/enhancements.cpp, which owns the `[enhancements]` table.
 // Define named symbols the same way, so the cvar declarations live next to their table.
-REXCVAR_DECLARE(bool, hide_exit_game);
-REXCVAR_DECLARE(bool, enhancements_hide_menu_options);
-REXCVAR_DECLARE(std::string, enhancements_hidden_menu_options);
-REXCVAR_DECLARE(bool, enhancements_rename_mod_settings);
-REXCVAR_DECLARE(bool, enhancements_skip_offline_dialog);
-REXCVAR_DECLARE(std::string, startup_mode);
-REXCVAR_DECLARE(bool, enhancements_refresh_music_library);
+
+
+
+
+
+
+
 
 namespace {
 
@@ -148,7 +149,7 @@ void ObserveBootRead(bool scatter, uint32_t completed_bytes,
                 "completed_bytes={} runtime_read_ms={:.1f} max_runtime_read_ms={:.1f} "
                 "post_read_scan_ms={:.1f} max_post_read_scan_ms={:.1f}",
                 std::chrono::duration_cast<std::chrono::milliseconds>(scan_done - window.last_report).count(),
-                rex::thread::current_thread_id(), window.plain_calls, window.scatter_calls,
+                rex::platform::GetCallerThreadID(), window.plain_calls, window.scatter_calls,
                 window.completed_bytes, window.original_us / 1000.0,
                 window.max_original_us / 1000.0, window.scan_us / 1000.0,
                 window.max_scan_us / 1000.0);
@@ -411,7 +412,7 @@ bool PatchFile(uint8_t* base, uint8_t* file, size_t available,
 // adjacent in guest memory. Measured 2026-10-10, the English locale's second block landed
 // in a buffer 192 KiB away from the end of the first, so the rule this replaces - which
 // required the two guest buffers to be consecutive - dropped the locale on every boot, and
-// with it both of R7's relabels (docs/guides/dlc.md §4.2). What identifies the continuation is the
+// with it both of R7's relabels (docs/guides/dlc.md Â§4.2). What identifies the continuation is the
 // *archive* offset, which the caller has already checked.
 //
 // Why the first block is not written back, even though it is known to still hold the file's
@@ -553,18 +554,16 @@ void HandleRead(const char* which, PPCContext& ctx, uint8_t* base, const ReadArg
 using ReadFunc = void (*)(PPCContext&, uint8_t*);
 
 ReadFunc ResolveOriginal(bool scatter) {
-  static ReadFunc plain = nullptr;
-  static ReadFunc scatter_fn = nullptr;
-  ReadFunc* slot = scatter ? &scatter_fn : &plain;
-  if (*slot == nullptr) {
+  static const ReadFunc plain = reinterpret_cast<ReadFunc>(
+      rb_blitz::platform::ResolveRuntimeSymbol("__imp__NtReadFile"));
+  static const ReadFunc scatter_fn = reinterpret_cast<ReadFunc>(
+      rb_blitz::platform::ResolveRuntimeSymbol("__imp__NtReadFileScatter"));
+  const auto original = scatter ? scatter_fn : plain;
+  if (!original) {
     const char* symbol = scatter ? "__imp__NtReadFileScatter" : "__imp__NtReadFile";
-    *slot = reinterpret_cast<ReadFunc>(rb_blitz::platform::ResolveRuntimeSymbol(symbol));
-    if (*slot == nullptr) {
-      REXLOG_ERROR("menu_filter: cannot resolve {} from rexruntime.dll; reads will be dropped",
-                   symbol);
-    }
+    REXLOG_ERROR("menu_filter: cannot resolve original SDK import {}; reads will be dropped", symbol);
   }
-  return *slot;
+  return original;
 }
 
 }  // namespace
@@ -578,19 +577,19 @@ void RetargetRecord(uint8_t* base, const uint8_t before[20], const uint8_t after
 
 void Configure(bool settings_restart_boot) {
   g_boot_read_timing_start = ReadClock::now();
-  g_settings.hide_rows = REXCVAR_GET(enhancements_hide_menu_options);
-  g_settings.rename_settings_row = REXCVAR_GET(enhancements_rename_mod_settings);
-  g_settings.skip_offline_prompts = settings_restart_boot || REXCVAR_GET(startup_mode) == "fast" ||
-                                    REXCVAR_GET(enhancements_skip_offline_dialog);
+  g_settings.hide_rows = rb_blitz::settings::title::enhancements_hide_menu_options.Get();
+  g_settings.rename_settings_row = rb_blitz::settings::title::enhancements_rename_mod_settings.Get();
+  g_settings.skip_offline_prompts = settings_restart_boot || rb_blitz::settings::title::startup_mode.Get() == "fast" ||
+                                    rb_blitz::settings::title::enhancements_skip_offline_dialog.Get();
   g_settings.tap_refresh_row = true;
-  g_settings.refresh_row_on = REXCVAR_GET(enhancements_refresh_music_library);
+  g_settings.refresh_row_on = rb_blitz::settings::title::enhancements_refresh_music_library.Get();
 
-  // P10: the hide decision is the §3.5 rule, not a branch. The in-game page now edits each
+  // P10: the hide decision is the Â§3.5 rule, not a branch. The in-game page now edits each
   // main-menu entry's visibility directly, so an explicit selection is authoritative even though
   // the old `hide_main_menu` master is no longer drawn: the master stays in the file for backward
   // compatibility, but a selection the player made - including an explicitly empty one - is what
   // applies. An untouched config hides the default list's entries.
-  const std::string configured_rows = REXCVAR_GET(enhancements_hidden_menu_options);
+  const std::string configured_rows = rb_blitz::settings::title::enhancements_hidden_menu_options.Get();
   rb_blitz::settings::menu_compat::HideRequest request;
   request.selection_explicit = configured_rows != menu_options::kDefaultRows;
   if (const auto* boot = rb_blitz::settings::boot::SettingsBoot::Current(); boot && boot->service()) {
@@ -605,7 +604,7 @@ void Configure(bool settings_restart_boot) {
   const rb_blitz::settings::menu_compat::HideDecision decision =
       rb_blitz::settings::menu_compat::DecideHiddenRows(request);
   g_settings.rows = decision.hidden;
-  if (REXCVAR_GET(hide_exit_game)) g_settings.rows.push_back("splash_exit");
+  if (rb_blitz::settings::title::hide_exit_game.Get()) g_settings.rows.push_back("splash_exit");
   // The list is edited whenever the decision named a row: the hide master governs the *selection*,
   // not the refresh entry's own switch, which takes its row away with the master on or off (the
   // decision above says which rows those are, and its note is logged below).
@@ -633,7 +632,7 @@ void Configure(bool settings_restart_boot) {
   REXLOG_INFO("menu_filter: R5 {}: {}", request.master ? "on" : "off", decision.note);
   if (decision.alternate_refresh_needed) {
     // Said once and plainly: the refresh lost its row, so the only in-menu way to run it is gone
-    // until the merged menu grows its own action (P10's follow-up, plan §3.5).
+    // until the merged menu grows its own action (P10's follow-up, plan Â§3.5).
     REXLOG_WARN("menu_filter: the downloadable-content row was hidden by an explicit selection; "
                 "the DLC library refresh has no main-menu row in this run");
   }

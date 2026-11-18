@@ -1,0 +1,34 @@
+{
+  "core": [
+    "rexbase",
+    "rexppc",
+    "rexkernel",
+    "rexapp",
+    "rexfilesystem",
+    "rexapu",
+    "rexhid",
+    "rexui",
+    "rexgpu",
+    "rexxam",
+    "rexxbdm",
+    "rexgpu-xenos-null",
+    "rexapu-sdl3",
+    "rexhid-sdl3",
+    "rexui-sdl3",
+    "SDL3"
+  ],
+  "conditional": {
+    "tracy": [
+      "TracyClient"
+    ],
+    "vulkan": [
+      "rexgpu-xenos-vulkan"
+    ],
+    "d3d12": [
+      "rexgpu-xenos-d3d12"
+    ],
+    "windows": [
+      "rexhid-xinput"
+    ]
+  }
+}

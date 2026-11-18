@@ -2,7 +2,7 @@
 #pragma once
 #include <filesystem>
 
-namespace rex { class Runtime; }
+namespace rex::kernel { class TitleRuntime; }
 namespace rb_blitz::screenshots {
-void Configure(rex::Runtime* runtime, const std::filesystem::path& shared_documents = {});
+void Configure(rex::kernel::TitleRuntime* runtime, const std::filesystem::path& shared_documents = {});
 }

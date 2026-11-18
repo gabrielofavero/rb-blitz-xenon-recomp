@@ -2,8 +2,9 @@
 #pragma once
 
 #include <string_view>
-#include <rex/hook.h>
-#include <rex/system/xmemory.h>
+#include <rex/ppc/hook.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 REX_EXTERN(__imp__sub_8245C878);  // Symbol(out_slot, chars)
 
@@ -12,9 +13,9 @@ namespace rb_blitz::shell_music {
 // intern table, preserving case, ownership and the caller's register context.
 inline void ReturnSongSymbol(PPCContext& ctx, uint8_t* base, std::string_view key) {
   if (key.size() > 4096) key = {};  // bound scratch stack use for malformed metadata
-  rex::CallFrame frame(ctx);
-  auto& call = frame.ctx;
-  call.r1.u32 -= static_cast<uint32_t>((key.size() + 1 + 0x100 + 15) & ~size_t{15});
+  PPCContext call=ctx;
+  rex::ScopeGuard restore_fpscr([&] { ctx.fpscr=call.fpscr; });
+  rex::ppc::OpenCallFrame(call,base,static_cast<uint32_t>((key.size()+1+0x100+15)&~size_t{15}));
   const uint32_t slot = call.r1.u32 + 0x70;
   const uint32_t chars = call.r1.u32 + 0x80;
   if (!key.empty()) std::memcpy(base + chars, key.data(), key.size());

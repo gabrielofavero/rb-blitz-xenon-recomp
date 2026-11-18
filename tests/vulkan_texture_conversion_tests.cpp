@@ -8,7 +8,7 @@
 #include <SPIRV/GlslangToSpv.h>
 #include <glslang/Public/ShaderLang.h>
 #include <StandAlone/ResourceLimits.h>
-#include <rex/graphics/vulkan/texture_conversion_shader.h>
+#include <gpu/xenos/vulkan/texture_conversion_shader.h>
 
 #include <algorithm>
 #include <array>
@@ -157,7 +157,7 @@ int main() {
     // Compile the exact source used by the runtime before checking GPU availability.
     glslang::InitializeProcess();
     glslang::TShader shader(EShLangCompute);
-    const char* source = rex::graphics::vulkan::kTextureConversionShader;
+    const char* source = rex::gpu::vulkan::kTextureConversionShader;
     shader.setStrings(&source, 1);
     shader.setEnvInput(glslang::EShSourceGlsl, EShLangCompute, glslang::EShClientVulkan, 450);
     shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_0);

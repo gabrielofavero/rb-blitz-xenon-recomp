@@ -9,87 +9,500 @@
     "nfpmVersion": "2.48.0",
     "nfpmArchiveSha256": "6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750",
     "stageManifest": [
-      { "fromTarget": "rb_blitz", "to": "opt/rock-band-blitz-recomp/bin/rb_blitz" },
-      { "fromTarget": "rb_blitz_linux_launcher", "to": "opt/rock-band-blitz-recomp/bin/rb_blitz_linux_launcher" },
-      { "fromTarget": "rexruntime", "to": "opt/rock-band-blitz-recomp/bin/librexruntime.so" },
-      { "fromTarget": "rexgpu-xenos", "to": "opt/rock-band-blitz-recomp/bin/librexgpu-xenos.so" },
-      { "from": "config/graphics_preparation.json", "to": "opt/rock-band-blitz-recomp/bin/graphics-preparation.json" },
-      { "from": "config/game_fingerprints.toml", "to": "opt/rock-band-blitz-recomp/bin/game-fingerprints.toml" },
-      { "from": "assets/messages/feed.json", "to": "opt/rock-band-blitz-recomp/bin/assets/messages/feed.json" },
-      { "from": "assets/icon/blitz.png", "to": "usr/share/icons/hicolor/256x256/apps/io.github.gabrielofavero.rbblitz.png" },
-      { "from": "installer/linux/io.github.gabrielofavero.rbblitz.desktop", "to": "usr/share/applications/io.github.gabrielofavero.rbblitz.desktop" },
-      { "from": "LICENSE", "to": "opt/rock-band-blitz-recomp/share/licenses/LICENSE" }
+      {
+        "fromTarget": "rb_blitz",
+        "to": "opt/rock-band-blitz-recomp/bin/rb_blitz"
+      },
+      {
+        "fromTarget": "rexbase",
+        "to": "opt/rock-band-blitz-recomp/bin/librexbase.so"
+      },
+      {
+        "fromTarget": "rexppc",
+        "to": "opt/rock-band-blitz-recomp/bin/librexppc.so"
+      },
+      {
+        "fromTarget": "rexkernel",
+        "to": "opt/rock-band-blitz-recomp/bin/librexkernel.so"
+      },
+      {
+        "fromTarget": "rexapp",
+        "to": "opt/rock-band-blitz-recomp/bin/librexapp.so"
+      },
+      {
+        "fromTarget": "rexfilesystem",
+        "to": "opt/rock-band-blitz-recomp/bin/librexfilesystem.so"
+      },
+      {
+        "fromTarget": "rexapu",
+        "to": "opt/rock-band-blitz-recomp/bin/librexapu.so"
+      },
+      {
+        "fromTarget": "rexhid",
+        "to": "opt/rock-band-blitz-recomp/bin/librexhid.so"
+      },
+      {
+        "fromTarget": "rexui",
+        "to": "opt/rock-band-blitz-recomp/bin/librexui.so"
+      },
+      {
+        "fromTarget": "rexgpu",
+        "to": "opt/rock-band-blitz-recomp/bin/librexgpu.so"
+      },
+      {
+        "fromTarget": "rexxam",
+        "to": "opt/rock-band-blitz-recomp/bin/librexxam.so"
+      },
+      {
+        "fromTarget": "rexxbdm",
+        "to": "opt/rock-band-blitz-recomp/bin/librexxbdm.so"
+      },
+      {
+        "fromTarget": "rexgpu-xenos-null",
+        "to": "opt/rock-band-blitz-recomp/bin/librexgpu-xenos-null.so"
+      },
+      {
+        "fromTarget": "rexapu-sdl3",
+        "to": "opt/rock-band-blitz-recomp/bin/librexapu-sdl3.so"
+      },
+      {
+        "fromTarget": "rexhid-sdl3",
+        "to": "opt/rock-band-blitz-recomp/bin/librexhid-sdl3.so"
+      },
+      {
+        "fromTarget": "rexui-sdl3",
+        "to": "opt/rock-band-blitz-recomp/bin/librexui-sdl3.so"
+      },
+      {
+        "fromTarget": "SDL3",
+        "to": "opt/rock-band-blitz-recomp/bin/libSDL3.so.0"
+      },
+      {
+        "fromTarget": "TracyClient",
+        "to": "opt/rock-band-blitz-recomp/bin/libTracyClient.so",
+        "when": "tracy"
+      },
+      {
+        "fromTarget": "rexgpu-xenos-vulkan",
+        "to": "opt/rock-band-blitz-recomp/bin/librexgpu-xenos-vulkan.so",
+        "when": "vulkan"
+      },
+      {
+        "fromTarget": "rb_blitz_linux_launcher",
+        "to": "opt/rock-band-blitz-recomp/bin/rb_blitz_linux_launcher"
+      },
+      {
+        "from": "config/graphics_preparation.json",
+        "to": "opt/rock-band-blitz-recomp/bin/graphics-preparation.json"
+      },
+      {
+        "from": "config/game_fingerprints.toml",
+        "to": "opt/rock-band-blitz-recomp/bin/game-fingerprints.toml"
+      },
+      {
+        "from": "assets/messages/feed.json",
+        "to": "opt/rock-band-blitz-recomp/bin/assets/messages/feed.json"
+      },
+      {
+        "from": "assets/icon/blitz.png",
+        "to": "usr/share/icons/hicolor/256x256/apps/io.github.gabrielofavero.rbblitz.png"
+      },
+      {
+        "from": "installer/linux/io.github.gabrielofavero.rbblitz.desktop",
+        "to": "usr/share/applications/io.github.gabrielofavero.rbblitz.desktop"
+      },
+      {
+        "from": "LICENSE",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/stb/stb_image.h",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/stb_image.h"
+      },
+      {
+        "from": "rexglue-sdk/LICENSE",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/libmspack/libmspack/COPYING.LIB",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/libmspack/libmspack/COPYING.LIB"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/spdlog/LICENSE",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/spdlog/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/xxHash/LICENSE",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/xxHash/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/tomlplusplus/LICENSE",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/tomlplusplus/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/imgui/LICENSE.txt",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/imgui/LICENSE.txt"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/inja/LICENSE",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/inja/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/inja/third_party/include/nlohmann/LICENSE.MIT",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/inja/third_party/include/nlohmann/LICENSE.MIT"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/simde/COPYING",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/simde/COPYING"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/sdl3/LICENSE.txt",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/sdl3/LICENSE.txt"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/sdl3/src/hidapi/LICENSE.txt",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/sdl3/src/hidapi/LICENSE.txt"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/tracy/LICENSE",
+        "when": "tracy",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/tracy/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/FFmpeg/LICENSE.md",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/FFmpeg/LICENSE.md"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.LGPLv2.1",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/FFmpeg/COPYING.LGPLv2.1"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.LGPLv3",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/FFmpeg/COPYING.LGPLv3"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.GPLv2",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/FFmpeg/COPYING.GPLv2"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.GPLv3",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/FFmpeg/COPYING.GPLv3"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/glslang/LICENSE.txt",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/glslang/LICENSE.txt"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/excrypt/LICENSE",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/excrypt/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/tlsf/tlsf.h",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/tlsf/tlsf.h"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/cli11/LICENSE",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/thirdparty/cli11/LICENSE"
+      },
+      {
+        "fromVulkanSource": "vulkan-headers/LICENSE.md",
+        "when": "vulkan",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/vulkan-headers/LICENSE.md"
+      },
+      {
+        "fromVulkanSource": "vulkan-loader/LICENSE.txt",
+        "when": "vulkan",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/vulkan-loader/LICENSE.txt"
+      },
+      {
+        "fromVulkanSource": "vulkan-memory-allocator/LICENSE.txt",
+        "when": "vulkan",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/vulkan-memory-allocator/LICENSE.txt"
+      },
+      {
+        "from": "rexglue-sdk/cmake/rexglue_vulkan_stack.json",
+        "when": "vulkan",
+        "to": "opt/rock-band-blitz-recomp/share/licenses/sdk/vulkan-stack.json"
+      },
+      {
+        "fromSdkStage": "libvulkan.so.1",
+        "to": "opt/rock-band-blitz-recomp/bin/libvulkan.so.1",
+        "when": "vulkan",
+        "runtime": true
+      }
     ],
     "desktopEntry": "usr/share/applications/io.github.gabrielofavero.rbblitz.desktop",
     "nativeDependencyInventoryPending": true,
     "releaseAuditPending": true
   },
   "macos": {
-    "architectures": ["arm64", "x86_64"],
+    "architectures": [
+      "arm64",
+      "x86_64"
+    ],
     "bundleName": "Rock Band Blitz.app",
     "bundleId": "io.github.gabrielofavero.rbblitz",
     "packageId": "io.github.gabrielofavero.rbblitz",
     "installLocation": "/Applications",
-    "deploymentTargetCandidate": "13.0",
+    "deploymentTargetCandidate": "13.3",
     "pkgbuildFrom": "xcrun --find pkgbuild",
-    "xcodeMinimum": "16",
+    "xcodeMinimum": "26",
     "xcodeBuildPinPending": true,
     "componentProperties": "installer/macos/components.plist",
     "controllerAssets": "Rock Band Blitz.app/Contents/Resources/assets/controller",
     "stageManifest": [
-      {"fromTemplate": "installer/macos/Info.plist.in", "to": "Rock Band Blitz.app/Contents/Info.plist"},
-      {"fromTarget": "rb_blitz_macos_launcher", "to": "Rock Band Blitz.app/Contents/MacOS/rb_blitz_macos_launcher"},
-      {"fromTarget": "rb_blitz", "to": "Rock Band Blitz.app/Contents/MacOS/rb_blitz"},
-      {"fromTarget": "rexruntime", "to": "Rock Band Blitz.app/Contents/MacOS/librexruntime.dylib"},
-      {"fromTarget": "rexgpu-xenos", "to": "Rock Band Blitz.app/Contents/MacOS/librexgpu-xenos.dylib"},
-      {"fromTarget": "TracyClient", "to": "Rock Band Blitz.app/Contents/MacOS/libTracyClient.dylib"},
-      {"from": "config/graphics_preparation.json", "to": "Rock Band Blitz.app/Contents/Resources/graphics-preparation.json"},
-      {"from": "config/game_fingerprints.toml", "to": "Rock Band Blitz.app/Contents/Resources/game-fingerprints.toml"},
-      {"from": "assets/messages/feed.json", "to": "Rock Band Blitz.app/Contents/Resources/assets/messages/feed.json"},
-      {"fromGenerated": "blitz.icns", "to": "Rock Band Blitz.app/Contents/Resources/blitz.icns"},
-      {"from": "LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/LICENSE"},
-      {"fromSdkStage": "licenses/cereal-LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/cereal/LICENSE"},
-      {"fromSdkStage": "licenses/spirv-cross-LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/spirv-cross/LICENSE"},
-      {"fromSdkStage": "vulkan/lib/libvulkan.1.dylib", "to": "Rock Band Blitz.app/Contents/Resources/vulkan/lib/libvulkan.1.dylib"},
-      {"fromSdkStage": "vulkan/lib/libMoltenVK.dylib", "to": "Rock Band Blitz.app/Contents/Resources/vulkan/lib/libMoltenVK.dylib"},
-      {"fromSdkStage": "vulkan/share/vulkan/icd.d/MoltenVK_icd.json", "to": "Rock Band Blitz.app/Contents/Resources/vulkan/share/vulkan/icd.d/MoltenVK_icd.json"},
-      {"from": "rexglue-sdk/thirdparty/stb/stb_image.h", "to": "Rock Band Blitz.app/Contents/Resources/licenses/stb_image.h"},
-      {"from": "rexglue-sdk/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/crypto/des/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/crypto/des/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/aes_128/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/aes_128/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/libmspack/libmspack/COPYING.LIB", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/libmspack/libmspack/COPYING.LIB"},
-      {"from": "rexglue-sdk/thirdparty/fmt/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/fmt/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/spdlog/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/spdlog/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/xxHash/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/xxHash/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/tomlplusplus/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/tomlplusplus/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/utfcpp/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/utfcpp/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/imgui/LICENSE.txt", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/imgui/LICENSE.txt"},
-      {"from": "rexglue-sdk/thirdparty/inja/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/inja/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/inja/third_party/include/nlohmann/LICENSE.MIT", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/inja/third_party/include/nlohmann/LICENSE.MIT"},
-      {"from": "rexglue-sdk/thirdparty/o1heap/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/o1heap/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/simde/COPYING", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/simde/COPYING"},
-      {"from": "rexglue-sdk/thirdparty/sdl3/LICENSE.txt", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/sdl3/LICENSE.txt"},
-      {"from": "rexglue-sdk/thirdparty/sdl3/src/hidapi/LICENSE.txt", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/sdl3/src/hidapi/LICENSE.txt"},
-      {"from": "rexglue-sdk/thirdparty/tracy/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/tracy/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/FFmpeg/LICENSE.md", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/FFmpeg/LICENSE.md"},
-      {"from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.LGPLv2.1", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/FFmpeg/COPYING.LGPLv2.1"},
-      {"from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.LGPLv3", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/FFmpeg/COPYING.LGPLv3"},
-      {"from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.GPLv2", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/FFmpeg/COPYING.GPLv2"},
-      {"from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.GPLv3", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/FFmpeg/COPYING.GPLv3"},
-      {"from": "rexglue-sdk/thirdparty/glslang/LICENSE.txt", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/glslang/LICENSE.txt"},
-      {"from": "rexglue-sdk/thirdparty/spirv-tools/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/spirv-tools/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/spirv-headers/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/spirv-headers/LICENSE"},
-      {"from": "rexglue-sdk/thirdparty/vulkan-headers/LICENSE.md", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/vulkan-headers/LICENSE.md"},
-      {"from": "rexglue-sdk/thirdparty/vulkan-loader/LICENSE.txt", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/vulkan-loader/LICENSE.txt"},
-      {"from": "rexglue-sdk/thirdparty/vulkan-memory-allocator/LICENSE.txt", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/vulkan-memory-allocator/LICENSE.txt"},
-      {"from": "rexglue-sdk/thirdparty/moltenvk/LICENSE", "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/moltenvk/LICENSE"}
+      {
+        "fromTemplate": "installer/macos/Info.plist.in",
+        "to": "Rock Band Blitz.app/Contents/Info.plist"
+      },
+      {
+        "fromTarget": "rb_blitz_macos_launcher",
+        "to": "Rock Band Blitz.app/Contents/MacOS/rb_blitz_macos_launcher"
+      },
+      {
+        "fromTarget": "rb_blitz",
+        "to": "Rock Band Blitz.app/Contents/MacOS/rb_blitz"
+      },
+      {
+        "fromTarget": "rexbase",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexbase.dylib"
+      },
+      {
+        "fromTarget": "rexppc",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexppc.dylib"
+      },
+      {
+        "fromTarget": "rexkernel",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexkernel.dylib"
+      },
+      {
+        "fromTarget": "rexapp",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexapp.dylib"
+      },
+      {
+        "fromTarget": "rexfilesystem",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexfilesystem.dylib"
+      },
+      {
+        "fromTarget": "rexapu",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexapu.dylib"
+      },
+      {
+        "fromTarget": "rexhid",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexhid.dylib"
+      },
+      {
+        "fromTarget": "rexui",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexui.dylib"
+      },
+      {
+        "fromTarget": "rexgpu",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexgpu.dylib"
+      },
+      {
+        "fromTarget": "rexxam",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexxam.dylib"
+      },
+      {
+        "fromTarget": "rexxbdm",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexxbdm.dylib"
+      },
+      {
+        "fromTarget": "rexgpu-xenos-null",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexgpu-xenos-null.dylib"
+      },
+      {
+        "fromTarget": "rexapu-sdl3",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexapu-sdl3.dylib"
+      },
+      {
+        "fromTarget": "rexhid-sdl3",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexhid-sdl3.dylib"
+      },
+      {
+        "fromTarget": "rexui-sdl3",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexui-sdl3.dylib"
+      },
+      {
+        "fromTarget": "SDL3",
+        "to": "Rock Band Blitz.app/Contents/MacOS/libSDL3.0.dylib"
+      },
+      {
+        "fromTarget": "TracyClient",
+        "to": "Rock Band Blitz.app/Contents/MacOS/libTracyClient.dylib",
+        "when": "tracy"
+      },
+      {
+        "fromTarget": "rexgpu-xenos-vulkan",
+        "to": "Rock Band Blitz.app/Contents/MacOS/librexgpu-xenos-vulkan.dylib",
+        "when": "vulkan"
+      },
+      {
+        "from": "config/graphics_preparation.json",
+        "to": "Rock Band Blitz.app/Contents/Resources/graphics-preparation.json"
+      },
+      {
+        "from": "config/game_fingerprints.toml",
+        "to": "Rock Band Blitz.app/Contents/Resources/game-fingerprints.toml"
+      },
+      {
+        "from": "assets/messages/feed.json",
+        "to": "Rock Band Blitz.app/Contents/Resources/assets/messages/feed.json"
+      },
+      {
+        "fromGenerated": "blitz.icns",
+        "to": "Rock Band Blitz.app/Contents/Resources/blitz.icns"
+      },
+      {
+        "from": "LICENSE",
+        "to": "Rock Band Blitz.app/Contents/Resources/LICENSE"
+      },
+      {
+        "fromSdkStage": "vulkan/lib/libvulkan.1.dylib",
+        "to": "Rock Band Blitz.app/Contents/Resources/vulkan/lib/libvulkan.1.dylib",
+        "when": "vulkan"
+      },
+      {
+        "fromSdkStage": "vulkan/lib/libMoltenVK.dylib",
+        "to": "Rock Band Blitz.app/Contents/Resources/vulkan/lib/libMoltenVK.dylib",
+        "when": "vulkan"
+      },
+      {
+        "fromSdkStage": "vulkan/share/vulkan/icd.d/MoltenVK_icd.json",
+        "to": "Rock Band Blitz.app/Contents/Resources/vulkan/share/vulkan/icd.d/MoltenVK_icd.json",
+        "when": "vulkan"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/stb/stb_image.h",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/stb_image.h"
+      },
+      {
+        "from": "rexglue-sdk/LICENSE",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/libmspack/libmspack/COPYING.LIB",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/libmspack/libmspack/COPYING.LIB"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/spdlog/LICENSE",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/spdlog/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/xxHash/LICENSE",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/xxHash/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/tomlplusplus/LICENSE",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/tomlplusplus/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/imgui/LICENSE.txt",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/imgui/LICENSE.txt"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/inja/LICENSE",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/inja/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/inja/third_party/include/nlohmann/LICENSE.MIT",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/inja/third_party/include/nlohmann/LICENSE.MIT"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/simde/COPYING",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/simde/COPYING"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/sdl3/LICENSE.txt",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/sdl3/LICENSE.txt"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/sdl3/src/hidapi/LICENSE.txt",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/sdl3/src/hidapi/LICENSE.txt"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/tracy/LICENSE",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/tracy/LICENSE",
+        "when": "tracy"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/FFmpeg/LICENSE.md",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/FFmpeg/LICENSE.md"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.LGPLv2.1",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/FFmpeg/COPYING.LGPLv2.1"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.LGPLv3",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/FFmpeg/COPYING.LGPLv3"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.GPLv2",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/FFmpeg/COPYING.GPLv2"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/FFmpeg/COPYING.GPLv3",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/FFmpeg/COPYING.GPLv3"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/glslang/LICENSE.txt",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/glslang/LICENSE.txt"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/excrypt/LICENSE",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/excrypt/LICENSE"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/tlsf/tlsf.h",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/tlsf/tlsf.h"
+      },
+      {
+        "from": "rexglue-sdk/thirdparty/cli11/LICENSE",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/thirdparty/cli11/LICENSE"
+      },
+      {
+        "fromVulkanSource": "vulkan-headers/LICENSE.md",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/vulkan-headers/LICENSE.md",
+        "when": "vulkan"
+      },
+      {
+        "fromVulkanSource": "vulkan-loader/LICENSE.txt",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/vulkan-loader/LICENSE.txt",
+        "when": "vulkan"
+      },
+      {
+        "fromVulkanSource": "vulkan-memory-allocator/LICENSE.txt",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/vulkan-memory-allocator/LICENSE.txt",
+        "when": "vulkan"
+      },
+      {
+        "fromVulkanSource": "moltenvk/LICENSE",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/moltenvk/LICENSE",
+        "when": "vulkan"
+      },
+      {
+        "fromMoltenDependency": "cereal",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/cereal/LICENSE",
+        "when": "vulkan"
+      },
+      {
+        "fromMoltenDependency": "spirv-cross",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/spirv-cross/LICENSE",
+        "when": "vulkan"
+      },
+      {
+        "from": "rexglue-sdk/cmake/rexglue_vulkan_stack.json",
+        "to": "Rock Band Blitz.app/Contents/Resources/licenses/vulkan-stack.json",
+        "when": "vulkan"
+      }
     ],
     "nativeDependencyInventoryPending": true,
     "iconConversionPending": false,
     "releaseAuditPending": true,
     "nativeValidation": {
       "arm64": {
-        "nativeDependencyInventoryPending": false,
+        "nativeDependencyInventoryPending": true,
         "xcodeBuildPinPending": false,
         "toolchainInputs": {
           "xcode": "Xcode 26.0.1\nBuild version 17A400",

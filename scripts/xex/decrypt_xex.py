@@ -24,8 +24,6 @@ import struct
 import sys
 from pathlib import Path
 
-from Crypto.Cipher import AES
-
 SEC_AES_KEY = 0x150
 SEC_IMAGE_SIZE = 0x04
 SEC_PAGE_DESC_COUNT = 0x180
@@ -36,6 +34,7 @@ FF_OFFSET_KEY = 0x000003FF
 DEFAULT_SDK = Path(__file__).resolve().parents[2] / "rexglue-sdk"
 SDK_KEY_FILE = "src/system/xex_module.cpp"
 SDK_KEY_NAME = "xe_xex2_retail_key"
+SDK_KEY_TABLE_FILE = "src/filesystem/xex.cpp"
 
 
 def be32(b, off):
@@ -46,26 +45,89 @@ def be16(b, off):
     return struct.unpack_from(">H", b, off)[0]
 
 
+def _initializer(text, declaration):
+    # Comments cannot contribute bytes or make another declaration appear valid.
+    text = re.sub(r"/\*.*?\*/|//[^\r\n]*", " ", text, flags=re.S)
+    matches = list(re.finditer(declaration, text))
+    if len(matches) != 1:
+        raise ValueError("expected one supported key declaration")
+    start = matches[0].end()
+    if start >= len(text) or text[start] != "{":
+        raise ValueError("key declaration has no array initializer")
+    depth = 0
+    for end in range(start, min(len(text), start+4096)):
+        if text[end] == "{": depth += 1
+        elif text[end] == "}":
+            depth -= 1
+            if depth == 0:
+                if not re.match(r"\s*;", text[end+1:]):
+                    raise ValueError("key initializer is not terminated")
+                return text[start:end+1]
+    raise ValueError("key initializer is oversized or unterminated")
+
+
+def _byte_arrays(initializer):
+    tokens = re.findall(r"0[xX][0-9a-fA-F]+|[{},]|[^\s{},]+", initializer)
+    position = 0
+    def array(depth=0):
+        nonlocal position
+        if depth > 3 or position >= len(tokens) or tokens[position] != "{":
+            raise ValueError("unsupported key array shape")
+        position += 1
+        values = []
+        while position < len(tokens) and tokens[position] != "}":
+            token = tokens[position]
+            if token == "{": values.append(array(depth+1))
+            elif re.fullmatch(r"0[xX][0-9a-fA-F]{1,2}", token):
+                values.append(int(token,16)); position += 1
+            else: raise ValueError("unsupported key array element")
+            if position < len(tokens) and tokens[position] == ",": position += 1
+            elif position >= len(tokens) or tokens[position] != "}":
+                raise ValueError("key array is missing a separator")
+        if position >= len(tokens): raise ValueError("unterminated key array")
+        position += 1
+        return values
+    result = array()
+    if position != len(tokens): raise ValueError("trailing key array tokens")
+    return result
+
+
+def parse_retail_key(text, *, table):
+    """Parse only a complete bounded SDK initializer; errors never contain its bytes."""
+    if table:
+        declaration = r"\bconstexpr\s+std::array\s*<\s*Key\s*,\s*4\s*>\s+kMasterKeys\s*=\s*"
+        parsed = _byte_arrays(_initializer(text, declaration))
+        if (len(parsed) != 1 or not isinstance(parsed[0],list) or len(parsed[0]) != 4 or
+                any(not isinstance(row,list) or len(row) not in (0,16) or
+                    any(not isinstance(value,int) for value in row) for row in parsed[0])):
+            raise ValueError("unsupported master-key table shape")
+        values = parsed[0][0] # XEXKey::kRetail is the first entry in the pinned SDK.
+    else:
+        declaration = r"\bxe_xex2_retail_key\s*(?:\[\s*(?:16)?\s*\])?\s*=\s*"
+        values = _byte_arrays(_initializer(text, declaration))
+    if len(values) != 16 or any(not isinstance(value,int) for value in values):
+        raise ValueError("retail key must contain exactly sixteen byte elements")
+    return bytes(values)
+
+
 def read_retail_key(sdk_dir):
-    """Reads the retail key out of the SDK source instead of copying it here."""
-    source = Path(sdk_dir) / SDK_KEY_FILE
+    """Read the runtime's pinned source initializer without retaining another copy."""
+    source = Path(sdk_dir) / SDK_KEY_TABLE_FILE
+    table = source.is_file()
+    if not table: source = Path(sdk_dir) / SDK_KEY_FILE
     try:
         text = source.read_text(encoding="utf-8", errors="replace")
+        return parse_retail_key(text, table=table)
     except OSError as error:
         raise SystemExit(
             f"cannot read the retail key from {source} ({error}); pass --key HEX instead"
         ) from error
-
-    at = text.find(SDK_KEY_NAME)
-    if at < 0:
-        raise SystemExit(f"no {SDK_KEY_NAME} in {source}; pass --key HEX instead")
-    values = re.findall(r"0x([0-9A-Fa-f]{2})\b", text[at:])
-    if len(values) < 16:
-        raise SystemExit(f"{SDK_KEY_NAME} has fewer than 16 bytes in {source}; pass --key HEX")
-    return bytes(int(v, 16) for v in values[:16])
+    except ValueError as error:
+        raise SystemExit(f"unsupported SDK key initializer in {source}: {error}; pass --key HEX") from None
 
 
 def decrypt_image(xex_path, out_path, retail_key):
+    from Crypto.Cipher import AES
     with open(xex_path, "rb") as f:
         data = f.read()
 
@@ -104,8 +166,6 @@ def decrypt_image(xex_path, out_path, retail_key):
     print(f"page_desc      : {page_desc_count} -> mapped size 0x{total_size:X}")
 
     session_key = AES.new(retail_key, AES.MODE_ECB).decrypt(aes_key) if enc else aes_key
-    print(f"aes_key        : {aes_key.hex()}")
-    print(f"session_key    : {session_key.hex()}")
 
     src = header_size
     if comp == 0:

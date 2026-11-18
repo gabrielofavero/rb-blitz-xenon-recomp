@@ -225,6 +225,81 @@ class PackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "escapes"):
                 package.find_library("libfixture.dylib", [root / "a"])
 
+    def test_module_collection_includes_runtime_loaded_providers_and_transitive_dependencies(self):
+        with tempfile.TemporaryDirectory() as name:
+            build = Path(name)
+            (build / "rb_blitz").write_bytes(b"host")
+            extra = ("librexapp.dylib", "librexkernel.dylib", "librexbase.dylib",
+                     "libSDL3.0.dylib", "libconverter.dylib")
+            for library in (*package.RUNTIME_MODULES, "libMoltenVK.dylib", *extra):
+                (build / library).write_bytes(library.encode())
+            dependencies = {
+                "rb_blitz": ["librexapp.dylib"],
+                "librexapp.dylib": ["librexkernel.dylib"],
+                "librexkernel.dylib": ["librexbase.dylib"],
+                "librexapu-sdl3.dylib": ["libSDL3.0.dylib"],
+                "libMoltenVK.dylib": ["libconverter.dylib"],
+            }
+            def commands(binary):
+                return [("LC_LOAD_DYLIB", "@rpath/" + value)
+                        for value in dependencies.get(binary.name, [])]
+            with patch.object(package, "audit_device_binary") as audit, \
+                 patch.object(package, "load_commands", side_effect=commands):
+                libraries = package.collect_libraries(build, [build], "17.0")
+            self.assertEqual(set(libraries), {*package.RUNTIME_MODULES, "libMoltenVK.dylib", *extra})
+            self.assertEqual(audit.call_count, len(libraries) + 1)
+            self.assertNotIn("librexruntime.dylib", libraries)
+            self.assertNotIn("librexgpu-xenos.dylib", libraries)
+            (build / "librexui-sdl3.dylib").unlink()
+            with patch.object(package, "audit_device_binary"), \
+                 patch.object(package, "load_commands", return_value=[]), \
+                 self.assertRaisesRegex(ValueError, "missing device library: librexui-sdl3"):
+                package.collect_libraries(build, [build], "17.0")
+
+    def test_explicit_vulkan_off_omits_backend_seeds_and_preserves_real_dependencies(self):
+        with tempfile.TemporaryDirectory() as name:
+            build = Path(name)
+            (build / "rb_blitz").write_bytes(b"host")
+            for library in (*package.RUNTIME_MODULES, "libMoltenVK.dylib"):
+                (build / library).write_bytes(library.encode())
+            expected = set(package.RUNTIME_MODULES) - {"librexgpu-xenos-vulkan.dylib"}
+            for option in ("REXGLUE_USE_VULKAN", "REXGLUE_GPU_VULKAN"):
+                with self.subTest(option=option):
+                    (build / "CMakeCache.txt").write_text(f"{option}:BOOL=OFF\n")
+                    with patch.object(package, "audit_device_binary"), \
+                         patch.object(package, "load_commands", return_value=[]):
+                        libraries = package.collect_libraries(build, [build], "17.0")
+                    self.assertEqual(set(libraries), expected)
+            with patch.object(package, "audit_device_binary"), \
+                 patch.object(package, "load_commands", side_effect=lambda path:
+                     [("LC_LOAD_DYLIB", "@rpath/libMoltenVK.dylib")] if path.name == "rb_blitz" else []):
+                libraries = package.collect_libraries(build, [build], "17.0")
+            self.assertEqual(set(libraries), expected | {"libMoltenVK.dylib"})
+            (build / "CMakeCache.txt").write_text("REXGLUE_USE_VULKAN:BOOL=ON\n")
+            with patch.object(package, "audit_device_binary"), \
+                 patch.object(package, "load_commands", return_value=[]):
+                libraries = package.collect_libraries(build, [build], "17.0")
+            self.assertEqual(set(libraries), {*package.RUNTIME_MODULES, "libMoltenVK.dylib"})
+
+    def test_signed_framework_dependencies_resolve_to_current_module_names(self):
+        self.assertEqual(package.dependency_library("@rpath/rexgpu_xenos_vulkan.framework/rexgpu_xenos_vulkan"),
+                         "librexgpu-xenos-vulkan.dylib")
+        self.assertEqual(package.dependency_library("@rpath/MoltenVK.framework/MoltenVK"), "libMoltenVK.dylib")
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            binary = root / "Frameworks/MoltenVK.framework/MoltenVK"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"framework image")
+            self.assertEqual(package.find_library("libMoltenVK.dylib", [root]), binary)
+            with patch.object(package, "audit_device_binary"), \
+                 patch.object(package, "load_commands", side_effect=lambda path:
+                     [("LC_LOAD_DYLIB", "@rpath/MoltenVK.framework/MoltenVK")] if path.name == "rb_blitz" else []):
+                for library in package.RUNTIME_MODULES:
+                    (root / library).write_bytes(library.encode())
+                (root / "rb_blitz").write_bytes(b"host")
+                libraries = package.collect_libraries(root, [root], "17.0")
+                self.assertEqual(libraries["libMoltenVK.dylib"], binary)
+
     def test_archive_layout_preserves_executable_mode_and_rejects_links(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
@@ -288,12 +363,12 @@ class NativePackagingTests(unittest.TestCase):
             source.write_text("int fixture(void) { return 1; }\n")
             flags = ["xcrun", "--sdk", "iphoneos", "clang", "-arch", "arm64", "-isysroot", sdk,
                      "-miphoneos-version-min=17.0", "-Wl,-headerpad_max_install_names"]
-            for library in ("librexruntime.dylib", "librexgpu-xenos.dylib", "libMoltenVK.dylib"):
+            for library in (*package.RUNTIME_MODULES, "librexbase.dylib", "libMoltenVK.dylib"):
                 subprocess.run([*flags, "-dynamiclib", str(source), "-o", str(build / library),
                                 "-Wl,-install_name," + str(build / library)],
                                check=True, capture_output=True)
             source.write_text("extern int fixture(void); int main(void) { return fixture(); }\n")
-            subprocess.run([*flags, str(source), str(build / "librexruntime.dylib"),
+            subprocess.run([*flags, str(source), str(build / "librexbase.dylib"),
                             "-Wl,-rpath," + str(build), "-o", str(build / "rb_blitz")],
                            check=True, capture_output=True)
             libraries = package.collect_libraries(build, [build], "17.0")
@@ -306,12 +381,12 @@ class NativePackagingTests(unittest.TestCase):
             for library, path in libraries.items():
                 package.stage_framework(app, path, library, "example.blitz", "0.1.0", "17.0")
             binaries = package.prepare_binaries(app, "17.0", list(libraries))
-            self.assertEqual(len(binaries), 4)
+            self.assertEqual(len(binaries), len(package.RUNTIME_MODULES) + 3)
             for binary in binaries:
                 commands = package.load_commands(binary)
                 self.assertIn(("LC_RPATH", "@executable_path/Frameworks"), commands)
                 self.assertNotIn(str(build), repr(commands))
-            self.assertIn(("LC_LOAD_DYLIB", "@rpath/rexruntime.framework/rexruntime"),
+            self.assertIn(("LC_LOAD_DYLIB", "@rpath/rexbase.framework/rexbase"),
                           package.load_commands(app / "rb_blitz"))
             package.write_info(app, "example.blitz", "0.1.0", "17.0")
             info = plistlib.loads((app / "Info.plist").read_bytes())

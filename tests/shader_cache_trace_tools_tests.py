@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/shaders"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts/assets"))
@@ -71,6 +73,12 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(frame['overlapping_work'][0]['site'], source)
         self.assertIn('causation unproven', frame['assessment'])
 
+    def test_modular_log_prefix_preserves_producer_thread(self):
+        result = self.report([
+            '2026-11-18 04:49:24.352 I core       t22060 shader_trace: event=gpu_frame phase=menu end_phase=menu site="swap" key=0 begin_us=0 end_us=50000 duration_us=50000 success=true',
+        ])
+        self.assertEqual(result["long_frames"][0]["thread_id"], 22060)
+
     def test_partial_records_are_reported_without_losing_usable_evidence(self):
         report = self.report([
             'shader_trace: event=gpu_frame phase=active_song end_phase=active_song '
@@ -81,6 +89,121 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(len(report['long_frames']), 1)
         self.assertEqual([r['line'] for r in report['damaged_trace_lines']], [2, 3])
         self.assertIn('unresolved', report['long_frames'][0]['assessment'])
+
+
+class RuntimeInventoryTests(unittest.TestCase):
+    def stage(self, build, platform="windows", cache=""):
+        sys.path.insert(0, str(trace.ROOT / "installer/tools"))
+        from runtime_inventory import runtime_targets, target_filename
+        (build / "CMakeCache.txt").write_text(cache)
+        names = [target_filename(name, platform) for name in runtime_targets(build, platform)]
+        names.append("rb_blitz.exe" if platform == "windows" else "rb_blitz")
+        for name in names:
+            (build / name).write_bytes(name.encode())
+        return names
+
+    def test_modular_contract_and_additional_staged_dependencies_are_hashed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            build = Path(folder)
+            names = self.stage(build)
+            (build / "vulkan").mkdir()
+            (build / "vulkan/vulkan-1.dll").write_bytes(b"loader")
+            (build / "custom-provider.dll").write_bytes(b"provider")
+            (build / "sdk-build").mkdir()
+            (build / "sdk-build/unstaged-test.dll").write_bytes(b"not shipped")
+            before = trace.runtime_binary_inventory(build)
+            self.assertEqual(set(before), set(names) | {"vulkan/vulkan-1.dll", "custom-provider.dll"})
+            (build / "vulkan/vulkan-1.dll").write_bytes(b"different loader")
+            after = trace.runtime_binary_inventory(build)
+            self.assertNotEqual(before["vulkan/vulkan-1.dll"]["sha256"], after["vulkan/vulkan-1.dll"]["sha256"])
+            self.assertEqual(after["custom-provider.dll"]["bytes"], 8)
+
+    def test_configured_optional_backends_are_not_required(self):
+        with tempfile.TemporaryDirectory() as folder:
+            build = Path(folder)
+            names = self.stage(build, cache="REXGLUE_USE_VULKAN:BOOL=OFF\nREXGLUE_ENABLE_TRACY:BOOL=OFF\n")
+            self.assertNotIn("rexgpu-xenos-vulkan.dll", names)
+            self.assertNotIn("TracyClient.dll", names)
+            self.assertEqual(set(trace.runtime_binary_inventory(build)), set(names))
+
+    def test_missing_configured_module_is_an_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            build = Path(folder)
+            self.stage(build)
+            (build / "rexxam.dll").unlink()
+            with self.assertRaisesRegex(ValueError, "rexxam.dll"):
+                trace.runtime_binary_inventory(build)
+
+    def test_old_baseline_layout_remains_supported(self):
+        with tempfile.TemporaryDirectory() as folder:
+            build = Path(folder)
+            names = ["rb_blitz.exe", "rexruntime.dll", "rexgpu-xenos.dll", "SDL3.dll"]
+            for name in names:
+                (build / name).write_bytes(name.encode())
+            self.assertEqual(set(trace.runtime_binary_inventory(build)), set(names))
+
+    def test_linux_loader_soname_and_macos_framework_binary_are_recorded(self):
+        for platform, extra in [("linux", "vulkan/libvulkan.so.1"),
+                                ("macos", "Frameworks/MoltenVK.framework/Versions/A/MoltenVK")]:
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as folder:
+                build = Path(folder)
+                self.stage(build, platform)
+                path = build / extra
+                path.parent.mkdir(parents=True)
+                path.write_bytes(b"native runtime")
+                self.assertIn(extra, trace.runtime_binary_inventory(build))
+
+
+class PreparationProvenanceTests(unittest.TestCase):
+    def test_alternate_build_records_its_source_checkout_and_capture_tool_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source, build, user, game = [folder / name for name in ('baseline', 'build', 'user', 'game')]
+            for path in (source / 'src', build, user, game): path.mkdir(parents=True)
+            (source / 'src/changed.cpp').write_text('baseline source')
+            (source / 'rexglue-sdk/include/rex').mkdir(parents=True)
+            (source / 'rexglue-sdk/include/rex/new.h').write_text('new public SDK header')
+            for name in ('rb_blitz.exe', 'rexruntime.dll', 'rexgpu-xenos.dll'):
+                (build / name).write_bytes(name.encode())
+            (game / 'default.xex').write_bytes(b'game fixture')
+            (user / 'save.dat').write_bytes(b'fixed save')
+            profile = folder / 'launcher.toml'
+            profile.write_text('[profile]\n')
+            def source_git(*args, cwd):
+                self.assertEqual(cwd, source)
+                if args == ('rev-parse', 'HEAD'): return 'baseline-project\n'
+                if args == ('-C', 'rexglue-sdk', 'rev-parse', 'HEAD'): return 'baseline-sdk\n'
+                if args == ('diff', 'HEAD'): return 'baseline project diff\n'
+                if args == ('-C', 'rexglue-sdk', 'diff', 'HEAD'): return 'baseline SDK diff\n'
+                if args == ('diff', '--name-only', 'HEAD'): return 'src/changed.cpp\n'
+                if args[:2] == ('ls-files', '--others'): return ''
+                if args[:4] == ('-C', 'rexglue-sdk', 'ls-files', '--others'): return 'include/rex/new.h\n'
+                if args == ('-C', 'rexglue-sdk', 'submodule', 'status', '--recursive'): return 'vendor-pin\n'
+                self.fail(args)
+            args = SimpleNamespace(name='baseline-cold', source_root=source, build_dir=build,
+                user_data=user, game=game, profile=profile, warm_from=None, backend='d3d12',
+                variant='retail', route='one fixed song', game_arg=[])
+            with patch.object(trace, 'RUNS', folder / 'runs'), patch.object(trace, 'git', side_effect=source_git):
+                trace.prepare(args)
+            run = folder / 'runs/baseline-cold'
+            manifest = json.loads((run / 'manifest.json').read_text())
+            self.assertEqual(manifest['project'], 'baseline-project')
+            self.assertEqual(manifest['sdk'], 'baseline-sdk')
+            self.assertEqual((run / 'inputs/sdk-source/include/rex/new.h').read_text(), 'new public SDK header')
+            self.assertEqual((run / 'inputs/sdk-submodules.txt').read_text(), 'vendor-pin\n')
+            self.assertEqual((run / 'inputs/source/src/changed.cpp').read_text(), 'baseline source')
+            self.assertEqual((run / 'inputs/project.diff').read_text(), 'baseline project diff\n')
+            self.assertEqual(manifest['capture_tools']['shader_cache_trace.py']['sha256'],
+                             trace.digest(Path(trace.__file__)))
+
+    def test_warm_cache_cannot_cross_binary_or_backend_identity(self):
+        binaries = {'rb_blitz.exe': {'sha256': 'baseline', 'bytes': 1}}
+        previous = dict(binaries=binaries, backend='d3d12', variant='retail', game_xex_sha256='game')
+        trace.validate_warm_source(previous, binaries, 'd3d12', 'retail', 'game')
+        for key, changed in [('binaries', {'rb_blitz.exe': {'sha256': 'upgrade', 'bytes': 1}}),
+                             ('backend', 'vulkan'), ('variant', 'ultimate'), ('game_xex_sha256', 'other')]:
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, 'same binary bytes'):
+                trace.validate_warm_source({**previous, key: changed}, binaries, 'd3d12', 'retail', 'game')
 
 
 class CaptureArgumentsTests(unittest.TestCase):

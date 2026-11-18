@@ -87,3 +87,19 @@ desktop (`out/_swap/hot-settings/c1-2026-11-07/`). Desktop Duplication captured 
 picture where ordinary captures were black or stale. SDK patch 0054 restored Vulkan menu input
 after minimize/restore. [unverified] Other DPI or monitor configurations. The schema now marks Window Mode
 immediate through this authored preview/Keep route; direct setting writes cannot bypass it.
+
+## Hosted drawable dimensions (2026-11-18)
+
+The Windows persistent host captures the SDL client rectangle before removing
+the child frame and reparenting the window. The attach request carries those
+dimensions so the host adds its own decorations exactly once. Measuring after
+reparenting counted the former frame as drawable space and caused horizontal
+presentation padding. This behavior is shared by D3D12 and Vulkan hosted
+windows; other platforms retain their native hosts.
+
+[measured] The v0.11 candidate release build and native window inventory in
+`out/rexglue-migration/window-preserved-client-size-r18.json` report a 1712 by
+720 captionless child, matching the guest render size. The corresponding title
+capture under `post-smoke-ui-final-r18/recovery/fixture/route-shots/00-title.png`
+was visually reviewed without the extra top and bottom strips. Other DPI and
+monitor configurations remain unverified.

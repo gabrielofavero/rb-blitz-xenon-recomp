@@ -26,7 +26,7 @@
 // ContentManager::set_extra_content_library()). Nothing is copied or renamed: the
 // library is resolved where it lies.
 //
-// Two adaptations, both measured rather than assumed (docs/guides/dlc.md §2.1):
+// Two adaptations, both measured rather than assumed (docs/guides/dlc.md Ã‚Â§2.1):
 //   * a saved-game package (00000001) - what a custom-song folder is made of - is
 //     presented as marketplace content (00000002), because the title reads its
 //     downloadable songs out of the marketplace enumeration and does not list a saved
@@ -38,7 +38,7 @@
 //     start it. The fallback lives in ContentManager::OpenContent(), beside the
 //     `.header` read it stands in for.
 //
-// Hook hygiene (docs/reference/rb3-references.md §8): the faithful behaviour, and the reason for the
+// Hook hygiene (docs/reference/rb3-references.md Ã‚Â§8): the faithful behaviour, and the reason for the
 // deviation.
 //
 // Faithful behaviour: the guest enumerates downloadable content through the emulated
@@ -79,13 +79,14 @@
 #include <utility>
 #include <vector>
 
-#include <rex/cvar.h>
-#include <rex/logging.h>
-#include <rex/runtime.h>
-#include <rex/system/flags.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xam/content_manager.h>
-#include <rex/system/xcontent.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/kernel/types/content.h>
+#include <rex/xam/content_sources.h>
+#include <rex/xam/content_validation.h>
+#include <rex/path_settings.h>
+#include "settings/runtime_values.h"
 
 #include "fs/dlc_layout.h"
 #include "fs/dlc_library.h"
@@ -103,42 +104,24 @@
 namespace rb_blitz::dlc {
 namespace {
 
-bool ValidateContentDevice(rex::filesystem::Device& device) {
+rex::Result<void> ValidateContentPackage(const rex::filesystem::IMountValidationView& view) {
   std::string reason;
-  if (fs::IsSafeSongContent(device, &reason)) return true;
+  if (fs::IsSafeSongContent(view, &reason)) return rex::Ok();
   REXLOG_WARN("dlc: Nope. Not here; refusing song content with {}", reason);
-  return false;
+  return rex::Err(rex::ErrorCategory::kValidation, std::move(reason));
 }
-
-REXCVAR_DEFINE_STRING(dlc_root, "", "Runtime",
-                      "DLC directory, laid out as <title_id>/<content_type>/<package> "
-                      "(default <game_data_root>/dlc, relative paths resolve against "
-                      "game_data_root). Packages are mounted where they lie, read-only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 // A second, independent source: folders holding STFS packages in any arrangement,
 // each package identified by the title id and content type in its own header
 // (src/fs/dlc_library.h). This is what makes a dumped song folder - thousands of
 // loose CON/LIVE containers - usable without restructuring it.
-REXCVAR_DEFINE_STRING(dlc_library, "", "Runtime",
-                      "Flat DLC library directories, ';'-separated: folders of STFS "
-                      "packages nested any way, each mounted under the title id and "
-                      "content type its own header names. Relative paths resolve against "
-                      "game_data_root. A dlc_root that is not the structured layout is "
-                      "scanned as a library too.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 // The content type is how the guest decides what to do with an item, and a custom-song
 // library is packaged as saved-game content (00000001) even though the title reads it
 // out of the marketplace (00000002) one. Empty keeps each package's own type, which is
 // the faithful reading; naming one presents the whole library under it.
-REXCVAR_DEFINE_STRING(dlc_library_content_type, "", "Runtime",
-                      "Content type to present every library package under, as 8 hex "
-                      "digits (e.g. 00000002). Empty (the default) presents only the "
-                      "saved-game packages (00000001) as marketplace content (00000002), "
-                      "which is what makes a dumped custom-song folder listable and "
-                      "playable; the other packages keep their own type.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 // The scan's second lever on a cold library. The per-file cost of a first open is not
 // the disk - it is whatever inspects a file the antivirus has not seen (measured ~16 ms
@@ -148,12 +131,7 @@ REXCVAR_DEFINE_STRING(dlc_library_content_type, "", "Runtime",
 // walk and the merge stay on the calling thread and in walk order, so the answer -
 // items, names, counters, rejections - is exactly the same at any thread count
 // (src/fs/dlc_library.h, tests/dlc_library_tests.cpp).
-REXCVAR_DEFINE_UINT32(dlc_scan_threads, 1, "Runtime",
-                      "Threads used to read a DLC library's package headers: 1 (the "
-                      "default) reads them on the calling thread; 0 uses the machine's "
-                      "core count, capped at 8; any other value is that many workers. "
-                      "The scan's result is identical at any thread count.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 std::string JoinTitles(const std::vector<fs::DlcPackage>& packages) {
   std::vector<std::string> titles;
@@ -222,7 +200,7 @@ std::vector<std::filesystem::path> DiscoverLibraryRoots(const std::filesystem::p
   if (root_is_library) {
     roots.push_back(root);
   }
-  for (const std::string& entry : fs::SplitPathList(REXCVAR_GET(dlc_library))) {
+  for (const std::string& entry : fs::SplitPathList(rb_blitz::settings::title::dlc_library.Get())) {
     std::error_code ec;
     roots.push_back(std::filesystem::absolute(fs::ResolveDlcRoot(entry, game_data_root), ec));
   }
@@ -332,7 +310,7 @@ fs::LibraryScanResult ScanLibrary(const std::vector<std::filesystem::path>& root
 // Read by both the boot path and the refresh so the two agree.
 uint32_t ForceContentTypeFromCvar() {
   uint32_t force_content_type = 0;
-  const std::string content_type_override = REXCVAR_GET(dlc_library_content_type);
+  const std::string content_type_override = rb_blitz::settings::title::dlc_library_content_type.Get();
   if (!content_type_override.empty()) {
     if (!fs::ParseHex32(content_type_override, &force_content_type) || force_content_type == 0) {
       REXLOG_WARN("dlc: dlc_library_content_type '{}' is not an 8-digit hex content type, "
@@ -345,14 +323,21 @@ uint32_t ForceContentTypeFromCvar() {
 }
 
 // The content manager the DLC sources are handed to, or null before the guest exists.
-rex::system::xam::ContentManager* ContentManagerOf(rex::Runtime* runtime) {
-  rex::system::KernelState* kernel_state = runtime != nullptr ? runtime->kernel_state() : nullptr;
-  return kernel_state != nullptr ? kernel_state->content_manager() : nullptr;
+rex::xam::IContentSources* ContentManagerOf(rex::kernel::TitleRuntime* runtime) {
+  return runtime && runtime->IsLoaded() ? REX_INTERFACE(rex::xam::IContentSources) : nullptr;
 }
 
 // What the boot path resolved, kept so the in-game refresh - which runs from a
 // filesystem hook with no arguments - can rebuild the same sources.
-rex::Runtime* g_runtime = nullptr;
+rex::kernel::TitleRuntime* g_runtime = nullptr;
+std::filesystem::path g_structured_root;
+
+bool PublishSources(rex::xam::IContentSources* service, std::vector<rex::xam::ContentSourceItem> items) {
+  if (!service) return false;
+  auto result = service->ReplaceContentSources({g_structured_root, std::move(items)});
+  if (!result) REXLOG_ERROR("dlc: content sources could not be published: {}", result.error().message);
+  return result.has_value();
+}
 
 // Everything the refresh needs, resolved once in Configure() and read from there by both
 // paths. The refresh is triggered from a guest thread, and this project's rule is that a
@@ -364,8 +349,8 @@ uint32_t g_force_content_type = 0;
 uint32_t g_scan_threads = 1;
 std::size_t g_content_count = 0;
 
-// The packages a later layer (R9) may draw a song from: the structured root's packages
-// and the flat library's, in that order. Kept from the scans so R9 does not walk the
+// The packages the menu music library may draw a song from: the structured root's packages
+// and the flat library's, in that order. Kept from the scans so menu music does not walk the
 // tree again; the structured half is held separately because a library-only refresh
 // replaces just the other half. Written in Configure()/Refresh(), read once at boot by
 // src/hooks/shell_music.cpp.
@@ -386,17 +371,16 @@ void RebuildPackagePaths(const std::vector<fs::LibraryItem>& library) {
 }
 
 // R7's in-game refresh. One runs at a time, on a worker thread, so the frame that asked
-// for it keeps drawing (the scan is ~31 s on a 1,402-package library - docs/guides/dlc.md §4.2);
-// the result is handed to the content manager by PublishPendingRefresh() from a *guest*
-// thread, because extra_content_library_ is a plain vector with no lock of its own and a
-// worker writing it while the guest lists or resolves content would be a data race.
+// for it keeps drawing (the scan is ~31 s on a 1,402-package library - docs/guides/dlc.md Ã‚Â§4.2);
+// PublishPendingRefresh() hands the immutable source snapshot to the content service
+// from a guest thread before releasing discovery waiters.
 //
 // `g_refresh_state` decides both rules (src/fs/refresh_state.h); the payload between the
 // two threads is `g_refresh_items`/`g_refresh_paths`/`g_refresh_count`, guarded by this
 // mutex, written by the worker and moved out by the guest thread that takes it.
 fs::RefreshState g_refresh_state;
 std::mutex g_refresh_payload_mutex;
-std::vector<rex::system::xam::ExtraContentItem> g_refresh_items;
+std::vector<rex::xam::ContentSourceItem> g_refresh_items;
 std::vector<std::filesystem::path> g_refresh_paths;
 std::size_t g_refresh_count = 0;
 // True from the instant a publisher takes the finished payload until the list is really
@@ -423,7 +407,7 @@ bool g_restarting = false;
 // libraries. Pure host work - no guest state, no content manager,
 // no cvar registry - which is what makes it safe on a worker thread.
 struct RefreshScan {
-  std::vector<rex::system::xam::ExtraContentItem> items;
+  std::vector<rex::xam::ContentSourceItem> items;
   std::vector<std::filesystem::path> paths;  // what R9 draws its menu pool from
 };
 
@@ -435,7 +419,7 @@ RefreshScan ScanLibraryForRefresh() {
   scan.items.reserve(library.items.size());
   for (const auto& item : library.items) {
     scan.items.push_back({item.host_path, item.file_name, item.title_id,
-                          rex::system::XContentType(item.content_type)});
+                          rex::kernel::XContentType(item.content_type)});
   }
   // The same order RebuildPackagePaths() produces, built locally: the worker must not
   // touch g_package_paths, which a guest thread reads.
@@ -478,7 +462,7 @@ void PrepareBootLibraryScan(const std::filesystem::path& game_data_root,
                             const std::filesystem::path& identity_cache_path) {
   std::error_code ec;
   const auto root = std::filesystem::absolute(
-      fs::ResolveDlcRoot(REXCVAR_GET(dlc_root), game_data_root), ec);
+      fs::ResolveDlcRoot(rb_blitz::settings::title::dlc_root.Get(), game_data_root), ec);
   const bool flat_root = std::filesystem::is_directory(root, ec) && !ec &&
                          !fs::HasStructuredLayout(root);
   auto roots = DiscoverLibraryRoots(game_data_root, root, flat_root);
@@ -488,7 +472,7 @@ void PrepareBootLibraryScan(const std::filesystem::path& game_data_root,
   job.roots = roots;
   job.cache_path = identity_cache_path;
   job.content_type = ForceContentTypeFromCvar();
-  job.threads = REXCVAR_GET(dlc_scan_threads);
+  job.threads = rb_blitz::settings::title::dlc_scan_threads.Get();
   // A first scan opens every package. Start it when the title reaches its own
   // content-discovery screen, so cold I/O cannot hold up the first guest frame.
   // A known cache is cheap to validate and can overlap graphics setup here.
@@ -503,17 +487,32 @@ void PrepareBootLibraryScan(const std::filesystem::path& game_data_root,
   g_boot_scan.emplace(std::move(job));
 }
 
-void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
-  if (runtime == nullptr) {
-    return;
+bool Configure(rex::kernel::TitleRuntime* runtime, const std::filesystem::path& game_data_root) {
+  if (!runtime || !runtime->IsLoaded()) return false;
+  {
+    std::lock_guard lock(g_refresh_worker_mutex);
+    if (g_refresh_worker.thread.joinable()) g_refresh_worker.thread.join();
+    g_restarting = false;
   }
+  g_refresh_state.Reset();
+  g_refresh_publishing = false;
+  g_structured_root.clear();
+  g_content_count = 0;
   g_runtime = runtime;
-  rex::system::xam::ContentManager* content_manager = ContentManagerOf(runtime);
-  if (content_manager) content_manager->set_content_device_validator(&ValidateContentDevice);
+  rex::xam::IContentSources* content_manager = ContentManagerOf(runtime);
+  auto* validation = REX_INTERFACE(rex::xam::IContentValidation);
+  if (!content_manager || !validation) {
+    REXLOG_ERROR("dlc: content source validation services are unavailable");
+    return false;
+  }
+  if (auto result = validation->SetContentValidator(&ValidateContentPackage); !result) {
+    REXLOG_ERROR("dlc: content validation could not be installed: {}", result.error().message);
+    return false;
+  }
 
   std::error_code ec;
   const std::filesystem::path root =
-      std::filesystem::absolute(fs::ResolveDlcRoot(REXCVAR_GET(dlc_root), game_data_root), ec);
+      std::filesystem::absolute(fs::ResolveDlcRoot(rb_blitz::settings::title::dlc_root.Get(), game_data_root), ec);
   const bool is_directory = std::filesystem::is_directory(root, ec) && !ec;
 
   // The structured root is scanned only when the directory is there and actually holds
@@ -534,10 +533,12 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     }
   }
 
+  if (structured && !scan.packages.empty()) g_structured_root = root;
+
   REXLOG_INFO("dlc_sources: structured_root='{}' structured={} packages={} scan_ms={:.3f} "
               "user_root='{}' cache_root='{}'", root.string(), structured, scan.packages.size(),
               std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - structured_start).count(),
-              runtime->user_data_root().string(), runtime->cache_root().string());
+              REX_PATHS().user_root.Get().string(), REX_PATHS().cache_root.Get().string());
 
   // A dlc_root that is not the structured layout is a library too, so pointing it at a
   // dumped song folder needs no other configuration; the configured libraries join it.
@@ -546,23 +547,14 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
 
   const uint32_t force_content_type = ForceContentTypeFromCvar();
 
-  // The emulated mount latency is **off on every boot** (owner directive, 2026-10-13: "it should be
-  // as fast as we can"). It costs 100 ms per deferred overlapped completion and a large library
-  // completes thousands of them: measured on a 1,402-package library, 2,803 completions, which is
-  // 280 s of the 667 s the "Discovering Downloadable Content" screen takes *before* the host's own
-  // walk is even counted. The completion still runs on the dispatch thread, still sets the
-  // overlapped, still queues the completion routine - only the wait goes, exactly as R7's version
-  // of this write did. The cvar keeps the faithful 100 ms for a caller who wants it
-  // (rb_blitz.toml: `deferred_overlapped_delay_ms = 100`).
-  REXCVAR_SET(deferred_overlapped_delay_ms, 0);
-  REXLOG_INFO("dlc: the emulated mount latency is off this boot (deferred_overlapped_delay_ms = 0; "
-              "the faithful 100 ms is one line in rb_blitz.toml away)");
+  const auto latency = settings::WriteRuntimeSetting("kernel.deferred_overlapped_delay_ms", "0", rex::SettingLayer::kTitle);
+  if (!latency.accepted()) REXLOG_WARN("dlc: completion latency setting was not applied: {}", latency.error);
   // Captured for the in-game refresh, which runs from a guest thread and must not read
   // the registry (see the comment on g_library_roots). The refresh therefore resolves the
   // same roots, content type and thread count this boot did, and cannot disagree with it.
   g_library_roots = library_roots;
   g_force_content_type = force_content_type;
-  g_scan_threads = REXCVAR_GET(dlc_scan_threads);
+  g_scan_threads = rb_blitz::settings::title::dlc_scan_threads.Get();
 
   // P5 of the RhythmVerse store plan: the store's download destination is this boot's resolved
   // DLC root, and its layout is the one the boot measured - a structured root gets
@@ -573,7 +565,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     store::DownloadConfig downloads;
     downloads.layout.destination_root = root;
     downloads.layout.structured = structured;
-    downloads.receipt_path = runtime->user_data_root() / "store" / "downloads.tsv";
+    downloads.receipt_path = REX_PATHS().user_root.Get() / "store" / "downloads.tsv";
     downloads.transfer = store::PlatformTransfer();
     downloads.refresh = [] { RefreshAfterStoreInstall(); };
     downloads.packages = store::InstalledSongPackages;
@@ -602,7 +594,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   fs::LibraryScanResult library;
   bool scan_deferred = false;
   bool early_scan_failed = false;
-  const auto identity_cache_path = runtime->cache_root() / "dlc-library-identities.cache";
+  const auto identity_cache_path = REX_PATHS().cache_root.Get() / "dlc-library-identities.cache";
   if (g_boot_scan && g_boot_scan->roots == library_roots &&
       g_boot_scan->cache_path == identity_cache_path &&
       g_boot_scan->content_type == force_content_type &&
@@ -658,12 +650,11 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
       g_initial_scan_pending = true;
       g_initial_scan_failures = early_scan_failed ? 1 : 0;
     }
-    if (content_manager && structured && !scan.packages.empty())
-      content_manager->set_extra_content_root(root);
+    if (!PublishSources(content_manager, {})) return false;
     REXLOG_INFO("dlc: first scan deferred to the title's native discovery screen; "
                 "{} flat candidate(s) found, window remains available during header I/O",
                 candidates.size());
-    return;
+    return true;
   }
 
   REXLOG_INFO("dlc: this boot scanned roots='{}' content_type={:08X} packages={} files={}",
@@ -702,15 +693,15 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     case fs::DlcRegistration::kNoDirectory:
       REXLOG_INFO("dlc: no content directory at {}, DLC is served from the content root alone",
                   root.string());
-      return;
+      return true;
     case fs::DlcRegistration::kNoSource:
       REXLOG_WARN(
           "dlc: {} or the configured libraries hold no mountable package, nothing to mount",
           root.string());
-      return;
+      return true;
     case fs::DlcRegistration::kNoContentManager:
       REXLOG_WARN("dlc: no content manager to register the DLC sources with, nothing to mount");
-      return;
+      return true;
     case fs::DlcRegistration::kRegisterStructured:
     case fs::DlcRegistration::kRegisterLibrary:
     case fs::DlcRegistration::kRegisterBoth:
@@ -720,18 +711,18 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // Registering is all that needs doing: enumeration and opening both resolve against
   // these sources, and nothing writes to either.
   if (structured_count != 0) {
-    content_manager->set_extra_content_root(root);
+
     REXLOG_INFO("dlc: {} package(s) for title(s) {} in {} (read-only, mounted in place)",
                 structured_count, JoinTitles(scan.packages), root.string());
   }
-  if (library_count != 0) {
-    std::vector<rex::system::xam::ExtraContentItem> items;
+  {
+    std::vector<rex::xam::ContentSourceItem> items;
     items.reserve(library.items.size());
     for (const auto& item : library.items) {
       items.push_back({item.host_path, item.file_name, item.title_id,
-                       rex::system::XContentType(item.content_type)});
+                       rex::kernel::XContentType(item.content_type)});
     }
-    content_manager->set_extra_content_library(std::move(items));
+    if (!PublishSources(content_manager, std::move(items))) return false;
     // Starts with the count the way the structured line does, so the acceptance
     // harness's `dlc: (\d+) package\(s\)` reads either source.
     REXLOG_INFO("dlc: {} package(s), {} not a container, in {} file(s) walked ({}) in {} "
@@ -739,6 +730,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
                 library_count, library.other_files, library.files_seen,
                 JoinLibraryGroups(library.items), JoinLibraryRoots(library_roots));
   }
+  return true;
 }
 
 bool PublishInitialScanIfReady() {
@@ -783,20 +775,25 @@ bool PublishInitialScanIfReady() {
   }
 
   auto* content_manager = ContentManagerOf(g_runtime);
+  bool published = false;
   if (content_manager) {
-    std::vector<rex::system::xam::ExtraContentItem> items;
+    std::vector<rex::xam::ContentSourceItem> items;
     items.reserve(completed.library.items.size());
     for (const auto& item : completed.library.items) {
       items.push_back({item.host_path, item.file_name, item.title_id,
-                       rex::system::XContentType(item.content_type)});
+                       rex::kernel::XContentType(item.content_type)});
     }
-    content_manager->set_extra_content_library(std::move(items));
+    published = PublishSources(content_manager, std::move(items));
   } else {
     REXLOG_WARN("dlc: initial scan found {} package(s), but no content manager is available",
                 completed.library.items.size());
-    if (!completed.library.items.empty())
-      ui::notifications::Post("dlc.discovery", ui::notifications::Level::kError,
-          "Downloaded songs could not be loaded", "The song library is unavailable. Restart the game to try again.");
+  }
+  if (!published) {
+    ui::notifications::Post("dlc.discovery", ui::notifications::Level::kError,
+        "Downloaded songs could not be loaded", "The song library is unavailable. Use Refresh Songs to try again.");
+    g_boot_scan.reset();
+    g_initial_scan_pending = false;
+    return true;
   }
   RebuildPackagePaths(completed.library.items);
   g_content_count = g_structured_paths.size() + completed.library.items.size();
@@ -815,7 +812,7 @@ bool PublishInitialScanIfReady() {
 
 void PublishPendingRefresh() {
   if (!g_refresh_state.Pending()) return;
-  std::vector<rex::system::xam::ExtraContentItem> items;
+  std::vector<rex::xam::ContentSourceItem> items;
   std::vector<std::filesystem::path> paths;
   std::size_t count = 0;
   {
@@ -838,7 +835,7 @@ void PublishPendingRefresh() {
     count = g_refresh_count;
   }
 
-  rex::system::xam::ContentManager* content_manager = ContentManagerOf(g_runtime);
+  rex::xam::IContentSources* content_manager = ContentManagerOf(g_runtime);
   if (content_manager == nullptr) {
     REXLOG_WARN("dlc: the refresh found {} package(s) but there is no content manager to "
                 "update",
@@ -846,8 +843,13 @@ void PublishPendingRefresh() {
     g_refresh_publishing.store(false);
     return;
   }
-  content_manager->set_extra_content_library(std::move(items));
-  // P7: a published list is the one place every content change passes through -
+  if (!PublishSources(content_manager, std::move(items))) {
+    g_refresh_publishing.store(false);
+    ui::notifications::Post("dlc.discovery", ui::notifications::Level::kError,
+        "Downloaded songs could not be refreshed", "The existing song library is still available. Try Refresh Songs again.");
+    return;
+  }
+  // A published list is the one place every content change passes through -
   // the boot scan, a requested refresh and a store install (whose callback is
   // RefreshAfterStoreInstall). Compare as sets, because a rescan may order the
   // same packages differently, and only a real change retires readiness.
@@ -862,7 +864,7 @@ void PublishPendingRefresh() {
     const std::lock_guard<std::mutex> lock(g_package_paths_mutex);
     g_package_paths = std::move(paths);
   }
-  // The list just changed, so the store's Downloaded index (§3.2) is stale: drop it rather than
+  // The list just changed, so the store's Downloaded index (Ã‚Â§3.2) is stale: drop it rather than
   // letting a page keep marking songs the library no longer (or newly) holds.
   rb_blitz::store::InvalidateLibrary();
   // After the list is in place, never before: everything that waits on a refresh waits for
@@ -946,6 +948,11 @@ void DrainRefreshForRestart() {
   std::lock_guard<std::mutex> worker_lock(g_refresh_worker_mutex);
   g_restarting = true;
   if (g_refresh_worker.thread.joinable()) g_refresh_worker.thread.join();
+  {
+    std::lock_guard initial_lock(g_initial_scan_mutex);
+    g_boot_scan.reset();
+    g_initial_scan_pending = false;
+  }
 }
 
 bool RefreshArmed() { return g_runtime != nullptr; }

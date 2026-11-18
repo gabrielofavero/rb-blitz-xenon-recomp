@@ -33,14 +33,58 @@ def inventory(folder):
             for p in sorted(folder.rglob("*")) if p.is_file()}
 
 
-def git(*args):
-    return subprocess.check_output(["git", *args], cwd=ROOT, text=True, encoding="utf-8")
+def runtime_binary_inventory(build):
+    """Record configured modules and every shared dependency staged with the host."""
+    build = Path(build).resolve()
+    platform = "windows" if (build / "rb_blitz.exe").is_file() else "macos" if any(build.glob("*.dylib")) else "linux"
+    executable = build / ("rb_blitz.exe" if platform == "windows" else "rb_blitz")
+    if not executable.is_file(): raise ValueError(f"missing host executable: {executable}")
+    modular = build / ("rexbase.dll" if platform == "windows" else "librexbase.dylib" if platform == "macos" else "librexbase.so")
+    if modular.is_file():
+        sys.path.insert(0, str(ROOT / "installer/tools"))
+        from runtime_inventory import runtime_targets, target_filename
+        required = [build / target_filename(name, platform) for name in runtime_targets(build, platform)]
+    else:
+        # Retain old capture comparisons while using one contract for modular SDKs.
+        names = ["rexruntime.dll", "rexgpu-xenos.dll"] if platform == "windows" else [
+            "librexruntime.dylib", "librexgpu-xenos.dylib"] if platform == "macos" else [
+            "librexruntime.so", "librexgpu-xenos.so"]
+        required = [build / name for name in names]
+    missing = [path.name for path in required if not path.is_file()]
+    if missing: raise ValueError("incomplete staged runtime: "+", ".join(missing))
+    paths = {executable, *required}
+    candidates = list(build.iterdir())
+    for directory in (build / "vulkan", build / "Frameworks"):
+        if directory.is_dir(): candidates.extend(directory.rglob("*"))
+    for path in candidates:
+        framework_binary = any(parent.suffix == ".framework" and path.name == parent.stem
+                               for parent in path.parents if parent != build)
+        if path.is_file() and (path.suffix.lower() in {".dll", ".dylib"} or
+                               re.search(r"\.so(?:\.\d+)*$", path.name) or framework_binary):
+            if not path.resolve().is_relative_to(build):
+                raise ValueError(f"staged runtime escapes its build directory: {path.name}")
+            paths.add(path)
+    for path in paths:
+        if not path.resolve().is_relative_to(build):
+            raise ValueError(f"staged runtime escapes its build directory: {path.name}")
+    return {path.relative_to(build).as_posix(): {"sha256": digest(path), "bytes": path.stat().st_size}
+            for path in sorted(paths)}
+
+
+def git(*args, cwd=ROOT):
+    return subprocess.check_output(["git", *args], cwd=cwd, text=True, encoding="utf-8")
 
 
 def run_dir(name):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", name):
         raise ValueError("run name must be a short alphanumeric slug")
     return RUNS / name
+
+
+def validate_warm_source(previous, binaries, backend, variant, game_sha256):
+    if (previous.get("binaries") != binaries or previous.get("backend") != backend or
+            previous.get("variant") != variant or previous.get("game_xex_sha256") != game_sha256):
+        raise ValueError("warm source must use the same binary bytes, backend, variant and game input")
 
 
 def capture_arguments(exe, args, run, cache):
@@ -63,13 +107,21 @@ def capture_arguments(exe, args, run, cache):
 
 
 def prepare(args):
+    source_root = getattr(args, "source_root", ROOT)
+    source_git = lambda *arguments: git(*arguments, cwd=source_root)
     run = run_dir(args.name)
     if run.exists():
         raise ValueError("run already exists; use a new name (nothing is overwritten)")
-    exe = ROOT / "out/build/win-amd64-release/rb_blitz.exe"
+    exe = args.build_dir / "rb_blitz.exe"
     for path in [exe, args.game / "default.xex", args.user_data, args.profile]:
         if not path.exists():
             raise ValueError(f"missing input: {path}")
+    binaries = runtime_binary_inventory(exe.parent)
+    game_sha256 = digest(args.game / "default.xex")
+    if args.warm_from:
+        previous_run = run_dir(args.warm_from)
+        previous = json.loads((previous_run / "manifest.json").read_text(encoding="utf-8"))
+        validate_warm_source(previous, binaries, args.backend, args.variant, game_sha256)
     if run.is_relative_to(args.user_data):
         raise ValueError("user-data source cannot contain the capture destination")
     # Require a real snapshot of the comparison's saves and settings. Empty saves
@@ -107,38 +159,53 @@ def prepare(args):
         if (run / name).exists():
             shutil.copy2(run / name, inputs / name)
     build = exe.parent
-    binaries = {}
-    for name in ["rb_blitz.exe", "rexruntime.dll", "rexgpu-xenos.dll"]:
-        path = build / name
-        binaries[name] = {"sha256": digest(path), "bytes": path.stat().st_size}
     for name in ["rb_blitz.toml", "paths.toml", "settings_dir.txt"]:
         if (build / name).is_file():
             shutil.copy2(build / name, inputs / name)
-    (inputs / "project.diff").write_text(git("diff", "HEAD"), encoding="utf-8")
-    (inputs / "sdk.diff").write_text(git("-C", "rexglue-sdk", "diff", "HEAD"), encoding="utf-8")
+    (inputs / "project.diff").write_text(source_git("diff", "HEAD"), encoding="utf-8")
+    (inputs / "sdk.diff").write_text(source_git("-C", "rexglue-sdk", "diff", "HEAD"), encoding="utf-8")
     # git diff omits untracked implementation files. Keep their exact bytes too.
-    changed = set(git("diff", "--name-only", "HEAD").splitlines())
-    changed.update(git("ls-files", "--others", "--exclude-standard", "src", "scripts", "tools",
-                       "tests", "patches").splitlines())
+    changed = set(source_git("diff", "--name-only", "HEAD").splitlines())
+    changed.update(source_git("ls-files", "--others", "--exclude-standard", "src", "scripts", "tools",
+                              "tests", "patches", "installer").splitlines())
     for name in sorted(changed):
-        source = ROOT / name
+        source = source_root / name
         if source.is_file():
             target = inputs / "source" / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
+    # SDK git diff also omits newly introduced public headers and module sources.
+    sdk_untracked = source_git("-C", "rexglue-sdk", "ls-files", "--others", "--exclude-standard",
+                               "src", "include", "cmake").splitlines()
+    for name in sorted(sdk_untracked):
+        source = source_root / "rexglue-sdk" / name
+        if source.is_file():
+            target = inputs / "sdk-source" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+    (inputs / "sdk-submodules.txt").write_text(
+        source_git("-C", "rexglue-sdk", "submodule", "status", "--recursive"), encoding="utf-8")
+    capture_tools = inputs / "capture-tools"
+    capture_tools.mkdir()
+    for tool in [Path(__file__), ROOT / "scripts/diagnostics/matched_performance.py",
+                 ROOT / "installer/tools/runtime_inventory.py",
+                 ROOT / "installer/config/runtime-modules.json"]:
+        if tool.is_file(): shutil.copy2(tool, capture_tools / tool.name)
     # Cache and save overrides are explicit; they outrank paths.toml/profile values.
     argv = capture_arguments(exe, args, run, cache)
     headers = {str(p.relative_to(args.game)): digest(p) for p in
                [args.game / "gen/main_xbox.hdr", args.game / "gen/patch_xbox.hdr",
                 args.game / "ultimate/gen/patch_xbox.hdr"] if p.is_file()}
     manifest = {"schema": 1, "prepared_utc": datetime.now(timezone.utc).isoformat(),
-                "project": git("rev-parse", "HEAD").strip(),
-                "sdk": git("-C", "rexglue-sdk", "rev-parse", "HEAD").strip(),
+                "project": source_git("rev-parse", "HEAD").strip(),
+                "sdk": source_git("-C", "rexglue-sdk", "rev-parse", "HEAD").strip(),
+                "source_root": str(source_root),
+                "capture_tools": inventory(capture_tools),
                 "binaries": binaries, "argv": argv, "backend": args.backend,
                 "variant": args.variant, "route": args.route, "warm_from": args.warm_from,
                 "source_user_data": str(args.user_data), "source_profile": str(args.profile),
                 "content_headers": headers,
-                "game_xex_sha256": digest(args.game / "default.xex"),
+                "game_xex_sha256": game_sha256,
                 "before_cache": inventory(cache), "initial_user_data": inventory(run / "user-data")}
     (run / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     # Quote PowerShell strings, including literal apostrophes. This file is inert
@@ -183,8 +250,8 @@ def report_file(log, output):
                 int(fields.get("suppressed", 0))
                 counters[fields["phase"] + "/" + fields["event"]] = fields
             elif "event=" in line:
-                thread = re.search(r'\[t(\d+)\]', line)
-                fields["thread_id"] = int(thread[1]) if thread else None
+                thread = re.search(r'\[t(\d+)\]|\bt(\d+)\b(?=\s+shader_trace:)', line)
+                fields["thread_id"] = int(thread[1] or thread[2]) if thread else None
                 for key in ["begin_us", "end_us", "duration_us"]:
                     fields[key] = int(fields[key])
                 if not fields.get("event") or fields["end_us"] < fields["begin_us"]:
@@ -277,6 +344,10 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     prep = commands.add_parser("prepare")
     prep.add_argument("name")
+    prep.add_argument("--build-dir", type=lambda p: Path(p).resolve(),
+                      default=ROOT / "out/build/win-amd64-release")
+    prep.add_argument("--source-root", type=lambda p: Path(p).resolve(), default=ROOT,
+                      help="source checkout matching the selected build, including its SDK")
     prep.add_argument("--backend", choices=["d3d12", "vulkan"], required=True)
     prep.add_argument("--variant", choices=["retail", "ultimate"], required=True)
     prep.add_argument("--game", type=lambda p: Path(p).resolve(), default=ROOT / "game")

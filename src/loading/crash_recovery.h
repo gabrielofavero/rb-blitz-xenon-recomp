@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #pragma once
+#include <filesystem>
 #include <string_view>
-namespace rex { class Runtime; }
+
 namespace rb_blitz::loading {
-void ConfigureCrashRecovery(rex::Runtime* runtime, bool settings_restart_boot = false);
+void ConfigureCrashRecovery(const std::filesystem::path& cache_root, bool settings_restart_boot = false);
 void BeginCrashRecoveryAttempt();
 void BeforeSongLoadJob();
 void EndCrashRecoveryAttempt();

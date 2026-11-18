@@ -79,13 +79,13 @@ bool FilteringToCvarValue(std::string_view token, int32_t* out) {
 
 std::vector<CvarAssignment> DisplayToCvars(std::string_view token) {
   if (token == "windowed") {
-    return {{"fullscreen", "false"}, {"borderless", "false"}};
+    return {{"ui.fullscreen", "false"}, {"ui.fullscreen_exclusive", "false"}};
   }
   if (token == "borderless") {
-    return {{"fullscreen", "false"}, {"borderless", "true"}};
+    return {{"ui.fullscreen", "true"}, {"ui.fullscreen_exclusive", "false"}};
   }
   if (token == "fullscreen") {
-    return {{"fullscreen", "true"}, {"borderless", "false"}};
+    return {{"ui.fullscreen", "true"}, {"ui.fullscreen_exclusive", "true"}};
   }
   return {};
 }

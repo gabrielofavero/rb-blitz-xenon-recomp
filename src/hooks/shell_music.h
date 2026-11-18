@@ -14,9 +14,7 @@
 #include <vector>
 #include "ui/menu_music_artwork.h"
 
-namespace rex {
-class Runtime;
-}  // namespace rex
+namespace rex::kernel { class TitleRuntime; }
 
 namespace rb_blitz::shell_music {
 
@@ -39,13 +37,15 @@ void PrepareBootCatalog(const std::filesystem::path& cache_path);
 // bounded worker batches only after the main menu is ready. Native music covers the wait.
 // A small rolling cache is prepared during native cache loading and menu playback. With the toggle off
 // it leaves the title's tracks in control; the independent navigator can still move them.
-void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
+void Configure(rex::kernel::TitleRuntime* runtime, const std::filesystem::path& game_data_root);
 
 // Startup starts host-only preparation; native cache loading also ensures it is running. Guest polls
 // publish at most one ready device without waiting for I/O. Close never joins.
 void StartQueuedPool();
 void PublishQueuedPool(bool during_loading = false);
 void CloseQueuedPool();
+// Join host preparation before the title memory or SDK providers can be unloaded.
+void DrainQueuedPool();
 
 // Worker-only bounded read. Opening under the session lock leases the existing
 // cache device until copied bytes are owned; art never mounts another package.

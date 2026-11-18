@@ -1,4 +1,4 @@
-# Linux x86-64 bootstrap record for Prompt 0. Versions below are required
+# Linux x86-64 bootstrap record. Versions below are required
 # starting points, not accepted release-toolchain measurements. Replace them
 # with versions measured on the native release builder before strict release.
 schema_version = 1
@@ -6,12 +6,12 @@ target = "linux-amd64"
 compiler_family = "Clang"
 
 [sdk]
-commit = "c94f5ebdcb3c9d1a460ca48e04f9758448f8d518"
+commit = "a3e1d82678ca20d68d4837a8e9ee4652ff073745"
 
 [clang]
-# The Linux preset calls clang++-20; the SDK requires LLVM Clang >= 18.
+# The Linux preset calls clang++-20; the SDK requires LLVM Clang >= 20.
 version = "20.0.0"
-minimum = "18"
+minimum = "20"
 
 [cmake]
 version = "3.25.0"

@@ -6,9 +6,10 @@
 
 #include "platform/guest_memory.h"
 
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/xmemory.h>
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 namespace {
 // 0 = the title derives the width from the height, exactly as it ships.

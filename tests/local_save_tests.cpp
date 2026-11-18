@@ -8,6 +8,12 @@ using namespace rb_blitz::local_save;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("save identity retains fixed-width uppercase paths across users");
+  CHECK_TRUE(SavePath("users",1,0x5841122D)==std::filesystem::path("users")/"0000000000000001"/"5841122D"/"local_save.bin");
+  CHECK_TRUE(SavePath("users",0xB13EBABEBABEBABEull,0x5841122D)==std::filesystem::path("users")/"B13EBABEBABEBABE"/"5841122D"/"local_save.bin");
+  CHECK_TRUE(SavePath("users",0xFFFFFFFFFFFFFFFFull,1)==std::filesystem::path("users")/"FFFFFFFFFFFFFFFF"/"00000001"/"local_save.bin");
+  CHECK_TRUE(SavePath("users",1,0x5841122D)!=SavePath("users",2,0x5841122D));
+
   BeginCase("native save with scores, mapping and stars survives envelope round trip");
   Bytes payload;
   for (uint32_t value : {11, 2, 1001, 45000, 1002, 120000, 5, 3, 2, 1001, 3, 1002, 5, 8})

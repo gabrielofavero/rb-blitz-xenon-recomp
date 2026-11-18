@@ -4,8 +4,8 @@
 #include "hooks/dlc.h"
 #include "graphics/preparation_loading.h"
 #include <array>
-#include <rex/hook.h>
-#include <rex/system/xmemory.h>
+#include <rex/ppc/hook.h>
+#include <rex/memory/endian.h>
 
 REX_EXTERN(sub_822CA460);
 REX_EXTERN(sub_822CB618);

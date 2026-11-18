@@ -13,10 +13,9 @@
 //      dock), preserving the requested aspect. Aspect preservation is the whole point: shrinking
 //      the window is fine because the presenter scales the image, but changing the shape would put
 //      back the black bars this project removed.
-//   2. Unit conversion. `window_width`/`window_height` are *logical* pixels and the SDK multiplies
-//      them by the display scale (`Window::SizeToPhysical`); the desktop's work area and its frame
-//      metrics are *physical* pixels. `PhysicalToLogical` is that half of the round trip, and it is
-//      here rather than in the boot so it can be tested without a machine.
+//   2. Unit conversion. SDL creates Cocoa windows in points and Windows windows in pixels.
+//      The desktop and frame measurements use backing pixels. The SDK converts
+//      startup dimensions to the native window units once at its provider boundary.
 //
 // What is deliberately *not* here: which display is the target, whether the row is fullscreen,
 // borderless or windowed, and where the frame metrics come from. Those are the boot's - and the
@@ -25,7 +24,7 @@
 // The measured facts this shape rests on are in docs/settings/graphics.md (part 3, custom
 // resolutions): the render path renders any aspect correctly once the frame, the layout space and
 // the presenter all agree, and the presenter derives its output shape from the *video mode* aspect
-// (part 1 §3), which is why the boot writes the video mode beside the window size.
+// (part 1 Ã‚Â§3), which is why the boot writes the video mode beside the window size.
 
 #pragma once
 
@@ -77,7 +76,7 @@ DisplayMode PresentationVideoMode(const DisplayMode& render);
 // The upright viewport cropped from a landscape source, retaining its full height.
 DisplayMode PortraitCropSize(const DisplayMode& source);
 
-// Physical -> logical, the conversion `Window::SizeToPhysical` inverts (`logical * dpi / 96`).
+// Backing pixels -> layout points for a host window that uses point coordinates.
 // Rounded to nearest, never below 1. `scale_percent` is `dpi * 100 / 96`, so 100 is the identity.
 DisplayMode PhysicalToLogical(const DisplayMode& physical, uint32_t scale_percent);
 

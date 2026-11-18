@@ -1,6 +1,6 @@
 # Experimental iOS IPA builder
 
-Build a private arm64 iPhone/iPad package on a Mac with full Xcode, CMake 3.25+,
+Build a private arm64 iPhone/iPad package on a Mac with full Xcode 26+ (AppleClang 17+), CMake 3.25+,
 Ninja, Python 3.11+, and Git. Two separate build routes are available: the
 original private IPA with bundled assets, and an importer IPA that asks for
 your game on the device. Ultimate 2.11 is included in private bundled IPAs and

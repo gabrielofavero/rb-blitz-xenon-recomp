@@ -5,7 +5,7 @@
 // the only place that knows HOW a `hot` row reaches the running game, and it knows three kinds:
 //
 //   * `graphics.vsync` and `interface.settings_labels` write a cvar **by name**, because `vsync`
-//     is defined in `rexruntime.dll`'s GPU category and `settings_help_overlay` by the game's own
+//     is defined by the SDK GPU settings owner and `settings_help_overlay` by the game's own
 //     overlay module; this project defines no storage symbol for either. Both rows are `hot`
 //     because a boot measured the effect (docs/guides/dlc.md's frame pacing, docs/settings/
 //     status.md's Settings Labels).

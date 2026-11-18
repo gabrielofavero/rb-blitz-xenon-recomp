@@ -49,7 +49,7 @@
 //
 // The Ultimate install; see docs/history/bringup-log.md B-012.
 //
-// Hook hygiene (docs/reference/rb3-references.md §8): the faithful behaviour, and every deviation
+// Hook hygiene (docs/reference/rb3-references.md Ã‚Â§8): the faithful behaviour, and every deviation
 // from it including each early return.
 //
 // Faithful behaviour. Vanilla Blitz is the default and is untouched: with no
@@ -99,13 +99,16 @@
 #include <system_error>
 #include <vector>
 
-#include <rex/cvar.h>
-#include <rex/filesystem/entry.h>
-#include <rex/filesystem/vfs.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/runtime.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/filesystem/file_system.h>
+#include <rex/path_settings.h>
+#include <rex/memory/virtual_memory.h>
+#include "platform/guest_memory.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/kernel/title_runtime.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 #include "fs/payload_overlay.h"
 #include "settings/ultimate_adapter.h"
@@ -127,20 +130,9 @@ uint32_t g_patches = 0;
 constexpr std::string_view kGameMount = "\\Device\\Harddisk0\\Partition1";
 constexpr std::string_view kOverlayMount = "\\Device\\BlitzOverlay";
 
-REXCVAR_DEFINE_INT32(ultimate_mode, 1, "Compatibility",
-                     "Rock Band Blitz Ultimate: 0=off, 1=auto, 2=force")
-    .range(0, 2)
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-REXCVAR_DEFINE_STRING(ultimate_payload_root, "", "Compatibility",
-                      "Rock Band Blitz Ultimate payload directory (default "
-                      "<game_data_root>/ultimate, relative paths resolve against "
-                      "game_data_root)")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
-REXCVAR_DEFINE_UINT32(ultimate_patches, kPatchAll, "Compatibility",
-                      "Rock Band Blitz Ultimate default.xex edits to reapply: "
-                      "1=content device, 2=song blacklist, 4=disk error latch")
-    .range(0, kPatchAll)
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
+
 
 std::string HexBytes(const uint8_t* bytes, size_t count) {
   constexpr char kDigits[] = "0123456789ABCDEF";
@@ -160,15 +152,12 @@ std::string HexBytes(const uint8_t* bytes, size_t count) {
 // to be unprotected around the write (XexModule::Load protects code and read-only
 // data with kMemoryProtectRead; a plain store there is reported as an unhandled
 // guest access violation and kills the process).
-void ApplyContentDevicePatch(rex::Runtime* runtime) {
-  auto* memory = runtime->memory();
-  auto* heap = memory != nullptr ? memory->LookupHeap(kContentDeviceSlot) : nullptr;
-  if (heap == nullptr) {
-    REXLOG_WARN("ultimate: no heap covers 0x{:08X}, content device string not patched",
-                kContentDeviceSlot);
+void ApplyContentDevicePatch(rex::kernel::TitleRuntime* runtime) {
+  auto* slot = runtime->GetMembase().TranslateVirtual<uint8_t*>(kContentDeviceSlot);
+  if (!platform::GuestRangeReadable(slot, sizeof(kContentDevicePayload))) {
+    REXLOG_WARN("ultimate: content device slot is not readable at 0x{:08X}",kContentDeviceSlot);
     return;
   }
-  auto* slot = memory->TranslateVirtual<uint8_t*>(kContentDeviceSlot);
   switch (ClassifyContentDeviceSlot(slot)) {
     case ContentDeviceState::kAlreadyRedirected:
       REXLOG_INFO("ultimate: 0x{:08X} already redirects the content device, nothing to do",
@@ -182,17 +171,19 @@ void ApplyContentDevicePatch(rex::Runtime* runtime) {
     case ContentDeviceState::kRetail:
       break;
   }
-  uint32_t old_protect = 0;
-  if (!heap->Protect(kContentDeviceSlot, sizeof(kContentDevicePayload),
-                     rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite,
-                     &old_protect)) {
-    REXLOG_WARN("ultimate: cannot unprotect 0x{:08X}, content device string not patched",
-                kContentDeviceSlot);
+  const size_t page_size=rex::memory::GetPageSize();
+  const auto address=reinterpret_cast<uintptr_t>(slot);
+  const auto start=address-address%page_size;
+  const auto end=((address+sizeof(kContentDevicePayload)+page_size-1)/page_size)*page_size;
+  rex::memory::PageAccess previous=rex::memory::PageAccess::kNoAccess;
+  if (!rex::memory::Protect(reinterpret_cast<void*>(start),end-start,
+      rex::memory::PageAccess::kReadWrite,&previous)) {
+    REXLOG_WARN("ultimate: cannot unprotect content device slot");
     return;
   }
-  std::memcpy(slot, kContentDevicePayload, sizeof(kContentDevicePayload));
-  heap->Protect(kContentDeviceSlot, sizeof(kContentDevicePayload),
-                old_protect ? old_protect : rex::memory::kMemoryProtectRead);
+  std::memcpy(slot,kContentDevicePayload,sizeof(kContentDevicePayload));
+  if(!rex::memory::Protect(reinterpret_cast<void*>(start),end-start,previous))
+    REXLOG_WARN("ultimate: cannot restore content device slot protection");
   REXLOG_INFO("ultimate: content device string at 0x{:08X} patched: UPDATE: -> D:",
               kContentDeviceSlot);
 }
@@ -206,72 +197,22 @@ void ApplyContentDevicePatch(rex::Runtime* runtime) {
 //
 // `settings_root` (a directory of the player's own) and `redirects` are P6's settings redirect:
 // the payload's one mutable file is served from there instead of the read-only game mount.
-void MountOverlay(rex::Runtime* runtime, const std::filesystem::path& payload_root,
+void MountOverlay(rex::kernel::TitleRuntime* runtime, const std::filesystem::path& payload_root,
                   const std::filesystem::path& game_data_root,
                   const std::filesystem::path& settings_root,
                   const std::vector<std::string>& redirects) {
-  auto* file_system = runtime->file_system();
-  if (file_system == nullptr) {
-    REXLOG_WARN("ultimate: no virtual file system to merge {} into", payload_root.string());
-    return;
-  }
+  (void)game_data_root;
+  std::string error;
+  fs::MountPayloadOverlay(runtime->GetFileSystem(),kOverlayMount,payload_root,kGameMount,
+      {std::string(kEntrypoint)},settings_root,redirects,&error);
 
-  std::error_code ec;
-  if (!std::filesystem::is_directory(payload_root, ec)) {
-    REXLOG_ERROR("ultimate: payload {} is not a directory", payload_root.string());
-    return;
-  }
-  if (!std::filesystem::is_directory(game_data_root, ec)) {
-    REXLOG_ERROR("ultimate: game root {} is not a directory", game_data_root.string());
-    return;
-  }
-
-  // The union must not be more writable than the directory it wraps, and the game root
-  // device is registered read-only unless the developer asked for game-relative writes
-  // (Runtime::SetupVfs). Asking its root entry is the only way: the virtual file system
-  // hands out entries, not the devices behind them.
-  rex::filesystem::Entry* game_root_entry = file_system->ResolvePath(kGameMount);
-  const bool base_read_only = game_root_entry == nullptr || game_root_entry->is_read_only();
-
-  auto overlay = std::make_unique<fs::PayloadOverlayDevice>(
-      kOverlayMount, std::filesystem::absolute(payload_root, ec),
-      std::filesystem::absolute(game_data_root, ec), base_read_only,
-      std::vector<std::string>{std::string(kEntrypoint)});
-  // The settings side goes on **before** Initialize(): the union's root entry, and every
-  // directory it merges, is built there, and a side added afterwards would not be in the child
-  // list the guest's own file lookup walks. If it cannot be mounted the union is still usable -
-  // the provider's file then simply keeps the game mount's read-only answer.
-  if (!redirects.empty()) {
-    if (!overlay->AddSettingsSide(settings_root, redirects)) {
-      REXLOG_WARN("ultimate: the payload's own settings file stays on the read-only game mount");
-    }
-  }
-  if (ec || !overlay->Initialize()) {
-    REXLOG_ERROR("ultimate: cannot merge {} with {}", payload_root.string(),
-                 game_data_root.string());
-    return;
-  }
-  if (!file_system->RegisterDevice(std::move(overlay))) {
-    REXLOG_ERROR("ultimate: cannot register the overlay device");
-    return;
-  }
-
-  // Both aliases move together: they point at the same directory, and a game: that
-  // could not see the payload would be a different directory than d:. A symbolic link
-  // is inserted without overwriting, so the old target has to go first.
-  for (const std::string_view alias : {"d:", "game:"}) {
-    file_system->UnregisterSymbolicLink(alias);
-    if (!file_system->RegisterSymbolicLink(alias, kOverlayMount)) {
-      REXLOG_ERROR("ultimate: cannot point {} at the overlay", alias);
-    }
-  }
 }
 
 }  // namespace
 
 bool PatchEnabled(uint32_t bit) { return HasPatch(g_patches, bit); }
 
-void EnableSettingsArchive(rex::Runtime* runtime) { ApplyContentDevicePatch(runtime); }
+void EnableSettingsArchive(rex::kernel::TitleRuntime* runtime) { ApplyContentDevicePatch(runtime); }
 
 // P6: this boot's provider state, computed once in Configure() on the host thread.
 settings::ultimate_adapter::ProviderRuntime g_provider;
@@ -282,12 +223,13 @@ bool SaveProvider(const std::map<std::string, std::string>& updates, std::string
   return settings::ultimate_adapter::SaveProviderFile(g_provider.settings_path, updates, error);
 }
 
-void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root) {
+void Configure(rex::kernel::TitleRuntime* runtime, const std::filesystem::path& game_data_root) {
+  g_patches=0;
   if (runtime == nullptr) return;
 
-  const Mode mode = ModeFromValue(REXCVAR_GET(ultimate_mode));
+  const Mode mode = ModeFromValue(rb_blitz::settings::title::ultimate_mode.Get());
   const std::filesystem::path payload_root =
-      ResolvePayloadRoot(REXCVAR_GET(ultimate_payload_root), game_data_root);
+      ResolvePayloadRoot(rb_blitz::settings::title::ultimate_payload_root.Get(), game_data_root);
   const bool has_payload = HasPayload(payload_root);
   const bool merged = HasPayload(game_data_root);
   // A separate payload directory is the only arrangement the adapter can inspect *and* the only
@@ -308,7 +250,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
   // what decides whether the settings redirect is meaningful, and the redirect is part of the
   // union that MountOverlay() builds a few lines below.
   settings::ultimate_adapter::ConfigureProvider(&g_provider, provider_root,
-      runtime->user_data_root(), mode != Mode::kOff && (separate_payload || merged));
+      REX_PATHS().user_root.Get(), mode != Mode::kOff && (separate_payload || merged));
   if (g_provider.considered) {
     REXLOG_INFO("ultimate: {}", g_provider.summary);
     for (const std::string& problem : g_provider.shape.problems) {
@@ -338,7 +280,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
                 std::string(kPayloadHeader), std::string(kPayloadArchive));
   }
 
-  g_patches = ClampPatchMask(REXCVAR_GET(ultimate_patches));
+  g_patches = ClampPatchMask(rb_blitz::settings::title::ultimate_patches.Get());
   REXLOG_INFO("ultimate: payload {}, patches 0x{:X}{}", payload_root.string(), g_patches,
               merged ? " (merged into the game root)" : "");
 
@@ -349,7 +291,7 @@ void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_roo
     // The redirect is added when the payload's own macro names the settings file this build
     // watches - a *separate* question from whether the whole payload is one we integrate with.
     // On an unrecognized payload this still repairs the provider's own save, which is the plan's
-    // compatibility fallback (§6.1); elsewhere it is the file our rows read and write.
+    // compatibility fallback (Ã‚Â§6.1); elsewhere it is the file our rows read and write.
     auto redirects = settings::ultimate_adapter::ProviderUserRecords(g_provider);
     const std::array legacy_roots{provider_root, game_data_root};
     std::string import_error;

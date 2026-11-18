@@ -10,9 +10,7 @@
 #include <filesystem>
 #include <vector>
 
-namespace rex {
-class Runtime;
-}  // namespace rex
+namespace rex::kernel { class TitleRuntime; }
 
 namespace rb_blitz::dlc {
 // Start a cached flat-library scan while graphics presentation is set up. A
@@ -39,10 +37,11 @@ std::vector<std::filesystem::path> BootCandidatePackagePaths();
 //     is not the structured layout is read as a library too, so pointing it at a
 //     dumped song folder needs no other configuration.
 //
-// Call once from RbBlitzApp::OnPostLoadXexImage(): the content manager exists, the
+// Call after loading the title, before guest execution: the content manager exists, the
 // paths are final and the guest has not started yet. Without any source this logs and
-// returns, leaving the content root as the only DLC source.
-void Configure(rex::Runtime* runtime, const std::filesystem::path& game_data_root);
+// returns, leaving the content root as the only DLC source. False refuses launch when
+// the content validator cannot be installed.
+bool Configure(rex::kernel::TitleRuntime* runtime, const std::filesystem::path& game_data_root);
 
 // R7's in-game refresh, asked for by the main menu's last row. This is what the in-game
 // native discovery hook calls. It uses the configuration captured at boot.

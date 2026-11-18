@@ -9,7 +9,7 @@
 #include "platform/virtual_keyboard.h"
 
 #include <imgui.h>
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 #include <rex/ui/style.h>
 
 #include <cstdlib>
@@ -91,8 +91,8 @@ void ConfigureKeyboardTheme(rex::ui::Style &style, std::function<void*()> native
   };
   keyboard.sample_controller = [] {
     using Pad = rex::ui::KeyboardControllerSample;
-    using namespace rex::input;
-    X_INPUT_STATE state{};
+    using namespace rex::hid;
+    IInputSystem::PadReading state{};
     Pad sample;
     sample.connected = input::SamplePhysicalPad(&state, true);
     // The window's actual focus is authoritative; text/IME keyboard focus and
@@ -101,9 +101,9 @@ void ConfigureKeyboardTheme(rex::ui::Style &style, std::function<void*()> native
     if (!sample.connected) {
       return sample;
     }
-    const uint16_t buttons = state.gamepad.buttons;
-    if (buttons & X_INPUT_GAMEPAD_A) sample.buttons |= Pad::ShowKeyboard;
-    if (buttons & X_INPUT_GAMEPAD_B) sample.buttons |= Pad::Cancel;
+    const uint16_t buttons = state.state.buttons;
+    if (buttons & kPadA) sample.buttons |= Pad::ShowKeyboard;
+    if (buttons & kPadB) sample.buttons |= Pad::Cancel;
     return sample;
   };
   keyboard.font = g_font;
@@ -128,11 +128,11 @@ void ConfigureKeyboardTheme(rex::ui::Style &style, std::function<void*()> native
   toast.font = keyboard.font;
   toast.heading_font = keyboard.heading_font;
   toast.background = keyboard.background;
-  toast.background_alpha = keyboard.background.w;
+  style.metrics.window_alpha.toast = keyboard.background.w;
   toast.border = keyboard.border;
   toast.border_highlight = keyboard.border_highlight;
-  toast.text = keyboard.text;
-  toast.title = keyboard.text;
+  toast.text = rex::ui::FromImVec4(keyboard.text);
+  toast.title = rex::ui::FromImVec4(keyboard.text);
   toast.muted_text = keyboard.muted_text;
 }
 }  // namespace rb_blitz::ui

@@ -57,11 +57,12 @@
 #include "diag/gameplay_probe.h"
 #include "input/native_menu.h"
 
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
 #include <rex/ppc/context.h>
-#include <rex/system/xmemory.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 REX_EXTERN(__imp__sub_824432A0);
 REX_EXTERN(__imp__sub_82443478);
@@ -77,48 +78,21 @@ REX_EXTERN(sub_82442B30);
 REX_EXTERN(sub_82442BB8);
 REX_EXTERN(sub_8245C878);
 
-REXCVAR_DEFINE_BOOL(probe_gameplay, false, "Diagnostics",
-                    "P0: log the native ButtonDown/ButtonUp -> kBMAction -> gameplay dispatch path. "
-                    "Diagnostics only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(probe_gameplay_bypass, false, "Diagnostics",
-                    "P0: make the native joypad mapping return no action (candidate native-preset "
-                    "bypass). Pair with probe_gameplay to see the suppression. Diagnostics only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(probe_gameplay_inject, false, "Diagnostics",
-                    "P0: dispatch a fixed Lane0/Lane1/UsePowerUp sequence into the native action "
-                    "boundary once a song controller exists. Diagnostics only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(probe_gameplay_inject_track, false, "Diagnostics",
-                    "P0: include TrackUp/TrackDown in the injected sequence. Each track action is "
-                    "held long enough for the controller's own repeat, then released. Diagnostics "
-                    "only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(probe_gameplay_block_dispatch, false, "Diagnostics",
-                    "P0: suppress every native entry into the action boundary (press and release) "
-                    "while the song controller exists, covering all four producers. Direct probe "
-                    "actions still dispatch. Diagnostics only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(probe_gameplay_inject_spam, false, "Diagnostics",
-                    "P0: replace the fixed sequence with an alternating Lane0/Lane1 press-released "
-                    "loop starting 8 s into the song, to test note judgement against the HUD "
-                    "score. Diagnostics only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(probe_gameplay_challenge, false, "Diagnostics",
-                    "P0: exercise dormant message and keyboard producers using guest-stack "
-                    "fixtures. Pair with block_dispatch for before/after evidence. Diagnostics only.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_BOOL(probe_gameplay_sources, false, "Diagnostics",
-                    "P0: raw G/H or mouse left/right dispatch notes; N/M dispatch tracks. "
-                    "Uses the live song guest thread. Diagnostics only, not saved mappings.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
+
+
+
+
+
+
 
 namespace {
 
@@ -216,7 +190,7 @@ thread_local int32_t g_spam_action = 0;
 thread_local uint32_t g_sources = 0;
 
 bool BlockNative(uint32_t controller) {
-  return REXCVAR_GET(probe_gameplay_block_dispatch) &&
+  return rb_blitz::settings::title::probe_gameplay_block_dispatch.Get() &&
       (controller == g_controller || (g_fixture_controller && controller == g_fixture_controller));
 }
 
@@ -283,7 +257,7 @@ void ReleaseAction(PPCContext& ctx, uint8_t* base, uint32_t controller, int32_t 
 constexpr int kSpamFirstTick = 300;  // about 8 s at 28 ms/tick: the HUD still reads 0
 
 void TimedInject(PPCContext& ctx, uint8_t* base, uint32_t controller, int tick) {
-  if (REXCVAR_GET(probe_gameplay_inject_spam)) {
+  if (rb_blitz::settings::title::probe_gameplay_inject_spam.Get()) {
     if (tick < kSpamFirstTick) {
       if (tick == kSpamFirstTick - 1) {
         REXLOG_INFO("gameplay_probe: spam starts on the next tick");
@@ -298,7 +272,7 @@ void TimedInject(PPCContext& ctx, uint8_t* base, uint32_t controller, int tick) 
     }
     return;
   }
-  const bool tracks = REXCVAR_GET(probe_gameplay_inject_track);
+  const bool tracks = rb_blitz::settings::title::probe_gameplay_inject_track.Get();
   switch (tick) {
     case 60:
       DispatchAction(ctx, base, controller, kLane0, 0);
@@ -442,7 +416,7 @@ void rb_blitz::diag::gameplay_probe::ControllerCreated(uint32_t controller, uint
   g_controller = controller;
   g_spam_action = 0;
   g_sources = 0;
-  if (REXCVAR_GET(probe_gameplay)) {
+  if (rb_blitz::settings::title::probe_gameplay.Get()) {
     REXLOG_INFO("gameplay_probe: NewController -> {:#x} (cfg={:#x}, vtable={:#x})", controller,
                 config, vtable);
   }
@@ -450,7 +424,7 @@ void rb_blitz::diag::gameplay_probe::ControllerCreated(uint32_t controller, uint
 
 // The destructor callback, called by the production hook before the original runs.
 void rb_blitz::diag::gameplay_probe::ControllerDestroyed(uint32_t controller) {
-  if (REXCVAR_GET(probe_gameplay) && controller == g_controller) {
+  if (rb_blitz::settings::title::probe_gameplay.Get() && controller == g_controller) {
     REXLOG_INFO("gameplay_probe: controller destroyed");
   }
   if (controller == g_controller) {
@@ -460,7 +434,7 @@ void rb_blitz::diag::gameplay_probe::ControllerDestroyed(uint32_t controller) {
 
 // Game::update_controls is setup, not the per-frame injection seam.
 REX_HOOK_RAW(sub_8238A0F0) {
-  if (REXCVAR_GET(probe_gameplay)) {
+  if (rb_blitz::settings::title::probe_gameplay.Get()) {
     const uint32_t game = static_cast<uint32_t>(ctx.r3.u32);
     if (game != g_last_update_game) {
       g_last_update_game = game;
@@ -476,13 +450,13 @@ REX_HOOK_RAW(sub_8238A0F0) {
 
 // The native mapping lookup: optionally the P0 bypass.
 REX_HOOK_RAW(sub_824432A0) {
-  if (REXCVAR_GET(probe_gameplay) && REXCVAR_GET(probe_gameplay_bypass) && ctx.r5.u32 == 0) {
+  if (rb_blitz::settings::title::probe_gameplay.Get() && rb_blitz::settings::title::probe_gameplay_bypass.Get() && ctx.r5.u32 == 0) {
     REXLOG_INFO("gameplay_probe: bypass lookup controller={:#x} button={}", ctx.r3.u32,
                 ctx.r4.s32);
     ctx.r3.u64 = 0;
     return;
   }
-  const bool on = REXCVAR_GET(probe_gameplay);
+  const bool on = rb_blitz::settings::title::probe_gameplay.Get();
   const uint32_t controller = static_cast<uint32_t>(ctx.r3.u32);
   const uint32_t button = static_cast<uint32_t>(ctx.r4.u32);
   __imp__sub_824432A0(ctx, base);
@@ -494,7 +468,7 @@ REX_HOOK_RAW(sub_824432A0) {
 
 // The ButtonDown handler: log the message's button and the action it resolves to.
 REX_HOOK_RAW(sub_82443478) {
-  const bool on = REXCVAR_GET(probe_gameplay);
+  const bool on = rb_blitz::settings::title::probe_gameplay.Get();
   uint32_t controller = 0;
   uint32_t button = 0;
   int32_t action = 0;
@@ -510,7 +484,7 @@ REX_HOOK_RAW(sub_82443478) {
 
 // The ButtonUp handler: same reading, release is action-specific.
 REX_HOOK_RAW(sub_82443528) {
-  if (REXCVAR_GET(probe_gameplay)) {
+  if (rb_blitz::settings::title::probe_gameplay.Get()) {
     const uint32_t controller = static_cast<uint32_t>(ctx.r3.u32);
     const uint32_t button = MessageButton(ctx, base, static_cast<uint32_t>(ctx.r4.u32));
     const int32_t action = LookupAction(ctx, base, controller, button, 0);
@@ -524,7 +498,7 @@ REX_HOOK_RAW(sub_82443528) {
 // (src/hooks/gameplay_input.cpp): every press of a mapped action arrives here, from all four
 // producers. Logs it and answers whether the probe's own block switch asks for it to be dropped.
 bool rb_blitz::diag::gameplay_probe::PressBoundary(PPCContext& ctx, uint8_t* base) {
-  if (!REXCVAR_GET(probe_gameplay)) {
+  if (!rb_blitz::settings::title::probe_gameplay.Get()) {
     return false;
   }
   const uint32_t lr = static_cast<uint32_t>(ctx.lr);
@@ -543,7 +517,7 @@ bool rb_blitz::diag::gameplay_probe::PressBoundary(PPCContext& ctx, uint8_t* bas
 
 // The release half of the same boundary, blocked by the same switch.
 bool rb_blitz::diag::gameplay_probe::ReleaseBoundary(PPCContext& ctx, uint8_t* base) {
-  if (!REXCVAR_GET(probe_gameplay)) {
+  if (!rb_blitz::settings::title::probe_gameplay.Get()) {
     return false;
   }
   const uint32_t lr = static_cast<uint32_t>(ctx.lr);
@@ -562,7 +536,7 @@ bool rb_blitz::diag::gameplay_probe::ReleaseBoundary(PPCContext& ctx, uint8_t* b
 // (the title imports no keystroke API, so the engine never delivers key
 // messages); the hook exists so a run can prove it never fires.
 REX_HOOK_RAW(sub_82442B30) {
-  if (REXCVAR_GET(probe_gameplay)) {
+  if (rb_blitz::settings::title::probe_gameplay.Get()) {
     REXLOG_INFO("gameplay_probe: keyboard controller down controller={:#x} msg={:#x}", ctx.r3.u32,
                 ctx.r4.u32);
   }
@@ -571,7 +545,7 @@ REX_HOOK_RAW(sub_82442B30) {
 
 // Explicit send_down_action/send_up_action messages. Sticks/triggers use ButtonDown.
 REX_HOOK_RAW(sub_82436A28) {
-  if (REXCVAR_GET(probe_gameplay)) {
+  if (rb_blitz::settings::title::probe_gameplay.Get()) {
     REXLOG_INFO("gameplay_probe: symbol message controller={:#x} array={:#x}", ctx.r4.u32,
                 ctx.r5.u32);
   }
@@ -583,10 +557,10 @@ REX_HOOK_RAW(sub_82436A28) {
 // object the production hook adopted.
 void rb_blitz::diag::gameplay_probe::Frame(PPCContext& ctx, uint8_t* base, uint32_t controller,
                                            int tick) {
-  if (!REXCVAR_GET(probe_gameplay)) {
+  if (!rb_blitz::settings::title::probe_gameplay.Get()) {
     return;
   }
-  if (tick == 30 && REXCVAR_GET(probe_gameplay_challenge)) ChallengeProducers(ctx, base);
-  if (REXCVAR_GET(probe_gameplay_inject)) TimedInject(ctx, base, controller, tick);
-  if (REXCVAR_GET(probe_gameplay_sources)) SampleSources(ctx, base);
+  if (tick == 30 && rb_blitz::settings::title::probe_gameplay_challenge.Get()) ChallengeProducers(ctx, base);
+  if (rb_blitz::settings::title::probe_gameplay_inject.Get()) TimedInject(ctx, base, controller, tick);
+  if (rb_blitz::settings::title::probe_gameplay_sources.Get()) SampleSources(ctx, base);
 }

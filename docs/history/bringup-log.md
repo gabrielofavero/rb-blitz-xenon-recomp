@@ -1843,7 +1843,7 @@ The window has always delivered mouse events — the SDK's `rex::ui::MouseEvent`
 carries buttons, motion and wheel, and its ImGui layer consumes them — but
 nothing turned them into pad input, because the only two drivers in
 `input_factory` hand the guest keys-as-a-pad or a real pad
-(`CreateDefaultInputSystem`, [rexglue-sdk/src/input/input_system.cpp](../../rexglue-sdk/src/input/input_system.cpp)). "The mouse should
+(`CreateDefaultInputSystem`, [rexglue-sdk/src/input/input_system.cpp](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/input/input_system.cpp)). "The mouse should
 navigate the menus" is therefore a **third device**,
 [src/input/mouse_ui.cpp](../../src/input/mouse_ui.cpp), installed from
 `RbBlitzApp::OnPreSetup` ([src/rb_blitz_app.h](../../src/rb_blitz_app.h:47)) — the

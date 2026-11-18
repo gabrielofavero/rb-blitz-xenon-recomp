@@ -4,8 +4,8 @@
 #include <atomic>
 #include <cstdint>
 
-#include <rex/hook.h>
-#include <rex/logging.h>
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
 #include <rex/types.h>
 
 #include "hooks/dlc.h"

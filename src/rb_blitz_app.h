@@ -1,50 +1,4 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// rb_blitz - ReXGlue Recompiled Project
-//
-// Customize your app by overriding virtual hooks from rex::ReXApp.
-//
-// Hook hygiene (docs/reference/rb3-references.md §8): this is the one file whose hooks are
-// rex::ReXApp's, so each override below states what the SDK does by itself and why
-// this app differs. In short:
-//   * OnPreSetup - the SDK runs its configured backends and input devices; here the
-//     GPU plugin defaults to xenos when none is named (the only one staged), the
-//     graphics backend named by `gpu_backend` is loaded first (refusing an empty or
-//     "any" value, so the SDK's own load is untouched), and the mouse driver is
-//     appended to whatever input factory is configured. Both are additive; a configured
-//     plugin and a configured factory are honoured.
-//   * OnConfigurePaths - faithfully, every path is honoured as given; here Controller Settings
-//     profile's `[settings]` rows are applied at the config rank first (D3 rank 4, so a
-//     game started without Controller Settings still sees the rows it saved, and the game's own
-//     rb_blitz.toml - loaded by the SDK after this hook - still outranks it), and a
-//     writable root that resolves inside the read-only game tree is dropped in favour of
-//     the platform user directory, so Controller Settings cannot make the game write into its own
-//     data. Any other directory is honoured as given.
-//   * ApplyContentLicense - the emulated console owns no licence, which sends the
-//     title down the trial path; here license_mask defaults to 1 (treated as
-//     purchased), and only when nothing else - config file, REX_* environment or
-//     command line - named a mask, so `license_mask = 0` restores the faithful path.
-//   * OnPostLoadXexImage - the SDK starts the guest unchanged; here the Ultimate and
-//     DLC layers run first, and each is a no-op without its payload/directory. R9's
-//     shell-music layer runs last and only when its toggle is on and the DLC layer
-//     found a library: it mounts a few packages read-only and redirects the hook the
-//     main menu's music goes through, and with the toggle off it is inert.
-//   * OnPreLaunchModule - the SDK never finalizes the cvar registry, so a key in
-//     rb_blitz.toml that matches no cvar stays silent; here the registry is finalized
-//     last, which reports such a key and locks the kInitOnly flags.
-//   * OnCreateDialogs - the SDK adds its own overlays (F3 debug, console, settings);
-//     here the probe overlay joins them, so there is still one ImGui context and one
-//     renderer. It draws only while probe_overlay is on; with the cvar off it changes
-//     nothing (diagnostics, see src/diag/probe.h).
-//   * OnConfigureFonts - the SDK registers its own font and adds nothing else; here the
-//     caption overlay's system sans joins the same atlas (player-facing text next to the
-//     SDK's 10 px debug face), with the SDK's font as the fallback when none can be read.
-//   * LogBootIdentity - diagnostics only; it changes no guest behaviour.
-//
-//   Every early return above is either the faithful path or a refusal to deviate
-//   further: a configured plugin, factory, path or mask leaves the SDK's own
-//   behaviour alone, and a missing payload or directory makes the added layers
-//   no-ops.
-
 #pragma once
 
 #include <chrono>
@@ -53,10 +7,11 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
-#include <rex/cvar.h>
+#include "settings/runtime_settings.h"
 #include "assets/texture_override.h"
 #include "platform/bundle_resources.h"
 #if defined(RB_BLITZ_IOS)
@@ -64,25 +19,14 @@
 #endif
 #include "input/touch_controls.h"
 #include "ui/gameplay_presentation.h"
-#include <rex/graphics/compile_trace.h>
+#include <rex/diagnostics/compile_trace.h>
 #include "diag/shader_trace.h"
 #include "diag/boot_heartbeat.h"
 #include "diag/session_logs.h"
 #include "graphics/preparation_loading.h"
 #include "graphics/shader_coverage.h"
-#include <rex/filesystem.h>
-#include <rex/logging/macros.h>
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 #include <rex/platform/dynlib.h>
-#include <rex/rex_app.h>
-#include <rex/system/flags.h>
-#include <rex/system/gpu_plugin.h>
-#include <rex/ui/presenter.h>
-#include <rex/ui/overlay/achievement_notification.h>
-#include <rex/system/interfaces/graphics.h>
-#include <rex/ui/window.h>
-#include <rex/ui/windowed_app_context_sdl.h>
-#include <rex/ui/window_sdl.h>
 #include <rex/version.h>
 
 #include "generated/fingerprint_expected.h"
@@ -112,7 +56,10 @@
 #include "settings/boot.h"
 #include "settings/paths.h"
 #include "settings/display_runtime.h"
+#include "settings/display_hotkey.h"
+#include "settings/display_trial.h"
 #include "platform/game_restart.h"
+#include "platform/bootstrap_arguments.h"
 #if defined(RB_BLITZ_IOS_IMPORTER)
 #include "platform/ios_importer.h"
 #endif
@@ -135,294 +82,265 @@
 #include "ui/keyboard_theme.h"
 #include "util/sha256.h"
 
-// The graphics backend the game renders with, defined in src/main.cpp beside the app it belongs
-// to. It is this project's cvar rather than the SDK's because choosing a backend is the *app's*
-// decision: the GPU plugin can only run the backends it was compiled with, so the load below is
-// where the choice can be honoured or refused.
-REXCVAR_DECLARE(std::string, gpu_backend);
-
-
-class RbBlitzApp : public rex::ReXApp {
- public:
-  using rex::ReXApp::ReXApp;
-#if defined(RB_BLITZ_IOS_IMPORTER)
-  std::unique_ptr<rb_blitz::platform::IOSImporter> ios_importer_;
-#endif
-
-#if defined(RB_BLITZ_IOS_IMPORTER)
-  bool OnInitialize() override {
-    // Keep UIKit pumping without constructing settings/runtime against missing
-    // assets. Completion re-enters the existing startup on the SDL UI thread.
-    ios_importer_ = rb_blitz::platform::StartIOSImporter([this] {
-      app_context().CallInUIThreadDeferred([this] {
-        if (!ios_importer_ || !ios_importer_->PrepareLaunch()) return;
-        ios_importer_.reset();
-        if (!rex::ReXApp::OnInitialize()) app_context().QuitFromUIThread();
-      });
-    });
-    return true;
-  }
-#endif
-
-  std::unique_ptr<rex::ui::ImGuiDialog> CreateAchievementsOverlay() override {
-    rb_blitz::ui::achievements::Toggle();
-    return nullptr;  // The app owns the persistent browser used by the guest action too.
-  }
-
-  // The SDK creates the toast once per launch. Suppressing its UI leaves the
-  // achievement manager's unlock, save, and reload paths running normally.
-  std::unique_ptr<rex::ui::AchievementNotificationDialog>
-  CreateAchievementNotificationDialog() override {
-    if (REXCVAR_GET(enhancements_hide_achievements)) {
-      return nullptr;
-    }
-    return rex::ReXApp::CreateAchievementNotificationDialog();
-  }
-
-  static std::unique_ptr<rex::ui::WindowedApp> Create(
-      rex::ui::WindowedAppContext& ctx) {
-    return std::unique_ptr<RbBlitzApp>(new RbBlitzApp(ctx, "rb_blitz",
-        PPCImageConfig));
-  }
-
-  // Keep the SDK's internal name for config/save paths, and give the window
-  // its player-facing name while retaining the SDK build identification.
-  void OnOpened(rex::ui::UISetupEvent& event) override {
-    event.target()->SetTitle("Rock Band Blitz " REXGLUE_BUILD_TITLE);
-  }
-
-  // Runtime/backend selection. Called before Runtime::Setup(); the GPU plugin
-  // is loaded immediately after this hook returns, so set the plugin name here.
-  // The `rexgpu-xenos` DLL is staged next to the executable via
-  // rexglue_setup_target(rb_blitz GPU_PLUGINS xenos) in CMakeLists.txt.
-  void OnPreSetup(rex::RuntimeConfig& config) override {
-    if (rb_blitz::platform::window_host::Active())
-      rex::ui::WindowSDL::SetNativeHost(&native_window_host_);
-    // Read the title's own autosave icon before opening the game window, so
-    // even a cold archive read cannot leave an unpainted window on screen.
-    std::string boot_art_error;
-    const auto art_started = std::chrono::steady_clock::now();
-    boot_icon_art_loaded_ = rb_blitz::ui::boot_loading_art::LoadBootLoadingFrames(
-        game_data_root(), &boot_loading_frames_, &boot_art_error);
-    if (boot_icon_art_loaded_) {
-      REXLOG_INFO("boot_loading: autosave icon ready elapsed_ms={}",
-                  std::chrono::duration_cast<std::chrono::milliseconds>(
-                      std::chrono::steady_clock::now() - art_started).count());
-    } else {
-      REXLOG_WARN("boot_loading: autosave icon unavailable: {}", boot_art_error);
-    }
-    // The settings/config paths are final here. Header I/O can run while the
-    // renderer initializes, before the content manager needs the exact list.
-    rb_blitz::dlc::PrepareBootLibraryScan(
-        game_data_root(), cache_root() / "dlc-library-identities.cache");
-    rb_blitz::shell_music::PrepareBootCatalog(
-        cache_root() / "menu_music_catalog.cache");
-    if (config.gpu_plugin.empty()) {
-      config.gpu_plugin = "xenos";
-    }
-    if (rex::cvar::GetFlagByName("settings_safe_graphics") == "true") {
-#if defined(_WIN32)
-      rex::cvar::SetFlagByName("gpu_backend", "d3d12");
-#else
-      rex::cvar::SetFlagByName("gpu_backend", "vulkan");
-#endif
-    }
-      SelectGpuBackend(config);
-    // Load the default plugin here too: its cvars must exist before presentation and runtime
-    // setup consume them. Loading creates the graphics object; SetupPresentation follows later.
-    if (!config.graphics && !config.gpu_plugin.empty()) {
-      config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin);
-    }
-    // Vulkan converts B-010 fixed-point textures directly from GPU shared memory
-    // (SDK patch 0022), so it no longer needs automatic CPU resolve readback.
-    if (config.graphics && settings_boot_) {
-      settings_boot_->BeforeGraphicsSetup(selected_backend_);
-    }
-    ApplyContentLicense();
-    // The runtime reads input_factory the moment this hook returns, and the
-    // input system is built from it, so this is the point where an extra input
-    // device can still be added. See src/input/mouse_ui.h.
-    //
-    // P2 of the gameplay-mapping plan: the SDK installs its own default factory before this hook
-    // (ReXApp::SetupPresentation), so the title's system has to replace it here - the two
-    // installers below wrap whatever is here. Without this the SDK's MnK driver would ignore the
-    // keyboard gate and no physical driver would be visible for a `pad:` gameplay source
-    // (measured 2026-10-18: no `title_input:` line and an empty physical pad list).
-    config.input_factory = REX_INPUT_BACKEND(rb_blitz::input::CreateTitleInputSystem);
-    rb_blitz::input::InstallMouseUiNavigation(config);
-    // Controller Settings' `[remap]` table, applied to the pad state the guest asks for. Its own
-    // wrapper of input_factory, so both it and the mouse compose with whichever backend was
-    // selected. See src/input/remap.h. Since P2 of the gameplay-mapping plan this is also where
-    // the source gates and the gameplay tables' physical snapshot live.
-    rb_blitz::input::InstallPadRemap(config);
-  }
-
-  // The graphics backend, from `gpu_backend` (controller-settings/config/settings.toml's Renderer row).
-  //
-  // The SDK loads the GPU plugin itself, with its own default backend - "any", whichever
-  // backend the plugin was compiled with. All this does is name one instead, and only when
-  // something did: "any" and an empty value both return without touching `config`, so the
-  // SDK's own load runs exactly as it always did and the faithful behaviour is unchanged.
-  //
-  // A named backend the payload does not have fails to load, is logged with the backend's
-  // name by the plugin, and leaves `config.graphics` empty - so the SDK's own load runs anyway
-  // and picks the backend the build does have. A wrong choice therefore degrades to the working
-  // renderer instead of refusing to boot, and never silently: the log names what could not be
-  // provided and what was used instead.
-  //
-  // Not static (it was, before P11a): a backend that really loaded is remembered in the app, so the
-  // settings store can report which renderer this boot is actually using.
-  void SelectGpuBackend(rex::RuntimeConfig& config) {
-    if (config.graphics || config.gpu_plugin.empty()) {
-      return;
-    }    const std::string backend = REXCVAR_GET(gpu_backend);
-    if (backend.empty() || backend == "any") {
-      return;
-    }
-    // A backend this *payload* has but this *machine* cannot run: the SDK loads the Vulkan
-    // loader at run time rather than linking it, so the plugin is happy to build a Vulkan
-    // graphics system on a box with no Vulkan driver, and the failure only lands later, inside
-    // presentation setup - where the backend is already committed and there is nothing left to
-    // fall back to. Checking the loader first is what keeps "a wrong choice degrades to the
-    // renderer that works" true for the case that actually happens.
-    if (backend == "vulkan" && !VulkanLoaderIsUsable()) {
-      REXLOG_WARN("graphics backend 'vulkan' was asked for, but {} is not usable here; "
-                  "falling back to the backend this build would have picked by itself",
-                  rex::platform::lib_names::kVulkanLoader);
-      return;
-    }
-    config.graphics = rex::system::LoadGpuPlugin(config.gpu_plugin, backend);
-    // Remembered only when a backend was really named and loaded: the settings boot reports it as
-    // the active renderer, and an unnamed/"any" choice stays unnamed rather than being guessed at.
-    if (config.graphics) {
-      selected_backend_ = backend;
-    }
-  }
-
-  // True when the Vulkan loader is present and looks like a loader. Whether it has a usable
-  // *device* is deliberately left to the provider: enumerating physical devices here would mean
-  // a second Vulkan initialization in the same process, and the provider has to do it anyway.
-  static bool VulkanLoaderIsUsable() {
-    rex::platform::DynamicLibrary loader;
+#include <atomic>
+#include <cctype>
+#include <algorithm>
+#include <array>
+#include <vector>
+#include <imgui.h>
+#include <SDL3/SDL.h>
+#include <rex/app/title_app.h>
+#include <rex/path_settings.h>
+#include <rex/platform/file.h>
+#include <rex/kernel/title_paths.h>
+#include <rex/gpu/graphics_system.h>
+#include <rex/gpu/graphics_presentation.h>
+#include <rex/gpu/graphics_preparation_service.h>
+#include <rex/gpu/texture_override.h>
+#include <rex/hid/input_system.h>
+#include <rex/hid/title_input.h>
+#include <rex/ui/ui_system.h>
+#include <rex/ui/style.h>
+#include <rex/ui/ui_event.h>
+#include <rex/ui/achievement_notifications.h>
 #if defined(RB_BLITZ_IOS)
-    const auto frameworks = rex::filesystem::GetExecutableFolder() / "Frameworks";
-    if (!loader.Load(frameworks / "MoltenVK.framework" / "MoltenVK") &&
-        !loader.Load(frameworks / "libMoltenVK.dylib")) {
-      return false;
-    }
-#else
-    if (!loader.Load(rex::platform::lib_names::kVulkanLoader)) {
-      return false;
-    }
+#include <rex/ui/application_activity.h>
 #endif
-    return loader.GetRawSymbol("vkGetInstanceProcAddr") != nullptr;
+#include <rex/ui/native_window_host.h>
+#include <rex/xam/achievement_manager.h>
+#include "hooks/crypto.h"
+#include "settings/runtime_values.h"
+#include "settings/title_defaults.h"
+#include "settings/graphics_settings.h"
+
+class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventListener {
+ public:
+  RbBlitzApp() : TitleApp("rb_blitz", kPPCImageConfig) {}
+
+  int RunEntry(const rex::CLIArgList& args) {
+    startup_args_ = rb_blitz::platform::NormalizeBootstrapArguments(args);
+#if defined(RB_BLITZ_IOS_IMPORTER)
+    // The importer owns UIKit until assets are ready, before any runtime mounts or drivers exist.
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) return 1;
+    rex::ScopeGuard release_import_ui([] { SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS); });
+    std::atomic<bool> ready{false};
+    auto importer = rb_blitz::platform::StartIOSImporter([&ready] { ready.store(true); });
+    if (!importer) return 1;
+    for (;;) {
+      while (!ready.load()) {
+        SDL_PumpEvents();
+        SDL_Delay(8);
+      }
+      ready.store(false);
+      if (importer->PrepareLaunch()) break;
+    }
+    importer.reset();
+#endif
+    try {
+      if (!Init(startup_args_)) {
+        OnShutdown();
+        return Shutdown();
+      }
+      if (LaunchTitle()) Run();
+      return Shutdown();
+    } catch (const StartupCancelled&) {
+      if (!on_init_complete_) OnShutdown();
+      return Shutdown();
+    } catch (...) {
+      if (!on_init_complete_) OnShutdown();
+      Shutdown();
+      throw;
+    }
   }
 
-  // Path policy. Called before logging is initialized, so keep this silent.
-  //
-  // game_data_root (read-only) comes from --game_data_root / the cvar and is
-  // mounted read-only by the SDK (allow_game_relative_writes defaults off).
-  // Writable state (user/update/cache) must never live inside game_data_root: a
-  // Controller Settings that asks for that gets the platform user directory instead. Any
-  // other directory is honoured as given - see rb_blitz::fs::IsSameOrInside()
-  // for why the check is not a std::filesystem::relative() call.
-  void OnConfigurePaths(rex::PathConfig& paths) override {
+ protected:
+  rex::AppSysRequirements GetRequirements() const override {
+    auto needs = rex::app::TitleApp::GetRequirements();
+    // Raw UI events and the title input filter provide keyboard input even
+    // when every external input driver has been disabled or fails.
+    needs.input = false;
+    return needs;
+  }
+
+  rex::Result<void> OnConfigure(rex::SettingsRegistry& registry) override {
+    using namespace rb_blitz::settings;
+    REX_TRY_VOID(RegisterTitleSettings(registry));
+    REX_TRY_VOID(RegisterRuntimeSettingAliases(registry));
+    // Resolve canonical environment values before selecting stored boot identity and paths.
+    for (auto* setting : registry.Enumerate()) {
+      std::string environment = "REX_";
+      for (unsigned char c : setting->GetName())
+        environment += c == '.' ? '_' : static_cast<char>(std::toupper(c));
+      if (auto value = rex::platform::GetEnvironmentValue(environment))
+        REX_TRY_VOID(registry.SetText(rex::SettingLayer::kEnvironment, setting->GetName(), *value));
+    }
+    // Boot identity and stored path choices depend on explicit options before the SDK parses them.
+    for (const auto& option : startup_args_.GetOptions()) {
+      if (const auto canonical = ResolveRuntimeSettingName(option.name))
+        REX_TRY_VOID(registry.SetText(rex::SettingLayer::kCommandLine, *canonical,
+                                     option.value.value_or("true")));
+    }
+    REX_TRY_VOID(SetTitleDefault(root, rex::platform::GetExecutableFolder().string()));
+    auto& title_paths = GetTitleRuntime().GetTitlePaths();
+    REX_TRY_VOID(SetTitleDefault(title_paths.game_root, (rex::platform::GetExecutableFolder() / "game").string()));
+#if defined(_WIN32)
+    REX_TRY_VOID(SetTitleDefault(REX_PATHS().user_root, (rex::platform::GetUserFolder() / "Rock Band Blitz").string()));
+    REX_TRY_VOID(SetTitleDefault(REX_PATHS().cache_root, "{app.user_root}/cache"));
+#else
+    const auto native = NativeUserRootsFromEnvironment();
+    if (!native.data.empty()) {
+      REX_TRY_VOID(SetTitleDefault(REX_PATHS().user_root, native.data.string()));
+      REX_TRY_VOID(SetTitleDefault(title_paths.update_root, (native.data / "updates").string()));
+    }
+    if (!native.cache.empty())
+      REX_TRY_VOID(SetTitleDefault(REX_PATHS().cache_root, native.cache.string()));
 #if defined(RB_BLITZ_IOS)
     ios_documents_root_ = rb_blitz::platform::PrepareIOSDocuments();
+    REX_TRY_VOID(SetTitleDefault(REX_PATHS().config_file, (native.config / "rb_blitz.toml").string()));
 #if defined(RB_BLITZ_IOS_IMPORTER)
-    paths.game_data_root = rb_blitz::platform::IOSImportedGameRoot();
-#else
-    paths.game_data_root = rex::filesystem::GetExecutableFolder() / "game";
+    REX_TRY_VOID(SetTitleDefault(title_paths.game_root, rb_blitz::platform::IOSImportedGameRoot().string()));
+#endif
+    REX_TRY_VOID(SetTitleDefault(title::dlc_root, (ios_documents_root_ / "DLCs").string()));
 #endif
 #endif
-    // D3's rank 4, and the reason R4's standalone half works at all: Controller Settings' own rows,
-    // applied at the config rank. This hook runs before the SDK loads the game's own
-    // `<exe>.toml` (rex_app.cpp's SetupEnvironment), so the game's file still outranks the
-    // profile at equal rank, and the command line and the environment - applied before any of
-    // this - outrank both. Without it only a game started by Controller Settings' Launch Game button
-    // saw any of Controller Settings' settings, because that is the only thing that passes them as
-    // argv (docs/plans/finished/2026-09-27-launcher-plan.md §11 findings 6 and 7).
-    //
-    // The report is kept and logged in OnPostInitLogging, not here: logging is initialized a few
-    // lines after this hook returns, so a line written now would go nowhere.
     profile_apply_ = rb_blitz::profile::ApplyProfileSettings();
-
-    // P11a: the native settings store. It runs *after* the legacy profile's rows (which it migrates
-    // and then outranks at equal rank) and *before* the SDK loads the game's own rb_blitz.toml
-    // (which is a later write at the same rank and therefore still beats it). Everything it
-    // decides - the identity, the path file, the migration, the target and licence, the rows the
-    // game reads at init - happens inside ConfigurePaths; what comes back is the two roots the path
-    // file selected, for the PathConfig below.
-    settings_boot_ = std::make_unique<rb_blitz::settings::boot::SettingsBoot>();
-    rb_blitz::settings::boot::SettingsBoot::SetCurrent(settings_boot_.get());
-    const rb_blitz::settings::boot::PathRoots boot_roots =
-        settings_boot_->ConfigurePaths(rex::filesystem::GetExecutableFolder());
-
-    // The runtime derived these roots from the cvars *before* this hook ran, so a root a profile
-    // row just supplied is not in `paths` yet. Re-read the two Controller Settings row can name, exactly
-    // as the runtime reads them; an empty cvar leaves the runtime's own default in place.
-    if (!REXCVAR_GET(user_data_root).empty()) {
-      paths.user_data_root = REXCVAR_GET(user_data_root);
+    settings_boot_ = std::make_unique<boot::SettingsBoot>();
+    boot::SettingsBoot::SetCurrent(settings_boot_.get());
+    settings_boot_->ConfigurePaths(rex::platform::GetExecutableFolder());
+    REX_TRY_VOID(SetTitleDefault(GetUI().GetSettings().title, "Rock Band Blitz [rexglue-v" REXGLUE_VERSION_STRING "]"));
+    if (rb_blitz::platform::window_host::Active()) {
+      native_host_ = std::make_shared<NativeWindowHost>();
+      native_host_registration_ = rex::ui::RegisterNativeWindowHost(native_host_);
     }
-    if (!REXCVAR_GET(cache_root).empty()) {
-      paths.cache_root = REXCVAR_GET(cache_root);
-    }
-
-    auto redirect_if_inside_game_root = [&](std::filesystem::path& p) {
-      if (rb_blitz::fs::IsSameOrInside(p, paths.game_data_root)) {
-        p.clear();
-      }
-    };
-
-    redirect_if_inside_game_root(paths.user_data_root);
-    redirect_if_inside_game_root(paths.cache_root);
-    redirect_if_inside_game_root(paths.update_data_root);
-
-    // The path file's own roots (installer-written, hand-editable). They replace the legacy
-    // profile's path fields, which is why they are applied after the profile and after the cvar
-    // re-read above; an explicit environment/CLI value outranks them and was left alone in
-    // ConfigurePaths (it reports that in the boot log).
-    if (boot_roots.have_user_data_root) {
-      paths.user_data_root = std::filesystem::path(std::u8string(boot_roots.user_data_root.begin(),
-                                                              boot_roots.user_data_root.end()));
-      redirect_if_inside_game_root(paths.user_data_root);
-    }
-
-    // Writable roots default outside the game tree. Windows preserves the established
-    // user-folder layout. Native desktop builds use separate platform data/cache roots;
-    // explicit cvar and path-file choices continue to win.
-#if defined(_WIN32)
-    if (REXCVAR_GET(user_data_root).empty()) {
-      paths.user_data_root = rex::filesystem::GetUserFolder() / "Rock Band Blitz";
-    }
-    if (REXCVAR_GET(cache_root).empty()) {
-      paths.cache_root = paths.user_data_root / "cache";
-    }
-#else
-    const auto native_roots = rb_blitz::settings::NativeUserRootsFromEnvironment();
-    if (REXCVAR_GET(user_data_root).empty() && !native_roots.data.empty()) {
-      paths.user_data_root = native_roots.data;
-    }
-    if (REXCVAR_GET(cache_root).empty() && !native_roots.cache.empty()) {
-      paths.cache_root = native_roots.cache;
-    }
-    if (REXCVAR_GET(update_data_root).empty() && !native_roots.data.empty()) {
-      paths.update_data_root = native_roots.data / "updates";
-    }
-#if defined(RB_BLITZ_IOS)
-    paths.config_path = native_roots.config / "rb_blitz.toml";
-    if (rex::cvar::GetFlagByName("dlc_root").empty())
-      rex::cvar::SetFlagByName("dlc_root", (ios_documents_root_ / "DLCs").string());
-#endif
-#endif
+    return RegisterLegacyLogCategoryConfig(registry, REX_PATHS().config_file.Get());
   }
 
-  // Boot identity and mod compatibility. Called once the XEX is loaded and the
-  // paths are final, which is the first point where game_data_root() is known,
-  // logging is up and the guest has not started yet.
-  void OnPostLoadXexImage() override {
-    // The autosave icon was installed for the first window paint. Keep it the
-    // only active custom dialog while the boot services are still being built.
+  rex::Result<void> OnSettingsLoaded(rex::SettingsRegistry& registry) override {
+    using namespace rb_blitz::settings;
+    REX_TRY_VOID(ApplyLegacyLoggingInputs());
+    REX_TRY_VOID(ApplyLegacyGraphicsInputs());
+    auto& graphics = GetGraphics().GetSettings();
+    const auto legacy_backend = InspectRuntimeSetting("gpu_backend");
+    if (graphics.driver.GetLayer() < legacy_backend.staged_source ||
+        graphics.driver.GetLayer() == rex::SettingLayer::kDefault)
+      REX_TRY_VOID(graphics.driver.SetText(legacy_backend.staged_source, legacy_backend.active_value));
+    if (title::settings_safe_graphics.Get()) {
+#if defined(_WIN32)
+      REX_TRY_VOID(graphics.driver.SetText(rex::SettingLayer::kRuntime, "d3d12"));
+#else
+      REX_TRY_VOID(graphics.driver.SetText(rex::SettingLayer::kRuntime, "vulkan"));
+#endif
+    }
+    if (graphics.driver.Get() == "vulkan" && !VulkanLoaderIsUsable()) {
+      REXLOG_WARN("graphics: Vulkan loader is unavailable; selecting the platform default");
+      REX_TRY_VOID(graphics.driver.SetText(graphics.driver.GetLayer(), "any"));
+    }
+    selected_backend_ = graphics.driver.Get();
+    REX_TRY_VOID(NormalizeInputDrivers());
+    REX_TRY_VOID(EnforceWritablePaths());
+    if (settings_boot_) settings_boot_->BeforeGraphicsSetup(selected_backend_);
+    ApplyContentLicense();
+#if defined(RB_BLITZ_IOS)
+    REX_TRY_VOID(SetTitleDefault(registry, "log.flush_level", "trace"));
+#endif
+    if (auto file_setting = registry.Find("log.file_name");
+        file_setting && CanSetTitleDefault(**file_setting) &&
+        ReadSdkSetting<std::string>("log.file_name").empty() &&
+        !rb_blitz::graphics::IsDevelopmentBuild(rex::platform::GetExecutablePath())) {
+      diagnostics_root_ = UserRoot();
+#if defined(RB_BLITZ_IOS)
+      diagnostics_root_ = ios_documents_root_;
+#endif
+      const auto path = rb_blitz::diag::PrepareSessionLog(diagnostics_root_);
+      if (!path.empty()) {
+        diagnostics_log_file_ = path.string();
+        REX_TRY_VOID(SetTitleDefault(registry, "log.file_name", diagnostics_log_file_));
+        REX_TRY_VOID(SetTitleDefault(registry, "log.max_file_size_bytes", "2097152"));
+        REX_TRY_VOID(SetTitleDefault(registry, "log.max_files", "1"));
+      }
+    }
+    std::string art_error;
+    boot_icon_art_loaded_ = rb_blitz::ui::boot_loading_art::LoadBootLoadingFrames(
+        GameRoot(), &boot_loading_frames_, &art_error);
+    if (!boot_icon_art_loaded_) REXLOG_WARN("boot_loading: autosave icon unavailable: {}", art_error);
+    rb_blitz::dlc::PrepareBootLibraryScan(GameRoot(), CacheRoot() / "dlc-library-identities.cache");
+    rb_blitz::shell_music::PrepareBootCatalog(CacheRoot() / "menu_music_catalog.cache");
+    return rex::Ok();
+  }
+
+  rex::Result<void> OnInit() override {
+    bool initialized = false;
+    rex::ScopeGuard rollback([&] { if (!initialized) OnShutdown(); });
+    selected_backend_ = GetGraphics().GetDriverName();
+    rb_blitz::profile::LogProfileApplyReport(profile_apply_);
+    if (settings_boot_) settings_boot_->LogConfigured();
+    auto* preparation = REX_INTERFACE(rex::gpu::IGraphicsPreparation);
+    if (!preparation || !preparation->SetShaderStorageDeferred(true))
+      return rex::Err(rex::ErrorCategory::kConfig, "graphics preparation cannot be deferred safely");
+    auto* title_input = REX_INTERFACE(rex::hid::ITitleInput);
+    if (!title_input) return rex::Err(rex::ErrorCategory::kModule, "title input service is unavailable");
+    rb_blitz::input::ConfigureTitleInput(title_input);
+    input_filter_ = rb_blitz::input::InstallPadRemap(*title_input);
+    ui_listener_ = GetUI().AddEventListener(*this);
+#if defined(RB_BLITZ_IOS)
+    if (!SDL_AddEventWatch(&WatchIOSActivation, this))
+      return rex::Err(rex::ErrorCategory::kModule, "iOS activation event watch is unavailable");
+    ios_event_watch_ = true;
+#endif
+    auto& atlas = GetUI().GetFonts();
+    rb_blitz::ui::help::ConfigureCaptionFont(&atlas);
+    rb_blitz::ui::ConfigureKeyboardFonts(&atlas);
+    rb_blitz::ui::ConfigureKeyboardTheme(GetUI().GetStyle(), [this] {
+      auto native = GetUI().GetNativeWindow();
+      return native ? native->window : nullptr;
+    });
+    GetUI().GetStyle().achievements.toggle_override = [] { rb_blitz::ui::achievements::Toggle(); };
+    auto* notifications = REX_INTERFACE(rex::ui::IAchievementNotifications);
+    if (!notifications)
+      return rex::Err(rex::ErrorCategory::kModule, "achievement notification policy is unavailable");
+    notifications->SetEnabled(!rb_blitz::settings::title::enhancements_hide_achievements.Get());
+    notification_policy_ = rb_blitz::settings::title::enhancements_hide_achievements.OnChange(
+        [](const bool& hidden) {
+          if (auto* service = REX_INTERFACE(rex::ui::IAchievementNotifications))
+            service->SetEnabled(!hidden);
+        });
+    // The persistent host owns resizing. Changing SDL child flags after attach
+    // restores its decorations and creates a second visible title bar.
+    if (!rb_blitz::platform::window_host::Active()) {
+      if (auto native = GetUI().GetNativeWindow(); native && native->sdl)
+        SDL_SetWindowResizable(static_cast<SDL_Window*>(native->sdl),
+                              rb_blitz::settings::title::window_resizable.Get());
+    }
+    gameplay_presentation_ = rb_blitz::ui::CreateGameplayPresentation(
+        [] { return REX_INTERFACE(rex::gpu::IGraphicsPresentation); }, [this] {
+          if (!rb_blitz::input::touch::PreviewEnabled() || !GetTitleRuntime().IsLoaded()) return;
+          const auto entries = GetTitleRuntime().GetAchievementManager().ListAchievements();
+          if (!entries.empty())
+            if (auto* service = REX_INTERFACE(rex::ui::IAchievementNotifications))
+              service->Preview(entries.front());
+        });
+    AttachDialog(gameplay_presentation_, startup_dialogs_);
+    touch_controls_ = rb_blitz::input::touch::CreateControls(GetUI());
+    AttachDialog(touch_controls_, startup_dialogs_);
+    boot_loading_icon_ = std::make_unique<rb_blitz::ui::BootLoadingIcon>(
+        [] { auto* p = REX_INTERFACE(rex::gpu::IGraphicsPresentation);
+             return p ? p->GetPresentationState().guest_output_refresh : 0; },
+        [] { return rb_blitz::diag::shader_trace::NativeStartupPanelReady(); },
+        [] { return rb_blitz::diag::shader_trace::NativeSplashReady(); },
+        [] { return rb_blitz::hooks::startup_splasher::NativeLogoLoadStarted(); });
+    if (boot_icon_art_loaded_) boot_loading_icon_->SetFrames(std::move(boot_loading_frames_));
+    startup_dialogs_.push_back(GetUI().AddDialog(*boot_loading_icon_));
+    PumpStartupWindow();
+    initialized = true;
+    on_init_complete_ = true;
+    return rex::Ok();
+  }
+
+  rex::Result<void> OnTitleLaunch(rex::kernel::TitleRuntime& title) override {
+    rb_blitz::crypto::ResetGuestCryptoState();
+    rb_blitz::input::InvalidateGameplayInput();
+    rb_blitz::assets::ConfigureTextureOverrides(REX_INTERFACE(rex::gpu::ITextureOverrides));
+
     PumpStartupWindow();
     const auto boot_started = std::chrono::steady_clock::now();
     auto stage_started = boot_started;
@@ -436,51 +354,32 @@ class RbBlitzApp : public rex::ReXApp {
     };
     REXLOG_INFO("boot_timing: post_xex begin");
     LogBootIdentity();
-    // The bootstrap has already validated this handoff and waited for the parent.
     for (const auto& argument : rb_blitz::platform::CommandLineArguments()) {
       if (rb_blitz::platform::IsHandoffSwitch(argument)) settings_restart_boot_ = true;
     }
     rb_blitz::enhancements::LogToggles();
-    // R5 reads its own cvars here, before the guest starts: the read hook that
-    // applies the menu filter runs on guest threads and must not touch the
-    // registry, so the toggle and the row list are captured once (P1's D7).
     rb_blitz::menu_filter::Configure(settings_restart_boot_);
-    rb_blitz::local_save::Configure(runtime());
+    rb_blitz::local_save::Configure(&title);
 #if defined(RB_BLITZ_IOS)
-    rb_blitz::screenshots::Configure(runtime(), ios_documents_root_);
+    rb_blitz::screenshots::Configure(&title, ios_documents_root_);
 #else
-    rb_blitz::screenshots::Configure(runtime());
+    rb_blitz::screenshots::Configure(&title);
 #endif
-    rb_blitz::ultimate::Configure(runtime(), game_data_root());
+    rb_blitz::ultimate::Configure(&title, GameRoot());
     log_stage("identity_and_ultimate");
-    // After ultimate::Configure, which decides what the guest-visible game tree
-    // looks like: DLC is resolved by the SDK content manager from a host path, so
-    // the two do not interact, but the DLC log line reads better next to the boot
-    // identity and the payload line than before them.
-    rb_blitz::dlc::Configure(runtime(), game_data_root());
+    if (!rb_blitz::dlc::Configure(&title, GameRoot()))
+      return rex::Err(rex::ErrorCategory::kValidation, "content validation service is unavailable");
     log_stage("dlc_configure");
-    // Capture pacing before guest threads start. Progress uses actual enumerators
-    // and UI completion, independently of whether the host cache was enabled/hit.
     rb_blitz::content_progress::Configure();
-    // After dlc::Configure, whose early path snapshot is the pool R9 draws from:
-    // with the toggle on, a few loaded DLC songs are mounted read-only and the main menu's
-    // shell-music loader is redirected to them (src/hooks/shell_music.cpp). With the
-    // toggle off - or no library - nothing is mounted and the hook is inert.
-    rb_blitz::shell_music::Configure(runtime(), game_data_root());
+    rb_blitz::shell_music::Configure(&title, GameRoot());
     log_stage("shell_music_configure");
-    // P11a: the settings store's second half, and it has to run in this order: after
-    // ultimate::Configure (the provider's values are what the store reports for its rows) and
-    // *before* bridge::Configure, whose seeding goes through the channel's store - so the channel
-    // must already be pointed at the service.
     settings_boot_->AfterLoadXexImage(selected_backend_);
     log_stage("settings_after_xex");
-    // The menu authoring below snapshots descriptor choices. Discover packages first, so its
-    // controller selector and the texture provider use the same boot catalog.
-    if (rex::cvar::GetFlagByName("enhancements_icon_schemes") == "true") {
+    if (rb_blitz::settings::title::enhancements_icon_schemes.Get()) {
       REXLOG_INFO("boot_timing: controller_schemes begin");
       rb_blitz::assets::InstallControllerSchemes(
-          rb_blitz::platform::BundleResources(rex::filesystem::GetExecutableFolder()) / "assets" / "controller" / "schemes",
-          runtime()->user_data_root() / "controller_schemes",
+          rb_blitz::platform::BundleResources(rex::platform::GetExecutableFolder()) / "assets" / "controller" / "schemes",
+          UserRoot() / "controller_schemes",
           [this] { PumpStartupWindow(); });
       std::string selected = "retail";
       if (settings_boot_ && settings_boot_->service()) {
@@ -507,456 +406,296 @@ class RbBlitzApp : public rex::ReXApp {
       }
     }
     log_stage("controller_schemes_and_selection");
-    // Publish overrides before authoring disabled menu rows, once all config sources exist.
     settings_boot_->FinishInit();
     log_stage("settings_finish_init");
-    settings_boot_->SetPresentedProbe([this] {
-      auto* graphics = runtime()->graphics_system();
-      auto* presenter = graphics ? graphics->presenter() : nullptr;
-      rex::ui::RawImage frame;
-      if (!presenter || !presenter->CaptureGuestOutput(frame) || !frame.width || !frame.height)
-        return false;
-      // Reject a blank startup surface; alpha alone is not evidence of a guest frame.
-      for (size_t i = 0; i + 3 < frame.data.size(); i += 4)
-        if (frame.data[i] || frame.data[i + 1] || frame.data[i + 2]) {
-#if defined(RB_BLITZ_IOS)
-          if (!ios_presentation_state_logged_) {
-            ios_presentation_state_logged_ = true;
-            app_context().CallInUIThreadDeferred([] { rb_blitz::platform::LogIOSPresentationState(); });
-          }
-#endif
-          return true;
-        }
-      return false;
-    });
-    if (auto* sink = settings_boot_->sink()) {
-      if (window() && !settings_boot_->paths().settings_file.empty()) {
-        display_preview_ = std::make_unique<rb_blitz::settings::DisplayPreviewTransaction>(
-            app_context(), *window(), settings_boot_->paths().settings_file);
-        rb_blitz::settings::ServiceSink::DisplayPreviewHooks hooks;
-        hooks.begin = [this](std::string_view requested, std::string* error) {
-          auto* graphics = runtime()->graphics_system();
-          auto* presenter = graphics ? graphics->presenter() : nullptr;
-          if (!display_preview_ || !presenter || !window()) {
-            if (error) *error = "display presenter is unavailable";
-            return false;
-          }
-          std::string previous;
-          if (!app_context().CallInUIThreadSynchronous([this, &previous] {
-                using Mode = rex::ui::Window::DisplayMode;
-                switch (window()->GetDisplayMode()) {
-                  case Mode::kWindowed: previous = "windowed"; break;
-                  case Mode::kBorderless: previous = "borderless"; break;
-                  case Mode::kFullscreen: previous = "fullscreen"; break;
-                }
-              })) {
-            if (error) *error = "display UI thread is unavailable";
-            return false;
-          }
-          if (!display_preview_->Begin(previous, requested, error)) return false;
-          display_preview_requested_mode_ = requested;
-          // Only a successful UI-thread paint after this sample can confirm the new mode.
-          // A guest-output present started before the switch cannot satisfy Keep.
-          display_preview_present_sequence_ = presenter->successful_ui_present_sequence();
-          window()->RequestPaint();
-          return true;
-        };
-        hooks.keep = [this](const rb_blitz::settings::DisplayPreviewTransaction::Persist& persist,
-                            std::string* error) {
-          auto* graphics = runtime()->graphics_system();
-          auto* presenter = graphics ? graphics->presenter() : nullptr;
-          if (!display_preview_ || !presenter || !display_preview_->active() ||
-              presenter->successful_ui_present_sequence() <= display_preview_present_sequence_) {
-            if (error) *error = "the new window mode has not presented yet";
-            return false;
-          }
-          bool mode_matches = false;
-          if (!app_context().CallInUIThreadSynchronous([this, &mode_matches] {
-                using Mode = rex::ui::Window::DisplayMode;
-                const Mode mode = window()->GetDisplayMode();
-                mode_matches =
-                    (display_preview_requested_mode_ == "windowed" && mode == Mode::kWindowed) ||
-                    (display_preview_requested_mode_ == "borderless" && mode == Mode::kBorderless) ||
-                    (display_preview_requested_mode_ == "fullscreen" && mode == Mode::kFullscreen);
-              }) || !mode_matches) {
-            if (error) *error = "the native window is no longer in the previewed mode";
-            return false;
-          }
-          return display_preview_->Keep(true, persist, error);
-        };
-        hooks.revert = [this](std::string* error) {
-          const bool reverted = display_preview_ && display_preview_->Revert(error);
-          if (reverted) display_preview_requested_mode_.clear();
-          return reverted;
-        };
-        hooks.active = [this] { return display_preview_ && display_preview_->active(); };
-        hooks.applied = [this](const rb_blitz::settings::Value& value, uint64_t revision) {
-          using namespace rb_blitz::settings;
-          if (!settings_boot_) return;
-          const std::map<SettingId, Value> changed = {{SettingId::kDisplay, value}};
-          HotApplyPlan plan;
-          plan.live = changed;
-          const uint64_t generation = settings_boot_->NoteCommittedRows(changed, plan, revision);
-          settings_boot_->NoteAppliedRows(changed,
-              {{SettingId::kDisplay, HotApplyStatus::kApplied, {}}}, generation);
-          REXLOG_INFO("settings_display: confirmed and acknowledged '{}' at revision {}",
-                      value.text, revision);
-        };
-        sink->SetDisplayPreviewHooks(std::move(hooks));
-      }
-      sink->SetRestartHandler([this](uint64_t saved, uint64_t current, uint64_t id,
-                                     const std::string& target, std::string* error) {
-        rb_blitz::platform::LaunchContext context;
-        context.executable = rex::filesystem::GetExecutablePath();
-        context.game_data_root = game_data_root();
-        context.working_directory = std::filesystem::current_path();
-        context.profile_file = settings_boot_->paths().legacy_profile;
-        context.target = target;
-        context.developer_arguments = rb_blitz::platform::CommandLineArguments();
-        if (!context.developer_arguments.empty()) context.developer_arguments.erase(context.developer_arguments.begin());
-        rb_blitz::dlc::DrainRefreshForRestart();
-        bool ready = false;
-        const bool dispatched = app_context().CallInUIThreadSynchronous([&] {
-          restart_coordinator_.ResetAfterFailure();
-          const auto outcome = restart_coordinator_.Request(saved, current, id, context);
-          *error = outcome.error;
-          ready = restart_coordinator_.CloseRequested();
-          if (ready && !rb_blitz::platform::window_host::ExpectRestart(restart_launcher_->ChildPid())) {
-            ready = false;
-            *error = "the native window could not accept the replacement game";
-          }
-          if (ready) REXLOG_INFO("settings_restart: replacement game is waiting; native window stays open");
-          else REXLOG_ERROR("settings_restart: {}", *error);
-        });
-        if (!dispatched || !ready) return false;
-        return app_context().CallInUIThreadDeferred([this] { window()->RequestClose(); });
-      });
-    }
-    // P2 of the RhythmVerse store plan: the store's path probe is installed *before* the payload
-    // is built, because the probe is what names the paths that build result is measured against.
-    // It reads its cvar once here, on this host thread; the observer itself runs on guest threads.
+    settings_boot_->SetPresentedProbe([this] { return HasNonblankGuestFrame(); });
+    ConfigureDisplayAndRestart();
     rb_blitz::store::InstallPathProbe();
-    // P3 of the RhythmVerse store plan: the record serving switch. The store's own netcache
-    // requests are answered from the loaded-file container (src/store/store_fetch.h), so this
-    // reads the serve directory once, here, and the hook never touches the cvar registry.
     rb_blitz::store::InstallStoreFetch();
-    // P4 of the RhythmVerse store plan: the search's worker and its one HTTP path. Started here,
-    // on the host thread before the guest exists, because the guest's `write_file` hook only posts
-    // work - the request itself never runs on a guest thread (project rule).
     rb_blitz::store::InstallSearchTransport();
-    // P3's catalogue: the offers a menu page is answered with. Its worker is started here for the
-    // same reason, and the serving policy reads only its snapshot (src/store/store_catalogue.h).
     rb_blitz::store::InstallStoreCatalogue();
-    // P3's album art: the cover worker that fetches the API's `album_art`, encodes the
-    // `.png_xbox` the retail art loader wants and publishes it for the guest's art request. Started
-    // before the catalogue so a page that lands during the same boot already has its prefetch seam
-    // installed (src/store/album_art_service.h).
     rb_blitz::store::InstallAlbumArt();
-    // M1: resolve cache/bundled feed before guest launch; only the host worker fetches Pages.
-    rb_blitz::messages::Install(runtime()->user_data_root(),
-        rb_blitz::platform::BundleResources(rex::filesystem::GetExecutableFolder()));
+    rb_blitz::messages::Install(UserRoot(),
+        rb_blitz::platform::BundleResources(rex::platform::GetExecutableFolder()));
     rb_blitz::messages::InstallUpdateAction([this] {
-      return app_context().CallInUIThreadDeferred([this] { window()->RequestClose(); });
+      GetUI().PostTask([this] { RequestShutdown(); });
+      return true;
     });
     rb_blitz::messages::InstallMessagesGuest();
-    // P3's Downloaded mark (§3.2): the artist/title index of the loaded DLC library. Its builder
-    // thread is started here; the serving policy asks only the published snapshot.
-    rb_blitz::store::InstallStoreLibrary(runtime()->user_data_root());
-    // P9-10 of the RhythmVerse store plan (§9): warm Recently Added once per boot. Until this the
-    // first catalogue fetch started when the store *opened* (`store_fetch.cpp`'s front-menu serve),
-    // so a Recent press 1-2 s later asked for a page the site had not answered yet and was handed
-    // the **empty** page, which the retail DTA turns back into the front menu - "Recent does
-    // nothing" (measured 2026-10-22 in two consecutive boots: `dlc_store/europe/eng/recent/` served
-    // as 46 bytes 1.1 s / 1.7 s after the front menu, page 1 landing 1.0 s / 1.9 s *after* the
-    // press). Asked here, before the guest exists, page 1 is held before the title can even draw
-    // its menu. It is the same worker and the same budget (`store_catalogue_pages`), and nothing is
-    // drawn: the caption strip only speaks within its surface window, which starts when the store
-    // is served a record. With the master off this is a no-op - the store makes no request at all
-    // then (plan §1.6, and the acceptance Control leg pins that silence).
+    rb_blitz::store::InstallStoreLibrary(UserRoot());
     rb_blitz::store::RequestCatalogueRefresh("the boot asked");
     graphics_loading_payload_ready_ =
         rb_blitz::settings::InstallMenuPayload(
-            runtime(), settings_restart_boot_, [this] { PumpStartupWindow(); });
-    // The typed settings channel (P1): its two guest hooks are installed at link time, so this
-    // only reads their flags once on this host thread and logs what they are set to. A guest
-    // thread must not touch the cvar registry, which is why the read happens here.
+            &title, settings_restart_boot_, [this] { PumpStartupWindow(); });
+    if (!graphics_loading_payload_ready_)
+      return rex::Err(rex::ErrorCategory::kValidation, "the required startup menu payload could not be installed");
     rb_blitz::settings::bridge::Configure();
     log_stage("menu_services_and_payload");
-    CreateRegularDialogs(imgui_drawer());
-  }
+    CreateRegularDialogs();
 
-  // Config-file hygiene. A key in rb_blitz.toml (or on the command line) that matches no
-  // cvar is deferred at load time, because the cvar may register later - the GPU plugin's
-  // do - and is only reported if something finalizes the registry. This is the last hook
-  // before the guest thread is created and every cvar this build has is registered by now,
-  // so finalizing here turns a misspelled key from a silent no-op into a log warning.
-  //
-  // FinalizeInit is the SDK's own end-of-initialization point: it also stops any further
-  // change to kInitOnly flags, which is correct here - those are device and logging
-  // selections that the config, environment and command line have already fixed.
-  void OnPreLaunchModule() override {
     const auto started = std::chrono::steady_clock::now();
     REXLOG_INFO("boot_timing: pre_launch begin");
     rb_blitz::assets::InstallP1TextureOverride();
-    // P11a: the last read-back before the guest thread exists. A cvar this boot wrote can have been
-    // outranked (an explicit source) or overwritten by the game's own rb_blitz.toml, and a row the
-    // player cannot change has to say so rather than save a value that never takes effect.
-    rex::cvar::FinalizeInit();
-    if (rb_blitz::platform::InstallCrashDiagnostics(runtime()->cache_root()))
+
+    if (rb_blitz::platform::InstallCrashDiagnostics(CacheRoot()))
       REXLOG_INFO("crash_diagnostics: pid={} fatal native exceptions write records to {}",
                   rb_blitz::platform::ThisProcessId(),
-                  (runtime()->cache_root() / "crash-dumps").string());
+                  (CacheRoot() / "crash-dumps").string());
     else
       REXLOG_WARN("crash_diagnostics: could not install native crash capture");
     rb_blitz::loading::ConfigureLoadTrace();
-    rb_blitz::loading::ConfigureCrashRecovery(runtime(), settings_restart_boot_);
-    rb_blitz::graphics::ConfigureLoading(runtime());
+    rb_blitz::loading::ConfigureCrashRecovery(CacheRoot(), settings_restart_boot_);
+    rb_blitz::graphics::ConfigureLoading(&title);
     coverage_recorder_ = rb_blitz::graphics::StartCoverage(
-        rex::filesystem::GetExecutablePath(),runtime()->cache_root(),runtime()->user_data_root());
+        rex::platform::GetExecutablePath(),CacheRoot(),UserRoot());
     rb_blitz::diag::shader_trace::LogConfiguration();
     if (!diagnostics_log_file_.empty() &&
-        !rb_blitz::diag::WriteSessionInfo(diagnostics_root_, REXGLUE_BUILD_STAMP,
-            RBBLITZ_TOOLCHAIN_STAMP, rex::filesystem::GetExecutablePath()))
+        !rb_blitz::diag::WriteSessionInfo(diagnostics_root_, rex::GetBuildStamp(),
+            RBBLITZ_TOOLCHAIN_STAMP, rex::platform::GetExecutablePath()))
       REXLOG_WARN("diagnostics: could not write session build identity");
     REXLOG_INFO("boot_timing: guest_launch_ready elapsed_ms={}",
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - started).count());
     rb_blitz::diag::boot_heartbeat::Start();
+
+    return rex::Ok();
   }
 
-  bool OnWindowCloseRequested() override {
-    if (display_preview_ && display_preview_->active()) {
-      std::string error;
-      if (!display_preview_->Revert(&error))
-        REXLOG_WARN("settings_display: close could not revert preview: {}", error);
-    }
-    rb_blitz::diag::boot_heartbeat::Finish("window close");
+  void OnTitleStopping(rex::kernel::TitleRuntime&) override {
+    rb_blitz::content_progress::Close();
+    rb_blitz::store::ClosePathProbe();
+    CloseDisplayTrial();
+    RevertDisplayPreview();
+    rb_blitz::diag::boot_heartbeat::Finish("title stopping");
     rb_blitz::loading::EndCrashRecoveryAttempt();
     rb_blitz::shell_music::CloseQueuedPool();
+    rb_blitz::shell_music::DrainQueuedPool();
+    rb_blitz::dlc::DrainRefreshForRestart();
     rb_blitz::graphics::CloseLoading();
-    rex::graphics::compile_trace::Snapshot("window_close");
+    coverage_recorder_.reset();
+    rb_blitz::input::InvalidateGameplayInput();
+    ClearRegularDialogs();
+    display_preview_.reset();
     if (settings_boot_) settings_boot_->Closing();
-    return true;
+    rex::diagnostics::compile_trace::Snapshot("title_stopping");
   }
 
-  // Bulk work belongs to the post-A content boundary, including when an SDK
-  // diagnostic requests asynchronous startup. Pre-A draws bootstrap on demand.
-  bool DeferShaderStoragePreparation() const override { return true; }
-  bool CanLaunchModule() const override { return graphics_loading_payload_ready_; }
-  void OnGuestThreadExit(rex::system::XThread*) override {
-    // EXIT GAME uses SDK destruction instead of OnClosing's hard exit. That
-    // cleanup can stall after audio stops (issues 1.zip, 2026-11-11). Bound the
-    // entire host-only tail, including the work below, without delaying a clean
-    // exit or touching saves while the guest is still running.
+  void OnTitleExit(rex::kernel::TitleExitReason) override {
     if (!rb_blitz::platform::ArmExitDeadline()) std::_Exit(0);
     REXLOG_INFO("shutdown: guest exited; host cleanup has a 2000 ms process-exit deadline");
-    rb_blitz::diag::boot_heartbeat::Finish("guest thread exit");
-    rb_blitz::shell_music::CloseQueuedPool();
-    rb_blitz::graphics::CloseLoading();
+    RequestShutdown();
   }
 
-  // Logging is up from here, which is why the profile application made in OnConfigurePaths is
-  // reported now and not there: what Controller Settings' file contributed (and which of its rows this
-  // build refused) is exactly the evidence a "my Controller Settings setting did not apply" report needs. The
-  // settings store's own boot lines follow it, for the same reason.
-  void OnPostInitLogging() override {
-    rb_blitz::profile::LogProfileApplyReport(profile_apply_);
-    if (settings_boot_) {
-      settings_boot_->LogConfigured();
+  void OnShutdown() override {
+    CloseDisplayTrial();
+#if defined(RB_BLITZ_IOS)
+    if (ios_event_watch_) {
+      SDL_RemoveEventWatch(&WatchIOSActivation, this);
+      ios_event_watch_ = false;
     }
-  }
-
-  void OnConfigureLogging(rex::LogConfig& config) override {
-#if defined(RB_BLITZ_IOS)
-    // Keep emitted lines on disk even if iOS terminates a suspended session.
-    config.flush_level = spdlog::level::trace;
 #endif
-    // Explicit logging paths remain available for support runs and automation.
-    if (!REXCVAR_GET(log_file).empty()) return;
-#if !defined(RB_BLITZ_IOS)
-    const auto executable = rex::filesystem::GetExecutablePath();
-    if (rb_blitz::graphics::IsDevelopmentBuild(executable)) return;
-#endif
-    diagnostics_root_ = user_data_root();
+    rb_blitz::content_progress::Close();
+    rb_blitz::store::ClosePathProbe();
+    rb_blitz::shell_music::DrainQueuedPool();
+    rb_blitz::dlc::DrainRefreshForRestart();
+    ClearRegularDialogs();
+    startup_dialogs_.clear();
+    boot_loading_icon_.reset();
+    gameplay_presentation_.reset();
+    touch_controls_.reset();
+    ui_listener_.Reset();
+    notification_policy_.Reset();
+    if (on_init_complete_) GetUI().GetStyle().achievements.toggle_override = {};
+    input_filter_.Reset();
+    rb_blitz::input::ConfigureTitleInput(nullptr);
+    rb_blitz::assets::ResetTextureOverrides();
+    rb_blitz::ui::notifications::SharedQueue().Clear();
+    coverage_recorder_.reset();
+    display_preview_.reset();
+    settings_boot_.reset();
+    if (on_init_complete_) REXLOG_INFO("Title shutdown completed");
+  }
+
+ private:
+  void OnUIEvent(const rex::ui::UIEvent& event) override {
+    if (event.GetType() == rex::ui::UIEvent::Type::kFocus ||
+        event.GetType() == rex::ui::UIEvent::Type::kClosing) display_hotkey_.Reset();
+    if (event.GetType() == rex::ui::UIEvent::Type::kClosing) {
+      CloseDisplayTrial();
+      RevertDisplayPreview();
+      rb_blitz::diag::boot_heartbeat::Finish("window close");
+    }
 #if defined(RB_BLITZ_IOS)
-    diagnostics_root_ = ios_documents_root_;
+    if (event.GetType() == rex::ui::UIEvent::Type::kFocus) {
+      auto native = GetUI().GetNativeWindow();
+      if (native && native->sdl)
+        SetIOSActive((SDL_GetWindowFlags(static_cast<SDL_Window*>(native->sdl)) &
+                      SDL_WINDOW_INPUT_FOCUS) != 0);
+    }
 #endif
-    const auto path = rb_blitz::diag::PrepareSessionLog(diagnostics_root_);
-    if (path.empty()) return;
-    diagnostics_log_file_ = path.string();
-    config.log_file = diagnostics_log_file_.c_str();
-    config.max_file_size_bytes = 2 * 1024 * 1024;
-    config.max_files = 1;
   }
-
-  // The help captions' typeface (owner request, 2026-10-14). The SDK registers its own font
-  // (ProggyTiny at 10 px) and then calls this; here a system sans joins the atlas for the caption
-  // overlay, which is player-facing text rather than a debug readout. This is the only moment an
-  // atlas may still be added to, which is why the load lives here and not in the overlay.
-  void OnConfigureFonts(ImFontAtlas* atlas) override {
-    rb_blitz::ui::help::ConfigureCaptionFont(atlas);
-    rb_blitz::ui::ConfigureKeyboardFonts(atlas);
+  void OnInputEvent(rex::InputEvent& event) override {
+    const auto action = display_hotkey_.Handle(event);
+    if (action == rb_blitz::settings::DisplayHotkey::Action::kNone) return;
+    if (action == rb_blitz::settings::DisplayHotkey::Action::kTrial) {
+      if (!display_trial_) display_trial_ =
+          std::make_unique<rb_blitz::settings::DisplayTrial>(GetUI());
+      std::string error;
+      if (!display_trial_->Cycle(&error)) REXLOG_WARN("settings_display: {}", error);
+      return;
+    }
+    const auto previous = rb_blitz::settings::RuntimeDisplayMode(GetUI());
+    if (previous.empty()) {
+      REXLOG_WARN("settings_display: current display mode is unavailable");
+      return;
+    }
+    std::string error;
+    if (!rb_blitz::settings::ApplyRuntimeDisplay(
+            GetUI(), previous == "windowed" ? "borderless" : "windowed", &error))
+      REXLOG_WARN("settings_display: Alt+Enter failed: {}", error);
   }
-
-  // The SDK's compact keyboard dialog is a debug-style prompt by default.
-  // Restyle that same modal for both library and RhythmVerse song searches,
-  // and share its presentation with the existing achievement unlock toast.
-  void OnConfigureStyle(ImGuiStyle&, rex::ui::Style& style) override {
-    rb_blitz::ui::ConfigureKeyboardTheme(style, [this] {
-      return window() ? window()->GetNativeWindowHandle() : nullptr;
-    });
-  }
-
-  // Diagnostics. The probe overlay is an ordinary SDK dialog: its constructor
-  // registers it with the drawer and its destructor unregisters it, so this only
-  // has to own it for as long as the app lives. Whether it draws is the
-  // `probe_overlay` cvar's decision, re-read every frame, which is what makes the
-  // toggle live; the cvar off draws nothing at all.
-  //
-  // The one thing the dialog cannot reach is the window (it lives here), so it is
-  // handed over as a callback rather than a pointer - the same lazily-called shape
-  // as the menu cursor's window lookup.
-  void OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) override {
-    gameplay_presentation_ = rb_blitz::ui::CreateGameplayPresentation(drawer, [this] {
-      auto* graphics = runtime() ? runtime()->graphics_system() : nullptr;
-      return graphics ? graphics->presenter() : nullptr;
-    }, [this] {
-      // Visual preview only: use the real notification without unlocking or
-      // changing any achievement state.
-      if (rb_blitz::input::touch::PreviewEnabled()) {
-        const auto entries = achievements().ListAchievements();
-        if (!entries.empty()) achievements().ShowAchievementNotification(entries.front().id);
-      }
-    });
-    touch_controls_ = rb_blitz::input::touch::CreateControls(drawer, [this] { return window(); });
-    boot_loading_icon_ = std::make_unique<rb_blitz::ui::BootLoadingIcon>(
-        drawer, [this] {
-          auto* graphics = runtime() ? runtime()->graphics_system() : nullptr;
-          auto* presenter = graphics ? graphics->presenter() : nullptr;
-          return presenter ? presenter->guest_output_refresh_sequence() : 0;
-        }, [] { return rb_blitz::diag::shader_trace::NativeStartupPanelReady(); },
-        [] { return rb_blitz::diag::shader_trace::NativeSplashReady(); },
-        [] { return rb_blitz::hooks::startup_splasher::NativeLogoLoadStarted(); });
-    if (boot_icon_art_loaded_)
-      boot_loading_icon_->SetFrames(std::move(boot_loading_frames_));
-  }
-
 #if defined(RB_BLITZ_IOS)
-  void OnApplicationActiveChanged(bool active) override {
+  void SetIOSActive(bool active) {
+    auto* activity = REX_INTERFACE(rex::ui::IApplicationActivity);
+    const auto changed = activity
+        ? activity->SetActive(active)
+        : rex::Err(rex::ErrorCategory::kModule, "application activity service is unavailable");
+    if (!changed) {
+      REXLOG_ERROR("ios_lifecycle: activation transition failed: {}", changed.error().message);
+      RequestShutdown();
+      return;
+    }
     rb_blitz::platform::SetIOSApplicationActive(active);
     if (!active) rb_blitz::input::InvalidateGameplayInput();
     else rb_blitz::platform::LogIOSPresentationState();
   }
-#endif
-
-  bool WantsStartupPaint() const override { return boot_icon_art_loaded_; }
-
-  void OnShutdown() override {
-    // The SDK destroys its ImGui drawer immediately after this hook. Dialogs
-    // unregister from that drawer in their destructors, so release them now.
-    probe_overlay_.reset();
-    music_player_.reset();
-    help_overlay_.reset();
-    notification_overlay_.reset();
-    achievement_browser_.reset();
-    rb_blitz::ui::notifications::SharedQueue().Clear();
-    mouse_cursor_.reset();
-    gameplay_presentation_.reset();
-    touch_controls_.reset();
-    boot_loading_icon_.reset();
-  }
-
-  void CreateRegularDialogs(rex::ui::ImGuiDrawer* drawer) {
-    mouse_cursor_ = rb_blitz::input::CreateMouseMenuCursor(drawer, [this] { return window(); });
-
-    // The help captions (owner request, 2026-10-13): a subtitle at the bottom of the screen that
-    // describes the highlighted settings row. It is fed by the guest's own caption events (the
-    // generated DTA writes `rbbz-settings/help/<symbol>/-`, routed through the settings bridge)
-    // and by the retail-page observer (src/hooks/help_observer.cpp); both resolve against the
-    // tables in src/ui/settings_screen.cpp and src/ui/help_topics.h. Creating it registers the
-    // bridge's caption sink; whether it draws is the `settings_help_overlay` cvar's decision,
-    // re-read every frame, which is what makes the toggle live.
-    help_overlay_ = rb_blitz::ui::help::CreateOverlay(drawer);
-    notification_overlay_ = rb_blitz::ui::notifications::CreateOverlay(drawer);
-    achievement_browser_ = rb_blitz::ui::achievements::CreateOverlay(
-        drawer, immediate_drawer(), runtime(), &achievements());
-    music_player_ = rb_blitz::ui::music::CreatePlayer(drawer);
-
-    probe_overlay_ = rb_blitz::diag::CreateOverlayDialog(drawer, [this] {
-      rb_blitz::diag::WindowState state;
-      const rex::ui::Window* w = window();
-      if (w == nullptr) {
-        return state;
-      }
-      state.physical_width = w->GetActualPhysicalWidth();
-      state.physical_height = w->GetActualPhysicalHeight();
-      state.logical_width = w->GetActualLogicalWidth();
-      state.logical_height = w->GetActualLogicalHeight();
-      state.fullscreen = w->IsFullscreen();
-      // The window reports both sizes; the ratio is the only reason to want a
-      // scale, and a logical size of zero (window not yet realised) means one.
-      if (state.logical_width != 0) {
-        state.dpi_scale = static_cast<float>(state.physical_width) /
-                          static_cast<float>(state.logical_width);
-      }
-      return state;
-    });
-  }
-
- private:
-  void PumpStartupWindow() {
-    if (window()) window()->RequestPaint();
-    // The normal SDL loop starts only after the synchronous boot hooks return.
-    // Repaint the guest's startup window at bounded work checkpoints meanwhile.
-    static_cast<rex::ui::SDLWindowedAppContext&>(app_context()).PumpStartupPaint();
-  }
-
-  // Content licence state, the emulated console's answer to "does this profile
-  // own this title?". XamContentGetLicenseMask hands the guest the
-  // `license_mask` kernel cvar verbatim, and this is the XBLA build of Rock Band
-  // Blitz: it asks for that mask early in boot and takes the trial path whenever
-  // the mask is zero, which is the mode that does not keep scores. ReXGlue
-  // defaults the mask to zero, i.e. "a
-  // console that owns no licence", and no rb_blitz.toml is shipped - by design,
-  // see installer/tools/make_payload.ps1 - so an installed build boots the full
-  // game as a trial. Playing the user's own dump is not that situation, and the
-  // reference baseline boots with a licence enabled.
-  //
-  // Called after the config file, the REX_* environment and the command line
-  // have been applied, and only writes when none of them named a mask, so
-  // `license_mask = 0` in rb_blitz.toml or --license_mask=0 still selects the
-  // trial path - that is how a trial-only bug stays reproducible.
-  void ApplyContentLicense() {
-    if (rex::cvar::GetFlagSource("license_mask") != rex::cvar::Source::kDefault) {
-      REXLOG_INFO("content licence: license_mask = {} (configured)",
-                  rex::cvar::GetFlagByName("license_mask"));
-      return;
+  static bool SDLCALL WatchIOSActivation(void* context, SDL_Event* event) {
+    auto& app = *static_cast<RbBlitzApp*>(context);
+    switch (event->type) {
+      case SDL_EVENT_WILL_ENTER_BACKGROUND:
+      case SDL_EVENT_DID_ENTER_BACKGROUND:
+        app.SetIOSActive(false);
+        break;
+      case SDL_EVENT_DID_ENTER_FOREGROUND:
+        app.SetIOSActive(true);
+        break;
+      default: break;
     }
-
-    // The cvar's storage lives in rexruntime.dll, so the write goes through the
-    // declaration in <rex/system/flags.h> rather than the registry.
-    REXCVAR_SET(license_mask, 1);
-    REXLOG_INFO("content licence: license_mask = 1 (default; the title is treated as purchased)");
+    return true;
   }
+#endif
+  std::filesystem::path GameRoot() { return GetTitleRuntime().GetTitlePaths().game_root.Get(); }
+  std::filesystem::path UserRoot() { return REX_PATHS().user_root.Get(); }
+  std::filesystem::path CacheRoot() { return REX_PATHS().cache_root.Get(); }
+  struct StartupCancelled {};
+  void PumpStartupWindow() { if (!RunFrame()) throw StartupCancelled{}; }
+  void AttachDialog(std::unique_ptr<rex::ui::IDialog>& dialog,
+                    std::vector<rex::ScopeGuard>& guards) {
+    if (dialog) guards.push_back(GetUI().AddDialog(*dialog));
+  }
+  bool HasNonblankGuestFrame() {
+    auto* presentation = REX_INTERFACE(rex::gpu::IGraphicsPresentation);
+    rex::gpu::CaptureImage frame;
+    if (!presentation || !presentation->CaptureGuestOutput(frame) || !frame.width || !frame.height)
+      return false;
+    if (frame.stride < size_t(frame.width) * 4 ||
+        frame.height > frame.data.size() / frame.stride) return false;
+    for (size_t y = 0; y < frame.height; ++y)
+      for (size_t x = 0; x < frame.width; ++x) {
+        const auto i = y * frame.stride + x * 4;
+        if (frame.data[i] || frame.data[i + 1] || frame.data[i + 2]) return true;
+      }
+    return false;
+  }
+  void ApplyContentLicense() {
+    const auto license = rb_blitz::settings::InspectRuntimeSetting("license_mask");
+    if (license.staged_source == rex::SettingLayer::kDefault)
+      rb_blitz::settings::WriteRuntimeSetting("license_mask", "1", rex::SettingLayer::kTitle);
+    REXLOG_INFO("content licence: license_mask = {}",
+        rb_blitz::settings::InspectRuntimeSetting("license_mask").active_value);
+  }
+  rex::Result<void> NormalizeInputDrivers() {
+    auto& drivers = GetInput().GetSettings().drivers;
+    std::string normalized;
+    std::string value = drivers.Get();
+    for (size_t first = 0; first <= value.size();) {
+      size_t end = value.find(',', first);
+      if (end == std::string::npos) end = value.size();
+      auto token = value.substr(first, end - first);
+      const auto begin = token.find_first_not_of(" \t");
+      if (begin != std::string::npos) {
+        token = token.substr(begin, token.find_last_not_of(" \t") - begin + 1);
+        if (token == "sdl") token = "sdl3";
+        if (!normalized.empty()) normalized += ',';
+        normalized += token;
+      }
+      if (end == value.size()) break;
+      first = end + 1;
+    }
+    if (normalized != value) REX_TRY_VOID(drivers.SetText(drivers.GetLayer(), normalized));
+    return rex::Ok();
+  }
+  rex::Result<void> EnforceWritablePaths() {
+    const auto game = GameRoot();
+    const auto native = rb_blitz::settings::NativeUserRootsFromEnvironment();
+    const auto safe_user = native.data.empty()
+        ? rex::platform::GetUserFolder() / "Rock Band Blitz" : native.data;
+    auto redirect = [&](auto& setting, const std::filesystem::path& fallback) -> rex::Result<void> {
+      if (!setting.Get().empty() && rb_blitz::fs::IsSameOrInside(setting.Get(), game)) {
+        REXLOG_WARN("paths: {} is inside the game root; using {}", setting.GetName(), fallback.string());
+        if (rb_blitz::fs::IsSameOrInside(fallback, game))
+          return rex::Err(rex::ErrorCategory::kConfig, "the writable root cannot be placed outside the game data");
+        REX_TRY_VOID(setting.SetText(rex::SettingLayer::kRuntime, fallback.string()));
+      }
+      return rex::Ok();
+    };
+    REX_TRY_VOID(redirect(REX_PATHS().user_root, safe_user));
+    REX_TRY_VOID(redirect(REX_PATHS().cache_root, native.cache.empty() ? safe_user / "cache" : native.cache));
+    REX_TRY_VOID(redirect(GetTitleRuntime().GetTitlePaths().update_root, safe_user / "updates"));
+    return rex::Ok();
+  }
+  static bool VulkanLoaderIsUsable() {
+    rex::platform::DynamicLibrary loader;
+#if defined(RB_BLITZ_IOS)
+    const auto frameworks = rex::platform::GetExecutableFolder() / "Frameworks";
+    if (!loader.Load(frameworks / "MoltenVK.framework" / "MoltenVK") &&
+        !loader.Load(frameworks / "libMoltenVK.dylib")) return false;
+#elif defined(_WIN32)
+    if (!loader.Load("vulkan-1.dll")) return false;
+#elif defined(__APPLE__)
+    if (!loader.Load("libvulkan.1.dylib")) return false;
+#else
+    if (!loader.Load("libvulkan.so.1")) return false;
+#endif
+    return loader.GetRawSymbol("vkGetInstanceProcAddr") != nullptr;
+  }
+  void CloseDisplayTrial() {
+    if (!display_trial_) return;
+    std::string error;
+    if (!display_trial_->Close(&error)) REXLOG_WARN("settings_display: {}", error);
+    display_trial_.reset();
+    display_hotkey_.Reset();
+  }
+  void RevertDisplayPreview() {
+    if (display_preview_ && display_preview_->active()) {
+      std::string error;
+      if (!display_preview_->Revert(&error)) REXLOG_WARN("settings_display: {}", error);
+    }
+  }
+  void ConfigureDisplayAndRestart();
+  void CreateRegularDialogs();
+  void ClearRegularDialogs() {
+    regular_dialogs_.clear();
+    probe_overlay_.reset(); mouse_cursor_.reset(); help_overlay_.reset();
+    notification_overlay_.reset(); achievement_browser_.reset(); music_player_.reset();
+  }
+  void LogBootIdentity() {
+    REXLOG_INFO("boot identity: {}", rex::GetBuildStamp());
 
-  // The build gate in CMakeLists.txt has already refused to recompile against a
-  // dump other than the one config/game_fingerprints.toml describes, but a
-  // Controller Settings can still point a built binary at a different game/ tree - a
-  // tree with a Rock Band Blitz Ultimate payload merged into it, for instance.
-  // Nothing here aborts: the point is that the log says which revision (if any)
-  // the running executable was actually booted against, so a bug report can be
-  // matched to it.
-  void LogBootIdentity() {    REXLOG_INFO("boot identity: {}", REXGLUE_BUILD_STAMP);
-
-    // Which compiler, CMake, Ninja, MSVC toolset, Windows SDK and SDK commit built
-    // this binary, with the frozen set named in the same line when it is one. It is
-    // the build's half of what the game data identity below is the runtime's half
-    // of: a log states the provenance of both sides before any other evidence in it
-    // is read (docs/guides/toolchain.md).
     REXLOG_INFO("toolchain: {}", RBBLITZ_TOOLCHAIN_STAMP);
 
     const std::filesystem::path entrypoint =
-        game_data_root() / rb_blitz::fingerprint::vanilla::kEntrypointPath;
+        GameRoot() / rb_blitz::fingerprint::vanilla::kEntrypointPath;
     std::error_code ec;
     std::uint64_t size = 0;
     const std::string digest = rb_blitz::util::HashFileHex(entrypoint, &size, ec);
@@ -980,58 +719,163 @@ class RbBlitzApp : public rex::ReXApp {
                 " docs/guides/ultimate-compat.md)",
                 rb_blitz::fingerprint::vanilla::kEntrypointSize,
                 rb_blitz::fingerprint::vanilla::kEntrypointSha256);
-  }
 
-  // Owned for the app's lifetime; it unregisters itself from the drawer when this
-  // is destroyed, which happens before ~ReXApp() tears the drawer down.
-  std::unique_ptr<rex::ui::ImGuiDialog> probe_overlay_;
-  std::unique_ptr<rb_blitz::ui::BootLoadingIcon> boot_loading_icon_;
-  rb_blitz::ui::boot_loading_art::BootLoadingFrames boot_loading_frames_;
-  bool boot_icon_art_loaded_ = false;
-  std::unique_ptr<rex::ui::ImGuiDialog> mouse_cursor_;
+  }
+  class NativeWindowHost final : public rex::ui::INativeWindowHost {
+    bool Attach(void* window, std::function<void(bool)> focus) override {
+      mode_.reset();
+      return rb_blitz::platform::window_host::Attach(window,
+          rb_blitz::settings::title::window_resizable.Get(), std::move(focus));
+    }
+    bool SetDisplayMode(rex::ui::NativeHostDisplayMode mode) override {
+      if (!rb_blitz::platform::window_host::SetDisplayMode(static_cast<int>(mode))) return false;
+      mode_ = mode;
+      return true;
+    }
+    void SetTitle(std::string_view value) override { rb_blitz::platform::window_host::SetTitle(value); }
+    std::optional<rex::ui::NativeHostDisplayMode> GetDisplayMode() const override { return mode_; }
+    std::optional<rex::ui::NativeHostDisplayMode> mode_;
+  };
+  rex::CLIArgList startup_args_;
+  std::unique_ptr<rb_blitz::settings::boot::SettingsBoot> settings_boot_;
+  rb_blitz::profile::ProfileApplyReport profile_apply_;
+  std::string selected_backend_;
+  bool settings_restart_boot_ = false;
+  bool on_init_complete_ = false;
   bool graphics_loading_payload_ready_ = false;
+  bool boot_icon_art_loaded_ = false;
+  rb_blitz::ui::boot_loading_art::BootLoadingFrames boot_loading_frames_;
+  std::unique_ptr<rb_blitz::ui::BootLoadingIcon> boot_loading_icon_;
+  std::unique_ptr<rex::ui::IDialog> probe_overlay_, mouse_cursor_, touch_controls_;
+  std::unique_ptr<rex::ui::IDialog> gameplay_presentation_, help_overlay_, notification_overlay_;
+  std::unique_ptr<rex::ui::IDialog> achievement_browser_, music_player_;
+  std::vector<rex::ScopeGuard> startup_dialogs_, regular_dialogs_;
+  rex::ScopeGuard input_filter_, ui_listener_, notification_policy_, native_host_registration_;
+  std::shared_ptr<NativeWindowHost> native_host_;
   std::unique_ptr<rb_blitz::graphics::CoverageRecorder> coverage_recorder_;
   std::string diagnostics_log_file_;
   std::filesystem::path diagnostics_root_;
 #if defined(RB_BLITZ_IOS)
   std::filesystem::path ios_documents_root_;
-  bool ios_presentation_state_logged_ = false;
+  bool ios_event_watch_ = false;
 #endif
-  std::unique_ptr<rex::ui::ImGuiDialog> touch_controls_;
-  std::unique_ptr<rex::ui::ImGuiDialog> gameplay_presentation_;
-  // The help captions' overlay (see OnCreateDialogs); destroying it also unregisters the settings
-  // bridge's caption sink, because the sink object lives beside the dialog.
-  std::unique_ptr<rex::ui::ImGuiDialog> help_overlay_;
-  std::unique_ptr<rex::ui::ImGuiDialog> notification_overlay_;
-  std::unique_ptr<rex::ui::ImGuiDialog> achievement_browser_;
-  std::unique_ptr<rex::ui::ImGuiDialog> music_player_;
-
-  // What Controller Settings' profile contributed at OnConfigurePaths, reported once logging exists.
-  rb_blitz::profile::ProfileApplyReport profile_apply_;
-
-  // P11a: the native settings store and its boot wiring (src/settings/boot.h). Created in
-  // OnConfigurePaths - it needs the executable folder, which only exists from there on - and owned
-  // for the process lifetime because the guest channel, the menu-rows seam and the restart
-  // handshake all reach the same store.
-  std::unique_ptr<rb_blitz::settings::boot::SettingsBoot> settings_boot_;
+  rb_blitz::settings::DisplayHotkey display_hotkey_;
+  std::unique_ptr<rb_blitz::settings::DisplayTrial> display_trial_;
   std::unique_ptr<rb_blitz::settings::DisplayPreviewTransaction> display_preview_;
   std::string display_preview_requested_mode_;
   uint64_t display_preview_present_sequence_ = 0;
-
-  // The backend this boot really loaded, when it named one (empty when the SDK chose). Reported by
-  // the settings store as the active renderer.
-  std::string selected_backend_;
-  bool settings_restart_boot_ = false;
-  class NativeWindowHost final : public rex::ui::WindowSDL::NativeHost {
-    bool Attach(void* window, bool resizable, std::function<void(bool)> focus_changed) override {
-      return rb_blitz::platform::window_host::Attach(window, resizable, std::move(focus_changed));
-    }
-    bool SetDisplayMode(rex::ui::Window::DisplayMode mode) override {
-      return rb_blitz::platform::window_host::SetDisplayMode(static_cast<int>(mode));
-    }
-    void SetTitle(std::string_view title) override { rb_blitz::platform::window_host::SetTitle(title); }
-  } native_window_host_;
   std::unique_ptr<rb_blitz::platform::ChildLauncher> restart_launcher_ =
       rb_blitz::platform::CreateChildLauncher();
   rb_blitz::platform::RestartCoordinator restart_coordinator_{restart_launcher_.get()};
 };
+
+inline void RbBlitzApp::CreateRegularDialogs() {
+  ClearRegularDialogs();
+  mouse_cursor_ = rb_blitz::input::CreateMouseMenuCursor(GetUI());
+  help_overlay_ = rb_blitz::ui::help::CreateOverlay();
+  notification_overlay_ = rb_blitz::ui::notifications::CreateOverlay(GetUI());
+  achievement_browser_ = rb_blitz::ui::achievements::CreateOverlay(GetUI(), [this] {
+    auto& title = GetTitleRuntime();
+    return title.IsLoaded() ? &title.GetAchievementManager() : nullptr;
+  });
+  music_player_ = rb_blitz::ui::music::CreatePlayer(GetUI());
+  probe_overlay_ = rb_blitz::diag::CreateOverlayDialog([this] {
+    rb_blitz::diag::WindowState state;
+    auto native = GetUI().GetNativeWindow();
+    if (!native || !native->sdl) return state;
+    auto* window = static_cast<SDL_Window*>(native->sdl);
+    int pw = 0, ph = 0, lw = 0, lh = 0;
+    SDL_GetWindowSizeInPixels(window, &pw, &ph);
+    SDL_GetWindowSize(window, &lw, &lh);
+    state.physical_width = pw; state.physical_height = ph;
+    state.logical_width = lw; state.logical_height = lh;
+    state.fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+    if (lw) state.dpi_scale = float(pw) / float(lw);
+    return state;
+  });
+  for (auto* dialog : {&mouse_cursor_, &help_overlay_, &notification_overlay_,
+                       &achievement_browser_, &music_player_, &probe_overlay_})
+    AttachDialog(*dialog, regular_dialogs_);
+}
+
+inline void RbBlitzApp::ConfigureDisplayAndRestart() {
+  auto* sink = settings_boot_ ? settings_boot_->sink() : nullptr;
+  if (!sink) return;
+  if (GetUI().HasWindow() && !settings_boot_->paths().settings_file.empty()) {
+    display_preview_ = std::make_unique<rb_blitz::settings::DisplayPreviewTransaction>(
+        GetUI(), settings_boot_->paths().settings_file);
+    rb_blitz::settings::ServiceSink::DisplayPreviewHooks hooks;
+    hooks.begin = [this](std::string_view requested, std::string* error) {
+      auto* presentation = REX_INTERFACE(rex::gpu::IGraphicsPresentation);
+      if (!display_preview_ || !presentation) {
+        if (error) *error = "display presentation is unavailable";
+        return false;
+      }
+      const auto previous = rb_blitz::settings::RuntimeDisplayMode(GetUI());
+      if (previous.empty()) {
+        if (error) *error = "the native display mode is unavailable";
+        return false;
+      }
+      if (!display_preview_->Begin(previous, requested, error)) return false;
+      display_preview_requested_mode_ = requested;
+      display_preview_present_sequence_ = presentation->GetPresentationState().successful_ui_present;
+      return true;
+    };
+    hooks.keep = [this](const rb_blitz::settings::DisplayPreviewTransaction::Persist& persist,
+                        std::string* error) {
+      auto* presentation = REX_INTERFACE(rex::gpu::IGraphicsPresentation);
+      if (!display_preview_ || !presentation || !display_preview_->active() ||
+          presentation->GetPresentationState().successful_ui_present <= display_preview_present_sequence_) {
+        if (error) *error = "the new window mode has not presented yet";
+        return false;
+      }
+      if (rb_blitz::settings::RuntimeDisplayMode(GetUI()) != display_preview_requested_mode_) {
+        if (error) *error = "the native window is no longer in the previewed mode";
+        return false;
+      }
+      return display_preview_->Keep(true, persist, error);
+    };
+    hooks.revert = [this](std::string* error) {
+      const bool reverted = display_preview_ && display_preview_->Revert(error);
+      if (reverted) display_preview_requested_mode_.clear();
+      return reverted;
+    };
+    hooks.active = [this] { return display_preview_ && display_preview_->active(); };
+    hooks.applied = [this](const rb_blitz::settings::Value& value, uint64_t revision) {
+      using namespace rb_blitz::settings;
+      if (!settings_boot_) return;
+      const std::map<SettingId, Value> changed = {{SettingId::kDisplay, value}};
+      HotApplyPlan plan; plan.live = changed;
+      const auto generation = settings_boot_->NoteCommittedRows(changed, plan, revision);
+      settings_boot_->NoteAppliedRows(changed,
+          {{SettingId::kDisplay, HotApplyStatus::kApplied, {}}}, generation);
+    };
+    sink->SetDisplayPreviewHooks(std::move(hooks));
+  }
+  sink->SetRestartHandler([this](uint64_t saved, uint64_t current, uint64_t id,
+                                const std::string& target, std::string* error) {
+    rb_blitz::platform::LaunchContext context;
+    context.executable = rex::platform::GetExecutablePath();
+    context.game_data_root = GameRoot();
+    context.working_directory = std::filesystem::current_path();
+    context.profile_file = settings_boot_->paths().legacy_profile;
+    context.target = target;
+    context.developer_arguments = rb_blitz::platform::CommandLineArguments();
+    if (!context.developer_arguments.empty()) context.developer_arguments.erase(context.developer_arguments.begin());
+    rb_blitz::dlc::DrainRefreshForRestart();
+    bool ready = false;
+    if (!GetUI().RunSynchronous([&] {
+      restart_coordinator_.ResetAfterFailure();
+      const auto outcome = restart_coordinator_.Request(saved, current, id, context);
+      if (error) *error = outcome.error;
+      ready = restart_coordinator_.CloseRequested();
+      if (ready && !rb_blitz::platform::window_host::ExpectRestart(restart_launcher_->ChildPid())) {
+        ready = false;
+        if (error) *error = "the native window could not accept the replacement game";
+      }
+      if (ready) REXLOG_INFO("settings_restart: replacement game is waiting; native window stays open");
+    }) || !ready) return false;
+    GetUI().PostTask([this] { RequestShutdown(); });
+    return true;
+  });
+}

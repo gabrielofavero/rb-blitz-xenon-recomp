@@ -4,9 +4,11 @@
 #include <condition_variable>
 #include <mutex>
 
-#include <rex/cvar.h>
-#include <rex/ui/window.h>
-#include <rex/ui/windowed_app_context.h>
+#include "settings/runtime_settings.h"
+#include <rex/ui/ui_system.h>
+#include <rex/ui/native_window_host.h>
+#include <SDL3/SDL.h>
+#include "settings/runtime_values.h"
 
 #include "settings/store.h"
 
@@ -33,53 +35,155 @@ bool WriteMarker(const std::filesystem::path& settings_file, std::string_view pr
 }
 }  // namespace
 
-bool ApplyRuntimeDisplay(rex::ui::WindowedAppContext& context, rex::ui::Window& window,
-                         std::string_view token, std::string* error) {
-  rex::ui::Window::DisplayMode mode;
-  if (token == "windowed") {
-    mode = rex::ui::Window::DisplayMode::kWindowed;
-  } else if (token == "borderless") {
-    mode = rex::ui::Window::DisplayMode::kBorderless;
-  } else if (token == "fullscreen") {
-    mode = rex::ui::Window::DisplayMode::kFullscreen;
-  } else {
-    if (error) *error = "unknown display mode";
+namespace {
+std::string HostDisplayMode(const rex::ui::INativeWindowHost& host) {
+  const auto mode = host.GetDisplayMode();
+  if (!mode) return {};
+  switch (*mode) {
+    case rex::ui::NativeHostDisplayMode::kWindowed: return "windowed";
+    case rex::ui::NativeHostDisplayMode::kBorderless: return "borderless";
+    case rex::ui::NativeHostDisplayMode::kFullscreen: return "fullscreen";
+  }
+  return {};
+}
+rex::ui::NativeHostDisplayMode HostMode(std::string_view token) {
+  if (token == "fullscreen") return rex::ui::NativeHostDisplayMode::kFullscreen;
+  if (token == "borderless") return rex::ui::NativeHostDisplayMode::kBorderless;
+  return rex::ui::NativeHostDisplayMode::kWindowed;
+}
+std::string NativeDisplayMode(SDL_Window* window) {
+  if (!(SDL_GetWindowFlags(window)&SDL_WINDOW_FULLSCREEN)) return "windowed";
+  return SDL_GetWindowFullscreenMode(window) ? "fullscreen" : "borderless";
+}
+}
+
+std::string RuntimeDisplayMode(rex::ui::IUISystem& context) {
+  std::string mode;
+  if (!context.RunSynchronous([&] {
+    if (const auto host = rex::ui::GetNativeWindowHost()) {
+      mode = HostDisplayMode(*host);
+      return;
+    }
+    const auto native=context.GetNativeWindow();
+    if (native && native->sdl) mode=NativeDisplayMode(static_cast<SDL_Window*>(native->sdl));
+  })) return {};
+  return mode;
+}
+
+namespace {
+bool ApplyDisplay(rex::ui::IUISystem& context, std::string_view token,
+                  bool write_settings, std::string* error) {
+  if (!ValidMode(token)) {
+    if (error) *error="unknown display mode";
     return false;
   }
-  bool applied = false;
+  bool applied=false;
   std::string failure;
-  const bool dispatched = context.CallInUIThreadSynchronous([&] {
-    const std::string old_fullscreen = rex::cvar::GetFlagByName("fullscreen");
-    const std::string old_borderless = rex::cvar::GetFlagByName("borderless");
-    if (old_fullscreen.empty() || old_borderless.empty()) {
-      failure = "display cvars are unavailable";
+  const bool dispatched=context.RunSynchronous([&] {
+    const auto native=context.GetNativeWindow();
+    if (!native || !native->sdl) { failure="native display window is unavailable"; return; }
+    auto* window=static_cast<SDL_Window*>(native->sdl);
+    const bool fullscreen=token!="windowed";
+    const bool exclusive=token=="fullscreen";
+    const char* fullscreen_text=fullscreen ? "true" : "false";
+    const char* exclusive_text=exclusive ? "true" : "false";
+    if (write_settings) for (const auto* name : {"ui.fullscreen","ui.fullscreen_exclusive"}) {
+      auto setting=REX_SETTINGS().Find(name);
+      if (!setting || (*setting)->IsFrozen() || (*setting)->GetLayer()==rex::SettingLayer::kLock) {
+        failure="display settings cannot change";
+        return;
+      }
+    }
+    const auto old_fullscreen=InspectRuntimeSetting("ui.fullscreen").active_value;
+    const auto old_exclusive=InspectRuntimeSetting("ui.fullscreen_exclusive").active_value;
+    // An embedded rendering child never owns the top-level fullscreen state.
+    // Require an acknowledged native mode before changing the settings snapshot.
+    if (const auto host = rex::ui::GetNativeWindowHost()) {
+      const auto old_mode = HostDisplayMode(*host);
+      if (!ValidMode(old_mode)) { failure = "native host display state is unavailable"; return; }
+      const auto restore_host = [&] {
+        return host->SetDisplayMode(HostMode(old_mode)) && HostDisplayMode(*host) == old_mode;
+      };
+      if (!host->SetDisplayMode(HostMode(token)) || HostDisplayMode(*host) != token) {
+        failure = restore_host() ? "native host refused the mode; the window was restored"
+                                 : "native host refused the mode and rollback";
+        return;
+      }
+      const bool wrote_fullscreen = !write_settings || WriteRuntimeSetting("ui.fullscreen", fullscreen_text,
+          rex::SettingLayer::kRuntime).accepted();
+      const bool wrote_exclusive = !write_settings || WriteRuntimeSetting("ui.fullscreen_exclusive", exclusive_text,
+          rex::SettingLayer::kRuntime).accepted();
+      if (write_settings && (!wrote_fullscreen || !wrote_exclusive ||
+          InspectRuntimeSetting("ui.fullscreen").active_value != fullscreen_text ||
+          InspectRuntimeSetting("ui.fullscreen_exclusive").active_value != exclusive_text)) {
+        WriteRuntimeSetting("ui.fullscreen", old_fullscreen, rex::SettingLayer::kRuntime);
+        WriteRuntimeSetting("ui.fullscreen_exclusive", old_exclusive, rex::SettingLayer::kRuntime);
+        failure = restore_host() ? "display settings refused the mode; the window was restored"
+                                 : "display settings refused the mode and native rollback";
+        return;
+      }
+      SDL_Event exposed{};
+      exposed.type = SDL_EVENT_WINDOW_EXPOSED;
+      exposed.window.windowID = SDL_GetWindowID(window);
+      SDL_PushEvent(&exposed);
+      applied = true;
       return;
     }
-    const auto old_mode = window.GetDisplayMode();
-    if (!window.SetDisplayMode(mode)) {
-      failure = "SDL refused the display transition";
+    const std::string old_mode=NativeDisplayMode(window);
+    const SDL_DisplayMode* old_selected=SDL_GetWindowFullscreenMode(window);
+    const SDL_DisplayMode previous=old_selected ? *old_selected : SDL_DisplayMode{};
+    SDL_DisplayMode selected{};
+    if (exclusive) {
+      const auto requested=context.GetVideoMode();
+      if (!SDL_GetClosestFullscreenDisplayMode(SDL_GetDisplayForWindow(window),
+          int(requested.width),int(requested.height),requested.refresh_rate,true,&selected)) {
+        failure="the display has no suitable exclusive mode";
+        return;
+      }
+    }
+    const auto restore_native=[&] {
+      const bool selected=SDL_SetWindowFullscreenMode(window,old_selected ? &previous : nullptr);
+      const bool toggled=SDL_SetWindowFullscreen(window,old_mode!="windowed");
+      const bool synced=SDL_SyncWindow(window);
+      return selected && toggled && synced && NativeDisplayMode(window)==old_mode;
+    };
+    if (!SDL_SetWindowFullscreenMode(window,exclusive ? &selected : nullptr) ||
+        !SDL_SetWindowFullscreen(window,fullscreen) || !SDL_SyncWindow(window) ||
+        NativeDisplayMode(window)!=token) {
+      failure=restore_native() ? "SDL refused the display transition; the window was restored"
+                               : "SDL refused the display transition and native rollback";
       return;
     }
-    const char* fullscreen = mode == rex::ui::Window::DisplayMode::kFullscreen ? "true" : "false";
-    const char* borderless = mode == rex::ui::Window::DisplayMode::kBorderless ? "true" : "false";
-    const bool wrote_fullscreen = rex::cvar::SetFlagByName("fullscreen", fullscreen);
-    const bool wrote_borderless = rex::cvar::SetFlagByName("borderless", borderless);
-    if (!wrote_fullscreen || !wrote_borderless ||
-        rex::cvar::GetFlagByName("fullscreen") != fullscreen ||
-        rex::cvar::GetFlagByName("borderless") != borderless) {
-      rex::cvar::SetFlagByName("fullscreen", old_fullscreen);
-      rex::cvar::SetFlagByName("borderless", old_borderless);
-      const bool restored = window.SetDisplayMode(old_mode);
-      failure = restored ? "display cvars refused the mode; native window was restored"
-                         : "display cvars refused the mode; native rollback also failed";
+    const bool wrote_fullscreen=!write_settings || WriteRuntimeSetting("ui.fullscreen",fullscreen_text,rex::SettingLayer::kRuntime).accepted();
+    const bool wrote_exclusive=!write_settings || WriteRuntimeSetting("ui.fullscreen_exclusive",exclusive_text,rex::SettingLayer::kRuntime).accepted();
+    if (write_settings && (!wrote_fullscreen || !wrote_exclusive ||
+        InspectRuntimeSetting("ui.fullscreen").active_value!=fullscreen_text ||
+        InspectRuntimeSetting("ui.fullscreen_exclusive").active_value!=exclusive_text)) {
+      WriteRuntimeSetting("ui.fullscreen",old_fullscreen,rex::SettingLayer::kRuntime);
+      WriteRuntimeSetting("ui.fullscreen_exclusive",old_exclusive,rex::SettingLayer::kRuntime);
+      failure=restore_native() ? "display settings refused the mode; the window was restored"
+                               : "display settings refused the mode and native rollback";
       return;
     }
-    window.RequestPaint();
-    applied = true;
+    SDL_Event exposed{};
+    exposed.type=SDL_EVENT_WINDOW_EXPOSED;
+    exposed.window.windowID=SDL_GetWindowID(window);
+    SDL_PushEvent(&exposed);
+    applied=true;
   });
-  if (!dispatched) failure = "UI thread is no longer available";
-  if (!applied && error) *error = failure;
+  if (!dispatched) failure="UI thread is no longer available";
+  if (!applied && error) *error=failure;
   return applied;
+}
+
+ }  // namespace
+
+bool ApplyRuntimeDisplay(rex::ui::IUISystem& context, std::string_view token, std::string* error) {
+  return ApplyDisplay(context, token, true, error);
+}
+
+bool ApplyTransientDisplay(rex::ui::IUISystem& context, std::string_view token, std::string* error) {
+  return ApplyDisplay(context, token, false, error);
 }
 
 bool ReadUnconfirmedDisplayPreview(const std::filesystem::path& settings_file,
@@ -126,12 +230,11 @@ bool ClearUnconfirmedDisplayPreview(const std::filesystem::path& settings_file,
 }
 
 struct DisplayPreviewTransaction::State {
-  State(rex::ui::WindowedAppContext& ui_context, rex::ui::Window& ui_window,
+  State(rex::ui::IUISystem& ui_context,
         std::filesystem::path file)
-      : context(ui_context), window(ui_window), settings_file(std::move(file)) {}
+      : context(ui_context), settings_file(std::move(file)) {}
   mutable std::mutex mutex;
-  rex::ui::WindowedAppContext& context;
-  rex::ui::Window& window;
+  rex::ui::IUISystem& context;
   std::filesystem::path settings_file;
   std::string previous;
   bool active = false;
@@ -140,11 +243,10 @@ struct DisplayPreviewTransaction::State {
   std::chrono::steady_clock::time_point deadline{};
 };
 
-DisplayPreviewTransaction::DisplayPreviewTransaction(rex::ui::WindowedAppContext& context,
-                                                     rex::ui::Window& window,
+DisplayPreviewTransaction::DisplayPreviewTransaction(rex::ui::IUISystem& context,
                                                      std::filesystem::path settings_file,
                                                      std::chrono::steady_clock::duration timeout)
-    : state_(std::make_shared<State>(context, window, std::move(settings_file))),
+    : state_(std::make_shared<State>(context, std::move(settings_file))),
       duration_(timeout) {}
 
 DisplayPreviewTransaction::~DisplayPreviewTransaction() {
@@ -188,7 +290,7 @@ bool DisplayPreviewTransaction::Begin(std::string_view previous, std::string_vie
     return false;
   }
   const bool marked = WriteMarker(state_->settings_file, previous, requested, error);
-  const bool applied = marked && ApplyRuntimeDisplay(state_->context, state_->window, requested, error);
+  const bool applied = marked && ApplyRuntimeDisplay(state_->context, requested, error);
   if (!applied) {
     // The native transition may have partially succeeded even when its
     // rollback failed. Preserve the marker until boot recovery proves the
@@ -209,7 +311,7 @@ bool DisplayPreviewTransaction::Begin(std::string_view previous, std::string_vie
     deadline = state_->deadline;
   }
   std::weak_ptr<State> weak_state = state_;
-  rex::ui::WindowedAppContext* context = &state_->context;
+  rex::ui::IUISystem* context = &state_->context;
   timeout_ = std::jthread([weak_state, context, deadline, generation](std::stop_token stop) {
     std::condition_variable_any condition;
     std::mutex mutex;
@@ -219,12 +321,12 @@ bool DisplayPreviewTransaction::Begin(std::string_view previous, std::string_vie
       // This callback owns no transaction object. Shutdown can invalidate
       // State while a UI callback is queued. A save in progress may delay the
       // rollback, so keep retrying until Keep or Revert ends the generation.
-      if (!context->CallInUIThread([weak_state, generation] {
+      context->PostTask([weak_state, generation] {
             if (auto state = weak_state.lock()) {
               std::string ignored;
               RevertState(state, generation, &ignored);
             }
-          })) return;
+          });
       if (auto state = weak_state.lock()) {
         std::lock_guard lock(state->mutex);
         if (!state->active || state->generation != generation) return;
@@ -306,7 +408,7 @@ bool DisplayPreviewTransaction::RevertState(const std::shared_ptr<State>& state,
     state->transitioning = true;
     previous = state->previous;
   }
-  const bool applied = ApplyRuntimeDisplay(state->context, state->window, previous, error);
+  const bool applied = ApplyRuntimeDisplay(state->context, previous, error);
   {
     std::lock_guard lock(state->mutex);
     if (!applied) {

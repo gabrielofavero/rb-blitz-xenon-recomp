@@ -11,6 +11,7 @@
 // instead of guessing, because a probe that reports a plausible number is worse
 // than one that reports none.
 
+#include "settings/runtime_values.h"
 #include "diag/probe_overlay.h"
 
 #include <algorithm>
@@ -20,7 +21,7 @@
 #include <vector>
 
 #include <imgui.h>
-#include <rex/cvar.h>
+#include "settings/runtime_settings.h"
 
 #include "diag/probe.h"
 #include "diag/probe_trace.h"
@@ -35,13 +36,13 @@ constexpr float kProbeOverlayValueColumn = 170.0f;
 // alive and in what order", the log dump is for the whole window.
 constexpr size_t kProbeOverlayEventRows = 12;
 
-std::string CvarString(const char* name) { return rex::cvar::GetFlagByName(name); }
+std::string CvarString(const char* name) { return rb_blitz::settings::InspectRuntimeSetting(name).active_value; }
 
-bool CvarBool(const char* name) { return rex::cvar::Query<bool>(name); }
+bool CvarBool(const char* name) { return settings::InspectRuntimeSetting(name).active_value=="true"; }
 
-int32_t CvarInt(const char* name) { return rex::cvar::Query<int32_t>(name); }
+int32_t CvarInt(const char* name) { return settings::ReadSdkSetting<int32_t>(name); }
 
-double CvarDouble(const char* name) { return rex::cvar::Query<double>(name); }
+double CvarDouble(const char* name) { return settings::ReadSdkSetting<double>(name); }
 
 // A KeyValue row, laid out so the column of values lines up down the panel.
 void Row(const char* key, const char* fmt, ...) {
@@ -57,11 +58,10 @@ void Row(const char* key, const char* fmt, ...) {
 
 }  // namespace
 
-ProbeOverlayDialog::ProbeOverlayDialog(rex::ui::ImGuiDrawer* imgui_drawer,
-                                       WindowStateProvider provider)
-    : rex::ui::ImGuiDialog(imgui_drawer), provider_(std::move(provider)) {}
+ProbeOverlayDialog::ProbeOverlayDialog(WindowStateProvider provider)
+    : provider_(std::move(provider)) {}
 
-void ProbeOverlayDialog::OnDraw(ImGuiIO& io) {
+bool ProbeOverlayDialog::Draw(ImGuiIO& io) {
   (void)io;
   // The per-frame probe work happens here, before the visibility check, because
   // the dialog is registered for the app's whole life and this is the one
@@ -70,7 +70,7 @@ void ProbeOverlayDialog::OnDraw(ImGuiIO& io) {
   // Off means invisible, not "drawn and empty": returning before Begin() draws
   // nothing at all, and because the cvar is re-read here the toggle is live.
   if (!overlay_enabled()) {
-    return;
+    return true;
   }
 
   ImGui::SetNextWindowPos(ImVec2(10, 320), ImGuiCond_FirstUseEver);
@@ -78,7 +78,7 @@ void ProbeOverlayDialog::OnDraw(ImGuiIO& io) {
   ImGui::SetNextWindowBgAlpha(0.65f);
   if (!ImGui::Begin("Probe##rb_blitz", nullptr, ImGuiWindowFlags_NoCollapse)) {
     ImGui::End();
-    return;
+    return true;
   }
 
   const WindowState window = provider_ ? provider_() : WindowState{};
@@ -135,6 +135,7 @@ void ProbeOverlayDialog::OnDraw(ImGuiIO& io) {
   }
 
   ImGui::End();
+  return true;
 }
 
 }  // namespace rb_blitz::diag

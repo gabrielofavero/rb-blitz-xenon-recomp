@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "messages/messages_service.h"
 
-#include <rex/cvar.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
 
 #include "store/store_http.h"
 
-REXCVAR_DEFINE_STRING(messages_api_url, "", "Diagnostics",
-                      "Host-only feed URL override. Empty uses the project's GitHub Pages feed; "
-                      "an HTTP loopback /feed.json URL is accepted for local acceptance tests")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 namespace rb_blitz::messages {
 namespace {
@@ -23,7 +20,7 @@ void Install(const std::filesystem::path& user_data_root,
   g_installed = true;
   g_service.Init(user_data_root, executable_dir, RBBLITZ_GAME_VERSION,
                  [](const std::string& line) { REXLOG_INFO("{}", line); });
-  std::string url = REXCVAR_GET(messages_api_url);
+  std::string url = rb_blitz::settings::title::messages_api_url.Get();
   if (url.empty()) url = std::string(kFeedUrl);
   if (!IsAllowedFeedUrl(url, true)) {
     REXLOG_WARN("messages: messages_api_url rejected: {}", url);

@@ -31,15 +31,14 @@ struct ImFontAtlas;  // imgui; only the font hook below needs the type
 struct ImFont;
 
 namespace rex::ui {
-class ImGuiDrawer;
-class ImGuiDialog;
+class IDialog;
 }  // namespace rex::ui
 
 namespace rb_blitz::ui::help {
 
 // Creates the overlay and registers it as the settings bridge's caption sink. Owned by the app
 // (src/rb_blitz_app.h) for as long as it lives; destroying it unregisters the sink.
-std::unique_ptr<rex::ui::ImGuiDialog> CreateOverlay(rex::ui::ImGuiDrawer* drawer);
+std::unique_ptr<rex::ui::IDialog> CreateOverlay();
 
 // Loads the caption's own typeface into the drawer's atlas and remembers it for the overlay's draws
 // (owner request, 2026-10-14). Called once, from `RbBlitzApp::OnConfigureFonts` - the only moment

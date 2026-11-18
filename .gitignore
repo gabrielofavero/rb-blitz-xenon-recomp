@@ -37,9 +37,8 @@
 /assets/installer/wizard-*.bmp
 
 # ReXGlue translation output is reproducible from the manifest and pinned SDK.
-# Keep only the small SDK integration file emitted by `rexglue init`.
+# SDK integration is maintained in CMakeLists.txt; all generated output stays local.
 /generated/*
-!/generated/rexglue.cmake
 
 # Local diagnostics.
 *.log

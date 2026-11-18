@@ -8,6 +8,8 @@ struct PPCContext;
 
 namespace rb_blitz::content_progress {
 void Configure();
+// Retire queued pacing writes and restore the player value before title unload.
+void Close();
 void Tick(PPCContext& ctx, uint8_t* base);
 // UIManager::Poll supplies the focused panel and transition state. The phase itself is
 // shown by the title's own UI (the connect panel's bar), not by a host overlay.

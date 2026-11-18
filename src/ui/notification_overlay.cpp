@@ -4,24 +4,24 @@
 #include "ui/help_layout.h"
 
 #include <imgui.h>
-#include <rex/ui/imgui_dialog.h>
-#include <rex/ui/imgui_drawer.h>
+#include <rex/ui/ui_system.h>
+#include <rex/ui/style.h>
 
 namespace rb_blitz::ui::notifications {
 namespace {
-class NotificationDialog final : public rex::ui::ImGuiDialog {
+class NotificationDialog final : public rex::ui::DialogBase {
  public:
-  explicit NotificationDialog(rex::ui::ImGuiDrawer* drawer) : ImGuiDialog(drawer) {}
+  explicit NotificationDialog(rex::ui::IUISystem& ui) : ui_(ui) {}
 
-  void OnDraw(ImGuiIO& io) override {
-    if (io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) return;
+  bool Draw(ImGuiIO& io) override {
+    if (io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) return true;
     const auto frame = SharedQueue().Tick();
-    if (!frame) return;
-    const auto& theme = imgui_drawer()->style().toast;
+    if (!frame) return true;
+    const auto& theme = ui_.GetStyle().toast;
     const float scale = std::clamp(io.DisplaySize.y / 720.0f, 0.65f, 1.5f);
     const float margin = 16.0f * scale;
     const float width = std::min(380.0f * scale, io.DisplaySize.x - margin * 2);
-    if (width < 60.0f) return;
+    if (width < 60.0f) return true;
     const float pad = 17.0f * scale;
     const float text_width = width - pad * 2;
     const float title_size = 21.0f * scale;
@@ -52,7 +52,7 @@ class NotificationDialog final : public rex::ui::ImGuiDialog {
     ImGui::SetNextWindowSize(ImVec2(width, height), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(alpha);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 1));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, theme.rounding);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, ui_.GetStyle().metrics.toast_rounding);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1, 1));
     constexpr auto flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoNav |
@@ -66,7 +66,7 @@ class NotificationDialog final : public rex::ui::ImGuiDialog {
         return ImGui::GetColorU32(c);
       };
       draw->AddText(heading, title_size, ImVec2(pos.x + pad, pos.y + pad),
-                    color(theme.title), title.c_str(), nullptr, text_width);
+                    color(rex::ui::ToImVec4(theme.title)), title.c_str(), nullptr, text_width);
       draw->AddText(body, body_size, ImVec2(pos.x + pad, pos.y + pad + title_height + 5 * scale),
                     color(theme.muted_text), description.c_str(), nullptr, text_width);
       // A small severity marker distinguishes info, warning and error notices.
@@ -80,11 +80,14 @@ class NotificationDialog final : public rex::ui::ImGuiDialog {
     ImGui::End();
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor();
-  }
+    return true;
+}
+ private:
+  rex::ui::IUISystem& ui_;
 };
 }  // namespace
 
-std::unique_ptr<rex::ui::ImGuiDialog> CreateOverlay(rex::ui::ImGuiDrawer* drawer) {
-  return std::make_unique<NotificationDialog>(drawer);
+std::unique_ptr<rex::ui::IDialog> CreateOverlay(rex::ui::IUISystem& ui) {
+  return std::make_unique<NotificationDialog>(ui);
 }
 }  // namespace rb_blitz::ui::notifications

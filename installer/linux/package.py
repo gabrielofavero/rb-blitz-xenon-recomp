@@ -21,6 +21,8 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "installer/config/platform-packaging.json"
+sys.path.insert(0, str(ROOT / "installer/tools"))
+from runtime_inventory import target_filename, manifest_entries, vulkan_source
 
 
 def fail(message: str) -> None:
@@ -36,16 +38,11 @@ def sha256(path: Path) -> str:
 
 
 def target_path(build: Path, name: str) -> Path:
-    filenames = {
-        "rb_blitz": "rb_blitz",
-        "rb_blitz_linux_launcher": "rb_blitz_linux_launcher",
-        "rexruntime": "librexruntime.so",
-        "rexgpu-xenos": "librexgpu-xenos.so",
-    }
-    return build / filenames[name]
+    return build / target_filename(name, "linux")
 
 
 def stage(build: Path, destination: Path, config: dict) -> None:
+    config["stageManifest"] = manifest_entries(config, build)
     destination.mkdir(parents=True, exist_ok=True)
     for entry in config["stageManifest"]:
         relative = Path(entry["to"])
@@ -53,6 +50,10 @@ def stage(build: Path, destination: Path, config: dict) -> None:
             fail(f"unsafe destination {relative}")
         if "fromTarget" in entry:
             source = target_path(build, entry["fromTarget"])
+        elif "fromSdkStage" in entry:
+            source = build / entry["fromSdkStage"]
+        elif "fromVulkanSource" in entry:
+            source = vulkan_source(build, entry["fromVulkanSource"])
         else:
             source = ROOT / entry["from"]
         if not source.is_file() or source.is_symlink():
@@ -60,20 +61,29 @@ def stage(build: Path, destination: Path, config: dict) -> None:
         output = destination / relative
         output.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, output)
-        output.chmod(0o755 if "fromTarget" in entry else 0o644)
+        output.chmod(0o755 if "fromTarget" in entry or entry.get("runtime") else 0o644)
     actual = {path.relative_to(destination).as_posix() for path in destination.rglob("*") if path.is_file()}
     expected = {entry["to"] for entry in config["stageManifest"]}
     if actual != expected:
         fail(f"stage differs from manifest; missing={sorted(expected - actual)}, extra={sorted(actual - expected)}")
-    for name in ("rb_blitz", "rb_blitz_linux_launcher", "librexruntime.so", "librexgpu-xenos.so"):
-        binary = destination / "opt/rock-band-blitz-recomp/bin" / name
+    binary_paths = {entry["to"] for entry in config["stageManifest"] if "fromTarget" in entry or entry.get("runtime")}
+    for name in binary_paths:
+        binary = destination / name
         if binary.open("rb").read(4) != b"\x7fELF":
             fail(f"not an ELF binary: {binary}")
+    staged_names = {Path(name).name for name in binary_paths}
+    for name in binary_paths:
+        binary = destination / name
+        output = subprocess.run(["readelf", "-d", str(binary)], check=True, text=True,
+                                capture_output=True).stdout
+        for dependency in re.findall(r"\(NEEDED\).*?\[([^]]+)\]", output):
+            if dependency.startswith(("librex", "libSDL3", "libTracyClient")) and dependency not in staged_names:
+                fail(f"{binary.name} requires unstaged SDK dependency: {dependency}")
     forbidden = (b"CON ", b"LIVE", b"PIRS", b"XEX2", b"MZ")
     for path in destination.rglob("*"):
         if path.is_file() and path.suffix.lower() in {".xex", ".ark", ".hdr", ".pdb", ".map"}:
             fail(f"forbidden payload extension: {path}")
-        if path.is_file() and path.name not in {"rb_blitz", "rb_blitz_linux_launcher", "librexruntime.so", "librexgpu-xenos.so"}:
+        if path.is_file() and path.relative_to(destination).as_posix() not in binary_paths:
             if path.open("rb").read(4) in forbidden:
                 fail(f"retail/archive/executable signature in staged resource: {path}")
 
@@ -158,7 +168,7 @@ def main() -> None:
     if args.stage_only:
         return
     subprocess.run([sys.executable, str(ROOT / "installer/tools/check_platform_packaging.py"),
-                    "--target", "linux", "--stage-root", str(stage_root)], check=True)
+                    "--target", "linux", "--stage-root", str(stage_root), "--build-dir", str(args.build_dir.resolve())], check=True)
     if not args.nfpm_archive:
         fail("pass the pinned nFPM archive with --nfpm-archive")
     with tempfile.TemporaryDirectory(prefix="rb-blitz-nfpm-") as temp_name:

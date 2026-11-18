@@ -660,3 +660,90 @@ for the follow-up record and evidence.
   `Entrypoint XEX not found` and exits the same way. The build gate stays the half that
   covers the build — [bringup-log.md](../history/bringup-log.md) B-014.
 | **The one-file release model's standing limits (2026-10-15)** | **(1) Nothing is published yet**: the repository has no releases, so the setup executable is built by hand (`installer\build.ps1`) until the first release is cut. **(2) `.github/workflows/builds.yml` has never run**: it needs a self-hosted Windows runner with `game/default.xex`, which is deliberately not in the repository, so the tag → release path is an intention until it does. **(3) The setup executable's caption is not asserted unattended**: it asks "… is already installed. Install it again?" before it shows a page on any machine that has the game, and an answer of No ends the run, so `scripts/acceptance/acceptance_product_titles.ps1` skips it and prints that reason. **(4) The updater executable is dormant**: the single file it installs from (`update.toml`) is no longer published, because a release publishes one file, and nothing starts it since Controller Settings stopped checking for updates. | [release-model.md](../plans/finished/2026-10-15-release-model.md) |
+
+## Shutdown packet cancellation diagnostics (2026-11-18)
+
+Open diagnostic limitation, observed on Windows AMD64 during v0.11 acceptance:
+GPU packet recovery can report failed indirect packets and primary-ring resyncs
+after `title_stopping`. `WAIT_REG_MEM` returns false when the command worker is
+cancelled; recovery currently treats that result as packet failure. Graphics
+detach joins the worker before clearing physical-memory pointers, and title
+teardown detaches graphics before releasing guest memory. The reviewed save,
+persistence and backend song runs finish cleanly after this shutdown-only
+pattern; they do not demonstrate a guest-memory lifetime violation.
+
+Cancellation should propagate without consuming the malformed-packet recovery
+budget or executing later packets, while preserving primary-buffer cleanup.
+That correction belongs to the packet-recovery patch and is not implemented by
+the title's window/music handoff changes. Errors before stopping require their
+own investigation; log ordering alone is insufficient to classify them as
+cancellation. Evidence and scope are recorded in the
+[v0.11 migration plan](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).
+
+
+## Startup asynchronous-pipeline guard (v0.11, 2026-11-18)
+
+Open policy migration limitation: the legacy synchronous-startup guard inspects
+`gpu.xenos.async_shader_compilation` in `BeforeGraphicsSetup`, before the v0.11
+driver registers that setting. Inspection has no active value at that boundary,
+so the guard does not arm. The settled caller/default asynchronous setting
+remains active. Queued profile, file and CLI values still apply at registration;
+this limitation does not discard explicit configuration or disable async work.
+
+Existing r25 Windows D3D12, Vulkan and forwarding routes record async enabled,
+boot, song/results and clean close. That coverage does not prove every early
+title draw appears. Any required synchronous-startup correction needs an
+initialized-driver/pre-launch boundary and bounded preference restoration.
+It is separate from enabling performance mechanisms. Exact source lifecycle and
+retained logs are recorded in `out/rexglue-migration/v011-gpu-gains-audit-r1.md`
+and the [migration plan](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).
+
+
+## v0.11 performance parity remains open (2026-11-18)
+
+The historical first matched Windows AMD64 Vulkan pair completes Ultimate One
+Week on both SDKs, but does not show a performance gain. Guest throughput is
+about 55.5 iterations/s on both. The forward-enabled v0.11 build uses 14.77%
+more sampled game CPU time, while non-game CPU activity also increases. The old
+capture uses GDI copy presentation and the new one uses DXGI flip; per-present
+frame/GPU distributions cannot establish equivalent displayed-frame behavior.
+Missing display durations do not identify dropped frames. One pair cannot
+establish a repeatable regression or isolate stack forwarding. Debug
+logging/tracing and native driver-cache state limit that historical comparison.
+
+The later INFO-log, trace-off Vulkan comparison uses matched FIFO presentation,
+1280x720, 1x scale and native MSAA. Its one completed warm pair changes guest
+throughput from 40.0347 to 54.8249 iterations/s (+36.943%), and sampled process
+CPU cost from 52.53125 to 45.8125 CPU-seconds (-12.790%). Concurrent non-game CPU
+activity also falls, from 11.788% to 8.479% of machine capacity. Cold seeds show
+the same throughput direction, without proving warm repeatability. The two
+completed normal-log D3D12 pairs show about 1-2% lower guest throughput and
+opposite CPU-cost changes. These measurements establish neither a universal
+regression nor an across-the-board gain. SDK presentation architectures produce
+different host-row units even when PresentMon classifications match; those
+rows cannot substitute for guest throughput or equivalent displayed frames.
+
+Production adopts SDK commit `a3e1d82678ca20d68d4837a8e9ee4652ff073745` with the
+reviewed 65-patch stack and promoted title integration. Production adoption is
+an integration decision, not proof of performance parity. The fresh Windows AMD64 production source-SDK configure and release build
+pass with D3D12 and Vulkan enabled. Formal
+repeated performance, native platform and package gates remain open. Exact scope,
+raw evidence and results are recorded in the
+[migration plan](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).
+
+## Deferred graphics-preference ownership (v0.11, 2026-11-18)
+
+Open, source-confirmed startup defect: saved graphics preferences can be queued
+before their driver-owned settings register. Registration applies the queued
+title-layer values, but `SettingsBoot::WriteCvar` does not retain their accepted
+intent in `applied_`. `FinishInit` can consequently classify a saved preference,
+including anti-aliasing, as externally controlled and lock its settings row.
+Equal saved/default values are affected because registration still records the
+title layer. A correction must also distinguish that layer from a matching
+value supplied by a developer file or CLI, which must retain external priority.
+
+The correction and focused host regression remain proposals; no runtime fix or
+verified UI reproduction is claimed. This ownership defect is separate from the
+asynchronous-startup guard above and the shutdown packet-cancellation diagnostic
+limitation. Source findings and proposal artifacts are recorded in the
+[migration plan](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).

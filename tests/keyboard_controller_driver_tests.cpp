@@ -1,96 +1,104 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Exercise the real SDL driver under the same capture suppression as a modal.
-// No native window is opened and no game/UI is navigated.
+// Physical modal sampling through the real selected SDL/HID public services.
 #include "check.h"
-
-#include <rex/input/sdl/sdl_input_driver.h>
+#include <filesystem>
+#include <vector>
+#include <SDL3/SDL.h>
+#include <rex/app/app.h>
+#include <rex/apu/audio_system.h>
+#include <rex/cli.h>
+#include <rex/gpu/graphics_system.h>
+#include <rex/hid/input_system.h>
+#include <rex/hid/title_input.h>
 #include <rex/ui/keyboard_input_controller.h>
-#include <rex/ui/window_sdl.h>
+#include <rex/ui/ui_system.h>
 
 namespace {
-class Context final : public rex::ui::WindowedAppContext {
-  void NotifyUILoopOfPendingFunctions() override {}
-  void PlatformQuitFromUIThread() override {}
+class InputApp final : public rex::app::App {
+ public:
+  InputApp() : App("keyboard_physical_test") {}
+ private:
+  rex::Result<void> OnConfigure(rex::SettingsRegistry& registry) override {
+    REX_TRY_VOID(root.Set(std::filesystem::current_path()));
+    REX_TRY_VOID(GetUI().GetSettings().driver.SetText(rex::SettingLayer::kTitle, "none"));
+    REX_TRY_VOID(GetInput().GetSettings().drivers.SetText(rex::SettingLayer::kTitle, "sdl3"));
+    REX_TRY_VOID(GetAudio().GetSettings().driver.SetText(rex::SettingLayer::kTitle, "none"));
+    REX_TRY_VOID(GetGraphics().GetSettings().driver.SetText(rex::SettingLayer::kTitle, "none"));
+    return registry.SetText(rex::SettingLayer::kTitle, "log.file", "false");
+  }
 };
-}  // namespace
+void Pump() { SDL_UpdateJoysticks(); SDL_PumpEvents(); }
+}
 
 int main() {
-  using namespace rex::input;
+  using namespace rex::hid;
   rb_blitz::test::BeginCase("Modal B reads physical SDL input while guest input is suppressed");
-  Context context;
-  rex::ui::WindowSDL window(context, "Unopened keyboard test", 1280, 720);
-  sdl::SDLInputDriver driver(nullptr, 0);
-  CHECK_EQ(driver.Setup(), 0);
   SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
-  driver.OnWindowAvailable(&window);
-  bool captured = true;
-  driver.set_is_active_callback([&] { return !captured; });
-
+  InputApp app;
+  CHECK_TRUE(app.Init(rex::CLIArgList::Parse(std::vector<std::string>{})).has_value());
+  auto* physical = REX_INTERFACE(ITitleInput);
+  CHECK_TRUE(physical != nullptr);
+  if (!physical) { app.Shutdown(); return rb_blitz::test::Finish(); }
+  auto& input = app.GetInput();
+  rex::InputEvent focus{.type = rex::InputEvent::Type::kFocusGained};
+  input.OnInputEvent(focus);
   SDL_VirtualJoystickDesc desc;
   SDL_INIT_INTERFACE(&desc);
   desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
   desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
   desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+  desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
   desc.name = "Keyboard modal regression pad";
   const auto instance = SDL_AttachVirtualJoystick(&desc);
   CHECK_TRUE(instance != 0);
   auto* joystick = SDL_OpenJoystick(instance);
   CHECK_TRUE(joystick != nullptr);
-  SDL_UpdateJoysticks();
-  SDL_PumpEvents();
+  Pump();
   CHECK_TRUE(SDL_IsGamepad(instance));
-  std::vector<DeviceInfo> devices;
-  driver.EnumerateDevices(devices);
-  DeviceId device = DeviceId::kInvalid;
-  for (const auto& info : devices) {
-    if (info.name == desc.name) device = info.id;
-  }
-  CHECK_TRUE(device != DeviceId::kInvalid);
-  if (device != DeviceId::kInvalid && joystick) {
-    rex::ui::KeyboardInputController cancel;
-    X_INPUT_STATE state{};
-    // Prime B's opening edge from a neutral physical sample.
-    CHECK_EQ(driver.GetDeviceStateForUI(device, &state), 0);
-    CHECK_FALSE(cancel.Update({true, true, 0}).cancel);
+  input.AcquireUIBlock();
+  rex::ui::KeyboardInputController cancel;
+  CHECK_TRUE(physical->GetPhysicalState(true).has_value());
+  CHECK_FALSE(cancel.Update({true, true, 0}).cancel);
+  if (joystick) {
     CHECK_TRUE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_EAST, true));
-    SDL_UpdateJoysticks();
-    SDL_PumpEvents();
-
-    CHECK_EQ(driver.GetDeviceState(device, &state), 0);
-    CHECK_EQ(state.gamepad.buttons, 0);
-    CHECK_EQ(driver.GetDeviceStateForUI(device, &state), 0);
-    CHECK_TRUE((state.gamepad.buttons & X_INPUT_GAMEPAD_B) != 0);
-    const auto buttons = (state.gamepad.buttons & X_INPUT_GAMEPAD_B)
-                             ? rex::ui::KeyboardControllerSample::Cancel : 0;
+    Pump();
+    const auto guest = input.GetState(0);
+    CHECK_TRUE(guest.has_value());
+    CHECK_EQ(guest->state.buttons, 0);
+    const auto modal = physical->GetPhysicalState(true);
+    CHECK_TRUE(modal.has_value());
+    CHECK_TRUE((modal->buttons & kPadB) != 0);
+    const auto buttons = (modal->buttons & kPadB) ? rex::ui::KeyboardControllerSample::Cancel : 0;
     CHECK_TRUE(cancel.Update({true, true, static_cast<uint16_t>(buttons)}).cancel);
-    // The UI read must not enable guest input as a side effect.
-    CHECK_EQ(driver.GetDeviceState(device, &state), 0);
-    CHECK_EQ(state.gamepad.buttons, 0);
-    captured = false;
-    CHECK_EQ(driver.GetDeviceState(device, &state), 0);
-    CHECK_TRUE((state.gamepad.buttons & X_INPUT_GAMEPAD_B) != 0);
+    CHECK_EQ(input.GetState(0)->state.buttons, 0);
+    input.ReleaseUIBlock();
+    // A held modal dismissal is consumed until release, so it cannot also
+    // cancel the guest screen underneath the keyboard.
+    CHECK_EQ(input.GetState(0)->state.buttons, 0);
+    CHECK_TRUE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_EAST, false));
+    Pump();
+    CHECK_EQ(input.GetState(0)->state.buttons, 0);
+    CHECK_TRUE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_EAST, true));
+    Pump();
+    CHECK_TRUE((input.GetState(0)->state.buttons & kPadB) != 0);
     CHECK_TRUE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_MISC1, true));
     CHECK_TRUE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, true));
-    SDL_UpdateJoysticks();
-    SDL_PumpEvents();
-    CHECK_EQ(driver.GetDeviceState(device, &state), 0);
-    CHECK_FALSE((state.gamepad.buttons & X_INPUT_GAMEPAD_GUIDE) != 0);
-    CHECK_FALSE((state.gamepad.buttons & X_INPUT_GAMEPAD_Y) != 0);
-    uint8_t available = 0, held = 0;
-    CHECK_TRUE(driver.GetExtraButtonState(device, &available, &held));
-    CHECK_TRUE((available & (1u << 0)) && (available & (1u << 3)));
-    CHECK_TRUE((held & (1u << 0)) && (held & (1u << 3)));
+    Pump();
+    const auto state = input.GetState(0);
+    CHECK_TRUE(state.has_value());
+    CHECK_FALSE((state->state.buttons & (kPadGuide | kPadY)) != 0);
+    const auto extra = physical->GetPhysicalExtraButtons(true);
+    CHECK_TRUE((extra.available & (1u << 0)) && (extra.available & (1u << 3)));
+    CHECK_TRUE((extra.held & (1u << 0)) && (extra.held & (1u << 3)));
     CHECK_TRUE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_MISC1, false));
-    SDL_UpdateJoysticks();
-    SDL_PumpEvents();
-    CHECK_TRUE(driver.GetExtraButtonState(device, &available, &held));
-    CHECK_FALSE((held & (1u << 0)) != 0);
+    Pump();
+    CHECK_FALSE((physical->GetPhysicalExtraButtons(true).held & (1u << 0)) != 0);
+  } else {
+    input.ReleaseUIBlock();
   }
   if (joystick) SDL_CloseJoystick(joystick);
   if (instance) SDL_DetachVirtualJoystick(instance);
-  SDL_PumpEvents();
-  rex::ui::UIEvent closing(&window);
-  static_cast<rex::ui::WindowListener&>(driver).OnClosing(closing);
-  SDL_Quit();
+  Pump();
+  CHECK_EQ(app.Shutdown(), 0);
   return rb_blitz::test::Finish();
 }

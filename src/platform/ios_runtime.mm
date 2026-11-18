@@ -5,7 +5,7 @@
 #include <condition_variable>
 #include <mutex>
 #include "fs/ios_documents.h"
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/CAMetalLayer.h>

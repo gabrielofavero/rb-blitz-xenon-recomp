@@ -27,6 +27,8 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "installer/tools"))
 from native_assets import controller_entries
+from runtime_inventory import (target_filename, manifest_entries, vulkan_source,
+                               molten_dependency_license, runtime_targets, enabled)
 
 CONFIG = ROOT / "installer/config/platform-packaging.json"
 INSTALL_SCRIPTS = ROOT / "installer/macos/scripts"
@@ -84,17 +86,11 @@ def create_icon(destination: Path, temporary: Path) -> None:
 
 
 def target_path(build: Path, name: str) -> Path:
-    names = {
-        "rb_blitz": "rb_blitz",
-        "rb_blitz_macos_launcher": "rb_blitz_macos_launcher",
-        "rexruntime": "librexruntime.dylib",
-        "rexgpu-xenos": "librexgpu-xenos.dylib",
-        "TracyClient": "libTracyClient.dylib",
-    }
-    return build / names[name]
+    return build / target_filename(name, "macos")
 
 
 def stage(build: Path, stage_root: Path, config: dict, version: str, temporary: Path) -> Path:
+    config["stageManifest"] = manifest_entries(config, build)
     app = stage_root / config["bundleName"]
     for entry in config["stageManifest"]:
         relative = Path(entry["to"])
@@ -109,6 +105,10 @@ def stage(build: Path, stage_root: Path, config: dict, version: str, temporary: 
             source = target_path(build, entry["fromTarget"])
         elif "fromSdkStage" in entry:
             source = build / entry["fromSdkStage"]
+        elif "fromVulkanSource" in entry:
+            source = vulkan_source(build, entry["fromVulkanSource"])
+        elif "fromMoltenDependency" in entry:
+            source = molten_dependency_license(build, entry["fromMoltenDependency"])
         else:
             source = ROOT / entry.get("from", entry.get("fromTemplate"))
         # Versioned dylibs normally have an SDK-generated unversioned alias.
@@ -263,11 +263,9 @@ def audit_app(app: Path, stage_root: Path, arch: str, config: dict) -> None:
                     fail(f"build-machine path found in bundle file: {path}")
                 tail = raw[-overlap:]
     macos = app / "Contents/MacOS"
-    required = [macos / "rb_blitz", macos / "rb_blitz_macos_launcher",
-             macos / "librexruntime.dylib", macos / "librexgpu-xenos.dylib",
-             macos / "libTracyClient.dylib",
-             app / "Contents/Resources/vulkan/lib/libvulkan.1.dylib",
-             app / "Contents/Resources/vulkan/lib/libMoltenVK.dylib"]
+    required = [macos / "rb_blitz", macos / "rb_blitz_macos_launcher"]
+    required += [stage_root / entry["to"] for entry in config["stageManifest"]
+                 if "fromTarget" in entry or entry.get("fromSdkStage", "").endswith(".dylib")]
     macho = macho_files(app)
     resolved_macho = {path.resolve() for path in macho}
     if any(binary not in macho for binary in required):

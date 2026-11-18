@@ -13,18 +13,15 @@
 #else
 #include <sys/mman.h>
 #endif
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/memory/endian.h>
 #include "input/touch_controls.h"
 REX_EXTERN(sub_823FF258);
 
 REX_EXTERN(sub_821F13D0);
 REX_EXTERN(sub_821F65C8);
 REX_EXTERN(sub_82226CD8);
-REXCVAR_DECLARE(bool, hud_reanchor);
-REXCVAR_DECLARE(bool, hud_reanchor_apply);
-REXCVAR_DECLARE(bool, hud_reanchor_scan);
 
 namespace {
 uint32_t width = 2560, height = 1080, crop_width = 0, crop_height = 0;
@@ -106,12 +103,13 @@ uint32_t Make(unsigned slot, const Shape& shape, float x, uint32_t dir = kHud,
   return t;
 }
 void Resolve(uint32_t t) {
-  PPCContext ctx{};
+  PPCContext ctx{}; ctx.r1.u32 = kHeap + 0x10000;
   ctx.r3.u32 = t;
   ctx.r31.u32 = 0xDEADBEEF;
   sub_821F13D0(ctx, memory);
   CHECK_EQ(ctx.r3.u32, t + 72);
   CHECK_EQ(ctx.r31.u32, 0xDEADBEEF);
+  CHECK_EQ(ctx.r1.u32, kHeap + 0x10000);
   CHECK_EQ(ctx.r11.u32, 0x12345678); // preserve original callee's return registers
 }
 void Close(float actual, double expected) {
@@ -123,7 +121,7 @@ void Close(float actual, double expected) {
 void Draw(uint32_t t, const Shape& shape, bool group = false) {
   const uint32_t drawable = t - (group ? 64 : 80);
   ObjectView(drawable, uint32_t(int64_t(t) - shape.offset));
-  PPCContext ctx{};
+  PPCContext ctx{}; ctx.r1.u32 = kHeap + 0x10000;
   ctx.r3.u32 = drawable;
   ctx.r4.u32 = 0xCAFEBABE;
   ctx.r31.u32 = 0xDEADBEEF;
@@ -133,6 +131,7 @@ void Draw(uint32_t t, const Shape& shape, bool group = false) {
   CHECK_EQ(ctx.r3.u32, drawable);
   CHECK_EQ(ctx.r4.u32, 0xCAFEBABE);
   CHECK_EQ(ctx.r31.u32, 0xDEADBEEF);
+  CHECK_EQ(ctx.r1.u32, kHeap + 0x10000);
 }
 constexpr double delta = (2560.0 / 1080.0 - 16.0 / 9.0) * 240.0;
 }  // namespace
@@ -210,6 +209,7 @@ extern "C" REX_FUNC(__imp__sub_821F65C8) {
 extern "C" REX_FUNC(__imp__sub_82226CD8) { __imp__sub_821F65C8(ctx, base); }
 
 int main() {
+  CHECK_TRUE(rb_blitz::settings::RegisterTitleSettings(REX_SETTINGS()).has_value());
   using namespace rb_blitz::test;
   // Reserve an addressable guest range, committing only two tiny fixture regions.
 #if defined(_WIN32)
@@ -234,12 +234,12 @@ int main() {
   width = 1920;
   rb_blitz::hooks::HudReanchorWorld(nullptr, kHeap);
   width = 2560;
-  REXCVAR_SET(hud_reanchor, false);
+  CHECK_TRUE(rb_blitz::settings::title::hud_reanchor.Set(false).has_value());
   rb_blitz::hooks::HudReanchorWorld(nullptr, kHeap);
-  REXCVAR_SET(hud_reanchor, true);
-  REXCVAR_SET(hud_reanchor_apply, false);
+  CHECK_TRUE(rb_blitz::settings::title::hud_reanchor.Set(true).has_value());
+  CHECK_TRUE(rb_blitz::settings::title::hud_reanchor_apply.Set(false).has_value());
   rb_blitz::hooks::HudReanchorWorld(nullptr, kHeap);
-  REXCVAR_SET(hud_reanchor_apply, true);
+  CHECK_TRUE(rb_blitz::settings::title::hud_reanchor_apply.Set(true).has_value());
 #endif
 
   BeginCase("every subset of missing HUD elements places the survivors on their first resolve");
@@ -598,7 +598,7 @@ int main() {
 
   BeginCase("retired scan flag performs no search and invalid path pointers are rejected");
   Reset();
-  REXCVAR_SET(hud_reanchor_scan, true);
+  CHECK_TRUE(rb_blitz::settings::title::hud_reanchor_scan.Set(true).has_value());
   const auto t2 = Make(0, shapes[1], -300);
   Word(kHud + 0x64, 0x60000000); // reserved but uncommitted, in the guest heap range
   Resolve(t2); Close(Float(t2 + 0x78), -300);
@@ -623,7 +623,7 @@ int main() {
   Resolve(pause);
   Close(Float(pause + 72), scale);
   ObjectView(pause - 64, pause + 0x108);
-  PPCContext call{}; call.r3.u32 = pause - 64;
+  PPCContext call{}; call.r1.u32 = kHeap + 0x10000; call.r3.u32 = pause - 64;
   using_touch = false;
   const auto old_draws = draw_calls;
   sub_82226CD8(call, memory);
@@ -642,7 +642,7 @@ int main() {
   Word(node + 4, 0); // native boolean is a DataNode integer
   for (const bool ready : {false, true, false, true}) {
     Word(node, ready ? 1 : 0);
-    PPCContext write{};
+    PPCContext write{}; write.r1.u32 = kHeap + 0x10000;
     write.r3.u32 = provider; write.r4.u32 = property; write.r5.u32 = node;
     const auto calls = property_writes;
     sub_823FF258(write, memory);
@@ -652,7 +652,7 @@ int main() {
   }
   Word(provider + 32, Text("unrelated.ep"));
   Word(node, 0);
-  PPCContext unrelated{};
+  PPCContext unrelated{}; unrelated.r1.u32 = kHeap + 0x10000;
   unrelated.r3.u32 = provider; unrelated.r4.u32 = property; unrelated.r5.u32 = node;
   sub_823FF258(unrelated, memory);
   CHECK_TRUE(powerup_ready); // unrelated providers cannot hide the control
@@ -662,7 +662,7 @@ int main() {
   const Shape lane_shape{"powerup.grp", 0x82024C4C, -0x108, 0};
   const auto lane = Make(0, lane_shape, 0);
   ObjectView(lane - 64, lane + 0x108);
-  PPCContext lane_draw{}; lane_draw.r3.u32 = lane - 64; lane_draw.r4.u32 = 0xCAFEBABE;
+  PPCContext lane_draw{}; lane_draw.r1.u32 = kHeap + 0x10000; lane_draw.r3.u32 = lane - 64; lane_draw.r4.u32 = 0xCAFEBABE;
   const auto captures_before = lane_captures, draws_before = draw_calls;
   sub_82226CD8(lane_draw, memory);
   CHECK_EQ(lane_captures, captures_before + 1);

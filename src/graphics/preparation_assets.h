@@ -18,6 +18,12 @@ using AssetReader = std::function<Bytes(const std::string&)>;
 // written big-endian like the SDK writes it. tests/shader_pipeline_catalogue_tests.py
 // re-reads those SDK headers and fails if these drift; SeedPreparation also
 // repairs a store written with another value instead of refusing to boot on it.
+// Both backends store the same packed ucode records and XXH3 identities.
+// The target SDK declares distinct header versions; backend changes retag a
+// fully validated compatible store and retain all learned shader records.
+inline constexpr uint32_t kD3D12ShaderStorageVersion = 0x20201219;
+inline constexpr uint32_t kVulkanShaderStorageVersion = 0x20261017;
+
 inline constexpr uint32_t kD3D12RecipeStorageVersion = 0x20260226;
 inline constexpr uint32_t kVulkanRecipeStorageVersion = 0x20260228;
 
@@ -46,5 +52,6 @@ SeedReport SeedPreparation(const std::string& manifest, const std::filesystem::p
                            const AssetReader& read, std::span<const uint8_t> image,
                            const std::function<bool()>& cancelled,
                            const PreparationInputs& inputs = {}, uint64_t content_epoch = 0,
-                           std::string* persistence_error = nullptr);
+                           std::string* persistence_error = nullptr,
+                           uint32_t shader_storage_version = kD3D12ShaderStorageVersion);
 }  // namespace rb_blitz::graphics

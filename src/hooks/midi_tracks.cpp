@@ -10,7 +10,7 @@
 // end). No asset is rewritten, no event from a playable track is discarded,
 // and no loader completion or cleanup is fabricated. Independent of Load Guard.
 // Evidence: docs/plans/finished/2026-10-13-load-guard.md, part 4.
-#include <rex/hook.h>
+#include <rex/ppc/hook.h>
 
 REX_EXTERN(__imp__sub_82438880);
 

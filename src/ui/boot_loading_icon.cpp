@@ -6,8 +6,7 @@
 #include <cmath>
 #include <utility>
 
-#include <rex/ui/imgui_drawer.h>
-#include <rex/logging.h>
+#include <rex/logging/log_category.h>
 
 namespace rb_blitz::ui {
 
@@ -42,13 +41,11 @@ ImU32 AuthoredSpinnerTint(float seconds) {
 
 }  // namespace
 
-BootLoadingIcon::BootLoadingIcon(rex::ui::ImGuiDrawer* drawer,
-                                 std::function<uint64_t()> guest_output_sequence,
+BootLoadingIcon::BootLoadingIcon(std::function<uint64_t()> guest_output_sequence,
                                  std::function<bool()> native_panel_ready,
                                  std::function<bool()> native_splash_ready,
                                  std::function<bool()> native_logo_load_started)
-    : ImGuiDialog(drawer),
-      guest_output_sequence_(std::move(guest_output_sequence)),
+    : guest_output_sequence_(std::move(guest_output_sequence)),
       native_panel_ready_(std::move(native_panel_ready)),
       native_splash_ready_(std::move(native_splash_ready)),
       native_logo_load_started_(std::move(native_logo_load_started)) {}
@@ -78,12 +75,11 @@ void BootLoadingIcon::SetFrames(boot_loading_art::BootLoadingFrames frames) {
 
 void BootLoadingIcon::ReleaseTextures() {
   for (auto& texture : textures_) {
-    if (texture) imgui_drawer()->ReleaseImageTexture(texture, texture_generation_);
-    texture = {};
+    texture.reset();
   }
 }
 
-void BootLoadingIcon::OnDraw(ImGuiIO& io) {
+bool BootLoadingIcon::Draw(ImGuiIO& io) {
   // The native splash can be visible without a new presenter refresh counter.
   // Never paint the host boot icon over that authored screen.
   if (!finished_ && native_splash_ready_ && native_splash_ready_()) {
@@ -114,7 +110,7 @@ void BootLoadingIcon::OnDraw(ImGuiIO& io) {
     ReleaseTextures();
     for (auto& atlas : atlases_rgba_) atlas.clear();
   }
-  if (finished_ || io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) return;
+  if (finished_ || io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) return true;
 
   const float seconds = std::chrono::duration<float>(
       std::chrono::steady_clock::now() - animation_started_).count();
@@ -122,22 +118,17 @@ void BootLoadingIcon::OnDraw(ImGuiIO& io) {
                              boot_loading_art::kAnimationFrameCount;
   const size_t atlas_index = frame_index / kFramesPerAtlas;
   if (atlases_rgba_[atlas_index].size() != kAtlasSize * kAtlasSize * 4)
-    return;
+    return true;
 
-  const auto generation = imgui_drawer()->image_texture_generation();
-  if (texture_generation_ != generation) {
-    ReleaseTextures();
-    texture_generation_ = generation;
-  }
   // Five 504x504 atlases hold the full 240-frame authored scroll at 30 fps
   // within the SDK's eight-texture limit.
   for (size_t i = 0; i < textures_.size(); ++i) {
     if (!textures_[i] && !atlases_rgba_[i].empty())
-      textures_[i] = imgui_drawer()->CreateImageTexture(
-          kAtlasSize, kAtlasSize, atlases_rgba_[i].data());
+      if (auto image = rex::ui::ImageTexture::Create(kAtlasSize, kAtlasSize, atlases_rgba_[i]))
+        textures_[i] = std::move(*image);
   }
-  const auto texture = textures_[atlas_index];
-  if (!texture) return;
+  const auto& texture = textures_[atlas_index];
+  if (!texture) return true;
 
   // The title's menu places the small autosave spinner near the upper right.
   // The 2339x986 reference puts its visible motif near (1860, 72), about
@@ -159,7 +150,7 @@ void BootLoadingIcon::OnDraw(ImGuiIO& io) {
   const float uv_right = uv_left + 1.0f / float(kAtlasColumns);
   const float uv_bottom = uv_top + 1.0f / float(kAtlasRows);
   ImGui::GetForegroundDrawList()->AddImageQuad(
-      texture, corner(-half, -half), corner(half, -half),
+      texture->GetTexture(), corner(-half, -half), corner(half, -half),
       corner(half, half), corner(-half, half),
       ImVec2(uv_left, uv_top), ImVec2(uv_right, uv_top),
       ImVec2(uv_right, uv_bottom), ImVec2(uv_left, uv_bottom),
@@ -168,6 +159,7 @@ void BootLoadingIcon::OnDraw(ImGuiIO& io) {
     first_draw_logged_ = true;
     REXLOG_INFO("boot_loading: autosave icon first draw");
   }
+  return true;
 }
 
 }  // namespace rb_blitz::ui

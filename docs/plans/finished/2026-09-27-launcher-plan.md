@@ -101,12 +101,12 @@ group instead of the withdrawn Experimental tab — and all of them are built, *
 | A Windows installer that already ships the game | [installer/](../../../installer), [installer/README.md](../../../installer/README.md) | the launcher's payload, packaging and mod-install route are already built |
 | The mod's installer, reusable from the launcher | `install-ultimate --dest <game root> (--from-pinned\|--from-zip\|--from-dir\|--from-url)` ([installer/src/commands.cpp:924-927](../../../installer/src/commands.cpp)), pinned URL+hash embedded at build time | D5's "Install Ultimate…" is a `CreateProcess` of a binary the installer already put in `{app}` |
 | The install's own record | `install-manifest.toml`: `[install] directory`, `game_directory`, `payload_commit`; `[game_data] source`, `directory`, `ultimate_installed` ([installer/src/install.cpp:1187-1208](../../../installer/src/install.cpp)) | first-run prefill for the General tab (D4) |
-| A flat cvar registry with a command line, a config file and source priorities | `--name=value` at startup, `rb_blitz.toml` next to the exe, `Source{kDefault,kConfig,kEnvironment,kCommandLine,kRuntime}` ([rexglue-sdk/src/core/cvar.cpp:83](../../../rexglue-sdk/src/core/cvar.cpp), `:97`, `:538`, `:639`) | the launcher's settings *are* cvars; no new settings plane is needed |
-| The launcher-relevant cvars | `game_data_root`/`user_data_root`/`update_data_root`/`cache_root` ([rexglue-sdk/include/rex/runtime.h:38-41](../../../rexglue-sdk/include/rex/runtime.h)), `dlc_root` ([src/hooks/dlc.cpp:33](../../../src/hooks/dlc.cpp)), `ultimate_mode`/`ultimate_payload_root`/`ultimate_patches` ([src/hooks/ultimate.cpp:100-113](../../../src/hooks/ultimate.cpp)), `input_backend`/`guide_button` ([rexglue-sdk/src/input/input_system.cpp:27-30](../../../rexglue-sdk/src/input/input_system.cpp)), `mnk_mode`/`mnk_mouse`/`mnk_sensitivity` and 25 `keybind_*` ([rexglue-sdk/src/input/mnk/mnk_input_driver.cpp:26-59](../../../rexglue-sdk/src/input/mnk/mnk_input_driver.cpp)), display/graphics/audio rows in the SDK's own cvar registry | the three tabs are a *projection* of the registry, not a new subsystem |
-| A boot-time hook where paths can still be corrected | `OnConfigurePaths` ([rexglue-sdk/include/rex/rex_app.h:113-115](../../../rexglue-sdk/include/rex/rex_app.h)), overridden at [src/rb_blitz_app.h:50](../../../src/rb_blitz_app.h) | the exact insertion point for "standalone uses the launcher's profile" (D3) |
+| A flat cvar registry with a command line, a config file and source priorities | `--name=value` at startup, `rb_blitz.toml` next to the exe, `Source{kDefault,kConfig,kEnvironment,kCommandLine,kRuntime}` ([rexglue-sdk/src/core/cvar.cpp:83](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/core/cvar.cpp), `:97`, `:538`, `:639`) | the launcher's settings *are* cvars; no new settings plane is needed |
+| The launcher-relevant cvars | `game_data_root`/`user_data_root`/`update_data_root`/`cache_root` ([rexglue-sdk/include/rex/runtime.h:38-41](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/include/rex/runtime.h)), `dlc_root` ([src/hooks/dlc.cpp:33](../../../src/hooks/dlc.cpp)), `ultimate_mode`/`ultimate_payload_root`/`ultimate_patches` ([src/hooks/ultimate.cpp:100-113](../../../src/hooks/ultimate.cpp)), `input_backend`/`guide_button` ([rexglue-sdk/src/input/input_system.cpp:27-30](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/input/input_system.cpp)), `mnk_mode`/`mnk_mouse`/`mnk_sensitivity` and 25 `keybind_*` ([rexglue-sdk/src/input/mnk/mnk_input_driver.cpp:26-59](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/input/mnk/mnk_input_driver.cpp)), display/graphics/audio rows in the SDK's own cvar registry | the three tabs are a *projection* of the registry, not a new subsystem |
+| A boot-time hook where paths can still be corrected | `OnConfigurePaths` ([rexglue-sdk/include/rex/rex_app.h:113-115](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/include/rex/rex_app.h)), overridden at [src/rb_blitz_app.h:50](../../../src/rb_blitz_app.h) | the exact insertion point for "standalone uses the launcher's profile" (D3) |
 | A precedent for "apply only where nothing else did" | `ApplyContentLicense()` reads `GetFlagSource("license_mask")` and writes only when it is `kDefault` ([src/rb_blitz_app.h](../../../src/rb_blitz_app.h)) | same shape as the profile merge |
 | The mouse-navigation feature, currently unconditional | `InstallMouseUiNavigation` in `OnPreSetup` ([src/rb_blitz_app.h:36](../../../src/rb_blitz_app.h)), device in [src/input/mouse_ui.h](../../../src/input/mouse_ui.h), arithmetic in [src/input/ui_nav.h](../../../src/input/ui_nav.h) | the Controller tab's mouse-support toggle is a *gate*, not a new feature |
-| A vendored UI stack already configured for this build | `imgui` OBJECT target ([rexglue-sdk/thirdparty/CMakeLists.txt:231-242](../../../rexglue-sdk/thirdparty/CMakeLists.txt)), SDL3 static with `SDL_SHARED=OFF`/`SDL_STATIC=ON` (`:247-250`), PNG decode via stb_image ([rexglue-sdk/src/ui/image_decode.cpp:17](../../../rexglue-sdk/src/ui/image_decode.cpp)) | the launcher needs no new third-party dependency (D1, D6) |
+| A vendored UI stack already configured for this build | `imgui` OBJECT target ([rexglue-sdk/thirdparty/CMakeLists.txt:231-242](../../../rexglue-sdk/thirdparty/CMakeLists.txt)), SDL3 static with `SDL_SHARED=OFF`/`SDL_STATIC=ON` (`:247-250`), PNG decode via stb_image ([rexglue-sdk/src/ui/image_decode.cpp:17](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/ui/image_decode.cpp)) | the launcher needs no new third-party dependency (D1, D6) |
 | An art pipeline with a stated licensing posture | [installer/tools/make_art.ps1](../../../installer/tools/make_art.ps1) (DPI ladder, centre-crop, "not ours, not committed"), `.gitignore` `/assets/installer/wizard-*.bmp`, committed `assets/icon/` (`blitz.png` + `blitz.ico`, plus the launcher's `blitz-mono.ico`) | R2's cover is generated, not committed (D11) |
 | A capture/verify toolkit | `scripts/diagnostics/capture_window.ps1`, `scripts/diagnostics/frame_diff.ps1`, `scripts/diagnostics/drive_ui.ps1`, `scripts/acceptance_*.ps1`, and the launcher's own `scripts/capture_controller_settings.ps1` / `scripts/acceptance_controller_settings.ps1` | the launcher is verified the same way the game is (E2/E3, now built) |
 | A dependency-free test harness | `tests/check.h`, targets in [CMakeLists.txt:128-172](../../../CMakeLists.txt) | controller-settings/profile/settings tests look exactly like the existing six |
@@ -172,7 +172,7 @@ shipped alone). Not in scope now.
   per-user install may be under `%LOCALAPPDATA%\Programs`, so "next to the exe" loses settings on
   update and breaks on a machine-wide install. Portable mode is the documented exception.
 - **Not** in `rb_blitz.toml`: that file is the game's own, rewritten wholesale by the F4 overlay's
-  *Save to config* (`SerializeToTOML`, [cvar.cpp:538](../../../rexglue-sdk/src/core/cvar.cpp)), and the
+  *Save to config* (`SerializeToTOML`, [cvar.cpp:538](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/core/cvar.cpp)), and the
   launcher must not fight it. Put host-only keys in it and the first F4 save drops them.
 - Format is TOML because it is what the rest of the project uses (SDK cvars, manifests, pins). Whether
   the launcher links the SDK's vendored `tomlplusplus` or hand-parses like
@@ -203,14 +203,14 @@ by double-click* must too, falling back to defaults when nothing was ever config
 Two details make it work, and both are [tree] facts:
 
 - `SetupEnvironment` reads `game_data_root`/`user_data_root`/`update_data_root`/`cache_root` **before**
-  any config file is loaded ([rexglue-sdk/src/ui/rex_app.cpp:110-140](../../../rexglue-sdk/src/ui/rex_app.cpp),
+  any config file is loaded ([rexglue-sdk/src/ui/rex_app.cpp:110-140](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/ui/rex_app.cpp),
   `LoadConfig` at `:157`). So after applying the profile, `OnConfigurePaths` must re-derive those paths
   from the (now profile-aware) cvars — there is no hook earlier than it that the project owns
   (`rex_app.h:98-115` lists them all). Built 2026-10-07 for the two a launcher row can name
   (`user_data_root`, `cache_root`); `game_data_root` and `update_data_root` have no row, and the
   command-line values the runtime already read are the same ones this re-reads.
 - Because the profile is loaded with `Source::kConfig` and `rb_blitz.toml` is loaded later at the same
-  rank (`Outranks` is `>=`, [cvar.cpp:83](../../../rexglue-sdk/src/core/cvar.cpp)), the game's own file
+  rank (`Outranks` is `>=`, [cvar.cpp:83](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/core/cvar.cpp)), the game's own file
   wins automatically. No manual source juggling, and `GetFlagSource` is only needed if a log line wants
   to name the winner.
 
@@ -1145,7 +1145,7 @@ Each block now says what is already in the tree, so a session does not rebuild i
 
 > **Goal.** The Controller tab's *Keyboard* group, which is the honest half of R13 and is untouched:
 > edit the 25 `keybind_*` strings
-> ([rexglue-sdk/src/input/mnk/mnk_input_driver.cpp:33-59](../../../rexglue-sdk/src/input/mnk/mnk_input_driver.cpp))
+> ([rexglue-sdk/src/input/mnk/mnk_input_driver.cpp:33-59](https://github.com/rexglue/rexglue-sdk/blob/c94f5ebdcb3c9d1a460ca48e04f9758448f8d518/src/input/mnk/mnk_input_driver.cpp))
 > with real capture, the shipped comma-alternatives grammar preserved, modifiers supported
 > (`Shift+Up`, `Ctrl+A` — `TakeModifiers`), conflict handling, `Esc` cancels capture, reserved keys
 > (`F3`, `F4`, `F7`, backtick, `Esc`) refuse to be bound and say why, and the profile refuses to save

@@ -11,6 +11,9 @@ Their target-specific bootstrap toolchain records are selected by CMake;
 the required native configure/codegen/link sequence and blockers are in the
 [platform expansion plan](../plans/in-progress/2026-11-09-linux-macos-release-plan.md).
 The Windows commands below remain the current supported build route.
+The current SDK requires LLVM Clang 20+ or AppleClang 17+ (Xcode 26+).
+The macOS deployment minimum is 13.3; native validation of the migrated SDK
+and modular runtime package remains pending on both Mac architectures.
 
 Prompt 2's Linux desktop launcher and package staging code are in
 [`installer/linux/README.md`](../../installer/linux/README.md). The Windows host
@@ -45,7 +48,7 @@ or `--ultimate-source '/path/to/ZIP-or-folder'` for local import. The packaged
 app offers the same optional mod setup after base import; its data never ships
 inside the installer. Select Ultimate with the in-game Game Version setting.
 
-On 2026-11-15, the internal `mac-arm64-release` build linked on an M1 with
+The following native measurement predates v0.11 and is not acceptance for the migrated stack. On 2026-11-15, the internal `mac-arm64-release` build linked on an M1 with
 Xcode 26.0.1 (17A400), AppleClang 17.0.0, SDK 26.0, CMake 3.31.6, and Ninja
 1.13.2. This is bring-up evidence, not release acceptance. Select the intended
 Xcode with `DEVELOPER_DIR` and put the tools and Python 3.11+ on `PATH`; apply
@@ -56,7 +59,7 @@ The native import lookup, protected-memory and signal-handler preservation
 regressions have focused tests. The Mac-only `vulkan_fragment_gradient` CTest
 renders synthetic triangles through the production SPIR-V arithmetic builder
 and the pinned MoltenVK stack, without game assets or a window. It verifies the
-fragment precision-helper workaround from SDK patch 0065 at 1×/2×/4× and checks
+fragment precision-helper workaround from SDK patch 0065 at 1Ã—/2Ã—/4Ã— and checks
 separate arithmetic rounding. Build `rb_blitz_vulkan_fragment_gradient_tests`
 and run `ctest --test-dir out/build/mac-arm64-release -R '^vulkan_fragment_gradient$' --output-on-failure`.
 Logs and startup before/after captures for this pass are under `out/macos/`.
@@ -75,22 +78,39 @@ This tests the shared transaction with synthetic game bytes and checks that
 the repository's supported fingerprint rejects them. It does not establish a
 Linux/macOS game build or graphical importer.
 
-> **Where to start:** §0 is once per checkout and §1 once per machine. On a checkout whose
-> toolchain and build tree are already in place, **§3 is the entry point** for a normal
-> source change; §2 is only for a build tree that has been moved or copied.
+> **Where to start:** Â§0 is once per checkout and Â§1 once per machine. On a checkout whose
+> toolchain and build tree are already in place, **Â§3 is the entry point** for a normal
+> source change; Â§2 is only for a build tree that has been moved or copied.
 
 ## 0. Prepare the SDK submodule (once per checkout)
 
-The pinned SDK submodule needs two idempotent repairs before it can be built from.
-Run both after a fresh clone, a `git submodule update`, or any checkout that
-rewrites `rexglue-sdk/` — not on every build:
+Initialize the pinned SDK and apply its registered stack before configuring. The applier reads the staged parent gitlink; [patches/sdk-stacks.json](../../patches/sdk-stacks.json) selects the matching baseline or v0.11 stack and rejects unknown revisions. Do not apply the old stack to v0.11.
 
 ```powershell
-# Where the execution policy is Restricted, -ExecutionPolicy Bypass is required; a
-# bare `.\scripts\...ps1` fails with UnauthorizedAccess.
+git submodule update --init --recursive
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\repair_flat_symlinks.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_patches.ps1
+python scripts/setup/prepare_vulkan_stack.py --source-root out/deps/rex-vulkan
+$vulkanSources = (Resolve-Path out/deps/rex-vulkan).Path
+cmake --preset win-amd64-release "-DREXGLUE_VULKAN_SOURCE_ROOT=$vulkanSources" -DREXGLUE_FETCH_VULKAN_DEPS=OFF
+cmake --build --preset win-amd64-release
 ```
+
+Vulkan source preparation is an explicit configure prerequisite. It verifies the SDK manifest's exact Headers, Loader, VMA and MoltenVK commits and canonical nested patch. Reuse the verified source root on later builds. `--mirror-root` or repeated `--mirror NAME=PATH` selects local Git mirrors. Audit populated sources without network access:
+
+```powershell
+python scripts/setup/prepare_vulkan_stack.py --source-root out/deps/rex-vulkan --check --offline
+```
+
+`REXGLUE_FETCH_VULKAN_DEPS=OFF` prevents Vulkan acquisition during configure; other SDK dependencies still need populated caches or network access. Windows D3D12-only builds use `-DREXGLUE_USE_VULKAN=OFF` and skip Vulkan preparation. See [toolchain.md](toolchain.md) for pins and validation limits. `apply_sdk_patches.ps1 -Check` audits patch state without writing.
+
+The project preserves the selected CMake install prefix across SDK dependency
+configuration. A relative `CMAKE_INSTALL_PREFIX` resolves against the build
+directory; an explicit absolute prefix retains its value.
+
+### Historical checkout repairs (2026-09-28)
+
+The counts and removed dependency paths below describe the pre-v0.11 checkout, retained to explain the repair tool. They are not the current dependency inventory.
 
 1. **`repair_flat_symlinks.ps1`** expands the SDK files that are symbolic links
    upstream into regular files holding the target's content. Windows here cannot
@@ -103,15 +123,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_pa
    How many entries the scan meets depends on which submodules are initialised, which
    is why the number in this paragraph moved when the smoke test of 2026-09-28 cloned
    with `--recurse-submodules`: **16** in this machine's long-lived tree, which has
-   MoltenVK unchecked, and **18** in a full clone (those 16 — 15
-   `libmspack/cabextract/mspack` files and o1heap's `CLAUDE.md` — plus two MoltenVK
+   MoltenVK unchecked, and **18** in a full clone (those 16 â€” 15
+   `libmspack/cabextract/mspack` files and o1heap's `CLAUDE.md` â€” plus two MoltenVK
    headers that link to a sibling file). Either way a healthy tree prints
    `repaired from target    : 0`, `not repairable          : 0` and exit 0, and marks
    what it repaired `--skip-worktree`, because the residual difference (a file *type*
    change, not content) cannot be resolved on this machine.
    A full clone also brings eight links with **no file to copy**, which are reported
    rather than repaired: one points at a *directory* (MoltenVK's
-   `MoltenVK/include/MoltenVK` → `../MoltenVK/API`) and seven point into MoltenVK's
+   `MoltenVK/include/MoltenVK` â†’ `../MoltenVK/API`) and seven point into MoltenVK's
    `External/` and `Package/` trees, which that submodule's own scripts fetch and which
    no target on this host compiles. They print as `directory links (skip) : 1` and
    `external targets (skip) : 7`; only a target the submodule *does* track and that is
@@ -120,7 +140,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_pa
    exited 1 on every fresh clone: [bringup-log.md](../history/bringup-log.md),
    "Clean-checkout smoke test".)
    **Do not** try to fix this by setting `core.symlinks true` in the submodules:
-   checkout then fails with `unable to create symlink …: Function not implemented`
+   checkout then fails with `unable to create symlink â€¦: Function not implemented`
    and deletes the file.
 2. **`apply_sdk_patches.ps1`** replays the complete
    [SDK patch stack](../../patches/README.md), including the initialized pinned
@@ -134,7 +154,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_pa
    repeated invocation without private game data or SDK compilation.
 
 Afterwards the submodule showing ` M` on the files the patch set names is the
-expected, correct state — they are the applied patches, not drift to be cleaned.
+expected, correct state â€” they are the applied patches, not drift to be cleaned.
 The parent repo stays clean, because `.gitmodules` marks the submodule
 `ignore = dirty`; the audit above is what replaces the warning that setting
 suppresses. Full rationale and manual equivalents:
@@ -142,23 +162,23 @@ suppresses. Full rationale and manual equivalents:
 
 ## 1. Toolchain prerequisites
 
-Check these before the first build and install whatever is missing — it is a one-time
-cost, and every later rebuild is the incremental path in §3.
+Check these before the first build and install whatever is missing â€” it is a one-time
+cost, and every later rebuild is the incremental path in Â§3.
 
 The versions in [config/toolchain.toml](../../config/toolchain.toml) are the **frozen set**
 ([toolchain.md](toolchain.md)): the toolchain the last recorded acceptance run was made
-with. That is a record, not a wall — a different version is reported and still builds, and
+with. That is a record, not a wall â€” a different version is reported and still builds, and
 only one below the record's `minimum` stops the build. So the installs below may be newer
 than the record, or older down to the minimum, without any other change.
 
 The build is a plain `Ninja` + `clang` build of the pinned SDK **from source**
-(`REXSDK_DIR` points at `rexglue-sdk/`, and `generated/rexglue.cmake` does an
-`add_subdirectory`), so the first build compiles SDL3, fmt, spdlog,
+(`REXSDK_DIR` points at `rexglue-sdk/`; the parent CMake file adds it directly
+and calls `rexglue_project(rb_blitz OUTPUT_DIR generated/default)`), so the first build compiles SDL3, fmt, spdlog,
 tomlplusplus, lzma, mspack and the ReXGlue runtime as well. That needs four
 things:
 
-1. **LLVM/Clang** — supplies `clang`, `clang++`, `lld-link` and `llvm-ar`.
-2. **MSVC build tools _and_ the Windows SDK** — the presets target
+1. **LLVM/Clang 20+** â€” supplies `clang`, `clang++`, `lld-link` and `llvm-ar`.
+2. **MSVC build tools _and_ the Windows SDK** â€” the presets target
    `x86_64-pc-windows-msvc`, so clang needs the MSVC/UCRT headers and the Windows
    SDK import libraries. Clang on its own is **not** enough, and a failure here
    looks like a missing `<windows.h>` / `<vector>` rather than a missing
@@ -181,7 +201,7 @@ clang++ -v -E -x c++ "$env:TEMP\probe.cpp" 2>&1 |
 All five tools must resolve, and the last command must list at least one MSVC
 include directory and one Windows Kits include directory. If it lists neither,
 clang is installed but the headers are not. An "ignoring nonexistent directory
-`...\MSVC\<ver>\atlmfc\include`" note in that output is normal — ATL/MFC is an
+`...\MSVC\<ver>\atlmfc\include`" note in that output is normal â€” ATL/MFC is an
 optional VS component that this build does not use.
 
 ### Installing them
@@ -196,7 +216,7 @@ winget install --id Ninja-build.Ninja -e --accept-package-agreements --accept-so
 
 > **Trap met installing this here:** `LLVM.LLVM`'s MSI installs to
 > `C:\Program Files\LLVM`, but the silent install **does not add its `bin` to
-> `PATH`** — the §1 check above still reports `clang`, `clang++` and `lld-link` as
+> `PATH`** â€” the Â§1 check above still reports `clang`, `clang++` and `lld-link` as
 > `MISSING` after a "Successfully installed". Append `C:\Program Files\LLVM\bin`
 > to the machine `PATH` by hand and open a new shell. `Kitware.CMake`'s MSI does
 > add itself, and `Ninja-build.Ninja` is a user-scope portable that adds its own
@@ -212,17 +232,17 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools -e `
 ```
 
 `--includeRecommended` brings in the MSVC x64 toolset plus a current Windows SDK;
-allow 15–30 minutes and several GB. To pin them explicitly instead, add
+allow 15â€“30 minutes and several GB. To pin them explicitly instead, add
 `--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64` and
 `--add Microsoft.VisualStudio.Component.Windows11SDK.22621` (or whichever SDK
 revision is current) to the `--override` string.
 
 Equally valid alternatives if one of them already exists:
 
-- an existing **Visual Studio** install — open *x64 Native Tools Command Prompt
+- an existing **Visual Studio** install â€” open *x64 Native Tools Command Prompt
   for VS* and run the same `cmake --preset` commands from there, so `INCLUDE` and
   `LIB` are already set;
-- **LLVM in a non-standard location** — the presets take the compiler from
+- **LLVM in a non-standard location** â€” the presets take the compiler from
   `PATH`, so either add its `bin` to `PATH`, or configure once by hand with
   `-DCMAKE_C_COMPILER=<path>\clang.exe -DCMAKE_CXX_COMPILER=<path>\clang++.exe`.
 
@@ -244,7 +264,7 @@ Pop-Location
 `exit=0` means clang, lld and the MSVC/Windows SDK headers and libraries are all
 mutually findable. If it instead reports a missing `libcmt.lib`, `ucrt.lib`,
 `kernel32.lib` or `windows.h`, the MSVC/Windows SDK half of step 2 is incomplete
-— that is the most common way this toolchain ends up broken.
+â€” that is the most common way this toolchain ends up broken.
 
 ## 2. Regenerate a stale build tree
 
@@ -259,13 +279,13 @@ where a tree was configured with:
 Select-String CMAKE_HOME_DIRECTORY out\build\win-amd64-release\CMakeCache.txt
 ```
 
-If that path is not where the checkout is now, delete the tree and regenerate it — do
+If that path is not where the checkout is now, delete the tree and regenerate it â€” do
 **not** build into it as-is.
 
 `out\build\win-amd64-release\rb_blitz.toml` is *not* a build artifact and CMake
 never writes it: the runtime reads `<exe name>.toml` from its own directory (the
 in-game settings overlay edits the same file), and this checkout's copy is the
-hand-maintained local profile — `mnk_mode = true` (the deterministic keyboard
+hand-maintained local profile â€” `mnk_mode = true` (the deterministic keyboard
 input path), `d3d12_readback_resolve = true` (render-target readback on the CPU,
 the B-010 escape hatch for the stale CPU mirror),
 `log_level = "debug"`,
@@ -296,9 +316,11 @@ gpu = "off"
 
 `d3d12_readback_resolve` is a cvar, so it belongs here rather than in
 [rb_blitz_manifest.toml](../../rb_blitz_manifest.toml); see
-[rb3-references.md](../reference/rb3-references.md) §8.
+[rb3-references.md](../reference/rb3-references.md) Â§8.
 
-An `[enhancements]` table belongs in this file too when a toggle is being tested. Every toggle in it
+**Historical local-profile example:** the following retired toggles describe the early bring-up build; current settings and defaults are listed in [engine/toggles.md](../engine/toggles.md).
+
+An `[enhancements]` table belonged in this file when a toggle was being tested. Every toggle in it
 is **off by default and unimplemented**, so an absent table is the faithful configuration and no
 installed build ships one. The nine toggles, what each will gate, and the boot line that reports them
 are in [engine/toggles.md](../engine/toggles.md):
@@ -314,32 +336,13 @@ codegen target during the build.
 
 ### The two graphics backends (D3D12 and Vulkan)
 
-The project and Windows presets default `REXGLUE_USE_VULKAN=ON` alongside
-`REXGLUE_USE_D3D12=ON`. The project sets this before loading the SDK, whose own Windows default
-is OFF, so configurations made without a preset also include Vulkan. An existing cache with
-Vulkan disabled still needs `cmake --preset win-amd64-release` to enable it. Configure prints
-the backends it settled on:
+The parent `REXGLUE_USE_VULKAN` option maps to SDK `REXGLUE_GPU_VULKAN` before adding the SDK; both default ON. D3D12 uses SDK `REXGLUE_GPU_D3D12` on supported Windows builds. Renderer rows follow actual backend targets (`rex::gpu-xenos-d3d12` / `rex::gpu-xenos-vulkan`).
 
-```
---   Graphics: D3D12=ON Vulkan=ON
-```
+Vulkan uses the pinned source stack from Â§0. Windows source-builds the loader with MASM (`ml64` from Visual Studio); Linux stages its SONAME link and resolved file. Desktop macOS uses the pinned loader and source-built patched MoltenVK. iOS links MoltenVK directly and stages signed frameworks without a desktop loader or ICD. Native Linux/macOS/iOS acceptance for this migrated stack remains unproven.
 
-That single pair of variables decides two things that must agree: what the GPU plugin contains,
-and what the game's in-game *Renderer* row offers (`RBBLITZ_BACKENDS` in
-[CMakeLists.txt](../../CMakeLists.txt) → the capability probe in
-[src/settings/boot.cpp](../../src/settings/boot.cpp)). At run time Vulkan is additionally probed: the
-SDK opens `vulkan-1.dll` with `LoadLibrary` rather than linking it, so a machine without a Vulkan
-loader does not offer Vulkan and a boot on the other backend is never at risk. A development tree
-relies on the loader the GPU driver installs (any Windows install with a Vulkan driver has one), and
-`--gpu_backend=vulkan` refuses cleanly when it is missing (`RbBlitzApp::SelectGpuBackend`); the
-**installer's payload ships its own copy** so an install does not depend on the driver having
-dropped one — see [installer/README.md](../../installer/README.md) §"The payload allow-list". Building
-Vulkan pulls in the SDK's
-`glslang`/`spirv-tools`/`spirv-headers`/`vulkan-headers`/`vulkan-memory-allocator` submodules — they
-are initialised in this checkout (see [known-issues.md](../reference/known-issues.md)); a fresh clone needs
-`git -C rexglue-sdk submodule update --init --recursive` for them.
+`-DREXGLUE_USE_VULKAN=OFF` omits Vulkan targets and dependencies. Runtime selection also probes a usable driver; an installed loader alone does not establish device availability. See [distributable.md](distributable.md) for the configured package inventory.
 
-In Help & Options → Audio / Video → Video, confirm the Renderer row to cycle between available
+In Help & Options â†’ Audio / Video â†’ Video, confirm the Renderer row to cycle between available
 backends. The row shows the saved selection immediately; leave Help & Options and accept the
 restart prompt to run it. A usable inactive backend must remain selected through saving and the
 next boot. Before 2026-10-24 the graphics reconciler replaced even a usable Vulkan preference with
@@ -355,23 +358,27 @@ For a dev override, launch `rb_blitz.exe --gpu_backend=vulkan`; an explicit over
 setting for that process, so use a normal launch when testing the menu's saved preference.
 
 The same pair of switches reaches the **installed** product through a chain that has to agree at
-every step: the configured source tree → the freshly built game and GPU plugin → the installer's
-payload snapshot → the setup executable → the installed binaries. `build.ps1` checks the middle
+every step: the configured source tree â†’ the freshly built game and GPU plugin â†’ the installer's
+payload snapshot â†’ the setup executable â†’ the installed binaries. `build.ps1` checks the middle
 of that chain: `make_payload.ps1` records the snapshot's backends and commit in
 `payload-manifest.toml`, and an existing `installer\out\payload` is reused only when it proves to
-be the tree being shipped — otherwise it is rebuilt, with the reason printed. That check exists
+be the tree being shipped â€” otherwise it is rebuilt, with the reason printed. That check exists
 because it failed once: `REXGLUE_USE_VULKAN` reached these presets on 2026-10-13 and an older
 snapshot was kept, embedded and installed, so the installed game's *Renderer* row offered D3D12
-alone ([installer/README.md](../../installer/README.md) §"The payload allow-list",
-[known-issues.md](../reference/known-issues.md)). Read the backends out of the configure log above,
-not out of a `CMakeCache.txt` you happen to find — a second, stale `out/build/*` tree is a real
+alone ([installer/README.md](../../installer/README.md) Â§"The payload allow-list",
+[known-issues.md](../reference/known-issues.md)). Read available backend targets from the current configure log,
+not out of a `CMakeCache.txt` you happen to find â€” a second, stale `out/build/*` tree is a real
 configuration and not the one a given setup executable was built from.
 
 ### The first build on a tree that has never run codegen
 
+The v0.11 `rexglue_project` integration generates and reloads the source list during the ordinary build. No deliberate codegen failure or mandatory second invocation remains. All generated translation and fingerprint outputs are ignored.
+
+**Historical pre-v0.11 failure:** the following diagnostic and workaround describe the former generated integration, retained as evidence.
+
 `generated/default/sources.cmake` is what names the 104 recompiled partitions to
 CMake, and codegen writes it *during* the build. A build system cannot learn about
-sources that appear in the middle of it — Ninja only reloads the build system
+sources that appear in the middle of it â€” Ninja only reloads the build system
 between invocations, and naming the generated file as a `CMAKE_CONFIGURE_DEPENDS`
 dependency does not change that (measured: the property is accepted and ignored for
 a file a custom command produces). So the first build of a fresh checkout stops by
@@ -394,7 +401,7 @@ Run those two commands again and the build completes normally. The check is adde
 by [CMakeLists.txt](../../CMakeLists.txt) only to a configuration that predates the
 generated sources, and it exists to replace the alternative: linking without the
 recompiled code at all, which fails as a screenful of undefined symbols
-(`_sub_…`, `PPCImageConfig`) that names neither codegen nor the fix. Once one
+(`_sub_â€¦`, `PPCImageConfig`) that names neither codegen nor the fix. Once one
 preset has run codegen, the other preset configures with the sources already
 present and needs no second pass.
 
@@ -406,44 +413,24 @@ cmake --build --preset win-amd64-release
 
 This re-runs CMake automatically when `CMakeLists.txt` changes (so a file added
 to `RBBLITZ_SOURCES` is picked up without a manual configure step) and then
-compiles only what changed — routinely under a minute. Useful variants:
+compiles only what changed â€” routinely under a minute. Useful variants:
 
 ```powershell
 cmake --build --preset win-amd64-release --target rb_blitz    # skip unrelated targets
 cmake --build --preset win-amd64-release -- -v                # show full command lines
 ```
 
-Outputs land in `out\build\win-amd64-release\`: `rb_blitz.exe`, `rexruntime.dll` and
-`rexgpu-xenos.dll` beside it. (The tree used to build a second executable, the settings
-application; it retired on 2026-10-19 and the payload snapshot now reads the game alone —
-see [the retired settings application](#the-retired-settings-application).)
+Outputs land in `out\build\win-amd64-release\`. Run the title with its staged modular SDK runtime, SDL3/provider modules, configured backend dependencies and resources. The [runtime module inventory](../../installer/config/runtime-modules.json) and shared [inventory helper](../../installer/tools/runtime_inventory.py) define the complete platform contract; two SDK DLLs are insufficient for v0.11.
 
-The two DLLs are **copies**: the SDK builds them into its own staging directory
-(`rexglue-sdk/out/win-amd64\`) and `rexglue_setup_target` refreshes the ones beside
-the executable in a `POST_BUILD` step of the `rb_blitz.exe` **link** — so a change
-that only reaches `rexgpu-xenos.dll` (any edit under
-`rexglue-sdk/src/graphics/`, including patch 0002's texture cache) relinks the
-plugin and leaves the copy beside the executable stale until something relinks the
-executable (measured 2026-09-30: a plugin-only build left a 2,852,352-byte
-`rexgpu-xenos.dll` in `rexglue-sdk/out/win-amd64` and a 2,850,304-byte one in
-`out\build\win-amd64-release`). Touch a project source and rebuild, or copy the
-DLL by hand, before a run that has to see a plugin-only change.
+`rexglue_setup_target` delegates staging to public `rexglue_configure_target` and tracks linked target files so runtime changes refresh the executable directory. Release, Debug and RelWithDebInfo use separate preset trees. Validate staged files for the selected configuration.
 
-`win-amd64-debug` and `win-amd64-relwithdebinfo` build into their own trees in the same
-checkout, and neither preset disturbs the other: the SDK's staging directory
-(`rexglue-sdk/out/win-amd64`) holds both configurations side by side because Debug
-artifacts are `d`-suffixed (`rexruntimed.dll`, `rexglued.exe`). The Debug preset is a full
-preset, not a build/test-only one: it builds, its host tests pass, and it walks the whole
-offline route (`acceptance_song.ps1 -BuildDir out/build/win-amd64-debug`). It could not
-until patch 0007 dropped the SDK's over-strict `XamAlloc_entry` assert — the flag-word
-parameter the implementation ignores — which stopped it at the first A on the title screen
-([known-issues.md](../reference/known-issues.md) "Accepted", [bringup-log.md](../history/bringup-log.md)
-B-013). Acceptance runs are still Release runs, because Release is the configuration that
-ships.
+**Historical staging measurement (2026-09-30):** a plugin-only build left a 2,852,352-byte `rexgpu-xenos.dll` in the old `rexglue-sdk/out/win-amd64` directory and a stale 2,850,304-byte copy beside the title. The former integration copied only after a title link. Current target dependency tracking replaces that manual-copy workaround.
+
+**Historical Debug acceptance:** the former `d`-suffixed runtime (`rexruntimed.dll`, `rexglued.exe`) passed host tests and the offline route after patch 0007 removed the ignored `XamAlloc_entry` flag assert. See [bringup-log.md](../history/bringup-log.md) B-013. This does not establish v0.11 Debug gameplay acceptance. Release remains the shipping configuration.
 
 ### The build gate: `game/` must be the fingerprinted dump
 
-Every build of `rb_blitz_codegen` — and therefore of `rb_blitz` — first runs
+Every build of `rb_blitz_codegen` â€” and therefore of `rb_blitz` â€” first runs
 `rb_blitz_fingerprint` against `game/default.xex`, and stops the build (exit 1)
 when it is not the dump
 [config/game_fingerprints.toml](../../config/game_fingerprints.toml) describes:
@@ -458,7 +445,7 @@ That is deliberate: every address in [config/](../../config) belongs to one imag
 wrong `default.xex` has to fail here, with this message, instead of at runtime as
 `Call to invalid or unregistered function`. A mismatch prints the digest it found
 next to the one it expected, and the gate also fails if the fingerprint file itself
-cannot be read — malformed input is not a way past the check.
+cannot be read â€” malformed input is not a way past the check.
 
 The same binary is the audit tool. The gate checks the codegen input (`default.xex`)
 only, which costs ~0.07 s; `--all` additionally hashes `gen/main_xbox.hdr` and the
@@ -470,11 +457,11 @@ only, which costs ~0.07 s; `--all` additionally hashes `gen/main_xbox.hdr` and t
 
 Its other job is generating
 [generated/fingerprint_expected.h](../../generated), the compiled-in copy of the same
-numbers that the runtime logs against (see §4). It is regenerated automatically
+numbers that the runtime logs against (see Â§4). It is regenerated automatically
 whenever the `.toml` changes, and is not committed.
 
-A deliberately modified content root is a supported configuration — copying an
-Ultimate payload's `gen/` and `default.xex` over a dump produces one — so the gate
+A deliberately modified content root is a supported configuration â€” copying an
+Ultimate payload's `gen/` and `default.xex` over a dump produces one â€” so the gate
 can be relaxed for a checkout whose `game/` is one:
 
 ```powershell
@@ -491,6 +478,8 @@ mod's, never a claim that an Ultimate image compiles: see
 [ultimate-compat.md](ultimate-compat.md).
 
 ### The other gate: the frozen toolchain
+
+The output below is the historical 2026-09-28 baseline; current pins are in [toolchain.md](toolchain.md).
 
 Every build of `rb_blitz_codegen` also runs `rb_blitz_toolchain` against
 [config/toolchain.toml](../../config/toolchain.toml), right after the game-data gate,
@@ -509,16 +498,16 @@ This is what replaced "the absolute compiler paths in this build tree's
 `CMakeCache.txt`" as the record of a working toolchain: the same knowledge, in the
 repository, checked on every machine. Only a version below the recorded `minimum` and an
 SDK checkout off its pinned commit stop a build; anything else is reported and builds.
-Both behaviours have a switch — `-DRBBLITZ_STRICT_TOOLCHAIN=ON` refuses every
-deviation, `-DRBBLITZ_ALLOW_OTHER_TOOLCHAIN=ON` accepts every one — and the whole
+Both behaviours have a switch â€” `-DRBBLITZ_STRICT_TOOLCHAIN=ON` refuses every
+deviation, `-DRBBLITZ_ALLOW_OTHER_TOOLCHAIN=ON` accepts every one â€” and the whole
 subject is [toolchain.md](toolchain.md).
 
 `rb_blitz.exe` carries the Blitz icon. [rb_blitz.rc](../../rb_blitz.rc) compiles
 [assets/icon/blitz.ico](../../assets/icon/blitz.ico) into the executable, so the icon is a
 build input like any other source: replacing the `.ico` and rebuilding is the
 whole edit, since nothing else references the file. Controller Settings ships the
-black-and-white alt icon instead — `assets/icon/blitz-mono.ico`, made from the colour
-art by [scripts/assets/make_mono_icon.py](../../scripts/assets/make_mono_icon.py) — so a game window and
+black-and-white alt icon instead â€” `assets/icon/blitz-mono.ico`, made from the colour
+art by [scripts/assets/make_mono_icon.py](../../scripts/assets/make_mono_icon.py) â€” so a game window and
 Controller Settings window are told apart in the taskbar. One resource covers every
 surface of each exe, because SDL registers its window class with the first
 `RT_GROUP_ICON` in it: Explorer, title bar, taskbar and Alt-Tab all follow from it.
@@ -538,7 +527,7 @@ The timestamp must be from this build, and the check must print `True`.
 
 ### Host unit tests (run these instead of booting, when they cover the change)
 
-The tests under [tests/](../../tests) exercise pure host logic — the B-009 MOGG key
+The tests under [tests/](../../tests) exercise pure host logic â€” the B-009 MOGG key
 path, whose SDK-free half lives in
 [src/hooks/crypto_keytable.h](../../src/hooks/crypto_keytable.h), the fingerprint
 parsing/comparison in
@@ -547,7 +536,7 @@ layout, the payload overlay, the path policy, the mouse-navigation stepper, the
 Ultimate compatibility layer's decidable half in
 [src/hooks/ultimate_plan.h](../../src/hooks/ultimate_plan.h) and the frozen-toolchain
 record in
-[src/util/toolchain_pin.h](../../src/util/toolchain_pin.h) — so they need no game
+[src/util/toolchain_pin.h](../../src/util/toolchain_pin.h) â€” so they need no game
 image, no runtime and no window, and finish in a couple of seconds:
 
 ```powershell
@@ -555,34 +544,37 @@ cmake --build --preset win-amd64-release
 ctest --test-dir out\build\win-amd64-release --output-on-failure
 ```
 
-Expected output is however many tests that tree registers — `ctest --test-dir <dir> -N` lists them.
-A `REXGLUE_USE_VULKAN=ON` configure forces `BUILD_TESTING` off from the SDK's
-`thirdparty/CMakeLists.txt`, so a release tree may register none while the debug tree keeps them on
-with `-DREXGLUE_USE_VULKAN=OFF -DBUILD_TESTING=ON` ([input-flow.md](../engine/input-flow.md) records
-the same hazard). Exactly one case needs the dump at
+Expected output is however many tests that tree registers â€” `ctest --test-dir <dir> -N` lists them.
+The title preserves the requested `BUILD_TESTING` value around SDK dependency
+configuration, so Vulkan release builds can retain the title tests. SDK unit and
+PPC fixture registration are controlled separately by `REXGLUE_BUILD_TESTS` and
+`REXGLUE_BUILD_PPC_TESTS`. Configure with `-DBUILD_TESTING=ON` for the title suite;
+disabling Vulkan is not required. Windows application builds always validate and
+stage the authored controller and internal keyboard/mouse packages, including
+when `BUILD_TESTING=OFF`; artwork packaging is a runtime dependency. Exactly one case needs the dump at
 all (`fingerprint_real_game_dump` hashes `game\default.xex`), and it prints
 `[ SKIP ]` instead of running when the dump is absent or, with
 `RBBLITZ_ALLOW_MODIFIED_GAME_DATA=ON`, when it is not the supported revision. A failing check
 prints the case name, `file:line`, and for memory comparisons the first differing
 bytes, so a red test is self-explanatory. The harness is
-[tests/check.h](../../tests/check.h) — deliberately dependency-free, because the
-SDK's vendored `catch2` submodule is not initialised — so a new test file needs
+[tests/check.h](../../tests/check.h) â€” deliberately dependency-free, because the
+title checks do not require the SDK's Catch2 test framework â€” so a new test file needs
 only an `add_executable` + `add_test` pair next to the existing one in
 `CMakeLists.txt`, plus `src` on its include path. Adding coverage here is the
-cheapest way to make a fix durable: `docs/reference/rb3-references.md` §7.3 counts "zero
+cheapest way to make a fix durable: `docs/reference/rb3-references.md` Â§7.3 counts "zero
 automated tests" as the failure mode that let the RB3 port's fixes rot.
 
 ## 4. Run it
 
-Start it **from the build directory** — that is where the exe looks for
-`rexruntime.dll`, the GPU plugin, its `.toml` and where it creates `logs\`:
+Start it **from the build directory** â€” that is where the exe looks for
+the configured modular SDK runtime, its `.toml` and where it creates `logs\`:
 
 ```powershell
 cd out\build\win-amd64-release
 .\rb_blitz.exe --game_data_root=..\..\..\game
 ```
 
-`--game_data_root` may point at either supported content variant — the retail dump,
+`--game_data_root` may point at either supported content variant â€” the retail dump,
 or a vanilla dump with a [Rock Band Blitz
 Ultimate](https://github.com/ultimate-mods-rb/blitz-ultimate) payload installed next
 to it. Nothing else on the command line has to change: the payload is detected and
@@ -591,17 +583,17 @@ unioned over the game root at boot, and `--ultimate_mode` / `--ultimate_payload_
 copied *over* the game root, that merged layout is detected too. The
 **build** input does not get that choice: codegen and every byte-guarded patch are
 addressed against the vanilla `default.xex`, so keep it (the mod's own installer
-suggests renaming it to `default_vanilla.xex` before installing) —
+suggests renaming it to `default_vanilla.xex` before installing) â€”
 [ultimate-compat.md](ultimate-compat.md).
 
 DLC needs no command-line change either: packages dropped in
 `<game_data_root>/dlc/<title_id>/<content_type>/<package>` are mounted in place and
 read-only at boot, and `--dlc_root` (or `dlc_root` in `rb_blitz.toml`) points
-somewhere else if they live elsewhere. A dumped song folder — thousands of loose
-`CON`/`LIVE` containers with no arrangement at all — goes in `--dlc_library` instead (or
+somewhere else if they live elsewhere. A dumped song folder â€” thousands of loose
+`CON`/`LIVE` containers with no arrangement at all â€” goes in `--dlc_library` instead (or
 straight into `--dlc_root`, which is read as a library when it is not the layout
 above); each package is placed under the title id and content type its own header
-names, recursively, and nothing is copied or linked — [dlc.md](dlc.md), which also
+names, recursively, and nothing is copied or linked â€” [dlc.md](dlc.md), which also
 names the boot log line that says what was found.
 
 Every boot logs the identity of both halves, so a log states which binary ran
@@ -609,41 +601,41 @@ against which image before any other evidence is read:
 
 ```text
 [info] [core] [t20932] boot identity: build: rexglue-v0.10.0.0-dev.unknown-win-amd64-Release@20260919_2358
-[info] [core] [t20932] game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d62…84bb)
+[info] [core] [t20932] game data identity: Rock Band Blitz 0.0.0.2 (9023488 bytes, sha256 e2195d62â€¦84bb)
 ```
 
 The first line is the SDK build stamp compiled into the binary, the second the
 `default.xex` it actually booted. A different `default.xex` **warns and continues**
-— `game data identity: MODIFIED - … is N bytes, sha256 …` followed by an `expected:`
+â€” `game data identity: MODIFIED - â€¦ is N bytes, sha256 â€¦` followed by an `expected:`
 line naming the values in
-[config/game_fingerprints.toml](../../config/game_fingerprints.toml) — because pointing
+[config/game_fingerprints.toml](../../config/game_fingerprints.toml) â€” because pointing
 a built executable at an Ultimate content root is a supported run, not a build error.
-The fatal half of that check is the gate in §3, not the boot.
+The fatal half of that check is the gate in Â§3, not the boot.
 
 What that warning can and cannot see is measured by
 `scripts\acceptance\acceptance_wrong_data.ps1`, which boots the recorded image, the Ultimate
 payload's own image (a valid XEX with a different digest) and three corrupt copies,
-and reports the §3 gate's verdict on the same file as the contrast:
+and reports the Â§3 gate's verdict on the same file as the contrast:
 
 ```powershell
 .\scripts\acceptance\acceptance_wrong_data.ps1
 ```
 
 Three things it pins down. A valid image with a different digest boots on to the title
-screen rather than being rejected — the warning is the whole response. A corrupt copy
+screen rather than being rejected â€” the warning is the whole response. A corrupt copy
 never reaches the identity check at all, because that runs after `OnPostLoadXexImage`
-and the loader has already refused the file — with a sentence, one per shape, since
+and the loader has already refused the file â€” with a sentence, one per shape, since
 [patches/rexglue-sdk/0008](../../patches/rexglue-sdk/0008-xex-image-bounds-checks.patch):
 1 MiB of the recorded image (`truncated`) is `its block table describes 9011200 bytes
 of image data, the image holds 1036288 after its 12288-byte header`, its first 2 KiB
 (`short`) is `its header claims 12288 bytes, the image holds 2048`, and a zero-length
-file (`empty`) is `Failed to map … (0 bytes) for module game:\default.xex`. Before
+file (`empty`) is `Failed to map â€¦ (0 bytes) for module game:\default.xex`. Before
 patch 0008 the first of those ended the process with `0xC0000005` and the loader's own
 `Loading XEX image: game:\default.xex` as the last line written (B-014 in
 [known-issues.md](../reference/known-issues.md)). And the gate refuses all three on the same file
 (`SIZE MISMATCH`), which is the half that covers the build.
 
-Development launches write a new numbered file, `logs\rb_blitz_001.log`, `_002`, …:
+Development launches write a new numbered file, `logs\rb_blitz_001.log`, `_002`, â€¦:
 
 ```powershell
 Get-ChildItem logs\*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1 Name,Length,LastWriteTime
@@ -690,10 +682,10 @@ synthetic pad on the same guest slot, and a keyboard-driven walk should not depe
 on where the mouse pointer happens to be resting.
 
 The song-route counterpart drives the whole offline route instead of stopping at
-the window: it presses title → sign-in → offline prompt → main menu → song list,
+the window: it presses title â†’ sign-in â†’ offline prompt â†’ main menu â†’ song list,
 selects the song by row with the *left* stick (arrow keys are the right stick in
 this title), waits for the song's own audio envelope
-(`XMPSetPlaybackController(0,1)` →
+(`XMPSetPlaybackController(0,1)` â†’
 `(0,0)`), and reads the results screen back as OCR text, passing a run only if that
 screen names the expected song. Vanilla content by default
 (`--ultimate_mode=0`), so an installed Ultimate payload cannot change the result:
@@ -712,12 +704,12 @@ re-checks instead of assuming one press is enough.
 
 It clears `logs\` before each run and writes `out\m5-acceptance\runNN-*.png` (every
 screen it asserted on as it went), a copy of each run's log, and `summary.json`; the
-exit code is non-zero unless every run passed the whole launch → results path.
+exit code is non-zero unless every run passed the whole launch â†’ results path.
 
 `-Pause` adds the one route inside the song that the log cannot show: a pause
-taken and released with Start. The title prints nothing when it pauses — a pause
+taken and released with Start. The title prints nothing when it pauses â€” a pause
 does not touch the playback controller the song's envelope is read from, so a
-paused run's log carries nothing but the pair that brackets the whole song — so
+paused run's log carries nothing but the pair that brackets the whole song â€” so
 the pause menu is the evidence: `GAME PAUSED` has to be on the screen, and off it
 again on the second Start, and the song still has to reach its own stop marker and
 name itself on the results screen afterwards. The paused span stays inside the
@@ -733,7 +725,7 @@ taking every screen the offline song route does not reach: the career leaderboar
 (which names Rock Central as the reason it is empty), the achievements row
 (inert without a signed-in profile, so the menu still being up is what is
 asserted), the four HELP & OPTIONS pages, the eStore notice (left with `A`, which
-is what it asks for, and not with `B`) and the EXIT GAME dialog — cancelled with
+is what it asks for, and not with `B`) and the EXIT GAME dialog â€” cancelled with
 `B` and then asked for a second time and confirmed, so the **guest** ends its own
 process. That is a different shutdown from the window close the launch check
 uses: the guest's own exit prints `KernelState::TerminateTitle` and `Execution
@@ -761,8 +753,8 @@ blocked static destructor, and repeated arming without opening the game UI.
 
 Every row of that walk is clamped up to the first row of its list and counted
 down from there, then checked against the screen it produced, because the guest
-resets a list's selection whenever the list is entered — leaving the leaderboard
-screen and accepting with no tap at all opens the song list — so carrying on from
+resets a list's selection whenever the list is entered â€” leaving the leaderboard
+screen and accepting with no tap at all opens the song list â€” so carrying on from
 wherever the last screen left the highlight reads a row nobody chose. A step that
 lands somewhere else walks the route again from the first row rather than
 pressing on into an unknown one. `-Pause` and this run write their screens to
@@ -771,7 +763,7 @@ with a copy of each run's log and a `summary.json` beside them.
 
 The storage counterpart runs five cases against a *dedicated* writable
 root rather than the user's `Documents\Rock Band Blitz`, and checks each run's own trace
-log as well as the files it leaves behind — creation, restart byte-identity, a
+log as well as the files it leaves behind â€” creation, restart byte-identity, a
 missing root, a corrupt payload, a corrupt header:
 
 ```powershell
@@ -814,7 +806,7 @@ install folder with no `rb_blitz.toml`):
 ```
 
 * `acceptance_save.ps1` changes the **manual calibration** offset through the guest's
-  own menus (HELP & OPTIONS → Calibration → Calibrate Manually), quits, restarts and
+  own menus (HELP & OPTIONS â†’ Calibration â†’ Calibrate Manually), quits, restarts and
   requires the value to read back, then reverts it and checks the revert too. The
   three legs share one isolated `--user_data_root`. Manual calibration is the setting
   it uses because its native commit was measured: A on the page's CONTINUE rewrites
@@ -822,8 +814,8 @@ install folder with no `rb_blitz.toml`):
   the file's hash changes). Before the local persistence hooks, Audio/Video toggles
   and controller mapping only changed on screen; the new paths need separate
   restart checks ([docs/reference/known-issues.md](../reference/known-issues.md)).
-  The value comes from OCR, so digits the OCR engine reads as letters ("0" → "O",
-  "-10" → "-IO") are normalised before they are parsed.
+  The value comes from OCR, so digits the OCR engine reads as letters ("0" â†’ "O",
+  "-10" â†’ "-IO") are normalised before they are parsed.
 * `acceptance_dlc.ps1` requires the DLC root's packages to be enumerated by the guest
   (`XamContentAggregateCreateEnumerator: added N items`, N > 0) and a song only the
   DLC package carries to be on the song-selection screen, read with Windows OCR. Its
@@ -832,7 +824,7 @@ install folder with no `rb_blitz.toml`):
   uses a fresh writable root, because the guest caches its song list into `songcache`.
   `-DlcLibrary` adds a flat library to the positive leg and points the control leg at a
   library path that does not exist too, so the same two legs prove either source
-  ([dlc.md](dlc.md) §2.1). `acceptance_song.ps1` takes the same `-DlcLibrary` /
+  ([dlc.md](dlc.md) Â§2.1). `acceptance_song.ps1` takes the same `-DlcLibrary` /
   `-DlcLibraryContentType` passthrough and is what proves a library song actually
   *plays*.
 
@@ -843,7 +835,7 @@ Evidence lands in `out\m7-dev\`, `out\m7-installed\` and, per standalone run,
 
 The mouse is a **third input device**, not a pointer: the row the pointer rests on is
 the row the highlight is put on, and the buttons *are* A and B. It is on by default,
-needs no setup, and announces itself once per boot, twice — once when the window
+needs no setup, and announces itself once per boot, twice â€” once when the window
 appears, with the row it computed for that size, and once when the driver is installed:
 
 ```text
@@ -855,17 +847,17 @@ appears, with the row it computed for that size, and once when the driver is ins
 | --- | --- | --- | --- |
 | `mouse_ui_nav` | `true` | flag | the whole device; `--no-mouse_ui_nav` (or `--mouse_ui_nav=false`) makes the driver enumerate no device at all |
 | `mouse_ui_hover` | `true` | flag | hover alignment: the highlight follows the row the pointer is over, by measuring the guest's own frames |
-| `mouse_ui_hover_delay_ms` | 80 | 0–2000 | how long the pointer rests before the selection follows it; shorter than a deliberate hover, longer than the gaps inside one movement |
-| `mouse_ui_idle_hz` | 5 | 0.1–60 | how often the guest's frame is read while nothing is being aligned, for spotting a screen change and for the fallback pitch |
-| `mouse_ui_row_fraction` | 0.0417 | 0.01–0.25 | pointer travel that moves the selection by one row in the fallback path, as a fraction of the window's height — 32 px at 768 |
-| `mouse_ui_press_ms` | 24 | 1–1000 | how long one step of the fallback path holds the stick |
-| `mouse_ui_release_ms` | 24 | 0–1000 | the gap between two steps of the fallback path |
+| `mouse_ui_hover_delay_ms` | 80 | 0â€“2000 | how long the pointer rests before the selection follows it; shorter than a deliberate hover, longer than the gaps inside one movement |
+| `mouse_ui_idle_hz` | 5 | 0.1â€“60 | how often the guest's frame is read while nothing is being aligned, for spotting a screen change and for the fallback pitch |
+| `mouse_ui_row_fraction` | 0.0417 | 0.01â€“0.25 | pointer travel that moves the selection by one row in the fallback path, as a fraction of the window's height â€” 32 px at 768 |
+| `mouse_ui_press_ms` | 24 | 1â€“1000 | how long one step of the fallback path holds the stick |
+| `mouse_ui_release_ms` | 24 | 0â€“1000 | the gap between two steps of the fallback path |
 | `mouse_ui_hover_log` | `false` | flag | write `out/mouse-probe/guestframes.log`: one line per press and one per hover, for measuring a screen |
 | `mouse_ui_probe` | `false` | flag | the same file, with one line and an ASCII thumbnail per *changed* frame |
 | `mouse_ui_probe_path` | `out/mouse-probe/guestframes.log` | path | where both of the above write |
-| `mouse_ui_probe_thumb_every` | 10 | 0–1000 | thumbnail every Nth frame in the probe log; 0 is none |
+| `mouse_ui_probe_thumb_every` | 10 | 0â€“1000 | thumbnail every Nth frame in the probe log; 0 is none |
 
-Like every other cvar they come from the command line or `rb_blitz.toml` (§2), and
+Like every other cvar they come from the command line or `rb_blitz.toml` (Â§2), and
 there is no runtime console, so changing one means a relaunch:
 
 ```powershell
@@ -876,7 +868,7 @@ there is no runtime console, so changing one means a relaunch:
 test, but the presenter can hand the guest's own last frame back
 (`rex::ui::Presenter::CaptureGuestOutput`), and that frame is enough: a menu step *moves*
 the highlight, so the difference between the frame before the press and the frame after it
-holds the highlight twice — where it was and where it went. From that pair
+holds the highlight twice â€” where it was and where it went. From that pair
 ([src/input/nav_detect.h](../../src/input/nav_detect.h)) come the row pitch and the row the
 highlight is on, both in guest pixels; the pointer is mapped into the same pixels through
 the presenter's own letterbox geometry ([src/input/ui_nav.h](../../src/input/ui_nav.h),
@@ -896,7 +888,7 @@ controller:
   to be free of repeats up to a third of a second, so 50 ms carries about six times the
   headroom.
 - **A press is measured against a frame read while the pointer was resting**, never against
-  one from before the last move the guest made — otherwise one press's difference holds two
+  one from before the last move the guest made â€” otherwise one press's difference holds two
   moves, the pitch comes out doubled, and the hover stops a row short of the pointer while
   the log insists it arrived.
 - **A screen that changes under a still pointer is left alone.** A click that opens a menu
@@ -905,7 +897,7 @@ controller:
 - **A marker at least as tall as its row is measured across two presses.** Its old and new
   positions overlap in the frame as well as in space, so one difference holds a single band
   with nothing in it to separate the two positions. The next press, in the same direction,
-  moves that band by exactly one row — the band is rigid — and that shift is the pitch,
+  moves that band by exactly one row â€” the band is rigid â€” and that shift is the pitch,
   with the marker being what is left of the band once a row is taken out of it. The turn of
   the stick that follows a press which measured nothing is therefore deferred to the third
   press, so the two presses a tall marker needs can go the same way. This is the shape the
@@ -913,7 +905,7 @@ controller:
 
 The pointer falling back to travel: with `--no-mouse_ui_hover`, or on a guest whose frames
 cannot be read back (no presenter, or a resized window with no guest size yet), the driver
-is the older relative model — cumulative pointer travel turned into
+is the older relative model â€” cumulative pointer travel turned into
 `round(distance / row)` presses, with the fraction of a row carried forward. It is exact on
 a screen whose pitch matches the cvar and drifts with distance on one that does not (the
 song list's selectable rows are 96 px apart), which is what the measured path exists to
@@ -924,10 +916,10 @@ the guest's own frame (~17 ms) is never seen.
 **Clicks wait for the alignment.** A click on a row the pointer has just moved to must not
 fire A before the highlight has arrived, or it activates the row the selection was on when
 the button went down. `UiClickPulser` holds the button until nothing is in flight, which is
-why A lands where the hand is — and why clicking a row the pointer was already resting on
+why A lands where the hand is â€” and why clicking a row the pointer was already resting on
 is instant.
 
-**The game window has to be the foreground window** for any of this to work — and for the
+**The game window has to be the foreground window** for any of this to work â€” and for the
 keyboard driver too, which is easy to confuse with "the mouse is broken". Both the runtime
 and this driver gate on real activation, so while the window is unfocused every event is
 dropped and a menu that ignores both the mouse *and* the arrow keys is telling you the
@@ -935,8 +927,8 @@ window is not really in front, not that navigation is off. Clicking the window i
 
 The standing limits of the device (menus only, no visible cursor, travel dropped while an
 overlay owns the pointer, and the foreground requirement above) are in
-[known-issues.md](../reference/known-issues.md); the measurements behind the defaults — the per-screen
-pitches, the pulse widths, the letterbox mapping — are in
+[known-issues.md](../reference/known-issues.md); the measurements behind the defaults â€” the per-screen
+pitches, the pulse widths, the letterbox mapping â€” are in
 [bringup-log.md](../history/bringup-log.md), in the "Mouse navigation" sections.
 
 ### The retired settings application
@@ -945,7 +937,7 @@ This tree used to build a second executable, `rb_blitz_controller_settings.exe`,
 pre-game settings window. It retired on 2026-10-19: every player setting it edited is an
 in-game Help & Options row (General, Controls, Audio/Video, Interface, Gameplay), and the
 installer now ships `rb_blitz.exe` alone
-([gameplay-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) §19 has the
+([gameplay-mapping plan](../plans/finished/2026-10-17-gameplay-input-mapping-plan.md) Â§19 has the
 retirement record). There is nothing to build or start beside the game.
 
 Two of its host suites tested modules the game owns, so they kept their checks under
@@ -985,24 +977,24 @@ Expected (the log category prefix may differ from `[krnl]`; the message text is
 what matters):
 
 ```text
-guest XeKeys: aes states 0x…, key table 0x… (8 slots), feed 0x…
-guest XeKeys: key 0xE0 -> slot 0 (obscured table entry +0x…)
-guest XeKeys: AES-CBC key 0xE0 slot 0 size 16 encrypt 0 in 0x… out 0x…
+guest XeKeys: aes states 0xâ€¦, key table 0xâ€¦ (8 slots), feed 0xâ€¦
+guest XeKeys: key 0xE0 -> slot 0 (obscured table entry +0xâ€¦)
+guest XeKeys: AES-CBC key 0xE0 slot 0 size 16 encrypt 0 in 0xâ€¦ out 0xâ€¦
 guest XeKeys:   in  <32 hex chars> |<ascii>|
 guest XeKeys:   out <32 hex chars> |<ascii>|
 ```
 
 - the key-install and AES-CBC lines prove the hook ran and that the key for the
-  obscured table entry was installed (`+0x…` is the entry offset, so `+0x0` for a
-  MOGG version of 12/13, `+0x10` for 14, `+0x20` for 15, `+0x30` for 16 — the
-  version→index mapping is in
+  obscured table entry was installed (`+0xâ€¦` is the entry offset, so `+0x0` for a
+  MOGG version of 12/13, `+0x10` for 14, `+0x20` for 15, `+0x30` for 16 â€” the
+  versionâ†’index mapping is in
   [bringup-log.md](../history/bringup-log.md#b-009-music-never-plays--xekeyssetkeyxekeysaescbc-were-no-op-stubs));
 - the `in` block echoes those same obscured table bytes (the dump is
   `min(inp_size, 32)` bytes, so 16 here), making it a second, independent
   confirmation that the right entry and slot are in play;
 - there must be **no** `__imp__XeKeysSetKey STUB` / `__imp__XeKeysAesCbc STUB`
   lines (their absence is one of the success criteria);
-- the `out` bytes are the AES-128-ECB decryption of the header block — that value
+- the `out` bytes are the AES-128-ECB decryption of the header block â€” that value
   becomes the MOGG stream's key mask, so a *plausible* value here plus audible
   music is the whole fix;
 - **sound effects must be unchanged**.
@@ -1012,12 +1004,12 @@ Failure signatures, in the order you are likely to meet them:
 | Log line | Meaning / next step |
 | --- | --- |
 | `guest XeKeys: kernel memory not available yet, ignoring the call` | Hook ran before the guest heap existed. The call is passed through; report it rather than assuming success. |
-| `guest XeKeys: unexpected key id 0x…, using slot 0` | A second key path exists that this fix does not model yet. New information — report the line. |
-| `guest XeKeys: key 0x… -> slot … has unusable buffer 0x…` | The guest handed over a key buffer that is neither the obscured table nor plausible guest memory. The known key was kept; report it. |
-| `guest XeKeys: AES-CBC on key 0x… before XeKeysSetKey` | Call ordering surprise (one-shot fallback warning). Report it. |
-| No `guest XeKeys` lines at all, and no music | The crypto path was never reached — the run did not get as far as opening a MOGG stream. Check the boot tail for `[FATAL]` / the title screen, not the crypto hook. |
-| `__imp__XeKeysSetKey STUB` still present | The hook is not in the binary: check the byte scan in §3, then confirm `src/hooks/crypto.cpp` is in `RBBLITZ_SOURCES` in [CMakeLists.txt](../../CMakeLists.txt). |
-| `[FATAL] …` | Regression, most likely unrelated to crypto. Send the line plus ~20 lines of context. |
+| `guest XeKeys: unexpected key id 0xâ€¦, using slot 0` | A second key path exists that this fix does not model yet. New information â€” report the line. |
+| `guest XeKeys: key 0xâ€¦ -> slot â€¦ has unusable buffer 0xâ€¦` | The guest handed over a key buffer that is neither the obscured table nor plausible guest memory. The known key was kept; report it. |
+| `guest XeKeys: AES-CBC on key 0xâ€¦ before XeKeysSetKey` | Call ordering surprise (one-shot fallback warning). Report it. |
+| No `guest XeKeys` lines at all, and no music | The crypto path was never reached â€” the run did not get as far as opening a MOGG stream. Check the boot tail for `[FATAL]` / the title screen, not the crypto hook. |
+| `__imp__XeKeysSetKey STUB` still present | The hook is not in the binary: check the byte scan in Â§3, then confirm `src/hooks/crypto.cpp` is in `RBBLITZ_SOURCES` in [CMakeLists.txt](../../CMakeLists.txt). |
+| `[FATAL] â€¦` | Regression, most likely unrelated to crypto. Send the line plus ~20 lines of context. |
 
 If the hook lines appear, the keys are right, and music is *still* silent, the
 next suspect is the guest side that consumes the revealed mask:
@@ -1044,9 +1036,9 @@ lines at boot, no `guest XeKeys` lines, and no music.
 
 ## 7. Handing the log back
 
-Logs are ~2 MB, so don't paste them whole. Either point me at the newest log —
+Logs are ~2 MB, so don't paste them whole. Either point me at the newest log â€”
 it is on this machine, e.g.
-`out\build\win-amd64-release\logs\rb_blitz_003.log` — or reduce it to an excerpt:
+`out\build\win-amd64-release\logs\rb_blitz_003.log` â€” or reduce it to an excerpt:
 
 ```powershell
 $log = Get-ChildItem out\build\win-amd64-release\logs\*.log |

@@ -3,6 +3,7 @@
 
 #include "store/store_probe.h"
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <set>
@@ -10,26 +11,21 @@
 #if defined(_WIN32)
 #include <windows.h>
 #endif
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/logging.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/logging/log_category.h>
+#include <rex/kernel/title_runtime.h>
+#include "platform/guest_memory.h"
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 #include "fs/payload_overlay.h"
 #include "store/store_fetch.h"
 #include "store/store_settings.h"
 
-REXCVAR_DEFINE_BOOL(store_trace, false, "Diagnostics",
-                    "Log the store paths the guest resolves and opens under the game root "
-                    "(RhythmVerse plan P2's data-layer probe)")
-    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 
-REXCVAR_DEFINE_STRING(store_local_server_root, "", "Diagnostics",
-                      "Point the retail store's netcache at a local server rooted at this "
-                      "guest-relative directory (RhythmVerse plan P2's local-server spike; empty "
-                      "leaves config/gen/store.dtb as shipped)")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
 
 namespace rb_blitz::store {
 namespace {
@@ -70,6 +66,9 @@ std::atomic<bool> g_trace_on{false};
 // The store panel `sub_8274FB60` was last called on. Written by that hook, read by the delivery
 // step in store_fetch.cpp, both on guest threads.
 std::atomic<uint32_t> g_panel{0};
+#if defined(_WIN32)
+PVOID g_fault_handler = nullptr;
+#endif
 
 // `rex::memory::GuestPtr` does no validation - it is base + address - so a null pointer, a small
 // integer or a host pointer handed to a log line faults the guest instead of reporting it. Every
@@ -79,34 +78,21 @@ std::atomic<uint32_t> g_panel{0};
 // virtual range starting at 0, so `LookupHeap(5)` answers and the read then faults; `QuerySize`
 // is what actually says whether pages back the address.
 bool GuestMapped(const uint32_t addr, const uint32_t length = 4) {
-  if (addr < 0x10000) {
-    return false;
-  }
-  auto* memory = REX_KERNEL_MEMORY();
-  auto* heap = memory != nullptr ? memory->LookupHeap(addr) : nullptr;
-  if (heap == nullptr) {
-    return false;
-  }
-  uint32_t size = 0;
-  return heap->QuerySize(addr, &size) && size >= length;
+  auto* runtime = REX_RUNTIME();
+  return addr >= 0x10000 && runtime &&
+         bool(runtime->GetGuestMemory().GetReadOnlySpan(addr, length));
 }
 
-// How many bytes from `addr` stay inside its committed region; 0 when unbacked.
 uint32_t GuestSpan(const uint32_t addr) {
-  if (addr < 0x10000) {
+  auto* runtime = REX_RUNTIME();
+  if (!runtime || addr < 0x10000) return 0;
+  size_t available = 0;
+  rex::memory::PageAccess access = rex::memory::PageAccess::kNoAccess;
+  auto* pointer = runtime->GetMembase().TranslateVirtual(addr);
+  if (!rex::memory::QueryProtect(pointer, available, access) ||
+      !(static_cast<unsigned>(access) & static_cast<unsigned>(rex::memory::PageAccess::kReadOnly)))
     return 0;
-  }
-  auto* memory = REX_KERNEL_MEMORY();
-  auto* heap = memory != nullptr ? memory->LookupHeap(addr) : nullptr;
-  if (heap == nullptr) {
-    return 0;
-  }
-  uint32_t base = addr;
-  uint32_t size = 0;
-  if (!heap->QuerySize(addr, &size) || size == 0) {
-    return 0;
-  }
-  return size > addr - base ? size - (addr - base) : size;
+  return uint32_t(std::min<uint64_t>(available, uint64_t(UINT32_MAX) - addr + 1));
 }
 
 // A big-endian u32 out of guest memory, or 0 when the address is not mapped.
@@ -248,12 +234,14 @@ LONG CALLBACK LogFault(EXCEPTION_POINTERS* info) {
   // The reported address is a *host* address: the guest's zero page is `virtual_membase + 0`, which
   // is why the first version of this handler saw 0x100000000 and filtered the fault out. The SDK's
   // own line translates it (`HostToGuestVirtual`), and so does this.
-  auto* memory = REX_KERNEL_MEMORY();
+  auto* runtime = REX_RUNTIME();
+  const auto guest_base = runtime ? runtime->GetMembase().GetBase() : nullptr;
   uintptr_t address = static_cast<uintptr_t>(record->ExceptionInformation[1]);
-  if (memory != nullptr && address >= reinterpret_cast<uintptr_t>(memory->virtual_membase()) &&
-      address < reinterpret_cast<uintptr_t>(memory->physical_membase())) {
-    address = memory->HostToGuestVirtual(reinterpret_cast<const void*>(address));
+  if (guest_base && address >= reinterpret_cast<uintptr_t>(guest_base) &&
+      address - reinterpret_cast<uintptr_t>(guest_base) <= UINT32_MAX) {
+    address = runtime->GetMembase().HostToGuestVirtual(reinterpret_cast<const void*>(address));
   }
+
   // Only guests: a new thread's stack probe writes its guard page, and that is a host write, not a
   // guest fault. A guest object read past its own null pointer lands near zero (the store's faults
   // are `0x0`, `0x5` and `0x44`), so the near-null range is the whole of what this looks for.
@@ -281,8 +269,19 @@ LONG CALLBACK LogFault(EXCEPTION_POINTERS* info) {
 
 }  // namespace
 
+void ClosePathProbe() {
+  g_trace_on.store(false, std::memory_order_relaxed);
+  fs::SetStorePathObserver(nullptr);
+  g_panel.store(0, std::memory_order_relaxed);
+#if defined(_WIN32)
+  if (g_fault_handler) RemoveVectoredExceptionHandler(g_fault_handler);
+  g_fault_handler = nullptr;
+#endif
+}
+
 void InstallPathProbe() {
-  const bool on = REXCVAR_GET(store_trace);
+  ClosePathProbe();
+  const bool on = rb_blitz::settings::title::store_trace.Get();
   g_trace_on.store(on, std::memory_order_relaxed);
   fs::SetStorePathObserver(on ? &Observe : nullptr);
 #if defined(_WIN32)
@@ -291,20 +290,21 @@ void InstallPathProbe() {
     // handler turns it into a host backtrace, which `out/_swap/map_lookup.py` resolves against
     // `rb_blitz.map` to the recompiled `sub_XXXXXXXX` that faulted - the store's remaining P3
     // faults both surfaced as `read of guest 0x00000000` (docs/reference/known-issues.md).
-    const PVOID handle = AddVectoredExceptionHandler(1, &LogFault);
-    auto* memory = REX_KERNEL_MEMORY();
+    g_fault_handler = AddVectoredExceptionHandler(1, &LogFault);
+    auto* runtime = REX_RUNTIME();
+    const auto guest_base = runtime ? reinterpret_cast<uintptr_t>(runtime->GetMembase().GetBase()) : 0;
     REXLOG_INFO("store-probe: fault logger {}; module base {:#x}; guest window [{:#x}, {:#x})",
-                handle != nullptr ? "installed" : "NOT installed",
+                g_fault_handler != nullptr ? "installed" : "NOT installed",
                 reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)),
-                memory != nullptr ? reinterpret_cast<uintptr_t>(memory->virtual_membase()) : 0,
-                memory != nullptr ? reinterpret_cast<uintptr_t>(memory->physical_membase()) : 0);
+                guest_base,
+                guest_base ? guest_base + uint64_t(UINT32_MAX) + 1 : 0);
   }
 #endif
   REXLOG_INFO("store-probe: path trace {}; the local server root is '{}'", on ? "on" : "off",
               LocalServerRoot());
 }
 
-std::string LocalServerRoot() { return REXCVAR_GET(store_local_server_root); }
+std::string LocalServerRoot() { return rb_blitz::settings::title::store_local_server_root.Get(); }
 
 // The same switch, for the fetch hook, which must not read the cvar registry from a guest thread.
 bool TraceEnabled() { return g_trace_on.load(std::memory_order_relaxed); }
@@ -321,21 +321,8 @@ uint32_t Panel() { return g_panel.load(std::memory_order_relaxed); }
 // with kMemoryProtectRead), so a plain store to a global there does nothing. This is the same
 // unprotect-write-restore the ultimate patches use (src/hooks/ultimate.cpp).
 bool WriteGuestU32Protected(uint8_t* base, const uint32_t addr, const uint32_t value) {
-  auto* memory = REX_KERNEL_MEMORY();
-  auto* heap = memory != nullptr ? memory->LookupHeap(addr) : nullptr;
-  if (heap == nullptr) {
-    return false;
-  }
-  uint32_t old_protect = 0;
-  if (!heap->Protect(addr, sizeof(uint32_t),
-                     rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite,
-                     &old_protect)) {
-    return false;
-  }
-  WriteGuestU32(base, addr, value);
-  heap->Protect(addr, sizeof(uint32_t),
-                old_protect != 0 ? old_protect : rex::memory::kMemoryProtectRead);
-  return true;
+  if (!GuestMapped(addr)) return false;
+  return platform::WriteProtectedGuestBe32(rex::memory::GuestPtr<uint8_t*>(base, addr), value);
 }
 
 // A short hex listing of the words at a guest address, for logs that have to show a layout the
@@ -366,7 +353,7 @@ std::string GuestWords(uint8_t* base, uint32_t addr, int count) {
 //
 // The hook is a pass-through: the request still runs exactly as retail wrote it, and the probe
 // only reports the path once per distinct value while `store_trace` is on. It exists because the
-// file-system side cannot answer this question: the fetch performs no I/O offline (plan §5/P2
+// file-system side cannot answer this question: the fetch performs no I/O offline (plan Ã‚Â§5/P2
 // record), so the *asked-for* name has to be read out of the panel's own state.
 REX_EXTERN(__imp__sub_8274FB60);
 REX_HOOK_RAW(sub_8274FB60) {

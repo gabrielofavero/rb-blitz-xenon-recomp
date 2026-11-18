@@ -76,7 +76,7 @@ bool overlay_enabled();
 // constructor does) and unregisters when the returned pointer is destroyed, so
 // the caller owns it for as long as the overlay should be available. The
 // provider is called from the UI thread each frame the overlay draws.
-std::unique_ptr<rex::ui::ImGuiDialog> CreateOverlayDialog(rex::ui::ImGuiDrawer* drawer,
+std::unique_ptr<rex::ui::IDialog> CreateOverlayDialog(
                                                           WindowStateProvider provider);
 
 }  // namespace rb_blitz::diag

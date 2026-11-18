@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Real protected-page faults in subprocesses: a rejected fault must not loop.
 #include "check.h"
-#include <rex/exception_handler.h>
+#include <rex/platform/exception_handler.h>
 #include <csignal>
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -13,9 +13,9 @@ void* fault_page;
 size_t page_size;
 volatile sig_atomic_t handled = 0;
 
-bool Reject(rex::arch::Exception*, void*) { return false; }
-bool Recover(rex::arch::Exception* ex, void*) {
-  if (ex->fault_address() != reinterpret_cast<uintptr_t>(fault_page)) _exit(91);
+bool Reject(rex::platform::Exception*, void*) { return false; }
+bool Recover(rex::platform::Exception* ex, void*) {
+  if (ex->GetFaultAddress() != reinterpret_cast<uintptr_t>(fault_page)) _exit(91);
   ++handled;
   return mprotect(fault_page, page_size, PROT_READ | PROT_WRITE) == 0;
 }
@@ -44,9 +44,9 @@ int Run(int mode, bool unmapped = false) {
     sigaction(SIGSEGV, &previous, nullptr);
     sigaction(SIGBUS, &previous, nullptr);
     const auto handler = mode == 4 ? Recover : Reject;
-    rex::arch::ExceptionHandler::Install(handler, nullptr);
+    rex::platform::ExceptionHandler::Install(handler, nullptr);
     *static_cast<volatile unsigned char*>(fault_page) = 7;
-    rex::arch::ExceptionHandler::Uninstall(handler, nullptr);
+    rex::platform::ExceptionHandler::Uninstall(handler, nullptr);
     _exit(mode == 4 && handled == 1 ? 0 : 94);
   }
   if (child < 0) return -1;

@@ -2,7 +2,7 @@
 
 [project]
 name = "rb_blitz"
-sdk_version = "0.10.0"
+sdk_version = "0.11.0"
 game_root = "game"
 
 [entrypoint]
@@ -16,3 +16,6 @@ includes = ["config/functions.toml"]
 # 0x82772828 and is reached by bl from four sites.
 longjmp_address = 0x82772510
 setjmp_address = 0x82772940
+
+# Reuse proven stack-slot values within a basic block; codegen invalidates at barriers.
+forward_stack_stores = true

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
-#include <rex/graphics/util/visible_region.h>
+#include <rex/xenos/visible_region.h>
 #include <limits>
-using namespace rex::graphics::draw_util;
+using namespace rex::gpu::draw_state;
 using namespace rb_blitz::test;
 int main() {
   const VisibleRegion region{true, 1280, 720, 405, 32, 0x260, 0x10530};

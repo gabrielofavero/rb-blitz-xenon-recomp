@@ -5,9 +5,12 @@ and leaves for [`../finished/`](../finished/) when it is delivered — one `git 
 `YYYY-MM-DD-` prefix.
 
 The [ReXGlue v0.11.0 migration](2026-11-17-rexglue-v0.11-migration-plan.md) started
-on 2026-11-17. The current-pin Windows Release build and strict 71-patch/nested
-replay pass. The isolated release SDK and codegen checkpoint are being validated;
-the production pin remains unchanged. Native platform and performance gates remain open.
+on 2026-11-17. Production now pins SDK commit
+`a3e1d82678ca20d68d4837a8e9ee4652ff073745` with the reviewed 65-patch stack and
+promoted title integration. The fresh Windows AMD64 production source-SDK
+configure and release build pass with D3D12 and Vulkan enabled. Limited Windows comparisons do not establish
+repeatable performance parity or an across-the-board gain. Native platform,
+package and formal performance gates remain open, so the plan stays in progress.
 
 The [framerate expansion plan](../todo/2026-10-25-framerate-expansion-plan.md) had a
 diagnostic pass on 2026-11-10 and returned to `todo/`. No higher rate is validated

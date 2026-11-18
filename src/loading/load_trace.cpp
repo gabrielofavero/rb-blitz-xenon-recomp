@@ -6,20 +6,18 @@
 
 #include <chrono>
 
-#include <rex/cvar.h>
-#include <rex/hook.h>
-#include <rex/system/thread_state.h>
-#include <rex/system/xmemory.h>
+#include "settings/runtime_settings.h"
+#include <rex/ppc/hook.h>
+#include <rex/kernel/thread_state.h>
+#include <rex/memory/endian.h>
+#include <rex/memory/mapped_ptr.h>
 
 REX_EXTERN(__imp__sub_822C3428);
 REX_EXTERN(__imp__sub_822C3878);
 REX_EXTERN(__imp__sub_822C38F8);
 REX_EXTERN(__imp__sub_822C3F48);
 
-REXCVAR_DEFINE_BOOL(song_load_trace, false, "Diagnostics",
-    "Read-only song-load lifecycle trace: load setup, job start, native completion, "
-    "unload and UI heartbeat. Does not cancel loads or recover guest faults.")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
 
 namespace rb_blitz::loading {
 namespace {
@@ -41,7 +39,7 @@ int64_t Now() {
 uint32_t U32(uint8_t* base, uint32_t address) {
   return rex::memory::load_and_swap<uint32_t>(base + address);
 }
-uint32_t Thread() { return rex::runtime::ThreadState::GetThreadID(); }
+uint32_t Thread() { return rex::kernel::ThreadState::GetBoundThreadID(); }
 
 void Event(const char* phase, uint8_t* base, uint32_t screen, uint32_t caller) {
   REXLOG_INFO("song_load: generation={} phase={} elapsed_ms={} thread={:08X} "
@@ -52,7 +50,7 @@ void Event(const char* phase, uint8_t* base, uint32_t screen, uint32_t caller) {
 }
 
 void ConfigureLoadTrace() {
-  enabled = REXCVAR_GET(song_load_trace);
+  enabled = rb_blitz::settings::title::song_load_trace.Get();
   if (enabled) REXLOG_INFO("song_load: read-only lifecycle tracing enabled");
 }
 

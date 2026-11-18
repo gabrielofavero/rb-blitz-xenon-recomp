@@ -14,8 +14,8 @@
 #include <thread>
 #include <utility>
 
-#include <rex/cvar.h>
-#include <rex/logging.h>
+#include "settings/runtime_settings.h"
+#include <rex/logging/log_category.h>
 
 #include "store/rhythmverse_client.h"
 #include "store/store_catalogue_status.h"
@@ -30,17 +30,9 @@
 // `rbbz-store/search/seed` (`store_search.h`) and submits the field instead of drawing the
 // keyboard while a seed is installed. Empty is the ordinary boot. Read on the host thread at
 // InstallSearchTransport.
-REXCVAR_DEFINE_STRING(store_search_seed, "", "Diagnostics",
-                      "Seed the RhythmVerse search field with this text at boot (RhythmVerse plan "
-                      "P4's measurement switch; empty leaves the field empty)")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
-REXCVAR_DEFINE_INT32(store_search_pages, 4, "Diagnostics",
-                     "How many API pages one search may read (clamped 1..20; the site's page size "
-                     "is 25 records). RhythmVerse plan P7's per-action budget: the walk continues "
-                     "past a page the eligibility/instrument filter emptied, because only the "
-                     "server's cursor decides where the results end. 1 is the pre-P7 behaviour")
-    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+
+
 
 namespace rb_blitz::store {
 namespace {
@@ -251,14 +243,14 @@ void InstallSearchTransport() {
     return page;
   });
   // Plan P7's per-action budget: the session owns the walk, this is where it learns the bound.
-  const std::int32_t pages = REXCVAR_GET(store_search_pages);
+  const std::int32_t pages = rb_blitz::settings::title::store_search_pages.Get();
   SetSearchPageBudget(pages < 1 ? 1 : (pages > 20 ? 20 : pages));
   REXLOG_INFO("store_search: transport ready (one worker thread, {}, up to {} page(s) per search)",
               kSearchPath, SearchPageBudget());
   // The measurement's seed: a field already holding a query, so Done alone exercises the request.
   // It fills the field without opening the surface - the strip belongs to the key pages, and a
   // seeded boot drew `Search: <query>` over the store's own screens (measured 2026-10-22).
-  const std::string seed = REXCVAR_GET(store_search_seed);
+  const std::string seed = rb_blitz::settings::title::store_search_seed.Get();
   if (!seed.empty()) {
     if (SearchSeedField(seed)) {
       REXLOG_INFO("store_search: the field was seeded with '{}'", seed);

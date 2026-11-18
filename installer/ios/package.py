@@ -24,6 +24,13 @@ from native_assets import controller_entries
 
 SYSTEM_PREFIXES = ("/usr/lib/", "/System/Library/")
 LOAD_COMMANDS = {"LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB", "LC_REEXPORT_DYLIB", "LC_LOAD_UPWARD_DYLIB"}
+# Providers are loaded by module name, so they are absent from Mach-O load commands.
+RUNTIME_MODULES = (
+    "librexfilesystem.dylib", "librexapu.dylib", "librexhid.dylib", "librexui.dylib",
+    "librexgpu.dylib", "librexxam.dylib", "librexxbdm.dylib",
+    "librexgpu-xenos-null.dylib", "librexgpu-xenos-vulkan.dylib",
+    "librexapu-sdl3.dylib", "librexhid-sdl3.dylib", "librexui-sdl3.dylib",
+)
 GAME_FILES = {"default.xex", "gen/main_xbox.hdr", "gen/main_xbox_0.ark"}
 ULTIMATE_FILES = {"gen/patch_xbox.hdr", "gen/patch_xbox_0.ark"}
 IMPORTER_IDENTITY = b"RB_BLITZ_IOS_IMPORTER_V1"
@@ -137,7 +144,10 @@ def find_library(name: str, roots: list[Path]) -> Path:
         fail(f"unsupported bundled dependency: {name}")
     candidates = set()
     for root in roots:
-        for path in root.rglob(name):
+        framework = Path(framework_path(name))
+        matches = [*root.rglob(name), *(path for path in root.rglob(framework.name)
+                    if path.parent.name == framework.parent.name)]
+        for path in matches:
             resolved = path.resolve()
             if not resolved.is_relative_to(root.resolve()):
                 fail(f"library link escapes allowed build tree: {path}")
@@ -150,9 +160,39 @@ def find_library(name: str, roots: list[Path]) -> Path:
     return sorted(candidates)[0]
 
 
+def dependency_library(dependency: str, known: list[str] | tuple[str, ...] = ()) -> str:
+    path = Path(dependency)
+    if path.name.endswith(".dylib"):
+        return path.name
+    if path.parent.name == path.name + ".framework":
+        relative = f"{path.parent.name}/{path.name}"
+        matches = [name for name in (*RUNTIME_MODULES, "libMoltenVK.dylib", *known)
+                   if framework_path(name) == relative]
+        return matches[0] if matches else f"lib{path.name}.dylib"
+    fail(f"unsupported bundled dependency: {dependency}")
+
+
+def vulkan_enabled(build: Path) -> bool:
+    cache = build / "CMakeCache.txt"
+    if not cache.is_file():
+        return True
+    values = dict(re.findall(
+        r"(?m)^(REXGLUE_USE_VULKAN|REXGLUE_GPU_VULKAN):[^=]*=(.*)$",
+        cache.read_text()))
+    # The title option maps to the SDK option before SDK configuration. Prefer
+    # that owning option when packaging a title build with an installed SDK.
+    value = values.get("REXGLUE_USE_VULKAN", values.get("REXGLUE_GPU_VULKAN", "ON"))
+    value = value.strip().upper()
+    return value not in {"", "0", "OFF", "NO", "FALSE", "N", "IGNORE", "NOTFOUND"} and not value.endswith("-NOTFOUND")
+
+
 def collect_libraries(build: Path, roots: list[Path], minimum: str) -> dict[str, Path]:
     libraries = {}
-    pending = ["librexruntime.dylib", "librexgpu-xenos.dylib", "libMoltenVK.dylib"]
+    pending = list(RUNTIME_MODULES)
+    if vulkan_enabled(build):
+        pending.append("libMoltenVK.dylib")
+    else:
+        pending.remove("librexgpu-xenos-vulkan.dylib")
     binaries = [build / "rb_blitz"]
     while pending or binaries:
         if pending:
@@ -172,7 +212,7 @@ def collect_libraries(build: Path, roots: list[Path], minimum: str) -> dict[str,
                 fail(f"dependency is outside approved library directories: {dependency}")
             if not dependency.startswith(("/", "@rpath/", "@loader_path/", "@executable_path/")):
                 fail(f"unrecognized dependency: {dependency}")
-            pending.append(Path(dependency).name)
+            pending.append(dependency_library(dependency, tuple(libraries)))
     return libraries
 
 
@@ -218,9 +258,10 @@ def prepare_binaries(app: Path, minimum: str, libraries: list[str]) -> list[Path
                 else:
                     args.extend(["-delete_rpath", value])
             elif kind in LOAD_COMMANDS and not value.startswith(SYSTEM_PREFIXES):
-                if Path(value).name not in relative:
+                dependency = dependency_library(value, tuple(relative))
+                if dependency not in relative:
                     fail(f"unresolved bundled dependency: {value}")
-                args.extend(["-change", value, f"@rpath/{relative[Path(value).name]}"])
+                args.extend(["-change", value, f"@rpath/{relative[dependency]}"])
         if not has_framework_rpath:
             args.extend(["-add_rpath", framework_rpath])
         run("xcrun", "install_name_tool", *args, str(binary))
