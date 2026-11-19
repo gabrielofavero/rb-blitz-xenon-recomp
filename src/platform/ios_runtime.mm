@@ -67,6 +67,25 @@ void LogIOSPresentationState() {
   }
 }
 
+bool ApplyIOSOrientation(void* native_window, bool portrait) {
+  @autoreleasepool {
+    UIWindow* window = (__bridge UIWindow*)native_window;
+    if (!window || !window.rootViewController) return false;
+    if (@available(iOS 16.0, *)) {
+      [window.rootViewController setNeedsUpdateOfSupportedInterfaceOrientations];
+      if (!window.windowScene) return false;
+      const auto mask = portrait ? UIInterfaceOrientationMaskPortrait : UIInterfaceOrientationMaskLandscape;
+      auto* preferences = [[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:mask];
+      [window.windowScene requestGeometryUpdateWithPreferences:preferences errorHandler:^(NSError* error) {
+        REXLOG_WARN("ios_orientation: geometry request refused: {}", error.localizedDescription.UTF8String);
+      }];
+    } else {
+      [UIViewController attemptRotationToDeviceOrientation];
+    }
+    return true;
+  }
+}
+
 std::filesystem::path PrepareIOSDocuments() {
   @autoreleasepool {
     NSURL* documents = [NSFileManager.defaultManager

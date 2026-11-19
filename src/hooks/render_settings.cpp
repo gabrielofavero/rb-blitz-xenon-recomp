@@ -24,6 +24,7 @@ namespace {
 std::atomic<uint32_t> g_render_width{0};
 std::atomic<uint32_t> g_render_height{720};
 std::atomic<uint32_t> g_portrait_width{0}, g_portrait_height{0};
+std::atomic<bool> g_interface_portrait{false}, g_gameplay_portrait{false}, g_active_portrait{false};
 
 // The title's own screen-space -> 16:9 mapping constants (measured 2026-10-12, see the header):
 // two adjacent 9/16 floats in the literal pool of the code that lays the UI out.
@@ -97,8 +98,17 @@ void rb_blitz::settings::SetBootPortraitFrame(uint32_t width, uint32_t height) {
   g_portrait_width = width;
   g_portrait_height = height;
 }
-uint32_t rb_blitz::settings::BootPortraitWidth() { return g_portrait_width.load(); }
-uint32_t rb_blitz::settings::BootPortraitHeight() { return g_portrait_height.load(); }
+void rb_blitz::settings::ConfigureOrientations(bool interface_portrait, bool gameplay_portrait) {
+  g_interface_portrait = interface_portrait;
+  g_gameplay_portrait = gameplay_portrait;
+  g_active_portrait = interface_portrait;
+}
+bool rb_blitz::settings::InterfacePortraitEnabled() { return g_interface_portrait.load(); }
+bool rb_blitz::settings::GameplayPortraitEnabled() { return g_gameplay_portrait.load(); }
+uint32_t rb_blitz::settings::BootPortraitWidth() { return g_active_portrait ? g_portrait_width.load() : 0; }
+uint32_t rb_blitz::settings::BootPortraitHeight() { return g_active_portrait ? g_portrait_height.load() : 0; }
+uint32_t rb_blitz::settings::GameplayPortraitWidth() { return g_gameplay_portrait ? g_portrait_width.load() : 0; }
+uint32_t rb_blitz::settings::GameplayPortraitHeight() { return g_gameplay_portrait ? g_portrait_height.load() : 0; }
 
 // 0x823F382C, the title's own `li r11,720`, before it stores its choice at +68 and derives the
 // width from it. Setting r11 here is what lets the title lay out at a height it would not have
@@ -223,6 +233,7 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
   SettingId active;
   Value selected;
   const bool game = input::GameplayResolutionActive();
+  g_active_portrait = input::GameScreenActive() ? GameplayPortraitEnabled() : InterfacePortraitEnabled();
   {
     std::lock_guard lock(g_profiles_mutex);
     scale = g_profile_scale;
@@ -338,7 +349,7 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
     }
   }
   SetBootRenderFrame(w, h);
-  if (BootPortraitWidth()) {
+  {
     const auto crop = PortraitCropSize({int(w), int(h)});
     SetBootPortraitFrame(crop.width, crop.height);
   }

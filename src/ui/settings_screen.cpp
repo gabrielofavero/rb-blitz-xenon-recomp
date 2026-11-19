@@ -1141,14 +1141,23 @@ std::vector<PanelSpec> AllPanels() {
                                         "Run the game windowed, borderless, or full screen.",
                                         Choices({"windowed", "Windowed", "borderless",
                                                  "Borderless", "fullscreen", "Full Screen"})),
-                              SelectRow("settings_orientation", "graphics.orientation", "Orientation",
-                                        "Portrait arranges the menus, HUD and gameplay. Restart to apply.",
-                                        Choices({"landscape", "Landscape", "portrait", "Portrait"})),
+                              SubmenuRow("settings_orientation_menu", "settings_orientation_screen", "Orientation",
+                                         "Choose separate interface and gameplay orientations."),
                               BoolRow("settings_vsync", "graphics.vsync", "V-Sync",
                                       "Match the frame rate to your display to remove screen tearing."),
                               BoolRow("settings_overscan", "guest.overscan", "Overscan",
                                       "Expand the picture so it fills the screen edge to edge."),
                           }});
+
+  out.push_back(PanelSpec{"settings_orientation_panel", "settings_orientation_screen",
+      "settings_display_screen", MenuPanels(), {
+      SelectRow("settings_interface_orientation", "graphics.interface_orientation", "Interface",
+                "Choose the menu orientation. Restart to apply.",
+                Choices({"landscape", "Landscape", "portrait", "Portrait"})),
+      SelectRow("settings_gameplay_orientation", "graphics.gameplay_orientation", "Gameplay",
+                "Choose the gameplay and HUD orientation. Restart to apply.",
+                Choices({"landscape", "Landscape", "portrait", "Portrait"})),
+  }});
 
   out.push_back(PanelSpec{"settings_resolution_panel", "settings_resolution_screen",
       "settings_display_screen", MenuPanels(), {

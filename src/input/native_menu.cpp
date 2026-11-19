@@ -449,12 +449,12 @@ bool PortraitSplashActive() {
 }
 bool PortraitSettingsActive() {
   std::lock_guard lock(mutex);
-  return rb_blitz::settings::BootPortraitWidth() &&
+  return rb_blitz::settings::InterfacePortraitEnabled() &&
          (ui::PortraitSettingsScene(current_panel_scene) || ui::PortraitControlsPanel(current_panel_name));
 }
 bool PortraitCalibrationActive() {
   std::lock_guard lock(mutex);
-  return rb_blitz::settings::BootPortraitWidth() &&
+  return rb_blitz::settings::InterfacePortraitEnabled() &&
          (current_panel_name == "cal_audio_panel" || current_panel_name == "cal_visuals_panel" ||
           current_panel_name == "cal_hw_audio_panel" || current_panel_name == "cal_hw_visuals_panel");
 }
@@ -788,14 +788,14 @@ std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoi
   const uint32_t right = dir ? SceneMesh(ctx, base, dir, "arrow_rt.mesh") : 0;
   auto left_bounds = left ? ProjectMesh(ctx, base, left) : std::nullopt;
   auto right_bounds = right ? ProjectMesh(ctx, base, right) : std::nullopt;
-  if (rb_blitz::settings::BootPortraitWidth()) {
+  if (rb_blitz::settings::InterfacePortraitEnabled()) {
     const auto previous = dir ? SceneMesh(ctx, base, dir, "portrait_previous.mesh") : 0;
     const auto next = dir ? SceneMesh(ctx, base, dir, "portrait_next.mesh") : 0;
     if (previous) left_bounds = ProjectMesh(ctx, base, previous);
     if (next) right_bounds = ProjectMesh(ctx, base, next);
   }
   auto hit = HitMenuArrow(point, left_bounds, right_bounds);
-  if (!hit && rb_blitz::settings::BootPortraitWidth()) {
+  if (!hit && rb_blitz::settings::InterfacePortraitEnabled()) {
     const float width = ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width;
     const float half = 19.f / width;
     hit = HitMenuArrow(point,
@@ -806,7 +806,7 @@ std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoi
   // panel keeps both arrows at these guest coordinates; MenuPointer already
   // accounts for the window's size and presentation rectangle. These narrow
   // targets keep a click on the visible art from falling through to Confirm.
-  if (!hit && !rb_blitz::settings::BootPortraitWidth())
+  if (!hit && !rb_blitz::settings::InterfacePortraitEnabled())
     hit = HitMenuArrow(point, MenuBounds{.365f, .31f, .378f, .35f},
                       MenuBounds{.622f, .31f, .635f, .35f});
   REXLOG_INFO("native_mouse: preset click point={},{} panel={:08X} dir={:08X} meshes={:08X}/{:08X} projected={}/{} action={}",
@@ -944,7 +944,7 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
   auto bounds = ProjectLabel(ctx, base, label);
   // The portrait settings footer is a full native button. Its mesh supplies
   // the hit area, so tapping beside the Back text also sends Cancel.
-  if (bounds && rb_blitz::settings::BootPortraitWidth() &&
+  if (bounds && rb_blitz::settings::InterfacePortraitEnabled() &&
       (ui::PortraitSettingsScene(current_panel_scene) || ui::PortraitControlsPanel(current_panel_name))) {
     const auto dir = header ? U32(base, header + 36) : 0;
     const char* name = action == 2 ? "portrait_back.mesh" : action == 1 ? "portrait_confirm.mesh" : nullptr;
@@ -965,7 +965,7 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
     }
   }
   if (bounds && current_panel_name == "server_connect_panel" &&
-      rb_blitz::settings::BootPortraitWidth()) {
+      rb_blitz::settings::InterfacePortraitEnabled()) {
     const char* name = action == 1 ? "portrait_continue.mesh" :
                        action == 2 ? "portrait_back.mesh" :
                        action == 3 ? "portrait_skip.mesh" : nullptr;

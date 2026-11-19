@@ -183,11 +183,11 @@ const Anchor* AnchorFor(const uint8_t* base, uint32_t transformable) {
 }
 
 uint32_t HudWidth() {
-  const auto width = rb_blitz::settings::BootPortraitWidth();
+  const auto width = rb_blitz::settings::GameplayPortraitWidth();
   return width ? width : rb_blitz::settings::BootRenderWidth();
 }
 uint32_t HudHeight() {
-  const auto height = rb_blitz::settings::BootPortraitHeight();
+  const auto height = rb_blitz::settings::GameplayPortraitHeight();
   return height ? height : rb_blitz::settings::BootRenderHeight();
 }
 // Portrait uses compact, separate HUD slots in the guest's 480-unit scene.

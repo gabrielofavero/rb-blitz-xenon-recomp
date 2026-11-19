@@ -390,7 +390,7 @@ bool InstallMenuPayload(rex::kernel::TitleRuntime* runtime, bool settings_restar
     configuration.menu_refresh_trial = true;
     configuration.four_by_three = uint64_t(BootRenderWidth()) * 3 ==
                                   uint64_t(BootRenderHeight()) * 4;
-    if (BootPortraitHeight())
+    if (InterfacePortraitEnabled() && BootPortraitHeight())
       configuration.portrait_aspect = float(BootPortraitWidth()) / BootPortraitHeight();
     configuration.download_content_row = download_content_row;
     // Shortcut settings have a fixed inventory; these boot values control the actual menu rows.
@@ -423,7 +423,8 @@ bool InstallMenuPayload(rex::kernel::TitleRuntime* runtime, bool settings_restar
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), refresh_row_on, &build_notes, menu_filter::HiddenRows(),
                         skip_startup_logos, &refresh_routes, maybe_pump,
-                        BootPortraitWidth() != 0, menu_filter::SkipOfflinePromptsEnabled()))
+                        InterfacePortraitEnabled(), menu_filter::SkipOfflinePromptsEnabled(),
+                        GameplayPortraitEnabled()))
     return fail();
   PumpStartupWindow(pump_startup_window);
   bool song_entry_patched = false;

@@ -72,7 +72,7 @@ using namespace rb_blitz::test;
 
 using dtb::Node;
 
-constexpr size_t kExpectedPagesPerContext = 74;
+constexpr size_t kExpectedPagesPerContext = 75;
 constexpr size_t kExpectedPages = 2 * kExpectedPagesPerContext;
 constexpr size_t kExpectedListPages = kExpectedPages - 4;  // two native wheels per context
 
@@ -3674,6 +3674,21 @@ void TestAchievementActionWording() {
 
 void TestResolutionProfileRows() {
   namespace settings = rb_blitz::settings;
+  BeginCase("Orientation contains independent Interface and Gameplay controls");
+  ConfigureMenu({});
+  CHECK_TRUE(PanelRowSymbols("settings_orientation_panel") ==
+      std::vector<std::string>({"settings_interface_orientation", "settings_gameplay_orientation"}));
+  CHECK_TRUE(PanelRowSymbols("settings_orientation_pause_panel") ==
+      std::vector<std::string>({"settings_interface_orientation", "settings_gameplay_orientation"}));
+  const auto orientation_paths = RequestPaths();
+  for (const auto* scope : {"interface", "gameplay"}) {
+    for (const auto* value : {"landscape", "portrait"}) {
+      const auto path = std::string("rbbz-settings/set/graphics.") + scope + "_orientation/t:" + value;
+      CHECK_TRUE(std::find(orientation_paths.begin(), orientation_paths.end(), path) != orientation_paths.end());
+    }
+    const auto caption = HelpTextFor(std::string("settings_") + scope + "_orientation");
+    CHECK_TRUE(!caption.empty() && caption.size() <= 96);
+  }
   BeginCase("Force 16:9 is an optional desktop resolution preference requiring restart");
   CHECK_EQ(static_cast<uint16_t>(settings::SettingId::kForce16By9), 33);
   CHECK_TRUE(settings::SettingIdToken(settings::SettingId::kForce16By9) == "force_16_by_9");
@@ -3874,7 +3889,8 @@ std::vector<std::string> PageRows(const std::string& panel_name) {
 void TestHiddenDisplayGroup() {
   BeginCase("hidden device display rows remove the empty Display and Advanced routes");
   MenuConfiguration configuration;
-  configuration.hidden = {"graphics.orientation", "graphics.display", "graphics.aspect_ratio", "graphics.render_scale",
+  configuration.hidden = {"graphics.interface_orientation", "graphics.gameplay_orientation",
+                           "graphics.display", "graphics.aspect_ratio", "graphics.render_scale",
                            "graphics.vsync", "graphics.renderer", "guest.overscan",
                            "graphics.interface_resolution", "graphics.gameplay_resolution",
                            "graphics.interface_render_scale", "graphics.gameplay_render_scale",

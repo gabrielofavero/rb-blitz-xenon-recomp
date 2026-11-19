@@ -554,7 +554,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     const auto scale_value = reconciler_.Reconcile(SettingId::kRenderScale,
         *service_->DescriptorFor(SettingId::kRenderScale), scale_request, capability_snapshot_).effective;
 #endif
-    const auto orientation = service_->EffectiveValue(SettingId::kOrientation);
+    const auto orientation = service_->EffectiveValue(SettingId::kInterfaceOrientation);
     int32_t scale = scale_value.text.size() == 2 ? scale_value.text[0] - '0' : 1;
     auto plan = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
                                   aspect.text, scale, orientation.text);
@@ -597,7 +597,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
                                SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
                                SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale,
                                SettingId::kForce16By9,
-                               SettingId::kOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
+                               SettingId::kInterfaceOrientation, SettingId::kGameplayOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
                                SettingId::kAntiAliasing, SettingId::kFiltering}) {
       wanted[id] = service_->RequestedValue(id);
       attempt[id] = service_->EffectiveValue(id);
@@ -613,7 +613,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     Value safe_aspect; safe_aspect.kind = ValueKind::kEnum; safe_aspect.text = "16:9";
     Value safe_scale; safe_scale.kind = ValueKind::kEnum; safe_scale.text = "1x";
     Value safe_orientation; safe_orientation.kind = ValueKind::kEnum; safe_orientation.text = "landscape";
-    safe_values[SettingId::kOrientation] = safe_orientation;
+    safe_values[SettingId::kInterfaceOrientation] = safe_orientation;
+    safe_values[SettingId::kGameplayOrientation] = safe_orientation;
     safe_values[SettingId::kAspectRatio] = safe_aspect;
     safe_values[SettingId::kRenderScale] = safe_scale;
     AddSafeResolutionProfiles(safe_values, service_->ResolutionProfileDisplay());
@@ -655,7 +656,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
         const int recovered_scale = token.size() == 2 ? token[0] - '0' : 1;
         const auto recovered = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
             selected.at(SettingId::kAspectRatio).text, recovered_scale,
-            selected.contains(SettingId::kOrientation) ? selected.at(SettingId::kOrientation).text : "landscape");
+            selected.contains(SettingId::kInterfaceOrientation) ? selected.at(SettingId::kInterfaceOrientation).text : "landscape");
         if (recovered.supported) {
           auto& pixels = selected[SettingId::kResolution];
           pixels.kind = ValueKind::kResolution;
@@ -996,7 +997,7 @@ void SettingsBoot::ApplyWindowPolicy() {
 #endif
 #if defined(RB_BLITZ_IOS)
   SDL_SetHint(SDL_HINT_ORIENTATIONS,
-      service_ && service_->EffectiveValue(SettingId::kOrientation).text == "portrait"
+      service_ && service_->EffectiveValue(SettingId::kInterfaceOrientation).text == "portrait"
           ? "Portrait" : "LandscapeLeft LandscapeRight");
 #endif
   // The video mode describes the aspect, independently of the render allocation.
@@ -1260,8 +1261,9 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     // Both halves of the guest size, because the title derives its width from its height and
     // the aspect the user picked is not one the title can compute (src/hooks/render_settings.h).
     SetBootRenderFrame(screen_plan_.guest_size.width, screen_plan_.guest_size.height);
-    const bool portrait = service_ && service_->EffectiveValue(SettingId::kOrientation).text == "portrait";
-    const auto crop = portrait ? PortraitCropSize(screen_plan_.guest_size) : DisplayMode{};
+    ConfigureOrientations(service_ && service_->EffectiveValue(SettingId::kInterfaceOrientation).text == "portrait",
+                          service_ && service_->EffectiveValue(SettingId::kGameplayOrientation).text == "portrait");
+    const auto crop = PortraitCropSize(screen_plan_.guest_size);
     SetBootPortraitFrame(crop.width, crop.height);
     REXLOG_INFO("settings_boot: guest render base {}x{}, draw scale {} (before graphics setup)",
                 screen_plan_.guest_size.width, screen_plan_.guest_size.height,
@@ -1282,7 +1284,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
                           SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
                           SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale,
                           SettingId::kForce16By9,
-                          SettingId::kOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
+                          SettingId::kInterfaceOrientation, SettingId::kGameplayOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
                           SettingId::kAntiAliasing, SettingId::kFiltering})
       effective[id] = service_->EffectiveValue(id);
     std::string error;

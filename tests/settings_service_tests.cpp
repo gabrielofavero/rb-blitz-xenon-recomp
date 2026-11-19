@@ -1502,6 +1502,47 @@ void TestIOSReleaseSettings() {
   }
 }
 
+void TestOrientationProfiles() {
+  BeginCase("orientation profiles persist mixed choices and restore platform defaults");
+  for (const auto platform : {schema::HostPlatform::kWindows, schema::HostPlatform::kLinux,
+                              schema::HostPlatform::kMacOS, schema::HostPlatform::kIOS,
+                              schema::HostPlatform::kAndroid}) {
+    Scratch scratch;
+    const auto paths = Paths(scratch);
+    const auto release = schema::SettingsForRelease(platform, "test");
+    const auto expected = schema::IsMobile(platform) ? "portrait" : "landscape";
+    Service service(paths, release);
+    service.Boot(nullptr, {}, nullptr);
+    service.SetCapabilities(Capabilities());
+    CHECK_TRUE(service.RequestedValue(SettingId::kInterfaceOrientation).text == expected);
+    CHECK_TRUE(service.RequestedValue(SettingId::kGameplayOrientation).text == expected);
+    for (const bool portrait_interface : {false, true}) {
+      const auto txn = service.BeginEdit(service.revision());
+      const auto interface_value = EnumV(portrait_interface ? "portrait" : "landscape");
+      const auto gameplay_value = EnumV(portrait_interface ? "landscape" : "portrait");
+      CHECK_TRUE(service.Set(txn, SettingId::kInterfaceOrientation, interface_value,
+                             service.capability_revision()).ok);
+      CHECK_TRUE(service.Set(txn, SettingId::kGameplayOrientation, gameplay_value,
+                             service.capability_revision()).ok);
+      const auto saved = service.Commit(txn);
+      CHECK_TRUE(saved.status == CommitStatus::kSaved);
+      CHECK_TRUE(saved.restart_required);
+      Service reloaded(paths, release);
+      reloaded.Boot(nullptr, {}, nullptr);
+      reloaded.SetCapabilities(Capabilities());
+      CHECK_TRUE(ValueEquals(reloaded.EffectiveValue(SettingId::kInterfaceOrientation), interface_value));
+      CHECK_TRUE(ValueEquals(reloaded.EffectiveValue(SettingId::kGameplayOrientation), gameplay_value));
+    }
+    const auto restore = service.BeginEdit(service.revision());
+    CHECK_TRUE(service.StageRestore(restore, Service::RestoreProfile::kRecommended).ok);
+    CHECK_TRUE(service.Commit(restore).status == CommitStatus::kSaved);
+    Service restored(paths, release);
+    restored.Boot(nullptr, {}, nullptr);
+    CHECK_TRUE(restored.RequestedValue(SettingId::kInterfaceOrientation).text == expected);
+    CHECK_TRUE(restored.RequestedValue(SettingId::kGameplayOrientation).text == expected);
+  }
+}
+
 void TestRestoreProfilesRoundTrip() {
   BeginCase("Vanilla presentation persists, then Recommended restores all first-boot preferences");
   Scratch scratch;
@@ -1543,6 +1584,8 @@ void TestRestoreProfilesRoundTrip() {
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kStartup).text == "normal");
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kDisplay).text == "fullscreen");
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kOrientation).text == "landscape");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kInterfaceOrientation).text == "landscape");
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kGameplayOrientation).text == "landscape");
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kInterfaceResolution).text == "1280x720");
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kGameplayResolution).text == "1280x720");
   CHECK_TRUE(reloaded.RequestedValue(SettingId::kAntiAliasing).text == "native");
@@ -1716,6 +1759,7 @@ void TestResolutionProfileAspectBootPolicy() {
 int main(int argc, char** argv) {
   TestVanillaResolutionProfilesAfterRestart();
   TestResolutionProfileAspectBootPolicy();
+  TestOrientationProfiles();
   TestRestoreProfilesRoundTrip();
   TestVanillaRespectsOverridesAndRelease();
   TestControllerSchemeRoundTrip();

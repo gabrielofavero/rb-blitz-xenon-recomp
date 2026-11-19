@@ -34,9 +34,14 @@ void SetBootRenderHeight(uint32_t height);
 uint32_t BootRenderWidth();
 uint32_t BootRenderHeight();
 // The visible portrait crop; zero outside portrait mode. Rendering stays landscape.
+void ConfigureOrientations(bool interface_portrait, bool gameplay_portrait);
+bool InterfacePortraitEnabled();
+bool GameplayPortraitEnabled();
 void SetBootPortraitFrame(uint32_t width, uint32_t height);
 uint32_t BootPortraitWidth();
 uint32_t BootPortraitHeight();
+uint32_t GameplayPortraitWidth();
+uint32_t GameplayPortraitHeight();
 
 // The other half of a non-16:9 frame: the space the title lays its UI out in.
 //

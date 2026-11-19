@@ -1858,8 +1858,10 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       bool skip_startup_logos,
                       MenuRefreshRoutes* refresh_routes,
                       const std::function<void()>& pump_startup_window,
-                      bool portrait_hud,
-                      bool skip_offline_prompts) {
+                      bool portrait_interface,
+                      bool skip_offline_prompts,
+                      std::optional<bool> portrait_gameplay) {
+  const bool portrait_hud = portrait_gameplay.value_or(portrait_interface);
   namespace screen = ui::screen;
   MenuRecords built;
   MenuRefreshRoutes installed_routes;
@@ -1898,15 +1900,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   {
     std::vector<uint8_t> source, buttons, welcome;
     if (!read(ui::input_font::kCalibrationRecord, &source, error) ||
-        (portrait_hud && !read(ui::input_font::kListRecord, &buttons, error)) ||
-        (portrait_hud && !read("ui/calibration/gen/cal_welcome.milo_xbox", &welcome, error)) ||
-        !(portrait_hud ? ui::input_font::PreparePortraitControls(source, buttons, welcome,
+        (portrait_interface && !read(ui::input_font::kListRecord, &buttons, error)) ||
+        (portrait_interface && !read("ui/calibration/gen/cal_welcome.milo_xbox", &welcome, error)) ||
+        !(portrait_interface ? ui::input_font::PreparePortraitControls(source, buttons, welcome,
             screen::CurrentMenuConfiguration().portrait_aspect,
             &built[ui::input_font::kCalibrationRecord], error) :
           ui::input_font::PrepareCalibrationLayout(
             source, &built[ui::input_font::kCalibrationRecord], error))) return false;
   }
-  if (portrait_hud) {
+  if (portrait_interface) {
     std::vector<uint8_t> buttons, welcome;
     if (!read(ui::input_font::kListRecord, &buttons, error) ||
         !read("ui/calibration/gen/cal_welcome.milo_xbox", &welcome, error)) return false;
@@ -1941,7 +1943,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   if (merge_provider && !skip_startup_logos) {
     if (!BuildUltimateRatingScene(read, &built["ui/startup/gen/esrb.milo_xbox"],
                                   error)) return false;
-    if (portrait_hud) {
+    if (portrait_interface) {
       std::vector<uint8_t> scene;
       if (!ui::input_font::PreparePortraitStartupLogo(
               built["ui/startup/gen/esrb.milo_xbox"], &scene, error)) return false;
@@ -1969,7 +1971,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         return SetFirstBootScreen(&roots, skip_startup_logos, error);
       }) || !edit("ui/splash/gen/splash.dtb", [&](auto& roots) {
         if (!AddCrashRecoveryHooks(&roots, error)) return false;
-        if (portrait_hud && !AddPortraitSplashLayout(
+        if (portrait_interface && !AddPortraitSplashLayout(
             &roots, screen::CurrentMenuConfiguration().portrait_aspect, error)) return false;
         if (merge_provider) {
           // A compatible provider's own settings entry is *removed*: its pages are all reachable
@@ -2612,7 +2614,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     }
   }
   if (!read(screen::kSceneSourceRecord, &built[screen::kSceneRecord], error)) return false;
-  if (portrait_hud) {
+  if (portrait_interface) {
     std::vector<uint8_t> buttons, scene;
     if (!read(ui::input_font::kListRecord, &buttons, error) ||
         !ui::input_font::PreparePortraitSettings(built[screen::kSceneRecord], buttons,
@@ -2792,7 +2794,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       note("input image font is unavailable: " + why);
     }
   }
-  if (portrait_hud) {
+  if (portrait_interface) {
     if (!edit("ui/startup/gen/autosave_icon_startup.dtb", [&](auto& roots) {
           return AddPortraitAutosaveLayout(&roots, error);
         })) return false;
@@ -2843,7 +2845,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   }
   if (!read("ui/pause/gen/confirmation_message.milo_xbox",
             &built["ui/pause/gen/settings_confirmation.milo_xbox"], error)) return false;
-  if (portrait_hud) {
+  if (portrait_interface) {
     std::vector<uint8_t> scene;
     if (!ui::input_font::PreparePortraitPrompt(
           built["ui/pause/gen/settings_confirmation.milo_xbox"],
@@ -2865,7 +2867,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     if (read(path, &bytes, &why) &&
         ui::dtb::Parse(bytes.data(), bytes.size(), &roots, &header, &why) &&
         SetDiscoveryStartLabel(&roots) && AddGraphicsLoadingGate(&roots,&why) &&
-        (!portrait_hud || AddPortraitLoadingLayout(&roots, false,
+        (!portrait_interface || AddPortraitLoadingLayout(&roots, false,
             screen::CurrentMenuConfiguration().portrait_aspect, &why))) {
       built[path] = ui::dtb::Compile(roots, header);
       if (skip_offline_prompts) {

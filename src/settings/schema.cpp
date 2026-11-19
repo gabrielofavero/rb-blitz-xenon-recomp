@@ -242,12 +242,15 @@ std::vector<SchemaRow> BuildTable() {
     rows.push_back(Row(std::move(d), {"graphics", "resolution"}, "legacy_resolution", "Resolution",
                        "Auto fits your display using the highest supported resolution."));
   }
-  {
-    Descriptor d = Make(SettingId::kOrientation, Category::kGraphics, Provider::kNative,
+  for (const auto& [id, key, label] : {
+      std::tuple{SettingId::kOrientation, "orientation", "Orientation"},
+      std::tuple{SettingId::kInterfaceOrientation, "interface_orientation", "Interface"},
+      std::tuple{SettingId::kGameplayOrientation, "gameplay_orientation", "Gameplay"}}) {
+    Descriptor d = Make(id, Category::kGraphics, Provider::kNative,
                         WidgetKind::kHorizontalSelect, ValueKind::kEnum, EnumValue("landscape"));
     d.choices = Choices({{"landscape", "Landscape"}, {"portrait", "Portrait"}});
-    rows.push_back(Row(std::move(d), {"graphics", "orientation"}, "", "Orientation",
-                       "Portrait arranges the menus, HUD and gameplay. Restart to apply."));
+    rows.push_back(Row(std::move(d), {"graphics", key}, "orientation_profiles", label,
+                       "Choose landscape or portrait for this part of the game. Restart to apply."));
   }
   {
     Descriptor d = Make(SettingId::kAspectRatio, Category::kGraphics, Provider::kNative,
@@ -576,6 +579,8 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kForce16By9, ApplicationStrategy::kRestart, ""},
     {SettingId::kResolution, ApplicationStrategy::kRestart, ""},
     {SettingId::kOrientation, ApplicationStrategy::kRestart, ""},
+    {SettingId::kInterfaceOrientation, ApplicationStrategy::kRestart, ""},
+    {SettingId::kGameplayOrientation, ApplicationStrategy::kRestart, ""},
     {SettingId::kAspectRatio, ApplicationStrategy::kRestart, ""},
     {SettingId::kRenderScale, ApplicationStrategy::kRestart, ""},
     // The first row promoted to `hot`, and its evidence is a measurement rather than a guess about
@@ -800,6 +805,11 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
     release.rules.emplace(SettingId::kRenderer, std::move(renderer));
   }
   if (IsMobile(platform)) {
+    for (const auto id : {SettingId::kInterfaceOrientation, SettingId::kGameplayOrientation}) {
+      RowRule orientation;
+      orientation.default_value = EnumValue("portrait");
+      release.rules.emplace(id, std::move(orientation));
+    }
     RowRule exit;
     exit.default_value = BoolValue(true);
     release.rules.emplace(SettingId::kHideExitGame, std::move(exit));
@@ -871,7 +881,8 @@ std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps,
       descriptor.availability = Availability::kHidden;
     if (descriptor.id == SettingId::kDlcScanThreads && !descriptor.choices.empty())
       descriptor.compiled_default = IntValue(std::stoll(descriptor.choices.back().token));
-    if (row.group == "legacy_resolution") descriptor.availability = Availability::kHidden;
+    if (row.group == "legacy_resolution" || descriptor.id == SettingId::kOrientation)
+      descriptor.availability = Availability::kHidden;
     if (descriptor.provider == Provider::kUltimate) {
       if (!caps.provider.installed || !caps.provider.compatible) {
         descriptor.availability = Availability::kHidden;

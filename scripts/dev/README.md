@@ -33,7 +33,8 @@ packager and accepts its arguments. Linux packaging requires the pinned nFPM
 archive and other arguments documented in `installer/linux/README.md`.
 
 Portrait runs copy the selected launcher profile and settings into a new
-`out/dev-portrait/` directory. They set `graphics.orientation = 'portrait'`,
+`out/dev-portrait/` directory. They set both `graphics.interface_orientation` and
+`graphics.gameplay_orientation` to `'portrait'`,
 `graphics.aspect_ratio = '16:9'`, and `graphics.force_16_by_9 = true`, including
 manual provenance. The resolution profiles therefore use a 16:9 source even on
 an ultrawide display. The source files are preserved; settings changed in a

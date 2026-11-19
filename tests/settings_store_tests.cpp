@@ -502,6 +502,41 @@ void TestMotionDeployMigration() {
 
 int main() {
   {
+    BeginCase("legacy orientation seeds each missing profile and preserves explicit choices");
+    Scratch scratch;
+    const auto file = scratch.base / "settings.toml";
+    for (const auto* orientation : {"portrait", "landscape"}) {
+      const std::string original = std::string("schema_version = 1\n[graphics]\norientation = '") +
+          orientation + "' # keep\ninterface_orientation = 'landscape'\nunknown = 'untouched'\n";
+      WriteFile(file, original);
+      const auto loaded = LoadSettingsDocument(file);
+      CHECK_STR_EQ(loaded.document.values.at(SettingId::kInterfaceOrientation).text, "landscape");
+      CHECK_STR_EQ(loaded.document.values.at(SettingId::kGameplayOrientation).text, orientation);
+      CHECK_STR_EQ(ReadFile(file), original);
+      SaveRequest request;
+      request.base = loaded.document.values;
+      Value value; value.kind = ValueKind::kEnum; value.text = "portrait";
+      request.changed[SettingId::kGameplayOrientation] = value;
+      CHECK_TRUE(SaveSettingsDocument(file, request).status == CommitStatus::kSaved);
+      const auto restored = LoadSettingsDocument(file);
+      CHECK_STR_EQ(restored.document.values.at(SettingId::kInterfaceOrientation).text, "landscape");
+      CHECK_STR_EQ(restored.document.values.at(SettingId::kGameplayOrientation).text, "portrait");
+      CHECK_TRUE(ReadFile(file).find("unknown = 'untouched'") != std::string::npos);
+    }
+    WriteFile(file, "schema_version = 1\n[graphics]\norientation = 'portrait'\n");
+    const auto loaded = LoadSettingsDocument(file);
+    CHECK_STR_EQ(loaded.document.values.at(SettingId::kInterfaceOrientation).text, "portrait");
+    CHECK_STR_EQ(loaded.document.values.at(SettingId::kGameplayOrientation).text, "portrait");
+    CHECK_EQ(loaded.document.migrated_graphics_preferences.size(), size_t(2));
+    SaveRequest request;
+    request.base = loaded.document.values;
+    Value value; value.kind = ValueKind::kEnum; value.text = "landscape";
+    request.changed[SettingId::kInterfaceOrientation] = value;
+    // A concurrent legacy edit must still conflict with the migrated base.
+    WriteFile(file, "schema_version = 1\n[graphics]\norientation = 'landscape'\n");
+    CHECK_TRUE(SaveSettingsDocument(file, request).status == CommitStatus::kConflict);
+  }
+  {
     BeginCase("interface and gameplay preferences survive independent saves");
     Scratch scratch;
     const auto file = scratch.base / "settings.toml";

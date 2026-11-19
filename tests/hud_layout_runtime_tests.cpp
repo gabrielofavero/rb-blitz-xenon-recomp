@@ -139,8 +139,8 @@ constexpr double delta = (2560.0 / 1080.0 - 16.0 / 9.0) * 240.0;
 namespace rb_blitz::settings {
 uint32_t BootRenderWidth() { return width; }
 uint32_t BootRenderHeight() { return height; }
-uint32_t BootPortraitWidth() { return crop_width; }
-uint32_t BootPortraitHeight() { return crop_height; }
+uint32_t GameplayPortraitWidth() { return crop_width; }
+uint32_t GameplayPortraitHeight() { return crop_height; }
 }
 namespace rb_blitz::input {
 void CaptureLanePowerup(PPCContext&, uint8_t*, uint32_t) { ++lane_captures; }

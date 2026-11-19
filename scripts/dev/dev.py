@@ -119,10 +119,11 @@ def portrait_profile(source: Path) -> Path:
     settings = source.with_name(settings_name)
     text = settings.read_text(encoding="utf-8") if settings.is_file() else "schema_version = 1\n"
     tomllib.loads(text)  # Refuse malformed input before creating a session.
-    text = set_scalars(text, "graphics", {"orientation": "'portrait'", "aspect_ratio": "'16:9'",
+    text = set_scalars(text, "graphics", {"interface_orientation": "'portrait'",
+                                          "gameplay_orientation": "'portrait'", "aspect_ratio": "'16:9'",
                                           "force_16_by_9": "true"})
     text = set_scalars(text, "provenance", {f"graphics.{key}": "'manual'" for key in
-                                          ("orientation", "aspect_ratio", "force_16_by_9")})
+                                          ("interface_orientation", "gameplay_orientation", "aspect_ratio", "force_16_by_9")})
     parent = ROOT / "out/dev-portrait"
     parent.mkdir(parents=True, exist_ok=True)
     session = Path(tempfile.mkdtemp(dir=parent))

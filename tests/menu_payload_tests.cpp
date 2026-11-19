@@ -2860,6 +2860,22 @@ int main(int argc, char** argv) {
       for (const auto& note : notes) std::printf("record note: %s\n", note.c_str());
       CHECK_TRUE(notes.empty());
     }
+    BeginCase("mixed orientations author interface scenes and gameplay HUD independently");
+    for (const bool interface_portrait : {false, true}) {
+      settings::MenuRecords mixed;
+      const bool gameplay_portrait = !interface_portrait;
+      CHECK_TRUE(settings::BuildMenuRecords(read, {"ui/locale/eng/gen/locale_keep.dtb"},
+          &mixed, &why, false, false, nullptr, {}, false, nullptr, {},
+          interface_portrait, false, gameplay_portrait));
+      const auto& interface_records = interface_portrait ? portrait : landscape;
+      const auto& gameplay_records = gameplay_portrait ? portrait : landscape;
+      for (const auto& [path, bytes] : portrait) {
+        const auto& expected = path == "ui/gen/game.dtb" ? gameplay_records : interface_records;
+        CHECK_EQ(mixed.contains(path), expected.contains(path));
+        if (mixed.contains(path) && expected.contains(path))
+          CHECK_TRUE(mixed.at(path) == expected.at(path));
+      }
+    }
     BeginCase("portrait payload changes splash buttons, loading layouts and the existing gameplay HUD route");
     CHECK_EQ(portrait.size(), landscape.size() + 14 + !landscape.contains("ui/gen/game.dtb") +
                                       !landscape.contains("ui/loading/gen/loading.dtb"));

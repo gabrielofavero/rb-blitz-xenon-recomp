@@ -1248,6 +1248,12 @@ int main() {
     for (const auto& row : rows) {
       if (row.id == SettingId::kDlcScanThreads) CHECK_EQ(row.compiled_default.integer,12);
       if (row.id == SettingId::kLoadGuard) CHECK_TRUE(row.compiled_default.text == "60s");
+      if (row.id == SettingId::kOrientation) CHECK_TRUE(row.availability == Availability::kHidden);
+      if (row.id == SettingId::kInterfaceOrientation || row.id == SettingId::kGameplayOrientation) {
+        CHECK_TRUE(row.compiled_default.text == (schema::IsMobile(platform) ? "portrait" : "landscape"));
+        CHECK_TRUE(row.availability == Availability::kVisible);
+        CHECK_TRUE(row.strategy == ApplicationStrategy::kRestart);
+      }
       if (row.id == SettingId::kSettingsLabelSize) CHECK_TRUE(row.compiled_default.text == "big");
       if (row.id == SettingId::kInterfaceResolution || row.id == SettingId::kGameplayResolution) {
         CHECK_TRUE(row.compiled_default.text == "native");

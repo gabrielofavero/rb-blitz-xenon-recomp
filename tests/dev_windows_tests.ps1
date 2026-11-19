@@ -49,7 +49,8 @@ try {
 import pathlib, sys, tomllib
 file = pathlib.Path(sys.argv[1])
 doc = tomllib.loads(file.with_name('settings.toml').read_text())
-assert doc['graphics']['orientation'] == 'portrait'
+assert doc['graphics']['interface_orientation'] == 'portrait'
+assert doc['graphics']['gameplay_orientation'] == 'portrait'
 assert doc['graphics']['aspect_ratio'] == '16:9'
 assert doc['graphics']['force_16_by_9'] is True
 assert doc['graphics']['renderer'] == 'vulkan'

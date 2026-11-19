@@ -13,4 +13,5 @@ void SetIOSInSong(bool in_song);  // Guest-authored game_screen enter/exit.
 bool ConsumeIOSAutoPause();      // Guest poll, when the native game can pause.
 void WaitForIOSForeground();  // Guest main-loop checkpoint; never called by the UI thread.
 void LogIOSPresentationState();  // UI thread only.
+bool ApplyIOSOrientation(void* native_window, bool portrait);  // UIWindow, UI thread only.
 }  // namespace rb_blitz::platform

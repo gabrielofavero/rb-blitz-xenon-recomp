@@ -316,9 +316,9 @@ function New-BlitzPortraitArguments {
     # Change only these scalar keys in the copied tables, keeping other settings.
     foreach ($section in @('graphics', 'provenance')) {
         $values = if ($section -eq 'graphics') {
-            [ordered]@{ orientation = "'portrait'"; aspect_ratio = "'16:9'"; force_16_by_9 = "true" }
+            [ordered]@{ interface_orientation = "'portrait'"; gameplay_orientation = "'portrait'"; aspect_ratio = "'16:9'"; force_16_by_9 = "true" }
         } else {
-            [ordered]@{ "'graphics.orientation'" = "'manual'"; "'graphics.aspect_ratio'" = "'manual'"; "'graphics.force_16_by_9'" = "'manual'" }
+            [ordered]@{ "'graphics.interface_orientation'" = "'manual'"; "'graphics.gameplay_orientation'" = "'manual'"; "'graphics.aspect_ratio'" = "'manual'"; "'graphics.force_16_by_9'" = "'manual'" }
         }
         $table = [regex]::Match($text, '(?ms)^\[' + $section + '\][^\r\n]*\r?\n(?<body>.*?)(?=^\[|\z)')
         $body = if ($table.Success) { $table.Groups['body'].Value } else { '' }

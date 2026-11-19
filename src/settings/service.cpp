@@ -594,6 +594,8 @@ ValidationResult Service::StageRestore(uint64_t txn, RestoreProfile profile) {
         {SettingId::kUnlockAll, boolean(false)},
         {SettingId::kDisplay, token("fullscreen")},
         {SettingId::kOrientation, token("landscape")},
+        {SettingId::kInterfaceOrientation, token("landscape")},
+        {SettingId::kGameplayOrientation, token("landscape")},
         {SettingId::kAspectRatio, token("16:9")},
         {SettingId::kForce16By9, boolean(true)},
         {SettingId::kRenderScale, token("1x")},

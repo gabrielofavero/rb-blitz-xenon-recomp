@@ -3,6 +3,7 @@
 
 #include <charconv>
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <filesystem>
 
@@ -49,7 +50,7 @@ bool Decode(std::string_view text, Identity* out) {
 namespace {
 constexpr wchar_t kClass[] = L"RbBlitzPersistentWindow";
 constexpr ULONG_PTR kProtocol = 0x52425731;
-enum class Operation : uint32_t { kRegister, kAttach, kDisplay, kTitle, kExpectRestart };
+enum class Operation : uint32_t { kRegister, kAttach, kDisplay, kTitle, kExpectRestart, kOrientation };
 struct Request {
   Operation operation{};
   uint32_t pid = 0;
@@ -119,6 +120,7 @@ struct Host {
   int mode = 0;
   RECT windowed{};
   DWORD windowed_style = WS_OVERLAPPEDWINDOW;
+  std::array<RECT, 2> orientation_bounds{};
   ULONGLONG exit_deadline = 0;
 
   ~Host() {
@@ -191,6 +193,36 @@ struct Host {
     return true;
   }
 
+  bool Orient(bool portrait) {
+    if (!configured || !child) return false;
+    if (mode != 0 || IsZoomed(window) || IsIconic(window)) return true;
+    RECT client{}, bounds{};
+    if (!GetClientRect(window, &client) || !GetWindowRect(window, &bounds)) return false;
+    const bool current = client.right < client.bottom;
+    if (current == portrait) return true;
+    orientation_bounds[current] = bounds;
+    auto target = orientation_bounds[portrait];
+    if (target.right == target.left) {
+      target = {0, 0, client.bottom, client.right};
+      if (!AdjustWindowRectExForDpi(&target, windowed_style, FALSE, 0, GetDpiForWindow(window))) return false;
+    }
+    MONITORINFO info{sizeof(info)};
+    if (!GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &info)) return false;
+    const int frame_w = bounds.right - bounds.left - client.right;
+    const int frame_h = bounds.bottom - bounds.top - client.bottom;
+    const int client_w = (std::max)(1L, target.right - target.left - frame_w);
+    const int client_h = (std::max)(1L, target.bottom - target.top - frame_h);
+    const double fit = (std::min)({1., double((std::max)(1L, info.rcWork.right - info.rcWork.left - frame_w)) / client_w,
+                                     double((std::max)(1L, info.rcWork.bottom - info.rcWork.top - frame_h)) / client_h});
+    const int width = (std::max)(1, int(client_w * fit)) + frame_w;
+    const int height = (std::max)(1, int(client_h * fit)) + frame_h;
+    const int x = std::clamp(int(bounds.left + (bounds.right - bounds.left - width) / 2),
+                            int(info.rcWork.left), int(info.rcWork.right - width));
+    const int y = std::clamp(int(bounds.top + (bounds.bottom - bounds.top - height) / 2),
+                            int(info.rcWork.top), int(info.rcWork.bottom - height));
+    return SetWindowPos(window, nullptr, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+  }
+
   LRESULT Receive(const Request& request) {
     // A replacement may finish its parent wait and send Attach while this
     // thread is still draining messages from the previous game generation.
@@ -242,6 +274,7 @@ struct Host {
       SetWindowTextW(window, request.title);
       return 1;
     }
+    if (request.operation == Operation::kOrientation) return Orient(request.mode != 0);
     return 0;
   }
 };
@@ -425,6 +458,13 @@ bool SetDisplayMode(int mode) {
       client.right, client.bottom, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
+bool SetOrientation(bool portrait) {
+  Request request{};
+  request.operation = Operation::kOrientation;
+  request.mode = portrait ? 1 : 0;
+  return Send(request);
+}
+
 void SetTitle(std::string_view title) {
   Request request{};
   request.operation = Operation::kTitle;
@@ -439,6 +479,7 @@ void Bootstrap(const std::vector<std::string>&) {}
 bool ExpectRestart(uint32_t) { return true; }
 bool Attach(void*, bool, std::function<void(bool)>) { return true; }
 bool SetDisplayMode(int) { return false; }
+bool SetOrientation(bool) { return false; }
 void SetTitle(std::string_view) {}
 bool Active() { return false; }
 #endif

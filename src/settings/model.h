@@ -55,12 +55,14 @@ enum class SettingId : uint16_t {
   kDisplay = 25,  // windowed / borderless / full screen (owner decision, 2026-10-13)
   kAspectRatio = 26,
   kRenderScale = 27,
-  kOrientation = 28,
+  kOrientation = 28,  // legacy combined preference; retained for migration
   kInterfaceResolution = 29,
   kGameplayResolution = 30,
   kInterfaceRenderScale = 31,
   kGameplayRenderScale = 32,
   kForce16By9 = 33,
+  kInterfaceOrientation = 34,
+  kGameplayOrientation = 35,
   // Interface
   kLetterbox = 40,
   kHideOfflinePrompts = 41,

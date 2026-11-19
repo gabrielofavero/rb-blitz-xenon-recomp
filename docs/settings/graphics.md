@@ -1384,8 +1384,18 @@ and old safe/desktop recovery values. Device switching remains a manual gate.
 
 ## Portrait gameplay experiment (2026-11-16)
 
-Audio & Video > Display > Orientation offers Landscape (default) and Portrait,
-applied after restarting. Both orientations render the same landscape source;
+Audio & Video > Video > Display > Orientation has independent Interface and Gameplay
+choices, applied after restarting. Desktop defaults to Landscape for both; iOS and
+Android default to Portrait for both. Existing `graphics.orientation` preferences
+seed either missing choice; explicit `graphics.interface_orientation` and
+`graphics.gameplay_orientation` values take precedence. Mixed choices switch with
+song entry and exit. Pause, settings and confirmation dialogs use Interface orientation.
+Windowed desktop clients change shape to fit the chosen orientation;
+fullscreen and maximized windows retain their display bounds. Mobile switches its
+allowed device orientation at that boundary. Interface assets and gameplay HUD
+layout each follow their own choice.
+
+Both orientations render the same landscape source;
 portrait gameplay crops its centre at a uniform scale. For 16:9 at 1x the source
 is still 1280x720, with a 405x720 visible viewport. The camera projection and
 vertical FOV are unchanged. The title, main menu, connection/content scan and song loading fill the portrait

@@ -29,6 +29,7 @@ void Bootstrap(const std::vector<std::string>& arguments);
 bool ExpectRestart(uint32_t replacement_pid);
 bool Attach(void* native_window, bool resizable, std::function<void(bool)> focus_changed);
 bool SetDisplayMode(int mode); // 0 windowed, 1 borderless, 2 desktop fullscreen
+bool SetOrientation(bool portrait); // fit the windowed client to the selected orientation
 void SetTitle(std::string_view title);
 bool Active();
 

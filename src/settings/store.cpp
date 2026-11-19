@@ -980,6 +980,20 @@ DocumentLoad LoadSettingsDocument(const fs::path& file) {
     }
   }
 
+  const auto legacy_orientation = load.document.values.find(SettingId::kOrientation);
+  if (legacy_orientation != load.document.values.end() &&
+      (legacy_orientation->second.text == "landscape" || legacy_orientation->second.text == "portrait")) {
+    const auto origin = load.document.origins.find(SettingId::kOrientation);
+    const auto inherited = origin != load.document.origins.end() ? origin->second : Origin::kManual;
+    for (const auto id : {SettingId::kInterfaceOrientation, SettingId::kGameplayOrientation}) {
+      const auto storage = StorageKeyFor(id);
+      if (doc.Has(storage.section, storage.key)) continue;
+      load.document.values[id] = legacy_orientation->second;
+      load.document.origins[id] = inherited;
+      load.document.graphics_preferences_migrated = true;
+      load.document.migrated_graphics_preferences.push_back(id);
+    }
+  }
   const auto legacy_resolution = load.document.values.find(SettingId::kResolution);
   Value aspect, scale;
   if (legacy_resolution != load.document.values.end() &&
@@ -1071,6 +1085,11 @@ SaveOutcome SaveSettingsDocument(const fs::path& file, const SaveRequest& reques
       if (row != nullptr && ParseValueFromItem(row->descriptor, item, &disk)) {
         disk_found = true;
       }
+    }
+    if (!item.found && (id == SettingId::kInterfaceOrientation || id == SettingId::kGameplayOrientation)) {
+      const auto* legacy = schema::FindRow(SettingId::kOrientation);
+      if (legacy && ParseValueFromItem(legacy->descriptor, PreferenceItem(doc, legacy->storage), &disk) &&
+          (disk.text == "landscape" || disk.text == "portrait")) disk_found = true;
     }
     if (!item.found && (id == SettingId::kAspectRatio || id == SettingId::kRenderScale)) {
       const auto derived = converted_preferences.find(id);

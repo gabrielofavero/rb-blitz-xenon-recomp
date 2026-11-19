@@ -315,6 +315,7 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
                               rb_blitz::settings::title::window_resizable.Get());
     }
     gameplay_presentation_ = rb_blitz::ui::CreateGameplayPresentation(
+        GetUI(),
         [] { return REX_INTERFACE(rex::gpu::IGraphicsPresentation); }, [this] {
           if (!rb_blitz::input::touch::PreviewEnabled() || !GetTitleRuntime().IsLoaded()) return;
           const auto entries = GetTitleRuntime().GetAchievementManager().ListAchievements();
