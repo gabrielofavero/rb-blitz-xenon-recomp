@@ -727,9 +727,9 @@ void TestFirstAssignReplacesAndAppends() {
   rb_blitz::input::InputStoreOptions options;
   auto store = rb_blitz::input::InputStore::Load(path, WriteFixture(path), options);
   std::string error;
-  // The fixture has no `second_note` row, so that action holds its default (W + left click).
+  // The fixture has no `second_note` row, so that action holds its default (W + right click).
   CHECK_FALSE(store->Matches("input.keyboard_mouse.second_note", true));
-  CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("W, Left Click") !=
+  CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("W, Right Click") !=
              std::string::npos);
   CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("Add Key or Replace") !=
              std::string::npos);
@@ -738,7 +738,7 @@ void TestFirstAssignReplacesAndAppends() {
   CHECK_TRUE(store->BeginCapture("input.keyboard_mouse.second_note", &error));
   CHECK_TRUE(store->CompleteCapture("input.keyboard_mouse.second_note", Source("key:Z"), &error));
   const std::string once = Slurp(path);
-  CHECK_TRUE(once.find("second_note = \"key:W, mouse:left, key:Z\"") != std::string::npos);
+  CHECK_TRUE(once.find("second_note = \"key:W, mouse:right, key:Z\"") != std::string::npos);
   CHECK_TRUE(once.find("wheel") == std::string::npos);
   CHECK_TRUE(store->Describe("input.keyboard_mouse.second_note").find("Custom binding") !=
              std::string::npos);

@@ -363,7 +363,7 @@ Consequences worth knowing:
   in-song arm measured the pause panel appearing 22 ms after the Escape press, with the release
   after it, and the earlier per-poll set let exactly that window through. A menu key no table
   ever took is never added, so the title's A press is untouched.
-- The Mouse & Keyboard defaults use First Note `Q` + right click, Second Note `W` + left
+- The Mouse & Keyboard defaults use First Note `Q` + left click, Second Note `W` + right
   click, Move Right `Arrow Right` + scroll down, Move Left `Arrow Left` + scroll up,
   Power-up `Space` + middle click, Pause `Escape`. The wheel directions were reversed at
   the owner's request on 2026-10-31. A wheel detent

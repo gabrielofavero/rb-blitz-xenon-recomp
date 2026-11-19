@@ -3224,7 +3224,7 @@ void TestConfirmationPagesAreCaptionFree() {
   int panels = 0;
   for (const dtb::Node& root : DefinitionRoots()) {
     if (root.tag != dtb::kCommand || root.kids.size() < 3 || root.kids[0].text != "new" ||
-        root.kids[2].tag != dtb::kSymbol) {
+        root.kids[1].text != "UIPanel" || root.kids[2].tag != dtb::kSymbol) {
       continue;
     }
     const std::string name = root.kids[2].text;
@@ -3251,8 +3251,9 @@ void TestConfirmationPagesAreCaptionFree() {
     // sibling test's job).
     std::vector<const dtb::Node*> enter_members;
     CollectMembers(root, "enter", &enter_members);
+    CHECK_EQ(enter_members.size(), 1u);
     if (enter_members.size() != 1u) {
-      continue;  // a screen, not a panel
+      continue;
     }
     ++panels;
     std::vector<std::string> enter_texts;

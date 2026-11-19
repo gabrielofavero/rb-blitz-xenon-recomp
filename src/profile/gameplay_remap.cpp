@@ -144,9 +144,9 @@ const std::array<ActionTable, kControllerPresetCount>& PresetTables() {
 std::vector<remap::Source> KeyboardMouseDefault(Action action) {
   switch (action) {
     case Action::kFirstNote:
-      return {Key("Q"), Mouse("right")};
+      return {Key("Q"), Mouse("left")};
     case Action::kSecondNote:
-      return {Key("W"), Mouse("left")};
+      return {Key("W"), Mouse("right")};
     case Action::kMoveLaneRight:
       return {Key("Right"), Mouse("wheel_down")};
     case Action::kMoveLaneLeft:

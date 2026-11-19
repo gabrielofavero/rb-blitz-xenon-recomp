@@ -201,6 +201,35 @@ int main() {
     CHECK_FALSE(SourceHeld(devices.Snapshot(), kOpen, Mouse("scroll")));
   }
 
+  BeginCase("default mouse clicks play First Note on left and Second Note on right");
+  {
+    FakeDevices devices;
+    gameplay::Table keyboard_mouse(gameplay::TableKind::kKeyboardMouse);
+    const auto first = gameplay::Action::kFirstNote;
+    const auto second = gameplay::Action::kSecondNote;
+    const SourceGates mouse_only{false, true};
+    const SourceGates mouse_off{true, false};
+    const auto held = [&](gameplay::Action action) {
+      return ActionHeld(devices.Snapshot(), mouse_only, keyboard_mouse, action);
+    };
+    CHECK_FALSE(held(first));
+    CHECK_FALSE(held(second));
+    devices.mouse_buttons = mouse_button::kLeft;
+    CHECK_TRUE(held(first));
+    CHECK_FALSE(held(second));
+    CHECK_FALSE(ActionHeld(devices.Snapshot(), mouse_off, keyboard_mouse, first));
+    devices.mouse_buttons = mouse_button::kRight;
+    CHECK_FALSE(held(first));
+    CHECK_TRUE(held(second));
+    CHECK_FALSE(ActionHeld(devices.Snapshot(), mouse_off, keyboard_mouse, second));
+    devices.mouse_buttons = mouse_button::kLeft | mouse_button::kRight;
+    CHECK_TRUE(held(first));
+    CHECK_TRUE(held(second));
+    devices.mouse_buttons = 0;
+    CHECK_FALSE(held(first));
+    CHECK_FALSE(held(second));
+  }
+
   BeginCase("an unfocused window plays nothing from any source");
   {
     FakeDevices devices;

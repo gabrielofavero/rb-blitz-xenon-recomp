@@ -214,17 +214,17 @@ void TestVocabulary() {
 
   BeginCase("P2: the Mouse & Keyboard defaults include the owner's lane-wheel reversal");
 
-  // Q + right click, W + left click, the arrow keys with a wheel detent each, Space + middle
+  // Q + left click, W + right click, the arrow keys with a wheel detent each, Space + middle
   // click, Escape. The lane-wheel directions are the owner's 2026-10-31 update to D12.
   // These replace the shipped keyboard preset; a click or detent is a binding by default.
   const auto keyboard = [](Action action) {
     return DefaultSources(TableKind::kKeyboardMouse, action);
   };
   CHECK_TRUE(HasSource(keyboard(Action::kFirstNote), remap::SourceKind::kKey, "Q"));
-  CHECK_TRUE(HasSource(keyboard(Action::kFirstNote), remap::SourceKind::kMouse, "right"));
+  CHECK_TRUE(HasSource(keyboard(Action::kFirstNote), remap::SourceKind::kMouse, "left"));
   CHECK_EQ(keyboard(Action::kFirstNote)->size(), 2u);
   CHECK_TRUE(HasSource(keyboard(Action::kSecondNote), remap::SourceKind::kKey, "W"));
-  CHECK_TRUE(HasSource(keyboard(Action::kSecondNote), remap::SourceKind::kMouse, "left"));
+  CHECK_TRUE(HasSource(keyboard(Action::kSecondNote), remap::SourceKind::kMouse, "right"));
   CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneRight), remap::SourceKind::kKey, "Right"));
   CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneRight), remap::SourceKind::kMouse, "wheel_down"));
   CHECK_TRUE(HasSource(keyboard(Action::kMoveLaneLeft), remap::SourceKind::kKey, "Left"));

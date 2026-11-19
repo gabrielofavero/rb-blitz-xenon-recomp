@@ -518,6 +518,11 @@ bytes are the installed retail scene copied at boot under a name of ours
 retail scene, because the scene refers to neighbours by relative path
 (`../resource/lists/list_options_main.milo`, `neon_lights.milo`).
 
+Each generated settings screen also sets the shared `background_night_panel`'s `spotlights.grp`
+visibility on entry: visible in the main menu and hidden during a song. Song loading hides this
+group, so returning to the menu without visiting the results screen must explicitly restore it.
+`TestScreenBackgroundLights` checks both contexts, including their child and confirmation screens.
+
 #### 2.2 Where a definition of ours may live
 
 Our definitions **ride inside a retail record** (measured in P1, re-confirmed here). Appending them to the

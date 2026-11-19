@@ -849,8 +849,8 @@ menu, so the external app is no longer the only place to change a binding:
   acts exactly when it has a custom row - with none, the title's native preset drives the pad, and
   with one, unmodified actions follow the preset the player selected on retail's Controller
   Presets page (observed from the song controller's `+80` slot at `NewController`). The Mouse &
-  Keyboard defaults are the restructure plan's D12 list (Q/right click, W/left click, arrows +
-  wheel detents, Space/middle click, Escape), a wheel detent is a one-poll press, the first
+  Keyboard defaults use Q/left click, W/right click, arrows +
+  wheel detents, Space/middle click, and Escape. A wheel detent is a one-poll press, the first
   Assign on a default row **replaces** it (`Default binding from Preset N. Click to Replace.`),
   and a key a gameplay table is holding is not echoed into Interface Mapping until it is
   released (the Escape that paused no longer resumes the game it just paused). Evidence:
