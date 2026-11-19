@@ -20,8 +20,10 @@ The first owner run exposed a void texture-lock call being read as an HRESULT:
 valid high-bit guest pointers were rejected, so the old frame remained active.
 The [live correction record](../plans/finished/2026-11-18-live-display-profile-fixes.md)
 records the typed output fix, deferred setting replay, and validation limits.
-Native windows are fitted from the display rather than the render profile;
-context changes keep the current window and fit each active aspect with bars.
+Landscape windows are fitted from the native display, independently of render
+quality. Portrait windows use the active profile aspect basis: Force 16:9 gives
+a 9:16 viewport even on an ultrawide monitor. Context changes keep the current
+window and fit each active aspect with bars.
 
 [static] The visible desktop controls are Resolution -> Interface / Gameplay.
 Each defaults to `native`, resolving the current monitor on each boot. The other

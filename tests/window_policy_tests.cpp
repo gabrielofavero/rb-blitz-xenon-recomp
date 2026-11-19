@@ -19,6 +19,7 @@
 
 #include "check.h"
 #include "settings/window_policy.h"
+#include "settings/resolution_profiles.h"
 
 namespace {
 
@@ -180,6 +181,33 @@ int main() {
     CHECK_EQ(int(crop.width * scale), 810);
     CHECK_EQ((2560 - 810) / 2, 875);
     CHECK_EQ(rb_blitz::settings::PortraitCropSize({1152, 720}).width, 450);
+  }
+
+  BeginCase("forced 16:9 portrait uses the profile basis on an ultrawide desktop");
+  {
+    using namespace rb_blitz::settings;
+    const DisplayMode native{2560, 1080};
+    const auto basis = ProfileDisplayBasis(native, true);
+    const auto source = ProfileWindowSource(native, basis, true);
+    CHECK_EQ(source.width, 1920);
+    CHECK_EQ(source.height, 1080);
+    const auto crop = PortraitCropSize(source);
+    CHECK_EQ(crop.width, 608);
+    CHECK_EQ(crop.height, 1080);
+    const auto fit = FitClientToDesktop(crop, Desktop(2560, 1032));
+    CHECK_EQ(fit.client.width, 559);
+    CHECK_EQ(fit.client.height, 993);
+    CHECK_TRUE(SameAspect(fit.client, {9, 16}, 2));
+    // Landscape remains display-sized, regardless of the forced render basis.
+    const auto landscape = ProfileWindowSource(native, basis, false);
+    CHECK_EQ(landscape.width, 2560);
+    CHECK_EQ(landscape.height, 1080);
+    const auto unforced = ProfileWindowSource(native, ProfileDisplayBasis(native, false), true);
+    CHECK_EQ(PortraitCropSize(unforced).width, 456);
+    // A physically portrait display still supplies a landscape render source.
+    const auto upright = ProfileWindowSource({1080, 1920}, {1080, 1920}, true);
+    CHECK_EQ(upright.width, 1920);
+    CHECK_EQ(upright.height, 1080);
   }
 
   BeginCase("portrait video mode preserves the exact render aspect inside SDK cvar bounds");

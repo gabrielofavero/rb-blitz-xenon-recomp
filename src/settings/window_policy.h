@@ -73,6 +73,9 @@ ClientFit FitClientToDesktop(const DisplayMode& requested, const DesktopMetrics&
 // Equivalent aspect within the SDK video-mode cvar bounds (640x480..4095x4095).
 // Only describes presentation; it never changes the guest render allocation.
 DisplayMode PresentationVideoMode(const DisplayMode& render);
+// Seed profile-based windows independently of quality tiers. Portrait follows
+// the profile's aspect basis; landscape keeps the native display window.
+DisplayMode ProfileWindowSource(DisplayMode native, DisplayMode profile_basis, bool portrait);
 // The upright viewport cropped from a landscape source, retaining its full height.
 DisplayMode PortraitCropSize(const DisplayMode& source);
 

@@ -86,6 +86,12 @@ ClientFit FitClientToDesktop(const DisplayMode& requested, const DesktopMetrics&
   return fit;
 }
 
+DisplayMode ProfileWindowSource(DisplayMode native, DisplayMode profile_basis, bool portrait) {
+  auto source = portrait ? profile_basis : native;
+  if (source.width < source.height) std::swap(source.width, source.height);
+  return source;
+}
+
 DisplayMode PortraitCropSize(const DisplayMode& source) {
   if (!Positive(source)) return {};
   return {int32_t(RoundDiv(int64_t(source.height) * source.height, source.width)), source.height};

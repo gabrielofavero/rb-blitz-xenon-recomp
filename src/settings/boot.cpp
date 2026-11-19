@@ -967,14 +967,16 @@ void SettingsBoot::ApplyWindowPolicy() {
   }
   DisplayMode source{screen_plan_.guest_size.width * screen_plan_.draw_scale,
                      screen_plan_.guest_size.height * screen_plan_.draw_scale};
+  const bool portrait = BootPortraitWidth() != 0;
   // Render profiles only change the picture inside the window. Seed the
-  // startup window from the display, independently of the selected profile.
+  // startup window independently of the quality tier, keeping the selected
+  // portrait aspect instead of cropping the physical monitor's aspect.
   if (profile_draw_scale_ && capability_snapshot_.primary_display_size.width > 0 &&
       capability_snapshot_.primary_display_size.height > 0) {
-    source = capability_snapshot_.primary_display_size;
-    if (source.width < source.height) std::swap(source.width, source.height);
+    source = ProfileWindowSource(capability_snapshot_.primary_display_size,
+        service_ ? service_->ResolutionProfileDisplay() : capability_snapshot_.primary_display_size,
+        portrait);
   }
-  const bool portrait = BootPortraitWidth() != 0;
   const DisplayMode render = portrait ? PortraitCropSize(source) : source;
 
   // The presenter derives the shape of its output region from the *video mode* aspect, not from the
