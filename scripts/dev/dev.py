@@ -16,7 +16,7 @@ HELP = """Usage: bash ./dev.sh [--platform linux|mac|ios|windows] ACTION [argume
 Or load commands in Bash/zsh: source ./dev.sh
 
   build-game [--configure] [build arguments]
-  run-game [--portrait] [--window] [--normal] [--no-dlc] [engine arguments]
+  run-game [--portrait] [--touch] [--window] [--normal] [--no-dlc] [engine arguments]
   run-game-quick                 Windowed, empty DLC, skip offline dialogs
   build-installer [packager arguments]
   dev-help
@@ -26,6 +26,7 @@ Actions: build, run (or run-game), run-normal, run-window, run-portrait,
 
 Portrait runs copy the selected settings under out/dev-portrait and force a
 16:9 source with force_16_by_9=true. Saved settings are never edited.
+--touch starts with touch prompts and treats mouse activity as touch input.
 DLC follows native paths.toml, with the legacy profile as a fallback.
 Extra engine arguments follow defaults and retain spaces and punctuation.
 
@@ -182,7 +183,7 @@ def build_game(target: str, args: list[str]) -> int:
 
 
 def run_game(target: str, args: list[str]) -> int:
-    tags = {"--portrait", "--window", "--windowed", "--normal", "--no-dlc", "--quick"}
+    tags = {"--portrait", "--touch", "--window", "--windowed", "--normal", "--no-dlc", "--quick"}
     selected = set(args) & tags
     forward = [arg for arg in args if arg not in tags]
     if target == "ios":
@@ -193,6 +194,8 @@ def run_game(target: str, args: list[str]) -> int:
         if not device:
             raise ValueError("iOS launch requires --device ID or RBBLITZ_IOS_DEVICE.")
         defaults = ["--blitz.compatibility.ultimate_mode=0"] if "--normal" in selected else []
+        if "--touch" in selected:
+            defaults += ["--blitz.diagnostics.mouse_as_touch=true"]
         if "--no-dlc" in selected:
             defaults += ["--blitz.runtime.dlc_root=/nonexistent-rb-blitz-dlc",
                          "--blitz.runtime.dlc_library=/nonexistent-rb-blitz-dlc"]
@@ -203,6 +206,8 @@ def run_game(target: str, args: list[str]) -> int:
     if not binary.is_file():
         raise ValueError(f"Game executable is missing: {binary}. Run build-game first.")
     defaults = [f"--title.game_root={ROOT / 'game'}"]
+    if "--touch" in selected:
+        defaults += ["--blitz.diagnostics.mouse_as_touch=true"]
     if "--normal" in selected:
         defaults += ["--blitz.compatibility.ultimate_mode=0"]
     if selected & {"--window", "--windowed", "--portrait", "--quick"}:

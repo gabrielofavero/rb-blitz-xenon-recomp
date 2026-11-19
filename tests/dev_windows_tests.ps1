@@ -62,7 +62,19 @@ assert '# retain this comment' in file.with_name('settings.toml').read_text()
     if ([IO.File]::ReadAllText($profile) -cne $profileText -or [IO.File]::ReadAllText($settings) -cne $settingsText) {
         throw 'Portrait setup modified the source settings.'
     }
-    Write-Output 'PASS: installed DLC discovery, checkout/CLI/environment precedence, portrait 16:9, source preservation, argument forwarding.'
+    # Exercise launch-tag handling through the quick path with its launcher mocked.
+    function Start-BlitzQuick { $script:launchArgs = @($args) }
+    Run-Blitz '--quick' '--touch' '--portrait' "--launcher_profile=$profile" '--blitz.diagnostics.mouse_as_touch=false'
+    $touchDefault = [Array]::IndexOf($script:launchArgs, '--blitz.diagnostics.mouse_as_touch=true')
+    $touchOverride = [Array]::IndexOf($script:launchArgs, '--blitz.diagnostics.mouse_as_touch=false')
+    if ($touchDefault -lt 0 -or $touchOverride -le $touchDefault -or '--touch' -in $script:launchArgs) {
+        throw 'Touch launch tag was not translated before explicit overrides.'
+    }
+    Run-Blitz '--quick'
+    if (@($script:launchArgs | Where-Object { $_ -like '*mouse_as_touch*' }).Count) {
+        throw 'Ordinary launches enabled touch emulation.'
+    }
+    Write-Output 'PASS: DLC precedence, portrait source preservation, argument forwarding, touch launch tag and override.'
 } finally {
     $Global:RbBlitzRoot = $repository
     $env:LOCALAPPDATA = $originalLocal

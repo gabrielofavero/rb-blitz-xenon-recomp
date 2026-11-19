@@ -508,6 +508,11 @@ rex::Setting<bool> rb_blitz::settings::title::touch_preview{
 false,
     "Preview the iOS guest controls on desktop, including a ready power-up."};
 
+rex::Setting<bool> rb_blitz::settings::title::mouse_as_touch{
+    &rb_blitz::settings::TitleSettingOwner("blitz.diagnostics"), "mouse_as_touch",
+    false, "Start with touch interface prompts and treat mouse activity as touch.",
+    rex::kUntilLaunch, rex::kNoSave};
+
 rex::Setting<std::string> rb_blitz::settings::title::startup_mode{
     &rb_blitz::settings::TitleSettingOwner("blitz.runtime"), "startup_mode",
 "normal",

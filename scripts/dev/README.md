@@ -6,6 +6,7 @@ From the repository root, load the commands into Bash or zsh:
 source ./dev.sh
 build-game
 run-game --portrait
+run-game --portrait --touch
 run-game --normal --no-dlc
 dev-help
 ```
@@ -37,6 +38,14 @@ Portrait runs copy the selected launcher profile and settings into a new
 manual provenance. The resolution profiles therefore use a 16:9 source even on
 an ultrawide display. The source files are preserved; settings changed in a
 portrait session stay in its copy.
+
+`--touch` starts with touch prompts and treats mouse movement, clicks, and
+scrolling as touch activity for the interface, including the touch HUD. Keyboard
+and controller input still select their own prompts; mouse activity returns to
+touch prompts. Mouse navigation stays available. The flag applies only to that
+launch and can be combined with `--portrait`. It maps to the engine setting
+`--blitz.diagnostics.mouse_as_touch=true` and does not enable the diagnostic
+power-up or achievement effects of `--touch_preview=true`.
 
 DLC configuration follows the runtime's native paths file. Windows falls back
 to registered installations, the default installation, then the selected legacy

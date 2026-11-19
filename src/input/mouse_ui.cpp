@@ -330,7 +330,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
     }
     if (auto changed = e.is_touch ? last_device::Touch() : last_device::MouseMove(e.x, e.y))
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
-                  e.is_touch ? "touch" : "mouse");
+                  changed->using_touch ? "touch" : "mouse");
     if (PlayerEvent(ui::music::PointerEvent::kMove, e)) return;
     if (LaneEvent(touch::Phase::kMove, e)) return;
     if (!MouseSupportEnabled()) return;
@@ -355,7 +355,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
     }
     if (auto changed = e.is_touch ? last_device::Touch() : last_device::MouseButton())
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
-                  e.is_touch ? "touch" : "mouse");
+                  changed->using_touch ? "touch" : "mouse");
     if (PlayerEvent(ui::music::PointerEvent::kDown, e)) return;
     if (LaneEvent(touch::Phase::kDown, e)) return;
     // The raw mask is device state, so it is recorded whatever the gates say: the sampler applies
@@ -404,7 +404,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
   void OnMouseWheel(rex::InputEvent& e) {
     if (auto changed = e.is_touch ? last_device::Touch() : last_device::MouseWheel())
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
-                  e.is_touch ? "touch" : "mouse");
+                  changed->using_touch ? "touch" : "mouse");
     if (PlayerEvent(ui::music::PointerEvent::kWheel, e)) return;
     // Device state first, gate second: the sampler applies the gates, and a capture binds a
     // detent while Mouse Support is off.

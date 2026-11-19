@@ -202,7 +202,8 @@ bool TouchInputActive() {
 #if defined(RB_BLITZ_IOS)
   return PreviewEnabled() || last_device::Current().using_touch;
 #else
-  return PreviewEnabled();
+  return PreviewEnabled() || (rb_blitz::settings::title::mouse_as_touch.Get() &&
+                              last_device::Current().using_touch);
 #endif
 }
 bool ButtonsEnabled() { return rb_blitz::settings::title::touch_buttons.Get(); }

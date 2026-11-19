@@ -127,6 +127,36 @@ int main() {
         "real mouse motion restores mouse prompts");
   Check(!mobile.MouseMove(150, 100, 330), "ordinary mouse motion keeps existing hint policy");
 
+  Tracker emulated;
+  emulated.SetMouseAsTouch(true);
+  Check(emulated.Current().using_touch, "mouse emulation starts with touch before focus");
+  Check(!emulated.MouseMove(0, 0, 0), "unfocused emulated mouse is ignored");
+  emulated.Focus(true);
+  const auto touch_revision = emulated.Current().revision;
+  emulated.MouseButton(100);
+  emulated.MouseWheel(200);
+  emulated.MouseMove(100, 100, 300);
+  emulated.MouseMove(200, 200, 400);
+  Check(emulated.Current().using_touch && emulated.Current().family == Family::kController,
+        "mouse movement, click and wheel keep touch interface");
+  Check(emulated.Current().revision == touch_revision, "continued emulated touch avoids refresh churn");
+  Check(emulated.KeyDown(500), "real keyboard still replaces emulated touch");
+  Check(!emulated.Current().using_touch, "keyboard selects physical interface");
+  Check(emulated.MouseMove(200, 200, 510), "first mouse movement restores touch immediately");
+  Check(emulated.Current().using_touch, "mouse restores touch inside family debounce");
+  Check(emulated.Tick(600), "emulated touch commits deferred controller art");
+  Check(emulated.Current().family == Family::kController, "emulated touch uses controller art");
+  Check(emulated.Pad(true, pad, 700), "real controller still clears emulated touch");
+  Check(!emulated.Current().using_touch, "controller selects physical interface");
+  Check(emulated.MouseWheel(800), "emulated wheel restores touch from controller");
+  emulated.Focus(false);
+  Check(!emulated.MouseButton(900), "unfocused emulated click is ignored");
+  emulated.Focus(true);
+  emulated.SetMouseAsTouch(false);
+  Check(emulated.MouseButton(1000), "disabling emulation restores physical mouse clicks");
+  Check(!emulated.Current().using_touch && emulated.Current().family == Family::kMouse,
+        "ordinary mouse policy survives emulation");
+
   using rb_blitz::input::TouchStartPrompt;
   Check(TouchStartPrompt("PRESS <alt1>\xC2\x80</alt1> TO START") == "TOUCH TO START",
         "splash removes private button glyph");

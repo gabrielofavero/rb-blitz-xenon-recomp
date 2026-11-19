@@ -96,15 +96,31 @@ class DevCommandsTests(unittest.TestCase):
         build.mkdir(parents=True)
         (build / "rb_blitz").touch()
         with patch.object(dev.platform, "machine", return_value="x86_64"), patch.object(dev, "execute", return_value=0) as run:
-            dev.run_game("linux", ["--portrait", "--no-dlc", "--normal", "--log.file_name=path with spaces;$(echo nope)"])
+            dev.run_game("linux", ["--portrait", "--touch", "--no-dlc", "--normal", "--log.file_name=path with spaces;$(echo nope)"])
         args, cwd = run.call_args.args
         self.assertEqual(cwd, build)
         self.assertIn("--ui.fullscreen=false", args)
+        self.assertIn("--blitz.diagnostics.mouse_as_touch=true", args)
+        self.assertNotIn("--touch", args)
         self.assertIn("--blitz.compatibility.ultimate_mode=0", args)
         self.assertIn("--log.file_name=path with spaces;$(echo nope)", args)
         self.assertIn(f"--blitz.runtime.dlc_root={self.root / 'out/no-dlc'}", args)
         copied = Path(next(arg.split("=", 1)[1] for arg in args if arg.startswith("--blitz.runtime.launcher_profile=")))
         self.assertTrue(tomllib.loads(copied.with_name("settings.toml").read_text())["graphics"]["force_16_by_9"])
+
+    def test_touch_is_opt_in_and_explicit_engine_override_follows_default(self):
+        for target in ("linux", "mac"):
+            build = self.root / "out/build" / f"{target}-amd64-release"
+            build.mkdir(parents=True)
+            (build / "rb_blitz").touch()
+            with patch.object(dev.platform, "machine", return_value="x86_64"), patch.object(Path, "home", return_value=self.root), patch.object(dev, "execute", return_value=0) as run:
+                dev.run_game(target, [])
+                self.assertFalse(any("mouse_as_touch" in arg for arg in run.call_args.args[0]))
+                override = "--blitz.diagnostics.mouse_as_touch=false"
+                dev.run_game(target, ["--touch", override])
+                args = run.call_args.args[0]
+                self.assertLess(args.index("--blitz.diagnostics.mouse_as_touch=true"), args.index(override))
+                self.assertNotIn("--touch", args)
 
     def test_build_failure_prevents_packaging(self):
         with patch.object(dev.platform, "system", return_value="Linux"), patch.object(dev, "build_game", return_value=17), patch.object(dev, "execute") as execute:

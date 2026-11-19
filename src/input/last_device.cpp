@@ -50,6 +50,18 @@ void Tracker::SelectScheme(std::string scheme) {
   ++state_.revision;
 }
 
+void Tracker::SetMouseAsTouch(bool enabled) {
+  mouse_as_touch_ = enabled;
+  if (enabled) {
+    TouchSource(true);
+    pending_family_.reset();
+    if (state_.family != Family::kController) {
+      state_.family = Family::kController;
+      ++state_.revision;
+    }
+  }
+}
+
 void Tracker::Focus(bool focused) {
   focused_ = focused;
   have_pointer_ = false;
@@ -107,6 +119,7 @@ bool Tracker::Touch(uint64_t now_ms) {
   return Switch(Family::kController, now_ms) || source_changed;
 }
 bool Tracker::MouseButton(uint64_t now_ms) {
+  if (mouse_as_touch_) return Touch(now_ms);
   if (!kMouseButtonAndWheelSelectKeyboardLayout || !focused_) return false;
   const bool source_changed = TouchSource(false);
   return Switch(Family::kMouse, now_ms) || source_changed;
@@ -116,6 +129,7 @@ bool Tracker::MouseWheel(uint64_t now_ms) {
 }
 
 bool Tracker::MouseMove(int x, int y, uint64_t now_ms) {
+  if (mouse_as_touch_) return Touch(now_ms);
   // Physical mouse motion can leave touch mode without changing the ordinary
   // keyboard/controller motion policy. Touch-generated mouse events use Touch().
   if (!kMouseMotionSelectsKeyboardLayout && !state_.using_touch) return false;
@@ -143,6 +157,10 @@ bool Tracker::Pad(bool connected, const profile::remap::PadState& pad, uint64_t 
 }
 
 State Current() { std::lock_guard lock(g_mutex); return g_tracker.Current(); }
+void SetMouseAsTouch(bool enabled) {
+  std::lock_guard lock(g_mutex);
+  g_tracker.SetMouseAsTouch(enabled);
+}
 void SelectScheme(std::string scheme) {
   std::lock_guard lock(g_mutex);
   g_tracker.SelectScheme(std::move(scheme));

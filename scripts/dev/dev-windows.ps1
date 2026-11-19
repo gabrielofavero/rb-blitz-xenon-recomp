@@ -146,6 +146,7 @@ function Run-Blitz {
                 $defaults += "--dlc_library=$emptyDlc", "--dlc_root=$emptyDlc"
             }
             '--portrait' { $portrait = $true }
+            '--touch' { $defaults += '--blitz.diagnostics.mouse_as_touch=true' }
             '--quick' { $quick = $true }
             default { $forward += $arg }
         }
@@ -561,6 +562,7 @@ Launch options (combine as needed):
   --portrait       Windowed 9:16 portrait using the game's 16:9 source/layout.
                    Copies the selected profile/settings into out\dev-portrait
                    each run. Changes there do not update the source settings.
+  --touch          Start with touch prompts; mouse activity selects the touch UI.
   --window         Desktop window (--windowed is also accepted).
   --no-dlc         Empty DLC library; overrides both DLC roots.
   --normal         Retail game even when Ultimate is installed.

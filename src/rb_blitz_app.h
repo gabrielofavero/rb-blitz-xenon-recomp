@@ -49,6 +49,7 @@
 #include "messages/messages_guest.h"
 #include "messages/messages_update.h"
 #include "input/mouse_ui.h"
+#include "input/last_device.h"
 #include "input/remap.h"
 #include "input/title_input.h"
 #include "profile/profile_apply.h"
@@ -217,6 +218,7 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
 
   rex::Result<void> OnSettingsLoaded(rex::SettingsRegistry& registry) override {
     using namespace rb_blitz::settings;
+    rb_blitz::input::last_device::SetMouseAsTouch(title::mouse_as_touch.Get());
     REX_TRY_VOID(ApplyLegacyLoggingInputs());
     REX_TRY_VOID(ApplyLegacyGraphicsInputs());
     auto& graphics = GetGraphics().GetSettings();

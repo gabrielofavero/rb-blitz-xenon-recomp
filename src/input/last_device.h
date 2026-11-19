@@ -30,6 +30,8 @@ class Tracker {
  public:
   explicit Tracker(bool touch_at_launch = false) { state_.using_touch = touch_at_launch; }
   State Current() const { return state_; }
+  // Select touch at startup and classify subsequent mouse activity as touch.
+  void SetMouseAsTouch(bool enabled);
   void SelectScheme(std::string scheme);
   void Focus(bool focused);
   bool KeyDown(uint64_t now_ms);
@@ -45,6 +47,7 @@ class Tracker {
   bool Switch(Family family, uint64_t now_ms);
   bool TouchSource(bool touch);
   State state_;
+  bool mouse_as_touch_ = false;
   bool focused_ = false;
   bool pad_active_ = false;
   bool have_pointer_ = false;
@@ -57,6 +60,7 @@ class Tracker {
 
 // Process-wide bridge. Observations publish family or touch-source changes.
 State Current();
+void SetMouseAsTouch(bool enabled);
 void SelectScheme(std::string scheme);
 void Focus(bool focused);
 std::optional<State> KeyDown();
