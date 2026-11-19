@@ -9,6 +9,21 @@ entries, disables RhythmVerse/library music, and restores offline prompts. Nativ
 saves are preserved. See [the settings tree](../settings/menu.md#current-organization-2026-11-17).
 Live navigation of the new tree is unverified.
 
+Portrait Start and connection/loading share the larger title logo at 95% of
+its original scale; the main menu uses 85% of its original, smaller pose.
+The Start prompt is also reduced by 5%. The city extends below the viewport to
+crop the solid strip beneath the road. Menu rows have a 62-unit pitch and fit
+six entries above the footer. Their private font uses the same 1024x1024
+regular Pentatonic atlas as Help & Options, with all four variations unlit.
+Loading text is bottom-aligned at the Start prompt's vertical anchor. The
+native loading bar occupies 40% of the portrait width at 18 units high;
+native text-height measurement keeps it six units above the wrapped message
+as status text changes. The percentage fits between the message and footer
+actions. These authored guest changes
+apply to portrait presentation on every platform; landscape retains its
+existing assets and layout. Windows build and record checks cover the payload;
+in-game appearance and other platforms remain unverified.
+
 Current refresh behavior is described under **At a glance**. Dated R7 sections
 below retain the old persisted-cache and sentinel measurements as history.
 

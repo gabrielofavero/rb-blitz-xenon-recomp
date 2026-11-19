@@ -1803,20 +1803,31 @@ void TestPortraitSplash() {
   namespace dtb = rb_blitz::ui::dtb;
   using dtb::Node;
   using namespace header_test;
-  BeginCase("portrait splash fits both logo poses and six menu cells above the footer");
+  BeginCase("portrait title and loading share a larger logo while six menu cells fit above the footer");
   for (float aspect : {402.f / 874, 9.f / 16, .625f, .75f, .9f}) {
     const auto l = rb_blitz::ui::PortraitSplash(aspect);
-    CHECK_TRUE(l.title_logo_scale >= l.menu_logo_scale);
-    CHECK_EQ(l.title_logo_x, 0);
-    CHECK_EQ(l.menu_logo_x, 0);
-    CHECK_TRUE(std::abs(l.city_z - 131.94f * l.city_scale + 240) < .001f);
+    CHECK_EQ(l.logo_x, 0);
+    CHECK_TRUE(std::abs(l.logo_scale / std::min(l.width * .755f / 499.4504f, .45f) - .85f) < .001f);
+    CHECK_TRUE(std::abs(l.title_logo_scale / std::min(l.width * .94f / 499.4504f, .68f) - .95f) < .001f);
+    CHECK_TRUE(l.title_logo_scale > l.logo_scale);
+    CHECK_TRUE(l.start_scale * 256 < l.width * .65f);
+    CHECK_TRUE(l.city_z - 131.94f * l.city_scale < -240);
     CHECK_TRUE(l.city_z + 548.6727f * l.city_scale < -70);
-    CHECK_TRUE(499.4504f * l.title_logo_scale <= l.width * .95f);
+    CHECK_TRUE(499.4504f * l.logo_scale <= l.width * .65f);
     const float flow = std::min(l.width, 270.f);
-    CHECK_TRUE(std::abs(l.list_z - (240 - flow * .7825f)) < .001f);
-    CHECK_TRUE(std::abs(l.menu_logo_z + 15.408f * l.menu_logo_scale - (240 - flow * .42625f)) < .001f);
-    CHECK_TRUE(l.list_z - (5 * 58.5f + 26.375f) * l.list_scale > -165);
-    CHECK_TRUE(52.75f * l.list_scale < 58.5f * l.list_scale);
+    CHECK_TRUE(std::abs(l.logo_z + 15.408f * l.logo_scale - (240 - flow * .42625f)) < .001f);
+    CHECK_TRUE(l.list_z - (5 * rb_blitz::ui::kPortraitMenuRowStep + 26.375f) * l.list_scale > -165);
+    CHECK_TRUE((rb_blitz::ui::kPortraitMenuRowStep - 52.75f) * l.list_scale > 2.5f);
+    const auto loading = rb_blitz::ui::PortraitLoading(aspect);
+    CHECK_EQ(loading.logo_scale, l.title_logo_scale);
+    CHECK_EQ(loading.logo_z, l.title_logo_z);
+    CHECK_EQ(loading.text_bottom_z, l.start_z);
+    CHECK_TRUE(loading.bar_width <= l.width * .4f);
+    CHECK_TRUE(loading.bar_width / loading.bar_height >= 3);
+    CHECK_TRUE(loading.bar_width / loading.bar_height <= 10);
+    CHECK_TRUE(loading.bar_height > 14);
+    CHECK_TRUE(loading.bar_gap > 0 && loading.bar_gap < 10);
+    CHECK_TRUE(loading.text_bottom_z > loading.percent_z);
   }
   CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("splash_screen", "splash_panel"));
   CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("autosave_warning_screen", "autosave_warning_panel"));
@@ -1862,7 +1873,7 @@ void TestPortraitSplash() {
     CHECK_TRUE(rb_blitz::ui::PortraitPromptScale(aspect, true) * 640 <= rb_blitz::ui::PortraitSplash(aspect).width * .85f);
   }
 
-  BeginCase("authored portrait splash changes pose on Start and Back, with no repeated transform writes");
+  BeginCase("portrait Start and loading keep the larger logo while main menu uses its smaller pose without repeated writes");
   std::vector<Node> roots{C({S("new"), S("UIPanel"), S("splash_panel"),
       A({S("enter"), C({S("native_enter")})}),
       A({S("poll"), C({S("native_poll")})}),
@@ -1913,6 +1924,7 @@ void TestPortraitSplash() {
   } machine{roots};
   machine.Method("enter");
   const auto title_scale = machine.scales.at("anim_logo.grp");
+  const auto title_position = machine.positions.at("anim_logo.grp");
   const int title_writes = machine.writes;
   machine.Method("poll");
   CHECK_EQ(machine.writes, title_writes);
@@ -1924,11 +1936,15 @@ void TestPortraitSplash() {
   for (int i = 0; i < 30; ++i) machine.Method("poll");
   CHECK_EQ(machine.writes, menu_writes);
   CHECK_TRUE(machine.positions == menu_positions);
+  machine.state = "waiting";
+  machine.Method("poll");
+  CHECK_TRUE(machine.scales.at("anim_logo.grp") == title_scale);
+  CHECK_TRUE(machine.positions.at("anim_logo.grp") == title_position);
   machine.state = "start";
   machine.Method("poll");
   CHECK_TRUE(machine.scales.at("anim_logo.grp") == title_scale);
   CHECK_EQ(machine.native_enters, 1);
-  CHECK_EQ(machine.native_polls, 33);
+  CHECK_EQ(machine.native_polls, 34);
   const auto bytes = dtb::Compile(roots);
   std::vector<Node> roundtrip;
   dtb::RootHeader header;
@@ -1990,7 +2006,44 @@ void TestPortraitSplash() {
     CheckStrEq(enter->kids[2].kids[1].text, "set_local_scale");
     const float scale = std::bit_cast<float>(enter->kids[2].kids[2].scalar);
     CHECK_TRUE(scale > 0 && scale < 1);
-    CHECK_EQ(enter->kids.size(), song ? size_t(8) : size_t(21));
+    CHECK_EQ(enter->kids.size(), song ? size_t(8) : size_t(20));
+    if (!song) {
+      std::map<std::string, std::array<float, 3>> positions, scales;
+      for (size_t i = 3; i < enter->kids.size(); ++i) {
+        const auto& command = enter->kids[i].kids;
+        if (command[1].text != "set_local_pos" && command[1].text != "set_local_scale") continue;
+        auto& values = command[1].text == "set_local_pos" ? positions[command[0].text] : scales[command[0].text];
+        for (size_t axis = 0; axis < 3; ++axis)
+          values[axis] = std::bit_cast<float>(command[axis + 2].scalar) * scale;
+      }
+      const auto& bar = scales.at("progress_bar.grp");
+      CHECK_TRUE(bar[0] * 256 <= 270 * .4f);
+      CHECK_TRUE(bar[2] * 32 > 14);
+      CHECK_TRUE(std::abs(positions.at("status.lbl")[2] - rb_blitz::ui::PortraitSplash(.5625f).start_z) < .001f);
+      CHECK_TRUE(positions.at("status.lbl")[2] > positions.at("content_percent.lbl")[2]);
+      for (float height : {26.f, 52.f, 78.f, 130.f}) {
+        bool measured = false;
+        float bar_z = 0;
+        const auto eval = [&](auto&& self, const Node& n) -> float {
+          if (n.tag == dtb::kFloat) return std::bit_cast<float>(n.scalar);
+          if (n.tag != dtb::kCommand || n.kids.empty()) return 0;
+          const auto& op = n.kids[0].text;
+          if (op == "do") { for (size_t i = 1; i < n.kids.size(); ++i) self(self, n.kids[i]); return 0; }
+          if (op == "+") return self(self, n.kids[1]) + self(self, n.kids[2]);
+          if (op == "/") return self(self, n.kids[1]) / self(self, n.kids[2]);
+          if (op == "status.lbl" && n.kids[1].text == "set_height_from_text") measured = true;
+          if (op == "status.lbl" && n.kids[1].text == "get") { CHECK_TRUE(measured); return height; }
+          if (op == "progress_bar.grp" && n.kids[1].text == "set_local_pos") bar_z = self(self, n.kids[4]) * scale;
+          return 0;
+        };
+        const auto* update = Method(loading, name, "rbbz_portrait_loading");
+        CHECK_TRUE(update != nullptr);
+        if (update) eval(eval, update->kids[1]);
+        CHECK_TRUE(measured);
+        const float gap = bar_z - bar[2] * 16 - (positions.at("status.lbl")[2] + height);
+        CHECK_TRUE(gap > 0 && gap < 10);
+      }
+    }
   }
 }
 
@@ -2800,8 +2853,9 @@ int main(int argc, char** argv) {
     }
     CHECK_TRUE(portrait.contains(rb_blitz::ui::input_font::kSplashListRecord));
     const auto& button_font = portrait.at(rb_blitz::ui::input_font::kPortraitSplashFontRecord);
-    CHECK_TRUE(button_font.size() > 0x810 + 0x104BB + 0x29);
-    CHECK_EQ(button_font[0x810 + 0x104BB + 0x29], uint8_t(0)); // stable full-bright label ink
+    CHECK_TRUE(button_font.size() > 0x810 + 0x156102 + 0x29);
+    for (size_t material : {size_t(0x155D8A), size_t(0x155EB2), size_t(0x155FDA), size_t(0x156102)})
+      CHECK_EQ(button_font[0x810 + material + 0x29], uint8_t(0)); // unlit ink in every variation
     BeginCase("portrait vignette has visible, translucent native geometry with valid faces");
     const auto& art = portrait.at(rb_blitz::ui::input_font::kSplashRecord);
     const auto u32 = [](const uint8_t* p) {

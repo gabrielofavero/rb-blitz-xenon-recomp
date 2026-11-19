@@ -61,9 +61,10 @@ bool PreparePortraitSettings(const std::vector<uint8_t>& source,
 bool PreparePortraitConnection(const std::vector<uint8_t>& source,
                                const std::vector<uint8_t>& button_source, float aspect,
                                std::vector<uint8_t>* scene, std::string* error);
-// Derive persistent native buttons and a selection cell for the six portrait rows.
+// Private unlit copy of the regular font used by Help & Options.
 bool PreparePortraitSplashFont(const std::vector<uint8_t>& source,
                               std::vector<uint8_t>* scene, std::string* error);
+// Derive persistent native buttons and a selection cell for the six portrait rows.
 bool PreparePortraitSplashList(const std::vector<uint8_t>& source,
                                const std::vector<uint8_t>& button_source, std::vector<uint8_t>* scene,
                                std::string* error);

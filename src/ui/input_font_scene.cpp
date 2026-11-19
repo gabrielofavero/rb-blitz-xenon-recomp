@@ -797,7 +797,7 @@ bool PreparePortraitSplashList(const std::vector<uint8_t>& source,
     return Fail(error, "portrait splash list source revision changed");
   if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
     return Fail(error, "portrait button template revision changed");
-  PutFloat(bytes.data() + 0x54A, 58.5f);
+  PutFloat(bytes.data() + 0x54A, ui::kPortraitMenuRowStep);
   // UILabel's explicit normal/selected color references, rather than the
   // directory's unused fallback color names, determine the visible text.
   SceneColor(bytes, 0xA45, .96f, .96f, .98f, 1);
@@ -874,11 +874,13 @@ bool PreparePortraitSplashFont(const std::vector<uint8_t>& source,
                                std::vector<uint8_t>* scene, std::string* error) {
   std::vector<uint8_t> bytes;
   if (!DecodeStream(source, &bytes, error)) return false;
-  if (bytes.size() != 72649 || Crc32(bytes.data(), bytes.size()) != 0x31A0083B)
+  if (bytes.size() != 1424134 || Crc32(bytes.data(), bytes.size()) != 0x6AA20AD1)
     return Fail(error, "portrait button font source revision changed");
-  // A private copy keeps the menu's white/black labels independent of the
-  // moving background lights, without changing the shared font elsewhere.
-  bytes[0x104BB + 0x29] = 0; // Mat::use_environ
+  // Use the same 1024-square regular atlas as Help & Options. Keep every
+  // variation unlit in this private copy so background lights do not tint
+  // the button labels; the shared font retains its authored materials.
+  for (size_t material : {size_t(0x155D8A), size_t(0x155EB2), size_t(0x155FDA), size_t(0x156102)})
+    bytes[material + 0x29] = 0; // Mat::use_environ
   return PackStored(bytes, scene, error);
 }
 

@@ -1686,18 +1686,13 @@ bool AddPortraitSplashLayout(std::vector<Node>* roots, float aspect, std::string
     if (root.tag == ui::dtb::kCommand && root.kids.size() >= 3 && root.kids[2].text == "splash_panel")
       root.kids.push_back(Node::Array({sym("poll"), call}));
   const Node state = cmd({cmd({Node::Var("this"), sym("loaded_dir")}), sym("get"), sym("state")});
-  Node main = cmd({sym("=="), state, sym("main_menu")});
-  const auto loading = ui::PortraitLoading(aspect);
   Node apply = cmd({sym("unless"),
       cmd({sym("=="), Node::Property({sym("rbbz_portrait_main")}), state}),
       cmd({sym("do"),
           cmd({Node::Var("this"), sym("set"), sym("rbbz_portrait_main"), state}),
-          cmd({sym("if_else"), main,
-              place("anim_logo.grp", layout.menu_logo_scale, layout.menu_logo_x, 0, layout.menu_logo_z),
-              cmd({sym("if_else"), cmd({sym("=="), state, sym("waiting")}),
-                  place("anim_logo.grp", loading.logo_scale, 0, 0,
-                        loading.logo_z - 15.408f * loading.logo_scale),
-                  place("anim_logo.grp", layout.title_logo_scale, layout.title_logo_x, 0, layout.title_logo_z)})}),
+          cmd({sym("if_else"), cmd({sym("=="), state, sym("main_menu")}),
+              place("anim_logo.grp", layout.logo_scale, layout.logo_x, 0, layout.logo_z),
+              place("anim_logo.grp", layout.title_logo_scale, 0, 0, layout.title_logo_z)}),
           place("start_panel.grp", layout.start_scale, 0, 8, layout.start_z),
           place("list.grp", 1, 0, -15.76387f, 0),
           place("start.lst", layout.list_scale, 0, 0, layout.list_z),
@@ -1763,16 +1758,15 @@ bool AddPortraitLoadingLayout(std::vector<Node>* roots, bool song_loading,
     size("status.lbl", 1, 1);
     set("status.lbl", sym("width"), number(layout.text_width));
     set("status.lbl", sym("height"), number(180));
-    set("status.lbl", sym("alignment"), Node::Int(0x22)); // middle center
+    set("status.lbl", sym("alignment"), Node::Int(0x42)); // bottom center
     set("status.lbl", Node::Array({sym("styles"), Node::Int(0), sym("text_size")}), number(26));
     // The status and footer transform directly under the scene. The count
     // and bar's enumeration parent has a net zero authored translation.
-    position("status.lbl", 15);
-    size("content_percent.lbl", 16.f / 30, 16.f / 30);
-    position("content_percent.lbl", -88);
+    position("status.lbl", layout.text_bottom_z);
+    size("content_percent.lbl", 14.f / 30, 14.f / 30);
+    position("content_percent.lbl", layout.percent_z);
     // The native frame spans 256 x 32 units. Preserve its animated fill.
-    size("progress_bar.grp", layout.width * .66f / 256, 4.f / 32);
-    position("progress_bar.grp", -108);
+    size("progress_bar.grp", layout.bar_width / 256, layout.bar_height / 32);
     for (const char* hint : {"continue.ihp", "back.ihp", "skip.ihp"})
       size(hint, layout.button_scale, layout.button_scale);
     position("continue.ihp", -187, layout.button_x);
@@ -1823,6 +1817,13 @@ bool AddPortraitLoadingLayout(std::vector<Node>* roots, bool song_loading,
     // Native state changes still own hint visibility. The matching button
     // backgrounds and hit areas follow those hints, with at most two slots.
     std::vector<Node> update{sym("do")};
+    // Bottom alignment fixes the last line at the Start prompt's anchor.
+    // Native measurement follows status changes and localized wrapping.
+    update.push_back(cmd({sym("status.lbl"), sym("set_height_from_text")}));
+    update.push_back(cmd({sym("progress_bar.grp"), sym("set_local_pos"), number(0), number(0),
+        cmd({sym("/"), cmd({sym("+"),
+            cmd({sym("status.lbl"), sym("get"), sym("height")}),
+            number(layout.text_bottom_z + layout.bar_gap + layout.bar_height / 2)}), number(scale)})}));
     for (const char* action : {"continue", "back", "skip"}) {
       update.push_back(cmd({Node::Symbol(std::string("portrait_") + action + ".mesh"),
           sym("set_showing"), cmd({Node::Symbol(std::string(action) + ".ihp"),
@@ -2789,7 +2790,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         !read(ui::input_font::kListRecord, &buttons, error) ||
         !ui::input_font::PreparePortraitSplashList(source, buttons, &scene, error)) return false;
     built[ui::input_font::kSplashListRecord] = std::move(scene);
-    if (!read("ui/resource/fonts/gen/pentatonic_boldsmall.milo_xbox", &source, error) ||
+    if (!read(ui::input_font::kSceneRecord, &source, error) ||
         !ui::input_font::PreparePortraitSplashFont(source, &scene, error)) return false;
     built[ui::input_font::kPortraitSplashFontRecord] = std::move(scene);
     std::vector<uint8_t> splash, themed;
