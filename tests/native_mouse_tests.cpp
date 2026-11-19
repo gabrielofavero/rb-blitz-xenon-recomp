@@ -128,6 +128,34 @@ int main() {
   }
   CHECK_EQ(MenuHintButton(entries.at(1).action), 0x2000); // Back uses its own record
   CHECK_EQ(MenuHintButton(entries.at(2).action), 0x10);   // Search is Start
+  BeginCase("separate footer draws preserve dynamic labels and restore both native vectors");
+  const auto original_words = words;
+  unsigned drawn = 0;
+  CHECK_TRUE(DrawInlineHelpLabelsSeparately(footer, read,
+      [&words](uint32_t address, uint32_t value) { words.at(address) = value; },
+      [&](size_t index) {
+        const auto visible = ReadInlineHelpEntries(footer, read);
+        CHECK_EQ(visible.size(), 1);
+        CHECK_EQ(visible.front().label, entries[index].label);
+        CHECK_EQ(visible.front().action, entries[index].action);
+        ++drawn;
+      }));
+  CHECK_EQ(drawn, 4);
+  CHECK_TRUE(words == original_words);
+  words[actions] = 14; // A later calibration state replaces Confirm with another native action.
+  words[labels] = 0x40100500;
+  CHECK_TRUE(DrawInlineHelpLabelsSeparately(footer, read,
+      [&words](uint32_t address, uint32_t value) { words.at(address) = value; },
+      [&](size_t index) {
+        if (index == 0) {
+          const auto visible = ReadInlineHelpEntries(footer, read);
+          CHECK_EQ(visible.front().action, 14);
+          CHECK_EQ(visible.front().label, 0x40100500);
+        }
+      }));
+  CHECK_EQ(words.at(footer + 84), actions + 4 * 28);
+  CHECK_EQ(words.at(footer + 96), labels + 4 * 4);
+  words = original_words;
   words[footer + 96] += 4;
   CHECK_TRUE(ReadInlineHelpEntries(footer, read).empty()); // inconsistent parallel arrays
   words[footer + 96] -= 4;

@@ -34,11 +34,15 @@ icon; changing input devices refreshes the native hint. Footer surfaces use
 unlit, untextured materials and a subtle border. A private regular font keeps
 their labels the same size as the menu rows. Titles use a separate, larger font
 size at the center of the marquee.
-Calibration's choice list uses the main menu buttons. Its title, rows and footer
-compensate for the welcome directory's 137-unit vertical translation. Wizard
-instructions and countdowns have independent readable sizes. Controller presets
+Calibration's choice list keeps the provider's `name` widget in a private copy
+of the main menu buttons. Its welcome directory uses an identity transform so
+panel initialization cannot shift the title, rows or footer. Wizard artwork,
+instructions and countdowns have independent sizes. The live calibration footer
+retains the game's changing actions, with a separate row for a third action.
+Footer and arrow surfaces use 12% opacity with a 10% border. Controller presets
 retain their diagram and callout associations at a larger size; the selector has
-38-unit arrow buttons with matching touch targets. Native selection and
+38-unit arrow buttons with matching touch targets; the complete arrow quads fit
+inside those bounds. Native selection and
 calibration animation timing remain intact.
 
 Current refresh behavior is described under **At a glance**. Dated R7 sections

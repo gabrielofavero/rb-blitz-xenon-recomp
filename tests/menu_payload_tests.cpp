@@ -1851,6 +1851,12 @@ void TestPortraitSplash() {
   }
   for (float aspect : {402.f / 874, 9.f / 16, .75f}) {
     const auto layout = rb_blitz::ui::PortraitSettings(aspect);
+    const auto confirm = rb_blitz::ui::PortraitCalibrationFooter(aspect, 0);
+    const auto back = rb_blitz::ui::PortraitCalibrationFooter(aspect, 1);
+    const auto retry = rb_blitz::ui::PortraitCalibrationFooter(aspect, 2);
+    CHECK_TRUE(confirm.x + confirm.width / 2 < back.x - back.width / 2);
+    CHECK_TRUE(retry.z - retry.height / 2 > back.z + back.height / 2);
+    CHECK_TRUE(confirm.height >= 30 && retry.height >= 30);
     CHECK_EQ(layout.content_scale, rb_blitz::ui::PortraitSplash(aspect).list_scale);
     CHECK_TRUE(layout.back_width < 364.5f * layout.content_scale * .6f);
     CHECK_TRUE(300 * layout.content_scale <= rb_blitz::ui::PortraitSplash(aspect).width * .93f);
@@ -2855,7 +2861,7 @@ int main(int argc, char** argv) {
       CHECK_TRUE(notes.empty());
     }
     BeginCase("portrait payload changes splash buttons, loading layouts and the existing gameplay HUD route");
-    CHECK_EQ(portrait.size(), landscape.size() + 13 + !landscape.contains("ui/gen/game.dtb") +
+    CHECK_EQ(portrait.size(), landscape.size() + 14 + !landscape.contains("ui/gen/game.dtb") +
                                       !landscape.contains("ui/loading/gen/loading.dtb"));
     for (const auto& [path, original] : landscape) {
       CHECK_TRUE(portrait.contains(path));
@@ -2951,6 +2957,8 @@ int main(int argc, char** argv) {
     CHECK_TRUE(settings_objects.contains("portrait_back.mesh"));
     CHECK_TRUE(settings_objects.contains("portrait_back_border.mesh"));
     CHECK_EQ(settings_objects.at("portrait_back.mat")[0x29], uint8_t(0));
+    const auto opacity = std::bit_cast<float>(u32(settings_objects.at("portrait_back.mat").data() + 0x25));
+    CHECK_TRUE(opacity > 0 && opacity <= .15f);
     CHECK_EQ(u32(settings_objects.at("InlineHelp.ihp").data() + 9), uint32_t(1));
     CHECK_EQ(u32(settings_objects.at("InlineHelp.ihp").data() + 13), uint32_t(2));
     CHECK_EQ(std::bit_cast<float>(u32(settings_objects.at("header.lbl").data() + 0x19)), 1.f);
@@ -2968,16 +2976,33 @@ int main(int argc, char** argv) {
       CHECK_EQ(std::bit_cast<float>(u32(objects.at("header.lbl").data() + 0x19)), 1.f);
     }
     const auto welcome = stored_objects(portrait.at("ui/calibration/gen/cal_welcome.milo_xbox"));
-    CHECK_EQ(std::bit_cast<float>(u32(welcome.at("header.lbl").data() + 0x19 + 44)) + 137.f, 170.f);
-    CHECK_EQ(std::bit_cast<float>(u32(welcome.at("cal_mode.lst").data() + 0x19 + 44)) + 137.f, 77.f);
+    CHECK_EQ(std::bit_cast<float>(u32(welcome.at("header.lbl").data() + 0x19 + 44)), 170.f);
+    CHECK_EQ(std::bit_cast<float>(u32(welcome.at("cal_mode.lst").data() + 0x19 + 44)), 77.f);
     CHECK_TRUE(std::bit_cast<float>(u32(welcome.at("cal_mode.lst").data() + 0x19)) ==
                rb_blitz::ui::PortraitSplash(config.portrait_aspect).list_scale);
-    CHECK_TRUE(std::bit_cast<float>(u32(welcome.at("portrait_back.mesh").data() + 0x15 + 44)) + 137.f == -182.f);
+    CHECK_TRUE(std::bit_cast<float>(u32(welcome.at("portrait_back.mesh").data() + 0x15 + 44)) == -182.f);
+    BeginCase("calibration list keeps the provider widget and wizard keeps its changing native footer");
+    const auto calibration_list = stored_objects(portrait.at(rb_blitz::ui::input_font::kPortraitCalibrationListRecord));
+    CHECK_TRUE(calibration_list.contains("name"));
+    CHECK_FALSE(calibration_list.contains("song"));
+    const auto wizard = stored_objects(portrait.at("ui/calibration/gen/cal_auto.milo_xbox"));
+    CHECK_EQ(u32(wizard.at("nav.ihp").data() + 9), uint32_t(2));
+    CHECK_FALSE(wizard.contains("portrait_back.ihp"));
+    CHECK_TRUE(wizard.contains("portrait_retry.mesh"));
+    for (const auto& [name, minimum] : {std::pair{"audio_anim.grp", .5f}, {"prog_bar.grp", 1.f},
+                                      {"visuals_anim.grp", .3f}, {"cal_metronome.grp", .3f}}) {
+      const auto& data = wizard.at(name);
+      CHECK_TRUE(std::bit_cast<float>(u32(data.data() + 0x21)) >= minimum);
+      CHECK_EQ(u32(data.data() + 0x21 + 105), uint32_t(0)); // independent transform, native draw group retained
+    }
+    CHECK_TRUE(std::abs(std::bit_cast<float>(u32(wizard.at("cal_metronome.grp").data() + 0x21 + 20))) > .3f);
     const auto presets = stored_objects(portrait.at("ui/controller_config/gen/controller_config.milo_xbox"));
     CHECK_TRUE(presets.contains("portrait_previous.mesh"));
     CHECK_TRUE(presets.contains("portrait_next.mesh"));
-    CHECK_TRUE(std::bit_cast<float>(u32(presets.at("arrow_lt.mesh").data() + 0x15)) == 1.2f);
-    CHECK_TRUE(std::bit_cast<float>(u32(presets.at("arrow_rt.mesh").data() + 0x15)) == 1.2f);
+    for (const char* name : {"arrow_lt.mesh", "arrow_rt.mesh", "arrow_lt_glow.mesh", "arrow_rt_glow.mesh"}) {
+      const float scale = std::bit_cast<float>(u32(presets.at(name).data() + 0x15));
+      CHECK_TRUE(scale * 64 <= 38 - 8); // Complete quad plus padding inside the touch target.
+    }
     CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("settings_screen", "settings_panel",
                                                 screen::PanelScene("settings_panel")));
     CHECK_TRUE(art.size() > 0x810);

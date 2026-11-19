@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <string_view>
 
 namespace rb_blitz::ui {
@@ -69,6 +70,17 @@ struct PortraitSettingsLayout {
 inline PortraitSettingsLayout PortraitSettings(float aspect) {
   const auto menu = PortraitSplash(aspect);
   return {menu.list_scale, 364.5f * menu.list_scale * .55f};
+}
+
+struct PortraitCalibrationAction {
+  float x, z, width, height;
+};
+
+// Keep the native calibration footer's changing actions in separate touch areas.
+inline PortraitCalibrationAction PortraitCalibrationFooter(float aspect, size_t index) {
+  const float width = (364.5f * PortraitSplash(aspect).list_scale - 10) / 2;
+  return {index < 2 ? (index ? 1.f : -1.f) * (width + 10) / 2 : 0.f,
+          index < 2 ? -215.f : -177.f, width, 30};
 }
 
 inline bool PortraitControlsScene(std::string_view scene) {

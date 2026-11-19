@@ -640,8 +640,8 @@ void PortraitSurface(PortraitScene& scene, const std::vector<uint8_t>& buttons,
   for (bool border : {true, false}) {
     const auto stem = name + (border ? "_border" : "");
     auto material = std::vector<uint8_t>(buttons.begin() + 0x15A78, buttons.begin() + 0x15B81);
-    SceneColor(material, 0x19, border ? .90f : .063f, border ? .85f : .051f,
-               border ? .95f : .11f, border ? .19f : .80f);
+    SceneColor(material, 0x19, border ? .90f : .04f, border ? .85f : .11f,
+               border ? .95f : .14f, border ? .10f : .12f);
     material[0x29] = 0; // Unlit, untextured native surface.
     auto mesh = std::vector<uint8_t>(buttons.begin() + 91238, buttons.begin() + 91635);
     const float w = width + (border ? 1.4f : 0), h = height + (border ? 1.4f : 0);
@@ -815,17 +815,15 @@ bool PreparePortraitControls(const std::vector<uint8_t>& source,
   const float width = ui::PortraitSplash(aspect).width;
   const bool presets = crc == 0xF522F89D;
   const bool welcome = crc == 0xDB1E96A0;
-  if (crc == 0x375728BA)
-    for (size_t offset : {size_t(0x325E44), size_t(0x325E74)})
-      PutFloat(bytes.data() + offset,
-               std::bit_cast<float>(Be32(bytes.data() + offset)) + 29.613494f);
   PortraitScene edited(bytes);
   // Body transforms remain separate from the fixed title and footer. Root
   // scaling is only the fallback for native calibration art, not menu controls.
   const float scale = std::min(width * (presets ? .94f / 540.f : .90f / 600.f), 1.f);
-  // The welcome directory translates all its children, including detached
-  // labels, by 137 units. Keep its lighting/backdrop and compensate content.
-  if (welcome) edited.root_z = 137;
+  // Panel loading can reset the directory transform. Author content against an
+  // identity root so its loaded and runtime poses agree.
+  if (welcome)
+    for (size_t offset : {size_t(0x214), size_t(0x244)})
+      PutFloat(edited.directory.data() + offset, 0);
   for (auto& object : edited.objects) {
     const auto matrix = PortraitMatrix(object);
     if (!matrix || object.type == "InlineHelp" || object.name == "header.lbl") continue;
@@ -861,19 +859,62 @@ bool PreparePortraitControls(const std::vector<uint8_t>& source,
     for (const auto& label : {Label{"audio_title.lbl", 117, 16}, {"video_title.lbl", 117, 16},
                               {"cal_audio_instructions.lbl", 82, 13.5f},
                               {"cal_video_instructions.lbl", 82, 13.5f},
-                              {"cal_countdown.lbl", 0, 40}, {"cal_instructions.lbl", -112, 14},
-                              {"cal_reps.lbl", -82, 13}, {"cal_setting.lbl", -145, 13}}) {
+                              {"cal_countdown.lbl", -20, 40}, {"cal_instructions.lbl", -126, 12.5f},
+                              {"cal_reps.lbl", -106, 11}, {"cal_setting.lbl", -151, 12}}) {
       auto* object = edited.Find(label.name);
       if (!object) continue;
       PortraitPose(*object, 1, 0, label.z);
       PortraitText(*object, label.size, width * .84f);
+    }
+    // Fit each visual independently, preserving the metronome's XY-to-XZ
+    // rotation and the progress bar's bone/texture animations.
+    const auto art = [&](const char* name, float primary_scale, float x, float z) {
+      auto& object = *edited.Find(name);
+      const auto matrix = PortraitMatrix(object);
+      const float factor = primary_scale / std::bit_cast<float>(Be32(object.data.data() + matrix));
+      for (size_t m : {matrix, matrix + 48}) {
+        for (size_t field = 0; field < 36; field += 4)
+          PutFloat(object.data.data() + m + field,
+                   std::bit_cast<float>(Be32(object.data.data() + m + field)) * factor);
+        PutFloat(object.data.data() + m + 36, x);
+        PutFloat(object.data.data() + m + 44, z);
+      }
+      PortraitParent(object, "");
+    };
+    const float fit = width / 270;
+    art("audio_anim.grp", .65f * fit, -264.275f * .65f * fit,
+        -20 - 45.061f * .65f * fit);
+    art("prog_bar.grp", 1.18f * fit, -.3215f * 1.18f * fit,
+        -72 + 65.4355f * 1.18f * fit);
+    const float metro = width * .80f / 599.163f;
+    art("cal_metronome.grp", metro, -1.3685f * metro, -25 + 73.7405f * metro);
+    const float background = width * .80f / 345.003f;
+    art("cal_bg.grp", background, .8785f * background, -25 + 84.6205f * background);
+    const float visual = width * .65f / 511.003f;
+    art("visuals_anim.grp", visual, -176.5365f * visual, -20 - 296.4875f * visual);
+    for (const char* name : {"cal_hardware_audio_illustration.grp", "cal_hardware_video_illustration.grp"})
+      art(name, .75f * fit, 0, 30);
+  }
+  if (crc == 0xDBAD7872) {
+    PortraitPose(*edited.Find("labels.grp"), .8f * width / 270, 0, -10);
+    for (const char* name : {"audio.lbl", "video.lbl"}) {
+      PortraitPose(*edited.Find(name), 1, 0, 117);
+      PortraitText(*edited.Find(name), 16, width * .84f);
+    }
+    PortraitPose(*edited.Find("current_offset.lbl"), 1, 0, -105);
+    PortraitText(*edited.Find("current_offset.lbl"), 22, width * .84f);
+  }
+  if (crc == 0x06D6D651) {
+    for (const auto& [name, z] : {std::pair{"audio_offset.lbl", 45.f}, {"video_offset.lbl", -25.f}}) {
+      PortraitPose(*edited.Find(name), 1, 0, z);
+      PortraitText(*edited.Find(name), 16, width * .84f);
     }
   }
   if (welcome) {
     auto* list = edited.Find("cal_mode.lst");
     PortraitPose(*list, ui::PortraitSplash(aspect).list_scale, 0, 77 - edited.root_z);
     RenameSceneString(list->data, "../resource/lists/list_calibration_mode.milo",
-                      "../resource/lists/list_splash.milo");
+                      "../resource/lists/portrait_calibration.milo");
     // The secondary title duplicates the marquee's localized heading.
     auto* secondary = edited.Find("title.lbl");
     PortraitParent(*secondary, "");
@@ -895,12 +936,43 @@ bool PreparePortraitControls(const std::vector<uint8_t>& source,
     for (const char* name : {"arrow_lt.mesh", "arrow_lt_glow.mesh", "arrow_rt.mesh", "arrow_rt_glow.mesh"}) {
       auto* arrow = edited.Find(name);
       const float side = std::string_view(name).find("_lt") != std::string_view::npos ? -1 : 1;
-      PortraitPose(*arrow, 1.2f, side * x, 110);
+      // The authored arrow quad is 64 units tall, including its transparent
+      // margins. Fit the complete quad inside the 38-unit touch target.
+      PortraitPose(*arrow, .45f, side * x, 110);
     }
     PortraitSurface(edited, buttons, "portrait_previous", 38, 38, -x, 110, "arrow_lt.mesh");
     PortraitSurface(edited, buttons, "portrait_next", 38, 38, x, 110, "arrow_rt.mesh");
   }
-  PortraitFooter(edited, buttons, aspect, crc == 0x61CF95FD, crc == 0x75394D35);
+  if (crc == 0x375728BA) {
+    // Calibration replaces nav.ihp's actions during countdown, measurement and
+    // retry. Keep this single live widget; its draw bridge reflows its labels.
+    auto& nav = *edited.Find("nav.ihp");
+    PortraitPose(nav, 1, 0, -197);
+    RenameSceneString(nav.data, "../resource/inline_help/default.milo",
+                      "../resource/inline_help/portrait_actions.milo");
+    for (size_t i = 0; i < 3; ++i) {
+      const auto slot = ui::PortraitCalibrationFooter(aspect, i);
+      PortraitSurface(edited, buttons,
+          i == 0 ? "portrait_confirm" : i == 1 ? "portrait_back" : "portrait_retry",
+          slot.width, slot.height, slot.x, slot.z, "nav.ihp");
+    }
+  } else {
+    PortraitFooter(edited, buttons, aspect, crc == 0x61CF95FD, crc == 0x75394D35);
+  }
+  return PackStored(edited.Build(), scene, error);
+}
+
+bool PreparePortraitCalibrationList(const std::vector<uint8_t>& source,
+                                    const std::vector<uint8_t>& button_source,
+                                    std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> fitted, bytes;
+  if (!PreparePortraitSplashList(source, button_source, &fitted, error) ||
+      !DecodeStream(fitted, &bytes, error)) return false;
+  PortraitScene edited(bytes);
+  auto* label = edited.Find("song");
+  if (!label || label->type != "UIListLabel") return Fail(error, "portrait list label widget changed");
+  // CalibrationModesProvider fills the widget called name, rather than song.
+  label->name = "name";
   return PackStored(edited.Build(), scene, error);
 }
 
@@ -917,7 +989,7 @@ bool PreparePortraitConnection(const std::vector<uint8_t>& source,
   const auto layout = ui::PortraitLoading(aspect);
   std::vector<PortraitObject> added;
   auto material = std::vector<uint8_t>(buttons.begin() + 88961, buttons.begin() + 89242);
-  SceneColor(material, 0x19, .063f, .051f, .11f, .92f);
+  SceneColor(material, 0x19, .04f, .11f, .14f, .12f);
   RenameSceneString(material, "options_slot.tex", "");
   added.push_back({"Mat", "portrait_action.mat", std::move(material)});
   auto color = std::vector<uint8_t>(bytes.begin() + 143303, bytes.begin() + 143340);

@@ -24,11 +24,13 @@
 #include "ui/input_font_scene.h"
 #include "ui/input_icon_rows.h"
 #include "ui/settings_screen.h"
+#include "ui/portrait_menu.h"
 
 REX_EXTERN(__imp__sub_824D85E8);  // InlineHelp::DrawShowing
 REX_EXTERN(__imp__sub_824D9330);  // InlineHelp::UpdateLabels
 REX_EXTERN(__imp__sub_824D8FF0);  // format and assign one UILabel
 REX_EXTERN(__imp__sub_822C45A8);  // loading screen UI message handler
+REX_EXTERN(sub_821F13D0);        // RndTransformable::WorldXfm
 
 namespace {
 namespace font = rb_blitz::ui::input_font;
@@ -252,7 +254,33 @@ REX_HOOK_RAW(sub_824D85E8) {
   // InlineHelp sets every label's world transform before drawing it. Capture
   // those labels directly after the draw instead of depending on a nested
   // UILabel callback (which may receive an adjusted base-class this pointer).
-  __imp__sub_824D85E8(ctx, base);
+  if (rb_blitz::input::PortraitCalibrationActive() && !entries.empty() && entries.size() <= 3) {
+    // Keep the original action and label vectors: calibration replaces them as
+    // its state changes. Draw each live label through the guest widget in its
+    // own slot, then restore the complete vectors before the next guest update.
+    const auto transform = owner + 4 + Be32(base, Be32(base, owner + 4) + 16);
+    const auto world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, transform);
+    const auto x = Be32(base, world + 48), z = Be32(base, world + 56);
+    const auto put = [&](uint32_t address, uint32_t value) {
+      rex::memory::store_and_swap<uint32_t>(base + address, value);
+    };
+    rex::ScopeGuard restore([&] {
+      put(world + 48, x); put(world + 56, z);
+    });
+    const auto incoming = ctx;
+    const bool drawn = rb_blitz::input::DrawInlineHelpLabelsSeparately(owner,
+        [base](uint32_t address) { return Be32(base, address); }, put, [&](size_t i) {
+      const auto slot = rb_blitz::ui::PortraitCalibrationFooter(
+          rb_blitz::ui::screen::CurrentMenuConfiguration().portrait_aspect, i);
+      rex::memory::store_and_swap<float>(base + world + 48, slot.x);
+      rex::memory::store_and_swap<float>(base + world + 56, slot.z);
+      ctx = incoming;
+      __imp__sub_824D85E8(ctx, base);
+    });
+    if (!drawn) __imp__sub_824D85E8(ctx, base);
+  } else {
+    __imp__sub_824D85E8(ctx, base);
+  }
   for (const auto& entry : entries)
     rb_blitz::input::CaptureMenuHint(ctx, base, entry.label, entry.action, owner);
 }

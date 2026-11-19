@@ -2818,6 +2818,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         !read(ui::input_font::kListRecord, &buttons, error) ||
         !ui::input_font::PreparePortraitSplashList(source, buttons, &scene, error)) return false;
     built[ui::input_font::kSplashListRecord] = std::move(scene);
+    if (!ui::input_font::PreparePortraitCalibrationList(source, buttons, &scene, error)) return false;
+    built[ui::input_font::kPortraitCalibrationListRecord] = std::move(scene);
     if (!read(ui::input_font::kSceneRecord, &source, error) ||
         !ui::input_font::PreparePortraitSplashFont(source, &scene, error)) return false;
     built[ui::input_font::kPortraitSplashFontRecord] = std::move(scene);

@@ -76,6 +76,11 @@ bool PreparePortraitSplashFont(const std::vector<uint8_t>& source,
 bool PreparePortraitSplashList(const std::vector<uint8_t>& source,
                                const std::vector<uint8_t>& button_source, std::vector<uint8_t>* scene,
                                std::string* error);
+bool PreparePortraitCalibrationList(const std::vector<uint8_t>& source,
+                                    const std::vector<uint8_t>& button_source,
+                                    std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kPortraitCalibrationListRecord[] =
+    "ui/resource/lists/gen/portrait_calibration.milo_xbox";
 inline constexpr char kSplashListRecord[] = "ui/resource/lists/gen/list_splash.milo_xbox";
 inline constexpr char kPortraitSplashFontRecord[] = "ui/resource/fonts/gen/portrait_splash.milo_xbox";
 // Give the song-list sort label the live Interface Sort icon font.

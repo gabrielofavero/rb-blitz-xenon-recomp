@@ -452,6 +452,12 @@ bool PortraitSettingsActive() {
   return rb_blitz::settings::BootPortraitWidth() &&
          (ui::PortraitSettingsScene(current_panel_scene) || ui::PortraitControlsPanel(current_panel_name));
 }
+bool PortraitCalibrationActive() {
+  std::lock_guard lock(mutex);
+  return rb_blitz::settings::BootPortraitWidth() &&
+         (current_panel_name == "cal_audio_panel" || current_panel_name == "cal_visuals_panel" ||
+          current_panel_name == "cal_hw_audio_panel" || current_panel_name == "cal_hw_visuals_panel");
+}
 
 void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   ++frame_number;
@@ -942,6 +948,17 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
       (ui::PortraitSettingsScene(current_panel_scene) || ui::PortraitControlsPanel(current_panel_name))) {
     const auto dir = header ? U32(base, header + 36) : 0;
     const char* name = action == 2 ? "portrait_back.mesh" : action == 1 ? "portrait_confirm.mesh" : nullptr;
+    if (current_panel_name == "cal_audio_panel" || current_panel_name == "cal_visuals_panel" ||
+        current_panel_name == "cal_hw_audio_panel" || current_panel_name == "cal_hw_visuals_panel") {
+      const auto entries = ReadInlineHelpEntries(owner,
+          [base](uint32_t address) { return U32(base, address); });
+      const auto entry = std::find_if(entries.begin(), entries.end(),
+          [label](const auto& entry) { return entry.label == label; });
+      if (entry != entries.end()) {
+        const auto index = size_t(entry - entries.begin());
+        name = index == 0 ? "portrait_confirm.mesh" : index == 1 ? "portrait_back.mesh" : "portrait_retry.mesh";
+      }
+    }
     const auto mesh = name && dir ? SceneMesh(ctx, base, dir, name) : 0;
     if (mesh) {
       if (const auto button_bounds = ProjectMesh(ctx, base, mesh)) bounds = button_bounds;

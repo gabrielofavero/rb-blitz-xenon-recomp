@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <vector>
 
 namespace rb_blitz::input {
@@ -36,5 +37,32 @@ std::vector<InlineHelpEntry> ReadInlineHelpEntries(uint32_t object, Read32 read3
     if (range(label, 4)) entries.push_back({label, read32(begin + i * 28)});
   }
   return entries;
+}
+
+// Let the guest draw each live label at a separate position without cloning the
+// widget's state. Restore both vector ranges before any subsequent guest update.
+template <typename Read32, typename Write32, typename Draw>
+bool DrawInlineHelpLabelsSeparately(uint32_t object, Read32 read32, Write32 write32, Draw draw) {
+  const auto entries = ReadInlineHelpEntries(object, read32);
+  if (entries.empty()) return false;
+  const auto begin = read32(object + 80), end = read32(object + 84);
+  const auto labels = read32(object + 92), labels_end = read32(object + 96);
+  if (entries.size() != (end - begin) / 28) return false;
+  struct Restore {
+    Write32& write;
+    uint32_t object, begin, end, labels, labels_end;
+    ~Restore() {
+      write(object + 80, begin); write(object + 84, end);
+      write(object + 92, labels); write(object + 96, labels_end);
+    }
+  } restore{write32, object, begin, end, labels, labels_end};
+  for (size_t i = 0; i < entries.size(); ++i) {
+    write32(object + 80, begin + uint32_t(i) * 28);
+    write32(object + 84, begin + uint32_t(i + 1) * 28);
+    write32(object + 92, labels + uint32_t(i) * 4);
+    write32(object + 96, labels + uint32_t(i + 1) * 4);
+    draw(i);
+  }
+  return true;
 }
 }  // namespace rb_blitz::input
