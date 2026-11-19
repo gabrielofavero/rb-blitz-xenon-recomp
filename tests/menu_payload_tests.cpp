@@ -1819,6 +1819,8 @@ void TestPortraitSplash() {
     CHECK_TRUE(52.75f * l.list_scale < 58.5f * l.list_scale);
   }
   CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("splash_screen", "splash_panel"));
+  CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("autosave_warning_screen", "autosave_warning_panel"));
+  CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("autosave_warning_screen", "splash_panel"));
   CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("splash_screen", "upsell_panel"));
   CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("confirm_exit_game_screen", "pause_exit_game_panel"));
   CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("settings_restart_screen", "settings_restart_panel",
@@ -1938,6 +1940,44 @@ void TestPortraitSplash() {
   const auto unknown = dtb::Compile(roots);
   CHECK_FALSE(rb_blitz::settings::AddPortraitSplashLayout(&roots, .5f, &why));
   CHECK_TRUE(dtb::Compile(roots) == unknown);
+
+  BeginCase("portrait autosave centers the combined icon and measured localized text");
+  std::vector<Node> autosave{C({S("new"), S("UIPanel"), S("autosave_warning_panel"),
+      A({S("enter"), C({S("native_enter")})}),
+      A({S("poll"), C({S("native_poll")})})})};
+  const auto autosave_before = autosave;
+  CHECK_TRUE(rb_blitz::settings::AddPortraitAutosaveLayout(&autosave, &why));
+  CHECK_TRUE(dtb::SerializeNodes(Method(autosave, "autosave_warning_panel", "poll")->kids) ==
+             dtb::SerializeNodes(Method(autosave_before, "autosave_warning_panel", "poll")->kids));
+  for (float text_height : {40.f, 95.5f, 150.f, 240.f}) {
+    bool measured = false;
+    int native_enters = 0;
+    std::map<std::string, float> z;
+    const auto eval = [&](auto&& self, const Node& n) -> float {
+      if (n.tag == dtb::kInt) return float(int32_t(n.scalar));
+      if (n.tag == dtb::kFloat) return std::bit_cast<float>(n.scalar);
+      if (n.tag != dtb::kCommand || n.kids.empty()) return 0;
+      const auto& op = n.kids[0].text;
+      if (op == "native_enter") { ++native_enters; return 0; }
+      if (op == "+") return self(self, n.kids[1]) + self(self, n.kids[2]);
+      if (op == "-") return self(self, n.kids[1]) - self(self, n.kids[2]);
+      if (op == "/") return self(self, n.kids[1]) / self(self, n.kids[2]);
+      const auto& action = n.kids[1].text;
+      if (action == "set_height_from_text") { measured = true; return 0; }
+      if (action == "get") { CHECK_TRUE(measured); return text_height; }
+      if (action == "set_local_pos") z[op] = self(self, n.kids[4]);
+      return 0;
+    };
+    const auto* enter = Method(autosave, "autosave_warning_panel", "enter");
+    for (size_t i = 1; i < enter->kids.size(); ++i) eval(eval, enter->kids[i]);
+    CHECK_EQ(native_enters, 1);
+    const float top = z.at("wedges.grp") + 28;
+    const float bottom = z.at("autosave.lbl") - text_height;
+    CHECK_TRUE(std::abs(top + bottom) < .001f);
+    CHECK_TRUE(top < 240 && bottom > -240);
+    CHECK_TRUE(z.at("wedges.grp") - 28 > z.at("autosave.lbl"));
+    CHECK_TRUE(z.at("wedges.grp") == z.at("spinner.trans"));
+  }
 
   BeginCase("portrait connection and song loading preserve native entry work");
   for (const bool song : {false, true}) {
@@ -2495,6 +2535,21 @@ int main(int argc, char** argv) {
                           scene.begin() + target_start + image_size,
                           source.begin() + source_start));
     CHECK_TRUE(scene != original);
+    BeginCase("portrait Ultimate zoom preserves every bitmap byte and rejects changed geometry");
+    std::vector<uint8_t> portrait;
+    CHECK_TRUE(rb_blitz::ui::input_font::PreparePortraitStartupLogo(scene, &portrait, &why));
+    CHECK_TRUE(portrait.size() == 0x810 + 351617);
+    CHECK_TRUE(std::equal(portrait.begin() + target_start,
+                          portrait.begin() + target_start + image_size,
+                          source.begin() + source_start));
+    const auto* scale = portrait.data() + 0x810 + 0x55A90;
+    const auto zoom = std::bit_cast<float>(uint32_t(scale[0]) << 24 | uint32_t(scale[1]) << 16 |
+                                         uint32_t(scale[2]) << 8 | scale[3]);
+    CHECK_TRUE(zoom > 1 && zoom * .44f < .9f);
+    portrait.back() ^= 1;
+    std::vector<uint8_t> untouched{1, 2, 3};
+    CHECK_FALSE(rb_blitz::ui::input_font::PreparePortraitStartupLogo(portrait, &untouched, &why));
+    CHECK_TRUE(untouched == std::vector<uint8_t>({1, 2, 3}));
     return Finish();
   }
   if (argc == 3 && std::string(argv[1]) == "check-startup-record") {
@@ -2731,7 +2786,7 @@ int main(int argc, char** argv) {
       CHECK_TRUE(notes.empty());
     }
     BeginCase("portrait payload changes splash buttons, loading layouts and the existing gameplay HUD route");
-    CHECK_EQ(portrait.size(), landscape.size() + 4 + !landscape.contains("ui/gen/game.dtb") +
+    CHECK_EQ(portrait.size(), landscape.size() + 6 + !landscape.contains("ui/gen/game.dtb") +
                                       !landscape.contains("ui/loading/gen/loading.dtb"));
     for (const auto& [path, original] : landscape) {
       CHECK_TRUE(portrait.contains(path));
@@ -2786,7 +2841,7 @@ int main(int argc, char** argv) {
     // Source offsets after the removed Select record shift back by 18 bytes.
     const size_t shift = declaration_size + member_size - 18;
     CHECK_EQ(std::bit_cast<float>(u32(settings_data + 0x3F90 + shift)), 0.f);
-    CHECK_EQ(std::bit_cast<float>(u32(settings_data + 0x3F98 + shift)), -190.f);
+    CHECK_EQ(u32(settings_data + 0x3F98 + shift), std::bit_cast<uint32_t>(-190.f));
     CHECK_EQ(std::bit_cast<float>(u32(settings_data + 0x432C + shift)),
              rb_blitz::ui::PortraitSettings(config.portrait_aspect).content_scale);
     // The appended background is a sibling of the native hint in options.grp,

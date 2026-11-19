@@ -42,6 +42,13 @@ bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* sce
 // Text-only native Start prompt and a soft vignette around the authored backdrop.
 bool PreparePortraitSplash(const std::vector<uint8_t>& source, float aspect,
                            std::vector<uint8_t>* scene, std::string* error);
+// Zoom the Ultimate bitmap in its distinct startup scene without changing its aspect.
+bool PreparePortraitStartupLogo(const std::vector<uint8_t>& source,
+                               std::vector<uint8_t>* scene, std::string* error);
+// Reflow the native autosave warning for height-filling portrait presentation.
+bool PreparePortraitAutosave(const std::vector<uint8_t>& source, float aspect,
+                            std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kAutosaveRecord[] = "ui/startup/gen/autosave_warning.milo_xbox";
 // Fit native confirmation/error content to portrait; preserve its shade and input.
 bool PreparePortraitPrompt(const std::vector<uint8_t>& source, float aspect,
                            std::vector<uint8_t>* scene, std::string* error);

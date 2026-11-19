@@ -1396,6 +1396,15 @@ fit the original landscape image inside the portrait window. Native confirmation
 presentation, with their content scaled to fit the visible width. The confirmation
 animation's scale keys use the same fit; its full-screen shade stays unscaled.
 
+Normal startup enlarges the Ultimate Mods image uniformly by 1.5x in portrait.
+The native autosave warning fills the window height, preserving its landscape
+spinner proportions and using 70% of the authored font size. Its localized text
+wraps within 84% of the visible width below the spinner. On entry, the native
+label measures the wrapped text height so the icon and warning are centered
+vertically as one block, including when localization changes the line count. These
+generated guest-scene changes are shared across platforms and graphics backends;
+landscape keeps its authored layout.
+
 The initial narrow-frame implementation was stretched and its visual validation
 was insufficient. It is superseded by the landscape-source crop above. The
 presenter needed SDK patch 0083: its runtime configuration setter previously

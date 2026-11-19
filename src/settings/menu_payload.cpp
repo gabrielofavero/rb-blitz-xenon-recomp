@@ -1634,6 +1634,29 @@ bool AddTouchHudAnimation(std::vector<ui::dtb::Node>* roots, std::string* why) {
   return true;
 }
 
+bool AddPortraitAutosaveLayout(std::vector<Node>* roots, std::string* why) {
+  auto* enter = PanelMethod(roots, "autosave_warning_panel", "enter");
+  if (!enter) {
+    if (why) *why = "portrait autosave entry changed";
+    return false;
+  }
+  const auto sym = [](const char* value) { return Node::Symbol(value); };
+  const auto cmd = [](std::vector<Node> kids) { return Node::Command(std::move(kids)); };
+  // UILabel::set_height_from_text (824BB0B8) measures the localized, wrapped
+  // text and stores its height. The spinner has a 28-unit radius; its center
+  // stays 55 units above the label, leaving a 27-unit gap. Center their union.
+  enter->kids.push_back(cmd({sym("autosave.lbl"), sym("set_height_from_text")}));
+  const auto text_z = cmd({sym("/"), cmd({sym("-"),
+      cmd({sym("autosave.lbl"), sym("get"), sym("height")}), Node::Int(83)}), Node::Int(2)});
+  const auto icon_z = cmd({sym("+"), text_z, Node::Int(55)});
+  enter->kids.push_back(cmd({sym("autosave.lbl"), sym("set_local_pos"),
+      Node::Int(0), Node::Int(0), text_z}));
+  for (const char* name : {"wedges.grp", "spinner.trans"})
+    enter->kids.push_back(cmd({sym(name), sym("set_local_pos"),
+        Node::Int(0), Node::Int(0), icon_z}));
+  return true;
+}
+
 bool AddPortraitSplashLayout(std::vector<Node>* roots, float aspect, std::string* why) {
   if (!roots) return false;
   auto staged = *roots;
@@ -1893,6 +1916,12 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   if (merge_provider && !skip_startup_logos) {
     if (!BuildUltimateRatingScene(read, &built["ui/startup/gen/esrb.milo_xbox"],
                                   error)) return false;
+    if (portrait_hud) {
+      std::vector<uint8_t> scene;
+      if (!ui::input_font::PreparePortraitStartupLogo(
+              built["ui/startup/gen/esrb.milo_xbox"], &scene, error)) return false;
+      built["ui/startup/gen/esrb.milo_xbox"] = std::move(scene);
+    }
     if (pump_startup_window) pump_startup_window();
   }
   if (!screen::CurrentMenuConfiguration().show_currency) {
@@ -2739,11 +2768,18 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     }
   }
   if (portrait_hud) {
+    if (!edit("ui/startup/gen/autosave_icon_startup.dtb", [&](auto& roots) {
+          return AddPortraitAutosaveLayout(&roots, error);
+        })) return false;
     if (!edit("ui/loading/gen/loading.dtb", [&](auto& roots) {
           return AddPortraitLoadingLayout(&roots, true,
               screen::CurrentMenuConfiguration().portrait_aspect, error);
         })) return false;
     std::vector<uint8_t> source, buttons, scene;
+    if (!read(ui::input_font::kAutosaveRecord, &source, error) ||
+        !ui::input_font::PreparePortraitAutosave(source,
+            screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
+    built[ui::input_font::kAutosaveRecord] = std::move(scene);
     if (!read(ui::input_font::kConnectionRecord, &source, error) ||
         !read(ui::input_font::kListRecord, &buttons, error) ||
         !ui::input_font::PreparePortraitConnection(source, buttons,

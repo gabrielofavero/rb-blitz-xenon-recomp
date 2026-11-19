@@ -508,6 +508,40 @@ void SceneMatrix(std::vector<uint8_t>& out, size_t at, float sx, float sz,
 }
 }  // namespace
 
+bool PreparePortraitStartupLogo(const std::vector<uint8_t>& source,
+                               std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  // The bitmap has already been replaced with Ultimate art. Validate the
+  // unchanged material/geometry tail, independent of those image bytes.
+  constexpr size_t geometry = 0x55850;
+  if (bytes.size() != 351617 ||
+      Crc32(bytes.data() + geometry, bytes.size() - geometry) != 0x4AA736EA)
+    return Fail(error, "portrait startup logo source revision changed");
+  // Startup scenes still fit the landscape image to the window width. Zoom
+  // the native group uniformly so the square wordmark occupies most of it.
+  for (size_t matrix : {size_t(0x55A90), size_t(0x55AC0)}) {
+    SceneMatrix(bytes, matrix, 1.5f, 1.5f);
+    PutFloat(bytes.data() + matrix + 16, 1.5f);
+  }
+  return PackStored(bytes, scene, error);
+}
+
+bool PreparePortraitAutosave(const std::vector<uint8_t>& source, float aspect,
+                            std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (bytes.size() != 532432 || Crc32(bytes.data(), bytes.size()) != 0xBDCAB5B3)
+    return Fail(error, "portrait autosave source revision changed");
+  // Keep native localization and wrapping. The panel's enter method positions
+  // the icon and label together after measuring the wrapped text height.
+  PutFloat(bytes.data() + 0x81BAB, ui::PortraitSplash(aspect).width * .84f);
+  constexpr size_t text_size = 0x81BF1;
+  PutFloat(bytes.data() + text_size,
+           std::bit_cast<float>(Be32(bytes.data() + text_size)) * .7f);
+  return PackStored(bytes, scene, error);
+}
+
 bool PreparePortraitPrompt(const std::vector<uint8_t>& source, float aspect,
                            std::vector<uint8_t>* scene, std::string* error) {
   std::vector<uint8_t> bytes;

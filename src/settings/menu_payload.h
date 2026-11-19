@@ -58,6 +58,8 @@ bool SetDiscoveryStartLabel(std::vector<ui::dtb::Node>* roots);
 bool AddCrashRecoveryHooks(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Center the existing splash art, start button, list and hints in portrait.
 bool AddPortraitSplashLayout(std::vector<ui::dtb::Node>* roots, float aspect, std::string* why);
+// Center the autosave icon and wrapped warning using the native label height.
+bool AddPortraitAutosaveLayout(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool AddPortraitLoadingLayout(std::vector<ui::dtb::Node>* roots, bool song_loading,
                               float aspect, std::string* why);
 bool BypassAutomaticUnlockError(std::vector<ui::dtb::Node>* roots, std::string* why);

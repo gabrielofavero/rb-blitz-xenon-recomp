@@ -83,6 +83,7 @@ inline bool PortraitPromptScene(std::string_view scene) {
 inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel,
                                 std::string_view scene = {}) {
   return (screen == "splash_screen" && panel == "splash_panel") ||
+         (screen == "autosave_warning_screen" && panel == "autosave_warning_panel") ||
          (screen == "server_connect_screen" && panel == "server_connect_panel") ||
          (screen == "loading_screen" && panel == "loading_panel") ||
          panel == "pause_exit_game_panel" || panel == "error_popup_panel" ||
