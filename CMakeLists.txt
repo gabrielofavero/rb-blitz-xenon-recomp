@@ -882,6 +882,13 @@ if(BUILD_TESTING)
         "${REXSDK_DIR}/thirdparty/inja/third_party/include")
     add_test(NAME messages_feed COMMAND rb_blitz_messages_feed_tests "${CMAKE_CURRENT_BINARY_DIR}")
     find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME dev_commands
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/dev_commands_tests.py")
+    if(WIN32)
+        add_test(NAME dev_windows
+            COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/dev_windows_tests.ps1")
+    endif()
     add_test(NAME sdk_nested_patches
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/sdk_nested_patch_tests.py")
     if(WIN32)
