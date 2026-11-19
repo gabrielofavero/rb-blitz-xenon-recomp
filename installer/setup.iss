@@ -116,10 +116,8 @@ VersionInfoCompany={#AppPublisher}
 VersionInfoDescription={#AppName} setup
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#AppVersion}
-; {autopf} is the machine-wide Program Files here, because the install below is
-; administrative; a /CURRENTUSER install resolves it to that user's own Programs
-; folder instead, so the one directive covers both.
-DefaultDirName={autopf}\{#AppDefaultDirName}
+; Keep binaries and paths.toml writable by the player without elevation.
+DefaultDirName={localappdata}\Programs\{#AppDefaultDirName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 ; The install folder page is shown even when an install is already registered, and
@@ -135,21 +133,10 @@ DisableDirPage=no
 ; declared defaults below are unchecked for the same reason. An explicit
 ; /TASKS or /MERGETASKS still decides.
 UsePreviousTasks=no
-; An administrative install, because that is the mode autopf resolves to the system
-; programs folder in: the default destination is the Rock Band Blitz folder there, where a
-; game belongs, and the setup and uninstaller ask for the
-; elevation the files there need. /CURRENTUSER is still honoured and installs under
-; the user's own profile instead, which is what an unattended run that may not
-; elevate has to pass.
-;
-; Nothing the *game* writes lives in the install folder: the DLC library and the
-; saved games are asked for on the folder page and default to the user's Documents,
-; so a machine-wide install does not put a player's saves under Program Files. The
-; one exception is deliberate and predates this: paths.toml sits beside the
-; executable, which an elevated install writes and a later hand edit may need the
-; same rights for (parent plan §9.1).
-PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=commandline
+; Install and uninstall for the current user without requesting administrator
+; rights. Auto shell folders and uninstall registration use the user's profile.
+; DLC and saves keep their independently selected locations under Documents.
+PrivilegesRequired=lowest
 MinVersion={#AppMinWindowsBuild}
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -2078,8 +2065,9 @@ end;
 
 function PreviousInstall(var dir, version: String): Boolean;
 begin
-  Result := QueryPreviousInstall(HKCU, dir, version) or
-            QueryPreviousInstall(HKLM, dir, version);
+  // A machine-wide install belongs to a different install scope and is not
+  // replaced by this per-user install.
+  Result := QueryPreviousInstall(HKCU, dir, version);
 end;
 
 // The flow when the game is already installed. The same version is a reinstall;

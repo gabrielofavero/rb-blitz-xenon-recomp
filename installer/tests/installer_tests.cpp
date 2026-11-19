@@ -2117,12 +2117,15 @@ static void TestWizardScript() {
   CHECK_TRUE(read < validate);
   CHECK_TRUE(validate < write);
 
-  BeginCase("the wizard installs the game into Program Files and asks for both folders");
+  BeginCase("the wizard installs per user without elevation and asks for both folders");
 
-  // The install is the administrative one - the only mode autopf resolves to
-  // Program Files in - and the default destination is the game's own folder there.
-  CHECK_CONTAINS(script, "PrivilegesRequired=admin");
-  CHECK_CONTAINS(script, "DefaultDirName={autopf}\\{#AppDefaultDirName}");
+  // Binaries and paths.toml belong to the player, as do shortcuts and uninstall
+  // registration. A machine-wide install must not be mistaken for this install.
+  CHECK_CONTAINS(script, "PrivilegesRequired=lowest");
+  CHECK_FALSE(script.find("PrivilegesRequiredOverridesAllowed=") != std::string::npos);
+  CHECK_CONTAINS(script, "DefaultDirName={localappdata}\\Programs\\{#AppDefaultDirName}");
+  CHECK_CONTAINS(script, "Result := QueryPreviousInstall(HKCU, dir, version);");
+  CHECK_FALSE(script.find("QueryPreviousInstall(HKLM, dir, version)") != std::string::npos);
   // Neither box is optional any more, and both open on the folder under the user's
   // Documents rather than on nothing at all (2026-10-14).
   CHECK_CONTAINS(script, "DlcPromptLabel.Caption := 'DLC folder:';");

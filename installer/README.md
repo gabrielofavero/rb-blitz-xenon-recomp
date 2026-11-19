@@ -76,7 +76,7 @@ build machine's path in it â€” and [`../docs/guides/ultimate-compat.md`](..
 | Page | What happens |
 | --- | --- |
 | Welcome | What the installer needs (a copy of the game they own), what it refuses to do (no game files included or downloaded). |
-| Install folder | `C:\Program Files\Rock Band Blitz` by default: the install is the administrative one (Inno Setup's `PrivilegesRequired=admin`), so it prompts for elevation, and `/CURRENTUSER` is what installs under a user's own profile instead. The page also asks for the DLC library and the save folder, and is shown even when an install is already registered â€” a reinstall has to be able to see and change them ([details below](#the-dlc-library-and-the-saved-games)). |
+| Install folder | `%LOCALAPPDATA%\Programs\Rock Band Blitz` by default. Setup installs for the current user without requesting administrator rights (`PrivilegesRequired=lowest`); shortcuts and uninstall registration also belong to that user. The page also asks for the DLC library and save folder, and stays visible on reinstalls so both can be changed ([details below](#the-dlc-library-and-the-saved-games)). |
 | Xbox 360 Game Files | The package / an extracted game folder / keep the data that is already installed in the install folder. The location is asked on this page, not on one of its own: choosing "package" or "folder" puts the prompt, the path box and its Browse button under the radios. The choice is verified *before* the install starts: the geometry of the selection is read and the required files are checked, so a wrong path fails on the page instead of halfway through. |
 | Rock Band Blitz Ultimate | Download the pinned release from the mod's own GitHub release (selected by default), use a zip, use a folder, or do not install it. The zip or folder is asked for on this page, and *do not install* puts how to add it later in the same place: run this installer again, or copy the release's `Xbox` folder into `<install folder>\game\ultimate`. |
 | Shortcuts | Which of the two shortcuts to create â€” both are the game ([details below](#shortcuts)). |
@@ -122,7 +122,7 @@ shortcut back in, and it is the only thing that does.
 ### A game that is already installed
 
 The wizard looks for the game before it shows its first page, using the Add/Remove
-Programs entry of a previous install (the AppId in `[Setup]`) for the folder and
+Programs entry of a previous per-user install (the AppId in `[Setup]`) for the folder and
 the version. An install that is there and the same version is offered as a
 reinstall; a lower one is an update and a higher one a downgrade, and both warn
 that saves made with the other version may not load, because the game's save
@@ -135,6 +135,11 @@ external folders are asked for, so a reinstall has to show it; Inno Setup's own
 `UsePreviousAppDir` still prefills the folder with the one the install was
 registered with, so an update lands on the game rather than beside it. `/DIR`
 overrides it either way.
+
+An older machine-wide install is separate: this setup does not replace its
+Program Files copy or change its registration or shared shortcuts. A fresh
+per-user install defaults to AppData, and existing per-user installs keep their
+registered folder. A custom `/DIR` must be writable by the current user.
 
 For each destination folder, the game-files page defaults to reusing detected
 game data. The Ultimate page likewise defaults to **Use the Ultimate mod already
@@ -417,24 +422,22 @@ Setup's own switches.
 | `/MERGETASKS` | `startmenu` (Inno Setup) | The additive form of the same thing; `!name` takes one away, which is already the default. |
 | `/RUNATEND` | `game` (wizard default), `none` | What to start when the install finishes. A silent install defaults to `none` â€” it launches nothing unless this asks for one; the wizard's finish page preselects the value when it is given. The retired `controller`/`launcher` spellings are refused rather than ignored: there is no settings application to start. |
 | `/DIR` | folder | Install folder (Inno Setup). |
-| `/CURRENTUSER` | â€” | Install under the current user's own profile instead of machine-wide. The default is machine-wide (`/ALLUSERS`), because that is the mode whose default folder is `C:\Program Files`; an unattended run that cannot answer an elevation prompt has to pass this. |
 | `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=<file>` | â€” | Usual unattended switches (Inno Setup). |
 
 Example â€” unattended install from a package, with the pinned mod, no dialog at all:
 
 ```bat
 RockBandBlitz-0.1.0-amd64-windows.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART ^
-  /CURRENTUSER /DIR="C:\Games\Rock Band Blitz" /LOG="%TEMP%\rbb-install.log" ^
+  /LOG="%TEMP%\rbb-install.log" ^
   /GAMEMETHOD=package /GAMEPACKAGE="<the extracted package folder>" ^
   /DLCDIR="D:\Rock Band DLC" /SAVEDIR="D:\Rock Band Saves" ^
   /ULTIMATESOURCE=pin
 ```
 
 A silent install launches nothing unless `/RUNATEND` asks for it (see the finish
-page above); a silent *uninstall* always keeps the game data (see below). It also
-cannot answer a UAC prompt: the setup asks for the elevation a machine-wide install
-needs, so an unattended run that is not already elevated passes `/CURRENTUSER` (as
-the example does) or `/DIR` into a folder it can write.
+page above); a silent *uninstall* always keeps the game data (see below). Setup
+does not request elevation, and no install-scope switch is needed. An optional
+`/DIR` must name a folder the current user can write.
 
 ## The helper contract
 
@@ -548,12 +551,9 @@ The DLC root is this installer's own choice: the game's fallback is a `dlc`
 directory inside the read-only game data, so the library folder beneath the
 save root is offered instead.
 
-The legacy profile is only consulted when the install is **not** running elevated:
-an all-users install started by an administrator must not import that
-administrator's own profile into the player's install. The ordinary install *is*
-elevated since 2026-10-14, so rung 3 now reaches `/CURRENTUSER` installs only - a
-known narrowing of the machine-wide default, recorded in
-[`../docs/reference/known-issues.md`](../docs/reference/known-issues.md).
+The per-user install can consult the current user's legacy Controller Settings
+profile when prefilling these folders. The installation's own `paths.toml` takes
+precedence, so reinstalls preserve the stored choices.
 
 What the installer refuses and what it accepts:
 
@@ -600,9 +600,10 @@ order) so a change that drops one fails the suite:
    nothing is written.
 5. One of the two boxes cleared and Next pressed: the page refuses it and nothing is
    written; typing a folder back in continues.
-6. A fresh install in the default `C:\Program Files\Rock Band Blitz`: the page opens
-   on it, `paths.toml` lands in it with both Document folders, and the game writes
-   its saves there rather than under Program Files.
+6. A fresh install in the default `%LOCALAPPDATA%\Programs\Rock Band Blitz`: Setup
+   starts without a UAC prompt, `paths.toml` lands beside the game with both
+   Document folders, and saves use the selected save folder. Shortcuts and the
+   uninstall entry belong to the current user, and uninstall requests no elevation.
 
 ## Custom controller layouts
 
