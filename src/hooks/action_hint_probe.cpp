@@ -18,6 +18,7 @@
 #include "assets/texture_override.h"
 #include "input/input_icons.h"
 #include "input/inline_help.h"
+#include "input/last_device.h"
 #include "input/native_menu.h"
 #include "profile/input_rows.h"
 #include "ui/input_font_scene.h"
@@ -156,13 +157,11 @@ void PublishActionHints() {
 }  // namespace rb_blitz::hooks
 
 REX_HOOK_RAW(sub_824D9330) {
-  if (!rb_blitz::assets::InputIconsAvailable()) {
-    __imp__sub_824D9330(ctx, base);
-    return;
+  if (rb_blitz::assets::InputIconsAvailable()) {
+    const auto view = rb_blitz::input::icons::CaptureActive(
+        rb_blitz::assets::ControllerSchemeRegistry());
+    Publish(view, Signature(view));
   }
-  const auto view = rb_blitz::input::icons::CaptureActive(
-      rb_blitz::assets::ControllerSchemeRegistry());
-  Publish(view, Signature(view));
   const auto entries = Entries(base, ctx.r3.u32);
   const auto* previous = g_entries;
   g_entries = &entries;
@@ -175,6 +174,10 @@ REX_HOOK_RAW(sub_824D8FF0) {
     for (const auto& entry : *g_entries) {
       if (entry.label != ctx.r3.u32 || entry.action >= kTargets.size() ||
           !*kTargets[entry.action]) continue;
+      const bool text_only = entry.action == 2 &&
+          rb_blitz::input::last_device::Current().using_touch &&
+          rb_blitz::input::PortraitSettingsActive();
+      if (!text_only && !rb_blitz::assets::InputIconsAvailable()) continue;
       const uint32_t code = font::GlyphCode(entry.action);
       if (TraceEnabled()) {
         static std::atomic<unsigned> traced{0};
@@ -186,7 +189,9 @@ REX_HOOK_RAW(sub_824D8FF0) {
       rex::ScopeGuard restore_fpscr([&] { ctx.fpscr=call.fpscr; });
       rex::ppc::OpenCallFrame(call,base,0x100);
       const uint32_t chars = call.r1.u32 + 0x80;
-      if (code < 0x80) {
+      if (text_only) {
+        base[chars] = 0;
+      } else if (code < 0x80) {
         base[chars] = uint8_t(code);
         base[chars + 1] = 0;
       } else {
@@ -219,13 +224,14 @@ REX_HOOK_RAW(sub_824D85E8) {
     }
     if (trace) TraceInlineHelp(base, ctx.r3.u32);
   }
-  if (rb_blitz::assets::InputIconsAvailable() && ctx.r3.u32 >= 224) {
+  if ((rb_blitz::assets::InputIconsAvailable() || rb_blitz::input::PortraitSettingsActive()) &&
+      ctx.r3.u32 >= 224) {
     const uint32_t object = ctx.r3.u32 - 224;
     if (!entries.empty()) {
       const auto view = rb_blitz::input::icons::CaptureActive(
           rb_blitz::assets::ControllerSchemeRegistry());
       const auto signature = Signature(view);
-      Publish(view, signature);
+      if (rb_blitz::assets::InputIconsAvailable()) Publish(view, signature);
       const auto widget_signature = signature + ":" +
           std::to_string(entries.front().label);
       static std::mutex mutex;

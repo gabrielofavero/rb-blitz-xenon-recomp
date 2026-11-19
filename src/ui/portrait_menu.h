@@ -67,12 +67,27 @@ struct PortraitSettingsLayout {
 };
 
 inline PortraitSettingsLayout PortraitSettings(float aspect) {
-  const float width = PortraitSplash(aspect).width;
-  return {std::min(width * .92f / 300.f, 1.f), std::min(width * .92f, 300.f)};
+  const auto menu = PortraitSplash(aspect);
+  return {menu.list_scale, 364.5f * menu.list_scale * .55f};
+}
+
+inline bool PortraitControlsScene(std::string_view scene) {
+  scene = scene.substr(scene.find_last_of('/') + 1);
+  if (scene.ends_with(".milo")) scene.remove_suffix(5);
+  return scene == "controller_config" ||
+         scene == "cal_welcome" || scene == "cal_auto" || scene == "cal_manual" ||
+         scene == "cal_quick" || scene == "cal_complete" || scene == "cal_failed";
 }
 
 inline bool PortraitSettingsScene(std::string_view scene) {
   return scene == "settings_menu.milo" || scene == "settings_menu_pause.milo";
+}
+
+inline bool PortraitControlsPanel(std::string_view panel) {
+  return (panel.ends_with("_panel") && PortraitControlsScene(panel.substr(0, panel.size() - 6))) ||
+         panel == "cal_audio_panel" || panel == "cal_visuals_panel" ||
+         panel == "cal_hw_audio_panel" || panel == "cal_hw_visuals_panel" ||
+         panel == "cal_manual_audio_panel" || panel == "cal_manual_video_panel";
 }
 
 // Confirmation scenes are also used by settings under private file aliases.
@@ -96,6 +111,8 @@ inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel
          panel == "rbbz_download_panel" || panel == "rbbz_search_loading_panel" ||
          panel == "rbbz_library_panel" ||
          PortraitSettingsScene(scene) ||
+         PortraitControlsScene(scene) ||
+         PortraitControlsPanel(panel) ||
          PortraitPromptScene(scene);
 }
 

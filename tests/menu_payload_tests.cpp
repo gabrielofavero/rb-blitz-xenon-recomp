@@ -1839,6 +1839,11 @@ void TestPortraitSplash() {
   CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("settings_restart_pause_screen", "settings_restart_pause_panel",
                                               "confirmation_message"));
   CHECK_FALSE(rb_blitz::ui::PortraitSplashScreen("options_screen", "options_panel"));
+  for (const char* panel : {"cal_welcome_panel", "cal_audio_panel", "cal_visuals_panel",
+                           "cal_hw_audio_panel", "cal_hw_visuals_panel", "cal_manual_audio_panel",
+                           "cal_manual_video_panel", "cal_quick_panel", "cal_complete_panel",
+                           "cal_failed_panel", "controller_config_panel"})
+    CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("", panel));
   for (const char* panel : {"settings_panel", "settings_av_panel", "settings_controls_pause_panel"}) {
     const auto scene = rb_blitz::ui::screen::PanelScene(panel);
     CHECK_TRUE(rb_blitz::ui::PortraitSettingsScene(scene));
@@ -1846,6 +1851,8 @@ void TestPortraitSplash() {
   }
   for (float aspect : {402.f / 874, 9.f / 16, .75f}) {
     const auto layout = rb_blitz::ui::PortraitSettings(aspect);
+    CHECK_EQ(layout.content_scale, rb_blitz::ui::PortraitSplash(aspect).list_scale);
+    CHECK_TRUE(layout.back_width < 364.5f * layout.content_scale * .6f);
     CHECK_TRUE(300 * layout.content_scale <= rb_blitz::ui::PortraitSplash(aspect).width * .93f);
     CHECK_TRUE(layout.back_width <= rb_blitz::ui::PortraitSplash(aspect).width * .93f);
     CHECK_TRUE(layout.back_top < 240 - 480 * .865f); // below the caption strip
@@ -2006,23 +2013,29 @@ void TestPortraitSplash() {
     CheckStrEq(enter->kids[2].kids[1].text, "set_local_scale");
     const float scale = std::bit_cast<float>(enter->kids[2].kids[2].scalar);
     CHECK_TRUE(scale > 0 && scale < 1);
-    CHECK_EQ(enter->kids.size(), song ? size_t(8) : size_t(20));
+    CHECK_EQ(enter->kids.size(), song ? size_t(8) : size_t(21));
     if (!song) {
       std::map<std::string, std::array<float, 3>> positions, scales;
+      int fit_type = 2; // Retail status.lbl uses ellipsis, which cannot measure its height.
       for (size_t i = 3; i < enter->kids.size(); ++i) {
         const auto& command = enter->kids[i].kids;
+        if (command.size() == 4 && command[0].text == "status.lbl" &&
+            command[1].text == "set" && command[2].text == "fit_type")
+          fit_type = int(command[3].scalar);
         if (command[1].text != "set_local_pos" && command[1].text != "set_local_scale") continue;
         auto& values = command[1].text == "set_local_pos" ? positions[command[0].text] : scales[command[0].text];
         for (size_t axis = 0; axis < 3; ++axis)
           values[axis] = std::bit_cast<float>(command[axis + 2].scalar) * scale;
       }
       const auto& bar = scales.at("progress_bar.grp");
+      CHECK_EQ(fit_type, 0);
       CHECK_TRUE(bar[0] * 256 <= 270 * .4f);
       CHECK_TRUE(bar[2] * 32 > 14);
       CHECK_TRUE(std::abs(positions.at("status.lbl")[2] - rb_blitz::ui::PortraitSplash(.5625f).start_z) < .001f);
       CHECK_TRUE(positions.at("status.lbl")[2] > positions.at("content_percent.lbl")[2]);
       for (float height : {26.f, 52.f, 78.f, 130.f}) {
         bool measured = false;
+        float measured_height = 180; // Initial box height, retained by non-wrap native labels.
         float bar_z = 0;
         const auto eval = [&](auto&& self, const Node& n) -> float {
           if (n.tag == dtb::kFloat) return std::bit_cast<float>(n.scalar);
@@ -2031,8 +2044,11 @@ void TestPortraitSplash() {
           if (op == "do") { for (size_t i = 1; i < n.kids.size(); ++i) self(self, n.kids[i]); return 0; }
           if (op == "+") return self(self, n.kids[1]) + self(self, n.kids[2]);
           if (op == "/") return self(self, n.kids[1]) / self(self, n.kids[2]);
-          if (op == "status.lbl" && n.kids[1].text == "set_height_from_text") measured = true;
-          if (op == "status.lbl" && n.kids[1].text == "get") { CHECK_TRUE(measured); return height; }
+          if (op == "status.lbl" && n.kids[1].text == "set_height_from_text" && fit_type == 0) {
+            measured = true;
+            measured_height = height;
+          }
+          if (op == "status.lbl" && n.kids[1].text == "get") { CHECK_TRUE(measured); return measured_height; }
           if (op == "progress_bar.grp" && n.kids[1].text == "set_local_pos") bar_z = self(self, n.kids[4]) * scale;
           return 0;
         };
@@ -2839,19 +2855,42 @@ int main(int argc, char** argv) {
       CHECK_TRUE(notes.empty());
     }
     BeginCase("portrait payload changes splash buttons, loading layouts and the existing gameplay HUD route");
-    CHECK_EQ(portrait.size(), landscape.size() + 6 + !landscape.contains("ui/gen/game.dtb") +
+    CHECK_EQ(portrait.size(), landscape.size() + 13 + !landscape.contains("ui/gen/game.dtb") +
                                       !landscape.contains("ui/loading/gen/loading.dtb"));
     for (const auto& [path, original] : landscape) {
       CHECK_TRUE(portrait.contains(path));
       if (path != "ui/splash/gen/splash.dtb" && path != "ui/gen/game.dtb" &&
           path != "ui/net/gen/server_connect.dtb" && path != rb_blitz::ui::input_font::kSplashRecord &&
           path != rb_blitz::ui::input_font::kErrorReturnRecord &&
+          path != rb_blitz::ui::input_font::kCalibrationRecord &&
           path != screen::kSceneRecord && path != screen::kPauseSceneRecord &&
           path != "ui/pause/gen/settings_confirmation.milo_xbox" &&
           path != "ui/pause/gen/settings_confirmation_pause.milo_xbox")
         CHECK_TRUE(portrait.at(path) == original);
     }
     CHECK_TRUE(portrait.contains(rb_blitz::ui::input_font::kSplashListRecord));
+    std::vector<uint8_t> portrait_buttons, portrait_welcome;
+    CHECK_TRUE(read(rb_blitz::ui::input_font::kListRecord, &portrait_buttons, &why));
+    CHECK_TRUE(read("ui/calibration/gen/cal_welcome.milo_xbox", &portrait_welcome, &why));
+    BeginCase("portrait calibration and presets preserve validated native scenes at narrow aspects");
+    for (const char* name : {"cal_welcome", "cal_auto", "cal_manual", "cal_quick", "cal_complete", "cal_failed", "controller_config"}) {
+      const std::string path = std::string("ui/") +
+          (std::string_view(name) == "controller_config" ? "controller_config" : "calibration") +
+          "/gen/" + name + ".milo_xbox";
+      CHECK_TRUE(portrait.contains(path));
+      CHECK_TRUE(rb_blitz::ui::PortraitControlsScene(name));
+      CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("", std::string(name) + "_panel"));
+      std::vector<uint8_t> source;
+      CHECK_TRUE(read(path, &source, &why));
+      for (float aspect : {402.f / 874, 9.f / 16, .75f}) {
+        std::vector<uint8_t> fitted;
+        CHECK_TRUE(rb_blitz::ui::input_font::PreparePortraitControls(source, portrait_buttons, portrait_welcome, aspect, &fitted, &why));
+        CHECK_TRUE(fitted != source);
+      }
+      source[0] ^= 1;
+      std::vector<uint8_t> refused;
+      CHECK_FALSE(rb_blitz::ui::input_font::PreparePortraitControls(source, portrait_buttons, portrait_welcome, config.portrait_aspect, &refused, &why));
+    }
     const auto& button_font = portrait.at(rb_blitz::ui::input_font::kPortraitSplashFontRecord);
     CHECK_TRUE(button_font.size() > 0x810 + 0x156102 + 0x29);
     for (size_t material : {size_t(0x155D8A), size_t(0x155EB2), size_t(0x155FDA), size_t(0x156102)})
@@ -2886,23 +2925,59 @@ int main(int argc, char** argv) {
     CHECK_TRUE(landscape.at(screen::kSceneRecord) == original_settings);
     const auto& settings_scene = portrait.at(screen::kSceneRecord);
     CHECK_TRUE(settings_scene.size() > 0x810 + 17455);
-    const auto* settings_data = settings_scene.data() + 0x810;
-    CHECK_EQ(u32(settings_data + 0x27), uint32_t(21));
-    const size_t declaration_size = 8 + 4 + std::string("portrait_back.mesh").size();
-    const size_t member_size = 4 + std::string("portrait_back.mesh").size();
-    CHECK_EQ(u32(settings_data + 0x3EF1 + declaration_size + member_size), uint32_t(1));
-    CHECK_EQ(u32(settings_data + 0x3EF5 + declaration_size + member_size), uint32_t(2)); // Cancel
-    // Source offsets after the removed Select record shift back by 18 bytes.
-    const size_t shift = declaration_size + member_size - 18;
-    CHECK_EQ(std::bit_cast<float>(u32(settings_data + 0x3F90 + shift)), 0.f);
-    CHECK_EQ(u32(settings_data + 0x3F98 + shift), std::bit_cast<uint32_t>(-190.f));
-    CHECK_EQ(std::bit_cast<float>(u32(settings_data + 0x432C + shift)),
-             rb_blitz::ui::PortraitSettings(config.portrait_aspect).content_scale);
-    // The appended background is a sibling of the native hint in options.grp,
-    // not a seventh list entry.
-    const auto mesh_name = std::string("portrait_back.mesh");
-    CHECK_TRUE(std::search(settings_scene.begin(), settings_scene.end(),
-                           mesh_name.begin(), mesh_name.end()) != settings_scene.end());
+    const auto stored_objects = [&](const std::vector<uint8_t>& packed) {
+      const auto* bytes = packed.data() + 0x810;
+      const auto size = packed.size() - 0x810;
+      size_t at = 4;
+      auto string = [&] {
+        const auto length = u32(bytes + at); at += 4;
+        std::string value(reinterpret_cast<const char*>(bytes + at), length);
+        at += length; return value;
+      };
+      string(); string(); at += 9;
+      const auto count = u32(bytes + at); at += 4;
+      std::vector<std::string> names;
+      for (uint32_t i = 0; i < count; ++i) { string(); names.push_back(string()); }
+      std::vector<size_t> markers;
+      for (size_t i = at; i + 4 <= size; ++i)
+        if (u32(bytes + i) == 0xADDEADDE) markers.push_back(i);
+      markers.erase(markers.begin(), markers.end() - count - 1);
+      std::map<std::string, std::vector<uint8_t>> objects;
+      for (size_t i = 0; i < count; ++i)
+        objects[names[i]] = {bytes + markers[i] + 4, bytes + markers[i + 1] + 4};
+      return objects;
+    };
+    auto settings_objects = stored_objects(settings_scene);
+    CHECK_TRUE(settings_objects.contains("portrait_back.mesh"));
+    CHECK_TRUE(settings_objects.contains("portrait_back_border.mesh"));
+    CHECK_EQ(settings_objects.at("portrait_back.mat")[0x29], uint8_t(0));
+    CHECK_EQ(u32(settings_objects.at("InlineHelp.ihp").data() + 9), uint32_t(1));
+    CHECK_EQ(u32(settings_objects.at("InlineHelp.ihp").data() + 13), uint32_t(2));
+    CHECK_EQ(std::bit_cast<float>(u32(settings_objects.at("header.lbl").data() + 0x19)), 1.f);
+    CHECK_EQ(std::bit_cast<float>(u32(settings_objects.at("header.lbl").data() + 0x19 + 44)), 170.f);
+    for (const char* path : {"ui/calibration/gen/cal_welcome.milo_xbox",
+                             "ui/calibration/gen/cal_auto.milo_xbox",
+                             "ui/calibration/gen/cal_manual.milo_xbox",
+                             "ui/calibration/gen/cal_complete.milo_xbox",
+                             "ui/controller_config/gen/controller_config.milo_xbox"}) {
+      auto objects = stored_objects(portrait.at(path));
+      CHECK_TRUE(objects.contains("portrait_back.mesh"));
+      CHECK_TRUE(objects.contains("portrait_confirm.mesh"));
+      CHECK_EQ(objects.at("portrait_back.mat")[0x29], uint8_t(0));
+      CHECK_EQ(objects.at("portrait_confirm.mat")[0x29], uint8_t(0));
+      CHECK_EQ(std::bit_cast<float>(u32(objects.at("header.lbl").data() + 0x19)), 1.f);
+    }
+    const auto welcome = stored_objects(portrait.at("ui/calibration/gen/cal_welcome.milo_xbox"));
+    CHECK_EQ(std::bit_cast<float>(u32(welcome.at("header.lbl").data() + 0x19 + 44)) + 137.f, 170.f);
+    CHECK_EQ(std::bit_cast<float>(u32(welcome.at("cal_mode.lst").data() + 0x19 + 44)) + 137.f, 77.f);
+    CHECK_TRUE(std::bit_cast<float>(u32(welcome.at("cal_mode.lst").data() + 0x19)) ==
+               rb_blitz::ui::PortraitSplash(config.portrait_aspect).list_scale);
+    CHECK_TRUE(std::bit_cast<float>(u32(welcome.at("portrait_back.mesh").data() + 0x15 + 44)) + 137.f == -182.f);
+    const auto presets = stored_objects(portrait.at("ui/controller_config/gen/controller_config.milo_xbox"));
+    CHECK_TRUE(presets.contains("portrait_previous.mesh"));
+    CHECK_TRUE(presets.contains("portrait_next.mesh"));
+    CHECK_TRUE(std::bit_cast<float>(u32(presets.at("arrow_lt.mesh").data() + 0x15)) == 1.2f);
+    CHECK_TRUE(std::bit_cast<float>(u32(presets.at("arrow_rt.mesh").data() + 0x15)) == 1.2f);
     CHECK_TRUE(rb_blitz::ui::PortraitSplashScreen("settings_screen", "settings_panel",
                                                 screen::PanelScene("settings_panel")));
     CHECK_TRUE(art.size() > 0x810);

@@ -18,11 +18,28 @@ regular Pentatonic atlas as Help & Options, with all four variations unlit.
 Loading text is bottom-aligned at the Start prompt's vertical anchor. The
 native loading bar occupies 40% of the portrait width at 18 units high;
 native text-height measurement keeps it six units above the wrapped message
-as status text changes. The percentage fits between the message and footer
+as status text changes. The status label explicitly uses wrap mode: the guest
+height-measurement handler skips ellipsis labels and leaves their box height
+unchanged, which would place the bar far above the visible text.
+The percentage fits between the message and footer
 actions. These authored guest changes
 apply to portrait presentation on every platform; landscape retains its
 existing assets and layout. Windows build and record checks cover the payload;
 in-game appearance and other platforms remain unverified.
+
+Portrait Help & Options uses the main menu's native list directory, matching
+button dimensions, font and row spacing. Its separate Back button is 55% of
+the row width and keeps a full mesh hit target. Touch input removes the Back
+icon; changing input devices refreshes the native hint. Footer surfaces use
+unlit, untextured materials and a subtle border. A private regular font keeps
+their labels the same size as the menu rows. Titles use a separate, larger font
+size at the center of the marquee.
+Calibration's choice list uses the main menu buttons. Its title, rows and footer
+compensate for the welcome directory's 137-unit vertical translation. Wizard
+instructions and countdowns have independent readable sizes. Controller presets
+retain their diagram and callout associations at a larger size; the selector has
+38-unit arrow buttons with matching touch targets. Native selection and
+calibration animation timing remain intact.
 
 Current refresh behavior is described under **At a glance**. Dated R7 sections
 below retain the old persisted-cache and sentinel measurements as history.

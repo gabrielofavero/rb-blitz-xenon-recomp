@@ -471,6 +471,7 @@ bool MenuScreenIs(std::string_view name);
 bool MainMenuMusicInputAvailable();
 // Portrait title/main menu, loading panels, and native confirmation/error prompts.
 bool PortraitSplashActive();
+bool PortraitSettingsActive();
 
 // A live song: the screen is `game_screen` and the focused panel is not the pause panel
 // (the same split `MenuAvailable` uses to let pause take the pad). False on every menu, on

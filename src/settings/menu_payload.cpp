@@ -1759,6 +1759,9 @@ bool AddPortraitLoadingLayout(std::vector<Node>* roots, bool song_loading,
     set("status.lbl", sym("width"), number(layout.text_width));
     set("status.lbl", sym("height"), number(180));
     set("status.lbl", sym("alignment"), Node::Int(0x42)); // bottom center
+    // The retail label uses ellipsis (2). set_height_from_text is a no-op
+    // outside wrap mode (0), leaving the full 180-unit box as the bar offset.
+    set("status.lbl", sym("fit_type"), Node::Int(0));
     set("status.lbl", Node::Array({sym("styles"), Node::Int(0), sym("text_size")}), number(26));
     // The status and footer transform directly under the scene. The count
     // and bar's enumeration parent has a net zero authored translation.
@@ -1893,10 +1896,31 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     return true;
   };
   {
-    std::vector<uint8_t> source;
+    std::vector<uint8_t> source, buttons, welcome;
     if (!read(ui::input_font::kCalibrationRecord, &source, error) ||
-        !ui::input_font::PrepareCalibrationLayout(
-            source, &built[ui::input_font::kCalibrationRecord], error)) return false;
+        (portrait_hud && !read(ui::input_font::kListRecord, &buttons, error)) ||
+        (portrait_hud && !read("ui/calibration/gen/cal_welcome.milo_xbox", &welcome, error)) ||
+        !(portrait_hud ? ui::input_font::PreparePortraitControls(source, buttons, welcome,
+            screen::CurrentMenuConfiguration().portrait_aspect,
+            &built[ui::input_font::kCalibrationRecord], error) :
+          ui::input_font::PrepareCalibrationLayout(
+            source, &built[ui::input_font::kCalibrationRecord], error))) return false;
+  }
+  if (portrait_hud) {
+    std::vector<uint8_t> buttons, welcome;
+    if (!read(ui::input_font::kListRecord, &buttons, error) ||
+        !read("ui/calibration/gen/cal_welcome.milo_xbox", &welcome, error)) return false;
+    for (const char* path : {"ui/calibration/gen/cal_welcome.milo_xbox",
+                            "ui/calibration/gen/cal_manual.milo_xbox",
+                            "ui/calibration/gen/cal_quick.milo_xbox",
+                            "ui/calibration/gen/cal_complete.milo_xbox",
+                            "ui/calibration/gen/cal_failed.milo_xbox",
+                            "ui/controller_config/gen/controller_config.milo_xbox"}) {
+      std::vector<uint8_t> source;
+      if (!read(path, &source, error) ||
+          !ui::input_font::PreparePortraitControls(source, buttons, welcome,
+              screen::CurrentMenuConfiguration().portrait_aspect, &built[path], error)) return false;
+    }
   }
   if (!edit("ui/calibration/gen/calibration.dtb", [&](auto& roots) {
         return FadeCalibrationButtonAfterCountdown(&roots, error);
@@ -2777,6 +2801,10 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
               screen::CurrentMenuConfiguration().portrait_aspect, error);
         })) return false;
     std::vector<uint8_t> source, buttons, scene;
+    if (!read(ui::input_font::kInlineHelpRecord, &source, error) ||
+        !ui::input_font::PreparePortraitActions(source,
+            screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
+    built[ui::input_font::kPortraitActionsRecord] = std::move(scene);
     if (!read(ui::input_font::kAutosaveRecord, &source, error) ||
         !ui::input_font::PreparePortraitAutosave(source,
             screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;

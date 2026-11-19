@@ -57,6 +57,14 @@ bool PreparePortraitPrompt(const std::vector<uint8_t>& source, float aspect,
 bool PreparePortraitSettings(const std::vector<uint8_t>& source,
                              const std::vector<uint8_t>& button_source, float aspect,
                              std::vector<uint8_t>* scene, std::string* error);
+// Fit the native calibration steps and controller diagrams to the portrait surface.
+bool PreparePortraitControls(const std::vector<uint8_t>& source,
+                             const std::vector<uint8_t>& button_source,
+                             const std::vector<uint8_t>& welcome_source, float aspect,
+                             std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitActions(const std::vector<uint8_t>& source, float aspect,
+                            std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kPortraitActionsRecord[] = "ui/resource/inline_help/gen/portrait_actions.milo_xbox";
 // Native bottom action buttons shared by connection prompts and graphics loading.
 bool PreparePortraitConnection(const std::vector<uint8_t>& source,
                                const std::vector<uint8_t>& button_source, float aspect,

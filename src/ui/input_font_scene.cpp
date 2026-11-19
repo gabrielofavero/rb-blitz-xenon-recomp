@@ -506,6 +506,204 @@ void SceneMatrix(std::vector<uint8_t>& out, size_t at, float sx, float sz,
   PutFloat(out.data() + at + 32, sz); PutFloat(out.data() + at + 36, x);
   PutFloat(out.data() + at + 40, y); PutFloat(out.data() + at + 44, z);
 }
+
+// Keep the directory's embedded resources and root record intact while editing
+// its own object table. Group draw membership is independent of transform parents.
+struct PortraitScene {
+  std::vector<uint8_t> header, directory;
+  std::vector<PortraitObject> objects;
+  std::string root;
+  float root_z = 0;
+  size_t info = 0;
+  explicit PortraitScene(const std::vector<uint8_t>& bytes) {
+    size_t at = 4;
+    auto string = [&] {
+      const auto size = Be32(bytes.data() + at); at += 4;
+      std::string value(reinterpret_cast<const char*>(bytes.data() + at), size);
+      at += size; return value;
+    };
+    string(); root = string(); info = at;
+    at += 9;
+    const auto count = Be32(bytes.data() + at); at += 4;
+    header.assign(bytes.begin(), bytes.begin() + at);
+    for (uint32_t i = 0; i < count; ++i) {
+      auto type = string(), name = string();
+      objects.push_back({std::move(type), std::move(name), {}});
+    }
+    std::vector<size_t> markers;
+    for (size_t i = at; i + 4 <= bytes.size(); ++i)
+      if (Be32(bytes.data() + i) == 0xADDEADDE) markers.push_back(i);
+    markers.erase(markers.begin(), markers.end() - count - 1);
+    directory.assign(bytes.begin() + at, bytes.begin() + markers.front() + 4);
+    for (size_t i = 0; i < count; ++i)
+      objects[i].data.assign(bytes.begin() + markers[i] + 4,
+                             bytes.begin() + markers[i + 1] + 4);
+  }
+  PortraitObject* Find(std::string_view name) {
+    for (auto& object : objects) if (object.name == name) return &object;
+    return nullptr;
+  }
+  void Before(std::string_view member, const std::vector<std::string>& names) {
+    for (auto& object : objects) {
+      if (object.type != "Group") continue;
+      auto& data = object.data;
+      // RndGroup's drawable vector follows its transform and drawable fields.
+      const auto parent = Be32(data.data() + 0x8A);
+      size_t at = 0x8E + parent + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 4;
+      if (at + 4 > data.size()) continue;
+      const auto count = Be32(data.data() + at); const auto count_at = at; at += 4;
+      for (uint32_t i = 0; i < count && at + 4 <= data.size(); ++i) {
+        const auto size = Be32(data.data() + at);
+        if (at + 4 + size > data.size()) break;
+        if (std::string_view(reinterpret_cast<const char*>(data.data() + at + 4), size) == member) {
+          std::vector<uint8_t> added;
+          for (const auto& name : names) SceneString(added, name);
+          PutBe32(data.data() + count_at, count + uint32_t(names.size()));
+          data.insert(data.begin() + at, added.begin(), added.end());
+          return;
+        }
+        at += 4 + size;
+      }
+    }
+  }
+  std::vector<uint8_t> Build() const {
+    auto result = header;
+    const auto old_count = Be32(result.data() + info + 9);
+    uint32_t name_bytes = 0;
+    for (const auto& object : objects) {
+      SceneString(result, object.type); SceneString(result, object.name);
+      name_bytes += uint32_t(object.name.size() + 1);
+    }
+    PutBe32(result.data() + info, Be32(header.data() + info) +
+             2 * (uint32_t(objects.size()) - old_count));
+    PutBe32(result.data() + info + 4, name_bytes + uint32_t(root.size() + 1));
+    PutBe32(result.data() + info + 9, uint32_t(objects.size()));
+    result.insert(result.end(), directory.begin(), directory.end());
+    for (const auto& object : objects) result.insert(result.end(), object.data.begin(), object.data.end());
+    return result;
+  }
+};
+
+size_t PortraitMatrix(const PortraitObject& object) {
+  if (object.type == "Group") return 0x21;
+  if (object.type == "UISlider") return 0x20;
+  if (object.type == "UILabel" || object.type == "UIList") return 0x19;
+  if (object.type == "Mesh") return 0x15;
+  if (object.type == "InlineHelp") {
+    for (size_t i = 9; i + 113 <= object.data.size(); ++i)
+      if (Be32(object.data.data() + i) == 9) return i + 4;
+  }
+  return 0;
+}
+
+void PortraitParent(PortraitObject& object, std::string_view parent) {
+  const auto at = PortraitMatrix(object) + 105;
+  const auto size = Be32(object.data.data() + at);
+  object.data.erase(object.data.begin() + at + 4, object.data.begin() + at + 4 + size);
+  object.data.insert(object.data.begin() + at + 4, parent.begin(), parent.end());
+  PutBe32(object.data.data() + at, uint32_t(parent.size()));
+}
+
+void PortraitPose(PortraitObject& object, float scale, float x, float z,
+                  std::string_view parent = {}) {
+  const auto matrix = PortraitMatrix(object);
+  for (size_t at : {matrix, matrix + 48}) SceneMatrix(object.data, at, scale, scale, x, 0, z);
+  PortraitParent(object, parent);
+}
+
+void PortraitText(PortraitObject& object, float size, float width, uint32_t alignment = 0x22) {
+  auto& data = object.data;
+  constexpr std::string_view prefix = "../";
+  const auto font = std::search(data.begin(), data.end(), prefix.begin(), prefix.end());
+  if (font == data.end()) return;
+  const size_t at = size_t(font - data.begin()) - 4;
+  const auto end = at + 4 + Be32(data.data() + at);
+  const auto variation = Be32(data.data() + end);
+  PutFloat(data.data() + end + 4 + variation, size);
+  if (alignment != UINT32_MAX) PutBe32(data.data() + at - 33, alignment);
+  if (width >= 0) PutFloat(data.data() + at - 29, width);
+}
+
+void PortraitTitle(PortraitScene& scene, float aspect) {
+  if (auto* title = scene.Find("header.lbl")) {
+    PortraitPose(*title, 1, 0, 170 - scene.root_z);
+    PortraitText(*title, 22, ui::PortraitSplash(aspect).width * .94f);
+    // Drawable::showing follows the transform's parent and revision.
+    title->data[PortraitMatrix(*title) + 113] = 1;
+  }
+}
+
+void PortraitSurface(PortraitScene& scene, const std::vector<uint8_t>& buttons,
+                     std::string name, float width, float height, float x, float z,
+                     std::string_view before) {
+  std::vector<std::string> members;
+  for (bool border : {true, false}) {
+    const auto stem = name + (border ? "_border" : "");
+    auto material = std::vector<uint8_t>(buttons.begin() + 0x15A78, buttons.begin() + 0x15B81);
+    SceneColor(material, 0x19, border ? .90f : .063f, border ? .85f : .051f,
+               border ? .95f : .11f, border ? .19f : .80f);
+    material[0x29] = 0; // Unlit, untextured native surface.
+    auto mesh = std::vector<uint8_t>(buttons.begin() + 91238, buttons.begin() + 91635);
+    const float w = width + (border ? 1.4f : 0), h = height + (border ? 1.4f : 0);
+    for (size_t matrix : {size_t(0x15), size_t(0x45)}) {
+      PutFloat(mesh.data() + matrix, w / 300);
+      PutFloat(mesh.data() + matrix + 20, h / 30);
+      PutFloat(mesh.data() + matrix + 36, x - w / 2);
+      PutFloat(mesh.data() + matrix + 40, border ? .2f : .1f);
+      PutFloat(mesh.data() + matrix + 44, z + h / 2 - scene.root_z);
+    }
+    RenameSceneString(mesh, "options_menu.grp", "");
+    RenameSceneString(mesh, "slot.mat", stem + ".mat");
+    RenameSceneString(mesh, "slot.mesh", stem + ".mesh");
+    members.push_back(stem + ".mesh");
+    scene.objects.push_back({"Mat", stem + ".mat", std::move(material)});
+    scene.objects.push_back({"Mesh", stem + ".mesh", std::move(mesh)});
+  }
+  scene.Before(before, members);
+}
+
+void PortraitFooter(PortraitScene& scene, const std::vector<uint8_t>& buttons,
+                    float aspect, bool back_only = false, bool confirm_only = false) {
+  auto original = std::find_if(scene.objects.begin(), scene.objects.end(),
+      [](const auto& object) { return object.type == "InlineHelp"; });
+  if (original == scene.objects.end()) return;
+  const auto base = *original;
+  size_t at = 13;
+  std::vector<std::vector<uint8_t>> entries;
+  for (uint32_t i = 0; i < Be32(base.data.data() + 9); ++i) {
+    const auto begin = at;
+    at += 8 + Be32(base.data.data() + at + 4) + 4;
+    entries.emplace_back(base.data.begin() + begin, base.data.begin() + at);
+  }
+  const auto tail = std::vector<uint8_t>(base.data.begin() + at, base.data.end());
+  const float row_width = 364.5f * ui::PortraitSplash(aspect).list_scale;
+  const float width = back_only || confirm_only ? row_width * .55f : (row_width - 10) / 2;
+  bool first = true;
+  for (const auto& entry : entries) {
+    const bool back = Be32(entry.data()) == 2;
+    if (back_only && !back) continue;
+    if (confirm_only && back) continue;
+    PortraitObject hint{"InlineHelp", first ? base.name : "portrait_back.ihp",
+                        {base.data.begin(), base.data.begin() + 13}};
+    PutBe32(hint.data.data() + 9, 1);
+    hint.data.insert(hint.data.end(), entry.begin(), entry.end());
+    hint.data.insert(hint.data.end(), tail.begin(), tail.end());
+    const float x = back_only || confirm_only ? 0 : (back ? 1 : -1) * (width + 10) / 2;
+    PortraitPose(hint, 1, x, -197 - scene.root_z);
+    RenameSceneString(hint.data, "../resource/inline_help/default.milo",
+                      "../resource/inline_help/portrait_actions.milo");
+    if (confirm_only) RenameSceneString(hint.data, "select", "rbbz_loading_retry");
+    const auto name = hint.name;
+    if (first) *scene.Find(base.name) = std::move(hint);
+    else {
+      scene.objects.push_back(std::move(hint));
+      scene.Before(base.name, {name});
+    }
+    PortraitSurface(scene, buttons, back ? "portrait_back" : "portrait_confirm",
+                    width, 30, x, -197, name);
+    first = false;
+  }
+}
 }  // namespace
 
 bool PreparePortraitStartupLogo(const std::vector<uint8_t>& source,
@@ -580,48 +778,130 @@ bool PreparePortraitSettings(const std::vector<uint8_t>& source,
     return Fail(error, "portrait settings source revision changed");
   if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
     return Fail(error, "portrait settings button template revision changed");
-  const auto layout = ui::PortraitSettings(aspect);
-  // Keep the cropped marquee/backdrop at its authored size. Uniformly fit
-  // only the title and six-row list, retaining the original vertical anchors.
-  for (size_t matrix : {size_t(0x41EC), size_t(0x421C), size_t(0x432C), size_t(0x435C)})
-    for (size_t axis : {size_t(0), size_t(16), size_t(32)})
-      PutFloat(bytes.data() + matrix + axis, layout.content_scale);
+  PortraitScene edited(bytes);
+  PortraitTitle(edited, aspect);
+  PortraitPose(*edited.Find("options.lst"), ui::PortraitSplash(aspect).list_scale, 0, 77);
+  RenameSceneString(edited.Find("options.lst")->data, "../resource/lists/list_options_main.milo",
+                    "../resource/lists/list_splash.milo");
+  PortraitFooter(edited, buttons, aspect, true);
+  return PackStored(edited.Build(), scene, error);
+}
 
-  // InlineHelp's first entry is Select; its second is the native Cancel/Back
-  // action. Keep Back alone and center it inside the bottom button. The normal
-  // input hint formatter still supplies the current device's icon and locale.
-  for (size_t matrix : {size_t(0x3F6C), size_t(0x3F9C)})
-    SceneMatrix(bytes, matrix, 1, 1, 0, 0, -190);
-  PutBe32(bytes.data() + 0x3EF1, 1);
+bool PreparePortraitActions(const std::vector<uint8_t>& source, float aspect,
+                            std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> hinted, bytes;
+  if (!PrepareInlineHelp(source, &hinted, error) || !DecodeStream(hinted, &bytes, error)) return false;
+  PortraitScene edited(bytes);
+  auto* text = edited.Find("text.lbl");
+  PortraitText(*text, 27.5f * ui::PortraitSplash(aspect).list_scale, 150);
+  RenameSceneString(text->data, "../fonts/pentatonic_regularcond.milo", "../fonts/portrait_splash.milo");
+  return PackStored(edited.Build(), scene, error);
+}
 
-  // Derive the button from the installed options slot, including its packed
-  // vertex format and valid face trailer. Its material already lives in this
-  // scene; the list's own materials and selection behavior remain independent.
-  std::vector<uint8_t> mesh(buttons.begin() + 91238, buttons.begin() + 91635);
-  for (size_t matrix : {size_t(0x15), size_t(0x45)}) {
-    PutFloat(mesh.data() + matrix, layout.back_width / 300.f);
-    PutFloat(mesh.data() + matrix + 36, -layout.back_width / 2);
-    PutFloat(mesh.data() + matrix + 44, layout.back_top);
+bool PreparePortraitControls(const std::vector<uint8_t>& source,
+                             const std::vector<uint8_t>& button_source,
+                             const std::vector<uint8_t>& welcome_source, float aspect,
+                             std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error, 3 * 1024 * 1024) ||
+      !DecodeStream(button_source, &buttons, error)) return false;
+  const auto crc = Crc32(bytes.data(), bytes.size());
+  if (crc != 0xDB1E96A0 && crc != 0x375728BA && crc != 0xDBAD7872 &&
+      crc != 0x61CF95FD && crc != 0x06D6D651 && crc != 0x75394D35 &&
+      crc != 0xF522F89D)
+    return Fail(error, "portrait controls source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait controls button template revision changed");
+  const float width = ui::PortraitSplash(aspect).width;
+  const bool presets = crc == 0xF522F89D;
+  const bool welcome = crc == 0xDB1E96A0;
+  if (crc == 0x375728BA)
+    for (size_t offset : {size_t(0x325E44), size_t(0x325E74)})
+      PutFloat(bytes.data() + offset,
+               std::bit_cast<float>(Be32(bytes.data() + offset)) + 29.613494f);
+  PortraitScene edited(bytes);
+  // Body transforms remain separate from the fixed title and footer. Root
+  // scaling is only the fallback for native calibration art, not menu controls.
+  const float scale = std::min(width * (presets ? .94f / 540.f : .90f / 600.f), 1.f);
+  // The welcome directory translates all its children, including detached
+  // labels, by 137 units. Keep its lighting/backdrop and compensate content.
+  if (welcome) edited.root_z = 137;
+  for (auto& object : edited.objects) {
+    const auto matrix = PortraitMatrix(object);
+    if (!matrix || object.type == "InlineHelp" || object.name == "header.lbl") continue;
+    const auto parent_at = matrix + 105;
+    const auto parent_size = Be32(object.data.data() + parent_at);
+    if (parent_at + 4 + parent_size > object.data.size())
+      return Fail(error, "portrait controls transform parent changed");
+    const std::string_view parent(reinterpret_cast<const char*>(object.data.data() + parent_at + 4), parent_size);
+    if (parent.empty() || parent == edited.root) {
+      for (size_t m : {matrix, matrix + 48})
+        for (size_t field : {size_t(0), size_t(4), size_t(8), size_t(24), size_t(28),
+                             size_t(32), size_t(36), size_t(44)})
+          PutFloat(object.data.data() + m + field,
+                   std::bit_cast<float>(Be32(object.data.data() + m + field)) * scale);
+      for (size_t m : {matrix, matrix + 48})
+        PutFloat(object.data.data() + m + 44,
+                 std::bit_cast<float>(Be32(object.data.data() + m + 44)) + edited.root_z * (scale - 1));
+    }
   }
-  RenameSceneString(mesh, "options_menu.grp", "options.grp");
-  RenameSceneString(mesh, "slot.mesh", "portrait_back.mesh");
-  SceneColor(bytes, 0x3A57 + 0x19, .063f, .051f, .11f, .8f);
-  bytes.insert(bytes.end(), mesh.begin(), mesh.end());
-
-  // Apply variable-length edits from the end so every measured source offset
-  // above remains valid. Draw the background before the InlineHelp text.
-  bytes.erase(bytes.begin() + 0x3EF5, bytes.begin() + 0x3F07);
-  PutBe32(bytes.data() + 0x3CF5, 5);
-  std::vector<uint8_t> member;
-  SceneString(member, "portrait_back.mesh");
-  bytes.insert(bytes.begin() + 0x3D08, member.begin(), member.end());
-  std::vector<uint8_t> declaration;
-  SceneString(declaration, "Mesh"); SceneString(declaration, "portrait_back.mesh");
-  bytes.insert(bytes.begin() + 0x2AF, declaration.begin(), declaration.end());
-  PutBe32(bytes.data() + 0x1E, 44);
-  PutBe32(bytes.data() + 0x22, 390 + 19); // name table includes each terminating NUL
-  PutBe32(bytes.data() + 0x27, 21);
-  return PackStored(bytes, scene, error);
+  if (crc == 0x61CF95FD || crc == 0x75394D35) {
+    std::vector<uint8_t> common;
+    if (!DecodeStream(welcome_source, &common, error) ||
+        Crc32(common.data(), common.size()) != 0xDB1E96A0)
+      return Fail(error, "portrait calibration chrome source revision changed");
+    PortraitScene chrome(common);
+    edited.objects.push_back(*chrome.Find("header.lbl"));
+    edited.objects.push_back(*chrome.Find("InlineHelp.ihp"));
+  }
+  PortraitTitle(edited, aspect);
+  if (crc == 0x375728BA) {
+    RenameSceneString(edited.Find("header.lbl")->data, "audio_video_options", "cal_welcome_title");
+    struct Label { const char* name; float z, size; };
+    for (const auto& label : {Label{"audio_title.lbl", 117, 16}, {"video_title.lbl", 117, 16},
+                              {"cal_audio_instructions.lbl", 82, 13.5f},
+                              {"cal_video_instructions.lbl", 82, 13.5f},
+                              {"cal_countdown.lbl", 0, 40}, {"cal_instructions.lbl", -112, 14},
+                              {"cal_reps.lbl", -82, 13}, {"cal_setting.lbl", -145, 13}}) {
+      auto* object = edited.Find(label.name);
+      if (!object) continue;
+      PortraitPose(*object, 1, 0, label.z);
+      PortraitText(*object, label.size, width * .84f);
+    }
+  }
+  if (welcome) {
+    auto* list = edited.Find("cal_mode.lst");
+    PortraitPose(*list, ui::PortraitSplash(aspect).list_scale, 0, 77 - edited.root_z);
+    RenameSceneString(list->data, "../resource/lists/list_calibration_mode.milo",
+                      "../resource/lists/list_splash.milo");
+    // The secondary title duplicates the marquee's localized heading.
+    auto* secondary = edited.Find("title.lbl");
+    PortraitParent(*secondary, "");
+    secondary->data[PortraitMatrix(*secondary) + 113] = 0;
+  }
+  if (presets) {
+    // Fit the complete controller diagram and its preset-specific callouts as
+    // one unit. Their leader lines must continue identifying the right controls.
+    for (auto& object : edited.objects) {
+      if (object.type != "UILabel" || object.name == "header.lbl") continue;
+      if (object.name == "IndexNum.lbl") {
+        PortraitPose(object, 1, 0, 110);
+        PortraitText(object, 16, width * .50f);
+      } else {
+        PortraitText(object, 18, -1, UINT32_MAX);
+      }
+    }
+    const float x = width * .36f;
+    for (const char* name : {"arrow_lt.mesh", "arrow_lt_glow.mesh", "arrow_rt.mesh", "arrow_rt_glow.mesh"}) {
+      auto* arrow = edited.Find(name);
+      const float side = std::string_view(name).find("_lt") != std::string_view::npos ? -1 : 1;
+      PortraitPose(*arrow, 1.2f, side * x, 110);
+    }
+    PortraitSurface(edited, buttons, "portrait_previous", 38, 38, -x, 110, "arrow_lt.mesh");
+    PortraitSurface(edited, buttons, "portrait_next", 38, 38, x, 110, "arrow_rt.mesh");
+  }
+  PortraitFooter(edited, buttons, aspect, crc == 0x61CF95FD, crc == 0x75394D35);
+  return PackStored(edited.Build(), scene, error);
 }
 
 bool PreparePortraitConnection(const std::vector<uint8_t>& source,
