@@ -570,7 +570,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
       const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings().platform);
       const auto profile_pixels = mobile
           ? ScaledProfileResolution(native, service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
-          : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text, native);
+          : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text,
+                              service_->ResolutionProfileDisplay());
       const auto profile_plan = ProfileGuestFrame(profile_pixels, profile_draw_scale_);
       if (profile_plan.supported) plan = profile_plan;
       else profile_draw_scale_ = 0;
@@ -595,6 +596,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     for (const SettingId id : {SettingId::kRenderer, SettingId::kResolution,
                                SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
                                SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale,
+                               SettingId::kForce16By9,
                                SettingId::kOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
                                SettingId::kAntiAliasing, SettingId::kFiltering}) {
       wanted[id] = service_->RequestedValue(id);
@@ -614,7 +616,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     safe_values[SettingId::kOrientation] = safe_orientation;
     safe_values[SettingId::kAspectRatio] = safe_aspect;
     safe_values[SettingId::kRenderScale] = safe_scale;
-    AddSafeResolutionProfiles(safe_values, capability_snapshot_.primary_display_size);
+    AddSafeResolutionProfiles(safe_values, service_->ResolutionProfileDisplay());
     auto selected = graphics_boot_.Select(wanted, attempt, safe_values, forced_safe);
     if (graphics_boot_.retrying()) {
       diagnostics_.push_back(
@@ -622,7 +624,13 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     }
     if (graphics_boot_.recovered() || forced_safe) {
       ApplyReleaseGraphicsRules(selected, schema::CurrentReleaseSettings());
+      if (const auto force = selected.find(SettingId::kForce16By9); force != selected.end())
+        service_->SetBootValues({{force->first, force->second}},
+                               "settings.graphics.recovered_from_failure");
       for (auto& [id, value] : selected) {
+        if (id == SettingId::kInterfaceResolution || id == SettingId::kGameplayResolution)
+          value.text = ReconcileProfileResolutionToken(value.text,
+              service_->DescriptorFor(id)->choices);
         if (id != SettingId::kResolution)
           value = reconciler_.Reconcile(id, *service_->DescriptorFor(id), value, capability_snapshot_).effective;
       }
@@ -633,7 +641,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
         const auto native = capability_snapshot_.primary_display_size;
         const auto pixels = mobile
             ? ScaledProfileResolution(native, selected.at(SettingId::kInterfaceRenderScale).integer)
-            : ProfileResolution(selected.at(SettingId::kInterfaceResolution).text, native);
+            : ProfileResolution(selected.at(SettingId::kInterfaceResolution).text,
+                                service_->ResolutionProfileDisplay());
         const auto recovered = ProfileGuestFrame(pixels, profile_draw_scale_);
         if (recovered.supported) {
           auto& value = selected[SettingId::kResolution];
@@ -1169,7 +1178,8 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
       const auto native = capability_snapshot_.primary_display_size;
       const auto pixels = schema::IsMobile(schema::CurrentReleaseSettings().platform)
           ? ScaledProfileResolution(native, service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
-          : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text, native);
+          : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text,
+                              service_->ResolutionProfileDisplay());
       screen_plan_ = ProfileGuestFrame(pixels, profile_draw_scale_);
     }
     overrides_.erase(SettingId::kResolution);
@@ -1240,7 +1250,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
       for (const auto id : {SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
                             SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale})
         profiles[id] = service_->EffectiveValue(id);
-      ConfigureResolutionProfiles(capability_snapshot_.primary_display_size, screen_plan_.draw_scale,
+      ConfigureResolutionProfiles(service_->ResolutionProfileDisplay(), screen_plan_.draw_scale,
           schema::IsMobile(schema::CurrentReleaseSettings().platform), profiles);
       WriteRuntimeSetting("gpu.xenos.present_source_aspect", "true", rex::SettingLayer::kTitle);
       WriteRuntimeSetting("gpu.xenos.clear_caches_on_present_resize", "true", rex::SettingLayer::kTitle);
@@ -1269,6 +1279,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     for (const auto id : {SettingId::kRenderer, SettingId::kResolution,
                           SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
                           SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale,
+                          SettingId::kForce16By9,
                           SettingId::kOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
                           SettingId::kAntiAliasing, SettingId::kFiltering})
       effective[id] = service_->EffectiveValue(id);
@@ -1277,13 +1288,23 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
         !graphics_boot_.Begin(effective, &error))
       REXLOG_WARN("settings_boot: {}", error);
   }
+}
+
+void SettingsBoot::BeginStartupShaderCompilation() {
+  // The graphics plugin registers Xenos settings after OnSettingsLoaded.
+  // Apply this only once that plugin is loaded, before the guest can draw.
   // Async pipeline creation can skip the title's first logo/title draws while
   // their PSOs are pending, presenting only the guest clear (blue on D3D12,
-  // black on Vulkan). Keep startup draws synchronous, then restore the user's
-  // setting at the first usable menu. Four owner-tested routes rendered without
-  // the blank interval with this cvar disabled.
-  if (InspectRuntimeSetting("async_shader_compilation").active_value == "true") {
-    if (WriteRuntimeSetting("async_shader_compilation", "false", rex::SettingLayer::kRuntime).accepted()) {
+  // black on Vulkan). Keep startup draws synchronous, then restore the prior
+  // setting at the first usable menu.
+  const auto setting = InspectRuntimeSetting("async_shader_compilation");
+  if (!setting.registered) {
+    REXLOG_WARN("settings_boot: startup shader setting is not registered");
+    return;
+  }
+  if (setting.active_value == "true") {
+    if (WriteRuntimeSetting("async_shader_compilation", "false", rex::SettingLayer::kRuntime).accepted() &&
+        InspectRuntimeSetting("async_shader_compilation").active_value == "false") {
       restore_async_shader_compilation_ = true;
       REXLOG_INFO("settings_boot: shader compilation is synchronous during startup");
     } else {

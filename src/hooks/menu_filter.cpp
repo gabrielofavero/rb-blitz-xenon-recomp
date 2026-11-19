@@ -651,6 +651,7 @@ void Configure(bool settings_restart_boot) {
 }
 
 const std::vector<std::string>& HiddenRows() { return g_settings.rows; }
+bool SkipOfflinePromptsEnabled() { return g_settings.skip_offline_prompts; }
 
 void PublishRuntimeVisibility(RuntimeVisibility visibility) {
   std::unique_lock lock(g_runtime_visibility_mutex);

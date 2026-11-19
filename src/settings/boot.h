@@ -96,8 +96,11 @@ class SettingsBoot {
   // --- 2. OnPostInitLogging ---------------------------------------------------------------
   void LogConfigured() const;
 
-  // OnPreSetup, after the plugin registers its flags and before SetupPresentation/Runtime::Setup.
+  // OnSettingsLoaded, before native driver plugins register their settings.
   void BeforeGraphicsSetup(const std::string& active_renderer);
+
+  // OnInit, after the graphics plugin registers Xenos settings and before guest launch.
+  void BeginStartupShaderCompilation();
 
   // --- 3. OnPostLoadXexImage (after ultimate::Configure) ----------------------------------
   // `active_renderer` is the backend token this boot selected ("d3d12" / "vulkan" / empty when

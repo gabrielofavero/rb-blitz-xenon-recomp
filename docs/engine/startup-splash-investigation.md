@@ -1,5 +1,36 @@
 # Startup splash investigation (2026-11-07)
 
+## Plugin registration and packed connection records (2026-11-18)
+
+The 677-frame, 30 fps recording shows Harmonix only on frame 337 (11.233 s),
+then Ultimate Mods on frames 338–486. The first autosave frame, 488 (16.267 s),
+is incomplete; frame 489 has a blue strip on its left edge. The autosave screen
+is otherwise stable through frame 642. All frames were decoded and inspected.
+
+The corresponding boot log, `rb_blitz_006.log`, reports
+`async_shader_compilation=true` before guest launch and no synchronous-startup
+marker. The SDK's `OnSettingsLoaded` callback now runs before graphics driver
+plugins register their Xenos settings. The safeguard previously ran in that
+callback and skipped its write because the setting did not exist yet. It now
+runs from `OnInit`, after plugin registration and before guest launch, and checks
+the active value after writing it. Restoration still occurs at the usable menu;
+an explicit false preference remains false.
+
+The same log shows that the generated connection record spans two archive reads.
+Its offline-prompt edit reaches into the already copied first read and cannot
+be delivered. The payload builder now applies the resolved offline policy to
+the complete generated record before packing it. Fast startup and settings
+restart overrides use the same policy. The existing graphics preparation gate
+remains the offline continuation, so skipping connection prompts still waits
+for graphics preparation.
+
+Both changes are shared title code for retail and Ultimate on all supported
+platforms and graphics backends; no SDK patches or defaults change. Windows
+release build and six focused CTests pass. The packed-record regression checks
+pass against both installed data routes (119 checks each), with offline skipping
+enabled and disabled in landscape and portrait layouts. Visible startup acceptance
+and Linux, macOS, and iOS validation remain outstanding.
+
 ## Expected routes and observed failure
 
 Normal startup should show the Harmonix logo on the retail route and the Ultimate

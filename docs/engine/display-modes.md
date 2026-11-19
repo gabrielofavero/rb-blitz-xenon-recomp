@@ -19,6 +19,23 @@ Resolution profiles also update render targets and presentation aspect at guest
 frame boundaries. See [the current profile route](../settings/graphics.md#interface-and-gameplay-profiles-2026-11-18).
 Native resize and mode-preview visual acceptance remain unverified.
 
+The [transition integrity follow-up](../plans/finished/2026-11-18-resolution-transition-integrity.md)
+moves replacement ahead of native tile capture. A recorded transition and
+`rb_blitz_007.log` exposed old resolve rectangles applied to a smaller new
+surface. Pause and native song confirmations now retain Gameplay resolution;
+only entering Help & Options uses Interface during a paused song. These
+corrections still require owner visual acceptance on the rebuilt game.
+
+The subsequent [native-aspect policy](../plans/finished/2026-11-18-native-aspect-resolution-policy.md)
+keeps scene proportions fixed for the session. Resolution lists use native
+proportions by default; Force 16:9 changes both lists after restarting. Live
+quality changes preserve the window size and current aspect. The earlier
+camera refresh hooks are retired, since the next run still reported unchanged
+proportions. Before releasing old textures, replacement now refreshes native
+RndTex wrappers and all matching sampler bindings to avoid dangling pointers.
+The loading crash dump records corrupted UIColor teardown; attributing that
+specific corruption to a particular writer remains unproven.
+
 
 Investigation, 2026-10-25, following a report of lasting performance loss after
 opening Windows screen capture in Borderless mode.

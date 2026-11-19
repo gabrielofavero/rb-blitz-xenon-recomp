@@ -30,6 +30,7 @@
 #include "settings/service.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -1088,10 +1089,43 @@ void TestProfileResolveTextures() {
   }
 }
 
+void TestProfileTextureUsers() {
+  BeginCase("profile replacement rebinds scene wrappers and all native sampler slots before release");
+  const std::array<uint32_t, 5> old{0xA0001000, 0xA0002000, 0xA0003000, 0xA0004000, 0xA0005000};
+  const std::array<uint32_t, 5> fresh{0xA1001000, 0xA1002000, 0xA1003000, 0xA1004000, 0xA1005000};
+  const std::array<uint32_t, 3> wrappers{100, 200, 300};
+  std::map<uint32_t, uint32_t> wrapped{{100,old[0]}, {200,old[1]}, {300,old[4]}};
+  std::array<uint32_t, 26> samplers{};
+  samplers[0] = old[0]; samplers[1] = old[1]; samplers[2] = old[2];
+  samplers[3] = old[3]; samplers[16] = old[4]; samplers[25] = old[0];
+  samplers[7] = 0xB0001000;
+  int rebound = 0, visited = 0;
+  RebindProfileTextureUsers(old, fresh, wrappers,
+      [&](uint32_t stage) { ++visited; return samplers[stage]; },
+      [&](uint32_t stage, uint32_t texture) { samplers[stage] = texture; ++rebound; },
+      [&](uint32_t wrapper, uint32_t texture) { wrapped[wrapper] = texture; });
+  CHECK_EQ(visited, 26); CHECK_EQ(rebound, 6);
+  CHECK_EQ(samplers[0], fresh[0]); CHECK_EQ(samplers[1], fresh[1]);
+  CHECK_EQ(samplers[2], fresh[2]); CHECK_EQ(samplers[3], fresh[3]);
+  CHECK_EQ(samplers[16], fresh[4]); CHECK_EQ(samplers[25], fresh[0]);
+  CHECK_EQ(samplers[7], 0xB0001000u); CHECK_EQ(samplers[8], 0u);
+  CHECK_EQ(wrapped.at(100), fresh[0]); CHECK_EQ(wrapped.at(200), fresh[1]);
+  CHECK_EQ(wrapped.at(300), fresh[4]);
+  for (auto retired : old) {
+    CHECK_TRUE(std::find(samplers.begin(), samplers.end(), retired) == samplers.end());
+    for (const auto& [wrapper, texture] : wrapped) CHECK_TRUE(texture != retired);
+  }
+  BeginCase("profile replacement tolerates absent wrappers and preserves unrelated bindings");
+  RebindProfileTextureUsers(old, fresh, {0,0,0},
+      [&](uint32_t stage) { return samplers[stage]; },
+      [&](uint32_t, uint32_t) { CHECK_TRUE(false); },
+      [&](uint32_t, uint32_t) { CHECK_TRUE(false); });
+}
+
 void TestSafeResolutionProfiles() {
   BeginCase("graphics recovery: both contexts use safe profiles without replacing unrelated choices");
   for (const auto& [native, expected] : std::initializer_list<std::pair<DisplayMode, const char*>>{
-       {{2560, 1080}, "1280x720"}, {{1280, 720}, "native"}, {{1024, 600}, "native"}}) {
+       {{2560, 1080}, "1707x720"}, {{1280, 720}, "native"}, {{1024, 600}, "native"}}) {
     std::map<SettingId, Value> safe{{SettingId::kFiltering, EnumV("4x")},
                                    {SettingId::kInterfaceResolution, EnumV("native")},
                                    {SettingId::kGameplayResolution, EnumV("native")}};
@@ -1105,13 +1139,13 @@ void TestSafeResolutionProfiles() {
 }
 
 void TestProfileResolutionChoices() {
-  BeginCase("desktop profiles offer native and lower native-aspect and 16:9 sizes");
+  BeginCase("desktop profiles keep one aspect across all quality tiers");
   for (const auto& [native, expected] :
        std::initializer_list<std::pair<DisplayMode, const char*>>{
-         {{2560, 1080}, "native,1920x1080,2133x900,1600x900,1707x720,1280x720"},
-         {{3440, 1440}, "native,2560x1440,2580x1080,1920x1080,2150x900,1600x900,1720x720,1280x720"},
-         {{1920, 1200}, "native,1920x1080,1728x1080,1600x900,1440x900,1280x720,1152x720"},
-         {{1600, 1200}, "native,1440x1080,1600x900,1200x900,1280x720,960x720"},
+         {{2560, 1080}, "native,2133x900,1707x720"},
+         {{3440, 1440}, "native,2580x1080,2150x900,1720x720"},
+         {{1920, 1200}, "native,1728x1080,1440x900,1152x720"},
+         {{1600, 1200}, "native,1440x1080,1200x900,960x720"},
          {{1920, 1080}, "native,1600x900,1280x720"},
          {{1280, 720}, "native"}, {{1024, 600}, "native"}}) {
     const auto choices = ProfileResolutionChoices(native);
@@ -1130,6 +1164,8 @@ void TestProfileResolutionChoices() {
                  (size.height == previous.height && size.width < previous.width));
       CHECK_FALSE(IsSize(size, native.width, native.height));
       CHECK_TRUE(choices[i].label == ResolutionToken(size));
+      CHECK_TRUE(std::abs(int64_t(size.width) * native.height -
+                          int64_t(size.height) * native.width) <= native.height / 2);
       previous = size;
     }
     CHECK_TRUE(tokens == expected);
@@ -1142,17 +1178,57 @@ void TestProfileResolutionChoices() {
   }
 }
 
+void TestProfileAspectService() {
+  BeginCase("graphics reconciler retains saved quality while the aspect policy converts width");
+  Service service({});
+  service.Boot(nullptr, PathEntry{}, nullptr);
+  CapabilitySnapshot caps;
+  caps.primary_display_size = {2560,1080};
+  GraphicsReconciler reconciler;
+  service.SetReconciler(&reconciler);
+  service.SetCapabilities(caps);
+  service.store().document().values[SettingId::kInterfaceResolution] = EnumV("1280x720");
+  service.store().document().values[SettingId::kGameplayResolution] = EnumV("1600x900");
+  CHECK_TRUE(IsToken(service.EffectiveValue(SettingId::kInterfaceResolution), "1707x720"));
+  CHECK_TRUE(IsToken(service.EffectiveValue(SettingId::kGameplayResolution), "2133x900"));
+  CHECK_TRUE(IsToken(service.RequestedValue(SettingId::kInterfaceResolution), "1280x720"));
+  CHECK_TRUE(IsToken(service.RequestedValue(SettingId::kGameplayResolution), "1600x900"));
+  BeginCase("graphics recovery adopts the working aspect before planning profile dimensions");
+  Value force; force.kind = ValueKind::kBool; force.boolean = true;
+  service.SetBootValues({{SettingId::kForce16By9, force}}, "settings.graphics.recovered_from_failure");
+  CHECK_TRUE(IsSize(service.ResolutionProfileDisplay(), 1920,1080));
+  CHECK_TRUE(service.DescriptorFor(SettingId::kInterfaceResolution)->choices.front().label == "1920x1080");
+  CHECK_TRUE(IsToken(service.EffectiveValue(SettingId::kInterfaceResolution), "1280x720"));
+  CHECK_TRUE(IsToken(service.EffectiveValue(SettingId::kGameplayResolution), "1600x900"));
+}
+
 int main() {
   TestProfileResolveTextures();
+  TestProfileTextureUsers();
   TestSafeResolutionProfiles();
   TestProfileResolutionChoices();
+  TestProfileAspectService();
   BeginCase("desktop profile resolution tokens retain precise native dimensions");
   const auto ultrawide_profiles = ProfileResolutionChoices({2560,1080});
   CHECK_TRUE(ultrawide_profiles.front().token == "native");
   CHECK_TRUE(ultrawide_profiles.front().label == "2560x1080");
-  CHECK_TRUE(ultrawide_profiles[1].token == "1920x1080");
-  CHECK_TRUE(ultrawide_profiles.back().token == "1280x720");
-  CHECK_TRUE(ProfileResolutionChoices({2880,1800})[1].token == "2880x1620");
+  CHECK_TRUE(ultrawide_profiles[1].token == "2133x900");
+  CHECK_TRUE(ultrawide_profiles.back().token == "1707x720");
+  CHECK_TRUE(ProfileResolutionChoices({2880,1800})[1].token == "2304x1440");
+  BeginCase("Force 16:9 fits the display and converts saved quality tiers");
+  const auto forced_basis = ProfileDisplayBasis({2560,1080}, true);
+  CHECK_TRUE(IsSize(forced_basis, 1920,1080));
+  const auto forced_choices = ProfileResolutionChoices(forced_basis);
+  CHECK_TRUE(forced_choices.front().label == "1920x1080");
+  CHECK_TRUE(forced_choices.back().token == "1280x720");
+  CHECK_TRUE(IsSize(ProfileDisplayBasis({1920,1200}, true),1920,1080));
+  CHECK_TRUE(IsSize(ProfileDisplayBasis({1600,1200}, true),1600,900));
+  CHECK_TRUE(ReconcileProfileResolutionToken("1707x720", forced_choices) == "1280x720");
+  CHECK_TRUE(ReconcileProfileResolutionToken("2133x900", forced_choices) == "1600x900");
+  CHECK_TRUE(ReconcileProfileResolutionToken("1280x720", ultrawide_profiles) == "1707x720");
+  CHECK_TRUE(ReconcileProfileResolutionToken("1920x1080", ultrawide_profiles) == "native");
+  CHECK_TRUE(ReconcileProfileResolutionToken("native", forced_choices) == "native");
+  CHECK_TRUE(ReconcileProfileResolutionToken("bad", forced_choices) == "native");
   CHECK_TRUE(IsSize(ProfileResolution("native", {2560,1080}),2560,1080));
   CHECK_TRUE(IsSize(ProfileResolution("1600x900", {2560,1080}),1600,900));
   CHECK_TRUE(IsSize(ProfileResolution("1600x900junk", {2560,1080}),0,0));

@@ -61,6 +61,9 @@ void RetargetRecord(uint8_t* guest_base, const uint8_t before[20], const uint8_t
 // edit cannot deliver it to a splash record that spans two ark reads (measured 2026-10-20).
 const std::vector<std::string>& HiddenRows();
 
+// The resolved boot policy, including Fast startup and settings restart overrides.
+bool SkipOfflinePromptsEnabled();
+
 // Guest-side menu predicates. The publisher supplies one coherent generation after a
 // durable settings commit. A loaded panel can query these through file_exists;
 // the read hook's boot copy remains immutable.

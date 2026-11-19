@@ -142,8 +142,17 @@ void StoreGuestBe32(uint8_t* p, uint32_t value) {
 }  // namespace
 
 void rb_blitz::settings::WriteGuestLayoutAspect(uint8_t* base) {
-  const uint32_t width = g_render_width.load(std::memory_order_relaxed);
-  const uint32_t height = g_render_height.load(std::memory_order_relaxed);
+  uint32_t width = g_render_width.load(std::memory_order_relaxed);
+  uint32_t height = g_render_height.load(std::memory_order_relaxed);
+  {
+    std::lock_guard lock(g_profiles_mutex);
+    if (g_profile_scale) {
+      // Scene proportions are selected at boot. Pixel rounding in lower tiers
+      // must not alter camera ratios or mutate already-loaded scene layouts.
+      width = std::max(g_native.width, g_native.height);
+      height = std::min(g_native.width, g_native.height);
+    }
+  }
   // Returning from a custom frame to 16:9 must restore the original layout constants.
   if (base == nullptr || height == 0) {
     return;
@@ -203,7 +212,9 @@ REX_EXTERN(sub_8250EC88); // D3DResource::Release, including deferred GPU destru
 REX_EXTERN(sub_82508270); // texture LockRect
 REX_EXTERN(sub_82506828); // texture UnlockRect
 REX_EXTERN(sub_823E9CE0); // bind the current color/depth pair and invalidate the material cache
-REX_EXTERN(__imp__sub_823F3C40); // renderer BeginDrawing
+REX_EXTERN(sub_823ED1D8); // RndTex wrapper: bind texture and refresh its dimensions/format
+REX_EXTERN(sub_825087A8); // D3D device SetTexture, including raw sampler pointer tracking
+REX_EXTERN(__imp__sub_82203260); // lazy frame begin, before native tiling captures its rectangles
 
 void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* base, uint32_t renderer) {
   DisplayMode pixels;
@@ -211,7 +222,7 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
   bool first_frame;
   SettingId active;
   Value selected;
-  const bool game = input::GameScreenActive();
+  const bool game = input::GameplayResolutionActive();
   {
     std::lock_guard lock(g_profiles_mutex);
     scale = g_profile_scale;
@@ -332,8 +343,23 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
     SetBootPortraitFrame(crop.width, crop.height);
   }
   WriteGuestLayoutAspect(base);
+  const uint32_t device = read(452);
+  RebindProfileTextureUsers({old[4], old[5], old[6], old[7], old[8]},
+      {fresh[4], fresh[5], fresh[6], fresh[7], fresh[8]}, {read(824), read(828), read(832)},
+      [&](uint32_t stage) { return LoadGuestBe32(base + device + 12920 + stage * 4); },
+      [&](uint32_t stage, uint32_t texture) {
+        ctx.r3.u32 = device; ctx.r4.u32 = stage; ctx.r5.u32 = texture;
+        ctx.r6.u64 = uint32_t{0x80000000} >> stage;
+        sub_825087A8(ctx, base);
+      },
+      [&](uint32_t wrapper, uint32_t texture) {
+        ctx.r3.u32 = wrapper; ctx.r4.u32 = texture;
+        sub_823ED1D8(ctx, base);
+      });
   // Xbox target bindings store raw surface pointers, without AddRef. Replace
   // those bindings and invalidate the material cache before releasing them.
+  // Wrappers and sampler slots above must also stop referring to old textures:
+  // a later native SetTexture writes through its previous raw resource pointer.
   ctx.r3.u32 = renderer;
   sub_823E9CE0(ctx, base);
   release(old);
@@ -345,7 +371,11 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
               pixels.width, pixels.height, w, h, scale);
 }
 
-REX_HOOK_RAW(sub_823F3C40) {
-  rb_blitz::settings::UpdateResolutionProfile(ctx, base, ctx.r3.u32);
-  __imp__sub_823F3C40(ctx, base);
+REX_HOOK_RAW(sub_82203260) {
+  // This function can be called repeatedly inside a frame. Only its first call
+  // starts tiling (+247 becomes true). BeginDrawing is already too late: an
+  // earlier caller may have captured the old tile rectangles for that frame.
+  if (base && ctx.r3.u32 && base[ctx.r3.u32 + 247] == 0)
+    rb_blitz::settings::UpdateResolutionProfile(ctx, base, ctx.r3.u32);
+  __imp__sub_82203260(ctx, base);
 }

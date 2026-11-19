@@ -6,6 +6,7 @@
 namespace rb_blitz::settings {
 namespace {
 constexpr SettingId kRows[] = {SettingId::kOrientation, SettingId::kAspectRatio, SettingId::kRenderScale,
+                               SettingId::kForce16By9,
                                SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
                                SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale,
                                SettingId::kRenderer, SettingId::kResolution,

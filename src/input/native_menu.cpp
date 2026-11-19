@@ -92,6 +92,7 @@ MenuMouseQueue queue;
 bool window_focused = false;
 bool menu_available = false;
 bool game_screen_active = false;
+bool gameplay_resolution_active = false;
 bool portrait_splash_active = false;
 uint32_t current_screen = 0, current_focus = 0;
 uint32_t current_panel = 0;
@@ -197,9 +198,10 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   const uint32_t panel = screen ? U32(base, screen + 52) : 0;
   const std::string name = ObjectName(base, screen);
   const std::string panel_name = ObjectName(base, ObjectBase(base, panel));
+  const std::string focus_name = ObjectName(base, ObjectBase(base, focus));
   if (panel_name != current_panel_name)
     current_panel_scene = ui::screen::PanelScene(panel_name);
-  const auto scope = DialogScopeFor(panel_name, ObjectName(base, ObjectBase(base, focus)));
+  const auto scope = DialogScopeFor(panel_name, focus_name);
   const uint32_t input_scope = scope == MenuDialogScope::kShortcuts ? focus :
                                scope == MenuDialogScope::kPanel ? panel : 0;
   rb_blitz::hooks::PublishActionHints();
@@ -211,7 +213,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       scope != MenuDialogScope::kPanel;
   rb_blitz::loading::ObserveRecoveryScreen(name, allowed);
   rb_blitz::content_progress::ObserveScreen(name, panel_name, allowed);
-  rb_blitz::diag::shader_trace::ObserveScreen(name, panel_name, ObjectName(base, ObjectBase(base, focus)),
+  rb_blitz::diag::shader_trace::ObserveScreen(name, panel_name, focus_name,
                                              U32(base, manager + 16) != 0);
   if (screen != current_screen || focus != current_focus || panel != current_panel ||
       input_scope != current_input_scope || allowed != menu_available) {
@@ -249,6 +251,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   observed_menu_frame = frame_number;
   if (current_screen_name != name) current_screen_name = name;
   game_screen_active = in_song;
+  gameplay_resolution_active = GameplayResolutionScreen(name, panel_name, focus_name);
   portrait_splash_active = ui::PortraitSplashScreen(name, panel_name, current_panel_scene);
   current_panel_name = panel_name;
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled() &&
@@ -435,6 +438,10 @@ bool MainMenuMusicInputAvailable() {
 bool GameScreenActive() {
   std::lock_guard lock(mutex);
   return game_screen_active;
+}
+bool GameplayResolutionActive() {
+  std::lock_guard lock(mutex);
+  return gameplay_resolution_active;
 }
 bool PortraitSplashActive() {
   std::lock_guard lock(mutex);

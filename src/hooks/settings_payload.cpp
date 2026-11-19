@@ -423,7 +423,7 @@ bool InstallMenuPayload(rex::kernel::TitleRuntime* runtime, bool settings_restar
   if (!BuildMenuRecords(read, {locale_set.begin(), locale_set.end()}, &records, &error,
                         ultimate::Provider().Active(), refresh_row_on, &build_notes, menu_filter::HiddenRows(),
                         skip_startup_logos, &refresh_routes, maybe_pump,
-                        BootPortraitWidth() != 0))
+                        BootPortraitWidth() != 0, menu_filter::SkipOfflinePromptsEnabled()))
     return fail();
   PumpStartupWindow(pump_startup_window);
   bool song_entry_patched = false;

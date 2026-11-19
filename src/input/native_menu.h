@@ -476,4 +476,14 @@ bool PortraitSplashActive();
 // (the same split `MenuAvailable` uses to let pause take the pad). False on every menu, on
 // the title, the loading screens and while paused.
 bool GameScreenActive();
+
+// Pause keeps the song's frame. Its inline options list and separate settings
+// screens use the interface frame; native quit/restart confirmations keep gameplay.
+inline bool GameplayResolutionScreen(std::string_view screen, std::string_view panel = {},
+                                     std::string_view focus = {}) {
+  if (screen == "game_screen") return panel != "pause_panel" || focus != "options.lst";
+  return screen == "pause_confirm_quit_song_screen" ||
+         screen == "pause_confirm_restart_song_screen";
+}
+bool GameplayResolutionActive();
 } // namespace rb_blitz::input

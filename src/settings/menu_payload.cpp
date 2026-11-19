@@ -1831,7 +1831,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
                       bool skip_startup_logos,
                       MenuRefreshRoutes* refresh_routes,
                       const std::function<void()>& pump_startup_window,
-                      bool portrait_hud) {
+                      bool portrait_hud,
+                      bool skip_offline_prompts) {
   namespace screen = ui::screen;
   MenuRecords built;
   MenuRefreshRoutes installed_routes;
@@ -2785,8 +2786,9 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   }
   built["ui/pause/gen/settings_confirmation_pause.milo_xbox"] =
       built["ui/pause/gen/settings_confirmation.milo_xbox"];
-  // This record may grow in the generated archive. Retain all original constants
-  // so menu_filter's independent, byte-neutral offline transitions still apply.
+  // Bake the offline transitions into the complete generated record. The record
+  // can span archive reads, whose first bytes the guest may already have copied
+  // by the time the read-time filter sees the rest of the file.
   {
     constexpr char path[] = "ui/net/gen/server_connect.dtb";
     std::vector<uint8_t> bytes;
@@ -2799,6 +2801,14 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         (!portrait_hud || AddPortraitLoadingLayout(&roots, false,
             screen::CurrentMenuConfiguration().portrait_aspect, &why))) {
       built[path] = ui::dtb::Compile(roots, header);
+      if (skip_offline_prompts) {
+        auto& record = built[path];
+        const auto skipped = menu_options::SkipOfflinePrompts(record.data(), record.size());
+        if (!skipped.applied) {
+          if (error) *error = "the required offline prompt skip could not be authored: " + skipped.reason;
+          return false;
+        }
+      }
     } else {
       if (error) *error = "the required graphics loading gate could not be authored: " + why;
       return false;

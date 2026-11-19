@@ -272,6 +272,7 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
     bool initialized = false;
     rex::ScopeGuard rollback([&] { if (!initialized) OnShutdown(); });
     selected_backend_ = GetGraphics().GetDriverName();
+    if (settings_boot_) settings_boot_->BeginStartupShaderCompilation();
     rb_blitz::profile::LogProfileApplyReport(profile_apply_);
     if (settings_boot_) settings_boot_->LogConfigured();
     auto* preparation = REX_INTERFACE(rex::gpu::IGraphicsPreparation);

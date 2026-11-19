@@ -941,7 +941,7 @@ void CheckPrivateFontGeometry(const std::vector<uint8_t>& scene, bool hint) {
 }
 
 // Optional integration check against extracted records; never boots or drives the game.
-int CheckInstalledRuntimeHeaderRecords(const char* asset_root) {
+int CheckInstalledRuntimeHeaderRecords(const char* asset_root, bool offline_only = false) {
   namespace fs = std::filesystem;
   namespace screen = rb_blitz::ui::screen;
   using namespace header_test;
@@ -969,6 +969,38 @@ int CheckInstalledRuntimeHeaderRecords(const char* asset_root) {
   for (const auto& note : notes) std::printf("record note: %s\n", note.c_str());
   CHECK_TRUE(notes.empty());
   CHECK_TRUE(routes.rows && routes.headers && routes.ready());
+  BeginCase("generated connection records carry the offline policy before archive reads");
+  for (unsigned mode = 0; mode < 4; ++mode) {
+    const bool portrait = (mode & 2) != 0;
+    const bool skip_offline = (mode & 1) != 0;
+    settings::MenuRecords configured;
+    if (skip_offline || portrait) {
+      CHECK_TRUE(settings::BuildMenuRecords(read, {"ui/locale/eng/gen/locale_keep.dtb"},
+          &configured, &why, false, false, nullptr, {}, false, nullptr, {}, portrait, skip_offline));
+    } else {
+      configured = records;
+    }
+    const auto found = configured.find("ui/net/gen/server_connect.dtb");
+    CHECK_TRUE(found != configured.end());
+    if (found == configured.end()) continue;
+    std::vector<Node> roots;
+    dtb::RootHeader header;
+    CHECK_TRUE(dtb::Parse(found->second.data(), found->second.size(), &roots, &header, &why));
+    const auto* update = Method(roots, "server_connect_panel", "update_state");
+    CHECK_TRUE(update != nullptr);
+    if (update) {
+      CHECK_TRUE(Has(*update, "set_state") == skip_offline);
+      CHECK_TRUE(Has(*update, "rbbz_begin_graphics") == skip_offline);
+      CHECK_FALSE(Has(*update, "goto_screen"));
+    }
+    // The packed bytes already contain the transitions; read alignment can no
+    // longer decide whether the skip reaches the guest. A later filter is a no-op.
+    auto copy = found->second;
+    const auto skipped = rb_blitz::menu_options::SkipOfflinePrompts(copy.data(), copy.size());
+    CHECK_TRUE(skipped.applied != skip_offline);
+    if (skip_offline) CHECK_TRUE(copy == found->second);
+  }
+  if (offline_only) return Finish();
   const auto splash = records.find("ui/splash/gen/splash.dtb");
   CHECK_TRUE(splash != records.end());
   if (splash != records.end()) {
@@ -2665,8 +2697,9 @@ int main(int argc, char** argv) {
       return 1;
     }
   }
-  if (argc == 3 && std::string(argv[1]) == "check-runtime-header-records") {
-    return CheckInstalledRuntimeHeaderRecords(argv[2]);
+  if (argc == 3 && (std::string(argv[1]) == "check-runtime-header-records" ||
+                    std::string(argv[1]) == "check-offline-records")) {
+    return CheckInstalledRuntimeHeaderRecords(argv[2], std::string(argv[1]) == "check-offline-records");
   }
   if (argc == 4 && std::string(argv[1]) == "check-p10-records") {
     return CheckInstalledHeaderRecords(argv[2], argv[3], true);

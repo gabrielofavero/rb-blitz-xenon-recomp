@@ -614,6 +614,41 @@ void TestScreenBackTargets() {
   CHECK_EQ(root_twins, 1);
 }
 
+void TestScreenBackgroundLights() {
+  BeginCase("settings screens reset shared spotlights for their entry context");
+
+  size_t menu_screens = 0;
+  size_t pause_screens = 0;
+  for (const auto& root : DefinitionRoots()) {
+    if (root.kids.size() < 3 || root.kids[1].text != "UIScreen" ||
+        !HasText(root, "background_night_panel")) continue;
+    const bool pause = HasText(root, "game_panel");
+    (pause ? pause_screens : menu_screens)++;
+    std::vector<const dtb::Node*> entries;
+    CollectMembers(root, "enter", &entries);
+    CHECK_EQ(entries.size(), 1u);
+    if (entries.size() != 1) continue;
+    std::vector<const dtb::Node*> calls;
+    FindCalls(*entries.front(), "set_showing", &calls);
+    CHECK_EQ(calls.size(), 1u);
+    if (calls.size() != 1) continue;
+    const auto& call = *calls.front();
+    CHECK_EQ(call.kids.size(), 3u);
+    if (call.kids.size() != 3) continue;
+    const auto& receiver = call.kids[0];
+    CHECK_EQ(receiver.tag, dtb::kCommand);
+    CHECK_EQ(receiver.kids.size(), 3u);
+    if (receiver.kids.size() != 3) continue;
+    CHECK_TRUE(receiver.kids[0].text == "background_night_panel");
+    CHECK_TRUE(receiver.kids[1].text == "find");
+    CHECK_TRUE(receiver.kids[2].text == "spotlights.grp");
+    CHECK_EQ(call.kids[2].tag, dtb::kSymbol);
+    CHECK_TRUE(call.kids[2].text == (pause ? "FALSE" : "TRUE"));
+  }
+  CHECK_EQ(menu_screens, kExpectedPagesPerContext);
+  CHECK_EQ(pause_screens, kExpectedPagesPerContext);
+}
+
 void TestRequestPathsParse() {
   BeginCase("every request the definition sends parses in the bridge's own grammar");
 
@@ -3637,24 +3672,61 @@ void TestAchievementActionWording() {
 }
 
 void TestResolutionProfileRows() {
+  namespace settings = rb_blitz::settings;
+  BeginCase("Force 16:9 is an optional desktop resolution preference requiring restart");
+  CHECK_EQ(static_cast<uint16_t>(settings::SettingId::kForce16By9), 33);
+  CHECK_TRUE(settings::SettingIdToken(settings::SettingId::kForce16By9) == "force_16_by_9");
+  const auto* force = settings::schema::FindRow(settings::SettingId::kForce16By9);
+  CHECK_TRUE(force != nullptr);
+  if (force) {
+    CHECK_TRUE(force->descriptor.value_kind == settings::ValueKind::kBool);
+    CHECK_FALSE(force->descriptor.compiled_default.boolean);
+    CHECK_TRUE(force->descriptor.strategy == settings::ApplicationStrategy::kRestart);
+    CHECK_TRUE(force->group == "resolution_profiles");
+  }
+  for (const auto platform : {settings::schema::HostPlatform::kWindows,
+                              settings::schema::HostPlatform::kLinux,
+                              settings::schema::HostPlatform::kMacOS,
+                              settings::schema::HostPlatform::kIOS,
+                              settings::schema::HostPlatform::kAndroid}) {
+    const auto descriptors = settings::schema::BuildDescriptors(
+        {}, settings::schema::SettingsForRelease(platform, "test"));
+    const auto descriptor = std::find_if(descriptors.begin(), descriptors.end(), [](const auto& d) {
+      return d.id == settings::SettingId::kForce16By9;
+    });
+    CHECK_TRUE(descriptor != descriptors.end());
+    if (descriptor == descriptors.end()) continue;
+    CHECK_FALSE(descriptor->compiled_default.boolean);
+    CHECK_EQ(descriptor->availability == settings::Availability::kHidden,
+             settings::schema::IsMobile(platform));
+  }
   BeginCase("desktop Resolution and mobile Render Scale have independent context controls");
   for (const bool mobile : {false, true}) {
     MenuConfiguration configuration;
+    if (mobile) configuration.hidden.insert("graphics.force_16_by_9");
     for (const auto* scope : {"interface", "gameplay"}) {
       configuration.hidden.insert(std::string("graphics.") + scope +
                                   (mobile ? "_resolution" : "_render_scale"));
       configuration.choices[std::string("graphics.") + scope + "_resolution"] =
-          {{"native", "2560x1080"}, {"1920x1080", "1920x1080"}, {"1280x720", "1280x720"}};
+          {{"native", "2560x1080"}, {"2133x900", "2133x900"}, {"1707x720", "1707x720"}};
     }
     ConfigureMenu(configuration);
     const auto rows = PanelRowSymbols("settings_display_panel");
     CHECK_TRUE(rows.front() == (mobile ? "settings_scale_menu" : "settings_resolution_menu"));
     CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_aspect_ratio") == rows.end());
     CHECK_TRUE(std::find(rows.begin(), rows.end(), "settings_render_scale") == rows.end());
+    CHECK_TRUE(PanelRowSymbols("settings_resolution_panel") == (mobile
+        ? std::vector<std::string>{}
+        : std::vector<std::string>{"settings_interface_resolution", "settings_gameplay_resolution",
+                                   "settings_force_16_by_9"}));
     const auto paths = RequestPaths();
+    for (const auto* value : {"0", "1"}) {
+      const auto path = std::string("rbbz-settings/set/graphics.force_16_by_9/b:") + value;
+      CHECK_EQ(std::find(paths.begin(), paths.end(), path) != paths.end(), !mobile);
+    }
     for (const auto* scope : {"interface", "gameplay"}) {
       const auto setting = std::string("graphics.") + scope + (mobile ? "_render_scale/i:" : "_resolution/t:");
-      const auto path = std::string("rbbz-settings/set/") + setting + (mobile ? "5" : "1280x720");
+      const auto path = std::string("rbbz-settings/set/") + setting + (mobile ? "5" : "1707x720");
       CHECK_TRUE(std::find(paths.begin(), paths.end(), path) != paths.end());
     }
     if (mobile) {
@@ -3667,6 +3739,8 @@ void TestResolutionProfileRows() {
     }
   }
   ConfigureMenu({});
+  CHECK_TRUE(HelpTextFor("settings_force_16_by_9") ==
+             "Use 16:9 resolution options after restarting.");
 }
 
 // A backend row lists what this build and this machine can run: the payload fills
@@ -3802,7 +3876,8 @@ void TestHiddenDisplayGroup() {
   configuration.hidden = {"graphics.orientation", "graphics.display", "graphics.aspect_ratio", "graphics.render_scale",
                            "graphics.vsync", "graphics.renderer", "guest.overscan",
                            "graphics.interface_resolution", "graphics.gameplay_resolution",
-                           "graphics.interface_render_scale", "graphics.gameplay_render_scale"};
+                           "graphics.interface_render_scale", "graphics.gameplay_render_scale",
+                           "graphics.force_16_by_9"};
   ConfigureMenu(configuration);
   CHECK_TRUE(PageRows("settings_av_panel") ==
              std::vector<std::string>({"settings_audio", "settings_video_menu"}));
@@ -4782,6 +4857,7 @@ int main(int argc, char** argv) {
   TestMergedRootShape();
   TestListOwnership();
   TestScreenBackTargets();
+  TestScreenBackgroundLights();
   TestRequestPathsParse();
   TestPanelLoadEdit();
   TestPanelEnterAppend();

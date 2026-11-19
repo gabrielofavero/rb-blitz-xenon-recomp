@@ -91,6 +91,8 @@ class Service {
   // The host installs the probed capabilities (P2/P4) and the provider (P6).
   void SetCapabilities(CapabilitySnapshot capabilities);
   const CapabilitySnapshot& capabilities() const { return capabilities_; }
+  // Resolution proportions are fixed at boot; changing Force 16:9 waits for restart.
+  DisplayMode ResolutionProfileDisplay() const;
   void SetReconciler(const Reconciler* reconciler);
   void SetProviderSink(ProviderSink* sink);
   bool has_provider_sink() const { return provider_ != nullptr; }
@@ -182,6 +184,7 @@ class Service {
   const Reconciler* reconciler_ = nullptr;
   ProviderSink* provider_ = nullptr;
   bool capabilities_set_ = false;
+  bool force_16_by_9_at_boot_ = false;
   uint64_t revision_ = 0;
   uint64_t capability_revision_ = 1;
   uint64_t txn_seq_ = 0;

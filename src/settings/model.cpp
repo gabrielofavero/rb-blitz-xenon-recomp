@@ -92,6 +92,8 @@ std::string_view SettingIdToken(SettingId id) {
       return "interface_render_scale";
     case SettingId::kGameplayRenderScale:
       return "gameplay_render_scale";
+    case SettingId::kForce16By9:
+      return "force_16_by_9";
     case SettingId::kAspectRatio:
       return "aspect_ratio";
     case SettingId::kRenderScale:

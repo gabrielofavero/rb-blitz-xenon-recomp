@@ -221,6 +221,10 @@ std::vector<SchemaRow> BuildTable() {
     rows.push_back(Row(std::move(d), {"graphics", key}, "resolution_profiles", label,
                        "Choose the rendering resolution for this part of the game."));
   }
+  rows.push_back(Row(Make(SettingId::kForce16By9, Category::kGraphics, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(false)),
+                     {"graphics", "force_16_by_9"}, "resolution_profiles", "Force 16:9",
+                     "Use 16:9 resolution options after restarting."));
   for (const auto& [id, key, label] : {
       std::tuple{SettingId::kInterfaceRenderScale, "interface_render_scale", "Interface"},
       std::tuple{SettingId::kGameplayRenderScale, "gameplay_render_scale", "Gameplay"}}) {
@@ -569,6 +573,7 @@ constexpr StrategyEntry kStrategies[] = {
      "guest frame boundary rebuilds render targets and resolve textures; visual acceptance pending"},
     {SettingId::kGameplayRenderScale, ApplicationStrategy::kHot,
      "guest frame boundary rebuilds render targets and resolve textures; visual acceptance pending"},
+    {SettingId::kForce16By9, ApplicationStrategy::kRestart, ""},
     {SettingId::kResolution, ApplicationStrategy::kRestart, ""},
     {SettingId::kOrientation, ApplicationStrategy::kRestart, ""},
     {SettingId::kAspectRatio, ApplicationStrategy::kRestart, ""},
@@ -858,6 +863,7 @@ std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps,
     Descriptor descriptor = row.descriptor;
     FillChoiceSource(descriptor, caps);
     if (descriptor.id == SettingId::kAspectRatio || descriptor.id == SettingId::kRenderScale ||
+        (descriptor.id == SettingId::kForce16By9 && IsMobile(release.platform)) ||
         ((descriptor.id == SettingId::kInterfaceResolution || descriptor.id == SettingId::kGameplayResolution)
              ? IsMobile(release.platform)
              : (descriptor.id == SettingId::kInterfaceRenderScale || descriptor.id == SettingId::kGameplayRenderScale)

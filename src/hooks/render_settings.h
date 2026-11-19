@@ -47,9 +47,9 @@ uint32_t BootPortraitHeight();
 // 1.381x as wide as it is tall (58x42 capture pixels) - exactly the 1680/1280 the frame grew by -
 // and with the pair at 1/2.3333 the same disc is round (44x42, the 16:9 reference's 44x42).
 //
-// This writes 1/aspect into both, once the frame is one the title would not have chosen by itself.
-// A 16:9 (and the title's own 4:3) frame is left completely alone. `base` is the guest memory
-// base the caller's hook received.
+// Profiles keep the boot-selected aspect across live resolution changes. Force
+// 16:9 changes that aspect on restart, before scenes build their projections.
+// Legacy frame overrides still derive the ratio from their active dimensions.
 void WriteGuestLayoutAspect(uint8_t* base);
 void ConfigureResolutionProfiles(DisplayMode native, int draw_scale, bool mobile,
                                  const std::map<SettingId, Value>& values);

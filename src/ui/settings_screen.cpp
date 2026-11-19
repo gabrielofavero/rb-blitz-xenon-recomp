@@ -1155,7 +1155,9 @@ std::vector<PanelSpec> AllPanels() {
       SelectRow("settings_interface_resolution", "graphics.interface_resolution", "Interface",
                 "Set menu rendering detail independently from gameplay.", Choices({"native", "Current"})),
       SelectRow("settings_gameplay_resolution", "graphics.gameplay_resolution", "Gameplay",
-                "Lower gameplay resolution to improve performance.", Choices({"native", "Current"}))}});
+                "Lower gameplay resolution to improve performance.", Choices({"native", "Current"})),
+      BoolRow("settings_force_16_by_9", "graphics.force_16_by_9", "Force 16:9",
+              "Use 16:9 resolution options after restarting.")}});
   out.push_back(PanelSpec{"settings_scale_panel", "settings_scale_screen",
       "settings_display_screen", MenuPanels(), {
       SubmenuRow("settings_interface_scale", "settings_scale_interface_screen", "Interface",
@@ -2416,7 +2418,16 @@ Node ScreenDefinition(const PanelSpec& panel) {
     panels.push_back(name);
   }
   panels.push_back(panel.name);
-  return Screen(panel.screen, panels, panel.name, panel.back);
+  Node screen = Screen(panel.screen, panels, panel.name, panel.back);
+  if (std::find(panels.begin(), panels.end(), "background_night_panel") != panels.end()) {
+    // Song loading hides this shared group. Restore its context on every entry,
+    // including returns to the menu that bypass the results screen's reset.
+    const bool pause = std::find(panels.begin(), panels.end(), "game_panel") != panels.end();
+    screen.kids.push_back(Arr({Sym("enter"),
+        Cmd({Cmd({Sym("background_night_panel"), Sym("find"), Sym("spotlights.grp")}),
+             Sym("set_showing"), Sym(pause ? "FALSE" : "TRUE")})}));
+  }
+  return screen;
 }
 
 // (The P1 prototype's `SubPanel`/`CompoundPanel` are gone: the four row kinds are generated from

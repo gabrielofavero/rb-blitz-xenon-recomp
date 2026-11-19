@@ -1594,9 +1594,128 @@ void TestVanillaRespectsOverridesAndRelease() {
   }
 }
 
+void TestVanillaResolutionProfilesAfterRestart() {
+  BeginCase("Vanilla restores the 720p quality tier across a desktop aspect restart");
+  Scratch scratch;
+  const auto paths = Paths(scratch);
+  WriteFile(paths.settings_file, "schema_version = 1\n[graphics]\nforce_16_by_9 = false\n"
+      "interface_resolution = 'native'\ngameplay_resolution = '2133x900'\n");
+  const auto release = schema::SettingsForRelease(schema::HostPlatform::kWindows, "test");
+  Service service(paths, release);
+  service.Boot(nullptr, {}, nullptr);
+  auto caps = Capabilities();
+  caps.primary_display_size = {2560, 1080};
+  service.SetCapabilities(caps);
+  const auto txn = service.BeginEdit(service.revision());
+  CHECK_TRUE(service.StageRestore(txn, Service::RestoreProfile::kVanilla).ok);
+  const auto saved = service.Commit(txn);
+  CHECK_TRUE(saved.status == CommitStatus::kSaved);
+  CHECK_TRUE(saved.restart_required);
+  CHECK_TRUE(service.RequestedValue(SettingId::kForce16By9).boolean);
+  CHECK_EQ(service.ResolutionProfileDisplay().width, 2560);
+  for (const auto id : {SettingId::kInterfaceResolution, SettingId::kGameplayResolution}) {
+    CHECK_TRUE(service.RequestedValue(id).text == "1707x720");
+    CHECK_TRUE(service.EffectiveValue(id).text == "1707x720");
+  }
+
+  Service reloaded(paths, release);
+  reloaded.Boot(nullptr, {}, nullptr);
+  reloaded.SetCapabilities(caps);
+  CHECK_TRUE(reloaded.RequestedValue(SettingId::kForce16By9).boolean);
+  CHECK_EQ(reloaded.ResolutionProfileDisplay().width, 1920);
+  for (const auto id : {SettingId::kInterfaceResolution, SettingId::kGameplayResolution}) {
+    CHECK_TRUE(reloaded.RequestedValue(id).text == "1707x720");
+    CHECK_TRUE(reloaded.EffectiveValue(id).text == "1280x720");
+  }
+}
+
+void TestResolutionProfileAspectBootPolicy() {
+  BeginCase("resolution profiles retain saved quality tiers under the boot aspect policy");
+  for (const bool force : {false, true}) {
+    Scratch scratch;
+    const auto paths = Paths(scratch);
+    WriteFile(paths.settings_file, std::string("schema_version = 1\n[graphics]\nforce_16_by_9 = ") +
+        (force ? "true" : "false") +
+        "\ninterface_resolution = '1280x720'\ngameplay_resolution = '1600x900'\n");
+    Service service(paths, schema::SettingsForRelease(schema::HostPlatform::kWindows, "test"));
+    CHECK_TRUE(service.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+    auto caps = Capabilities();
+    caps.primary_display_size = {2560, 1080};
+    service.SetCapabilities(caps);
+    const auto tokens = [](const Service& state) {
+      std::vector<std::string> result;
+      for (const auto& choice : state.DescriptorFor(SettingId::kInterfaceResolution)->choices)
+        result.push_back(choice.token);
+      return result;
+    };
+    const auto expected = force ? std::vector<std::string>{"native", "1600x900", "1280x720"}
+                                : std::vector<std::string>{"native", "2133x900", "1707x720"};
+    CHECK_TRUE(tokens(service) == expected);
+    CHECK_EQ(service.ResolutionProfileDisplay().width, force ? 1920 : 2560);
+    CHECK_EQ(service.ResolutionProfileDisplay().height, 1080);
+    CHECK_TRUE(service.RequestedValue(SettingId::kInterfaceResolution).text == "1280x720");
+    CHECK_TRUE(service.RequestedValue(SettingId::kGameplayResolution).text == "1600x900");
+    CHECK_TRUE(service.EffectiveValue(SettingId::kInterfaceResolution).text ==
+               (force ? "1280x720" : "1707x720"));
+    CHECK_TRUE(service.EffectiveValue(SettingId::kGameplayResolution).text ==
+               (force ? "1600x900" : "2133x900"));
+    const ClampingReconciler reconciler;
+    service.SetReconciler(&reconciler);
+    CHECK_TRUE(service.EffectiveValue(SettingId::kInterfaceResolution).text ==
+               (force ? "1280x720" : "1707x720"));
+    for (const auto& field : service.GetSnapshot().fields) {
+      if (field.id != SettingId::kInterfaceResolution && field.id != SettingId::kGameplayResolution)
+        continue;
+      CHECK_EQ(field.corrected, !force);
+      if (!force) CHECK_TRUE(field.correction_reason_key == "settings.graphics.for_display");
+    }
+
+    BeginCase("Force 16:9 saves a restart change without replacing the active profile choices");
+    const auto txn = service.BeginEdit(service.revision());
+    CHECK_TRUE(service.Set(txn, SettingId::kForce16By9, BoolV(!force),
+                           service.capability_revision()).ok);
+    const auto saved = service.Commit(txn);
+    CHECK_TRUE(saved.status == CommitStatus::kSaved);
+    CHECK_TRUE(saved.restart_required);
+    ++caps.revision;
+    service.SetCapabilities(caps);
+    CHECK_TRUE(tokens(service) == expected);
+    CHECK_EQ(service.ResolutionProfileDisplay().width, force ? 1920 : 2560);
+    CHECK_TRUE(service.store().document().values.at(SettingId::kInterfaceResolution).text == "1280x720");
+    CHECK_TRUE(service.store().document().values.at(SettingId::kGameplayResolution).text == "1600x900");
+
+    Service reloaded(paths, schema::SettingsForRelease(schema::HostPlatform::kWindows, "test"));
+    CHECK_TRUE(reloaded.Boot(nullptr, {}, nullptr) == DocumentStatus::kOk);
+    reloaded.SetCapabilities(caps);
+    CHECK_TRUE(reloaded.RequestedValue(SettingId::kForce16By9).boolean == !force);
+    CHECK_EQ(reloaded.ResolutionProfileDisplay().width, force ? 2560 : 1920);
+    CHECK_TRUE(reloaded.EffectiveValue(SettingId::kInterfaceResolution).text ==
+               (force ? "1707x720" : "1280x720"));
+    CHECK_TRUE(reloaded.EffectiveValue(SettingId::kGameplayResolution).text ==
+               (force ? "2133x900" : "1600x900"));
+  }
+
+  BeginCase("mobile profiles ignore a saved desktop aspect preference");
+  for (const auto platform : {schema::HostPlatform::kIOS, schema::HostPlatform::kAndroid}) {
+    Scratch scratch;
+    const auto paths = Paths(scratch);
+    WriteFile(paths.settings_file, "schema_version = 1\n[graphics]\nforce_16_by_9 = true\n");
+    Service service(paths, schema::SettingsForRelease(platform, "test"));
+    service.Boot(nullptr, {}, nullptr);
+    auto caps = Capabilities();
+    caps.primary_display_size = {2622, 1206};
+    service.SetCapabilities(caps);
+    CHECK_EQ(service.ResolutionProfileDisplay().width, 2622);
+    CHECK_EQ(service.ResolutionProfileDisplay().height, 1206);
+    CHECK_TRUE(service.DescriptorFor(SettingId::kForce16By9)->availability == Availability::kHidden);
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  TestVanillaResolutionProfilesAfterRestart();
+  TestResolutionProfileAspectBootPolicy();
   TestRestoreProfilesRoundTrip();
   TestVanillaRespectsOverridesAndRelease();
   TestControllerSchemeRoundTrip();

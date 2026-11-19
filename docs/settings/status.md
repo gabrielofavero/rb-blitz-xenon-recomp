@@ -2,6 +2,23 @@
 
 ## Display profiles and defaults (2026-11-18)
 
+The [native-aspect follow-up](../plans/finished/2026-11-18-native-aspect-resolution-policy.md)
+replaces mixed-aspect cycling with one aspect per boot. Force 16:9 defaults off
+and prompts for restart; resolution quality stays immediate. Saved tiers convert
+to the active aspect. The latest song-load crash investigation found borrowed
+texture wrappers and sampler pointers that were left behind by replacement;
+these are now rebound before old textures are released. The dump identifies
+corrupted UIColor teardown, without proving the original corrupting write.
+Song entry and visual acceptance remain owner checks after the current build.
+
+The [transition integrity follow-up](../plans/finished/2026-11-18-resolution-transition-integrity.md)
+recorded the earlier correction for the magenta transition frame and aspect stretching:
+replacement now precedes native tile capture, and cameras refresh their cached
+projections after a ratio change. Its camera hooks are superseded by the
+native-aspect policy above. Pause and native song confirmations keep
+Gameplay resolution; Help & Options selects Interface until returning to pause.
+Visual acceptance of these corrections remains an owner check.
+
 The [performance and aspect-tier update](../plans/finished/2026-11-18-live-profile-performance-and-aspect-tiers.md)
 adds lower native-aspect choices beside 16:9 and addresses target lifetime and
 cache retention during live changes. The latest owner log records approximately

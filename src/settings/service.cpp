@@ -19,6 +19,7 @@
 
 #include "settings/cvars.h"
 #include "settings/schema.h"
+#include "settings/resolution_profiles.h"
 #include "fs/atomic_file.h"
 
 namespace rb_blitz::settings {
@@ -177,7 +178,16 @@ DocumentStatus Service::Boot(const Profile* legacy, const PathEntry& existing_pa
       *migration = result;
     }
   }
+  const auto force = store_.document().values.find(SettingId::kForce16By9);
+  force_16_by_9_at_boot_ = !schema::IsMobile(release_.platform) &&
+      force != store_.document().values.end() && force->second.kind == ValueKind::kBool &&
+      force->second.boolean;
+  RefreshDescriptors();
   return load_status_;
+}
+
+DisplayMode Service::ResolutionProfileDisplay() const {
+  return ProfileDisplayBasis(capabilities_.primary_display_size, force_16_by_9_at_boot_);
 }
 
 void Service::RefreshDescriptors() {
@@ -185,6 +195,10 @@ void Service::RefreshDescriptors() {
   for (auto& descriptor : descriptors_) {
     const auto it = provider_choices_.find(descriptor.id);
     if (it != provider_choices_.end()) descriptor.choices = it->second;
+    if (!schema::IsMobile(release_.platform) &&
+        (descriptor.id == SettingId::kInterfaceResolution ||
+         descriptor.id == SettingId::kGameplayResolution))
+      descriptor.choices = ProfileResolutionChoices(ResolutionProfileDisplay());
   }
 }
 
@@ -255,6 +269,13 @@ void Service::SetOverrides(std::map<SettingId, Value> values, std::map<SettingId
 }
 
 void Service::SetBootValues(std::map<SettingId, Value> values, std::string reason) {
+  if (const auto force = values.find(SettingId::kForce16By9);
+      force != values.end() && force->second.kind == ValueKind::kBool) {
+    // Recovery may select an earlier working aspect before scenes are loaded.
+    // A normal settings commit never changes the running aspect this way.
+    force_16_by_9_at_boot_ = !schema::IsMobile(release_.platform) && force->second.boolean;
+    RefreshDescriptors();
+  }
   for (auto& [id, value] : values) {
     boot_corrections_[id] = value;
     boot_effective_[id] = std::move(value);
@@ -342,13 +363,23 @@ Value Service::ReconcileEffective(const Descriptor& descriptor, const Value& req
     return it->second;
   }
   const Reconciler* reconciler = reconciler_ != nullptr ? reconciler_ : &default_reconciler_;
+  Value compatible = requested;
+  bool profile_corrected = false;
+  if (!schema::IsMobile(release_.platform) &&
+      (descriptor.id == SettingId::kInterfaceResolution ||
+       descriptor.id == SettingId::kGameplayResolution)) {
+    compatible.kind = ValueKind::kEnum;
+    compatible.text = ReconcileProfileResolutionToken(requested.text, descriptor.choices);
+    profile_corrected = !ValueEquals(compatible, requested);
+  }
   const Reconciliation result =
-      reconciler->Reconcile(descriptor.id, descriptor, requested, capabilities_);
+      reconciler->Reconcile(descriptor.id, descriptor, compatible, capabilities_);
   if (corrected != nullptr) {
-    *corrected = result.corrected;
+    *corrected = result.corrected || profile_corrected;
   }
   if (correction_reason_key != nullptr) {
-    *correction_reason_key = result.correction_reason_key;
+    *correction_reason_key = profile_corrected && result.correction_reason_key.empty()
+        ? "settings.graphics.for_display" : result.correction_reason_key;
   }
   return result.ok ? result.effective : descriptor.compiled_default;
 }
@@ -547,6 +578,11 @@ ValidationResult Service::StageRestore(uint64_t txn, RestoreProfile profile) {
     Value hidden;
     hidden.kind = ValueKind::kList;
     hidden.list = {"rbbz_rhythmverse"};
+    // Stage a quality tier the current menu can accept. Its height maps to the
+    // 16:9 equivalent when the saved aspect policy takes effect after restart.
+    Value vanilla_resolution;
+    vanilla_resolution.kind = ValueKind::kEnum;
+    vanilla_resolution.text = ProfileResolutionChoices(ResolutionProfileDisplay()).back().token;
     const std::map<SettingId, Value> vanilla{
         {SettingId::kTarget, token("common")},
         {SettingId::kStartup, token("normal")},
@@ -559,9 +595,10 @@ ValidationResult Service::StageRestore(uint64_t txn, RestoreProfile profile) {
         {SettingId::kDisplay, token("fullscreen")},
         {SettingId::kOrientation, token("landscape")},
         {SettingId::kAspectRatio, token("16:9")},
+        {SettingId::kForce16By9, boolean(true)},
         {SettingId::kRenderScale, token("1x")},
-        {SettingId::kInterfaceResolution, token("1280x720")},
-        {SettingId::kGameplayResolution, token("1280x720")},
+        {SettingId::kInterfaceResolution, vanilla_resolution},
+        {SettingId::kGameplayResolution, vanilla_resolution},
         {SettingId::kVsync, boolean(true)},
         {SettingId::kAntiAliasing, token("native")},
         {SettingId::kFiltering, token("native")},

@@ -9,6 +9,27 @@ using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("pause and native song confirmations retain the gameplay resolution");
+  for (const auto screen : {"game_screen", "pause_confirm_quit_song_screen",
+                            "pause_confirm_restart_song_screen"})
+    CHECK_TRUE(GameplayResolutionScreen(screen));
+  for (const auto screen : {"", "splash_screen", "loading_screen", "song_select_screen",
+                            "settings_screen", "settings_pause_screen",
+                            "settings_av_pause_screen", "settings_display_pause_screen",
+                            "settings_resolution_pause_screen", "settings_scale_pause_screen",
+                            "settings_display_confirm_pause_screen", "settings_restart_pause_screen",
+                            "av_options_pause_screen", "controller_config_pause_screen",
+                            "tutorials_pause_screen", "pause_credits_screen"})
+    CHECK_FALSE(GameplayResolutionScreen(screen));
+  BeginCase("pause switches resolution for inline Help and Options and returns to gameplay");
+  CHECK_TRUE(GameplayResolutionScreen("game_screen", "pause_panel", "pause.lst"));
+  CHECK_FALSE(GameplayResolutionScreen("game_screen", "pause_panel", "options.lst"));
+  CHECK_FALSE(GameplayResolutionScreen("settings_general_pause_screen", "settings_general_pause_panel",
+                                      "options.lst"));
+  CHECK_FALSE(GameplayResolutionScreen("game_screen", "pause_panel", "options.lst"));
+  CHECK_TRUE(GameplayResolutionScreen("game_screen", "pause_panel", "pause.lst"));
+  CHECK_TRUE(GameplayResolutionScreen("game_screen", "game_panel"));
+
   BeginCase("dialogs own their prompts and background footer targets cannot receive presses");
   CHECK_TRUE(DialogScopeFor("song_select_panel", "shortcuts.lst") == MenuDialogScope::kShortcuts);
   CHECK_TRUE(DialogScopeFor("song_select_panel", "songs.lst") == MenuDialogScope::kNone);

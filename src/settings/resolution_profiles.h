@@ -28,33 +28,44 @@ inline DisplayMode ProfileResolution(std::string_view token, DisplayMode native)
   return size;
 }
 
-// Native remains a stable intent across monitor changes. Lower offers preserve
-// its aspect or use 16:9, fit the current screen, and stop at 720 pixels high.
-inline std::vector<Choice> ProfileResolutionChoices(DisplayMode native) {
+inline DisplayMode ProfileDisplayBasis(DisplayMode native, bool force_16_by_9) {
   if (native.width <= 0 || native.height <= 0) native = {1280, 720};
+  if (!force_16_by_9) return native;
+  const int units = std::max(1, std::min(native.width / 16, native.height / 9));
+  return {units * 16, units * 9};
+}
+
+// Native remains a stable intent across monitor changes. Every lower offer
+// preserves the active display basis, with a 720-pixel height floor.
+inline std::vector<Choice> ProfileResolutionChoices(DisplayMode native) {
+  native = ProfileDisplayBasis(native, false);
   std::vector<Choice> choices{{"native", ResolutionToken(native)}};
-  std::vector<DisplayMode> sizes;
-  const int units = std::min(native.width / 16, native.height / 9);
-  if (units >= 80) sizes.push_back({units * 16, units * 9});
-  for (const auto size : {DisplayMode{7680,4320}, {5120,2880}, {3840,2160},
-                          {3200,1800}, {2560,1440}, {1920,1080}, {1600,900}, {1280,720}}) {
-    if (size.width <= native.width && size.height <= native.height) sizes.push_back(size);
-    if (size.height < native.height) {
+  for (const int height : {4320, 2880, 2160, 1800, 1440, 1080, 900, 720}) {
+    if (height < native.height) {
       const auto width = static_cast<int32_t>(
-          (int64_t(native.width) * size.height + native.height / 2) / native.height);
-      if (width > 0 && width <= native.width) sizes.push_back({width, size.height});
+          (int64_t(native.width) * height + native.height / 2) / native.height);
+      if (width > 0 && width <= native.width) {
+        const auto token = ResolutionToken({width, height});
+        choices.push_back({token, token});
+      }
     }
   }
-  std::sort(sizes.begin(), sizes.end(), [](auto a, auto b) {
-    return a.height != b.height ? a.height > b.height : a.width > b.width;
-  });
-  for (const auto size : sizes) {
-    const auto token = ResolutionToken(size);
-    if ((size.width == native.width && size.height == native.height) ||
-        std::any_of(choices.begin(), choices.end(), [&](const auto& c) { return c.token == token; })) continue;
-    choices.push_back({token, token});
-  }
   return choices;
+}
+
+// Retain a saved quality tier when the aspect policy or monitor changes. Width
+// is derived from the active basis; stored requests remain available on disk.
+inline std::string ReconcileProfileResolutionToken(std::string_view token,
+                                                   const std::vector<Choice>& choices) {
+  if (token == "native" || choices.empty()) return "native";
+  for (const auto& choice : choices) if (choice.token == token) return std::string(token);
+  const auto requested = ProfileResolution(token, {});
+  if (requested.height <= 0) return "native";
+  for (const auto& choice : choices) {
+    const auto size = ProfileResolution(choice.label, {});
+    if (size.height > 0 && size.height <= requested.height) return choice.token;
+  }
+  return choices.back().token;
 }
 
 inline DisplayMode ScaledProfileResolution(DisplayMode native, int tenths) {
@@ -73,8 +84,7 @@ inline bool IsResolutionProfile(SettingId id) {
 inline void AddSafeResolutionProfiles(std::map<SettingId, Value>& values, DisplayMode native) {
   Value desktop;
   desktop.kind = ValueKind::kEnum;
-  desktop.text = native.width >= 1280 && native.height >= 720 &&
-                 (native.width != 1280 || native.height != 720) ? "1280x720" : "native";
+  desktop.text = ProfileResolutionChoices(native).back().token;
   values[SettingId::kInterfaceResolution] = desktop;
   values[SettingId::kGameplayResolution] = desktop;
   Value mobile;

@@ -2,6 +2,15 @@
 
 ## Interface and gameplay profiles (2026-11-18)
 
+The [native-aspect policy](../plans/finished/2026-11-18-native-aspect-resolution-policy.md)
+supersedes mixed-aspect resolution cycling. Desktop profiles offer only the
+display's proportions. Force 16:9 is the third Resolution row, defaults off,
+and uses the existing restart prompt. After restart, both lists use fitted
+16:9 equivalents. Resolution edits remain immediate within the boot's aspect;
+changing Force 16:9 does not change current lists or loaded scenes until restart.
+Saved explicit tiers convert by height to the active aspect, preserving the
+original stored request. Native remains a stable display-following token.
+
 The next owner run found sustained GPU fence stalls after several live changes.
 The [performance and aspect-tier record](../plans/finished/2026-11-18-live-profile-performance-and-aspect-tiers.md)
 tracks raw device-binding lifetime and obsolete GPU-cache retention corrections.
@@ -16,22 +25,46 @@ context changes keep the current window and fit each active aspect with bars.
 
 [static] The visible desktop controls are Resolution -> Interface / Gameplay.
 Each defaults to `native`, resolving the current monitor on each boot. The other
-choices include its fitted 16:9 equivalent, standard 16:9 sizes, and lower sizes
-that retain the native aspect, down to 720 pixels high. Manual choices persist
-independently. For example, 3440x1440 includes both 1720x720 and 1280x720. Mobile hides
+choices retain the selected aspect down to 720 pixels high. Manual choices persist
+independently. For example, 3440x1440 offers 1720x720 with Force 16:9 off;
+with it on, the fitted 2560x1440 basis offers 1280x720. Mobile hides
 Resolution and offers Render Scale -> Interface / Gameplay, each a guest audio
 wheel with six positions from 0.5 through 1.0; both default to 1.0.
 
 `src/settings/resolution_profiles.h` owns offers and guest-frame arithmetic.
 The SDK multiplier remains fixed for the boot. `src/hooks/render_settings.cpp`
-replaces guest color/depth targets and resolve textures at BeginDrawing
-(`sub_823F3C40`) when the selected context needs a different frame. It publishes
+replaces guest color/depth targets and resolve textures before lazy frame begin
+(`sub_82203260`, renderer byte +247 clear), before native tiling snapshots its
+rectangles. BeginDrawing is too late for callers that already opened the frame.
+It publishes
 all replacements together, releases resources through the guest D3D lifetime
 route, and retains the previous frame on allocation failure. Interface menus
-and live gameplay select separate profiles. The application ledger acknowledges
+and gameplay select separate profiles. Pause and native song quit/restart
+confirmations keep Gameplay; entering Help & Options and its subpages selects
+Interface, and returning to pause restores Gameplay. Input routing continues
+to distinguish paused input from a live song independently of this policy.
+The inline pause Help & Options root is still `game_screen`/`pause_panel`:
+focus on `options.lst` selects Interface, while `pause.lst` retains Gameplay.
+The application ledger acknowledges
 an edit only after its active frame accepts it; inactive contexts stay queued.
 Recovery seeds conservative effective profiles in both contexts while retaining
 the saved requests. The profile renderer remains active for subsequent edits.
+
+Aspect literals are selected before scenes load and remain fixed across live
+quality changes, including ratios whose rounded lower tiers differ by a pixel.
+The earlier camera refresh hooks are retired: the next owner run still reported
+unchanged proportions, so live aspect changes are not considered reliable.
+The [transition integrity record](../plans/finished/2026-11-18-resolution-transition-integrity.md)
+retains the earlier investigation and its unverified conclusions.
+
+Replacement also refreshes the existing native RndTex wrappers at renderer
++824/+828/+832 via `sub_823ED1D8`, preserving their object identities. All 26
+native sampler slots that refer to old textures are rebound through
+`sub_825087A8` before old resources are released. Both hold borrowed pointers:
+native sampler rebinding can write through its previous resource pointer, so
+releasing it first risks writes into reused guest objects. The song-start crash
+dump shows a corrupted UIColor child pointer, but does not prove which write
+originally corrupted it. Visual and song-start acceptance remain unverified.
 
 Tile boundaries use 32-pixel alignment separately from the visible frame width.
 Dimensions are rounded to the nearest guest pixel when they are not divisible

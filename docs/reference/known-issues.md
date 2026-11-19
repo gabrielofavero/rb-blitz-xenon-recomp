@@ -21,11 +21,29 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
-**Display profile acceptance (2026-11-18):** the next owner run confirms live
+**Resolution aspect and song-start acceptance (2026-11-18):** the latest run still
+reports unchanged proportions and crashes entering gameplay. The
+[native-aspect policy](../plans/finished/2026-11-18-native-aspect-resolution-policy.md)
+keeps aspect fixed until restart, exposes Force 16:9 separately, and rebinds
+borrowed texture wrappers and sampler slots before releasing retired resources.
+The dump identifies a corrupted UIColor child pointer; the original writer is
+not captured. The rebuilt game needs repeated resolution switches followed by
+song entry and pause/Help & Options confirmation. Crash-free runtime acceptance
+is not established by host tests.
+
+**Display profile acceptance (2026-11-18):** an earlier owner run confirms live
 changes but reports sustained GPU fence stalls, including after restoring native.
 The [performance correction](../plans/finished/2026-11-18-live-profile-performance-and-aspect-tiers.md)
 addresses stale target bindings and obsolete GPU-cache retention; performance
 acceptance of the rebuilt game remains unverified.
+
+The later recording and `rb_blitz_007.log` expose a corrupted transition frame
+and stale camera aspect projections. The
+[transition integrity follow-up](../plans/finished/2026-11-18-resolution-transition-integrity.md)
+moves profile replacement before tile capture and refreshes each camera when
+the applied ratio changes. Pause retains Gameplay resolution until Help &
+Options opens. These changes require owner visual confirmation; the earlier
+performance measurements remain historical evidence, not a verdict on this build.
 
 Earlier findings: the first owner run exposed a void
 texture-lock status error and missing deferred SDK setting ownership. The
