@@ -6,7 +6,7 @@ _rbblitz_dev() {
         run-game-normal) shift; set -- run-normal "$@" ;;
         run-game-window) shift; set -- run-window "$@" ;;
         run-game-no-dlc) shift; set -- run-no-dlc "$@" ;;
-        run-game-portrait) shift; set -- run-portrait "$@" ;;
+        run-game-mobile) shift; set -- run-mobile "$@" ;;
         run-game-quick) shift; set -- quick "$@" ;;
     esac
     if [ "$RBBLITZ_DEV_PLATFORM" = windows ]; then
@@ -29,7 +29,7 @@ run-game() { _rbblitz_dev run "$@"; }
 run-game-normal() { run-game --normal "$@"; }
 run-game-window() { run-game --window "$@"; }
 run-game-no-dlc() { run-game --no-dlc "$@"; }
-run-game-portrait() { run-game --portrait "$@"; }
+run-game-mobile() { run-game --mobile "$@"; }
 run-game-quick() { run-game --quick "$@"; }
 build-installer() { _rbblitz_dev build-installer "$@"; }
 dev-help() { _rbblitz_dev help; }

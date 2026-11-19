@@ -16,16 +16,16 @@ HELP = """Usage: bash ./dev.sh [--platform linux|mac|ios|windows] ACTION [argume
 Or load commands in Bash/zsh: source ./dev.sh
 
   build-game [--configure] [build arguments]
-  run-game [--portrait] [--touch] [--window] [--normal] [--no-dlc] [engine arguments]
+  run-game [--mobile] [--touch] [--window] [--normal] [--no-dlc] [engine arguments]
   run-game-quick                 Windowed, empty DLC, skip offline dialogs
   build-installer [packager arguments]
   dev-help
 
-Actions: build, run (or run-game), run-normal, run-window, run-portrait,
+Actions: build, run (or run-game), run-normal, run-window, run-mobile,
          run-no-dlc (or no-dlc), quick, build-installer (or installer), help
 
-Portrait runs copy the selected settings under out/dev-portrait and force a
-16:9 source with force_16_by_9=true. Saved settings are never edited.
+Mobile runs use mobile settings and mouse-as-touch in a portrait window.
+Settings are copied under out/dev-mobile; saved settings are never edited.
 --touch starts with touch prompts and treats mouse activity as touch input.
 DLC follows native paths.toml, with the legacy profile as a fallback.
 Extra engine arguments follow defaults and retain spaces and punctuation.
@@ -36,7 +36,7 @@ iOS is selected explicitly on a Mac: bash ./dev.sh --platform ios build
   build / build-installer       Existing signed/unsigned IPA builder arguments
   run --device ID [--bundle-id ID] [engine arguments]
 iOS launches an already installed app through Xcode devicectl. Desktop window
-and portrait tags do not apply to iOS; use its on-device display settings.
+and mobile preview tags do not apply to iOS; use its on-device display settings.
 Unix quick runs leave title-screen input to the player.
 """
 
@@ -114,23 +114,22 @@ def set_scalars(text: str, section: str, values: dict[str, str]) -> str:
     return text[:table.start()] + replacement + text[table.end():] if table else text.rstrip() + "\n\n" + replacement
 
 
-def portrait_profile(source: Path) -> Path:
+def mobile_profile(source: Path) -> Path:
     settings_name = "settings.toml" if source.name == "launcher.toml" else source.stem + ".game-settings.toml"
     settings = source.with_name(settings_name)
     text = settings.read_text(encoding="utf-8") if settings.is_file() else "schema_version = 1\n"
     tomllib.loads(text)  # Refuse malformed input before creating a session.
     text = set_scalars(text, "graphics", {"interface_orientation": "'portrait'",
-                                          "gameplay_orientation": "'portrait'", "aspect_ratio": "'16:9'",
-                                          "force_16_by_9": "true"})
+                                          "gameplay_orientation": "'portrait'"})
     text = set_scalars(text, "provenance", {f"graphics.{key}": "'manual'" for key in
-                                          ("interface_orientation", "gameplay_orientation", "aspect_ratio", "force_16_by_9")})
-    parent = ROOT / "out/dev-portrait"
+                                          ("interface_orientation", "gameplay_orientation")})
+    parent = ROOT / "out/dev-mobile"
     parent.mkdir(parents=True, exist_ok=True)
     session = Path(tempfile.mkdtemp(dir=parent))
     if source.is_file():
         shutil.copyfile(source, session / "launcher.toml")
     (session / "settings.toml").write_text(text, encoding="utf-8")
-    print(f"Portrait with 16:9 source; settings copy: {session}", flush=True)
+    print(f"Mobile preview; settings copy: {session}", flush=True)
     return session / "launcher.toml"
 
 
@@ -184,18 +183,18 @@ def build_game(target: str, args: list[str]) -> int:
 
 
 def run_game(target: str, args: list[str]) -> int:
-    tags = {"--portrait", "--touch", "--window", "--windowed", "--normal", "--no-dlc", "--quick"}
+    tags = {"--mobile", "--touch", "--window", "--windowed", "--normal", "--no-dlc", "--quick"}
     selected = set(args) & tags
     forward = [arg for arg in args if arg not in tags]
     if target == "ios":
-        if selected & {"--portrait", "--window", "--windowed", "--quick"}:
-            raise ValueError("Desktop window/portrait/quick tags are unavailable on iOS; use on-device display settings.")
+        if selected & {"--mobile", "--window", "--windowed", "--quick"}:
+            raise ValueError("Desktop window/mobile/quick tags are unavailable on iOS; use on-device display settings.")
         device, forward = take_option(forward, ("--device",), os.environ.get("RBBLITZ_IOS_DEVICE", ""))
         bundle, forward = take_option(forward, ("--bundle-id",), "io.github.gabrielofavero.rbblitz")
         if not device:
             raise ValueError("iOS launch requires --device ID or RBBLITZ_IOS_DEVICE.")
         defaults = ["--blitz.compatibility.ultimate_mode=0"] if "--normal" in selected else []
-        if "--touch" in selected:
+        if selected & {"--touch", "--mobile"}:
             defaults += ["--blitz.diagnostics.mouse_as_touch=true"]
         if "--no-dlc" in selected:
             defaults += ["--blitz.runtime.dlc_root=/nonexistent-rb-blitz-dlc",
@@ -207,11 +206,11 @@ def run_game(target: str, args: list[str]) -> int:
     if not binary.is_file():
         raise ValueError(f"Game executable is missing: {binary}. Run build-game first.")
     defaults = [f"--title.game_root={ROOT / 'game'}"]
-    if "--touch" in selected:
+    if selected & {"--touch", "--mobile"}:
         defaults += ["--blitz.diagnostics.mouse_as_touch=true"]
     if "--normal" in selected:
         defaults += ["--blitz.compatibility.ultimate_mode=0"]
-    if selected & {"--window", "--windowed", "--portrait", "--quick"}:
+    if selected & {"--window", "--windowed", "--mobile", "--quick"}:
         defaults += ["--ui.fullscreen=false"]
     if selected & {"--no-dlc", "--quick"}:
         empty = ROOT / "out/no-dlc"
@@ -222,8 +221,9 @@ def run_game(target: str, args: list[str]) -> int:
     profile, remaining = take_option(forward, ("--launcher_profile", "--blitz.runtime.launcher_profile"))
     source = profile_path(target, build, profile)
     defaults += dlc_arguments(target, build, source, defaults + forward)
-    if "--portrait" in selected:
-        forward = [f"--blitz.runtime.launcher_profile={portrait_profile(source)}", *remaining]
+    if "--mobile" in selected:
+        defaults += ["--blitz.diagnostics.mobile_preview=true"]
+        forward = [f"--blitz.runtime.launcher_profile={mobile_profile(source)}", *remaining]
     return execute([str(binary), *defaults, *forward], build)
 
 
@@ -237,7 +237,7 @@ def main(argv: list[str]) -> int:
         raise ValueError(f"{target} commands require a Mac host with the native Apple tools.")
     if target == "linux" and platform.system() != "Linux":
         raise ValueError("Linux commands require a native Linux host.")
-    shortcuts = {"run-normal": "--normal", "run-window": "--window", "run-portrait": "--portrait",
+    shortcuts = {"run-normal": "--normal", "run-window": "--window", "run-mobile": "--mobile",
                  "run-no-dlc": "--no-dlc", "no-dlc": "--no-dlc", "quick": "--quick"}
     if action in shortcuts:
         argv.insert(0, shortcuts[action])

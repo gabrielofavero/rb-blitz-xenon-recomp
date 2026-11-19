@@ -567,7 +567,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
       if (landscape.width < landscape.height) std::swap(landscape.width, landscape.height);
       profile_draw_scale_ = std::max((landscape.width + 1919) / 1920,
                                      (landscape.height + 719) / 720);
-      const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings().platform);
+      const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings());
       const auto profile_pixels = mobile
           ? ScaledProfileResolution(native, service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
           : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text,
@@ -638,7 +638,7 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
       // Internal pixel plans may exceed the display's old preset offer gate.
       // Rebuild them from recovered controls rather than clamping their shape.
       if (profile_draw_scale_) {
-        const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings().platform);
+        const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings());
         const auto native = capability_snapshot_.primary_display_size;
         const auto pixels = mobile
             ? ScaledProfileResolution(native, selected.at(SettingId::kInterfaceRenderScale).integer)
@@ -1179,7 +1179,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
 #endif
     if (profile_draw_scale_ && service_) {
       const auto native = capability_snapshot_.primary_display_size;
-      const auto pixels = schema::IsMobile(schema::CurrentReleaseSettings().platform)
+      const auto pixels = schema::IsMobile(schema::CurrentReleaseSettings())
           ? ScaledProfileResolution(native, service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
           : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text,
                               service_->ResolutionProfileDisplay());
@@ -1254,7 +1254,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
                             SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale})
         profiles[id] = service_->EffectiveValue(id);
       ConfigureResolutionProfiles(service_->ResolutionProfileDisplay(), screen_plan_.draw_scale,
-          schema::IsMobile(schema::CurrentReleaseSettings().platform), profiles);
+          schema::IsMobile(schema::CurrentReleaseSettings()), profiles);
       WriteRuntimeSetting("gpu.xenos.present_source_aspect", "true", rex::SettingLayer::kTitle);
       WriteRuntimeSetting("gpu.xenos.clear_caches_on_present_resize", "true", rex::SettingLayer::kTitle);
     }

@@ -513,6 +513,11 @@ rex::Setting<bool> rb_blitz::settings::title::mouse_as_touch{
     false, "Start with touch interface prompts and treat mouse activity as touch.",
     rex::kUntilLaunch, rex::kNoSave};
 
+rex::Setting<bool> rb_blitz::settings::title::mobile_preview{
+    &rb_blitz::settings::TitleSettingOwner("blitz.diagnostics"), "mobile_preview",
+    false, "Use the mobile settings menu and resolution profiles on desktop.",
+    rex::kUntilLaunch, rex::kNoSave};
+
 rex::Setting<std::string> rb_blitz::settings::title::startup_mode{
     &rb_blitz::settings::TitleSettingOwner("blitz.runtime"), "startup_mode",
 "normal",

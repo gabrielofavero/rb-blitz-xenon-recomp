@@ -41,21 +41,21 @@ class DevCommandsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             dev.preset("linux", "riscv64")
 
-    def test_portrait_preserves_source_and_forces_resolution_profile(self):
+    def test_mobile_preserves_source_and_forces_portrait(self):
         source = self.root / "custom.toml"
         original = "# profile\n[launch]\ntarget = 'ultimate'\n"
         source.write_text(original)
         settings = source.with_name("custom.game-settings.toml")
         text = "schema_version = 1\n# retain this\n[graphics]\nforce_16_by_9 = false\naspect_ratio = 'auto'\nrenderer = 'vulkan'\n[provenance]\n'graphics.force_16_by_9' = 'automatic'\n[controller]\nscheme = 'xbox-series'\n"
         settings.write_text(text)
-        copied = dev.portrait_profile(source)
+        copied = dev.mobile_profile(source)
         values = tomllib.loads(copied.with_name("settings.toml").read_text())
         self.assertEqual(values["graphics"]["interface_orientation"], "portrait")
         self.assertEqual(values["graphics"]["gameplay_orientation"], "portrait")
-        self.assertEqual(values["graphics"]["aspect_ratio"], "16:9")
-        self.assertIs(values["graphics"]["force_16_by_9"], True)
+        self.assertEqual(values["graphics"]["aspect_ratio"], "auto")
+        self.assertIs(values["graphics"]["force_16_by_9"], False)
         self.assertEqual(values["graphics"]["renderer"], "vulkan")
-        self.assertEqual(values["provenance"]["graphics.force_16_by_9"], "manual")
+        self.assertEqual(values["provenance"]["graphics.force_16_by_9"], "automatic")
         self.assertEqual(values["controller"]["scheme"], "xbox-series")
         self.assertEqual(settings.read_text(), text)
         self.assertEqual(source.read_text(), original)
@@ -97,17 +97,19 @@ class DevCommandsTests(unittest.TestCase):
         build.mkdir(parents=True)
         (build / "rb_blitz").touch()
         with patch.object(dev.platform, "machine", return_value="x86_64"), patch.object(dev, "execute", return_value=0) as run:
-            dev.run_game("linux", ["--portrait", "--touch", "--no-dlc", "--normal", "--log.file_name=path with spaces;$(echo nope)"])
+            dev.run_game("linux", ["--mobile", "--no-dlc", "--normal", "--log.file_name=path with spaces;$(echo nope)"])
         args, cwd = run.call_args.args
         self.assertEqual(cwd, build)
         self.assertIn("--ui.fullscreen=false", args)
         self.assertIn("--blitz.diagnostics.mouse_as_touch=true", args)
+        self.assertIn("--blitz.diagnostics.mobile_preview=true", args)
+        self.assertNotIn("--mobile", args)
         self.assertNotIn("--touch", args)
         self.assertIn("--blitz.compatibility.ultimate_mode=0", args)
         self.assertIn("--log.file_name=path with spaces;$(echo nope)", args)
         self.assertIn(f"--blitz.runtime.dlc_root={self.root / 'out/no-dlc'}", args)
         copied = Path(next(arg.split("=", 1)[1] for arg in args if arg.startswith("--blitz.runtime.launcher_profile=")))
-        self.assertTrue(tomllib.loads(copied.with_name("settings.toml").read_text())["graphics"]["force_16_by_9"])
+        self.assertEqual(tomllib.loads(copied.with_name("settings.toml").read_text())["graphics"]["interface_orientation"], "portrait")
 
     def test_touch_is_opt_in_and_explicit_engine_override_follows_default(self):
         for target in ("linux", "mac"):
@@ -117,6 +119,7 @@ class DevCommandsTests(unittest.TestCase):
             with patch.object(dev.platform, "machine", return_value="x86_64"), patch.object(Path, "home", return_value=self.root), patch.object(dev, "execute", return_value=0) as run:
                 dev.run_game(target, [])
                 self.assertFalse(any("mouse_as_touch" in arg for arg in run.call_args.args[0]))
+                self.assertFalse(any("mobile_preview" in arg for arg in run.call_args.args[0]))
                 override = "--blitz.diagnostics.mouse_as_touch=false"
                 dev.run_game(target, ["--touch", override])
                 args = run.call_args.args[0]
@@ -153,14 +156,14 @@ uname() { if [ "$1" = -s ]; then printf '%s' "$TEST_HOST"; else printf arm64; fi
 source "$1"
 printf '%s\\0' "$RBBLITZ_DEV_PLATFORM"
 _rbblitz_dev() { printf '%s\\0' "$@"; }
-run-game-portrait "$2"
+run-game-mobile "$2"
 '''
         for host, target in (("MINGW64_NT", "windows"), ("Linux", "linux"), ("Darwin", "mac")):
             env = dict(SHELL_ENV, TEST_HOST=host)
             env.pop("RBBLITZ_DEV_PLATFORM", None)
             result = subprocess.run([BASH, "-c", script, "dev-test", (REPOSITORY / "dev.sh").as_posix(), argument],
                                     env=env, capture_output=True, check=True)
-            self.assertEqual(result.stdout.split(b"\0")[:-1], [target.encode(), b"run", b"--portrait", argument.encode()])
+            self.assertEqual(result.stdout.split(b"\0")[:-1], [target.encode(), b"run", b"--mobile", argument.encode()])
 
     @unittest.skipUnless(BASH, "Bash is unavailable")
     def test_shell_dispatch_propagates_exit_and_preserves_arguments(self):

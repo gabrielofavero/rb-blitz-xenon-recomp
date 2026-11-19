@@ -6,7 +6,7 @@ the log excerpt that blocker entries in [bringup-log.md](../history/bringup-log.
 Everything below is PowerShell, run from the repository root unless noted.
 
 For shared development shortcuts, source the root `dev.sh` in Bash or zsh (Git
-Bash on Windows), then use `build-game`, `run-game --portrait`, or
+Bash on Windows), then use `build-game`, `run-game --mobile`, or
 `build-installer`. The dispatcher loads the native platform helper; iOS can be
 selected explicitly on a Mac. See the [development command guide](../../scripts/dev/README.md)
 for prerequisites, DLC discovery, portrait settings copies, and platform limits.

@@ -122,6 +122,7 @@ extern rex::Setting<bool> touch_buttons;
 extern rex::Setting<std::string> touch_motion_deploy;
 extern rex::Setting<bool> touch_preview;
 extern rex::Setting<bool> mouse_as_touch;
+extern rex::Setting<bool> mobile_preview;
 extern rex::Setting<std::string> startup_mode;
 extern rex::Setting<bool> song_load_crash_recovery;
 extern rex::Setting<bool> song_load_recovered;

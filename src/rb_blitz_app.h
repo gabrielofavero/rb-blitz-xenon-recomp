@@ -204,6 +204,7 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
     REX_TRY_VOID(SetTitleDefault(title::dlc_root, (ios_documents_root_ / "DLCs").string()));
 #endif
 #endif
+    schema::SetMobilePreviewEnabled(title::mobile_preview.Get());
     profile_apply_ = rb_blitz::profile::ApplyProfileSettings();
     settings_boot_ = std::make_unique<boot::SettingsBoot>();
     boot::SettingsBoot::SetCurrent(settings_boot_.get());

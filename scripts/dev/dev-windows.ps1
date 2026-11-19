@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('build', 'run', 'run-game', 'run-normal', 'run-window', 'run-no-dlc', 'no-dlc', 'run-portrait', 'quick', 'installer', 'build-installer', 'help', '--help', '-h')]
+    [ValidateSet('build', 'run', 'run-game', 'run-normal', 'run-window', 'run-no-dlc', 'no-dlc', 'run-mobile', 'quick', 'installer', 'build-installer', 'help', '--help', '-h')]
     [string]$Action = 'help',
 
     [Parameter(Position = 1, ValueFromRemainingArguments = $true)]
@@ -133,7 +133,7 @@ function Run-Blitz {
 
     $defaults = @()
     $forward = @()
-    $portrait = $false
+    $mobile = $false
     $quick = $false
     foreach ($arg in $Extra) {
         switch ($arg) {
@@ -145,7 +145,7 @@ function Run-Blitz {
                 New-Item -ItemType Directory -Force -Path $emptyDlc -ErrorAction Stop | Out-Null
                 $defaults += "--dlc_library=$emptyDlc", "--dlc_root=$emptyDlc"
             }
-            '--portrait' { $portrait = $true }
+            '--mobile' { $mobile = $true }
             '--touch' { $defaults += '--blitz.diagnostics.mouse_as_touch=true' }
             '--quick' { $quick = $true }
             default { $forward += $arg }
@@ -154,9 +154,9 @@ function Run-Blitz {
     if (-not $quick) {
         $defaults += @(Get-BlitzDlcArguments -Extra @($defaults + $forward))
     }
-    if ($portrait) {
-        $prepared = New-BlitzPortraitArguments -Extra $forward
-        $defaults += '--ui.fullscreen=false'
+    if ($mobile) {
+        $prepared = New-BlitzMobileArguments -Extra $forward
+        $defaults += '--ui.fullscreen=false', '--blitz.diagnostics.mobile_preview=true', '--blitz.diagnostics.mouse_as_touch=true'
         $forward = @($prepared)
     }
     if ($quick) {
@@ -264,7 +264,7 @@ for index, name in enumerate([*files, profile]):
     }
 }
 
-function New-BlitzPortraitArguments {
+function New-BlitzMobileArguments {
     # Orientation has no engine flag. Use the supported profile route with a
     # fresh settings copy for each run; never rewrite the source profile.
     param([string[]]$Extra)
@@ -316,9 +316,9 @@ function New-BlitzPortraitArguments {
     # Change only these scalar keys in the copied tables, keeping other settings.
     foreach ($section in @('graphics', 'provenance')) {
         $values = if ($section -eq 'graphics') {
-            [ordered]@{ interface_orientation = "'portrait'"; gameplay_orientation = "'portrait'"; aspect_ratio = "'16:9'"; force_16_by_9 = "true" }
+            [ordered]@{ interface_orientation = "'portrait'"; gameplay_orientation = "'portrait'" }
         } else {
-            [ordered]@{ "'graphics.interface_orientation'" = "'manual'"; "'graphics.gameplay_orientation'" = "'manual'"; "'graphics.aspect_ratio'" = "'manual'"; "'graphics.force_16_by_9'" = "'manual'" }
+            [ordered]@{ "'graphics.interface_orientation'" = "'manual'"; "'graphics.gameplay_orientation'" = "'manual'" }
         }
         $table = [regex]::Match($text, '(?ms)^\[' + $section + '\][^\r\n]*\r?\n(?<body>.*?)(?=^\[|\z)')
         $body = if ($table.Success) { $table.Groups['body'].Value } else { '' }
@@ -338,13 +338,13 @@ function New-BlitzPortraitArguments {
         } else { $text = $text.TrimEnd() + "`r`n`r`n" + $replacement }
     }
 
-    $sessionDir = Join-Path $Global:RbBlitzRoot ('out\dev-portrait\' + [guid]::NewGuid().ToString('N'))
+    $sessionDir = Join-Path $Global:RbBlitzRoot ('out\dev-mobile\' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $sessionDir -ErrorAction Stop | Out-Null
     if (Test-Path -LiteralPath $sourceProfile) {
         Copy-Item -LiteralPath $sourceProfile -Destination (Join-Path $sessionDir 'launcher.toml') -ErrorAction Stop
     }
     [IO.File]::WriteAllText((Join-Path $sessionDir 'settings.toml'), $text, [Text.UTF8Encoding]::new($false))
-    Write-Host "Portrait 9:16 (16:9 source); settings copy: $sessionDir"
+    Write-Host "Mobile preview; settings copy: $sessionDir"
     "--launcher_profile=$(Join-Path $sessionDir 'launcher.toml')"
     $forward
 }
@@ -366,9 +366,9 @@ function Run-BlitzWindow {
     Run-Blitz '--window' @Extra
 }
 
-function Run-BlitzPortrait {
+function Run-BlitzMobile {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Extra)
-    Run-Blitz '--portrait' @Extra
+    Run-Blitz '--mobile' @Extra
 }
 
 function Run-BlitzNormal {
@@ -559,8 +559,8 @@ In Bash, load with: source ./dev.sh
   dev-help
 
 Launch options (combine as needed):
-  --portrait       Windowed 9:16 portrait using the game's 16:9 source/layout.
-                   Copies the selected profile/settings into out\dev-portrait
+  --mobile         Windowed portrait with mobile settings and mouse-as-touch.
+                   Copies the selected profile/settings into out\dev-mobile
                    each run. Changes there do not update the source settings.
   --touch          Start with touch prompts; mouse activity selects the touch UI.
   --window         Desktop window (--windowed is also accepted).
@@ -578,18 +578,18 @@ profile when no checkout DLC root is configured. Explicit DLC arguments take pri
 Builds refuse to run while another build or the game uses the release tree.
 
 Examples:
-  bash ./dev.sh run --portrait --no-dlc
+  bash ./dev.sh run --mobile --no-dlc
   bash ./dev.sh run game --no-dlc
-  run-game --portrait --normal --no-dlc
+  run-game --mobile --normal --no-dlc
   run-game --window --vsync=false
   run-game --quick -NoSkipSplash
   run-game --help
 
 Existing aliases still work:
   run-game-normal, run-game-window, run-game-no-dlc, run-game-quick
-  run-game-portrait
+  run-game-mobile
 Dispatcher shortcuts:
-  run-game, run-normal, run-window, run-no-dlc, no-dlc, run-portrait, quick
+  run-game, run-normal, run-window, run-no-dlc, no-dlc, run-mobile, quick
   installer (same as build-installer), help
 '@
 }
@@ -600,7 +600,7 @@ Set-Alias -Name run-game-normal -Value Run-BlitzNormal -Force
 Set-Alias -Name run-game-window -Value Run-BlitzWindow -Force
 Set-Alias -Name run-game-quick -Value Run-BlitzQuick -Force
 Set-Alias -Name run-game-no-dlc -Value Run-BlitzNoDlc -Force
-Set-Alias -Name run-game-portrait -Value Run-BlitzPortrait -Force
+Set-Alias -Name run-game-mobile -Value Run-BlitzMobile -Force
 Set-Alias -Name build-installer -Value Invoke-InstallerBuild -Force
 Set-Alias -Name dev-help -Value Get-BlitzHelp -Force
 
@@ -632,7 +632,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         'run-window' { Run-BlitzWindow @Rest }
         'run-no-dlc' { Run-BlitzNoDlc @Rest }
         'no-dlc' { Run-BlitzNoDlc @Rest }
-        'run-portrait' { Run-BlitzPortrait @Rest }
+        'run-mobile' { Run-BlitzMobile @Rest }
         'quick' { Run-BlitzQuick @Rest }
         'installer' { Invoke-InstallerBuild @Rest }
         'build-installer' { Invoke-InstallerBuild @Rest }

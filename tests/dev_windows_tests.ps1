@@ -42,7 +42,7 @@ try {
     $settingsText = "schema_version = 1`n# retain this comment`n[graphics]`naspect_ratio = 'auto'`nforce_16_by_9 = false`nrenderer = 'vulkan'`n[controller]`nscheme = 'xbox-series'`n"
     [IO.File]::WriteAllText($profile, $profileText)
     [IO.File]::WriteAllText($settings, $settingsText)
-    $prepared = @(New-BlitzPortraitArguments -Extra "--blitz.runtime.launcher_profile=$profile", '--log.file_name=space ; $literal')
+    $prepared = @(New-BlitzMobileArguments -Extra "--blitz.runtime.launcher_profile=$profile", '--log.file_name=space ; $literal')
     if ($prepared.Count -ne 2 -or $prepared[1] -ne '--log.file_name=space ; $literal') { throw 'Portrait argument forwarding changed.' }
     $copy = $prepared[0].Substring('--launcher_profile='.Length)
     $verify = @'
@@ -51,11 +51,11 @@ file = pathlib.Path(sys.argv[1])
 doc = tomllib.loads(file.with_name('settings.toml').read_text())
 assert doc['graphics']['interface_orientation'] == 'portrait'
 assert doc['graphics']['gameplay_orientation'] == 'portrait'
-assert doc['graphics']['aspect_ratio'] == '16:9'
-assert doc['graphics']['force_16_by_9'] is True
+assert doc['graphics']['aspect_ratio'] == 'auto'
+assert doc['graphics']['force_16_by_9'] is False
 assert doc['graphics']['renderer'] == 'vulkan'
 assert doc['controller']['scheme'] == 'xbox-series'
-assert doc['provenance']['graphics.force_16_by_9'] == 'manual'
+assert doc['provenance']['graphics.interface_orientation'] == 'manual'
 assert '# retain this comment' in file.with_name('settings.toml').read_text()
 '@
     & python -c $verify $copy
@@ -65,7 +65,10 @@ assert '# retain this comment' in file.with_name('settings.toml').read_text()
     }
     # Exercise launch-tag handling through the quick path with its launcher mocked.
     function Start-BlitzQuick { $script:launchArgs = @($args) }
-    Run-Blitz '--quick' '--touch' '--portrait' "--launcher_profile=$profile" '--blitz.diagnostics.mouse_as_touch=false'
+    Run-Blitz '--quick' '--mobile' "--launcher_profile=$profile" '--blitz.diagnostics.mouse_as_touch=false'
+    if ('--blitz.diagnostics.mobile_preview=true' -notin $script:launchArgs -or '--mobile' -in $script:launchArgs) {
+        throw 'Mobile launch tag did not enable the mobile settings policy.'
+    }
     $touchDefault = [Array]::IndexOf($script:launchArgs, '--blitz.diagnostics.mouse_as_touch=true')
     $touchOverride = [Array]::IndexOf($script:launchArgs, '--blitz.diagnostics.mouse_as_touch=false')
     if ($touchDefault -lt 0 -or $touchOverride -le $touchDefault -or '--touch' -in $script:launchArgs) {

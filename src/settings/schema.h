@@ -55,7 +55,11 @@ struct ReleaseSettings {
   HostPlatform platform = HostPlatform::kWindows;
   std::string version;
   std::map<SettingId, RowRule> rules;
+  bool mobile_preview = false;
 };
+inline bool IsMobile(const ReleaseSettings& release) {
+  return release.mobile_preview || IsMobile(release.platform);
+}
 
 struct VersionRule {
   HostPlatform platform;
@@ -65,7 +69,10 @@ struct VersionRule {
 };
 
 ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view version,
-                                   std::span<const VersionRule> version_rules = {});
+                                   std::span<const VersionRule> version_rules = {},
+                                   bool mobile_preview = false);
+// Select before boot creates the settings service; desktop preview keeps native backend rules.
+void SetMobilePreviewEnabled(bool enabled);
 ReleaseSettings CurrentReleaseSettings();
 
 // Every row, in the parent plan §3 presentation order. Static for the process lifetime.

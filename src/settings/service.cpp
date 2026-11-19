@@ -179,7 +179,7 @@ DocumentStatus Service::Boot(const Profile* legacy, const PathEntry& existing_pa
     }
   }
   const auto force = store_.document().values.find(SettingId::kForce16By9);
-  force_16_by_9_at_boot_ = !schema::IsMobile(release_.platform) &&
+  force_16_by_9_at_boot_ = !schema::IsMobile(release_) &&
       force != store_.document().values.end() && force->second.kind == ValueKind::kBool &&
       force->second.boolean;
   RefreshDescriptors();
@@ -195,7 +195,7 @@ void Service::RefreshDescriptors() {
   for (auto& descriptor : descriptors_) {
     const auto it = provider_choices_.find(descriptor.id);
     if (it != provider_choices_.end()) descriptor.choices = it->second;
-    if (!schema::IsMobile(release_.platform) &&
+    if (!schema::IsMobile(release_) &&
         (descriptor.id == SettingId::kInterfaceResolution ||
          descriptor.id == SettingId::kGameplayResolution))
       descriptor.choices = ProfileResolutionChoices(ResolutionProfileDisplay());
@@ -273,7 +273,7 @@ void Service::SetBootValues(std::map<SettingId, Value> values, std::string reaso
       force != values.end() && force->second.kind == ValueKind::kBool) {
     // Recovery may select an earlier working aspect before scenes are loaded.
     // A normal settings commit never changes the running aspect this way.
-    force_16_by_9_at_boot_ = !schema::IsMobile(release_.platform) && force->second.boolean;
+    force_16_by_9_at_boot_ = !schema::IsMobile(release_) && force->second.boolean;
     RefreshDescriptors();
   }
   for (auto& [id, value] : values) {
@@ -365,7 +365,7 @@ Value Service::ReconcileEffective(const Descriptor& descriptor, const Value& req
   const Reconciler* reconciler = reconciler_ != nullptr ? reconciler_ : &default_reconciler_;
   Value compatible = requested;
   bool profile_corrected = false;
-  if (!schema::IsMobile(release_.platform) &&
+  if (!schema::IsMobile(release_) &&
       (descriptor.id == SettingId::kInterfaceResolution ||
        descriptor.id == SettingId::kGameplayResolution)) {
     compatible.kind = ValueKind::kEnum;

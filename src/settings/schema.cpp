@@ -784,11 +784,13 @@ ApplicationStrategy StrategyOf(SettingId id) {
 }
 
 ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view version,
-                                   std::span<const VersionRule> version_rules) {
+                                   std::span<const VersionRule> version_rules,
+                                   bool mobile_preview) {
   ReleaseSettings release;
   release.platform = platform;
+  release.mobile_preview = mobile_preview;
   release.version = version;
-  if (!IsMobile(platform)) {
+  if (!IsMobile(release)) {
     RowRule touch;
     touch.hidden = true;
     release.rules.emplace(SettingId::kTouchLaneSwipe, touch);
@@ -804,7 +806,7 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
     renderer.choices = Choices({{"vulkan", "Vulkan"}});
     release.rules.emplace(SettingId::kRenderer, std::move(renderer));
   }
-  if (IsMobile(platform)) {
+  if (IsMobile(release)) {
     for (const auto id : {SettingId::kInterfaceOrientation, SettingId::kGameplayOrientation}) {
       RowRule orientation;
       orientation.default_value = EnumValue("portrait");
@@ -813,6 +815,12 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
     RowRule exit;
     exit.default_value = BoolValue(true);
     release.rules.emplace(SettingId::kHideExitGame, std::move(exit));
+  }
+  if (mobile_preview) {
+    // Match the mobile menu without changing the host's window or graphics backend.
+    for (const auto id : {SettingId::kRenderer, SettingId::kDisplay,
+                          SettingId::kResolution, SettingId::kVsync})
+      release.rules[id].hidden = true;
   }
   if (platform == HostPlatform::kIOS) {
     RowRule target;
@@ -846,6 +854,12 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
   return release;
 }
 
+namespace {
+bool g_mobile_preview = false;
+}
+
+void SetMobilePreviewEnabled(bool enabled) { g_mobile_preview = enabled; }
+
 ReleaseSettings CurrentReleaseSettings() {
 #if defined(RBBLITZ_GAME_VERSION)
   constexpr std::string_view version = RBBLITZ_GAME_VERSION;
@@ -853,16 +867,17 @@ ReleaseSettings CurrentReleaseSettings() {
   constexpr std::string_view version = "unversioned";
 #endif
 #if defined(_WIN32)
-  return SettingsForRelease(HostPlatform::kWindows, version);
+  constexpr auto platform = HostPlatform::kWindows;
 #elif defined(RB_BLITZ_IOS)
-  return SettingsForRelease(HostPlatform::kIOS, version);
+  constexpr auto platform = HostPlatform::kIOS;
 #elif defined(__ANDROID__)
-  return SettingsForRelease(HostPlatform::kAndroid, version);
+  constexpr auto platform = HostPlatform::kAndroid;
 #elif defined(__APPLE__)
-  return SettingsForRelease(HostPlatform::kMacOS, version);
+  constexpr auto platform = HostPlatform::kMacOS;
 #else
-  return SettingsForRelease(HostPlatform::kLinux, version);
+  constexpr auto platform = HostPlatform::kLinux;
 #endif
+  return SettingsForRelease(platform, version, {}, g_mobile_preview && !IsMobile(platform));
 }
 
 std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps,
@@ -873,11 +888,11 @@ std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps,
     Descriptor descriptor = row.descriptor;
     FillChoiceSource(descriptor, caps);
     if (descriptor.id == SettingId::kAspectRatio || descriptor.id == SettingId::kRenderScale ||
-        (descriptor.id == SettingId::kForce16By9 && IsMobile(release.platform)) ||
+        (descriptor.id == SettingId::kForce16By9 && IsMobile(release)) ||
         ((descriptor.id == SettingId::kInterfaceResolution || descriptor.id == SettingId::kGameplayResolution)
-             ? IsMobile(release.platform)
+             ? IsMobile(release)
              : (descriptor.id == SettingId::kInterfaceRenderScale || descriptor.id == SettingId::kGameplayRenderScale)
-                   && !IsMobile(release.platform)))
+                   && !IsMobile(release)))
       descriptor.availability = Availability::kHidden;
     if (descriptor.id == SettingId::kDlcScanThreads && !descriptor.choices.empty())
       descriptor.compiled_default = IntValue(std::stoll(descriptor.choices.back().token));

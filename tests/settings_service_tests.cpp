@@ -1462,6 +1462,39 @@ void TestIOSImporterDefault() {
   }
 }
 
+void TestMobilePreviewSettings() {
+  BeginCase("desktop mobile preview matches mobile rows and keeps the native graphics backend");
+  const auto mobile_rows = schema::BuildDescriptors(CapabilitySnapshot{},
+      schema::SettingsForRelease(schema::HostPlatform::kIOS, "test"));
+  for (const auto platform : {schema::HostPlatform::kWindows, schema::HostPlatform::kLinux,
+                              schema::HostPlatform::kMacOS}) {
+    Scratch scratch;
+    const auto release = schema::SettingsForRelease(platform, "test", {}, true);
+    CHECK_TRUE(release.platform == platform);
+    CHECK_TRUE(schema::IsMobile(release));
+    Service service(Paths(scratch), release);
+    service.Boot(nullptr, {}, nullptr);
+    for (const auto& row : mobile_rows) {
+      const auto* preview = service.DescriptorFor(row.id);
+      CHECK_TRUE(preview && preview->availability == row.availability);
+    }
+    CHECK_TRUE(service.EffectiveValue(SettingId::kInterfaceOrientation).text == "portrait");
+    CHECK_TRUE(service.EffectiveValue(SettingId::kGameplayOrientation).text == "portrait");
+    CHECK_TRUE(service.EffectiveValue(SettingId::kHideExitGame).boolean);
+    const auto desktop = schema::BuildDescriptors(CapabilitySnapshot{},
+        schema::SettingsForRelease(platform, "test"));
+    for (const auto& row : desktop)
+      if (row.id == SettingId::kRenderer || row.id == SettingId::kTarget)
+        CHECK_TRUE(ValueEquals(service.DescriptorFor(row.id)->compiled_default, row.compiled_default));
+  }
+  const auto desktop = schema::CurrentReleaseSettings();
+  schema::SetMobilePreviewEnabled(true);
+  CHECK_TRUE(schema::IsMobile(schema::CurrentReleaseSettings()));
+  schema::SetMobilePreviewEnabled(false);
+  CHECK_TRUE(schema::CurrentReleaseSettings().platform == desktop.platform);
+  CHECK_FALSE(schema::CurrentReleaseSettings().mobile_preview);
+}
+
 void TestIOSReleaseSettings() {
   BeginCase("iOS: hidden desktop display preferences cannot replace the device baseline");
   Scratch scratch;
@@ -1795,6 +1828,7 @@ int main(int argc, char** argv) {
   TestReleaseSettingsMigration();
   TestVulkanOnlyReleaseSettings();
   TestIOSReleaseSettings();
+  TestMobilePreviewSettings();
   TestIOSUltimateDefaultUpgrade();
   TestIOSImporterDefault();
   return Finish();
