@@ -6,6 +6,7 @@
 #include "input/dialog_prompts.h"
 #include "input/last_device.h"
 #include "input/start_prompt.h"
+#include "input/calibration_text.h"
 #include "diag/shader_trace.h"
 #include "input/remap.h"
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
@@ -61,6 +62,7 @@ REX_EXTERN(sub_82402DE8);       // ObjectDir::FindObject
 REX_EXTERN(sub_821F13D0);       // RndTransformable::WorldXfm
 REX_EXTERN(__imp__sub_824BC668); // UILabel::DrawShowing (label +260)
 REX_EXTERN(sub_824BA9F8);       // UILabel::LabelStyle
+REX_EXTERN(sub_824BAF98);       // UILabel::Update (text rectangle and style layout)
 REX_EXTERN(sub_824BC7D0);       // UILabel::SetText
 REX_EXTERN(__imp__sub_824BC7D0);
 REX_EXTERN(__imp__sub_824DC2F0); // UISlider drawable traversal
@@ -90,6 +92,7 @@ uint32_t ObjectBase(uint8_t* base, uint32_t object) {
 std::mutex mutex;
 MenuMouseQueue queue;
 bool window_focused = false;
+std::optional<MenuPoint> menu_pointer;
 bool menu_available = false;
 bool game_screen_active = false;
 bool gameplay_resolution_active = false;
@@ -122,6 +125,13 @@ thread_local uint32_t frame_number = 0;
 struct HeaderGeometry { uint32_t screen = 0, focus = 0, frame = 0; MenuBounds bounds; };
 thread_local std::array<HeaderGeometry, 4> header_geometry;
 thread_local std::vector<MenuHintTarget> hint_targets;
+struct FooterDraw {
+  uint32_t owner;
+  std::vector<InlineHelpEntry> entries;
+  size_t index, count;
+};
+thread_local const FooterDraw* drawing_footer = nullptr;
+thread_local MenuFooterTouchPress footer_touch_press;
 thread_local int clicked_header = -1;
 thread_local uint32_t header_click_frame = 0;
 thread_local std::string current_panel_name;
@@ -227,6 +237,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     geometry = {};
     header_geometry = {};
     hint_targets.clear();
+    footer_touch_press.Reset();
     clicked_header = -1;
     MenuRail stale; PublishRail(stale);
     last_selected_row = -1;
@@ -366,6 +377,7 @@ void MouseMenuFocus(bool focused) {
   if (focused != window_focused && rb_blitz::settings::title::mouse_native_trace.Get())
     REXLOG_INFO("native_mouse: window focus={} queue={}", focused, focused && menu_available && MouseSupportEnabled());
   window_focused = focused;
+  if (!focused) menu_pointer.reset();
   queue.Context(current_screen, current_focus, focused && menu_available && MouseSupportEnabled() &&
                 !SystemUIActive() && !ui::achievements::Active(), current_panel);
   // P2 (plan D5): losing the window drops every gameplay hold. The physical layer already
@@ -375,10 +387,12 @@ void MouseMenuFocus(bool focused) {
 }
 void QueueMenuMouse(MouseAction action, MenuPoint point) {
   std::lock_guard lock(mutex);
+  if (action == MouseAction::kMove || action == MouseAction::kAccept) menu_pointer = point;
   if (MouseSupportEnabled()) queue.Push(action, point);
 }
 void QueueMenuWheel(int delta, MenuPoint point) {
   std::lock_guard lock(mutex);
+  menu_pointer = point;
   if (MouseSupportEnabled()) queue.Wheel(delta, point);
 }
 void QueueMenuScrollbar(MouseAction action, MenuPoint point) {
@@ -450,7 +464,12 @@ bool PortraitSplashActive() {
 bool PortraitSettingsActive() {
   std::lock_guard lock(mutex);
   return rb_blitz::settings::InterfacePortraitEnabled() &&
-         (ui::PortraitSettingsScene(current_panel_scene) || ui::PortraitControlsPanel(current_panel_name));
+         (ui::PortraitSettingsScene(current_panel_scene) || ui::PortraitControlsPanel(current_panel_name) ||
+          current_panel_name == "av_options_panel" || current_panel_name == "credits_panel");
+}
+bool PortraitConnectionActive() {
+  std::lock_guard lock(mutex);
+  return rb_blitz::settings::InterfacePortraitEnabled() && current_panel_name == "server_connect_panel";
 }
 bool PortraitCalibrationActive() {
   std::lock_guard lock(mutex);
@@ -474,6 +493,8 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   bool idle = false, enabled = false;
   {
     std::lock_guard lock(mutex);
+    if (const auto button = footer_touch_press.Poll(queue.enabled(), (HostMouseButtons() & 1) != 0))
+      queue.PulseButton(button);
     event = queue.NextFrame(can_scroll);
     idle = !queue.Pending();
     enabled = queue.enabled();
@@ -504,6 +525,10 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       scroll_follow.Reset();
       REXLOG_INFO("native_mouse: legend click screen={} point={:.4f},{:.4f} button={:04X}",
                   current_screen_name, event->point.x, event->point.y, button);
+      if (last_device::Current().using_touch && PortraitSettingsActive()) {
+        footer_touch_press.Begin(event->point, button);
+        return;
+      }
       std::lock_guard lock(mutex);
       if (queue.enabled()) queue.PulseButton(button);
       return;
@@ -749,6 +774,113 @@ uint32_t SceneMesh(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* nam
   return it->second;
 }
 
+uint32_t SceneObject(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* name) {
+  GuestCall call(ctx, base);
+  std::memcpy(base + call.scratch, name, std::strlen(name) + 1);
+  auto& c = call.ctx;
+  c.r3.u32 = dir; c.r4.u32 = call.scratch; c.r5.u32 = 0; c.r6.u32 = 0;
+  sub_82402DE8(c, base);
+  return c.r3.u32;
+}
+
+void DrawMenuHints(PPCContext& ctx, uint8_t* base, uint32_t owner, size_t index, size_t count,
+                    void (*draw)(PPCContext&, uint8_t*)) {
+  const FooterDraw footer{owner, ReadInlineHelpEntries(owner,
+      [base](uint32_t address) { return U32(base, address); }), index, count};
+  const auto previous = drawing_footer;
+  drawing_footer = &footer;
+  rex::ScopeGuard restore([&] { drawing_footer = previous; });
+  draw(ctx, base);
+}
+
+bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
+                               const std::string& stem, size_t index, size_t count, bool reflow) {
+  bool hovered = false;
+  for (bool border : {true, false}) {
+    const auto name = std::string(stem) + (border ? "_border.mesh" : ".mesh");
+    const auto mesh = SceneMesh(ctx, base, dir, name.c_str());
+    if (!mesh) continue;
+    if (reflow) {
+      const auto slot = ui::PortraitFooterAction(
+          ui::screen::CurrentMenuConfiguration().portrait_aspect, index, count);
+      const auto world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, mesh + 64);
+      const float width = slot.width + (border ? 1.4f : 0), height = slot.height + (border ? 1.4f : 0);
+      Float(base, world, width / 300);
+      Float(base, world + 24, height / 30);
+      Float(base, world + 48, slot.x - width / 2);
+      Float(base, world + 52, border ? .2f : .1f);
+      Float(base, world + 56, slot.z + height / 2);
+    }
+    if (const auto bounds = ProjectMesh(ctx, base, mesh)) {
+      std::lock_guard lock(mutex);
+      hovered = MenuFooterHovered(menu_pointer, *bounds, queue.enabled(),
+          last_device::Current().using_touch, (HostMouseButtons() & 1) != 0);
+      if (queue.enabled() && footer_touch_press.Draw(*bounds)) hovered = true;
+    }
+    const auto material = U32(base, mesh + 292);
+    std::array<uint32_t, 4> prior{};
+    const auto dirty = [&] {
+      rex::memory::store_and_swap<uint32_t>(base + material + 520, U32(base, material + 520) | 1);
+    };
+    if (hovered && !border && material) {
+      for (size_t i = 0; i < prior.size(); ++i) prior[i] = U32(base, material + 44 + uint32_t(i) * 4);
+      const auto yellow = ui::FooterButtonColor(false, true);
+      for (size_t i = 0; i < yellow.size(); ++i) Float(base, material + 44 + uint32_t(i) * 4, yellow[i]);
+      dirty();
+    }
+    rex::ScopeGuard restore([&] {
+      if (hovered && !border && material) {
+        for (size_t i = 0; i < prior.size(); ++i)
+          rex::memory::store_and_swap<uint32_t>(base + material + 44 + uint32_t(i) * 4, prior[i]);
+        dirty();
+      }
+    });
+    if (auto* draw = rex::ppc::ResolveFunction(U32(base, U32(base, mesh) + 24)))
+      rex::ppc::Call<void>(ctx, base, *draw, mesh);
+  }
+  return hovered;
+}
+
+void DrawPresetArrows(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  if (!settings::InterfacePortraitEnabled() ||
+      (current_screen_name != "controller_config_screen" &&
+       current_screen_name != "controller_config_pause_screen")) return;
+  const auto header = ObjectBase(base, label);
+  if (ObjectName(base, header) != "IndexNum.lbl") return;
+  const auto dir = U32(base, header + 36);
+  if (!SceneObject(ctx, base, dir, "portrait_preset_arrows.grp")) return;
+  for (bool left : {true, false}) {
+    const bool hovered = DrawPortraitFooterSurface(ctx, base, dir,
+        left ? "portrait_previous" : "portrait_next", 0, 0, false);
+    for (bool glow : {false, true}) {
+      const auto name = std::string(left ? "arrow_lt" : "arrow_rt") + (glow ? "_glow.mesh" : ".mesh");
+      const auto mesh = SceneMesh(ctx, base, dir, name.c_str());
+      if (!mesh) continue;
+      const auto material = U32(base, mesh + 292);
+      std::array<uint32_t, 3> prior{};
+      const auto dirty = [&] {
+        rex::memory::store_and_swap<uint32_t>(base + material + 520, U32(base, material + 520) | 1);
+      };
+      if (hovered && material) {
+        for (size_t i = 0; i < prior.size(); ++i) {
+          prior[i] = U32(base, material + 44 + uint32_t(i) * 4);
+          Float(base, material + 44 + uint32_t(i) * 4, 0);
+        }
+        dirty();
+      }
+      rex::ScopeGuard restore([&] {
+        if (hovered && material) {
+          for (size_t i = 0; i < prior.size(); ++i)
+            rex::memory::store_and_swap<uint32_t>(base + material + 44 + uint32_t(i) * 4, prior[i]);
+          dirty();
+        }
+      });
+      if (auto* draw = rex::ppc::ResolveFunction(U32(base, U32(base, mesh) + 24)))
+        rex::ppc::Call<void>(ctx, base, *draw, mesh);
+    }
+  }
+}
+
 void CaptureSlider(PPCContext& ctx, uint8_t* base, uint32_t slider) {
   if (slider != current_focus || !IsSettingsWheel(ObjectName(base, ObjectBase(base, slider)))) return;
   const auto resource = U32(base, slider + 92);
@@ -925,6 +1057,148 @@ std::optional<MenuBounds> ProjectLabel(PPCContext& ctx, uint8_t* base, uint32_t 
   }
   return bounds;
 }
+void DrawMenuHintLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  const auto* footer = drawing_footer;
+  const auto entry = footer ? std::find_if(footer->entries.begin(), footer->entries.end(),
+      [label](const auto& e) { return e.label == label; }) : std::vector<InlineHelpEntry>::const_iterator{};
+  if (!footer || entry == footer->entries.end()) { __imp__sub_824BC668(ctx, base); return; }
+  const auto header = ObjectBase(base, footer->owner);
+  const auto dir = header ? U32(base, header + 36) : 0;
+  const auto black_color = dir ? SceneObject(ctx, base, dir, "portrait_caption_black.color") : 0;
+  if (!black_color) { __imp__sub_824BC668(ctx, base); return; }
+  const auto index = footer->index + size_t(entry - footer->entries.begin());
+  const auto name = ObjectName(base, header);
+  const bool independent = name == "continue.ihp" || name == "back.ihp" || name == "skip.ihp";
+  const std::string stem = independent ? "portrait_" + name.substr(0, name.size() - 4) :
+      index == 0 ? "portrait_confirm" : index == 1 ? "portrait_back" : "portrait_retry";
+  const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, index, footer->count, !independent);
+  const bool black = hovered || current_screen_name == "splash_screen" ||
+      current_panel_name == "server_connect_panel" || current_screen_name == "loading_screen";
+  const auto styles = U32(base, label + 180), styles_end = U32(base, label + 184);
+  if (!black || !styles || styles_end < styles || styles_end - styles < 44) {
+    __imp__sub_824BC668(ctx, base); return;
+  }
+  // Only the primary caption changes color. Its alternate icon style keeps
+  // the controller/key artwork's original colors, including while hovered.
+  const auto prior_color = U32(base, styles + 12);
+  const auto text_style = rex::ppc::Call<uint32_t>(ctx, base, sub_824BA9F8, label, uint32_t(0));
+  std::array<uint32_t, 3> prior_rgb{};
+  for (size_t i = 0; i < prior_rgb.size(); ++i) {
+    prior_rgb[i] = U32(base, text_style + 24 + uint32_t(i) * 4);
+    Float(base, text_style + 24 + uint32_t(i) * 4, 0);
+  }
+  rex::memory::store_and_swap<uint32_t>(base + styles + 12, black_color);
+  rex::ScopeGuard restore([&] {
+    rex::memory::store_and_swap<uint32_t>(base + styles + 12, prior_color);
+    for (size_t i = 0; i < prior_rgb.size(); ++i)
+      rex::memory::store_and_swap<uint32_t>(base + text_style + 24 + uint32_t(i) * 4, prior_rgb[i]);
+  });
+  __imp__sub_824BC668(ctx, base);
+}
+
+std::string_view CalibrationToken(uint8_t* base, uint32_t label) {
+  const auto address = U32(base, label + 164);
+  if (!address) return {};
+  const char* token = reinterpret_cast<const char*>(base + address);
+  return {token, strnlen(token, 64)};
+}
+
+void UpdateCalibrationText(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  if (current_screen_name.rfind("cal_", 0) != 0) return;
+  const auto token = CalibrationToken(base, label);
+  const bool result = token == "lag_success";
+  if (!result && token != "cal_audio_desc_pad" && token != "cal_video_desc_pad") return;
+  const auto address = U32(base, label + 80);
+  if (!address) return;
+  const char* chars = reinterpret_cast<const char*>(base + address);
+  const std::string_view actual(chars, strnlen(chars, 1024));
+  if (actual.size() == 1024) return;
+  thread_local std::unordered_map<std::string, CalibrationPromptText> prompts;
+  const bool touch = last_device::Current().using_touch;
+  const auto desired = prompts[std::string(token)].Update(actual,
+      touch && (!result || settings::InterfacePortraitEnabled()), result);
+  if (desired == actual || desired.size() >= 1024) return;
+  GuestCall call(ctx, base, 1280);
+  const auto text = call.ctx.r1.u32 + 128;
+  std::memcpy(base + text, desired.c_str(), desired.size() + 1);
+  call.ctx.r3.u32 = label; call.ctx.r4.u32 = text; call.ctx.r5.u32 = 0;
+  __imp__sub_824BC7D0(call.ctx, base);
+}
+
+void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  DrawPresetArrows(ctx, base, label);
+  const bool portrait = settings::InterfacePortraitEnabled();
+  const auto name = ObjectName(base, ObjectBase(base, label));
+  const bool title = portrait && name == "header.lbl" &&
+      ui::PortraitSplashScreen(current_screen_name, current_panel_name, current_panel_scene);
+  const bool success = portrait && current_screen_name.rfind("cal_", 0) == 0 &&
+      CalibrationToken(base, label) == "lag_success";
+  const auto* footer = portrait ? drawing_footer : nullptr;
+  const auto entry = footer ? std::find_if(footer->entries.begin(), footer->entries.end(),
+      [label](const auto& e) { return e.label == label; }) : std::vector<InlineHelpEntry>::const_iterator{};
+  const bool action = footer && entry != footer->entries.end();
+  if (!title && !success && !action) { DrawMenuHintLabel(ctx, base, label); return; }
+  if (base[label + 178])
+    rex::ppc::Call<void>(ctx, base, sub_824BAF98, label, uint32_t(0));
+  const float width = F32(base, label + 152), height = F32(base, label + 156);
+  if (!(width > 0) || !std::isfinite(height)) { DrawMenuHintLabel(ctx, base, label); return; }
+  const auto transformable = label + 72 + U32(base, U32(base, label + 72) + 16);
+  const auto world = WorldTransformForDraw(transformable,
+      [base](uint32_t address) { return base[address]; },
+      [&](uint32_t object) { return rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, object); });
+  std::array<uint8_t, 64> prior;
+  std::memcpy(prior.data(), base + world, prior.size());
+  rex::ScopeGuard restore([&] { std::memcpy(base + world, prior.data(), prior.size()); });
+  float x = F32(base, world + 48), z = F32(base, world + 56);
+  if (title) { x = 0; z = ui::kPortraitTitleCenter; }
+  if (success) {
+    x = 0; z = 0;
+    const float available = ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width * .84f;
+    const float measured = std::abs(F32(base, world)) * width;
+    const float scale = std::min(last_device::Current().using_touch ? 2.f : 1.65f,
+                                 available / std::max(measured, 1.f));
+    for (uint32_t row = 0; row < 3; ++row)
+      for (uint32_t column = 0; column < 3; ++column)
+        Float(base, world + row * 16 + column * 4, F32(base, world + row * 16 + column * 4) * scale);
+  }
+  if (action) {
+    const auto header = ObjectBase(base, footer->owner);
+    const auto owner_name = ObjectName(base, header);
+    const auto dir = header ? U32(base, header + 36) : 0;
+    // Apply only to scenes with authored button surfaces. Other InlineHelp
+    // widgets retain their original placement and text layout.
+    if (!dir || !SceneObject(ctx, base, dir, "portrait_caption_black.color")) {
+      DrawMenuHintLabel(ctx, base, label); return;
+    }
+    if (owner_name == "continue.ihp" || owner_name == "back.ihp" || owner_name == "skip.ihp") {
+      const auto owner_transform = footer->owner + 4 + U32(base, U32(base, footer->owner + 4) + 16);
+      const auto owner_world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, owner_transform);
+      x = F32(base, owner_world + 48); z = F32(base, owner_world + 56);
+    } else {
+      const auto slot = ui::PortraitFooterAction(ui::screen::CurrentMenuConfiguration().portrait_aspect,
+          footer->index + size_t(entry - footer->entries.begin()), footer->count);
+      x = slot.x; z = slot.z;
+    }
+  }
+  // UILabel's alignment includes font bearings and mixed icon baselines. Center
+  // its measured rectangle through the live basis, including multiline text.
+  float cx = F32(base, label + 144) + width / 2;
+  float cz = F32(base, label + 148) + height / 2;
+  // The layout rectangle includes advance spacing and the empty alternate
+  // icon style on touch. Center footer captions on the quads actually drawn.
+  if (action) {
+    if (const auto bounds = InlineHelpGlyphBounds(label,
+        [base](uint32_t address) { return U32(base, address); },
+        [base](uint32_t address) { return F32(base, address); })) {
+      cx = ((*bounds)[0] + (*bounds)[2]) / 2;
+      cz = ((*bounds)[1] + (*bounds)[3]) / 2;
+    }
+  }
+  Float(base, world + 48, x - F32(base, world) * cx - F32(base, world + 32) * cz);
+  Float(base, world + 56, z - F32(base, world + 8) * cx - F32(base, world + 40) * cz);
+  DrawMenuHintLabel(ctx, base, label);
+}
+
 void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (!menu_available || current_input_scope || LibraryHeaderForScreen(current_screen_name) < 0) return;
   const int index = LibraryHeaderForLabel(ObjectName(base, ObjectBase(base, label)));
@@ -945,11 +1219,11 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
   // The portrait settings footer is a full native button. Its mesh supplies
   // the hit area, so tapping beside the Back text also sends Cancel.
   if (bounds && rb_blitz::settings::InterfacePortraitEnabled() &&
-      (ui::PortraitSettingsScene(current_panel_scene) || ui::PortraitControlsPanel(current_panel_name))) {
+      (ui::PortraitSettingsScene(current_panel_scene) || ui::PortraitControlsPanel(current_panel_name) ||
+       current_panel_name == "av_options_panel" || current_panel_name == "credits_panel")) {
     const auto dir = header ? U32(base, header + 36) : 0;
-    const char* name = action == 2 ? "portrait_back.mesh" : action == 1 ? "portrait_confirm.mesh" : nullptr;
-    if (current_panel_name == "cal_audio_panel" || current_panel_name == "cal_visuals_panel" ||
-        current_panel_name == "cal_hw_audio_panel" || current_panel_name == "cal_hw_visuals_panel") {
+    const char* name = nullptr;
+    {
       const auto entries = ReadInlineHelpEntries(owner,
           [base](uint32_t address) { return U32(base, address); });
       const auto entry = std::find_if(entries.begin(), entries.end(),
@@ -964,7 +1238,7 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
       if (const auto button_bounds = ProjectMesh(ctx, base, mesh)) bounds = button_bounds;
     }
   }
-  if (bounds && current_panel_name == "server_connect_panel" &&
+  if (bounds && (current_panel_name == "server_connect_panel" || current_panel_name == "splash_panel") &&
       rb_blitz::settings::InterfacePortraitEnabled()) {
     const char* name = action == 1 ? "portrait_continue.mesh" :
                        action == 2 ? "portrait_back.mesh" :
@@ -1241,7 +1515,8 @@ REX_HOOK_RAW(sub_824BC668) {
   rb_blitz::input::UpdateStartPrompt(ctx, base, label);
   rb_blitz::hooks::PrepareHudLabel(ctx, base, label);
   rb_blitz::input::UpdateCalibrationSideLabel(ctx, base, label);
-  __imp__sub_824BC668(ctx, base);
+  rb_blitz::input::UpdateCalibrationText(ctx, base, label);
+  rb_blitz::input::DrawAlignedMenuLabel(ctx, base, label);
   rb_blitz::input::CaptureDialogPrompt(ctx, base, label);
   rb_blitz::input::CaptureHeader(ctx, base, label);
 }

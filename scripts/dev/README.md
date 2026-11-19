@@ -31,11 +31,12 @@ arguments pass through after defaults; quote arguments containing spaces.
 packager and accepts its arguments. Linux packaging requires the pinned nFPM
 archive and other arguments documented in `installer/linux/README.md`.
 
-`--mobile` replaces `--portrait`. It opens a portrait window, selects the mobile
+`--mobile` replaces `--portrait`. It opens a 9:16 portrait window, selects the mobile
 settings menu (including Touch controls and interface/gameplay render scales),
 and enables mouse-as-touch for UI elements. Desktop-only display, renderer,
 VSync, resolution, and Force 16:9 rows are hidden; the native graphics backend
-is preserved. It does not enable diagnostic power-up or achievement effects.
+is preserved. Preview rendering and render scales use a forced 16:9 source even
+on ultrawide monitors. It does not enable diagnostic power-up or achievement effects.
 
 Mobile runs copy the selected launcher profile and settings into a new
 `out/dev-mobile/` directory and set both interface and gameplay orientation to

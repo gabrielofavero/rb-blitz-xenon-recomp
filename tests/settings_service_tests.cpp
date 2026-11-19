@@ -1481,6 +1481,18 @@ void TestMobilePreviewSettings() {
     CHECK_TRUE(service.EffectiveValue(SettingId::kInterfaceOrientation).text == "portrait");
     CHECK_TRUE(service.EffectiveValue(SettingId::kGameplayOrientation).text == "portrait");
     CHECK_TRUE(service.EffectiveValue(SettingId::kHideExitGame).boolean);
+    for (const auto native : {DisplayMode{2560, 1080}, {3440, 1440}, {5120, 1440}}) {
+      auto caps = Capabilities();
+      caps.primary_display_size = native;
+      service.SetCapabilities(caps);
+      const auto basis = service.ResolutionProfileDisplay();
+      CHECK_EQ(basis.width * 9, basis.height * 16);
+      CHECK_TRUE(basis.width <= native.width && basis.height <= native.height);
+      // A copied desktop preference or recovery value cannot restore ultrawide preview.
+      service.SetBootValues({{SettingId::kForce16By9, BoolV(false)}}, "settings.graphics.recovery");
+      CHECK_EQ(service.ResolutionProfileDisplay().width, basis.width);
+      CHECK_EQ(service.ResolutionProfileDisplay().height, basis.height);
+    }
     const auto desktop = schema::BuildDescriptors(CapabilitySnapshot{},
         schema::SettingsForRelease(platform, "test"));
     for (const auto& row : desktop)

@@ -2,11 +2,25 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <string_view>
 
 namespace rb_blitz::ui {
+
+inline constexpr std::array<float, 4> kMenuButtonNormal{.063f, .051f, .11f, .67f};
+inline constexpr std::array<float, 4> kMenuButtonBorder{.90f, .85f, .95f, .19f};
+inline constexpr std::array<float, 4> kMenuButtonHover{1, .855f, .086f, 1};
+inline constexpr float kFooterOpacity = .8f;
+// Midpoint of the marquee's two rows of lights in the guest scene.
+inline constexpr float kPortraitTitleCenter = 164.6512f;
+
+inline std::array<float, 4> FooterButtonColor(bool border, bool hovered = false) {
+  auto color = border ? kMenuButtonBorder : hovered ? kMenuButtonHover : kMenuButtonNormal;
+  color[3] *= kFooterOpacity;
+  return color;
+}
 
 struct PortraitSplashLayout {
   float width;
@@ -46,18 +60,18 @@ inline float PortraitPromptScale(float aspect, bool error_popup = false) {
 
 struct PortraitLoadingLayout {
   float width, logo_scale, logo_z;
-  float text_width, button_width, button_x, button_scale;
+  float text_width, text_size, button_width, button_x, button_scale;
   float bar_width, bar_height, bar_gap, text_bottom_z, percent_z;
 };
 
 inline PortraitLoadingLayout PortraitLoading(float aspect) {
   const auto splash = PortraitSplash(aspect);
   const float width = splash.width;
-  const float button_width = (width * .90f - 10) / 2;
+  const float button_width = (364.5f * splash.list_scale - 10) / 2;
   return {width, splash.title_logo_scale, splash.title_logo_z,
-          width * .84f, button_width, (button_width + 10) / 2,
-          std::min(1.f, button_width / 90), width * .4f, 18, 6,
-          splash.start_z, splash.start_z - 17.5f};
+          width * .84f, 18 * splash.list_scale / .55f, button_width, (button_width + 10) / 2,
+          1, width * .5f, 20, 3,
+          -150, -167.5f};
 }
 
 struct PortraitSettingsLayout {
@@ -83,6 +97,14 @@ inline PortraitCalibrationAction PortraitCalibrationFooter(float aspect, size_t 
           index < 2 ? -215.f : -177.f, width, 30};
 }
 
+inline PortraitCalibrationAction PortraitFooterAction(float aspect, size_t index, size_t count) {
+  if (count > 2) return PortraitCalibrationFooter(aspect, index);
+  const float row = 364.5f * PortraitSplash(aspect).list_scale;
+  const float width = count == 1 ? row * .55f : (row - 10) / 2;
+  return {count == 1 ? 0.f : (index ? 1.f : -1.f) * (width + 10) / 2,
+          -197, width, 30};
+}
+
 inline bool PortraitControlsScene(std::string_view scene) {
   scene = scene.substr(scene.find_last_of('/') + 1);
   if (scene.ends_with(".milo")) scene.remove_suffix(5);
@@ -92,7 +114,10 @@ inline bool PortraitControlsScene(std::string_view scene) {
 }
 
 inline bool PortraitSettingsScene(std::string_view scene) {
-  return scene == "settings_menu.milo" || scene == "settings_menu_pause.milo";
+  return scene == "settings_menu.milo" || scene == "settings_menu_pause.milo" ||
+         scene == "../av_options/settings_scale.milo" ||
+         scene == "../av_options/settings_scale_pause.milo" ||
+         scene == "av_options.milo" || scene == "credits.milo";
 }
 
 inline bool PortraitControlsPanel(std::string_view panel) {
@@ -122,6 +147,7 @@ inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel
          panel == "pause_exit_game_panel" || panel == "error_popup_panel" ||
          panel == "rbbz_download_panel" || panel == "rbbz_search_loading_panel" ||
          panel == "rbbz_library_panel" ||
+         panel == "av_options_panel" || panel == "credits_panel" ||
          PortraitSettingsScene(scene) ||
          PortraitControlsScene(scene) ||
          PortraitControlsPanel(panel) ||

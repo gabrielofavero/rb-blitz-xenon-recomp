@@ -79,6 +79,9 @@ endings and orphaned documents. Auditing without editing is the read-only `docs-
 
 ### Current settings delivery
 
+[Portrait UI alignment](plans/finished/2026-11-19-portrait-ui-alignment.md) tracks
+footer styling, title placement, calibration presentation and preset hover.
+
 [Feature-focused settings and restore profiles](settings/menu.md#current-organization-2026-11-17)
 documents the menu reorganization and Recommended/Vanilla profiles; validation is
 in the [settings status](settings/status.md#feature-focused-settings-and-restore-profiles-2026-11-17).

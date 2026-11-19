@@ -1723,7 +1723,9 @@ bool AddPortraitLoadingLayout(std::vector<Node>* roots, bool song_loading,
   const auto number = [](float value) {
     Node n; n.tag = ui::dtb::kFloat; n.scalar = std::bit_cast<uint32_t>(value); return n;
   };
-  const float scale = std::min(ui::PortraitSplash(aspect).width / (song_loading ? 640.f : 520.f), .7f);
+  // Connection text is measured in guest UI units. Its animated label and bar
+  // must share an identity root at every aspect.
+  const float scale = song_loading ? std::min(ui::PortraitSplash(aspect).width / 640.f, .7f) : 1.f;
   const Node dir = Node::Command({Node::Symbol(song_loading ? "loading_panel" : "server_connect_panel"),
                                    Node::Symbol("loaded_dir")});
   enter->kids.push_back(Node::Command({dir, Node::Symbol("set_local_scale"),
@@ -1762,7 +1764,7 @@ bool AddPortraitLoadingLayout(std::vector<Node>* roots, bool song_loading,
     // The retail label uses ellipsis (2). set_height_from_text is a no-op
     // outside wrap mode (0), leaving the full 180-unit box as the bar offset.
     set("status.lbl", sym("fit_type"), Node::Int(0));
-    set("status.lbl", Node::Array({sym("styles"), Node::Int(0), sym("text_size")}), number(26));
+    set("status.lbl", Node::Array({sym("styles"), Node::Int(0), sym("text_size")}), number(layout.text_size));
     // The status and footer transform directly under the scene. The count
     // and bar's enumeration parent has a net zero authored translation.
     position("status.lbl", layout.text_bottom_z);
@@ -1820,21 +1822,32 @@ bool AddPortraitLoadingLayout(std::vector<Node>* roots, bool song_loading,
     // Native state changes still own hint visibility. The matching button
     // backgrounds and hit areas follow those hints, with at most two slots.
     std::vector<Node> update{sym("do")};
-    // Bottom alignment fixes the last line at the Start prompt's anchor.
+    // Bottom alignment fixes the last line below the logo at every aspect.
     // Native measurement follows status changes and localized wrapping.
     update.push_back(cmd({sym("status.lbl"), sym("set_height_from_text")}));
     update.push_back(cmd({sym("progress_bar.grp"), sym("set_local_pos"), number(0), number(0),
         cmd({sym("/"), cmd({sym("+"),
             cmd({sym("status.lbl"), sym("get"), sym("height")}),
             number(layout.text_bottom_z + layout.bar_gap + layout.bar_height / 2)}), number(scale)})}));
-    for (const char* action : {"continue", "back", "skip"}) {
-      update.push_back(cmd({Node::Symbol(std::string("portrait_") + action + ".mesh"),
-          sym("set_showing"), cmd({Node::Symbol(std::string(action) + ".ihp"),
-                                   sym("get"), sym("showing")})}));
-    }
+    for (const char* action : {"continue", "back", "skip"})
+      for (const char* suffix : {".mesh", "_border.mesh"})
+        update.push_back(cmd({Node::Symbol(std::string("portrait_") + action + suffix),
+            sym("set_showing"), cmd({Node::Symbol(std::string(action) + ".ihp"),
+                                     sym("get"), sym("showing")})}));
+    // A single action is centred; pairs share the same balanced footer slots.
+    update.push_back(cmd({sym("continue.ihp"), sym("set_local_pos"),
+        cmd({sym("if_else"), cmd({sym("||"), cmd({sym("back.ihp"), sym("get"), sym("showing")}),
+                                             cmd({sym("skip.ihp"), sym("get"), sym("showing")})}),
+             number(layout.button_x), number(0)}), number(0), number(-187)}));
+    update.push_back(cmd({sym("back.ihp"), sym("set_local_pos"),
+        cmd({sym("if_else"), cmd({sym("||"), cmd({sym("continue.ihp"), sym("get"), sym("showing")}),
+                                             cmd({sym("skip.ihp"), sym("get"), sym("showing")})}),
+             number(-layout.button_x), number(0)}), number(0), number(-187)}));
     update.push_back(cmd({sym("skip.ihp"), sym("set_local_pos"),
         cmd({sym("if_else"), cmd({sym("back.ihp"), sym("get"), sym("showing")}),
-             number(layout.button_x / scale), number(-layout.button_x / scale)}),
+             number(layout.button_x / scale),
+             cmd({sym("if_else"), cmd({sym("continue.ihp"), sym("get"), sym("showing")}),
+                  number(-layout.button_x / scale), number(0)})}),
         number(0), number(-187 / scale)}));
     const auto apply = cmd({Node::Var("this"), sym("rbbz_portrait_loading")});
     enter->kids.push_back(apply);
@@ -2088,8 +2101,11 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         // it. Both are corrected on entry, by the time the panel's `{enter}` runs and its scene is
         // loaded (a statement in our own panel runs before `{ui goto_screen ...}`, when the retail
         // scene is not loaded yet - measured 2026-10-19).
-        return screen::AppendPanelEnterStatements(&roots, "av_options_panel",
-                                                  screen::AudioPageEnterStatements(), error);
+        auto statements = screen::AudioPageEnterStatements();
+        if (portrait_interface)
+          statements.front() = Node::Command({Node::Symbol("checkbox.lst"), Node::Symbol("set_local_pos"),
+                                              Node::Int(0), Node::Int(0), Node::Int(77)});
+        return screen::AppendPanelEnterStatements(&roots, "av_options_panel", statements, error);
       })) return false;
   for (const auto& locale : locales) {
     if (!edit(locale, [&](auto& roots) {
@@ -2624,6 +2640,21 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   built[screen::kPauseSceneRecord] = built[screen::kSceneRecord];
   if (!read("ui/av_options/gen/av_options.milo_xbox",
             &built["ui/av_options/gen/settings_scale.milo_xbox"], error)) return false;
+  if (portrait_interface) {
+    std::vector<uint8_t> buttons, scene, source;
+    const auto aspect = screen::CurrentMenuConfiguration().portrait_aspect;
+    if (!read(ui::input_font::kListRecord, &buttons, error) ||
+        !ui::input_font::PreparePortraitAudio(built["ui/av_options/gen/settings_scale.milo_xbox"],
+            buttons, aspect, &scene, error)) return false;
+    built["ui/av_options/gen/av_options.milo_xbox"] = scene;
+    built["ui/av_options/gen/settings_scale.milo_xbox"] = std::move(scene);
+    if (!read("ui/credits/gen/credits.milo_xbox", &source, error) ||
+        !ui::input_font::PreparePortraitCredits(source, buttons, aspect, &scene, error)) return false;
+    built["ui/credits/gen/credits.milo_xbox"] = std::move(scene);
+    if (!read("ui/resource/lists/gen/list_credits.milo_xbox", &source, error) ||
+        !ui::input_font::PreparePortraitCreditsList(source, aspect, &scene, error)) return false;
+    built["ui/resource/lists/gen/list_credits.milo_xbox"] = std::move(scene);
+  }
   built["ui/av_options/gen/settings_scale_pause.milo_xbox"] =
       built["ui/av_options/gen/settings_scale.milo_xbox"];
   {
@@ -2827,7 +2858,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     built[ui::input_font::kPortraitSplashFontRecord] = std::move(scene);
     std::vector<uint8_t> splash, themed;
     if (!read(ui::input_font::kSplashRecord, &splash, error) ||
-        !ui::input_font::PreparePortraitSplash(splash,
+        !ui::input_font::PreparePortraitSplash(splash, buttons,
             screen::CurrentMenuConfiguration().portrait_aspect, &themed, error)) return false;
     if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
       if (!ui::input_font::PrepareSplash(themed, &splash, error)) return false;

@@ -1203,6 +1203,21 @@ void TestProfileAspectService() {
 }
 
 int main() {
+  BeginCase("mobile preview render scales retain a 16:9 source on ultrawide monitors");
+  for (const auto native : {DisplayMode{2560, 1080}, {3440, 1440}, {5120, 1440}}) {
+    Service service({}, schema::SettingsForRelease(schema::HostPlatform::kWindows, "test", {}, true));
+    service.Boot(nullptr, {}, nullptr);
+    CapabilitySnapshot caps;
+    caps.primary_display_size = native;
+    service.SetCapabilities(caps);
+    const int draw_scale = std::max((native.width + 1919) / 1920, (native.height + 719) / 720);
+    for (int tenths = 5; tenths <= 10; ++tenths) {
+      const auto pixels = ScaledProfileResolution(service.ResolutionProfileDisplay(), tenths);
+      const auto frame = ProfileGuestFrame(pixels, draw_scale);
+      CHECK_TRUE(frame.supported);
+      CHECK_TRUE(std::abs(frame.guest_size.width * 9 - frame.guest_size.height * 16) <= 16);
+    }
+  }
   TestProfileResolveTextures();
   TestProfileTextureUsers();
   TestSafeResolutionProfiles();

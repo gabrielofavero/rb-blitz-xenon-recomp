@@ -71,7 +71,6 @@ body { margin:0; }
 #blitz-portrait .bp-powericons button {padding:0;border:0;background:transparent;font-size:5cqw;min-width:0}
 #blitz-portrait .bp-powericons .bp-disc {width:18cqw;margin:0 auto;font-size:6cqw}
 #blitz-portrait .bp-powericons .bp-power-next {flex:0 0 7cqw;font-size:9cqw}
-#blitz-portrait .bp-screen .bp-back {align-self:flex-start;display:grid;place-items:center;flex:none;width:11cqw;aspect-ratio:1;padding:0;border:1px solid #ffffff50;border-radius:2px;background:#100d1caa;font-size:7cqw;line-height:1}
 #blitz-portrait .bp-screen.ready {justify-content:center}
 #blitz-portrait .bp-screen.ready .bp-grid {grid-template-columns:1fr;gap:2cqw}
 #blitz-portrait .bp-screen.ready .bp-disc {width:22cqw;margin:0 auto 1cqw;font-size:8cqw}
@@ -108,7 +107,6 @@ body { margin:0; }
   const list = (items, cls = '') => '<div class="bp-list ' + cls + '">' + items.join('') + '</div>';
   const head = (name, cls = '') => '<div class="bp-head ' + cls + '">' + name + '</div>';
   const bottom = (...items) => '<div class="bp-bottom">' + row(...items) + '</div>';
-  const back = to => '<button type="button" class="bp-back" data-go="' + to + '" aria-label="Back">←</button>';
   const logo = '<div class="bp-logo" role="img" aria-label="Rock Band Blitz Ultimate"></div>';
   const tabs = current => '<nav class="bp-tabs" style="--bp-neon:' + ['#55b8ff','#ffaf45','#ff4035'][current] + '" aria-label="Song hub">' + ['Messages','Rhythmverse','Your Songs'].map((item,i) => '<button type="button" data-go="' + (i+3) + '"' + (i === current ? ' aria-current="page"' : '') + '>' + item + '</button>').join('') + '</nav>';
   const album = '<div class="bp-album" role="img" aria-label="Stunt album cover"></div>';
@@ -135,11 +133,11 @@ body { margin:0; }
   const scenes = [
     () => logo + button('TAP TO START','hot bp-start',1),
     () => logo + list([button('PLAY','hot',5),button('PLAY CURRENT SONG','',6),button('RHYTHMVERSE','',4),button('HELP &amp; OPTIONS','',2),button('EXIT GAME')]) + '<div class="bp-mini bp-bottom"><small>Death on Two Legs…<br>Queen</small>' + button('‹‹') + button('Ⅱ') + button('››') + '</div>',
-    () => back(1) + head('HELP &amp; OPTIONS','bulbs') + list(['Controls','Calibration','General','Audio/Video','Gameplay','How to Play'].map((name,i) => button(name,i === 0 ? 'hot' : '')), 'bp-options') + '<div class="bp-detail"><small>Choose the devices and the controller mappings that play the game.</small></div>',
-    () => back(1) + tabs(0) + list([button('2026-11-06 Welcome','hot')], 'left') + '<article class="bp-panel"><strong>Welcome to version 0.1.0 :)</strong><p>This is the very first version of the Rock Band Blitz project. Play as much as you can, enjoy, and let me know about any bugs on GitHub!</p></article>',
-    () => back(1) + tabs(1) + list([button('Recently Added','hot'),button('Search')], 'left') + '<div class="bp-panel bp-center" style="margin:6cqw 13cqw;border-color:#f8a43e;box-shadow:0 0 8px #b95d1b"><b>ROCK BAND<br>BLITZ</b></div>' + bottom(button('Filters')),
-    () => back(1) + tabs(2) + row(button('Sort · Artist')) + list([button('Random Song'),'<span class="bp-group">BARENAKED LADIES</span>',song('One Week',true),'<span class="bp-group">FOO FIGHTERS</span>',song('These Days',false),'<span class="bp-group">QUEEN</span>',song('Death on Two Legs (Dedicated to…)',false)],'left') + '<div class="bp-bottom">' + card('Rock · 1998 &nbsp; ●●●●○') + row(button('Filters'),button('Search'),button('Select','hot',6)) + '</div>',
-    () => back(5) + head('SELECT POWER-UPS') + card('Track difficulty &nbsp; ●●●○○') + '<div class="bp-grid">' + button(disc('') + 'Overdrive','hot') + button(disc('') + 'Note') + button(disc('') + 'Track') + '</div><div class="bp-panel"><div class="bp-row bp-powericons">' + ['','2×','◉'].map(icon => button(disc(icon))).join('') + '<button type="button" class="bp-power-next" aria-label="More power-ups">&gt;</button></div><strong>NO POWER-UP SELECTED</strong><small>Hit glowing white notes to build energy, then tap Overdrive to deploy.</small></div>' + bottom(button('Play Song','hot',7)),
+    () => head('HELP &amp; OPTIONS','bulbs') + list(['Controls','Calibration','General','Audio/Video','Gameplay','How to Play'].map((name,i) => button(name,i === 0 ? 'hot' : '')), 'bp-options') + '<div class="bp-detail"><small>Choose the devices and the controller mappings that play the game.</small></div>' + bottom(button('‹ Back','',1)),
+    () => tabs(0) + list([button('2026-11-06 Welcome','hot')], 'left') + '<article class="bp-panel"><strong>Welcome to version 0.1.0 :)</strong><p>This is the very first version of the Rock Band Blitz project. Play as much as you can, enjoy, and let me know about any bugs on GitHub!</p></article>' + bottom(button('‹ Back','',1)),
+    () => tabs(1) + list([button('Recently Added','hot'),button('Search')], 'left') + '<div class="bp-panel bp-center" style="margin:6cqw 13cqw;border-color:#f8a43e;box-shadow:0 0 8px #b95d1b"><b>ROCK BAND<br>BLITZ</b></div>' + bottom(button('‹ Back','',1),button('Filters')),
+    () => tabs(2) + row(button('Sort · Artist'),button('Search')) + list([button('Random Song'),'<span class="bp-group">BARENAKED LADIES</span>',song('One Week',true),'<span class="bp-group">FOO FIGHTERS</span>',song('These Days',false),'<span class="bp-group">QUEEN</span>',song('Death on Two Legs (Dedicated to…)',false)],'left') + '<div class="bp-bottom">' + card('Rock · 1998 &nbsp; ●●●●○') + row(button('‹ Back','',1),button('Shortcuts'),button('Select','hot',6)) + '</div>',
+    () => head('SELECT POWER-UPS') + card('Track difficulty &nbsp; ●●●○○') + '<div class="bp-grid">' + button(disc('') + 'Overdrive','hot') + button(disc('') + 'Note') + button(disc('') + 'Track') + '</div><div class="bp-panel"><div class="bp-row bp-powericons">' + ['','2×','◉'].map(icon => button(disc(icon))).join('') + '<button type="button" class="bp-power-next" aria-label="More power-ups">&gt;</button></div><strong>NO POWER-UP SELECTED</strong><small>Hit glowing white notes to build energy, then tap Overdrive to deploy.</small></div>' + bottom(button('‹ Back','',5),button('Play Song','hot',7)),
     () => '<p class="bp-tip">The Recommended screen shows both songs you own and songs you SHOULD own.</p><div class="bp-grid"><div>' + disc('2×') + '<small>Point Doubler</small></div><div>' + disc('') + '<small>No Power-up<br>selected</small></div><div>' + disc('') + '<small>No Power-up<br>selected</small></div></div>' + bottom(button('Begin','hot',8)),
     () => gameplay(),
     () => gameplay() + pause()

@@ -187,7 +187,9 @@ DocumentStatus Service::Boot(const Profile* legacy, const PathEntry& existing_pa
 }
 
 DisplayMode Service::ResolutionProfileDisplay() const {
-  return ProfileDisplayBasis(capabilities_.primary_display_size, force_16_by_9_at_boot_);
+  // Desktop mobile preview represents a 9:16 phone, independently of the monitor's aspect.
+  return ProfileDisplayBasis(capabilities_.primary_display_size,
+                             release_.mobile_preview || force_16_by_9_at_boot_);
 }
 
 void Service::RefreshDescriptors() {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "input/last_device.h"
 #include "input/start_prompt.h"
+#include "input/calibration_text.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -192,5 +193,35 @@ int main() {
         "guest reassignment replaces saved text even at the same address");
   Check(prompt.Update(original, true) == "TOUCH TO BEGIN", "scene reload captures the new label");
   Check(prompt.Update("TOUCH TO BEGIN", false) == original, "scene reload restores its own original");
+  using rb_blitz::input::TouchCalibrationInstruction;
+  for (const auto& [physical, touch] : std::array<std::pair<std::string_view, std::string_view>, 7>{{
+      {"Hear a drum hit, press the <alt1>A</alt1> button.", "Hear a drum hit, tap the screen."},
+      {"Needle hits either side, press the <alt1>\xC2\x81</alt1> button.", "Needle hits either side, tap the screen."},
+      {"Drücke jedes Mal die <alt1>A</alt1>-Taste, wenn du einen Trommelschlag hörst.",
+       "Tippe jedes Mal auf den Bildschirm, wenn du einen Trommelschlag hörst."},
+      {"pulsa el botón <alt1>A</alt1>.", "toca la pantalla."},
+      {"appuie sur la touche <alt1>A</alt1> quand l'aiguille touche chaque côté de la jauge.",
+       "touche l'écran quand l'aiguille touche chaque côté de la jauge."},
+      {"premi <alt1>A</alt1>.", "tocca lo schermo."},
+      {"pressione o botão <alt1>A</alt1>.", "toque na tela."}}})
+    Check(TouchCalibrationInstruction(physical) == touch, "calibration preserves localized timing and removes the button");
+  Check(TouchCalibrationInstruction("Drücke jedes Mal die <alt1>A</alt1> -Taste, wenn die Nadel ausschlägt.") ==
+        "Tippe jedes Mal auf den Bildschirm, wenn die Nadel ausschlägt.", "German video prompt accepts its authored spacing");
+  Check(TouchCalibrationInstruction("press the <alt1>A button.") == "press the <alt1>A button.",
+        "malformed calibration markup is preserved");
+  rb_blitz::input::CalibrationPromptText calibration;
+  const std::string audio = "Hear a drum hit, press the <alt1>A</alt1> button.";
+  const auto tapped = calibration.Update(audio, true, false);
+  Check(tapped == "Hear a drum hit, tap the screen.", "touch audio replaces button wording");
+  Check(calibration.Update(tapped, false, false) == audio, "controller restores original calibration wording");
+  Check(calibration.Update("pressione o botão <alt1>A</alt1>.", true, false) == "toque na tela.",
+        "locale changes refresh calibration wording");
+  rb_blitz::input::CalibrationPromptText result;
+  Check(result.Update("Lag Calibration Successful", true, true) == "Lag Calibration\nSuccessful",
+        "mobile result has two balanced lines");
+  Check(result.Update("Lag Calibration\nSuccessful", true, true) == "Lag Calibration\nSuccessful",
+        "mobile result remains stable between draws");
+  Check(result.Update("Lag Calibration\nSuccessful", false, true) == "Lag Calibration Successful",
+        "physical input restores single-line result");
   std::cout << "last_device: OK\n";
 }

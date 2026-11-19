@@ -569,7 +569,8 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
                                      (landscape.height + 719) / 720);
       const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings());
       const auto profile_pixels = mobile
-          ? ScaledProfileResolution(native, service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
+          ? ScaledProfileResolution(service_->ResolutionProfileDisplay(),
+                                    service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
           : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text,
                               service_->ResolutionProfileDisplay());
       const auto profile_plan = ProfileGuestFrame(profile_pixels, profile_draw_scale_);
@@ -639,9 +640,9 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
       // Rebuild them from recovered controls rather than clamping their shape.
       if (profile_draw_scale_) {
         const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings());
-        const auto native = capability_snapshot_.primary_display_size;
         const auto pixels = mobile
-            ? ScaledProfileResolution(native, selected.at(SettingId::kInterfaceRenderScale).integer)
+            ? ScaledProfileResolution(service_->ResolutionProfileDisplay(),
+                                      selected.at(SettingId::kInterfaceRenderScale).integer)
             : ProfileResolution(selected.at(SettingId::kInterfaceResolution).text,
                                 service_->ResolutionProfileDisplay());
         const auto recovered = ProfileGuestFrame(pixels, profile_draw_scale_);
@@ -1178,9 +1179,9 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     screen_plan_ = PlanGuestScreen(render_limits_, {1280, 720});
 #endif
     if (profile_draw_scale_ && service_) {
-      const auto native = capability_snapshot_.primary_display_size;
       const auto pixels = schema::IsMobile(schema::CurrentReleaseSettings())
-          ? ScaledProfileResolution(native, service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
+          ? ScaledProfileResolution(service_->ResolutionProfileDisplay(),
+                                    service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
           : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text,
                               service_->ResolutionProfileDisplay());
       screen_plan_ = ProfileGuestFrame(pixels, profile_draw_scale_);

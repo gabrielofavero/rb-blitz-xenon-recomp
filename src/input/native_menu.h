@@ -77,6 +77,33 @@ struct MenuBounds {
   }
 };
 
+inline bool MenuFooterHovered(const std::optional<MenuPoint>& pointer, const MenuBounds& bounds,
+                               bool enabled, bool touch, bool pressed = false) {
+  return enabled && (!touch || pressed) && pointer && bounds.Contains(*pointer);
+}
+
+// Give a touch footer at least one highlighted draw before sending its action.
+// Waiting for release also keeps a held Back button visible beneath the finger.
+struct MenuFooterTouchPress {
+  std::optional<MenuPoint> point;
+  uint16_t button = 0;
+  bool drawn = false;
+  void Reset() { point.reset(); button = 0; drawn = false; }
+  void Begin(MenuPoint at, uint16_t action) { point = at; button = action; drawn = false; }
+  bool Draw(const MenuBounds& bounds) {
+    if (!point || !bounds.Contains(*point)) return false;
+    drawn = true;
+    return true;
+  }
+  uint16_t Poll(bool enabled, bool pressed) {
+    if (!enabled) { Reset(); return 0; }
+    if (!drawn || pressed) return 0;
+    const auto action = button;
+    Reset();
+    return action;
+  }
+};
+
 // The six-position audio resource is shared by the two volume controls and
 // mobile resolution profiles. Points are in the guest's presentation space.
 inline int SliderStepAt(MenuPoint point, const MenuBounds& bounds, int intervals = 5) {
@@ -472,7 +499,11 @@ bool MainMenuMusicInputAvailable();
 // Portrait title/main menu, loading panels, and native confirmation/error prompts.
 bool PortraitSplashActive();
 bool PortraitSettingsActive();
+bool PortraitConnectionActive();
 bool PortraitCalibrationActive();
+// Keep the footer's live labels associated with their native button surfaces.
+void DrawMenuHints(PPCContext& ctx, uint8_t* base, uint32_t owner, size_t index, size_t count,
+                    void (*draw)(PPCContext&, uint8_t*));
 
 // A live song: the screen is `game_screen` and the focused panel is not the pause panel
 // (the same split `MenuAvailable` uses to let pause take the pad). False on every menu, on

@@ -3,10 +3,59 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <limits>
+#include <optional>
 #include <vector>
 
 namespace rb_blitz::input {
-struct InlineHelpEntry { uint32_t label, action; };
+struct InlineHelpEntry { uint32_t label, action, record = 0; };
+
+// RndText batches glyph quads by font in 12-byte records at UILabel +132.
+// Use each batch's live glyph count, not the mesh's allocated vertex capacity:
+// touch removes the icon batch and captions can shrink when actions change.
+template <typename Read32, typename ReadFloat>
+std::optional<std::array<float, 4>> InlineHelpGlyphBounds(
+    uint32_t label, Read32 read32, ReadFloat read_float) {
+  const auto range = [](uint32_t address, uint64_t size) {
+    return address >= 0x40000000 && uint64_t(address) + size <= 0x7F000000;
+  };
+  if (!range(label, 140)) return {};
+  const auto begin = read32(label + 132), end = read32(label + 136);
+  if (end < begin || end - begin > 16 * 12 || (end - begin) % 12 ||
+      !range(begin, end - begin)) return {};
+  const float inf = std::numeric_limits<float>::infinity();
+  std::array<float, 4> bounds{inf, inf, -inf, -inf};
+  for (auto batch = begin; batch < end; batch += 12) {
+    const auto glyphs = read32(batch + 8);
+    if (!glyphs) continue;
+    const auto mesh = read32(batch + 4);
+    if (glyphs > 1024 || !range(mesh, 328)) return {};
+    const auto owner = read32(mesh + 324);
+    if (!range(owner, 264)) return {};
+    const auto vertices = read32(owner + 256), capacity = read32(owner + 260);
+    const auto count = glyphs * 4;
+    if (count > capacity || !range(vertices, uint64_t(count) * 96)) return {};
+    for (uint32_t i = 0; i < count; i += 4) {
+      std::array<float, 4> quad{inf, inf, -inf, -inf};
+      for (uint32_t corner = 0; corner < 4; ++corner) {
+        const auto vertex = vertices + (i + corner) * 96;
+        const float x = read_float(vertex), z = read_float(vertex + 8);
+        if (!std::isfinite(x) || !std::isfinite(z)) return {};
+        quad[0] = std::min(quad[0], x); quad[2] = std::max(quad[2], x);
+        quad[1] = std::min(quad[1], z); quad[3] = std::max(quad[3], z);
+      }
+      // Spaces advance the pen without drawing; RndText zeros their spare quads.
+      if (!(quad[2] > quad[0]) || !(quad[3] > quad[1])) continue;
+      bounds[0] = std::min(bounds[0], quad[0]); bounds[2] = std::max(bounds[2], quad[2]);
+      bounds[1] = std::min(bounds[1], quad[1]); bounds[3] = std::max(bounds[3], quad[3]);
+    }
+  }
+  if (!(bounds[2] > bounds[0]) || !(bounds[3] > bounds[1])) return {};
+  return bounds;
+}
 
 // SetWorldXfm writes the draw matrix at +72 and clears the dirty byte at +189.
 // WorldXfm is an evaluator: calling it on a clean object rebuilds from its local
@@ -34,7 +83,7 @@ std::vector<InlineHelpEntry> ReadInlineHelpEntries(uint32_t object, Read32 read3
   std::vector<InlineHelpEntry> entries;
   for (uint32_t i = 0; i < (end - begin) / 28; ++i) {
     const uint32_t label = read32(labels + i * 4);
-    if (range(label, 4)) entries.push_back({label, read32(begin + i * 28)});
+    if (range(label, 4)) entries.push_back({label, read32(begin + i * 28), begin + i * 28});
   }
   return entries;
 }

@@ -15,9 +15,11 @@ The Start prompt is also reduced by 5%. The city extends below the viewport to
 crop the solid strip beneath the road. Menu rows have a 62-unit pitch and fit
 six entries above the footer. Their private font uses the same 1024x1024
 regular Pentatonic atlas as Help & Options, with all four variations unlit.
-Loading text is bottom-aligned at the Start prompt's vertical anchor. The
-native loading bar occupies 40% of the portrait width at 18 units high;
-native text-height measurement keeps it six units above the wrapped message
+Loading text is bottom-aligned at the Start prompt's vertical anchor, using
+18-unit text at the reference list scale. On 2026-11-19 this replaced the earlier
+20-unit text and 40%-wide, 18-unit-high bar with its six-unit message gap. The
+native loading bar now occupies 50% of the portrait width at 20 units high;
+native text-height measurement keeps it three units above the wrapped message
 as status text changes. The status label explicitly uses wrap mode: the guest
 height-measurement handler skips ellipsis labels and leaves their box height
 unchanged, which would place the bar far above the visible text.
@@ -33,17 +35,47 @@ the row width and keeps a full mesh hit target. Touch input removes the Back
 icon; changing input devices refreshes the native hint. Footer surfaces use
 unlit, untextured materials and a subtle border. A private regular font keeps
 their labels the same size as the menu rows. Titles use a separate, larger font
-size at the center of the marquee.
+size at the center of the marquee. The measured light-row centers are
+141.5062 and 187.7962 guest units; their midpoint is 164.6512. The native label
+draw centers the current text rectangle there, including its font bearings.
+Footer captions center their live glyph quads against the button center,
+including mixed keyboard/controller glyph baselines. Empty icon batches, spaces
+and unused vertex capacity do not affect this measurement. Touch settings footer presses
+draw the native yellow surface before dispatching the action on release, so even
+a tap between UI polls receives feedback. Screen, panel and focus changes discard
+pending presses.
 Calibration's choice list keeps the provider's `name` widget in a private copy
 of the main menu buttons. Its welcome directory uses an identity transform so
 panel initialization cannot shift the title, rows or footer. Wizard artwork,
 instructions and countdowns have independent sizes. The live calibration footer
 retains the game's changing actions, with a separate row for a third action.
-Footer and arrow surfaces use 12% opacity with a 10% border. Controller presets
+Footer surfaces share the main menu palette with alpha multiplied by 0.8:
+53.6% normal fill, 15.2% border and 80% yellow hover fill. This supersedes the
+earlier documented 12% fill and 10% border. Main menu/loading captions remain
+black; other footer captions turn black on hover. Controller presets
 retain their diagram and callout associations at a larger size; the selector has
 38-unit arrow buttons with matching touch targets; the complete arrow quads fit
-inside those bounds. Native selection and
-calibration animation timing remain intact.
+inside those bounds. The preset label draw renders the private native arrow
+surfaces and arrows together, temporarily changing hovered arrow RGB to black
+and the background to yellow. Hidden draw groups prevent duplicate traversal.
+Native selection and calibration animation timing remain intact.
+
+2026-11-19 [static]: audio artwork centers the resting speaker body, measured
+from texture alpha bounds `(4,65)-(139,205)` and mapped through the authored
+quad UVs to local `(223.3656,39.78075)`, rather than centering the transparent
+256-square texture. Its sound waves expand without moving the speaker. Touch
+audio/video instructions replace only the localized button phrase with a screen
+tap in all six installed languages, retaining the drum-hit/needle timing cue;
+physical input restores the exact original wording. Portrait `lag_success`
+centers at guest `(0,0)`, scales up to 2x on touch or 1.65x with physical input,
+and fits within 84% of the viewport width. Touch results split at a word boundary
+near the middle; other calibration state labels keep their existing placement.
+World transforms and material colors are restored after each draw. Localized
+button wording is restored when physical input becomes active.
+Evidence: `out/portrait-ui-alignment/` and adjacent build/test logs. These changes
+are shared guest UI code; Windows automated validation is recorded in the
+[delivery plan](../plans/finished/2026-11-19-portrait-ui-alignment.md). Game/UI
+appearance and other native platforms remain unverified.
 
 Current refresh behavior is described under **At a glance**. Dated R7 sections
 below retain the old persisted-cache and sentinel measurements as history.

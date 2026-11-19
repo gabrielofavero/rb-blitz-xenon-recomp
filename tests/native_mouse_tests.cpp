@@ -9,6 +9,84 @@ using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("footer feedback follows mouse hover and active touch presses across the full button");
+  const MenuBounds footer_bounds{.2f, .85f, .4f, .95f};
+  CHECK_TRUE(MenuFooterHovered(MenuPoint{.21f, .9f}, footer_bounds, true, false));
+  CHECK_TRUE(MenuFooterHovered(MenuPoint{.39f, .9f}, footer_bounds, true, false));
+  CHECK_FALSE(MenuFooterHovered(MenuPoint{.41f, .9f}, footer_bounds, true, false));
+  CHECK_FALSE(MenuFooterHovered(MenuPoint{.3f, .9f}, footer_bounds, false, false));
+  CHECK_FALSE(MenuFooterHovered(MenuPoint{.3f, .9f}, footer_bounds, true, true));
+  CHECK_TRUE(MenuFooterHovered(MenuPoint{.21f, .9f}, footer_bounds, true, true, true));
+  CHECK_TRUE(MenuFooterHovered(MenuPoint{.39f, .9f}, footer_bounds, true, true, true));
+  CHECK_FALSE(MenuFooterHovered(MenuPoint{.41f, .9f}, footer_bounds, true, true, true));
+  CHECK_FALSE(MenuFooterHovered(MenuPoint{.3f, .9f}, footer_bounds, false, true, true));
+  CHECK_FALSE(MenuFooterHovered({}, footer_bounds, true, false));
+  CHECK_FALSE(MenuFooterHovered(MenuPoint{NAN, NAN}, footer_bounds, true, false));
+
+  BeginCase("touch footer actions wait for a highlighted draw and release, including taps between frames");
+  MenuFooterTouchPress press;
+  press.Begin({.3f, .9f}, 0x2000);
+  CHECK_EQ(press.Poll(true, false), 0); // a quick tap still needs feedback
+  CHECK_FALSE(press.Draw({.5f, .85f, .7f, .95f}));
+  CHECK_EQ(press.Poll(true, false), 0);
+  CHECK_TRUE(press.Draw(footer_bounds));
+  CHECK_EQ(press.Poll(true, true), 0); // hold keeps the button on screen
+  CHECK_EQ(press.Poll(true, false), 0x2000);
+  CHECK_FALSE(press.Draw(footer_bounds));
+  CHECK_EQ(press.Poll(true, false), 0); // deliver once
+  press.Begin({.3f, .9f}, 0x2000);
+  CHECK_TRUE(press.Draw(footer_bounds));
+  CHECK_EQ(press.Poll(false, false), 0); // lost focus discards the action
+  CHECK_FALSE(press.Draw(footer_bounds));
+  press.Begin({.3f, .9f}, 0x2000);
+  CHECK_TRUE(press.Draw(footer_bounds));
+  press.Reset(); // a different screen/panel must not inherit the action
+  CHECK_EQ(press.Poll(true, false), 0);
+
+  BeginCase("footer captions center on live text and icon quads instead of layout spacing or stale vertices");
+  {
+    constexpr uint32_t label = 0x40100000, batches = 0x40101000;
+    constexpr uint32_t text_mesh = 0x40102000, icon_mesh = 0x40103000;
+    constexpr uint32_t text_vertices = 0x40104000, icon_vertices = 0x40105000;
+    std::unordered_map<uint32_t, uint32_t> words{
+        {label + 132, batches}, {label + 136, batches + 24},
+        {batches + 4, text_mesh}, {batches + 8, 1},
+        {batches + 16, icon_mesh}, {batches + 20, 1},
+        {text_mesh + 324, text_mesh}, {text_mesh + 256, text_vertices}, {text_mesh + 260, 8},
+        {icon_mesh + 324, icon_mesh}, {icon_mesh + 256, icon_vertices}, {icon_mesh + 260, 4}};
+    std::unordered_map<uint32_t, float> floats;
+    for (uint32_t i = 0; i < 4; ++i) {
+      floats[text_vertices + i * 96] = i & 1 ? 30.f : 10.f;
+      floats[text_vertices + i * 96 + 8] = i & 2 ? 8.f : -4.f;
+      floats[icon_vertices + i * 96] = i & 1 ? 5.f : -9.f;
+      floats[icon_vertices + i * 96 + 8] = i & 2 ? 10.f : -8.f;
+      floats[text_vertices + (i + 4) * 96] = 200.f; // unused mesh capacity
+      floats[text_vertices + (i + 4) * 96 + 8] = 200.f;
+    }
+    const auto read_word = [&](uint32_t at) { return words.at(at); };
+    const auto read_float = [&](uint32_t at) { return floats.at(at); };
+    auto measured = InlineHelpGlyphBounds(label, read_word, read_float);
+    CHECK_TRUE(measured.has_value());
+    CHECK_TRUE((*measured == std::array<float, 4>{-9, -8, 30, 10}));
+    words[batches + 20] = 0; // touch hides the icon without discarding its allocated mesh
+    measured = InlineHelpGlyphBounds(label, read_word, read_float);
+    CHECK_TRUE(measured.has_value());
+    CHECK_TRUE((*measured == std::array<float, 4>{10, -4, 30, 8}));
+    words[batches + 8] = 2;
+    for (uint32_t i = 4; i < 8; ++i) {
+      floats[text_vertices + i * 96] = 0;
+      floats[text_vertices + i * 96 + 8] = 0;
+    }
+    measured = InlineHelpGlyphBounds(label, read_word, read_float);
+    CHECK_TRUE(measured.has_value());
+    CHECK_TRUE((*measured == std::array<float, 4>{10, -4, 30, 8}));
+    floats[text_vertices] = NAN;
+    CHECK_FALSE(InlineHelpGlyphBounds(label, read_word, read_float));
+    floats[text_vertices] = 10;
+    words[batches + 8] = 3; // invalid live count exceeds the allocation
+    CHECK_FALSE(InlineHelpGlyphBounds(label, read_word, read_float));
+    CHECK_FALSE(InlineHelpGlyphBounds(0, read_word, read_float));
+  }
   BeginCase("pause and native song confirmations retain the gameplay resolution");
   for (const auto screen : {"game_screen", "pause_confirm_quit_song_screen",
                             "pause_confirm_restart_song_screen"})
@@ -125,6 +203,7 @@ int main() {
   for (size_t i = 0; i < entries.size(); ++i) {
     CHECK_EQ(entries[i].label, 0x40100100 + i * 0x100);
     CHECK_EQ(entries[i].action, read(actions + uint32_t(i) * 28));
+    CHECK_EQ(entries[i].record, actions + uint32_t(i) * 28);
   }
   CHECK_EQ(MenuHintButton(entries.at(1).action), 0x2000); // Back uses its own record
   CHECK_EQ(MenuHintButton(entries.at(2).action), 0x10);   // Search is Start
@@ -161,6 +240,7 @@ int main() {
   words[footer + 96] -= 4;
   words[labels + 4] = 0;
   CHECK_EQ(ReadInlineHelpEntries(footer, read).size(), 3); // never dereference an invalid label
+  CHECK_EQ(ReadInlineHelpEntries(footer, read).at(1).record, actions + 2 * 28);
   words[footer + 84] = actions - 28;
   CHECK_TRUE(ReadInlineHelpEntries(footer, read).empty());
   CHECK_TRUE(ReadInlineHelpEntries(0, read).empty()); // reject before touching guest memory

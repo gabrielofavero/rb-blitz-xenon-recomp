@@ -40,7 +40,8 @@ bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* sc
 bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                    std::string* error);
 // Text-only native Start prompt and a soft vignette around the authored backdrop.
-bool PreparePortraitSplash(const std::vector<uint8_t>& source, float aspect,
+bool PreparePortraitSplash(const std::vector<uint8_t>& source,
+                           const std::vector<uint8_t>& button_source, float aspect,
                            std::vector<uint8_t>* scene, std::string* error);
 // Zoom the Ultimate bitmap in its distinct startup scene without changing its aspect.
 bool PreparePortraitStartupLogo(const std::vector<uint8_t>& source,
@@ -57,6 +58,14 @@ bool PreparePortraitPrompt(const std::vector<uint8_t>& source, float aspect,
 bool PreparePortraitSettings(const std::vector<uint8_t>& source,
                              const std::vector<uint8_t>& button_source, float aspect,
                              std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitAudio(const std::vector<uint8_t>& source,
+                         const std::vector<uint8_t>& button_source, float aspect,
+                         std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitCredits(const std::vector<uint8_t>& source,
+                           const std::vector<uint8_t>& button_source, float aspect,
+                           std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitCreditsList(const std::vector<uint8_t>& source, float aspect,
+                               std::vector<uint8_t>* scene, std::string* error);
 // Fit the native calibration steps and controller diagrams to the portrait surface.
 bool PreparePortraitControls(const std::vector<uint8_t>& source,
                              const std::vector<uint8_t>& button_source,
