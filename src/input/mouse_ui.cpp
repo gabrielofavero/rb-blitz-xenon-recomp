@@ -34,6 +34,7 @@ namespace {
 // from the guest input thread). SDL documents `SDL_GetMouseState` and `SDL_GetKeyboardFocus` as
 // main-thread calls, so the sampler must not ask SDL itself - it reads these instead.
 std::atomic<uint32_t> g_mouse_buttons{0};
+std::atomic<bool> g_pointer_is_touch{false};
 std::atomic<bool> g_window_focused{false};
 // The wheel detents seen since the guest-side sampler last consumed them (P2 of the
 // interface/gameplay mapping plan): positive away from the player, negative toward. Recorded
@@ -324,6 +325,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
     return p;
   }
   void OnMouseMove(rex::InputEvent& e) {
+    g_pointer_is_touch.store(e.is_touch, std::memory_order_relaxed);
     if (touch::ConsumeMouse(e.is_touch, touch::Phase::kMove, GameScreenActive())) {
       e.handled = true;
       return;
@@ -349,6 +351,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
     e.handled = true;
   }
   void OnMouseDown(rex::InputEvent& e) {
+    g_pointer_is_touch.store(e.is_touch, std::memory_order_relaxed);
     if (touch::ConsumeMouse(e.is_touch, touch::Phase::kDown, GameScreenActive())) {
       e.handled = true;
       return;
@@ -383,6 +386,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
     e.handled = true;
   }
   void OnMouseUp(rex::InputEvent& e) {
+    g_pointer_is_touch.store(e.is_touch, std::memory_order_relaxed);
     if (touch::ConsumeMouse(e.is_touch, touch::Phase::kUp, GameScreenActive())) {
       e.handled = true;
       return;
@@ -402,6 +406,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
     e.handled = true;
   }
   void OnMouseWheel(rex::InputEvent& e) {
+    g_pointer_is_touch.store(e.is_touch, std::memory_order_relaxed);
     if (auto changed = e.is_touch ? last_device::Touch() : last_device::MouseWheel())
       REXLOG_INFO("button_schemes: active {} (device {})", changed->scheme,
                   changed->using_touch ? "touch" : "mouse");
@@ -473,6 +478,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
 }
 
 uint32_t HostMouseButtons() { return g_mouse_buttons.load(std::memory_order_relaxed); }
+bool HostPointerIsTouch() { return g_pointer_is_touch.load(std::memory_order_relaxed); }
 int32_t HostTakeMouseWheel() {
   return g_wheel_detents.exchange(0, std::memory_order_relaxed);
 }

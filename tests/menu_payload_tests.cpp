@@ -1862,6 +1862,12 @@ void TestPortraitSplash() {
     const auto retry = rb_blitz::ui::PortraitCalibrationFooter(aspect, 2);
     CHECK_TRUE(confirm.x + confirm.width / 2 < back.x - back.width / 2);
     CHECK_TRUE(retry.z - retry.height / 2 > back.z + back.height / 2);
+    const auto live_retry = rb_blitz::ui::PortraitFooterAction(aspect, 1, 3);
+    const auto live_back = rb_blitz::ui::PortraitFooterAction(aspect, 2, 3);
+    CHECK_EQ(live_retry.x, 0.f);
+    CHECK_TRUE(live_retry.z - live_retry.height / 2 > live_back.z + live_back.height / 2);
+    CHECK_TRUE(std::string_view(rb_blitz::ui::PortraitFooterSurface(1, 3)) == "portrait_retry");
+    CHECK_TRUE(std::string_view(rb_blitz::ui::PortraitFooterSurface(2, 3)) == "portrait_back");
     CHECK_TRUE(confirm.height >= 30 && retry.height >= 30);
     CHECK_EQ(layout.content_scale, rb_blitz::ui::PortraitSplash(aspect).list_scale);
     CHECK_TRUE(layout.back_width < 364.5f * layout.content_scale * .6f);
@@ -3087,6 +3093,8 @@ int main(int argc, char** argv) {
       auto objects = stored_objects(portrait.at(path));
       CHECK_TRUE(objects.contains("portrait_back.mesh"));
       CHECK_TRUE(objects.contains("portrait_confirm.mesh"));
+      CHECK_EQ(objects.contains("portrait_calibration_footer.color"),
+               std::string_view(path).find("/calibration/") != std::string_view::npos);
       CHECK_EQ(objects.at("portrait_back.mat")[0x29], uint8_t(0));
       CHECK_EQ(objects.at("portrait_confirm.mat")[0x29], uint8_t(0));
       CHECK_EQ(std::bit_cast<float>(u32(objects.at("header.lbl").data() + 0x19)), 1.f);
@@ -3116,6 +3124,20 @@ int main(int argc, char** argv) {
       CHECK_EQ(u32(data.data() + 0x21 + 105), uint32_t(0)); // independent transform, native draw group retained
     }
     CHECK_TRUE(std::abs(std::bit_cast<float>(u32(wizard.at("cal_metronome.grp").data() + 0x21 + 20))) > .3f);
+    for (const char* name : {"button_press_xbox.mesh", "button_press_ps3.mesh"}) {
+      const auto& button = wizard.at(name);
+      for (size_t matrix : {size_t{0x15}, size_t{0x45}}) {
+        const auto field = [&](size_t offset) {
+          return std::bit_cast<float>(u32(button.data() + matrix + offset));
+        };
+        CHECK_TRUE(std::abs(field(36)) < .001f);
+        CHECK_TRUE(std::abs(field(44) + 25.f) < .001f);
+        const float previous = 1.5573348f * rb_blitz::ui::PortraitSplash(config.portrait_aspect).width * .65f / 511.003f;
+        CHECK_TRUE(std::abs(field(0) / previous - .85f) < .001f);
+        CHECK_TRUE(std::abs(field(20) - field(0)) < .001f); // retain the quad's XY-to-XZ rotation
+      }
+      CHECK_EQ(u32(button.data() + 0x15 + 105), uint32_t{0});
+    }
     const auto& speaker = wizard.at("audio_anim.grp");
     const auto speaker_field = [&](size_t field) {
       return std::bit_cast<float>(u32(speaker.data() + 0x21 + field));

@@ -190,6 +190,25 @@ int main() {
   CHECK_EQ(evaluations, 1); // Dirty labels still resolve their current parent/local placement.
 
   BeginCase("guest footer records preserve full labels and their native actions");
+  {
+    const std::vector<InlineHelpEntry> calibration{
+        {0x40100100, 1, 1}, {0x40100200, 1, 2}, {0x40100300, 2, 3}};
+    const auto caption = [](const auto& entry) -> std::string_view {
+      return entry.record == 1 ? "select" : entry.record == 2 ? "retry" : "inline_help_back";
+    };
+    const auto pair = CalibrationFooterEntries(calibration, caption);
+    CHECK_EQ(pair.size(), 2);
+    CHECK_EQ(pair[0].label, calibration[2].label); // Back stays left.
+    CHECK_EQ(pair[1].label, calibration[1].label); // Retry stays right, despite sharing Confirm with Select.
+    CHECK_EQ(MenuHintButton(pair[0].action), 0x2000);
+    CHECK_EQ(MenuHintButton(pair[1].action), 0x1000);
+    const auto back_only = CalibrationFooterEntries(
+        std::vector<InlineHelpEntry>{calibration[0], calibration[2]}, caption);
+    CHECK_EQ(back_only.size(), 1);
+    CHECK_EQ(back_only[0].label, calibration[2].label);
+    CHECK_TRUE(CalibrationFooterEntries(std::vector<InlineHelpEntry>{calibration[0]}, caption).empty());
+    CHECK_EQ(calibration.size(), 3); // Guest navigation retains its complete native action list.
+  }
   constexpr uint32_t footer = 0x40001000, actions = 0x40002000, labels = 0x40003000;
   std::unordered_map<uint32_t, uint32_t> words{
       {footer + 80, actions}, {footer + 84, actions + 4 * 28},

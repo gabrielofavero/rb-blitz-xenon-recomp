@@ -739,7 +739,7 @@ void PortraitFooter(PortraitScene& scene, const std::vector<uint8_t>& buttons,
     }
   }
   for (size_t i = 0; i < 3; ++i) {
-    const auto slot = ui::PortraitFooterAction(aspect, i, 3);
+    const auto slot = ui::PortraitCalibrationFooter(aspect, i);
     PortraitSurface(scene, buttons,
         i == 0 ? "portrait_confirm" : i == 1 ? "portrait_back" : "portrait_retry",
         slot.width, slot.height, slot.x, slot.z, {});
@@ -1005,6 +1005,14 @@ bool PreparePortraitControls(const std::vector<uint8_t>& source,
     art("cal_bg.grp", background, .8785f * background, -25 + 84.6205f * background);
     const float visual = width * .65f / 511.003f;
     art("visuals_anim.grp", visual, -176.5365f * visual, -20 - 296.4875f * visual);
+    // The button quads are centered at their mesh origins, offset within the
+    // controller animation group. Center them over the meter independently.
+    for (const char* name : {"button_press_xbox.mesh", "button_press_ps3.mesh"}) {
+      art(name, 1.5573348f * visual * .85f, 0, -25);
+      auto& object = *edited.Find(name);
+      const auto matrix = PortraitMatrix(object);
+      std::copy_n(object.data.data() + matrix, 48, object.data.data() + matrix + 48);
+    }
     for (const char* name : {"cal_hardware_audio_illustration.grp", "cal_hardware_video_illustration.grp"})
       art(name, .75f * fit, 0, 30);
   }
@@ -1071,13 +1079,18 @@ bool PreparePortraitControls(const std::vector<uint8_t>& source,
     RenameSceneString(nav.data, "../resource/inline_help/default.milo",
                       "../resource/inline_help/portrait_actions.milo");
     for (size_t i = 0; i < 3; ++i) {
-      const auto slot = ui::PortraitFooterAction(aspect, i, 3);
+      const auto slot = ui::PortraitCalibrationFooter(aspect, i);
       PortraitSurface(edited, buttons,
           i == 0 ? "portrait_confirm" : i == 1 ? "portrait_back" : "portrait_retry",
           slot.width, slot.height, slot.x, slot.z, {});
     }
   } else {
     PortraitFooter(edited, buttons, aspect, crc == 0x61CF95FD, crc == 0x75394D35);
+  }
+  if (!presets) {
+    auto marker = *edited.Find("portrait_caption_black.color");
+    marker.name = "portrait_calibration_footer.color";
+    edited.objects.push_back(std::move(marker));
   }
   return PackStored(edited.Build(), scene, error);
 }

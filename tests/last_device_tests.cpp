@@ -2,6 +2,7 @@
 #include "input/last_device.h"
 #include "input/start_prompt.h"
 #include "input/calibration_text.h"
+#include "input/native_menu.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -141,6 +142,15 @@ int main() {
   Check(emulated.Current().using_touch && emulated.Current().family == Family::kController,
         "mouse movement, click and wheel keep touch interface");
   Check(emulated.Current().revision == touch_revision, "continued emulated touch avoids refresh churn");
+  const rb_blitz::input::MenuBounds footer{.2f, .85f, .4f, .95f};
+  const rb_blitz::input::MenuPoint pointer{.3f, .9f};
+  Check(rb_blitz::input::MenuFooterHovered(pointer, footer, true, false),
+        "physical mouse hovers footer and preset surfaces while emulating touch");
+  Check(emulated.Current().using_touch, "mouse hover keeps emulated touch captions");
+  Check(!rb_blitz::input::MenuFooterHovered(pointer, footer, true, true),
+        "released touchscreen pointer does not leave a hover behind");
+  Check(rb_blitz::input::MenuFooterHovered(pointer, footer, true, true, true),
+        "held touchscreen pointer highlights the same surfaces");
   Check(emulated.KeyDown(500), "real keyboard still replaces emulated touch");
   Check(!emulated.Current().using_touch, "keyboard selects physical interface");
   Check(emulated.MouseMove(200, 200, 510), "first mouse movement restores touch immediately");

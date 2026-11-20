@@ -78,8 +78,8 @@ struct MenuBounds {
 };
 
 inline bool MenuFooterHovered(const std::optional<MenuPoint>& pointer, const MenuBounds& bounds,
-                               bool enabled, bool touch, bool pressed = false) {
-  return enabled && (!touch || pressed) && pointer && bounds.Contains(*pointer);
+                               bool enabled, bool touch_pointer, bool pressed = false) {
+  return enabled && (!touch_pointer || pressed) && pointer && bounds.Contains(*pointer);
 }
 
 // Give a touch footer at least one highlighted draw before sending its action.
@@ -453,6 +453,8 @@ void MouseMenuFocus(bool focused);
 // the game window's own focus, not the pointer's availability (an ImGui overlay taking the
 // pointer must not stop the keyboard from playing).
 uint32_t HostMouseButtons();
+// Actual pointer-event source, independent of touch interface emulation.
+bool HostPointerIsTouch();
 // The wheel detents seen since the previous call: positive away from the player (`wheel_up`),
 // negative toward (`wheel_down`). Consumes them, so exactly one poll sees each detent.
 int32_t HostTakeMouseWheel();
@@ -501,6 +503,10 @@ bool PortraitSplashActive();
 bool PortraitSettingsActive();
 bool PortraitConnectionActive();
 bool PortraitCalibrationActive();
+// Resolve authored footer surfaces from the drawing widget's own scene.
+bool PortraitMenuHintsAvailable(PPCContext& ctx, uint8_t* base, uint32_t owner);
+struct InlineHelpEntry;
+std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* base, uint32_t owner);
 // Keep the footer's live labels associated with their native button surfaces.
 void DrawMenuHints(PPCContext& ctx, uint8_t* base, uint32_t owner, size_t index, size_t count,
                     void (*draw)(PPCContext&, uint8_t*));

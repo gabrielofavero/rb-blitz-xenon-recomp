@@ -13,6 +13,19 @@
 namespace rb_blitz::input {
 struct InlineHelpEntry { uint32_t label, action, record = 0; };
 
+// Select is redundant beside the portrait calibration's direct touch targets.
+// Match its caption token: Retry can share Select's native Confirm action.
+template <typename Caption>
+std::vector<InlineHelpEntry> CalibrationFooterEntries(
+    const std::vector<InlineHelpEntry>& entries, Caption caption) {
+  std::vector<InlineHelpEntry> visible;
+  for (const auto& entry : entries)
+    if (caption(entry) != "select") visible.push_back(entry);
+  std::stable_partition(visible.begin(), visible.end(),
+      [](const auto& entry) { return entry.action == 2; });
+  return visible;
+}
+
 // RndText batches glyph quads by font in 12-byte records at UILabel +132.
 // Use each batch's live glyph count, not the mesh's allocated vertex capacity:
 // touch removes the icon batch and captions can shrink when actions change.

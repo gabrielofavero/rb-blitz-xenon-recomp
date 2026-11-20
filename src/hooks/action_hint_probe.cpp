@@ -269,12 +269,16 @@ REX_HOOK_RAW(sub_824D85E8) {
   // InlineHelp sets every label's world transform before drawing it. Capture
   // those labels directly after the draw instead of depending on a nested
   // UILabel callback (which may receive an adjusted base-class this pointer).
-  if (rb_blitz::input::PortraitSettingsActive() && !entries.empty() && entries.size() <= 3) {
+  const auto visible = rb_blitz::input::PortraitMenuHintEntries(ctx, base, owner);
+  if (!entries.empty() && entries.size() <= 3 &&
+      rb_blitz::input::PortraitMenuHintsAvailable(ctx, base, owner)) {
     // Keep the original action and label vectors: calibration replaces them as
     // its state changes. Draw each live label through the guest widget in its
     // own slot, then restore the complete vectors before the next guest update.
     const auto transform = owner + 4 + Be32(base, Be32(base, owner + 4) + 16);
-    const auto world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, transform);
+    const auto world = rb_blitz::input::WorldTransformForDraw(transform,
+        [base](uint32_t address) { return base[address]; },
+        [&](uint32_t object) { return rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, object); });
     const auto x = Be32(base, world + 48), z = Be32(base, world + 56);
     const auto put = [&](uint32_t address, uint32_t value) {
       rex::memory::store_and_swap<uint32_t>(base + address, value);
@@ -285,18 +289,22 @@ REX_HOOK_RAW(sub_824D85E8) {
     const auto incoming = ctx;
     const bool drawn = rb_blitz::input::DrawInlineHelpLabelsSeparately(owner,
         [base](uint32_t address) { return Be32(base, address); }, put, [&](size_t i) {
+      const auto entry = std::find_if(visible.begin(), visible.end(),
+          [&](const auto& entry) { return entry.label == entries[i].label; });
+      if (entry == visible.end()) return;
+      const auto index = size_t(entry - visible.begin());
       const auto slot = rb_blitz::ui::PortraitFooterAction(
-          rb_blitz::ui::screen::CurrentMenuConfiguration().portrait_aspect, i, entries.size());
+          rb_blitz::ui::screen::CurrentMenuConfiguration().portrait_aspect, index, visible.size());
       rex::memory::store_and_swap<float>(base + world + 48, slot.x);
       rex::memory::store_and_swap<float>(base + world + 56, slot.z);
       ctx = incoming;
-      rb_blitz::input::DrawMenuHints(ctx, base, owner, i, entries.size(), __imp__sub_824D85E8);
+      rb_blitz::input::DrawMenuHints(ctx, base, owner, index, visible.size(), __imp__sub_824D85E8);
     });
     if (!drawn) rb_blitz::input::DrawMenuHints(ctx, base, owner, 0, entries.size(), __imp__sub_824D85E8);
   } else {
     rb_blitz::input::DrawMenuHints(ctx, base, owner, 0, entries.size(), __imp__sub_824D85E8);
   }
-  for (const auto& entry : entries)
+  for (const auto& entry : visible)
     rb_blitz::input::CaptureMenuHint(ctx, base, entry.label, entry.action, owner);
 }
 

@@ -98,11 +98,17 @@ inline PortraitCalibrationAction PortraitCalibrationFooter(float aspect, size_t 
 }
 
 inline PortraitCalibrationAction PortraitFooterAction(float aspect, size_t index, size_t count) {
-  if (count > 2) return PortraitCalibrationFooter(aspect, index);
+  // The live three-action order is Select, Retry, Back.
+  if (count > 2) return PortraitCalibrationFooter(aspect, index == 1 ? 2 : index == 2 ? 1 : 0);
   const float row = 364.5f * PortraitSplash(aspect).list_scale;
   const float width = count == 1 ? row * .55f : (row - 10) / 2;
   return {count == 1 ? 0.f : (index ? 1.f : -1.f) * (width + 10) / 2,
           -197, width, 30};
+}
+
+inline const char* PortraitFooterSurface(size_t index, size_t count) {
+  if (count > 2) return index == 0 ? "portrait_confirm" : index == 1 ? "portrait_retry" : "portrait_back";
+  return index == 0 ? "portrait_confirm" : "portrait_back";
 }
 
 inline bool PortraitControlsScene(std::string_view scene) {

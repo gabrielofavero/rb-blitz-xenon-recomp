@@ -783,6 +783,30 @@ uint32_t SceneObject(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* n
   return c.r3.u32;
 }
 
+bool PortraitMenuHintsAvailable(PPCContext& ctx, uint8_t* base, uint32_t owner) {
+  if (!settings::InterfacePortraitEnabled()) return false;
+  const auto header = ObjectBase(base, owner);
+  const auto name = ObjectName(base, header);
+  if (name == "continue.ihp" || name == "back.ihp" || name == "skip.ihp") return false;
+  const auto dir = header ? U32(base, header + 36) : 0;
+  return dir && SceneObject(ctx, base, dir, "portrait_caption_black.color");
+}
+
+std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* base, uint32_t owner) {
+  const auto entries = ReadInlineHelpEntries(owner,
+      [base](uint32_t address) { return U32(base, address); });
+  if (!settings::InterfacePortraitEnabled()) return entries;
+  const auto header = ObjectBase(base, owner);
+  const auto dir = header ? U32(base, header + 36) : 0;
+  if (!dir || !SceneObject(ctx, base, dir, "portrait_calibration_footer.color")) return entries;
+  return CalibrationFooterEntries(entries, [base](const auto& entry) {
+    const auto address = U32(base, entry.record + 16);
+    if (!address) return std::string_view{};
+    const char* token = reinterpret_cast<const char*>(base + address);
+    return std::string_view(token, strnlen(token, 64));
+  });
+}
+
 void DrawMenuHints(PPCContext& ctx, uint8_t* base, uint32_t owner, size_t index, size_t count,
                     void (*draw)(PPCContext&, uint8_t*)) {
   const FooterDraw footer{owner, ReadInlineHelpEntries(owner,
@@ -814,7 +838,7 @@ bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
     if (const auto bounds = ProjectMesh(ctx, base, mesh)) {
       std::lock_guard lock(mutex);
       hovered = MenuFooterHovered(menu_pointer, *bounds, queue.enabled(),
-          last_device::Current().using_touch, (HostMouseButtons() & 1) != 0);
+          HostPointerIsTouch(), (HostMouseButtons() & 1) != 0);
       if (queue.enabled() && footer_touch_press.Draw(*bounds)) hovered = true;
     }
     const auto material = U32(base, mesh + 292);
@@ -1070,7 +1094,7 @@ void DrawMenuHintLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   const auto name = ObjectName(base, header);
   const bool independent = name == "continue.ihp" || name == "back.ihp" || name == "skip.ihp";
   const std::string stem = independent ? "portrait_" + name.substr(0, name.size() - 4) :
-      index == 0 ? "portrait_confirm" : index == 1 ? "portrait_back" : "portrait_retry";
+      ui::PortraitFooterSurface(index, footer->count);
   const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, index, footer->count, !independent);
   const bool black = hovered || current_screen_name == "splash_screen" ||
       current_panel_name == "server_connect_panel" || current_screen_name == "loading_screen";
@@ -1115,8 +1139,9 @@ void UpdateCalibrationText(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (actual.size() == 1024) return;
   thread_local std::unordered_map<std::string, CalibrationPromptText> prompts;
   const bool touch = last_device::Current().using_touch;
+  const bool portrait = settings::InterfacePortraitEnabled();
   const auto desired = prompts[std::string(token)].Update(actual,
-      touch && (!result || settings::InterfacePortraitEnabled()), result);
+      result ? touch && portrait : touch || portrait, result);
   if (desired == actual || desired.size() >= 1024) return;
   GuestCall call(ctx, base, 1280);
   const auto text = call.ctx.r1.u32 + 128;
@@ -1218,22 +1243,18 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
   auto bounds = ProjectLabel(ctx, base, label);
   // The portrait settings footer is a full native button. Its mesh supplies
   // the hit area, so tapping beside the Back text also sends Cancel.
-  if (bounds && rb_blitz::settings::InterfacePortraitEnabled() &&
-      (ui::PortraitSettingsScene(current_panel_scene) || ui::PortraitControlsPanel(current_panel_name) ||
-       current_panel_name == "av_options_panel" || current_panel_name == "credits_panel")) {
+  if (bounds && PortraitMenuHintsAvailable(ctx, base, owner)) {
     const auto dir = header ? U32(base, header + 36) : 0;
-    const char* name = nullptr;
+    std::string name;
     {
-      const auto entries = ReadInlineHelpEntries(owner,
-          [base](uint32_t address) { return U32(base, address); });
+      const auto entries = PortraitMenuHintEntries(ctx, base, owner);
       const auto entry = std::find_if(entries.begin(), entries.end(),
           [label](const auto& entry) { return entry.label == label; });
-      if (entry != entries.end()) {
-        const auto index = size_t(entry - entries.begin());
-        name = index == 0 ? "portrait_confirm.mesh" : index == 1 ? "portrait_back.mesh" : "portrait_retry.mesh";
-      }
+      if (entry == entries.end()) return;
+      const auto index = size_t(entry - entries.begin());
+      name = std::string(ui::PortraitFooterSurface(index, entries.size())) + ".mesh";
     }
-    const auto mesh = name && dir ? SceneMesh(ctx, base, dir, name) : 0;
+    const auto mesh = !name.empty() && dir ? SceneMesh(ctx, base, dir, name.c_str()) : 0;
     if (mesh) {
       if (const auto button_bounds = ProjectMesh(ctx, base, mesh)) bounds = button_bounds;
     }

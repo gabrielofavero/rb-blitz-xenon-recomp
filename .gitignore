@@ -49,6 +49,9 @@
 # by nature, so it is never committed.
 /prune.ps1
 
+# Local Windows development entry point.
+/dev.ps1
+
 # Local dev server: publishes a folder over HTTP and exposes it at a fixed Dev Tunnel URL
 # (the `devtunnel` CLI the CloakCode extension drives). Bound to this machine's devtunnel
 # login and its tunnel, so it is never committed.
