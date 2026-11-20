@@ -1,84 +1,92 @@
-# Rock Band Blitz: Xbox 360 Static Recompilation
+# Rock Band Blitz: Xenon Recompilation
 
 Welcome! :)
 
-This project statically recompiles the Xbox 360 version of Rock Band Blitz using [rexglue](rexglue-sdk). The goal is a stable, easy-to-install, customizable version for multiple platforms.
-
-The project is in a soft launch: releases are public here, but I am not promoting them until version 1.0.0. You are welcome to try them. Pre-release builds are Windows only; Linux and macOS builds are planned for the full release.
-
-The game boots, renders 2D and 3D elements, and can complete songs. It is also compatible with Ultimate and includes several enhancements.
-
-Before v1.0.0, I plan to improve stability and performance and add the planned features outside the mobile scope. After release, I will focus on smaller stability improvements and additional platforms: mobile first, possibly VR. Other consoles are not currently planned.
+This project statically recompiles the Xbox 360 version of Rock Band Blitz using [ReXGlue](rexglue-sdk). Target platforms are Windows, Linux, macOS, iOS, and Android. Meta Quest 3 support is planned for a later date.
 
 ## Enhancements
 
-These enhancements aim to make the game feel native on PC and improve the offline experience. Restoring the original online mode, including leaderboards, Blitz Credits progression, and competition with friends, is outside the project scope.
+My goal is to make the game feel native on each platform and add features that make the experience more enjoyable. Long road ahead!
 
-| Feature                                                        | Type     | Status      | Notes                                                                                   |
-| -------------------------------------------------------------- | -------- | ----------- | --------------------------------------------------------------------------------------- |
-| Mouse Support                                                  | Toggle   | Done        | Navigate menus and play with a mouse.                                                   |
-| Custom Interface and Gameplay Mapping                          | Toggle   | Done        | Set separate menu and gameplay inputs; mix mouse, keyboard, and controller.             |
-| Multi-Thread DLC loading                                       | Toggle   | Done        | Choose the number of threads used to load DLC.                                          |
-| Download Customs from  [RhythmVerse](https://rhythmverse.co/) | Toggle   | Done        | Download custom DLC through the in-game Music Store.                                    |
-| Library Background Music                                       | Toggle   | Done        | Play songs from your library on the main menu.                                          |
-| Music Player Overlay                                           | Toggle   | Done        | Skip between menu songs when Library Background Music is enabled.                       |
-| Play Current Song                                              | Toggle   | Done        | Start playing the current menu song.                                                    |
-| Custom bindings                                                | Toggle   | Done        | Map menu and gameplay controls independently.                                           |
-| In-game Custom Settings                                        | Built-in | Done        | Configure options in the game, without a launcher.                                      |
-| Simple DLC Directory                                           | Built-in | Done        | Place CON and LIVE DLC in one directory.                                                |
-| Settings Labels Overlay                                        | Toggle   | Done        | Show optional settings descriptions in Normal, Big, or Biggest text.                                       |
-| Refresh Songs quick button                                     | Toggle   | Done        | Refresh your library without returning to the main menu.                                |
-| Compile shaders on Main Menu                                   | Built-in | Done        | Precompile shaders to reduce first-play stutter.                                        |
-| Load Guard                                                     | Toggle   | Done        | Restart after a bad DLC load or a configurable loading timeout.                         |
-| Bad DLCs fixes                                                 | Built-in | Done        | Fix some DLC-related crashes in sorting and song loading.                               |
-| Custom Resolutions                                             | Toggle   | In Progress | 16:9 works; 32:9 and 4:3 support and HUD adjustments are planned.                       |
-| Custom Button Layouts                                          | Toggle   | Done        | Switch among Xbox 360/Series, PlayStation 3/4/5, Nintendo, and Steam layouts.           |
-| Many interface adjustments                                     | Toggle   | Done        | Hide unused menu options and the repeated Offline Mode prompt; more cleanup is planned. |
-| In Game song manager                                           | Toggle   | To Do       | Delete DLC or hide songs from the library and menu music.                               |
-| Non CON/LIVE DLCs support                                      | Built-in | To Do       | Explore support for extracted DLC folders and other formats.                            |
-| In-game Messages and Update Checker                            | Built-in | To Do       | Show changelogs in game and offer updates.                                              |
-| More framerate options                                         | Toggle   | To Do       | Investigate additional frame rates and engine limits.                                   |
-| Play Powerups offline without Ultimate                         | Toggle   | To Do       | Add offline power-ups to the base game; Ultimate already supports them.                 |
-| (Mobile) Portrait interface                                    | Built-in | To Do       | Rearrange the interface for portrait mode.                                              |
-| (Mobile) Dynamic Orientation                                   | Built-in | To Do       | Adapt the interface and gameplay to device orientation.                                 |
-| (Mobile) Touch controls (UI and gameplay)                      | Built-in | To Do       | Add native touch input for menus and gameplay.                                          |
+### General
 
-Ultimate is compatible and recommended. It adds features such as offline power-ups and new HUD elements; see the [Rock Band Blitz Ultimate repository](https://github.com/ultimate-mods-rb/blitz-ultimate) for the full list. The installer offers Ultimate as an optional download.
+| Feature                             | Type     | Status      | Notes                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------- | -------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Custom resolutions                  | Toggle   | Done        | Up to 4K, with support for nonstandard aspect ratios, including ultrawide.                                                                                                                                                                                                                                            |
+| Ultimate mod compatibility          | Built-in | Done        | All enhancements from Ultimate are compatible. Usage is recommended, as It adds features such as offline power-ups and new HUD elements; see the [Rock Band Blitz Ultimate repository](https://github.com/ultimate-mods-rb/blitz-ultimate) for the full list. The installers offer Ultimate as an optional download. |
+| Main menu shader precompilation     | Built-in | Done        | Precompile shaders to **reduce** stutter when playing for the first time.                                                                                                                                                                                                                                       |
+| Multiple game targets               | Toggle   | Done        | Switch between standard Rock Band Blitz, Ultimate, and the XBLA demo.                                                                                                                                                                                                                                                 |
+| In-game messages and update checker | Built-in | Done        | The defunct Messages section now displays project announcements and updates.                                                                                                                                                                                                                                          |
+| Offline power-ups without Ultimate  | Toggle   | To Do       | Add offline power-ups to the base game; Ultimate already supports them.                                                                                                                                                                                                                                               |
+| More frame rate options             | Toggle   | To Do       | Further investigation and testing on more powerful hardware are needed.                                                                                                                                                                                                                                               |
+| Portrait mode gameplay              | Toggle   | In Progress | Play in a touch native way by clicking on the lane and swiping to switch lanes. Overlays also supported.                                                                                                                                                                                                              |
 
-## How to Install
+### Input types
 
-Download the latest installer from the releases page and follow its instructions. You need the Xbox 360 Rock Band Blitz package or its extracted contents. The installer can download Ultimate. Importing PS3 button assets is not yet implemented, so you do not need those assets.
+| Feature                            | Type     | Status | Notes                                                                                                                                    |
+| ---------------------------------- | -------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Mouse, keyboard, and touch support | Built-in | Done   | Navigate the interface and play songs.                                                                                                   |
+| Custom mappings                    | Toggle   | Done   | Customize multiple inputs for gameplay and interface navigation.                                                                         |
+| Custom button layouts              | Toggle   | Done   | Button icons and controller diagrams for keyboard/mouse, Xbox 360/Series, PlayStation 3/4/5, Switch 1/2, Steam Deck, and Meta Quest 2/3. |
 
-Pre-release builds are Windows only.
+### DLC management
 
-## How to Build
+| Feature                                                     | Type     | Status | Notes                                                                                                                |
+| ----------------------------------------------------------- | -------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
+| Download customs from [RhythmVerse](https://rhythmverse.co/) | Toggle   | Done   | Download custom songs through an in-game store.                                                                      |
+| Simple DLC directory                                        | Built-in | Done   | Place CON and LIVE DLC packages in one directory, without needing to worry about emulating the Xbox 360 file system. |
+| Multithreaded DLC loading                                   | Toggle   | Done   | Speed up DLC loading at startup, especially with 1,000 or more packages.                                             |
+| DLC crash fixes                                             | Built-in | Done   | Fix some DLC-related crashes during sorting and song loading.                                                        |
+| Load Guard                                                  | Toggle   | Done   | Restart after a failed DLC load or a configurable loading timeout.                                                   |
+| "Refresh Songs" main menu button                            | Toggle   | Done   | Refresh your library without restarting the game.                                                                    |
+| In-game song manager                                        | Built-in | To Do  | Delete DLC or hide songs from the library and menu music.                                                            |
+| Support for other DLC formats                               | Built-in | To Do  | Detect and load more custom song formats beyond CON and LIVE.                                                        |
 
-You can build the project on Windows using PowerShell from the repository root. Use the `develop` branch for the latest features.
+### Main menu music
 
-Use the pinned v0.11 SDK, LLVM/Clang 20+, CMake 3.25+, Ninja, Python 3.10+, and Visual Studio C++ Build Tools with a Windows SDK. Keep the verified dump at `game/default.xex`. Exact versions and native platform limits are in [the toolchain guide](docs/guides/toolchain.md).
+| Feature                              | Type   | Status | Notes                                                                  |
+| ------------------------------------ | ------ | ------ | ---------------------------------------------------------------------- |
+| Library background music             | Toggle | Done   | Play songs from your library on the main menu.                         |
+| "Play Current Song" main menu button | Toggle | Done   | Start playing the current menu song.                                   |
+| Music player                         | Toggle | Done   | A main menu overlay that lets you browse and control background music. |
 
-```powershell
-git submodule update --init --recursive
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\repair_flat_symlinks.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup\apply_sdk_patches.ps1
-python scripts/setup/prepare_vulkan_stack.py --source-root out/deps/rex-vulkan
-$vulkanSources = (Resolve-Path out/deps/rex-vulkan).Path
-cmake --preset win-amd64-release "-DREXGLUE_VULKAN_SOURCE_ROOT=$vulkanSources" -DREXGLUE_FETCH_VULKAN_DEPS=OFF
-cmake --build --preset win-amd64-release
-```
+### Interface
 
-The patch applier selects the registered stack for the staged SDK gitlink. Dependency preparation verifies exact source pins and the canonical MoltenVK patch before configure. Code generation and source-list reload are automatic. See [build and run](docs/guides/build-and-run.md) for mirrors, offline checks, and a D3D12-only configuration.
+| Feature                          | Type     | Status      | Notes                                                                              |
+| -------------------------------- | -------- | ----------- | ---------------------------------------------------------------------------------- |
+| Main menu customization          | Built-in | Done        | Choose which items to show or hide on the main menu.                               |
+| Custom in-game settings          | Built-in | Done        | Configure all new toggles in-game.                                                 |
+| Achievement overlay              | Built-in | Done        | Achievement notifications and menus use custom styling to match the game's design. |
+| Ultimate's "Song Search" overlay | Built-in | Done        | Adapt the keyboard prompt for controllers and other input devices.                 |
+| Settings Labels overlay          | Toggle   | Done        | Show an in-game explanation of each setting.                                       |
+| Portrait mode interface          | Built-in | In Progress | Rearrange the interface for touch controls and mobile navigation.                  |
 
-Build outputs go to `out\build\win-amd64-release\`; run `rb_blitz.exe` from that directory. Run host tests with `ctest --test-dir out\build\win-amd64-release --output-on-failure`. Use `installer\build.ps1` to build the installer from the current code.
+## How to run
 
-See [`docs\`](docs) for information about the game, build and run instructions, and planned and completed features.
+Builds for the target platforms will be available on the [Releases page](https://github.com/gabrielofavero/rb-blitz-xenon-recomp/releases). Desktop packages ask you to select the game assets during installation or on first launch. Mobile builds works by importing assets on first launch.
 
-## AI Usage
+You can also build the game from the terminal. See [Build and run](docs/guides/build-and-run.md) for platform instructions, including how to build for mobile with assets already included to skip on-device import. Android and Meta Quest build routes are not yet available.
 
-This project uses AI extensively. I set the scope, make architectural and implementation decisions, review the code, and test the game manually.
+## How is content handled?
 
-AI helps investigate compiled code, suggest options, write code, and run automated tests. I am a software developer, but C++ is not my specialty, so I spend more time reviewing than coding, though I also make manual changes.
+The original Xbox 360 executable and retail game archives are not included in the repository or installers. You provide the game package or its extracted contents; the port runs statically recompiled game code with project patches and hooks, and imports the required assets locally. See [content packaging](docs/guides/distributable.md) for details.
 
-The icon was upscaled with AI from the 64 × 64 Xbox 360 icon. The installer cover uses official art extended vertically in Photoshop. Button layouts were adapted from human-created work, with attribution in [`docs\`](docs) and the in-game credits.
+* The Windows installer cover adapts existing, pubicly available, box art.
+* New button icons and controller diagrams are adaptations of real human work! The PlayStation 3 glyphs are also a recriation, not the original PS3 assets.
+* The app icon is the only fully AI-generated artwork: a recreation of the original 64 × 64 Xbox 360 icon. Monochrome and Apple packaging variants are processed exports of supplied icon artwork; see [app icons](assets/icon/README.md).
 
-I know many people prefer projects made entirely by humans. As a solo developer, I use AI to help with this personal project while reviewing the results myself. I will release v1.0.0 and Linux/macOS builds when I am confident in their quality.
+Artwork credits: Nicolae (XELU) Berbece and Paul Paun (button and controller layouts); [haaldor](https://github.com/haaldor/Xelu_prompts_SVG) (SVG adaptation); zacksly (Switch 1/2 controllers); Valve and Meta (official device artwork adapted for Steam Deck and Quest). See the [attribution record](assets/controller/Attributions.txt).
+
+## Project status and future support
+
+This project is in active development. My goal is to release version 0.1.0 on all target platforms simultaneously, excluding Meta Quest 3.
+
+The game is already in good shape, especially on Windows. Most critical features are implemented, graphics are close to the original, and my tests have sustained long gameplay sessions without crashes.
+
+The challenge is to make the experience consistent across platforms and find edge cases. I test on real hardware, but those tests cover only my particular PC, iPhone model, and OS versions. Pre-releases will help gather feedback from a wider range of devices. Please report problems on the [Issues page](https://github.com/gabrielofavero/rb-blitz-xenon-recomp/issues), including your hardware, OS, game build, and steps to reproduce them.
+
+Once the game is stable and the initially planned features are implemented, I'll release version 1.0.0 and shift the focus to smaller bug fixes. This is a humongous project for a single dev, so please provide feedback as this is the only way to ensure a fully stable port in the future!
+
+## Was AI used?
+
+Yes. This is an AI-assisted project. I also make changes manually and apply my own software development skills throughout the process.

@@ -21,7 +21,8 @@ documents under [`settings/`](settings).
 | If you want to… | Read |
 | --- | --- |
 | build a private iPhone/iPad IPA | [`installer/ios/README.md`](../installer/ios/README.md) and [iOS plan](plans/finished/2026-11-16-ios-cli-installer-plan.md) |
-| build, run, or capture a log | [`guides/build-and-run.md`](guides/build-and-run.md) |
+| build or boot on Windows, Linux, macOS, or iOS; capture a log | [`guides/build-and-run.md`](guides/build-and-run.md) |
+| use the dev scripts and desktop mobile preview | [`scripts/dev/README.md`](../scripts/dev/README.md) |
 | know what is broken on purpose vs by accident | [`reference/known-issues.md`](reference/known-issues.md) |
 | know what is being worked on right now | [`settings/status.md`](settings/status.md), [native-aspect resolutions](plans/finished/2026-11-18-native-aspect-resolution-policy.md), and [`plans/todo/`](plans/todo) |
 | understand a menu, a toggle, or the HUD | [`engine/`](engine) |

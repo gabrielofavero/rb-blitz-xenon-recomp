@@ -1,7 +1,10 @@
 # Scripts
 
-Run scripts from the repository root unless a script says otherwise. Paths in the
-documentation and build configuration use these directories:
+Run scripts from the repository root unless a script says otherwise. Start with
+the [build and run guide](../docs/guides/build-and-run.md) for platform setup, or
+the [development command reference](dev/README.md) for `dev.sh`, `dev.ps1`, build,
+launch, mobile preview, and packaging shortcuts. Paths in the documentation and
+build configuration use these directories:
 
 | Directory | Purpose |
 | --- | --- |
