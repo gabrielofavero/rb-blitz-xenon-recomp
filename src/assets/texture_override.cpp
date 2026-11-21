@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -583,7 +584,7 @@ class SchemeOverride final : public rex::gpu::ITextureOverrideProvider {
   std::jthread worker_;
 };
 
-std::atomic<std::shared_ptr<SchemeOverride>> g_scheme_provider;
+std::shared_ptr<SchemeOverride> g_scheme_provider;
 rex::gpu::ITextureOverrides* g_override_service = nullptr;
 rex::ScopeGuard g_override_registration;
 
@@ -705,7 +706,7 @@ void ConfigureTextureOverrides(rex::gpu::ITextureOverrides* service) {
 
 void ResetTextureOverrides() {
   g_override_registration = {};
-  g_scheme_provider.store(nullptr);
+  std::atomic_store(&g_scheme_provider, std::shared_ptr<SchemeOverride>{});
   g_override_service = nullptr;
 }
 
@@ -753,12 +754,12 @@ void InstallControllerSchemes(const std::filesystem::path& install_root,
   settings::schema::SetControllerSchemes(std::move(choices));
   auto provider = std::make_shared<SchemeOverride>(std::move(registry));
   if (!RegisterProvider(provider)) return;
-  g_scheme_provider.store(std::move(provider));
+  std::atomic_store(&g_scheme_provider, std::move(provider));
   REXLOG_INFO("button_schemes: active retail (device controller)");
 }
 
 bool SelectControllerScheme(const std::string& id, uint64_t* ticket) {
-  const auto provider = g_scheme_provider.load();
+  const auto provider = std::atomic_load(&g_scheme_provider);
   if (!provider || !provider->Select(id, ticket)) return false;
   const auto before = input::last_device::Current();
   input::last_device::SelectScheme(id);
@@ -771,27 +772,27 @@ bool SelectControllerScheme(const std::string& id, uint64_t* ticket) {
 }
 
 std::optional<ControllerSchemeProgress> LatestAppliedControllerScheme() {
-  const auto provider = g_scheme_provider.load();
+  const auto provider = std::atomic_load(&g_scheme_provider);
   return provider ? provider->LatestApplied() : std::nullopt;
 }
 
 void PublishInputIcons(std::string signature, std::vector<input::icons::Icon> icons) {
-  if (const auto provider = g_scheme_provider.load())
+  if (const auto provider = std::atomic_load(&g_scheme_provider))
     provider->PublishIcons(std::move(signature), std::move(icons));
 }
 void PublishHintIcons(std::string signature,
                       std::array<std::vector<input::icons::Icon>, 3> variants,
                       std::array<input::icons::Icon, 3> calibration,
                       input::icons::Family active_family) {
-  if (const auto provider = g_scheme_provider.load())
+  if (const auto provider = std::atomic_load(&g_scheme_provider))
     provider->PublishHints(std::move(signature),
       std::move(variants), std::move(calibration), active_family);
 }
 bool InputIconsAvailable() {
-  return g_scheme_provider.load() != nullptr && ui::input_font::PrivateBc3() != nullptr;
+  return std::atomic_load(&g_scheme_provider) != nullptr && ui::input_font::PrivateBc3() != nullptr;
 }
 const controller_schemes::Registry* ControllerSchemeRegistry() {
-  const auto provider = g_scheme_provider.load();
+  const auto provider = std::atomic_load(&g_scheme_provider);
   return provider ? provider->Registry() : nullptr;
 }
 

@@ -405,7 +405,8 @@ if(RBBLITZ_IOS_IMPORTER)
     include(installer/ios/importer.cmake)
 endif()
 if(RBBLITZ_IOS)
-    target_link_libraries(rb_blitz PRIVATE "-framework UIKit" "-framework Foundation" "-framework Metal")
+    target_link_libraries(rb_blitz PRIVATE "-framework UIKit" "-framework Foundation"
+        "-framework Metal" "-framework QuartzCore")
     set_target_properties(rb_blitz PROPERTIES
         MACOSX_BUNDLE FALSE
         OBJCXX_STANDARD 23 OBJCXX_STANDARD_REQUIRED ON
@@ -782,6 +783,21 @@ add_executable(rb_blitz_shader_microcode_hash tools/shader_microcode_hash.cpp)
 target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxHash::xxhash)
 
 if(BUILD_TESTING)
+    if(REXGLUE_USE_VULKAN)
+        add_executable(rb_blitz_vulkan_resolve_scale_tests tests/vulkan_resolve_scale_tests.cpp)
+        target_include_directories(rb_blitz_vulkan_resolve_scale_tests PRIVATE tests "${REXSDK_DIR}/src")
+        add_test(NAME vulkan_resolve_scale COMMAND rb_blitz_vulkan_resolve_scale_tests)
+        if(APPLE)
+            target_compile_definitions(rb_blitz_vulkan_resolve_scale_tests PRIVATE RBBLITZ_RESOLVE_NATIVE_TEST)
+            target_link_libraries(rb_blitz_vulkan_resolve_scale_tests PRIVATE rex::sdk Vulkan::Vulkan Vulkan::Headers)
+            rexglue_configure_target(rb_blitz_vulkan_resolve_scale_tests)
+            set_property(TARGET rb_blitz_vulkan_resolve_scale_tests APPEND PROPERTY
+                INSTALL_RPATH "@executable_path/vulkan/lib")
+            add_test(NAME vulkan_resolve_scale_native COMMAND rb_blitz_vulkan_resolve_scale_tests --native)
+            set_tests_properties(vulkan_resolve_scale_native PROPERTIES TIMEOUT 30
+                ENVIRONMENT "VK_ICD_FILENAMES=$<TARGET_FILE_DIR:rb_blitz_vulkan_resolve_scale_tests>/vulkan/share/vulkan/icd.d/MoltenVK_icd.json")
+        endif()
+    endif()
     add_executable(rb_blitz_ios_lifecycle_tests tests/ios_lifecycle_tests.cpp)
     target_include_directories(rb_blitz_ios_lifecycle_tests PRIVATE src tests)
     target_link_libraries(rb_blitz_ios_lifecycle_tests PRIVATE rex::base)

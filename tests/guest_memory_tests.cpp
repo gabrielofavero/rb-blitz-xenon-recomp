@@ -6,7 +6,7 @@
 
 int main() {
   using namespace rb_blitz::platform;
-  const size_t page = rex::memory::page_size();
+  const size_t page = rex::memory::GetPageSize();
   auto* bytes = static_cast<uint8_t*>(mmap(nullptr, page * 2, PROT_READ,
                                          MAP_PRIVATE | MAP_ANON, -1, 0));
   if (bytes == MAP_FAILED) return 1;

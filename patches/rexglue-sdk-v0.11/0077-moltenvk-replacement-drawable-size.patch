@@ -58,13 +58,16 @@ new file mode 100644
 diff --git a/src/gpu/xenos/CMakeLists.txt b/src/gpu/xenos/CMakeLists.txt
 --- a/src/gpu/xenos/CMakeLists.txt
 +++ b/src/gpu/xenos/CMakeLists.txt
-@@ -200,6 +200,10 @@
+@@ -200,6 +200,13 @@
      ${REXGPU_XENOS_VULKAN_ALL}
    )
    target_compile_definitions(rexgpu-xenos-vulkan PRIVATE REX_GPU_XENOS_STATIC)
 +  if (APPLE AND TARGET rexgpu-xenos-vulkan)
 +    target_sources(rexgpu-xenos-vulkan PRIVATE host/metal_surface.mm)
 +    target_link_libraries(rexgpu-xenos-vulkan PRIVATE "-framework QuartzCore")
++    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++      target_link_libraries(rexgpu-xenos-vulkan PRIVATE objc)
++    endif ()
 +  endif ()
    target_link_libraries(
      rexgpu-xenos-vulkan

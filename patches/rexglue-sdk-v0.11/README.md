@@ -1,6 +1,6 @@
 # ReXGlue v0.11.0 production stack and migration ledger
 
-Status: registered production stack, 2026-11-18. **67 SDK patches** apply to exact
+Status: registered production stack, 2026-11-21. **69 SDK patches** apply to exact
 upstream v0.11.0 commit `a3e1d82678ca20d68d4837a8e9ee4652ff073745`.
 The production gitlink and title integration now use this release and patch set.
 The fresh Windows AMD64 production source-SDK release build passes.
@@ -12,7 +12,7 @@ is retained for rollback. The
 owns current delivery gates and validation.
 
 The ledger covers all **71 original SDK patch IDs**, the retained nested
-MoltenVK patch, and new responsibilities **0089**, **0090**, **0091**, **0092**, **0093**, **0094** and **0095**. Sixty original IDs have candidate
+MoltenVK patch, and new responsibilities **0089**, **0090**, **0091**, **0092**, **0093**, **0094**, **0095**, **0096** and **0097**. Sixty original IDs have candidate
 files; eleven use an upstream/title replacement or fold into an owning candidate.
 Original IDs retain their responsibility even when filenames or implementation
 layers change. Corrections are folded into the owning candidate; 0089 is separate
@@ -34,6 +34,55 @@ MoltenVK), independent of host architecture. Windows AMD64 compilation and
 full-stack replay are checked locally; native Linux/macOS/iOS/Android and
 Vulkan/MoltenVK runtime transitions remain unverified.
 No removed SDK API shim or second runtime is introduced.
+
+### Vulkan resolve allocation limit (2026-11-21)
+
+[0097-vulkan-resolve-allocation-limit.patch](0097-vulkan-resolve-allocation-limit.patch)
+queries `maxMemoryAllocationSize` with the existing Vulkan 1.1 properties query.
+Before either cache is constructed, it reduces both effective resolution axes
+until the non-sparse scaled resolve allocation fits. The saved preference stays
+unchanged and the fallback is logged. This prevents a saved 3x3 scale from
+requesting a single 4.5 GiB buffer on a device with a lower allocation limit.
+Descriptor range limits are intentionally not used as allocation limits.
+This distinct responsibility has no prior owning patch; texture format
+conversion, memory upload scheduling and platform memory mapping retain their
+existing owners. The change is shared by all Vulkan platforms/architectures,
+including macOS/iOS MoltenVK. D3D12, sparse residency and Vulkan 1.0 devices with
+unknown limits keep their existing behavior. Memory pressure can still cause
+allocations below a reported limit to fail.
+
+Validation: macOS arm64 Release game/importer/controller builds and the affected
+iOS arm64 Release Vulkan library compile pass with Xcode 26.0.1. Strict replay
+passes all 69 patches with zero updates. `vulkan_resolve_scale` passes 655 checks
+covering scale pairs, allocation boundaries, sparse residency and unknown limits.
+The headless native check reports Apple M1's 4 GiB allocation limit, selects 2x2
+from 3x3, and successfully allocates/binds the resulting 2 GiB storage buffer.
+The development app and expanded pkg audits pass (1,241 files, 22 Mach-O images).
+Evidence is under `out/macos/crash-fix/`; the package and hash inventory are under
+`out/macos/packages/resolve-allocation-fix/`. Game launch/gameplay, Intel macOS,
+Windows, Linux and native iOS device execution remain untested for this change.
+
+### Portable AES schedule extent (2026-11-21)
+
+[0096-portable-aes-schedule-extent.patch](0096-portable-aes-schedule-extent.patch)
+derives the AES conversion buffer's fixed extent from its member type. Apple
+Clang 17 rejects `std::size(title.words)` as a template argument because `title`
+is a function parameter. The type-based extent preserves the same buffer size,
+byte conversion and copy operations on every platform and architecture,
+independently of the graphics backend. No earlier patch changes these helpers;
+this compiler portability responsibility is separate from the iOS runtime route.
+Native Apple builds validate the affected helpers; Windows and Linux builds are
+not available in this session.
+
+The native iOS build also folds unused-parameter handling into its owning 0074
+patch: the sandbox backing-file branch explicitly ignores the shared API's path
+and access arguments. Other platform branches retain their existing behavior.
+The same patch uses the supported `vm_region_64` API for the new process-resource
+region counter on iOS; macOS retains `mach_vm_region`. Port deallocation and
+region iteration remain unchanged.
+The owning 0077 drawable-size patch explicitly links the Objective-C runtime on
+iOS for its Metal surface messages; other platforms retain their existing links.
+The following 0078 CMake hunk is adjusted for the added lines.
 
 ### Live frontbuffer cache lifecycle (2026-11-18)
 

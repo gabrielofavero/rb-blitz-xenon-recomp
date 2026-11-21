@@ -706,7 +706,7 @@ diff --git a/src/ui/ui_module.cpp b/src/ui/ui_module.cpp
 diff --git a/src/gpu/xenos/CMakeLists.txt b/src/gpu/xenos/CMakeLists.txt
 --- a/src/gpu/xenos/CMakeLists.txt
 +++ b/src/gpu/xenos/CMakeLists.txt
-@@ -243,3 +243,7 @@
+@@ -246,3 +246,7 @@
      )
    endif ()
  endif ()

@@ -1,0 +1,92 @@
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.h b/src/gpu/xenos/host/vulkan/vulkan_device.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_device.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_device.h
+@@ -72,6 +72,8 @@
+     u32 maxImageDimensionCube = 4096;
+     u32 maxImageArrayLayers = 256;
+     u32 maxStorageBufferRange = static_cast<u32>(1) << 27;
++    // Zero means unavailable on Vulkan 1.0 without maintenance3.
++    VkDeviceSize maxMemoryAllocationSize = 0;
+     u32 maxSamplerAllocationCount = 4000;
+     u32 maxPerStageDescriptorSamplers = 16;
+     u32 maxPerStageDescriptorStorageBuffers = 4;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.cpp b/src/gpu/xenos/host/vulkan/vulkan_device.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_device.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_device.cpp
+@@ -460,11 +460,15 @@
+   if (properties.apiVersion >= VK_API_VERSION_1_1 && ifn.vkGetPhysicalDeviceProperties2) {
+     VkPhysicalDeviceIDProperties ids = {};
+     ids.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
++    VkPhysicalDeviceMaintenance3Properties allocation_properties = {};
++    allocation_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES;
++    ids.pNext = &allocation_properties;
+     VkPhysicalDeviceProperties2 id_properties = {};
+     id_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+     id_properties.pNext = &ids;
+     ifn.vkGetPhysicalDeviceProperties2(physical_device, &id_properties);
+     std::memcpy(device->properties_.driverUUID, ids.driverUUID, VK_UUID_SIZE);
++    device->properties_.maxMemoryAllocationSize = allocation_properties.maxMemoryAllocationSize;
+   }
+   rex::string::CopyTruncating(device->properties_.deviceName, properties.deviceName,
+                               sizeof(device->properties_.deviceName));
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -43,6 +43,7 @@
+ #include "gpu/xenos/vulkan/pipeline_cache.h"
+ #include "gpu/xenos/vulkan/async_pipeline_state.h"
+ #include "gpu/xenos/vulkan/render_target_cache.h"
++#include "gpu/xenos/vulkan/resolve_scale.h"
+ #include "gpu/xenos/vulkan/shader.h"
+ #include "gpu/xenos/vulkan/shared_memory.h"
+ #include <rex/xenos/fetch.h>
+@@ -849,6 +850,18 @@
+         "emulator, reducing to {}x{}",
+         draw_resolution_scale_x, draw_resolution_scale_y);
+   }
++  const u32 requested_scale_x = draw_resolution_scale_x;
++  const u32 requested_scale_y = draw_resolution_scale_y;
++  if (ClampResolveScaleToAllocationLimit(
++          SharedMemory::kBufferSize, device_properties.maxMemoryAllocationSize,
++          device_properties.sparseResidencyBuffer,
++          draw_resolution_scale_x, draw_resolution_scale_y)) {
++    REXGPU_WARN(
++        "Vulkan draw resolution scale {}x{} exceeds the device's {} MB allocation limit "
++        "for non-sparse scaled resolves; using {}x{} (saved settings unchanged)",
++        requested_scale_x, requested_scale_y, device_properties.maxMemoryAllocationSize >> 20,
++        draw_resolution_scale_x, draw_resolution_scale_y);
++  }
+   if (draw_resolution_scale_x > 1 || draw_resolution_scale_y > 1) {
+     REXGPU_WARN(
+         "Vulkan draw resolution scaling is experimental and may not affect all "
+diff --git a/src/gpu/xenos/vulkan/resolve_scale.h b/src/gpu/xenos/vulkan/resolve_scale.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/vulkan/resolve_scale.h
+@@ -0,0 +1,26 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++
++#include <cstdint>
++
++namespace rex::gpu::vulkan {
++
++// Non-sparse scaled resolves dedicate one allocation for all guest physical
++// memory. Descriptor range limits do not describe the allocation's size limit.
++// Reduce both axes together before constructing either cache so they agree.
++inline bool ClampResolveScaleToAllocationLimit(std::uint64_t guest_memory_size,
++                                               std::uint64_t max_allocation_size,
++                                               bool sparse_residency,
++                                               std::uint32_t& x, std::uint32_t& y) {
++  if (sparse_residency || !max_allocation_size) return false;
++  bool changed = false;
++  while ((x > 1 || y > 1) &&
++         std::uint64_t(x) * y > max_allocation_size / guest_memory_size) {
++    if (x > 1) --x;
++    if (y > 1) --y;
++    changed = true;
++  }
++  return changed;
++}
++
++}  // namespace rex::gpu::vulkan

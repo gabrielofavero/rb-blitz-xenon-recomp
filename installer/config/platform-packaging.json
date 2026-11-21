@@ -502,7 +502,7 @@
     "releaseAuditPending": true,
     "nativeValidation": {
       "arm64": {
-        "nativeDependencyInventoryPending": true,
+        "nativeDependencyInventoryPending": false,
         "xcodeBuildPinPending": false,
         "toolchainInputs": {
           "xcode": "Xcode 26.0.1\nBuild version 17A400",

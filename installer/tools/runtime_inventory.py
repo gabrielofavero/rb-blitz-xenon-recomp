@@ -49,8 +49,18 @@ def vulkan_source(build: Path, relative: str) -> Path:
 
 def molten_dependency_license(build: Path, name: str) -> Path:
     cache = cmake_cache(build)
+    source_key = name.lower().replace('-', '_') + "_source_dir"
+    configured = {Path(value).resolve() for key, value in cache.items()
+                  if key.lower().replace('-', '_') in {source_key, "cpm_package_" + source_key}}
+    if configured:
+        matches = {candidate.resolve() for root in configured
+                   for candidate in root.glob("LICENSE*")
+                   if candidate.is_file() and candidate.resolve().is_relative_to(root)}
+        if not matches: raise ValueError(f"missing pinned MoltenVK {name} license in its configured source")
+        if len({hashlib.sha256(path.read_bytes()).hexdigest() for path in matches}) != 1:
+            raise ValueError(f"ambiguous MoltenVK {name} license sources; use a clean dependency source cache")
+        return sorted(matches)[0]
     roots = [Path(cache.get("CPM_SOURCE_CACHE", str(build / "_deps"))), build / "_deps"]
-    roots += [Path(value) for key, value in cache.items() if key.lower() == name.lower().replace('-', '_') + "_source_dir"]
     matches = set()
     for root in roots:
         if not root.is_dir(): continue
