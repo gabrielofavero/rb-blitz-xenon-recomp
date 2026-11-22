@@ -20,11 +20,14 @@ int main(int argc, char** argv) {
       std::string(argv[1]) != "--validate" &&
                     std::string(argv[1]) != "--validate-install" &&
                     std::string(argv[1]) != "--validate-internal-keyboard" &&
+                    std::string(argv[1]) != "--validate-internal-touch" &&
                     std::string(argv[1]) != "--list-declared" &&
-                    std::string(argv[1]) != "--list-internal-keyboard")) {
+                    std::string(argv[1]) != "--list-internal-keyboard" &&
+                    std::string(argv[1]) != "--list-internal-touch")) {
     std::cerr << "usage: rb_blitz_controller_schemes "
                  "--validate|--validate-install|--validate-internal-keyboard|"
-                 "--list-declared|--list-internal-keyboard <folder>\n"
+                 "--validate-internal-touch|--list-declared|--list-internal-keyboard|"
+                 "--list-internal-touch <folder>\n"
                  "       rb_blitz_controller_schemes --write-cache <folder> <cache-file>\n"
                  "       rb_blitz_controller_schemes --benchmark-discover <install-root>\n";
     return 2;
@@ -36,7 +39,12 @@ int main(int argc, char** argv) {
   const bool internal = std::string(argv[1]) == "--validate-internal-keyboard" ||
                         std::string(argv[1]) == "--list-internal-keyboard" ||
                         (write_cache && folder.filename() == "keyboard-mouse");
-  const bool valid = internal ? rb_blitz::controller_schemes::LoadInternalKeyboard(
+  const bool touch = std::string(argv[1]) == "--validate-internal-touch" ||
+                     std::string(argv[1]) == "--list-internal-touch" ||
+                     (write_cache && folder.filename() == "touch");
+  const bool valid = touch ? rb_blitz::controller_schemes::LoadInternalTouch(
+      folder, rb_blitz::controller_schemes::DecodePngWic, &scheme, &reason) :
+      internal ? rb_blitz::controller_schemes::LoadInternalKeyboard(
       folder, rb_blitz::controller_schemes::DecodePngWic, &scheme, &reason) :
       rb_blitz::controller_schemes::LoadScheme(
           folder, trusted, rb_blitz::controller_schemes::DecodePngWic, &scheme, &reason);
@@ -57,7 +65,8 @@ int main(int argc, char** argv) {
     return 0;
   }
   if (std::string(argv[1]) == "--list-declared" ||
-      std::string(argv[1]) == "--list-internal-keyboard") {
+      std::string(argv[1]) == "--list-internal-keyboard" ||
+      std::string(argv[1]) == "--list-internal-touch") {
     std::cout << "scheme.toml\n";
     for (const auto& path : scheme.declared_files)
       std::cout << path.generic_string() << '\n';

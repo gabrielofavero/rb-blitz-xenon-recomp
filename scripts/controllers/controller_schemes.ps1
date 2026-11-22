@@ -30,8 +30,9 @@ if (-not $Destination) {
     $Destination = Join-Path $repo 'out/build/win-amd64-release/assets/controller/schemes'
 }
 foreach ($folder in $folders) {
-    $internal = (Split-Path -Leaf $folder) -eq 'keyboard-mouse'
-    $mode = if ($internal) { '--validate-internal-keyboard' } else { '--validate' }
+    $id = Split-Path -Leaf $folder
+    $internal = $id -in @('keyboard-mouse', 'touch')
+    $mode = if ($id -eq 'touch') { '--validate-internal-touch' } elseif ($internal) { '--validate-internal-keyboard' } else { '--validate' }
     if ($Pack) {
         $targetRoot = if ($internal) { Split-Path -Parent $Destination } else { $Destination }
         New-Item -ItemType Directory -Path $targetRoot -Force | Out-Null

@@ -1203,7 +1203,38 @@ void TestProfileAspectService() {
 }
 
 int main() {
-  BeginCase("mobile preview render scales retain a 16:9 source on ultrawide monitors");
+  BeginCase("device scale 1.0 retains native portrait pixels after the landscape source is cropped");
+  for (const auto native : {DisplayMode{1206, 2622}, {2622, 1206}, {1179, 2556},
+                            {2048, 2732}, {1080, 2400}}) {
+    Service service({}, schema::SettingsForRelease(schema::HostPlatform::kIOS, "test"));
+    service.Boot(nullptr, {}, nullptr);
+    CapabilitySnapshot caps; caps.primary_display_size = native;
+    service.SetCapabilities(caps);
+    const int multiplier = ResolutionProfileDrawScale(native, true, true, false);
+    for (int tenths = 5; tenths <= 10; ++tenths) {
+      const auto frame = ProfileGuestFrame(service.RenderScalePixels(SettingId::kInterfaceRenderScale, tenths),
+                                            multiplier);
+      CHECK_TRUE(frame.supported);
+      const auto source = frame.guest_size;
+      const int crop_width = int(std::lround(double(source.height) * source.height / source.width));
+      const auto physical = ScaledProfileResolution(
+          {std::min(native.width, native.height), std::max(native.width, native.height)}, tenths);
+      CHECK_TRUE(std::abs(crop_width * multiplier - physical.width) <= 2 * multiplier);
+      CHECK_TRUE(std::abs(source.height * multiplier - physical.height) <= multiplier / 2);
+    }
+    // Mixed orientations share one fixed backend multiplier. A landscape
+    // gameplay profile still fills the display at its native dimensions.
+    service.store().document().values[SettingId::kGameplayOrientation] = EnumV("landscape");
+    const auto landscape = service.RenderScalePixels(SettingId::kGameplayRenderScale, 10);
+    CHECK_TRUE(IsSize(landscape, std::max(native.width, native.height), std::min(native.width, native.height)));
+    CHECK_TRUE(ProfileGuestFrame(landscape, multiplier).supported);
+    CHECK_EQ(ResolutionProfileDrawScale(native, true, false, true), multiplier);
+    service.SetBootValues({{SettingId::kInterfaceOrientation, EnumV("landscape")}},
+                           "settings.graphics.recovered_from_failure");
+    CHECK_TRUE(IsSize(service.RenderScalePixels(SettingId::kInterfaceRenderScale, 10),
+                      landscape.width, landscape.height));
+  }
+  BeginCase("mobile preview render scales retain a 437:201 source on ultrawide monitors");
   for (const auto native : {DisplayMode{2560, 1080}, {3440, 1440}, {5120, 1440}}) {
     Service service({}, schema::SettingsForRelease(schema::HostPlatform::kWindows, "test", {}, true));
     service.Boot(nullptr, {}, nullptr);
@@ -1212,10 +1243,10 @@ int main() {
     service.SetCapabilities(caps);
     const int draw_scale = std::max((native.width + 1919) / 1920, (native.height + 719) / 720);
     for (int tenths = 5; tenths <= 10; ++tenths) {
-      const auto pixels = ScaledProfileResolution(service.ResolutionProfileDisplay(), tenths);
+      const auto pixels = service.RenderScalePixels(SettingId::kInterfaceRenderScale, tenths);
       const auto frame = ProfileGuestFrame(pixels, draw_scale);
       CHECK_TRUE(frame.supported);
-      CHECK_TRUE(std::abs(frame.guest_size.width * 9 - frame.guest_size.height * 16) <= 16);
+      CHECK_TRUE(std::abs(frame.guest_size.width * 201 - frame.guest_size.height * 437) <= 437);
     }
   }
   TestProfileResolveTextures();

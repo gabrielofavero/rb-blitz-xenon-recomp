@@ -213,6 +213,61 @@ int main() {
           "pressed and released calibration mip chains were not distinct");
   }
 #endif
+  Check(!LoadScheme(art / "touch", false, FakePng, &scheme, &why) &&
+        !LoadScheme(art / "touch", true, FakePng, &scheme, &why) &&
+        !LoadInternalKeyboard(art / "touch", FakePng, &scheme, &why),
+        "internal touch became selectable or loaded as keyboard art");
+  Check(LoadInternalTouch(art / "touch", FakePng, &scheme, &why),
+        "internal touch rejected");
+  Check(scheme.kind == "touch" && scheme.inputs.size() == 3 &&
+        scheme.declared_files.size() == 5 && scheme.extra_files.empty() &&
+        scheme.InputFor("touch:tap") && scheme.InputFor("touch:swipe_left") &&
+        scheme.InputFor("touch:swipe_right") && scheme.calibration_pairs.size() == 1 &&
+        scheme.calibration_pairs.contains("tap"),
+        "touch inventory must contain three gestures and only tap calibration");
+  const auto touch_folder = root / "touch";
+  fs::copy(art / "touch", touch_folder, fs::copy_options::recursive);
+  Check(LoadInternalTouch(touch_folder, FakePng, &scheme, &why),
+        "copied touch package rejected");
+#ifdef _WIN32
+  Check(WriteSchemeCache(scheme, touch_folder / "scheme.cache", &why),
+        "touch cache write failed");
+  Scheme cached_touch;
+  Check(LoadSchemeCache(touch_folder, &cached_touch, &why) && cached_touch.from_cache &&
+        cached_touch.kind == "touch" && cached_touch.InputFor("touch:tap") &&
+        cached_touch.calibration_pairs == scheme.calibration_pairs,
+        "touch cache changed gesture or calibration metadata");
+#endif
+  const auto touch_registry = Discover(install, user, FakePng);
+  Check(touch_registry.has_touch &&
+        touch_registry.touch.InputFor("touch:tap") && !touch_registry.Find("touch"),
+        "touch discovery must load internal art without making it selectable");
+  fs::copy(touch_folder, install / "touch", fs::copy_options::recursive);
+  Check(!Discover(install, user, FakePng).Find("touch"),
+        "cached touch art became a selectable controller layout");
+#ifdef _WIN32
+  Check(touch_registry.touch.from_cache, "touch discovery ignored the installed cache");
+  {
+    const auto* tap = scheme.InputFor("touch:tap");
+    Image released, pressed;
+    Check(LoadCalibrationImage(scheme, *tap, false, DecodePngWic, &released, &why) &&
+          LoadCalibrationImage(scheme, *tap, true, DecodePngWic, &pressed, &why),
+          "tap calibration pair could not be decoded");
+    const auto first = ComposeCalibration(released);
+    const auto second = ComposeCalibration(pressed);
+    Check(first.size() == 5 && second.size() == 5 &&
+          first[0].size() == 256 * 256 && first[0] != second[0],
+          "tap calibration frames must produce distinct five-level BC3 mip chains");
+  }
+#endif
+  fs::remove(touch_folder / "scheme.cache");
+  const std::string touch_manifest = "schema_version = 2\nid = \"touch\"\n"
+      "name = \"Touch\"\nkind = \"touch\"\n[[input]]\nid = \"tap\"\nfile = \"tap.png\"\n";
+  for (const char* source : {"pad:a", "mouse:left", "key:Return", "touch:unknown"}) {
+    Write(touch_folder / "scheme.toml", touch_manifest + "source = \"" + source + "\"\n");
+    Check(!LoadInternalTouch(touch_folder, FakePng, &scheme, &why),
+          "touch scheme accepted a non-gesture or unknown source");
+  }
   const auto v2 = root / "v2";
   fs::create_directories(v2);
   Write(v2 / "scheme.toml", "schema_version = 2\nid = \"v2\"\nname = \"V2\"\n"

@@ -17,6 +17,7 @@
 #include <rex/ppc/hook.h>
 #include <rex/memory/endian.h>
 #include "input/touch_controls.h"
+#include "ui/portrait_viewport.h"
 REX_EXTERN(sub_823FF258);
 
 REX_EXTERN(sub_821F13D0);
@@ -69,6 +70,7 @@ void ObjectView(uint32_t derived, uint32_t header) {
   Word(table + 4, header - derived - 4);
 }
 void Reset() {
+  rb_blitz::ui::PublishPortraitViewport({});
   std::memset(memory + kHeap, 0, 0x10000);
   transforms = {}; drawn_child = 0;
   next_string = kHeap + 0xD000;
@@ -368,7 +370,7 @@ int main() {
   const auto cropped_meter = Make(1, shapes[1], -300);
   Resolve(cropped_stars); Resolve(cropped_meter);
   Close(Float(cropped_stars + 0x78), 111);
-  Close(Float(cropped_meter + 0x78), -60.25);
+  Close(Float(cropped_meter + 0x78), -44);
   const Shape timer_shape{"timer.lbl", 0x8203A95C, 0x7C, 0};
   const auto cropped_timer = Make(2, timer_shape, -123, kHud, cropped_meter);
   Resolve(cropped_timer);
@@ -388,7 +390,7 @@ int main() {
   Close(Float(cropped_streak + 0x80), -80);
   Close(Float(cropped_streak + 72), 1.2);
   BeginCase("the compact multiplier ladder stays at centre left without changing the score counter");
-  Close(Float(cropped_meter + 0x78), -60.25);
+  Close(Float(cropped_meter + 0x78), -44);
   Close(Float(cropped_meter + 0x80), 0);
   Close(Float(cropped_meter + 72), .65);
   const auto unchanged_score = Make(4, shapes[5], 270);
@@ -436,6 +438,32 @@ int main() {
   Close(Float(cropped_progress + 104), 0);
   Close(Float(cropped_progress + 112), 1);
   Close(Float(cropped_progress + 0x78), 123);
+
+#if defined(RB_BLITZ_IOS)
+  BeginCase("mobile top HUD follows cutouts and refreshes cached art when the safe area changes");
+  Reset();
+  width = 1280; height = 720; crop_width = 405; crop_height = 720;
+  rb_blitz::ui::PublishPortraitViewport({402, 874, 0, 62, 402, 778});
+  const Shape top_shape{"portrait_top_hud.grp", 0x82024C4C, -0x108, 0};
+  const auto top = Make(0, top_shape, 0);
+  Float(top + 0x40, 0);
+  const auto top_bar = Make(1, group, 0, kHud, top);
+  Float(top_bar + 0x40, 185);
+  const auto top_score = Make(2, shapes[5], 270);
+  Resolve(top_bar); Resolve(top_score);
+  const float first_inset = 62.f / 874 * 480 + 8;
+  Close(Float(top + 0x80), -first_inset);
+  Close(Float(top_bar + 0x80), 185 - first_inset);
+  Close(Float(top_score + 0x80), 210 - first_inset);
+  Close(Float(top + 72), 1); // native Blitz animation size is preserved
+  Draw(top, top_shape, true);
+  rb_blitz::ui::PublishPortraitViewport({402, 874, 0, 80, 402, 760});
+  Draw(top, top_shape, true);
+  CHECK_EQ(memory[top_bar + 189], 1);
+  Resolve(top_bar);
+  Close(Float(top_bar + 0x80), 185 - (80.f / 874 * 480 + 8));
+  Reset();
+#endif
 
   BeginCase("first draw repairs fully cached left HUD loaded before its path was assigned");
   Reset();

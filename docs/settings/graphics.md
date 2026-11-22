@@ -25,13 +25,60 @@ quality. Portrait windows use the active profile aspect basis: Force 16:9 gives
 a 9:16 viewport even on an ultrawide monitor. Context changes keep the current
 window and fit each active aspect with bars.
 
+Desktop `--mobile` preview uses a 201:437 phone window with a 437:201
+landscape render basis, independent of the desktop monitor and Force 16:9.
+The native iOS release continues to follow the device's proportions.
+
+Authored portrait panels fit their complete 480-unit canvas inside the current
+SDL window safe area with a gutter of 2% of its shorter dimension. The fit only
+shrinks, preserves proportions, centers within asymmetric cutout/home-indicator
+insets, and updates on resize without rebuilding the menu archive. A narrower
+window can therefore show margins above and below the fitted scene. The guest
+panel transform is scoped to drawing and restored afterward; native projections
+keep touch targets aligned, including footer surfaces and captions placed by
+draw hooks. Gameplay and menus that retain the landscape fit keep their existing
+presentation. This path is shared across Windows, Linux, macOS and iOS and does
+not depend on D3D12 or Vulkan/MoltenVK behavior.
+
+Start, loading and the main menu share one logo scale. The main-menu logo sits
+above the first row; the available header height caps the shared size on wider
+portrait screens so all six menu entries retain their spacing.
+
+Portrait calibration reserves separate vertical bands for measured instruction
+text, the meter, progress, hit count, status, and the current offset. The
+metronome is 20% smaller; long localized instructions shrink proportionally
+inside their reserved band. Success hides the meter, speaker, flash animation,
+progress, and hit count before drawing the centered result. Retry restores the
+authored visibility defaults before native initialization. Calibration advance
+hints read Next throughout the flow, with Back first and Retry preserved where
+applicable. These changes use the guest's scenes, state script, and live labels.
+
+The `portrait_layout` host test exercises the production guest draw hook with
+isolated memory: asymmetric safe bounds, phone/tablet resize, nested draws,
+transform restoration, and preview proportions. Windows release validation
+passes all nine targeted CTest suites, 2,802 layout checks, 1,047 installed
+portrait-record checks, and both development launch-helper test suites. Native
+Linux, macOS and iOS builds and device visual acceptance remain unverified.
+
 [static] The visible desktop controls are Resolution -> Interface / Gameplay.
 Each defaults to `native`, resolving the current monitor on each boot. The other
 choices retain the selected aspect down to 720 pixels high. Manual choices persist
 independently. For example, 3440x1440 offers 1720x720 with Force 16:9 off;
 with it on, the fitted 2560x1440 basis offers 1280x720. Mobile hides
-Resolution and offers Render Scale -> Interface / Gameplay, each a guest audio
-wheel with six positions from 0.5 through 1.0; both default to 1.0.
+Resolution and offers a Render Scale page with Interface and Gameplay guest
+wheels together. Both have six positions from 0.5 through 1.0 and default to 1.0.
+Edits save on the same page; Up/Down selects a wheel, Left/Right adjusts it,
+and touch can tap or drag either wheel with a minimum 44-window-unit hit height.
+Dragging retains the starting wheel and clamps at its endpoints.
+
+On mobile devices, 1.0 targets the physical display resolution in the selected
+orientation. Portrait rendering expands the landscape source so its full-height
+crop retains the display's long-edge pixel count instead of enlarging a crop
+rendered at the short-edge height. Lower scales reduce both dimensions from
+that source. Interface and gameplay can use different orientations; their maximum
+source size determines the boot's fixed backend multiplier. Guest-pixel rounding
+can change the resulting dimensions by a few physical pixels. Desktop `--mobile`
+continues to use its fitted preview window as the resolution basis.
 
 `src/settings/resolution_profiles.h` owns offers and guest-frame arithmetic.
 The SDK multiplier remains fixed for the boot. `src/hooks/render_settings.cpp`
@@ -1445,7 +1492,9 @@ mesh adds a soft edge shade (at most 29% opacity in the corners), leaving the
 central half completely transparent. The original sky colors, moving pattern,
 rays and flash animation remain intact. Connection and song loading preserve
 their native entry work and fit their content to the portrait width; song tips,
-power-ups and the begin prompt occupy separate vertical slots. The existing
+power-ups and the begin prompt occupy separate vertical slots. Song-loading tips
+use larger wrapped text within the portrait margins. The begin prompt shares
+the Start screen's condensed font and visible text size. The existing
 music player becomes a compact bottom bar with title,
 artist and three outlined controls at least 44 logical pixels square on phone-sized
 surfaces; very small desktop windows scale the bar to remain visible. Landscape retains
@@ -1487,6 +1536,15 @@ The crop and full HUD are validated on macOS Vulkan; screenshots and logs are
 under `out/macos/portrait-crop/`. iOS uses the same layout and declares portrait
 support, with the selected orientation supplied to SDL before window creation.
 Device portrait rotation and touch placement still need a device visual check.
+
+The mobile portrait score, Blitz meter and animated Blitz message move below
+the window's reported top safe area, with an additional eight guest UI units
+of spacing. Safe-area changes invalidate cached HUD transforms without changing
+the native animation keys. The multiplier ladder sits farther inside the left
+edge so its instrument icons remain visible. Fresh mobile profiles start with
+Personal Best, Song Progress Bar and Timer hidden, including Ultimate installs.
+These defaults are persisted through the provider transaction before launch;
+existing profiles and explicit overrides retain their choices.
 
 Portrait rendering cutoff (SDK patch 0085) now intersects the main-frame draw
 scissor with the visible crop, plus a 32-source-pixel filtering apron on each

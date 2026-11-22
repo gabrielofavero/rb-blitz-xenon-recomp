@@ -394,6 +394,10 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
     g_mouse_buttons.fetch_and(~MouseMask(e.button));
     if (PlayerEvent(ui::music::PointerEvent::kUp, e)) return;
     if (LaneEvent(touch::Phase::kUp, e)) return;
+    if (e.is_touch && e.button == rex::MouseButton::kLeft && !dragging_ && MouseSupportEnabled()) {
+      const float miss = std::numeric_limits<float>::quiet_NaN();
+      QueueMenuMouse(MouseAction::kMove, Point(e).value_or(MenuPoint{miss, miss}));
+    }
     if (rb_blitz::settings::title::mouse_native_trace.Get())
       REXLOG_INFO("native_mouse: button={} up mask={:02X}", static_cast<int>(e.button),
                   g_mouse_buttons.load());

@@ -166,6 +166,7 @@ set(RBBLITZ_SOURCES
     src/hooks/action_hint_probe.cpp
     src/hooks/input_font_alloc_trace.cpp
     src/hooks/render_settings.cpp
+    src/hooks/portrait_layout.cpp
     src/hooks/settings_payload.cpp
     src/settings/menu_payload.cpp
     src/ui/gameplay_presentation.cpp
@@ -1233,6 +1234,12 @@ if(BUILD_TESTING)
         target_include_directories(rb_blitz_hud_layout_runtime_tests PRIVATE src)
         target_link_libraries(rb_blitz_hud_layout_runtime_tests PRIVATE rex::sdk)
         add_test(NAME hud_layout_runtime COMMAND rb_blitz_hud_layout_runtime_tests)
+        add_executable(rb_blitz_portrait_layout_tests
+            tests/portrait_layout_tests.cpp src/hooks/portrait_layout.cpp
+            src/settings/window_policy.cpp)
+        target_include_directories(rb_blitz_portrait_layout_tests PRIVATE src tests)
+        target_link_libraries(rb_blitz_portrait_layout_tests PRIVATE rex::sdk)
+        add_payload_test(portrait_layout rb_blitz_portrait_layout_tests)
         # The same isolated fixtures also exercise the iOS-only placement and
         # input-source gate on a native host, without navigating the game.
         add_executable(rb_blitz_touch_hud_runtime_tests

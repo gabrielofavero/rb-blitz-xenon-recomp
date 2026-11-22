@@ -37,16 +37,18 @@ std::mutex g_profiles_mutex;
 rb_blitz::settings::DisplayMode g_native;
 int g_profile_scale = 0;
 bool g_mobile_profiles = false;
+bool g_device_profiles = false;
 bool g_profile_first_frame = true;
 std::map<rb_blitz::settings::SettingId, rb_blitz::settings::Value> g_profiles;
 }  // namespace
 
 void rb_blitz::settings::ConfigureResolutionProfiles(DisplayMode native, int draw_scale, bool mobile,
-    const std::map<SettingId, Value>& values) {
+    const std::map<SettingId, Value>& values, bool device) {
   std::lock_guard lock(g_profiles_mutex);
   g_native = native.width > 0 && native.height > 0 ? native : DisplayMode{1280,720};
   g_profile_scale = draw_scale;
   g_mobile_profiles = mobile;
+  g_device_profiles = device;
   g_profile_first_frame = true;
   g_profiles = values;
 }
@@ -54,7 +56,9 @@ void rb_blitz::settings::ConfigureResolutionProfiles(DisplayMode native, int dra
 bool rb_blitz::settings::QueueResolutionProfile(SettingId id, const Value& value, std::string* error) {
   std::lock_guard lock(g_profiles_mutex);
   const bool scale = id == SettingId::kInterfaceRenderScale || id == SettingId::kGameplayRenderScale;
-  const auto pixels = scale ? ScaledProfileResolution(g_native, value.integer)
+  const bool portrait = g_device_profiles && (id == SettingId::kGameplayRenderScale
+      ? GameplayPortraitEnabled() : InterfacePortraitEnabled());
+  const auto pixels = scale ? ScaledProfileResolution(DeviceProfileSource(g_native, portrait), value.integer)
                             : ProfileResolution(value.text, g_native);
   if (!IsResolutionProfile(id) || !g_profile_scale ||
       (scale ? value.kind != ValueKind::kInt || value.integer < 5 || value.integer > 10
@@ -243,7 +247,9 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
                                : (game ? SettingId::kGameplayResolution : SettingId::kInterfaceResolution);
     selected = g_profiles.at(active);
     pixels = g_mobile_profiles
-        ? ScaledProfileResolution(g_native, g_profiles.at(game ? SettingId::kGameplayRenderScale
+        ? ScaledProfileResolution(DeviceProfileSource(g_native, g_device_profiles &&
+            (game ? GameplayPortraitEnabled() : InterfacePortraitEnabled())),
+            g_profiles.at(game ? SettingId::kGameplayRenderScale
                                                              : SettingId::kInterfaceRenderScale).integer)
         : ProfileResolution(g_profiles.at(game ? SettingId::kGameplayResolution
                                               : SettingId::kInterfaceResolution).text, g_native);

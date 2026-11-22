@@ -36,6 +36,9 @@ bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>*
 // the action-hint font, leaving unrelated label styles on their retail fonts.
 bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                     std::string* error);
+// Match the song-loading begin prompt to the title screen's condensed face.
+bool PreparePortraitSongLoading(const std::vector<uint8_t>& source,
+                                std::vector<uint8_t>* scene, std::string* error);
 // Point the splash start label at the action-hint font.
 bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                    std::string* error);
@@ -61,6 +64,9 @@ bool PreparePortraitSettings(const std::vector<uint8_t>& source,
 bool PreparePortraitAudio(const std::vector<uint8_t>& source,
                          const std::vector<uint8_t>& button_source, float aspect,
                          std::vector<uint8_t>* scene, std::string* error);
+bool PrepareRenderScaleScene(const std::vector<uint8_t>& source,
+                             const std::vector<uint8_t>& button_source, float aspect, bool portrait,
+                             std::vector<uint8_t>* scene, std::string* error);
 bool PreparePortraitCredits(const std::vector<uint8_t>& source,
                            const std::vector<uint8_t>& button_source, float aspect,
                            std::vector<uint8_t>* scene, std::string* error);
@@ -95,6 +101,18 @@ inline constexpr char kPortraitSplashFontRecord[] = "ui/resource/fonts/gen/portr
 // Give the song-list sort label the live Interface Sort icon font.
 bool PrepareSongSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                        std::string* error);
+// Reflow the installed song panel, keeping its provider, artwork and modal list.
+bool PreparePortraitSongs(const std::vector<uint8_t>& source,
+                          const std::vector<uint8_t>& button_source, float aspect,
+                          std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitShortcuts(const std::vector<uint8_t>& source,
+                             std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kPortraitShortcutsRecord[] = "ui/resource/lists/gen/portrait_shortcuts.milo_xbox";
+bool PreparePortraitSongList(const std::vector<uint8_t>& source,
+                             const std::vector<uint8_t>& button_source, bool grouped,
+                             std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kPortraitSongListRecord[] = "ui/resource/lists/gen/portrait_mysongs.milo_xbox";
+inline constexpr char kPortraitSongSearchRecord[] = "ui/resource/lists/gen/portrait_song_search.milo_xbox";
 // Center the resting speaker artwork on the calibration countdown's axis.
 bool PrepareCalibrationLayout(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                               std::string* error);

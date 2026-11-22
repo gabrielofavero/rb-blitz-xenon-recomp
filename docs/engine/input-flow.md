@@ -217,6 +217,17 @@ slot every update) — the per-frame lift replaces it. Screens with no captured
 list — the title screen's *PRESS (A) TO START* — keep the at-principle A, so a
 mouse-only boot still works.
 
+Touch list selection is feedback for a press, rather than a persistent cursor.
+Idle rows, including the first row on entry and underlying unfocused lists,
+draw with their normal colors. Pressing a row lights it until release; even a
+tap completed between guest frames receives one highlighted draw before its
+native Confirm pulse. Leaving the row, losing input focus, or changing pages
+cancels that press. The release position is checked against the current row
+geometry. Highlight suppression changes only per-draw records, preserving the
+guest selection and full-width touch targets. Keyboard and controller activity
+restores the normal persistent selection immediately. This policy is shared
+across host platforms; native iOS visual and touch acceptance remain unverified.
+
 The synthetic host device establishes controller connectivity while either host gate is
 open (P2 made it follow Keyboard Support as well as Mouse Support). Fixed mouse actions
 are merged after user controller remapping, for player one only. `[remap]` mouse

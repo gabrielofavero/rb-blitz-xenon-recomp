@@ -2,10 +2,18 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
+#include <cmath>
 #include <string>
 #include <string_view>
 
 namespace rb_blitz::input {
+
+inline float CalibrationTextFit(float width, float height, float available_width, float available_height) {
+  if (!std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0 ||
+      available_width <= 0 || available_height <= 0) return 1;
+  return std::min({1.f, available_width / width, available_height / height});
+}
 
 inline std::string TouchCalibrationInstruction(std::string_view text) {
   struct Phrase { std::string_view before, after, touch; };

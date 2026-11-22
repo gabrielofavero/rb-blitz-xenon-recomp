@@ -72,9 +72,9 @@ using namespace rb_blitz::test;
 
 using dtb::Node;
 
-constexpr size_t kExpectedPagesPerContext = 75;
+constexpr size_t kExpectedPagesPerContext = 73;
 constexpr size_t kExpectedPages = 2 * kExpectedPagesPerContext;
-constexpr size_t kExpectedListPages = kExpectedPages - 4;  // two native wheels per context
+constexpr size_t kExpectedListPages = kExpectedPages - 2;  // one native two-wheel page per context
 
 bool SuppressesSettingsCaption(const std::string_view name) {
   return name.starts_with("settings_restart") ||
@@ -2325,6 +2325,11 @@ void TestLabels() {
   for (const auto& label : labels) {
     CHECK_TRUE(label.second.rfind(": ON") == std::string::npos);
     CHECK_TRUE(label.second.rfind(": OFF") == std::string::npos);
+    // Include the displayed value in the option-name budget.
+    if (label.first.starts_with("settings_filtering_") ||
+        label.first.starts_with("settings_wiggles_")) {
+      CHECK_TRUE(label.second.size() <= 28u);
+    }
   }
   bool dof_on = false;
   for (const auto& label : labels) {
@@ -2887,7 +2892,21 @@ int DumpRecord(const char* in_path, const char* needle) {
 void TestHelpTextsCoverEveryRow() {
   BeginCase("every row of the surface carries a caption, and every caption fits the overlay");
 
-  const std::vector<std::string> symbols = HelpSymbols();
+  std::vector<std::string> symbols = HelpSymbols();
+  // Deferred changes add timing text to the caption shown during a song.
+  // Count that text too so it cannot undo the portrait wording budget.
+  for (const char* symbol : {
+           "settings_hud_pb_next_selection", "settings_hud_hide_next_song",
+           "settings_hud_progress_next_song", "settings_hud_timer_next_song",
+           "settings_hud_streak_next_song", "settings_hud_input_next_song",
+           "settings_camera_next_song", "settings_gems_next_song",
+           "settings_show_messages_menu_return", "settings_show_recommendations_menu_return",
+           "settings_mm_leaderboard_menu_return", "settings_mm_achievements_menu_return",
+           "settings_mm_upgrade_menu_return", "settings_mm_download_content_menu_return",
+           "settings_dlc_refresh_menu_return", "settings_play_current_menu_return",
+           "settings_mm_rhythmverse_menu_return"}) {
+    symbols.emplace_back(symbol);
+  }
   CHECK_TRUE(symbols.size() > 60u);
   std::vector<std::string> seen;
   for (const std::string& symbol : symbols) {
@@ -2899,10 +2918,11 @@ void TestHelpTextsCoverEveryRow() {
       std::printf("         row %s has no caption\n", symbol.c_str());
       continue;
     }
-    // The overlay wraps at a fixed width; "short, 1-2 lines" is a table contract, so it is
-    // enforced here rather than discovered on screen.
+    // Keep the authored text compact for portrait captions; the renderer uses
+    // actual font metrics to fit smaller windows and larger text sizes.
     if (text.size() > kMaxHelpTextChars) std::printf("         caption too long: %s (%zu)\n", std::string(symbol).c_str(), text.size());
     CHECK_TRUE(text.size() <= kMaxHelpTextChars);
+    CHECK_TRUE(text.size() <= 48);
     CHECK_TRUE(text.find('\n') == std::string::npos);
     CHECK_TRUE(text.back() == '.');
     for (const char c : text) {
@@ -3145,6 +3165,7 @@ void TestHelpTopicsResolve() {
     CHECK_TRUE(!text.empty());
     if (text.size() > kMaxHelpTextChars) std::printf("         caption too long: %s (%zu)\n", std::string(symbol).c_str(), text.size());
     CHECK_TRUE(text.size() <= kMaxHelpTextChars);
+    CHECK_TRUE(text.size() <= 48);
   }
   CHECK_TRUE(TextForSymbol("no_such_row").empty());
 
@@ -3662,7 +3683,7 @@ void TestAchievementActionWording() {
   CHECK_TRUE(label_for("settings_earn_achievements") == "Unlock Online Achievements");
   CHECK_TRUE(label_for("settings_hide_achievements_on") == "Show Achievements: On");
   CHECK_TRUE(label_for("settings_hide_achievements_off") == "Show Achievements: Off");
-  CHECK_TRUE(HelpTextFor("settings_hide_achievements").find("earned and saved") !=
+  CHECK_TRUE(HelpTextFor("settings_hide_achievements").find("progress is saved") !=
              std::string::npos);
 
   // The row's own caption still says what the grant does, and no surface spells the old wording.
@@ -3747,16 +3768,56 @@ void TestResolutionProfileRows() {
     }
     if (mobile) {
       for (const auto& root : DefinitionRoots()) {
-        if (root.kids.size() < 3 || root.kids[2].text != "settings_scale_interface_panel") continue;
+        if (root.kids.size() < 3 || (root.kids[2].text != "settings_scale_panel" &&
+                                  root.kids[2].text != "settings_scale_pause_panel")) continue;
         CHECK_TRUE(HasText(root, "sound_effects_slider.sld"));
+        CHECK_TRUE(HasText(root, "track_sound_slider.sld"));
+        CHECK_TRUE(HasText(root, "interface_scale.lbl"));
+        CHECK_TRUE(HasText(root, "gameplay_scale.lbl"));
         CHECK_TRUE(HasText(root, "set_num_steps"));
         CHECK_FALSE(HasText(root, "options.lst"));
+        std::vector<const dtb::Node*> polls;
+        CollectMembers(root, "poll", &polls);
+        CHECK_EQ(polls.size(), 1u);
+        if (polls.empty()) continue;
+        const auto& poll = *polls.front();
+        CHECK_TRUE(HasText(poll, "!="));
+        CHECK_TRUE(HasText(poll, "rbbz-settings/commit/-/-"));
+        for (const auto* scope : {"interface", "gameplay"}) {
+          for (int value = 5; value <= 10; ++value)
+            CHECK_TRUE(HasText(poll, "rbbz-settings/set/graphics." + std::string(scope) +
+                                    "_render_scale/i:" + std::to_string(value)));
+        }
+        // Successful edits update the value label in place. Only save failures
+        // can open another screen; Confirm no longer commits and leaves.
+        int results = 0;
+        const auto check_results = [&](const auto& self, const Node& node) -> void {
+          if (node.tag == dtb::kCommand && node.kids.size() == 4 &&
+              node.kids[0].text == "if_else" &&
+              HasText(node.kids[1], "rbbz-settings/snapshot/commit.ok/b:1")) {
+            ++results;
+            CHECK_FALSE(HasText(node.kids[2], "goto_screen"));
+            CHECK_TRUE(HasText(node.kids[2], "set_token_fmt"));
+            CHECK_TRUE(HasText(node.kids[3], "goto_screen"));
+          }
+          for (const auto& child : node.kids) self(self, child);
+        };
+        check_results(check_results, poll);
+        CHECK_EQ(results, 12);
+        std::vector<const dtb::Node*> buttons;
+        CollectMembers(root, "BUTTON_DOWN_MSG", &buttons);
+        CHECK_EQ(buttons.size(), 1u);
+        if (!buttons.empty()) {
+          CHECK_TRUE(HasText(*buttons.front(), "kAction_Up"));
+          CHECK_TRUE(HasText(*buttons.front(), "kAction_Down"));
+          CHECK_FALSE(HasText(*buttons.front(), "rbbz-settings/commit/-/-"));
+        }
       }
     }
   }
   ConfigureMenu({});
   CHECK_TRUE(HelpTextFor("settings_force_16_by_9") ==
-             "Use 16:9 resolution options after restarting.");
+             "Use 16:9 resolutions. Restart.");
 }
 
 // A backend row lists what this build and this machine can run: the payload fills
@@ -4799,18 +4860,18 @@ void TestUltimateTrialDispatchIsCommitGuarded() {
       CHECK_FALSE(HasText(*methods.front(), "rbbz-settings/ultimate/value/interface.progressbar"));
     }
   }
-  CHECK_TRUE(HelpTextFor("settings_hud_timer_next_song").find("Applies next song.") !=
+  CHECK_TRUE(HelpTextFor("settings_hud_timer_next_song").find("Next song.") !=
              std::string::npos);
   CHECK_TRUE(HelpTextFor("settings_hud_gold_next_song").empty());
   CHECK_TRUE(HelpTextFor("settings_show_messages_menu_return").find(
-                 "Applies when you return to the main menu.") != std::string::npos);
+                 "At main menu.") != std::string::npos);
   CHECK_TRUE(HelpTextFor("settings_show_messages_menu_return").find("Requires a restart") ==
              std::string::npos);
-  CHECK_TRUE(HelpTextFor("settings_mm_leaderboard_menu_return").find("Restart to apply") ==
+  CHECK_TRUE(HelpTextFor("settings_mm_leaderboard_menu_return").find("Restart") ==
              std::string::npos);
   CHECK_TRUE(HelpTextFor("no_such_menu_row_menu_return").empty());
   CHECK_TRUE(HelpTextFor("settings_hud_pb_next_selection").find(
-                 "Applies on next song selection.") != std::string::npos);
+                 "Next song pick.") != std::string::npos);
 
   std::vector<const dtb::Node*> select_members;
   CollectMembers(*menu, "select_row", &select_members);

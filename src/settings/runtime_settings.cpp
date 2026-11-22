@@ -515,7 +515,7 @@ rex::Setting<bool> rb_blitz::settings::title::mouse_as_touch{
 
 rex::Setting<bool> rb_blitz::settings::title::mobile_preview{
     &rb_blitz::settings::TitleSettingOwner("blitz.diagnostics"), "mobile_preview",
-    false, "Use the mobile settings menu and resolution profiles on desktop.",
+    false, "Use a 201:437 phone preview and mobile settings on desktop.",
     rex::kUntilLaunch, rex::kNoSave};
 
 rex::Setting<std::string> rb_blitz::settings::title::startup_mode{

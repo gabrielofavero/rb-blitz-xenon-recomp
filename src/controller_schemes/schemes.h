@@ -62,10 +62,14 @@ bool LoadScheme(const std::filesystem::path& folder, bool trusted_reserved,
                 DecodePng decoder, Scheme* result, std::string* why);
 bool LoadInternalKeyboard(const std::filesystem::path& folder, DecodePng decoder,
                           Scheme* result, std::string* why);
+bool LoadInternalTouch(const std::filesystem::path& folder, DecodePng decoder,
+                       Scheme* result, std::string* why);
 struct Registry {
   std::map<std::string, Scheme> schemes;
   Scheme keyboard_mouse;
   bool has_keyboard_mouse = false;
+  Scheme touch;
+  bool has_touch = false;
   std::vector<Rejection> rejected;
   std::vector<std::string> shadowed;
   const Scheme* Find(const std::string& id) const;

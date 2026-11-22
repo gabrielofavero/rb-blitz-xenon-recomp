@@ -8,21 +8,49 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace rb_blitz::input {
 struct InlineHelpEntry { uint32_t label, action, record = 0; };
 
-// Select is redundant beside the portrait calibration's direct touch targets.
-// Match its caption token: Retry can share Select's native Confirm action.
+// The source Symbol is at +4; +16 points to its localized display string.
+// Match the Symbol so navigation policy does not depend on the current language.
+template <typename Read32, typename Text>
+std::string_view InlineHelpCaptionToken(const InlineHelpEntry& entry, Read32 read32, Text text) {
+  return entry.record ? text(read32(entry.record + 4)) : std::string_view{};
+}
+
+inline constexpr std::string_view CalibrationFooterCaption(bool calibration, std::string_view caption) {
+  return calibration && (caption == "select" || caption == "continue")
+      ? "rbbz_calibration_next" : caption;
+}
+
+inline bool CalibrationRetryCaption(std::string_view caption) {
+  return caption == "retry" || caption == "rbbz_loading_retry";
+}
+
+struct InlineHelpPlacement { size_t index, count; };
+
+// Failure is a separate guest panel, so its single Retry label must reserve the
+// upper slot even while the underlying panel still draws Back and Next.
+inline InlineHelpPlacement CalibrationFooterPlacement(bool calibration, std::string_view caption,
+                                                      size_t index, size_t count) {
+  return calibration && CalibrationRetryCaption(caption) ? InlineHelpPlacement{2, 3}
+                                                        : InlineHelpPlacement{index, count};
+}
+
+// Keep Back and Next on the lower row, followed by Retry. Shared Confirm actions
+// do not make the labels interchangeable; each retains its native record.
 template <typename Caption>
 std::vector<InlineHelpEntry> CalibrationFooterEntries(
     const std::vector<InlineHelpEntry>& entries, Caption caption) {
-  std::vector<InlineHelpEntry> visible;
-  for (const auto& entry : entries)
-    if (caption(entry) != "select") visible.push_back(entry);
-  std::stable_partition(visible.begin(), visible.end(),
-      [](const auto& entry) { return entry.action == 2; });
+  auto visible = entries;
+  const auto rank = [&](const auto& entry) {
+    return CalibrationRetryCaption(caption(entry)) ? 2 : entry.action == 2 ? 0 : 1;
+  };
+  std::stable_sort(visible.begin(), visible.end(),
+      [&](const auto& a, const auto& b) { return rank(a) < rank(b); });
   return visible;
 }
 

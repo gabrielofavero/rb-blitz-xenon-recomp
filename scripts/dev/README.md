@@ -114,11 +114,12 @@ Combine these with `run-game` or its one-action equivalent:
 | `--mobile` | Use a portrait desktop window, mobile settings UI, mouse-as-touch, and a separate settings copy. |
 | `--quick` | Windowed launch, empty DLC library, and skipped offline dialogs. Windows also presses A after a delay. |
 
-`--mobile` replaces the old `--portrait` spelling. It opens a 9:16 preview window
+`--mobile` replaces the old `--portrait` spelling. It opens a 201:437 preview window
+(the proportions of a 1206x2622 phone display)
 and selects mobile settings, including Touch controls and interface/gameplay
 render scales. Desktop-only display, renderer, VSync, resolution, and Force 16:9
 rows are hidden; the native graphics backend is preserved. Preview rendering
-uses a forced 16:9 source even on ultrawide monitors. This previews mobile UI
+uses a matching 437:201 landscape source even on ultrawide monitors. This previews mobile UI
 on the desktop; it does not build or run an iOS binary.
 
 Mobile runs copy the selected launcher profile and settings into a fresh

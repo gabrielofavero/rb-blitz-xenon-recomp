@@ -36,8 +36,8 @@ def main() -> None:
     total = 0
     for folder in sorted(ROOT.iterdir()):
         manifest = folder / "scheme.toml"
-        internal_keyboard = folder.name == "keyboard-mouse"
-        images = folder if internal_keyboard else folder / "buttons"
+        internal = folder.name in ("keyboard-mouse", "touch")
+        images = folder if internal else folder / "buttons"
         if not manifest.is_file() or not images.is_dir():
             continue
         if folder.name.startswith("template-"):
@@ -49,15 +49,15 @@ def main() -> None:
         declared = set()
         for entry in data.get("input", []):
             relative = entry.get("file", "")
-            if internal_keyboard and Path(relative).parent != Path("."):
+            if internal and Path(relative).parent != Path("."):
                 continue
-            if not internal_keyboard and not relative.startswith("buttons/"):
+            if not internal and not relative.startswith("buttons/"):
                 continue
             path = folder / relative
             if not path.is_file():
                 raise FileNotFoundError(path)
             declared.add(path)
-            replacement = f'{entry["id"]}.png' if internal_keyboard else f'buttons/{entry["id"]}.png'
+            replacement = f'{entry["id"]}.png' if internal else f'buttons/{entry["id"]}.png'
             if relative != replacement:
                 old_line = f'file = "{relative}"'
                 new_line = f'file = "{replacement}"'

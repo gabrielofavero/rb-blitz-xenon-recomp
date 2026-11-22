@@ -37,9 +37,9 @@ foreach ($entry in $folders) {
     if (-not (Test-Path -LiteralPath $validator -PathType Leaf)) {
         throw "Build rb_blitz_controller_schemes before packaging $id."
     }
-    $internal = $id -eq 'keyboard-mouse'
-    $mode = if ($internal) { '--validate-internal-keyboard' } else { '--validate' }
-    $listMode = if ($internal) { '--list-internal-keyboard' } else { '--list-declared' }
+    $internal = $id -in @('keyboard-mouse', 'touch')
+    $mode = if ($id -eq 'touch') { '--validate-internal-touch' } elseif ($internal) { '--validate-internal-keyboard' } else { '--validate' }
+    $listMode = if ($id -eq 'touch') { '--list-internal-touch' } elseif ($internal) { '--list-internal-keyboard' } else { '--list-declared' }
     $report = @(& $validator $mode $folder)
     if ($LASTEXITCODE -ne 0) { throw "Invalid authored controller scheme: $folder" }
     $files = @(& $validator $listMode $folder)
@@ -52,7 +52,7 @@ foreach ($entry in $folders) {
         }
         $relative = $relative.Replace('/', '\')
         $source = $file.FullName.Replace('"', '""')
-        $destination = if ($internal) { "assets\controller\keyboard-mouse" } else { "assets\controller\schemes\$id" }
+        $destination = if ($internal) { "assets\controller\$id" } else { "assets\controller\schemes\$id" }
         $subdir = Split-Path -Parent $relative
         if ($subdir) { $destination += "\$subdir" }
         $lines.Add("Source: `"$source`"; DestDir: `"{app}\$destination`"; Flags: ignoreversion")

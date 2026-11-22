@@ -2,9 +2,11 @@
 
     python scripts/controllers/render_all_controller_calibration.py
     python scripts/controllers/render_all_controller_calibration.py --exclude xbox-series
+    python scripts/controllers/render_all_controller_calibration.py --layout touch
 
 Each layout's scheme supplies the source PNGs. The renderer embeds those PNGs
 intact and writes generated images to each layout's calibration/ folder.
+Touch renders only tap; swipe artwork is reserved for future gesture hints.
 Requires Pillow and Playwright Chromium; see render_button_template.py.
 """
 
@@ -21,7 +23,8 @@ from render_button_template import ROOT, compose_svg, render_png_with_page
 
 def layout_inputs(layout: Path) -> list[tuple[str, Path]]:
     scheme = tomllib.loads((layout / "scheme.toml").read_text(encoding="utf-8"))
-    inputs = scheme.get("input", [])
+    inputs = [entry for entry in scheme.get("input", [])
+              if not entry.get("source", "").startswith("touch:") or entry["source"] == "touch:tap"]
     names = [entry["id"] for entry in inputs]
     if len(names) != len(set(names)):
         raise ValueError(f"{layout}: duplicate input IDs")
@@ -41,15 +44,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exclude", action="append", default=[],
                         help="Skip a layout already rendered (repeatable)")
+    parser.add_argument("--layout", action="append", default=[],
+                        help="Render only this layout (repeatable)")
     args = parser.parse_args()
 
     root = ROOT / "assets/controller"
     available = {path.parent.name: path.parent for path in root.glob("*/scheme.toml")}
-    unknown = set(args.exclude) - set(available)
+    unknown = (set(args.exclude) | set(args.layout)) - set(available)
     if unknown:
         parser.error(f"Unknown layout(s): {', '.join(sorted(unknown))}")
     jobs = [(available[name], layout_inputs(available[name]))
-            for name in sorted(available) if name not in args.exclude]
+            for name in sorted(available) if name not in args.exclude and
+            (not args.layout or name in args.layout)]
     jobs = [(layout, inputs) for layout, inputs in jobs if inputs]
 
     total = 0
@@ -62,7 +68,9 @@ def main() -> None:
                     for state in ("pressed", "released"):
                         master = root / f"masters/button-{state}-template.svg"
                         output = layout / "calibration" / f"{name}-{state}.png"
-                        render_png_with_page(compose_svg(master, artwork, state), output, 256, page)
+                        cast_shadow = not (layout.name == "touch" and name == "tap" and state == "released")
+                        render_png_with_page(compose_svg(master, artwork, state, cast_shadow=cast_shadow),
+                                             output, 256, page)
                 count = len(inputs) * 2
                 total += count
                 print(f"{layout.name}: {count} PNGs", flush=True)

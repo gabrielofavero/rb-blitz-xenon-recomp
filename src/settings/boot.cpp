@@ -563,13 +563,13 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     if (plan.supported) {
       auto native = capability_snapshot_.primary_display_size;
       if (native.width <= 0 || native.height <= 0) native = {1280, 720};
-      auto landscape = native;
-      if (landscape.width < landscape.height) std::swap(landscape.width, landscape.height);
-      profile_draw_scale_ = std::max((landscape.width + 1919) / 1920,
-                                     (landscape.height + 719) / 720);
+      profile_draw_scale_ = ResolutionProfileDrawScale(native,
+          schema::IsMobile(schema::CurrentReleaseSettings().platform),
+          orientation.text == "portrait",
+          service_->EffectiveValue(SettingId::kGameplayOrientation).text == "portrait");
       const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings());
       const auto profile_pixels = mobile
-          ? ScaledProfileResolution(service_->ResolutionProfileDisplay(),
+          ? service_->RenderScalePixels(SettingId::kInterfaceRenderScale,
                                     service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
           : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text,
                               service_->ResolutionProfileDisplay());
@@ -626,9 +626,12 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     }
     if (graphics_boot_.recovered() || forced_safe) {
       ApplyReleaseGraphicsRules(selected, schema::CurrentReleaseSettings());
-      if (const auto force = selected.find(SettingId::kForce16By9); force != selected.end())
-        service_->SetBootValues({{force->first, force->second}},
-                               "settings.graphics.recovered_from_failure");
+      std::map<SettingId, Value> recovered_layout;
+      for (const auto id : {SettingId::kForce16By9, SettingId::kInterfaceOrientation,
+                            SettingId::kGameplayOrientation})
+        if (const auto value = selected.find(id); value != selected.end())
+          recovered_layout[id] = value->second;
+      service_->SetBootValues(std::move(recovered_layout), "settings.graphics.recovered_from_failure");
       for (auto& [id, value] : selected) {
         if (id == SettingId::kInterfaceResolution || id == SettingId::kGameplayResolution)
           value.text = ReconcileProfileResolutionToken(value.text,
@@ -640,8 +643,12 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
       // Rebuild them from recovered controls rather than clamping their shape.
       if (profile_draw_scale_) {
         const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings());
+        profile_draw_scale_ = ResolutionProfileDrawScale(capability_snapshot_.primary_display_size,
+            schema::IsMobile(schema::CurrentReleaseSettings().platform),
+            service_->EffectiveValue(SettingId::kInterfaceOrientation).text == "portrait",
+            service_->EffectiveValue(SettingId::kGameplayOrientation).text == "portrait");
         const auto pixels = mobile
-            ? ScaledProfileResolution(service_->ResolutionProfileDisplay(),
+            ? service_->RenderScalePixels(SettingId::kInterfaceRenderScale,
                                       selected.at(SettingId::kInterfaceRenderScale).integer)
             : ProfileResolution(selected.at(SettingId::kInterfaceResolution).text,
                                 service_->ResolutionProfileDisplay());
@@ -1180,7 +1187,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
 #endif
     if (profile_draw_scale_ && service_) {
       const auto pixels = schema::IsMobile(schema::CurrentReleaseSettings())
-          ? ScaledProfileResolution(service_->ResolutionProfileDisplay(),
+          ? service_->RenderScalePixels(SettingId::kInterfaceRenderScale,
                                     service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
           : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text,
                               service_->ResolutionProfileDisplay());
@@ -1255,7 +1262,8 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
                             SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale})
         profiles[id] = service_->EffectiveValue(id);
       ConfigureResolutionProfiles(service_->ResolutionProfileDisplay(), screen_plan_.draw_scale,
-          schema::IsMobile(schema::CurrentReleaseSettings()), profiles);
+          schema::IsMobile(schema::CurrentReleaseSettings()), profiles,
+          schema::IsMobile(schema::CurrentReleaseSettings().platform));
       WriteRuntimeSetting("gpu.xenos.present_source_aspect", "true", rex::SettingLayer::kTitle);
       WriteRuntimeSetting("gpu.xenos.clear_caches_on_present_resize", "true", rex::SettingLayer::kTitle);
     }
@@ -1403,6 +1411,11 @@ void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
     if (!note.empty()) {
       REXLOG_WARN("settings_boot: {}", note);
     }
+    const auto hud_defaults = service_->ApplyFirstBootMobileHudDefaults();
+    if (hud_defaults.provider_written)
+      REXLOG_INFO("settings_boot: fresh mobile profile hides comparison, progress and timer HUD");
+    for (const auto& error : hud_defaults.errors)
+      REXLOG_WARN("settings_boot: mobile HUD defaults: {}", error);
   }
   REXLOG_INFO("settings_boot: the provider is {} ({}); {} value(s) reach the store",
               provider.Active() ? "active" : "not active",

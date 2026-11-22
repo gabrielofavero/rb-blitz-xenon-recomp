@@ -40,3 +40,28 @@ ctest --test-dir out/build/win-amd64-release -R '^song_sort$' --output-on-failur
 The owner's in-game confirmation of the corrected Difficulty view is pending.
 The temporary vectored fault logger used for `rb_blitz_323.log` was removed;
 it also observed ordinary faults that the runtime subsequently handled.
+
+## Portrait library
+
+Portrait My Songs uses the installed guest scene and native song providers.
+One centered header and the landscape header's animated arrow groups occupy the top; Sort and Search
+sit below it with a larger gap. The grouped list keeps its headings, larger
+rating stars and filled selection row. Taller rows allow song titles to wrap.
+Portrait arrows use larger native art and invisible tap targets. Touch hides
+their controller/key images; keyboard and controller input restore those images.
+Album art, song title, artist, album, genre/year and difficulty occupy a fixed
+card above the Back, Shortcuts and Select actions. Wider portrait layouts reduce
+the visible row count to keep the list clear of that card.
+
+Shortcuts keeps the landscape neon frame, list highlight and hints, with a taller
+frame and larger text in a private portrait list resource. Selecting a group
+updates the song selection; Cancel returns focus to the songs. Search retains its
+keyboard and result provider, with a separate portrait row resource. The existing
+keyboard dialog fills the phone width and uses larger input and action controls,
+positioned above the screen center to leave room for the platform keyboard. Mouse and
+touch targets use the projected guest geometry and respect modal input ownership.
+
+These changes apply when the interface orientation is portrait, independently
+of the gameplay orientation. Scene copies are generated from installed game
+records; landscape resources and source archives are preserved. Authoring and
+input code are shared across desktop and iOS backends.

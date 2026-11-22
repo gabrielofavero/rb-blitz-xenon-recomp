@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "settings/runtime_values.h"
 #include "ui/gameplay_presentation.h"
+#include "ui/portrait_viewport.h"
 #include "settings/runtime_settings.h"
 #include <rex/logging/log_category.h>
 #include <rex/ui/ui_system.h>
@@ -29,6 +30,16 @@ class GameplayPresentation final : public rex::ui::DialogBase {
         preview_notification_(std::move(preview_notification)) {}
  private:
   bool Draw(ImGuiIO&) override {
+    const auto native = context_.GetNativeWindow();
+    auto* window = native ? static_cast<SDL_Window*>(native->sdl) : nullptr;
+    int width = 0, height = 0;
+    SDL_Rect safe{};
+    if (window) {
+      SDL_GetWindowSize(window, &width, &height);
+      SDL_GetWindowSafeArea(window, &safe);
+    }
+    PublishPortraitViewport({float(width), float(height), float(safe.x), float(safe.y),
+                             float(safe.w), float(safe.h)});
     const bool game = input::GameScreenActive();
     const bool portrait = game ? settings::GameplayPortraitEnabled() : settings::InterfacePortraitEnabled();
     if (!orientation_ || *orientation_ != portrait) {

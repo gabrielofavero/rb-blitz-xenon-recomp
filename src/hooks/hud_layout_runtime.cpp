@@ -26,6 +26,7 @@
 #include "platform/guest_memory.h"
 #include "input/touch_controls.h"
 #include "input/native_menu.h"
+#include "ui/portrait_viewport.h"
 
 REX_EXTERN(__imp__sub_821F13D0);  // RndTransformable::WorldXfm
 REX_EXTERN(sub_821F13D0);
@@ -141,6 +142,7 @@ constexpr auto kAnchors = std::to_array<Anchor>({
     {"inputs.lbl",          0x8203A95C,  0x07C,  0, true},
     {"pb.lbl",              0x8203A95C,  0x07C,  0, true},
     {"progress_bar.sld",     0,           0,      0, true},
+    {"portrait_top_hud.grp", 0x82024C4C, -0x108,  0, true},
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
     {"touch_pause.grp",     0x82024C4C, -0x108, -1},
 #endif
@@ -210,6 +212,7 @@ const Anchor* InheritedAnchor(const uint8_t* base, uint32_t transformable) {
   return nullptr;
 }
 float PortraitScale(const Anchor& anchor, float half_width) {
+  if (anchor.name == "portrait_top_hud.grp") return 1;
   float scale = .5f;
   if (anchor.name == "band_meter_hud" || anchor.name == "dynamic_leaderboard")
     scale = .65f;
@@ -218,6 +221,13 @@ float PortraitScale(const Anchor& anchor, float half_width) {
   if (anchor.name == "timer.lbl" || anchor.name == "inputs.lbl")
     scale = .7f;
   return scale * std::min(1.f, half_width / 120.f);
+}
+float PortraitTopInset() {
+  if (!TouchHudEnabled()) return 0;
+  const auto viewport = rb_blitz::ui::CurrentPortraitViewport();
+  if (!std::isfinite(viewport.height) || !std::isfinite(viewport.safe_y) ||
+      viewport.height <= 0) return 0;
+  return std::clamp(viewport.safe_y / viewport.height, 0.f, .25f) * 480 + 8;
 }
 void PlacePortraitHud(uint8_t* base, uint32_t transformable, const Anchor& anchor) {
   const float half_width = 240.f * HudWidth() /
@@ -247,9 +257,10 @@ void PlacePortraitHud(uint8_t* base, uint32_t transformable, const Anchor& ancho
     }
   }
   float x = 0, z = 0;
-  if (anchor.name == "star_board") { x = half_width - 24; z = 210; }
-  else if (anchor.name == "score.lbl") { x = 0; z = 210; }
-  else if (anchor.name == "band_meter_hud") { x = -half_width + 115 * scale; z = 0; }
+  if (anchor.name == "portrait_top_hud.grp") { x = 0; z = -PortraitTopInset(); }
+  else if (anchor.name == "star_board") { x = half_width - 24; z = 210 - PortraitTopInset(); }
+  else if (anchor.name == "score.lbl") { x = 0; z = 210 - PortraitTopInset(); }
+  else if (anchor.name == "band_meter_hud") { x = -half_width + 140 * scale; z = 0; }
   else if (anchor.name == "letter_collect_hud") { x = 0; z = 110; }
   else if (anchor.name == "dynamic_leaderboard") { x = half_width * (2.f / 3.f); z = 0; }
   else if (anchor.name == "timer.lbl") { x = 0; z = -202; }
@@ -326,6 +337,7 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
     const uint8_t* base = nullptr;
     uint32_t transformable = 0;
     double delta = 0;
+    float top_inset = 0;
     std::array<uint8_t, 0xC0> state{};
     std::array<uint8_t, 64> parent_world{};
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
@@ -336,6 +348,7 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
   static thread_local std::array<Prepared, 16> prepared{};
   static thread_local size_t next_prepared = 0;
   const double delta = ActiveDelta();
+  const float top_inset = PortraitHud() ? PortraitTopInset() : 0;
   const uint32_t parent = U32(base, transformable + kParent);
   const bool has_parent = HeapRange(parent, 0xC0);
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
@@ -354,7 +367,7 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
 #endif
         !base[transformable + 189] &&
         (!has_parent || !base[parent + 189]) &&
-        entry.delta == delta &&
+        entry.delta == delta && entry.top_inset == top_inset &&
         std::memcmp(entry.state.data(), base + transformable, entry.state.size()) == 0 &&
         (!has_parent || std::memcmp(entry.parent_world.data(), base + parent + 72,
                                    entry.parent_world.size()) == 0)) return;
@@ -369,6 +382,7 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
   previous->base = base;
   previous->transformable = transformable;
   previous->delta = delta;
+  previous->top_inset = top_inset;
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
   previous->touch_mode = touch_mode;
   previous->touch_layout = touch_layout;

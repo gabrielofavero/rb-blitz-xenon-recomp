@@ -65,9 +65,11 @@ bool ParseStrings(const std::string& raw, std::vector<std::string>* values) {
   return true;
 }
 bool Reserved(const std::string& id) {
-  return id == "retail" || id == "keyboard" || id == "keyboard-mouse";
+  return id == "retail" || id == "keyboard" || id == "keyboard-mouse" || id == "touch";
 }
-bool ValidSource(const std::string& source, bool keyboard) {
+bool ValidSource(const std::string& source, bool keyboard, bool touch = false) {
+  if (touch) return source == "touch:tap" || source == "touch:swipe_left" ||
+                    source == "touch:swipe_right";
   static const std::set<std::string> extra = {
       "misc1", "misc2", "touchpad", "left_paddle1", "left_paddle2",
       "right_paddle1", "right_paddle2"};
@@ -215,8 +217,11 @@ const InputImage* Scheme::InputFor(std::string_view source, std::string_view var
 }
 
 static bool LoadSchemeImpl(const fs::path& folder, bool trusted_reserved,
-                           bool internal_keyboard, DecodePng decoder,
+                           std::string_view internal_kind, DecodePng decoder,
                            Scheme* result, std::string* why) {
+  const bool internal = !internal_kind.empty();
+  const bool internal_keyboard = internal_kind == "keyboard-mouse";
+  const bool internal_touch = internal_kind == "touch";
   std::error_code ec;
   if (fs::is_symlink(folder, ec) || !fs::is_directory(folder, ec)) {
     *why = "package folder is missing or a symlink"; return false;
@@ -302,15 +307,15 @@ static bool LoadSchemeImpl(const fs::path& folder, bool trusted_reserved,
   if (!std::regex_match(scheme.id, std::regex("[a-z0-9][a-z0-9-]{0,31}")) ||
       scheme.id != folder.filename().string()) { *why = "invalid id or folder name"; return false; }
   if (scheme.id == "retail" || scheme.id == "keyboard" ||
-      (Reserved(scheme.id) && !trusted_reserved && !internal_keyboard) ||
-      (scheme.id == "keyboard-mouse" && !internal_keyboard) ||
-      (internal_keyboard && scheme.id != "keyboard-mouse")) {
+      (Reserved(scheme.id) && !trusted_reserved && !internal) ||
+      ((scheme.id == "keyboard-mouse" || scheme.id == "touch") && !internal) ||
+      (internal && scheme.id != internal_kind)) {
     *why = "reserved id"; return false;
   }
   if (!ValidName(scheme.name)) { *why = "name must be 1-20 UTF-8 characters"; return false; }
   scheme.kind = required("kind");
-  if (scheme.kind != (internal_keyboard ? "keyboard-mouse" : "controller") ||
-      (internal_keyboard && schema_version != 2)) {
+  if (scheme.kind != (internal ? internal_kind : "controller") ||
+      (internal && schema_version != 2)) {
     *why = "invalid scheme kind"; return false;
   }
   std::set<std::string> paths;
@@ -384,8 +389,8 @@ static bool LoadSchemeImpl(const fs::path& folder, bool trusted_reserved,
       *why = "invalid modifiers"; return false;
     }
     if (entry.source.empty() == entry.components.empty() ||
-        (!entry.source.empty() && !ValidSource(entry.source, internal_keyboard)) ||
-        (internal_keyboard && (!entry.slot.empty() || !entry.components.empty())) ||
+        (!entry.source.empty() && !ValidSource(entry.source, internal_keyboard, internal_touch)) ||
+        (internal && (!entry.slot.empty() || !entry.components.empty())) ||
         (!entry.components.empty() && std::any_of(entry.components.begin(), entry.components.end(),
             [](const auto& s) { return !ValidSource(s, false) || !s.starts_with("pad:"); }))) {
       *why = "invalid input source or components"; return false;
@@ -449,11 +454,15 @@ static bool LoadSchemeImpl(const fs::path& folder, bool trusted_reserved,
 
 bool LoadScheme(const fs::path& folder, bool trusted_reserved, DecodePng decoder,
                 Scheme* result, std::string* why) {
-  return LoadSchemeImpl(folder, trusted_reserved, false, decoder, result, why);
+  return LoadSchemeImpl(folder, trusted_reserved, {}, decoder, result, why);
 }
 bool LoadInternalKeyboard(const fs::path& folder, DecodePng decoder,
                           Scheme* result, std::string* why) {
-  return LoadSchemeImpl(folder, true, true, decoder, result, why);
+  return LoadSchemeImpl(folder, true, "keyboard-mouse", decoder, result, why);
+}
+bool LoadInternalTouch(const fs::path& folder, DecodePng decoder,
+                       Scheme* result, std::string* why) {
+  return LoadSchemeImpl(folder, true, "touch", decoder, result, why);
 }
 bool LoadCalibrationImage(const Scheme& scheme, const InputImage& input, bool pressed,
                           DecodePng decoder, Image* image, std::string* why) {
@@ -639,7 +648,8 @@ bool LoadSchemeCache(const fs::path& folder, Scheme* result, std::string* why) {
       !ReadString(in, &scheme.kind) || !ReadU32(in, &version) ||
       !ReadU32(in, &flags) || (version != 1 && version != 2) || flags > 7 ||
       scheme.id != folder.filename().string() ||
-      scheme.kind != (scheme.id == "keyboard-mouse" ? "keyboard-mouse" : "controller")) {
+      scheme.kind != (scheme.id == "keyboard-mouse" || scheme.id == "touch"
+                          ? scheme.id : "controller")) {
     *why = "invalid scheme cache identity";
     return false;
   }
@@ -697,8 +707,10 @@ std::string Registry::Summary() const {
   out << "Xbox 360 (retail)";
   for (const auto& [id, scheme] : schemes) out << ", " << scheme.name << " (" << id << ")";
   size_t cached = has_keyboard_mouse && keyboard_mouse.from_cache ? 1 : 0;
+  cached += has_touch && touch.from_cache ? 1 : 0;
   for (const auto& [id, scheme] : schemes) cached += scheme.from_cache ? 1 : 0;
   out << "; internal_keyboard=" << (has_keyboard_mouse ? keyboard_mouse.inputs.size() : 0);
+  out << "; internal_touch=" << (has_touch ? touch.inputs.size() : 0);
   out << "; cached=" << cached << "; rejected=" << rejected.size()
       << "; shadowed=" << shadowed.size();
   return out.str();
@@ -712,9 +724,12 @@ Registry Discover(const fs::path& install_root, const fs::path& user_root, Decod
     const auto started = std::chrono::steady_clock::now();
     // Only the build-installed assets carry a cache. A user's package is always
     // parsed and validated from its source so edits take effect on the next boot.
-    const bool cached = trusted && LoadSchemeCache(folder, scheme, why);
-    const bool accepted = cached || (internal ? LoadInternalKeyboard(folder, decoder, scheme, why)
-                                              : LoadScheme(folder, trusted, decoder, scheme, why));
+    const bool selectable = folder.filename() != "keyboard-mouse" && folder.filename() != "touch";
+    const bool cached = trusted && (internal || selectable) && LoadSchemeCache(folder, scheme, why);
+    const bool accepted = cached || (internal
+        ? (folder.filename() == "touch" ? LoadInternalTouch(folder, decoder, scheme, why)
+                                         : LoadInternalKeyboard(folder, decoder, scheme, why))
+        : LoadScheme(folder, trusted, decoder, scheme, why));
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - started).count();
     if (observer) observer(folder, false, accepted, static_cast<uint64_t>(elapsed));
@@ -726,6 +741,12 @@ Registry Discover(const fs::path& install_root, const fs::path& user_root, Decod
     if (load(keyboard_folder, true, true, &registry.keyboard_mouse, &why))
       registry.has_keyboard_mouse = true;
     else registry.rejected.push_back({keyboard_folder, why});
+  }
+  const fs::path touch_folder = install_root.parent_path() / "touch";
+  if (fs::exists(touch_folder)) {
+    std::string why;
+    if (load(touch_folder, true, true, &registry.touch, &why)) registry.has_touch = true;
+    else registry.rejected.push_back({touch_folder, why});
   }
   auto scan = [&](const fs::path& root, bool user) {
     std::error_code ec;

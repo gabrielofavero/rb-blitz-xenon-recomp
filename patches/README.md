@@ -22,6 +22,16 @@ or fold into an owning patch. The title integration and SDK pin are adopted;
 the fresh Windows AMD64 production source-SDK release build passes.
 Adoption does not close formal performance or native-platform/package gates.
 
+The production 0036 keyboard theme patch also owns portrait prompt sizing: phone
+width determines text/input scale, actions fill the content width, and the dialog
+sits above center to leave room for the platform keyboard. The dependent 0037 and
+0063 prompt hunks are regenerated against that layout; their controller and
+automatic-keyboard behavior is retained. This shared opt-in UI change applies
+across Windows, Linux, macOS and iOS, independently of architecture or D3D12,
+Vulkan and MoltenVK. Landscape and unthemed prompt sizing retain their defaults.
+Strict replay of all 67 production patches passes. Native validation is Windows
+AMD64; the other platforms and architectures have not been executed for this change.
+
 The original `c94f5ebdcb3c9d1a460ca48e04f9758448f8d518` pin, 71-patch stack
 under `rexglue-sdk/`, nested source patch and historical lineage below are retained
 for rollback. They are not the active v0.11 patch registration. Validation records

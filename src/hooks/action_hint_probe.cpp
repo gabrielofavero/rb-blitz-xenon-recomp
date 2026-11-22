@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -30,6 +31,8 @@ REX_EXTERN(__imp__sub_824D85E8);  // InlineHelp::DrawShowing
 REX_EXTERN(__imp__sub_824D9330);  // InlineHelp::UpdateLabels
 REX_EXTERN(__imp__sub_824D8FF0);  // format and assign one UILabel
 REX_EXTERN(sub_824D8FF0);
+REX_EXTERN(sub_8245C878);        // Symbol(out_slot, chars)
+REX_EXTERN(sub_82462FA0);        // Localize(Symbol, found, Locale*)
 REX_EXTERN(__imp__sub_822C45A8);  // loading screen UI message handler
 REX_EXTERN(sub_821F13D0);        // RndTransformable::WorldXfm
 
@@ -191,7 +194,17 @@ REX_HOOK_RAW(sub_824D8FF0) {
       if (entry.label != ctx.r3.u32 || entry.action >= kTargets.size() ||
           !*kTargets[entry.action]) continue;
       const bool text_only = rb_blitz::input::last_device::Current().using_touch;
-      if (!text_only && !rb_blitz::assets::InputIconsAvailable()) continue;
+      const bool replace_icon = text_only || rb_blitz::assets::InputIconsAvailable();
+      const auto token = rb_blitz::input::InlineHelpCaptionToken(entry,
+          [base](uint32_t address) { return Be32(base, address); },
+          [base](uint32_t address) {
+            const char* chars = address ? reinterpret_cast<const char*>(base + address) : "";
+            return std::string_view(chars, strnlen(chars, 64));
+          });
+      const auto next = rb_blitz::input::CalibrationFooterCaption(
+          rb_blitz::input::CalibrationMenuActive(), token);
+      const bool replace_caption = next != token;
+      if (!replace_icon && !replace_caption) continue;
       const uint32_t code = font::GlyphCode(entry.action);
       if (TraceEnabled()) {
         static std::atomic<unsigned> traced{0};
@@ -213,10 +226,21 @@ REX_HOOK_RAW(sub_824D8FF0) {
         base[chars + 1] = uint8_t(0x80 | (code & 0x3F));
         base[chars + 2] = 0;
       }
+      uint32_t caption = ctx.r6.u32;
+      if (replace_caption) {
+        std::memcpy(base + chars + 8, next.data(), next.size());
+        base[chars + 8 + next.size()] = 0;
+        const uint32_t symbol_slot = chars + 0x30;
+        rex::ppc::Call<void>(call, base, sub_8245C878, symbol_slot, chars + 8);
+        // The native Action::SetToken uses this same Locale instance.
+        const auto translated = rex::ppc::Call<uint32_t>(call, base, sub_82462FA0,
+            Be32(base, symbol_slot), uint32_t(0), uint32_t(0x8298D810));
+        if (translated) caption = translated;
+      }
       call.r3 = ctx.r3;
       call.r4 = ctx.r4;
-      call.r5.u32 = chars;
-      call.r6 = ctx.r6;
+      call.r5.u32 = replace_icon ? chars : ctx.r5.u32;
+      call.r6.u32 = caption;
       __imp__sub_824D8FF0(call, base);
       ctx.r3 = call.r3;
       return;
@@ -248,7 +272,8 @@ REX_HOOK_RAW(sub_824D85E8) {
       const auto signature = Signature(view);
       if (rb_blitz::assets::InputIconsAvailable()) Publish(view, signature);
       auto widget_signature = signature +
-          (rb_blitz::input::last_device::Current().using_touch ? ":text" : ":icons");
+          (rb_blitz::input::last_device::Current().using_touch ? ":text" : ":icons") +
+          ":" + std::to_string(rb_blitz::input::MenuScreenGeneration());
       for (const auto& entry : entries)
         widget_signature += ":" + std::to_string(entry.label) + ":" + std::to_string(entry.action);
       static std::mutex mutex;
@@ -270,7 +295,7 @@ REX_HOOK_RAW(sub_824D85E8) {
   // those labels directly after the draw instead of depending on a nested
   // UILabel callback (which may receive an adjusted base-class this pointer).
   const auto visible = rb_blitz::input::PortraitMenuHintEntries(ctx, base, owner);
-  if (!entries.empty() && entries.size() <= 3 &&
+  if (!visible.empty() && visible.size() <= 3 &&
       rb_blitz::input::PortraitMenuHintsAvailable(ctx, base, owner)) {
     // Keep the original action and label vectors: calibration replaces them as
     // its state changes. Draw each live label through the guest widget in its
@@ -293,12 +318,15 @@ REX_HOOK_RAW(sub_824D85E8) {
           [&](const auto& entry) { return entry.label == entries[i].label; });
       if (entry == visible.end()) return;
       const auto index = size_t(entry - visible.begin());
+      const auto placement = rb_blitz::input::PortraitMenuHintPlacement(
+          ctx, base, owner, *entry, index, visible.size());
       const auto slot = rb_blitz::ui::PortraitFooterAction(
-          rb_blitz::ui::screen::CurrentMenuConfiguration().portrait_aspect, index, visible.size());
-      rex::memory::store_and_swap<float>(base + world + 48, slot.x);
-      rex::memory::store_and_swap<float>(base + world + 56, slot.z);
+          rb_blitz::ui::screen::CurrentMenuConfiguration().portrait_aspect, placement.index, placement.count);
+      const auto position = rb_blitz::input::PortraitDrawPoint(slot.x, slot.z);
+      rex::memory::store_and_swap<float>(base + world + 48, position.x);
+      rex::memory::store_and_swap<float>(base + world + 56, position.y);
       ctx = incoming;
-      rb_blitz::input::DrawMenuHints(ctx, base, owner, index, visible.size(), __imp__sub_824D85E8);
+      rb_blitz::input::DrawMenuHints(ctx, base, owner, placement.index, placement.count, __imp__sub_824D85E8);
     });
     if (!drawn) rb_blitz::input::DrawMenuHints(ctx, base, owner, 0, entries.size(), __imp__sub_824D85E8);
   } else {

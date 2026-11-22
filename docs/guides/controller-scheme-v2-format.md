@@ -4,7 +4,7 @@ The v0.11 host consumes public HID services; the SDL3 driver link below is a pri
 
 Each non-template art folder has a `scheme.toml`. The runtime and validator accept
 these manifests alongside version 1 user packages. The build stages the
-authored controller folders and the internal keyboard art. Each layout's
+authored controller folders and the internal keyboard and touch art. Each layout's
 editable `pad.svg` and source `pad.png` live under
 `assets/controller/masters/<layout-id>/` and are not listed in any manifest.
 
@@ -80,6 +80,19 @@ layout refreshes the guest's own calibration button textures. A missing pair
 keeps the installed game's image. The PlayStation 3 layout reuses the installed
 game's original PS3 Cross frames when `pad:a` is Confirm; a different PS3
 Confirm binding uses its matching scheme pair.
+
+Touch gestures live in the internal `assets/controller/touch/` scheme with
+`kind = "touch"`. Its sources are `touch:tap`, `touch:swipe_left`, and
+`touch:swipe_right`; these identify artwork and do not add remappable bindings.
+The layout is staged beside `keyboard-mouse/`, outside the selectable controller
+schemes. While touch is the detected input source, calibration uses
+`calibration/tap-released.png` and `calibration/tap-pressed.png`, independent of
+the Confirm binding or controller layout. Switching to a keyboard, mouse, or
+controller restores that device's calibration images. The swipe images are
+packaged for future use and have no runtime consumer or calibration frames.
+Regenerate the tap pair with
+`python scripts/controllers/render_all_controller_calibration.py --layout touch`.
+This shared asset and texture route applies to all host platforms and backends.
 
 The authored PlayStation 3 layout declares only button PNGs and sets
 `[controller] retail_pad_family = "ps"`. The Xbox 360 game scene already includes

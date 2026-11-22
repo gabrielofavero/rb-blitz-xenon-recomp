@@ -87,6 +87,22 @@ constexpr uint64_t kExtraIconsFingerprint = 0x1163F9F7F2FFF53Dull;
 using Levels = std::vector<std::vector<uint8_t>>;
 using CalibrationLevels = std::array<Levels, 2>;
 
+CalibrationLevels ComposeCalibrationPair(const controller_schemes::Scheme& scheme,
+                                         const controller_schemes::InputImage* entry) {
+  CalibrationLevels levels;
+  if (!entry || !scheme.calibration_pairs.contains(entry->id)) return levels;
+  controller_schemes::Image released, pressed;
+  std::string why;
+  if (controller_schemes::LoadCalibrationImage(scheme, *entry, false,
+          DecodeSchemePngTimed, &released, &why) &&
+      controller_schemes::LoadCalibrationImage(scheme, *entry, true,
+          DecodeSchemePngTimed, &pressed, &why)) {
+    levels[0] = controller_schemes::ComposeCalibration(released);
+    levels[1] = controller_schemes::ComposeCalibration(pressed);
+  } else REXLOG_WARN("calibration: cannot load {} art: {}", entry->id, why);
+  return levels;
+}
+
 CalibrationLevels ComposeCalibrationIcon(const controller_schemes::Registry& registry,
                                          const input::icons::Icon& icon) {
   CalibrationLevels levels;
@@ -110,18 +126,7 @@ CalibrationLevels ComposeCalibrationIcon(const controller_schemes::Registry& reg
       const char* prefix = source.kind == profile::remap::SourceKind::kPad ? "pad:" :
                            source.kind == profile::remap::SourceKind::kSdl ? "sdl:" :
                            source.kind == profile::remap::SourceKind::kMouse ? "mouse:" : "key:";
-      if (const auto* entry = scheme->InputFor(std::string(prefix) + source.name);
-          entry && scheme->calibration_pairs.contains(entry->id)) {
-        controller_schemes::Image released, pressed;
-        std::string why;
-        if (controller_schemes::LoadCalibrationImage(*scheme, *entry, false,
-                DecodeSchemePngTimed, &released, &why) &&
-            controller_schemes::LoadCalibrationImage(*scheme, *entry, true,
-                DecodeSchemePngTimed, &pressed, &why)) {
-          levels[0] = controller_schemes::ComposeCalibration(released);
-          levels[1] = controller_schemes::ComposeCalibration(pressed);
-        } else REXLOG_WARN("calibration: cannot load {} art: {}", entry->id, why);
-      }
+      levels = ComposeCalibrationPair(*scheme, scheme->InputFor(std::string(prefix) + source.name));
     }
   }
   return levels;
@@ -145,6 +150,7 @@ struct FontResult {
   uint64_t revision = 0;
   bool valid = true;
   std::array<FontVariant, 3> variants;
+  CalibrationLevels touch_calibration;
 };
 
 class SchemeOverride final : public rex::gpu::ITextureOverrideProvider {
@@ -206,6 +212,9 @@ class SchemeOverride final : public rex::gpu::ITextureOverrideProvider {
       }
       FontResult result;
       result.revision = job.revision;
+      if (registry_.has_touch)
+        result.touch_calibration = ComposeCalibrationPair(registry_.touch,
+            registry_.touch.InputFor("touch:tap"));
       const auto* scheme = registry_.Find(job.scheme);
       for (size_t family = 0; family < result.variants.size(); ++family) {
         input::icons::Icon blank;
@@ -239,6 +248,9 @@ class SchemeOverride final : public rex::gpu::ITextureOverrideProvider {
   }
   bool Poll() override {
     bool changed = false;
+    const bool using_touch = input::last_device::Current().using_touch;
+    const bool touch_changed = using_touch != using_touch_;
+    using_touch_ = using_touch;
     std::string next;
     uint64_t next_ticket = 0;
     std::vector<input::icons::Icon> icons;
@@ -339,11 +351,12 @@ class SchemeOverride final : public rex::gpu::ITextureOverrideProvider {
       if (completed_job_ && completed_job_->revision == font_revision_) {
         if (completed_job_->valid) installed_font_revision_ = font_revision_;
         font_variants_ = std::move(completed_job_->variants);
+        touch_calibration_ = std::move(completed_job_->touch_calibration);
         completed_job_.reset();
         fonts_ready = true;
       } else if (completed_job_) completed_job_.reset();
     }
-    if (scheme_changed || family_changed || hints_changed || fonts_ready || retail_ps_pads_ready ||
+    if (scheme_changed || family_changed || touch_changed || hints_changed || fonts_ready || retail_ps_pads_ready ||
         refresh_font_after_buttons_) {
       refresh_font_after_buttons_ = false;
       changed = true;
@@ -441,8 +454,10 @@ class SchemeOverride final : public rex::gpu::ITextureOverrideProvider {
     if (button || icons || pad_slot || font || private_font || calibration_slot >= 0)
       refresh_target = true;
     const auto& variant = font_variants_[static_cast<size_t>(active_family_)];
-    if (calibration_slot >= 0 && !variant.calibration[calibration_slot % 2].empty()) {
-      const auto& levels = variant.calibration[calibration_slot % 2];
+    const auto& calibration = using_touch_ && !touch_calibration_[0].empty()
+        ? touch_calibration_ : variant.calibration;
+    if (calibration_slot >= 0 && !calibration[calibration_slot % 2].empty()) {
+      const auto& levels = calibration[calibration_slot % 2];
       if (request.mip_count > levels.size()) return false;
       host_levels.assign(levels.begin(), levels.begin() + request.mip_count);
       return true;
@@ -550,6 +565,8 @@ class SchemeOverride final : public rex::gpu::ITextureOverrideProvider {
   std::array<std::vector<input::icons::Icon>, 3> hint_variants_;
   std::array<input::icons::Icon, 3> calibration_icons_;
   std::array<FontVariant, 3> font_variants_;
+  CalibrationLevels touch_calibration_;
+  bool using_touch_ = false;
   std::vector<input::icons::Icon> pending_icons_;
   std::array<std::vector<input::icons::Icon>, 3> pending_hints_;
   std::array<input::icons::Icon, 3> pending_calibration_;

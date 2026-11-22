@@ -41,7 +41,7 @@ same tree in main-menu and in-song contexts.
 | Score Goals | Gold Star Progress; Personal Best |
 | Song Progress | Song Progress Bar; Timer |
 | Player Feedback | Note Streak; Input Viewer |
-| Tracks & Gems | Precision Mode; Disable Random Track Wiggles; Gems |
+| Tracks & Gems | Precision Mode; Stop Track Wiggles; Gems |
 | Scenery | Disable Plots; Force Plot; Force Skybox |
 | Menus & Prompts | Main Menu; Library Display; Settings Labels; Skip Offline Prompts |
 | Main Menu | Refresh Songs; Download Content; Leaderboards; Exit Game; Unlock Full Game |
@@ -69,7 +69,7 @@ same tree in main-menu and in-song contexts.
 | Audio | Active Track Boost; Sound Effects Volume; Bass Boost |
 | Video | Display; Graphics |
 | Display | Resolution (desktop) / Render Scale (mobile); Window Mode; Orientation; V-Sync; Overscan |
-| Graphics | Anti-Aliasing; Anisotropic Filtering; Depth of Field (Ultimate); Renderer (Windows with multiple backends) |
+| Graphics | Anti-Aliasing; Texture Filtering; Depth of Field (Ultimate); Renderer (Windows with multiple backends) |
 | Anti-Aliasing | None; Native (2x); FXAA; FXAA Extreme, subject to backend capabilities |
 | How to Play | Basic Tutorial; Advanced Tutorial |
 | Credits | Native credits page |
@@ -82,6 +82,10 @@ old shortcut-group and Advanced intermediary pages are retired. Fast Boot retain
 Main Menu Shortcut and Play Current Song are short labels whose states fit the
 28-character limit. Exit Game visibility is editable on desktop and mobile,
 keeping its existing defaults (visible on desktop, hidden on mobile).
+
+Settings captions use compact wording for portrait screens, with a 48-character
+budget including deferred-apply notes. Font measurement still controls wrapping
+and ellipsis within the reserved caption strip at each text size.
 
 On iOS, Window Mode, Aspect Ratio, Render Scale, V-Sync, Overscan, and Renderer
 remain hidden/fixed by device policy. Orientation stays available. Linux/macOS

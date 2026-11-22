@@ -57,7 +57,7 @@ uint32_t GameplayPortraitHeight();
 // Legacy frame overrides still derive the ratio from their active dimensions.
 void WriteGuestLayoutAspect(uint8_t* base);
 void ConfigureResolutionProfiles(DisplayMode native, int draw_scale, bool mobile,
-                                 const std::map<SettingId, Value>& values);
+                                 const std::map<SettingId, Value>& values, bool device);
 bool QueueResolutionProfile(SettingId id, const Value& value, std::string* error);
 void UpdateResolutionProfile(PPCContext& ctx, uint8_t* base, uint32_t renderer);
 }

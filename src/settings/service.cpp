@@ -170,6 +170,7 @@ DocumentStatus Service::Boot(const Profile* legacy, const PathEntry& existing_pa
   boot_corrections_.clear();
   boot_correction_reasons_.clear();
   load_status_ = store_.Load().status;
+  mobile_hud_defaults_applied_ = false;
   if (legacy != nullptr) {
     MigrationOptions options;
     options.legacy_usable = legacy_usable;
@@ -187,9 +188,15 @@ DocumentStatus Service::Boot(const Profile* legacy, const PathEntry& existing_pa
 }
 
 DisplayMode Service::ResolutionProfileDisplay() const {
-  // Desktop mobile preview represents a 9:16 phone, independently of the monitor's aspect.
-  return ProfileDisplayBasis(capabilities_.primary_display_size,
-                             release_.mobile_preview || force_16_by_9_at_boot_);
+  if (release_.mobile_preview) return MobilePreviewDisplayBasis(capabilities_.primary_display_size);
+  return ProfileDisplayBasis(capabilities_.primary_display_size, force_16_by_9_at_boot_);
+}
+
+DisplayMode Service::RenderScalePixels(SettingId id, int tenths) const {
+  const bool portrait = schema::IsMobile(release_.platform) &&
+      EffectiveValue(id == SettingId::kGameplayRenderScale ? SettingId::kGameplayOrientation
+                                                          : SettingId::kInterfaceOrientation).text == "portrait";
+  return ScaledProfileResolution(DeviceProfileSource(ResolutionProfileDisplay(), portrait), tenths);
 }
 
 void Service::RefreshDescriptors() {
@@ -252,6 +259,29 @@ void Service::SetProviderValues(std::map<SettingId, Value> values) {
 
 void Service::SetProviderDefaults(std::map<SettingId, Value> values) {
   provider_defaults_ = std::move(values);
+}
+
+CommitResult Service::ApplyFirstBootMobileHudDefaults() {
+  if (!schema::IsMobile(release_) || load_status_ != DocumentStatus::kMissing ||
+      mobile_hud_defaults_applied_ || txn_ || !provider_ ||
+      provider_->Readiness() != ProviderReadiness::kCompatible) return {};
+  const auto edit = BeginEdit(revision_);
+  Value hidden;
+  hidden.kind = ValueKind::kBool;
+  hidden.boolean = false;
+  for (const auto id : {SettingId::kShowPb, SettingId::kProgressBar, SettingId::kShowTimer}) {
+    if (IsOverridden(id)) continue;
+    pending_[id] = hidden;
+  }
+  // Like Restore defaults, initialization can update a compatible installed
+  // provider while the base-game target is active. Commit still validates it.
+  pending_defaults_ = true;
+  pending_capability_revision_ = capability_revision_;
+  auto result = Commit(edit);
+  mobile_hud_defaults_applied_ = result.status == CommitStatus::kSaved ||
+                                 result.status == CommitStatus::kNoChanges;
+  if (!mobile_hud_defaults_applied_) Cancel(edit);
+  return result;
 }
 
 void Service::SetOverrides(std::map<SettingId, Value> values, std::map<SettingId, Source> sources) {

@@ -19,6 +19,9 @@ namespace rb_blitz::input {
 void CaptureLanePowerup(PPCContext& ctx, uint8_t* base, uint32_t dir);
 
 struct MenuPoint { float x = 0, y = 0; };
+// Absolute guest UI positions authored by draw hooks share the panel's safe fit.
+MenuPoint PortraitDrawPoint(float x, float z);
+std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable);
 // The presented rectangle inside a `w` x `h` frame: the part of the window the guest's frame
 // occupies once the presenter has applied the video mode's aspect and (optionally) the overscan
 // safe area. MenuPointer and MenuPointToWindow share it, so a pointer and an overlay drawn from
@@ -110,6 +113,23 @@ inline int SliderStepAt(MenuPoint point, const MenuBounds& bounds, int intervals
   if (!bounds.Contains(point) || intervals <= 0 || bounds.right <= bounds.left) return -1;
   return std::clamp(int(std::floor((point.x - bounds.left) /
                                  (bounds.right - bounds.left) * intervals + .500001f)), 0, intervals);
+}
+
+inline MenuBounds SliderTouchBounds(MenuBounds bounds, float window_height) {
+  if (std::isfinite(window_height) && window_height > 0) {
+    const float center = (bounds.top + bounds.bottom) / 2;
+    bounds.top = std::min(bounds.top, center - 22 / window_height);
+    bounds.bottom = std::max(bounds.bottom, center + 22 / window_height);
+  }
+  return bounds;
+}
+
+// Once a press catches a wheel, vertical finger drift keeps that wheel and
+// dragging past either endpoint clamps to its stop.
+inline int SliderDragStepAt(MenuPoint point, const MenuBounds& bounds) {
+  if (!std::isfinite(point.x) || !std::isfinite(point.y)) return -1;
+  return SliderStepAt({std::clamp(point.x, bounds.left, bounds.right),
+                       (bounds.top + bounds.bottom) / 2}, bounds);
 }
 
 inline bool IsSettingsWheel(std::string_view focus) {
@@ -213,12 +233,42 @@ inline int LibraryHeaderForScreen(std::string_view screen) {
 }
 
 inline int LibraryHeaderForLabel(std::string_view name) {
-  if (name == "main_my_songs.lbl") return 0;
-  if (name == "main_store.lbl") return 1;
-  if (name == "main_inbox.lbl") return 2;
-  if (name == "main_Home.lbl") return 3;
+  if (name == "main_my_songs.lbl" || name == "portrait_tab_songs.lbl") return 0;
+  if (name == "main_store.lbl" || name == "portrait_tab_store.lbl") return 1;
+  if (name == "main_inbox.lbl" || name == "portrait_tab_messages.lbl") return 2;
+  if (name == "main_Home.lbl" || name == "portrait_tab_recs.lbl") return 3;
   return -1;
 }
+
+// Touch owns a highlight only for its pressed row. Activation waits for feedback
+// and release; moving away, changing screens, or physical navigation cancels it.
+struct MenuTouchHighlight {
+  uint32_t list = 0;
+  int row = -1;
+  bool drawn = false;
+
+  void Reset() { list = 0; row = -1; drawn = false; }
+  void Press(uint32_t target, int selected) { list = target; row = selected; drawn = false; }
+  void Move(uint32_t target, int selected) {
+    if (list != target || row != selected) Reset();
+  }
+  bool TakeAccept(bool touch, uint32_t target, int selected, bool pressed) {
+    if (!touch || list != target || row != selected) { Reset(); return false; }
+    if (!list || !drawn || pressed) return false;
+    Reset();
+    return true;
+  }
+  // A quick tap may be released before the next guest draw. Give it one draw;
+  // held touches remain lit, and physical navigation restores normal selection.
+  bool Draw(bool touch, uint32_t target, int selected, bool pressed) {
+    if (!touch) { Reset(); return true; }
+    if (!list || list != target) return false;
+    if (row != selected) { Reset(); return false; }
+    if (drawn && !pressed) return false;
+    drawn = true;
+    return true;
+  }
+};
 
 // Hover ownership and the unhover lift (owner rule, 2026-10-16). Hover selects a row; when the
 // pointer leaves the rows the frame the player sees drops the highlight too - but only the hover
@@ -492,6 +542,7 @@ uint16_t SampleMenuMousePadState();
 // selection from, because a slider has no list state at list+176. Recorded regardless of the
 // mouse preference, because the captions must not depend on an input setting.
 uint32_t CurrentScreen();
+uint64_t MenuScreenGeneration();
 uint32_t CurrentFocus();
 uint32_t FocusedListDrawn();
 bool MenuAvailable();
@@ -503,10 +554,14 @@ bool PortraitSplashActive();
 bool PortraitSettingsActive();
 bool PortraitConnectionActive();
 bool PortraitCalibrationActive();
+bool CalibrationMenuActive();
 // Resolve authored footer surfaces from the drawing widget's own scene.
 bool PortraitMenuHintsAvailable(PPCContext& ctx, uint8_t* base, uint32_t owner);
 struct InlineHelpEntry;
+struct InlineHelpPlacement;
 std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* base, uint32_t owner);
+InlineHelpPlacement PortraitMenuHintPlacement(PPCContext& ctx, uint8_t* base, uint32_t owner,
+                                             const InlineHelpEntry& entry, size_t index, size_t count);
 // Keep the footer's live labels associated with their native button surfaces.
 void DrawMenuHints(PPCContext& ctx, uint8_t* base, uint32_t owner, size_t index, size_t count,
                     void (*draw)(PPCContext&, uint8_t*));

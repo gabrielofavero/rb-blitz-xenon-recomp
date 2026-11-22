@@ -26,6 +26,7 @@
 #include "ui/input_font_scene.h"
 #include "ui/achievements_overlay.h"
 #include "ui/portrait_menu.h"
+#include "hooks/portrait_layout.h"
 #include "hooks/render_settings.h"
 #include "ui/settings_screen.h"
 #include "loading/load_trace.h"
@@ -92,6 +93,7 @@ uint32_t ObjectBase(uint8_t* base, uint32_t object) {
 std::mutex mutex;
 MenuMouseQueue queue;
 bool window_focused = false;
+uint64_t window_focus_revision = 0;
 std::optional<MenuPoint> menu_pointer;
 bool menu_available = false;
 bool game_screen_active = false;
@@ -144,15 +146,18 @@ thread_local int last_selected_row = -1;
 // Only a hover the mouse itself set may be lifted when the pointer leaves it; a
 // controller's own selection is never touched by mouse motion.
 thread_local MouseHighlight mouse_highlight;
+thread_local MenuTouchHighlight touch_highlight;
 // The scroll-aware hover (MouseScrollFollow in native_menu.h): a scroll the mouse applied moves
 // the rows, so the row that comes to rest under the pointer is caught once the burst has drained
 // and the drawn frame shows the new view.
 thread_local MouseScrollFollow scroll_follow;
 struct SliderGeometry {
-  uint32_t focus = 0, frame = 0;
+  uint32_t focus = 0, screen = 0, frame = 0;
   MenuBounds bounds;
 };
-thread_local SliderGeometry slider_geometry;
+thread_local std::array<SliderGeometry, 2> slider_geometries;
+thread_local int slider_drag = -1;
+thread_local uint32_t slider_drag_screen = 0;
 thread_local MenuRailDrag rail_drag;
 
 // The gutter the window thread may arm a drag in: published per draw so input that
@@ -230,7 +235,6 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     if (input_scope != current_input_scope)
       REXLOG_INFO("native_mouse: dialog context panel={} focus={} scope={:08X}", panel_name,
                   ObjectName(base, ObjectBase(base, focus)), input_scope);
-    if (screen != current_screen) ++screen_generation;
     // A panel-entry refresh may replace the splash provider's row array before
     // its first draw. Never hit-test or dispatch against indices captured from
     // the preceding screen or list generation.
@@ -244,6 +248,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     rail_map = {};
     rail_drag.Reset();
     mouse_highlight.Reset();
+    touch_highlight.Reset();
     scroll_follow.Reset();
     // P2 (plan D5): a screen or focus change is a boundary the gameplay tables must not carry
     // held state across. The gameplay holds are dropped without an edge on the next poll, so a
@@ -254,6 +259,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
                   name, panel_name, current_panel_scene, focus, allowed);
   }
   std::lock_guard lock(mutex);
+  if (screen != current_screen) ++screen_generation;
   current_screen = screen; current_focus = focus; menu_available = allowed;
   current_panel = panel;
   current_panel_dir = panel ? U32(base, panel + 52) : 0;
@@ -281,12 +287,17 @@ int SelectedRow(PPCContext& ctx, uint8_t* base, uint32_t list) {
 // highlight leaves the frame while the list still shows the row the mouse set (owner rule,
 // 2026-10-16 - MouseHighlight in native_menu.h). The guest's selected row itself is never
 // written, so the album panel and the controller keep their anchor.
-bool Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
+bool Select(PPCContext& ctx, uint8_t* base, MenuPoint point, bool press = false) {
   // The pointer from the last draw is valid only for the same focused component
   // in the immediately preceding frame. Never dereference a retired screen's list.
   if (!geometry.list || geometry.frame + 1 != frame_number ||
       current_focus != geometry.list) return false;
   const int row = HitMenuRow(point, geometry.bounds, geometry.rows);
+  if (last_device::Current().using_touch) {
+    mouse_highlight.Reset();
+    if (press && row >= 0) touch_highlight.Press(geometry.list, row);
+    else touch_highlight.Move(geometry.list, row);
+  }
   if (rb_blitz::settings::title::mouse_native_trace.Get()) REXLOG_INFO("native_mouse: hit={},{} row={} bounds={},{},{},{}", point.x, point.y, row, geometry.bounds.left, geometry.bounds.top, geometry.bounds.right, geometry.bounds.bottom);
   if (row < 0) {
     const auto left = mouse_highlight.PointerLeft(geometry.list, SelectedRow(ctx, base, geometry.list));
@@ -295,7 +306,7 @@ bool Select(PPCContext& ctx, uint8_t* base, MenuPoint point) {
                   left == MouseHighlight::Leave::kLifted ? "off" : "kept");
     return false;
   }
-  mouse_highlight.Hover(geometry.list, row);
+  if (!last_device::Current().using_touch) mouse_highlight.Hover(geometry.list, row);
   const int selected = SelectedRow(ctx, base, geometry.list);
   if (selected == row) return true;
   const int direction = row > selected ? 1 : -1;
@@ -374,6 +385,7 @@ bool MouseMenuAvailable() {
 }
 void MouseMenuFocus(bool focused) {
   std::lock_guard lock(mutex);
+  if (focused != window_focused) ++window_focus_revision;
   if (focused != window_focused && rb_blitz::settings::title::mouse_native_trace.Get())
     REXLOG_INFO("native_mouse: window focus={} queue={}", focused, focused && menu_available && MouseSupportEnabled());
   window_focused = focused;
@@ -438,6 +450,10 @@ bool MenuAvailable() {
   std::lock_guard lock(mutex);
   return menu_available;
 }
+uint64_t MenuScreenGeneration() {
+  std::lock_guard lock(mutex);
+  return screen_generation;
+}
 bool MenuScreenIs(std::string_view name) {
   std::lock_guard lock(mutex);
   return current_screen_name == name;
@@ -477,6 +493,10 @@ bool PortraitCalibrationActive() {
          (current_panel_name == "cal_audio_panel" || current_panel_name == "cal_visuals_panel" ||
           current_panel_name == "cal_hw_audio_panel" || current_panel_name == "cal_hw_visuals_panel");
 }
+bool CalibrationMenuActive() {
+  std::lock_guard lock(mutex);
+  return current_screen_name.rfind("cal_", 0) == 0;
+}
 
 void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   ++frame_number;
@@ -490,16 +510,33 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   // animating (firstShowing != targetShowing). Keep that detent queued instead - except
   // on a railed list, where the wheel advances a plain target and needs no hold.
   const bool can_scroll = !fresh || railed || U32(base, current_focus + 224) == U32(base, current_focus + 228);
+  const int touch_row = touch_highlight.list == current_focus && current_focus
+      ? SelectedRow(ctx, base, current_focus) : -1;
   bool idle = false, enabled = false;
   {
     std::lock_guard lock(mutex);
+    // Focus may be lost and regained while the guest is suspended. Do not
+    // turn the release of that abandoned touch into a click on resume.
+    static thread_local uint64_t touch_focus_revision = 0;
+    if (touch_focus_revision != window_focus_revision) {
+      touch_highlight.Reset();
+      touch_focus_revision = window_focus_revision;
+    }
+    if (touch_highlight.list) {
+      if (!fresh || !menu_pointer) touch_highlight.Reset();
+      else touch_highlight.Move(geometry.list, HitMenuRow(*menu_pointer, geometry.bounds, geometry.rows));
+    }
+    if (queue.enabled() && touch_highlight.TakeAccept(last_device::Current().using_touch,
+        current_focus, touch_row, (HostMouseButtons() & 1) != 0)) queue.Pulse(MouseAction::kAccept);
     if (const auto button = footer_touch_press.Poll(queue.enabled(), (HostMouseButtons() & 1) != 0))
       queue.PulseButton(button);
     event = queue.NextFrame(can_scroll);
     idle = !queue.Pending();
     enabled = queue.enabled();
   }
-  if (!enabled) rail_drag.Reset();
+  if (!enabled) { rail_drag.Reset(); touch_highlight.Reset(); }
+  if (!enabled || !(HostMouseButtons() & 1) || slider_drag_screen != current_screen)
+    slider_drag = -1;
   // The scroll-aware hover's landing (MouseScrollFollow in native_menu.h): the scroll has been
   // applied and drawn (a fresh frame carries the new view), the burst has drained and the
   // viewport is at rest, so the row under the pointer is caught - or the hover stays empty (the
@@ -546,14 +583,41 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   // Sliders are UIComponents, with no UIListState to select or scroll. Route
   // through their own directional handlers so their animation and value agree.
   const auto focus_name = ObjectName(base, ObjectBase(base, current_focus));
+  const bool scale_page = current_panel_name == "settings_scale_panel" ||
+                          current_panel_name == "settings_scale_pause_panel";
+  if (scale_page && (event->action == MouseAction::kAccept ||
+      (event->action == MouseAction::kMove && (HostMouseButtons() & 1)))) {
+    if (event->action == MouseAction::kAccept) slider_drag = -1;
+    for (size_t index = 0; index < slider_geometries.size(); ++index) {
+      const auto& slider = slider_geometries[index];
+      if (!slider.focus || slider.screen != current_screen || slider.frame + 1 != frame_number) continue;
+      const auto bounds = SliderTouchBounds(slider.bounds, ui::CurrentPortraitViewport().height);
+      if (event->action == MouseAction::kMove && slider_drag != int(index)) continue;
+      const int step = event->action == MouseAction::kAccept
+          ? SliderStepAt(event->point, bounds) : SliderDragStepAt(event->point, bounds);
+      if (step < 0 || U32(base, slider.focus + 132) != 6) continue;
+      slider_drag = int(index);
+      slider_drag_screen = current_screen;
+      // UISlider's native current/step fields (824DC048). Its normal draw updates
+      // the pod; the panel commits changed values once per poll, including drags.
+      rex::memory::store_and_swap<uint32_t>(base + slider.focus + 128, uint32_t(step));
+      if (slider.focus != current_focus) {
+        std::lock_guard lock(mutex);
+        if (queue.enabled()) queue.Pulse(index == 0 ? MouseAction::kUp : MouseAction::kDown);
+      }
+      return;
+    }
+    return;
+  }
   if (IsSettingsWheel(focus_name)) {
-    if (event->action == MouseAction::kUp) event->action = MouseAction::kRight;
-    else if (event->action == MouseAction::kDown) event->action = MouseAction::kLeft;
+    if (!scale_page && event->action == MouseAction::kUp) event->action = MouseAction::kRight;
+    else if (!scale_page && event->action == MouseAction::kDown) event->action = MouseAction::kLeft;
     else if (event->action == MouseAction::kAccept) {
       // The guest's audio scene places the endpoints at these normalized
       // coordinates; MenuPointer accounts for window size, crop and overscan.
-      const auto bounds = slider_geometry.focus == current_focus && slider_geometry.frame + 1 == frame_number
-          ? slider_geometry.bounds : MenuBounds{.284f, .86f, .716f, .97f};
+      const auto& slider = slider_geometries[focus_name == "sound_effects_slider.sld" ? 0 : 1];
+      const auto bounds = slider.focus == current_focus && slider.screen == current_screen &&
+          slider.frame + 1 == frame_number ? slider.bounds : MenuBounds{.284f, .86f, .716f, .97f};
       const int step = SliderStepAt(event->point, bounds);
       if (step < 0) return;
       std::lock_guard lock(mutex);
@@ -659,13 +723,17 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   if (event->action == MouseAction::kMove || event->action == MouseAction::kAccept) {
     // A later pointer event is where a pending scroll catch must land (MouseScrollFollow).
     scroll_follow.Pointer(event->point);
-    const bool on_row = Select(ctx, base, event->point);
+    const bool on_row = Select(ctx, base, event->point, event->action == MouseAction::kAccept);
     // A click only presses what the mouse is on: on a screen whose list tracks the mouse,
     // an unhovered click (empty space, or a scroll-gutter miss) must not press A (owner
     // rule, 2026-10-16). Screens without a captured list - the title's own prompt, for
     // one - keep their at-principle A, which is how they are started.
     if (event->action == MouseAction::kAccept && !on_row && geometry.list == current_focus &&
         geometry.frame + 1 == frame_number)
+      return;
+    // Touch activates on release after a visible pressed frame. A move off the
+    // original row cancels the press instead of activating a different option.
+    if (event->action == MouseAction::kAccept && on_row && last_device::Current().using_touch)
       return;
   }
   // A selection notification can itself replace a screen, so recheck before A.
@@ -675,12 +743,15 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
 }
 
 struct DrawCapture {
+  uint32_t resource = 0, widget = 0;
+  std::unordered_set<uint32_t> painted_rows;
   Geometry result;
   uint32_t first = 0, end = 0, row = 0;
   int selected = -1;
   std::optional<MenuBounds> highlight;
-  // The mouse's unhover frame: the shared highlight mesh is skipped while this draw runs.
+  // A mouse leave or idle touch draws active rows without the shared highlight.
   bool suppress = false;
+  bool touch = false;
 };
 thread_local DrawCapture* drawing = nullptr;
 
@@ -726,7 +797,8 @@ void SyncMesh(PPCContext& ctx, uint8_t* base) {
                it->second.resource != U32(base, mesh + 412)) mesh_boxes.erase(it);
   }
 }
-std::optional<MenuBounds> ProjectMesh(PPCContext& ctx, uint8_t* base, uint32_t mesh) {
+std::optional<MenuBounds> ProjectMesh(PPCContext& ctx, uint8_t* base, uint32_t mesh,
+                                     uint32_t transform = 0) {
   const auto camera = U32(base, 0x8284A108), owner = U32(base, mesh + 324);
   if (!camera || !owner) return {};
   MeshBox box;
@@ -739,7 +811,7 @@ std::optional<MenuBounds> ProjectMesh(PPCContext& ctx, uint8_t* base, uint32_t m
   GuestCall call(ctx, base); auto& c = call.ctx;
   // These sibling meshes may be queried before their own draw updates the world
   // transform. Resolve parent transforms before projecting their bounds.
-  if (base[mesh + 253]) {
+  if (!transform && base[mesh + 253]) {
     c.r3.u32 = mesh + 64;
     sub_821F13D0(c, base);
   }
@@ -748,7 +820,7 @@ std::optional<MenuBounds> ProjectMesh(PPCContext& ctx, uint8_t* base, uint32_t m
   for (unsigned corner = 0; corner < 8; ++corner) {
     for (unsigned axis = 0; axis < 3; ++axis)
       Float(base, local + axis * 4, corner & (1 << axis) ? box.high[axis] : box.low[axis]);
-    c.r3.u32 = local; c.r4.u32 = mesh + 136; c.r5.u32 = world;
+    c.r3.u32 = local; c.r4.u32 = transform ? transform : mesh + 136; c.r5.u32 = world;
     sub_821E14A8(c, base);
     c.r3.u32 = camera; c.r4.u32 = world; c.r5.u32 = projected;
     sub_821FF4A0(c, base);
@@ -787,6 +859,7 @@ bool PortraitMenuHintsAvailable(PPCContext& ctx, uint8_t* base, uint32_t owner) 
   if (!settings::InterfacePortraitEnabled()) return false;
   const auto header = ObjectBase(base, owner);
   const auto name = ObjectName(base, header);
+  if (current_screen_name == "song_select_screen" && name == "pop_up_help.ihp") return false;
   if (name == "continue.ihp" || name == "back.ihp" || name == "skip.ihp") return false;
   const auto dir = header ? U32(base, header + 36) : 0;
   return dir && SceneObject(ctx, base, dir, "portrait_caption_black.color");
@@ -798,13 +871,35 @@ std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* b
   if (!settings::InterfacePortraitEnabled()) return entries;
   const auto header = ObjectBase(base, owner);
   const auto dir = header ? U32(base, header + 36) : 0;
+  if (dir && SceneObject(ctx, base, dir, "portrait_songs.color") &&
+      ObjectName(base, header) == "InlineHelp.ihp") {
+    std::vector<InlineHelpEntry> visible;
+    for (const auto action : {2u, 3u, 1u})
+      for (const auto& entry : entries) if (entry.action == action) visible.push_back(entry);
+    return visible;
+  }
   if (!dir || !SceneObject(ctx, base, dir, "portrait_calibration_footer.color")) return entries;
   return CalibrationFooterEntries(entries, [base](const auto& entry) {
-    const auto address = U32(base, entry.record + 16);
-    if (!address) return std::string_view{};
-    const char* token = reinterpret_cast<const char*>(base + address);
-    return std::string_view(token, strnlen(token, 64));
+    return InlineHelpCaptionToken(entry, [base](uint32_t address) { return U32(base, address); },
+        [base](uint32_t address) {
+          const char* token = address ? reinterpret_cast<const char*>(base + address) : "";
+          return std::string_view(token, strnlen(token, 64));
+        });
   });
+}
+
+InlineHelpPlacement PortraitMenuHintPlacement(PPCContext& ctx, uint8_t* base, uint32_t owner,
+                                             const InlineHelpEntry& entry, size_t index, size_t count) {
+  const auto header = ObjectBase(base, owner);
+  const auto dir = header ? U32(base, header + 36) : 0;
+  const bool calibration = dir && SceneObject(ctx, base, dir, "portrait_calibration_footer.color");
+  const auto caption = InlineHelpCaptionToken(entry,
+      [base](uint32_t address) { return U32(base, address); },
+      [base](uint32_t address) {
+        const char* text = address ? reinterpret_cast<const char*>(base + address) : "";
+        return std::string_view(text, strnlen(text, 64));
+      });
+  return CalibrationFooterPlacement(calibration, caption, index, count);
 }
 
 void DrawMenuHints(PPCContext& ctx, uint8_t* base, uint32_t owner, size_t index, size_t count,
@@ -818,22 +913,37 @@ void DrawMenuHints(PPCContext& ctx, uint8_t* base, uint32_t owner, size_t index,
 }
 
 bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
-                               const std::string& stem, size_t index, size_t count, bool reflow) {
+                               const std::string& stem, size_t index, size_t count, bool reflow,
+                               bool visible = true) {
+  const auto portrait_draw_fit = hooks::PortraitDrawFit();
   bool hovered = false;
   for (bool border : {true, false}) {
     const auto name = std::string(stem) + (border ? "_border.mesh" : ".mesh");
     const auto mesh = SceneMesh(ctx, base, dir, name.c_str());
     if (!mesh) continue;
-    if (reflow) {
-      const auto slot = ui::PortraitFooterAction(
-          ui::screen::CurrentMenuConfiguration().portrait_aspect, index, count);
+    const bool song_control = !reflow && stem.rfind("portrait_", 0) == 0 &&
+        (stem == "portrait_sort" || stem == "portrait_search" || stem == "portrait_header_previous" || stem == "portrait_header_next");
+    if (reflow || song_control) {
+      const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
+      ui::PortraitCalibrationAction slot{};
+      if (song_control) {
+        const auto layout = ui::PortraitSongs(aspect);
+        const bool arrow = stem.rfind("portrait_header_", 0) == 0;
+        const bool left = stem == "portrait_sort" || stem == "portrait_header_previous";
+        slot = {(left ? -1.f : 1.f) * (arrow ? layout.width / 2 - ui::kPortraitSongArrowInset : layout.width / 4 + 2),
+                arrow ? layout.tabs_z : layout.tools_z,
+                arrow ? ui::kPortraitSongArrowTargetSize : layout.width / 2 - 3,
+                arrow ? ui::kPortraitSongArrowTargetSize : 27.f};
+      } else slot = SceneObject(ctx, base, dir, "portrait_songs.color")
+          ? ui::PortraitSongsFooter(aspect, index, count) : ui::PortraitFooterAction(aspect, index, count);
       const auto world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, mesh + 64);
-      const float width = slot.width + (border ? 1.4f : 0), height = slot.height + (border ? 1.4f : 0);
+      const float width = (slot.width + (border ? 1.4f : 0)) * portrait_draw_fit.scale;
+      const float height = (slot.height + (border ? 1.4f : 0)) * portrait_draw_fit.scale;
       Float(base, world, width / 300);
       Float(base, world + 24, height / 30);
-      Float(base, world + 48, slot.x - width / 2);
+      Float(base, world + 48, portrait_draw_fit.X(slot.x) - width / 2);
       Float(base, world + 52, border ? .2f : .1f);
-      Float(base, world + 56, slot.z + height / 2);
+      Float(base, world + 56, portrait_draw_fit.Z(slot.z) + height / 2);
     }
     if (const auto bounds = ProjectMesh(ctx, base, mesh)) {
       std::lock_guard lock(mutex);
@@ -841,6 +951,8 @@ bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
           HostPointerIsTouch(), (HostMouseButtons() & 1) != 0);
       if (queue.enabled() && footer_touch_press.Draw(*bounds)) hovered = true;
     }
+    // Header meshes only define a generous hit region; the native arrows draw themselves.
+    if (!visible) continue;
     const auto material = U32(base, mesh + 292);
     std::array<uint32_t, 4> prior{};
     const auto dirty = [&] {
@@ -848,8 +960,9 @@ bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
     };
     if (hovered && !border && material) {
       for (size_t i = 0; i < prior.size(); ++i) prior[i] = U32(base, material + 44 + uint32_t(i) * 4);
-      const auto yellow = ui::FooterButtonColor(false, true);
-      for (size_t i = 0; i < yellow.size(); ++i) Float(base, material + 44 + uint32_t(i) * 4, yellow[i]);
+      const auto color = SceneObject(ctx, base, dir, "portrait_action.color")
+          ? ui::LoadingButtonColor(false, true) : ui::FooterButtonColor(false, true);
+      for (size_t i = 0; i < color.size(); ++i) Float(base, material + 44 + uint32_t(i) * 4, color[i]);
       dirty();
     }
     rex::ScopeGuard restore([&] {
@@ -866,16 +979,27 @@ bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
 }
 
 void DrawPresetArrows(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  const bool songs = current_screen_name == "song_select_screen";
   if (!settings::InterfacePortraitEnabled() ||
       (current_screen_name != "controller_config_screen" &&
-       current_screen_name != "controller_config_pause_screen")) return;
+       current_screen_name != "controller_config_pause_screen" && !songs)) return;
   const auto header = ObjectBase(base, label);
-  if (ObjectName(base, header) != "IndexNum.lbl") return;
+  if (ObjectName(base, header) != (songs ? "portrait_tab_songs.lbl" : "IndexNum.lbl")) return;
   const auto dir = U32(base, header + 36);
-  if (!SceneObject(ctx, base, dir, "portrait_preset_arrows.grp")) return;
+  if (!songs && !SceneObject(ctx, base, dir, "portrait_preset_arrows.grp")) return;
   for (bool left : {true, false}) {
-    const bool hovered = DrawPortraitFooterSurface(ctx, base, dir,
-        left ? "portrait_previous" : "portrait_next", 0, 0, false);
+    const std::string stem = songs ? (left ? "portrait_header_previous" : "portrait_header_next") :
+                                    (left ? "portrait_previous" : "portrait_next");
+    const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false, !songs);
+    if (songs && !current_input_scope) {
+      const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
+      if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt) {
+        std::lock_guard lock(mutex);
+        hint_targets.push_back({current_screen, current_focus, frame_number, *bounds,
+                                uint16_t(left ? 0x0100 : 0x0200), 0});
+      }
+    }
+    if (songs) continue; // The background panel draws and animates the retail header arrows.
     for (bool glow : {false, true}) {
       const auto name = std::string(left ? "arrow_lt" : "arrow_rt") + (glow ? "_glow.mesh" : ".mesh");
       const auto mesh = SceneMesh(ctx, base, dir, name.c_str());
@@ -906,14 +1030,15 @@ void DrawPresetArrows(PPCContext& ctx, uint8_t* base, uint32_t label) {
 }
 
 void CaptureSlider(PPCContext& ctx, uint8_t* base, uint32_t slider) {
-  if (slider != current_focus || !IsSettingsWheel(ObjectName(base, ObjectBase(base, slider)))) return;
+  const auto name = ObjectName(base, ObjectBase(base, slider));
+  if (!IsSettingsWheel(name)) return;
   const auto resource = U32(base, slider + 92);
   if (!resource) return;
   const auto mesh = SceneMesh(ctx, base, resource, "slider.mesh");
   if (!mesh) return;
   const auto bounds = ProjectMesh(ctx, base, mesh);
   if (!bounds || bounds->right <= bounds->left || bounds->bottom <= bounds->top) return;
-  slider_geometry = {slider, frame_number, *bounds};
+  slider_geometries[name == "sound_effects_slider.sld" ? 0 : 1] = {slider, current_screen, frame_number, *bounds};
 }
 
 void CaptureLanePowerup(PPCContext& ctx, uint8_t* base, uint32_t dir) {
@@ -1013,6 +1138,75 @@ void CaptureRow(uint8_t* base, MenuBounds bounds) {
   }
 }
 
+void DrawPortraitSongRow(PPCContext& ctx, uint8_t* base) {
+  if (!drawing || !drawing->row || ctx.r7.u32 ||
+      !settings::InterfacePortraitEnabled() || current_screen_name != "song_select_screen") return;
+  const auto label = U32(base, ctx.r3.u32 + 8);
+  const auto widget = drawing->widget;
+  if (!label || drawing->painted_rows.contains(drawing->row)) return;
+  const auto text = U32(base, label + 80);
+  if (!text || !base[text]) return;
+  const bool selected = !drawing->suppress && U32(base, drawing->row + 24) == 1;
+  const bool heading = U32(base, drawing->row + 24) == 2 || U32(base, drawing->row + 28) == 2;
+  const auto dir = drawing->resource;
+  const auto mesh = SceneMesh(ctx, base, dir, heading ? "portrait_header.mesh" :
+                              selected ? "portrait_selected.mesh" : "portrait_row.mesh");
+  if (!mesh) {
+    static thread_local std::unordered_set<uint32_t> missing;
+    if (settings::title::mouse_native_trace.Get() && missing.insert(dir).second)
+      REXLOG_INFO("native_mouse: portrait row mesh unavailable dir={:08X} widget={:08X} label={:08X}",
+                  dir, widget, label);
+    return;
+  }
+  // Providers copy their own fit settings onto label instances. Restore wrapping
+  // on the live label as well as the authored template before measuring/drawing.
+  if (U32(base, label + 96) != 0) {
+    rex::memory::store_and_swap<uint32_t>(base + label + 96, 0);
+    base[label + 178] = 1;
+  }
+  if (F32(base, label + 88) != ui::kPortraitSongRowHeight - 5) {
+    Float(base, label + 88, ui::kPortraitSongRowHeight - 5);
+    base[label + 178] = 1;
+  }
+  if (base[label + 178]) {
+    GuestCall update(ctx, base);
+    rex::ppc::Call<void>(update.ctx, base, sub_824BAF98, label, uint32_t(0));
+  }
+  drawing->painted_rows.insert(drawing->row);
+  // UIListLabelElement receives the label's final transform after provider
+  // spacing, animation and portrait fitting. Derive the row rectangle from
+  // that same transform, retaining the guest's own mesh, material and draw.
+  std::array<float, 16> matrix{};
+  for (size_t i = 0; i < matrix.size(); ++i) matrix[i] = F32(base, ctx.r4.u32 + uint32_t(i * 4));
+  GuestCall call(ctx, base);
+  const auto world = rex::ppc::Call<uint32_t>(call.ctx, base, sub_821F13D0, mesh + 64);
+  std::array<uint8_t, 64> prior{};
+  std::memcpy(prior.data(), base + world, prior.size());
+  const float height = heading ? 30.f : ui::kPortraitSongRowHeight;
+  // The button template's vertices lie in XY; labels lie in XZ.
+  for (size_t axis = 0; axis < 3; ++axis) {
+    Float(base, world + uint32_t(axis * 4), matrix[axis] * 420.f / 300);
+    Float(base, world + uint32_t(16 + axis * 4), matrix[8 + axis] * height / 30);
+    Float(base, world + uint32_t(32 + axis * 4), -matrix[4 + axis]);
+  }
+  for (size_t axis = 0; axis < 3; ++axis)
+    Float(base, world + uint32_t(48 + axis * 4),
+          matrix[12 + axis] - 14 * matrix[axis] + height / 2 * matrix[8 + axis]);
+  const auto material = U32(base, mesh + 292);
+  const float alpha = material ? F32(base, material + 56) : 1.f;
+  const auto dirty = [&] {
+    if (material) rex::memory::store_and_swap<uint32_t>(base + material + 520, U32(base, material + 520) | 1);
+  };
+  if (material) { Float(base, material + 56, alpha * float(ctx.f1.f64)); dirty(); }
+  rex::ScopeGuard restore([&] {
+    std::memcpy(base + world, prior.data(), prior.size());
+    if (material) { Float(base, material + 56, alpha); dirty(); }
+  });
+  if (auto* draw = rex::ppc::ResolveFunction(U32(base, U32(base, mesh) + 24)))
+    rex::ppc::Call<void>(call.ctx, base, *draw, mesh);
+  if (const auto bounds = ProjectMesh(call.ctx, base, mesh)) CaptureRow(base, *bounds);
+}
+
 void CaptureLabel(PPCContext& ctx, uint8_t* base) {
   if (!drawing || !drawing->row || ctx.r7.u32) return;
   const auto row = drawing->row;
@@ -1092,11 +1286,15 @@ void DrawMenuHintLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (!black_color) { __imp__sub_824BC668(ctx, base); return; }
   const auto index = footer->index + size_t(entry - footer->entries.begin());
   const auto name = ObjectName(base, header);
+  if (current_screen_name == "song_select_screen" && name == "pop_up_help.ihp") {
+    __imp__sub_824BC668(ctx, base); return;
+  }
   const bool independent = name == "continue.ihp" || name == "back.ihp" || name == "skip.ihp";
   const std::string stem = independent ? "portrait_" + name.substr(0, name.size() - 4) :
       ui::PortraitFooterSurface(index, footer->count);
   const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, index, footer->count, !independent);
-  const bool black = hovered || current_screen_name == "splash_screen" ||
+  const bool black = hovered || (current_screen_name == "song_select_screen" && index == 2) ||
+      current_screen_name == "splash_screen" ||
       current_panel_name == "server_connect_panel" || current_screen_name == "loading_screen";
   const auto styles = U32(base, label + 180), styles_end = U32(base, label + 184);
   if (!black || !styles || styles_end < styles || styles_end - styles < 44) {
@@ -1154,19 +1352,61 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   DrawPresetArrows(ctx, base, label);
   const bool portrait = settings::InterfacePortraitEnabled();
   const auto name = ObjectName(base, ObjectBase(base, label));
+  const bool songs = portrait && current_screen_name == "song_select_screen";
+  if (songs && last_device::Current().using_touch &&
+      (name == "shell_arrow_left.lbl" || name == "shell_arrow_rt.lbl")) return;
+  const bool song_tool = songs && (name == "sorting.lbl" || name == "portrait_search.lbl");
+  const int song_tab = songs ? LibraryHeaderForLabel(name) : -1;
+  if (song_tab >= 0 && !SceneObject(ctx, base, U32(base, ObjectBase(base, label) + 36),
+                                   "portrait_songs.color")) return;
+  if (song_tab > 0) return;
+  if (song_tool) {
+    const auto dir = U32(base, ObjectBase(base, label) + 36);
+    const std::string stem = name == "sorting.lbl" ? "portrait_sort" : "portrait_search";
+    DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false);
+    if (!current_input_scope) {
+      const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
+      if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt) {
+        std::lock_guard lock(mutex);
+        hint_targets.push_back({current_screen, current_focus, frame_number, *bounds,
+                               uint16_t(name == "sorting.lbl" ? 0x20 : 0x10), 0});
+      }
+    }
+  }
   const bool title = portrait && name == "header.lbl" &&
       ui::PortraitSplashScreen(current_screen_name, current_panel_name, current_panel_scene);
   const bool success = portrait && current_screen_name.rfind("cal_", 0) == 0 &&
       CalibrationToken(base, label) == "lag_success";
+  const auto token = portrait ? CalibrationToken(base, label) : std::string_view{};
+  const bool instruction = portrait && current_screen_name.rfind("cal_", 0) == 0 &&
+      (token == "cal_audio_desc_pad" || token == "cal_video_desc_pad");
+  std::optional<float> calibration_z;
+  if (portrait && current_screen_name.rfind("cal_", 0) == 0) {
+    for (const auto& [label_name, anchor] : {
+        std::pair{"audio_title.lbl", 117.f}, {"video_title.lbl", 117.f},
+        {"cal_instructions.lbl", -128.f}, {"cal_reps.lbl", -105.f},
+        {"cal_setting.lbl", -153.f}, {"cal_countdown.lbl", ui::kPortraitCalibrationMeterZ},
+        {"failed.lbl", -112.f}}) {
+      if (name == label_name) { calibration_z = anchor; break; }
+    }
+  }
   const auto* footer = portrait ? drawing_footer : nullptr;
   const auto entry = footer ? std::find_if(footer->entries.begin(), footer->entries.end(),
       [label](const auto& e) { return e.label == label; }) : std::vector<InlineHelpEntry>::const_iterator{};
-  const bool action = footer && entry != footer->entries.end();
-  if (!title && !success && !action) { DrawMenuHintLabel(ctx, base, label); return; }
+  const bool action = footer && entry != footer->entries.end() &&
+      !(songs && ObjectName(base, ObjectBase(base, footer->owner)) == "pop_up_help.ihp");
+  if (!title && !success && !instruction && !calibration_z && !action && !song_tool && song_tab < 0) {
+    DrawMenuHintLabel(ctx, base, label); return;
+  }
   if (base[label + 178])
     rex::ppc::Call<void>(ctx, base, sub_824BAF98, label, uint32_t(0));
   const float width = F32(base, label + 152), height = F32(base, label + 156);
   if (!(width > 0) || !std::isfinite(height)) { DrawMenuHintLabel(ctx, base, label); return; }
+  const auto ink = InlineHelpGlyphBounds(label,
+      [base](uint32_t address) { return U32(base, address); },
+      [base](uint32_t address) { return F32(base, address); });
+  const float visible_width = ink ? (*ink)[2] - (*ink)[0] : width;
+  const float visible_height = ink ? (*ink)[3] - (*ink)[1] : std::abs(height);
   const auto transformable = label + 72 + U32(base, U32(base, label + 72) + 16);
   const auto world = WorldTransformForDraw(transformable,
       [base](uint32_t address) { return base[address]; },
@@ -1175,11 +1415,44 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   std::memcpy(prior.data(), base + world, prior.size());
   rex::ScopeGuard restore([&] { std::memcpy(base + world, prior.data(), prior.size()); });
   float x = F32(base, world + 48), z = F32(base, world + 56);
-  if (title) { x = 0; z = ui::kPortraitTitleCenter; }
+  const auto portrait_draw_fit = hooks::PortraitDrawFit();
+  if (song_tool || song_tab >= 0) {
+    const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
+    const auto layout = ui::PortraitSongs(aspect);
+    const auto fit = portrait_draw_fit;
+    float available = layout.width / 2 - 10;
+    float desired_height = 12;
+    if (song_tool) {
+      x = fit.X((name == "sorting.lbl" ? -1.f : 1.f) * (layout.width / 4 + 2));
+      z = fit.Z(layout.tools_z);
+    } else {
+      x = fit.X(0);
+      z = fit.Z(layout.tabs_z);
+      available = layout.width - 76; desired_height = 17;
+    }
+    const float scale = std::min(available * fit.scale / std::max(visible_width, 1.f),
+                                  desired_height * fit.scale / std::max(visible_height, 1.f));
+    for (uint32_t row = 0; row < 3; ++row)
+      for (uint32_t column = 0; column < 3; ++column)
+        Float(base, world + row * 16 + column * 4, row == column ? scale : 0);
+  }
+  if (calibration_z) { x = portrait_draw_fit.X(0); z = portrait_draw_fit.Z(*calibration_z); }
+  if (title) { x = portrait_draw_fit.X(0); z = portrait_draw_fit.Z(ui::kPortraitTitleCenter); }
+  if (instruction) {
+    x = portrait_draw_fit.X(0); z = portrait_draw_fit.Z(ui::kPortraitCalibrationInstructionsZ);
+    const float scale = CalibrationTextFit(std::abs(F32(base, world)) * visible_width,
+        std::abs(F32(base, world + 40)) * visible_height,
+        ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width * .84f * portrait_draw_fit.scale,
+        ui::kPortraitCalibrationInstructionsHeight * portrait_draw_fit.scale);
+    for (uint32_t row = 0; row < 3; ++row)
+      for (uint32_t column = 0; column < 3; ++column)
+        Float(base, world + row * 16 + column * 4, F32(base, world + row * 16 + column * 4) * scale);
+  }
   if (success) {
-    x = 0; z = 0;
-    const float available = ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width * .84f;
-    const float measured = std::abs(F32(base, world)) * width;
+    x = portrait_draw_fit.X(0); z = portrait_draw_fit.Z(0);
+    const float available = ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width *
+                            .84f * portrait_draw_fit.scale;
+    const float measured = std::abs(F32(base, world)) * visible_width;
     const float scale = std::min(last_device::Current().using_touch ? 2.f : 1.65f,
                                  available / std::max(measured, 1.f));
     for (uint32_t row = 0; row < 3; ++row)
@@ -1200,31 +1473,42 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
       const auto owner_world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, owner_transform);
       x = F32(base, owner_world + 48); z = F32(base, owner_world + 56);
     } else {
-      const auto slot = ui::PortraitFooterAction(ui::screen::CurrentMenuConfiguration().portrait_aspect,
-          footer->index + size_t(entry - footer->entries.begin()), footer->count);
-      x = slot.x; z = slot.z;
+      const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
+      const auto index = footer->index + size_t(entry - footer->entries.begin());
+      const bool song_footer = SceneObject(ctx, base, dir, "portrait_songs.color") != 0;
+      const auto slot = song_footer
+          ? ui::PortraitSongsFooter(aspect, index, footer->count)
+          : ui::PortraitFooterAction(aspect, index, footer->count);
+      x = portrait_draw_fit.X(slot.x); z = portrait_draw_fit.Z(slot.z);
+      if (song_footer) {
+        const float scale = std::min(1.f, slot.width * .92f * portrait_draw_fit.scale /
+            std::max(std::abs(F32(base, world)) * visible_width, 1.f));
+        for (uint32_t row = 0; row < 3; ++row)
+          for (uint32_t column = 0; column < 3; ++column)
+            Float(base, world + row * 16 + column * 4, F32(base, world + row * 16 + column * 4) * scale);
+      }
     }
   }
   // UILabel's alignment includes font bearings and mixed icon baselines. Center
   // its measured rectangle through the live basis, including multiline text.
   float cx = F32(base, label + 144) + width / 2;
   float cz = F32(base, label + 148) + height / 2;
-  // The layout rectangle includes advance spacing and the empty alternate
-  // icon style on touch. Center footer captions on the quads actually drawn.
-  if (action) {
-    if (const auto bounds = InlineHelpGlyphBounds(label,
-        [base](uint32_t address) { return U32(base, address); },
-        [base](uint32_t address) { return F32(base, address); })) {
-      cx = ((*bounds)[0] + (*bounds)[2]) / 2;
-      cz = ((*bounds)[1] + (*bounds)[3]) / 2;
-    }
+  // Padding, font bearings and unused icon styles are not visible text. Use
+  // the drawn quads for calibration descriptions as well as footer captions.
+  if (ink) {
+    cx = ((*ink)[0] + (*ink)[2]) / 2;
+    cz = ((*ink)[1] + (*ink)[3]) / 2;
   }
   Float(base, world + 48, x - F32(base, world) * cx - F32(base, world + 32) * cz);
   Float(base, world + 56, z - F32(base, world + 8) * cx - F32(base, world + 40) * cz);
+  if (song_tab >= 0 && menu_available && !current_input_scope)
+    if (const auto bounds = ProjectLabel(ctx, base, label))
+      header_geometry[song_tab] = {current_screen, current_focus, frame_number, *bounds};
   DrawMenuHintLabel(ctx, base, label);
 }
 
 void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  if (settings::InterfacePortraitEnabled() && current_screen_name == "song_select_screen") return;
   if (!menu_available || current_input_scope || LibraryHeaderForScreen(current_screen_name) < 0) return;
   const int index = LibraryHeaderForLabel(ObjectName(base, ObjectBase(base, label)));
   if (index < 0) return;
@@ -1252,7 +1536,8 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
           [label](const auto& entry) { return entry.label == label; });
       if (entry == entries.end()) return;
       const auto index = size_t(entry - entries.begin());
-      name = std::string(ui::PortraitFooterSurface(index, entries.size())) + ".mesh";
+      const auto placement = PortraitMenuHintPlacement(ctx, base, owner, *entry, index, entries.size());
+      name = std::string(ui::PortraitFooterSurface(placement.index, placement.count)) + ".mesh";
     }
     const auto mesh = !name.empty() && dir ? SceneMesh(ctx, base, dir, name.c_str()) : 0;
     if (mesh) {
@@ -1391,10 +1676,15 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   const auto list_header = ObjectBase(base, list);
   const bool belongs = dialog_scope != MenuDialogScope::kPanel ||
       (list_header && U32(base, list_header + 36) == current_panel_dir);
-  if (ctx.r9.u32 || list != current_focus || !menu_available || !belongs) {
+  const bool focused = list == current_focus && menu_available && belongs;
+  const bool touch = last_device::Current().using_touch;
+  const bool portrait_songs = settings::InterfacePortraitEnabled() && current_screen_name == "song_select_screen";
+  if (ctx.r9.u32 || !list || (!focused && !touch && !portrait_songs)) {
     __imp__sub_824E5020(ctx, base); return;
   }
   DrawCapture capture;
+  capture.resource = ctx.r3.u32;
+  capture.touch = touch;
   capture.result.list = list; capture.result.frame = frame_number;
   capture.first = U32(base, ctx.r4.u32 + 56); capture.end = U32(base, ctx.r4.u32 + 60);
   const auto display = U32(base, ctx.r4.u32 + 48);
@@ -1406,25 +1696,32 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   // frees right after DrawWidgets, so nothing here survives the frame, and the captured
   // row geometry above was read from the real selected slot. A selection change the mouse
   // did not make ends the lift instead, so a controller's own highlight is never hidden.
-  if (mouse_highlight.lifted_list == list) {
+  // Touch uses the same draw-only suppression without inheriting mouse hover;
+  // only the row pressed on this page may light, until its release.
+  if (touch) mouse_highlight.Reset();
+  bool suppress = !focused || !touch_highlight.Draw(touch, list, SelectedRow(ctx, base, list),
+                                       (HostMouseButtons() & 1) != 0);
+  if (!touch && mouse_highlight.lifted_list == list) {
     if (!mouse_highlight.Lifted(list, SelectedRow(ctx, base, list))) {
       if (rb_blitz::settings::title::mouse_native_trace.Get())
         REXLOG_INFO("native_mouse: highlight back list={:08X}", list);
-    } else {
-      // The element the engine marked highlighted drops to active (+24: 1 -> 0), and the
-      // draw-state's highlight display slot reads -1, which makes highlight-only slots
-      // (drawstate +48) skip. The shared highlight mesh is skipped in the DrawMesh hook
-      // via capture.suppress. Nothing else in the draw uses these fields.
-      for (auto row = capture.first; row < capture.end; row += 44)
-        if (U32(base, row + 24) == 1)
-          rex::memory::store_and_swap<uint32_t>(base + row + 24, 0);
-      rex::memory::store_and_swap<uint32_t>(base + ctx.r4.u32 + 48, uint32_t(-1));
-      capture.suppress = true;
-    }
+    } else suppress = true;
+  }
+  if (suppress) {
+    // The element the engine marked highlighted drops to active (+24: 1 -> 0), and the
+    // draw-state's highlight display slot reads -1, which makes highlight-only slots
+    // (drawstate +48) skip. The shared highlight mesh is skipped in the DrawMesh hook
+    // via capture.suppress. Nothing else in the draw uses these fields.
+    for (auto row = capture.first; row < capture.end; row += 44)
+      if (U32(base, row + 24) == 1)
+        rex::memory::store_and_swap<uint32_t>(base + row + 24, 0);
+    rex::memory::store_and_swap<uint32_t>(base + ctx.r4.u32 + 48, uint32_t(-1));
+    capture.suppress = true;
   }
   auto previous = drawing; drawing = &capture;
   __imp__sub_824E5020(ctx, base);
   drawing = previous;
+  if (!focused) return;
   auto& result = capture.result;
   // The native highlight supplies the full button width, even when its text is
   // short. Translate its cell along the row axis; no screen-specific pitches.
@@ -1490,6 +1787,12 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   PublishRail(MeasureRail(ctx, base, list, geometry));
 
 }
+std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable) {
+  if (!settings::InterfacePortraitEnabled() || !portrait_splash_active || !current_panel_dir ||
+      ObjectBase(base, drawable) != ObjectBase(base, current_panel_dir)) return {};
+  return ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width / 480;
+}
+
 } // namespace rb_blitz::input
 
 REX_HOOK_RAW(sub_824B2958) {
@@ -1522,12 +1825,14 @@ REX_HOOK_RAW(sub_824E5020) {
 REX_HOOK_RAW(sub_824E07A8) {
   using namespace rb_blitz::input;
   if (drawing) {
+    drawing->widget = ctx.r3.u32;
     const auto row = ctx.r5.u32 - 4;
     drawing->row = row >= drawing->first && row < drawing->end && (row - drawing->first) % 44 == 0 ? row : 0;
   }
   __imp__sub_824E07A8(ctx, base);
 }
 REX_HOOK_RAW(sub_824E9A90) {
+  rb_blitz::input::DrawPortraitSongRow(ctx, base);
   rb_blitz::input::CaptureLabel(ctx, base);
   __imp__sub_824E9A90(ctx, base);
 }
@@ -1580,7 +1885,12 @@ REX_HOOK_RAW(sub_824E0900) {
   // bar's own projection, and the hover that selects a row again restores both in the same
   // frame the pointer lands (`UIListHighlight::Draw`, at vtable +100). The mesh's transform
   // is left at its resting value; UIListHighlight::Draw restores it after every draw anyway.
-  if (bar && drawing->suppress) return;
+  if (bar && drawing->suppress) {
+    // DrawMesh would apply r7 to the shared bar. Project with that same final
+    // transform so invisible touch highlights retain their full hit width.
+    if (drawing->touch) drawing->highlight = ProjectMesh(ctx, base, mesh, ctx.r7.u32);
+    return;
+  }
   __imp__sub_824E0900(ctx, base);
   if (bar) drawing->highlight = ProjectMesh(ctx, base, mesh);
   // UIListArrow::Draw calls DrawMesh only for a visible scroll arrow, with

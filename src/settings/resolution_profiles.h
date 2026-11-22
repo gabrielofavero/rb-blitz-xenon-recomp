@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -33,6 +34,15 @@ inline DisplayMode ProfileDisplayBasis(DisplayMode native, bool force_16_by_9) {
   if (!force_16_by_9) return native;
   const int units = std::max(1, std::min(native.width / 16, native.height / 9));
   return {units * 16, units * 9};
+}
+
+// 1206x2622 phone capture, reduced to 201:437. Keep its landscape source
+// inside the display; the portrait window is the reciprocal full-height crop.
+inline DisplayMode MobilePreviewDisplayBasis(DisplayMode native) {
+  if (native.width <= 0 || native.height <= 0) native = {1280, 720};
+  const double height = std::min(double(native.height), double(native.width) * 201 / 437);
+  return {std::max(1, int32_t(std::lround(height * 437 / 201))),
+          std::max(1, int32_t(std::floor(height)))};
 }
 
 // Native remains a stable intent across monitor changes. Every lower offer
@@ -72,6 +82,24 @@ inline DisplayMode ScaledProfileResolution(DisplayMode native, int tenths) {
   tenths = std::clamp(tenths, 5, 10);
   return {std::max(1, (native.width * tenths + 5) / 10),
           std::max(1, (native.height * tenths + 5) / 10)};
+}
+
+// A portrait device displays a full-height crop of the landscape source. Its
+// source height must match the device's long edge to retain native pixel density.
+inline DisplayMode DeviceProfileSource(DisplayMode native, bool portrait) {
+  if (native.width <= 0 || native.height <= 0) return {};
+  if (native.width < native.height) std::swap(native.width, native.height);
+  if (!portrait) return native;
+  return {int32_t((int64_t(native.width) * native.width + native.height / 2) / native.height),
+          native.width};
+}
+
+inline int ResolutionProfileDrawScale(DisplayMode native, bool device,
+                                      bool interface_portrait, bool gameplay_portrait) {
+  if (native.width <= 0 || native.height <= 0) native = {1280, 720};
+  if (native.width < native.height) std::swap(native.width, native.height);
+  const auto largest = DeviceProfileSource(native, device && (interface_portrait || gameplay_portrait));
+  return std::max((largest.width + 1919) / 1920, (largest.height + 719) / 720);
 }
 
 inline bool IsResolutionProfile(SettingId id) {

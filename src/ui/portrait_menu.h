@@ -15,6 +15,15 @@ inline constexpr std::array<float, 4> kMenuButtonHover{1, .855f, .086f, 1};
 inline constexpr float kFooterOpacity = .8f;
 // Midpoint of the marquee's two rows of lights in the guest scene.
 inline constexpr float kPortraitTitleCenter = 164.6512f;
+inline constexpr float kPortraitCalibrationInstructionsZ = 78;
+inline constexpr float kPortraitCalibrationInstructionsHeight = 58;
+inline constexpr float kPortraitCalibrationMeterZ = -16;
+inline constexpr std::array<const char*, 6> kPortraitCalibrationGraphics{
+    "cal_metronome.grp", "cal_bg.grp", "visuals_anim.grp", "audio_anim.grp",
+    "prog_bar.grp", "cal_reps.lbl"};
+// Conservative bounds across the native logo meshes and their animation keys.
+inline constexpr float kPortraitLogoTop = 206.f;
+inline constexpr float kPortraitLogoBottom = -176.f;
 
 inline std::array<float, 4> FooterButtonColor(bool border, bool hovered = false) {
   auto color = border ? kMenuButtonBorder : hovered ? kMenuButtonHover : kMenuButtonNormal;
@@ -22,12 +31,18 @@ inline std::array<float, 4> FooterButtonColor(bool border, bool hovered = false)
   return color;
 }
 
+inline std::array<float, 4> LoadingButtonColor(bool border, bool hovered = false) {
+  // A light plum tint lets the warm backdrop show through without a yellow highlight.
+  return border ? std::array<float, 4>{.90f, .85f, .95f, .09f} :
+      std::array<float, 4>{.72f, .66f, .79f, hovered ? .28f : .18f};
+}
+
 struct PortraitSplashLayout {
   float width;
   float logo_scale, logo_x, logo_z;
-  float title_logo_scale, title_logo_z;
+  float title_logo_z;
   float start_scale, start_z;
-  float list_scale, list_z;
+  float list_scale, menu_list_scale, list_z;
   float city_scale, city_z;
 };
 
@@ -38,21 +53,47 @@ inline PortraitSplashLayout PortraitSplash(float aspect) {
   const float width = 480 * std::clamp(aspect, .3f, .9f);
   // Center the symmetric wordmark, rather than its asymmetric decorations.
   constexpr float logo_width = 499.4504f, logo_z = 15.408f;
-  const float logo_scale = .85f * std::min(width * .755f / logo_width, .45f);
-  const float title_scale = .95f * std::min(width * .94f / logo_width, .68f);
   const float list_scale = std::min(width * .76f / 364.5f, .55f);
   // Like the reference's cqw units, top spacing follows visible width.
   const float flow_width = std::min(width, 270.f);
-  const float list_z = 240 - flow_width * .8f;
+  // Preserve the title's existing size and pose across all splash states.
+  const float list_top = 240 - flow_width * .8f + 26.375f * list_scale;
+  const float logo_scale = std::min(.95f * std::min(width * .94f / logo_width, .68f),
+      (236 - list_top - 8) / (kPortraitLogoTop - kPortraitLogoBottom));
+  const float title_logo_z = 240 - flow_width * .625f - logo_z * logo_scale;
+  const float menu_top = title_logo_z + kPortraitLogoBottom * logo_scale - 8;
+  // Fit all six rows below the fixed logo, above the city and footer region.
+  const float menu_list_scale = std::min(list_scale, (menu_top + 164) / (5 * 62 + 52.75f));
+  const float list_z = menu_top - 26.375f * menu_list_scale;
   const float city_scale = .205f;
-  return {width, logo_scale, 0, 240 - flow_width * .42625f - logo_z * logo_scale,
-          title_scale, 240 - flow_width * .625f - logo_z * title_scale,
+  return {width, logo_scale, 0, title_logo_z, title_logo_z,
           .95f * width * .65f / 256, 240 - flow_width * 1.438f,
           // Crop the solid strip beneath the road and overlap the bottom edge.
-          list_scale, list_z, city_scale, -248 + 131.94f * city_scale};
+          list_scale, menu_list_scale, list_z, city_scale, -248 + 131.94f * city_scale};
 }
 
 inline constexpr float kPortraitMenuRowStep = 62.f;
+inline constexpr float kPortraitSongRowHeight = 55;
+inline constexpr float kPortraitSongRowStep = 60;
+inline constexpr float kPortraitSongArrowScale = .9f;
+inline constexpr float kPortraitSongArrowInset = 22;
+inline constexpr float kPortraitSongArrowTargetSize = 40;
+
+struct PortraitSongsLayout {
+  float width, list_scale;
+  float tabs_z = 188, tools_z = 133, list_z = 92;
+  float card_z = -158, card_height = 52, footer_z = -201;
+  int rows = 7;
+};
+
+inline PortraitSongsLayout PortraitSongs(float aspect) {
+  const float width = PortraitSplash(aspect).width * .92f;
+  PortraitSongsLayout layout{width, width / 420.f};
+  layout.rows = std::min(7, 1 + int((layout.list_z - (layout.card_z + layout.card_height / 2 + 14) -
+                                   kPortraitSongRowHeight / 2 * layout.list_scale) /
+                                   (kPortraitSongRowStep * layout.list_scale)));
+  return layout;
+}
 
 inline float PortraitPromptScale(float aspect, bool error_popup = false) {
   return std::min(PortraitSplash(aspect).width * .84f / (error_popup ? 640.f : 350.f), 1.f);
@@ -68,9 +109,11 @@ inline PortraitLoadingLayout PortraitLoading(float aspect) {
   const auto splash = PortraitSplash(aspect);
   const float width = splash.width;
   const float button_width = (364.5f * splash.list_scale - 10) / 2;
-  return {width, splash.title_logo_scale, splash.title_logo_z,
+  // The native 256 x 32 frame and animated fill share an 8:1 aspect.
+  const float bar_width = width * .5f;
+  return {width, splash.logo_scale, splash.title_logo_z,
           width * .84f, 18 * splash.list_scale / .55f, button_width, (button_width + 10) / 2,
-          1, width * .5f, 20, 3,
+          1, bar_width, bar_width / 8, 3,
           -150, -167.5f};
 }
 
@@ -90,16 +133,23 @@ struct PortraitCalibrationAction {
   float x, z, width, height;
 };
 
+inline PortraitCalibrationAction PortraitSongsFooter(float aspect, size_t index, size_t count) {
+  const auto layout = PortraitSongs(aspect);
+  const float width = (layout.width - 5 * (count - 1)) / count;
+  return {(float(index) - float(count - 1) / 2) * (width + 5),
+          layout.footer_z, width, 27};
+}
+
 // Keep the native calibration footer's changing actions in separate touch areas.
 inline PortraitCalibrationAction PortraitCalibrationFooter(float aspect, size_t index) {
   const float width = (364.5f * PortraitSplash(aspect).list_scale - 10) / 2;
   return {index < 2 ? (index ? 1.f : -1.f) * (width + 10) / 2 : 0.f,
-          index < 2 ? -215.f : -177.f, width, 30};
+          index < 2 ? -197.f : -159.f, width, 30};
 }
 
 inline PortraitCalibrationAction PortraitFooterAction(float aspect, size_t index, size_t count) {
-  // The live three-action order is Select, Retry, Back.
-  if (count > 2) return PortraitCalibrationFooter(aspect, index == 1 ? 2 : index == 2 ? 1 : 0);
+  // Back and Next share the lower row; Retry occupies its own row above them.
+  if (count > 2) return PortraitCalibrationFooter(aspect, index);
   const float row = 364.5f * PortraitSplash(aspect).list_scale;
   const float width = count == 1 ? row * .55f : (row - 10) / 2;
   return {count == 1 ? 0.f : (index ? 1.f : -1.f) * (width + 10) / 2,
@@ -107,7 +157,7 @@ inline PortraitCalibrationAction PortraitFooterAction(float aspect, size_t index
 }
 
 inline const char* PortraitFooterSurface(size_t index, size_t count) {
-  if (count > 2) return index == 0 ? "portrait_confirm" : index == 1 ? "portrait_retry" : "portrait_back";
+  if (count > 2) return index == 0 ? "portrait_confirm" : index == 1 ? "portrait_back" : "portrait_retry";
   return index == 0 ? "portrait_confirm" : "portrait_back";
 }
 
@@ -154,6 +204,7 @@ inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel
          panel == "rbbz_download_panel" || panel == "rbbz_search_loading_panel" ||
          panel == "rbbz_library_panel" ||
          panel == "av_options_panel" || panel == "credits_panel" ||
+         (screen == "song_select_screen" && panel == "song_select_panel") ||
          PortraitSettingsScene(scene) ||
          PortraitControlsScene(scene) ||
          PortraitControlsPanel(panel) ||

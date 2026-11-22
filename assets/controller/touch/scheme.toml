@@ -1,0 +1,19 @@
+schema_version = 2
+id = "touch"
+name = "Touch"
+kind = "touch"
+
+[[input]]
+id = "tap"
+file = "tap.png"
+source = "touch:tap"
+
+[[input]]
+id = "swipe_left"
+file = "swipe_left.png"
+source = "touch:swipe_left"
+
+[[input]]
+id = "swipe_right"
+file = "swipe_right.png"
+source = "touch:swipe_right"

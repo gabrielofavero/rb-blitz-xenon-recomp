@@ -53,6 +53,8 @@ bool HidePowerupCurrency(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool HideResultsCurrency(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Start the native button fade when calibration's countdown releases input sampling.
 bool FadeCalibrationButtonAfterCountdown(std::vector<ui::dtb::Node>* roots, std::string* why);
+// Separate the result toast from portrait calibration art, restoring art on retry.
+bool PreparePortraitCalibrationFlow(std::vector<ui::dtb::Node>* roots, std::string* why);
 // The formerly transient state 28 can now span frames while a refresh scans.
 // Give it the same content-loading label as state 29; retain real connection labels.
 bool SetDiscoveryStartLabel(std::vector<ui::dtb::Node>* roots);
@@ -60,6 +62,7 @@ bool SetDiscoveryStartLabel(std::vector<ui::dtb::Node>* roots);
 bool AddCrashRecoveryHooks(std::vector<ui::dtb::Node>* roots, std::string* why);
 // Center the existing splash art, start button, list and hints in portrait.
 bool AddPortraitSplashLayout(std::vector<ui::dtb::Node>* roots, float aspect, std::string* why);
+bool AddPortraitSongsLayout(std::vector<ui::dtb::Node>* roots, float aspect, std::string* why);
 // Center the autosave icon and wrapped warning using the native label height.
 bool AddPortraitAutosaveLayout(std::vector<ui::dtb::Node>* roots, std::string* why);
 bool AddPortraitLoadingLayout(std::vector<ui::dtb::Node>* roots, bool song_loading,

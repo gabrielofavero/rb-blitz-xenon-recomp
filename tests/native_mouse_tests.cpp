@@ -9,6 +9,44 @@ using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("touch menus hide idle selection and activate once after feedback and release");
+  MenuTouchHighlight touch;
+  CHECK_FALSE(touch.Draw(true, 0x10, 0, false)); // default selected row remains unlit
+  touch.Press(0x10, 3);
+  CHECK_FALSE(touch.TakeAccept(true, 0x10, 3, false)); // a tap between frames waits for feedback
+  CHECK_FALSE(touch.Draw(true, 0x20, 0, false)); // other visible lists stay unlit
+  CHECK_TRUE(touch.Draw(true, 0x10, 3, false));
+  CHECK_FALSE(touch.Draw(true, 0x10, 3, false)); // release cannot leave it yellow
+  CHECK_TRUE(touch.TakeAccept(true, 0x10, 3, false));
+  CHECK_FALSE(touch.TakeAccept(true, 0x10, 3, false)); // activation is delivered once
+  CHECK_FALSE(touch.Draw(true, 0x10, 3, false));
+  touch.Press(0x10, 3);
+  CHECK_TRUE(touch.Draw(true, 0x10, 3, true));
+  CHECK_TRUE(touch.Draw(true, 0x10, 3, true));
+  CHECK_FALSE(touch.TakeAccept(true, 0x10, 3, true)); // hold shows feedback without activating
+  CHECK_TRUE(touch.TakeAccept(true, 0x10, 3, false));
+  touch.Reset(); // navigating to another page cannot transfer the press
+  CHECK_FALSE(touch.Draw(true, 0x20, 0, true));
+  CHECK_FALSE(touch.Draw(true, 0x20, 0, false));
+
+  BeginCase("touch cancellation and physical navigation preserve the native selection anchor");
+  touch.Press(0x10, 3);
+  CHECK_TRUE(touch.Draw(true, 0x10, 3, true));
+  touch.Move(0x10, -1); // moving off the pressed row cancels it
+  touch.Move(0x10, 3); // moving back does not create another press
+  CHECK_FALSE(touch.Draw(true, 0x10, 3, true));
+  CHECK_FALSE(touch.TakeAccept(true, 0x10, 3, false));
+  touch.Press(0x10, 3);
+  CHECK_FALSE(touch.Draw(true, 0x10, 4, true)); // changing selection cancels feedback
+  CHECK_FALSE(touch.TakeAccept(true, 0x10, 4, false));
+  touch.Press(0x10, 3);
+  CHECK_TRUE(touch.Draw(false, 0x10, 3, false)); // keyboard/controller restores the same row
+  CHECK_FALSE(touch.TakeAccept(false, 0x10, 3, false));
+  CHECK_FALSE(touch.Draw(true, 0x10, 3, false)); // switching back to touch clears selection art
+  touch.Press(0x10, 3);
+  touch.Reset(); // disabled input or focus loss discards pending activation
+  CHECK_FALSE(touch.TakeAccept(true, 0x10, 3, false));
+
   BeginCase("footer feedback follows mouse hover and active touch presses across the full button");
   const MenuBounds footer_bounds{.2f, .85f, .4f, .95f};
   CHECK_TRUE(MenuFooterHovered(MenuPoint{.21f, .9f}, footer_bounds, true, false));
@@ -191,22 +229,55 @@ int main() {
 
   BeginCase("guest footer records preserve full labels and their native actions");
   {
+    const InlineHelpEntry localized{0x40100100, 1, 0x40101000};
+    std::unordered_map<uint32_t, uint32_t> caption_words{
+        {localized.record + 4, 0x40102000}, {localized.record + 16, 0x40103000}};
+    const auto read_caption = [&] {
+      return InlineHelpCaptionToken(localized,
+          [&](uint32_t address) { return caption_words.at(address); },
+          [](uint32_t address) -> std::string_view {
+            return address == 0x40102000 ? "select" : "Choisir";
+          });
+    };
+    CHECK_TRUE(read_caption() == "select");
+    CHECK_TRUE(CalibrationFooterCaption(true, read_caption()) == "rbbz_calibration_next");
     const std::vector<InlineHelpEntry> calibration{
         {0x40100100, 1, 1}, {0x40100200, 1, 2}, {0x40100300, 2, 3}};
     const auto caption = [](const auto& entry) -> std::string_view {
       return entry.record == 1 ? "select" : entry.record == 2 ? "retry" : "inline_help_back";
     };
-    const auto pair = CalibrationFooterEntries(calibration, caption);
-    CHECK_EQ(pair.size(), 2);
-    CHECK_EQ(pair[0].label, calibration[2].label); // Back stays left.
-    CHECK_EQ(pair[1].label, calibration[1].label); // Retry stays right, despite sharing Confirm with Select.
-    CHECK_EQ(MenuHintButton(pair[0].action), 0x2000);
-    CHECK_EQ(MenuHintButton(pair[1].action), 0x1000);
+    const auto visible = CalibrationFooterEntries(calibration, caption);
+    CHECK_EQ(visible.size(), 3);
+    CHECK_EQ(visible[0].label, calibration[2].label); // Back stays left.
+    CHECK_EQ(visible[1].label, calibration[0].label); // Next remains available.
+    CHECK_EQ(visible[2].label, calibration[1].label); // Retry has its own upper row.
+    CHECK_EQ(MenuHintButton(visible[0].action), 0x2000);
+    CHECK_EQ(MenuHintButton(visible[1].action), 0x1000);
+    CHECK_EQ(MenuHintButton(visible[2].action), 0x1000);
+    for (const auto token : {"retry", "rbbz_loading_retry"}) {
+      // The failure panel owns only Retry; the covered calibration panel owns
+      // Back/Next. The one-entry widget must still use the upper three-slot pose.
+      const auto placement = CalibrationFooterPlacement(true, token, 0, 1);
+      CHECK_EQ(placement.index, 2);
+      CHECK_EQ(placement.count, 3);
+      const auto ordinary = CalibrationFooterPlacement(false, token, 0, 1);
+      CHECK_EQ(ordinary.index, 0);
+      CHECK_EQ(ordinary.count, 1);
+    }
+    const auto next = CalibrationFooterPlacement(true, "select", 1, 2);
+    CHECK_EQ(next.index, 1);
+    CHECK_EQ(next.count, 2);
     const auto back_only = CalibrationFooterEntries(
         std::vector<InlineHelpEntry>{calibration[0], calibration[2]}, caption);
-    CHECK_EQ(back_only.size(), 1);
+    CHECK_EQ(back_only.size(), 2);
     CHECK_EQ(back_only[0].label, calibration[2].label);
-    CHECK_TRUE(CalibrationFooterEntries(std::vector<InlineHelpEntry>{calibration[0]}, caption).empty());
+    CHECK_EQ(back_only[1].label, calibration[0].label);
+    CHECK_EQ(CalibrationFooterEntries(std::vector<InlineHelpEntry>{calibration[0]}, caption).size(), 1);
+    CHECK_TRUE(CalibrationFooterCaption(true, "select") == "rbbz_calibration_next");
+    CHECK_TRUE(CalibrationFooterCaption(true, "continue") == "rbbz_calibration_next");
+    CHECK_TRUE(CalibrationFooterCaption(false, "select") == "select");
+    CHECK_TRUE(CalibrationFooterCaption(true, "retry") == "retry");
+    CHECK_TRUE(CalibrationFooterCaption(true, "inline_help_back") == "inline_help_back");
     CHECK_EQ(calibration.size(), 3); // Guest navigation retains its complete native action list.
   }
   constexpr uint32_t footer = 0x40001000, actions = 0x40002000, labels = 0x40003000;
@@ -706,6 +777,20 @@ int main() {
   CHECK_EQ(SliderStepAt({.5f, .91f}, slider_bounds), 3);
   CHECK_EQ(SliderStepAt({.5f, .5f}, slider_bounds), -1);
   CHECK_EQ(SliderStepAt({NAN, .91f}, slider_bounds), -1);
+  BeginCase("small wheels accept touch padding and retain a drag beyond their visual bounds");
+  const MenuBounds thin{.3f, .49f, .7f, .51f};
+  const auto padded = SliderTouchBounds(thin, 800);
+  CHECK_TRUE(std::abs((padded.bottom - padded.top) * 800 - 44) < .001f);
+  CHECK_TRUE(padded.left == thin.left);
+  CHECK_TRUE(padded.right == thin.right);
+  CHECK_EQ(SliderStepAt({.3f, .475f}, padded), 0);
+  CHECK_EQ(SliderStepAt({.7f, .525f}, padded), 5);
+  CHECK_EQ(SliderDragStepAt({.1f, .2f}, padded), 0);
+  CHECK_EQ(SliderDragStepAt({.9f, .8f}, padded), 5);
+  CHECK_EQ(SliderDragStepAt({.5f, .8f}, padded), 3);
+  CHECK_EQ(SliderDragStepAt({NAN, .8f}, padded), -1);
+  CHECK_TRUE(SliderTouchBounds(thin, 0).top == thin.top);
+  CHECK_TRUE(SliderTouchBounds(slider_bounds, 800).top == slider_bounds.top);
   CHECK_TRUE(IsSettingsWheel("sound_effects_slider.sld"));
   CHECK_TRUE(IsSettingsWheel("track_sound_slider.sld"));
   CHECK_FALSE(IsSettingsWheel("options.lst"));

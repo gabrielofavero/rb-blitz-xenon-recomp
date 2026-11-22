@@ -16,13 +16,14 @@ def controller_entries(root: Path, validator: Path, destination: str) -> list[di
             continue
         if folder.is_symlink():
             raise ValueError(f"linked controller folder: {folder}")
-        internal = folder.name == "keyboard-mouse"
-        mode = "--list-internal-keyboard" if internal else "--list-declared"
+        internal = folder.name in ("keyboard-mouse", "touch")
+        mode = ("--list-internal-touch" if folder.name == "touch" else
+                "--list-internal-keyboard" if internal else "--list-declared")
         files = subprocess.run([str(validator), mode, str(folder)], check=True,
                                capture_output=True, text=True).stdout.splitlines()
         if "scheme.toml" not in files or len(files) != len(set(files)):
             raise ValueError(f"invalid controller inventory: {folder}")
-        target = "keyboard-mouse" if internal else f"schemes/{folder.name}"
+        target = folder.name if internal else f"schemes/{folder.name}"
         for name in files:
             path = Path(name)
             if path.is_absolute() or ".." in path.parts or path.suffix not in (".png", ".toml"):

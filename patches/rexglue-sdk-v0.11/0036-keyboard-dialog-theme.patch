@@ -89,21 +89,23 @@ diff --git a/src/ui/prompt.cpp b/src/ui/prompt.cpp
    if (!ImGui::BeginPopupModal(label_.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
      Complete({});
      closing_ = true;
-@@ -113,4 +118,120 @@
+@@ -113,4 +118,123 @@
    return !closing_;
  }
  
 +bool PromptDialog::DrawThemed(ImGuiIO& io, bool first_draw) {
 +    const auto& theme = style_->keyboard;
-+    // DisplaySize is already in DPI-independent units. Scale with the game,
-+    // including short and ultrawide windows, and keep a margin at either edge.
++    // DisplaySize is already in DPI-independent units. Portrait dialogs use
++    // the phone width, leaving room below for the platform keyboard.
++    const bool portrait = io.DisplaySize.x < io.DisplaySize.y;
 +    const float scale = std::clamp(std::min(io.DisplaySize.y / 720.0f,
-+                                          io.DisplaySize.x / 960.0f), 0.5f, 1.75f);
-+    const float width = std::min(480.0f * scale, io.DisplaySize.x - 32.0f * scale);
++                                          io.DisplaySize.x / (portrait ? 480.0f : 960.0f)), 0.5f, 1.75f);
++    const float width = portrait ? io.DisplaySize.x - 32.0f * scale :
++        std::min(480.0f * scale, io.DisplaySize.x - 32.0f * scale);
 +    ImGui::PushFont(theme.font, 18.0f * scale);
 +    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(30.0f * scale, 28.0f * scale));
 +    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(12.0f * scale, 10.0f * scale));
-+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f * scale, 6.0f * scale));
++    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f * scale, (portrait ? 13.0f : 6.0f) * scale));
 +    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f * scale);
 +    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 2.0f * scale);
 +    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, theme.layered_border ? 0.0f : 1.0f);
@@ -120,7 +122,7 @@ diff --git a/src/ui/prompt.cpp b/src/ui/prompt.cpp
 +    ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, theme.accent_active);
 +    ImGui::PushStyleColor(ImGuiCol_NavCursor, theme.accent_hovered);
 +    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, theme.dim);
-+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
++    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * (portrait ? 0.38f : 0.5f)),
 +                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 +    ImGui::SetNextWindowSize(ImVec2(width, 0.0f));
 +    const ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize |
@@ -176,14 +178,15 @@ diff --git a/src/ui/prompt.cpp b/src/ui/prompt.cpp
 +      bool confirmed = ImGui::InputText("##body", buffer_.data(), buffer_.size(),
 +                                        ImGuiInputTextFlags_EnterReturnsTrue);
 +      const bool escaped = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
-+      const float button_width = 110.0f * scale;
++      const float button_width = portrait ?
++          (ImGui::GetContentRegionAvail().x - 12.0f * scale) * 0.5f : 110.0f * scale;
 +      const float buttons_width = button_width * 2.0f + 12.0f * scale;
 +      ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
 +                          (ImGui::GetContentRegionAvail().x - buttons_width) * 0.5f);
-+      confirmed |= ImGui::Button("Done", ImVec2(button_width, 32.0f * scale));
++      confirmed |= ImGui::Button("Done", ImVec2(button_width, (portrait ? 44.0f : 32.0f) * scale));
 +      ImGui::SameLine();
 +      ImGui::PushStyleColor(ImGuiCol_Button, theme.secondary);
-+      const bool cancelled = ImGui::Button("Cancel", ImVec2(button_width, 32.0f * scale));
++      const bool cancelled = ImGui::Button("Cancel", ImVec2(button_width, (portrait ? 44.0f : 32.0f) * scale));
 +      ImGui::PopStyleColor();
 +      ImGui::PushFont(theme.font, 14.0f * scale);
 +      ImGui::PushStyleColor(ImGuiCol_Text, theme.muted_text);

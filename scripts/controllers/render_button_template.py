@@ -80,7 +80,7 @@ def add_image(parent: ET.Element, name: str, data: bytes, center_x: int,
     })
 
 
-def compose_svg(master: Path, artwork: Path, state: str) -> bytes:
+def compose_svg(master: Path, artwork: Path, state: str, *, cast_shadow: bool = True) -> bytes:
     placement = PLACEMENTS[state]
     root = ET.parse(master).getroot()
     if root.find(".//*[@id='button-face']") is not None:
@@ -91,13 +91,14 @@ def compose_svg(master: Path, artwork: Path, state: str) -> bytes:
                     placement.body_height / source.height)
         body_width = round(source.width * scale)
         body_height = round(source.height * scale)
-    shadow_group = ET.SubElement(root, f"{{{SVG_NS}}}g", {
-        "id": "scripted-shadow",
-        "transform": f"translate(0 {placement.shadow_offset})",
-    })
-    add_image(shadow_group, "shadow-shape", shadow,
-              placement.center_x, placement.center_y,
-              body_width, body_height, BUTTON_ANGLE)
+    if cast_shadow:
+        shadow_group = ET.SubElement(root, f"{{{SVG_NS}}}g", {
+            "id": "scripted-shadow",
+            "transform": f"translate(0 {placement.shadow_offset})",
+        })
+        add_image(shadow_group, "shadow-shape", shadow,
+                  placement.center_x, placement.center_y,
+                  body_width, body_height, BUTTON_ANGLE)
     add_image(root, "button-body", neutral,
               placement.center_x, placement.center_y,
               body_width, body_height, BUTTON_ANGLE)
@@ -149,13 +150,15 @@ def main() -> None:
                         default=ROOT / "assets/controller/xbox-series/buttons/a_button.png")
     parser.add_argument("--output", type=Path, help="Destination PNG")
     parser.add_argument("--size", type=int, default=256, help="Output width and height")
+    parser.add_argument("--no-shadow", action="store_true", help="Omit the artwork's cast shadow")
     args = parser.parse_args()
     if args.size <= 0:
         parser.error("--size must be positive")
 
     master = ROOT / f"assets/controller/masters/button-{args.state}-template.svg"
     output = args.output or ROOT / f"out/controller-button-prototype/{args.button.stem}-{args.state}.png"
-    render_png(compose_svg(master, args.button, args.state), output, args.size)
+    render_png(compose_svg(master, args.button, args.state, cast_shadow=not args.no_shadow),
+               output, args.size)
     print(output)
 
 

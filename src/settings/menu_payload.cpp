@@ -1540,6 +1540,34 @@ bool HideResultsCurrency(std::vector<Node>* roots, std::string* why) {
   return true;
 }
 
+bool PreparePortraitCalibrationFlow(std::vector<ui::dtb::Node>* roots, std::string* why) {
+  if (!roots) return false;
+  auto staged = *roots;
+  for (auto& root : staged) {
+    auto* method = FindNode(root, ui::dtb::kArray, "set_state");
+    auto* states = method ? FindNode(*method, ui::dtb::kCommand, "switch") : nullptr;
+    auto* init = states ? FindNode(*states, ui::dtb::kArray, "init") : nullptr;
+    auto* success = states ? FindNode(*states, ui::dtb::kArray, "success") : nullptr;
+    if (!init || !success || !FindNode(*success, ui::dtb::kCommand, "cal_instructions.lbl")) continue;
+    for (const auto& [state, showing] : {std::pair{init, "TRUE"}, std::pair{success, "FALSE"}}) {
+      for (const char* graphic : ui::kPortraitCalibrationGraphics) {
+        const bool hidden_at_init = state == init &&
+            (std::string_view(graphic) == "audio_anim.grp" || std::string_view(graphic) == "visuals_anim.grp");
+        const auto command = Node::Command({Node::Symbol(graphic), Node::Symbol("set_showing"),
+                                            Node::Symbol(hidden_at_init ? "FALSE" : showing)});
+        const auto text = ui::dtb::SerializeNodes({command});
+        if (std::none_of(state->kids.begin() + 1, state->kids.end(), [&](const auto& child) {
+              return ui::dtb::SerializeNodes({child}) == text;
+            })) state->kids.push_back(command);
+      }
+    }
+    *roots = std::move(staged);
+    return true;
+  }
+  if (why) *why = "calibration init/success states changed";
+  return false;
+}
+
 bool FadeCalibrationButtonAfterCountdown(std::vector<ui::dtb::Node>* roots, std::string* why) {
   if (!roots) return false;
   for (auto& root : *roots) {
@@ -1634,6 +1662,94 @@ bool AddTouchHudAnimation(std::vector<ui::dtb::Node>* roots, std::string* why) {
   return true;
 }
 
+bool AddPortraitSongsLayout(std::vector<Node>* roots, float aspect, std::string* why) {
+  if (!roots) return false;
+  auto staged = *roots;
+  for (const char* method : {"enter", "finish_load", "update_current_song", "mounting_finished"})
+    if (!PanelMethod(&staged, "song_select_panel", method)) {
+      if (why) *why = "portrait song panel lifecycle changed";
+      return false;
+    }
+  if (PanelMethod(&staged, "song_select_panel", "rbbz_portrait_layout")) return true;
+  const auto s = [](std::string_view v) { return Node::Symbol(v); };
+  const auto c = [](std::vector<Node> v) { return Node::Command(std::move(v)); };
+  const auto f = [](float v) {
+    Node node; node.tag = ui::dtb::kFloat; node.scalar = std::bit_cast<uint32_t>(v); return node;
+  };
+  const auto layout = ui::PortraitSongs(aspect);
+  std::vector<Node> apply{s("rbbz_portrait_layout")};
+  if (!PanelMethod(&staged, "song_select_panel", "exit"))
+    for (auto& root : staged)
+      if (root.tag == ui::dtb::kCommand && root.kids.size() > 2 &&
+          root.kids[0].text == "new" && root.kids[2].text == "song_select_panel")
+        root.kids.push_back(Node::Array({s("exit")}));
+  // Reposition the shared retail groups, retaining their controller glyphs,
+  // materials and the arrow flows' animated children. Restore them on departure.
+  for (const bool right : {false, true}) {
+    const auto arrow = c({s("background_panel"), s("find"), s(right ? "Rt_arrow.grp" : "Left_arrow.grp")});
+    apply.push_back(c({arrow, s("set_local_scale"), f(ui::kPortraitSongArrowScale),
+                       f(ui::kPortraitSongArrowScale), f(ui::kPortraitSongArrowScale)}));
+    apply.push_back(c({arrow, s("set_local_pos"),
+                       f((right ? 1.f : -1.f) * (layout.width / 2 - ui::kPortraitSongArrowInset)),
+                       f(-1), f(layout.tabs_z)}));
+    auto* exit = PanelMethod(&staged, "song_select_panel", "exit");
+    exit->kids.push_back(c({arrow, s("set_local_scale"), f(1), f(1), f(1)}));
+    exit->kids.push_back(c({arrow, s("set_local_pos"), f(right ? 363.624542f : -364.586578f),
+                           f(-1), f(186.714798f)}));
+  }
+  apply.push_back(c({s("popup_neon"), s("set_local_scale"), f(1), f(1), f(1.75f)}));
+  apply.push_back(c({s("popup_neon"), s("set_local_pos"), f(0), f(0), f(0)}));
+  apply.push_back(c({s("portrait_search.lbl"), s("set_token_fmt"), s("search")}));
+  for (const auto& [name, token] : {
+      std::pair{"portrait_tab_songs.lbl", "my_songs"}, std::pair{"portrait_tab_store.lbl", "store"},
+      std::pair{"portrait_tab_messages.lbl", "header_inbox"}, std::pair{"portrait_tab_recs.lbl", "recs"}}) {
+    apply.push_back(c({s(name), s("set_token_fmt"), s(token)}));
+    apply.push_back(c({s(name), s("set_showing"), s("TRUE")}));
+  }
+  for (const char* name : {"songs.lst", "song_search.lst"}) {
+    apply.push_back(c({s(name), s("set"), s("display_num"), Node::Int(layout.rows)}));
+    apply.push_back(c({s(name), s("set"), s("max_display"), Node::Int(layout.rows - 1)}));
+  }
+  apply.push_back(c({s("song_search.lst"), s("set"), s("list_resource"), s("portrait_song_search")}));
+  apply.push_back(c({s("song_search.lst"), s("set_local_pos"), Node::Int(0), Node::Int(0), f(layout.list_z)}));
+  apply.push_back(c({s("song_search.lst"), s("set_local_scale"), f(layout.list_scale), f(layout.list_scale), f(layout.list_scale)}));
+  const float album_scale = .24f;
+  apply.push_back(c({s("album_art"), s("set_local_scale"), f(album_scale), f(album_scale), f(album_scale)}));
+  apply.push_back(c({s("album_art"), s("set_local_pos"),
+      f(-layout.width / 2 + 27), Node::Int(0), f(layout.card_z)}));
+  apply.push_back(c({c({s("album_art"), s("find"), s("album_black_bg.mesh")}),
+                     s("set"), s("showing"), s("FALSE")}));
+  apply.push_back(c({s("diff_meter_rnd"), s("set_local_scale"), f(.32f), f(.32f), f(.32f)}));
+  apply.push_back(c({s("diff_meter_rnd"), s("set_local_pos"), f(layout.width / 2 - 35), Node::Int(0), f(-178)}));
+  apply.push_back(c({s("songs.lst"), s("refresh")}));
+  const auto call = c({Node::Var("this"), s("rbbz_portrait_layout")});
+  for (const char* method : {"enter", "finish_load"})
+    PanelMethod(&staged, "song_select_panel", method)->kids.push_back(call);
+  const auto selected = c({c({Node::Var("this"), s("get_songs_provider")}),
+                           s("get_metadata"), c({s("songs.lst"), s("selected_pos")})});
+  const auto details = c({s("do"), Node::Array({Node::Var("portrait_song"), selected}),
+      c({s("portrait_song_title.lbl"), s("set_display_text_string"),
+         c({s("if_else"), Node::Var("portrait_song"),
+            c({Node::Var("portrait_song"), s("title")}), Node::String("")})})});
+  for (const char* method : {"update_current_song", "mounting_finished"})
+    PanelMethod(&staged, "song_select_panel", method)->kids.push_back(details);
+  // Search owns the same footprint with its own native data provider.
+  for (auto& root : staged) {
+    const auto hide_rail = [&](const auto& self, Node& node) -> void {
+      if (node.tag == ui::dtb::kCommand && node.kids.size() == 3 &&
+          node.kids[0].text == "scroller.grp" && node.kids[1].text == "set_showing")
+        node.kids[2] = s("FALSE");
+      for (auto& child : node.kids) self(self, child);
+    };
+    hide_rail(hide_rail, root);
+    if (root.tag == ui::dtb::kCommand && root.kids.size() > 2 &&
+        root.kids[0].text == "new" && root.kids[2].text == "song_select_panel")
+      root.kids.push_back(Node::Array(apply));
+  }
+  *roots = std::move(staged);
+  return true;
+}
+
 bool AddPortraitAutosaveLayout(std::vector<Node>* roots, std::string* why) {
   auto* enter = PanelMethod(roots, "autosave_warning_panel", "enter");
   if (!enter) {
@@ -1690,12 +1806,10 @@ bool AddPortraitSplashLayout(std::vector<Node>* roots, float aspect, std::string
       cmd({sym("=="), Node::Property({sym("rbbz_portrait_main")}), state}),
       cmd({sym("do"),
           cmd({Node::Var("this"), sym("set"), sym("rbbz_portrait_main"), state}),
-          cmd({sym("if_else"), cmd({sym("=="), state, sym("main_menu")}),
-              place("anim_logo.grp", layout.logo_scale, layout.logo_x, 0, layout.logo_z),
-              place("anim_logo.grp", layout.title_logo_scale, 0, 0, layout.title_logo_z)}),
+          place("anim_logo.grp", layout.logo_scale, layout.logo_x, 0, layout.logo_z),
           place("start_panel.grp", layout.start_scale, 0, 8, layout.start_z),
           place("list.grp", 1, 0, -15.76387f, 0),
-          place("start.lst", layout.list_scale, 0, 0, layout.list_z),
+          place("start.lst", layout.menu_list_scale, 0, 0, layout.list_z),
           // The city's transform parent is the scene, not its draw group.
           place("splash_city.mesh", layout.city_scale, 0, 82.35371f, layout.city_z),
           cmd({sym("continue.ihp"), sym("set_showing"), sym("FALSE")}),
@@ -1740,6 +1854,23 @@ bool AddPortraitLoadingLayout(std::vector<Node>* roots, bool song_loading,
     position("Powerups.grp", 15);
     position("load_vert.grp", -80);
     position("loading.lbl", -175);
+    const auto splash = ui::PortraitSplash(aspect);
+    const auto set = [&](const char* name, Node property, Node value) {
+      enter->kids.push_back(Node::Command({Node::Symbol(name), Node::Symbol("set"),
+                                          std::move(property), std::move(value)}));
+    };
+    // UILabel sizes are local to the fitted loading directory. Keep the tip
+    // readable and give the begin prompt the Start screen's visible text size.
+    for (const char* label : {"tip.lbl", "loading.lbl"}) {
+      enter->kids.push_back(Node::Command({Node::Symbol(label), Node::Symbol("set_local_scale"),
+                                          number(1), number(1), number(1)}));
+      set(label, Node::Symbol("width"), number(splash.width * .84f / scale));
+      set(label, Node::Symbol("height"), number(70 / scale));
+      set(label, Node::Symbol("fit_type"), Node::Int(0));
+      const float size = std::string_view(label) == "tip.lbl" ? 11.5f : 28.630569f * splash.start_scale;
+      set(label, Node::Array({Node::Symbol("styles"), Node::Int(0), Node::Symbol("text_size")}),
+          number(size / scale));
+    }
   } else {
     const auto sym = [](const char* value) { return Node::Symbol(value); };
     const auto set = [&](const char* name, Node property, Node value) {
@@ -1938,7 +2069,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     }
   }
   if (!edit("ui/calibration/gen/calibration.dtb", [&](auto& roots) {
-        return FadeCalibrationButtonAfterCountdown(&roots, error);
+        return FadeCalibrationButtonAfterCountdown(&roots, error) &&
+            (!portrait_interface || PreparePortraitCalibrationFlow(&roots, error));
       })) return false;
   if (screen::CurrentMenuConfiguration().controller_layout_enabled &&
       !edit("config/gen/beatmatch_controller.dtb", [&](auto& roots) {
@@ -2240,6 +2372,17 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           }
         }
       }
+      if (portrait_interface) {
+        const char* caption = locale.find("/fre/") != std::string::npos ? "Trier" :
+            locale.find("/deu/") != std::string::npos ? "Sort." :
+            locale.find("/esl/") != std::string::npos ? "Orden" :
+            locale.find("/ita/") != std::string::npos ? "Ordina" :
+            locale.find("/ptb/") != std::string::npos ? "Ordem" : "Sort";
+        for (auto& root : roots)
+          if (root.tag == ui::dtb::kArray && root.kids.size() == 2 &&
+              root.kids[0].text == "song_sort_str" && root.kids[1].tag == ui::dtb::kString)
+            root.kids[1].text = std::string(caption) + " - %s";
+      }
       for (const auto& [key,text] : std::initializer_list<std::pair<const char*,const char*>>{
           {"rbbz_graphics_checking","Checking graphics cache..."},
           {"rbbz_graphics_preparing","Preparing graphics... %i / %i"},
@@ -2248,6 +2391,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           {"rbbz_graphics_failed_cache","The graphics cache folder is not writable."},
           {"rbbz_graphics_retry","Try Again"},
           {"rbbz_loading_retry","Retry"},
+          {"rbbz_calibration_next","Next"},
           {"rbbz_loading_continue","Continue"},
           {"rbbz_graphics_ignore","Ignore"},
           {"rbbz_graphics_back","Skip"},
@@ -2640,6 +2784,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   built[screen::kPauseSceneRecord] = built[screen::kSceneRecord];
   if (!read("ui/av_options/gen/av_options.milo_xbox",
             &built["ui/av_options/gen/settings_scale.milo_xbox"], error)) return false;
+  const auto scale_source = built["ui/av_options/gen/settings_scale.milo_xbox"];
   if (portrait_interface) {
     std::vector<uint8_t> buttons, scene, source;
     const auto aspect = screen::CurrentMenuConfiguration().portrait_aspect;
@@ -2647,13 +2792,19 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         !ui::input_font::PreparePortraitAudio(built["ui/av_options/gen/settings_scale.milo_xbox"],
             buttons, aspect, &scene, error)) return false;
     built["ui/av_options/gen/av_options.milo_xbox"] = scene;
-    built["ui/av_options/gen/settings_scale.milo_xbox"] = std::move(scene);
     if (!read("ui/credits/gen/credits.milo_xbox", &source, error) ||
         !ui::input_font::PreparePortraitCredits(source, buttons, aspect, &scene, error)) return false;
     built["ui/credits/gen/credits.milo_xbox"] = std::move(scene);
     if (!read("ui/resource/lists/gen/list_credits.milo_xbox", &source, error) ||
         !ui::input_font::PreparePortraitCreditsList(source, aspect, &scene, error)) return false;
     built["ui/resource/lists/gen/list_credits.milo_xbox"] = std::move(scene);
+  }
+  {
+    std::vector<uint8_t> buttons, scene;
+    if (!read(ui::input_font::kListRecord, &buttons, error) ||
+        !ui::input_font::PrepareRenderScaleScene(scale_source, buttons,
+            screen::CurrentMenuConfiguration().portrait_aspect, portrait_interface, &scene, error)) return false;
+    built["ui/av_options/gen/settings_scale.milo_xbox"] = std::move(scene);
   }
   built["ui/av_options/gen/settings_scale_pause.milo_xbox"] =
       built["ui/av_options/gen/settings_scale.milo_xbox"];
@@ -2834,10 +2985,42 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
               screen::CurrentMenuConfiguration().portrait_aspect, error);
         })) return false;
     std::vector<uint8_t> source, buttons, scene;
+    const auto songs_aspect = screen::CurrentMenuConfiguration().portrait_aspect;
+    // Reflow the generated panel, preserving its configured header routes.
+    auto& song_record = built.at("ui/song_select/gen/song_select.dtb");
+    std::vector<Node> song_roots;
+    ui::dtb::RootHeader song_header;
+    if (!ui::dtb::Parse(song_record.data(), song_record.size(), &song_roots, &song_header, error) ||
+        !AddPortraitSongsLayout(&song_roots, songs_aspect, error)) return false;
+    song_record = ui::dtb::Compile(song_roots, song_header);
+    if (!read(ui::input_font::kSongSelectRecord, &source, error) ||
+        !read(ui::input_font::kListRecord, &buttons, error) ||
+        !ui::input_font::PreparePortraitSongs(source, buttons, songs_aspect, &scene, error)) return false;
+    if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
+      source = std::move(scene);
+      if (!ui::input_font::PrepareSongSelect(source, &scene, error)) return false;
+    }
+    built[ui::input_font::kSongSelectRecord] = std::move(scene);
+    for (const bool grouped : {true, false}) {
+      if (!read(grouped ? "ui/resource/lists/gen/list_mysongs.milo_xbox" :
+                          "ui/resource/lists/gen/list_popup.milo_xbox", &source, error) ||
+          !ui::input_font::PreparePortraitSongList(source, buttons, grouped, &scene, error)) return false;
+      built[grouped ? ui::input_font::kPortraitSongListRecord : ui::input_font::kPortraitSongSearchRecord] = std::move(scene);
+    }
+    if (!read("ui/resource/lists/gen/list_popup.milo_xbox", &source, error) ||
+        !ui::input_font::PreparePortraitShortcuts(source, &scene, error)) return false;
+    built[ui::input_font::kPortraitShortcutsRecord] = std::move(scene);
     if (!read(ui::input_font::kInlineHelpRecord, &source, error) ||
         !ui::input_font::PreparePortraitActions(source,
             screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
     built[ui::input_font::kPortraitActionsRecord] = std::move(scene);
+    if (!read(ui::input_font::kLoadingRecord, &source, error) ||
+        !ui::input_font::PreparePortraitSongLoading(source, &scene, error)) return false;
+    if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
+      if (!ui::input_font::PrepareLoading(scene, &source, error)) return false;
+      scene = std::move(source);
+    }
+    built[ui::input_font::kLoadingRecord] = std::move(scene);
     if (!read(ui::input_font::kAutosaveRecord, &source, error) ||
         !ui::input_font::PreparePortraitAutosave(source,
             screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;

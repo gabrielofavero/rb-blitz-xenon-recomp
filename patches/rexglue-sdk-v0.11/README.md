@@ -5,6 +5,15 @@ upstream v0.11.0 commit `a3e1d82678ca20d68d4837a8e9ee4652ff073745`.
 The production gitlink and title integration now use this release and patch set.
 The fresh Windows AMD64 production source-SDK release build passes.
 Formal performance and native-platform/package gates remain open after adoption.
+
+Portrait keyboard layout remains in its existing owner, 0036. The 0037 controller
+and 0063 automatic-keyboard prompt hunks are regenerated against it without
+changing their behavior. The opt-in renderer sizes portrait dialogs from phone
+width and reserves space below for the platform keyboard. This is shared UI for
+all supported hosts, architectures and rendering backends. The 67-patch replay
+passes; Windows AMD64 is the available native validation platform for this
+refinement. Linux, macOS, iOS and other architectures are not tested here.
+
 The [historical 71-patch baseline](../README.md) at
 `c94f5ebdcb3c9d1a460ca48e04f9758448f8d518`, including its nested MoltenVK patch,
 is retained for rollback. The

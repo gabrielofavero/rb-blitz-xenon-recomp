@@ -63,13 +63,13 @@ std::string TextForSymbol(const std::string_view symbol) {
   // The retail rows this table owns. Checked first because none of these names can be a generated
   // row's (the generated ones are `settings_*` or the five adopted retail labels).
   if (symbol == "av_overscan") {
-    return "Expand the picture so it fills the screen edge to edge.";
+    return "Fill the screen to its edges.";
   }
   if (symbol == "av_active_track_volume") {
-    return "Boost the volume of the track you are playing.";
+    return "Boost the active track volume.";
   }
   if (symbol == "av_sound_volume") {
-    return "How loud the game's sound effects play.";
+    return "Adjust sound effects volume.";
   }
   if (symbol == "av_bass_boost") {
     return "Add extra bass to the mix.";

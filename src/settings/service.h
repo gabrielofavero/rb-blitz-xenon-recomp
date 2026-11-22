@@ -93,12 +93,15 @@ class Service {
   const CapabilitySnapshot& capabilities() const { return capabilities_; }
   // Resolution proportions are fixed at boot; changing Force 16:9 waits for restart.
   DisplayMode ResolutionProfileDisplay() const;
+  DisplayMode RenderScalePixels(SettingId id, int tenths) const;
   void SetReconciler(const Reconciler* reconciler);
   void SetProviderSink(ProviderSink* sink);
   bool has_provider_sink() const { return provider_ != nullptr; }
   void SetProviderChoices(std::map<SettingId, std::vector<Choice>> choices);
   void SetProviderValues(std::map<SettingId, Value> values);
   void SetProviderDefaults(std::map<SettingId, Value> values);
+  // Seed the optional mobile HUD once, after a fresh profile's provider is ready.
+  CommitResult ApplyFirstBootMobileHudDefaults();
   // Values an explicit developer config / environment / CLI won, with the source that won.
   void SetOverrides(std::map<SettingId, Value> values, std::map<SettingId, Source> sources);
   void SetBootValues(std::map<SettingId, Value> values, std::string reason);
@@ -185,6 +188,7 @@ class Service {
   ProviderSink* provider_ = nullptr;
   bool capabilities_set_ = false;
   bool force_16_by_9_at_boot_ = false;
+  bool mobile_hud_defaults_applied_ = false;
   uint64_t revision_ = 0;
   uint64_t capability_revision_ = 1;
   uint64_t txn_seq_ = 0;

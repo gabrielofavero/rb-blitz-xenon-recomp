@@ -18,6 +18,7 @@
 #include "settings/schema.h"
 
 #include <cstdint>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -1486,7 +1487,7 @@ void TestMobilePreviewSettings() {
       caps.primary_display_size = native;
       service.SetCapabilities(caps);
       const auto basis = service.ResolutionProfileDisplay();
-      CHECK_EQ(basis.width * 9, basis.height * 16);
+      CHECK_TRUE(std::abs(double(basis.width) / basis.height - 437.0 / 201) < .004);
       CHECK_TRUE(basis.width <= native.width && basis.height <= native.height);
       // A copied desktop preference or recovery value cannot restore ultrawide preview.
       service.SetBootValues({{SettingId::kForce16By9, BoolV(false)}}, "settings.graphics.recovery");
@@ -1505,6 +1506,55 @@ void TestMobilePreviewSettings() {
   schema::SetMobilePreviewEnabled(false);
   CHECK_TRUE(schema::CurrentReleaseSettings().platform == desktop.platform);
   CHECK_FALSE(schema::CurrentReleaseSettings().mobile_preview);
+}
+
+void TestFirstBootMobileHudDefaults() {
+  BeginCase("fresh mobile profiles persist a minimal HUD, while existing choices and desktop stay intact");
+  for (const auto platform : {schema::HostPlatform::kIOS, schema::HostPlatform::kAndroid,
+                              schema::HostPlatform::kWindows}) {
+    for (const bool existing : {false, true}) {
+      Scratch scratch;
+      const auto paths = Paths(scratch);
+      if (existing) WriteFile(paths.settings_file, "schema_version = 1\n");
+      Service service(paths, schema::SettingsForRelease(platform, "test"));
+      service.Boot(nullptr, {}, nullptr);
+      service.SetCapabilities(Capabilities());
+      FakeProvider provider;
+      for (const auto id : {SettingId::kShowPb, SettingId::kProgressBar, SettingId::kShowTimer})
+        provider.values[id] = BoolV(true);
+      service.SetProviderSink(&provider);
+      const bool initialize = !existing && schema::IsMobile(platform);
+      const auto applied = service.ApplyFirstBootMobileHudDefaults();
+      CHECK_EQ(applied.provider_written, initialize);
+      CHECK_EQ(provider.saves, initialize ? 1 : 0);
+      for (const auto id : {SettingId::kShowPb, SettingId::kProgressBar, SettingId::kShowTimer})
+        CHECK_EQ(service.EffectiveValue(id).boolean, !initialize);
+      if (!initialize) continue;
+      const auto edit = service.BeginEdit(service.revision());
+      CHECK_TRUE(service.Set(edit, SettingId::kShowTimer, BoolV(true), service.capability_revision()).ok);
+      CHECK_TRUE(service.Commit(edit).status == CommitStatus::kSaved);
+      CHECK_TRUE(service.ApplyFirstBootMobileHudDefaults().status == CommitStatus::kNoChanges);
+      CHECK_TRUE(service.EffectiveValue(SettingId::kShowTimer).boolean);
+    }
+  }
+  BeginCase("mobile HUD initialization respects explicit ownership and can retry a failed provider save");
+  Scratch scratch;
+  Service service(Paths(scratch), schema::SettingsForRelease(schema::HostPlatform::kIOS, "test"));
+  service.Boot(nullptr, {}, nullptr);
+  service.SetCapabilities(Capabilities());
+  FakeProvider provider;
+  provider.durable = false;
+  provider.values = {{SettingId::kShowPb, BoolV(true)}, {SettingId::kProgressBar, BoolV(true)},
+                     {SettingId::kShowTimer, BoolV(true)}};
+  service.SetProviderSink(&provider);
+  service.SetOverrides({{SettingId::kShowTimer, BoolV(true)}}, {{SettingId::kShowTimer, Source::kCommandLine}});
+  CHECK_TRUE(service.ApplyFirstBootMobileHudDefaults().status == CommitStatus::kPartial);
+  CHECK_TRUE(service.CommittedProviderValue(SettingId::kShowPb)->boolean);
+  provider.durable = true;
+  CHECK_TRUE(service.ApplyFirstBootMobileHudDefaults().status == CommitStatus::kSaved);
+  CHECK_FALSE(service.CommittedProviderValue(SettingId::kShowPb)->boolean);
+  CHECK_FALSE(service.CommittedProviderValue(SettingId::kProgressBar)->boolean);
+  CHECK_TRUE(service.CommittedProviderValue(SettingId::kShowTimer)->boolean);
 }
 
 void TestIOSReleaseSettings() {
@@ -1840,6 +1890,7 @@ int main(int argc, char** argv) {
   TestReleaseSettingsMigration();
   TestVulkanOnlyReleaseSettings();
   TestIOSReleaseSettings();
+  TestFirstBootMobileHudDefaults();
   TestMobilePreviewSettings();
   TestIOSUltimateDefaultUpgrade();
   TestIOSImporterDefault();
