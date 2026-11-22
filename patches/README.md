@@ -14,9 +14,9 @@ checkout.
 ## Registered production v0.11.0 stack (2026-11-18)
 
 The [v0.11.0 stack and complete disposition ledger](rexglue-sdk-v0.11/README.md)
-contains the **67 registered production SDK patches** for exact release commit
+contains the **69 registered production SDK patches** for exact release commit
 `a3e1d82678ca20d68d4837a8e9ee4652ff073745`. It accounts for **all 71 original
-SDK patch IDs, the retained nested MoltenVK patch and new 0089/0090/0091/0092/0093/0094/0095**:
+SDK patch IDs, the retained nested MoltenVK patch and new 0089/0090/0091/0092/0093/0094/0095/0096/0097**:
 sixty original IDs retain v0.11 files; eleven use upstream/title replacements
 or fold into an owning patch. The title integration and SDK pin are adopted;
 the fresh Windows AMD64 production source-SDK release build passes.
@@ -31,6 +31,29 @@ across Windows, Linux, macOS and iOS, independently of architecture or D3D12,
 Vulkan and MoltenVK. Landscape and unthemed prompt sizing retain their defaults.
 Strict replay of all 67 production patches passes. Native validation is Windows
 AMD64; the other platforms and architectures have not been executed for this change.
+
+The separate [0097 resolve allocation limit patch](rexglue-sdk-v0.11/0097-vulkan-resolve-allocation-limit.patch)
+checks the Vulkan 1.1 allocation limit before constructing resolution-scaled
+render-target and texture caches. Non-sparse scaled resolves need one allocation
+of 512 MiB times the scale area; a saved 3x3 request needs 4.5 GiB and aborts
+startup on an Apple M1 when allocation fails. Both cache scales now decrease
+together to fit the reported limit, with a warning and no saved-setting changes.
+This allocation sizing responsibility is separate from 0002's texture format
+conversion, 0070's upload batching and 0074's iOS memory mapping. It applies to
+Vulkan on Windows, Linux, macOS and iOS at any architecture; sparse residency,
+unknown Vulkan 1.0 limits and D3D12 retain their existing behavior. A reported
+limit does not guarantee an allocation succeeds under memory pressure.
+
+The separate [0096 compiler portability patch](rexglue-sdk-v0.11/0096-portable-aes-schedule-extent.patch)
+uses the AES schedule member type to determine its fixed conversion buffer size.
+It supports Apple Clang 17 without changing AES behavior and applies to all
+platforms and backends. No existing patch owns these upstream helpers.
+The iOS-only unused arguments in the sandbox memory-backing branch are handled
+inside the existing 0074 runtime patch, preserving its ownership and other hosts.
+That patch also applies the existing iOS `vm_region_64` route to the new
+process-resource region counter; macOS keeps its `mach_vm_region` implementation.
+The 0077 Metal drawable-size helper explicitly links `objc` on iOS; its macOS
+links remain unchanged, and the following 0078 CMake hunk is adjusted.
 
 The original `c94f5ebdcb3c9d1a460ca48e04f9758448f8d518` pin, 71-patch stack
 under `rexglue-sdk/`, nested source patch and historical lineage below are retained

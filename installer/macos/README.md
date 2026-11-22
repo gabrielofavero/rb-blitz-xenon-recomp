@@ -205,6 +205,24 @@ The modular runtime inventory is `installer/config/runtime-modules.json`. Stagin
 requires every configured module, including providers loaded at runtime, and
 checks their dependency closure. Vulkan and Tracy files follow the build cache.
 License notices use current SDK vendors and the prepared Vulkan source pins;
-missing or ambiguous nested MoltenVK license sources fail staging. The previous
-native dependency record predates this layout, so a current native macOS audit
-is required before packaging is certified.
+missing or ambiguous nested MoltenVK license sources fail staging. Configured
+dependency source directories select their top-level notices rather than licenses
+of embedded dependencies or unrelated cached revisions.
+
+On 2026-11-21, the v0.11.0 Apple Silicon development installer passed the native
+bundle and expanded-package audits with 1,241 files and 22 Mach-O images using
+the recorded Xcode 26.0.1 toolchain. All 68 SDK patches replay with zero updates;
+41 packaging tests (two PowerShell-only skips) and the native guest-memory test
+pass. The package and hash inventory are under `out/macos/packages/rexglue-v0.11`.
+This completes the current arm64 dependency inventory; Intel, installation,
+Finder launch, gameplay and minimum-OS acceptance remain unverified.
+
+The subsequent resolve-allocation fix is packaged under
+`out/macos/packages/resolve-allocation-fix/`, with its sibling hash inventory.
+The native app and expanded-package audits again pass with 1,241 files and
+22 Mach-O images, and all 69 SDK patches replay without updates. A saved 3x3
+render scale requires one 4.5 GiB non-sparse resolve buffer, exceeding Apple M1's
+4 GiB allocation limit. Startup now logs a fallback to an effective 2x2 scale
+without changing the saved preference. The 655 sizing checks and headless native
+2 GiB allocation/bind test pass; the affected iOS Vulkan library also compiles.
+These checks do not establish successful installed-game launch or gameplay.

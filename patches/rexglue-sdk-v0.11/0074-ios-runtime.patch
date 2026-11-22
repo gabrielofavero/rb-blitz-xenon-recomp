@@ -157,12 +157,14 @@ diff --git a/src/base/memory_posix.cpp b/src/base/memory_posix.cpp
  
    if ((info.protection & (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE)) ==
        (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE)) {
-@@ -354,6 +378,24 @@
+@@ -354,6 +378,26 @@
      return kFileMappingHandleInvalid;
    }
    return ashmem_fd;
 +#elif REX_PLATFORM_IOS
 +  // An unlinked sandbox temp file supplies the shared aliases without named shm.
++  (void)path;
++  (void)access;
 +  const char* temp_dir = std::getenv("TMPDIR");
 +  std::string temporary = (std::filesystem::path(temp_dir ? temp_dir : "/tmp") /
 +                            "rex-memory-XXXXXX").string();
@@ -182,7 +184,7 @@ diff --git a/src/base/memory_posix.cpp b/src/base/memory_posix.cpp
  #else
    int oflag;
    switch (access) {
-@@ -414,9 +456,9 @@
+@@ -414,9 +458,9 @@
  #endif
  }
  
@@ -457,3 +459,42 @@ diff --git a/cmake/rexglueConfig.cmake.in b/cmake/rexglueConfig.cmake.in
  # Only Release rexglue is installed, so every consumer config has to reach it.
  if (TARGET rex::rexglue)
    set_target_properties(
+diff --git a/src/base/process_resources_posix.cpp b/src/base/process_resources_posix.cpp
+index 94d3d885..89cb3cac 100644
+--- a/src/base/process_resources_posix.cpp
++++ b/src/base/process_resources_posix.cpp
+@@ -24,7 +24,9 @@
+ 
+ #if defined(__APPLE__)
+ #include <mach/mach.h>
++#if !REX_PLATFORM_IOS
+ #include <mach/mach_vm.h>
++#endif
+ #include <mach/vm_region.h>
+ #endif
+ 
+@@ -60,15 +62,24 @@ long CountOpenDescriptors() {
+ #if defined(__APPLE__)
+ 
+ long CountMemoryRegions() {
++#if REX_PLATFORM_IOS
++  vm_address_t address = 0;
++  vm_size_t size = 0;
++#else
+   mach_vm_address_t address = 0;
+   mach_vm_size_t size = 0;
++#endif
+   long regions = 0;
+   vm_region_basic_info_data_64_t info;
+   while (true) {
+     mach_msg_type_number_t info_count = VM_REGION_BASIC_INFO_COUNT_64;
+     mach_port_t object_name = MACH_PORT_NULL;
+     const kern_return_t status =
++#if REX_PLATFORM_IOS
++        vm_region_64(mach_task_self(), &address, &size, VM_REGION_BASIC_INFO_64,
++#else
+         mach_vm_region(mach_task_self(), &address, &size, VM_REGION_BASIC_INFO_64,
++#endif
+                        reinterpret_cast<vm_region_info_t>(&info), &info_count, &object_name);
+     if (status != KERN_SUCCESS) {
+       break;

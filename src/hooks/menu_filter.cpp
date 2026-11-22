@@ -231,7 +231,7 @@ uint32_t RetargetChecksumRow(uint8_t* base, const uint8_t before[20], const uint
     size_t available = 0;
     rex::memory::PageAccess access = rex::memory::PageAccess::kNoAccess;
     if (!rex::memory::QueryProtect(at, available, access)) {
-      const size_t page = rex::memory::page_size();
+      const size_t page = rex::memory::GetPageSize();
       at += std::min(size_t(limit - at), page - reinterpret_cast<uintptr_t>(at) % page);
       continue;
     }

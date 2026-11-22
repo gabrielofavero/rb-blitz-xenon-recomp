@@ -1,0 +1,28 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp b/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp
+@@ -12,6 +12,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cstring>
++#include <type_traits>
+ #include <vector>
+ 
+ #include <rex/logging/log_category.h>
+@@ -827,14 +828,14 @@
+ }
+ 
+ void ToHost(const AESSchedule& title, EXCRYPT_AES_SCHEDULE& host) {
+-  std::array<u32, std::size(title.words)> words;
++  std::array<u32, std::extent_v<decltype(AESSchedule::words)>> words;
+   std::transform(std::begin(title.words), std::end(title.words), words.begin(),
+                  [](const be_u32& word) { return static_cast<u32>(word); });
+   std::memcpy(&host, words.data(), sizeof(host));
+ }
+ 
+ void ToGuest(const EXCRYPT_AES_SCHEDULE& host, AESSchedule& title) {
+-  std::array<u32, std::size(title.words)> words;
++  std::array<u32, std::extent_v<decltype(AESSchedule::words)>> words;
+   std::memcpy(words.data(), &host, sizeof(host));
+   std::copy(words.begin(), words.end(), std::begin(title.words));
+ }

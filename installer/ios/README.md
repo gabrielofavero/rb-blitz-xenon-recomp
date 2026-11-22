@@ -73,6 +73,13 @@ pass. This is build/host evidence; no importer UI has been navigated. The exact
 validation and owner checks are in the
 [importer plan](../../docs/plans/finished/2026-11-16-ios-importer-plan.md).
 
+2026-11-21 build evidence: the v0.11.0 68-patch SDK snapshot produces audited
+unsigned bundled (343 MiB) and importer (64 MiB) IPAs under
+`out/ios/packages/rexglue-v0.11`, with SHA-256 inventories and signing entitlements.
+Both are arm64 iPhoneOS builds targeting iOS 17.0 using Xcode 26.0.1. The snapshot
+passes strict SDK replay and 41 host packaging tests (two PowerShell-only skips).
+Device signing, importer UI and gameplay remain unverified.
+
 ## Bundled-assets IPA
 
 The original `sh scripts/ios/build.sh` flow is unchanged. The paragraphs below

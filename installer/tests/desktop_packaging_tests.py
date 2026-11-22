@@ -108,6 +108,27 @@ class DesktopInventoryTests(unittest.TestCase):
             other.parent.mkdir(parents=True)
             other.write_text("different source version")
             with self.assertRaisesRegex(ValueError, "ambiguous"): runtime.molten_dependency_license(build, "cereal")
+            nested = cereal.parent / "include/cereal/external/LICENSE"
+            nested.parent.mkdir(parents=True)
+            nested.write_text("embedded dependency license")
+            with (build / "CMakeCache.txt").open("a") as stream:
+                stream.write(f"cereal_SOURCE_DIR:STATIC={cereal.parent}\n")
+            self.assertEqual(runtime.molten_dependency_license(build, "cereal"), cereal)
+            cereal.unlink()
+            with self.assertRaisesRegex(ValueError, "missing pinned"):
+                runtime.molten_dependency_license(build, "cereal")
+            if sys.platform != "win32":
+                outside = build / "outside-license"
+                outside.write_text("unrelated license")
+                cereal.symlink_to(outside)
+                with self.assertRaisesRegex(ValueError, "missing pinned"):
+                    runtime.molten_dependency_license(build, "cereal")
+            spirv = cache / "SPIRV-Cross/LICENSE"
+            spirv.parent.mkdir()
+            spirv.write_text("fixture SPIRV-Cross license")
+            with (build / "CMakeCache.txt").open("a") as stream:
+                stream.write(f"CPM_PACKAGE_SPIRV-Cross_SOURCE_DIR:INTERNAL={spirv.parent}\n")
+            self.assertEqual(runtime.molten_dependency_license(build, "spirv-cross"), spirv)
 
     @unittest.skipUnless(shutil.which("pwsh") or shutil.which("powershell"), "requires PowerShell")
     def test_windows_payload_requires_configured_provider_modules(self):
