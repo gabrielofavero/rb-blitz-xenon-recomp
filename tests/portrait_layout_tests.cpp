@@ -50,6 +50,20 @@ extern "C" REX_FUNC(__imp__sub_824C8E88) {
 int main() {
   using namespace rb_blitz::test;
   using namespace rb_blitz::ui;
+  BeginCase("portrait powerups separate the complete song card, three choices and footer");
+  CHECK_TRUE(PortraitSplashScreen("powerup_select_screen", "powerup_select_panel"));
+  for (float aspect : {.3f, 201.f / 437, 9.f / 16, .75f, .9f}) {
+    const auto layout = PortraitPowerups(aspect);
+    CHECK_EQ(layout.choices, 3);
+    CHECK_TRUE(layout.card_z - layout.card_height / 2 > layout.categories_z + 45 * layout.category_scale);
+    CHECK_TRUE(layout.categories_z - 45 * layout.category_scale > layout.choices_z + 25 * layout.choices_scale);
+    CHECK_TRUE(layout.CategoryCaptionZ() - 8 > layout.choices_z + 25 * layout.choices_scale);
+    CHECK_TRUE(layout.InfoZ() + 12 < layout.choices_z - 25 * layout.choices_scale);
+    CHECK_TRUE(layout.InfoZ() - 12 > PortraitFooterAction(aspect, 0, 2).z + 30);
+    CHECK_TRUE((64 + 25) * layout.choices_scale < layout.width / 2);
+    CHECK_TRUE((64 + 46 + 16) * layout.choices_scale < layout.width / 2);
+    CHECK_TRUE(layout.description_z > PortraitFooterAction(aspect, 0, 2).z + 30);
+  }
   BeginCase("portrait songs reserve separate rows, details and footer at phone and tablet aspects");
   for (float aspect : {.3f, 201.f / 437, 9.f / 16, .75f, .9f}) {
     const auto layout = PortraitSongs(aspect);

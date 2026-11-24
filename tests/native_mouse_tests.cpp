@@ -429,6 +429,11 @@ int main() {
   CHECK_EQ(MenuArrowPage(5, 5, 15, MouseAction::kRight), 10);
   CHECK_EQ(MenuArrowPage(10, 5, 15, MouseAction::kLeft), 5);
   CHECK_EQ(MenuArrowPage(0, 5, 0, MouseAction::kRight), 0);
+  // Portrait reveals three large icons at a time, including a partial last page.
+  CHECK_EQ(MenuArrowPage(0, 3, 4, MouseAction::kRight), 3);
+  CHECK_EQ(MenuArrowPage(3, 3, 4, MouseAction::kRight), 4);
+  CHECK_EQ(MenuArrowPage(4, 3, 4, MouseAction::kLeft), 1);
+  CHECK_EQ(MenuArrowPage(1, 3, 4, MouseAction::kLeft), 0);
 
   BeginCase("pointer mapping respects letterboxing, stretch and overscan");
   auto p = MenuPointer(1280, 360, 2560, 720, 16, 9, true, false, 90, 90);

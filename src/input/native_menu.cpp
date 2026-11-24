@@ -123,6 +123,13 @@ struct Geometry {
   int selected = -1;
 };
 thread_local Geometry geometry;
+struct PowerupInfoTarget {
+  uint32_t screen = 0, focus = 0, frame = 0;
+  MenuBounds bounds;
+  MenuPoint row;
+};
+thread_local std::array<PowerupInfoTarget, 3> powerup_info_targets;
+thread_local uint32_t powerup_info_screen = 0, powerup_info_frame = 0;
 thread_local uint32_t frame_number = 0;
 struct HeaderGeometry { uint32_t screen = 0, focus = 0, frame = 0; MenuBounds bounds; };
 thread_local std::array<HeaderGeometry, 4> header_geometry;
@@ -239,6 +246,8 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     // its first draw. Never hit-test or dispatch against indices captured from
     // the preceding screen or list generation.
     geometry = {};
+    powerup_info_targets = {};
+    powerup_info_screen = powerup_info_frame = 0;
     header_geometry = {};
     hint_targets.clear();
     footer_touch_press.Reset();
@@ -553,10 +562,23 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     }
   }
   if (!event) return;
+  const bool powerup_info = powerup_info_screen == current_screen &&
+      powerup_info_frame + 1 == frame_number;
   // Footer labels act on the existing selection. Handle them before row hit
   // testing, which would otherwise reject a footer click as empty space.
   // Touch-generated left presses use this same queue as physical mouse clicks.
   if (event->action == MouseAction::kAccept) {
+    if (!powerup_info) for (const auto& target : powerup_info_targets) {
+      if (target.screen != current_screen || target.focus != current_focus ||
+          target.frame + 1 != frame_number || !target.bounds.Contains(event->point)) continue;
+      if (Select(ctx, base, target.row)) {
+        touch_highlight.Reset();
+        scroll_follow.Reset();
+        std::lock_guard lock(mutex);
+        if (queue.enabled()) queue.PulseButton(0x8000);
+      }
+      return;
+    }
     if (const auto button = HitMenuHint(event->point, hint_targets,
                                         current_screen, current_focus, frame_number, current_input_scope)) {
       scroll_follow.Reset();
@@ -580,6 +602,7 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
                   current_screen_name, event->point.x, event->point.y, hint_targets.size(),
                   hint_targets.empty() ? 0 : hint_targets.back().frame, frame_number);
   }
+  if (powerup_info) return;
   // Sliders are UIComponents, with no UIListState to select or scroll. Route
   // through their own directional handlers so their animation and value agree.
   const auto focus_name = ObjectName(base, ObjectBase(base, current_focus));
@@ -755,6 +778,13 @@ struct DrawCapture {
 };
 thread_local DrawCapture* drawing = nullptr;
 
+bool PortraitPowerupFooterRow(uint8_t* base) {
+  return drawing && drawing->row && settings::InterfacePortraitEnabled() &&
+      current_screen_name == "powerup_select_screen" &&
+      ObjectName(base, ObjectBase(base, drawing->result.list)) == "powerup_select.lst" &&
+      U32(base, drawing->row + 36) == 3;
+}
+
 // Static retail meshes discard their CPU vertices after upload. Keep only their
 // local bounds, including the packed 36-byte vertex representation loaded from Milo.
 // The GPU allocation identifies the resource; a reused guest address cannot reuse
@@ -871,6 +901,14 @@ std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* b
   if (!settings::InterfacePortraitEnabled()) return entries;
   const auto header = ObjectBase(base, owner);
   const auto dir = header ? U32(base, header + 36) : 0;
+  if (dir && SceneObject(ctx, base, dir, "portrait_powerups.color") &&
+      ObjectName(base, header) == "help.ihp") {
+    auto ordered = entries;
+    std::stable_sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) {
+      return a.action == 2 && b.action != 2;
+    });
+    return ordered;
+  }
   if (dir && SceneObject(ctx, base, dir, "portrait_songs.color") &&
       ObjectName(base, header) == "InlineHelp.ihp") {
     std::vector<InlineHelpEntry> visible;
@@ -1294,6 +1332,7 @@ void DrawMenuHintLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
       ui::PortraitFooterSurface(index, footer->count);
   const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, index, footer->count, !independent);
   const bool black = hovered || (current_screen_name == "song_select_screen" && index == 2) ||
+      (current_screen_name == "powerup_select_screen" && name == "help.ihp" && index == 1) ||
       current_screen_name == "splash_screen" ||
       current_panel_name == "server_connect_panel" || current_screen_name == "loading_screen";
   const auto styles = U32(base, label + 180), styles_end = U32(base, label + 184);
@@ -1353,6 +1392,25 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   const bool portrait = settings::InterfacePortraitEnabled();
   const auto name = ObjectName(base, ObjectBase(base, label));
   const bool songs = portrait && current_screen_name == "song_select_screen";
+  const bool powerups = portrait && current_screen_name == "powerup_select_screen";
+  const bool powerup_info_control = powerups && name.starts_with("portrait_powerup_info_") &&
+      name.ends_with(".lbl");
+  const bool powerup_name = powerups && name == "name.lbl";
+  if (powerup_name) { powerup_info_screen = current_screen; powerup_info_frame = frame_number; }
+  if (powerup_info_control) {
+    const auto dir = U32(base, ObjectBase(base, label) + 36);
+    const auto stem = name.substr(0, name.size() - 4);
+    const auto index = size_t(name[name.size() - 5] - '0');
+    DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false);
+    if (index < powerup_info_targets.size() && geometry.list == current_focus &&
+        geometry.frame == frame_number && U32(base, current_focus + 224) == U32(base, current_focus + 228)) {
+      auto rows = geometry.rows;
+      std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.center.x < b.center.x; });
+      const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
+      if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt; bounds && index < rows.size())
+        powerup_info_targets[index] = {current_screen, current_focus, frame_number, *bounds, rows[index].center};
+    }
+  }
   if (songs && last_device::Current().using_touch &&
       (name == "shell_arrow_left.lbl" || name == "shell_arrow_rt.lbl")) return;
   const bool song_tool = songs && (name == "sorting.lbl" || name == "portrait_search.lbl");
@@ -1380,6 +1438,8 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   const auto token = portrait ? CalibrationToken(base, label) : std::string_view{};
   const bool instruction = portrait && current_screen_name.rfind("cal_", 0) == 0 &&
       (token == "cal_audio_desc_pad" || token == "cal_video_desc_pad");
+  const bool powerup_description = portrait && current_screen_name == "powerup_select_screen" &&
+      name == "powerup_desc.lbl";
   std::optional<float> calibration_z;
   if (portrait && current_screen_name.rfind("cal_", 0) == 0) {
     for (const auto& [label_name, anchor] : {
@@ -1395,7 +1455,7 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
       [label](const auto& e) { return e.label == label; }) : std::vector<InlineHelpEntry>::const_iterator{};
   const bool action = footer && entry != footer->entries.end() &&
       !(songs && ObjectName(base, ObjectBase(base, footer->owner)) == "pop_up_help.ihp");
-  if (!title && !success && !instruction && !calibration_z && !action && !song_tool && song_tab < 0) {
+  if (!title && !success && !instruction && !powerup_description && !powerup_name && !powerup_info_control && !calibration_z && !action && !song_tool && song_tab < 0) {
     DrawMenuHintLabel(ctx, base, label); return;
   }
   if (base[label + 178])
@@ -1437,13 +1497,32 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
         Float(base, world + row * 16 + column * 4, row == column ? scale : 0);
   }
   if (calibration_z) { x = portrait_draw_fit.X(0); z = portrait_draw_fit.Z(*calibration_z); }
-  if (title) { x = portrait_draw_fit.X(0); z = portrait_draw_fit.Z(ui::kPortraitTitleCenter); }
+  if (title) {
+    x = portrait_draw_fit.X(0);
+    z = portrait_draw_fit.Z(current_screen_name == "powerup_select_screen"
+        ? ui::PortraitPowerups(ui::screen::CurrentMenuConfiguration().portrait_aspect).title_z
+        : ui::kPortraitTitleCenter);
+  }
   if (instruction) {
     x = portrait_draw_fit.X(0); z = portrait_draw_fit.Z(ui::kPortraitCalibrationInstructionsZ);
     const float scale = CalibrationTextFit(std::abs(F32(base, world)) * visible_width,
         std::abs(F32(base, world + 40)) * visible_height,
         ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width * .84f * portrait_draw_fit.scale,
         ui::kPortraitCalibrationInstructionsHeight * portrait_draw_fit.scale);
+    for (uint32_t row = 0; row < 3; ++row)
+      for (uint32_t column = 0; column < 3; ++column)
+        Float(base, world + row * 16 + column * 4, F32(base, world + row * 16 + column * 4) * scale);
+  }
+  if (powerup_description || powerup_name || powerup_info_control) {
+    const auto layout = ui::PortraitPowerups(ui::screen::CurrentMenuConfiguration().portrait_aspect);
+    if (!powerup_info_control) {
+      x = portrait_draw_fit.X(0);
+      z = portrait_draw_fit.Z(powerup_name ? layout.name_z : layout.description_z);
+    }
+    const float scale = CalibrationTextFit(std::abs(F32(base, world)) * visible_width,
+        std::abs(F32(base, world + 40)) * visible_height,
+        (powerup_info_control ? 56 * layout.choices_scale : layout.width - 20) * portrait_draw_fit.scale,
+        (powerup_name ? 30 : powerup_info_control ? 14 : layout.description_height) * portrait_draw_fit.scale);
     for (uint32_t row = 0; row < 3; ++row)
       for (uint32_t column = 0; column < 3; ++column)
         Float(base, world + row * 16 + column * 4, F32(base, world + row * 16 + column * 4) * scale);
@@ -1630,25 +1709,31 @@ void UpdateCalibrationSideLabel(PPCContext& ctx, uint8_t* base, uint32_t label) 
   call.ctx.r5.u32 = 0;
   sub_824BC7D0(call.ctx, base);
 }
-void UpdateStartPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
+void UpdateTouchPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
   // UILabel keeps its locale Symbol at +164 and its RndText UTF-8 string
   // at +80 (RndText +8). SetText(clear_token=false) preserves that Symbol.
   const uint32_t token_address = U32(base, label + 164);
   if (!token_address) return;
   const char* token = reinterpret_cast<const char*>(base + token_address);
   const std::string_view name(token, strnlen(token, 64));
-  const auto found = std::find(kStartPromptTokens.begin(), kStartPromptTokens.end(), name);
-  if (found == kStartPromptTokens.end()) return;
+  if (name.size() == 64) return;
   const uint32_t text_address = U32(base, label + 80);
   if (!text_address) return;
   const char* text = reinterpret_cast<const char*>(base + text_address);
-  const std::string_view actual(text, strnlen(text, 256));
-  if (actual.size() == 256) return;
-  thread_local std::array<StartPromptText, kStartPromptTokens.size()> prompts;
-  auto& prompt = prompts[size_t(found - kStartPromptTokens.begin())];
+  const std::string_view actual(text, strnlen(text, 4096));
+  if (actual.size() == 4096) return;
+  // Any localized button instruction can appear outside the start screens,
+  // including powerup descriptions. Preserve each token's physical wording.
+  thread_local std::unordered_map<std::string, StartPromptText> prompts;
+  auto found = prompts.find(std::string(name));
+  if (found == prompts.end()) {
+    if (TouchStartPrompt(actual) == actual) return;
+    found = prompts.emplace(std::string(name), StartPromptText{}).first;
+  }
+  auto& prompt = found->second;
   const auto desired = prompt.Update(actual, last_device::Current().using_touch);
-  if (desired == actual || desired.size() >= 256) return;
-  GuestCall call(ctx, base, 512);
+  if (desired == actual || desired.size() >= 4096) return;
+  GuestCall call(ctx, base, uint32_t(256 + desired.size()));
   const uint32_t chars = call.ctx.r1.u32 + 128;
   std::memcpy(base + chars, desired.c_str(), desired.size() + 1);
   call.ctx.r3.u32 = label;
@@ -1679,7 +1764,8 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   const bool focused = list == current_focus && menu_available && belongs;
   const bool touch = last_device::Current().using_touch;
   const bool portrait_songs = settings::InterfacePortraitEnabled() && current_screen_name == "song_select_screen";
-  if (ctx.r9.u32 || !list || (!focused && !touch && !portrait_songs)) {
+  const bool portrait_powerups = settings::InterfacePortraitEnabled() && current_screen_name == "powerup_select_screen";
+  if (ctx.r9.u32 || !list || (!focused && !touch && !portrait_songs && !portrait_powerups)) {
     __imp__sub_824E5020(ctx, base); return;
   }
   DrawCapture capture;
@@ -1726,7 +1812,7 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   // The native highlight supplies the full button width, even when its text is
   // short. Translate its cell along the row axis; no screen-specific pitches.
   const auto selected = std::find_if(result.rows.begin(), result.rows.end(), [&](const MenuRow& r) { return r.index == capture.selected; });
-  if (capture.highlight && selected != result.rows.end()) {
+  if (capture.highlight && selected != result.rows.end() && !portrait_powerups) {
     float min_x = 1e10f, max_x = -1e10f, min_y = 1e10f, max_y = -1e10f;
     for (const auto& row : result.rows) {
       const auto& b = *row.bounds;
@@ -1832,13 +1918,17 @@ REX_HOOK_RAW(sub_824E07A8) {
   __imp__sub_824E07A8(ctx, base);
 }
 REX_HOOK_RAW(sub_824E9A90) {
+  // The native fourth category remains keyboard/controller reachable, while
+  // its launch action is drawn and targeted by the portrait Start footer.
+  using namespace rb_blitz::input;
+  if (PortraitPowerupFooterRow(base)) return;
   rb_blitz::input::DrawPortraitSongRow(ctx, base);
   rb_blitz::input::CaptureLabel(ctx, base);
   __imp__sub_824E9A90(ctx, base);
 }
 REX_HOOK_RAW(sub_824BC668) {
   const auto label = ctx.r3.u32 - 260;
-  rb_blitz::input::UpdateStartPrompt(ctx, base, label);
+  rb_blitz::input::UpdateTouchPrompt(ctx, base, label);
   rb_blitz::hooks::PrepareHudLabel(ctx, base, label);
   rb_blitz::input::UpdateCalibrationSideLabel(ctx, base, label);
   rb_blitz::input::UpdateCalibrationText(ctx, base, label);
@@ -1880,6 +1970,8 @@ REX_HOOK_RAW(sub_8229FD60) {
 REX_HOOK_RAW(sub_824E0900) {
   using namespace rb_blitz::input;
   const auto mesh = ctx.r4.u32;
+  const auto transform = ctx.r7.u32;
+  if (PortraitPowerupFooterRow(base)) return;
   const bool bar = drawing && !ctx.r8.u32 && U32(base, U32(base, ctx.r3.u32) + 100) == 0x824E9098;
   // The mouse's unhover frame draws no bar and captures no cell: the cell would be the
   // bar's own projection, and the hover that selects a row again restores both in the same
@@ -1898,8 +1990,8 @@ REX_HOOK_RAW(sub_824E0900) {
   // the mesh transform, using the camera that actually drew the list.
   if (drawing && current_screen_name == "powerup_select_screen") {
     const auto name = ObjectName(base, ObjectBase(base, mesh));
-    if (name == "arrow_lt.mesh") drawing->result.left_arrow = ProjectMesh(ctx, base, mesh);
-    if (name == "arrow_rt.mesh") drawing->result.right_arrow = ProjectMesh(ctx, base, mesh);
+    if (name == "arrow_lt.mesh") drawing->result.left_arrow = ProjectMesh(ctx, base, mesh, transform);
+    if (name == "arrow_rt.mesh") drawing->result.right_arrow = ProjectMesh(ctx, base, mesh, transform);
   }
 }
 
@@ -1911,5 +2003,6 @@ REX_HOOK_RAW(sub_824BFEF0) {
   const auto mesh = drawing && drawing->row && !ctx.r7.u32 && U32(base, ctx.r3.u32 + 8)
       ? U32(base, U32(base, ctx.r3.u32 + 4) + 132) : 0;
   __imp__sub_824BFEF0(ctx, base);
-  if (mesh) if (auto bounds = ProjectMesh(ctx, base, mesh)) CaptureRow(base, *bounds);
+  if (mesh && !PortraitPowerupFooterRow(base))
+    if (auto bounds = ProjectMesh(ctx, base, mesh)) CaptureRow(base, *bounds);
 }

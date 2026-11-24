@@ -7,11 +7,8 @@
 
 namespace rb_blitz::input {
 
-inline constexpr std::array<std::string_view, 3> kStartPromptTokens{
-    "splash_press_start", "loading_press_button", "press_start_to_continue"};
-
 // Keep the localized action and capitalization, replacing just the press verb
-// and button. Both retail and the effective-binding private glyphs use alt1.
+// and button. Retail labels use alt or alt1; private binding glyphs use alt1.
 inline std::string TouchStartPrompt(std::string_view text) {
   struct Verb { std::string_view press, touch; };
   constexpr std::array<Verb, 12> verbs{{
@@ -24,10 +21,11 @@ inline std::string TouchStartPrompt(std::string_view text) {
   for (const auto& verb : verbs) {
     if (!text.starts_with(verb.press)) continue;
     auto tail = text.substr(verb.press.size());
-    if (tail.starts_with("<alt1>")) {
-      const auto end = tail.find("</alt1>");
+    if (tail.starts_with("<alt1>") || tail.starts_with("<alt>")) {
+      const std::string_view closing = tail.starts_with("<alt1>") ? "</alt1>" : "</alt>";
+      const auto end = tail.find(closing);
       if (end == std::string_view::npos) return std::string(text);
-      tail.remove_prefix(end + 7);
+      tail.remove_prefix(end + closing.size());
     } else if (tail.starts_with("START")) {
       tail.remove_prefix(5);
     } else {

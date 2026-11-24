@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ui/achievements_overlay.h"
 #include "ui/achievement_navigation.h"
+#include "ui/achievement_layout.h"
 
 #include <algorithm>
 #include <atomic>
@@ -80,11 +81,10 @@ class Browser final : public rex::ui::DialogBase {
       opened_ = true;
     }
     const auto& theme = ui_.GetStyle().toast;
-    const float scale = std::min(io.DisplaySize.x / 1280.0f, io.DisplaySize.y / 720.0f);
-    const float pad = 24 * scale;
-    const ImVec2 size(std::min(1140 * scale, io.DisplaySize.x - 2 * pad),
-                      io.DisplaySize.y - 2 * pad);
-    const ImVec2 pos((io.DisplaySize.x - size.x) / 2, pad);
+    const auto layout = LayoutBrowser(io.DisplaySize.x, io.DisplaySize.y, CurrentPortraitViewport());
+    const float scale = layout.scale, pad = layout.padding;
+    const ImVec2 size(layout.width, layout.height);
+    const ImVec2 pos(layout.x, layout.y);
     ImGui::SetNextWindowPos(pos);
     ImGui::SetNextWindowSize(size);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(pad, pad));
@@ -133,7 +133,7 @@ class Browser final : public rex::ui::DialogBase {
           earned_score += entry.gamerscore;
         }
       }
-      ImGui::Text("%d / %d unlocked    |    %d / %d G", unlocked_count,
+      ImGui::TextWrapped("%d / %d unlocked  |  %d / %d G", unlocked_count,
                   static_cast<int>(entries_.size()), earned_score, total_score);
       ImGui::PushStyleColor(ImGuiCol_PlotHistogram, theme.border);
       ImGui::ProgressBar(entries_.empty() ? 0 : float(unlocked_count) / entries_.size(),
@@ -143,16 +143,21 @@ class Browser final : public rex::ui::DialogBase {
       const uint32_t command = navigation_.Tick(HeldCommands(), input::HostInputFocused(),
                                                  io.DeltaTime);
       bool dismiss = (command & kBack) != 0;
-      const float list_height = ImGui::GetContentRegionAvail().y - 50 * scale;
+      const float button_height = layout.portrait ? std::max(44.f, 48 * scale) : 30 * scale;
+      const float list_height = std::max(1.f, ImGui::GetContentRegionAvail().y -
+          button_height - ImGui::GetStyle().ItemSpacing.y);
       const bool moved = navigation_.Move(command, static_cast<int>(entries_.size()),
-                          std::max(1, int(list_height / (150 * scale))));
+                          std::max(1, int(list_height / (150 * scale))), layout.columns);
       if (ImGui::BeginChild("##achievement_cards", ImVec2(0, list_height),
                             ImGuiChildFlags_None, ImGuiWindowFlags_AlwaysVerticalScrollbar |
                             ImGuiWindowFlags_NoNav)) {
+        const bool reflowed = layout.columns != previous_columns_;
+        previous_columns_ = layout.columns;
         if (appearing) ImGui::SetScrollY(0);
         if (entries_.empty()) ImGui::TextUnformatted("No achievements are available for this title.");
         const float gap = 12 * scale;
-        const float card_width = (ImGui::GetContentRegionAvail().x - gap) / 2;
+        const float card_width = (ImGui::GetContentRegionAvail().x - gap * (layout.columns - 1)) /
+                                 layout.columns;
         const float icon_size = 64 * scale;
         const float inset = 12 * scale;
         const float text_width = card_width - icon_size - 3 * inset;
@@ -164,22 +169,25 @@ class Browser final : public rex::ui::DialogBase {
           return !manager_->IsUnlocked(entry.id) && !entry.unachieved_description.empty()
                      ? entry.unachieved_description : entry.description;
         };
-        for (int row = 0; row < static_cast<int>(entries_.size()); row += 2) {
+        for (int row = 0; row < static_cast<int>(entries_.size()); row += layout.columns) {
           float row_height = icon_size + 2 * inset;
-          for (int i = row; i < std::min(row + 2, int(entries_.size())); ++i) {
+          for (int i = row; i < std::min(row + layout.columns, int(entries_.size())); ++i) {
             const float title_height = heading->CalcTextSizeA(22 * scale, 1e9f,
                                         text_width, entries_[i].label.c_str()).y;
             const float desc_height = body->CalcTextSizeA(18 * scale, 1e9f,
                                         text_width, description(entries_[i]).c_str()).y;
             row_height = std::max(row_height, 2 * inset + title_height + desc_height + 30 * scale);
           }
-          for (int i = row; i < std::min(row + 2, int(entries_.size())); ++i) {
+          for (int i = row; i < std::min(row + layout.columns, int(entries_.size())); ++i) {
             if (i != row) ImGui::SameLine(0, gap);
             const auto& entry = entries_[i];
             const bool unlocked = manager_->IsUnlocked(entry.id);
             const ImVec2 card = ImGui::GetCursorScreenPos();
             ImGui::PushID(static_cast<int>(entry.id));
             ImGui::InvisibleButton("##card", ImVec2(card_width, row_height));
+            // Touch events share the primary pointer; dragging a portrait card scrolls the list.
+            if (layout.portrait && ImGui::IsItemActive() && ImGui::IsMouseDragging(0))
+              ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
             // A parked pointer does not steal selection back from the controller.
             if (ImGui::IsItemHovered() && (ImGui::IsMouseClicked(0) ||
                 io.MouseDelta.x != 0 || io.MouseDelta.y != 0 || io.MouseWheel != 0))
@@ -216,18 +224,20 @@ class Browser final : public rex::ui::DialogBase {
                           ImGui::GetColorU32(theme.muted_text), description(entry).c_str(),
                           nullptr, text_width);
             // Keep the entire focused row in view, including variable-height descriptions.
-            if ((moved || appearing) && navigation_.selected == i) ImGui::SetScrollHereY();
+            if ((moved || appearing || reflowed) && navigation_.selected == i) ImGui::SetScrollHereY();
             ImGui::PopID();
           }
         }
       }
       ImGui::EndChild();
       ImGui::AlignTextToFramePadding();
-      ImGui::TextUnformatted("D-pad / left stick / arrows: browse    |    Mouse wheel: scroll");
+      ImGui::TextUnformatted(layout.portrait ? "Drag to scroll" :
+          "D-pad / left stick / arrows: browse    |    Mouse wheel: scroll");
       ImGui::SameLine();
       const float button_width = 140 * scale;
       ImGui::SetCursorPosX(size.x - pad - button_width);
-      if (ImGui::Button("B / Esc: Back", ImVec2(button_width, 30 * scale))) dismiss = true;
+      if (ImGui::Button(layout.portrait ? "Back" : "B / Esc: Back",
+                        ImVec2(button_width, button_height))) dismiss = true;
       ImGui::PopFont();
       if (dismiss) {
         ImGui::CloseCurrentPopup();
@@ -272,6 +282,7 @@ class Browser final : public rex::ui::DialogBase {
   std::map<std::string, std::unique_ptr<rex::ui::ImageTexture>> icons_;
   std::vector<rex::Achievement> entries_;
   Navigation navigation_;
+  int previous_columns_ = 0;
   bool opened_ = false;
 };
 }  // namespace

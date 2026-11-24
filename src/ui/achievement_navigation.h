@@ -30,19 +30,20 @@ class Navigation {
     return held & ~kBack;
   }
 
-  bool Move(uint32_t command, int count, int page_rows) {
+  bool Move(uint32_t command, int count, int page_rows, int columns = 2) {
     const int before = selected;
     if (count <= 0) { selected = 0; return false; }
+    columns = std::max(1, columns);
     selected = std::clamp(selected, 0, count - 1);
     if (command & kFirst) selected = 0;
     else if (command & kLast) selected = count - 1;
-    else if (command & kPageUp) selected = std::max(0, selected - 2 * page_rows);
-    else if (command & kPageDown) selected = std::min(count - 1, selected + 2 * page_rows);
-    else if (command & kUp) selected = std::max(selected % 2, selected - 2);
-    else if ((command & kDown) && selected / 2 < (count - 1) / 2)
-      selected = std::min(count - 1, selected + 2);
-    else if ((command & kLeft) && selected % 2) --selected;
-    else if ((command & kRight) && selected % 2 == 0 && selected + 1 < count) ++selected;
+    else if (command & kPageUp) selected = std::max(0, selected - columns * page_rows);
+    else if (command & kPageDown) selected = std::min(count - 1, selected + columns * page_rows);
+    else if (command & kUp) selected = std::max(selected % columns, selected - columns);
+    else if ((command & kDown) && selected / columns < (count - 1) / columns)
+      selected = std::min(count - 1, selected + columns);
+    else if ((command & kLeft) && selected % columns) --selected;
+    else if ((command & kRight) && selected % columns < columns - 1 && selected + 1 < count) ++selected;
     return before != selected;
   }
 

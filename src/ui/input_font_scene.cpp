@@ -1606,6 +1606,211 @@ bool PreparePortraitSongs(const std::vector<uint8_t>& source,
   return PackStored(edited.Build(), scene, error);
 }
 
+bool PreparePortraitPowerups(const std::vector<uint8_t>& source,
+                            const std::vector<uint8_t>& button_source, float aspect,
+                            std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error) || !DecodeStream(button_source, &buttons, error)) return false;
+  if (bytes.size() != 2119316 || Crc32(bytes.data(), bytes.size()) != 0x56CA45F0)
+    return Fail(error, "portrait powerup panel source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait powerup button template revision changed");
+  PortraitScene edited(bytes), templates(buttons);
+  const auto layout = ui::PortraitPowerups(aspect);
+  auto ink = *templates.Find("active_normal.color");
+  ink.name = "portrait_powerup_ink.color";
+  SceneColor(ink.data, 17, 1, 1, 1, 1);
+  edited.objects.push_back(std::move(ink));
+  for (const char* name : {"powerup_panel.grp", "Lists.grp", "Selected_Song.grp",
+                           "description.grp", "type_1.grp", "type_2.grp", "type_3.grp"})
+    PortraitPose(*edited.Find(name), 1, 0, 0);
+  // Keep every native provider and its equipped-item textures. The fourth
+  // category action is presented by the footer instead of a fourth icon.
+  PortraitPose(*edited.Find("powerup_select.lst"), layout.category_scale,
+               -120 * layout.category_scale, layout.categories_z);
+  RenameSceneString(edited.Find("powerup_select.lst")->data,
+      "../resource/lists/list_powerup_main_select.milo", "../resource/lists/portrait_powerup_categories.milo");
+  for (const char* name : {"active_powerups.lst", "passive_powerups_a.lst", "passive_powerups_b.lst"}) {
+    PortraitPose(*edited.Find(name), layout.choices_scale, -64 * layout.choices_scale, layout.choices_z);
+    RenameSceneString(edited.Find(name)->data,
+        "../resource/lists/list_powerup_left_to_right_temp.milo", "../resource/lists/portrait_powerup_choices.milo");
+  }
+  const std::vector<std::string> hidden{
+      "active_powerup.mesh", "passive_powerup.mesh", "active_title.lbl", "passive.lbl",
+      "passive_powerup_text.lbl", "warning.lbl", "title_playsong.lbl", "total_cost.lbl",
+      "equip_reminder.grp", "frame.mesh", "neon.mesh", "coin.lbl", "cost_text.lbl",
+      "diff_panel.mesh", "description_panel.mesh"};
+  for (const auto& name : hidden) edited.RemoveDrawMember(name);
+  PortraitHiddenGroup(edited, templates, "portrait_powerup_landscape.grp", hidden);
+  PortraitPose(*edited.Find("cred_column.grp"), 1, 0, 0);
+  for (const auto& [name, x] : {std::pair{"your_monies_text.lbl", -layout.width / 4},
+                               std::pair{"your_cred.lbl", layout.width / 4}}) {
+    auto& label = *edited.Find(name);
+    PortraitPose(label, 1, x, -176);
+    PortraitText(label, 9, layout.width / 2 - 4);
+  }
+  for (const auto& [name, x] : {
+      std::pair{"title_deployed.lbl", -layout.width / 3},
+      std::pair{"title_seeded.lbl", 0.f}, std::pair{"title_automatic.lbl", layout.width / 3}}) {
+    auto& label = *edited.Find(name);
+    PortraitPose(label, 1, x, layout.CategoryCaptionZ());
+    PortraitText(label, 10 * layout.width / 249, layout.width / 3 - 4);
+    RenameSceneString(label.data,
+        std::string_view(name) == "title_deployed.lbl" ? "powerup_sel__head_deploy" :
+        std::string_view(name) == "title_seeded.lbl" ? "powerup_sel__head_seeded" : "powerup_sel__head_automatic",
+        std::string_view(name) == "title_deployed.lbl" ? "rbbz_powerup_overdrive" :
+        std::string_view(name) == "title_seeded.lbl" ? "rbbz_powerup_note" : "rbbz_powerup_track");
+    RenameSceneString(label.data, "../resource/fonts/pentatonic_regularcond.milo",
+                      "../resource/fonts/portrait_splash.milo");
+  }
+  auto header = *edited.Find("title_deployed.lbl");
+  header.name = "header.lbl";
+  RenameSceneString(header.data, "rbbz_powerup_overdrive", "powerup_selection_title");
+  RenameSceneString(header.data, "RB_Yellow.color", "portrait_powerup_ink.color");
+  edited.objects.push_back(std::move(header));
+  PortraitPose(*edited.Find("header.lbl"), 1, 0, layout.title_z);
+  PortraitText(*edited.Find("header.lbl"), 18, layout.width);
+  edited.Before("title_deployed.lbl", {"header.lbl"});
+  const float left = -layout.width / 2;
+  auto& album = *edited.Find("album_art_panel.mesh");
+  const float album_scale = 44.f / 165 * layout.width / 249;
+  // The mesh extends down from its top edge, so offset by half its scaled height.
+  PortraitPose(album, album_scale, left + 6, layout.card_z + 165 * album_scale / 2);
+  for (const auto& [name, z, size] : {
+      std::tuple{"selection_title.lbl", 149.f, 12.f},
+      std::tuple{"selection_artist.lbl", 139.f, 10.f},
+      std::tuple{"name.lbl", layout.name_z, 18.f},
+      std::tuple{"powerup_desc.lbl", layout.description_z, 14.f}}) {
+    auto& label = *edited.Find(name);
+    const bool song = std::string_view(name).starts_with("selection_");
+    PortraitPose(label, 1, song ? left + 58 * layout.width / 249 : 0, z);
+    PortraitText(label, size * layout.width / 249,
+                 song ? layout.width - 64 * layout.width / 249 : layout.width - 20,
+                 song ? 0x21 : 0x22);
+    if (song) RenameSceneString(label.data, "UIColor.color", "portrait_powerup_ink.color");
+    RenameSceneString(label.data, "../resource/fonts/pentatonic_regularcond.milo",
+                      "../resource/fonts/portrait_splash.milo");
+    // Revision 29 stores fit mode before alignment/width. A description must
+    // retain all its lines before its measured rectangle is fitted for drawing.
+    const auto font = std::search(label.data.begin(), label.data.end(), "../", "../" + 3);
+    PutBe32(label.data.data() + (font - label.data.begin()) - 41, 0);
+  }
+  PortraitSurface(edited, buttons, "portrait_song_card", layout.width, layout.card_height,
+                  0, layout.card_z, "album_art_panel.mesh");
+  PortraitSurface(edited, buttons, "portrait_powerup_choices", layout.width, 110,
+                  0, -63, {});
+  edited.Before("Lists.grp", {"portrait_powerup_choices_surface.grp"});
+  PortraitSurface(edited, buttons, "portrait_powerup_details", layout.width, layout.details_height,
+                  0, layout.details_z, {});
+  // Descriptions occupy their own guest view, so reading never confirms a
+  // list item. Each visible item has a separate, generous Details touch target.
+  std::vector<std::string> info_controls;
+  for (int i = 0; i < 3; ++i) {
+    const auto stem = "portrait_powerup_info_" + std::to_string(i);
+    auto label = *edited.Find("title_seeded.lbl");
+    label.name = stem + ".lbl";
+    RenameSceneString(label.data, "rbbz_powerup_note", "rbbz_powerup_details");
+    PortraitPose(label, 1, (i - 1) * 64 * layout.choices_scale, layout.InfoZ());
+    PortraitText(label, 10 * layout.width / 249, 60 * layout.choices_scale);
+    edited.objects.push_back(std::move(label));
+    PortraitSurface(edited, buttons, stem, 60 * layout.choices_scale, 24,
+                    (i - 1) * 64 * layout.choices_scale, layout.InfoZ(), {});
+    info_controls.push_back(stem + ".lbl");
+  }
+  for (const char* name : {"title_deployed.lbl", "title_seeded.lbl", "title_automatic.lbl"})
+    edited.RemoveDrawMember(name);
+  PortraitHiddenGroup(edited, templates, "portrait_powerup_captions.grp",
+      {"title_deployed.lbl", "title_seeded.lbl", "title_automatic.lbl"});
+  edited.Find("portrait_powerup_captions.grp")->data[0x21 + 113] = 1;
+  PortraitHiddenGroup(edited, templates, "portrait_powerup_controls.grp", info_controls);
+  edited.Before("header.lbl", {"portrait_powerup_captions.grp", "portrait_powerup_controls.grp"});
+  // The native purchase confirmation remains a modal with its original actions.
+  PortraitPose(*edited.Find("confirm.grp"), ui::PortraitPromptScale(aspect), 0, 0);
+  PortraitPose(*edited.Find("purchasing_text.lbl"), 1, 0, -174);
+  PortraitText(*edited.Find("purchasing_text.lbl"), 11, layout.width);
+  PortraitFooter(edited, buttons, aspect);
+  auto& help_object = *edited.Find("help.ihp");
+  PortraitPose(help_object, 1, 0, -197);
+  RenameSceneString(help_object.data, "../resource/inline_help/default.milo",
+                    "../resource/inline_help/portrait_actions.milo");
+  auto& help = help_object.data;
+  // Back and Start use the existing inline-help draw/input bridge. Start is
+  // bound to the panel's native song purchase/launch path in the portrait DTA.
+  for (size_t at = 13, i = 0; i < Be32(help.data() + 9); ++i) {
+    const auto action = Be32(help.data() + at);
+    if (action == 1) PutBe32(help.data() + at, 4);
+    at += 12 + Be32(help.data() + at + 4);
+  }
+  RenameSceneString(help, "select", "powerup_sel__head_play");
+  auto info_help = help_object;
+  info_help.name = "portrait_info_help.ihp";
+  // One native Cancel action, presented as Close on the dedicated details view.
+  auto& data = info_help.data;
+  size_t at = 13;
+  while (Be32(data.data() + 9) > 1) {
+    const auto end = at + 12 + Be32(data.data() + at + 4);
+    if (Be32(data.data() + at) == 2) at = end;
+    else {
+      data.erase(data.begin() + at, data.begin() + end);
+      PutBe32(data.data() + 9, Be32(data.data() + 9) - 1);
+    }
+  }
+  RenameSceneString(data, "inline_help_back", "settings_close");
+  edited.objects.push_back(std::move(info_help));
+  for (const char* name : {"name.lbl", "powerup_desc.lbl"}) edited.RemoveDrawMember(name);
+  PortraitHiddenGroup(edited, templates, "portrait_powerup_info.grp",
+      {"portrait_powerup_details_border.mesh", "portrait_powerup_details.mesh",
+       "name.lbl", "powerup_desc.lbl", "portrait_info_help.ihp"});
+  // Remove duplicate hidden surface membership before adding the modal group.
+  edited.objects.erase(std::remove_if(edited.objects.begin(), edited.objects.end(), [](const auto& object) {
+    return object.name == "portrait_powerup_details_surface.grp";
+  }), edited.objects.end());
+  edited.Before("header.lbl", {"portrait_powerup_info.grp"});
+  SceneColor(edited.Find("portrait_back.mat")->data, 0x19, 1, .855f, .086f, ui::kFooterOpacity);
+  auto marker = *edited.Find("portrait_caption_black.color");
+  marker.name = "portrait_powerups.color";
+  edited.objects.push_back(std::move(marker));
+  return PackStored(edited.Build(), scene, error);
+}
+
+bool PreparePortraitPowerupList(const std::vector<uint8_t>& source, bool categories,
+                               std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (categories ? bytes.size() != 3798863 || Crc32(bytes.data(), bytes.size()) != 0xB5D69B6F
+                 : bytes.size() != 900120 || Crc32(bytes.data(), bytes.size()) != 0x6DD17D45)
+    return Fail(error, "portrait powerup list source revision changed");
+  PortraitScene edited(bytes);
+  // Embedded flow directories follow the owning UIListDir's delimiter.
+  // Its spacing belongs to that first record, before those nested resources.
+  constexpr std::array<uint8_t, 4> delimiter{0xAD, 0xDE, 0xAD, 0xDE};
+  const auto end = std::search(edited.directory.begin(), edited.directory.end(),
+                               delimiter.begin(), delimiter.end());
+  if (end == edited.directory.end() || end - edited.directory.begin() < 25)
+    return Fail(error, "portrait powerup list directory changed");
+  PutFloat(edited.directory.data() + (end - edited.directory.begin()) + 4 - 29,
+           categories ? 120.f : 64.f);
+  if (categories) {
+    PortraitPose(*edited.Find("medium.grp"), 1, 0, 0);
+    for (const char* name : {"activePowerup.mesh", "highlight_med.mesh", "glow_med.mesh"})
+      PortraitPose(*edited.Find(name), std::string_view(name) == "activePowerup.mesh" ? 1.f : 1.2f, 0, 0);
+    std::erase_if(edited.objects, [](const auto& object) { return object.type == "UIListArrow"; });
+    PortraitPose(*edited.Find("empty.lbl"), 1, 0, 0);
+    PortraitText(*edited.Find("empty.lbl"), 14, 90);
+  } else {
+    PortraitPose(*edited.Find("powerup.mesh"), 1, 0, 0);
+    for (const char* name : {"highlight.mesh", "glow.mesh"})
+      PortraitPose(*edited.Find(name), 50.f / 64, 0, 0);
+    for (const bool right : {false, true}) {
+      auto& arrow = *edited.Find(right ? "arrow_rt.mesh" : "arrow_lt.mesh");
+      // Preserve the left arrow's rotation while moving its resting pivot.
+      for (size_t at : {size_t(0x15), size_t(0x45)})
+        PutFloat(arrow.data.data() + at + 36, right ? 46.f : -46.f);
+    }
+  }
+  return PackStored(edited.Build(), scene, error);
+}
+
 bool PreparePortraitShortcuts(const std::vector<uint8_t>& source,
                              std::vector<uint8_t>* scene, std::string* error) {
   std::vector<uint8_t> bytes;

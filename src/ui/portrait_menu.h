@@ -24,6 +24,7 @@ inline constexpr std::array<const char*, 6> kPortraitCalibrationGraphics{
 // Conservative bounds across the native logo meshes and their animation keys.
 inline constexpr float kPortraitLogoTop = 206.f;
 inline constexpr float kPortraitLogoBottom = -176.f;
+inline constexpr float kPortraitStatusTextBottomZ = -150.f;
 
 inline std::array<float, 4> FooterButtonColor(bool border, bool hovered = false) {
   auto color = border ? kMenuButtonBorder : hovered ? kMenuButtonHover : kMenuButtonNormal;
@@ -67,7 +68,8 @@ inline PortraitSplashLayout PortraitSplash(float aspect) {
   const float list_z = menu_top - 26.375f * menu_list_scale;
   const float city_scale = .205f;
   return {width, logo_scale, 0, title_logo_z, title_logo_z,
-          .95f * width * .65f / 256, 240 - flow_width * 1.438f,
+          // Center the Start prompt at the two-line discovery message's height.
+          .95f * width * .65f / 256, kPortraitStatusTextBottomZ + 10,
           // Crop the solid strip beneath the road and overlap the bottom edge.
           list_scale, menu_list_scale, list_z, city_scale, -248 + 131.94f * city_scale};
 }
@@ -95,6 +97,24 @@ inline PortraitSongsLayout PortraitSongs(float aspect) {
   return layout;
 }
 
+struct PortraitPowerupsLayout {
+  float width, category_scale, choices_scale;
+  float title_z = 188;
+  float card_z = 128, card_height = 56;
+  float categories_z = 44, choices_z = -45;
+  float name_z = 100, description_z = 35;
+  float details_z = 50, details_height = 180, description_height = 100;
+  int choices = 3;
+  float CategoryCaptionZ() const { return categories_z - 45 * category_scale - 14; }
+  float InfoZ() const { return choices_z - 30 * choices_scale - 18; }
+};
+
+inline PortraitPowerupsLayout PortraitPowerups(float aspect) {
+  const float width = std::min(PortraitSplash(aspect).width * .92f, 270.f);
+  // Three 50-unit icons at 64-unit spacing, plus both 32-unit page arrows.
+  return {width, width / 360, width / 260};
+}
+
 inline float PortraitPromptScale(float aspect, bool error_popup = false) {
   return std::min(PortraitSplash(aspect).width * .84f / (error_popup ? 640.f : 350.f), 1.f);
 }
@@ -114,7 +134,7 @@ inline PortraitLoadingLayout PortraitLoading(float aspect) {
   return {width, splash.logo_scale, splash.title_logo_z,
           width * .84f, 18 * splash.list_scale / .55f, button_width, (button_width + 10) / 2,
           1, bar_width, bar_width / 8, 3,
-          -150, -167.5f};
+          kPortraitStatusTextBottomZ, -167.5f};
 }
 
 struct PortraitSettingsLayout {
@@ -205,6 +225,7 @@ inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel
          panel == "rbbz_library_panel" ||
          panel == "av_options_panel" || panel == "credits_panel" ||
          (screen == "song_select_screen" && panel == "song_select_panel") ||
+         (screen == "powerup_select_screen" && panel == "powerup_select_panel") ||
          PortraitSettingsScene(scene) ||
          PortraitControlsScene(scene) ||
          PortraitControlsPanel(panel) ||

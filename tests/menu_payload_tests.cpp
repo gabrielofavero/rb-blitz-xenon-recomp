@@ -2941,7 +2941,7 @@ int main(int argc, char** argv) {
       CHECK_EQ(instructions, size_t{2});
     }
     BeginCase("portrait payload changes splash buttons, loading layouts and the existing gameplay HUD route");
-    CHECK_EQ(portrait.size(), landscape.size() + 20 + !landscape.contains("ui/gen/game.dtb") +
+    CHECK_EQ(portrait.size(), landscape.size() + 22 + !landscape.contains("ui/gen/game.dtb") +
                                       !landscape.contains("ui/loading/gen/loading.dtb"));
     for (const auto& [path, original] : landscape) {
       CHECK_TRUE(portrait.contains(path));
@@ -2951,6 +2951,8 @@ int main(int argc, char** argv) {
           path != "ui/av_options/gen/settings_scale_pause.milo_xbox" &&
           path != "ui/calibration/gen/calibration.dtb" &&
           path != "ui/song_select/gen/song_select.dtb" &&
+          path != "ui/powerup_select/gen/powerup_select.dtb" &&
+          path != rb_blitz::ui::input_font::kPowerupSelectRecord &&
           path != rb_blitz::ui::input_font::kSongSelectRecord &&
           path != rb_blitz::ui::input_font::kSplashRecord &&
           path != rb_blitz::ui::input_font::kErrorReturnRecord &&
@@ -3041,6 +3043,116 @@ int main(int argc, char** argv) {
       return objects;
     };
     const auto settings_objects = stored_objects(settings_scene);
+    BeginCase("portrait powerups keep native equip and launch handlers with three visible choices");
+    {
+      namespace font = rb_blitz::ui::input_font;
+      std::vector<dtb::Node> before, after;
+      const auto& original = landscape.at("ui/powerup_select/gen/powerup_select.dtb");
+      const auto& changed = portrait.at("ui/powerup_select/gen/powerup_select.dtb");
+      CHECK_TRUE(dtb::Parse(original.data(), original.size(), &before, nullptr, &why));
+      CHECK_TRUE(dtb::Parse(changed.data(), changed.size(), &after, nullptr, &why));
+      for (const char* method : {"go_to_powerup_list", "update_powerup_desc", "powerups_chosen"}) {
+        const auto* a = header_test::Method(before, "powerup_select_panel", method);
+        const auto* b = header_test::Method(after, "powerup_select_panel", method);
+        CHECK_TRUE(a && b);
+        if (a && b) CHECK_TRUE(dtb::Compile({*a}) == dtb::Compile({*b}));
+      }
+      for (const char* method : {"SELECT_MSG", "SCROLL_MSG"}) {
+        const auto* a = header_test::Method(before, "powerup_select_panel", method);
+        const auto* b = header_test::Method(after, "powerup_select_panel", method);
+        CHECK_TRUE(a && b && b->kids.size() == 2 && b->kids[1].kids.size() == 4);
+        if (a && b && b->kids.size() == 2 && b->kids[1].kids.size() == 4) {
+          const auto& guard = b->kids[1];
+          CHECK_TRUE(guard.kids[0].text == "if_else");
+          CHECK_EQ(guard.kids[2].scalar, 0u); // Reading blocks equip and scrolling.
+          auto restored = *b;
+          restored.kids.resize(1);
+          restored.kids.insert(restored.kids.end(), guard.kids[3].kids.begin() + 1, guard.kids[3].kids.end());
+          CHECK_TRUE(dtb::Compile({*a}) == dtb::Compile({restored}));
+        }
+      }
+      const auto* open = header_test::Method(after, "powerup_select_panel", "rbbz_open_powerup_info");
+      const auto* close = header_test::Method(after, "powerup_select_panel", "rbbz_close_powerup_info");
+      CHECK_TRUE(open && close && header_test::Has(*open, "update_powerup_desc"));
+      CHECK_TRUE(open && !header_test::Has(*open, "SELECT_MSG") && !header_test::Has(*open, "update_equipped_powerups"));
+      const auto* buttons = header_test::Method(after, "powerup_select_panel", "BUTTON_DOWN_MSG");
+      CHECK_TRUE(buttons && header_test::Has(*buttons, "kAction_Start"));
+      if (buttons) {
+        const auto* start = header_test::Case(*buttons, "kAction_Start");
+        CHECK_TRUE(start && header_test::Has(*start, "song_preview") && header_test::Has(*start, "powerups_chosen"));
+        const auto* select = header_test::Method(before, "powerup_select_panel", "SELECT_MSG");
+        const auto* launch = select ? header_test::Case(*select, "play_song") : nullptr;
+        CHECK_TRUE(start && launch);
+        if (start && launch) {
+          auto expected = *launch; expected.kids[0] = dtb::Node::Symbol("kAction_Start");
+          CHECK_TRUE(dtb::Compile({*start}) == dtb::Compile({expected}));
+        }
+      }
+      const auto* enter = header_test::Method(after, "powerup_select_panel", "enter");
+      CHECK_TRUE(enter != nullptr);
+      size_t counts = 0;
+      if (enter) for (const auto& cmd : enter->kids)
+        if (cmd.kids.size() == 4 && cmd.kids[2].text == "display_num") {
+          ++counts; CHECK_EQ(cmd.kids[3].scalar, 3u);
+        }
+      CHECK_EQ(counts, size_t{3});
+      const auto objects = stored_objects(portrait.at(font::kPowerupSelectRecord));
+      for (const char* name : {"portrait_song_card.mesh", "portrait_powerup_details.mesh",
+                               "portrait_powerups.color", "help.ihp", "difficulty", "header.lbl",
+                               "portrait_powerup_info.grp", "portrait_info_help.ihp",
+                               "portrait_powerup_info_0.lbl", "portrait_powerup_info_2.mesh"})
+        CHECK_TRUE(objects.contains(name));
+      const auto contains = [](const auto& bytes, std::string_view text) {
+        return std::search(bytes.begin(), bytes.end(), text.begin(), text.end()) != bytes.end();
+      };
+      CHECK_TRUE(contains(objects.at("help.ihp"), "portrait_actions.milo"));
+      CHECK_TRUE(contains(objects.at("help.ihp"), "powerup_sel__head_play"));
+      CHECK_EQ(u32(objects.at("portrait_info_help.ihp").data() + 9), 1u);
+      CHECK_EQ(u32(objects.at("portrait_info_help.ihp").data() + 13), 2u);
+      CHECK_TRUE(contains(objects.at("portrait_info_help.ihp"), "settings_close"));
+      CHECK_EQ(objects.at("portrait_powerup_info.grp")[0x21 + 113], uint8_t{0});
+      CHECK_TRUE(contains(objects.at("active_powerups.lst"), "portrait_powerup_choices.milo"));
+      CHECK_TRUE(contains(objects.at("powerup_select.lst"), "portrait_powerup_categories.milo"));
+      CHECK_EQ(u32(objects.at("help.ihp").data() + 9), 2u);
+      CHECK_EQ(u32(objects.at("help.ihp").data() + 13), 4u); // native Start, localized Play Song
+      CHECK_TRUE(contains(objects.at("header.lbl"), "powerup_selection_title"));
+      CHECK_TRUE(contains(objects.at("header.lbl"), "portrait_powerup_ink.color"));
+      CHECK_TRUE(contains(objects.at("selection_title.lbl"), "portrait_powerup_ink.color"));
+      CHECK_TRUE(contains(objects.at("selection_artist.lbl"), "portrait_powerup_ink.color"));
+      for (size_t channel = 0; channel < 4; ++channel)
+        CHECK_EQ(u32(objects.at("portrait_powerup_ink.color").data() + 17 + channel * 4),
+                 std::bit_cast<uint32_t>(1.f));
+      const auto choices = stored_objects(portrait.at(font::kPortraitPowerupChoicesRecord));
+      CHECK_TRUE(choices.contains("back_arrow") && choices.contains("new_arrow"));
+      CHECK_TRUE(choices.contains("arrow_lt.mesh") && choices.contains("arrow_rt.mesh"));
+      CHECK_FALSE(landscape.contains(font::kPortraitPowerupCategoriesRecord));
+      CHECK_FALSE(landscape.contains(font::kPortraitPowerupChoicesRecord));
+      // UIListDir's spacing precedes embedded flow directories. Changing a
+      // nested flow's tail instead corrupts the resource despite valid names.
+      for (const auto& [path, spacing] : {
+          std::pair{font::kPortraitPowerupCategoriesRecord, 120.f},
+          std::pair{font::kPortraitPowerupChoicesRecord, 64.f}}) {
+        const auto& packed = portrait.at(path);
+        const auto* bytes = packed.data() + 0x810;
+        size_t at = 4;
+        const auto skip_string = [&] { at += 4 + u32(bytes + at); };
+        skip_string(); skip_string(); at += 9;
+        const auto count = u32(bytes + at); at += 4;
+        for (uint32_t i = 0; i < count; ++i) { skip_string(); skip_string(); }
+        while (u32(bytes + at) != 0xADDEADDE) ++at;
+        CHECK_EQ(u32(bytes + at + 4 - 29), std::bit_cast<uint32_t>(spacing));
+      }
+      std::vector<uint8_t> source, scene;
+      CHECK_TRUE(read(font::kPowerupSelectRecord, &source, &why));
+      for (const float aspect : {201.f / 437, 9.f / 16, .75f}) {
+        CHECK_TRUE(font::PreparePortraitPowerups(source, portrait_buttons, aspect, &scene, &why));
+        const auto fitted = stored_objects(scene);
+        const auto& name = fitted.at("name.lbl");
+        CHECK_EQ(u32(name.data() + 25 + 44), std::bit_cast<uint32_t>(rb_blitz::ui::PortraitPowerups(aspect).name_z));
+      }
+      source[0] ^= 1;
+      CHECK_FALSE(font::PreparePortraitPowerups(source, portrait_buttons, config.portrait_aspect, &scene, &why));
+    }
     BeginCase("portrait songs retain native providers, a modal shortcut list and separate search rows");
     {
       namespace font = rb_blitz::ui::input_font;

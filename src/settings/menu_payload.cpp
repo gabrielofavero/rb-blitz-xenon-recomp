@@ -1750,6 +1750,110 @@ bool AddPortraitSongsLayout(std::vector<Node>* roots, float aspect, std::string*
   return true;
 }
 
+bool AddPortraitPowerupsLayout(std::vector<Node>* roots, float aspect, std::string* why) {
+  if (!roots) return false;
+  auto staged = *roots;
+  auto* enter = PanelMethod(&staged, "powerup_select_panel", "enter");
+  auto* buttons = PanelMethod(&staged, "powerup_select_panel", "BUTTON_DOWN_MSG");
+  auto* select = PanelMethod(&staged, "powerup_select_panel", "SELECT_MSG");
+  auto* exit = PanelMethod(&staged, "powerup_select_panel", "exit");
+  if (!enter || !buttons || !select || !exit) {
+    if (why) *why = "portrait powerup panel lifecycle changed";
+    return false;
+  }
+  const auto s = [](std::string_view v) { return Node::Symbol(v); };
+  const auto c = [](std::vector<Node> v) { return Node::Command(std::move(v)); };
+  const auto f = [](float v) {
+    Node node; node.tag = ui::dtb::kFloat; node.scalar = std::bit_cast<uint32_t>(v); return node;
+  };
+  // Reuse the exact launch statements, including song-preview shutdown and
+  // the native purchase flow. Do not turn a page-arrow press into Confirm.
+  std::vector<Node*> launch;
+  const auto find_launch = [&](const auto& self, Node& node) -> void {
+    if (node.tag == ui::dtb::kArray && !node.kids.empty() && node.kids[0].text == "play_song")
+      launch.push_back(&node);
+    for (auto& child : node.kids) self(self, child);
+  };
+  find_launch(find_launch, *select);
+  if (launch.size() != 1 || buttons->kids.size() < 2 ||
+      buttons->kids[1].tag != ui::dtb::kCommand || buttons->kids[1].kids.empty() ||
+      buttons->kids[1].kids[0].text != "switch") {
+    if (why) *why = "portrait powerup launch handler changed";
+    return false;
+  }
+  auto start = *launch.front(); start.kids[0] = s("kAction_Start");
+  buttons->kids[1].kids.push_back(std::move(start));
+  const auto layout = ui::PortraitPowerups(aspect);
+  for (const char* name : {"active_powerups.lst", "passive_powerups_a.lst", "passive_powerups_b.lst"}) {
+    // Apply before set_provider/refresh and set_selected_simulate_scroll run.
+    enter->kids.insert(enter->kids.begin() + 1, c({s(name), s("set"), s("max_display"), Node::Int(2)}));
+    enter->kids.insert(enter->kids.begin() + 1, c({s(name), s("set"), s("display_num"), Node::Int(layout.choices)}));
+  }
+  // Two columns keep all five instrument meters below the title and artist.
+  const float meter_scale = layout.width / 480;
+  enter->kids.push_back(c({s("difficulty"), s("set_local_scale"),
+                           f(meter_scale), f(meter_scale), f(meter_scale)}));
+  enter->kids.push_back(c({s("difficulty"), s("set_local_pos"),
+      f(-layout.width / 2 + 64 * layout.width / 249), f(0), f(118)}));
+  int instrument = 0;
+  for (const char* name : {"diff_bass", "diff_drum", "diff_guitar", "diff_keys", "diff_vocals"}) {
+    const int column = instrument / 3, row = instrument % 3;
+    enter->kids.push_back(c({c({s("difficulty"), s("find"), s(name)}), s("set_local_pos"),
+        f(55 + column * 170.f), f(0), f((1 - row) * 20.f)}));
+    ++instrument;
+  }
+  enter->kids.push_back(c({s("selection_artist.lbl"), s("set_display_text_string"),
+      c({c({Node::Var("this"), s("get_song")}), s("artist")})}));
+  const auto shared_title = c({s("background_panel"), s("find"), s("PowerupSelection.lbl")});
+  enter->kids.push_back(c({shared_title, s("set_showing"), s("FALSE")}));
+  exit->kids.push_back(c({shared_title, s("set_showing"), s("TRUE")}));
+  const auto info = Node::Property({s("rbbz_powerup_info")});
+  const auto call = [&](const char* method) { return c({Node::Var("this"), s(method)}); };
+  const auto showing = [&](const char* name, Node value) {
+    return c({s(name), s("set_showing"), std::move(value)});
+  };
+  const auto choices = c({s("||"), c({s("||"), c({s("active_powerups.lst"), s("showing")}),
+      c({s("passive_powerups_a.lst"), s("showing")})}), c({s("passive_powerups_b.lst"), s("showing")})});
+  const auto controls = c({s("&&"), c({s("!"), info}), choices});
+  std::vector<Node> update{s("do")};
+  for (const char* name : {"Selected_Song.grp", "Lists.grp", "portrait_powerup_captions.grp", "help.ihp"})
+    update.push_back(showing(name, c({s("!"), info})));
+  for (const char* name : {"portrait_powerup_controls.grp", "portrait_powerup_choices_surface.grp"})
+    update.push_back(showing(name, controls));
+  update.push_back(showing("portrait_powerup_info.grp", info));
+  const auto refresh = call("rbbz_update_powerup_info");
+  enter->kids.push_back(c({s("set"), info, Node::Int(0)}));
+  enter->kids.push_back(refresh);
+  const auto close = call("rbbz_close_powerup_info");
+  const auto gate = [&](Node* method, Node when_open) {
+    std::vector<Node> original{s("do")};
+    original.insert(original.end(), method->kids.begin() + 1, method->kids.end());
+    method->kids.erase(method->kids.begin() + 1, method->kids.end());
+    method->kids.push_back(c({s("if_else"), info, std::move(when_open), c(std::move(original))}));
+  };
+  buttons->kids[1].kids.push_back(Node::Array({s("kAction_Option"),
+      c({s("if"), choices, call("rbbz_open_powerup_info")})}));
+  gate(buttons, c({s("switch"), Node::Var("action"),
+      Node::Array({s("kAction_Cancel"), close}), Node::Array({s("kAction_Confirm"), close}),
+      Node::Array({s("kAction_Option"), close}), Node::Array({s("default"), Node::Int(0)})}));
+  gate(select, Node::Int(0));
+  if (auto* scroll = PanelMethod(&staged, "powerup_select_panel", "SCROLL_MSG"))
+    gate(scroll, Node::Int(0));
+  // Append members after editing existing methods: appending may relocate them.
+  for (auto& root : staged) {
+    if (root.tag != ui::dtb::kCommand || root.kids.size() < 3 || root.kids[2].text != "powerup_select_panel") continue;
+    root.kids.push_back(Node::Array({s("rbbz_powerup_info"), Node::Int(0)}));
+    root.kids.push_back(Node::Array({s("rbbz_update_powerup_info"), c(std::move(update))}));
+    root.kids.push_back(Node::Array({s("rbbz_open_powerup_info"),
+        c({Node::Var("this"), s("update_powerup_desc"), c({Node::Var("this"), s("focus_name")})}),
+        c({s("set"), info, Node::Int(1)}), refresh}));
+    root.kids.push_back(Node::Array({s("rbbz_close_powerup_info"), c({s("set"), info, Node::Int(0)}), refresh}));
+    root.kids.push_back(Node::Array({s("poll"), refresh}));
+  }
+  *roots = std::move(staged);
+  return true;
+}
+
 bool AddPortraitAutosaveLayout(std::vector<Node>* roots, std::string* why) {
   auto* enter = PanelMethod(roots, "autosave_warning_panel", "enter");
   if (!enter) {
@@ -2096,10 +2200,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     }
     if (pump_startup_window) pump_startup_window();
   }
-  if (!screen::CurrentMenuConfiguration().show_currency) {
+  if (!screen::CurrentMenuConfiguration().show_currency || portrait_interface) {
     if (!edit("ui/powerup_select/gen/powerup_select.dtb", [&](auto& roots) {
-          return HidePowerupCurrency(&roots, error);
-        }) || !edit("ui/results_hub/gen/song_results.dtb", [&](auto& roots) {
+          return (screen::CurrentMenuConfiguration().show_currency || HidePowerupCurrency(&roots, error)) &&
+              (!portrait_interface || AddPortraitPowerupsLayout(
+                  &roots, screen::CurrentMenuConfiguration().portrait_aspect, error));
+        })) return false;
+  }
+  if (!screen::CurrentMenuConfiguration().show_currency) {
+    if (!edit("ui/results_hub/gen/song_results.dtb", [&](auto& roots) {
           return HideResultsCurrency(&roots, error);
         })) return false;
   }
@@ -2373,6 +2482,22 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         }
       }
       if (portrait_interface) {
+        const bool fr = locale.find("/fre/") != std::string::npos;
+        const bool de = locale.find("/deu/") != std::string::npos;
+        const bool es = locale.find("/esl/") != std::string::npos;
+        const bool it = locale.find("/ita/") != std::string::npos;
+        const bool pt = locale.find("/ptb/") != std::string::npos;
+        for (const auto& [key, value] : std::initializer_list<std::pair<const char*, const char*>>{
+            {"rbbz_powerup_overdrive", "Overdrive"},
+            {"rbbz_powerup_note", de ? "Noten" : es || it || pt ? "Nota" : "Note"},
+            {"rbbz_powerup_track", de ? "Spur" : fr ? "Piste" : es || pt ? "Pista" : it ? "Traccia" : "Track"},
+            {"rbbz_powerup_details", de ? "Details" : fr ? "Détails" : es ? "Detalles" : it ? "Dettagli" : pt ? "Detalhes" : "Details"}}) {
+          std::string why;
+          if (!screen::AddLocaleEntry(&roots, key, value, &why)) {
+            if (error) *error = "powerup locale entry refused: " + why;
+            return false;
+          }
+        }
         const char* caption = locale.find("/fre/") != std::string::npos ? "Trier" :
             locale.find("/deu/") != std::string::npos ? "Sort." :
             locale.find("/esl/") != std::string::npos ? "Orden" :
@@ -2986,6 +3111,21 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         })) return false;
     std::vector<uint8_t> source, buttons, scene;
     const auto songs_aspect = screen::CurrentMenuConfiguration().portrait_aspect;
+    if (!read(ui::input_font::kPowerupSelectRecord, &source, error) ||
+        !read(ui::input_font::kListRecord, &buttons, error) ||
+        !ui::input_font::PreparePortraitPowerups(source, buttons, songs_aspect, &scene, error)) return false;
+    if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
+      source = std::move(scene);
+      if (!ui::input_font::PreparePowerupSelect(source, &scene, error)) return false;
+    }
+    built[ui::input_font::kPowerupSelectRecord] = std::move(scene);
+    for (const bool categories : {true, false}) {
+      if (!read(categories ? "ui/resource/lists/gen/list_powerup_main_select.milo_xbox" :
+                             "ui/resource/lists/gen/list_powerup_left_to_right_temp.milo_xbox", &source, error) ||
+          !ui::input_font::PreparePortraitPowerupList(source, categories, &scene, error)) return false;
+      built[categories ? ui::input_font::kPortraitPowerupCategoriesRecord :
+                         ui::input_font::kPortraitPowerupChoicesRecord] = std::move(scene);
+    }
     // Reflow the generated panel, preserving its configured header routes.
     auto& song_record = built.at("ui/song_select/gen/song_select.dtb");
     std::vector<Node> song_roots;

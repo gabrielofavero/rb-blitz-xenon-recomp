@@ -130,6 +130,19 @@ clamped to `NumData - numDisplay`, through the same native selection/scroll
 notifications used by the library rail. It preserves the equipped item and does
 not emit Confirm. Mouse and touch use the same queue and presentation mapping.
 
+Portrait powerup selection authors three large icons per page in private native
+list resources. All three category providers retain their native equip and
+description notifications. The song card keeps the album, song/artist labels and
+all five instrument difficulty meters in a compact 3–2 grid. Back and Play Song use the existing native
+footer buttons; Play Song sends Start to the same preview shutdown and purchase
+statements as the category menu's launch entry. Its fourth icon is suppressed in
+portrait, including its mouse bounds. Each visible choice has a separate Details
+button that selects the row without confirming it and sends Option to the guest
+panel. A dedicated guest view displays the localized name and wrapped description;
+Close restores the selection without equipping. While details are open, the panel
+blocks equip, paging and song launch. These changes apply to portrait interfaces on all host
+platforms; landscape retains its original records and layout.
+
 On every list that is *not* a vertical scrolled list — the horizontal powerup rows,
 for instance — a detent becomes a D-pad press, not stick travel. Retail steps a
 list once per directional press, while a two-frame analog pulse depends on the
@@ -966,11 +979,11 @@ still need owner validation. Other actionable locale strings and tutorial or
 calibration scene images remain open in the
 [hint inventory](button-hint-inventory.md).
 
-Touch start prompts (2026-11-16): `last_device` starts in touch mode on mobile.
+Touch instructions: `last_device` starts in touch mode on mobile.
 Real touch selects that mode on desktop too. Before the guest draws a UILabel
-with `splash_press_start`, `loading_press_button`, or `press_start_to_continue`,
-the existing draw hook replaces the press verb and button with the localized
-touch verb, preserving the original action (start, begin, or continue). The
+beginning with a localized press verb and button glyph, the existing draw hook
+replaces the verb and button with the localized touch verb. This includes start
+prompts and powerup descriptions, preserving the complete action and explanation. The
 guest's font, animation and label layout still draw the text. The original
 string returns live on physical keyboard, mouse button/wheel, controller
 activity, or deliberate mouse motion out of touch mode. An idle connected pad

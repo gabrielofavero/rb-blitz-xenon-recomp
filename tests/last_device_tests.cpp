@@ -190,6 +190,17 @@ int main() {
         "French keeps original action");
   Check(TouchStartPrompt("PRESS <alt1>A") == "PRESS <alt1>A", "malformed markup is preserved");
   Check(TouchStartPrompt("Loading...") == "Loading...", "other text is preserved");
+  Check(TouchStartPrompt("Press <alt>X</alt> to double all score multipliers.") ==
+        "Touch to double all score multipliers.", "retail powerup button markup also supports touch");
+  const std::string jackpot = "Press <alt1>\xC2\x86</alt1> to start a 3X point Jackpot. "
+      "Play perfectly to win it all, but miss one note and you'll lose the Jackpot! (Each use requires Energy.)";
+  const std::string touch_jackpot = "Touch to start a 3X point Jackpot. "
+      "Play perfectly to win it all, but miss one note and you'll lose the Jackpot! (Each use requires Energy.)";
+  rb_blitz::input::StartPromptText powerup;
+  Check(powerup.Update(jackpot, true) == touch_jackpot,
+        "powerup touch text preserves the complete explanation without a button glyph");
+  Check(powerup.Update(touch_jackpot, false) == jackpot,
+        "switching input while reading restores the original powerup instruction");
   rb_blitz::input::StartPromptText prompt;
   const std::string original = "PRESS <alt1>A</alt1>TO BEGIN";
   Check(prompt.Update(original, false) == original, "physical boot preserves prompt exactly");

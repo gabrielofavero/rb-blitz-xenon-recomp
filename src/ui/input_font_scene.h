@@ -105,6 +105,15 @@ bool PrepareSongSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>*
 bool PreparePortraitSongs(const std::vector<uint8_t>& source,
                           const std::vector<uint8_t>& button_source, float aspect,
                           std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitPowerups(const std::vector<uint8_t>& source,
+                            const std::vector<uint8_t>& button_source, float aspect,
+                            std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitPowerupList(const std::vector<uint8_t>& source, bool categories,
+                               std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kPortraitPowerupCategoriesRecord[] =
+    "ui/resource/lists/gen/portrait_powerup_categories.milo_xbox";
+inline constexpr char kPortraitPowerupChoicesRecord[] =
+    "ui/resource/lists/gen/portrait_powerup_choices.milo_xbox";
 bool PreparePortraitShortcuts(const std::vector<uint8_t>& source,
                              std::vector<uint8_t>* scene, std::string* error);
 inline constexpr char kPortraitShortcutsRecord[] = "ui/resource/lists/gen/portrait_shortcuts.milo_xbox";
