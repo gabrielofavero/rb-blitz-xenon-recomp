@@ -1750,6 +1750,106 @@ bool AddPortraitSongsLayout(std::vector<Node>* roots, float aspect, std::string*
   return true;
 }
 
+bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, std::string* why) {
+  if (!roots) return false;
+  auto staged = *roots;
+  const auto s = [](std::string_view v) { return Node::Symbol(v); };
+  const auto c = [](std::vector<Node> v) { return Node::Command(std::move(v)); };
+  const auto f = [](float v) {
+    Node node; node.tag = ui::dtb::kFloat; node.scalar = std::bit_cast<uint32_t>(v); return node;
+  };
+  const auto layout = ui::PortraitSongs(aspect);
+  const auto append = [&](const char* panel, const char* method, std::vector<Node> commands) {
+    auto* target = PanelMethod(&staged, panel, method);
+    if (!target) { if (why) *why = std::string("portrait store lifecycle missing: ") + panel + "." + method; return false; }
+    // Entry can end in a native state guard that refuses commerce while the
+    // screen callback initializes it. Geometry must already be in place.
+    const auto at = std::string_view(method) == "enter" ? target->kids.begin() + 1 : target->kids.end();
+    target->kids.insert(at, commands.begin(), commands.end());
+    return true;
+  };
+  const auto position = [&](const char* name, float x, float z) {
+    return c({s(name), s("set_local_pos"), f(x), f(0), f(z)});
+  };
+  const auto scale = [&](Node object, float value) {
+    return c({object, s("set_local_scale"), f(value), f(value), f(value)});
+  };
+  const auto list = [&](const char* name, int rows, const char* resource, float z) {
+    return std::vector<Node>{
+      c({s(name), s("set"), s("display_num"), Node::Int(rows)}),
+      c({s(name), s("set"), s("max_display"), Node::Int(rows - 1)}),
+      c({s(name), s("set"), s("list_resource"), s(resource)}),
+      position(name, 0, z), scale(s(name), layout.list_scale)};
+  };
+  if (info) {
+    if (!PanelMethod(&staged, "store_info_panel", "refresh_panel")) return false;
+    auto commands = list("buttons.lst", 2, "portrait_store_info", -45);
+    commands.push_back(c({s("portrait_tab_store.lbl"), s("set_token_fmt"), s("store")}));
+    commands.push_back(c({s("rating.grp"), s("set_local_pos"), f(0), f(0), f(0)}));
+    // Credit generation writes landscape geometry on every refresh. Reapply
+    // the portrait bounds after it, keeping optional credit visibility intact.
+    for (const auto& [name, z, size, height] : {
+        std::tuple{"song.lbl", 140.f, 20.f, 36.f}, {"drm.lbl", 100.f, 15.f, 22.f},
+        {"rating.lbl", 72.f, 12.f, 18.f}, {"rating_description.lbl", 52.f, 12.f, 18.f},
+        {"cost.lbl", 32.f, 12.f, 18.f}, {"cost_ps3.lbl", 12.f, 12.f, 18.f}}) {
+      commands.push_back(position(name, -layout.width / 2 + 8, z));
+      for (const auto& [property, value] : {std::pair{"width", layout.width - 16}, {"height", height}})
+        commands.push_back(c({s(name), s("set"), s(property), f(value)}));
+      commands.push_back(c({s(name), s("set"), Node::Array({s("styles"), Node::Int(0), s("text_size")}), f(size)}));
+    }
+    if (!append("store_info_panel", "refresh_panel", commands)) return false;
+    // All states share this private native scene: downloading, completion,
+    // failure and leave-without-refresh confirmation retain their own handlers.
+    for (auto& root : staged) {
+      if (root.tag != ui::dtb::kCommand || root.kids.size() < 3) continue;
+      if (root.kids[2].text != store::kDownloadPanelName && root.kids[2].text != "rbbz_library_panel") continue;
+      for (auto& member : root.kids)
+        if (member.tag == ui::dtb::kArray && member.kids.size() == 2 && member.kids[0].text == "file")
+          member.kids[1] = Node::String("../error/portrait_store_dialog.milo");
+    }
+  } else {
+    for (const auto& [panel, method, name, resource] : {
+        std::tuple{"store_menu_panel", "enter", "filter.lst", "portrait_store_menu"},
+        {"store_menu_panel", "new_provider", "filter.lst", "portrait_store_menu"},
+        {"store_browser_panel", "refresh_list", "song.lst", "portrait_store_browser"}}) {
+      auto commands = list(name, layout.rows, resource, layout.list_z);
+      commands.push_back(c({s("portrait_tab_store.lbl"), s("set_token_fmt"), s("store")}));
+      if (!append(panel, method, commands)) return false;
+    }
+    // Shared header arrows use the same positions and restoration as My Songs.
+    for (const char* panel : {"store_menu_panel", "store_browser_panel"}) {
+      std::vector<Node> enter, exit;
+      for (const bool right : {false, true}) {
+        const auto arrow = c({s("background_panel"), s("find"), s(right ? "Rt_arrow.grp" : "Left_arrow.grp")});
+        enter.push_back(scale(arrow, ui::kPortraitSongArrowScale));
+        enter.push_back(c({arrow, s("set_local_pos"),
+            f((right ? 1.f : -1.f) * (layout.width / 2 - ui::kPortraitSongArrowInset)), f(-1), f(layout.tabs_z)}));
+        exit.push_back(scale(arrow, 1));
+        exit.push_back(c({arrow, s("set_local_pos"), f(right ? 363.624542f : -364.586578f), f(-1), f(186.714798f)}));
+      }
+      if (!append(panel, "enter", enter) || !append(panel, "exit", exit)) return false;
+    }
+    if (!append("store_menu_panel", "enter", {
+        c({s("store_banner_panel"), s("set_album_visibility"), s("FALSE")})})) return false;
+    if (!append("store_details_panel", "refresh", {
+        scale(s("difficulty"), .28f), position("difficulty", layout.width / 2 - 30, -178)})) return false;
+    // Retire the landscape rails/banner and loading chrome after their state
+    // callbacks, which can otherwise re-show them after a catalogue request.
+    const auto suppress = [&](const auto& self, Node& node) -> void {
+      if (node.tag == ui::dtb::kCommand && node.kids.size() >= 3 &&
+          node.kids[1].text == "set_showing" && node.kids[0].text == "scroller.grp")
+        node.kids[2] = s("FALSE");
+      if (node.tag == ui::dtb::kCommand && node.kids.size() >= 3 &&
+          node.kids[0].text == "store_banner_panel" && node.kids[1].text == "set_album_visibility")
+        node.kids[2] = s("FALSE");
+      for (auto& kid : node.kids) self(self, kid);
+    };
+    for (auto& root : staged) suppress(suppress, root);
+  }
+  *roots = std::move(staged);
+  return true;
+}
+
 bool AddPortraitPowerupsLayout(std::vector<Node>* roots, float aspect, std::string* why) {
   if (!roots) return false;
   auto staged = *roots;
@@ -3111,6 +3211,36 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         })) return false;
     std::vector<uint8_t> source, buttons, scene;
     const auto songs_aspect = screen::CurrentMenuConfiguration().portrait_aspect;
+    if (screen::CurrentMenuConfiguration().rhythmverse_row) {
+      for (const bool info : {false, true}) {
+        const auto found = built.find(info ? "ui/store/gen/store_info.dtb" : "ui/store/gen/store.dtb");
+        if (found == built.end()) {
+          if (error) *error = "portrait store requires its generated screen records";
+          return false;
+        }
+        auto& record = found->second;
+        std::vector<Node> roots; ui::dtb::RootHeader header;
+        if (!ui::dtb::Parse(record.data(), record.size(), &roots, &header, error) ||
+            !AddPortraitStoreLayout(&roots, songs_aspect, info, error)) return false;
+        record = ui::dtb::Compile(roots, header);
+      }
+      if (!read(ui::input_font::kListRecord, &buttons, error)) return false;
+      for (const char* kind : {"menu", "browser", "details", "info", "dialog", "chrome"}) {
+        const auto path = std::string(kind) == "dialog" ? "ui/error/gen/error_general.milo_xbox" :
+            std::string(kind) == "chrome" ? "ui/store/gen/store.milo_xbox" :
+            std::string("ui/store/gen/store_") + kind + ".milo_xbox";
+        if (!read(path, &source, error) ||
+            !ui::input_font::PreparePortraitStore(source, buttons, kind, songs_aspect, &scene, error)) return false;
+        built[std::string(kind) == "dialog" ? ui::input_font::kPortraitStoreDialogRecord : path] = std::move(scene);
+      }
+      for (const auto& [kind, original] : {std::pair{"menu", "list_store_frontmenu"},
+            {"browser", "list_held_button"}, {"info", "list_store_songpage"}}) {
+        if (!read(std::string("ui/resource/lists/gen/") + original + ".milo_xbox", &source, error) ||
+            !ui::input_font::PreparePortraitStoreList(source, buttons, kind, &scene, error)) return false;
+        built[std::string("ui/resource/lists/gen/portrait_store_") + kind + ".milo_xbox"] = std::move(scene);
+      }
+    }
+
     if (!read(ui::input_font::kPowerupSelectRecord, &source, error) ||
         !read(ui::input_font::kListRecord, &buttons, error) ||
         !ui::input_font::PreparePortraitPowerups(source, buttons, songs_aspect, &scene, error)) return false;

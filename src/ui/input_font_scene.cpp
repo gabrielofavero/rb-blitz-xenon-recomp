@@ -1412,6 +1412,12 @@ bool PreparePortraitSplashFont(const std::vector<uint8_t>& source,
   return PackStored(bytes, scene, error);
 }
 
+namespace {
+bool BuildPortraitSongList(const std::vector<uint8_t>& bytes, const std::vector<uint8_t>& buttons,
+                           bool grouped, std::string_view store,
+                           std::vector<uint8_t>* scene, std::string* error);
+}
+
 bool PreparePortraitSongList(const std::vector<uint8_t>& source,
                              const std::vector<uint8_t>& button_source, bool grouped,
                              std::vector<uint8_t>* scene, std::string* error) {
@@ -1422,6 +1428,28 @@ bool PreparePortraitSongList(const std::vector<uint8_t>& source,
     return Fail(error, "portrait song list source revision changed");
   if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
     return Fail(error, "portrait song button template revision changed");
+  return BuildPortraitSongList(bytes, buttons, grouped, {}, scene, error);
+}
+
+bool PreparePortraitStoreList(const std::vector<uint8_t>& source,
+                              const std::vector<uint8_t>& button_source, std::string_view kind,
+                              std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error) || !DecodeStream(button_source, &buttons, error)) return false;
+  const auto crc = Crc32(bytes.data(), bytes.size());
+  if (!((kind == "menu" && bytes.size() == 25668 && crc == 0xEE741658) ||
+        (kind == "browser" && bytes.size() == 77557 && crc == 0xA2078F90) ||
+        (kind == "info" && bytes.size() == 91304 && crc == 0x1C5441E7)))
+    return Fail(error, "portrait store list source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait store button template revision changed");
+  return BuildPortraitSongList(bytes, buttons, false, kind, scene, error);
+}
+
+namespace {
+bool BuildPortraitSongList(const std::vector<uint8_t>& bytes, const std::vector<uint8_t>& buttons,
+                           bool grouped, std::string_view store,
+                           std::vector<uint8_t>* scene, std::string* error) {
   PortraitScene edited(bytes), templates(buttons);
   // UIListDir's tail holds orientation, preview fields and element spacing.
   PutFloat(edited.directory.data() + edited.directory.size() - 29, ui::kPortraitSongRowStep);
@@ -1445,6 +1473,30 @@ bool PreparePortraitSongList(const std::vector<uint8_t>& source,
       const auto at = std::search(object.data.begin(), object.data.end(), font.begin(), font.end());
       if (at != object.data.end()) {
         PutBe32(object.data.data() + (at - object.data.begin()) - 41, 0);
+      }
+    }
+  }
+  if (!store.empty()) {
+    // Retain provider field names so grouping, paging and ownership stay native.
+    std::erase_if(edited.objects, [&](const auto& object) {
+      if (object.type != "UIListLabel") return false;
+      if (store == "menu") return object.name != "filter" && object.name != "count";
+      if (store == "info") return object.name != "list";
+      return object.name != "song" && object.name != "album" && object.name != "group" &&
+             object.name != "group_center" && object.name != "purchased";
+    });
+    for (auto& object : edited.objects) {
+      if (object.type == "UILabel") {
+        const bool badge = object.name == "purchased.lbl" || object.name == "count.lbl";
+        PortraitPose(object, 1, badge ? 140.f : -196.f, 0);
+        PortraitText(object, badge ? 12.f : 19.f,
+                     badge ? 65.f : 325.f, 0x21);
+        RenameSceneString(object.data, "../fonts/pentatonic.milo", "../fonts/portrait_splash.milo");
+      }
+      if (object.type == "UIColor") {
+        const bool black = object.name == "slot_active_selecting.color" ||
+                           object.name == "slot_selected.color" || object.name == "highlight_selected.color";
+        SceneColor(object.data, 17, black ? .04f : 1.f, black ? .03f : 1.f, black ? .02f : 1.f, 1);
       }
     }
   }
@@ -1499,9 +1551,17 @@ bool PreparePortraitSongList(const std::vector<uint8_t>& source,
   edited.RemoveDrawMember("slot.mesh");
   std::vector<std::string> original_art{"slot.mesh"};
   if (grouped) { edited.RemoveDrawMember("highlight.mesh"); original_art.push_back("highlight.mesh"); }
+  if (!store.empty()) {
+    original_art.clear();
+    for (const auto& object : edited.objects)
+      if (object.type == "Mesh" && !object.name.starts_with("portrait_")) original_art.push_back(object.name);
+    for (const auto& name : original_art) edited.RemoveDrawMember(name);
+  }
   PortraitHiddenGroup(edited, templates, "portrait_old_rows.grp", original_art);
   return PackStored(edited.Build(), scene, error);
 }
+
+} // namespace
 
 bool PreparePortraitSongs(const std::vector<uint8_t>& source,
                           const std::vector<uint8_t>& button_source, float aspect,
@@ -1603,6 +1663,140 @@ bool PreparePortraitSongs(const std::vector<uint8_t>& source,
     return Fail(error, "portrait shortcut entrance animation changed");
   for (size_t at : {size_t(95), size_t(103)}) PutFloat(popup_animation.data() + at, .5f * popup_scale);
   for (size_t at : {size_t(111), size_t(119)}) PutFloat(popup_animation.data() + at, popup_scale);
+  return PackStored(edited.Build(), scene, error);
+}
+
+bool PreparePortraitStore(const std::vector<uint8_t>& source,
+                          const std::vector<uint8_t>& button_source, std::string_view kind,
+                          float aspect, std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error) || !DecodeStream(button_source, &buttons, error)) return false;
+  const auto crc = Crc32(bytes.data(), bytes.size());
+  if (!((kind == "menu" && bytes.size() == 198542 && crc == 0x56F69A79) ||
+        (kind == "browser" && bytes.size() == 27572 && crc == 0x02151E8F) ||
+        (kind == "details" && bytes.size() == 699173 && crc == 0x3A7D0176) ||
+        (kind == "info" && bytes.size() == 3170769 && crc == 0xCFC46DD6) ||
+        (kind == "dialog" && bytes.size() == 2803318 && crc == 0x6790B076) ||
+        (kind == "chrome" && bytes.size() == 281861 && crc == 0xE4D9DD75)))
+    return Fail(error, "portrait store scene source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait store button template revision changed");
+  PortraitScene edited(bytes), templates(buttons);
+  const auto layout = ui::PortraitSongs(aspect);
+  // Each independently drawn panel owns its safe-area fit, including details
+  // below the browser and the screen still visible behind a modal.
+  auto marker = *templates.Find("active_normal.color");
+  marker.name = "portrait_store.color";
+  edited.objects.push_back(std::move(marker));
+  const auto hide = [&](std::vector<std::string> names) {
+    for (const auto& name : names) edited.RemoveDrawMember(name);
+    PortraitHiddenGroup(edited, templates, "portrait_store_hidden.grp", names);
+  };
+  const auto label = [&](const char* name, float x, float z, float size, float width) {
+    auto* object = edited.Find(name);
+    PortraitPose(*object, 1, x, z);
+    PortraitText(*object, size, width, 0x21);
+    for (const char* font : {"../resource/fonts/pentatonic_regularcond.milo",
+                             "../resource/fonts/pentatonic_bold.milo",
+                             "../resource/fonts/pentatonic.milo"})
+      RenameSceneString(object->data, font, "../resource/fonts/portrait_splash.milo");
+  };
+  if (kind == "dialog") {
+    // Keep the native panel art and modal visibility; detach the labels from
+    // its horizontal fit so progress and long downloaded titles stay readable.
+    auto* group = edited.Find("all.grp");
+    PortraitPose(*group, 1, 0, 0);
+    for (size_t at : {size_t(0x21), size_t(0x51)})
+      SceneMatrix(group->data, at, layout.width / 640, .7f);
+    label("error.lbl", -layout.width * .43f, 50, 17, layout.width * .86f);
+    label("continue.lbl", -layout.width * .43f, -55, 13, layout.width * .86f);
+    RenameSceneString(edited.Find("continue.lbl")->data, "../resource/fonts/buttons.milo",
+                      "../resource/fonts/inline_help_icons.milo");
+  } else if (kind == "chrome") {
+    hide({"album.lbl", "artist.lbl", "desc.lbl", "genre.lbl", "year.lbl",
+          "microsoft.lbl", "ps_logo.mesh", "ps_logo_1080.mesh"});
+    label("crumb.lbl", -layout.width / 2 + 6, layout.tools_z, 12, layout.width - 12);
+    PortraitPose(*edited.Find("wait.grp"), .4f, layout.width / 2 - 10, layout.tools_z);
+  } else if (kind == "details") {
+    hide({"genre_screen.mesh", "album_info_screen.mesh", "pack_songs.lst"});
+    const float left = -layout.width / 2 + 54;
+    for (const auto& [name, z] : {std::pair{"artist.lbl", -139.f}, {"album.lbl", -151.f},
+                                 {"genre.lbl", -163.f}, {"year.lbl", -175.f}})
+      label(name, left, z, 10, z < -160 ? std::max(20.f, layout.width - 120) : layout.width - 64);
+    SceneColor(edited.Find("black.color")->data, 17, 1, 1, 1, 1);
+    // Album mesh geometry is baked in the landscape right column. Normalize
+    // that geometry to a square rather than retaining its old pivot/offset.
+    auto* album = edited.Find("album.mesh");
+    constexpr size_t vertices = 219;
+    if (album->data.size() != 394) return Fail(error, "portrait store album geometry changed");
+    float min_x = INFINITY, max_x = -INFINITY, min_y = INFINITY, max_y = -INFINITY;
+    for (uint32_t i = 0; i < 4; ++i) {
+      const auto* vertex = album->data.data() + vertices + i * 36;
+      const auto x = std::bit_cast<float>(Be32(vertex));
+      const auto y = std::bit_cast<float>(Be32(vertex + 4));
+      min_x = std::min(min_x, x); max_x = std::max(max_x, x);
+      min_y = std::min(min_y, y); max_y = std::max(max_y, y);
+    }
+    if (!(max_x > min_x && max_y > min_y)) return Fail(error, "portrait store album bounds changed");
+    for (uint32_t i = 0; i < 4; ++i) {
+      auto* vertex = album->data.data() + vertices + i * 36;
+      const auto x = std::bit_cast<float>(Be32(vertex));
+      const auto y = std::bit_cast<float>(Be32(vertex + 4));
+      PutFloat(vertex, -layout.width / 2 + 27 + 40 * ((x - min_x) / (max_x - min_x) - .5f));
+      PutFloat(vertex + 4, 0);
+      PutFloat(vertex + 8, layout.card_z + 40 * (.5f - (y - min_y) / (max_y - min_y)));
+    }
+    PortraitPose(*album, 1, 0, 0);
+    edited.Find("album.mat")->data[0x29] = 0;
+    // The difficulty resource is placed after it is loaded by its panel DTA.
+    PortraitSurface(edited, buttons, "portrait_store_card", layout.width, layout.card_height,
+                    0, layout.card_z, "album.mesh");
+  } else {
+    const bool menu = kind == "menu", info = kind == "info";
+    if (menu) hide({"scroller.grp"});
+    else if (info) hide({"neon_panel.mesh", "neon_light.mesh", "recommended.grp", "recommended_wait.grp"});
+    else hide({"album.mesh", "scroller.grp", "shortcuts.grp"});
+    const char* list_name = menu ? "filter.lst" : info ? "buttons.lst" : "song.lst";
+    auto* list = edited.Find(list_name);
+    PortraitPose(*list, layout.list_scale, 0, info ? -45.f : layout.list_z);
+    const char* old_resource = menu ? "../resource/lists/list_store_frontmenu.milo" :
+        info ? "../resource/lists/list_store_songpage.milo" : "../resource/lists/list_held_button.milo";
+    const auto resource = std::string("../resource/lists/portrait_store_") + std::string(kind) + ".milo";
+    RenameSceneString(list->data, old_resource, resource);
+    // Private headers follow the library tab identity, without altering shared
+    // background animation keys used by the landscape hub pages.
+    auto heading = menu ? *edited.Find("store_unavailable.lbl") :
+        info ? *edited.Find("song.lbl") : *edited.Find("popup_header.lbl");
+    heading.name = "portrait_tab_store.lbl";
+    PortraitPose(heading, 1, 0, layout.tabs_z);
+    PortraitText(heading, 17, layout.width - 76);
+    // Replace the scene token; set_token_fmt also refreshes it at panel entry.
+    edited.objects.push_back(std::move(heading));
+    edited.Before(menu ? "filter.lst" : info ? "song.lbl" : "song.lst", {"portrait_tab_store.lbl"});
+    if (!info) {
+      for (const bool next : {false, true}) {
+        const auto stem = std::string(next ? "portrait_header_next" : "portrait_header_previous");
+        PortraitSurface(edited, buttons, stem, ui::kPortraitSongArrowTargetSize,
+                        ui::kPortraitSongArrowTargetSize,
+                        (next ? 1.f : -1.f) * (layout.width / 2 - ui::kPortraitSongArrowInset), layout.tabs_z, {});
+      }
+    }
+    if (menu) label("store_unavailable.lbl", -layout.width * .43f, 30, 17, layout.width * .86f);
+    if (info) {
+      label("song.lbl", -layout.width / 2 + 8, 132, 20, layout.width - 16);
+      label("drm.lbl", -layout.width / 2 + 8, 103, 15, layout.width - 16);
+      for (const auto& [name, z] : {std::pair{"rating.lbl", 75.f}, {"rating_description.lbl", 55.f},
+                                   {"cost.lbl", 35.f}, {"cost_ps3.lbl", 15.f}})
+        label(name, -layout.width / 2 + 8, z, 12, layout.width - 16);
+    }
+    PortraitFooter(edited, buttons, aspect);
+    auto color = *edited.Find("portrait_caption_black.color"); color.name = "portrait_songs.color";
+    edited.objects.push_back(std::move(color));
+    // All native state footers use the same private action resource.
+    for (auto& object : edited.objects) if (object.type == "InlineHelp")
+      RenameSceneString(object.data, "../resource/inline_help/default.milo",
+                        "../resource/inline_help/portrait_actions.milo");
+  }
   return PackStored(edited.Build(), scene, error);
 }
 

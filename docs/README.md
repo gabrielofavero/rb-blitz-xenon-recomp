@@ -80,6 +80,9 @@ endings and orphaned documents. Auditing without editing is the read-only `docs-
 
 ### Current settings delivery
 
+[Portrait screen coverage](plans/todo/2026-11-23-portrait-screen-coverage-plan.md)
+maps existing adaptations, missing screens, conditional routes, and remaining acceptance.
+
 [Portrait UI alignment](plans/finished/2026-11-19-portrait-ui-alignment.md) tracks
 footer styling, title placement, calibration presentation and preset hover.
 

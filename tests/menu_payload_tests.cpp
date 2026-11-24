@@ -3042,6 +3042,76 @@ int main(int argc, char** argv) {
         objects[names[i]] = {bytes + markers[i] + 4, bytes + markers[i + 1] + 4};
       return objects;
     };
+    namespace font = rb_blitz::ui::input_font;
+    BeginCase("RhythmVerse portrait authors every panel and preserves native download states");
+    config.rhythmverse_row = true;
+    for (const float aspect : {.3f, 201.f / 437, .75f, .9f}) {
+      config.portrait_aspect = aspect;
+      screen::ConfigureMenu(config);
+      settings::MenuRecords records;
+      std::vector<std::string> notes;
+      CHECK_TRUE(settings::BuildMenuRecords(read, {"ui/locale/eng/gen/locale_keep.dtb"},
+          &records, &why, false, false, &notes, {}, false, nullptr, {}, true));
+      for (const auto& note : notes) std::printf("store record note: %s\n", note.c_str());
+      CHECK_TRUE(notes.empty());
+      for (const char* kind : {"menu", "browser", "details", "info"}) {
+        const auto path = std::string("ui/store/gen/store_") + kind + ".milo_xbox";
+        CHECK_TRUE(records.contains(path));
+        const auto objects = stored_objects(records.at(path));
+        CHECK_TRUE(objects.contains("portrait_store.color"));
+        if (std::string_view(kind) != "details") CHECK_TRUE(objects.contains("portrait_tab_store.lbl"));
+      }
+      const auto dialog = stored_objects(records.at(font::kPortraitStoreDialogRecord));
+      CHECK_TRUE(dialog.contains("error.lbl") && dialog.contains("continue.lbl"));
+      // Labels have no transform parent: the art's fit cannot shrink their text.
+      for (const char* name : {"error.lbl", "continue.lbl"})
+        CHECK_EQ(u32(dialog.at(name).data() + 0x19 + 105), 0u);
+      for (const auto& [kind, field] : {std::pair{"menu", "filter"}, {"browser", "song"}, {"info", "list"}}) {
+        const auto objects = stored_objects(records.at(std::string("ui/resource/lists/gen/portrait_store_") + kind + ".milo_xbox"));
+        CHECK_TRUE(objects.contains(field));
+        CHECK_TRUE(objects.contains("portrait_row.mesh") && objects.contains("portrait_selected.mesh"));
+      }
+      const auto details = stored_objects(records.at("ui/store/gen/store_details.milo_xbox"));
+      const auto& album = details.at("album.mesh");
+      const auto layout = rb_blitz::ui::PortraitSongs(aspect);
+      for (size_t i = 0; i < 4; ++i) {
+        const auto x = std::bit_cast<float>(u32(album.data() + 208 + i * 36));
+        const auto z = std::bit_cast<float>(u32(album.data() + 216 + i * 36));
+        CHECK_TRUE(std::abs(x - (-layout.width / 2 + 27)) <= 20.001f);
+        CHECK_TRUE(std::abs(z - layout.card_z) <= 20.001f);
+      }
+      for (const bool info : {false, true}) {
+        const auto& record = records.at(info ? "ui/store/gen/store_info.dtb" : "ui/store/gen/store.dtb");
+        std::vector<dtb::Node> roots; dtb::RootHeader header;
+        CHECK_TRUE(dtb::Parse(record.data(), record.size(), &roots, &header, &why));
+        if (info) {
+          CHECK_TRUE(header_test::Method(roots, "store_info_panel", "refresh_panel") != nullptr);
+          CHECK_TRUE(header_test::Method(roots, "rbbz_download_panel", "show_popup") != nullptr);
+          CHECK_TRUE(header_test::Method(roots, "rbbz_download_panel", "finish_installed") != nullptr);
+          for (const char* panel : {"rbbz_download_panel", "rbbz_library_panel"}) {
+            bool found = false;
+            for (const auto& root : roots) if (root.kids.size() > 2 && root.kids[2].text == panel)
+              for (const auto& member : root.kids)
+                if (member.kids.size() == 2 && member.kids[0].text == "file") {
+                  CHECK_TRUE(member.kids[1].text == "../error/portrait_store_dialog.milo"); found = true;
+                }
+            CHECK_TRUE(found);
+          }
+        } else {
+          const auto* refresh = header_test::Method(roots, "store_browser_panel", "refresh_list");
+          CHECK_TRUE(refresh != nullptr);
+          CHECK_TRUE(header_test::Method(roots, "store_details_panel", "refresh") != nullptr);
+        }
+      }
+      std::vector<uint8_t> source, refused{1,2,3};
+      CHECK_TRUE(read("ui/store/gen/store_browser.milo_xbox", &source, &why));
+      source.back() ^= 1;
+      CHECK_FALSE(font::PreparePortraitStore(source, portrait_buttons, "browser", aspect, &refused, &why));
+      CHECK_TRUE((refused == std::vector<uint8_t>{1,2,3}));
+    }
+    config.rhythmverse_row = false;
+    config.portrait_aspect = 9.f / 16;
+    screen::ConfigureMenu(config);
     const auto settings_objects = stored_objects(settings_scene);
     BeginCase("portrait powerups keep native equip and launch handlers with three visible choices");
     {

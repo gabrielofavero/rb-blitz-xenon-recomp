@@ -5,6 +5,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rb_blitz::ui::input_font {
@@ -105,6 +106,14 @@ bool PrepareSongSelect(const std::vector<uint8_t>& source, std::vector<uint8_t>*
 bool PreparePortraitSongs(const std::vector<uint8_t>& source,
                           const std::vector<uint8_t>& button_source, float aspect,
                           std::vector<uint8_t>* scene, std::string* error);
+// Reflow RhythmVerse's native catalogue, offer and shared detail scenes.
+bool PreparePortraitStore(const std::vector<uint8_t>& source,
+                          const std::vector<uint8_t>& button_source, std::string_view kind,
+                          float aspect, std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitStoreList(const std::vector<uint8_t>& source,
+                              const std::vector<uint8_t>& button_source, std::string_view kind,
+                              std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kPortraitStoreDialogRecord[] = "ui/error/gen/portrait_store_dialog.milo_xbox";
 bool PreparePortraitPowerups(const std::vector<uint8_t>& source,
                             const std::vector<uint8_t>& button_source, float aspect,
                             std::vector<uint8_t>* scene, std::string* error);
