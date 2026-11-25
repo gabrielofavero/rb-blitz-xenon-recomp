@@ -106,7 +106,7 @@ void Gestures::Observe(const FingerEvent& event) {
     if (inserted && !it->second.pause) {
       const auto action = x < layout_.width * .5f ? Action::kFirstNote : Action::kSecondNote;
       Emit(action);
-      gameplay_.push_back({GameplayKind::kPress, it->second.token, action});
+      gameplay_.push_back({GameplayKind::kPress, it->second.token, action, false, event.timestamp_ns});
     }
     return;
   }
@@ -136,17 +136,26 @@ void Gestures::Observe(const FingerEvent& event) {
     const bool left = (dx > 0) == inverted_lane_swipe_;
     const auto action = left ? Action::kMoveLaneLeft : Action::kMoveLaneRight;
     Emit(action);
-    gameplay_.push_back({GameplayKind::kSwipe, finger.token, action, true});
+    gameplay_.push_back({GameplayKind::kSwipe, finger.token, action, true, event.timestamp_ns});
   }
   if (event.phase == Phase::kUp) {
     gameplay_.push_back({GameplayKind::kRelease, finger.token,
-        finger.x < layout_.width * .5f ? Action::kFirstNote : Action::kSecondNote, finger.swiped});
+        finger.x < layout_.width * .5f ? Action::kFirstNote : Action::kSecondNote, finger.swiped,
+        event.timestamp_ns});
     fingers_.erase(it);
   }
 }
 std::vector<GameplayEvent> Gestures::DrainGameplay() {
   std::vector<GameplayEvent> events;
   events.swap(gameplay_);
+  // A swipe already recognized while waiting for a guest frame must not also
+  // strike a note. Keep the press identity so its swipe/release still reconcile.
+  for (auto& event : events) {
+    if (event.kind != GameplayKind::kPress) continue;
+    event.swiped = std::any_of(events.begin(), events.end(), [&](const auto& other) {
+      return other.kind == GameplayKind::kSwipe && other.token == event.token;
+    });
+  }
   return events;
 }
 Actions Gestures::Sample() {

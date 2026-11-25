@@ -195,6 +195,7 @@ set(RBBLITZ_SOURCES
     # per-frame seam and the press/release boundary), and the pad overlay that bypasses the native
     # preset without blanking input the menus, pause and calibration still need.
     src/hooks/gameplay_input.cpp
+    src/hooks/touch_calibration.cpp
     # P2 of the gameplay-mapping plan: the source gates (SDK-free rules) and the title's own input
     # system (the SDK's drivers with the MnK emulation behind the keyboard gate, plus the physical
     # pad sampling a `pad:` gameplay source reads instead of the merged state).

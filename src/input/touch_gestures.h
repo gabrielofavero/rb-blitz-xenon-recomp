@@ -35,6 +35,7 @@ struct FingerEvent {
   uint64_t device = 0, finger = 0;
   Phase phase = Phase::kDown;
   float x = 0, y = 0;  // normalized full-screen coordinates
+  uint64_t timestamp_ns = 0;
 };
 
 struct PointerResult { bool consumed = false, deploy = false; };
@@ -58,6 +59,38 @@ struct GameplayEvent {
   uint64_t token = 0;
   Action action = Action::kFirstNote;
   bool swiped = false;
+  uint64_t timestamp_ns = 0;
+};
+
+// Only new contacts in the current sampling interval count. Captured contacts
+// keep swallowing their synthetic mouse stream through a sampling boundary.
+class CalibrationTaps {
+ public:
+  void Cancel() { target_ = 0; down_ = captured_ = false; pending_.clear(); }
+  void SetTarget(uint32_t target) {
+    if (target_ != target) { pending_.clear(); target_ = target; }
+  }
+  bool Observe(Phase phase, uint64_t timestamp) {
+    if (phase == Phase::kDown) {
+      if (down_) return captured_;
+      down_ = true;
+      captured_ = target_ != 0;
+      if (captured_ && pending_.size() < 64) pending_.push_back(timestamp);
+    }
+    const bool consumed = captured_;
+    if (phase == Phase::kUp || phase == Phase::kCancel) down_ = captured_ = false;
+    return consumed;
+  }
+  std::vector<uint64_t> Drain(uint32_t target) {
+    if (target != target_) return {};
+    std::vector<uint64_t> result;
+    result.swap(pending_);
+    return result;
+  }
+ private:
+  uint32_t target_ = 0;
+  bool down_ = false, captured_ = false;
+  std::vector<uint64_t> pending_;
 };
 
 // Notes strike immediately. Each touch keeps an identity through its release so

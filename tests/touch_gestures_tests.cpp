@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
 #include "input/touch_gestures.h"
+#include "input/touch_timing.h"
 #include <algorithm>
 #include <limits>
 #include <cmath>
@@ -24,8 +25,66 @@ void Tap(Gestures& g, float x, float y = .6f, uint64_t finger = 1) {
   Event(g, Phase::kDown, x, y, finger);
   Event(g, Phase::kUp, x, y, finger);
 }
+void TimingCases() {
+  BeginCase("touch judgements retain tap spacing and the native calibration offset");
+  constexpr uint64_t now = 1'000'000'000;
+  CHECK_TRUE(std::abs(EventTimeMs(2000, now - 40'000'000, now) - 1960) < 1e-6);
+  CHECK_TRUE(std::abs(EventTimeMs(2000, now - 10'000'000, now) - 1990) < 1e-6);
+  CHECK_TRUE(std::abs(EventTimeMs(2075, now - 40'000'000, now) - 2035) < 1e-6);
+  CHECK_TRUE(EventTimeMs(2000, 0, now) == 2000);
+  CHECK_TRUE(EventTimeMs(2000, now + 1, now) == 2000);
+  CHECK_TRUE(InputAgeNs(now - kMaxInputAgeNs - 1, now) > kMaxInputAgeNs);
+
+  BeginCase("buffered swipes suppress only their own starting note and preserve timestamps");
+  auto buffered = Ready();
+  buffered.Observe({1, 1, Phase::kDown, .2f, .6f, now - 40'000'000});
+  buffered.Observe({1, 2, Phase::kDown, .8f, .6f, now - 30'000'000});
+  buffered.Observe({1, 1, Phase::kMove, .4f, .6f, now - 10'000'000});
+  auto batch = buffered.DrainGameplay();
+  CHECK_EQ(batch.size(), size_t(3));
+  CHECK_TRUE(batch[0].swiped);
+  CHECK_FALSE(batch[1].swiped);
+  CHECK_EQ(batch[0].timestamp_ns, now - 40'000'000);
+  CHECK_EQ(batch[1].timestamp_ns, now - 30'000'000);
+  CHECK_EQ(batch[2].timestamp_ns, now - 10'000'000);
+  buffered.Observe({1, 2, Phase::kUp, .8f, .6f, now});
+  batch = buffered.DrainGameplay();
+  CHECK_EQ(batch[0].timestamp_ns, now);
+
+  BeginCase("calibration uses raw down edges and discards retired sampling intervals");
+  CalibrationTaps calibration;
+  CHECK_FALSE(calibration.Observe(Phase::kDown, 100));
+  calibration.SetTarget(1);
+  CHECK_TRUE(calibration.Drain(1).empty()); // a held finger cannot become a sample
+  CHECK_FALSE(calibration.Observe(Phase::kDown, 105)); // neither can a duplicate down
+  CHECK_FALSE(calibration.Observe(Phase::kUp, 110));
+  CHECK_TRUE(calibration.Observe(Phase::kDown, 200));
+  CHECK_TRUE(calibration.Observe(Phase::kDown, 201)); // duplicate down
+  CHECK_TRUE(calibration.Observe(Phase::kUp, 210));
+  CHECK_TRUE(calibration.Observe(Phase::kDown, 300));
+  auto taps = calibration.Drain(1);
+  CHECK_EQ(taps.size(), size_t(2));
+  CHECK_EQ(taps[0], uint64_t(200));
+  CHECK_EQ(taps[1], uint64_t(300));
+  calibration.SetTarget(0);
+  CHECK_TRUE(calibration.Observe(Phase::kUp, 310)); // owns its synthetic release
+  calibration.SetTarget(2);
+  CHECK_TRUE(calibration.Drain(2).empty());
+  CHECK_TRUE(calibration.Observe(Phase::kDown, 400));
+  calibration.SetTarget(3);
+  CHECK_TRUE(calibration.Drain(2).empty());
+  CHECK_TRUE(calibration.Drain(3).empty());
+  calibration.Cancel();
+  calibration.SetTarget(3);
+  CHECK_TRUE(calibration.Observe(Phase::kDown, 500));
+  taps = calibration.Drain(3);
+  CHECK_EQ(taps.size(), size_t(1));
+  CHECK_EQ(taps[0], uint64_t(500));
+}
 }
 int main() {
+  TimingCases();
+
   BeginCase("a note fires on down; release resolves that same touch without another strike");
   auto g = Ready();
   Event(g, Phase::kDown, .1f);

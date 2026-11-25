@@ -40,6 +40,7 @@
 #include <mutex>
 #include <utility>
 #include <vector>
+#include <SDL3/SDL.h>
 
 #include "settings/runtime_settings.h"
 #include <rex/ppc/hook.h>
@@ -52,6 +53,7 @@
 #include "diag/shader_trace.h"
 #include "input/effective_input.h"
 #include "input/touch_controls.h"
+#include "input/touch_timing.h"
 #include "input/native_menu.h"
 #include "input/source_gates.h"
 
@@ -61,6 +63,7 @@ REX_EXTERN(__imp__sub_82443A30);
 REX_EXTERN(__imp__sub_824364B0);
 REX_EXTERN(__imp__sub_824367E0);
 REX_EXTERN(__imp__sub_82441D20);
+REX_EXTERN(__imp__sub_824423F8);
 
 namespace rb_blitz::gameplay_input {
 namespace detail {
@@ -183,15 +186,18 @@ struct TouchMistake {
 struct TouchPress {
   Action action;
   bool swiped = false;
+  bool dispatched = false;
   std::vector<TouchMistake> mistakes;
 };
 thread_local uint64_t g_touch_press = 0;
+thread_local uint64_t g_touch_timestamp_ns = 0;
+thread_local uint64_t g_touch_dispatch_ns = 0;
 thread_local std::map<uint64_t, TouchPress> g_touch_presses;
 thread_local uint32_t g_touch_controller = 0;
 
 bool TouchHeld(Action action) {
   for (const auto& [token, press] : g_touch_presses)
-    if (press.action == action) return true;
+    if (press.dispatched && press.action == action) return true;
   return false;
 }
 
@@ -226,11 +232,19 @@ void DispatchTouch(PPCContext& ctx, uint8_t* base, uint32_t controller) {
     if (event.kind == GameplayKind::kCancel) {
       const auto previous = std::move(g_touch_presses);
       g_touch_presses.clear();
-      for (const auto& [token, press] : previous) release(press.action);
+      for (const auto& [token, press] : previous)
+        if (press.dispatched) release(press.action);
     } else if (event.kind == GameplayKind::kPress) {
-      g_touch_presses.emplace(event.token, TouchPress{event.action, false, {}});
+      const auto now = SDL_GetTicksNS();
+      if (InputAgeNs(event.timestamp_ns, now) > kMaxInputAgeNs) continue;
+      g_touch_presses.emplace(event.token, TouchPress{event.action, false, !event.swiped, {}});
+      if (event.swiped) continue;
       g_touch_press = event.token;
+      g_touch_timestamp_ns = event.timestamp_ns;
+      g_touch_dispatch_ns = now;
       CallPress(ctx, base, controller, BmAction(event.action));
+      g_touch_timestamp_ns = 0;
+      g_touch_dispatch_ns = 0;
       g_touch_press = 0;
     } else if (event.kind == GameplayKind::kSwipe) {
       const auto it = g_touch_presses.find(event.token);
@@ -260,8 +274,9 @@ void DispatchTouch(PPCContext& ctx, uint8_t* base, uint32_t controller) {
         }
       }
       const auto action = it->second.action;
+      const bool dispatched = it->second.dispatched;
       g_touch_presses.erase(it);
-      release(action);
+      if (dispatched) release(action);
     }
   }
 }
@@ -381,6 +396,25 @@ int LiveControllerPreset() {
 }
 
 }  // namespace rb_blitz::gameplay_input
+
+// SwingAtLane receives the calibrated song time from BeatMatcher (+96).
+// Correct only the direct touch call, leaving chart polling, native controls,
+// calibration offsets and the game's hit windows intact.
+REX_HOOK_RAW(sub_824423F8) {
+  using namespace rb_blitz::gameplay_input::detail;
+  const double original = ctx.f1.f64;
+  const bool trace = g_touch_timestamp_ns && TraceOn();
+  if (g_touch_timestamp_ns) {
+    ctx.f1.f64 = rb_blitz::input::touch::EventTimeMs(
+        original, g_touch_timestamp_ns, g_touch_dispatch_ns);
+  }
+  const double corrected = ctx.f1.f64;
+  __imp__sub_824423F8(ctx, base);
+  if (trace)
+    REXLOG_INFO("touch timing: token={} queue_ms={:.3f} song_ms={:.3f} event_ms={:.3f} hit={}",
+        g_touch_press, double(rb_blitz::input::touch::InputAgeNs(
+            g_touch_timestamp_ns, g_touch_dispatch_ns)) * 1e-6, original, corrected, ctx.r3.u32 != 0);
+}
 
 // ---------------------------------------------------------------------------------------------
 // The guest hooks. One address, one definition: gameplay_probe.h explains why the probe's

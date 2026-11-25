@@ -66,6 +66,42 @@ child window begins so hit testing follows the newly drawn positions. Resizing,
 backgrounding, closing, keyboard/controller navigation, mouse-wheel input and
 physical mouse use cancel touch motion. Mouse as Touch also supports this path.
 
+## Touch gameplay and calibration timing
+
+Direct gameplay contacts retain SDL's monotonic nanosecond timestamp through
+`FingerEvent` and `GameplayEvent`. The `824423F8` SwingAtLane hook subtracts the
+queued touch's age from the native calibrated song time, only while dispatching
+that touch's note press. Multiple taps drained in one frame keep their original
+spacing. Keyboard, controller and automatic chart judgements retain their native
+time, hit windows and calibration offsets. Touch presses older than 250 ms are
+discarded so a stall cannot turn abandoned input into a new strike.
+
+Notes still dispatch on down. If a swipe is already recognized in the same
+buffered batch, its starting press keeps its identity but does not strike a note.
+A swipe recognized after dispatch can forgive its own failed press; a successful
+hit already committed by the guest is retained.
+
+Manual touch calibration samples bypass the menu's synthetic A-button pulses.
+`CalibrationPanel::Poll` (`822BCE90`) publishes a sampling target only in native
+state 2 after the five countdown cycles. Raw primary-contact downs queue their
+timestamps; their synthetic mouse stream is consumed through release. The guest
+thread feeds each tap to `822BC0C0`, the native calibration sampler, with the user
+selected by `start_test`. The `822B89A8` elapsed-time hook removes that tap's queue
+age for the duration of the sample. Native outlier rejection, result storage and
+hardware calibration remain in the guest. Sampling interval changes, panel exit,
+focus loss and backgrounding discard queued samples.
+
+The path serves iOS and the explicit desktop touch preview, independently of the
+renderer. Host tests cover timestamp spacing, preserved calibration offsets,
+buffered swipe identity and calibration contact boundaries. Windows AMD64 Release
+builds and host tests validate compilation and queue rules; iOS device timing and
+macOS/Linux builds require separate validation. Existing calibration values may
+include the previous menu-route delay and should be measured again on the device.
+
+With `input_source_trace=true`, `touch timing:` records each dispatched note's
+token, queue age, native song time, corrected event time and hit result. `touch calibration:`
+records direct calibration sample ages. These traces are disabled by default.
+
 ## iOS inactivity pause
 
 On iOS, losing scene activation freezes guest time and latches a pause request

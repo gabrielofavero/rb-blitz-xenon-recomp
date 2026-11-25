@@ -23,6 +23,7 @@ bool PreviewEnabled() { return rb_blitz::settings::title::touch_preview.Get(); }
 #include "input/last_device.h"
 #include "input/input_capture.h"
 #include "input/native_menu.h"
+#include "input/touch_timing.h"
 #include "input/remap.h"
 #include "ui/achievements_overlay.h"
 
@@ -32,6 +33,8 @@ static_assert(static_cast<uint64_t>(SDL_MOUSE_TOUCHID) == UINT64_MAX);
 static_assert(static_cast<uint64_t>(SDL_PEN_TOUCHID) == UINT64_MAX - 1);
 std::mutex g_mutex;
 Gestures g_gestures;
+CalibrationTaps g_calibration;
+uint64_t g_calibration_updated_ns = 0;
 MotionDetector g_motion;
 PowerupTarget g_powerup_target;
 Rect g_lane_powerup;
@@ -145,7 +148,16 @@ class Controls final : public rex::ui::DialogBase {
         self.menu_fingers_.insert(key);
       }
       bool menu_captured = false;
-      if (self.menu_primary_ == key && !active && g_foreground && HostInputFocused()) {
+      if (self.menu_primary_ == key) {
+        std::lock_guard lock(g_mutex);
+        const auto now = SDL_GetTicksNS();
+        if (!g_foreground || !HostInputFocused() || SystemUIActive() ||
+            ui::achievements::Active() || !g_calibration_updated_ns ||
+            InputAgeNs(g_calibration_updated_ns, now) > 100'000'000)
+          g_calibration.SetTarget(0);
+        menu_captured = g_calibration.Observe(phase, finger.timestamp ? finger.timestamp : now);
+      }
+      if (!menu_captured && self.menu_primary_ == key && !active && g_foreground && HostInputFocused()) {
         const auto menu_phase = phase == Phase::kDown ? MenuTouchPhase::kDown :
             phase == Phase::kMove ? MenuTouchPhase::kMove :
             phase == Phase::kUp ? MenuTouchPhase::kUp : MenuTouchPhase::kCancel;
@@ -178,7 +190,8 @@ class Controls final : public rex::ui::DialogBase {
 #endif
       if (active && phase == Phase::kDown && (target || touch_gameplay)) g_mouse_gate.Capture();
       if (!target && touch_gameplay)
-        g_gestures.Observe({finger.touchID, finger.fingerID, phase, finger.x, finger.y});
+        g_gestures.Observe({finger.touchID, finger.fingerID, phase, finger.x, finger.y,
+            finger.timestamp ? finger.timestamp : SDL_GetTicksNS()});
     }
     return true;
   }
@@ -229,6 +242,8 @@ void CancelGameplay() {
   g_visible = false;
   std::lock_guard lock(g_mutex);
   g_gestures.Cancel(); g_motion.Reset(); g_powerup_target.Cancel();
+  g_calibration.Cancel();
+  g_calibration_updated_ns = 0;
   g_lane_powerup = {}; g_lane_timestamp = 0;
 }
 void PublishLanePowerup(Rect rect) {
@@ -279,6 +294,15 @@ bool ControlsVisible() { return g_visible && g_foreground && TouchInputActive() 
 std::vector<GameplayEvent> DrainGameplay() {
   std::lock_guard lock(g_mutex);
   return g_gestures.DrainGameplay();
+}
+void PublishCalibrationTarget(uint32_t target) {
+  std::lock_guard lock(g_mutex);
+  g_calibration.SetTarget(target);
+  g_calibration_updated_ns = SDL_GetTicksNS();
+}
+std::vector<uint64_t> DrainCalibrationTaps(uint32_t target) {
+  std::lock_guard lock(g_mutex);
+  return g_calibration.Drain(target);
 }
 bool ConsumeMouse(bool is_touch, Phase phase, bool gameplay) {
   std::lock_guard lock(g_mutex);

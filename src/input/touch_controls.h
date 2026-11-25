@@ -10,6 +10,8 @@ bool PreviewEnabled();
 Actions SampleGameplay(bool active);
 void CancelGameplay();
 std::vector<GameplayEvent> DrainGameplay();
+void PublishCalibrationTarget(uint32_t target);
+std::vector<uint64_t> DrainCalibrationTaps(uint32_t target);
 bool ConsumeMouse(bool is_touch, Phase phase, bool gameplay);
 // Physical mouse coordinates normalized to the presented guest frame.
 bool ConsumeLanePointer(Phase phase, float guest_x, float guest_y);
