@@ -105,6 +105,8 @@ draw projects `powerup_icon.mesh` through the current camera; only normalized
 screen bounds leave the draw, and targets expire after 100 ms. Letterboxing,
 overscan, and safe-area presentation use the same conversion as native menu
 input. The mouse cursor is shown while a ready lane target is available.
+Mesh lookup uses the directory that owns the drawn group, including the nested
+`powerup_icon1` scene instance; it does not require a fixed directory name.
 
 Press and release inside the original icon bounds dispatch the same native
 Power-up action pair as motion and controller deployment. The pointer is

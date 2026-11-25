@@ -190,6 +190,7 @@ set(RBBLITZ_SOURCES
     src/input/touch_controls.cpp
     src/input/touch_gestures.cpp
     src/input/native_menu.cpp
+    src/input/native_mesh.cpp
     # P3 of the gameplay-mapping plan: the guest adapter that dispatches a gameplay table's
     # actions through the title's own validated boundary (the controller factory/destructor, the
     # per-frame seam and the press/release boundary), and the pad overlay that bypasses the native
@@ -1244,6 +1245,12 @@ if(BUILD_TESTING)
     add_test(NAME hud_layout COMMAND rb_blitz_hud_layout_tests)
 
     if(WIN32 OR APPLE)
+        add_executable(rb_blitz_native_mesh_runtime_tests
+            tests/native_mesh_runtime_tests.cpp src/input/native_mesh.cpp
+            src/input/touch_gestures.cpp)
+        target_include_directories(rb_blitz_native_mesh_runtime_tests PRIVATE src tests)
+        target_link_libraries(rb_blitz_native_mesh_runtime_tests PRIVATE rex::sdk)
+        add_test(NAME native_mesh_runtime COMMAND rb_blitz_native_mesh_runtime_tests)
         # Exercise the production WorldXfm hook with isolated live-object fixtures.
         add_executable(rb_blitz_hud_layout_runtime_tests
             tests/hud_layout_runtime_tests.cpp src/hooks/hud_layout_runtime.cpp
