@@ -20,6 +20,52 @@ The old screenshot detector, hover aligner, relative-motion stepper and their
 configuration flags have been removed. `enhancements_native_mouse` was an unused
 placeholder; R6 uses `mouse_ui_nav` as its single switch.
 
+## Touch list scrolling
+
+The song list, its search results, the shortcut filter list, and RhythmVerse
+browsing and search results accept direct finger drags. Gesture
+slop uses eight window points; travel uses the list's projected row pitch, so
+portrait layouts, display density and presentation scaling share the same input
+path. SDL finger timestamps determine release velocity. The primary contact owns
+the gesture, and its synthesized mouse stream is consumed independently of later
+touches. The desktop Mouse as Touch mode uses the same scrolling model.
+
+Dragging changes the viewport without selecting each passing row. Release adds
+exponentially decaying momentum, clamped at both ends. A touch during momentum
+stops the view without activating a row; an ordinary tap activates after release
+and a visible feedback frame. Holding before release suppresses stale velocity.
+Window focus, screen/dialog changes, resizing and physical navigation abandon the
+gesture; a suspended guest does not accumulate momentum.
+
+RhythmVerse uses the focused vertical list on `store_menu_screen` and
+`store_browser_screen`, including browsing categories and submitted search
+results. The current provider determines the scroll range as result counts
+change. Loading, download and error dialogs retain their own input scope;
+details screens and horizontal lists do not opt into content dragging.
+
+`TouchListScroll` in `src/input/touch_scroll.h` keeps fractional viewport positions.
+Whole rows use the existing native selection/scroll notifications. The
+`UIListDir::BuildDrawState` hook (`824E6DC8`) temporarily supplies the fractional
+progress through `UIListState` +52/+60; the native builder handles the extra edge
+row, provider spacing and alpha. Navigation fields are restored before returning.
+Rendering and hit testing therefore use the same guest draw state.
+
+This path is shared across SDL platforms and rendering backends. Host tests cover
+tap/drag separation, fractional travel, momentum, interruption, boundaries,
+resolution-independent slop and synthesized mouse suppression. Windows AMD64
+Release is the build validation target; iOS, macOS and Linux device behavior still
+requires manual validation.
+
+The Achievements browser uses the same motion model in both its one-column and
+two-column layouts. Its whole card viewport accepts drags, including gaps between
+cards, while the native ImGui scrollbar and Back button retain their own input.
+SDL finger timestamps determine momentum; duplicate mouse events cannot change
+the selected card while dragging or coasting. Taps select cards on release, and
+touching a coasting list only stops it. Pixel scrolling is applied before the
+child window begins so hit testing follows the newly drawn positions. Resizing,
+backgrounding, closing, keyboard/controller navigation, mouse-wheel input and
+physical mouse use cancel touch motion. Mouse as Touch also supports this path.
+
 ## iOS inactivity pause
 
 On iOS, losing scene activation freezes guest time and latches a pause request

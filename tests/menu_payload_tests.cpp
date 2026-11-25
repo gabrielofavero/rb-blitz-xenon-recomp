@@ -21,6 +21,7 @@
 #include "settings/ultimate_runtime.h"
 #include "ui/menu_options.h"
 #include "ui/input_font_scene.h"
+#include "ui/milo_object_boundaries.h"
 #include "ui/portrait_menu.h"
 #include "input/calibration_text.h"
 #include "input/inline_help.h"
@@ -2106,6 +2107,36 @@ void TestPortraitSplash() {
   }
 }
 
+void TestMiloFlowBoundaries() {
+  using rb_blitz::ui::input_font::detail::MiloObjectBoundaries;
+  BeginCase("Milo object boundaries retain inline Flow directories and nested children");
+  std::vector<uint8_t> bytes;
+  const auto word = [&](uint32_t value) {
+    for (int shift = 24; shift >= 0; shift -= 8) bytes.push_back(uint8_t(value >> shift));
+  };
+  const auto marker = [&] {
+    const auto at = bytes.size(); word(0xADDEADDE); return at;
+  };
+  const auto flow_directory = [&](const std::string& child_type) {
+    word(32); word(4);
+    bytes.insert(bytes.end(), {'F', 'l', 'o', 'w'});
+    word(1); bytes.push_back('n');
+    word(4); word(2); bytes.push_back(0); word(1);
+    word(uint32_t(child_type.size()));
+    bytes.insert(bytes.end(), child_type.begin(), child_type.end());
+    word(1); bytes.push_back('n');
+  };
+  const auto root = marker();
+  word(7); marker(); flow_directory("Flow"); marker();
+  word(7); marker(); flow_directory("FlowAnimate"); marker();
+  word(3); const auto flow_end = marker();
+  word(11); const auto texture_end = marker();
+  const auto boundaries = MiloObjectBoundaries(bytes, 0, 2);
+  CHECK_TRUE((boundaries == std::vector<size_t>{root, flow_end, texture_end}));
+  bytes.resize(flow_end);
+  CHECK_TRUE(MiloObjectBoundaries(bytes, 0, 2).empty());
+}
+
 int main(int argc, char** argv) {
   if (argc == 4 && std::string(argv[1]) == "check-calibration-source") {
     namespace settings = rb_blitz::settings;
@@ -3033,10 +3064,8 @@ int main(int argc, char** argv) {
       const auto count = u32(bytes + at); at += 4;
       std::vector<std::string> names;
       for (uint32_t i = 0; i < count; ++i) { string(); names.push_back(string()); }
-      std::vector<size_t> markers;
-      for (size_t i = at; i + 4 <= size; ++i)
-        if (u32(bytes + i) == 0xADDEADDE) markers.push_back(i);
-      markers.erase(markers.begin(), markers.end() - count - 1);
+      const auto markers = rb_blitz::ui::input_font::detail::MiloObjectBoundaries(
+          std::span<const uint8_t>(bytes, size), at, count);
       std::map<std::string, std::vector<uint8_t>> objects;
       for (size_t i = 0; i < count; ++i)
         objects[names[i]] = {bytes + markers[i] + 4, bytes + markers[i + 1] + 4};
@@ -3070,6 +3099,14 @@ int main(int argc, char** argv) {
         const auto objects = stored_objects(records.at(std::string("ui/resource/lists/gen/portrait_store_") + kind + ".milo_xbox"));
         CHECK_TRUE(objects.contains(field));
         CHECK_TRUE(objects.contains("portrait_row.mesh") && objects.contains("portrait_selected.mesh"));
+        if (std::string_view(kind) == "browser") {
+          // The measured native Flow includes its own directory and FlowAnimate.
+          // Losing those boundaries makes the guest read texture pixels as names.
+          const auto& flow = objects.at("Flow.flow");
+          CHECK_EQ(flow.size(), size_t{1006});
+          CHECK_EQ(u32(flow.data()), 7u);
+          CHECK_EQ(u32(flow.data() + 0x193), 32u);
+        }
       }
       const auto details = stored_objects(records.at("ui/store/gen/store_details.milo_xbox"));
       const auto& album = details.at("album.mesh");
@@ -3746,6 +3783,7 @@ int main(int argc, char** argv) {
     CheckStrEq(moved[2].kids[1].text, "Rock Band Blitz Ultimate 2.0 Development Team");
     CHECK_EQ(moved.size(), fixture().size());
   }
+  TestMiloFlowBoundaries();
   TestExtendingKeepsOnePart();
   TestBaseArkGetsItsOwnPart();
   TestMountedPartOfTheWrongSizeIsNotCarried();

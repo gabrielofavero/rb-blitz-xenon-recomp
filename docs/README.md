@@ -141,6 +141,9 @@ budget, and the row-text budget — are a skill:
 
 ### Plans
 
+[Xbox Dev Mode build](plans/todo/2026-11-25-xbox-dev-mode-build-plan.md) plans the UWP
+runtime port, bundled build, first-launch preparation, DLC storage and native compilation research.
+
 The [iOS importer plan](plans/finished/2026-11-16-ios-importer-plan.md) tracks
 the separate first-launch Files importer, optional Ultimate setup and asset-free
 IPA build; the original bundled-assets route remains available.

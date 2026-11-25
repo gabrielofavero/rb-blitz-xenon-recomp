@@ -258,9 +258,13 @@ bool MotionDetector::Observe(MotionMode mode, uint64_t now, float x, float y, fl
 }
 bool MouseGate::Consume(bool is_touch, Phase phase, bool gameplay) {
   if (!is_touch) return false;
-  const bool consume = gameplay || down_;
-  if (phase == Phase::kDown && consume) down_ = true;
-  if (phase == Phase::kUp || phase == Phase::kCancel) down_ = false;
+  if (phase == Phase::kDown && !menu_pending_.empty()) {
+    menu_ = menu_pending_.front();
+    menu_pending_.pop_front();
+  }
+  const bool consume = gameplay || down_ || menu_;
+  if (phase == Phase::kDown && (gameplay || down_)) down_ = true;
+  if (phase == Phase::kUp || phase == Phase::kCancel) down_ = menu_ = false;
   return consume;
 }
 }  // namespace rb_blitz::input::touch

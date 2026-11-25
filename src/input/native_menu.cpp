@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Retail guest ABI and validation: docs/engine/input-flow.md.
 #include "input/native_menu.h"
+#include "input/touch_scroll.h"
 #include "hooks/hud_layout_runtime.h"
 #include "input/inline_help.h"
 #include "input/dialog_prompts.h"
@@ -33,6 +34,7 @@
 #include "loading/crash_recovery.h"
 #include "hooks/content_progress.h"
 #include <bit>
+#include <chrono>
 #include <algorithm>
 #include <cstring>
 #include <mutex>
@@ -46,6 +48,7 @@
 
 REX_EXTERN(__imp__sub_824B2958); // UIManager::Poll
 REX_EXTERN(__imp__sub_824E5020); // UIListDir::Draw
+REX_EXTERN(__imp__sub_824E6DC8); // UIListDir::BuildDrawState
 REX_EXTERN(sub_824B1980);       // UIManager::FocusComponent
 REX_EXTERN(sub_824C1938);       // UIList::SetSelected
 REX_EXTERN(sub_824C1F08);       // UIList::ScrollComplete
@@ -127,6 +130,26 @@ struct Geometry {
   int selected = -1;
 };
 thread_local Geometry geometry;
+// Shared gesture state is protected by mutex; guest draw state stays thread local.
+struct TouchTarget {
+  uint32_t list = 0, frame = 0;
+  MenuBounds bounds;
+  float pitch = 0;
+  int first = 0, maximum = 0;
+};
+TouchTarget touch_target;
+TouchListScroll touch_scroll;
+bool touch_captured = false;
+thread_local uint32_t touch_draw_list = 0;
+thread_local float touch_draw_position = 0;
+double TouchTime() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+void ResetTouchScroll() {
+  touch_target = {};
+  touch_scroll.Reset();
+  touch_captured = false;
+}
 struct PowerupInfoTarget {
   uint32_t screen = 0, focus = 0, frame = 0;
   MenuBounds bounds;
@@ -241,8 +264,9 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   rb_blitz::content_progress::ObserveScreen(name, panel_name, allowed);
   rb_blitz::diag::shader_trace::ObserveScreen(name, panel_name, focus_name,
                                              U32(base, manager + 16) != 0);
-  if (screen != current_screen || focus != current_focus || panel != current_panel ||
-      input_scope != current_input_scope || allowed != menu_available) {
+  const bool changed_context = screen != current_screen || focus != current_focus || panel != current_panel ||
+      input_scope != current_input_scope || allowed != menu_available;
+  if (changed_context) {
     if (input_scope != current_input_scope)
       REXLOG_INFO("native_mouse: dialog context panel={} focus={} scope={:08X}", panel_name,
                   ObjectName(base, ObjectBase(base, focus)), input_scope);
@@ -263,6 +287,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     mouse_highlight.Reset();
     touch_highlight.Reset();
     scroll_follow.Reset();
+    touch_draw_list = 0;
     // P2 (plan D5): a screen or focus change is a boundary the gameplay tables must not carry
     // held state across. The gameplay holds are dropped without an edge on the next poll, so a
     // press or release from the old context can never arrive late in the new one.
@@ -272,6 +297,7 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
                   name, panel_name, current_panel_scene, focus, allowed);
   }
   std::lock_guard lock(mutex);
+  if (changed_context) ResetTouchScroll();
   if (screen != current_screen) ++screen_generation;
   current_screen = screen; current_focus = focus; menu_available = allowed;
   current_panel = panel;
@@ -372,6 +398,18 @@ std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoi
 }
 
 bool MouseSupportEnabled() { return true; }
+MenuPoint MenuWindowPointer(float x, float y, int width, int height) {
+  const bool source_aspect = settings::ReadSdkSetting<bool>("gpu.xenos.present_source_aspect");
+  const int frame_height = settings::BootRenderHeight();
+  const int frame_width = settings::BootRenderWidth();
+  return MenuPointer(x, y, width, height,
+      source_aspect ? (frame_width ? frame_width : frame_height * 16 / 9) : settings::ReadSdkSetting<int32_t>("ui.video_mode_width"),
+      source_aspect ? frame_height : settings::ReadSdkSetting<int32_t>("ui.video_mode_height"),
+      settings::ReadSdkSetting<bool>("gpu.xenos.present_letterbox"),
+      settings::ReadSdkSetting<bool>("gpu.xenos.present_allow_overscan_cutoff"),
+      settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_x"),
+      settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_y"));
+}
 bool AnswerMenuHeaderQuery(std::string_view path, bool* answer) {
   constexpr std::string_view prefix = "rbbz-mouse/header/";
   if (!path.starts_with(prefix)) return false;
@@ -403,7 +441,7 @@ void MouseMenuFocus(bool focused) {
   if (focused != window_focused && rb_blitz::settings::title::mouse_native_trace.Get())
     REXLOG_INFO("native_mouse: window focus={} queue={}", focused, focused && menu_available && MouseSupportEnabled());
   window_focused = focused;
-  if (!focused) menu_pointer.reset();
+  if (!focused) { menu_pointer.reset(); ResetTouchScroll(); }
   queue.Context(current_screen, current_focus, focused && menu_available && MouseSupportEnabled() &&
                 !SystemUIActive() && !ui::achievements::Active(), current_panel);
   // P2 (plan D5): losing the window drops every gameplay hold. The physical layer already
@@ -413,17 +451,56 @@ void MouseMenuFocus(bool focused) {
 }
 void QueueMenuMouse(MouseAction action, MenuPoint point) {
   std::lock_guard lock(mutex);
+  touch_scroll.Reset(); touch_captured = false;
   if (action == MouseAction::kMove || action == MouseAction::kAccept) menu_pointer = point;
   if (MouseSupportEnabled()) queue.Push(action, point);
 }
 void QueueMenuWheel(int delta, MenuPoint point) {
   std::lock_guard lock(mutex);
+  touch_scroll.Reset(); touch_captured = false;
   menu_pointer = point;
   if (MouseSupportEnabled()) queue.Wheel(delta, point);
 }
 void QueueMenuScrollbar(MouseAction action, MenuPoint point) {
   std::lock_guard lock(mutex);
+  touch_scroll.Reset(); touch_captured = false;
   if (MouseSupportEnabled()) queue.Scrollbar(action, point);
+}
+void CancelMenuTouch() {
+  std::lock_guard lock(mutex);
+  touch_scroll.Reset(); touch_captured = false;
+}
+bool QueueMenuTouch(MenuTouchPhase phase, MenuPoint point, float x, float y, double age_seconds) {
+  std::lock_guard lock(mutex);
+  const double now = TouchTime() - std::max(0.0, age_seconds);
+  if (phase == MenuTouchPhase::kCancel || !queue.enabled()) {
+    const bool consumed = touch_captured;
+    touch_scroll.Reset(); touch_captured = false;
+    return consumed;
+  }
+  if (phase == MenuTouchPhase::kDown) {
+    if (!touch_target.list || touch_target.list != current_focus ||
+        touch_target.frame + 1 < observed_menu_frame ||
+        !(touch_target.pitch > 0) || !touch_target.bounds.Contains(point)) {
+      touch_scroll.Reset(); touch_captured = false;
+      return false;
+    }
+    touch_scroll.Begin({x, y, point.y / touch_target.pitch}, touch_target.first,
+                       touch_target.maximum, now);
+    touch_captured = true;
+    menu_pointer = point;
+    return true;
+  }
+  if (!touch_captured) return phase == MenuTouchPhase::kMove && touch_scroll.OwnsView();
+  const TouchScrollPoint at{x, y, point.y / touch_target.pitch};
+  menu_pointer = point;
+  if (phase == MenuTouchPhase::kMove) touch_scroll.Move(at, now);
+  else if (phase == MenuTouchPhase::kUp) {
+    if (touch_scroll.End(at, now) && touch_target.bounds.Contains(point))
+      queue.Push(MouseAction::kAccept, point);
+    touch_captured = false;
+  }
+  return true;
 }
 bool MouseMenuRailHit(MenuPoint point) {
   const auto rail = RailSnapshot();
@@ -527,8 +604,20 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   const int touch_row = touch_highlight.list == current_focus && current_focus
       ? SelectedRow(ctx, base, current_focus) : -1;
   bool idle = false, enabled = false;
+  bool touching_view = false;
+  std::optional<float> touch_position;
   {
     std::lock_guard lock(mutex);
+    if (!queue.enabled() || !last_device::Current().using_touch || !fresh ||
+        touch_target.list != current_focus) {
+      touch_scroll.Reset(); touch_captured = false;
+    }
+    touch_scroll.Advance(TouchTime());
+    if (touch_scroll.OwnsView()) {
+      touch_position = touch_scroll.Position();
+      touching_view = touch_scroll.Pressed() || touch_scroll.Velocity() != 0;
+      if (touching_view) touch_highlight.Reset();
+    }
     // Focus may be lost and regained while the guest is suspended. Do not
     // turn the release of that abandoned touch into a click on resume.
     static thread_local uint64_t touch_focus_revision = 0;
@@ -547,6 +636,14 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     event = queue.NextFrame(can_scroll);
     idle = !queue.Pending();
     enabled = queue.enabled();
+  }
+  touch_draw_list = touch_position ? current_focus : 0;
+  if (touch_position) {
+    touch_draw_position = *touch_position;
+    const MenuPoint miss{NAN, NAN};
+    ScrollListTo(ctx, base, current_focus, int(std::floor(*touch_position)), miss);
+    // Touch never reselects the row that happens to slide under a resting finger.
+    scroll_follow.Reset();
   }
   if (!enabled) { rail_drag.Reset(); touch_highlight.Reset(); }
   if (!enabled || !(HostMouseButtons() & 1) || slider_drag_screen != current_screen)
@@ -1885,7 +1982,24 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   geometry.selected = capture.selected;
   if (capture.selected >= 0) last_selected_row = capture.selected;
   PublishRail(MeasureRail(ctx, base, list, geometry));
-
+  // Library and RhythmVerse lists share the viewport route, including shortcuts without
+  // a sibling rail. Publish only the focused list from this completed draw.
+  const bool touch_list = MenuTouchScrollEligible(current_screen_name, dialog_scope, geometry.horizontal);
+  TouchTarget target;
+  if (touch_list && EnsureRailMap(ctx, base, list) && rail_map.max_first > 0) {
+    const float pitch = RailPitch(geometry.rows);
+    if (pitch > 0)
+      target = {list, frame_number, geometry.bounds, pitch,
+                int(U32(base, list + 224)), rail_map.max_first};
+  }
+  {
+    std::lock_guard lock(mutex);
+    // Keep the pitch fixed for a held finger: edge fades can temporarily omit
+    // a row from hit geometry while the native draw state is interpolating.
+    if (touch_captured && target.list == touch_target.list) target.pitch = touch_target.pitch;
+    touch_target = target;
+    touch_scroll.Limit(target.maximum);
+  }
 }
 std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable) {
   if (!settings::InterfacePortraitEnabled() || !portrait_splash_active) return {};
@@ -1925,6 +2039,42 @@ REX_HOOK_RAW(sub_824DC2F0) {
 }
 REX_HOOK_RAW(sub_824E5020) {
   rb_blitz::input::DrawList(ctx, base);
+}
+REX_HOOK_RAW(sub_824E6DC8) {
+  using namespace rb_blitz::input;
+  const auto state = ctx.r5.u32;
+  const float fraction = touch_draw_position - std::floor(touch_draw_position);
+  if (!touch_draw_list || state != touch_draw_list + 176 || fraction <= 0) {
+    __imp__sub_824E6DC8(ctx, base);
+    return;
+  }
+  // UIListState +48/+52/+60 are firstShowing, targetShowing and progress.
+  // Let the native builder supply its extra edge row, provider spacing and
+  // fades at this fractional position. Restore navigation state before poll.
+  const auto draw_state = ctx.r4.u32;
+  const int selected = SelectedRow(ctx, base, touch_draw_list);
+  const int anchor = selected >= 0 ? selected : last_selected_row;
+  const auto target = U32(base, state + 52), progress = U32(base, state + 60);
+  rex::ScopeGuard restore([&] {
+    rex::memory::store_and_swap<uint32_t>(base + state + 52, target);
+    rex::memory::store_and_swap<uint32_t>(base + state + 60, progress);
+  });
+  rex::memory::store_and_swap<uint32_t>(base + state + 52, U32(base, state + 48) + 1);
+  Float(base, state + 60, fraction);
+  __imp__sub_824E6DC8(ctx, base);
+  // Retail interpolation advances the selected display slot at its midpoint.
+  // A finger moves only the view: retain the logical selection and its draw
+  // slot instead, including while it sits outside the visible band.
+  rex::memory::store_and_swap<uint32_t>(base + draw_state + 48, uint32_t(-1));
+  const auto first = U32(base, draw_state + 56), end = U32(base, draw_state + 60);
+  for (auto row = first; row < end; row += 44) {
+    const auto row_state = U32(base, row + 24);
+    if (row_state == 1) rex::memory::store_and_swap<uint32_t>(base + row + 24, 0);
+    if (anchor >= 0 && U32(base, row + 36) == uint32_t(anchor)) {
+      rex::memory::store_and_swap<uint32_t>(base + draw_state + 48, U32(base, row + 32));
+      if (row_state != 2) rex::memory::store_and_swap<uint32_t>(base + row + 24, 1);
+    }
+  }
 }
 REX_HOOK_RAW(sub_824E07A8) {
   using namespace rb_blitz::input;

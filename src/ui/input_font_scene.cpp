@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "ui/input_font_scene.h"
+#include "ui/milo_object_boundaries.h"
 
 #include <array>
 #include <algorithm>
@@ -531,10 +532,7 @@ struct PortraitScene {
       auto type = string(), name = string();
       objects.push_back({std::move(type), std::move(name), {}});
     }
-    std::vector<size_t> markers;
-    for (size_t i = at; i + 4 <= bytes.size(); ++i)
-      if (Be32(bytes.data() + i) == 0xADDEADDE) markers.push_back(i);
-    markers.erase(markers.begin(), markers.end() - count - 1);
+    const auto markers = detail::MiloObjectBoundaries(bytes, at, count);
     directory.assign(bytes.begin() + at, bytes.begin() + markers.front() + 4);
     for (size_t i = 0; i < count; ++i)
       objects[i].data.assign(bytes.begin() + markers[i] + 4,

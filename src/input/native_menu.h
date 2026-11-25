@@ -19,6 +19,7 @@ namespace rb_blitz::input {
 void CaptureLanePowerup(PPCContext& ctx, uint8_t* base, uint32_t dir);
 
 struct MenuPoint { float x = 0, y = 0; };
+MenuPoint MenuWindowPointer(float x, float y, int width, int height);
 // Absolute guest UI positions authored by draw hooks share the panel's safe fit.
 MenuPoint PortraitDrawPoint(float x, float z);
 std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable);
@@ -529,6 +530,11 @@ void QueueMenuMouse(MouseAction action, MenuPoint point);
 // and the scroll-aware hover catches the row that lands there (MouseScrollFollow).
 void QueueMenuWheel(int delta, MenuPoint point);
 void QueueMenuScrollbar(MouseAction action, MenuPoint point);
+enum class MenuTouchPhase { kDown, kMove, kUp, kCancel };
+// Primary touch events (including the mouse-as-touch preview) bypass pad repeat.
+// Window points determine tap slop; presented coordinates determine row travel.
+bool QueueMenuTouch(MenuTouchPhase phase, MenuPoint point, float x, float y, double age_seconds = 0);
+void CancelMenuTouch();
 // Whether a point is in the focused list's scrollbar gutter, as the last draw left it.
 bool MouseMenuRailHit(MenuPoint point);
 // The rail plus a small margin: clicks here are swallowed instead of pressing A.

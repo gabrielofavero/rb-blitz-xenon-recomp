@@ -250,6 +250,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
       case rex::InputEvent::Type::kButtonDown: OnMouseDown(event); break;
       case rex::InputEvent::Type::kButtonUp: OnMouseUp(event); break;
       case rex::InputEvent::Type::kWheel: OnMouseWheel(event); break;
+      case rex::InputEvent::Type::kResize: CancelMenuTouch(); break;
       default: break;
     }
   }
@@ -311,15 +312,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
 
   std::optional<MenuPoint> Point(const rex::InputEvent& e, bool clip = true) const {
     if (!ui_.HasWindow()) return {};
-    const bool source_aspect = rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_source_aspect");
-    const int frame_height = rb_blitz::settings::BootRenderHeight();
-    const int frame_width = rb_blitz::settings::BootRenderWidth();
-    auto p = MenuPointer(float(e.x), float(e.y),
-        Width(), Height(),
-        source_aspect ? (frame_width ? frame_width : frame_height * 16 / 9) : rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_width"),
-        source_aspect ? frame_height : rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_height"),
-        rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_letterbox"), rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_allow_overscan_cutoff"),
-        rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_x"), rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_y"));
+    auto p = MenuWindowPointer(float(e.x), float(e.y), Width(), Height());
     if (!std::isfinite(p.x) || !std::isfinite(p.y) ||
         (clip && !MenuBounds{0, 0, 1, 1}.Contains(p))) return {};
     return p;
@@ -335,6 +328,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
                   changed->using_touch ? "touch" : "mouse");
     if (PlayerEvent(ui::music::PointerEvent::kMove, e)) return;
     if (LaneEvent(touch::Phase::kMove, e)) return;
+    if (TouchListEvent(MenuTouchPhase::kMove, e)) return;
     if (!MouseSupportEnabled()) return;
     const bool moved = e.x != last_x_ || e.y != last_y_;
     if (auto p = Point(e, !dragging_)) {
@@ -369,6 +363,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
       REXLOG_INFO("native_mouse: button={} down mask={:02X}", static_cast<int>(e.button),
                   g_mouse_buttons.load());
     if (!MouseSupportEnabled()) return;
+    if (TouchListEvent(MenuTouchPhase::kDown, e)) return;
     if (auto p = Point(e)) {
       if (e.button == rex::MouseButton::kLeft) {
         // The gutter belongs to the scrollbar: a press there must not click the row,
@@ -394,6 +389,7 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
     g_mouse_buttons.fetch_and(~MouseMask(e.button));
     if (PlayerEvent(ui::music::PointerEvent::kUp, e)) return;
     if (LaneEvent(touch::Phase::kUp, e)) return;
+    if (TouchListEvent(MenuTouchPhase::kUp, e)) return;
     if (e.is_touch && e.button == rex::MouseButton::kLeft && !dragging_ && MouseSupportEnabled()) {
       const float miss = std::numeric_limits<float>::quiet_NaN();
       QueueMenuMouse(MouseAction::kMove, Point(e).value_or(MenuPoint{miss, miss}));
@@ -435,6 +431,20 @@ class MouseCursor final : public rex::ui::DialogBase, public rex::ui::IUIEventLi
     touch::ConsumeLanePointer(touch::Phase::kCancel, miss, miss);
     lane_pointer_captured_ = false;
     SDL_CaptureMouse(false);
+  }
+  bool TouchListEvent(MenuTouchPhase phase, rex::InputEvent& e) {
+    if ((!e.is_touch && !rb_blitz::settings::title::mouse_as_touch.Get()) ||
+        (phase != MenuTouchPhase::kMove && e.button != rex::MouseButton::kLeft)) return false;
+    if (ui_.GetImGuiIO().WantCaptureMouse) {
+      CancelMenuTouch();
+      return false;
+    }
+    const auto point = Point(e, false).value_or(MenuPoint{NAN, NAN});
+    const float scale = ToLogical();
+    if (!QueueMenuTouch(phase, point, float(e.x) * scale, float(e.y) * scale)) return false;
+    last_x_ = e.x; last_y_ = e.y;
+    e.handled = true;
+    return true;
   }
   bool LaneEvent(touch::Phase phase, rex::InputEvent& e) {
     if (e.is_touch || (phase != touch::Phase::kMove &&

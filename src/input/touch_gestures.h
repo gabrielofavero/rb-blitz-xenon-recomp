@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <string_view>
 #include <utility>
@@ -134,8 +135,15 @@ class MotionDetector {
 class MouseGate {
  public:
   void Capture() { down_ = true; }
+  // Raw contacts can arrive before multiple synthesized mouse gestures drain.
+  void MenuBegin(bool captured) {
+    if (menu_pending_.size() == 32) menu_pending_.pop_front();
+    menu_pending_.push_back(captured);
+  }
   bool Consume(bool is_touch, Phase phase, bool gameplay);
  private:
   bool down_ = false;
+  bool menu_ = false;
+  std::deque<bool> menu_pending_;
 };
 }  // namespace rb_blitz::input::touch

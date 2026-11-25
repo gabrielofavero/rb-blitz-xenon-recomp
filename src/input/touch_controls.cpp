@@ -14,6 +14,8 @@ bool PreviewEnabled() { return rb_blitz::settings::title::touch_preview.Get(); }
 
 #include <atomic>
 #include <mutex>
+#include <optional>
+#include <set>
 #include <SDL3/SDL.h>
 #include <imgui.h>
 #include <rex/logging/log_category.h>
@@ -101,6 +103,10 @@ class Controls final : public rex::ui::DialogBase {
     if (event->type == SDL_EVENT_WILL_ENTER_BACKGROUND || event->type == SDL_EVENT_DID_ENTER_BACKGROUND) {
       g_foreground = false;
       CancelGameplay();
+      CancelMenuTouch();
+      std::lock_guard lock(self.menu_mutex_);
+      self.menu_fingers_.clear();
+      self.menu_primary_.reset();
     } else if (event->type == SDL_EVENT_DID_ENTER_FOREGROUND) {
       g_foreground = true;
     }
@@ -128,7 +134,38 @@ class Controls final : public rex::ui::DialogBase {
     // Those devices retain their own bindings and must never trigger gestures.
     if (!IsDirectTouch(finger.touchID)) return true;
     if (!self.window_id_ || finger.windowID != self.window_id_) return true;
+    if (phase == Phase::kCancel) CancelMenuTouch();
     const bool active = Available();
+    if (phase == Phase::kDown && g_foreground && HostInputFocused()) last_device::Touch();
+    {
+      std::lock_guard menu_lock(self.menu_mutex_);
+      const auto key = std::pair<uint64_t, uint64_t>{finger.touchID, finger.fingerID};
+      if (phase == Phase::kDown) {
+        if (self.menu_fingers_.empty()) self.menu_primary_ = key;
+        self.menu_fingers_.insert(key);
+      }
+      bool menu_captured = false;
+      if (self.menu_primary_ == key && !active && g_foreground && HostInputFocused()) {
+        const auto menu_phase = phase == Phase::kDown ? MenuTouchPhase::kDown :
+            phase == Phase::kMove ? MenuTouchPhase::kMove :
+            phase == Phase::kUp ? MenuTouchPhase::kUp : MenuTouchPhase::kCancel;
+        const auto layout = CurrentLayout();
+        const float x = finger.x * layout.width, y = finger.y * layout.height;
+        const auto point = MenuWindowPointer(x, y, int(layout.width), int(layout.height));
+        const auto now = SDL_GetTicksNS();
+        const double age = finger.timestamp && now > finger.timestamp ?
+            double(now - finger.timestamp) * 1e-9 : 0;
+        menu_captured = QueueMenuTouch(menu_phase, point, x, y, age);
+      }
+      if (phase == Phase::kDown && self.menu_primary_ == key) {
+        std::lock_guard lock(g_mutex);
+        g_mouse_gate.MenuBegin(menu_captured);
+      }
+      if (phase == Phase::kUp || phase == Phase::kCancel) {
+        self.menu_fingers_.erase(key);
+        if (self.menu_primary_ == key) self.menu_primary_.reset();
+      }
+    }
     {
       std::lock_guard lock(g_mutex);
       UpdateGestures(active);
@@ -143,8 +180,6 @@ class Controls final : public rex::ui::DialogBase {
       if (!target && touch_gameplay)
         g_gestures.Observe({finger.touchID, finger.fingerID, phase, finger.x, finger.y});
     }
-    // Menu touches also establish the source before a song's HUD appears.
-    if (phase == Phase::kDown && g_foreground && HostInputFocused()) last_device::Touch();
     return true;
   }
   bool Draw(ImGuiIO&) override {
@@ -160,6 +195,7 @@ class Controls final : public rex::ui::DialogBase {
     const Layout layout = MakeLayout(float(width), float(height),
         {float(safe.x), float(safe.y), float(safe.w), float(safe.h)});
     const bool active = ui_.IsFocused() && Available() && window_id_;
+    if (CurrentLayout() != layout) CancelMenuTouch();
     {
       std::lock_guard lock(g_mutex);
       if (g_layout != layout) g_powerup_target.Cancel();
@@ -179,6 +215,9 @@ class Controls final : public rex::ui::DialogBase {
   SDL_Sensor* sensor_ = nullptr;
   SDL_SensorID sensor_id_ = 0;
   bool sensor_initialized_ = false;
+  std::mutex menu_mutex_;
+  std::set<std::pair<uint64_t, uint64_t>> menu_fingers_;
+  std::optional<std::pair<uint64_t, uint64_t>> menu_primary_;
 };
 }
 Actions SampleGameplay(bool active) {

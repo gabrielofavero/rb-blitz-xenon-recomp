@@ -400,5 +400,21 @@ int main() {
   CHECK_TRUE(gate.Consume(true, Phase::kDown, false));
   CHECK_TRUE(gate.Consume(true, Phase::kUp, false));
   CHECK_FALSE(gate.Consume(false, Phase::kDown, true));
+
+  BeginCase("queued native list gestures swallow only their own synthesized mouse events");
+  gate = {};
+  gate.MenuBegin(true);
+  gate.MenuBegin(false); // a footer tap follows a list swipe before mouse delivery
+  gate.MenuBegin(true);
+  CHECK_FALSE(gate.Consume(false, Phase::kDown, false)); // a physical mouse does not drain it
+  CHECK_TRUE(gate.Consume(true, Phase::kDown, false));
+  CHECK_TRUE(gate.Consume(true, Phase::kMove, false));
+  CHECK_TRUE(gate.Consume(true, Phase::kUp, false));
+  CHECK_FALSE(gate.Consume(true, Phase::kDown, false));
+  CHECK_FALSE(gate.Consume(true, Phase::kUp, false));
+  CHECK_TRUE(gate.Consume(true, Phase::kDown, false));
+  CHECK_TRUE(gate.Consume(true, Phase::kUp, false));
+  CHECK_FALSE(gate.Consume(true, Phase::kDown, false));
+  CHECK_FALSE(gate.Consume(true, Phase::kUp, false));
   return Finish();
 }

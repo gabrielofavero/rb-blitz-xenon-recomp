@@ -15,6 +15,14 @@ inline MenuDialogScope DialogScopeFor(std::string_view panel, std::string_view f
   return focus == "shortcuts.lst" ? MenuDialogScope::kShortcuts : MenuDialogScope::kNone;
 }
 
+// Library and RhythmVerse pages scroll their focused vertical list. Modal
+// panels keep their own input; only the shortcut dialog opts into list dragging.
+inline bool MenuTouchScrollEligible(std::string_view screen, MenuDialogScope scope, bool horizontal) {
+  if (horizontal || scope == MenuDialogScope::kPanel) return false;
+  return scope == MenuDialogScope::kShortcuts || screen == "song_select_screen" ||
+         screen == "store_menu_screen" || screen == "store_browser_screen";
+}
+
 struct DialogPromptSpan { float left, right; uint32_t action; };
 // Advances are the cumulative UTF-16 positions produced by the guest's normal
 // RndText layout, including zero-width markup. No font approximation or extra

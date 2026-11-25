@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "check.h"
 #include "input/native_menu.h"
+#include "input/touch_scroll.h"
 #include "input/inline_help.h"
 #include "input/dialog_prompts.h"
 #include "input/pad_packet.h"
@@ -9,6 +10,93 @@ using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  const auto scroll_point = [](float y, float x = 100.f, float pitch = 40.f) {
+    return TouchScrollPoint{x, y, y / pitch};
+  };
+  BeginCase("touch tap slop does not move the viewport or turn a horizontal gesture into a tap");
+  TouchListScroll kinetic;
+  kinetic.Begin(scroll_point(200), 10, 5000, 1);
+  kinetic.Move(scroll_point(205), 1.02);
+  CHECK_TRUE(std::abs(kinetic.Position() - 10) < .001f);
+  CHECK_TRUE(kinetic.End(scroll_point(205), 1.03));
+  CHECK_FALSE(kinetic.End(scroll_point(205), 1.04));
+  kinetic.Begin(scroll_point(200), 10, 5000, 2);
+  kinetic.Move(scroll_point(202, 130), 2.02);
+  CHECK_FALSE(kinetic.Dragging());
+  CHECK_FALSE(kinetic.End(scroll_point(202, 130), 2.03));
+
+  BeginCase("dragging follows the finger in fractional rows and never activates on release");
+  kinetic.Reset();
+  kinetic.Begin(scroll_point(200), 10, 5000, 3);
+  kinetic.Move(scroll_point(150), 3.04);
+  CHECK_TRUE(kinetic.Dragging());
+  CHECK_TRUE(std::abs(kinetic.Position() - 11.25f) < .001f);
+  CHECK_FALSE(kinetic.End(scroll_point(150), 3.05));
+  CHECK_TRUE(kinetic.Velocity() > 0);
+  kinetic.Advance(3.10);
+  CHECK_TRUE(kinetic.Position() > 11.25f);
+
+  BeginCase("catching a moving list stops it without opening the song under the finger");
+  const float moving_position = kinetic.Position();
+  kinetic.Begin(scroll_point(200), 11, 5000, 3.10);
+  CHECK_TRUE(std::abs(kinetic.Position() - moving_position) < .001f);
+  CHECK_TRUE(kinetic.Velocity() == 0);
+  CHECK_FALSE(kinetic.End(scroll_point(200), 3.12));
+  kinetic.Begin(scroll_point(200), 11, 5000, 3.20);
+  CHECK_TRUE(kinetic.End(scroll_point(200), 3.22));
+
+  BeginCase("momentum decays independently of the guest frame rate");
+  kinetic.Reset();
+  kinetic.Begin(scroll_point(300), 20, 5000, 4);
+  kinetic.Move(scroll_point(260), 4.02);
+  kinetic.Move(scroll_point(200), 4.04);
+  CHECK_FALSE(kinetic.End(scroll_point(200), 4.05));
+  auto slow_frames = kinetic, fast_frames = kinetic;
+  for (int i = 1; i <= 30; ++i) slow_frames.Advance(4.05 + i / 30.0);
+  for (int i = 1; i <= 120; ++i) fast_frames.Advance(4.05 + i / 120.0);
+  CHECK_TRUE(std::abs(slow_frames.Position() - fast_frames.Position()) < .001f);
+  CHECK_TRUE(std::abs(slow_frames.Velocity() - fast_frames.Velocity()) < .001f);
+  for (int i = 1; i <= 60; ++i) fast_frames.Advance(5.05 + i / 30.0);
+  CHECK_TRUE(fast_frames.Velocity() == 0);
+
+  BeginCase("a held finger and a suspended guest do not launch stale momentum");
+  kinetic.Begin(scroll_point(200), 20, 5000, 6);
+  kinetic.Move(scroll_point(100), 6.03);
+  CHECK_FALSE(kinetic.End(scroll_point(100), 6.30));
+  CHECK_TRUE(kinetic.Velocity() == 0);
+  kinetic.Begin(scroll_point(200), 20, 5000, 7);
+  kinetic.Move(scroll_point(100), 7.03);
+  kinetic.End(scroll_point(100), 7.04);
+  const float before_suspend = kinetic.Position();
+  kinetic.Advance(9);
+  CHECK_TRUE(kinetic.Position() == before_suspend);
+  CHECK_TRUE(kinetic.Velocity() == 0);
+
+  BeginCase("both list boundaries clamp drag and momentum, including shortened filter results");
+  kinetic.Reset();
+  kinetic.Begin(scroll_point(200), 1, 5, 10);
+  kinetic.Move(scroll_point(400), 10.02);
+  CHECK_TRUE(kinetic.Position() == 0);
+  CHECK_TRUE(kinetic.Velocity() == 0);
+  kinetic.Move(scroll_point(360), 10.04);
+  CHECK_TRUE(kinetic.Position() > 0); // reversing immediately leaves the boundary
+  kinetic.Move(scroll_point(-1000), 10.06);
+  CHECK_TRUE(kinetic.Position() == 5);
+  CHECK_TRUE(kinetic.Velocity() == 0);
+  CHECK_FALSE(kinetic.End(scroll_point(-1000), 10.07));
+  kinetic.Limit(2);
+  CHECK_TRUE(kinetic.Position() == 2);
+
+  BeginCase("touch movement uses the actual row pitch while tap slop stays in window points");
+  kinetic.Reset();
+  kinetic.Begin(scroll_point(200, 100, 20), 5, 50, 11);
+  kinetic.Move(scroll_point(175, 100, 20), 11.02);
+  CHECK_TRUE(std::abs(kinetic.Position() - 6.25f) < .001f);
+  kinetic.Reset(); // window, dialog and physical input boundaries abandon the gesture
+  CHECK_FALSE(kinetic.OwnsView());
+  CHECK_FALSE(kinetic.Pressed());
+  CHECK_FALSE(kinetic.End(scroll_point(175), 11.03));
+
   BeginCase("touch menus hide idle selection and activate once after feedback and release");
   MenuTouchHighlight touch;
   CHECK_FALSE(touch.Draw(true, 0x10, 0, false)); // default selected row remains unlit
@@ -152,6 +240,21 @@ int main() {
   for (const auto panel : {"rbbz_download_panel", "rbbz_search_loading_panel",
                            "rbbz_library_panel", "error_popup_panel"})
     CHECK_TRUE(DialogScopeFor(panel, "") == MenuDialogScope::kPanel);
+
+  BeginCase("song searches and RhythmVerse browsing and results share vertical touch scrolling");
+  for (const auto screen : {"song_select_screen", "store_menu_screen", "store_browser_screen"}) {
+    CHECK_TRUE(MenuTouchScrollEligible(screen, MenuDialogScope::kNone, false));
+    CHECK_FALSE(MenuTouchScrollEligible(screen, MenuDialogScope::kNone, true));
+    CHECK_TRUE(MenuTouchScrollEligible(screen, MenuDialogScope::kShortcuts, false));
+    for (const auto panel : {"rbbz_download_panel", "rbbz_search_loading_panel",
+                             "rbbz_library_panel", "error_popup_panel"})
+      CHECK_FALSE(MenuTouchScrollEligible(screen, DialogScopeFor(panel, ""), false));
+  }
+  for (const auto screen : {"", "store_info_screen", "store_details_screen", "splash_screen",
+                            "game_screen", "settings_screen", "inbox_screen"})
+    CHECK_FALSE(MenuTouchScrollEligible(screen, MenuDialogScope::kNone, false));
+
+  BeginCase("dialog scope excludes background footer targets");
   const std::vector<MenuHintTarget> scoped{
       {1, 2, 10, {.2f, .8f, .4f, .9f}, 0x1000, 0},
       {1, 2, 10, {.2f, .6f, .4f, .7f}, 0x2000, 42}};

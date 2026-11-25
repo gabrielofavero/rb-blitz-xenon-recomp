@@ -1,5 +1,27 @@
 # Startup splash investigation (2026-11-07)
 
+## Portrait startup resource corruption (2026-11-25)
+
+The portrait RhythmVerse browser preloads a list derived from
+`ui/resource/lists/gen/list_held_button.milo_xbox`. Its `Flow.flow` object
+contains an inline directory and a `FlowAnimate` child. The scene rewriter
+previously counted every `ADDEADDE` delimiter as a top-level object boundary.
+It consequently retained only 109 of the Flow's 1,006 bytes and moved its
+remaining data into the containing directory. The guest then interpreted
+texture pixels as object-name lengths during initial resource loading. A
+reproduced crash requested a `0x70000001`-byte string read, overwriting the
+guest stack; another run faulted in the splash worker after the corruption.
+
+Object boundary detection now folds inline Flow directories, including nested
+Flows, into their containing object. The native animation remains intact.
+The regression tests cover nested boundaries, truncated input, and the complete
+native Flow in generated portrait store lists at four aspect ratios. Windows
+release builds, the focused payload and splasher tests, and all 1,372 installed
+portrait record checks pass. A fresh portrait Vulkan launch at 2x scale reaches
+the usable main menu after discovery of 1,777 packages, without graphics
+recovery. The change is shared title resource code; Linux, macOS, and iOS remain
+untested.
+
 ## Plugin registration and packed connection records (2026-11-18)
 
 The 677-frame, 30 fps recording shows Harmonix only on frame 337 (11.233 s),

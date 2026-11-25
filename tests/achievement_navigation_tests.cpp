@@ -2,6 +2,7 @@
 #include "check.h"
 #include "ui/achievement_navigation.h"
 #include "ui/achievement_layout.h"
+#include "ui/achievement_scroll.h"
 
 int main() {
   using namespace rb_blitz::test;
@@ -97,5 +98,99 @@ int main() {
   const auto empty_safe = LayoutBrowser(402, 874, {402, 874});
   CHECK_EQ(phone.width, empty_safe.width);
   CHECK_EQ(phone.height, empty_safe.height);
+
+  BeginCase("achievement drags cover the whole viewport and preserve fractional pixel positions");
+  const ScrollViewport viewport{10, 100, 390, 600, 400, 800, 400, 800};
+  CardScroll scroll;
+  scroll.Configure(viewport, 100.25f, 1000.75f, true);
+  scroll.Observe(1, 1, ScrollPhase::kDown, .5f, .4f, 1);
+  scroll.Observe(1, 1, ScrollPhase::kMove, .5f, .3f, 1.04);
+  CHECK_TRUE(std::abs(scroll.Advance(1.04).value() - 180.25f) < .001f);
+  scroll.Observe(1, 1, ScrollPhase::kUp, .5f, .3f, 1.05);
+  CHECK_FALSE(scroll.TakeTap().has_value());
+  CHECK_TRUE(scroll.Advance(1.10).value() > 180.25f);
+
+  BeginCase("a touch catches achievement momentum without changing the selected card");
+  scroll.Observe(1, 2, ScrollPhase::kDown, .5f, .4f, 1.10);
+  const float caught = scroll.Advance(1.10).value();
+  scroll.Observe(1, 2, ScrollPhase::kUp, .5f, .4f, 1.12);
+  CHECK_FALSE(scroll.TakeTap().has_value());
+  CHECK_TRUE(scroll.Advance(1.15).value() == caught);
+  scroll.Observe(1, 3, ScrollPhase::kDown, .5f, .4f, 1.20);
+  scroll.Observe(1, 3, ScrollPhase::kUp, .5f, .4f, 1.22);
+  const auto tap = scroll.TakeTap();
+  CHECK_TRUE(tap && tap->x == 200 && tap->y == 320);
+  CHECK_FALSE(scroll.TakeTap().has_value());
+
+  BeginCase("density changes preserve finger travel and eight-point tap slop");
+  for (float density : {1.f, 2.f, 3.f}) {
+    scroll.Reset();
+    scroll.Configure({10 * density, 100 * density, 390 * density, 600 * density,
+        400 * density, 800 * density, 400, 800}, 100.25f, 1000 * density, true);
+    scroll.Observe(1, 1, ScrollPhase::kDown, .5f, .4f, 2);
+    scroll.Observe(1, 1, ScrollPhase::kMove, .5f, .3f, 2.04);
+    CHECK_TRUE(std::abs(scroll.Advance(2.04).value() - (100.25f + 80 * density)) < .001f);
+    scroll.Reset();
+    scroll.Configure({0, 0, 400 * density, 800 * density,
+        400 * density, 800 * density, 400, 800}, 0, 1000, true);
+    scroll.Observe(1, 1, ScrollPhase::kDown, .5f, .4f, 3);
+    scroll.Observe(1, 1, ScrollPhase::kUp, .5f, .405f, 3.04);
+    CHECK_TRUE(scroll.TakeTap().has_value());
+  }
+
+  BeginCase("touch scrolling reaches fractional boundaries and leaves the footer and scrollbar available");
+  scroll.Reset();
+  scroll.Configure(viewport, 10.5f, 1000.75f, true);
+  scroll.Observe(1, 1, ScrollPhase::kDown, .5f, .4f, 4);
+  scroll.Observe(1, 1, ScrollPhase::kMove, .5f, 1.2f, 4.04);
+  CHECK_TRUE(scroll.Advance(4.04).value() == 0);
+  scroll.Observe(1, 1, ScrollPhase::kMove, .5f, -2.f, 4.08);
+  CHECK_TRUE(std::abs(scroll.Advance(4.08).value() - 1000.75f) < .001f);
+  scroll.Observe(1, 1, ScrollPhase::kUp, .5f, -2.f, 4.09);
+  CHECK_FALSE(scroll.TakeTap().has_value());
+  for (const ScrollPoint outside : {ScrollPoint{.99f, .4f}, ScrollPoint{.5f, .9f}}) {
+    scroll.Observe(1, 2, ScrollPhase::kDown, outside.x, outside.y, 4.2);
+    CHECK_FALSE(scroll.TouchOwnsView());
+    scroll.Observe(1, 2, ScrollPhase::kUp, outside.x, outside.y, 4.22);
+    CHECK_FALSE(scroll.TakeTap().has_value());
+  }
+
+  BeginCase("a second finger neither changes the view nor inherits a released gesture");
+  scroll.Reset();
+  scroll.Configure(viewport, 100, 1000, true);
+  scroll.Observe(1, 1, ScrollPhase::kDown, .5f, .4f, 5);
+  scroll.Observe(1, 2, ScrollPhase::kDown, .6f, .4f, 5.01);
+  scroll.Observe(1, 2, ScrollPhase::kMove, .6f, .2f, 5.02);
+  CHECK_TRUE(scroll.Advance(5.02).value() == 100);
+  scroll.Observe(1, 1, ScrollPhase::kUp, .5f, .4f, 5.04);
+  CHECK_TRUE(scroll.TakeTap().has_value());
+  scroll.Observe(1, 2, ScrollPhase::kMove, .6f, .1f, 5.06);
+  scroll.Observe(1, 2, ScrollPhase::kUp, .6f, .1f, 5.08);
+  CHECK_TRUE(scroll.Advance(5.08).value() == 100);
+  CHECK_FALSE(scroll.TakeTap().has_value());
+
+  BeginCase("focus, resize, navigation and closing discard achievement gestures and pending taps");
+  for (int boundary = 0; boundary < 4; ++boundary) {
+    scroll.Reset();
+    scroll.Configure(viewport, 100, 1000, true);
+    scroll.Observe(1, 1, ScrollPhase::kDown, .5f, .4f, 6);
+    if (boundary == 0) scroll.Configure(viewport, 100, 1000, false);
+    if (boundary == 1) { auto resized = viewport; resized.right -= 20; scroll.Configure(resized, 100, 1000, true); }
+    if (boundary == 2) scroll.Cancel();
+    if (boundary == 3) scroll.Reset();
+    scroll.Observe(1, 1, ScrollPhase::kMove, .5f, .2f, 6.02);
+    scroll.Observe(1, 1, ScrollPhase::kUp, .5f, .2f, 6.04);
+    CHECK_FALSE(scroll.Advance(6.04).has_value());
+    CHECK_FALSE(scroll.TakeTap().has_value());
+  }
+  BeginCase("focus recovery accepts a new finger even when the abandoned release never arrived");
+  scroll.Reset();
+  scroll.Configure(viewport, 100, 1000, true);
+  scroll.Observe(1, 1, ScrollPhase::kDown, .5f, .4f, 7);
+  scroll.Configure(viewport, 100, 1000, false);
+  scroll.Configure(viewport, 100, 1000, true);
+  scroll.Observe(1, 2, ScrollPhase::kDown, .5f, .4f, 8);
+  scroll.Observe(1, 2, ScrollPhase::kUp, .5f, .4f, 8.02);
+  CHECK_TRUE(scroll.TakeTap().has_value());
   return Finish();
 }

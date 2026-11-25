@@ -2,6 +2,7 @@
 #include "ui/achievements_overlay.h"
 #include "ui/achievement_navigation.h"
 #include "ui/achievement_layout.h"
+#include "ui/achievement_scroll.h"
 
 #include <algorithm>
 #include <atomic>
@@ -9,6 +10,9 @@
 #include <vector>
 #include <fstream>
 #include <map>
+#include <mutex>
+#include <SDL3/SDL.h>
+#include <rex/logging/log_category.h>
 #include <rex/ui/style.h>
 #include <rex/ui/image_texture.h>
 #include "platform/image_decode.h"
@@ -20,6 +24,7 @@
 
 #include "input/native_menu.h"
 #include "input/title_input.h"
+#include "settings/runtime_settings.h"
 
 namespace rb_blitz::ui::achievements {
 namespace {
@@ -51,9 +56,12 @@ uint32_t HeldCommands() {
 class Browser final : public rex::ui::DialogBase {
  public:
   Browser(rex::ui::IUISystem& ui, std::function<rex::xam::IAchievementManager*()> manager)
-      : ui_(ui), manager_provider_(std::move(manager)) {}
+      : ui_(ui), manager_provider_(std::move(manager)) {
+    if (!SDL_AddEventWatch(Watch, this))
+      REXLOG_ERROR("achievements: could not register touch events: {}", SDL_GetError());
+  }
   bool WantsExclusiveInput() const override { return Active(); }
-  ~Browser() override { active.store(false); }
+  ~Browser() override { SDL_RemoveEventWatch(Watch, this); active.store(false); }
 
   bool Draw(ImGuiIO& io) override {
     manager_ = manager_provider_ ? manager_provider_() : nullptr;
@@ -63,6 +71,7 @@ class Browser final : public rex::ui::DialogBase {
       icons_.clear();
     }
     if (!Active()) {
+      ResetScroll();
       // F7 can dismiss the persistent browser from outside its own draw. Retire
       // the popup as well, otherwise ImGui would keep an invisible modal open.
       if (opened_ && ImGui::BeginPopupModal("##blitz_achievements")) {
@@ -72,7 +81,7 @@ class Browser final : public rex::ui::DialogBase {
       opened_ = false;
       return true;
     }
-    if (io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) return true;
+    if (io.DisplaySize.x <= 0 || io.DisplaySize.y <= 0) { ResetScroll(); return true; }
     const bool appearing = !opened_;
     if (appearing) {
       entries_ = manager_->ListAchievements();
@@ -148,12 +157,47 @@ class Browser final : public rex::ui::DialogBase {
           button_height - ImGui::GetStyle().ItemSpacing.y);
       const bool moved = navigation_.Move(command, static_cast<int>(entries_.size()),
                           std::max(1, int(list_height / (150 * scale))), layout.columns);
+      const auto native = ui_.GetNativeWindow();
+      auto* window = native ? static_cast<SDL_Window*>(native->sdl) : nullptr;
+      int window_width = 0, window_height = 0;
+      if (window) SDL_GetWindowSize(window, &window_width, &window_height);
+      const ScrollViewport frame{pos.x, pos.y, pos.x + size.x, pos.y + size.y,
+          io.DisplaySize.x, io.DisplaySize.y, float(window_width), float(window_height)};
+      const bool scroll_enabled = window && window_width > 0 && window_height > 0 &&
+          ui_.IsFocused() && input::HostInputFocused() && !dismiss;
+      {
+        std::lock_guard lock(scroll_mutex_);
+        if (appearing || frame != scroll_frame_ || !scroll_enabled || command ||
+            io.MouseWheel != 0 || io.MouseWheelH != 0) scroll_.Cancel();
+        scroll_frame_ = frame;
+        scroll_window_ = window ? SDL_GetWindowID(window) : 0;
+        // Apply before BeginChild so card drawing and hit testing use the new
+        // viewport in this frame, rather than deferring it to the next frame.
+        if (scroll_enabled) if (auto y = scroll_.Advance(double(SDL_GetTicksNS()) * 1e-9))
+          ImGui::SetNextWindowScroll(ImVec2(-1, *y));
+      }
       if (ImGui::BeginChild("##achievement_cards", ImVec2(0, list_height),
                             ImGuiChildFlags_None, ImGuiWindowFlags_AlwaysVerticalScrollbar |
                             ImGuiWindowFlags_NoNav)) {
         const bool reflowed = layout.columns != previous_columns_;
         previous_columns_ = layout.columns;
         if (appearing) ImGui::SetScrollY(0);
+        const auto child_pos = ImGui::GetWindowPos(), child_size = ImGui::GetWindowSize();
+        std::optional<ScrollPoint> tap;
+        bool touch_owns_view = false;
+        {
+          std::lock_guard lock(scroll_mutex_);
+          auto viewport = frame;
+          viewport.left = child_pos.x; viewport.top = child_pos.y;
+          viewport.right = child_pos.x + child_size.x - ImGui::GetStyle().ScrollbarSize;
+          viewport.bottom = child_pos.y + child_size.y;
+          scroll_.Configure(viewport, ImGui::GetScrollY(), ImGui::GetScrollMaxY(), scroll_enabled);
+          scroll_ready_ = scroll_enabled;
+          tap = scroll_.TakeTap();
+          touch_owns_view = scroll_.TouchOwnsView();
+        }
+        const bool touch_pointer = touch_owns_view || io.MouseSource == ImGuiMouseSource_TouchScreen ||
+            settings::title::mouse_as_touch.Get();
         if (entries_.empty()) ImGui::TextUnformatted("No achievements are available for this title.");
         const float gap = 12 * scale;
         const float card_width = (ImGui::GetContentRegionAvail().x - gap * (layout.columns - 1)) /
@@ -185,11 +229,10 @@ class Browser final : public rex::ui::DialogBase {
             const ImVec2 card = ImGui::GetCursorScreenPos();
             ImGui::PushID(static_cast<int>(entry.id));
             ImGui::InvisibleButton("##card", ImVec2(card_width, row_height));
-            // Touch events share the primary pointer; dragging a portrait card scrolls the list.
-            if (layout.portrait && ImGui::IsItemActive() && ImGui::IsMouseDragging(0))
-              ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
+            if (tap && tap->x >= card.x && tap->x < card.x + card_width &&
+                tap->y >= card.y && tap->y < card.y + row_height) navigation_.selected = i;
             // A parked pointer does not steal selection back from the controller.
-            if (ImGui::IsItemHovered() && (ImGui::IsMouseClicked(0) ||
+            if (!touch_pointer && ImGui::IsItemHovered() && (ImGui::IsMouseClicked(0) ||
                 io.MouseDelta.x != 0 || io.MouseDelta.y != 0 || io.MouseWheel != 0))
               navigation_.selected = i;
             const bool selected = navigation_.selected == i;
@@ -228,10 +271,11 @@ class Browser final : public rex::ui::DialogBase {
             ImGui::PopID();
           }
         }
-      }
+      } else ResetScroll();
       ImGui::EndChild();
       ImGui::AlignTextToFramePadding();
-      ImGui::TextUnformatted(layout.portrait ? "Drag to scroll" :
+      ImGui::TextUnformatted(layout.portrait || io.MouseSource == ImGuiMouseSource_TouchScreen ||
+          settings::title::mouse_as_touch.Get() ? "Drag or flick to scroll" :
           "D-pad / left stick / arrows: browse    |    Mouse wheel: scroll");
       ImGui::SameLine();
       const float button_width = 140 * scale;
@@ -240,18 +284,82 @@ class Browser final : public rex::ui::DialogBase {
                         ImVec2(button_width, button_height))) dismiss = true;
       ImGui::PopFont();
       if (dismiss) {
+        ResetScroll();
         ImGui::CloseCurrentPopup();
         active.store(false);
         opened_ = false;
       }
       ImGui::EndPopup();
-    }
+    } else ResetScroll();
     ImGui::PopStyleColor(10);
     ImGui::PopStyleVar(5);
     return true;
 }
 
  private:
+  void ResetScroll() {
+    std::lock_guard lock(scroll_mutex_);
+    scroll_.Reset(); scroll_ready_ = false;
+  }
+  static bool SDLCALL Watch(void* data, SDL_Event* event) {
+    auto& self = *static_cast<Browser*>(data);
+    if (!Active()) return true;
+    std::lock_guard lock(self.scroll_mutex_);
+    const bool background = event->type == SDL_EVENT_WILL_ENTER_BACKGROUND ||
+                            event->type == SDL_EVENT_DID_ENTER_BACKGROUND;
+    const bool window_boundary = event->type == SDL_EVENT_WINDOW_FOCUS_LOST ||
+        event->type == SDL_EVENT_WINDOW_RESIZED || event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
+        event->type == SDL_EVENT_WINDOW_MINIMIZED;
+    if (background || (window_boundary &&
+                       event->window.windowID == self.scroll_window_)) {
+      self.scroll_.Reset(); self.scroll_ready_ = false;
+      return true;
+    }
+    if (!self.scroll_ready_) return true;
+    ScrollPhase phase;
+    float x = 0, y = 0;
+    uint64_t device = 0, finger = 0;
+    switch (event->type) {
+      case SDL_EVENT_FINGER_DOWN: case SDL_EVENT_FINGER_MOTION:
+      case SDL_EVENT_FINGER_UP: case SDL_EVENT_FINGER_CANCELED: {
+        const auto& touch = event->tfinger;
+        if (touch.windowID != self.scroll_window_ || touch.touchID == SDL_MOUSE_TOUCHID ||
+            touch.touchID == SDL_PEN_TOUCHID) return true;
+        phase = event->type == SDL_EVENT_FINGER_DOWN ? ScrollPhase::kDown :
+            event->type == SDL_EVENT_FINGER_MOTION ? ScrollPhase::kMove :
+            event->type == SDL_EVENT_FINGER_UP ? ScrollPhase::kUp : ScrollPhase::kCancel;
+        x = touch.x; y = touch.y; device = touch.touchID; finger = touch.fingerID;
+        break;
+      }
+      case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP:
+      case SDL_EVENT_MOUSE_MOTION: {
+        const bool move = event->type == SDL_EVENT_MOUSE_MOTION;
+        const auto window = move ? event->motion.windowID : event->button.windowID;
+        const auto which = move ? event->motion.which : event->button.which;
+        if (window != self.scroll_window_ || which == SDL_TOUCH_MOUSEID) return true;
+        if (!settings::title::mouse_as_touch.Get() ||
+            (!move && event->button.button != SDL_BUTTON_LEFT)) {
+          self.scroll_.Cancel(); return true;
+        }
+        phase = move ? ScrollPhase::kMove : event->type == SDL_EVENT_MOUSE_BUTTON_DOWN ?
+            ScrollPhase::kDown : ScrollPhase::kUp;
+        x = (move ? event->motion.x : event->button.x) / self.scroll_frame_.window_width;
+        y = (move ? event->motion.y : event->button.y) / self.scroll_frame_.window_height;
+        device = UINT64_MAX;
+        break;
+      }
+      case SDL_EVENT_MOUSE_WHEEL:
+        if (event->wheel.windowID == self.scroll_window_) self.scroll_.Cancel();
+        return true;
+      case SDL_EVENT_KEY_DOWN:
+        if (event->key.windowID == self.scroll_window_) self.scroll_.Cancel();
+        return true;
+      default: return true;
+    }
+    const auto timestamp = event->common.timestamp ? event->common.timestamp : SDL_GetTicksNS();
+    self.scroll_.Observe(device, finger, phase, x, y, double(timestamp) * 1e-9);
+    return true;
+  }
   rex::ui::ImageTexture* GetIcon(const rex::Achievement& entry) {
     if (entry.icon_path.empty()) return nullptr;
     if (auto found = icons_.find(entry.icon_path); found != icons_.end()) return found->second.get();
@@ -282,6 +390,11 @@ class Browser final : public rex::ui::DialogBase {
   std::map<std::string, std::unique_ptr<rex::ui::ImageTexture>> icons_;
   std::vector<rex::Achievement> entries_;
   Navigation navigation_;
+  std::mutex scroll_mutex_;
+  CardScroll scroll_;
+  ScrollViewport scroll_frame_;
+  SDL_WindowID scroll_window_ = 0;
+  bool scroll_ready_ = false;
   int previous_columns_ = 0;
   bool opened_ = false;
 };

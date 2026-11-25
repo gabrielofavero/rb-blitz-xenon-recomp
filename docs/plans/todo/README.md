@@ -4,6 +4,7 @@ Plans awaiting work, including plans paused after an initial investigation. Each
 
 | Plan | What it covers |
 | --- | --- |
+| [`2026-11-25-xbox-dev-mode-build-plan.md`](2026-11-25-xbox-dev-mode-build-plan.md) | Planning only: x64 UWP runtime port, bundled build first, first-launch asset importer, DLC storage and transfer, USB acceptance, and a separate on-console native compilation spike. |
 | [`2026-11-23-portrait-screen-coverage-plan.md`](2026-11-23-portrait-screen-coverage-plan.md) | Portrait coverage map for all 59 retail screen registrations, generated settings, modals, and host surfaces; existing adaptations, missing layouts, conditional routes, and a short completion order. |
 | [`2026-11-17-custom-loading-texts-plan.md`](2026-11-17-custom-loading-texts-plan.md) | Planning only: exact loading-screen/message inventory, selective JSON replacements, semantic inline input images, and live controller/keyboard/mouse/touch wording. |
 | [`2026-10-25-framerate-expansion-plan.md`](2026-10-25-framerate-expansion-plan.md) | Paused after P0/P1 diagnostics and gameplay pilots. No higher rate passed the in-song performance gate; the diagnostic code and results remain recorded for a later attempt. |
