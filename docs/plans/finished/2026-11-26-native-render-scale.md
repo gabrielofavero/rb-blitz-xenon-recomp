@@ -1,6 +1,6 @@
 # Native render scale and pointer controls
 
-Status: implementation in progress, 2026-11-26.
+Status: delivered, 2026-11-26; physical iOS testing remains unverified.
 
 ## Requirements and decisions
 
@@ -26,10 +26,21 @@ new saved capacity can be attempted. Unchanged running geometry is not re-armed
 just because a higher value was saved for a later restart. Shutdown retires the
 journal before any final guest draws can write new markers.
 
-## Validation
+## Validation (2026-11-26)
 
-- Required Windows release build attempted; unavailable because this macOS checkout has no Windows build directory.
-- Native Apple Silicon Release build and focused host tests: pending.
-- Game navigation, pointer/touch behavior, physical-device performance and high-resolution allocation: unverified. No game UI was driven.
+- macOS ARM64 and iOS ARM64 Release builds pass, including final recovery changes.
+- All 16 focused CTest suites pass, including native Vulkan allocation, registry feed, settings, mouse and profile recovery.
+- The actual native Audio scene passes 90 focused checks across landscape, phone and tablet aspects.
+- Eight iOS integration units also passed device syntax checks before the full device build.
+- All 73 SDK patches replay; the six files owned by 0097 match replay exactly. The official live-tree audit retains unrelated `src/ui/prompt.cpp` drift.
+- Documentation checker: zero errors, 49 existing warnings.
+- Windows Release build unavailable on this Mac; Windows/Linux runtime acceptance unverified.
+- An exploratory broad portrait-fixture run reported 35/2090 failures before the final rebuild; it is not current UI acceptance. Focused scale-scene checks pass independently.
 
-Evidence will be recorded under `out/render-scale-*` and the native build tree's CTest logs.
+Evidence: `out/render-scale-build-current.log`, `out/render-scale-final-recovery-build.log`, `out/render-scale-ios-build-current.log`, `out/render-scale-tests-final.log`, `out/render-scale-scene.log`, `out/render-scale-sdk-owned-replay.log`, `out/render-scale-docs.log`.
+
+## Device handoff
+
+Audited unsigned bundled IPA: `out/ios/packages/render-scale-20261126/RockBandBlitz-0.1.0-arm64-ios.ipa`; its audit records iOS 17.0, arm64 and unsigned status. Device signing and testing remain manual. No game UI was driven.
+
+Check independent Interface/Gameplay values, tap/drag, native labels, pending capacity changes and recovery after an interrupted higher-quality attempt. Native is a real pixel target; device allocation limits can refuse it. Full live backend-capacity growth remains unsupported and requires a renderer lifecycle redesign.

@@ -80,7 +80,7 @@ endings and orphaned documents. Auditing without editing is the read-only `docs-
 
 ### Current settings delivery
 
-[Native render scale and pointer controls](plans/in-progress/2026-11-26-native-render-scale.md) records native pixel semantics, device quality tiers and startup allocation.
+[Native render scale and pointer controls](plans/finished/2026-11-26-native-render-scale.md) records native pixel semantics, device quality tiers and startup allocation.
 
 [Portrait screen coverage](plans/in-progress/2026-11-23-portrait-screen-coverage-plan.md)
 maps existing adaptations, missing screens, conditional routes, and remaining acceptance.

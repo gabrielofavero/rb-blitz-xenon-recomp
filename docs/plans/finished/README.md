@@ -11,6 +11,7 @@ decisions behind code that is running today, and the per-prompt tables are how a
 
 | Plan | Delivered |
 | --- | --- |
+| [Native render scale](2026-11-26-native-render-scale.md) | Delivered 2026-11-26: Audio-style controls, ten native-relative stops, conservative startup, allocation admission and crash recovery. macOS/iOS builds, 16 focused suites and 90 scene checks pass; device UI remains unverified. |
 | [Portrait UI alignment](2026-11-19-portrait-ui-alignment.md) | Delivered 2026-11-19: shared footer palette and opacity, measured heading/footer centering, speaker placement, localized touch calibration prompts/results and preset hover. Release build, five focused suites and 965 asset checks pass; owner UI acceptance remains unverified. |
 | [`2026-11-15-rexglue-patch-refactoring-plan.md`](2026-11-15-rexglue-patch-refactoring-plan.md) | Delivered 2026-11-17: 71 SDK patches plus the unchanged nested MoltenVK patch, justified retirements, seven byte-equivalent families, shared replay and hosted CI gates. Release build, 31 affected CTest suites and documentation checks pass; native platform/UI acceptance remains unverified. |
 | [`2026-11-16-ios-importer-plan.md`](2026-11-16-ios-importer-plan.md) | Separate first-launch Files importer IPA, optional skip/local/GitHub Ultimate setup and persistent verification. Both iOS builders and host regressions pass; device importer UI acceptance remains unproven. |

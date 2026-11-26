@@ -10,8 +10,8 @@ an active attempt until that context proves steady output and the process closes
 cleanly, rather than approving Gameplay when only the menu has drawn. Live changes remain bounded by
 the process's backend capacity; larger capacity still requires restart.
 See [graphics](graphics.md) and the
-[delivery record](../plans/in-progress/2026-11-26-native-render-scale.md).
-Native release/host validation is in progress. Game navigation, touch and physical
+[delivery record](../plans/finished/2026-11-26-native-render-scale.md).
+Native macOS/iOS Release builds, 16 focused suites and 90 scene checks pass. Game navigation, touch and physical
 iOS memory/performance acceptance are unverified.
 
 ## Display profiles and defaults (2026-11-18)

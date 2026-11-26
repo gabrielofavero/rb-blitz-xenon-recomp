@@ -1,7 +1,5 @@
 # In-progress plans
 
-[Native render scale and pointer controls](2026-11-26-native-render-scale.md) is implementing device-relative quality tiers, Audio-style controls and conservative startup allocation.
-
 Plans that are actively being worked. A plan moves here from [`../todo/`](../todo/) when work starts
 and leaves for [`../finished/`](../finished/) when it is delivered — one `git mv`, keeping its
 `YYYY-MM-DD-` prefix.
