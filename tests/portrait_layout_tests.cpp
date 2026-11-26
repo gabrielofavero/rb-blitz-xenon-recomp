@@ -25,6 +25,11 @@ void Close(float value, float wanted) { CHECK_TRUE(std::abs(value - wanted) < .0
 std::optional<float> rb_blitz::input::PortraitPanelDrawAspect(uint8_t*, uint32_t drawable) {
   return eligible && drawable == kPanel ? std::optional<float>{aspect} : std::nullopt;
 }
+void rb_blitz::input::DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t,
+                                       void (*draw)(PPCContext&, uint8_t*)) {
+  draw(ctx, base);
+}
+rb_blitz::input::MenuPoint rb_blitz::input::PortraitPanelTranslation() { return {}; }
 extern "C" REX_FUNC(sub_821F0300) {
   CHECK_EQ(ctx.r3.u32, kPanel + 80);
   ++dirty_calls;
@@ -50,6 +55,29 @@ extern "C" REX_FUNC(__imp__sub_824C8E88) {
 int main() {
   using namespace rb_blitz::test;
   using namespace rb_blitz::ui;
+  BeginCase("library transitions retain portrait for both native panel layouts");
+  for (const auto source : kPortraitLibraryScreens)
+    for (const auto destination : kPortraitLibraryScreens) {
+      const auto transition = std::string("trans_") + std::string(source) + "_" + std::string(destination);
+      CHECK_TRUE(PortraitLibraryTransition(transition));
+      CHECK_TRUE(PortraitSplashScreen(transition, ""));
+    }
+  for (const auto screen : {"song_select_screen", "trans_splash_screen_song_select_screen",
+                            "trans_song_select_screen_powerup_select_screen",
+                            "trans_song_select_screen_inbox_screen_extra"})
+    CHECK_FALSE(PortraitLibraryTransition(screen));
+  CHECK_TRUE(PortraitLibraryPanelScreen("songselect") == "song_select_screen");
+  CHECK_TRUE(PortraitLibraryPanelScreen("songselect", true) == "store_browser_screen");
+  CHECK_TRUE(PortraitLibraryPanelScreen("InboxPanel") == "inbox_screen");
+  CHECK_TRUE(PortraitLibraryPanelScreen("RecommendationsPanel") == "recommendation_screen");
+  CHECK_TRUE(PortraitLibraryPanelScreen("PanelDir").empty());
+  BeginCase("library tab titles share the settled marquee center at every portrait width");
+  for (const float aspect : {.3f, 201.f / 437, 9.f / 16, .75f, .9f}) {
+    constexpr float rail_center = (204.37974548339844f + 169.7950897216797f) / 2;
+    Close(PortraitSongs(aspect).tabs_z, rail_center);
+    Close(PortraitMessages(aspect).tabs_z, rail_center);
+    Close(PortraitRecommendations(aspect).tabs_z, rail_center);
+  }
   BeginCase("portrait powerups separate the complete song card, three choices and footer");
   CHECK_TRUE(PortraitSplashScreen("powerup_select_screen", "powerup_select_panel"));
   for (float aspect : {.3f, 201.f / 437, 9.f / 16, .75f, .9f}) {

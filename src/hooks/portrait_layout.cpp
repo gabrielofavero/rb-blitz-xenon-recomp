@@ -19,7 +19,8 @@ thread_local bool drawing = false;
 rb_blitz::ui::PortraitFit rb_blitz::hooks::PortraitDrawFit() { return draw_fit; }
 
 rb_blitz::input::MenuPoint rb_blitz::input::PortraitDrawPoint(float x, float z) {
-  return {draw_fit.X(x), draw_fit.Z(z)};
+  const auto translation = PortraitPanelTranslation();
+  return {draw_fit.X(x) + translation.x, draw_fit.Z(z) + translation.y};
 }
 
 REX_HOOK_RAW(sub_824C8E88) {
@@ -56,5 +57,5 @@ REX_HOOK_RAW(sub_824C8E88) {
     draw_fit = {};
     drawing = false;
   });
-  __imp__sub_824C8E88(ctx, base);
+  rb_blitz::input::DrawPortraitPanel(ctx, base, drawable, __imp__sub_824C8E88);
 }

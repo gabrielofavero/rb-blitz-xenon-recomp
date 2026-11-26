@@ -295,7 +295,8 @@ REX_HOOK_RAW(sub_824D85E8) {
   // those labels directly after the draw instead of depending on a nested
   // UILabel callback (which may receive an adjusted base-class this pointer).
   const auto visible = rb_blitz::input::PortraitMenuHintEntries(ctx, base, owner);
-  if (!visible.empty() && visible.size() <= 3 &&
+  const size_t footer_capacity = rb_blitz::input::MenuScreenIs("recommendation_screen") ? 5 : 3;
+  if (!visible.empty() && visible.size() <= footer_capacity &&
       rb_blitz::input::PortraitMenuHintsAvailable(ctx, base, owner)) {
     // Keep the original action and label vectors: calibration replaces them as
     // its state changes. Draw each live label through the guest widget in its
@@ -320,8 +321,8 @@ REX_HOOK_RAW(sub_824D85E8) {
       const auto index = size_t(entry - visible.begin());
       const auto placement = rb_blitz::input::PortraitMenuHintPlacement(
           ctx, base, owner, *entry, index, visible.size());
-      const auto slot = rb_blitz::ui::PortraitFooterAction(
-          rb_blitz::ui::screen::CurrentMenuConfiguration().portrait_aspect, placement.index, placement.count);
+      const auto slot = rb_blitz::input::PortraitMenuHintSlot(
+          ctx, base, owner, placement.index, placement.count);
       const auto position = rb_blitz::input::PortraitDrawPoint(slot.x, slot.z);
       rex::memory::store_and_swap<float>(base + world + 48, position.x);
       rex::memory::store_and_swap<float>(base + world + 56, position.y);

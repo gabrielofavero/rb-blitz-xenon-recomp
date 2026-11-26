@@ -2,6 +2,7 @@
 // Retail guest ABI and validation: docs/engine/input-flow.md.
 #include "input/native_menu.h"
 #include "input/native_mesh.h"
+#include "input/native_list_draw.h"
 #include "input/touch_scroll.h"
 #include "hooks/hud_layout_runtime.h"
 #include "input/inline_help.h"
@@ -48,7 +49,6 @@
 
 
 REX_EXTERN(__imp__sub_824B2958); // UIManager::Poll
-REX_EXTERN(__imp__sub_824E5020); // UIListDir::Draw
 REX_EXTERN(__imp__sub_824E6DC8); // UIListDir::BuildDrawState
 REX_EXTERN(sub_824B1980);       // UIManager::FocusComponent
 REX_EXTERN(sub_824C1938);       // UIList::SetSelected
@@ -111,8 +111,13 @@ thread_local std::unordered_map<uint32_t, std::vector<DialogPromptSpan>> dialog_
 uint64_t screen_generation = 0;
 // The current screen's guest object name, used by native mouse navigation.
 std::string current_screen_name;
+thread_local std::string_view drawing_panel_screen;
+thread_local MenuPoint drawing_panel_translation;
+std::string_view DrawScreenName() {
+  return drawing_panel_screen.empty() ? std::string_view(current_screen_name) : drawing_panel_screen;
+}
 bool PortraitStoreActive() {
-  return ui::screen::CurrentMenuConfiguration().rhythmverse_row && ui::PortraitStoreScreen(current_screen_name);
+  return ui::screen::CurrentMenuConfiguration().rhythmverse_row && ui::PortraitStoreScreen(DrawScreenName());
 }
 
 // The focused list the previous frame's draw identified (see DrawList). Read by the help caption
@@ -214,6 +219,22 @@ struct GuestCall {
   }
   ~GuestCall() { parent.fpscr = ctx.fpscr; }
 };
+
+void UpdatePortraitPanelTranslation(PPCContext& ctx, uint8_t* base, uint32_t transform) {
+  if (drawing_panel_screen.empty()) return;
+  for (unsigned depth = 0; transform && depth < 16; ++depth) {
+    if (ObjectName(base, ObjectBase(base, transform)) == "Parent.trans") {
+      const auto world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, transform);
+      const auto fit = hooks::PortraitDrawFit();
+      drawing_panel_translation = {F32(base, world + 48) - fit.X(0),
+                                   F32(base, world + 56) - fit.Z(0)};
+      return;
+    }
+    const auto parent = U32(base, transform + 0x94);
+    if (parent == transform) break;
+    transform = parent;
+  }
+}
 
 uint32_t Focus(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   GuestCall call(ctx, base); call.ctx.r3.u32 = manager;
@@ -547,7 +568,7 @@ uint64_t MenuScreenGeneration() {
 }
 bool MenuScreenIs(std::string_view name) {
   std::lock_guard lock(mutex);
-  return current_screen_name == name;
+  return DrawScreenName() == name;
 }
 bool MainMenuMusicInputAvailable() {
   std::lock_guard lock(mutex);
@@ -899,12 +920,33 @@ uint32_t SceneObject(PPCContext& ctx, uint8_t* base, uint32_t dir, const char* n
 
 bool PortraitMenuHintsAvailable(PPCContext& ctx, uint8_t* base, uint32_t owner) {
   if (!settings::InterfacePortraitEnabled()) return false;
+  if (!drawing_panel_screen.empty())
+    UpdatePortraitPanelTranslation(ctx, base, owner + 4 + U32(base, U32(base, owner + 4) + 16));
   const auto header = ObjectBase(base, owner);
   const auto name = ObjectName(base, header);
-  if (current_screen_name == "song_select_screen" && name == "pop_up_help.ihp") return false;
+  if (DrawScreenName() == "song_select_screen" && name == "pop_up_help.ihp") return false;
   if (name == "continue.ihp" || name == "back.ihp" || name == "skip.ihp") return false;
   const auto dir = header ? U32(base, header + 36) : 0;
   return dir && SceneObject(ctx, base, dir, "portrait_caption_black.color");
+}
+
+bool RecommendationFooter(PPCContext& ctx, uint8_t* base, uint32_t dir) {
+  return DrawScreenName() == "recommendation_screen" && dir &&
+      SceneObject(ctx, base, dir, "portrait_recommendations.color");
+}
+
+ui::PortraitCalibrationAction PortraitFooterSlot(PPCContext& ctx, uint8_t* base, uint32_t dir,
+                                                size_t index, size_t count) {
+  const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
+  if (RecommendationFooter(ctx, base, dir)) return ui::PortraitRecommendationsFooter(aspect, index, count);
+  return SceneObject(ctx, base, dir, "portrait_songs.color")
+      ? ui::PortraitSongsFooter(aspect, index, count) : ui::PortraitFooterAction(aspect, index, count);
+}
+
+ui::PortraitCalibrationAction PortraitMenuHintSlot(PPCContext& ctx, uint8_t* base, uint32_t owner,
+                                                  size_t index, size_t count) {
+  const auto header = ObjectBase(base, owner);
+  return PortraitFooterSlot(ctx, base, header ? U32(base, header + 36) : 0, index, count);
 }
 
 std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* base, uint32_t owner) {
@@ -913,6 +955,7 @@ std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* b
   if (!settings::InterfacePortraitEnabled()) return entries;
   const auto header = ObjectBase(base, owner);
   const auto dir = header ? U32(base, header + 36) : 0;
+  if (RecommendationFooter(ctx, base, dir)) return RecommendationFooterEntries(entries);
   if (dir && SceneObject(ctx, base, dir, "portrait_powerups.color") &&
       ObjectName(base, header) == "help.ihp") {
     auto ordered = entries;
@@ -922,7 +965,7 @@ std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* b
     return ordered;
   }
   if (dir && SceneObject(ctx, base, dir, "portrait_songs.color") &&
-      ObjectName(base, header) == "InlineHelp.ihp" && current_screen_name == "song_select_screen") {
+      ObjectName(base, header) == "InlineHelp.ihp" && DrawScreenName() == "song_select_screen") {
     std::vector<InlineHelpEntry> visible;
     for (const auto action : {2u, 3u, 1u})
       for (const auto& entry : entries) if (entry.action == action) visible.push_back(entry);
@@ -984,16 +1027,21 @@ bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
                 arrow ? layout.tabs_z : layout.tools_z,
                 arrow ? ui::kPortraitSongArrowTargetSize : layout.width / 2 - 3,
                 arrow ? ui::kPortraitSongArrowTargetSize : 27.f};
-      } else slot = SceneObject(ctx, base, dir, "portrait_songs.color")
-          ? ui::PortraitSongsFooter(aspect, index, count) : ui::PortraitFooterAction(aspect, index, count);
+      } else slot = PortraitFooterSlot(ctx, base, dir, index, count);
+      // Hub arrows belong to the unfitted background marquee, like its title.
+      const auto fit = song_control && stem.rfind("portrait_header_", 0) == 0
+          ? ui::PortraitFit{} : portrait_draw_fit;
       const auto world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, mesh + 64);
-      const float width = (slot.width + (border ? 1.4f : 0)) * portrait_draw_fit.scale;
-      const float height = (slot.height + (border ? 1.4f : 0)) * portrait_draw_fit.scale;
+      const float width = (slot.width + (border ? 1.4f : 0)) * fit.scale;
+      const float height = (slot.height + (border ? 1.4f : 0)) * fit.scale;
       Float(base, world, width / 300);
       Float(base, world + 24, height / 30);
-      Float(base, world + 48, portrait_draw_fit.X(slot.x) - width / 2);
+      const bool moving_content = reflow || (song_control && stem.rfind("portrait_header_", 0) != 0);
+      Float(base, world + 48, fit.X(slot.x) - width / 2 +
+          (moving_content ? drawing_panel_translation.x : 0));
       Float(base, world + 52, border ? .2f : .1f);
-      Float(base, world + 56, portrait_draw_fit.Z(slot.z) + height / 2);
+      Float(base, world + 56, fit.Z(slot.z) + height / 2 +
+          (moving_content ? drawing_panel_translation.y : 0));
     }
     if (const auto bounds = ProjectMesh(ctx, base, mesh)) {
       std::lock_guard lock(mutex);
@@ -1029,13 +1077,16 @@ bool DrawPortraitFooterSurface(PPCContext& ctx, uint8_t* base, uint32_t dir,
 }
 
 void DrawPresetArrows(PPCContext& ctx, uint8_t* base, uint32_t label) {
-  const bool store = PortraitStoreActive() && current_screen_name != "store_info_screen";
-  const bool songs = current_screen_name == "song_select_screen" || store;
+  const bool store = PortraitStoreActive() && DrawScreenName() != "store_info_screen";
+  const bool messages = DrawScreenName() == "inbox_screen";
+  const bool recommendations = DrawScreenName() == "recommendation_screen";
+  const bool songs = DrawScreenName() == "song_select_screen" || store || messages || recommendations;
   if (!settings::InterfacePortraitEnabled() ||
-      (current_screen_name != "controller_config_screen" &&
-       current_screen_name != "controller_config_pause_screen" && !songs)) return;
+      (DrawScreenName() != "controller_config_screen" &&
+       DrawScreenName() != "controller_config_pause_screen" && !songs)) return;
   const auto header = ObjectBase(base, label);
-  if (ObjectName(base, header) != (songs ? (store ? "portrait_tab_store.lbl" : "portrait_tab_songs.lbl") : "IndexNum.lbl")) return;
+  if (ObjectName(base, header) != (songs ? (recommendations ? "portrait_tab_recs.lbl" : messages ? "portrait_tab_messages.lbl" :
+      store ? "portrait_tab_store.lbl" : "portrait_tab_songs.lbl") : "IndexNum.lbl")) return;
   const auto dir = U32(base, header + 36);
   if (!songs && !SceneObject(ctx, base, dir, "portrait_preset_arrows.grp")) return;
   for (bool left : {true, false}) {
@@ -1095,8 +1146,8 @@ void CaptureSlider(PPCContext& ctx, uint8_t* base, uint32_t slider) {
 
 namespace {
 std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoint point) {
-  if (current_screen_name != "controller_config_screen" &&
-      current_screen_name != "controller_config_pause_screen") return {};
+  if (DrawScreenName() != "controller_config_screen" &&
+      DrawScreenName() != "controller_config_pause_screen") return {};
   // UIPanel +0x34 owns the loaded PanelDir, whose authored arrow meshes are
   // named in controller_config.milo_xbox. Resolve only on a click so placement
   // and aspect changes use the scene's current transforms at minimal cost.
@@ -1178,14 +1229,12 @@ void CaptureRow(uint8_t* base, MenuBounds bounds) {
 void DrawPortraitSongRow(PPCContext& ctx, uint8_t* base) {
   if (!drawing || !drawing->row || ctx.r7.u32 ||
       !settings::InterfacePortraitEnabled() ||
-      (current_screen_name != "song_select_screen" && !PortraitStoreActive())) return;
+      (DrawScreenName() != "song_select_screen" && DrawScreenName() != "inbox_screen" && !PortraitStoreActive())) return;
   const auto label = U32(base, ctx.r3.u32 + 8);
-  const auto widget = drawing->widget;
-  if (PortraitStoreActive()) {
-    const auto name = ObjectName(base, ObjectBase(base, label));
-    if (name != "filter.lbl" && name != "song.lbl" && name != "album.lbl" && name != "group.lbl" &&
-        name != "group_center.lbl" && name != "list.lbl") return;
-  }
+  const auto widget = U32(base, ctx.r3.u32 + 4);
+  const bool messages = DrawScreenName() == "inbox_screen";
+  const auto inbox = ui::PortraitMessages(ui::screen::CurrentMenuConfiguration().portrait_aspect);
+  if (!PortraitListRowField(DrawScreenName(), ObjectName(base, ObjectBase(base, widget)))) return;
   if (!label || drawing->painted_rows.contains(drawing->row)) return;
   const auto text = U32(base, label + 80);
   if (!text || !base[text]) return;
@@ -1207,8 +1256,9 @@ void DrawPortraitSongRow(PPCContext& ctx, uint8_t* base) {
     rex::memory::store_and_swap<uint32_t>(base + label + 96, 0);
     base[label + 178] = 1;
   }
-  if (F32(base, label + 88) != ui::kPortraitSongRowHeight - 5) {
-    Float(base, label + 88, ui::kPortraitSongRowHeight - 5);
+  const float label_height = messages ? inbox.row_height - 2 : ui::kPortraitSongRowHeight - 5;
+  if (F32(base, label + 88) != label_height) {
+    Float(base, label + 88, label_height);
     base[label + 178] = 1;
   }
   if (base[label + 178]) {
@@ -1225,16 +1275,18 @@ void DrawPortraitSongRow(PPCContext& ctx, uint8_t* base) {
   const auto world = rex::ppc::Call<uint32_t>(call.ctx, base, sub_821F13D0, mesh + 64);
   std::array<uint8_t, 64> prior{};
   std::memcpy(prior.data(), base + world, prior.size());
-  const float height = heading ? 30.f : ui::kPortraitSongRowHeight;
+  const float height = heading ? 30.f : messages ? inbox.row_height : ui::kPortraitSongRowHeight;
+  const float row_width = messages ? inbox.width : 420.f;
+  const float text_inset = messages ? inbox.text_inset : 14.f;
   // The button template's vertices lie in XY; labels lie in XZ.
   for (size_t axis = 0; axis < 3; ++axis) {
-    Float(base, world + uint32_t(axis * 4), matrix[axis] * 420.f / 300);
+    Float(base, world + uint32_t(axis * 4), matrix[axis] * row_width / 300);
     Float(base, world + uint32_t(16 + axis * 4), matrix[8 + axis] * height / 30);
     Float(base, world + uint32_t(32 + axis * 4), -matrix[4 + axis]);
   }
   for (size_t axis = 0; axis < 3; ++axis)
     Float(base, world + uint32_t(48 + axis * 4),
-          matrix[12 + axis] - 14 * matrix[axis] + height / 2 * matrix[8 + axis]);
+          matrix[12 + axis] - text_inset * matrix[axis] + height / 2 * matrix[8 + axis]);
   const auto material = U32(base, mesh + 292);
   const float alpha = material ? F32(base, material + 56) : 1.f;
   const auto dirty = [&] {
@@ -1318,30 +1370,9 @@ std::optional<MenuBounds> ProjectLabel(PPCContext& ctx, uint8_t* base, uint32_t 
   }
   return bounds;
 }
-void DrawMenuHintLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
-  const auto* footer = drawing_footer;
-  const auto entry = footer ? std::find_if(footer->entries.begin(), footer->entries.end(),
-      [label](const auto& e) { return e.label == label; }) : std::vector<InlineHelpEntry>::const_iterator{};
-  if (!footer || entry == footer->entries.end()) { __imp__sub_824BC668(ctx, base); return; }
-  const auto header = ObjectBase(base, footer->owner);
-  const auto dir = header ? U32(base, header + 36) : 0;
-  const auto black_color = dir ? SceneObject(ctx, base, dir, "portrait_caption_black.color") : 0;
-  if (!black_color) { __imp__sub_824BC668(ctx, base); return; }
-  const auto index = footer->index + size_t(entry - footer->entries.begin());
-  const auto name = ObjectName(base, header);
-  if (current_screen_name == "song_select_screen" && name == "pop_up_help.ihp") {
-    __imp__sub_824BC668(ctx, base); return;
-  }
-  const bool independent = name == "continue.ihp" || name == "back.ihp" || name == "skip.ihp";
-  const std::string stem = independent ? "portrait_" + name.substr(0, name.size() - 4) :
-      ui::PortraitFooterSurface(index, footer->count);
-  const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, index, footer->count, !independent);
-  const bool black = hovered || (current_screen_name == "song_select_screen" && index == 2) ||
-      (current_screen_name == "powerup_select_screen" && name == "help.ihp" && index == 1) ||
-      current_screen_name == "splash_screen" ||
-      current_panel_name == "server_connect_panel" || current_screen_name == "loading_screen";
+void DrawBlackMenuCaption(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t black_color) {
   const auto styles = U32(base, label + 180), styles_end = U32(base, label + 184);
-  if (!black || !styles || styles_end < styles || styles_end - styles < 44) {
+  if (!black_color || !styles || styles_end < styles || styles_end - styles < 44) {
     __imp__sub_824BC668(ctx, base); return;
   }
   // Only the primary caption changes color. Its alternate icon style keeps
@@ -1362,6 +1393,33 @@ void DrawMenuHintLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   __imp__sub_824BC668(ctx, base);
 }
 
+void DrawMenuHintLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  const auto* footer = drawing_footer;
+  const auto entry = footer ? std::find_if(footer->entries.begin(), footer->entries.end(),
+      [label](const auto& e) { return e.label == label; }) : std::vector<InlineHelpEntry>::const_iterator{};
+  if (!footer || entry == footer->entries.end()) { __imp__sub_824BC668(ctx, base); return; }
+  const auto header = ObjectBase(base, footer->owner);
+  const auto dir = header ? U32(base, header + 36) : 0;
+  const auto black_color = dir ? SceneObject(ctx, base, dir, "portrait_caption_black.color") : 0;
+  if (!black_color) { __imp__sub_824BC668(ctx, base); return; }
+  const auto index = footer->index + size_t(entry - footer->entries.begin());
+  const auto name = ObjectName(base, header);
+  if (DrawScreenName() == "song_select_screen" && name == "pop_up_help.ihp") {
+    __imp__sub_824BC668(ctx, base); return;
+  }
+  const bool independent = name == "continue.ihp" || name == "back.ihp" || name == "skip.ihp";
+  const std::string stem = independent ? "portrait_" + name.substr(0, name.size() - 4) :
+      RecommendationFooter(ctx, base, dir) ? ui::PortraitRecommendationFooterSurface(index) :
+      ui::PortraitFooterSurface(index, footer->count);
+  const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, index, footer->count, !independent);
+  const bool black = hovered || (DrawScreenName() == "song_select_screen" && index == 2) ||
+      (DrawScreenName() == "powerup_select_screen" && name == "help.ihp" && index == 1) ||
+      DrawScreenName() == "splash_screen" ||
+      current_panel_name == "server_connect_panel" || DrawScreenName() == "loading_screen";
+  if (black) DrawBlackMenuCaption(ctx, base, label, black_color);
+  else __imp__sub_824BC668(ctx, base);
+}
+
 std::string_view CalibrationToken(uint8_t* base, uint32_t label) {
   const auto address = U32(base, label + 164);
   if (!address) return {};
@@ -1370,7 +1428,7 @@ std::string_view CalibrationToken(uint8_t* base, uint32_t label) {
 }
 
 void UpdateCalibrationText(PPCContext& ctx, uint8_t* base, uint32_t label) {
-  if (current_screen_name.rfind("cal_", 0) != 0) return;
+  if (DrawScreenName().rfind("cal_", 0) != 0) return;
   const auto token = CalibrationToken(base, label);
   const bool result = token == "lag_success";
   if (!result && token != "cal_audio_desc_pad" && token != "cal_video_desc_pad") return;
@@ -1392,21 +1450,102 @@ void UpdateCalibrationText(PPCContext& ctx, uint8_t* base, uint32_t label) {
   __imp__sub_824BC7D0(call.ctx, base);
 }
 
+bool DrawPortraitReadingText(PPCContext& ctx, uint8_t* base, uint32_t label, std::string_view name) {
+  if (!settings::InterfacePortraitEnabled()) return false;
+  float x = 0, z = 0, available_width = 0, available_height = 0;
+  const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
+  if (DrawScreenName() == "inbox_screen" && (name == "subject.lbl" || name == "message.lbl")) {
+    const auto layout = ui::PortraitMessages(aspect);
+    const bool subject = name == "subject.lbl";
+    x = -layout.width / 2 + 10; z = subject ? layout.subject_top : layout.body_top;
+    available_width = layout.width - 20;
+    available_height = subject ? layout.subject_height : layout.body_height;
+  } else if (DrawScreenName() == "recommendation_screen") {
+    const auto header = ObjectBase(base, label);
+    if (!header || !RecommendationFooter(ctx, base, U32(base, header + 36))) return false;
+    const auto layout = ui::PortraitRecommendations(aspect);
+    x = -layout.width / 2 + 10; available_width = layout.width - 20;
+    if (name == "song_title.lbl") { z = layout.title_top; available_height = layout.title_height; }
+    else if (name == "song_artist.lbl") { z = layout.artist_top; available_height = layout.artist_height; }
+    else if (name == "song_info.lbl") { z = layout.info_top; available_height = layout.info_height; }
+    else if (name == "description.lbl") { z = layout.reason_top; available_height = layout.reason_height; }
+    else if (name == "lb_title.lbl") { z = layout.leaderboard_title_top; available_height = 12; }
+    else if (name == "rank_first.lbl" || name == "unavailablel.lbl") { z = -136; available_height = 24; }
+    else if (name == "portrait_rec_empty.lbl") { z = 90; available_height = 48; }
+    else if (name == "portrait_rec_position.lbl") { x = layout.width / 2 - 52; z = 154; available_width = 44; available_height = 12; }
+    else return false;
+  } else return false;
+  if (base[label + 178])
+    rex::ppc::Call<void>(ctx, base, sub_824BAF98, label, uint32_t(0));
+  const auto ink = InlineHelpGlyphBounds(label,
+      [base](uint32_t at) { return U32(base, at); },
+      [base](uint32_t at) { return F32(base, at); });
+  const float left = ink ? (*ink)[0] : F32(base, label + 144);
+  const float top = ink ? (*ink)[3] : F32(base, label + 148);
+  const float width = ink ? (*ink)[2] - left : F32(base, label + 152);
+  const float height = ink ? top - (*ink)[1] : std::abs(F32(base, label + 156));
+  if (!(width > 0 && height > 0)) { __imp__sub_824BC668(ctx, base); return true; }
+  const auto transformable = label + 72 + U32(base, U32(base, label + 72) + 16);
+  const auto world = WorldTransformForDraw(transformable,
+      [base](uint32_t at) { return base[at]; },
+      [&](uint32_t object) { return rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, object); });
+  std::array<uint8_t, 64> prior{};
+  std::memcpy(prior.data(), base + world, prior.size());
+  rex::ScopeGuard restore([&] { std::memcpy(base + world, prior.data(), prior.size()); });
+  const auto fit = hooks::PortraitDrawFit();
+  const float scale = CalibrationTextFit(std::abs(F32(base, world)) * width,
+      std::abs(F32(base, world + 40)) * height, available_width * fit.scale, available_height * fit.scale);
+  for (uint32_t row = 0; row < 3; ++row)
+    for (uint32_t column = 0; column < 3; ++column)
+      Float(base, world + row * 16 + column * 4, F32(base, world + row * 16 + column * 4) * scale);
+  Float(base, world + 48, fit.X(x) + drawing_panel_translation.x -
+      F32(base, world) * left - F32(base, world + 32) * top);
+  Float(base, world + 56, fit.Z(z) + drawing_panel_translation.y -
+      F32(base, world + 8) * left - F32(base, world + 40) * top);
+  __imp__sub_824BC668(ctx, base);
+  return true;
+}
+
 void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
+  if (!drawing_panel_screen.empty())
+    UpdatePortraitPanelTranslation(ctx, base, label + 72 + U32(base, U32(base, label + 72) + 16));
   DrawPresetArrows(ctx, base, label);
   const bool portrait = settings::InterfacePortraitEnabled();
   const auto name = ObjectName(base, ObjectBase(base, label));
-  const bool songs = portrait && (current_screen_name == "song_select_screen" || PortraitStoreActive());
-  const bool powerups = portrait && current_screen_name == "powerup_select_screen";
+  if (DrawPortraitReadingText(ctx, base, label, name)) return;
+  const bool messages = portrait && DrawScreenName() == "inbox_screen";
+  const bool recommendations = portrait && DrawScreenName() == "recommendation_screen";
+  const bool songs = portrait && (DrawScreenName() == "song_select_screen" || PortraitStoreActive() || messages || recommendations);
+  const bool powerups = portrait && DrawScreenName() == "powerup_select_screen";
   const bool powerup_info_control = powerups && name.starts_with("portrait_powerup_info_") &&
       name.ends_with(".lbl");
   const bool powerup_name = powerups && name == "name.lbl";
+  const bool rec_navigation = recommendations &&
+      (name == "portrait_rec_previous.lbl" || name == "portrait_rec_next.lbl");
+  uint32_t rec_hover_color = 0;
+  if (rec_navigation) {
+    const auto dir = U32(base, ObjectBase(base, label) + 36);
+    const auto stem = name.substr(0, name.size() - 4);
+    if (DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false))
+      rec_hover_color = SceneObject(ctx, base, dir, "portrait_caption_black.color");
+    if (current_panel_name == "recommendation_panel" && !current_input_scope && current_focus &&
+        U32(base, current_focus + 224) == U32(base, current_focus + 228)) {
+      const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
+      if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt) {
+        std::lock_guard lock(mutex);
+        hint_targets.push_back({current_screen, current_focus, frame_number, *bounds,
+            uint16_t(name == "portrait_rec_previous.lbl" ? 0x0004 : 0x0008), 0});
+      }
+    }
+  }
+  uint32_t powerup_hover_color = 0;
   if (powerup_name) { powerup_info_screen = current_screen; powerup_info_frame = frame_number; }
   if (powerup_info_control) {
     const auto dir = U32(base, ObjectBase(base, label) + 36);
     const auto stem = name.substr(0, name.size() - 4);
     const auto index = size_t(name[name.size() - 5] - '0');
-    DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false);
+    if (DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false))
+      powerup_hover_color = SceneObject(ctx, base, dir, "portrait_caption_black.color");
     if (index < powerup_info_targets.size() && geometry.list == current_focus &&
         geometry.frame == frame_number && U32(base, current_focus + 224) == U32(base, current_focus + 228)) {
       auto rows = geometry.rows;
@@ -1416,13 +1555,13 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
         powerup_info_targets[index] = {current_screen, current_focus, frame_number, *bounds, rows[index].center};
     }
   }
-  if (songs && last_device::Current().using_touch &&
-      (name == "shell_arrow_left.lbl" || name == "shell_arrow_rt.lbl")) return;
-  const bool song_tool = songs && current_screen_name == "song_select_screen" && (name == "sorting.lbl" || name == "portrait_search.lbl");
+  if (portrait && (songs || ui::PortraitLibraryTransition(DrawScreenName())) &&
+      last_device::Current().using_touch && (name == "shell_arrow_left.lbl" || name == "shell_arrow_rt.lbl")) return;
+  const bool song_tool = songs && DrawScreenName() == "song_select_screen" && (name == "sorting.lbl" || name == "portrait_search.lbl");
   const int song_tab = songs ? LibraryHeaderForLabel(name) : -1;
   if (song_tab >= 0 && !SceneObject(ctx, base, U32(base, ObjectBase(base, label) + 36),
                                    "portrait_songs.color")) return;
-  if (song_tab >= 0 && song_tab != (PortraitStoreActive() ? 1 : 0)) return;
+  if (song_tab >= 0 && song_tab != (recommendations ? 3 : messages ? 2 : PortraitStoreActive() ? 1 : 0)) return;
   if (song_tool) {
     const auto dir = U32(base, ObjectBase(base, label) + 36);
     const std::string stem = name == "sorting.lbl" ? "portrait_sort" : "portrait_search";
@@ -1437,16 +1576,16 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
     }
   }
   const bool title = portrait && name == "header.lbl" &&
-      ui::PortraitSplashScreen(current_screen_name, current_panel_name, current_panel_scene);
-  const bool success = portrait && current_screen_name.rfind("cal_", 0) == 0 &&
+      ui::PortraitSplashScreen(DrawScreenName(), current_panel_name, current_panel_scene);
+  const bool success = portrait && DrawScreenName().rfind("cal_", 0) == 0 &&
       CalibrationToken(base, label) == "lag_success";
   const auto token = portrait ? CalibrationToken(base, label) : std::string_view{};
-  const bool instruction = portrait && current_screen_name.rfind("cal_", 0) == 0 &&
+  const bool instruction = portrait && DrawScreenName().rfind("cal_", 0) == 0 &&
       (token == "cal_audio_desc_pad" || token == "cal_video_desc_pad");
-  const bool powerup_description = portrait && current_screen_name == "powerup_select_screen" &&
+  const bool powerup_description = portrait && DrawScreenName() == "powerup_select_screen" &&
       name == "powerup_desc.lbl";
   std::optional<float> calibration_z;
-  if (portrait && current_screen_name.rfind("cal_", 0) == 0) {
+  if (portrait && DrawScreenName().rfind("cal_", 0) == 0) {
     for (const auto& [label_name, anchor] : {
         std::pair{"audio_title.lbl", 117.f}, {"video_title.lbl", 117.f},
         {"cal_instructions.lbl", -128.f}, {"cal_reps.lbl", -105.f},
@@ -1460,7 +1599,15 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
       [label](const auto& e) { return e.label == label; }) : std::vector<InlineHelpEntry>::const_iterator{};
   const bool action = footer && entry != footer->entries.end() &&
       !(songs && ObjectName(base, ObjectBase(base, footer->owner)) == "pop_up_help.ihp");
-  if (!title && !success && !instruction && !powerup_description && !powerup_name && !powerup_info_control && !calibration_z && !action && !song_tool && song_tab < 0) {
+  if (!title && !success && !instruction && !powerup_description && !powerup_name && !powerup_info_control && !rec_navigation && !calibration_z && !action && !song_tool && song_tab < 0) {
+    const auto field = messages && drawing
+        ? ObjectName(base, ObjectBase(base, drawing->widget)) : std::string{};
+    if (messages && drawing && drawing->row && !drawing->suppress &&
+        U32(base, drawing->row + 24) == 1 && (field == "subject_line" || field == "new")) {
+      DrawBlackMenuCaption(ctx, base, label,
+          SceneObject(ctx, base, drawing->resource, "portrait_caption_black.color"));
+      return;
+    }
     DrawMenuHintLabel(ctx, base, label); return;
   }
   if (base[label + 178])
@@ -1481,6 +1628,17 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   rex::ScopeGuard restore([&] { std::memcpy(base + world, prior.data(), prior.size()); });
   float x = F32(base, world + 48), z = F32(base, world + 56);
   const auto portrait_draw_fit = hooks::PortraitDrawFit();
+  if (rec_navigation) {
+    const auto layout = ui::PortraitRecommendations(ui::screen::CurrentMenuConfiguration().portrait_aspect);
+    x = portrait_draw_fit.X((name == "portrait_rec_next.lbl" ? 1.f : -1.f) * layout.NavigationX());
+    z = portrait_draw_fit.Z(layout.carousel_z);
+    const float scale = CalibrationTextFit(std::abs(F32(base, world)) * visible_width,
+        std::abs(F32(base, world + 40)) * visible_height,
+        (layout.navigation_size - 6) * portrait_draw_fit.scale, 20 * portrait_draw_fit.scale);
+    for (uint32_t row = 0; row < 3; ++row)
+      for (uint32_t column = 0; column < 3; ++column)
+        Float(base, world + row * 16 + column * 4, F32(base, world + row * 16 + column * 4) * scale);
+  }
   if (song_tool || song_tab >= 0) {
     const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
     const auto layout = ui::PortraitSongs(aspect);
@@ -1491,8 +1649,10 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
       x = fit.X((name == "sorting.lbl" ? -1.f : 1.f) * (layout.width / 4 + 2));
       z = fit.Z(layout.tools_z);
     } else {
-      x = fit.X(0);
-      z = fit.Z(layout.tabs_z);
+      // The shared background panel draws the marquee outside the content's
+      // safe-area transform. Keep its title at that same screen-space anchor.
+      x = 0;
+      z = layout.tabs_z;
       available = layout.width - 76; desired_height = 17;
     }
     const float scale = std::min(available * fit.scale / std::max(visible_width, 1.f),
@@ -1504,7 +1664,7 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (calibration_z) { x = portrait_draw_fit.X(0); z = portrait_draw_fit.Z(*calibration_z); }
   if (title) {
     x = portrait_draw_fit.X(0);
-    z = portrait_draw_fit.Z(current_screen_name == "powerup_select_screen"
+    z = portrait_draw_fit.Z(DrawScreenName() == "powerup_select_screen"
         ? ui::PortraitPowerups(ui::screen::CurrentMenuConfiguration().portrait_aspect).title_z
         : ui::kPortraitTitleCenter);
   }
@@ -1557,12 +1717,9 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
       const auto owner_world = rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, owner_transform);
       x = F32(base, owner_world + 48); z = F32(base, owner_world + 56);
     } else {
-      const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
       const auto index = footer->index + size_t(entry - footer->entries.begin());
       const bool song_footer = SceneObject(ctx, base, dir, "portrait_songs.color") != 0;
-      const auto slot = song_footer
-          ? ui::PortraitSongsFooter(aspect, index, footer->count)
-          : ui::PortraitFooterAction(aspect, index, footer->count);
+      const auto slot = PortraitFooterSlot(ctx, base, dir, index, footer->count);
       x = portrait_draw_fit.X(slot.x); z = portrait_draw_fit.Z(slot.z);
       if (song_footer) {
         const float scale = std::min(1.f, slot.width * .92f * portrait_draw_fit.scale /
@@ -1575,6 +1732,10 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   }
   // UILabel's alignment includes font bearings and mixed icon baselines. Center
   // its measured rectangle through the live basis, including multiline text.
+  if (song_tool || song_tab >= 0 || rec_navigation || action) {
+    x += drawing_panel_translation.x;
+    z += drawing_panel_translation.y;
+  }
   float cx = F32(base, label + 144) + width / 2;
   float cz = F32(base, label + 148) + height / 2;
   // Padding, font bearings and unused icon styles are not visible text. Use
@@ -1588,13 +1749,16 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (song_tab >= 0 && menu_available && !current_input_scope)
     if (const auto bounds = ProjectLabel(ctx, base, label))
       header_geometry[song_tab] = {current_screen, current_focus, frame_number, *bounds};
-  DrawMenuHintLabel(ctx, base, label);
+  if (rec_hover_color) DrawBlackMenuCaption(ctx, base, label, rec_hover_color);
+  else if (powerup_hover_color) DrawBlackMenuCaption(ctx, base, label, powerup_hover_color);
+  else DrawMenuHintLabel(ctx, base, label);
 }
 
 void CaptureHeader(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (settings::InterfacePortraitEnabled() &&
-      (current_screen_name == "song_select_screen" || PortraitStoreActive())) return;
-  if (!menu_available || current_input_scope || LibraryHeaderForScreen(current_screen_name) < 0) return;
+      (DrawScreenName() == "song_select_screen" || DrawScreenName() == "inbox_screen" ||
+       DrawScreenName() == "recommendation_screen" || PortraitStoreActive())) return;
+  if (!menu_available || current_input_scope || LibraryHeaderForScreen(DrawScreenName()) < 0) return;
   const int index = LibraryHeaderForLabel(ObjectName(base, ObjectBase(base, label)));
   if (index < 0) return;
   if (const auto bounds = ProjectLabel(ctx, base, label))
@@ -1622,7 +1786,9 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
       if (entry == entries.end()) return;
       const auto index = size_t(entry - entries.begin());
       const auto placement = PortraitMenuHintPlacement(ctx, base, owner, *entry, index, entries.size());
-      name = std::string(ui::PortraitFooterSurface(placement.index, placement.count)) + ".mesh";
+      name = std::string(RecommendationFooter(ctx, base, dir)
+          ? ui::PortraitRecommendationFooterSurface(placement.index)
+          : ui::PortraitFooterSurface(placement.index, placement.count)) + ".mesh";
     }
     const auto mesh = !name.empty() && dir ? SceneMesh(ctx, base, dir, name.c_str()) : 0;
     if (mesh) {
@@ -1646,7 +1812,7 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
     if (rejected[label] != current_screen) {
       rejected[label] = current_screen;
       REXLOG_INFO("native_mouse: legend has no bounds screen={} action={} label={:08X} rect={},{},{},{} camera={:08X}",
-                  current_screen_name, action, label, F32(base, label + 144),
+                  DrawScreenName(), action, label, F32(base, label + 144),
                   F32(base, label + 148), F32(base, label + 152), F32(base, label + 156),
                   U32(base, 0x8284A108));
     }
@@ -1662,7 +1828,7 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
   if (traced[label] != current_screen) {
     traced[label] = current_screen;
     REXLOG_INFO("native_mouse: legend target screen={} action={} label={:08X} bounds={:.4f},{:.4f},{:.4f},{:.4f}",
-                current_screen_name, action, label, bounds->left, bounds->top, bounds->right, bounds->bottom);
+                DrawScreenName(), action, label, bounds->left, bounds->top, bounds->right, bounds->bottom);
   }
 }
 void CaptureDialogPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
@@ -1694,7 +1860,7 @@ void CaptureDialogPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
 void UpdateCalibrationSideLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   // These two UILabels flank the metronome. Their scene font is redirected to
   // inline_help_icons.milo; its U+0081 glyph is the live Interface Confirm tile.
-  if (current_screen_name.rfind("cal_", 0) != 0) return;
+  if (DrawScreenName().rfind("cal_", 0) != 0) return;
   const auto name = ObjectName(base, ObjectBase(base, label));
   if (name != "green02.lbl" && name != "green1.lbl") return;
   thread_local uint64_t previous_generation = 0;
@@ -1770,10 +1936,11 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   const bool focused = list == current_focus && menu_available && belongs;
   const bool touch = last_device::Current().using_touch;
   const bool portrait_songs = settings::InterfacePortraitEnabled() &&
-      (current_screen_name == "song_select_screen" || PortraitStoreActive());
-  const bool portrait_powerups = settings::InterfacePortraitEnabled() && current_screen_name == "powerup_select_screen";
+      (DrawScreenName() == "song_select_screen" || DrawScreenName() == "inbox_screen" ||
+       DrawScreenName() == "recommendation_screen" || PortraitStoreActive());
+  const bool portrait_powerups = settings::InterfacePortraitEnabled() && DrawScreenName() == "powerup_select_screen";
   if (ctx.r9.u32 || !list || (!focused && !touch && !portrait_songs && !portrait_powerups)) {
-    __imp__sub_824E5020(ctx, base); return;
+    DrawNativeList(ctx, base); return;
   }
   DrawCapture capture;
   capture.resource = ctx.r3.u32;
@@ -1812,7 +1979,7 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
     capture.suppress = true;
   }
   auto previous = drawing; drawing = &capture;
-  __imp__sub_824E5020(ctx, base);
+  DrawNativeList(ctx, base);
   drawing = previous;
   if (!focused) return;
   auto& result = capture.result;
@@ -1874,13 +2041,17 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
     }
     result.horizontal = max_x - min_x > max_y - min_y;
   }
+  // A single visible card still belongs to a horizontal carousel; wheel
+  // remapping cannot infer its axis from two row centers in this layout.
+  if (settings::InterfacePortraitEnabled() && DrawScreenName() == "recommendation_screen" &&
+      ObjectName(base, list_header) == "recommendations.lst") result.horizontal = true;
   geometry = std::move(result);
   geometry.selected = capture.selected;
   if (capture.selected >= 0) last_selected_row = capture.selected;
   PublishRail(MeasureRail(ctx, base, list, geometry));
   // Library and RhythmVerse lists share the viewport route, including shortcuts without
   // a sibling rail. Publish only the focused list from this completed draw.
-  const bool touch_list = MenuTouchScrollEligible(current_screen_name, dialog_scope, geometry.horizontal);
+  const bool touch_list = MenuTouchScrollEligible(DrawScreenName(), dialog_scope, geometry.horizontal);
   TouchTarget target;
   if (touch_list && EnsureRailMap(ctx, base, list) && rail_map.max_first > 0) {
     const float pitch = RailPitch(geometry.rows);
@@ -1903,9 +2074,32 @@ std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable) {
   const auto name = ObjectName(base, object);
   const bool store_panel = PortraitStoreActive() &&
       (name == "StoreMainPanel" || name == "StoreMenuPanel" || name == "songselect" || name == "storedetails" || name == "error_general");
-  if (!store_panel && (!current_panel_dir || object != ObjectBase(base, current_panel_dir))) return {};
+  const bool transition_panel = ui::PortraitLibraryTransition(current_screen_name) &&
+      !ui::PortraitLibraryPanelScreen(name).empty();
+  if (!store_panel && !transition_panel &&
+      (!current_panel_dir || object != ObjectBase(base, current_panel_dir))) return {};
   return ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width / 480;
 }
+
+void DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t drawable,
+                       void (*draw)(PPCContext&, uint8_t*)) {
+  const auto previous = drawing_panel_screen;
+  const auto previous_translation = drawing_panel_translation;
+  if (settings::InterfacePortraitEnabled() && ui::PortraitLibraryTransition(current_screen_name)) {
+    const auto dir = ObjectBase(base, drawable);
+    const auto name = ObjectName(base, dir);
+    drawing_panel_screen = ui::PortraitLibraryPanelScreen(name,
+        name == "songselect" && !SceneObject(ctx, base, dir, "portrait_tab_songs.lbl"));
+    drawing_panel_translation = {};
+  }
+  rex::ScopeGuard restore([&] {
+    drawing_panel_screen = previous;
+    drawing_panel_translation = previous_translation;
+  });
+  draw(ctx, base);
+}
+
+MenuPoint PortraitPanelTranslation() { return drawing_panel_translation; }
 
 } // namespace rb_blitz::input
 

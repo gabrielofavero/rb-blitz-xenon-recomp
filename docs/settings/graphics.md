@@ -44,6 +44,16 @@ Start, loading and the main menu share one logo scale. The main-menu logo sits
 above the first row; the available header height caps the shared size on wider
 portrait screens so all six menu entries retain their spacing.
 
+Portrait settings confirmations size the message independently of their native
+action list. Buttons span 84% of the portrait canvas width, with separate normal,
+pressed/selected and border meshes and gaps between rows. The private list retains
+the popup provider's field name and the existing touch-release activation path.
+Main-menu and pause settings share this layout, including restart, restore and
+display confirmations. The default action, entrance animation and full-screen
+shade retain their existing behavior. This scene authoring is shared across
+platforms and graphics backends; device appearance and touch acceptance still
+require runtime validation.
+
 Portrait calibration reserves separate vertical bands for measured instruction
 text, the meter, progress, hit count, status, and the current offset. The
 metronome is 20% smaller; long localized instructions shrink proportionally

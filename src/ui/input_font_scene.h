@@ -57,6 +57,14 @@ inline constexpr char kAutosaveRecord[] = "ui/startup/gen/autosave_warning.milo_
 // Fit native confirmation/error content to portrait; preserve its shade and input.
 bool PreparePortraitPrompt(const std::vector<uint8_t>& source, float aspect,
                            std::vector<uint8_t>* scene, std::string* error);
+// Settings confirmations use full-width native buttons independently of message sizing.
+bool PreparePortraitSettingsPrompt(const std::vector<uint8_t>& source, float aspect,
+                                   std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitPromptList(const std::vector<uint8_t>& source,
+                               const std::vector<uint8_t>& button_source,
+                               std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kPortraitPromptListRecord[] =
+    "ui/resource/lists/gen/portrait_prompt.milo_xbox";
 // Crop the settings backdrop, fit its native list/title and retain one Back
 // action above a native button mesh. Both menu and pause settings use this copy.
 bool PreparePortraitSettings(const std::vector<uint8_t>& source,
@@ -114,6 +122,26 @@ bool PreparePortraitStoreList(const std::vector<uint8_t>& source,
                               const std::vector<uint8_t>& button_source, std::string_view kind,
                               std::vector<uint8_t>* scene, std::string* error);
 inline constexpr char kPortraitStoreDialogRecord[] = "ui/error/gen/portrait_store_dialog.milo_xbox";
+// Native message rows retain their provider-selected icons beside the subject.
+bool PreparePortraitMessages(const std::vector<uint8_t>& source,
+                             const std::vector<uint8_t>& button_source, float aspect,
+                             std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitMessagesList(const std::vector<uint8_t>& source,
+                                 const std::vector<uint8_t>& button_source, float aspect,
+                                 std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kMessagesRecord[] = "ui/inbox/gen/inbox.milo_xbox";
+inline constexpr char kPortraitMessagesListRecord[] = "ui/resource/lists/gen/portrait_inbox.milo_xbox";
+bool PreparePortraitRecommendations(const std::vector<uint8_t>& source,
+                                    const std::vector<uint8_t>& button_source, float aspect,
+                                    std::vector<uint8_t>* scene, std::string* error);
+// Preserve the native album widget/material callback and compact leaderboard fields.
+bool PreparePortraitRecommendationList(const std::vector<uint8_t>& source, float aspect,
+                                       std::vector<uint8_t>* scene, std::string* error);
+bool PreparePortraitRecommendationLeaderboard(const std::vector<uint8_t>& source, float aspect,
+                                              std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kRecommendationsRecord[] = "ui/recommendations/gen/recommendations.milo_xbox";
+inline constexpr char kPortraitRecommendationListRecord[] = "ui/resource/lists/gen/portrait_recommendations.milo_xbox";
+inline constexpr char kPortraitRecommendationLeaderboardRecord[] = "ui/resource/lists/gen/portrait_rec_leaders.milo_xbox";
 bool PreparePortraitPowerups(const std::vector<uint8_t>& source,
                             const std::vector<uint8_t>& button_source, float aspect,
                             std::vector<uint8_t>* scene, std::string* error);

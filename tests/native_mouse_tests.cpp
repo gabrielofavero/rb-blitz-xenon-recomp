@@ -241,8 +241,8 @@ int main() {
                            "rbbz_library_panel", "error_popup_panel"})
     CHECK_TRUE(DialogScopeFor(panel, "") == MenuDialogScope::kPanel);
 
-  BeginCase("song searches and RhythmVerse browsing and results share vertical touch scrolling");
-  for (const auto screen : {"song_select_screen", "store_menu_screen", "store_browser_screen"}) {
+  BeginCase("song searches, RhythmVerse and Messages share vertical touch scrolling");
+  for (const auto screen : {"song_select_screen", "store_menu_screen", "store_browser_screen", "inbox_screen"}) {
     CHECK_TRUE(MenuTouchScrollEligible(screen, MenuDialogScope::kNone, false));
     CHECK_FALSE(MenuTouchScrollEligible(screen, MenuDialogScope::kNone, true));
     CHECK_TRUE(MenuTouchScrollEligible(screen, MenuDialogScope::kShortcuts, false));
@@ -251,7 +251,7 @@ int main() {
       CHECK_FALSE(MenuTouchScrollEligible(screen, DialogScopeFor(panel, ""), false));
   }
   for (const auto screen : {"", "store_info_screen", "store_details_screen", "splash_screen",
-                            "game_screen", "settings_screen", "inbox_screen"})
+                            "game_screen", "settings_screen"})
     CHECK_FALSE(MenuTouchScrollEligible(screen, MenuDialogScope::kNone, false));
 
   BeginCase("dialog scope excludes background footer targets");
@@ -383,6 +383,24 @@ int main() {
     CHECK_TRUE(CalibrationFooterCaption(true, "inline_help_back") == "inline_help_back");
     CHECK_EQ(calibration.size(), 3); // Guest navigation retains its complete native action list.
   }
+  BeginCase("recommendation footer keeps Confirm and Back before secondary actions without dropping records");
+  {
+    const std::vector<InlineHelpEntry> actions{{10, 4, 100}, {20, 2, 200}, {30, 5, 300}, {40, 1, 400}, {50, 3, 500}};
+    for (unsigned mask = 1; mask < 32; ++mask) {
+      std::vector<InlineHelpEntry> visible;
+      for (size_t i = 0; i < actions.size(); ++i) if (mask & (1u << i)) visible.push_back(actions[i]);
+      const auto ordered = RecommendationFooterEntries(visible);
+      CHECK_EQ(ordered.size(), visible.size());
+      for (const auto& entry : visible)
+        CHECK_EQ(std::count_if(ordered.begin(), ordered.end(), [&](const auto& n) {
+          return n.label == entry.label && n.action == entry.action && n.record == entry.record;
+        }), 1);
+      if (mask & 8) CHECK_EQ(ordered[0].action, 1u);
+      if (mask & 2) CHECK_EQ(ordered[(mask & 8) ? 1 : 0].action, 2u);
+    }
+    CHECK_EQ(actions[0].label, 10u);
+  }
+
   constexpr uint32_t footer = 0x40001000, actions = 0x40002000, labels = 0x40003000;
   std::unordered_map<uint32_t, uint32_t> words{
       {footer + 80, actions}, {footer + 84, actions + 4 * 28},
@@ -497,6 +515,19 @@ int main() {
   CHECK_EQ(LibraryHeaderForLabel("main_inbox.lbl"), 2);
   CHECK_EQ(LibraryHeaderForLabel("main_Home.lbl"), 3);
   CHECK_EQ(LibraryHeaderForLabel("main_new_msg.lbl"), -1);
+
+  BeginCase("portrait row surfaces follow provider widgets rather than unnamed label clones");
+  CHECK_TRUE(PortraitListRowField("store_menu_screen", "filter"));
+  CHECK_FALSE(PortraitListRowField("store_menu_screen", "count"));
+  for (const auto field : {"song", "album", "group", "group_center"})
+    CHECK_TRUE(PortraitListRowField("store_browser_screen", field));
+  CHECK_FALSE(PortraitListRowField("store_browser_screen", "purchased"));
+  CHECK_TRUE(PortraitListRowField("store_info_screen", "list"));
+  CHECK_TRUE(PortraitListRowField("inbox_screen", "subject_line"));
+  CHECK_TRUE(PortraitListRowField("inbox_screen", "header"));
+  CHECK_FALSE(PortraitListRowField("inbox_screen", "new"));
+  CHECK_FALSE(PortraitListRowField("store_menu_screen", ""));
+  CHECK_FALSE(PortraitListRowField("powerup_select_screen", "name"));
 
   BeginCase("preset arrows dispatch their matching D-pad directions only on their art");
   const MenuBounds left_arrow{.22f, .25f, .24f, .31f};

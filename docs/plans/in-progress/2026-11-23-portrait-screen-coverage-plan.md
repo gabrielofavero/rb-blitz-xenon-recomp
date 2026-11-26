@@ -2,9 +2,10 @@
 
 Status: planning, 2026-11-23. Static inventory complete; remaining adaptation and visual acceptance are pending.
 
-The main gaps are the **results flow, pause menu, store browsing/details, Messages,
-recommendations, leaderboards, and tutorials**. My Songs, powerup selection,
-settings, calibration, and credits already have portrait work. Adapting a library
+The main implementation gaps are the **results flow, pause menu, store browsing/details,
+leaderboards, challenge dialogs and tutorials**. My Songs, powerup selection,
+settings, calibration, credits, Messages and Recommended now have portrait work;
+Messages and Recommended visual acceptance remains pending as of 2026-11-25. Adapting a library
 tab or a shared popup does not adapt the screen behind it.
 
 ## Scope and status
@@ -48,8 +49,9 @@ pages add surfaces beyond that count. A declared screen is not proof it is reach
 | Store/RhythmVerse landing and browser — `store_menu_screen`, `store_browser_screen` | **Partial; implementation in progress**. Workspace changes add native portrait store scenes, list resources, tab arrows, song card, and footer. Build/behavior acceptance is not established by this audit. | Categories, catalogue/search lists, filters, paging, installed states, loading/empty/offline/error views. |
 | Store offer details — `store_info_screen`, `store_info_unavailable_screen` | **Partial; implementation in progress**. Workspace changes add portrait offer metadata/actions and a private download/management dialog. | Artwork, metadata, actions, unavailable offers, installed/delete states, and return navigation; verify which variants inherit the new scenes. |
 | Store preparation/enumeration — `prep_offer_for_store_screen`, `store_info_enum_screen` | **Transition** within the unfinished store flow. | Check fetching/enumeration/wait/failure visuals and the destination after cancellation. |
-| Messages/update feed — `inbox_screen` | **Missing**. Feed/provider work exists independently of portrait. | List, selected message/body/actions, unread state, empty/error/loading states, and long content. |
-| Recommended songs — `recommendation_screen`; challenge-request panel | **Missing**. Recommendations and challenge panels have no dedicated portrait layout found. | Cards, actions, empty/offline states, and challenge confirmation. Determine which legacy actions remain reachable. |
+| Messages/update feed — `inbox_screen` | **Adapted; UI acceptance pending (2026-11-25)**. Native three-row scrolling feed, row icons, separate reading panel, header arrows and context-sensitive footer. See [Messages portrait presentation](../../engine/messages.md#10-portrait-presentation-2026-11-25). | In-game list/reading layout, unread state, empty/error/loading states, long content, touch/wheel/controller scrolling and update actions. |
+| Recommended songs — `recommendation_screen` | **Adapted; UI acceptance pending (2026-11-25)**. One-card album carousel, category icon, readable metadata/reason, compact native leaderboard, header arrows and two-row action footer. See [portrait Recommended page](../../engine/input-flow.md#portrait-recommended-page). | Live appearance, empty/loading/offline states, carousel boundaries, tap/wheel/controller navigation, preview and launch/store/leaderboard actions. |
+| Challenge-request panel | **Missing**. The Recommendations handler retains its native challenge route; its separate confirmation scene has no dedicated portrait adaptation. | Connected challenge creation, confirmation, cancel/failure states and return focus. |
 | Career leaderboard — `career_leaderboard_screen`; song leaderboard panel | **Missing**. Song leaderboard is also embedded in other flows. | Offline notice, tabs/rows, personal rank, and embedded board placement. Online service restoration is outside scope. |
 
 ### Song preparation, gameplay, pause, and results

@@ -15,6 +15,8 @@ inline constexpr std::array<float, 4> kMenuButtonHover{1, .855f, .086f, 1};
 inline constexpr float kFooterOpacity = .8f;
 // Midpoint of the marquee's two rows of lights in the guest scene.
 inline constexpr float kPortraitTitleCenter = 164.6512f;
+// Hub marquee rails settle at 204.37975 and 169.79509 in the background panel.
+inline constexpr float kPortraitHubTitleCenter = (204.37975f + 169.79509f) / 2;
 inline constexpr float kPortraitCalibrationInstructionsZ = 78;
 inline constexpr float kPortraitCalibrationInstructionsHeight = 58;
 inline constexpr float kPortraitCalibrationMeterZ = -16;
@@ -83,7 +85,7 @@ inline constexpr float kPortraitSongArrowTargetSize = 40;
 
 struct PortraitSongsLayout {
   float width, list_scale;
-  float tabs_z = 188, tools_z = 133, list_z = 92;
+  float tabs_z = kPortraitHubTitleCenter, tools_z = 133, list_z = 92;
   float card_z = -158, card_height = 52, footer_z = -201;
   int rows = 7;
 };
@@ -97,11 +99,42 @@ inline PortraitSongsLayout PortraitSongs(float aspect) {
   return layout;
 }
 
+struct PortraitMessagesLayout {
+  float width;
+  float tabs_z = kPortraitHubTitleCenter, list_z = 130, row_step = 48, row_height = 42;
+  float icon_size = 28, icon_inset = 22, text_inset = 44;
+  float detail_top = -10, detail_bottom = -179;
+  float subject_top = -19, subject_height = 32;
+  float body_top = -57, body_height = 112;
+  int rows = 3;
+};
+
+inline PortraitMessagesLayout PortraitMessages(float aspect) {
+  return {PortraitSongs(aspect).width};
+}
+
+struct PortraitRecommendationsLayout {
+  float width, art_size, navigation_size;
+  float tabs_z = kPortraitHubTitleCenter, carousel_z = 104;
+  float title_top = 20, title_height = 30;
+  float artist_top = -16, artist_height = 18, info_top = -38, info_height = 14;
+  float reason_top = -59, reason_height = 43;
+  float leaderboard_title_top = -114, leaderboard_z = -137, leaderboard_step = 17;
+  float TypeZ() const { return carousel_z - art_size / 2 - 14; }
+  float NavigationX() const { return (width - navigation_size) / 2; }
+};
+
+inline PortraitRecommendationsLayout PortraitRecommendations(float aspect) {
+  const float width = PortraitSongs(aspect).width;
+  return {width, std::min(width * .48f, 112.f), std::min(width * .21f, 36.f)};
+}
+
 struct PortraitPowerupsLayout {
   float width, category_scale, choices_scale;
   float title_z = 188;
   float card_z = 128, card_height = 56;
   float categories_z = 44, choices_z = -45;
+  float currency_z = -150, currency_height = 28;
   float name_z = 100, description_z = 35;
   float details_z = 50, details_height = 180, description_height = 100;
   int choices = 3;
@@ -160,6 +193,22 @@ inline PortraitCalibrationAction PortraitSongsFooter(float aspect, size_t index,
           layout.footer_z, width, 27};
 }
 
+inline PortraitCalibrationAction PortraitRecommendationsFooter(float aspect, size_t index, size_t count) {
+  const float width = PortraitRecommendations(aspect).width;
+  const bool primary = index < 2;
+  const size_t columns = primary ? std::min(count, size_t{2}) : count - 2;
+  const size_t column = primary ? index : index - 2;
+  const float cell = (width - 5 * (columns - 1)) / columns;
+  return {(float(column) - float(columns - 1) / 2) * (cell + 5),
+          primary ? -211.f : -179.f, cell, primary ? 29.f : 25.f};
+}
+
+inline const char* PortraitRecommendationFooterSurface(size_t index) {
+  constexpr std::array<const char*, 5> names{"portrait_rec_action_0", "portrait_rec_action_1",
+      "portrait_rec_action_2", "portrait_rec_action_3", "portrait_rec_action_4"};
+  return index < names.size() ? names[index] : "";
+}
+
 // Keep the native calibration footer's changing actions in separate touch areas.
 inline PortraitCalibrationAction PortraitCalibrationFooter(float aspect, size_t index) {
   const float width = (364.5f * PortraitSplash(aspect).list_scale - 10) / 2;
@@ -216,11 +265,36 @@ inline bool PortraitStoreScreen(std::string_view screen) {
   return screen == "store_menu_screen" || screen == "store_browser_screen" || screen == "store_info_screen";
 }
 
+inline constexpr std::array<std::string_view, 5> kPortraitLibraryScreens{
+    "song_select_screen", "store_menu_screen", "store_browser_screen",
+    "inbox_screen", "recommendation_screen"};
+
+inline bool PortraitLibraryTransition(std::string_view screen) {
+  if (!screen.starts_with("trans_")) return false;
+  screen.remove_prefix(6);
+  for (const auto source : kPortraitLibraryScreens) {
+    if (!screen.starts_with(source) || screen.size() <= source.size() || screen[source.size()] != '_') continue;
+    const auto destination = screen.substr(source.size() + 1);
+    return std::find(kPortraitLibraryScreens.begin(), kPortraitLibraryScreens.end(), destination) !=
+        kPortraitLibraryScreens.end();
+  }
+  return false;
+}
+
+inline std::string_view PortraitLibraryPanelScreen(std::string_view panel, bool store_browser = false) {
+  if (panel == "songselect") return store_browser ? "store_browser_screen" : "song_select_screen";
+  if (panel == "StoreMainPanel" || panel == "StoreMenuPanel") return "store_menu_screen";
+  if (panel == "storedetails") return "store_browser_screen";
+  if (panel == "InboxPanel") return "inbox_screen";
+  if (panel == "RecommendationsPanel") return "recommendation_screen";
+  return {};
+}
+
 // Panels with authored portrait content fill the surface, including modal
 // prompts. Other menus keep their existing fitted presentation.
 inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel,
                                 std::string_view scene = {}) {
-  return PortraitStoreScreen(screen) ||
+  return PortraitStoreScreen(screen) || PortraitLibraryTransition(screen) ||
          (screen == "splash_screen" && panel == "splash_panel") ||
          (screen == "autosave_warning_screen" && panel == "autosave_warning_panel") ||
          (screen == "server_connect_screen" && panel == "server_connect_panel") ||
@@ -230,6 +304,8 @@ inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel
          panel == "rbbz_library_panel" ||
          panel == "av_options_panel" || panel == "credits_panel" ||
          (screen == "song_select_screen" && panel == "song_select_panel") ||
+         (screen == "inbox_screen" && panel == "inbox_panel") ||
+         (screen == "recommendation_screen" && panel == "recommendation_panel") ||
          (screen == "powerup_select_screen" && panel == "powerup_select_panel") ||
          PortraitSettingsScene(scene) ||
          PortraitControlsScene(scene) ||

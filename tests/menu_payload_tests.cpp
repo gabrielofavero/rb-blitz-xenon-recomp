@@ -2018,6 +2018,7 @@ void TestPortraitSplash() {
     bool measured = false;
     int native_enters = 0;
     std::map<std::string, float> z;
+    std::map<std::string, std::array<float, 3>> scales;
     const auto eval = [&](auto&& self, const Node& n) -> float {
       if (n.tag == dtb::kInt) return float(int32_t(n.scalar));
       if (n.tag == dtb::kFloat) return std::bit_cast<float>(n.scalar);
@@ -2031,17 +2032,208 @@ void TestPortraitSplash() {
       if (action == "set_height_from_text") { measured = true; return 0; }
       if (action == "get") { CHECK_TRUE(measured); return text_height; }
       if (action == "set_local_pos") z[op] = self(self, n.kids[4]);
+      if (action == "set_local_scale")
+        for (size_t axis = 0; axis < 3; ++axis)
+          scales[op][axis] = self(self, n.kids[axis + 2]);
       return 0;
     };
     const auto* enter = Method(autosave, "autosave_warning_panel", "enter");
     for (size_t i = 1; i < enter->kids.size(); ++i) eval(eval, enter->kids[i]);
     CHECK_EQ(native_enters, 1);
-    const float top = z.at("wedges.grp") + 28;
+    const auto& icon_scale = scales.at("wedges.grp");
+    CHECK_TRUE(icon_scale[0] > 0 && icon_scale[0] < 1);
+    CHECK_TRUE(icon_scale[0] == icon_scale[1] && icon_scale[1] == icon_scale[2]);
+    CHECK_TRUE(icon_scale == scales.at("spinner.trans"));
+    const float radius = 28 * icon_scale[0];
+    const float top = z.at("wedges.grp") + radius;
     const float bottom = z.at("autosave.lbl") - text_height;
     CHECK_TRUE(std::abs(top + bottom) < .001f);
     CHECK_TRUE(top < 240 && bottom > -240);
-    CHECK_TRUE(z.at("wedges.grp") - 28 > z.at("autosave.lbl"));
+    CHECK_TRUE(std::abs(z.at("wedges.grp") - radius - z.at("autosave.lbl") - 27) < .001f);
     CHECK_TRUE(z.at("wedges.grp") == z.at("spinner.trans"));
+  }
+
+  BeginCase("portrait store layout refills widgets after changing the visible row count");
+  for (const bool info : {false, true}) {
+    const auto method = [](const char* name) {
+      return A({S(name), C({S("native_bind")})});
+    };
+    std::vector<Node> store = info ? std::vector<Node>{
+        C({S("new"), S("UIPanel"), S("store_info_panel"), method("refresh_panel")})}
+      : std::vector<Node>{
+        C({S("new"), S("StoreMenuPanel"), S("store_menu_panel"),
+            method("enter"), method("new_provider"), method("exit")}),
+        C({S("new"), S("HeldButtonPanel"), S("store_browser_panel"),
+            method("enter"), method("refresh_list"), method("exit")}),
+        C({S("new"), S("HeldButtonPanel"), S("store_details_panel"), method("refresh")})};
+    CHECK_TRUE(rb_blitz::settings::AddPortraitStoreLayout(&store, .5f, info, &why));
+    for (const auto& [panel, callback] : {
+        std::pair{"store_menu_panel", "enter"}, {"store_menu_panel", "new_provider"},
+        {"store_browser_panel", "refresh_list"}, {"store_info_panel", "refresh_panel"}}) {
+      if (info != (std::string_view(panel) == "store_info_panel")) continue;
+      bool populated = true;
+      int native_binds = 0, rebuilt = 0;
+      const auto run = [&](const Node& command) {
+        const auto& kids = command.kids;
+        if (command.tag != dtb::kCommand || kids.empty()) return;
+        if (kids[0].text == "native_bind") { populated = true; ++native_binds; }
+        // UIList::SetNumDisplay recreates empty label elements. Its provider
+        // remains attached, but only a subsequent refresh fills those elements.
+        if (kids.size() == 4 && kids[1].text == "set" && kids[2].text == "display_num") {
+          populated = false; ++rebuilt;
+        }
+        if (kids.size() == 2 && kids[1].text == "refresh") populated = true;
+      };
+      const auto* edited = Method(store, panel, callback);
+      CHECK_TRUE(edited != nullptr);
+      if (edited) for (const auto& command : edited->kids) run(command);
+      CHECK_EQ(native_binds, 1);
+      CHECK_EQ(rebuilt, 1);
+      CHECK_TRUE(populated);
+    }
+  }
+
+  BeginCase("portrait message feed reserves separate icon, subject, reading and footer areas");
+  for (float aspect : {.3f, 402.f / 874, .75f, .9f}) {
+    const auto layout = rb_blitz::ui::PortraitMessages(aspect);
+    CHECK_TRUE(layout.width <= rb_blitz::ui::PortraitSplash(aspect).width);
+    CHECK_TRUE(layout.list_z + layout.row_height / 2 < layout.tabs_z - 20);
+    CHECK_TRUE(layout.list_z - (layout.rows - 1) * layout.row_step - layout.row_height / 2 > layout.detail_top);
+    CHECK_TRUE(layout.icon_inset - layout.icon_size / 2 > 0);
+    CHECK_TRUE(layout.icon_inset + layout.icon_size / 2 < layout.text_inset);
+    CHECK_TRUE(layout.width - layout.text_inset - 16 > 60);
+    CHECK_TRUE(layout.subject_top < layout.detail_top);
+    CHECK_TRUE(layout.subject_top - layout.subject_height > layout.body_top);
+    CHECK_TRUE(layout.body_top - layout.body_height > layout.detail_bottom);
+    CHECK_TRUE(layout.detail_bottom > rb_blitz::ui::PortraitSongsFooter(aspect, 0, 2).z + 15);
+  }
+  BeginCase("portrait Messages preserves native actions and measures new text after provider callbacks");
+  {
+    std::vector<Node> inbox{C({S("new"), S("InboxPanel"), S("inbox_panel"),
+        A({S("enter"), C({S("native_enter")})}),
+        A({S("on_messages_updated"), C({S("native_update")})}),
+        A({S("SCROLL_MSG"), C({S("native_scroll")})}),
+        A({S("exit"), C({S("native_exit")})}),
+        A({S("update_inline_help"), C({S("native_actions")})}),
+        A({S("BUTTON_DOWN_MSG"), C({S("native_buttons")})})})};
+    const auto before = inbox;
+    CHECK_TRUE(rb_blitz::settings::AddPortraitMessagesLayout(&inbox, .5f, &why));
+    for (const char* action : {"update_inline_help", "BUTTON_DOWN_MSG"})
+      CHECK_TRUE(dtb::SerializeNodes(Method(inbox, "inbox_panel", action)->kids) ==
+                 dtb::SerializeNodes(Method(before, "inbox_panel", action)->kids));
+    for (const char* callback : {"enter", "on_messages_updated", "SCROLL_MSG"}) {
+      bool native_ran = false, subject_measured = false, body_measured = false, filled = true;
+      int resized = 0;
+      for (const auto& command : Method(inbox, "inbox_panel", callback)->kids) {
+        if (command.tag != dtb::kCommand || command.kids.empty()) continue;
+        const auto& kids = command.kids;
+        if (kids[0].text.starts_with("native_")) { native_ran = true; filled = true; }
+        if (kids.size() == 4 && kids[1].text == "set" && kids[2].text == "display_num") {
+          CHECK_FALSE(native_ran); filled = false; ++resized;
+        }
+        if (kids.size() == 2 && kids[1].text == "refresh") filled = true;
+        if (kids.size() == 2 && kids[1].text == "set_height_from_text") {
+          CHECK_TRUE(native_ran);
+          subject_measured |= kids[0].text == "subject.lbl";
+          body_measured |= kids[0].text == "message.lbl";
+        }
+        CHECK_FALSE(kids.size() > 1 && kids[0].text == "songs.lst" && kids[1].text == "set_selected");
+      }
+      CHECK_EQ(resized, std::string_view(callback) == "enter" ? 1 : 0);
+      CHECK_TRUE(native_ran && subject_measured && body_measured && filled);
+    }
+    auto incompatible = before;
+    incompatible[0].kids.erase(incompatible[0].kids.begin() + 5);
+    const auto original = dtb::Compile(incompatible);
+    CHECK_FALSE(rb_blitz::settings::AddPortraitMessagesLayout(&incompatible, .5f, &why));
+    CHECK_TRUE(dtb::Compile(incompatible) == original);
+  }
+
+  BeginCase("portrait recommendation artwork, navigation, text and five footer actions stay separated");
+  for (float aspect : {.3f, 402.f / 874, .75f, .9f}) {
+    const auto layout = rb_blitz::ui::PortraitRecommendations(aspect);
+    CHECK_TRUE(layout.carousel_z + layout.art_size / 2 < layout.tabs_z - 20);
+    CHECK_TRUE(layout.NavigationX() - layout.navigation_size / 2 > layout.art_size / 2);
+    CHECK_TRUE(layout.TypeZ() + 6 < layout.carousel_z - layout.art_size / 2);
+    CHECK_TRUE(layout.TypeZ() - 8 > layout.title_top);
+    CHECK_TRUE(layout.title_top - layout.title_height > layout.artist_top);
+    CHECK_TRUE(layout.artist_top - layout.artist_height > layout.info_top);
+    CHECK_TRUE(layout.info_top - layout.info_height > layout.reason_top);
+    CHECK_TRUE(layout.reason_top - layout.reason_height > layout.leaderboard_title_top);
+    for (size_t count = 1; count <= 5; ++count) {
+      for (size_t i = 0; i < count; ++i) {
+        const auto a = rb_blitz::ui::PortraitRecommendationsFooter(aspect, i, count);
+        CHECK_TRUE(a.width > 32 && a.height >= 25);
+        CHECK_TRUE(std::abs(a.x) + a.width / 2 <= layout.width / 2 + .001f);
+        CHECK_TRUE(a.z - a.height / 2 > -240);
+        CHECK_TRUE(a.z + a.height / 2 < layout.leaderboard_z - layout.leaderboard_step - 7);
+        for (size_t j = 0; j < i; ++j) {
+          const auto b = rb_blitz::ui::PortraitRecommendationsFooter(aspect, j, count);
+          CHECK_TRUE(std::abs(a.x - b.x) >= (a.width + b.width) / 2 ||
+                     std::abs(a.z - b.z) >= (a.height + b.height) / 2);
+          CHECK_TRUE(std::string_view(rb_blitz::ui::PortraitRecommendationFooterSurface(i)) !=
+                     rb_blitz::ui::PortraitRecommendationFooterSurface(j));
+        }
+      }
+    }
+  }
+  BeginCase("portrait recommendation state follows the native provider without replacing actions or selection");
+  {
+    const auto method = [](const char* name) { return A({S(name), C({S("native_update")})}); };
+    std::vector<Node> roots{C({S("new"), S("RecommendationsPanel"), S("recommendation_panel"),
+        method("enter"), method("exit"), method("update_recommendation_info"),
+        method("update_lb_ui_for_focus_rec"), method("on_mini_leaderboards_updated"),
+        method("on_leaderboard_failed"), method("SELECT_MSG"), method("BUTTON_DOWN_MSG"), method("SCROLL_MSG")})};
+    const auto before = roots;
+    CHECK_TRUE(rb_blitz::settings::AddPortraitRecommendationsLayout(&roots, .5f, &why));
+    for (const char* action : {"SELECT_MSG", "BUTTON_DOWN_MSG", "SCROLL_MSG"})
+      CHECK_TRUE(dtb::SerializeNodes(Method(roots, "recommendation_panel", action)->kids) ==
+                 dtb::SerializeNodes(Method(before, "recommendation_panel", action)->kids));
+    for (const auto& [count, selected] : {std::pair{0, 0}, {1, 0}, {5, 0}, {5, 2}, {5, 4}}) {
+      std::map<std::string, bool> showing;
+      int native_updates = 0, measured = 0, cleared = 0;
+      std::array<int, 2> position{};
+      const auto eval = [&](auto&& self, const Node& n) -> float {
+        if (n.tag == dtb::kInt) return float(int32_t(n.scalar));
+        if (n.tag != dtb::kCommand || n.kids.empty()) return 0;
+        const auto& k = n.kids; const auto& op = k[0].text;
+        if (op == "native_update") { ++native_updates; return 0; }
+        if (op == "!") return !self(self, k[1]);
+        if (op == "&&") return self(self, k[1]) && self(self, k[2]);
+        if (op == ">") return self(self, k[1]) > self(self, k[2]);
+        if (op == "<") return self(self, k[1]) < self(self, k[2]);
+        if (op == "+") return self(self, k[1]) + self(self, k[2]);
+        if (op == "-") return self(self, k[1]) - self(self, k[2]);
+        if (op == "unless") {
+          if (!self(self, k[1])) for (size_t i = 2; i < k.size(); ++i) self(self, k[i]);
+          return 0;
+        }
+        if (k[1].text == "num_data") return float(count);
+        if (k[1].text == "selected_pos") return float(selected);
+        if (k[1].text == "set_showing") showing[op] = self(self, k[2]);
+        if (k[1].text == "set_token_fmt") position = {int(self(self, k[3])), int(self(self, k[4]))};
+        if (k[1].text == "set_height_from_text") { CHECK_EQ(native_updates, 1); ++measured; }
+        if (k[1].text == "clear_action_token") ++cleared;
+        CHECK_FALSE(k[1].text == "set_selected" || (k[1].text == "set" && k[2].text == "display_num"));
+        return 0;
+      };
+      const auto* update = Method(roots, "recommendation_panel", "update_recommendation_info");
+      for (const auto& cmd : update->kids) eval(eval, cmd);
+      CHECK_EQ(native_updates, 1); CHECK_EQ(measured, 4);
+      CHECK_EQ(cleared, count == 0 ? 3 : 0);
+      CHECK_EQ(showing.at("portrait_rec_empty.lbl"), count == 0);
+      CHECK_EQ(showing.at("recommendations.lst"), count != 0);
+      CHECK_EQ(showing.at("rec_icon"), count != 0);
+      CHECK_EQ(showing.at("portrait_rec_board_state.grp"), count != 0);
+      CHECK_EQ(showing.at("portrait_rec_previous.lbl"), count > 0 && selected > 0);
+      CHECK_EQ(showing.at("portrait_rec_next.lbl"), count > 0 && selected < count - 1);
+      CHECK_EQ(position[0], selected + 1); CHECK_EQ(position[1], count);
+    }
+    auto incompatible = before;
+    incompatible[0].kids.erase(incompatible[0].kids.begin() + 8);
+    const auto unchanged = dtb::Compile(incompatible);
+    CHECK_FALSE(rb_blitz::settings::AddPortraitRecommendationsLayout(&incompatible, .5f, &why));
+    CHECK_TRUE(dtb::Compile(incompatible) == unchanged);
   }
 
   BeginCase("portrait connection and song loading preserve native entry work");
@@ -2972,7 +3164,7 @@ int main(int argc, char** argv) {
       CHECK_EQ(instructions, size_t{2});
     }
     BeginCase("portrait payload changes splash buttons, loading layouts and the existing gameplay HUD route");
-    CHECK_EQ(portrait.size(), landscape.size() + 22 + !landscape.contains("ui/gen/game.dtb") +
+    CHECK_EQ(portrait.size(), landscape.size() + 28 + !landscape.contains("ui/gen/game.dtb") +
                                       !landscape.contains("ui/loading/gen/loading.dtb"));
     for (const auto& [path, original] : landscape) {
       CHECK_TRUE(portrait.contains(path));
@@ -2982,6 +3174,9 @@ int main(int argc, char** argv) {
           path != "ui/av_options/gen/settings_scale_pause.milo_xbox" &&
           path != "ui/calibration/gen/calibration.dtb" &&
           path != "ui/song_select/gen/song_select.dtb" &&
+          path != "ui/background/gen/background.dtb" &&
+          path != "ui/inbox/gen/inbox.dtb" &&
+          path != "ui/recommendations/gen/recommendations.dtb" &&
           path != "ui/powerup_select/gen/powerup_select.dtb" &&
           path != rb_blitz::ui::input_font::kPowerupSelectRecord &&
           path != rb_blitz::ui::input_font::kSongSelectRecord &&
@@ -3072,6 +3267,128 @@ int main(int argc, char** argv) {
       return objects;
     };
     namespace font = rb_blitz::ui::input_font;
+    BeginCase("portrait Messages retains native row icons, wrapped text and independent detail fonts");
+    for (float aspect : {.3f, 402.f / 874, .75f, .9f}) {
+      std::vector<uint8_t> source, scene;
+      CHECK_TRUE(read(font::kMessagesRecord, &source, &why));
+      const auto original = source;
+      CHECK_TRUE(font::PreparePortraitMessages(source, portrait_buttons, aspect, &scene, &why));
+      CHECK_TRUE(source == original);
+      const auto panel = stored_objects(scene);
+      for (const char* name : {"songs.lst", "subject.lbl", "message.lbl", "portrait_tab_messages.lbl",
+                               "portrait_messages_reading.mesh", "portrait_messages_reading_border.mesh",
+                               "portrait_header_previous.mesh", "portrait_header_next.mesh",
+                               "portrait_confirm.mesh", "portrait_back.mesh", "InlineHelp.ihp"})
+        CHECK_TRUE(panel.contains(name));
+      const auto contains = [](const auto& bytes, std::string_view text) {
+        return std::search(bytes.begin(), bytes.end(), text.begin(), text.end()) != bytes.end();
+      };
+      CHECK_TRUE(contains(panel.at("songs.lst"), "portrait_inbox.milo"));
+      CHECK_TRUE(contains(panel.at("InlineHelp.ihp"), "portrait_actions.milo"));
+      CHECK_TRUE(contains(panel.at("message.lbl"), "portrait_splash.milo"));
+      CHECK_TRUE(contains(panel.at("message.lbl"), "pentatonic_bold.milo"));
+      const auto layout = rb_blitz::ui::PortraitMessages(aspect);
+      const auto& slide = panel.at("TransAnim.tnm");
+      const float distance = 1022 * rb_blitz::ui::PortraitSplash(aspect).width / (480 * 16.f / 9);
+      CHECK_TRUE(std::abs(std::bit_cast<float>(u32(slide.data() + 53)) + distance) < .001f);
+      CHECK_TRUE(std::abs(std::bit_cast<float>(u32(slide.data() + 85)) - distance) < .001f);
+      CHECK_EQ(u32(slide.data() + 65), std::bit_cast<uint32_t>(-10.f));
+      CHECK_EQ(u32(slide.data() + 97), std::bit_cast<uint32_t>(10.f));
+      for (const char* name : {"songs.lst", "subject.lbl", "message.lbl", "portrait_tab_messages.lbl"})
+        CHECK_EQ(u32(panel.at(name).data() + 0x19 + 105), 12u);
+      CHECK_EQ(u32(panel.at("songs.lst").data() + 0x19 + 44), std::bit_cast<uint32_t>(layout.list_z));
+      CHECK_TRUE(contains(panel.at("all.grp"), "portrait_tab_messages.lbl"));
+      CHECK_TRUE(read("ui/resource/lists/gen/list_inbox.milo_xbox", &source, &why));
+      const auto list_source = source;
+      CHECK_TRUE(font::PreparePortraitMessagesList(source, portrait_buttons, aspect, &scene, &why));
+      CHECK_TRUE(source == list_source);
+      const auto list = stored_objects(scene);
+      for (const char* name : {"icon", "icon.mesh", "icon_misc.mat", "icon_more_stars.mat",
+                               "icon_misc.tex", "subject_line", "subject_line.lbl", "new",
+                               "portrait_message_header.lbl", "portrait_row.mesh", "portrait_selected.mesh"})
+        CHECK_TRUE(list.contains(name));
+      CHECK_FALSE(list.contains("slot"));
+      CHECK_FALSE(list.contains("highlight"));
+      CHECK_FALSE(list.contains("time")); // The feed's published date is already in the subject.
+      CHECK_FALSE(list.contains("header.lbl")); // Avoid treating a row heading as the page title.
+      CHECK_TRUE(contains(list.at("icon"), "icon.mesh"));
+      CHECK_EQ(u32(list.at("icon").data() + 25), std::bit_cast<uint32_t>(2.f));
+      CHECK_EQ(u32(list.at("icon.mesh").data() + 0x15), std::bit_cast<uint32_t>(layout.icon_size / 50));
+      CHECK_EQ(u32(list.at("icon.mesh").data() + 0x15 + 36),
+               std::bit_cast<uint32_t>(-layout.width / 2 + layout.icon_inset));
+      CHECK_FALSE(contains(list.at("portrait_old_rows.grp"), "icon.mesh"));
+      std::vector<uint8_t> refused{1,2,3};
+      source.back() ^= 1;
+      CHECK_FALSE(font::PreparePortraitMessagesList(source, portrait_buttons, aspect, &refused, &why));
+      CHECK_TRUE((refused == std::vector<uint8_t>{1,2,3}));
+    }
+    CHECK_FALSE(landscape.contains(font::kMessagesRecord));
+    CHECK_FALSE(landscape.contains(font::kPortraitMessagesListRecord));
+    BeginCase("portrait Recommended keeps native album textures, category icons, leaderboard fields and five actions");
+    for (float aspect : {.3f, 402.f / 874, .75f, .9f}) {
+      const auto layout = rb_blitz::ui::PortraitRecommendations(aspect);
+      const auto contains = [](const auto& bytes, std::string_view text) {
+        return std::search(bytes.begin(), bytes.end(), text.begin(), text.end()) != bytes.end();
+      };
+      std::vector<uint8_t> source, scene;
+      CHECK_TRUE(read(font::kRecommendationsRecord, &source, &why));
+      const auto original = source;
+      CHECK_TRUE(font::PreparePortraitRecommendations(source, portrait_buttons, aspect, &scene, &why));
+      CHECK_TRUE(source == original);
+      const auto panel = stored_objects(scene);
+      for (const char* name : {"recommendations.lst", "mini_leaders.lst", "rec_icon", "description.lbl",
+                               "song_title.lbl", "song_artist.lbl", "song_info.lbl", "portrait_tab_recs.lbl",
+                               "portrait_rec_previous.lbl", "portrait_rec_next.lbl", "portrait_rec_empty.lbl",
+                               "portrait_rec_position.lbl", "portrait_rec_board_state.grp", "InlineHelp.ihp"})
+        CHECK_TRUE(panel.contains(name));
+      CHECK_TRUE(contains(panel.at("recommendations.lst"), "portrait_recommendations.milo"));
+      CHECK_TRUE(contains(panel.at("mini_leaders.lst"), "portrait_rec_leaders.milo"));
+      CHECK_TRUE(contains(panel.at("description.lbl"), "portrait_splash.milo"));
+      CHECK_TRUE(contains(panel.at("description.lbl"), "pentatonic_bold.milo"));
+      CHECK_TRUE(contains(panel.at("InlineHelp.ihp"), "portrait_actions.milo"));
+      CHECK_TRUE(contains(panel.at("portrait_rec_board_state.grp"), "no_board.grp"));
+      CHECK_TRUE(contains(panel.at("portrait_rec_board_state.grp"), "loading.grp"));
+      CHECK_TRUE(contains(panel.at("portrait_rec_board_state.grp"), "mini_leaders.grp"));
+      CHECK_TRUE(panel.contains("spinner_hoz") && panel.contains("spinner_hoz1") && panel.contains("spinner_vert"));
+      CHECK_TRUE(std::bit_cast<float>(u32(panel.at("portrait_rec_details.mat").data() + 0x25)) >= .9f);
+      for (const char* name : {"song_title.lbl", "song_artist.lbl", "song_info.lbl", "description.lbl", "recommendations.lst"})
+        CHECK_EQ(u32(panel.at(name).data() + 0x19 + 105), 12u);
+      CHECK_EQ(u32(panel.at("recommendations.lst").data() + 0x19 + 44), std::bit_cast<uint32_t>(layout.carousel_z));
+      for (size_t i = 0; i < 5; ++i)
+        CHECK_TRUE(panel.contains(std::string(rb_blitz::ui::PortraitRecommendationFooterSurface(i)) + ".mesh"));
+      CHECK_TRUE(read("ui/resource/lists/gen/list_recommendations_albums.milo_xbox", &source, &why));
+      const auto original_list = source;
+      CHECK_TRUE(font::PreparePortraitRecommendationList(source, aspect, &scene, &why));
+      CHECK_TRUE(source == original_list);
+      const auto cards = stored_objects(scene);
+      CHECK_TRUE(cards.contains("album_mesh") && cards.contains("album0.mat") && cards.contains("rec_type"));
+      CHECK_FALSE(cards.contains("shade") || cards.contains("shade_highlight") || cards.contains("UIListHighlight.arw"));
+      CHECK_TRUE(contains(cards.at("album_mesh"), "album_slot.mesh"));
+      CHECK_EQ(u32(cards.at("album_slot.mesh").data() + 0x15), std::bit_cast<uint32_t>(layout.art_size / 125));
+      CHECK_EQ(u32(cards.at("album_slot.mesh").data() + 0x15 + 36), std::bit_cast<uint32_t>(0.f));
+      CHECK_TRUE(contains(cards.at("rec_type.lbl"), "portrait_splash.milo"));
+      CHECK_TRUE(read("ui/resource/lists/gen/list_home_lb.milo_xbox", &source, &why));
+      const auto original_leaders = source;
+      CHECK_TRUE(font::PreparePortraitRecommendationLeaderboard(source, aspect, &scene, &why));
+      CHECK_TRUE(source == original_leaders);
+      const auto leaders = stored_objects(scene);
+      CHECK_TRUE(leaders.contains("user_name") && leaders.contains("rank") && leaders.contains("mini_score"));
+      CHECK_FALSE(leaders.contains("slot") || leaders.contains("UIListHighlight.arw"));
+      CHECK_TRUE(contains(leaders.at("name.lbl"), "portrait_splash.milo"));
+      std::vector<uint8_t> refused{1,2,3};
+      source.back() ^= 1;
+      CHECK_FALSE(font::PreparePortraitRecommendationLeaderboard(source, aspect, &refused, &why));
+      CHECK_TRUE((refused == std::vector<uint8_t>{1,2,3}));
+      source = original_list; source.back() ^= 1;
+      CHECK_FALSE(font::PreparePortraitRecommendationList(source, aspect, &refused, &why));
+      CHECK_TRUE((refused == std::vector<uint8_t>{1,2,3}));
+      source = original; source.back() ^= 1;
+      CHECK_FALSE(font::PreparePortraitRecommendations(source, portrait_buttons, aspect, &refused, &why));
+      CHECK_TRUE((refused == std::vector<uint8_t>{1,2,3}));
+    }
+    CHECK_FALSE(landscape.contains(font::kRecommendationsRecord));
+    CHECK_FALSE(landscape.contains(font::kPortraitRecommendationListRecord));
+    CHECK_FALSE(landscape.contains(font::kPortraitRecommendationLeaderboardRecord));
     BeginCase("RhythmVerse portrait authors every panel and preserves native download states");
     config.rhythmverse_row = true;
     for (const float aspect : {.3f, 201.f / 437, .75f, .9f}) {
@@ -3088,7 +3405,28 @@ int main(int argc, char** argv) {
         CHECK_TRUE(records.contains(path));
         const auto objects = stored_objects(records.at(path));
         CHECK_TRUE(objects.contains("portrait_store.color"));
-        if (std::string_view(kind) != "details") CHECK_TRUE(objects.contains("portrait_tab_store.lbl"));
+        if (std::string_view(kind) != "details") {
+          CHECK_TRUE(objects.contains("portrait_tab_store.lbl"));
+          const auto& heading = objects.at("portrait_tab_store.lbl");
+          constexpr std::string_view font_path = "../resource/fonts/portrait_splash.milo";
+          const auto font_at = std::search(heading.begin(), heading.end(), font_path.begin(), font_path.end());
+          CHECK_TRUE(font_at != heading.end());
+          // Hub titles share the slide parent; the standalone info page keeps
+          // its own layout. Both center their ink on the marquee's anchor.
+          CHECK_EQ(u32(heading.data() + 0x19 + 105), std::string_view(kind) == "info" ? 0u : 12u);
+          CHECK_EQ(u32(heading.data() + 0x19 + 36), std::bit_cast<uint32_t>(0.f));
+          CHECK_EQ(u32(heading.data() + 0x19 + 44),
+                   std::bit_cast<uint32_t>(rb_blitz::ui::PortraitSongs(aspect).tabs_z));
+          if (std::string_view(kind) == "menu") {
+            constexpr std::string_view title = "portrait_tab_store.lbl";
+            const auto has_title = [&](const char* group) {
+              const auto& bytes = objects.at(group);
+              return std::search(bytes.begin(), bytes.end(), title.begin(), title.end()) != bytes.end();
+            };
+            CHECK_TRUE(has_title("all.grp"));
+            CHECK_FALSE(has_title("main.grp"));
+          }
+        }
       }
       const auto dialog = stored_objects(records.at(font::kPortraitStoreDialogRecord));
       CHECK_TRUE(dialog.contains("error.lbl") && dialog.contains("continue.lbl"));
@@ -3112,8 +3450,9 @@ int main(int argc, char** argv) {
       const auto& album = details.at("album.mesh");
       const auto layout = rb_blitz::ui::PortraitSongs(aspect);
       for (size_t i = 0; i < 4; ++i) {
-        const auto x = std::bit_cast<float>(u32(album.data() + 208 + i * 36));
-        const auto z = std::bit_cast<float>(u32(album.data() + 216 + i * 36));
+        const auto parent_length = u32(album.data() + 0x15 + 105);
+        const auto x = std::bit_cast<float>(u32(album.data() + 208 + parent_length + i * 36));
+        const auto z = std::bit_cast<float>(u32(album.data() + 216 + parent_length + i * 36));
         CHECK_TRUE(std::abs(x - (-layout.width / 2 + 27)) <= 20.001f);
         CHECK_TRUE(std::abs(z - layout.card_z) <= 20.001f);
       }
@@ -3303,7 +3642,7 @@ int main(int argc, char** argv) {
       dtb::RootHeader song_header;
       const auto& record = portrait.at("ui/song_select/gen/song_select.dtb");
       CHECK_TRUE(dtb::Parse(record.data(), record.size(), &song_roots, &song_header, &why));
-      for (const char* name : {"Left_arrow.grp", "Rt_arrow.grp", "popup_neon"}) {
+      for (const char* name : {"popup_neon"}) {
         bool found = false;
         for (const auto& root : song_roots) found |= header_test::Has(root, name);
         CHECK_TRUE(found);
@@ -3328,6 +3667,47 @@ int main(int argc, char** argv) {
       const auto original = dtb::Compile(unknown);
       CHECK_FALSE(settings::AddPortraitSongsLayout(&unknown, .5f, &why));
       CHECK_TRUE(dtb::Compile(unknown) == original);
+    }
+    BeginCase("the persistent portrait background owns arrows across page exits and native press Flows");
+    {
+      std::vector<dtb::Node> roots;
+      const auto& background = portrait.at("ui/background/gen/background.dtb");
+      CHECK_TRUE(dtb::Parse(background.data(), background.size(), &roots, nullptr, &why));
+      const auto* enter = header_test::Method(roots, "background_panel", "enter");
+      CHECK_TRUE(enter != nullptr);
+      for (const char* arrow : {"Left_arrow.grp", "Rt_arrow.grp"}) {
+        bool placed = false, scaled = false;
+        if (enter) for (const auto& command : enter->kids) {
+          if (command.kids.size() != 5 || !header_test::Has(command.kids[0], arrow)) continue;
+          if (command.kids[1].text == "set_local_pos") {
+            placed = true;
+            CHECK_EQ(command.kids[4].scalar, std::bit_cast<uint32_t>(rb_blitz::ui::kPortraitHubTitleCenter));
+          }
+          if (command.kids[1].text == "set_local_scale") scaled = true;
+        }
+        CHECK_TRUE(placed && scaled);
+      }
+      for (const auto& [path, panels] : std::array<std::pair<const char*, std::vector<const char*>>, 4>{{
+          {"ui/song_select/gen/song_select.dtb", {"song_select_panel"}},
+          {"ui/store/gen/store.dtb", {"store_menu_panel", "store_browser_panel"}},
+          {"ui/inbox/gen/inbox.dtb", {"inbox_panel"}},
+          {"ui/recommendations/gen/recommendations.dtb", {"recommendation_panel"}}}}) {
+        const auto& record = portrait.at(path);
+        CHECK_TRUE(dtb::Parse(record.data(), record.size(), &roots, nullptr, &why));
+        for (const auto* panel : panels) {
+          const auto* exit = header_test::Method(roots, panel, "exit");
+          if (exit) {
+            CHECK_FALSE(header_test::Has(*exit, "Left_arrow.grp"));
+            CHECK_FALSE(header_test::Has(*exit, "Rt_arrow.grp"));
+          }
+          const auto* buttons = header_test::Method(roots, panel, "BUTTON_DOWN_MSG");
+          const auto* helper = header_test::Method(roots, panel, "go_to_song_select");
+          CHECK_TRUE(buttons && header_test::Has(*buttons, "arrow_lt.flow"));
+          CHECK_TRUE(buttons && (header_test::Has(*buttons, "arrow_rt.flow") ||
+              (header_test::Has(*buttons, "go_to_song_select") && helper &&
+               header_test::Has(*helper, "arrow_rt.flow"))));
+        }
+      }
     }
     BeginCase("portrait native scenes prepare independently at phone and tablet aspects");
     for (float aspect : {.3f, 402.f / 874, 9.f / 16, .75f, .9f}) {
@@ -3545,8 +3925,8 @@ int main(int argc, char** argv) {
     CHECK_TRUE(art.size() > 0x810);
     BeginCase("shared portrait prompts preserve native shade and animation timing across aliases");
     const auto& confirmation = portrait.at("ui/pause/gen/confirmation_message.milo_xbox");
-    CHECK_TRUE(confirmation == portrait.at("ui/pause/gen/settings_confirmation.milo_xbox"));
-    CHECK_TRUE(confirmation == portrait.at("ui/pause/gen/settings_confirmation_pause.milo_xbox"));
+    CHECK_TRUE(portrait.at("ui/pause/gen/settings_confirmation.milo_xbox") ==
+               portrait.at("ui/pause/gen/settings_confirmation_pause.milo_xbox"));
     const auto* prompt = confirmation.data() + 0x810;
     const float prompt_scale = rb_blitz::ui::PortraitPromptScale(config.portrait_aspect);
     CHECK_EQ(std::bit_cast<float>(u32(prompt + 0x2DF8)), prompt_scale);
@@ -3555,6 +3935,36 @@ int main(int argc, char** argv) {
     CHECK_EQ(std::bit_cast<float>(u32(prompt + 0x32B7 + 12)), 0.f);
     CHECK_EQ(std::bit_cast<float>(u32(prompt + 0x32B7 + 44)), 10.f);
     CHECK_EQ(std::bit_cast<float>(u32(prompt + 0x3089 + 0x15)), 1.f); // unscaled dimmer
+    BeginCase("settings portrait prompts separate readable messages from full-width native touch buttons");
+    const auto generic_prompt = stored_objects(confirmation);
+    const auto settings_prompt = stored_objects(portrait.at("ui/pause/gen/settings_confirmation.milo_xbox"));
+    CHECK_TRUE(settings_prompt.at("Shade.mesh") == generic_prompt.at("Shade.mesh"));
+    const auto& prompt_list = portrait.at(rb_blitz::ui::input_font::kPortraitPromptListRecord);
+    const auto prompt_buttons = stored_objects(prompt_list);
+    CHECK_TRUE(prompt_buttons.contains("list")); // Popup provider field, not the splash field.
+    CHECK_FALSE(prompt_buttons.contains("song"));
+    for (const char* state : {"portrait_button", "portrait_selected", "portrait_border"})
+      CHECK_TRUE(prompt_buttons.contains(std::string(state) + ".mesh"));
+    std::vector<uint8_t> prompt_source;
+    CHECK_TRUE(read("ui/pause/gen/confirmation_message.milo_xbox", &prompt_source, &why));
+    for (const float aspect : {402.f / 874, 447.f / 982, 9.f / 16, .75f}) {
+      std::vector<uint8_t> fitted;
+      CHECK_TRUE(rb_blitz::ui::input_font::PreparePortraitSettingsPrompt(prompt_source, aspect, &fitted, &why));
+      const auto objects = stored_objects(fitted);
+      const auto& list = objects.at("options.lst");
+      const float scale = std::bit_cast<float>(u32(list.data() + 0x19));
+      const float width = rb_blitz::ui::PortraitSplash(aspect).width;
+      CHECK_TRUE(std::abs(364.5f * scale - width * .84f) < .001f);
+      CHECK_TRUE(52.75f * scale / width * 402 >= 48); // Phone-sized touch height.
+      CHECK_TRUE((62 - 52.75f) * scale > 3); // Clear gap between actions.
+      constexpr std::string_view resource = "../resource/lists/portrait_prompt.milo";
+      CHECK_TRUE(std::search(list.begin(), list.end(), resource.begin(), resource.end()) != list.end());
+      const auto& message = objects.at("pause.lbl");
+      CHECK_EQ(std::bit_cast<float>(u32(message.data() + 0x19)), 1.f);
+      const auto& animation = objects.at("on.anim");
+      CHECK_EQ(std::bit_cast<float>(u32(animation.data() + 0xAF)), .5f);
+      CHECK_EQ(std::bit_cast<float>(u32(animation.data() + 0xCF)), 1.f);
+    }
     const auto splash_objects = stored_objects(art);
     CHECK_TRUE(splash_objects.contains("portrait_continue.mesh"));
     CHECK_TRUE(splash_objects.contains("portrait_back.mesh"));

@@ -49,6 +49,12 @@ sit below it with a larger gap. The grouped list keeps its headings, larger
 rating stars and filled selection row. Taller rows allow song titles to wrap.
 Portrait arrows use larger native art and invisible tap targets. Touch hides
 their controller/key images; keyboard and controller input restore those images.
+The persistent background panel owns arrow placement, including while library
+pages transition. Page exits leave the native arrow press Flows and their
+animated children in place. Library transition screens retain portrait cropping;
+each departing and arriving panel keeps its own title, reading areas and footer.
+Portrait content inherits `Parent.trans`, and horizontal transition keys scale
+to the portrait canvas width while retaining the native timing and direction.
 Album art, song title, artist, album, genre/year and difficulty occupy a fixed
 card above the Back, Shortcuts and Select actions. Wider portrait layouts reduce
 the visible row count to keep the list clear of that card.

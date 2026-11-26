@@ -642,6 +642,26 @@ void PortraitText(PortraitObject& object, float size, float width, uint32_t alig
   if (width >= 0) PutFloat(data.data() + at - 29, width);
 }
 
+bool PortraitLibraryAnimation(PortraitScene& scene, float aspect, std::string* error) {
+  auto* animation = scene.Find("TransAnim.tnm");
+  if (!scene.Find("Parent.trans") || !animation)
+    return Fail(error, "portrait library transition objects changed");
+  auto& data = animation->data;
+  if (data.size() != 180 || Be32(data.data() + 49) != 6)
+    return Fail(error, "portrait library transition keys changed");
+  const float horizontal = ui::PortraitSplash(aspect).width / (480 * 16.f / 9);
+  for (size_t at = 53; at < 53 + 6 * 16; at += 16)
+    PutFloat(data.data() + at, std::bit_cast<float>(Be32(data.data() + at)) * horizontal);
+  // Native transition Flows animate Parent.trans. Detached portrait content
+  // must inherit that same translation, including newly authored surfaces.
+  for (auto& object : scene.objects) {
+    const auto matrix = PortraitMatrix(object);
+    if (matrix && Be32(object.data.data() + matrix + 105) == 0)
+      PortraitParent(object, "Parent.trans");
+  }
+  return true;
+}
+
 void PortraitTitle(PortraitScene& scene, float aspect) {
   if (auto* title = scene.Find("header.lbl")) {
     PortraitPose(*title, 1, 0, ui::kPortraitTitleCenter - scene.root_z);
@@ -714,7 +734,8 @@ void PortraitSurface(PortraitScene& scene, const std::vector<uint8_t>& buttons,
 }
 
 void PortraitFooter(PortraitScene& scene, const std::vector<uint8_t>& buttons,
-                    float aspect, bool back_only = false, bool confirm_only = false) {
+                    float aspect, bool back_only = false, bool confirm_only = false,
+                    bool recommendations = false) {
   auto original = std::find_if(scene.objects.begin(), scene.objects.end(),
       [](const auto& object) { return object.type == "InlineHelp"; });
   if (original == scene.objects.end()) return;
@@ -737,9 +758,11 @@ void PortraitFooter(PortraitScene& scene, const std::vector<uint8_t>& buttons,
       }
     }
   }
-  for (size_t i = 0; i < 3; ++i) {
-    const auto slot = ui::PortraitCalibrationFooter(aspect, i);
+  for (size_t i = 0; i < (recommendations ? 5u : 3u); ++i) {
+    const auto slot = recommendations ? ui::PortraitRecommendationsFooter(aspect, i, 5) :
+                                         ui::PortraitCalibrationFooter(aspect, i);
     PortraitSurface(scene, buttons,
+        recommendations ? ui::PortraitRecommendationFooterSurface(i) :
         i == 0 ? "portrait_confirm" : i == 1 ? "portrait_back" : "portrait_retry",
         slot.width, slot.height, slot.x, slot.z, {});
   }
@@ -806,6 +829,41 @@ bool PreparePortraitPrompt(const std::vector<uint8_t>& source, float aspect,
       }
   }
   return PackStored(bytes, scene, error);
+}
+
+bool PreparePortraitSettingsPrompt(const std::vector<uint8_t>& source, float aspect,
+                                   std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (bytes.size() != 13645 || Crc32(bytes.data(), bytes.size()) != 0x7EFF956D)
+    return Fail(error, "portrait settings prompt source revision changed");
+  PortraitScene edited(bytes);
+  const float width = ui::PortraitSplash(aspect).width * .84f;
+  // Retain Group.grp and its entrance animation at native scale. Message wrapping
+  // and button geometry have separate fits; the full-screen shade stays untouched.
+  auto& message = *edited.Find("pause.lbl");
+  PortraitPose(message, 1, 0, 66, "Group.grp");
+  PortraitText(message, 16, width);
+  auto& list = *edited.Find("options.lst");
+  PortraitPose(list, width / 364.5f, 0, -26, "Group.grp");
+  RenameSceneString(list.data, "../resource/lists/list_popup.milo",
+                    "../resource/lists/portrait_prompt.milo");
+  return PackStored(edited.Build(), scene, error);
+}
+
+bool PreparePortraitPromptList(const std::vector<uint8_t>& source,
+                               const std::vector<uint8_t>& button_source,
+                               std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> fitted, bytes;
+  if (!PreparePortraitSplashList(source, button_source, &fitted, error) ||
+      !DecodeStream(fitted, &bytes, error)) return false;
+  PortraitScene edited(bytes);
+  // Preserve the popup provider's field name on the shared portrait button style.
+  auto* label = edited.Find("song");
+  if (!label || label->type != "UIListLabel")
+    return Fail(error, "portrait prompt list label widget changed");
+  label->name = "list";
+  return PackStored(edited.Build(), scene, error);
 }
 
 bool PreparePortraitSettings(const std::vector<uint8_t>& source,
@@ -1413,7 +1471,7 @@ bool PreparePortraitSplashFont(const std::vector<uint8_t>& source,
 namespace {
 bool BuildPortraitSongList(const std::vector<uint8_t>& bytes, const std::vector<uint8_t>& buttons,
                            bool grouped, std::string_view store,
-                           std::vector<uint8_t>* scene, std::string* error);
+                           std::vector<uint8_t>* scene, std::string* error, float aspect = 0);
 }
 
 bool PreparePortraitSongList(const std::vector<uint8_t>& source,
@@ -1444,15 +1502,32 @@ bool PreparePortraitStoreList(const std::vector<uint8_t>& source,
   return BuildPortraitSongList(bytes, buttons, false, kind, scene, error);
 }
 
+bool PreparePortraitMessagesList(const std::vector<uint8_t>& source,
+                                 const std::vector<uint8_t>& button_source, float aspect,
+                                 std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error, 4 * 1024 * 1024) ||
+      !DecodeStream(button_source, &buttons, error)) return false;
+  if (bytes.size() != 2462023 || Crc32(bytes.data(), bytes.size()) != 0xB9CA86DD)
+    return Fail(error, "portrait message list source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait message button template revision changed");
+  return BuildPortraitSongList(bytes, buttons, false, "messages", scene, error, aspect);
+}
+
 namespace {
 bool BuildPortraitSongList(const std::vector<uint8_t>& bytes, const std::vector<uint8_t>& buttons,
                            bool grouped, std::string_view store,
-                           std::vector<uint8_t>* scene, std::string* error) {
+                           std::vector<uint8_t>* scene, std::string* error, float aspect) {
   PortraitScene edited(bytes), templates(buttons);
+  const bool messages = store == "messages";
+  const auto inbox = ui::PortraitMessages(aspect);
   // UIListDir's tail holds orientation, preview fields and element spacing.
-  PutFloat(edited.directory.data() + edited.directory.size() - 29, ui::kPortraitSongRowStep);
-  std::erase_if(edited.objects, [](const auto& object) {
-    return object.type == "UIListHighlight" || object.type == "UIListMesh";
+  PutFloat(edited.directory.data() + edited.directory.size() - 29,
+           messages ? inbox.row_step : ui::kPortraitSongRowStep);
+  std::erase_if(edited.objects, [&](const auto& object) {
+    return object.type == "UIListHighlight" ||
+           (object.type == "UIListMesh" && !(messages && object.name == "icon"));
   });
   for (auto& object : edited.objects) {
     if (object.type == "Group") PortraitPose(object, 1, 0, 0);
@@ -1474,7 +1549,7 @@ bool BuildPortraitSongList(const std::vector<uint8_t>& bytes, const std::vector<
       }
     }
   }
-  if (!store.empty()) {
+  if (!store.empty() && !messages) {
     // Retain provider field names so grouping, paging and ownership stay native.
     std::erase_if(edited.objects, [&](const auto& object) {
       if (object.type != "UIListLabel") return false;
@@ -1498,6 +1573,35 @@ bool BuildPortraitSongList(const std::vector<uint8_t>& bytes, const std::vector<
       }
     }
   }
+  if (messages) {
+    std::erase_if(edited.objects, [](const auto& object) {
+      return object.type == "UIListLabel" && object.name != "subject_line" &&
+             object.name != "header" && object.name != "new";
+    });
+    for (auto& object : edited.objects) {
+      if (object.name == "header.lbl") object.name = "portrait_message_header.lbl";
+      RenameSceneString(object.data, "header.lbl", "portrait_message_header.lbl");
+      if (object.type == "UIListLabel")
+        PutFloat(object.data.data() + 25, object.name == "new" ? 3.f : 1.f);
+      if (object.type == "UIColor") SceneColor(object.data, 17, 1, 1, 1, 1);
+      if (object.type != "UILabel") continue;
+      const bool badge = object.name == "new.lbl";
+      PortraitPose(object, 1, badge ? inbox.width / 2 - 8 : -inbox.width / 2 + inbox.text_inset, 0);
+      PortraitText(object, badge ? 9.f : 14.f, badge ? 12.f : inbox.width - inbox.text_inset - 16, 0x21);
+      if (!badge) for (const char* font : {"../fonts/pentatonic_regularcond.milo",
+                                          "../fonts/pentatonic_bold.milo", "../fonts/pentatonic.milo"})
+        RenameSceneString(object.data, font, "../fonts/portrait_splash.milo");
+    }
+    PortraitPose(*edited.Find("icon.mesh"), inbox.icon_size / 50,
+                  -inbox.width / 2 + inbox.icon_inset, 0);
+    // The label draw paints the row background. Draw its separate icon after
+    // that surface so the feed keeps the provider's original icon material.
+    PutFloat(edited.Find("icon")->data.data() + 25, 2.f);
+    auto black = *templates.Find("active_normal.color");
+    black.name = "portrait_caption_black.color";
+    SceneColor(black.data, 17, 0, 0, 0, 1);
+    edited.objects.push_back(std::move(black));
+  }
   // The bonus glyph is outside the portrait title column. The native song
   // label remains the first populated label for each selectable row.
   if (grouped) std::erase_if(edited.objects, [](const auto& object) {
@@ -1520,9 +1624,10 @@ bool BuildPortraitSongList(const std::vector<uint8_t>& bytes, const std::vector<
     const auto color = selected ? ui::kMenuButtonHover : ui::kMenuButtonNormal;
     SceneColor(material.data, 0x19, color[0], color[1], color[2], color[3]);
     auto mesh = *templates.Find("slot.mesh"); mesh.name = name + ".mesh";
-    const float height = header ? 30.f : ui::kPortraitSongRowHeight;
+    const float height = header ? 30.f : messages ? inbox.row_height : ui::kPortraitSongRowHeight;
+    const float width = messages ? inbox.width : 420.f;
     for (size_t at : {size_t(0x15), size_t(0x45)}) {
-      SceneMatrix(mesh.data, at, 420.f / 300, height / 30, -210, 0, height / 2);
+      SceneMatrix(mesh.data, at, width / 300, height / 30, -width / 2, 0, height / 2);
       PutFloat(mesh.data.data() + at + 16, 0);
       PutFloat(mesh.data.data() + at + 20, height / 30);
       PutFloat(mesh.data.data() + at + 28, -1);
@@ -1552,7 +1657,8 @@ bool BuildPortraitSongList(const std::vector<uint8_t>& bytes, const std::vector<
   if (!store.empty()) {
     original_art.clear();
     for (const auto& object : edited.objects)
-      if (object.type == "Mesh" && !object.name.starts_with("portrait_")) original_art.push_back(object.name);
+      if (object.type == "Mesh" && !object.name.starts_with("portrait_") &&
+          !(messages && object.name == "icon.mesh")) original_art.push_back(object.name);
     for (const auto& name : original_art) edited.RemoveDrawMember(name);
   }
   PortraitHiddenGroup(edited, templates, "portrait_old_rows.grp", original_art);
@@ -1661,6 +1767,7 @@ bool PreparePortraitSongs(const std::vector<uint8_t>& source,
     return Fail(error, "portrait shortcut entrance animation changed");
   for (size_t at : {size_t(95), size_t(103)}) PutFloat(popup_animation.data() + at, .5f * popup_scale);
   for (size_t at : {size_t(111), size_t(119)}) PutFloat(popup_animation.data() + at, popup_scale);
+  if (!PortraitLibraryAnimation(edited, aspect, error)) return false;
   return PackStored(edited.Build(), scene, error);
 }
 
@@ -1768,9 +1875,15 @@ bool PreparePortraitStore(const std::vector<uint8_t>& source,
     heading.name = "portrait_tab_store.lbl";
     PortraitPose(heading, 1, 0, layout.tabs_z);
     PortraitText(heading, 17, layout.width - 76);
+    for (const char* font : {"../resource/fonts/pentatonic_regularcond.milo",
+                             "../resource/fonts/pentatonic_bold.milo",
+                             "../resource/fonts/pentatonic.milo"})
+      RenameSceneString(heading.data, font, "../resource/fonts/portrait_splash.milo");
     // Replace the scene token; set_token_fmt also refreshes it at panel entry.
     edited.objects.push_back(std::move(heading));
-    edited.Before(menu ? "filter.lst" : info ? "song.lbl" : "song.lst", {"portrait_tab_store.lbl"});
+    // The heading remains visible while the menu's loading state switches
+    // between main.grp, loading.grp and unavailable.grp.
+    edited.Before(menu ? "main.grp" : info ? "song.lbl" : "song.lst", {"portrait_tab_store.lbl"});
     if (!info) {
       for (const bool next : {false, true}) {
         const auto stem = std::string(next ? "portrait_header_next" : "portrait_header_previous");
@@ -1795,6 +1908,230 @@ bool PreparePortraitStore(const std::vector<uint8_t>& source,
       RenameSceneString(object.data, "../resource/inline_help/default.milo",
                         "../resource/inline_help/portrait_actions.milo");
   }
+  if ((kind == "menu" || kind == "browser" || kind == "details") &&
+      !PortraitLibraryAnimation(edited, aspect, error)) return false;
+  return PackStored(edited.Build(), scene, error);
+}
+
+bool PreparePortraitRecommendationList(const std::vector<uint8_t>& source, float aspect,
+                                       std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (bytes.size() != 707715 || Crc32(bytes.data(), bytes.size()) != 0xBAC782D2)
+    return Fail(error, "portrait recommendation list source revision changed");
+  PortraitScene edited(bytes);
+  const auto layout = ui::PortraitRecommendations(aspect);
+  std::erase_if(edited.objects, [](const auto& object) {
+    return object.type == "UIListHighlight" ||
+           (object.type == "UIListMesh" && object.name != "album_mesh");
+  });
+  for (auto& object : edited.objects) {
+    if (object.type == "Group") PortraitPose(object, 1, 0, 0);
+    if (object.type == "Mat" && object.name.starts_with("album")) object.data[0x29] = 0;
+    if (object.type == "UIColor") SceneColor(object.data, 17, 1, 1, 1, 1);
+  }
+  PortraitPose(*edited.Find("album_slot.mesh"), layout.art_size / 125, 0, 0);
+  auto& type = *edited.Find("rec_type.lbl");
+  PortraitPose(type, 1, -layout.width / 2 + 34, -layout.art_size / 2 - 14);
+  PortraitText(type, 12, layout.width - 46, 0x21);
+  RenameSceneString(type.data, "../fonts/pentatonic_regularcond.milo", "../fonts/portrait_splash.milo");
+  return PackStored(edited.Build(), scene, error);
+}
+
+bool PreparePortraitRecommendationLeaderboard(const std::vector<uint8_t>& source, float aspect,
+                                              std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error)) return false;
+  if (bytes.size() != 93819 || Crc32(bytes.data(), bytes.size()) != 0x2560C8D4)
+    return Fail(error, "portrait recommendation leaderboard source revision changed");
+  PortraitScene edited(bytes);
+  const auto layout = ui::PortraitRecommendations(aspect);
+  PutFloat(edited.directory.data() + edited.directory.size() - 29, layout.leaderboard_step);
+  std::erase_if(edited.objects, [](const auto& object) {
+    return object.type == "UIListHighlight" || object.type == "UIListMesh";
+  });
+  for (auto& object : edited.objects) {
+    if (object.type == "Group") PortraitPose(object, 1, 0, 0);
+    if (object.type == "UIColor") SceneColor(object.data, 17, 1, 1, 1, 1);
+    if (object.type != "UILabel") continue;
+    const bool rank = object.name == "rank.lbl", score = object.name == "score.lbl";
+    const float x = rank ? -layout.width / 2 + 8 : score ? layout.width / 2 - 60 : -layout.width / 2 + 36;
+    PortraitPose(object, 1, x, 0);
+    PortraitText(object, score || rank ? 10.f : 11.f,
+                   rank ? 22.f : score ? 52.f : layout.width - 102, 0x21);
+    RenameSceneString(object.data, "../fonts/pentatonic_regularcond.milo", "../fonts/portrait_splash.milo");
+  }
+  return PackStored(edited.Build(), scene, error);
+}
+
+bool PreparePortraitRecommendations(const std::vector<uint8_t>& source,
+                                    const std::vector<uint8_t>& button_source, float aspect,
+                                    std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error, 4 * 1024 * 1024) ||
+      !DecodeStream(button_source, &buttons, error)) return false;
+  if (bytes.size() != 3556837 || Crc32(bytes.data(), bytes.size()) != 0xAE602183)
+    return Fail(error, "portrait recommendation panel source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait recommendation button template revision changed");
+  PortraitScene edited(bytes), templates(buttons);
+  const auto layout = ui::PortraitRecommendations(aspect);
+  std::vector<std::string> old_art;
+  for (const auto& object : edited.objects) if (object.type == "Mesh") old_art.push_back(object.name);
+  for (const auto& name : old_art) edited.RemoveDrawMember(name);
+  PortraitHiddenGroup(edited, templates, "portrait_recommendations_landscape.grp", old_art);
+  for (const char* name : {"home.grp", "info.grp", "mini_leaders.grp", "no_board.grp", "unavailable.grp"})
+    PortraitPose(*edited.Find(name), 1, 0, 0);
+  auto& carousel = *edited.Find("recommendations.lst");
+  PortraitPose(carousel, 1, 0, layout.carousel_z);
+  RenameSceneString(carousel.data, "../resource/lists/list_recommendations_albums.milo",
+                    "../resource/lists/portrait_recommendations.milo");
+  auto& leaders = *edited.Find("mini_leaders.lst");
+  PortraitPose(leaders, 1, 0, layout.leaderboard_z);
+  RenameSceneString(leaders.data, "../resource/lists/list_home_lb.milo",
+                    "../resource/lists/portrait_rec_leaders.milo");
+  const auto label = [&](const char* name, float z, float size) {
+    auto& object = *edited.Find(name);
+    PortraitPose(object, 1, -layout.width / 2 + 10, z);
+    PortraitText(object, size, layout.width - 20, 0x11);
+    // The reason's alternate bold font keeps its own material and emphasis.
+    for (const char* font : {"../resource/fonts/pentatonic_regularcond.milo", "../resource/fonts/pentatonic.milo"})
+      RenameSceneString(object.data, font, "../resource/fonts/portrait_splash.milo");
+    const auto font = std::search(object.data.begin(), object.data.end(), "../", "../" + 3);
+    PutBe32(object.data.data() + (font - object.data.begin()) - 41, 0);
+  };
+  label("song_title.lbl", layout.title_top, 18);
+  label("song_artist.lbl", layout.artist_top, 13);
+  label("song_info.lbl", layout.info_top, 11);
+  label("description.lbl", layout.reason_top, 13);
+  label("lb_title.lbl", layout.leaderboard_title_top, 11);
+  label("rank_first.lbl", -136, 12);
+  label("unavailablel.lbl", -136, 12);
+  auto ink = *templates.Find("active_normal.color");
+  ink.name = "portrait_recommendations.color";
+  SceneColor(ink.data, 17, 1, 1, 1, 1);
+  edited.objects.push_back(std::move(ink));
+  auto heading = *edited.Find("song_title.lbl");
+  heading.name = "portrait_tab_recs.lbl";
+  RenameSceneString(heading.data, "RB_Yellow.color", "portrait_recommendations.color");
+  PortraitPose(heading, 1, 0, layout.tabs_z);
+  PortraitText(heading, 17, layout.width - 76);
+  edited.objects.push_back(std::move(heading));
+  edited.Before("info.grp", {"portrait_tab_recs.lbl"});
+  for (const bool next : {false, true}) {
+    const auto stem = std::string(next ? "portrait_rec_next" : "portrait_rec_previous");
+    auto arrow = *edited.Find("portrait_tab_recs.lbl");
+    arrow.name = stem + ".lbl";
+    PortraitPose(arrow, 1, (next ? 1.f : -1.f) * layout.NavigationX(), layout.carousel_z);
+    PortraitText(arrow, 24, layout.navigation_size);
+    edited.objects.push_back(std::move(arrow));
+    edited.Before("recommendations.lst", {stem + ".lbl"});
+    PortraitSurface(edited, buttons, stem, layout.navigation_size, 42,
+                    (next ? 1.f : -1.f) * layout.NavigationX(), layout.carousel_z, {});
+    const auto header_stem = std::string(next ? "portrait_header_next" : "portrait_header_previous");
+    PortraitSurface(edited, buttons, header_stem, ui::kPortraitSongArrowTargetSize,
+                    ui::kPortraitSongArrowTargetSize,
+                    (next ? 1.f : -1.f) * (layout.width / 2 - ui::kPortraitSongArrowInset), layout.tabs_z, {});
+  }
+  auto empty = *edited.Find("song_title.lbl");
+  empty.name = "portrait_rec_empty.lbl";
+  PortraitPose(empty, 1, -layout.width / 2 + 10, 90);
+  PortraitText(empty, 16, layout.width - 20, 0x11);
+  edited.objects.push_back(std::move(empty));
+  edited.Before("info.grp", {"portrait_rec_empty.lbl"});
+  auto position = *edited.Find("portrait_tab_recs.lbl");
+  position.name = "portrait_rec_position.lbl";
+  PortraitPose(position, 1, layout.width / 2 - 52, 154);
+  PortraitText(position, 10, 44, 0x11);
+  edited.objects.push_back(std::move(position));
+  edited.Before("info.grp", {"portrait_rec_position.lbl"});
+  PortraitSurface(edited, buttons, "portrait_rec_hero", layout.width, 138, 0, 95, "description.lbl");
+  PortraitSurface(edited, buttons, "portrait_rec_details", layout.width, 132, 0, -40, "description.lbl");
+  PortraitSurface(edited, buttons, "portrait_rec_board", layout.width, 52, 0, -139, "mini_leaders.grp");
+  // Reading areas separate small text from the detailed animated backdrop.
+  SceneColor(edited.Find("portrait_rec_details.mat")->data, 0x19, .04f, .025f, .09f, .94f);
+  SceneColor(edited.Find("portrait_rec_board.mat")->data, 0x19, .04f, .025f, .09f, .9f);
+  const std::vector<std::string> board_members{"portrait_rec_board_border.mesh", "portrait_rec_board.mesh",
+      "mini_leaders.grp", "no_board.grp", "unavailable.grp", "loading.grp"};
+  for (const auto& name : board_members) edited.RemoveDrawMember(name);
+  PortraitHiddenGroup(edited, templates, "portrait_rec_board_state.grp", board_members);
+  edited.Before("loading_audio.grp", {"portrait_rec_board_state.grp"});
+  PortraitPose(*edited.Find("loading.grp"), .45f, 0, -139);
+  PortraitPose(*edited.Find("loading_audio.grp"), .25f, layout.width / 2 - 12, -152);
+  PortraitFooter(edited, buttons, aspect, false, false, true);
+  auto marker = *edited.Find("portrait_recommendations.color");
+  marker.name = "portrait_songs.color";
+  edited.objects.push_back(std::move(marker));
+  if (!PortraitLibraryAnimation(edited, aspect, error)) return false;
+  return PackStored(edited.Build(), scene, error);
+}
+
+bool PreparePortraitMessages(const std::vector<uint8_t>& source,
+                             const std::vector<uint8_t>& button_source, float aspect,
+                             std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error, 4 * 1024 * 1024) ||
+      !DecodeStream(button_source, &buttons, error)) return false;
+  if (bytes.size() != 2997942 || Crc32(bytes.data(), bytes.size()) != 0xC69F406E)
+    return Fail(error, "portrait messages source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait message button template revision changed");
+  PortraitScene edited(bytes), templates(buttons);
+  const auto layout = ui::PortraitMessages(aspect);
+  std::vector<std::string> old_art;
+  for (const auto& object : edited.objects)
+    if (object.type == "Mesh" || object.name == "message.txt") old_art.push_back(object.name);
+  for (const auto& name : old_art) edited.RemoveDrawMember(name);
+  PortraitHiddenGroup(edited, templates, "portrait_messages_landscape.grp", old_art);
+  auto& list = *edited.Find("songs.lst");
+  PortraitPose(list, 1, 0, layout.list_z);
+  RenameSceneString(list.data, "../resource/lists/list_inbox.milo",
+                    "../resource/lists/portrait_inbox.milo");
+  const auto label = [&](const char* name, float z, float size) {
+    auto& object = *edited.Find(name);
+    PortraitPose(object, 1, -layout.width / 2 + 10, z);
+    PortraitText(object, size, layout.width - 20, 0x11);
+    // Keep the body's alternate bold font separate: sharing its material with
+    // the primary font would let emphasis tint every glyph in the paragraph.
+    for (const char* font : {"../resource/fonts/pentatonic_regularcond.milo",
+                             "../resource/fonts/bureaugrot_wide_bold.milo",
+                             "../resource/fonts/pentatonic.milo"})
+      RenameSceneString(object.data, font, "../resource/fonts/portrait_splash.milo");
+    const auto font = std::search(object.data.begin(), object.data.end(), "../", "../" + 3);
+    PutBe32(object.data.data() + (font - object.data.begin()) - 41, 0);
+  };
+  label("subject.lbl", layout.subject_top, 16);
+  label("message.lbl", layout.body_top, 13);
+  for (const char* name : {"waiting_txt.lbl", "challenge_txt.lbl"})
+    label(name, 35, 14);
+  auto heading = *edited.Find("subject.lbl");
+  heading.name = "portrait_tab_messages.lbl";
+  auto ink = *templates.Find("active_normal.color");
+  ink.name = "portrait_messages_ink.color";
+  SceneColor(ink.data, 17, 1, 1, 1, 1);
+  RenameSceneString(heading.data, "Yellow.color", ink.name);
+  edited.objects.push_back(std::move(ink));
+  PortraitPose(heading, 1, 0, layout.tabs_z);
+  PortraitText(heading, 17, layout.width - 76);
+  edited.objects.push_back(std::move(heading));
+  edited.Before("inbox.grp", {"portrait_tab_messages.lbl"});
+  for (const bool next : {false, true}) {
+    const auto stem = std::string(next ? "portrait_header_next" : "portrait_header_previous");
+    PortraitSurface(edited, buttons, stem, ui::kPortraitSongArrowTargetSize,
+                    ui::kPortraitSongArrowTargetSize,
+                    (next ? 1.f : -1.f) * (layout.width / 2 - ui::kPortraitSongArrowInset), layout.tabs_z, {});
+  }
+  PortraitSurface(edited, buttons, "portrait_messages_reading", layout.width,
+                  layout.detail_top - layout.detail_bottom, 0,
+                  (layout.detail_top + layout.detail_bottom) / 2, "message.lbl");
+  SceneColor(edited.Find("portrait_messages_reading.mat")->data, 0x19, .04f, .025f, .09f, .94f);
+  SceneColor(edited.Find("portrait_messages_reading_border.mat")->data, 0x19, .36f, .79f, 1, .9f);
+  PortraitPose(*edited.Find("loading.grp"), .7f, 0, 70);
+  PortraitFooter(edited, buttons, aspect);
+  auto marker = *edited.Find("portrait_caption_black.color");
+  marker.name = "portrait_songs.color";
+  edited.objects.push_back(std::move(marker));
+  if (!PortraitLibraryAnimation(edited, aspect, error)) return false;
   return PackStored(edited.Build(), scene, error);
 }
 
@@ -1838,9 +2175,20 @@ bool PreparePortraitPowerups(const std::vector<uint8_t>& source,
   for (const auto& [name, x] : {std::pair{"your_monies_text.lbl", -layout.width / 4},
                                std::pair{"your_cred.lbl", layout.width / 4}}) {
     auto& label = *edited.Find(name);
-    PortraitPose(label, 1, x, -176);
+    PortraitPose(label, 1, x, layout.currency_z);
     PortraitText(label, 9, layout.width / 2 - 4);
+    // The coin and pick share a 45/136 ink center below the glyph top;
+    // the primary font's capitals use 20.5/31. Match their visible centers.
+    constexpr std::string_view icons = "../resource/fonts/blitz_icons.milo";
+    const auto font = std::search(label.data.begin(), label.data.end(), icons.begin(), icons.end());
+    if (font == label.data.end()) return Fail(error, "portrait currency icon font changed");
+    const auto end = size_t(font - label.data.begin()) + icons.size();
+    PutFloat(label.data.data() + end + 4, 24);
+    PutFloat(label.data.data() + end + 12, 24 * 45.f / 136 - 9 * 20.5f / 31);
   }
+  PortraitSurface(edited, buttons, "portrait_currency", layout.width, layout.currency_height,
+                  0, layout.currency_z, {});
+  edited.Before("your_cred.lbl", {"portrait_currency_surface.grp"});
   for (const auto& [name, x] : {
       std::pair{"title_deployed.lbl", -layout.width / 3},
       std::pair{"title_seeded.lbl", 0.f}, std::pair{"title_automatic.lbl", layout.width / 3}}) {

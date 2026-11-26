@@ -156,6 +156,19 @@ The public repository has no setup release yet, so the Pages publication gate ca
 the first feed. The automatic installer updater remains dormant; this release's action opens
 GitHub Releases only.
 
+**Portrait Messages acceptance (2026-11-25):** Native feed rows, built-in icons,
+the reading panel and action footer are adapted for portrait. Host checks cover
+scene generation and layout contracts; live appearance, long-feed scrolling,
+selection/read state and update navigation still require verification. See
+[Messages portrait presentation](../engine/messages.md#10-portrait-presentation-2026-11-25).
+
+**Portrait Recommended acceptance (2026-11-25):** The native album carousel,
+song/reason panel, category icon, compact leaderboard and five-action footer
+have portrait layouts and host coverage. Live artwork/text, carousel navigation,
+preview/launch/store actions and connected leaderboard/challenge routes remain
+unverified. Separate challenge/full leaderboard scenes retain their existing
+presentation. See [portrait Recommended page](../engine/input-flow.md#portrait-recommended-page).
+
 **Inbox icon assets (messages M6, 2026-11-06):** `icons_unplayed_songs` has no row
 material in `list_inbox.milo_xbox`, and `icon_challenge` has a row material but
 no verified bitmap in the main ark. Both feed IDs draw `icon_misc`. The measured

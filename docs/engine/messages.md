@@ -278,3 +278,38 @@ launch the dormant updater.
 
 Implementation and acceptance evidence are tracked in the
 [`messages feed plan`](../plans/finished/2026-10-23-messages-and-update-feed-plan.md).
+
+## 10. Portrait presentation (2026-11-25)
+
+`PreparePortraitMessages` generates the native inbox panel with a centered private
+header, three visible feed rows, a reading panel and the native action footer.
+`PreparePortraitMessagesList` derives `portrait_inbox.milo_xbox` from the installed
+list. Each row reserves a 28-unit icon on its left and a wrapped date/subject beside
+it; the provider keeps selecting the original named icon material. The icon widget
+draws after the row background so that surface cannot cover the artwork.
+
+The feed uses 48-unit spacing and the same fractional viewport, drag, momentum,
+mouse wheel and controller paths as My Songs. Dragging changes the viewport without
+reselecting every passing row. Selecting a row still runs the native message timer,
+subject/body update and action refresh. The reading panel measures the new wrapped
+text after entry, feed updates and selection changes, then fits its visible glyphs
+into separate title and body areas. The body's alternate bold font retains its
+own material so emphasis cannot recolor the full paragraph.
+
+The footer retains the native Back action and context-sensitive Select/Update
+actions. The private header uses the same library navigation arrows and restores
+their shared transforms on exit. Landscape resources and the feed transport are
+unchanged. The source chunks are validated by size and CRC before rewriting; the
+inbox's larger chunks have a local 4 MiB decode limit.
+
+Validation artifacts are `out/messages-portrait-build.log`,
+`out/messages-portrait-record-tests.log` and `out/messages-portrait/records/`.
+The Windows release build, seven focused CTest suites and 1,633 installed-record
+checks pass. Host tests cover callback ordering, independent scroll/selection state, icon
+retention, text/font resources, layout separation and generated scenes at four
+phone/tablet aspects. In-game appearance, gestures with a long feed, changing
+message contents, empty/loading states and update navigation remain unverified.
+The shared title code applies to Windows, Linux, macOS and iOS; only the Windows
+release build and host tests were run.
+The documentation checker reports 18 existing stale-link/path errors elsewhere
+in the repository; none refer to the new portrait Messages section.

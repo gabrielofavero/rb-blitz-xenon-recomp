@@ -12,6 +12,7 @@
 #include <vector>
 
 struct PPCContext;
+namespace rb_blitz::ui { struct PortraitCalibrationAction; }
 
 namespace rb_blitz::input {
 
@@ -22,7 +23,11 @@ struct MenuPoint { float x = 0, y = 0; };
 MenuPoint MenuWindowPointer(float x, float y, int width, int height);
 // Absolute guest UI positions authored by draw hooks share the panel's safe fit.
 MenuPoint PortraitDrawPoint(float x, float z);
+MenuPoint PortraitPanelTranslation();
 std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable);
+// Transition screens draw both library panels; each retains its own layout identity.
+void DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t drawable,
+                       void (*draw)(PPCContext&, uint8_t*));
 // The presented rectangle inside a `w` x `h` frame: the part of the window the guest's frame
 // occupies once the presenter has applied the video mode's aspect and (optionally) the overscan
 // safe area. MenuPointer and MenuPointToWindow share it, so a pointer and an overlay drawn from
@@ -239,6 +244,17 @@ inline int LibraryHeaderForLabel(std::string_view name) {
   if (name == "main_inbox.lbl" || name == "portrait_tab_messages.lbl") return 2;
   if (name == "main_Home.lbl" || name == "portrait_tab_recs.lbl") return 3;
   return -1;
+}
+
+// UIListLabelElement owns an unnamed UILabel clone. Its UIListLabel widget
+// retains the provider field name, including when a recycled row is refilled.
+inline bool PortraitListRowField(std::string_view screen, std::string_view field) {
+  if (screen == "inbox_screen") return field == "subject_line" || field == "header";
+  if (screen == "store_menu_screen" || screen == "store_browser_screen" ||
+      screen == "store_info_screen")
+    return field == "filter" || field == "song" || field == "album" ||
+           field == "group" || field == "group_center" || field == "list";
+  return screen == "song_select_screen";
 }
 
 // Touch owns a highlight only for its pressed row. Activation waits for feedback
@@ -568,6 +584,8 @@ struct InlineHelpPlacement;
 std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* base, uint32_t owner);
 InlineHelpPlacement PortraitMenuHintPlacement(PPCContext& ctx, uint8_t* base, uint32_t owner,
                                              const InlineHelpEntry& entry, size_t index, size_t count);
+ui::PortraitCalibrationAction PortraitMenuHintSlot(PPCContext& ctx, uint8_t* base, uint32_t owner,
+                                                  size_t index, size_t count);
 // Keep the footer's live labels associated with their native button surfaces.
 void DrawMenuHints(PPCContext& ctx, uint8_t* base, uint32_t owner, size_t index, size_t count,
                     void (*draw)(PPCContext&, uint8_t*));

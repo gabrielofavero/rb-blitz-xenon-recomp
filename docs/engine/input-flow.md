@@ -40,8 +40,19 @@ gesture; a suspended guest does not accumulate momentum.
 RhythmVerse uses the focused vertical list on `store_menu_screen` and
 `store_browser_screen`, including browsing categories and submitted search
 results. The current provider determines the scroll range as result counts
-change. Loading, download and error dialogs retain their own input scope;
+change. Messages uses the same drag, momentum and wheel path for its focused
+`songs.lst`; its separate reading panel stays outside that gesture area.
+Loading, download and error dialogs retain their own input scope;
 details screens and horizontal lists do not opt into content dragging.
+
+Portrait store layouts refresh each list after changing its visible row count:
+the native setter recreates label elements without filling them from the provider.
+The private header uses the portrait font and stays outside the menu's loading,
+loaded and unavailable groups so state changes preserve its centered title.
+Row surfaces identify the owning `UIListLabel` provider field: the guest creates
+unnamed `UILabel` copies for each visible element. The library tab titles center
+between the shared marquee's settled rails, outside the content panel's safe-area
+transform, matching the background panel that draws those rails and arrows.
 
 `TouchListScroll` in `src/input/touch_scroll.h` keeps fractional viewport positions.
 Whole rows use the existing native selection/scroll notifications. The
@@ -49,6 +60,16 @@ Whole rows use the existing native selection/scroll notifications. The
 progress through `UIListState` +52/+60; the native builder handles the extra edge
 row, provider spacing and alpha. Navigation fields are restored before returning.
 Rendering and hit testing therefore use the same guest draw state.
+
+`DrawNativeList` lends each widget its native spare element before drawing the
+extra edge row and fills that element through `UIListDir::ScrollStart`. After
+each render pass it returns the last element without rotating the settled rows
+or emitting selection notifications. The synthetic draw otherwise indexes past
+the widget's seven elements on the eighth row; the 2026-11-25 My Songs dump
+records that null dereference in `UIListLabel::Draw` (`824BF178`, row index 7).
+The isolated `native_list_draw` suite checks the filled edge row, repeated render
+passes, element order and ownership restoration, ordinary native scrolling, and
+empty/short filtered lists. Live scrolling remains a manual validation gate.
 
 This path is shared across SDL platforms and rendering backends. Host tests cover
 tap/drag separation, fractional travel, momentum, interruption, boundaries,
@@ -65,6 +86,55 @@ touching a coasting list only stops it. Pixel scrolling is applied before the
 child window begins so hit testing follows the newly drawn positions. Resizing,
 backgrounding, closing, keyboard/controller navigation, mouse-wheel input and
 physical mouse use cancel touch motion. Mouse as Touch also supports this path.
+
+## Portrait Recommended page
+
+The native `recommendation_screen` has a portrait layout as of 2026-11-25.
+`PreparePortraitRecommendations` derives its panel from the installed scene;
+private carousel and compact leaderboard resources retain the native
+`album_mesh`, `rec_type`, `user_name`, `rank` and `mini_score` provider fields.
+The carousel presents one square album image at a time, its category icon and
+caption, a position counter, and a separate song/artist/genre/reason panel.
+The layout scales the original square artwork uniformly and fits measured text
+within independent reading areas.
+
+Previous/Next buttons send the native D-pad left/right actions and disappear at
+the ends of the list. Their hit areas stay separate from the album's Confirm
+target and the header's library-navigation arrows. The single visible card
+explicitly retains its horizontal axis for mouse-wheel remapping. Sizing occurs
+before native provider binding, so rebuilding the list cannot erase its freshly
+filled elements or replace the saved selection.
+
+The action footer supports all five native actions. Confirm and Back occupy the
+lower row; available options, preview and leaderboard actions occupy a separate
+row above it. Each action has its own surface and hit area. Caption ordering,
+placement and hit testing use the same live action list, preserving the original
+action IDs and input-icon styles. The shared InlineHelp draw bridge separates
+five labels on this screen while retaining the smaller limits on other screens.
+
+An empty provider shows a localized empty-state caption and hides the artwork,
+metadata, counter, navigation and leaderboard container. Confirm, Preview and
+Leaderboard actions are cleared in that state; Back and Options retain their
+native behavior. The compact leaderboard keeps its native hidden, loading,
+visible, empty and unavailable states. Its container prevents stale leaderboard
+content from remaining visible after the last recommendation disappears.
+
+The native preview, store, song-launch and challenge handlers remain in the
+Recommendations record. Separate challenge and full leaderboard screens still
+require their own portrait acceptance; adapting this page does not validate
+those destinations or restore online services.
+
+Validation artifacts are `out/recommendations-portrait-build.log`,
+`out/recommendations-portrait-record-tests.log` and
+`out/recommendations-portrait/records/`. Windows AMD64 Release, eight focused
+CTest suites and 1,883 installed-record checks pass. Checks cover four phone and
+tablet aspects, footer separation, provider/action preservation, empty and
+boundary states, artwork sizing and incompatible source refusal. In-game
+appearance, tap/wheel/controller navigation, previews and connected-service
+actions remain unverified. The title code is shared across Windows, Linux,
+macOS and iOS; the latter three platforms were not built or device-tested.
+The documentation checker still reports 18 existing stale-link/path errors;
+none refer to this section or the Recommended layout.
 
 ## Touch gameplay and calibration timing
 
