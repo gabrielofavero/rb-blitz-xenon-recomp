@@ -9,6 +9,9 @@
 #include <vector>
 
 namespace rb_blitz::ui::input_font {
+// Bind detached panel content to the directory fitted by the viewport draw hook.
+bool PreparePortraitCanvas(const std::vector<uint8_t>& source,
+                           std::vector<uint8_t>* scene, std::string* error);
 
 // Derive an icon-only copy of the installed Pentatonic font scene. Its glyph
 // table is private; the texture still shares the retail 1024-square identity.

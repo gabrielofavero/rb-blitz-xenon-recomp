@@ -2029,6 +2029,10 @@ void TestPortraitSplash() {
       if (op == "-") return self(self, n.kids[1]) - self(self, n.kids[2]);
       if (op == "/") return self(self, n.kids[1]) / self(self, n.kids[2]);
       const auto& action = n.kids[1].text;
+      if (action == "set" && n.kids[2].text == "width") {
+        CHECK_FALSE(measured);
+        CHECK_TRUE(self(self, n.kids[3]) < 480 * 9.f / 16);
+      }
       if (action == "set_height_from_text") { measured = true; return 0; }
       if (action == "get") { CHECK_TRUE(measured); return text_height; }
       if (action == "set_local_pos") z[op] = self(self, n.kids[4]);
@@ -2344,6 +2348,51 @@ void TestMiloFlowBoundaries() {
   CHECK_TRUE((boundaries == std::vector<size_t>{root, flow_end, texture_end}));
   bytes.resize(flow_end);
   CHECK_TRUE(MiloObjectBoundaries(bytes, 0, 2).empty());
+}
+
+void TestPortraitCanvas() {
+  BeginCase("detached portrait objects inherit the fitted panel without changing animation parents");
+  std::vector<uint8_t> bytes;
+  const auto word = [&](uint32_t value) {
+    for (int shift = 24; shift >= 0; shift -= 8) bytes.push_back(uint8_t(value >> shift));
+  };
+  const auto string = [&](std::string_view value) {
+    word(uint32_t(value.size())); bytes.insert(bytes.end(), value.begin(), value.end());
+  };
+  word(32); string("PanelDir"); string("panel");
+  word(0); word(0); bytes.push_back(0); word(3);
+  string("UILabel"); string("detached.lbl");
+  string("UILabel"); string("animated.lbl");
+  string("Trans"); string("Parent.trans");
+  word(0xADDEADDE);
+  for (const auto [matrix, parent] : {std::pair{size_t(0x19), ""},
+                                     {size_t(0x19), "Parent.trans"}, {size_t(0x11), ""}}) {
+    bytes.insert(bytes.end(), matrix + 105, 0);
+    string(parent); word(0xADDEADDE);
+  }
+  std::vector<uint8_t> packed(0x810, 0);
+  const auto little = [&](size_t at, uint32_t value) {
+    for (size_t i = 0; i < 4; ++i) packed[at + i] = uint8_t(value >> (8 * i));
+  };
+  little(0, 0xCABEDEAF); little(4, 0x810); little(8, 1);
+  little(12, uint32_t(bytes.size())); little(16, uint32_t(bytes.size()) | 0x01000000);
+  packed.insert(packed.end(), bytes.begin(), bytes.end());
+  std::vector<uint8_t> fitted;
+  std::string why;
+  CHECK_TRUE(rb_blitz::ui::input_font::PreparePortraitCanvas(packed, &fitted, &why));
+  const auto markers = rb_blitz::ui::input_font::detail::MiloObjectBoundaries(
+      std::span<const uint8_t>(fitted).subspan(0x810), 0, 3);
+  CHECK_EQ(markers.size(), size_t(4));
+  if (markers.size() != 4) return;
+  for (size_t i = 0; i < 3; ++i) {
+    const auto at = 0x810 + markers[i] + 4 + (i == 2 ? 0x11 : 0x19) + 105;
+    const std::string expected = i == 1 ? "Parent.trans" : "panel";
+    CHECK_EQ(fitted[at + 3], uint8_t(expected.size()));
+    CHECK_TRUE(std::memcmp(fitted.data() + at + 4, expected.data(), expected.size()) == 0);
+  }
+  std::vector<uint8_t> again;
+  CHECK_TRUE(rb_blitz::ui::input_font::PreparePortraitCanvas(fitted, &again, &why));
+  CHECK_TRUE(again == fitted);
 }
 
 int main(int argc, char** argv) {
@@ -4292,6 +4341,7 @@ int main(int argc, char** argv) {
     CHECK_EQ(moved.size(), fixture().size());
   }
   TestMiloFlowBoundaries();
+  TestPortraitCanvas();
   TestExtendingKeepsOnePart();
   TestBaseArkGetsItsOwnPart();
   TestMountedPartOfTheWrongSizeIsNotCarried();

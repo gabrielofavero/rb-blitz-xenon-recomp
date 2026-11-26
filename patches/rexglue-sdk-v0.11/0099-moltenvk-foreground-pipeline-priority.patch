@@ -1,0 +1,138 @@
+diff --git a/src/gpu/xenos/host/vulkan/pipeline_compilation_gate.h b/src/gpu/xenos/host/vulkan/pipeline_compilation_gate.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/host/vulkan/pipeline_compilation_gate.h
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++#include <condition_variable>
++#include <cstddef>
++#include <mutex>
++#include <utility>
++
++namespace rex::gpu::vulkan {
++// MoltenVK serializes shader-library conversion inside its pipeline cache.
++// Schedule that serial work before entering the driver so preparation workers
++// cannot queue ahead of pipelines needed by the current frame.
++class PipelineCompilationGate {
++ public:
++  template <typename Callback> decltype(auto) Run(bool background, Callback&& callback) {
++    {
++      std::unique_lock lock(mutex_);
++      if (!background) ++foreground_waiters_;
++      changed_.wait(lock, [&] { return !active_ && (!background || !foreground_waiters_); });
++      if (!background) --foreground_waiters_;
++      active_ = true;
++    }
++    struct Completion {
++      PipelineCompilationGate& gate;
++      ~Completion() {
++        {
++          std::lock_guard lock(gate.mutex_);
++          gate.active_ = false;
++        }
++        gate.changed_.notify_all();
++      }
++    } completion{*this};
++    return std::forward<Callback>(callback)();
++  }
++  std::size_t WaitingForeground() const {
++    std::lock_guard lock(mutex_);
++    return foreground_waiters_;
++  }
++ private:
++  mutable std::mutex mutex_;
++  std::condition_variable changed_;
++  std::size_t foreground_waiters_ = 0;
++  bool active_ = false;
++};
++}  // namespace rex::gpu::vulkan
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.h b/src/gpu/xenos/vulkan/pipeline_cache.h
+--- a/src/gpu/xenos/vulkan/pipeline_cache.h
++++ b/src/gpu/xenos/vulkan/pipeline_cache.h
+@@ -10,6 +10,7 @@
+  */
+ 
+ #pragma once
++#include "gpu/xenos/host/vulkan/pipeline_compilation_gate.h"
+ #include <rex/gpu/native_pipeline_cache.h>
+ 
+ #ifndef XXH_INLINE_ALL
+@@ -386,7 +387,8 @@
+    */
+   bool CreatePipeline(const PipelineCreationArguments& creation_arguments,
+                       VkShaderModule fragment_shader_override = VK_NULL_HANDLE,
+-                      bool defer_publication = false);
++                      bool defer_publication = false, bool background_preparation = false);
++  PipelineCompilationGate compilation_gate_;
+   void CreationThread(size_t thread_index);
+   void CreateQueuedPipelinesOnProcessorThread();
+   void PublishCompletedPipelines();
+diff --git a/src/gpu/xenos/vulkan/pipeline_cache.cpp b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+--- a/src/gpu/xenos/vulkan/pipeline_cache.cpp
++++ b/src/gpu/xenos/vulkan/pipeline_cache.cpp
+@@ -846,7 +846,7 @@
+     if (creation_arguments.preload_identity != kNoPreloadIdentity) {
+       preparation.BeginEntry(creation_arguments.preload_identity);
+     }
+-    if (CreatePipeline(creation_arguments, VK_NULL_HANDLE, true)) {
++    if (CreatePipeline(creation_arguments, VK_NULL_HANDLE, true, true)) {
+       preparation.SucceedEntry(creation_arguments.preload_identity);
+     } else {
+       preparation.FailEntry(creation_arguments.preload_identity);
+@@ -3107,7 +3107,8 @@
+ }
+ 
+ bool VulkanPipelineCache::CreatePipeline(const PipelineCreationArguments& creation_arguments,
+-                                         VkShaderModule fragment_shader_override, bool defer_publication) {
++                                         VkShaderModule fragment_shader_override, bool defer_publication,
++                                         bool background_preparation) {
+   VkPipeline existing_pipeline =
+       creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
+   bool is_placeholder =
+@@ -3568,8 +3569,12 @@
+   VkPipeline pipeline;
+   VkResult create_result = rex::diagnostics::compile_trace::Call(creating_placeholder ? rex::diagnostics::compile_trace::Event::kPlaceholder : rex::diagnostics::compile_trace::Event::kGuestPipeline,
+         "src/gpu/xenos/vulkan/pipeline_cache.cpp:3082", XXH3_64bits(&description, sizeof(description)), [&] {
+-          return vulkan_device->CreateGraphicsPipelines(1,
+-                                                         &pipeline_create_info, nullptr, &pipeline);
++          const auto create = [&] {
++            return vulkan_device->CreateGraphicsPipelines(1, &pipeline_create_info, nullptr, &pipeline);
++          };
++          if (vulkan_device->GetProperties().driverID == VK_DRIVER_ID_MOLTENVK)
++            return compilation_gate_.Run(background_preparation, create);
++          return create();
+         });
+   if (create_result != VK_SUCCESS) {
+     u64 ps_hash = creation_arguments.pixel_shader
+diff --git a/src/base/threading_posix.cpp b/src/base/threading_posix.cpp
+--- a/src/base/threading_posix.cpp
++++ b/src/base/threading_posix.cpp
+@@ -988,6 +988,19 @@
+       pthread_attr_destroy(&attr);
+       return false;
+     }
++#if REX_PLATFORM_MAC
++    if (params.initial_priority != 0) {
++      // Darwin schedules application work through QoS. POSIX attributes with
++      // inherited scheduling do not apply the requested worker priority.
++      const qos_class_t qos = params.initial_priority < 0
++          ? (params.initial_priority < -1 ? QOS_CLASS_BACKGROUND : QOS_CLASS_UTILITY)
++          : (params.initial_priority > 1 ? QOS_CLASS_USER_INTERACTIVE : QOS_CLASS_USER_INITIATED);
++      if (pthread_attr_set_qos_class_np(&attr, qos, 0) != 0) {
++        pthread_attr_destroy(&attr);
++        return false;
++      }
++    }
++#else
+     if (params.initial_priority != 0) {
+       sched_param sched{};
+       sched.sched_priority = params.initial_priority + 1;
+@@ -1000,6 +1013,7 @@
+         return false;
+       }
+     }
++#endif
+     ThreadStartData* const start = start_data.release();
+     if (pthread_create(&thread_, &attr, ThreadStartRoutine, start) != 0) {
+       start_data.reset(start);

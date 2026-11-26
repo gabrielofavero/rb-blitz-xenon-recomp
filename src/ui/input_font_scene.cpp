@@ -788,6 +788,39 @@ bool PreparePortraitStartupLogo(const std::vector<uint8_t>& source,
   return PackStored(bytes, scene, error);
 }
 
+bool PreparePortraitCanvas(const std::vector<uint8_t>& source,
+                           std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes;
+  if (!DecodeStream(source, &bytes, error, 16 * 1024 * 1024)) return false;
+  // Fonts, nested list resources and ordinary RndDirs keep their own coordinate
+  // spaces. Only the owning UI panel receives the runtime safe-area transform.
+  constexpr std::string_view type = "PanelDir";
+  if (bytes.size() < 8 + type.size() || Be32(bytes.data() + 4) != type.size() ||
+      std::memcmp(bytes.data() + 8, type.data(), type.size())) {
+    *scene = source;
+    return true;
+  }
+  PortraitScene edited(bytes);
+  for (auto& object : edited.objects) {
+    // Trans records include Parent.trans, whose children already inherit the
+    // directory through it. Never reparent an existing animation hierarchy.
+    const auto matrix = object.type == "Trans" ? size_t(0x11) : PortraitMatrix(object);
+    if (!matrix) continue;
+    const auto parent = matrix + 105;
+    if (parent + 4 > object.data.size() ||
+        Be32(object.data.data() + parent) > object.data.size() - parent - 4)
+      return Fail(error, "portrait canvas transform parent changed");
+    if (Be32(object.data.data() + parent) != 0) continue;
+    if (object.type == "Trans") {
+      PutBe32(object.data.data() + parent, uint32_t(edited.root.size()));
+      object.data.insert(object.data.begin() + parent + 4, edited.root.begin(), edited.root.end());
+    } else {
+      PortraitParent(object, edited.root);
+    }
+  }
+  return PackStored(edited.Build(), scene, error);
+}
+
 bool PreparePortraitAutosave(const std::vector<uint8_t>& source, float aspect,
                             std::vector<uint8_t>* scene, std::string* error) {
   std::vector<uint8_t> bytes;

@@ -70,6 +70,19 @@ passes all nine targeted CTest suites, 2,802 layout checks, 1,047 installed
 portrait-record checks, and both development launch-helper test suites. Native
 Linux, macOS and iOS builds and device visual acceptance remain unverified.
 
+Portrait panel content with no transform parent is attached to its owning
+directory when the payload is prepared. Draw-group membership alone does not
+provide transform inheritance. This lets the runtime fit cover detached labels,
+buttons and animation roots as well as ordinary child objects; existing animation
+parents remain intact. The fit contains the entire authored 480-unit canvas in
+the current window safe rectangle, adds a 2% gutter, preserves proportions, and
+updates when the window or safe area changes. It handles arbitrary phone sizes
+without selecting a layout from a resolution whitelist. The autosave entry script
+also reapplies its portrait wrapping width before measuring localized text.
+These rules are shared across platforms and graphics backends. The regression
+matrix includes compact 16:9 phones, notched iPhones, 18:9 through 22:9 phones,
+multiple pixel densities, asymmetric insets and intermediate resize widths.
+
 [static] The visible desktop controls are Resolution -> Interface / Gameplay.
 Each defaults to `native`, resolving the current monitor on each boot. The other
 choices retain the selected aspect down to 720 pixels high. Manual choices persist

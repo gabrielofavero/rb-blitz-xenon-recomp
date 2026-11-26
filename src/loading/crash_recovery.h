@@ -5,6 +5,7 @@
 
 namespace rb_blitz::loading {
 void ConfigureCrashRecovery(const std::filesystem::path& cache_root, bool settings_restart_boot = false);
+void CloseCrashRecovery();
 void BeginCrashRecoveryAttempt();
 void BeforeSongLoadJob();
 void EndCrashRecoveryAttempt();

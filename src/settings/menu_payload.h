@@ -66,7 +66,8 @@ bool AddPortraitSongsLayout(std::vector<ui::dtb::Node>* roots, float aspect, std
 bool AddPortraitStoreLayout(std::vector<ui::dtb::Node>* roots, float aspect, bool info, std::string* why);
 bool AddPortraitPowerupsLayout(std::vector<ui::dtb::Node>* roots, float aspect, std::string* why);
 // Center the autosave icon and wrapped warning using the native label height.
-bool AddPortraitAutosaveLayout(std::vector<ui::dtb::Node>* roots, std::string* why);
+bool AddPortraitAutosaveLayout(std::vector<ui::dtb::Node>* roots, std::string* why,
+                              float aspect = 9.f / 16);
 bool AddPortraitMessagesLayout(std::vector<ui::dtb::Node>* roots, float aspect, std::string* why);
 bool AddPortraitRecommendationsLayout(std::vector<ui::dtb::Node>* roots, float aspect, std::string* why);
 bool AddPortraitLoadingLayout(std::vector<ui::dtb::Node>* roots, bool song_loading,

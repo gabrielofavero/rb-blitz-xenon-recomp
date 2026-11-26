@@ -19,3 +19,7 @@ setjmp_address = 0x82772940
 
 # Reuse proven stack-slot values within a basic block; codegen invalidates at barriers.
 forward_stack_stores = true
+
+# Keep guest temporaries and callee-saved values in compiler-managed registers.
+non_argument_as_local = true
+non_volatile_as_local = true

@@ -1,6 +1,6 @@
 # ReXGlue v0.11.0 production stack and migration ledger
 
-Status: registered production stack, 2026-11-21. **69 SDK patches** apply to exact
+Status: registered production stack, 2026-11-26. **73 SDK patches** apply to exact
 upstream v0.11.0 commit `a3e1d82678ca20d68d4837a8e9ee4652ff073745`.
 The production gitlink and title integration now use this release and patch set.
 The fresh Windows AMD64 production source-SDK release build passes.
@@ -21,7 +21,7 @@ is retained for rollback. The
 owns current delivery gates and validation.
 
 The ledger covers all **71 original SDK patch IDs**, the retained nested
-MoltenVK patch, and new responsibilities **0089**, **0090**, **0091**, **0092**, **0093**, **0094**, **0095**, **0096** and **0097**. Sixty original IDs have candidate
+MoltenVK patch, and new responsibilities **0089**, **0090**, **0091**, **0092**, **0093**, **0094**, **0095**, **0096**, **0097**, **0098**, **0099**, **0100** and **0101**. Sixty original IDs have candidate
 files; eleven use an upstream/title replacement or fold into an owning candidate.
 Original IDs retain their responsibility even when filenames or implementation
 layers change. Corrections are folded into the owning candidate; 0089 is separate
@@ -43,6 +43,86 @@ MoltenVK), independent of host architecture. Windows AMD64 compilation and
 full-stack replay are checked locally; native Linux/macOS/iOS/Android and
 Vulkan/MoltenVK runtime transitions remain unverified.
 No removed SDK API shim or second runtime is introduced.
+
+### Exact guest upload snapshots (2026-11-26)
+
+[0101-vulkan-unchanged-upload-snapshots.patch](0101-vulkan-unchanged-upload-snapshots.patch)
+uses a fixed-capacity CPU snapshot cache to omit unchanged Vulkan uploads. Exact
+page comparisons preserve the normal per-frame refresh that catches unwatched
+host writes. Snapshots feed the upload staging copy, so both versions agree;
+no live guest pages are aliased by the GPU and no GPU mapping is read on the CPU.
+GPU writes, cache clear and explicit invalidation discard matching snapshots.
+Write watches are armed before comparisons, partial-upload failures invalidate
+the corresponding validity state, and allocation failure disables this optional
+cache. Existing copy barriers and 0070's hoisting hazards remain authoritative.
+
+The scope is Vulkan on all hosts, disabled by default. Explicit budgets
+(0-128 MiB) enable this experimental upload policy; changing system pressure in
+the Apple measurements prevents a repeatable FPS claim.
+D3D12 is unchanged. The separate 0098 allocator/retention policy remains intact.
+The queued-copy oracle exercises pending uploads, overlapping GPU writes, exact
+last-byte changes, private snapshot ownership, bounded replacement and reset.
+Builds and gameplay measurements are in the
+[performance study](../../docs/engine/vulkan-performance.md).
+
+### Shared localized register state (2026-11-26)
+
+[0100-codegen-shared-local-register-state.patch](0100-codegen-shared-local-register-state.patch)
+corrects the ABI of shared-register calls under register localization. A cleanup
+funclet may receive its parent frame in volatile r12; synchronizing only ABI
+nonvolatiles leaves that pointer in a caller local while the callee reads zero.
+Shared bodies retain context storage for every register family. Callers copy all
+enabled localized registers through context at shared-call and setjmp boundaries.
+The code-generation behavior stamp advances to 5 so old outputs regenerate.
+
+This is a shared v0.11 code-generation correction for Windows, Linux, macOS and
+iOS, across supported architectures and D3D12/Vulkan/MoltenVK. All localization
+flags remain opt-in SDK settings. It does not replace 0005's discovery/stamp
+implementation or the title's explicit function annotations. Two regressions
+fail against the original generator; 51 focused cases (385 assertions) pass
+against the correction. All 73 production patches replay in isolation; the
+pre-existing live prompt mismatch remains preserved. Native game validation is
+recorded in the [performance study](../../docs/engine/vulkan-performance.md).
+
+### MoltenVK foreground compilation priority (2026-11-26)
+
+[0099-moltenvk-foreground-pipeline-priority.patch](0099-moltenvk-foreground-pipeline-priority.patch)
+prioritizes pipelines needed by a current frame over preparation jobs before
+entering MoltenVK's serial shader-library cache. One preparation conversion may
+finish, then waiting foreground work takes precedence over queued background
+jobs. Other Vulkan drivers keep parallel driver calls. The scope includes macOS
+arm64/x86-64 and iOS arm64 using MoltenVK; D3D12 is unchanged. Preparation
+lifecycle (0021), persistence (0028) and pending draws (0069) retain their owners.
+The patch also maps explicit initial Apple thread priorities to native QoS:
+lowest/background, below-normal/utility, above-normal/user-initiated and
+highest/user-interactive. Normal priority retains inherited scheduling. The old
+POSIX attributes did not establish Darwin QoS for preparation workers. This host
+thread mapping applies independently of the rendering backend on macOS/iOS;
+Windows/Linux retain the existing implementation. The eight-check host test
+verifies driver-work priority and exception-safe release; the native QoS test
+checks the class inside each newly created worker. Native macOS worker QoS passes 12 checks; current-frame and failure-release
+priority passes eight. Both Apple arm64 release builds and seven focused CTest
+registrations pass. Native iOS device scheduling and Intel macOS remain untested.
+
+### Apple GPU memory retention (2026-11-26)
+
+[0098-apple-gpu-memory-retention.patch](0098-apple-gpu-memory-retention.patch)
+owns cache and allocator residency. Demand-paged imported host backing for the
+512 MiB guest mirror and scaled resolves, smaller VMA blocks, LZFSE-retained shader
+source, completion-gated upload-page retirement and an eight-pool idle command
+reserve apply on Apple MoltenVK. Host import validates support/alignment/types,
+keeps CPU pages alive until Vulkan memory is freed and falls back to private
+allocation. `gpu.vulkan.host_memory_backing=false` restores private backing. Texture-cache defaults are smaller on macOS/iOS,
+including Intel macOS; explicit settings retain precedence. No allocation-size
+cap, rendering-resolution change, or removed API is introduced. Other drivers,
+Windows/Linux architectures and D3D12 retain their defaults. Existing owners
+0070/0073/0074/0097 still control ordering, submission, mapping and resolve limits.
+The shared upload-pool constructor defaults to retaining all pages, so current
+D3D12 and non-MoltenVK Vulkan consumers keep their behavior.
+
+The [memory study](../../docs/engine/vulkan-performance.md#apple-gpu-memory-retention-2026-11-26)
+records the native Apple M1 allocator comparison (288 to 40 MiB retained blocks),
+CPU lifetime/override tests, builds and remaining platform/runtime limits.
 
 ### Vulkan resolve allocation limit (2026-11-21)
 

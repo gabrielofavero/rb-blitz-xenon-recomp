@@ -35,6 +35,22 @@ int main() {
     CHECK_TRUE(matches(value));
   }
 
+  BeginCase("shader source compression defaults to LZFSE and preserves explicit overrides");
+  constexpr const char* compression_key = "MVK_CONFIG_SHADER_COMPRESSION_ALGORITHM";
+  const char* original_compression = std::getenv(compression_key);
+  const std::optional<std::string> saved_compression = original_compression
+      ? std::optional<std::string>(original_compression) : std::nullopt;
+  CHECK_EQ(unsetenv(compression_key), 0);
+  configure();
+  CHECK_TRUE(std::string(std::getenv(compression_key)) == "1");
+  for (const char* value : {"0", "2", ""}) {
+    CHECK_EQ(setenv(compression_key, value, 1), 0);
+    configure();
+    CHECK_TRUE(std::string(std::getenv(compression_key)) == value);
+  }
+  if (saved_compression) setenv(compression_key, saved_compression->c_str(), 1);
+  else unsetenv(compression_key);
+
   if (saved) setenv(key, saved->c_str(), 1);
   else unsetenv(key);
   return Finish();

@@ -492,6 +492,7 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
   }
 
   void OnShutdown() override {
+    rb_blitz::loading::CloseCrashRecovery();
     CloseDisplayTrial();
 #if defined(RB_BLITZ_IOS)
     if (ios_event_watch_) {

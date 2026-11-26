@@ -120,3 +120,72 @@ after_instruction = true
 address = 0x823F3878
 name = "RenderFrameWidthHook"
 registers = ["r7", "r29"]
+
+# The audio read hook uses its caller's r31 to identify the VorbisReader.
+# Synchronize localized nonvolatiles across this call.
+[functions."0x827E08F8"]
+share_registers = true
+
+# Cleanup funclets and the stack probe take their parent frame or size in r12.
+# Keep these nonstandard call boundaries in shared context under localization.
+[functions]
+"0x82256D2C" = { share_registers = true }
+"0x82256D74" = { share_registers = true }
+"0x82256DDC" = { share_registers = true }
+"0x82256E44" = { share_registers = true }
+"0x82256EAC" = { share_registers = true }
+"0x82256F14" = { share_registers = true }
+"0x82256F7C" = { share_registers = true }
+"0x82256FE4" = { share_registers = true }
+"0x8225704C" = { share_registers = true }
+"0x822570B4" = { share_registers = true }
+"0x8225711C" = { share_registers = true }
+"0x82257184" = { share_registers = true }
+"0x822571EC" = { share_registers = true }
+"0x82257274" = { share_registers = true }
+"0x822572DC" = { share_registers = true }
+"0x82257344" = { share_registers = true }
+"0x822573AC" = { share_registers = true }
+"0x82257414" = { share_registers = true }
+"0x8225747C" = { share_registers = true }
+"0x822574E4" = { share_registers = true }
+"0x8225752C" = { share_registers = true }
+"0x82257574" = { share_registers = true }
+"0x822575BC" = { share_registers = true }
+"0x82257604" = { share_registers = true }
+"0x8225764C" = { share_registers = true }
+"0x82257694" = { share_registers = true }
+"0x822576FC" = { share_registers = true }
+"0x82257764" = { share_registers = true }
+"0x822577CC" = { share_registers = true }
+"0x82257834" = { share_registers = true }
+"0x8225789C" = { share_registers = true }
+"0x82257904" = { share_registers = true }
+"0x8225796C" = { share_registers = true }
+"0x822579D4" = { share_registers = true }
+"0x82257A3C" = { share_registers = true }
+"0x82257AA4" = { share_registers = true }
+"0x82257B0C" = { share_registers = true }
+"0x82257B74" = { share_registers = true }
+"0x82257BDC" = { share_registers = true }
+"0x82257C44" = { share_registers = true }
+"0x82257CAC" = { share_registers = true }
+"0x82257D14" = { share_registers = true }
+"0x82257D7C" = { share_registers = true }
+"0x82257DE4" = { share_registers = true }
+"0x82257E4C" = { share_registers = true }
+"0x82257EB4" = { share_registers = true }
+"0x82257F1C" = { share_registers = true }
+"0x82257F84" = { share_registers = true }
+"0x82257FEC" = { share_registers = true }
+"0x82258054" = { share_registers = true }
+"0x822580BC" = { share_registers = true }
+"0x82258124" = { share_registers = true }
+"0x8225818C" = { share_registers = true }
+"0x822581F4" = { share_registers = true }
+"0x8225825C" = { share_registers = true }
+"0x822582C4" = { share_registers = true }
+"0x8225832C" = { share_registers = true }
+"0x82258394" = { share_registers = true }
+"0x824EED34" = { share_registers = true }
+"0x82768F0C" = { share_registers = true }

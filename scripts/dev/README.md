@@ -121,6 +121,10 @@ render scales. Desktop-only display, renderer, VSync, resolution, and Force 16:9
 rows are hidden; the native graphics backend is preserved. Preview rendering
 uses a matching 437:201 landscape source even on ultrawide monitors. This previews mobile UI
 on the desktop; it does not build or run an iOS binary.
+The dimensions describe the preview's aspect ratio, not a fixed pixel-for-pixel
+iPhone resolution. Portrait panels fit their full authored canvas into the live
+window safe area, so narrower windows shrink content uniformly instead of
+discarding its sides. Real iOS windows supply their own size and cutout insets.
 
 Mobile runs copy the selected launcher profile and settings into a fresh
 `out/dev-mobile/` session and set interface/gameplay orientation to `'portrait'`,

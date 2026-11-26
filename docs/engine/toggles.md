@@ -1,5 +1,26 @@
 # Enhancement toggles
 
+`gpu.vulkan.shared_memory_snapshot_cache_mb` (SDK, restart-scoped) bounds private
+CPU copies of recorded uploads. Exact comparisons skip unchanged GPU copies
+while retaining frame refresh and write tracking. The default is 0 (disabled)
+on every platform; explicit budgets range from 0 to 128 MiB. GPU writes and explicit cache
+invalidation retire matching snapshots. SDK patch 0101 owns this Vulkan policy;
+D3D12 retains its existing upload path.
+
+`gpu.vulkan.host_memory_backing` (SDK, default **true**, restart-scoped) imports
+aligned anonymous host pages for large buffers on Apple MoltenVK when supported.
+Off retains the original private allocations. Logical addresses, resolution,
+upload snapshots and synchronization stay the same. Unsupported drivers/imports
+fall back to private allocation. SDK patch 0098 owns the helper and lifetime.
+See the [memory study](vulkan-performance.md#apple-gpu-memory-retention-2026-11-26).
+
+`MVK_CONFIG_SHADER_COMPRESSION_ALGORITHM` (MoltenVK environment variable, restart-scoped)
+defaults to **1 (LZFSE)** on macOS and iOS. It compresses retained shader source
+for pipeline-cache export. Explicit **0** keeps uncompressed source; any explicit
+value is preserved. SDK patch 0098 applies the default in both Apple loader routes.
+See the [memory study](vulkan-performance.md#apple-gpu-memory-retention-2026-11-26)
+for cache budgets, retention limits and validation.
+
 `MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS` (MoltenVK environment variable,
 restart-scoped) now defaults to **0 on macOS** when absent. Metal command encoding
 and drawable acquisition run on MoltenVK's ordered dispatch queue, preventing

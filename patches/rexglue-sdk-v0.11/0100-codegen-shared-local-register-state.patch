@@ -1,0 +1,207 @@
+diff --git a/src/codegen/builder/builder_context.h b/src/codegen/builder/builder_context.h
+--- a/src/codegen/builder/builder_context.h
++++ b/src/codegen/builder/builder_context.h
+@@ -43,7 +43,7 @@
+   u8 fwd{};
+ };
+ 
+-/** Placeholder lines that stand for copying every localized nonvolatile into ctx or back. */
++/** Placeholder lines that copy all localized registers into ctx or back. */
+ inline constexpr std::string_view kSyncToCtx = "@sync_to_ctx";
+ inline constexpr std::string_view kSyncFromCtx = "@sync_from_ctx";
+ 
+diff --git a/src/codegen/builder/context.cpp b/src/codegen/builder/context.cpp
+--- a/src/codegen/builder/context.cpp
++++ b/src/codegen/builder/context.cpp
+@@ -136,9 +136,9 @@
+ 
+ std::string BuilderContext::R(size_t index) {
+   const auto& cfg = GetConfig();
+-  if (!fn.GetMillicode() && ((cfg.non_argument_registers_as_local_variables &&
+-                              (index == 0 || index == 11 || index == 12)) ||
+-                             (CanLocalizeNonVolatiles() && index >= 14))) {
++  if (!fn.GetMillicode() && !fn.IsRegisterSharing() &&
++      ((cfg.non_argument_registers_as_local_variables && (index == 0 || index == 11 || index == 12)) ||
++       (CanLocalizeNonVolatiles() && index >= 14))) {
+     locals.r[index] = true;
+     return std::format("r{}", index);
+   }
+@@ -147,8 +147,9 @@
+ 
+ std::string BuilderContext::F(size_t index) {
+   const auto& cfg = GetConfig();
+-  if (!fn.GetMillicode() && ((cfg.non_argument_registers_as_local_variables && index == 0) ||
+-                             (CanLocalizeNonVolatiles() && index >= 14))) {
++  if (!fn.GetMillicode() && !fn.IsRegisterSharing() &&
++      ((cfg.non_argument_registers_as_local_variables && index == 0) ||
++       (CanLocalizeNonVolatiles() && index >= 14))) {
+     locals.f[index] = true;
+     return std::format("f{}", index);
+   }
+@@ -157,7 +158,7 @@
+ 
+ std::string BuilderContext::V(size_t index) {
+   const auto& cfg = GetConfig();
+-  if (!fn.GetMillicode() &&
++  if (!fn.GetMillicode() && !fn.IsRegisterSharing() &&
+       ((cfg.non_argument_registers_as_local_variables && (index >= 32 && index <= 63)) ||
+        (CanLocalizeNonVolatiles() &&
+         ((index >= 14 && index <= 31) || (index >= 64 && index <= 127))))) {
+@@ -168,7 +169,7 @@
+ }
+ 
+ std::string BuilderContext::CR(size_t index) {
+-  if (GetConfig().cr_registers_as_local_variables) {
++  if (GetConfig().cr_registers_as_local_variables && !fn.IsRegisterSharing()) {
+     locals.cr[index] = true;
+     return std::format("cr{}", index);
+   }
+@@ -176,7 +177,7 @@
+ }
+ 
+ const char* BuilderContext::CTR() {
+-  if (GetConfig().ctr_as_local_variable) {
++  if (GetConfig().ctr_as_local_variable && !fn.IsRegisterSharing()) {
+     locals.ctr = true;
+     return "ctr";
+   }
+@@ -184,7 +185,7 @@
+ }
+ 
+ const char* BuilderContext::XER() {
+-  if (GetConfig().xer_as_local_variable) {
++  if (GetConfig().xer_as_local_variable && !fn.IsRegisterSharing()) {
+     locals.xer = true;
+     return "xer";
+   }
+@@ -192,7 +193,7 @@
+ }
+ 
+ const char* BuilderContext::Reserved() {
+-  if (GetConfig().reserved_register_as_local_variable) {
++  if (GetConfig().reserved_register_as_local_variable && !fn.IsRegisterSharing()) {
+     locals.reserved = true;
+     return "reserved";
+   }
+diff --git a/src/codegen/config.h b/src/codegen/config.h
+--- a/src/codegen/config.h
++++ b/src/codegen/config.h
+@@ -64,9 +64,9 @@
+   u32 parent = 0;   /**< Parent function address, 0 when standalone */
+ 
+   /**
+-   * Keeps non volatiles in ctx instead of localizing them. Marks an MSVC SEH funclet, which
+-   * reads the registers its owner left live and would see a zero from a local. Callers sync
+-   * their localized copies across the call site.
++   * Keeps registers in ctx instead of localizing them. Marks an MSVC SEH funclet, which
++   * reads the registers its owner left live, including a scratch r12 frame pointer.
++   * Callers sync their localized copies across the call site.
+    */
+   bool share_registers = false;
+ 
+diff --git a/src/codegen/function_graph.cpp b/src/codegen/function_graph.cpp
+--- a/src/codegen/function_graph.cpp
++++ b/src/codegen/function_graph.cpp
+@@ -311,7 +311,10 @@
+   std::vformat_to(std::back_inserter(out), fmt.get(), std::make_format_args(args...));
+ }
+ 
+-/** Builds one assignment per localized nonvolatile, from the locals into ctx or back. */
++/** Copies localized state across shared-register calls and setjmp boundaries.
++ * Cleanup funclets may receive their frame pointer in volatile r12, so copying
++ * only ABI nonvolatiles does not preserve the shared-register calling convention.
++ */
+ std::string RegisterSyncLines(const RecompilerLocalVariables& locals, bool to_ctx) {
+   std::string lines;
+   auto copy = [&](const std::string& name) {
+@@ -320,22 +323,25 @@
+     else
+       EmitPrintln(lines, "\t{0} = ctx.{0};", name);
+   };
+-  for (size_t i = 14; i < 32; ++i) {
++  for (size_t i = 0; i < 32; ++i) {
+     if (locals.r[i])
+       copy(std::format("r{}", i));
+   }
+-  for (size_t i = 14; i < 32; ++i) {
++  for (size_t i = 0; i < 32; ++i) {
+     if (locals.f[i])
+       copy(std::format("f{}", i));
+   }
+-  for (size_t i = 14; i < 128; ++i) {
+-    if ((i < 32 || i >= 64) && locals.v[i])
++  for (size_t i = 0; i < 128; ++i) {
++    if (locals.v[i])
+       copy(std::format("v{}", i));
+   }
+-  for (size_t i = 2; i < 6; ++i) {
++  for (size_t i = 0; i < 8; ++i) {
+     if (locals.cr[i])
+       copy(std::format("cr{}", i));
+   }
++  if (locals.ctr) copy("ctr");
++  if (locals.xer) copy("xer");
++  if (locals.reserved) copy("reserved");
+   return lines;
+ }
+ 
+diff --git a/src/codegen/output_stamp.cpp b/src/codegen/output_stamp.cpp
+--- a/src/codegen/output_stamp.cpp
++++ b/src/codegen/output_stamp.cpp
+@@ -16,7 +16,7 @@
+ 
+ constexpr int kStampVersion = 1;
+ // Invalidate unchanged inputs when downstream codegen behavior changes.
+-constexpr int kCodegenBehaviourVersion = 4;
++constexpr int kCodegenBehaviourVersion = 5;
+ 
+ namespace {
+ std::filesystem::path InputSortKey(const std::filesystem::path& path) {
+diff --git a/tests/unit/codegen/funclet_sync_test.cpp b/tests/unit/codegen/funclet_sync_test.cpp
+--- a/tests/unit/codegen/funclet_sync_test.cpp
++++ b/tests/unit/codegen/funclet_sync_test.cpp
+@@ -89,3 +89,44 @@
+   CHECK(body.find("ctx.r31 = r31;") == std::string::npos);
+   CHECK(body.find("r31 = ctx.r31;") == std::string::npos);
+ }
++
++REX_TEST_CASE("A shared cleanup receives the caller's localized r12 frame pointer",
++              "[codegen][funclet]") {
++  // addi r12,r1,144; bl cleanup; blr. Cleanup reads its frame through r12.
++  const std::vector<u32> words = {0x39810090, BranchLink(1, 3), kBlr,
++                                  0x3BECFF70, 0x807F0054, kBlr};
++  const rex::test::PDataEntry pdata[] = {{Address(0), 3}};
++  rex::test::TempFolder folder;
++  const auto result = rex::test::GenerateFromImage(
++      folder, rex::test::BuildCodeImage(words, pdata),
++      std::format("non_argument_as_local = true\nnon_volatile_as_local = true\n"
++                  "[entrypoint.functions]\n0x{:08X} = {{ share_registers = true }}\n",
++                  Address(3)));
++  REQUIRE(result);
++  const auto tree = rex::test::ReadGeneratedTree(folder.path / "generated" / "entry");
++  const auto owner = Body(tree, "xstart");
++  const auto call = owner.find(std::format("sub_{:08X}(ctx, base);", Address(3)));
++  const auto to_ctx = owner.find("ctx.r12 = r12;");
++  const auto from_ctx = owner.find("r12 = ctx.r12;", call);
++  REQUIRE(call != std::string::npos);
++  REQUIRE(to_ctx != std::string::npos);
++  CHECK(to_ctx < call);
++  CHECK(from_ctx != std::string::npos);
++  const auto cleanup = Body(tree, std::format("sub_{:08X}", Address(3)));
++  CHECK(cleanup.find("ctx.r12.s64 + -144") != std::string::npos);
++  CHECK(cleanup.find("PPCRegister r12{}") == std::string::npos);
++}
++
++REX_TEST_CASE("A shared call synchronizes all enabled local register families",
++              "[codegen][funclet]") {
++  const auto body = GenerateOwner("non_argument_as_local = true\nnon_volatile_as_local = true\n"
++                                  "cr_as_local = true\n");
++  for (const std::string_view reg : {"r11", "r12", "r31", "f31", "v64", "cr5"}) {
++    const auto before = body.find(std::format("ctx.{0} = {0};", reg));
++    const auto after = body.find(std::format("{0} = ctx.{0};", reg));
++    INFO(reg);
++    CHECK(before != std::string::npos);
++    CHECK(after != std::string::npos);
++    CHECK(before < after);
++  }
++}

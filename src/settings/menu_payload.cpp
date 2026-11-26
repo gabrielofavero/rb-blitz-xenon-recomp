@@ -2108,7 +2108,7 @@ bool AddPortraitPowerupsLayout(std::vector<Node>* roots, float aspect, std::stri
   return true;
 }
 
-bool AddPortraitAutosaveLayout(std::vector<Node>* roots, std::string* why) {
+bool AddPortraitAutosaveLayout(std::vector<Node>* roots, std::string* why, float aspect) {
   auto* enter = PanelMethod(roots, "autosave_warning_panel", "enter");
   if (!enter) {
     if (why) *why = "portrait autosave entry changed";
@@ -2122,6 +2122,12 @@ bool AddPortraitAutosaveLayout(std::vector<Node>* roots, std::string* why) {
   Node icon_scale;
   icon_scale.tag = ui::dtb::kFloat;
   icon_scale.scalar = std::bit_cast<uint32_t>(0.75f);
+  // Entry scripts can reset serialized label properties. Apply the portrait
+  // wrapping width after native entry and before measuring localized text.
+  Node text_width;
+  text_width.tag = ui::dtb::kFloat;
+  text_width.scalar = std::bit_cast<uint32_t>(ui::PortraitSplash(aspect).width * .84f);
+  enter->kids.push_back(cmd({sym("autosave.lbl"), sym("set"), sym("width"), text_width}));
   enter->kids.push_back(cmd({sym("autosave.lbl"), sym("set_height_from_text")}));
   const auto text_z = cmd({sym("/"), cmd({sym("-"),
       cmd({sym("autosave.lbl"), sym("get"), sym("height")}), Node::Int(69)}), Node::Int(2)});
@@ -3370,7 +3376,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
   }
   if (portrait_interface) {
     if (!edit("ui/startup/gen/autosave_icon_startup.dtb", [&](auto& roots) {
-          return AddPortraitAutosaveLayout(&roots, error);
+          return AddPortraitAutosaveLayout(&roots, error,
+              screen::CurrentMenuConfiguration().portrait_aspect);
         })) return false;
     if (!edit("ui/loading/gen/loading.dtb", [&](auto& roots) {
           return AddPortraitLoadingLayout(&roots, true,
@@ -3563,6 +3570,14 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     } else {
       if (error) *error = "the required graphics loading gate could not be authored: " + why;
       return false;
+    }
+  }
+  if (portrait_interface) {
+    for (auto& [path, bytes] : built) {
+      if (!path.starts_with("ui/") || !path.ends_with(".milo_xbox")) continue;
+      std::vector<uint8_t> fitted;
+      if (!ui::input_font::PreparePortraitCanvas(bytes, &fitted, error)) return false;
+      bytes = std::move(fitted);
     }
   }
   *records = std::move(built);

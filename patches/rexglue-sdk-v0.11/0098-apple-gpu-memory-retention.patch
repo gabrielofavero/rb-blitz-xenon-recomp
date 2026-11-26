@@ -1,0 +1,469 @@
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_host_memory.h b/src/gpu/xenos/host/vulkan/vulkan_host_memory.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/host/vulkan/vulkan_host_memory.h
+@@ -0,0 +1,24 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++#include <cstddef>
++#include <cstdint>
++#include <rex/utility.h>
++#include "gpu/xenos/host/vulkan/api.h"
++
++namespace rex::gpu::vulkan {
++class VulkanDevice;
++namespace objects {
++// Owns only the host pages. Destroy the Vulkan buffer and free its imported
++// VkDeviceMemory before Reset or destruction, including on initialization failure.
++class HostMemoryBacking : public rex::NonCopyable {
++ public:
++  ~HostMemoryBacking();
++  bool CreateBuffer(const VulkanDevice* device, VkDeviceSize size, VkBufferUsageFlags usage,
++                    VkBuffer& buffer_out, VkDeviceMemory& memory_out, std::uint32_t* type_out = nullptr);
++  void Reset();
++ private:
++  void* mapping_ = nullptr;
++  size_t mapping_size_ = 0;
++};
++}  // namespace objects
++}  // namespace rex::gpu::vulkan
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.h b/src/gpu/xenos/host/vulkan/vulkan_device.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_device.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_device.h
+@@ -210,6 +210,7 @@
+     bool ext_1_1_KHR_bind_memory2 = false;
+     bool ext_1_2_KHR_spirv_1_4 = false;
+     bool ext_EXT_memory_budget = false;
++    bool ext_EXT_external_memory_host = false;
+     bool ext_EXT_custom_border_color = false;
+     bool ext_EXT_robustness2 = false;
+     bool ext_1_3_KHR_maintenance4 = false;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.cpp b/src/gpu/xenos/host/vulkan/vulkan_device.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_device.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_device.cpp
+@@ -146,6 +146,11 @@
+   REX_VK_STRUCT_PROMOTED_EXTENSION(KHR_bind_memory2, 1, 1)
+   if (get_physical_device_properties2_supported) {
+     REX_VK_STRUCT_EXTENSION(EXT_memory_budget)
++#if REX_PLATFORM_MAC
++    if (properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 1, 0)) {
++      REX_VK_STRUCT_EXTENSION(EXT_external_memory_host)
++    }
++#endif
+   }
+   if (properties.apiVersion >= VK_MAKE_API_VERSION(0, 1, 1, 0)) {
+     REX_VK_STRUCT_PROMOTED_EXTENSION(KHR_maintenance4, 1, 3)
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_objects.cpp b/src/gpu/xenos/host/vulkan/vulkan_objects.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_objects.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_objects.cpp
+@@ -11,6 +11,14 @@
+ 
+ #include <rex/diagnostics/compile_trace.h>
+ #include <cstdint>
++#include <algorithm>
++#include <rex/platform.h>
++#include <rex/bit.h>
++#if REX_PLATFORM_MAC
++#include <sys/mman.h>
++#include <unistd.h>
++#endif
++#include "gpu/xenos/host/vulkan/vulkan_host_memory.h"
+ #include <format>
+ 
+ #include <rex/logging/log_category.h>
+@@ -24,6 +32,129 @@
+ namespace gpu {
+ namespace vulkan {
+ namespace objects {
++
++HostMemoryBacking::~HostMemoryBacking() { Reset(); }
++
++void HostMemoryBacking::Reset() {
++#if REX_PLATFORM_MAC
++  if (mapping_) munmap(mapping_, mapping_size_);
++#endif
++  mapping_ = nullptr;
++  mapping_size_ = 0;
++}
++
++bool HostMemoryBacking::CreateBuffer(const VulkanDevice* device, VkDeviceSize size,
++                                    VkBufferUsageFlags usage, VkBuffer& buffer_out,
++                                    VkDeviceMemory& memory_out, u32* type_out) {
++#if REX_PLATFORM_MAC
++  if (mapping_ || device->GetProperties().driverID != VK_DRIVER_ID_MOLTENVK ||
++      !device->GetExtensions().ext_EXT_external_memory_host) return false;
++  const auto* instance = device->GetVulkanInstance();
++  const auto& ifn = instance->GetFunctions();
++  const auto& dfn = device->GetFunctions();
++  const auto get_host_properties = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(
++      ifn.vkGetDeviceProcAddr(device->GetDevice(), "vkGetMemoryHostPointerPropertiesEXT"));
++  const auto get_external_properties = reinterpret_cast<PFN_vkGetPhysicalDeviceExternalBufferProperties>(
++      ifn.vkGetInstanceProcAddr(instance->GetInstance(), "vkGetPhysicalDeviceExternalBufferProperties"));
++  if (!get_host_properties || !get_external_properties || !ifn.vkGetPhysicalDeviceProperties2) return false;
++  auto external_info = BuildStructure<VkPhysicalDeviceExternalBufferInfo>(
++      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_BUFFER_INFO);
++  external_info.usage = usage;
++  external_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
++  auto external_properties = BuildStructure<VkExternalBufferProperties>(
++      VK_STRUCTURE_TYPE_EXTERNAL_BUFFER_PROPERTIES);
++  get_external_properties(device->GetPhysicalDevice(), &external_info, &external_properties);
++  const auto external_features = external_properties.externalMemoryProperties.externalMemoryFeatures;
++  if (!(external_features & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) return false;
++  if ((external_features & VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT) &&
++      !device->GetExtensions().ext_1_1_KHR_dedicated_allocation) return false;
++  auto host_properties = BuildStructure<VkPhysicalDeviceExternalMemoryHostPropertiesEXT>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT);
++  auto properties = BuildStructure<VkPhysicalDeviceProperties2>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2);
++  properties.pNext = &host_properties;
++  ifn.vkGetPhysicalDeviceProperties2(device->GetPhysicalDevice(), &properties);
++  VkDeviceSize alignment = std::max(VkDeviceSize(getpagesize()),
++                                  host_properties.minImportedHostPointerAlignment);
++  if (!host_properties.minImportedHostPointerAlignment || (alignment & (alignment - 1))) return false;
++
++  auto external = BuildStructure<VkExternalMemoryBufferCreateInfo>(VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO);
++  external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
++  auto info = BuildStructure<VkBufferCreateInfo>(VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO);
++  info.pNext = &external;
++  info.size = size;
++  info.usage = usage;
++  info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++  VkBuffer buffer;
++  if (dfn.vkCreateBuffer(device->GetDevice(), &info, nullptr, &buffer) != VK_SUCCESS) return false;
++  VkMemoryRequirements requirements;
++  dfn.vkGetBufferMemoryRequirements(device->GetDevice(), buffer, &requirements);
++  const VkDeviceSize allocation_size = rex::RoundUpPow2(requirements.size, alignment);
++  // Reserve extra virtual pages so imports with alignment above the host page
++  // size can still be satisfied. Trim padding without touching the data pages.
++  if (!allocation_size || allocation_size > SIZE_MAX - alignment) {
++    dfn.vkDestroyBuffer(device->GetDevice(), buffer, nullptr);
++    return false;
++  }
++  const size_t reserve_size = size_t(allocation_size + alignment);
++  void* reserved = mmap(nullptr, reserve_size, PROT_READ | PROT_WRITE,
++                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++  if (reserved == MAP_FAILED) {
++    dfn.vkDestroyBuffer(device->GetDevice(), buffer, nullptr);
++    return false;
++  }
++  const uintptr_t base = reinterpret_cast<uintptr_t>(reserved);
++  const uintptr_t aligned = rex::RoundUpPow2(base, uintptr_t(alignment));
++  const size_t prefix = aligned - base;
++  const size_t suffix = reserve_size - prefix - size_t(allocation_size);
++  if (prefix) munmap(reserved, prefix);
++  if (suffix) munmap(reinterpret_cast<void*>(aligned + allocation_size), suffix);
++  mapping_ = reinterpret_cast<void*>(aligned);
++  mapping_size_ = size_t(allocation_size);
++
++  auto pointer_properties = BuildStructure<VkMemoryHostPointerPropertiesEXT>(VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT);
++  u32 memory_type = 0;
++  if (get_host_properties(device->GetDevice(), VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
++                          mapping_, &pointer_properties) != VK_SUCCESS ||
++      !rex::bit_scan_forward(requirements.memoryTypeBits & pointer_properties.memoryTypeBits &
++                                device->GetMemoryTypes().host_coherent, &memory_type)) {
++    dfn.vkDestroyBuffer(device->GetDevice(), buffer, nullptr);
++    Reset();
++    return false;
++  }
++  auto import = BuildStructure<VkImportMemoryHostPointerInfoEXT>(VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT);
++  import.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
++  import.pHostPointer = mapping_;
++  auto dedicated = BuildStructure<VkMemoryDedicatedAllocateInfo>(
++      VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO);
++  if (external_features & VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT) {
++    dedicated.buffer = buffer;
++    import.pNext = &dedicated;
++  }
++  auto allocation = BuildStructure<VkMemoryAllocateInfo>(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
++  allocation.pNext = &import;
++  allocation.allocationSize = allocation_size;
++  allocation.memoryTypeIndex = memory_type;
++  VkDeviceMemory memory;
++  if (dfn.vkAllocateMemory(device->GetDevice(), &allocation, nullptr, &memory) != VK_SUCCESS) {
++    dfn.vkDestroyBuffer(device->GetDevice(), buffer, nullptr);
++    Reset();
++    return false;
++  }
++  if (dfn.vkBindBufferMemory(device->GetDevice(), buffer, memory, 0) != VK_SUCCESS) {
++    dfn.vkDestroyBuffer(device->GetDevice(), buffer, nullptr);
++    dfn.vkFreeMemory(device->GetDevice(), memory, nullptr);
++    Reset();
++    return false;
++  }
++  buffer_out = buffer;
++  memory_out = memory;
++  if (type_out) *type_out = memory_type;
++  REXGPU_INFO("MoltenVK: demand-paged host backing for {} MiB buffer", allocation_size >> 20);
++  return true;
++#else
++  (void)device; (void)size; (void)usage; (void)buffer_out; (void)memory_out; (void)type_out;
++  return false;
++#endif
++}
+ 
+ void FlushMappedMemoryRange(const VulkanDevice* const vulkan_device, const VkDeviceMemory memory,
+                             const u32 memory_type, const VkDeviceSize offset,
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_settings.h b/src/gpu/xenos/host/vulkan/vulkan_settings.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_settings.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_settings.h
+@@ -34,6 +34,8 @@
+               "placeholder pipelines to avoid visible flashing");
+   REX_SETTING(bool, submit_on_primary_buffer_end, true,
+               "Submit command buffer when PM4 primary buffer ends");
++  REX_SETTING(bool, host_memory_backing, true,
++              "Use demand-paged host backing for large MoltenVK buffers", kRestart);
+   REX_SETTING(bool, shared_memory_upload_batching, true,
+               "Batch independent guest-memory uploads before MoltenVK render passes");
+   REX_SETTING(bool, texture_descriptor_cache, true,
+diff --git a/src/gpu/xenos/vulkan/shared_memory.h b/src/gpu/xenos/vulkan/shared_memory.h
+--- a/src/gpu/xenos/vulkan/shared_memory.h
++++ b/src/gpu/xenos/vulkan/shared_memory.h
+@@ -17,6 +17,7 @@
+ #include <vector>
+ 
+ #include "gpu/xenos/shared_memory.h"
++#include "gpu/xenos/host/vulkan/vulkan_host_memory.h"
+ #include <rex/memory.h>
+ #include "gpu/xenos/host/vulkan/vulkan_upload_buffer_pool.h"
+ 
+@@ -65,6 +66,7 @@
+   VulkanCommandProcessor& command_processor_;
+   VkPipelineStageFlags guest_shader_pipeline_stages_;
+ 
++  objects::HostMemoryBacking host_backing_;
+   VkBuffer buffer_ = VK_NULL_HANDLE;
+   u32 buffer_memory_type_;
+   /** One allocation, or every allocation so far when sparse. */
+diff --git a/src/gpu/xenos/vulkan/shared_memory.cpp b/src/gpu/xenos/vulkan/shared_memory.cpp
+--- a/src/gpu/xenos/vulkan/shared_memory.cpp
++++ b/src/gpu/xenos/vulkan/shared_memory.cpp
+@@ -91,6 +91,13 @@
+     }
+   }
+ 
++  if (buffer_ == VK_NULL_HANDLE && command_processor_.GetVulkanSettings().host_memory_backing.Get()) {
++    VkDeviceMemory memory;
++    if (host_backing_.CreateBuffer(vulkan_device, kBufferSize, buffer_create_info.usage,
++                                  buffer_, memory, &buffer_memory_type_)) {
++      buffer_memory_.push_back(memory);
++    }
++  }
+   if (buffer_ == VK_NULL_HANDLE) {
+     REXGPU_INFO(
+         "Vulkan sparse binding is not used for shared memory emulation. Video "
+@@ -172,6 +179,7 @@
+     dfn.vkFreeMemory(device, memory, nullptr);
+   }
+   buffer_memory_.clear();
++  host_backing_.Reset();
+ 
+   if (!from_destructor) {
+     ShutdownCommon();
+diff --git a/src/gpu/xenos/vulkan/texture_cache.h b/src/gpu/xenos/vulkan/texture_cache.h
+--- a/src/gpu/xenos/vulkan/texture_cache.h
++++ b/src/gpu/xenos/vulkan/texture_cache.h
+@@ -393,6 +393,7 @@
+   std::pair<const SamplerParameters, Sampler>* sampler_used_last_ = nullptr;
+   u32 custom_border_color_sampler_count_ = 0;
+ 
++  objects::HostMemoryBacking scaled_resolve_host_backing_;
+   VkBuffer scaled_resolve_buffer_ = VK_NULL_HANDLE;
+   u64 scaled_resolve_buffer_size_ = 0;
+   bool scaled_resolve_buffer_sparse_ = false;
+diff --git a/src/gpu/xenos/vulkan/texture_cache.cpp b/src/gpu/xenos/vulkan/texture_cache.cpp
+--- a/src/gpu/xenos/vulkan/texture_cache.cpp
++++ b/src/gpu/xenos/vulkan/texture_cache.cpp
+@@ -2188,7 +2188,13 @@
+ 
+   if (scaled_resolve_buffer_ == VK_NULL_HANDLE) {
+     buffer_create_info.flags = 0;
+-    if (!gpu::vulkan::objects::CreateDedicatedAllocationBuffer(
++    VkDeviceMemory imported_memory;
++    if (command_processor_.GetVulkanSettings().host_memory_backing.Get() &&
++        scaled_resolve_host_backing_.CreateBuffer(vulkan_device, scaled_resolve_buffer_size_,
++            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, scaled_resolve_buffer_, imported_memory,
++            &scaled_resolve_buffer_memory_type_)) {
++      scaled_resolve_buffer_memory_.push_back(imported_memory);
++    } else if (!gpu::vulkan::objects::CreateDedicatedAllocationBuffer(
+             vulkan_device, scaled_resolve_buffer_size_, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+             gpu::vulkan::objects::MemoryPurpose::kDeviceLocal, scaled_resolve_buffer_,
+             scaled_resolve_buffer_memory_.emplace_back(), &scaled_resolve_buffer_memory_type_)) {
+@@ -2217,6 +2223,7 @@
+     dfn.vkFreeMemory(device, memory, nullptr);
+   }
+   scaled_resolve_buffer_memory_.clear();
++  scaled_resolve_host_backing_.Reset();
+   scaled_resolve_sparse_allocated_.clear();
+   scaled_resolve_buffer_size_ = 0;
+   scaled_resolve_buffer_sparse_ = false;
+diff --git a/src/gpu/xenos/host/vulkan/memory_policy.h b/src/gpu/xenos/host/vulkan/memory_policy.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/host/vulkan/memory_policy.h
+@@ -0,0 +1,12 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++
++#include <cstdint>
++
++namespace rex::gpu::vulkan {
++// Zero lets VMA use its upstream block policy. MoltenVK shares allocation slack
++// with the CPU's memory budget, so use smaller blocks without limiting resources.
++inline constexpr std::uint64_t PreferredAllocatorBlockSize(bool moltenvk, bool ios) {
++  return moltenvk ? std::uint64_t(ios ? 16 : 32) << 20 : 0;
++}
++}  // namespace rex::gpu::vulkan
+diff --git a/src/gpu/xenos/host/graphics_upload_buffer_pool.h b/src/gpu/xenos/host/graphics_upload_buffer_pool.h
+--- a/src/gpu/xenos/host/graphics_upload_buffer_pool.h
++++ b/src/gpu/xenos/host/graphics_upload_buffer_pool.h
+@@ -49,7 +49,8 @@
+     size_t size; /**< Capacity allocated for this page, retained when the pool grows. */
+   };
+ 
+-  GraphicsUploadBufferPool(size_t page_size) : page_size_(page_size) {}
++  GraphicsUploadBufferPool(size_t page_size, u64 idle_submission_count = 0)
++      : page_size_(page_size), idle_submission_count_(idle_submission_count) {}
+ 
+   /**
+    * Requests space for data written in a single piece.
+@@ -97,6 +98,9 @@
+   Page* submitted_first_ = nullptr;
+   Page* submitted_last_ = nullptr;
+ 
++  // Zero preserves the peak-sized cache. Other values retire completed idle pages.
++  const u64 idle_submission_count_;
++
+   size_t current_page_used_ = 0;
+   size_t current_page_flushed_ = 0;
+ };
+diff --git a/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp b/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp
+--- a/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp
++++ b/src/gpu/xenos/host/graphics_upload_buffer_pool.cpp
+@@ -27,6 +27,23 @@
+ void GraphicsUploadBufferPool::Reclaim(u64 completed_submission_index) {
+   ReclaimPages(submitted_first_, submitted_last_, writable_first_, writable_last_,
+                completed_submission_index);
++  if (!idle_submission_count_ || !writable_first_) return;
++  // The first writable page may still contain data referenced by a pending
++  // submission. Only later pages have been fully retired by ReclaimPages.
++  Page* previous = writable_first_;
++  Page* page = previous->next;
++  while (page) {
++    Page* next = page->next;
++    if (page->last_submission_index <= completed_submission_index &&
++        completed_submission_index - page->last_submission_index >= idle_submission_count_) {
++      previous->next = next;
++      if (writable_last_ == page) writable_last_ = previous;
++      delete page;
++    } else {
++      previous = page;
++    }
++    page = next;
++  }
+ }
+ 
+ void GraphicsUploadBufferPool::ResetSubmissionTimeline() {
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_upload_buffer_pool.cpp b/src/gpu/xenos/host/vulkan/vulkan_upload_buffer_pool.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_upload_buffer_pool.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_upload_buffer_pool.cpp
+@@ -25,7 +25,8 @@
+                                                const size_t page_size)
+     : GraphicsUploadBufferPool(static_cast<size_t>(
+           rex::RoundUpNonZero(static_cast<VkDeviceSize>(page_size),
+-                              vulkan_device->GetProperties().nonCoherentAtomSize))),
++                              vulkan_device->GetProperties().nonCoherentAtomSize)),
++          vulkan_device->GetProperties().driverID == VK_DRIVER_ID_MOLTENVK ? 120 : 0),
+       vulkan_device_(vulkan_device),
+       usage_(usage) {}
+ 
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_mem_alloc.cpp b/src/gpu/xenos/host/vulkan/vulkan_mem_alloc.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_mem_alloc.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_mem_alloc.cpp
+@@ -11,6 +11,8 @@
+ 
+ #define VMA_IMPLEMENTATION
+ #include <cstring>
++#include <rex/platform.h>
++#include "gpu/xenos/host/vulkan/memory_policy.h"
+ 
+ #include <rex/logging/log_category.h>
+ #include "gpu/xenos/host/vulkan/vulkan_mem_alloc.h"
+@@ -29,6 +31,10 @@
+ 
+   VmaVulkanFunctions vma_vulkan_functions = {};
+   VmaAllocatorCreateInfo allocator_create_info = {};
++  // Unified memory also pays for unused allocator capacity. Keep smaller blocks
++  // on MoltenVK; larger resources can still receive dedicated allocations.
++  allocator_create_info.preferredLargeHeapBlockSize = PreferredAllocatorBlockSize(
++      vulkan_device->GetProperties().driverID == VK_DRIVER_ID_MOLTENVK, REX_PLATFORM_IOS);
+ 
+   vma_vulkan_functions.vkGetInstanceProcAddr = ifn.vkGetInstanceProcAddr;
+   vma_vulkan_functions.vkGetDeviceProcAddr = ifn.vkGetDeviceProcAddr;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_moltenvk.cpp b/src/gpu/xenos/host/vulkan/vulkan_moltenvk.cpp
+--- a/src/gpu/xenos/host/vulkan/vulkan_moltenvk.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_moltenvk.cpp
+@@ -195,6 +195,9 @@
+   // Encode asynchronously on MoltenVK's ordered queue without holding the shared
+   // Vulkan queue mutex while waiting for a drawable. Explicit overrides win.
+   setenv("MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", "0", 0);
++  // Metal libraries no longer need their MSL text, but pipeline-cache export
++  // retains it. LZFSE reduces this CPU-side cache without dropping shaders.
++  setenv("MVK_CONFIG_SHADER_COMPRESSION_ALGORITHM", "1", 0);
+   if (!paths.sdk_root.empty()) {
+     SetIfUnset("VULKAN_SDK", paths.sdk_root);
+   }
+diff --git a/src/gpu/xenos/xenos_settings.h b/src/gpu/xenos/xenos_settings.h
+--- a/src/gpu/xenos/xenos_settings.h
++++ b/src/gpu/xenos/xenos_settings.h
+@@ -12,6 +12,7 @@
+ 
+ #include <string>
+ 
++#include <rex/platform.h>
+ #include <rex/setting.h>
+ #include <rex/types.h>
+ 
+@@ -52,11 +53,23 @@
+               "render backend");
+   REX_SETTING(i32, texture_cache_memory_limit_render_to_texture, 24,
+               "Texture cache memory limit for render to texture (MB)", Range{1, 256}, kRestart);
+-  REX_SETTING(i32, texture_cache_memory_limit_soft, 384, "Soft texture cache memory limit (MB)",
++  // Apple GPUs share the application's memory budget with the CPU. Explicit
++  // configuration still overrides these cache defaults.
++#if REX_PLATFORM_IOS
++  static constexpr i32 kTextureCacheSoftMB = 128, kTextureCacheHardMB = 256;
++  static constexpr i32 kTextureCacheSoftLifetime = 3;
++#elif REX_PLATFORM_MAC
++  static constexpr i32 kTextureCacheSoftMB = 192, kTextureCacheHardMB = 384;
++  static constexpr i32 kTextureCacheSoftLifetime = 5;
++#else
++  static constexpr i32 kTextureCacheSoftMB = 384, kTextureCacheHardMB = 768;
++  static constexpr i32 kTextureCacheSoftLifetime = 30;
++#endif
++  REX_SETTING(i32, texture_cache_memory_limit_soft, kTextureCacheSoftMB, "Soft texture cache memory limit (MB)",
+               Range{64, 4096}, kRestart);
+-  REX_SETTING(i32, texture_cache_memory_limit_hard, 768, "Hard texture cache memory limit (MB)",
++  REX_SETTING(i32, texture_cache_memory_limit_hard, kTextureCacheHardMB, "Hard texture cache memory limit (MB)",
+               Range{128, 8192}, kRestart);
+-  REX_SETTING(i32, texture_cache_memory_limit_soft_lifetime, 30,
++  REX_SETTING(i32, texture_cache_memory_limit_soft_lifetime, kTextureCacheSoftLifetime,
+               "Soft texture cache memory limit lifetime (seconds)", Range{1, 3600});
+   REX_SETTING(bool, pre_mask_resolve_l2_block, true,
+               "Mask scaled resolve L2 blocks to the write range before iterating");
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -4872,6 +4872,15 @@
+     command_buffers_submitted_.pop_front();
+   }
+ 
++  // Completed command pools retain driver command storage until destroyed.
++  // Bound the idle reserve on MoltenVK after a burst of small submissions.
++  if (vulkan_device->GetProperties().driverID == VK_DRIVER_ID_MOLTENVK) {
++    while (command_buffers_writable_.size() > 8) {
++      dfn.vkDestroyCommandPool(device, command_buffers_writable_.front().pool, nullptr);
++      command_buffers_writable_.erase(command_buffers_writable_.begin());
++    }
++  }
++
+   shared_memory_->CompletedSubmissionUpdated();
+ 
+   primitive_processor_->CompletedSubmissionUpdated();

@@ -1,0 +1,303 @@
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_settings.h b/src/gpu/xenos/host/vulkan/vulkan_settings.h
+--- a/src/gpu/xenos/host/vulkan/vulkan_settings.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_settings.h
+@@ -36,6 +36,9 @@
+               "Submit command buffer when PM4 primary buffer ends");
+   REX_SETTING(bool, host_memory_backing, true,
+               "Use demand-paged host backing for large MoltenVK buffers", kRestart);
++  REX_SETTING(i32, shared_memory_snapshot_cache_mb, 0,
++              "Budget for exact CPU snapshots that avoid unchanged guest-memory uploads",
++              Range{0, 128}, kRestart);
+   REX_SETTING(bool, shared_memory_upload_batching, true,
+               "Batch independent guest-memory uploads before MoltenVK render passes");
+   REX_SETTING(bool, texture_descriptor_cache, true,
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -610,6 +610,7 @@
+ 
+ void VulkanCommandProcessor::InvalidateGPUMemory() {
+   if (shared_memory_) {
++    shared_memory_->ResetUploadSnapshots();
+     shared_memory_->InvalidateAllPages();
+   }
+ }
+diff --git a/src/gpu/xenos/vulkan/shared_memory.cpp b/src/gpu/xenos/vulkan/shared_memory.cpp
+--- a/src/gpu/xenos/vulkan/shared_memory.cpp
++++ b/src/gpu/xenos/vulkan/shared_memory.cpp
+@@ -10,6 +10,9 @@
+  */
+ 
+ #include <algorithm>
++#include <chrono>
++#include <new>
++#include <rex/diagnostics/compile_trace.h>
+ #include <cstring>
+ #include <utility>
+ #include <vector>
+@@ -164,10 +167,32 @@
+       rex::RoundUpPow2(gpu::vulkan::VulkanUploadBufferPool::kDefaultPageSize,
+                        static_cast<size_t>(1) << GetPageSizeLog2()));
+ 
++  const i32 snapshot_mb = command_processor_.GetVulkanSettings().shared_memory_snapshot_cache_mb.Get();
++  if (snapshot_mb > 0) {
++    try {
++      snapshot_cache_ = std::make_unique<SharedMemorySnapshotCache>(
++          kBufferSize, u32(1) << GetPageSizeLog2(), size_t(snapshot_mb) << 20);
++      snapshot_watch_ = RegisterGlobalWatch([](void* context, u32 first, u32 last, bool gpu) {
++        // CPU writes are checked byte-for-byte at the next frame refresh. GPU
++        // writes replace the mirror without replacing our CPU upload snapshot.
++        if (gpu) static_cast<VulkanSharedMemory*>(context)->snapshot_cache_->Invalidate(first, last);
++      }, this);
++      snapshot_stats_time_ = std::chrono::steady_clock::now();
++    } catch (const std::bad_alloc&) {
++      snapshot_cache_.reset();
++      REXGPU_WARN("Shared memory: snapshot budget unavailable; retaining normal uploads");
++    }
++  }
+   return true;
+ }
+ 
+ void VulkanSharedMemory::Shutdown(bool from_destructor) {
++  if (snapshot_watch_) {
++    UnregisterGlobalWatch(snapshot_watch_);
++    snapshot_watch_ = nullptr;
++  }
++  snapshot_cache_.reset();
++  snapshot_upload_ranges_.clear();
+   upload_buffer_pool_.reset();
+ 
+   const gpu::vulkan::VulkanDevice* const vulkan_device = command_processor_.GetVulkanDevice();
+@@ -192,6 +217,18 @@
+ 
+ void VulkanSharedMemory::EndSubmission() {
+   upload_buffer_pool_->FlushWrites();
++  if (snapshot_cache_ && rex::diagnostics::compile_trace::Enabled()) {
++    const auto now = std::chrono::steady_clock::now();
++    if (now - snapshot_stats_time_ >= std::chrono::seconds(10)) {
++      REXGPU_INFO("shared_memory_snapshots: reused_pages={} uploaded_pages={} capacity_bytes={}",
++                  snapshot_hits_, snapshot_uploads_, snapshot_cache_->capacity_bytes());
++      snapshot_stats_time_ = now;
++    }
++  }
++}
++
++void VulkanSharedMemory::ResetUploadSnapshots() {
++  if (snapshot_cache_) snapshot_cache_->Clear();
+ }
+ 
+ void VulkanSharedMemory::Use(Usage usage, std::pair<u32, u32> written_range) {
+@@ -264,19 +301,58 @@
+   if (upload_page_ranges.empty()) {
+     return true;
+   }
++  const u32 page_shift = GetPageSizeLog2();
++  const u32 page_size = u32(1) << page_shift;
++  const std::vector<std::pair<u32, u32>>* ranges = &upload_page_ranges;
++  bool rollback_validity = false;
++  rex::ScopeGuard rollback([&] {
++    if (!rollback_validity) return;
++    auto lock = AcquireLock();
++    for (const auto& range : upload_page_ranges)
++      OnPhysicalWrite({range.first << page_shift, range.second << page_shift}, true);
++  });
++  if (snapshot_cache_) {
++    rollback_validity = true;
++    snapshot_upload_ranges_.clear();
++    for (const auto& range : upload_page_ranges) {
++      // Arm the write watch before comparing bytes, just as the regular upload
++      // path arms it before copying. A later CPU write remains invalidated.
++      MarkRangeValid(range.first << page_shift, range.second << page_shift, false);
++      const u8* source = GetPhysicalForRead(GetMemory(), range.first << page_shift,
++                                            range.second << page_shift);
++      if (!source) return false;
++      for (u32 offset = 0; offset < range.second; ++offset) {
++        const u32 page = range.first + offset;
++        if (snapshot_cache_->Matches(page, source + size_t(offset) * page_size)) {
++          ++snapshot_hits_;
++          continue;
++        }
++        if (!snapshot_upload_ranges_.empty() &&
++            snapshot_upload_ranges_.back().first + snapshot_upload_ranges_.back().second == page)
++          ++snapshot_upload_ranges_.back().second;
++        else snapshot_upload_ranges_.emplace_back(page, 1);
++      }
++    }
++    if (snapshot_upload_ranges_.empty()) {
++      rollback_validity = false;
++      return true;
++    }
++    ranges = &snapshot_upload_ranges_;
++  }
++  const auto& pending_ranges = *ranges;
+   // The ranges are sorted, so front and back bound the barrier.
+   // Independent uploads can precede a deferred read-only pass; aliases stay ordered.
+   auto& commands = command_processor_.GetDeferredCommandBuffer();
+   bool hoist = last_usage_ == Usage::kRead;
+-  for (const auto& range : upload_page_ranges) {
++  for (const auto& range : pending_ranges) {
+     hoist &= commands.CanHoistSharedMemoryUpload(range.first << GetPageSizeLog2(),
+                                                range.second << GetPageSizeLog2());
+   }
+   if (!hoist) {
+     Use(Usage::kTransferDestination,
+-        std::make_pair(upload_page_ranges.front().first << GetPageSizeLog2(),
+-                       (upload_page_ranges.back().first + upload_page_ranges.back().second -
+-                        upload_page_ranges.front().first)
++        std::make_pair(pending_ranges.front().first << GetPageSizeLog2(),
++                       (pending_ranges.back().first + pending_ranges.back().second -
++                        pending_ranges.front().first)
+                            << GetPageSizeLog2()));
+     command_processor_.SubmitBarriers(true);
+   }
+@@ -285,7 +361,7 @@
+   bool successful = true;
+   upload_regions_.clear();
+   VkBuffer upload_buffer_previous = VK_NULL_HANDLE;
+-  for (auto upload_range : upload_page_ranges) {
++  for (auto upload_range : pending_ranges) {
+     u32 upload_range_start = upload_range.first;
+     u32 upload_range_length = upload_range.second;
+     while (upload_range_length) {
+@@ -300,8 +376,9 @@
+         successful = false;
+         break;
+       }
+-      MarkRangeValid(upload_range_start << GetPageSizeLog2(), static_cast<u32>(upload_buffer_size),
+-                     false);
++      if (!snapshot_cache_)
++        MarkRangeValid(upload_range_start << GetPageSizeLog2(), static_cast<u32>(upload_buffer_size),
++                       false);
+       const u8* upload_source =
+           GetPhysicalForRead(GetMemory(), upload_range_start << GetPageSizeLog2(),
+                              static_cast<u32>(upload_buffer_size));
+@@ -309,7 +386,19 @@
+         successful = false;
+         break;
+       }
+-      std::memcpy(upload_buffer_mapping, upload_source, upload_buffer_size);
++      if (snapshot_cache_) {
++        const u32 pages = static_cast<u32>(upload_buffer_size >> page_shift);
++        for (u32 page = 0; page < pages; ++page) {
++          // Copy through the private snapshot so comparison bytes equal the
++          // staged version. Do not read back write-combined upload mappings.
++          const u8* snapshot = snapshot_cache_->RememberUpload(
++              upload_range_start + page, upload_source + size_t(page) * page_size);
++          std::memcpy(upload_buffer_mapping + size_t(page) * page_size, snapshot, page_size);
++        }
++        snapshot_uploads_ += pages;
++      } else {
++        std::memcpy(upload_buffer_mapping, upload_source, upload_buffer_size);
++      }
+       if (upload_buffer_previous != upload_buffer && !upload_regions_.empty()) {
+         REX_ASSERT(upload_buffer_previous != VK_NULL_HANDLE);
+         if (hoist) {
+@@ -345,6 +434,7 @@
+       }
+     upload_regions_.clear();
+   }
++  rollback_validity = !successful;
+   return successful;
+ }
+ 
+diff --git a/src/gpu/xenos/vulkan/shared_memory.h b/src/gpu/xenos/vulkan/shared_memory.h
+--- a/src/gpu/xenos/vulkan/shared_memory.h
++++ b/src/gpu/xenos/vulkan/shared_memory.h
+@@ -12,6 +12,8 @@
+ #pragma once
+ 
+ #include <algorithm>
++#include <chrono>
++#include "gpu/xenos/host/vulkan/shared_memory_snapshot_cache.h"
+ #include <memory>
+ #include <utility>
+ #include <vector>
+@@ -36,6 +38,7 @@
+ 
+   void CompletedSubmissionUpdated();
+   void EndSubmission();
++  void ResetUploadSnapshots();
+ 
+   enum class Usage : u8 {
+     /** Index buffer, vfetch, compute read, transfer source. */
+@@ -77,6 +80,11 @@
+ 
+   std::unique_ptr<gpu::vulkan::VulkanUploadBufferPool> upload_buffer_pool_;
+   std::vector<VkBufferCopy> upload_regions_;
++  std::unique_ptr<SharedMemorySnapshotCache> snapshot_cache_;
++  GlobalWatchHandle snapshot_watch_ = nullptr;
++  std::vector<std::pair<u32, u32>> snapshot_upload_ranges_;
++  u64 snapshot_hits_ = 0, snapshot_uploads_ = 0;
++  std::chrono::steady_clock::time_point snapshot_stats_time_{};
+ };
+ 
+ }  // namespace rex::gpu::vulkan
+diff --git a/src/gpu/xenos/host/vulkan/shared_memory_snapshot_cache.h b/src/gpu/xenos/host/vulkan/shared_memory_snapshot_cache.h
+new file mode 100644
+--- /dev/null
++++ b/src/gpu/xenos/host/vulkan/shared_memory_snapshot_cache.h
+@@ -0,0 +1,64 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <memory>
++#include <vector>
++
++namespace rex::gpu::vulkan {
++// Exact CPU copies of data already recorded for upload. These never alias live
++// guest pages or GPU-owned memory. GPU writes must invalidate their page entries.
++class SharedMemorySnapshotCache {
++ public:
++  SharedMemorySnapshotCache(uint32_t address_space_size, uint32_t page_size, size_t budget)
++      : page_size_(page_size),
++        page_to_slot_(address_space_size / page_size, kMissing),
++        owners_(std::min(page_to_slot_.size(), budget / page_size), kMissing),
++        valid_(owners_.size(), 0),
++        bytes_(owners_.empty() ? nullptr :
++            std::make_unique_for_overwrite<uint8_t[]>(owners_.size() * page_size)) {}
++
++  bool Matches(uint32_t page, const void* source) const {
++    if (page >= page_to_slot_.size()) return false;
++    const uint32_t slot = page_to_slot_[page];
++    return slot != kMissing && valid_[slot] &&
++           std::memcmp(bytes_.get() + size_t(slot) * page_size_, source, page_size_) == 0;
++  }
++  // Call only for bytes in an upload staging buffer that will be recorded before
++  // the next lookup, including when an allocation fails after a partial upload.
++  const uint8_t* RememberUpload(uint32_t page, const void* snapshot) {
++    if (owners_.empty() || page >= page_to_slot_.size()) return static_cast<const uint8_t*>(snapshot);
++    uint32_t slot = page_to_slot_[page];
++    if (slot == kMissing) {
++      slot = next_slot_++ % static_cast<uint32_t>(owners_.size());
++      if (owners_[slot] != kMissing) page_to_slot_[owners_[slot]] = kMissing;
++      owners_[slot] = page;
++      page_to_slot_[page] = slot;
++    }
++    std::memcpy(bytes_.get() + size_t(slot) * page_size_, snapshot, page_size_);
++    valid_[slot] = 1;
++    return bytes_.get() + size_t(slot) * page_size_;
++  }
++  // Inclusive byte bounds, matching SharedMemory's global watch callback.
++  void Invalidate(uint32_t first, uint32_t last) {
++    if (first > last || size_t(first / page_size_) >= page_to_slot_.size()) return;
++    const uint32_t end = static_cast<uint32_t>(std::min(
++        size_t(last / page_size_), page_to_slot_.size() - 1));
++    for (uint32_t page = first / page_size_; page <= end; ++page) {
++      const uint32_t slot = page_to_slot_[page];
++      if (slot != kMissing) valid_[slot] = 0;
++    }
++  }
++  void Clear() { std::fill(valid_.begin(), valid_.end(), uint8_t(0)); }
++  size_t capacity_bytes() const { return owners_.size() * page_size_; }
++
++ private:
++  static constexpr uint32_t kMissing = UINT32_MAX;
++  uint32_t page_size_, next_slot_ = 0;
++  std::vector<uint32_t> page_to_slot_, owners_;
++  std::vector<uint8_t> valid_;
++  std::unique_ptr<uint8_t[]> bytes_;
++};
++}  // namespace rex::gpu::vulkan

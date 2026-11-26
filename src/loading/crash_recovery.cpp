@@ -57,6 +57,12 @@ void ConfigureCrashRecovery(const std::filesystem::path& cache_root, bool settin
     REXLOG_INFO("load_recovery: external monitor ready pid={} recovered={}", session.monitor_pid(), presentation.recovered);
   } else REXLOG_ERROR("load_recovery: unavailable: {}", error);
 }
+void CloseCrashRecovery() {
+  // Settings are destroyed before some process globals. Retire the callback
+  // while its setting and mutex still exist, rather than during static teardown.
+  guard_policy_change.Reset();
+  if (configured.exchange(false, std::memory_order_acq_rel)) session.SetLoading(false);
+}
 void BeginCrashRecoveryAttempt() {
   if (!configured.load(std::memory_order_acquire)) return;
   const auto seconds = CurrentLoadGuardSeconds();

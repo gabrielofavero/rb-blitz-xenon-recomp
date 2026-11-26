@@ -522,3 +522,202 @@ non-finite viewports and side-effecting draws. Eight focused CTest registrations
 pass. macOS and iOS builds and the SDK patch audit are recorded in the same
 evidence directory. iOS device performance and Windows/D3D12 compilation and
 visual acceptance remain unverified.
+
+## Apple GPU memory retention (2026-11-26)
+
+SDK patch [0098](../../patches/rexglue-sdk-v0.11/0098-apple-gpu-memory-retention.patch)
+reduces retained allocations on macOS (arm64 and x86-64) and iOS (arm64).
+It owns memory residency policy, independently of upload ordering (0070),
+queue submission (0073), platform mapping (0074), and resolve allocation limits
+(0097). No existing responsibility or launch route is removed.
+
+The large guest-mirror and scaled-resolve buffers now attempt
+[`VK_EXT_external_memory_host`](https://docs.vulkan.org/refpages/latest/refpages/source/VK_EXT_external_memory_host.html)
+import on Apple MoltenVK. Anonymous aligned host pages retain the full address
+range while physical backing follows GPU use. These are separate GPU mirror
+pages, never the live CPU guest aliases: upload snapshots and command ordering
+are preserved. The helper checks extension/API support, importability, dedicated
+allocation requirements, pointer alignment and compatible coherent memory types.
+Failures retain the original private allocation. Owners destroy their Vulkan
+buffers and memory before unmapping host pages.
+`gpu.vulkan.host_memory_backing=false` restores private backing for comparisons.
+
+Research and source inspection identify separate costs:
+
+- [VMA's allocator documentation](https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/struct_vma_allocator_create_info.html)
+  documents a default preferred large-heap block size of 256 MiB. The texture
+  allocator now prefers 32 MiB blocks on macOS MoltenVK and 16 MiB on iOS.
+  Large resources still allocate successfully through VMA's dedicated path;
+  this is an allocation granularity, not a resource-size limit.
+- [MoltenVK's shader compression setting](https://github.com/KhronosGroup/MoltenVK/blob/main/Docs/MoltenVK_Configuration_Parameters.md#mvk_config_shader_compression_algorithm)
+  describes retained MSL source used for pipeline-cache export. Both Apple loader
+  routes default to LZFSE (`MVK_CONFIG_SHADER_COMPRESSION_ALGORITHM=1`) before
+  instance creation; explicit environment values, including 0, win.
+- Completed Vulkan upload pages previously remained cached until cache clear or
+  shutdown. MoltenVK now retires spare pages after 120 completed submission
+  indices of inactivity. The current writable page and pending submissions are
+  retained. Other Vulkan drivers and D3D12 keep peak-capacity reuse.
+- MoltenVK keeps at most eight idle command pools after fence completion.
+  Pending pools are never destroyed by this policy.
+- Apple texture caches use smaller defaults, with ordinary explicit SDK settings
+  retaining precedence. Existing eviction still waits for GPU completion.
+
+| Default | iOS | macOS | Windows/Linux |
+| --- | ---: | ---: | ---: |
+| Soft texture limit (MiB) | 128 | 192 | 384 |
+| Hard texture limit (MiB) | 256 | 384 | 768 |
+| Soft-limit age (seconds) | 3 | 5 | 30 |
+
+The existing render-to-texture allowance is added for resolution scaling. These
+are texture-cache budgets, not total-process limits. Smaller caches may increase
+reuploads when a working set exceeds the budget; frame-time impact remains a
+runtime validation item.
+
+A scaled resolve still reserves a logical buffer of 512 MiB times the scale
+area on non-sparse MoltenVK: 2x2 spans 2 GiB, 3x3 spans 4.5 GiB. Private fallback
+can charge the full size; imported host backing avoids that eager physical cost.
+The existing device-allocation limit still applies. iOS already forces 1x in
+`settings/boot.cpp`; macOS resolution and image quality are preserved. This work
+does not establish that the SDK upgrade introduced these costs. A matched
+v0.10/v0.11 game comparison has not been performed.
+
+Validation evidence is under `out/memory-optimization/`. On Apple M1, the native
+headless allocator test creates 96 four-MiB buffers and retains one after freeing
+the rest. VMA block bytes fall from 301,989,888 (288 MiB) with the upstream policy
+to 41,943,040 (40 MiB) with the macOS policy, and 25,165,824 (24 MiB) with the iOS
+policy exercised on this Mac (`allocator-tests.log`). The live allocation is
+4 MiB in all three cases. This measures allocator slack, not whole-game physical
+footprint or native iOS residency. The host upload-lifetime and loader-policy
+tests each pass 17 checks (`pool-tests.log`, `policy-tests.log`). The native
+allocator/import test passes 11 checks, including coherent GPU writes to both
+ends of a 512 MiB imported buffer (`allocator-tests.log`). An exploratory probe
+that GPU-fills only 4 MiB charges about 514 MiB with private backing
+(`host-probe-gpu.log`); its sequential teardown makes the host delta unsuitable
+as an independent footprint measurement.
+
+SDK patch [0099](../../patches/rexglue-sdk-v0.11/0099-moltenvk-foreground-pipeline-priority.patch)
+also fixes compilation priority. Startup deliberately uses synchronous draw
+pipelines (`SettingsBoot::BeginStartupShaderCompilation`). Multiple preparation
+workers otherwise enter MoltenVK's serial shader-library lock ahead of those
+draws. An application-side gate admits waiting current-frame pipelines before
+queued preparation, with exception-safe release. Other Vulkan drivers retain
+parallel driver calls. Eight host checks cover priority and failure recovery.
+Explicit Apple worker priorities now select native QoS instead of ignored POSIX
+scheduling attributes; normal/inherited scheduling is preserved.
+
+Game evidence: the 720p Ultimate route reaches Queen's Death on Two Legs through
+the native Skip action, displays the power-up screen and active note highway,
+and peaks at 1,506,872,080 bytes (1,437 MiB) in `steady-720/memory.json`. The
+2x startup/menu attempt peaks at 1,596,770,800 bytes (1,523 MiB), with 512/2048 MiB
+host-backed buffers logged (`priority-1440/`); screenshot timeout prevents a full
+2x gameplay claim. Earlier 2x startup snapshot is about 1,298 MiB
+(`host-backed-1440/`). These are not matched before/after process measurements.
+The final build also reaches active gameplay and exits 0 (`final-720/`,
+`game-final-720.log`), peaking at 1,534,118,768 bytes (1,463 MiB). Its 67 active-song
+probe windows average 46.3 iterations/s with a 49.8 median, including CPU sampling
+and screenshot overhead. These runs still vary below 60 fps; RAM savings do not
+establish a complete frame-pacing fix. The 8 GiB test Mac reports about 11 GiB of
+swap in use.
+A simultaneous VM snapshot invalidated the initial CPU sample; `steady-720/`
+contains a later CPU-only sample. The immediate-encoding experiment reaches the
+menu but not gameplay and is not adopted as a default.
+
+The smoke tests also expose a pre-existing shutdown abort: a global load-guard
+setting subscription outlives its setting. `CloseCrashRecovery` now retires it
+while settings are alive during application shutdown.
+
+macOS arm64 and iOS arm64 Release builds pass (`mac-final-build.log`,
+`ios-final-build.log`), and seven focused CTest registrations pass
+(`ctest-final.log`), including 12 native worker-QoS checks. The current build's
+shutdown smoke reaches the main menu and exits 0 (`game-shutdown-check.log`),
+replacing the prior static-teardown abort. The patch applier's 12 Python cases
+pass; 24 PowerShell-dependent cases skip on this host (`applier-tests.log`).
+All 71 production patches replay in isolation. The live tree retains its
+pre-existing `src/ui/prompt.cpp` mismatch; the standard strict live check still
+rejects that file rather than overwriting it. An initially corrupted Ninja
+dependency cache caused repeated configure/codegen cycles; recompaction repaired
+it. Builds use a stable `SOURCE_DATE_EPOCH` from the title commit.
+The documentation checker still reports 18 existing stale-link/path errors and
+49 warnings. Native iOS device memory/frame pacing, Windows, Linux and Intel
+macOS have not been executed.
+
+
+## Guest register allocation and frame rate (2026-11-26)
+
+The Apple M1 720p route was repeated with no screenshot or CPU-sampling work
+during gameplay. `out/memory-optimization/fps-baseline-r2/` averages 48.6 guest
+iterations/s over 60 active-song probe windows (median window 49.3/s). Disabling
+`gpu.xenos.clear_memory_page_state` experimentally reaches 52.0/s (median 52.3/s)
+in `fps-watch-cache/`. Over the common 5-45 second song-clock region the rates
+are 48.5 and 51.5/s. This switch remains unchanged in production: memory providers
+can expose writable physical spans without notifying listeners, and the frame
+refresh protects coherency. The experiment identifies upload cost, not a safe
+replacement for write tracking.
+
+The title manifest enables `non_argument_as_local` and `non_volatile_as_local`.
+These are shared title code-generation options across CPU architectures and
+D3D12/Vulkan/MoltenVK, independent of resolution or graphics quality. They keep
+scratch and ABI-preserved registers in compiler-managed locals. CR, CTR, XER,
+reservation, link-register and machine-state optimizations remain disabled;
+existing floating-point policies remain in force. The function body count stays
+38,196. Before the cleanup correction, general-register context accesses fall
+from 2,492,962 to 1,206,569 and 10,385 save-helper call sites disappear
+(`localization-static-comparison.json`). These are source counts, not executed
+instruction counts or a speedup measurement.
+
+The initial localized candidate faults at guest address 0x34 during CRT array
+initialization (`fps-local-registers/console.log`). The parent at 0x824EE738
+passes its frame in r12 to cleanup funclet 0x824EE7E8. The SDK synchronized only
+nonvolatiles at that call and still localized the callee's r12 into a zero-initialized
+local. SDK patch 0100 keeps every shared-register family in context and synchronizes
+all enabled caller locals. Its code-generation behavior revision advances to 5.
+The existing 0005 discovery/stamp responsibility is retained. The fix applies to
+all code-generation hosts and targets, with SDK localization defaults unchanged.
+Two new regressions fail against the old generator and pass with the correction;
+51 focused SDK cases pass 385 assertions (`codegen-register-red-tests.log`,
+`codegen-register-final-tests.log`). All 73 production patches replay in isolation;
+the pre-existing live prompt mismatch remains preserved (`fps-full-replay.log`).
+
+The audio hook for `ogg_sync_buffer` also reads its caller's r31 at 0x827687A0.
+`config/functions.toml` marks 0x827E08F8 as `share_registers`, so the caller's
+VorbisReader remains available across that hook. The generated call site is
+inspected for synchronization before and after the call. An entry-block audit
+identifies another 60 functions with live-in r12 inputs: 59 cleanup helpers and
+one stack probe. Those entries also retain shared registers; the explicit count
+is 61, including the audio hook (`confirmed-register-inputs.json`).
+
+The corrected localized build reaches active gameplay and exits cleanly.
+`fps-local-registers-route/` averages 46.0 guest iterations/s versus 43.1/s in
+`fps-baseline-control/`; the common 5-45 second song-clock region measures
+46.2 versus 43.2/s. These sequential captures suggest a modest CPU gain, with
+remaining external-load and cache-order limitations. They do not demonstrate
+stable 60 fps or establish displayed-frame distributions. Both preserve 720p,
+1x rendering, no MSAA and the title's normal frame memory refresh.
+
+### Exact upload snapshots
+
+SDK patch 0101 implements an optional bounded CPU snapshot cache for Vulkan
+uploads. It compares exact page bytes with a private copy of the recorded upload;
+GPU writes and explicit cache invalidation retire affected entries. Staging copies
+use the snapshot itself so queued bytes agree with later comparisons. No live
+guest pages are substituted for the GPU mirror, and the CPU never reads a GPU
+mapping. Write watches are armed before comparison; partial failures invalidate
+prematurely marked ranges. Existing transfer barriers and hoisting checks remain
+authoritative. The setting `gpu.vulkan.shared_memory_snapshot_cache_mb` accepts
+0-128 MiB and defaults to **0 on all platforms**. D3D12 remains unchanged.
+
+The independent queued-copy oracle passes 4,943 checks, including delayed uploads,
+overlapping GPU writes, snapshot eviction, final-byte changes and cache reset.
+Eight focused native CTest registrations pass (`fps-ctest.log`); the focused
+code-generation suite passes 51 cases and 385 assertions.
+
+The 64 MiB trial (`fps-snapshot-on/`) averages 37.9 iterations/s over 60 probe
+windows, versus 32.6/s over 58 windows when explicitly disabled in the same
+binary (`fps-snapshot-off/`). Their peaks are 1,571,425,136 and 1,530,809,200 bytes.
+The trial avoids 2,094,859 page uploads while recording 86,082 uploads by its last
+10-second counter. However, the 8 GiB Mac's swap use rises from about 17.5 to
+21.7 GiB during this work; a contemporaneous sample also finds simulator services
+consuming substantial CPU. The song clocks cover different amounts of gameplay.
+These captures establish upload reuse and successful gameplay, not a repeatable
+FPS improvement. The cache therefore remains opt-in rather than changing the
+production default. CPU localization remains enabled.

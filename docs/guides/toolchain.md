@@ -243,13 +243,17 @@ the pinned source and current build inputs; they are not measured speedups.
 | Vector stores and tail calls | Upstream `55dd9b0b` fuses eligible vector stores and emits eligible tail calls during regeneration. Exception scopes, hooks and setjmp/longjmp retain their safety boundaries. |
 | Fast vector math | The manifest has no exact-mode overrides; the nine selectable instruction families retain upstream fast defaults. `vlogefp` remains exact. |
 | Stack-store forwarding | The entrypoint manifest explicitly enables `forward_stack_stores = true`. Same-block stack reloads can reuse proven local values; writes still update guest memory. Calls, labels, aliases, barriers and hooks invalidate affected state. |
+| Guest register allocation | The title enables `non_argument_as_local` and `non_volatile_as_local`. Patch 0100 synchronizes every enabled local register at shared calls and keeps shared callees in context; codegen behavior revision 5 forces regeneration. Explicit shared entries preserve 60 r12 entry inputs and the audio hook's caller r31. |
 | GPU setup and state reuse | Upstream paint-pipeline reuse, no-op depth rejection and D3D12 sampler-layout fixes are automatic. Supported bindless, native-cache, shader-storage and asynchronous compilation defaults remain enabled; Vulkan feature support is checked by the driver. |
 
 Release compilation uses Clang 20.1.8 with `-O3`; the title does not replace it
 with a lower generated-code optimization level. Existing correctness settings,
-including required D3D12 readback, remain in force. Old register-localization
-switches and global unsafe floating-point compiler flags are separate choices,
-not requirements for these v0.11 mechanisms.
+including required D3D12 readback, remain in force. Register localization is
+enabled with shared-call corrections; CR, CTR, XER, reservation and global unsafe
+floating-point compiler optimizations remain disabled. The focused codegen suite
+passes 51 cases and 385 assertions. Native Apple measurements and remaining
+frame-pacing limits are recorded in the
+[performance study](../engine/vulkan-performance.md#guest-register-allocation-and-frame-rate-2026-11-26).
 
 The forwarding comparison preserves all 38,458 registrations and 38,196 function
 bodies. It replaces 2,215 stack-load macro occurrences with local reads. The

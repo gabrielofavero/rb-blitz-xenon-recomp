@@ -21,6 +21,27 @@ identified in their text. The Button Layout route audit was updated with a
 
 ## Open
 
+**Apple memory usage (2026-11-26):** allocator slack, uncompressed shader source,
+and peak-sized transient pools contribute to macOS/iOS memory pressure. SDK
+patch 0098 reduces retention; the headless Apple M1 allocator comparison drops
+288 MiB of retained blocks to 40 MiB under the macOS policy. The final 720p game
+route peaks at 1,463 MiB, renders active gameplay and exits cleanly; frame rates
+still vary below 60 fps. Matched whole-game savings and native iOS footprint remain
+unverified. Patch 0099 prioritizes foreground MoltenVK compilation and establishes
+native QoS for Apple preparation workers. Large MoltenVK
+buffers now attempt demand-paged host import, with private fallback; a 2x2
+scaled resolve still reserves a 2 GiB logical buffer. iOS already forces 1x.
+See the [memory study](../engine/vulkan-performance.md#apple-gpu-memory-retention-2026-11-26).
+
+**Apple FPS (2026-11-26):** guest register localization is enabled with SDK patch
+0100's shared-call correction and 61 explicit shared-register entries. The native
+720p route reaches gameplay and exits cleanly; a sequential comparison measures
+46.0 versus 43.1 guest iterations/s. Stable 60 fps remains unverified. Patch 0101
+adds exact upload reuse but defaults to disabled: changing swap pressure and
+concurrent simulator CPU load prevent a repeatable gain claim. No native iOS
+device FPS result is available. See the
+[frame-rate study](../engine/vulkan-performance.md#guest-register-allocation-and-frame-rate-2026-11-26).
+
 **Resolution aspect and song-start acceptance (2026-11-18):** the latest run still
 reports unchanged proportions and crashes entering gameplay. The
 [native-aspect policy](../plans/finished/2026-11-18-native-aspect-resolution-policy.md)

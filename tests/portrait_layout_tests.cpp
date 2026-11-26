@@ -55,6 +55,7 @@ extern "C" REX_FUNC(__imp__sub_824C8E88) {
 int main() {
   using namespace rb_blitz::test;
   using namespace rb_blitz::ui;
+  using rb_blitz::settings::DisplayMode;
   BeginCase("library transitions retain portrait for both native panel layouts");
   for (const auto source : kPortraitLibraryScreens)
     for (const auto destination : kPortraitLibraryScreens) {
@@ -128,6 +129,35 @@ int main() {
         FitPortraitViewport(.75f, {402, 874, 0, 0, 402, 874}).scale);
   Close(FitPortraitViewport(.75f, {}).scale, 1);
   Close(FitPortraitViewport(std::numeric_limits<float>::quiet_NaN(), {402, 874}).scale, 1);
+
+  BeginCase("standard phone resolutions and intermediate resize widths contain the entire authored canvas");
+  // Physical pixels and logical points must produce the same layout. Include
+  // compact 16:9 phones, notched iPhones, and 18:9 through 22:9 Android displays.
+  for (const auto size : {DisplayMode{640,1136}, {750,1334}, {1080,1920},
+                          {1125,2436}, {828,1792}, {1080,2340}, {1170,2532},
+                          {1179,2556}, {1206,2622}, {1290,2796}, {1320,2868},
+                          {1080,2160}, {1080,2400}, {1440,3120}, {1080,2520}}) {
+    for (float density : {1.f, 2.f, 3.f}) {
+      const float width = size.width / density, height = size.height / density;
+      for (float safe_top : {0.f, height * .075f}) {
+        PortraitViewport viewport{width, height, width * .01f, safe_top,
+                                  width * .98f, height - safe_top - height * .04f};
+        for (float authored : {width / height, 9.f / 16, .75f}) {
+          const auto fit = FitPortraitViewport(authored, viewport);
+          const float left = width / 2 + fit.X(-240 * authored) * height / 480;
+          const float right = width / 2 + fit.X(240 * authored) * height / 480;
+          const float top = height / 2 - fit.Z(240) * height / 480;
+          const float bottom = height / 2 - fit.Z(-240) * height / 480;
+          CHECK_TRUE(left > viewport.safe_x && right < viewport.safe_x + viewport.safe_width);
+          CHECK_TRUE(top > safe_top && bottom < safe_top + viewport.safe_height);
+          for (int resized = 240; resized <= 600; ++resized) {
+            const auto narrow = FitPortraitViewport(authored, {float(resized), height});
+            CHECK_TRUE(narrow.scale * authored * height < resized);
+          }
+        }
+      }
+    }
+  }
 
   BeginCase("mobile preview follows 201:437 independently of desktop proportions and render scale");
   using namespace rb_blitz::settings;

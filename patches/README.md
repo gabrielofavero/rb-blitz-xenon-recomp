@@ -14,9 +14,9 @@ checkout.
 ## Registered production v0.11.0 stack (2026-11-18)
 
 The [v0.11.0 stack and complete disposition ledger](rexglue-sdk-v0.11/README.md)
-contains the **69 registered production SDK patches** for exact release commit
+contains the **73 registered production SDK patches** for exact release commit
 `a3e1d82678ca20d68d4837a8e9ee4652ff073745`. It accounts for **all 71 original
-SDK patch IDs, the retained nested MoltenVK patch and new 0089/0090/0091/0092/0093/0094/0095/0096/0097**:
+SDK patch IDs, the retained nested MoltenVK patch and new 0089/0090/0091/0092/0093/0094/0095/0096/0097/0098/0099/0100/0101**:
 sixty original IDs retain v0.11 files; eleven use upstream/title replacements
 or fold into an owning patch. The title integration and SDK pin are adopted;
 the fresh Windows AMD64 production source-SDK release build passes.
@@ -31,6 +31,44 @@ across Windows, Linux, macOS and iOS, independently of architecture or D3D12,
 Vulkan and MoltenVK. Landscape and unthemed prompt sizing retain their defaults.
 Strict replay of all 67 production patches passes. Native validation is Windows
 AMD64; the other platforms and architectures have not been executed for this change.
+
+The separate [0101 unchanged-upload patch](rexglue-sdk-v0.11/0101-vulkan-unchanged-upload-snapshots.patch)
+compares requested guest pages against bounded, private copies of recorded CPU
+uploads. Unchanged bytes reuse the existing GPU copy; GPU writes, explicit
+invalidation and cache clear invalidate snapshots. Normal frame refresh, write
+watches and 0070's copy ordering remain in place. The cache defaults to disabled
+on all platforms: Apple gameplay measurements under changing system pressure
+do not establish a repeatable FPS gain. D3D12 is unchanged. The cache owns upload selection, separately from 0098's allocator
+retention and 0070's transfer batching. An independent queued-copy oracle checks
+snapshot ownership, GPU overwrites, replacement and exact comparisons.
+
+The separate [0100 shared-register code-generation patch](rexglue-sdk-v0.11/0100-codegen-shared-local-register-state.patch)
+preserves localized scratch registers, including the r12 frame pointer passed to
+CRT cleanup funclets. Shared-register bodies use context storage and callers
+synchronize every localized register family. This owns the shared-call ABI,
+separately from 0005's discovery and skip-stamp infrastructure; its behavior
+revision advances the stamp from 4 to 5. It applies to v0.11 code generation for
+all supported CPU architectures and graphics backends; default-disabled local
+register options retain their behavior. The regression fails on the original
+generator and all 51 focused code-generation cases pass with the correction.
+
+The separate [0099 compilation priority patch](rexglue-sdk-v0.11/0099-moltenvk-foreground-pipeline-priority.patch)
+schedules current-frame pipeline creation ahead of queued preparation on MoltenVK.
+It owns access priority to the driver's serial shader-cache conversion, distinct
+from 0021's preparation lifecycle, 0028's persistence and 0069's pending-draw policy.
+Other Vulkan drivers and D3D12 retain parallel compilation behavior. The host
+priority and failure-release test passes eight checks, native Apple worker QoS
+passes 12, both Apple arm64 release builds pass, and seven focused CTest checks pass.
+
+The separate [0098 Apple GPU memory patch](rexglue-sdk-v0.11/0098-apple-gpu-memory-retention.patch)
+owns demand-paged host backing for large MoltenVK buffers, allocation granularity,
+retained shader compression, transient-pool retirement and Apple texture-cache budgets. It keeps upload ordering (0070), queue submission
+(0073), platform mapping (0074) and scaled-resolve limits (0097) in their existing
+owners. MoltenVK selects smaller allocator blocks and completed-resource retention;
+macOS/iOS select smaller texture defaults. Windows/Linux and D3D12 defaults stay
+unchanged. Both Apple loader routes preserve explicit compression overrides.
+See the [memory study](../docs/engine/vulkan-performance.md#apple-gpu-memory-retention-2026-11-26)
+for measurements and untested configurations.
 
 The separate [0097 resolve allocation limit patch](rexglue-sdk-v0.11/0097-vulkan-resolve-allocation-limit.patch)
 checks the Vulkan 1.1 allocation limit before constructing resolution-scaled
