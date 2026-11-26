@@ -32,11 +32,13 @@ inline constexpr Feature kFeatures[] = {
     {"interface.show_pb", "Personal Best"},
     {"interface.show_steak", "Note Streak"},
     {"interface.input_viewer", "Input Viewer"},
+    {"interface.show_run_comparison", "Run Comparison"},
 };
 struct Link { size_t child, parent; };
 inline constexpr Link kLinks[] = {
     {1, 0}, {2, 0}, {3, 0}, {6, 5},
     {8, 7}, {9, 7}, {10, 7}, {11, 7}, {12, 7}, {13, 7},
+    {11, 14},
 };
 inline size_t Index(std::string_view token) {
   for (size_t i = 0; i < std::size(kFeatures); ++i)

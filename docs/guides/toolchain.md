@@ -83,7 +83,7 @@ a relative Windows default that breaks later SDK regeneration.
 
 ### Platform validation scope
 
-The migrated SDK build, CTest and title-link evidence currently comes from Windows AMD64; see the [migration record](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md). Windows ARM64 native and cross-link validation is unavailable here: MSVC toolset `14.44.35207` has no `lib/arm64` libraries, although Windows SDK `10.0.26100.0` supplies `um/arm64`. AMD64 results do not establish ARM64 correctness. Native Linux, macOS and iOS migration acceptance remains pending; older Apple measurements below describe the former SDK.
+The migrated SDK build, CTest and title-link evidence currently comes from Windows AMD64; see the [migration record](../plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md). Windows ARM64 native and cross-link validation is unavailable here: MSVC toolset `14.44.35207` has no `lib/arm64` libraries, although Windows SDK `10.0.26100.0` supplies `um/arm64`. AMD64 results do not establish ARM64 correctness. Native Linux, macOS and iOS migration acceptance remains pending; older Apple measurements below describe the former SDK.
 
 ### Pinned Vulkan sources
 
@@ -262,4 +262,4 @@ forward/direct PPC sequences. These counts establish emitted-code and test
 coverage, not CPU/GPU timing gains. Windows AMD64 candidate validation does not
 establish native Linux, Apple or ARM64 behavior. Matched performance and the
 production adoption state remain recorded in the
-[migration plan](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).
+[migration plan](../plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md).

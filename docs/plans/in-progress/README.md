@@ -1,10 +1,12 @@
 # In-progress plans
 
+[Native render scale and pointer controls](2026-11-26-native-render-scale.md) is implementing device-relative quality tiers, Audio-style controls and conservative startup allocation.
+
 Plans that are actively being worked. A plan moves here from [`../todo/`](../todo/) when work starts
 and leaves for [`../finished/`](../finished/) when it is delivered — one `git mv`, keeping its
 `YYYY-MM-DD-` prefix.
 
-The [ReXGlue v0.11.0 migration](2026-11-17-rexglue-v0.11-migration-plan.md) started
+The [ReXGlue v0.11.0 migration](../finished/2026-11-17-rexglue-v0.11-migration-plan.md) started
 on 2026-11-17. Production now pins SDK commit
 `a3e1d82678ca20d68d4837a8e9ee4652ff073745` with the reviewed 65-patch stack and
 promoted title integration. The fresh Windows AMD64 production source-SDK

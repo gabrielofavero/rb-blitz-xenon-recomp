@@ -167,4 +167,112 @@ bool GraphicsBootState::Save(std::string* error) {
   }
   return WriteFileAtomic(file_, doc.Render(), error);
 }
+
+bool ResolutionProfileState::Open(const std::filesystem::path& settings_file, std::string* error) {
+  if (settings_file.empty()) return false;
+  file_ = settings_file; file_ += ".render-profiles.toml";
+  if (!lock_.Acquire(file_, error, false)) return false;
+  std::string text; bool exists = false;
+  if (!ReadFileText(file_, &text, &exists)) {
+    if (error) *error = "cannot read render profile journal";
+    return false;
+  }
+  if (exists) {
+    bool ok;
+    const auto doc = toml::Document::Parse(text, &ok, error);
+    if (!ok || doc.Get("", "schema_version").value != "1") {
+      if (error) *error = "unrecognized render profile journal; left untouched";
+      return false;
+    }
+    request_ = doc.Get("", "request").value;
+    failed_ = doc.Get("", "failed").value;
+    for (const auto id : {SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
+                          SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale}) {
+      const auto key = SettingIdToken(id);
+      if (const auto value = doc.Get("pending", key); value.found) pending_[id] = value.value;
+      if (const auto value = doc.Get("confirmed", key); value.found) confirmed_[id] = value.value;
+    }
+  }
+  active_ = true;
+  return true;
+}
+
+bool ResolutionProfileState::Recover(const GraphicsValues& requested, std::string* error) {
+  if (!active_) return false;
+  const auto signature = Signature(requested);
+  if (!pending_.empty() && request_ == signature) failed_ = signature;
+  if (failed_ != signature) failed_.clear();
+  request_ = signature;
+  pending_.clear(); presents_.clear(); confirmed_.clear();
+  if (!Save(error)) return true;  // unreadable safety state must never enable native implicitly
+  return !failed_.empty();
+}
+
+bool ResolutionProfileState::Begin(const GraphicsValues& requested, SettingId context,
+                                   std::string fingerprint, std::string* error) {
+  if (!active_) return false;
+  const auto signature = Signature(requested);
+  confirmed_.erase(context);
+  if (pending_.contains(context) && pending_.at(context) == fingerprint && request_ == signature) {
+    presents_[context] = 0;
+    return true;
+  }
+  const auto previous_request = request_;
+  const auto previous_pending = pending_;
+  request_ = signature;
+  // Only Recover compares a new saved request with the failure latch. Safe
+  // running frames and changes still awaiting restart must not clear it.
+  pending_[context] = std::move(fingerprint);
+  presents_[context] = 0;
+  if (Save(error)) return true;
+  request_ = previous_request;
+  pending_ = previous_pending;
+  return false;
+}
+
+bool ResolutionProfileState::Presented(SettingId context, std::string_view fingerprint,
+                                       std::string* error) {
+  const auto found = pending_.find(context);
+  if (!active_ || found == pending_.end() || found->second != fingerprint) return true;
+  if (confirmed_.contains(context) && confirmed_.at(context) == fingerprint) return true;
+  if (++presents_[context] < kStablePresents) return true;
+  confirmed_[context] = found->second;
+  // Keep the active attempt armed until clean shutdown. Memory pressure may
+  // cause a later song to hang after this resolution has already presented.
+  return Save(error);
+}
+
+bool ResolutionProfileState::Closed(std::string* error, bool deliberate_restart) {
+  if (!active_) return true;
+  // An accepted settings restart intentionally attempts newly saved capacity;
+  // stopping the old frame early must not classify that request as a crash.
+  if (deliberate_restart) {
+    pending_.clear(); presents_.clear();
+    const bool saved = Save(error); active_ = false; return saved;
+  }
+  // Only a stable context in a cleanly closed process is proven for this run.
+  // Initialization failures and early quits retain their unconfirmed markers.
+  for (auto it = pending_.begin(); it != pending_.end();) {
+    const auto good = confirmed_.find(it->first);
+    if (good != confirmed_.end() && good->second == it->second) it = pending_.erase(it);
+    else ++it;
+  }
+  const bool saved = Save(error);
+  // Title stopping can precede the last guest draw; never arm a new attempt
+  // after this final shutdown write.
+  active_ = false;
+  return saved;
+}
+
+bool ResolutionProfileState::Save(std::string* error) {
+  toml::Document doc;
+  doc.Set("", "schema_version", "1");
+  doc.Set("", "request", toml::RenderBasic(request_));
+  doc.Set("", "failed", toml::RenderBasic(failed_));
+  for (const auto& [id, value] : pending_)
+    doc.Set("pending", SettingIdToken(id), toml::RenderBasic(value));
+  for (const auto& [id, value] : confirmed_)
+    doc.Set("confirmed", SettingIdToken(id), toml::RenderBasic(value));
+  return WriteFileAtomic(file_, doc.Render(), error);
+}
 }  // namespace rb_blitz::settings

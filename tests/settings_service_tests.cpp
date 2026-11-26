@@ -350,6 +350,7 @@ void TestMobileDefaultsAndLaneSwipe() {
     Service service(paths, release);
     service.Boot(nullptr, {}, nullptr);
     CHECK_TRUE(service.EffectiveValue(SettingId::kHideExitGame).boolean);
+    CHECK_FALSE(service.EffectiveValue(SettingId::kShowRunComparison).boolean);
     constexpr auto id = SettingId::kTouchLaneSwipe;
     const auto* row = service.DescriptorFor(id);
     CHECK_TRUE(row && row->availability == Availability::kVisible);
@@ -893,8 +894,8 @@ void TestInterruptedCommitRecovery() {
   service.Boot(nullptr, {}, nullptr);
   service.SetCapabilities(Capabilities());
   const auto txn = service.BeginEdit(service.revision());
-  CHECK_TRUE(service.Set(txn, SettingId::kInterfaceResolution, EnumV("1280x720"), 1).ok);
-  CHECK_TRUE(service.Set(txn, SettingId::kGameplayResolution, EnumV("1280x720"), 1).ok);
+  CHECK_TRUE(service.Set(txn, SettingId::kInterfaceResolution, EnumV("1600x900"), 1).ok);
+  CHECK_TRUE(service.Set(txn, SettingId::kGameplayResolution, EnumV("1600x900"), 1).ok);
   CHECK_TRUE(service.Commit(txn).status == CommitStatus::kSaved);
   const auto automatic = service.BeginEdit(service.revision());
   CHECK_TRUE(service.Set(automatic, SettingId::kInterfaceResolution, EnumV("native"), 1).ok);
@@ -1481,6 +1482,7 @@ void TestMobilePreviewSettings() {
     }
     CHECK_TRUE(service.EffectiveValue(SettingId::kInterfaceOrientation).text == "portrait");
     CHECK_TRUE(service.EffectiveValue(SettingId::kGameplayOrientation).text == "portrait");
+    CHECK_FALSE(service.EffectiveValue(SettingId::kShowRunComparison).boolean);
     CHECK_TRUE(service.EffectiveValue(SettingId::kHideExitGame).boolean);
     for (const auto native : {DisplayMode{2560, 1080}, {3440, 1440}, {5120, 1440}}) {
       auto caps = Capabilities();
@@ -1510,6 +1512,9 @@ void TestMobilePreviewSettings() {
 
 void TestFirstBootMobileHudDefaults() {
   BeginCase("fresh mobile profiles persist a minimal HUD, while existing choices and desktop stay intact");
+  const auto hud_toggles = {SettingId::kHideHud, SettingId::kGoldProgress, SettingId::kShowPb,
+                            SettingId::kProgressBar, SettingId::kShowTimer, SettingId::kShowSteak,
+                            SettingId::kInputViewer};
   for (const auto platform : {schema::HostPlatform::kIOS, schema::HostPlatform::kAndroid,
                               schema::HostPlatform::kWindows}) {
     for (const bool existing : {false, true}) {
@@ -1520,14 +1525,14 @@ void TestFirstBootMobileHudDefaults() {
       service.Boot(nullptr, {}, nullptr);
       service.SetCapabilities(Capabilities());
       FakeProvider provider;
-      for (const auto id : {SettingId::kShowPb, SettingId::kProgressBar, SettingId::kShowTimer})
+      for (const auto id : hud_toggles)
         provider.values[id] = BoolV(true);
       service.SetProviderSink(&provider);
       const bool initialize = !existing && schema::IsMobile(platform);
       const auto applied = service.ApplyFirstBootMobileHudDefaults();
       CHECK_EQ(applied.provider_written, initialize);
       CHECK_EQ(provider.saves, initialize ? 1 : 0);
-      for (const auto id : {SettingId::kShowPb, SettingId::kProgressBar, SettingId::kShowTimer})
+      for (const auto id : hud_toggles)
         CHECK_EQ(service.EffectiveValue(id).boolean, !initialize);
       if (!initialize) continue;
       const auto edit = service.BeginEdit(service.revision());
@@ -1555,6 +1560,31 @@ void TestFirstBootMobileHudDefaults() {
   CHECK_FALSE(service.CommittedProviderValue(SettingId::kShowPb)->boolean);
   CHECK_FALSE(service.CommittedProviderValue(SettingId::kProgressBar)->boolean);
   CHECK_TRUE(service.CommittedProviderValue(SettingId::kShowTimer)->boolean);
+
+  BeginCase("native run comparison defaults to hidden on mobile without requiring Ultimate");
+  for (const auto platform : {schema::HostPlatform::kIOS, schema::HostPlatform::kAndroid,
+                              schema::HostPlatform::kWindows, schema::HostPlatform::kLinux,
+                              schema::HostPlatform::kMacOS}) {
+    Scratch native_scratch;
+    const auto paths = Paths(native_scratch);
+    const auto release = schema::SettingsForRelease(platform, "test");
+    Service native(paths, release);
+    native.Boot(nullptr, {}, nullptr);
+    auto caps = Capabilities();
+    caps.provider = {};
+    native.SetCapabilities(caps);
+    CHECK_EQ(native.EffectiveValue(SettingId::kShowRunComparison).boolean, !schema::IsMobile(platform));
+    const auto* row = native.DescriptorFor(SettingId::kShowRunComparison);
+    CHECK_TRUE(row && row->provider == Provider::kNative && row->availability == Availability::kVisible);
+    const auto edit = native.BeginEdit(native.revision());
+    CHECK_TRUE(native.Set(edit, SettingId::kShowRunComparison, BoolV(schema::IsMobile(platform)),
+                          native.capability_revision()).ok);
+    CHECK_TRUE(native.Commit(edit).status == CommitStatus::kSaved);
+    Service reloaded(paths, release);
+    reloaded.Boot(nullptr, {}, nullptr);
+    reloaded.SetCapabilities(caps);
+    CHECK_EQ(reloaded.EffectiveValue(SettingId::kShowRunComparison).boolean, schema::IsMobile(platform));
+  }
 }
 
 void TestIOSReleaseSettings() {

@@ -2396,6 +2396,61 @@ void TestPortraitCanvas() {
 }
 
 int main(int argc, char** argv) {
+  if (argc == 3 && std::string(argv[1]) == "check-render-scale-source") {
+    namespace font = rb_blitz::ui::input_font;
+    const auto u32 = [](const uint8_t* p) {
+      return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
+    };
+    const auto read = [&](const char* path) {
+      std::ifstream file(std::filesystem::path(argv[2]) / path, std::ios::binary);
+      return std::vector<uint8_t>(std::istreambuf_iterator<char>(file), {});
+    };
+    const auto source = read("ui/av_options/gen/av_options.milo_xbox");
+    const auto buttons = read(font::kListRecord);
+    BeginCase("native render scale scene retains Audio buttons and a ten-marker bottom wheel");
+    CHECK_FALSE(source.empty()); CHECK_FALSE(buttons.empty());
+    if (source.empty() || buttons.empty()) return Finish();
+    for (const bool portrait : {false, true}) {
+      for (const float aspect : {.3f, 402.f / 874, .75f, .9f}) {
+        std::vector<uint8_t> scene;
+        std::string why;
+        CHECK_TRUE(font::PrepareRenderScaleScene(source, buttons, aspect, portrait, &scene, &why));
+        if (scene.size() <= 0x810) { std::printf("scene refused: %s\n", why.c_str()); continue; }
+        const auto* bytes = scene.data() + 0x810;
+        size_t at = 4;
+        const auto string = [&] {
+          const auto length = u32(bytes + at); at += 4;
+          std::string text(reinterpret_cast<const char*>(bytes + at), length);
+          at += length; return text;
+        };
+        string(); string(); at += 9;
+        const auto count = u32(bytes + at); at += 4;
+        std::vector<std::string> names;
+        for (uint32_t i = 0; i < count; ++i) { string(); names.push_back(string()); }
+        const auto markers = font::detail::MiloObjectBoundaries(
+            std::span<const uint8_t>(bytes, scene.size() - 0x810), at, count);
+        CHECK_EQ(markers.size(), size_t(count) + 1);
+        if (markers.size() != size_t(count) + 1) continue;
+        std::map<std::string, std::vector<uint8_t>> objects;
+        for (size_t i = 0; i < count; ++i)
+          objects[names[i]] = {bytes + markers[i] + 4, bytes + markers[i + 1] + 4};
+        for (const char* name : {"checkbox.lst", "track_sound_slider.sld", "scale_value.lbl", "nav.ihp"})
+          CHECK_TRUE(objects.contains(name));
+        if (!objects.contains("track_sound_slider.sld") || !objects.contains("scale_value.lbl")) continue;
+        const auto& wheel = objects.at("track_sound_slider.sld");
+        constexpr std::string_view resource = "../resource/sliders/slider_options.milo";
+        CHECK_TRUE(std::search(wheel.begin(), wheel.end(), resource.begin(), resource.end()) != wheel.end());
+        CHECK_TRUE(std::abs(std::bit_cast<float>(u32(wheel.data() + 0x20 + 44)) + 100) < .001f);
+        const float scale = std::bit_cast<float>(u32(wheel.data() + 0x20));
+        const float width = portrait ? rb_blitz::ui::PortraitSplash(aspect).width : 640.f;
+        CHECK_TRUE(scale > 0 && 190 * scale <= width * .85f);
+        const auto& label = objects.at("scale_value.lbl");
+        CHECK_TRUE(std::abs(std::bit_cast<float>(u32(label.data() + 0x19 + 44)) + 70) < .001f);
+        CHECK_EQ(u32(objects.at("nav.ihp").data() + 9), uint32_t(2));
+      }
+    }
+    return Finish();
+  }
   if (argc == 4 && std::string(argv[1]) == "check-calibration-source") {
     namespace settings = rb_blitz::settings;
     namespace font = rb_blitz::ui::input_font;
@@ -3868,12 +3923,11 @@ int main(int argc, char** argv) {
       CHECK_TRUE(rb_blitz::ui::input_font::PrepareRenderScaleScene(source, portrait_buttons,
                                                                  aspect, true, &fitted, &why));
       objects = stored_objects(fitted);
-      CHECK_TRUE(objects.contains("interface_scale.lbl"));
-      CHECK_TRUE(objects.contains("gameplay_scale.lbl"));
-      CHECK_EQ(u32(objects.at("nav.ihp").data() + 9), uint32_t(1));
-      CHECK_EQ(u32(objects.at("nav.ihp").data() + 13), uint32_t(2));
-      for (const auto& [slider, z] : {std::pair{"sound_effects_slider.sld", 60.f},
-                                     {"track_sound_slider.sld", -55.f}}) {
+      CHECK_TRUE(objects.contains("scale_value.lbl"));
+      CHECK_TRUE(objects.contains("checkbox.lst"));
+      CHECK_EQ(u32(objects.at("nav.ihp").data() + 9), uint32_t(2));
+      for (const auto& [slider, z] : {std::pair{"sound_effects_slider.sld", -100.f},
+                                     {"track_sound_slider.sld", -100.f}}) {
         const auto& object = objects.at(slider);
         CHECK_TRUE(std::abs(std::bit_cast<float>(u32(object.data() + 0x20 + 44)) - z) < .001f);
       }

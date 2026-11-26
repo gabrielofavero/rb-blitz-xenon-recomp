@@ -5,6 +5,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <map>
 #include <string>
 #include <vector>
@@ -78,12 +79,6 @@ inline std::string ReconcileProfileResolutionToken(std::string_view token,
   return choices.back().token;
 }
 
-inline DisplayMode ScaledProfileResolution(DisplayMode native, int tenths) {
-  tenths = std::clamp(tenths, 5, 10);
-  return {std::max(1, (native.width * tenths + 5) / 10),
-          std::max(1, (native.height * tenths + 5) / 10)};
-}
-
 // A portrait device displays a full-height crop of the landscape source. Its
 // source height must match the device's long edge to retain native pixel density.
 inline DisplayMode DeviceProfileSource(DisplayMode native, bool portrait) {
@@ -102,15 +97,85 @@ inline int ResolutionProfileDrawScale(DisplayMode native, bool device,
   return std::max((largest.width + 1919) / 1920, (largest.height + 719) / 720);
 }
 
-// MoltenVK cannot sparsely back the scaled resolve buffer. Keep iOS at 1x
-// (2x alone adds 2 GiB), fitting both orientations before applying quality tiers.
-inline DisplayMode IOSProfilePixels(DisplayMode native, bool portrait, int tenths) {
+// Scale values are source pixel heights, except 10, which retains the saved
+// native intent across device/orientation changes. Older 5..9 tenths are read
+// compatibly; new wheel choices always store exact heights, including 720.
+inline bool IsDeviceRenderScaleValue(int value) {
+  return (value >= 5 && value <= 10) || value >= 720;
+}
+
+inline DisplayMode DeviceRenderScalePixels(DisplayMode native, bool portrait, int value) {
   auto source = DeviceProfileSource(native, portrait);
   if (source.width <= 0 || source.height <= 0) source = {1280, 720};
-  const double fit = std::min({1.0, 1920.0 / source.width, 720.0 / source.height});
-  source = {std::max(1, int32_t(std::lround(source.width * fit))),
-            std::max(1, int32_t(std::lround(source.height * fit)))};
-  return ScaledProfileResolution(source, tenths);
+  int height = value == 10 ? source.height : value >= 5 && value <= 9
+      ? (source.height * value + 5) / 10 : value;
+  height = std::clamp(height, std::min(720, source.height), source.height);
+  return {std::max(1, int32_t((int64_t(source.width) * height + source.height / 2) / source.height)),
+          height};
+}
+
+inline std::vector<Choice> DeviceRenderScaleChoices(DisplayMode native, bool portrait) {
+  auto source = DeviceProfileSource(native, portrait);
+  if (source.width <= 0 || source.height <= 0) source = {1280, 720};
+  std::vector<Choice> choices;
+  const int floor = std::min(720, source.height);
+  for (int step = 0; step < 10; ++step) {
+    const int height = floor + int((int64_t(source.height - floor) * step + 4) / 9);
+    const bool full = step == 9;
+    if (!full && height == source.height) continue;
+    const auto token = full ? std::string("10") : std::to_string(height);
+    char ratio[32];
+    std::snprintf(ratio, sizeof(ratio), "%.3f", double(height) / source.height);
+    std::string label = full ? "1.0" : ratio;
+    while (label.size() > 3 && label.back() == '0') label.pop_back();
+    label += " (" + std::to_string(height) + "p)";
+    if (choices.empty() || choices.back().token != token)
+      choices.push_back({token, std::move(label)});
+    if (floor == source.height) return {{"10", "1.0 (" + std::to_string(source.height) + "p)"}};
+  }
+  return choices;
+}
+
+inline int ReconcileDeviceRenderScale(int value, DisplayMode native, bool portrait) {
+  if (value == 10) return 10;
+  const auto pixels = DeviceRenderScalePixels(native, portrait, value);
+  const auto choices = DeviceRenderScaleChoices(native, portrait);
+  int selected = std::stoi(choices.front().token);
+  for (const auto& choice : choices) {
+    const int candidate = std::stoi(choice.token);
+    if (DeviceRenderScalePixels(native, portrait, candidate).height <= pixels.height)
+      selected = candidate;
+  }
+  return selected;
+}
+
+// Unknown devices begin at the 720 source-height floor. A recorded sustainable
+// size may select a higher wheel stop; display dimensions alone prove no speed.
+inline int RecommendedDeviceRenderScale(DisplayMode native, bool portrait, DisplayMode sustainable) {
+  const auto choices = DeviceRenderScaleChoices(native, portrait);
+  if (sustainable.width <= 0 || sustainable.height <= 0) return std::stoi(choices.front().token);
+  const auto source = DeviceProfileSource(native, portrait);
+  if (source.width <= 0 || source.height <= 0) return std::stoi(choices.front().token);
+  const auto height = std::min(sustainable.height,
+      int32_t(int64_t(sustainable.width) * source.height / source.width));
+  return ReconcileDeviceRenderScale(height, native, portrait);
+}
+
+inline std::string RecommendedProfileResolution(const std::vector<Choice>& choices,
+                                                DisplayMode sustainable) {
+  if (sustainable.width > 0 && sustainable.height > 0)
+    for (const auto& choice : choices) {
+      const auto pixels = ProfileResolution(choice.label, {});
+      if (pixels.width <= sustainable.width && pixels.height <= sustainable.height) return choice.token;
+    }
+  return choices.back().token;
+}
+
+inline int SelectedResolutionProfileDrawScale(DisplayMode interface_pixels, DisplayMode gameplay_pixels) {
+  const auto scale = [](DisplayMode pixels) {
+    return std::max((pixels.width + 1919) / 1920, (pixels.height + 719) / 720);
+  };
+  return std::max(1, std::max(scale(interface_pixels), scale(gameplay_pixels)));
 }
 
 inline bool IsResolutionProfile(SettingId id) {
@@ -128,7 +193,7 @@ inline void AddSafeResolutionProfiles(std::map<SettingId, Value>& values, Displa
   values[SettingId::kGameplayResolution] = desktop;
   Value mobile;
   mobile.kind = ValueKind::kInt;
-  mobile.integer = 5;
+  mobile.integer = 720;
   values[SettingId::kInterfaceRenderScale] = mobile;
   values[SettingId::kGameplayRenderScale] = mobile;
 }

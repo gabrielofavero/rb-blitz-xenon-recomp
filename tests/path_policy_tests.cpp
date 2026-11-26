@@ -92,7 +92,9 @@ int main() {
   {
     Scratch s;
     CHECK_TRUE(IsSameOrInside(s.root / "user/./save/", s.root));
+#ifdef _WIN32
     CHECK_TRUE(IsSameOrInside(s.root.generic_string() + "\\user\\save", s.root));
+#endif
     CHECK_TRUE(IsSameOrInside(s.nested / ".." / "save", s.root));
 #ifdef _WIN32
     CHECK_TRUE(IsSameOrInside(UpperCased(s.root), s.root));
@@ -119,7 +121,7 @@ int main() {
     Scratch s;
     std::error_code ec;
     const fs::path other_drive =
-        s.root.root_name().native() == L"C:" ? fs::path("D:\\") : fs::path("C:\\");
+        s.root.root_name() == fs::path("C:") ? fs::path("D:\\") : fs::path("C:\\");
     if (fs::exists(other_drive, ec) && !ec) {
       CHECK_FALSE(IsSameOrInside(other_drive, s.root));
       CHECK_FALSE(IsSameOrInside(other_drive / "rb_blitz", s.root));

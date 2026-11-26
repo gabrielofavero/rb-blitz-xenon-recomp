@@ -111,6 +111,7 @@ enum class SettingId : uint16_t {
   kTouchLaneSwipe = 94,
   kHideExitGame = 95,
   kTouchMotionDeploy = 96,
+  kShowRunComparison = 97,
 };
 
 enum class ValueKind : uint8_t { kNone = 0, kBool, kInt, kEnum, kString, kList, kResolution };

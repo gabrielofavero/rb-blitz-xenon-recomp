@@ -42,13 +42,8 @@ bool g_profile_first_frame = true;
 std::map<rb_blitz::settings::SettingId, rb_blitz::settings::Value> g_profiles;
 
 rb_blitz::settings::DisplayMode MobileProfilePixels(
-    rb_blitz::settings::DisplayMode native, bool portrait, int tenths) {
-#if defined(RB_BLITZ_IOS)
-  return rb_blitz::settings::IOSProfilePixels(native, portrait, tenths);
-#else
-  return rb_blitz::settings::ScaledProfileResolution(
-      rb_blitz::settings::DeviceProfileSource(native, portrait), tenths);
-#endif
+    rb_blitz::settings::DisplayMode native, bool portrait, int value) {
+  return rb_blitz::settings::DeviceRenderScalePixels(native, portrait, value);
 }
 }  // namespace
 
@@ -71,7 +66,7 @@ bool rb_blitz::settings::QueueResolutionProfile(SettingId id, const Value& value
   const auto pixels = scale ? MobileProfilePixels(g_native, portrait, value.integer)
                             : ProfileResolution(value.text, g_native);
   if (!IsResolutionProfile(id) || !g_profile_scale ||
-      (scale ? value.kind != ValueKind::kInt || value.integer < 5 || value.integer > 10
+      (scale ? value.kind != ValueKind::kInt || !IsDeviceRenderScaleValue(value.integer)
              : value.kind != ValueKind::kEnum) ||
       !ProfileGuestFrame(pixels, g_profile_scale).supported) {
     if (error) *error = "the resolution profile cannot be rendered by this device";
@@ -270,6 +265,8 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
       runtime->AcknowledgeResolutionProfile(active, selected, applied, error);
   };
   if (!base || !renderer || !plan.supported) return;
+  if (auto* runtime = boot::SettingsBoot::Current();
+      runtime && !runtime->BeginResolutionProfileFrame(active, selected)) return;
   const auto read = [&](uint32_t offset) { return LoadGuestBe32(base + renderer + offset); };
   const uint32_t w = plan.guest_size.width, h = plan.guest_size.height;
   const uint32_t flags = read(796);

@@ -17,7 +17,7 @@ refinement. Linux, macOS, iOS and other architectures are not tested here.
 The [historical 71-patch baseline](../README.md) at
 `c94f5ebdcb3c9d1a460ca48e04f9758448f8d518`, including its nested MoltenVK patch,
 is retained for rollback. The
-[migration plan](../../docs/plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md)
+[migration plan](../../docs/plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md)
 owns current delivery gates and validation.
 
 The ledger covers all **71 original SDK patch IDs**, the retained nested

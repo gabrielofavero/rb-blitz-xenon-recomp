@@ -216,7 +216,7 @@ void TestNamedRestoreProfiles() {
   CHECK_TRUE(h.Send("rbbz-settings/invoke/settings.restore_recommended/-").status == Status::kOk);
   CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
   CHECK_TRUE(h.service.RequestedValue(SettingId::kRhythmVerse).boolean);
-  CHECK_TRUE(h.service.RequestedValue(SettingId::kInterfaceResolution).text == "native");
+  CHECK_TRUE(h.service.RequestedValue(SettingId::kInterfaceResolution).text == "1280x720");
 }
 
 void TestRestoreDefaultsRetryAfterConflict() {
@@ -793,6 +793,16 @@ void TestLinkedHud() {
   CHECK_TRUE(h.Holds("interface.hide_hud", WireValue::Bool(false)));
   CHECK_TRUE(h.Holds("interface.show_timer", WireValue::Bool(true)));
   CHECK_TRUE(h.Holds("interface.show_pb", WireValue::Bool(false)));
+
+  BeginCase("Personal Best requires Run Comparison and enabling it restores the prerequisite");
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.interface.show_run_comparison/b:0").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/set/linked.interface.show_pb/b:1").status == Status::kOk);
+  CHECK_TRUE(h.Holds("linked.pending", WireValue::Bool(true)));
+  CHECK_TRUE(h.Send("rbbz-settings/invoke/linked.confirm/-").status == Status::kOk);
+  CHECK_TRUE(h.Send("rbbz-settings/commit/-/-").status == Status::kOk);
+  CHECK_TRUE(h.Holds("interface.show_run_comparison", WireValue::Bool(true)));
+  CHECK_TRUE(h.Holds("interface.show_pb", WireValue::Bool(true)));
 }
 
 void TestRefreshEnableClearsLegacyHide() {

@@ -956,32 +956,19 @@ bool PrepareRenderScaleScene(const std::vector<uint8_t>& source,
       return Fail(error, "render scale scene source revision changed");
   }
   PortraitScene edited(bytes);
-  // These wheels save as they move, so the page only needs its native Back hint.
-  auto& actions = edited.Find("nav.ihp")->data;
-  for (size_t at = 13, index = 0; index < Be32(actions.data() + 9);) {
-    const size_t end = at + 12 + Be32(actions.data() + at + 4);
-    if (Be32(actions.data() + at) == 2) { at = end; ++index; }
-    else {
-      actions.erase(actions.begin() + at, actions.begin() + end);
-      PutBe32(actions.data() + 9, Be32(actions.data() + 9) - 1);
-    }
-  }
+  // Keep the native Audio buttons and Select/Back footer. Both profiles share
+  // the bottom wheel; its value label sits above it, clear of help and footer.
   const float width = portrait ? ui::PortraitSplash(aspect).width : 640.f;
   const float scale = std::min(width * .84f / 190, 1.f);
-  const auto label_template = *edited.Find("header.lbl");
-  size_t index = 0;
-  for (const char* slider : {"sound_effects_slider.sld", "track_sound_slider.sld"}) {
-    const float top = index == 0 ? 100.f : -15.f;
-    auto label = label_template;
-    label.name = index == 0 ? "interface_scale.lbl" : "gameplay_scale.lbl";
-    PortraitPose(label, 1, 0, top);
-    PortraitText(label, 18, width * .84f);
-    label.data[PortraitMatrix(label) + 113] = 1;
-    edited.Before(slider, {label.name});
-    edited.objects.push_back(std::move(label));
-    PortraitPose(*edited.Find(slider), scale, -88.75f * scale, top - 40);
-    ++index;
-  }
+  for (const char* slider : {"sound_effects_slider.sld", "track_sound_slider.sld"})
+    PortraitPose(*edited.Find(slider), scale, -88.75f * scale, -100);
+  auto label = *edited.Find("header.lbl");
+  label.name = "scale_value.lbl";
+  PortraitPose(label, 1, 0, -70);
+  PortraitText(label, 16, width * .84f);
+  label.data[PortraitMatrix(label) + 113] = 1;
+  edited.Before("track_sound_slider.sld", {label.name});
+  edited.objects.push_back(std::move(label));
   return PackStored(edited.Build(), scene, error);
 }
 

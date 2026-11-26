@@ -70,7 +70,7 @@ REX_EXTERN(sub_824BA9F8);       // UILabel::LabelStyle
 REX_EXTERN(sub_824BAF98);       // UILabel::Update (text rectangle and style layout)
 REX_EXTERN(sub_824BC7D0);       // UILabel::SetText
 REX_EXTERN(__imp__sub_824BC7D0);
-REX_EXTERN(__imp__sub_824DC2F0); // UISlider drawable traversal
+REX_EXTERN(__imp__sub_824DC1E8); // UISlider::DrawShowing
 REX_EXTERN(__imp__sub_8229FD60); // RndText: cumulative UTF-16 advances during normal layout
 REX_EXTERN(sub_8220DB30);       // RndMesh::Sync
 
@@ -210,6 +210,11 @@ struct SliderGeometry {
 thread_local std::array<SliderGeometry, 2> slider_geometries;
 thread_local int slider_drag = -1;
 thread_local uint32_t slider_drag_screen = 0;
+thread_local SliderFocusEdit slider_pending;
+thread_local std::optional<MenuPoint> slider_button_click;
+thread_local uint32_t slider_button_screen = 0;
+thread_local Geometry slider_buttons_geometry;
+thread_local uint32_t slider_buttons_screen = 0;
 thread_local MenuRailDrag rail_drag;
 
 // The gutter the window thread may arm a drag in: published per draw so input that
@@ -731,6 +736,23 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       }
     }
   }
+  if (!enabled) {
+    slider_pending.Reset();
+    slider_button_click.reset();
+  }
+  if (const auto step = slider_pending.Take(current_screen, current_focus)) {
+    const auto count = U32(base, current_focus + 132);
+    if (count > 0 && count <= 10)
+      rex::memory::store_and_swap<uint32_t>(base + current_focus + 128,
+          uint32_t(std::clamp(*step, 0, int(count) - 1)));
+  }
+  if (slider_button_click && slider_button_screen != current_screen) slider_button_click.reset();
+  if (slider_button_click && fresh && enabled) {
+    // The wheel's Cancel has returned focus to the buttons. Re-run the click
+    // against their new draw instead of keeping a guest pointer across focus.
+    event = MenuMouseEvent{MouseAction::kAccept, *slider_button_click};
+    slider_button_click.reset();
+  }
   if (!event) return;
   if (event->action == MouseAction::kUp || event->action == MouseAction::kDown) {
     std::lock_guard lock(mutex);
@@ -789,33 +811,57 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   const bool scale_page = current_panel_name == "settings_scale_panel" ||
                           current_panel_name == "settings_scale_pause_panel";
   if (scale_page && (event->action == MouseAction::kAccept ||
+      event->action == MouseAction::kUp || event->action == MouseAction::kDown ||
       (event->action == MouseAction::kMove && (HostMouseButtons() & 1)))) {
     if (event->action == MouseAction::kAccept) slider_drag = -1;
-    for (size_t index = 0; index < slider_geometries.size(); ++index) {
-      const auto& slider = slider_geometries[index];
-      if (!slider.focus || slider.screen != current_screen || slider.frame + 1 != frame_number) continue;
+    // Render Scale uses one bottom wheel; the buttons select its active profile.
+    const auto& slider = slider_geometries[1];
+    if (slider.focus && slider.screen == current_screen && slider.frame + 1 == frame_number) {
       const auto bounds = SliderTouchBounds(slider.bounds, ui::CurrentPortraitViewport().height);
-      if (event->action == MouseAction::kMove && slider_drag != int(index)) continue;
-      const int step = event->action == MouseAction::kAccept
-          ? SliderStepAt(event->point, bounds) : SliderDragStepAt(event->point, bounds);
-      if (step < 0 || U32(base, slider.focus + 132) != 6) continue;
-      slider_drag = int(index);
-      slider_drag_screen = current_screen;
-      // UISlider's native current/step fields (824DC048). Its normal draw updates
-      // the pod; the panel commits changed values once per poll, including drags.
-      rex::memory::store_and_swap<uint32_t>(base + slider.focus + 128, uint32_t(step));
-      if (slider.focus != current_focus) {
-        std::lock_guard lock(mutex);
-        if (queue.enabled()) queue.Pulse(index == 0 ? MouseAction::kUp : MouseAction::kDown);
+      const int count = int(U32(base, slider.focus + 132));
+      const bool dragging = event->action == MouseAction::kMove && slider_drag == 1;
+      const bool scrolling = event->action == MouseAction::kUp || event->action == MouseAction::kDown;
+      if (count > 0 && count <= 10 && (dragging || bounds.Contains(event->point))) {
+        const int step = scrolling
+            ? std::clamp(int(U32(base, slider.focus + 128)) +
+                (event->action == MouseAction::kUp ? 1 : -1), 0, count - 1)
+            : dragging ? SliderDragStepAt(event->point, bounds, count - 1)
+                       : SliderStepAt(event->point, bounds, count - 1);
+        if (step >= 0) {
+          if (!scrolling) { slider_drag = 1; slider_drag_screen = current_screen; }
+          // UISlider's normal draw updates the pod. The authored panel commits
+          // changed current values once per poll, including pointer drags.
+          if (slider.focus == current_focus)
+            rex::memory::store_and_swap<uint32_t>(base + slider.focus + 128, uint32_t(step));
+          else {
+            const bool opening = slider_pending.screen != current_screen ||
+                                 slider_pending.slider != slider.focus;
+            slider_pending.Begin(current_screen, slider.focus, step);
+            std::lock_guard lock(mutex);
+            // Finger motion may arrive before Confirm has transferred focus.
+            // Retain its latest stop without queuing another Confirm to close it.
+            if (opening && queue.enabled()) queue.Pulse(MouseAction::kAccept);
+          }
+          return;
+        }
       }
+    }
+    if (event->action == MouseAction::kAccept && IsSettingsWheel(focus_name) &&
+        slider_buttons_screen == current_screen && slider_buttons_geometry.frame + 1 == frame_number &&
+        HitMenuRow(event->point, slider_buttons_geometry.bounds, slider_buttons_geometry.rows) >= 0) {
+      slider_button_click = event->point;
+      slider_button_screen = current_screen;
+      std::lock_guard lock(mutex);
+      if (queue.enabled()) queue.Pulse(MouseAction::kBack);
       return;
     }
-    return;
+    // Missed wheel events must still reach the buttons' ordinary row hit test.
   }
   if (IsSettingsWheel(focus_name)) {
-    if (!scale_page && event->action == MouseAction::kUp) event->action = MouseAction::kRight;
-    else if (!scale_page && event->action == MouseAction::kDown) event->action = MouseAction::kLeft;
+    if (event->action == MouseAction::kUp) event->action = MouseAction::kRight;
+    else if (event->action == MouseAction::kDown) event->action = MouseAction::kLeft;
     else if (event->action == MouseAction::kAccept) {
+      if (scale_page) return;
       // The guest's audio scene places the endpoints at these normalized
       // coordinates; MenuPointer accounts for window size, crop and overscan.
       const auto& slider = slider_geometries[focus_name == "sound_effects_slider.sld" ? 0 : 1];
@@ -2134,12 +2180,15 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   const bool belongs = dialog_scope != MenuDialogScope::kPanel ||
       (list_header && U32(base, list_header + 36) == current_panel_dir);
   const bool focused = list == current_focus && menu_available && belongs;
+  const bool scale_buttons = menu_available && belongs &&
+      (current_panel_name == "settings_scale_panel" || current_panel_name == "settings_scale_pause_panel") &&
+      ObjectName(base, list_header) == "checkbox.lst";
   const bool touch = last_device::Current().using_touch;
   const bool portrait_songs = settings::InterfacePortraitEnabled() &&
       (DrawScreenName() == "song_select_screen" || DrawScreenName() == "inbox_screen" ||
        DrawScreenName() == "recommendation_screen" || PortraitStoreActive());
   const bool portrait_powerups = settings::InterfacePortraitEnabled() && DrawScreenName() == "powerup_select_screen";
-  if (ctx.r9.u32 || !list || (!focused && !touch && !portrait_songs && !portrait_powerups)) {
+  if (ctx.r9.u32 || !list || (!focused && !scale_buttons && !touch && !portrait_songs && !portrait_powerups)) {
     DrawNativeList(ctx, base); return;
   }
   DrawCapture capture;
@@ -2181,7 +2230,7 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   auto previous = drawing; drawing = &capture;
   DrawNativeList(ctx, base);
   drawing = previous;
-  if (!focused) return;
+  if (!focused && !scale_buttons) return;
   auto& result = capture.result;
   // The native highlight supplies the full button width, even when its text is
   // short. Translate its cell along the row axis; no screen-specific pitches.
@@ -2245,6 +2294,12 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   // remapping cannot infer its axis from two row centers in this layout.
   if (settings::InterfacePortraitEnabled() && DrawScreenName() == "recommendation_screen" &&
       ObjectName(base, list_header) == "recommendations.lst") result.horizontal = true;
+  if (scale_buttons) {
+    slider_buttons_geometry = result;
+    slider_buttons_geometry.selected = capture.selected;
+    slider_buttons_screen = current_screen;
+  }
+  if (!focused) return;
   geometry = std::move(result);
   geometry.selected = capture.selected;
   if (capture.selected >= 0) last_selected_row = capture.selected;
@@ -2328,9 +2383,9 @@ REX_HOOK_RAW(sub_824B2958) {
                                      rb_blitz::input::MenuAvailable()});
   trace_poll.Success();
 }
-REX_HOOK_RAW(sub_824DC2F0) {
+REX_HOOK_RAW(sub_824DC1E8) {
   const auto slider = ctx.r3.u32 - 204;
-  __imp__sub_824DC2F0(ctx, base);
+  __imp__sub_824DC1E8(ctx, base);
   rb_blitz::input::CaptureSlider(ctx, base, slider);
 }
 REX_HOOK_RAW(sub_824E5020) {

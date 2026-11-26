@@ -80,7 +80,9 @@ endings and orphaned documents. Auditing without editing is the read-only `docs-
 
 ### Current settings delivery
 
-[Portrait screen coverage](plans/todo/2026-11-23-portrait-screen-coverage-plan.md)
+[Native render scale and pointer controls](plans/in-progress/2026-11-26-native-render-scale.md) records native pixel semantics, device quality tiers and startup allocation.
+
+[Portrait screen coverage](plans/in-progress/2026-11-23-portrait-screen-coverage-plan.md)
 maps existing adaptations, missing screens, conditional routes, and remaining acceptance.
 
 [Portrait UI alignment](plans/finished/2026-11-19-portrait-ui-alignment.md) tracks
@@ -150,7 +152,8 @@ IPA build; the original bundled-assets route remains available.
 
 | Document | Status |
 | --- | --- |
-| [`plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md`](plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md) | In progress: production adopts ReXGlue v0.11.0 at `a3e1d826` with 65 patches and promoted title integration. Production rebuild is pending; native platform/package and formal performance gates remain open. Limited Windows comparisons establish no universal gain or regression. |
+| [`plans/todo/2026-11-26-apple-performance-plan.md`](plans/todo/2026-11-26-apple-performance-plan.md) | Planning only: sustained 60 FPS at real 1080p on iOS/macOS; ranked optimization map, existing fixes, phased implementation and physical-device performance gates. |
+| [`plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md`](plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md) | In progress: production adopts ReXGlue v0.11.0 at `a3e1d826` with 65 patches and promoted title integration. Production rebuild is pending; native platform/package and formal performance gates remain open. Limited Windows comparisons establish no universal gain or regression. |
 | [`plans/todo/2026-11-17-custom-loading-texts-plan.md`](plans/todo/2026-11-17-custom-loading-texts-plan.md) | Planning only: loading-message inventory and selective JSON replacements with inline action images and live controller/keyboard/mouse/touch variants. |
 | [`plans/finished/2026-11-15-rexglue-patch-refactoring-plan.md`](plans/finished/2026-11-15-rexglue-patch-refactoring-plan.md) | Delivered 2026-11-17: 87 to 71 SDK patches, confirmed unused-code retirement, seven byte-equivalent consolidation families, shared replay engine and push/PR CI. Release build and 31 affected suites pass; native platform/UI gates remain unverified. |
 | [`plans/finished/2026-11-15-desktop-render-settings-plan.md`](plans/finished/2026-11-15-desktop-render-settings-plan.md) | Delivered 2026-11-15: separate Aspect Ratio and Render Scale, legacy migration, bounded automatic recommendation and aspect-correct native-scale M1 gameplay. Release build, nine tests and SDK replay pass; authored settings save/restart remains unverified after the owner stopped launches. |

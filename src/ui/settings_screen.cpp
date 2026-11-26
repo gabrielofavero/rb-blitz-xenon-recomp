@@ -1037,7 +1037,7 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_general_panel", "settings_general_screen", kRootScreen, MenuPanels(), {
       SubmenuRow("settings_launch", "settings_launch_screen", "Startup", "Set game version, boot, and loading."),
       SubmenuRow("settings_achievements", "settings_achievements_screen", "Achievements & Unlocks", "Set unlocks and achievement popups."),
-      SubmenuRow("settings_gameplay", "settings_gameplay_screen", "Gameplay", "Set Ultimate camera, HUD, and scenery.", true),
+      SubmenuRow("settings_gameplay", "settings_gameplay_screen", "Gameplay", "Set HUD, camera, and scenery."),
       SubmenuRow("settings_interface", "settings_interface_screen", "Menus & Prompts", "Set shortcuts, tabs, and prompts."),
       SubmenuRow("settings_dlc", "settings_dlc_screen", "Extra Features", "Set store and music options."),
       SubmenuRow("settings_restore_defaults", "settings_restore_defaults_screen", "Restore Settings", "Reset settings and inputs. Restart.")
@@ -1158,19 +1158,19 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_resolution_panel", "settings_resolution_screen",
       "settings_display_screen", MenuPanels(), {
       SelectRow("settings_interface_resolution", "graphics.interface_resolution", "Interface",
-                "Set menu rendering detail.", Choices({"native", "Current"})),
+                "Set menu detail; upgrades may need restart.", Choices({"native", "Current"})),
       SelectRow("settings_gameplay_resolution", "graphics.gameplay_resolution", "Gameplay",
-                "Lower gameplay detail for speed.", Choices({"native", "Current"})),
+                "Set gameplay detail; upgrades may restart.", Choices({"native", "Current"})),
       BoolRow("settings_force_16_by_9", "graphics.force_16_by_9", "Force 16:9",
               "Use 16:9 resolutions. Restart.")}});
   out.push_back(PanelSpec{"settings_scale_panel", "settings_scale_screen",
       "settings_display_screen", MenuPanels(), {
       SelectRow("settings_interface_scale", "graphics.interface_render_scale", "Interface",
-                "Scale menu detail; 1.0 is native.",
-                Choices({"5", "0.5", "6", "0.6", "7", "0.7", "8", "0.8", "9", "0.9", "10", "1.0"}), false, "i:"),
+                "1.0 is native device pixels; may need restart.",
+                Choices({"720", "720p", "760", "760p", "800", "800p", "840", "840p", "880", "880p", "920", "920p", "960", "960p", "1000", "1000p", "1040", "1040p", "10", "1.0 (1080p)"}), false, "i:"),
       SelectRow("settings_gameplay_scale", "graphics.gameplay_render_scale", "Gameplay",
-                "Scale gameplay detail; 1.0 is native.",
-                Choices({"5", "0.5", "6", "0.6", "7", "0.7", "8", "0.8", "9", "0.9", "10", "1.0"}), false, "i:")},
+                "1.0 is native device pixels; may need restart.",
+                Choices({"720", "720p", "760", "760p", "800", "800p", "840", "840p", "880", "880p", "920", "920p", "960", "960p", "1000", "1000p", "1040", "1040p", "10", "1.0 (1080p)"}), false, "i:")},
       "../av_options/settings_scale.milo"});
 
   // 3a-ii. Graphics: the render-path rows, with Depth of Field moved here from Gameplay and drawn
@@ -1211,9 +1211,8 @@ std::vector<PanelSpec> AllPanels() {
                                         "Stronger smoothing; softer detail."),
                           }});
 
-  // 4. Gameplay (provider only; the root row that appears with it is what makes the root six):
-  // five entries, with the HUD page moved here from Interface and the track/gem rows kept in a
-  // submenu so the page stays a page rather than a list of everything the provider can do.
+  // Gameplay exposes the native HUD control in both versions; Ultimate adds
+  // camera, speed, track and scenery controls on the same page.
   out.push_back(PanelSpec{"settings_gameplay_panel", "settings_gameplay_screen", "settings_general_screen",
                           MenuPanels(),
                           {
@@ -1230,7 +1229,7 @@ std::vector<PanelSpec> AllPanels() {
                                                  "145", "145%", "150", "150%"}),
                                         true, "i:"),
                               SubmenuRow("settings_hud", "settings_hud_screen", "HUD",
-                                         "Choose visible gameplay displays.", true),
+                                         "Choose visible gameplay displays."),
                               SubmenuRow("settings_tracks_menu", "settings_tracks_screen",
                                          "Tracks & Gems",
                                          "Set note and track appearance.", true),
@@ -1327,7 +1326,7 @@ std::vector<PanelSpec> AllPanels() {
                                             "Hide all gameplay displays.", true),
                               SubmenuRow("settings_hud_score", "settings_hud_score_screen",
                                          "Score Goals",
-                                         "Show gold-star and best-score goals.", true),
+                                         "Choose score comparisons and goals."),
                               SubmenuRow("settings_hud_song", "settings_hud_song_screen",
                                          "Song Progress",
                                          "Show song progress and time.", true),
@@ -1338,6 +1337,9 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_hud_score_panel", "settings_hud_score_screen",
                           "settings_hud_screen", MenuPanels(),
                           {
+                              ElementVisibilityRow("settings_hud_comparison", "interface.show_run_comparison",
+                                                   "Run Comparison",
+                                                   "Show the right-side score comparison. Restart."),
                               ElementVisibilityRow("settings_hud_gold", "interface.goldprogress",
                                                    "Gold Star Progress",
                                                    "Show gold-star progress.", true),
@@ -2271,51 +2273,67 @@ Node MoveMember(const PanelSpec& panel, const char* name, const bool forward) {
   return Arr({Sym(name), Cmd({Sym("if"), Cmd({Sym("!"), Var("rbbz_settings_editing")}), std::move(body)})});
 }
 
+// The Audio scene owns the buttons, focus and bottom wheel. Values come from
+// the device's descriptor choices, never from a fixed Xbox 360 scale ladder.
 Node ScalePanelDefinition(const PanelSpec& panel) {
+  constexpr auto slider = "track_sound_slider.sld";
+  constexpr auto list = "checkbox.lst";
   Node unhandled = Node::Int(0); unhandled.tag = 0x06;
-  const std::array<const char*, 2> sliders{"sound_effects_slider.sld", "track_sound_slider.sld"};
-  const std::array<const char*, 2> labels{"interface_scale.lbl", "gameplay_scale.lbl"};
-  const auto focus = [&](size_t index) {
-    return Cmd({Sym("do"), Cmd({Var("this"), Sym("set_focus"), Str(sliders[index])}),
-                HelpWrite(panel.rows[index].symbol)});
-  };
-  std::vector<Node> enter{Sym("enter"),
-      Cmd({Sym("shell_sfx"), Sym("set_interceptor"), Var("this")}),
-      Cmd({Sym("checkbox.lst"), Sym("set_showing"), Sym("FALSE")}),
-      Cmd({Sym("header.lbl"), Sym("set"), Sym("text_token"), Sym(panel.title_key)})};
-  std::vector<Node> poll{Sym("do")};
-  for (size_t index = 0; index < sliders.size(); ++index) {
+  const auto list_focus = Cmd({Var("this"), Sym("set_focus"), Str(list)});
+  const auto on_list = Cmd({Sym("=="), Cmd({Var("this"), Sym("focus_name")}), Sym(list)});
+  std::vector<Node> rows, preview{Sym("switch"), Cmd({Sym(list), Sym("selected_sym")})};
+  std::vector<Node> save_profiles{Sym("switch"), Var("rbbz_scale_active")};
+  for (size_t index = 0; index < panel.rows.size(); ++index) {
     const auto& row = panel.rows[index];
-    const auto cache = "rbbz_scale_" + std::to_string(index);
-    const auto display = [&](int step) {
-      return Cmd({Sym("do"), Cmd({Sym("set"), Var(cache), Node::Int(step)}),
-          Cmd({Sym(labels[index]), Sym("set_token_fmt"),
-               Sym(row.symbol + "_" + std::to_string(step + 5))})});
+    if (row.choices.empty()) continue;
+    rows.push_back(Sym(row.symbol));
+    const auto display = [&](size_t step) {
+      return Cmd({Sym("do"), Cmd({Sym("set"), Var("rbbz_scale_step"), Node::Int(step)}),
+          Cmd({Sym("scale_value.lbl"), Sym("set_token_fmt"),
+               Sym(row.symbol + "_" + SymbolToken(row.choices[step].token))})});
     };
-    enter.push_back(Cmd({Sym(sliders[index]), Sym("set_num_steps"), Node::Int(6)}));
-    enter.push_back(Cmd({Sym(sliders[index]), Sym("set_current"), Node::Int(5)}));
-    enter.push_back(Cmd({Sym(sliders[index]), Sym("set_showing"), Sym("TRUE")}));
-    enter.push_back(display(5));
-    std::vector<Node> save{Sym("switch"), Cmd({Sym(sliders[index]), Sym("current")})};
-    for (int step = 0; step < 6; ++step) {
-      enter.push_back(Cmd({Sym("if"), Cmd({Sym("file_exists"),
-          Str(Path("snapshot", row.setting, "i:" + std::to_string(step + 5)))}),
-          Cmd({Sym("do"), Cmd({Sym(sliders[index]), Sym("set_current"), Node::Int(step)}), display(step)})}));
-      save.push_back(Arr({Node::Int(step), ChangeSetting(row.setting, "i:" + std::to_string(step + 5),
-          g_emitting_pause, Cmd({Sym("do"), display(step), focus(index)}))}));
+    const size_t last = row.choices.size() - 1;
+    std::vector<Node> load{Sym("do"),
+        Cmd({Sym("set"), Var("rbbz_scale_active"), Node::Int(index)}),
+        Cmd({Sym(slider), Sym("set_num_steps"), Node::Int(row.choices.size())}),
+        Cmd({Sym(slider), Sym("set_current"), Node::Int(last)}), display(last), HelpWrite(row.symbol)};
+    std::vector<Node> save{Sym("switch"), Cmd({Sym(slider), Sym("current")})};
+    for (size_t step = 0; step < row.choices.size(); ++step) {
+      load.push_back(Cmd({Sym("if"), Cmd({Sym("file_exists"), Str(ChoiceQuery(row, row.choices[step]))}),
+          Cmd({Sym("do"), Cmd({Sym(slider), Sym("set_current"), Node::Int(step)}), display(step)})}));
+      save.push_back(Arr({Node::Int(step), ChangeSetting(row.setting,
+          WireValue(row, row.choices[step].token), g_emitting_pause, display(step))}));
     }
-    poll.push_back(Cmd({Sym("if"), Cmd({Sym("!="), Var(cache),
-        Cmd({Sym(sliders[index]), Sym("current")})}), Cmd(std::move(save))}));
+    preview.push_back(Arr({Sym(row.symbol), Cmd(std::move(load))}));
+    save_profiles.push_back(Arr({Node::Int(index), Cmd(std::move(save))}));
   }
-  enter.push_back(focus(0));
+  const auto open = Cmd({Sym("do"), Cmd({Var("this"), Sym("preview_scale")}),
+      Cmd({Sym(slider), Sym("set_showing"), Sym("TRUE")}),
+      Cmd({Sym("scale_value.lbl"), Sym("set_showing"), Sym("TRUE")}),
+      Cmd({Var("this"), Sym("set_focus"), Str(slider)})});
+  const auto confirm = Cmd({Sym("if_else"), on_list, open, list_focus});
+  const auto cancel = Cmd({Sym("if_else"), on_list, Leave(), list_focus});
   return Cmd({Sym("new"), Sym("UIPanel"), Sym(panel.name), Arr({Sym("file"), Str(panel.scene)}),
-      Arr({Sym("focus"), Sym(sliders[0])}), GetFocusMember(), Arr(std::move(enter)),
-      Arr({Sym("poll"), Cmd(std::move(poll))}),
+      Arr({Sym("focus"), Sym(list)}), GetFocusMember(),
+      Arr({Sym("preview_scale"), Cmd(std::move(preview))}),
+      Arr({Sym("select_row"), open}),
+      Arr({Sym("enter"), Cmd({Sym("shell_sfx"), Sym("set_interceptor"), Var("this")}),
+          Cmd({Sym("header.lbl"), Sym("set"), Sym("text_token"), Sym(panel.title_key)}),
+          Cmd({Sym(list), Sym("set_showing"), Sym("TRUE")}),
+          Cmd({Sym(list), Sym("set_data"), Arr(std::move(rows))}),
+          Cmd({Sym(list), Sym("set_selected"), Node::Int(0)}),
+          Cmd({Sym("sound_effects_slider.sld"), Sym("set_showing"), Sym("FALSE")}),
+          Cmd({Sym(slider), Sym("set_showing"), Sym("FALSE")}),
+          Cmd({Sym("scale_value.lbl"), Sym("set_showing"), Sym("FALSE")}),
+          Cmd({Var("this"), Sym("preview_scale")}), list_focus}),
+      Arr({Sym("SCROLL_MSG"), Cmd({Sym("if"), on_list,
+          Cmd({Var("this"), Sym("preview_scale")})})}),
+      Arr({Sym("poll"), Cmd({Sym("if"), Cmd({Sym("!="), Var("rbbz_scale_step"),
+          Cmd({Sym(slider), Sym("current")})}), Cmd(std::move(save_profiles))})}),
       Arr({Sym("exit"), HelpWrite(""), Cmd({Sym("shell_sfx"), Sym("clear_interceptor")})}),
       Arr({Sym("BUTTON_DOWN_MSG"), Cmd({Sym("switch"), Var("action"),
-          Arr({Sym("kAction_Up"), focus(0)}), Arr({Sym("kAction_Down"), focus(1)}),
-          Arr({Sym("kAction_Confirm"), Node::Int(0)}), Arr({Sym("kAction_Start"), Node::Int(0)}),
-          Arr({Sym("kAction_Cancel"), Leave()}), Arr({Sym("kAction_ViewModify"), Leave()}),
+          Arr({Sym("kAction_Confirm"), confirm}), Arr({Sym("kAction_Start"), confirm}),
+          Arr({Sym("kAction_Cancel"), cancel}), Arr({Sym("kAction_ViewModify"), cancel}),
           unhandled})})});
 }
 
@@ -3874,6 +3892,8 @@ std::vector<std::pair<std::string, std::string>> Labels(const bool portrait) {
         add(row.symbol + "_on", row.label);
         add(row.symbol + "_off", row.off_label.empty() ? row.label : row.off_label);
       } else if (row.kind == Kind::kSelect) {
+        if (row.setting == "graphics.interface_render_scale" ||
+            row.setting == "graphics.gameplay_render_scale") add(row.symbol, row.label);
         for (const Choice& choice : row.choices) {
           add(row.symbol + "_" + SymbolToken(choice.token), row.label + ": " + choice.label);
         }

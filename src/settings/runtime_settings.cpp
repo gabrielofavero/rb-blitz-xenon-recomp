@@ -67,6 +67,16 @@ false,
     rex::kRestart};
 #endif
 
+rex::Setting<bool> rb_blitz::settings::title::show_run_comparison{
+    &rb_blitz::settings::TitleSettingOwner("blitz.enhancements"), "show_run_comparison",
+#if defined(RB_BLITZ_IOS) || defined(__ANDROID__)
+    false,
+#else
+    true,
+#endif
+    "Show the native right-side run comparison and its Personal Best extension.",
+    rex::kRestart};
+
 rex::Setting<std::string> rb_blitz::settings::title::enhancements_hidden_menu_options{
     &rb_blitz::settings::TitleSettingOwner("blitz.enhancements"), "enhancements_hidden_menu_options",
 rb_blitz::menu_options::kDefaultRows,

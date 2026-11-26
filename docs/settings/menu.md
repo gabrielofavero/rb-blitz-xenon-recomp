@@ -9,7 +9,8 @@ preserved; repeated baseline/build/test prose and duplicated evidence lists were
 records are [architecture.md](architecture.md), [plan.md](plan.md), [contracts.md](contracts.md) and
 [status.md](status.md).
 
-2026-11-16 [tree]: the experimental iOS release hides desktop display mode,
+Historical policy (2026-11-16; render-scale behavior superseded by
+[native device scales](graphics.md), 2026-11-26): the experimental iOS release hides desktop display mode,
 resolution, aspect, scale, VSync, overscan and renderer controls. Empty authored
 submenus are pruned after availability filtering. Graphics quality and input
 controls remain available. Auto resolution follows the device's proportions at

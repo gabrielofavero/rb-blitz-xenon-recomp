@@ -956,6 +956,33 @@ int main() {
   CHECK_EQ(SliderStepAt({.5f, .91f}, slider_bounds), 3);
   CHECK_EQ(SliderStepAt({.5f, .5f}, slider_bounds), -1);
   CHECK_EQ(SliderStepAt({NAN, .91f}, slider_bounds), -1);
+  BeginCase("device wheels accept ten stops and a single native stop");
+  for (int step = 0; step < 10; ++step) {
+    const float x = slider_bounds.left + (slider_bounds.right - slider_bounds.left) * step / 9;
+    CHECK_EQ(SliderStepAt({x, .91f}, slider_bounds, 9), step);
+  }
+  CHECK_EQ(SliderStepAt({.284f, .91f}, slider_bounds, 0), 0);
+  CHECK_EQ(SliderStepAt({.716f, .91f}, slider_bounds, 0), 0);
+  CHECK_EQ(SliderStepAt({.5f, .91f}, slider_bounds, -1), -1);
+  CHECK_EQ(SliderDragStepAt({.1f, .2f}, slider_bounds, 9), 0);
+  CHECK_EQ(SliderDragStepAt({.9f, .8f}, slider_bounds, 9), 9);
+  CHECK_EQ(SliderDragStepAt({.5f, .8f}, slider_bounds, 9), 5);
+  CHECK_EQ(SliderDragStepAt({.9f, .8f}, slider_bounds, 0), 0);
+  BeginCase("pointer edits survive the button-to-wheel focus transition once");
+  SliderFocusEdit slider_edit;
+  slider_edit.Begin(1, 20, 3);
+  CHECK_FALSE(slider_edit.Take(1, 10));
+  CHECK_EQ(slider_edit.Take(1, 20).value_or(-1), 3);
+  CHECK_FALSE(slider_edit.Take(1, 20));
+  slider_edit.Begin(1, 20, 1);
+  slider_edit.Begin(1, 20, 7);
+  CHECK_EQ(slider_edit.Take(1, 20).value_or(-1), 7);
+  slider_edit.Begin(1, 20, 4);
+  CHECK_FALSE(slider_edit.Take(2, 20));
+  CHECK_FALSE(slider_edit.Take(1, 20));
+  slider_edit.Begin(1, 20, 2);
+  slider_edit.Reset();
+  CHECK_FALSE(slider_edit.Take(1, 20));
   BeginCase("small wheels accept touch padding and retain a drag beyond their visual bounds");
   const MenuBounds thin{.3f, .49f, .7f, .51f};
   const auto padded = SliderTouchBounds(thin, 800);

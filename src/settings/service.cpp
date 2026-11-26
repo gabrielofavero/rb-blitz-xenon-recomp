@@ -192,13 +192,11 @@ DisplayMode Service::ResolutionProfileDisplay() const {
   return ProfileDisplayBasis(capabilities_.primary_display_size, force_16_by_9_at_boot_);
 }
 
-DisplayMode Service::RenderScalePixels(SettingId id, int tenths) const {
+DisplayMode Service::RenderScalePixels(SettingId id, int value) const {
   const bool portrait = schema::IsMobile(release_.platform) &&
       EffectiveValue(id == SettingId::kGameplayRenderScale ? SettingId::kGameplayOrientation
                                                           : SettingId::kInterfaceOrientation).text == "portrait";
-  if (release_.platform == schema::HostPlatform::kIOS)
-    return IOSProfilePixels(ResolutionProfileDisplay(), portrait, tenths);
-  return ScaledProfileResolution(DeviceProfileSource(ResolutionProfileDisplay(), portrait), tenths);
+  return DeviceRenderScalePixels(ResolutionProfileDisplay(), portrait, value);
 }
 
 void Service::RefreshDescriptors() {
@@ -206,10 +204,23 @@ void Service::RefreshDescriptors() {
   for (auto& descriptor : descriptors_) {
     const auto it = provider_choices_.find(descriptor.id);
     if (it != provider_choices_.end()) descriptor.choices = it->second;
+    if (descriptor.id == SettingId::kInterfaceRenderScale || descriptor.id == SettingId::kGameplayRenderScale) {
+      const auto orientation = descriptor.id == SettingId::kGameplayRenderScale
+          ? SettingId::kGameplayOrientation : SettingId::kInterfaceOrientation;
+      const bool portrait = schema::IsMobile(release_.platform) && EffectiveValue(orientation).text == "portrait";
+      descriptor.choices = DeviceRenderScaleChoices(ResolutionProfileDisplay(), portrait);
+      descriptor.compiled_default.kind = ValueKind::kInt;
+      descriptor.compiled_default.integer = RecommendedDeviceRenderScale(ResolutionProfileDisplay(), portrait,
+          capabilities_.verified_sustainable_resolution);
+    }
     if (!schema::IsMobile(release_) &&
         (descriptor.id == SettingId::kInterfaceResolution ||
          descriptor.id == SettingId::kGameplayResolution))
+    {
       descriptor.choices = ProfileResolutionChoices(ResolutionProfileDisplay());
+      descriptor.compiled_default.text = RecommendedProfileResolution(descriptor.choices,
+          capabilities_.verified_sustainable_resolution);
+    }
   }
 }
 
@@ -271,7 +282,9 @@ CommitResult Service::ApplyFirstBootMobileHudDefaults() {
   Value hidden;
   hidden.kind = ValueKind::kBool;
   hidden.boolean = false;
-  for (const auto id : {SettingId::kShowPb, SettingId::kProgressBar, SettingId::kShowTimer}) {
+  for (const auto id : {SettingId::kHideHud, SettingId::kGoldProgress, SettingId::kShowPb,
+                        SettingId::kProgressBar, SettingId::kShowTimer, SettingId::kShowSteak,
+                        SettingId::kInputViewer}) {
     if (IsOverridden(id)) continue;
     pending_[id] = hidden;
   }
@@ -315,6 +328,7 @@ void Service::SetBootValues(std::map<SettingId, Value> values, std::string reaso
     boot_effective_[id] = std::move(value);
     boot_correction_reasons_[id] = reason;
   }
+  RefreshDescriptors();
 }
 
 void Service::SetMenuRows(std::vector<Choice> rows) {
@@ -404,6 +418,13 @@ Value Service::ReconcileEffective(const Descriptor& descriptor, const Value& req
        descriptor.id == SettingId::kGameplayResolution)) {
     compatible.kind = ValueKind::kEnum;
     compatible.text = ReconcileProfileResolutionToken(requested.text, descriptor.choices);
+    profile_corrected = !ValueEquals(compatible, requested);
+  }
+  if (descriptor.id == SettingId::kInterfaceRenderScale || descriptor.id == SettingId::kGameplayRenderScale) {
+    const auto orientation = descriptor.id == SettingId::kGameplayRenderScale
+        ? SettingId::kGameplayOrientation : SettingId::kInterfaceOrientation;
+    const bool portrait = schema::IsMobile(release_.platform) && EffectiveValue(orientation).text == "portrait";
+    compatible.integer = ReconcileDeviceRenderScale(int(requested.integer), ResolutionProfileDisplay(), portrait);
     profile_corrected = !ValueEquals(compatible, requested);
   }
   const Reconciliation result =
@@ -643,6 +664,7 @@ ValidationResult Service::StageRestore(uint64_t txn, RestoreProfile profile) {
         {SettingId::kHiddenMainMenu, hidden},
         {SettingId::kHideDownloadContent, boolean(false)},
         {SettingId::kHideExitGame, boolean(false)},
+        {SettingId::kShowRunComparison, boolean(true)},
         {SettingId::kRhythmVerse, boolean(false)},
         {SettingId::kMusicPlayer, boolean(false)},
         {SettingId::kBackgroundMusicNavigation, boolean(false)},

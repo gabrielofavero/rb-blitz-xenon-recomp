@@ -82,6 +82,17 @@ Vulkan on Windows, Linux, macOS and iOS at any architecture; sparse residency,
 unknown Vulkan 1.0 limits and D3D12 retain their existing behavior. A reported
 limit does not guarantee an allocation succeeds under memory pressure.
 
+The 2026-11-26 correction remains in 0097 because exact scale admission owns the
+same allocation-limit responsibility. Opt-in
+`gpu.vulkan.resolution_scale_strict` rejects a configuration or device-limit
+clamp before shared memory and graphics caches are allocated. On non-sparse
+backends it also reserves headroom: at most half the remaining reported GPU heap
+budget, or one quarter of the device-local heap when live budgeting is unavailable.
+The default remains false, preserving existing clamp behavior; D3D12 is unchanged.
+This admission also bounds 0098's potential dense allocation fallback and never
+redefines a requested native resolution. Host budget arithmetic and full-stack
+replay are checked; native iOS, Windows and Linux GPU admission remain unverified.
+
 The separate [0096 compiler portability patch](rexglue-sdk-v0.11/0096-portable-aes-schedule-extent.patch)
 uses the AES schedule member type to determine its fixed conversion buffer size.
 It supports Apple Clang 17 without changing AES behavior and applies to all
@@ -169,7 +180,7 @@ on D3D12 (`upgraded-song-smoke-r6-ui.log`) and Vulkan
 (`upgraded-vulkan-song-r2-ui.log`). These functional runs are not performance
 comparisons. Ultimate, remaining game/UI acceptance, matched performance and native
 non-Windows validation remain pending. The
-[migration plan](../docs/plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md)
+[migration plan](../docs/plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md)
 owns those delivery gates and native-platform proof gaps.
 
 ## Historical baseline stack and lineage (2026-11-17)

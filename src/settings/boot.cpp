@@ -504,6 +504,24 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     // release must never write that fallback into settings.toml when a loader is missing.
     recommendations[SettingId::kRenderer].text = "vulkan";
 #endif
+    // Probe first, then persist both contexts before backend setup. Unknown
+    // performance starts at 720 source pixels; native display size is no benchmark.
+    for (const auto id : {SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale}) {
+      const auto orientation_id = id == SettingId::kGameplayRenderScale
+          ? SettingId::kGameplayOrientation : SettingId::kInterfaceOrientation;
+      const bool portrait = schema::IsMobile(schema::CurrentReleaseSettings().platform) &&
+          service_->EffectiveValue(orientation_id).text == "portrait";
+      Value value; value.kind = ValueKind::kInt;
+      value.integer = RecommendedDeviceRenderScale(service_->ResolutionProfileDisplay(), portrait,
+          capability_snapshot_.verified_sustainable_resolution);
+      recommendations[id] = value;
+    }
+    for (const auto id : {SettingId::kInterfaceResolution, SettingId::kGameplayResolution}) {
+      Value value; value.kind = ValueKind::kEnum;
+      const auto sustainable = capability_snapshot_.verified_sustainable_resolution;
+      value.text = RecommendedProfileResolution(service_->DescriptorFor(id)->choices, sustainable);
+      recommendations[id] = value;
+    }
     auto& store = service_->store();
     if (load_status_ == DocumentStatus::kOk || load_status_ == DocumentStatus::kMissing) {
       for (const auto id : store.document().migrated_graphics_preferences) {
@@ -561,24 +579,24 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     if (!plan.supported) plan = PlanRenderSettings(render_limits_, capability_snapshot_.primary_display_size,
                                                    "auto", 1, orientation.text);
     if (plan.supported) {
-      auto native = capability_snapshot_.primary_display_size;
-      if (native.width <= 0 || native.height <= 0) native = {1280, 720};
-      profile_draw_scale_ = ResolutionProfileDrawScale(native,
-          schema::IsMobile(schema::CurrentReleaseSettings().platform),
-          orientation.text == "portrait",
-          service_->EffectiveValue(SettingId::kGameplayOrientation).text == "portrait");
-#if defined(RB_BLITZ_IOS)
-      profile_draw_scale_ = 1;
-#endif
       const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings());
       const auto profile_pixels = mobile
           ? service_->RenderScalePixels(SettingId::kInterfaceRenderScale,
                                     service_->EffectiveValue(SettingId::kInterfaceRenderScale).integer)
           : ProfileResolution(service_->EffectiveValue(SettingId::kInterfaceResolution).text,
                               service_->ResolutionProfileDisplay());
+      const auto gameplay_pixels = mobile
+          ? service_->RenderScalePixels(SettingId::kGameplayRenderScale,
+                                    service_->EffectiveValue(SettingId::kGameplayRenderScale).integer)
+          : ProfileResolution(service_->EffectiveValue(SettingId::kGameplayResolution).text,
+                              service_->ResolutionProfileDisplay());
+      // Reserve for the selected profiles on every platform. A conservative
+      // first boot must not allocate native-sized caches behind its 720p frame.
+      profile_draw_scale_ = SelectedResolutionProfileDrawScale(profile_pixels, gameplay_pixels);
       const auto profile_plan = ProfileGuestFrame(profile_pixels, profile_draw_scale_);
       if (profile_plan.supported) plan = profile_plan;
-      else profile_draw_scale_ = 0;
+      // Keep unsupported capacity visible to admission. Falling back with a
+      // zero profile scale would silently redefine the saved native endpoint.
       Value pixels; pixels.kind = ValueKind::kResolution;
       pixels.width = plan.guest_size.width * plan.draw_scale;
       pixels.height = plan.guest_size.height * plan.draw_scale;
@@ -622,12 +640,27 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     safe_values[SettingId::kAspectRatio] = safe_aspect;
     safe_values[SettingId::kRenderScale] = safe_scale;
     AddSafeResolutionProfiles(safe_values, service_->ResolutionProfileDisplay());
-    auto selected = graphics_boot_.Select(wanted, attempt, safe_values, forced_safe);
+    error.clear();
+    const bool profile_journal_ready = resolution_profile_state_.Open(paths_.settings_file, &error);
+    if (!profile_journal_ready && !error.empty()) diagnostics_.push_back(error);
+    const bool profile_recovery = !profile_journal_ready || resolution_profile_state_.Recover(wanted, &error);
+    if (profile_recovery)
+      diagnostics_.push_back(profile_journal_ready
+          ? "an unconfirmed render profile was interrupted; using 720p until the request changes"
+          : "render profile recovery storage is unavailable; using 720p");
+    if (profile_recovery && !forced_safe) {
+      // A failed quality allocation does not require rotating or reshaping the
+      // presentation. Keep the boot's layout while reducing both quality tiers.
+      for (const auto id : {SettingId::kInterfaceOrientation, SettingId::kGameplayOrientation,
+                            SettingId::kForce16By9, SettingId::kAspectRatio})
+        if (const auto found = attempt.find(id); found != attempt.end()) safe_values[id] = found->second;
+    }
+    auto selected = graphics_boot_.Select(wanted, attempt, safe_values, forced_safe || profile_recovery);
     if (graphics_boot_.retrying()) {
       diagnostics_.push_back(
           "the saved graphics request failed to present before; this boot retries it once");
     }
-    if (graphics_boot_.recovered() || forced_safe) {
+    if (graphics_boot_.recovered() || forced_safe || profile_recovery) {
       ApplyReleaseGraphicsRules(selected, schema::CurrentReleaseSettings());
       std::map<SettingId, Value> recovered_layout;
       for (const auto id : {SettingId::kForce16By9, SettingId::kInterfaceOrientation,
@@ -646,18 +679,17 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
       // Rebuild them from recovered controls rather than clamping their shape.
       if (profile_draw_scale_) {
         const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings());
-        profile_draw_scale_ = ResolutionProfileDrawScale(capability_snapshot_.primary_display_size,
-            schema::IsMobile(schema::CurrentReleaseSettings().platform),
-            service_->EffectiveValue(SettingId::kInterfaceOrientation).text == "portrait",
-            service_->EffectiveValue(SettingId::kGameplayOrientation).text == "portrait");
-#if defined(RB_BLITZ_IOS)
-        profile_draw_scale_ = 1;
-#endif
         const auto pixels = mobile
             ? service_->RenderScalePixels(SettingId::kInterfaceRenderScale,
                                       selected.at(SettingId::kInterfaceRenderScale).integer)
             : ProfileResolution(selected.at(SettingId::kInterfaceResolution).text,
                                 service_->ResolutionProfileDisplay());
+        const auto gameplay_pixels = mobile
+            ? service_->RenderScalePixels(SettingId::kGameplayRenderScale,
+                                      selected.at(SettingId::kGameplayRenderScale).integer)
+            : ProfileResolution(selected.at(SettingId::kGameplayResolution).text,
+                                service_->ResolutionProfileDisplay());
+        profile_draw_scale_ = SelectedResolutionProfileDrawScale(pixels, gameplay_pixels);
         const auto recovered = ProfileGuestFrame(pixels, profile_draw_scale_);
         if (recovered.supported) {
           auto& value = selected[SettingId::kResolution];
@@ -1155,7 +1187,7 @@ void SettingsBoot::LogConfigured() const {
               capability_snapshot_.supported_resolutions.size());
 }
 
-void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
+bool SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
   active_renderer_ = active_renderer.empty() || active_renderer == "any"
                          ? kFallbackBackend : active_renderer;
   // Plugin flags now contain the developer config, environment and CLI values replayed at
@@ -1180,6 +1212,7 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     }
   }
   deferred_writes_.clear();
+
   if (rb_blitz::settings::title::settings_safe_graphics.Get()) {
     const auto safe_draw_scale = std::to_string(profile_draw_scale_ ? profile_draw_scale_ : 1);
     for (const auto& [name, value] : std::map<std::string, std::string>{
@@ -1306,7 +1339,40 @@ void SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
     if (graphics_boot_.active() && !probe_render_active_ &&
         !graphics_boot_.Begin(effective, &error))
       REXLOG_WARN("settings_boot: {}", error);
+    const auto active_profile = schema::IsMobile(schema::CurrentReleaseSettings())
+        ? SettingId::kInterfaceRenderScale : SettingId::kInterfaceResolution;
+    if (!probe_render_active_ && !BeginResolutionProfileFrame(active_profile, service_->EffectiveValue(active_profile))) {
+      REXLOG_ERROR("settings_boot: startup render profile could not be protected by its journal");
+      return false;
+    }
   }
+  if (profile_draw_scale_ && service_) {
+    const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings());
+    for (const auto id : {mobile ? SettingId::kInterfaceRenderScale : SettingId::kInterfaceResolution,
+                          mobile ? SettingId::kGameplayRenderScale : SettingId::kGameplayResolution}) {
+      const auto value = service_->EffectiveValue(id);
+      const auto pixels = mobile ? service_->RenderScalePixels(id, value.integer)
+          : ProfileResolution(value.text, service_->ResolutionProfileDisplay());
+      if (!ProfileGuestFrame(pixels, profile_draw_scale_).supported) {
+        REXLOG_ERROR("settings_boot: requested render profile {}x{} cannot be represented exactly", pixels.width, pixels.height);
+        return false;
+      }
+    }
+  }
+  // Native-relative profiles must never initialize at a silently reduced Vulkan
+  // multiplier. Arm recovery first so a clean setup refusal is recoverable too.
+  if (profile_draw_scale_ && active_renderer_ == "vulkan") {
+    // Driver plugins register after OnSettingsLoaded. The registry retains this
+    // runtime-layer value and validates/replays it when Vulkan registers its owner.
+    const auto admission = REX_SETTINGS().SetText(rex::SettingLayer::kRuntime,
+                                                 "gpu.vulkan.resolution_scale_strict", "true");
+    if (!admission) {
+      REXLOG_ERROR("settings_boot: cannot require exact Vulkan render-scale admission: {}",
+                  admission.error().GetDescription());
+      return false;
+    }
+  }
+  return true;
 }
 
 void SettingsBoot::BeginStartupShaderCompilation() {
@@ -1380,6 +1446,8 @@ void SettingsBoot::Closing() {
   menu_presented_ = true;
   std::string error;
   if (!graphics_boot_.Closed(&error)) REXLOG_WARN("settings_boot: {}", error);
+  if (!resolution_profile_state_.Closed(&error, sink_ && sink_->restart_accepted()))
+    REXLOG_WARN("settings_boot: {}", error);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1419,7 +1487,7 @@ void SettingsBoot::AfterLoadXexImage(const std::string& active_renderer) {
     }
     const auto hud_defaults = service_->ApplyFirstBootMobileHudDefaults();
     if (hud_defaults.provider_written)
-      REXLOG_INFO("settings_boot: fresh mobile profile hides comparison, progress and timer HUD");
+      REXLOG_INFO("settings_boot: fresh mobile profile keeps the base HUD and disables Ultimate HUD extras");
     for (const auto& error : hud_defaults.errors)
       REXLOG_WARN("settings_boot: mobile HUD defaults: {}", error);
   }
@@ -1820,12 +1888,80 @@ void SettingsBoot::AcknowledgeControllerLayout(uint64_t ticket, const std::strin
                   {{SettingId::kButtonScheme, HotApplyStatus::kApplied, {}}}, generation);
 }
 
+bool SettingsBoot::BeginResolutionProfileFrame(SettingId id, const Value& value) {
+  if (!service_ || !IsResolutionProfile(id)) return false;
+  const bool mobile = id == SettingId::kInterfaceRenderScale || id == SettingId::kGameplayRenderScale;
+  const auto pixels = mobile ? service_->RenderScalePixels(id, value.integer)
+                            : ProfileResolution(value.text, service_->ResolutionProfileDisplay());
+  const auto fingerprint = ResolutionToken(pixels) + "@" + std::to_string(profile_draw_scale_);
+  std::lock_guard lock(graphics_marker_mutex_);
+  std::string error;
+  if (resolution_present_probe_) {
+    const auto refresh = resolution_present_probe_();
+    if (refresh > resolution_last_refresh_ && resolution_active_ready_ &&
+        resolution_active_context_ != SettingId::kUnknown)
+      if (!resolution_profile_state_.Presented(resolution_active_context_, resolution_active_fingerprint_, &error))
+        REXLOG_WARN("settings_boot: cannot confirm render profile: {}", error);
+    resolution_last_refresh_ = refresh;
+  }
+  // Arm actual allocation changes, not saves awaiting restart. Re-arming the
+  // unchanged running frame against a newly saved high profile would mark that
+  // request failed on an intentional restart before it has ever been attempted.
+  if (resolution_active_context_ == id && resolution_active_fingerprint_ == fingerprint) return true;
+  GraphicsValues requested;
+  for (const auto setting : {SettingId::kRenderer, SettingId::kResolution,
+                            SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
+                            SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale,
+                            SettingId::kForce16By9,
+                            SettingId::kInterfaceOrientation, SettingId::kGameplayOrientation,
+                            SettingId::kAspectRatio, SettingId::kRenderScale,
+                            SettingId::kAntiAliasing, SettingId::kFiltering})
+    requested[setting] = service_->RequestedValue(setting);
+  if (resolution_active_context_ != SettingId::kUnknown) {
+    const auto snapshot = service_->GetSnapshot();
+    const bool saved_restart = std::any_of(snapshot.fields.begin(), snapshot.fields.end(),
+        [&](const FieldState& field) {
+          return !service_->IsOverridden(field.id) && field.restart_required &&
+              (IsResolutionProfile(field.id) || field.id == SettingId::kInterfaceOrientation ||
+               field.id == SettingId::kGameplayOrientation || field.id == SettingId::kForce16By9 ||
+               field.id == SettingId::kRenderer);
+        });
+    if (saved_restart) {
+      // iOS applies capacity/orientation changes by closing and reopening the
+      // app. A context switch in the old process must not mark that unattempted
+      // saved request as failed merely because the process is then terminated.
+      for (const auto& field : snapshot.fields)
+        if (requested.contains(field.id)) requested[field.id] = field.running;
+      requested[id] = value;
+    }
+  }
+  // If storage is unavailable, retain the conservative frame. An unrecorded
+  // native attempt could otherwise repeat indefinitely after a process kill.
+  if (!resolution_profile_state_.active()) {
+    if (pixels.height > 720) return false;
+  } else if (!resolution_profile_state_.Begin(requested, id, fingerprint, &error)) {
+    REXLOG_WARN("settings_boot: render profile attempt could not be recorded: {}", error);
+    if (pixels.height > 720 || profile_draw_scale_ > 1) return false;
+  }
+  if (resolution_active_context_ != id || resolution_active_fingerprint_ != fingerprint)
+    resolution_active_ready_ = false;
+  resolution_active_context_ = id;
+  resolution_active_fingerprint_ = fingerprint;
+  resolution_active_value_ = value;
+  return true;
+}
+
 void SettingsBoot::NoteResolutionProfileQueued(SettingId id, uint64_t generation, const Value& value) {
   resolution_profiles_queued_[id] = {generation, value};
 }
 
 void SettingsBoot::AcknowledgeResolutionProfile(SettingId id, const Value& value, bool applied,
                                                 const std::string& error) {
+  {
+    std::lock_guard lock(graphics_marker_mutex_);
+    if (id == resolution_active_context_ && ValueEquals(value, resolution_active_value_))
+      resolution_active_ready_ = applied;
+  }
   const auto queued = resolution_profiles_queued_.find(id);
   if (queued == resolution_profiles_queued_.end() || !ValueEquals(queued->second.second, value)) return;
   const auto generation = queued->second.first;

@@ -1,19 +1,8 @@
-diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.h b/src/gpu/xenos/host/vulkan/vulkan_device.h
---- a/src/gpu/xenos/host/vulkan/vulkan_device.h
-+++ b/src/gpu/xenos/host/vulkan/vulkan_device.h
-@@ -72,6 +72,8 @@
-     u32 maxImageDimensionCube = 4096;
-     u32 maxImageArrayLayers = 256;
-     u32 maxStorageBufferRange = static_cast<u32>(1) << 27;
-+    // Zero means unavailable on Vulkan 1.0 without maintenance3.
-+    VkDeviceSize maxMemoryAllocationSize = 0;
-     u32 maxSamplerAllocationCount = 4000;
-     u32 maxPerStageDescriptorSamplers = 16;
-     u32 maxPerStageDescriptorStorageBuffers = 4;
 diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.cpp b/src/gpu/xenos/host/vulkan/vulkan_device.cpp
+index 07c5a74..999334d 100644
 --- a/src/gpu/xenos/host/vulkan/vulkan_device.cpp
 +++ b/src/gpu/xenos/host/vulkan/vulkan_device.cpp
-@@ -460,11 +460,15 @@
+@@ -460,11 +460,15 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
    if (properties.apiVersion >= VK_API_VERSION_1_1 && ifn.vkGetPhysicalDeviceProperties2) {
      VkPhysicalDeviceIDProperties ids = {};
      ids.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
@@ -29,7 +18,35 @@ diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.cpp b/src/gpu/xenos/host/vu
    }
    rex::string::CopyTruncating(device->properties_.deviceName, properties.deviceName,
                                sizeof(device->properties_.deviceName));
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_device.h b/src/gpu/xenos/host/vulkan/vulkan_device.h
+index 408d0b7..46338ea 100644
+--- a/src/gpu/xenos/host/vulkan/vulkan_device.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_device.h
+@@ -72,6 +72,8 @@ class VulkanDevice : public rex::NonCopyable {
+     u32 maxImageDimensionCube = 4096;
+     u32 maxImageArrayLayers = 256;
+     u32 maxStorageBufferRange = static_cast<u32>(1) << 27;
++    // Zero means unavailable on Vulkan 1.0 without maintenance3.
++    VkDeviceSize maxMemoryAllocationSize = 0;
+     u32 maxSamplerAllocationCount = 4000;
+     u32 maxPerStageDescriptorSamplers = 16;
+     u32 maxPerStageDescriptorStorageBuffers = 4;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_settings.h b/src/gpu/xenos/host/vulkan/vulkan_settings.h
+index 60d6f5d..4aeafdf 100644
+--- a/src/gpu/xenos/host/vulkan/vulkan_settings.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_settings.h
+@@ -26,6 +26,9 @@ class VulkanSettings : public SettingOwner {
+ 
+   REX_SETTING(i32, device, -1, "Physical device index, -1 selects automatically", Range{-1, 15},
+               kStartupOnly);
++  REX_SETTING(bool, resolution_scale_strict, false,
++              "Reject unsupported or over-budget resolution scale instead of reducing it",
++              kStartupOnly);
+   REX_SETTING(bool, readback_resolve, false, "Read render to texture results on the CPU");
+   REX_SETTING(bool, readback_memexport, false,
+               "Read data written by memory export in shaders on the CPU");
 diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+index 760a9cc..1b2844d 100644
 --- a/src/gpu/xenos/vulkan/command_processor.cpp
 +++ b/src/gpu/xenos/vulkan/command_processor.cpp
 @@ -43,6 +43,7 @@
@@ -40,33 +57,109 @@ diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/c
  #include "gpu/xenos/vulkan/shader.h"
  #include "gpu/xenos/vulkan/shared_memory.h"
  #include <rex/xenos/fetch.h>
-@@ -849,6 +850,18 @@
-         "emulator, reducing to {}x{}",
-         draw_resolution_scale_x, draw_resolution_scale_y);
+@@ -822,6 +823,75 @@ bool VulkanCommandProcessor::SetupContext() {
+                 "buffers bound to the compute shader");
    }
+ 
++  u32 draw_resolution_scale_x, draw_resolution_scale_y;
++  bool draw_resolution_scale_not_clamped = TextureCache::GetConfigDrawResolutionScale(
++      GetGraphicsDriver().GetResolutionScaleX(), GetGraphicsDriver().GetResolutionScaleY(),
++      draw_resolution_scale_x, draw_resolution_scale_y);
++  const bool strict_resolution_scale = GetVulkanSettings().resolution_scale_strict.Get();
++  if (!draw_resolution_scale_not_clamped && strict_resolution_scale) {
++    REXGPU_FAIL(false, "The requested resolution scale cannot be represented exactly");
++  }
++  if (!draw_resolution_scale_not_clamped) {
++    REXGPU_WARN(
++        "The requested draw resolution scale is not supported by the "
++        "emulator, reducing to {}x{}",
++        draw_resolution_scale_x, draw_resolution_scale_y);
++  }
 +  const u32 requested_scale_x = draw_resolution_scale_x;
 +  const u32 requested_scale_y = draw_resolution_scale_y;
 +  if (ClampResolveScaleToAllocationLimit(
 +          SharedMemory::kBufferSize, device_properties.maxMemoryAllocationSize,
 +          device_properties.sparseResidencyBuffer,
 +          draw_resolution_scale_x, draw_resolution_scale_y)) {
++    if (strict_resolution_scale) {
++      REXGPU_FAIL(false,
++                  "Requested resolution scale {}x{} exceeds the device's {} MB allocation limit; "
++                  "refusing to launch at a different resolution",
++                  requested_scale_x, requested_scale_y,
++                  device_properties.maxMemoryAllocationSize >> 20);
++    }
 +    REXGPU_WARN(
 +        "Vulkan draw resolution scale {}x{} exceeds the device's {} MB allocation limit "
 +        "for non-sparse scaled resolves; using {}x{} (saved settings unchanged)",
 +        requested_scale_x, requested_scale_y, device_properties.maxMemoryAllocationSize >> 20,
 +        draw_resolution_scale_x, draw_resolution_scale_y);
 +  }
++  if (strict_resolution_scale && !device_properties.sparseResidencyBuffer &&
++      (draw_resolution_scale_x > 1 || draw_resolution_scale_y > 1)) {
++    const auto& ifn = vulkan_device->GetVulkanInstance()->GetFunctions();
++    VkPhysicalDeviceMemoryProperties memory_properties = {};
++    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget = {};
++    const bool have_budget = vulkan_device->GetExtensions().ext_EXT_memory_budget &&
++        ifn.vkGetPhysicalDeviceMemoryProperties2;
++    if (have_budget) {
++      budget.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT;
++      VkPhysicalDeviceMemoryProperties2 properties = {};
++      properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2;
++      properties.pNext = &budget;
++      ifn.vkGetPhysicalDeviceMemoryProperties2(vulkan_device->GetPhysicalDevice(), &properties);
++      memory_properties = properties.memoryProperties;
++    } else {
++      ifn.vkGetPhysicalDeviceMemoryProperties(vulkan_device->GetPhysicalDevice(), &memory_properties);
++    }
++    VkDeviceSize dense_budget = 0;
++    bool have_heap = false;
++    for (u32 heap = 0; heap < memory_properties.memoryHeapCount; ++heap) {
++      if (!(memory_properties.memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)) continue;
++      have_heap = true;
++      dense_budget = std::max<VkDeviceSize>(dense_budget, ConservativeDenseResolveBudget(
++          memory_properties.memoryHeaps[heap].size,
++          have_budget ? budget.heapBudget[heap] : 0,
++          have_budget ? budget.heapUsage[heap] : 0));
++    }
++    if (have_heap && !DenseResolveFitsBudget(SharedMemory::kBufferSize,
++            draw_resolution_scale_x, draw_resolution_scale_y, dense_budget)) {
++      REXGPU_FAIL(false,
++                  "Requested resolution scale {}x{} exceeds the conservative {} MB scaled "
++                  "resolve budget; refusing the allocation before graphics caches are created",
++                  requested_scale_x, requested_scale_y, dense_budget >> 20);
++    }
++  }
++
+   shared_memory_ = std::make_unique<VulkanSharedMemory>(*this, physical_memory_, write_watch_,
+                                                         guest_shader_pipeline_stages_);
+   if (!shared_memory_->Initialize()) {
+@@ -839,16 +909,6 @@ bool VulkanCommandProcessor::SetupContext() {
+           device_properties.maxStorageBufferRange);
+   u32 shared_memory_binding_count = UINT32_C(1) << shared_memory_binding_count_log2;
+ 
+-  u32 draw_resolution_scale_x, draw_resolution_scale_y;
+-  bool draw_resolution_scale_not_clamped = TextureCache::GetConfigDrawResolutionScale(
+-      GetGraphicsDriver().GetResolutionScaleX(), GetGraphicsDriver().GetResolutionScaleY(),
+-      draw_resolution_scale_x, draw_resolution_scale_y);
+-  if (!draw_resolution_scale_not_clamped) {
+-    REXGPU_WARN(
+-        "The requested draw resolution scale is not supported by the "
+-        "emulator, reducing to {}x{}",
+-        draw_resolution_scale_x, draw_resolution_scale_y);
+-  }
    if (draw_resolution_scale_x > 1 || draw_resolution_scale_y > 1) {
      REXGPU_WARN(
          "Vulkan draw resolution scaling is experimental and may not affect all "
 diff --git a/src/gpu/xenos/vulkan/resolve_scale.h b/src/gpu/xenos/vulkan/resolve_scale.h
 new file mode 100644
+index 0000000..ed866b5
 --- /dev/null
 +++ b/src/gpu/xenos/vulkan/resolve_scale.h
-@@ -0,0 +1,26 @@
+@@ -0,0 +1,46 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +#pragma once
 +
++#include <algorithm>
 +#include <cstdint>
 +
 +namespace rex::gpu::vulkan {
@@ -89,4 +182,67 @@ new file mode 100644
 +  return changed;
 +}
 +
++// Admission reserves room for shared memory, render targets and transient work.
++// A reported live budget leaves half of the remaining heap free; without it,
++// admit at most one quarter of the physical device-local heap.
++inline std::uint64_t ConservativeDenseResolveBudget(std::uint64_t heap_size,
++                                                    std::uint64_t reported_budget,
++                                                    std::uint64_t heap_usage) {
++  if (!reported_budget) return heap_size / 4;
++  const auto ceiling = std::min(heap_size, reported_budget);
++  return heap_usage >= ceiling ? 0 : (ceiling - heap_usage) / 2;
++}
++
++inline bool DenseResolveFitsBudget(std::uint64_t guest_memory_size,
++                                  std::uint32_t x, std::uint32_t y,
++                                  std::uint64_t budget) {
++  // Unscaled rendering has no additional scaled resolve buffer.
++  if (x == 1 && y == 1) return true;
++  return guest_memory_size && std::uint64_t(x) * y <= budget / guest_memory_size;
++}
++
 +}  // namespace rex::gpu::vulkan
+diff --git a/src/gpu/xenos/vulkan/texture_cache.cpp b/src/gpu/xenos/vulkan/texture_cache.cpp
+index b200df0..f646fac 100644
+--- a/src/gpu/xenos/vulkan/texture_cache.cpp
++++ b/src/gpu/xenos/vulkan/texture_cache.cpp
+@@ -26,6 +26,7 @@
+ #include "gpu/xenos/vulkan/command_processor.h"
+ #include "gpu/xenos/vulkan/deferred_command_buffer.h"
+ #include "gpu/xenos/vulkan/texture_cache.h"
++#include "gpu/xenos/vulkan/resolve_scale.h"
+ #include "gpu/xenos/vulkan/texture_conversion_shader.h"
+ #include "gpu/xenos/pipeline/texture/conversion.h"
+ #include <rex/math.h>
+@@ -2186,6 +2187,31 @@ bool VulkanTextureCache::InitializeScaledResolveBuffer() {
+     }
+   }
+ 
++  // Sparse creation can fail even when the feature is advertised. Do not
++  // replace sparse backing with an oversized dense allocation in strict mode.
++  if (scaled_resolve_buffer_ == VK_NULL_HANDLE &&
++      command_processor_.GetVulkanSettings().resolution_scale_strict.Get() &&
++      vulkan_device->GetProperties().sparseResidencyBuffer) {
++    const auto maximum = vulkan_device->GetProperties().maxMemoryAllocationSize;
++    if (maximum && scaled_resolve_buffer_size_ > maximum) {
++      REXGPU_FAIL(false, "Sparse scaled resolves unavailable; dense fallback exceeds allocation limit");
++    }
++    VkPhysicalDeviceMemoryProperties memory_properties = {};
++    vulkan_device->GetVulkanInstance()->GetFunctions().vkGetPhysicalDeviceMemoryProperties(
++        vulkan_device->GetPhysicalDevice(), &memory_properties);
++    VkDeviceSize dense_budget = 0;
++    bool have_heap = false;
++    for (u32 heap = 0; heap < memory_properties.memoryHeapCount; ++heap) {
++      if (!(memory_properties.memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)) continue;
++      have_heap = true;
++      dense_budget = std::max<VkDeviceSize>(dense_budget,
++          ConservativeDenseResolveBudget(memory_properties.memoryHeaps[heap].size, 0, 0));
++    }
++    if (have_heap && scaled_resolve_buffer_size_ > dense_budget) {
++      REXGPU_FAIL(false, "Sparse scaled resolves unavailable; dense fallback exceeds memory budget");
++    }
++  }
++
+   if (scaled_resolve_buffer_ == VK_NULL_HANDLE) {
+     buffer_create_info.flags = 0;
+     if (!gpu::vulkan::objects::CreateDedicatedAllocationBuffer(

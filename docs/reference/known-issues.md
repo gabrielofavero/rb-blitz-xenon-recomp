@@ -30,7 +30,7 @@ still vary below 60 fps. Matched whole-game savings and native iOS footprint rem
 unverified. Patch 0099 prioritizes foreground MoltenVK compilation and establishes
 native QoS for Apple preparation workers. Large MoltenVK
 buffers now attempt demand-paged host import, with private fallback; a 2x2
-scaled resolve still reserves a 2 GiB logical buffer. iOS already forces 1x.
+scaled resolve still reserves a 2 GiB logical buffer. iOS now chooses capacity from the selected profiles; unknown performance starts at 720p. Native portrait capacity may exceed device limits, and full live capacity growth remains unsupported. See [render-scale policy](../settings/graphics.md).
 See the [memory study](../engine/vulkan-performance.md#apple-gpu-memory-retention-2026-11-26).
 
 **Apple FPS (2026-11-26):** guest register localization is enabled with SDK patch
@@ -744,7 +744,7 @@ That correction belongs to the packet-recovery patch and is not implemented by
 the title's window/music handoff changes. Errors before stopping require their
 own investigation; log ordering alone is insufficient to classify them as
 cancellation. Evidence and scope are recorded in the
-[v0.11 migration plan](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).
+[v0.11 migration plan](../plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md).
 
 
 ## Startup asynchronous-pipeline guard (v0.11, 2026-11-18)
@@ -762,7 +762,7 @@ title draw appears. Any required synchronous-startup correction needs an
 initialized-driver/pre-launch boundary and bounded preference restoration.
 It is separate from enabling performance mechanisms. Exact source lifecycle and
 retained logs are recorded in `out/rexglue-migration/v011-gpu-gains-audit-r1.md`
-and the [migration plan](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).
+and the [migration plan](../plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md).
 
 
 ## v0.11 performance parity remains open (2026-11-18)
@@ -795,7 +795,7 @@ an integration decision, not proof of performance parity. The fresh Windows AMD6
 pass with D3D12 and Vulkan enabled. Formal
 repeated performance, native platform and package gates remain open. Exact scope,
 raw evidence and results are recorded in the
-[migration plan](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).
+[migration plan](../plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md).
 
 ## Deferred graphics-preference ownership (v0.11, 2026-11-18)
 
@@ -812,4 +812,4 @@ The correction and focused host regression remain proposals; no runtime fix or
 verified UI reproduction is claimed. This ownership defect is separate from the
 asynchronous-startup guard above and the shutdown packet-cancellation diagnostic
 limitation. Source findings and proposal artifacts are recorded in the
-[migration plan](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).
+[migration plan](../plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md).

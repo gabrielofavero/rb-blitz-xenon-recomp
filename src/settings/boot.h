@@ -97,7 +97,7 @@ class SettingsBoot {
   void LogConfigured() const;
 
   // OnSettingsLoaded, before native driver plugins register their settings.
-  void BeforeGraphicsSetup(const std::string& active_renderer);
+  bool BeforeGraphicsSetup(const std::string& active_renderer);
 
   // OnInit, after the graphics plugin registers Xenos settings and before guest launch.
   void BeginStartupShaderCompilation();
@@ -110,6 +110,8 @@ class SettingsBoot {
   // --- 4. OnPreLaunchModule ---------------------------------------------------------------
   void FinishInit();
   void SetPresentedProbe(std::function<bool()> probe) { presented_probe_ = std::move(probe); }
+  void SetResolutionPresentProbe(std::function<uint64_t()> probe) { resolution_present_probe_ = std::move(probe); }
+  bool BeginResolutionProfileFrame(SettingId id, const Value& value);
   void MenuFrame();
   // Restore the player's shader compilation preference after the native
   // startup and content discovery have reached the usable menu.
@@ -223,6 +225,13 @@ class SettingsBoot {
   int profile_draw_scale_ = 0;
   bool probe_render_active_ = false;
   GraphicsBootState graphics_boot_;
+  ResolutionProfileState resolution_profile_state_;
+  std::function<uint64_t()> resolution_present_probe_;
+  uint64_t resolution_last_refresh_ = 0;
+  SettingId resolution_active_context_ = SettingId::kUnknown;
+  std::string resolution_active_fingerprint_;
+  Value resolution_active_value_;
+  bool resolution_active_ready_ = false;
   std::function<bool()> presented_probe_;
   unsigned menu_frames_ = 0;
   std::atomic<bool> menu_presented_{false};

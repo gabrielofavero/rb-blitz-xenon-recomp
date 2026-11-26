@@ -108,6 +108,7 @@ class ServiceSink final : public bridge::RequestSink, public bridge::SinkQueries
   // records it; starting the child is the boot's job, because that is where the process identity
   // and the launch context live (§8).
   bool restart_requested() const { return restart_requested_; }
+  bool restart_accepted() const { return restart_requested_ && restart_ok_; }
   uint64_t restart_request_id() const { return restart_request_id_; }
   // The last commit's outcome, in the terms the restart handshake needs: a durable revision, and
   // whether any `restart`-strategy row really changed.

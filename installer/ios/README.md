@@ -106,13 +106,28 @@ addressing entitlement when signing: the guest reserves several GiB of virtual
 address space. This is address space, not a claim about physical memory use.
 The profile used for signing must permit that entitlement.
 
-iOS display profiles retain a 1x backend multiplier. Interface and gameplay
-quality tiers scale an aspect-preserving source capped at 1920x720, including
-the wider source used for portrait cropping. MoltenVK cannot sparsely back the
-scaled resolve buffer: a 2x multiplier adds a dedicated 2 GiB allocation and can
-exceed the app's memory limit before the splash screen. Boot, recovery and live
-profile changes use the same bounded source. Desktop and Android profiles keep
-their existing rendering policy.
+Render Scale uses Audio-style Interface and Gameplay buttons with one bottom
+native ten-stop wheel. **1.0 is device native pixel density, not the Xbox 360
+720p base.** Landscape uses display backing pixels; portrait expands the landscape
+source so its full-height crop keeps native density. The ten stops are calculated
+from exact 720 source-height pixels through native, with a ratio and pixel-height
+label. A display at or below 720 has a single native value.
+
+First boot probes the device and applies a conservative 720p recommendation
+before graphics allocation when no sustainable resolution has been verified.
+The backend multiplier is selected from both chosen profiles. Edits within that
+capacity apply live; larger capacity requires closing/reopening the app.
+Vulkan strictly refuses an unsupported multiplier or an unsafe dense allocation
+instead of silently calling a reduced image native. MoltenVK's scaled resolve
+backing is still large: 2x2 needs 2 GiB and 4x4 needs 8 GiB. Native can therefore
+be unavailable on a device even though the wheel describes its real resolution.
+
+A durable per-context recovery marker remains armed throughout the session.
+Stable output plus a clean exit clears it. A crash or forced termination starts
+both contexts at 720p on subsequent boots, preserving the saved request and layout.
+The failed choice is not retried automatically until the request changes.
+See [the rendering policy](../../docs/settings/graphics.md) for rounding, live
+capacity limits and validation. This is a safety policy, not a device benchmark.
 
 Alternatively, provide an existing signing identity and an iOS development or
 ad hoc provisioning profile covering your device and bundle identifier:
@@ -130,14 +145,12 @@ locally; the builder does not obtain or create them. Signed and unsigned builds
 use the same filename; the audit sidecar records signing status. Move an existing
 IPA aside before rebuilding the same name.
 
-The minimum target is iOS/iPadOS 17.0; the experiment uses fullscreen (landscape by default; Display > Orientation also offers portrait),
-Vulkan through MoltenVK, automatic device aspect and 1x render scale with
-VSync. The existing Auto planner chooses an aligned guest width at 720p (or
-540p for very wide displays); an A18 Pro iPhone reporting 2622x1206 uses
-1568x720. Presentation uses the device's exact aspect so width alignment does
-not leave side bars. Desktop display mode, resolution, aspect, scale, VSync, overscan and
-renderer rows are hidden, and empty settings groups disappear. Existing graphics
-quality and control settings remain. No new host overlay is introduced.
+The minimum target is iOS/iPadOS 17.0. The experiment uses fullscreen Vulkan
+through MoltenVK, device aspect and VSync. Display offers separate Interface and
+Gameplay orientation and Render Scale preferences. Desktop window mode, fixed
+Resolution, Force 16:9, VSync and renderer selectors remain hidden. Existing
+graphics-quality and control settings remain available. No new host overlay is
+introduced.
 After the first launch, Files shows **On My iPhone > Rock Band Blitz** (or
 **On My iPad**), with these folders:
 
@@ -172,10 +185,10 @@ It appears only during a song. The native pause menu retains ordinary touch
 navigation. Touch gestures reset on pause, focus loss, cancellation and resize.
 These controls have no settings rows; physical mouse input keeps its bindings.
 
-Graphics recovery retains the iPhone/iPad Auto aspect and 1x render scale, even
-when the startup journal contains a 16:9 safe mode or an older desktop layout.
-It replans guest geometry before presentation, rather than stretching a 16:9
-frame across the display.
+Render-profile recovery preserves the selected orientation/aspect and replans
+both quality tiers at the conservative floor before allocating graphics buffers.
+It reduces backend capacity too, rather than retaining native-sized backing
+behind a 720p image.
 
 On iOS, the synchronous will-resign-active event pauses audio, parks the guest
 main loop at its next draw, freezes guest time, blocks new Vulkan queue calls,

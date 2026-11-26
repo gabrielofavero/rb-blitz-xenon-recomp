@@ -1,5 +1,20 @@
 # Native menu mouse (R6)
 
+## Render scale wheel input (2026-11-26)
+
+[tree] `src/input/native_menu.cpp` captures UISlider hit bounds after actual
+`UISlider::DrawShowing` at `0x824DC1E8`, replacing the traversal hook at
+`0x824DC2F0`. Step math reads the active slider's native count at offset +132;
+its current index is at +128. Render Scale uses Audio's profile buttons and a
+single bottom wheel. Clicks choose a stop, dragging clamps at either end, and
+mouse-wheel detents adjust the value. Touch hit bounds have a minimum height of
+44 window units. Pointer edits retain their intended stop through button-to-wheel
+focus changes, and fresh button geometry remains available while the wheel has
+focus. Screen changes discard pending pointer edits.
+
+[unverified] These paths have host arithmetic/state checks; actual game input,
+physical touch hit areas and device visual acceptance require a built-game test.
+
 `mouse_ui_nav=true` enables the menu cursor (default on; the in-game Controls →
 Mouse support setting). Hover selects a native list row directly. Left click emits
 A, right click emits B, and wheel detents step non-scrolled lists (left/right for

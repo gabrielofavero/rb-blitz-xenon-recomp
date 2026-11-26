@@ -1132,8 +1132,8 @@ void TestSafeResolutionProfiles() {
     AddSafeResolutionProfiles(safe, native);
     CHECK_TRUE(IsToken(safe.at(SettingId::kInterfaceResolution), expected));
     CHECK_TRUE(IsToken(safe.at(SettingId::kGameplayResolution), expected));
-    CHECK_EQ(safe.at(SettingId::kInterfaceRenderScale).integer, 5);
-    CHECK_EQ(safe.at(SettingId::kGameplayRenderScale).integer, 5);
+    CHECK_EQ(safe.at(SettingId::kInterfaceRenderScale).integer, 720);
+    CHECK_EQ(safe.at(SettingId::kGameplayRenderScale).integer, 720);
     CHECK_TRUE(IsToken(safe.at(SettingId::kFiltering), "4x"));
   }
 }
@@ -1202,26 +1202,239 @@ void TestProfileAspectService() {
   CHECK_TRUE(IsToken(service.EffectiveValue(SettingId::kGameplayResolution), "1600x900"));
 }
 
+void TestResolutionProfileCrashRecovery() {
+  BeginCase("profile recovery confirms only the active context and latches interrupted native attempts");
+  std::error_code code;
+  const auto base = fs::temp_directory_path(code) / "rb_blitz-profile-recovery";
+  fs::remove_all(base, code); fs::create_directories(base, code);
+  const auto file = base / "settings.toml";
+  Value native; native.kind = ValueKind::kInt; native.integer = 10;
+  GraphicsValues requested{{SettingId::kInterfaceRenderScale,native},
+                           {SettingId::kGameplayRenderScale,native}};
+  std::string error;
+  const auto interface = SettingId::kInterfaceRenderScale;
+  const auto gameplay = SettingId::kGameplayRenderScale;
+  {
+    ResolutionProfileState journal;
+    CHECK_TRUE(journal.Open(file, &error));
+    CHECK_FALSE(journal.Recover(requested, &error));
+    CHECK_TRUE(journal.Begin(requested, interface, "native-menu", &error));
+    for (unsigned i = 0; i < ResolutionProfileState::kStablePresents; ++i)
+      CHECK_TRUE(journal.Presented(interface, "native-menu", &error));
+    // The native Gameplay choice has never drawn. Menu presentation proves
+    // nothing about that allocation, so its first draw must arm a new marker.
+    CHECK_TRUE(journal.Begin(requested, gameplay, "native-game", &error));
+    for (unsigned i = 0; i + 1 < ResolutionProfileState::kStablePresents; ++i)
+      CHECK_TRUE(journal.Presented(gameplay, "native-game", &error));
+  }
+  for (int boot = 0; boot < 3; ++boot) {
+    ResolutionProfileState journal;
+    CHECK_TRUE(journal.Open(file, &error));
+    CHECK_TRUE(journal.Recover(requested, &error));
+    auto running_safe = requested;
+    running_safe[interface].integer = running_safe[gameplay].integer = 720;
+    CHECK_TRUE(journal.Begin(running_safe, interface, "720-menu", &error));
+    for (unsigned i = 0; i < ResolutionProfileState::kStablePresents; ++i)
+      CHECK_TRUE(journal.Presented(interface, "720-menu", &error));
+    CHECK_TRUE(journal.Closed(&error));
+  }
+  Value lower = native; lower.integer = 720;
+  requested[gameplay] = lower;
+  {
+    ResolutionProfileState journal;
+    CHECK_TRUE(journal.Open(file, &error));
+    CHECK_FALSE(journal.Recover(requested, &error));
+    CHECK_TRUE(journal.Begin(requested, gameplay, "720-game", &error));
+    // Presenting a different/stale image must not confirm this allocation.
+    for (unsigned i = 0; i < ResolutionProfileState::kStablePresents; ++i)
+      CHECK_TRUE(journal.Presented(gameplay, "native-game", &error));
+  }
+  {
+    ResolutionProfileState journal;
+    CHECK_TRUE(journal.Open(file, &error));
+    CHECK_TRUE(journal.Recover(requested, &error));
+    CHECK_TRUE(journal.Closed(&error));
+  }
+  // A clean early close or backend initialization refusal has not proved a frame.
+  requested[gameplay] = native;
+  {
+    ResolutionProfileState journal;
+    CHECK_TRUE(journal.Open(file, &error));
+    CHECK_FALSE(journal.Recover(requested, &error));
+    CHECK_TRUE(journal.Begin(requested, gameplay, "native-game", &error));
+    CHECK_TRUE(journal.Closed(&error));
+  }
+  {
+    ResolutionProfileState journal;
+    CHECK_TRUE(journal.Open(file, &error));
+    CHECK_TRUE(journal.Recover(requested, &error));
+  }
+  BeginCase("a saved higher profile earns its first attempt after an intentional restart");
+  {
+    const auto pending_restart = base / "pending-restart.toml";
+    auto running_request = requested;
+    running_request[gameplay] = lower;
+    {
+      ResolutionProfileState journal;
+      CHECK_TRUE(journal.Open(pending_restart, &error));
+      CHECK_FALSE(journal.Recover(running_request, &error));
+      CHECK_TRUE(journal.Begin(running_request, interface, "720-menu", &error));
+      // Saving a higher Gameplay value does not allocate that profile yet.
+      CHECK_TRUE(journal.Closed(&error));
+    }
+    {
+      ResolutionProfileState journal;
+      CHECK_TRUE(journal.Open(pending_restart, &error));
+      CHECK_FALSE(journal.Recover(requested, &error));
+    }
+  }
+  BeginCase("an accepted settings restart does not mistake the stopped old frame for a crash");
+  {
+    const auto restart_file = base / "accepted-restart.toml";
+    {
+      ResolutionProfileState journal;
+      CHECK_TRUE(journal.Open(restart_file, &error));
+      CHECK_FALSE(journal.Recover(requested, &error));
+      CHECK_TRUE(journal.Begin(requested, interface, "720-menu", &error));
+      CHECK_TRUE(journal.Closed(&error, true));
+    }
+    {
+      ResolutionProfileState journal;
+      CHECK_TRUE(journal.Open(restart_file, &error));
+      CHECK_FALSE(journal.Recover(requested, &error));
+    }
+  }
+  BeginCase("a later hang still recovers after a profile has presented stable frames");
+  for (const bool clean_close : {false, true}) {
+    const auto lifetime_file = base / (clean_close ? "clean.toml" : "late-hang.toml");
+    {
+      ResolutionProfileState journal;
+      CHECK_TRUE(journal.Open(lifetime_file, &error));
+      CHECK_FALSE(journal.Recover(requested, &error));
+      CHECK_TRUE(journal.Begin(requested, gameplay, "native-game", &error));
+      for (unsigned i = 0; i < ResolutionProfileState::kStablePresents + 5; ++i)
+        CHECK_TRUE(journal.Presented(gameplay, "native-game", &error));
+      if (clean_close) CHECK_TRUE(journal.Closed(&error));
+    }
+    {
+      ResolutionProfileState journal;
+      CHECK_TRUE(journal.Open(lifetime_file, &error));
+      CHECK_EQ(journal.Recover(requested, &error), !clean_close);
+    }
+  }
+  fs::remove_all(base, code);
+}
+
+void TestSafeProfileDefaultsAndRestore() {
+  BeginCase("first boot and Restore Recommended use the conservative device profile before allocation");
+  std::error_code code;
+  const auto base = fs::temp_directory_path(code) / "rb_blitz-profile-defaults";
+  fs::remove_all(base, code);
+  fs::create_directories(base, code);
+  for (const auto platform : {schema::HostPlatform::kIOS, schema::HostPlatform::kAndroid,
+                             schema::HostPlatform::kWindows}) {
+    const auto file = base / (std::to_string(int(platform)) + ".toml");
+    StorePaths paths; paths.settings_file = file;
+    const auto release = schema::SettingsForRelease(platform, "test");
+    CapabilitySnapshot caps; caps.primary_display_size = {2622,1206};
+    {
+      Service service(paths, release);
+      service.Boot(nullptr, {}, nullptr);
+      service.SetCapabilities(caps);
+      if (schema::IsMobile(platform)) {
+        for (const auto id : {SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale}) {
+          CHECK_EQ(service.EffectiveValue(id).integer, 720);
+          Value native; native.kind = ValueKind::kInt; native.integer = 10;
+          service.store().MarkChanged(id, native, Origin::kManual);
+        }
+      } else {
+        for (const auto id : {SettingId::kInterfaceResolution, SettingId::kGameplayResolution}) {
+          CHECK_TRUE(service.EffectiveValue(id).text == "1565x720");
+          service.store().MarkChanged(id, EnumV("native"), Origin::kManual);
+        }
+      }
+      CHECK_TRUE(service.store().Save().errors.empty());
+      const auto txn = service.BeginEdit(service.revision());
+      CHECK_TRUE(service.StageRestore(txn, Service::RestoreProfile::kRecommended).ok);
+      CHECK_TRUE(service.Commit(txn).status == CommitStatus::kSaved);
+      if (schema::IsMobile(platform)) {
+        CHECK_EQ(service.EffectiveValue(SettingId::kInterfaceRenderScale).integer, 720);
+        CHECK_EQ(service.EffectiveValue(SettingId::kGameplayRenderScale).integer, 720);
+      } else {
+        CHECK_TRUE(service.EffectiveValue(SettingId::kInterfaceResolution).text == "1565x720");
+      }
+    }
+    Service restarted(paths, release);
+    restarted.Boot(nullptr, {}, nullptr);
+    restarted.SetCapabilities(caps);
+    if (schema::IsMobile(platform))
+      CHECK_EQ(restarted.EffectiveValue(SettingId::kInterfaceRenderScale).integer, 720);
+    else CHECK_TRUE(restarted.EffectiveValue(SettingId::kInterfaceResolution).text == "1565x720");
+  }
+  fs::remove_all(base, code);
+}
+
 int main() {
-  BeginCase("iOS profiles stay within the unscaled render budget in both orientations");
+  TestSafeProfileDefaultsAndRestore();
+  TestResolutionProfileCrashRecovery();
+  BeginCase("iOS profiles use ten device-relative heights with a true native endpoint");
   for (const auto native : {DisplayMode{1206,2622}, {2622,1206}, {2048,2732}, {1080,2400}}) {
     Service service({}, schema::SettingsForRelease(schema::HostPlatform::kIOS, "test"));
     service.Boot(nullptr, {}, nullptr);
     CapabilitySnapshot caps; caps.primary_display_size = native;
     service.SetCapabilities(caps);
     for (const auto orientation : {"portrait", "landscape"}) {
+      const bool portrait = orientation == std::string_view("portrait");
       for (const auto id : {SettingId::kInterfaceOrientation, SettingId::kGameplayOrientation})
-        service.store().document().values[id] = EnumV(orientation);
-      for (int tenths = 5; tenths <= 10; ++tenths) {
-        const auto pixels = IOSProfilePixels(native, orientation == std::string_view("portrait"), tenths);
-        CHECK_TRUE(ProfileGuestFrame(pixels, 1).supported);
-        for (const auto id : {SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale})
-          CHECK_TRUE(IsSize(service.RenderScalePixels(id, tenths), pixels.width, pixels.height));
-        const auto source = DeviceProfileSource(native, orientation == std::string_view("portrait"));
-        CHECK_TRUE(std::abs(double(pixels.width) / pixels.height - double(source.width) / source.height) < 0.02);
+        service.SetBootValues({{id, EnumV(orientation)}}, "test");
+      const auto choices = DeviceRenderScaleChoices(native, portrait);
+      CHECK_EQ(choices.size(), 10u);
+      CHECK_TRUE(choices.front().token == "720");
+      CHECK_TRUE(choices.back().token == "10");
+      CHECK_TRUE(choices.back().label.starts_with("1.0 ("));
+      int previous = 0;
+      for (const auto& choice : choices) {
+        const int value = std::stoi(choice.token);
+        const auto pixels = service.RenderScalePixels(SettingId::kInterfaceRenderScale, value);
+        CHECK_TRUE(pixels.height > previous);
+        previous = pixels.height;
+        CHECK_TRUE(choice.label.size() + std::string("Gameplay: ").size() <= 28);
       }
+      const auto source = DeviceProfileSource(native, portrait);
+      for (const auto id : {SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale}) {
+        CHECK_TRUE(IsSize(service.RenderScalePixels(id, 10), source.width, source.height));
+        CHECK_EQ(service.RenderScalePixels(id, 720).height, 720);
+      }
+      CHECK_TRUE(IsSize(DeviceRenderScalePixels(native, portrait, 10), source.width, source.height));
+      CHECK_EQ(DeviceRenderScalePixels(native, portrait, 720).height, 720);
+      CHECK_EQ(RecommendedDeviceRenderScale(native, portrait, {}), 720);
+      CHECK_EQ(SelectedResolutionProfileDrawScale(DeviceRenderScalePixels(native, portrait, 720),
+                                                  DeviceRenderScalePixels(native, portrait, 720)), 1);
+      CHECK_TRUE(service.DescriptorFor(SettingId::kInterfaceRenderScale)->strategy == ApplicationStrategy::kHot);
+      CHECK_EQ(service.DescriptorFor(SettingId::kGameplayRenderScale)->choices.size(), choices.size());
+      CHECK_TRUE(service.DescriptorFor(SettingId::kGameplayRenderScale)->choices.front().token == choices.front().token);
     }
   }
+  BeginCase("small displays collapse the scale wheel and legacy fractional requests remain readable");
+  CHECK_EQ(DeviceRenderScaleChoices({1280,720}, false).size(), 1u);
+  CHECK_EQ(DeviceRenderScaleChoices({1024,600}, false).size(), 1u);
+  CHECK_EQ(DeviceRenderScalePixels({1024,600}, false, 720).height, 600);
+  CHECK_EQ(ReconcileDeviceRenderScale(10, {1206,2622}, true), 10);
+  const auto recommended = RecommendedDeviceRenderScale({1206,2622}, true, {1920,1080});
+  const auto recommended_pixels = DeviceRenderScalePixels({1206,2622}, true, recommended);
+  CHECK_TRUE(recommended_pixels.width <= 1920 && recommended_pixels.height <= 1080);
+  CHECK_TRUE(RecommendedProfileResolution(ProfileResolutionChoices({2560,1080}), {1920,1080}) == "1707x720");
+  const auto old = ReconcileDeviceRenderScale(5, {1206,2622}, true);
+  CHECK_TRUE(old >= 720 && old < 2622);
+  CHECK_TRUE(DeviceRenderScalePixels({1206,2622}, true, old).height <= 1311);
+  BeginCase("backend capacity follows both selected profiles, not the display ceiling");
+  CHECK_EQ(SelectedResolutionProfileDrawScale({1280,720}, {1280,720}), 1);
+  CHECK_EQ(SelectedResolutionProfileDrawScale({1280,720}, {1920,1080}), 2);
+  CHECK_EQ(SelectedResolutionProfileDrawScale({3840,2160}, {1280,720}), 3);
+  const auto oversized_native = DeviceRenderScalePixels({4320,7680}, true, 10);
+  const auto oversized_scale = SelectedResolutionProfileDrawScale(oversized_native, oversized_native);
+  CHECK_TRUE(oversized_scale > 7);
+  CHECK_FALSE(ProfileGuestFrame(oversized_native, oversized_scale).supported);
   BeginCase("device scale 1.0 retains native portrait pixels after the landscape source is cropped");
   for (const auto native : {DisplayMode{1206, 2622}, {2622, 1206}, {1179, 2556},
                             {2048, 2732}, {1080, 2400}}) {
@@ -1236,8 +1449,11 @@ int main() {
       CHECK_TRUE(frame.supported);
       const auto source = frame.guest_size;
       const int crop_width = int(std::lround(double(source.height) * source.height / source.width));
-      const auto physical = ScaledProfileResolution(
-          {std::min(native.width, native.height), std::max(native.width, native.height)}, tenths);
+      const auto selected_pixels = service.RenderScalePixels(SettingId::kInterfaceRenderScale, tenths);
+      const auto native_source = DeviceProfileSource(native, true);
+      const double ratio = double(selected_pixels.height) / native_source.height;
+      const DisplayMode physical{int(std::lround(std::min(native.width, native.height) * ratio)),
+                                 int(std::lround(std::max(native.width, native.height) * ratio))};
       CHECK_TRUE(std::abs(crop_width * multiplier - physical.width) <= 2 * multiplier);
       CHECK_TRUE(std::abs(source.height * multiplier - physical.height) <= multiplier / 2);
     }
@@ -1261,7 +1477,8 @@ int main() {
     caps.primary_display_size = native;
     service.SetCapabilities(caps);
     const int draw_scale = std::max((native.width + 1919) / 1920, (native.height + 719) / 720);
-    for (int tenths = 5; tenths <= 10; ++tenths) {
+    for (const auto& choice : service.DescriptorFor(SettingId::kInterfaceRenderScale)->choices) {
+      const int tenths = std::stoi(choice.token);
       const auto pixels = service.RenderScalePixels(SettingId::kInterfaceRenderScale, tenths);
       const auto frame = ProfileGuestFrame(pixels, draw_scale);
       CHECK_TRUE(frame.supported);
@@ -1297,8 +1514,8 @@ int main() {
   CHECK_TRUE(IsSize(ProfileResolution("native", {2560,1080}),2560,1080));
   CHECK_TRUE(IsSize(ProfileResolution("1600x900", {2560,1080}),1600,900));
   CHECK_TRUE(IsSize(ProfileResolution("1600x900junk", {2560,1080}),0,0));
-  CHECK_TRUE(IsSize(ScaledProfileResolution({2622,1206},10),2622,1206));
-  CHECK_TRUE(IsSize(ScaledProfileResolution({2622,1206},5),1311,603));
+  CHECK_TRUE(IsSize(DeviceRenderScalePixels({2622,1206},false,10),2622,1206));
+  CHECK_TRUE(IsSize(DeviceRenderScalePixels({2622,1206},false,720),1565,720));
   CHECK_TRUE(IsSize(ProfileGuestFrame({1920,1080},2).guest_size,960,540));
   CHECK_TRUE(IsSize(ProfileGuestFrame({1280,720},2).guest_size,640,360));
   CHECK_TRUE(IsSize(ProfileGuestFrame({3440,1440},2).guest_size,1720,720));
@@ -1321,11 +1538,11 @@ int main() {
       }
       if (row.id == SettingId::kSettingsLabelSize) CHECK_TRUE(row.compiled_default.text == "big");
       if (row.id == SettingId::kInterfaceResolution || row.id == SettingId::kGameplayResolution) {
-        CHECK_TRUE(row.compiled_default.text == "native");
+        CHECK_TRUE(row.compiled_default.text == "1280x720");
         CHECK_EQ(row.availability == Availability::kHidden, schema::IsMobile(platform));
       }
       if (row.id == SettingId::kInterfaceRenderScale || row.id == SettingId::kGameplayRenderScale) {
-        CHECK_EQ(row.compiled_default.integer,10);
+        CHECK_EQ(row.compiled_default.integer,720);
         CHECK_EQ(row.availability == Availability::kHidden, !schema::IsMobile(platform));
       }
     }

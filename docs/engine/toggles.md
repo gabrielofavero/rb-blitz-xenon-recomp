@@ -1,5 +1,13 @@
 # Enhancement toggles
 
+`gpu.vulkan.resolution_scale_strict` (SDK default **false**, startup-only) refuses
+unsupported draw multipliers and dense scaled-resolve allocations that exceed a
+conservative device budget, including sparse-to-dense fallback. Off retains the
+SDK's warning-and-clamp policy. Blitz requires true while resolution profiles are
+active so native labels cannot silently describe a reduced backend scale.
+SDK patch 0097 owns admission; D3D12 keeps its existing path. See
+[render scale and recovery](../settings/graphics.md).
+
 `gpu.vulkan.shared_memory_snapshot_cache_mb` (SDK, restart-scoped) bounds private
 CPU copies of recorded uploads. Exact comparisons skip unchanged GPU copies
 while retaining frame refresh and write tracking. The default is 0 (disabled)

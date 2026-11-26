@@ -703,8 +703,10 @@ void ApplyHotRows(bool force_restart) {
 
   if (!force_restart) PublishTrialMenuVisibility(changed);
 
-  ::rb_blitz::settings::HotApplyPlan plan =
-      ::rb_blitz::settings::PlanHotApplyByStrategy(changed);
+  auto* boot = ::rb_blitz::settings::boot::SettingsBoot::Current();
+  ::rb_blitz::settings::HotApplyPlan plan = boot && boot->service()
+      ? ::rb_blitz::settings::PlanHotApply(changed, boot->service()->descriptors())
+      : ::rb_blitz::settings::PlanHotApply(changed, {});
   if (!::rb_blitz::menu_filter::RuntimeMenuRefreshReady()) {
     for (const auto& [id, value] : plan.deferred_menu) plan.pending_restart.push_back(id);
     plan.deferred_menu.clear();
@@ -732,7 +734,6 @@ void ApplyHotRows(bool force_restart) {
     plan.pending_restart.clear();
     for (const auto& [id, value] : changed) plan.pending_restart.push_back(id);
   }
-  auto* boot = ::rb_blitz::settings::boot::SettingsBoot::Current();
   const uint64_t generation = boot ? boot->NoteCommittedRows(
       changed, plan, boot->service() ? boot->service()->revision() : 0) : 0;
   if (!force_restart && boot && boot->service() && ::rb_blitz::menu_filter::RuntimeMenuRefreshReady())

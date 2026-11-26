@@ -61,6 +61,7 @@ extern rex::Setting<bool> enhancements_skip_offline_dialog;
 extern rex::Setting<bool> enhancements_icon_schemes;
 extern rex::Setting<bool> enhancements_hide_menu_options;
 extern rex::Setting<bool> hide_exit_game;
+extern rex::Setting<bool> show_run_comparison;
 extern rex::Setting<std::string> enhancements_hidden_menu_options;
 extern rex::Setting<bool> enhancements_rename_mod_settings;
 extern rex::Setting<bool> enhancements_refresh_music_library;

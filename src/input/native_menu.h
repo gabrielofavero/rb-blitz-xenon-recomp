@@ -127,10 +127,10 @@ struct MenuFooterTouchPress {
   }
 };
 
-// The six-position audio resource is shared by the two volume controls and
-// mobile resolution profiles. Points are in the guest's presentation space.
+// Audio and render scale share the native slider resource. Its number of
+// stops comes from the active control. Points use guest presentation space.
 inline int SliderStepAt(MenuPoint point, const MenuBounds& bounds, int intervals = 5) {
-  if (!bounds.Contains(point) || intervals <= 0 || bounds.right <= bounds.left) return -1;
+  if (!bounds.Contains(point) || intervals < 0 || bounds.right <= bounds.left) return -1;
   return std::clamp(int(std::floor((point.x - bounds.left) /
                                  (bounds.right - bounds.left) * intervals + .500001f)), 0, intervals);
 }
@@ -146,11 +146,29 @@ inline MenuBounds SliderTouchBounds(MenuBounds bounds, float window_height) {
 
 // Once a press catches a wheel, vertical finger drift keeps that wheel and
 // dragging past either endpoint clamps to its stop.
-inline int SliderDragStepAt(MenuPoint point, const MenuBounds& bounds) {
+inline int SliderDragStepAt(MenuPoint point, const MenuBounds& bounds, int intervals = 5) {
   if (!std::isfinite(point.x) || !std::isfinite(point.y)) return -1;
   return SliderStepAt({std::clamp(point.x, bounds.left, bounds.right),
-                       (bounds.top + bounds.bottom) / 2}, bounds);
+                       (bounds.top + bounds.bottom) / 2}, bounds, intervals);
 }
+
+// A pointer may open a slider through its button first. Keep the intended stop
+// until that focus change completes; never deliver it to another screen.
+struct SliderFocusEdit {
+  uint32_t screen = 0, slider = 0;
+  int step = 0;
+  void Begin(uint32_t owner, uint32_t target, int value) {
+    screen = owner; slider = target; step = value;
+  }
+  void Reset() { screen = slider = 0; }
+  std::optional<int> Take(uint32_t owner, uint32_t focus) {
+    if (owner != screen) Reset();
+    if (!slider || focus != slider) return {};
+    const int value = step;
+    Reset();
+    return value;
+  }
+};
 
 inline bool IsSettingsWheel(std::string_view focus) {
   return focus == "sound_effects_slider.sld" || focus == "track_sound_slider.sld";

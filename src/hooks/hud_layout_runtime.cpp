@@ -427,6 +427,25 @@ void PrepareTransformAncestry(PPCContext& ctx, uint8_t* base, uint32_t current) 
     }
   }
 }
+
+bool HideRunComparisonDraw(const uint8_t* base, uint32_t drawable) {
+  if (rb_blitz::settings::title::show_run_comparison.Get()) return false;
+  const uint32_t header = ObjectBase(base, drawable);
+  if (!header) return false;
+  const auto comparison = [&](uint32_t object) {
+    return object && U32(base, object) == 0x82018EA4 &&
+        NameIs(base, U32(base, object + 32), "dynamic_leaderboard") && InHud(base, object);
+  };
+  if (comparison(header)) return true;
+  // Ultimate can attach the comparison's draw.grp directly to hud.grp,
+  // bypassing the native directory's DrawShowing. Check both ownership routes.
+  if (U32(base, header) != 0x82024C4C ||
+      !NameIs(base, U32(base, header + 32), "draw.grp")) return false;
+  if (comparison(ObjectBase(base, U32(base, header + 36)))) return true;
+  const uint32_t transformable = TransformForHeader(base, header);
+  return transformable && comparison(ObjectBase(base, U32(base, transformable + kParent)));
+}
+
 // A draw group's ownership and transform parent are independent. Its members
 // can belong to the comparison dir and inherit that dir's transform even when
 // draw.grp itself has no transform parent. Prepare named owning dirs as well.
@@ -561,11 +580,13 @@ extern "C" REX_FUNC(sub_821F13D0) {
 }
 
 extern "C" REX_FUNC(sub_821F65C8) {
+  if (HideRunComparisonDraw(base, ctx.r3.u32)) return;
   PrepareHudDraw(ctx, base);
   __imp__sub_821F65C8(ctx, base);
 }
 
 extern "C" REX_FUNC(sub_82226CD8) {
+  if (HideRunComparisonDraw(base, ctx.r3.u32)) return;
   const auto header = ObjectBase(base, ctx.r3.u32);
   if (header && U32(base, header) == 0x82024C4C) {
     const auto name = U32(base, header + 32);

@@ -120,7 +120,7 @@ void Close(float actual, double expected) {
 // Both production draw hooks receive a RndDrawable view, distinct from the
 // transformable and Hmx::Object views. Constructors give offsets +80 (RndDir)
 // and +64 (RndGroup) from drawable to transformable.
-void Draw(uint32_t t, const Shape& shape, bool group = false) {
+void Draw(uint32_t t, const Shape& shape, bool group = false, bool visible = true) {
   const uint32_t drawable = t - (group ? 64 : 80);
   ObjectView(drawable, uint32_t(int64_t(t) - shape.offset));
   PPCContext ctx{}; ctx.r1.u32 = kHeap + 0x10000;
@@ -129,7 +129,7 @@ void Draw(uint32_t t, const Shape& shape, bool group = false) {
   ctx.r31.u32 = 0xDEADBEEF;
   const auto before = draw_calls;
   if (group) sub_82226CD8(ctx, memory); else sub_821F65C8(ctx, memory);
-  CHECK_EQ(draw_calls, before + 1);
+  CHECK_EQ(draw_calls, before + (visible ? 1 : 0));
   CHECK_EQ(ctx.r3.u32, drawable);
   CHECK_EQ(ctx.r4.u32, 0xCAFEBABE);
   CHECK_EQ(ctx.r31.u32, 0xDEADBEEF);
@@ -212,6 +212,7 @@ extern "C" REX_FUNC(__imp__sub_82226CD8) { __imp__sub_821F65C8(ctx, base); }
 
 int main() {
   CHECK_TRUE(rb_blitz::settings::RegisterTitleSettings(REX_SETTINGS()).has_value());
+  CHECK_TRUE(rb_blitz::settings::title::show_run_comparison.Set(true).has_value());
   using namespace rb_blitz::test;
   // Reserve an addressable guest range, committing only two tiny fixture regions.
 #if defined(_WIN32)
@@ -608,6 +609,27 @@ int main() {
   Draw(independent_draw, comparison_group, true);
   Close(drawn_x, 312 + delta);
   CHECK_EQ(dirty_calls, old_dirty_calls);
+
+  BeginCase("run comparison visibility suppresses native and direct group draws in either orientation");
+  CHECK_TRUE(rb_blitz::settings::title::show_run_comparison.Set(false).has_value());
+  for (const bool portrait : {false, true}) {
+    width = portrait ? 720 : 1280;
+    height = portrait ? 1280 : 720;
+    Draw(owned_comparison, shapes[4], false, false);
+    Draw(independent_draw, comparison_group, true, false);
+    // A direct group may use a transform parent without an owning comparison dir.
+    const auto parented_draw = Make(3, comparison_group, 0, kHud, owned_comparison);
+    Draw(parented_draw, comparison_group, true, false);
+    const auto other_draw = Make(4, comparison_group, 0, kHud);
+    Draw(other_draw, comparison_group, true);
+    const auto non_hud = Make(5, shapes[4], 300, kOtherDir);
+    Draw(non_hud, shapes[4]);
+    const auto score = Make(6, shapes[0], 270);
+    Draw(score, shapes[0]);
+  }
+  CHECK_TRUE(rb_blitz::settings::title::show_run_comparison.Set(true).has_value());
+  Draw(owned_comparison, shapes[4]);
+  Draw(independent_draw, comparison_group, true);
 
   BeginCase("direct group draw prepares nested named anchors in parent-first order");
   Reset();

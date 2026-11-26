@@ -93,7 +93,7 @@ class Service {
   const CapabilitySnapshot& capabilities() const { return capabilities_; }
   // Resolution proportions are fixed at boot; changing Force 16:9 waits for restart.
   DisplayMode ResolutionProfileDisplay() const;
-  DisplayMode RenderScalePixels(SettingId id, int tenths) const;
+  DisplayMode RenderScalePixels(SettingId id, int value) const;
   void SetReconciler(const Reconciler* reconciler);
   void SetProviderSink(ProviderSink* sink);
   bool has_provider_sink() const { return provider_ != nullptr; }

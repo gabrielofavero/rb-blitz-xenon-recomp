@@ -230,10 +230,9 @@ std::vector<SchemaRow> BuildTable() {
       std::tuple{SettingId::kGameplayRenderScale, "gameplay_render_scale", "Gameplay"}}) {
     auto d = Make(id, Category::kGraphics, Provider::kNative,
                   WidgetKind::kHorizontalSelect, ValueKind::kInt, IntValue(10));
-    for (int i = 5; i <= 10; ++i)
-      d.choices.push_back({std::to_string(i), i == 10 ? "1.0" : "0." + std::to_string(i)});
+    d.choices = DeviceRenderScaleChoices({1280, 720}, false);
     rows.push_back(Row(std::move(d), {"graphics", key}, "render_scale_profiles", label,
-                       "Render from half to full screen resolution in steps of 0.1."));
+                       "Choose 720p to device native resolution; 1.0 is native."));
   }
   {
     Descriptor d = Make(SettingId::kResolution, Category::kGraphics, Provider::kNative,
@@ -313,6 +312,10 @@ std::vector<SchemaRow> BuildTable() {
   }
 
   // --- Interface -----------------------------------------------------------
+  rows.push_back(Row(Make(SettingId::kShowRunComparison, Category::kInterface, Provider::kNative,
+                          WidgetKind::kBoolean, ValueKind::kBool, BoolValue(true)),
+                     {"interface", "show_run_comparison"}, "hud", "Run Comparison",
+                     "Show the right-side score comparison. Restart."));
   rows.push_back(ProviderRow(Make(SettingId::kLetterbox, Category::kInterface,
                                   Provider::kUltimate, WidgetKind::kBoolean, ValueKind::kBool,
                                   BoolValue(false)),
@@ -614,6 +617,7 @@ constexpr StrategyEntry kStrategies[] = {
     {SettingId::kHideMainMenu, ApplicationStrategy::kRestart, ""},
     {SettingId::kHiddenMainMenu, ApplicationStrategy::kRestart, ""},
     {SettingId::kHideHud, ApplicationStrategy::kRestart, ""},
+    {SettingId::kShowRunComparison, ApplicationStrategy::kRestart, ""},
     {SettingId::kGoldProgress, ApplicationStrategy::kRestart, ""},
     {SettingId::kProgressBar, ApplicationStrategy::kRestart, ""},
     {SettingId::kShowTimer, ApplicationStrategy::kNextSong,
@@ -807,6 +811,9 @@ ReleaseSettings SettingsForRelease(HostPlatform platform, std::string_view versi
     release.rules.emplace(SettingId::kRenderer, std::move(renderer));
   }
   if (IsMobile(release)) {
+    RowRule comparison;
+    comparison.default_value = BoolValue(false);
+    release.rules.emplace(SettingId::kShowRunComparison, std::move(comparison));
     for (const auto id : {SettingId::kInterfaceOrientation, SettingId::kGameplayOrientation}) {
       RowRule orientation;
       orientation.default_value = EnumValue("portrait");
@@ -887,6 +894,22 @@ std::vector<Descriptor> BuildDescriptors(const CapabilitySnapshot& caps,
   for (const SchemaRow& row : Rows()) {
     Descriptor descriptor = row.descriptor;
     FillChoiceSource(descriptor, caps);
+    if (descriptor.id == SettingId::kInterfaceRenderScale || descriptor.id == SettingId::kGameplayRenderScale) {
+      const auto orientation_id = descriptor.id == SettingId::kGameplayRenderScale
+          ? SettingId::kGameplayOrientation : SettingId::kInterfaceOrientation;
+      const auto rule = release.rules.find(orientation_id);
+      const bool portrait = IsMobile(release.platform) && rule != release.rules.end() &&
+          rule->second.default_value && rule->second.default_value->text == "portrait";
+      const auto basis = release.mobile_preview ? MobilePreviewDisplayBasis(caps.primary_display_size)
+                                              : ProfileDisplayBasis(caps.primary_display_size, false);
+      descriptor.choices = DeviceRenderScaleChoices(basis, portrait);
+      descriptor.compiled_default = IntValue(RecommendedDeviceRenderScale(basis, portrait, caps.verified_sustainable_resolution));
+    }
+
+    if (descriptor.id == SettingId::kInterfaceResolution || descriptor.id == SettingId::kGameplayResolution) {
+      descriptor.compiled_default = EnumValue(RecommendedProfileResolution(descriptor.choices,
+          caps.verified_sustainable_resolution));
+    }
     if (descriptor.id == SettingId::kAspectRatio || descriptor.id == SettingId::kRenderScale ||
         (descriptor.id == SettingId::kForce16By9 && IsMobile(release)) ||
         ((descriptor.id == SettingId::kInterfaceResolution || descriptor.id == SettingId::kGameplayResolution)

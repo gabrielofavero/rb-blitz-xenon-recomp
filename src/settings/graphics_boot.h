@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <string_view>
 #include "fs/atomic_file.h"
 #include "settings/model.h"
 
@@ -53,5 +54,27 @@ class GraphicsBootState {
   std::string recovery_for_;
   GraphicsValues attempted_;
   GraphicsValues good_;
+};
+// A live profile is proven after steady guest images and a clean process exit.
+// An unclean exit latches the requested combination to the safe floor on future
+// boots; only an explicit different combination earns another attempt.
+class ResolutionProfileState {
+ public:
+  bool Open(const std::filesystem::path& settings_file, std::string* error);
+  bool Recover(const GraphicsValues& requested, std::string* error);
+  bool Begin(const GraphicsValues& requested, SettingId context, std::string fingerprint,
+             std::string* error);
+  bool Presented(SettingId context, std::string_view fingerprint, std::string* error);
+  bool Closed(std::string* error, bool deliberate_restart = false);
+  bool active() const { return active_; }
+  static constexpr unsigned kStablePresents = 120;
+ private:
+  bool Save(std::string* error);
+  std::filesystem::path file_;
+  rb_blitz::fs::FileLock lock_;
+  bool active_ = false;
+  std::string request_, failed_;
+  std::map<SettingId, std::string> pending_, confirmed_;
+  std::map<SettingId, unsigned> presents_;
 };
 }  // namespace rb_blitz::settings

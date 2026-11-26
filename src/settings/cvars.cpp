@@ -125,6 +125,8 @@ std::string_view CvarForSetting(SettingId id) {
       return "touch_lane_swipe";
     case SettingId::kHideExitGame:
       return "hide_exit_game";
+    case SettingId::kShowRunComparison:
+      return "show_run_comparison";
     case SettingId::kTouchButtons:
       return "touch_buttons";
     case SettingId::kTouchMotionDeploy:

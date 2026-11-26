@@ -11,6 +11,8 @@
 
 using namespace rb_blitz::test;
 using rex::gpu::vulkan::ClampResolveScaleToAllocationLimit;
+using rex::gpu::vulkan::ConservativeDenseResolveBudget;
+using rex::gpu::vulkan::DenseResolveFitsBudget;
 constexpr uint64_t kGuestMemory = uint64_t(512) << 20;
 
 #if defined(RBBLITZ_RESOLVE_NATIVE_TEST)
@@ -144,6 +146,22 @@ int main(int argc, char** argv) {
   CHECK_FALSE(ClampResolveScaleToAllocationLimit(kGuestMemory, uint64_t(1) << 30, true, x, y));
   CHECK_EQ(x, 3u);
   CHECK_EQ(y, 3u);
+  BeginCase("strict dense admission reserves headroom using live or physical heap limits");
+  const auto gib = uint64_t(1) << 30;
+  CHECK_EQ(ConservativeDenseResolveBudget(8 * gib, 0, 0), 2 * gib);
+  CHECK_EQ(ConservativeDenseResolveBudget(8 * gib, 6 * gib, 2 * gib), 2 * gib);
+  CHECK_EQ(ConservativeDenseResolveBudget(8 * gib, 12 * gib, 2 * gib), 3 * gib);
+  CHECK_EQ(ConservativeDenseResolveBudget(8 * gib, 6 * gib, 6 * gib), uint64_t(0));
+  CHECK_EQ(ConservativeDenseResolveBudget(8 * gib, 6 * gib, 7 * gib), uint64_t(0));
+  CHECK_TRUE(DenseResolveFitsBudget(kGuestMemory, 1, 1, 0));
+  CHECK_TRUE(DenseResolveFitsBudget(kGuestMemory, 2, 2, 2 * gib));
+  CHECK_FALSE(DenseResolveFitsBudget(kGuestMemory, 2, 2, 2 * gib - 1));
+  CHECK_FALSE(DenseResolveFitsBudget(kGuestMemory, 4, 4, 2 * gib));
+  CHECK_FALSE(DenseResolveFitsBudget(kGuestMemory, 2, 2, 0));
+  CHECK_FALSE(DenseResolveFitsBudget(0, 2, 2, 2 * gib));
+  BeginCase("strict budget checks avoid multiplication overflow at large limits");
+  CHECK_FALSE(DenseResolveFitsBudget(UINT64_MAX, 7, 7, UINT64_MAX));
+  CHECK_TRUE(DenseResolveFitsBudget(UINT64_MAX / 49, 7, 7, UINT64_MAX));
   BeginCase("all supported scale pairs stay in range and do not exceed a known limit");
   for (uint32_t initial_x = 1; initial_x <= 8; ++initial_x) {
     for (uint32_t initial_y = 1; initial_y <= 8; ++initial_y) {

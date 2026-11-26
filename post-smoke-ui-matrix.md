@@ -1,7 +1,7 @@
 # Sequential Windows UI regression matrix
 
 Historical preparation checklist. Current execution and limitations are recorded in the
-[migration plan](docs/plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).
+[migration plan](docs/plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md).
 
 Prepared 2026-11-18 by read-only inspection. **No UI action was executed for this
 matrix.** Reuse already retained current-build evidence; a checklist is not a pass.

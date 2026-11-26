@@ -241,7 +241,9 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
     selected_backend_ = graphics.driver.Get();
     REX_TRY_VOID(NormalizeInputDrivers());
     REX_TRY_VOID(EnforceWritablePaths());
-    if (settings_boot_) settings_boot_->BeforeGraphicsSetup(selected_backend_);
+    if (settings_boot_ && !settings_boot_->BeforeGraphicsSetup(selected_backend_))
+      return rex::Err(rex::ErrorCategory::kConfig,
+          "The render profile could not be protected or admitted safely. Relaunch to recover at 720p.");
     ApplyContentLicense();
 #if defined(RB_BLITZ_IOS)
     REX_TRY_VOID(SetTitleDefault(registry, "log.flush_level", "trace"));
@@ -414,6 +416,10 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
     settings_boot_->FinishInit();
     log_stage("settings_finish_init");
     settings_boot_->SetPresentedProbe([this] { return HasNonblankGuestFrame(); });
+    settings_boot_->SetResolutionPresentProbe([] {
+      auto* presentation = REX_INTERFACE(rex::gpu::IGraphicsPresentation);
+      return presentation ? presentation->GetPresentationState().guest_output_refresh : 0;
+    });
     ConfigureDisplayAndRestart();
     rb_blitz::store::InstallPathProbe();
     rb_blitz::store::InstallStoreFetch();

@@ -6,8 +6,9 @@ The [native-aspect policy](../plans/finished/2026-11-18-native-aspect-resolution
 supersedes mixed-aspect resolution cycling. Desktop profiles offer only the
 display's proportions. Force 16:9 is the third Resolution row, defaults off,
 and uses the existing restart prompt. After restart, both lists use fitted
-16:9 equivalents. Resolution edits remain immediate within the boot's aspect;
-changing Force 16:9 does not change current lists or loaded scenes until restart.
+16:9 equivalents. Resolution edits remain immediate within the boot's aspect
+and allocated backend capacity; larger capacity requires restart (2026-11-26).
+Changing Force 16:9 does not change current lists or loaded scenes until restart.
 Saved explicit tiers convert by height to the active aspect, preserving the
 original stored request. Native remains a stable display-following token.
 
@@ -83,25 +84,55 @@ These rules are shared across platforms and graphics backends. The regression
 matrix includes compact 16:9 phones, notched iPhones, 18:9 through 22:9 phones,
 multiple pixel densities, asymmetric insets and intermediate resize widths.
 
-[static] The visible desktop controls are Resolution -> Interface / Gameplay.
-Each defaults to `native`, resolving the current monitor on each boot. The other
-choices retain the selected aspect down to 720 pixels high. Manual choices persist
-independently. For example, 3440x1440 offers 1720x720 with Force 16:9 off;
-with it on, the fitted 2560x1440 basis offers 1280x720. Mobile hides
-Resolution and offers a Render Scale page with Interface and Gameplay guest
-wheels together. Both have six positions from 0.5 through 1.0 and default to 1.0.
-Edits save on the same page; Up/Down selects a wheel, Left/Right adjusts it,
-and touch can tap or drag either wheel with a minimum 44-window-unit hit height.
-Dragging retains the starting wheel and clamps at its endpoints.
+[tree, updated 2026-11-26] Desktop Resolution retains independent Interface
+and Gameplay preferences, with native-aspect offers down to 720 pixels high.
+For example, 3440x1440 offers 1720x720 with Force 16:9 off; with it on, the
+fitted 2560x1440 basis offers 1280x720. First boot probes the device and saves
+both recommendations before renderer allocation. Without a verified sustainable
+resolution, both profiles start at the 720 source-height floor. Restore Recommended
+uses the same conservative policy. Manual saved requests remain authoritative.
+This is a fallback policy, not a device benchmark or a guarantee against memory pressure.
 
-On mobile devices, 1.0 targets the physical display resolution in the selected
-orientation. Portrait rendering expands the landscape source so its full-height
-crop retains the display's long-edge pixel count instead of enlarging a crop
-rendered at the short-edge height. Lower scales reduce both dimensions from
-that source. Interface and gameplay can use different orientations; their maximum
-source size determines the boot's fixed backend multiplier. Guest-pixel rounding
-can change the resulting dimensions by a few physical pixels. Desktop `--mobile`
-continues to use its fitted preview window as the resolution basis.
+Mobile hides Resolution and offers Render Scale with Audio-style Interface and
+Gameplay buttons. Selecting a button opens one bottom native ten-dot wheel;
+its ten heights are evenly calculated from 720 to the device source height,
+with each label showing the scale ratio and pixel height. Displays at or below
+720 have one native stop. Click selects a stop, drag clamps at endpoints,
+mouse-wheel detents adjust the value, and touch hit height is at least 44 window
+units. Confirm/Cancel from the wheel returns to the buttons; Back from the
+buttons leaves the page. Both menu and pause settings use their own scene copy.
+
+**1.0 means device NATIVE pixel density, never the Xbox 360 720p base.**
+The display probe uses backing pixels rather than logical UI points. Landscape
+uses the native display dimensions; portrait expands the landscape source so
+its full-height crop retains the display's long-edge pixel count. New lower
+choices store exact source pixel heights. Saved token `10` preserves native
+intent across devices/orientations; legacy `5` through `9` tenths reconcile to
+the nearest lower calculated tier. Guest integer multiplier rounding can change
+the resulting dimensions by a few physical pixels. Desktop `--mobile` uses its
+fitted preview window as the basis.
+
+Backend capacity remains fixed for a process. It is selected from BOTH
+chosen profiles on every platform, so a first 720p boot does not reserve
+native-sized scaled resolve backing. Profile edits apply live when they fit that capacity; larger allocations
+remain pending restart. Vulkan's dense scaled-resolve backing is 512 MiB times
+the two backend axes: 2x2 needs 2 GiB, 4x4 needs 8 GiB. Device limits must not be
+bypassed or silently reinterpreted as a lower native resolution. Full live backend
+capacity growth requires a renderer-cache lifecycle redesign and is not implemented.
+
+A separate per-context resolution journal arms before allocation, including
+initial backend setup, and requires 120 distinct guest-output refreshes
+at that active profile plus a clean process exit. The marker stays armed during
+the session so a later song-load hang is recoverable too. Merely reaching the menu
+does not approve Gameplay. A crash or forced termination makes the next boot use
+720p for BOTH contexts; saved requests remain editable, and the failed request
+stays latched until changed. An accepted settings restart clears the old frame's
+trial so a newly saved higher setting can receive its first actual attempt.
+Recovery preserves orientation/aspect. This complements the original startup
+graphics journal.
+
+[unverified] Physical iOS native allocation, high-resolution performance, actual
+mouse/touch interaction and game visual acceptance need a device/game test.
 
 `src/settings/resolution_profiles.h` owns offers and guest-frame arithmetic.
 The SDK multiplier remains fixed for the boot. `src/hooks/render_settings.cpp`
@@ -1431,6 +1462,10 @@ the 3D horizontal crop and inward-anchored HUD. These are windowed diagnostic ca
 4:3 fullscreen display remains untested.
 
 ### iOS startup recovery and background GPU loss (2026-11-16)
+
+The Auto/1x sizing policy in this historical record is superseded by the native
+render-scale and per-context recovery policy above (2026-11-26). The device log
+measurements and background-GPU findings remain the record of that build.
 
 The owner's two device logs isolated separate failures in the same IPA. In the
 failed sizing run, recovery selected guest 1280x720 while the presenter correctly

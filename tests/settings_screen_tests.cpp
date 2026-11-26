@@ -74,7 +74,7 @@ using dtb::Node;
 
 constexpr size_t kExpectedPagesPerContext = 73;
 constexpr size_t kExpectedPages = 2 * kExpectedPagesPerContext;
-constexpr size_t kExpectedListPages = kExpectedPages - 2;  // one native two-wheel page per context
+constexpr size_t kExpectedListPages = kExpectedPages - 2;  // one native Audio-style scale page per context
 
 bool SuppressesSettingsCaption(const std::string_view name) {
   return name.starts_with("settings_restart") ||
@@ -222,6 +222,13 @@ bool HasText(const dtb::Node& root, const std::string& name) {
   std::vector<std::string> texts;
   CollectText(root, &texts);
   return std::find(texts.begin(), texts.end(), name) != texts.end();
+}
+
+// Audio-style scale panels use their native checkbox list and shared wheel.
+// Generic options.lst navigation invariants apply to the other settings scenes.
+bool IsScalePanel(const dtb::Node& root) {
+  return HasText(root, "../av_options/settings_scale.milo") ||
+         HasText(root, "../av_options/settings_scale_pause.milo");
 }
 
 // True when some leaf *ends with* `suffix`. The context twin's name is a suffix of a longer leaf, so
@@ -1538,6 +1545,7 @@ void TestEveryFillPlacesTheSelection() {
   int placements = 0;
   int moving = 0;
   for (const dtb::Node& root : roots) {
+    if (IsScalePanel(root)) continue;
     std::vector<const dtb::Node*> menus;
     CollectMembers(root, "populate_menu", &menus);
     if (menus.empty()) {
@@ -1577,6 +1585,7 @@ void TestEveryFillPlacesTheSelection() {
 
   // Every placement is on our own list, with an integer index.
   for (const dtb::Node& root : roots) {
+    if (IsScalePanel(root)) continue;
     std::vector<const dtb::Node*> calls;
     FindCalls(root, "set_selected", &calls);
     for (const dtb::Node* call : calls) {
@@ -1766,13 +1775,14 @@ void TestButtonTableIsOneSwitch() {
     for (const std::string& word : Words(*switches.front())) {
       if (word == "select_row") ++selects;
     }
-    CHECK_TRUE(selects >= 2 || HasText(root, "sound_effects_slider.sld"));  // Confirm and Start both call it
+    CHECK_TRUE(selects >= 2 || IsScalePanel(root));  // Confirm and Start both call it
   }
   CHECK_EQ(tables, kExpectedPages);  // every panel, in both contexts
 
   // And the row table itself exists once per panel, keyed on the list's selected symbol.
   int row_tables = 0;
   for (const dtb::Node& root : DefinitionRoots()) {
+    if (IsScalePanel(root)) continue;
     std::vector<const dtb::Node*> members;
     CollectMembers(root, "select_row", &members);
     if (members.empty()) {
@@ -1966,6 +1976,7 @@ void TestRestartPromptOnlyOnLeave() {
   int root_cancels = 0;
   int other_cancels = 0;
   for (const dtb::Node& root : roots) {
+    if (IsScalePanel(root)) continue;
     std::vector<const dtb::Node*> members;
     CollectMembers(root, "select_row", &members);
     if (members.empty()) continue;  // a screen, not a panel
@@ -2988,7 +2999,7 @@ void TestHelpTextsCoverEveryRow() {
   // merge adopts (their text is still ours; the locale only owns their labels) and a provider row.
   CHECK_TRUE(HelpTextFor("controls").find("controller") != std::string::npos);
   CHECK_TRUE(HelpTextFor("calibration").find("audio") != std::string::npos);
-  CHECK_TRUE(HelpTextFor("settings_gameplay").find("Ultimate") != std::string::npos);
+  CHECK_TRUE(HelpTextFor("settings_gameplay").find("HUD") != std::string::npos);
   CHECK_TRUE(HelpTextFor("settings_vsync").find("tearing") != std::string::npos);
 }
 
@@ -3018,6 +3029,7 @@ void TestHelpEventsInTheDefinition() {
   int expected_scrolls = 0;
   int clears = 0;
   for (const dtb::Node& root : roots) {
+    if (IsScalePanel(root)) continue;
     std::vector<const dtb::Node*> rows;
     CollectMembers(root, "select_row", &rows);
     if (rows.empty()) {
@@ -3346,6 +3358,15 @@ void TestConfirmationPagesAreCaptionFree() {
       CHECK_TRUE(enter_hides >= 1);
       CHECK_EQ(enter_named, 0);
       CHECK_TRUE(hides >= 1);
+    } else if (IsScalePanel(root)) {
+      CHECK_TRUE(HasText(*enter_members.front(), "preview_scale"));
+      std::vector<const dtb::Node*> previews;
+      CollectMembers(root, "preview_scale", &previews);
+      CHECK_EQ(previews.size(), 1u);
+      if (!previews.empty()) {
+        CHECK_TRUE(HasText(*previews.front(), "rbbz-settings/help/settings_interface_scale/-"));
+        CHECK_TRUE(HasText(*previews.front(), "rbbz-settings/help/settings_gameplay_scale/-"));
+      }
     } else {
       // No ordinary page may have slipped into the suppressed set by losing its caption: every
       // one of them describes a first visible row (one name, or one per provider-gate world).
@@ -3379,7 +3400,7 @@ void TestHudShapeAndVisibilityLabels() {
         std::vector<std::string>({"settings_hud_hide", "settings_hud_score",
                                   "settings_hud_song", "settings_hud_feedback"}));
     CHECK_TRUE(PanelRowSymbols(panel("settings_hud_score_panel")) ==
-        std::vector<std::string>({"settings_hud_gold", "settings_hud_pb"}));
+        std::vector<std::string>({"settings_hud_comparison", "settings_hud_gold", "settings_hud_pb"}));
     CHECK_TRUE(PanelRowSymbols(panel("settings_hud_song_panel")) ==
         std::vector<std::string>({"settings_hud_progress", "settings_hud_timer"}));
     CHECK_TRUE(PanelRowSymbols(panel("settings_hud_feedback_panel")) ==
@@ -3795,6 +3816,11 @@ void TestResolutionProfileRows() {
                                   (mobile ? "_resolution" : "_render_scale"));
       configuration.choices[std::string("graphics.") + scope + "_resolution"] =
           {{"native", "2560x1080"}, {"2133x900", "2133x900"}, {"1707x720", "1707x720"}};
+      configuration.choices[std::string("graphics.") + scope + "_render_scale"] =
+          {{"720", "0.275 (720p)"}, {"931", "0.355 (931p)"}, {"1143", "0.436 (1143p)"},
+           {"1354", "0.516 (1354p)"}, {"1565", "0.597 (1565p)"}, {"1777", "0.678 (1777p)"},
+           {"1988", "0.758 (1988p)"}, {"2199", "0.839 (2199p)"}, {"2411", "0.92 (2411p)"},
+           {"10", "1.0 (2622p)"}};
     }
     ConfigureMenu(configuration);
     const auto rows = PanelRowSymbols("settings_display_panel");
@@ -3812,7 +3838,7 @@ void TestResolutionProfileRows() {
     }
     for (const auto* scope : {"interface", "gameplay"}) {
       const auto setting = std::string("graphics.") + scope + (mobile ? "_render_scale/i:" : "_resolution/t:");
-      const auto path = std::string("rbbz-settings/set/") + setting + (mobile ? "5" : "1707x720");
+      const auto path = std::string("rbbz-settings/set/") + setting + (mobile ? "720" : "1707x720");
       CHECK_TRUE(std::find(paths.begin(), paths.end(), path) != paths.end());
     }
     if (mobile) {
@@ -3821,10 +3847,66 @@ void TestResolutionProfileRows() {
                                   root.kids[2].text != "settings_scale_pause_panel")) continue;
         CHECK_TRUE(HasText(root, "sound_effects_slider.sld"));
         CHECK_TRUE(HasText(root, "track_sound_slider.sld"));
-        CHECK_TRUE(HasText(root, "interface_scale.lbl"));
-        CHECK_TRUE(HasText(root, "gameplay_scale.lbl"));
+        CHECK_TRUE(HasText(root, "scale_value.lbl"));
+        CHECK_TRUE(HasText(root, "checkbox.lst"));
+        CHECK_TRUE(HasText(root, "preview_scale"));
+        CHECK_TRUE(HasText(root, "focus_name"));
         CHECK_TRUE(HasText(root, "set_num_steps"));
         CHECK_FALSE(HasText(root, "options.lst"));
+        std::vector<const dtb::Node*> enters;
+        CollectMembers(root, "enter", &enters);
+        CHECK_EQ(enters.size(), 1u);
+        if (!enters.empty()) {
+          std::vector<const dtb::Node*> fills, placements;
+          FindCalls(*enters.front(), "set_data", &fills);
+          FindCalls(*enters.front(), "set_selected", &placements);
+          CHECK_EQ(fills.size(), 1u);
+          CHECK_EQ(placements.size(), 1u);
+          if (!fills.empty() && fills.front()->kids.size() >= 3) {
+            CHECK_TRUE(fills.front()->kids[0].text == "checkbox.lst");
+            const auto& buttons = fills.front()->kids[2];
+            CHECK_EQ(buttons.tag, dtb::kArray);
+            CHECK_EQ(buttons.kids.size(), 2u);
+            if (buttons.kids.size() == 2u) {
+              CHECK_TRUE(buttons.kids[0].text == "settings_interface_scale");
+              CHECK_TRUE(buttons.kids[1].text == "settings_gameplay_scale");
+            }
+          }
+          if (!placements.empty() && placements.front()->kids.size() >= 3) {
+            CHECK_TRUE(placements.front()->kids[0].text == "checkbox.lst");
+            CHECK_EQ(placements.front()->kids[2].tag, dtb::kInt);
+            CHECK_EQ(placements.front()->kids[2].scalar, 0u);
+          }
+        }
+        std::vector<const dtb::Node*> previews, scrolls;
+        CollectMembers(root, "preview_scale", &previews);
+        CollectMembers(root, "SCROLL_MSG", &scrolls);
+        CHECK_EQ(previews.size(), 1u);
+        CHECK_EQ(scrolls.size(), 1u);
+        if (!previews.empty()) {
+          std::vector<const dtb::Node*> tables;
+          CollectRowTables(*previews.front(), &tables);
+          CHECK_EQ(tables.size(), 1u);
+          if (!tables.empty()) {
+            CHECK_TRUE(HasText(*tables.front(), "checkbox.lst"));
+            CHECK_EQ(tables.front()->kids.size(), 4u);
+            CHECK_TRUE(HasText(*tables.front(), "settings_interface_scale"));
+            CHECK_TRUE(HasText(*tables.front(), "settings_gameplay_scale"));
+          }
+          CHECK_TRUE(HasText(*previews.front(), "rbbz-settings/help/settings_interface_scale/-"));
+          CHECK_TRUE(HasText(*previews.front(), "rbbz-settings/help/settings_gameplay_scale/-"));
+        }
+        if (!scrolls.empty() && scrolls.front()->kids.size() >= 2) {
+          const auto& conditional = scrolls.front()->kids[1];
+          CHECK_EQ(conditional.tag, dtb::kCommand);
+          CHECK_EQ(conditional.kids.size(), 3u);
+          if (conditional.kids.size() == 3u) {
+            CHECK_TRUE(conditional.kids[0].text == "if");
+            CHECK_TRUE(HasText(conditional.kids[1], "focus_name"));
+            CHECK_TRUE(HasText(conditional.kids[1], "checkbox.lst"));
+            CHECK_TRUE(HasText(conditional.kids[2], "preview_scale"));
+          }
+        }
         std::vector<const dtb::Node*> polls;
         CollectMembers(root, "poll", &polls);
         CHECK_EQ(polls.size(), 1u);
@@ -3833,9 +3915,9 @@ void TestResolutionProfileRows() {
         CHECK_TRUE(HasText(poll, "!="));
         CHECK_TRUE(HasText(poll, "rbbz-settings/commit/-/-"));
         for (const auto* scope : {"interface", "gameplay"}) {
-          for (int value = 5; value <= 10; ++value)
+          for (const auto* value : {"720", "931", "1143", "1354", "1565", "1777", "1988", "2199", "2411", "10"})
             CHECK_TRUE(HasText(poll, "rbbz-settings/set/graphics." + std::string(scope) +
-                                    "_render_scale/i:" + std::to_string(value)));
+                                    "_render_scale/i:" + value));
         }
         // Successful edits update the value label in place. Only save failures
         // can open another screen; Confirm no longer commits and leaves.
@@ -3852,14 +3934,40 @@ void TestResolutionProfileRows() {
           for (const auto& child : node.kids) self(self, child);
         };
         check_results(check_results, poll);
-        CHECK_EQ(results, 12);
+        CHECK_EQ(results, 20);
         std::vector<const dtb::Node*> buttons;
         CollectMembers(root, "BUTTON_DOWN_MSG", &buttons);
         CHECK_EQ(buttons.size(), 1u);
         if (!buttons.empty()) {
-          CHECK_TRUE(HasText(*buttons.front(), "kAction_Up"));
-          CHECK_TRUE(HasText(*buttons.front(), "kAction_Down"));
+          CHECK_TRUE(HasText(*buttons.front(), "kAction_Confirm"));
+          CHECK_TRUE(HasText(*buttons.front(), "kAction_Cancel"));
+          CHECK_TRUE(HasText(*buttons.front(), "focus_name"));
           CHECK_FALSE(HasText(*buttons.front(), "rbbz-settings/commit/-/-"));
+          CHECK_EQ(buttons.front()->kids.size(), 2u);
+          if (buttons.front()->kids.size() == 2u) {
+            const auto& table = buttons.front()->kids[1];
+            for (const auto& entry : table.kids) {
+              if (entry.tag != dtb::kArray || entry.kids.size() != 2u ||
+                  (entry.kids[0].text != "kAction_Confirm" &&
+                   entry.kids[0].text != "kAction_Cancel")) continue;
+              const auto& action = entry.kids[1];
+              CHECK_EQ(action.tag, dtb::kCommand);
+              CHECK_EQ(action.kids.size(), 4u);
+              if (action.kids.size() != 4u) continue;
+              CHECK_TRUE(action.kids[0].text == "if_else");
+              CHECK_TRUE(HasText(action.kids[1], "focus_name"));
+              CHECK_TRUE(HasText(action.kids[1], "checkbox.lst"));
+              CHECK_TRUE(IsCall(action.kids[3], "set_focus"));
+              CHECK_TRUE(HasText(action.kids[3], "checkbox.lst"));
+              if (entry.kids[0].text == "kAction_Confirm") {
+                CHECK_TRUE(HasText(action.kids[2], "preview_scale"));
+                CHECK_TRUE(HasText(action.kids[2], "track_sound_slider.sld"));
+                CHECK_TRUE(HasText(action.kids[2], "set_focus"));
+              } else {
+                CHECK_TRUE(HasText(action.kids[2], "goto_screen"));
+              }
+            }
+          }
         }
       }
     }

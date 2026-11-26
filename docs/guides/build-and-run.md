@@ -17,7 +17,7 @@ These are the routes implemented in this repository. A preset or package builder
 does not establish release acceptance on that platform. The current SDK is
 ReXGlue v0.11.0; older native build and gameplay measurements do not validate the
 migrated stack. See the [toolchain record](toolchain.md#platform-validation-scope)
-and [migration record](../plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md).
+and [migration record](../plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md).
 
 | Target | Release preset | Build host and graphics | Current validation scope |
 | --- | --- | --- | --- |

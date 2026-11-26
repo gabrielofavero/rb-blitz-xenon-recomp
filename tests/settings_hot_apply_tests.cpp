@@ -636,6 +636,23 @@ void PlanByStrategyMatchesTheDescriptorPlan() {
            true);
 }
 
+void DeviceScaleChangesUseReleaseDescriptors() {
+  test::BeginCase("device scales use live application with backend-capacity refusal available");
+  namespace schema = rb_blitz::settings::schema;
+  CapabilitySnapshot caps; caps.primary_display_size = {1206,2622};
+  Value value; value.kind = rb_blitz::settings::ValueKind::kInt; value.integer = 10;
+  const std::map<SettingId,Value> changed{{SettingId::kInterfaceRenderScale,value},
+                                       {SettingId::kGameplayRenderScale,value}};
+  const auto ios = rb_blitz::settings::PlanHotApply(changed,
+      schema::BuildDescriptors(caps, schema::SettingsForRelease(schema::HostPlatform::kIOS, "test")));
+  CHECK_EQ(ios.live.size(), 2u);
+  CHECK_TRUE(ios.pending_restart.empty());
+  const auto preview = rb_blitz::settings::PlanHotApply(changed,
+      schema::BuildDescriptors(caps, schema::SettingsForRelease(schema::HostPlatform::kWindows, "test", {}, true)));
+  CHECK_EQ(preview.live.size(), 2u);
+  CHECK_TRUE(preview.pending_restart.empty());
+}
+
 void StrategyTokensAreFrozen() {
   test::BeginCase("strategy: the two tokens are the plan's own words");
   CHECK_TRUE(std::string(rb_blitz::settings::ApplicationStrategyToken(
@@ -667,6 +684,7 @@ int main() {
   StaleFailureCannotEraseCurrentFailure();
   MixedBoundariesKeepIndependentPendingState();
   MissingOrDuplicateBatchCompletionKeepsRestartFallback();
+  DeviceScaleChangesUseReleaseDescriptors();
   StrategyTokensAreFrozen();
   return test::Finish();
 }

@@ -80,7 +80,15 @@ class RegistryApp final : public rex::app::App {
       CHECK_FALSE(actual.restart_pending);
     }
     REX_TRY_VOID(registry.Register(d3d12));
+    BeginCase("Exact Vulkan scale admission queues before driver registration");
+    CHECK_FALSE(vulkan.resolution_scale_strict.Get());
+    REX_TRY_VOID(registry.SetText(SettingLayer::kFile, "gpu.vulkan.resolution_scale_strict", "false"));
+    REX_TRY_VOID(registry.SetText(SettingLayer::kRuntime, "gpu.vulkan.resolution_scale_strict", "true"));
+    CHECK_FALSE(InspectRuntimeSetting("gpu.vulkan.resolution_scale_strict").registered);
     REX_TRY_VOID(registry.Register(vulkan));
+    CHECK_TRUE(vulkan.resolution_scale_strict.Get());
+    CHECK_TRUE(vulkan.resolution_scale_strict.GetLayer() == SettingLayer::kRuntime);
+    CHECK_FALSE(InspectRuntimeSetting("gpu.vulkan.resolution_scale_strict").restart_pending);
     late_aliases_applied = !xenos.native_pipeline_cache.Get() && !vulkan.shared_memory_upload_batching.Get();
     REX_TRY_VOID(registry.SetText(SettingLayer::kTitle,"gpu.xenos.native_pipeline_cache","true"));
     REX_TRY_VOID(registry.SetText(SettingLayer::kTitle,"gpu.vulkan.shared_memory_upload_batching","true"));
