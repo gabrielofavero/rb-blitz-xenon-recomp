@@ -33,9 +33,9 @@ inline bool CalibrationRetryCaption(std::string_view caption) {
 struct InlineHelpPlacement { size_t index, count; };
 
 inline std::vector<InlineHelpEntry> RecommendationFooterEntries(std::vector<InlineHelpEntry> entries) {
-  const auto rank = [](uint32_t action) { return action == 1 ? 0 : action == 2 ? 1 : 2; };
+  std::erase_if(entries, [](const auto& entry) { return entry.action != 1 && entry.action != 2; });
   std::stable_sort(entries.begin(), entries.end(), [&](const auto& a, const auto& b) {
-    return rank(a.action) < rank(b.action);
+    return a.action == 2 && b.action != 2;
   });
   return entries;
 }

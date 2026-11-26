@@ -132,7 +132,8 @@ bool PreparePortraitMessagesList(const std::vector<uint8_t>& source,
 inline constexpr char kMessagesRecord[] = "ui/inbox/gen/inbox.milo_xbox";
 inline constexpr char kPortraitMessagesListRecord[] = "ui/resource/lists/gen/portrait_inbox.milo_xbox";
 bool PreparePortraitRecommendations(const std::vector<uint8_t>& source,
-                                    const std::vector<uint8_t>& button_source, float aspect,
+                                    const std::vector<uint8_t>& button_source,
+                                    const std::vector<uint8_t>& background_source, float aspect,
                                     std::vector<uint8_t>* scene, std::string* error);
 // Preserve the native album widget/material callback and compact leaderboard fields.
 bool PreparePortraitRecommendationList(const std::vector<uint8_t>& source, float aspect,

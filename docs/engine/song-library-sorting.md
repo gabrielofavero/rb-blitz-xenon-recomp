@@ -55,6 +55,9 @@ animated children in place. Library transition screens retain portrait cropping;
 each departing and arriving panel keeps its own title, reading areas and footer.
 Portrait content inherits `Parent.trans`, and horizontal transition keys scale
 to the portrait canvas width while retaining the native timing and direction.
+Transition-time scene lookups convert the PanelDir drawable view back to its
+ObjectDir view and validate their shared virtual base before reading the scene's
+object table. The virtual Hmx::Object pointer is used only for object names.
 Album art, song title, artist, album, genre/year and difficulty occupy a fixed
 card above the Back, Shortcuts and Select actions. Wider portrait layouts reduce
 the visible row count to keep the list clear of that card.
@@ -71,3 +74,10 @@ These changes apply when the interface orientation is portrait, independently
 of the gameplay orientation. Scene copies are generated from installed game
 records; landscape resources and source archives are preserved. Authoring and
 input code are shared across desktop and iOS backends.
+
+Recommended uses a single album card with separate category, title, artist,
+genre/year and description bands. Its carousel copies the header's resting
+arrow meshes and texture without their animation, with invisible tap targets.
+The footer contains Back on the left and Select on the right. Background
+leaderboard requests do not draw the landscape loading label or an empty panel;
+completed leaderboard states retain their native rows and status text.

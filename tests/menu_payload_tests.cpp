@@ -2099,6 +2099,7 @@ void TestPortraitSplash() {
     CHECK_TRUE(layout.width <= rb_blitz::ui::PortraitSplash(aspect).width);
     CHECK_TRUE(layout.list_z + layout.row_height / 2 < layout.tabs_z - 20);
     CHECK_TRUE(layout.list_z - (layout.rows - 1) * layout.row_step - layout.row_height / 2 > layout.detail_top);
+    CHECK_TRUE(layout.list_z - layout.row_height / 2 - layout.detail_top <= 10);
     CHECK_TRUE(layout.icon_inset - layout.icon_size / 2 > 0);
     CHECK_TRUE(layout.icon_inset + layout.icon_size / 2 < layout.text_inset);
     CHECK_TRUE(layout.width - layout.text_inset - 16 > 60);
@@ -2107,7 +2108,7 @@ void TestPortraitSplash() {
     CHECK_TRUE(layout.body_top - layout.body_height > layout.detail_bottom);
     CHECK_TRUE(layout.detail_bottom > rb_blitz::ui::PortraitSongsFooter(aspect, 0, 2).z + 15);
   }
-  BeginCase("portrait Messages preserves native actions and measures new text after provider callbacks");
+  BeginCase("portrait Messages keeps Back in the footer and measures text after provider callbacks");
   {
     std::vector<Node> inbox{C({S("new"), S("InboxPanel"), S("inbox_panel"),
         A({S("enter"), C({S("native_enter")})}),
@@ -2118,9 +2119,14 @@ void TestPortraitSplash() {
         A({S("BUTTON_DOWN_MSG"), C({S("native_buttons")})})})};
     const auto before = inbox;
     CHECK_TRUE(rb_blitz::settings::AddPortraitMessagesLayout(&inbox, .5f, &why));
-    for (const char* action : {"update_inline_help", "BUTTON_DOWN_MSG"})
+    for (const char* action : {"BUTTON_DOWN_MSG"})
       CHECK_TRUE(dtb::SerializeNodes(Method(inbox, "inbox_panel", action)->kids) ==
                  dtb::SerializeNodes(Method(before, "inbox_panel", action)->kids));
+    const auto* help = Method(inbox, "inbox_panel", "update_inline_help");
+    CHECK_TRUE(help && Has(*help, "native_actions"));
+    for (const char* action : {"kAction_Confirm", "kAction_Start", "kAction_Option", "kAction_ShellOption"})
+      CHECK_TRUE(help && Has(*help, action));
+    CHECK_TRUE(help && !Has(*help, "kAction_Cancel"));
     for (const char* callback : {"enter", "on_messages_updated", "SCROLL_MSG"}) {
       bool native_ran = false, subject_measured = false, body_measured = false, filled = true;
       int resized = 0;
@@ -2149,7 +2155,7 @@ void TestPortraitSplash() {
     CHECK_TRUE(dtb::Compile(incompatible) == original);
   }
 
-  BeginCase("portrait recommendation artwork, navigation, text and five footer actions stay separated");
+  BeginCase("portrait recommendation artwork, navigation, text and two footer actions stay separated");
   for (float aspect : {.3f, 402.f / 874, .75f, .9f}) {
     const auto layout = rb_blitz::ui::PortraitRecommendations(aspect);
     CHECK_TRUE(layout.carousel_z + layout.art_size / 2 < layout.tabs_z - 20);
@@ -2160,7 +2166,7 @@ void TestPortraitSplash() {
     CHECK_TRUE(layout.artist_top - layout.artist_height > layout.info_top);
     CHECK_TRUE(layout.info_top - layout.info_height > layout.reason_top);
     CHECK_TRUE(layout.reason_top - layout.reason_height > layout.leaderboard_title_top);
-    for (size_t count = 1; count <= 5; ++count) {
+    for (size_t count = 1; count <= 2; ++count) {
       for (size_t i = 0; i < count; ++i) {
         const auto a = rb_blitz::ui::PortraitRecommendationsFooter(aspect, i, count);
         CHECK_TRUE(a.width > 32 && a.height >= 25);
@@ -2189,17 +2195,22 @@ void TestPortraitSplash() {
     for (const char* action : {"SELECT_MSG", "BUTTON_DOWN_MSG", "SCROLL_MSG"})
       CHECK_TRUE(dtb::SerializeNodes(Method(roots, "recommendation_panel", action)->kids) ==
                  dtb::SerializeNodes(Method(before, "recommendation_panel", action)->kids));
-    for (const auto& [count, selected] : {std::pair{0, 0}, {1, 0}, {5, 0}, {5, 2}, {5, 4}}) {
+    for (const auto& [count, selected] : {std::pair{0, 0}, {1, 0}, {5, 0}, {5, 2}, {5, 4}})
+      for (int board_state = 1; board_state <= 5; ++board_state) {
       std::map<std::string, bool> showing;
       int native_updates = 0, measured = 0, cleared = 0;
       std::array<int, 2> position{};
       const auto eval = [&](auto&& self, const Node& n) -> float {
         if (n.tag == dtb::kInt) return float(int32_t(n.scalar));
+        if (n.text == "TRUE") return 1;
+        if (n.text == "hidden") return 1;
+        if (n.text == "loading") return 2;
         if (n.tag != dtb::kCommand || n.kids.empty()) return 0;
         const auto& k = n.kids; const auto& op = k[0].text;
         if (op == "native_update") { ++native_updates; return 0; }
         if (op == "!") return !self(self, k[1]);
-        if (op == "&&") return self(self, k[1]) && self(self, k[2]);
+        if (op == "&&") return std::all_of(k.begin() + 1, k.end(), [&](const auto& v) { return self(self, v) != 0; });
+        if (op == "!=") return self(self, k[1]) != self(self, k[2]);
         if (op == ">") return self(self, k[1]) > self(self, k[2]);
         if (op == "<") return self(self, k[1]) < self(self, k[2]);
         if (op == "+") return self(self, k[1]) + self(self, k[2]);
@@ -2208,6 +2219,8 @@ void TestPortraitSplash() {
           if (!self(self, k[1])) for (size_t i = 2; i < k.size(); ++i) self(self, k[i]);
           return 0;
         }
+        if (op == "if") { if (self(self, k[1])) self(self, k[2]); return 0; }
+        if (op == "leaderboard_mode.ep") return float(board_state);
         if (k[1].text == "num_data") return float(count);
         if (k[1].text == "selected_pos") return float(selected);
         if (k[1].text == "set_showing") showing[op] = self(self, k[2]);
@@ -2223,11 +2236,15 @@ void TestPortraitSplash() {
       CHECK_EQ(cleared, count == 0 ? 3 : 0);
       CHECK_EQ(showing.at("portrait_rec_empty.lbl"), count == 0);
       CHECK_EQ(showing.at("recommendations.lst"), count != 0);
-      CHECK_EQ(showing.at("rec_icon"), count != 0);
-      CHECK_EQ(showing.at("portrait_rec_board_state.grp"), count != 0);
+      CHECK_FALSE(showing.at("rec_icon"));
+      CHECK_EQ(showing.at("portrait_rec_board_state.grp"), count != 0 && board_state > 2);
       CHECK_EQ(showing.at("portrait_rec_previous.lbl"), count > 0 && selected > 0);
       CHECK_EQ(showing.at("portrait_rec_next.lbl"), count > 0 && selected < count - 1);
       CHECK_EQ(position[0], selected + 1); CHECK_EQ(position[1], count);
+      for (const char* callback : {"update_lb_ui_for_focus_rec", "on_mini_leaderboards_updated", "on_leaderboard_failed"}) {
+        for (const auto& cmd : Method(roots, "recommendation_panel", callback)->kids) eval(eval, cmd);
+        CHECK_EQ(showing.at("portrait_rec_board_state.grp"), count != 0 && board_state > 2);
+      }
     }
     auto incompatible = before;
     incompatible[0].kids.erase(incompatible[0].kids.begin() + 8);
@@ -3133,6 +3150,22 @@ int main(int argc, char** argv) {
       CHECK_TRUE(settings::BuildMenuRecords(read, {"ui/locale/eng/gen/locale_keep.dtb"},
           &mixed, &why, false, false, nullptr, {}, false, nullptr, {},
           interface_portrait, false, gameplay_portrait));
+      const auto& locale = mixed.at("ui/locale/eng/gen/locale_keep.dtb");
+      std::vector<dtb::Node> localized;
+      dtb::RootHeader locale_header;
+      CHECK_TRUE(dtb::Parse(locale.data(), locale.size(), &localized, &locale_header, &why));
+      const auto locale_text = [&](std::string_view key) {
+        for (const auto& root : localized)
+          if (root.kids.size() == 2 && root.kids[0].text == key) return root.kids[1].text;
+        return std::string();
+      };
+      CHECK_TRUE(locale_text("settings_achievements") ==
+                 (interface_portrait ? "Unlocks" : "Achievements & Unlocks"));
+      CHECK_TRUE(locale_text("settings_title_settings_controller_layout_panel") ==
+                 (interface_portrait ? "LAYOUT" : "CONTROLLER LAYOUT"));
+      CHECK_TRUE(locale_text("settings_mm_rhythmverse_off") ==
+                 (interface_portrait ? "Shortcut: Visible" : "Main Menu Shortcut: Visible"));
+      CHECK_TRUE(locale_text("settings_mm_achievements_off") == "Achievements: Visible");
       const auto& interface_records = interface_portrait ? portrait : landscape;
       const auto& gameplay_records = gameplay_portrait ? portrait : landscape;
       for (const auto& [path, bytes] : portrait) {
@@ -3285,6 +3318,9 @@ int main(int argc, char** argv) {
       };
       CHECK_TRUE(contains(panel.at("songs.lst"), "portrait_inbox.milo"));
       CHECK_TRUE(contains(panel.at("InlineHelp.ihp"), "portrait_actions.milo"));
+      CHECK_EQ(u32(panel.at("InlineHelp.ihp").data() + 9), 1u);
+      CHECK_EQ(u32(panel.at("InlineHelp.ihp").data() + 13), 2u);
+      CHECK_TRUE(panel.contains("portrait_messages_list.mesh"));
       CHECK_TRUE(contains(panel.at("message.lbl"), "portrait_splash.milo"));
       CHECK_TRUE(contains(panel.at("message.lbl"), "pentatonic_bold.milo"));
       const auto layout = rb_blitz::ui::PortraitMessages(aspect);
@@ -3324,16 +3360,17 @@ int main(int argc, char** argv) {
     }
     CHECK_FALSE(landscape.contains(font::kMessagesRecord));
     CHECK_FALSE(landscape.contains(font::kPortraitMessagesListRecord));
-    BeginCase("portrait Recommended keeps native album textures, category icons, leaderboard fields and five actions");
+    BeginCase("portrait Recommended uses static header arrows, bounded text and two actions without loading or empty panels");
     for (float aspect : {.3f, 402.f / 874, .75f, .9f}) {
       const auto layout = rb_blitz::ui::PortraitRecommendations(aspect);
       const auto contains = [](const auto& bytes, std::string_view text) {
         return std::search(bytes.begin(), bytes.end(), text.begin(), text.end()) != bytes.end();
       };
-      std::vector<uint8_t> source, scene;
+      std::vector<uint8_t> source, scene, header_arrows;
+      CHECK_TRUE(read("ui/background/gen/background.milo_xbox", &header_arrows, &why));
       CHECK_TRUE(read(font::kRecommendationsRecord, &source, &why));
       const auto original = source;
-      CHECK_TRUE(font::PreparePortraitRecommendations(source, portrait_buttons, aspect, &scene, &why));
+      CHECK_TRUE(font::PreparePortraitRecommendations(source, portrait_buttons, header_arrows, aspect, &scene, &why));
       CHECK_TRUE(source == original);
       const auto panel = stored_objects(scene);
       for (const char* name : {"recommendations.lst", "mini_leaders.lst", "rec_icon", "description.lbl",
@@ -3347,15 +3384,28 @@ int main(int argc, char** argv) {
       CHECK_TRUE(contains(panel.at("description.lbl"), "pentatonic_bold.milo"));
       CHECK_TRUE(contains(panel.at("InlineHelp.ihp"), "portrait_actions.milo"));
       CHECK_TRUE(contains(panel.at("portrait_rec_board_state.grp"), "no_board.grp"));
-      CHECK_TRUE(contains(panel.at("portrait_rec_board_state.grp"), "loading.grp"));
+      CHECK_FALSE(contains(panel.at("portrait_rec_board_state.grp"), "loading.grp"));
       CHECK_TRUE(contains(panel.at("portrait_rec_board_state.grp"), "mini_leaders.grp"));
+      CHECK_TRUE(contains(panel.at("portrait_rec_unused.grp"), "loading.grp"));
+      CHECK_TRUE(contains(panel.at("portrait_rec_unused.grp"), "rec_icon"));
+      const auto& unused = panel.at("portrait_rec_unused.grp");
+      CHECK_EQ(unused[0x21 + 113 + u32(unused.data() + 0x21 + 105)], 0);
+      CHECK_FALSE(contains(panel.at("home.grp"), "loading.grp"));
+      CHECK_FALSE(contains(panel.at("home.grp"), "rec_icon"));
+      CHECK_FALSE(panel.contains("portrait_rec_board.mesh"));
+      for (const char* stem : {"portrait_rec_previous", "portrait_rec_next"}) {
+        CHECK_TRUE(panel.contains(std::string(stem) + "_arrow.mesh"));
+        CHECK_TRUE(contains(panel.at(std::string(stem) + "_arrow.mat"), "shell_nav_arrow.tex"));
+        CHECK_FALSE(contains(panel.at(std::string(stem) + "_arrow.mesh"), ".flow"));
+      }
       CHECK_TRUE(panel.contains("spinner_hoz") && panel.contains("spinner_hoz1") && panel.contains("spinner_vert"));
       CHECK_TRUE(std::bit_cast<float>(u32(panel.at("portrait_rec_details.mat").data() + 0x25)) >= .9f);
       for (const char* name : {"song_title.lbl", "song_artist.lbl", "song_info.lbl", "description.lbl", "recommendations.lst"})
         CHECK_EQ(u32(panel.at(name).data() + 0x19 + 105), 12u);
       CHECK_EQ(u32(panel.at("recommendations.lst").data() + 0x19 + 44), std::bit_cast<uint32_t>(layout.carousel_z));
-      for (size_t i = 0; i < 5; ++i)
+      for (size_t i = 0; i < 2; ++i)
         CHECK_TRUE(panel.contains(std::string(rb_blitz::ui::PortraitRecommendationFooterSurface(i)) + ".mesh"));
+      CHECK_FALSE(panel.contains("portrait_rec_action_2.mesh"));
       CHECK_TRUE(read("ui/resource/lists/gen/list_recommendations_albums.milo_xbox", &source, &why));
       const auto original_list = source;
       CHECK_TRUE(font::PreparePortraitRecommendationList(source, aspect, &scene, &why));
@@ -3383,7 +3433,7 @@ int main(int argc, char** argv) {
       CHECK_FALSE(font::PreparePortraitRecommendationList(source, aspect, &refused, &why));
       CHECK_TRUE((refused == std::vector<uint8_t>{1,2,3}));
       source = original; source.back() ^= 1;
-      CHECK_FALSE(font::PreparePortraitRecommendations(source, portrait_buttons, aspect, &refused, &why));
+      CHECK_FALSE(font::PreparePortraitRecommendations(source, portrait_buttons, header_arrows, aspect, &refused, &why));
       CHECK_TRUE((refused == std::vector<uint8_t>{1,2,3}));
     }
     CHECK_FALSE(landscape.contains(font::kRecommendationsRecord));
@@ -3430,6 +3480,16 @@ int main(int argc, char** argv) {
       }
       const auto dialog = stored_objects(records.at(font::kPortraitStoreDialogRecord));
       CHECK_TRUE(dialog.contains("error.lbl") && dialog.contains("continue.lbl"));
+      CHECK_TRUE(dialog.contains("portrait_dialog_close.lbl"));
+      CHECK_TRUE(dialog.contains("portrait_dialog_panel.mesh"));
+      CHECK_TRUE(dialog.contains("portrait_dialog_action.mesh"));
+      CHECK_TRUE(dialog.contains("portrait_dialog_close.mesh"));
+      const auto modal = rb_blitz::ui::PortraitStoreDialog(aspect);
+      CHECK_TRUE(modal.text_top < modal.close_z - modal.close_size / 2);
+      CHECK_TRUE(modal.text_top - modal.text_height > modal.action_z + modal.action_height / 2);
+      CHECK_TRUE(modal.action_z - modal.action_height / 2 > -modal.height / 2);
+      CHECK_TRUE(modal.CloseX() + modal.close_size / 2 < modal.width / 2);
+
       // Labels have no transform parent: the art's fit cannot shrink their text.
       for (const char* name : {"error.lbl", "continue.lbl"})
         CHECK_EQ(u32(dialog.at(name).data() + 0x19 + 105), 0u);
@@ -3464,6 +3524,44 @@ int main(int argc, char** argv) {
           CHECK_TRUE(header_test::Method(roots, "store_info_panel", "refresh_panel") != nullptr);
           CHECK_TRUE(header_test::Method(roots, "rbbz_download_panel", "show_popup") != nullptr);
           CHECK_TRUE(header_test::Method(roots, "rbbz_download_panel", "finish_installed") != nullptr);
+          const auto* buttons = header_test::Method(roots, "store_info_panel", "refresh_buttons");
+          CHECK_TRUE(buttons != nullptr);
+          bool exit_row = false, selected_action = false, back_footer = false, action_footer = false;
+          const auto inspect = [&](const auto& self, const dtb::Node& node) -> void {
+            if (node.tag == dtb::kCommand && node.kids.size() >= 3) {
+              const auto& k = node.kids;
+              if (k.size() == 4 && k[0].text == "insert_elem" && k[3].text == "exit") exit_row = true;
+              if (k[0].text == "buttons.lst" && k[1].text == "set_selected" && k[2].scalar == 0) selected_action = true;
+              if (k.size() == 4 && k[0].text == "store_info.ihp" && k[1].text == "set_action_token") {
+                if (k[2].text == "kAction_Cancel" && k[3].text == "back") back_footer = true;
+                if (k[2].text == "kAction_Confirm" && k[3].kids.size() == 2 &&
+                    k[3].kids[0].text == "buttons.lst" && k[3].kids[1].text == "selected_sym") action_footer = true;
+              }
+            }
+            for (const auto& kid : node.kids) self(self, kid);
+          };
+          inspect(inspect, *buttons);
+          CHECK_FALSE(exit_row);
+          CHECK_TRUE(selected_action && back_footer && action_footer);
+          const auto* deleting = header_test::Method(roots, "rbbz_library_panel", "confirm_delete");
+          CHECK_TRUE(deleting != nullptr);
+          const auto visibility = [&](const auto& self, const dtb::Node& node, const char* label) -> int {
+            int result = -1;
+            if (node.tag == dtb::kCommand && node.kids.size() == 3 &&
+                node.kids[0].text == label && node.kids[1].text == "set_showing")
+              result = node.kids[2].text == "TRUE" ? 1 : 0;
+            for (const auto& kid : node.kids) {
+              const auto next = self(self, kid, label);
+              if (next >= 0) result = next;
+            }
+            return result;
+          };
+          CHECK_EQ(visibility(visibility, *deleting, "continue.lbl"), 0);
+          CHECK_EQ(visibility(visibility, *deleting, "portrait_dialog_close.lbl"), 0);
+          const auto* installed = header_test::Method(roots, "rbbz_download_panel", "finish_installed");
+          CHECK_EQ(visibility(visibility, *installed, "continue.lbl"), 1);
+          CHECK_EQ(visibility(visibility, *installed, "portrait_dialog_close.lbl"), 1);
+
           for (const char* panel : {"rbbz_download_panel", "rbbz_library_panel"}) {
             bool found = false;
             for (const auto& root : roots) if (root.kids.size() > 2 && root.kids[2].text == panel)

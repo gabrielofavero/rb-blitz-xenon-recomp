@@ -439,7 +439,8 @@ bool ReorganizeAudioPage(std::vector<dtb::Node>* nodes, std::string* reason);
 // Every locale entry the surface needs that retail does not already carry, as (key, English).
 // Rows that reuse a retail row symbol (`controls`, `calibration`, `audio_video_options`,
 // `tutorial`, `credits`) are *not* here: their labels come from the installed locale unchanged.
-std::vector<std::pair<std::string, std::string>> Labels();
+// Portrait uses compact settings labels while preserving locale keys and state suffixes.
+std::vector<std::pair<std::string, std::string>> Labels(bool portrait = false);
 
 // Retail locale entries the merged surface **rewrites**, as (key, from, to). The retail AV page
 // draws its two checkboxes as `Overscan | ENABLED` / `Bass Boost | DISABLED` - a `|` separator and

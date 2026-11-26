@@ -1199,7 +1199,7 @@ void TestDownloadContentVisibilityAndNoDlc() {
   configuration.rhythmverse_row = false;
   configuration.availability["general.play_current_song"] = "no playable DLC songs found";
   ConfigureMenu(configuration);
-  const std::vector<std::string> shortcuts = {"settings_dlc_refresh", "settings_mm_download_content", "settings_mm_leaderboard", "settings_mm_exit", "settings_mm_upgrade"};
+  const std::vector<std::string> shortcuts = {"settings_dlc_refresh", "settings_mm_download_content", "settings_mm_leaderboard", "settings_mm_achievements", "settings_mm_exit", "settings_mm_upgrade"};
   CHECK_TRUE(PanelRowSymbols("settings_main_menu_panel") == shortcuts);
   CHECK_TRUE(PageRows(PausePanel("settings_main_menu_panel")) == shortcuts);
   CHECK_TRUE(PanelRowSymbols("settings_main_menu_extra_panel").empty());
@@ -2266,6 +2266,55 @@ void TestSaveErrorSaysWhy() {
     }
     CHECK_TRUE(defined);
   }
+}
+
+void TestPortraitLabels() {
+  BeginCase("portrait settings shorten names while preserving keys, values and landscape labels");
+  MenuConfiguration configuration;
+  configuration.download_content_row = true;
+  for (const bool trial : {false, true}) {
+    configuration.trial_mode = trial;
+    ConfigureMenu(configuration);
+    const auto landscape = Labels(false);
+    const auto portrait = Labels(true);
+    CHECK_EQ(landscape.size(), portrait.size());
+    for (size_t i = 0; i < landscape.size(); ++i)
+      CHECK_TRUE(landscape[i].first == portrait[i].first);
+    const auto label = [](const auto& labels, const char* key) {
+      for (const auto& entry : labels) if (entry.first == key) return entry.second;
+      return std::string();
+    };
+    CHECK_TRUE(label(portrait, "settings_achievements") == "Unlocks");
+    CHECK_TRUE(label(portrait, "settings_title_settings_achievements_panel") == "UNLOCKS");
+    CHECK_TRUE(label(portrait, "settings_title_settings_controller_layout_panel") == "LAYOUT");
+    CHECK_TRUE(label(portrait, "settings_unlock_online") == "Unlock Online Ac.");
+    CHECK_TRUE(label(portrait, "settings_earn_achievements") == "Unlock Online Ac.");
+    CHECK_TRUE(label(portrait, "settings_mm_rhythmverse_on") == "Shortcut: Hidden");
+    CHECK_TRUE(label(portrait, "settings_mm_rhythmverse_off") == "Shortcut: Visible");
+    CHECK_TRUE(label(portrait, "settings_hud_gold_on") == "Star Progress: Visible");
+    CHECK_TRUE(label(portrait, "settings_hud_gold_off") == "Star Progress: Hidden");
+    CHECK_TRUE(label(portrait, "settings_hud_progress_on") == "Progress Bar: Visible");
+    CHECK_TRUE(label(portrait, "settings_force_skybox_default") == "Skybox: Default");
+    CHECK_TRUE(label(portrait, "settings_force_plot_off") == "Plot: Off");
+    CHECK_TRUE(label(portrait, "settings_title_settings_interface_music_play_panel") == "MUSIC PLAYBACK");
+    CHECK_TRUE(label(portrait, "settings_title_settings_interface_music_library_panel") == "LIBRARY OPTIONS");
+    CHECK_TRUE(label(portrait, "settings_music_navigation_on") == "Music Navigation: On");
+    CHECK_TRUE(label(portrait, "settings_dlc_threads_4") == "Loading Threads: 4");
+    for (const auto& labels : {landscape, portrait}) {
+      CHECK_TRUE(label(labels, "settings_mm_achievements_on") == "Achievements: Hidden");
+      CHECK_TRUE(label(labels, "settings_mm_achievements_off") == "Achievements: Visible");
+      CHECK_TRUE(label(labels, kDownloadContentRow) == kDownloadContentLabel);
+    }
+    CHECK_TRUE(label(portrait, trial ? "settings_mm_download_content" : "settings_mm_download_content_off") ==
+               (trial ? "Download Cont.: Unavailable" : "Download Cont.: Visible"));
+    CHECK_TRUE(label(portrait, trial ? "settings_mm_upgrade_off" : "settings_mm_upgrade") ==
+               (trial ? "Unlock Game: Visible" : "Unlock Game: Unavailable"));
+    CHECK_TRUE(label(landscape, "settings_achievements") == "Achievements & Unlocks");
+    CHECK_TRUE(label(landscape, "settings_title_settings_controller_layout_panel") == "CONTROLLER LAYOUT");
+    CHECK_TRUE(label(landscape, "settings_mm_rhythmverse_off") == "Main Menu Shortcut: Visible");
+    CHECK_TRUE(Labels() == landscape);
+  }
+  ConfigureMenu({});
 }
 
 void TestLabels() {
@@ -3442,7 +3491,7 @@ void TestFeatureTreeAndRestoreProfiles() {
     CHECK_TRUE(PanelRowSymbols(panel("settings_general_panel")) == std::vector<std::string>({
         "settings_launch", "settings_achievements", "settings_gameplay", "settings_interface", "settings_dlc", "settings_restore_defaults"}));
     CHECK_TRUE(PanelRowSymbols(panel("settings_achievements_panel")) == std::vector<std::string>({
-        "settings_unlock_all", "settings_unlock_online", "settings_hide_achievements", "settings_mm_achievements"}));
+        "settings_unlock_all", "settings_unlock_online", "settings_hide_achievements"}));
     CHECK_TRUE(PanelRowSymbols(panel("settings_dlc_panel")) == std::vector<std::string>({
         "settings_rhythmverse_menu", "settings_menu_music"}));
     CHECK_TRUE(PanelRowSymbols(panel("settings_av_panel")) == std::vector<std::string>({"settings_audio", "settings_video_menu"}));
@@ -4973,6 +5022,7 @@ int main(int argc, char** argv) {
   TestGameplayMappingTreeAfterP4();
   TestLocaleOverrides();
   TestLabels();
+  TestPortraitLabels();
   TestHelpTextsCoverEveryRow();
   TestHelpEventsInTheDefinition();
   TestHelpTopicsResolve();

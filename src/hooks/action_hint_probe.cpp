@@ -295,7 +295,7 @@ REX_HOOK_RAW(sub_824D85E8) {
   // those labels directly after the draw instead of depending on a nested
   // UILabel callback (which may receive an adjusted base-class this pointer).
   const auto visible = rb_blitz::input::PortraitMenuHintEntries(ctx, base, owner);
-  const size_t footer_capacity = rb_blitz::input::MenuScreenIs("recommendation_screen") ? 5 : 3;
+  constexpr size_t footer_capacity = 3;
   if (!visible.empty() && visible.size() <= footer_capacity &&
       rb_blitz::input::PortraitMenuHintsAvailable(ctx, base, owner)) {
     // Keep the original action and label vectors: calibration replaces them as

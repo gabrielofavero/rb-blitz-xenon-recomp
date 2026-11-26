@@ -1806,6 +1806,23 @@ bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, s
       commands.push_back(c({s(name), s("set"), Node::Array({s("styles"), Node::Int(0), s("text_size")}), f(size)}));
     }
     if (!append("store_info_panel", "refresh_panel", commands)) return false;
+    if (auto* refresh = PanelMethod(&staged, "store_info_panel", "refresh_buttons")) {
+      // The focused list dispatches the current action through its native
+      // SELECT_MSG. Back is represented by the separate footer action.
+      const auto remove_exit = [&](const auto& self, Node& node) -> void {
+        if (node.tag == ui::dtb::kCommand && node.kids.size() == 4 &&
+            node.kids[0].text == "insert_elem" && node.kids[3].text == "exit") {
+          node = Node::Int(0);
+          return;
+        }
+        for (auto& kid : node.kids) self(self, kid);
+      };
+      remove_exit(remove_exit, *refresh);
+      refresh->kids.push_back(c({s("buttons.lst"), s("set_selected"), Node::Int(0)}));
+      refresh->kids.push_back(c({s("store_info.ihp"), s("set_action_token"), s("kAction_Cancel"), s("back")}));
+      refresh->kids.push_back(c({s("store_info.ihp"), s("set_action_token"), s("kAction_Confirm"),
+          c({s("buttons.lst"), s("selected_sym")})}));
+    }
     // All states share this private native scene: downloading, completion,
     // failure and leave-without-refresh confirmation retain their own handlers.
     for (auto& root : staged) {
@@ -1814,6 +1831,34 @@ bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, s
       for (auto& member : root.kids)
         if (member.tag == ui::dtb::kArray && member.kids.size() == 2 && member.kids[0].text == "file")
           member.kids[1] = Node::String("../error/portrait_store_dialog.milo");
+      const auto actions = [&](const auto& self, Node& node) -> void {
+        if (node.tag == ui::dtb::kCommand && node.kids.size() == 3 &&
+            node.kids[0].text == "continue.lbl" &&
+            (node.kids[1].text == "set_token_fmt" || node.kids[1].text == "set_display_text_string")) {
+          const bool token = node.kids[1].text == "set_token_fmt";
+          const auto value = node.kids[2].text;
+          const bool refresh = token && value == store::kDownloadRefreshToken;
+          std::string caption;
+          if (!token) {
+            constexpr std::string_view confirm = "<alt1>A</alt1> ";
+            if (value.starts_with(confirm)) {
+              caption = value.substr(confirm.size(), value.find("<alt1>B</alt1>") - confirm.size());
+              while (!caption.empty() && caption.back() == ' ') caption.pop_back();
+            }
+          }
+          const bool primary = refresh || !caption.empty();
+          const bool close = token || value.find("<alt1>B</alt1>") != std::string::npos;
+          node = c({s("do"),
+              c({s("continue.lbl"), s(refresh ? "set_token_fmt" : "set_display_text_string"),
+                  refresh ? s("rbbz_portrait_refresh") : Node::String(caption)}),
+              c({s("continue.lbl"), s("set_showing"), s(primary ? "TRUE" : "FALSE")}),
+              c({s("portrait_dialog_close.lbl"), s("set_display_text_string"), Node::String("X")}),
+              c({s("portrait_dialog_close.lbl"), s("set_showing"), s(close ? "TRUE" : "FALSE")})});
+          return;
+        }
+        for (auto& kid : node.kids) self(self, kid);
+      };
+      actions(actions, root);
     }
   } else {
     for (const auto& [panel, method, name, resource] : {
@@ -1852,7 +1897,8 @@ bool AddPortraitMessagesLayout(std::vector<Node>* roots, float aspect, std::stri
   auto* updated = PanelMethod(&staged, "inbox_panel", "on_messages_updated");
   auto* scroll = PanelMethod(&staged, "inbox_panel", "SCROLL_MSG");
   auto* exit = PanelMethod(&staged, "inbox_panel", "exit");
-  if (!enter || !updated || !scroll || !exit) {
+  auto* help = PanelMethod(&staged, "inbox_panel", "update_inline_help");
+  if (!enter || !updated || !scroll || !exit || !help) {
     if (why) *why = "portrait messages lifecycle changed";
     return false;
   }
@@ -1864,7 +1910,10 @@ bool AddPortraitMessagesLayout(std::vector<Node>* roots, float aspect, std::stri
   const auto layout = ui::PortraitMessages(aspect);
   enter->kids.insert(enter->kids.begin() + 1, {
       c({s("songs.lst"), s("set"), s("display_num"), Node::Int(layout.rows)}),
+      c({s("songs.lst"), s("set"), s("min_display"), Node::Int(0)}),
       c({s("songs.lst"), s("set"), s("max_display"), Node::Int(layout.rows - 1)})});
+  for (const char* action : {"kAction_Confirm", "kAction_Start", "kAction_Option", "kAction_ShellOption"})
+    help->kids.push_back(c({s("InlineHelp.ihp"), s("clear_action_token"), s(action)}));
   enter->kids.push_back(c({s("songs.lst"), s("refresh")}));
   enter->kids.push_back(c({s("portrait_tab_messages.lbl"), s("set_token_fmt"), s("header_inbox")}));
   for (auto* callback : {enter, updated, scroll})
@@ -1881,7 +1930,7 @@ bool AddPortraitMessagesLayout(std::vector<Node>* roots, float aspect, std::stri
   return true;
 }
 
-bool AddPortraitRecommendationsLayout(std::vector<Node>* roots, float aspect, std::string* why) {
+bool AddPortraitRecommendationsLayout(std::vector<Node>* roots, float /*aspect*/, std::string* why) {
   if (!roots) return false;
   auto staged = *roots;
   auto* enter = PanelMethod(&staged, "recommendation_panel", "enter");
@@ -1899,7 +1948,6 @@ bool AddPortraitRecommendationsLayout(std::vector<Node>* roots, float aspect, st
   const auto f = [](float v) {
     Node n; n.tag = ui::dtb::kFloat; n.scalar = std::bit_cast<uint32_t>(v); return n;
   };
-  const auto layout = ui::PortraitRecommendations(aspect);
   // Size before the native provider bindings, preserving saved selection and
   // avoiding empty elements when SetNumDisplay recreates the widgets.
   enter->kids.insert(enter->kids.begin() + 1, {
@@ -1919,17 +1967,18 @@ bool AddPortraitRecommendationsLayout(std::vector<Node>* roots, float aspect, st
   enter->kids.push_back(c({s("portrait_rec_empty.lbl"), s("set_height_from_text")}));
   for (const char* spinner : {"spinner_hoz", "spinner_vert", "spinner_hoz1"})
     enter->kids.push_back(c({s(spinner), s("set_local_pos"), f(0), f(0), f(0)}));
-  enter->kids.push_back(c({s("rec_icon"), s("set_local_scale"), f(20.f / 70), f(20.f / 70), f(20.f / 70)}));
-  enter->kids.push_back(c({s("rec_icon"), s("set_local_pos"), f(-layout.width / 2 + 17), f(0), f(layout.TypeZ())}));
   const auto count = c({s("recommendations.lst"), s("num_data")});
   const auto selected = c({s("recommendations.lst"), s("selected_pos")});
   const auto has = c({s(">"), count, Node::Int(0)});
   const auto showing = [&](const char* name, Node value) { return c({s(name), s("set_showing"), std::move(value)}); };
   for (const char* name : {"recommendations.lst", "song_title.lbl", "song_artist.lbl", "song_info.lbl",
-                           "description.lbl", "rec_icon", "portrait_rec_position.lbl", "portrait_rec_board_state.grp",
+                           "description.lbl", "portrait_rec_position.lbl",
                            "portrait_rec_hero.mesh", "portrait_rec_hero_border.mesh",
                            "portrait_rec_details.mesh", "portrait_rec_details_border.mesh"})
     update->kids.push_back(showing(name, has));
+  update->kids.push_back(showing("rec_icon", s("FALSE")));
+  update->kids.push_back(c({s("if"), has,
+      c({s("InlineHelp.ihp"), s("set_action_token"), s("kAction_Confirm"), s("select")})}));
   update->kids.push_back(showing("portrait_rec_empty.lbl", c({s("!"), has})));
   update->kids.push_back(showing("portrait_rec_previous.lbl", c({s("&&"), has,
       c({s(">"), selected, Node::Int(0)})})));
@@ -1943,11 +1992,11 @@ bool AddPortraitRecommendationsLayout(std::vector<Node>* roots, float aspect, st
       c({s("InlineHelp.ihp"), s("clear_action_token"), s("kAction_Confirm")}),
       c({s("InlineHelp.ihp"), s("clear_action_token"), s("kAction_Option")}),
       c({s("InlineHelp.ihp"), s("clear_action_token"), s("kAction_ShellOption")})}));
-  const auto board_showing = c({s("&&"), has, c({s("!="),
-      c({s("leaderboard_mode.ep"), s("get"), s("display_state")}), s("hidden")})});
-  for (auto* callback : {board, board_updated, board_failed})
-    for (const char* name : {"portrait_rec_board.mesh", "portrait_rec_board_border.mesh"})
-      callback->kids.push_back(showing(name, board_showing));
+  const auto state = c({s("leaderboard_mode.ep"), s("get"), s("display_state")});
+  const auto board_showing = c({s("&&"), has,
+      c({s("!="), state, s("hidden")}), c({s("!="), state, s("loading")})});
+  for (auto* callback : {update, board, board_updated, board_failed})
+    callback->kids.push_back(showing("portrait_rec_board_state.grp", board_showing));
   *roots = std::move(staged);
   return true;
 }
@@ -2781,6 +2830,8 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           note("the Download label was refused: " + why);
         }
         screen::AddLocaleEntry(&roots, "store_delete_song", "Delete", &why);
+        if (portrait_interface)
+          screen::AddLocaleEntry(&roots, "rbbz_portrait_refresh", "Refresh", &why);
         screen::AddLocaleEntry(&roots, "store_checking_library", "Checking installed songs...", &why);
         // P9-7's footer caption: the store's Start button now opens the Search Song Filter page, so
         // its inline help names that page instead of the scene's `inline_help_options`
@@ -2850,7 +2901,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           }
         }
       }
-      for (const auto& [key, text] : screen::Labels()) {
+      for (const auto& [key, text] : screen::Labels(portrait_interface)) {
         std::string why;
         if (!screen::AddLocaleEntry(&roots, key, text, &why) &&
             why != "the locale already has that key") {
@@ -3340,8 +3391,10 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
     if (!edit("ui/recommendations/gen/recommendations.dtb", [&](auto& roots) {
           return AddPortraitRecommendationsLayout(&roots, songs_aspect, error);
         })) return false;
-    if (!read(ui::input_font::kRecommendationsRecord, &source, error) ||
-        !ui::input_font::PreparePortraitRecommendations(source, buttons, songs_aspect, &scene, error)) return false;
+    std::vector<uint8_t> header_arrows;
+    if (!read("ui/background/gen/background.milo_xbox", &header_arrows, error) ||
+        !read(ui::input_font::kRecommendationsRecord, &source, error) ||
+        !ui::input_font::PreparePortraitRecommendations(source, buttons, header_arrows, songs_aspect, &scene, error)) return false;
     built[ui::input_font::kRecommendationsRecord] = std::move(scene);
     if (!read("ui/resource/lists/gen/list_recommendations_albums.milo_xbox", &source, error) ||
         !ui::input_font::PreparePortraitRecommendationList(source, songs_aspect, &scene, error)) return false;

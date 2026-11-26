@@ -4,6 +4,7 @@
 #include "input/native_mesh.h"
 #include "input/native_list_draw.h"
 #include "input/touch_scroll.h"
+#include "input/reading_viewport.h"
 #include "hooks/hud_layout_runtime.h"
 #include "input/inline_help.h"
 #include "input/dialog_prompts.h"
@@ -71,6 +72,7 @@ REX_EXTERN(sub_824BC7D0);       // UILabel::SetText
 REX_EXTERN(__imp__sub_824BC7D0);
 REX_EXTERN(__imp__sub_824DC2F0); // UISlider drawable traversal
 REX_EXTERN(__imp__sub_8229FD60); // RndText: cumulative UTF-16 advances during normal layout
+REX_EXTERN(sub_8220DB30);       // RndMesh::Sync
 
 namespace rb_blitz::input {
 namespace {
@@ -145,6 +147,16 @@ struct TouchTarget {
 TouchTarget touch_target;
 TouchListScroll touch_scroll;
 bool touch_captured = false;
+struct ReadingTarget {
+  uint32_t screen = 0, focus = 0, frame = 0;
+  int selection = -1;
+  MenuBounds bounds;
+  float offset = 0, maximum = 0, pitch = 0;
+  bool captured = false;
+  TouchListScroll scroll;
+};
+ReadingTarget reading_target;
+constexpr float kReadingLineStep = 18;
 thread_local uint32_t touch_draw_list = 0;
 thread_local float touch_draw_position = 0;
 double TouchTime() {
@@ -154,6 +166,7 @@ void ResetTouchScroll() {
   touch_target = {};
   touch_scroll.Reset();
   touch_captured = false;
+  reading_target = {};
 }
 struct PowerupInfoTarget {
   uint32_t screen = 0, focus = 0, frame = 0;
@@ -479,27 +492,54 @@ void QueueMenuMouse(MouseAction action, MenuPoint point) {
 void QueueMenuWheel(int delta, MenuPoint point) {
   std::lock_guard lock(mutex);
   touch_scroll.Reset(); touch_captured = false;
+  reading_target.scroll.Reset(); reading_target.captured = false;
   menu_pointer = point;
   if (MouseSupportEnabled()) queue.Wheel(delta, point);
 }
 void QueueMenuScrollbar(MouseAction action, MenuPoint point) {
   std::lock_guard lock(mutex);
   touch_scroll.Reset(); touch_captured = false;
+  reading_target.scroll.Reset(); reading_target.captured = false;
   if (MouseSupportEnabled()) queue.Scrollbar(action, point);
 }
 void CancelMenuTouch() {
   std::lock_guard lock(mutex);
   touch_scroll.Reset(); touch_captured = false;
+  reading_target.scroll.Reset(); reading_target.captured = false;
 }
 bool QueueMenuTouch(MenuTouchPhase phase, MenuPoint point, float x, float y, double age_seconds) {
   std::lock_guard lock(mutex);
   const double now = TouchTime() - std::max(0.0, age_seconds);
   if (phase == MenuTouchPhase::kCancel || !queue.enabled()) {
-    const bool consumed = touch_captured;
+    const bool consumed = touch_captured || reading_target.captured;
     touch_scroll.Reset(); touch_captured = false;
+    reading_target.scroll.Reset(); reading_target.captured = false;
     return consumed;
   }
+  const bool reading_fresh = reading_target.screen == current_screen &&
+      reading_target.focus == current_focus && reading_target.frame + 1 >= observed_menu_frame;
+  if (phase == MenuTouchPhase::kDown) reading_target.captured = false;
+  if (phase == MenuTouchPhase::kDown && reading_fresh && reading_target.pitch > 0 &&
+      reading_target.bounds.Contains(point)) {
+    touch_scroll.Reset(); touch_captured = false;
+    reading_target.scroll.Begin({x, y, point.y / reading_target.pitch},
+        reading_target.offset / kReadingLineStep, reading_target.maximum / kReadingLineStep, now);
+    reading_target.captured = true;
+    menu_pointer = point;
+    return true;
+  }
+  if (reading_target.captured) {
+    const TouchScrollPoint at{x, y, point.y / reading_target.pitch};
+    if (phase == MenuTouchPhase::kMove) reading_target.scroll.Move(at, now);
+    else if (phase == MenuTouchPhase::kUp) {
+      reading_target.scroll.End(at, now);
+      reading_target.captured = false;
+    }
+    menu_pointer = point;
+    return true;
+  }
   if (phase == MenuTouchPhase::kDown) {
+    reading_target.scroll.Reset();
     if (!touch_target.list || touch_target.list != current_focus ||
         touch_target.frame + 1 < observed_menu_frame ||
         !(touch_target.pitch > 0) || !touch_target.bounds.Contains(point)) {
@@ -629,6 +669,13 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   std::optional<float> touch_position;
   {
     std::lock_guard lock(mutex);
+    if (!queue.enabled() || !last_device::Current().using_touch ||
+        reading_target.frame + 1 < frame_number) {
+      reading_target.scroll.Reset(); reading_target.captured = false;
+    }
+    reading_target.scroll.Advance(TouchTime());
+    if (reading_target.scroll.OwnsView())
+      reading_target.offset = reading_target.scroll.Position() * kReadingLineStep;
     if (!queue.enabled() || !last_device::Current().using_touch || !fresh ||
         touch_target.list != current_focus) {
       touch_scroll.Reset(); touch_captured = false;
@@ -685,6 +732,16 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
     }
   }
   if (!event) return;
+  if (event->action == MouseAction::kUp || event->action == MouseAction::kDown) {
+    std::lock_guard lock(mutex);
+    if (reading_target.screen == current_screen && reading_target.focus == current_focus &&
+        reading_target.frame + 1 == frame_number && reading_target.bounds.Contains(event->point)) {
+      reading_target.offset = std::clamp(reading_target.offset +
+          (event->action == MouseAction::kDown ? 1 : -1) * 2 * kReadingLineStep,
+          0.f, reading_target.maximum);
+      return;
+    }
+  }
   const bool powerup_info = powerup_info_screen == current_screen &&
       powerup_info_frame + 1 == frame_number;
   // Footer labels act on the existing selection. Handle them before row hit
@@ -956,6 +1013,8 @@ std::vector<InlineHelpEntry> PortraitMenuHintEntries(PPCContext& ctx, uint8_t* b
   const auto header = ObjectBase(base, owner);
   const auto dir = header ? U32(base, header + 36) : 0;
   if (RecommendationFooter(ctx, base, dir)) return RecommendationFooterEntries(entries);
+  if (PortraitStoreActive() && DrawScreenName() == "store_info_screen" &&
+      ObjectName(base, header) == "store_info.ihp") return RecommendationFooterEntries(entries);
   if (dir && SceneObject(ctx, base, dir, "portrait_powerups.color") &&
       ObjectName(base, header) == "help.ihp") {
     auto ordered = entries;
@@ -1234,7 +1293,10 @@ void DrawPortraitSongRow(PPCContext& ctx, uint8_t* base) {
   const auto widget = U32(base, ctx.r3.u32 + 4);
   const bool messages = DrawScreenName() == "inbox_screen";
   const auto inbox = ui::PortraitMessages(ui::screen::CurrentMenuConfiguration().portrait_aspect);
-  if (!PortraitListRowField(DrawScreenName(), ObjectName(base, ObjectBase(base, widget)))) return;
+  // UIListWidget exposes its Hmx::Object directly; UIComponents need the
+  // virtual-base adjustment. Accept the field from either representation.
+  if (!PortraitListRowField(DrawScreenName(), ObjectName(base, widget)) &&
+      !PortraitListRowField(DrawScreenName(), ObjectName(base, ObjectBase(base, widget)))) return;
   if (!label || drawing->painted_rows.contains(drawing->row)) return;
   const auto text = U32(base, label + 80);
   if (!text || !base[text]) return;
@@ -1454,7 +1516,24 @@ bool DrawPortraitReadingText(PPCContext& ctx, uint8_t* base, uint32_t label, std
   if (!settings::InterfacePortraitEnabled()) return false;
   float x = 0, z = 0, available_width = 0, available_height = 0;
   const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
-  if (DrawScreenName() == "inbox_screen" && (name == "subject.lbl" || name == "message.lbl")) {
+  const auto header = ObjectBase(base, label);
+  const auto dir = header ? U32(base, header + 36) : 0;
+  if (name == "error.lbl" && dir && SceneObject(ctx, base, dir, "portrait_dialog_panel.mesh")) {
+    const auto dialog = ui::PortraitStoreDialog(aspect);
+    x = -dialog.TextWidth() / 2; z = dialog.text_top;
+    available_width = dialog.TextWidth(); available_height = dialog.text_height;
+  } else if (PortraitStoreActive() && DrawScreenName() == "store_info_screen" && dir &&
+             SceneObject(ctx, base, dir, "portrait_store_info.mesh")) {
+    const auto layout = ui::PortraitSongs(aspect);
+    x = -layout.width / 2 + 8; available_width = layout.width - 16;
+    if (name == "song.lbl") { z = 140; available_height = 36; }
+    else if (name == "drm.lbl") { z = 100; available_height = 22; }
+    else if (name == "rating.lbl") { z = 72; available_height = 18; }
+    else if (name == "rating_description.lbl") { z = 52; available_height = 18; }
+    else if (name == "cost.lbl") { z = 32; available_height = 18; }
+    else if (name == "cost_ps3.lbl") { z = 12; available_height = 18; }
+    else return false;
+  } else if (DrawScreenName() == "inbox_screen" && (name == "subject.lbl" || name == "message.lbl")) {
     const auto layout = ui::PortraitMessages(aspect);
     const bool subject = name == "subject.lbl";
     x = -layout.width / 2 + 10; z = subject ? layout.subject_top : layout.body_top;
@@ -1462,15 +1541,16 @@ bool DrawPortraitReadingText(PPCContext& ctx, uint8_t* base, uint32_t label, std
     available_height = subject ? layout.subject_height : layout.body_height;
   } else if (DrawScreenName() == "recommendation_screen") {
     const auto header = ObjectBase(base, label);
-    if (!header || !RecommendationFooter(ctx, base, U32(base, header + 36))) return false;
+    if (!header || (name != "rec_type.lbl" && !RecommendationFooter(ctx, base, U32(base, header + 36)))) return false;
     const auto layout = ui::PortraitRecommendations(aspect);
     x = -layout.width / 2 + 10; available_width = layout.width - 20;
-    if (name == "song_title.lbl") { z = layout.title_top; available_height = layout.title_height; }
+    if (name == "rec_type.lbl") { z = layout.TypeZ() + 6; available_height = 16; }
+    else if (name == "song_title.lbl") { z = layout.title_top; available_height = layout.title_height; }
     else if (name == "song_artist.lbl") { z = layout.artist_top; available_height = layout.artist_height; }
     else if (name == "song_info.lbl") { z = layout.info_top; available_height = layout.info_height; }
     else if (name == "description.lbl") { z = layout.reason_top; available_height = layout.reason_height; }
     else if (name == "lb_title.lbl") { z = layout.leaderboard_title_top; available_height = 12; }
-    else if (name == "rank_first.lbl" || name == "unavailablel.lbl") { z = -136; available_height = 24; }
+    else if (name == "rank_first.lbl" || name == "unavailablel.lbl") { z = layout.leaderboard_z; available_height = 24; }
     else if (name == "portrait_rec_empty.lbl") { z = 90; available_height = 48; }
     else if (name == "portrait_rec_position.lbl") { x = layout.width / 2 - 52; z = 154; available_width = 44; available_height = 12; }
     else return false;
@@ -1493,8 +1573,11 @@ bool DrawPortraitReadingText(PPCContext& ctx, uint8_t* base, uint32_t label, std
   std::memcpy(prior.data(), base + world, prior.size());
   rex::ScopeGuard restore([&] { std::memcpy(base + world, prior.data(), prior.size()); });
   const auto fit = hooks::PortraitDrawFit();
-  const float scale = CalibrationTextFit(std::abs(F32(base, world)) * width,
-      std::abs(F32(base, world + 40)) * height, available_width * fit.scale, available_height * fit.scale);
+  const bool reading = DrawScreenName() == "inbox_screen" && name == "message.lbl";
+  const float scale = reading ? std::min(1.f, available_width * fit.scale /
+      std::max(std::abs(F32(base, world)) * width, 1.f)) :
+      CalibrationTextFit(std::abs(F32(base, world)) * width,
+          std::abs(F32(base, world + 40)) * height, available_width * fit.scale, available_height * fit.scale);
   for (uint32_t row = 0; row < 3; ++row)
     for (uint32_t column = 0; column < 3; ++column)
       Float(base, world + row * 16 + column * 4, F32(base, world + row * 16 + column * 4) * scale);
@@ -1502,7 +1585,128 @@ bool DrawPortraitReadingText(PPCContext& ctx, uint8_t* base, uint32_t label, std
       F32(base, world) * left - F32(base, world + 32) * top);
   Float(base, world + 56, fit.Z(z) + drawing_panel_translation.y -
       F32(base, world + 8) * left - F32(base, world + 40) * top);
+  if (reading && ink) {
+    const float text_scale = std::abs(F32(base, world + 40)) / fit.scale;
+    if (!(text_scale > 0)) { __imp__sub_824BC668(ctx, base); return true; }
+    const float maximum = std::max(0.f, height * text_scale - available_height);
+    float offset = 0;
+    // Project the fixed reading strip before translating its overflowing text.
+    const auto rectangle = label + 144;
+    std::array<uint8_t, 16> prior_rectangle{};
+    std::memcpy(prior_rectangle.data(), base + rectangle, prior_rectangle.size());
+    Float(base, rectangle, left);
+    Float(base, rectangle + 4, top - available_height / text_scale);
+    Float(base, rectangle + 8, available_width / text_scale);
+    Float(base, rectangle + 12, available_height / text_scale);
+    const auto bounds = ProjectLabel(ctx, base, label);
+    std::memcpy(base + rectangle, prior_rectangle.data(), prior_rectangle.size());
+    if (bounds && current_screen_name == "inbox_screen" && current_panel_name == "inbox_panel" &&
+        !current_input_scope) {
+      static thread_local std::string previous_text;
+      const auto chars = U32(base, label + 80);
+      const std::string text = chars ? std::string(reinterpret_cast<char*>(base + chars),
+          strnlen(reinterpret_cast<char*>(base + chars), 2048)) : std::string{};
+      const int selection = current_focus ? SelectedRow(ctx, base, current_focus) : -1;
+      std::lock_guard lock(mutex);
+      if (text != previous_text || reading_target.screen != current_screen ||
+          reading_target.focus != current_focus || reading_target.selection != selection ||
+          reading_target.frame + 1 < frame_number) {
+        reading_target = {};
+        previous_text = text;
+      }
+      reading_target.screen = current_screen; reading_target.focus = current_focus;
+      reading_target.selection = selection;
+      reading_target.frame = frame_number; reading_target.bounds = *bounds;
+      reading_target.maximum = maximum;
+      reading_target.offset = std::clamp(reading_target.offset, 0.f, maximum);
+      reading_target.pitch = (bounds->bottom - bounds->top) * kReadingLineStep / available_height;
+      reading_target.scroll.Limit(maximum / kReadingLineStep);
+      offset = reading_target.offset;
+    }
+    Float(base, world + 56, F32(base, world + 56) + offset * fit.scale);
+    if (maximum > 0) {
+      const auto clipped = ReadingGlyphsOutside(label, top - (offset + available_height) / text_scale,
+          top - offset / text_scale,
+          [base](uint32_t at) { return U32(base, at); },
+          [base](uint32_t at) { return F32(base, at); });
+      if (clipped) {
+        std::unordered_set<uint32_t> meshes;
+        for (const auto& glyph : *clipped) {
+          for (uint32_t corner = 0; corner < 4; ++corner)
+            Float(base, glyph.vertices + corner * 96, glyph.x[0]);
+          meshes.insert(glyph.mesh);
+        }
+        const auto sync = [&] {
+          for (const auto mesh : meshes) {
+            GuestCall call(ctx, base);
+            // Sync positions while retaining the CPU vertices used for restoration.
+            rex::ppc::Call<void>(call.ctx, base, sub_8220DB30, mesh, uint32_t(0x201));
+          }
+        };
+        sync();
+        rex::ScopeGuard restore_glyphs([&] {
+          for (const auto& glyph : *clipped)
+            for (uint32_t corner = 0; corner < 4; ++corner)
+              Float(base, glyph.vertices + corner * 96, glyph.x[corner]);
+          sync();
+        });
+        __imp__sub_824BC668(ctx, base);
+        return true;
+      }
+    }
+  }
   __imp__sub_824BC668(ctx, base);
+  return true;
+}
+
+bool DrawPortraitStoreDialogControl(PPCContext& ctx, uint8_t* base, uint32_t label,
+                                    std::string_view name) {
+  if (!settings::InterfacePortraitEnabled() ||
+      (name != "continue.lbl" && name != "portrait_dialog_close.lbl")) return false;
+  const auto header = ObjectBase(base, label);
+  const auto dir = header ? U32(base, header + 36) : 0;
+  if (!dir || !SceneObject(ctx, base, dir, "portrait_dialog_panel.mesh")) return false;
+  const auto style = rex::ppc::Call<uint32_t>(ctx, base, sub_824BA9F8, label, uint32_t(0));
+  if (!(F32(base, style + 36) > 0)) return true;
+  const auto text = U32(base, label + 80);
+  if (!text || !base[text]) return true;
+  if (base[label + 178])
+    rex::ppc::Call<void>(ctx, base, sub_824BAF98, label, uint32_t(0));
+  const auto ink = InlineHelpGlyphBounds(label,
+      [base](uint32_t at) { return U32(base, at); },
+      [base](uint32_t at) { return F32(base, at); });
+  if (!ink) return true;
+  const bool close = name == "portrait_dialog_close.lbl";
+  const std::string stem = close ? "portrait_dialog_close" : "portrait_dialog_action";
+  const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false);
+  const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
+  if (menu_available && dir == current_panel_dir && dialog_scope == MenuDialogScope::kPanel)
+    if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt) {
+      std::lock_guard lock(mutex);
+      hint_targets.push_back({current_screen, current_focus, frame_number, *bounds,
+                              MenuHintButton(close ? 2 : 1), current_input_scope});
+    }
+  const auto dialog = ui::PortraitStoreDialog(ui::screen::CurrentMenuConfiguration().portrait_aspect);
+  const auto fit = hooks::PortraitDrawFit();
+  const auto transform = label + 72 + U32(base, U32(base, label + 72) + 16);
+  const auto world = WorldTransformForDraw(transform,
+      [base](uint32_t at) { return base[at]; },
+      [&](uint32_t object) { return rex::ppc::Call<uint32_t>(ctx, base, sub_821F13D0, object); });
+  std::array<uint8_t, 64> prior{};
+  std::memcpy(prior.data(), base + world, prior.size());
+  rex::ScopeGuard restore([&] { std::memcpy(base + world, prior.data(), prior.size()); });
+  const float scale = std::min({1.f,
+      (close ? dialog.close_size - 12 : dialog.ActionWidth() - 12) * fit.scale /
+          std::max(std::abs(F32(base, world)) * ((*ink)[2] - (*ink)[0]), 1.f),
+      20 * fit.scale / std::max(std::abs(F32(base, world + 40)) * ((*ink)[3] - (*ink)[1]), 1.f)});
+  for (uint32_t row = 0; row < 3; ++row)
+    for (uint32_t column = 0; column < 3; ++column)
+      Float(base, world + row * 16 + column * 4, F32(base, world + row * 16 + column * 4) * scale);
+  const float cx = ((*ink)[0] + (*ink)[2]) / 2, cz = ((*ink)[1] + (*ink)[3]) / 2;
+  Float(base, world + 48, fit.X(close ? dialog.CloseX() : 0) - F32(base, world) * cx - F32(base, world + 32) * cz);
+  Float(base, world + 56, fit.Z(close ? dialog.close_z : dialog.action_z) - F32(base, world + 8) * cx - F32(base, world + 40) * cz);
+  if (hovered) DrawBlackMenuCaption(ctx, base, label, SceneObject(ctx, base, dir, "portrait_caption_black.color"));
+  else __imp__sub_824BC668(ctx, base);
   return true;
 }
 
@@ -1512,6 +1716,7 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   DrawPresetArrows(ctx, base, label);
   const bool portrait = settings::InterfacePortraitEnabled();
   const auto name = ObjectName(base, ObjectBase(base, label));
+  if (DrawPortraitStoreDialogControl(ctx, base, label, name)) return;
   if (DrawPortraitReadingText(ctx, base, label, name)) return;
   const bool messages = portrait && DrawScreenName() == "inbox_screen";
   const bool recommendations = portrait && DrawScreenName() == "recommendation_screen";
@@ -1522,12 +1727,10 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   const bool powerup_name = powerups && name == "name.lbl";
   const bool rec_navigation = recommendations &&
       (name == "portrait_rec_previous.lbl" || name == "portrait_rec_next.lbl");
-  uint32_t rec_hover_color = 0;
   if (rec_navigation) {
     const auto dir = U32(base, ObjectBase(base, label) + 36);
     const auto stem = name.substr(0, name.size() - 4);
-    if (DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false))
-      rec_hover_color = SceneObject(ctx, base, dir, "portrait_caption_black.color");
+    DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false, false);
     if (current_panel_name == "recommendation_panel" && !current_input_scope && current_focus &&
         U32(base, current_focus + 224) == U32(base, current_focus + 228)) {
       const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
@@ -1537,6 +1740,10 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
             uint16_t(name == "portrait_rec_previous.lbl" ? 0x0004 : 0x0008), 0});
       }
     }
+    const auto mesh = SceneMesh(ctx, base, dir, (stem + "_arrow.mesh").c_str());
+    if (mesh) if (auto* draw = rex::ppc::ResolveFunction(U32(base, U32(base, mesh) + 24)))
+      rex::ppc::Call<void>(ctx, base, *draw, mesh);
+    return;
   }
   uint32_t powerup_hover_color = 0;
   if (powerup_name) { powerup_info_screen = current_screen; powerup_info_frame = frame_number; }
@@ -1628,17 +1835,6 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   rex::ScopeGuard restore([&] { std::memcpy(base + world, prior.data(), prior.size()); });
   float x = F32(base, world + 48), z = F32(base, world + 56);
   const auto portrait_draw_fit = hooks::PortraitDrawFit();
-  if (rec_navigation) {
-    const auto layout = ui::PortraitRecommendations(ui::screen::CurrentMenuConfiguration().portrait_aspect);
-    x = portrait_draw_fit.X((name == "portrait_rec_next.lbl" ? 1.f : -1.f) * layout.NavigationX());
-    z = portrait_draw_fit.Z(layout.carousel_z);
-    const float scale = CalibrationTextFit(std::abs(F32(base, world)) * visible_width,
-        std::abs(F32(base, world + 40)) * visible_height,
-        (layout.navigation_size - 6) * portrait_draw_fit.scale, 20 * portrait_draw_fit.scale);
-    for (uint32_t row = 0; row < 3; ++row)
-      for (uint32_t column = 0; column < 3; ++column)
-        Float(base, world + row * 16 + column * 4, F32(base, world + row * 16 + column * 4) * scale);
-  }
   if (song_tool || song_tab >= 0) {
     const auto aspect = ui::screen::CurrentMenuConfiguration().portrait_aspect;
     const auto layout = ui::PortraitSongs(aspect);
@@ -1749,8 +1945,7 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
   if (song_tab >= 0 && menu_available && !current_input_scope)
     if (const auto bounds = ProjectLabel(ctx, base, label))
       header_geometry[song_tab] = {current_screen, current_focus, frame_number, *bounds};
-  if (rec_hover_color) DrawBlackMenuCaption(ctx, base, label, rec_hover_color);
-  else if (powerup_hover_color) DrawBlackMenuCaption(ctx, base, label, powerup_hover_color);
+  if (powerup_hover_color) DrawBlackMenuCaption(ctx, base, label, powerup_hover_color);
   else DrawMenuHintLabel(ctx, base, label);
 }
 
@@ -1916,6 +2111,11 @@ void UpdateTouchPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
 // Defined after DrawList; declared here because the draw is what discovers a new list.
 void DrawList(PPCContext& ctx, uint8_t* base) {
   const uint32_t list = ctx.r5.u32 - 176;
+  // The details footer invokes the native focused action list. Keep that list
+  // enabled and focused, but draw its actions only through InlineHelp.
+  if (settings::InterfacePortraitEnabled() && PortraitStoreActive() &&
+      DrawScreenName() == "store_info_screen" &&
+      ObjectName(base, ObjectBase(base, list)) == "buttons.lst") return;
   // Record the focused list's identity for the help caption observer (src/hooks/help_observer.cpp)
   // before the mouse-specific early-outs: this is the only place a list is *positively* identified
   // as the focused component by the engine itself, and the observer must not depend on the mouse
@@ -2054,7 +2254,11 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   const bool touch_list = MenuTouchScrollEligible(DrawScreenName(), dialog_scope, geometry.horizontal);
   TouchTarget target;
   if (touch_list && EnsureRailMap(ctx, base, list) && rail_map.max_first > 0) {
-    const float pitch = RailPitch(geometry.rows);
+    float pitch = RailPitch(geometry.rows);
+    if (!(pitch > 0) && settings::InterfacePortraitEnabled() && DrawScreenName() == "inbox_screen") {
+      const auto layout = ui::PortraitMessages(ui::screen::CurrentMenuConfiguration().portrait_aspect);
+      pitch = (geometry.bounds.bottom - geometry.bounds.top) * layout.row_step / layout.row_height;
+    }
     if (pitch > 0)
       target = {list, frame_number, geometry.bounds, pitch,
                 int(U32(base, list + 224)), rail_map.max_first};
@@ -2086,8 +2290,10 @@ void DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t drawable,
   const auto previous = drawing_panel_screen;
   const auto previous_translation = drawing_panel_translation;
   if (settings::InterfacePortraitEnabled() && ui::PortraitLibraryTransition(current_screen_name)) {
-    const auto dir = ObjectBase(base, drawable);
-    const auto name = ObjectName(base, dir);
+    const auto dir = PanelDirectoryFromDrawable(drawable,
+        [base](uint32_t address) { return U32(base, address); });
+    if (!dir) { draw(ctx, base); return; }
+    const auto name = ObjectName(base, ObjectBase(base, dir));
     drawing_panel_screen = ui::PortraitLibraryPanelScreen(name,
         name == "songselect" && !SceneObject(ctx, base, dir, "portrait_tab_songs.lbl"));
     drawing_panel_translation = {};

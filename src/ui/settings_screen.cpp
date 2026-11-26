@@ -1112,8 +1112,7 @@ std::vector<PanelSpec> AllPanels() {
   out.push_back(PanelSpec{"settings_achievements_panel", "settings_achievements_screen", "settings_general_screen", MenuPanels(), {
       BoolRow("settings_unlock_all", "general.unlock_all", "Unlock All", "Unlock all content.", true),
       ActionRow("settings_unlock_online", "general.unlock_online_achievements", "Unlock Online Achievements", "Unlock online-only achievements.", true),
-      InvertedBoolRow("settings_hide_achievements", "general.hide_achievements", "Show Achievements", "Toggle popups; progress is saved."),
-      VisibilityRow("settings_mm_achievements", "interface.hidden_main_menu.splash_achievements", "Main Menu Shortcut", "Show achievements.")
+      InvertedBoolRow("settings_hide_achievements", "general.hide_achievements", "Show Achievements", "Toggle popups; progress is saved.")
   }});
 
   // Audio retains only the native sliders and save handlers; music features live under Game.
@@ -1370,6 +1369,7 @@ std::vector<PanelSpec> AllPanels() {
       ElementVisibilityRow("settings_dlc_refresh", "general.refresh_music_library", "Refresh Songs", "Show song rescan."),
       VisibilityRow("settings_mm_download_content", "interface.hide_download_content", "Download Content", "Full game: show DLC."),
       VisibilityRow("settings_mm_leaderboard", "interface.hidden_main_menu.splash_leaderboard", "Leaderboards", "Show Leaderboards."),
+      VisibilityRow("settings_mm_achievements", "interface.hidden_main_menu.splash_achievements", "Achievements", "Show achievements shortcut."),
       VisibilityRow("settings_mm_exit", "interface.hide_exit_game", "Exit Game", "Show Exit Game."),
       VisibilityRow("settings_mm_upgrade", "interface.hidden_main_menu.splash_upgrade", "Unlock Full Game", "Show upgrade; Demo only.")
   }});
@@ -3825,7 +3825,7 @@ bool ReplaceLocaleEntry(std::vector<dtb::Node>* nodes, const std::string_view ke
 
 // Every locale entry the surface adds, again derived from the table. A row with an empty label is a
 // retail row symbol whose text the installed locale already carries, so nothing is added for it.
-std::vector<std::pair<std::string, std::string>> Labels() {
+std::vector<std::pair<std::string, std::string>> Labels(const bool portrait) {
   std::vector<std::pair<std::string, std::string>> out;
 
   out.emplace_back("settings_linked_message", "This change also changes linked settings. Continue?");
@@ -3912,6 +3912,38 @@ std::vector<std::pair<std::string, std::string>> Labels() {
   // row carries its string.
   if (g_configuration.rhythmverse_row) {
     add(kRhythmVerseRow, kRhythmVerseLabel);
+  }
+  if (portrait) {
+    // Match complete names, including their uppercase page titles, and retain
+    // state/availability suffixes. Main-menu entries keep their own wording.
+    static constexpr std::pair<std::string_view, std::string_view> compact[] = {
+        {"Achievements & Unlocks", "Unlocks"},
+        {"Unlock Online Achievements", "Unlock Online Ac."},
+        {"Download Content", "Download Cont."},
+        {"Unlock Full Game", "Unlock Game"},
+        {"Main Menu Shortcut", "Shortcut"},
+        {"Gold Star Progress", "Star Progress"},
+        {"Song Progress Bar", "Progress Bar"},
+        {"Force Skybox", "Skybox"},
+        {"Force Plot", "Plot"},
+        {"Controller Layout", "Layout"},
+        {"Background Music Play", "Music Playback"},
+        {"Music Library Options", "Library Options"},
+        {"Menu Music Navigation", "Music Navigation"},
+        {"DLC Loading Threads", "Loading Threads"},
+    };
+    for (auto& [key, text] : out) {
+      if (!key.starts_with("settings_")) continue;
+      const bool title = key.starts_with("settings_title_");
+      for (const auto& [full, short_name] : compact) {
+        const std::string before = title ? UpperAscii(std::string(full)) : std::string(full);
+        if (text == before || text.starts_with(before + ": ")) {
+          text.replace(0, before.size(), title ? UpperAscii(std::string(short_name)) :
+                                               std::string(short_name));
+          break;
+        }
+      }
+    }
   }
   return out;
 }

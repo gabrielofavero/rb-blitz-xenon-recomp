@@ -28,6 +28,20 @@ std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable);
 // Transition screens draw both library panels; each retains its own layout identity.
 void DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t drawable,
                        void (*draw)(PPCContext&, uint8_t*));
+// PanelDir::DrawShowing receives the RndDrawable view at ObjectDir +156.
+// FindObject requires ObjectDir, while names belong to its virtual Hmx::Object.
+// The native draw caller (8247E224) checks the same shared virtual base.
+template <class ReadWord>
+uint32_t PanelDirectoryFromDrawable(uint32_t drawable, ReadWord word) {
+  if (drawable < 156) return 0;
+  const auto directory = drawable - 156;
+  const auto object_base = [&](uint32_t view) {
+    const auto table = word(view + 4);
+    return table ? view + 4 + word(table + 4) : 0;
+  };
+  const auto object = object_base(drawable);
+  return object && object_base(directory) == object ? directory : 0;
+}
 // The presented rectangle inside a `w` x `h` frame: the part of the window the guest's frame
 // occupies once the presenter has applied the video mode's aspect and (optionally) the overscan
 // safe area. MenuPointer and MenuPointToWindow share it, so a pointer and an overlay drawn from

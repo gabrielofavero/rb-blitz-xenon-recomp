@@ -2,6 +2,7 @@
 #include "check.h"
 #include "input/native_menu.h"
 #include "input/touch_scroll.h"
+#include "input/reading_viewport.h"
 #include "input/inline_help.h"
 #include "input/dialog_prompts.h"
 #include "input/pad_packet.h"
@@ -10,6 +11,27 @@ using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("transition scene lookups use ObjectDir rather than its drawable or virtual object base");
+  {
+    constexpr uint32_t directory = 0x1000, drawable = directory + 156, object = 0x1300;
+    std::unordered_map<uint32_t, uint32_t> words{
+        {directory + 4, 0x2000}, {drawable + 4, 0x2100},
+        {0x2004, object - directory - 4}, {0x2104, object - drawable - 4}};
+    const auto read = [&](uint32_t address) { return words.at(address); };
+    const auto lookup_directory = PanelDirectoryFromDrawable(drawable, read);
+    CHECK_EQ(lookup_directory, directory);
+    CHECK_TRUE(lookup_directory != drawable && lookup_directory != object);
+    // ObjectDir's hash table is at +8; the virtual object has unrelated bytes
+    // there. Sending it to FindObject reproduces the invalid hash-table read.
+    words[directory + 8] = 0x3000;
+    words[object + 8] = 0xFFFFFFFF;
+    CHECK_EQ(read(lookup_directory + 8), 0x3000u);
+    words[0x2004] += 4;
+    CHECK_EQ(PanelDirectoryFromDrawable(drawable, read), 0u);
+    words[directory + 4] = 0;
+    CHECK_EQ(PanelDirectoryFromDrawable(drawable, read), 0u);
+    CHECK_EQ(PanelDirectoryFromDrawable(0, read), 0u);
+  }
   const auto scroll_point = [](float y, float x = 100.f, float pitch = 40.f) {
     return TouchScrollPoint{x, y, y / pitch};
   };
@@ -198,6 +220,23 @@ int main() {
     measured = InlineHelpGlyphBounds(label, read_word, read_float);
     CHECK_TRUE(measured.has_value());
     CHECK_TRUE((*measured == std::array<float, 4>{10, -4, 30, 8}));
+    // The reading viewport clips both fonts independently and ignores unused
+    // mesh capacity. Scrolling the strip exposes the previously hidden glyph.
+    words[batches + 20] = 1;
+    auto clipped = ReadingGlyphsOutside(label, -5, 9, read_word, read_float);
+    CHECK_TRUE(clipped && clipped->size() == 1);
+    if (clipped && clipped->size() == 1) {
+      CHECK_EQ(clipped->front().mesh, icon_mesh);
+      CHECK_EQ(clipped->front().vertices, icon_vertices);
+      CHECK_TRUE((clipped->front().x == std::array<float, 4>{-9, 5, -9, 5}));
+    }
+    clipped = ReadingGlyphsOutside(label, -9, 11, read_word, read_float);
+    CHECK_TRUE(clipped && clipped->empty());
+    clipped = ReadingGlyphsOutside(label, -9, 0, read_word, read_float);
+    CHECK_TRUE(clipped && clipped->size() == 2);
+    CHECK_FALSE(ReadingGlyphsOutside(label, 10, 0, read_word, read_float));
+    CHECK_FALSE(ReadingGlyphsOutside(label, NAN, 0, read_word, read_float));
+    words[batches + 20] = 0;
     words[batches + 8] = 2;
     for (uint32_t i = 4; i < 8; ++i) {
       floats[text_vertices + i * 96] = 0;
@@ -211,6 +250,7 @@ int main() {
     floats[text_vertices] = 10;
     words[batches + 8] = 3; // invalid live count exceeds the allocation
     CHECK_FALSE(InlineHelpGlyphBounds(label, read_word, read_float));
+    CHECK_FALSE(ReadingGlyphsOutside(label, -9, 11, read_word, read_float));
     CHECK_FALSE(InlineHelpGlyphBounds(0, read_word, read_float));
   }
   BeginCase("pause and native song confirmations retain the gameplay resolution");
@@ -383,20 +423,20 @@ int main() {
     CHECK_TRUE(CalibrationFooterCaption(true, "inline_help_back") == "inline_help_back");
     CHECK_EQ(calibration.size(), 3); // Guest navigation retains its complete native action list.
   }
-  BeginCase("recommendation footer keeps Confirm and Back before secondary actions without dropping records");
+  BeginCase("recommendation footer shows only Back then Select with their original guest records");
   {
     const std::vector<InlineHelpEntry> actions{{10, 4, 100}, {20, 2, 200}, {30, 5, 300}, {40, 1, 400}, {50, 3, 500}};
     for (unsigned mask = 1; mask < 32; ++mask) {
       std::vector<InlineHelpEntry> visible;
       for (size_t i = 0; i < actions.size(); ++i) if (mask & (1u << i)) visible.push_back(actions[i]);
       const auto ordered = RecommendationFooterEntries(visible);
-      CHECK_EQ(ordered.size(), visible.size());
+      CHECK_EQ(ordered.size(), size_t(bool(mask & 2)) + size_t(bool(mask & 8)));
       for (const auto& entry : visible)
         CHECK_EQ(std::count_if(ordered.begin(), ordered.end(), [&](const auto& n) {
           return n.label == entry.label && n.action == entry.action && n.record == entry.record;
-        }), 1);
-      if (mask & 8) CHECK_EQ(ordered[0].action, 1u);
-      if (mask & 2) CHECK_EQ(ordered[(mask & 8) ? 1 : 0].action, 2u);
+        }), entry.action == 1 || entry.action == 2 ? 1 : 0);
+      if (mask & 2) CHECK_EQ(ordered[0].action, 2u);
+      if (mask & 8) CHECK_EQ(ordered[(mask & 2) ? 1 : 0].action, 1u);
     }
     CHECK_EQ(actions[0].label, 10u);
   }

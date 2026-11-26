@@ -99,14 +99,27 @@ inline PortraitSongsLayout PortraitSongs(float aspect) {
   return layout;
 }
 
+struct PortraitStoreDialogLayout {
+  float width;
+  float height = 200, text_top = 46, text_height = 94;
+  float action_z = -76, action_height = 32, close_z = 76, close_size = 36;
+  float TextWidth() const { return width - 28; }
+  float ActionWidth() const { return width * .65f; }
+  float CloseX() const { return width / 2 - 24; }
+};
+
+inline PortraitStoreDialogLayout PortraitStoreDialog(float aspect) {
+  return {PortraitSongs(aspect).width};
+}
+
 struct PortraitMessagesLayout {
   float width;
   float tabs_z = kPortraitHubTitleCenter, list_z = 130, row_step = 48, row_height = 42;
   float icon_size = 28, icon_inset = 22, text_inset = 44;
-  float detail_top = -10, detail_bottom = -179;
-  float subject_top = -19, subject_height = 32;
-  float body_top = -57, body_height = 112;
-  int rows = 3;
+  float detail_top = 101, detail_bottom = -179;
+  float subject_top = 90, subject_height = 32;
+  float body_top = 52, body_height = 221;
+  int rows = 1;
 };
 
 inline PortraitMessagesLayout PortraitMessages(float aspect) {
@@ -116,10 +129,10 @@ inline PortraitMessagesLayout PortraitMessages(float aspect) {
 struct PortraitRecommendationsLayout {
   float width, art_size, navigation_size;
   float tabs_z = kPortraitHubTitleCenter, carousel_z = 104;
-  float title_top = 20, title_height = 30;
-  float artist_top = -16, artist_height = 18, info_top = -38, info_height = 14;
-  float reason_top = -59, reason_height = 43;
-  float leaderboard_title_top = -114, leaderboard_z = -137, leaderboard_step = 17;
+  float title_top = 16, title_height = 30;
+  float artist_top = -24, artist_height = 18, info_top = -46, info_height = 14;
+  float reason_top = -68, reason_height = 43;
+  float leaderboard_title_top = -125, leaderboard_z = -148, leaderboard_step = 17;
   float TypeZ() const { return carousel_z - art_size / 2 - 14; }
   float NavigationX() const { return (width - navigation_size) / 2; }
 };
@@ -195,17 +208,12 @@ inline PortraitCalibrationAction PortraitSongsFooter(float aspect, size_t index,
 
 inline PortraitCalibrationAction PortraitRecommendationsFooter(float aspect, size_t index, size_t count) {
   const float width = PortraitRecommendations(aspect).width;
-  const bool primary = index < 2;
-  const size_t columns = primary ? std::min(count, size_t{2}) : count - 2;
-  const size_t column = primary ? index : index - 2;
-  const float cell = (width - 5 * (columns - 1)) / columns;
-  return {(float(column) - float(columns - 1) / 2) * (cell + 5),
-          primary ? -211.f : -179.f, cell, primary ? 29.f : 25.f};
+  const float cell = (width - 5 * (count - 1)) / count;
+  return {(float(index) - float(count - 1) / 2) * (cell + 5), -211, cell, 29};
 }
 
 inline const char* PortraitRecommendationFooterSurface(size_t index) {
-  constexpr std::array<const char*, 5> names{"portrait_rec_action_0", "portrait_rec_action_1",
-      "portrait_rec_action_2", "portrait_rec_action_3", "portrait_rec_action_4"};
+  constexpr std::array<const char*, 2> names{"portrait_rec_action_0", "portrait_rec_action_1"};
   return index < names.size() ? names[index] : "";
 }
 

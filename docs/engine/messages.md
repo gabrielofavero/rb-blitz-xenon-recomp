@@ -37,6 +37,15 @@ The list's `subject_line` copy call at `0x822D5068` now receives the optional fe
 `notification` label. Other calls to the same copy helper keep the full `title`
 for the detail pane. Both headings retain the published date.
 
+The portrait layout presents one notification row in a dark native card, followed
+immediately by the selected subject and message. The notification list keeps the
+retail provider and selection callbacks; wheel input and touch drags can browse
+additional rows. The message body has its own wheel/touch viewport, retains its
+normal font size, and resets to the top when the selection or body changes.
+Overflowing glyphs are clipped within the reading strip using the existing guest
+font meshes, with their coordinates restored after drawing. The portrait footer
+shows Back alone; the keyboard/controller update action remains available.
+
 ## 2. The provider and its message data
 
 | Fact | Value |
