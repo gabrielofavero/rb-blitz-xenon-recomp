@@ -567,6 +567,9 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
           schema::IsMobile(schema::CurrentReleaseSettings().platform),
           orientation.text == "portrait",
           service_->EffectiveValue(SettingId::kGameplayOrientation).text == "portrait");
+#if defined(RB_BLITZ_IOS)
+      profile_draw_scale_ = 1;
+#endif
       const bool mobile = schema::IsMobile(schema::CurrentReleaseSettings());
       const auto profile_pixels = mobile
           ? service_->RenderScalePixels(SettingId::kInterfaceRenderScale,
@@ -647,6 +650,9 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
             schema::IsMobile(schema::CurrentReleaseSettings().platform),
             service_->EffectiveValue(SettingId::kInterfaceOrientation).text == "portrait",
             service_->EffectiveValue(SettingId::kGameplayOrientation).text == "portrait");
+#if defined(RB_BLITZ_IOS)
+        profile_draw_scale_ = 1;
+#endif
         const auto pixels = mobile
             ? service_->RenderScalePixels(SettingId::kInterfaceRenderScale,
                                       selected.at(SettingId::kInterfaceRenderScale).integer)

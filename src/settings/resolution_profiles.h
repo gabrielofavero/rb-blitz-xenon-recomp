@@ -102,6 +102,17 @@ inline int ResolutionProfileDrawScale(DisplayMode native, bool device,
   return std::max((largest.width + 1919) / 1920, (largest.height + 719) / 720);
 }
 
+// MoltenVK cannot sparsely back the scaled resolve buffer. Keep iOS at 1x
+// (2x alone adds 2 GiB), fitting both orientations before applying quality tiers.
+inline DisplayMode IOSProfilePixels(DisplayMode native, bool portrait, int tenths) {
+  auto source = DeviceProfileSource(native, portrait);
+  if (source.width <= 0 || source.height <= 0) source = {1280, 720};
+  const double fit = std::min({1.0, 1920.0 / source.width, 720.0 / source.height});
+  source = {std::max(1, int32_t(std::lround(source.width * fit))),
+            std::max(1, int32_t(std::lround(source.height * fit)))};
+  return ScaledProfileResolution(source, tenths);
+}
+
 inline bool IsResolutionProfile(SettingId id) {
   return id == SettingId::kInterfaceResolution || id == SettingId::kGameplayResolution ||
          id == SettingId::kInterfaceRenderScale || id == SettingId::kGameplayRenderScale;

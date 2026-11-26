@@ -196,6 +196,8 @@ DisplayMode Service::RenderScalePixels(SettingId id, int tenths) const {
   const bool portrait = schema::IsMobile(release_.platform) &&
       EffectiveValue(id == SettingId::kGameplayRenderScale ? SettingId::kGameplayOrientation
                                                           : SettingId::kInterfaceOrientation).text == "portrait";
+  if (release_.platform == schema::HostPlatform::kIOS)
+    return IOSProfilePixels(ResolutionProfileDisplay(), portrait, tenths);
   return ScaledProfileResolution(DeviceProfileSource(ResolutionProfileDisplay(), portrait), tenths);
 }
 

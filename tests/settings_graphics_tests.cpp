@@ -1203,10 +1203,29 @@ void TestProfileAspectService() {
 }
 
 int main() {
+  BeginCase("iOS profiles stay within the unscaled render budget in both orientations");
+  for (const auto native : {DisplayMode{1206,2622}, {2622,1206}, {2048,2732}, {1080,2400}}) {
+    Service service({}, schema::SettingsForRelease(schema::HostPlatform::kIOS, "test"));
+    service.Boot(nullptr, {}, nullptr);
+    CapabilitySnapshot caps; caps.primary_display_size = native;
+    service.SetCapabilities(caps);
+    for (const auto orientation : {"portrait", "landscape"}) {
+      for (const auto id : {SettingId::kInterfaceOrientation, SettingId::kGameplayOrientation})
+        service.store().document().values[id] = EnumV(orientation);
+      for (int tenths = 5; tenths <= 10; ++tenths) {
+        const auto pixels = IOSProfilePixels(native, orientation == std::string_view("portrait"), tenths);
+        CHECK_TRUE(ProfileGuestFrame(pixels, 1).supported);
+        for (const auto id : {SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale})
+          CHECK_TRUE(IsSize(service.RenderScalePixels(id, tenths), pixels.width, pixels.height));
+        const auto source = DeviceProfileSource(native, orientation == std::string_view("portrait"));
+        CHECK_TRUE(std::abs(double(pixels.width) / pixels.height - double(source.width) / source.height) < 0.02);
+      }
+    }
+  }
   BeginCase("device scale 1.0 retains native portrait pixels after the landscape source is cropped");
   for (const auto native : {DisplayMode{1206, 2622}, {2622, 1206}, {1179, 2556},
                             {2048, 2732}, {1080, 2400}}) {
-    Service service({}, schema::SettingsForRelease(schema::HostPlatform::kIOS, "test"));
+    Service service({}, schema::SettingsForRelease(schema::HostPlatform::kAndroid, "test"));
     service.Boot(nullptr, {}, nullptr);
     CapabilitySnapshot caps; caps.primary_display_size = native;
     service.SetCapabilities(caps);

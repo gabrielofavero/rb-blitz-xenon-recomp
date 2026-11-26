@@ -106,6 +106,14 @@ addressing entitlement when signing: the guest reserves several GiB of virtual
 address space. This is address space, not a claim about physical memory use.
 The profile used for signing must permit that entitlement.
 
+iOS display profiles retain a 1x backend multiplier. Interface and gameplay
+quality tiers scale an aspect-preserving source capped at 1920x720, including
+the wider source used for portrait cropping. MoltenVK cannot sparsely back the
+scaled resolve buffer: a 2x multiplier adds a dedicated 2 GiB allocation and can
+exceed the app's memory limit before the splash screen. Boot, recovery and live
+profile changes use the same bounded source. Desktop and Android profiles keep
+their existing rendering policy.
+
 Alternatively, provide an existing signing identity and an iOS development or
 ad hoc provisioning profile covering your device and bundle identifier:
 
