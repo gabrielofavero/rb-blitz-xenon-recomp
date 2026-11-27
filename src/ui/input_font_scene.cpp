@@ -2566,16 +2566,29 @@ bool PrepareHudHints(const std::vector<uint8_t>& source, std::vector<uint8_t>* s
                             {"remedial_help.grp", "tutorial_pane.grp"}, 4, error)) return false;
   return PackStored(bytes, scene, error);
 }
-bool PrepareTouchHud(const std::vector<uint8_t>& source,
-                     std::vector<uint8_t>* scene,
-                     std::string* error) {
+bool PrepareGameplayHud(const std::vector<uint8_t>& source, bool portrait, bool touch,
+                        std::vector<uint8_t>* scene, std::string* error) {
   std::vector<uint8_t> bytes;
   if (!DecodeStream(source, &bytes, error)) return false;
   // Pinned installed HUD: the tail after the inline Flow directories contains
   // these ordinary root objects in declaration order. Refuse other revisions
   // before editing offsets, including an already generated HUD.
   if (bytes.size() != 4838050 || Crc32(bytes.data(), bytes.size()) != 0xA70E19B1)
-    return Fail(error, "touch HUD source revision changed");
+    return Fail(error, "gameplay HUD source revision changed");
+  if (portrait) {
+    // when_stars_align.anim centers the stock row by moving star0 left as
+    // each subsequent star advances right from its predecessor. Keep star0
+    // at the pivot and reverse only the X offsets in the remaining tracks.
+    constexpr std::array<size_t, 5> tracks{0x415B85, 0x415C0E, 0x415C97, 0x415D20, 0x415DA9};
+    for (size_t star = 0; star < tracks.size(); ++star) {
+      for (size_t frame = 0; frame < 5; ++frame) {
+        auto* x = bytes.data() + tracks[star] + frame * 16;
+        const float offset = std::bit_cast<float>(Be32(x));
+        PutFloat(x, star == 0 || offset == 0 ? 0.f : -offset);
+      }
+    }
+  }
+  if (!touch) return PackStored(bytes, scene, error);
   auto copy = [&](size_t from, size_t to) {
     return std::vector<uint8_t>(bytes.begin() + from, bytes.begin() + to);
   };

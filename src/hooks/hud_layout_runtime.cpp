@@ -256,8 +256,8 @@ void PlacePortraitHud(uint8_t* base, uint32_t transformable, const Anchor& ancho
   float x = 0, z = 0;
   if (anchor.name == "portrait_top_hud.grp") { x = 0; z = 12 - PortraitTopInset(); }
   else if (anchor.name == "star_board") {
-    // Leave room to the right of the pivot for the full animated star row.
-    x = half_width - 90 * scale - 4;
+    // The first star stays at the pivot as the row fills in to its left.
+    x = half_width - 17 * scale - 4;
     z = kPortraitScoreZ - PortraitTopInset();
   }
   else if (anchor.name == "score.lbl") {

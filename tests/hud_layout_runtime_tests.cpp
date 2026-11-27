@@ -346,7 +346,7 @@ int main() {
     Resolve(portrait_meter);
     Resolve(portrait_comparison);
     Resolve(portrait_letters);
-    Close(Float(portrait_stars + 0x78), 400.0 / 720 * 240 - 49);
+    Close(Float(portrait_stars + 0x78), 400.0 / 720 * 240 - 12.5);
     Close(Float(portrait_stars + 0x80), 232);
     Close(Float(portrait_score + 0x78), 10 - 400.0 / 720 * 240);
     Close(Float(portrait_score + 0x80), 232);
@@ -370,7 +370,7 @@ int main() {
   const auto cropped_stars = Make(0, shapes[0], 270);
   const auto cropped_meter = Make(1, shapes[1], -300);
   Resolve(cropped_stars); Resolve(cropped_meter);
-  Close(Float(cropped_stars + 0x78), 86);
+  Close(Float(cropped_stars + 0x78), 122.5);
   Close(Float(cropped_meter + 0x78), -63.2);
   const Shape timer_shape{"timer.lbl", 0x8203A95C, 0x7C, 0};
   const auto cropped_timer = Make(2, timer_shape, -123, kHud, cropped_meter);
@@ -473,7 +473,7 @@ int main() {
   const float second_inset = 80.f / 874 * 480 + 8;
   Close(Float(mobile_stars + 0x80), 232 - second_inset);
   Close(Float(mobile_stars + 72), .5);
-  Close(Float(mobile_stars + 0x78), 86);
+  Close(Float(mobile_stars + 0x78), 122.5);
   CHECK_TRUE(Float(mobile_pause + 0x80) < Float(mobile_stars + 0x80));
   Draw(mobile_stars, shapes[0], true);
   touch_layout.pause.y += 10;

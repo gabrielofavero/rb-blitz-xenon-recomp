@@ -3275,16 +3275,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
         return true;
 #endif
       })) return false;
-#if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
-  if (touch_hud) {
-  {
+  if (portrait_hud || touch_hud) {
     std::vector<uint8_t> source;
     if (!read(ui::input_font::kHudRecord, &source, error) ||
-        !ui::input_font::PrepareTouchHud(source, &built[ui::input_font::kHudRecord], error))
+        !ui::input_font::PrepareGameplayHud(source, portrait_hud, touch_hud,
+                                           &built[ui::input_font::kHudRecord], error))
       return false;
   }
-  }
-#endif
   {
     std::vector<uint8_t> original;
     std::vector<uint8_t> prepared;

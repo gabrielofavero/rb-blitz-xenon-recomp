@@ -1618,6 +1618,7 @@ fills the portrait surface and keeps the tip, power-ups and Begin prompt separat
 
 HUD positions use the visible crop bounds independently of the source frame.
 The score sits above the pause button, level with the animated star row.
+The first star stays at the right edge and additional stars fill in to its left.
 The multiplier ladder is inset from the left to fit
 instrument badges that share a rung. The personal-best comparator sits at
 centre right, and collected letters sit above the ladder and comparator. The

@@ -2602,7 +2602,7 @@ int main(int argc, char** argv) {
     const auto before = source;
     std::vector<uint8_t> scene;
     std::string why;
-    CHECK_TRUE(font::PrepareTouchHud(source, &scene, &why));
+    CHECK_TRUE(font::PrepareGameplayHud(source, false, true, &scene, &why));
     CHECK_TRUE(source == before);
     if (scene.size() <= 0x810) return Finish();
     const auto* data = scene.data() + 0x810;
@@ -2623,6 +2623,26 @@ int main(int argc, char** argv) {
         "touch_pause_l.mesh", "touch_pause_r.mesh", "touch_pause.anim", "portrait_top_hud.grp"};
     CHECK_TRUE(std::find(names.begin(), names.end(), "touch_powerup.grp") == names.end());
     for (size_t i = 0; i < added.size(); ++i) CheckStrEq(names[112 + i], added[i]);
+    BeginCase("portrait stars fill left from a fixed first star with or without touch controls");
+    std::vector<uint8_t> portrait, portrait_touch;
+    CHECK_TRUE(font::PrepareGameplayHud(source, true, false, &portrait, &why));
+    CHECK_TRUE(font::PrepareGameplayHud(source, true, true, &portrait_touch, &why));
+    CHECK_EQ(portrait.size(), size_t{0x810 + 4838050});
+    CHECK_EQ(portrait_touch.size(), scene.size());
+    if (portrait.size() != 0x810 + 4838050 || portrait_touch.size() != scene.size())
+      return Finish();
+    const size_t touch_shift = at - 0xDA4;
+    for (size_t star = 0; star < 5; ++star) {
+      for (size_t frame = 0; frame < 5; ++frame) {
+        const size_t key = 0x810 + 0x415B85 + star * 0x89 + frame * 16;
+        const float stock_x = star == 0 ? -2.5f * frame : frame >= star ? 5.f : 0.f;
+        const float portrait_x = star > 0 && frame >= star ? -5.f : 0.f;
+        CHECK_EQ(std::bit_cast<float>(u32(scene.data() + key + touch_shift)), stock_x);
+        CHECK_EQ(std::bit_cast<float>(u32(portrait.data() + key)), portrait_x);
+        CHECK_EQ(std::bit_cast<float>(u32(portrait_touch.data() + key + touch_shift)), portrait_x);
+        CHECK_EQ(std::bit_cast<float>(u32(portrait.data() + key + 12)), 5.f * frame);
+      }
+    }
     std::vector<size_t> markers;
     for (size_t i = 0x810; i + 4 <= scene.size(); ++i)
       if (u32(scene.data() + i) == 0xADDEADDE) markers.push_back(i);
@@ -2657,7 +2677,7 @@ int main(int argc, char** argv) {
     CHECK_TRUE(contains(object(8), "blitz_text_flat.mesh"));
     std::vector<uint8_t> hints;
     CHECK_TRUE(font::PrepareHudHints(scene, &hints, &why));
-    CHECK_FALSE(font::PrepareTouchHud(scene, &hints, &why)); // never double-apply offsets
+    CHECK_FALSE(font::PrepareGameplayHud(scene, true, true, &hints, &why));
 
     const auto game = read(argv[3]);
     std::vector<dtb::Node> roots;
@@ -3295,7 +3315,9 @@ int main(int argc, char** argv) {
       const auto& interface_records = interface_portrait ? portrait : landscape;
       const auto& gameplay_records = gameplay_portrait ? portrait : landscape;
       for (const auto& [path, bytes] : portrait) {
-        const auto& expected = path == "ui/gen/game.dtb" ? gameplay_records : interface_records;
+        const bool gameplay_record = path == "ui/gen/game.dtb" ||
+            path == rb_blitz::ui::input_font::kHudRecord;
+        const auto& expected = gameplay_record ? gameplay_records : interface_records;
         CHECK_EQ(mixed.contains(path), expected.contains(path));
         if (mixed.contains(path) && expected.contains(path))
           CHECK_TRUE(mixed.at(path) == expected.at(path));
@@ -3324,7 +3346,8 @@ int main(int argc, char** argv) {
     }
     BeginCase("portrait payload changes splash buttons, loading layouts and the existing gameplay HUD route");
     CHECK_EQ(portrait.size(), landscape.size() + 30 + !landscape.contains("ui/gen/game.dtb") +
-                                      !landscape.contains("ui/loading/gen/loading.dtb"));
+        !landscape.contains("ui/loading/gen/loading.dtb") +
+        !landscape.contains(rb_blitz::ui::input_font::kHudRecord));
     for (const auto& [path, original] : landscape) {
       CHECK_TRUE(portrait.contains(path));
       if (!path.starts_with("ui/locale/") && path != "ui/splash/gen/splash.dtb" && path != "ui/gen/game.dtb" &&
@@ -3343,6 +3366,7 @@ int main(int argc, char** argv) {
           path != rb_blitz::ui::input_font::kErrorReturnRecord &&
           path != rb_blitz::ui::input_font::kCalibrationRecord &&
           path != rb_blitz::ui::input_font::kLoadingRecord &&
+          path != rb_blitz::ui::input_font::kHudRecord &&
           path != screen::kSceneRecord && path != screen::kPauseSceneRecord &&
           path != "ui/pause/gen/confirmation_message.milo_xbox" &&
           path != "ui/pause/gen/settings_confirmation.milo_xbox" &&
