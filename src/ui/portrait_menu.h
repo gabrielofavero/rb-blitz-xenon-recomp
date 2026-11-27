@@ -79,15 +79,18 @@ inline PortraitSplashLayout PortraitSplash(float aspect) {
 inline constexpr float kPortraitMenuRowStep = 62.f;
 
 struct PortraitPauseLayout {
-  float width, list_scale;
-  float title_z = 174, list_z = 120;
-  int rows = 8;
+  static constexpr int rows = 8;  // Includes the trial upgrade action.
+  float width, height, title_size, title_z, list_scale, list_z;
 };
 
 inline PortraitPauseLayout PortraitPause(float aspect) {
-  const float width = PortraitSplash(aspect).width * .88f;
-  // Eight native actions fit between the heading and the separate footer.
-  return {width, std::min(width / 364.5f, 286.f / (7 * kPortraitMenuRowStep + 26.375f))};
+  const float width = std::min(PortraitSplash(aspect).width * .90f, 246.f);
+  const float list_scale = (width - 24) / 367.f;
+  const float rows_height = ((PortraitPauseLayout::rows - 1) * kPortraitMenuRowStep + 55.25f) *
+                            list_scale;
+  const float height = rows_height + 74;
+  return {width, height, std::min(22.f, (width - 24) / 7.f), height / 2 - 27,
+          list_scale, height / 2 - 59 - 27.625f * list_scale};
 }
 inline constexpr float kPortraitSongRowHeight = 55;
 inline constexpr float kPortraitSongRowStep = 60;
@@ -175,6 +178,24 @@ inline PortraitPowerupsLayout PortraitPowerups(float aspect) {
 
 inline float PortraitPromptScale(float aspect, bool error_popup = false) {
   return std::min(PortraitSplash(aspect).width * .84f / (error_popup ? 640.f : 350.f), 1.f);
+}
+
+struct PortraitSongLoadingLayout {
+  float scene_scale;
+  float tip_width, tip_size;
+  float powerup_step, powerup_radius, powerup_name_width, powerup_name_size;
+  float status_width, status_size;
+  static constexpr float tip_z = 100, tip_height = 188;
+  static constexpr float powerup_z = -36, powerup_name_height = 54;
+  static constexpr float spinner_z = -138, status_z = -163, status_height = 60;
+};
+
+inline PortraitSongLoadingLayout PortraitSongLoading(float aspect) {
+  const float width = PortraitSplash(aspect).width;
+  const float scene_scale = width / 640;
+  return {scene_scale, width * .93f, std::min(width * .07f, 17.5f),
+          width * .31f, std::min(72 * scene_scale, 29.f), width * .30f,
+          std::min(width * .051f, 13.5f), width * .86f, std::min(width * .096f, 23.f)};
 }
 
 struct PortraitLoadingLayout {

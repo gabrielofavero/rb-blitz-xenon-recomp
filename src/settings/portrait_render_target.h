@@ -13,9 +13,11 @@ namespace rb_blitz::settings {
 // pause and confirmations retain gameplay quality while using Interface layout.
 inline bool CompactPortraitContext(bool game_screen, bool gameplay_profile,
                                     bool interface_portrait, bool gameplay_portrait,
-                                    bool authored_interface) {
+                                    bool authored_interface, bool autosave_warning = false) {
   const bool portrait = game_screen ? gameplay_portrait : interface_portrait;
-  return portrait && (game_screen || gameplay_profile || authored_interface);
+  // The startup warning keeps the full-width target used by the preceding
+  // logos. The presenter crops it to portrait without changing its scene camera.
+  return portrait && (game_screen || gameplay_profile || (authored_interface && !autosave_warning));
 }
 
 // Keep the original source's vertical coverage while allocating only the

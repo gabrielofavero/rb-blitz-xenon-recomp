@@ -148,6 +148,11 @@ struct TouchTarget {
   MenuBounds bounds;
   float pitch = 0;
   int first = 0, maximum = 0;
+  TouchScrollAxis axis = TouchScrollAxis::kVertical;
+
+  TouchScrollPoint At(MenuPoint point, float x, float y) const {
+    return {x, y, (axis == TouchScrollAxis::kHorizontal ? point.x : point.y) / pitch};
+  }
 };
 TouchTarget touch_target;
 TouchListScroll touch_scroll;
@@ -564,19 +569,21 @@ bool QueueMenuTouch(MenuTouchPhase phase, MenuPoint point, float x, float y, dou
       touch_scroll.Reset(); touch_captured = false;
       return false;
     }
-    touch_scroll.Begin({x, y, point.y / touch_target.pitch}, touch_target.first,
-                       touch_target.maximum, now);
+    touch_scroll.Begin(touch_target.At(point, x, y), touch_target.first,
+                       touch_target.maximum, now, touch_target.axis);
     touch_captured = true;
     menu_pointer = point;
     return true;
   }
   if (!touch_captured) return phase == MenuTouchPhase::kMove && touch_scroll.OwnsView();
-  const TouchScrollPoint at{x, y, point.y / touch_target.pitch};
+  const auto at = touch_target.At(point, x, y);
   menu_pointer = point;
   if (phase == MenuTouchPhase::kMove) touch_scroll.Move(at, now);
   else if (phase == MenuTouchPhase::kUp) {
-    if (touch_scroll.End(at, now) && touch_target.bounds.Contains(point))
-      queue.Push(MouseAction::kAccept, point);
+    if (touch_scroll.End(at, now)) {
+      if (touch_target.axis == TouchScrollAxis::kHorizontal) touch_scroll.Reset();
+      if (touch_target.bounds.Contains(point)) queue.Push(MouseAction::kAccept, point);
+    }
     touch_captured = false;
   }
   return true;
@@ -703,6 +710,11 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       touch_position = touch_scroll.Position();
       touching_view = touch_scroll.Pressed() || touch_scroll.Velocity() != 0;
       if (touching_view) touch_highlight.Reset();
+      else if (touch_target.axis == TouchScrollAxis::kHorizontal) {
+        // Settle the icons under their Details buttons and return control to the guest.
+        touch_position = std::round(*touch_position);
+        touch_scroll.Reset();
+      }
     }
     // Focus may be lost and regained while the guest is suspended. Do not
     // turn the release of that abandoned touch into a click on resume.
@@ -1811,7 +1823,9 @@ void DrawAlignedMenuLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
     const auto index = size_t(name[name.size() - 5] - '0');
     if (DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false))
       powerup_hover_color = SceneObject(ctx, base, dir, "portrait_caption_black.color");
-    if (index < powerup_info_targets.size() && geometry.list == current_focus &&
+    const bool interpolating = touch_draw_list == current_focus &&
+        touch_draw_position != std::floor(touch_draw_position);
+    if (!interpolating && index < powerup_info_targets.size() && geometry.list == current_focus &&
         geometry.frame == frame_number && U32(base, current_focus + 224) == U32(base, current_focus + 228)) {
       auto rows = geometry.rows;
       std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.center.x < b.center.x; });
@@ -2328,25 +2342,44 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   geometry.selected = capture.selected;
   if (capture.selected >= 0) last_selected_row = capture.selected;
   PublishRail(MeasureRail(ctx, base, list, geometry));
-  // Library and RhythmVerse lists share the viewport route, including shortcuts without
-  // a sibling rail. Publish only the focused list from this completed draw.
+  // Library, RhythmVerse and power-up choices scroll the viewport of the focused list.
+  bool powerup_choices = false;
+  if (geometry.horizontal && dialog_scope == MenuDialogScope::kNone &&
+      DrawScreenName() == "powerup_select_screen") {
+    const auto name = ObjectName(base, list_header);
+    powerup_choices = name == "active_powerups.lst" || name == "passive_powerups_a.lst" ||
+                      name == "passive_powerups_b.lst";
+  }
   const bool touch_list = MenuTouchScrollEligible(DrawScreenName(), dialog_scope, geometry.horizontal);
   TouchTarget target;
-  if (touch_list && EnsureRailMap(ctx, base, list) && rail_map.max_first > 0) {
-    float pitch = RailPitch(geometry.rows);
+  if ((touch_list || powerup_choices) && EnsureRailMap(ctx, base, list) && rail_map.max_first > 0) {
+    float pitch = 0;
+    if (powerup_choices) {
+      const auto [left, right] = std::minmax_element(geometry.rows.begin(), geometry.rows.end(),
+          [](const MenuRow& a, const MenuRow& b) { return a.center.x < b.center.x; });
+      if (right->index > left->index)
+        pitch = (right->center.x - left->center.x) / (right->index - left->index);
+    } else {
+      pitch = RailPitch(geometry.rows);
+    }
     if (!(pitch > 0) && settings::InterfacePortraitEnabled() && DrawScreenName() == "inbox_screen") {
       const auto layout = ui::PortraitMessages(ui::screen::CurrentMenuConfiguration().portrait_aspect);
       pitch = (geometry.bounds.bottom - geometry.bounds.top) * layout.row_step / layout.row_height;
     }
     if (pitch > 0)
       target = {list, frame_number, geometry.bounds, pitch,
-                int(U32(base, list + 224)), rail_map.max_first};
+                int(U32(base, list + 224)), rail_map.max_first,
+                powerup_choices ? TouchScrollAxis::kHorizontal : TouchScrollAxis::kVertical};
   }
   {
     std::lock_guard lock(mutex);
     // Keep the pitch fixed for a held finger: edge fades can temporarily omit
     // a row from hit geometry while the native draw state is interpolating.
     if (touch_captured && target.list == touch_target.list) target.pitch = touch_target.pitch;
+    if (target.list != touch_target.list) {
+      touch_scroll.Reset();
+      touch_captured = false;
+    }
     touch_target = target;
     touch_scroll.Limit(target.maximum);
   }

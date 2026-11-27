@@ -75,17 +75,18 @@ int main() {
   CHECK_EQ(snapshot.directory, 0u);
   CHECK_FALSE(snapshot.active);
   CHECK_TRUE(snapshot.screen == "game_screen");
-  BeginCase("pause fills portrait with eight separated actions above the touch footer");
+  BeginCase("portrait pause fits all eight native actions inside its panel");
   CHECK_TRUE(PortraitSplashScreen("game_screen", "pause_panel"));
   CHECK_FALSE(PortraitSplashScreen("game_screen", "game_panel"));
   for (const float aspect : {.3f, 201.f / 437, 9.f / 16, .75f, .9f}) {
     const auto pause = PortraitPause(aspect);
-    const auto footer = PortraitFooterAction(aspect, 0, 2);
-    CHECK_TRUE(364.5f * pause.list_scale <= pause.width);
-    CHECK_TRUE(pause.list_z + 26.375f * pause.list_scale < pause.title_z - 20);
-    CHECK_TRUE(pause.list_z - ((pause.rows - 1) * kPortraitMenuRowStep + 26.375f) *
-               pause.list_scale > footer.z + footer.height / 2 + 10);
-    CHECK_TRUE(kPortraitMenuRowStep * pause.list_scale > 52.75f * pause.list_scale);
+    CHECK_TRUE(pause.width < PortraitSplash(aspect).width);
+    CHECK_TRUE(pause.height < 480);
+    CHECK_TRUE(367.f * pause.list_scale < pause.width);
+    CHECK_TRUE(pause.list_z + 27.625f * pause.list_scale < pause.title_z - pause.title_size);
+    CHECK_TRUE(pause.list_z - ((pause.rows - 1) * kPortraitMenuRowStep + 27.625f) *
+               pause.list_scale > -pause.height / 2 + 10);
+    CHECK_TRUE(kPortraitMenuRowStep > 55.25f);
   }
   BeginCase("library transitions retain portrait for both native panel layouts");
   for (const auto source : kPortraitLibraryScreens)

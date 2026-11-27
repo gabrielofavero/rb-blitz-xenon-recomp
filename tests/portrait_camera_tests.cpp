@@ -105,6 +105,7 @@ int main() {
       Context{true, false, false, true, false, true}}) // Cached quality may lag a scene boundary.
     CHECK_EQ(CompactPortraitContext(context.song, context.game_quality, context.ui_portrait,
                                     context.song_portrait, context.authored), context.compact);
+  CHECK_FALSE(CompactPortraitContext(false, false, true, false, true, true));
   BeginCase("compact gameplay targets allocate exactly the existing centered crop");
   for (const auto native : {DisplayMode{2622, 1206}, {2556, 1179}, {2400, 1080},
                             {1920, 1080}, {2732, 2048}}) {

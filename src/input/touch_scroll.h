@@ -6,9 +6,10 @@
 
 namespace rb_blitz::input {
 
-// x/y are window points for gesture slop; row_y follows the presented list's
+// x/y are window points for gesture slop; row follows the presented list's
 // actual row pitch, so dragging stays attached to the finger at any resolution.
-struct TouchScrollPoint { float x = 0, y = 0, row_y = 0; };
+struct TouchScrollPoint { float x = 0, y = 0, row = 0; };
+enum class TouchScrollAxis { kVertical, kHorizontal };
 
 class TouchListScroll {
  public:
@@ -24,7 +25,8 @@ class TouchListScroll {
     Clamp();
   }
 
-  void Begin(TouchScrollPoint point, float first, float maximum, double now) {
+  void Begin(TouchScrollPoint point, float first, float maximum, double now,
+             TouchScrollAxis axis = TouchScrollAxis::kVertical) {
     Advance(now);
     const bool catching = std::abs(velocity_) > kStopSpeed;
     if (!owns_view_) position_ = first;
@@ -32,6 +34,7 @@ class TouchListScroll {
     dragging_ = false;
     tap_ = !catching;
     velocity_ = 0;
+    axis_ = axis;
     start_ = last_ = point;
     last_motion_ = now;
     clock_ = now;
@@ -42,10 +45,12 @@ class TouchListScroll {
     if (!pressed_ || !Finite(point)) return;
     const float dx = point.x - start_.x, dy = point.y - start_.y;
     if (std::hypot(dx, dy) > kSlop) tap_ = false;
-    if (!dragging_ && std::abs(dy) > kSlop && std::abs(dy) >= std::abs(dx))
-      dragging_ = true;
+    const bool horizontal = axis_ == TouchScrollAxis::kHorizontal;
+    const float along = std::abs(horizontal ? dx : dy);
+    const float across = std::abs(horizontal ? dy : dx);
+    if (along > kSlop && along >= across) dragging_ = true;
     if (dragging_) {
-      const float delta = last_.row_y - point.row_y;
+      const float delta = last_.row - point.row;
       const float before = position_;
       position_ += delta;
       const double elapsed = now - last_motion_;
@@ -58,7 +63,7 @@ class TouchListScroll {
       if (position_ == before && delta != 0) velocity_ = 0;
     }
     // A stationary release must not replace the last moving velocity sample.
-    if (point.row_y != last_.row_y) last_motion_ = now;
+    if (point.row != last_.row) last_motion_ = now;
     last_ = point;
     clock_ = now;
   }
@@ -89,7 +94,7 @@ class TouchListScroll {
 
  private:
   static bool Finite(TouchScrollPoint p) {
-    return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.row_y);
+    return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.row);
   }
   void Clamp() {
     position_ = std::clamp(position_, 0.f, maximum_);
@@ -100,6 +105,7 @@ class TouchListScroll {
   bool owns_view_ = false, pressed_ = false, dragging_ = false, tap_ = false;
   float position_ = 0, velocity_ = 0, maximum_ = 0;
   double clock_ = 0, last_motion_ = 0;
+  TouchScrollAxis axis_ = TouchScrollAxis::kVertical;
   TouchScrollPoint start_, last_;
 };
 }  // namespace rb_blitz::input

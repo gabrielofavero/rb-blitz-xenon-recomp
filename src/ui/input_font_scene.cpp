@@ -629,7 +629,8 @@ void PortraitPose(PortraitObject& object, float scale, float x, float z,
   PortraitParent(object, parent);
 }
 
-void PortraitText(PortraitObject& object, float size, float width, uint32_t alignment = 0x22) {
+void PortraitText(PortraitObject& object, float size, float width,
+                  uint32_t alignment = 0x22, float wrap_height = -1) {
   auto& data = object.data;
   constexpr std::string_view prefix = "../";
   const auto font = std::search(data.begin(), data.end(), prefix.begin(), prefix.end());
@@ -640,6 +641,10 @@ void PortraitText(PortraitObject& object, float size, float width, uint32_t alig
   PutFloat(data.data() + end + 4 + variation, size);
   if (alignment != UINT32_MAX) PutBe32(data.data() + at - 33, alignment);
   if (width >= 0) PutFloat(data.data() + at - 29, width);
+  if (wrap_height >= 0) {
+    PutFloat(data.data() + at - 12, wrap_height);
+    PutBe32(data.data() + at - 8, 0);  // UILabel wrap mode
+  }
 }
 
 bool PortraitLibraryAnimation(PortraitScene& scene, float aspect, std::string* error) {
@@ -765,6 +770,55 @@ void PortraitFooter(PortraitScene& scene, const std::vector<uint8_t>& buttons,
         recommendations ? ui::PortraitRecommendationFooterSurface(i) :
         i == 0 ? "portrait_confirm" : i == 1 ? "portrait_back" : "portrait_retry",
         slot.width, slot.height, slot.x, slot.z, {});
+  }
+}
+
+void FitPortraitPauseFrame(std::vector<uint8_t>& bytes, const ui::PortraitPauseLayout& layout) {
+  constexpr size_t neon_transform = 0xA0C;
+  const float scale = layout.width / 400;
+  for (const auto matrix : {neon_transform, neon_transform + 48})
+    SceneMatrix(bytes, matrix, scale, scale);
+
+  // The texture's inner rail is 77 units in from the top and bottom of the
+  // original quad. Stretch the center strip while preserving the outer
+  // quarters at the same scale as the sides, including the glow at each corner.
+  const float half_height = layout.height / (2 * scale) + 77;
+  const std::array<float, 4> row_z{half_height, half_height - 100,
+                                 100 - half_height, -half_height};
+  constexpr std::array<uint8_t, 4> texture_v{0x00, 0x34, 0x3A, 0x3C};  // Half floats: 0, ¼, ¾, 1.
+  constexpr size_t vertex_size = 36;
+  constexpr size_t original_faces = 4 + 2 * 3 * 2;
+  // The background and three light meshes are identical packed quads in
+  // the embedded popup. Work backwards so each original offset stays valid.
+  for (const size_t first_vertex : {0x2C64, 0x2AD1, 0x2880, 0x26ED}) {
+    std::vector<uint8_t> geometry;
+    const auto begin = bytes.begin() + first_vertex;
+    const auto faces = begin + 4 * vertex_size;
+    const auto face_group = faces + original_faces;
+    for (size_t row = 0; row < row_z.size(); ++row) {
+      for (const size_t side : {0, 2}) {
+        const auto vertex = begin + side * vertex_size;
+        const auto offset = geometry.size();
+        geometry.insert(geometry.end(), vertex, vertex + vertex_size);
+        PutFloat(geometry.data() + offset + 8, row_z[row]);
+        geometry[offset + 18] = texture_v[row];
+        geometry[offset + 19] = 0;
+      }
+    }
+    SceneWord(geometry, 6);
+    for (uint8_t right_top = 0; right_top < 6; right_top += 2) {
+      const uint8_t left_top = right_top + 1;
+      const uint8_t right_bottom = right_top + 2;
+      const uint8_t left_bottom = right_top + 3;
+      for (const auto index : {right_bottom, right_top, left_bottom, left_top, left_bottom, right_top}) {
+        geometry.push_back(0);
+        geometry.push_back(index);
+      }
+    }
+    PutBe32(bytes.data() + first_vertex - 13, 8);
+    face_group[4] = 6;  // All six triangles share the native face group.
+    const auto end = bytes.erase(begin, face_group);
+    bytes.insert(end, geometry.begin(), geometry.end());
   }
 }
 }  // namespace
@@ -909,20 +963,18 @@ bool PreparePortraitPause(const std::vector<uint8_t>& source,
     return Fail(error, "portrait pause source revision changed");
   if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
     return Fail(error, "portrait pause button template revision changed");
-  PortraitScene edited(bytes);
   const auto layout = ui::PortraitPause(aspect);
-  // Keep Group.grp and on.anim: the native entrance still owns the entire panel.
-  // Replace its wide decorative frame with a portrait surface in that same group.
-  edited.RemoveDrawMember("popup_neon");
-  edited.RemoveDrawMember("main_bg1.mesh");
-  PortraitSurface(edited, buttons, "portrait_pause_panel",
-                  ui::PortraitSplash(aspect).width * .96f, 436, 0, 0, "pause.lst");
-  for (const char* suffix : {".mesh", "_border.mesh"})
-    PortraitParent(*edited.Find(std::string("portrait_pause_panel") + suffix), "Group.grp");
-  SceneColor(edited.Find("portrait_pause_panel.mat")->data, 0x19, .035f, .025f, .065f, .94f);
+  FitPortraitPauseFrame(bytes, layout);
+  PortraitScene edited(bytes);
+  // Keep these objects in a hidden draw group so the panel directory cannot
+  // pick them up as independent drawables.
+  const std::vector<std::string> hidden{"main_bg1.mesh", "select.ihp"};
+  for (const auto& name : hidden) edited.RemoveDrawMember(name);
+  PortraitScene templates(buttons);
+  PortraitHiddenGroup(edited, templates, "portrait_pause_hidden.grp", hidden);
   auto& title = *edited.Find("pause.lbl");
   PortraitPose(title, 1, 0, layout.title_z, "Group.grp");
-  PortraitText(title, 22, layout.width);
+  PortraitText(title, layout.title_size, layout.width - 24);
   RenameSceneString(title.data, "../resource/fonts/pentatonic.milo",
                     "../resource/fonts/portrait_splash.milo");
   for (const char* name : {"pause.lst", "options.lst"}) {
@@ -931,8 +983,6 @@ bool PreparePortraitPause(const std::vector<uint8_t>& source,
     RenameSceneString(list.data, "../resource/lists/list_popup.milo",
                       "../resource/lists/portrait_prompt.milo");
   }
-  PortraitFooter(edited, buttons, aspect);
-  PortraitParent(*edited.Find("select.ihp"), "Group.grp");
   return PackStored(edited.Build(), scene, error);
 }
 
@@ -1269,14 +1319,76 @@ bool PreparePortraitCalibrationList(const std::vector<uint8_t>& source,
   return PackStored(edited.Build(), scene, error);
 }
 
-bool PreparePortraitSongLoading(const std::vector<uint8_t>& source,
+bool PreparePortraitSongLoading(const std::vector<uint8_t>& source, float aspect,
                                 std::vector<uint8_t>* scene, std::string* error) {
   std::vector<uint8_t> bytes;
   if (!DecodeStream(source, &bytes, error)) return false;
   if (bytes.size() != 9828070 || Crc32(bytes.data(), bytes.size()) != 0x3DCC8337)
     return Fail(error, "portrait song loading source revision changed");
   PortraitScene edited(bytes);
+  const auto layout = ui::PortraitSongLoading(aspect);
+  const float scale = layout.scene_scale;
+  constexpr uint32_t top_center = 0x12, middle_center = 0x22;
+  const auto place = [&](const char* name, float x, float z, std::string_view parent) {
+    PortraitPose(*edited.Find(name), 1, x / scale, z / scale, parent);
+  };
+  const auto style = [&](const char* name, float size, float width, uint32_t alignment,
+                         float height) {
+    PortraitText(*edited.Find(name), size / scale, width / scale, alignment, height / scale);
+  };
+  const auto font_style = [](PortraitObject& object, std::string_view font) {
+    auto& data = object.data;
+    const auto end = size_t(std::search(data.begin(), data.end(), font.begin(), font.end()) -
+                            data.begin()) + font.size();
+    return data.data() + end + 4 + Be32(data.data() + end);
+  };
+  constexpr std::string_view buttons = "../resource/fonts/buttons.milo";
+  auto& tip = *edited.Find("tip.lbl");
+  place("tip.lbl", 0, layout.tip_z, edited.root);
+  style("tip.lbl", layout.tip_size, layout.tip_width, middle_center, layout.tip_height);
+  PutFloat(font_style(tip, buttons), layout.tip_size * 1.1f / scale);
+  // Power-up Flow selects one of two height keys for the tip. Both states
+  // share the same wrapping area in portrait.
+  auto& height_keys = edited.Find("tip_size.anim")->data;
+  for (size_t at : {0x5A, 0x62})
+    PutFloat(height_keys.data() + at, layout.tip_height / scale);
+
+  place("Powerups.grp", 0, layout.powerup_z, "all.grp");
+  struct PowerupSlot {
+    const char* group;
+    const char* icon;
+    const char* label;
+    int column;
+  };
+  for (const auto& slot : {PowerupSlot{"active.grp", "active_pup.mesh", "name_active_powerup.lbl", -1},
+                         {"Passive_a.grp", "passive_a_pup.mesh", "name_passive_powerup_a.lbl", 0},
+                         {"Passive_b.grp", "passive_b_pup.mesh", "name_passive_powerup_b.lbl", 1}}) {
+    place(slot.group, slot.column * layout.powerup_step, 0, "Powerups.grp");
+    // The icon meshes have a 120-unit quad before their local transform.
+    PortraitPose(*edited.Find(slot.icon), layout.powerup_radius / (60 * scale), 0, 0, slot.group);
+    place(slot.label, 0, -layout.powerup_radius - 9, slot.group);
+    style(slot.label, layout.powerup_name_size, layout.powerup_name_width, top_center,
+          layout.powerup_name_height);
+  }
+
+  place("splash.grp", 0, 0, "all.grp");
+  place("load_vert.grp", 0, layout.spinner_z, "splash.grp");
+  place("wait.lbl", 0, layout.status_z - layout.spinner_z, "load_vert.grp");
+  style("wait.lbl", layout.status_size, layout.status_width, middle_center, layout.status_height);
+  auto& wait = *edited.Find("wait.lbl");
+  // The native style stores opacity four floats after its text size.
+  constexpr size_t style_opacity_offset = 4 * sizeof(float);
+  PutFloat(font_style(wait, "../resource/fonts/eagle_book_blitzlabel.milo") +
+               style_opacity_offset, .9f);
+  // Keep the native spinner and caption pulse, with a readable opacity floor.
+  auto& pulse = edited.Find("PropAnim.anim")->data;
+  constexpr size_t wait_alpha_min_key = 0xE6;
+  PutFloat(pulse.data() + wait_alpha_min_key, .72f);
+
+  place("loading.lbl", 0, layout.status_z, "splash.grp");
+  style("loading.lbl", layout.status_size, layout.status_width, middle_center, layout.status_height);
   auto& prompt = *edited.Find("loading.lbl");
+  PutFloat(font_style(prompt, buttons), layout.status_size * 1.05f / scale);
   RenameSceneString(prompt.data, "../resource/fonts/pentatonic.milo",
                     "../resource/fonts/pentatonic_regularcond.milo");
   return PackStored(edited.Build(), scene, error);

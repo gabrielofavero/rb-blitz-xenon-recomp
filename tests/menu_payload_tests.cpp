@@ -2046,7 +2046,7 @@ void TestPortraitSplash() {
     for (size_t i = 1; i < enter->kids.size(); ++i) eval(eval, enter->kids[i]);
     CHECK_EQ(native_enters, 1);
     const auto& icon_scale = scales.at("wedges.grp");
-    CHECK_TRUE(icon_scale[0] > 0 && icon_scale[0] < 1);
+    CHECK_EQ(icon_scale[0], .5f);
     CHECK_TRUE(icon_scale[0] == icon_scale[1] && icon_scale[1] == icon_scale[2]);
     CHECK_TRUE(icon_scale == scales.at("spinner.trans"));
     const float radius = 28 * icon_scale[0];
@@ -2287,7 +2287,7 @@ void TestPortraitSplash() {
     const float scale = std::bit_cast<float>(enter->kids[2].kids[2].scalar);
     CHECK_TRUE(scale > 0 && scale <= 1);
     CHECK_EQ(scale == 1, !song);
-    CHECK_EQ(enter->kids.size(), song ? size_t(18) : size_t(21));
+    CHECK_EQ(enter->kids.size(), song ? size_t(3) : size_t(21));
     if (!song) {
       std::map<std::string, std::array<float, 3>> positions, scales;
       int fit_type = 2; // Retail status.lbl uses ellipsis, which cannot measure its height.
@@ -3489,7 +3489,7 @@ int main(int argc, char** argv) {
       const auto objects = stored_objects(scene);
       for (const char* name : {"pause.lst", "options.lst", "pause.lbl", "select.ihp",
                                "Group.grp", "enter.flow", "on.anim", "popup_neon",
-                               "portrait_pause_panel.mesh", "portrait_confirm.mesh", "portrait_back.mesh"})
+                               "portrait_pause_hidden.grp"})
         CHECK_TRUE(objects.contains(name));
       const auto contains = [](const auto& bytes, std::string_view text) {
         return std::search(bytes.begin(), bytes.end(), text.begin(), text.end()) != bytes.end();
@@ -3499,12 +3499,21 @@ int main(int argc, char** argv) {
         CHECK_TRUE(object_parent(list, 0x19) == "Group.grp");
         CHECK_TRUE(contains(list, "../resource/lists/portrait_prompt.milo"));
       }
-      CHECK_TRUE(object_parent(objects.at("portrait_pause_panel.mesh"), 0x15) == "Group.grp");
-      CHECK_TRUE(contains(objects.at("select.ihp"), "portrait_actions.milo"));
       CHECK_TRUE(contains(objects.at("pause.lbl"), "portrait_splash.milo"));
-      CHECK_FALSE(contains(objects.at("Group.grp"), "popup_neon"));
-      CHECK_FALSE(contains(objects.at("Group.grp"), "main_bg1.mesh"));
-      CHECK_TRUE(contains(objects.at("Group.grp"), "portrait_pause_panel.mesh"));
+      const auto& hidden = objects.at("portrait_pause_hidden.grp");
+      CHECK_FALSE(object_showing(hidden, 0x21));
+      CHECK_EQ(group_members(hidden), 2u);
+      const auto& visible = objects.at("Group.grp");
+      for (const char* name : {"main_bg1.mesh", "select.ihp"}) {
+        CHECK_FALSE(contains(visible, name));
+        CHECK_TRUE(contains(hidden, name));
+      }
+      const auto member = [&](std::string_view name) {
+        return std::search(visible.begin(), visible.end(), name.begin(), name.end());
+      };
+      CHECK_TRUE(member("popup_neon") < member("pause.lst"));
+      CHECK_FALSE(objects.contains("portrait_confirm.mesh"));
+      CHECK_FALSE(objects.contains("portrait_back.mesh"));
     }
     auto changed_pause = pause_source;
     changed_pause.back() ^= 1;
@@ -4056,6 +4065,47 @@ int main(int argc, char** argv) {
         const float size = std::bit_cast<float>(u32(status.data() + color + 4 + u32(status.data() + color)));
         CHECK_EQ(size, rb_blitz::ui::PortraitLoading(aspect).text_size);
       }
+
+      CHECK_TRUE(read(rb_blitz::ui::input_font::kLoadingRecord, &source, &why));
+      CHECK_TRUE(rb_blitz::ui::input_font::PreparePortraitSongLoading(source, aspect, &fitted, &why));
+      objects = stored_objects(fitted);
+      const auto loading = rb_blitz::ui::PortraitSongLoading(aspect);
+      const auto scene_z = [&](const char* label) {
+        return std::bit_cast<float>(u32(objects.at(label).data() + 0x19 + 44)) *
+               loading.scene_scale;
+      };
+      CHECK_TRUE(std::abs(scene_z("tip.lbl") - loading.tip_z) < .001f);
+      CHECK_TRUE(std::abs(scene_z("loading.lbl") - loading.status_z) < .001f);
+      CHECK_TRUE(std::abs(scene_z("wait.lbl") + loading.spinner_z - loading.status_z) < .001f);
+      CHECK_TRUE(loading.tip_z - loading.tip_height / 2 > loading.powerup_z + loading.powerup_radius);
+      CHECK_TRUE(loading.powerup_z - loading.powerup_radius - 9 - loading.powerup_name_height >
+                 loading.spinner_z);
+      CHECK_TRUE(loading.powerup_name_width < loading.powerup_step);
+      const auto& tip = objects.at("tip.lbl");
+      constexpr std::string_view tip_font = "../resource/fonts/pentatonic.milo";
+      const auto tip_style = std::search(tip.begin(), tip.end(), tip_font.begin(), tip_font.end());
+      CHECK_TRUE(tip_style != tip.end());
+      if (tip_style != tip.end()) {
+        const auto font = tip.data() + (tip_style - tip.begin()) - 4;
+        CHECK_EQ(std::bit_cast<float>(u32(font - 25)), 1.25f);
+        CHECK_EQ(u32(font - 8), uint32_t(0));
+        CHECK_TRUE(std::abs(std::bit_cast<float>(u32(font - 12)) * loading.scene_scale -
+                            loading.tip_height) < .001f);
+      }
+      const auto& wait = objects.at("wait.lbl");
+      constexpr std::string_view wait_font = "../resource/fonts/eagle_book_blitzlabel.milo";
+      const auto wait_style = std::search(wait.begin(), wait.end(), wait_font.begin(), wait_font.end());
+      CHECK_TRUE(wait_style != wait.end());
+      if (wait_style != wait.end()) {
+        const auto variation = size_t(wait_style - wait.begin()) + wait_font.size();
+        const auto size = variation + 4 + u32(wait.data() + variation);
+        CHECK_TRUE(std::abs(std::bit_cast<float>(u32(wait.data() + size)) * loading.scene_scale -
+                            loading.status_size) < .001f);
+        CHECK_EQ(std::bit_cast<float>(u32(wait.data() + size + 16)), .9f);
+        CHECK_EQ(u32(wait.data() + size + 20), uint32_t(0));
+      }
+      const auto& pulse = objects.at("PropAnim.anim");
+      CHECK_EQ(std::bit_cast<float>(u32(pulse.data() + 0xE6)), .72f);
     }
     BeginCase("portrait audio, render wheels and credits retain their native widgets and shared footer");
     for (const char* path : {"ui/av_options/gen/av_options.milo_xbox",

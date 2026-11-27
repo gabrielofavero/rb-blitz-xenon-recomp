@@ -293,7 +293,8 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
   }
   const auto source_plan = ProfileGuestFrame(pixels, scale);
   const bool compact = CompactPortraitContext(game_screen, game, interface_portrait,
-                                               gameplay_portrait, input::PortraitSplashActive());
+                                               gameplay_portrait, input::PortraitSplashActive(),
+                                               input::MenuScreenIs("autosave_warning_screen"));
   const auto plan = CompactPortraitRenderTarget(source_plan, compact);
   const auto acknowledge = [&](bool applied, const std::string& error = {}) {
     if (auto* runtime = boot::SettingsBoot::Current())

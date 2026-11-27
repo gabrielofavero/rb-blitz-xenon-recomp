@@ -40,8 +40,8 @@ bool PrepareInlineHelp(const std::vector<uint8_t>& source, std::vector<uint8_t>*
 // the action-hint font, leaving unrelated label styles on their retail fonts.
 bool PrepareLoading(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,
                     std::string* error);
-// Match the song-loading begin prompt to the title screen's condensed face.
-bool PreparePortraitSongLoading(const std::vector<uint8_t>& source,
+// Fit the native song-loading tip, power-up row and status to portrait.
+bool PreparePortraitSongLoading(const std::vector<uint8_t>& source, float aspect,
                                 std::vector<uint8_t>* scene, std::string* error);
 // Point the splash start label at the action-hint font.
 bool PrepareSplash(const std::vector<uint8_t>& source, std::vector<uint8_t>* scene,

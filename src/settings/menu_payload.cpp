@@ -2123,12 +2123,13 @@ bool AddPortraitAutosaveLayout(std::vector<Node>* roots, std::string* why, float
   }
   const auto sym = [](const char* value) { return Node::Symbol(value); };
   const auto cmd = [](std::vector<Node> kids) { return Node::Command(std::move(kids)); };
-  // UILabel::set_height_from_text (824BB0B8) measures the localized, wrapped
-  // text and stores its height. Scale the spinner to a 21-unit radius and
-  // leave a 27-unit gap above the label. Center their union.
+  // Center the spinner and the native label's measured, localized text as one block.
+  constexpr float spinner_scale = .5f;
+  constexpr int spinner_radius = 14;
+  constexpr int text_gap = 27;
   Node icon_scale;
   icon_scale.tag = ui::dtb::kFloat;
-  icon_scale.scalar = std::bit_cast<uint32_t>(0.75f);
+  icon_scale.scalar = std::bit_cast<uint32_t>(spinner_scale);
   // Entry scripts can reset serialized label properties. Apply the portrait
   // wrapping width after native entry and before measuring localized text.
   Node text_width;
@@ -2137,8 +2138,9 @@ bool AddPortraitAutosaveLayout(std::vector<Node>* roots, std::string* why, float
   enter->kids.push_back(cmd({sym("autosave.lbl"), sym("set"), sym("width"), text_width}));
   enter->kids.push_back(cmd({sym("autosave.lbl"), sym("set_height_from_text")}));
   const auto text_z = cmd({sym("/"), cmd({sym("-"),
-      cmd({sym("autosave.lbl"), sym("get"), sym("height")}), Node::Int(69)}), Node::Int(2)});
-  const auto icon_z = cmd({sym("+"), text_z, Node::Int(48)});
+      cmd({sym("autosave.lbl"), sym("get"), sym("height")}),
+      Node::Int(2 * spinner_radius + text_gap)}), Node::Int(2)});
+  const auto icon_z = cmd({sym("+"), text_z, Node::Int(spinner_radius + text_gap)});
   enter->kids.push_back(cmd({sym("autosave.lbl"), sym("set_local_pos"),
       Node::Int(0), Node::Int(0), text_z}));
   for (const char* name : {"wedges.grp", "spinner.trans"}) {
@@ -2216,39 +2218,14 @@ bool AddPortraitLoadingLayout(std::vector<Node>* roots, bool song_loading,
   };
   // Connection text is measured in guest UI units. Its animated label and bar
   // must share an identity root at every aspect.
-  const float scale = song_loading ? std::min(ui::PortraitSplash(aspect).width / 640.f, .7f) : 1.f;
+  const float scale = song_loading ? ui::PortraitSongLoading(aspect).scene_scale : 1.f;
   const Node dir = Node::Command({Node::Symbol(song_loading ? "loading_panel" : "server_connect_panel"),
                                    Node::Symbol("loaded_dir")});
   enter->kids.push_back(Node::Command({dir, Node::Symbol("set_local_scale"),
                                        number(scale), number(scale), number(scale)}));
-  if (song_loading) {
-    const auto position = [&](const char* name, float z) {
-      enter->kids.push_back(Node::Command({Node::Symbol(name), Node::Symbol("set_local_pos"),
-                                          number(0), number(0), number(z / scale)}));
-    };
-    position("splash.grp", 0);
-    position("tip.lbl", 150);
-    position("Powerups.grp", 15);
-    position("load_vert.grp", -80);
-    position("loading.lbl", -175);
-    const auto splash = ui::PortraitSplash(aspect);
-    const auto set = [&](const char* name, Node property, Node value) {
-      enter->kids.push_back(Node::Command({Node::Symbol(name), Node::Symbol("set"),
-                                          std::move(property), std::move(value)}));
-    };
-    // UILabel sizes are local to the fitted loading directory. Keep the tip
-    // readable and give the begin prompt the Start screen's visible text size.
-    for (const char* label : {"tip.lbl", "loading.lbl"}) {
-      enter->kids.push_back(Node::Command({Node::Symbol(label), Node::Symbol("set_local_scale"),
-                                          number(1), number(1), number(1)}));
-      set(label, Node::Symbol("width"), number(splash.width * .84f / scale));
-      set(label, Node::Symbol("height"), number(70 / scale));
-      set(label, Node::Symbol("fit_type"), Node::Int(0));
-      const float size = std::string_view(label) == "tip.lbl" ? 11.5f : 28.630569f * splash.start_scale;
-      set(label, Node::Array({Node::Symbol("styles"), Node::Int(0), Node::Symbol("text_size")}),
-          number(size / scale));
-    }
-  } else {
+  // The song scene owns its own transforms and label styles. Connection
+  // layout still follows the text height at runtime.
+  if (!song_loading) {
     const auto sym = [](const char* value) { return Node::Symbol(value); };
     const auto set = [&](const char* name, Node property, Node value) {
       enter->kids.push_back(Node::Command({sym(name), sym("set"),
@@ -3491,7 +3468,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
             screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
     built[ui::input_font::kPortraitActionsRecord] = std::move(scene);
     if (!read(ui::input_font::kLoadingRecord, &source, error) ||
-        !ui::input_font::PreparePortraitSongLoading(source, &scene, error)) return false;
+        !ui::input_font::PreparePortraitSongLoading(source, songs_aspect, &scene, error)) return false;
     if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
       if (!ui::input_font::PrepareLoading(scene, &source, error)) return false;
       scene = std::move(source);

@@ -1563,13 +1563,12 @@ presentation, with their content scaled to fit the visible width. The confirmati
 animation's scale keys use the same fit; its full-screen shade stays unscaled.
 
 Normal startup enlarges the Ultimate Mods image uniformly by 1.5x in portrait.
-The native autosave warning fills the window height, preserving its landscape
-spinner proportions and using 70% of the authored font size. Its localized text
-wraps within 84% of the visible width below the spinner. On entry, the native
-label measures the wrapped text height so the icon and warning are centered
-vertically as one block, including when localization changes the line count. These
-generated guest-scene changes are shared across platforms and graphics backends;
-landscape keeps its authored layout.
+The portrait autosave warning keeps the startup logos' full-width render target
+and uses a centered portrait crop at every Interface render scale. The spinner
+is one third smaller than its previous portrait size. The native label uses
+55% of the authored font size and wraps localized text within 84% of the visible
+width. On entry, the label measures the wrapped text height to center the icon
+and warning together. The layout is shared across platforms and graphics backends.
 
 The initial narrow-frame implementation was stretched and its visual validation
 was insufficient. It is superseded by the landscape-source crop above. The

@@ -185,6 +185,36 @@ int main() {
   CHECK_FALSE(kinetic.Pressed());
   CHECK_FALSE(kinetic.End(scroll_point(175), 11.03));
 
+  BeginCase("power-up touch scrolling follows horizontal drags and clamps at both ends");
+  const auto powerup_point = [](float x, float y = 100.f) {
+    return TouchScrollPoint{x, y, x / 40.f};
+  };
+  TouchListScroll powerups;
+  powerups.Begin(powerup_point(200), 1, 4, 12, TouchScrollAxis::kHorizontal);
+  powerups.Move(powerup_point(150), 12.04);
+  CHECK_TRUE(powerups.Dragging());
+  CHECK_TRUE(std::abs(powerups.Position() - 2.25f) < .001f);
+  CHECK_FALSE(powerups.End(powerup_point(150), 12.05));
+  powerups.Advance(12.10);
+  CHECK_TRUE(powerups.Position() > 2.25f);
+  powerups.Begin(powerup_point(150), 2, 4, 12.10, TouchScrollAxis::kHorizontal);
+  CHECK_TRUE(powerups.Velocity() == 0);
+  powerups.Move(powerup_point(-200), 12.12);
+  CHECK_TRUE(powerups.Position() == 4);
+  powerups.Move(powerup_point(200), 12.14);
+  CHECK_TRUE(powerups.Position() == 0);
+  CHECK_FALSE(powerups.End(powerup_point(200), 12.15));
+
+  BeginCase("power-up touch scrolling preserves taps and ignores vertical swipes");
+  powerups.Reset();
+  powerups.Begin(powerup_point(200), 1, 4, 13, TouchScrollAxis::kHorizontal);
+  CHECK_TRUE(powerups.End(powerup_point(205), 13.03));
+  powerups.Begin(powerup_point(200), 1, 4, 14, TouchScrollAxis::kHorizontal);
+  powerups.Move(powerup_point(202, 140), 14.03);
+  CHECK_FALSE(powerups.Dragging());
+  CHECK_FALSE(powerups.End(powerup_point(202, 140), 14.05));
+  CHECK_TRUE(powerups.Position() == 1);
+
   BeginCase("touch menus hide idle selection and activate once after feedback and release");
   MenuTouchHighlight touch;
   CHECK_FALSE(touch.Draw(true, 0x10, 0, false)); // default selected row remains unlit
