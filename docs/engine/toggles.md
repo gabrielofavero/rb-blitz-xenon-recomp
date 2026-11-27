@@ -360,3 +360,13 @@ and generated retail records. The visual change awaits the owner's retest.
 P2 diagnostics: `background_music_nav_probe` (empty by default; `next`, `previous`,
 `play_pause`) posts once after `background_music_nav_probe_delay` seconds (default 5)
 on the splash option list. It cannot bypass the switch or unavailable capabilities.
+
+
+## Portrait gameplay fallback diagnostic (2026-11-26)
+
+`blitz.diagnostics.portrait_render_cutoff` (default true, restart) limits hidden
+main-frame pixels only when portrait gameplay still uses a cropped landscape
+fallback, such as before compact target publication or after a replacement
+allocation refusal. It does not disable compact targets or restore the old wide
+rendering path for comparisons. `src/ui/gameplay_presentation.cpp` owns the
+fallback scissor request; `src/hooks/render_settings.cpp` owns compact targets.

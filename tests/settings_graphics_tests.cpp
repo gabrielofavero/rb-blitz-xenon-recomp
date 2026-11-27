@@ -24,6 +24,7 @@
 #include "settings/capabilities.h"
 #include "settings/graphics_policy.h"
 #include "settings/graphics_boot.h"
+#include "loading/crash_dialog_state.h"
 #include "settings/resolution_profiles.h"
 #include "settings/render_profile_resources.h"
 #include "settings/schema.h"
@@ -723,20 +724,9 @@ void TestFirstRun() {
 }
 
 void TestRecovery() {
-  BeginCase("policy: only a boot that attempted and never presented triggers the safe route");
+  BeginCase("policy: the safe route uses the conservative graphics values");
 
   const CapabilitySnapshot caps = Machine(3840, 2160);
-
-  GraphicsBootMarker never;
-  CHECK_FALSE(GraphicsFallbackWarranted(never));  // first run is not a graphics failure
-  GraphicsBootMarker clean;
-  clean.attempted = true;
-  clean.presented = true;
-  CHECK_FALSE(GraphicsFallbackWarranted(clean));
-  GraphicsBootMarker failed;
-  failed.attempted = true;
-  failed.presented = false;
-  CHECK_TRUE(GraphicsFallbackWarranted(failed));
 
   // No failure recorded: the request comes back untouched (no boot-time re-optimizing).
   const GraphicsFallback intact = RecoverGraphics(caps, ResolutionV(3840, 2160), "d3d12", false);
@@ -862,13 +852,22 @@ void TestGraphicsBootJournal() {
     CHECK_TRUE(first.Presented(&error));
   }
   {
-    // A request whose boot died before the menu frame (Begin without Presented) is recovered.
+    // A boot interrupted before its first frame carries no failure evidence.
+    GraphicsBootState interrupted;
+    CHECK_TRUE(interrupted.Open(file, &error));
+    CHECK_TRUE(IsRes(interrupted.Select(wanted, wanted, safe, false).at(SettingId::kResolution), 1920,
+                     1080));
+    CHECK_TRUE(interrupted.Begin(wanted, &error));
+  }
+  {
     GraphicsBootState failed;
     CHECK_TRUE(failed.Open(file, &error));
     CHECK_TRUE(IsRes(failed.Select(wanted, wanted, safe, false).at(SettingId::kResolution), 1920,
                      1080));
     CHECK_FALSE(failed.recovered());
-    CHECK_TRUE(failed.Begin(wanted, &error));  // simulate process death before a menu frame
+    CHECK_TRUE(failed.Begin(wanted, &error));
+    CHECK_TRUE(failed.Rejected(&error));
+    CHECK_TRUE(failed.Closed(&error));
   }
   {
     GraphicsBootState recovery;
@@ -909,6 +908,7 @@ void TestGraphicsBootJournal() {
     CHECK_TRUE(IsRes(failed.Select(bigger, bigger, safe, false).at(SettingId::kResolution), 2560,
                      1440));
     CHECK_TRUE(failed.Begin(bigger, &error));
+    CHECK_TRUE(failed.Rejected(&error));
   }
   {
     GraphicsBootState recovery;
@@ -924,7 +924,8 @@ void TestGraphicsBootJournal() {
     CHECK_TRUE(IsRes(retry.Select(bigger, bigger, safe, false).at(SettingId::kResolution), 2560,
                      1440));
     CHECK_TRUE(retry.retrying());
-    CHECK_TRUE(retry.Begin(bigger, &error));  // the retry dies too
+    CHECK_TRUE(retry.Begin(bigger, &error));
+    CHECK_TRUE(retry.Rejected(&error));
   }
   {
     GraphicsBootState latched;
@@ -969,6 +970,7 @@ void TestGraphicsBootJournal() {
     CHECK_TRUE(IsRes(failed.Select(small, small, safe, false).at(SettingId::kResolution), 1600,
                      900));
     CHECK_TRUE(failed.Begin(small, &error));
+    CHECK_TRUE(failed.Rejected(&error));
   }
   {
     GraphicsBootState recovery;
@@ -977,6 +979,14 @@ void TestGraphicsBootJournal() {
     CHECK_TRUE(recovery.recovered());
     CHECK_TRUE(recovery.Begin(effective, &error));
     CHECK_TRUE(recovery.Presented(&error));
+  }
+  {
+    GraphicsBootState interrupted_retry;
+    CHECK_TRUE(interrupted_retry.Open(file, &error));
+    CHECK_TRUE(IsRes(interrupted_retry.Select(small, small, safe, false).at(SettingId::kResolution),
+                     1600, 900));
+    CHECK_TRUE(interrupted_retry.retrying());
+    CHECK_TRUE(interrupted_retry.Begin(small, &error));
   }
   {
     GraphicsBootState close_during_retry;
@@ -1203,125 +1213,83 @@ void TestProfileAspectService() {
 }
 
 void TestResolutionProfileCrashRecovery() {
-  BeginCase("profile recovery confirms only the active context and latches interrupted native attempts");
+  BeginCase("render profile recovery requires an explicit allocation rejection");
   std::error_code code;
   const auto base = fs::temp_directory_path(code) / "rb_blitz-profile-recovery";
-  fs::remove_all(base, code); fs::create_directories(base, code);
+  fs::remove_all(base, code);
+  fs::create_directories(base, code);
   const auto file = base / "settings.toml";
-  Value native; native.kind = ValueKind::kInt; native.integer = 10;
-  GraphicsValues requested{{SettingId::kInterfaceRenderScale,native},
-                           {SettingId::kGameplayRenderScale,native}};
-  std::string error;
   const auto interface = SettingId::kInterfaceRenderScale;
   const auto gameplay = SettingId::kGameplayRenderScale;
+  Value native;
+  native.kind = ValueKind::kInt;
+  native.integer = 10;
+  const GraphicsValues requested{{interface, native}, {gameplay, native}};
+  std::string error;
+  {
+    ResolutionProfileState journal;
+    CHECK_TRUE(journal.Open(file, &error));
+    CHECK_FALSE(journal.Recover(requested, &error));
+    CHECK_FALSE(journal.Rejected(&error));
+    CHECK_TRUE(journal.Begin(requested, interface, "native-menu", &error));
+    CHECK_TRUE(journal.Begin(requested, gameplay, "native-game", &error));
+    // A guest crash or abrupt app termination leaves these attempts on disk.
+  }
   {
     ResolutionProfileState journal;
     CHECK_TRUE(journal.Open(file, &error));
     CHECK_FALSE(journal.Recover(requested, &error));
     CHECK_TRUE(journal.Begin(requested, interface, "native-menu", &error));
-    for (unsigned i = 0; i < ResolutionProfileState::kStablePresents; ++i)
-      CHECK_TRUE(journal.Presented(interface, "native-menu", &error));
-    // The native Gameplay choice has never drawn. Menu presentation proves
-    // nothing about that allocation, so its first draw must arm a new marker.
-    CHECK_TRUE(journal.Begin(requested, gameplay, "native-game", &error));
-    for (unsigned i = 0; i + 1 < ResolutionProfileState::kStablePresents; ++i)
-      CHECK_TRUE(journal.Presented(gameplay, "native-game", &error));
-  }
-  for (int boot = 0; boot < 3; ++boot) {
-    ResolutionProfileState journal;
-    CHECK_TRUE(journal.Open(file, &error));
-    CHECK_TRUE(journal.Recover(requested, &error));
-    auto running_safe = requested;
-    running_safe[interface].integer = running_safe[gameplay].integer = 720;
-    CHECK_TRUE(journal.Begin(running_safe, interface, "720-menu", &error));
-    for (unsigned i = 0; i < ResolutionProfileState::kStablePresents; ++i)
-      CHECK_TRUE(journal.Presented(interface, "720-menu", &error));
     CHECK_TRUE(journal.Closed(&error));
   }
-  Value lower = native; lower.integer = 720;
-  requested[gameplay] = lower;
+
+  BeginCase("legacy latches cannot identify what caused the previous exit");
   {
+    // This request would have matched both the old failed field and pending state.
+    const auto path = base / "settings.toml.render-profiles.toml";
+    std::ofstream legacy(path);
+    legacy << "schema_version = 1\n"
+              "request = \"interface_render_scale=10;gameplay_render_scale=10;\"\n"
+              "failed = \"interface_render_scale=10;gameplay_render_scale=10;\"\n"
+              "[pending]\ninterface_render_scale = \"native-menu\"\n";
+    legacy.close();
     ResolutionProfileState journal;
     CHECK_TRUE(journal.Open(file, &error));
     CHECK_FALSE(journal.Recover(requested, &error));
-    CHECK_TRUE(journal.Begin(requested, gameplay, "720-game", &error));
-    // Presenting a different/stale image must not confirm this allocation.
-    for (unsigned i = 0; i < ResolutionProfileState::kStablePresents; ++i)
-      CHECK_TRUE(journal.Presented(gameplay, "native-game", &error));
   }
-  {
-    ResolutionProfileState journal;
-    CHECK_TRUE(journal.Open(file, &error));
-    CHECK_TRUE(journal.Recover(requested, &error));
-    CHECK_TRUE(journal.Closed(&error));
-  }
-  // A clean early close or backend initialization refusal has not proved a frame.
-  requested[gameplay] = native;
-  {
-    ResolutionProfileState journal;
-    CHECK_TRUE(journal.Open(file, &error));
-    CHECK_FALSE(journal.Recover(requested, &error));
-    CHECK_TRUE(journal.Begin(requested, gameplay, "native-game", &error));
-    CHECK_TRUE(journal.Closed(&error));
-  }
-  {
-    ResolutionProfileState journal;
-    CHECK_TRUE(journal.Open(file, &error));
-    CHECK_TRUE(journal.Recover(requested, &error));
-  }
-  BeginCase("a saved higher profile earns its first attempt after an intentional restart");
-  {
-    const auto pending_restart = base / "pending-restart.toml";
-    auto running_request = requested;
-    running_request[gameplay] = lower;
-    {
-      ResolutionProfileState journal;
-      CHECK_TRUE(journal.Open(pending_restart, &error));
-      CHECK_FALSE(journal.Recover(running_request, &error));
-      CHECK_TRUE(journal.Begin(running_request, interface, "720-menu", &error));
-      // Saving a higher Gameplay value does not allocate that profile yet.
-      CHECK_TRUE(journal.Closed(&error));
-    }
-    {
-      ResolutionProfileState journal;
-      CHECK_TRUE(journal.Open(pending_restart, &error));
-      CHECK_FALSE(journal.Recover(requested, &error));
-    }
-  }
-  BeginCase("an accepted settings restart does not mistake the stopped old frame for a crash");
-  {
-    const auto restart_file = base / "accepted-restart.toml";
-    {
-      ResolutionProfileState journal;
-      CHECK_TRUE(journal.Open(restart_file, &error));
-      CHECK_FALSE(journal.Recover(requested, &error));
-      CHECK_TRUE(journal.Begin(requested, interface, "720-menu", &error));
-      CHECK_TRUE(journal.Closed(&error, true));
-    }
-    {
-      ResolutionProfileState journal;
-      CHECK_TRUE(journal.Open(restart_file, &error));
-      CHECK_FALSE(journal.Recover(requested, &error));
-    }
-  }
-  BeginCase("a later hang still recovers after a profile has presented stable frames");
+
+  BeginCase("an explicit rejection survives shutdown until the saved request changes");
   for (const bool clean_close : {false, true}) {
-    const auto lifetime_file = base / (clean_close ? "clean.toml" : "late-hang.toml");
+    const auto refused = base / (clean_close ? "refused-close.toml" : "refused-crash.toml");
     {
       ResolutionProfileState journal;
-      CHECK_TRUE(journal.Open(lifetime_file, &error));
+      CHECK_TRUE(journal.Open(refused, &error));
       CHECK_FALSE(journal.Recover(requested, &error));
       CHECK_TRUE(journal.Begin(requested, gameplay, "native-game", &error));
-      for (unsigned i = 0; i < ResolutionProfileState::kStablePresents + 5; ++i)
-        CHECK_TRUE(journal.Presented(gameplay, "native-game", &error));
+      CHECK_TRUE(journal.Rejected(&error));
       if (clean_close) CHECK_TRUE(journal.Closed(&error));
     }
     {
       ResolutionProfileState journal;
-      CHECK_TRUE(journal.Open(lifetime_file, &error));
-      CHECK_EQ(journal.Recover(requested, &error), !clean_close);
+      CHECK_TRUE(journal.Open(refused, &error));
+      CHECK_TRUE(journal.Recover(requested, &error));
+      auto safe = requested;
+      safe[interface].integer = safe[gameplay].integer = 720;
+      CHECK_TRUE(journal.Begin(safe, interface, "safe-menu", &error));
+      CHECK_TRUE(journal.Closed(&error));
+    }
+    {
+      ResolutionProfileState journal;
+      CHECK_TRUE(journal.Open(refused, &error));
+      CHECK_TRUE(journal.Recover(requested, &error));
+      auto changed = requested;
+      changed[gameplay].integer = 720;
+      CHECK_FALSE(journal.Recover(changed, &error));
+      CHECK_TRUE(journal.Begin(changed, gameplay, "720-game", &error));
+      CHECK_TRUE(journal.Closed(&error));
     }
   }
+  CHECK_FALSE(fs::exists(file));
   fs::remove_all(base, code);
 }
 
@@ -1375,6 +1343,26 @@ void TestSafeProfileDefaultsAndRestore() {
 }
 
 int main() {
+  BeginCase("graphics recovery explains the fallback once after short-boot discovery reaches the menu");
+  rb_blitz::loading::CrashDialogState recovery;
+  recovery.graphics_recovered = true;
+  recovery.fast_startup = true;
+  bool answer = false;
+  recovery.Query("rbbz-load/recovery/active", &answer); CHECK_TRUE(answer);
+  recovery.Query("rbbz-load/recovery/start", &answer); CHECK_FALSE(answer);
+  recovery.Query("rbbz-load/recovery/popup", &answer); CHECK_FALSE(answer);
+  recovery.menu_ready = true;
+  recovery.Query("rbbz-load/recovery/start", &answer); CHECK_TRUE(answer);
+  recovery.Query("rbbz-load/recovery/starting", &answer); CHECK_TRUE(answer);
+  recovery.menu_ready = false;
+  recovery.Query("rbbz-load/recovery/popup", &answer); CHECK_FALSE(answer);
+  recovery.menu_ready = true;
+  recovery.Query("rbbz-load/recovery/popup", &answer); CHECK_TRUE(answer);
+  recovery.Query("rbbz-load/recovery/graphics", &answer); CHECK_TRUE(answer);
+  recovery.Query("rbbz-load/recovery/popup", &answer); CHECK_FALSE(answer);
+  recovery.Query("rbbz-load/recovery/active", &answer); CHECK_FALSE(answer);
+  recovery.Query("rbbz-load/recovery/timeout30", &answer); CHECK_FALSE(answer);
+  recovery.Query("rbbz-load/recovery/timeout60", &answer); CHECK_FALSE(answer);
   TestSafeProfileDefaultsAndRestore();
   TestResolutionProfileCrashRecovery();
   BeginCase("iOS profiles use ten device-relative heights with a true native endpoint");

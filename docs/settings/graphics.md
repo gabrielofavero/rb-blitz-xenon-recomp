@@ -55,6 +55,17 @@ shade retain their existing behavior. This scene authoring is shared across
 platforms and graphics backends; device appearance and touch acceptance still
 require runtime validation.
 
+The portrait pause panel uses the same native button style for both its action
+and inline options lists. Up to eight actions fit between the centered heading
+and separate, tappable Continue/Back footer. A dark portrait backdrop replaces
+the wide decorative frame while retaining the guest's entrance animation,
+providers, confirmation routes and touch-release activation. Pause follows
+Interface orientation, including when Gameplay uses a different orientation.
+This layout is shared across platforms and graphics backends.
+macOS ARM64 and iOS ARM64 release builds passed, as did five targeted host test
+suites and 2,342 extracted-record checks. Windows and Linux builds and in-game
+appearance/touch behavior remain unverified for this pause layout.
+
 Portrait calibration reserves separate vertical bands for measured instruction
 text, the meter, progress, hit count, status, and the current offset. The
 metronome is 20% smaller; long localized instructions shrink proportionally
@@ -84,6 +95,18 @@ These rules are shared across platforms and graphics backends. The regression
 matrix includes compact 16:9 phones, notched iPhones, 18:9 through 22:9 phones,
 multiple pixel densities, asymmetric insets and intermediate resize widths.
 
+iOS settings boot queries UIKit's native screen dimensions before SDL video
+initialization. Querying SDL at that point returned no display mode and selected
+the 1280x720 fallback, authoring a 9:16 canvas for a narrower phone surface.
+Live viewport fitting also reads the UIWindow bounds and safe-area insets.
+UI polling publishes the active panel directory and screen in a synchronized
+snapshot for the guest draw thread. Keeping the directory only in polling-thread
+local storage left drawing without an eligible panel and silently skipped the fit.
+The log records the window safe rectangle and the panel fit whenever they change.
+`sh scripts/ios/test-display.sh DEVICE_UUID` exercises the production UIKit probe
+before any SDL initialization and checks the full canvas and logo bounds in a
+booted simulator. This is an isolated display test, not a simulator game build.
+
 [tree, updated 2026-11-26] Desktop Resolution retains independent Interface
 and Gameplay preferences, with native-aspect offers down to 720 pixels high.
 For example, 3440x1440 offers 1720x720 with Force 16:9 off; with it on, the
@@ -92,6 +115,13 @@ both recommendations before renderer allocation. Without a verified sustainable
 resolution, both profiles start at the 720 source-height floor. Restore Recommended
 uses the same conservative policy. Manual saved requests remain authoritative.
 This is a fallback policy, not a device benchmark or a guarantee against memory pressure.
+
+Graphics recovery uses Fast startup for that launch, without changing the saved
+startup preference. Once discovery has restored the main menu, the guest's native
+error popup explains that graphics were reduced after an incomplete or unsafe
+setup and that saved preferences remain available in Help & Options. The notice
+is consumed once per recovery boot, including render-profile allocation recovery.
+Song-load crash recovery also uses Fast startup and retains its existing message.
 
 Mobile hides Resolution and offers Render Scale with Audio-style Interface and
 Gameplay buttons. Selecting a button opens one bottom native ten-dot wheel;
@@ -115,21 +145,39 @@ fitted preview window as the basis.
 Backend capacity remains fixed for a process. It is selected from BOTH
 chosen profiles on every platform, so a first 720p boot does not reserve
 native-sized scaled resolve backing. Profile edits apply live when they fit that capacity; larger allocations
-remain pending restart. Vulkan's dense scaled-resolve backing is 512 MiB times
-the two backend axes: 2x2 needs 2 GiB, 4x4 needs 8 GiB. Device limits must not be
-bypassed or silently reinterpreted as a lower native resolution. Full live backend
-capacity growth requires a renderer-cache lifecycle redesign and is not implemented.
+remain pending restart. Non-sparse MoltenVK uses compact range-backed scaled
+resolves (SDK 0102): 512 MiB times both axes remains the logical address space,
+but only accessed ranges receive storage, aligned to 64 KiB. Overlapping ranges
+merge through GPU copies and retain old descriptor storage until its submission
+completes. Per-buffer allocation/storage limits and a peak budget including
+retired buffers apply; the cap is 512 MiB on iOS and 1 GiB on macOS, further
+bounded by one quarter of the device-local heap. This cap does not establish
+current process headroom or a sustainable quality tier. Other Vulkan drivers
+retain their existing sparse/dense paths. Full live backend capacity growth
+requires a renderer-cache lifecycle redesign and is not implemented.
 
-A separate per-context resolution journal arms before allocation, including
-initial backend setup, and requires 120 distinct guest-output refreshes
-at that active profile plus a clean process exit. The marker stays armed during
-the session so a later song-load hang is recoverable too. Merely reaching the menu
-does not approve Gameplay. A crash or forced termination makes the next boot use
-720p for BOTH contexts; saved requests remain editable, and the failed request
-stays latched until changed. An accepted settings restart clears the old frame's
-trial so a newly saved higher setting can receive its first actual attempt.
-Recovery preserves orientation/aspect. This complements the original startup
-graphics journal.
+Authored portrait Interface routes and portrait gameplay render their centered
+crop directly into a narrow target. Native horizontal projection, inverse and
+normalized left/right culling planes change together; cached world-frustum and
+pointer matrices rebuild before drawing. Presenter cropping is disabled for that
+target. Main-scene culling can reject hidden-side objects, while intersecting
+bounds and required effects still run. Unadapted menus, custom-target cameras and
+partial viewports retain their independent paths. Visual orientation selects
+compact mode even when a pause screen retains the other context's quality tier.
+Lane power-up touch bounds and events use the actual frontbuffer aspect. The initial frame before an authored route is selected still
+uses the landscape allocation. Narrowing these targets reduces guest frame and
+resolve-image dimensions; it does not shrink every backend EDRAM attachment.
+See the [memory delivery record](../plans/finished/2026-11-26-interface-render-memory.md)
+and [gameplay/dialog follow-up](../plans/finished/2026-11-26-portrait-gameplay-rendering.md).
+
+The resolution journal records which profile was active before allocation.
+An explicit render allocation refusal uses the 720p profiles at the next boot
+and preserves orientation and aspect. The rejected request stays latched until
+the saved graphics combination changes. A crash, forced termination or
+interrupted attempt without a recorded allocation refusal leaves the requested
+profiles available. Older journal entries lack that distinction and are cleared
+on upgrade. Presentation interface version 2 provides the backend allocation
+failure signal.
 
 [unverified] Physical iOS native allocation, high-resolution performance, actual
 mouse/touch interaction and game visual acceptance need a device/game test.
@@ -519,7 +567,7 @@ The two new modules are SDK-free and compile standalone (`clang++ -std=c++23 -Is
 | File | Contents |
 | --- | --- |
 | `capabilities.h/.cpp` | `RenderPathLimits`, `RenderPathSizes`, `RendererProbe`, `CapabilityInputs`, `SupportedResolutions`, `NormalizeDisplayModes`, `BuildCapabilitySnapshot`, `ActiveRenderer`, `FindRenderer`, `IsSupportedResolution`, `LargestSupportedFitting`, `SmallestSupported`, `DisplayModeToken`, `ParseDisplayModeToken`. |
-| `graphics_policy.h/.cpp` | `IsGraphicsRow`, the correction/validation reason keys, `AntiAliasingTokens`, `FilteringTokens`, `PolicyRenderer`, `GuestScreenPlan`/`PlanGuestScreen`, `GraphicsReconciler` (P0's `Reconciler`), `GraphicsRecommendation`/`RecommendGraphics`, `GraphicsBootMarker`/`GraphicsFallbackWarranted`/`RecoverGraphics`. |
+| `graphics_policy.h/.cpp` | `IsGraphicsRow`, the correction/validation reason keys, `AntiAliasingTokens`, `FilteringTokens`, `PolicyRenderer`, `GuestScreenPlan`/`PlanGuestScreen`, `GraphicsReconciler` (P0's `Reconciler`), `GraphicsRecommendation`/`RecommendGraphics`, `RecoverGraphics`. |
 
 Both are P4-owned: they are new file names in `src/settings/`, not edits to P3's `{model,schema,store,migration,paths,service,cvars}.*`. `graphics_policy.cpp` includes `settings/service.h` for the `Reconciler` base and `settings/cvars.h` for the filtering value map; neither is modified.
 
@@ -573,18 +621,20 @@ Two invariants the tests pin: **a valid manual choice is never re-optimized** (a
 * **Measured machine** → the primary display's largest renderable size (1920x1080 here, 3840x2160 on a 4K primary), the backend this boot actually uses, `native` AA **only** when the device verified its sample semantics, and `native` filtering. Filtering deliberately stays the title's own choice: the ceiling is a fact that bounds what the user may *pick*, not a preference to impose, and `anti_aliasing`'s `native` is the one field the measurement genuinely gates.
 * **Unknown hardware** (no usable renderer, or no producible size) → the bounded conservative route: 1280x720, the only usable backend (d3d12 as the last resort), `none`, `native`, with `conservative = true` and `settings.graphics.recommended_conservative` so the UI can say why.
 
-`GraphicsFallbackWarranted(marker)` is `attempted && !presented` — a first run or a boot that never reached presentation is not a graphics failure. `RecoverGraphics` returns the request untouched when no failure is recorded (no boot-time re-optimizing) and the safe floor when one is: **1280x720, the active backend, `none`, `native`** — the combination that presented on every machine this project measured — with `settings.graphics.recovered_from_failure`. The durable marker's shape is P4's (`GraphicsBootMarker`); *where* the boot writes and clears it is the coordinator's wiring, like P3's storage wiring.
+`RecoverGraphics` selects the conservative floor of 1280x720, the active
+backend, no anti-aliasing and native filtering.
 
-**The journal's retry policy (measured 2026-10-15).** `GraphicsBootState` (`src/settings/graphics_boot.{h,cpp}`) is the durable half — a per-profile `<settings>.graphics-boot.toml` that never rewrites the preferences file, protected from a concurrent live boot by a process-lifetime lock. Its rules, after the installed copy exposed a latch that outlived its failure (the installed-copy review's P8):
+**Graphics startup journal.** The per-profile `<settings>.graphics-boot.toml`
+records graphics attachment failures and the last configuration that presented
+a menu frame. An explicit graphics attachment failure starts one recovery boot
+and permits one retry of the saved request. A second graphics attachment
+failure keeps the fallback active until the requested combination changes.
+An interrupted retry can be attempted again. The journal is locked for the
+lifetime of the process, and saved preferences remain editable.
 
-* A boot that begins an attempt (`Begin`) and dies before the menu frame (`Presented`) leaves `pending`; the next boot at the **same request** recovers to last-known-good.
-* That request is then **retried exactly once** on a later boot: a retry that presents clears the recovery (the request proved itself), a retry that dies keeps the recovery until the request changes. Bounded, not an endless retry — a preference that fails twice stays on last-known-good.
-* A **clean close** before the menu frame (`Closed`) clears `pending` without spending the retry: quitting during a load is not a verdict on the request.
-* The signature keys on what the player **chose** (`RequestedValue`; `'auto'` renders as its own token), never on what it resolves to — so changing Auto to the size it already resolves to earns a fresh attempt, while the *effective* values decide only whether recovering would be a no-op (then the safe floor is used instead).
-
-Measured against the owner's real journal, copied verbatim into a disposable root (`out/_swap/gfx-journal/`, 2026-10-15): the latched request the old build silently downgraded to 1280x720 logs `settings_boot: the saved graphics request failed to present before; this boot retries it once` and boots the wide mode (guest 1280x540 x2, `video_mode 2560x1080`, presented); `resolution = 'auto'` boots wide through the same journal (a changed choice is a fresh attempt); and changing the row then answering **Restart now** boots the child into the new size (`restart2` leg: 960x540 x2 = 1920x1080). The same fixture measured the restart prompt's gate: `RestartPending()` compares each row's *current effective* value against the boot's baseline, so Auto → the size it already resolves to raises **no** prompt (`restart` leg: no restart requested, because nothing would change), while a change that alters the effective size does (`restart2`). The pre-fix boots and the poisoning journal itself are kept under `out/_swap/gfx-journal/owner/`. `settings_graphics` pins the state machine (recover → retry → heal; a second failure latches; a clean close keeps the retry; a changed choice re-attempts even on the same pixels).
-
-**Not wired (open):** the *recovered* state is visible in the log only — the menu-facing "show `settings.graphics.recovered_from_failure` when `GraphicsFallback::needed`" item in the UI table is still undone, and the latched (second-failure) case keeps showing the requested value while the boot runs last-known-good.
+The main-menu recovery message appears when a recorded graphics failure
+caused the current boot to apply fallback quality settings. Explicit safe mode
+and journal storage errors use their own boot diagnostics.
 
 ### 6. The render path: the guest-size plan, and what was measured
 
@@ -1500,7 +1550,8 @@ fullscreen and maximized windows retain their display bounds. Mobile switches it
 allowed device orientation at that boundary. Interface assets and gameplay HUD
 layout each follow their own choice.
 
-Both orientations render the same landscape source;
+Gameplay and unadapted interface routes render the landscape source; authored
+portrait Interface routes use compact targets with equivalent camera coverage;
 portrait gameplay crops its centre at a uniform scale. For 16:9 at 1x the source
 is still 1280x720, with a 405x720 visible viewport. The camera projection and
 vertical FOV are unchanged. The title, main menu, connection/content scan and song loading fill the portrait
@@ -1617,8 +1668,9 @@ the opt-in policy at swap boundaries; leaving gameplay disables it.
 This reduces main-scene pixel shading, not geometry submission, full-size
 attachment allocation, or all resolve/presentation work. The main EDRAM pair
 is guarded by its measured register identity, so an unrecognized layout keeps
-full rendering. `--portrait_render_cutoff=false` restores the original full
-rendering for comparisons; `--draw_visible_region_probe=true` records bounded
+full rendering. With compact gameplay targets, `--portrait_render_cutoff=false`
+only disables the scissor optimization for a cropped fallback frame; it does not
+disable compact rendering. `--draw_visible_region_probe=true` records bounded
 scissor-area counters. Those counters describe rasterization bounds, not actual
 fragment invocations or GPU timestamps. The comparison evidence and scale
 results are recorded in [the Vulkan performance record](../engine/vulkan-performance.md).

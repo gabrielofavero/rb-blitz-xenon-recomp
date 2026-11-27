@@ -78,6 +78,7 @@
 #include "input/input_icons.h"
 #include "input/effective_input.h"
 #include "input/native_menu.h"
+#include "ui/portrait_dialog.h"
 #include "input/remap.h"
 #include "input/title_input.h"
 #include "messages/messages_update.h"
@@ -957,6 +958,11 @@ bool TakeExists(PPCContext& ctx, uint8_t* base) {
   bool recovery_answer = false;
   if (::rb_blitz::loading::CrashRecoveryQuery(path, &recovery_answer)) {
     WriteResultCell(base, ctx.r3.u32, recovery_answer ? 1u : 0u);
+    return true;
+  }
+  bool dialog_answer = false;
+  if (::rb_blitz::ui::portrait_dialog::AnswerQuery(path, &dialog_answer)) {
+    WriteResultCell(base, ctx.r3.u32, dialog_answer ? 1u : 0u);
     return true;
   }
   bool header_answer = false;

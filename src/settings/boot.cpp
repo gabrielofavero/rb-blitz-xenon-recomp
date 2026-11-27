@@ -6,6 +6,9 @@
 
 #include "settings/boot.h"
 #include "settings/ios_defaults.h"
+#if defined(RB_BLITZ_IOS)
+#include "platform/ios_display.h"
+#endif
 #if defined(RB_BLITZ_IOS_IMPORTER)
 #include "platform/ios_importer.h"
 #endif
@@ -170,7 +173,17 @@ void ProbeDisplay(CapabilityInputs& inputs) {
                                       static_cast<int32_t>(mode.dmPelsHeight)});
     }
   }
-#elif defined(__APPLE__) && !defined(RB_BLITZ_IOS)
+#elif defined(RB_BLITZ_IOS)
+  // Settings boot runs before SDL video initialization. Query UIKit directly;
+  // an unavailable SDL mode here otherwise authors every phone as 9:16.
+  const auto [width, height] = platform::IOSNativeDisplaySize();
+  if (width > 0 && height > 0) {
+    inputs.primary_display_size = {width, height};
+    inputs.primary_display_id = "ios:main";
+    inputs.display_enumeration_available = true;
+    inputs.display_modes.push_back(inputs.primary_display_size);
+  }
+#elif defined(__APPLE__)
   ProbeMacDisplay(inputs);
 #else
   const SDL_DisplayID display = SDL_GetPrimaryDisplay();
@@ -643,11 +656,12 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
     error.clear();
     const bool profile_journal_ready = resolution_profile_state_.Open(paths_.settings_file, &error);
     if (!profile_journal_ready && !error.empty()) diagnostics_.push_back(error);
-    const bool profile_recovery = !profile_journal_ready || resolution_profile_state_.Recover(wanted, &error);
-    if (profile_recovery)
-      diagnostics_.push_back(profile_journal_ready
-          ? "an unconfirmed render profile was interrupted; using 720p until the request changes"
-          : "render profile recovery storage is unavailable; using 720p");
+    const bool profile_failed = profile_journal_ready && resolution_profile_state_.Recover(wanted, &error);
+    const bool profile_recovery = profile_failed || !profile_journal_ready || !error.empty();
+    if (profile_failed)
+      diagnostics_.push_back("a render allocation was rejected; using 720p until the request changes");
+    else if (profile_recovery)
+      diagnostics_.push_back("render profile recovery storage is unavailable; using 720p");
     if (profile_recovery && !forced_safe) {
       // A failed quality allocation does not require rotating or reshaping the
       // presentation. Keep the boot's layout while reducing both quality tiers.
@@ -708,6 +722,18 @@ PathRoots SettingsBoot::ConfigurePaths(const std::filesystem::path& executable_d
           pixels.kind = ValueKind::kResolution;
           pixels.width = recovered.guest_size.width * recovered.draw_scale;
           pixels.height = recovered.guest_size.height * recovered.draw_scale;
+        }
+      }
+      if (!forced_safe && (profile_failed || (graphics_boot_.recovered() && !profile_recovery))) {
+        for (const auto id : {SettingId::kResolution, SettingId::kInterfaceResolution,
+                              SettingId::kGameplayResolution, SettingId::kInterfaceRenderScale,
+                              SettingId::kGameplayRenderScale, SettingId::kRenderScale,
+                              SettingId::kAntiAliasing, SettingId::kFiltering}) {
+          const auto row = selected.find(id);
+          if (row != selected.end() && !ValueEquals(row->second, attempt.at(id))) {
+            graphics_recovered_ = true;
+            break;
+          }
         }
       }
       service_->SetBootValues(std::move(selected), "settings.graphics.recovered_from_failure");
@@ -1188,6 +1214,11 @@ void SettingsBoot::LogConfigured() const {
 }
 
 bool SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
+  if (graphics_recovered_ || title::song_load_recovered.Get()) {
+    // This launch uses the short route; the saved startup preference is retained.
+    WriteRuntimeSetting("blitz.runtime.startup_mode", "fast", rex::SettingLayer::kRuntime).accepted();
+    REXLOG_INFO("settings_boot: recovery uses fast startup for this launch");
+  }
   active_renderer_ = active_renderer.empty() || active_renderer == "any"
                          ? kFallbackBackend : active_renderer;
   // Plugin flags now contain the developer config, environment and CLI values replayed at
@@ -1355,6 +1386,9 @@ bool SettingsBoot::BeforeGraphicsSetup(const std::string& active_renderer) {
           : ProfileResolution(value.text, service_->ResolutionProfileDisplay());
       if (!ProfileGuestFrame(pixels, profile_draw_scale_).supported) {
         REXLOG_ERROR("settings_boot: requested render profile {}x{} cannot be represented exactly", pixels.width, pixels.height);
+        std::string error;
+        if (resolution_profile_state_.active() && !resolution_profile_state_.Rejected(&error))
+          REXLOG_WARN("settings_boot: cannot record rejected render profile: {}", error);
         return false;
       }
     }
@@ -1416,6 +1450,7 @@ void SettingsBoot::MenuFrame() {
   if (++menu_frames_ % 30 != 0) return;
   std::lock_guard lock(graphics_marker_mutex_);
   if (menu_presented_) return;
+  if (ObserveResolutionAllocationFailure()) return;
   if (!presented_probe_()) return;
   std::string error;
   if (graphics_boot_.active() && !probe_render_active_ && !graphics_marker_attempted_) {
@@ -1445,9 +1480,19 @@ void SettingsBoot::Closing() {
   std::lock_guard lock(graphics_marker_mutex_);
   menu_presented_ = true;
   std::string error;
+  ObserveResolutionAllocationFailure();
   if (!graphics_boot_.Closed(&error)) REXLOG_WARN("settings_boot: {}", error);
-  if (!resolution_profile_state_.Closed(&error, sink_ && sink_->restart_accepted()))
+  if (!resolution_profile_state_.Closed(&error))
     REXLOG_WARN("settings_boot: {}", error);
+}
+
+void SettingsBoot::NoteGraphicsStartupFailure() {
+  std::lock_guard lock(graphics_marker_mutex_);
+  if (probe_render_active_ || title::settings_safe_graphics.Get() || !graphics_boot_.active())
+    return;
+  std::string error;
+  if (!graphics_boot_.Rejected(&error))
+    REXLOG_WARN("settings_boot: cannot record graphics startup refusal: {}", error);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1888,6 +1933,18 @@ void SettingsBoot::AcknowledgeControllerLayout(uint64_t ticket, const std::strin
                   {{SettingId::kButtonScheme, HotApplyStatus::kApplied, {}}}, generation);
 }
 
+bool SettingsBoot::ObserveResolutionAllocationFailure() {
+  if (resolution_allocation_failed_) return true;
+  if (!resolution_failure_probe_ || !resolution_failure_probe_()) return false;
+  resolution_allocation_failed_ = true;
+  std::string error;
+  if (resolution_profile_state_.active() && !resolution_profile_state_.Rejected(&error))
+    REXLOG_WARN("settings_boot: cannot record rejected render allocation: {}", error);
+  REXLOG_ERROR("settings_boot: render allocation failed; stopping this attempt and retaining 720p recovery for relaunch");
+  if (resolution_failure_handler_) resolution_failure_handler_();
+  return true;
+}
+
 bool SettingsBoot::BeginResolutionProfileFrame(SettingId id, const Value& value) {
   if (!service_ || !IsResolutionProfile(id)) return false;
   const bool mobile = id == SettingId::kInterfaceRenderScale || id == SettingId::kGameplayRenderScale;
@@ -1896,14 +1953,7 @@ bool SettingsBoot::BeginResolutionProfileFrame(SettingId id, const Value& value)
   const auto fingerprint = ResolutionToken(pixels) + "@" + std::to_string(profile_draw_scale_);
   std::lock_guard lock(graphics_marker_mutex_);
   std::string error;
-  if (resolution_present_probe_) {
-    const auto refresh = resolution_present_probe_();
-    if (refresh > resolution_last_refresh_ && resolution_active_ready_ &&
-        resolution_active_context_ != SettingId::kUnknown)
-      if (!resolution_profile_state_.Presented(resolution_active_context_, resolution_active_fingerprint_, &error))
-        REXLOG_WARN("settings_boot: cannot confirm render profile: {}", error);
-    resolution_last_refresh_ = refresh;
-  }
+  if (ObserveResolutionAllocationFailure()) return false;
   // Arm actual allocation changes, not saves awaiting restart. Re-arming the
   // unchanged running frame against a newly saved high profile would mark that
   // request failed on an intentional restart before it has ever been attempted.
@@ -1943,11 +1993,8 @@ bool SettingsBoot::BeginResolutionProfileFrame(SettingId id, const Value& value)
     REXLOG_WARN("settings_boot: render profile attempt could not be recorded: {}", error);
     if (pixels.height > 720 || profile_draw_scale_ > 1) return false;
   }
-  if (resolution_active_context_ != id || resolution_active_fingerprint_ != fingerprint)
-    resolution_active_ready_ = false;
   resolution_active_context_ = id;
   resolution_active_fingerprint_ = fingerprint;
-  resolution_active_value_ = value;
   return true;
 }
 
@@ -1957,11 +2004,6 @@ void SettingsBoot::NoteResolutionProfileQueued(SettingId id, uint64_t generation
 
 void SettingsBoot::AcknowledgeResolutionProfile(SettingId id, const Value& value, bool applied,
                                                 const std::string& error) {
-  {
-    std::lock_guard lock(graphics_marker_mutex_);
-    if (id == resolution_active_context_ && ValueEquals(value, resolution_active_value_))
-      resolution_active_ready_ = applied;
-  }
   const auto queued = resolution_profiles_queued_.find(id);
   if (queued == resolution_profiles_queued_.end() || !ValueEquals(queued->second.second, value)) return;
   const auto generation = queued->second.first;

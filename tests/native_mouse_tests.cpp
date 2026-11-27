@@ -5,12 +5,78 @@
 #include "input/reading_viewport.h"
 #include "input/inline_help.h"
 #include "input/dialog_prompts.h"
+#include "input/dialog_target.h"
+#include "ui/portrait_dialog_state.h"
+#include <atomic>
+#include <thread>
 #include "input/pad_packet.h"
 #include <unordered_map>
 using namespace rb_blitz::input;
 using namespace rb_blitz::test;
 
 int main() {
+  BeginCase("portrait overlay consumes one current native action and rejects stale owners");
+  {
+    namespace modal = rb_blitz::ui::portrait_dialog;
+    modal::State state;
+    state.Label(100, true, "A localized message");
+    state.Label(100, false, "<alt1>A</alt1> Continue");
+    state.Open();
+    state.Observe(1, 2, 100, true);
+    auto shown = state.Current();
+    CHECK_TRUE(shown.active);
+    CHECK_TRUE(shown.body == "A localized message");
+    CHECK_TRUE(shown.caption == "Continue");
+    CHECK_FALSE(state.TakeConfirm());
+    CHECK_TRUE(state.Confirm(shown.generation));
+    CHECK_FALSE(state.Confirm(shown.generation));
+    CHECK_TRUE(state.TakeConfirm());
+    CHECK_FALSE(state.TakeConfirm());
+    state.Close();
+    CHECK_FALSE(state.Current().active);
+    CHECK_FALSE(state.Confirm(shown.generation));
+    state.Open();
+    CHECK_FALSE(state.Confirm(shown.generation));
+    shown = state.Current();
+    CHECK_TRUE(state.Confirm(shown.generation));
+    state.Observe(3, 4, 101, false);
+    CHECK_FALSE(state.Current().active);
+    CHECK_FALSE(state.TakeConfirm());
+    state.Close();
+    state.Open();
+    state.Observe(1, 2, 100, true);
+    shown = state.Current();
+    state.Label(100, true, "A replacement message");
+    CHECK_FALSE(state.Confirm(shown.generation));
+    CHECK_TRUE(state.Current().body == "A replacement message");
+    CHECK_TRUE(modal::PlainText("<b>Title</b>\nBody") == "Title\nBody");
+    CHECK_TRUE(modal::PlainText("<alt1>A</alt1>").empty());
+    state.Observe(1, 2, 100, false); // landscape never takes modal input
+    CHECK_FALSE(state.Current().active);
+    CHECK_FALSE(state.Confirm(state.Current().generation));
+  }
+  BeginCase("portrait overlay leaves the native dialog visible until its text is available");
+  {
+    rb_blitz::ui::portrait_dialog::State state;
+    state.Open(); state.Observe(1, 2, 100, true);
+    CHECK_FALSE(state.Current().active);
+    CHECK_FALSE(state.Confirm(state.Current().generation));
+    std::thread guest([&] { state.Label(100, true, "Ready"); }); guest.join();
+    auto shown = state.Current();
+    CHECK_TRUE(shown.active);
+    CHECK_TRUE(shown.caption == "Continue");
+    std::thread host([&] { state.Confirm(shown.generation); }); host.join();
+    CHECK_TRUE(state.TakeConfirm());
+  }
+  BeginCase("focused UIPanel resolves its loaded directory from the panel view");
+  {
+    constexpr uint32_t panel = 0x40F0A918, directory = 0x4177A6A8;
+    const std::unordered_map<uint32_t, uint32_t> words{
+        {panel + 8, directory}, {panel + 52, 0}};
+    const auto read = [&](uint32_t address) { return words.at(address); };
+    CHECK_EQ(PanelDirectoryFromPanel(panel, read), directory);
+    CHECK_EQ(PanelDirectoryFromPanel(0, read), 0u);
+  }
   BeginCase("transition scene lookups use ObjectDir rather than its drawable or virtual object base");
   {
     constexpr uint32_t directory = 0x1000, drawable = directory + 156, object = 0x1300;
@@ -309,6 +375,69 @@ int main() {
   popup_queue.Context(1, 0, true, 21); // focus-less popup replaces another panel
   CHECK_EQ(popup_queue.SamplePad(), 0);
   CHECK_FALSE(popup_queue.NextFrame());
+
+  BeginCase("modal button bounds cross guest threads and expire with their owning panel");
+  {
+    DialogTargetPublisher publisher;
+    const DialogTargetContext context{1, 0, 20, 100, 20, true, true};
+    std::thread poll([&] { publisher.Context(context, 10); });
+    poll.join();
+    std::thread draw([&] {
+      publisher.Capture(publisher.Snapshot(), {.2f, .4f, .8f, .6f}, 0x1000);
+    });
+    draw.join();
+    CHECK_EQ(publisher.Hit({.5f, .5f}, 1, 0, 20, 11), 0x1000);
+    CHECK_EQ(publisher.Hit({.19f, .5f}, 1, 0, 20, 11), 0);
+    CHECK_EQ(publisher.Hit({.5f, .5f}, 1, 0, 0, 11), 0);
+    CHECK_EQ(publisher.Hit({.5f, .5f}, 1, 0, 20, 12), 0);
+    const DialogTargetContext next{1, 0, 21, 101, 21, true, true};
+    publisher.Context(next, 11);
+    publisher.Capture(context, {.2f, .4f, .8f, .6f}, 0x1000);
+    CHECK_EQ(publisher.Hit({.5f, .5f}, 1, 0, 21, 12), 0);
+    publisher.Capture(publisher.Snapshot(), {NAN, .4f, .8f, .6f}, 0x1000);
+    CHECK_EQ(publisher.Hit({.5f, .5f}, 1, 0, 21, 12), 0);
+    publisher.Capture(publisher.Snapshot(), {.2f, .4f, .8f, .6f}, 0x1000);
+    CHECK_EQ(publisher.Hit({.5f, .5f}, 1, 0, 21, 12), 0x1000);
+    publisher.Context({1, 2, 30, 102, 0, true, false}, 12);
+    CHECK_EQ(publisher.Hit({.5f, .5f}, 1, 2, 0, 12), 0);
+  }
+  BeginCase("modal captures use the published poll sequence rather than draw-thread frame locals");
+  {
+    DialogTargetPublisher publisher;
+    const DialogTargetContext context{1, 0, 20, 100, 20, true, true};
+    std::thread poll([&] { publisher.Context(context, 842); }); poll.join();
+    std::thread draw([&] {
+      thread_local uint32_t draw_frame = 0;
+      const auto snapshot = publisher.Snapshot();
+      if (draw_frame == 0 && snapshot.poll_frame == 842)
+        publisher.Capture(snapshot, {.2f, .4f, .8f, .6f}, 0x1000);
+    }); draw.join();
+    // Advancing the poll sequence keeps the preceding draw's targets alive.
+    publisher.Context(context, 843);
+    CHECK_EQ(publisher.Hit({.5f, .5f}, 1, 0, 20, 843), 0x1000);
+    publisher.Context(context, 844);
+    CHECK_EQ(publisher.Hit({.5f, .5f}, 1, 0, 20, 844), 0);
+  }
+  BeginCase("concurrent modal publication exposes complete context snapshots");
+  {
+    DialogTargetPublisher publisher;
+    std::atomic<bool> complete{false}, consistent{true};
+    std::thread poll([&] {
+      for (uint32_t i = 1; i < 4000; ++i)
+        publisher.Context({i, i, i, i, i, true, true}, i);
+      complete = true;
+    });
+    std::thread draw([&] {
+      while (!complete) {
+        const auto value = publisher.Snapshot();
+        if (value.screen != value.focus || value.focus != value.directory ||
+            value.directory != value.scope || value.scope != value.poll_frame) consistent = false;
+        publisher.Capture(value, {.2f, .4f, .8f, .6f}, 0x1000);
+      }
+    });
+    poll.join(); draw.join();
+    CHECK_TRUE(consistent.load());
+  }
 
   BeginCase("dialog action spans use native measured advances and leave the gap inert");
   const auto measure_fixture = [](std::u16string_view text) {

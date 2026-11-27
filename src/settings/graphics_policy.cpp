@@ -377,10 +377,6 @@ Value ResolutionPreferenceForBoot(const CapabilitySnapshot& caps, const Value& r
   return requested;
 }
 
-bool GraphicsFallbackWarranted(const GraphicsBootMarker& marker) {
-  return marker.attempted && !marker.presented;
-}
-
 GraphicsFallback RecoverGraphics(const CapabilitySnapshot& caps,
                                  const Value& requested_resolution,
                                  std::string_view requested_renderer, bool previous_boot_failed) {

@@ -77,6 +77,18 @@ inline PortraitSplashLayout PortraitSplash(float aspect) {
 }
 
 inline constexpr float kPortraitMenuRowStep = 62.f;
+
+struct PortraitPauseLayout {
+  float width, list_scale;
+  float title_z = 174, list_z = 120;
+  int rows = 8;
+};
+
+inline PortraitPauseLayout PortraitPause(float aspect) {
+  const float width = PortraitSplash(aspect).width * .88f;
+  // Eight native actions fit between the heading and the separate footer.
+  return {width, std::min(width / 364.5f, 286.f / (7 * kPortraitMenuRowStep + 26.375f))};
+}
 inline constexpr float kPortraitSongRowHeight = 55;
 inline constexpr float kPortraitSongRowStep = 60;
 inline constexpr float kPortraitSongArrowScale = .9f;
@@ -101,8 +113,8 @@ inline PortraitSongsLayout PortraitSongs(float aspect) {
 
 struct PortraitStoreDialogLayout {
   float width;
-  float height = 200, text_top = 46, text_height = 94;
-  float action_z = -76, action_height = 32, close_z = 76, close_size = 36;
+  float height = 216, text_top = 46, text_height = 94;
+  float action_z = -80, action_height = 40, close_z = 76, close_size = 36;
   float TextWidth() const { return width - 28; }
   float ActionWidth() const { return width * .65f; }
   float CloseX() const { return width / 2 - 24; }
@@ -307,6 +319,7 @@ inline bool PortraitSplashScreen(std::string_view screen, std::string_view panel
          (screen == "autosave_warning_screen" && panel == "autosave_warning_panel") ||
          (screen == "server_connect_screen" && panel == "server_connect_panel") ||
          (screen == "loading_screen" && panel == "loading_panel") ||
+         panel == "pause_panel" ||
          panel == "pause_exit_game_panel" || panel == "error_popup_panel" ||
          panel == "rbbz_download_panel" || panel == "rbbz_search_loading_panel" ||
          panel == "rbbz_library_panel" ||

@@ -32,8 +32,10 @@ bool inject = false;
 bool inject_stall = false;
 uint32_t attempt_seconds = 0;
 }
-void ConfigureCrashRecovery(const std::filesystem::path& cache_root, bool settings_restart_boot) {
+void ConfigureCrashRecovery(const std::filesystem::path& cache_root, bool settings_restart_boot,
+                            bool graphics_recovered) {
   presentation.recovered = rb_blitz::settings::title::song_load_recovered.Get();
+  presentation.graphics_recovered = graphics_recovered;
   presentation.settings_restart = settings_restart_boot;
   presentation.fast_startup = rb_blitz::settings::title::startup_mode.Get() == "fast";
   if (presentation.fast_startup)
@@ -101,7 +103,8 @@ bool CrashRecoveryQuery(std::string_view path, bool* answer) {
     REXLOG_WARN("startup: purchased short-boot error-screen probe: {}", path);
   const bool handled = presentation.Query(path, answer);
   if (handled && *answer && path == "rbbz-load/recovery/popup") {
-    REXLOG_INFO("load_recovery: main menu ready; consuming native crash dialog once");
+    REXLOG_INFO("load_recovery: main menu ready; consuming native recovery dialog once (graphics={})",
+                presentation.graphics_recovered);
   }
   return handled;
 }

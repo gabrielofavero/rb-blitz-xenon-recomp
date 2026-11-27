@@ -24,6 +24,9 @@ bool EmptySplashList(const PPCContext& ctx, const uint8_t* base) {
 }
 
 namespace rb_blitz::hooks::startup_splasher {
+void ResetBootState() {
+  native_logo_load_started.store(false, std::memory_order_release);
+}
 bool NativeLogoLoadStarted() {
   return native_logo_load_started.load(std::memory_order_acquire);
 }

@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import plistlib
 import shutil
@@ -290,7 +291,7 @@ class PackagingTests(unittest.TestCase):
             binary = root / "Frameworks/MoltenVK.framework/MoltenVK"
             binary.parent.mkdir(parents=True)
             binary.write_bytes(b"framework image")
-            self.assertEqual(package.find_library("libMoltenVK.dylib", [root]), binary)
+            self.assertEqual(package.find_library("libMoltenVK.dylib", [root]), binary.resolve())
             with patch.object(package, "audit_device_binary"), \
                  patch.object(package, "load_commands", side_effect=lambda path:
                      [("LC_LOAD_DYLIB", "@rpath/MoltenVK.framework/MoltenVK")] if path.name == "rb_blitz" else []):
@@ -298,7 +299,7 @@ class PackagingTests(unittest.TestCase):
                     (root / library).write_bytes(library.encode())
                 (root / "rb_blitz").write_bytes(b"host")
                 libraries = package.collect_libraries(root, [root], "17.0")
-                self.assertEqual(libraries["libMoltenVK.dylib"], binary)
+                self.assertEqual(libraries["libMoltenVK.dylib"], binary.resolve())
 
     def test_archive_layout_preserves_executable_mode_and_rejects_links(self):
         with tempfile.TemporaryDirectory() as name:
@@ -319,18 +320,102 @@ class PackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "bundle symlink"):
                 package.archive_ipa(payload, root / "bad.ipa")
 
-    def test_cli_refuses_to_overwrite_an_existing_ipa(self):
-        with tempfile.TemporaryDirectory() as name:
-            root = Path(name)
-            with (ROOT / "installer/config/pins.toml").open("rb") as stream:
-                version = tomllib.load(stream)["installer"]["version"]
-            existing = root / f"RockBandBlitz-{version}-arm64-ios.ipa"
-            existing.write_bytes(b"previous artifact")
-            arguments = ["package.py", "--build-dir", name, "--controller-validator", "unused",
-                         "--output", name]
-            with patch.object(sys, "argv", arguments), self.assertRaisesRegex(ValueError, "archive the existing IPA"):
-                package.main()
-            self.assertEqual(existing.read_bytes(), b"previous artifact")
+    def test_cli_replaces_current_mode_only_after_bundle_and_archive_audits(self):
+        for mode in ("bundled", "importer"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as name:
+                root = Path(name)
+                build = root / "build"
+                build.mkdir()
+                binary = b"fresh binary" + (package.IMPORTER_IDENTITY if mode == "importer" else b"")
+                (build / "rb_blitz").write_bytes(binary)
+                output = root / "packages"
+                output.mkdir()
+                with (ROOT / "installer/config/pins.toml").open("rb") as stream:
+                    version = tomllib.load(stream)["installer"]["version"]
+                suffix = "-importer" if mode == "importer" else ""
+                existing = output / f"RockBandBlitz-{version}-arm64-ios{suffix}.ipa"
+                existing.write_bytes(b"previous artifact")
+                audit = existing.with_suffix(".audit.json")
+                audit.write_text("previous audit")
+                other = output / (f"RockBandBlitz-{version}-arm64-ios.ipa" if suffix else
+                                  f"RockBandBlitz-{version}-arm64-ios-importer.ipa")
+                other.write_bytes(b"other mode")
+                events = []
+                def checked(stage):
+                    self.assertEqual(existing.read_bytes(), b"previous artifact")
+                    self.assertEqual(audit.read_text(), "previous audit")
+                    events.append(stage)
+                def resources(app, *args):
+                    checked("resources")
+                    (app / "fresh.txt").write_text("fresh resource")
+                def preparation(app):
+                    checked("preparation")
+                def binaries(app, *args):
+                    checked("binaries")
+                    return []
+                original_archive = package.archive_ipa
+                def archive(payload, candidate):
+                    original_archive(payload, candidate)
+                    checked("archive")
+                arguments = ["package.py", "--mode", mode, "--build-dir", str(build),
+                             "--controller-validator", "unused", "--output", str(output)]
+                with patch.object(sys, "argv", arguments), \
+                     patch.object(package, "collect_libraries", return_value={}), \
+                     patch.object(package, "stage_resources", side_effect=resources), \
+                     patch.object(package, "audit_preparation", side_effect=preparation), \
+                     patch.object(package, "write_info"), \
+                     patch.object(package, "prepare_binaries", side_effect=binaries), \
+                     patch.object(package, "archive_ipa", side_effect=archive), \
+                     patch("builtins.print"):
+                    package.main()
+                self.assertEqual(events, ["resources", "preparation", "binaries", "archive"])
+                with zipfile.ZipFile(existing) as packaged:
+                    self.assertIsNone(packaged.testzip())
+                    self.assertEqual(packaged.read("Payload/Rock Band Blitz.app/rb_blitz"), binary)
+                    self.assertEqual(packaged.read("Payload/Rock Band Blitz.app/fresh.txt"), b"fresh resource")
+                report = json.loads(audit.read_text())
+                self.assertEqual(report["assetMode"], mode)
+                self.assertEqual(report["sha256"], package.sha256(existing))
+                self.assertEqual(other.read_bytes(), b"other mode")
+                self.assertEqual(set(output.glob("*.ipa")), {existing, other})
+                self.assertFalse(any(path.is_dir() for path in output.iterdir()))
+
+    def test_cli_preserves_current_ipa_and_audit_when_staging_or_archive_validation_fails(self):
+        for mode in ("bundled", "importer"):
+            for stage in ("resources", "archive"):
+                with self.subTest(mode=mode, stage=stage), tempfile.TemporaryDirectory() as name:
+                    root = Path(name)
+                    build = root / "build"
+                    build.mkdir()
+                    binary = b"fresh binary" + (package.IMPORTER_IDENTITY if mode == "importer" else b"")
+                    (build / "rb_blitz").write_bytes(binary)
+                    output = root / "packages"
+                    output.mkdir()
+                    with (ROOT / "installer/config/pins.toml").open("rb") as stream:
+                        version = tomllib.load(stream)["installer"]["version"]
+                    suffix = "-importer" if mode == "importer" else ""
+                    existing = output / f"RockBandBlitz-{version}-arm64-ios{suffix}.ipa"
+                    existing.write_bytes(b"previous artifact")
+                    audit = existing.with_suffix(".audit.json")
+                    audit.write_text("previous audit")
+                    arguments = ["package.py", "--mode", mode, "--build-dir", str(build),
+                                 "--controller-validator", "unused", "--output", str(output)]
+                    expected_error = "fixture staging failed" if stage == "resources" else "archive integrity"
+                    resource_error = ValueError("fixture staging failed") if stage == "resources" else None
+                    # Force the real archive writer's integrity check to fail,
+                    # after it has produced a candidate beside the old package.
+                    with patch.object(sys, "argv", arguments), \
+                         patch.object(package, "collect_libraries", return_value={}), \
+                         patch.object(package, "stage_resources", side_effect=resource_error), \
+                         patch.object(package, "audit_preparation"), \
+                         patch.object(package, "write_info"), \
+                         patch.object(package, "prepare_binaries", return_value=[]), \
+                         patch.object(package.zipfile.ZipFile, "testzip", return_value="damaged-member"), \
+                         self.assertRaisesRegex(ValueError, expected_error):
+                        package.main()
+                    self.assertEqual(existing.read_bytes(), b"previous artifact")
+                    self.assertEqual(audit.read_text(), "previous audit")
+                    self.assertEqual(set(output.iterdir()), {existing, audit})
 
     def test_graphics_catalogue_requires_a_current_game_build(self):
         with tempfile.TemporaryDirectory() as name:

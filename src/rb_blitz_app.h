@@ -75,6 +75,7 @@
 #include "ui/help_overlay.h"
 #include "ui/notification_overlay.h"
 #include "ui/achievements_overlay.h"
+#include "ui/portrait_dialog.h"
 #include "ui/notifications.h"
 #include "ui/boot_loading_art.h"
 #include "ui/boot_loading_icon.h"
@@ -118,31 +119,40 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
  public:
   RbBlitzApp() : TitleApp("rb_blitz", kPPCImageConfig) {}
 
-  int RunEntry(const rex::CLIArgList& args) {
+  int RunEntry(const rex::CLIArgList& args, bool restarting = false) {
+    settings_restart_boot_ = restarting;
     startup_args_ = rb_blitz::platform::NormalizeBootstrapArguments(args);
 #if defined(RB_BLITZ_IOS_IMPORTER)
-    // The importer owns UIKit until assets are ready, before any runtime mounts or drivers exist.
-    if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) return 1;
-    rex::ScopeGuard release_import_ui([] { SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS); });
-    std::atomic<bool> ready{false};
-    auto importer = rb_blitz::platform::StartIOSImporter([&ready] { ready.store(true); });
-    if (!importer) return 1;
-    for (;;) {
-      while (!ready.load()) {
-        SDL_PumpEvents();
-        SDL_Delay(8);
+    if (!restarting) {
+      // The importer owns UIKit until assets are ready, before any runtime mounts or drivers exist.
+      if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) return 1;
+      rex::ScopeGuard release_import_ui([] { SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS); });
+      std::atomic<bool> ready{false};
+      auto importer = rb_blitz::platform::StartIOSImporter([&ready] { ready.store(true); });
+      if (!importer) return 1;
+      for (;;) {
+        while (!ready.load()) {
+          SDL_PumpEvents();
+          SDL_Delay(8);
+        }
+        ready.store(false);
+        if (importer->PrepareLaunch()) break;
       }
-      ready.store(false);
-      if (importer->PrepareLaunch()) break;
+      importer.reset();
     }
-    importer.reset();
 #endif
     try {
       if (!Init(startup_args_)) {
         OnShutdown();
         return Shutdown();
       }
-      if (LaunchTitle()) Run();
+      if (const auto launched = LaunchTitle(); launched) {
+        Run();
+      } else if (settings_boot_ && std::string_view(launched.error().message).starts_with(
+                                      "runtime attach failed, graphics attach failed, ")) {
+        // The SDK identifies the failed subsystem at the title attachment boundary.
+        settings_boot_->NoteGraphicsStartupFailure();
+      }
       return Shutdown();
     } catch (const StartupCancelled&) {
       if (!on_init_complete_) OnShutdown();
@@ -153,6 +163,10 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
       throw;
     }
   }
+
+#if defined(RB_BLITZ_IOS)
+  const auto& IOSRestartArguments() const { return ios_restart_.arguments(); }
+#endif
 
  protected:
   rex::AppSysRequirements GetRequirements() const override {
@@ -274,6 +288,11 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
   }
 
   rex::Result<void> OnInit() override {
+    rb_blitz::diag::shader_trace::ResetBootState();
+    rb_blitz::hooks::startup_splasher::ResetBootState();
+#if defined(RB_BLITZ_IOS)
+    rb_blitz::platform::SetIOSInSong(false);
+#endif
     bool initialized = false;
     rex::ScopeGuard rollback([&] { if (!initialized) OnShutdown(); });
     selected_backend_ = GetGraphics().GetDriverName();
@@ -416,9 +435,12 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
     settings_boot_->FinishInit();
     log_stage("settings_finish_init");
     settings_boot_->SetPresentedProbe([this] { return HasNonblankGuestFrame(); });
-    settings_boot_->SetResolutionPresentProbe([] {
+    settings_boot_->SetResolutionFailureProbe([] {
       auto* presentation = REX_INTERFACE(rex::gpu::IGraphicsPresentation);
-      return presentation ? presentation->GetPresentationState().guest_output_refresh : 0;
+      return presentation && presentation->GetPresentationState().resolution_allocation_failed;
+    });
+    settings_boot_->SetResolutionFailureHandler([this] {
+      GetUI().PostTask([this] { RequestShutdown(); });
     });
     ConfigureDisplayAndRestart();
     rb_blitz::store::InstallPathProbe();
@@ -455,7 +477,8 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
     else
       REXLOG_WARN("crash_diagnostics: could not install native crash capture");
     rb_blitz::loading::ConfigureLoadTrace();
-    rb_blitz::loading::ConfigureCrashRecovery(CacheRoot(), settings_restart_boot_);
+    rb_blitz::loading::ConfigureCrashRecovery(CacheRoot(), settings_restart_boot_,
+        settings_boot_ && settings_boot_->graphics_recovered());
     rb_blitz::graphics::ConfigureLoading(&title);
     coverage_recorder_ = rb_blitz::graphics::StartCoverage(
         rex::platform::GetExecutablePath(),CacheRoot(),UserRoot());
@@ -487,11 +510,14 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
     rb_blitz::input::InvalidateGameplayInput();
     ClearRegularDialogs();
     display_preview_.reset();
-    if (settings_boot_) settings_boot_->Closing();
     rex::diagnostics::compile_trace::Snapshot("title_stopping");
   }
 
   void OnTitleExit(rex::kernel::TitleExitReason) override {
+#if defined(RB_BLITZ_IOS)
+    // Unloading during an in-process restart must not arm a process-exit timer.
+    if (ios_restart_.arguments()) return;
+#endif
     if (!rb_blitz::platform::ArmExitDeadline()) std::_Exit(0);
     REXLOG_INFO("shutdown: guest exited; host cleanup has a 2000 ms process-exit deadline");
     RequestShutdown();
@@ -524,6 +550,10 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
     rb_blitz::ui::notifications::SharedQueue().Clear();
     coverage_recorder_.reset();
     display_preview_.reset();
+    if (settings_boot_) {
+      settings_boot_->SetResolutionFailureHandler({});
+      settings_boot_->Closing();
+    }
     settings_boot_.reset();
     if (on_init_complete_) REXLOG_INFO("Title shutdown completed");
   }
@@ -700,6 +730,7 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
     regular_dialogs_.clear();
     probe_overlay_.reset(); mouse_cursor_.reset(); help_overlay_.reset();
     notification_overlay_.reset(); achievement_browser_.reset(); music_player_.reset();
+    portrait_dialog_.reset();
   }
   void LogBootIdentity() {
     REXLOG_INFO("boot identity: {}", rex::GetBuildStamp());
@@ -760,7 +791,7 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
   std::unique_ptr<rb_blitz::ui::BootLoadingIcon> boot_loading_icon_;
   std::unique_ptr<rex::ui::IDialog> probe_overlay_, mouse_cursor_, touch_controls_;
   std::unique_ptr<rex::ui::IDialog> gameplay_presentation_, help_overlay_, notification_overlay_;
-  std::unique_ptr<rex::ui::IDialog> achievement_browser_, music_player_;
+  std::unique_ptr<rex::ui::IDialog> achievement_browser_, music_player_, portrait_dialog_;
   std::vector<rex::ScopeGuard> startup_dialogs_, regular_dialogs_;
   rex::ScopeGuard input_filter_, ui_listener_, notification_policy_, native_host_registration_;
   std::shared_ptr<NativeWindowHost> native_host_;
@@ -770,6 +801,7 @@ class RbBlitzApp final : public rex::app::TitleApp, public rex::ui::IUIEventList
 #if defined(RB_BLITZ_IOS)
   std::filesystem::path ios_documents_root_;
   bool ios_event_watch_ = false;
+  rb_blitz::platform::InProcessRestart ios_restart_;
 #endif
   rb_blitz::settings::DisplayHotkey display_hotkey_;
   std::unique_ptr<rb_blitz::settings::DisplayTrial> display_trial_;
@@ -791,6 +823,7 @@ inline void RbBlitzApp::CreateRegularDialogs() {
     return title.IsLoaded() ? &title.GetAchievementManager() : nullptr;
   });
   music_player_ = rb_blitz::ui::music::CreatePlayer(GetUI());
+  portrait_dialog_ = rb_blitz::ui::portrait_dialog::CreateOverlay(GetUI().GetStyle().toast);
   probe_overlay_ = rb_blitz::diag::CreateOverlayDialog([this] {
     rb_blitz::diag::WindowState state;
     auto native = GetUI().GetNativeWindow();
@@ -806,7 +839,7 @@ inline void RbBlitzApp::CreateRegularDialogs() {
     return state;
   });
   for (auto* dialog : {&mouse_cursor_, &help_overlay_, &notification_overlay_,
-                       &achievement_browser_, &music_player_, &probe_overlay_})
+                       &achievement_browser_, &music_player_, &probe_overlay_, &portrait_dialog_})
     AttachDialog(*dialog, regular_dialogs_);
 }
 
@@ -874,9 +907,19 @@ inline void RbBlitzApp::ConfigureDisplayAndRestart() {
     context.target = target;
     context.developer_arguments = rb_blitz::platform::CommandLineArguments();
     if (!context.developer_arguments.empty()) context.developer_arguments.erase(context.developer_arguments.begin());
+#if defined(RB_BLITZ_IOS)
+    // Use the current boot's filtered arguments on repeated in-process restarts.
+    context.developer_arguments.assign(startup_args_.GetAll().begin(), startup_args_.GetAll().end());
+#endif
     rb_blitz::dlc::DrainRefreshForRestart();
     bool ready = false;
     if (!GetUI().RunSynchronous([&] {
+#if defined(RB_BLITZ_IOS)
+      const auto outcome = ios_restart_.Request(saved, current, context);
+      if (error) *error = outcome.error;
+      ready = outcome.status == rb_blitz::settings::RestartStatus::kOk;
+      if (ready) REXLOG_INFO("settings_restart: recreating the iOS runtime after teardown");
+#else
       restart_coordinator_.ResetAfterFailure();
       const auto outcome = restart_coordinator_.Request(saved, current, id, context);
       if (error) *error = outcome.error;
@@ -886,6 +929,7 @@ inline void RbBlitzApp::ConfigureDisplayAndRestart() {
         if (error) *error = "the native window could not accept the replacement game";
       }
       if (ready) REXLOG_INFO("settings_restart: replacement game is waiting; native window stays open");
+#endif
     }) || !ready) return false;
     GetUI().PostTask([this] { RequestShutdown(); });
     return true;

@@ -22,7 +22,17 @@ bool menu_seen = false; // guest/UI thread only
 bool in_game_screen = false;
 std::atomic<bool> native_startup_panel_ready{false};
 std::atomic<bool> native_splash_ready{false};
+bool startup_finished = false;
+unsigned startup_budget = 16;
+std::string startup_context;
 } // namespace
+void ResetBootState() {
+  menu_seen = in_game_screen = startup_finished = false;
+  native_startup_panel_ready = false;
+  native_splash_ready = false;
+  startup_budget = 16;
+  startup_context.clear();
+}
 bool NativeStartupPanelReady() {
   return native_startup_panel_ready.load(std::memory_order_acquire);
 }
@@ -71,9 +81,6 @@ void ObserveScreen(std::string_view screen, std::string_view panel,
   // Small, always-on startup evidence for intermittent blank/blue boots. This
   // observes native UI state only; it cannot establish that pixels rendered.
   // Keep it independent of the expensive shader diagnostic switch.
-  static bool startup_finished = false;
-  static unsigned startup_budget = 16;
-  static std::string startup_context;
   if (!startup_finished && startup_budget) {
     const std::string context = std::string(screen) + "/" + std::string(panel) +
                                 (transitioning ? "/transition" : "/stable");

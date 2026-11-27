@@ -4,7 +4,8 @@
 #include <string_view>
 
 namespace rb_blitz::loading {
-void ConfigureCrashRecovery(const std::filesystem::path& cache_root, bool settings_restart_boot = false);
+void ConfigureCrashRecovery(const std::filesystem::path& cache_root, bool settings_restart_boot = false,
+                            bool graphics_recovered = false);
 void CloseCrashRecovery();
 void BeginCrashRecoveryAttempt();
 void BeforeSongLoadJob();

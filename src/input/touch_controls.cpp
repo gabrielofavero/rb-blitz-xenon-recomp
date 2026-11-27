@@ -23,6 +23,8 @@ bool PreviewEnabled() { return rb_blitz::settings::title::touch_preview.Get(); }
 #include "input/last_device.h"
 #include "input/input_capture.h"
 #include "input/native_menu.h"
+#include "hooks/render_settings.h"
+#include "settings/portrait_render_target.h"
 #include "input/touch_timing.h"
 #include "input/remap.h"
 #include "ui/achievements_overlay.h"
@@ -48,6 +50,19 @@ bool Available() {
   return g_foreground && GameScreenActive() && HostInputFocused() &&
          !SystemUIActive() && !ui::achievements::Active() && !capture::Armed();
 }
+MenuPoint LanePointToWindow(float x, float y) {
+  using namespace rb_blitz::settings;
+  const auto source = PresentationPointerSource(
+      {int32_t(BootRenderWidth()), int32_t(BootRenderHeight())},
+      {ReadSdkSetting<int32_t>("ui.video_mode_width"), ReadSdkSetting<int32_t>("ui.video_mode_height")},
+      ReadSdkSetting<bool>("gpu.xenos.present_source_aspect"));
+  return MenuPointToWindow({x, y}, int(g_layout.width), int(g_layout.height), source.width, source.height,
+      ReadSdkSetting<bool>("gpu.xenos.present_letterbox"),
+      ReadSdkSetting<bool>("gpu.xenos.present_allow_overscan_cutoff"),
+      ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_x"),
+      ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_y"));
+}
+
 void UpdateGestures(bool active) {
   g_gestures.SetActive(active);
   g_gestures.SetInvertedLaneSwipe(rb_blitz::settings::title::touch_lane_swipe.Get() != "normal");
@@ -55,14 +70,8 @@ void UpdateGestures(bool active) {
   const auto now = SDL_GetTicksNS();
   const auto rect = g_lane_timestamp && now - g_lane_timestamp < 100'000'000
       ? g_lane_powerup : Rect{};
-  const auto to_window = [&](float x, float y) {
-    return MenuPointToWindow({x, y}, int(g_layout.width), int(g_layout.height),
-        rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_width"), rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_height"),
-        rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_letterbox"), rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_allow_overscan_cutoff"),
-        rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_x"), rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_y"));
-  };
-  const auto first = to_window(rect.x, rect.y);
-  const auto last = to_window(rect.x + rect.width, rect.y + rect.height);
+  const auto first = LanePointToWindow(rect.x, rect.y);
+  const auto last = LanePointToWindow(rect.x + rect.width, rect.y + rect.height);
   g_powerup_target.SetTarget({first.x, first.y, last.x - first.x, last.y - first.y},
                             active && g_powerup_ready && rect.width > 0);
 }
@@ -284,10 +293,7 @@ bool ConsumeLanePointer(Phase phase, float x, float y) {
   const bool active = Available();
   std::lock_guard lock(g_mutex);
   UpdateGestures(active);
-  const auto point = MenuPointToWindow({x, y}, int(g_layout.width), int(g_layout.height),
-      rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_width"), rb_blitz::settings::ReadSdkSetting<int32_t>("ui.video_mode_height"),
-      rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_letterbox"), rb_blitz::settings::ReadSdkSetting<bool>("gpu.xenos.present_allow_overscan_cutoff"),
-      rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_x"), rb_blitz::settings::ReadSdkSetting<int32_t>("gpu.xenos.present_safe_area_y"));
+  const auto point = LanePointToWindow(x, y);
   return ObserveLanePointer({UINT64_MAX, 0, phase, point.x, point.y}).consumed;
 }
 bool ControlsVisible() { return g_visible && g_foreground && TouchInputActive() && ButtonsEnabled(); }

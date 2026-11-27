@@ -63,15 +63,20 @@ bool GraphicsBootState::Open(const std::filesystem::path& settings_file, std::st
   if (exists) {
     bool ok;
     const auto doc = toml::Document::Parse(text, &ok, error);
-    if (!ok || doc.Get("", "schema_version").value != "1") {
+    const auto version = doc.Get("", "schema_version").value;
+    if (!ok || (version != "1" && version != "2")) {
       if (error) *error = "unrecognized graphics startup journal; left untouched";
       return false;
     }
     pending_ = doc.Get("", "pending").value == "true";
     requested_ = doc.Get("", "requested").value;
-    recovery_for_ = doc.Get("", "recovery_for").value;
-    // An older journal has no `retried`: the request has not spent its retry yet.
-    retried_ = doc.Get("", "retried").value == "true";
+    if (version == "2") {
+      rejected_ = doc.Get("", "rejected").value == "true";
+      recovery_for_ = doc.Get("", "recovery_for").value;
+      retried_ = doc.Get("", "retried").value == "true";
+      if (pending_ && !rejected_ && doc.Get("", "retrying").value == "true")
+        retried_ = false;
+    }
     attempted_ = ReadValues(doc, "attempted");
     good_ = ReadValues(doc, "last_good");
   }
@@ -89,10 +94,8 @@ GraphicsValues GraphicsBootState::Select(const GraphicsValues& requested,
   const auto attempt = Signature(effective);
   recovered_ = false;
   retrying_ = false;
-  if (active_ && pending_ && requested_ == signature) {
-    // The last boot at this request died before the menu frame: recover now, and arm the one
-    // retry for a later boot. `retried_` is kept when it is already this request's, so a retry
-    // that dies again re-latches instead of arming another one.
+  if (active_ && pending_ && rejected_ && requested_ == signature) {
+    // A confirmed refusal during the retry keeps the recovery latched.
     recovered_ = true;
     if (recovery_for_ != signature) {
       recovery_for_ = signature;
@@ -102,7 +105,7 @@ GraphicsValues GraphicsBootState::Select(const GraphicsValues& requested,
     if (retried_) {
       recovered_ = true;  // the request failed twice already: it keeps the recovery values
     } else {
-      retrying_ = true;  // this boot spends the retry; a death re-latches it via `pending`
+      retrying_ = true;  // An interrupted retry can still receive a verdict.
     }
   } else {
     // A changed preference is a fresh attempt.
@@ -125,10 +128,16 @@ bool GraphicsBootState::Begin(const GraphicsValues& effective, std::string* erro
   if (!active_) return false;
   attempted_ = effective;
   pending_ = true;
+  rejected_ = false;
+  return Save(error);
+}
+bool GraphicsBootState::Rejected(std::string* error) {
+  if (!active_ || !pending_) return false;
+  rejected_ = true;
   return Save(error);
 }
 bool GraphicsBootState::Presented(std::string* error) {
-  if (!active_ || !pending_) return false;
+  if (!active_ || !pending_ || rejected_) return false;
   good_ = attempted_;
   pending_ = false;
   // The retry proved the request: it is an ordinary request again.
@@ -140,7 +149,7 @@ bool GraphicsBootState::Presented(std::string* error) {
   return Save(error);
 }
 bool GraphicsBootState::Closed(std::string* error) {
-  if (!active_ || !pending_) return true;
+  if (!active_ || !pending_ || rejected_) return true;
   pending_ = false;
   // A clean close before the menu frame says nothing about the request, so a retry that was
   // interrupted this way has not been spent and gets another chance on the next boot.
@@ -152,11 +161,13 @@ bool GraphicsBootState::Closed(std::string* error) {
 }
 bool GraphicsBootState::Save(std::string* error) {
   toml::Document doc;
-  doc.Set("", "schema_version", "1");
+  doc.Set("", "schema_version", "2");
   doc.Set("", "pending", pending_ ? "true" : "false");
+  doc.Set("", "rejected", rejected_ ? "true" : "false");
   doc.Set("", "requested", toml::RenderBasic(requested_));
   doc.Set("", "recovery_for", toml::RenderBasic(recovery_for_));
   doc.Set("", "retried", retried_ ? "true" : "false");
+  doc.Set("", "retrying", retrying_ ? "true" : "false");
   for (const auto& [section, values] :
        std::map<std::string, GraphicsValues>{{"attempted", attempted_}, {"last_good", good_}}) {
     for (const auto& [id, value] : values) {
@@ -180,18 +191,14 @@ bool ResolutionProfileState::Open(const std::filesystem::path& settings_file, st
   if (exists) {
     bool ok;
     const auto doc = toml::Document::Parse(text, &ok, error);
-    if (!ok || doc.Get("", "schema_version").value != "1") {
+    const auto version = doc.Get("", "schema_version").value;
+    if (!ok || (version != "1" && version != "2")) {
       if (error) *error = "unrecognized render profile journal; left untouched";
       return false;
     }
-    request_ = doc.Get("", "request").value;
-    failed_ = doc.Get("", "failed").value;
-    for (const auto id : {SettingId::kInterfaceResolution, SettingId::kGameplayResolution,
-                          SettingId::kInterfaceRenderScale, SettingId::kGameplayRenderScale}) {
-      const auto key = SettingIdToken(id);
-      if (const auto value = doc.Get("pending", key); value.found) pending_[id] = value.value;
-      if (const auto value = doc.Get("confirmed", key); value.found) confirmed_[id] = value.value;
-    }
+    // Version 1 also latched generic crashes and process kills. Its failed
+    // signatures carry no evidence that a graphics allocation was refused.
+    if (version == "2") failed_ = doc.Get("", "failed").value;
   }
   active_ = true;
   return true;
@@ -200,11 +207,10 @@ bool ResolutionProfileState::Open(const std::filesystem::path& settings_file, st
 bool ResolutionProfileState::Recover(const GraphicsValues& requested, std::string* error) {
   if (!active_) return false;
   const auto signature = Signature(requested);
-  if (!pending_.empty() && request_ == signature) failed_ = signature;
   if (failed_ != signature) failed_.clear();
   request_ = signature;
-  pending_.clear(); presents_.clear(); confirmed_.clear();
-  if (!Save(error)) return true;  // unreadable safety state must never enable native implicitly
+  pending_.clear();
+  Save(error);
   return !failed_.empty();
 }
 
@@ -212,67 +218,40 @@ bool ResolutionProfileState::Begin(const GraphicsValues& requested, SettingId co
                                    std::string fingerprint, std::string* error) {
   if (!active_) return false;
   const auto signature = Signature(requested);
-  confirmed_.erase(context);
-  if (pending_.contains(context) && pending_.at(context) == fingerprint && request_ == signature) {
-    presents_[context] = 0;
+  if (pending_.contains(context) && pending_.at(context) == fingerprint && request_ == signature)
     return true;
-  }
   const auto previous_request = request_;
   const auto previous_pending = pending_;
   request_ = signature;
   // Only Recover compares a new saved request with the failure latch. Safe
   // running frames and changes still awaiting restart must not clear it.
   pending_[context] = std::move(fingerprint);
-  presents_[context] = 0;
   if (Save(error)) return true;
   request_ = previous_request;
   pending_ = previous_pending;
   return false;
 }
 
-bool ResolutionProfileState::Presented(SettingId context, std::string_view fingerprint,
-                                       std::string* error) {
-  const auto found = pending_.find(context);
-  if (!active_ || found == pending_.end() || found->second != fingerprint) return true;
-  if (confirmed_.contains(context) && confirmed_.at(context) == fingerprint) return true;
-  if (++presents_[context] < kStablePresents) return true;
-  confirmed_[context] = found->second;
-  // Keep the active attempt armed until clean shutdown. Memory pressure may
-  // cause a later song to hang after this resolution has already presented.
+bool ResolutionProfileState::Rejected(std::string* error) {
+  if (!active_ || pending_.empty() || request_.empty()) return false;
+  failed_ = request_;
   return Save(error);
 }
 
-bool ResolutionProfileState::Closed(std::string* error, bool deliberate_restart) {
+bool ResolutionProfileState::Closed(std::string* error) {
   if (!active_) return true;
-  // An accepted settings restart intentionally attempts newly saved capacity;
-  // stopping the old frame early must not classify that request as a crash.
-  if (deliberate_restart) {
-    pending_.clear(); presents_.clear();
-    const bool saved = Save(error); active_ = false; return saved;
-  }
-  // Only a stable context in a cleanly closed process is proven for this run.
-  // Initialization failures and early quits retain their unconfirmed markers.
-  for (auto it = pending_.begin(); it != pending_.end();) {
-    const auto good = confirmed_.find(it->first);
-    if (good != confirmed_.end() && good->second == it->second) it = pending_.erase(it);
-    else ++it;
-  }
-  const bool saved = Save(error);
-  // Title stopping can precede the last guest draw; never arm a new attempt
-  // after this final shutdown write.
+  pending_.clear();
   active_ = false;
-  return saved;
+  return Save(error);
 }
 
 bool ResolutionProfileState::Save(std::string* error) {
   toml::Document doc;
-  doc.Set("", "schema_version", "1");
+  doc.Set("", "schema_version", "2");
   doc.Set("", "request", toml::RenderBasic(request_));
   doc.Set("", "failed", toml::RenderBasic(failed_));
   for (const auto& [id, value] : pending_)
     doc.Set("pending", SettingIdToken(id), toml::RenderBasic(value));
-  for (const auto& [id, value] : confirmed_)
-    doc.Set("confirmed", SettingIdToken(id), toml::RenderBasic(value));
   return WriteFileAtomic(file_, doc.Render(), error);
 }
 }  // namespace rb_blitz::settings

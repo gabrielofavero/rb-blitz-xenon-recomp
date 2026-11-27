@@ -3,12 +3,15 @@
 #include "check.h"
 #include "hooks/portrait_layout.h"
 #include "ui/portrait_menu.h"
+#include "ui/portrait_dialog.h"
 #include "input/native_menu.h"
+#include "input/portrait_panel.h"
 #include "settings/resolution_profiles.h"
 #include "settings/window_policy.h"
 
 #include <array>
 #include <limits>
+#include <future>
 #include <rex/ppc/hook.h>
 #include <rex/memory/endian.h>
 
@@ -16,10 +19,15 @@ REX_EXTERN(sub_824C8E88);
 namespace {
 constexpr uint32_t kPanel = 0x1000, kLocal = kPanel + 88;
 bool eligible = true, nested = false;
+bool suppress_dialog = false;
 unsigned dirty_calls = 0, draw_calls = 0;
 float aspect = 9.f / 16;
 std::array<float, 16> expected{};
 void Close(float value, float wanted) { CHECK_TRUE(std::abs(value - wanted) < .001f); }
+}
+
+bool rb_blitz::ui::portrait_dialog::SuppressDirectory(uint32_t directory) {
+  return suppress_dialog && directory == kPanel - 156;
 }
 
 std::optional<float> rb_blitz::input::PortraitPanelDrawAspect(uint8_t*, uint32_t drawable) {
@@ -56,6 +64,29 @@ int main() {
   using namespace rb_blitz::test;
   using namespace rb_blitz::ui;
   using rb_blitz::settings::DisplayMode;
+  BeginCase("guest draw threads consume the panel published by UI polling and observe retirement");
+  rb_blitz::input::PortraitPanelPublisher panels;
+  std::async(std::launch::async, [&] { panels.Publish(0x1234, true, "splash_screen"); }).get();
+  auto snapshot = std::async(std::launch::async, [&] { return panels.Snapshot(); }).get();
+  CHECK_EQ(snapshot.directory, 0x1234u);
+  CHECK_TRUE(snapshot.active && snapshot.screen == "splash_screen");
+  panels.Publish(0, false, "game_screen");
+  snapshot = std::async(std::launch::async, [&] { return panels.Snapshot(); }).get();
+  CHECK_EQ(snapshot.directory, 0u);
+  CHECK_FALSE(snapshot.active);
+  CHECK_TRUE(snapshot.screen == "game_screen");
+  BeginCase("pause fills portrait with eight separated actions above the touch footer");
+  CHECK_TRUE(PortraitSplashScreen("game_screen", "pause_panel"));
+  CHECK_FALSE(PortraitSplashScreen("game_screen", "game_panel"));
+  for (const float aspect : {.3f, 201.f / 437, 9.f / 16, .75f, .9f}) {
+    const auto pause = PortraitPause(aspect);
+    const auto footer = PortraitFooterAction(aspect, 0, 2);
+    CHECK_TRUE(364.5f * pause.list_scale <= pause.width);
+    CHECK_TRUE(pause.list_z + 26.375f * pause.list_scale < pause.title_z - 20);
+    CHECK_TRUE(pause.list_z - ((pause.rows - 1) * kPortraitMenuRowStep + 26.375f) *
+               pause.list_scale > footer.z + footer.height / 2 + 10);
+    CHECK_TRUE(kPortraitMenuRowStep * pause.list_scale > 52.75f * pause.list_scale);
+  }
   BeginCase("library transitions retain portrait for both native panel layouts");
   for (const auto source : kPortraitLibraryScreens)
     for (const auto destination : kPortraitLibraryScreens) {
@@ -202,6 +233,20 @@ int main() {
   expected = authored;
   ctx.r3.u32 = kPanel;
   sub_824C8E88(ctx, memory.data());
+  CHECK_EQ(draw_calls, 121);
+  CHECK_EQ(dirty_calls, 120);
+  BeginCase("host dialog suppression leaves all guest transforms and render state untouched");
+  const uint32_t directory = kPanel - 156, object = 0x1600;
+  rex::memory::store_and_swap<uint32_t>(memory.data() + directory + 4, 0x800);
+  rex::memory::store_and_swap<uint32_t>(memory.data() + kPanel + 4, 0x900);
+  rex::memory::store_and_swap<uint32_t>(memory.data() + 0x804, object - directory - 4);
+  rex::memory::store_and_swap<uint32_t>(memory.data() + 0x904, object - kPanel - 4);
+  suppress_dialog = true;
+  const auto before = memory;
+  ctx.r3.u32 = kPanel;
+  sub_824C8E88(ctx, memory.data());
+  CHECK_TRUE(before == memory);
+  CHECK_EQ(ctx.r3.u32, kPanel);
   CHECK_EQ(draw_calls, 121);
   CHECK_EQ(dirty_calls, 120);
   return Finish();

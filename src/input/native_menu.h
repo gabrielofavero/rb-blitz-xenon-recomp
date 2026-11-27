@@ -28,6 +28,13 @@ std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable);
 // Transition screens draw both library panels; each retains its own layout identity.
 void DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t drawable,
                        void (*draw)(PPCContext&, uint8_t*));
+// UIPanel owns its loaded PanelDir at +8. This is the UIPanel view returned
+// by UIScreen's focus-panel field, rather than the shared Hmx::Object base.
+template <class ReadWord>
+uint32_t PanelDirectoryFromPanel(uint32_t panel, ReadWord word) {
+  return panel ? word(panel + 8) : 0;
+}
+
 // PanelDir::DrawShowing receives the RndDrawable view at ObjectDir +156.
 // FindObject requires ObjectDir, while names belong to its virtual Hmx::Object.
 // The native draw caller (8247E224) checks the same shared virtual base.

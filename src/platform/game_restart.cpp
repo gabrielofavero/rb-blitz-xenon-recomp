@@ -760,6 +760,26 @@ const char* RestartPhaseToken(RestartPhase phase) {
 
 RestartCoordinator::RestartCoordinator(ChildLauncher* child) : child_(child) {}
 
+RestartOutcome InProcessRestart::Request(uint64_t saved_revision, uint64_t current_revision,
+                                        const LaunchContext& context) {
+  using rb_blitz::settings::RestartStatus;
+  if (arguments_) {
+    return {RestartStatus::kAlreadyRequested, RestartPhase::kReady,
+            "a restart is already in flight"};
+  }
+  if (saved_revision != current_revision) {
+    return {RestartStatus::kStaleRevision, RestartPhase::kIdle, "settings.stale_revision"};
+  }
+  if (saved_revision == 0) {
+    return {RestartStatus::kNotSaved, RestartPhase::kIdle, "nothing durable has been saved yet"};
+  }
+  auto arguments = BuildChildArguments(context, HandoffToken{});
+  // There is no parent process to wait for; the entry loop enforces teardown.
+  arguments.pop_back();
+  arguments_ = std::move(arguments);
+  return {RestartStatus::kOk, RestartPhase::kReady, {}};
+}
+
 RestartOutcome RestartCoordinator::Request(uint64_t saved_revision, uint64_t current_revision,
                                            uint64_t request_id, const LaunchContext& context) {
   RestartOutcome outcome;

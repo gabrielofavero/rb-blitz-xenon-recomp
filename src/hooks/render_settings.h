@@ -33,7 +33,7 @@ void SetBootRenderFrame(uint32_t width, uint32_t height);
 void SetBootRenderHeight(uint32_t height);
 uint32_t BootRenderWidth();
 uint32_t BootRenderHeight();
-// The visible portrait crop; zero outside portrait mode. Rendering stays landscape.
+// The visible portrait frame; zero outside portrait mode. Compact routes render it directly.
 void ConfigureOrientations(bool interface_portrait, bool gameplay_portrait);
 bool InterfacePortraitEnabled();
 bool GameplayPortraitEnabled();
@@ -42,6 +42,11 @@ uint32_t BootPortraitWidth();
 uint32_t BootPortraitHeight();
 uint32_t GameplayPortraitWidth();
 uint32_t GameplayPortraitHeight();
+// A compact portrait target retains the original landscape camera's vertical
+// coverage, with a narrower native projection and no presenter-side crop.
+float PortraitRenderTargetProjectionScale();
+bool CompactPortraitRenderTargetActive();
+void RefreshPortraitRenderTargetCamera(PPCContext& ctx, uint8_t* base, uint32_t camera);
 
 // The other half of a non-16:9 frame: the space the title lays its UI out in.
 //

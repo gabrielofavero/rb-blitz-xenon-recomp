@@ -1181,3 +1181,30 @@ guest menu with Enter, no external pad driver and no recovery gesture, while
 leaving its profile bytes unchanged. Seven checks pass in
 `out/rexglue-migration/post-smoke-ui-final-r18/recovery/`; the historical F10
 route is not counted as exercised by that result.
+
+
+## Portrait recovery dialogs (2026-11-26)
+
+Portrait error popups use a host modal with the achievement browser's fonts,
+opaque backdrop and three glowing border rails. Its wrapped message and Continue
+caption are copied from the guest's localized UILabel strings. The modal fits
+inside the device safe area; long text scrolls above a separate touch button.
+Landscape retains the native error scene and its original button handler.
+
+The original guest show/hide lifecycle owns the modal. A generation-tagged host
+Continue request is consumed once by the error panel's authored poll method,
+which executes a verbatim copy of its native Confirm branch. That branch hides
+the popup and restores its return panel. Exclusive host input cannot block this
+script route. Focus changes, replacement messages and close/reopen transitions
+invalidate pending requests. Until localized text is available, the native panel
+remains visible rather than leaving an empty modal.
+
+The overlay resolves UIPanel's loaded directory at +8 only for message ownership
+and suppressing that dialog's native draw. It does not change the directory
+selection used by general portrait panel fitting, cameras, render targets or
+presentation settings. The error scene has no portrait mesh or transform edits.
+The separate RhythmVerse portrait dialogs retain their existing guest surfaces.
+
+Host checks cover cross-thread publication, duplicate and stale actions,
+landscape ineligibility, markup removal, native scene preservation and exact
+Confirm-branch dispatch. Device visual/input acceptance requires a signed build.

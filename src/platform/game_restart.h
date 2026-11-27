@@ -189,6 +189,18 @@ struct RestartOutcome {
   std::string error;
 };
 
+// iOS cannot create a replacement process. Queue a fresh app instance after the
+// current app has shut down and been destroyed, including its SDK modules.
+class InProcessRestart {
+ public:
+  RestartOutcome Request(uint64_t saved_revision, uint64_t current_revision,
+                         const LaunchContext& context);
+  const std::optional<std::vector<std::string>>& arguments() const { return arguments_; }
+
+ private:
+  std::optional<std::vector<std::string>> arguments_;
+};
+
 // The exactly-once restart request, and the child it creates. One instance per boot, owned by the
 // boot wiring; every method runs on the UI thread.
 class RestartCoordinator {

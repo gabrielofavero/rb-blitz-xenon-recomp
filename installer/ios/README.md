@@ -80,6 +80,13 @@ Both are arm64 iPhoneOS builds targeting iOS 17.0 using Xcode 26.0.1. The snapsh
 passes strict SDK replay and 41 host packaging tests (two PowerShell-only skips).
 Device signing, importer UI and gameplay remain unverified.
 
+The native display probe can be tested independently of the game in a booted
+simulator with `sh scripts/ios/test-display.sh DEVICE_UUID` and full Xcode selected
+through `DEVELOPER_DIR`. It checks native dimensions before SDL initialization,
+then verifies the portrait canvas and complete logo against the window safe area.
+The test does not require game assets, signing credentials, or a simulator game
+target.
+
 ## Bundled-assets IPA
 
 The original `sh scripts/ios/build.sh` flow is unchanged. The paragraphs below
@@ -118,14 +125,23 @@ before graphics allocation when no sustainable resolution has been verified.
 The backend multiplier is selected from both chosen profiles. Edits within that
 capacity apply live; larger capacity requires closing/reopening the app.
 Vulkan strictly refuses an unsupported multiplier or an unsafe dense allocation
-instead of silently calling a reduced image native. MoltenVK's scaled resolve
-backing is still large: 2x2 needs 2 GiB and 4x4 needs 8 GiB. Native can therefore
-be unavailable on a device even though the wheel describes its real resolution.
+instead of silently calling a reduced image native. Non-sparse MoltenVK now
+allocates scaled resolve storage for accessed ranges rather than the complete
+scaled Xbox address space. Overlap migration preserves aliases and pending
+frames. A 512 MiB peak resolve budget includes retiring blocks; per-buffer device
+limits and actual allocation failure can still reject a higher quality tier.
+Authored portrait menus and portrait gameplay use narrow targets, matching
+camera projections and horizontal culling planes. Native pointer matrices and
+lane power-up touch mapping follow the actual frontbuffer. Unadapted menus keep
+their landscape source. Required effects and retained Xbox graphics data remain;
+there is no hidden horizontal primary frame to crop after compact rendering.
 
 A durable per-context recovery marker remains armed throughout the session.
 Stable output plus a clean exit clears it. A crash or forced termination starts
 both contexts at 720p on subsequent boots, preserving the saved request and layout.
 The failed choice is not retried automatically until the request changes.
+An observed GPU allocation refusal also retains this latch through orderly shutdown,
+even when earlier frames reached the stability threshold.
 See [the rendering policy](../../docs/settings/graphics.md) for rounding, live
 capacity limits and validation. This is a safety policy, not a device benchmark.
 
@@ -142,8 +158,9 @@ sh scripts/ios/build.sh --source '/path/to/your/game-package' \
 The signer checks the profile's platform, expiration, application identifier,
 required entitlement and signing certificate. Signing credentials are supplied
 locally; the builder does not obtain or create them. Signed and unsigned builds
-use the same filename; the audit sidecar records signing status. Move an existing
-IPA aside before rebuilding the same name.
+use the same filename; the audit sidecar records signing status. Rebuilds replace
+the current mode's IPA only after the candidate passes staging and archive audits.
+A failed candidate preserves the previous IPA; the other package mode is unchanged.
 
 The minimum target is iOS/iPadOS 17.0. The experiment uses fullscreen Vulkan
 through MoltenVK, device aspect and VSync. Display offers separate Interface and

@@ -80,6 +80,12 @@ endings and orphaned documents. Auditing without editing is the read-only `docs-
 
 ### Current settings delivery
 
+[Portrait gameplay rendering and recovery dialogs](plans/finished/2026-11-26-portrait-gameplay-rendering.md)
+records narrow gameplay targets, matching culling/touch mapping and the readable modal recovery action.
+
+[Interface rendering memory](plans/finished/2026-11-26-interface-render-memory.md)
+records compact scaled-resolve backing, authored portrait targets and allocation recovery.
+
 [Native render scale and pointer controls](plans/finished/2026-11-26-native-render-scale.md) records native pixel semantics, device quality tiers and startup allocation.
 
 [Portrait screen coverage](plans/in-progress/2026-11-23-portrait-screen-coverage-plan.md)
@@ -152,6 +158,7 @@ IPA build; the original bundled-assets route remains available.
 
 | Document | Status |
 | --- | --- |
+| [`plans/todo/2026-11-27-mobile-adaptive-render-scale-plan.md`](plans/todo/2026-11-27-mobile-adaptive-render-scale-plan.md) | Planning only. Quality, Performance and Manual on iOS with adaptive menus, between-song gameplay scaling and physical-device acceptance. |
 | [`plans/todo/2026-11-26-apple-performance-plan.md`](plans/todo/2026-11-26-apple-performance-plan.md) | Planning only: sustained 60 FPS at real 1080p on iOS/macOS; ranked optimization map, existing fixes, phased implementation and physical-device performance gates. |
 | [`plans/in-progress/2026-11-17-rexglue-v0.11-migration-plan.md`](plans/finished/2026-11-17-rexglue-v0.11-migration-plan.md) | In progress: production adopts ReXGlue v0.11.0 at `a3e1d826` with 65 patches and promoted title integration. Production rebuild is pending; native platform/package and formal performance gates remain open. Limited Windows comparisons establish no universal gain or regression. |
 | [`plans/todo/2026-11-17-custom-loading-texts-plan.md`](plans/todo/2026-11-17-custom-loading-texts-plan.md) | Planning only: loading-message inventory and selective JSON replacements with inline action images and live controller/keyboard/mouse/touch variants. |

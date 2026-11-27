@@ -121,19 +121,6 @@ Value ResolutionPreferenceForBoot(const CapabilitySnapshot& caps, const Value& r
 
 // --- last-known-good recovery --------------------------------------------------------------
 
-// The durable marker a boot maintains: written before presentation is attempted, updated
-// once a frame is presented, and cleared on a clean shutdown. P4 owns the shape; the
-// coordinator owns where the boot reads and writes it.
-struct GraphicsBootMarker {
-  bool attempted = false;  // a boot reached presentation
-  bool presented = false;  // ... and presented at least one frame
-  Value attempted_resolution;
-};
-
-// "Attempted but never presented" is the failure signal. A marker that never attempted
-// (first run, or a boot that failed before graphics) is not a graphics failure.
-bool GraphicsFallbackWarranted(const GraphicsBootMarker& marker);
-
 struct GraphicsFallback {
   bool needed = false;
   std::string reason_key;
@@ -143,11 +130,7 @@ struct GraphicsFallback {
   Value filtering;
 };
 
-// The route a boot that failed to present takes. When no failure is recorded the request is
-// returned unchanged (a valid manual choice is never re-optimized on boot); when one is
-// recorded the safe floor is returned - the title's native 720p, the active backend, no AA,
-// native filtering - which is a combination that presented at least once on every machine
-// this project has measured.
+// Select the conservative floor for graphics recovery or explicit safe mode.
 GraphicsFallback RecoverGraphics(const CapabilitySnapshot& caps, const Value& requested_resolution,
                                  std::string_view requested_renderer, bool previous_boot_failed);
 

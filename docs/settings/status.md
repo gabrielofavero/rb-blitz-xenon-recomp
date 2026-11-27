@@ -1,5 +1,35 @@
 # In-game settings — status, evidence and remaining work
 
+## Compact gameplay and recovery dialogs (2026-11-26)
+
+[tree] Portrait gameplay uses compact targets, matching horizontal projection
+and normalized culling planes, with cached world/pointer matrices rebuilt before
+use. Touch bounds/events use actual frontbuffer proportions. Mixed visual
+orientation and quality-profile transitions retain their independent choices.
+
+[tree] Graphics recovery uses the existing guest dialog with reflowed measured
+text and one large Continue action. Modal owner/directory/scope and the polling
+sequence are published across guest threads; button bounds no longer inherit a
+draw thread's zero frame counter. Dismissal sends the existing native Confirm
+action and stale/background targets remain excluded. See the
+[delivery record](../plans/finished/2026-11-26-portrait-gameplay-rendering.md)
+for builds, tests and explicitly unverified physical-device acceptance.
+
+## Interface render memory (2026-11-26)
+
+[tree] SDK 0102 replaces monolithic scaled-resolve backing on non-sparse
+MoltenVK with accessed-range buffers and fence-retired overlap migration.
+Authored portrait Interface routes use compact targets with corrected native
+camera and touch matrices. An allocation refusal latches recovery even after
+stable output; final journal closure follows GPU drain. Backend capacity still
+remains fixed for the process, and gameplay/unadapted menus retain their paths.
+
+[measured] Eleven focused suites pass, including native Apple M1 GPU copies in
+both submission modes, 8,785 interval-oracle checks and 757 camera checks.
+Signed-device high-resolution boot, visuals, touch and memory/performance remain
+unverified. Build/package and platform details are in the
+[delivery record](../plans/finished/2026-11-26-interface-render-memory.md).
+
 ## Native render scale and recovery (2026-11-26)
 
 [tree] Render Scale uses Audio-style Interface/Gameplay buttons and one native

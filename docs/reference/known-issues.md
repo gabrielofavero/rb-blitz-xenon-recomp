@@ -30,7 +30,19 @@ still vary below 60 fps. Matched whole-game savings and native iOS footprint rem
 unverified. Patch 0099 prioritizes foreground MoltenVK compilation and establishes
 native QoS for Apple preparation workers. Large MoltenVK
 buffers now attempt demand-paged host import, with private fallback; a 2x2
-scaled resolve still reserves a 2 GiB logical buffer. iOS now chooses capacity from the selected profiles; unknown performance starts at 720p. Native portrait capacity may exceed device limits, and full live capacity growth remains unsupported. See [render-scale policy](../settings/graphics.md).
+scaled resolve describes a 2 GiB logical range. SDK 0102 replaces monolithic
+scaled backing on non-sparse MoltenVK with accessed-range allocations, bounded
+by per-buffer limits and peak budgets. Authored portrait Interface routes use
+compact targets, now including portrait gameplay and matching camera culling.
+EDRAM attachment sizing retains guest-visible address ownership; necessary effects
+and historical resolved data still consume memory. There is no blanket removal
+of all offscreen work or a proportional whole-process-memory saving. iOS chooses capacity from selected profiles and starts at 720p without
+verified performance evidence. Allocation refusal latches conservative recovery
+and cannot be confirmed by later incomplete frames. High-resolution device boot,
+resident footprint and sustained performance remain unverified pending the signed
+install. Full live capacity growth remains unsupported. See
+[render-scale policy](../settings/graphics.md) and
+[implementation record](../plans/finished/2026-11-26-interface-render-memory.md).
 See the [memory study](../engine/vulkan-performance.md#apple-gpu-memory-retention-2026-11-26).
 
 **Apple FPS (2026-11-26):** guest register localization is enabled with SDK patch
@@ -82,8 +94,10 @@ verified data across launches; device acceptance of the importer routes remains
 unproven. The owner confirmed bundled installation and visible menu output;
 memory pressure and gameplay touch acceptance remain unverified. See the
 [importer plan](../plans/finished/2026-11-16-ios-importer-plan.md).
-iOS cannot spawn a replacement process: restart-required settings need a manual
-close/reopen, and automatic load-failure relaunch is unavailable. The signing
+iOS settings restart now tears down the app runtime and creates a fresh instance
+inside the same process, skipping the importer. Both IPA routes require device
+acceptance of repeated restarts and saved boot settings. Automatic load-failure
+relaunch is unavailable. The signing
 profile must permit extended virtual addressing. See the
 [iOS plan](../plans/finished/2026-11-16-ios-cli-installer-plan.md).
 

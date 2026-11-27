@@ -167,6 +167,7 @@ set(RBBLITZ_SOURCES
     src/hooks/input_font_alloc_trace.cpp
     src/hooks/render_settings.cpp
     src/hooks/portrait_layout.cpp
+    src/hooks/portrait_camera.cpp
     src/hooks/settings_payload.cpp
     src/settings/menu_payload.cpp
     src/ui/gameplay_presentation.cpp
@@ -276,6 +277,7 @@ set(RBBLITZ_SOURCES
     src/ui/help_overlay.cpp
     src/ui/notification_overlay.cpp
     src/ui/achievements_overlay.cpp
+    src/ui/portrait_dialog.cpp
     src/ui/boot_loading_art.cpp
     src/ui/boot_loading_icon.cpp
     src/ui/menu_music_player.cpp
@@ -359,8 +361,10 @@ else()
         src/messages/messages_runtime.cpp
         src/messages/messages_update_runtime.cpp)
     if(RBBLITZ_IOS)
-        list(APPEND RBBLITZ_SOURCES src/store/store_apple.mm src/platform/ios_runtime.mm)
+        list(APPEND RBBLITZ_SOURCES src/store/store_apple.mm src/platform/ios_runtime.mm
+            src/platform/ios_display.mm)
         set_source_files_properties(src/store/store_apple.mm src/platform/ios_runtime.mm
+            src/platform/ios_display.mm
             PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     else()
         list(APPEND RBBLITZ_SOURCES src/store/store_curl.cpp)
@@ -788,10 +792,27 @@ target_link_libraries(rb_blitz_shader_microcode_hash PRIVATE xxHash::xxhash)
 
 if(BUILD_TESTING)
     if(REXGLUE_USE_VULKAN)
+        add_executable(rb_blitz_scaled_resolve_segments_tests tests/scaled_resolve_segments_tests.cpp)
+        target_include_directories(rb_blitz_scaled_resolve_segments_tests PRIVATE tests "${REXSDK_DIR}/src")
+        add_test(NAME scaled_resolve_segments COMMAND rb_blitz_scaled_resolve_segments_tests)
         add_executable(rb_blitz_vulkan_resolve_scale_tests tests/vulkan_resolve_scale_tests.cpp)
         target_include_directories(rb_blitz_vulkan_resolve_scale_tests PRIVATE tests "${REXSDK_DIR}/src")
         add_test(NAME vulkan_resolve_scale COMMAND rb_blitz_vulkan_resolve_scale_tests)
         if(APPLE)
+            add_executable(rb_blitz_scaled_resolve_native_tests tests/scaled_resolve_native_tests.cpp)
+            target_include_directories(rb_blitz_scaled_resolve_native_tests PRIVATE tests "${REXSDK_DIR}/src")
+            target_link_libraries(rb_blitz_scaled_resolve_native_tests PRIVATE rex::sdk Vulkan::Vulkan Vulkan::Headers)
+            rexglue_configure_target(rb_blitz_scaled_resolve_native_tests)
+            set_property(TARGET rb_blitz_scaled_resolve_native_tests APPEND PROPERTY
+                INSTALL_RPATH "@executable_path/vulkan/lib")
+            add_test(NAME scaled_resolve_native COMMAND rb_blitz_scaled_resolve_native_tests)
+            add_test(NAME scaled_resolve_native_async COMMAND rb_blitz_scaled_resolve_native_tests)
+            set_tests_properties(scaled_resolve_native scaled_resolve_native_async
+                PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+            set_tests_properties(scaled_resolve_native PROPERTIES
+                ENVIRONMENT "VK_ICD_FILENAMES=$<TARGET_FILE_DIR:rb_blitz_scaled_resolve_native_tests>/vulkan/share/vulkan/icd.d/MoltenVK_icd.json;MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1")
+            set_tests_properties(scaled_resolve_native_async PROPERTIES
+                ENVIRONMENT "VK_ICD_FILENAMES=$<TARGET_FILE_DIR:rb_blitz_scaled_resolve_native_tests>/vulkan/share/vulkan/icd.d/MoltenVK_icd.json;MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0")
             target_compile_definitions(rb_blitz_vulkan_resolve_scale_tests PRIVATE RBBLITZ_RESOLVE_NATIVE_TEST)
             target_link_libraries(rb_blitz_vulkan_resolve_scale_tests PRIVATE rex::sdk Vulkan::Vulkan Vulkan::Headers)
             rexglue_configure_target(rb_blitz_vulkan_resolve_scale_tests)
@@ -1301,6 +1322,15 @@ if(BUILD_TESTING)
         target_include_directories(rb_blitz_portrait_layout_tests PRIVATE src tests)
         target_link_libraries(rb_blitz_portrait_layout_tests PRIVATE rex::sdk)
         add_payload_test(portrait_layout rb_blitz_portrait_layout_tests)
+        add_executable(rb_blitz_portrait_dialog_tests tests/portrait_dialog_tests.cpp
+            src/ui/portrait_dialog.cpp)
+        target_include_directories(rb_blitz_portrait_dialog_tests PRIVATE src tests)
+        target_link_libraries(rb_blitz_portrait_dialog_tests PRIVATE rex::sdk)
+        add_payload_test(portrait_dialog rb_blitz_portrait_dialog_tests)
+        add_executable(rb_blitz_portrait_camera_tests tests/portrait_camera_tests.cpp src/hooks/portrait_camera.cpp)
+        target_include_directories(rb_blitz_portrait_camera_tests PRIVATE src tests)
+        target_link_libraries(rb_blitz_portrait_camera_tests PRIVATE rex::sdk)
+        add_payload_test(portrait_camera rb_blitz_portrait_camera_tests)
         # The same isolated fixtures also exercise the iOS-only placement and
         # input-source gate on a native host, without navigating the game.
         add_executable(rb_blitz_touch_hud_runtime_tests
@@ -1362,7 +1392,9 @@ if(BUILD_TESTING)
     add_executable(rb_blitz_native_mouse_tests
         tests/native_mouse_tests.cpp
     )
+    find_package(Threads REQUIRED)
     target_include_directories(rb_blitz_native_mouse_tests PRIVATE src)
+    target_link_libraries(rb_blitz_native_mouse_tests PRIVATE Threads::Threads)
     add_test(NAME native_mouse COMMAND rb_blitz_native_mouse_tests)
     add_executable(rb_blitz_present_resize_tests tests/present_resize_tests.cpp)
     target_include_directories(rb_blitz_present_resize_tests PRIVATE tests "${REXSDK_DIR}/src")

@@ -4,6 +4,7 @@ Plans awaiting work, including plans paused after an initial investigation. Each
 
 | Plan | What it covers |
 | --- | --- |
+| [`2026-11-27-mobile-adaptive-render-scale-plan.md`](2026-11-27-mobile-adaptive-render-scale-plan.md) | Quality, Performance and Manual on iOS, with shared automatic interface scaling, between-song gameplay changes and physical-device rollout gates. |
 | [`2026-11-26-apple-performance-plan.md`](2026-11-26-apple-performance-plan.md) | Planning only: sustained 60 FPS at real 1080p on iOS/macOS, measured CPU/GPU/presentation attribution, resolution and memory policy, upload/pass reduction, ARM64 math, scheduling and device acceptance. |
 | [`2026-11-25-xbox-dev-mode-build-plan.md`](2026-11-25-xbox-dev-mode-build-plan.md) | Planning only: x64 UWP runtime port, bundled build first, first-launch asset importer, DLC storage and transfer, USB acceptance, and a separate on-console native compilation spike. |
 | [`2026-11-23-portrait-screen-coverage-plan.md`](../in-progress/2026-11-23-portrait-screen-coverage-plan.md) | Portrait coverage map for all 59 retail screen registrations, generated settings, modals, and host surfaces; existing adaptations, missing layouts, conditional routes, and a short completion order. |

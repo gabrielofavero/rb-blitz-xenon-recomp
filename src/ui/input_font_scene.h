@@ -68,6 +68,11 @@ bool PreparePortraitPromptList(const std::vector<uint8_t>& source,
                                std::vector<uint8_t>* scene, std::string* error);
 inline constexpr char kPortraitPromptListRecord[] =
     "ui/resource/lists/gen/portrait_prompt.milo_xbox";
+// Preserve the native pause providers, routes and animation with touch-sized rows.
+bool PreparePortraitPause(const std::vector<uint8_t>& source,
+                          const std::vector<uint8_t>& button_source, float aspect,
+                          std::vector<uint8_t>* scene, std::string* error);
+inline constexpr char kPauseRecord[] = "ui/pause/gen/pause.milo_xbox";
 // Crop the settings backdrop, fit its native list/title and retain one Back
 // action above a native button mesh. Both menu and pause settings use this copy.
 bool PreparePortraitSettings(const std::vector<uint8_t>& source,

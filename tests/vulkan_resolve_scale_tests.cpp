@@ -126,6 +126,11 @@ int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
 #endif
+  BeginCase("compact resolve backing is confined to non-sparse MoltenVK");
+  CHECK_TRUE(rex::gpu::vulkan::UseSegmentedResolveBacking(true, false));
+  CHECK_FALSE(rex::gpu::vulkan::UseSegmentedResolveBacking(true, true));
+  CHECK_FALSE(rex::gpu::vulkan::UseSegmentedResolveBacking(false, false));
+  CHECK_FALSE(rex::gpu::vulkan::UseSegmentedResolveBacking(false, true));
   BeginCase("3x startup respects the non-sparse allocation limit");
   uint32_t x = 3, y = 3;
   CHECK_TRUE(ClampResolveScaleToAllocationLimit(kGuestMemory, uint64_t(1) << 30, false, x, y));

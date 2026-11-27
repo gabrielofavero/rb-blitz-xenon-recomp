@@ -750,7 +750,7 @@ rex::Setting<int32_t> rb_blitz::settings::title::store_search_pages{
 rex::Setting<bool> rb_blitz::settings::title::portrait_render_cutoff{
     &rb_blitz::settings::TitleSettingOwner("blitz.diagnostics"), "portrait_render_cutoff",
 true,
-    "Skip hidden main-frame pixels during portrait gameplay; disable for comparison",
+    "Limit hidden drawing while portrait gameplay uses the cropped fallback.",
     rex::kRestart};
 
 rex::Setting<bool> rb_blitz::settings::title::settings_help_overlay{

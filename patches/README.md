@@ -14,9 +14,9 @@ checkout.
 ## Registered production v0.11.0 stack (2026-11-18)
 
 The [v0.11.0 stack and complete disposition ledger](rexglue-sdk-v0.11/README.md)
-contains the **73 registered production SDK patches** for exact release commit
+contains the **74 registered production SDK patches** for exact release commit
 `a3e1d82678ca20d68d4837a8e9ee4652ff073745`. It accounts for **all 71 original
-SDK patch IDs, the retained nested MoltenVK patch and new 0089/0090/0091/0092/0093/0094/0095/0096/0097/0098/0099/0100/0101**:
+SDK patch IDs, the retained nested MoltenVK patch and new 0089/0090/0091/0092/0093/0094/0095/0096/0097/0098/0099/0100/0101/0102**:
 sixty original IDs retain v0.11 files; eleven use upstream/title replacements
 or fold into an owning patch. The title integration and SDK pin are adopted;
 the fresh Windows AMD64 production source-SDK release build passes.
@@ -31,6 +31,21 @@ across Windows, Linux, macOS and iOS, independently of architecture or D3D12,
 Vulkan and MoltenVK. Landscape and unthemed prompt sizing retain their defaults.
 Strict replay of all 67 production patches passes. Native validation is Windows
 AMD64; the other platforms and architectures have not been executed for this change.
+
+The separate [0102 range-backed resolve patch](rexglue-sdk-v0.11/0102-vulkan-range-backed-scaled-resolves.patch)
+owns compact scaled-address mapping on non-sparse MoltenVK. It allocates accessed
+ranges, migrates overlapping aliases by GPU copy and preserves superseded buffers
+until submission completion, including descriptor-relative CPU readback. It
+reuses 0098's host imports and adds optional allocation-size ceilings; existing
+helper callers retain their defaults. 0097 continues to own dense/sparse admission:
+0102 skips its monolithic-size gate only for the compact policy and enforces
+actual per-block and peak limits instead. No existing sparse/dense path is removed.
+Presentation interface version 2 exposes latched allocation failure through detach
+so title recovery can reject incomplete output after GPU drain. Other Vulkan
+drivers and D3D12 retain their storage policies. The shared presentation ABI is
+rebuilt on all hosts; native validation here is macOS/iOS arm64, with Windows,
+Linux, Intel macOS and other architectures untested. See the
+[delivery record](../docs/plans/finished/2026-11-26-interface-render-memory.md).
 
 The separate [0101 unchanged-upload patch](rexglue-sdk-v0.11/0101-vulkan-unchanged-upload-snapshots.patch)
 compares requested guest pages against bounded, private copies of recorded CPU

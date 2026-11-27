@@ -13,6 +13,7 @@
 #include "ui/input_font_scene.h"
 #include "ui/menu_options.h"
 #include "ui/portrait_menu.h"
+#include "ui/portrait_dialog_payload.h"
 
 namespace rb_blitz::settings {
 namespace {
@@ -1275,8 +1276,9 @@ bool AddCrashRecoveryHooks(std::vector<Node>* roots, std::string* why) {
   const auto popup_condition = cmd({sym("&&"), cmd({sym("=="), panel_state, sym("main_menu")}), query("popup")});
   const auto popup_action = cmd({sym("do"), set(sym("FALSE")),
       cmd({sym("error_popup_panel"), sym("show_popup"),
-           cmd({sym("if_else"), query("timeout30"), sym("rbbz_load_timeout_30"),
-                cmd({sym("if_else"), query("timeout60"), sym("rbbz_load_timeout_60"), sym("rbbz_load_crashed")})}),
+           cmd({sym("if_else"), query("graphics"), sym("rbbz_graphics_recovered"),
+             cmd({sym("if_else"), query("timeout30"), sym("rbbz_load_timeout_30"),
+                cmd({sym("if_else"), query("timeout60"), sym("rbbz_load_timeout_60"), sym("rbbz_load_crashed")})})}),
            sym("splash_panel")})});
   const auto popup = cmd({sym("if"), popup_condition, popup_action});
   const auto poll = cmd({sym("if"), Node::Property({sym("rbbz_recovery_boot")}),
@@ -1810,18 +1812,23 @@ bool AddPortraitStoreLayout(std::vector<Node>* roots, float aspect, bool info, s
       // The focused list dispatches the current action through its native
       // SELECT_MSG. Back is represented by the separate footer action.
       const auto remove_exit = [&](const auto& self, Node& node) -> void {
-        if (node.tag == ui::dtb::kCommand && node.kids.size() == 4 &&
-            node.kids[0].text == "insert_elem" && node.kids[3].text == "exit") {
-          node = Node::Int(0);
-          return;
+        // The guest's do evaluator executes each statement as a command.
+        // Erase the insertion so no literal is left in its place.
+        if (node.tag == ui::dtb::kCommand && !node.kids.empty() && node.kids[0].text == "do") {
+          std::erase_if(node.kids, [](const Node& statement) {
+            return statement.tag == ui::dtb::kCommand && statement.kids.size() == 4 &&
+                   statement.kids[0].text == "insert_elem" && statement.kids[3].text == "exit";
+          });
         }
         for (auto& kid : node.kids) self(self, kid);
       };
       remove_exit(remove_exit, *refresh);
-      refresh->kids.push_back(c({s("buttons.lst"), s("set_selected"), Node::Int(0)}));
       refresh->kids.push_back(c({s("store_info.ihp"), s("set_action_token"), s("kAction_Cancel"), s("back")}));
-      refresh->kids.push_back(c({s("store_info.ihp"), s("set_action_token"), s("kAction_Confirm"),
-          c({s("buttons.lst"), s("selected_sym")})}));
+      refresh->kids.push_back(c({s("if_else"), c({s(">"), c({s("buttons.lst"), s("num_data")}), Node::Int(0)}),
+          c({s("do"), c({s("buttons.lst"), s("set_selected"), Node::Int(0)}),
+             c({s("store_info.ihp"), s("set_action_token"), s("kAction_Confirm"),
+                c({s("buttons.lst"), s("selected_sym")})})}),
+          c({s("store_info.ihp"), s("clear_action_token"), s("kAction_Confirm")})}));
     }
     // All states share this private native scene: downloading, completion,
     // failure and leave-without-refresh confirmation retain their own handlers.
@@ -2399,6 +2406,13 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       if (error) *error = "unsupported native crash-popup arguments";
       return false;
     }
+    if (portrait_interface) {
+      if (!ui::portrait_dialog::Install(popup_roots)) {
+        if (error) *error = "unsupported native portrait-popup confirmation";
+        return false;
+      }
+      built["ui/error/gen/error_general.dtb"] = ui::dtb::Compile(popup_roots, popup_header);
+    }
   }
   auto edit = [&](const std::string& path, auto transform) {
     std::vector<uint8_t> bytes;
@@ -2791,6 +2805,7 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           {"rbbz_graphics_ignore","Ignore"},
           {"rbbz_graphics_back","Skip"},
           {"rbbz_load_crashed","The game crashed while loading a song and was restarted. Returned to the main menu. Try another song."},
+          {"rbbz_graphics_recovered","Graphics were lowered to help the game start. Saved choices are unchanged. Review Help & Options."},
           {"rbbz_load_timeout_30","The song did not finish loading within 30 seconds. The game was restarted to the main menu. Try another song or check this song's files."},
           {"rbbz_load_timeout_60","The song did not finish loading within 60 seconds. The game was restarted to the main menu. Try another song or check this song's files."}}) {
         std::string why;
@@ -3516,19 +3531,16 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
       themed = std::move(splash);
     }
     built[ui::input_font::kSplashRecord] = std::move(themed);
-    if (!read(ui::input_font::kErrorReturnRecord, &source, error) ||
-        !ui::input_font::PreparePortraitPrompt(source,
-            screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
-    if (screen::CurrentMenuConfiguration().controller_layout_enabled) {
-      if (!ui::input_font::PrepareErrorReturn(scene, &source, error)) return false;
-      scene = std::move(source);
-    }
-    built[ui::input_font::kErrorReturnRecord] = std::move(scene);
   }
   if (!read("ui/pause/gen/confirmation_message.milo_xbox",
             &built["ui/pause/gen/settings_confirmation.milo_xbox"], error)) return false;
   if (portrait_interface) {
     std::vector<uint8_t> scene, source, buttons;
+    if (!read(ui::input_font::kPauseRecord, &source, error) ||
+        !read(ui::input_font::kListRecord, &buttons, error) ||
+        !ui::input_font::PreparePortraitPause(source, buttons,
+          screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;
+    built[ui::input_font::kPauseRecord] = std::move(scene);
     if (!ui::input_font::PreparePortraitPrompt(
           built["ui/pause/gen/settings_confirmation.milo_xbox"],
           screen::CurrentMenuConfiguration().portrait_aspect, &scene, error)) return false;

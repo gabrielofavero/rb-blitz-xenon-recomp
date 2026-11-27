@@ -346,14 +346,14 @@ int main() {
     Resolve(portrait_meter);
     Resolve(portrait_comparison);
     Resolve(portrait_letters);
-    Close(Float(portrait_stars + 0x78), 400.0 / 720 * 240 - 24);
+    Close(Float(portrait_stars + 0x78), 400.0 / 720 * 240 - 92);
     Close(Float(portrait_stars + 0x80), 210);
     Close(Float(portrait_score + 0x78), 0);
-    Close(Float(portrait_score + 0x80), 210);
+    Close(Float(portrait_score + 0x80), 232);
     Close(Float(portrait_meter + 0x80), 0);
     Close(Float(portrait_comparison + 0x80), 0);
     Close(Float(portrait_letters + 0x80), 110);
-    Close(Float(portrait_stars + 72), .5);
+    Close(Float(portrait_stars + 72), .7);
     Close(Float(portrait_score + 72), .5); // parent scale inherited exactly once
     Close(Float(portrait_meter + 72), .65);
     Close(Float(portrait_comparison + 72), .65);
@@ -370,8 +370,8 @@ int main() {
   const auto cropped_stars = Make(0, shapes[0], 270);
   const auto cropped_meter = Make(1, shapes[1], -300);
   Resolve(cropped_stars); Resolve(cropped_meter);
-  Close(Float(cropped_stars + 0x78), 111);
-  Close(Float(cropped_meter + 0x78), -44);
+  Close(Float(cropped_stars + 0x78), 43);
+  Close(Float(cropped_meter + 0x78), -103.8);
   const Shape timer_shape{"timer.lbl", 0x8203A95C, 0x7C, 0};
   const auto cropped_timer = Make(2, timer_shape, -123, kHud, cropped_meter);
   Resolve(cropped_timer);
@@ -390,8 +390,8 @@ int main() {
   Close(Float(cropped_streak + 0x78), -123);
   Close(Float(cropped_streak + 0x80), -80);
   Close(Float(cropped_streak + 72), 1.2);
-  BeginCase("the compact multiplier ladder stays at centre left without changing the score counter");
-  Close(Float(cropped_meter + 0x78), -44);
+  BeginCase("the compact multiplier ladder stays at the far left without changing the score counter");
+  Close(Float(cropped_meter + 0x78), -103.8);
   Close(Float(cropped_meter + 0x80), 0);
   Close(Float(cropped_meter + 72), .65);
   const auto unchanged_score = Make(4, shapes[5], 270);
@@ -453,16 +453,34 @@ int main() {
   const auto top_score = Make(2, shapes[5], 270);
   Resolve(top_bar); Resolve(top_score);
   const float first_inset = 62.f / 874 * 480 + 8;
-  Close(Float(top + 0x80), -first_inset);
-  Close(Float(top_bar + 0x80), 185 - first_inset);
-  Close(Float(top_score + 0x80), 210 - first_inset);
+  Close(Float(top + 0x80), 40 - first_inset);
+  Close(Float(top_bar + 0x80), 225 - first_inset);
+  Close(Float(top_score + 0x80), 232 - first_inset);
   Close(Float(top + 72), 1); // native Blitz animation size is preserved
   Draw(top, top_shape, true);
   rb_blitz::ui::PublishPortraitViewport({402, 874, 0, 80, 402, 760});
   Draw(top, top_shape, true);
   CHECK_EQ(memory[top_bar + 189], 1);
   Resolve(top_bar);
-  Close(Float(top_bar + 0x80), 185 - (80.f / 874 * 480 + 8));
+  Close(Float(top_bar + 0x80), 225 - (80.f / 874 * 480 + 8));
+  // Stars share the pause disc's centre, including layout-only changes.
+  const auto mobile_stars = Make(3, shapes[0], 270);
+  const Shape mobile_pause_shape{"touch_pause.grp", 0x82024C4C, -0x108, -1};
+  const auto mobile_pause = Make(4, mobile_pause_shape, -289);
+  const auto previous_layout = touch_layout;
+  touch_layout = {402, 874, {12, 92, 44, 44}};
+  using_touch = true;
+  Resolve(mobile_stars); Resolve(mobile_pause);
+  Close(Float(mobile_stars + 0x80), Float(mobile_pause + 0x80));
+  Close(Float(mobile_stars + 72), .7);
+  Close(Float(mobile_stars + 0x78), 43);
+  Draw(mobile_stars, shapes[0], true);
+  touch_layout.pause.y += 10;
+  Draw(mobile_stars, shapes[0], true);
+  Resolve(mobile_pause);
+  Close(Float(mobile_stars + 0x80), Float(mobile_pause + 0x80));
+  touch_layout = previous_layout;
+  using_touch = false;
   Reset();
 #endif
 

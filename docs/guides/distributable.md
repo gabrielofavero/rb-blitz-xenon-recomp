@@ -229,3 +229,14 @@ local discoveries and saves; corrupt stores repair at next preparation.
 The audit rejects shader/native store extensions and magic even if renamed.
 See [shader-cache.md](../engine/shader-cache.md) part 9 for the release evidence,
 troubleshooting, cold/warm timings and the unproven installed/UI gates.
+
+
+### Current iOS package replacement (2026-11-26)
+
+Reuse the existing iOS build directories and `out/ios/packages/`. Each mode keeps
+one current filename: `RockBandBlitz-0.1.0-arm64-ios.ipa` or
+`RockBandBlitz-0.1.0-arm64-ios-importer.ipa`. The packager stages, audits and checks
+the ZIP before atomically replacing that mode's IPA. Failed staging or archive
+validation preserves the previous artifact and audit; the other mode is unchanged.
+The audit sidecar records signing state and the resulting SHA-256. See the
+[iOS builder](../../installer/ios/README.md) for signing and installation.

@@ -721,3 +721,63 @@ consuming substantial CPU. The song clocks cover different amounts of gameplay.
 These captures establish upload reuse and successful gameplay, not a repeatable
 FPS improvement. The cache therefore remains opt-in rather than changing the
 production default. CPU localization remains enabled.
+
+
+## Compact interface rendering storage (2026-11-26)
+
+[tree] SDK 0102 uses accessed-range buffers for scaled resolves on non-sparse
+MoltenVK. The scaled Xbox address space is logical; it no longer determines a
+single allocation at startup. Existing shaders remain descriptor-relative.
+Overlap migration copies old GPU data into the union range before publication;
+superseded buffers remain alive through their last submission. Texture-cache
+clear preserves backing because resolved-page validity survives that operation.
+CPU downscale readback binds the compact source and uses a zero shader offset,
+allowing logical source addresses above 4 GiB. Per-block requirements and imported
+host alignment are checked before allocation; peak accounting includes retired
+storage. Limits remain conservative policy, not measured phone memory headroom.
+
+[tree] Authored portrait Interface scenes allocate their visible crop directly.
+The native target seam precedes lazy frame tiling. RndCam projection rebuild
+`821FF728` scales horizontal projection and inverse; `821FF8E8` rebuilds the cached
+WorldToScreen matrices used by pointer projection. Camera selection `821FFBC8`
+refreshes reused cameras on mode changes, and destruction `821FFD30` retires
+metadata. The renderer aspect getter `82203138` continues to read the landscape
+layout constants, preserving authored vertical coverage. Custom targets, partial
+viewports, gameplay and unadapted interface routes keep their existing behavior.
+The first pre-context frame still allocates landscape; EDRAM-backed attachment
+height continues to follow the existing ownership model. Compact targets therefore
+reduce guest frame and resolve-image area without proving equivalent savings for
+every backend attachment. The phone-shaped fixture reduces source area by about
+79%; real process memory and timing savings remain unmeasured.
+
+[measured] Native Apple M1 copies exercise an 8 GiB logical space above 5 GiB with
+5,308,416 bytes of compact backing at peak plus a 3,276,800-byte readback buffer.
+Both MoltenVK submission modes pass 31 checks against an independent data oracle.
+This is a headless mapping/copy result, not a game FPS or iPhone memory result.
+The [delivery record](../plans/finished/2026-11-26-interface-render-memory.md)
+contains exact builds, tests, patch replay and remaining device checks.
+
+
+## Compact portrait gameplay (2026-11-26)
+
+The [gameplay follow-up](../plans/finished/2026-11-26-portrait-gameplay-rendering.md)
+extends compact primary targets to portrait gameplay, including mixed pause
+quality/orientation contexts. Projection and inverse retain vertical coverage;
+left/right local culling planes at camera +544/+560 are transformed and
+normalized, then native `821FF8E8` rebuilds world planes and pointer matrices.
+This removes the main frame's invisible horizontal raster/resolve area and can
+reject hidden-side object bounds before submission. Required shadows, reflections,
+postprocessing and intersecting bounds retain their work. Custom texture cameras
+and partial viewports retain independent projections. Whole-frame effect/pointer
+correctness and GPU-work/memory savings require signed-device observation.
+
+The remaining EDRAM backing is not a viewport. The common cache covers an 11-bit
+console address period; later aliases, clears and resolves can read its retained
+tiles. Clamping attachment height to the current screen could lose guest-visible
+data. A growable design would need physical extent versions, owned-tile migration,
+height-aware framebuffer keys and fence retirement across both rendering backends.
+No unsafe clamp or discard policy is introduced. The fixed EDRAM buffer is
+10 MiB times the backend scale area and has no blanket startup clear to remove.
+Historical resolved storage likewise survives cache clears while its validity
+survives. These costs prevent treating a smaller main target as equivalent
+whole-process resident-memory savings.

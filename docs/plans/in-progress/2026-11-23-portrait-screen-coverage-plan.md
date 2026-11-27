@@ -2,7 +2,7 @@
 
 Status: planning, 2026-11-23. Static inventory complete; remaining adaptation and visual acceptance are pending.
 
-The main implementation gaps are the **results flow, pause menu, store browsing/details,
+The main implementation gaps are the **results flow, store browsing/details,
 leaderboards, challenge dialogs and tutorials**. My Songs, powerup selection,
 settings, calibration, credits, Messages and Recommended now have portrait work;
 Messages and Recommended visual acceptance remains pending as of 2026-11-25. Adapting a library
@@ -63,7 +63,7 @@ pages add surfaces beyond that count. A declared screen is not proof it is reach
 | Difficulty selector — `difficulty_select_screen` / `difficulty_select_panel` | **Conditional; missing** portrait layout. | Prove which current song/mode paths use it before adapting or explicitly excluding it. |
 | Song loading and ready-to-begin — `loading_screen` | **Adapted**. Tip, powerups, progress/spinner, and Begin prompt occupy separate bands. | Long/localized tips, every powerup combination, failure/recovery, and prompt device changes. |
 | Gameplay — `game_screen`, HUD, and touch controls | **Adapted**, with centered landscape-source crop, individual HUD placement, and safe-area adjustments. | Every optional HUD element enabled, all powerup effects, remedial/tutorial messages, song-end transitions, and touch/device rotation. Hidden-by-default HUD elements still need coverage. |
-| Pause — `pause_panel` on `game_screen` | **Missing** for the main pause menu. Portrait child settings do not cover pause itself. | Resume/restart/quit, root/options list, backdrop, input hints, and mixed Interface/Gameplay orientations. |
+| Pause — `pause_panel` on `game_screen` | **Adapted; UI acceptance pending (2026-11-26)**. Native portrait backdrop, heading, eight button rows, inline options, and tappable footer; follows Interface orientation. | Resume/restart/quit, confirmation return, long locales, safe areas, touch/controller navigation, and mixed Interface/Gameplay orientations. |
 | Quit/restart — `pause_confirm_quit_song_screen`, `pause_confirm_restart_song_screen` | **Adapted shared confirmation**, with surrounding pause/game panels still pending. | Both cancel and confirm; preserve song state and orientation on return. |
 | New-game/tutorial handoff — `pause_to_new_game_screen` | **Transition**. Uses the night background and routes to loading/tutorials. | Verify the visible handoff and cancellation with pause/tutorial work. |
 | Song summary — `song_results_screen` | **Missing**. | Score, stars, song/artist, actions, and long metadata. |

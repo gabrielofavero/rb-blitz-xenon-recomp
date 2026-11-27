@@ -1,6 +1,6 @@
 # ReXGlue v0.11.0 production stack and migration ledger
 
-Status: registered production stack, 2026-11-26. **73 SDK patches** apply to exact
+Status: registered production stack, 2026-11-26. **74 SDK patches** apply to exact
 upstream v0.11.0 commit `a3e1d82678ca20d68d4837a8e9ee4652ff073745`.
 The production gitlink and title integration now use this release and patch set.
 The fresh Windows AMD64 production source-SDK release build passes.
@@ -21,7 +21,7 @@ is retained for rollback. The
 owns current delivery gates and validation.
 
 The ledger covers all **71 original SDK patch IDs**, the retained nested
-MoltenVK patch, and new responsibilities **0089**, **0090**, **0091**, **0092**, **0093**, **0094**, **0095**, **0096**, **0097**, **0098**, **0099**, **0100** and **0101**. Sixty original IDs have candidate
+MoltenVK patch, and new responsibilities **0089**, **0090**, **0091**, **0092**, **0093**, **0094**, **0095**, **0096**, **0097**, **0098**, **0099**, **0100**, **0101** and **0102**. Sixty original IDs have candidate
 files; eleven use an upstream/title replacement or fold into an owning candidate.
 Original IDs retain their responsibility even when filenames or implementation
 layers change. Corrections are folded into the owning candidate; 0089 is separate
@@ -43,6 +43,27 @@ MoltenVK), independent of host architecture. Windows AMD64 compilation and
 full-stack replay are checked locally; native Linux/macOS/iOS/Android and
 Vulkan/MoltenVK runtime transitions remain unverified.
 No removed SDK API shim or second runtime is introduced.
+
+### Range-backed scaled resolves (2026-11-26)
+
+[0102-vulkan-range-backed-scaled-resolves.patch](0102-vulkan-range-backed-scaled-resolves.patch)
+adds compact range mapping for non-sparse MoltenVK, separately from 0098's host
+import/retention and 0097's dense admission. Range-relative descriptors preserve
+resolve, texture-load and CPU-readback addressing without shader changes.
+Overlapping buffers migrate through ordered GPU copies, with superseded storage
+retained until its submission completes. Per-block device limits and actual
+allocation bytes, including import alignment, count against peak limits. Allocation
+failure leaves mappings intact and latches presentation failure through graphics
+detachment. Presentation interface version 2 prevents old-plugin ABI mismatches.
+Native sparse and other Vulkan drivers and D3D12 retain their storage policies.
+The shared observation API requires matching modules on all platforms.
+
+An independent delayed-copy oracle and native Apple GPU copies cover aliases,
+nonzero/high addresses, overlap migration, old descriptors, rollback and fence
+retirement. Exact full-stack replay passes; the official live audit still reports
+pre-existing unrelated `src/ui/prompt.cpp` drift, which is preserved. Details and
+platform validation are in the
+[delivery record](../../docs/plans/finished/2026-11-26-interface-render-memory.md).
 
 ### Exact guest upload snapshots (2026-11-26)
 

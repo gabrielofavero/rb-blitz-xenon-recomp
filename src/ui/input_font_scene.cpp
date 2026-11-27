@@ -899,6 +899,43 @@ bool PreparePortraitPromptList(const std::vector<uint8_t>& source,
   return PackStored(edited.Build(), scene, error);
 }
 
+bool PreparePortraitPause(const std::vector<uint8_t>& source,
+                          const std::vector<uint8_t>& button_source, float aspect,
+                          std::vector<uint8_t>* scene, std::string* error) {
+  std::vector<uint8_t> bytes, buttons;
+  if (!DecodeStream(source, &bytes, error) || !DecodeStream(button_source, &buttons, error))
+    return false;
+  if (bytes.size() != 364849 || Crc32(bytes.data(), bytes.size()) != 0x7A8DF8A9)
+    return Fail(error, "portrait pause source revision changed");
+  if (buttons.size() != 91806 || Crc32(buttons.data(), buttons.size()) != 0x6AD2DE01)
+    return Fail(error, "portrait pause button template revision changed");
+  PortraitScene edited(bytes);
+  const auto layout = ui::PortraitPause(aspect);
+  // Keep Group.grp and on.anim: the native entrance still owns the entire panel.
+  // Replace its wide decorative frame with a portrait surface in that same group.
+  edited.RemoveDrawMember("popup_neon");
+  edited.RemoveDrawMember("main_bg1.mesh");
+  PortraitSurface(edited, buttons, "portrait_pause_panel",
+                  ui::PortraitSplash(aspect).width * .96f, 436, 0, 0, "pause.lst");
+  for (const char* suffix : {".mesh", "_border.mesh"})
+    PortraitParent(*edited.Find(std::string("portrait_pause_panel") + suffix), "Group.grp");
+  SceneColor(edited.Find("portrait_pause_panel.mat")->data, 0x19, .035f, .025f, .065f, .94f);
+  auto& title = *edited.Find("pause.lbl");
+  PortraitPose(title, 1, 0, layout.title_z, "Group.grp");
+  PortraitText(title, 22, layout.width);
+  RenameSceneString(title.data, "../resource/fonts/pentatonic.milo",
+                    "../resource/fonts/portrait_splash.milo");
+  for (const char* name : {"pause.lst", "options.lst"}) {
+    auto& list = *edited.Find(name);
+    PortraitPose(list, layout.list_scale, 0, layout.list_z, "Group.grp");
+    RenameSceneString(list.data, "../resource/lists/list_popup.milo",
+                      "../resource/lists/portrait_prompt.milo");
+  }
+  PortraitFooter(edited, buttons, aspect);
+  PortraitParent(*edited.Find("select.ihp"), "Group.grp");
+  return PackStored(edited.Build(), scene, error);
+}
+
 bool PreparePortraitSettings(const std::vector<uint8_t>& source,
                              const std::vector<uint8_t>& button_source, float aspect,
                              std::vector<uint8_t>* scene, std::string* error) {

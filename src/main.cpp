@@ -33,8 +33,28 @@
 #include <SDL3/SDL_main.h>
 #endif
 
+#if defined(RB_BLITZ_IOS)
+static int RunIOSRbBlitz(const rex::CLIArgList& initial_args) {
+  auto args = initial_args;
+  bool restarting = false;
+  for (;;) {
+    int result;
+    std::optional<std::vector<std::string>> next;
+    {
+      RbBlitzApp app;
+      result = app.RunEntry(args, restarting);
+      if (result == 0) next = app.IOSRestartArguments();
+    }  // Destroy the title, SDK modules and settings before constructing another app.
+    if (!next) return result;
+    args = rex::CLIArgList::Parse(*next);
+    restarting = true;
+  }
+}
+REX_DETAIL_ENTRY_POINTS(RunIOSRbBlitz)
+#else
 int RunRbBlitz(RbBlitzApp& app, const rex::CLIArgList& args) { return app.RunEntry(args); }
 REX_TITLE_APP_MAIN(RbBlitzApp, RunRbBlitz)
+#endif
 
 // Run the process handoff before SDK initialization so two titles never mount one save tree.
 

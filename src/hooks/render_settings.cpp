@@ -7,6 +7,7 @@
 #include <mutex>
 #include "settings/resolution_profiles.h"
 #include "settings/render_profile_resources.h"
+#include "settings/portrait_render_target.h"
 #include "settings/window_policy.h"
 #include "settings/boot.h"
 #include "input/native_menu.h"
@@ -25,6 +26,8 @@ std::atomic<uint32_t> g_render_width{0};
 std::atomic<uint32_t> g_render_height{720};
 std::atomic<uint32_t> g_portrait_width{0}, g_portrait_height{0};
 std::atomic<bool> g_interface_portrait{false}, g_gameplay_portrait{false}, g_active_portrait{false};
+// Source and target widths are published together for UI/camera consumers.
+std::atomic<uint64_t> g_portrait_target_widths{0};
 
 // The title's own screen-space -> 16:9 mapping constants (measured 2026-10-12, see the header):
 // two adjacent 9/16 floats in the literal pool of the code that lays the UI out.
@@ -33,6 +36,7 @@ constexpr uint32_t kLayoutAspectHi = 0x8201E4D0;
 // 9/16 as big-endian float bits: what the two fields above hold on the supported retail image, and
 // therefore the shape guard that keeps this write off any other image.
 constexpr uint32_t kAspect16By9Inverse = 0x3F100000;
+uint32_t g_written_layout_aspect = 0;
 std::mutex g_profiles_mutex;
 rb_blitz::settings::DisplayMode g_native;
 int g_profile_scale = 0;
@@ -56,6 +60,7 @@ void rb_blitz::settings::ConfigureResolutionProfiles(DisplayMode native, int dra
   g_device_profiles = device;
   g_profile_first_frame = true;
   g_profiles = values;
+  g_portrait_target_widths = 0;
 }
 
 bool rb_blitz::settings::QueueResolutionProfile(SettingId id, const Value& value, std::string* error) {
@@ -108,6 +113,9 @@ void rb_blitz::settings::SetBootPortraitFrame(uint32_t width, uint32_t height) {
   g_portrait_height = height;
 }
 void rb_blitz::settings::ConfigureOrientations(bool interface_portrait, bool gameplay_portrait) {
+  // Each fresh guest image starts with the original literal pool, even when
+  // iOS restarts the runtime without replacing the host process.
+  g_written_layout_aspect = 0;
   g_interface_portrait = interface_portrait;
   g_gameplay_portrait = gameplay_portrait;
   g_active_portrait = interface_portrait;
@@ -118,6 +126,13 @@ uint32_t rb_blitz::settings::BootPortraitWidth() { return g_active_portrait ? g_
 uint32_t rb_blitz::settings::BootPortraitHeight() { return g_active_portrait ? g_portrait_height.load() : 0; }
 uint32_t rb_blitz::settings::GameplayPortraitWidth() { return g_gameplay_portrait ? g_portrait_width.load() : 0; }
 uint32_t rb_blitz::settings::GameplayPortraitHeight() { return g_gameplay_portrait ? g_portrait_height.load() : 0; }
+float rb_blitz::settings::PortraitRenderTargetProjectionScale() {
+  const auto widths = g_portrait_target_widths.load();
+  return PortraitTargetProjectionScale(uint32_t(widths >> 32), uint32_t(widths));
+}
+bool rb_blitz::settings::CompactPortraitRenderTargetActive() {
+  return g_portrait_target_widths.load() != 0;
+}
 
 // 0x823F382C, the title's own `li r11,720`, before it stores its choice at +68 and derives the
 // width from it. Setting r11 here is what lets the title lay out at a height it would not have
@@ -182,7 +197,7 @@ void rb_blitz::settings::WriteGuestLayoutAspect(uint8_t* base) {
     std::memcpy(&value, &inverse_aspect, sizeof(value));
     return value;
   }();
-  static uint32_t written = 0;
+  auto& written = g_written_layout_aspect;
   if (written == bits) {
     return;  // already this boot's value; do not touch the image again
   }
@@ -235,6 +250,20 @@ REX_EXTERN(sub_823ED1D8); // RndTex wrapper: bind texture and refresh its dimens
 REX_EXTERN(sub_825087A8); // D3D device SetTexture, including raw sampler pointer tracking
 REX_EXTERN(__imp__sub_82203260); // lazy frame begin, before native tiling captures its rectangles
 
+namespace {
+void PublishPortraitTarget(PPCContext& ctx, uint8_t* base, uint32_t source_width,
+                           uint32_t target_width, bool compact) {
+  const uint64_t widths = compact ? (uint64_t(source_width) << 32) | target_width : 0;
+  const auto previous = g_portrait_target_widths.exchange(widths);
+  if (rb_blitz::settings::PortraitTargetProjectionScale(uint32_t(previous >> 32), uint32_t(previous)) ==
+      rb_blitz::settings::PortraitTargetProjectionScale(uint32_t(widths >> 32), uint32_t(widths))) return;
+  // Camera selection can precede lazy frame begin. Refresh the already-current
+  // camera after publishing the new target, before its first draw uses it.
+  rb_blitz::settings::RefreshPortraitRenderTargetCamera(ctx, base,
+      LoadGuestBe32(base + 0x8284A108));  // RndCam::sCurrent
+}
+}  // namespace
+
 void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* base, uint32_t renderer) {
   DisplayMode pixels;
   int scale;
@@ -242,7 +271,10 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
   SettingId active;
   Value selected;
   const bool game = input::GameplayResolutionActive();
-  g_active_portrait = input::GameScreenActive() ? GameplayPortraitEnabled() : InterfacePortraitEnabled();
+  const bool game_screen = input::GameScreenActive();
+  const bool interface_portrait = InterfacePortraitEnabled();
+  const bool gameplay_portrait = GameplayPortraitEnabled();
+  g_active_portrait = game_screen ? gameplay_portrait : interface_portrait;
   {
     std::lock_guard lock(g_profiles_mutex);
     scale = g_profile_scale;
@@ -259,7 +291,10 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
         : ProfileResolution(g_profiles.at(game ? SettingId::kGameplayResolution
                                               : SettingId::kInterfaceResolution).text, g_native);
   }
-  const auto plan = ProfileGuestFrame(pixels, scale);
+  const auto source_plan = ProfileGuestFrame(pixels, scale);
+  const bool compact = CompactPortraitContext(game_screen, game, interface_portrait,
+                                               gameplay_portrait, input::PortraitSplashActive());
+  const auto plan = CompactPortraitRenderTarget(source_plan, compact);
   const auto acknowledge = [&](bool applied, const std::string& error = {}) {
     if (auto* runtime = boot::SettingsBoot::Current())
       runtime->AcknowledgeResolutionProfile(active, selected, applied, error);
@@ -279,6 +314,7 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
       read(868) == (vertical ? 0 : tile_w) && read(872) == (vertical ? tile_h : 0) &&
       read(876) == w && read(880) == h);
   if (read(64) == w && read(68) == h && (!first_frame || initial_tiles_match)) {
+    PublishPortraitTarget(caller, base, source_plan.guest_size.width, w, compact);
     { std::lock_guard lock(g_profiles_mutex); g_profile_first_frame = false; }
     failed = {};
     acknowledge(true);
@@ -363,7 +399,7 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
   }
   SetBootRenderFrame(w, h);
   {
-    const auto crop = PortraitCropSize({int(w), int(h)});
+    const auto crop = compact ? DisplayMode{int(w), int(h)} : PortraitCropSize({int(w), int(h)});
     SetBootPortraitFrame(crop.width, crop.height);
   }
   WriteGuestLayoutAspect(base);
@@ -387,12 +423,13 @@ void rb_blitz::settings::UpdateResolutionProfile(PPCContext& caller, uint8_t* ba
   ctx.r3.u32 = renderer;
   sub_823E9CE0(ctx, base);
   release(old);
+  PublishPortraitTarget(ctx, base, source_plan.guest_size.width, w, compact);
   { std::lock_guard lock(g_profiles_mutex); g_profile_first_frame = false; }
   failed = {};
   acknowledge(true);
   caller.fpscr = ctx.fpscr;
-  REXLOG_INFO("render: {} profile {}x{} -> guest {}x{} at {}x", game ? "gameplay" : "interface",
-              pixels.width, pixels.height, w, h, scale);
+  REXLOG_INFO("render: {} profile {}x{} -> guest {}x{} at {}x{}", game ? "gameplay" : "interface",
+              pixels.width, pixels.height, w, h, scale, compact ? " (portrait target)" : "");
 }
 
 REX_HOOK_RAW(sub_82203260) {

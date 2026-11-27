@@ -457,8 +457,6 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=True)
     suffix = "-importer" if args.mode == "importer" else ""
     destination = output / f"RockBandBlitz-{version}-arm64-ios{suffix}.ipa"
-    if destination.exists():
-        fail(f"archive the existing IPA before rebuilding: {destination}")
     libraries = collect_libraries(build, roots, args.minimum_ios)
     with tempfile.TemporaryDirectory(prefix="rb-blitz-ipa-", dir=output) as directory:
         temporary = Path(directory)
@@ -486,6 +484,8 @@ def main() -> None:
                   "sha256": sha256(candidate),
                   "files": {path.relative_to(app).as_posix(): sha256(path)
                             for path in sorted(app.rglob("*")) if path.is_file()}}
+        # Keep the previous package until staging, audits and archive integrity
+        # checks succeed, then atomically publish the current package mode.
         candidate.replace(destination)
         destination.with_suffix(".audit.json").write_text(json.dumps(report, indent=2) + "\n")
         if not args.sign_identity:

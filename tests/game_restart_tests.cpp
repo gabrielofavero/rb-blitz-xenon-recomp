@@ -487,6 +487,33 @@ void ArgumentRetirement() {
   CHECK_FALSE(IsRetiredArgument("--resolution_scale=2"));  // an explicit override is preserved
 }
 
+void InProcessRestartUsesSavedSettings() {
+  test::BeginCase("in-process restart: durable revision, one request and fresh boot arguments");
+  InProcessRestart restart;
+  LaunchContext context;
+  context.game_data_root = "/Documents/Game Data";
+  context.profile_file = "/Documents/profile.toml";
+  context.developer_arguments = {"--game_data_root=old", "--launcher_profile", "old.toml",
+      "--restart-bootstrap", "--restart-handoff=v1.1.2.3.common", "--refresh_dlc_cache=true",
+      "--gpu=vulkan"};
+  using rb_blitz::settings::RestartStatus;
+  CHECK_TRUE(restart.Request(0, 0, context).status == RestartStatus::kNotSaved);
+  CHECK_FALSE(restart.arguments().has_value());
+  CHECK_TRUE(restart.Request(1, 2, context).status == RestartStatus::kStaleRevision);
+  CHECK_FALSE(restart.arguments().has_value());
+  CHECK_TRUE(restart.Request(2, 2, context).status == RestartStatus::kOk);
+  const std::vector<std::string> expected = {"--game_data_root=/Documents/Game Data",
+      "--launcher_profile=/Documents/profile.toml", "--gpu=vulkan"};
+  CHECK_TRUE(*restart.arguments() == expected);
+  CHECK_TRUE(restart.Request(2, 2, context).status == RestartStatus::kAlreadyRequested);
+  CHECK_TRUE(*restart.arguments() == expected);
+  // A new app instance gets its own request gate, so another restart is possible.
+  InProcessRestart next_boot;
+  context.developer_arguments = *restart.arguments();
+  CHECK_TRUE(next_boot.Request(3, 3, context).status == RestartStatus::kOk);
+  CHECK_TRUE(*next_boot.arguments() == expected);
+}
+
 void CoordinatorIsExactlyOnce() {
   test::BeginCase("coordinator: one child per boot, and the failures keep the game running");
 
@@ -838,6 +865,7 @@ int main(int argc, char** argv) {
   ChildArgumentsAreAnAllowlist();
   PersistentWindowIdentity();
   ArgumentRetirement();
+  InProcessRestartUsesSavedSettings();
   CoordinatorIsExactlyOnce();
   CoordinatedSpawnFailureKeepsTheParent();
   CoordinatorWithoutALauncher();

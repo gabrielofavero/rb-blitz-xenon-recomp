@@ -10,6 +10,7 @@
 #include "input/native_menu.h"
 #include "platform/window_host.h"
 #if defined(RB_BLITZ_IOS)
+#include "platform/ios_display.h"
 #include "platform/ios_runtime.h"
 #endif
 #include <SDL3/SDL.h>
@@ -38,14 +39,28 @@ class GameplayPresentation final : public rex::ui::DialogBase {
       SDL_GetWindowSize(window, &width, &height);
       SDL_GetWindowSafeArea(window, &safe);
     }
-    PublishPortraitViewport({float(width), float(height), float(safe.x), float(safe.y),
-                             float(safe.w), float(safe.h)});
+    PortraitViewport viewport{float(width), float(height), float(safe.x), float(safe.y),
+                              float(safe.w), float(safe.h)};
+#if defined(RB_BLITZ_IOS)
+    if (window) {
+      const auto native_viewport = platform::IOSWindowViewport(SDL_GetPointerProperty(
+          SDL_GetWindowProperties(window), SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER, nullptr));
+      if (native_viewport.width > 0 && native_viewport.height > 0) viewport = native_viewport;
+    }
+#endif
+    const auto previous = CurrentPortraitViewport();
+    if (viewport.width != previous.width || viewport.height != previous.height ||
+        viewport.safe_x != previous.safe_x || viewport.safe_y != previous.safe_y ||
+        viewport.safe_width != previous.safe_width || viewport.safe_height != previous.safe_height)
+      REXLOG_INFO("portrait: viewport {}x{}, safe {},{} {}x{}", viewport.width, viewport.height,
+                  viewport.safe_x, viewport.safe_y, viewport.safe_width, viewport.safe_height);
+    PublishPortraitViewport(viewport);
     const bool game = input::GameScreenActive();
     const bool portrait = game ? settings::GameplayPortraitEnabled() : settings::InterfacePortraitEnabled();
     if (!orientation_ || *orientation_ != portrait) {
       if (ApplyOrientation(portrait)) orientation_ = portrait;
     }
-    const bool crop = portrait && (game ||
+    const bool crop = portrait && !settings::CompactPortraitRenderTargetActive() && (game ||
         (settings::InterfacePortraitEnabled() && input::PortraitSplashActive()));
     const bool render_cutoff = crop && game && rb_blitz::settings::title::portrait_render_cutoff.Get();
     const auto source_width = settings::BootRenderWidth();
@@ -91,7 +106,8 @@ class GameplayPresentation final : public rex::ui::DialogBase {
     source_height_ = source_height;
     visible_width_ = visible_width;
     if (entering_crop && preview_notification_) preview_notification_();
-    REXLOG_INFO("portrait: {} landscape source, preserving both axes", crop ? "cropping" : "fitting");
+    REXLOG_INFO("portrait: {} {} source, preserving both axes", crop ? "cropping" : "fitting",
+                settings::CompactPortraitRenderTargetActive() ? "compact portrait" : "landscape");
     return true;
   }
   bool ApplyOrientation(bool portrait) {

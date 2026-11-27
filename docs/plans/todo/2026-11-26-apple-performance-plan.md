@@ -1,5 +1,11 @@
 # Apple performance implementation plan
 
+The [interface memory delivery](../finished/2026-11-26-interface-render-memory.md)
+implements compact non-sparse MoltenVK scaled-resolve backing, authored portrait
+Interface targets and late allocation rejection. Those allocation paths supersede
+the monolithic-backing assumptions below. Device acceptance and sustained timing
+remain open; this does not complete the broader profiling or 1080p performance gates.
+
 Date: 2026-11-26. Status: planning only; implementation and new gameplay measurements have not started.
 
 Target sustained 60 FPS at 1080p-equivalent internal resolution on iOS and macOS,

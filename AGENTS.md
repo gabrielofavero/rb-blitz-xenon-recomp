@@ -15,6 +15,11 @@
   current build already contains the most recent change. An unbuilt change means
   the user tests stale binaries. Build command:
   `cmake --build --preset win-amd64-release`.
+- For iOS builds, reuse the same build and packaging directories on every run.
+  Write IPA artifacts directly to `out/ios/packages/` using the established
+  filename for the package mode, overwriting the previous IPA. Do not create
+  timestamped, feature-specific, or numbered directories or IPA copies under
+  `out/`; keep one current IPA per package mode.
 - On Windows, run payload test executables through
   `out/build/win-amd64-release/rb_blitz_windows_test_runner.exe <test.exe> [args...]`
   so crashes go to the agent's console or CTest log without desktop dialogs.

@@ -110,7 +110,9 @@ class SettingsBoot {
   // --- 4. OnPreLaunchModule ---------------------------------------------------------------
   void FinishInit();
   void SetPresentedProbe(std::function<bool()> probe) { presented_probe_ = std::move(probe); }
-  void SetResolutionPresentProbe(std::function<uint64_t()> probe) { resolution_present_probe_ = std::move(probe); }
+  void SetResolutionFailureProbe(std::function<bool()> probe) { resolution_failure_probe_ = std::move(probe); }
+  void SetResolutionFailureHandler(std::function<void()> handler) { resolution_failure_handler_ = std::move(handler); }
+  void NoteGraphicsStartupFailure();
   bool BeginResolutionProfileFrame(SettingId id, const Value& value);
   void MenuFrame();
   // Restore the player's shader compilation preference after the native
@@ -125,6 +127,7 @@ class SettingsBoot {
   ServiceSink* sink() { return sink_.get(); }
 
   bool store_available() const { return store_available_; }
+  bool graphics_recovered() const { return graphics_recovered_; }
   const StorePaths& paths() const { return paths_; }
   const PathFileResult& path_file() const { return path_file_; }
   const MigrationResult& migration() const { return migration_; }
@@ -207,6 +210,8 @@ class SettingsBoot {
   // True when an explicit source (environment / command line) already owns this cvar, so the stored
   // row must not be written over it.
   bool ExplicitlyOwned(const std::string& name, SettingId id);
+  // Caller holds graphics_marker_mutex_. The handler may post shutdown to the UI thread.
+  bool ObserveResolutionAllocationFailure();
 
   StorePaths paths_;
   PathFileResult path_file_;
@@ -225,13 +230,13 @@ class SettingsBoot {
   int profile_draw_scale_ = 0;
   bool probe_render_active_ = false;
   GraphicsBootState graphics_boot_;
+  bool graphics_recovered_ = false;
   ResolutionProfileState resolution_profile_state_;
-  std::function<uint64_t()> resolution_present_probe_;
-  uint64_t resolution_last_refresh_ = 0;
+  std::function<bool()> resolution_failure_probe_;
+  std::function<void()> resolution_failure_handler_;
+  bool resolution_allocation_failed_ = false;
   SettingId resolution_active_context_ = SettingId::kUnknown;
   std::string resolution_active_fingerprint_;
-  Value resolution_active_value_;
-  bool resolution_active_ready_ = false;
   std::function<bool()> presented_probe_;
   unsigned menu_frames_ = 0;
   std::atomic<bool> menu_presented_{false};

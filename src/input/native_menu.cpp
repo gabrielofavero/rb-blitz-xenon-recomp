@@ -30,7 +30,10 @@
 #include "ui/input_font_scene.h"
 #include "ui/achievements_overlay.h"
 #include "ui/portrait_menu.h"
+#include "ui/portrait_dialog.h"
 #include "hooks/portrait_layout.h"
+#include "input/portrait_panel.h"
+#include "input/dialog_target.h"
 #include "hooks/render_settings.h"
 #include "ui/settings_screen.h"
 #include "loading/load_trace.h"
@@ -104,6 +107,8 @@ bool menu_available = false;
 bool game_screen_active = false;
 bool gameplay_resolution_active = false;
 bool portrait_splash_active = false;
+PortraitPanelPublisher portrait_panel_state;
+DialogTargetPublisher dialog_target_state;
 uint32_t current_screen = 0, current_focus = 0;
 uint32_t current_panel = 0;
 thread_local uint32_t current_panel_dir = 0, current_input_scope = 0;
@@ -341,6 +346,11 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   current_screen = screen; current_focus = focus; menu_available = allowed;
   current_panel = panel;
   current_panel_dir = panel ? U32(base, panel + 52) : 0;
+  // The overlay observes the UIPanel's loaded directory without changing the
+  // directory selection used by the established menu fitting path.
+  ui::portrait_dialog::Observe(screen, panel, PanelDirectoryFromPanel(panel,
+      [base](uint32_t address) { return U32(base, address); }),
+      allowed && panel_name == "error_popup_panel");
   current_input_scope = input_scope;
   dialog_scope = scope;
   observed_menu_frame = frame_number;
@@ -349,7 +359,10 @@ void Context(PPCContext& ctx, uint8_t* base, uint32_t manager) {
   gameplay_resolution_active = GameplayResolutionScreen(name, panel_name, focus_name);
   portrait_splash_active = ui::PortraitSplashScreen(name, panel_name, current_panel_scene) &&
       (!ui::PortraitStoreScreen(name) || ui::screen::CurrentMenuConfiguration().rhythmverse_row);
+  portrait_panel_state.Publish(current_panel_dir, portrait_splash_active, name);
   current_panel_name = panel_name;
+  dialog_target_state.Context({screen, focus, panel, current_panel_dir, input_scope,
+      allowed && scope == MenuDialogScope::kPanel, panel_name == "error_popup_panel"}, frame_number);
   queue.Context(screen, focus, allowed && window_focused && MouseSupportEnabled() &&
                 !SystemUIActive() && !ui::achievements::Active(), panel);
 }
@@ -781,7 +794,9 @@ void PollMouse(PPCContext& ctx, uint8_t* base, uint32_t manager) {
       }
       return;
     }
-    if (const auto button = HitMenuHint(event->point, hint_targets,
+    const auto modal_button = dialog_target_state.Hit(event->point, current_screen, current_focus,
+                                                       current_input_scope, frame_number);
+    if (const auto button = modal_button ? modal_button : HitMenuHint(event->point, hint_targets,
                                         current_screen, current_focus, frame_number, current_input_scope)) {
       scroll_follow.Reset();
       REXLOG_INFO("native_mouse: legend click screen={} point={:.4f},{:.4f} button={:04X}",
@@ -1253,8 +1268,7 @@ namespace {
 std::optional<MouseAction> PresetArrowAt(PPCContext& ctx, uint8_t* base, MenuPoint point) {
   if (DrawScreenName() != "controller_config_screen" &&
       DrawScreenName() != "controller_config_pause_screen") return {};
-  // UIPanel +0x34 owns the loaded PanelDir, whose authored arrow meshes are
-  // named in controller_config.milo_xbox. Resolve only on a click so placement
+  // Resolve the authored controller_config.milo_xbox arrows only on a click so placement
   // and aspect changes use the scene's current transforms at minimal cost.
   const uint32_t panel = U32(base, current_screen + 52);
   const uint32_t dir = panel ? U32(base, panel + 52) : 0;
@@ -1726,12 +1740,10 @@ bool DrawPortraitStoreDialogControl(PPCContext& ctx, uint8_t* base, uint32_t lab
   const std::string stem = close ? "portrait_dialog_close" : "portrait_dialog_action";
   const bool hovered = DrawPortraitFooterSurface(ctx, base, dir, stem, 0, 0, false);
   const auto mesh = SceneMesh(ctx, base, dir, (stem + ".mesh").c_str());
-  if (menu_available && dir == current_panel_dir && dialog_scope == MenuDialogScope::kPanel)
-    if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt) {
-      std::lock_guard lock(mutex);
-      hint_targets.push_back({current_screen, current_focus, frame_number, *bounds,
-                              MenuHintButton(close ? 2 : 1), current_input_scope});
-    }
+  const auto dialog_context = dialog_target_state.Snapshot();
+  if (dialog_context.available && dir == dialog_context.directory)
+    if (const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt)
+      dialog_target_state.Capture(dialog_context, *bounds, MenuHintButton(close ? 2 : 1));
   const auto dialog = ui::PortraitStoreDialog(ui::screen::CurrentMenuConfiguration().portrait_aspect);
   const auto fit = hooks::PortraitDrawFit();
   const auto transform = label + 72 + U32(base, U32(base, label + 72) + 16);
@@ -2073,29 +2085,27 @@ void CaptureMenuHint(PPCContext& ctx, uint8_t* base, uint32_t label, uint32_t ac
   }
 }
 void CaptureDialogPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
-  if (!menu_available || dialog_scope != MenuDialogScope::kPanel) return;
+  const auto context = dialog_target_state.Snapshot();
+  if (!context.available) return;
   const auto header = ObjectBase(base, label);
   if (!header || ObjectName(base, header) != "continue.lbl" ||
-      U32(base, header + 36) != current_panel_dir) return;
-  const auto it = dialog_prompts.find(label);
-  if (it == dialog_prompts.end()) return;
+      U32(base, header + 36) != context.directory) return;
   const auto bounds = ProjectLabel(ctx, base, label);
   if (!bounds) return;
-  if (!hint_targets.empty() && hint_targets.back().frame != frame_number) hint_targets.clear();
+  const auto it = dialog_prompts.find(label);
+  if (it == dialog_prompts.end() || it->second.empty()) {
+    // The native error panel has exactly one Confirm action. Touch wording
+    // deliberately removes its controller glyph; the action stays the same.
+    const auto text = U32(base, label + 80);
+    if (context.error_popup && text && base[text])
+      dialog_target_state.Capture(context, *bounds, MenuHintButton(1));
+    return;
+  }
   for (const auto& span : it->second) {
     const float width = bounds->right - bounds->left;
-    MenuBounds part{bounds->left + width * span.left, bounds->top,
-                    bounds->left + width * span.right, bounds->bottom};
-    hint_targets.push_back({current_screen, current_focus, frame_number, part,
-                            MenuHintButton(span.action), current_input_scope});
-  }
-  static thread_local std::unordered_map<uint32_t, uint32_t> traced;
-  if (traced.size() > 128) traced.clear();
-  if (traced[label] != current_input_scope) {
-    traced[label] = current_input_scope;
-    REXLOG_INFO("native_mouse: dialog prompt panel={} label={:08X} actions={} bounds={:.4f},{:.4f},{:.4f},{:.4f}",
-                current_panel_name, label, it->second.size(), bounds->left, bounds->top,
-                bounds->right, bounds->bottom);
+    const MenuBounds part{bounds->left + width * span.left, bounds->top,
+                          bounds->left + width * span.right, bounds->bottom};
+    dialog_target_state.Capture(context, part, MenuHintButton(span.action));
   }
 }
 void UpdateCalibrationSideLabel(PPCContext& ctx, uint8_t* base, uint32_t label) {
@@ -2153,6 +2163,20 @@ void UpdateTouchPrompt(PPCContext& ctx, uint8_t* base, uint32_t label) {
   call.ctx.r4.u32 = chars;
   call.ctx.r5.u32 = 0;
   __imp__sub_824BC7D0(call.ctx, base);
+}
+
+void PublishPortraitDialogLabel(uint8_t* base, uint32_t label) {
+  if (!settings::InterfacePortraitEnabled()) return;
+  const auto header = ObjectBase(base, label);
+  const auto name = ObjectName(base, header);
+  if (name != "error.lbl" && name != "continue.lbl") return;
+  const auto directory = header ? U32(base, header + 36) : 0;
+  if (!directory || ObjectName(base, ObjectBase(base, directory)) != "error_general") return;
+  const auto text = U32(base, label + 80);
+  if (!text) return;
+  const auto* chars = reinterpret_cast<const char*>(base + text);
+  const auto length = strnlen(chars, 16385);
+  if (length <= 16384) ui::portrait_dialog::PublishLabel(directory, name == "error.lbl", {chars, length});
 }
 // Defined after DrawList; declared here because the draw is what discovers a new list.
 void DrawList(PPCContext& ctx, uint8_t* base) {
@@ -2328,15 +2352,18 @@ void DrawList(PPCContext& ctx, uint8_t* base) {
   }
 }
 std::optional<float> PortraitPanelDrawAspect(uint8_t* base, uint32_t drawable) {
-  if (!settings::InterfacePortraitEnabled() || !portrait_splash_active) return {};
+  if (!settings::InterfacePortraitEnabled()) return {};
+  const auto panel = portrait_panel_state.Snapshot();
+  if (!panel.active) return {};
   const auto object = ObjectBase(base, drawable);
   const auto name = ObjectName(base, object);
-  const bool store_panel = PortraitStoreActive() &&
+  const bool store_panel = ui::screen::CurrentMenuConfiguration().rhythmverse_row &&
+      ui::PortraitStoreScreen(panel.screen) &&
       (name == "StoreMainPanel" || name == "StoreMenuPanel" || name == "songselect" || name == "storedetails" || name == "error_general");
-  const bool transition_panel = ui::PortraitLibraryTransition(current_screen_name) &&
+  const bool transition_panel = ui::PortraitLibraryTransition(panel.screen) &&
       !ui::PortraitLibraryPanelScreen(name).empty();
   if (!store_panel && !transition_panel &&
-      (!current_panel_dir || object != ObjectBase(base, current_panel_dir))) return {};
+      (!panel.directory || object != ObjectBase(base, panel.directory))) return {};
   return ui::PortraitSplash(ui::screen::CurrentMenuConfiguration().portrait_aspect).width / 480;
 }
 
@@ -2344,7 +2371,8 @@ void DrawPortraitPanel(PPCContext& ctx, uint8_t* base, uint32_t drawable,
                        void (*draw)(PPCContext&, uint8_t*)) {
   const auto previous = drawing_panel_screen;
   const auto previous_translation = drawing_panel_translation;
-  if (settings::InterfacePortraitEnabled() && ui::PortraitLibraryTransition(current_screen_name)) {
+  const auto panel = portrait_panel_state.Snapshot();
+  if (settings::InterfacePortraitEnabled() && ui::PortraitLibraryTransition(panel.screen)) {
     const auto dir = PanelDirectoryFromDrawable(drawable,
         [base](uint32_t address) { return U32(base, address); });
     if (!dir) { draw(ctx, base); return; }
@@ -2448,6 +2476,7 @@ REX_HOOK_RAW(sub_824E9A90) {
 REX_HOOK_RAW(sub_824BC668) {
   const auto label = ctx.r3.u32 - 260;
   rb_blitz::input::UpdateTouchPrompt(ctx, base, label);
+  rb_blitz::input::PublishPortraitDialogLabel(base, label);
   rb_blitz::hooks::PrepareHudLabel(ctx, base, label);
   rb_blitz::input::UpdateCalibrationSideLabel(ctx, base, label);
   rb_blitz::input::UpdateCalibrationText(ctx, base, label);
@@ -2463,6 +2492,7 @@ REX_HOOK_RAW(sub_824BC7D0) {
   setting_prompt_label = ObjectName(base, ObjectBase(base, label)) == "continue.lbl" ? label : 0;
   if (setting_prompt_label) dialog_prompts.erase(label);
   __imp__sub_824BC7D0(ctx, base);
+  PublishPortraitDialogLabel(base, label);
   setting_prompt_label = previous;
 }
 

@@ -2,6 +2,8 @@
 #pragma once
 #include <string_view>
 namespace rb_blitz::diag::shader_trace {
+// Called before guest threads start, including subsequent in-process boots.
+void ResetBootState();
 // Called by the existing UIManager::Poll observer, independent of mouse/focus
 // settings.
 void ObserveScreen(std::string_view screen, std::string_view panel,

@@ -1,0 +1,724 @@
+diff --git a/include/rex/gpu/graphics_presentation.h b/include/rex/gpu/graphics_presentation.h
+index 92c559f..9661b99 100644
+--- a/include/rex/gpu/graphics_presentation.h
++++ b/include/rex/gpu/graphics_presentation.h
+@@ -17,13 +17,14 @@ struct CaptureImage {
+ struct PresentationState {
+   u64 guest_output_refresh = 0; /**< Active images published to the output mailbox. */
+   u64 successful_ui_present = 0; /**< Images presented from the UI paint path. */
++  bool resolution_allocation_failed = false; /**< Latched until the next title attachment. */
+ };
+ 
+ /** Optional output observation, available while the graphics module is connected.
+  * Calls never expose a backend object. Capture waits for GPU completion and may fail when
+  * output is absent, unavailable or lost; callers must not use it as a per-frame pacing signal.
+  */
+-REX_DECLARE_INTERFACE(IGraphicsPresentation, 1)
++REX_DECLARE_INTERFACE(IGraphicsPresentation, 2)
+   [[nodiscard]] virtual PresentationState GetPresentationState() const = 0;
+   [[nodiscard]] virtual bool CaptureGuestOutput(CaptureImage& image) = 0;
+ };
+diff --git a/src/gpu/xenos/host/vulkan/scaled_resolve_segments.h b/src/gpu/xenos/host/vulkan/scaled_resolve_segments.h
+new file mode 100644
+index 0000000..b561e9a
+--- /dev/null
++++ b/src/gpu/xenos/host/vulkan/scaled_resolve_segments.h
+@@ -0,0 +1,134 @@
++// SPDX-License-Identifier: BSD-3-Clause
++#pragma once
++
++#include <algorithm>
++#include <cstddef>
++#include <cstdint>
++#include <new>
++#include <vector>
++
++namespace rex::gpu::vulkan {
++
++// Maps logical scaled-resolve addresses to compact buffers. Descriptors remain
++// relative to their requested logical start, so shader addressing is unchanged.
++// Allocation owns hardware/budget checks. Copy and retire must not throw; retired
++// handles must remain alive until all submissions using their descriptors finish.
++class ScaledResolveSegments {
++ public:
++  static constexpr std::uint64_t kAlignment = std::uint64_t(64) << 10;
++
++  struct Span {
++    std::uint64_t start = 0;
++    std::uint64_t size = 0;
++    std::uint64_t handle = 0;
++  };
++
++  struct Binding {
++    std::uint64_t handle = 0;
++    std::uint64_t offset = 0;
++    std::uint64_t length = 0;
++  };
++
++  explicit ScaledResolveSegments(std::uint64_t logical_size = 0)
++      : logical_size_(logical_size) {}
++
++  bool Configure(std::uint64_t logical_size) {
++    if (!spans_.empty()) return false;
++    logical_size_ = logical_size;
++    return true;
++  }
++
++  const std::vector<Span>& spans() const { return spans_; }
++
++  bool Find(std::uint64_t start, std::uint64_t length, Binding& binding) const {
++    if (!ValidRange(start, length)) return false;
++    if (!length) {
++      binding = {};
++      return true;
++    }
++    for (const auto& span : spans_) {
++      if (span.start > start) break;
++      if (start - span.start < span.size &&
++          length <= span.size - (start - span.start)) {
++        binding = {span.handle, start - span.start, length};
++        return true;
++      }
++    }
++    return false;
++  }
++
++  // Allocate(size) returns a new nonzero handle or zero on failure.
++  // Copy(source, destination, source_offset, destination_offset, size) records a
++  // GPU copy before later use of the returned binding. Retirement is deferred by
++  // the caller. Failure leaves existing mappings and the output binding intact.
++  template <typename Allocate, typename Copy, typename Retire>
++  bool Acquire(std::uint64_t start, std::uint64_t length, Allocate&& allocate,
++               Copy&& copy, Retire&& retire, Binding& binding) {
++    if (!ValidRange(start, length)) return false;
++    if (Find(start, length, binding)) return true;
++
++    std::uint64_t begin = start & ~(kAlignment - 1);
++    std::uint64_t end = start + length;
++    if (end & (kAlignment - 1)) {
++      end += std::min(kAlignment - (end & (kAlignment - 1)), logical_size_ - end);
++    }
++
++    std::size_t first = 0;
++    while (first < spans_.size() && spans_[first].start + spans_[first].size <= begin) {
++      ++first;
++    }
++    std::size_t last = first;
++    while (last < spans_.size() && spans_[last].start < end) {
++      begin = std::min(begin, spans_[last].start);
++      end = std::max(end, spans_[last].start + spans_[last].size);
++      ++last;
++    }
++
++    // Prepare all metadata before allocation or recording migration commands.
++    // Publishing the resulting map is then a nonthrowing swap.
++    std::vector<Span> replacement;
++    try {
++      replacement.reserve(spans_.size() - (last - first) + 1);
++      replacement.insert(replacement.end(), spans_.begin(), spans_.begin() + first);
++      replacement.push_back({begin, end - begin, 0});
++      replacement.insert(replacement.end(), spans_.begin() + last, spans_.end());
++    } catch (const std::bad_alloc&) {
++      return false;
++    }
++
++    std::uint64_t handle;
++    try {
++      handle = allocate(end - begin);
++    } catch (const std::bad_alloc&) {
++      return false;
++    }
++    if (!handle) return false;
++    replacement[first].handle = handle;
++    for (std::size_t index = first; index < last; ++index) {
++      const auto& old = spans_[index];
++      copy(old.handle, handle, 0, old.start - begin, old.size);
++    }
++    spans_.swap(replacement);
++    for (std::size_t index = first; index < last; ++index) {
++      retire(replacement[index].handle);
++    }
++    binding = {handle, start - begin, length};
++    return true;
++  }
++
++  template <typename Retire>
++  void Clear(Retire&& retire) {
++    for (const auto& span : spans_) retire(span.handle);
++    spans_.clear();
++  }
++
++ private:
++  bool ValidRange(std::uint64_t start, std::uint64_t length) const {
++    return start <= logical_size_ && length <= logical_size_ - start;
++  }
++
++  std::uint64_t logical_size_ = 0;
++  std::vector<Span> spans_;
++};
++
++}  // namespace rex::gpu::vulkan
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_host_memory.h b/src/gpu/xenos/host/vulkan/vulkan_host_memory.h
+index 768f272..790ff67 100644
+--- a/src/gpu/xenos/host/vulkan/vulkan_host_memory.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_host_memory.h
+@@ -14,7 +14,9 @@ class HostMemoryBacking : public rex::NonCopyable {
+  public:
+   ~HostMemoryBacking();
+   bool CreateBuffer(const VulkanDevice* device, VkDeviceSize size, VkBufferUsageFlags usage,
+-                    VkBuffer& buffer_out, VkDeviceMemory& memory_out, std::uint32_t* type_out = nullptr);
++                    VkBuffer& buffer_out, VkDeviceMemory& memory_out, std::uint32_t* type_out = nullptr,
++                    VkDeviceSize allocation_limit = VK_WHOLE_SIZE);
++  size_t allocation_size() const { return mapping_size_; }
+   void Reset();
+  private:
+   void* mapping_ = nullptr;
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_objects.cpp b/src/gpu/xenos/host/vulkan/vulkan_objects.cpp
+index 4c8bb5e..3403675 100644
+--- a/src/gpu/xenos/host/vulkan/vulkan_objects.cpp
++++ b/src/gpu/xenos/host/vulkan/vulkan_objects.cpp
+@@ -45,7 +45,7 @@ void HostMemoryBacking::Reset() {
+ 
+ bool HostMemoryBacking::CreateBuffer(const VulkanDevice* device, VkDeviceSize size,
+                                     VkBufferUsageFlags usage, VkBuffer& buffer_out,
+-                                    VkDeviceMemory& memory_out, u32* type_out) {
++                                    VkDeviceMemory& memory_out, u32* type_out, VkDeviceSize allocation_limit) {
+ #if REX_PLATFORM_MAC
+   if (mapping_ || device->GetProperties().driverID != VK_DRIVER_ID_MOLTENVK ||
+       !device->GetExtensions().ext_EXT_external_memory_host) return false;
+@@ -90,7 +90,7 @@ bool HostMemoryBacking::CreateBuffer(const VulkanDevice* device, VkDeviceSize si
+   const VkDeviceSize allocation_size = rex::RoundUpPow2(requirements.size, alignment);
+   // Reserve extra virtual pages so imports with alignment above the host page
+   // size can still be satisfied. Trim padding without touching the data pages.
+-  if (!allocation_size || allocation_size > SIZE_MAX - alignment) {
++  if (!allocation_size || allocation_size > SIZE_MAX - alignment || allocation_size > allocation_limit) {
+     dfn.vkDestroyBuffer(device->GetDevice(), buffer, nullptr);
+     return false;
+   }
+@@ -152,6 +152,7 @@ bool HostMemoryBacking::CreateBuffer(const VulkanDevice* device, VkDeviceSize si
+   return true;
+ #else
+   (void)device; (void)size; (void)usage; (void)buffer_out; (void)memory_out; (void)type_out;
++  (void)allocation_limit;
+   return false;
+ #endif
+ }
+@@ -185,7 +186,7 @@ bool CreateDedicatedAllocationBuffer(const VulkanDevice* const vulkan_device,
+                                      const VkDeviceSize size, const VkBufferUsageFlags usage,
+                                      const MemoryPurpose memory_purpose, VkBuffer& buffer_out,
+                                      VkDeviceMemory& memory_out, u32* const memory_type_out,
+-                                     VkDeviceSize* const memory_size_out) {
++                                     VkDeviceSize* const memory_size_out, VkDeviceSize allocation_limit) {
+   const VulkanDevice::Functions& dfn = vulkan_device->GetFunctions();
+   const VkDevice device = vulkan_device->GetDevice();
+ 
+@@ -205,6 +206,10 @@ bool CreateDedicatedAllocationBuffer(const VulkanDevice* const vulkan_device,
+ 
+   VkMemoryRequirements memory_requirements;
+   dfn.vkGetBufferMemoryRequirements(device, buffer, &memory_requirements);
++  if (memory_requirements.size > allocation_limit) {
++    dfn.vkDestroyBuffer(device, buffer, nullptr);
++    return false;
++  }
+   u32 memory_type = ChooseMemoryType(vulkan_device->GetMemoryTypes(),
+                                      memory_requirements.memoryTypeBits, memory_purpose);
+   if (memory_type == UINT32_MAX) {
+diff --git a/src/gpu/xenos/host/vulkan/vulkan_objects.h b/src/gpu/xenos/host/vulkan/vulkan_objects.h
+index 4204e84..b269563 100644
+--- a/src/gpu/xenos/host/vulkan/vulkan_objects.h
++++ b/src/gpu/xenos/host/vulkan/vulkan_objects.h
+@@ -184,7 +184,8 @@ bool CreateDedicatedAllocationBuffer(const VulkanDevice* vulkan_device, VkDevice
+                                      VkBufferUsageFlags usage, MemoryPurpose memory_purpose,
+                                      VkBuffer& buffer_out, VkDeviceMemory& memory_out,
+                                      u32* memory_type_out = nullptr,
+-                                     VkDeviceSize* memory_size_out = nullptr);
++                                     VkDeviceSize* memory_size_out = nullptr,
++                                     VkDeviceSize allocation_limit = VK_WHOLE_SIZE);
+ 
+ bool CreateDedicatedAllocationImage(const VulkanDevice* vulkan_device,
+                                     const VkImageCreateInfo& create_info,
+diff --git a/src/gpu/xenos/vulkan/command_processor.cpp b/src/gpu/xenos/vulkan/command_processor.cpp
+index 23f520d..1b7baa5 100644
+--- a/src/gpu/xenos/vulkan/command_processor.cpp
++++ b/src/gpu/xenos/vulkan/command_processor.cpp
+@@ -38,6 +38,7 @@
+ #include <rex/title.h>
+ #include <rex/xenos/register.h>
+ #include "gpu/xenos/vulkan/command_processor.h"
++#include "gpu/xenos/vulkan/vulkan_xenos_graphics_driver.h"
+ #include "gpu/xenos/vulkan/descriptor_binding_state.h"
+ #include "gpu/xenos/physical_memory.h"
+ #include "gpu/xenos/vulkan/pipeline_cache.h"
+@@ -58,6 +59,11 @@ static_assert(GLSLANG_VERSION_MAJOR == 11);
+ 
+ namespace rex::gpu::vulkan {
+ 
++void VulkanCommandProcessor::ReportResolutionAllocationFailure() {
++  static_cast<VulkanXenosGraphicsDriver&>(GetGraphicsDriver()).ReportResolutionAllocationFailure();
++}
++
++
+ namespace {
+ 
+ constexpr TBuiltInResource kGlslangDefaultTBuiltInResource = {
+@@ -840,7 +846,9 @@ bool VulkanCommandProcessor::SetupContext() {
+   }
+   const u32 requested_scale_x = draw_resolution_scale_x;
+   const u32 requested_scale_y = draw_resolution_scale_y;
+-  if (ClampResolveScaleToAllocationLimit(
++  const bool segmented_resolves = UseSegmentedResolveBacking(
++      device_properties.driverID == VK_DRIVER_ID_MOLTENVK, device_properties.sparseResidencyBuffer);
++  if (!segmented_resolves && ClampResolveScaleToAllocationLimit(
+           SharedMemory::kBufferSize, device_properties.maxMemoryAllocationSize,
+           device_properties.sparseResidencyBuffer,
+           draw_resolution_scale_x, draw_resolution_scale_y)) {
+@@ -857,7 +865,7 @@ bool VulkanCommandProcessor::SetupContext() {
+         requested_scale_x, requested_scale_y, device_properties.maxMemoryAllocationSize >> 20,
+         draw_resolution_scale_x, draw_resolution_scale_y);
+   }
+-  if (strict_resolution_scale && !device_properties.sparseResidencyBuffer &&
++  if (strict_resolution_scale && !segmented_resolves && !device_properties.sparseResidencyBuffer &&
+       (draw_resolution_scale_x > 1 || draw_resolution_scale_y > 1)) {
+     const auto& ifn = vulkan_device->GetVulkanInstance()->GetFunctions();
+     VkPhysicalDeviceMemoryProperties memory_properties = {};
+@@ -4425,8 +4433,8 @@ bool VulkanCommandProcessor::IssueCopyReadbackResolvePath() {
+       return true;
+     }
+ 
+-    VkBuffer scaled_resolve_buffer = texture_cache_->GetScaledResolveBuffer();
+-    if (scaled_resolve_buffer == VK_NULL_HANDLE || scaled_start > static_cast<u64>(UINT32_MAX)) {
++    VkDescriptorBufferInfo scaled_source = {};
++    if (!texture_cache_->GetScaledResolveBinding(scaled_start, scaled_length, scaled_source)) {
+       return true;
+     }
+ 
+@@ -4470,9 +4478,7 @@ bool VulkanCommandProcessor::IssueCopyReadbackResolvePath() {
+     }
+ 
+     VkDescriptorBufferInfo buffer_infos[2] = {};
+-    buffer_infos[0].buffer = scaled_resolve_buffer;
+-    buffer_infos[0].offset = 0;
+-    buffer_infos[0].range = VK_WHOLE_SIZE;
++    buffer_infos[0] = scaled_source;
+     buffer_infos[1].buffer = resolve_downscale_buffer_;
+     buffer_infos[1].offset = 0;
+     buffer_infos[1].range = written_length;
+@@ -4511,7 +4517,7 @@ bool VulkanCommandProcessor::IssueCopyReadbackResolvePath() {
+     constants.scale_y = texture_cache_->GetDrawResolutionScaleY();
+     constants.pixel_size_log2 = pixel_size_log2;
+     constants.tile_count = tile_count;
+-    constants.source_offset_bytes = static_cast<u32>(scaled_start);
++    constants.source_offset_bytes = 0;
+     constants.half_pixel_offset = (GetXenosSettings().readback_resolve_half_pixel_offset.Get() &&
+                                    (constants.scale_x > 1 || constants.scale_y > 1))
+                                       ? 1u
+diff --git a/src/gpu/xenos/vulkan/command_processor.h b/src/gpu/xenos/vulkan/command_processor.h
+index 5622de0..1abb779 100644
+--- a/src/gpu/xenos/vulkan/command_processor.h
++++ b/src/gpu/xenos/vulkan/command_processor.h
+@@ -161,6 +161,8 @@ class VulkanCommandProcessor : public CommandProcessor {
+   }
+   u64 GetCompletedSubmission() const { return submission_completed_; }
+ 
++  void ReportResolutionAllocationFailure();
++
+   /**
+    * Queues sparse binds. A submission sends them in 1 vkQueueBindSparse without waiting for a
+    * semaphore, so binds between the completed and current submission and within 1 submission
+diff --git a/src/gpu/xenos/vulkan/render_target_cache.cpp b/src/gpu/xenos/vulkan/render_target_cache.cpp
+index 96d0949..dcd62c5 100644
+--- a/src/gpu/xenos/vulkan/render_target_cache.cpp
++++ b/src/gpu/xenos/vulkan/render_target_cache.cpp
+@@ -1161,11 +1161,14 @@ bool VulkanRenderTargetCache::Resolve(IPhysicalMemory& memory, VulkanSharedMemor
+             VulkanCommandProcessor::SingleTransientDescriptorLayout ::kStorageBufferCompute);
+         if (descriptor_set_dest != VK_NULL_HANDLE) {
+           VkDescriptorBufferInfo write_descriptor_set_dest_buffer_info;
+-          write_descriptor_set_dest_buffer_info.buffer =
+-              draw_resolution_scaled ? texture_cache.GetScaledResolveBuffer()
+-                                     : shared_memory.GetBuffer();
+-          write_descriptor_set_dest_buffer_info.offset = copy_dest_base;
+-          write_descriptor_set_dest_buffer_info.range = copy_dest_range_length;
++          if (draw_resolution_scaled) {
++            if (!texture_cache.GetScaledResolveBinding(copy_dest_base, copy_dest_range_length,
++                                                       write_descriptor_set_dest_buffer_info)) return false;
++          } else {
++            write_descriptor_set_dest_buffer_info.buffer = shared_memory.GetBuffer();
++            write_descriptor_set_dest_buffer_info.offset = copy_dest_base;
++            write_descriptor_set_dest_buffer_info.range = copy_dest_range_length;
++          }
+           VkWriteDescriptorSet write_descriptor_set_dest;
+           write_descriptor_set_dest.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+           write_descriptor_set_dest.pNext = nullptr;
+@@ -1814,6 +1817,7 @@ std::unique_ptr<RenderTargetCache::RenderTarget> VulkanRenderTargetCache::Create
+   if (!gpu::vulkan::objects::CreateDedicatedAllocationImage(
+           vulkan_device, image_create_info, gpu::vulkan::objects::MemoryPurpose::kDeviceLocal,
+           image, memory)) {
++    if (IsDrawResolutionScaled()) command_processor_.ReportResolutionAllocationFailure();
+     REXGPU_FAIL(nullptr,
+                 "VulkanRenderTarget: Failed to create a {}x{} {}xMSAA {} render target "
+                 "image",
+diff --git a/src/gpu/xenos/vulkan/resolve_scale.h b/src/gpu/xenos/vulkan/resolve_scale.h
+index ed866b5..e8ca14f 100644
+--- a/src/gpu/xenos/vulkan/resolve_scale.h
++++ b/src/gpu/xenos/vulkan/resolve_scale.h
+@@ -24,6 +24,11 @@ inline bool ClampResolveScaleToAllocationLimit(std::uint64_t guest_memory_size,
+   return changed;
+ }
+ 
++// MoltenVK has no sparse buffers. Compact range backing replaces dense address-space storage.
++inline bool UseSegmentedResolveBacking(bool moltenvk, bool sparse_residency) {
++  return moltenvk && !sparse_residency;
++}
++
+ // Admission reserves room for shared memory, render targets and transient work.
+ // A reported live budget leaves half of the remaining heap free; without it,
+ // admit at most one quarter of the physical device-local heap.
+diff --git a/src/gpu/xenos/vulkan/texture_cache.cpp b/src/gpu/xenos/vulkan/texture_cache.cpp
+index d6c74f6..eec4c77 100644
+--- a/src/gpu/xenos/vulkan/texture_cache.cpp
++++ b/src/gpu/xenos/vulkan/texture_cache.cpp
+@@ -466,6 +466,7 @@ void VulkanTextureCache::ClearCache() {
+ void VulkanTextureCache::BeginSubmission(u64 new_submission_index) {
+   TextureCache::BeginSubmission(new_submission_index);
+   if (override_upload_pool_) override_upload_pool_->Reclaim(command_processor_.GetCompletedSubmission());
++  ReclaimScaledResolveSegments();
+ 
+   if (!null_images_cleared_ && null_image_2d_array_cube_ != VK_NULL_HANDLE &&
+       null_image_3d_ != VK_NULL_HANDLE) {
+@@ -1150,6 +1151,7 @@ std::unique_ptr<TextureCache::Texture> VulkanTextureCache::CreateTexture(Texture
+   VmaAllocation allocation;
+   if (vmaCreateImage(vma_allocator_, &image_create_info, &allocation_create_info, &image,
+                      &allocation, nullptr)) {
++    if (key.scaled_resolve) command_processor_.ReportResolutionAllocationFailure();
+     return nullptr;
+   }
+ 
+@@ -1503,7 +1505,9 @@ bool VulkanTextureCache::LoadHostTextureDataFromResidentMemory(Texture& texture,
+                                  source_base_range)) {
+         return false;
+       }
+-      write_descriptor_set_source_base_buffer_info.buffer = scaled_resolve_buffer_;
++      if (!GetScaledResolveBinding(source_base_start, source_base_range,
++                                    write_descriptor_set_source_base_buffer_info)) return false;
++      source_base_start = write_descriptor_set_source_base_buffer_info.offset;
+     } else {
+       source_base_start = source_base_start_unscaled;
+       source_base_range = rex::RoundUpPow2(static_cast<u64>(vulkan_texture.GetGuestBaseSize()),
+@@ -1548,7 +1552,9 @@ bool VulkanTextureCache::LoadHostTextureDataFromResidentMemory(Texture& texture,
+                                  source_mips_range)) {
+         return false;
+       }
+-      write_descriptor_set_source_mips_buffer_info.buffer = scaled_resolve_buffer_;
++      if (!GetScaledResolveBinding(source_mips_start, source_mips_range,
++                                    write_descriptor_set_source_mips_buffer_info)) return false;
++      source_mips_start = write_descriptor_set_source_mips_buffer_info.offset;
+     } else {
+       source_mips_start = source_mips_start_unscaled;
+       source_mips_range = rex::RoundUpPow2(static_cast<u64>(vulkan_texture.GetGuestMipsSize()),
+@@ -2146,6 +2152,28 @@ bool VulkanTextureCache::InitializeScaledResolveBuffer() {
+   const gpu::vulkan::VulkanDevice::Functions& dfn = vulkan_device->GetFunctions();
+   const VkDevice device = vulkan_device->GetDevice();
+ 
++  const auto& properties = vulkan_device->GetProperties();
++  segmented_scaled_resolves_ = UseSegmentedResolveBacking(
++      properties.driverID == VK_DRIVER_ID_MOLTENVK, properties.sparseResidencyBuffer);
++  if (segmented_scaled_resolves_) {
++    scaled_resolve_segments_.Configure(scaled_resolve_buffer_size_);
++    VkPhysicalDeviceMemoryProperties heaps = {};
++    vulkan_device->GetVulkanInstance()->GetFunctions().vkGetPhysicalDeviceMemoryProperties(
++        vulkan_device->GetPhysicalDevice(), &heaps);
++    for (u32 heap = 0; heap < heaps.memoryHeapCount; ++heap) {
++      if (!(heaps.memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)) continue;
++      scaled_resolve_segment_budget_ = std::max<u64>(scaled_resolve_segment_budget_,
++          ConservativeDenseResolveBudget(heaps.memoryHeaps[heap].size, 0, 0));
++    }
++    // Resolve storage shares the process budget with guest memory, attachments,
++    // textures and uploads. Count old in-flight buffers during migrations too.
++    scaled_resolve_segment_budget_ = std::min<u64>(scaled_resolve_segment_budget_,
++        u64(REX_PLATFORM_IOS ? 512 : 1024) << 20);
++    REXGPU_INFO("VulkanTextureCache: range-backed scaled resolves, {} MiB logical, {} MiB peak budget",
++                scaled_resolve_buffer_size_ >> 20, scaled_resolve_segment_budget_ >> 20);
++    return scaled_resolve_segment_budget_ != 0;
++  }
++
+   const VkBufferCreateFlags sparse_flags =
+       VK_BUFFER_CREATE_SPARSE_BINDING_BIT | VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT;
+ 
+@@ -2240,6 +2268,9 @@ bool VulkanTextureCache::InitializeScaledResolveBuffer() {
+ }
+ 
+ void VulkanTextureCache::ShutdownScaledResolveBuffer() {
++  scaled_resolve_segments_.Clear([](u64) {});
++  ReclaimScaledResolveSegments(true);
++  segmented_scaled_resolves_ = false;
+   const gpu::vulkan::VulkanDevice* const vulkan_device = command_processor_.GetVulkanDevice();
+   const gpu::vulkan::VulkanDevice::Functions& dfn = vulkan_device->GetFunctions();
+   const VkDevice device = vulkan_device->GetDevice();
+@@ -2259,6 +2290,107 @@ void VulkanTextureCache::ShutdownScaledResolveBuffer() {
+   scaled_resolve_last_written_range_ = std::make_pair(static_cast<u64>(0), static_cast<u64>(0));
+ }
+ 
++VulkanTextureCache::ScaledResolveSegment* VulkanTextureCache::FindScaledResolveSegment(u64 handle) const {
++  for (const auto& segment : scaled_resolve_segment_buffers_)
++    if (segment->handle == handle) return segment.get();
++  return nullptr;
++}
++
++void VulkanTextureCache::ReclaimScaledResolveSegments(bool all) {
++  const auto* device = command_processor_.GetVulkanDevice();
++  const auto& dfn = device->GetFunctions();
++  const auto completed = command_processor_.GetCompletedSubmission();
++  std::erase_if(scaled_resolve_segment_buffers_, [&](const auto& segment) {
++    if (!all && (!segment->retired_submission || segment->retired_submission > completed)) return false;
++    dfn.vkDestroyBuffer(device->GetDevice(), segment->buffer, nullptr);
++    dfn.vkFreeMemory(device->GetDevice(), segment->memory, nullptr);
++    scaled_resolve_segment_bytes_ -= segment->size;
++    // Imported host pages are released by the record after Vulkan releases its memory.
++    return true;
++  });
++}
++
++u64 VulkanTextureCache::CreateScaledResolveSegment(u64 size) {
++  const auto* device = command_processor_.GetVulkanDevice();
++  const auto& properties = device->GetProperties();
++  const auto& dfn = device->GetFunctions();
++  ReclaimScaledResolveSegments();
++  if ((properties.maxMemoryAllocationSize && size > properties.maxMemoryAllocationSize) ||
++      size > properties.maxStorageBufferRange ||
++      scaled_resolve_segment_bytes_ > scaled_resolve_segment_budget_ ||
++      size > scaled_resolve_segment_budget_ - scaled_resolve_segment_bytes_) {
++    REXGPU_ERROR("VulkanTextureCache: scaled resolve block refused: {} KiB, {} MiB in flight, {} MiB budget",
++                 size >> 10, scaled_resolve_segment_bytes_ >> 20, scaled_resolve_segment_budget_ >> 20);
++    return 0;
++  }
++  // All potentially throwing metadata allocations precede the Vulkan allocation.
++  scaled_resolve_segment_buffers_.reserve(scaled_resolve_segment_buffers_.size() + 1);
++  auto segment = std::make_unique<ScaledResolveSegment>();
++  const VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
++      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
++  const u64 remaining = scaled_resolve_segment_budget_ - scaled_resolve_segment_bytes_;
++  const u64 allocation_limit = properties.maxMemoryAllocationSize
++      ? std::min<u64>(remaining, properties.maxMemoryAllocationSize) : remaining;
++  VkDeviceSize allocated_size = 0;
++  const bool imported = command_processor_.GetVulkanSettings().host_memory_backing.Get() &&
++      segment->host_backing.CreateBuffer(device, size, usage, segment->buffer, segment->memory,
++                                         nullptr, allocation_limit);
++  if (imported) allocated_size = segment->host_backing.allocation_size();
++  if (!imported && !gpu::vulkan::objects::CreateDedicatedAllocationBuffer(device, size, usage,
++          gpu::vulkan::objects::MemoryPurpose::kDeviceLocal, segment->buffer, segment->memory,
++          nullptr, &allocated_size, allocation_limit)) {
++    REXGPU_ERROR("VulkanTextureCache: failed to allocate {} KiB scaled resolve block", size >> 10);
++    return 0;
++  }
++  VkMemoryRequirements requirements = {};
++  dfn.vkGetBufferMemoryRequirements(device->GetDevice(), segment->buffer, &requirements);
++  const u64 accounted_size = allocated_size;
++  if (accounted_size > scaled_resolve_segment_budget_ - scaled_resolve_segment_bytes_) {
++    dfn.vkDestroyBuffer(device->GetDevice(), segment->buffer, nullptr);
++    dfn.vkFreeMemory(device->GetDevice(), segment->memory, nullptr);
++    return 0;
++  }
++  segment->handle = scaled_resolve_segment_next_id_++;
++  segment->size = accounted_size;
++  const auto handle = segment->handle;
++  scaled_resolve_segment_bytes_ += accounted_size;
++  scaled_resolve_segment_buffers_.push_back(std::move(segment));
++  REXGPU_INFO("VulkanTextureCache: scaled resolve block {} KiB, {} MiB backing in flight",
++              size >> 10, scaled_resolve_segment_bytes_ >> 20);
++  return handle;
++}
++
++bool VulkanTextureCache::GetScaledResolveBinding(u64 start_scaled, u64 length_scaled,
++                                                VkDescriptorBufferInfo& binding_out) const {
++  const auto& properties = command_processor_.GetVulkanDevice()->GetProperties();
++  if (!length_scaled || start_scaled > scaled_resolve_buffer_size_ ||
++      length_scaled > scaled_resolve_buffer_size_ - start_scaled ||
++      length_scaled > properties.maxStorageBufferRange) return false;
++  if (segmented_scaled_resolves_) {
++    ScaledResolveSegments::Binding binding;
++    if (!scaled_resolve_segments_.Find(start_scaled, length_scaled, binding)) return false;
++    const auto* segment = FindScaledResolveSegment(binding.handle);
++    if (!segment || segment->retired_submission) return false;
++    binding_out = {segment->buffer, binding.offset, binding.length};
++  } else {
++    if (!scaled_resolve_buffer_) return false;
++    binding_out = {scaled_resolve_buffer_, start_scaled, length_scaled};
++  }
++  return true;
++}
++
++void VulkanTextureCache::UseScaledResolveSegments(bool write) {
++  // Older descriptors can still refer to superseded buffers in this submission.
++  // Include them until their submission fence completes.
++  for (const auto& segment : scaled_resolve_segment_buffers_) {
++    command_processor_.PushBufferMemoryBarrier(segment->buffer, 0, VK_WHOLE_SIZE,
++        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
++        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
++        VK_ACCESS_SHADER_READ_BIT | (write ? VK_ACCESS_SHADER_WRITE_BIT : 0),
++        VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, false);
++  }
++}
++
+ bool VulkanTextureCache::GetScaledResolveRange(u32 start_unscaled, u32 length_unscaled,
+                                                u32 length_scaled_alignment_log2,
+                                                u64& start_scaled_out,
+@@ -2294,6 +2426,43 @@ bool VulkanTextureCache::GetScaledResolveRange(u32 start_unscaled, u32 length_un
+ }
+ 
+ bool VulkanTextureCache::AllocateScaledResolveBuffer(u64 start_scaled, u64 length_scaled) {
++  if (segmented_scaled_resolves_ && length_scaled) {
++    ScaledResolveSegments::Binding binding;
++    u64 candidate_handle = 0;
++    try {
++      const bool acquired = scaled_resolve_segments_.Acquire(start_scaled, length_scaled,
++          [this, &candidate_handle](u64 size) {
++            candidate_handle = CreateScaledResolveSegment(size);
++            return candidate_handle;
++          },
++          [this](u64 old_handle, u64 new_handle, u64 source_offset, u64 dest_offset, u64 size) {
++            auto* source = FindScaledResolveSegment(old_handle);
++            auto* dest = FindScaledResolveSegment(new_handle);
++            command_processor_.PushBufferMemoryBarrier(source->buffer, 0, VK_WHOLE_SIZE,
++                VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
++                VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
++                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, false);
++            command_processor_.SubmitBarriers(true);
++            VkBufferCopy region{source_offset, dest_offset, size};
++            command_processor_.GetDeferredCommandBuffer().CmdVkCopyBuffer(
++                source->buffer, dest->buffer, 1, &region);
++            command_processor_.PushBufferMemoryBarrier(dest->buffer, dest_offset, size,
++                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
++                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
++                VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, false);
++          },
++          [this](u64 handle) {
++            FindScaledResolveSegment(handle)->retired_submission = command_processor_.GetCurrentSubmission();
++          }, binding);
++      if (acquired) return true;
++    } catch (const std::bad_alloc&) {
++      if (auto* candidate = FindScaledResolveSegment(candidate_handle))
++        candidate->retired_submission = command_processor_.GetCurrentSubmission();
++      REXGPU_ERROR("VulkanTextureCache: scaled resolve range metadata allocation failed");
++    }
++    command_processor_.ReportResolutionAllocationFailure();
++    return false;
++  }
+   if (!length_scaled || !scaled_resolve_buffer_sparse_) {
+     return true;
+   }
+@@ -2356,6 +2525,7 @@ void VulkanTextureCache::GetScaledResolveUsageMasks(VkPipelineStageFlags& stage_
+ }
+ 
+ void VulkanTextureCache::UseScaledResolveBufferForRead() {
++  if (segmented_scaled_resolves_) { UseScaledResolveSegments(false); return; }
+   if (!scaled_resolve_buffer_) {
+     return;
+   }
+@@ -2385,6 +2555,7 @@ void VulkanTextureCache::UseScaledResolveBufferForRead() {
+ 
+ void VulkanTextureCache::UseScaledResolveBufferForWrite(u64 written_start_scaled,
+                                                         u64 written_length_scaled) {
++  if (segmented_scaled_resolves_) { UseScaledResolveSegments(true); return; }
+   if (!scaled_resolve_buffer_) {
+     return;
+   }
+diff --git a/src/gpu/xenos/vulkan/texture_cache.h b/src/gpu/xenos/vulkan/texture_cache.h
+index 99a0928..31b510f 100644
+--- a/src/gpu/xenos/vulkan/texture_cache.h
++++ b/src/gpu/xenos/vulkan/texture_cache.h
+@@ -18,6 +18,7 @@
+ #include <vector>
+ 
+ #include "gpu/xenos/pipeline/texture/cache.h"
++#include "gpu/xenos/host/vulkan/scaled_resolve_segments.h"
+ #include "gpu/xenos/vulkan/shader.h"
+ #include "gpu/xenos/vulkan/shared_memory.h"
+ #include <rex/hash.h>
+@@ -138,7 +139,8 @@ class VulkanTextureCache final : public TextureCache {
+                                 u32 length_scaled_alignment_log2 = 0) {
+     return CommitScaledResolveMemory(start_unscaled, length_unscaled, length_scaled_alignment_log2);
+   }
+-  VkBuffer GetScaledResolveBuffer() const { return scaled_resolve_buffer_; }
++  bool GetScaledResolveBinding(u64 start_scaled, u64 length_scaled,
++                               VkDescriptorBufferInfo& binding_out) const;
+   void UseScaledResolveBufferForRead();
+   void UseScaledResolveBufferForWrite(u64 written_start_scaled, u64 written_length_scaled);
+ 
+@@ -393,6 +395,23 @@ class VulkanTextureCache final : public TextureCache {
+   std::pair<const SamplerParameters, Sampler>* sampler_used_last_ = nullptr;
+   u32 custom_border_color_sampler_count_ = 0;
+ 
++  struct ScaledResolveSegment {
++    u64 handle = 0, size = 0, retired_submission = 0;
++    VkBuffer buffer = VK_NULL_HANDLE;
++    VkDeviceMemory memory = VK_NULL_HANDLE;
++    objects::HostMemoryBacking host_backing;
++  };
++  bool segmented_scaled_resolves_ = false;
++  ScaledResolveSegments scaled_resolve_segments_;
++  std::vector<std::unique_ptr<ScaledResolveSegment>> scaled_resolve_segment_buffers_;
++  u64 scaled_resolve_segment_next_id_ = 1;
++  u64 scaled_resolve_segment_bytes_ = 0;
++  u64 scaled_resolve_segment_budget_ = 0;
++  ScaledResolveSegment* FindScaledResolveSegment(u64 handle) const;
++  u64 CreateScaledResolveSegment(u64 size);
++  void ReclaimScaledResolveSegments(bool all = false);
++  void UseScaledResolveSegments(bool write);
++
+   objects::HostMemoryBacking scaled_resolve_host_backing_;
+   VkBuffer scaled_resolve_buffer_ = VK_NULL_HANDLE;
+   u64 scaled_resolve_buffer_size_ = 0;
+diff --git a/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.cpp b/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.cpp
+index e327005..3f96d8c 100644
+--- a/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.cpp
++++ b/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.cpp
+@@ -58,6 +58,18 @@ void VulkanXenosGraphicsDriver::ResumeApplicationForShutdown() {
+   if (provider_) static_cast<VulkanProvider*>(provider_.get())->GetVulkanDevice()->ResumeForShutdown();
+ }
+ 
++PresentationState VulkanXenosGraphicsDriver::GetPresentationState() const {
++  auto state = XenosGraphicsDriverBase::GetPresentationState();
++  state.resolution_allocation_failed = resolution_allocation_failed_.load(std::memory_order_relaxed);
++  return state;
++}
++
++Result<void> VulkanXenosGraphicsDriver::AttachTitle(const TitleInfo& info, IPhysicalMemory& memory,
++    IPhysicalWriteWatch& watch, IGuestInterrupts& interrupts) {
++  resolution_allocation_failed_.store(false, std::memory_order_relaxed);
++  return XenosGraphicsDriverBase::AttachTitle(info, memory, watch, interrupts);
++}
++
+ void VulkanXenosGraphicsDriver::CreateProvider(bool with_presentation) {
+   provider_ = rex::gpu::vulkan::VulkanProvider::Create(
+       true, with_presentation, vulkan_settings_.device.Get(), vulkan_settings_);
+diff --git a/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.h b/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.h
+index db539cb..e51fa5d 100644
+--- a/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.h
++++ b/src/gpu/xenos/vulkan/vulkan_xenos_graphics_driver.h
+@@ -12,6 +12,7 @@
+ #pragma once
+ 
+ #include <memory>
++#include <atomic>
+ #include <rex/settings_registry.h>
+ 
+ #include "gpu/xenos/command_processor.h"
+@@ -29,6 +30,10 @@ class VulkanXenosGraphicsDriver : public XenosGraphicsDriverBase {
+   void Shutdown() override;
+   Result<void> SetApplicationActive(bool active) override;
+   void ResumeApplicationForShutdown() override;
++  PresentationState GetPresentationState() const override;
++  Result<void> AttachTitle(const TitleInfo& info, IPhysicalMemory& memory,
++                           IPhysicalWriteWatch& watch, IGuestInterrupts& interrupts) override;
++  void ReportResolutionAllocationFailure() { resolution_allocation_failed_.store(true, std::memory_order_relaxed); }
+ 
+   const VulkanSettings& GetVulkanSettings() const { return vulkan_settings_; }
+ 
+@@ -40,6 +45,7 @@ class VulkanXenosGraphicsDriver : public XenosGraphicsDriverBase {
+  private:
+   std::unique_ptr<CommandProcessor> CreateCommandProcessor() override;
+ 
++  std::atomic<bool> resolution_allocation_failed_{false};
+   VulkanSettings vulkan_settings_;
+   ISettingsRegistry* vulkan_registry_ = nullptr;
+ };
