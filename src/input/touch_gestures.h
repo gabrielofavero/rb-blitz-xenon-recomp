@@ -29,6 +29,7 @@ struct Layout {
   bool operator==(const Layout&) const = default;
 };
 Layout MakeLayout(float width, float height, Rect safe_area);
+Rect LanePowerupSlot(Rect viewport);
 
 enum class Phase { kDown, kMove, kUp, kCancel };
 struct FingerEvent {

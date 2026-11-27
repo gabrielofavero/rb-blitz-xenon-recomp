@@ -25,6 +25,7 @@ bool ButtonsEnabled();
 void PublishPowerupReady(bool ready);
 bool PowerupReady();
 // Normalized guest bounds from the native lane icon's current draw.
+// Empty bounds mark a native draw whose mesh could not be projected.
 void PublishLanePowerup(Rect rect);
 std::unique_ptr<rex::ui::IDialog> CreateControls(rex::ui::IUISystem& ui);
 }  // namespace rb_blitz::input::touch

@@ -4,6 +4,7 @@
 #include "ui/apple_font.h"
 #endif
 
+#include "input/last_device.h"
 #include "input/native_menu.h"
 #include "input/title_input.h"
 #include "platform/virtual_keyboard.h"
@@ -83,6 +84,7 @@ void ConfigureKeyboardFonts(ImFontAtlas *atlas) {
 void ConfigureKeyboardTheme(rex::ui::Style &style, std::function<void*()> native_window) {
   auto &keyboard = style.keyboard;
   keyboard.enabled = true;
+  keyboard.hide_shortcut_hints = [] { return input::last_device::Current().using_touch; };
   keyboard.request_keyboard = [native_window] {
     return platform::RequestVirtualKeyboard(native_window ? native_window() : nullptr);
   };

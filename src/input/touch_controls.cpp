@@ -68,16 +68,26 @@ void UpdateGestures(bool active) {
   g_gestures.SetInvertedLaneSwipe(rb_blitz::settings::title::touch_lane_swipe.Get() != "normal");
   g_gestures.SetPowerupAvailable(active && g_powerup_ready);
   const auto now = SDL_GetTicksNS();
-  const auto rect = g_lane_timestamp && now - g_lane_timestamp < 100'000'000
-      ? g_lane_powerup : Rect{};
-  const auto first = LanePointToWindow(rect.x, rect.y);
-  const auto last = LanePointToWindow(rect.x + rect.width, rect.y + rect.height);
-  g_powerup_target.SetTarget({first.x, first.y, last.x - first.x, last.y - first.y},
-                            active && g_powerup_ready && rect.width > 0);
+  if (!active || !g_powerup_ready || !g_lane_timestamp || now - g_lane_timestamp >= 100'000'000) {
+    g_powerup_target.SetTarget({}, false);
+    return;
+  }
+  const auto rect = g_lane_powerup;
+  const bool projected = rect.width > 0 && rect.height > 0;
+  const auto first = projected ? LanePointToWindow(rect.x, rect.y) : LanePointToWindow(0, 0);
+  const auto last = projected ? LanePointToWindow(rect.x + rect.width, rect.y + rect.height)
+                              : LanePointToWindow(1, 1);
+  const Rect mapped{first.x, first.y, last.x - first.x, last.y - first.y};
+  g_powerup_target.SetTarget(projected ? mapped : LanePowerupSlot(mapped), true);
 }
 PointerResult ObserveLanePointer(const FingerEvent& event) {
   const auto result = g_powerup_target.Observe(event);
   if (result.deploy) g_gestures.DeployPowerup();
+  if (event.phase == Phase::kDown && g_powerup_ready &&
+      rb_blitz::settings::title::mouse_native_trace.Get())
+    REXLOG_INFO("touch_hud: lane pointer ({:.2f},{:.2f}) captured={} guest bounds=({:.3f},{:.3f},{:.3f},{:.3f})",
+                event.x, event.y, result.consumed, g_lane_powerup.x, g_lane_powerup.y,
+                g_lane_powerup.width, g_lane_powerup.height);
   return result;
 }
 class Controls final : public rex::ui::DialogBase {
@@ -126,11 +136,15 @@ class Controls final : public rex::ui::DialogBase {
       const auto mode = ParseMotionMode(rb_blitz::settings::title::touch_motion_deploy.Get());
       const bool active = Available() && TouchInputActive() && mode != MotionMode::kNone;
       std::lock_guard lock(g_mutex);
-      if (!active || !g_powerup_ready) { g_motion.Reset(); return true; }
+      if (!active) { g_motion.Reset(); return true; }
       const auto& sample = event->sensor;
-      UpdateGestures(active);
-      if (g_motion.Observe(mode, sample.timestamp, sample.data[0], sample.data[1], sample.data[2]))
+      // Establish the playing angle before the meter becomes ready. Keep the
+      // detector's rearm state across changes to the meter.
+      if (g_motion.Observe(mode, sample.timestamp, sample.data[0], sample.data[1], sample.data[2])) {
+        g_gestures.SetActive(true);
+        g_gestures.SetPowerupAvailable(g_powerup_ready);
         g_gestures.DeployPowerup();
+      }
       return true;
     }
     Phase phase;
@@ -275,19 +289,18 @@ void PublishPowerupReady(bool ready) {
   const bool changed = g_powerup_ready.exchange(ready) != ready;
   if (!ready && changed) {
     std::lock_guard lock(g_mutex);
-    g_motion.Reset();
     g_powerup_target.SetTarget({}, false);
   }
   if (!observed.exchange(true) || changed)
     REXLOG_INFO("touch_hud: native power-up deployable={}", ready);
 }
-bool PowerupReady() { return PreviewEnabled() || g_powerup_ready; }
+bool PowerupReady() { return g_powerup_ready; }
 bool LanePowerupAvailable() {
   if (!Available() || !g_powerup_ready) return false;
   std::lock_guard lock(g_mutex);
   const auto now = SDL_GetTicksNS();
   return g_lane_timestamp && now - g_lane_timestamp < 100'000'000 &&
-      g_lane_powerup.width > 0 && g_lane_powerup.height > 0;
+      g_layout.width > 0 && g_layout.height > 0;
 }
 bool ConsumeLanePointer(Phase phase, float x, float y) {
   const bool active = Available();

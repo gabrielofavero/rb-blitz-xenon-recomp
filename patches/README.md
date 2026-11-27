@@ -22,15 +22,17 @@ or fold into an owning patch. The title integration and SDK pin are adopted;
 the fresh Windows AMD64 production source-SDK release build passes.
 Adoption does not close formal performance or native-platform/package gates.
 
-The production 0036 keyboard theme patch also owns portrait prompt sizing: phone
-width determines text/input scale, actions fill the content width, and the dialog
-sits above center to leave room for the platform keyboard. The dependent 0037 and
-0063 prompt hunks are regenerated against that layout; their controller and
-automatic-keyboard behavior is retained. This shared opt-in UI change applies
-across Windows, Linux, macOS and iOS, independently of architecture or D3D12,
-Vulkan and MoltenVK. Landscape and unthemed prompt sizing retain their defaults.
-Strict replay of all 67 production patches passes. Native validation is Windows
-AMD64; the other platforms and architectures have not been executed for this change.
+The production 0036 keyboard theme patch owns portrait prompt sizing and
+shortcut hint visibility. Portrait dialogs use nearly the full window width
+with larger text, a taller input, and wider action buttons. The dialog sits
+above center to leave room for the onscreen keyboard. The title's last-input
+tracker supplies the touch state for hiding the shortcut row. The dependent
+0037 controller and 0063 automatic-keyboard hunks target the updated layout.
+The shared opt-in theme works across Windows, Linux, macOS and iOS on D3D12,
+Vulkan and MoltenVK. Strict replay covers all 74 production patches.
+The macOS and iOS arm64 Vulkan release builds and focused macOS prompt tests
+pass. In-game device testing, Windows, Linux and other architectures remain
+unverified for this change.
 
 The separate [0102 range-backed resolve patch](rexglue-sdk-v0.11/0102-vulkan-range-backed-scaled-resolves.patch)
 owns compact scaled-address mapping on non-sparse MoltenVK. It allocates accessed

@@ -6,13 +6,15 @@ The production gitlink and title integration now use this release and patch set.
 The fresh Windows AMD64 production source-SDK release build passes.
 Formal performance and native-platform/package gates remain open after adoption.
 
-Portrait keyboard layout remains in its existing owner, 0036. The 0037 controller
-and 0063 automatic-keyboard prompt hunks are regenerated against it without
-changing their behavior. The opt-in renderer sizes portrait dialogs from phone
-width and reserves space below for the platform keyboard. This is shared UI for
-all supported hosts, architectures and rendering backends. The 67-patch replay
-passes; Windows AMD64 is the available native validation platform for this
-refinement. Linux, macOS, iOS and other architectures are not tested here.
+0036 owns the portrait keyboard layout and the optional touch shortcut
+visibility callback. The title provides its last-input state. Portrait dialogs
+scale text and fields from the available width, place the action buttons across
+the content area, and reserve space below for the platform keyboard. 0037 owns
+controller handling and tests for the themed prompt. 0063 owns automatic
+keyboard activation. The opt-in layout is shared by every rendering backend
+and host architecture. All 74 production patches replay cleanly. macOS and iOS
+arm64 Vulkan release builds pass, along with the headless prompt tests on macOS.
+In-game device testing, Windows, Linux and other architectures remain unverified.
 
 The [historical 71-patch baseline](../README.md) at
 `c94f5ebdcb3c9d1a460ca48e04f9758448f8d518`, including its nested MoltenVK patch,

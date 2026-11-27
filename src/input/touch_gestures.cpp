@@ -27,6 +27,14 @@ Layout MakeLayout(float width, float height, Rect safe) {
       safe.y + margin, safe.y + std::max(margin, safe.height - margin - side));
   return {width, height, {x, y, side, side}};
 }
+Rect LanePowerupSlot(Rect viewport) {
+  if (!(viewport.width > 0 && viewport.height > 0)) return {};
+  // The ready icon is centered under the active lane. Its proportions are
+  // relative to the viewport height so the hit area follows portrait cropping.
+  const float width = std::min(viewport.width, viewport.height * .136f);
+  return {viewport.x + (viewport.width - width) * .5f,
+          viewport.y + viewport.height * .82f, width, viewport.height * .116f};
+}
 void PowerupTarget::SetTarget(Rect bounds, bool available) {
   bounds_ = bounds;
   available_ = available && bounds.width > 0 && bounds.height > 0;
@@ -177,11 +185,9 @@ void TiltDetector::Reset() { *this = {}; }
 bool TiltDetector::Observe(uint64_t now, float x, float y, float z) {
   if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) { Reset(); return false; }
   const float magnitude = std::hypot(std::hypot(x, y), z);
-  // A jolt is not an orientation measurement. Recalibrate after translation
-  // rather than treating a strong shake as a forward wrist tilt.
-  if (magnitude < 9.80665f * .8f || magnitude > 9.80665f * 1.2f) {
-    Reset(); return false;
-  }
+  // A brief jolt can interrupt a valid tilt. Ignore the contaminated sample
+  // and let the sample-gap check discard the baseline after sustained movement.
+  if (magnitude < 9.80665f * .8f || magnitude > 9.80665f * 1.2f) return false;
   constexpr float kDegrees = 57.2957795f;
   const float pitch = std::atan2(z, std::hypot(x, y)) * kDegrees;
   if (!initialized_ || now <= last_ || now - last_ > 250'000'000) {
@@ -223,7 +229,9 @@ bool TiltDetector::Observe(uint64_t now, float x, float y, float z) {
     movement_since_ = 0;
     return false;
   }
-  if (now < cooldown_ || elapsed < 80'000'000 || delta < 22.f) return false;
+  // A low playing angle leaves less travel before the screen is flat.
+  const float threshold = std::clamp((90.f - baseline_) * .7f, 12.f, 22.f);
+  if (now < cooldown_ || elapsed < 80'000'000 || delta < threshold) return false;
   armed_ = false;
   movement_since_ = 0;
   settled_since_ = now;

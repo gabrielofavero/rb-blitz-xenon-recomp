@@ -154,15 +154,19 @@ void CaptureLanePowerup(PPCContext& ctx, uint8_t* base, uint32_t dir) {
   // The caller identifies powerup.grp. Its containing RndDir can be renamed
   // by nested scene loading (powerup_icon1); resolve the mesh in that directory.
   const auto mesh = SceneMesh(ctx, base, dir, "powerup_icon.mesh");
-  if (!mesh) return;
-  const auto bounds = ProjectMesh(ctx, base, mesh);
-  if (!bounds) return;
-  // WorldToScreen returns normalized guest coordinates. Retain only a fresh
-  // visible icon; no guest object pointer leaves this draw call.
-  const float left = std::max(0.f, bounds->left), top = std::max(0.f, bounds->top);
-  const float right = std::min(1.f, bounds->right), bottom = std::min(1.f, bounds->bottom);
-  if (right > left && bottom > top)
-    touch::PublishLanePowerup({left, top, right - left, bottom - top});
+  const auto bounds = mesh ? ProjectMesh(ctx, base, mesh) : std::nullopt;
+  if (bounds) {
+    const float left = std::max(0.f, bounds->left), top = std::max(0.f, bounds->top);
+    const float right = std::min(1.f, bounds->right), bottom = std::min(1.f, bounds->bottom);
+    if (right > left && bottom > top) {
+      touch::PublishLanePowerup({left, top, right - left, bottom - top});
+      return;
+    }
+  }
+  // Track scenes can draw the shared icon at a lane-relative position while
+  // the directory mesh projects outside the frame. Keep the native draw as
+  // the visibility signal so input can use the lane's viewport-relative slot.
+  touch::PublishLanePowerup({});
 }
 
 } // namespace rb_blitz::input

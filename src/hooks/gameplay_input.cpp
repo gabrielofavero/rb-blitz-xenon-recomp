@@ -242,6 +242,8 @@ void DispatchTouch(PPCContext& ctx, uint8_t* base, uint32_t controller) {
       g_touch_press = event.token;
       g_touch_timestamp_ns = event.timestamp_ns;
       g_touch_dispatch_ns = now;
+      if (event.action == Action::kPowerup && TraceOn())
+        REXLOG_INFO("gameplay input: touch power-up dispatched to controller {:#x}", controller);
       CallPress(ctx, base, controller, BmAction(event.action));
       g_touch_timestamp_ns = 0;
       g_touch_dispatch_ns = 0;

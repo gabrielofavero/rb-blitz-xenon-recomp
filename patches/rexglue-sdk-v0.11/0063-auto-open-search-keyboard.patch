@@ -1,7 +1,7 @@
 diff --git a/src/ui/prompt.cpp b/src/ui/prompt.cpp
 --- a/src/ui/prompt.cpp
 +++ b/src/ui/prompt.cpp
-@@ -210,7 +210,8 @@
+@@ -211,7 +211,8 @@
        if (pending_keyboard_request_ && theme.request_keyboard && !action.cancel) {
          keyboard_requested_ |= theme.request_keyboard();
        }

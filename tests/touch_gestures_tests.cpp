@@ -234,6 +234,19 @@ int main() {
   CHECK_EQ(events.size(), size_t(2));
   CHECK_TRUE(events[0].action == Action::kFirstNote);
 
+  BeginCase("the lane slot follows the presented game viewport in both orientations");
+  for (const Rect viewport : {Rect{0, 0, 305, 662}, Rect{20, 30, 1280, 720}}) {
+    const auto slot = LanePowerupSlot(viewport);
+    CHECK_TRUE(slot.Contains(viewport.x + viewport.width * .5f,
+                             viewport.y + viewport.height * .86f));
+    CHECK_TRUE(slot.Contains(viewport.x + viewport.width * .5f,
+                             viewport.y + viewport.height * .89f));
+    CHECK_FALSE(slot.Contains(viewport.x + viewport.width * .5f,
+                              viewport.y + viewport.height * .77f));
+    CHECK_FALSE(slot.Contains(viewport.x + viewport.width * .25f,
+                              viewport.y + viewport.height * .86f));
+  }
+  CHECK_TRUE(LanePowerupSlot({}) == Rect{});
   BeginCase("native lane icon accepts mouse and direct touch without generating note events");
   for (uint64_t device : {uint64_t(1), UINT64_MAX}) {
     PowerupTarget target;
@@ -361,6 +374,28 @@ int main() {
       if (scenario == 3) CHECK_FALSE(pose(35.f + std::min(i, 100) * .35f));
       if (scenario == 4) CHECK_FALSE(pose(35, 0, i % 2 ? 10.f : -10.f));
     }
+  }
+  BeginCase("tilt can deploy from a low playing angle after the meter becomes ready");
+  {
+    g = Ready();
+    MotionDetector detector;
+    uint64_t clock = 0;
+    auto pose = [&](float degrees, float acceleration = 9.80665f) {
+      const float radians = degrees / 57.2957795f;
+      clock += 20'000'000;
+      if (detector.Observe(MotionMode::kTilt, clock, 0,
+                           acceleration * std::cos(radians), acceleration * std::sin(radians)))
+        g.DeployPowerup();
+    };
+    for (int i = 0; i < 20; ++i) pose(70);
+    CHECK_TRUE(g.DrainGameplay().empty());
+    g.SetPowerupAvailable(true);
+    for (int i = 1; i <= 8; ++i) pose(70.f + i * 2.125f, i == 4 ? 13.f : 9.80665f);
+    for (int i = 0; i < 12; ++i) pose(87);
+    events = g.DrainGameplay();
+    CHECK_EQ(events.size(), size_t(2));
+    CHECK_TRUE(events.size() == 2 && events[0].action == Action::kPowerup &&
+               events[1].kind == GameplayKind::kRelease);
   }
   BeginCase("invalid, stale, reversed and reset tilt samples discard partial gestures");
   for (int scenario = 0; scenario < 5; ++scenario) {

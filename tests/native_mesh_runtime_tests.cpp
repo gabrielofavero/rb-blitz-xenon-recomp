@@ -170,9 +170,11 @@ int main() {
   CHECK_EQ(resolves, 1u); CHECK_EQ(publications, 1u);
   Close(published.x, .9f); Close(published.width, .1f);
   Float(kMesh + 136 + 48, 2.f);
-  Capture(); CHECK_EQ(publications, 1u);
+  Capture(); CHECK_EQ(publications, 2u);
+  CHECK_TRUE(published == Rect{});
   Float(kMesh + 136 + 48, std::numeric_limits<float>::quiet_NaN());
-  Capture(); CHECK_EQ(publications, 1u);
+  Capture(); CHECK_EQ(publications, 3u);
+  CHECK_TRUE(published == Rect{});
 
   BeginCase("inactive gameplay and unavailable powerups never publish targets");
   Fixture(true); Upload();
@@ -182,10 +184,12 @@ int main() {
   BeginCase("reused GPU resources and unrelated meshes cannot reuse an icon target");
   Fixture(true); Upload();
   Word(kMesh + 412, 0x5678);
-  Capture(); CHECK_EQ(publications, 0u);
+  Capture(); CHECK_EQ(publications, 1u);
+  CHECK_TRUE(published == Rect{});
   Fixture(true); Upload();
   Text(kHeap + 0x5000, "other.mesh");
-  Capture(); CHECK_EQ(publications, 0u);
+  Capture(); CHECK_EQ(publications, 1u);
+  CHECK_TRUE(published == Rect{});
 #if defined(_WIN32)
   VirtualFree(memory, 0, MEM_RELEASE);
 #else

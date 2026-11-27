@@ -100,13 +100,12 @@ title's existing ready icon on the lane. The native remedial reminder retains
 its original flow, placement, glyph, and animation.
 
 The shiny power-up icon below the lane accepts a left mouse click or a direct
-touch on every platform, including desktop touchscreens. Its native `powerup.grp`
-draw projects `powerup_icon.mesh` through the current camera; only normalized
-screen bounds leave the draw, and targets expire after 100 ms. Letterboxing,
-overscan, and safe-area presentation use the same conversion as native menu
-input. The mouse cursor is shown while a ready lane target is available.
-Mesh lookup uses the directory that owns the drawn group, including the nested
-`powerup_icon1` scene instance; it does not require a fixed directory name.
+touch on every platform, including desktop touchscreens. Its native
+`powerup.grp` draw supplies the visibility signal. When the scene mesh projects
+outside the frame, the hit area uses the icon's position under the active lane
+and scales with the presented viewport height. Targets expire after 100 ms.
+Letterboxing, overscan, and safe-area presentation use the native menu
+conversion. The mouse cursor is shown while a ready lane target is available.
 
 Press and release inside the original icon bounds dispatch the same native
 Power-up action pair as motion and controller deployment. The pointer is
@@ -131,12 +130,13 @@ Game after a restart; desktop defaults keep it visible.
 `controller.touch_motion_deploy` defaults to `tilt`, persists, and applies immediately.
 Tilt uses SDL's iOS CoreMotion accelerometer to recognize a quick forward wrist
 rotation: tip the top edge away so the screen moves toward face-up. After a
-150 ms stable baseline, the filtered pitch must advance 22 degrees, completing
-within 450 ms of a 6-degree onset and lasting at least 80 ms. Sideways roll,
-backward tilts, gradual grip changes, and acceleration outside 0.8–1.2 g do not
-deploy. Return within 8 degrees of the playing angle for 150 ms and wait one
-second before another deployment. Pitch is independent of the portrait or
-landscape sensor axes.
+150 ms stable baseline, the filtered pitch must advance up to 22 degrees,
+completing within 450 ms of a 6-degree onset and lasting at least 80 ms.
+The threshold is reduced when the screen is already tilted toward face-up.
+Samples outside 0.8–1.2 g are skipped. Sideways roll, backward tilts, and
+gradual grip changes do not deploy. Return within 8 degrees of the playing angle
+for 150 ms and wait one second before another deployment. Pitch is independent
+of the portrait or landscape sensor axes.
 
 `shake` accepts a light flick in any direction above 8 m/s² after gravity
 filtering (previously 12 m/s²), with a one-second cooldown and a quiet sample
@@ -146,8 +146,9 @@ until a new mode is saved; true inherits `tilt`. Explicit new modes take priorit
 Restoring the default removes the retired switch too.
 
 Samples are gated by foreground, focus, active gameplay, touch as the active
-device, modal/capture state, readiness, and the setting. Pause, cancellation,
-and mode changes reset the detector. SDK patch 0081 enables the iOS sensor
+device, modal/capture state, and the setting. The detector tracks the playing
+angle before the meter is ready. Deployment still requires a ready power-up.
+Pause, cancellation, and mode changes reset the detector. SDK patch 0081 enables the iOS sensor
 subsystem. Host tests cover both motion recognizers, mode switching, mouse/touch lane targets,
 generated settings requests, persistence, and legacy opt-outs. Physical gesture
 feel, iOS builds, and Apple font caption measurements require device/macOS validation;

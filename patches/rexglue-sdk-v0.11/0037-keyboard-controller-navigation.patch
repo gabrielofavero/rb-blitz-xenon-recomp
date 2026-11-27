@@ -1,25 +1,24 @@
 diff --git a/include/rex/ui/style.h b/include/rex/ui/style.h
 --- a/include/rex/ui/style.h
 +++ b/include/rex/ui/style.h
-@@ -11,6 +11,8 @@
- #pragma once
+@@ -12,6 +12,7 @@
  
  #include <array>
-+#include <functional>
+ #include <functional>
 +#include <rex/ui/keyboard_input_controller.h>
  #include <imgui.h>
  #include <algorithm>
  
-@@ -358,6 +360,9 @@
+@@ -359,6 +360,9 @@
  
  struct KeyboardInputStyle {
    bool enabled = false;
 +  std::function<KeyboardControllerSample()> sample_controller;
 +  std::function<bool()> request_keyboard;
 +  std::function<void()> dismiss_keyboard;
+   // Sample the title's input mode on the UI thread when drawing shortcut hints.
+   std::function<bool()> hide_shortcut_hints;
    ImFont* font = nullptr;
-   ImFont* heading_font = nullptr;
-   ImVec4 background{0.10f, 0.10f, 0.12f, 1.00f};
 diff --git a/src/ui/prompt.h b/src/ui/prompt.h
 --- a/src/ui/prompt.h
 +++ b/src/ui/prompt.h
@@ -63,7 +62,7 @@ diff --git a/src/ui/prompt.cpp b/src/ui/prompt.cpp
      // DisplaySize is already in DPI-independent units. Portrait dialogs use
      // the phone width, leaving room below for the platform keyboard.
      const bool portrait = io.DisplaySize.x < io.DisplaySize.y;
-@@ -196,27 +201,37 @@
+@@ -197,30 +202,40 @@
          ImGui::TextWrapped("%s", config_.body.c_str());
          ImGui::PopStyleColor();
        }
@@ -86,27 +85,30 @@ diff --git a/src/ui/prompt.cpp b/src/ui/prompt.cpp
        const bool escaped = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
        const float button_width = portrait ?
            (ImGui::GetContentRegionAvail().x - 12.0f * scale) * 0.5f : 110.0f * scale;
+       const float button_height = portrait ? std::max(44.0f, 44.0f * scale) : 32.0f * scale;
        const float buttons_width = button_width * 2.0f + 12.0f * scale;
        ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
                            (ImGui::GetContentRegionAvail().x - buttons_width) * 0.5f);
--      confirmed |= ImGui::Button("Done", ImVec2(button_width, (portrait ? 44.0f : 32.0f) * scale));
-+      confirmed |= ImGui::Button("Done", ImVec2(button_width, (portrait ? 44.0f : 32.0f) * scale)) && mouse_released;
+-      confirmed |= ImGui::Button("Done", ImVec2(button_width, button_height));
++      confirmed |= ImGui::Button("Done", ImVec2(button_width, button_height)) && mouse_released;
        ImGui::SameLine();
        ImGui::PushStyleColor(ImGuiCol_Button, theme.secondary);
--      const bool cancelled = ImGui::Button("Cancel", ImVec2(button_width, (portrait ? 44.0f : 32.0f) * scale));
-+      const bool cancelled = (ImGui::Button("Cancel", ImVec2(button_width, (portrait ? 44.0f : 32.0f) * scale)) &&
+-      const bool cancelled = ImGui::Button("Cancel", ImVec2(button_width, button_height));
++      const bool cancelled = (ImGui::Button("Cancel", ImVec2(button_width, button_height)) &&
 +                              mouse_released) || action.cancel;
        ImGui::PopStyleColor();
-       ImGui::PushFont(theme.font, 14.0f * scale);
-       ImGui::PushStyleColor(ImGuiCol_Text, theme.muted_text);
--      center_text("Enter to confirm    /    Esc to cancel");
--      ImGui::TextUnformatted("Enter to confirm    /    Esc to cancel");
-+      const char* hint = pad.connected ? "Enter: Search    B / Esc: Cancel" :
-+                                         "Enter: Search    Esc: Cancel";
-+      center_text(hint);
-+      ImGui::TextUnformatted(hint);
-       ImGui::PopStyleColor();
-       ImGui::PopFont();
+       if (!theme.hide_shortcut_hints || !theme.hide_shortcut_hints()) {
+         ImGui::PushFont(theme.font, 14.0f * scale);
+         ImGui::PushStyleColor(ImGuiCol_Text, theme.muted_text);
+-        center_text("Enter to confirm    /    Esc to cancel");
+-        ImGui::TextUnformatted("Enter to confirm    /    Esc to cancel");
++        const char* hint = pad.connected ? "Enter: Search    B / Esc: Cancel" :
++                                           "Enter: Search    Esc: Cancel";
++        center_text(hint);
++        ImGui::TextUnformatted(hint);
+         ImGui::PopStyleColor();
+         ImGui::PopFont();
+       }
        if (confirmed || cancelled || escaped) {
 diff --git a/include/rex/ui/keyboard_input_controller.h b/include/rex/ui/keyboard_input_controller.h
 new file mode 100644
@@ -160,10 +162,11 @@ diff --git a/tests/unit/ui/keyboard_prompt_test.cpp b/tests/unit/ui/keyboard_pro
 new file mode 100644
 --- /dev/null
 +++ b/tests/unit/ui/keyboard_prompt_test.cpp
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,137 @@
 +// Copyright 2026. Released under the BSD license - see LICENSE.
 +#include "rex_test.h"
 +#include <imgui.h>
++#include <imgui_internal.h>
 +#include <rex/ui/style.h>
 +#include "ui/prompt.h"
 +
@@ -179,11 +182,18 @@ new file mode 100644
 +    io.Fonts->AddFontDefault();
 +  }
 +  ~PromptContext() { ImGui::DestroyContext(context); ImGui::SetCurrentContext(previous); }
-+  bool Frame(rex::ui::PromptDialog& dialog) {
++  bool Frame(rex::ui::PromptDialog& dialog, std::string* log = nullptr) {
 +    auto& io = ImGui::GetIO();
 +    io.DeltaTime = 1.0f / 60.0f;
 +    ImGui::NewFrame();
++    if (log) {
++      ImGui::LogToBuffer();
++    }
 +    const bool keep = dialog.Draw(io);
++    if (log) {
++      *log = ImGui::GetCurrentContext()->LogBuffer.c_str();
++      ImGui::LogFinish();
++    }
 +    ImGui::Render();
 +    for (auto* texture : *ImGui::GetDrawData()->Textures) {
 +      texture->SetTexID(1);
@@ -241,6 +251,42 @@ new file mode 100644
 +  }
 +  CHECK(dismissed == 1);
 +  CHECK(completed == 1);
++}
++
++REX_TEST_CASE("portrait search fills the phone width and hides shortcuts for touch", "[ui][keyboard]") {
++  PromptContext context;
++  ImGui::GetIO().DisplaySize = ImVec2(402.0f, 874.0f);
++  rex::ui::Style style;
++  style.keyboard.enabled = true;
++  ImVec2 size{};
++  ImVec2 center{};
++  float button_height = 0.0f;
++  bool touch = true;
++  style.keyboard.hide_shortcut_hints = [&] {
++    size = ImGui::GetWindowSize();
++    const auto pos = ImGui::GetWindowPos();
++    center = ImVec2(pos.x + size.x * 0.5f, pos.y + size.y * 0.5f);
++    button_height = ImGui::GetItemRectSize().y;
++    return touch;
++  };
++  rex::ui::PromptDialog dialog({.title="Search", .text_input=true},
++      [](rex::ui::PromptResult) {}, &style);
++  CHECK(context.Frame(dialog));
++  CHECK(context.Frame(dialog));
++  std::string touch_log;
++  CHECK(context.Frame(dialog, &touch_log));
++  CHECK(size.x > 0.9f * 402.0f);
++  CHECK(center.y < 0.4f * 874.0f);
++  CHECK(button_height >= 44.0f);
++  CHECK(touch_log.find("Done") != std::string::npos);
++  CHECK(touch_log.find("Enter: Search") == std::string::npos);
++  CHECK(touch_log.find("Esc: Cancel") == std::string::npos);
++
++  touch = false;
++  std::string keyboard_log;
++  CHECK(context.Frame(dialog, &keyboard_log));
++  CHECK(keyboard_log.find("Enter: Search") != std::string::npos);
++  CHECK(keyboard_log.find("Esc: Cancel") != std::string::npos);
 +}
 +
 +REX_TEST_CASE("keyboard theme callbacks do not affect an ordinary message box", "[ui][keyboard]") {
