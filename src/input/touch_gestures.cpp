@@ -17,13 +17,14 @@ Layout MakeLayout(float width, float height, Rect safe) {
   if (safe.width <= 0 || safe.height <= 0) safe = {0, 0, width, height};
   const float margin = std::min(12.0f, height * .025f);
   // The installed HUD's prompt is a 54-unit disc in a 480-unit-high scene.
-  // Pause always starts at the safe left edge; never reserve a slot before it.
+  // Match the score's gap above the resting Blitz meter below it.
   const bool portrait = width < height;
+  const float top = safe.y + margin + (portrait ? height * (76.f / 480.f) : 0.f);
   const float preferred_side = portrait ? 44.f : std::max(height * .1125f, 44.f);
   const float side = std::max(0.f, std::min({preferred_side,
-      safe.width - margin * 2, safe.height - margin * 2}));
+      safe.width - margin * 2, safe.y + safe.height - top - margin}));
   const float x = safe.x + margin;
-  const float y = portrait ? safe.y + margin : std::clamp(height * (59.3836f / 480.f) - side / 2,
+  const float y = portrait ? top : std::clamp(height * (59.3836f / 480.f) - side / 2,
       safe.y + margin, safe.y + std::max(margin, safe.height - margin - side));
   return {width, height, {x, y, side, side}};
 }

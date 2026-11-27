@@ -3254,19 +3254,15 @@ bool BuildMenuRecords(const RecordReader& read, const std::vector<std::string>& 
           }
           const auto game = Node::Command({Node::Var("this"), Node::Symbol("get_game")});
           const auto hud = Node::Command({game, Node::Symbol("get_hud_dir")});
-          for (const char* name : {"score.lbl", "timer.lbl"}) {
+          for (const auto& [name, alignment] : {
+                   std::pair{"score.lbl", 0x21}, std::pair{"timer.lbl", 0x22},
+                   std::pair{"pb.lbl", 0x24}}) {
             const auto label = Node::Command({hud, Node::Symbol("find"), Node::Symbol(name),
                                              Node::Int(0)});
-            // Use the guest's own text alignment so changing digit counts stays centred.
             enter->kids.push_back(Node::Command({Node::Symbol("if"), label,
                 Node::Command({label, Node::Symbol("set"), Node::Symbol("alignment"),
-                               Node::Int(0x22)})})); // middle centre
+                               Node::Int(alignment)})}));
           }
-          const auto personal_best = Node::Command({hud, Node::Symbol("find"),
-              Node::Symbol("pb.lbl"), Node::Int(0)});
-          enter->kids.push_back(Node::Command({Node::Symbol("if"), personal_best,
-              Node::Command({personal_best, Node::Symbol("set"), Node::Symbol("alignment"),
-                             Node::Int(0x24)})})); // middle right
         }
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
         if (touch_hud && !AddTouchHudAnimation(&roots, error)) return false;

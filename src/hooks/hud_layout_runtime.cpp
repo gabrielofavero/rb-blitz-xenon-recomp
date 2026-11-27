@@ -166,6 +166,8 @@ bool TouchHudEnabled() {
 }
 
 bool PortraitHud();
+constexpr float kPortraitScoreZ = 232;
+
 const Anchor* AnchorFor(const uint8_t* base, uint32_t transformable) {
   const uint32_t header = ObjectBase(base, transformable);
   if (!header) return nullptr;
@@ -214,13 +216,11 @@ const Anchor* InheritedAnchor(const uint8_t* base, uint32_t transformable) {
 float PortraitScale(const Anchor& anchor, float half_width) {
   if (anchor.name == "portrait_top_hud.grp") return 1;
   float scale = .5f;
-  if (anchor.name == "band_meter_hud" || anchor.name == "dynamic_leaderboard")
-    scale = .65f;
-  if (anchor.name == "star_board") scale = .7f;
-  if (anchor.name == "progress_bar.sld") scale = .8f;
-  if (anchor.name == "streak.lbl") scale = 1.2f;
-  if (anchor.name == "timer.lbl" || anchor.name == "inputs.lbl")
-    scale = .7f;
+  if (anchor.name == "band_meter_hud") scale = .55f;
+  if (anchor.name == "dynamic_leaderboard") scale = .65f;
+  if (anchor.name == "progress_bar.sld") scale = .35f;
+  if (anchor.name == "streak.lbl" || anchor.name == "timer.lbl") scale = 1.2f;
+  if (anchor.name == "inputs.lbl") scale = .7f;
   return scale * std::min(1.f, half_width / 120.f);
 }
 float PortraitTopInset() {
@@ -230,18 +230,14 @@ float PortraitTopInset() {
       viewport.height <= 0) return 0;
   return std::clamp(viewport.safe_y / viewport.height, 0.f, .25f) * 480 + 8;
 }
-float PortraitStarsZ() {
-  if (TouchHudEnabled()) {
-    const auto layout = rb_blitz::input::touch::CurrentLayout();
-    if (layout.width > 0 && layout.width < layout.height && layout.pause.height > 0)
-      return (.5f - (layout.pause.y + layout.pause.height / 2) / layout.height) * 480;
-    const auto viewport = rb_blitz::ui::CurrentPortraitViewport();
-    if (viewport.height > 0) {
-      const float centre = viewport.safe_y + std::min(12.f, viewport.height * .025f) + 22;
-      return (.5f - centre / viewport.height) * 480;
-    }
-  }
-  return 210;
+float PortraitBottomInset() {
+  if (!TouchHudEnabled()) return 0;
+  const auto viewport = rb_blitz::ui::CurrentPortraitViewport();
+  if (!std::isfinite(viewport.height) || !std::isfinite(viewport.safe_y) ||
+      !std::isfinite(viewport.safe_height) || viewport.height <= 0 ||
+      viewport.safe_height <= 0) return 0;
+  const float bottom = viewport.height - viewport.safe_y - viewport.safe_height;
+  return std::clamp(bottom / viewport.height, 0.f, .25f) * 480;
 }
 void PlacePortraitHud(uint8_t* base, uint32_t transformable, const Anchor& anchor) {
   const float half_width = 240.f * HudWidth() /
@@ -257,27 +253,28 @@ void PlacePortraitHud(uint8_t* base, uint32_t transformable, const Anchor& ancho
       rex::memory::store_and_swap<uint32_t>(base + address,
           std::bit_cast<uint32_t>(value * relative_scale));
     }
-  if (anchor.name == "progress_bar.sld") {
-    // Screen right is +X and screen up is +Z. Rotate the fresh world basis
-    // clockwise around Y, including the authored slider tilt and its children.
-    for (uint32_t row = 0; row < 3; ++row) {
-      const auto address = transformable + 72 + row * 16;
-      const float old_x = std::bit_cast<float>(U32(base, address));
-      const float old_z = std::bit_cast<float>(U32(base, address + 8));
-      rex::memory::store_and_swap<uint32_t>(base + address,
-          std::bit_cast<uint32_t>(old_z));
-      rex::memory::store_and_swap<uint32_t>(base + address + 8,
-          std::bit_cast<uint32_t>(-old_x));
-    }
-  }
   float x = 0, z = 0;
-  if (anchor.name == "portrait_top_hud.grp") { x = 0; z = 40 - PortraitTopInset(); }
-  else if (anchor.name == "star_board") { x = half_width - 120 * scale - 8; z = PortraitStarsZ(); }
-  else if (anchor.name == "score.lbl") { x = 0; z = 232 - PortraitTopInset(); }
-  else if (anchor.name == "band_meter_hud") { x = -half_width + 48 * scale; z = 0; }
+  if (anchor.name == "portrait_top_hud.grp") { x = 0; z = 12 - PortraitTopInset(); }
+  else if (anchor.name == "star_board") {
+    // Leave room to the right of the pivot for the full animated star row.
+    x = half_width - 90 * scale - 4;
+    z = kPortraitScoreZ - PortraitTopInset();
+  }
+  else if (anchor.name == "score.lbl") {
+    x = -half_width + 10;
+    z = kPortraitScoreZ - PortraitTopInset();
+  }
+  else if (anchor.name == "band_meter_hud") {
+    // Fit the ladder backing and overlapping instrument badges.
+    x = -half_width + 116 * scale + 8;
+    z = 0;
+  }
   else if (anchor.name == "letter_collect_hud") { x = 0; z = 110; }
-  else if (anchor.name == "dynamic_leaderboard") { x = half_width * (2.f / 3.f); z = 0; }
-  else if (anchor.name == "timer.lbl") { x = 0; z = -202; }
+  else if (anchor.name == "dynamic_leaderboard") { x = half_width - 72 * scale - 8; z = 0; }
+  else if (anchor.name == "timer.lbl") {
+    // Allow 12 units for the glyphs and padding above the bottom safe edge.
+    z = -228 + PortraitBottomInset();
+  }
   else if (anchor.name == "streak.lbl") { x = -half_width + 12; z = -80; }
   else if (anchor.name == "inputs.lbl") { x = -half_width + 12; z = -160; }
   else if (anchor.name == "pb.lbl") {
@@ -291,7 +288,11 @@ void PlacePortraitHud(uint8_t* base, uint32_t transformable, const Anchor& ancho
     x = local_x > 100 && !preview ? half_width + 900 : half_width - 12;
     z = 70;
   }
-  else if (anchor.name == "progress_bar.sld") { x = -84 * scale; z = -212; }
+  else if (anchor.name == "progress_bar.sld") {
+    x = half_width - 16;
+    // The vertical slider extends up from its pivot.
+    z = 148 - 84 * scale - PortraitTopInset();
+  }
   else if (anchor.name == "remedial_help.grp") { x = 0; z = -190; }
   rex::memory::store_and_swap<uint32_t>(base + transformable + kWorldX,
                                        std::bit_cast<uint32_t>(x));
@@ -351,8 +352,7 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
     const uint8_t* base = nullptr;
     uint32_t transformable = 0;
     double delta = 0;
-    float top_inset = 0;
-    float stars_z = 0;
+    float safe_inset = 0;
     std::array<uint8_t, 0xC0> state{};
     std::array<uint8_t, 64> parent_world{};
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
@@ -363,8 +363,9 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
   static thread_local std::array<Prepared, 16> prepared{};
   static thread_local size_t next_prepared = 0;
   const double delta = ActiveDelta();
-  const float top_inset = PortraitHud() ? PortraitTopInset() : 0;
-  const float stars_z = PortraitHud() ? PortraitStarsZ() : 0;
+  const float safe_inset = PortraitHud()
+      ? (anchor.name == "timer.lbl" ? PortraitBottomInset() : PortraitTopInset())
+      : 0;
   const uint32_t parent = U32(base, transformable + kParent);
   const bool has_parent = HeapRange(parent, 0xC0);
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
@@ -383,7 +384,7 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
 #endif
         !base[transformable + 189] &&
         (!has_parent || !base[parent + 189]) &&
-        entry.delta == delta && entry.top_inset == top_inset && entry.stars_z == stars_z &&
+        entry.delta == delta && entry.safe_inset == safe_inset &&
         std::memcmp(entry.state.data(), base + transformable, entry.state.size()) == 0 &&
         (!has_parent || std::memcmp(entry.parent_world.data(), base + parent + 72,
                                    entry.parent_world.size()) == 0)) return;
@@ -398,8 +399,7 @@ void PrepareAnchorDraw(PPCContext& ctx, uint8_t* base, uint32_t transformable,
   previous->base = base;
   previous->transformable = transformable;
   previous->delta = delta;
-  previous->top_inset = top_inset;
-  previous->stars_z = stars_z;
+  previous->safe_inset = safe_inset;
 #if defined(RB_BLITZ_IOS) || defined(RB_BLITZ_TOUCH_HUD)
   previous->touch_mode = touch_mode;
   previous->touch_layout = touch_layout;

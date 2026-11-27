@@ -200,6 +200,8 @@ int main() {
   CHECK_TRUE(layout.pause.x < 74); // exactly the first safe slot, no authored blank before pause
   CHECK_TRUE(layout.pause.x + layout.pause.width <= 812);
   CHECK_TRUE(layout.pause.height >= 44);
+  CHECK_TRUE(std::abs(layout.pause.y + layout.pause.height / 2 -
+                      402.f * (59.3836f / 480.f)) < .01f);
   CHECK_TRUE(layout.pause.x + layout.pause.width < layout.width / 2);
   for (const auto& sized : {layout, MakeLayout(1194, 834, {0, 24, 1194, 790}),
                           MakeLayout(402, 874, {0, 62, 402, 778})}) {
@@ -208,6 +210,7 @@ int main() {
   }
   const auto portrait_controls = MakeLayout(405, 720, {0, 24, 405, 662});
   CHECK_EQ(portrait_controls.pause.width, 44.f);
+  CHECK_EQ(portrait_controls.pause.y, 150.f);
   const float px = (layout.pause.x + layout.pause.width / 2) / layout.width;
   const float py = (layout.pause.y + layout.pause.height / 2) / layout.height;
   g = Ready();
